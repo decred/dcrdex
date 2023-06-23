@@ -77,6 +77,9 @@ DASH_ON=$?
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
 ETH_ON=$?
 
+~/dextest/polygon/harness-ctl/alpha --exec 'eth.blockNumber' > /dev/null
+POLYGON_ON=$?
+
 set -e
 
 # Write markets.json.
@@ -150,6 +153,28 @@ if [ $ETH_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2
 EOF
 else echo "WARNING: Ethereum is not running. Configuring dcrdex markets without ETH."
+fi
+
+if [ $POLYGON_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "POLYGON_simnet",
+            "quote": "DCR_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+        },
+        {
+            "base": "DEXTT_POLYGON_simnet",
+            "quote": "DCR_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+else echo "WARNING: Polygon is not running. Configuring dcrdex markets without Polygon."
 fi
 
 if [ $DOGE_ON -eq 0 ]; then
@@ -306,7 +331,35 @@ cat << EOF >> "./markets.json"
             "maxFeeRate": 200,
             "swapConf": 2
 EOF
-fi
+fi # end if ETH_ON
+
+if [ $POLYGON_ON -eq 0 ]; then
+POLYGON_CONFIG_PATH=${TEST_ROOT}/polygon.conf
+POLYGON_IPC_FILE=${TEST_ROOT}/polygon/alpha/bor/bor.ipc
+
+cat > $POLYGON_CONFIG_PATH <<EOF
+ws://localhost:34985 , 2000
+# comments are respected
+; http://localhost:48297
+${POLYGONf_IPC_FILE},2
+EOF
+
+cat << EOF >> "./markets.json"
+         },
+        "POLYGON_simnet": {
+            "bip44symbol": "polygon",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2,
+            "configPath": "$POLYGON_CONFIG_PATH"
+        },
+        "DEXTT_POLYGON_simnet": {
+            "bip44symbol": "dextt.polygon",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2
+EOF
+fi # end if POLYGON_ON
 
 if [ $DOGE_ON -eq 0 ]; then
     cat << EOF >> "./markets.json"

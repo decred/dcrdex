@@ -46,6 +46,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	dexsrv "decred.org/dcrdex/server/dex"
 	toxiproxy "github.com/Shopify/toxiproxy/v2/client"
 )
@@ -131,6 +132,7 @@ var (
 func init() {
 	rand.Seed(time.Now().UnixNano())
 	dexeth.MaybeReadSimnetAddrs()
+	dexpolygon.MaybeReadSimnetAddrs()
 }
 
 // process stores a long running command and the funcion to stop it on shutdown.

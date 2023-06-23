@@ -44,6 +44,7 @@ import (
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/firo"
 	"decred.org/dcrdex/client/asset/ltc"
+	"decred.org/dcrdex/client/asset/polygon"
 	"decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/dex"
@@ -64,13 +65,15 @@ import (
 var (
 	dexHost = "127.0.0.1:17273"
 
-	homeDir      = os.Getenv("HOME")
-	dextestDir   = filepath.Join(homeDir, "dextest")
-	alphaIPCFile = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
+	homeDir             = os.Getenv("HOME")
+	dextestDir          = filepath.Join(homeDir, "dextest")
+	ethAlphaIPCFile     = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
+	polygonAlphaIPCFile = filepath.Join(dextestDir, "polygon", "alpha", "bor", "bor.ipc")
 
-	tLockTimeTaker = 30 * time.Second
-	tLockTimeMaker = 1 * time.Minute
-	testTokenID, _ = dex.BipSymbolID("dextt.eth")
+	tLockTimeTaker    = 30 * time.Second
+	tLockTimeMaker    = 1 * time.Minute
+	ethDexttID, _     = dex.BipSymbolID("dextt.eth")
+	polygonDexttID, _ = dex.BipSymbolID("dextt.polygon")
 )
 
 type SimWalletType int
@@ -339,10 +342,52 @@ func (s *simulationTest) startClients() error {
 				if err := hctrl.fund(s.ctx, address, amts); err != nil {
 					return fmt.Errorf("fund error: %w", err)
 				}
-				hctrl.mineBlocks(s.ctx, 2)
+			mined:
+				for {
+					hctrl.mineBlocks(s.ctx, 2)
+					bal, err := c.core.AssetBalance(form.AssetID)
+					if err != nil {
+						return fmt.Errorf("error getting balance for %s: %w", unbip(form.AssetID), err)
+					}
+					if bal.Available > 0 {
+						break mined
+					}
+					s.log.Infof("Waiting for %s funding tx to be mined", unbip(form.AssetID))
+					select {
+					case <-time.After(time.Second * 2):
+					case <-s.ctx.Done():
+						return s.ctx.Err()
+					}
+				}
+
 				// Tip change after block filtering scan takes the wallet time.
 				time.Sleep(2 * time.Second * sleepFactor)
+
+				w, _ := c.core.wallet(form.AssetID)
+				approved := make(chan struct{})
+				if approver, is := w.Wallet.(asset.TokenApprover); is {
+					const contractVer = 0
+					if _, err := approver.ApproveToken(contractVer, func() {
+						close(approved)
+					}); err != nil {
+						return fmt.Errorf("error approving %s token: %w", unbip(form.AssetID), err)
+					}
+				out:
+					for {
+						s.log.Infof("Mining more blocks to get approval tx confirmed")
+						hctrl.mineBlocks(s.ctx, 2)
+						select {
+						case <-approved:
+							c.log.Infof("%s approved", unbip(form.AssetID))
+							break out
+						case <-time.After(time.Second * 5):
+						case <-s.ctx.Done():
+							return s.ctx.Err()
+						}
+					}
+				}
 			}
+
 			return nil
 		}
 
@@ -1525,24 +1570,28 @@ func (hc *harnessCtrl) fund(ctx context.Context, address string, amts []int) err
 }
 
 func newHarnessCtrl(assetID uint32) *harnessCtrl {
-
+	symbolParts := strings.Split(dex.BipIDSymbol(assetID), ".")
+	baseChainSymbol := symbolParts[0]
+	if len(symbolParts) == 2 {
+		baseChainSymbol = symbolParts[1]
+	}
 	switch assetID {
 	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, firo.BipID, zec.BipID, dgb.BipID, dash.BipID:
 		return &harnessCtrl{
-			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
+			dir:     filepath.Join(dextestDir, baseChainSymbol, "harness-ctl"),
 			fundCmd: "./alpha",
 			fundStr: "sendtoaddress_%s_%d",
 		}
-	case eth.BipID:
+	case eth.BipID, polygon.BipID:
 		// Sending with values of .1 eth.
 		return &harnessCtrl{
-			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
+			dir:     filepath.Join(dextestDir, baseChainSymbol, "harness-ctl"),
 			fundCmd: "./sendtoaddress",
 			fundStr: "%s_%d",
 		}
-	case testTokenID:
+	case ethDexttID, polygonDexttID:
 		return &harnessCtrl{
-			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(eth.BipID), "harness-ctl"),
+			dir:     filepath.Join(dextestDir, baseChainSymbol, "harness-ctl"),
 			fundCmd: "./sendTokens",
 			fundStr: "%s_%d",
 		}
@@ -1572,8 +1621,10 @@ var cloneTypes = map[uint32]string{
 
 // accountBIPs is a map of account based assets. Used in fee estimation.
 var accountBIPs = map[uint32]bool{
-	eth.BipID: true,
-	60000:     true, // dextt test token
+	eth.BipID:      true,
+	ethDexttID:     true, // dextt test token
+	polygon.BipID:  true,
+	polygonDexttID: true,
 }
 
 func dcrWallet(wt SimWalletType, node string) (*tWallet, error) {
@@ -1620,7 +1671,15 @@ func ethWallet() (*tWallet, error) {
 	return &tWallet{
 		fund:       true,
 		walletType: "rpc",
-		config:     map[string]string{"providers": alphaIPCFile},
+		config:     map[string]string{"providers": ethAlphaIPCFile},
+	}, nil
+}
+
+func polygonWallet() (*tWallet, error) {
+	return &tWallet{
+		fund:       true,
+		walletType: "rpc",
+		config:     map[string]string{"providers": polygonAlphaIPCFile},
 	}, nil
 }
 
@@ -1631,7 +1690,19 @@ func dexttWallet() (*tWallet, error) {
 		parent: &WalletForm{
 			Type:    "rpc",
 			AssetID: eth.BipID,
-			Config:  map[string]string{"providers": alphaIPCFile},
+			Config:  map[string]string{"providers": ethAlphaIPCFile},
+		},
+	}, nil
+}
+
+func polyDexttWallet() (*tWallet, error) {
+	return &tWallet{
+		fund:       true,
+		walletType: "token",
+		parent: &WalletForm{
+			Type:    "rpc",
+			AssetID: polygon.BipID,
+			Config:  map[string]string{"providers": polygonAlphaIPCFile},
 		},
 	}, nil
 }
@@ -1741,8 +1812,12 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = btcWallet(wt, node)
 		case eth.BipID:
 			tw, err = ethWallet()
-		case testTokenID:
+		case ethDexttID:
 			tw, err = dexttWallet()
+		case polygon.BipID:
+			tw, err = polygonWallet()
+		case polygonDexttID:
+			tw, err = polyDexttWallet()
 		case ltc.BipID:
 			tw, err = ltcWallet(wt, node)
 		case bch.BipID:

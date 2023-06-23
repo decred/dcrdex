@@ -884,12 +884,10 @@ export class FeeAssetSelectionForm {
       const n = page.marketTmpl.cloneNode(true) as HTMLElement
       const marketTmpl = Doc.parseTemplate(n)
 
-      const baseAsset = xc.assets[mkt.baseid]
-      const baseUnitInfo = app().unitInfo(mkt.baseid, xc)
-      const quoteAsset = xc.assets[mkt.quoteid]
-      const quoteUnitInfo = app().unitInfo(mkt.quoteid, xc)
+      const baseAsset = app().assets[mkt.baseid]
+      const quoteAsset = app().assets[mkt.quoteid]
 
-      if (cFactor(baseUnitInfo) === 0 || cFactor(quoteUnitInfo) === 0) return null
+      if (cFactor(baseAsset.unitInfo) === 0 || cFactor(quoteAsset.unitInfo) === 0) return null
 
       if (typeof excludeIcon !== 'undefined') {
         const excludeBase = excludeIcon === mkt.baseid
@@ -903,21 +901,18 @@ export class FeeAssetSelectionForm {
         if (parent) parent.insertBefore(otherLogo, marketTmpl.logo.nextSibling)
       }
 
-      const baseSymbol = baseAsset.symbol.toUpperCase()
-      const quoteSymbol = quoteAsset.symbol.toUpperCase()
+      marketTmpl.baseName.replaceWith(Doc.symbolize(baseAsset))
+      marketTmpl.quoteName.replaceWith(Doc.symbolize(quoteAsset))
 
-      marketTmpl.baseName.replaceWith(Doc.symbolize(baseSymbol))
-      marketTmpl.quoteName.replaceWith(Doc.symbolize(quoteSymbol))
-
-      marketTmpl.lotSize.textContent = Doc.formatCoinValue(mkt.lotsize, baseUnitInfo)
-      marketTmpl.lotSizeSymbol.replaceWith(Doc.symbolize(baseSymbol))
+      marketTmpl.lotSize.textContent = Doc.formatCoinValue(mkt.lotsize, baseAsset.unitInfo)
+      marketTmpl.lotSizeSymbol.replaceWith(Doc.symbolize(baseAsset))
 
       if (mkt.spot) {
         Doc.show(marketTmpl.quoteLotSize)
-        const r = cFactor(quoteUnitInfo) / cFactor(baseUnitInfo)
+        const r = cFactor(quoteAsset.unitInfo) / cFactor(baseAsset.unitInfo)
         const quoteLot = mkt.lotsize * mkt.spot.rate / OrderUtil.RateEncodingFactor * r
-        const s = Doc.formatCoinValue(quoteLot, quoteUnitInfo)
-        marketTmpl.quoteLotSize.textContent = `(~${s} ${quoteSymbol})`
+        const s = Doc.formatCoinValue(quoteLot, quoteAsset.unitInfo)
+        marketTmpl.quoteLotSize.textContent = `(~${s} ${quoteAsset.symbol})`
       }
       return n
     }
@@ -933,7 +928,7 @@ export class FeeAssetSelectionForm {
       assetTmpl.logo.src = Doc.logoPath(symbol)
       const fee = Doc.formatCoinValue(bondAsset.amount, unitInfo)
       assetTmpl.feeAmt.textContent = String(fee)
-      assetTmpl.feeSymbol.replaceWith(Doc.symbolize(asset.symbol))
+      assetTmpl.feeSymbol.replaceWith(Doc.symbolize(asset))
       assetTmpl.confs.textContent = String(bondAsset.confs)
       setReadyMessage(assetTmpl.ready, asset)
 
@@ -1066,12 +1061,12 @@ export class WalletWaitForm {
     this.parentID = asset.token?.parentID
     const bondAsset = this.bondAsset = this.xc.bondAssets[asset.symbol]
 
-    const symbolize = (el: PageElement, symbol: string) => {
+    const symbolize = (el: PageElement, asset: SupportedAsset) => {
       Doc.empty(el)
-      el.appendChild(Doc.symbolize(symbol))
+      el.appendChild(Doc.symbolize(asset))
     }
 
-    for (const span of Doc.applySelector(this.form, '.unit')) symbolize(span, asset.symbol)
+    for (const span of Doc.applySelector(this.form, '.unit')) symbolize(span, asset)
     page.logo.src = Doc.logoPath(asset.symbol)
     page.depoAddr.textContent = wallet.address
     page.fee.textContent = Doc.formatCoinValue(bondAsset.amount, asset.unitInfo)
@@ -1092,9 +1087,9 @@ export class WalletWaitForm {
         page.txFee.textContent = Doc.formatCoinValue(bondFeeBuffer, parentAsset.unitInfo)
         page.parentFees.textContent = Doc.formatCoinValue(bondFeeBuffer, parentAsset.unitInfo)
         page.tokenFees.textContent = Doc.formatCoinValue(bondAsset.amount, asset.unitInfo)
-        symbolize(page.txFeeUnit, parentAsset.symbol)
-        symbolize(page.parentUnit, parentAsset.symbol)
-        symbolize(page.parentBalUnit, parentAsset.symbol)
+        symbolize(page.txFeeUnit, parentAsset)
+        symbolize(page.parentUnit, parentAsset)
+        symbolize(page.parentBalUnit, parentAsset)
         page.parentBal.textContent = parentAsset.wallet ? Doc.formatCoinValue(parentAsset.wallet.balance.available, parentAsset.unitInfo) : '0'
       } else {
         Doc.show(page.sendEnoughWithEst)

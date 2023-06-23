@@ -479,7 +479,7 @@ var bipIDs = map[uint32]string{
 	890:   "xsel",
 	900:   "lmo",
 	916:   "meta",
-	966:   "matic",
+	966:   "polygon", // changed from "matic"
 	970:   "twins",
 	996:   "okp",
 	997:   "sum",
@@ -589,18 +589,22 @@ var bipIDs = map[uint32]string{
 	37992: "fxtc",
 	39321: "ama",
 	49344: "stash",
-	// ETH reserved token range 60000-60999
+	// Ethereum reserved token range 60000-60999
 	60000: "dextt.eth", // DEX test token
 	60001: "usdc.eth",
-	// END ETH reserved token range
-	65536:    "keth",
-	88888:    "ryo[c0ban]",
-	99999:    "wicc",
-	200625:   "aka",
-	200665:   "genom",
-	246529:   "ats",
-	424242:   "x42",
-	666666:   "vite",
+	// END Ethereum reserved token range
+	65536:  "keth",
+	88888:  "ryo[c0ban]",
+	99999:  "wicc",
+	200625: "aka",
+	200665: "genom",
+	246529: "ats",
+	424242: "x42",
+	666666: "vite",
+	// Polygon reserved token range 966000-966999
+	966000: "dextt.polygon",
+	966001: "usdc.polygon",
+	// END Polygon reserved token range
 	1171337:  "ilt",
 	1313114:  "etho",
 	1313500:  "xero",

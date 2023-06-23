@@ -128,10 +128,9 @@ export default class OrderPage extends BasePage {
     else {
       ord = await this.fetchOrder()
     }
-
     // Swap out the dot-notation symbols with token-aware symbols.
-    this.page.mktBaseSymbol.replaceWith(Doc.symbolize(ord.baseSymbol))
-    this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(ord.quoteSymbol))
+    this.page.mktBaseSymbol.replaceWith(Doc.symbolize(app().assets[ord.baseID]))
+    this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(app().assets[ord.quoteID]))
 
     this.setAccelerationButtonVis()
     this.showMatchCards()

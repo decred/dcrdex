@@ -804,6 +804,13 @@ export default class WalletsPage extends BasePage {
     Doc.hide(tmpl.fiat, tmpl.noWallet)
     bttn.classList.add('nowallet')
     tmpl.img.src ||= Doc.logoPath(a.symbol) // don't initiate GET if already set (e.g. update on some notification)
+    const symbolParts = a.symbol.split('.')
+    if (symbolParts.length === 2) {
+      const parentSymbol = symbolParts[1]
+      tmpl.parentImg.classList.remove('d-hide')
+      tmpl.parentImg.src ||= Doc.logoPath(parentSymbol)
+    }
+
     tmpl.name.textContent = a.name
     if (a.wallet) {
       bttn.classList.remove('nowallet')
@@ -831,7 +838,7 @@ export default class WalletsPage extends BasePage {
 
   updateDisplayedAsset (assetID: number) {
     if (assetID !== this.selectedAssetID) return
-    const { symbol, wallet, name } = app().assets[assetID]
+    const { symbol, wallet, name, token } = app().assets[assetID]
     const page = this.page
     for (const el of document.querySelectorAll('[data-asset-name]')) el.textContent = name
     page.assetLogo.src = Doc.logoPath(symbol)
@@ -839,8 +846,14 @@ export default class WalletsPage extends BasePage {
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.peerCountBox, page.syncProgressBox, page.statusDisabled
+      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenParentBox
     )
+    if (token) {
+      const parentAsset = app().assets[token.parentID]
+      page.tokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
+      page.tokenParnetName.textContent = parentAsset.name
+      Doc.show(page.tokenParentBox)
+    }
     if (wallet) {
       this.updateDisplayedAssetBalance()
 
@@ -1202,14 +1215,15 @@ export default class WalletsPage extends BasePage {
 
   updateDisplayedAssetBalance (): void {
     const page = this.page
-    const { wallet, unitInfo: ui, symbol, id: assetID } = app().assets[this.selectedAssetID]
+    const asset = app().assets[this.selectedAssetID]
+    const { wallet, unitInfo: ui, id: assetID } = asset
     const bal = wallet.balance
     Doc.show(page.balanceBox, page.walletDetails)
     const totalLocked = bal.locked + bal.contractlocked + bal.bondlocked
     const totalBalance = bal.available + totalLocked + bal.immature
     page.balance.textContent = Doc.formatCoinValue(totalBalance, ui)
     Doc.empty(page.balanceUnit)
-    page.balanceUnit.appendChild(Doc.symbolize(symbol))
+    page.balanceUnit.appendChild(Doc.symbolize(asset))
     const rate = app().fiatRatesMap[assetID]
     if (rate) {
       Doc.show(page.fiatBalanceBox)
@@ -1292,16 +1306,17 @@ export default class WalletsPage extends BasePage {
       tmpl.baseLogo.src = Doc.logoPath(basesymbol)
       tmpl.quoteLogo.src = Doc.logoPath(quotesymbol)
       Doc.empty(tmpl.baseSymbol, tmpl.quoteSymbol)
-      tmpl.baseSymbol.appendChild(Doc.symbolize(basesymbol))
-      tmpl.quoteSymbol.appendChild(Doc.symbolize(quotesymbol))
+      tmpl.baseSymbol.appendChild(Doc.symbolize(app().assets[baseid], true))
+      tmpl.quoteSymbol.appendChild(Doc.symbolize(app().assets[quoteid], true))
 
       if (spot) {
         const convRate = app().conventionalRate(baseid, quoteid, spot.rate, exchanges[host])
         tmpl.price.textContent = Doc.formatFourSigFigs(convRate)
-        tmpl.priceQuoteUnit.textContent = quotesymbol.toUpperCase()
-        tmpl.priceBaseUnit.textContent = basesymbol.toUpperCase()
+        const fmtSymbol = (s: string) => s.split('.')[0].toUpperCase()
+        tmpl.priceQuoteUnit.textContent = fmtSymbol(quotesymbol)
+        tmpl.priceBaseUnit.textContent = fmtSymbol(basesymbol)
         tmpl.volume.textContent = Doc.formatFourSigFigs(spotVolume(assetID, mkt))
-        tmpl.volumeUnit.textContent = assetID === baseid ? basesymbol.toUpperCase() : quotesymbol.toUpperCase()
+        tmpl.volumeUnit.textContent = assetID === baseid ? fmtSymbol(basesymbol) : fmtSymbol(quotesymbol)
       } else Doc.hide(tmpl.priceBox, tmpl.volumeBox)
       Doc.bind(row, 'click', () => app().loadPage('markets', { host, base: baseid, quote: quoteid }))
     }
@@ -1331,16 +1346,16 @@ export default class WalletsPage extends BasePage {
       const row = page.recentOrderTmpl.cloneNode(true) as PageElement
       page.recentOrders.appendChild(row)
       const tmpl = Doc.parseTemplate(row)
-      let from: string, to: string
+      let from: SupportedAsset, to: SupportedAsset
       const [baseUnitInfo, quoteUnitInfo] = [app().unitInfo(ord.baseID), app().unitInfo(ord.quoteID)]
       if (ord.sell) {
-        [from, to] = [ord.baseSymbol, ord.quoteSymbol]
+        [from, to] = [app().assets[ord.baseID], app().assets[ord.quoteID]]
         tmpl.fromQty.textContent = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         if (ord.type === OrderUtil.Limit) {
           tmpl.toQty.textContent = Doc.formatCoinValue(ord.qty / OrderUtil.RateEncodingFactor * ord.rate, quoteUnitInfo)
         }
       } else {
-        [from, to] = [ord.quoteSymbol, ord.baseSymbol]
+        [from, to] = [app().assets[ord.quoteID], app().assets[ord.baseID]]
         if (ord.type === OrderUtil.Market) {
           tmpl.fromQty.textContent = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         } else {
@@ -1349,11 +1364,11 @@ export default class WalletsPage extends BasePage {
         }
       }
 
-      tmpl.fromLogo.src = Doc.logoPath(from)
+      tmpl.fromLogo.src = Doc.logoPath(from.symbol)
       Doc.empty(tmpl.fromSymbol, tmpl.toSymbol)
-      tmpl.fromSymbol.appendChild(Doc.symbolize(from))
-      tmpl.toLogo.src = Doc.logoPath(to)
-      tmpl.toSymbol.appendChild(Doc.symbolize(to))
+      tmpl.fromSymbol.appendChild(Doc.symbolize(from, true))
+      tmpl.toLogo.src = Doc.logoPath(to.symbol)
+      tmpl.toSymbol.appendChild(Doc.symbolize(to, true))
       tmpl.status.textContent = OrderUtil.statusString(ord)
       tmpl.filled.textContent = `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`
       tmpl.age.textContent = Doc.timeSince(ord.submitTime)

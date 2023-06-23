@@ -57,7 +57,7 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
 		}
 
-		ethClient = newRPCClient(dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
+		ethClient = newRPCClient(BipID, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
@@ -69,7 +69,7 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("Connect error: %w", err)
 		}
 
-		if err := ethClient.loadToken(ctx, testTokenID); err != nil {
+		if err := ethClient.loadToken(ctx, testTokenID, registeredTokens[testTokenID]); err != nil {
 			return 1, fmt.Errorf("loadToken error: %w", err)
 		}
 

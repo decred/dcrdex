@@ -57,8 +57,8 @@ type tokenContractor interface {
 	estimateTransferGas(context.Context, *big.Int) (uint64, error)
 }
 
-type contractorConstructor func(net dex.Network, addr common.Address, ec bind.ContractBackend) (contractor, error)
-type tokenContractorConstructor func(net dex.Network, assetID uint32, acctAddr common.Address, ec bind.ContractBackend) (tokenContractor, error)
+type contractorConstructor func(contractAddr, addr common.Address, ec bind.ContractBackend) (contractor, error)
+type tokenContractorConstructor func(net dex.Network, token *dexeth.Token, acctAddr common.Address, ec bind.ContractBackend) (tokenContractor, error)
 
 // contractV0 is the interface common to a version 0 swap contract or version 0
 // token swap contract.
@@ -88,11 +88,7 @@ var _ contractor = (*contractorV0)(nil)
 // newV0Contractor is the constructor for a version 0 ETH swap contract. For
 // token swap contracts, use newV0TokenContractor to construct a
 // tokenContractorV0.
-func newV0Contractor(net dex.Network, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
-	contractAddr, exists := dexeth.ContractAddresses[0][net]
-	if !exists || contractAddr == (common.Address{}) {
-		return nil, fmt.Errorf("no contract address for version 0, net %s", net)
-	}
+func newV0Contractor(contractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
 	c, err := swapv0.NewETHSwap(contractAddr, cb)
 	if err != nil {
 		return nil, err
@@ -332,11 +328,17 @@ var _ contractor = (*tokenContractorV0)(nil)
 var _ tokenContractor = (*tokenContractorV0)(nil)
 
 // newV0TokenContractor is a contractor for version 0 erc20 token swap contract.
-func newV0TokenContractor(net dex.Network, assetID uint32, acctAddr common.Address, cb bind.ContractBackend) (tokenContractor, error) {
-	token, tokenAddr, swapContractAddr, err := dexeth.VersionedNetworkToken(assetID, 0, net)
-	if err != nil {
-		return nil, err
+func newV0TokenContractor(net dex.Network, token *dexeth.Token, acctAddr common.Address, cb bind.ContractBackend) (tokenContractor, error) {
+	netToken, found := token.NetTokens[net]
+	if !found {
+		return nil, fmt.Errorf("token %s has no network %s", token.Name, net)
 	}
+	tokenAddr := netToken.Address
+	contract, found := netToken.SwapContracts[0] // contract version 0
+	if !found {
+		return nil, fmt.Errorf("token %s version 0 has no network %s token info", token.Name, net)
+	}
+	swapContractAddr := contract.Address
 
 	c, err := erc20v0.NewERC20Swap(swapContractAddr, cb)
 	if err != nil {

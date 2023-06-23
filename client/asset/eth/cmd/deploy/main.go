@@ -3,6 +3,34 @@
 
 package main
 
+/*
+	deploy is a utility for deploying swap contracts. Examples of use:
+
+	1) Estimate the funding required to deploy a base asset swap contract to
+	   Ethereum
+		./deploy --mainnet --chain eth --fundingrequired
+	   This will use the current prevailing fee rate to estimate the fee
+	   requirements for the deployment transaction. The estimate is only
+	   accurate if there are already enough funds in the wallet (so estimateGas
+	   can be used), otherwise, a generously-padded constant is used to estimate
+	   the gas requirements.
+
+	2) Deploy a base asset swap contract to Ethereum.
+		./deploy --mainnet --chain eth
+
+	3) Deploy a token swap contract to Polygon.
+		./deploy --mainnet --chain polygon --tokenaddr 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+
+	4) Return remaining Goerli testnet ETH balance to specified address.
+		./deploy --testnet --chain eth --returnaddr 0x18d65fb8d60c1199bb1ad381be47aa692b482605
+
+	IMPORTANT: deploy uses the same wallet configuration as getgas. See getgas
+	README for instructions.
+
+	5) Test reading of the Polygon credentials file.
+		./deploy --chain polygon --mainnet --readcreds
+*/
+
 import (
 	"context"
 	"flag"
@@ -11,6 +39,7 @@ import (
 	"os/user"
 	"path/filepath"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/polygon"
 	"decred.org/dcrdex/dex"
@@ -37,8 +66,8 @@ func mainErr() error {
 		return fmt.Errorf("could not get the current user: %w", err)
 	}
 
-	var maxSwaps, contractVerI int
-	var chain, token, credentialsPath, returnAddr string
+	var contractVerI int
+	var chain, credentialsPath, tokenAddress, returnAddr string
 	var useTestnet, useMainnet, useSimnet, trace, debug, readCreds, fundingReq bool
 	flag.BoolVar(&readCreds, "readcreds", false, "does not run gas estimates. read the credentials file and print the address")
 	flag.BoolVar(&fundingReq, "fundingrequired", false, "does not run gas estimates. calculate the funding required by the wallet to get estimates")
@@ -48,11 +77,10 @@ func mainErr() error {
 	flag.BoolVar(&useSimnet, "simnet", false, "use simnet")
 	flag.BoolVar(&trace, "trace", false, "use simnet")
 	flag.BoolVar(&debug, "debug", false, "use simnet")
-	flag.IntVar(&maxSwaps, "n", 5, "max number of swaps per transaction. minimum is 2. test will run from 2 swap up to n swaps.")
 	flag.StringVar(&chain, "chain", "eth", "symbol of the base chain")
-	flag.StringVar(&token, "token", "eth", "symbol of the token. if token is not specified, will check gas for ETH")
+	flag.StringVar(&tokenAddress, "tokenaddr", "", "launches an erc20-linked contract with this token. default launches a base chain contract")
 	flag.IntVar(&contractVerI, "ver", 0, "contract version")
-	flag.StringVar(&credentialsPath, "creds", "", "path for JSON credentials file. default eth: ~/ethtest/getgas-credentials.json, default polygon: ~/ethtest/getgas-credentials_polygon.json")
+	flag.StringVar(&credentialsPath, "creds", "", "path for JSON credentials file. default eth: ~/ethtest/getgas-credentials.json, default polygon: ~/ethtest/getgas-polygon-credentials.json")
 	flag.Parse()
 
 	if !useMainnet && !useTestnet && !useSimnet {
@@ -92,18 +120,15 @@ func mainErr() error {
 		return nil
 	}
 
-	if maxSwaps < 2 {
-		return fmt.Errorf("n cannot be < 2")
-	}
-
-	if chain == "polygon" && token == "eth" {
-		token = "polygon" // chain takes precedence, adjust the default.
-	}
-
-	assetID, found := dex.BipSymbolID(token)
+	assetID, found := dex.BipSymbolID(chain)
 	if !found {
-		return fmt.Errorf("asset %s not known", token)
+		return fmt.Errorf("asset %s not known", chain)
 	}
+
+	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		return fmt.Errorf("specified chain is not a base chain. appears to be token %s", tkn.Name)
+	}
+
 	contractVer := uint32(contractVerI)
 
 	logLvl := dex.LevelInfo
@@ -114,69 +139,61 @@ func mainErr() error {
 		logLvl = dex.LevelTrace
 	}
 
-	log := dex.StdOutLogger("GG", logLvl)
+	var tokenAddr common.Address
+	if tokenAddress != "" {
+		if !common.IsHexAddress(tokenAddress) {
+			return fmt.Errorf("token address %q does not appear to be valid", tokenAddress)
+		}
+		tokenAddr = common.HexToAddress(tokenAddress)
+	}
 
-	var g *dexeth.Gases
-	var tkn *dexeth.Token
-	var ui, bui *dex.UnitInfo
-	var compat eth.CompatibilityData
+	log := dex.StdOutLogger("DEPLOY", logLvl)
+
+	var bui *dex.UnitInfo
 	var chainCfg *params.ChainConfig
-	var contractAddr common.Address
 	switch chain {
 	case "eth":
 		bui = &dexeth.UnitInfo
-		g = dexeth.VersionedGases[contractVer]
-		ui = &dexeth.UnitInfo
-		if token != chain {
-			tkn = dexeth.Tokens[assetID]
-			ui = &tkn.UnitInfo
-			g = &tkn.NetTokens[net].SwapContracts[contractVer].Gas
-		}
-		contractAddr = dexeth.ContractAddresses[contractVer][net]
 		chainCfg, err = eth.ChainGenesis(net)
 		if err != nil {
 			return fmt.Errorf("error finding chain config: %v", err)
 		}
-		compat, err = eth.NetworkCompatibilityData(net)
-		if err != nil {
-			return fmt.Errorf("error finding api compatibility data: %v", err)
-		}
 	case "polygon":
-		g = dexpolygon.VersionedGases[contractVer]
 		bui = &dexpolygon.UnitInfo
-		ui = bui
-		if token != chain {
-			tkn = dexpolygon.Tokens[assetID]
-			ui = &tkn.UnitInfo
-			g = &tkn.NetTokens[net].SwapContracts[contractVer].Gas
-		}
-		contractAddr = dexpolygon.ContractAddresses[contractVer][net]
 		chainCfg, err = polygon.ChainGenesis(net)
 		if err != nil {
 			return fmt.Errorf("error finding chain config: %v", err)
 		}
-		compat, err = polygon.NetworkCompatibilityData(net)
-		if err != nil {
-			return fmt.Errorf("error finding api compatibility data: %v", err)
-		}
-	}
-
-	wParams := &eth.GetGasWalletParams{
-		ChainCfg:     chainCfg,
-		Gas:          g,
-		Token:        tkn,
-		BaseUnitInfo: bui,
-		UnitInfo:     ui,
-		Compat:       &compat,
-		ContractAddr: contractAddr,
 	}
 
 	switch {
 	case fundingReq:
-		return eth.GetGas.EstimateFunding(ctx, net, assetID, contractVer, maxSwaps, credentialsPath, wParams, log)
+		return eth.ContractDeployer.EstimateDeployFunding(
+			ctx,
+			contractVer,
+			tokenAddr,
+			credentialsPath,
+			chainCfg,
+			bui,
+			log,
+			net,
+		)
 	case returnAddr != "":
-		return eth.GetGas.ReturnETH(ctx, credentialsPath, returnAddr, wParams, net, log)
+		if !common.IsHexAddress(returnAddr) {
+			return fmt.Errorf("return address %q is not valid", returnAddr)
+		}
+		addr := common.HexToAddress(returnAddr)
+		return eth.ContractDeployer.ReturnETH(ctx, addr, credentialsPath, chainCfg, bui, log, net)
 	default:
-		return eth.GetGas.Estimate(ctx, net, assetID, contractVer, maxSwaps, credentialsPath, wParams, log)
+		return eth.ContractDeployer.DeployContract(
+			ctx,
+			contractVer,
+			tokenAddr,
+			credentialsPath,
+			chainCfg,
+			bui,
+			log,
+			net,
+		)
 	}
 }

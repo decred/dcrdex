@@ -65,7 +65,7 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 		return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", bc.txHash, bc.secretHash)
 	}
 
-	if be.assetID == BipID {
+	if be.assetID == be.baseChainID {
 		sum := new(big.Int)
 		for _, in := range inits {
 			sum.Add(sum, in.Value)

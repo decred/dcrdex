@@ -607,7 +607,7 @@ var assetToken = &asset.BackedAsset{
 var assetMATIC = &asset.BackedAsset{
 	Asset: dex.Asset{
 		ID:           966,
-		Symbol:       "matic",
+		Symbol:       "polygon",
 		MaxFeeRate:   10,
 		SwapSize:     dummySize,
 		SwapSizeBase: dummySize,
@@ -701,10 +701,10 @@ func TestMain(m *testing.M) {
 	assetETH.Backend = oRig.eth
 	assetMATIC.Backend = oRig.polygon
 	tunnels := map[string]MarketTunnel{
-		"dcr_btc":   oRig.market,
-		"eth_btc":   oRig.market,
-		"dcr_eth":   oRig.market,
-		"eth_matic": oRig.market,
+		"dcr_btc":     oRig.market,
+		"eth_btc":     oRig.market,
+		"dcr_eth":     oRig.market,
+		"eth_polygon": oRig.market,
 	}
 	pendingAccounters := make(map[string]PendingAccounter)
 	for name := range tunnels {

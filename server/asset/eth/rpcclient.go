@@ -74,6 +74,9 @@ var _ fmt.Stringer = (*endpoint)(nil)
 type rpcclient struct {
 	net dex.Network
 	log dex.Logger
+
+	baseChainID uint32
+
 	// endpoints should only be used during connect to know which endpoints
 	// to attempt to connect. If we were unable to connect to some of the
 	// endpoints, they will not be included in the clients slice.
@@ -82,7 +85,7 @@ type rpcclient struct {
 	// so an ethConn has not been created for them.
 	neverConnectedEndpoints []endpoint
 	healthCheckCounter      int
-	tokensLoaded            map[uint32]bool
+	tokensLoaded            map[uint32]*VersionedToken
 	ethContractAddr         common.Address
 
 	// the order of clients will change based on the health of the connections.
@@ -90,13 +93,14 @@ type rpcclient struct {
 	clients    []*ethConn
 }
 
-func newRPCClient(net dex.Network, endpoints []endpoint, ethContractAddr common.Address, log dex.Logger) *rpcclient {
+func newRPCClient(baseChainID uint32, net dex.Network, endpoints []endpoint, ethContractAddr common.Address, log dex.Logger) *rpcclient {
 	return &rpcclient{
+		baseChainID:     baseChainID,
 		net:             net,
 		endpoints:       endpoints,
 		log:             log,
 		ethContractAddr: ethContractAddr,
-		tokensLoaded:    make(map[uint32]bool),
+		tokensLoaded:    make(map[uint32]*VersionedToken),
 	}
 }
 
@@ -148,8 +152,8 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 	}
 	ec.swapContract = &swapSourceV0{es}
 
-	for assetID := range c.tokensLoaded {
-		tkn, err := newTokener(ctx, assetID, c.net, ec.Client)
+	for assetID, vToken := range c.tokensLoaded {
+		tkn, err := newTokener(ctx, vToken, c.net, ec.Client)
 		if err != nil {
 			return nil, fmt.Errorf("error constructing ERC20Swap: %w", err)
 		}
@@ -381,11 +385,11 @@ func (c *rpcclient) headerIsOutdated(hdr *types.Header) bool {
 	return c.net != dex.Simnet && hdr.Time < uint64(time.Now().Add(-headerExpirationTime).Unix())
 }
 
-func (c *rpcclient) loadToken(ctx context.Context, assetID uint32) error {
-	c.tokensLoaded[assetID] = true
+func (c *rpcclient) loadToken(ctx context.Context, assetID uint32, vToken *VersionedToken) error {
+	c.tokensLoaded[assetID] = vToken
 
 	for _, cl := range c.clientsCopy() {
-		tkn, err := newTokener(ctx, assetID, c.net, cl.Client)
+		tkn, err := newTokener(ctx, vToken, c.net, cl.Client)
 		if err != nil {
 			return fmt.Errorf("error constructing ERC20Swap: %w", err)
 		}
@@ -440,7 +444,7 @@ func (c *rpcclient) blockNumber(ctx context.Context) (bn uint64, err error) {
 
 // swap gets a swap keyed by secretHash in the contract.
 func (c *rpcclient) swap(ctx context.Context, assetID uint32, secretHash [32]byte) (state *dexeth.SwapState, err error) {
-	if assetID == BipID {
+	if assetID == c.baseChainID {
 		return state, c.withClient(func(ec *ethConn) error {
 			state, err = ec.swapContract.Swap(ctx, secretHash)
 			return err
@@ -464,7 +468,7 @@ func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *type
 // dumbBalance gets the account balance, ignoring the effects of unmined
 // transactions.
 func (c *rpcclient) dumbBalance(ctx context.Context, ec *ethConn, assetID uint32, addr common.Address) (bal *big.Int, err error) {
-	if assetID == BipID {
+	if assetID == c.baseChainID {
 		return ec.BalanceAt(ctx, addr, nil)
 	}
 	tkn := ec.tokens[assetID]
@@ -495,7 +499,7 @@ func (c *rpcclient) smartBalance(ctx context.Context, ec *ethConn, assetID uint3
 		return nil, fmt.Errorf("contentFrom error: %w", err)
 	}
 
-	if assetID == BipID {
+	if assetID == c.baseChainID {
 		ethBalance, err := ec.BalanceAt(ctx, addr, big.NewInt(int64(tip)))
 		if err != nil {
 			return nil, err

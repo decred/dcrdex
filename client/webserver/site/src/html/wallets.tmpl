@@ -9,7 +9,10 @@
     {{- /* ASSET SELECT */ -}}
     <div class="d-flex flex-column align-items-stretch stylish-overflow invisible" id="assetSelect">
       <div id="iconSelectTmpl" class="icon-select d-flex align-items-stretch">
-        <img data-tmpl="img">
+        <div class="position-relative overflow-visible">
+          <img data-tmpl="img">
+          <img data-tmpl="parentImg" class="d-hide">
+        </div>
         <div class="d-none d-md-flex flex-column justify-content-around ps-2">
           <span class="fs15 lh1 text-nowrap" data-tmpl="name"></span>
           <span class="fs15 lh1" data-tmpl="balance"></span>
@@ -26,7 +29,12 @@
           <div class="my-auto w-100 flex-center flex-column py-3">
             <div class="flex-center">
               <img id="assetLogo">
-              <div class="ms-2 fs28 sans-light" id="assetName" data-asset-name="1"></div>
+              <div class="ms-2 fs28 sans-light lh1" id="assetName" data-asset-name="1"></div>
+            </div>
+            <div id="tokenParentBox" class="flex-center" class="fs16 d-hide">
+              <span>Token on</span>
+              <img id="tokenParentLogo" class="ms-1">
+              <span id="tokenParnetName"></span>
             </div>
             <div id="createWalletBox" class="my-2">
               <button class="py-1 px-2 hoverbg fs18" id="createWallet">[[[create_a_x_wallet]]]</button>
@@ -265,13 +273,13 @@
                 </thead>
                 <tbody id="recentOrders">
                   <tr id="recentOrderTmpl">
-                    <td data-tmpl="trade" class="text-nowrap">
+                    <td data-tmpl="trade" class="text-nowrap flex-center">
                       <span data-tmpl="fromQty"></span>
-                      <img data-tmpl="fromLogo" class="micro-icon">
+                      <img data-tmpl="fromLogo" class="micro-icon mx-1">
                       <span data-tmpl="fromSymbol" class="d-none d-md-inline"></span>
                       <span>&rarr;</span>
                       <span data-tmpl="toQty"></span>
-                      <img data-tmpl="toLogo" class="micro-icon">
+                      <img data-tmpl="toLogo" class="micro-icon mx-1">
                       <span data-tmpl="toSymbol" class="d-none d-md-inline"></span>
                     </td>
                     <td data-tmpl="status"></td>

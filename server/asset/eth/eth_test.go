@@ -117,7 +117,7 @@ func (n *testNode) connect(ctx context.Context) error {
 
 func (n *testNode) shutdown() {}
 
-func (n *testNode) loadToken(context.Context, uint32) error {
+func (n *testNode) loadToken(context.Context, uint32, *VersionedToken) error {
 	return nil
 }
 
@@ -237,7 +237,7 @@ func TestDecodeCoinID(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	backend, err := unconnectedETH(tLogger, dex.Simnet)
+	backend, err := unconnectedETH(BipID, dexeth.ContractAddresses[0][dex.Simnet], registeredTokens, tLogger, dex.Simnet)
 	if err != nil {
 		t.Fatalf("unconnectedETH error: %v", err)
 	}
@@ -698,7 +698,13 @@ func testValidateContract(t *testing.T, assetID uint32) {
 		if assetID == BipID {
 			cv = &ETHBackend{eth}
 		} else {
-			cv = &TokenBackend{eth}
+			cv = &TokenBackend{
+				AssetBackend: eth,
+				VersionedToken: &VersionedToken{
+					Token: dexeth.Tokens[testTokenID],
+					Ver:   0,
+				},
+			}
 		}
 
 		swapData := make([]byte, 4+len(test.secretHash))

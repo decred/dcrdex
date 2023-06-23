@@ -593,10 +593,23 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		c = node.tokenContractor
 	}
 
+	versionedGases := make(map[uint32]*dexeth.Gases)
+	if assetID == BipID { // just make a copy
+		for ver, g := range dexeth.VersionedGases {
+			versionedGases[ver] = g
+		}
+	} else {
+		netToken := dexeth.Tokens[assetID].NetTokens[dex.Simnet]
+		for ver, c := range netToken.SwapContracts {
+			versionedGases[ver] = &c.Gas
+		}
+	}
+
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
-			bipID:         BipID,
+			baseChainID:   BipID,
 			chainID:       dexeth.ChainIDs[dex.Simnet],
+			tokens:        dexeth.Tokens,
 			addr:          node.addr,
 			net:           dex.Simnet,
 			node:          node,
@@ -607,6 +620,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			monitoredTxDB: kvdb.NewMemoryDB(),
 			pendingTxs:    make(map[common.Hash]*pendingTx),
 		},
+		versionedGases:     versionedGases,
 		log:                tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:            assetID,
 		contractors:        map[uint32]contractor{0: c},
@@ -1010,14 +1024,9 @@ func testRefund(t *testing.T, assetID uint32) {
 
 	gasesV1 := &dexeth.Gases{Refund: 1e5}
 	if assetID == BipID {
-		dexeth.VersionedGases[1] = gasesV1
-		defer delete(dexeth.VersionedGases, 1)
+		eth.versionedGases[1] = gasesV1
 	} else {
-		tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
-		tc := *tokenContracts[0]
-		tc.Gas = *gasesV1
-		tokenContracts[1] = &tc
-		defer delete(tokenContracts, 1)
+		eth.versionedGases[1] = &dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
 		v1c = &tTokenContractor{tContractor: v1Contractor}
 	}
 
@@ -2226,10 +2235,14 @@ func testRedeem(t *testing.T, assetID uint32) {
 
 	// Test with a non-zero contract version to ensure it makes it into the receipt
 	contractVer := uint32(1)
-	dexeth.VersionedGases[1] = ethGases // for dexeth.RedeemGas(..., 1)
-	tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
+
+	eth.versionedGases[1] = ethGases
+	if assetID != BipID {
+		eth.versionedGases[1] = &tokenGases
+	}
+
+	tokenContracts := eth.tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
 	tokenContracts[1] = tokenContracts[0]
-	defer delete(dexeth.VersionedGases, 1)
 	defer delete(tokenContracts, 1)
 
 	contractorV1 := &tContractor{
@@ -3383,7 +3396,7 @@ func TestDriverOpen(t *testing.T) {
 		DataDir:  tmpDir,
 		Net:      dex.Testnet,
 		Logger:   logger,
-	}, true)
+	}, &testnetCompatibilityData, true)
 	if err != nil {
 		t.Fatalf("CreateWallet error: %v", err)
 	}
@@ -3445,7 +3458,7 @@ func TestDriverExists(t *testing.T) {
 		DataDir:  tmpDir,
 		Net:      dex.Simnet,
 		Logger:   tLogger,
-	}, true)
+	}, &testnetCompatibilityData, true)
 	if err != nil {
 		t.Fatalf("CreateEVMWallet error: %v", err)
 	}
@@ -3752,21 +3765,23 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	gasesV0 := dexeth.VersionedGases[0]
 	gasesV1 := &dexeth.Gases{Refund: 1e6}
 	assetV0 := *tETH
+
 	assetV1 := *tETH
 	if assetID == BipID {
-		dexeth.VersionedGases[1] = gasesV1
-		defer delete(dexeth.VersionedGases, 1)
+		eth.versionedGases[1] = gasesV1
 	} else {
 		feeWallet = node.tokenParent
 		assetV0 = *tToken
 		assetV1 = *tToken
-		tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
-		gasesV0 = &tokenGases
+		tokenContracts := eth.tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
 		tc := *tokenContracts[0]
 		tc.Gas = *gasesV1
 		tokenContracts[1] = &tc
-		node.tokenContractor.bal = dexeth.GweiToWei(1e9)
 		defer delete(tokenContracts, 1)
+		gasesV0 = &tokenGases
+		eth.versionedGases[0] = gasesV0
+		eth.versionedGases[1] = gasesV1
+		node.tokenContractor.bal = dexeth.GweiToWei(1e9)
 	}
 
 	assetV0.MaxFeeRate = 45
@@ -3852,19 +3867,15 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	assetV1 := *tETH
 	feeWallet := eth
 	if assetID == BipID {
-		dexeth.VersionedGases[1] = gasesV1
-		defer delete(dexeth.VersionedGases, 1)
+		eth.versionedGases[1] = gasesV1
 	} else {
 		node.tokenContractor.allow = unlimitedAllowanceReplenishThreshold
 		feeWallet = node.tokenParent
 		assetV0 = *tToken
 		assetV1 = *tToken
-		tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
 		gasesV0 = &tokenGases
-		tc := *tokenContracts[0]
-		tc.Gas = *gasesV1
-		tokenContracts[1] = &tc
-		defer delete(tokenContracts, 1)
+		eth.versionedGases[0] = gasesV0
+		eth.versionedGases[1] = gasesV1
 	}
 
 	assetV0.MaxFeeRate = 45
@@ -4997,7 +5008,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 			}
 		} else {
 			if estimate != tokenFees {
-				t.Fatalf("%s: expected fees to be %v, got %v", test.name, ethFees, estimate)
+				t.Fatalf("%s: expected fees to be %v, got %v", test.name, tokenFees, estimate)
 			}
 		}
 		if err != nil {
@@ -5027,7 +5038,7 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 		DataDir:  tmpDir,
 		Net:      dex.Testnet,
 		Logger:   logger,
-	}, true)
+	}, &testnetCompatibilityData, true)
 	if err != nil {
 		t.Fatalf("CreateEVMWallet error: %v", err)
 	}

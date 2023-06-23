@@ -30,8 +30,8 @@
           <div id="marketTmplV1" class="market-tmpl-v1 d-flex align-items-stretch p-2 my-1 pointer hoverbg">
             <div class="flex-center flex-column me-1">
               <div class="d-flex align-items-start justify-content-start flex-grow-1">
-                <img data-tmpl="baseIcon">
-                <img data-tmpl="quoteIcon" class="ms-1">
+                <img class="market-tmpl-pair-img" data-tmpl="baseIcon">
+                <img class="market-tmpl-pair-img" data-tmpl="quoteIcon" class="ms-1">
                 <span class="errcolor ico-disconnected d-hide ps-1" data-tmpl="disconnectedIco"></span>
               </div>
               <div class="fs10 demi text-start text-nowrap dexname" data-tmpl="host"></div>
@@ -64,7 +64,7 @@
       <div id="marketStatsV1" class="market-stats-v1 align-items-center justify-content-center p-2 flex-wrap">
         <div class="flex-center me-2 pointer hoverbg" data-tmpl="marketSelect">
           <div class="flex-center">
-            <img data-tmpl="baseIcon"><img data-tmpl="quoteIcon" class="ms-1">
+            <img class="market-stats-pair-img" data-tmpl="baseIcon"><img class="market-stats-pair-img" data-tmpl="quoteIcon" class="ms-1">
           </div>
           <div class="flex-center fs24 demi ms-2">
             <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
@@ -270,11 +270,11 @@
                   <div class="d-flex justify-content-start pb-2 fs14">
                     <button id="buyBttn" type="button" class="buygreen-bg selected">
                       [[[Buy]]]
-                      <span data-unit="base"></span>
+                      <span data-unit="base" data-unit-format="noparent"></span>
                     </button>
                     <button id="sellBttn" type="button" class="sellred-bg ms-2">
                       [[[Sell]]]
-                      <span data-unit="base"></span>
+                      <span data-unit="base" data-unit-format="noparent"></span>
                     </button>
                     <span></span>
                   </div>
@@ -315,7 +315,7 @@
                     <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
                     <div class="col-18 p-0 position-relative">
                       <input type="number" class="form-control select bg1" id="rateField">
-                      <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
+                      <span class="unitbox"><span class="unit" data-unit="quote" data-unit-format="noparent"></span>/<span class="unit" data-unit="base" data-unit-format="noparent"></span></span>
                     </div>
                   </div>
                   <div class="d-flex mt-4" id="qtyBox">
@@ -327,25 +327,25 @@
                     <div class="col-1 p-0"></div> {{/* spacer */}}
                     <div class="col-11 p-0 position-relative">
                       <input type="number" class="form-control select bg1" id="qtyField">
-                      <span class="unit unitbox" data-unit="base"></span>
+                      <span class="unit unitbox" data-unit="base" data-unit-format="noparent"></span>
                     </div>
                   </div>
 
                   {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
                   <div id="mktBuyBox" class="d-hide">
                     <div class="text-center mt-2 fs15">
-                      [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote"></span>
+                      [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote" data-unit-format="noparent"></span>
                     </div>
                     <div class="d-flex justify-content-center mt-2">
                       <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
                       <div class="col-12 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="mktBuyField">
-                        <span class="unit unitbox" data-unit="quote"></span>
+                        <span class="unit unitbox" data-unit="quote" data-unit-format="noparent"></span>
                       </div>
                     </div>
                     <div class="p-0 fs14 flex-center mt-1">
                       <span>
-                        ~ <span id="mktBuyScore">0</span> <span data-unit="base"></span>
+                        ~ <span id="mktBuyScore">0</span> <span data-unit="base" data-unit-format="noparent"></span>
                         @ <span id="mktBuyLots">0</span> <span >[[[:title:lots]]]</span><br>
 
                       </span>
@@ -401,7 +401,7 @@
                 <div data-tmpl="balanceRows" class="d-flex flex-column align-items-stretch brdrbottom lh1">
                   <div class="d-flex justify-content-between align-items-center px-3 py-1 fs15" data-tmpl="balanceRowTmpl">
                     <span data-tmpl="title"></span>
-                    <div data-tmpl="bal"></div>
+                    <div data-tmpl="bal" class="flex-center"></div>
                   </div>
                 </div>
               </div>

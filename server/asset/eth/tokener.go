@@ -29,20 +29,20 @@ type erc20Contract interface {
 
 // tokener is a contract data manager for a token.
 type tokener struct {
-	*registeredToken
+	*VersionedToken
 	swapContract
 	erc20Contract
 	contractAddr, tokenAddr common.Address
 }
 
 // newTokener is a constructor for a tokener.
-func newTokener(ctx context.Context, assetID uint32, net dex.Network, be bind.ContractBackend) (*tokener, error) {
-	token, netToken, swapContract, err := networkToken(assetID, net)
+func newTokener(ctx context.Context, vToken *VersionedToken, net dex.Network, be bind.ContractBackend) (*tokener, error) {
+	netToken, swapContract, err := networkToken(vToken, net)
 	if err != nil {
 		return nil, err
 	}
 
-	if token.ver != 0 {
+	if vToken.Ver != 0 {
 		return nil, fmt.Errorf("only version 0 contracts supported")
 	}
 
@@ -59,20 +59,20 @@ func newTokener(ctx context.Context, assetID uint32, net dex.Network, be bind.Co
 	boundAddr, err := es.TokenAddress(readOnlyCallOpts(ctx, false))
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving bound address for %s version %d contract: %w",
-			token.Name, token.ver, err)
+			vToken.Name, vToken.Ver, err)
 	}
 
 	if boundAddr != netToken.Address {
 		return nil, fmt.Errorf("wrong bound address for %s version %d contract. wanted %s, got %s",
-			token.Name, token.ver, netToken.Address, boundAddr)
+			vToken.Name, vToken.Ver, netToken.Address, boundAddr)
 	}
 
 	tkn := &tokener{
-		registeredToken: token,
-		swapContract:    &swapSourceV0{es},
-		erc20Contract:   erc20,
-		contractAddr:    swapContract.Address,
-		tokenAddr:       netToken.Address,
+		VersionedToken: vToken,
+		swapContract:   &swapSourceV0{es},
+		erc20Contract:  erc20,
+		contractAddr:   swapContract.Address,
+		tokenAddr:      netToken.Address,
 	}
 
 	return tkn, nil
@@ -90,7 +90,7 @@ func (t *tokener) transferred(txData []byte) *big.Int {
 
 // swapped calculates the value sent to the swap contracts initiate method.
 func (t *tokener) swapped(txData []byte) *big.Int {
-	inits, err := dexeth.ParseInitiateData(txData, t.ver)
+	inits, err := dexeth.ParseInitiateData(txData, t.Ver)
 	if err != nil {
 		return nil
 	}

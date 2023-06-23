@@ -5,24 +5,43 @@ package polygon
 
 import (
 	"fmt"
+	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/dex"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
+	"github.com/ethereum/go-ethereum/common"
 )
+
+func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
+	token, found := dexpolygon.Tokens[tokenID]
+	if !found {
+		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
+	}
+	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
+		Type:        walletTypeToken,
+		Tab:         "Polygon token",
+		Description: desc,
+	}, nets...)
+}
 
 func init() {
 	asset.Register(BipID, &Driver{})
+	registerToken(simnetTokenID, "A token wallet for the DEX test token. Used for testing DEX software.", dex.Simnet)
+	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.", dex.Mainnet)
 }
 
 const (
 	// BipID is the BIP-0044 asset ID for Polygon.
-	BipID         = 966
-	walletTypeRPC = "rpc"
+	BipID           = 966
+	walletTypeRPC   = "rpc"
+	walletTypeToken = "token"
 )
 
 var (
+	simnetTokenID, _ = dex.BipSymbolID("dextt.polygon")
+	usdcTokenID, _   = dex.BipSymbolID("usdc.polygon")
 	// WalletInfo defines some general information about a Polygon Wallet(EVM
 	// Compatible).
 	WalletInfo = &asset.WalletInfo{
@@ -56,7 +75,35 @@ type Driver struct{}
 
 // Open opens the Polygon exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-	return eth.NewEVMWallet(BipID, dexpolygon.ChainIDs[net], cfg, logger, net)
+	chainCfg, err := ChainGenesis(net)
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate Polygon genesis configuration for network %s", net)
+	}
+	compat, err := NetworkCompatibilityData(net)
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate Polygon compatibility data: %s", net)
+	}
+	contracts := make(map[uint32]common.Address, 1)
+	for ver, netAddrs := range dexpolygon.ContractAddresses {
+		for netw, addr := range netAddrs {
+			if netw == net {
+				contracts[ver] = addr
+				break
+			}
+		}
+	}
+	// BipID, chainCfg, cfg, &t, dexpolygon.VersionedGases, dexpolygon.Tokens, logger, net
+	return eth.NewEVMWallet(&eth.EVMWalletConfig{
+		BaseChainID:        BipID,
+		ChainCfg:           chainCfg,
+		AssetCfg:           cfg,
+		CompatData:         &compat,
+		VersionedGases:     dexpolygon.VersionedGases,
+		Tokens:             dexpolygon.Tokens,
+		Logger:             logger,
+		BaseChainContracts: contracts,
+		Net:                net,
+	})
 }
 
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
@@ -75,5 +122,9 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 }
 
 func (d *Driver) Create(cfg *asset.CreateWalletParams) error {
-	return eth.CreateEVMWallet(dexpolygon.ChainIDs[cfg.Net], cfg, false)
+	t, err := NetworkCompatibilityData(cfg.Net)
+	if err != nil {
+		return fmt.Errorf("error finding compatibility data: %v", err)
+	}
+	return eth.CreateEVMWallet(dexpolygon.ChainIDs[cfg.Net], cfg, &t, false)
 }
