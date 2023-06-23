@@ -101,7 +101,6 @@ func (c *tBtcWallet) LockOutpoint(op wire.OutPoint) {
 	if c.lockedCoins != nil {
 		// check if already locked
 		for _, l := range c.lockedCoins {
-			// print the
 			if l.TxID == op.Hash.String() && l.Vout == op.Index {
 				return
 			}

@@ -2475,7 +2475,7 @@ func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderVal
 // that fund each order are returned in the same order as the values that were
 // passed in.
 func (btc *baseWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset.MultiOrderValue,
-	maxFeeRate uint64) ([]asset.Coins, [][]dex.Bytes, map[outPoint]*utxo, []*output, error) {
+	maxFeeRate uint64, splitAllowed bool) ([]asset.Coins, [][]dex.Bytes, map[outPoint]*utxo, []*output, error) {
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("error getting spendable utxos: %w", err)
@@ -2579,6 +2579,10 @@ func (btc *baseWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset
 	allFundingUTXOs := fundAllOrders()
 	if allFundingUTXOs != nil {
 		return returnValues(allFundingUTXOs)
+	}
+
+	if splitAllowed {
+		return returnValues([][]*compositeUTXO{})
 	}
 
 	// If could not fully fund, fund as much as possible in the priority
@@ -2727,8 +2731,8 @@ func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.
 	var totalFunded uint64
 
 	// Find each of the orders that can be funded without being included
-	// in the split transacction.
-	for i := 0; i < len(values); i++ {
+	// in the split transaction.
+	for range values {
 		// First find the order the can be funded with the least overlock.
 		// If there is no order that can be funded without going over the
 		// maxLock limit, or not leaving enough for bond reserves, then all
@@ -2753,7 +2757,7 @@ func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.
 		remainingUTXOs = utxoSetDiff(remainingUTXOs, fundingUTXOs)
 
 		// Then we make sure that a split transaction can be created for
-		// any remaining orders without uding the utxos returned by
+		// any remaining orders without using the utxos returned by
 		// orderWithLeastOverFund.
 		if len(newRemainingOrders) > 0 {
 			canFund, newSplitCoins, newSpents := btc.fundMultiSplitTx(newRemainingOrders, remainingUTXOs,
@@ -2827,7 +2831,7 @@ func (btc *baseWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue
 
 	reserves := btc.reserves()
 
-	coins, redeemScripts, fundingCoins, spents, err := btc.fundMultiBestEffort(reserves, maxLock, values, maxFeeRate)
+	coins, redeemScripts, fundingCoins, spents, err := btc.fundMultiBestEffort(reserves, maxLock, values, maxFeeRate, allowSplit)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -5302,8 +5306,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		// Add the change output.
 		vSize0 := btc.calcTxSize(baseTx)
 		baseTx.AddTxOut(changeOutput)
-		changeSize := btc.calcTxSize(baseTx) - vSize0 // may be dexbtc.P2WPKHOutputSize
-		btc.log.Infof("change size: %d", changeSize)
+		changeSize := btc.calcTxSize(baseTx) - vSize0       // may be dexbtc.P2WPKHOutputSize
 		addrStr, _ := btc.stringAddr(addr, btc.chainParams) // just for logging
 		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addrStr)
 
