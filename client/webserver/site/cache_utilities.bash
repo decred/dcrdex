@@ -52,9 +52,9 @@ hashjssrc () { hashdir "${JS_DIR}" ; }
 
 # hashjssrc hashes the compiled js.
 hashjsdist () {
-    sed -i.tmp 's/commitHash="[^"]*"//' "${JS_FILE}"
-    HASH=$(hashfile "${JS_FILE}" | cut -c1-8)
-    rm "${JS_FILE}.tmp"
+    sed 's/commitHash="[^"]*"//' "${JS_FILE}" > js.tmp
+    HASH=$(hashfile js.tmp | cut -c1-8)
+    rm js.tmp
     echo ${HASH}
 }
 
