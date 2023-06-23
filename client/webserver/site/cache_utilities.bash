@@ -5,20 +5,14 @@ CSS_FILE=${SITE_DIR}/dist/style.css
 JS_DIR=${SITE_DIR}/src/js
 JS_FILE=${SITE_DIR}/dist/entry.js
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-   hashfunc="shasum"
-else
-   hashfunc="sha1sum"
-fi
-
-hashfile () { "${hashfunc}" $1 | cut -d " " -f1 ; }
+hashfile () { openssl sha1 $1 | cut -d " " -f2 ; }
 
 hashdir () {
     HASHBUF=""
     while read FP ; do
         HASHBUF="${HASHBUF}$(hashfile ${FP})"
     done < <(git ls-files "$1")
-    echo ${HASHBUF} | "${hashfunc}" | cut -d " " -f1 | cut -c1-8
+    echo ${HASHBUF} | openssl sha1 | cut -d " " -f2 | cut -c1-8
 }
 
 # hashcsssrc hashes the css source directory.
