@@ -26,7 +26,9 @@ not `master`.
 If using external wallet software (e.g. **dcrd**+**dcrwallet**, **bitcoind**,
 Electrum, etc.), they must remain running while the DEX client is running. Do
 not shut down, lock, unlock, or otherwise modify your wallet settings while the
-client is running.
+client is running. Also, only send funds from within the DEX application, not
+directly from the external wallet's own controls. Finally, do not manually lock
+or unlock any coins while the DEX client is running.
 
 ## Client Configuration
 
@@ -91,7 +93,7 @@ several blocks.
    <img src="images/client-pw.png" width="320">
 
    NOTE: Checking the "Remember my password" box only applies to the current
-   session. It is easiest for most user to check it.
+   session. It is easiest for most users to have it checked.
 
 4. Choose the DEX host that you would like to use. Either click one of the
    pre-defined hosts, or enter the address of a known host that you would like
@@ -136,12 +138,19 @@ several blocks.
    <img src="images/sync-fund-btc.png" width="360">
 
    **IMPORTANT**: This is your own local wallet, and you can send as much as you
-   like to your new wallet since *only* the amount required for the bond will be
-   spent in the next step. The remaining amount will be in your available
-   balance. For example, you can send yourself 5 BTC and only the required
-   amount will be spent to create the bond in the next step, with the remainder
-   in the wallet's balance, which can then be traded, sent, or simply held in
-   the wallet.
+   like to it since *only* the amount required for the bond will be spent in the
+   next step. The remaining amount, minus a small reserve for future bond
+   transactions, will be in your available balance. For example, you can send
+   yourself 5 BTC and only the required amount (0.0014 BTC in the case pictured
+   above) will be spent to create the bond in the next step, with an equivalent
+   amount plus fees in reserves. The remainder goes to your available balance,
+   which can then be traded, sent, or simply held in the wallet.
+
+   You may disable future bonds at any time by changing the "Target Tier" to 0
+   in the "Update Bond Options" form accessible from DEX host settings form
+   accessible from the Settings page. This will return any reserves to the
+   available balance. Any active bonds will automatically be refunded when their
+   lock time expires (currently 2 months after creation).
 
    NOTE: The native Litecoin and Bitcoin Cash wallets connect to full nodes on
    the blockchain network that have "compact block filters" enabled. It may take
@@ -172,6 +181,12 @@ several blocks.
    validation and you will be ready to trade:
 
    <img src="images/bond-accepted.png" width="360">
+
+   It is recommended to export bond information whenever they are created since
+   they are not automatically restored from just the application seed. Do this
+   using the "Export Account" button of the DEX host settings accessible from
+   the Settings page. If you restore from seed in the future: create the same
+   wallets, add the same DEX host, and *then* import the bonds from this backup.
 
 10. At any time you can go to the Settings page via the "gears" icon in the top
     navigation bar to retrieve the application seed that was generated when
