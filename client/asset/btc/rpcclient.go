@@ -498,6 +498,8 @@ func (wc *rpcClient) listUnspent() ([]*ListUnspentResult, error) {
 // lockAllUnspent unlocks all locked outputs for spending again. If unlock is
 // true btc will return 'true' if successful. If unlock is false btc will also
 // return 'true' but do nothing so a warning is issued below.
+//
+// See Also: btc_test.go: RawRequest case: methodLockUnspent
 func (wc *rpcClient) lockAllUnspent(unlock bool) error {
 	if !unlock {
 		wc.log.Warn("attempting to lock all unspent outputs 'lockunspent false'")
@@ -508,7 +510,8 @@ func (wc *rpcClient) lockAllUnspent(unlock bool) error {
 		return fmt.Errorf("'lockunspent %v': %v: ", unlock, err)
 	}
 	if !rpcReturn {
-		return fmt.Errorf("'lockunspent %v' unsuccessful: RPC returns %v", unlock, rpcReturn)
+		return fmt.Errorf("'lockunspent %v' unsuccessful: RPC returns %v",
+			unlock, rpcReturn)
 	}
 	return nil
 }
@@ -520,7 +523,7 @@ func (wc *rpcClient) lockUnspent(unlock bool, ops []*output) error {
 	if ops == nil {
 		return wc.lockAllUnspent(unlock)
 	}
-	var rpcops []*RPCOutpoint // To clear all, this must be nil->null, not empty slice.
+	var rpcops []*RPCOutpoint
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
 			TxID: op.txHash().String(),
