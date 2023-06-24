@@ -5,14 +5,14 @@ CSS_FILE=${SITE_DIR}/dist/style.css
 JS_DIR=${SITE_DIR}/src/js
 JS_FILE=${SITE_DIR}/dist/entry.js
 
-hashfile () { sha1sum $1 | cut -d " " -f1 ; }
+hashfile () { openssl sha1 $1 | cut -d " " -f2 ; }
 
 hashdir () {
     HASHBUF=""
     while read FP ; do
         HASHBUF="${HASHBUF}$(hashfile ${FP})"
     done < <(git ls-files "$1")
-    echo ${HASHBUF} | sha1sum | cut -d " " -f1 | cut -c1-8
+    echo ${HASHBUF} | openssl sha1 | cut -d " " -f2 | cut -c1-8
 }
 
 # hashcsssrc hashes the css source directory.
@@ -52,8 +52,7 @@ hashjssrc () { hashdir "${JS_DIR}" ; }
 
 # hashjssrc hashes the compiled js.
 hashjsdist () {
-    cp "${JS_FILE}" js.tmp
-    sed -i 's/commitHash="[^"]*"//' js.tmp
+    perl -pe 's/commitHash="[^"]*"//' "${JS_FILE}" > js.tmp
     HASH=$(hashfile js.tmp | cut -c1-8)
     rm js.tmp
     echo ${HASH}
