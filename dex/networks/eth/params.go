@@ -29,7 +29,21 @@ const (
 	MinGasTipCap     = 2 //gwei
 )
 
+// These are the chain IDs of the various Ethereum network supported.
+const (
+	MainnetChainID = 1
+	TestnetChainID = 5  // Görli
+	SimnetChainID  = 42 // see dex/testing/eth/harness.sh
+)
+
 var (
+	// ChainIDs is a map of the network name to it's chain ID.
+	ChainIDs = map[dex.Network]int64{
+		dex.Mainnet: MainnetChainID,
+		dex.Testnet: TestnetChainID,
+		dex.Simnet:  SimnetChainID,
+	}
+
 	UnitInfo = dex.UnitInfo{
 		AtomicUnit: "gwei",
 		Conventional: dex.Denomination{

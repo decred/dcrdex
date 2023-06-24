@@ -27,6 +27,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -88,6 +89,7 @@ type provider struct {
 	endpointAddr string
 	ec           *combinedRPCClient
 	ws           bool
+	chainID      *big.Int
 	net          dex.Network
 	tipCapV      atomic.Value // *cachedTipCap
 	stop         func()
@@ -520,6 +522,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		}
 
 		p := &provider{
+			chainID:      chainID,
 			host:         host,
 			endpointAddr: endpoint,
 			ws:           wsSubscribed,
@@ -649,7 +652,7 @@ func (m *multiRPCClient) voidUnusedNonce() {
 // createAndCheckProviders creates and connects to providers. It checks that
 // unknown providers have a sufficient api to trade and saves good providers to
 // file. One bad provider or connect problem will cause this to error.
-func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, net dex.Network,
+func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, chainID *big.Int, net dex.Network,
 	log dex.Logger) error {
 	var localCP map[string]bool
 	path := filepath.Join(walletDir, "compliant-providers.json")
@@ -686,7 +689,7 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 	}
 
 	if len(unknownEndpoints) > 0 {
-		providers, err := connectProviders(ctx, unknownEndpoints, log, big.NewInt(chainIDs[net]), net)
+		providers, err := connectProviders(ctx, unknownEndpoints, log, chainID, net)
 		if err != nil {
 			return fmt.Errorf("expected to successfully connect to at least 1 of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
@@ -700,7 +703,7 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 			return fmt.Errorf("expected to successfully connect to all of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
 		}
-		if err := checkProvidersCompliance(ctx, providers, net, dex.Disabled /* logger is for testing only */); err != nil {
+		if err := checkProvidersCompliance(ctx, providers, dex.Disabled /* logger is for testing only */); err != nil {
 			return err
 		}
 	}
@@ -742,7 +745,7 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 		return errors.New("no providers specified")
 	}
 	endpoints := strings.Split(providerDef, " ")
-	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.net, m.log); err != nil {
+	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, m.net, m.log); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
 	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net)
@@ -1516,7 +1519,7 @@ type rpcTest struct {
 
 // newCompatibilityTests returns a list of RPC tests to run to determine API
 // compatibility.
-func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Logger) []*rpcTest {
+func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Network, log dex.Logger) []*rpcTest {
 	// NOTE: The logger is intended for use the execution of the compatibility
 	// tests, and it will generally be dex.Disabled in production.
 	var (
@@ -1548,9 +1551,17 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Log
 		txHash = testnetTxHash
 		blockHash = testnetBlockHash
 	case dex.Simnet:
+		if big.NewInt(dexpolygon.SimnetChainID).Cmp(chainID) == 0 {
+			break // TODO: add simnet tests for polygon this will require the ~/dextest/polygon dir to be populated with the files below.
+		}
+
+		tDir, err := simnetDataDir(chainID.Int64())
+		if err != nil {
+			panic(fmt.Sprintf("Problem getting simnet data dir: %v", err))
+		}
+
 		addr = simnetAddr
 		var (
-			tDir           = filepath.Join(os.Getenv("HOME"), "dextest", "eth")
 			tTxHashFile    = filepath.Join(tDir, "test_tx_hash.txt")
 			tBlockHashFile = filepath.Join(tDir, "test_block10_hash.txt")
 			tContractFile  = filepath.Join(tDir, "test_token_contract_address.txt")
@@ -1648,7 +1659,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Log
 				// I guess we would need to unpack the results. I don't really
 				// know how to interpret these, but I'm really just looking for
 				// a request error.
-				log.Debug("#### USDC balanceOf result:", dexeth.WeiToGwei(bal), "gwei")
+				log.Debug("#### ERC20 token balanceOf result:", dexeth.WeiToGwei(bal), "gwei")
 				return nil
 			},
 		},
@@ -1752,10 +1763,10 @@ func domain(addr string) (string, error) {
 // requires by sending a series of requests and verifying the responses. If a
 // provider is found to be compliant, their domain name is added to a list and
 // stored in a file on disk so that future checks can be short-circuited.
-func checkProvidersCompliance(ctx context.Context, providers []*provider, net dex.Network, log dex.Logger) error {
+func checkProvidersCompliance(ctx context.Context, providers []*provider, log dex.Logger) error {
 	for _, p := range providers {
 		// Need to run API tests on this endpoint.
-		for _, t := range newCompatibilityTests(p.ec, net, log) {
+		for _, t := range newCompatibilityTests(p.ec, p.chainID, p.net, log) {
 			ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 			err := t.f(ctx, p)
 			cancel()

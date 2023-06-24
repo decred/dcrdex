@@ -54,7 +54,7 @@ type nodeClient struct {
 	chainID *big.Int
 }
 
-func newNodeClient(dir string, net dex.Network, log dex.Logger) (*nodeClient, error) {
+func newNodeClient(dir string, chainID int64, net dex.Network, log dex.Logger) (*nodeClient, error) {
 	node, err := prepareNode(&nodeConfig{
 		net:    net,
 		appDir: dir,
@@ -70,7 +70,7 @@ func newNodeClient(dir string, net dex.Network, log dex.Logger) (*nodeClient, er
 	}
 
 	return &nodeClient{
-		chainID: big.NewInt(chainIDs[net]),
+		chainID: big.NewInt(chainID),
 		node:    node,
 		creds:   creds,
 		net:     net,
@@ -89,7 +89,7 @@ func (n *nodeClient) chainConfig() *params.ChainConfig {
 // connect connects to a node. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
 func (n *nodeClient) connect(ctx context.Context) (err error) {
-	n.leth, err = startNode(n.node, n.net)
+	n.leth, err = startNode(n.chainID.Int64(), n.node, n.net)
 	if err != nil {
 		return err
 	}
@@ -406,8 +406,9 @@ func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, max
 	}
 }
 
-func gases(assetID uint32, contractVer uint32, net dex.Network) *dexeth.Gases {
-	if assetID == BipID {
+func gases(parentID, assetID uint32, contractVer uint32, net dex.Network) *dexeth.Gases {
+	isToken := parentID != assetID
+	if !isToken { // ETH or EVM-compatible asset.
 		if contractVer != contractVersionNewest {
 			return dexeth.VersionedGases[contractVer]
 		}

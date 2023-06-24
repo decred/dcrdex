@@ -264,13 +264,14 @@ out:
 }
 
 func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
-	ethCfg, err := ethChainConfig(net)
+	chainID := dexeth.ChainIDs[net]
+	ethCfg, err := chainConfig(chainID, net)
 	if err != nil {
 		return nil, nil, err
 	}
 	cfg := ethCfg.Genesis.Config
 
-	c, err := newMultiRPCClient(dataDir, []string{endpoint}, tLogger.SubLogger(name), cfg, big.NewInt(chainIDs[net]), net)
+	c, err := newMultiRPCClient(dataDir, []string{endpoint}, tLogger.SubLogger(name), cfg, big.NewInt(dexeth.ChainIDs[net]), net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
 	}
@@ -307,7 +308,7 @@ func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network)
 }
 
 func prepareNodeClient(name, dataDir string, net dex.Network) (*nodeClient, *accounts.Account, error) {
-	c, err := newNodeClient(getWalletDir(dataDir, net), net, tLogger.SubLogger(name))
+	c, err := newNodeClient(getWalletDir(dataDir, net), dexeth.ChainIDs[net], net, tLogger.SubLogger(name))
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
 	}
@@ -685,7 +686,7 @@ func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network
 		Net:      net,
 		Logger:   tLogger,
 	}
-	return createWallet(&createWalletParams, true)
+	return CreateEVMWallet(dexeth.ChainIDs[net], &createWalletParams, true)
 }
 
 func prepareTokenClients(t *testing.T) {
@@ -1131,7 +1132,7 @@ func testInitiateGas(t *testing.T, assetID uint32) {
 	if isTestnet {
 		net = dex.Testnet
 	}
-	gases := gases(assetID, 0, net)
+	gases := gases(BipID, assetID, 0, net)
 
 	var previousGas uint64
 	maxSwaps := 50

@@ -586,26 +586,22 @@ function setCoinHref (assetID: number, link: PageElement) {
   link.href = formatter(link.dataset.explorerCoin || '')
 }
 
+/* ethBasedExplorerArg returns the explorer argument for ETH, ERC20 and EVM
+Compatible assets and whether the return value is an address. */
+function ethBasedExplorerArg (cid: string): [string, boolean] {
+  if (cid.startsWith(coinIDTakerFoundMakerRedemption)) return [cid.substring(coinIDTakerFoundMakerRedemption.length), true]
+  else if (cid.length === 42) return [cid, true]
+  else return [cid, false]
+}
+
 const ethExplorers: Record<number, (cid: string) => string> = {
   [Mainnet]: (cid: string) => {
-    if (cid.startsWith(coinIDTakerFoundMakerRedemption)) {
-      const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
-      return `https://etherscan.io/address/${makerAddr}`
-    }
-    if (cid.length === 42) {
-      return `https://etherscan.io/address/${cid}`
-    }
-    return `https://etherscan.io/tx/${cid}`
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://etherscan.io/address/${arg}` : `https://etherscan.io/tx/${arg}`
   },
   [Testnet]: (cid: string) => {
-    if (cid.startsWith(coinIDTakerFoundMakerRedemption)) {
-      const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
-      return `https://goerli.etherscan.io/address/${makerAddr}`
-    }
-    if (cid.length === 42) {
-      return `https://goerli.etherscan.io/address/${cid}`
-    }
-    return `https://goerli.etherscan.io/tx/${cid}`
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://goerli.etherscan.io/address/${arg}` : `https://goerli.etherscan.io/tx/${arg}`
   }
 }
 
@@ -649,5 +645,15 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   145: { // bch
     [Mainnet]: (cid: string) => `https://bch.loping.net/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://tbch4.loping.net/tx/${cid.split(':')[0]}`
+  },
+  966: { // matic
+    [Mainnet]: (cid: string) => {
+      const [arg, isAddr] = ethBasedExplorerArg(cid)
+      return isAddr ? `https://polygonscan.com/address/${arg}` : `https://polygonscan.com/tx/${arg}`
+    },
+    [Testnet]: (cid: string) => {
+      const [arg, isAddr] = ethBasedExplorerArg(cid)
+      return isAddr ? `https://mumbai.polygonscan.com/address/${arg}` : `https://mumbai.polygonscan.com/tx/${arg}`
+    }
   }
 }
