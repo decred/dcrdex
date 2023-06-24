@@ -25,7 +25,7 @@ const (
 
 var (
 	UnitInfo = dex.UnitInfo{
-		AtomicUnit: "satoshi",
+		AtomicUnit: "Satoshi",
 		Conventional: dex.Denomination{
 			Unit:             "DASH",
 			ConversionFactor: 1e8,

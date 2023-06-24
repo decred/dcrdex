@@ -7,9 +7,6 @@
 # a "mnemonic" parameter that is a set of seed words from the hdseed of
 # a previous wallet. This is really for restoring wallets but we can use
 # it to make a repeatable wallet.
-#
-# Note: For regtest & testnet the BIP44 derivation path is 1 not 5 as used
-# in mainnet wallets 
 
 SYMBOL="dash"
 # Dash binaries should be in PATH
@@ -57,8 +54,9 @@ GAMMA_ADDRESS="yQmfjX89287y3cYFXdDAo882VCG7cSspRm"
 # delta is a named HD wallet in the beta node's wallet directory.
 DELTA_ADDRESS="ySM59Zz7BsVsd8TJnNbLTXoZmkqN4Ph2Yw"
 
-# No background watch mining set
-NOMINER="1"
+# Background watch mining in window 3 by default:  
+# 'export NOMINER="1"' or uncomment this line to disable
+#NOMINER="1"
 
 set -ex
 

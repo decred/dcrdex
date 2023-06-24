@@ -162,8 +162,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		return nil, fmt.Errorf("unknown network ID %v", net)
 	}
 
-	// Designate the clone ports. These will be overwritten by any explicit
-	// settings in the configuration file.
+	// Designate the clone ports.
 	ports := dexbtc.NetPorts{
 		Mainnet: "8232",
 		Testnet: "18232",

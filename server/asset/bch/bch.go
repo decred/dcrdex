@@ -66,8 +66,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// Designate the clone ports. These will be overwritten by any explicit
-	// settings in the configuration file. Bitcoin Cash uses the same default
+	// Designate the clone ports. Bitcoin Cash uses the same default
 	// ports as Bitcoin.
 	ports := dexbtc.NetPorts{
 		Mainnet: "8332",

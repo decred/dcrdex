@@ -44,7 +44,7 @@ func init() {
 
 const (
 	version   = 0
-	BipID     = 5 // testnet and regtest use '1' for derivations
+	BipID     = 5
 	assetName = "dash"
 )
 
@@ -63,12 +63,11 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// Designate the clone ports. These will be overwritten by any explicit
-	// settings in the configuration file.
+	// Designate the clone ports.
 	ports := dexbtc.NetPorts{
-		Mainnet: "9999",  // rpc:  9998
-		Testnet: "19999", // rpc: 19998
-		Simnet:  "19994", // rpc: 19998
+		Mainnet: "9998",
+		Testnet: "19998",
+		Simnet:  "19898",
 	}
 
 	if configPath == "" {

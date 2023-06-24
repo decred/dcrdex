@@ -17,7 +17,7 @@ import (
 
 const (
 	version                 = 0
-	BipID                   = 5      // 1 used for derivation on for testnet/regtest
+	BipID                   = 5
 	minNetworkVersion       = 190100 // Dash v19.1.0, proto: 70227
 	walletTypeRPC           = "dashdRPC"
 	defaultRedeemConfTarget = 2
@@ -110,12 +110,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// Designate the clone ports. These will be overwritten by any explicit
-	// settings in the configuration file.
+	// Designate the clone ports.
 	ports := dexbtc.NetPorts{
-		Mainnet: "9999",  // rpc:  9998
-		Testnet: "19999", // rpc: 19998
-		Simnet:  "19994", // rpc: 19998
+		Mainnet: "9998",
+		Testnet: "19998",
+		Simnet:  "19898",
 	}
 
 	cloneCFG := &btc.BTCCloneCFG{
