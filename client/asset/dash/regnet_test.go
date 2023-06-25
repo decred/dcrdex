@@ -27,7 +27,11 @@ package dash
 //   └── wallet.dat
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
@@ -62,4 +66,24 @@ func TestWallet(t *testing.T) {
 			Name: "delta",
 		},
 	})
+}
+
+// Tests mainnet externally and that testnet and simnet are not supported
+func TestFetchExternalFee(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	_, err := fetchExternalFee(ctx, dex.Regtest)
+	if err == nil {
+		t.Fatal(errors.New("regtest should error"))
+	}
+	_, err = fetchExternalFee(ctx, dex.Testnet)
+	if err == nil {
+		t.Fatal(errors.New("testnet should error"))
+	}
+	var rate uint64
+	rate, err = fetchExternalFee(ctx, dex.Mainnet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("External fee rate fetched:: %d sat/B\n", rate)
 }
