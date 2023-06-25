@@ -180,6 +180,9 @@ func leastOverFund(enough func(inputsSize, sum uint64) (bool, uint64), utxos []*
 	return leastOverFundWithLimit(enough, math.MaxUint64, utxos)
 }
 
+// leastOverFundWithLimit is the same as leastOverFund, but with an additional
+// maxFund parameter. The total value of the returned UTXOs will not exceed
+// maxFund.
 func leastOverFundWithLimit(enough func(inputsSize, sum uint64) (bool, uint64), maxFund uint64, utxos []*compositeUTXO) []*compositeUTXO {
 	// Remove the UTXOs that are larger than maxFund
 	var smallEnoughUTXOs []*compositeUTXO

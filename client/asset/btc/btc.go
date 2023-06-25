@@ -2420,8 +2420,9 @@ func (btc *baseWallet) fund(keep uint64, minConfs uint32, lockUnspents bool,
 }
 
 // orderWithLeastOverFund returns the index of the order from a slice of orders
-// that requires the least over-funding without using more than maxLock. If
-// none can be funded without using more than maxLock, -1 is returned.
+// that requires the least over-funding without using more than maxLock. It
+// also returns the UTXOs that were used to fund the order. If none can be
+// funded without using more than maxLock, -1 is returned.
 func (btc *baseWallet) orderWithLeastOverFund(maxLock, feeRate uint64, orders []*asset.MultiOrderValue, utxos []*compositeUTXO) (orderIndex int, leastOverFundingUTXOs []*compositeUTXO) {
 	minOverFund := uint64(math.MaxUint64)
 	orderIndex = -1
@@ -2473,7 +2474,8 @@ func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderVal
 // fundMultiBestEffors makes a best effort to fund every order. If it is not
 // possible, it returns coins for the orders that could be funded. The coins
 // that fund each order are returned in the same order as the values that were
-// passed in.
+// passed in. If a split is allowed and all orders cannot be funded, nil slices
+// are returned.
 func (btc *baseWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset.MultiOrderValue,
 	maxFeeRate uint64, splitAllowed bool) ([]asset.Coins, [][]dex.Bytes, map[outPoint]*utxo, []*output, error) {
 	utxos, _, avail, err := btc.spendableUTXOs(0)
@@ -2581,6 +2583,8 @@ func (btc *baseWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset
 		return returnValues(allFundingUTXOs)
 	}
 
+	// Return nil if a split is allowed. There is no need to fund in priority
+	// order if a split will be done regardless.
 	if splitAllowed {
 		return returnValues([][]*compositeUTXO{})
 	}
@@ -5971,7 +5975,7 @@ func (btc *baseWallet) BondsFeeBuffer() uint64 {
 // not enabled and all of the orders cannot be funded due to mismatches in
 // UTXO sizes, the orders that can be funded are funded. It will fail on the
 // first order that cannot be funded. The returned values will always be in
-// the same order as the Values in the parameter, if the length of the returned
+// the same order as the Values in the parameter. If the length of the returned
 // orders is shorter than what was passed in, it means that the orders at the
 // end of the list were unable to be funded.
 func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
