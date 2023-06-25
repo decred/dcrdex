@@ -2,7 +2,6 @@
 
 SESSION="polygon-harness"
 
-SOURCE_DIR=$(pwd)
 NODES_ROOT=~/dextest/polygon
 GENESIS_JSON_FILE_LOCATION="${NODES_ROOT}/genesis.json"
 HARNESS_DIR=${NODES_ROOT}/harness-ctl
@@ -273,7 +272,7 @@ tmux new-session -d -s "${SESSION}" "${SHELL}"
 echo "Creating nodes"
 makenode "alpha" "${ALPHA_HTTP_PORT}" "${ALPHA_WS_PORT}" \
          "${ALPHA_AUTHRPC_PORT}" "${ALPHA_NODE_PORT}" "${SESSION}:1" \
-         "${ALPHA_ADDRESS_JSON_FILE_NAME}" "${ALPHA_ADDRESS_JSON}" "${ALPHS_GRPC_PORT}" \
+         "${ALPHA_ADDRESS_JSON_FILE_NAME}" "${ALPHA_ADDRESS_JSON}" "${ALPHA_GRPC_PORT}" \
          "${ALPHA_NODE_KEY}"
 makenode "beta" "${BETA_HTTP_PORT}" "${BETA_WS_PORT}" \
          "${BETA_AUTHRPC_PORT}" "${BETA_NODE_PORT}" "${SESSION}:2" \
