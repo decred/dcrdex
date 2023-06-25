@@ -4762,6 +4762,17 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 	return nil
 }
 
+// Active indicates if there are any active orders across all configured
+// accounts. This includes booked orders and trades that are settling.
+func (c *Core) Active() bool {
+	for _, dc := range c.dexConnections() {
+		if dc.hasActiveOrders() {
+			return true
+		}
+	}
+	return false
+}
+
 // Logout logs the user out
 func (c *Core) Logout() error {
 	c.loginMtx.Lock()
@@ -4772,11 +4783,8 @@ func (c *Core) Logout() error {
 	}
 
 	// Check active orders
-	conns := c.dexConnections()
-	for _, dc := range conns {
-		if dc.hasActiveOrders() {
-			return codedError(activeOrdersErr, ActiveOrdersLogoutErr)
-		}
+	if c.Active() {
+		return codedError(activeOrdersErr, ActiveOrdersLogoutErr)
 	}
 
 	// Lock wallets
@@ -4794,7 +4802,7 @@ func (c *Core) Logout() error {
 
 	// With no open orders for any of the dex connections, and all wallets locked,
 	// lock each dex account.
-	for _, dc := range conns {
+	for _, dc := range c.dexConnections() {
 		dc.acct.lock()
 	}
 
