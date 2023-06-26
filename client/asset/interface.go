@@ -625,6 +625,18 @@ type NewAddresser interface {
 	NewAddress() (string, error)
 }
 
+// AddressReturner is a wallet that allows recycling of unused redemption or refund
+// addresses. Asset implementations should log any errors internally. The caller
+// is responsible for only returning unused addresses.
+type AddressReturner interface {
+	// ReturnRefundContracts should be called with the Receipt.Contract() data
+	// for any swaps that will not be refunded.
+	ReturnRefundContracts(contracts [][]byte)
+	// ReturnRedemptionAddress accepts a  Wallet.RedemptionAddress() if the
+	// address will not be used.
+	ReturnRedemptionAddress(addr string)
+}
+
 // LogFiler is a wallet that allows for downloading of its log file.
 type LogFiler interface {
 	LogFilePath() string

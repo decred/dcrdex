@@ -178,7 +178,7 @@ func (c *tBtcWallet) Unlock(passphrase []byte, lock <-chan time.Time) error {
 func (c *tBtcWallet) Lock() {}
 
 func (c *tBtcWallet) Locked() bool {
-	return false
+	return c.locked
 }
 
 func (c *tBtcWallet) SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeyScope,
@@ -197,7 +197,7 @@ func (c *tBtcWallet) SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeySc
 }
 
 func (c *tBtcWallet) HaveAddress(a btcutil.Address) (bool, error) {
-	return false, nil
+	return c.ownsAddress, nil
 }
 
 func (c *tBtcWallet) Stop() {}

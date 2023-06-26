@@ -716,10 +716,6 @@ func (w *spvWallet) externalAddress() (btcutil.Address, error) {
 	return w.wallet.NewAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
-func (w *spvWallet) refundAddress() (btcutil.Address, error) {
-	return w.externalAddress()
-}
-
 // signTx attempts to have the wallet sign the transaction inputs.
 func (w *spvWallet) signTx(tx *wire.MsgTx) (*wire.MsgTx, error) {
 	// Can't use btcwallet.Wallet.SignTransaction, because it doesn't work for
