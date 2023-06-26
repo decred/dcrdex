@@ -98,6 +98,21 @@ func (c *tBtcWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wire.
 func (c *tBtcWallet) ResetLockedOutpoints() {}
 
 func (c *tBtcWallet) LockOutpoint(op wire.OutPoint) {
+	if c.lockedCoins != nil {
+		// check if already locked
+		for _, l := range c.lockedCoins {
+			if l.TxID == op.Hash.String() && l.Vout == op.Index {
+				return
+			}
+		}
+
+		c.lockedCoins = append(c.lockedCoins, &RPCOutpoint{
+			TxID: op.Hash.String(),
+			Vout: op.Index,
+		})
+		return
+	}
+
 	c.lockedCoins = []*RPCOutpoint{{
 		TxID: op.Hash.String(),
 		Vout: op.Index,

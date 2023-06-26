@@ -146,6 +146,13 @@ type tradeForm struct {
 	srvForm *core.TradeForm
 }
 
+// multiTradeForm combines the application password and the user's trade
+// details.
+type multiTradeForm struct {
+	appPass encode.PassBytes
+	srvForm *core.MultiTradeForm
+}
+
 // cancelForm is information necessary to cancel a trade.
 type cancelForm struct {
 	orderID dex.Bytes
@@ -575,6 +582,62 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 		},
 	}
 	return req, nil
+}
+
+func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{7}); err != nil {
+		return nil, err
+	}
+
+	sell, err := checkBoolArg(params.Args[1], "sell")
+	if err != nil {
+		return nil, err
+	}
+
+	base, err := checkUIntArg(params.Args[2], "base", 32)
+	if err != nil {
+		return nil, err
+	}
+
+	quote, err := checkUIntArg(params.Args[3], "quote", 32)
+	if err != nil {
+		return nil, err
+	}
+
+	maxLock, err := checkUIntArg(params.Args[4], "maxLock", 64)
+	if err != nil {
+		return nil, err
+	}
+
+	var p [][2]uint64
+	if err := json.Unmarshal([]byte(params.Args[5]), &p); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal placements: %v", err)
+	}
+	placements := make([]*core.QtyRate, 0, len(p))
+	for _, placement := range p {
+		placements = append(placements, &core.QtyRate{
+			Qty:  placement[0],
+			Rate: placement[1],
+		})
+	}
+
+	options, err := checkMapArg(params.Args[6], "options")
+	if err != nil {
+		return nil, err
+	}
+
+	return &multiTradeForm{
+		appPass: params.PWArgs[0],
+		srvForm: &core.MultiTradeForm{
+			Host:       params.Args[0],
+			Sell:       sell,
+			Base:       uint32(base),
+			Quote:      uint32(quote),
+			Placements: placements,
+			Options:    options,
+			MaxLock:    maxLock,
+		},
+	}, nil
 }
 
 func parseCancelArgs(params *RawParams) (*cancelForm, error) {
