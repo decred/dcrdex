@@ -4,13 +4,7 @@
 package dash
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -27,7 +21,6 @@ const (
 	minNetworkVersion       = 190100 // Dash v19.1.0, proto: 70227
 	walletTypeRPC           = "dashdRPC"
 	defaultRedeemConfTarget = 2
-	mainnetFeeStatsAPI      = "https://api.blockchair.com/dash/stats"
 )
 
 var (
@@ -180,39 +173,4 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)
-}
-
-type blockchairData struct {
-	SuggestedTxFee uint64 `json:"suggested_transaction_fee_per_byte_sat"`
-}
-type blockchairStatsResponse struct {
-	Data blockchairData `json:"data"`
-}
-
-// fetchExternalFee calls https://api.blockchair.com/dash/stats endpoint and
-// returns 'suggested_transaction_fee_per_byte_sat' for mainnet.
-func fetchExternalFee(ctx context.Context, net dex.Network) (uint64, error) {
-	if net != dex.Mainnet {
-		return 0, errors.New("mainnet endpoint only")
-	}
-	// timed call
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, mainnetFeeStatsAPI, nil)
-	if err != nil {
-		return 0, err
-	}
-	httpResponse, err := http.DefaultClient.Do(r)
-	if err != nil {
-		return 0, err
-	}
-	var resp blockchairStatsResponse
-	reader := io.LimitReader(httpResponse.Body, 1<<19)
-	err = json.NewDecoder(reader).Decode(&resp)
-	if err != nil {
-		return 0, err
-	}
-	httpResponse.Body.Close()
-
-	return resp.Data.SuggestedTxFee, nil
 }

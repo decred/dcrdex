@@ -2,7 +2,7 @@
 
 package dash
 
-// Regnet tests expect a Dash test harness to be running.
+// Regtest livetest expects a Dash test harness to be running.
 //
 // Simnet harness info:
 // ====================
@@ -51,6 +51,7 @@ var (
 	}
 )
 
+// Livetest
 func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
 		NewWallet: NewWallet,
@@ -68,11 +69,15 @@ func TestWallet(t *testing.T) {
 	})
 }
 
-// Tests mainnet externally and that testnet and simnet are not supported
-func TestFetchExternalFee(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+// External Fee: Tests that testnet, regnet and simnet are not supported
+func TestFetchExternalFeeNotMainnet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
 	defer cancel()
-	_, err := fetchExternalFee(ctx, dex.Regtest)
+	_, err := fetchExternalFee(ctx, dex.Simnet)
+	if err == nil {
+		t.Fatal(errors.New("simnet should error"))
+	}
+	_, err = fetchExternalFee(ctx, dex.Regtest)
 	if err == nil {
 		t.Fatal(errors.New("regtest should error"))
 	}
@@ -80,10 +85,32 @@ func TestFetchExternalFee(t *testing.T) {
 	if err == nil {
 		t.Fatal(errors.New("testnet should error"))
 	}
+}
+
+// External Fee: Tests mainnet via cache
+func TestFetchExternalFeeUseCache(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
 	var rate uint64
-	rate, err = fetchExternalFee(ctx, dex.Mainnet)
+	rate, err := fetchExternalFee(ctx, dex.Mainnet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("External fee rate fetched:: %d sat/B\n", rate)
+	fmt.Printf("External fee rate fetched from cache:: %d sat/B\n", rate)
+}
+
+// External Fee: Tests mainnet by accessing external endpoint
+func TestFetchExternalFeeUseEndpoint(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	var rate uint64
+
+	t.Log("waiting for 5 seconds before accessing stats endpoint")
+	time.Sleep(5 * time.Second)
+
+	rate, err := fetchExternalFee(ctx, dex.Mainnet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("External fee rate fetched from remote endpoint:: %d sat/B\n", rate)
 }
