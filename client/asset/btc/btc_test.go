@@ -5906,18 +5906,7 @@ func TestAddressRecycling(t *testing.T) {
 		for addr := range w.recycledAddrs {
 			memList = append(memList, addr)
 		}
-		compareAddrLists(tag+":mem", expAddrs, memList)
-
-		b, _ := os.ReadFile(w.recyclePath)
-		var fileAddrs []string
-		for _, addr := range strings.Split(string(b), "\n") {
-			if addr == "" {
-				continue
-			}
-			fileAddrs = append(fileAddrs, addr)
-		}
-
-		compareAddrLists(tag+":file", expAddrs, fileAddrs)
+		compareAddrLists(tag, expAddrs, memList)
 	}
 
 	addr1, _ := btcutil.NewAddressPubKeyHash(encode.RandomBytes(20), &chaincfg.MainNetParams)
@@ -5962,8 +5951,21 @@ func TestAddressRecycling(t *testing.T) {
 
 	// Check address loading.
 	w.ReturnRefundContracts(contracts)
+
+	w.writeRecycledAddrsToFile()
+	b, _ := os.ReadFile(w.recyclePath)
+	var fileAddrs []string
+	for _, addr := range strings.Split(string(b), "\n") {
+		if addr == "" {
+			continue
+		}
+		fileAddrs = append(fileAddrs, addr)
+	}
+	compareAddrLists("filecheck", []string{addr1.String(), addr2.String()}, fileAddrs)
+
 	otherW, _ := newUnconnectedWallet(w.cloneParams, &WalletConfig{})
 	if len(otherW.recycledAddrs) != 2 {
 		t.Fatalf("newly opened wallet didn't load recycled addrs")
 	}
+
 }

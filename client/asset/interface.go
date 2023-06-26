@@ -632,7 +632,7 @@ type AddressReturner interface {
 	// ReturnRefundContracts should be called with the Receipt.Contract() data
 	// for any swaps that will not be refunded.
 	ReturnRefundContracts(contracts [][]byte)
-	// ReturnRedemptionAddress acceptsa  Wallet.RedemptionAddress() if the
+	// ReturnRedemptionAddress accepts a  Wallet.RedemptionAddress() if the
 	// address will not be used.
 	ReturnRedemptionAddress(addr string)
 }

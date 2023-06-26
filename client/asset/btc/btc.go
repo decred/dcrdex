@@ -1469,6 +1469,13 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	btc.tipMtx.Unlock()
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		btc.writeRecycledAddrsToFile()
+	}()
+
 	return &wg, nil
 }
 
@@ -4812,7 +4819,6 @@ func (btc *baseWallet) RedemptionAddress() (string, error) {
 func (btc *baseWallet) recyclableAddress() (string, error) {
 	var recycledAddr string
 	btc.recycledAddrMtx.Lock()
-	nRecycles := len(btc.recycledAddrs)
 	for addr := range btc.recycledAddrs {
 		if owns, err := btc.OwnsDepositAddress(addr); owns {
 			delete(btc.recycledAddrs, addr)
@@ -4825,9 +4831,6 @@ func (btc *baseWallet) recyclableAddress() (string, error) {
 		} else { // we don't own it
 			delete(btc.recycledAddrs, addr)
 		}
-	}
-	if len(btc.recycledAddrs) != nRecycles {
-		btc.writeRecycledAddrsToFile()
 	}
 	btc.recycledAddrMtx.Unlock()
 	if recycledAddr != "" {
@@ -4859,7 +4862,7 @@ func (btc *baseWallet) ReturnRefundContracts(contracts [][]byte) {
 	}
 }
 
-// ReturnRedemptionAddress acceptsa  Wallet.RedemptionAddress() if the address
+// ReturnRedemptionAddress accepts a Wallet.RedemptionAddress() if the address
 // will not be used.
 func (btc *baseWallet) ReturnRedemptionAddress(addr string) {
 	btc.returnAddresses([]string{addr})
@@ -4868,16 +4871,12 @@ func (btc *baseWallet) ReturnRedemptionAddress(addr string) {
 func (btc *baseWallet) returnAddresses(addrs []string) {
 	btc.recycledAddrMtx.Lock()
 	defer btc.recycledAddrMtx.Unlock()
-	nRecycles := len(btc.recycledAddrs)
 	for _, addr := range addrs {
 		if _, exists := btc.recycledAddrs[addr]; exists {
 			btc.log.Errorf("Returned address %q was already indexed", addr)
 			continue
 		}
 		btc.recycledAddrs[addr] = struct{}{}
-	}
-	if len(btc.recycledAddrs) != nRecycles {
-		btc.writeRecycledAddrsToFile()
 	}
 }
 
@@ -6582,14 +6581,16 @@ func (btc *baseWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Red
 	}, nil
 }
 
-// writeRecycledAddrsToFile should be called with the recycledAddrMtx locked.
+// writeRecycledAddrsToFile writes the recycled address cache to file.
 func (btc *baseWallet) writeRecycledAddrsToFile() {
+	btc.recycledAddrMtx.Lock()
 	addrs := make([]string, 0, len(btc.recycledAddrs))
 	for addr := range btc.recycledAddrs {
 		addrs = append(addrs, addr)
 	}
+	btc.recycledAddrMtx.Unlock()
 	contents := []byte(strings.Join(addrs, "\n"))
-	if err := os.WriteFile(btc.recyclePath, contents, 0644); err != nil {
+	if err := os.WriteFile(btc.recyclePath, contents, 0600); err != nil {
 		btc.log.Errorf("Error writing recycled address file: %v", err)
 	}
 }
