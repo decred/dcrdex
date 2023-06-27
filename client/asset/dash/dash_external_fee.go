@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package dash
 
 import (
@@ -6,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -13,53 +17,67 @@ import (
 
 // See Also: https://blockchair.com/api/docs
 
+const (
+	minCacheTime       = 3 * time.Second
+	mainnetFeeStatsAPI = "https://api.blockchair.com/dash/stats"
+)
+
+var (
+	statsCache = blockchairStatsCache{
+		sync.Mutex{},
+		time.Now(),
+		blockchairStatsData{uint64(1)}}
+)
+
 type blockchairStatsData struct {
 	SuggestedTxFee uint64 `json:"suggested_transaction_fee_per_byte_sat"`
 }
 
 // blockchairStatsCache caches statistics from a mainnet statistics endpoint
 type blockchairStatsCache struct {
+	sync.Mutex
 	// Time of the last successful read from the statistics endpoint
 	lastGoodRead time.Time
 	// Statistics from the endpoint
 	data blockchairStatsData
 }
 
-func newBlockchairStatsCache(time time.Time, stats blockchairStatsData) blockchairStatsCache {
-	return blockchairStatsCache{time, stats}
+func (cache *blockchairStatsCache) update(readTime time.Time, stats blockchairStatsData) {
+	cache.Lock()
+	cache.lastGoodRead = readTime
+	cache.data = stats
+	cache.Unlock()
 }
 
-func (b *blockchairStatsCache) update(readTime time.Time, stats blockchairStatsData) {
-	b.lastGoodRead = readTime
-	b.data = stats
+func (cache *blockchairStatsCache) value() *blockchairStatsData {
+	cache.Lock()
+	defer cache.Unlock()
+	return &cache.data
 }
 
-func (b *blockchairStatsCache) useCache() bool {
-	elapsed := time.Now().UnixMilli() - b.lastGoodRead.UnixMilli()
-	return elapsed < int64(minCacheTime)
+func (cache *blockchairStatsCache) timestamp() *time.Time {
+	cache.Lock()
+	defer cache.Unlock()
+	return &cache.lastGoodRead
+}
+
+func (cache *blockchairStatsCache) useCache() bool {
+	lastGoodReadTime := cache.timestamp()
+	return lastGoodReadTime.Add(minCacheTime).After(time.Now())
 }
 
 type blockchairStatsResponse struct {
 	Data blockchairStatsData `json:"data"`
 }
 
-const (
-	mainnetFeeStatsAPI = "https://api.blockchair.com/dash/stats"
-	minCacheTime       = 3 * time.Second / time.Millisecond // 3s
-)
-
-var (
-	statsCache = newBlockchairStatsCache(time.Now(), blockchairStatsData{uint64(1)})
-)
-
-// fetchExternalFee calls mainnetFeeStatsAPI endpoint and returns stats including
-// 'suggested_transaction_fee_per_byte_sat' for mainnet.
+// fetchExternalFee calls mainnetFeeStatsAPI endpoint and returns Dash
+// blockchain stats
 func fetchExternalFee(ctx context.Context, net dex.Network) (uint64, error) {
 	if net != dex.Mainnet {
 		return 0, errors.New("mainnet endpoint only")
 	}
 	if statsCache.useCache() {
-		return statsCache.data.SuggestedTxFee, nil
+		return statsCache.value().SuggestedTxFee, nil
 	}
 
 	// timed http call

@@ -275,7 +275,7 @@ sleep 2
 # https://docs.dash.org/projects/core/en/stable/docs/api/remote-procedure-calls-wallet.html#upgradetohd
 
 ################################################################################
-# Create the alpha wallet
+# Create unnamed wallet on node alpha
 ################################################################################
 echo "Creating alpha wallet - encrypted HD"
 
@@ -286,7 +286,7 @@ tmux send-keys -t $SESSION:2 "./alpha  upgradetohd \"${ALPHA_SEED_MNEMONIC}\" \"
 sleep 3
 
 ################################################################################
-# Create the gamma wallet
+# Create unnamed wallet on node beta
 ################################################################################
 echo "Creating beta wallet - encrypted HD"
 
@@ -329,7 +329,7 @@ tmux send-keys -t $SESSION:2 "./alpha generatetoaddress 100 ${ALPHA_MINING_ADDR}
 sleep 1
 
 ################################################################################
-# Send gamma and delta some coin
+# Send beta, gamma and delta some coin
 ################################################################################
 echo "Funding beta, gamma & delta wallets from alpha's block subsidy. 500 tDASH/block."
 

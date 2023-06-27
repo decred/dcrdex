@@ -54,7 +54,7 @@ var (
 // Livetest
 func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
-		NewWallet: NewWallet,
+		NewWallet: newWallet,
 		LotSize:   tLotSize,
 		Asset:     tDASH,
 		SplitTx:   true,
@@ -96,7 +96,7 @@ func TestFetchExternalFeeUseCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("External fee rate fetched from cache:: %d sat/B\n", rate)
+	fmt.Printf("External fee rate fetched from cache: %d sat/B\n", rate)
 }
 
 // External Fee: Tests mainnet by accessing external endpoint
@@ -112,5 +112,5 @@ func TestFetchExternalFeeUseEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("External fee rate fetched from remote endpoint:: %d sat/B\n", rate)
+	fmt.Printf("External fee rate fetched from remote endpoint: %d sat/B\n", rate)
 }

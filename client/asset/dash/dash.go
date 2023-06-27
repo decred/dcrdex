@@ -87,7 +87,7 @@ type Driver struct{}
 
 // Open creates the Dash exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	return NewWallet(cfg, logger, network)
+	return newWallet(cfg, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Dash
@@ -101,11 +101,8 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
-// NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. The wallet will shut down when the provided context is
-// canceled. The configPath can be an empty string, in which case the standard
-// system location of the dashd config file is assumed.
-func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
+// newWallet constructs a new client wallet for Dash based on the WalletDefinition.Type
+func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
