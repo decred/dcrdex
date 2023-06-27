@@ -800,15 +800,6 @@ func (ew *electrumWallet) changeAddress() (btcutil.Address, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) refundAddress() (btcutil.Address, error) {
-	addr, err := ew.wallet.GetUnusedAddress(ew.ctx)
-	if err != nil {
-		return nil, err
-	}
-	return ew.decodeAddr(addr, ew.chainParams)
-}
-
-// part of btc.Wallet interface
 func (ew *electrumWallet) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	// If the wallet's signtransaction RPC ever has a problem with the PSBT, we
 	// could attempt to sign the transaction ourselves by pulling the inputs'

@@ -424,6 +424,9 @@ type OrderMetaData struct {
 	// RedemptionFeesPaid is the sum of the actual fees paid for all
 	// redemptions.
 	RedemptionFeesPaid uint64
+	// FundingFeesPaid is the fees paid when funding the order. This is > 0
+	// when funding the order required a split tx.
+	FundingFeesPaid uint64
 
 	// EpochDur is the epoch duration for the market at the time the order was
 	// submitted. When considered with the order's ServerTime, we also know the

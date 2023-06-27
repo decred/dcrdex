@@ -2056,9 +2056,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(redemptionConfirms) > 0 {
-		for _, match := range redemptionConfirms {
-			t.confirmRedemption(match)
-		}
+		t.confirmRedemptions(redemptionConfirms)
 	}
 
 	for _, match := range dynamicSwapFeeConfirms {
@@ -2470,6 +2468,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			proof.MakerSwap = coinID
 			match.Status = order.MakerSwapCast
 		}
+
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
 				match, coinIDString(fromWallet.AssetID, coinID), err)
@@ -2847,45 +2846,63 @@ func (t *trackedTrade) redeemFee() uint64 {
 	return feeSuggestion
 }
 
+// confirmRedemption attempts to confirm the redemptions for each match, and
+// then return any refund addresses that we won't be using.
+func (t *trackedTrade) confirmRedemptions(matches []*matchTracker) {
+	var refundContracts [][]byte
+	for _, m := range matches {
+		if confirmed, err := t.confirmRedemption(m); err != nil {
+			t.dc.log.Errorf("Unable to confirm redemption: %v", err)
+		} else if confirmed {
+			refundContracts = append(refundContracts, m.MetaData.Proof.ContractData)
+		}
+	}
+	if len(refundContracts) == 0 {
+		return
+	}
+	if ar, is := t.wallets.fromWallet.Wallet.(asset.AddressReturner); is {
+		ar.ReturnRefundContracts(refundContracts)
+	}
+}
+
 // confirmRedemption checks if the user's redemption has been confirmed,
 // and if so, updates the match's status to MatchConfirmed.
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (t *trackedTrade) confirmRedemption(match *matchTracker) {
+func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 	// In some cases the wallet will need to send a new redeem transaction.
 	toWallet := t.wallets.toWallet
 
 	if toWallet.peerCount < 1 {
-		t.dc.log.Errorf("Unable to confirm redemption. %s wallet has no peers.", unbip(toWallet.AssetID))
-		return
+		return false, fmt.Errorf("%s wallet has no peers", unbip(toWallet.AssetID))
 	}
 
 	if !toWallet.synchronized() {
-		t.dc.log.Errorf("Unable to confirm redemption. %s still syncing.", unbip(toWallet.AssetID))
-		return
+		return false, fmt.Errorf("%s still syncing", unbip(toWallet.AssetID))
 	}
 
 	didUnlock, err := toWallet.refreshUnlock()
 	if err != nil { // Just log it and try anyway.
-		t.dc.log.Errorf("refreshUnlock error checking redeem %s: %v", t.wallets.toWallet.Symbol, err)
+		t.dc.log.Errorf("refreshUnlock error checking redeem %s: %v", toWallet.Symbol, err)
 	}
 	if didUnlock {
-		t.dc.log.Warnf("Unexpected unlock needed for the %s wallet to check a redemption", t.wallets.toWallet.Symbol)
+		t.dc.log.Warnf("Unexpected unlock needed for the %s wallet to check a redemption", toWallet.Symbol)
 	}
 
+	proof := &match.MetaData.Proof
 	var redeemCoinID order.CoinID
 	if match.Side == order.Maker {
-		redeemCoinID = match.MetaData.Proof.MakerRedeem
+		redeemCoinID = proof.MakerRedeem
 	} else {
-		redeemCoinID = match.MetaData.Proof.TakerRedeem
+		redeemCoinID = proof.TakerRedeem
 	}
 
 	match.confirmRedemptionNumTries++
 
 	redemptionStatus, err := toWallet.Wallet.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
 		Spends: match.counterSwap,
-		Secret: match.MetaData.Proof.Secret,
+		Secret: proof.Secret,
 	}, t.redeemFee())
 	if errors.Is(asset.ErrSwapRefunded, err) {
 		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), t.token())
@@ -2896,21 +2913,20 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 		if err != nil {
 			t.dc.log.Errorf("Failed to update match in db %v", err)
 		}
-		return
+		return false, errors.New("swap was already refunded by the counterparty")
 	} else if err != nil {
-		t.dc.log.Errorf("Error confirming redemption for coin %v. Already tried %d times, will retry later: %v.",
-			redeemCoinID, match.confirmRedemptionNumTries, err)
 		match.delayTicks(time.Minute * 15)
-		return
+		return false, fmt.Errorf("error confirming redemption for coin %v. already tried %d times, will retry later: %v",
+			redeemCoinID, match.confirmRedemptionNumTries, err)
 	}
 
 	var redemptionResubmitted, redemptionConfirmed bool
 	if !bytes.Equal(redeemCoinID, redemptionStatus.CoinID) {
 		redemptionResubmitted = true
 		if match.Side == order.Maker {
-			match.MetaData.Proof.MakerRedeem = order.CoinID(redemptionStatus.CoinID)
+			proof.MakerRedeem = order.CoinID(redemptionStatus.CoinID)
 		} else {
-			match.MetaData.Proof.TakerRedeem = order.CoinID(redemptionStatus.CoinID)
+			proof.TakerRedeem = order.CoinID(redemptionStatus.CoinID)
 		}
 	}
 
@@ -2945,6 +2961,7 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 		note := newMatchNote(TopicConfirms, "", "", db.Data, t, match)
 		t.notify(note)
 	}
+	return redemptionConfirmed, nil
 }
 
 // findMakersRedemption starts a goroutine to search for the redemption of
@@ -3523,6 +3540,9 @@ func (t *trackedTrade) returnCoins() {
 			t.dc.log.Warnf("Unable to return %s funding coins: %v", t.wallets.fromWallet.Symbol, err)
 		} else {
 			t.coinsLocked = false
+		}
+		if returner, is := t.wallets.toWallet.Wallet.(asset.AddressReturner); is {
+			returner.ReturnRedemptionAddress(t.Trade().Address)
 		}
 	} else if t.change != nil && t.changeLocked {
 		err := t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})

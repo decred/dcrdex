@@ -98,6 +98,21 @@ func (c *tBtcWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wire.
 func (c *tBtcWallet) ResetLockedOutpoints() {}
 
 func (c *tBtcWallet) LockOutpoint(op wire.OutPoint) {
+	if c.lockedCoins != nil {
+		// check if already locked
+		for _, l := range c.lockedCoins {
+			if l.TxID == op.Hash.String() && l.Vout == op.Index {
+				return
+			}
+		}
+
+		c.lockedCoins = append(c.lockedCoins, &RPCOutpoint{
+			TxID: op.Hash.String(),
+			Vout: op.Index,
+		})
+		return
+	}
+
 	c.lockedCoins = []*RPCOutpoint{{
 		TxID: op.Hash.String(),
 		Vout: op.Index,
@@ -163,7 +178,7 @@ func (c *tBtcWallet) Unlock(passphrase []byte, lock <-chan time.Time) error {
 func (c *tBtcWallet) Lock() {}
 
 func (c *tBtcWallet) Locked() bool {
-	return false
+	return c.locked
 }
 
 func (c *tBtcWallet) SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeyScope,
@@ -182,7 +197,7 @@ func (c *tBtcWallet) SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeySc
 }
 
 func (c *tBtcWallet) HaveAddress(a btcutil.Address) (bool, error) {
-	return false, nil
+	return c.ownsAddress, nil
 }
 
 func (c *tBtcWallet) Stop() {}

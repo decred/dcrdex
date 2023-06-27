@@ -1255,7 +1255,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	}
 
 	// Test fund order with less than available funds
-	coins1, redeemScripts1, err := w.FundOrder(&order)
+	coins1, redeemScripts1, _, err := w.FundOrder(&order)
 	// NOTE: the following should NOT use dex.Asset.SwapSize, instead w.gases(ver) and the swap count and fee rate
 	expectedOrderFees := fromAsset.SwapSize * order.MaxFeeRate * order.MaxSwapCount
 	expectedFees := expectedOrderFees
@@ -1276,7 +1276,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	if assetID == BipID {
 		order.Value -= expectedOrderFees
 	}
-	coins, redeemScripts, err := w.FundOrder(&order)
+	coins, redeemScripts, _, err := w.FundOrder(&order)
 	checkFundOrderResult(coins, redeemScripts, err, fundOrderTest{
 		testName: "not enough",
 		wantErr:  true,
@@ -1289,7 +1289,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	if assetID == BipID {
 		expVal += expectedFees
 	}
-	coins2, redeemScripts2, err := w.FundOrder(&order)
+	coins2, redeemScripts2, _, err := w.FundOrder(&order)
 	checkFundOrderResult(coins2, redeemScripts2, err, fundOrderTest{
 		testName:    "just enough",
 		coinValue:   expVal,
@@ -1309,7 +1309,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	if assetID == BipID {
 		order.Value -= expectedOrderFees
 	}
-	_, _, err = w.FundOrder(&order)
+	_, _, _, err = w.FundOrder(&order)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1330,7 +1330,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	checkBalance(eth, walletBalanceGwei, 0, "returned correct amount")
 
 	node.balErr = errors.New("")
-	_, _, err = w.FundOrder(&order)
+	_, _, _, err = w.FundOrder(&order)
 	if err == nil {
 		t.Fatalf("balance error should cause error but did not")
 	}
@@ -1340,7 +1340,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	if assetID != BipID {
 		eth.approvalCache = make(map[uint32]bool)
 		node.tokenContractor.allow = big.NewInt(0)
-		_, _, err = w.FundOrder(&order)
+		_, _, _, err = w.FundOrder(&order)
 		if err == nil {
 			t.Fatalf("no allowance should cause error but did not")
 		}
@@ -1350,7 +1350,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	// Test eth wallet gas fee limit > server MaxFeeRate causes error
 	tmpGasFeeLimit := eth.gasFeeLimit()
 	eth.gasFeeLimitV = order.MaxFeeRate - 1
-	_, _, err = w.FundOrder(&order)
+	_, _, _, err = w.FundOrder(&order)
 	if err == nil {
 		t.Fatalf("eth wallet gas fee limit > server MaxFeeRate should cause error")
 	}
