@@ -150,7 +150,7 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		NonSegwitSigner:          nil,
 		ConnectFunc:              nil,
 		FeeEstimator:             nil, // estimatesmartfee + getblockstats
-		ExternalFeeEstimator:     fetchExternalFee,
+		ExternalFeeEstimator:     nil,
 		OmitAddressType:          true,  // getnewaddress has No address-type arg
 		LegacySignTxRPC:          false, // Has signrawtransactionwithwallet RPC
 		BooleanGetBlockRPC:       false, // Use 0/1 for verbose param
