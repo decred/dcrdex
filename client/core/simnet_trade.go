@@ -1713,8 +1713,8 @@ func dgbWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(dgb.BipID, node, WTCoreClone)
 }
 
-func firoWallet(node string) (*tWallet, error) {
-	return btcCloneWallet(firo.BipID, node, WTCoreClone)
+func firoWallet(wt SimWalletType, node string) (*tWallet, error) {
+	return btcCloneWallet(firo.BipID, node, wt)
 }
 
 func zecWallet(node string) (*tWallet, error) {
@@ -1744,7 +1744,7 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 		case dgb.BipID:
 			tw, err = dgbWallet(node)
 		case firo.BipID:
-			tw, err = firoWallet(node)
+			tw, err = firoWallet(wt, node)
 		case zec.BipID:
 			tw, err = zecWallet(node)
 		default:
