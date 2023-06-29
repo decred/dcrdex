@@ -481,15 +481,6 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		default:
 			return nil, fmt.Errorf("invalid number of params %d", len(params))
 		}
-		_ = json.Unmarshal(params[1], &coins)
-		if string(params[0]) == "false" {
-			if c.lockedCoins != nil {
-				c.lockedCoins = append(c.lockedCoins, coins...)
-			} else {
-				c.lockedCoins = coins
-			}
-		}
-		return json.Marshal(true)
 	case methodListLockUnspent:
 		return mustMarshal(c.listLockUnspent), nil
 	case methodGetBalances:
