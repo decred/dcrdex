@@ -9,7 +9,7 @@ wallets.
 Build with server locktimes in mind.
 i.e. -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
 
-Supported assets are bch, btc, dcr, doge, dgb, eth, firo, ltc, and zec.
+Supported assets are bch, btc, dash, dcr, doge, dgb, eth, firo, ltc, and zec.
 */
 
 package main
@@ -34,6 +34,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	_ "decred.org/dcrdex/client/asset/bch"
 	_ "decred.org/dcrdex/client/asset/btc"
+	_ "decred.org/dcrdex/client/asset/dash"
 	_ "decred.org/dcrdex/client/asset/dcr"
 	_ "decred.org/dcrdex/client/asset/dgb"
 	_ "decred.org/dcrdex/client/asset/doge"
@@ -55,6 +56,7 @@ const (
 	alpha            = "alpha"
 	beta             = "beta"
 	btc              = "btc"
+	dash             = "dash"
 	dcr              = "dcr"
 	eth              = "eth"
 	firo             = "firo"
@@ -74,6 +76,7 @@ var (
 	ethID, _    = dex.BipSymbolID(eth)
 	dexttID, _  = dex.BipSymbolID(dextt)
 	ltcID, _    = dex.BipSymbolID(ltc)
+	dashID, _   = dex.BipSymbolID(dash)
 	dogeID, _   = dex.BipSymbolID(doge)
 	dgbID, _    = dex.BipSymbolID(dgb)
 	firoID, _   = dex.BipSymbolID(firo)
@@ -160,7 +163,7 @@ func rpcAddr(symbol, node string) string {
 	switch symbol {
 	case dcr:
 		key = "rpclisten"
-	case btc, ltc, bch, zec, doge:
+	case btc, ltc, bch, zec, doge, firo, dash:
 		key = "rpcport"
 	case eth, dextt:
 		key = "ListenAddr"
@@ -473,7 +476,7 @@ func run() error {
 		switch symbol {
 		case btc, ltc, dgb:
 			args = []string{"getnewaddress", "''", "bech32"}
-		case doge, bch, firo, zec:
+		case dash, doge, bch, firo, zec:
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
@@ -504,7 +507,7 @@ func run() error {
 
 	unlockWallets := func(symbol string) error {
 		switch symbol {
-		case btc, ltc, doge, firo, bch, dgb:
+		case btc, ltc, dash, doge, firo, bch, dgb:
 			<-harnessCtl(ctx, symbol, "./alpha", "walletpassphrase", "abc", "4294967295")
 			<-harnessCtl(ctx, symbol, "./beta", "walletpassphrase", "abc", "4294967295")
 		case dcr:
@@ -604,7 +607,7 @@ func run() error {
 			case dcrID:
 				walletAddr = pair.cfg["rpclisten"]
 				pair.cfg["rpclisten"] = newAddr
-			case btcID, ltcID, dogeID, firoID, bchID, dgbID:
+			case btcID, ltcID, dashID, dogeID, firoID, bchID, dgbID:
 				oldPort := pair.cfg["rpcport"]
 				walletAddr = "127.0.0.1:" + oldPort
 				pair.cfg["rpcport"] = port

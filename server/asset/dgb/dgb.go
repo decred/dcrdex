@@ -67,8 +67,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// Designate the clone ports. These will be overwritten by any explicit
-	// settings in the configuration file.
+	// Designate the clone ports.
 	ports := dexbtc.NetPorts{
 		Mainnet: "14022",
 		Testnet: "14023",

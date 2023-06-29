@@ -71,6 +71,9 @@ ZEC_ON=$?
 ~/dextest/dgb/harness-ctl/alpha getblockchaininfo &> /dev/null
 DGB_ON=$?
 
+~/dextest/dash/harness-ctl/alpha getblockchaininfo &> /dev/null
+DASH_ON=$?
+
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
 ETH_ON=$?
 
@@ -197,6 +200,20 @@ EOF
 else echo "WARNING: Digibyte is not running. Configuring dcrdex markets without DGB."
 fi
 
+if [ $DASH_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "DASH_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+else echo "WARNING: Dash is not running. Configuring dcrdex markets without DASH."
+fi
+
 cat << EOF >> "./markets.json"
     }
     ],
@@ -319,6 +336,20 @@ if [ $ZEC_ON -eq 0 ]; then
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf",
             "bondAmt": 40000000,
+            "bondConfs": 1
+EOF
+fi
+
+if [ $DASH_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "DASH_simnet": {
+            "bip44symbol": "dash",
+            "network": "simnet",
+            "maxFeeRate": 10,
+            "swapConf": 2,
+            "configPath": "${TEST_ROOT}/dash/alpha/alpha.conf",
+            "bondAmt": 10000000,
             "bondConfs": 1
 EOF
 fi
