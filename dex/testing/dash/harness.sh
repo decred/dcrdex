@@ -223,14 +223,8 @@ chmod +x "./reorg"
 
 cat > "./new-wallet" <<EOF
 #!/usr/bin/env bash
-echo "making a new named non-hd wallet on beta node: name="\$1" password="\$2""
-if [ "\$1" == "" ]
-then
-  echo "empty name"
-  echo "usage: new-wallet \"wallet name\"  \"[optional] wallet password for an encrypted wallet\""
-else
-  ./beta createwallet "\$1" false false "\$2"
-fi
+echo "making a new named non-hd wallet on "\$1" node: name="\$2" password=none"
+"./\$1" createwallet "\$2" false false
 EOF
 chmod +x "./new-wallet"
 

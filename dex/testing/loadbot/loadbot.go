@@ -163,7 +163,7 @@ func rpcAddr(symbol, node string) string {
 	switch symbol {
 	case dcr:
 		key = "rpclisten"
-	case btc, ltc, bch, zec, doge:
+	case btc, ltc, bch, zec, doge, firo, dash:
 		key = "rpcport"
 	case eth, dextt:
 		key = "ListenAddr"
