@@ -6155,6 +6155,9 @@ func (btc *baseWallet) MaxFundingFees(numTrades uint32, options map[string]strin
 		if split, ok := options[splitKey]; ok {
 			useSplit, _ = strconv.ParseBool(split)
 		}
+		if split, ok := options[multiSplitKey]; ok {
+			useSplit, _ = strconv.ParseBool(split)
+		}
 	}
 	if !useSplit {
 		return 0
@@ -6169,7 +6172,7 @@ func (btc *baseWallet) MaxFundingFees(numTrades uint32, options map[string]strin
 		outputSize = dexbtc.P2PKHOutputSize
 	}
 
-	const numInputs = 12 // // plan for lots of inputs to get a safe estimate
+	const numInputs = 12 // plan for lots of inputs to get a safe estimate
 
 	txSize := dexbtc.MinimumTxOverhead + numInputs*inputSize + uint64(numTrades+1)*outputSize
 	return btc.feeRateLimit() * txSize

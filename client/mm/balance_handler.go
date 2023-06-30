@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package mm
 
 import (
@@ -26,7 +29,7 @@ type orderInfo struct {
 	order              *core.Order
 	initialFundsLocked uint64
 	lotSize            uint64
-	//initialRedeemFeesLocked will be > 0 for assets that are account lockers
+	// initialRedeemFeesLocked will be > 0 for assets that are account lockers
 	// (ETH). This means that the redeem fees will be initially locked, then
 	// the complete redeemed amount will be sent on redemption.
 	initialRedeemFeesLocked   uint64
@@ -60,13 +63,13 @@ func (o *orderInfo) finishedProcessing() bool {
 // When the balance handler is created, it will allocate the proper amount of
 // funds for each bot. Then, as the bot makes trades, the balance handler will
 // decrease and increase the bot's balances as needed.
-// Below is of how the botHandler increases and decreases a bot's balances
-// during a trade.
+// Below is a breakdown of how the botHandler increases and decreases a bot's
+// balances during a trade.
 //
 // 1. A trade is made:
 //
 //   - FromAsset:
-//     DECREASE: LockedFunds + SplitTxFees + FundingFees
+//     DECREASE: LockedFunds + FundingFees(i.e. SplitTx fees)
 //     if isAccountLocker, RefundFeesLockedFunds
 //
 //   - ToAsset:
@@ -81,9 +84,10 @@ func (o *orderInfo) finishedProcessing() bool {
 //   - ToAsset:
 //     INCREASE: if isAccountLocker, RedeemedAmount
 //     else RedeemedAmount - MaxRedeemFeesForLotsRedeemed
-//     (the redeemed amount is tracked on the core.Order, so we
+//     (the redeem fees are tracked on the core.Order, so we
 //     do not know the exact amount used for this match. The
-//     difference is handled later.)
+//     difference will be returned to the bot when all fees
+//     are confirmed.)
 //
 // 3. Match Refunded:
 //
@@ -164,6 +168,7 @@ func (b *balanceHandler) decreaseBotBalance(botID string, assetID uint32, amount
 		if bb.balances[assetID] < amount {
 			b.log.Errorf("decreaseBalance: bot %s has insufficient balance for asset %d. "+
 				"balance: %d, amount: %d", botID, assetID, bb.balances[assetID], amount)
+			bb.balances[assetID] = 0
 			return
 		}
 
@@ -214,10 +219,12 @@ func (b *balanceHandler) botBalance(botID string, assetID uint32) uint64 {
 // wrappedCoreForBot returns a coreWithSegregatedBalance for the specified bot.
 func (b *balanceHandler) wrappedCoreForBot(botID string) *coreWithSegregatedBalance {
 	return &coreWithSegregatedBalance{
+		// We embed core to avoid having to reimplement pass through methods,
+		// but also have core as a field to avoid recursions.
 		clientCore:     b.core,
+		core:           b.core,
 		balanceHandler: b,
 		botID:          botID,
-		core:           b.core,
 		log:            b.log,
 	}
 }
@@ -306,7 +313,7 @@ func (b *balanceHandler) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 //   - If the order is no longer booked, the difference between the order's
 //     quantity and the amount that was matched can be returned to the bot.
 //   - If all fees have been confirmed, the rest of the difference between
-//     the amount the at was initially locked and the amount that was used
+//     the amount that was initially locked and the amount that was used
 //     can be returned.
 func (b *balanceHandler) handleOrderUpdate(o *core.Order) {
 	orderInfo := b.getOrderInfo(o.ID)
@@ -823,14 +830,13 @@ func (c *coreWithSegregatedBalance) AssetBalance(assetID uint32) (*core.WalletBa
 
 func (c *coreWithSegregatedBalance) sufficientBalanceForTrade(host string, base, quote uint32, sell bool, rate, qty uint64, options map[string]string) (bool, error) {
 	var maxQty uint64
+	var err error
 	if sell {
-		var err error
 		maxQty, err = c.maxSellQty(host, base, quote, options)
 		if err != nil {
 			return false, err
 		}
 	} else {
-		var err error
 		maxQty, err = c.maxBuyQty(host, base, quote, rate, options)
 		if err != nil {
 			return false, err
