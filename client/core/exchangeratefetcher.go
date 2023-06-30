@@ -64,9 +64,9 @@ var (
 
 // fiatRateFetchers is the list of all supported fiat rate fetchers.
 var fiatRateFetchers = map[string]rateFetcher{
-	coinpaprika:   fetchCoinpaprikaRates,
-	dcrdataDotOrg: fetchDcrdataRates,
-	messari:       fetchMessariRates,
+	coinpaprika:   FetchCoinpaprikaRates,
+	dcrdataDotOrg: FetchDcrdataRates,
+	messari:       FetchMessariRates,
 }
 
 // fiatRateInfo holds the fiat rate and the last update time for an
@@ -137,10 +137,10 @@ func newCommonRateSource(fetcher rateFetcher) *commonRateSource {
 	}
 }
 
-// fetchCoinpaprikaRates retrieves and parses fiat rate data from the
+// FetchCoinpaprikaRates retrieves and parses fiat rate data from the
 // Coinpaprika API. See https://api.coinpaprika.com/#operation/getTickersById
 // for sample request and response information.
-func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
+func FetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
 	fiatRates := make(map[uint32]float64)
 	fetchRate := func(sa *SupportedAsset) {
 		assetID := sa.ID
@@ -190,9 +190,9 @@ func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint3
 	return fiatRates
 }
 
-// fetchDcrdataRates retrieves and parses fiat rate data from dcrdata
+// FetchDcrdataRates retrieves and parses fiat rate data from dcrdata
 // exchange rate API.
-func fetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
+func FetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
 	assetBTC := assets[btcBipID]
 	assetDCR := assets[dcrBipID]
 	noBTCAsset := assetBTC == nil || assetBTC.Wallet == nil
@@ -222,10 +222,10 @@ func fetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 	return fiatRates
 }
 
-// fetchMessariRates retrieves and parses fiat rate data from the Messari API.
+// FetchMessariRates retrieves and parses fiat rate data from the Messari API.
 // See https://messari.io/api/docs#operation/Get%20Asset%20Market%20Data for
 // sample request and response information.
-func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
+func FetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
 	fiatRates := make(map[uint32]float64)
 	fetchRate := func(sa *SupportedAsset) {
 		assetID := sa.ID

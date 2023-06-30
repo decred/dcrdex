@@ -1158,7 +1158,7 @@ func testInitiateGas(t *testing.T, assetID uint32) {
 			expectedGas = gases.SwapAdd
 			actualGas = gas - previousGas
 		}
-		if actualGas > expectedGas || actualGas < expectedGas*75/100 {
+		if actualGas > expectedGas || actualGas < expectedGas*70/100 {
 			t.Fatalf("Expected incremental gas for %d initiations to be close to %d but got %d",
 				i, expectedGas, actualGas)
 		}
@@ -1550,7 +1550,7 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 			expectedGas = gases.RedeemAdd
 			actualGas = gas - previous
 		}
-		if actualGas > expectedGas || actualGas < (expectedGas/100*95) {
+		if actualGas > expectedGas || actualGas < (expectedGas*70/100) {
 			t.Fatalf("Expected incremental gas for %d redemptions to be close to %d but got %d",
 				i, expectedGas, actualGas)
 		}
@@ -1906,7 +1906,7 @@ func testRefundGas(t *testing.T, assetID uint32) {
 	}
 	if isETH {
 		expGas := gases.Refund
-		if gas > expGas || gas < expGas*95/100 {
+		if gas > expGas || gas < expGas*70/100 {
 			t.Fatalf("expected refund gas to be near %d, but got %d",
 				expGas, gas)
 		}

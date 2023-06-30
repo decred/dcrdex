@@ -104,8 +104,11 @@ func (w *whale) HandleNotification(m *Mantle, note core.Notification) {
 		// Once registration is complete, register for a book feed.
 		if n.Topic() == core.TopicAccountRegistered {
 			book := m.book()
-			midGap := midGap(book)
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(20, uint64(float64(midGap)*(1+(whalePercent*2 /* twice for buffering */))))
+			rate := midGap(book)
+			if !liveMidGap {
+				rate += uint64(float64(rate) * whalePercent)
+			}
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(20, rate)
 			wmm := walletMinMax{
 				baseID:  {min: minBaseQty, max: maxBaseQty},
 				quoteID: {min: minQuoteQty, max: maxQuoteQty},
@@ -137,8 +140,11 @@ func (w *whale) HandleNotification(m *Mantle, note core.Notification) {
 		// Refresh balances one epoch at a time.
 		case c < numWhale:
 			book := m.book()
-			midGap := midGap(book)
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(20, midGap+rateStep)
+			rate := midGap(book)
+			if !liveMidGap {
+				rate += uint64(float64(rate) * whalePercent)
+			}
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(20, rate)
 			wmm := walletMinMax{
 				baseID:  {min: minBaseQty, max: maxBaseQty},
 				quoteID: {min: minQuoteQty, max: maxQuoteQty},
@@ -164,11 +170,26 @@ func (w *whale) HandleNotification(m *Mantle, note core.Notification) {
 func (*whale) whale(m *Mantle) {
 	book := m.book()
 	midGap := midGap(book)
-	tweak := rand.Float64() * float64(1-(2*rand.Intn(2))) * float64(midGap) * whalePercent
-	target := rateStep
-	if tweak > 0 || int64(midGap)+int64(tweak) > int64(rateStep) {
-		target = truncate(int64(midGap)+int64(tweak), int64(rateStep))
+	var target uint64
+	// If we are trying to stay close to the mid gap, have the whale push
+	// us there. Otherwise set a random target.
+	if liveMidGap {
+		r, err := liveRate()
+		if err != nil {
+			m.log.Errorf("error retrieving live rates: %v", err)
+			target = midGap
+		} else {
+			target = truncate(int64(r*float64(rateEncFactor)), int64(rateStep))
+		}
+	} else {
+		tweak := rand.Float64() * float64(1-(2*rand.Intn(2))) * float64(midGap) * whalePercent
+		target = rateStep
+		if tweak > 0 || int64(midGap)+int64(tweak) > int64(rateStep) {
+			target = truncate(int64(midGap)+int64(tweak), int64(rateStep))
+		}
 	}
+	conversionRatio := float64(conversionFactors[quoteSymbol]) / float64(conversionFactors[baseSymbol])
+	m.log.Infof("TS whaling at %v rate.", float64(target)/float64(rateEncFactor)/conversionRatio)
 	sell := true
 	if target > midGap {
 		sell = false
@@ -204,7 +225,7 @@ func (*whale) whale(m *Mantle) {
 		rem = 0
 	}
 
-	m.log.Infof("Whaling with %d lots at %v", lots, float64(target)/float64(conversionFactors[quoteSymbol]))
+	m.log.Infof("Whaling with %d lots at %v", lots, float64(target)/float64(rateEncFactor)/conversionRatio)
 
 	for _, man := range wMantles {
 		for i := 0; i < int(nMaxOrd); i++ {
