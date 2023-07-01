@@ -4762,6 +4762,17 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 	return nil
 }
 
+// Active indicates if there are any active orders across all configured
+// accounts. This includes booked orders and trades that are settling.
+func (c *Core) Active() bool {
+	for _, dc := range c.dexConnections() {
+		if dc.hasActiveOrders() {
+			return true
+		}
+	}
+	return false
+}
+
 // Logout logs the user out
 func (c *Core) Logout() error {
 	c.loginMtx.Lock()
@@ -4772,11 +4783,8 @@ func (c *Core) Logout() error {
 	}
 
 	// Check active orders
-	conns := c.dexConnections()
-	for _, dc := range conns {
-		if dc.hasActiveOrders() {
-			return codedError(activeOrdersErr, ActiveOrdersLogoutErr)
-		}
+	if c.Active() {
+		return codedError(activeOrdersErr, ActiveOrdersLogoutErr)
 	}
 
 	// Lock wallets
@@ -4794,7 +4802,7 @@ func (c *Core) Logout() error {
 
 	// With no open orders for any of the dex connections, and all wallets locked,
 	// lock each dex account.
-	for _, dc := range conns {
+	for _, dc := range c.dexConnections() {
 		dc.acct.lock()
 	}
 
@@ -5646,6 +5654,36 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}, nil
 }
 
+// MultiTrade is used to place multiple standing limit orders on the same
+// side of the same market simultaneously.
+func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) ([]*Order, error) {
+	reqs, err := c.prepareMultiTradeRequests(pw, form)
+	if err != nil {
+		return nil, err
+	}
+
+	orders := make([]*Order, 0, len(reqs))
+
+	for _, req := range reqs {
+		// return last error below if none of the orders succeeded
+		var corder *Order
+		corder, err = c.sendTradeRequest(req)
+		if err != nil {
+			c.log.Errorf("failed to send trade request: %v", err)
+			continue
+		}
+		orders = append(orders, corder)
+	}
+	if len(orders) < len(reqs) {
+		c.log.Errorf("failed to send %d of %d trade requests", len(reqs)-len(orders), len(reqs))
+	}
+	if len(orders) == 0 {
+		return nil, err
+	}
+
+	return orders, nil
+}
+
 // Trade is used to place a market or limit order.
 func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	req, err := c.prepareTradeRequest(pw, form)
@@ -5719,8 +5757,11 @@ type tradeRequest struct {
 	tempID       uint64
 }
 
-// prepareTradeRequest prepares a trade request.
-func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, error) {
+func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host string, sell bool) (wallets *walletSet, assetConfig *assetSet, dc *dexConnection, mktConf *msgjson.Market, err error) {
+	fail := func(err error) (*walletSet, *assetSet, *dexConnection, *msgjson.Market, error) {
+		return nil, nil, nil, nil, err
+	}
+
 	// Check the user password. A Trade can be attempted with an empty password,
 	// which should work if both wallets are unlocked. We use this feature for
 	// bots.
@@ -5729,48 +5770,40 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		var err error
 		crypter, err = c.encryptionKey(pw)
 		if err != nil {
-			return nil, fmt.Errorf("Trade password error: %w", err)
+			return fail(fmt.Errorf("Trade password error: %w", err))
 		}
 		defer crypter.Close()
 	}
 
-	dc, err := c.registeredDEX(form.Host)
+	dc, err = c.registeredDEX(host)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if dc.acct.suspended() {
-		return nil, newError(suspendedAcctErr, "may not trade while account is suspended")
+		return fail(newError(suspendedAcctErr, "may not trade while account is suspended"))
 	}
 
-	mktID := marketName(form.Base, form.Quote)
-	mktConf := dc.marketConfig(mktID)
+	mktID := marketName(base, quote)
+	mktConf = dc.marketConfig(mktID)
 	if mktConf == nil {
-		return nil, newError(marketErr, "order placed for unknown market %q", mktID)
+		return fail(newError(marketErr, "order placed for unknown market %q", mktID))
 	}
 
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
 	if !dc.running(mktID) {
-		return nil, newError(marketErr, "%s market trading is suspended", mktID)
+		return fail(newError(marketErr, "%s market trading is suspended", mktID))
 	}
 
-	rate, qty := form.Rate, form.Qty
-	if form.IsLimit && rate == 0 {
-		return nil, newError(orderParamsErr, "zero-rate order not allowed")
-	}
-
-	wallets, assetConfigs, versCompat, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	wallets, assetConfigs, versCompat, err := c.walletSet(dc, base, quote, sell)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if !versCompat { // also covers missing asset config, but that's unlikely since there is a market config
-		return nil, fmt.Errorf("client and server asset versions are incompatible for %v", dc.acct.host)
+		return fail(fmt.Errorf("client and server asset versions are incompatible for %v", dc.acct.host))
 	}
 
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
-
-	accountRedeemer, isAccountRedemption := toWallet.Wallet.(asset.AccountLocker)
-	accountRefunder, isAccountRefund := fromWallet.Wallet.(asset.AccountLocker)
 
 	prepareWallet := func(w *xcWallet) error {
 		// NOTE: If the wallet is already internally unlocked (the decrypted
@@ -5796,99 +5829,27 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 
 	err = prepareWallet(fromWallet)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 
 	err = prepareWallet(toWallet)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 
-	// Get an address for the swap contract.
-	redeemAddr, err := toWallet.RedemptionAddress()
-	if err != nil {
-		return nil, codedError(walletErr, fmt.Errorf("%s RedemptionAddress error: %w",
-			assetConfigs.toAsset.Symbol, err))
-	}
+	return wallets, assetConfigs, dc, mktConf, nil
+}
 
-	// Fund the order and prepare the coins.
-	lotSize := mktConf.LotSize
-	fundQty := qty
-	lots := qty / lotSize
-	if form.IsLimit && !form.Sell {
-		fundQty = calc.BaseToQuote(rate, fundQty)
-	}
-	redemptionRefundLots := lots
-
-	isImmediate := (!form.IsLimit || form.TifNow)
-
-	// Market buy order
-	if !form.IsLimit && !form.Sell {
-		// There is some ambiguity here about whether the specified quantity for
-		// a market buy order should include projected fees, or whether fees
-		// should be in addition to the quantity. If the fees should be
-		// additional to the order quantity (the approach taken here), we should
-		// try to estimate the number of lots based on the current market. If
-		// the market is not synced, fall back to a single-lot estimate, with
-		// the knowledge that such an estimate means that the specified amount
-		// might not all be available for matching once fees are considered.
-		lots = 1
-		book := dc.bookie(mktID)
-		if book != nil {
-			midGap, err := book.MidGap()
-			// An error is only returned when there are no orders on the book.
-			// In that case, fall back to the 1 lot estimate for now.
-			if err == nil {
-				baseQty := calc.QuoteToBase(midGap, fundQty)
-				lots = baseQty / lotSize
-				redemptionRefundLots = lots * marketBuyRedemptionSlippageBuffer
-				if lots == 0 {
-					err = newError(orderParamsErr,
-						"order quantity is too low for current market rates. "+
-							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
-						qty, assetConfigs.quoteAsset.Symbol, midGap, baseQty,
-						assetConfigs.baseAsset.Symbol, lotSize)
-					return nil, err
-				}
-			} else if isAccountRedemption {
-				return nil, newError(orderParamsErr, "cannot estimate redemption count")
-			}
-		}
-	}
-
-	if lots == 0 {
-		return nil, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
-			qty, assetConfigs.baseAsset.Symbol, rate, lotSize)
-	}
-
-	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
-		Version:       assetConfigs.fromAsset.Version,
-		Value:         fundQty,
-		MaxSwapCount:  lots,
-		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
-		Immediate:     isImmediate,
-		FeeSuggestion: c.feeSuggestion(dc, assetConfigs.fromAsset.ID),
-		Options:       form.Options,
-		RedeemVersion: assetConfigs.toAsset.Version,
-		RedeemAssetID: assetConfigs.toAsset.ID,
-	})
-	if err != nil {
-		return nil, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
-			assetConfigs.fromAsset.Symbol, fundQty, lots, err))
-	}
-	defer func() {
-		if _, err := c.updateWalletBalance(fromWallet); err != nil {
-			c.log.Errorf("updateWalletBalance error: %v", err)
-		}
-		if fromToken := asset.TokenInfo(assetConfigs.fromAsset.ID); fromToken != nil {
-			c.updateAssetBalance(fromToken.ParentID)
-		}
-	}()
-
+func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemScripts []dex.Bytes, dc *dexConnection, redeemAddr string,
+	form *TradeForm, lots, redemptionRefundLots uint64, fundingFees uint64, assetConfigs *assetSet, mktConf *msgjson.Market, errCloser *dex.ErrorCloser) (*tradeRequest, error) {
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
 	}
+
+	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
+	accountRedeemer, isAccountRedemption := toWallet.Wallet.(asset.AccountLocker)
+	accountRefunder, isAccountRefund := fromWallet.Wallet.(asset.AccountLocker)
 
 	// In the special case that there is a single coin that implements
 	// RecoveryCoin, set that as the change coin.
@@ -5902,19 +5863,6 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		}
 	}
 
-	// The coins selected for this order will need to be unlocked
-	// if the order does not get to the server successfully.
-	errCloser := dex.NewErrorCloser()
-	defer errCloser.Done(c.log)
-	errCloser.Add(func() error {
-		err := fromWallet.ReturnCoins(coins)
-		if err != nil {
-			return fmt.Errorf("Unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
-		}
-		return nil
-	})
-
-	// Construct the order.
 	preImg := newPreimage()
 	prefix := &order.Prefix{
 		AccountID:  dc.acct.ID(),
@@ -5953,12 +5901,13 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 			},
 		}
 	}
-	err = order.ValidateOrder(ord, order.OrderStatusEpoch, lotSize)
+
+	err := order.ValidateOrder(ord, order.OrderStatusEpoch, mktConf.LotSize)
 	if err != nil {
 		return nil, fmt.Errorf("ValidateOrder error: %w", err)
 	}
 
-	msgCoins, err := messageCoins(wallets.fromWallet, coins, redeemScripts)
+	msgCoins, err := messageCoins(fromWallet, coins, redeemScripts)
 	if err != nil {
 		return nil, fmt.Errorf("%v wallet failed to sign coins: %w", assetConfigs.fromAsset.Symbol, err)
 	}
@@ -6046,12 +5995,13 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
 			ChangeCoin:         changeID,
+			FundingFeesPaid:    fundingFees,
 		},
 		Order: ord,
 	}
 
-	tradeRequest := &tradeRequest{
-		mktID:        mktID,
+	return &tradeRequest{
+		mktID:        marketName(form.Base, form.Quote),
 		route:        route,
 		dc:           dc,
 		form:         form,
@@ -6062,11 +6012,248 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		wallets:      wallets,
 		errCloser:    errCloser.Copy(),
 		preImg:       preImg,
+	}, nil
+}
+
+// prepareTradeRequest prepares a trade request.
+func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, error) {
+	wallets, assetConfigs, dc, mktConf, err := c.prepareForTradeRequestPrep(pw, form.Base, form.Quote, form.Host, form.Sell)
+	if err != nil {
+		return nil, err
+	}
+
+	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
+	mktID := marketName(form.Base, form.Quote)
+
+	rate, qty := form.Rate, form.Qty
+	if form.IsLimit && rate == 0 {
+		return nil, newError(orderParamsErr, "zero-rate order not allowed")
+	}
+
+	// Get an address for the swap contract.
+	redeemAddr, err := toWallet.RedemptionAddress()
+	if err != nil {
+		return nil, codedError(walletErr, fmt.Errorf("%s RedemptionAddress error: %w",
+			assetConfigs.toAsset.Symbol, err))
+	}
+
+	// Fund the order and prepare the coins.
+	lotSize := mktConf.LotSize
+	fundQty := qty
+	lots := qty / lotSize
+	if form.IsLimit && !form.Sell {
+		fundQty = calc.BaseToQuote(rate, fundQty)
+	}
+	redemptionRefundLots := lots
+
+	isImmediate := (!form.IsLimit || form.TifNow)
+
+	// Market buy order
+	if !form.IsLimit && !form.Sell {
+		_, isAccountRedemption := toWallet.Wallet.(asset.AccountLocker)
+
+		// There is some ambiguity here about whether the specified quantity for
+		// a market buy order should include projected fees, or whether fees
+		// should be in addition to the quantity. If the fees should be
+		// additional to the order quantity (the approach taken here), we should
+		// try to estimate the number of lots based on the current market. If
+		// the market is not synced, fall back to a single-lot estimate, with
+		// the knowledge that such an estimate means that the specified amount
+		// might not all be available for matching once fees are considered.
+		lots = 1
+		book := dc.bookie(mktID)
+		if book != nil {
+			midGap, err := book.MidGap()
+			// An error is only returned when there are no orders on the book.
+			// In that case, fall back to the 1 lot estimate for now.
+			if err == nil {
+				baseQty := calc.QuoteToBase(midGap, fundQty)
+				lots = baseQty / lotSize
+				redemptionRefundLots = lots * marketBuyRedemptionSlippageBuffer
+				if lots == 0 {
+					err = newError(orderParamsErr,
+						"order quantity is too low for current market rates. "+
+							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
+						qty, assetConfigs.quoteAsset.Symbol, midGap, baseQty,
+						assetConfigs.baseAsset.Symbol, lotSize)
+					return nil, err
+				}
+			} else if isAccountRedemption {
+				return nil, newError(orderParamsErr, "cannot estimate redemption count")
+			}
+		}
+	}
+
+	if lots == 0 {
+		return nil, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
+			qty, assetConfigs.baseAsset.Symbol, rate, mktConf.LotSize)
+	}
+
+	coins, redeemScripts, fundingFees, err := fromWallet.FundOrder(&asset.Order{
+		Version:       assetConfigs.fromAsset.Version,
+		Value:         fundQty,
+		MaxSwapCount:  lots,
+		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
+		Immediate:     isImmediate,
+		FeeSuggestion: c.feeSuggestion(dc, assetConfigs.fromAsset.ID),
+		Options:       form.Options,
+		RedeemVersion: assetConfigs.toAsset.Version,
+		RedeemAssetID: assetConfigs.toAsset.ID,
+	})
+	if err != nil {
+		return nil, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
+			assetConfigs.fromAsset.Symbol, fundQty, lots, err))
+	}
+	defer func() {
+		if _, err := c.updateWalletBalance(fromWallet); err != nil {
+			c.log.Errorf("updateWalletBalance error: %v", err)
+		}
+		if fromToken := asset.TokenInfo(assetConfigs.fromAsset.ID); fromToken != nil {
+			c.updateAssetBalance(fromToken.ParentID)
+		}
+	}()
+
+	// The coins selected for this order will need to be unlocked
+	// if the order does not get to the server successfully.
+	errCloser := dex.NewErrorCloser()
+	defer errCloser.Done(c.log)
+	errCloser.Add(func() error {
+		err := fromWallet.ReturnCoins(coins)
+		if err != nil {
+			return fmt.Errorf("Unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
+		}
+		return nil
+	})
+
+	tradeRequest, err := c.createTradeRequest(wallets, coins, redeemScripts, dc, redeemAddr, form,
+		lots, redemptionRefundLots, fundingFees, assetConfigs, mktConf, errCloser)
+	if err != nil {
+		return nil, err
 	}
 
 	errCloser.Success()
 
 	return tradeRequest, nil
+}
+
+func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tradeRequest, error) {
+	wallets, assetConfigs, dc, mktConf, err := c.prepareForTradeRequestPrep(pw, form.Base, form.Quote, form.Host, form.Sell)
+	if err != nil {
+		return nil, err
+	}
+	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
+
+	multiFunder, is := fromWallet.Wallet.(asset.MultiOrderFunder)
+	if !is {
+		return nil, newError(orderParamsErr, "fromWallet is not a MultiOrderFunder")
+	}
+
+	for _, trade := range form.Placements {
+		if trade.Rate == 0 {
+			return nil, newError(orderParamsErr, "zero rate is invalid")
+		}
+		if trade.Qty == 0 {
+			return nil, newError(orderParamsErr, "zero quantity is invalid")
+		}
+	}
+
+	redeemAddresses := make([]string, 0, len(form.Placements))
+	for range form.Placements {
+		redeemAddr, err := toWallet.RedemptionAddress()
+		if err != nil {
+			return nil, codedError(walletErr, fmt.Errorf("%s RedemptionAddress error: %w",
+				assetConfigs.toAsset.Symbol, err))
+		}
+		redeemAddresses = append(redeemAddresses, redeemAddr)
+	}
+
+	orderValues := make([]*asset.MultiOrderValue, 0, len(form.Placements))
+	for _, trade := range form.Placements {
+		fundQty := trade.Qty
+		lots := fundQty / mktConf.LotSize
+		if lots == 0 {
+			return nil, newError(orderParamsErr, "order quantity < 1 lot")
+		}
+
+		if !form.Sell {
+			fundQty = calc.BaseToQuote(trade.Rate, fundQty)
+		}
+		orderValues = append(orderValues, &asset.MultiOrderValue{
+			MaxSwapCount: lots,
+			Value:        fundQty,
+		})
+	}
+
+	allCoins, allRedeemScripts, fundingFees, err := multiFunder.FundMultiOrder(&asset.MultiOrder{
+		Version:       assetConfigs.fromAsset.Version,
+		Values:        orderValues,
+		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
+		FeeSuggestion: c.feeSuggestion(dc, assetConfigs.fromAsset.ID),
+		Options:       form.Options,
+		RedeemVersion: assetConfigs.toAsset.Version,
+		RedeemAssetID: assetConfigs.toAsset.ID,
+	}, form.MaxLock)
+	if err != nil {
+		return nil, codedError(walletErr, fmt.Errorf("FundMultiOrder error for %s: %v", assetConfigs.fromAsset.Symbol, err))
+	}
+
+	if len(allCoins) != len(form.Placements) {
+		c.log.Infof("FundMultiOrder only funded %d orders out of %d", len(allCoins), len(form.Placements))
+	}
+	defer func() {
+		if _, err := c.updateWalletBalance(fromWallet); err != nil {
+			c.log.Errorf("updateWalletBalance error: %v", err)
+		}
+		if fromToken := asset.TokenInfo(assetConfigs.fromAsset.ID); fromToken != nil {
+			c.updateAssetBalance(fromToken.ParentID)
+		}
+	}()
+
+	errClosers := make([]*dex.ErrorCloser, 0, len(allCoins))
+	for _, coins := range allCoins {
+		theseCoins := coins
+		errCloser := dex.NewErrorCloser()
+		defer errCloser.Done(c.log)
+		errCloser.Add(func() error {
+			err := fromWallet.ReturnCoins(theseCoins)
+			if err != nil {
+				return fmt.Errorf("unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
+			}
+			return nil
+		})
+		errClosers = append(errClosers, errCloser)
+	}
+
+	tradeRequests := make([]*tradeRequest, 0, len(allCoins))
+	for i, coins := range allCoins {
+		tradeForm := &TradeForm{
+			Host:    form.Host,
+			IsLimit: true,
+			Sell:    form.Sell,
+			Base:    form.Base,
+			Quote:   form.Quote,
+			Qty:     form.Placements[i].Qty,
+			Rate:    form.Placements[i].Rate,
+			Options: form.Options,
+		}
+		// Only count the funding fees once.
+		var fees uint64
+		if i == 0 {
+			fees = fundingFees
+		}
+		req, err := c.createTradeRequest(wallets, coins, allRedeemScripts[i], dc, redeemAddresses[i], tradeForm,
+			orderValues[i].MaxSwapCount, orderValues[i].MaxSwapCount, fees, assetConfigs, mktConf, errClosers[i])
+		if err != nil {
+			return nil, err
+		}
+		tradeRequests = append(tradeRequests, req)
+	}
+
+	for _, errCloser := range errClosers {
+		errCloser.Success()
+	}
+
+	return tradeRequests, nil
 }
 
 // sendTradeRequest sends an order, processes the result, then prepares and
@@ -6075,6 +6262,7 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 	dc, dbOrder, wallets, form, route := tr.dc, tr.dbOrder, tr.wallets, tr.form, tr.route
 	mktID, msgOrder, preImg, recoveryCoin, coins := tr.mktID, tr.msgOrder, tr.preImg, tr.recoveryCoin, tr.coins
 	defer tr.errCloser.Done(c.log)
+
 	// Send and get the result.
 	result := new(msgjson.OrderResult)
 	err := dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)

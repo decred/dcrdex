@@ -54,6 +54,7 @@ const (
 	notificationsRoute         = "notifications"
 	startMarketMakingRoute     = "startmarketmaking"
 	stopMarketMakingRoute      = "stopmarketmaking"
+	multiTradeRoute            = "multitrade"
 )
 
 const (
@@ -118,6 +119,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	notificationsRoute:         handleNotificationsRoute,
 	startMarketMakingRoute:     handleStartMarketMakingRoute,
 	stopMarketMakingRoute:      handleStopMarketMakingRoute,
+	multiTradeRoute:            handleMultiTrade,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -555,6 +557,29 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		Stamp:   res.Stamp,
 	}
 	return createResponse(tradeRoute, &tradeRes, nil)
+}
+
+func handleMultiTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseMultiTradeArgs(params)
+	if err != nil {
+		return usage(multiTradeRoute, err)
+	}
+	defer form.appPass.Clear()
+	res, err := s.core.MultiTrade(form.appPass, form.srvForm)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to multi trade: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCTradeError, errMsg)
+		return createResponse(multiTradeRoute, nil, resErr)
+	}
+	trades := make([]*tradeResponse, 0, len(res))
+	for _, trade := range res {
+		trades = append(trades, &tradeResponse{
+			OrderID: trade.ID.String(),
+			Sig:     trade.Sig.String(),
+			Stamp:   trade.Stamp,
+		})
+	}
+	return createResponse(multiTradeRoute, &trades, nil)
 }
 
 // handleCancel handles requests for cancel. *msgjson.ResponsePayload.Error is
@@ -1318,6 +1343,31 @@ Registration is complete after the fee transaction has been confirmed.`,
       "stamp" (int): The time the order was signed in milliseconds since 00:00:00
         Jan 1 1970.
     }`,
+	},
+	multiTradeRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"host" sell base quote maxLock [[qty,rate]] options`,
+		cmdSummary:  `Place multiple orders in one go.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    host (string): The DEX to trade on.
+    sell (bool): Whether the order is selling.
+    base (int): The BIP-44 coin index for the market's base asset.
+    quote (int): The BIP-44 coin index for the market's quote asset.
+    maxLock (int): The maximum amount the wallet can lock for this order. 0 means no limit.
+    placements ([[int,int]]):  An array of [qty,rate] placements. Quantity must be
+	 a multiple of the lot size. Rate must be in atomic units of the quote asset.
+    options (string): A JSON-encoded string->string mapping of additional
+       trade options.`,
+		returns: `Returns:
+    obj: The details of each order.
+    [{
+      "orderid" (string): The order's unique hex identifier.
+      "sig" (string): The DEX's signature of the order information.
+      "stamp" (int): The time the order was signed in milliseconds since 00:00:00
+        Jan 1 1970.
+    }]`,
 	},
 	cancelRoute: {
 		pwArgsShort: `"appPass"`,

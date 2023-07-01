@@ -589,10 +589,6 @@ func (wc *rpcClient) externalAddress() (btcutil.Address, error) {
 	return wc.address("legacy")
 }
 
-func (wc *rpcClient) refundAddress() (btcutil.Address, error) {
-	return wc.externalAddress()
-}
-
 // address is used internally for fetching addresses of various types from the
 // wallet.
 func (wc *rpcClient) address(aType string) (btcutil.Address, error) {

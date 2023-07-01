@@ -104,6 +104,7 @@ import (
 	"runtime/debug"
 	"runtime/pprof"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -335,6 +336,9 @@ func mainCore() error {
 			var backgroundNoteSent bool
 			select {
 			case <-windowManager.zeroLeft:
+				if windowManager.persist.Load() {
+					continue // ignore
+				}
 			logout:
 				for {
 					err := clientCore.Logout()
@@ -374,8 +378,29 @@ func mainCore() error {
 		}
 	}()
 
+	activeState := make(chan bool, 8)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		active := true // starting with "Force Quit"
+		for {
+			select {
+			case <-time.After(time.Second):
+				// inelegant polling? Even Core doesn't know until it checks, so
+				// can't feasibly rig a signal from Core without changes there.
+				coreActive := clientCore.Active()
+				if coreActive != active {
+					active = coreActive
+					activeState <- coreActive
+				}
+			case <-appCtx.Done():
+				return
+			}
+		}
+	}()
+
 	systray.Run(func() {
-		systrayOnReady(appCtx, filepath.Dir(cfg.LogPath), openC, killChan)
+		systrayOnReady(appCtx, filepath.Dir(cfg.LogPath), openC, killChan, activeState)
 	}, nil)
 
 	closeAllWindows()
@@ -392,6 +417,7 @@ var windowManager = &struct {
 	counter  uint32
 	windows  map[uint32]*exec.Cmd
 	zeroLeft chan struct{}
+	persist  atomic.Bool
 }{
 	windows:  make(map[uint32]*exec.Cmd),
 	zeroLeft: make(chan struct{}, 1),
@@ -486,7 +512,8 @@ var FavIcon []byte
 //go:embed src/symbol-bw-round.png
 var SymbolBWIcon []byte
 
-func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struct{}, killC chan<- os.Signal) {
+func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struct{},
+	killC chan<- os.Signal, activeState <-chan bool) {
 	systray.SetIcon(FavIcon)
 	systray.SetTitle("DEX client")
 	systray.SetTooltip("Self-custodial multi-wallet")
@@ -529,7 +556,7 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 		mLogs := systray.AddMenuItem("Open logs folder", "Open the folder with your DEX logs.")
 		go func() {
 			for range mLogs.ClickedCh {
-				log.Debug("Opening browswer to log directory at", logDirURL)
+				log.Debug("Opening browser to log directory at", logDirURL)
 				runWebviewSubprocess(ctx, logDirURL)
 			}
 		}()
@@ -537,12 +564,40 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 
 	systray.AddSeparator()
 
-	mQuit := systray.AddMenuItem("Force Quit", "Force DEX client to close.")
+	mPersist := systray.AddMenuItemCheckbox("Persist after windows closed.",
+		"Keep the process running after all windows are closed. "+
+			"Shutdown is initiated through the Quit item in the system tray menu.", false)
 	go func() {
-		<-mQuit.ClickedCh
-		mOpen.Disable()
-		mQuit.Disable()
-		killC <- os.Interrupt
+		for range mPersist.ClickedCh {
+			var persisting = !mPersist.Checked() // toggle
+			if persisting {
+				mPersist.Check()
+			} else {
+				mPersist.Uncheck()
+			}
+			windowManager.persist.Store(persisting)
+		}
+	}()
+
+	mQuit := systray.AddMenuItem("Force Quit", "Force DEX client to close with active orders.")
+	go func() {
+		for {
+			select {
+			case active := <-activeState:
+				if active {
+					mQuit.SetTitle("Force Quit")
+					mQuit.SetTooltip("Force DEX client to close with active orders.")
+				} else {
+					mQuit.SetTitle("Quit")
+					mQuit.SetTooltip("Shutdown the DEX client. You have no active orders.")
+				}
+			case <-mQuit.ClickedCh:
+				mOpen.Disable()
+				mQuit.Disable()
+				killC <- os.Interrupt
+				return
+			}
+		}
 	}()
 }
 

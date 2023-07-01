@@ -1832,7 +1832,7 @@ func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64, o
 // Equal number of coins and redeemed scripts must be returned. A nil or empty
 // dex.Bytes should be appended to the redeem scripts collection for coins with
 // no redeem script.
-func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
+func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint64, error) {
 	cfg := dcr.config()
 
 	// Consumer checks dex asset version, so maybe this is not our job:
@@ -1841,20 +1841,20 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	// 		ord.DEXConfig.Version, dcr.Info().Version)
 	// }
 	if ord.Value == 0 {
-		return nil, nil, fmt.Errorf("cannot fund value = 0")
+		return nil, nil, 0, fmt.Errorf("cannot fund value = 0")
 	}
 	if ord.MaxSwapCount == 0 {
-		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
+		return nil, nil, 0, fmt.Errorf("cannot fund a zero-lot order")
 	}
 	if ord.FeeSuggestion > ord.MaxFeeRate {
-		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.MaxFeeRate)
+		return nil, nil, 0, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.MaxFeeRate)
 	}
 	if ord.FeeSuggestion > cfg.feeRateLimit {
-		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, cfg.feeRateLimit)
+		return nil, nil, 0, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, cfg.feeRateLimit)
 	}
 	// Check wallet's fee rate limit against server's max fee rate
 	if cfg.feeRateLimit < ord.MaxFeeRate {
-		return nil, nil, fmt.Errorf(
+		return nil, nil, 0, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
 			dex.BipIDSymbol(BipID), ord.MaxFeeRate, cfg.feeRateLimit)
 	}
@@ -1862,7 +1862,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	customCfg := new(swapOptions)
 	err := config.Unmapify(ord.Options, customCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error parsing swap options")
+		return nil, nil, 0, fmt.Errorf("Error parsing swap options")
 	}
 
 	// Check ord.Options for a FeeBump here
@@ -1897,7 +1897,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			extraSplitOutput = reserves + bondsFeeBuffer(cfg.feeRateLimit)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("error funding order value of %s DCR: %w",
+			return nil, nil, 0, fmt.Errorf("error funding order value of %s DCR: %w",
 				amount(ord.Value), err)
 		}
 	}
@@ -1924,23 +1924,23 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			dcr.log.Errorf("calcBumpRate error: %v", err)
 		}
 
-		splitCoins, split, err := dcr.split(ord.Value, ord.MaxSwapCount, coins,
+		splitCoins, split, fees, err := dcr.split(ord.Value, ord.MaxSwapCount, coins,
 			inputsSize, splitFeeRate, bumpedMaxRate, extraSplitOutput)
 		if err != nil { // potentially try again with extraSplitOutput=0 if it wasn't already
 			if _, errRet := dcr.returnCoins(coins); errRet != nil {
 				dcr.log.Warnf("Failed to unlock funding coins %v: %v", coins, errRet)
 			}
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		if split {
-			return splitCoins, []dex.Bytes{nil}, nil // no redeem script required for split tx output
+			return splitCoins, []dex.Bytes{nil}, fees, nil // no redeem script required for split tx output
 		}
-		return splitCoins, redeemScripts, nil // splitCoins == coins
+		return splitCoins, redeemScripts, 0, nil // splitCoins == coins
 	}
 
 	dcr.log.Infof("Funding %s DCR order with coins %v worth %s", amount(ord.Value), coins, amount(sum))
 
-	return coins, redeemScripts, nil
+	return coins, redeemScripts, 0, nil
 }
 
 // fund finds coins for the specified value. A function is provided that can
@@ -2167,7 +2167,7 @@ func tryFund(utxos []*compositeUTXO,
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64,
-	splitFeeRate, bumpedMaxRate, extraOutput uint64) (asset.Coins, bool, error) {
+	splitFeeRate, bumpedMaxRate, extraOutput uint64) (asset.Coins, bool, uint64, error) {
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
@@ -2196,7 +2196,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		// loss to fees in a split. This trivial amount is of no concern because
 		// the reserves should be buffered for amounts much larger than the fees
 		// on a single transaction.
-		return coins, false, nil
+		return coins, false, 0, nil
 	}
 
 	// Generate an address to receive the sized outputs. If mixing is enabled on
@@ -2214,14 +2214,14 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 	addr, err := getAddr()
 	if err != nil {
-		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
+		return nil, false, 0, fmt.Errorf("error creating split transaction address: %w", err)
 	}
 
 	var addr2 stdaddr.Address
 	if extraOutput > 0 {
 		addr2, err = getAddr()
 		if err != nil {
-			return nil, false, fmt.Errorf("error creating secondary split transaction address: %w", err)
+			return nil, false, 0, fmt.Errorf("error creating secondary split transaction address: %w", err)
 		}
 	}
 
@@ -2233,7 +2233,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 
 	msgTx, sentVal, err := dcr.sendCoins(coins, addr, addr2, reqFunds, extraOutput, splitFeeRate, false)
 	if err != nil {
-		return nil, false, fmt.Errorf("error sending split transaction: %w", err)
+		return nil, false, 0, fmt.Errorf("error sending split transaction: %w", err)
 	}
 
 	if sentVal != reqFunds {
@@ -2257,11 +2257,16 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		dcr.log.Errorf("error returning coins spent in split transaction %v", coins)
 	}
 
+	totalOut := uint64(0)
+	for i := 0; i < len(msgTx.TxOut); i++ {
+		totalOut += uint64(msgTx.TxOut[i].Value)
+	}
+
 	dcr.log.Infof("Funding %s DCR order with split output coin %v from original coins %v", valStr, op, coins)
 	dcr.log.Infof("Sent split transaction %s to accommodate swap of size %s + fees = %s DCR",
 		op.txHash(), valStr, amount(reqFunds))
 
-	return asset.Coins{op}, true, nil
+	return asset.Coins{op}, true, coinSum - totalOut, nil
 }
 
 // lockFundingCoins locks the funding coins via RPC and stores them in the map.
