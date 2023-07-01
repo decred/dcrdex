@@ -363,8 +363,9 @@ type Wallet interface {
 	// returned []dex.Bytes contains the redeem scripts for the selected coins.
 	// Equal number of coins and redeemed scripts must be returned. A nil or
 	// empty dex.Bytes should be appended to the redeem scripts collection for
-	// coins with no redeem script.
-	FundOrder(*Order) (coins Coins, redeemScripts []dex.Bytes, err error)
+	// coins with no redeem script. The fees returned are any fees paid in the
+	// process of funding the order, such as transaction fees for a split tx.
+	FundOrder(*Order) (coins Coins, redeemScripts []dex.Bytes, fees uint64, err error)
 	// MaxOrder generates information about the maximum order size and
 	// associated fees that the wallet can support for the specified DEX. The
 	// fees are an estimate based on current network conditions, and will be <=
@@ -500,6 +501,12 @@ type Wallet interface {
 	SingleLotRedeemFees(version uint32, feeRate uint64, options map[string]string) (uint64, error)
 }
 
+// MultiOrderFunder is a wallet that can fund multiple orders at once.
+// This will be part of the Wallet interface once all wallets support it.
+type MultiOrderFunder interface {
+	FundMultiOrder(ord *MultiOrder, maxLock uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
+}
+
 // Authenticator is a wallet implementation that require authentication.
 type Authenticator interface {
 	// Unlock unlocks the exchange wallet.
@@ -616,6 +623,18 @@ type Sweeper interface {
 // NewAddresser is a wallet that can generate new deposit addresses.
 type NewAddresser interface {
 	NewAddress() (string, error)
+}
+
+// AddressReturner is a wallet that allows recycling of unused redemption or refund
+// addresses. Asset implementations should log any errors internally. The caller
+// is responsible for only returning unused addresses.
+type AddressReturner interface {
+	// ReturnRefundContracts should be called with the Receipt.Contract() data
+	// for any swaps that will not be refunded.
+	ReturnRefundContracts(contracts [][]byte)
+	// ReturnRedemptionAddress accepts a  Wallet.RedemptionAddress() if the
+	// address will not be used.
+	ReturnRedemptionAddress(addr string)
 }
 
 // LogFiler is a wallet that allows for downloading of its log file.
@@ -1004,7 +1023,7 @@ type AuditInfo struct {
 
 // Swaps is the details needed to broadcast a swap contract(s).
 type Swaps struct {
-	// Version is the asset version. Most backends only support one version.
+	// Version is the asset version.
 	Version uint32
 	// Inputs are the Coins being spent.
 	Inputs Coins
@@ -1057,7 +1076,7 @@ type RedeemForm struct {
 // Order is order details needed for FundOrder.
 type Order struct {
 	// Version is the asset version of the "from" asset with the init
-	// transaction (this wallet). Most backends only support one version.
+	// transaction.
 	Version uint32
 	// Value is the amount required to satisfy the order. The Value does not
 	// include fees. Fees will be calculated internally based on the number of
@@ -1065,11 +1084,8 @@ type Order struct {
 	// (DEXConfig).
 	Value uint64
 	// MaxSwapCount is the number of lots in the order, which is also the
-	// maximum number of transaction that an order could potentially generate
-	// in a worst-case scenario of all 1-lot matches. Note that if requesting
-	// funding for the quote asset's wallet, the number of lots will not be
-	// Value / DEXConfig.LotSize, because an order is quantified in the base
-	// asset, so lots is always (order quantity) / (base asset lot size).
+	// maximum number of transactions that an order could potentially generate
+	// in a worst-case scenario of all 1-lot matches.
 	MaxSwapCount uint64 // uint64 for compatibility with quantity and lot size.
 	// MaxFeeRate is the largest possible fee rate for the init transaction (of
 	// this "from" asset) specific to and provided by a particular server, and
@@ -1092,7 +1108,49 @@ type Order struct {
 	// tokens with ETH.
 
 	// RedeemVersion is the asset version of the "to" asset with the redeem
-	// transaction. Most backends only support one version.
+	// transaction.
+	RedeemVersion uint32
+	// RedeemAssetID is the asset ID of the "to" asset.
+	RedeemAssetID uint32
+}
+
+// MultiOrderValue is one of the placements in a multi-order.
+type MultiOrderValue struct {
+	// Value is the amount required to satisfy the order. The Value does not
+	// include fees. Fees will be calculated internally based on the number of
+	// possible swaps (MaxSwapCount) and the exchange's configuration
+	// (DEXConfig).
+	Value uint64
+	// MaxSwapCount is the number of lots in the order, which is also the
+	// maximum number of transactions that an order could potentially generate
+	// in a worst-case scenario of all 1-lot matches.
+	MaxSwapCount uint64 // uint64 for compatibility with quantity and lot size.
+}
+
+// MultiOrder is order details needed for FundMultiOrder.
+type MultiOrder struct {
+	// Version is the asset version of the "from" asset with the init
+	// transaction.
+	Version uint32
+	Values  []*MultiOrderValue
+	// MaxFeeRate is the largest possible fee rate for the init transaction (of
+	// this "from" asset) specific to and provided by a particular server, and
+	// is used to calculate the funding required to cover fees.
+	MaxFeeRate uint64
+	// FeeSuggestion is a suggested fee from the server. If a split transaction
+	// is used, the fee rate used should be at least the suggested fee, else
+	// zero-conf coins might be rejected.
+	FeeSuggestion uint64
+	// Options are options that corresponds to PreSwap.Options, as well as
+	// their values.
+	Options map[string]string
+
+	// The following fields are only used for some assets where the redeemed/to
+	// asset may require funds in this "from" asset. For example, buying ERC20
+	// tokens with ETH.
+
+	// RedeemVersion is the asset version of the "to" asset with the redeem
+	// transaction.
 	RedeemVersion uint32
 	// RedeemAssetID is the asset ID of the "to" asset.
 	RedeemAssetID uint32
