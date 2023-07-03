@@ -447,8 +447,6 @@ var _ asset.DynamicSwapper = (*ETHWallet)(nil)
 var _ asset.DynamicSwapper = (*TokenWallet)(nil)
 var _ asset.Authenticator = (*ETHWallet)(nil)
 var _ asset.TokenApprover = (*TokenWallet)(nil)
-var _ asset.MultiOrderFunder = (*ETHWallet)(nil)
-var _ asset.MultiOrderFunder = (*TokenWallet)(nil)
 
 type baseWallet struct {
 	// The asset subsystem starts with Connect(ctx). This ctx will be initialized

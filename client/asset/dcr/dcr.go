@@ -248,10 +248,12 @@ var (
 			},
 		},
 	}
-	swapFeeBumpKey   = "swapfeebump"
-	splitKey         = "swapsplit"
-	redeemFeeBumpFee = "redeemfeebump"
-	client           http.Client
+	swapFeeBumpKey      = "swapfeebump"
+	splitKey            = "swapsplit"
+	multiSplitKey       = "multisplit"
+	multiSplitBufferKey = "multisplitbuffer"
+	redeemFeeBumpFee    = "redeemfeebump"
+	client              http.Client
 )
 
 // outPoint is the hash and output index of a transaction output.
@@ -1520,7 +1522,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 		}
 		// Like the fund() method, try with some utxos taken out of the mix for
 		// reserves, as precise in value as possible.
-		kept := leastOverFund(reserves, utxos)
+		kept := leastOverFund(reserveEnough(reserves), utxos)
 		utxos = utxoSetDiff(utxos, kept)
 		sum, _, inputsSize, _, _, _, err = tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, false))
 		if err != nil { // no joy with the reduced set
@@ -1943,6 +1945,605 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	return coins, redeemScripts, 0, nil
 }
 
+// fundMultiOptions are the possible order options when calling FundMultiOrder.
+type fundMultiOptions struct {
+	// Split, if true, and multi-order cannot be funded with the existing UTXOs
+	// in the wallet without going over the maxLock limit, a split transaction
+	// will be created with one output per order.
+	//
+	// Use the multiSplitKey const defined above in the options map to set this option.
+	Split *bool
+	// SplitBuffer, if set, will instruct the wallet to add a buffer onto each
+	// output of the multi-order split transaction (if the split is needed).
+	// SplitBuffer is defined as a percentage of the output. If a .1 BTC output
+	// is required for an order and SplitBuffer is set to 5, a .105 BTC output
+	// will be created.
+	//
+	// The motivation for this is to assist market makers in having to do the
+	// least amount of splits as possible. It is useful when BTC is the quote
+	// asset on a market, and the price is increasing. During a market maker's
+	// operation, it will frequently have to cancel and replace orders as the
+	// rate moves. If BTC is the quote asset on a market, and the rate has
+	// lightly increased, the market maker will need to lock slightly more of
+	// the quote asset for the same amount of lots of the base asset. If there
+	// is no split buffer, this may necessitate a new split transaction.
+	//
+	// Use the multiSplitBufferKey const defined above in the options map to set this.
+	SplitBuffer *uint64
+}
+
+func decodeFundMultiOptions(options map[string]string) (*fundMultiOptions, error) {
+	opts := new(fundMultiOptions)
+	if options == nil {
+		return opts, nil
+	}
+
+	if split, ok := options[multiSplitKey]; ok {
+		b, err := strconv.ParseBool(split)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing split option: %w", err)
+		}
+		opts.Split = &b
+	}
+
+	if splitBuffer, ok := options[multiSplitBufferKey]; ok {
+		b, err := strconv.ParseUint(splitBuffer, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing split buffer option: %w", err)
+		}
+		opts.SplitBuffer = &b
+	}
+
+	return opts, nil
+}
+
+// orderWithLeastOverFund returns the index of the order from a slice of orders
+// that requires the least over-funding without using more than maxLock. It
+// also returns the UTXOs that were used to fund the order. If none can be
+// funded without using more than maxLock, -1 is returned.
+func (dcr *ExchangeWallet) orderWithLeastOverFund(maxLock, feeRate uint64, orders []*asset.MultiOrderValue, utxos []*compositeUTXO) (orderIndex int, leastOverFundingUTXOs []*compositeUTXO) {
+	minOverFund := uint64(math.MaxUint64)
+	orderIndex = -1
+	for i, value := range orders {
+		enough := orderEnough(value.Value, value.MaxSwapCount, feeRate, false)
+		var fundingUTXOs []*compositeUTXO
+		if maxLock > 0 {
+			fundingUTXOs = leastOverFundWithLimit(enough, maxLock, utxos)
+		} else {
+			fundingUTXOs = leastOverFund(enough, utxos)
+		}
+		if len(fundingUTXOs) == 0 {
+			continue
+		}
+		sum := sumUTXOs(fundingUTXOs)
+		overFund := sum - value.Value
+		if overFund < minOverFund {
+			minOverFund = overFund
+			orderIndex = i
+			leastOverFundingUTXOs = fundingUTXOs
+		}
+	}
+	return
+}
+
+// fundsRequiredForMultiOrders returns an slice of the required funds for each
+// of a slice of orders and the total required funds.
+func (dcr *ExchangeWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, feeRate, splitBuffer uint64) ([]uint64, uint64) {
+	requiredForOrders := make([]uint64, len(orders))
+	var totalRequired uint64
+
+	for i, value := range orders {
+		req := calc.RequiredOrderFundsAlt(value.Value, dexdcr.P2PKHInputSize, value.MaxSwapCount,
+			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, feeRate)
+		req = req * (100 + splitBuffer) / 100
+		requiredForOrders[i] = req
+		totalRequired += req
+	}
+
+	return requiredForOrders, totalRequired
+}
+
+// fundMultiBestEffort makes a best effort to fund every order. If it is not
+// possible, it returns coins for the orders that could be funded. The coins
+// that fund each order are returned in the same order as the values that were
+// passed in. If a split is allowed and all orders cannot be funded, nil slices
+// are returned.
+func (dcr *ExchangeWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset.MultiOrderValue,
+	maxFeeRate uint64, splitAllowed bool) ([]asset.Coins, [][]dex.Bytes, []*fundingCoin, error) {
+	utxos, err := dcr.spendableUTXOs()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting spendable utxos: %w", err)
+	}
+
+	var avail uint64
+	for _, utxo := range utxos {
+		avail += toAtoms(utxo.rpc.Amount)
+	}
+
+	fundAllOrders := func() [][]*compositeUTXO {
+		indexToFundingCoins := make(map[int][]*compositeUTXO, len(values))
+		remainingUTXOs := utxos
+		remainingOrders := values
+		remainingIndexes := make([]int, len(values))
+		for i := range remainingIndexes {
+			remainingIndexes[i] = i
+		}
+		var totalFunded uint64
+		for range values {
+			orderIndex, fundingUTXOs := dcr.orderWithLeastOverFund(maxLock-totalFunded, maxFeeRate, remainingOrders, remainingUTXOs)
+			if orderIndex == -1 {
+				return nil
+			}
+			totalFunded += sumUTXOs(fundingUTXOs)
+			if totalFunded > avail-keep {
+				return nil
+			}
+			newRemainingOrders := make([]*asset.MultiOrderValue, 0, len(remainingOrders)-1)
+			newRemainingIndexes := make([]int, 0, len(remainingOrders)-1)
+			for j := range remainingOrders {
+				if j != orderIndex {
+					newRemainingOrders = append(newRemainingOrders, remainingOrders[j])
+					newRemainingIndexes = append(newRemainingIndexes, remainingIndexes[j])
+				}
+			}
+			indexToFundingCoins[remainingIndexes[orderIndex]] = fundingUTXOs
+			remainingOrders = newRemainingOrders
+			remainingIndexes = newRemainingIndexes
+			remainingUTXOs = utxoSetDiff(remainingUTXOs, fundingUTXOs)
+		}
+		allFundingUTXOs := make([][]*compositeUTXO, len(values))
+		for i := range values {
+			allFundingUTXOs[i] = indexToFundingCoins[i]
+		}
+		return allFundingUTXOs
+	}
+
+	fundInOrder := func(orderedValues []*asset.MultiOrderValue) [][]*compositeUTXO {
+		allFundingUTXOs := make([][]*compositeUTXO, 0, len(orderedValues))
+		remainingUTXOs := utxos
+		var totalFunded uint64
+		for _, value := range orderedValues {
+			enough := orderEnough(value.Value, value.MaxSwapCount, maxFeeRate, false)
+
+			var fundingUTXOs []*compositeUTXO
+			if maxLock > 0 {
+				if maxLock < totalFunded {
+					// Should never happen unless there is a bug in leastOverFundWithLimit
+					dcr.log.Errorf("maxLock < totalFunded. %d < %d", maxLock, totalFunded)
+					return allFundingUTXOs
+				}
+				fundingUTXOs = leastOverFundWithLimit(enough, maxLock-totalFunded, remainingUTXOs)
+			} else {
+				fundingUTXOs = leastOverFund(enough, remainingUTXOs)
+			}
+			if len(fundingUTXOs) == 0 {
+				return allFundingUTXOs
+			}
+			totalFunded += sumUTXOs(fundingUTXOs)
+			if totalFunded > avail-keep {
+				return allFundingUTXOs
+			}
+			allFundingUTXOs = append(allFundingUTXOs, fundingUTXOs)
+			remainingUTXOs = utxoSetDiff(remainingUTXOs, fundingUTXOs)
+		}
+		return allFundingUTXOs
+	}
+
+	returnValues := func(allFundingUTXOs [][]*compositeUTXO) (coins []asset.Coins, redeemScripts [][]dex.Bytes, fundingCoins []*fundingCoin, err error) {
+		coins = make([]asset.Coins, len(allFundingUTXOs))
+		fundingCoins = make([]*fundingCoin, 0, len(allFundingUTXOs))
+		redeemScripts = make([][]dex.Bytes, len(allFundingUTXOs))
+		for i, fundingUTXOs := range allFundingUTXOs {
+			coins[i] = make(asset.Coins, len(fundingUTXOs))
+			redeemScripts[i] = make([]dex.Bytes, len(fundingUTXOs))
+			for j, output := range fundingUTXOs {
+				txHash, err := chainhash.NewHashFromStr(output.rpc.TxID)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("error decoding txid: %w", err)
+				}
+				coins[i][j] = newOutput(txHash, output.rpc.Vout, toAtoms(output.rpc.Amount), output.rpc.Tree)
+				fundingCoins = append(fundingCoins, &fundingCoin{
+					op:   newOutput(txHash, output.rpc.Vout, toAtoms(output.rpc.Amount), output.rpc.Tree),
+					addr: output.rpc.Address,
+				})
+				redeemScript, err := hex.DecodeString(output.rpc.RedeemScript)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w",
+						txHash, output.rpc.RedeemScript, err)
+				}
+				redeemScripts[i][j] = redeemScript
+			}
+		}
+		return
+	}
+
+	// Attempt to fund all orders by selecting the order that requires the least
+	// over funding, removing the funding utxos from the set of available utxos,
+	// and continuing until all orders are funded.
+	allFundingUTXOs := fundAllOrders()
+	if allFundingUTXOs != nil {
+		return returnValues(allFundingUTXOs)
+	}
+
+	// Return nil if a split is allowed. There is no need to fund in priority
+	// order if a split will be done regardless.
+	if splitAllowed {
+		return returnValues([][]*compositeUTXO{})
+	}
+
+	// If could not fully fund, fund as much as possible in the priority
+	// order.
+	allFundingUTXOs = fundInOrder(values)
+	return returnValues(allFundingUTXOs)
+}
+
+// fundMultiSplitTx uses the utxos provided and attempts to fund a multi-split
+// transaction to fund each of the orders. If successful, it returns the
+// funding coins and outputs.
+func (dcr *ExchangeWallet) fundMultiSplitTx(orders []*asset.MultiOrderValue, utxos []*compositeUTXO,
+	splitTxFeeRate, maxFeeRate, splitBuffer, keep, maxLock uint64) (bool, asset.Coins, []*fundingCoin) {
+	_, totalOutputRequired := dcr.fundsRequiredForMultiOrders(orders, maxFeeRate, splitBuffer)
+
+	var splitTxSizeWithoutInputs uint32 = dexdcr.MsgTxOverhead
+	numOutputs := len(orders)
+	if keep > 0 {
+		numOutputs++
+	}
+	splitTxSizeWithoutInputs += uint32(dexdcr.P2PKHOutputSize * numOutputs)
+
+	enough := func(sum uint64, size uint32, utxo *compositeUTXO) (bool, uint64) {
+		totalSum := sum + toAtoms(utxo.rpc.Amount)
+		totalSize := size + utxo.input.Size()
+		splitTxFee := uint64(splitTxSizeWithoutInputs+totalSize) * splitTxFeeRate
+		req := totalOutputRequired + splitTxFee
+		return totalSum >= req, totalSum - req
+	}
+
+	var avail uint64
+	for _, utxo := range utxos {
+		avail += toAtoms(utxo.rpc.Amount)
+	}
+
+	fundSplitCoins, _, spents, _, inputsSize, err := dcr.fundInternalWithUTXOs(utxos, keep, enough, false)
+	if err != nil {
+		return false, nil, nil
+	}
+
+	if maxLock > 0 {
+		totalSize := inputsSize + uint64(splitTxSizeWithoutInputs)
+		if totalOutputRequired+(totalSize*splitTxFeeRate) > maxLock {
+			return false, nil, nil
+		}
+	}
+
+	return true, fundSplitCoins, spents
+}
+
+// submitMultiSplitTx creates a multi-split transaction using fundingCoins with
+// one output for each order, and submits it to the network.
+func (dcr *ExchangeWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*fundingCoin, orders []*asset.MultiOrderValue,
+	maxFeeRate, splitTxFeeRate, splitBuffer uint64) ([]asset.Coins, uint64, error) {
+	baseTx := wire.NewMsgTx()
+	_, err := dcr.addInputCoins(baseTx, fundingCoins)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	cfg := dcr.config()
+	getAddr := func() (stdaddr.Address, error) {
+		if cfg.tradingAccount != "" {
+			return dcr.wallet.ExternalAddress(dcr.ctx, cfg.tradingAccount)
+		}
+		return dcr.wallet.InternalAddress(dcr.ctx, cfg.primaryAcct)
+	}
+
+	requiredForOrders, _ := dcr.fundsRequiredForMultiOrders(orders, maxFeeRate, splitBuffer)
+	outputAddresses := make([]stdaddr.Address, len(orders))
+	for i, req := range requiredForOrders {
+		outputAddr, err := getAddr()
+		if err != nil {
+			return nil, 0, err
+		}
+		outputAddresses[i] = outputAddr
+		payScriptVer, payScript := outputAddr.PaymentScript()
+		txOut := newTxOut(int64(req), payScriptVer, payScript)
+		baseTx.AddTxOut(txOut)
+	}
+
+	tx, err := dcr.sendWithReturn(baseTx, splitTxFeeRate, -1)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	coins := make([]asset.Coins, len(orders))
+	fcs := make([]*fundingCoin, len(orders))
+	for i := range coins {
+		coins[i] = asset.Coins{newOutput(tx.CachedTxHash(), uint32(i), uint64(tx.TxOut[i].Value), wire.TxTreeRegular)}
+		fcs[i] = &fundingCoin{
+			op:   newOutput(tx.CachedTxHash(), uint32(i), uint64(tx.TxOut[i].Value), wire.TxTreeRegular),
+			addr: outputAddresses[i].String(),
+		}
+	}
+	dcr.lockFundingCoins(fcs)
+
+	var totalOut uint64
+	for _, txOut := range tx.TxOut {
+		totalOut += uint64(txOut.Value)
+	}
+
+	var totalIn uint64
+	for _, txIn := range fundingCoins {
+		totalIn += txIn.Value()
+	}
+
+	return coins, totalIn - totalOut, nil
+}
+
+// fundMultiWithSplit creates a split transaction to fund multiple orders. It
+// attempts to fund as many of the orders as possible without a split transaction,
+// and only creates a split transaction for the remaining orders. This is only
+// called after it has been determined that all of the orders cannot be funded
+// without a split transaction.
+func (dcr *ExchangeWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.MultiOrderValue,
+	splitTxFeeRate, maxFeeRate, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
+	utxos, err := dcr.spendableUTXOs()
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("error getting spendable utxos: %w", err)
+	}
+
+	var avail uint64
+	for _, utxo := range utxos {
+		avail += toAtoms(utxo.rpc.Amount)
+	}
+
+	canFund, splitCoins, splitSpents := dcr.fundMultiSplitTx(values, utxos, splitTxFeeRate, maxFeeRate, splitBuffer, keep, maxLock)
+	if !canFund {
+		return nil, nil, 0, fmt.Errorf("cannot fund all with split")
+	}
+
+	remainingUTXOs := utxos
+	remainingOrders := values
+
+	// The return values must be in the same order as the values that were
+	// passed in, so we keep track of the original indexes here.
+	indexToFundingCoins := make(map[int][]*compositeUTXO, len(values))
+	remainingIndexes := make([]int, len(values))
+	for i := range remainingIndexes {
+		remainingIndexes[i] = i
+	}
+
+	var totalFunded uint64
+
+	// Find each of the orders that can be funded without being included
+	// in the split transaction.
+	for range values {
+		// First find the order the can be funded with the least overlock.
+		// If there is no order that can be funded without going over the
+		// maxLock limit, or not leaving enough for bond reserves, then all
+		// of the remaining orders must be funded with the split transaction.
+		orderIndex, fundingUTXOs := dcr.orderWithLeastOverFund(maxLock-totalFunded, maxFeeRate, remainingOrders, remainingUTXOs)
+		if orderIndex == -1 {
+			break
+		}
+		totalFunded += sumUTXOs(fundingUTXOs)
+		if totalFunded > avail-keep {
+			break
+		}
+
+		newRemainingOrders := make([]*asset.MultiOrderValue, 0, len(remainingOrders)-1)
+		newRemainingIndexes := make([]int, 0, len(remainingOrders)-1)
+		for j := range remainingOrders {
+			if j != orderIndex {
+				newRemainingOrders = append(newRemainingOrders, remainingOrders[j])
+				newRemainingIndexes = append(newRemainingIndexes, remainingIndexes[j])
+			}
+		}
+		remainingUTXOs = utxoSetDiff(remainingUTXOs, fundingUTXOs)
+
+		// Then we make sure that a split transaction can be created for
+		// any remaining orders without using the utxos returned by
+		// orderWithLeastOverFund.
+		if len(newRemainingOrders) > 0 {
+			canFund, newSplitCoins, newSpents := dcr.fundMultiSplitTx(newRemainingOrders, remainingUTXOs,
+				splitTxFeeRate, maxFeeRate, splitBuffer, keep, maxLock-totalFunded)
+			if !canFund {
+				break
+			}
+			splitCoins = newSplitCoins
+			splitSpents = newSpents
+		}
+
+		indexToFundingCoins[remainingIndexes[orderIndex]] = fundingUTXOs
+		remainingOrders = newRemainingOrders
+		remainingIndexes = newRemainingIndexes
+	}
+
+	var splitOutputCoins []asset.Coins
+	var splitFees uint64
+
+	// This should always be true, otherwise this function would not have been
+	// called.
+	if len(remainingOrders) > 0 {
+		splitOutputCoins, splitFees, err = dcr.submitMultiSplitTx(splitCoins,
+			splitSpents, remainingOrders, maxFeeRate, splitTxFeeRate, splitBuffer)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("error creating split transaction: %w", err)
+		}
+	}
+
+	coins := make([]asset.Coins, len(values))
+	redeemScripts := make([][]dex.Bytes, len(values))
+	spents := make([]*fundingCoin, 0, len(values))
+
+	var splitIndex int
+
+	for i := range values {
+		if fundingUTXOs, ok := indexToFundingCoins[i]; ok {
+			coins[i] = make(asset.Coins, len(fundingUTXOs))
+			redeemScripts[i] = make([]dex.Bytes, len(fundingUTXOs))
+			for j, unspent := range fundingUTXOs {
+				txHash, err := chainhash.NewHashFromStr(unspent.rpc.TxID)
+				if err != nil {
+					return nil, nil, 0, fmt.Errorf("error decoding txid from rpc server %s: %w", unspent.rpc.TxID, err)
+				}
+				output := newOutput(txHash, unspent.rpc.Vout, toAtoms(unspent.rpc.Amount), unspent.rpc.Tree)
+				coins[i][j] = output
+				fc := &fundingCoin{
+					op:   output,
+					addr: unspent.rpc.Address,
+				}
+				spents = append(spents, fc)
+				redeemScript, err := hex.DecodeString(unspent.rpc.RedeemScript)
+				if err != nil {
+					return nil, nil, 0, fmt.Errorf("error decoding redeem script for %s, script = %s: %w",
+						txHash, unspent.rpc.RedeemScript, err)
+				}
+				redeemScripts[i][j] = redeemScript
+			}
+		} else {
+			coins[i] = splitOutputCoins[splitIndex]
+			redeemScripts[i] = []dex.Bytes{nil}
+			splitIndex++
+		}
+	}
+
+	dcr.lockFundingCoins(spents)
+
+	return coins, redeemScripts, splitFees, nil
+}
+
+// fundMulti first attempts to fund each of the orders with with the available
+// UTXOs. If a split is not allowed, it will fund the orders that it was able
+// to fund. If splitting is allowed, a split transaction will be created to fund
+// all of the orders.
+func (dcr *ExchangeWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue, splitTxFeeRate, maxFeeRate uint64, allowSplit bool, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock()
+
+	reserves := dcr.reserves()
+
+	coins, redeemScripts, fundingCoins, err := dcr.fundMultiBestEffort(reserves, maxLock, values, maxFeeRate, allowSplit)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if len(coins) == len(values) || !allowSplit {
+		dcr.lockFundingCoins(fundingCoins)
+		return coins, redeemScripts, 0, nil
+	}
+
+	return dcr.fundMultiWithSplit(reserves, maxLock, values, splitTxFeeRate, maxFeeRate, splitBuffer)
+}
+
+func (dcr *ExchangeWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) (coins []asset.Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error) {
+	var totalRequiredForOrders uint64
+	for _, value := range mo.Values {
+		if value.Value == 0 {
+			return nil, nil, 0, fmt.Errorf("cannot fund value = 0")
+		}
+		if value.MaxSwapCount == 0 {
+			return nil, nil, 0, fmt.Errorf("cannot fund zero-lot order")
+		}
+		req := calc.RequiredOrderFundsAlt(value.Value, dexdcr.P2PKHInputSize, value.MaxSwapCount,
+			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, mo.MaxFeeRate)
+		totalRequiredForOrders += req
+	}
+
+	if maxLock < totalRequiredForOrders && maxLock != 0 {
+		return nil, nil, 0, fmt.Errorf("maxLock < totalRequiredForOrders (%d < %d)", maxLock, totalRequiredForOrders)
+	}
+
+	if mo.FeeSuggestion > mo.MaxFeeRate {
+		return nil, nil, 0, fmt.Errorf("fee suggestion %d > max fee rate %d", mo.FeeSuggestion, mo.MaxFeeRate)
+	}
+
+	cfg := dcr.config()
+	if cfg.feeRateLimit < mo.MaxFeeRate {
+		return nil, nil, 0, fmt.Errorf(
+			"%v: server's max fee rate %v higher than configured fee rate limit %v",
+			dex.BipIDSymbol(BipID), mo.MaxFeeRate, cfg.feeRateLimit)
+	}
+
+	bal, err := dcr.Balance()
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("error getting balance: %w", err)
+	}
+	if bal.Available < totalRequiredForOrders {
+		return nil, nil, 0, fmt.Errorf("insufficient funds. %d < %d", bal.Available, totalRequiredForOrders)
+	}
+
+	customCfg, err := decodeFundMultiOptions(mo.Options)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("error decoding options: %w", err)
+	}
+
+	var useSplit bool
+	var splitBuffer uint64
+	if customCfg.Split != nil {
+		useSplit = *customCfg.Split
+	}
+	if useSplit && customCfg.SplitBuffer != nil {
+		splitBuffer = *customCfg.SplitBuffer
+	}
+
+	return dcr.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, useSplit, splitBuffer)
+}
+
+// fundOrder finds coins from a set of UTXOs for a specified value. This method
+// is the same as "fund", except the UTXOs must be passed in, and fundingMtx
+// must be held by the caller.
+func (dcr *ExchangeWallet) fundInternalWithUTXOs(utxos []*compositeUTXO, keep uint64, // leave utxos for this reserve amt
+	enough func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64), lock bool) (
+	coins asset.Coins, redeemScripts []dex.Bytes, spents []*fundingCoin, sum, size uint64, err error) {
+	avail := sumUTXOs(utxos)
+	if keep > avail { // skip utxo selection if we can't possibly make reserves
+		return nil, nil, nil, 0, 0, asset.ErrInsufficientBalance
+	}
+
+	var sz uint32
+
+	// First take some UTXOs out of the mix for any keep amount. Select these
+	// with the objective of being as close to the amount as possible, unlike
+	// tryFund that minimizes the number of UTXOs chosen. By doing this first,
+	// we may be making the order spend a larger number of UTXOs, but we
+	// mitigate subsequent order funding failure due to reserves because we know
+	// this order will leave behind sufficient UTXOs without relying on change.
+	if keep > 0 {
+		kept := leastOverFund(reserveEnough(keep), utxos)
+		dcr.log.Debugf("Setting aside %v DCR in %d UTXOs to respect the %v DCR reserved amount",
+			toDCR(sumUTXOs(kept)), len(kept), toDCR(keep))
+		utxosPruned := utxoSetDiff(utxos, kept)
+		sum, _, sz, coins, spents, redeemScripts, err = tryFund(utxosPruned, enough)
+		if err != nil { // try with the full set
+			dcr.log.Debugf("Unable to fund order with UTXOs set aside (%v), trying again with full UTXO set.", err)
+		} // else spents is populated
+	}
+	if len(spents) == 0 { // either keep is zero or it failed with utxosPruned
+		// Without utxos set aside for keep, we have to consider any spendable
+		// change (extra) that the enough func grants us.
+		var extra uint64
+		sum, extra, sz, coins, spents, redeemScripts, err = tryFund(utxos, enough)
+		if err != nil {
+			return nil, nil, nil, 0, 0, err
+		}
+		if avail-sum+extra < keep {
+			return nil, nil, nil, 0, 0, asset.ErrInsufficientBalance
+		}
+		// else we got lucky with the legacy funding approach and there was
+		// either available unspent or the enough func granted spendable change.
+		if keep > 0 && extra > 0 {
+			dcr.log.Debugf("Funding succeeded with %f DCR in spendable change.", toDCR(extra))
+		}
+	}
+
+	if lock {
+		err = dcr.lockFundingCoins(spents)
+		if err != nil {
+			return nil, nil, nil, 0, 0, err
+		}
+	}
+	return coins, redeemScripts, spents, sum, uint64(sz), nil
+}
+
 // fund finds coins for the specified value. A function is provided that can
 // check whether adding the provided output would be enough to satisfy the
 // needed value. Preference is given to selecting coins with 1 or more confs,
@@ -1964,53 +2565,8 @@ func (dcr *ExchangeWallet) fund(keep uint64, // leave utxos for this reserve amt
 		return nil, nil, 0, 0, err
 	}
 
-	avail := sumUTXOs(utxos)
-	if keep > avail { // skip utxo selection if we can't possibly make reserves
-		return nil, nil, 0, 0, asset.ErrInsufficientBalance
-	}
-
-	var sz uint32
-	var spents []*fundingCoin
-
-	// First take some UTXOs out of the mix for any keep amount. Select these
-	// with the objective of being as close to the amount as possible, unlike
-	// tryFund that minimizes the number of UTXOs chosen. By doing this first,
-	// we may be making the order spend a larger number of UTXOs, but we
-	// mitigate subsequent order funding failure due to reserves because we know
-	// this order will leave behind sufficient UTXOs without relying on change.
-	if keep > 0 {
-		kept := leastOverFund(keep, utxos)
-		dcr.log.Debugf("Setting aside %v DCR in %d UTXOs to respect the %v DCR reserved amount",
-			toDCR(sumUTXOs(kept)), len(kept), toDCR(keep))
-		utxosPruned := utxoSetDiff(utxos, kept)
-		sum, _, sz, coins, spents, redeemScripts, err = tryFund(utxosPruned, enough)
-		if err != nil { // try with the full set
-			dcr.log.Debugf("Unable to fund order with UTXOs set aside (%v), trying again with full UTXO set.", err)
-		} // else spents is populated
-	}
-	if len(spents) == 0 { // either keep is zero or it failed with utxosPruned
-		// Without utxos set aside for keep, we have to consider any spendable
-		// change (extra) that the enough func grants us.
-		var extra uint64
-		sum, extra, sz, coins, spents, redeemScripts, err = tryFund(utxos, enough)
-		if err != nil {
-			return nil, nil, 0, 0, err
-		}
-		if avail-sum+extra < keep {
-			return nil, nil, 0, 0, asset.ErrInsufficientBalance
-		}
-		// else we got lucky with the legacy funding approach and there was
-		// either available unspent or the enough func granted spendable change.
-		if keep > 0 && extra > 0 {
-			dcr.log.Debugf("Funding succeeded with %f DCR in spendable change.", toDCR(extra))
-		}
-	}
-
-	err = dcr.lockFundingCoins(spents)
-	if err != nil {
-		return nil, nil, 0, 0, err
-	}
-	return coins, redeemScripts, sum, uint64(sz), nil
+	coins, redeemScripts, _, sum, size, err = dcr.fundInternalWithUTXOs(utxos, keep, enough, true)
+	return coins, redeemScripts, sum, size, err
 }
 
 // spendableUTXOs generates a slice of spendable *compositeUTXO.
@@ -2283,6 +2839,21 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	}
 	for _, c := range fCoins {
 		dcr.fundingCoins[c.op.pt] = c
+	}
+	return nil
+}
+
+func (dcr *ExchangeWallet) unlockFundingCoins(fCoins []*fundingCoin) error {
+	wireOPs := make([]*wire.OutPoint, 0, len(fCoins))
+	for _, c := range fCoins {
+		wireOPs = append(wireOPs, wire.NewOutPoint(c.op.txHash(), c.op.vout(), c.op.tree))
+	}
+	err := dcr.wallet.LockUnspent(dcr.ctx, true, wireOPs)
+	if err != nil {
+		return err
+	}
+	for _, c := range fCoins {
+		delete(dcr.fundingCoins, c.op.pt)
 	}
 	return nil
 }

@@ -976,7 +976,6 @@ var _ asset.Bonder = (*baseWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWalletSPV)(nil)
 var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
 var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
-var _ asset.MultiOrderFunder = (*baseWallet)(nil)
 var _ asset.AddressReturner = (*baseWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet

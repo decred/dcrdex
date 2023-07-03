@@ -4,6 +4,7 @@
 package dcr
 
 import (
+	"math"
 	"math/rand"
 	"sort"
 	"time"
@@ -63,6 +64,22 @@ func orderEnough(val, lots, feeRate uint64, reportChange bool) func(sum uint64, 
 	}
 }
 
+// reserveEnough generates a function that can be used as the enough argument
+// to the fund method. The function returns true if sum is greater than equal
+// to amt.
+func reserveEnough(amt uint64) func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64) {
+	return func(sum uint64, _ uint32, unspent *compositeUTXO) (bool, uint64) {
+		return sum+toAtoms(unspent.rpc.Amount) >= amt, 0
+	}
+}
+
+func sumUTXOSize(set []*compositeUTXO) (tot uint32) {
+	for _, utxo := range set {
+		tot += utxo.input.Size()
+	}
+	return tot
+}
+
 func sumUTXOs(set []*compositeUTXO) (tot uint64) {
 	for _, utxo := range set {
 		tot += toAtoms(utxo.rpc.Amount)
@@ -76,7 +93,7 @@ func sumUTXOs(set []*compositeUTXO) (tot uint64) {
 // involves two passes over the UTXOs. The first pass randomly selects
 // each UTXO with 50% probability. Then, the second pass selects any
 // unused UTXOs until the total value is greater than or equal to amt.
-func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compositeUTXO {
+func subsetWithLeastOverFund(enough func(uint64, uint32, *compositeUTXO) (bool, uint64), maxFund uint64, utxos []*compositeUTXO) []*compositeUTXO {
 	best := uint64(1 << 62)
 	var bestIncluded []bool
 	bestNumIncluded := 0
@@ -92,9 +109,9 @@ func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compos
 	included := make([]bool, len(utxos))
 	const iterations = 1000
 
-searchLoop:
 	for nRep := 0; nRep < iterations; nRep++ {
 		var nTotal uint64
+		var totalSize uint32
 		var numIncluded int
 
 		for nPass := 0; nPass < 2; nPass++ {
@@ -108,9 +125,13 @@ searchLoop:
 				if use {
 					included[i] = true
 					numIncluded++
+					totalBefore := nTotal
+					sizeBefore := totalSize
 					nTotal += toAtoms(shuffledUTXOs[i].rpc.Amount)
-					if nTotal >= amt {
-						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) {
+					totalSize += shuffledUTXOs[i].input.Size()
+
+					if e, _ := enough(totalBefore, sizeBefore, shuffledUTXOs[i]); e {
+						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) && nTotal <= maxFund {
 							best = nTotal
 							if bestIncluded == nil {
 								bestIncluded = make([]bool, len(shuffledUTXOs))
@@ -118,12 +139,11 @@ searchLoop:
 							copy(bestIncluded, included)
 							bestNumIncluded = numIncluded
 						}
-						if nTotal == amt {
-							break searchLoop
-						}
+
 						included[i] = false
-						nTotal -= toAtoms(shuffledUTXOs[i].rpc.Amount)
 						numIncluded--
+						nTotal -= toAtoms(shuffledUTXOs[i].rpc.Amount)
+						totalSize -= shuffledUTXOs[i].input.Size()
 					}
 				}
 			}
@@ -165,37 +185,78 @@ searchLoop:
 //
 // If the provided UTXO set has less combined value than the requested amount a
 // nil slice is returned.
-func leastOverFund(amt uint64, utxos []*compositeUTXO) []*compositeUTXO {
-	if amt == 0 || sumUTXOs(utxos) < amt {
-		return nil
+func leastOverFund(enough func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64), utxos []*compositeUTXO) []*compositeUTXO {
+	return leastOverFundWithLimit(enough, math.MaxUint64, utxos)
+}
+
+// enoughWithoutAdditional is used to utilize an "enough" function with a set
+// of UTXOs when we are not looking to add another UTXO to the set, just
+// check if the current set if UTXOs is enough.
+func enoughWithoutAdditional(enough func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64), utxos []*compositeUTXO) bool {
+	if len(utxos) == 0 {
+		return false
+	}
+
+	if len(utxos) == 1 {
+		e, _ := enough(0, 0, utxos[0])
+		return e
+	}
+
+	valueWithoutLast := sumUTXOs(utxos[:len(utxos)-1])
+	sizeWithoutLast := sumUTXOSize(utxos[:len(utxos)-1])
+
+	e, _ := enough(valueWithoutLast, sizeWithoutLast, utxos[len(utxos)-1])
+	return e
+}
+
+// leastOverFundWithLimit is the same as leastOverFund, but with an additional
+// maxFund parameter. The total value of the returned UTXOs will not exceed
+// maxFund.
+func leastOverFundWithLimit(enough func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64), maxFund uint64, utxos []*compositeUTXO) []*compositeUTXO {
+	// Remove the UTXOs that are larger than maxFund
+	var smallEnoughUTXOs []*compositeUTXO
+	idx := sort.Search(len(utxos), func(i int) bool {
+		utxo := utxos[i]
+		return toAtoms(utxo.rpc.Amount) > maxFund
+	})
+	if idx == len(utxos) {
+		smallEnoughUTXOs = utxos
+	} else {
+		smallEnoughUTXOs = utxos[:idx]
 	}
 
 	// Partition - smallest UTXO that is large enough to fully fund, and the set
 	// of smaller ones.
-	idx := sort.Search(len(utxos), func(i int) bool {
-		return toAtoms(utxos[i].rpc.Amount) >= amt
+	idx = sort.Search(len(smallEnoughUTXOs), func(i int) bool {
+		utxo := smallEnoughUTXOs[i]
+		e, _ := enough(0, 0, utxo)
+		return e
 	})
 	var small []*compositeUTXO
-	var single *compositeUTXO // only return this if smaller ones would use more
-	if idx == len(utxos) {    // no one is enough
-		small = utxos
+	var single *compositeUTXO         // only return this if smaller ones would use more
+	if idx == len(smallEnoughUTXOs) { // no one is enough
+		small = smallEnoughUTXOs
 	} else {
-		small = utxos[:idx]
-		single = utxos[idx]
+		small = smallEnoughUTXOs[:idx]
+		single = smallEnoughUTXOs[idx]
 	}
 
-	// Find a subset of the small UTXO set with smallest combined amount.
 	var set []*compositeUTXO
-	if sumUTXOs(small) >= amt {
-		set = subsetWithLeastSumGreaterThan(amt, small)
-	} else if single != nil {
-		return []*compositeUTXO{single}
+	if !enoughWithoutAdditional(enough, small) {
+		if single != nil {
+			return []*compositeUTXO{single}
+		} else {
+			return nil
+		}
+	} else {
+		set = subsetWithLeastOverFund(enough, maxFund, small)
 	}
 
 	// Return the small UTXO subset if it is less than the single big UTXO.
 	if single != nil && toAtoms(single.rpc.Amount) < sumUTXOs(set) {
 		return []*compositeUTXO{single}
 	}
+
 	return set
 }
 

@@ -1069,6 +1069,10 @@ func (w *TXCWallet) ReturnRefundContracts(contracts [][]byte) {
 	w.returnedContracts = contracts
 }
 
+func (*TXCWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) (coins []asset.Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error) {
+	return nil, nil, 0, nil
+}
+
 type TAccountLocker struct {
 	*TXCWallet
 	reserveNRedemptions    uint64

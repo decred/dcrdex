@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 )
 
@@ -14,7 +15,8 @@ func Test_leastOverFund(t *testing.T) {
 	amt := uint64(10e8)
 	newU := func(amt float64) *compositeUTXO {
 		return &compositeUTXO{
-			rpc: &walletjson.ListUnspentResult{Amount: amt},
+			rpc:   &walletjson.ListUnspentResult{Amount: amt},
+			input: &dexdcr.SpendInfo{},
 		}
 	}
 	tests := []struct {
@@ -80,7 +82,7 @@ func Test_leastOverFund(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := leastOverFund(amt, tt.utxos)
+			got := leastOverFund(reserveEnough(amt), tt.utxos)
 			sort.Slice(got, func(i int, j int) bool {
 				return got[i].rpc.Amount < got[j].rpc.Amount
 			})
@@ -113,7 +115,8 @@ func Fuzz_leastOverFund(f *testing.F) {
 
 	newU := func(amt float64) *compositeUTXO {
 		return &compositeUTXO{
-			rpc: &walletjson.ListUnspentResult{Amount: amt},
+			rpc:   &walletjson.ListUnspentResult{Amount: amt},
+			input: &dexdcr.SpendInfo{},
 		}
 	}
 
@@ -140,7 +143,7 @@ func Fuzz_leastOverFund(f *testing.F) {
 			utxos[i] = newU(v)
 		}
 		startTime := time.Now()
-		leastOverFund(amt*1e8, utxos)
+		leastOverFund(reserveEnough(amt*1e8), utxos)
 		totalDuration += time.Since(startTime)
 		totalUTXO += int64(n)
 	})
@@ -157,12 +160,13 @@ func BenchmarkLeastOverFund(b *testing.B) {
 			rpc: &walletjson.ListUnspentResult{
 				Amount: float64(1+rnd.Int31n(100)) / float64(1e8),
 			},
+			input: &dexdcr.SpendInfo{},
 		}
 		utxos[i] = utxo
 	}
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		leastOverFund(10_000, utxos)
+		leastOverFund(reserveEnough(10_000), utxos)
 	}
 }
 
