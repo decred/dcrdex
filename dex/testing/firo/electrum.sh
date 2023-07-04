@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+set -ex
+
+# https://github.com/spesmilo/electrum/issues/7833 (fixed in 4.3)
+# possible alt workaround: python3 -m pip install "protobuf>=3.12,<4"
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
+SCRIPT_DIR=$(pwd)
+
+# Electrum-Firo Version 4.1.5.2
+COMMIT=a3f64386efc9069cae83e23c241331de6f418b2f
+
+GENESIS=a42b98f04cc2916e8adfb5d9db8a2227c4629bc205748ed2f33180b636ee885b # regtest
+RPCPORT=8001
+EX_PORT=50002
+
+ASSET_DIR=~/dextest/electrum/firo
+ELECTRUM_DIR=${ASSET_DIR}/client
+REPO_DIR=${ELECTRUM_DIR}/electrum-repo
+WALLET_DIR=${ELECTRUM_DIR}/wallet
+NET_DIR=${WALLET_DIR}/regtest
+
+rm -rf ${NET_DIR}/blockchain_headers ${NET_DIR}/forks ${NET_DIR}/certs ${NET_DIR}/wallets/default_wallet
+mkdir -p ${NET_DIR}/regtest
+mkdir -p ${NET_DIR}/wallets
+mkdir -p ${REPO_DIR}
+
+cd ${REPO_DIR}
+
+if [ ! -d "${REPO_DIR}/.git" ]; then
+    git init
+    git remote add origin https://github.com/firoorg/electrum-firo.git
+fi
+
+git remote -v
+
+git fetch --depth 1 origin ${COMMIT}
+git reset --hard FETCH_HEAD
+
+if [ ! -d "${ELECTRUM_DIR}/venv" ]; then
+    python3 -m venv ${ELECTRUM_DIR}/venv
+fi
+source ${ELECTRUM_DIR}/venv/bin/activate
+python -m ensurepip --upgrade
+pip install -e .
+pip install requests cryptography pycryptodomex pyqt5
+
+cp "${SCRIPT_DIR}/electrum_regtest_wallet" "${NET_DIR}/wallets/default_wallet"
+
+cat > "${NET_DIR}/config" <<EOF
+{
+    "auto_connect": false,
+    "tor_auto_on": false,
+    "detect_proxy": false,
+    "blockchain_preferred_block": {
+        "hash": "${GENESIS}",
+        "height": 0
+    },
+    "check_updates": false,
+    "config_version": 3,
+    "decimal_point": 8,
+    "dont_show_testnet_warning": true,
+    "gui_last_wallet": "${NET_DIR}/wallets/default_wallet",
+    "is_maximized": false,
+    "oneserver": false,
+    "recently_open": [
+        "${NET_DIR}/wallets/default_wallet"
+    ],
+    "rpchost": "127.0.0.1",
+    "rpcpassword": "pass",
+    "rpcport": ${RPCPORT},
+    "rpcuser": "user",
+    "server": "127.0.0.1:${EX_PORT}:s",
+    "show_addresses_tab": true,
+    "show_console_tab": true,
+    "show_utxo_tab": true,
+    "use_rbf": false
+}
+EOF
+
+cat > "${ASSET_DIR}/client-config.ini" <<EOF
+rpcuser=user
+rpcpassword=pass
+rpcbind=127.0.0.1:${RPCPORT}
+EOF
+
+./electrum-firo --regtest --dir=${WALLET_DIR}
