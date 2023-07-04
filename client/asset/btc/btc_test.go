@@ -413,15 +413,75 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 			return json.Marshal(false)
 		}
 		coins := make([]*RPCOutpoint, 0)
-		_ = json.Unmarshal(params[1], &coins)
-		if string(params[0]) == "false" {
-			if c.lockedCoins != nil {
-				c.lockedCoins = append(c.lockedCoins, coins...)
-			} else {
-				c.lockedCoins = coins
+
+		// There may not be 2 params for this. Bitcoin accepts 'lockunspent true'
+		// so that is a valid input to this request. And although bitcoin accepts
+		// 'lockunspent true null' other btc clones may not.
+		// Bitcoin parameter checking changes by 0.16 to ignore this null. So any
+		// clones < bitcoin 0.16 *may* not allow the null parameter and error.
+		// Known clones that would error: Zcash, Doge, Firo
+
+		oneParam := func(param0 json.RawMessage) ([]byte, error) {
+			if string(param0) == "true" {
+				c.lockedCoins = nil
+				return json.Marshal(true)
 			}
+			return json.Marshal(true)
 		}
-		return json.Marshal(true)
+
+		switch len(params) {
+		case 1:
+			return oneParam(params[0])
+		case 2:
+			if string(params[1]) == "null" {
+				// Then is the 1 param case plus an unused 'null'
+				return oneParam(params[0])
+			}
+
+			err := json.Unmarshal(params[1], &coins)
+			if err != nil {
+				return json.Marshal(false)
+			}
+
+			if string(params[0]) == "false" {
+				var dup bool
+				var newLockedList []*RPCOutpoint
+				for _, coin := range coins {
+					dup = false
+					for _, lockedCoin := range c.lockedCoins {
+						if lockedCoin.TxID == coin.TxID && lockedCoin.Vout == coin.Vout {
+							dup = true
+							break
+						}
+					}
+					if !dup {
+						newLockedList = append(newLockedList, coin)
+					}
+				}
+				c.lockedCoins = append(c.lockedCoins, newLockedList...)
+				return json.Marshal(true)
+			}
+
+			// unlock 'true'
+			var remove bool
+			var newLockedList []*RPCOutpoint
+			for _, lockedCoin := range c.lockedCoins {
+				remove = false
+				for _, coin := range coins {
+					if lockedCoin.TxID == coin.TxID && lockedCoin.Vout == coin.Vout {
+						remove = true
+						break
+					}
+				}
+				if !remove {
+					newLockedList = append(newLockedList, lockedCoin)
+				}
+			}
+			c.lockedCoins = newLockedList
+			return json.Marshal(true)
+		default:
+			return nil, fmt.Errorf("invalid number of params %d", len(params))
+		}
 	case methodListLockUnspent:
 		return mustMarshal(c.listLockUnspent), nil
 	case methodGetBalances:

@@ -3068,7 +3068,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, input
 	// Unlock spent coins
 	returnErr := btc.ReturnCoins(coins)
 	if returnErr != nil {
-		btc.log.Errorf("error unlocking spent coins: %v", err)
+		btc.log.Errorf("error unlocking spent coins: %v", returnErr)
 	}
 
 	btc.log.Infof("Funding %s %s order with split output coin %v from original coins %v",
