@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+#
+# Set up Electrum-Firo (electrum) regtest client wallet for testing.
+# - Expects the firo regtest chain server harness to be running. 
+# - Expects an ElectrumX_Firo server runing on top of the chain server
+# - Connects to the ElectrumX server over SSL at localhost:EX_PORT
+# - Exposes electrum RPC at localhost:RPC_PORT - Dex connects here
+#
+# Requires:
+# - python3  - tested python3.10 and minimal testing python3.7
+# - pip3     - for boostrap loading pip
+# - git
+#
+# See Also: README_ELECTRUM_HARNESSES.md and README_HARNESS.md
 
 set -ex
 

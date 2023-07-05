@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 #
 # Set up ElectrumX-Firo (electrumX) regtest server for testing.
-# Expects the firo regnet harness to be running and listening for RPC's on
-# harness.sh ALPHA_RPC_PORT="53768"
+# - Expects the firo regtest chain harness to be running and listening 
+#   for RPC's on harness.sh ALPHA_RPC_PORT="53768"
+# - Exposes default RPC port at localhost:8000
+# - Exposes wallet SSL connection service at localhost:50002  
 #
-# Devs should maybe install gencerts ;-)
-# go install github.com/decred/dcrd/cmd/gencerts@release-v1.7
+# Requires:
+# - python3  - tested python3.10 and minimal testing python3.7
+# - pip3     - for boostrap loading pip
+# - gencerts - go install github.com/decred/dcrd/cmd/gencerts@release-v1.7
+# - git
+#
+# See Also: README_ELECTRUM_HARNESSES.md and README_HARNESS.md
 
 set -ex
 
