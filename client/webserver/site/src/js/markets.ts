@@ -930,6 +930,7 @@ export default class MarketsPage extends BasePage {
   updateRegistrationStatusView () {
     const { page, market: { dex } } = this
     page.regStatusDex.textContent = dex.host
+    page.postingBondsDex.textContent = dex.host
 
     if (dex.tier >= 1) {
       this.setRegistrationStatusView(intl.prep(intl.ID_REGISTRATION_FEE_SUCCESS), '', 'completed')
@@ -960,7 +961,7 @@ export default class MarketsPage extends BasePage {
 
     if (market.dex.tier >= 1) {
       const toggle = () => {
-        Doc.hide(page.registrationStatus, page.bondRequired)
+        Doc.hide(page.registrationStatus, page.bondRequired, page.bondCreationPending)
         this.resolveOrderFormVisibility()
       }
       if (Doc.isHidden(page.orderForm)) {
@@ -975,6 +976,8 @@ export default class MarketsPage extends BasePage {
       Doc.show(page.notRegistered)
     } else if (this.hasPendingBonds()) {
       Doc.show(page.registrationStatus)
+    } else if (market.dex.bondOptions.targetTier > 0) {
+      Doc.show(page.bondCreationPending)
     } else {
       page.acctTier.textContent = `${market.dex.tier}`
       page.dexSettingsLink.href = `/dexsettings/${market.dex.host}`

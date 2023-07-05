@@ -1216,7 +1216,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 	},
 	postBondRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" bond assetID (lockTime "cert" maintain)`,
+		argsShort:   `"addr" bond assetID (maintain "cert")`,
 		cmdSummary: `Post new bond for DEX. An ok response does not mean that the bond is active.
 		Bond is active after the bond transaction has been confirmed and the server notified.`,
 		pwArgsLong: `Password Args:
@@ -1225,8 +1225,8 @@ Registration is complete after the fee transaction has been confirmed.`,
     addr (string): The DEX address to post bond for for.
     bond (int): The bond amount (in DCR presently).
     assetID (int): The asset ID with which to pay the fee.
-    cert (string): Optional. The TLS certificate path. Only applicable when registering.
-    maintain (bool): Optional. Whether to maintain the trading tier established by this bond. Only applicable when registering. (default is true)`,
+    maintain (bool): Optional. Whether to maintain the trading tier established by this bond. Only applicable when registering. (default is true)
+    cert (string): Optional. The TLS certificate path. Only applicable when registering.`,
 		returns: `Returns:
     {
       "bondID" (string): The bond transactions's txid and output index.

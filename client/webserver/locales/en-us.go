@@ -70,6 +70,8 @@ var EnUS = map[string]string{
 	"need_to_register_msg":           `You need to create an account on <span id="unregisteredDex"></span> to trade.`,
 	"Create Account":                 "Create Account",
 	"reg_status_msg":                 `In order to trade at <span id="regStatusDex" class="text-break"></span>, your pending bond(s) need to be confirmed.`,
+	"posting_bonds_shortly":          "Creating bonds...",
+	"bond_creation_pending_msg":      `In order to trade at <span id="postingBondsDex" class="text-break"></span> bond(s) will be created shortly.`,
 	"action_required_to_trade":       "ACTION REQUIRED TO TRADE",
 	"acct_tier_post_bond":            `You account tier is <span id="acctTier"></span>. You need to post new bonds to trade.`,
 	"enable_bond_maintenance":        "Enable bond maintenance from DEX Settings page.",

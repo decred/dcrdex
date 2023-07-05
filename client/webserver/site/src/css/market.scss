@@ -457,6 +457,14 @@ div[data-handler=markets] {
     color: #777;
   }
 
+  #bondCreationPending {
+    .title {
+      font-weight: bold;
+      margin-bottom: 5px;
+      color: #9b8c09;
+    }
+  }
+
   #registrationStatus {
     .title {
       font-weight: bold;
