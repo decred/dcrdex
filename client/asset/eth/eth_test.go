@@ -1692,7 +1692,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 		eth.lockedFunds.initiateReserves = 0
 		eth.baseWallet.wallets[BipID].lockedFunds.initiateReserves = 0
 
-		allCoins, _, _, err := multiFunder.FundMultiOrder(test.multiOrder, test.maxLock)
+		allCoins, redeemScripts, _, err := multiFunder.FundMultiOrder(test.multiOrder, test.maxLock)
 		if test.expectErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get one", test.name)
@@ -1704,6 +1704,9 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 		}
 		if len(allCoins) != len(test.multiOrder.Values) {
 			t.Fatalf("%s: expected %d coins but got %d", test.name, len(test.multiOrder.Values), len(allCoins))
+		}
+		if len(redeemScripts) != len(test.multiOrder.Values) {
+			t.Fatalf("%s: expected %d redeem scripts but got %d", test.name, len(test.multiOrder.Values), len(redeemScripts))
 		}
 		for i, coins := range allCoins {
 			if len(coins) != 1 {

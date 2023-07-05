@@ -1511,7 +1511,12 @@ func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]ass
 		return nil, nil, 0, err
 	}
 
-	return allCoins, nil, 0, nil
+	redeemScripts := make([][]dex.Bytes, len(ord.Values))
+	for i := range redeemScripts {
+		redeemScripts[i] = []dex.Bytes{nil}
+	}
+
+	return allCoins, redeemScripts, 0, nil
 }
 
 // FundMultiOrder funds multiple orders in one shot. No special handling is
@@ -1561,8 +1566,13 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 		return nil, nil, 0, err
 	}
 
+	redeemScripts := make([][]dex.Bytes, len(ord.Values))
+	for i := range redeemScripts {
+		redeemScripts[i] = []dex.Bytes{nil}
+	}
+
 	success = true
-	return allCoins, nil, 0, nil
+	return allCoins, redeemScripts, 0, nil
 }
 
 // gasEstimates are estimates of gas required for operations involving a swap
