@@ -437,7 +437,11 @@ export default class WalletsPage extends BasePage {
       page.unapproveTokenErr.textContent = res.msg
       Doc.show(page.unapproveTokenErr)
     } else {
-      const feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.symbol.toUpperCase()}`
+      let feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.symbol.toUpperCase()}`
+      const rate = app().fiatRatesMap[parentAsset.id]
+      if (rate) {
+        feeText += ` (${Doc.formatFiatConversion(res.txFee, rate, parentAsset.unitInfo)} USD)`
+      }
       page.unapprovalFeeEstimate.textContent = feeText
     }
     this.showForm(page.unapproveTokenForm)

@@ -796,7 +796,11 @@ export default class MarketsPage extends BasePage {
       page.approveTokenErr.textContent = res.msg
       Doc.show(page.approveTokenErr)
     } else {
-      const feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.info.unitinfo)} ${parentAsset.symbol.toUpperCase()}`
+      let feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.symbol.toUpperCase()}`
+      const rate = app().fiatRatesMap[parentAsset.id]
+      if (rate) {
+        feeText += ` (${Doc.formatFiatConversion(res.txFee, rate, parentAsset.unitInfo)} USD)`
+      }
       page.approvalFeeEstimate.textContent = feeText
     }
     this.showForm(page.approveTokenForm)
