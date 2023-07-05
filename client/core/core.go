@@ -8138,20 +8138,20 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 			bondIDStr := coinIDString(dbBond.AssetID, dbBond.CoinID)
 
 			if int64(dbBond.LockTime) <= lockTimeThresh {
-				c.log.Infof("Loaded expired bond %v. Refund tx: %x", bondIDStr, dbBond.RefundTx)
+				c.log.Infof("Loaded expired bond %v. Refund tx: %v", bondIDStr, dbBond.RefundTx)
 				dc.acct.expiredBonds = append(dc.acct.expiredBonds, dbBond)
 				continue
 			}
 
 			if dbBond.Confirmed {
 				// This bond has already been confirmed by the server.
-				c.log.Infof("Loaded active bond %v. BACKUP refund tx: %x", bondIDStr, dbBond.RefundTx)
+				c.log.Infof("Loaded active bond %v. BACKUP refund tx: %v", bondIDStr, dbBond.RefundTx)
 				dc.acct.bonds = append(dc.acct.bonds, dbBond)
 				continue
 			}
 
 			// Server has not yet confirmed this bond.
-			c.log.Infof("Loaded pending bond %v. Refund tx: %x", bondIDStr, dbBond.RefundTx)
+			c.log.Infof("Loaded pending bond %v. Refund tx: %v", bondIDStr, dbBond.RefundTx)
 			dc.acct.pendingBonds = append(dc.acct.pendingBonds, dbBond)
 
 			// We need to start monitorBondConfs on login since postbond
