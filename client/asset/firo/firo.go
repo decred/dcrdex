@@ -39,7 +39,7 @@ const (
 )
 
 var (
-	configOpts = append(btc.RPCConfigOpts("Firo", "8168"), []*asset.ConfigOption{
+	configOpts = append(btc.RPCConfigOpts("Firo", "8888"), []*asset.ConfigOption{
 		{
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
@@ -164,7 +164,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		NumericGetRawRPC:         false, // getrawtransaction uses either 0/1 Or true/false
 		LegacyValidateAddressRPC: true,  // use validateaddress to read 'ismine' bool
 		SingularWallet:           true,  // one wallet/node
-		UnlockSpends:             false, // checked after sendtoaddress
+		UnlockSpends:             true,  // does Not unlock coins after sendrawtransaction
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     fetchExternalFee,

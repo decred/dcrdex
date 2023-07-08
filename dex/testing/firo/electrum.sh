@@ -52,10 +52,12 @@ git fetch --depth 1 origin ${COMMIT}
 git reset --hard FETCH_HEAD
 
 if [ ! -d "${ELECTRUM_DIR}/venv" ]; then
+    # The venv interpreter will be this python version, e.g. python3.10
     python3 -m venv ${ELECTRUM_DIR}/venv
 fi
 source ${ELECTRUM_DIR}/venv/bin/activate
-python -m ensurepip --upgrade
+python --version
+python -m pip install --upgrade pip # can support more versions than ensurepip
 pip install -e .
 pip install requests cryptography pycryptodomex pyqt5
 

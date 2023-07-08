@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # Set up ElectrumX-Firo (electrumX) regtest server for testing.
-# - Expects the firo regtest chain harness to be running and listening 
+# - Expects the firo regtest chain harness to be running and listening
 #   for RPC's on harness.sh ALPHA_RPC_PORT="53768"
 # - Exposes default RPC port at localhost:8000
-# - Exposes wallet SSL connection service at localhost:50002  
+# - Exposes wallet SSL connection service at localhost:50002
 #
 # Requires:
 # - python3  - tested python3.10 and minimal testing python3.7
@@ -20,7 +20,7 @@ COMMIT=c0cdcc0dfcaa057058fd1ed281557dede924cd27
 
 ELECTRUMX_DIR=~/dextest/electrum/firo/server
 REPO_DIR=${ELECTRUMX_DIR}/electrumx-repo
-DATA_DIR=${ELECTRUMX_DIR}/data  
+DATA_DIR=${ELECTRUMX_DIR}/data
 rm -rf ${DATA_DIR}
 mkdir -p ${REPO_DIR} ${DATA_DIR}
 
@@ -36,7 +36,7 @@ git remote -v
 git fetch --depth 1 origin ${COMMIT}
 git reset --hard FETCH_HEAD
 
-if [ ! -d "${ELECTRUMX_DIR}/venv" ]; then   
+if [ ! -d "${ELECTRUMX_DIR}/venv" ]; then
     python3 -m venv ${ELECTRUMX_DIR}/venv
 fi
 source ${ELECTRUMX_DIR}/venv/bin/activate
@@ -53,7 +53,7 @@ export NET="regtest"
 export DB_ENGINE="leveldb"
 export DB_DIRECTORY="${DATA_DIR}"
 export DAEMON_URL="http://user:pass@127.0.0.1:53768"    # harness:alpha:rpc
-export SERVICES="ssl://localhost:50002,rpc://" 
+export SERVICES="ssl://localhost:50002,rpc://"
 export SSL_CERTFILE="${DATA_DIR}/ssl.cert"
 export SSL_KEYFILE="${DATA_DIR}/ssl.key"
 export PEER_DISCOVERY="off"

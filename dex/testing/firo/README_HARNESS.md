@@ -17,7 +17,7 @@ The harness script will create four connected regtest nodes **alpha**, **beta**,
 will mine some blocks and send some regular transactions.
 
 ```
-# This simnet harness sets up 4 Firo nodes and a set of herness controls
+# This simnet harness sets up 4 Firo nodes and a set of harness controls
 # Each node has a prepared, encrypted, empty wallet
 
 # alpha/
@@ -59,7 +59,7 @@ UTXOs to spend.
 
 **beta**, **gamma**, **delta** will all connect to **alpha** as peers
 
-## Harness control scripts
+## Harness Control Scripts
 
 The `./harness.sh` script will drop you into a tmux window in a directory
 called `harness-ctl`. Inside of this directory are a number of scripts to
@@ -70,10 +70,18 @@ respective node-wallets.
 
 `./alpha getbalance`, for example.
 
+__Other Examples__
+
 `./reorg` will step through a script that causes the alpha node to
 undergo a reorg.
 
 `./quit` shuts down the nodes and closes the tmux session.
+
+## Background Miner
+
+By default the harness also sets up a background miner which mines on the alpha
+node every 15s. This can upset some test logic so it can be disabled by
+setting envoronment var NOMINER="1"
 
 ## Dev Stuff
 
@@ -93,6 +101,6 @@ __Zombie Killer__
 
 (debian)
 ```
-$   killall -9 firod    # kill the daemons
-$   tmux kill-session   # kill tmux server - warning can kill all tmux sessions
+$   killall -9 firod                    # kill running daemons
+$   tmux kill-session -t firo-harness   # kill firo-harness session
 ```

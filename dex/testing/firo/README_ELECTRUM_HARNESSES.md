@@ -36,7 +36,7 @@ Python3 v3.6 is coded but this script was tested using python3.10. Some testing
 veriosn upgraded by the script into a virtual environment each time.
 
 The **electrum.sh** script depends on [python3], [python3 pip] and [git] to run.
-Python3 v3.6 is coded but this svript was tested using python3.10. Some testing 
+Python3 v3.6 is coded but this script was tested using python3.10. Some testing 
 (minimal) was done with 3.7. Git should be latest. Pip will be re-downloaded and 
 version upgraded by the script into a virtual environment each time.
 

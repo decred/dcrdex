@@ -38,12 +38,7 @@ func TestWallet(t *testing.T) {
 		NewWallet: NewWallet,
 		LotSize:   tLotSize,
 		Asset:     tFIRO,
-		FirstWallet: &livetest.WalletName{
-			Node: "delta",
-		},
-		SecondWallet: &livetest.WalletName{
-			Node: "gamma",
-		},
+		SplitTx:   true,
 	})
 }
 
