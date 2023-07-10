@@ -138,8 +138,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Simnet:  "28888",
 	}
 
-	var exw *btc.ExchangeWalletFullNode
-
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:                cfg,
 		MinNetworkVersion:        minNetworkVersion,
@@ -167,21 +165,22 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     fetchExternalFee,
-		PrivKeyFunc: func(addr string) (*btcec.PrivateKey, error) {
-			return privKeyForAddress(exw, addr)
-		},
+		PrivKeyFunc:              nil, // set only for walletTypeRPC below
 	}
 
 	switch cfg.Type {
 	case walletTypeRPC, walletTypeLegacy:
+		var exw *btc.ExchangeWalletFullNode
+		// override PrivKeyFunc - we Do need our own Firo dumpprivkey fn
+		cloneCFG.PrivKeyFunc = func(addr string) (*btcec.PrivateKey, error) {
+			return privKeyForAddress(exw, addr)
+		}
 		var err error
 		exw, err = btc.BTCCloneWallet(cloneCFG)
 		return exw, err
 	case walletTypeElectrum:
 		// override Ports - no default ports
 		cloneCFG.Ports = dexbtc.NetPorts{}
-		// electrum Does have a getbalance RPC
-		cloneCFG.LegacyBalance = false
 		return btc.ElectrumWallet(cloneCFG)
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q for firo", cfg.Type)

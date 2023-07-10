@@ -1,40 +1,7 @@
 #!/usr/bin/env bash
 
-# This simnet harness sets up 4 Firo nodes and a set of herness controls
+# This simnet harness sets up 4 Firo nodes and a set of harness controls
 # Each node has a prepared, encrypted, empty wallet
-
-# alpha/
-# ├── alpha.conf
-# └── regtest
-#     ├── wallet.dat
-
-# beta/
-# ├── beta.conf
-# └── regtest
-#     ├── wallet.dat
-
-# gamma/
-# ├── gamma.conf
-# └── regtest
-#     ├── wallet.dat
-
-# delta/
-# ├── delta.conf
-# └── regtest
-#     ├── wallet.dat
-
-# └── harness-ctl
-#     ├── alpha
-#     ├── beta
-#     ├── connect-alpha
-#     ├── delta
-#     ├── gamma
-#     ├── mine-alpha
-#     ├── mine-beta
-#     ├── quit
-#     ├── reorg
-#     ├── start-wallet
-#     └── stop-wallet
 
 SYMBOL="firo"
 DAEMON="firod"

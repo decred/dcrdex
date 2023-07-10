@@ -1612,6 +1612,10 @@ func bchWallet(wt SimWalletType, node string) (*tWallet, error) {
 	return btcCloneWallet(bch.BipID, node, wt)
 }
 
+func firoWallet(wt SimWalletType, node string) (*tWallet, error) {
+	return btcCloneWallet(firo.BipID, node, wt)
+}
+
 func ethWallet() (*tWallet, error) {
 	return &tWallet{
 		fund:       true,
@@ -1719,10 +1723,6 @@ func dashWallet(node string) (*tWallet, error) {
 
 func dgbWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(dgb.BipID, node, WTCoreClone)
-}
-
-func firoWallet(wt SimWalletType, node string) (*tWallet, error) {
-	return btcCloneWallet(firo.BipID, node, wt)
 }
 
 func zecWallet(node string) (*tWallet, error) {

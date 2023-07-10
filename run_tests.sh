@@ -64,6 +64,7 @@ go test -c -o /dev/null -tags electrumlive ./client/asset/btc
 go test -c -o /dev/null -tags harness ./client/asset/btc/livetest
 go test -c -o /dev/null -tags harness ./client/asset/ltc
 go test -c -o /dev/null -tags harness ./client/asset/bch
+go test -c -o /dev/null -tags harness ./client/asset/firo
 go test -c -o /dev/null -tags harness ./client/asset/eth
 go test -c -o /dev/null -tags rpclive ./client/asset/eth
 go test -c -o /dev/null -tags harness ./client/asset/zec
