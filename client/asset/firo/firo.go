@@ -84,8 +84,7 @@ var (
 				Type:        walletTypeElectrum,
 				Tab:         "Electrum-Firo (external)",
 				Description: "Use an external Electrum-Firo Wallet",
-				// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum-firo", false), "config"), // e.g. ~/.electrum-firo/config		ConfigOpts:        append(rpcOpts, commonOpts...),
-				ConfigOpts: append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", false)...),
+				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", false)...),
 			},
 		},
 	}
