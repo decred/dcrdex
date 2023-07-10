@@ -6,63 +6,62 @@ sandboxed environment for testing dex swap transactions.
 ## Dependencies
 
 The harness depends on [firod] and [firo-cli] to run.
-https://github.com/firoorg/firo/releases binaries or build from source
+Go to <https://github.com/firoorg/firo/releases> for binaries or source.
 
 ## Using
 
 You must have `firod` and `firo-cli` in `PATH` to use the harness.
 
 The harness script will create four connected regtest nodes **alpha**, **beta**,
-**gamma**, **delta**. Each node will have one empty but encrypted wallet. The script
-will mine some blocks and send some regular transactions.
+**gamma**, **delta**. Each node will have one empty but encrypted wallet. The script will mine some blocks and send some regular transactions.
 
-```
-# This simnet harness sets up 4 Firo nodes and a set of harness controls
-# Each node has a prepared, encrypted, empty wallet
+This simnet harness sets up 4 Firo nodes and a set of harness controls
+Each node has a prepared, encrypted, empty wallet
 
-# alpha/
-# ├── alpha.conf
-# └── regtest
-#     ├── wallet.dat
+```text
+alpha/
+├── alpha.conf
+└── regtest
+    ├── wallet.dat
 
-# beta/
-# ├── beta.conf
-# └── regtest
-#     ├── wallet.dat
+beta/
+├── beta.conf
+└── regtest
+    ├── wallet.dat
 
-# gamma/
-# ├── gamma.conf
-# └── regtest
-#     ├── wallet.dat
+gamma/
+├── gamma.conf
+└── regtest
+    ├── wallet.dat
 
-# delta/
-# ├── delta.conf
-# └── regtest
-#     ├── wallet.dat
+delta/
+├── delta.conf
+└── regtest
+    ├── wallet.dat
 
-# └── harness-ctl
-#     ├── alpha
-#     ├── beta
-#     ├── connect-alpha
-#     ├── delta
-#     ├── gamma
-#     ├── mine-alpha
-#     ├── mine-beta
-#     ├── quit
-#     ├── reorg
-#     ├── start-wallet
-#     └── stop-wallet
+└── harness-ctl
+    ├── alpha
+    ├── beta
+    ├── connect-alpha
+    ├── delta
+    ├── gamma
+    ├── mine-alpha
+    ├── mine-beta
+    ├── quit
+    ├── reorg
+    ├── start-wallet
+    └── stop-wallet
 ```
 
 **alpha** is purely a mining node/wallet, and will have mostly coinbase
 UTXOs to spend.
 
-**beta**, **gamma**, **delta** will all connect to **alpha** as peers
+**beta**, **gamma**, **delta** will all connect to **alpha** as peers.
 
 ## Harness Control Scripts
 
 The `./harness.sh` script will drop you into a tmux window in a directory
-called `harness-ctl`. Inside of this directory are a number of scripts to
+called `harness-ctl`. Inside this directory are a number of scripts to
 allow you to perform RPC calls against each wallet.
 
 `./alpha` `./beta` `./gamma` `./delta` are just `firo-cli` configured for their
@@ -70,10 +69,9 @@ respective node-wallets.
 
 `./alpha getbalance`, for example.
 
-__Other Examples__
+### Other Examples 
 
-`./reorg` will step through a script that causes the alpha node to
-undergo a reorg.
+`./reorg` will step through a script that causes the alpha node to undergo a reorg.
 
 `./quit` shuts down the nodes and closes the tmux session.
 
@@ -81,7 +79,7 @@ undergo a reorg.
 
 By default the harness also sets up a background miner which mines on the alpha
 node every 15s. This can upset some test logic so it can be disabled by
-setting envoronment var NOMINER="1"
+setting environment var NOMINER="1"
 
 ## Dev Stuff
 
@@ -97,10 +95,11 @@ zombie firod processes preventing the harness nodes from binding to the
 specified ports. You'll have to manually hunt down the zombie PIDs and `kill`
 them if this happens.
 
-__Zombie Killer__
+### Zombie Killer
 
 (debian)
-```
+
+```bash
 $   killall -9 firod                    # kill running daemons
 $   tmux kill-session -t firo-harness   # kill firo-harness session
 ```
