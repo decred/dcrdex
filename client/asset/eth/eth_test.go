@@ -1465,6 +1465,264 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	checkBalance(eth2, 0, walletBalanceGwei, "funding3")
 }
 
+func TestFundMultiOrder(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testFundMultiOrder(t, BipID) })
+	t.Run("token", func(t *testing.T) { testFundMultiOrder(t, simnetTokenID) })
+}
+
+func testFundMultiOrder(t *testing.T, assetID uint32) {
+	w, eth, node, shutdown := tassetWallet(assetID)
+	multiFunder, ok := w.(asset.MultiOrderFunder)
+	if !ok {
+		t.Fatalf("wallet does not implement MultiOrderFunder")
+	}
+
+	defer shutdown()
+
+	fromAsset := tETH
+	swapGas := dexeth.VersionedGases[fromAsset.Version].Swap
+	if assetID != BipID {
+		fromAsset = tToken
+		node.tokenContractor.allow = unlimitedAllowance
+		swapGas = dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].
+			SwapContracts[fromAsset.Version].Gas.Swap
+	}
+
+	type test struct {
+		name       string
+		multiOrder *asset.MultiOrder
+		maxLock    uint64
+		bal        uint64
+		tokenBal   uint64
+		parentBal  uint64
+
+		ethOnly   bool
+		tokenOnly bool
+
+		expectErr bool
+	}
+
+	tests := []test{
+		{
+			name:      "ok",
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			tokenBal:  uint64(dexeth.GweiFactor),
+			parentBal: uint64(dexeth.GweiFactor),
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+		},
+		{
+			name:      "maxLock just enough, eth",
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			tokenBal:  uint64(dexeth.GweiFactor),
+			parentBal: uint64(dexeth.GweiFactor),
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+			maxLock: uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+		},
+		{
+			name:      "maxLock not enough, eth",
+			ethOnly:   true,
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			tokenBal:  uint64(dexeth.GweiFactor),
+			parentBal: uint64(dexeth.GweiFactor),
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+			maxLock:   uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate - 1,
+			expectErr: true,
+		},
+		{
+			name:      "maxLock just enough, token",
+			tokenOnly: true,
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			tokenBal:  uint64(dexeth.GweiFactor),
+			parentBal: uint64(dexeth.GweiFactor),
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+			maxLock: uint64(dexeth.GweiFactor),
+		},
+		{
+			name:      "maxLock not enough, eth",
+			tokenOnly: true,
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			tokenBal:  uint64(dexeth.GweiFactor),
+			parentBal: uint64(dexeth.GweiFactor),
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+			maxLock: uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+		},
+
+		{
+			name:      "insufficient balance",
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate - 1,
+			tokenBal:  uint64(dexeth.GweiFactor) - 1,
+			parentBal: uint64(dexeth.GweiFactor),
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name:      "parent balance ok",
+			tokenOnly: true,
+			tokenBal:  uint64(dexeth.GweiFactor),
+			parentBal: swapGas * 4 * fromAsset.MaxFeeRate,
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+		},
+		{
+			name:      "insufficient parent balance",
+			tokenOnly: true,
+			tokenBal:  uint64(dexeth.GweiFactor),
+			parentBal: swapGas*4*fromAsset.MaxFeeRate - 1,
+			multiOrder: &asset.MultiOrder{
+				Version:    fromAsset.Version,
+				MaxFeeRate: fromAsset.MaxFeeRate,
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        uint64(dexeth.GweiFactor) / 2,
+						MaxSwapCount: 2,
+					},
+				},
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		if assetID == BipID {
+			if test.tokenOnly {
+				continue
+			}
+			node.bal = dexeth.GweiToWei(test.bal)
+		} else {
+			if test.ethOnly {
+				continue
+			}
+			node.tokenContractor.bal = dexeth.GweiToWei(test.tokenBal)
+			node.tokenParent.node.(*tMempoolNode).bal = dexeth.GweiToWei(test.parentBal)
+		}
+		eth.lockedFunds.initiateReserves = 0
+		eth.baseWallet.wallets[BipID].lockedFunds.initiateReserves = 0
+
+		allCoins, redeemScripts, _, err := multiFunder.FundMultiOrder(test.multiOrder, test.maxLock)
+		if test.expectErr {
+			if err == nil {
+				t.Fatalf("%s: expected error but did not get one", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+		if len(allCoins) != len(test.multiOrder.Values) {
+			t.Fatalf("%s: expected %d coins but got %d", test.name, len(test.multiOrder.Values), len(allCoins))
+		}
+		if len(redeemScripts) != len(test.multiOrder.Values) {
+			t.Fatalf("%s: expected %d redeem scripts but got %d", test.name, len(test.multiOrder.Values), len(redeemScripts))
+		}
+		for i, coins := range allCoins {
+			if len(coins) != 1 {
+				t.Fatalf("%s: expected 1 coin but got %d", test.name, len(coins))
+			}
+			expectedValue := test.multiOrder.Values[i].Value
+			if assetID == BipID {
+				expectedValue += swapGas * test.multiOrder.Values[i].MaxSwapCount * fromAsset.MaxFeeRate
+			}
+			if coins[0].Value() != expectedValue {
+				t.Fatalf("%s: expected coin %d value %d but got %d", test.name, i, expectedValue, coins[0].Value())
+			}
+		}
+	}
+}
+
 func TestPreSwap(t *testing.T) {
 	const baseFee, tip = 42, 2
 	const feeSuggestion = 90 // ignored by eth's PreSwap

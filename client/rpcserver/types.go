@@ -585,7 +585,7 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 }
 
 func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{7}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{6, 7}); err != nil {
 		return nil, err
 	}
 
@@ -621,9 +621,12 @@ func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
 		})
 	}
 
-	options, err := checkMapArg(params.Args[6], "options")
-	if err != nil {
-		return nil, err
+	options := make(map[string]string)
+	if len(params.Args) == 7 {
+		options, err = checkMapArg(params.Args[6], "options")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &multiTradeForm{
