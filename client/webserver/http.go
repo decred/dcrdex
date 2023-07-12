@@ -24,6 +24,7 @@ import (
 const (
 	homeRoute        = "/"
 	registerRoute    = "/register"
+	initRoute        = "/init"
 	loginRoute       = "/login"
 	marketsRoute     = "/markets"
 	walletsRoute     = "/wallets"
@@ -223,6 +224,11 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		log.Errorf("error writing qr code image: %v", err)
 	}
+}
+
+// handleInit is the handler for the '/init' page request
+func (s *WebServer) handleInit(w http.ResponseWriter, r *http.Request) {
+	s.sendTemplate(w, "init", s.commonArgs(r, "Welcome | Decred DEX"))
 }
 
 // handleSettings is the handler for the '/settings' page request.

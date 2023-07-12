@@ -1132,6 +1132,7 @@ export class Wave extends Chart {
     })
     if (!msg) return
     msgRegion.plot(new Extents(0, 1, 0, 1), (ctx: CanvasRenderingContext2D, t: Translator) => {
+      this.applyLabelStyle(this.fontSize)
       ctx.fillText(msg, t.x(0.5), t.y(0.5), this.msgRegion.width())
     })
   }

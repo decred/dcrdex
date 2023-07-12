@@ -4510,7 +4510,6 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 		subject, details := c.formatDetails(TopicSeedNeedsSaving)
 		c.notify(newSecurityNote(TopicSeedNeedsSaving, subject, details, db.Success))
 	}
-
 	return nil
 }
 

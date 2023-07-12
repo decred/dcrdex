@@ -626,7 +626,7 @@ func TestAPIInit(t *testing.T) {
 		Pass: encode.PassBytes("def"),
 	}
 	body = goodBody
-	ensure(s.apiInit, `{"ok":true}`)
+	ensure(s.apiInit, `{"ok":true,"hosts":["dex.decred.org:7232"]}`)
 
 	// Initialization error
 	tCore.initErr = tErr

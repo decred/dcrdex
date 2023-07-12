@@ -8,6 +8,7 @@ import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
 import DexSettingsPage from './dexsettings'
+import InitPage from './init'
 import { RateEncodingFactor, StatusExecuted, hasActiveMatches } from './orderutil'
 import { getJSON, postJSON, Errors } from './http'
 import * as ntfn from './notifications'
@@ -70,7 +71,8 @@ const constructors: Record<string, PageClass> = {
   settings: SettingsPage,
   orders: OrdersPage,
   order: OrderPage,
-  dexsettings: DexSettingsPage
+  dexsettings: DexSettingsPage,
+  init: InitPage
 }
 
 // Application is the main javascript web application for the Decred DEX client.
@@ -457,12 +459,12 @@ export default class Application {
       return
     }
     const authed = user && user.authed
-    if (authed) page.profileBox.classList.add('authed')
-    else {
+    if (!authed) {
       page.profileBox.classList.remove('authed')
       Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
       return
     }
+    page.profileBox.classList.add('authed')
     Doc.show(page.noteBell, page.walletsMenuEntry)
     if (Object.keys(user.exchanges).length > 0) {
       Doc.show(page.marketsMenuEntry)

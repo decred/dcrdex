@@ -354,4 +354,18 @@ var EnUS = map[string]string{
 	"no_token_allowances":     "You have not granted allowances for any swap contracts for this token.",
 	"token_unapproval_tx_msg": `Your token approval has been removed with transaction ID:`,
 	"approval_change_pending": "Approval change pending",
+	// Init page
+	"Quick Configuration":             "Quick Configuration",
+	"quickconfig_server_header":       "We can connect to these servers.",
+	"quickconfig_wallet_header":       "We can activate these native wallets now. Configure additional wallets from the Wallets view.",
+	"quickconfig_server_error_header": "Errors encountered when connecting to the following servers. You can try again from the Settings view.",
+	"quickconfig_wallet_error_header": "Errors encountered when creating the following wallets. Wallets can be configured in the Wallets view.",
+	"Continue":                        "Continue",
+	"Backup App Seed":                 "Backup App Seed",
+	"seed_backup_implore": "It's highly recommended that you back up your application seed now. " +
+		"The application seed is critical to recovering your fidelity bonds and native wallets.",
+	"Backup Now":             "Backup Now",
+	"Skip this step for now": "Skip this step for now",
+	"save_seed_instructions": "Save the following seed somewhere safe. Do not share this with anybody.",
+	"Done":                   "Done",
 }
