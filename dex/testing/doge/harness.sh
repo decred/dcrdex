@@ -276,6 +276,7 @@ tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
 tmux send-keys -t $SESSION:3 C-c
+tmux send-keys -t $SESSION:5 C-c
 tmux wait-for alpha${SYMBOL}
 tmux wait-for beta${SYMBOL}
 # seppuku
