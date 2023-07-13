@@ -1337,9 +1337,9 @@ func TestFundMultiOrder(t *testing.T) {
 				{nil},
 			},
 			expectedLockedCoins: []*wire.OutPoint{
-				{txHashes[0], 0, wire.TxTreeRegular},
-				{txHashes[1], 0, wire.TxTreeRegular},
-				{txHashes[2], 0, wire.TxTreeRegular},
+				wire.NewOutPoint(&txHashes[0], 0, wire.TxTreeRegular),
+				wire.NewOutPoint(&txHashes[1], 0, wire.TxTreeRegular),
+				wire.NewOutPoint(&txHashes[2], 0, wire.TxTreeRegular),
 			},
 		},
 		{ // "split not allowed, can only fund first order and respect maxLock"
@@ -1402,7 +1402,7 @@ func TestFundMultiOrder(t *testing.T) {
 				{nil},
 			},
 			expectedLockedCoins: []*wire.OutPoint{
-				{txHashes[0], 0, wire.TxTreeRegular},
+				wire.NewOutPoint(&txHashes[0], 0, wire.TxTreeRegular),
 			},
 		},
 		{ // "split not allowed, can only fund first order and respect bond reserves"
@@ -1466,7 +1466,7 @@ func TestFundMultiOrder(t *testing.T) {
 				{nil},
 			},
 			expectedLockedCoins: []*wire.OutPoint{
-				{txHashes[0], 0, wire.TxTreeRegular},
+				wire.NewOutPoint(&txHashes[0], 0, wire.TxTreeRegular),
 			},
 		},
 		{ // "split not allowed, need to fund in increasing order"
@@ -1537,9 +1537,9 @@ func TestFundMultiOrder(t *testing.T) {
 				{nil},
 			},
 			expectedLockedCoins: []*wire.OutPoint{
-				{txHashes[0], 0, wire.TxTreeRegular},
-				{txHashes[1], 0, wire.TxTreeRegular},
-				{txHashes[2], 0, wire.TxTreeRegular},
+				wire.NewOutPoint(&txHashes[0], 0, wire.TxTreeRegular),
+				wire.NewOutPoint(&txHashes[1], 0, wire.TxTreeRegular),
+				wire.NewOutPoint(&txHashes[2], 0, wire.TxTreeRegular),
 			},
 		},
 		{ // "split allowed, no split required"
@@ -1605,8 +1605,8 @@ func TestFundMultiOrder(t *testing.T) {
 				{nil},
 			},
 			expectedLockedCoins: []*wire.OutPoint{
-				{txHashes[0], 0, wire.TxTreeRegular},
-				{txHashes[1], 0, wire.TxTreeRegular},
+				wire.NewOutPoint(&txHashes[1], 0, wire.TxTreeRegular),
+				wire.NewOutPoint(&txHashes[2], 0, wire.TxTreeRegular),
 			},
 		},
 		{ // "split allowed, can fund both with split"
