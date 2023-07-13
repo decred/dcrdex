@@ -131,7 +131,7 @@ func subsetWithLeastOverFund(enough func(uint64, uint32, *compositeUTXO) (bool, 
 					totalSize += shuffledUTXOs[i].input.Size()
 
 					if e, _ := enough(totalBefore, sizeBefore, shuffledUTXOs[i]); e {
-						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) && nTotal <= maxFund {
+						if (nTotal < best || (nTotal == best && numIncluded < bestNumIncluded)) && nTotal <= maxFund {
 							best = nTotal
 							if bestIncluded == nil {
 								bestIncluded = make([]bool, len(shuffledUTXOs))

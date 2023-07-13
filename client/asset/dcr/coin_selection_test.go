@@ -93,6 +93,45 @@ func Test_leastOverFund(t *testing.T) {
 	}
 }
 
+func Test_leastOverFundWithLimit(t *testing.T) {
+	newU := func(amt float64) *compositeUTXO {
+		return &compositeUTXO{
+			rpc:   &walletjson.ListUnspentResult{Amount: amt},
+			input: &dexdcr.SpendInfo{},
+		}
+	}
+	tests := []struct {
+		name  string
+		limit uint64
+		utxos []*compositeUTXO
+		want  []*compositeUTXO
+	}{
+		{
+			"1,3",
+			10e8,
+			[]*compositeUTXO{newU(1), newU(8), newU(9)},
+			[]*compositeUTXO{newU(1), newU(9)},
+		},
+		{
+			"max fund too low",
+			9e8,
+			[]*compositeUTXO{newU(1), newU(8), newU(9)},
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := leastOverFundWithLimit(reserveEnough(10e8), tt.limit, tt.utxos)
+			sort.Slice(got, func(i int, j int) bool {
+				return got[i].rpc.Amount < got[j].rpc.Amount
+			})
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("subset() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Fuzz_leastOverFund(f *testing.F) {
 	type seed struct {
 		amt uint64
