@@ -123,7 +123,7 @@ func subsetWithLeastOverFund(enough func(uint64, uint64) (bool, uint64), maxFund
 					nTotal += shuffledUTXOs[i].amount
 					totalSize += uint64(shuffledUTXOs[i].input.VBytes())
 					if e, _ := enough(totalSize, nTotal); e {
-						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) && nTotal <= maxFund {
+						if (nTotal < best || (nTotal == best && numIncluded < bestNumIncluded)) && nTotal <= maxFund {
 							best = nTotal
 							if bestIncluded == nil {
 								bestIncluded = make([]bool, len(shuffledUTXOs))

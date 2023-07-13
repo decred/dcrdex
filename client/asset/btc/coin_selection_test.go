@@ -96,6 +96,50 @@ func Test_leastOverFund(t *testing.T) {
 	}
 }
 
+func Test_leastOverFundWithLimit(t *testing.T) {
+	enough := func(_, sum uint64) (bool, uint64) {
+		return sum >= 10e8, 0
+	}
+	newU := func(amt float64) *compositeUTXO {
+		return &compositeUTXO{
+			utxo: &utxo{
+				amount: uint64(amt) * 1e8,
+			},
+			input: &dexbtc.SpendInfo{},
+		}
+	}
+	tests := []struct {
+		name  string
+		limit uint64
+		utxos []*compositeUTXO
+		want  []*compositeUTXO
+	}{
+		{
+			"1,3",
+			10e8,
+			[]*compositeUTXO{newU(1), newU(8), newU(9)},
+			[]*compositeUTXO{newU(1), newU(9)},
+		},
+		{
+			"max fund too low",
+			9e8,
+			[]*compositeUTXO{newU(1), newU(8), newU(9)},
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := leastOverFundWithLimit(enough, tt.limit, tt.utxos)
+			sort.Slice(got, func(i int, j int) bool {
+				return got[i].amount < got[j].amount
+			})
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("subset() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Fuzz_leastOverFund(f *testing.F) {
 	type seed struct {
 		amt uint64
