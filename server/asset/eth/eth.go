@@ -91,6 +91,7 @@ func networkToken(vToken *VersionedToken, net dex.Network) (netToken *dexeth.Net
 	if !found {
 		return nil, nil, fmt.Errorf("no addresses for %s on %s", vToken.Name, net)
 	}
+
 	contract, found = netToken.SwapContracts[vToken.Ver]
 	if !found || contract.Address == (common.Address{}) {
 		return nil, nil, fmt.Errorf("no version %d address for %s on %s", vToken.Ver, vToken.Name, net)
@@ -591,12 +592,14 @@ func (eth *TokenBackend) ValidateContract(contractData []byte) error {
 	if err != nil { // ensures secretHash is proper length
 		return err
 	}
+
+	if ver != eth.VersionedToken.Ver {
+		return fmt.Errorf("incorrect token swap contract version %d, wanted %d", ver, eth.VersionedToken.Ver)
+	}
+
 	_, _, err = networkToken(eth.VersionedToken, eth.net)
 	if err != nil {
 		return fmt.Errorf("error locating token: %v", err)
-	}
-	if ver != eth.VersionedToken.Ver {
-		return fmt.Errorf("incorrect token swap contract version %d, wanted %d", ver, eth.VersionedToken.Ver)
 	}
 
 	return nil

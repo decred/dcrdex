@@ -727,6 +727,15 @@ func testValidateContract(t *testing.T, assetID uint32) {
 		ValidateContract([]byte) error
 	}
 
+	if assetID != BipID {
+		c := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0]
+		ogAddr := c.Address
+		c.Address = common.Address{0x01}
+		defer func() {
+			c.Address = ogAddr
+		}()
+	}
+
 	for _, test := range tests {
 		eth, _ := tNewBackend(assetID)
 		var cv contractValidator
@@ -737,7 +746,7 @@ func testValidateContract(t *testing.T, assetID uint32) {
 				AssetBackend: eth,
 				VersionedToken: &VersionedToken{
 					Token: dexeth.Tokens[testTokenID],
-					Ver:   0,
+					Ver:   test.ver,
 				},
 			}
 		}

@@ -124,13 +124,9 @@ func TestNewSwapCoin(t *testing.T) {
 	txCoinIDBytes := txHash[:]
 	badCoinIDBytes := encode.RandomBytes(39)
 	const gasPrice = 30
-	const value = 5e9
+	value := tSwap1.Value + tSwap2.Value
 	const gasTipCap = 2
 	wantGas, err := dexeth.WeiToGweiUint64(big.NewInt(3e10))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantVal, err := dexeth.WeiToGweiUint64(big.NewInt(5e18))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,10 +233,11 @@ func TestNewSwapCoin(t *testing.T) {
 
 		if sc.vector.To != tSwap2.Participant ||
 			sc.vector.SecretHash != tRedeem2.V.SecretHash ||
-			dexeth.WeiToGwei(sc.value) != wantVal ||
+			dexeth.WeiToGwei(sc.value) != value ||
 			sc.gasFeeCap != wantGas ||
 			sc.gasTipCap != wantGasTipCap ||
 			sc.vector.LockTime != tSwap2.RefundTimestamp {
+
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, sc)
 		}
 	}
