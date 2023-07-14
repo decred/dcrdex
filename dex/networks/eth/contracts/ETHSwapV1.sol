@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BlueOak-1.0.0
 // pragma should be as specific as possible to allow easier validation.
-pragma solidity = 0.8.15;
+pragma solidity = 0.8.18;
 
 // ETHSwap creates a contract to be deployed on an ethereum network. After
 // deployed, it keeps a record of the state of a contract and enables
@@ -33,6 +33,7 @@ contract ETHSwap {
     }
 
     bytes32 constant RefundRecord = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+    bytes32 constant RefundRecordHash = 0xAF9613760F72635FBDB44A5A0A63C39F12AF30F950A6EE5C971BE188E89C4051;
 
     // swaps is a map of contract hashes to the "swap record". The swap record
     // has the following interpretation.
@@ -50,16 +51,16 @@ contract ETHSwap {
     // the swap record.
     struct Vector {
         bytes32 secretHash;
+        uint256 value;
         address initiator;
         uint64 refundTimestamp;
         address participant;
-        uint64 value;
     }
 
     // contractKey generates a key hash which commits to the contract data. The
     // generated hash is used as a key in the swaps map.
     function contractKey(Vector calldata v) public pure returns (bytes32) {
-        return sha256(bytes.concat(v.secretHash, bytes20(v.initiator), bytes20(v.participant), bytes8(v.value), bytes8(v.refundTimestamp)));
+        return sha256(bytes.concat(v.secretHash, bytes20(v.initiator), bytes20(v.participant), bytes32(v.value), bytes8(v.refundTimestamp)));
     }
 
     // Redemption is the information necessary to redeem a Vector. Since we
@@ -127,6 +128,7 @@ contract ETHSwap {
 
             require(v.value > 0, "0 val");
             require(v.refundTimestamp > 0, "0 refundTimestamp");
+            require(v.secretHash != RefundRecordHash, "illegal secret hash (refund record hash)");
 
             bytes32 k = contractKey(v);
             bytes32 record = swaps[k];
@@ -137,13 +139,13 @@ contract ETHSwap {
 
             swaps[k] = record;
 
-            initVal += v.value * 1 gwei;
+            initVal += v.value;
         }
 
         require(initVal == msg.value, "bad val");
     }
 
-    // isRedeemable returns whether or not a swap identified by secretHash
+    // isRedeemable returns whether or not a swap identified by vector
     // can be redeemed using secret. isRedeemable DOES NOT check if the caller
     // is the participant in the vector.
     function isRedeemable(Vector calldata v)
@@ -156,7 +158,7 @@ contract ETHSwap {
     }
 
     // redeem redeems a Vector. It checks that the sender is not a contract,
-    // and that the secret hash hashes to secretHash. msg.value is tranfered
+    // and that the secret hashes to secretHash. msg.value is tranfered
     // from ETHSwap to the sender.
     //
     // To prevent reentry attack, it is very important to check the state of the
@@ -187,7 +189,7 @@ contract ETHSwap {
             require(secretValidates(r.secret, r.v.secretHash), "invalid secret");
 
             swaps[k] = r.secret;
-            amountToRedeem += r.v.value * 1 gwei;
+            amountToRedeem += r.v.value;
         }
 
         (bool ok, ) = payable(msg.sender).call{value: amountToRedeem}("");
@@ -211,17 +213,17 @@ contract ETHSwap {
         (bytes32 k, bytes32 record, uint256 blockNum) = retrieveStatus(v);
 
         // Is this swap initialized?
+        // This check also guarantees that the swap has not already been
+        // refunded i.e. record != RefundRecord, since RefundRecord is certainly
+        // greater than block.number.
         require(blockNum > 0 && blockNum <= block.number, "swap not active");
 
         // Is it already redeemed?
         require(!secretValidates(record, v.secretHash), "swap already redeemed");
 
-        // Is it already refunded?
-        require(record != RefundRecord, "swap already refunded");
-
         swaps[k] = RefundRecord;
 
-        (bool ok, ) = payable(v.initiator).call{value: v.value * 1 gwei}("");
+        (bool ok, ) = payable(v.initiator).call{value: v.value}("");
         require(ok == true, "transfer failed");
     }
 }

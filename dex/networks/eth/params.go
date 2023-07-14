@@ -5,6 +5,7 @@ package eth
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,7 +68,7 @@ var (
 		1: {
 			dex.Mainnet: common.Address{},
 			dex.Testnet: common.Address{},
-			dex.Simnet:  common.Address{},
+			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 		},
 	}
 
@@ -86,22 +87,21 @@ var v0Gases = &Gases{
 }
 
 var v1Gases = &Gases{
-	// First swap used 48769 gas Recommended Gases.Swap = 63399
-	// 	4 additional swaps averaged 26904 gas each. Recommended Gases.SwapAdd = 34975
-	// 	[48769 75679 102590 129486 156385]
-	Swap:    63_399,
-	SwapAdd: 34_975,
-	// First redeem used 39792 gas. Recommended Gases.Redeem = 51729
-	// 	4 additional redeems averaged 11037 gas each. recommended Gases.RedeemAdd = 14348
-	// 	[39792 50836 61880 72898 83943]
-
-	// Compare expected Swap + Redeem = 88k with UniSwap v2: 102k, v3: 127k
-	// A 1-match order is cheaper that UniSwap with v1 gases.
-	Redeem:    51_729,
-	RedeemAdd: 14_348,
-	// Average of 5 refunds: 40155. Recommended Gases.Refund = 52201
-	// 	[40158 40158 40158 40158 40146]
-	Refund: 52_201,
+	// First swap used 48340 gas Recommended Gases.Swap = 62842
+	Swap: 62_842,
+	// 	4 additional swaps averaged 26499 gas each. Recommended Gases.SwapAdd = 34448
+	// 	[48340 74837 101338 127836 154338]
+	SwapAdd: 34_448,
+	// First redeem used 39496 gas. Recommended Gases.Redeem = 51344
+	Redeem: 51_344,
+	// 	4 additional redeems averaged 10744 gas each. recommended Gases.RedeemAdd = 13967
+	// 	[39496 50238 60984 71727 82473]
+	RedeemAdd: 13_967,
+	// *** Compare expected Swap + Redeem = 88k with UniSwap v2: 102k, v3: 127k
+	// *** A 1-match order is cheaper than UniSwap.
+	// Average of 5 refunds: 39918. Recommended Gases.Refund = 51893
+	// 	[39918 39918 39918 39918 39918]
+	Refund: 51_893,
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
@@ -129,8 +129,20 @@ func EncodeContractData(contractVersion uint32, locator []byte) []byte {
 	return b
 }
 
-// DecodeLocator unpacks the contract version and secret hash.
-func DecodeLocator(data []byte) (contractVersion uint32, locator []byte, err error) {
+func DecodeContractDataV0(data []byte) (secretHash [32]byte, err error) {
+	contractVer, secretHashB, err := DecodeContractData(data)
+	if err != nil {
+		return secretHash, err
+	}
+	if contractVer != 0 {
+		return secretHash, errors.New("not contract version 0")
+	}
+	copy(secretHash[:], secretHashB)
+	return
+}
+
+// DecodeContractData unpacks the contract version and the locator.
+func DecodeContractData(data []byte) (contractVersion uint32, locator []byte, err error) {
 	if len(data) < 4 {
 		err = errors.New("invalid short encoding")
 		return
@@ -278,9 +290,9 @@ func (ss SwapStep) String() string {
 type SwapVector struct {
 	From       common.Address
 	To         common.Address
-	Value      uint64
+	Value      *big.Int
 	SecretHash [32]byte
-	LockTime   uint64
+	LockTime   uint64 // seconds
 }
 
 // Locator encodes a version 1 locator for the SwapVector.
@@ -288,10 +300,21 @@ func (v *SwapVector) Locator() []byte {
 	locator := make([]byte, LocatorV1Length)
 	copy(locator[0:20], v.From[:])
 	copy(locator[20:40], v.To[:])
-	binary.BigEndian.PutUint64(locator[40:48], v.Value)
-	copy(locator[48:80], v.SecretHash[:])
-	binary.BigEndian.PutUint64(locator[80:88], v.LockTime)
+	v.Value.FillBytes(locator[40:72])
+	copy(locator[72:104], v.SecretHash[:])
+	binary.BigEndian.PutUint64(locator[104:112], v.LockTime)
 	return locator
+}
+
+func (v *SwapVector) String() string {
+	return fmt.Sprintf("{ from = %s, to = %s, value = %d, secret hash = %s, locktime = %s }",
+		v.From, v.To, v.Value, hex.EncodeToString(v.SecretHash[:]), time.UnixMilli(int64(v.LockTime)))
+}
+
+func CompareVectors(v1, v2 *SwapVector) bool {
+	// Check vector equivalence.
+	return v1.Value.Cmp(v2.Value) == 0 && v1.To == v2.To && v1.From == v2.From &&
+		v1.LockTime == v2.LockTime && v1.SecretHash == v2.SecretHash
 }
 
 // SwapStatus is the contract data that specifies the current contract state.
@@ -393,9 +416,9 @@ func ParseV0Locator(locator []byte) (secretHash [32]byte, err error) {
 	return
 }
 
-// LocatorV1Length = from 20 + to 20 + value 8 + secretHash 32 +
-// lockTime 8 = 88 bytes
-const LocatorV1Length = 88
+// LocatorV1Length = from 20 + to 20 + value 32 + secretHash 32 +
+// lockTime 8 = 112 bytes
+const LocatorV1Length = 112
 
 func ParseV1Locator(locator []byte) (v *SwapVector, err error) {
 	// from 20 + to 20 + value 8 + secretHash 32 + lockTime 8
@@ -403,22 +426,49 @@ func ParseV1Locator(locator []byte) (v *SwapVector, err error) {
 		v = &SwapVector{
 			From:     common.BytesToAddress(locator[:20]),
 			To:       common.BytesToAddress(locator[20:40]),
-			Value:    binary.BigEndian.Uint64(locator[40:48]),
-			LockTime: binary.BigEndian.Uint64(locator[80:88]),
+			Value:    new(big.Int).SetBytes(locator[40:72]),
+			LockTime: binary.BigEndian.Uint64(locator[104:112]),
 		}
-		copy(v.SecretHash[:], locator[48:80])
+		copy(v.SecretHash[:], locator[72:104])
 	} else {
 		err = fmt.Errorf("wrong v1 locator length. wanted %d, got %d", LocatorV1Length, len(locator))
 	}
 	return
 }
 
-func SwapVectorToAbigen(c *SwapVector) swapv1.ETHSwapVector {
+func SwapVectorToAbigen(v *SwapVector) swapv1.ETHSwapVector {
 	return swapv1.ETHSwapVector{
-		SecretHash:      c.SecretHash,
-		Initiator:       c.From,
-		RefundTimestamp: c.LockTime,
-		Participant:     c.To,
-		Value:           c.Value,
+		SecretHash:      v.SecretHash,
+		Initiator:       v.From,
+		RefundTimestamp: v.LockTime,
+		Participant:     v.To,
+		Value:           v.Value,
 	}
 }
+
+// ProtocolVersion assists in mapping the dex.Asset.Version to a contract
+// version.
+type ProtocolVersion uint32
+
+const (
+	ProtocolVersionZero ProtocolVersion = iota
+	ProtocolVersionV1Contracts
+)
+
+func (v ProtocolVersion) ContractVersion() uint32 {
+	switch v {
+	case ProtocolVersionZero:
+		return 0
+	case ProtocolVersionV1Contracts:
+		return 1
+	default:
+		return ContractVersionUnknown
+	}
+}
+
+var (
+	// ContractVersionERC20 is passed as the contract version when calling
+	// ERC20 contract methods.
+	ContractVersionERC20   = ^uint32(0)
+	ContractVersionUnknown = ContractVersionERC20 - 1
+)

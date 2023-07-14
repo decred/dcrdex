@@ -91,7 +91,7 @@ func ParseInitiateDataV0(calldata []byte) (map[[SecretHashSize]byte]*Initiation,
 	return toReturn, nil
 }
 
-// ParseRedeemData parses the calldata used to call the redeem function of a
+// ParseRedeemDataV0 parses the calldata used to call the redeem function of a
 // specific version of the swap contract. It returns the the list of redemptions
 // done in the call and errors if the call data does not call redeem with expected
 // argument types.
@@ -137,7 +137,7 @@ func ParseRedeemDataV0(calldata []byte) (map[[SecretHashSize]byte]*Redemption, e
 	return toReturn, nil
 }
 
-// ParseRefundData parses the calldata used to call the refund function of a
+// ParseRefundDataV0 parses the calldata used to call the refund function of a
 // specific version of the swap contract. It returns the secret hash and errors
 // if the call data does not call refund with expected argument types.
 func ParseRefundDataV0(calldata []byte) ([32]byte, error) {
@@ -191,17 +191,17 @@ func ParseInitiateDataV1(calldata []byte) (map[[SecretHashSize]byte]*SwapVector,
 	}
 	initiations, ok := args[0].value.([]struct {
 		SecretHash      [32]byte       `json:"secretHash"`
+		Value           *big.Int       `json:"value"`
 		Initiator       common.Address `json:"initiator"`
 		RefundTimestamp uint64         `json:"refundTimestamp"`
 		Participant     common.Address `json:"participant"`
-		Value           uint64         `json:"value"`
 	})
 	if !ok {
 		return nil, fmt.Errorf("expected first arg of type []swapv1.ETHSwapContract but got %T", args[0].value)
 	}
 
 	// This is done for the compiler to ensure that the type defined above and
-	// swapv0.ETHSwapInitiation are the same, other than the tags.
+	// swapv1.ETHSwapVector are the same, other than the tags.
 	if len(initiations) > 0 {
 		_ = swapv1.ETHSwapVector(initiations[0])
 	}
@@ -241,10 +241,10 @@ func ParseRedeemDataV1(calldata []byte) (map[[SecretHashSize]byte]*RedemptionV1,
 	redemptions, ok := args[0].value.([]struct {
 		V struct {
 			SecretHash      [32]uint8      `json:"secretHash"`
+			Value           *big.Int       `json:"value"`
 			Initiator       common.Address `json:"initiator"`
 			RefundTimestamp uint64         `json:"refundTimestamp"`
 			Participant     common.Address `json:"participant"`
-			Value           uint64         `json:"value"`
 		} `json:"v"`
 		Secret [32]uint8 `json:"secret"`
 	})
@@ -253,9 +253,8 @@ func ParseRedeemDataV1(calldata []byte) (map[[SecretHashSize]byte]*RedemptionV1,
 	}
 
 	// This is done for the compiler to ensure that the type defined above and
-	// swapv0.ETHSwapRedemption are the same, other than the tags.
+	// swapv1.ETHSwapVector are the same, other than the tags.
 	if len(redemptions) > 0 {
-		// Why can't I do ETHSwapRedemption directly?
 		_ = swapv1.ETHSwapVector(redemptions[0].V)
 	}
 	toReturn := make(map[[SecretHashSize]byte]*RedemptionV1, len(redemptions))
@@ -294,10 +293,10 @@ func ParseRefundDataV1(calldata []byte) (*SwapVector, error) {
 	}
 	contract, ok := args[0].value.(struct {
 		SecretHash      [32]byte       `json:"secretHash"`
+		Value           *big.Int       `json:"value"`
 		Initiator       common.Address `json:"initiator"`
 		RefundTimestamp uint64         `json:"refundTimestamp"`
 		Participant     common.Address `json:"participant"`
-		Value           uint64         `json:"value"`
 	})
 	if !ok {
 		return nil, fmt.Errorf("expected first arg of type [32]byte but got %T", args[0].value)

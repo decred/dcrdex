@@ -42,20 +42,20 @@ func TestMain(m *testing.M) {
 	monitorConnectionsInterval = 3 * time.Second
 
 	// Run in function so that defers happen before os.Exit is called.
-	dexeth.MaybeReadSimnetAddrs()
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
 		defer cancel()
 		log := dex.StdOutLogger("T", dex.LevelTrace)
 
-		netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
+		const contractVer = 0
+		netAddrs, found := dexeth.ContractAddresses[contractVer]
 		if !found {
-			return 1, fmt.Errorf("no contract address for eth version %d", ethContractVersion)
+			return 1, fmt.Errorf("no contract address for eth version %d", contractVer)
 		}
 		ethContractAddr, found := netAddrs[dex.Simnet]
 		if !found {
-			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
+			return 1, fmt.Errorf("no contract address for eth version %d on %s", contractVer, dex.Simnet)
 		}
 
 		ethClient = newRPCClient(BipID, 42, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
@@ -112,7 +112,9 @@ func TestSuggestGasTipCap(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
-	_, err := ethClient.status(ctx, BipID, &dexeth.SwapVector{})
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	_, err := ethClient.status(ctx, BipID, secretHash[:])
 	if err != nil {
 		t.Fatal(err)
 	}
