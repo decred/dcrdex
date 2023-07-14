@@ -414,9 +414,9 @@ func (c *tContractor) vector(ctx context.Context, locator []byte) (*dexeth.SwapV
 		return nil, errors.New("swap not in map")
 	}
 	v := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
-		Value:      dexeth.WeiToGwei(swap.Value),
+		From:       swap.Initiator,
+		To:         swap.Participant,
+		Value:      swap.Value,
 		SecretHash: secretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),
 	}
@@ -436,9 +436,9 @@ func (c *tContractor) statusAndVector(ctx context.Context, locator []byte) (*dex
 		return nil, nil, errors.New("swap not in map")
 	}
 	v := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
-		Value:      dexeth.WeiToGwei(swap.Value),
+		From:       swap.Initiator,
+		To:         swap.Participant,
+		Value:      swap.Value,
 		SecretHash: vector.SecretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),
 	}
@@ -1721,7 +1721,7 @@ func testRefund(t *testing.T, assetID uint32) {
 	v1Vector := dexeth.SwapVector{
 		From:       testAddressA,
 		To:         testAddressB,
-		Value:      1,
+		Value:      dexeth.GweiToWei(1),
 		SecretHash: secretHash,
 		LockTime:   uint64(time.Now().Unix()),
 	}
@@ -2715,14 +2715,14 @@ func testSwap(t *testing.T, assetID uint32) {
 					testName, receipt.Coin().Value(), contract.Value)
 			}
 			contractData := receipt.Contract()
-			contractVer, locator, err := dexeth.DecodeLocator(contractData)
+			contractVer, locator, err := dexeth.DecodeContractData(contractData)
 			if err != nil {
 				t.Fatalf("failed to decode contract data: %v", err)
 			}
 			if swaps.Version != contractVer {
 				t.Fatal("wrong contract version")
 			}
-			chkLocator := acToLocator(contractVer, contract, node.addr)
+			chkLocator := acToLocator(contractVer, contract, dexeth.GweiToWei(contract.Value), node.addr)
 			if !bytes.Equal(locator, chkLocator) {
 				t.Fatalf("%v, contract: %x != locator in input: %x",
 					testName, receipt.Contract(), locator)
@@ -3309,7 +3309,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		// Check that value of output coin is as axpected
 		var totalSwapValue uint64
 		for _, redemption := range test.form.Redemptions {
-			_, locator, err := dexeth.DecodeLocator(redemption.Spends.Contract)
+			_, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
 			if err != nil {
 				t.Fatalf("DecodeLocator: %v", err)
 			}
@@ -3553,15 +3553,6 @@ func TestMaxOrder(t *testing.T) {
 	}
 }
 
-func overMaxWei() *big.Int {
-	maxInt := ^uint64(0)
-	maxWei := new(big.Int).SetUint64(maxInt)
-	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
-	maxWei.Mul(maxWei, gweiFactorBig)
-	overMaxWei := new(big.Int).Set(maxWei)
-	return overMaxWei.Add(overMaxWei, gweiFactorBig)
-}
-
 func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
 	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
 	for _, init := range initiations {
@@ -3751,7 +3742,7 @@ func testAuditContract(t *testing.T, assetID uint32) {
 			t.Fatalf(`"%v": expected contract %x != actual %x`, test.name, test.contract, auditInfo.Contract)
 		}
 
-		_, expectedSecretHash, err := dexeth.DecodeLocator(test.contract)
+		_, expectedSecretHash, err := dexeth.DecodeContractData(test.contract)
 		if err != nil {
 			t.Fatalf(`"%v": failed to decode versioned bytes: %v`, test.name, err)
 		}
@@ -4336,24 +4327,14 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
 
 	feeWallet := eth
-	gasesV0 := dexeth.VersionedGases[0]
-	gasesV1 := &dexeth.Gases{Refund: 1e6}
+	gasesV0 := eth.versionedGases[0]
+	gasesV1 := eth.versionedGases[1]
 	assetV0 := *tETHV0
 	assetV1 := *tETHV0
-	if assetID == BipID {
-		eth.versionedGases[1] = gasesV1
-	} else {
+	if assetID != BipID {
 		feeWallet = node.tokenParent
 		assetV0 = *tTokenV0
 		assetV1 = *tTokenV0
-		tokenContracts := dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
-		gasesV0 = &tokenGasesV0
-		tc := *tokenContracts[0]
-		tc.Gas = *gasesV1
-		tokenContracts[1] = &tc
-		defer delete(tokenContracts, 1)
-		eth.versionedGases[0] = gasesV0
-		eth.versionedGases[1] = gasesV1
 		node.tokenContractor.bal = dexeth.GweiToWei(1e9)
 	}
 
@@ -4434,9 +4415,9 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	var secretHash [32]byte
 	node.tContractor.swapMap[secretHash] = &dexeth.SwapState{}
 
-	gasesV1 := &dexeth.Gases{Redeem: 1e6, RedeemAdd: 85e5}
+	gasesV0 := eth.versionedGases[0]
+	gasesV1 := eth.versionedGases[1]
 	eth.versionedGases[1] = gasesV1
-	gasesV0 := dexeth.VersionedGases[0]
 	assetV0 := *tETHV0
 	assetV1 := *tETHV0
 	feeWallet := eth
@@ -4445,12 +4426,6 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 		feeWallet = node.tokenParent
 		assetV0 = *tTokenV0
 		assetV1 = *tTokenV0
-		tokenContracts := dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
-		gasesV0 = &tokenGasesV0
-		tc := *tokenContracts[0]
-		tc.Gas = *gasesV1
-		tokenContracts[1] = &tc
-		defer delete(tokenContracts, 1)
 	}
 
 	assetV0.MaxFeeRate = 45
@@ -4557,7 +4532,7 @@ func testSend(t *testing.T, assetID uint32) {
 
 	maxFeeRate, _, _ := eth.recommendedMaxFeeRate(eth.ctx)
 	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
-	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGasesV0.Transfer
+	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGasesV1.Transfer
 
 	const val = 10e9
 	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
@@ -4610,12 +4585,12 @@ func testSend(t *testing.T, assetID uint32) {
 		coin, err := w.Send(test.addr, val, 0)
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
+				t.Fatalf("expected error for test %q", test.name)
 			}
 			continue
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 		if !bytes.Equal(txHash[:], coin.ID()) {
 			t.Fatal("coin is not the tx hash")
@@ -4855,7 +4830,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 
 	maxFeeRate, _, _ := eth.recommendedMaxFeeRate(eth.ctx)
 	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
-	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGasesV0.Transfer
+	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGasesV1.Transfer
 
 	ethFees = ethFees * 12 / 10
 	tokenFees = tokenFees * 12 / 10
