@@ -1960,7 +1960,7 @@ type fundMultiOptions struct {
 	// will be created.
 	//
 	// The motivation for this is to assist market makers in having to do the
-	// least amount of splits as possible. It is useful when BTC is the quote
+	// least amount of splits as possible. It is useful when DCR is the quote
 	// asset on a market, and the price is increasing. During a market maker's
 	// operation, it will frequently have to cancel and replace orders as the
 	// rate moves. If BTC is the quote asset on a market, and the rate has

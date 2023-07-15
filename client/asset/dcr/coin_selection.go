@@ -191,7 +191,7 @@ func leastOverFund(enough func(sum uint64, size uint32, unspent *compositeUTXO) 
 
 // enoughWithoutAdditional is used to utilize an "enough" function with a set
 // of UTXOs when we are not looking to add another UTXO to the set, just
-// check if the current set if UTXOs is enough.
+// check if the current set of UTXOs is enough.
 func enoughWithoutAdditional(enough func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64), utxos []*compositeUTXO) bool {
 	if len(utxos) == 0 {
 		return false

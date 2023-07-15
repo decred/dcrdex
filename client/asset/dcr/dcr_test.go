@@ -1173,15 +1173,13 @@ func TestFundMultiOrder(t *testing.T) {
 		tPKHAddr.String(),
 		tPKHAddr.String(),
 		tPKHAddr.String(),
-		"bcrt1q4fjzhnum2krkurhg55xtadzyf76f8waqj26d0e",
-		"bcrt1qqnl9fhnms6gpmlmrwnsq36h4rqxwd3m4plkcw4",
+		tPKHAddr.String(),
 	}
 	scriptPubKeys := []string{
 		hex.EncodeToString(tP2PKHScript),
 		hex.EncodeToString(tP2PKHScript),
 		hex.EncodeToString(tP2PKHScript),
-		"0014aa642bcf9b55876e0ee8a50cbeb4444fb493bba0",
-		"001404fe54de7b86901dff6374e008eaf5180ce6c775",
+		hex.EncodeToString(tP2PKHScript),
 	}
 	for i := 0; i < 5; i++ {
 		txIDs = append(txIDs, hex.EncodeToString(encode.RandomBytes(32)))
@@ -2072,7 +2070,7 @@ func TestFundMultiOrder(t *testing.T) {
 			},
 		},
 		{ // "only one order needs a split due to bond reserves, rest funded without"
-			name: "only one order needs a split, rest can be funded without",
+			name: "only one order needs a split due to bond reserves, rest funded without",
 			multiOrder: &asset.MultiOrder{
 				Values: []*asset.MultiOrderValue{
 					{
@@ -2143,6 +2141,105 @@ func TestFundMultiOrder(t *testing.T) {
 				wire.NewTxOut(120e5-requiredForOrder(1e6, 2)-int64(expectedSplitFee(1, 2)), []byte{}),
 			},
 			expectedSplitFee: expectedSplitFee(1, 2),
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+				{nil},
+			},
+			expectedCoins: []asset.Coins{
+				{newOutput(&txHashes[0], 0, 12e5, wire.TxTreeRegular)},
+				{newOutput(&txHashes[1], 0, 12e5, wire.TxTreeRegular)},
+				nil,
+			},
+		},
+		{ // "only one order needs a split due to maxLock, rest funded without"
+			name: "only one order needs a split due to maxLock, rest funded without",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					multiSplitKey: "true",
+				},
+			},
+			utxos: []walletjson.ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					Account:       tAcctName,
+					ScriptPubKey:  scriptPubKeys[0],
+					Address:       addresses[0],
+					Amount:        12e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					Account:       tAcctName,
+					ScriptPubKey:  scriptPubKeys[1],
+					Address:       addresses[1],
+					Amount:        12e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					Account:       tAcctName,
+					ScriptPubKey:  scriptPubKeys[2],
+					Address:       addresses[2],
+					Amount:        9e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[3],
+					Account:       tAcctName,
+					ScriptPubKey:  scriptPubKeys[3],
+					Address:       addresses[3],
+					Amount:        9e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			maxLock:              35e5,
+			bondReservesEnforced: 0,
+			balance:              42e5,
+			expectSendRawTx:      true,
+			expectedInputs: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  txHashes[3],
+						Index: 0,
+					},
+				},
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  txHashes[2],
+						Index: 0,
+					},
+				},
+			},
+			expectedOutputs: []*wire.TxOut{
+				wire.NewTxOut(requiredForOrder(1e6, 2), []byte{}),
+				wire.NewTxOut(18e5-requiredForOrder(1e6, 2)-int64(expectedSplitFee(2, 2)), []byte{}),
+			},
+			expectedSplitFee: expectedSplitFee(2, 2),
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
 				{nil},
