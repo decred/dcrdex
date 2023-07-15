@@ -19,6 +19,7 @@ const int NavigationActionPolicyCancel = 1;
 @interface CompletionHandlerDelegate:NSObject
 - (void)completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler withURLs:(NSArray<NSURL *> * _Nullable)URLs;
 - (void)decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler withPolicy:(int)policy;
+- (void)authenticationCompletionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler withChallenge:(NSURLAuthenticationChallenge *)challenge;
 @end
 
 @implementation CompletionHandlerDelegate
@@ -34,6 +35,16 @@ const int NavigationActionPolicyCancel = 1;
 // it with the provided policy.
 - (void)decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler withPolicy:(int)policy {
 	policy == NavigationActionPolicyCancel ? decisionHandler(WKNavigationActionPolicyCancel) : decisionHandler(WKNavigationActionPolicyAllow);
+}
+
+// Implements "authenticationCompletionHandler:withChallenge" for "webView:didReceiveAuthenticationChallenge:completionHandler".
+// See: https://developer.apple.com/forums/thread/15610.
+- (void)authenticationCompletionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler withChallenge:(NSURLAuthenticationChallenge *)challenge {
+	SecTrustRef serverTrust = challenge.protectionSpace.serverTrust;
+	CFDataRef exceptions = SecTrustCopyExceptions(serverTrust);
+	SecTrustSetExceptions(serverTrust, exceptions);
+	CFRelease(exceptions);
+	completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust:serverTrust]);
 }
 @end
 
@@ -257,6 +268,8 @@ func mainCore() error {
 		}()
 	}
 
+	// Default to serving the web interface over TLS.
+	cfg.WebTLS = true
 	webSrv, err := webserver.New(cfg.Web(clientCore, logMaker.Logger("WEB"), utc))
 	if err != nil {
 		return fmt.Errorf("failed creating web server: %w", err)
@@ -428,6 +441,11 @@ func initCocoaDefaultDelegateClassWrapper(logDir string) *cocoaDefaultDelegateCl
 	// if to open the URL in webview or in the user's default browser. See:
 	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455641-webview?language=objc
 	ad.AddMethod("webView:decidePolicyForNavigationAction:decisionHandler:", ad.handleWebViewDecidePolicyForNavigationActionDecisionHandler)
+	// MacOS will execute this method when dexc-desktop is started with a
+	// self-signed certificate and a new webview is requested. See:
+	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455638-webview?language=objc
+	// and https://developer.apple.com/forums/thread/15610.
+	ad.AddMethod("webView:didReceiveAuthenticationChallenge:completionHandler:", ad.handleWebViewDidReceiveAuthenticationChallengeCompletionHandler)
 
 	// Add custom selectors to the app delegate since there are reused in
 	// different menus. App delegates methods should be added before NSApp is
@@ -527,6 +545,10 @@ func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewRunOpenPanelWithParamet
 		return
 	}
 	completionHandler.Send("completionHandler:withURLs:", completionHandlerFn, panel.Send("URLs"))
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewDidReceiveAuthenticationChallengeCompletionHandler(_ objc.Object, webview objc.Object, challenge objc.Object, challengeCompletionHandler objc.Object) {
+	completionHandler.Send("authenticationCompletionHandler:withChallenge:", challengeCompletionHandler, challenge)
 }
 
 func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewDidFinishNavigation(_ objc.Object /* delegate */, webView objc.Object, _ objc.Object /* navigation */) {
