@@ -151,8 +151,7 @@ func findExePath() string {
 	return s
 }
 
-func defaultWindowWidthAndHeight() (int, int) {
-	width, height := int(C.display_width()), int(C.display_height())
+func limitedWindowWidthAndHeight(width int, height int) (int, int) {
 	if width <= 0 || width > 1920 {
 		width = 1920
 	}

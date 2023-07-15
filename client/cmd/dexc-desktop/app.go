@@ -341,7 +341,7 @@ func runWebview(url string) {
 	w.SetTitle(appTitle)
 	w.SetSize(600, 600, webview.HintMin)
 
-	width, height := defaultWindowWidthAndHeight()
+	width, height := limitedWindowWidthAndHeight(int(C.display_width()), int(C.display_height()))
 
 	w.SetSize(width, height, webview.HintNone)
 	w.Navigate(url)

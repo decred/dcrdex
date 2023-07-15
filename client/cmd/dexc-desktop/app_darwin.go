@@ -46,6 +46,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"os/signal"
@@ -61,20 +62,20 @@ import (
 
 	"decred.org/dcrdex/client/app"
 	"decred.org/dcrdex/client/asset"
-	dexCore "decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
 	"github.com/progrium/macdriver/cocoa"
-	"github.com/progrium/macdriver/core"
+	mdCore "github.com/progrium/macdriver/core"
 	"github.com/progrium/macdriver/objc"
 	"github.com/progrium/macdriver/webkit"
 )
 
 var (
 	webviewConfig  = webkit.WKWebViewConfiguration_New()
-	width, height  = defaultWindowWidthAndHeight()
+	width, height  = windowWidthAndHeight()
 	maxOpenWindows = 5          // what would they want to do with more than 5 😂?
 	nOpenWindows   atomic.Int32 // number of open windows
 )
@@ -96,12 +97,17 @@ const (
 )
 
 func init() {
+	// MacOS requires the app to be executed on the "main" thread only. See:
+	// https://github.com/golang/go/wiki/LockOSThread. Use
+	// mdCore.Dispatch(func()) to execute any function that needs to run in the
+	// "main" thread.
 	runtime.LockOSThread()
 
-	// Set webview preferences.
-	webviewConfig.Preferences().SetValueForKey(core.True, core.String("developerExtrasEnabled"))
-	webviewConfig.Preferences().SetValueForKey(core.True, core.String("javaScriptCanAccessClipboard"))
-	webviewConfig.Preferences().SetValueForKey(core.True, core.String("DOMPasteAllowed"))
+	// Set "developerExtrasEnabled" to true to allow viewing the developer
+	// console.
+	webviewConfig.Preferences().SetValueForKey(mdCore.True, mdCore.String("developerExtrasEnabled"))
+	// Set "DOMPasteAllowed" to true to allow user's paste text.
+	webviewConfig.Preferences().SetValueForKey(mdCore.True, mdCore.String("DOMPasteAllowed"))
 }
 
 // hasOpenWindows is a convenience function to tell if there are any windows
@@ -185,8 +191,8 @@ func mainCore() error {
 		}
 	}()
 
-	// Prepare the Core.
-	clientCore, err := dexCore.New(cfg.Core(logMaker.Logger("CORE")))
+	// Prepare the core.
+	clientCore, err := core.New(cfg.Core(logMaker.Logger("CORE")))
 	if err != nil {
 		return fmt.Errorf("error creating client core: %w", err)
 	}
@@ -295,7 +301,7 @@ func mainCore() error {
 	// if to open the URL in webview or in the user's default browser. See:
 	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455641-webview?language=objc
 	addMethodToDelegate("webView:decidePolicyForNavigationAction:decisionHandler:", func(delegate objc.Object, webview objc.Object, navigation objc.Object, decisionHandler objc.Object) {
-		reqURL := core.NSURLRequest_fromRef(navigation.Send("request")).URL()
+		reqURL := mdCore.NSURLRequest_fromRef(navigation.Send("request")).URL()
 		destinationHost := reqURL.Host().String()
 		var decisionPolicy int
 		if url.Hostname() != destinationHost {
@@ -317,8 +323,8 @@ func mainCore() error {
 		}
 
 		// Create a new webview and load the provided url.
-		req := core.NSURLRequest_Init(core.URL(url.String()))
-		webView := webkit.WKWebView_Init(core.Rect(0, 0, float64(width), float64(height)), webviewConfig)
+		req := mdCore.NSURLRequest_Init(mdCore.URL(url.String()))
+		webView := webkit.WKWebView_Init(mdCore.Rect(0, 0, float64(width), float64(height)), webviewConfig)
 		webView.Object.Class().AddMethod(selIsNewWebview, selTrue)
 		webView.LoadRequest(req)
 		webView.SetUIDelegate_(cocoa.DefaultDelegate)
@@ -332,7 +338,7 @@ func mainCore() error {
 	// expect two (webView and navigation).
 	addMethodToDelegate("webView:didFinishNavigation:", func(_ objc.Object /* delegate */, webView objc.Object, _ objc.Object /* navigation */) {
 		// Return early if we already created a window for this webview.
-		if !core.True.Equals(webView.Send(selIsNewWebview)) {
+		if !mdCore.True.Equals(webView.Send(selIsNewWebview)) {
 			return // Nothing to do. This is just a normal window refresh.
 		}
 
@@ -342,12 +348,12 @@ func mainCore() error {
 		nOpenWindows.Add(1) // increment the number of open windows
 
 		// Create a new window and set the webview as its content view.
-		win := cocoa.NSWindow_Init(core.NSMakeRect(0, 0, float64(width), float64(height)), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
+		win := cocoa.NSWindow_Init(mdCore.NSMakeRect(0, 0, float64(width), float64(height)), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
 		win.SetTitle(appTitle)
 		win.Center()
 		win.SetMovable_(true)
 		win.SetContentView(webkit.WKWebView_fromRef(webView))
-		win.SetMinSize_(core.NSSize{Width: 600, Height: 600})
+		win.SetMinSize_(mdCore.NSSize{Width: 600, Height: 600})
 		win.MakeKeyAndOrderFront(nil)
 		win.SetDelegate_(cocoa.DefaultDelegate)
 	})
@@ -380,11 +386,11 @@ func mainCore() error {
 	// MacOS will always execute this method when dexc-desktop is about to exit
 	// so we should use this opportunity to cleanup. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428642-applicationshouldterminate?language=objc
-	addMethodToDelegate("applicationShouldTerminate:", func(s objc.Object) core.NSUInteger {
+	addMethodToDelegate("applicationShouldTerminate:", func(s objc.Object) mdCore.NSUInteger {
 		cancel()              // no-op with clean rpc/web server setup
 		wg.Wait()             // no-op with clean setup and shutdown
 		shutdownCloser.Done() // execute shutdown functions
-		return core.NSUInteger(1)
+		return mdCore.NSUInteger(1)
 	})
 
 	// "applicationDockMenu:" method returns the app's dock menu. See:
@@ -416,7 +422,7 @@ func mainCore() error {
 			return // nothing to do
 		}
 
-		if !errors.Is(err, dexCore.ActiveOrdersLogoutErr) {
+		if !errors.Is(err, core.ActiveOrdersLogoutErr) {
 			log.Errorf("Core logout error: %v", err)
 			return
 		}
@@ -479,8 +485,8 @@ func mainCore() error {
 		// still running (even with the dot below the dock icon).
 		obj := cocoa.NSStatusBar_System().StatusItemWithLength(cocoa.NSVariableStatusItemLength)
 		obj.Retain()
-		obj.Button().SetImage(cocoa.NSImage_InitWithData(core.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon)))))
-		obj.Button().Image().SetSize(core.Size(18, 18))
+		obj.Button().SetImage(cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon)))))
+		obj.Button().Image().SetSize(mdCore.Size(18, 18))
 		obj.Button().SetToolTip("Self-custodial multi-wallet")
 
 		runningItem := cocoa.NSMenuItem_New()
@@ -511,15 +517,26 @@ func mainCore() error {
 		// window is immediately visible when it's created. This also has the
 		// side effect of redrawing the menu bar which will be unresponsive
 		// until it is redrawn.
-		core.Dispatch(func() {
+		mdCore.Dispatch(func() {
 			app.TryToPerform_with_(objc.Sel("unhide:"), nil)
 		})
 
 		createNewWebView()
 	})
 
+	// Set the "ActivationPolicy" to NSApplicationActivationPolicyRegular to run
+	// dexc-desktop as a regular MacOS app (i.e as a non-cli application). See:
+	// https://developer.apple.com/documentation/appkit/nsapplication/1428621-setactivationpolicy?language=objc
 	app.SetActivationPolicy(cocoa.NSApplicationActivationPolicyRegular)
+	// Set "ActivateIgnoringOtherApps" to false to block other attempt at
+	// opening dexc-desktop from creating a new instance when dexc-desktop is
+	// already running. See:
+	// https://developer.apple.com/documentation/appkit/nsapplication/1428468-activateignoringotherapps/.
+	// "ActivateIgnoringOtherApps" is deprecated but still allowed until macOS
+	// version 14. Ventura is macOS version 13.
 	app.ActivateIgnoringOtherApps(false)
+	// Set dexc-desktop delegate to manage dexc-desktop behavior. See:
+	// https://developer.apple.com/documentation/appkit/nsapplication/1428705-delegate?language=objc
 	app.SetDelegate(cocoa.DefaultDelegate)
 
 	wg.Add(1)
@@ -601,17 +618,17 @@ func addMethodToDelegate(method string, fn interface{}) {
 // openURL opens the file at the specified path using macOS's native APIs.
 func openURL(path string) {
 	// See: https://developer.apple.com/documentation/appkit/nsworkspace?language=objc
-	cocoa.NSWorkspace_sharedWorkspace().Send("openURL:", core.NSURL_Init(path))
+	cocoa.NSWorkspace_sharedWorkspace().Send("openURL:", mdCore.NSURL_Init(path))
 }
 
 // selTrue returns an objc boolean "True".
 func selTrue(_ objc.Object) objc.Object {
-	return core.True
+	return mdCore.True
 }
 
 // selTrue returns an objc boolean "False".
 func selFalse(_ objc.Object) objc.Object {
-	return core.False
+	return mdCore.False
 }
 
 // createDexcDesktopStateFile writes the id of the current process to the file
@@ -659,4 +676,9 @@ func (sc *shutdownCloser) Done() {
 		sc.closers[i]()
 	}
 	sc.closers = nil
+}
+
+func windowWidthAndHeight() (width, height int) {
+	frame := cocoa.NSScreen_Main().Frame()
+	return limitedWindowWidthAndHeight(int(math.Round(frame.Size.Width)), int(math.Round(frame.Size.Height)))
 }
