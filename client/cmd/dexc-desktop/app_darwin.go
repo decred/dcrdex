@@ -78,12 +78,20 @@ var (
 	width, height  = windowWidthAndHeight()
 	maxOpenWindows = 5          // what would they want to do with more than 5 😂?
 	nOpenWindows   atomic.Int32 // number of open windows
+
+	// Initialized when dexc-desktop has been started.
+	appURL *url.URL
+
+	// completionHandler handles Objective-C callback functions for some
+	// delegate methods.
+	completionHandler = objc.Object_fromPointer(C.createCompletionHandlerDelegate())
 )
 
 const (
 	// macOSAppTitle is the title of the macOS app. It is used to set the title
 	// of the main menu.
 	macOSAppTitle = "Decred DEX"
+
 	// selOpenLogs is the selector for the "Open Logs" menu item.
 	selOpenLogs = "openLogs:"
 	// selNewWindow is the selector for the "New Window" menu item.
@@ -108,12 +116,10 @@ func init() {
 	webviewConfig.Preferences().SetValueForKey(mdCore.True, mdCore.String("developerExtrasEnabled"))
 	// Set "DOMPasteAllowed" to true to allow user's paste text.
 	webviewConfig.Preferences().SetValueForKey(mdCore.True, mdCore.String("DOMPasteAllowed"))
-}
 
-// hasOpenWindows is a convenience function to tell if there are any windows
-// currently open.
-func hasOpenWindows() bool {
-	return nOpenWindows.Load() > 0
+	// Set to false in order to prevent dexc-desktop from exiting when the last
+	// window is closed.
+	cocoa.TerminateAfterWindowsClose = false
 }
 
 // mainCore is the darwin entry point for the DEX Desktop client.
@@ -274,144 +280,29 @@ func mainCore() error {
 		scheme = "https"
 	}
 
-	url, err := url.ParseRequestURI(fmt.Sprintf("%s://%s", scheme, webSrv.Addr()))
+	appURL, err = url.ParseRequestURI(fmt.Sprintf("%s://%s", scheme, webSrv.Addr()))
 	if err != nil {
 		return fmt.Errorf("url.ParseRequestURI error: %w", err)
 	}
 
 	logDir := filepath.Dir(cfg.LogPath)
-
-	// Set to false so that the app doesn't exit when the last window is closed.
-	cocoa.TerminateAfterWindowsClose = false
-
-	// MacOS will execute this method when a file upload button is clicked. See:
-	// https://developer.apple.com/documentation/webkit/wkuidelegate/1641952-webview?language=objc
-	addMethodToDelegate("webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:", func(_ objc.Object, webview objc.Object, param objc.Object, fram objc.Object, completionHandler objc.Object) {
-		panel := objc.Get("NSOpenPanel").Send("openPanel")
-		openFiles := panel.Send("runModal").Bool()
-		handlerDelegate := objc.Object_fromPointer(C.createCompletionHandlerDelegate())
-		if !openFiles {
-			handlerDelegate.Send("completionHandler:withURLs:", completionHandler, nil)
-			return
-		}
-		handlerDelegate.Send("completionHandler:withURLs:", completionHandler, panel.Send("URLs"))
-	})
-
-	// MacOS will execute this method for each navigation in webview to decide
-	// if to open the URL in webview or in the user's default browser. See:
-	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455641-webview?language=objc
-	addMethodToDelegate("webView:decidePolicyForNavigationAction:decisionHandler:", func(delegate objc.Object, webview objc.Object, navigation objc.Object, decisionHandler objc.Object) {
-		reqURL := mdCore.NSURLRequest_fromRef(navigation.Send("request")).URL()
-		destinationHost := reqURL.Host().String()
-		var decisionPolicy int
-		if url.Hostname() != destinationHost {
-			decisionPolicy = NavigationActionPolicyCancel
-			openURL(reqURL.String())
-		}
-
-		completionHandler := objc.Object_fromPointer(C.createCompletionHandlerDelegate())
-		completionHandler.Send("decisionHandler:withPolicy:", decisionHandler, decisionPolicy)
-	})
-
-	// createNewWebView creates a new webview with the specified URL. The actual
-	// window will be created when the webview is loaded (i.e the
-	// "webView:didFinishNavigation:" method below have been executed).
-	createNewWebView := func() {
-		if int(nOpenWindows.Load()) >= maxOpenWindows {
-			log.Debugf("Ignoring open new window request, max number of (%d) open windows exceeded", maxOpenWindows)
-			return
-		}
-
-		// Create a new webview and load the provided url.
-		req := mdCore.NSURLRequest_Init(mdCore.URL(url.String()))
-		webView := webkit.WKWebView_Init(mdCore.Rect(0, 0, float64(width), float64(height)), webviewConfig)
-		webView.Object.Class().AddMethod(selIsNewWebview, selTrue)
-		webView.LoadRequest(req)
-		webView.SetUIDelegate_(cocoa.DefaultDelegate)
-		webView.SetNavigationDelegate_(cocoa.DefaultDelegate)
-	}
-
-	// WebView will execute this method when the page has loaded. We can then
-	// create a new window to avoid a temporary blank window. See:
-	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455629-webview?language=objc
-	// NOTE: This method actually receives three argument but the docs said to
-	// expect two (webView and navigation).
-	addMethodToDelegate("webView:didFinishNavigation:", func(_ objc.Object /* delegate */, webView objc.Object, _ objc.Object /* navigation */) {
-		// Return early if we already created a window for this webview.
-		if !mdCore.True.Equals(webView.Send(selIsNewWebview)) {
-			return // Nothing to do. This is just a normal window refresh.
-		}
-
-		// Overwrite the webview "selIsNewWebview" method.
-		webView.Class().AddMethod(selIsNewWebview, selFalse)
-
-		nOpenWindows.Add(1) // increment the number of open windows
-
-		// Create a new window and set the webview as its content view.
-		win := cocoa.NSWindow_Init(mdCore.NSMakeRect(0, 0, float64(width), float64(height)), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
-		win.SetTitle(appTitle)
-		win.Center()
-		win.SetMovable_(true)
-		win.SetContentView(webkit.WKWebView_fromRef(webView))
-		win.SetMinSize_(mdCore.NSSize{Width: 600, Height: 600})
-		win.MakeKeyAndOrderFront(nil)
-		win.SetDelegate_(cocoa.DefaultDelegate)
-	})
-
-	// Add custom selectors to the app delegate since there are reused in
-	// different menus. App delegates methods should be added before NSApp is
-	// initialized.
-	addMethodToDelegate(selOpenLogs, func(_ objc.Object) {
-		logDirURL, err := app.FilePathToURL(logDir)
-		if err != nil {
-			log.Errorf("error constructing log directory URL: %v", err)
-		} else {
-			openURL(logDirURL)
-		}
-	})
-
-	addMethodToDelegate(selNewWindow, func(_ objc.Object) {
-		windows := cocoa.NSApp().OrderedWindows()
-		len := windows.Count()
-		if len < uint64(maxOpenWindows) {
-			createNewWebView()
-		} else {
-			// Show the last window if maxOpenWindows has been exceeded.
-			winObj := windows.ObjectAtIndex(len - 1)
-			win := cocoa.NSWindow_fromRef(winObj)
-			win.MakeMainWindow()
-		}
-	})
+	classWrapper := initCocoaDefaultDelegateClassWrapper(logDir)
 
 	// MacOS will always execute this method when dexc-desktop is about to exit
 	// so we should use this opportunity to cleanup. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428642-applicationshouldterminate?language=objc
-	addMethodToDelegate("applicationShouldTerminate:", func(s objc.Object) mdCore.NSUInteger {
+	classWrapper.AddMethod("applicationShouldTerminate:", func(s objc.Object) mdCore.NSUInteger {
 		cancel()              // no-op with clean rpc/web server setup
 		wg.Wait()             // no-op with clean setup and shutdown
 		shutdownCloser.Done() // execute shutdown functions
 		return mdCore.NSUInteger(1)
 	})
 
-	// "applicationDockMenu:" method returns the app's dock menu. See:
-	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428564-applicationdockmenu?language=objc
-	addMethodToDelegate("applicationDockMenu:", func(_ objc.Object) objc.Object {
-		// Menu Items
-		newWindowMenuItem := cocoa.NSMenuItem_Init("New Window", objc.Sel(selNewWindow), "n")
-		logsMenuItem := cocoa.NSMenuItem_Init("Open Logs", objc.Sel(selOpenLogs), "l")
-
-		menu := cocoa.NSMenu_New()
-		menu.AddItem(newWindowMenuItem)
-		menu.AddItem(logsMenuItem)
-
-		return menu
-	})
-
 	// MacOS will always execute this method when dexc-desktop window is about
 	// to close See:
 	// https://developer.apple.com/documentation/appkit/nswindowdelegate/1419605-windowwillclose?language=objc
 	var noteSent bool
-	addMethodToDelegate("windowWillClose:", func(_ objc.Object) {
+	classWrapper.AddMethod("windowWillClose:", func(_ objc.Object) {
 		windowsOpen := nOpenWindows.Add(-1)
 		if windowsOpen > 0 {
 			return // nothing to do
@@ -433,104 +324,15 @@ func mainCore() error {
 		}
 	})
 
-	// MacOS will always execute this method when dexc-desktop icon on the dock
-	// is clicked or a new process is about to start, so we hijack the action
-	// and create new windows if all windows have been closed. See:
-	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428638-applicationshouldhandlereopen?language=objc
-	addMethodToDelegate("applicationShouldHandleReopen:hasVisibleWindows:", func(_ objc.Object) bool {
-		if !hasOpenWindows() {
-			// dexc-desktop is already running but there are no windows open so
-			// we should create a new window.
-			createNewWebView()
-			return false
-		}
-
-		// dexc-desktop is already running and there's a window open so we can
-		// go ahead with the default action which is to bring the open window to
-		// the front.
-		return true
-	})
-
 	app := cocoa.NSApp()
-
-	// Set the app's main and status bar menu when we receive
-	// NSApplicationWillFinishLaunchingNotification. See:
-	//  - https://github.com/go-gl/glfw/blob/master/v3.3/glfw/glfw/src/cocoa_init.m#L427-L443
-	//  - https://developer.apple.com/documentation/appkit/nsapplicationwillfinishlaunchingnotification?language=objc
-	addMethodToDelegate("applicationWillFinishLaunching:", func(_ objc.Object) {
-		// Create the main menu bar.
-		menuBar := cocoa.NSMenu_New()
-		app.SetMainMenu(menuBar)
-		appMenus := createMainMenuItems()
-		for _, menu := range appMenus {
-			// Create a menu item for the menuBar and set the menu as the
-			// submenu. See:
-			// https://developer.apple.com/documentation/appkit/nsmenuitem/1514845-submenu?language=objc
-			mainBarItem := cocoa.NSMenuItem_New()
-			mainBarItem.SetTitle(menu.Title())
-			mainBarItem.SetSubmenu(menu)
-			menuBar.AddItem(mainBarItem)
-
-			if menu.Title() == "Window" {
-				// Set NSApp's WindowsMenu to the Window menu. This will allow
-				// windows to be grouped together in the dock icon and in the
-				// Window menu. Also, MacOS will automatically add other default
-				// Window menu items. See:
-				// https://developer.apple.com/documentation/appkit/nsapplication/1428547-windowsmenu?language=objc
-				app.Set("WindowsMenu:", menu)
-			}
-		}
-
-		// Create the status bar menu. We want users to notice dexc desktop is
-		// still running (even with the dot below the dock icon).
-		obj := cocoa.NSStatusBar_System().StatusItemWithLength(cocoa.NSVariableStatusItemLength)
-		obj.Retain()
-		obj.Button().SetImage(cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon)))))
-		obj.Button().Image().SetSize(mdCore.Size(18, 18))
-		obj.Button().SetToolTip("Self-custodial multi-wallet")
-
-		runningItem := cocoa.NSMenuItem_New()
-		runningItem.SetTitle("Dex Client is running")
-		runningItem.SetEnabled(false)
-
-		itemQuit := cocoa.NSMenuItem_Init("Quit", objc.Sel("terminate:"), "q")
-		itemQuit.SetToolTip("Quit DEX client")
-
-		menu := cocoa.NSMenu_New()
-		menu.AddItem(runningItem)
-		menu.AddItem(itemQuit)
-		obj.SetMenu(menu)
-
-		// Hide the application until it is ready to be shown when we receive
-		// the "NSApplicationDidFinishLaunchingNotification" below. This also
-		// allows us to ensure the menu bar is redrawn.
-		app.TryToPerform_with_(objc.Sel("hide:"), nil)
-	})
-
-	// MacOS will always send a notification named
-	// "NSApplicationDidFinishLaunchingNotification" when an application has
-	// finished launching. See:
-	// https://developer.apple.com/documentation/appkit/nsapplicationdidfinishlaunchingnotification?language=objc
-	addMethodToDelegate("applicationDidFinishLaunching:", func(_, notification objc.Object) {
-		// Unhide the app on the main thread after it has finished launching we
-		// need to give this priority before creating the window to ensure the
-		// window is immediately visible when it's created. This also has the
-		// side effect of redrawing the menu bar which will be unresponsive
-		// until it is redrawn.
-		mdCore.Dispatch(func() {
-			app.TryToPerform_with_(objc.Sel("unhide:"), nil)
-		})
-
-		createNewWebView()
-	})
-
-	// Set the "ActivationPolicy" to NSApplicationActivationPolicyRegular to run
-	// dexc-desktop as a regular MacOS app (i.e as a non-cli application). See:
+	// Set the "ActivationPolicy" to "NSApplicationActivationPolicyRegular" in
+	// order to run dexc-desktop as a regular MacOS app (i.e as a non-cli
+	// application). See:
 	// https://developer.apple.com/documentation/appkit/nsapplication/1428621-setactivationpolicy?language=objc
 	app.SetActivationPolicy(cocoa.NSApplicationActivationPolicyRegular)
-	// Set "ActivateIgnoringOtherApps" to false to block other attempt at
-	// opening dexc-desktop from creating a new instance when dexc-desktop is
-	// already running. See:
+	// Set "ActivateIgnoringOtherApps" to "false" in order to block other
+	// attempt at opening dexc-desktop from creating a new instance when
+	// dexc-desktop is already running. See:
 	// https://developer.apple.com/documentation/appkit/nsapplication/1428468-activateignoringotherapps/.
 	// "ActivateIgnoringOtherApps" is deprecated but still allowed until macOS
 	// version 14. Ventura is macOS version 13.
@@ -557,78 +359,292 @@ func mainCore() error {
 	return nil
 }
 
-// createMainMenuItems creates the main menu items for the app menu.
-func createMainMenuItems() []cocoa.NSMenu {
+// hasOpenWindows is a convenience function to tell if there are any windows
+// currently open.
+func hasOpenWindows() bool {
+	return nOpenWindows.Load() > 0
+}
+
+// createNewWebView creates a new webview with the specified URL. The actual
+// window will be created when the webview is loaded (i.e the
+// "webView:didFinishNavigation:" method have been executed).
+func createNewWebView() {
+	if int(nOpenWindows.Load()) >= maxOpenWindows {
+		log.Debugf("Ignoring open new window request, max number of (%d) open windows exceeded", maxOpenWindows)
+		return
+	}
+
+	// Create a new webview and loads the appURL.
+	req := mdCore.NSURLRequest_Init(mdCore.URL(appURL.String()))
+	webView := webkit.WKWebView_Init(mdCore.Rect(0, 0, float64(width), float64(height)), webviewConfig)
+	webView.Object.Class().AddMethod(selIsNewWebview, func(_ objc.Object) objc.Object { return mdCore.True })
+	webView.LoadRequest(req)
+	webView.SetUIDelegate_(cocoa.DefaultDelegate)
+	webView.SetNavigationDelegate_(cocoa.DefaultDelegate)
+}
+
+// cocoaDefaultDelegateClassWrapper wraps cocoa.DefaultDelegateClass.
+type cocoaDefaultDelegateClassWrapper struct {
+	objc.Class
+}
+
+// initCocoaDefaultDelegateClassWrapper creates a new
+// *cocoaDefaultDelegateClassWrapper and adds required Object-C methods. Other
+// methods can be added to the returned *cocoaDefaultDelegateClassWrapper.
+func initCocoaDefaultDelegateClassWrapper(logDir string) *cocoaDefaultDelegateClassWrapper {
+	ad := &cocoaDefaultDelegateClassWrapper{
+		Class: cocoa.DefaultDelegateClass,
+	}
+
+	// Set the app's main and status bar menu when we receive
+	// NSApplicationWillFinishLaunchingNotification. See:
+	//  - https://github.com/go-gl/glfw/blob/master/v3.3/glfw/glfw/src/cocoa_init.m#L427-L443
+	//  - https://developer.apple.com/documentation/appkit/nsapplicationwillfinishlaunchingnotification?language=objc
+	ad.AddMethod("applicationWillFinishLaunching:", ad.handleApplicationWillFinishLaunching)
+	// MacOS will always send a notification named
+	// "NSApplicationDidFinishLaunchingNotification" when an application has
+	// finished launching. See:
+	// https://developer.apple.com/documentation/appkit/nsapplicationdidfinishlaunchingnotification?language=objc
+	ad.AddMethod("applicationDidFinishLaunching:", ad.handleApplicationDidFinishLaunching)
+	// MacOS will always execute this method when dexc-desktop icon on the dock
+	// is clicked or a new process is about to start, so we hijack the action
+	// and create new windows if all windows have been closed. See:
+	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428638-applicationshouldhandlereopen?language=objc
+	ad.AddMethod("applicationShouldHandleReopen:hasVisibleWindows:", ad.handleApplicationShouldHandleReopenHasVisibleWindows)
+	// "applicationDockMenu:" method returns the app's dock menu. See:
+	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428564-applicationdockmenu?language=objc
+	ad.AddMethod("applicationDockMenu:", ad.handleApplicationDockMenu)
+	// WebView will execute this method when the page has loaded. We can then
+	// create a new window to avoid a temporary blank window. See:
+	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455629-webview?language=objc
+	// NOTE: This method actually receives three argument but the docs said to
+	// expect two (webView and navigation).
+	ad.AddMethod("webView:didFinishNavigation:", ad.handleWebViewDidFinishNavigation)
+	// MacOS will execute this method when a file upload button is clicked. See:
+	// https://developer.apple.com/documentation/webkit/wkuidelegate/1641952-webview?language=objc
+	ad.AddMethod("webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:", ad.handleWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler)
+	// MacOS will execute this method for each navigation in webview to decide
+	// if to open the URL in webview or in the user's default browser. See:
+	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455641-webview?language=objc
+	ad.AddMethod("webView:decidePolicyForNavigationAction:decisionHandler:", ad.handleWebViewDecidePolicyForNavigationActionDecisionHandler)
+
+	// Add custom selectors to the app delegate since there are reused in
+	// different menus. App delegates methods should be added before NSApp is
+	// initialized.
+	ad.AddMethod(selOpenLogs, func(_ objc.Object) {
+		logDirURL, err := app.FilePathToURL(logDir)
+		if err != nil {
+			log.Errorf("error constructing log directory URL: %v", err)
+		} else {
+			openURL(logDirURL)
+		}
+	})
+	ad.AddMethod(selNewWindow, func(_ objc.Object) {
+		windows := cocoa.NSApp().OrderedWindows()
+		len := windows.Count()
+		if len < uint64(maxOpenWindows) {
+			createNewWebView()
+		} else {
+			// Show the last window if maxOpenWindows has been exceeded.
+			winObj := windows.ObjectAtIndex(len - 1)
+			win := cocoa.NSWindow_fromRef(winObj)
+			win.MakeMainWindow()
+		}
+	})
+
+	return ad
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationWillFinishLaunching(_ objc.Object) {
+	// Create the status bar menu. We want users to notice dexc desktop is
+	// still running (even with the dot below the dock icon).
+	obj := cocoa.NSStatusBar_System().StatusItemWithLength(cocoa.NSVariableStatusItemLength)
+	obj.Retain()
+	obj.Button().SetImage(cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon)))))
+	obj.Button().Image().SetSize(mdCore.Size(18, 18))
+	obj.Button().SetToolTip("Self-custodial multi-wallet")
+
+	runningItem := cocoa.NSMenuItem_New()
+	runningItem.SetTitle("Dex Client is running")
+	runningItem.SetEnabled(false)
+
+	menu := cocoa.NSMenu_New()
+	menu.AddItem(runningItem)
+	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
+	quitMenuItem.SetToolTip("Quit DEX client")
+	menu.AddItem(quitMenuItem)
+	obj.SetMenu(menu)
+
+	setAppMainMenuBar()
+
+	// Hide the application until it is ready to be shown when we receive
+	// the "NSApplicationDidFinishLaunchingNotification" below. This also
+	// allows us to ensure the menu bar is redrawn.
+	cocoa.NSApp().TryToPerform_with_(objc.Sel("hide:"), nil)
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationDidFinishLaunching(_, _ objc.Object) {
+	// Unhide the app on the main thread after it has finished launching we need
+	// to give this priority before creating the window to ensure the window is
+	// immediately visible when it's created. This also has the side effect of
+	// redrawing the menu bar which will be unresponsive until it is redrawn.
+	mdCore.Dispatch(func() {
+		cocoa.NSApp().TryToPerform_with_(objc.Sel("unhide:"), nil)
+	})
+
+	createNewWebView()
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationShouldHandleReopenHasVisibleWindows(_ objc.Object) bool {
+	if !hasOpenWindows() {
+		// dexc-desktop is already running but there are no windows open so
+		// we should create a new window.
+		createNewWebView()
+		return false
+	}
+
+	// dexc-desktop is already running and there's a window open so we can
+	// go ahead with the default action which is to bring the open window to
+	// the front.
+	return true
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationDockMenu(_ objc.Object) objc.Object {
+	menu := cocoa.NSMenu_New()
+	newWindowMenuItem := cocoa.NSMenuItem_Init("New Window", objc.Sel(selNewWindow), "n")
+	logsMenuItem := cocoa.NSMenuItem_Init("Open Logs", objc.Sel(selOpenLogs), "l")
+	menu.AddItem(newWindowMenuItem)
+	menu.AddItem(logsMenuItem)
+	return menu
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler(_ objc.Object, webview objc.Object, param objc.Object, fram objc.Object, completionHandlerFn objc.Object) {
+	panel := objc.Get("NSOpenPanel").Send("openPanel")
+	openFiles := panel.Send("runModal").Bool()
+	if !openFiles {
+		completionHandler.Send("completionHandler:withURLs:", completionHandlerFn, nil)
+		return
+	}
+	completionHandler.Send("completionHandler:withURLs:", completionHandlerFn, panel.Send("URLs"))
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewDidFinishNavigation(_ objc.Object /* delegate */, webView objc.Object, _ objc.Object /* navigation */) {
+	// Return early if we already created a window for this webview.
+	if !mdCore.True.Equals(webView.Send(selIsNewWebview)) {
+		return // Nothing to do. This is just a normal window refresh.
+	}
+
+	// Overwrite the webview "selIsNewWebview" method to return false. This will
+	// prevent this new webview from opening new windows later.
+	webView.Class().AddMethod(selIsNewWebview, func(_ objc.Object) objc.Object { return mdCore.False })
+	nOpenWindows.Add(1) // increment the number of open windows
+
+	// Create a new window and set the webview as its content view.
+	win := cocoa.NSWindow_Init(mdCore.NSMakeRect(0, 0, float64(width), float64(height)), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
+	win.SetTitle(appTitle)
+	win.Center()
+	win.SetMovable_(true)
+	win.SetContentView(webkit.WKWebView_fromRef(webView))
+	win.SetMinSize_(mdCore.NSSize{Width: 600, Height: 600})
+	win.MakeKeyAndOrderFront(nil)
+	win.SetDelegate_(cocoa.DefaultDelegate)
+}
+
+func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewDecidePolicyForNavigationActionDecisionHandler(delegate objc.Object, webview objc.Object, navigation objc.Object, decisionHandler objc.Object) {
+	reqURL := mdCore.NSURLRequest_fromRef(navigation.Send("request")).URL()
+	destinationHost := reqURL.Host().String()
+	var decisionPolicy int
+	if appURL.Hostname() != destinationHost {
+		decisionPolicy = NavigationActionPolicyCancel
+		openURL(reqURL.String())
+	}
+	completionHandler.Send("decisionHandler:withPolicy:", decisionHandler, decisionPolicy)
+}
+
+// setAppMainMenuBar creates and sets the main menu items for the app menu.
+func setAppMainMenuBar() {
 	// Create the App menu.
 	appMenu := cocoa.NSMenu_Init(macOSAppTitle)
 
-	// Add the menu items.
+	// Create the menu items.
 	hideMenuItem := cocoa.NSMenuItem_Init("Hide "+macOSAppTitle, objc.Sel("hide:"), "h")
-	appMenu.AddItem(hideMenuItem)
-
 	hideOthersMenuItem := cocoa.NSMenuItem_Init("Hide Others", objc.Sel("hideOtherApplications:"), "")
-	appMenu.AddItem(hideOthersMenuItem)
-
 	showAllMenuItem := cocoa.NSMenuItem_Init("Show All", objc.Sel("unhideAllApplications:"), "")
-	appMenu.AddItem(showAllMenuItem)
-
-	appMenu.AddItem(cocoa.NSMenuItem_Separator())
-
 	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
 	quitMenuItem.SetToolTip("Quit DEX client")
-	appMenu.AddItem(quitMenuItem)
-
-	// Create the Window menu.
-	windowMenu := cocoa.NSMenu_Init("Window")
 
 	// Add the menu items.
-	newWindowItem := cocoa.NSMenuItem_Init("New Window", objc.Sel(selNewWindow), "n")
-	windowMenu.AddItem(newWindowItem)
+	appMenu.AddItem(hideMenuItem)
+	appMenu.AddItem(hideOthersMenuItem)
+	appMenu.AddItem(showAllMenuItem)
+	appMenu.AddItem(cocoa.NSMenuItem_Separator())
+	appMenu.AddItem(quitMenuItem)
 
-	windowMenu.AddItem(cocoa.NSMenuItem_Separator())
+	// Create the "Window" menu.
+	windowMenu := cocoa.NSMenu_Init("Window")
 
+	// Create the "Window" menu items.
+	newWindowMenuItem := cocoa.NSMenuItem_Init("New Window", objc.Sel(selNewWindow), "n")
 	minimizeMenuItem := cocoa.NSMenuItem_Init("Minimize", objc.Sel("performMiniaturize:"), "m")
-	windowMenu.AddItem(minimizeMenuItem)
-
 	zoomMenuItem := cocoa.NSMenuItem_Init("Zoom", objc.Sel("performZoom:"), "z")
-	windowMenu.AddItem(zoomMenuItem)
-
 	frontMenuItem := cocoa.NSMenuItem_Init("Bring All to Front", objc.Sel("arrangeInFront:"), "")
-	windowMenu.AddItem(frontMenuItem)
-
-	windowMenu.AddItem(cocoa.NSMenuItem_Separator())
-
 	fullScreenMenuItem := cocoa.NSMenuItem_Init("Enter Full Screen", objc.Sel("toggleFullScreen:"), "f")
+
+	// Add the "Window" menu items.
+	windowMenu.AddItem(newWindowMenuItem)
+	windowMenu.AddItem(cocoa.NSMenuItem_Separator())
+	windowMenu.AddItem(minimizeMenuItem)
+	windowMenu.AddItem(zoomMenuItem)
+	windowMenu.AddItem(frontMenuItem)
+	windowMenu.AddItem(cocoa.NSMenuItem_Separator())
 	windowMenu.AddItem(fullScreenMenuItem)
 
 	// Create the "Others" menu.
 	othersMenu := cocoa.NSMenu_Init("Others")
 
+	// Create the "Others" menu items.
 	logsMenuItem := cocoa.NSMenuItem_Init("Open Logs", objc.Sel(selOpenLogs), "l")
+
+	// Add the "Others" menu item.
 	othersMenu.AddItem(logsMenuItem)
 
-	return []cocoa.NSMenu{appMenu, windowMenu, othersMenu}
+	// Create the main menu bar.
+	menuBar := cocoa.NSMenu_New()
+	app := cocoa.NSApp()
+	for _, menu := range []cocoa.NSMenu{appMenu, windowMenu, othersMenu} {
+		// Create a menu item for the menuBar and set the menu as the
+		// submenu. See:
+		// https://developer.apple.com/documentation/appkit/nsmenuitem/1514845-submenu?language=objc
+		mainBarItem := cocoa.NSMenuItem_New()
+		mainBarItem.SetTitle(menu.Title())
+		mainBarItem.SetSubmenu(menu)
+		menuBar.AddItem(mainBarItem)
+
+		if menu.Title() == "Window" {
+			// Set NSApp's WindowsMenu to the Window menu. This will allow
+			// windows to be grouped together in the dock icon and in the
+			// Window menu. Also, MacOS will automatically add other default
+			// Window menu items. See:
+			// https://developer.apple.com/documentation/appkit/nsapplication/1428547-windowsmenu?language=objc
+			app.Set("WindowsMenu:", menu)
+		}
+	}
+
+	app.SetMainMenu(menuBar)
+	return
 }
 
-// addMethodToDelegate adds a method to the default Cocoa delegate.
-func addMethodToDelegate(method string, fn interface{}) {
-	cocoa.DefaultDelegateClass.AddMethod(method, fn)
+func windowWidthAndHeight() (width, height int) {
+	frame := cocoa.NSScreen_Main().Frame()
+	return limitedWindowWidthAndHeight(int(math.Round(frame.Size.Width)), int(math.Round(frame.Size.Height)))
 }
 
-// openURL opens the file at the specified path using macOS's native APIs.
+// openURL opens the provided path using macOS's native APIs. This will ensure
+// the "path" is opened with the appropriate app (e.g a valid HTTP URL will be
+// opened in the user's default browser)
 func openURL(path string) {
 	// See: https://developer.apple.com/documentation/appkit/nsworkspace?language=objc
 	cocoa.NSWorkspace_sharedWorkspace().Send("openURL:", mdCore.NSURL_Init(path))
-}
-
-// selTrue returns an objc boolean "True".
-func selTrue(_ objc.Object) objc.Object {
-	return mdCore.True
-}
-
-// selTrue returns an objc boolean "False".
-func selFalse(_ objc.Object) objc.Object {
-	return mdCore.False
 }
 
 // createDexcDesktopStateFile writes the id of the current process to the file
@@ -676,9 +692,4 @@ func (sc *shutdownCloser) Done() {
 		sc.closers[i]()
 	}
 	sc.closers = nil
-}
-
-func windowWidthAndHeight() (width, height int) {
-	frame := cocoa.NSScreen_Main().Frame()
-	return limitedWindowWidthAndHeight(int(math.Round(frame.Size.Width)), int(math.Round(frame.Size.Height)))
 }
