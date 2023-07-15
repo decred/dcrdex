@@ -2,10 +2,51 @@
 
 package main
 
+/*
+#cgo CFLAGS: -x objective-c
+#cgo LDFLAGS: -lobjc -framework WebKit -framework AppKit
+
+#import <objc/runtime.h>
+#import <WebKit/WebKit.h>
+#import <AppKit/AppKit.h>
+
+// NavigationActionPolicyCancel is an integer used in Go code to represent
+// WKNavigationActionPolicyCancel
+const int NavigationActionPolicyCancel = 1;
+
+// CompletionHandlerDelegate implements methods required for executing
+// completion and decision handlers.
+@interface CompletionHandlerDelegate:NSObject
+- (void)completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler withURLs:(NSArray<NSURL *> * _Nullable)URLs;
+- (void)decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler withPolicy:(int)policy;
+@end
+
+@implementation CompletionHandlerDelegate
+// "completionHandler:withURLs" accepts a completion handler function from
+// "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:" and
+// executes it with the provided URLs.
+- (void)completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler withURLs:(NSArray<NSURL *> * _Nullable)URLs {
+	completionHandler(URLs);
+}
+
+// "decisionHandler:withPolicy" accepts a decision handler function from
+// "webView:decidePolicyForNavigationAction:decisionHandler" and executes
+// it with the provided policy.
+- (void)decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler withPolicy:(int)policy {
+	policy == NavigationActionPolicyCancel ? decisionHandler(WKNavigationActionPolicyCancel) : decisionHandler(WKNavigationActionPolicyAllow);
+}
+@end
+
+void* createCompletionHandlerDelegate() {
+   return [[CompletionHandlerDelegate alloc] init];
+}
+*/
+import "C"
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -48,6 +89,10 @@ const (
 	selNewWindow = "newWindow:"
 	// selIsNewWebview is the selector for a webview that require a new window.
 	selIsNewWebview = "isNewWebView:"
+
+	// NavigationActionPolicyCancel is used in Objective-C code to represent
+	// WKNavigationActionPolicyCancel.
+	NavigationActionPolicyCancel = 1
 )
 
 func init() {
@@ -109,7 +154,6 @@ func mainCore() error {
 	// as a deferred statement in the main goroutine.
 	shutdownCloser := new(shutdownCloser)
 	defer shutdownCloser.Done() // execute deferred functions if we return early
-
 	// Initialize logging.
 	utc := !cfg.LocalLogs
 	logMaker, closeLogger := app.InitLogging(cfg.LogPath, cfg.DebugLevel, cfg.LogStdout, utc)
@@ -224,11 +268,44 @@ func mainCore() error {
 		scheme = "https"
 	}
 
-	url := fmt.Sprintf("%s://%s", scheme, webSrv.Addr())
+	url, err := url.ParseRequestURI(fmt.Sprintf("%s://%s", scheme, webSrv.Addr()))
+	if err != nil {
+		return fmt.Errorf("url.ParseRequestURI error: %w", err)
+	}
+
 	logDir := filepath.Dir(cfg.LogPath)
 
 	// Set to false so that the app doesn't exit when the last window is closed.
 	cocoa.TerminateAfterWindowsClose = false
+
+	// MacOS will execute this method when a file upload button is clicked. See:
+	// https://developer.apple.com/documentation/webkit/wkuidelegate/1641952-webview?language=objc
+	addMethodToDelegate("webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:", func(_ objc.Object, webview objc.Object, param objc.Object, fram objc.Object, completionHandler objc.Object) {
+		panel := objc.Get("NSOpenPanel").Send("openPanel")
+		openFiles := panel.Send("runModal").Bool()
+		handlerDelegate := objc.Object_fromPointer(C.createCompletionHandlerDelegate())
+		if !openFiles {
+			handlerDelegate.Send("completionHandler:withURLs:", completionHandler, nil)
+			return
+		}
+		handlerDelegate.Send("completionHandler:withURLs:", completionHandler, panel.Send("URLs"))
+	})
+
+	// MacOS will execute this method for each navigation in webview to decide
+	// if to open the URL in webview or in the user's default browser. See:
+	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455641-webview?language=objc
+	addMethodToDelegate("webView:decidePolicyForNavigationAction:decisionHandler:", func(delegate objc.Object, webview objc.Object, navigation objc.Object, decisionHandler objc.Object) {
+		reqURL := core.NSURLRequest_fromRef(navigation.Send("request")).URL()
+		destinationHost := reqURL.Host().String()
+		var decisionPolicy int
+		if url.Hostname() != destinationHost {
+			decisionPolicy = NavigationActionPolicyCancel
+			openURL(reqURL.String())
+		}
+
+		completionHandler := objc.Object_fromPointer(C.createCompletionHandlerDelegate())
+		completionHandler.Send("decisionHandler:withPolicy:", decisionHandler, decisionPolicy)
+	})
 
 	// createNewWebView creates a new webview with the specified URL. The actual
 	// window will be created when the webview is loaded (i.e the
@@ -240,10 +317,11 @@ func mainCore() error {
 		}
 
 		// Create a new webview and load the provided url.
-		req := core.NSURLRequest_Init(core.URL(url))
+		req := core.NSURLRequest_Init(core.URL(url.String()))
 		webView := webkit.WKWebView_Init(core.Rect(0, 0, float64(width), float64(height)), webviewConfig)
 		webView.Object.Class().AddMethod(selIsNewWebview, selTrue)
 		webView.LoadRequest(req)
+		webView.SetUIDelegate_(cocoa.DefaultDelegate)
 		webView.SetNavigationDelegate_(cocoa.DefaultDelegate)
 	}
 
@@ -523,7 +601,7 @@ func addMethodToDelegate(method string, fn interface{}) {
 // openURL opens the file at the specified path using macOS's native APIs.
 func openURL(path string) {
 	// See: https://developer.apple.com/documentation/appkit/nsworkspace?language=objc
-	objc.Get("NSWorkspace").Get("sharedWorkspace").Send("openURL:", core.NSURL_Init(path))
+	cocoa.NSWorkspace_sharedWorkspace().Send("openURL:", core.NSURL_Init(path))
 }
 
 // selTrue returns an objc boolean "True".

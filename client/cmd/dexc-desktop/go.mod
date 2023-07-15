@@ -8,7 +8,7 @@ require (
 	decred.org/dcrdex v0.6.1
 	fyne.io/systray v1.10.1-0.20230403195833-7dc3c09283d6
 	github.com/gen2brain/beeep v0.0.0-20220909211152-5a9ec94374f6
-	github.com/progrium/macdriver v0.2.0
+	github.com/progrium/macdriver v0.4.0
 	github.com/webview/webview v0.0.0-20230415172654-8387ff8945fc
 )
 
@@ -173,7 +173,7 @@ require (
 	golang.org/x/exp v0.0.0-20230206171751-46f607a40771 // indirect
 	golang.org/x/net v0.8.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.7.0 // indirect
+	golang.org/x/sys v0.9.0 // indirect
 	golang.org/x/term v0.6.0 // indirect
 	golang.org/x/text v0.8.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
