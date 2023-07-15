@@ -379,6 +379,7 @@ func createNewWebView() {
 	webView := webkit.WKWebView_Init(mdCore.Rect(0, 0, float64(width), float64(height)), webviewConfig)
 	webView.Object.Class().AddMethod(selIsNewWebview, func(_ objc.Object) objc.Object { return mdCore.True })
 	webView.LoadRequest(req)
+	webView.SetAllowsBackForwardNavigationGestures_(true)
 	webView.SetUIDelegate_(cocoa.DefaultDelegate)
 	webView.SetNavigationDelegate_(cocoa.DefaultDelegate)
 }
