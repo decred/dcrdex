@@ -71,7 +71,6 @@ function prepare() {
 		  <key>CFBundleSignature</key><string>dexc</string>
 		  <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
 		  <key>LSMinimumSystemVersion</key><string>10.11.0</string>
-		  <key>LSUIElement</key><true/>
 		  <key>NSHighResolutionCapable</key><true/>
 		  <key>NSRequiresAquaSystemAppearance</key><false/>
 		  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
