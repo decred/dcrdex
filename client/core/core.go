@@ -10370,15 +10370,22 @@ func (c *Core) saveDisabledRateSources() {
 	}
 }
 
-func (c *Core) shieldedWallet(assetID uint32) (asset.ShieldedWallet, error) {
+func (c *Core) shieldedWallet(assetID uint32, wantSynced ...bool) (asset.ShieldedWallet, error) {
 	w, found := c.wallet(assetID)
 	if !found {
 		return nil, fmt.Errorf("no %s wallet", unbip(assetID))
 	}
+
 	sw, is := w.Wallet.(asset.ShieldedWallet)
 	if !is {
 		return nil, fmt.Errorf("%s wallet is not a shielded wallet", unbip(assetID))
 	}
+
+	// Check if a sycned wallet is requested.
+	if len(wantSynced) > 0 && wantSynced[0] && !w.synchronized() {
+		return nil, fmt.Errorf("%s is still syncing", unbip(assetID))
+	}
+
 	return sw, nil
 }
 
@@ -10405,7 +10412,7 @@ func (c *Core) NewShieldedAddress(assetID uint32) (string, error) {
 
 // ShieldFunds moves funds from the transparent account to the shielded account.
 func (c *Core) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	sw, err := c.shieldedWallet(assetID)
+	sw, err := c.shieldedWallet(assetID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -10415,7 +10422,7 @@ func (c *Core) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 // UnshieldFunds moves funds from the shielded account to the transparent
 // account.
 func (c *Core) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	sw, err := c.shieldedWallet(assetID)
+	sw, err := c.shieldedWallet(assetID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -10431,18 +10438,9 @@ func (c *Core) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uin
 		return nil, fmt.Errorf("password error: %w", err)
 	}
 
-	w, found := c.wallet(assetID)
-	if !found {
-		return nil, fmt.Errorf("no %s wallet", unbip(assetID))
-	}
-
-	sw, is := w.Wallet.(asset.ShieldedWallet)
-	if !is {
-		return nil, fmt.Errorf("%s wallet is not a shielded wallet", unbip(assetID))
-	}
-
-	if !w.synchronized() {
-		return nil, fmt.Errorf("%s is still syncing", unbip(assetID))
+	sw, err := c.shieldedWallet(assetID, true)
+	if err != nil {
+		return nil, err
 	}
 
 	coinID, err := sw.SendShielded(c.ctx, toAddr, amt)
