@@ -1472,10 +1472,6 @@ func TestFundMultiOrder(t *testing.T) {
 
 func testFundMultiOrder(t *testing.T, assetID uint32) {
 	w, eth, node, shutdown := tassetWallet(assetID)
-	multiFunder, ok := w.(asset.MultiOrderFunder)
-	if !ok {
-		t.Fatalf("wallet does not implement MultiOrderFunder")
-	}
 
 	defer shutdown()
 
@@ -1692,7 +1688,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 		eth.lockedFunds.initiateReserves = 0
 		eth.baseWallet.wallets[BipID].lockedFunds.initiateReserves = 0
 
-		allCoins, redeemScripts, _, err := multiFunder.FundMultiOrder(test.multiOrder, test.maxLock)
+		allCoins, redeemScripts, _, err := w.FundMultiOrder(test.multiOrder, test.maxLock)
 		if test.expectErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get one", test.name)

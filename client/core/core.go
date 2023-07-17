@@ -6142,11 +6142,6 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 	}
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
-	multiFunder, is := fromWallet.Wallet.(asset.MultiOrderFunder)
-	if !is {
-		return nil, newError(orderParamsErr, "fromWallet is not a MultiOrderFunder")
-	}
-
 	for _, trade := range form.Placements {
 		if trade.Rate == 0 {
 			return nil, newError(orderParamsErr, "zero rate is invalid")
@@ -6183,7 +6178,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 		})
 	}
 
-	allCoins, allRedeemScripts, fundingFees, err := multiFunder.FundMultiOrder(&asset.MultiOrder{
+	allCoins, allRedeemScripts, fundingFees, err := fromWallet.FundMultiOrder(&asset.MultiOrder{
 		Version:       assetConfigs.fromAsset.Version,
 		Values:        orderValues,
 		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,

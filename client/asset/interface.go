@@ -499,11 +499,10 @@ type Wallet interface {
 	SingleLotSwapFees(version uint32, feeRate uint64, options map[string]string) (uint64, error)
 	// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
 	SingleLotRedeemFees(version uint32, feeRate uint64, options map[string]string) (uint64, error)
-}
-
-// MultiOrderFunder is a wallet that can fund multiple orders at once.
-// This will be part of the Wallet interface once all wallets support it.
-type MultiOrderFunder interface {
+	// FundMultiOrder funds multiple orders at once. The return values will
+	// be in the same order as the passed orders. If less values are returned
+	// than the number of orders, then the orders at the end of the list were
+	// not about to be funded.
 	FundMultiOrder(ord *MultiOrder, maxLock uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
 }
 
