@@ -258,41 +258,7 @@ func (contractDeployer) ReturnETH(
 	}
 	defer cl.shutdown()
 
-	bigBal, err := cl.addressBalance(ctx, cl.address())
-	if err != nil {
-		return fmt.Errorf("error getting eth balance: %v", err)
-	}
-	bal := dexeth.WeiToGwei(bigBal)
-
-	log.Infof("Balance: %s %s", ui.ConventionalString(bal), ui.Conventional.Unit)
-
-	var gas uint64 = defaultSendGasLimit
-	fees := feeRate * gas
-
-	log.Infof("Fees: %s %s", ui.ConventionalString(fees), ui.Conventional.Unit)
-
-	if fees >= bal {
-		return fmt.Errorf("tx fees of %s %s exceed balance of %s",
-			ui.ConventionalString(fees), ui.Conventional.Unit, ui.ConventionalString(bal))
-	}
-
-	sendAmt := bal - fees
-
-	log.Infof("Net Send: %s %s", ui.ConventionalString(sendAmt), ui.Conventional.Unit)
-
-	txOpts, err := cl.txOpts(ctx, sendAmt, gas, dexeth.GweiToWei(feeRate), nil)
-	if err != nil {
-		return fmt.Errorf("error constructing tx opts: %w", err)
-	}
-
-	tx, err := cl.sendTransaction(ctx, txOpts, returnAddr, nil)
-	if err != nil {
-		return fmt.Errorf("error sending tx: %w", err)
-	}
-
-	log.Infof("Transaction ID: %s", tx.Hash())
-
-	return nil
+	return GetGas.returnFunds(ctx, cl, dexeth.GweiToWei(feeRate), returnAddr, nil, ui, log, net)
 }
 
 func (contractDeployer) nodeAndRate(

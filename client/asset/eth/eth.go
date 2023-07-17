@@ -31,6 +31,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
+	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/hdkeychain/v3"
@@ -2356,7 +2357,7 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate, gasLimit uint64,
 }
 
 func (w *assetWallet) approvalStatus(version uint32) (asset.ApprovalStatus, error) {
-	if w.assetID == BipID {
+	if w.assetID == w.baseChainID {
 		return asset.Approved, nil
 	}
 
@@ -4527,7 +4528,7 @@ func getFileCredentials(path string, net dex.Network) (*fileCredentials, string,
 
 // quickNode constructs a multiRPCClient and a contractor for the specified
 // asset. The client is connected and unlocked.
-func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint32,
+func quickNode(ctx context.Context, walletDir string, contractVer uint32,
 	seed []byte, provider string, wParams *GetGasWalletParams, net dex.Network, log dex.Logger) (*multiRPCClient, contractor, error) {
 
 	pw := []byte("abc")
@@ -4695,7 +4696,7 @@ func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Networ
 	walletDir, provider string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
 	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
 
-	cl, c, err = quickNode(ctx, walletDir, assetID, contractVer, seed, provider, wParams, net, log)
+	cl, c, err = quickNode(ctx, walletDir, contractVer, seed, provider, wParams, net, log)
 	if err != nil {
 		return nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
@@ -4784,8 +4785,8 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	log.Info("Address:", cl.address())
 	log.Info("Base chain balance:", ethFmt(ethBal), ui.Conventional.Unit)
 
-	isToken := assetID != BipID
 	tokenBalOK := true
+	isToken := wParams.Token != nil
 	if isToken {
 		log.Infof("%s required for fees: %s", bui.Conventional.Unit, ethFmt(ethReq))
 
@@ -4820,13 +4821,21 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	return nil
 }
 
-// ReturnETH returns the estimation wallet's Ethereum balance to a specified
+// Return returns the estimation wallet's Ethereum balance to a specified
 // address, if it is more than fees required to send. Note: There is no way yet
 // to get token balances returned, because the amount of token balance required
 // is typically only a few atoms. The user should only fund a token's balance
 // with the recommended amount from EstimateFunding.
-func (getGas) ReturnETH(ctx context.Context, credentialsPath, returnAddr string, wParams *GetGasWalletParams, net dex.Network, log dex.Logger) error {
-	const assetID = BipID // Only return ethereum. For tokens, the wallets should only ever be loaded with a few atoms.
+func (getGas) Return(
+	ctx context.Context,
+	assetID uint32,
+	credentialsPath,
+	returnAddr string,
+	wParams *GetGasWalletParams,
+	net dex.Network,
+	log dex.Logger,
+) error {
+
 	const contractVer = 0 // Doesn't matter
 
 	if !common.IsHexAddress(returnAddr) {
@@ -4844,7 +4853,7 @@ func (getGas) ReturnETH(ctx context.Context, credentialsPath, returnAddr string,
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, _, err := quickNode(ctx, walletDir, assetID, contractVer, creds.Seed, provider, wParams, net, log)
+	cl, _, err := quickNode(ctx, walletDir, contractVer, creds.Seed, provider, wParams, net, log)
 	if err != nil {
 		return fmt.Errorf("error creating initiator wallet: %v", err)
 	}
@@ -4857,29 +4866,89 @@ func (getGas) ReturnETH(ctx context.Context, credentialsPath, returnAddr string,
 
 	recommendedFeeRate := new(big.Int).Add(tip, new(big.Int).Mul(base, big.NewInt(2)))
 
+	return GetGas.returnFunds(ctx, cl, recommendedFeeRate, common.HexToAddress(returnAddr), wParams.Token, wParams.UnitInfo, log, net)
+}
+
+func (getGas) returnFunds(
+	ctx context.Context,
+	cl *multiRPCClient,
+	feeRate *big.Int,
+	returnAddr common.Address,
+	token *dexeth.Token, // nil for base chain
+	ui *dex.UnitInfo,
+	log dex.Logger,
+	net dex.Network,
+) error {
+
 	bigEthBal, err := cl.addressBalance(ctx, cl.address())
 	if err != nil {
 		return fmt.Errorf("error getting eth balance: %v", err)
 	}
 	ethBal := dexeth.WeiToGwei(bigEthBal)
 
-	bigFees := new(big.Int).Mul(new(big.Int).SetUint64(defaultSendGasLimit), recommendedFeeRate)
+	if token != nil {
+		nt, found := token.NetTokens[net]
+		if !found {
+			return fmt.Errorf("no %s token for %s", token.Name, net)
+		}
+		var g dexeth.Gases
+		for _, sc := range nt.SwapContracts {
+			g = sc.Gas
+			break
+		}
+		fees := g.Transfer * dexeth.WeiToGwei(feeRate)
+		if fees > ethBal {
+			return fmt.Errorf("not enough base chain balance (%s) to cover fees (%s)",
+				dexeth.UnitInfo.ConventionalString(ethBal), dexeth.UnitInfo.ConventionalString(fees))
+		}
+
+		tokenContract, err := erc20.NewIERC20(nt.Address, cl.contractBackend())
+		if err != nil {
+			return fmt.Errorf("NewIERC20 error: %v", err)
+		}
+
+		callOpts := &bind.CallOpts{
+			From:    cl.address(),
+			Context: ctx,
+		}
+
+		bigTokenBal, err := tokenContract.BalanceOf(callOpts, cl.address())
+		if err != nil {
+			return fmt.Errorf("error getting token balance: %w", err)
+		}
+
+		txOpts, err := cl.txOpts(ctx, 0, g.Transfer, feeRate, nil)
+		if err != nil {
+			return fmt.Errorf("error generating tx opts: %w", err)
+		}
+
+		tx, err := tokenContract.Transfer(txOpts, returnAddr, bigTokenBal)
+		if err != nil {
+			return fmt.Errorf("error transferring tokens : %w", err)
+		}
+		log.Infof("Sent %s in transaction %s", ui.ConventionalString(token.EVMToAtomic(bigTokenBal)), tx.Hash())
+		return nil
+	}
+
+	bigFees := new(big.Int).Mul(new(big.Int).SetUint64(defaultSendGasLimit), feeRate)
+
 	fees := dexeth.WeiToGwei(bigFees)
-	ethFmt := wParams.UnitInfo.ConventionalString
+
+	ethFmt := ui.ConventionalString
 	if fees >= ethBal {
 		return fmt.Errorf("balance is lower than projected fees: %s < %s", ethFmt(ethBal), ethFmt(fees))
 	}
 
 	remainder := ethBal - fees
-	txOpts, err := cl.txOpts(ctx, remainder, defaultSendGasLimit, recommendedFeeRate, nil)
+	txOpts, err := cl.txOpts(ctx, remainder, defaultSendGasLimit, feeRate, nil)
 	if err != nil {
 		return fmt.Errorf("error generating tx opts: %w", err)
 	}
-	tx, err := cl.sendTransaction(ctx, txOpts, common.HexToAddress(returnAddr), nil)
+	tx, err := cl.sendTransaction(ctx, txOpts, returnAddr, nil)
 	if err != nil {
 		return fmt.Errorf("error sending funds: %w", err)
 	}
-	log.Info("!!! Success!!! txid =", tx.Hash())
+	log.Infof("Sent %s in transaction %s", ui.ConventionalString(remainder), tx.Hash())
 	return nil
 }
 
@@ -4953,7 +5022,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 		}
 
 		var mrc contractor
-		approvalClient, mrc, err = quickNode(ctx, filepath.Join(walletDir, "ac_dir"), assetID, contractVer, encode.RandomBytes(32), provider, wParams, net, log)
+		approvalClient, mrc, err = quickNode(ctx, filepath.Join(walletDir, "ac_dir"), contractVer, encode.RandomBytes(32), provider, wParams, net, log)
 		if err != nil {
 			return fmt.Errorf("error creating approval contract node: %v", err)
 		}

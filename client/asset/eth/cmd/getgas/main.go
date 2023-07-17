@@ -175,7 +175,7 @@ func mainErr() error {
 	case fundingReq:
 		return eth.GetGas.EstimateFunding(ctx, net, assetID, contractVer, maxSwaps, credentialsPath, wParams, log)
 	case returnAddr != "":
-		return eth.GetGas.ReturnETH(ctx, credentialsPath, returnAddr, wParams, net, log)
+		return eth.GetGas.Return(ctx, assetID, credentialsPath, returnAddr, wParams, net, log)
 	default:
 		return eth.GetGas.Estimate(ctx, net, assetID, contractVer, maxSwaps, credentialsPath, wParams, log)
 	}
