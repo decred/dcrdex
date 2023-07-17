@@ -41,6 +41,8 @@ type BotConfig struct {
 	MMCfg        *MarketMakingConfig        `json:"marketMakingConfig,omitempty"`
 	MMWithCEXCfg *MarketMakingWithCEXConfig `json:"marketMakingWithCEXConfig,omitempty"`
 	ArbCfg       *ArbitrageConfig           `json:"arbitrageConfig,omitempty"`
+
+	Disabled bool `json:"disabled"`
 }
 
 func (c *BotConfig) requiresPriceOracle() bool {

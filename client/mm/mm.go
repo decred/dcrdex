@@ -5,6 +5,7 @@ package mm
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -13,6 +14,8 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/order"
 )
 
 // clientCore is satisfied by core.Core.
@@ -31,19 +34,125 @@ type clientCore interface {
 	WalletState(assetID uint32) *core.WalletState
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	MaxFundingFees(fromAsset uint32, numTrades uint32, options map[string]string) (uint64, error)
+	User() *core.User
+	Login(pw []byte) error
+	OpenWallet(assetID uint32, appPW []byte) error
 }
 
 var _ clientCore = (*core.Core)(nil)
 
+// dexOrderBook is satisfied by orderbook.OrderBook.
+// Avoids having to mock the entire orderbook in tests.
+type dexOrderBook interface {
+	MidGap() (uint64, error)
+}
+
+var _ dexOrderBook = (*orderbook.OrderBook)(nil)
+
+// botBalance keeps track of the bot balances.
+// When the MarketMaker is created, it will allocate the proper amount of
+// funds for each bot. Then, as the bot makes trades, each bot's balances
+// will be increased and decreased as needed.
+// Below is of how the balances are adjusted during trading.
+//
+// 1. A trade is made:
+//
+//   - FromAsset:
+//     DECREASE: LockedFunds + SplitTxFees + FundingFees
+//     if isAccountLocker, RefundFeesLockedFunds
+//
+//   - ToAsset:
+//     DECREASE: if isAccountLocker, RedeemFeesLockedFunds
+//
+// 2. MatchConfirmed:
+//
+//   - FromAsset:
+//     INCREASE: RefundedAmount - RefundFees
+//     if isAccountLocker, RefundFeesLockedFunds
+//
+//   - ToAsset:
+//     INCREASE: if isAccountLocker, RedeemedAmount
+//     else RedeemedAmount - MaxRedeemFeesForLotsRedeemed
+//     (the redeemed amount is tracked on the core.Order, so we
+//     do not know the exact amount used for this match. The
+//     difference is handled later.)
+//
+// 3. Match Refunded:
+//
+//   - FromAsset:
+//     INCREASE: if isAccountLocker, RefundedAmount
+//     else RefundedAmount - MaxRefundFees
+//
+// 4. Order Status > Booked:
+//
+//   - FromAsset:
+//     INCREASE: OverLockedAmount (LockedFunds - FilledAmount - MaxSwapFees)
+//
+// 5. All Fees Confirmed:
+//
+//   - FromAsset:
+//     INCREASE: ExcessSwapFees (MaxSwapFees - ActualSwapFees)
+//     if isAccountLocker, ExcessRefundFees (RefundFeesLockedFunds - ActualRefundFees)
+//     else ExcessRefundFees (MaxRefundFees - ActualRefundFees)
+//
+//   - ToAsset:
+//     INCREASE: if isAccountLocker, ExcessRedeemFees (RedeemFeesLockedFunds - ActualRedeemFees)
+//     else ExcessRedeemFees (MaxRedeemFeesForLotsRedeemed - ActualRedeemFees)
+type botBalance struct {
+	mtx      sync.RWMutex
+	balances map[uint32]uint64
+}
+
+// orderInfo stores the necessary information the MarketMaker needs for a
+// particular order.
+type orderInfo struct {
+	bot                string
+	order              *core.Order
+	initialFundsLocked uint64
+	lotSize            uint64
+	//initialRedeemFeesLocked will be > 0 for assets that are account lockers
+	// (ETH). This means that the redeem fees will be initially locked, then
+	// the complete redeemed amount will be sent on redemption.
+	initialRedeemFeesLocked   uint64
+	initialRefundFeesLocked   uint64
+	singleLotSwapFees         uint64
+	singleLotRedeemFees       uint64
+	unusedLockedFundsReturned bool
+	excessFeesReturned        bool
+	matchesRefunded           map[order.MatchID]struct{}
+}
+
+// finishedProcessing returns true when the MarketMaker no longer needs to
+// track an order.
+func (o *orderInfo) finishedProcessing() bool {
+	if !o.unusedLockedFundsReturned || !o.excessFeesReturned {
+		return false
+	}
+
+	for _, match := range o.order.Matches {
+		var matchID order.MatchID
+		copy(matchID[:], match.MatchID)
+		if _, found := o.matchesRefunded[matchID]; !found {
+			return false
+		}
+	}
+
+	return true
+}
+
 // MarketMaker handles the market making process. It supports running different
 // strategies on different markets.
 type MarketMaker struct {
-	ctx     context.Context
-	die     context.CancelFunc
-	running atomic.Bool
-	log     dex.Logger
-	core    *core.Core
-	bh      *balanceHandler
+	ctx                   context.Context
+	die                   context.CancelFunc
+	running               atomic.Bool
+	log                   dex.Logger
+	core                  clientCore
+	doNotKillWhenBotsStop bool // used for testing
+	botBalances           map[string]*botBalance
+
+	ordersMtx sync.RWMutex
+	orders    map[order.OrderID]*orderInfo
 }
 
 // Running returns true if the MarketMaker is running.
@@ -93,6 +202,392 @@ func priceOracleFromConfigs(ctx context.Context, cfgs []*BotConfig, log dex.Logg
 	return oracle, nil
 }
 
+func (m *MarketMaker) loginAndUnlockWallets(pw []byte, cfgs []*BotConfig) error {
+	err := m.core.Login(pw)
+	if err != nil {
+		return fmt.Errorf("failed to login: %w", err)
+	}
+	unlocked := make(map[uint32]interface{})
+	for _, cfg := range cfgs {
+		if _, done := unlocked[cfg.BaseAsset]; !done {
+			err := m.core.OpenWallet(cfg.BaseAsset, pw)
+			if err != nil {
+				return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.BaseAsset, err)
+			}
+			unlocked[cfg.BaseAsset] = true
+		}
+
+		if _, done := unlocked[cfg.QuoteAsset]; !done {
+			err := m.core.OpenWallet(cfg.QuoteAsset, pw)
+			if err != nil {
+				return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.QuoteAsset, err)
+			}
+			unlocked[cfg.QuoteAsset] = true
+		}
+	}
+
+	return nil
+}
+
+func validateAndFilterEnabledConfigs(cfgs []*BotConfig) ([]*BotConfig, error) {
+	enabledCfgs := make([]*BotConfig, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		if !cfg.Disabled {
+			enabledCfgs = append(enabledCfgs, cfg)
+		}
+	}
+	if len(enabledCfgs) == 0 {
+		return nil, errors.New("no enabled bots")
+	}
+	if err := duplicateBotConfig(enabledCfgs); err != nil {
+		return nil, err
+	}
+	return enabledCfgs, nil
+}
+
+func (m *MarketMaker) setupBalances(cfgs []*BotConfig) error {
+	m.botBalances = make(map[string]*botBalance, len(cfgs))
+
+	type trackedBalance struct {
+		balanceAvailable uint64
+		balanceReserved  uint64
+	}
+
+	balanceTracker := make(map[uint32]*trackedBalance)
+
+	for _, cfg := range cfgs {
+		if _, found := balanceTracker[cfg.BaseAsset]; !found {
+			bal, err := m.core.AssetBalance(cfg.BaseAsset)
+			if err != nil {
+				return fmt.Errorf("failed to get balance for asset %d: %v", cfg.BaseAsset, err)
+			}
+
+			balanceTracker[cfg.BaseAsset] = &trackedBalance{
+				balanceAvailable: bal.Available,
+			}
+		}
+
+		if _, found := balanceTracker[cfg.QuoteAsset]; !found {
+			bal, err := m.core.AssetBalance(cfg.QuoteAsset)
+			if err != nil {
+				return fmt.Errorf("failed to get balance for asset %d: %v", cfg.QuoteAsset, err)
+			}
+			balanceTracker[cfg.QuoteAsset] = &trackedBalance{
+				balanceAvailable: bal.Available,
+			}
+		}
+
+		baseBalance := balanceTracker[cfg.BaseAsset]
+		quoteBalance := balanceTracker[cfg.QuoteAsset]
+
+		var baseRequired, quoteRequired uint64
+		if cfg.BaseBalanceType == Percentage {
+			baseRequired = baseBalance.balanceAvailable * cfg.BaseBalance / 100
+		} else {
+			baseRequired = cfg.BaseBalance
+		}
+
+		if cfg.QuoteBalanceType == Percentage {
+			quoteRequired = quoteBalance.balanceAvailable * cfg.QuoteBalance / 100
+		} else {
+			quoteRequired = cfg.QuoteBalance
+		}
+
+		if baseRequired == 0 && quoteRequired == 0 {
+			return fmt.Errorf("both base and quote balance are zero for market %s-%d-%d",
+				cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+		}
+
+		if baseRequired > baseBalance.balanceAvailable-baseBalance.balanceReserved {
+			return fmt.Errorf("insufficient balance for asset %d", cfg.BaseAsset)
+		}
+		if quoteRequired > quoteBalance.balanceAvailable-quoteBalance.balanceReserved {
+			return fmt.Errorf("insufficient balance for asset %d", cfg.QuoteAsset)
+		}
+
+		baseBalance.balanceReserved += baseRequired
+		quoteBalance.balanceReserved += quoteRequired
+
+		mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+		m.botBalances[mktID] = &botBalance{
+			balances: map[uint32]uint64{
+				cfg.BaseAsset:  baseRequired,
+				cfg.QuoteAsset: quoteRequired,
+			},
+		}
+	}
+
+	return nil
+}
+
+// isAccountLocker returns if the asset is an account locker.
+func (m *MarketMaker) isAccountLocker(assetID uint32) bool {
+	walletState := m.core.WalletState(assetID)
+	if walletState == nil {
+		m.log.Errorf("isAccountLocker: wallet state not found for asset %d", assetID)
+		return false
+	}
+
+	return walletState.Traits.IsAccountLocker()
+}
+
+// increaseBotBalance increases a bot's balance of an asset.
+func (m *MarketMaker) increaseBotBalance(botID string, assetID uint32, amount uint64, oidB dex.Bytes) {
+	bb := m.botBalances[botID]
+	if bb == nil {
+		m.log.Errorf("increaseBotBalance: bot %s not found", botID)
+		return
+	}
+
+	bb.mtx.Lock()
+	defer bb.mtx.Unlock()
+
+	if _, found := bb.balances[assetID]; found {
+		m.log.Debugf("botID: %s, increase asset %d, amount %d. before: %d, after: %d", botID, assetID, amount, bb.balances[assetID], bb.balances[assetID]+amount)
+		bb.balances[assetID] += amount
+	} else {
+		m.log.Errorf("increaseBotBalance: asset %d not found for bot %s", assetID, botID)
+	}
+}
+
+// decreaseBotBalance decreases a bot's balance of an asset.
+func (m *MarketMaker) decreaseBotBalance(botID string, assetID uint32, amount uint64, oidB dex.Bytes) {
+	bb := m.botBalances[botID]
+	if bb == nil {
+		m.log.Errorf("decreaseBalance: bot %s not found", botID)
+		return
+	}
+
+	bb.mtx.Lock()
+	defer bb.mtx.Unlock()
+
+	if _, found := bb.balances[assetID]; found {
+		if bb.balances[assetID] < amount {
+			m.log.Errorf("decreaseBalance: bot %s has insufficient balance for asset %d. "+
+				"balance: %d, amount: %d", botID, assetID, bb.balances[assetID], amount)
+			bb.balances[assetID] = 0
+			return
+		}
+		for botID, bb := range m.botBalances {
+			m.log.Debugf("botID: %s", botID)
+			for assetID, balance := range bb.balances {
+				m.log.Debugf("	asset %d, balance: %d", assetID, balance)
+			}
+		}
+		bb.balances[assetID] -= amount
+	} else {
+		m.log.Errorf("decreaseBalance: asset %d not found for bot %s", assetID, botID)
+	}
+}
+
+// botBalance returns a bot's balance of an asset.
+func (m *MarketMaker) botBalance(botID string, assetID uint32) uint64 {
+	bb := m.botBalances[botID]
+	if bb == nil {
+		m.log.Errorf("balance: bot %s not found", botID)
+		return 0
+	}
+
+	bb.mtx.RLock()
+	defer bb.mtx.RUnlock()
+
+	if _, found := bb.balances[assetID]; found {
+		return bb.balances[assetID]
+	}
+
+	m.log.Errorf("balance: asset %d not found for bot %s", assetID, botID)
+	return 0
+}
+
+func (m *MarketMaker) getOrderInfo(id dex.Bytes) *orderInfo {
+	var oid order.OrderID
+	copy(oid[:], id)
+
+	m.ordersMtx.RLock()
+	defer m.ordersMtx.RUnlock()
+	return m.orders[oid]
+}
+
+func (m *MarketMaker) removeOrderInfo(id dex.Bytes) {
+	m.log.Tracef("oid %s - finished handling", hex.EncodeToString(id))
+
+	var oid order.OrderID
+	copy(oid[:], id[:])
+
+	m.ordersMtx.Lock()
+	defer m.ordersMtx.Unlock()
+	delete(m.orders, oid)
+}
+
+// handleMatchUpdate adds the redeem/refund amount to the bot's balance if the
+// match is in the confirmed state.
+func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
+	if match.Status != order.MatchConfirmed && match.Refund == nil {
+		return
+	}
+
+	orderInfo := m.getOrderInfo(oid)
+	if orderInfo == nil {
+		m.log.Errorf("did not find order info for order %s", oid)
+		return
+	}
+
+	var matchID order.MatchID
+	copy(matchID[:], match.MatchID)
+	if _, handled := orderInfo.matchesRefunded[matchID]; handled {
+		return
+	}
+
+	orderInfo.matchesRefunded[matchID] = struct{}{}
+
+	if match.Refund != nil {
+		// TODO: Currently refunds are not handled properly. Core gives no way to
+		// retrieve the refund fee. Core will need to make this information available,
+		// and then the fee will need to be taken into account before increasing the
+		// bot's balance.
+		refundAsset := orderInfo.order.BaseID
+		refundQty := match.Qty
+		if !orderInfo.order.Sell {
+			refundAsset = orderInfo.order.QuoteID
+			refundQty = calc.BaseToQuote(match.Rate, refundQty)
+		}
+		m.log.Tracef("oid: %s, increasing balance due to refund")
+		m.increaseBotBalance(orderInfo.bot, refundAsset, refundQty, oid)
+	} else {
+		redeemAsset := orderInfo.order.BaseID
+		redeemQty := match.Qty
+		if orderInfo.order.Sell {
+			redeemAsset = orderInfo.order.QuoteID
+			redeemQty = calc.BaseToQuote(match.Rate, redeemQty)
+		}
+
+		var maxRedeemFees uint64
+		if orderInfo.initialRedeemFeesLocked == 0 {
+			numLots := match.Qty / orderInfo.lotSize
+			maxRedeemFees = numLots * orderInfo.singleLotRedeemFees
+		}
+		m.log.Tracef("oid: %s, increasing balance due to redeem, redeemQty - %v, maxRedeemFees - %v", oid, redeemQty, maxRedeemFees)
+		m.increaseBotBalance(orderInfo.bot, redeemAsset, redeemQty-maxRedeemFees, oid)
+	}
+
+	if orderInfo.finishedProcessing() {
+		m.removeOrderInfo(oid)
+	}
+}
+
+// handleOrderNotification checks if any funds are ready to be made available
+// for use by a bot depending on the order's state.
+//   - If any matches are
+//     in the confirmed state that have not yet been processed, the redeemed
+//     or refunded amount is added to the bot's balance.
+//   - If the order is no longer booked, the difference between the order's
+//     quantity and the amount that was matched can be returned to the bot.
+//   - If all fees have been confirmed, the rest of the difference between
+//     the amount the at was initially locked and the amount that was used
+//     can be returned.
+func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
+	orderInfo := m.getOrderInfo(o.ID)
+	if orderInfo == nil {
+		return
+	}
+
+	orderInfo.order = o
+
+	// Step 2/3 (from botBalance doc): add redeem/refund amount to balance
+	for _, match := range o.Matches {
+		m.handleMatchUpdate(match, o.ID)
+	}
+
+	if o.Status <= order.OrderStatusBooked || // Not ready to process
+		(orderInfo.unusedLockedFundsReturned && orderInfo.excessFeesReturned) || // Complete
+		(orderInfo.unusedLockedFundsReturned && !orderInfo.excessFeesReturned && !o.AllFeesConfirmed) { // Step 1 complete, but not ready for step 2
+		return
+	}
+
+	fromAsset, toAsset := o.BaseID, o.QuoteID
+	if !o.Sell {
+		fromAsset, toAsset = toAsset, fromAsset
+	}
+
+	var filledQty, filledLots uint64
+	for _, match := range o.Matches {
+		if match.IsCancel {
+			continue
+		}
+
+		filledLots += match.Qty / orderInfo.lotSize
+		if fromAsset == o.QuoteID {
+			filledQty += calc.BaseToQuote(match.Rate, match.Qty)
+		} else {
+			filledQty += match.Qty
+		}
+	}
+
+	// Step 4 (from botBalance doc): OrderStatus > Booked - return over locked amount
+	if !orderInfo.unusedLockedFundsReturned {
+		maxSwapFees := filledLots * orderInfo.singleLotSwapFees
+		usedFunds := filledQty + maxSwapFees
+		if usedFunds < orderInfo.initialFundsLocked {
+			m.log.Tracef("oid: %s, returning unused locked funds, initialFundsLocked %v, filledQty %v, filledLots %v, maxSwapFees %v",
+				o.ID, orderInfo.initialFundsLocked, filledQty, filledLots, maxSwapFees)
+			m.increaseBotBalance(orderInfo.bot, fromAsset, orderInfo.initialFundsLocked-usedFunds, o.ID)
+		} else {
+			m.log.Errorf("oid: %v - usedFunds %d >= initialFundsLocked %d",
+				hex.EncodeToString(o.ID), orderInfo.initialFundsLocked)
+		}
+
+		orderInfo.unusedLockedFundsReturned = true
+	}
+
+	// Step 5 (from botBalance doc): All Fees Confirmed - return excess swap and redeem fees
+	if !orderInfo.excessFeesReturned && o.AllFeesConfirmed {
+		// Return excess swap fees
+		maxSwapFees := filledLots * orderInfo.singleLotSwapFees
+		if maxSwapFees > o.FeesPaid.Swap {
+			m.log.Tracef("oid: %s, return excess swap fees, maxSwapFees %v, swap fees %v", o.ID, maxSwapFees, o.FeesPaid.Swap)
+			m.increaseBotBalance(orderInfo.bot, fromAsset, maxSwapFees-o.FeesPaid.Swap, o.ID)
+		} else if maxSwapFees < o.FeesPaid.Swap {
+			m.log.Errorf("oid: %v - maxSwapFees %d < swap fees %d", hex.EncodeToString(o.ID), maxSwapFees, o.FeesPaid.Swap)
+		}
+
+		// Return excess redeem fees
+		if orderInfo.initialRedeemFeesLocked > 0 { // AccountLocker
+			if orderInfo.initialRedeemFeesLocked > o.FeesPaid.Redemption {
+				m.log.Tracef("oid: %s, return excess redeem fees (accountLocker), initialRedeemFeesLocked %v, redemption fees %v",
+					o.ID, orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
+				m.increaseBotBalance(orderInfo.bot, toAsset, orderInfo.initialRedeemFeesLocked-o.FeesPaid.Redemption, o.ID)
+			} else {
+				m.log.Errorf("oid: %v - initialRedeemFeesLocked %d > redemption fees %d",
+					hex.EncodeToString(o.ID), orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
+			}
+		} else {
+			maxRedeemFees := filledLots * orderInfo.singleLotRedeemFees
+			if maxRedeemFees > o.FeesPaid.Redemption {
+				m.log.Tracef("oid: %s, return excess redeem fees, maxRedeemFees %v, redemption fees %v", o.ID, maxRedeemFees, o.FeesPaid.Redemption)
+				m.increaseBotBalance(orderInfo.bot, toAsset, maxRedeemFees-o.FeesPaid.Redemption, o.ID)
+			} else if maxRedeemFees < o.FeesPaid.Redemption {
+				m.log.Errorf("oid: %v - maxRedeemFees %d < redemption fees %d",
+					hex.EncodeToString(o.ID), maxRedeemFees, o.FeesPaid.Redemption)
+			}
+		}
+
+		orderInfo.excessFeesReturned = true
+	}
+
+	if orderInfo.finishedProcessing() {
+		m.removeOrderInfo(o.ID)
+	}
+}
+
+func (m *MarketMaker) handleNotification(n core.Notification) {
+	switch note := n.(type) {
+	case *core.OrderNote:
+		m.handleOrderUpdate(note.Order)
+	case *core.MatchNote:
+		m.handleMatchUpdate(note.Match, note.OrderID)
+	}
+}
+
 // Run starts the MarketMaker. There can only be one BotConfig per dex market.
 func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) error {
 	if !m.running.CompareAndSwap(false, true) {
@@ -108,44 +603,54 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 
 	m.ctx, m.die = context.WithCancel(ctx)
 
-	if err := duplicateBotConfig(cfgs); err != nil {
-		return err
-	}
-
-	err := m.core.Login(pw)
-	if err != nil {
-		return fmt.Errorf("failed to login: %w", err)
-	}
-
-	// TODO: unlock all wallets
-
-	oracle, err := priceOracleFromConfigs(m.ctx, cfgs, m.log.SubLogger("PriceOracle"))
+	enabledCfgs, err := validateAndFilterEnabledConfigs(cfgs)
 	if err != nil {
 		return err
 	}
 
-	m.bh, err = newBalanceHandler(cfgs, m.core, m.log.SubLogger("BalanceHandler"))
+	if err := m.loginAndUnlockWallets(pw, enabledCfgs); err != nil {
+		return err
+	}
+
+	oracle, err := priceOracleFromConfigs(m.ctx, enabledCfgs, m.log.SubLogger("PriceOracle"))
 	if err != nil {
+		return err
+	}
+
+	if err := m.setupBalances(enabledCfgs); err != nil {
 		return err
 	}
 
 	startedMarketMaking = true
 
 	wg := new(sync.WaitGroup)
+
+	// Listen for core notifications.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		m.bh.run(m.ctx)
+		feed := m.core.NotificationFeed()
+		defer feed.ReturnFeed()
+
+		for {
+			select {
+			case <-m.ctx.Done():
+				return
+			case n := <-feed.C:
+				m.handleNotification(n)
+			}
+		}
 	}()
 
-	for _, cfg := range cfgs {
+	// Start each bot.
+	for _, cfg := range enabledCfgs {
 		switch {
 		case cfg.MMCfg != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
 				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
-				RunBasicMarketMaker(m.ctx, cfg, m.bh.wrappedCoreForBot(mktID), oracle, pw, logger)
+				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, pw, logger)
 				wg.Done()
 			}(cfg)
 		default:
@@ -162,16 +667,6 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 	return nil
 }
 
-// BotBalances returns the amount of each asset currently allocated to each
-// bot. This can only be called when the MarketMaker is running.
-func (m *MarketMaker) BotBalances() map[string]map[uint32]uint64 {
-	if !m.running.Load() {
-		return nil
-	}
-
-	return m.bh.allBotBalances()
-}
-
 // Stop stops the MarketMaker.
 func (m *MarketMaker) Stop() {
 	if m.die != nil {
@@ -179,11 +674,11 @@ func (m *MarketMaker) Stop() {
 	}
 }
 
-// NewMarketMaker creates a new MarketMaker.
-func NewMarketMaker(core *core.Core, log dex.Logger) (*MarketMaker, error) {
+func NewMarketMaker(c clientCore, log dex.Logger) (*MarketMaker, error) {
 	return &MarketMaker{
-		core:    core,
+		core:    c,
 		log:     log,
 		running: atomic.Bool{},
+		orders:  make(map[order.OrderID]*orderInfo),
 	}, nil
 }

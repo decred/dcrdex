@@ -414,8 +414,6 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		}
 	}
 
-	m.log.Infof("rebalance: highest buy = %d, lowest sell = %d", highestBuy, lowestSell)
-
 	// Check if order-placement might self-match.
 	var cantBuy, cantSell bool
 	if buyPrice >= lowestSell {
@@ -428,8 +426,6 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 			highestBuy, sellPrice)
 		cantSell = true
 	}
-
-	m.log.Infof("rebalance: can't buy = %t, can't sell = %t", cantBuy, cantSell)
 
 	var canceledBuyLots, canceledSellLots uint64 // for stats reporting
 	cancels := make([]*sortedOrder, 0)
@@ -519,7 +515,6 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		if err != nil {
 			m.log.Errorf("MaxBuy error: %v", err)
 		} else {
-			m.log.Infof("MaxBuy order: %v", maxOrder)
 			maxBuyLots = int(maxOrder.Swap.Lots)
 		}
 		if maxBuyLots < newBuyLots {
@@ -537,7 +532,6 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		if err != nil {
 			m.log.Errorf("MaxSell error: %v", err)
 		} else {
-			m.log.Infof("MaxSell order: %v", maxOrder)
 			maxLots = int(maxOrder.Swap.Lots)
 		}
 		if maxLots < newSellLots {

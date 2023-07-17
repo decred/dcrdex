@@ -55,7 +55,6 @@ const (
 	startMarketMakingRoute     = "startmarketmaking"
 	stopMarketMakingRoute      = "stopmarketmaking"
 	multiTradeRoute            = "multitrade"
-	marketMakerBalancesRoute   = "marketmakerbalances"
 )
 
 const (
@@ -121,7 +120,6 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	startMarketMakingRoute:     handleStartMarketMakingRoute,
 	stopMarketMakingRoute:      handleStopMarketMakingRoute,
 	multiTradeRoute:            handleMultiTrade,
-	marketMakerBalancesRoute:   handleMarketMakerBalancesRoute,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -956,11 +954,6 @@ func handleStopMarketMakingRoute(s *RPCServer, params *RawParams) *msgjson.Respo
 	return createResponse(stopMarketMakingRoute, "stopped market making", nil)
 }
 
-func handleMarketMakerBalancesRoute(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	balances := s.mm.BotBalances()
-	return createResponse(marketMakerBalancesRoute, balances, nil)
-}
-
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1590,8 +1583,5 @@ needed to complete a swap.`,
 	},
 	stopMarketMakingRoute: {
 		cmdSummary: `Stop market making.`,
-	},
-	marketMakerBalancesRoute: {
-		cmdSummary: `Check the balances for each market maker bot.`,
 	},
 }
