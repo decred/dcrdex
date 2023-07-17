@@ -122,26 +122,25 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
   # The mining script may end up mining more or less blocks than specified.
   cat > "${HARNESS_DIR}/mine-${NAME}" <<EOF
 #!/usr/bin/env bash
-  NUM=2
-  case \$1 in
-      ''|*[!0-9]*|[0-1])  ;;
-      *) NUM=\$1 ;;
-  esac
-  echo "Mining..."
-  echo "${HARNESS_DIR}/${NAME} --exec 'eth.blockNumber')"
-  BEFORE=\$("${HARNESS_DIR}/${NAME}" --exec 'eth.blockNumber')
-  "${HARNESS_DIR}/${NAME}" --exec 'miner.start()' > /dev/null
-  sleep \$(echo "\$NUM-1.8" | bc)
-  "${HARNESS_DIR}/${NAME}" --exec 'miner.stop()' > /dev/null
-  sleep 4
-  AFTER=\$("${HARNESS_DIR}/${NAME}" --exec 'eth.blockNumber')
-  DIFF=\$((AFTER-BEFORE))
-  echo "Mined \$DIFF blocks on ${NAME}. Their hashes:"
-  for i in \$(seq \$((BEFORE+1)) \$AFTER)
-  do
-    echo \$i
-    "${HARNESS_DIR}/${NAME}" --exec 'eth.getHeaderByNumber('\$i')'
-  done
+NUM=2
+case \$1 in
+    ''|*[!0-9]*|[0-1])  ;;
+    *) NUM=\$1 ;;
+esac
+echo "Mining \${NUM} blocks..."
+START_BLOCK=\$("${HARNESS_DIR}/${NAME}" --exec 'eth.blockNumber')
+# echo "Start Block: \${START_BLOCK}"
+CURRENT_BLOCK=\${START_BLOCK}
+"${HARNESS_DIR}/${NAME}" --exec 'miner.start()' > /dev/null
+DIFF=0
+while [ "\${DIFF}" -lt "\${NUM}" ];do
+  sleep 0.05
+  CURRENT_BLOCK=\$("${HARNESS_DIR}/${NAME}" --exec 'eth.blockNumber')
+  DIFF=\$((CURRENT_BLOCK-START_BLOCK))
+  # echo "Current Block: \${CURRENT_BLOCK}"
+done
+echo "Blocks Mined: \${DIFF}"
+"${HARNESS_DIR}/${NAME}" --exec 'miner.stop()' > /dev/null
 EOF
   chmod +x "${HARNESS_DIR}/mine-${NAME}"
 fi
