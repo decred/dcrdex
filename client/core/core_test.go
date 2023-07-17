@@ -2779,6 +2779,13 @@ func TestSend(t *testing.T) {
 	if tWallet.sendFeeSuggestion != feeRate {
 		t.Fatalf("unexpected fee rate from FeeRater. wanted %d, got %d", feeRate, tWallet.sendFeeSuggestion)
 	}
+
+	// wallet is not synced
+	wallet.synced = false
+	_, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
+	if err == nil {
+		t.Fatalf("Expected error for a non-synchronized wallet")
+	}
 }
 
 func trade(t *testing.T, async bool) {

@@ -5324,6 +5324,10 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 		return nil, err
 	}
 
+	if !wallet.synchronized() {
+		return nil, fmt.Errorf("%s is still syncing", unbip(assetID))
+	}
+
 	var coin asset.Coin
 	feeSuggestion := c.feeSuggestionAny(assetID)
 	if !subtract {
@@ -5379,6 +5383,10 @@ func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConf
 		return "", err
 	}
 
+	if !wallet.synchronized() {
+		return "", fmt.Errorf("%s is still syncing", unbip(assetID))
+	}
+
 	dex, connected, err := c.dex(dexAddr)
 	if err != nil {
 		return "", err
@@ -5422,6 +5430,10 @@ func (c *Core) UnapproveToken(appPW []byte, assetID uint32, version uint32) (str
 	err = wallet.Unlock(crypter)
 	if err != nil {
 		return "", err
+	}
+
+	if !wallet.synchronized() {
+		return "", fmt.Errorf("%s is still syncing", unbip(assetID))
 	}
 
 	onConfirm := func() {
@@ -10419,9 +10431,18 @@ func (c *Core) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uin
 		return nil, fmt.Errorf("password error: %w", err)
 	}
 
-	sw, err := c.shieldedWallet(assetID)
-	if err != nil {
-		return nil, err
+	w, found := c.wallet(assetID)
+	if !found {
+		return nil, fmt.Errorf("no %s wallet", unbip(assetID))
+	}
+
+	sw, is := w.Wallet.(asset.ShieldedWallet)
+	if !is {
+		return nil, fmt.Errorf("%s wallet is not a shielded wallet", unbip(assetID))
+	}
+
+	if !w.synchronized() {
+		return nil, fmt.Errorf("%s is still syncing", unbip(assetID))
 	}
 
 	coinID, err := sw.SendShielded(c.ctx, toAddr, amt)
