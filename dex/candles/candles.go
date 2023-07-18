@@ -6,6 +6,7 @@ package candles
 import (
 	"time"
 
+	"decred.org/dcrdex/dex/generics"
 	"decred.org/dcrdex/dex/msgjson"
 )
 
@@ -68,7 +69,7 @@ func (c *Cache) Add(candle *Candle) {
 		return
 	}
 	c.Candles = append(c.Candles, *candle)
-	c.cursor = sz // len(c.candles) - 1
+	c.cursor = sz // len(c.Candles) - 1
 }
 
 func (c *Cache) Reset() {
@@ -179,6 +180,29 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol, high, low uint64
 // Last gets the most recent candle in the cache.
 func (c *Cache) Last() *Candle {
 	return &c.Candles[c.cursor]
+}
+
+// CompletedCandlesSince returns any candles that fall into an epoch after the
+// epoch of the provided timestamp, and before the current epoch.
+func (c *Cache) CompletedCandlesSince(lastStoredEndStamp uint64) (cs []*Candle) {
+	currentIdx := uint64(time.Now().UnixMilli()) / c.BinSize
+	lastStoredIdx := lastStoredEndStamp / c.BinSize
+
+	sz := len(c.Candles)
+	for i := 0; i < sz; i++ {
+		// iterate backwards
+		candle := &c.Candles[(c.cursor+sz-i)%sz]
+		epochIdx := candle.EndStamp / c.BinSize
+		if epochIdx >= currentIdx {
+			continue
+		}
+		if epochIdx <= lastStoredIdx {
+			break
+		}
+		cs = append(cs, candle)
+	}
+	generics.ReverseSlice(cs)
+	return
 }
 
 // combineCandles attempts to add the candidate candle to the target candle

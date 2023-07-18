@@ -32,6 +32,9 @@ const (
 	cancelsArchivedTableName = "cancels_archived"
 	cancelsActiveTableName   = "cancels_active"
 	epochReportsTableName    = "epoch_reports"
+	candlesTableName         = "candles"
+
+	indexCandlesOnDurEndFmt = "idx_candles_on_dur_end_%s"
 )
 
 type tableStmt struct {
@@ -69,6 +72,17 @@ var createMarketTableStatements = []tableStmt{
 	{matchesTableName, internal.CreateMatchesTable}, // just one matches table per market for now
 	{epochsTableName, internal.CreateEpochsTable},
 	{epochReportsTableName, internal.CreateEpochReportTable},
+	{candlesTableName, internal.CreateCandlesTable},
+}
+
+type marketIdx struct {
+	tableName string
+	idxFmt    string
+	stmt      string
+}
+
+var createMarketIndexesStatements = []marketIdx{
+	{candlesTableName, indexCandlesOnDurEndFmt, internal.CreateCandlesIndex},
 }
 
 var tableMap = func() map[string]string {
@@ -118,6 +132,10 @@ func fullEpochsTableName(dbName, marketSchema string) string {
 
 func fullEpochReportsTableName(dbName, marketSchema string) string {
 	return dbName + "." + marketSchema + "." + epochReportsTableName
+}
+
+func fullCandlesTableName(dbName, marketSchema string) string {
+	return dbName + "." + marketSchema + "." + candlesTableName
 }
 
 // createTable creates one of the known tables by name. The table will be

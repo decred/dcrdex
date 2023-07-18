@@ -27,6 +27,8 @@ var (
 // caches at startup.
 type DBSource interface {
 	LoadEpochStats(base, quote uint32, caches []*candles.Cache) error
+	LastCandleEndStamp(base, quote uint32, candleDur uint64) (uint64, error)
+	InsertCandles(base, quote uint32, dur uint64, cs []*candles.Candle) error
 }
 
 // MarketSource is a source of market information. Markets are added after
@@ -43,6 +45,11 @@ type BookSource interface {
 	Book(mktName string) (*msgjson.OrderBook, error)
 }
 
+type cacheWithStoredTime struct {
+	*candles.Cache
+	lastStoredEndStamp uint64 // protected by DataAPI.cacheMtx
+}
+
 // DataAPI is a data API backend.
 type DataAPI struct {
 	db             DBSource
@@ -53,7 +60,7 @@ type DataAPI struct {
 	spots    map[string]json.RawMessage
 
 	cacheMtx     sync.RWMutex
-	marketCaches map[string]map[uint64]*candles.Cache
+	marketCaches map[string]map[uint64]*cacheWithStoredTime
 }
 
 // NewDataAPI is the constructor for a new DataAPI.
@@ -62,7 +69,7 @@ func NewDataAPI(dbSrc DBSource) *DataAPI {
 		db:             dbSrc,
 		epochDurations: make(map[string]uint64),
 		spots:          make(map[string]json.RawMessage),
-		marketCaches:   make(map[string]map[uint64]*candles.Cache),
+		marketCaches:   make(map[string]map[uint64]*cacheWithStoredTime),
 	}
 
 	if atomic.CompareAndSwapUint32(&started, 0, 1) {
@@ -81,18 +88,25 @@ func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 	}
 	epochDur := mkt.EpochDuration()
 	s.epochDurations[mktName] = epochDur
-	binCaches := make(map[uint64]*candles.Cache, len(binSizes)+1)
-	s.marketCaches[mktName] = binCaches
+	binCaches := make(map[uint64]*cacheWithStoredTime, len(binSizes)+1)
 	cacheList := make([]*candles.Cache, 0, len(binSizes)+1)
 	for _, binSize := range append([]uint64{epochDur}, binSizes...) {
 		cache := candles.NewCache(candles.CacheSize, binSize)
+		lastCandleEndStamp, err := s.db.LastCandleEndStamp(mkt.Base(), mkt.Quote(), cache.BinSize)
+		if err != nil {
+			return fmt.Errorf("LastCandleEndStamp: %w", err)
+		}
+		c := &cacheWithStoredTime{cache, lastCandleEndStamp}
 		cacheList = append(cacheList, cache)
-		binCaches[binSize] = cache
+		binCaches[binSize] = c
 	}
 	err = s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList)
 	if err != nil {
 		return err
 	}
+	s.cacheMtx.Lock()
+	s.marketCaches[mktName] = binCaches
+	s.cacheMtx.Unlock()
 	return nil
 }
 
@@ -120,7 +134,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 		epochDur := s.epochDurations[mktName]
 		startStamp := epochIdx * epochDur
 		endStamp := startStamp + epochDur
-		var cache5min *candles.Cache
+		var cache5min *cacheWithStoredTime
 		const fiveMins = uint64(time.Minute * 5 / time.Millisecond)
 		candle := &candles.Candle{
 			StartStamp:  startStamp,
@@ -137,6 +151,21 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 				cache5min = cache
 			}
 			cache.Add(candle)
+
+			// Check if any candles need to be inserted.
+			// Don't insert epoch candles.
+			if cache.BinSize == epochDur {
+				continue
+			}
+
+			newCandles := cache.CompletedCandlesSince(cache.lastStoredEndStamp)
+			if len(newCandles) == 0 {
+				continue
+			}
+			if err := s.db.InsertCandles(base, quote, cache.BinSize, newCandles); err != nil {
+				return 0, 0, 0, 0, err
+			}
+			cache.lastStoredEndStamp = newCandles[len(newCandles)-1].EndStamp
 		}
 		if cache5min == nil {
 			return 0, 0, 0, 0, fmt.Errorf("no 5 minute cache")

@@ -83,6 +83,14 @@ func createMarketTables(db *sql.DB, marketName string) error {
 		}
 	}
 
+	for _, c := range createMarketIndexesStatements {
+		idxName := fmt.Sprintf(indexCandlesOnDurEndFmt, marketUID)
+		err := createIndexStmt(db, c.stmt, idxName, marketUID+"."+c.tableName)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

@@ -800,7 +800,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		log.Infof("Preparing historical market data API for market %v...", mktInf.Name)
 		err = dataAPI.AddMarketSource(mkt)
 		if err != nil {
-			return nil, fmt.Errorf("DataSource.AddMarket: %w", err)
+			return nil, fmt.Errorf("DataSource.AddMarketSource: %w", err)
 		}
 
 		// Having loaded the book, get the accounts owning the orders.
