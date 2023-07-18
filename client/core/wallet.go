@@ -365,11 +365,20 @@ func (w *xcWallet) connected() bool {
 	return w.hookedUp
 }
 
-// synchronized is true if the wallet had been synchronized with the network.
-func (w *xcWallet) synchronized() bool {
+// checkPeersAndSyncStatus checks that the wallet is synced, and has peers
+// otherwise we might double spend if the wallet keys were used elsewhere. This
+// should be checked before attempting to send funds but does not replace any
+// other checks that may be required.
+func (w *xcWallet) checkPeersAndSyncStatus() error {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
-	return w.synced
+	if w.peerCount < 1 {
+		return fmt.Errorf("%s wallet has no connected peers", unbip(w.AssetID))
+	}
+	if !w.synced {
+		return fmt.Errorf("%s wallet is not synchronized", unbip(w.AssetID))
+	}
+	return nil
 }
 
 // Connect calls the dex.Connector's Connect method, sets the xcWallet.hookedUp

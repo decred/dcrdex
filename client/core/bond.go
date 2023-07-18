@@ -446,10 +446,10 @@ func (c *Core) postRequiredBonds(dc *dexConnection, cfg *dexBondCfg, state *dexA
 		c.log.Errorf("failed to unlock bond asset wallet %v: %v", unbip(state.bondAssetID), err)
 		return
 	}
-	if !wallet.synchronized() {
-		c.log.Warnf("Wallet %v is not yet synchronized with the network. Cannot post new bonds yet.",
-			unbip(state.bondAssetID))
-		return // otherwise we might double spend if the wallet keys were used elsewhere
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		c.log.Errorf("Cannot post new bonds yet. %v", err)
+		return
 	}
 
 	// For the max bonded limit, we'll normalize all bonds to the
@@ -1075,8 +1075,9 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	if _, ok := wallet.Wallet.(asset.Bonder); !ok { // will fail in MakeBondTx, but assert early
 		return nil, fmt.Errorf("wallet %v is not an asset.Bonder", bondAssetSymbol)
 	}
-	if !wallet.synchronized() { // otherwise we might double spend if the wallet keys were used elsewhere
-		return nil, fmt.Errorf("wallet %v is not synchronized", unbip(bondAssetID))
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return nil, err
 	}
 
 	// Check the app password.

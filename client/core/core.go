@@ -5324,8 +5324,8 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 		return nil, err
 	}
 
-	if !wallet.synchronized() {
-		return nil, fmt.Errorf("%s is still syncing", unbip(assetID))
+	if err = wallet.checkPeersAndSyncStatus(); err != nil {
+		return nil, err
 	}
 
 	var coin asset.Coin
@@ -5383,8 +5383,9 @@ func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConf
 		return "", err
 	}
 
-	if !wallet.synchronized() {
-		return "", fmt.Errorf("%s is still syncing", unbip(assetID))
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
 	}
 
 	dex, connected, err := c.dex(dexAddr)
@@ -5432,8 +5433,9 @@ func (c *Core) UnapproveToken(appPW []byte, assetID uint32, version uint32) (str
 		return "", err
 	}
 
-	if !wallet.synchronized() {
-		return "", fmt.Errorf("%s is still syncing", unbip(assetID))
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
 	}
 
 	onConfirm := func() {
@@ -10370,7 +10372,7 @@ func (c *Core) saveDisabledRateSources() {
 	}
 }
 
-func (c *Core) shieldedWallet(assetID uint32, wantSynced ...bool) (asset.ShieldedWallet, error) {
+func (c *Core) shieldedWallet(assetID uint32, forFundTransfer ...bool) (asset.ShieldedWallet, error) {
 	w, found := c.wallet(assetID)
 	if !found {
 		return nil, fmt.Errorf("no %s wallet", unbip(assetID))
@@ -10381,9 +10383,11 @@ func (c *Core) shieldedWallet(assetID uint32, wantSynced ...bool) (asset.Shielde
 		return nil, fmt.Errorf("%s wallet is not a shielded wallet", unbip(assetID))
 	}
 
-	// Check if a sycned wallet is requested.
-	if len(wantSynced) > 0 && wantSynced[0] && !w.synchronized() {
-		return nil, fmt.Errorf("%s is still syncing", unbip(assetID))
+	// Check if this wallet can send funds at the moment.
+	if len(forFundTransfer) > 0 && forFundTransfer[0] {
+		if err := w.checkPeersAndSyncStatus(); err != nil {
+			return nil, err
+		}
 	}
 
 	return sw, nil
