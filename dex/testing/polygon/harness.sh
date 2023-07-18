@@ -139,8 +139,8 @@ while [ "\${DIFF}" -lt "\${NUM}" ];do
   DIFF=\$((CURRENT_BLOCK-START_BLOCK))
   # echo "Current Block: \${CURRENT_BLOCK}"
 done
-echo "Blocks Mined: \${DIFF}"
 "${HARNESS_DIR}/${NAME}" --exec 'miner.stop()' > /dev/null
+echo "Blocks Mined: \${DIFF}"
 EOF
   chmod +x "${HARNESS_DIR}/mine-${NAME}"
 fi

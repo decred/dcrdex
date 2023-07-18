@@ -4821,11 +4821,8 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	return nil
 }
 
-// Return returns the estimation wallet's Ethereum balance to a specified
-// address, if it is more than fees required to send. Note: There is no way yet
-// to get token balances returned, because the amount of token balance required
-// is typically only a few atoms. The user should only fund a token's balance
-// with the recommended amount from EstimateFunding.
+// Return returns the estimation wallet's base-chain or token balance to a
+// specified address, if it is more than fees required to send.
 func (getGas) Return(
 	ctx context.Context,
 	assetID uint32,
