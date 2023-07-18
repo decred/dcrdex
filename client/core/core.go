@@ -5324,6 +5324,10 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 		return nil, err
 	}
 
+	if err = wallet.checkPeersAndSyncStatus(); err != nil {
+		return nil, err
+	}
+
 	var coin asset.Coin
 	feeSuggestion := c.feeSuggestionAny(assetID)
 	if !subtract {
@@ -5379,6 +5383,11 @@ func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConf
 		return "", err
 	}
 
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
 	dex, connected, err := c.dex(dexAddr)
 	if err != nil {
 		return "", err
@@ -5420,6 +5429,11 @@ func (c *Core) UnapproveToken(appPW []byte, assetID uint32, version uint32) (str
 	}
 
 	err = wallet.Unlock(crypter)
+	if err != nil {
+		return "", err
+	}
+
+	err = wallet.checkPeersAndSyncStatus()
 	if err != nil {
 		return "", err
 	}
@@ -10358,15 +10372,24 @@ func (c *Core) saveDisabledRateSources() {
 	}
 }
 
-func (c *Core) shieldedWallet(assetID uint32) (asset.ShieldedWallet, error) {
+func (c *Core) shieldedWallet(assetID uint32, forFundTransfer ...bool) (asset.ShieldedWallet, error) {
 	w, found := c.wallet(assetID)
 	if !found {
 		return nil, fmt.Errorf("no %s wallet", unbip(assetID))
 	}
+
 	sw, is := w.Wallet.(asset.ShieldedWallet)
 	if !is {
 		return nil, fmt.Errorf("%s wallet is not a shielded wallet", unbip(assetID))
 	}
+
+	// Check if this wallet can send funds at the moment.
+	if len(forFundTransfer) > 0 && forFundTransfer[0] {
+		if err := w.checkPeersAndSyncStatus(); err != nil {
+			return nil, err
+		}
+	}
+
 	return sw, nil
 }
 
@@ -10393,7 +10416,7 @@ func (c *Core) NewShieldedAddress(assetID uint32) (string, error) {
 
 // ShieldFunds moves funds from the transparent account to the shielded account.
 func (c *Core) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	sw, err := c.shieldedWallet(assetID)
+	sw, err := c.shieldedWallet(assetID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -10403,7 +10426,7 @@ func (c *Core) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 // UnshieldFunds moves funds from the shielded account to the transparent
 // account.
 func (c *Core) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	sw, err := c.shieldedWallet(assetID)
+	sw, err := c.shieldedWallet(assetID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -10419,7 +10442,7 @@ func (c *Core) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uin
 		return nil, fmt.Errorf("password error: %w", err)
 	}
 
-	sw, err := c.shieldedWallet(assetID)
+	sw, err := c.shieldedWallet(assetID, true)
 	if err != nil {
 		return nil, err
 	}

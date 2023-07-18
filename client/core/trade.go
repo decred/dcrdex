@@ -2903,12 +2903,8 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 	// In some cases the wallet will need to send a new redeem transaction.
 	toWallet := t.wallets.toWallet
 
-	if toWallet.peerCount < 1 {
-		return false, fmt.Errorf("%s wallet has no peers", unbip(toWallet.AssetID))
-	}
-
-	if !toWallet.synchronized() {
-		return false, fmt.Errorf("%s still syncing", unbip(toWallet.AssetID))
+	if err := toWallet.checkPeersAndSyncStatus(); err != nil {
+		return false, err
 	}
 
 	didUnlock, err := toWallet.refreshUnlock()
