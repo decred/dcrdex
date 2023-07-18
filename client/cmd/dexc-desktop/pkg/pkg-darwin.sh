@@ -9,7 +9,7 @@ set -o pipefail;
 export GOWORK=off
 
 # For release set metadata to "release".
-VER=`cat ../../../app/VERSION`
+VER="0.7.0-pre"
 META= # "release"
 BUILD_VER="1.0.0" # increment for every build.
 OS_FULL_VERSION="$(sw_vers | sed -n 2p | cut -d : -f 2 | tr -d '[:space:]' | cut -c1-)"
