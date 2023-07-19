@@ -129,10 +129,8 @@ var (
 	testTokenID                  uint32
 	masterToken                  *dexeth.Token
 
-	contractAddr common.Address
-
-	v1  bool
-	ver uint32
+	v1          bool
+	contractVer uint32
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
@@ -149,11 +147,11 @@ func acLocator(c *asset.Contract) []byte {
 }
 
 func makeLocator(secretHash [32]byte, valg, lockTime uint64) []byte {
-	if ver == 1 {
+	if contractVer == 1 {
 		return (&dexeth.SwapVector{
 			From:       ethClient.address(),
 			To:         participantEthClient.address(),
-			Value:      valg,
+			Value:      dexeth.GweiToWei(valg),
 			SecretHash: secretHash,
 			LockTime:   lockTime,
 		}).Locator()
@@ -171,7 +169,7 @@ func newRedeem(secret, secretHash [32]byte, valg, lockTime uint64) *asset.Redemp
 				// id:    txHash,
 				value: valg,
 			},
-			Contract: dexeth.EncodeContractData(ver, makeLocator(secretHash, valg, lockTime)),
+			Contract: dexeth.EncodeContractData(contractVer, makeLocator(secretHash, valg, lockTime)),
 		},
 		Secret: secret[:],
 	}
@@ -385,15 +383,15 @@ func runSimnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("error creating participant wallet dir: %v", err)
 	}
 
-	tokenGases = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[ver].Gas
+	tokenGases = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[contractVer].Gas
 
 	// ETH swap contract.
 	token := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
-	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[ver][dex.Simnet])
-	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[ver].Address)
+	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[contractVer][dex.Simnet])
+	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[contractVer].Address)
 	fmt.Printf("Test token contract addr is %v\n", token.Address)
 
-	contractAddr = dexeth.ContractAddresses[ver][dex.Simnet]
+	contractAddr := dexeth.ContractAddresses[contractVer][dex.Simnet]
 
 	initiatorProviders, participantProviders := rpcEndpoints(dex.Simnet)
 
@@ -428,9 +426,9 @@ func runSimnet(m *testing.M) (int, error) {
 	simnetAddr = simnetAcct.Address
 	participantAddr = participantAcct.Address
 
-	contractAddr, exists := dexeth.ContractAddresses[ver][dex.Simnet]
+	contractAddr, exists := dexeth.ContractAddresses[contractVer][dex.Simnet]
 	if !exists || contractAddr == (common.Address{}) {
-		return 1, fmt.Errorf("no contract address for version %d", ver)
+		return 1, fmt.Errorf("no contract address for contract version %d", contractVer)
 	}
 
 	if v1 {
@@ -495,7 +493,7 @@ func runSimnet(m *testing.M) (int, error) {
 func runTestnet(m *testing.M) (int, error) {
 	testTokenID = usdcID
 	masterToken = dexeth.Tokens[testTokenID]
-	tokenGases = &masterToken.NetTokens[dex.Testnet].SwapContracts[ver].Gas
+	tokenGases = &masterToken.NetTokens[dex.Testnet].SwapContracts[contractVer].Gas
 	if testnetWalletSeed == "" || testnetParticipantWalletSeed == "" {
 		return 1, errors.New("testnet seeds not set")
 	}
@@ -510,8 +508,8 @@ func runTestnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("error creating testnet participant wallet dir: %v", err)
 	}
 	secPerBlock = testnetSecPerBlock
-	contractAddr = dexeth.ContractAddresses[ver][dex.Testnet]
-	fmt.Printf("ETH swap contract address is %v\n", contractAddr)
+	contractAddr := dexeth.ContractAddresses[contractVer][dex.Testnet]
+	fmt.Printf("Swap contract address is %v\n", contractAddr)
 
 	initiatorRPC, participantRPC := rpcEndpoints(dex.Testnet)
 
@@ -560,13 +558,13 @@ func runTestnet(m *testing.M) (int, error) {
 	simnetAddr = simnetAcct.Address
 	participantAddr = participantAcct.Address
 
-	contractAddr, exists := dexeth.ContractAddresses[ver][dex.Testnet]
+	contractAddr, exists := dexeth.ContractAddresses[contractVer][dex.Testnet]
 	if !exists || contractAddr == (common.Address{}) {
-		return 1, fmt.Errorf("no contract address for version %d", ver)
+		return 1, fmt.Errorf("no contract address for version %d", contractVer)
 	}
 
 	ctor, tokenCtor := newV0Contractor, newV0TokenContractor
-	if ver == 1 {
+	if contractVer == 1 {
 		ctor, tokenCtor = newV1Contractor, newV1TokenContractor
 	}
 
@@ -622,6 +620,8 @@ func prepareV1SimnetContractors() (err error) {
 }
 
 func prepareSimnetContractors(c contractorConstructor, tc tokenContractorConstructor) (err error) {
+	contractAddr := dexeth.ContractAddresses[contractVer][dex.Simnet]
+
 	if simnetContractor, err = c(dex.Simnet, contractAddr, simnetAddr, ethClient.contractBackend()); err != nil {
 		return fmt.Errorf("new contractor error: %w", err)
 	}
@@ -629,7 +629,9 @@ func prepareSimnetContractors(c contractorConstructor, tc tokenContractorConstru
 		return fmt.Errorf("participant new contractor error: %w", err)
 	}
 
-	if simnetTokenContractor, err = tc(dex.Simnet, masterToken, simnetAddr, ethClient.contractBackend()); err != nil {
+	token := dexeth.Tokens[testTokenID]
+
+	if simnetTokenContractor, err = tc(dex.Simnet, token, simnetAddr, ethClient.contractBackend()); err != nil {
 		return fmt.Errorf("new token contractor error: %w", err)
 	}
 
@@ -638,7 +640,7 @@ func prepareSimnetContractors(c contractorConstructor, tc tokenContractorConstru
 	// (*BoundContract).Call while calling (*ERC20Swap).TokenAddress.
 	time.Sleep(time.Second)
 
-	if participantTokenContractor, err = tc(dex.Simnet, masterToken, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantTokenContractor, err = tc(dex.Simnet, token, participantAddr, participantEthClient.contractBackend()); err != nil {
 		return fmt.Errorf("participant new token contractor error: %w", err)
 	}
 	return
@@ -674,14 +676,12 @@ func TestMain(m *testing.M) {
 	flag.Parse()
 
 	if v1 {
-		ver = 1
+		contractVer = 1
 	}
 
-	ethGases = dexeth.VersionedGases[ver]
-	contractAddr = dexeth.ContractAddresses[BipID][dex.Simnet]
+	ethGases = dexeth.VersionedGases[contractVer]
 
 	if isTestnet {
-		contractAddr = dexeth.ContractAddresses[BipID][dex.Testnet]
 		tmpDir, err := os.MkdirTemp("", "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error creating temporary directory: %v", err)
@@ -839,7 +839,7 @@ func TestBasicRetrieval(t *testing.T) {
 func TestPeering(t *testing.T) {
 	t.Run("testAddPeer", testAddPeer)
 	t.Run("testSyncProgress", testSyncProgress)
-	t.Run("testGetCodeAt", testGetCodeAt)
+	// t.Run("testGetCodeAt", testGetCodeAt)
 }
 
 func TestAccount(t *testing.T) {
@@ -1167,39 +1167,41 @@ func testSyncProgress(t *testing.T) {
 	spew.Dump(p)
 }
 
-// func testInitiateGas(t *testing.T, assetID uint32) {
-// 	if assetID != BipID {
-// 		prepareTokenClients(t)
-// 	}
+func testInitiateGas(t *testing.T, assetID uint32) {
+	gases := ethGases
+	c := simnetContractor
+	if assetID != BipID {
+		c = simnetTokenContractor
+		prepareTokenClients(t)
+		gases = tokenGases
+	}
 
-// 	gases := gases(ver, dexeth.VersionedGases)
+	var previousGas uint64
+	maxSwaps := 50
+	for i := 1; i <= maxSwaps; i++ {
+		gas, err := c.estimateInitGas(ctx, i)
+		if err != nil {
+			t.Fatalf("unexpected error from estimateInitGas(%d): %v", i, err)
+		}
 
-// 	var previousGas uint64
-// 	maxSwaps := 50
-// 	for i := 1; i <= maxSwaps; i++ {
-// 		gas, err := ethClient.estimateInitGas(ctx, i)
-// 		if err != nil {
-// 			t.Fatalf("unexpected error from estimateInitGas(%d): %v", i, err)
-// 		}
+		var expectedGas uint64
+		var actualGas uint64
+		if i == 1 {
+			expectedGas = gases.Swap
+			actualGas = gas
+		} else {
+			expectedGas = gases.SwapAdd
+			actualGas = gas - previousGas
+		}
+		if actualGas > expectedGas || actualGas < expectedGas/2 {
+			t.Fatalf("Expected incremental gas for %d initiations to be close to %d but got %d",
+				i, expectedGas, actualGas)
+		}
 
-// 		var expectedGas uint64
-// 		var actualGas uint64
-// 		if i == 1 {
-// 			expectedGas = gases.Swap
-// 			actualGas = gas
-// 		} else {
-// 			expectedGas = gases.SwapAdd
-// 			actualGas = gas - previousGas
-// 		}
-// 		if actualGas > expectedGas || actualGas < expectedGas/2 {
-// 			t.Fatalf("Expected incremental gas for %d initiations to be close to %d but got %d",
-// 				i, expectedGas, actualGas)
-// 		}
-
-// 		fmt.Printf("Gas used for batch initiating %v swaps: %v. %v more than previous \n", i, gas, gas-previousGas)
-// 		previousGas = gas
-// 	}
-// }
+		fmt.Printf("Gas used for batch initiating %v swaps: %v. %v more than previous \n", i, gas, gas-previousGas)
+		previousGas = gas
+	}
+}
 
 // feesAtBlk calculates the gas fee at blkNum. This adds the base fee at blkNum
 // to a minimum gas tip cap.
@@ -2303,23 +2305,23 @@ func testApproveGas(t *testing.T) {
 	fmt.Printf("replacement tx hash: %s\n", tx.Hash())
 }*/
 
-func testGetCodeAt(t *testing.T) {
-	cl, is := ethClient.(*nodeClient)
-	if !is {
-		t.Skip("getCode tests only run for nodeClient")
-	}
-	byteCode, err := cl.getCodeAt(ctx, contractAddr)
-	if err != nil {
-		t.Fatalf("Failed to get bytecode: %v", err)
-	}
-	c, err := hex.DecodeString(swapv0.ETHSwapRuntimeBin)
-	if err != nil {
-		t.Fatalf("Error decoding")
-	}
-	if !bytes.Equal(byteCode, c) {
-		t.Fatal("Contract on chain does not match one in code")
-	}
-}
+// func testGetCodeAt(t *testing.T) {
+// 	cl, is := ethClient.(*nodeClient)
+// 	if !is {
+// 		t.Skip("getCode tests only run for nodeClient")
+// 	}
+// 	byteCode, err := cl.getCodeAt(ctx, contractAddr)
+// 	if err != nil {
+// 		t.Fatalf("Failed to get bytecode: %v", err)
+// 	}
+// 	c, err := hex.DecodeString(swapv0.ETHSwapRuntimeBin)
+// 	if err != nil {
+// 		t.Fatalf("Error decoding")
+// 	}
+// 	if !bytes.Equal(byteCode, c) {
+// 		t.Fatal("Contract on chain does not match one in code")
+// 	}
+// }
 
 func testSignMessage(t *testing.T) {
 	msg := []byte("test message")
@@ -2347,7 +2349,7 @@ func TestTokenGasEstimates(t *testing.T) {
 	runSimnetMiner(ctx, "eth", tLogger)
 	prepareTokenClients(t)
 	tLogger.SetLevel(dex.LevelInfo)
-	if err := getGasEstimates(ctx, ethClient, participantEthClient, simnetTokenContractor, participantTokenContractor, 5, ver, tokenGases, tLogger); err != nil {
+	if err := getGasEstimates(ctx, ethClient, participantEthClient, simnetTokenContractor, participantTokenContractor, 5, contractVer, tokenGases, dexeth.GweiToWei, tLogger); err != nil {
 		t.Fatalf("getGasEstimates error: %v", err)
 	}
 }

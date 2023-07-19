@@ -101,56 +101,51 @@ var Tokens = map[uint32]*Token{
 					0: {
 						// Swap contract address. The simnet harness writes this
 						// address to file. Live tests must populate this field.
-						Address: common.Address{},
+						Address: common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 						Gas: Gases{
-							// Results from client's GetGasEstimates.
-							//
-							// First swap used 171756 gas
-							//   4 additional swaps averaged 112607 gas each
-							//   [171756 284366 396976 509586 622184]
-							// First redeem used 63214 gas
-							//   4 additional redeems averaged 31641 gas each
-							//   [63214 94858 126502 158135 189779]
-							// Average of 5 refunds: 48127
-							//   [48127 48127 48127 48127 48127]
-							//
-							// Approve is the gas used to call the approve
-							// method of the contract. For Approve transactions,
-							// the very first approval for an account-spender
-							// pair takes more than subsequent approvals. The
-							// results are repeated for a different account's
-							// first approvals on the same contract, so it's not
-							// just the global first.
-							// Average of 5 approvals: 27365
-							//   [44465 27365 27365 27365 27365]
-							//
-							// The first transfer to an address the contract has
-							// not seen before will insert a new key into the
-							// contract's token map. The amount of extra gas
-							// this consumes seems to depend on the size of the
-							// map and is not noticeable on simnet.
-							// Average of 5 transfers: 32540
-							//   [32540 32540 32540 32540 32540]
-							Swap:      174_000,
-							SwapAdd:   115_000,
-							Redeem:    70_000,
-							RedeemAdd: 33_000,
-							Refund:    50_000,
-							Approve:   46_000,
-							Transfer:  35_000,
+							// First swap used 171664 gas Recommended Gases.Swap = 223163
+							Swap: 223_163,
+							// 	4 additional swaps averaged 112612 gas each. Recommended Gases.SwapAdd = 146395
+							// 	[171664 284279 396870 509509 622112]
+							SwapAdd: 146_395,
+							// First redeem used 63158 gas. Recommended Gases.Redeem = 82105
+							Redeem: 82_105,
+							// 	4 additional redeems averaged 31626 gas each. recommended Gases.RedeemAdd = 41113
+							// 	[63158 94799 126404 158058 189663]
+							RedeemAdd: 41_113,
+							// Average of 5 refunds: 48095. Recommended Gases.Refund = 62523
+							// 	[48098 48098 48086 48098 48098]
+							Refund: 62_523,
+							// Average of 2 approvals: 44754. Recommended Gases.Approve = 58180
+							// 	[44754 44754]
+							Approve: 58_180,
+							// Average of 1 transfers: 49646. Recommended Gases.Transfer = 64539
+							// 	[49646]
+							Transfer: 64_539,
 						},
 					},
 					1: {
-						// DRAFT TODO
-						Address: common.Address{},
+						Address: common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 						Gas: Gases{
-							Swap:      174_000, // [171756 284366 396976 509586 622184]
-							SwapAdd:   115_000,
-							Redeem:    70_000, // [63214 94858 126502 158135 189779]
-							RedeemAdd: 33_000,
-							Refund:    50_000, // [48127 48127 48127 48127 48127]
-							Approve:   46_000, // [44465 27365 27365 27365 27365]
-							Transfer:  35_000, // [32540 32540 32540 32540 32540]
+							// First swap used 85547 gas Recommended Gases.Swap = 111211
+							Swap: 111_211,
+							// 	4 additional swaps averaged 26499 gas each. Recommended Gases.SwapAdd = 34448
+							// 	[85547 112048 138534 165048 191546]
+							SwapAdd: 34_448,
+							// First redeem used 42219 gas. Recommended Gases.Redeem = 54884
+							Redeem: 54_884,
+							// 	4 additional redeems averaged 10744 gas each. recommended Gases.RedeemAdd = 13967
+							// 	[42219 52965 63695 74430 85198]
+							RedeemAdd: 13_967,
+							// Average of 5 refunds: 45022. Recommended Gases.Refund = 58528
+							// 	[45025 45025 45013 45025 45025]
+							Refund: 58_528,
+							// Average of 2 approvals: 44754. Recommended Gases.Approve = 58180
+							// 	[44754 44754]
+							Approve: 58_180,
+							// Average of 1 transfers: 49646. Recommended Gases.Transfer = 64539
+							// 	[49646]
+							Transfer: 64_539,
 						},
 					},
 				},
@@ -294,14 +289,6 @@ func MaybeReadSimnetAddrsDir(
 	}
 	if !fi.IsDir() {
 		return
-	}
-
-	fmt.Println("------------")
-	for ver, nets := range contractAddrs {
-		fmt.Println("--MaybeReadSimnetAddrsDir.0", ver, len(nets))
-		for net, addr := range nets {
-			fmt.Println("--MaybeReadSimnetAddrsDir.1", net, addr)
-		}
 	}
 
 	ethSwapContractAddrFileV0 := filepath.Join(harnessDir, "eth_swap_contract_address.txt")

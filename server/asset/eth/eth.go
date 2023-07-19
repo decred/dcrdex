@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -23,60 +24,22 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-type VersionedToken struct {
-	*dexeth.Token
-	Ver uint32
-}
-
-var registeredTokens = make(map[uint32]*VersionedToken)
-
-func registerToken(assetID uint32, ver uint32) {
-	token, exists := dexeth.Tokens[assetID]
-	if !exists {
-		panic(fmt.Sprintf("no token constructor for asset ID %d", assetID))
-	}
-	asset.RegisterToken(assetID, &TokenDriver{
-		DriverBase: DriverBase{
-			Ver: ver,
-			UI:  token.UnitInfo,
-			Nam: token.Name,
-		},
-		Token: token.Token,
-	})
-	registeredTokens[assetID] = &VersionedToken{
-		Token: token,
-		Ver:   ver,
-	}
-}
-
-func init() {
-	asset.Register(BipID, &Driver{
-		DriverBase: DriverBase{
-			Ver: version,
-			UI:  dexeth.UnitInfo,
-			Nam: "Ethereum",
-		},
-	})
-
-	registerToken(testTokenID, ethContractVersion)
-	registerToken(usdcID, ethContractVersion)
-}
-
 const (
-	BipID              = 60
-	ethContractVersion = 1
-	version            = 1
+	BipID = 60
 )
 
 var (
 	_ asset.Driver      = (*Driver)(nil)
 	_ asset.TokenBacker = (*ETHBackend)(nil)
+
+	defaultProtocolVersion    = dexeth.ProtocolVersionV1Contracts
+	protocolVersionsFilePath  = "evm-protocol-overrides.json"
+	protocolVersionsOverrides = make(map[uint32]dexeth.ProtocolVersion)
 
 	backendInfo = &asset.BackendInfo{
 		SupportsDynamicTxFee: true,
@@ -86,28 +49,93 @@ var (
 	usdcID, _      = dex.BipSymbolID("usdc.eth")
 )
 
+func init() {
+	// Load any legacy/reverted protocol versions.
+	if b, err := os.ReadFile(protocolVersionsFilePath); err == nil && len(b) > 0 {
+		var symbolVers map[string]uint32
+		if err := json.Unmarshal(b, &symbolVers); err != nil {
+			panic(fmt.Sprintf("provided protocol override file at %q did not parse: %v", protocolVersionsFilePath, err))
+		}
+		for symbol, v := range symbolVers {
+			assetID, found := dex.BipSymbolID(symbol)
+			if !found {
+				panic(fmt.Sprintf("asset %s specified in protocol override file is not known", symbol))
+			}
+			protocolVersionsOverrides[assetID] = ProtocolVersion(v)
+		}
+	}
+
+	asset.Register(BipID, &Driver{
+		DriverBase: DriverBase{
+			ProtocolVersion: ProtocolVersion(BipID),
+			UI:              dexeth.UnitInfo,
+			Nam:             "Ethereum",
+		},
+	})
+
+	registerToken(testTokenID, ProtocolVersion(testTokenID))
+	registerToken(usdcID, ProtocolVersion(usdcID))
+}
+
+// ProtocolVersion returns the default protocol version unless a reversion is
+// specified in the file at protocolVersionsFilePath.
+func ProtocolVersion(assetID uint32) dexeth.ProtocolVersion {
+	v, found := protocolVersionsOverrides[assetID]
+	if found {
+		return v
+	}
+	return defaultProtocolVersion
+}
+
+type VersionedToken struct {
+	*dexeth.Token
+	ContractVersion uint32
+}
+
+var registeredTokens = make(map[uint32]*VersionedToken)
+
+func registerToken(assetID uint32, protocolVer dexeth.ProtocolVersion) {
+	token, exists := dexeth.Tokens[assetID]
+	if !exists {
+		panic(fmt.Sprintf("no token constructor for asset ID %d", assetID))
+	}
+	drv := &TokenDriver{
+		DriverBase: DriverBase{
+			ProtocolVersion: protocolVer,
+			UI:              token.UnitInfo,
+			Nam:             token.Name,
+		},
+		Token: token.Token,
+	}
+	asset.RegisterToken(assetID, drv)
+	registeredTokens[assetID] = &VersionedToken{
+		Token:           token,
+		ContractVersion: protocolVer.ContractVersion(),
+	}
+}
+
 func networkToken(vToken *VersionedToken, net dex.Network) (netToken *dexeth.NetToken, contract *dexeth.SwapContract, err error) {
 	netToken, found := vToken.NetTokens[net]
 	if !found {
 		return nil, nil, fmt.Errorf("no addresses for %s on %s", vToken.Name, net)
 	}
 
-	contract, found = netToken.SwapContracts[vToken.Ver]
+	contract, found = netToken.SwapContracts[vToken.ContractVersion]
 	if !found || contract.Address == (common.Address{}) {
-		return nil, nil, fmt.Errorf("no version %d address for %s on %s", vToken.Ver, vToken.Name, net)
+		return nil, nil, fmt.Errorf("no version %d address for %s on %s", vToken.ContractVersion, vToken.Name, net)
 	}
 	return
 }
 
 type DriverBase struct {
-	UI  dex.UnitInfo
-	Ver uint32
-	Nam string
+	UI              dex.UnitInfo
+	ProtocolVersion dexeth.ProtocolVersion
+	Nam             string
 }
 
 // Version returns the Backend implementation's version number.
 func (d *DriverBase) Version() uint32 {
-	return d.Ver
+	return uint32(d.ProtocolVersion)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -164,11 +192,13 @@ type ethFetcher interface {
 	connect(ctx context.Context) error
 	suggestGasTipCap(ctx context.Context) (*big.Int, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
+	transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 	// token- and asset-specific methods
 	loadToken(ctx context.Context, assetID uint32, vToken *VersionedToken) error
-	status(ctx context.Context, assetID uint32, vector *dexeth.SwapVector) (*dexeth.SwapStatus, error)
+	status(ctx context.Context, assetID uint32, locator []byte) (*dexeth.SwapStatus, error)
+	vector(ctx context.Context, assetID uint32, locator []byte) (*dexeth.SwapVector, error)
+	statusAndVector(ctx context.Context, assetID uint32, locator []byte) (*dexeth.SwapStatus, *dexeth.SwapVector, error)
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
-	receipt(context.Context, common.Hash) (*types.Receipt, error)
 }
 
 type baseBackend struct {
@@ -215,6 +245,7 @@ type AssetBackend struct {
 	redeemSize uint64
 
 	contractAddr common.Address
+	contractVer  uint32
 }
 
 // ETHBackend implements some Ethereum-specific methods.
@@ -238,14 +269,15 @@ var _ asset.AccountBalancer = (*ETHBackend)(nil)
 
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
-func unconnectedETH(bipID uint32, contractAddr common.Address, vTokens map[uint32]*VersionedToken, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
+func unconnectedETH(bipID uint32, vTokens map[uint32]*VersionedToken, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 	// TODO: At some point multiple contracts will need to be used, at
 	// least for transitory periods when updating the contract, and
 	// possibly a random contract setup, and so this section will need to
 	// change to support multiple contracts.
-	contractAddr, exists := dexeth.ContractAddresses[ethContractVersion][net]
+	contractVer := ProtocolVersion(bipID).ContractVersion()
+	contractAddr, exists := dexeth.ContractAddresses[contractVer][net]
 	if !exists || contractAddr == (common.Address{}) {
-		return nil, fmt.Errorf("no eth contract for version %d, net %s", ethContractVersion, net)
+		return nil, fmt.Errorf("no eth contract for version %d, net %s", contractVer, net)
 	}
 	return &ETHBackend{&AssetBackend{
 		baseBackend: &baseBackend{
@@ -259,10 +291,11 @@ func unconnectedETH(bipID uint32, contractAddr common.Address, vTokens map[uint3
 		log:          logger,
 		contractAddr: contractAddr,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
-		initTxSize:   uint32(dexeth.InitGas(1, ethContractVersion)),
-		redeemSize:   dexeth.RedeemGas(1, ethContractVersion),
+		initTxSize:   uint32(dexeth.InitGas(1, contractVer)),
+		redeemSize:   dexeth.RedeemGas(1, contractVer),
 		assetID:      bipID,
 		atomize:      dexeth.WeiToGwei,
+		contractVer:  contractVer,
 	}}, nil
 }
 
@@ -343,17 +376,18 @@ func NewEVMBackend(
 
 	baseChainID, net, log := cfg.AssetID, cfg.Net, cfg.Logger
 	assetName := strings.ToUpper(dex.BipIDSymbol(baseChainID))
+	contractVer := ProtocolVersion(baseChainID).ContractVersion()
 
-	netAddrs, found := contractAddrs[ethContractVersion]
+	netAddrs, found := contractAddrs[contractVer]
 	if !found {
-		return nil, fmt.Errorf("no contract address for %s version %d", assetName, ethContractVersion)
+		return nil, fmt.Errorf("no contract address for %s version %d", assetName, contractVer)
 	}
 	contractAddr, found := netAddrs[net]
 	if !found {
-		return nil, fmt.Errorf("no contract address for %s version %d on %s", assetName, ethContractVersion, net)
+		return nil, fmt.Errorf("no contract address for %s version %d on %s", assetName, contractVer, net)
 	}
 
-	eth, err := unconnectedETH(baseChainID, contractAddr, vTokens, log, net)
+	eth, err := unconnectedETH(baseChainID, vTokens, log, net)
 	if err != nil {
 		return nil, err
 	}
@@ -574,13 +608,9 @@ func (be *AssetBackend) sendBlockUpdate(u *asset.BlockUpdate) {
 // ValidateContract ensures that contractData encodes both the expected contract
 // version and a secret hash.
 func (eth *ETHBackend) ValidateContract(contractData []byte) error {
-	ver, _, err := dexeth.DecodeLocator(contractData)
+	_, _, err := dexeth.DecodeContractData(contractData)
 	if err != nil { // ensures secretHash is proper length
 		return err
-	}
-
-	if ver != ethContractVersion {
-		return fmt.Errorf("incorrect swap contract version %d, wanted %d", ver, ethContractVersion)
 	}
 	return nil
 }
@@ -588,18 +618,16 @@ func (eth *ETHBackend) ValidateContract(contractData []byte) error {
 // ValidateContract ensures that contractData encodes both the expected swap
 // contract version and a secret hash.
 func (eth *TokenBackend) ValidateContract(contractData []byte) error {
-	ver, _, err := dexeth.DecodeLocator(contractData)
+	contractVer, _, err := dexeth.DecodeContractData(contractData)
 	if err != nil { // ensures secretHash is proper length
 		return err
 	}
-
-	if ver != eth.VersionedToken.Ver {
-		return fmt.Errorf("incorrect token swap contract version %d, wanted %d", ver, eth.VersionedToken.Ver)
-	}
-
 	_, _, err = networkToken(eth.VersionedToken, eth.net)
 	if err != nil {
 		return fmt.Errorf("error locating token: %v", err)
+	}
+	if contractVer != eth.VersionedToken.ContractVersion {
+		return fmt.Errorf("incorrect token swap contract version %d, wanted %d", contractVer, eth.VersionedToken.ContractVersion)
 	}
 
 	return nil
@@ -633,22 +661,30 @@ func (be *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, 
 }
 
 // ValidateSecret checks that the secret satisfies the secret hash.
-func (eth *baseBackend) ValidateSecret(secret, contractData []byte) bool {
-	contractVer, locator, err := dexeth.DecodeLocator(contractData)
+func (eth *AssetBackend) ValidateSecret(secret, contractData []byte) bool {
+	contractVer, locator, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
-		eth.baseLogger.Errorf("unable to decode contract data: %w", err)
+		eth.log.Errorf("Error decoding contract data for validation: %v", err)
 		return false
 	}
-	if contractVer != ethContractVersion {
+	var secretHash [32]byte
+	switch contractVer {
+	case 0:
+		copy(secretHash[:], locator)
+	case 1:
+		v, err := dexeth.ParseV1Locator(locator)
+		if err != nil {
+			eth.log.Errorf("ValidateSecret locator parsing error: %v", err)
+			return false
+		}
+		secretHash = v.SecretHash
+	default:
+		eth.log.Errorf("ValidateSecret received unknown contract version: %d", contractVer)
 		return false
 	}
-	vec, err := dexeth.ParseV1Locator(locator)
-	if err != nil {
-		eth.baseLogger.Errorf("unable to parse v1 locator: %w", err)
-		return false
-	}
+
 	sh := sha256.Sum256(secret)
-	return bytes.Equal(sh[:], vec.SecretHash[:])
+	return bytes.Equal(sh[:], secretHash[:])
 }
 
 // Synced is true if the blockchain is ready for action.
@@ -795,30 +831,4 @@ func (eth *ETHBackend) run(ctx context.Context) {
 			return
 		}
 	}
-}
-
-func (eth *baseBackend) txConfirmations(ctx context.Context, txHash common.Hash) (int64, error) {
-	r, err := eth.node.receipt(ctx, txHash)
-	if err != nil {
-		// Could be mempool.
-		if _, isMempool, err2 := eth.node.transaction(ctx, txHash); err2 != nil {
-			if errors.Is(err2, ethereum.NotFound) {
-				return 0, asset.CoinNotFoundError
-			}
-			return 0, fmt.Errorf("errors encountered searching for transaction: %v, %v", err, err2)
-		} else if isMempool {
-			return 0, nil
-		}
-		return 0, err
-	}
-
-	if r.BlockNumber == nil || r.BlockNumber.Int64() <= 0 {
-		return 0, nil
-	}
-
-	bn, err := eth.node.blockNumber(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("unable to fetch block number: %v", err)
-	}
-	return int64(bn) - r.BlockNumber.Int64() + 1, nil
 }

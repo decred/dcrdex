@@ -191,10 +191,10 @@ func ParseInitiateDataV1(calldata []byte) (map[[SecretHashSize]byte]*SwapVector,
 	}
 	initiations, ok := args[0].value.([]struct {
 		SecretHash      [32]byte       `json:"secretHash"`
+		Value           *big.Int       `json:"value"`
 		Initiator       common.Address `json:"initiator"`
 		RefundTimestamp uint64         `json:"refundTimestamp"`
 		Participant     common.Address `json:"participant"`
-		Value           uint64         `json:"value"`
 	})
 	if !ok {
 		return nil, fmt.Errorf("expected first arg of type []swapv1.ETHSwapContract but got %T", args[0].value)
@@ -241,10 +241,10 @@ func ParseRedeemDataV1(calldata []byte) (map[[SecretHashSize]byte]*RedemptionV1,
 	redemptions, ok := args[0].value.([]struct {
 		V struct {
 			SecretHash      [32]uint8      `json:"secretHash"`
+			Value           *big.Int       `json:"value"`
 			Initiator       common.Address `json:"initiator"`
 			RefundTimestamp uint64         `json:"refundTimestamp"`
 			Participant     common.Address `json:"participant"`
-			Value           uint64         `json:"value"`
 		} `json:"v"`
 		Secret [32]uint8 `json:"secret"`
 	})
@@ -294,10 +294,10 @@ func ParseRefundDataV1(calldata []byte) (*SwapVector, error) {
 	}
 	contract, ok := args[0].value.(struct {
 		SecretHash      [32]byte       `json:"secretHash"`
+		Value           *big.Int       `json:"value"`
 		Initiator       common.Address `json:"initiator"`
 		RefundTimestamp uint64         `json:"refundTimestamp"`
 		Participant     common.Address `json:"participant"`
-		Value           uint64         `json:"value"`
 	})
 	if !ok {
 		return nil, fmt.Errorf("expected first arg of type [32]byte but got %T", args[0].value)

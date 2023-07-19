@@ -30,8 +30,7 @@ import (
 )
 
 const (
-	contractVersionNewest = ^uint32(0)
-	approveGas            = 4e5
+	approveGas = 4e5
 )
 
 var (
@@ -410,9 +409,10 @@ func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, max
 }
 
 func gases(contractVer uint32, versionedGases map[uint32]*dexeth.Gases) *dexeth.Gases {
-	if contractVer != contractVersionNewest {
+	if contractVer != dexeth.ContractVersionERC20 {
 		return versionedGases[contractVer]
 	}
+
 	var bestVer uint32
 	var bestGases *dexeth.Gases
 	for ver, gases := range versionedGases {

@@ -111,7 +111,19 @@ var (
 							Transfer: 64_539,
 						},
 					},
-					1: {},
+					1: {
+						// DRAFT TODO
+						Address: common.Address{}, // Set in MaybeReadSimnetAddrs
+						Gas: dexeth.Gases{
+							Swap:      223_163,
+							SwapAdd:   146_399,
+							Redeem:    82_121,
+							RedeemAdd: 41_113,
+							Refund:    62_527,
+							Approve:   58_180,
+							Transfer:  64_539,
+						},
+					},
 				},
 			},
 		},

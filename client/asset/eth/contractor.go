@@ -223,9 +223,9 @@ func (c *contractorV0) vector(ctx context.Context, locator []byte) (*dexeth.Swap
 	vector := &dexeth.SwapVector{
 		From:       swap.Participant,
 		To:         swap.Initiator,
-		Value:      dexeth.WeiToGwei(swap.Value),
+		Value:      swap.Value,
 		SecretHash: secretHash,
-		LockTime:   uint64(swap.LockTime.UnixMilli()),
+		LockTime:   uint64(swap.LockTime.Unix()),
 	}
 	return vector, nil
 }
@@ -245,9 +245,9 @@ func (c *contractorV0) statusAndVector(ctx context.Context, locator []byte) (*de
 	vector := &dexeth.SwapVector{
 		From:       swap.Participant,
 		To:         swap.Initiator,
-		Value:      dexeth.WeiToGwei(swap.Value),
+		Value:      swap.Value,
 		SecretHash: secretHash,
-		LockTime:   uint64(swap.LockTime.UnixMilli()),
+		LockTime:   uint64(swap.LockTime.Unix()),
 	}
 	status := &dexeth.SwapStatus{
 		Step:        swap.State,
@@ -452,7 +452,7 @@ func (c *erc20Contractor) balance(ctx context.Context) (*big.Int, error) {
 // allowance exposes the read-only allowance method of the erc20 token contract.
 func (c *erc20Contractor) allowance(ctx context.Context) (*big.Int, error) {
 	callOpts := &bind.CallOpts{
-		Pending: true,
+		// Pending: true, // Seeing errors on even simnet that say "backend does not support pending state"
 		From:    c.acct,
 		Context: ctx,
 	}
@@ -585,8 +585,7 @@ func (c *tokenContractorV0) tokenAddress() common.Address {
 
 type contractorV1 struct {
 	contractV1
-	abi *abi.ABI
-	// net          dex.Network
+	abi          *abi.ABI
 	contractAddr common.Address
 	acctAddr     common.Address
 	cb           bind.ContractBackend
@@ -598,19 +597,18 @@ type contractorV1 struct {
 var _ contractor = (*contractorV1)(nil)
 
 func newV1Contractor(net dex.Network, contractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
-
 	c, err := swapv1.NewETHSwap(contractAddr, cb)
 	if err != nil {
 		return nil, err
 	}
 	return &contractorV1{
-		contractV1: c,
-		abi:        dexeth.ABIs[1],
-		// net:          net,
+		contractV1:   c,
+		abi:          dexeth.ABIs[1],
 		contractAddr: contractAddr,
 		acctAddr:     acctAddr,
 		cb:           cb,
 		atomize:      dexeth.WeiToGwei,
+		evmify:       dexeth.GweiToWei,
 	}, nil
 }
 
@@ -672,7 +670,7 @@ func (c *contractorV1) initiate(txOpts *bind.TransactOpts, contracts []*asset.Co
 		v := &dexeth.SwapVector{
 			From:     c.acctAddr,
 			To:       common.HexToAddress(ac.Address),
-			Value:    ac.Value,
+			Value:    c.evmify(ac.Value),
 			LockTime: ac.LockTime,
 		}
 		copy(v.SecretHash[:], ac.SecretHash)
@@ -698,7 +696,7 @@ func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemp
 
 		// Not checking version from DecodeLocator because it was already
 		// audited and incorrect version locator would err below anyway.
-		_, locator, err := dexeth.DecodeLocator(r.Spends.Contract)
+		_, locator, err := dexeth.DecodeContractData(r.Spends.Contract)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing locator redeem: %w", err)
 		}
@@ -732,7 +730,7 @@ func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, erro
 			SecretHash:      secretHash,
 			Initiator:       c.acctAddr,
 			Participant:     common.BytesToAddress(encode.RandomBytes(20)),
-			Value:           1,
+			Value:           big.NewInt(dexeth.GweiFactor),
 		})
 	}
 
@@ -807,23 +805,23 @@ func (c *contractorV1) isRefundable(locator []byte) (bool, error) {
 
 func (c *contractorV1) incomingValue(ctx context.Context, tx *types.Transaction) (uint64, error) {
 	if redeems, err := dexeth.ParseRedeemDataV1(tx.Data()); err == nil {
-		var redeemed uint64
+		var redeemed *big.Int
 		for _, r := range redeems {
-			redeemed += r.Contract.Value
+			redeemed.Add(redeemed, r.Contract.Value)
 		}
-		return redeemed, nil
+		return c.atomize(redeemed), nil
 	}
 	refund, err := dexeth.ParseRefundDataV1(tx.Data())
 	if err != nil {
 		return 0, nil
 	}
-	return refund.Value, nil
+	return c.atomize(refund.Value), nil
 }
 
 func (c *contractorV1) outgoingValue(tx *types.Transaction) (swapped uint64) {
 	if inits, err := dexeth.ParseInitiateDataV1(tx.Data()); err == nil {
 		for _, init := range inits {
-			swapped += init.Value
+			swapped += c.atomize(init.Value)
 		}
 	}
 	return

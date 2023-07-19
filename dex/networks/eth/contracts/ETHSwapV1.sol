@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BlueOak-1.0.0
 // pragma should be as specific as possible to allow easier validation.
-pragma solidity = 0.8.15;
+pragma solidity = 0.8.18;
 
 // ETHSwap creates a contract to be deployed on an ethereum network. After
 // deployed, it keeps a record of the state of a contract and enables
@@ -50,16 +50,16 @@ contract ETHSwap {
     // the swap record.
     struct Vector {
         bytes32 secretHash;
+        uint256 value;
         address initiator;
         uint64 refundTimestamp;
         address participant;
-        uint64 value;
     }
 
     // contractKey generates a key hash which commits to the contract data. The
     // generated hash is used as a key in the swaps map.
     function contractKey(Vector calldata v) public pure returns (bytes32) {
-        return sha256(bytes.concat(v.secretHash, bytes20(v.initiator), bytes20(v.participant), bytes8(v.value), bytes8(v.refundTimestamp)));
+        return sha256(bytes.concat(v.secretHash, bytes20(v.initiator), bytes20(v.participant), bytes32(v.value), bytes8(v.refundTimestamp)));
     }
 
     // Redemption is the information necessary to redeem a Vector. Since we
@@ -137,7 +137,7 @@ contract ETHSwap {
 
             swaps[k] = record;
 
-            initVal += v.value * 1 gwei;
+            initVal += v.value;
         }
 
         require(initVal == msg.value, "bad val");
@@ -187,7 +187,11 @@ contract ETHSwap {
             require(secretValidates(r.secret, r.v.secretHash), "invalid secret");
 
             swaps[k] = r.secret;
-            amountToRedeem += r.v.value * 1 gwei;
+
+
+            // DRAFT TODO: NOOOOOO! This doesn't account for decimals. This is
+            // WRONG for e.g. USDC.
+            amountToRedeem += r.v.value;
         }
 
         (bool ok, ) = payable(msg.sender).call{value: amountToRedeem}("");
@@ -221,7 +225,7 @@ contract ETHSwap {
 
         swaps[k] = RefundRecord;
 
-        (bool ok, ) = payable(v.initiator).call{value: v.value * 1 gwei}("");
+        (bool ok, ) = payable(v.initiator).call{value: v.value}("");
         require(ok == true, "transfer failed");
     }
 }
