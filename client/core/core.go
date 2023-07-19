@@ -1377,6 +1377,9 @@ type Config struct {
 	TorIsolation bool
 	// Language. A BCP 47 language tag. Default is en-US.
 	Language string
+	// SimnetFiatRates specifies whether to fetch fiat rates when running on
+	// simnet.
+	SimnetFiatRates bool
 
 	// NoAutoWalletLock instructs Core to skip locking the wallet on shutdown or
 	// logout. This can be helpful if the user wants the wallet to remain
@@ -1586,7 +1589,7 @@ func (c *Core) Run(ctx context.Context) {
 
 	// Skip rate fetch setup if on simnet. Rate fetching maybe enabled if
 	// desired.
-	if c.cfg.Net != dex.Simnet {
+	if c.cfg.Net != dex.Simnet || c.cfg.SimnetFiatRates {
 		c.ratesMtx.Lock()
 		// Retrieve disabled fiat rate sources from database.
 		disabledSources, err := c.db.DisabledRateSources()
