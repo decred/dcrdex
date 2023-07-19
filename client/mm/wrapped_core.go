@@ -82,6 +82,7 @@ func (c *wrappedCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error
 		singleLotRedeemFees:     singleLotRedeemFees,
 		lotSize:                 mkt.LotSize,
 		matchesRefunded:         make(map[order.MatchID]struct{}),
+		matchesSeen:             make(map[order.MatchID]struct{}),
 	}
 	c.mm.ordersMtx.Unlock()
 
@@ -95,10 +96,15 @@ func (c *wrappedCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error
 		fundingFees = o.FeesPaid.Funding
 	}
 
-	c.mm.decreaseBotBalance(c.botID, fromAsset, o.LockedAmt+fundingFees, o.ID)
-	if o.RedeemLockedAmt > 0 {
-		c.mm.decreaseBotBalance(c.botID, toAsset, o.RedeemLockedAmt, o.ID)
+	balMods := []*balanceMod{
+		{false, fromAsset, balTypeAvailable, o.LockedAmt + fundingFees},
+		{true, fromAsset, balTypeFundingOrder, o.LockedAmt + fundingFees},
 	}
+	if o.RedeemLockedAmt > 0 {
+		balMods = append(balMods, &balanceMod{false, toAsset, balTypeAvailable, o.RedeemLockedAmt})
+		balMods = append(balMods, &balanceMod{true, toAsset, balTypeFundingOrder, o.RedeemLockedAmt})
+	}
+	c.mm.modifyBotBalance(c.botID, balMods)
 
 	return o, nil
 }
@@ -129,8 +135,10 @@ func (c *wrappedCore) MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.
 	}
 
 	fromAsset := form.Quote
+	toAsset := form.Base
 	if form.Sell {
 		fromAsset = form.Base
+		toAsset = form.Quote
 	}
 	form.MaxLock = c.mm.botBalance(c.botID, fromAsset)
 
@@ -139,6 +147,7 @@ func (c *wrappedCore) MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.
 		return nil, err
 	}
 
+	var totalFromLocked, totalToLocked, fundingFeesPaid uint64
 	for _, o := range orders {
 		var orderID order.OrderID
 		copy(orderID[:], o.ID)
@@ -154,24 +163,26 @@ func (c *wrappedCore) MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.
 			singleLotRedeemFees:     singleLotRedeemFees,
 			lotSize:                 mkt.LotSize,
 			matchesRefunded:         make(map[order.MatchID]struct{}),
+			matchesSeen:             make(map[order.MatchID]struct{}),
 		}
 		c.mm.ordersMtx.Unlock()
 
-		fromAsset, toAsset := form.Quote, form.Base
-		if form.Sell {
-			fromAsset, toAsset = toAsset, fromAsset
-		}
-
-		var fundingFees uint64
+		totalFromLocked += o.LockedAmt
+		totalToLocked += o.RedeemLockedAmt
 		if o.FeesPaid != nil {
-			fundingFees = o.FeesPaid.Funding
-		}
-
-		c.mm.decreaseBotBalance(c.botID, fromAsset, o.LockedAmt+fundingFees, o.ID)
-		if o.RedeemLockedAmt > 0 {
-			c.mm.decreaseBotBalance(c.botID, toAsset, o.RedeemLockedAmt, o.ID)
+			totalFromLocked += o.FeesPaid.Funding
 		}
 	}
+
+	balMods := []*balanceMod{
+		{false, fromAsset, balTypeAvailable, totalFromLocked + fundingFeesPaid},
+		{true, fromAsset, balTypeFundingOrder, totalFromLocked},
+	}
+	if totalToLocked > 0 {
+		balMods = append(balMods, &balanceMod{false, toAsset, balTypeAvailable, totalToLocked})
+		balMods = append(balMods, &balanceMod{true, toAsset, balTypeFundingOrder, totalToLocked})
+	}
+	c.mm.modifyBotBalance(c.botID, balMods)
 
 	return orders, nil
 }
