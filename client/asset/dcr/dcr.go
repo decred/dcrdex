@@ -30,6 +30,7 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -3513,6 +3514,7 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 	// Check for an unspent output.
 	output, err := dcr.wallet.UnspentOutput(ctx, txHash, vout, wire.TxTreeUnknown)
 	if err == nil {
+		dcr.log.Infof("lookupTxOutput: UnspentOutput found it! %v:%d", txHash, vout)
 		return output.TxOut, output.Confirmations, 0, nil
 	} else if !errors.Is(err, asset.CoinNotFoundError) {
 		return nil, 0, 0, err
@@ -3530,6 +3532,7 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 	if int(vout) >= len(msgTx.TxOut) {
 		return nil, 0, 0, fmt.Errorf("tx %s has no output at %d", txHash, vout)
 	}
+	dcr.log.Debug(spew.Sdump(tx))
 
 	txOut = msgTx.TxOut[vout]
 	confs = uint32(tx.Confirmations)
@@ -3538,6 +3541,9 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 	if confs == 0 {
 		// Only counts as spent if spent in a mined transaction,
 		// unconfirmed tx outputs can't be spent in a mined tx.
+		if dcr.wallet.SpvMode() {
+			return txOut, confs, -1, nil // make it do a cfilters scan because GetTransaction lies
+		}
 		return txOut, confs, 0, nil
 	}
 
@@ -4541,10 +4547,14 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	_, confs, spendFlag, err = dcr.lookupTxOutput(ctx, txHash, vout)
 	if err == nil {
 		if spendFlag != -1 {
+			dcr.log.Infof("SwapConfirmations: lookupTxOutput DID find %v (confs = %v, spent = %v)", txHash, confs, spendFlag)
 			return confs, spendFlag > 0, nil
 		} // else go on to block filters scan
+		dcr.log.Infof("SwapConfirmations: lookupTxOutput DID find %v, but going to cfilters scan for spend status", txHash)
 	} else if !errors.Is(err, asset.CoinNotFoundError) {
 		return 0, false, err
+	} else {
+		dcr.log.Infof("SwapConfirmations: lookupTxOutput did NOT find %v, going to cfilters scan for confs", txHash)
 	}
 
 	// Prepare the pkScript to find the contract output using block filters.

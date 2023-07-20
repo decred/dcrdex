@@ -174,6 +174,16 @@ func (w *tDcrWallet) TxDetails(ctx context.Context, txHash *chainhash.Hash) (*ud
 	return w.txDetails, w.txDetailsErr
 }
 
+func (w *tDcrWallet) TransactionSummary(ctx context.Context, txHash *chainhash.Hash) (txSummary *wallet.TransactionSummary, confs int32, blockHash *chainhash.Hash, err error) {
+	return nil, 0, nil, errors.New("blah")
+}
+func (w *tDcrWallet) TxConfirms(ctx context.Context, hash *chainhash.Hash) (int32, error) {
+	return 0, errors.New("blah")
+}
+func (w *tDcrWallet) TxBlock(ctx context.Context, hash *chainhash.Hash) (chainhash.Hash, int32, error) {
+	return chainhash.Hash{}, 0, errors.New("blah")
+}
+
 func (w *tDcrWallet) Synced() bool {
 	return true
 }

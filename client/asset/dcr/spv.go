@@ -81,6 +81,10 @@ type dcrWallet interface {
 	UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error
 	LoadPrivateKey(ctx context.Context, addr stdaddr.Address) (key *secp256k1.PrivateKey, zero func(), err error)
 	TxDetails(ctx context.Context, txHash *chainhash.Hash) (*udb.TxDetails, error)
+	TransactionSummary(ctx context.Context, txHash *chainhash.Hash) (txSummary *wallet.TransactionSummary, confs int32, blockHash *chainhash.Hash, err error)
+	TxConfirms(ctx context.Context, hash *chainhash.Hash) (int32, error)
+	TxBlock(ctx context.Context, hash *chainhash.Hash) (chainhash.Hash, int32, error)
+	// GetTransactionsByHashes(ctx context.Context, txHashes []*chainhash.Hash) (txs []*wire.MsgTx, notFound []*wire.InvVect, err error)
 	GetTransactionsByHashes(ctx context.Context, txHashes []*chainhash.Hash) (txs []*wire.MsgTx, notFound []*wire.InvVect, err error)
 	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
@@ -667,6 +671,7 @@ func (w *spvWallet) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*w
 // Part of the Wallet interface.
 func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*WalletTransaction, error) {
 	// copy-pasted from dcrwallet/internal/rpc/jsonrpc/methods.go
+	// TODO: use TransactionSummary instead of TxDetails in unstable API.
 	txd, err := w.dcrWallet.TxDetails(ctx, txHash)
 	if errors.Is(err, walleterrors.NotExist) {
 		return nil, asset.CoinNotFoundError
@@ -690,7 +695,34 @@ func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 	if txd.Block.Height != -1 {
 		ret.BlockHash = txd.Block.Hash.String()
 		ret.Confirmations = int64(tipHeight - txd.Block.Height + 1)
+	} else {
+		// Check with TxConfirms and TxBlock now, why not.
+		confs, err := w.dcrWallet.TxConfirms(ctx, txHash)
+		if err != nil {
+			w.log.Warnf("TxConfirms: %v", err)
+		} else if confs > 0 {
+			w.log.Warnf("TxConfirms says yes! %d confs", confs)
+		}
+		blockHash, blockHeight, err := w.dcrWallet.TxBlock(ctx, txHash)
+		if err != nil {
+			w.log.Warnf("TxBlock: %v", err)
+		} else if blockHeight > 0 {
+			w.log.Warnf("TxBlock says yes! block %v, height %d", blockHash, blockHeight)
+			ret.BlockHash = blockHash.String()
+			ret.Confirmations = int64(tipHeight - blockHeight + 1)
+			goto gotit
+		}
+		_, confs2, blockHashP, err := w.dcrWallet.TransactionSummary(ctx, txHash)
+		if err != nil {
+			w.log.Warnf("TransactionSummary: %v", err)
+		} else if confs2 > 0 {
+			w.log.Warnf("TransactionSummary says yes! block %v, confs %d", blockHashP, confs2)
+			ret.BlockHash = blockHashP.String()
+			ret.Confirmations = int64(confs2)
+			goto gotit
+		}
 	}
+gotit:
 
 	details, err := w.ListTransactionDetails(ctx, txHash)
 	if err != nil {
@@ -997,8 +1029,8 @@ func initLogging(netDir string) error {
 		l.SetLevel(lvl)
 		return l
 	}
-	wallet.UseLogger(logger("WLLT", slog.LevelInfo))
-	udb.UseLogger(logger("UDB", slog.LevelInfo))
+	wallet.UseLogger(logger("WLLT", slog.LevelDebug))
+	udb.UseLogger(logger("UDB", slog.LevelDebug))
 	chain.UseLogger(logger("CHAIN", slog.LevelInfo))
 	spv.UseLogger(logger("SPV", slog.LevelDebug))
 	p2p.UseLogger(logger("P2P", slog.LevelInfo))
