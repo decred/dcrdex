@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -37,7 +38,7 @@ var tLogger dex.Logger
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
-func tBackend(ctx context.Context, t *testing.T, cfg *Config, walletName *WalletName, blkFunc func(string, error)) *connectedWallet {
+func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, walletName *WalletName, blkFunc func(string, error)) *connectedWallet {
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
@@ -69,6 +70,7 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, walletName *Wallet
 		PeersChange: func(num uint32, err error) {
 			fmt.Printf("peer count = %d, err = %v", num, err)
 		},
+		DataDir: dir,
 	}
 
 	w, err := cfg.NewWallet(walletCfg, tLogger.SubLogger(walletName.Node+"."+walletName.Name), dex.Regtest)
@@ -194,9 +196,17 @@ func Run(t *testing.T, cfg *Config) {
 		time.Sleep(blockWait)
 	}
 
+	tmpDir, err := os.MkdirTemp("", "")
+	if err != nil {
+		t.Fatalf("Error creating temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	firstDir := filepath.Join(tmpDir, "first")
+	secondDir := filepath.Join(tmpDir, "second")
+
 	t.Log("Setting up alpha/beta/gamma wallet backends...")
-	rig.firstWallet = tBackend(tCtx, t, cfg, cfg.FirstWallet, blkFunc)
-	rig.secondWallet = tBackend(tCtx, t, cfg, cfg.SecondWallet, blkFunc)
+	rig.firstWallet = tBackend(tCtx, t, cfg, firstDir, cfg.FirstWallet, blkFunc)
+	rig.secondWallet = tBackend(tCtx, t, cfg, secondDir, cfg.SecondWallet, blkFunc)
 	defer rig.close()
 
 	// Unlocks a wallet for use.
