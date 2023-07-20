@@ -15,6 +15,9 @@ GAMMA_RPC_PORT="23771"
 ALPHA_MINING_ADDR="mjzB71SzfAi8BwNvobPZ983d8vCdxuQD2i"
 BETA_MINING_ADDR="mwL7ypWCMEhBhGcsqWNwkvAasuXP3duXQk"
 
+# Uncomment to disable background mining
+#NOMINER="1"
+
 set -ex
 NODES_ROOT=~/dextest/${SYMBOL}
 rm -rf "${NODES_ROOT}"
@@ -273,6 +276,7 @@ tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
 tmux send-keys -t $SESSION:3 C-c
+tmux send-keys -t $SESSION:5 C-c
 tmux wait-for alpha${SYMBOL}
 tmux wait-for beta${SYMBOL}
 # seppuku
@@ -315,6 +319,18 @@ done
 
 tmux send-keys -t $SESSION:4 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
-# Reenable history and attach to the control session.
+################################################################################
+# Setup watch background miner -- if required
+################################################################################
+if [ -z "$NOMINER" ] ; then
+  tmux new-window -t $SESSION:5 -n "miner" $SHELL
+  tmux send-keys -t $SESSION:5 "cd ${HARNESS_DIR}" C-m
+  tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
+fi
+
+######################################################################################
+# Reenable history select the harness control window & attach to the control session #
+######################################################################################
 tmux send-keys -t $SESSION:4 "set -o history" C-m
+tmux select-window -t $SESSION:4
 tmux attach-session -t $SESSION
