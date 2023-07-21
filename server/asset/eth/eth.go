@@ -181,6 +181,7 @@ type baseBackend struct {
 	node ethFetcher
 
 	baseChainID     uint32
+	baseChainName   string
 	versionedTokens map[uint32]*VersionedToken
 
 	// bestHeight is the last best known chain tip height. bestHeight is set
@@ -250,6 +251,7 @@ func unconnectedETH(bipID uint32, contractAddr common.Address, vTokens map[uint3
 			baseLogger:      logger,
 			tokens:          make(map[uint32]*TokenBackend),
 			baseChainID:     bipID,
+			baseChainName:   strings.ToUpper(dex.BipIDSymbol(bipID)),
 			versionedTokens: vTokens,
 		},
 		log:          logger,
@@ -279,6 +281,8 @@ func NewEVMBackend(
 	}
 	defer file.Close()
 
+	assetName := strings.ToUpper(dex.BipIDSymbol(baseChainID))
+
 	var endpoints []endpoint
 	endpointsMap := make(map[string]bool) // to avoid duplicates
 	scanner := bufio.NewScanner(file)
@@ -287,12 +291,12 @@ func NewEVMBackend(
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
-		ethCfgInstructions := "invalid eth config line: \"%s\". " +
+		ethCfgInstructions := "invalid %s config line: \"%s\". " +
 			"Each line must contain URL and optionally a priority (between 0-65535) " +
 			"separated by a comma. Example: \"https://www.infura.io/,2\""
 		parts := strings.Split(line, ",")
 		if len(parts) < 1 || len(parts) > 2 {
-			return nil, fmt.Errorf(ethCfgInstructions, line)
+			return nil, fmt.Errorf(ethCfgInstructions, assetName, line)
 		}
 		url := strings.TrimSpace(parts[0])
 		var priority uint16
@@ -313,20 +317,20 @@ func NewEVMBackend(
 		})
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading eth config file at %q. %v", configPath, err)
+		return nil, fmt.Errorf("error reading %s config file at %q. %v", assetName, configPath, err)
 	}
 	if len(endpoints) == 0 {
-		return nil, fmt.Errorf("no endpoint found in the eth config file at %q", configPath)
+		return nil, fmt.Errorf("no endpoint found in the %s config file at %q", assetName, configPath)
 	}
-	log.Debugf("Parsed %d endpoints from the ETH config file", len(endpoints))
+	log.Debugf("Parsed %d endpoints from the %v config file", assetName, len(endpoints))
 
 	netAddrs, found := contractAddrs[ethContractVersion]
 	if !found {
-		return nil, fmt.Errorf("no contract address for eth version %d", ethContractVersion)
+		return nil, fmt.Errorf("no contract address for %s version %d", assetName, ethContractVersion)
 	}
 	contractAddr, found := netAddrs[net]
 	if !found {
-		return nil, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, net)
+		return nil, fmt.Errorf("no contract address for %s version %d on %s", assetName, ethContractVersion, net)
 	}
 
 	eth, err := unconnectedETH(baseChainID, contractAddr, vTokens, log, net)
@@ -479,7 +483,7 @@ func (eth *baseBackend) FeeRate(ctx context.Context) (uint64, error) {
 	}
 
 	if hdr.BaseFee == nil {
-		return 0, errors.New("eth block header does not contain base fee")
+		return 0, fmt.Errorf("%v block header does not contain base fee", eth.baseChainName)
 	}
 
 	suggestedGasTipCap, err := eth.node.suggestGasTipCap(ctx)
@@ -511,7 +515,7 @@ func (eth *baseBackend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uin
 	coin := contract.Coin
 	sc, ok := coin.(*swapCoin)
 	if !ok {
-		eth.baseLogger.Error("eth contract coin type must be a swapCoin but got %T", sc)
+		eth.baseLogger.Error("%v contract coin type must be a swapCoin but got %T", eth.baseChainName, sc)
 		return false
 	}
 
@@ -748,8 +752,8 @@ func (eth *ETHBackend) poll(ctx context.Context) {
 
 // run processes the queue and monitors the application context.
 func (eth *ETHBackend) run(ctx context.Context) {
-	eth.baseLogger.Infof("Starting ETH block polling with interval of %v",
-		blockPollInterval)
+	eth.baseLogger.Infof("Starting %v block polling with interval of %v",
+		eth.baseChainName, blockPollInterval)
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 

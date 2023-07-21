@@ -75,7 +75,8 @@ type rpcclient struct {
 	net dex.Network
 	log dex.Logger
 
-	baseChainID uint32
+	baseChainID   uint32
+	baseChainName string
 
 	// endpoints should only be used during connect to know which endpoints
 	// to attempt to connect. If we were unable to connect to some of the
@@ -96,6 +97,7 @@ type rpcclient struct {
 func newRPCClient(baseChainID uint32, net dex.Network, endpoints []endpoint, ethContractAddr common.Address, log dex.Logger) *rpcclient {
 	return &rpcclient{
 		baseChainID:     baseChainID,
+		baseChainName:   strings.ToUpper(dex.BipIDSymbol(baseChainID)),
 		net:             net,
 		endpoints:       endpoints,
 		log:             log,
@@ -148,7 +150,7 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 
 	es, err := swapv0.NewETHSwap(c.ethContractAddr, ec.Client)
 	if err != nil {
-		return nil, fmt.Errorf("unable to initialize eth contract for %q: %v", endpoint, err)
+		return nil, fmt.Errorf("unable to initialize %v contract for %q: %v", c.baseChainName, endpoint, err)
 	}
 	ec.swapContract = &swapSourceV0{es}
 
@@ -314,7 +316,7 @@ func (c *rpcclient) monitorConnectionsHealth(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if !c.sortConnectionsByHealth(ctx) {
-				c.log.Warnf("No healthy ETH RPC connections")
+				c.log.Warnf("No healthy %v RPC connections", c.baseChainName)
 			}
 		}
 	}
@@ -373,7 +375,7 @@ func (c *rpcclient) connect(ctx context.Context) (err error) {
 	success = c.sortConnectionsByHealth(ctx)
 
 	if !success {
-		return fmt.Errorf("failed to connect to an up-to-date ethereum node")
+		return fmt.Errorf("failed to connect to an up-to-date %v node", c.baseChainName)
 	}
 
 	go c.monitorConnectionsHealth(ctx)
