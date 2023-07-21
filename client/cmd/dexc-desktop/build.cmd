@@ -22,8 +22,11 @@
 ::       https://developer.microsoft.com/en-us/windows/downloads/sdk-archive/
 ::     OR
 ::    b. With the Visual Studio Build Tools (see link in Node.js step above).
-::  5. Reboot.
-::  6. Install MSYS2. https://www.msys2.org/
+::  5. Install the WebView2 runtime. It may already be installed, but try just
+::     in case it is not.
+::     https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section 
+::  6. Reboot.
+::  7. Install MSYS2. https://www.msys2.org/
 ::     Default install folder is C:\msys64.
 ::    a. If the installer does not automatically open a terminal when done,
 ::       launch the "UCRT64" terminal from the start menu.
@@ -31,21 +34,17 @@
 ::       it completes.  Start it again.
 ::    c. Install the ucrt64 runtime variety of the GCC compilers.
 ::       `pacman -S mingw-w64-ucrt-x86_64-gcc`
-::  7. Edit the *user* `PATH` to include `C:\msys64\ucrt64\bin`. Use the "Edit"
+::  8. Edit the *user* `PATH` to include `C:\msys64\ucrt64\bin`. Use the "Edit"
 ::     button at (System Properties -> Advanced -> Environment Variables...).
-::  8. Close all terminals, or logout/in, or reboot.
-::  9. Open cmd.exe (the plain windows console, not msys or the git console),
-::     and check `gcc --version`.
-::  10. Ensure `tar` and `curl` are also available. By default, they should be
+::  9. Close all terminals, or logout/in, or reboot.
+::  10. Open cmd.exe (the plain windows console, not msys or the git console),
+::      and check `gcc --version`.
+::  11. Ensure `tar` and `curl` are also available. By default, they should be
 ::      on the *system* `PATH` for up-to-date Windows installs.
-::  11. If not on a dcrdex release branch, either obtain the `dist` folder from
+::  12. If not on a dcrdex release branch, either obtain the `dist` folder from
 ::      another machine and put it under `client/webserver/site` or build it
 ::      from that folder with `npm ci` and `npm run build`. See the Node.js
 ::      install instructions above.
-::
-:: NOTE: On every machine tested, the Webview2 *runtime* was already installed,
-:: but if you have removed it or Edge itself, it may be necessary to install:
-:: https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section 
 
 echo "Fetching and extracting the latest WebView2 SDK..."
 mkdir libs\webview2
