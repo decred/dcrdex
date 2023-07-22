@@ -104,6 +104,9 @@ this point.
 A prepared, empty but encrypted electrum wallet is copied to the electrum data
 directory at **~/dextest/electrum/firo/client/wallet/regtest/wallets** directory.
 
+By default the electrum client is started as a daemon and the default wallet is loaded.
+Use **stop-daemon** script to stop the daemon.
+
 The electrum client wallet will connect to the firo electrumX daemon.
 
 ### Simnet Trade Testing

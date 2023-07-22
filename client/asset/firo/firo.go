@@ -152,7 +152,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Segwit:                   false,
 		InitTxSize:               dexbtc.InitTxSize,
 		InitTxSizeBase:           dexbtc.InitTxSizeBase,
-		LegacyBalance:            true,
+		LegacyBalance:            false, // set true only for walletTypeRPC below
 		LegacyRawFeeLimit:        true,  // sendrawtransaction Has single arg allowhighfees
 		ArglessChangeAddrRPC:     true,  // getrawchangeaddress has No address-type arg
 		OmitAddressType:          true,  // getnewaddress has No address-type arg
@@ -170,6 +170,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 	switch cfg.Type {
 	case walletTypeRPC, walletTypeLegacy:
+		cloneCFG.LegacyBalance = true
 		var exw *btc.ExchangeWalletFullNode
 		// override PrivKeyFunc - we Do need our own Firo dumpprivkey fn
 		cloneCFG.PrivKeyFunc = func(addr string) (*btcec.PrivateKey, error) {

@@ -34,6 +34,12 @@ REPO_DIR=${ELECTRUM_DIR}/electrum-repo
 WALLET_DIR=${ELECTRUM_DIR}/wallet
 NET_DIR=${WALLET_DIR}/regtest
 
+# startup options (Default start as a daemon)
+# Uncomment this line to start with gui
+#START_WITH_GUI="1"
+ELECTRUM_REGTEST_ARGS="--regtest --dir=${WALLET_DIR}"
+WALLET_PASSWORD="abc"
+
 rm -rf ${NET_DIR}/blockchain_headers ${NET_DIR}/forks ${NET_DIR}/certs ${NET_DIR}/wallets/default_wallet
 mkdir -p ${NET_DIR}/regtest
 mkdir -p ${NET_DIR}/wallets
@@ -59,7 +65,11 @@ source ${ELECTRUM_DIR}/venv/bin/activate
 python --version
 python -m pip install --upgrade pip # can support more versions than ensurepip
 pip install -e .
-pip install requests cryptography pycryptodomex pyqt5
+pip install requests cryptography pycryptodomex
+if [ -n "$START_WITH_GUI" ];
+then
+    pip install pyqt5
+fi
 
 cp "${SCRIPT_DIR}/electrum_regtest_wallet" "${NET_DIR}/wallets/default_wallet"
 
@@ -100,4 +110,13 @@ rpcpassword=pass
 rpcbind=127.0.0.1:${RPCPORT}
 EOF
 
-./electrum-firo --regtest --dir=${WALLET_DIR}
+if [ -n "$START_WITH_GUI" ];
+then
+    ./electrum-firo ${ELECTRUM_REGTEST_ARGS}
+else
+    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} daemon --detach
+    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} load_wallet --password=${WALLET_PASSWORD}
+    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} list_wallets
+    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} getinfo
+    echo "use 'stop_daemon.sh' to stop the daemon"
+fi
