@@ -56,19 +56,16 @@ func TestRPC(t *testing.T) {
 	mt.TestRPC(t)
 }
 
-// var freeServers = []string{
-// 	"https://cloudflare-eth.com/", // cloudflare-eth.com "SuggestGasTipCap" error: Method not found
-// 	"https://main-rpc.linkpool.io/",
-// 	"https://nodes.mewapi.io/rpc/eth",
-// 	"https://rpc.flashbots.net/",
-// 	"https://rpc.ankr.com/eth", // Passes, but doesn't support SyncProgress, which don't use and just lie about right now.
-// 	"https://api.mycryptoapi.com/eth",
-// 	"https://ethereumnodelight.app.runonflux.io",
-// }
+var freeServers = []string{
+	"wss://polygon-mainnet.public.blastapi.io",
+	"https://polygon.blockpi.network/v1/rpc/public",
+	"https://polygon.publicnode.com",
+	"https://rpc.ankr.com/polygon",
+}
 
-// func TestFreeServers(t *testing.T) {
-// 	mt.TestFreeServers(t, freeServers)
-// }
+func TestFreeServers(t *testing.T) {
+	mt.TestFreeServers(t, freeServers)
+}
 
 func TestMainnetCompliance(t *testing.T) {
 	mt.TestMainnetCompliance(t)

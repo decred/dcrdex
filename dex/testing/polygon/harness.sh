@@ -122,9 +122,9 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
   # The mining script may end up mining more or less blocks than specified.
   cat > "${HARNESS_DIR}/mine-${NAME}" <<EOF
 #!/usr/bin/env bash
-NUM=2
+NUM=1
 case \$1 in
-    ''|*[!0-9]*|[0-1])  ;;
+    ''|*[!0-9]*)  ;;
     *) NUM=\$1 ;;
 esac
 echo "Mining \${NUM} blocks..."
@@ -417,6 +417,11 @@ echo "ERC20 SWAP contract address is ${ERC20_SWAP_CONTRACT_ADDR}. Saving to ${NO
 cat > "${NODES_ROOT}/erc20_swap_contract_address.txt" <<EOF
 ${ERC20_SWAP_CONTRACT_ADDR}
 EOF
+
+# Miner
+tmux new-window -t $SESSION:3 -n "miner" $SHELL
+tmux send-keys -t $SESSION:3 "cd ${NODES_ROOT}/harness-ctl" C-m
+tmux send-keys -t $SESSION:3 "watch -n 15 ./mine-alpha 1" C-m
 
 tmux select-window -t $SESSION:0
 tmux send-keys -t $SESSION:0 "set -o history" C-m

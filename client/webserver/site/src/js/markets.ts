@@ -1526,17 +1526,15 @@ export default class MarketsPage extends BasePage {
     for (const mord of sortedOrders) {
       const div = page.userOrderTmpl.cloneNode(true) as HTMLElement
       page.userOrders.appendChild(div)
-
-      const headerEl = Doc.tmplElement(div, 'header')
-      const header = Doc.parseTemplate(headerEl)
-      const detailsDiv = Doc.tmplElement(div, 'details')
-      const details = Doc.parseTemplate(detailsDiv)
+      const tmpl = Doc.parseTemplate(div)
+      const header = Doc.parseTemplate(tmpl.header)
+      const details = Doc.parseTemplate(tmpl.details)
 
       mord.div = div
       mord.header = header
       mord.details = details
-
       const ord = mord.ord
+
       const orderID = ord.id
       const isActive = orderIsActive(ord)
 
@@ -1545,18 +1543,18 @@ export default class MarketsPage extends BasePage {
       if (orderID) metaOrders[orderID] = mord
 
       if (!ord.readyToTick && OrderUtil.hasActiveMatches(ord)) {
-        headerEl.classList.add('unready-user-order')
+        tmpl.header.classList.add('unready-user-order')
         unreadyOrders = true
       }
       header.sideLight.classList.add(ord.sell ? 'sell' : 'buy')
       if (!isActive) header.sideLight.classList.add('inactive')
-      details.side.textContent = header.side.textContent = OrderUtil.sellString(ord)
+      details.side.textContent = mord.header.side.textContent = OrderUtil.sellString(ord)
       details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
-      details.qty.textContent = header.qty.textContent = Doc.formatCoinValue(ord.qty, market.baseUnitInfo)
-      details.rate.textContent = header.rate.textContent = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
-      header.baseSymbol.textContent = ord.baseSymbol.toUpperCase()
-      details.type.textContent = OrderUtil.typeString(ord)
+      details.qty.textContent = mord.header.qty.textContent = Doc.formatCoinValue(ord.qty, market.baseUnitInfo)
+      details.rate.textContent = mord.header.rate.textContent = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
+      header.baseSymbol.textContent = market.baseUnitInfo.conventional.unit
+      details.type.textContent = market.quoteUnitInfo.conventional.unit
       this.updateMetaOrder(mord)
 
       Doc.bind(div, 'mouseenter', () => {
@@ -1593,14 +1591,14 @@ export default class MarketsPage extends BasePage {
         app().bindInternalNavigation(div)
       }
       let currentFloater: (PageElement | null)
-      Doc.bind(headerEl, 'click', () => {
-        if (Doc.isDisplayed(detailsDiv)) {
-          Doc.hide(detailsDiv)
+      Doc.bind(tmpl.header, 'click', () => {
+        if (Doc.isDisplayed(tmpl.details)) {
+          Doc.hide(tmpl.details)
           header.expander.classList.add('ico-arrowdown')
           header.expander.classList.remove('ico-arrowup')
           return
         }
-        Doc.show(detailsDiv)
+        Doc.show(tmpl.details)
         header.expander.classList.remove('ico-arrowdown')
         header.expander.classList.add('ico-arrowup')
         if (currentFloater) currentFloater.remove()
@@ -1610,16 +1608,16 @@ export default class MarketsPage extends BasePage {
        * pushing the layout around, we'll show the buttons as an absolutely
        * positioned copy of the button menu.
        */
-      Doc.bind(headerEl, 'mouseenter', () => {
+      Doc.bind(tmpl.header, 'mouseenter', () => {
         // Don't show the copy if the details are already displayed.
-        if (Doc.isDisplayed(detailsDiv)) return
+        if (Doc.isDisplayed(tmpl.details)) return
         if (currentFloater) currentFloater.remove()
         // Create and position the element based on the position of the header.
         const floater = document.createElement('div')
         currentFloater = floater
         document.body.appendChild(floater)
         floater.className = 'user-order-floaty-menu'
-        const m = Doc.layoutMetrics(headerEl)
+        const m = Doc.layoutMetrics(tmpl.header)
         const y = m.bodyTop + m.height
         floater.style.top = `${y - 1}px` // - 1 to hide border on header div
         floater.style.left = `${m.bodyLeft}px`
@@ -1706,11 +1704,9 @@ export default class MarketsPage extends BasePage {
     // gets first price value from buy or from sell, so we can show it on
     // title.
     const midGapValue = this.midGapConventional()
-    const { baseCfg: b, quoteCfg: q } = this.market
-    const baseSymb = b.symbol.toUpperCase()
-    const quoteSymb = q.symbol.toUpperCase()
-    if (!midGapValue) document.title = `${baseSymb}${quoteSymb} | ${this.ogTitle}`
-    else document.title = `${Doc.formatCoinValue(midGapValue)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}` // more than 6 numbers it gets too big for the title.
+    const { baseUnitInfo: { conventional: { unit: bUnit } }, quoteUnitInfo: { conventional: { unit: qUnit } } } = this.market
+    if (!midGapValue) document.title = `${bUnit}${qUnit} | ${this.ogTitle}`
+    else document.title = `${Doc.formatCoinValue(midGapValue)} | ${bUnit}${qUnit} | ${this.ogTitle}` // more than 6 numbers it gets too big for the title.
   }
 
   /* handleBookRoute is the handler for the 'book' notification, which is sent

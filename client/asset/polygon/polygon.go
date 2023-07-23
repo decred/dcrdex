@@ -37,6 +37,7 @@ const (
 	BipID           = 966
 	walletTypeRPC   = "rpc"
 	walletTypeToken = "token"
+	minerGasCeil    = 8_000_000 // config.Defaults.Miner.GasCeil
 )
 
 var (
@@ -92,6 +93,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 			}
 		}
 	}
+	wi := *WalletInfo
 	// BipID, chainCfg, cfg, &t, dexpolygon.VersionedGases, dexpolygon.Tokens, logger, net
 	return eth.NewEVMWallet(&eth.EVMWalletConfig{
 		BaseChainID:        BipID,
@@ -102,6 +104,8 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		Tokens:             dexpolygon.Tokens,
 		Logger:             logger,
 		BaseChainContracts: contracts,
+		MinerBlockGasCeil:  minerGasCeil,
+		WalletInfo:         &wi,
 		Net:                net,
 	})
 }

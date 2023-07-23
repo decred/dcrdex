@@ -178,24 +178,26 @@ var (
 		0,                                // branch 0
 		0,                                // index 0
 	}
-
-	// perTxGasLimit is the most gas we can use on a transaction. It is the
-	// lower of either the per tx or per block gas limit.
-	perTxGasLimit = func() uint64 {
-		// blockGasLimit is the amount of gas we can use in one transaction
-		// according to the block gas limit.
-		blockGasLimit := ethconfig.Defaults.Miner.GasCeil / maxProportionOfBlockGasLimitToUse
-
-		// txGasLimit is the amount of gas we can use in one transaction
-		// according to the default transaction gas fee limit.
-		txGasLimit := uint64(maxTxFeeGwei / defaultGasFeeLimit)
-
-		if blockGasLimit > txGasLimit {
-			return txGasLimit
-		}
-		return blockGasLimit
-	}()
 )
+
+// perTxGasLimit is the most gas we can use on a transaction. It is the lower of
+// either the per tx or per block gas limit.
+func perTxGasLimit(minerCeil uint64) uint64 {
+	// blockGasLimit is the amount of gas we can use in one transaction
+	// according to the block gas limit.
+
+	// Ethereum GasCeil: 30_000_000, Polygon: 8_000_000
+	blockGasLimit := minerCeil / maxProportionOfBlockGasLimitToUse
+
+	// txGasLimit is the amount of gas we can use in one transaction
+	// according to the default transaction gas fee limit.
+	txGasLimit := uint64(maxTxFeeGwei / defaultGasFeeLimit)
+
+	if blockGasLimit > txGasLimit {
+		return txGasLimit
+	}
+	return blockGasLimit
+}
 
 // WalletConfig are wallet-level configuration settings.
 type WalletConfig struct {
@@ -269,13 +271,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	}
 
 	return "", fmt.Errorf("unknown coin ID format: %x", coinID)
-}
-
-func ethWalletInfo(maxSwaps, maxRedeems uint64) *asset.WalletInfo {
-	wi := *WalletInfo
-	wi.MaxSwapsInTx = maxSwaps
-	wi.MaxRedeemsInTx = maxRedeems
-	return &wi
 }
 
 // Info returns basic information about the wallet and asset.
@@ -462,6 +457,7 @@ type baseWallet struct {
 	log        dex.Logger
 	dir        string
 	walletType string
+	txGasLimit uint64
 
 	baseChainID uint32
 	chainCfg    *params.ChainConfig
@@ -505,6 +501,7 @@ type assetWallet struct {
 	log       dex.Logger
 	ui        dex.UnitInfo
 	connected atomic.Bool
+	wi        *asset.WalletInfo
 
 	versionedContracts map[uint32]common.Address
 	versionedGases     map[uint32]*dexeth.Gases
@@ -530,9 +527,6 @@ type assetWallet struct {
 
 	evmify  func(uint64) *big.Int
 	atomize func(*big.Int) uint64
-
-	maxSwapsInTx   uint64
-	maxRedeemsInTx uint64
 
 	// pendingTxCheckBal is protected by the pendingTxMtx. We use this field
 	// as a secondary check to see if we need to request confirmations for
@@ -567,20 +561,8 @@ type TokenWallet struct {
 const maxProportionOfBlockGasLimitToUse = 4
 
 // Info returns basic information about the wallet and asset.
-func (w *ETHWallet) Info() *asset.WalletInfo {
-	return ethWalletInfo(w.maxSwapsInTx, w.maxRedeemsInTx)
-}
-
-// Info returns basic information about the wallet and asset.
-func (w *TokenWallet) Info() *asset.WalletInfo {
-	return &asset.WalletInfo{
-		Name:              w.token.Name,
-		Version:           WalletInfo.Version,
-		SupportedVersions: WalletInfo.SupportedVersions,
-		UnitInfo:          w.token.UnitInfo,
-		MaxSwapsInTx:      w.maxSwapsInTx,
-		MaxRedeemsInTx:    w.maxRedeemsInTx,
-	}
+func (w *assetWallet) Info() *asset.WalletInfo {
+	return w.wi
 }
 
 // genWalletSeed uses the wallet seed passed from core as the entropy for
@@ -701,6 +683,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 			}
 		}
 	}
+	wi := *WalletInfo
 
 	return NewEVMWallet(&EVMWalletConfig{
 		BaseChainID:        BipID,
@@ -711,6 +694,8 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		Tokens:             dexeth.Tokens,
 		Logger:             logger,
 		BaseChainContracts: contracts,
+		WalletInfo:         &wi,
+		MinerBlockGasCeil:  ethconfig.Defaults.Miner.GasCeil,
 		Net:                net,
 	})
 }
@@ -725,6 +710,8 @@ type EVMWalletConfig struct {
 	Tokens             map[uint32]*dexeth.Token
 	Logger             dex.Logger
 	BaseChainContracts map[uint32]common.Address
+	MinerBlockGasCeil  uint64
+	WalletInfo         *asset.WalletInfo
 	Net                dex.Network
 }
 
@@ -754,6 +741,8 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		gasFeeLimit = defaultGasFeeLimit
 	}
 
+	txGasLimit := perTxGasLimit(cfg.MinerBlockGasCeil)
+
 	eth := &baseWallet{
 		net:          cfg.Net,
 		baseChainID:  cfg.BaseChainID,
@@ -764,6 +753,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		log:          cfg.Logger,
 		dir:          cfg.AssetCfg.DataDir,
 		walletType:   cfg.AssetCfg.Type,
+		txGasLimit:   txGasLimit,
 		settings:     cfg.AssetCfg.Settings,
 		gasFeeLimitV: gasFeeLimit,
 		wallets:      make(map[uint32]*assetWallet),
@@ -781,12 +771,16 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		}
 	}
 
-	if maxSwapGas == 0 || perTxGasLimit < maxSwapGas {
+	if maxSwapGas == 0 || txGasLimit < maxSwapGas {
 		return nil, errors.New("max swaps cannot be zero or undefined")
 	}
-	if maxRedeemGas == 0 || perTxGasLimit < maxRedeemGas {
+	if maxRedeemGas == 0 || txGasLimit < maxRedeemGas {
 		return nil, errors.New("max redeems cannot be zero or undefined")
 	}
+
+	wi := cfg.WalletInfo
+	wi.MaxSwapsInTx = txGasLimit / maxSwapGas
+	wi.MaxRedeemsInTx = txGasLimit / maxRedeemGas
 
 	aw := &assetWallet{
 		baseWallet:         eth,
@@ -803,13 +797,12 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		ui:                 dexeth.UnitInfo,
-		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
-		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
 		pendingTxCheckBal:  new(big.Int),
+		wi:                 wi,
 	}
 
 	cfg.Logger.Infof("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
-		aw.maxSwapsInTx, aw.maxRedeemsInTx)
+		wi.MaxSwapsInTx, wi.MaxRedeemsInTx)
 
 	aw.wallets = map[uint32]*assetWallet{
 		assetID: aw,
@@ -1095,10 +1088,10 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		}
 	}
 
-	if maxSwapGas == 0 || perTxGasLimit < maxSwapGas {
+	if maxSwapGas == 0 || w.txGasLimit < maxSwapGas {
 		return nil, errors.New("max swaps cannot be zero or undefined")
 	}
-	if maxRedeemGas == 0 || perTxGasLimit < maxRedeemGas {
+	if maxRedeemGas == 0 || w.txGasLimit < maxRedeemGas {
 		return nil, errors.New("max redeems cannot be zero or undefined")
 	}
 
@@ -1107,6 +1100,15 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 	for ver, c := range netToken.SwapContracts {
 		contracts[ver] = c.Address
 		gases[ver] = &c.Gas
+	}
+
+	wi := &asset.WalletInfo{
+		Name:              token.Name,
+		Version:           w.wi.Version,
+		SupportedVersions: w.wi.SupportedVersions,
+		UnitInfo:          token.UnitInfo,
+		MaxSwapsInTx:      w.txGasLimit / maxSwapGas,
+		MaxRedeemsInTx:    w.txGasLimit / maxRedeemGas,
 	}
 
 	aw := &assetWallet{
@@ -1124,8 +1126,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
 		ui:                 token.UnitInfo,
-		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
-		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
+		wi:                 wi,
 		pendingTxCheckBal:  new(big.Int),
 	}
 
@@ -1717,8 +1718,8 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, err err
 	// transaction. Limit our gas estimate to the same number of swaps.
 	nMax := n
 	var nRemain, nFull int
-	if uint64(n) > w.maxSwapsInTx {
-		nMax = int(w.maxSwapsInTx)
+	if uint64(n) > w.wi.MaxSwapsInTx {
+		nMax = int(w.wi.MaxSwapsInTx)
 		nFull = n / nMax
 		nSwap = (oneSwap + uint64(nMax-1)*g.SwapAdd) * uint64(nFull)
 		nRemain = n % nMax

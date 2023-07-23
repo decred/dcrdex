@@ -84,11 +84,11 @@ func (contractDeployer) EstimateDeployFunding(
 		}
 	}
 
-	const deploymentGas = 1_500_000 // eth v0: 825_466, token v0 687_67
+	const deploymentGas = 1_500_000 // eth v0: 687_671, token v0 825_478
 	if gas == 0 {
 		gas = deploymentGas
 	}
-	fees := feeRate * gas * 5 / 4 // 20% buffer on fee rate to allow for variation
+	fees := feeRate * gas
 
 	log.Infof("Estimated fees: %s", ui.ConventionalString(fees))
 
@@ -185,18 +185,17 @@ func (contractDeployer) DeployContract(
 		To:   nil, // special value means deploy contract
 		Data: txData,
 	})
-	gas = gas * 5 / 4
 	if err != nil {
 		return fmt.Errorf("EstimateGas error: %v", err)
 	}
 
-	fees := feeRate * gas // no fee-rate buffer
+	log.Infof("Estimated fees: %s", ui.ConventionalString(feeRate*gas))
 
-	log.Infof("Estimated fees: %s", ui.ConventionalString(fees))
+	gas *= 5 / 4 // Add 20% buffer
+	feesWithBuffer := feeRate * gas
 
 	gweiBal := dexeth.WeiToGwei(baseChainBal)
-	if fees >= gweiBal {
-		feesWithBuffer := fees * 5 / 4
+	if feesWithBuffer >= gweiBal {
 		shortage := feesWithBuffer - gweiBal
 		return fmt.Errorf("❌ Current balance (%s %s) insufficient for fees (%s). Send %s more to %s",
 			ui.ConventionalString(gweiBal), ui.Conventional.Unit, ui.ConventionalString(feesWithBuffer),

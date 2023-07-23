@@ -605,6 +605,10 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		}
 	}
 
+	wi := *WalletInfo
+	wi.MaxSwapsInTx = 40
+	wi.MaxRedeemsInTx = 60
+
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
 			baseChainID:   BipID,
@@ -627,11 +631,11 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
-		maxSwapsInTx:       40,
-		maxRedeemsInTx:     60,
 		pendingTxCheckBal:  new(big.Int),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
 		approvalCache:      make(map[uint32]bool),
+		// move up after review
+		wi: &wi,
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,

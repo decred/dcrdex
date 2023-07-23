@@ -173,6 +173,7 @@ export default class OrderPage extends BasePage {
     const quoteSymbol = Doc.bipSymbol(this.order.quoteID)
     const baseUnitInfo = app().unitInfo(this.order.baseID)
     const quoteUnitInfo = app().unitInfo(this.order.quoteID)
+    const [bUnit, qUnit] = [baseUnitInfo.conventional.unit.toLowerCase(), quoteUnitInfo.conventional.unit.toLowerCase()]
     const quoteAmount = OrderUtil.baseToQuote(match.rate, match.qty)
 
     if (match.isCancel) {
@@ -229,19 +230,19 @@ export default class OrderPage extends BasePage {
 
     if ((match.side === OrderUtil.Maker && this.order.sell) ||
           (match.side === OrderUtil.Taker && !this.order.sell)) {
-      tmpl.makerSwapAsset.textContent = baseSymbol
-      tmpl.takerSwapAsset.textContent = quoteSymbol
-      tmpl.makerRedeemAsset.textContent = quoteSymbol
-      tmpl.takerRedeemAsset.textContent = baseSymbol
+      tmpl.makerSwapAsset.textContent = bUnit
+      tmpl.takerSwapAsset.textContent = qUnit
+      tmpl.makerRedeemAsset.textContent = qUnit
+      tmpl.takerRedeemAsset.textContent = bUnit
     } else {
-      tmpl.makerSwapAsset.textContent = quoteSymbol
-      tmpl.takerSwapAsset.textContent = baseSymbol
-      tmpl.makerRedeemAsset.textContent = baseSymbol
-      tmpl.takerRedeemAsset.textContent = quoteSymbol
+      tmpl.makerSwapAsset.textContent = qUnit
+      tmpl.takerSwapAsset.textContent = bUnit
+      tmpl.makerRedeemAsset.textContent = bUnit
+      tmpl.takerRedeemAsset.textContent = qUnit
     }
 
     const rate = app().conventionalRate(this.order.baseID, this.order.quoteID, match.rate)
-    tmpl.rate.textContent = `${rate} ${baseSymbol}/${quoteSymbol}`
+    tmpl.rate.textContent = `${rate} ${bUnit}/${qUnit}`
 
     if (this.order.sell) {
       tmpl.refundAsset.textContent = baseSymbol
