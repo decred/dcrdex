@@ -248,9 +248,14 @@ export class NewWalletForm {
     page.newWalletPass.value = ''
 
     Doc.empty(tabs)
-    Doc.hide(tabs, page.newWalletErr)
+    Doc.hide(tabs, page.newWalletErr, page.tokenMsgBox)
     page.header.classList.remove('bordertop')
     this.page.assetLogo.src = Doc.logoPath(asset.symbol)
+    if (parentAsset) {
+      page.tokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
+      page.tokenParentName.textContent = parentAsset.name
+      Doc.show(page.tokenMsgBox)
+    }
 
     const pinfo = parentAsset ? parentAsset.info : null
     const walletDefs = pinfo ? pinfo.availablewallets : (winfo as WalletInfo).availablewallets ? (winfo as WalletInfo).availablewallets : [(winfo as Token).definition]
