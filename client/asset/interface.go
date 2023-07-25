@@ -292,6 +292,10 @@ type WalletInfo struct {
 	// MaxRedeemsInTx is the max amount of redemptions that this wallet can do
 	// in a single transaction.
 	MaxRedeemsInTx uint64
+	// IsAccountBased should be set to true for account-based (EVM) assets, so
+	// that a common seed will be generated and wallets will generate the
+	// same address.
+	IsAccountBased bool
 }
 
 // ConfigOption is a wallet configuration option.

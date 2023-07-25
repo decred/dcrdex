@@ -2691,10 +2691,14 @@ func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, 
 // on external wallet software and their key derivation paths, this seed may be
 // usable for accessing funds outside of DEX applications, e.g. btcwallet.
 func AssetSeedAndPass(assetID uint32, appSeed []byte) ([]byte, []byte) {
+	seedAssetID := assetID
+	if ai, _ := asset.Info(assetID); ai != nil && ai.IsAccountBased {
+		const accountBasedSeedAssetID = 60 // ETH
+		seedAssetID = accountBasedSeedAssetID
+	}
 	b := make([]byte, len(appSeed)+4)
 	copy(b, appSeed)
-	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
-
+	binary.BigEndian.PutUint32(b[len(appSeed):], seedAssetID)
 	s := blake256.Sum256(b)
 	p := blake256.Sum256(s[:])
 	return s[:], p[:]

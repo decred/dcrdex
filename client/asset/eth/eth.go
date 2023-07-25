@@ -160,6 +160,7 @@ var (
 			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
 			// the value cannot be known until we connect and get network info.
 		},
+		IsAccountBased: true,
 	}
 
 	// unlimitedAllowance is the maximum supported allowance for an erc20
