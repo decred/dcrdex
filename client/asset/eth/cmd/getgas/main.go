@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/polygon"
@@ -50,7 +51,7 @@ func mainErr() error {
 	flag.BoolVar(&debug, "debug", false, "use simnet")
 	flag.IntVar(&maxSwaps, "n", 5, "max number of swaps per transaction. minimum is 2. test will run from 2 swap up to n swaps.")
 	flag.StringVar(&chain, "chain", "eth", "symbol of the base chain")
-	flag.StringVar(&token, "token", "eth", "symbol of the token. if token is not specified, will check gas for ETH")
+	flag.StringVar(&token, "token", "", "symbol of the token. if token is not specified, will check gas for base chain")
 	flag.IntVar(&contractVerI, "ver", 0, "contract version")
 	flag.StringVar(&credentialsPath, "creds", "", "path for JSON credentials file. default eth: ~/ethtest/getgas-credentials.json, default polygon: ~/ethtest/getgas-credentials_polygon.json")
 	flag.Parse()
@@ -73,22 +74,17 @@ func mainErr() error {
 	}
 
 	if credentialsPath == "" {
-		switch chain {
-		case "eth":
-			credentialsPath = filepath.Join(u.HomeDir, "ethtest", "getgas-credentials.json")
-		case "polygon":
-			credentialsPath = filepath.Join(u.HomeDir, "ethtest", "getgas-credentials_polygon.json")
-		}
+		credentialsPath = filepath.Join(u.HomeDir, "dextest", "credentials.json")
 	}
 
 	if readCreds {
-		addr, provider, err := eth.GetGas.ReadCredentials(credentialsPath, net)
+		addr, providers, err := eth.GetGas.ReadCredentials(chain, credentialsPath, net)
 		if err != nil {
 			return err
 		}
 		fmt.Println("Credentials successfully parsed")
 		fmt.Println("Address:", addr)
-		fmt.Println("Provider:", provider)
+		fmt.Println("Providers:", strings.Join(providers, ", "))
 		return nil
 	}
 
@@ -96,8 +92,13 @@ func mainErr() error {
 		return fmt.Errorf("n cannot be < 2")
 	}
 
-	if chain == "polygon" && token == "eth" {
-		token = "polygon" // chain takes precedence, adjust the default.
+	if token == "" {
+		token = chain
+	}
+
+	// Allow specification of tokens without .[chain] suffix.
+	if chain != token && !strings.Contains(token, ".") {
+		token = token + "." + chain
 	}
 
 	assetID, found := dex.BipSymbolID(token)
@@ -116,59 +117,75 @@ func mainErr() error {
 
 	log := dex.StdOutLogger("GG", logLvl)
 
-	var g *dexeth.Gases
-	var tkn *dexeth.Token
-	var ui, bui *dex.UnitInfo
-	var compat eth.CompatibilityData
-	var chainCfg *params.ChainConfig
-	var contractAddr common.Address
-	switch chain {
-	case "eth":
-		bui = &dexeth.UnitInfo
-		g = dexeth.VersionedGases[contractVer]
-		ui = &dexeth.UnitInfo
+	walletParams := func(
+		gases map[uint32]*dexeth.Gases,
+		contracts map[uint32]map[dex.Network]common.Address,
+		tokens map[uint32]*dexeth.Token,
+		compatLookup func(net dex.Network) (c eth.CompatibilityData, err error),
+		chainCfg func(net dex.Network) (c *params.ChainConfig, err error),
+		bui *dex.UnitInfo,
+	) (*eth.GetGasWalletParams, error) {
+
+		wParams := new(eth.GetGasWalletParams)
+		wParams.BaseUnitInfo = bui
 		if token != chain {
-			tkn = dexeth.Tokens[assetID]
-			ui = &tkn.UnitInfo
-			g = &tkn.NetTokens[net].SwapContracts[contractVer].Gas
+			var exists bool
+			tkn, exists := tokens[assetID]
+			if !exists {
+				return nil, fmt.Errorf("specified token %s does not exist on base chain %s", token, chain)
+			}
+			wParams.Token = tkn
+			wParams.UnitInfo = &tkn.UnitInfo
+			netToken, exists := tkn.NetTokens[net]
+			if !exists {
+				return nil, fmt.Errorf("no %s token on %s network %s", tkn.Name, chain, net)
+			}
+			swapContract, exists := netToken.SwapContracts[contractVer]
+			if !exists {
+				return nil, fmt.Errorf("no verion %d contract for %s token on %s network %s", contractVer, tkn.Name, chain, net)
+			}
+			wParams.Gas = &swapContract.Gas
+		} else {
+			wParams.UnitInfo = bui
+			g, exists := gases[contractVer]
+			if !exists {
+				return nil, fmt.Errorf("no verion %d contract for %s network %s", contractVer, chain, net)
+			}
+			wParams.Gas = g
+			cs, exists := contracts[contractVer]
+			if !exists {
+				return nil, fmt.Errorf("no version %d base chain swap contract on %s", contractVer, chain)
+			}
+			wParams.ContractAddr, exists = cs[net]
+			if !exists {
+				return nil, fmt.Errorf("no version %d base chain swap contract on %s network %s", contractVer, chain, net)
+			}
 		}
-		contractAddr = dexeth.ContractAddresses[contractVer][net]
-		chainCfg, err = eth.ChainGenesis(net)
+		wParams.ChainCfg, err = chainCfg(net)
 		if err != nil {
-			return fmt.Errorf("error finding chain config: %v", err)
+			return nil, fmt.Errorf("error finding chain config: %v", err)
 		}
-		compat, err = eth.NetworkCompatibilityData(net)
+		compat, err := compatLookup(net)
 		if err != nil {
-			return fmt.Errorf("error finding api compatibility data: %v", err)
+			return nil, fmt.Errorf("error finding api compatibility data: %v", err)
 		}
-	case "polygon":
-		g = dexpolygon.VersionedGases[contractVer]
-		bui = &dexpolygon.UnitInfo
-		ui = bui
-		if token != chain {
-			tkn = dexpolygon.Tokens[assetID]
-			ui = &tkn.UnitInfo
-			g = &tkn.NetTokens[net].SwapContracts[contractVer].Gas
-		}
-		contractAddr = dexpolygon.ContractAddresses[contractVer][net]
-		chainCfg, err = polygon.ChainGenesis(net)
-		if err != nil {
-			return fmt.Errorf("error finding chain config: %v", err)
-		}
-		compat, err = polygon.NetworkCompatibilityData(net)
-		if err != nil {
-			return fmt.Errorf("error finding api compatibility data: %v", err)
-		}
+		wParams.Compat = &compat
+		return wParams, nil
 	}
 
-	wParams := &eth.GetGasWalletParams{
-		ChainCfg:     chainCfg,
-		Gas:          g,
-		Token:        tkn,
-		BaseUnitInfo: bui,
-		UnitInfo:     ui,
-		Compat:       &compat,
-		ContractAddr: contractAddr,
+	var wParams *eth.GetGasWalletParams
+	switch chain {
+	case "eth":
+		wParams, err = walletParams(dexeth.VersionedGases, dexeth.ContractAddresses, dexeth.Tokens,
+			eth.NetworkCompatibilityData, eth.ChainGenesis, &dexeth.UnitInfo)
+	case "polygon":
+		wParams, err = walletParams(dexpolygon.VersionedGases, dexpolygon.ContractAddresses, dexpolygon.Tokens,
+			polygon.NetworkCompatibilityData, polygon.ChainGenesis, &dexpolygon.UnitInfo)
+	default:
+		return fmt.Errorf("chain %s not known", chain)
+	}
+	if err != nil {
+		return fmt.Errorf("error generating wallet params: %w", err)
 	}
 
 	switch {

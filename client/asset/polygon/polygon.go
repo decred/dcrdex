@@ -126,9 +126,9 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 }
 
 func (d *Driver) Create(cfg *asset.CreateWalletParams) error {
-	t, err := NetworkCompatibilityData(cfg.Net)
+	compat, err := NetworkCompatibilityData(cfg.Net)
 	if err != nil {
 		return fmt.Errorf("error finding compatibility data: %v", err)
 	}
-	return eth.CreateEVMWallet(dexpolygon.ChainIDs[cfg.Net], cfg, &t, false)
+	return eth.CreateEVMWallet(dexpolygon.ChainIDs[cfg.Net], cfg, &compat, false)
 }

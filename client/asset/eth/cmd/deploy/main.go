@@ -101,16 +101,11 @@ func mainErr() error {
 	}
 
 	if credentialsPath == "" {
-		switch chain {
-		case "eth":
-			credentialsPath = filepath.Join(u.HomeDir, "ethtest", "getgas-credentials.json")
-		case "polygon":
-			credentialsPath = filepath.Join(u.HomeDir, "ethtest", "getgas-credentials_polygon.json")
-		}
+		credentialsPath = filepath.Join(u.HomeDir, "dextest", "credentials.json")
 	}
 
 	if readCreds {
-		addr, provider, err := eth.GetGas.ReadCredentials(credentialsPath, net)
+		addr, provider, err := eth.GetGas.ReadCredentials(chain, credentialsPath, net)
 		if err != nil {
 			return err
 		}
@@ -170,6 +165,7 @@ func mainErr() error {
 	case fundingReq:
 		return eth.ContractDeployer.EstimateDeployFunding(
 			ctx,
+			chain,
 			contractVer,
 			tokenAddr,
 			credentialsPath,
@@ -183,10 +179,11 @@ func mainErr() error {
 			return fmt.Errorf("return address %q is not valid", returnAddr)
 		}
 		addr := common.HexToAddress(returnAddr)
-		return eth.ContractDeployer.ReturnETH(ctx, addr, credentialsPath, chainCfg, bui, log, net)
+		return eth.ContractDeployer.ReturnETH(ctx, chain, addr, credentialsPath, chainCfg, bui, log, net)
 	default:
 		return eth.ContractDeployer.DeployContract(
 			ctx,
+			chain,
 			contractVer,
 			tokenAddr,
 			credentialsPath,

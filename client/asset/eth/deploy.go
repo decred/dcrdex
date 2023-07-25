@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -34,6 +35,7 @@ var ContractDeployer contractDeployer
 // generated.
 func (contractDeployer) EstimateDeployFunding(
 	ctx context.Context,
+	chain string,
 	contractVer uint32,
 	tokenAddress common.Address,
 	credentialsPath string,
@@ -49,7 +51,7 @@ func (contractDeployer) EstimateDeployFunding(
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, walletDir, credentialsPath, chainCfg, log, net)
+	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
 	if err != nil {
 		return err
 	}
@@ -144,6 +146,7 @@ func (contractDeployer) txData(contractVer uint32, tokenAddr common.Address) (tx
 // DeployContract deployes a dcrdex swap contract.
 func (contractDeployer) DeployContract(
 	ctx context.Context,
+	chain string,
 	contractVer uint32,
 	tokenAddress common.Address,
 	credentialsPath string,
@@ -159,7 +162,7 @@ func (contractDeployer) DeployContract(
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, walletDir, credentialsPath, chainCfg, log, net)
+	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
 	if err != nil {
 		return err
 	}
@@ -237,6 +240,7 @@ func (contractDeployer) DeployContract(
 // wallet to the specified return address.
 func (contractDeployer) ReturnETH(
 	ctx context.Context,
+	chain string,
 	returnAddr common.Address,
 	credentialsPath string,
 	chainCfg *params.ChainConfig,
@@ -251,7 +255,7 @@ func (contractDeployer) ReturnETH(
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, walletDir, credentialsPath, chainCfg, log, net)
+	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
 	if err != nil {
 		return err
 	}
@@ -262,14 +266,16 @@ func (contractDeployer) ReturnETH(
 
 func (contractDeployer) nodeAndRate(
 	ctx context.Context,
+	chain string,
 	walletDir,
 	credentialsPath string,
+
 	chainCfg *params.ChainConfig,
 	log dex.Logger,
 	net dex.Network,
 ) (*multiRPCClient, uint64, error) {
 
-	creds, provider, err := getFileCredentials(credentialsPath, net)
+	seed, providers, err := getFileCredentials(chain, credentialsPath, net)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -279,9 +285,9 @@ func (contractDeployer) nodeAndRate(
 
 	if err := CreateEVMWallet(chainID, &asset.CreateWalletParams{
 		Type:     walletTypeRPC,
-		Seed:     creds.Seed,
+		Seed:     seed,
 		Pass:     pw,
-		Settings: map[string]string{providersKey: provider},
+		Settings: map[string]string{providersKey: strings.Join(providers, " ")},
 		DataDir:  walletDir,
 		Net:      net,
 		Logger:   log,
@@ -289,7 +295,7 @@ func (contractDeployer) nodeAndRate(
 		return nil, 0, fmt.Errorf("error creating wallet: %w", err)
 	}
 
-	cl, err := newMultiRPCClient(walletDir, []string{provider}, log, chainCfg, net)
+	cl, err := newMultiRPCClient(walletDir, providers, log, chainCfg, net)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error creating rpc client: %w", err)
 	}

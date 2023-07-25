@@ -294,11 +294,11 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 }
 
 func (d *Driver) Create(cfg *asset.CreateWalletParams) error {
-	t, err := NetworkCompatibilityData(cfg.Net)
+	comp, err := NetworkCompatibilityData(cfg.Net)
 	if err != nil {
 		return fmt.Errorf("error finding compatibility data: %v", err)
 	}
-	return CreateEVMWallet(dexeth.ChainIDs[cfg.Net], cfg, &t, false)
+	return CreateEVMWallet(dexeth.ChainIDs[cfg.Net], cfg, &comp, false)
 }
 
 // Balance is the current balance, including information about the pending
@@ -670,7 +670,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate Ethereum genesis configuration for network %s", net)
 	}
-	t, err := NetworkCompatibilityData(net)
+	comp, err := NetworkCompatibilityData(net)
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate Ethereum compatibility data: %s", net)
 	}
@@ -689,7 +689,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		BaseChainID:        BipID,
 		ChainCfg:           chainCfg,
 		AssetCfg:           assetCFG,
-		CompatData:         &t,
+		CompatData:         &comp,
 		VersionedGases:     dexeth.VersionedGases,
 		Tokens:             dexeth.Tokens,
 		Logger:             logger,
@@ -4500,37 +4500,47 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 	return nil
 }
 
-// fileCredentials contain the seed and providers to use for GetGasEstimates.
-type fileCredentials struct {
-	Seed      dex.Bytes         `json:"seed"`
-	Providers map[string]string `json:"providers"`
+// providersFile reads a file located at ~/ethtest/credentials.json.
+// The file contains seed and provider information for wallets used for
+// getgas, deploy, and nodeclient testing. If simnet providers are not
+// specified, getFileCredentials will add the simnet alpha node.
+type providersFile struct {
+	Seed      dex.Bytes                                                   `json:"seed"`
+	Providers map[string] /* symbol */ map[string] /* network */ []string `json:"providers"`
 }
 
 // getFileCredentials reads the file at path and extracts the seed and the
 // provider for the network.
-func getFileCredentials(path string, net dex.Network) (*fileCredentials, string, error) {
+func getFileCredentials(chain, path string, net dex.Network) (seed []byte, providers []string, err error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("error reading credentials file: %v", err)
+		return nil, nil, fmt.Errorf("error reading credentials file: %v", err)
 	}
-	creds := new(fileCredentials)
-	if err := json.Unmarshal(b, creds); err != nil {
-		return nil, "", fmt.Errorf("error parsing credentials file: %v", err)
+	var p providersFile
+	if err := json.Unmarshal(b, &p); err != nil {
+		return nil, nil, fmt.Errorf("error parsing credentials file: %v", err)
 	}
-	if len(creds.Seed) == 0 {
-		return nil, "", fmt.Errorf("must provide both seeds in testnet credentials file")
+	if len(p.Seed) == 0 {
+		return nil, nil, fmt.Errorf("must provide both seeds in credentials file")
 	}
-	provider := creds.Providers[net.String()]
-	if provider == "" {
-		return nil, "", fmt.Errorf("credentials file does not specify an RPC provider")
+	seed = p.Seed
+	providers = p.Providers[chain][net.String()]
+	if net == dex.Simnet && len(providers) == 0 {
+		u, _ := user.Current()
+		switch chain {
+		case "polygon":
+			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "bor", "bor.ipc")}
+		default:
+			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "node", "geth.ipc")}
+		}
 	}
-	return creds, provider, nil
+	return
 }
 
 // quickNode constructs a multiRPCClient and a contractor for the specified
 // asset. The client is connected and unlocked.
 func quickNode(ctx context.Context, walletDir string, contractVer uint32,
-	seed []byte, provider string, wParams *GetGasWalletParams, net dex.Network, log dex.Logger) (*multiRPCClient, contractor, error) {
+	seed []byte, providers []string, wParams *GetGasWalletParams, net dex.Network, log dex.Logger) (*multiRPCClient, contractor, error) {
 
 	pw := []byte("abc")
 	chainID := wParams.ChainCfg.ChainID.Int64()
@@ -4539,7 +4549,7 @@ func quickNode(ctx context.Context, walletDir string, contractVer uint32,
 		Type:     walletTypeRPC,
 		Seed:     seed,
 		Pass:     pw,
-		Settings: map[string]string{providersKey: provider},
+		Settings: map[string]string{providersKey: strings.Join(providers, " ")},
 		DataDir:  walletDir,
 		Net:      net,
 		Logger:   log,
@@ -4547,7 +4557,7 @@ func quickNode(ctx context.Context, walletDir string, contractVer uint32,
 		return nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
 
-	cl, err := newMultiRPCClient(walletDir, []string{provider}, log, wParams.ChainCfg, net)
+	cl, err := newMultiRPCClient(walletDir, providers, log, wParams.ChainCfg, net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error opening initiator rpc client: %v", err)
 	}
@@ -4668,25 +4678,24 @@ type GetGasWalletParams struct {
 	UnitInfo     *dex.UnitInfo
 	BaseUnitInfo *dex.UnitInfo
 	Compat       *CompatibilityData
-	ContractAddr common.Address
+	ContractAddr common.Address // Base chain contract addr.
 }
 
 // ReadCredentials reads the credentials for the network from the credentials
 // file.
-func (getGas) ReadCredentials(credentialsPath string, net dex.Network) (addr, provider string, err error) {
-	var creds *fileCredentials
-	creds, provider, err = getFileCredentials(credentialsPath, net)
+func (getGas) ReadCredentials(chain, credentialsPath string, net dex.Network) (addr string, providers []string, err error) {
+	seed, providers, err := getFileCredentials(chain, credentialsPath, net)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
-	privB, zero, err := privKeyFromSeed(creds.Seed)
+	privB, zero, err := privKeyFromSeed(seed)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 	defer zero()
 	privateKey, err := crypto.ToECDSA(privB)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 
 	addr = crypto.PubkeyToAddress(privateKey.PublicKey).String()
@@ -4694,10 +4703,10 @@ func (getGas) ReadCredentials(credentialsPath string, net dex.Network) (addr, pr
 }
 
 func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int,
-	walletDir, provider string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
+	walletDir string, providers []string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
 	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
 
-	cl, c, err = quickNode(ctx, walletDir, contractVer, seed, provider, wParams, net, log)
+	cl, c, err = quickNode(ctx, walletDir, contractVer, seed, providers, wParams, net, log)
 	if err != nil {
 		return nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
@@ -4752,15 +4761,23 @@ func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Networ
 	return
 }
 
+func (getGas) chainForAssetID(assetID uint32) string {
+	ti := asset.TokenInfo(assetID)
+	if ti == nil {
+		return dex.BipIDSymbol(assetID)
+	}
+	return dex.BipIDSymbol(ti.ParentID)
+}
+
 // EstimateFunding estimates how much funding is needed for estimating gas, and
 // prints helpful messages for the user.
 func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, contractVer uint32,
 	maxSwaps int, credentialsPath string, wParams *GetGasWalletParams, log dex.Logger) error {
 
 	symbol := dex.BipIDSymbol(assetID)
-	log.Infof("Estimating required funding for up to %d swaps of asset %s, contract version %d on %s", maxSwaps, symbol, contractVer, symbol)
+	log.Infof("Estimating required funding for up to %d swaps of asset %s, contract version %d on %s", maxSwaps, symbol, contractVer, net)
 
-	creds, provider, err := getFileCredentials(credentialsPath, net)
+	seed, providers, err := getFileCredentials(GetGas.chainForAssetID(assetID), credentialsPath, net)
 	if err != nil {
 		return err
 	}
@@ -4771,7 +4788,7 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, provider, creds.Seed, wParams, log)
+	cl, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
 		return err
 	}
@@ -4784,10 +4801,10 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	ethFmt := bui.ConventionalString
 
 	log.Info("Address:", cl.address())
-	log.Info("Base chain balance:", ethFmt(ethBal), ui.Conventional.Unit)
+	log.Info("Base chain balance:", ethFmt(ethBal), bui.Conventional.Unit)
 
-	tokenBalOK := true
 	isToken := wParams.Token != nil
+	tokenBalOK := true
 	if isToken {
 		log.Infof("%s required for fees: %s", bui.Conventional.Unit, ethFmt(ethReq))
 
@@ -4840,7 +4857,7 @@ func (getGas) Return(
 		return fmt.Errorf("supplied return address %q is not an Ethereum address", returnAddr)
 	}
 
-	creds, provider, err := getFileCredentials(credentialsPath, net)
+	seed, providers, err := getFileCredentials(GetGas.chainForAssetID(assetID), credentialsPath, net)
 	if err != nil {
 		return err
 	}
@@ -4851,7 +4868,7 @@ func (getGas) Return(
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, _, err := quickNode(ctx, walletDir, contractVer, creds.Seed, provider, wParams, net, log)
+	cl, _, err := quickNode(ctx, walletDir, contractVer, seed, providers, wParams, net, log)
 	if err != nil {
 		return fmt.Errorf("error creating initiator wallet: %v", err)
 	}
@@ -4967,7 +4984,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 
 	isToken := wParams.Token != nil
 
-	creds, provider, err := getFileCredentials(credentialsPath, net)
+	seed, providers, err := getFileCredentials(GetGas.chainForAssetID(assetID), credentialsPath, net)
 	if err != nil {
 		return err
 	}
@@ -4978,7 +4995,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, c, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, provider, creds.Seed, wParams, log)
+	cl, c, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
 		return err
 	}
@@ -5020,7 +5037,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 		}
 
 		var mrc contractor
-		approvalClient, mrc, err = quickNode(ctx, filepath.Join(walletDir, "ac_dir"), contractVer, encode.RandomBytes(32), provider, wParams, net, log)
+		approvalClient, mrc, err = quickNode(ctx, filepath.Join(walletDir, "ac_dir"), contractVer, encode.RandomBytes(32), providers, wParams, net, log)
 		if err != nil {
 			return fmt.Errorf("error creating approval contract node: %v", err)
 		}
