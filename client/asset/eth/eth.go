@@ -630,7 +630,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 	// 	return importKeyToNode(node, privateKey, createWalletParams.Pass)
 	case walletTypeRPC:
 		// Make the wallet dir if it does not exist, otherwise we may fail to
-		// write the compliant_providers.json file. Create the keystore
+		// write the compliant-providers.json file. Create the keystore
 		// subdirectory as well to avoid a "failed to watch keystore folder"
 		// error from the keystore's internal account cache supervisor.
 		keystoreDir := filepath.Join(walletDir, "keystore")
@@ -4501,7 +4501,7 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 	return nil
 }
 
-// providersFile reads a file located at ~/ethtest/credentials.json.
+// providersFile reads a file located at ~/dextest/credentials.json.
 // The file contains seed and provider information for wallets used for
 // getgas, deploy, and nodeclient testing. If simnet providers are not
 // specified, getFileCredentials will add the simnet alpha node.

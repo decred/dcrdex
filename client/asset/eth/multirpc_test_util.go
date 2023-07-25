@@ -4,7 +4,6 @@ package eth
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -24,41 +23,16 @@ import (
 
 type MRPCTest struct {
 	ctx               context.Context
+	chain             string
 	chainConfigLookup func(net dex.Network) (c ethconfig.Config, err error)
 	compatDataLookup  func(net dex.Network) (c CompatibilityData, err error)
 	harnessDirectory  string
-	providersFile     string
+	credentialsFile   string
 }
 
 // NewMRPCTest creates a new MRPCTest.
-// Create a providers.json file in your ~/dextest directory.
-// If not Ethereum, it should be named providers_[SYMBOL].json instead.
-//   1. Seed can be anything. Just generate randomness.
-//   2. Can connect to a host's websocket and http endpoints simultaneously.
-//      Actually nothing preventing you from connecting to a single provider
-//      100 times, but that may be a guardrail added in the future.
-//
-// Example ~/dextest/providers.json
-/*
-{
-    "testnet": {
-        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f47",
-        "providers": [
-            "https://goerli.infura.io/v3/<API KEY>",
-            "https://<API KEY>.eth.rpc.rivet.cloud",
-            "https://eth-goerli.g.alchemy.com/v2/<API KEY>-"
-        ]
-    },
-    "mainnet": {
-        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f47",
-        "providers": [
-            "wss://mainnet.infura.io/ws/v3/<API KEY>",
-            "https://<API KEY>.eth.rpc.rivet.cloud",
-            "https://eth-mainnet.g.alchemy.com/v2/<API KEY>"
-        ]
-    }
-}
-*/
+// Create a credntials.json file in your ~/dextest directory.
+// See README for getgas for format
 func NewMRPCTest(
 	ctx context.Context,
 	cfgLookup func(net dex.Network) (c ethconfig.Config, err error),
@@ -74,16 +48,13 @@ func NewMRPCTest(
 	}
 
 	dextestDir := filepath.Join(os.Getenv("HOME"), "dextest")
-	fn := "providers.json"
-	if chainSymbol != "eth" {
-		fn = "providers_" + chainSymbol + ".json"
-	}
 	return &MRPCTest{
 		ctx:               ctx,
+		chain:             chainSymbol,
 		chainConfigLookup: cfgLookup,
 		compatDataLookup:  compatLookup,
 		harnessDirectory:  filepath.Join(dextestDir, chainSymbol, "harness-ctl"),
-		providersFile:     filepath.Join(dextestDir, fn),
+		credentialsFile:   filepath.Join(dextestDir, "credentials.json"),
 	}
 }
 
@@ -383,23 +354,10 @@ func (m *MRPCTest) mine(ctx context.Context) error {
 
 func (m *MRPCTest) readProviderFile(t *testing.T, net dex.Network) (seed []byte, providers []string) {
 	t.Helper()
-	b, err := os.ReadFile(m.providersFile)
+	var err error
+	seed, providers, err = getFileCredentials(m.chain, m.credentialsFile, net)
 	if err != nil {
-		t.Fatalf("ReadFile(%q) error: %v", m.providersFile, err)
+		t.Fatalf("Error retreiving credentials from file at %q: %v", m.credentialsFile, err)
 	}
-
-	type tProvider struct {
-		Seed      dex.Bytes `json:"seed"`
-		Providers []string  `json:"providers"`
-	}
-
-	var accounts map[string]*tProvider
-	if err := json.Unmarshal(b, &accounts); err != nil {
-		t.Fatal(err)
-	}
-	accts := accounts[net.String()]
-	if accts == nil {
-		t.Fatalf("no")
-	}
-	return accts.Seed, accts.Providers
+	return
 }

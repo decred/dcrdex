@@ -8,16 +8,24 @@ If this is a new asset, you must populate either `dexeth.VersionedGases` or
 `dexeth.Tokens` with generous estimates before running `getgas`.
 
 ### Use
-- Create a credentials file. `getgas` will look in `~/ethtest/getgas-credentials.json` for Ethereum, and `~/ethtest/getgas-credentials_polygon.json` for Polygon. You can override that location with the `--creds` CLI argument. The credentials file should have the JSON format in the example below. The seed can be anything.
+- Create a credentials file. `getgas` will look for `~/dextest/credentials.json`.
+You can override that location with the `--creds` CLI argument.
+The credentials file should have the JSON format in the example below. The seed can be anything.
 
 **example credentials file**
 ```
 {
     "seed": "<32-bytes hex>",
     "providers": {
-        "simnet": "http://localhost:38556",
-        "testnet": "https://goerli.infura.io/v3/<API key>",
-        "mainnet": "https://mainnet.infura.io/v3/<API key>"
+        "eth": {
+            "testnet: [
+                "https://goerli.infura.io/v3/<API key>"
+            ],
+            "mainnet": [
+                "https://mainnet.infura.io/v3/<API key>"
+            ]
+        },
+        "polygon": { ... }
     }
 }
 ```

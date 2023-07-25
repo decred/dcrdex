@@ -281,14 +281,13 @@ func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network)
 	if err != nil {
 		return err
 	}
+	fmt.Println("initiator address is", ethClient.address())
 
 	participantEthClient, participantAcct, err = prepareRPCClient("participant", participantDir, participantEndpoints, net)
 	if err != nil {
 		ethClient.shutdown()
 		return err
 	}
-
-	fmt.Println("initiator address is", ethClient.address())
 	fmt.Println("participant address is", participantEthClient.address())
 	return nil
 }
@@ -626,6 +625,15 @@ func TestMain(m *testing.M) {
 	flag.Parse()
 
 	if isTestnet {
+		tmpDir, err := os.MkdirTemp("", "")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating temporary directory: %v", err)
+			os.Exit(1)
+		}
+		testnetWalletDir = filepath.Join(tmpDir, "initiator")
+		defer os.RemoveAll(testnetWalletDir)
+		testnetParticipantWalletDir = filepath.Join(tmpDir, "participant")
+		defer os.RemoveAll(testnetParticipantWalletDir)
 		if err := useTestnet(); err != nil {
 			fmt.Fprintf(os.Stderr, "error loading testnet: %v", err)
 			os.Exit(1)

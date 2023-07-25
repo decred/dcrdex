@@ -66,6 +66,7 @@ func mainErr() error {
 	if err != nil {
 		return fmt.Errorf("could not get the current user: %w", err)
 	}
+	defaultCredentialsPath := filepath.Join(u.HomeDir, "dextest", "credentials.json")
 
 	var contractVerI int
 	var chain, credentialsPath, tokenAddress, returnAddr string
@@ -81,7 +82,7 @@ func mainErr() error {
 	flag.StringVar(&chain, "chain", "eth", "symbol of the base chain")
 	flag.StringVar(&tokenAddress, "tokenaddr", "", "launches an erc20-linked contract with this token. default launches a base chain contract")
 	flag.IntVar(&contractVerI, "ver", 0, "contract version")
-	flag.StringVar(&credentialsPath, "creds", "", "path for JSON credentials file. default eth: ~/ethtest/getgas-credentials.json, default polygon: ~/ethtest/getgas-polygon-credentials.json")
+	flag.StringVar(&credentialsPath, "creds", defaultCredentialsPath, "path for JSON credentials file.")
 	flag.Parse()
 
 	if !useMainnet && !useTestnet && !useSimnet {
@@ -99,10 +100,6 @@ func mainErr() error {
 	}
 	if useTestnet {
 		net = dex.Testnet
-	}
-
-	if credentialsPath == "" {
-		credentialsPath = filepath.Join(u.HomeDir, "dextest", "credentials.json")
 	}
 
 	if readCreds {
