@@ -38,6 +38,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/eth"
@@ -105,13 +106,13 @@ func mainErr() error {
 	}
 
 	if readCreds {
-		addr, provider, err := eth.GetGas.ReadCredentials(chain, credentialsPath, net)
+		addr, providers, err := eth.GetGas.ReadCredentials(chain, credentialsPath, net)
 		if err != nil {
 			return err
 		}
 		fmt.Println("Credentials successfully parsed")
 		fmt.Println("Address:", addr)
-		fmt.Println("Provider:", provider)
+		fmt.Println("Providers:", strings.Join(providers, ", "))
 		return nil
 	}
 

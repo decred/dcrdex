@@ -1,10 +1,11 @@
-//go:build rpclive
+// //go:build rpclive
 
 package eth
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"math/rand"
 	"os"
@@ -64,6 +65,13 @@ func NewMRPCTest(
 	compatLookup func(net dex.Network) (c CompatibilityData, err error),
 	chainSymbol string,
 ) *MRPCTest {
+
+	var skipWS bool
+	flag.BoolVar(&skipWS, "skipws", false, "skip attempt to automatically resolve WebSocket URL from HTTP(S) URL")
+	flag.Parse()
+	if skipWS {
+		forceTryWS = false
+	}
 
 	dextestDir := filepath.Join(os.Getenv("HOME"), "dextest")
 	fn := "providers.json"
@@ -213,6 +221,8 @@ func (m *MRPCTest) TestMonitorNet(t *testing.T, net dex.Network) {
 }
 
 func (m *MRPCTest) TestRPC(t *testing.T) {
+	// To skip automatic websocket resolution, pass flag --skipws.
+
 	endpoint := os.Getenv("PROVIDER")
 	if endpoint == "" {
 		t.Fatalf("specify a provider in the PROVIDER environmental variable")

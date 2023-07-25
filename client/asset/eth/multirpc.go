@@ -54,14 +54,25 @@ const (
 	tipCapSuggestionExpiration   = time.Hour
 	brickedFailCount             = 100
 	providerDelimiter            = " "
-	defaultRequestTimeout        = time.Second * 10
+	// Infura and Rivet (basic plans) seem to have a 15 second delay for 1)
+	// initializing websocket connection, or 2) the first eth_chainId request on
+	// HTTPS, but not for other requests.
+	// TODO: Keep a file mapping provider URL to retrieved chain IDs, and skip
+	// the eth_chainId request after verified for the first time?
+	defaultRequestTimeout = time.Second * 20
 )
 
-// nonceProviderStickiness is the minimum amount of time that must pass between
-// requests to DIFFERENT nonce providers. If we use a provider for a
-// nonce-sensitive (NS) operation, and later have another NS operation, we will
-// use the same provider if < nonceProviderStickiness has passed.
-var nonceProviderStickiness = time.Minute
+var (
+	// nonceProviderStickiness is the minimum amount of time that must pass
+	// between requests to DIFFERENT nonce providers. If we use a provider for a
+	// nonce-sensitive (NS) operation, and later have another NS operation, we
+	// will use the same provider if < nonceProviderStickiness has passed.
+	nonceProviderStickiness = time.Minute
+	// By default, connectProviders will attempt to get a WebSockets endpoint
+	// when given an HTTP(S) provider URL. Can be disabled for testing
+	// ((*MRPCTest).TestRPC).
+	forceTryWS = true
+)
 
 // TODO: Handle rate limiting? From the docs:
 // When you are rate limited, your JSON-RPC responses have HTTP Status code 429.
@@ -416,8 +427,13 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		}
 	}()
 
+	// We'll connect concurrently, and cancel the context on the first error
+	// received.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// addEndpoint only returns errors that should be propagated immediately.
-	addEndpoint := func(endpoint string) error {
+	addEndpoint := func(endpoint string) (*provider, error) {
 		// Give ourselves a limited time to resolve a connection.
 		timedCtx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 		defer cancel()
@@ -431,12 +447,18 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		var wsSubscribed bool
 		var h chan *types.Header
 		host := providerIPC
-		if !strings.HasSuffix(endpoint, ".ipc") {
-			wsURL, err := url.Parse(endpoint)
+		var scratchURL *url.URL
+		isIPC := strings.HasSuffix(endpoint, ".ipc")
+		if !isIPC {
+			var err error
+			scratchURL, err = url.Parse(endpoint)
 			if err != nil {
-				return fmt.Errorf("failed to parse url %q: %w", endpoint, err)
+				return nil, fmt.Errorf("failed to parse url %q: %w", endpoint, err)
 			}
-			host = wsURL.Host
+			host = scratchURL.Host
+		}
+		if forceTryWS && !isIPC {
+			wsURL := scratchURL
 			ogScheme := wsURL.Scheme
 			switch ogScheme {
 			case "https":
@@ -445,7 +467,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				wsURL.Scheme = "ws"
 			case "ws", "wss":
 			default:
-				return fmt.Errorf("unknown scheme for endpoint %q: %q, expected any of: ws(s)/http(s)",
+				return nil, fmt.Errorf("unknown scheme for endpoint %q: %q, expected any of: ws(s)/http(s)",
 					endpoint, wsURL.Scheme)
 			}
 			replaced := ogScheme != wsURL.Scheme
@@ -462,7 +484,11 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				host = providerRivetCloud
 			}
 
+			// Some providers appear to meter websocket connections.
+			var err error
+			startTime := time.Now()
 			rpcClient, err = rpc.DialWebsocket(timedCtx, wsURL.String(), "")
+			log.Tracef("%s to connect to %s", time.Since(startTime), wsURL)
 			if err == nil {
 				ec = ethclient.NewClient(rpcClient)
 				h = make(chan *types.Header, 8)
@@ -490,26 +516,30 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		// path discrimination, so I won't even try to validate the protocol.
 		if ec == nil {
 			var err error
+			startTime := time.Now()
 			rpcClient, err = rpc.DialContext(timedCtx, endpoint)
+			log.Tracef("%s to connect to %s", time.Since(startTime), endpoint)
 			if err != nil {
 				log.Errorf("error creating http client for %q: %v", endpoint, err)
-				return nil
+				return nil, nil
 			}
 			ec = ethclient.NewClient(rpcClient)
 		}
 
-		// Get chain ID.
+		// Chain ID seems to be metered for some providers.
+		startTime := time.Now()
 		reportedChainID, err := ec.ChainID(timedCtx)
+		log.Tracef("%s to fetch chain ID for verification at %s", time.Since(startTime), host)
 		if err != nil {
 			// If we can't get a header, don't use this provider.
 			ec.Close()
 			log.Errorf("Failed to get chain ID from %q: %v", endpoint, err)
-			return nil
+			return nil, nil
 		}
 		if chainID.Cmp(reportedChainID) != 0 {
 			ec.Close()
 			log.Errorf("%q reported wrong chain ID. expected %d, got %d", endpoint, chainID, reportedChainID)
-			return nil
+			return nil, nil
 		}
 
 		hdr, err := ec.HeaderByNumber(timedCtx, nil /* latest */)
@@ -517,7 +547,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			// If we can't get a header, don't use this provider.
 			ec.Close()
 			log.Errorf("Failed to get header from %q: %v", endpoint, err)
-			return nil
+			return nil, nil
 		}
 
 		p := &provider{
@@ -555,19 +585,48 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			wg.Wait()
 		}
 
-		providers = append(providers, p)
-
-		return nil
+		return p, nil
 	}
 
+	type addResult struct {
+		provider *provider
+		err      error
+		endpoint string
+	}
+	resultChan := make(chan *addResult)
 	for _, endpoint := range endpoints {
-		if err := addEndpoint(endpoint); err != nil {
-			return nil, err
+		go func(endpoint string) {
+			p, err := addEndpoint(endpoint)
+			resultChan <- &addResult{p, err, endpoint}
+		}(endpoint)
+	}
+	var resCount int
+	var err error
+out:
+	for {
+		select {
+		case res := <-resultChan:
+			resCount++
+			if res.provider != nil {
+				providers = append(providers, res.provider)
+			}
+			if res.err != nil && err == nil {
+				err = res.err
+				cancel()
+			}
+			if resCount == len(endpoints) {
+				break out
+			}
+		case <-ctx.Done():
 		}
 	}
 
+	if err != nil {
+		return nil, err
+	}
+
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("failed to connect to even single provider among: %s",
+		return nil, fmt.Errorf("failed to connect to even a single provider among: %s",
 			failedProviders(providers, endpoints))
 	}
 

@@ -4801,7 +4801,7 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	ethFmt := bui.ConventionalString
 
 	log.Info("Address:", cl.address())
-	log.Info("Base chain balance:", ethFmt(ethBal), bui.Conventional.Unit)
+	log.Infof("%s balance: %s", bui.Conventional.Unit, ethFmt(ethBal))
 
 	isToken := wParams.Token != nil
 	tokenBalOK := true
@@ -4818,7 +4818,7 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 		log.Infof("%s required for trading: %s", ui.Conventional.Unit, assetFmt(swapReq))
 		if tokenBal < swapReq {
 			tokenBalOK = false
-			log.Infof("❌ Insufficient token balance. Deposit %s %s before getting a gas estimate",
+			log.Infof("❌ Insufficient %[2]s balance. Deposit %[1]s %[2]s before getting a gas estimate",
 				assetFmt(swapReq-tokenBal), ui.Conventional.Unit)
 		}
 
@@ -5006,13 +5006,14 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 	ui := wParams.UnitInfo
 	assetFmt := ui.ConventionalString
 	bui := wParams.BaseUnitInfo
+	bUnit := bui.Conventional.Unit
 	ethFmt := bui.ConventionalString
 
-	log.Infof("ETH balance: %s", ethFmt(dexeth.WeiToGwei(ethBal)))
+	log.Infof("%s balance: %s", bUnit, ethFmt(dexeth.WeiToGwei(ethBal)))
 	atomicBal := dexeth.WeiToGwei(ethBal)
 	if atomicBal < ethReq {
-		return fmt.Errorf("eth balance insufficient to get gas estimates. current: %s, required %s ETH. send eth to %s",
-			ethFmt(atomicBal), ethFmt(ethReq), cl.address())
+		return fmt.Errorf("%s balance insufficient to get gas estimates. current: %[2]s, required ~ %[3]s %[1]s. send %[1]s to %[4]s",
+			bUnit, ethFmt(atomicBal), ethFmt(ethReq*5/4), cl.address())
 	}
 
 	// Run the miner now, in case we need it for the approval client preload.
@@ -5030,10 +5031,10 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 		convUnit := ui.Conventional.Unit
 		log.Infof("%s balance: %s %s", strings.ToUpper(symbol), assetFmt(atomicBal), convUnit)
 		log.Infof("%d %s required for swaps", swapReq, ui.AtomicUnit)
-		log.Infof("%d gwei eth required for fees", ethReq)
+		log.Infof("%d gwei %s required for fees", ethReq, bui.Conventional.Unit)
 		if atomicBal < swapReq {
-			return fmt.Errorf("token balance insufficient to get gas estimates. current: %s, required %s %s. send %s to %s",
-				assetFmt(atomicBal), assetFmt(swapReq), convUnit, symbol, cl.address())
+			return fmt.Errorf("%[3]s balance insufficient to get gas estimates. current: %[1]s, required ~ %[2]s %[3]s. send %[3]s to %[4]s",
+				assetFmt(atomicBal), assetFmt(swapReq), convUnit, cl.address())
 		}
 
 		var mrc contractor
@@ -5062,7 +5063,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 		}
 
 	} else {
-		log.Infof("%d gwei eth required for fees and swaps", ethReq)
+		log.Infof("%d gwei %s required for fees and swaps", ethReq, bui.Conventional.Unit)
 	}
 
 	log.Debugf("Getting gas estimates")

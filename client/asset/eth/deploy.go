@@ -102,7 +102,7 @@ func (contractDeployer) EstimateDeployFunding(
 	}
 
 	shortage := fees - gweiBal
-	log.Infof("❌ Current balance (%s %s) insufficient for fees (%s). Send %s more to %s",
+	log.Infof("❌ Current balance (%[1]s %[2]s) insufficient for fees (%[3]s). Send %[4]s %[2]s to %[5]s",
 		ui.ConventionalString(gweiBal), ui.Conventional.Unit, ui.ConventionalString(fees),
 		ui.ConventionalString(shortage), cl.address())
 
@@ -200,7 +200,7 @@ func (contractDeployer) DeployContract(
 	gweiBal := dexeth.WeiToGwei(baseChainBal)
 	if feesWithBuffer >= gweiBal {
 		shortage := feesWithBuffer - gweiBal
-		return fmt.Errorf("❌ Current balance (%s %s) insufficient for fees (%s). Send %s more to %s",
+		return fmt.Errorf("❌ Current balance (%[1]s %[2]s) insufficient for fees (%[3]s). Send %[4]s %[2]s to %[5]s",
 			ui.ConventionalString(gweiBal), ui.Conventional.Unit, ui.ConventionalString(feesWithBuffer),
 			ui.ConventionalString(shortage), cl.address())
 	}
