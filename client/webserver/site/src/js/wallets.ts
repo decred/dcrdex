@@ -1567,7 +1567,7 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.toggleSubtract)
     }
 
-    Doc.hide(page.validAddr, page.sendErr, page.maxSendDisplay)
+    Doc.hide(page.validAddr, page.sendErr, page.maxSendDisplay, page.sendTokenMsgBox)
     page.sendAddr.classList.remove('invalid')
     page.sendAddr.value = ''
     page.sendAmt.value = ''
@@ -1575,6 +1575,12 @@ export default class WalletsPage extends BasePage {
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
     page.sendLogo.src = Doc.logoPath(symbol)
     page.sendName.textContent = name
+    if (token) {
+      const parentAsset = app().assets[token.parentID]
+      page.sendTokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
+      page.sendTokenParentName.textContent = parentAsset.name
+      Doc.show(page.sendTokenMsgBox)
+    }
     // page.sendFee.textContent = wallet.feerate
     // page.sendUnit.textContent = wallet.units
 
@@ -1611,8 +1617,6 @@ export default class WalletsPage extends BasePage {
 
     this.showFiatValue(assetID, 0, page.sendValue)
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
-    page.sendLogo.src = Doc.logoPath(wallet.symbol)
-    page.sendName.textContent = name
     box.dataset.assetID = String(assetID)
     this.showForm(box)
   }

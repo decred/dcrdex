@@ -1798,13 +1798,19 @@ export class DepositAddress {
   async setAsset (assetID: number) {
     this.assetID = assetID
     const page = this.page
-    Doc.hide(page.depositErr)
+    Doc.hide(page.depositErr, page.depositTokenMsgBox)
     const asset = app().assets[assetID]
     page.depositLogo.src = Doc.logoPath(asset.symbol)
     const wallet = app().walletMap[assetID]
     page.depositName.textContent = asset.name
     page.depositAddress.textContent = wallet.address
     page.qrcode.src = `/generateqrcode?address=${wallet.address}`
+    if (asset.token) {
+      const parentAsset = app().assets[asset.token.parentID]
+      page.depositTokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
+      page.depositTokenParentName.textContent = parentAsset.name
+      Doc.show(page.depositTokenMsgBox)
+    }
     if ((wallet.traits & traitNewAddresser) !== 0) Doc.show(page.newDepAddrBttn)
     else Doc.hide(page.newDepAddrBttn)
   }
