@@ -102,7 +102,6 @@ interface MetaOrder {
   details: Record<string, PageElement>
   ord: Order
   cancelling?: boolean
-  status?: number
 }
 
 interface CancelData {
@@ -2274,7 +2273,7 @@ export default class MarketsPage extends BasePage {
     if (!mord || note.topic === 'AsyncOrderFailure' || (note.topic === 'OrderLoaded' && order.readyToTick)) {
       return this.refreshActiveOrders()
     }
-    const oldStatus = mord.status
+    const oldStatus = mord.ord.status
     mord.ord = order
     if (note.topic === 'MissedCancel') Doc.show(mord.details.cancelBttn)
     if (order.filled === order.qty) Doc.hide(mord.details.cancelBttn)
