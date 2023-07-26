@@ -2270,7 +2270,8 @@ export default class MarketsPage extends BasePage {
     //   previously not "ready to tick" (due to its wallets not being connected
     //   and unlocked) has now become ready to tick. The active orders section
     //   needs to be refreshed.
-    if (!mord || note.topic === 'AsyncOrderFailure' || (note.topic === 'OrderLoaded' && order.readyToTick)) {
+    const wasInflight = note.topic === 'AsyncOrderFailure' || note.topic === 'AsyncOrderSubmitted'
+    if (!mord || wasInflight || (note.topic === 'OrderLoaded' && order.readyToTick)) {
       return this.refreshActiveOrders()
     }
     const oldStatus = mord.ord.status
