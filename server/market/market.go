@@ -2380,6 +2380,16 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	cSum := epoch.cSum
 	misses := epoch.misses
 
+	// We can't call RecordCancel under the bookMtx since it can potentially
+	// trigger a user suspension and unbooking via UnbookUserOrders, which locks
+	// the bookMtx. So we'll track the info necessary to call RecordCancel and
+	// call them after the matches loop.
+	type cancelMatch struct {
+		co      *order.CancelOrder
+		loEpoch int64
+	}
+	cancelMatches := make([]cancelMatch, 0)
+
 	// Perform order matching using the preimages to shuffle the queue.
 	m.bookMtx.Lock()        // allow a coherent view of book orders with (*Market).Book
 	matchTime := time.Now() // considered as the time at which matched cancel orders are executed
@@ -2397,9 +2407,11 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		// Update order settling amounts.
 		for _, match := range ms.Matches() {
 			if co, ok := match.Taker.(*order.CancelOrder); ok {
-				epochGap := int32((co.ServerTime.UnixMilli() / epochDur) - (match.Maker.ServerTime.UnixMilli() / epochDur))
-				m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, epochGap, matchTime)
 				canceled = append(canceled, co.TargetOrderID)
+				cancelMatches = append(cancelMatches, cancelMatch{
+					co:      co,
+					loEpoch: match.Maker.ServerTime.UnixMilli() / epochDur,
+				})
 				continue
 			}
 			m.settling[match.Taker.ID()] += match.Quantity
@@ -2412,6 +2424,12 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		delete(m.settling, oid)
 	}
 	m.bookMtx.Unlock()
+
+	for _, c := range cancelMatches {
+		co, loEpoch := c.co, c.loEpoch
+		epochGap := int32((co.ServerTime.UnixMilli() / epochDur) - loEpoch)
+		m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, epochGap, matchTime)
+	}
 
 	if len(ordersRevealed) > 0 {
 		log.Infof("Matching complete for market %v epoch %d:"+
