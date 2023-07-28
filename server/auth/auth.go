@@ -526,7 +526,7 @@ func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.
 	log.Debugf("RecordCancel: user %v strikes %d, bond tier %v => trading tier %v",
 		user, score, bondTier, tier)
 	// If their tier sinks below 1, unbook their orders and send a note.
-	if tier < 1 {
+	if changed && tier < 1 {
 		details := fmt.Sprintf("excessive cancellation rate, new tier = %d", tier)
 		auth.Penalize(user, account.CancellationRate, details)
 	}
@@ -1014,7 +1014,7 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 	log.Infof("Match failure for user %v: %q (badness %v), strikes %d, bond tier %v => trading tier %v",
 		user, violation, violation.Score(), score, bondTier, tier)
 	// If their tier sinks below 1, unbook their orders and send a note.
-	if tier < 1 {
+	if changed && tier < 1 {
 		details := fmt.Sprintf("swap %v failure (%v) for order %v, new tier = %d",
 			mmid.MatchID, misstep, oid, tier)
 		auth.Penalize(user, account.FailureToAct, details)
@@ -1070,7 +1070,7 @@ func (auth *AuthManager) MissedPreimage(user account.AccountID, epochEnd time.Ti
 	tier, bondTier, changed := auth.computeUserTier(user, score)
 	log.Debugf("MissedPreimage: user %v strikes %d, bond tier %v => trading tier %v", user, score, bondTier, tier)
 	// If their tier sinks below 1, unbook their orders and send a note.
-	if tier < 1 {
+	if changed && tier < 1 {
 		details := fmt.Sprintf("preimage for order %v not provided upon request: new tier = %d", oid, tier)
 		auth.Penalize(user, account.PreimageReveal, details)
 	}
