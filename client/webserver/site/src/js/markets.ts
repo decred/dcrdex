@@ -80,7 +80,7 @@ const epochMatchSummaryRoute = 'epoch_match_summary'
 const animationLength = 500
 
 const anHour = 60 * 60 * 1000 // milliseconds
-const maxActiveOrdersShown = 10
+const maxUserOrdersShown = 10
 
 const check = document.createElement('span')
 check.classList.add('ico-check')
@@ -1467,6 +1467,11 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  maxUserOrderCount (): number {
+    const { dex: { host }, cfg: { name: mktID } } = this.market
+    return Math.max(maxUserOrdersShown, app().orders(host, mktID).length)
+  }
+
   async loadUserOrders () {
     const market = this.market
     for (const oid in this.metaOrders) delete this.metaOrders[oid]
@@ -1474,7 +1479,7 @@ export default class MarketsPage extends BasePage {
     const filter: OrderFilter = {
       hosts: [market.dex.host],
       market: { baseID: market.base.id, quoteID: market.quote.id },
-      n: maxActiveOrdersShown
+      n: this.maxUserOrderCount()
     }
     const res = await postJSON('/api/orders', filter)
     return this.resolveActiveOrders(res.orders || [])
@@ -1490,10 +1495,18 @@ export default class MarketsPage extends BasePage {
     const { page, metaOrders, market } = this
     const cfg = market.cfg
 
+    const orderIsActive = (ord: Order) => ord.status < OrderUtil.StatusExecuted || OrderUtil.hasActiveMatches(ord)
+
     for (const ord of orders) metaOrders[ord.id] = { ord: ord } as MetaOrder
     let sortedOrders = Object.keys(metaOrders).map((oid: string) => metaOrders[oid])
-    sortedOrders.sort((a: MetaOrder, b: MetaOrder) => b.ord.submitTime - a.ord.submitTime)
-    if (sortedOrders.length > maxActiveOrdersShown) { sortedOrders = sortedOrders.slice(0, maxActiveOrdersShown - 1) }
+    sortedOrders.sort((a: MetaOrder, b: MetaOrder) => {
+      const [aActive, bActive] = [orderIsActive(a.ord), orderIsActive(b.ord)]
+      if (aActive && !bActive) return -1
+      else if (!aActive && bActive) return 1
+      return b.ord.submitTime - a.ord.submitTime
+    })
+    const n = this.maxUserOrderCount()
+    if (sortedOrders.length > n) { sortedOrders = sortedOrders.slice(0, n) }
 
     for (const oid in metaOrders) delete metaOrders[oid]
 
@@ -1517,7 +1530,7 @@ export default class MarketsPage extends BasePage {
 
       const ord = mord.ord
       const orderID = ord.id
-      const isActive = ord.status < OrderUtil.StatusExecuted || OrderUtil.hasActiveMatches(ord)
+      const isActive = orderIsActive(ord)
 
       // No need to track in-flight orders here. We've already added it to
       // display.
