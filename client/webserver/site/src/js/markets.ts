@@ -1473,25 +1473,32 @@ export default class MarketsPage extends BasePage {
   }
 
   async loadUserOrders () {
-    const market = this.market
+    const { base: b, quote: q, dex: { host }, cfg: { name: mktID } } = this.market
     for (const oid in this.metaOrders) delete this.metaOrders[oid]
-    if (!market.base || !market.quote) return this.resolveActiveOrders([]) // unsupported asset
+    if (!b || !q) return this.resolveUserOrders([]) // unsupported asset
+    const activeOrders = app().orders(host, mktID)
+    if (activeOrders.length >= maxUserOrdersShown) return this.resolveUserOrders(activeOrders)
     const filter: OrderFilter = {
-      hosts: [market.dex.host],
-      market: { baseID: market.base.id, quoteID: market.quote.id },
+      hosts: [host],
+      market: { baseID: b.id, quoteID: q.id },
       n: this.maxUserOrderCount()
     }
     const res = await postJSON('/api/orders', filter)
-    return this.resolveActiveOrders(res.orders || [])
+    const orders = res.orders || []
+    // Make sure all active orders are in there. The /orders API sorts by time,
+    // so if there is are 10 cancelled/executed orders newer than an old active
+    // order, the active order wouldn't be included in the result.
+    for (const activeOrd of activeOrders) if (!orders.some((dbOrd: Order) => dbOrd.id === activeOrd.id)) orders.push(activeOrd)
+    return this.resolveUserOrders(res.orders || [])
   }
 
   /* refreshActiveOrders refreshes the user's active order list. */
   refreshActiveOrders () {
     const orders = app().orders(this.market.dex.host, marketID(this.market.baseCfg.symbol, this.market.quoteCfg.symbol))
-    return this.resolveActiveOrders(orders)
+    return this.resolveUserOrders(orders)
   }
 
-  resolveActiveOrders (orders: Order[]) {
+  resolveUserOrders (orders: Order[]) {
     const { page, metaOrders, market } = this
     const cfg = market.cfg
 
