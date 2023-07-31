@@ -170,7 +170,8 @@ export default class OrdersPage extends BasePage {
       set('host', `${mktID} @ ${ord.host}`)
       let from, to, fromQty
       let toQty = ''
-      const [baseUnitInfo, quoteUnitInfo] = [app().unitInfo(ord.baseID), app().unitInfo(ord.quoteID)]
+      const xc = app().exchanges[ord.host] || undefined
+      const [baseUnitInfo, quoteUnitInfo] = [app().unitInfo(ord.baseID, xc), app().unitInfo(ord.quoteID, xc)]
       if (ord.sell) {
         [from, to] = [ord.baseSymbol, ord.quoteSymbol]
         fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
@@ -194,7 +195,7 @@ export default class OrdersPage extends BasePage {
       Doc.tmplElement(tr, 'toLogo').src = Doc.logoPath(to)
       set('toSymbol', to)
       set('type', `${OrderUtil.typeString(ord)} ${OrderUtil.sellString(ord)}`)
-      set('rate', Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate)))
+      set('rate', Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate, xc)))
       set('status', OrderUtil.statusString(ord))
       set('filled', `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`)
       set('settled', `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`)
@@ -290,11 +291,11 @@ export default class OrdersPage extends BasePage {
    * server's filter type.
    */
   currentFilter (): OrderFilter {
-    const filterState = this.filterState
+    const filterState = this.filterState as OrderFilter
     return {
       hosts: filterState.hosts,
-      assets: filterState.assets.map((s: any) => parseInt(s)),
-      statuses: filterState.statuses.map((s: any) => parseInt(s)),
+      assets: filterState.assets?.map((s: any) => parseInt(s)),
+      statuses: filterState.statuses?.map((s: any) => parseInt(s)),
       n: orderBatchSize,
       offset: this.offset
     }

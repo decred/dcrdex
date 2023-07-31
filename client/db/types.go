@@ -1192,6 +1192,11 @@ func (n *Notification) Encode() []byte {
 		AddData([]byte(n.TopicID))
 }
 
+type OrderFilterMarket struct {
+	Base  uint32
+	Quote uint32
+}
+
 // OrderFilter is used to limit the results returned by a query to (DB).Orders.
 type OrderFilter struct {
 	// N is the number of orders to return in the set.
@@ -1206,6 +1211,8 @@ type OrderFilter struct {
 	// Assets is a list of BIP IDs for acceptable assets. A zero-length Assets
 	// means all assets are accepted.
 	Assets []uint32
+	// Market limits results to a specific market.
+	Market *OrderFilterMarket
 	// Statuses is a list of acceptable statuses. A zero-length Statuses means
 	// all statuses are accepted.
 	Statuses []order.OrderStatus

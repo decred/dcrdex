@@ -543,12 +543,18 @@ export interface RemainderUpdate {
   qtyAtomic: number
 }
 
+export interface OrderFilterMarket {
+  baseID: number
+  quoteID: number
+}
+
 export interface OrderFilter {
   n?: number
   offset?: string
-  hosts: string[]
-  assets: number[]
-  statuses: number[]
+  hosts?: string[]
+  assets?: number[]
+  market?: OrderFilterMarket
+  statuses?: number[]
 }
 
 export interface MakerProgram {
