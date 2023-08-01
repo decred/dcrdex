@@ -104,6 +104,7 @@ func runCore() error {
 		UnlockCoinsOnLogin: cfg.UnlockCoinsOnLogin,
 		NoAutoWalletLock:   cfg.NoAutoWalletLock,
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
+		ExtensionModeFile:  cfg.ExtensionModeFile,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating client core: %w", err)
