@@ -5537,12 +5537,12 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
 		}
 	}
 
-	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeRate, form.Options)
+	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeRate, form.UseSafeTxSize)
 	if err != nil {
 		return 0, 0, fmt.Errorf("error calculating swap fees: %w", err)
 	}
 
-	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeRate, form.Options)
+	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeRate)
 	if err != nil {
 		return 0, 0, fmt.Errorf("error calculating redeem fees: %w", err)
 	}

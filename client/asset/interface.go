@@ -507,9 +507,9 @@ type Wallet interface {
 	// used to call the function.
 	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption, feeSuggestion uint64) (*ConfirmRedemptionStatus, error)
 	// SingleLotSwapFees returns the fees for a swap transaction for a single lot.
-	SingleLotSwapFees(version uint32, feeRate uint64, options map[string]string) (uint64, error)
+	SingleLotSwapFees(version uint32, feeRate uint64, useSafeTxSize bool) (uint64, error)
 	// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
-	SingleLotRedeemFees(version uint32, feeRate uint64, options map[string]string) (uint64, error)
+	SingleLotRedeemFees(version uint32, feeRate uint64) (uint64, error)
 	// FundMultiOrder funds multiple orders at once. The return values will
 	// be in the same order as the passed orders. If less values are returned
 	// than the number of orders, then the orders at the end of the list were

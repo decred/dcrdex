@@ -1656,43 +1656,19 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 }
 
 // SingleLotSwapFees returns the fees for a swap transaction for a single lot.
-func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, options map[string]string) (fees uint64, err error) {
-	// Load the user's selected order-time options.
-	customCfg := new(swapOptions)
-	err = config.Unmapify(options, customCfg)
-	if err != nil {
-		return 0, fmt.Errorf("error parsing selected swap options: %w", err)
+func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (fees uint64, err error) {
+	var numInputs uint64
+	if useSafeTxSize {
+		numInputs = 12
+	} else {
+		numInputs = 2
 	}
 
-	// Parse the configured split transaction.
-	split := dcr.config().useSplitTx
-	if customCfg.Split != nil {
-		split = *customCfg.Split
-	}
-
-	feeBump, err := customCfg.feeBump()
-	if err != nil {
-		return 0, err
-	}
-
-	bumpedNetRate := feeSuggestion
-	if feeBump > 1 {
-		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
-	}
-
-	const numInputs = 12 // plan for lots of inputs to get a safe estimate
 	var txSize uint64 = dexdcr.InitTxSizeBase + (numInputs * dexdcr.P2PKHInputSize)
 
-	var splitTxSize uint64
-	if split {
-		// If there is a split, the split tx could have more inputs, and the
-		// swap would just have one, but the math works out the same this way
-		// anyways.
-		splitTxSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + (2 * dexdcr.P2PKHOutputSize)
-	}
+	dcr.log.Infof("SingleLotSwapFees: txSize = %d, feeSuggestion = %d", txSize, feeSuggestion)
 
-	totalTxSize := txSize + splitTxSize
-	return totalTxSize * bumpedNetRate, nil
+	return txSize * feeSuggestion, nil
 }
 
 // MaxFundingFees returns the maximum funding fees for an order/multi-order.
@@ -1835,11 +1811,13 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 }
 
 // SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
-func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64, options map[string]string) (uint64, error) {
-	preRedeem, err := dcr.preRedeem(1, feeSuggestion, options)
+func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64) (uint64, error) {
+	preRedeem, err := dcr.preRedeem(1, feeSuggestion, nil)
 	if err != nil {
 		return 0, err
 	}
+
+	dcr.log.Infof("SingleLotRedeemFees: worst case = %d, feeSuggestion = %d", preRedeem.Estimate.RealisticWorstCase, feeSuggestion)
 
 	return preRedeem.Estimate.RealisticWorstCase, nil
 }

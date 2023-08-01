@@ -1,18 +1,32 @@
 [{
     "host": "127.0.0.1:17273",
     "baseAsset": 42,
-    "quoteAsset": 0,
+    "quoteAsset": 60,
     "baseBalanceType": 0,
     "baseBalance": 50,
     "quoteBalanceType": 0,
     "quoteBalance": 50,
     "marketMakingConfig": {
-        "lots": 2,
         "gapStrategy": "multiplier",
-        "gapFactor": 1,
+        "sellPlacements": [{
+            "gapFactor": 2,
+            "lots": 2
+        },{
+            "gapFactor": 3,
+            "lots": 1
+        }],
+        "buyPlacements": [{
+            "gapFactor": 2,
+            "lots": 2
+        },{
+            "gapFactor": 3,
+            "lots": 1
+        }],
         "driftTolerance": 0.001,
         "oracleWeighting": 0.5,
         "oracleBias": 0,
-        "manualRate": 0
+        "emptyMarketRate": 0.005,
+        "splitTxAllowed": true,
+        "splitBuffer": 10
     }
 }]

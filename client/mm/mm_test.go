@@ -137,6 +137,7 @@ type tCore struct {
 	cancelsPlaced                []dex.Bytes
 	buysPlaced                   []*core.TradeForm
 	sellsPlaced                  []*core.TradeForm
+	multiTradesPlaced            []*core.MultiTradeForm
 	maxFundingFees               uint64
 }
 
@@ -174,13 +175,24 @@ func (*tCore) Cancel(oidB dex.Bytes) error {
 	return nil
 }
 func (c *tCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
+	if form.Sell {
+		c.sellsPlaced = append(c.sellsPlaced, form)
+	} else {
+		c.buysPlaced = append(c.buysPlaced, form)
+	}
 	return c.tradeResult, nil
 }
-func (*tCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error) {
-	return nil, nil
+func (c *tCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error) {
+	if c.maxBuyErr != nil {
+		return nil, c.maxBuyErr
+	}
+	return c.maxBuyEstimate, nil
 }
-func (*tCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error) {
-	return nil, nil
+func (c *tCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error) {
+	if c.maxSellErr != nil {
+		return nil, c.maxSellErr
+	}
+	return c.maxSellEstimate, nil
 }
 func (c *tCore) AssetBalance(assetID uint32) (*core.WalletBalance, error) {
 	return c.assetBalances[assetID], c.assetBalanceErr
@@ -190,8 +202,10 @@ func (c *tCore) PreOrder(form *core.TradeForm) (*core.OrderEstimate, error) {
 	return c.orderEstimate, nil
 }
 func (c *tCore) MultiTrade(pw []byte, forms *core.MultiTradeForm) ([]*core.Order, error) {
+	c.multiTradesPlaced = append(c.multiTradesPlaced, forms)
 	return c.multiTradeResult, nil
 }
+
 func (c *tCore) WalletState(assetID uint32) *core.WalletState {
 	isAccountLocker := c.isAccountLocker[assetID]
 
@@ -207,9 +221,6 @@ func (c *tCore) WalletState(assetID uint32) *core.WalletState {
 func (c *tCore) MaxFundingFees(fromAsset uint32, numTrades uint32, options map[string]string) (uint64, error) {
 	return c.maxFundingFees, nil
 }
-func (c *tCore) User() *core.User {
-	return nil
-}
 func (c *tCore) Login(pw []byte) error {
 	return nil
 }
@@ -217,7 +228,23 @@ func (c *tCore) OpenWallet(assetID uint32, pw []byte) error {
 	return nil
 }
 
+func (c *tCore) User() *core.User {
+	return nil
+}
+
 var _ clientCore = (*tCore)(nil)
+
+func tMaxOrderEstimate(lots uint64, swapFees, redeemFees uint64) *core.MaxOrderEstimate {
+	return &core.MaxOrderEstimate{
+		Swap: &asset.SwapEstimate{
+			RealisticWorstCase: swapFees,
+			Lots:               lots,
+		},
+		Redeem: &asset.RedeemEstimate{
+			RealisticWorstCase: redeemFees,
+		},
+	}
+}
 
 func (c *tCore) setAssetBalances(balances map[uint32]uint64) {
 	c.assetBalances = make(map[uint32]*core.WalletBalance)
@@ -232,11 +259,21 @@ func (c *tCore) setAssetBalances(balances map[uint32]uint64) {
 	}
 }
 
+func (c *tCore) clearTradesAndCancels() {
+	c.cancelsPlaced = make([]dex.Bytes, 0)
+	c.buysPlaced = make([]*core.TradeForm, 0)
+	c.sellsPlaced = make([]*core.TradeForm, 0)
+	c.multiTradesPlaced = make([]*core.MultiTradeForm, 0)
+}
+
 func newTCore() *tCore {
 	return &tCore{
 		assetBalances:   make(map[uint32]*core.WalletBalance),
 		noteFeed:        make(chan core.Notification),
 		isAccountLocker: make(map[uint32]bool),
+		cancelsPlaced:   make([]dex.Bytes, 0),
+		buysPlaced:      make([]*core.TradeForm, 0),
+		sellsPlaced:     make([]*core.TradeForm, 0),
 	}
 }
 

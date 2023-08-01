@@ -475,7 +475,7 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 
 	orderInfo := m.getOrderInfo(oid)
 	if orderInfo == nil {
-		m.log.Errorf("did not find order info for order %s", oid)
+		m.log.Debugf("did not find order info for order %s", oid)
 		return
 	}
 
@@ -732,6 +732,8 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 		return err
 	}
 
+	user := m.core.User()
+
 	startedMarketMaking = true
 
 	wg := new(sync.WaitGroup)
@@ -761,7 +763,12 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 			go func(cfg *BotConfig) {
 				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
 				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
-				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, pw, logger)
+				var baseFiatRate, quoteFiatRate float64
+				if user != nil {
+					baseFiatRate = user.FiatRates[cfg.BaseAsset]
+					quoteFiatRate = user.FiatRates[cfg.QuoteAsset]
+				}
+				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, baseFiatRate, quoteFiatRate, logger)
 				wg.Done()
 			}(cfg)
 		default:

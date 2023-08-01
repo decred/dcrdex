@@ -1996,34 +1996,16 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 }
 
 // SingleLotSwapFees returns the fees for a swap transaction for a single lot.
-func (btc *baseWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, options map[string]string) (fees uint64, err error) {
-	// Load the user's selected order-time options.
-	customCfg := new(swapOptions)
-	err = config.Unmapify(options, customCfg)
-	if err != nil {
-		return 0, fmt.Errorf("error parsing selected swap options: %w", err)
-	}
-
-	// Parse the configured split transaction.
-	split := btc.useSplitTx()
-	if customCfg.Split != nil {
-		split = *customCfg.Split
-	}
-
-	feeBump, err := customCfg.feeBump()
-	if err != nil {
-		return 0, err
-	}
-
-	bumpedNetRate := feeSuggestion
-	if feeBump > 1 {
-		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
+func (btc *baseWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (fees uint64, err error) {
+	var numInputs uint64
+	if useSafeTxSize {
+		numInputs = 12
+	} else {
+		numInputs = 2
 	}
 
 	// TODO: The following is not correct for all BTC clones. e.g. Zcash has
 	// a different MinimumTxOverhead (29).
-
-	const numInputs = 12 // plan for lots of inputs to get a safe estimate
 
 	var txSize uint64
 	if btc.segwit {
@@ -2032,18 +2014,7 @@ func (btc *baseWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, options
 		txSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2PKHInputSize) + dexbtc.P2SHOutputSize + dexbtc.P2PKHOutputSize
 	}
 
-	var splitTxSize uint64
-	if split {
-		if btc.segwit {
-			splitTxSize = dexbtc.MinimumTxOverhead + dexbtc.RedeemP2WPKHInputSize + dexbtc.P2WPKHOutputSize
-		} else {
-			splitTxSize = dexbtc.MinimumTxOverhead + dexbtc.RedeemP2PKHInputSize + dexbtc.P2PKHOutputSize
-		}
-	}
-
-	totalTxSize := txSize + splitTxSize
-
-	return totalTxSize * bumpedNetRate, nil
+	return txSize * feeSuggestion, nil
 }
 
 // splitOption constructs an *asset.OrderOption with customized text based on the
@@ -2265,8 +2236,8 @@ func (btc *baseWallet) PreRedeem(form *asset.PreRedeemForm) (*asset.PreRedeem, e
 }
 
 // SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
-func (btc *baseWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64, options map[string]string) (uint64, error) {
-	preRedeem, err := btc.preRedeem(1, feeSuggestion, options)
+func (btc *baseWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64) (uint64, error) {
+	preRedeem, err := btc.preRedeem(1, feeSuggestion, nil)
 	if err != nil {
 		return 0, err
 	}
