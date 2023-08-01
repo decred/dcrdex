@@ -6,7 +6,8 @@ import {
   WalletConfigForm,
   UnlockWalletForm,
   DepositAddress,
-  bind as bindForm
+  bind as bindForm,
+  baseChainSymbol
 } from './forms'
 import State from './state'
 import * as intl from './locales'
@@ -350,15 +351,16 @@ export default class WalletsPage extends BasePage {
    * setPWSettingViz sets the visibility of the password field section.
    */
   setPWSettingViz (visible: boolean) {
+    const page = this.page
     if (visible) {
-      Doc.hide(this.page.showIcon)
-      Doc.show(this.page.hideIcon, this.page.changePW)
-      this.page.switchPWMsg.textContent = intl.prep(intl.ID_KEEP_WALLET_PASS)
+      Doc.hide(page.showIcon)
+      Doc.show(page.hideIcon, page.changePW)
+      page.switchPWMsg.textContent = intl.prep(intl.ID_KEEP_WALLET_PASS)
       return
     }
-    Doc.hide(this.page.hideIcon, this.page.changePW)
-    Doc.show(this.page.showIcon)
-    this.page.switchPWMsg.textContent = intl.prep(intl.ID_NEW_WALLET_PASS)
+    Doc.hide(page.hideIcon, page.changePW)
+    Doc.show(page.showIcon)
+    page.switchPWMsg.textContent = intl.prep(intl.ID_NEW_WALLET_PASS)
   }
 
   /*
@@ -1029,9 +1031,11 @@ export default class WalletsPage extends BasePage {
   /* Show the form used to change wallet configuration settings. */
   async showReconfig (assetID: number, skipAnimation?: boolean) {
     const page = this.page
-    Doc.hide(page.changeWalletType, page.changeTypeHideIcon, page.reconfigErr, page.showChangeType, page.changeTypeHideIcon)
-    Doc.hide(page.reconfigErr)
-    Doc.hide(page.enableWallet, page.disableWallet)
+    Doc.hide(
+      page.changeWalletType, page.changeTypeHideIcon, page.reconfigErr,
+      page.showChangeType, page.changeTypeHideIcon, page.reconfigErr,
+      page.enableWallet, page.disableWallet
+    )
     // Hide update password section by default
     this.changeWalletPW = false
     this.setPWSettingViz(this.changeWalletPW)
@@ -1039,8 +1043,8 @@ export default class WalletsPage extends BasePage {
 
     const currentDef = app().currentWalletDefinition(assetID)
     const walletDefs = asset.token ? [asset.token.definition] : asset.info ? asset.info.availablewallets : []
-
-    if (walletDefs.length > 1) {
+    const disableWalletType = app().user.extensionModeConfig?.restrictedWallets[baseChainSymbol(assetID)]?.disableWalletType
+    if (walletDefs.length > 1 && !disableWalletType) {
       Doc.empty(page.changeWalletTypeSelect)
       Doc.show(page.showChangeType, page.changeTypeShowIcon)
       page.changeTypeMsg.textContent = intl.prep(intl.ID_CHANGE_WALLET_TYPE)
@@ -1050,8 +1054,6 @@ export default class WalletsPage extends BasePage {
         option.value = option.textContent = wDef.type
         page.changeWalletTypeSelect.appendChild(option)
       }
-    } else {
-      Doc.hide(page.showChangeType)
     }
 
     const wallet = app().walletMap[assetID]
@@ -1078,7 +1080,7 @@ export default class WalletsPage extends BasePage {
       return
     }
     const assetHasActiveOrders = app().haveActiveOrders(assetID)
-    this.reconfigForm.update(currentDef.configopts || [], assetHasActiveOrders)
+    this.reconfigForm.update(asset.id, currentDef.configopts || [], assetHasActiveOrders)
     this.setGuideLink(currentDef.guidelink)
     this.reconfigForm.setConfig(res.map)
     this.updateDisplayedReconfigFields(currentDef)
@@ -1088,7 +1090,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const walletType = page.changeWalletTypeSelect.value || ''
     const walletDef = app().walletDefinition(this.selectedAssetID, walletType)
-    this.reconfigForm.update(walletDef.configopts || [], false)
+    this.reconfigForm.update(this.selectedAssetID, walletDef.configopts || [], false)
     this.setGuideLink(walletDef.guidelink)
     this.updateDisplayedReconfigFields(walletDef)
   }
@@ -1102,7 +1104,8 @@ export default class WalletsPage extends BasePage {
   }
 
   updateDisplayedReconfigFields (walletDef: WalletDefinition) {
-    if (walletDef.seeded || walletDef.type === 'token') {
+    const disablePassword = app().user.extensionModeConfig?.restrictedWallets[baseChainSymbol(this.selectedAssetID)]?.disablePassword
+    if (walletDef.seeded || walletDef.type === 'token' || disablePassword) {
       Doc.hide(this.page.showChangePW, this.reconfigForm.fileSelector)
       this.changeWalletPW = false
       this.setPWSettingViz(false)

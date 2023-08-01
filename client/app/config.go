@@ -100,6 +100,8 @@ type CoreConfig struct {
 	NoAutoDBBackup     bool `long:"no-db-backup" description:"Disable creation of a database backup on shutdown."`
 	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
 	SimnetFiatRates    bool `long:"simnet-fiat-rates" description:"Fetch fiat rates when running in simnet mode."`
+
+	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
 }
 
 // WebConfig encapsulates the configuration needed for the web server.
@@ -195,6 +197,7 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		NoAutoWalletLock:   cfg.NoAutoWalletLock,
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 		SimnetFiatRates:    cfg.SimnetFiatRates,
+		ExtensionModeFile:  cfg.ExtensionModeFile,
 	}
 }
 

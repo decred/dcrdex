@@ -287,6 +287,16 @@ export interface Denomination {
   conversionFactor: number
 }
 
+export interface ExtensionConfiguredWallet {
+  hiddenFields: string[]
+  disableWalletType: boolean
+  disablePassword: boolean
+}
+
+export interface ExtensionModeConfig {
+  restrictedWallets: Record<string, ExtensionConfiguredWallet>
+}
+
 export interface User {
   exchanges: Record<string, Exchange>
   inited: boolean
@@ -297,6 +307,7 @@ export interface User {
   ok: boolean // added by webserver
   bots: BotReport[]
   net: number
+  extensionModeConfig: ExtensionModeConfig
 }
 
 export interface CoreNote {

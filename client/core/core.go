@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/csv"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -1394,6 +1395,10 @@ type Config struct {
 	// UnlockCoinsOnLogin indicates that on wallet connect during login, or on
 	// creation of a new wallet, all coins with the wallet should be unlocked.
 	UnlockCoinsOnLogin bool
+	// ExtensionModeFile is the path to a file that specifies configuration
+	// for running core in extension mode, which gives the caller options for
+	// e.g. limiting the ability to configure wallets.
+	ExtensionModeFile string
 }
 
 // Core is the core client application. Core manages DEX connections, wallets,
@@ -1411,6 +1416,8 @@ type Core struct {
 
 	locale        map[Topic]*translation
 	localePrinter *message.Printer
+
+	extensionModeConfig *ExtensionModeConfig
 
 	// construction or init sets credentials
 	credMtx     sync.RWMutex
@@ -1509,7 +1516,7 @@ func New(cfg *Config) (*Core, error) {
 
 	locale, found := locales[lang.String()]
 	if !found {
-		return nil, fmt.Errorf("No translations for language %s", lang)
+		return nil, fmt.Errorf("no translations for language %s", lang)
 	}
 
 	// Try to get the primary credentials, but ignore no-credentials error here
@@ -1522,6 +1529,17 @@ func New(cfg *Config) (*Core, error) {
 	seedGenerationTime, err := boltDB.SeedGenerationTime()
 	if err != nil && !errors.Is(err, db.ErrNoSeedGenTime) {
 		return nil, err
+	}
+
+	var xCfg *ExtensionModeConfig
+	if cfg.ExtensionModeFile != "" {
+		b, err := os.ReadFile(cfg.ExtensionModeFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading extension mode file at %q: %w", cfg.ExtensionModeFile, err)
+		}
+		if err := json.Unmarshal(b, &xCfg); err != nil {
+			return nil, fmt.Errorf("error unmarshalling extension mode file: %w", err)
+		}
 	}
 
 	c := &Core{
@@ -1545,9 +1563,10 @@ func New(cfg *Config) (*Core, error) {
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		noteChans:     make(map[uint64]chan Notification),
 
-		locale:             locale,
-		localePrinter:      message.NewPrinter(lang),
-		seedGenerationTime: seedGenerationTime,
+		locale:              locale,
+		localePrinter:       message.NewPrinter(lang),
+		extensionModeConfig: xCfg,
+		seedGenerationTime:  seedGenerationTime,
 
 		fiatRateSources: make(map[string]*commonRateSource),
 		pendingWallets:  make(map[uint32]bool),
@@ -2362,6 +2381,7 @@ func (c *Core) User() *User {
 		SeedGenerationTime: c.seedGenerationTime,
 		FiatRates:          c.fiatConversions(),
 		Net:                c.net,
+		ExtensionConfig:    c.extensionModeConfig,
 	}
 }
 
