@@ -843,7 +843,6 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 // core.User type, adding fields specific to the users server authentication
 // and cookies.
 type userInfo struct {
-	*core.User
 	Authed           bool
 	PasswordIsCached bool
 	DarkMode         bool

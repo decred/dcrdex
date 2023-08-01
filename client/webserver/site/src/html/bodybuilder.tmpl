@@ -25,13 +25,12 @@
 {{define "header"}}
 <header id=header class="maintop">
   {{$authed := .UserInfo.Authed}}
-  {{$marketsReady := and $authed (gt (len .UserInfo.Exchanges) 0)}}
   <a href="/" class="logo-icon d-none d-md-block"></a>
   <a href="/" class="logo-icon d-block d-md-none"></a>
   <div id="headerSpace"></div>
   <div class="mainlinks fs18 offwhite pe-2">
 
-    <a href="/markets" class="demi hoverbg{{if not $marketsReady}} d-hide{{end}}" id="marketsMenuEntry">[[[Markets]]]</a>
+    <a href="/markets" class="demi hoverbg d-hide" id="marketsMenuEntry">[[[Markets]]]</a>
 
     <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallets]]]</a>
 
@@ -104,7 +103,7 @@
 {{end}}
 
 {{define "bottom"}}
-<script src="/js/entry.js?v=8d78a43c|6fec6c4d"></script>
+<script src="/js/entry.js?v=e399004c|4c138427"></script>
 </body>
 </html>
 {{end}}
