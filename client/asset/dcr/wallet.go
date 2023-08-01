@@ -63,6 +63,19 @@ type AddressInfo struct {
 	Branch  uint32
 }
 
+type XCWalletAccounts struct {
+	PrimaryAccount string `ini:"account"`
+	UnmixedAccount string `ini:"unmixedaccount"`
+	TradingAccount string `ini:"tradingaccount"`
+
+	// primaryAcct    string
+	// unmixedAccount string // mixing-enabled wallets only
+	// // tradingAccount (mixing-enabled wallets only) stores utxos reserved for
+	// // executing order matches, the external branch stores split tx outputs,
+	// // internal branch stores chained (non-final) swap change.
+	// tradingAccount string
+}
+
 // Wallet defines methods that the ExchangeWallet uses for communicating with
 // a Decred wallet and blockchain.
 type Wallet interface {
@@ -73,6 +86,9 @@ type Wallet interface {
 	// SpvMode returns true if the wallet is connected to the Decred
 	// network via SPV peers.
 	SpvMode() bool
+	// Accounts returns the names of the accounts for use by the exchange
+	// wallet.
+	Accounts() XCWalletAccounts
 	// NotifyOnTipChange registers a callback function that should be
 	// invoked when the wallet sees new mainchain blocks. The return value
 	// indicates if this notification can be provided. Where this tip change
@@ -157,8 +173,8 @@ type Wallet interface {
 	// be voted on.
 	SetVotingPreferences(ctx context.Context, choices, tspendPolicy, treasuryPolicy map[string]string) error
 	SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error
-	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error)
 	StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error)
+	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error)
 }
 
 // WalletTransaction is a pared down version of walletjson.GetTransactionResult.
@@ -169,11 +185,24 @@ type WalletTransaction struct {
 	Hex           string
 }
 
+// fundsMixer defines methods for mixing funds in a wallet.
+type fundsMixer interface {
+	// IsMixing is true if the wallet is currently mixing funds.
+	IsMixing() bool
+	// StartFundsMixer starts mixing funds. Creates the required accounts
+	// (including the dex trading account) if any does not already exist.
+	StartFundsMixer(ctx context.Context, passphrase []byte) error
+	// StopFundsMixer stops the funds mixer. This will error if the mixer was
+	// not already running.
+	StopFundsMixer() error
+}
+
 // tipNotifier can be implemented if the Wallet is able to provide a stream of
 // blocks as they are finished being processed.
 // DRAFT NOTE: This is alternative to NotifyOnTipChange. I prefer this method,
 // and would vote to export this interface and get rid of NotifyOnTipChange.
 // @itswisdomagain might be using the current API though.
+// TODO: Makes sense.
 type tipNotifier interface {
 	tipFeed() <-chan *block
 }

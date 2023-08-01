@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -150,12 +151,17 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 
-	wallet, err := unconnectedWallet(walletCfg, &walletConfig{PrimaryAccount: tAcctName}, tChainParams, tLogger, dex.Simnet)
+	wallet, err := unconnectedWallet(walletCfg, &walletConfig{}, tChainParams, tLogger, dex.Simnet)
 	if err != nil {
 		shutdown()
 		panic(err.Error())
 	}
+	var accounts atomic.Value
+	accounts.Store(XCWalletAccounts{
+		PrimaryAccount: tAcctName,
+	})
 	wallet.wallet = &rpcWallet{
+		accountsV: accounts,
 		rpcClient: client,
 		log:       log,
 	}
@@ -3966,7 +3972,7 @@ type tReconfigurer struct {
 	err     error
 }
 
-func (r *tReconfigurer) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restartRequired bool, err error) {
+func (r *tReconfigurer) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restartRequired bool, err error) {
 	return r.restart, r.err
 }
 
@@ -3984,9 +3990,6 @@ func TestReconfigure(t *testing.T) {
 	defer cancel()
 
 	cfg1 := &walletConfig{
-		PrimaryAccount:   "primary",
-		UnmixedAccount:   "unmixed",
-		TradingAccount:   "trading",
 		UseSplitTx:       true,
 		FallbackFeeRate:  55,
 		FeeRateLimit:     98,
@@ -3995,9 +3998,6 @@ func TestReconfigure(t *testing.T) {
 	}
 
 	cfg2 := &walletConfig{
-		PrimaryAccount:   "primary2",
-		UnmixedAccount:   "unmixed2",
-		TradingAccount:   "trading2",
 		UseSplitTx:       false,
 		FallbackFeeRate:  66,
 		FeeRateLimit:     97,
@@ -4005,11 +4005,9 @@ func TestReconfigure(t *testing.T) {
 		ApiFeeFallback:   false,
 	}
 
+	// TODO: Test account names reconfiguration for rpcwallets.
 	checkConfig := func(cfg *walletConfig) {
-		if cfg.PrimaryAccount != wallet.config().primaryAcct ||
-			cfg.UnmixedAccount != wallet.config().unmixedAccount ||
-			cfg.TradingAccount != wallet.config().tradingAccount ||
-			cfg.UseSplitTx != wallet.config().useSplitTx ||
+		if cfg.UseSplitTx != wallet.config().useSplitTx ||
 			toAtoms(cfg.FallbackFeeRate/1000) != wallet.config().fallbackFeeRate ||
 			toAtoms(cfg.FeeRateLimit/1000) != wallet.config().feeRateLimit ||
 			cfg.RedeemConfTarget != wallet.config().redeemConfTarget ||
