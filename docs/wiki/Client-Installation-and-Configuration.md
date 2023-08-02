@@ -5,11 +5,11 @@
 The DEX client can be installed in one of the following ways. Download the
 application from *just one* of the following locations:
 
-* Download the standalone DEX client for your operating system for the [latest
-  release on GitHub](https://github.com/decred/dcrdex/releases). Extract the
-  "dexc" executable from the archive and run it. Open any web browser to the
-  link shown by the application. You may also put the **dexc** executable's
-  folder on your `PATH`.
+* Download [standalone DEX client for your operating system](https://dex.decred.org/#downloads).
+* Download [the latest standalone DEX client release from GitHub](https://github.com/decred/dcrdex/releases)
+  for your operating system. Extract the "dexc" executable from the archive and run it.
+  Open any web browser to the link shown by the application. You may also put the **dexc**
+  executable's folder on your `PATH`.
 * [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
   the official graphical Decred wallet, which integrates the DEX client, and go
   to the DEX tab.
