@@ -6,11 +6,11 @@
 
 ## What is DEX?
 
-The Decred Decentralized Exchange (DEX) is a system that enables trustless
-exchange of different types of blockchain assets via a familiar market-based
-API. DEX is a non-custodial solution for cross-chain exchange based on
-atomic swap technology. DEX matches trading parties and facilitates price
-discovery and the communication of swap details.
+The [Decred Decentralized Exchange (DEX)](https://dex.decred.org/) is a system 
+that enables trustless exchange of different types of blockchain assets via a 
+familiar market-based API. DEX is a non-custodial solution for cross-chain 
+exchange based on atomic swap technology. DEX matches trading parties and 
+facilitates price discovery and the communication of swap details.
 
 Matching is performed through a familiar exchange interface, with market and
 limit orders and an order book. Settlement occurs on-chain. DEX's epoch-based
