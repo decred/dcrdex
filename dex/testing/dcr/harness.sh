@@ -64,6 +64,10 @@ if [ -f ./harnesschain.tar.gz ]; then
   cp -r ${NODES_ROOT}/alpha/data/simnet ${NODES_ROOT}/beta/data/simnet
 fi
 
+# Background watch mining in window 8 by default:  
+# 'export NOMINER="1"' or uncomment this line to disable
+#NOMINER="1"
+
 echo "Writing ctl scripts"
 ################################################################################
 # Control Scripts
@@ -370,10 +374,14 @@ done
 sleep 0.5
 tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
 
-tmux new-window -t $SESSION:8 -n "miner" $SHELL
-tmux send-keys -t $SESSION:8 "cd ${NODES_ROOT}/harness-ctl" C-m
-tmux send-keys -t $SESSION:8 "watch -n 15 ./mine-alpha 1" C-m
+# Watch Miner
+if [ -z "$NOMINER" ] ; then
+  tmux new-window -t $SESSION:8 -n "miner" $SHELL
+  tmux send-keys -t $SESSION:8 "cd ${NODES_ROOT}/harness-ctl" C-m
+  tmux send-keys -t $SESSION:8 "watch -n 15 ./mine-alpha 1" C-m
+fi
 
 # Reenable history and attach to the control session.
 tmux send-keys -t $SESSION:0 "set -o history" C-m
+tmux select-window -t $SESSION:0
 tmux attach-session -t $SESSION
