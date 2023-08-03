@@ -1079,6 +1079,7 @@ export default class MarketsPage extends BasePage {
     this.setOrderBttnText()
     this.setCandleDurBttns()
     this.previewQuoteAmt(false)
+    this.updateTitle()
   }
 
   /*
@@ -1579,13 +1580,11 @@ export default class MarketsPage extends BasePage {
     // gets first price value from buy or from sell, so we can show it on
     // title.
     const midGapValue = this.midGapConventional()
-    if (!midGapValue) return
-
     const { baseCfg: b, quoteCfg: q } = this.market
     const baseSymb = b.symbol.toUpperCase()
     const quoteSymb = q.symbol.toUpperCase()
-    // more than 6 numbers it gets too big for the title.
-    document.title = `${Doc.formatCoinValue(midGapValue)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
+    if (!midGapValue) document.title = `${baseSymb}${quoteSymb} | ${this.ogTitle}`
+    else document.title = `${Doc.formatCoinValue(midGapValue)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}` // more than 6 numbers it gets too big for the title.
   }
 
   /* handleBookRoute is the handler for the 'book' notification, which is sent
