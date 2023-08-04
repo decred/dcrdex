@@ -953,13 +953,14 @@ type Bond struct {
 //
 // TODO: Include penalty data as specified in the spec.
 type ConnectResult struct {
-	Sig                 Bytes          `json:"sig"`
-	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
-	ActiveMatches       []*Match       `json:"activematches"`
-	Score               int32          `json:"score"`
-	Tier                *int64         `json:"tier"` // 1+ means bonded and may trade, a function of active bond amounts and conduct, nil legacy
-	ActiveBonds         []*Bond        `json:"activeBonds"`
-	LegacyFeePaid       *bool          `json:"legacyFeePaid"` // not set by legacy server
+	Sig                 Bytes               `json:"sig"`
+	ActiveOrderStatuses []*OrderStatus      `json:"activeorderstatuses"`
+	ActiveMatches       []*Match            `json:"activematches"`
+	Score               int32               `json:"score"`
+	Tier                *int64              `json:"tier"` // == v1. Deprecated in v2. means bonded and may trade, a function of active bond amounts and conduct, nil legacy
+	ActiveBonds         []*Bond             `json:"activeBonds"`
+	LegacyFeePaid       *bool               `json:"legacyFeePaid"` // == v1. Deprected in v2.
+	TierReportV2        *account.TierReport `json:"tierReportV2"`  // v2
 
 	Suspended *bool `json:"suspended,omitempty"` // DEPRECATED - implied by tier<1
 }
@@ -970,8 +971,9 @@ type ConnectResult struct {
 type TierChangedNotification struct {
 	Signature
 	// AccountID Bytes  `json:"accountID"`
-	Tier   int64  `json:"tier"`
-	Reason string `json:"reason"`
+	Tier         int64               `json:"tier"`
+	TierReportV2 *account.TierReport `json:"tierReportV2"` // replaces Tier field
+	Reason       string              `json:"reason"`
 }
 
 // Serialize serializes the TierChangedNotification data.
@@ -1095,13 +1097,14 @@ func (pb *PostBond) Serialize() []byte {
 // true, the bond was applied to the account; if false it is not confirmed, but
 // was otherwise validated.
 type PostBondResult struct {
-	Signature        // message is BondID | AccountID
-	AccountID Bytes  `json:"accountID"`
-	AssetID   uint32 `json:"assetID"`
-	Amount    uint64 `json:"amount"`
-	Expiry    uint64 `json:"expiry"` // not locktime, but time when bond expires for dex
-	BondID    Bytes  `json:"bondID"`
-	Tier      int64  `json:"tier"`
+	Signature                        // message is BondID | AccountID
+	AccountID    Bytes               `json:"accountID"`
+	AssetID      uint32              `json:"assetID"`
+	Amount       uint64              `json:"amount"`
+	Expiry       uint64              `json:"expiry"` // not locktime, but time when bond expires for dex
+	BondID       Bytes               `json:"bondID"`
+	Tier         int64               `json:"tier"`
+	TierReportV2 *account.TierReport `json:"tierReportV2"`
 }
 
 // Serialize serializes the PostBondResult data for the signature.
@@ -1306,6 +1309,9 @@ type ConfigResult struct {
 	BondExpiry uint64 `json:"DEV_bondExpiry"`
 
 	RegFees map[string]*FeeAsset `json:"regFees"`
+
+	ScoreIncrement uint32 `json:"scoreIncrement"`
+	MaxScore       uint32 `json:"maxScore"`
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot

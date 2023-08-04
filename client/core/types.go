@@ -767,8 +767,9 @@ type dexAccount struct {
 	pendingBonds      []*db.Bond // not yet confirmed
 	bonds             []*db.Bond // confirmed, and not yet expired
 	expiredBonds      []*db.Bond // expired and needing refund
-	tier              int64      // check instead of isSuspended
-	tierChange        int64      // unactuated with bond reserves
+	tier              *account.TierReport
+	effectiveTier     int64 // before *account.TierReport, effectiveTier can be out of sync with and takes precedence over tier.Effective()
+	tierChange        int64 // unactuated with bond reserves
 	targetTier        uint64
 	maxBondedAmt      uint64
 	totalReserved     int64  // total of bondAsset reserved for bonds (future and liveunspent), set iff maintaining bonds
@@ -945,7 +946,8 @@ func (a *dexAccount) authed() bool {
 func (a *dexAccount) unAuth() {
 	a.authMtx.Lock()
 	a.isAuthed = false
-	a.tier = 0
+	a.tier = nil
+	a.effectiveTier = 0
 	a.legacyFeePaid = false
 	a.authMtx.Unlock()
 }
@@ -954,7 +956,7 @@ func (a *dexAccount) unAuth() {
 func (a *dexAccount) suspended() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
-	return a.tier < 1
+	return a.effectiveTier < 1
 }
 
 // feePending checks whether the fee transaction has been broadcast, but the
