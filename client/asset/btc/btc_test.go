@@ -2048,13 +2048,15 @@ func testMaxFundingFees(t *testing.T, segwit bool, walletType string) {
 		outputSize = dexbtc.P2PKHOutputSize
 	}
 
-	maxFundingFees := wallet.MaxFundingFees(3, useSplitOptions)
-	expectedFees := feeRateLimit * (inputSize*12 + outputSize*4 + dexbtc.MinimumTxOverhead)
+	const maxSwaps = 3
+	const numInputs = 12
+	maxFundingFees := wallet.MaxFundingFees(maxSwaps, useSplitOptions)
+	expectedFees := feeRateLimit * (inputSize*numInputs + outputSize*(maxSwaps+1) + dexbtc.MinimumTxOverhead)
 	if maxFundingFees != expectedFees {
 		t.Fatalf("unexpected max funding fees. expected %d, got %d", expectedFees, maxFundingFees)
 	}
 
-	maxFundingFees = wallet.MaxFundingFees(3, noSplitOptions)
+	maxFundingFees = wallet.MaxFundingFees(maxSwaps, noSplitOptions)
 	if maxFundingFees != 0 {
 		t.Fatalf("unexpected max funding fees. expected 0, got %d", maxFundingFees)
 	}

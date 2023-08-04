@@ -1791,7 +1791,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			postTradeBalances: map[uint32]*botBalance{
 				0: {
 					Available:    100,
-					FundingOrder: calc.BaseToQuote(5e7, 5e6) + 1400,
+					FundingOrder: calc.BaseToQuote(5e7, 5e6) + 1000,
 				},
 				42: {
 					Available: 5e6,
@@ -1878,7 +1878,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				},
 				42: {
 					Available:    100,
-					FundingOrder: 5e6 + 1400,
+					FundingOrder: 5e6 + 1000,
 				},
 			},
 		},
@@ -2129,7 +2129,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			postTradeBalances: map[uint32]*botBalance{
 				0: {
 					Available:    100,
-					FundingOrder: calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(52e7, 5e6) + 2400,
+					FundingOrder: calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(52e7, 5e6) + 2000,
 				},
 				42: {
 					Available: 5e6,
@@ -2236,7 +2236,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				},
 				42: {
 					Available:    100,
-					FundingOrder: 1e7 + 2400,
+					FundingOrder: 1e7 + 2000,
 				},
 			},
 		},

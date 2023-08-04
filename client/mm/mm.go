@@ -70,7 +70,7 @@ type botBalance struct {
 // 1. A trade is made:
 //
 //   - FromAsset:
-//     DECREASE: LockedFunds + SplitTxFees + FundingFees
+//     DECREASE: LockedFunds + FundingFees
 //     if isAccountLocker, RefundFeesLockedFunds
 //
 //   - ToAsset:
@@ -122,7 +122,7 @@ type orderInfo struct {
 	order              *core.Order
 	initialFundsLocked uint64
 	lotSize            uint64
-	//initialRedeemFeesLocked will be > 0 for assets that are account lockers
+	// initialRedeemFeesLocked will be > 0 for assets that are account lockers
 	// (ETH). This means that the redeem fees will be initially locked, then
 	// the complete redeemed amount will be sent on redemption.
 	initialRedeemFeesLocked   uint64
@@ -132,7 +132,7 @@ type orderInfo struct {
 	unusedLockedFundsReturned bool
 	excessFeesReturned        bool
 	matchesSeen               map[order.MatchID]struct{}
-	matchesRefunded           map[order.MatchID]struct{}
+	matchesSettled            map[order.MatchID]struct{}
 }
 
 // finishedProcessing returns true when the MarketMaker no longer needs to
@@ -145,7 +145,7 @@ func (o *orderInfo) finishedProcessing() bool {
 	for _, match := range o.order.Matches {
 		var matchID order.MatchID
 		copy(matchID[:], match.MatchID)
-		if _, found := o.matchesRefunded[matchID]; !found {
+		if _, found := o.matchesSettled[matchID]; !found {
 			return false
 		}
 	}
@@ -166,6 +166,16 @@ type MarketMaker struct {
 
 	ordersMtx sync.RWMutex
 	orders    map[order.OrderID]*orderInfo
+}
+
+// NewMarketMaker creates a new MarketMaker.
+func NewMarketMaker(c clientCore, log dex.Logger) (*MarketMaker, error) {
+	return &MarketMaker{
+		core:    c,
+		log:     log,
+		running: atomic.Bool{},
+		orders:  make(map[order.OrderID]*orderInfo),
+	}, nil
 }
 
 // Running returns true if the MarketMaker is running.
@@ -258,6 +268,8 @@ func validateAndFilterEnabledConfigs(cfgs []*BotConfig) ([]*BotConfig, error) {
 	return enabledCfgs, nil
 }
 
+// setupBalances makes sure there is sufficient balance to cover all the bots,
+// and populates the botBalances map.
 func (m *MarketMaker) setupBalances(cfgs []*BotConfig) error {
 	m.botBalances = make(map[string]*botBalances, len(cfgs))
 
@@ -267,27 +279,28 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig) error {
 	}
 
 	balanceTracker := make(map[uint32]*trackedBalance)
+	trackAsset := func(assetID uint32) error {
+		if _, found := balanceTracker[assetID]; found {
+			return nil
+		}
+		bal, err := m.core.AssetBalance(assetID)
+		if err != nil {
+			return fmt.Errorf("failed to get balance for asset %d: %v", assetID, err)
+		}
+		balanceTracker[assetID] = &trackedBalance{
+			balanceAvailable: bal.Available,
+		}
+		return nil
+	}
 
 	for _, cfg := range cfgs {
-		if _, found := balanceTracker[cfg.BaseAsset]; !found {
-			bal, err := m.core.AssetBalance(cfg.BaseAsset)
-			if err != nil {
-				return fmt.Errorf("failed to get balance for asset %d: %v", cfg.BaseAsset, err)
-			}
-
-			balanceTracker[cfg.BaseAsset] = &trackedBalance{
-				balanceAvailable: bal.Available,
-			}
+		err := trackAsset(cfg.BaseAsset)
+		if err != nil {
+			return err
 		}
-
-		if _, found := balanceTracker[cfg.QuoteAsset]; !found {
-			bal, err := m.core.AssetBalance(cfg.QuoteAsset)
-			if err != nil {
-				return fmt.Errorf("failed to get balance for asset %d: %v", cfg.QuoteAsset, err)
-			}
-			balanceTracker[cfg.QuoteAsset] = &trackedBalance{
-				balanceAvailable: bal.Available,
-			}
+		err = trackAsset(cfg.QuoteAsset)
+		if err != nil {
+			return err
 		}
 
 		baseBalance := balanceTracker[cfg.BaseAsset]
@@ -357,6 +370,11 @@ const (
 	balTypePendingRefund
 )
 
+const (
+	balanceModIncrease = true
+	balanceModDecrease = false
+)
+
 // balanceMod is passed to modifyBotBalance to increase or decrease one
 // of the bot's balances for an asset.
 type balanceMod struct {
@@ -384,55 +402,28 @@ func (m *MarketMaker) modifyBotBalance(botID string, mods []*balanceMod) {
 			continue
 		}
 
-		switch mod.typ {
-		case balTypeAvailable:
+		newFieldValue := func(balanceType string, initialValue uint64) uint64 {
 			if mod.increase {
-				assetBalance.Available += mod.amount
+				return initialValue + mod.amount
 			} else {
 				if assetBalance.Available < mod.amount {
-					m.log.Errorf("modifyBotBalance: bot %s has insufficient balance for asset %d. "+
-						"balance: %d, amount: %d", botID, mod.assetID, assetBalance.Available, mod.amount)
-					assetBalance.Available = 0
-					return
+					m.log.Errorf("modifyBotBalance: bot %s has insufficient %s for asset %d. "+
+						"balance: %d, amount: %d", botID, balanceType, mod.assetID, initialValue, mod.amount)
+					return 0
 				}
-				assetBalance.Available -= mod.amount
+				return initialValue - mod.amount
 			}
+		}
+
+		switch mod.typ {
+		case balTypeAvailable:
+			assetBalance.Available = newFieldValue("available balance", assetBalance.Available)
 		case balTypeFundingOrder:
-			if mod.increase {
-				assetBalance.FundingOrder += mod.amount
-			} else {
-				if assetBalance.FundingOrder < mod.amount {
-					m.log.Errorf("modifyBotBalance: bot %s has insufficient funding order for asset %d. "+
-						"balance: %d, amount: %d", botID, mod.assetID, assetBalance.FundingOrder, mod.amount)
-					assetBalance.FundingOrder = 0
-					return
-				}
-				assetBalance.FundingOrder -= mod.amount
-			}
+			assetBalance.FundingOrder = newFieldValue("funding order", assetBalance.FundingOrder)
 		case balTypePendingRedeem:
-			if mod.increase {
-				assetBalance.PendingRedeem += mod.amount
-			} else {
-				if assetBalance.PendingRedeem < mod.amount {
-					m.log.Errorf("modifyBotBalance: bot %s has insufficient pending redeem for asset %d. "+
-						"balance: %d, amount: %d", botID, mod.assetID, assetBalance.PendingRedeem, mod.amount)
-					assetBalance.PendingRedeem = 0
-					return
-				}
-				assetBalance.PendingRedeem -= mod.amount
-			}
+			assetBalance.PendingRedeem = newFieldValue("pending redeem", assetBalance.PendingRedeem)
 		case balTypePendingRefund:
-			if mod.increase {
-				assetBalance.PendingRefund += mod.amount
-			} else {
-				if assetBalance.PendingRefund < mod.amount {
-					m.log.Errorf("modifyBotBalance: bot %s has insufficient pending refund for asset %d. "+
-						"balance: %d, amount: %d", botID, mod.assetID, assetBalance.PendingRefund, mod.amount)
-					assetBalance.PendingRefund = 0
-					return
-				}
-				assetBalance.PendingRefund -= mod.amount
-			}
+			assetBalance.PendingRefund = newFieldValue("pending refund", assetBalance.PendingRefund)
 		}
 	}
 }
@@ -500,13 +491,13 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		var balanceMods []*balanceMod
 		if orderInfo.order.Sell {
 			balanceMods = []*balanceMod{
-				{false, orderInfo.order.BaseID, balTypeFundingOrder, match.Qty},
-				{true, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
+				{balanceModDecrease, orderInfo.order.BaseID, balTypeFundingOrder, match.Qty},
+				{balanceModIncrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
 			}
 		} else {
 			balanceMods = []*balanceMod{
-				{false, orderInfo.order.QuoteID, balTypeFundingOrder, calc.BaseToQuote(match.Rate, match.Qty)},
-				{true, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
+				{balanceModDecrease, orderInfo.order.QuoteID, balTypeFundingOrder, calc.BaseToQuote(match.Rate, match.Qty)},
+				{balanceModIncrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
 			}
 		}
 
@@ -517,11 +508,11 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		return
 	}
 
-	if _, handled := orderInfo.matchesRefunded[matchID]; handled {
+	if _, handled := orderInfo.matchesSettled[matchID]; handled {
 		return
 	}
 
-	orderInfo.matchesRefunded[matchID] = struct{}{}
+	orderInfo.matchesSettled[matchID] = struct{}{}
 
 	if match.Refund != nil {
 		// TODO: Currently refunds are not handled properly. Core gives no way to
@@ -541,13 +532,13 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		var balanceMods []*balanceMod
 		if orderInfo.order.Sell {
 			balanceMods = []*balanceMod{
-				{false, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
-				{true, orderInfo.order.BaseID, balTypeAvailable, match.Qty},
+				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
+				{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty},
 			}
 		} else {
 			balanceMods = []*balanceMod{
-				{false, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
-				{true, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty)},
+				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
+				{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty)},
 			}
 		}
 		m.log.Tracef("oid: %s, increasing balance due to refund")
@@ -568,8 +559,8 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		m.log.Tracef("oid: %s, increasing balance due to redeem, redeemQty - %v, maxRedeemFees - %v", oid, redeemQty, maxRedeemFees)
 
 		balanceMods := []*balanceMod{
-			{false, redeemAsset, balTypePendingRedeem, redeemQty - maxRedeemFees},
-			{true, redeemAsset, balTypeAvailable, redeemQty - maxRedeemFees},
+			{balanceModDecrease, redeemAsset, balTypePendingRedeem, redeemQty - maxRedeemFees},
+			{balanceModIncrease, redeemAsset, balTypeAvailable, redeemQty - maxRedeemFees},
 		}
 		m.modifyBotBalance(orderInfo.bot, balanceMods)
 	}
@@ -636,8 +627,8 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 				o.ID, orderInfo.initialFundsLocked, filledQty, filledLots, maxSwapFees)
 
 			balanceMods := []*balanceMod{
-				{true, fromAsset, balTypeAvailable, orderInfo.initialFundsLocked - usedFunds},
-				{false, fromAsset, balTypeFundingOrder, orderInfo.initialFundsLocked - usedFunds},
+				{balanceModIncrease, fromAsset, balTypeAvailable, orderInfo.initialFundsLocked - usedFunds},
+				{balanceModDecrease, fromAsset, balTypeFundingOrder, orderInfo.initialFundsLocked - usedFunds},
 			}
 			m.modifyBotBalance(orderInfo.bot, balanceMods)
 		} else {
@@ -655,8 +646,8 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 		if maxSwapFees > o.FeesPaid.Swap {
 			m.log.Tracef("oid: %s, return excess swap fees, maxSwapFees %v, swap fees %v", o.ID, maxSwapFees, o.FeesPaid.Swap)
 			balanceMods := []*balanceMod{
-				{true, fromAsset, balTypeAvailable, maxSwapFees - o.FeesPaid.Swap},
-				{false, fromAsset, balTypeFundingOrder, maxSwapFees},
+				{balanceModIncrease, fromAsset, balTypeAvailable, maxSwapFees - o.FeesPaid.Swap},
+				{balanceModDecrease, fromAsset, balTypeFundingOrder, maxSwapFees},
 			}
 			m.modifyBotBalance(orderInfo.bot, balanceMods)
 		} else if maxSwapFees < o.FeesPaid.Swap {
@@ -669,8 +660,8 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 				m.log.Tracef("oid: %s, return excess redeem fees (accountLocker), initialRedeemFeesLocked %v, redemption fees %v",
 					o.ID, orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
 				balanceMods := []*balanceMod{
-					{true, toAsset, balTypeAvailable, orderInfo.initialRedeemFeesLocked - o.FeesPaid.Redemption},
-					{false, toAsset, balTypeFundingOrder, orderInfo.initialRedeemFeesLocked},
+					{balanceModIncrease, toAsset, balTypeAvailable, orderInfo.initialRedeemFeesLocked - o.FeesPaid.Redemption},
+					{balanceModDecrease, toAsset, balTypeFundingOrder, orderInfo.initialRedeemFeesLocked},
 				}
 				m.modifyBotBalance(orderInfo.bot, balanceMods)
 			} else {
@@ -682,7 +673,7 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 			if maxRedeemFees > o.FeesPaid.Redemption {
 				m.log.Tracef("oid: %s, return excess redeem fees, maxRedeemFees %v, redemption fees %v", o.ID, maxRedeemFees, o.FeesPaid.Redemption)
 				balanceMods := []*balanceMod{
-					{true, toAsset, balTypeAvailable, maxRedeemFees - o.FeesPaid.Redemption},
+					{balanceModIncrease, toAsset, balTypeAvailable, maxRedeemFees - o.FeesPaid.Redemption},
 				}
 				m.modifyBotBalance(orderInfo.bot, balanceMods)
 			} else if maxRedeemFees < o.FeesPaid.Redemption {
@@ -792,13 +783,4 @@ func (m *MarketMaker) Stop() {
 	if m.die != nil {
 		m.die()
 	}
-}
-
-func NewMarketMaker(c clientCore, log dex.Logger) (*MarketMaker, error) {
-	return &MarketMaker{
-		core:    c,
-		log:     log,
-		running: atomic.Bool{},
-		orders:  make(map[order.OrderID]*orderInfo),
-	}, nil
 }

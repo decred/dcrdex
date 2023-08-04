@@ -5514,27 +5514,20 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
 
 	if form.UseMaxFeeRate {
 		dc.assetsMtx.Lock()
-		swapAsset := dc.assets[wallets.fromWallet.AssetID]
+		swapAsset, redeemAsset := dc.assets[wallets.fromWallet.AssetID], dc.assets[wallets.toWallet.AssetID]
+		dc.assetsMtx.Unlock()
 		if swapAsset == nil {
-			dc.assetsMtx.Unlock()
 			return 0, 0, fmt.Errorf("no asset found for %d", wallets.fromWallet.AssetID)
 		}
-		swapFeeRate = swapAsset.MaxFeeRate
-
-		redeemAsset := dc.assets[wallets.toWallet.AssetID]
 		if redeemAsset == nil {
-			dc.assetsMtx.Unlock()
 			return 0, 0, fmt.Errorf("no asset found for %d", wallets.toWallet.AssetID)
 		}
-
-		redeemFeeRate = redeemAsset.MaxFeeRate
-		dc.assetsMtx.Unlock()
+		swapFeeRate, redeemFeeRate = swapAsset.MaxFeeRate, redeemAsset.MaxFeeRate
 	} else {
 		swapFeeRate = c.feeSuggestionAny(wallets.fromWallet.AssetID) // server rates only for the swap init
 		if swapFeeRate == 0 {
 			return 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
 		}
-
 		redeemFeeRate = c.feeSuggestionAny(wallets.toWallet.AssetID) // wallet rate or server rate
 		if redeemFeeRate == 0 {
 			return 0, 0, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", wallets.toWallet.Symbol, form.Host)
