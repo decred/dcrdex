@@ -259,12 +259,40 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 		}
 	}
 
-	tierDeficit := int64(state.targetTier) - state.tier
-	state.mustPost = tierDeficit + state.weakStrength - state.pendingStrength
-	// If weak bonds expiring would put the number of live and pending bonds
-	// to zero, replace the weak bonds.
-	if state.mustPost <= 0 && state.weakStrength >= state.liveStrength+state.pendingStrength {
-		state.mustPost = state.weakStrength - state.pendingStrength
+	// This old way is bugged because we have no way of knowing how many bonus
+	// tiers the server has assigned us, because it is not directly reported in
+	// any comms and  to calculate it locally, we would need to know the
+	// server's ban score, which is configurable and not reported. We would also
+	// need to know our own score, but after the ConnectResult, the server
+	// doesn't send score updates.
+	//
+	// The old way
+	// -----------
+	// tierDeficit := int64(state.targetTier) - state.tier
+	// state.mustPost = tierDeficit + state.weakStrength - state.pendingStrength
+	// -----------
+	//
+	// Instead, if the server says we're short, we assume that we have zero
+	// bonus tiers and use the old calculation.
+	serverTierDeficit := int64(state.targetTier) - state.tier + state.weakStrength - state.pendingStrength
+	if serverTierDeficit > 0 {
+		state.mustPost = serverTierDeficit
+	} else {
+		// But if the server says we're tiered up, we may be so because we have
+		// bonus tiers, which ultimately causes us to ignore weak bonds. In
+		// that case, just make sure that our local bond data is sufficient to
+		// get our target tier. For clients with low targetTier and good trading
+		// history, this will be the primary route through which weak bonds are
+		// renewed.
+		// Note: For users with targetTier > 1, unknown bonus tiers can also
+		// cause us to broadcast renewal bonds that are too small, resulting
+		// in split bonds that cost the user unnecessary tx fees. This solution
+		// is only a stop-gap. A proper solution will require more data from the
+		// API so we can know our bonus tiers.
+		bondTierDeficit := int64(state.targetTier) - state.liveStrength - state.pendingStrength + state.weakStrength
+		if bondTierDeficit > 0 {
+			state.mustPost = bondTierDeficit
+		}
 	}
 
 	return state
