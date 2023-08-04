@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/keygen"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 )
@@ -196,7 +197,8 @@ func (c *Core) dexBondConfig(dc *dexConnection, now int64) *dexBondCfg {
 }
 
 type dexAcctBondState struct {
-	tierChange, tier                            int64
+	*account.TierReport
+	tierChange                                  int64
 	targetTier                                  uint64
 	pendingStrength, weakStrength, liveStrength int64
 	weak                                        []*db.Bond
@@ -235,7 +237,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	}
 
 	state.tierChange = dc.acct.tierChange // since last reserves update
-	state.tier, state.targetTier = dc.acct.tier, dc.acct.targetTier
+	state.TierReport, state.targetTier = dc.acct.tier, dc.acct.targetTier
 	state.bondAssetID, state.maxBondedAmt = dc.acct.bondAsset, dc.acct.maxBondedAmt
 	// Screen the unexpired bonds slices.
 	dc.acct.bonds = filterExpiredBonds(dc.acct.bonds)
@@ -257,7 +259,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 		}
 	}
 
-	tierDeficit := int64(state.targetTier) - state.tier
+	tierDeficit := int64(state.targetTier) - state.Bonded
 	state.mustPost = tierDeficit + state.weakStrength - state.pendingStrength
 
 	return state
@@ -434,8 +436,8 @@ func (c *Core) postRequiredBonds(dc *dexConnection, cfg *dexBondCfg, state *dexA
 		return
 	}
 
-	c.log.Infof("Gotta post %d bond increments now. Target tier %d, current tier %d (%d weak, %d pending)",
-		state.mustPost, state.targetTier, state.tier, state.weakStrength, state.pendingStrength)
+	c.log.Infof("Gotta post %d bond increments now. Target tier %d, current bonded tier %d (%d weak, %d pending)",
+		state.mustPost, state.targetTier, state.Bonded, state.weakStrength, state.pendingStrength)
 
 	if !unlocked || dc.status() != comms.Connected {
 		c.log.Warnf("Unable to post the required bond while disconnected or account is locked.")
@@ -598,11 +600,10 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 	if err != nil {
 		return codedError(registerErr, err)
 	}
-
 	// Check the response signature.
 	err = dc.acct.checkSig(append(preBondRes.Serialize(), bond.UnsignedTx...), preBondRes.Sig)
 	if err != nil {
-		return fmt.Errorf("preValidateBond: DEX signature validation error: %v", err)
+		return newError(signatureErr, "preValidateBond: DEX signature validation error: %v", err)
 	}
 
 	if preBondRes.Amount != bond.Amount {
@@ -622,7 +623,6 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 	if len(pkBytes) == 0 {
 		return nil, fmt.Errorf("account keys not decrypted")
 	}
-
 	assetID, bondCoin := bond.AssetID, bond.CoinID
 	bondCoinStr := coinIDString(assetID, bondCoin)
 
@@ -640,6 +640,10 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 	if err != nil {
 		return nil, codedError(registerErr, err)
 	}
+
+	dc.acct.authMtx.Lock()
+	dc.updateTierReport(postBondRes.TierReportV2, &postBondRes.Tier, nil, nil)
+	dc.acct.authMtx.Unlock()
 
 	// Check the response signature.
 	err = dc.acct.checkSig(postBondRes.Serialize(), postBondRes.Sig)
@@ -929,7 +933,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 			inBonds, live := dc.bondTotalInternal(bondAssetID)
 			mod := int64(bondOverlap * targetTier * bondAssetAmt)
 			// If we appear to be penalized, add increments to mod.
-			if tierOffset := int64(bondedTier()) - dc.acct.tier; tierOffset > 0 {
+			if tierOffset := int64(bondedTier()) - dc.acct.tier.Bonded; tierOffset > 0 {
 				mod += tierOffset * int64(bondAssetAmt)
 			}
 			dc.acct.totalReserved = mod
@@ -974,7 +978,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 			mod = bondOverlap * tierDelta * int64(bondAssetAmt)
 			if oldTarget == 0 { // enabling maintenance, not just a delta
 				// If we appear to be penalized, add increments to mod.
-				if tierOffset := int64(bondedTier()) - dc.acct.tier; tierOffset > 0 {
+				if tierOffset := int64(bondedTier()) - dc.acct.tier.Bonded; tierOffset > 0 {
 					mod += tierOffset * int64(bondAssetAmt)
 				}
 				// Wallet already has live unspent bonds (inBonds) registered.
@@ -1131,7 +1135,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 		if bal, err := wallet.Balance(); err != nil {
 			return nil, newError(bondAssetErr, "unable to check wallet balance: %w", err)
 		} else if bal.Available < form.Bond {
-			return nil, newError(bondAssetErr, "insufficient available balance")
+			return nil, newError(walletBalanceErr, "insufficient available balance")
 		}
 
 		// New DEX connection.
@@ -1163,7 +1167,6 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 		}
 		// dc.acct is now configured with encKey, privKey, and id for a new
 		// (unregistered) account.
-
 		if paid {
 			success = true
 			// The listen goroutine is already running, now track the conn.
@@ -1365,9 +1368,8 @@ func (c *Core) updatePendingBondConfs(dc *dexConnection, assetID uint32, coinID 
 	dc.acct.pendingBondsConfs[bondIDStr] = confs
 }
 
-func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, newTier int64) error {
+func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, newEffectiveTier int64) error {
 	bondIDStr := coinIDString(assetID, coinID)
-
 	// Update dc.acct.{bonds,pendingBonds,tier} under authMtx lock.
 	var foundPending, foundConfirmed bool
 	dc.acct.authMtx.Lock()
@@ -1391,7 +1393,7 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, n
 		}
 	}
 
-	dc.acct.tier = newTier
+	dc.acct.effectiveTier = newEffectiveTier
 	targetTier := dc.acct.targetTier
 	isAuthed := dc.acct.isAuthed
 	dc.acct.authMtx.Unlock()
@@ -1403,8 +1405,8 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, n
 			return fmt.Errorf("db.ConfirmBond failure: %w", err)
 		}
 		c.log.Infof("Bond %s (%s) confirmed.", bondIDStr, unbip(assetID))
-		details := fmt.Sprintf("New tier = %d (target = %d).", newTier, targetTier) // TODO: format to subject,details
-		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, string(TopicBondConfirmed), details, db.Success, dc.acct.host, newTier))
+		details := fmt.Sprintf("New tier = %d (target = %d).", newEffectiveTier, targetTier) // TODO: format to subject,details
+		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, string(TopicBondConfirmed), details, db.Success, dc.acct.host, newEffectiveTier))
 	} else if !foundConfirmed {
 		c.log.Errorf("bondConfirmed: Bond %s (%s) not found", bondIDStr, unbip(assetID))
 		// just try to authenticate...
@@ -1428,9 +1430,9 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, n
 		return err
 	}
 
-	details := fmt.Sprintf("New tier = %d", newTier) // TODO: format to subject,details
+	details := fmt.Sprintf("New tier = %d", newEffectiveTier) // TODO: format to subject,details
 	c.notify(newBondPostNoteWithTier(TopicAccountRegistered, string(TopicAccountRegistered),
-		details, db.Success, dc.acct.host, newTier)) // possibly redundant with SubjectBondConfirmed
+		details, db.Success, dc.acct.host, newEffectiveTier)) // possibly redundant with SubjectBondConfirmed
 
 	return nil
 }
@@ -1463,7 +1465,7 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, new
 		}
 	}
 
-	dc.acct.tier = newTier
+	dc.acct.effectiveTier = newTier
 	targetTier := dc.acct.targetTier
 	dc.acct.authMtx.Unlock()
 

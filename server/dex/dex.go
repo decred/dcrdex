@@ -155,6 +155,8 @@ func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, bon
 		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)), // temporary while we figure it out
 		BinSizes:         candles.BinSizes,
 		RegFees:          regAssets,
+		ScoreIncrement:   cfg.BanScore,
+		MaxScore:         auth.ScoringMatchLimit,
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -620,6 +622,10 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 		bondCoinID, amt, _, _, lockTime, acct, err = bc.ParseBondTx(version, rawTx)
 		return
+	}
+
+	if cfg.BanScore == 0 {
+		cfg.BanScore = auth.DefaultBanScore
 	}
 
 	authCfg := auth.Config{

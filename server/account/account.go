@@ -166,3 +166,22 @@ func (r Rule) Description() string {
 func (r Rule) Punishable() bool {
 	return r > NoRule && r < MaxRule
 }
+
+// TierReport is a part of a number of server-originating messages. It was
+// introduced with the v2 ConnectResult.
+type TierReport struct {
+	Bonded  int64 `json:"bondTier"`
+	Revoked int64 `json:"revokedTiers"`
+	Bonus   int64 `json:"bonusTiers"`
+	Legacy  bool  `json:"legacyTier"`
+	Score   int32 `json:"score"`
+}
+
+// Effective calculates the effective tier for trading limit calculations.
+func (r *TierReport) Effective() int64 {
+	tier := r.Bonded - r.Revoked + r.Bonus
+	if r.Legacy {
+		tier++
+	}
+	return tier
+}
