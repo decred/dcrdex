@@ -18,9 +18,6 @@ ALPHA_LISTEN_PORT="20775"
 BETA_LISTEN_PORT="20776"
 ALPHA_RPC_PORT="20777"
 BETA_RPC_PORT="20778"
-# additional daemon args - currently none
-EXTRA_ARGS=
-#EXTRA_ARGS="-usehd=1"
 WALLET_PASSWORD="abc"
 
 # These should be BIP39 mnemomic seed words representing the wallet's hdseed.
