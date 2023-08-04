@@ -1553,6 +1553,13 @@ export default class MarketsPage extends BasePage {
       header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       details.qty.textContent = mord.header.qty.textContent = Doc.formatCoinValue(ord.qty, market.baseUnitInfo)
       details.rate.textContent = mord.header.rate.textContent = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
+      let rate = ord.rate
+      let ratePrefix = ''
+      if (ord.type === OrderUtil.Market && ord.matches?.length > 0) {
+        ratePrefix = '~ '
+        rate = OrderUtil.averageRate(ord)
+      }
+      details.rate.textContent = mord.header.rate.textContent = ratePrefix + Doc.formatRateFullPrecision(rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
       header.baseSymbol.textContent = market.baseUnitInfo.conventional.unit
       details.type.textContent = market.quoteUnitInfo.conventional.unit
       this.updateMetaOrder(mord)

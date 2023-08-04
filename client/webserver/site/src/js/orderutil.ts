@@ -7,6 +7,7 @@ import {
   Match
 } from './registry'
 import { BooleanOption, XYRangeOption } from './opts'
+import Doc from './doc'
 
 export const Limit = 1
 export const Market = 2
@@ -117,6 +118,26 @@ export function settled (order: Order) {
       (match.side === Taker && match.status >= MatchComplete)
     return redeemed ? settled + qty(match) : settled
   }, 0)
+}
+
+/* averageRateString returns a formatting string containing the average rate of
+the matches that have been filled in an order. */
+export function averageRateString (ord: Order): string {
+  if (ord.matches?.length === 0) return '0'
+  return '~ ' + Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, averageRate(ord)))
+}
+
+/* averageRate returns a the average rate of the matches that have been filled
+in an order. */
+export function averageRate (ord: Order): number {
+  if (ord.matches?.length === 0) return 0
+  let rateProduct = 0
+  let baseQty = 0
+  ord.matches.forEach((m) => {
+    baseQty += m.qty
+    rateProduct += (m.rate * m.qty) // order ~ 1e16
+  })
+  return rateProduct / baseQty
 }
 
 /* baseToQuote returns the quantity of the quote asset. */

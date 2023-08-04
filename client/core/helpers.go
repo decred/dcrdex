@@ -326,15 +326,19 @@ func (ord *OrderReader) StatusString() string {
 
 // SimpleRateString is the formatted match rate.
 func (ord *OrderReader) SimpleRateString() string {
+	if ord.Type == order.MarketOrderType {
+		return ord.AverageRateString()
+	}
 	return ord.formatRate(ord.Rate)
 }
 
 // RateString is a formatted rate with units.
 func (ord *OrderReader) RateString() string {
+	rateStr := ord.formatRate(ord.Rate)
 	if ord.Type == order.MarketOrderType {
-		return "market"
+		rateStr = ord.AverageRateString()
 	}
-	return fmt.Sprintf("%s %s/%s", ord.formatRate(ord.Rate), ord.QuoteUnitInfo.Conventional.Unit, ord.BaseUnitInfo.Conventional.Unit)
+	return fmt.Sprintf("%s %s/%s", rateStr, ord.QuoteUnitInfo.Conventional.Unit, ord.BaseUnitInfo.Conventional.Unit)
 }
 
 // AverageRateString returns a formatting string containing the average rate of
@@ -348,7 +352,7 @@ func (ord *OrderReader) AverageRateString() string {
 		baseQty += match.Qty
 		rateProduct += match.Rate * match.Qty // order ~ 1e16
 	}
-	return ord.formatRate(rateProduct / baseQty)
+	return "~ " + ord.formatRate(rateProduct/baseQty)
 }
 
 // SwapFeesString is a formatted string of the paid swap fees.
