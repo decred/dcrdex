@@ -80,7 +80,8 @@ const (
 	InsertCandle = `INSERT INTO %s (end_stamp, candle_dur, match_volume,
 		quote_volume, high_rate, low_rate, start_rate, end_rate
 	)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`
+	// How to ON CONFLICT (end_stamp, candle_dur) DO NOTHING ?
 
 	SelectCandles = `SELECT end_stamp, match_volume, quote_volume,
 		high_rate, low_rate, start_rate, end_rate
