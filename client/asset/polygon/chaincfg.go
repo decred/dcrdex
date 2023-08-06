@@ -16,7 +16,6 @@ import (
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/ethereum/go-ethereum/common"
 	ethcore "github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -85,41 +84,23 @@ func simnetDataDir() (string, error) {
 	return filepath.Join(u.HomeDir, "dextest", "polygon"), nil
 }
 
-// ChainConfig returns chain configuration for the specified network.
-func ChainConfig(net dex.Network) (c ethconfig.Config, err error) {
-	// There are some minor differences between ethconfig.Default and the
-	// polygon Defaults. The Miner settings are slightly different. There are
-	// some new fields added in Polygon. I don't think any of them are
-	// significant for us.
-	c = ethconfig.Defaults
-	c.RPCTxFeeCap = 5
-
+// ChainConfig returns the core configuration for the blockchain.
+func ChainConfig(net dex.Network) (c *params.ChainConfig, err error) {
 	switch net {
-	// Ethereum
-	case dex.Testnet:
-		c.Genesis = dexpolygon.DefaultMumbaiGenesisBlock()
 	case dex.Mainnet:
-		c.Genesis = dexpolygon.DefaultBorMainnetGenesisBlock()
+		return dexpolygon.BorMainnetChainConfig, nil
+	case dex.Testnet:
+		return dexpolygon.MumbaiChainConfig, nil
 	case dex.Simnet:
-		c.Genesis, err = readSimnetGenesisFile()
-		if err != nil {
-			return c, fmt.Errorf("readSimnetGenesisFile error: %w", err)
-		}
 	default:
 		return c, fmt.Errorf("unknown network %d", net)
-
 	}
-	c.NetworkId = c.Genesis.Config.ChainID.Uint64()
-	return
-}
-
-// ChainGenesis returns the genesis parameters for the specified network.
-func ChainGenesis(net dex.Network) (c *params.ChainConfig, err error) {
-	cfg, err := ChainConfig(net)
+	// simnet
+	g, err := readSimnetGenesisFile()
 	if err != nil {
-		return nil, err
+		return c, fmt.Errorf("readSimnetGenesisFile error: %w", err)
 	}
-	return cfg.Genesis.Config, nil
+	return g.Config, nil
 }
 
 // readSimnetGenesisFile reads the simnet genesis file.

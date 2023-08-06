@@ -667,7 +667,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 
 // newWallet is the constructor for an Ethereum asset.Wallet.
 func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
-	chainCfg, err := ChainGenesis(net)
+	chainCfg, err := ChainConfig(net)
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate Ethereum genesis configuration for network %s", net)
 	}

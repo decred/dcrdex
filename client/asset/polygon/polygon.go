@@ -51,13 +51,6 @@ var (
 		SupportedVersions: []uint32{0},
 		UnitInfo:          dexpolygon.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
-			// {
-			// 	Type:        walletTypeGeth,
-			// 	Tab:         "Native",
-			// 	Description: "Use the built-in DEX wallet (geth light node)",
-			// 	ConfigOpts:  WalletOpts,
-			// 	Seeded:      true,
-			// },
 			{
 				Type:        walletTypeRPC,
 				Tab:         "External",
@@ -77,7 +70,7 @@ type Driver struct{}
 
 // Open opens the Polygon exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-	chainCfg, err := ChainGenesis(net)
+	chainCfg, err := ChainConfig(net)
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate Polygon genesis configuration for network %s", net)
 	}

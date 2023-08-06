@@ -174,10 +174,10 @@ func mainErr() error {
 	switch chain {
 	case "eth":
 		wParams, err = walletParams(dexeth.VersionedGases, dexeth.ContractAddresses, dexeth.Tokens,
-			eth.NetworkCompatibilityData, eth.ChainGenesis, &dexeth.UnitInfo)
+			eth.NetworkCompatibilityData, eth.ChainConfig, &dexeth.UnitInfo)
 	case "polygon":
 		wParams, err = walletParams(dexpolygon.VersionedGases, dexpolygon.ContractAddresses, dexpolygon.Tokens,
-			polygon.NetworkCompatibilityData, polygon.ChainGenesis, &dexpolygon.UnitInfo)
+			polygon.NetworkCompatibilityData, polygon.ChainConfig, &dexpolygon.UnitInfo)
 	default:
 		return fmt.Errorf("chain %s not known", chain)
 	}

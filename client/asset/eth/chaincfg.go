@@ -94,8 +94,8 @@ func simnetDataDir() (string, error) {
 	return filepath.Join(u.HomeDir, "dextest", "eth"), nil
 }
 
-// ChainConfig returns chain configuration for the specified network.
-func ChainConfig(net dex.Network) (c ethconfig.Config, err error) {
+// ETHConfig returns the ETH protocol configuration for the specified network.
+func ETHConfig(net dex.Network) (c ethconfig.Config, err error) {
 	c = ethconfig.Defaults
 	switch net {
 	// Ethereum
@@ -116,9 +116,9 @@ func ChainConfig(net dex.Network) (c ethconfig.Config, err error) {
 	return
 }
 
-// ChainGenesis returns the genesis parameters for the specified network.
-func ChainGenesis(net dex.Network) (c *params.ChainConfig, err error) {
-	cfg, err := ChainConfig(net)
+// ChainConfig returns the core configuration for the blockchain.
+func ChainConfig(net dex.Network) (c *params.ChainConfig, err error) {
+	cfg, err := ETHConfig(net)
 	if err != nil {
 		return nil, err
 	}

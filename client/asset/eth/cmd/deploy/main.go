@@ -147,13 +147,13 @@ func mainErr() error {
 	switch chain {
 	case "eth":
 		bui = &dexeth.UnitInfo
-		chainCfg, err = eth.ChainGenesis(net)
+		chainCfg, err = eth.ChainConfig(net)
 		if err != nil {
 			return fmt.Errorf("error finding chain config: %v", err)
 		}
 	case "polygon":
 		bui = &dexpolygon.UnitInfo
-		chainCfg, err = polygon.ChainGenesis(net)
+		chainCfg, err = polygon.ChainConfig(net)
 		if err != nil {
 			return fmt.Errorf("error finding chain config: %v", err)
 		}

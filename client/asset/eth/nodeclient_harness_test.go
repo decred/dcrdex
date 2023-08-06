@@ -251,11 +251,10 @@ out:
 }
 
 func prepareRPCClient(name, dataDir string, providers []string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
-	ethCfg, err := ChainConfig(net)
+	cfg, err := ChainConfig(net)
 	if err != nil {
 		return nil, nil, err
 	}
-	cfg := ethCfg.Genesis.Config
 
 	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, net)
 	if err != nil {

@@ -18,14 +18,14 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 type MRPCTest struct {
 	ctx               context.Context
 	chain             string
-	chainConfigLookup func(net dex.Network) (c ethconfig.Config, err error)
-	compatDataLookup  func(net dex.Network) (c CompatibilityData, err error)
+	chainConfigLookup func(net dex.Network) (*params.ChainConfig, error)
+	compatDataLookup  func(net dex.Network) (CompatibilityData, error)
 	harnessDirectory  string
 	credentialsFile   string
 }
@@ -35,7 +35,7 @@ type MRPCTest struct {
 // See README for getgas for format
 func NewMRPCTest(
 	ctx context.Context,
-	cfgLookup func(net dex.Network) (c ethconfig.Config, err error),
+	cfgLookup func(net dex.Network) (*params.ChainConfig, error),
 	compatLookup func(net dex.Network) (c CompatibilityData, err error),
 	chainSymbol string,
 ) *MRPCTest {
@@ -77,7 +77,7 @@ func (m *MRPCTest) rpcClient(dir string, seed []byte, endpoints []string, net de
 		return nil, fmt.Errorf("compatDataLookup error: %v", err)
 	}
 
-	chainID := int64(cfg.NetworkId)
+	chainID := cfg.ChainID.Int64()
 	if err := CreateEVMWallet(chainID, &asset.CreateWalletParams{
 		Type: walletTypeRPC,
 		Seed: seed,
@@ -92,7 +92,7 @@ func (m *MRPCTest) rpcClient(dir string, seed []byte, endpoints []string, net de
 		return nil, fmt.Errorf("error creating wallet: %v", err)
 	}
 
-	return newMultiRPCClient(dir, endpoints, log, cfg.Genesis.Config, net)
+	return newMultiRPCClient(dir, endpoints, log, cfg, net)
 }
 
 func (m *MRPCTest) TestHTTP(t *testing.T, port string) {
@@ -279,7 +279,7 @@ func (m *MRPCTest) TestMainnetCompliance(t *testing.T) {
 	}
 
 	log := dex.StdOutLogger("T", dex.LevelTrace)
-	providers, err := connectProviders(ctx, providerLookup, log, cfg.Genesis.Config.ChainID, dex.Mainnet)
+	providers, err := connectProviders(ctx, providerLookup, log, cfg.ChainID, dex.Mainnet)
 	if err != nil {
 		t.Fatal(err)
 	}
