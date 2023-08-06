@@ -376,8 +376,11 @@ type Order struct {
 	Cancelling        bool              `json:"cancelling"`
 	Canceled          bool              `json:"canceled"`
 	FeesPaid          *FeeBreakdown     `json:"feesPaid"`
+	AllFeesConfirmed  bool              `json:"allFeesConfirmed"`
 	FundingCoins      []*Coin           `json:"fundingCoins"`
 	LockedAmt         uint64            `json:"lockedamt"`
+	RedeemLockedAmt   uint64            `json:"redeemLockedAmt"`
+	RefundLockedAmt   uint64            `json:"refundLockedAmt"`
 	AccelerationCoins []*Coin           `json:"accelerationCoins"`
 	Rate              uint64            `json:"rate"`          // limit only
 	TimeInForce       order.TimeInForce `json:"tif"`           // limit only
@@ -1009,11 +1012,12 @@ type MultiTradeForm struct {
 
 // SingleLotFeesForm is used to determine the fees for a single lot trade.
 type SingleLotFeesForm struct {
-	Host    string            `json:"host"`
-	Base    uint32            `json:"base"`
-	Quote   uint32            `json:"quote"`
-	Sell    bool              `json:"sell"`
-	Options map[string]string `json:"options"`
+	Host          string            `json:"host"`
+	Base          uint32            `json:"base"`
+	Quote         uint32            `json:"quote"`
+	Sell          bool              `json:"sell"`
+	Options       map[string]string `json:"options"`
+	UseMaxFeeRate bool              `json:"useMaxFeeRate"`
 }
 
 // marketName is a string ID constructed from the asset IDs.

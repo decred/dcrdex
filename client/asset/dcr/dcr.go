@@ -1695,6 +1695,23 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, opt
 	return totalTxSize * bumpedNetRate, nil
 }
 
+// MaxFundingFees returns the maximum funding fees for an order/multi-order.
+func (dcr *ExchangeWallet) MaxFundingFees(numTrades uint32, options map[string]string) uint64 {
+	useSplit := dcr.config().useSplitTx
+	if options != nil {
+		if split, ok := options[splitKey]; ok {
+			useSplit, _ = strconv.ParseBool(split)
+		}
+	}
+	if !useSplit {
+		return 0
+	}
+
+	const numInputs = 12 // plan for lots of inputs to get a safe estimate
+	splitTxSize := dexdcr.MsgTxOverhead + (numInputs * dexdcr.P2PKHInputSize) + (uint64(numTrades+1) * dexdcr.P2PKHOutputSize)
+	return splitTxSize * dcr.config().feeRateLimit
+}
+
 // splitOption constructs an *asset.OrderOption with customized text based on the
 // difference in fees between the configured and test split condition.
 func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTXO, bump float64) *asset.OrderOption {

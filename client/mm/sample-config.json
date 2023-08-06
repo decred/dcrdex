@@ -2,8 +2,12 @@
     "host": "127.0.0.1:17273",
     "baseAsset": 42,
     "quoteAsset": 0,
+    "baseBalanceType": 0,
+    "baseBalance": 50,
+    "quoteBalanceType": 0,
+    "quoteBalance": 50,
     "marketMakingConfig": {
-        "lots": 1,
+        "lots": 2,
         "gapStrategy": "multiplier",
         "gapFactor": 1,
         "driftTolerance": 0.001,

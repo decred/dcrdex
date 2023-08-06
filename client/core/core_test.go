@@ -1064,9 +1064,11 @@ func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Byte
 func (w *TXCWallet) ReturnRedemptionAddress(addr string) {
 	w.returnedAddr = addr
 }
-
 func (w *TXCWallet) ReturnRefundContracts(contracts [][]byte) {
 	w.returnedContracts = contracts
+}
+func (w *TXCWallet) MaxFundingFees(_ uint32, _ map[string]string) uint64 {
+	return 0
 }
 
 func (*TXCWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) (coins []asset.Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error) {
