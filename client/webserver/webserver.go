@@ -6,7 +6,7 @@ package webserver
 import (
 	"context"
 	"crypto/elliptic"
-	"crypto/rand"
+	crand "crypto/rand"
 	"crypto/tls"
 	"embed"
 	"encoding/hex"
@@ -672,7 +672,7 @@ func prepareAddr(addr net.Addr) (string, bool) {
 // deauth should be used to invalidate tokens on logout.
 func (s *WebServer) authorize() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	crand.Read(b)
 	token := hex.EncodeToString(b)
 	zero(b)
 	s.authMtx.Lock()

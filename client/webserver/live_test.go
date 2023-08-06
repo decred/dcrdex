@@ -12,7 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
-	"math/rand"
+	mrand "math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +39,8 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -64,6 +66,9 @@ var (
 	doubleCreateAsyncErr  = false
 	randomizeOrdersCount  = false
 	initErrors            = false
+
+	rand   *mrand.Rand
+	titler = cases.Title(language.AmericanEnglish)
 )
 
 func dummySettings() map[string]string {
@@ -134,6 +139,8 @@ func userOrders(mktID string) (ords []*core.Order) {
 			Filled: filled,
 			Matches: []*core.Match{
 				{
+					MatchID: ordertest.RandomMatchID().Bytes(),
+					Rate:   uint64(ord.Rate * 1e8),
 					Qty:    uint64(rand.Float64() * float64(filled)),
 					Status: order.MatchComplete,
 				},
@@ -1895,7 +1902,7 @@ func (c *TCore) runRandomPokes() {
 	for {
 		select {
 		case <-time.NewTimer(nextWait()).C:
-			note := db.NewNotification(randStr(5, 30), core.Topic(randStr(5, 30)), strings.Title(randStr(5, 30)), randStr(5, 100), db.Poke)
+			note := db.NewNotification(randStr(5, 30), core.Topic(randStr(5, 30)), titler.String(randStr(5, 30)), randStr(5, 100), db.Poke)
 			c.noteFeed <- &note
 		case <-tCtx.Done():
 			return
@@ -1918,7 +1925,7 @@ func (c *TCore) runRandomNotes() {
 				severity = db.WarningLevel
 			}
 
-			note := db.NewNotification(randStr(5, 30), core.Topic(randStr(5, 30)), strings.Title(randStr(5, 30)), randStr(5, 100), severity)
+			note := db.NewNotification(randStr(5, 30), core.Topic(randStr(5, 30)), titler.String(randStr(5, 30)), randStr(5, 100), severity)
 			c.noteFeed <- &note
 		case <-tCtx.Done():
 			return
@@ -1998,15 +2005,14 @@ func TestServer(t *testing.T) {
 	delayBalance = true
 	doubleCreateAsyncErr = false
 	randomizeOrdersCount = true
-	initErrors = true
+	initErrors = false
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
 	time.AfterFunc(time.Minute*59, func() { shutdown() })
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	tCore := newTCore()
-
-	rand.Seed(time.Now().UnixNano())
+	rand = mrand.New(mrand.NewSource(time.Now().UnixNano()))
 
 	if initialize {
 		tCore.InitializeClient([]byte(""), nil)
