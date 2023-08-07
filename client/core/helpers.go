@@ -344,7 +344,8 @@ func (ord *OrderReader) RateString() string {
 // AverageRateString returns a formatting string containing the average rate of
 // the matches that have been filled in an order.
 func (ord *OrderReader) AverageRateString() string {
-	if len(ord.Matches) == 0 {
+	nMatch := len(ord.Matches)
+	if nMatch == 0 {
 		return "0"
 	}
 	var baseQty, rateProduct uint64
@@ -352,7 +353,11 @@ func (ord *OrderReader) AverageRateString() string {
 		baseQty += match.Qty
 		rateProduct += match.Rate * match.Qty // order ~ 1e16
 	}
-	return "~ " + ord.formatRate(rateProduct/baseQty)
+	rateStr := ord.formatRate(rateProduct / baseQty)
+	if nMatch > 1 {
+		rateStr = "~ " + rateStr // "~" only makes sense if the order has more than one match.
+	}
+	return rateStr
 }
 
 // SwapFeesString is a formatted string of the paid swap fees.

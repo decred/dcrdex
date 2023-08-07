@@ -1555,9 +1555,10 @@ export default class MarketsPage extends BasePage {
       details.rate.textContent = mord.header.rate.textContent = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
       let rate = ord.rate
       let ratePrefix = ''
-      if (ord.type === OrderUtil.Market && ord.matches?.length > 0) {
-        ratePrefix = '~ '
+      const nMatch = ord.matches?.length
+      if (ord.type === OrderUtil.Market && nMatch > 0) {
         rate = OrderUtil.averageRate(ord)
+        if (nMatch > 1) ratePrefix = '~ ' // ~ only makes sense if the order has more than one match
       }
       details.rate.textContent = mord.header.rate.textContent = ratePrefix + Doc.formatRateFullPrecision(rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
       header.baseSymbol.textContent = market.baseUnitInfo.conventional.unit
@@ -2367,7 +2368,7 @@ export default class MarketsPage extends BasePage {
 
   handleMatchNote (note: MatchNote) {
     const mord = this.metaOrders[note.orderID]
-    if (!mord) return this.refreshActiveOrders()
+    if (!mord || note.match.status === OrderUtil.NewlyMatched) return this.refreshActiveOrders()
     if (app().canAccelerateOrder(mord.ord)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
   }

@@ -123,8 +123,11 @@ export function settled (order: Order) {
 /* averageRateString returns a formatting string containing the average rate of
 the matches that have been filled in an order. */
 export function averageRateString (ord: Order): string {
-  if (ord.matches?.length === 0) return '0'
-  return '~ ' + Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, averageRate(ord)))
+  const nMatch = ord.matches?.length
+  if (nMatch === 0) return '0'
+  let rateStr = Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, averageRate(ord)))
+  if (nMatch > 1) rateStr = '~ ' + rateStr // "~" only makes sense if the order has more than one match.
+  return rateStr
 }
 
 /* averageRate returns a the average rate of the matches that have been filled
