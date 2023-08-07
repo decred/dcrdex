@@ -1,3 +1,5 @@
+//go:build !harness && !vspd
+
 package dcr
 
 import (

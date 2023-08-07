@@ -40,7 +40,6 @@ type walletConfig struct {
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	ActivelyUsed     bool    `ini:"special_activelyUsed"` //injected by core
 	ApiFeeFallback   bool    `ini:"apifeefallback"`
-	VSPURL           string  `ini:"vspurl"`
 }
 
 type rpcConfig struct {
