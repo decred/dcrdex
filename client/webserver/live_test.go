@@ -67,7 +67,7 @@ var (
 	randomizeOrdersCount  = false
 	initErrors            = false
 
-	rand   *mrand.Rand
+	rand   = mrand.New(mrand.NewSource(time.Now().UnixNano()))
 	titler = cases.Title(language.AmericanEnglish)
 )
 
@@ -140,9 +140,9 @@ func userOrders(mktID string) (ords []*core.Order) {
 			Matches: []*core.Match{
 				{
 					MatchID: ordertest.RandomMatchID().Bytes(),
-					Rate:   uint64(ord.Rate * 1e8),
-					Qty:    uint64(rand.Float64() * float64(filled)),
-					Status: order.MatchComplete,
+					Rate:    uint64(ord.Rate * 1e8),
+					Qty:     uint64(rand.Float64() * float64(filled)),
+					Status:  order.MatchComplete,
 				},
 			},
 			TimeInForce: tif,
@@ -2012,7 +2012,6 @@ func TestServer(t *testing.T) {
 	time.AfterFunc(time.Minute*59, func() { shutdown() })
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	tCore := newTCore()
-	rand = mrand.New(mrand.NewSource(time.Now().UnixNano()))
 
 	if initialize {
 		tCore.InitializeClient([]byte(""), nil)
@@ -2028,7 +2027,7 @@ func TestServer(t *testing.T) {
 
 	s, err := New(&Config{
 		Core:     tCore,
-		Addr:     "[::1]:54321",
+		Addr:     "127.0.0.1:54321",
 		Logger:   logger,
 		NoEmbed:  true, // use files on disk, and reload on each page load
 		HttpProf: true,
