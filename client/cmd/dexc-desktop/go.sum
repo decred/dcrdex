@@ -314,6 +314,12 @@ github.com/decred/go-socks v1.1.0 h1:dnENcc0KIqQo3HSXdgboXAHgqsCIutkqq6ntQjYtm2U
 github.com/decred/go-socks v1.1.0/go.mod h1:sDhHqkZH0X4JjSa02oYOGhcGHYp12FsY1jQ/meV8md0=
 github.com/decred/slog v1.2.0 h1:soHAxV52B54Di3WtKLfPum9OFfWqwtf/ygf9njdfnPM=
 github.com/decred/slog v1.2.0/go.mod h1:kVXlGnt6DHy2fV5OjSeuvCJ0OmlmTF6LFpEPMu/fOY0=
+github.com/decred/vspd/client/v2 v2.1.0 h1:RzwmM/FCvpJDskNMeqeJ8UNnlR7kLCl3JlG8iZiLbG0=
+github.com/decred/vspd/client/v2 v2.1.0/go.mod h1:r/CtdQF7TmuoIaFuanHtUMYYlQxWgRBGapdn4b+Bouc=
+github.com/decred/vspd/types v1.1.0 h1:hTeqQwgRUN2FGIbuCIdyzBejKV+jxKrmEIcLKxpsB1g=
+github.com/decred/vspd/types v1.1.0/go.mod h1:THsO8aBSwWBq6ZsIG25cNqbkNb+EEASXzLhFvODVc0s=
+github.com/decred/vspd/types/v2 v2.0.0 h1:FaPA+W4OOMRWK+Vk4fyyYdXoVLRMMRQsxzsnSjJjOnI=
+github.com/decred/vspd/types/v2 v2.0.0/go.mod h1:2xnNqedkt9GuL+pK8uIzDxqYxFlwLRflYFJH64b76n0=
 github.com/denis-tingajkin/go-header v0.4.2/go.mod h1:eLRHAVXzE5atsKAnNRDB90WHCFFnBUn4RN0nRcs1LJA=
 github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f/go.mod h1:xH/i4TFMt8koVQZ6WFms69WAsDWr2XsYL3Hkl7jkoLE=
 github.com/dgraph-io/badger v1.6.0/go.mod h1:zwt7syl517jmP8s94KqSxTlM6IMsdhYy6psNgSztDR4=

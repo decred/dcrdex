@@ -16,6 +16,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"math"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -27,14 +29,20 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/encode"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/wire"
 )
 
 const (
 	alphaAddress = "SsWKp7wtdTZYabYFYSc9cnxhwFEjA5g4pFc"
 	betaAddress  = "Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
+	gammaSeed    = "1285a47d6a59f9c548b2a72c2c34a2de97967bede3844090102bbba76707fe9d"
+	vspAddr      = "http://127.0.0.1:19591"
 )
 
 var (
@@ -58,18 +66,21 @@ func mineAlpha() error {
 	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:0", "./mine-alpha 1", "C-m").Run()
 }
 
-func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
+func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
-	cfgPath := filepath.Join(user.HomeDir, "dextest", "dcr", name, name+".conf")
-	settings, err := config.Parse(cfgPath)
-	if err != nil {
-		t.Fatalf("error reading config options: %v", err)
+	settings := make(map[string]string)
+	if !isInternal {
+		cfgPath := filepath.Join(user.HomeDir, "dextest", "dcr", name, name+".conf")
+		var err error
+		settings, err = config.Parse(cfgPath)
+		if err != nil {
+			t.Fatalf("error reading config options: %v", err)
+		}
 	}
-	settings["account"] = "default"
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
 		TipChange: func(err error) {
@@ -78,6 +89,16 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 		PeersChange: func(num uint32, err error) {
 			t.Logf("peer count = %d, err = %v", num, err)
 		},
+	}
+	if isInternal {
+		seed, err := hex.DecodeString(gammaSeed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dataDir := t.TempDir()
+		createSPVWallet(walletPassword, seed, dataDir, 0, 0, chaincfg.SimNetParams())
+		walletCfg.Type = walletTypeSPV
+		walletCfg.DataDir = dataDir
 	}
 	var backend asset.Wallet
 	backend, err = NewWallet(walletCfg, tLogger, dex.Simnet)
@@ -88,6 +109,23 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 	err = cm.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
+	}
+	if isInternal {
+		i := 0
+		for {
+			synced, _, err := backend.SyncStatus()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if synced {
+				break
+			}
+			if i == 5 {
+				t.Fatal("spv wallet not synced after 5 seconds")
+			}
+			i++
+			time.Sleep(time.Second)
+		}
 	}
 	return backend.(*ExchangeWallet), cm
 }
@@ -103,17 +141,27 @@ func newTestRig(t *testing.T, blkFunc func(string, error)) *testRig {
 		backends:          make(map[string]*ExchangeWallet),
 		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
 	}
-	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, "alpha", blkFunc)
-	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, "beta", blkFunc)
+	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, "alpha", false, blkFunc)
+	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, "beta", false, blkFunc)
+	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(t, "gamma", true, blkFunc)
 	return rig
 }
 
+// alpha is an external wallet connected to dcrd.
 func (rig *testRig) alpha() *ExchangeWallet {
 	return rig.backends["alpha"]
 }
+
+// beta is an external spv wallet.
 func (rig *testRig) beta() *ExchangeWallet {
 	return rig.backends["beta"]
 }
+
+// gamma is an internal spv wallet.
+func (rig *testRig) gamma() *ExchangeWallet {
+	return rig.backends["gamma"]
+}
+
 func (rig *testRig) close(t *testing.T) {
 	t.Helper()
 	for name, cm := range rig.connectionMasters {
@@ -529,5 +577,147 @@ func runTest(t *testing.T, splitTx bool) {
 	err = rig.beta().Lock()
 	if err != nil {
 		t.Fatalf("error locking wallet: %v", err)
+	}
+}
+
+func TestTickets(t *testing.T) {
+	rig := newTestRig(t, func(name string, err error) {
+		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+	})
+	defer rig.close(t)
+	tLogger.Info("Testing ticket methods with the alpha rig.")
+	testTickets(t, false, rig.alpha())
+	// TODO: beta wallet is spv but has no vsp in its config. Add it and
+	// test here.
+	tLogger.Info("Testing ticket methods with the gamma rig.")
+	testTickets(t, true, rig.gamma())
+}
+
+func testTickets(t *testing.T, isInternal bool, ew *ExchangeWallet) {
+
+	// Test StakeStatus.
+	ss, err := ew.StakeStatus()
+	if err != nil {
+		t.Fatalf("unable to get stake status: %v", err)
+	}
+	tLogger.Info("The following are stake status before setting vsp or purchasing tickets.")
+	spew.Dump(ss)
+
+	// Test SetVSP.
+	err = ew.SetVSP(vspAddr)
+	if isInternal {
+		if err != nil {
+			t.Fatalf("unexpected error setting vsp for internal wallet: %v", err)
+		}
+	} else {
+		if err == nil {
+			t.Fatal("expected error setting vsp for external wallet")
+		}
+	}
+
+	// Test PurchaseTickets.
+	if err := ew.Unlock(walletPassword); err != nil {
+		t.Fatalf("unable to unlock wallet: %v", err)
+	}
+	tickets, err := ew.PurchaseTickets(3)
+	if err != nil {
+		t.Fatalf("error purchasing tickets: %v", err)
+	}
+	tLogger.Infof("Purchased the following tickets: %v", tickets)
+
+	var currentDeployments []chaincfg.ConsensusDeployment
+	var bestVer uint32
+	for ver, deps := range ew.chainParams.Deployments {
+		if bestVer == 0 || ver > bestVer {
+			currentDeployments = deps
+			bestVer = ver
+		}
+	}
+
+	choices := make(map[string]string)
+	for _, d := range currentDeployments {
+		choices[d.Vote.Id] = d.Vote.Choices[rand.Int()%len(d.Vote.Choices)].Id
+	}
+
+	aPubKey := "034a43df1b95bf1b0dd77b53b8d880d4a5f47376fb036a5be5c1f3ba8d12ef65d7"
+	bPubKey := "02028dd2bbabbcd262c3e2326ae27a61fcc935beb2bbc2f0f76f3f5025ba4a3c5d"
+
+	treasuryPolicy := map[string]string{
+		aPubKey: "yes",
+		bPubKey: "no",
+	}
+
+	var tspendPolicy map[string]string
+	if spvw, is := ew.wallet.(*spvWallet); is {
+		if dcrw, is := spvw.dcrWallet.(*extendedWallet); is {
+			txIn := &wire.TxIn{SignatureScript: encode.RandomBytes(66 + secp256k1.PubKeyBytesLenCompressed)}
+			tspendA := &wire.MsgTx{Expiry: math.MaxUint32 - 1, TxIn: []*wire.TxIn{txIn}}
+			tspendB := &wire.MsgTx{Expiry: math.MaxUint32 - 2, TxIn: []*wire.TxIn{txIn}}
+			txHashA, txHashB := tspendA.TxHash(), tspendB.TxHash()
+			tspendPolicy = map[string]string{
+				txHashA.String(): "yes",
+				txHashB.String(): "no",
+			}
+			for _, tx := range []*wire.MsgTx{tspendA, tspendB} {
+				if err := dcrw.AddTSpend(*tx); err != nil {
+					t.Fatalf("Error adding tspend: %v", err)
+				}
+			}
+		}
+	}
+
+	// Test SetVotingPreferences.
+	if err := ew.SetVotingPreferences(choices, tspendPolicy, treasuryPolicy); err != nil {
+		t.Fatalf("Error setting voting preferences: %v", err)
+	}
+
+	// Test StakeStatus again.
+	ss, err = ew.StakeStatus()
+	if err != nil {
+		t.Fatalf("Unable to get stake status: %v", err)
+	}
+	tLogger.Info("The following are stake status after setting vsp and purchasing tickets.")
+	spew.Dump(ss)
+
+	if len(ss.Stances.VoteChoices) != len(choices) {
+		t.Fatalf("wrong number of vote choices. expected %d, got %d", len(choices), len(ss.Stances.VoteChoices))
+	}
+
+	for _, reportedChoice := range ss.Stances.VoteChoices {
+		choiceID, found := choices[reportedChoice.AgendaID]
+		if !found {
+			t.Fatalf("unknown agenda %s", reportedChoice.AgendaID)
+		}
+		if reportedChoice.ChoiceID != choiceID {
+			t.Fatalf("wrong choice reported. expected %s, got %s", choiceID, reportedChoice.ChoiceID)
+		}
+	}
+
+	if len(ss.Stances.TreasuryPolicy) != len(treasuryPolicy) {
+		t.Fatalf("wrong number of treasury keys. expected %d, got %d", len(treasuryPolicy), len(ss.Stances.TreasuryPolicy))
+	}
+
+	for _, tp := range ss.Stances.TreasuryPolicy {
+		policy, found := treasuryPolicy[tp.Key]
+		if !found {
+			t.Fatalf("unknown treasury key %s", tp.Key)
+		}
+		if tp.Policy != policy {
+			t.Fatalf("wrong policy reported. expected %s, got %s", policy, tp.Policy)
+		}
+	}
+
+	if len(ss.Stances.TSpendPolicy) != len(tspendPolicy) {
+		t.Fatalf("wrong number of tspends. expected %d, got %d", len(tspendPolicy), len(ss.Stances.TSpendPolicy))
+	}
+
+	for _, p := range ss.Stances.TSpendPolicy {
+		policy, found := tspendPolicy[p.Hash]
+		if !found {
+			t.Fatalf("unknown tspend tx %s", p.Hash)
+		}
+		if p.Policy != policy {
+			t.Fatalf("wrong policy reported. expected %s, got %s", policy, p.Policy)
+		}
 	}
 }

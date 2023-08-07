@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	dcrwalletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -31,6 +32,7 @@ const (
 	WalletTraitShielded                               // The wallet is ShieldedWallet (e.g. ZCash)
 	WalletTraitTokenApprover                          // The wallet is a TokenApprover
 	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
+	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -123,6 +125,12 @@ func (wt WalletTrait) IsAccountLocker() bool {
 	return wt&WalletTraitAccountLocker != 0
 }
 
+// IsTicketBuyer tests if the WalletTrait has the WalletTraitTicketBuyer bit set,
+// which indicates the wallet implements the TicketBuyer interface.
+func (wt WalletTrait) IsTicketBuyer() bool {
+	return wt&WalletTraitTicketBuyer != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -170,7 +178,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(AccountLocker); is {
 		t |= WalletTraitAccountLocker
 	}
-
+	if _, is := w.(TicketBuyer); is {
+		t |= WalletTraitTicketBuyer
+	}
 	return t
 }
 
@@ -870,6 +880,80 @@ type TokenApprover interface {
 	ApprovalStatus() map[uint32]ApprovalStatus
 	// ApprovalFee returns the estimated fee for an approval transaction.
 	ApprovalFee(assetVer uint32, approval bool) (uint64, error)
+}
+
+// TicketTransaction represents a ticket transaction.
+type TicketTransaction struct {
+	Hash        string `json:"hash"`
+	TicketPrice uint64 `json:"ticketPrice"`
+	Fees        uint64 `json:"fees"`
+	Stamp       uint64 `json:"stamp"`
+	BlockHeight int64  `json:"blockHeight"`
+}
+
+// TicketStatus from dcrwallet.
+type TicketStatus uint
+
+// Copy of wallet.TicketStatus
+const (
+	TicketStatusUnknown TicketStatus = iota
+	TicketStatusUnmined
+	TicketStatusImmature
+	TicketStatusLive
+	TicketStatusVoted
+	TicketStatusMissed
+	TicketStatusExpired
+	TicketStatusUnspent
+	TicketStatusRevoked
+)
+
+// Ticket holds information about a decred ticket.
+type Ticket struct {
+	Ticket  TicketTransaction `json:"ticket"`
+	Status  TicketStatus      `json:"status"`
+	Spender string            `json:"spender"`
+}
+
+// Stances are vote choices.
+type Stances struct {
+	VoteChoices    []*dcrwalletjson.VoteChoice           `json:"voteChoices"`
+	TSpendPolicy   []*dcrwalletjson.TSpendPolicyResult   `json:"tSpendPolicy"`
+	TreasuryPolicy []*dcrwalletjson.TreasuryPolicyResult `json:"treasuryPolicy"`
+}
+
+// TicketStakingStatus holds various stake information from the wallet.
+type TicketStakingStatus struct {
+	// TicketPrice is the current price of one ticket. Also known as the
+	// stake difficulty.
+	TicketPrice uint64 `json:"ticketPrice"`
+	// VSP is the currently set VSP address and fee.
+	VSP string `json:"vsp"`
+	// IsRPC will be true if this is an RPC wallet, in which case we can't
+	// set a new VSP and some other information may not be available.
+	IsRPC bool `json:"isRPC"`
+	// Tickets returns current active tickets up until they are voted or
+	// revoked. Includes unconfirmed tickets.
+	Tickets []*Ticket `json:"tickets"`
+	// Stances returns current voting preferences.
+	Stances Stances `json:"stances"`
+}
+
+// TicketBuyer is a wallet that can participate in decred staking.
+//
+// TODO: Consider adding (*AutoClient).ProcessUnprocessedTickets/ProcessManagedTickets
+// to be used when restoring wallet from seed.
+type TicketBuyer interface {
+	// StakeStatus returns current staking statuses such as currently owned
+	// tickets, ticket price, and current voting preferences.
+	StakeStatus() (*TicketStakingStatus, error)
+	// SetVSP sets the VSP provider.
+	SetVSP(addr string) error
+	// PurchaseTickets purchases n amount of tickets. Returns the purchased
+	// ticket hashes if successful.
+	PurchaseTickets(n int) ([]string, error)
+	// SetVotingPreferences sets default voting settings for all active
+	// tickets and future tickets. Nil maps can be provided for no change.
+	SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy map[string]string) error
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

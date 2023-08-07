@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 	"io"
 	"math"
 	"net/http"
+	neturl "net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -44,6 +47,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
+	vspdjson "github.com/decred/vspd/types"
 )
 
 const (
@@ -94,6 +98,8 @@ const (
 	// monitored until this number of confirms is reached. Two to make sure
 	// the block containing the redeem is stakeholder-approved
 	requiredRedeemConfirms = 2
+
+	vspFileName = "vsp.json"
 )
 
 var (
@@ -557,6 +563,14 @@ type mempoolRedeem struct {
 	firstSeen time.Time
 }
 
+// vsp holds info needed for purchasing tickets from a vsp. PubKey is from the
+// vsp and is used for verifying communications.
+type vsp struct {
+	URL           string  `json:"url"`
+	FeePercentage float64 `json:"feepercent"`
+	PubKey        string  `json:"pubkey"`
+}
+
 // ExchangeWallet is a wallet backend for Decred. The backend is how the DEX
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
@@ -588,6 +602,8 @@ type ExchangeWallet struct {
 	tipChange     func(error)
 	lastPeerCount uint32
 	peersChange   func(uint32, error)
+	dir           string
+	walletType    string
 
 	oracleFeesMtx sync.Mutex
 	oracleFees    map[uint64]feeStamped // conf target => fee rate
@@ -609,6 +625,10 @@ type ExchangeWallet struct {
 	// TODO: Consider persisting mempool redeems on file.
 	mempoolRedeemsMtx sync.RWMutex
 	mempoolRedeems    map[[32]byte]*mempoolRedeem // keyed by secret hash
+
+	vspV atomic.Value // *vsp
+
+	connected atomic.Bool
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -686,6 +706,7 @@ var _ asset.LiveReconfigurer = (*ExchangeWallet)(nil)
 var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 var _ asset.Bonder = (*ExchangeWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWallet)(nil)
+var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -827,6 +848,11 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		return nil, err
 	}
 
+	dir := filepath.Join(cfg.DataDir, chainParams.Name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("unable to create wallet dir: %v", err)
+	}
+
 	w := &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
@@ -838,6 +864,19 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
 		oracleFees:          make(map[uint64]feeStamped),
 		mempoolRedeems:      make(map[[32]byte]*mempoolRedeem),
+		dir:                 dir,
+		walletType:          cfg.Type,
+	}
+
+	if b, err := os.ReadFile(filepath.Join(dir, vspFileName)); err == nil {
+		var v vsp
+		err = json.Unmarshal(b, &v)
+		if err != nil {
+			return nil, fmt.Errorf("unable to unmarshal vsp file: %v", err)
+		}
+		w.vspV.Store(&v)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("unable to read vsp file: %v", err)
 	}
 
 	w.cfgV.Store(walletCfg)
@@ -925,6 +964,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	}
 
 	success = true // All good, don't disconnect the wallet when this method returns.
+	dcr.connected.Store(true)
 
 	// NotifyOnTipChange will return false if the wallet does not support
 	// tip change notification. We'll use dcr.monitorBlocks below if so.
@@ -5132,6 +5172,125 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 		finalFee = estFeeWithChange
 	}
 	return finalFee, isValidAddress, nil
+}
+
+func (dcr *ExchangeWallet) isSPV() bool {
+	return dcr.walletType == walletTypeSPV
+}
+
+func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
+	if !dcr.connected.Load() {
+		return nil, errors.New("not connected, login first")
+	}
+	sdiff, err := dcr.wallet.StakeDiff(dcr.ctx)
+	if err != nil {
+		return nil, err
+	}
+	isRPC := !dcr.isSPV()
+	var vspURL string
+	if !isRPC {
+		if v := dcr.vspV.Load(); v != nil {
+			vspURL = v.(*vsp).URL
+		}
+	}
+	tickets, err := dcr.wallet.Tickets(dcr.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving tickets: %w", err)
+	}
+	voteChoices, tSpendPolicy, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving stances: %w", err)
+	}
+	return &asset.TicketStakingStatus{
+		TicketPrice: uint64(sdiff),
+		VSP:         vspURL,
+		IsRPC:       isRPC,
+		Tickets:     tickets,
+		Stances: asset.Stances{
+			VoteChoices:    voteChoices,
+			TSpendPolicy:   tSpendPolicy,
+			TreasuryPolicy: treasuryPolicy,
+		},
+	}, nil
+}
+
+func vspInfo(url string) (*vspdjson.VspInfoResponse, error) {
+	suffix := "/api/v3/vspinfo"
+	path, err := neturl.JoinPath(url, suffix)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.Get(path)
+	if err != nil {
+		return nil, fmt.Errorf("http get error: %v", err)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var info vspdjson.VspInfoResponse
+	err = json.Unmarshal(b, &info)
+	if err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// SetVSP sets the VSP provider. Ability to set can be checked with StakeStatus
+// first. Only non-RPC (internal) wallets can be set. Part of the
+// asset.TicketBuyer interface.
+func (dcr *ExchangeWallet) SetVSP(url string) error {
+	if !dcr.isSPV() {
+		return errors.New("cannot set vsp for external wallet")
+	}
+	info, err := vspInfo(url)
+	if err != nil {
+		return err
+	}
+	v := vsp{
+		URL:           url,
+		PubKey:        base64.StdEncoding.EncodeToString(info.PubKey),
+		FeePercentage: info.FeePercentage,
+	}
+	b, err := json.Marshal(&v)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dcr.dir, vspFileName), b, 0666); err != nil {
+		return err
+	}
+	dcr.vspV.Store(&v)
+	return nil
+}
+
+// PurchaseTickets purchases n number of tickets. Part of the asset.TicketBuyer
+// interface.
+func (dcr *ExchangeWallet) PurchaseTickets(n int) ([]string, error) {
+	if n < 1 {
+		return nil, nil
+	}
+	if !dcr.connected.Load() {
+		return nil, errors.New("not connected, login first")
+	}
+	if !dcr.isSPV() {
+		return dcr.wallet.PurchaseTickets(dcr.ctx, n, "", "")
+	}
+	v := dcr.vspV.Load()
+	if v == nil {
+		return nil, errors.New("no vsp set")
+	}
+	vInfo := v.(*vsp)
+	return dcr.wallet.PurchaseTickets(dcr.ctx, n, vInfo.URL, vInfo.PubKey)
+}
+
+// SetVotingPreferences sets the vote choices for all active tickets and future
+// tickets. Nil maps can be provided for no change. Part of the
+// asset.TicketBuyer interface.
+func (dcr *ExchangeWallet) SetVotingPreferences(choices map[string]string, tspendPolicy map[string]string, treasuryPolicy map[string]string) error {
+	if !dcr.connected.Load() {
+		return errors.New("not connected, login first")
+	}
+	return dcr.wallet.SetVotingPreferences(dcr.ctx, choices, tspendPolicy, treasuryPolicy)
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
