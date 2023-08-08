@@ -28,7 +28,9 @@ import {
   WalletPeer,
   ApprovalStatus,
   CustomBalance,
-  WalletState
+  WalletState,
+  TicketStakingStatus,
+  VotingServiceProvider
 } from './registry'
 import { CoinExplorers } from './order'
 
@@ -41,6 +43,7 @@ const traitRestorer = 1 << 8
 const traitTxFeeEstimator = 1 << 9
 const traitPeerManager = 1 << 10
 const traitTokenApprover = 1 << 13
+const traitTicketBuyer = 1 << 16
 
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
 
@@ -112,7 +115,7 @@ export default class WalletsPage extends BasePage {
 
     this.selectedAssetID = -1
     Doc.cleanTemplates(
-      page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl
+      page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl
     )
 
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
@@ -176,6 +179,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.addPeerSubmit, 'click', async () => { this.submitAddPeer() })
     Doc.bind(page.unapproveTokenAllowance, 'click', async () => { this.showUnapproveTokenAllowanceTableForm() })
     Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
+    Doc.bind(page.showVSPs, 'click', () => { this.showVSPPicker() })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -781,7 +785,7 @@ export default class WalletsPage extends BasePage {
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.peerCountBox, page.syncProgressBox, page.statusDisabled
+      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.stakingBox
     )
     if (wallet) {
       this.updateDisplayedAssetBalance()
@@ -800,10 +804,77 @@ export default class WalletsPage extends BasePage {
           Doc.show(page.statusReady)
           if (!app().haveActiveOrders(assetID) && wallet.encrypted) Doc.show(page.lockBttnBox)
         } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
+        this.updateTicketBuyer(assetID)
       } else Doc.show(page.statusOff, page.connectBttnBox) // wallet not running
     } else Doc.show(page.createWalletBox) // no wallet
 
     page.walletDetailsBox.classList.remove('invisible')
+  }
+
+  async updateTicketBuyer (assetID: number) {
+    const { wallet, unitInfo: ui } = app().assets[assetID]
+    if (wallet.traits & traitTicketBuyer) return
+    const page = this.page
+    Doc.hide(page.pickVSP, page.stakingSummary, page.stakingErr, page.vspDisplayBox)
+    Doc.show(page.stakingBox)
+    const res = await postJSON('/api/stakestatus', assetID)
+    if (assetID !== this.selectedAssetID) return // User changed asset while we were fetching
+    if (!app().checkResponse(res)) {
+      Doc.show(page.stakingErr)
+      page.stakingErr.textContent = res.msg
+      return
+    }
+    Doc.show(page.stakingSummary)
+    const status = res.status as TicketStakingStatus
+    page.stakingTicketCount.textContent = String(status.tickets.length)
+    page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
+    page.ticketPriceUnit.textContent = ui.conventional.unit
+    if (status.vsp) {
+      Doc.show(page.vspDisplayBox)
+      page.vspDisplay.textContent = status.vsp
+    } else Doc.show(page.pickVSP)
+  }
+
+  async showVSPPicker () {
+    const assetID = this.selectedAssetID
+    const page = this.page
+    this.showForm(page.vspPicker)
+    Doc.empty(page.vspPickerList)
+    Doc.hide(page.stakingErr)
+    const loaded = app().loading(page.vspPicker)
+    const res = await postJSON('/api/listvsps', assetID)
+    loaded()
+    if (assetID !== this.selectedAssetID) return // User changed asset while we were fetching
+    if (!app().checkResponse(res)) {
+      Doc.show(page.stakingErr)
+      page.stakingErr.textContent = res.msg
+      return
+    }
+    const vsps = res.vsps as VotingServiceProvider[]
+    for (const vsp of vsps) {
+      const row = page.vspRowTmpl.cloneNode(true) as PageElement
+      page.vspPickerList.appendChild(row)
+      const tmpl = Doc.parseTemplate(row)
+      tmpl.url.textContent = vsp.url
+      tmpl.feeRate.textContent = vsp.feePercentage.toFixed(2)
+      tmpl.voting.textContent = String(vsp.voting)
+      Doc.bind(row, 'click', () => {
+        Doc.hide(page.stakingErr)
+        this.setVSP(assetID, vsp)
+      })
+    }
+  }
+
+  async setVSP (assetID: number, vsp: VotingServiceProvider) {
+    this.closePopups()
+    const page = this.page
+    const loaded = app().loading(page.stakingBox)
+    const res = await postJSON('/api/setvsp', { assetID, url: vsp.url })
+    loaded()
+    if (assetID !== this.selectedAssetID) return
+    if (app().checkResponse(res)) return this.updateTicketBuyer(assetID)
+    Doc.show(page.stakingErr)
+    page.stakingErr.textContent = res.msg
   }
 
   updateDisplayedAssetBalance (): void {

@@ -124,6 +124,33 @@
                 </table>
               </div>
             </div>
+
+            <div id="stakingBox" class="position-relative m-3 p-2 w-100 d-flex align-items-stretch">
+              <div class="flex-grow-1">
+                <div class="fs28 sans-light flex-center lh1"><span class="ico-ticket me-2 fs22"></span>Staking</div>
+                <hr class="dashed my-2">
+                <div id="stakingSummary" class="flex-center fs16">
+                  <span>You have <span id="stakingTicketCount" class="demi"></span> live tickets</span>
+                </div>
+                <div id="pickVSP" class="fs16 p-2 flex-center">
+                  <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
+                </div>
+                <div id="vspDisplayBox" class="fs16 p-2 flex-center">
+                  <span>VSP: <span id="vspDisplay"></span></span>
+                </div>
+                <div id="stakingErr" class="fs16 p-2 errcolor"></div>
+              </div>
+              <div class="flex-center p-4 brdrleft">
+                <div class="d-flex flex-column">
+                  <span class="fs18 demi">Ticket Price</span>
+                  <hr class="dotted my-2">
+                  <span class="d-flex align-items-end">
+                    <span class="fs22 lh-1" id="ticketPrice"></span>
+                    <span class="fs18 lh-1 grey ms-1" id="ticketPriceUnit"></span>
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>{{/* END WALLET DETAILS */}}
 
@@ -602,6 +629,26 @@
       <div id="errorModalMsg" class="fs16 errcolor my-2 text-center"></div>
     </form>
 
+    <form id="vspPicker" class="flex-center flex-column p-2 m-4">
+      <div class="fs24 sans-light">Select a Voting Service Provider</div>
+      <hr class="dashed my-2">
+      <table id="vspPickerTable">
+        <thead>
+          <tr>
+            <th>URL</th>
+            <th>Fee Rate</th>
+            <th>Live Tickets</th>
+          </tr>
+        </thead>
+        <tbody id="vspPickerList">
+          <tr id="vspRowTmpl" class="hoverbg pointer">
+            <td data-tmpl="url"></td>
+            <td data-tmpl="feeRate"></td>
+            <td data-tmpl="voting"></td>
+          </tr>
+        </tbody>
+      </table>
+    </form>
   </div>
 </div>
 {{template "bottom"}}

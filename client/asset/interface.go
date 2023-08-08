@@ -925,7 +925,7 @@ type Stances struct {
 
 // VotingServiceProvider is information about a voting service provider.
 type VotingServiceProvider struct {
-	URL           string      `json:"host"`
+	URL           string      `json:"url"`
 	Network       dex.Network `json:"network"`
 	Launched      uint64      `json:"launched"`    // milliseconds
 	LastUpdated   uint64      `json:"lastUpdated"` // milliseconds

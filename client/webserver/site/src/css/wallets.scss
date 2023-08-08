@@ -193,6 +193,33 @@
     @extend .table;
     @extend .table-striped;
   }
+
+  #stakingBox {
+    border-width: 1px;
+    border-style: solid none;
+    border-color: $light_border_color;
+  }
+
+  table#vspPickerTable {
+    border: 1px solid $light_border_color;
+
+    th,
+    tr:not(:last-child) {
+      border-bottom: 1px solid $light_border_color;
+    }
+
+    th,
+    td {
+      padding: 5px 15px 5px 10px;
+    }
+
+    td:not(:first-child) {
+      text-align: right;
+      border-left: solid;
+      border-left-width: 1px;
+      border-color: $light_border_color;
+    }
+  }
 }
 
 @include media-breakpoint-up(xxl) {

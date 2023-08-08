@@ -519,7 +519,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/unshieldfunds", s.apiUnshieldFunds)
 			apiAuth.Post("/sendshielded", s.apiSendShielded)
 
-			apiAuth.Post("/statkestatus", s.apiStakeStatus)
+			apiAuth.Post("/stakestatus", s.apiStakeStatus)
 			apiAuth.Post("/setvsp", s.apiSetVSP)
 			apiAuth.Post("/purchasetickets", s.apiPurchaseTickets)
 			apiAuth.Post("/setvotes", s.apiSetVotingPreferences)

@@ -603,6 +603,64 @@ export interface WalletPeer {
   connected: boolean
 }
 
+export interface TicketTransaction {
+  hash: string
+  ticketPrice: number
+  fees: number
+  stamp: number
+  blockHeight: number
+}
+
+export interface Ticket {
+  ticket: TicketTransaction
+  status: number
+  spender: string
+}
+
+export interface VoteChoice {
+  agendaid: string
+  agendadescription: string
+  choiceid: string
+  choicedescription: string
+}
+
+export interface PolicyResult {
+  hash: string
+  policy: string
+  ticket?: string
+}
+
+export interface Stances {
+  voteChoices: VoteChoice[]
+  tSpendPolicy: PolicyResult[]
+  treasuryPolicy: PolicyResult[]
+}
+
+export interface TicketStakingStatus {
+  ticketPrice: number
+  vsp: string
+  isRPC: boolean
+  tickets: Ticket[]
+  stances: Stances
+}
+
+// VotingServiceProvider is information about a voting service provider.
+export interface VotingServiceProvider {
+  url: string
+  network: number
+  launched: number
+  lastUpdated: number
+  apiVersions: number[]
+  feePercentage: number
+  closed: boolean
+  voting: number
+  voted: number
+  revoked: number
+  vspdVersion: string
+  blockHeight: number
+  netShare: number
+}
+
 export interface Application {
   assets: Record<number, SupportedAsset>
   seedGenTime: number

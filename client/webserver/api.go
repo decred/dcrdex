@@ -1628,7 +1628,7 @@ func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, &struct {
 		OK     bool                       `json:"ok"`
-		Status *asset.TicketStakingStatus `json:"address"`
+		Status *asset.TicketStakingStatus `json:"status"`
 	}{
 		OK:     true,
 		Status: status,
