@@ -929,15 +929,15 @@ type VotingServiceProvider struct {
 	Network       dex.Network `json:"network"`
 	Launched      uint64      `json:"launched"`    // milliseconds
 	LastUpdated   uint64      `json:"lastUpdated"` // milliseconds
-	APIVersions   []uint32    `json:"apiVersions"`
+	APIVersions   []int64     `json:"apiVersions"`
 	FeePercentage float64     `json:"feePercentage"`
 	Closed        bool        `json:"closed"`
-	Voting        uint64      `json:"voting"`
-	Voted         uint64      `json:"voted"`
-	Revoked       uint64      `json:"revoked"`
+	Voting        int64       `json:"voting"`
+	Voted         int64       `json:"voted"`
+	Revoked       int64       `json:"revoked"`
 	VSPDVersion   string      `json:"vspdVersion"`
-	BlockHeight   uint64      `json:"blockHeight"`
-	NetShare      float64     `json:"netShare"`
+	BlockHeight   uint32      `json:"blockHeight"`
+	NetShare      float32     `json:"netShare"`
 }
 
 // TicketStakingStatus holds various stake information from the wallet.

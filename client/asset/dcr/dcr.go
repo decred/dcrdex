@@ -5263,6 +5263,29 @@ func (dcr *ExchangeWallet) SetVotingPreferences(choices map[string]string, tspen
 
 // ListVSPs lists known available voting service providers.
 func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
+	if dcr.network == dex.Simnet {
+		const simnetVSPUrl = "http://127.0.0.1:19591"
+		vspi, err := vspInfo(simnetVSPUrl)
+		if err != nil {
+			dcr.log.Warnf("Error getting simnet VSP info: %v", err)
+			return []*asset.VotingServiceProvider{}, nil
+		}
+		return []*asset.VotingServiceProvider{{
+			URL:           simnetVSPUrl,
+			Network:       dex.Simnet,
+			Launched:      uint64(time.Now().Add(-time.Hour * 24 * 180).UnixMilli()),
+			LastUpdated:   uint64(time.Now().Add(-time.Minute * 15).UnixMilli()),
+			APIVersions:   vspi.APIVersions,
+			FeePercentage: vspi.FeePercentage,
+			Closed:        vspi.VspClosed,
+			Voting:        vspi.Voting,
+			Voted:         vspi.Voted,
+			Revoked:       vspi.Revoked,
+			VSPDVersion:   vspi.VspdVersion,
+			BlockHeight:   vspi.BlockHeight,
+			NetShare:      vspi.NetworkProportion,
+		}}, nil
+	}
 	resp, err := http.Get("https://api.decred.org/?c=vsp")
 	if err != nil {
 		return nil, fmt.Errorf("http get error: %v", err)
@@ -5274,18 +5297,18 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 
 	// This struct is not quite compatible with vspdjson.VspInfoResponse.
 	var res map[string]*struct {
-		Network       string   `json:"network"`
-		Launched      uint64   `json:"launched"`    // seconds
-		LastUpdated   uint64   `json:"lastupdated"` // seconds
-		APIVersions   []uint32 `json:"apiversions"`
-		FeePercentage float64  `json:"feepercentage"`
-		Closed        bool     `json:"closed"`
-		Voting        uint64   `json:"voting"`
-		Voted         uint64   `json:"voted"`
-		Revoked       uint64   `json:"revoked"`
-		VSPDVersion   string   `json:"vspdversion"`
-		BlockHeight   uint64   `json:"blockheight"`
-		NetShare      float64  `json:"estimatednetworkproportion"`
+		Network       string  `json:"network"`
+		Launched      uint64  `json:"launched"`    // seconds
+		LastUpdated   uint64  `json:"lastupdated"` // seconds
+		APIVersions   []int64 `json:"apiversions"`
+		FeePercentage float64 `json:"feepercentage"`
+		Closed        bool    `json:"closed"`
+		Voting        int64   `json:"voting"`
+		Voted         int64   `json:"voted"`
+		Revoked       int64   `json:"revoked"`
+		VSPDVersion   string  `json:"vspdversion"`
+		BlockHeight   uint32  `json:"blockheight"`
+		NetShare      float32 `json:"estimatednetworkproportion"`
 	}
 	if err = json.Unmarshal(b, &res); err != nil {
 		return nil, err

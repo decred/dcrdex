@@ -10604,3 +10604,12 @@ func (c *Core) SetVotingPreferences(assetID uint32, choices, tSpendPolicy,
 	}
 	return tb.SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy)
 }
+
+// ListVSPs lists known available voting service providers.
+func (c *Core) ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error) {
+	_, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	return tb.ListVSPs()
+}
