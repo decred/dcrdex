@@ -16,15 +16,15 @@ possible.
 {|
 ! variable !! relevant section !! units || default
 |-
-| epoch&nbsp;duration || [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]] || milliseconds || 20,000
+| epoch&nbsp;duration || [[fundamentals.mediawiki/#epoch-based-order-matching|Epoch-based Order Matching]] || milliseconds || 20,000
 |-
-| market&nbsp;buy&nbsp;buffer || [[orders.mediawiki/#Market_Buy_Orders|Market Buy Orders]] || unitless ratio || 1.25
+| market&nbsp;buy&nbsp;buffer || [[orders.mediawiki/#market-buy-orders|Market Buy Orders]] || unitless ratio || 1.25
 |-
-| registration&nbsp;fees || [[fundamentals.mediawiki/#Fees|Fees]] || atoms || 1e8 (1 DCR)
+| bonds || [[fundamentals.mediawiki/#bonds|Bonds]] || atoms || 2e8 (2 DCR)
 |-
-| cancellation&nbsp;threshold || [[community.mediawiki/#Rule_3_An_accounts_cancellation_rate_must_not_exceed_the_threshold|Rule 3]] || unitless ratio || 0.6
+| cancellation&nbsp;threshold || [[community.mediawiki/#rule-3-an-accounts-cancellation-rate-must-not-exceed-the-threshold|Rule 3]] || unitless ratio || 0.6
 |-
-| broadcast&nbsp;timeout || [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]] &amp; [[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|Rule 1]] || milliseconds || 60,000
+| broadcast&nbsp;timeout || [[fundamentals.mediawiki/#exchange-variables|Exchange Variables]] &amp; [[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|Rule 1]] || milliseconds || 60,000
 |}
 
 ==Per-asset Variables==
@@ -34,14 +34,14 @@ possible.
 |-
 | lot&nbsp;size  || atoms ||  the minimum order quantity and the order quantity increment when an asset is the base asset
 |-
-| rate&nbsp;step || atoms || the minimum price rate and the price rate increment when an asset is the quote asset. [[orders.mediawiki/#Rate_Encoding|message-rate encoding]]
+| rate&nbsp;step || atoms || the minimum price rate and the price rate increment when an asset is the quote asset. [[orders.mediawiki/#rate-encoding|message-rate encoding]]
 |-
 | fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
 |-
 | swap&nbsp;confirmations|| count || the Minimum confirmations before acting on a swap transaction
 |}
 
-See also [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]].
+See also [[fundamentals.mediawiki/#exchange-variables|Exchange Variables]].
 
 ==Administration API==
 
@@ -51,7 +51,15 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 {|
 ! path      !! method !! description
 |-
-| /config   || GET || the current DEX configuration. See [[fundamentals.mediawiki/#Configuration_Data_Request|Configuration Data Request]]
+| /ping     || GET || checks if admin server is alive. Returns `pong` if server is still alive
+|-
+| /config   || GET || the current DEX configuration. See [[fundamentals.mediawiki/#configuration-data-request|Configuration Data Request]]
+|-
+| /enabledataapi/{yes} || GET || to enable or disable the HTTP data API. "yes" must be a valid BOOL value (e.g, true, false)
+|-
+| /asset/{asset} || GET || display information about specified asset (e.g dcr, btc)
+|-
+| /asset/{asset}/setfeescale/{scale} || GET || sets the fee rate scale for the specified asset. "scale" must be a valid float(e.g 2.0). The current default is 1.0.
 |-
 | /accounts || GET || lists information about all known accounts
 |-
