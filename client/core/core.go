@@ -6603,6 +6603,10 @@ func (dc *dexConnection) updateTierReport(
 		dc.acct.tier = newTierReport
 		return
 	}
+	var score int32
+	if scor != nil {
+		score = *scor
+	}
 	if tier == nil { // legacy server (V0PURGE)
 		// A legacy server does not set ConnectResult.LegacyFeePaid, but unpaid
 		// legacy ('register') users get an UnpaidAccountError from Connect, so
@@ -6611,7 +6615,7 @@ func (dc *dexConnection) updateTierReport(
 		// there are no bonus tiers in these servers.
 		dc.acct.tier = &account.TierReport{
 			Legacy: true,
-			// Score: , // not reported in v0.
+			Score:  -score, // Sign switched in v2 connect result.
 		}
 		return
 	}
@@ -6634,7 +6638,6 @@ func (dc *dexConnection) updateTierReport(
 	// we'll assume that the server has the default ban score (20) and work
 	// from there.
 	var bonusTiers, revokedTiers int64
-	var score int32
 	oldTierReport := dc.acct.tier
 	// If we got here through authDEX -> ConnectResult, we won't have an
 	// oldTierReport, but we will have a score. For other paths, we will have
@@ -6646,7 +6649,7 @@ func (dc *dexConnection) updateTierReport(
 		score = oldTierReport.Score
 		bonusTiers, revokedTiers = oldTierReport.Bonus, oldTierReport.Revoked
 	} else if scor != nil { // via authDEX -> ConnectResult
-		score = *scor
+		score = *scor * -1 // Sign switched in v2 connect result.
 		tierAdj := int64(score / defaultBanScore)
 		if tierAdj < 0 {
 			bonusTiers = -tierAdj

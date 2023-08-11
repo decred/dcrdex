@@ -916,7 +916,9 @@ func (auth *AuthManager) tierReport(bondTier int64, score int32, legacyFeePaid b
 		Revoked: revokedTiers,
 		Bonus:   bonusTiers,
 		Legacy:  legacyFeePaid,
-		Score:   score,
+		// TODO: Reverse the signage of all violations so we get postiive scores
+		// from successes and negative score from violations.
+		Score: -score,
 	}
 }
 
