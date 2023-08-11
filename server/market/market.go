@@ -2425,12 +2425,6 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	}
 	m.bookMtx.Unlock()
 
-	for _, c := range cancelMatches {
-		co, loEpoch := c.co, c.loEpoch
-		epochGap := int32((co.ServerTime.UnixMilli() / epochDur) - loEpoch)
-		m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, epochGap, matchTime)
-	}
-
 	if len(ordersRevealed) > 0 {
 		log.Infof("Matching complete for market %v epoch %d:"+
 			" %d matches (%d partial fills), %d completed OK (not booked),"+
@@ -2628,6 +2622,12 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			},
 		}
 		notifyChan <- sig
+	}
+
+	for _, c := range cancelMatches {
+		co, loEpoch := c.co, c.loEpoch
+		epochGap := int32((co.ServerTime.UnixMilli() / epochDur) - loEpoch)
+		m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, epochGap, matchTime)
 	}
 
 	// Send "nomatch" notifications.
