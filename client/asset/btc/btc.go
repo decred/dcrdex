@@ -698,7 +698,13 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	if err != nil {
 		return false, err
 	}
+
 	dir := filepath.Join(dataDir, chainParams.Name)
+	return walletExists(dir, chainParams)
+}
+
+// walletExists checks the existence of the wallet.
+func walletExists(dir string, chainParams *chaincfg.Params) (bool, error) {
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
 	loader := wallet.NewLoader(chainParams, dir, true, dbTimeout, 250)
 	return loader.WalletExists()

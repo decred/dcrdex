@@ -3044,7 +3044,7 @@ func (c *Core) updateWallet(assetID uint32, wallet *xcWallet) {
 }
 
 // RecoverWallet will retrieve some recovery information from the wallet,
-// which may not be possible if the wallet is too corrupted, disconnect and
+// which may not be possible if the wallet is too corrupted. Disconnect and
 // destroy the old wallet, create a new one, and if the recovery information
 // was retrieved from the old wallet, send this information to the new one.
 // If force is false, this will check for active orders involving this
@@ -3378,17 +3378,23 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}
 
 	// See if the wallet offers a quick path.
-	if configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer); is && oldWallet.walletType == walletDef.Type {
+	configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer)
+	if is && oldWallet.walletType == walletDef.Type {
 		form.Config[asset.SpecialSettingActivelyUsed] = strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
 		defer delete(form.Config, asset.SpecialSettingActivelyUsed)
 
-		if restart, err := configurer.Reconfigure(c.ctx, &asset.WalletConfig{
+		wCfg := &asset.WalletConfig{
 			Type:     form.Type,
 			Settings: form.Config,
 			DataDir:  c.assetDataDirectory(assetID),
-		}, oldWallet.currentDepositAddress()); err != nil {
+		}
+		
+		restart, err := configurer.Reconfigure(c.ctx, wCfg, oldWallet.currentDepositAddress())
+		if err != nil {
 			return fmt.Errorf("Reconfigure: %v", err)
-		} else if !restart {
+		}
+
+		if !restart {
 			// Config was updated without a need to restart.
 			if owns, err := oldWallet.OwnsDepositAddress(oldWallet.currentDepositAddress()); err != nil {
 				return newError(walletErr, "error checking deposit address after live config update: %w", err)
