@@ -1,38 +1,66 @@
 # BTC Wallet Recovery and Rescanning
 
+## Opening the BTC Wallet Settings
+
+In this guide, we will be using the Native BTC wallet that is built into DEX and you should learn how to navigate to the settings page.  The settings page is where you can reinitialize the wallet, rescan the wallet, etc.
+
+1. Navigate to the `Wallets` page (`/wallets`) and select the Bitcoin wallet if it is not already selected.
+2. Click the `Settings` button that has a gears icon to open the settings box. The settings box will look like this:
+
+    <img alt="BTC Wallet Settings View" src="./images/btc-wallet-settings.png" width="300"/>
+
 ## Reinitializing the Native BTC Wallet
 
-If the native BTC wallet is corrupted, the dexc.log may have a message containing "connectWallet: wallet not found", such as:
+If the native BTC wallet is corrupted, the dexc.log may have a message containing "wallet not found", such as:
 
-> [ERR] CORE: Unable to connect to **btc** wallet (start and sync wallets BEFORE starting dex!): **connectWallet: wallet not found**
+> [ERR] CORE: Unable to connect to **btc** wallet (start and sync wallets BEFORE starting dex!): **connectWallet: failed to connect btc wallet: connect failure: wallet not found**
 
-Note **btc** in the above message, and **wallet not found**.  This may also say something about db corruption or similar errors, which may also be addressed as follows.
+Note **btc** in the above message, and **wallet not found**.  This may also say something about db corruption, or similar errors, which may also be addressed as follows.
 
-In this case, the Wallets page (/wallets) will still show the wallet since it was previously configured, just that it is not synchronized and cannot be unlocked:
+In this case, the Wallets page (`/wallets`) will still show the wallet since it was previously configured, just that it is not synchronized and cannot be unlocked or connected.  It will look like this:
 
-![wallets view](https://user-images.githubusercontent.com/9373513/149597739-06318c29-f6be-4837-bb6f-2055971be8cf.png)
+<img alt="BTC Wallet View" src="./images/unloaded-btc-wallet.png" width="300"/>
 
-This may be solvable by simply clicking the gears to open the settings box, and then click Submit:
+To reinitialize the wallet, [open the wallet settings](#opening-the-btc-wallet-settings) and click the `Submit` button.
 
-![wallet settings](https://user-images.githubusercontent.com/9373513/149597817-abbcbf5f-d05f-4b48-996f-485030d2a74c.png)
+If successful you will see a message like:
 
-The dexc.log should say:
+<img alt="BTC Wallet Reconfigured Success" src="./images/wallet-reconfigured-success.png" width="300"/>
 
-> [INF] CORE: Initializing a built-in btc wallet
+and the dexc.log should say:
+
+> [INF] CORE: Initializing a btc wallet
 
 The wallet will begin re-synchronizing.  This may take several minutes.
 
-If this process results in errors, it may be necessary to go to the folder containing the wallet data and **delete the wallet.db so it may be regenerated** from your application seed.  First SHUTDOWN DEX. Next, for mainnet, on Linux, this would be in the folder `~/.dexc/mainnet/assetdb/btc/mainnet/`.  There may be a wallet.db file in this folder, which you should rename wallet.db.bak.  Now startup and login to DEX.  Go to the Wallets page to see wallet status, which should re-synchronize.  Check notifications and logs for any errors.
+**IF** this process results in errors, it may be necessary to go to the folder containing the wallet data and **delete the wallet.db so it may be regenerated** from your application seed.  To do this:
+
+1. Shutdown DEX.
+2. Open the folder for the wallet `network` (either `mainnet`, `testnet`, `regtest`).  This would be:
+    - `~/.dexc/mainnet/assetdb/btc/mainnet/` on Linux
+    - `~/Library/Application\ Support/Dexc/mainnet/assetdb/btc/mainnet/` on MacOS 
+    - `C:\Users\<Username>\AppData\Dexc\mainnet\assetdb\btc\mainnet` on Windows.
+
+   There may be a wallet.db file in this folder, which you should rename wallet.db.bak.
+
+3. Startup and login to DEX.
+4. [Open the BTC wallet settings](#opening-the-btc-wallet-settings) and click `Submit` again.
+
+If you still encounter any error in the logs or notification, you can reach out to us on our chat channels. We will be happy to help you out.
 
 ## Rescanning the wallet
 
-There will be a Rescan button added to the Wallets page, but for now, you can force the wallet to rescan in one of two ways.  First, SHUTDOWN DEX.  Then do one of the following:
+If you have sent funds to your wallet, but they are not showing up in DEX, it may be necessary to rescan the wallet.  This is a process that can take several hours, depending on the number of transactions in the wallet.
 
-1. Delete the wallet.db file in the "assetdb/btc" folder as described at the end of the previous section.  Start back up and log in. Follow the instructions in [the Reinitializing the Native BTC Wallet section](#reinitializing-the-native-btc-wallet) to reinitialize the wallet and begin a resync.
+To rescan the wallet, [open the wallet settings](#opening-the-btc-wallet-settings) and click the `Rescan` button.  You will a message with a green check icon if the rescan was successful.
+
+**IF** you wish to force a rescan, you can do so by following these steps:
+
+1. Delete the wallet.db file in the `assetdb/btc/mainnet/` (for mainnet) folder as described at the end of the previous section.  Start DEX and log in. Follow the instructions in [the Reinitializing the Native BTC Wallet section](#reinitializing-the-native-btc-wallet) to reinitialize the wallet and begin a resync.
 2. OR (**safest option**) use the `dropwtxmgr` tool on that wallet.db file.  See the instructions in <https://github.com/btcsuite/btcwallet/blob/master/docs/force_rescans.md>.  You will build that tool as described there and then run it on DEX's btc wallet.db. For example `dropwtxmgr --db ~/.dexc/mainnet/assetdb/btc/mainnet/wallet.db`.  When you start DEX and login again, it will begin to rescan the wallet.
 
 ## Full reinitialize
 
-In addition to reinitializing or rescanning the BTC wallet.db file, you may also remove all of the chain data files to force resynchronization of all blockchain data used by the neutrino service that powers the wallet.  To do this, delete all of the files in `~/.dexc/mainnet/assetdb/btc/mainnet/` (for mainnet), including neutrino.db, reg_filter_headers.bin, block_headers.bin, and wallet.db.  You may keep peers.json to help with bootstrapping when you restart, but it may be deleted too.
+In addition to reinitializing or rescanning the BTC wallet.db file, you may also remove all of the chain data files to force resynchronization of all blockchain data used by the neutrino service that powers the wallet.  To do this, shutdown DEX and delete all of the files in `assetdb/btc/mainnet/` (for mainnet), including `neutrino.db`, `reg_filter_headers.bin`, `block_headers.bin`, and `wallet.db`.  You may keep `peers.json` to help with bootstrapping when you restart, but it may be deleted too.
 
-Next, startup DEX and go to the Wallet page. Finally, click the gears icon for the Bitcoin wallet, and click Submit after ensuring it is currently showing the Native wallet option as in the [first section's screenshot](#reinitializing-the-native-btc-wallet).
+Next, startup DEX and go to the Wallet page. [open the wallet settings](#opening-the-btc-wallet-settings) and click `Submit` after ensuring it is currently showing the `Native` wallet option as in the [first section's screenshot](#reinitializing-the-native-btc-wallet).
