@@ -3388,7 +3388,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			Settings: form.Config,
 			DataDir:  c.assetDataDirectory(assetID),
 		}
-		
+
 		restart, err := configurer.Reconfigure(c.ctx, wCfg, oldWallet.currentDepositAddress())
 		if err != nil {
 			return fmt.Errorf("Reconfigure: %v", err)
