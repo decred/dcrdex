@@ -11,7 +11,7 @@ In this guide, we will be using the Native BTC wallet that is built into DEX and
 
 ## Reinitializing the Native BTC Wallet
 
-If the native BTC wallet is corrupted, the dexc.log may have a message containing "wallet not found", such as:
+If the native BTC wallet is corrupted, the `dexc.log` (located at `~/.dexc/mainnet/logs` for Linux, `~/Library/Application\ Support/Dexc/mainnet/logs`, for MacOS and `C:\Users\<Username>\AppData\Dexc\mainnet` for windows) may have a message containing "wallet not found", such as:
 
 > [ERR] CORE: Unable to connect to **btc** wallet (start and sync wallets BEFORE starting dex!): **connectWallet: failed to connect btc wallet: connect failure: wallet not found**
 
@@ -25,7 +25,7 @@ To reinitialize the wallet, [open the wallet settings](#opening-the-btc-wallet-s
 
 <img alt="BTC Wallet Settings View" src="./images/btc-wallet-settings.png" width="300"/>
 
-The dexc.log should say:
+The `dexc.log` should say:
 
 > [DBG] CORE[btc][SPV]: Starting native BTC wallet...
 
