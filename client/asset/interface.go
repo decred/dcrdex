@@ -822,9 +822,8 @@ type AccountLocker interface {
 // without the need for re-initialization.
 type LiveReconfigurer interface {
 	// Reconfigure attempts to reconfigure the wallet. If reconfiguration
-	// requires a restart/reinit, the Wallet should still validate as much
-	// configuration as possible. If restartRequired is true for an SPV wallet,
-	// it should be reinitialized.
+	// requires a restart, the Wallet should still validate as much
+	// configuration as possible.
 	Reconfigure(ctx context.Context, cfg *WalletConfig, currentAddress string) (restartRequired bool, err error)
 }
 

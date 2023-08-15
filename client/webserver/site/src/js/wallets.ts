@@ -27,7 +27,8 @@ import {
   PeerSource,
   WalletPeer,
   ApprovalStatus,
-  CustomBalance
+  CustomBalance,
+  WalletState
 } from './registry'
 import { CoinExplorers } from './order'
 
@@ -1069,6 +1070,8 @@ export default class WalletsPage extends BasePage {
     if (wallet.disabled) Doc.show(page.enableWallet)
     else Doc.show(page.disableWallet)
 
+    this.showOrHideRecoverySupportMsg(wallet)
+
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.name
     if (!skipAnimation) this.showForm(page.reconfigForm)
@@ -1084,6 +1087,17 @@ export default class WalletsPage extends BasePage {
     this.setGuideLink(currentDef.guidelink)
     this.reconfigForm.setConfig(res.map)
     this.updateDisplayedReconfigFields(currentDef)
+  }
+
+  showOrHideRecoverySupportMsg (wallet:WalletState) {
+    const page = this.page
+    if ((!wallet.running && !wallet.disabled) && wallet.traits & traitRecoverer) {
+      page.reconfigSupportMsg.textContent = intl.prep(intl.ID_WALLET_RECOVERY_SUPPORT_MSG, { walletType: wallet.type })
+      Doc.show(page.reconfigSupportMsg)
+      return
+    }
+    Doc.empty(page.reconfigSupportMsg)
+    Doc.hide(page.reconfigSupportMsg)
   }
 
   changeWalletType () {

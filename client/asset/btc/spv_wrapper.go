@@ -280,8 +280,7 @@ func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) 
 		return false, err
 	}
 	if !exists {
-		restartRequired = true
-		return
+		return false, errors.New("wallet not found")
 	}
 
 	return w.wallet.Reconfigure(cfg, currentAddress)
