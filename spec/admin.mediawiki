@@ -55,11 +55,11 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 |-
 | /config   || GET || the current DEX configuration. See [[fundamentals.mediawiki/#configuration-data-request|Configuration Data Request]]
 |-
-| /enabledataapi/{yes} || GET || to enable or disable the HTTP data API. "yes" must be a valid BOOL value (e.g, true, false)
+| /enabledataapi/{yes} || GET || enable or disable the HTTP data API. "yes" must be a valid BOOL value (e.g, true, false)
 |-
-| /asset/{asset} || GET || display information about specified asset (e.g dcr, btc)
+| /asset/{assetSymbol} || GET || display information about specified asset symbol (e.g dcr, btc)
 |-
-| /asset/{asset}/setfeescale/{scale} || GET || sets the fee rate scale for the specified asset. "scale" must be a valid float(e.g 2.0). The current default is 1.0.
+| /asset/{assetSymbol}/setfeescale/{scale} || GET || sets the fee rate scale factor for the specified asset. The scale factor must be a valid float(e.g 2.0). The default is 1.0.
 |-
 | /accounts || GET || lists information about all known accounts
 |-

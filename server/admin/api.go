@@ -61,9 +61,9 @@ func (s *Server) apiConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.core.ConfigMsg())
 }
 
-// apiAsset is the handler for the '/asset/{"assetSymKey"}' API request.
+// apiAsset is the handler for the '/asset/{"assetSymbol"}' API request.
 func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
-	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymbol))
 	assetID, found := dex.BipSymbolID(assetSymbol)
 	if !found {
 		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
@@ -105,9 +105,9 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiSetFeeScale is the handler for the
-// '/asset/{"assetSymKey"}/setfeescale/{"scaleKey"}' API request.
+// '/asset/{"assetSymbol"}/setfeescale/{"scaleKey"}' API request.
 func (s *Server) apiSetFeeScale(w http.ResponseWriter, r *http.Request) {
-	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymbol))
 	assetID, found := dex.BipSymbolID(assetSymbol)
 	if !found {
 		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
