@@ -513,7 +513,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		// they do. Maybe consider a constant error asset.InsufficientBalance.
 		maxOrder, err := m.core.MaxBuy(m.host, m.base, m.quote, buyPrice)
 		if err != nil {
-			m.log.Tracef("MaxBuy error: %v", err)
+			m.log.Errorf("MaxBuy error: %v", err)
 		} else {
 			maxBuyLots = int(maxOrder.Swap.Lots)
 		}
@@ -530,7 +530,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		var maxLots int
 		maxOrder, err := m.core.MaxSell(m.host, m.base, m.quote)
 		if err != nil {
-			m.log.Tracef("MaxSell error: %v", err)
+			m.log.Errorf("MaxSell error: %v", err)
 		} else {
 			maxLots = int(maxOrder.Swap.Lots)
 		}

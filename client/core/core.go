@@ -5513,27 +5513,51 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
 		return 0, 0, fmt.Errorf("client and server asset versions are incompatible for %v", form.Host)
 	}
 
-	swapFeeSuggestion := c.feeSuggestionAny(wallets.fromWallet.AssetID) // server rates only for the swap init
-	if swapFeeSuggestion == 0 {
-		return 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
+	var swapFeeRate, redeemFeeRate uint64
+
+	if form.UseMaxFeeRate {
+		dc.assetsMtx.Lock()
+		swapAsset, redeemAsset := dc.assets[wallets.fromWallet.AssetID], dc.assets[wallets.toWallet.AssetID]
+		dc.assetsMtx.Unlock()
+		if swapAsset == nil {
+			return 0, 0, fmt.Errorf("no asset found for %d", wallets.fromWallet.AssetID)
+		}
+		if redeemAsset == nil {
+			return 0, 0, fmt.Errorf("no asset found for %d", wallets.toWallet.AssetID)
+		}
+		swapFeeRate, redeemFeeRate = swapAsset.MaxFeeRate, redeemAsset.MaxFeeRate
+	} else {
+		swapFeeRate = c.feeSuggestionAny(wallets.fromWallet.AssetID) // server rates only for the swap init
+		if swapFeeRate == 0 {
+			return 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
+		}
+		redeemFeeRate = c.feeSuggestionAny(wallets.toWallet.AssetID) // wallet rate or server rate
+		if redeemFeeRate == 0 {
+			return 0, 0, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", wallets.toWallet.Symbol, form.Host)
+		}
 	}
 
-	redeemFeeSuggestion := c.feeSuggestionAny(wallets.toWallet.AssetID) // wallet rate or server rate
-	if redeemFeeSuggestion == 0 {
-		return 0, 0, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", wallets.toWallet.Symbol, form.Host)
-	}
-
-	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeSuggestion, form.Options)
+	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeRate, form.Options)
 	if err != nil {
 		return 0, 0, fmt.Errorf("error calculating swap fees: %w", err)
 	}
 
-	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeSuggestion, form.Options)
+	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeRate, form.Options)
 	if err != nil {
 		return 0, 0, fmt.Errorf("error calculating redeem fees: %w", err)
 	}
 
 	return swapFees, redeemFees, nil
+}
+
+// MaxFundingFees gives the max fees required to fund a Trade or MultiTrade.
+func (c *Core) MaxFundingFees(fromAsset uint32, numTrades uint32, options map[string]string) (uint64, error) {
+	wallet, found := c.wallet(fromAsset)
+	if !found {
+		return 0, newError(missingWalletErr, "no wallet found for %s", unbip(fromAsset))
+	}
+
+	return wallet.MaxFundingFees(numTrades, options), nil
 }
 
 // PreOrder calculates fee estimates for a trade.
@@ -10473,4 +10497,78 @@ func (c *Core) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uin
 	}
 
 	return coinID, nil
+}
+
+// stakingWallet fetches the staking wallet and returns its asset.TicketBuyer
+// interface. Errors if no wallet is currently loaded. Used for ticket
+// purchasing.
+func (c *Core) stakingWallet(assetID uint32) (*xcWallet, asset.TicketBuyer, error) {
+	wallet, exists := c.wallet(assetID)
+	if !exists {
+		return nil, nil, newError(missingWalletErr, "no configured wallet found for %s", unbip(assetID))
+	}
+	ticketBuyer, is := wallet.Wallet.(asset.TicketBuyer)
+	if !is {
+		return nil, nil, fmt.Errorf("%s wallet is not a TicketBuyer", unbip(assetID))
+	}
+	return wallet, ticketBuyer, nil
+}
+
+// StakeStatus returns current staking statuses such as currently owned
+// tickets, ticket price, and current voting preferences. Used for
+// ticket purchasing.
+func (c *Core) StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error) {
+	_, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	return tb.StakeStatus()
+}
+
+// SetVSP sets the VSP provider. Used for ticket purchasing.
+func (c *Core) SetVSP(assetID uint32, addr string) error {
+	_, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return err
+	}
+	return tb.SetVSP(addr)
+}
+
+// PurchaseTickets purchases n tickets. Returns the purchased ticket hashes if
+// successful. Used for ticket purchasing.
+func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, error) {
+	wallet, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	crypter, err := c.encryptionKey(pw)
+	if err != nil {
+		return nil, fmt.Errorf("password error: %w", err)
+	}
+	defer crypter.Close()
+	err = c.connectAndUnlock(crypter, wallet)
+	if err != nil {
+		return nil, err
+	}
+	hashes, err := tb.PurchaseTickets(n)
+	if err != nil {
+		return nil, err
+	}
+	c.updateAssetBalance(assetID)
+	// TODO: Send tickets bought notification.
+	//subject, details := c.formatDetails(TopicSendSuccess, sentValue, unbip(assetID), address, coin)
+	//c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
+	return hashes, nil
+}
+
+// SetVotingPreferences sets default voting settings for all active tickets and
+// future tickets. Nil maps can be provided for no change. Used for ticket
+// purchasing.
+func (c *Core) SetVotingPreferences(assetID uint32, choices, tSpendPolicy,
+	treasuryPolicy map[string]string) error {
+	_, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return err
+	}
+	return tb.SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy)
 }

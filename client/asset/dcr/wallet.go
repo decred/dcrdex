@@ -13,6 +13,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrutil/v4"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
@@ -143,7 +144,19 @@ type Wallet interface {
 	PeerCount(ctx context.Context) (uint32, error)
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
-
+	// StakeDiff gets the stake difficulty.
+	StakeDiff(ctx context.Context) (dcrutil.Amount, error)
+	// PurchaseTickets purchases n tickets. vspHost and vspPubKey only
+	// needed for internal wallets.
+	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]string, error)
+	// Tickets returns current active ticket hashes up until they are voted
+	// or revoked. Includes unconfirmed tickets.
+	Tickets(ctx context.Context) ([]*asset.Ticket, error)
+	// VotingPreferences returns current voting preferences.
+	VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*walletjson.TSpendPolicyResult, []*walletjson.TreasuryPolicyResult, error)
+	// SetVotingPreferences sets preferences used when a ticket is chosen to
+	// be voted on.
+	SetVotingPreferences(ctx context.Context, choices, tspendPolicy, treasuryPolicy map[string]string) error
 	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error)
 }
 

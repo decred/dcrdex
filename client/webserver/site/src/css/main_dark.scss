@@ -82,7 +82,9 @@ body.dark {
   select,
   select:focus,
   input,
-  input:focus {
+  input:focus,
+  textarea,
+  textarea:focus {
     border: none;
     outline: none;
     color: $font-color-dark;
@@ -91,7 +93,9 @@ body.dark {
   select,
   select:focus,
   input:not([type=checkbox]),
-  input:focus:not([type=checkbox]) {
+  input:focus:not([type=checkbox]),
+  textarea,
+  textarea:focus {
     background-color: black;
     border: 1px solid $dark_input_border;
   }

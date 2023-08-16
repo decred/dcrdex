@@ -15,7 +15,7 @@ export BETA_NODE_RPC_PORT="19571"
 
 ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
 ALPHA_MINING_ADDR="SsXciQNTo3HuV5tX3yy4hXndRWgLMRVC7Ah"
-ALPHA_WALLET_RPC_PORT="19562"
+export ALPHA_WALLET_RPC_PORT="19562"
 ALPHA_WALLET_HTTPPROF_PORT="19563"
 
 # The alpha wallet clone uses the same seed as the alpha wallet.
@@ -34,6 +34,14 @@ TRADING_WALLET2_SEED="3db72efa55b9e6cce9c27dde9bea848c6199004f9b1ae2add3b0438949
 TRADING_WALLET2_ADDRESS="SsYW5LPmGCvvHuWok8U9FQu1kotv8LpvoEt"
 TRADING_WALLET2_PORT="19582"
 
+VSPD_WALLET_SEED="2db72efa55b9e6cce9c27dde9bea848c6199004f9b1ae2add3b04389495edb9c"
+export VSPD_WALLET_RPC_PORT="19590"
+
+# Address for testing with an internal wallet in client/assets/dcr
+VSP_HARNESS_TEST_ADDR="SsXsicdfL1jB2Rzu2UA7P2B9gnpqA9YGypw"
+
+VSPD_PORT="19591"
+
 # WAIT can be used in a send-keys call along with a `wait-for donedcr` command to
 # wait for process termination.
 WAIT="; tmux wait-for -S donedcr"
@@ -44,7 +52,7 @@ export NODES_ROOT
 export SHELL=$(which bash)
 
 if [ -d "${NODES_ROOT}" ]; then
-  rm -R "${NODES_ROOT}"
+  rm -fR "${NODES_ROOT}"
 fi
 mkdir -p "${NODES_ROOT}/alpha"
 mkdir -p "${NODES_ROOT}/beta"
@@ -147,7 +155,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/mine-beta"
 # alpha wallet clone does not need to purchase tickets or do anything else
 # really other than just voting on tickets purchased with the alpha wallet.
 cat > "${NODES_ROOT}/harness-ctl/clone-w-alpha" <<EOF
-"${HARNESS_DIR}/create-wallet" "$SESSION:7" "alpha-clone" ${ALPHA_WALLET_SEED} \
+"${HARNESS_DIR}/create-wallet" "$SESSION:9" "alpha-clone" ${ALPHA_WALLET_SEED} \
 ${ALPHA_WALLET_CLONE_RPC_PORT} 0 1 # ENABLE_VOTING=1 enables voting but not ticket buyer
 tmux select-window -t $SESSION:0 # return to the ctl window
 EOF
@@ -193,8 +201,8 @@ echo "Diverged alpha, beta best blocks" && ./alpha getbestblock && ./beta_node g
 
 # Stop alpha wallet clone, no longer needed.
 echo "Stopping alpha-clone wallet"
-tmux send-keys -t $SESSION:7 C-c
-tmux send-keys -t $SESSION:7 exit C-m
+tmux send-keys -t $SESSION:9 C-c
+tmux send-keys -t $SESSION:9 exit C-m
 
 echo "Reconnecting beta to alpha"
 ./beta_node addnode 127.0.0.1:${ALPHA_NODE_PORT} add
@@ -216,6 +224,8 @@ tmux send-keys -t $SESSION:5 C-c
 tmux send-keys -t $SESSION:6 C-c
 tmux send-keys -t $SESSION:7 C-c
 tmux send-keys -t $SESSION:8 C-c
+tmux send-keys -t $SESSION:9 C-c
+tmux send-keys -t $SESSION:10 C-c
 sleep 0.2
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
@@ -289,8 +299,10 @@ sleep 3
 echo "Creating simnet alpha wallet"
 USE_SPV="0"
 ENABLE_VOTING="2" # 2 = enable voting and ticket buyer
+MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:3" "alpha" ${ALPHA_WALLET_SEED} \
-${ALPHA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_PORT}
+${ALPHA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_PORT} \
+${MANUAL_TICKETS}
 # alpha uses walletpassphrase/walletlock.
 
 # SPV wallets will declare peers stalled and disconnect with only ancient blocks
@@ -301,23 +313,38 @@ tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
 echo "Creating simnet beta wallet"
 USE_SPV="1"
 ENABLE_VOTING="0"
+MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:4" "beta" ${BETA_WALLET_SEED} \
-${BETA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${BETA_WALLET_HTTPPROF_PORT}
+${BETA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${BETA_WALLET_HTTPPROF_PORT} \
+${MANUAL_TICKETS}
 
 # The trading wallets need to be created from scratch every time.
 echo "Creating simnet trading wallet 1"
 USE_SPV="1"
 ENABLE_VOTING="0"
+MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:5" "trading1" ${TRADING_WALLET1_SEED} \
-${TRADING_WALLET1_PORT} ${USE_SPV} ${ENABLE_VOTING}
+${TRADING_WALLET1_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS}
 
 echo "Creating simnet trading wallet 2"
 USE_SPV="1"
 ENABLE_VOTING="0"
+MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:6" "trading2" ${TRADING_WALLET2_SEED} \
-${TRADING_WALLET2_PORT} ${USE_SPV} ${ENABLE_VOTING}
+${TRADING_WALLET2_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS}
 
-sleep 15
+echo "Creating simnet vspd wallet"
+USE_SPV="0"
+ENABLE_VOTING="1"
+MANUAL_TICKETS="1"
+"${HARNESS_DIR}/create-wallet.sh" "$SESSION:7" "vspdwallet" ${VSPD_WALLET_SEED} \
+${VSPD_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS}
+
+sleep 3
+
+echo "Creating simnet vspd"
+ALPHA_WALLET_PUBKEY=$("${NODES_ROOT}/harness-ctl/alpha" "getmasterpubkey")
+"${HARNESS_DIR}/create-vspd.sh" "$SESSION:8" "${VSPD_PORT}" "${ALPHA_WALLET_PUBKEY}"
 
 # Give beta's "default" account a password, so it uses unlockaccount/lockaccount.
 tmux send-keys -t $SESSION:0 "./beta setaccountpassphrase default ${WALLET_PASS}${WAIT}" C-m\; wait-for donedcr
@@ -360,13 +387,13 @@ if [ "$MINE" = "1" ]; then
   # Have alpha send some credits to the other wallets
   for i in 10 18 5 7 1 15 3 25
   do
-    RECIPIENTS="{\"${BETA_MINING_ADDR}\":${i},\"${TRADING_WALLET1_ADDRESS}\":${i},\"${TRADING_WALLET2_ADDRESS}\":${i}}"
+    RECIPIENTS="{\"${TRADING_WALLET1_ADDRESS}\":${i},\"${TRADING_WALLET2_ADDRESS}\":${i},\"${BETA_MINING_ADDR}\":${i},\"${VSP_HARNESS_TEST_ADDR}\":${i}}"
     tmux send-keys -t $SESSION:0 "./alpha sendmany default '${RECIPIENTS}'${WAIT}" C-m\; wait-for donedcr
   done
 fi
 
 # Have alpha share a little more wealth, esp. for trade_simnet_test.go
-RECIPIENTS="{\"${TRADING_WALLET1_ADDRESS}\":24,\"${TRADING_WALLET2_ADDRESS}\":24,\"${BETA_MINING_ADDR}\":24}"
+RECIPIENTS="{\"${TRADING_WALLET1_ADDRESS}\":24,\"${TRADING_WALLET2_ADDRESS}\":24,\"${BETA_MINING_ADDR}\":24,\"${VSP_HARNESS_TEST_ADDR}\":24}"
 for i in {1..60}; do
   tmux send-keys -t $SESSION:0 "./alpha sendmany default '${RECIPIENTS}'${WAIT}" C-m\; wait-for donedcr
 done
@@ -376,9 +403,9 @@ tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
 
 # Watch Miner
 if [ -z "$NOMINER" ] ; then
-  tmux new-window -t $SESSION:8 -n "miner" $SHELL
-  tmux send-keys -t $SESSION:8 "cd ${NODES_ROOT}/harness-ctl" C-m
-  tmux send-keys -t $SESSION:8 "watch -n 15 ./mine-alpha 1" C-m
+  tmux new-window -t $SESSION:9 -n "miner" $SHELL
+  tmux send-keys -t $SESSION:9 "cd ${NODES_ROOT}/harness-ctl" C-m
+  tmux send-keys -t $SESSION:9 "watch -n 15 ./mine-alpha 1" C-m
 fi
 
 # Reenable history and attach to the control session.

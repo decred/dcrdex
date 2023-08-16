@@ -518,6 +518,28 @@ func (c *tRPCClient) Disconnected() bool {
 	return c.disconnected
 }
 
+func (c *tRPCClient) GetStakeInfo(ctx context.Context) (*walletjson.GetStakeInfoResult, error) {
+	return nil, nil
+}
+
+func (c *tRPCClient) PurchaseTicket(ctx context.Context, fromAccount string, spendLimit dcrutil.Amount, minConf *int,
+	ticketAddress stdaddr.Address, numTickets *int, poolAddress stdaddr.Address, poolFees *dcrutil.Amount,
+	expiry *int, ticketChange *bool, ticketFee *dcrutil.Amount) ([]*chainhash.Hash, error) {
+	return nil, nil
+}
+
+func (c *tRPCClient) GetTickets(ctx context.Context, includeImmature bool) ([]*chainhash.Hash, error) {
+	return nil, nil
+}
+
+func (c *tRPCClient) GetVoteChoices(ctx context.Context) (*walletjson.GetVoteChoicesResult, error) {
+	return nil, nil
+}
+
+func (c *tRPCClient) SetVoteChoice(ctx context.Context, agendaID, choiceID string) error {
+	return nil
+}
+
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	if rr, found := c.rawRes[method]; found {
 		return rr, c.rawErr[method] // err probably should be nil, but respect the config
@@ -681,6 +703,35 @@ func TestMain(m *testing.M) {
 		return m.Run()
 	}
 	os.Exit(doIt())
+}
+
+func TestMaxFundingFees(t *testing.T) {
+	wallet, _, shutdown := tNewWallet()
+	defer shutdown()
+
+	feeRateLimit := uint64(100)
+
+	wallet.cfgV.Store(&exchangeWalletConfig{
+		feeRateLimit: feeRateLimit,
+	})
+
+	useSplitOptions := map[string]string{
+		splitKey: "true",
+	}
+	noSplitOptions := map[string]string{
+		splitKey: "false",
+	}
+
+	maxFundingFees := wallet.MaxFundingFees(3, useSplitOptions)
+	expectedFees := feeRateLimit * (dexdcr.P2PKHInputSize*12 + dexdcr.P2PKHOutputSize*4 + dexdcr.MsgTxOverhead)
+	if maxFundingFees != expectedFees {
+		t.Fatalf("unexpected max funding fees. expected %d, got %d", expectedFees, maxFundingFees)
+	}
+
+	maxFundingFees = wallet.MaxFundingFees(3, noSplitOptions)
+	if maxFundingFees != 0 {
+		t.Fatalf("unexpected max funding fees. expected 0, got %d", maxFundingFees)
+	}
 }
 
 func TestAvailableFund(t *testing.T) {

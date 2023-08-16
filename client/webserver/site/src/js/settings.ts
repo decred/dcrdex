@@ -278,7 +278,7 @@ export default class SettingsPage extends BasePage {
       return
     }
     page.exportSeedPW.value = ''
-    page.seedDiv.textContent = res.seed
+    page.seedDiv.textContent = res.seed.match(/.{1,32}/g).map((chunk: string) => chunk.match(/.{1,8}/g)?.join(' ')).join('\n')
     this.showForm(page.authorizeSeedDisplay)
   }
 

@@ -116,7 +116,7 @@ class AppInitForm {
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app().loading(this.form)
-    const seed = page.seedInput.value
+    const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
     const rememberPass = page.rememberPass.checked
     const res = await postJSON('/api/init', {
       pass: pw,
@@ -298,7 +298,8 @@ class SeedBackupForm {
       return
     }
     const page = this.page
-    page.seedDiv.textContent = res.seed
+    // 64 bytes, 128 hex characters. Format nicely.
+    page.seedDiv.textContent = res.seed.match(/.{1,32}/g).map((chunk: string) => chunk.match(/.{1,8}/g)?.join(' ')).join('\n')
     Doc.hide(page.sbWanna)
     Doc.show(page.sbSeed)
   }

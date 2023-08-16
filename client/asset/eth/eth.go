@@ -89,7 +89,7 @@ const (
 	// see DecodeCoinID func for details.
 	coinIDTakerFoundMakerRedemption = "TakerFoundMakerRedemption:"
 
-	// maxTxFeeGwei is the default max amout of eth that can be used in one
+	// maxTxFeeGwei is the default max amount of eth that can be used in one
 	// transaction. This is set by the host in the case of providers. The
 	// internal node currently has no max but also cannot be used since the
 	// merge.
@@ -1284,6 +1284,11 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 	return &asset.PreSwap{
 		Estimate: est,
 	}, nil
+}
+
+// MaxFundingFees returns 0 because ETH does not have funding fees.
+func (w *baseWallet) MaxFundingFees(_ uint32, _ map[string]string) uint64 {
+	return 0
 }
 
 // SingleLotSwapFees returns the fees for a swap transaction for a single lot.
