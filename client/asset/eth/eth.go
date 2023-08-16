@@ -1291,14 +1291,13 @@ func (w *baseWallet) MaxFundingFees(_ uint32, _ uint64, _ map[string]string) uin
 	return 0
 }
 
-// SingleLotSwapFees returns the fees for a swap transaction for a single lot.
-func (w *assetWallet) SingleLotSwapFees(version uint32, feeSuggestion uint64, _ bool) (fees uint64, err error) {
+// SingleLotSwapRefundFees returns the fees for a swap transaction for a single lot.
+func (w *assetWallet) SingleLotSwapRefundFees(version uint32, feeSuggestion uint64, _ bool) (swapFees uint64, refundFees uint64, err error) {
 	g := w.gases(version)
 	if g == nil {
-		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, version)
+		return 0, 0, fmt.Errorf("no gases known for %d version %d", w.assetID, version)
 	}
-
-	return g.Swap * feeSuggestion, nil
+	return g.Swap * feeSuggestion, g.Refund * feeSuggestion, nil
 }
 
 // estimateSwap prepares an *asset.SwapEstimate. The estimate does not include

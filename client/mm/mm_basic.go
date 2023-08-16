@@ -357,13 +357,13 @@ func (m *basicMarketMaker) halfSpread(basisPrice uint64) (uint64, error) {
 		return 0, fmt.Errorf("basis price cannot be zero")
 	}
 
-	baseFees, quoteFees, err := m.core.SingleLotFees(form)
+	baseFees, quoteFees, _, err := m.core.SingleLotFees(form)
 	if err != nil {
 		return 0, fmt.Errorf("SingleLotFees error: %v", err)
 	}
 
 	form.Sell = false
-	newQuoteFees, newBaseFees, err := m.core.SingleLotFees(form)
+	newQuoteFees, newBaseFees, _, err := m.core.SingleLotFees(form)
 	if err != nil {
 		return 0, fmt.Errorf("SingleLotFees error: %v", err)
 	}

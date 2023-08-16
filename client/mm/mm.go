@@ -24,7 +24,7 @@ type clientCore interface {
 	ExchangeMarket(host string, base, quote uint32) (*core.Market, error)
 	SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
-	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, error)
+	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uint64, error)
 	Cancel(oidB dex.Bytes) error
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
@@ -129,10 +129,12 @@ type orderInfo struct {
 	initialRefundFeesLocked   uint64
 	singleLotSwapFees         uint64
 	singleLotRedeemFees       uint64
+	singleLotRefundFees       uint64
 	unusedLockedFundsReturned bool
 	excessFeesReturned        bool
 	matchesSeen               map[order.MatchID]struct{}
 	matchesSettled            map[order.MatchID]struct{}
+	revokedMatchesSeen        map[order.MatchID]struct{}
 }
 
 // finishedProcessing returns true when the MarketMaker no longer needs to
@@ -406,7 +408,7 @@ func (m *MarketMaker) modifyBotBalance(botID string, mods []*balanceMod) {
 			if mod.increase {
 				return initialValue + mod.amount
 			} else {
-				if assetBalance.Available < mod.amount {
+				if initialValue < mod.amount {
 					m.log.Errorf("modifyBotBalance: bot %s has insufficient %s for asset %d. "+
 						"balance: %d, amount: %d", botID, balanceType, mod.assetID, initialValue, mod.amount)
 					return 0
@@ -457,7 +459,7 @@ func (m *MarketMaker) getOrderInfo(id dex.Bytes) *orderInfo {
 }
 
 func (m *MarketMaker) removeOrderInfo(id dex.Bytes) {
-	m.log.Tracef("oid %s - finished handling", hex.EncodeToString(id))
+	m.log.Tracef("Removing oid %s from tracked orders", hex.EncodeToString(id))
 
 	var oid order.OrderID
 	copy(oid[:], id[:])
@@ -479,15 +481,14 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		return
 	}
 
+	var maxRedeemFees uint64
+	if orderInfo.initialRedeemFeesLocked == 0 {
+		numLots := match.Qty / orderInfo.lotSize
+		maxRedeemFees = numLots * orderInfo.singleLotRedeemFees
+	}
+
 	if _, seen := orderInfo.matchesSeen[matchID]; !seen {
 		orderInfo.matchesSeen[matchID] = struct{}{}
-
-		var maxRedeemFees uint64
-		if orderInfo.initialRedeemFeesLocked == 0 {
-			numLots := match.Qty / orderInfo.lotSize
-			maxRedeemFees = numLots * orderInfo.singleLotRedeemFees
-		}
-
 		var balanceMods []*balanceMod
 		if orderInfo.order.Sell {
 			balanceMods = []*balanceMod{
@@ -504,6 +505,50 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		m.modifyBotBalance(orderInfo.bot, balanceMods)
 	}
 
+	if match.Revoked {
+		if _, seen := orderInfo.revokedMatchesSeen[matchID]; !seen {
+			orderInfo.revokedMatchesSeen[matchID] = struct{}{}
+
+			if match.Swap == nil { // There will be no refund
+				var balanceMods []*balanceMod
+				if orderInfo.order.Sell {
+					balanceMods = []*balanceMod{
+						{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty},
+						{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
+					}
+				} else {
+					balanceMods = []*balanceMod{
+						{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty)},
+						{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
+					}
+				}
+				m.modifyBotBalance(orderInfo.bot, balanceMods)
+				orderInfo.matchesSettled[matchID] = struct{}{}
+				return
+			}
+
+			var singleLotRefundFees uint64
+			if orderInfo.initialRefundFeesLocked == 0 {
+				singleLotRefundFees = orderInfo.singleLotRefundFees
+			}
+
+			var balanceMods []*balanceMod
+			if orderInfo.order.Sell {
+				balanceMods = []*balanceMod{
+					{balanceModIncrease, orderInfo.order.BaseID, balTypePendingRefund, match.Qty - singleLotRefundFees},
+					{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
+				}
+			} else {
+				balanceMods = []*balanceMod{
+					{balanceModIncrease, orderInfo.order.QuoteID, balTypePendingRefund, calc.BaseToQuote(match.Rate, match.Qty) - singleLotRefundFees},
+					{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
+				}
+			}
+
+			m.modifyBotBalance(orderInfo.bot, balanceMods)
+		}
+	}
+
 	if match.Status != order.MatchConfirmed && match.Refund == nil {
 		return
 	}
@@ -515,30 +560,21 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 	orderInfo.matchesSettled[matchID] = struct{}{}
 
 	if match.Refund != nil {
-		// TODO: Currently refunds are not handled properly. Core gives no way to
-		// retrieve the refund fee. Core will need to make this information available,
-		// and then the fee will need to be taken into account before increasing the
-		// bot's balance. Also, currently we are not detecting that a refund will happen,
-		// only that it has already happened. When a match has been revoked, the bot's
-		// PendingRefund balance must be increased, and the PendingRedeem amount must be
-		// decreased.
-
-		var maxRedeemFees uint64
-		if orderInfo.initialRedeemFeesLocked == 0 {
-			numLots := match.Qty / orderInfo.lotSize
-			maxRedeemFees = numLots * orderInfo.singleLotRedeemFees
+		var maxRefundFees uint64
+		if orderInfo.initialRefundFeesLocked == 0 {
+			maxRefundFees = orderInfo.singleLotRefundFees
 		}
 
 		var balanceMods []*balanceMod
 		if orderInfo.order.Sell {
 			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
-				{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty},
+				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRefund, match.Qty - maxRefundFees},
+				{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty - maxRefundFees},
 			}
 		} else {
 			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
-				{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty)},
+				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRefund, calc.BaseToQuote(match.Rate, match.Qty) - maxRefundFees},
+				{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty) - maxRefundFees},
 			}
 		}
 		m.log.Tracef("oid: %s, increasing balance due to refund")
@@ -605,12 +641,19 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 	}
 
 	var filledQty, filledLots uint64
+	var redeemedLots uint64
+	var refundedMatches uint64
 	for _, match := range o.Matches {
 		if match.IsCancel {
 			continue
 		}
-
 		filledLots += match.Qty / orderInfo.lotSize
+		if match.Refund != nil {
+			refundedMatches++
+		}
+		if match.Redeem != nil {
+			redeemedLots += match.Qty / orderInfo.lotSize
+		}
 		if fromAsset == o.QuoteID {
 			filledQty += calc.BaseToQuote(match.Rate, match.Qty)
 		} else {
@@ -625,7 +668,6 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 		if usedFunds < orderInfo.initialFundsLocked {
 			m.log.Tracef("oid: %s, returning unused locked funds, initialFundsLocked %v, filledQty %v, filledLots %v, maxSwapFees %v",
 				o.ID, orderInfo.initialFundsLocked, filledQty, filledLots, maxSwapFees)
-
 			balanceMods := []*balanceMod{
 				{balanceModIncrease, fromAsset, balTypeAvailable, orderInfo.initialFundsLocked - usedFunds},
 				{balanceModDecrease, fromAsset, balTypeFundingOrder, orderInfo.initialFundsLocked - usedFunds},
@@ -639,12 +681,11 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 		orderInfo.unusedLockedFundsReturned = true
 	}
 
-	// Step 5 (from botBalance doc): All Fees Confirmed - return excess swap and redeem fees
+	// Step 5 (from botBalance doc): All Fees Confirmed - return excess fees
 	if !orderInfo.excessFeesReturned && o.AllFeesConfirmed {
 		// Return excess swap fees
 		maxSwapFees := filledLots * orderInfo.singleLotSwapFees
 		if maxSwapFees > o.FeesPaid.Swap {
-			m.log.Tracef("oid: %s, return excess swap fees, maxSwapFees %v, swap fees %v", o.ID, maxSwapFees, o.FeesPaid.Swap)
 			balanceMods := []*balanceMod{
 				{balanceModIncrease, fromAsset, balTypeAvailable, maxSwapFees - o.FeesPaid.Swap},
 				{balanceModDecrease, fromAsset, balTypeFundingOrder, maxSwapFees},
@@ -669,7 +710,7 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 					hex.EncodeToString(o.ID), orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
 			}
 		} else {
-			maxRedeemFees := filledLots * orderInfo.singleLotRedeemFees
+			maxRedeemFees := redeemedLots * orderInfo.singleLotRedeemFees
 			if maxRedeemFees > o.FeesPaid.Redemption {
 				m.log.Tracef("oid: %s, return excess redeem fees, maxRedeemFees %v, redemption fees %v", o.ID, maxRedeemFees, o.FeesPaid.Redemption)
 				balanceMods := []*balanceMod{
@@ -679,6 +720,28 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 			} else if maxRedeemFees < o.FeesPaid.Redemption {
 				m.log.Errorf("oid: %v - maxRedeemFees %d < redemption fees %d",
 					hex.EncodeToString(o.ID), maxRedeemFees, o.FeesPaid.Redemption)
+			}
+		}
+
+		// Return excess refund fees
+		if orderInfo.initialRefundFeesLocked > 0 { // AccountLocker
+			if orderInfo.initialRefundFeesLocked > o.FeesPaid.Refund {
+				balanceMods := []*balanceMod{
+					{balanceModIncrease, fromAsset, balTypeAvailable, orderInfo.initialRefundFeesLocked - o.FeesPaid.Refund},
+					{balanceModDecrease, fromAsset, balTypeFundingOrder, orderInfo.initialRefundFeesLocked},
+				}
+				m.modifyBotBalance(orderInfo.bot, balanceMods)
+			}
+		} else {
+			maxRefundFees := refundedMatches * orderInfo.singleLotRefundFees
+			if maxRefundFees > o.FeesPaid.Refund {
+				balanceMods := []*balanceMod{
+					{balanceModIncrease, fromAsset, balTypeAvailable, maxRefundFees - o.FeesPaid.Refund},
+				}
+				m.modifyBotBalance(orderInfo.bot, balanceMods)
+			} else if maxRefundFees < o.FeesPaid.Refund {
+				m.log.Errorf("oid: %v - max refund fees %d < refund fees %d",
+					hex.EncodeToString(o.ID), maxRefundFees, o.FeesPaid.Refund)
 			}
 		}
 

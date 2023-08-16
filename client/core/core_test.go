@@ -1030,8 +1030,8 @@ func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, chan
 	return w.preAccelerateSwapRate, &w.preAccelerateSuggestedRange, nil, nil
 }
 
-func (w *TXCWallet) SingleLotSwapFees(version uint32, feeRate uint64, useSafeTxSize bool) (uint64, error) {
-	return 0, nil
+func (w *TXCWallet) SingleLotSwapRefundFees(version uint32, feeRate uint64, useSafeTxSize bool) (uint64, uint64, error) {
+	return 0, 0, nil
 }
 
 func (w *TXCWallet) SingleLotRedeemFees(version uint32, feeRate uint64) (uint64, error) {

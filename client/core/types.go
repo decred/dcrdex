@@ -419,6 +419,8 @@ type FeeBreakdown struct {
 	Swap       uint64 `json:"swap"`
 	Redemption uint64 `json:"redemption"`
 	Funding    uint64 `json:"funding"` // split fees
+	// TODO: Refund is not yet being populated.
+	Refund uint64 `json:"refund"`
 }
 
 // coreOrderFromTrade constructs an *Order from the supplied limit or market
