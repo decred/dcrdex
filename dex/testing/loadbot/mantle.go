@@ -307,7 +307,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		// Even though the harnessCtl is synchronous, I've still observed some
 		// issues with trying to create the wallet immediately.
 		<-time.After(time.Second)
-	case ltc, bch, btc, dgb:
+	case ltc, bch, btc, dash, dgb:
 		cmdOut := <-harnessCtl(ctx, symbol, "./new-wallet", node, name)
 		if cmdOut.err != nil {
 			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
@@ -439,7 +439,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 func send(symbol, node, addr string, val uint64) error {
 	var res *harnessResult
 	switch symbol {
-	case btc, dcr, ltc, doge, firo, bch, dgb:
+	case btc, dcr, ltc, dash, doge, firo, bch, dgb:
 		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
 	case zec:
 		// sendtoaddress will choose spent outputs if a block was
@@ -663,6 +663,17 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 		form = &core.WalletForm{
 			Type:    "zcashdRPC",
 			AssetID: zecID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     port,
+			},
+		}
+	case dash:
+		form = &core.WalletForm{
+			Type:    "dashdRPC",
+			AssetID: dashID,
 			Config: map[string]string{
 				"walletname":  name,
 				"rpcuser":     "user",
