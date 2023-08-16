@@ -17,7 +17,7 @@ in the `client/webserver/locales` directory. These dictionaries map HTML templat
 keys to translations. New or modified entries should use the translation in the English
 dictionary (`var EnUS` in the file `en-us.go`) as the source text. The goal is to duplicate
 entries for all keys in the English dictionary.
- 
+
 When creating a dictionary for a new language, use the BCP 47 language tag to construct
 the file's name. Then new language's HTML strings map must then be listed in [client/webserver/locales/locales.go](https://github.com/decred/dcrdex/blob/master/client/webserver/locales/locales.go) with an appropriate language tag.
 

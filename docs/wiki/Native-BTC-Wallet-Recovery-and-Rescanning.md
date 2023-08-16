@@ -5,7 +5,7 @@
 In this guide, we will be using the Native BTC wallet that is built into DEX and you should learn how to navigate to the settings page.  The settings page is where you can reinitialize the wallet, rescan the wallet, etc.
 
 1. Navigate to the `Wallets` page (`/wallets`) and select the Bitcoin wallet if it is not already selected.
-2. Click the `Settings` button that has a gears icon to open the settings box.
+2. Click the `Settings` button that has a gears icon to open the settings dialog.
 
    <img alt="BTC Wallet Settings View" src="./images/btc-wallet-page-for-settings.png" width="300"/>
 
@@ -21,7 +21,7 @@ In this case, the Wallets page (`/wallets`) will still show the wallet since it 
 
 <img alt="BTC Wallet View" src="./images/unloaded-btc-wallet.png" width="300"/>
 
-To reinitialize the wallet, [open the wallet settings](#opening-the-btc-wallet-settings) and click the `Recover` button:
+To reinitialize the wallet, [open the wallet settings dialog](#opening-the-btc-wallet-settings) and click the `Recover` button:
 
 <img alt="BTC Wallet Settings View" src="./images/btc-wallet-settings.png" width="300"/>
 
@@ -36,10 +36,10 @@ The wallet will begin re-synchronizing.  This may take several minutes.
 1. Shutdown DEX.
 2. Open the wallet directory. For mainnet, this would be:
     - `~/.dexc/mainnet/assetdb/btc/mainnet/` on Linux
-    - `~/Library/Application\ Support/Dexc/mainnet/assetdb/btc/mainnet/` on MacOS 
+    - `~/Library/Application\ Support/Dexc/mainnet/assetdb/btc/mainnet/` on MacOS
     - `C:\Users\<Username>\AppData\Dexc\mainnet\assetdb\btc\mainnet` on Windows.
 
-   There may be a wallet.db file in this folder, which you should rename wallet.db.bak.
+  There may be a wallet.db file in this folder, which you should rename wallet.db.bak.
 
 3. Startup and login to DEX.
 4. [Open the BTC wallet settings](#opening-the-btc-wallet-settings) and click `Recover` again.
@@ -48,9 +48,9 @@ If you still encounter any error in the logs or notification, you can reach out 
 
 ## Rescanning the wallet
 
-If you have sent funds to your wallet, but they are not showing up in DEX, it may be necessary to rescan the wallet.  This is a process that can take several hours, depending on the number of transactions in the wallet.
+In rare circumstances, the wallet may need to rescan the blockchain for missed transactions.  This is a process that can take several hours, depending on the number of transactions in the wallet.
 
-To rescan the wallet, [open the wallet settings](#opening-the-btc-wallet-settings) and click the `Rescan` button.  You will a message with a green check icon if the rescan was successful.
+To rescan the wallet, [open the wallet settings dialog](#opening-the-btc-wallet-settings) and click the `Rescan` button.  You will a message with a green check icon if the rescan was successful.
 
 **IF** you wish to force a rescan, you can do so by following these steps:
 
@@ -61,4 +61,4 @@ To rescan the wallet, [open the wallet settings](#opening-the-btc-wallet-setting
 
 In addition to reinitializing or rescanning the BTC wallet.db file, you may also remove all of the chain data files to force resynchronization of all blockchain data used by the neutrino service that powers the wallet.  To do this, shutdown DEX and delete all of the files in `assetdb/btc/mainnet/` (for mainnet), including `neutrino.db`, `reg_filter_headers.bin`, `block_headers.bin`, and `wallet.db`.  You may keep `peers.json` to help with bootstrapping when you restart, but it may be deleted too.
 
-Next, startup DEX and go to the Wallet page. [open the wallet settings](#opening-the-btc-wallet-settings) and click `Recover` after ensuring it is currently showing the `Native` wallet option as in the [first section's screenshot](#reinitializing-the-native-btc-wallet).
+Next, startup DEX and go to the Wallet page. [open the wallet settings dialog](#opening-the-btc-wallet-settings) and click `Recover` after ensuring it is currently showing the `Native` wallet option as in the [first section's screenshot](#reinitializing-the-native-btc-wallet).
