@@ -1300,3 +1300,164 @@ func TestDeleteRecords(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleSetVSP(t *testing.T) {
+	params := &RawParams{
+		Args: []string{
+			"42",
+			"url.com",
+		},
+	}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		setVSPErr   error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:        "core.SetVSP error",
+		params:      params,
+		setVSPErr:   errors.New("error"),
+		wantErrCode: msgjson.RPCSetVSPError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{setVSPErr: test.setVSPErr}
+		r := &RPCServer{core: tc}
+		payload := handleSetVSP(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestPurchaseTickets(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{pw},
+		Args: []string{
+			"42",
+			"2",
+		},
+	}
+	tickets := []string{"txidA", "txidB"}
+	tests := []struct {
+		name               string
+		params             *RawParams
+		purchaseTicketsErr error
+		purchaseTickets    []string
+		wantErrCode        int
+	}{{
+		name:            "ok",
+		params:          params,
+		purchaseTickets: tickets,
+		wantErrCode:     -1,
+	}, {
+		name:               "core.PurchaseTickets error",
+		params:             params,
+		purchaseTicketsErr: errors.New("error"),
+		wantErrCode:        msgjson.RPCPurchaseTicketsError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			purchseTickets:     test.purchaseTickets,
+			purchaseTicketsErr: test.purchaseTicketsErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handlePurchaseTickets(r, test.params)
+		res := new([]string)
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+		if test.wantErrCode == -1 && len(*res) != 2 {
+			t.Fatalf("expected two tickets but got %d", len(*res))
+		}
+	}
+}
+
+func TestHandleStakeStatus(t *testing.T) {
+	params := &RawParams{
+		Args: []string{
+			"42",
+		},
+	}
+	tests := []struct {
+		name           string
+		params         *RawParams
+		stakeStatusErr error
+		wantErrCode    int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:           "core.StakeStatus error",
+		params:         params,
+		stakeStatusErr: errors.New("error"),
+		wantErrCode:    msgjson.RPCStakeStatusError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{stakeStatusErr: test.stakeStatusErr}
+		r := &RPCServer{core: tc}
+		payload := handleStakeStatus(r, test.params)
+		res := new(asset.TicketStakingStatus)
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleSetVotingPreferences(t *testing.T) {
+	params := &RawParams{
+		Args: []string{
+			"42",
+		},
+	}
+	tests := []struct {
+		name             string
+		params           *RawParams
+		setVotingPrefErr error
+		wantErrCode      int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:             "core.SetVotingPreferences error",
+		params:           params,
+		setVotingPrefErr: errors.New("error"),
+		wantErrCode:      msgjson.RPCSetVotingPreferencesError,
+	}, {
+		name: "bad params",
+		params: &RawParams{
+			Args: []string{
+				"asdf",
+			},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{setVotingPrefErr: test.setVotingPrefErr}
+		r := &RPCServer{core: tc}
+		payload := handleSetVotingPreferences(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -811,3 +811,146 @@ func TestDeleteArchivedRecordsArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSetVSPArgs(t *testing.T) {
+	paramsWithArgs := func(args ...string) *RawParams {
+		return &RawParams{Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: paramsWithArgs("42", "asdf"),
+	}, {
+		name:    "asset ID not a number",
+		params:  paramsWithArgs("def", "abc"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		_, err := parseSetVSPArgs(test.params)
+		if test.wantErr != nil {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+	}
+}
+
+func TestPurchaseTicketsArgs(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	pwArgs := []encode.PassBytes{pw}
+	paramsWithArgs := func(args ...string) *RawParams {
+		return &RawParams{Args: args, PWArgs: pwArgs}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: paramsWithArgs("42", "4"),
+	}, {
+		name:    "num of tickets not a number",
+		params:  paramsWithArgs("42", "abc"),
+		wantErr: errArgs,
+	}, {
+		name:    "asset ID not a number",
+		params:  paramsWithArgs("abc", "4"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		_, err := parsePurchaseTicketsArgs(test.params)
+		if test.wantErr != nil {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+	}
+}
+
+func TestStakeStatusArgs(t *testing.T) {
+	paramsWithArgs := func(args ...string) *RawParams {
+		return &RawParams{Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: paramsWithArgs("42"),
+	}, {
+		name:    "asset ID not a number",
+		params:  paramsWithArgs("def"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		_, err := parseStakeStatusArgs(test.params)
+		if test.wantErr != nil {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+	}
+}
+
+func TestParseSetVotingPreferencesArgs(t *testing.T) {
+	paramsWithArgs := func(args ...string) *RawParams {
+		return &RawParams{Args: args}
+	}
+	aMap := `{"txidA":"yes","txidB":"no"}`
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok one arg",
+		params: paramsWithArgs("42"),
+	}, {
+		name:   "ok three map args",
+		params: paramsWithArgs("42", aMap, aMap, aMap),
+	}, {
+		name:   "ok two map args",
+		params: paramsWithArgs("42", aMap, aMap),
+	}, {
+		name:   "ok one map arg",
+		params: paramsWithArgs("42", aMap),
+	}, {
+		name:   "ok blank strings",
+		params: paramsWithArgs("42", "", "", aMap),
+	}, {
+		name:    "bad map",
+		params:  paramsWithArgs("42", "asdf"),
+		wantErr: errArgs,
+	}, {
+		name:    "asset ID not a number",
+		params:  paramsWithArgs("asdf"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		_, err := parseSetVotingPreferencesArgs(test.params)
+		if test.wantErr != nil {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+	}
+}

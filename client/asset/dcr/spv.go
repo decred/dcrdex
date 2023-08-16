@@ -893,6 +893,9 @@ func (w *spvWallet) ticketsInRange(ctx context.Context, fromHeight, toHeight int
 
 	tickets := make([]*asset.Ticket, 0)
 
+	// TODO: This does not seem to return tickets withought confirmations.
+	// Investigate this and return unconfirmed tickets with block height
+	// set to -1 if possible.
 	processTicket := func(ticketSummaries []*wallet.TicketSummary, hdr *wire.BlockHeader) (bool, error) {
 		for _, ticketSummary := range ticketSummaries {
 			spender := ""
