@@ -37,7 +37,6 @@ const (
 	BipID           = 966
 	walletTypeRPC   = "rpc"
 	walletTypeToken = "token"
-	minerGasCeil    = 8_000_000 // config.Defaults.Miner.GasCeil
 )
 
 var (
@@ -45,7 +44,7 @@ var (
 	usdcTokenID, _   = dex.BipSymbolID("usdc.polygon")
 	// WalletInfo defines some general information about a Polygon Wallet(EVM
 	// Compatible).
-	WalletInfo = &asset.WalletInfo{
+	WalletInfo = asset.WalletInfo{
 		Name:              "Polygon",
 		Version:           0,
 		SupportedVersions: []uint32{0},
@@ -87,7 +86,6 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 			}
 		}
 	}
-	wi := *WalletInfo
 	// BipID, chainCfg, cfg, &t, dexpolygon.VersionedGases, dexpolygon.Tokens, logger, net
 	return eth.NewEVMWallet(&eth.EVMWalletConfig{
 		BaseChainID:        BipID,
@@ -98,8 +96,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		Tokens:             dexpolygon.Tokens,
 		Logger:             logger,
 		BaseChainContracts: contracts,
-		MinerBlockGasCeil:  minerGasCeil,
-		WalletInfo:         &wi,
+		WalletInfo:         WalletInfo,
 		Net:                net,
 	})
 }
@@ -109,7 +106,8 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 }
 
 func (d *Driver) Info() *asset.WalletInfo {
-	return WalletInfo
+	wi := WalletInfo
+	return &wi
 }
 
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {

@@ -2677,6 +2677,11 @@ func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, 
 		return nil, nil, errors.New("no v2 credentials stored")
 	}
 
+	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		return nil, nil, fmt.Errorf("%s is a token. assets seeds are for base chains onlyu. did you want %s",
+			tkn.Name, asset.Asset(tkn.ParentID).Info.Name)
+	}
+
 	appSeed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app seed decryption error: %w", err)
@@ -2691,11 +2696,21 @@ func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, 
 // on external wallet software and their key derivation paths, this seed may be
 // usable for accessing funds outside of DEX applications, e.g. btcwallet.
 func AssetSeedAndPass(assetID uint32, appSeed []byte) ([]byte, []byte) {
+	const accountBasedSeedAssetID = 60 // ETH
 	seedAssetID := assetID
 	if ai, _ := asset.Info(assetID); ai != nil && ai.IsAccountBased {
-		const accountBasedSeedAssetID = 60 // ETH
 		seedAssetID = accountBasedSeedAssetID
 	}
+	// Tokens asset IDs shouldn't be passed in, but if they are, return the seed
+	// for the parent ID.
+	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		if ai, _ := asset.Info(tkn.ParentID); ai != nil {
+			if ai.IsAccountBased {
+				seedAssetID = accountBasedSeedAssetID
+			}
+		}
+	}
+
 	b := make([]byte, len(appSeed)+4)
 	copy(b, appSeed)
 	binary.BigEndian.PutUint32(b[len(appSeed):], seedAssetID)

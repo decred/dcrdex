@@ -605,10 +605,6 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		}
 	}
 
-	wi := *WalletInfo
-	wi.MaxSwapsInTx = 40
-	wi.MaxRedeemsInTx = 60
-
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
 			baseChainID:   BipID,
@@ -625,6 +621,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			pendingTxs:    make(map[common.Hash]*pendingTx),
 		},
 		versionedGases:     versionedGases,
+		maxSwapGas:         versionedGases[0].Swap,
+		maxRedeemGas:       versionedGases[0].Redeem,
 		log:                tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:            assetID,
 		contractors:        map[uint32]contractor{0: c},
@@ -635,7 +633,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		pendingApprovals:   make(map[uint32]*pendingApproval),
 		approvalCache:      make(map[uint32]bool),
 		// move up after review
-		wi: &wi,
+		wi: WalletInfo,
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
