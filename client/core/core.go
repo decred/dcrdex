@@ -3378,23 +3378,17 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}
 
 	// See if the wallet offers a quick path.
-	configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer)
-	if is && oldWallet.walletType == walletDef.Type {
+	if configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer); is && oldWallet.walletType == walletDef.Type {
 		form.Config[asset.SpecialSettingActivelyUsed] = strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
 		defer delete(form.Config, asset.SpecialSettingActivelyUsed)
 
-		wCfg := &asset.WalletConfig{
+		if restart, err := configurer.Reconfigure(c.ctx, &asset.WalletConfig{
 			Type:     form.Type,
 			Settings: form.Config,
 			DataDir:  c.assetDataDirectory(assetID),
-		}
-
-		restart, err := configurer.Reconfigure(c.ctx, wCfg, oldWallet.currentDepositAddress())
-		if err != nil {
+		}, oldWallet.currentDepositAddress()); err != nil {
 			return fmt.Errorf("Reconfigure: %v", err)
-		}
-
-		if !restart {
+		} else if !restart {
 			// Config was updated without a need to restart.
 			if owns, err := oldWallet.OwnsDepositAddress(oldWallet.currentDepositAddress()); err != nil {
 				return newError(walletErr, "error checking deposit address after live config update: %w", err)

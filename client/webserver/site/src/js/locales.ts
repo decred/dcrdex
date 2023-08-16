@@ -264,7 +264,7 @@ export const enUS: Locale = {
   [ID_LOCKED_ORDER_BAL_MSG]: 'Funds locked in unmatched orders',
   [ID_CREATING_WALLETS]: 'Creating wallets',
   [ID_ADDING_SERVERS]: 'Connecting to servers',
-  [ID_WALLET_RECOVERY_SUPPORT_MSG]: 'Note: Your {{ walletType }} wallet is not running! Click on the "Recover" button below to fix it.'
+  [ID_WALLET_RECOVERY_SUPPORT_MSG]: 'Native {{ walletSymbol }} wallet failed to load properly. Try clicking the "Recover" button below to fix it'
 }
 
 export const ptBR: Locale = {
