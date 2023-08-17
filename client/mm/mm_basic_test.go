@@ -359,8 +359,7 @@ func TestRebalance(t *testing.T) {
 		{
 			name: "test balances edge, not enough for orders",
 			cfg: &MarketMakingConfig{
-				GapStrategy:    GapStrategyMultiplier,
-				SplitTxAllowed: true,
+				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
 						Lots:      1,
@@ -497,8 +496,7 @@ func TestRebalance(t *testing.T) {
 		{
 			name: "test balances edge, not enough for 2 lot orders, place 1 lot",
 			cfg: &MarketMakingConfig{
-				GapStrategy:    GapStrategyMultiplier,
-				SplitTxAllowed: true,
+				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
 						Lots:      1,

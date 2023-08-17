@@ -1067,7 +1067,7 @@ func (w *TXCWallet) ReturnRedemptionAddress(addr string) {
 func (w *TXCWallet) ReturnRefundContracts(contracts [][]byte) {
 	w.returnedContracts = contracts
 }
-func (w *TXCWallet) MaxFundingFees(_ uint32, _ map[string]string) uint64 {
+func (w *TXCWallet) MaxFundingFees(_ uint32, _ uint64, _ map[string]string) uint64 {
 	return 0
 }
 

@@ -100,26 +100,11 @@ type MarketMakingConfig struct {
 	// ignored if there is market data available.
 	EmptyMarketRate float64 `json:"emptyMarketRate"`
 
-	// SplitTxAllowed indicates whether the wallet (if it supports multi-splits)
-	// is allowed to do multi split transactions when funding orders. For UTXO
-	// based assets, it may not be possible to fund each of the orders without
-	// a split transaction which creates outputs of the size required by each
-	// order.
-	SplitTxAllowed bool `json:"splitTxAllowed"`
+	// BaseOptions are the multi-order options for the base asset wallet.
+	BaseOptions map[string]string `json:"baseOptions"`
 
-	// SplitBuffer indicates whether the quote asset wallet (if it supports
-	// multi-splits) should add a buffer to the split amount. This is useful
-	// to prevent too many split transactions from being created. During the
-	// operation of this market maker, orders will be frequently placed and
-	// canceled as the price moves. If the price moves upward and there is
-	// no split buffer, the wallet may need to create a new split transaction
-	// to fund the new orders.
-	//
-	// The split buffer is a percentage of the total amount required for an
-	// order. For example if the order requires 0.1 BTC and the split buffer
-	// is 5, the wallet will create a split transaction with an output of
-	// 0.105 BTC.
-	SplitBuffer *uint64 `json:"splitBuffer"`
+	// QuoteOptions are the multi-order options for the quote asset wallet.
+	QuoteOptions map[string]string `json:"quoteOptions"`
 }
 
 func needBreakEvenHalfSpread(strat GapStrategy) bool {
@@ -172,7 +157,7 @@ func (c *MarketMakingConfig) Validate() error {
 		return nil
 	}
 
-	sellPlacements := make(map[float64]interface{}, len(c.SellPlacements))
+	sellPlacements := make(map[float64]bool, len(c.SellPlacements))
 	for _, p := range c.SellPlacements {
 		if _, duplicate := sellPlacements[p.GapFactor]; duplicate {
 			return fmt.Errorf("duplicate sell placement %f", p.GapFactor)
@@ -183,11 +168,12 @@ func (c *MarketMakingConfig) Validate() error {
 		}
 	}
 
-	buyPlacements := make(map[float64]interface{}, len(c.BuyPlacements))
+	buyPlacements := make(map[float64]bool, len(c.BuyPlacements))
 	for _, p := range c.BuyPlacements {
 		if _, duplicate := buyPlacements[p.GapFactor]; duplicate {
 			return fmt.Errorf("duplicate buy placement %f", p.GapFactor)
 		}
+		buyPlacements[p.GapFactor] = true
 		if err := validatePlacement(p); err != nil {
 			return fmt.Errorf("invalid buy placement: %w", err)
 		}
@@ -348,7 +334,8 @@ func basisPrice(book dexOrderBook, oracle oracle, cfg *MarketMakingConfig, mkt *
 	}
 
 	if cfg.EmptyMarketRate > 0 {
-		return mkt.ConventionalRateToMsg(cfg.EmptyMarketRate)
+		emptyMsgRate := mkt.ConventionalRateToMsg(cfg.EmptyMarketRate)
+		return steppedRate(emptyMsgRate, mkt.RateStep)
 	}
 
 	return 0
@@ -404,14 +391,11 @@ func (m *basicMarketMaker) placeMultiTrade(placements []*rateLots, sell bool) {
 		})
 	}
 
-	options := map[string]string{}
-	if m.cfg.SplitTxAllowed {
-		options["multisplit"] = "true"
-	}
-	if !sell {
-		if m.cfg.SplitBuffer != nil {
-			options["multisplitbuffer"] = fmt.Sprintf("%d", *m.cfg.SplitBuffer)
-		}
+	var options map[string]string
+	if sell {
+		options = m.cfg.BaseOptions
+	} else {
+		options = m.cfg.QuoteOptions
 	}
 
 	orders, err := m.core.MultiTrade(nil, &core.MultiTradeForm{
@@ -432,8 +416,7 @@ func (m *basicMarketMaker) placeMultiTrade(placements []*rateLots, sell bool) {
 		var oid order.OrderID
 		copy(oid[:], ord.ID)
 		m.ords[oid] = ord
-		placementIndex := placements[i].placementIndex
-		m.oidToPlacement[oid] = placementIndex
+		m.oidToPlacement[oid] = placements[i].placementIndex
 	}
 	m.ordMtx.Unlock()
 }
@@ -615,13 +598,17 @@ func basicMMRebalance(newEpoch uint64, m rebalancer, c clientCore, cfg *MarketMa
 		var remainingBalance uint64
 		if sell {
 			remainingBalance = baseBalance.Available
-			if cfg.SplitTxAllowed {
+			if remainingBalance > sellFees.funding {
 				remainingBalance -= sellFees.funding
+			} else {
+				return nil
 			}
 		} else {
 			remainingBalance = quoteBalance.Available
-			if cfg.SplitTxAllowed {
+			if remainingBalance > buyFees.funding {
 				remainingBalance -= buyFees.funding
+			} else {
+				return nil
 			}
 		}
 
@@ -770,12 +757,12 @@ func (m *basicMarketMaker) updateFeeRates() error {
 		return fmt.Errorf("failed to get fees: %v", err)
 	}
 
-	buyFundingFees, err := m.core.MaxFundingFees(m.base, uint32(len(m.cfg.BuyPlacements)), nil)
+	buyFundingFees, err := m.core.MaxFundingFees(m.quote, m.host, uint32(len(m.cfg.BuyPlacements)), m.cfg.QuoteOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get funding fees: %v", err)
 	}
 
-	sellFundingFees, err := m.core.MaxFundingFees(m.quote, uint32(len(m.cfg.SellPlacements)), nil)
+	sellFundingFees, err := m.core.MaxFundingFees(m.base, m.host, uint32(len(m.cfg.SellPlacements)), m.cfg.BaseOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get funding fees: %v", err)
 	}

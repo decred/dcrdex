@@ -143,19 +143,39 @@ var (
 	defaultWalletBirthdayUnix = 1622668320
 	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
 
+	multiFundingOpts = []*asset.ConfigOption{
+		{
+			Key:         multiSplitKey,
+			DisplayName: "External fee rate estimates",
+			Description: "Allow split funding transactions that pre-size outputs to " +
+				"prevent excessive overlock.",
+			IsBoolean:    true,
+			DefaultValue: true,
+		},
+		{
+			Key:         multiSplitBufferKey,
+			DisplayName: "External fee rate estimates",
+			Description: "Add an integer percent buffer to split output amounts to " +
+				"facilitate output reuse",
+			DefaultValue: true,
+		},
+	}
+
 	rpcWalletDefinition = &asset.WalletDefinition{
 		Type:              walletTypeRPC,
 		Tab:               "External",
 		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        append(RPCConfigOpts("Bitcoin", "8332"), CommonConfigOpts("BTC", true)...),
+		MultiFundingOpts:  multiFundingOpts,
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
-		Type:        walletTypeSPV,
-		Tab:         "Native",
-		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  append(SPVConfigOpts("BTC"), CommonConfigOpts("BTC", true)...),
-		Seeded:      true,
+		Type:             walletTypeSPV,
+		Tab:              "Native",
+		Description:      "Use the built-in SPV wallet",
+		ConfigOpts:       append(SPVConfigOpts("BTC"), CommonConfigOpts("BTC", true)...),
+		Seeded:           true,
+		MultiFundingOpts: multiFundingOpts,
 	}
 
 	electrumWalletDefinition = &asset.WalletDefinition{
@@ -771,7 +791,7 @@ type fundMultiOptions struct {
 	// will be created with one output per order.
 	//
 	// Use the multiSplitKey const defined above in the options map to set this option.
-	Split *bool
+	Split bool `ini:"multisplit"`
 	// SplitBuffer, if set, will instruct the wallet to add a buffer onto each
 	// output of the multi-order split transaction (if the split is needed).
 	// SplitBuffer is defined as a percentage of the output. If a .1 BTC output
@@ -788,32 +808,12 @@ type fundMultiOptions struct {
 	// is no split buffer, this may necessitate a new split transaction.
 	//
 	// Use the multiSplitBufferKey const defined above in the options map to set this.
-	SplitBuffer *uint64
+	SplitBuffer uint64 `ini:"multisplitbuffer"`
 }
 
 func decodeFundMultiOptions(options map[string]string) (*fundMultiOptions, error) {
 	opts := new(fundMultiOptions)
-	if options == nil {
-		return opts, nil
-	}
-
-	if split, ok := options[multiSplitKey]; ok {
-		b, err := strconv.ParseBool(split)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing split option: %w", err)
-		}
-		opts.Split = &b
-	}
-
-	if splitBuffer, ok := options[multiSplitBufferKey]; ok {
-		b, err := strconv.ParseUint(splitBuffer, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing split buffer option: %w", err)
-		}
-		opts.SplitBuffer = &b
-	}
-
-	return opts, nil
+	return opts, config.Unmapify(options, opts)
 }
 
 // redeemOptions are order options that apply to redemptions.
@@ -6107,30 +6107,18 @@ func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) ([]a
 		return nil, nil, 0, fmt.Errorf("error decoding options: %w", err)
 	}
 
-	var useSplit bool
-	var splitBuffer uint64
-	if customCfg.Split != nil {
-		useSplit = *customCfg.Split
-	}
-	if useSplit && customCfg.SplitBuffer != nil {
-		splitBuffer = *customCfg.SplitBuffer
-	}
-
-	return btc.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, useSplit, splitBuffer)
+	return btc.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, customCfg.Split, customCfg.SplitBuffer)
 }
 
 // MaxFundingFees returns the maximum funding fees for an order/multi-order.
-func (btc *baseWallet) MaxFundingFees(numTrades uint32, options map[string]string) uint64 {
-	useSplit := btc.useSplitTx()
-	if options != nil {
-		if split, ok := options[splitKey]; ok {
-			useSplit, _ = strconv.ParseBool(split)
-		}
-		if split, ok := options[multiSplitKey]; ok {
-			useSplit, _ = strconv.ParseBool(split)
-		}
+func (btc *baseWallet) MaxFundingFees(numTrades uint32, feeRate uint64, options map[string]string) uint64 {
+	customCfg, err := decodeFundMultiOptions(options)
+	if err != nil {
+		btc.log.Errorf("Error decoding multi-fund settings: %v", err)
+		return 0
 	}
-	if !useSplit {
+
+	if !customCfg.Split {
 		return 0
 	}
 
@@ -6146,7 +6134,7 @@ func (btc *baseWallet) MaxFundingFees(numTrades uint32, options map[string]strin
 	const numInputs = 12 // plan for lots of inputs to get a safe estimate
 
 	txSize := dexbtc.MinimumTxOverhead + numInputs*inputSize + uint64(numTrades+1)*outputSize
-	return btc.feeRateLimit() * txSize
+	return feeRate * txSize
 }
 
 type utxo struct {

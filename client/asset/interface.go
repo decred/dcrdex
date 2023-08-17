@@ -234,6 +234,8 @@ type WalletDefinition struct {
 	// description for each option. This can be used to request config info from
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*ConfigOption `json:"configopts"`
+	// MultiFundingOpts are options related to funding multi-trades.
+	MultiFundingOpts []*ConfigOption `json:"multifundingopts"`
 	// NoAuth indicates that the wallet does not implement the Authenticator
 	// interface. A better way to check is to use the wallet traits but wallet
 	// construction is presently required to discern traits.
@@ -516,7 +518,7 @@ type Wallet interface {
 	// not about to be funded.
 	FundMultiOrder(ord *MultiOrder, maxLock uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
 	// MaxFundingFees returns the max fees that could be paid for funding a swap.
-	MaxFundingFees(numTrades uint32, options map[string]string) uint64
+	MaxFundingFees(numTrades uint32, feeRate uint64, options map[string]string) uint64
 }
 
 // Authenticator is a wallet implementation that require authentication.

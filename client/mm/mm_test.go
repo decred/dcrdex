@@ -218,7 +218,7 @@ func (c *tCore) WalletState(assetID uint32) *core.WalletState {
 		Traits: traits,
 	}
 }
-func (c *tCore) MaxFundingFees(fromAsset uint32, numTrades uint32, options map[string]string) (uint64, error) {
+func (c *tCore) MaxFundingFees(fromAsset uint32, host string, numTrades uint32, options map[string]string) (uint64, error) {
 	return c.maxFundingFees, nil
 }
 func (c *tCore) Login(pw []byte) error {

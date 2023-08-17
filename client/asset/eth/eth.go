@@ -1287,7 +1287,7 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 }
 
 // MaxFundingFees returns 0 because ETH does not have funding fees.
-func (w *baseWallet) MaxFundingFees(_ uint32, _ map[string]string) uint64 {
+func (w *baseWallet) MaxFundingFees(_ uint32, _ uint64, _ map[string]string) uint64 {
 	return 0
 }
 

@@ -1,7 +1,7 @@
 [{
     "host": "127.0.0.1:17273",
     "baseAsset": 42,
-    "quoteAsset": 60,
+    "quoteAsset": 0,
     "baseBalanceType": 0,
     "baseBalance": 50,
     "quoteBalanceType": 0,
@@ -26,7 +26,12 @@
         "oracleWeighting": 0.5,
         "oracleBias": 0,
         "emptyMarketRate": 0.005,
-        "splitTxAllowed": true,
-        "splitBuffer": 10
+        "baseOptions": {
+            "multisplit": "true"
+        },
+        "quoteOptions": {
+            "multisplit": "true",
+            "multisplitbuffer": "5"
+        }
     }
 }]
