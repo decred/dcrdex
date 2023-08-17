@@ -138,6 +138,24 @@ type WalletState struct {
 	Approved     map[uint32]asset.ApprovalStatus `json:"approved"`
 }
 
+// ExtensionModeConfig is configuration for running core in extension mode,
+// primarily for restricting certain wallet reconfiguration options.
+type ExtensionModeConfig struct {
+	// RestrictedWallets are wallets that need restrictions on reconfiguration
+	// options.
+	RestrictedWallets map[string] /*symbol*/ struct {
+		// HiddenFields are configuration fields (asset.ConfigOption.Key) that
+		// should not be displayed to the user.
+		HiddenFields []string `json:"hiddenFields"`
+		// DisableWalletType indicates that we should not offer the user an
+		// an option to change the wallet type.
+		DisableWalletType bool `json:"disableWalletType"`
+		// DisablePassword indicates that we should not offer the user an option
+		// to change the wallet password.
+		DisablePassword bool `json:"disablePassword"`
+	} `json:"restrictedWallets"`
+}
+
 // User is information about the user's wallets and DEX accounts.
 type User struct {
 	Exchanges          map[string]*Exchange       `json:"exchanges"`
@@ -146,6 +164,7 @@ type User struct {
 	Assets             map[uint32]*SupportedAsset `json:"assets"`
 	FiatRates          map[uint32]float64         `json:"fiatRates"`
 	Net                dex.Network                `json:"net"`
+	ExtensionConfig    *ExtensionModeConfig       `json:"extensionModeConfig,omitempty"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated

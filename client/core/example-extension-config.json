@@ -1,0 +1,17 @@
+{
+    "restrictedWallets": {
+        "dcr": {
+            "hiddenFields": [
+                "account",
+                "unmixedaccount",
+                "tradingaccount",
+                "username",
+                "password",
+                "rpclisten",
+                "rpccert"
+            ],
+            "disableWalletType": true,
+            "disablePassword": true
+        }
+    }
+}

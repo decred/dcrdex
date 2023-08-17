@@ -326,7 +326,8 @@ export class NewWalletForm {
         break
       }
     }
-    const displayCreateBtn = walletDef.seeded || Boolean(this.current.asset.token)
+    const { asset, parentAsset, winfo } = this.current
+    const displayCreateBtn = walletDef.seeded || Boolean(asset.token)
     if (appPwCached && displayCreateBtn && !containsRequired) {
       Doc.show(page.oneBttnBox)
     } else if (displayCreateBtn) {
@@ -338,8 +339,6 @@ export class NewWalletForm {
       if (!walletDef.noauth) Doc.show(page.newWalletPassBox)
       page.submitAdd.textContent = intl.prep(intl.ID_ADD)
     }
-
-    const { asset, parentAsset, winfo } = this.current
 
     if (parentAsset) {
       const parentAndTokenOpts = JSON.parse(JSON.stringify(configOpts))
@@ -353,8 +352,8 @@ export class NewWalletForm {
         for (const opt of tokenOptsCopy) opt.regAsset = asset.id
         parentAndTokenOpts.push(...tokenOptsCopy)
       }
-      this.subform.update(parentAndTokenOpts, false)
-    } else this.subform.update(configOpts, false)
+      this.subform.update(asset.id, parentAndTokenOpts, false)
+    } else this.subform.update(asset.id, configOpts, false)
     this.setGuideLink(guideLink)
 
     if (this.subform.dynamicOpts.children.length || this.subform.defaultSettings.children.length) {
@@ -442,6 +441,7 @@ export class WalletConfigForm {
   defaultSettingsMsg: PageElement
   defaultSettings: PageElement
   assetHasActiveOrders: boolean
+  assetID: number
 
   constructor (form: HTMLElement, sectionize: boolean) {
     this.page = Doc.idDescendants(form)
@@ -531,6 +531,8 @@ export class WalletConfigForm {
       })
       if (!skipRepeatN) for (let i = 0; i < (opt.repeatN ? opt.repeatN - 1 : 0); i++) this.addOpt(box, opt, insertAfter, true)
     } else el = this.textInputTmpl.cloneNode(true) as HTMLElement
+    const hiddenFields = app().user.extensionModeConfig?.restrictedWallets[baseChainSymbol(this.assetID)]?.hiddenFields || []
+    if (hiddenFields.indexOf(opt.key) !== -1) Doc.hide(el)
     this.configElements.push([opt, el])
     const input = el.querySelector('input') as ConfigOptionInput
     input.dataset.configKey = opt.key
@@ -576,10 +578,11 @@ export class WalletConfigForm {
   /*
    * update creates the dynamic form.
    */
-  update (configOpts: ConfigOption[] | null, activeOrders: boolean) {
+  update (assetID: number, configOpts: ConfigOption[] | null, activeOrders: boolean) {
     this.assetHasActiveOrders = activeOrders
     this.configElements = []
     this.configOpts = configOpts || []
+    this.assetID = assetID
     Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
 
     // If there are no options, just hide the entire form.
@@ -1902,4 +1905,13 @@ function dateToString (date: Date) {
   return dateApplyOffset(date).toISOString().split('T')[0]
   // Another common hack:
   // date.toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit" })
+}
+
+/*
+ * baseChainSymbol returns the symbol for the asset's parent if the asset is a
+ * token, otherwise the symbol for the asset itself.
+ */
+export function baseChainSymbol (assetID: number) {
+  const asset = app().user.assets[assetID]
+  return asset.token ? app().user.assets[asset.token.parentID].symbol : asset.symbol
 }
