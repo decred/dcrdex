@@ -92,6 +92,7 @@ type dcrWallet interface {
 	SetAgendaChoices(ctx context.Context, ticketHash *chainhash.Hash, choices ...wallet.AgendaChoice) (voteBits uint16, err error)
 	SetTSpendPolicy(ctx context.Context, tspendHash *chainhash.Hash, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
+	SetRelayFee(relayFee dcrutil.Amount)
 	vspclient.Wallet
 	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
@@ -1112,6 +1113,11 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 		}
 		return nil
 	})
+}
+
+func (w *spvWallet) SetTxFee(_ context.Context, feePerKB dcrutil.Amount) error {
+	w.dcrWallet.SetRelayFee(feePerKB)
+	return nil
 }
 
 // cacheBlock caches a block for future use. The block has a lastAccess stamp

@@ -157,6 +157,7 @@ type Wallet interface {
 	// SetVotingPreferences sets preferences used when a ticket is chosen to
 	// be voted on.
 	SetVotingPreferences(ctx context.Context, choices, tspendPolicy, treasuryPolicy map[string]string) error
+	SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error
 	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error)
 }
 

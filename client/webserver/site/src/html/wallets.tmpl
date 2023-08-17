@@ -125,33 +125,46 @@
               </div>
             </div>
 
-            <div id="stakingBox" class="position-relative m-3 p-2 w-100 d-flex align-items-stretch">
-              <div class="flex-grow-1">
-                <div class="fs28 sans-light flex-center lh1"><span class="ico-ticket me-2 fs22"></span>Staking</div>
-                <hr class="dashed my-2">
-                <div id="stakingSummary" class="flex-center fs16">
-                  <span>You have <span id="stakingTicketCount" class="demi"></span> live tickets</span>
+            {{- /* STAKING */ -}}
+            <div id="stakingBox" class="m-3 p-2 w-100 d-flex flex-column">
+              {{- /* STAKING SUMMARY */ -}}
+              <div class="position-relative w-100 d-flex align-items-stretch">
+                <div class="flex-grow-1">
+                  <div class="fs28 sans-light flex-center lh1"><span class="ico-ticket me-2 fs22"></span>Staking</div>
+                  <hr class="dashed my-2">
+                  <div id="stakingSummary" class="flex-center fs16">
+                    <span>You have <span id="stakingTicketCount" class="demi"></span> live tickets</span>
+                  </div>
+                  <div id="pickVSP" class="fs16 p-2 flex-center">
+                    <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
+                  </div>
+                  <div id="vspDisplayBox" class="fs16 p-2 flex-center">
+                    <span>VSP: <span id="vspDisplay"></span></span>
+                  </div>
+                  <div id="stakingErr" class="fs16 p-2 errcolor"></div>
                 </div>
-                <div id="pickVSP" class="fs16 p-2 flex-center">
-                  <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
+                <div id="ticketPriceBox" class="flex-center p-4 brdrleft">
+                  <div class="d-flex flex-column">
+                    <span class="fs18 demi">Ticket Price</span>
+                    <hr class="dotted my-2">
+                    <span class="d-flex align-items-end">
+                      <span class="fs22 lh-1" id="ticketPrice"></span>
+                      <span class="fs18 lh-1 grey ms-1" id="ticketPriceUnit"></span>
+                    </span>
+                  </div>
                 </div>
-                <div id="vspDisplayBox" class="fs16 p-2 flex-center">
-                  <span>VSP: <span id="vspDisplay"></span></span>
-                </div>
-                <div id="stakingErr" class="fs16 p-2 errcolor"></div>
               </div>
-              <div class="flex-center p-4 brdrleft">
-                <div class="d-flex flex-column">
-                  <span class="fs18 demi">Ticket Price</span>
-                  <hr class="dotted my-2">
-                  <span class="d-flex align-items-end">
-                    <span class="fs22 lh-1" id="ticketPrice"></span>
-                    <span class="fs18 lh-1 grey ms-1" id="ticketPriceUnit"></span>
-                  </span>
+
+              {{- /* PURCHASE TICKETS */ -}}
+              <div id="purchaseTicketsBox" class="w-100 flex-center d-flex flex-column align-items-stretch py-1">
+                <hr class="dotted my-2">
+                <div class="px-2 pt-2">
+                  <button id="purchaseTicketsBttn" class="me-2"><span class="ico-ticket me-1"></span> Purchase Tickets</button>
+                  <button id="ticketHistory"><span class="ico-textfile me-1"></span> Tickets</button>
                 </div>
               </div>
             </div>
-          </div>
+          </div>{{- /* END STAKING */ -}}
         </div>{{/* END WALLET DETAILS */}}
 
         {{- /* MARKETS OVERVIEW */ -}}
@@ -636,7 +649,7 @@
         <thead>
           <tr>
             <th>URL</th>
-            <th>Fee Rate</th>
+            <th>Fee Rate (%)</th>
             <th>Live Tickets</th>
           </tr>
         </thead>
@@ -648,6 +661,36 @@
           </tr>
         </tbody>
       </table>
+    </form>
+
+    <form id="purchaseTicketsForm" class="flex-center flex-column p-2 m-4 mw-425">
+      <div class="d-flex">
+        <div class="flex-center flex-column col-50 p-4">
+          <span>Current Price</span>
+          <hr class="dotted my-1 w-100">
+          <span id="purchaserCurrentPrice">a</span>
+        </div>
+        <div class="flex-center flex-column  col-50 p-4">
+          <span>Available Balance</span>
+          <hr class="dotted my-1 w-100">
+          <span id="purchaserBal">a</span>
+        </div>
+      </div>
+      <hr class="dotted w-100">
+      <div class="d-flex">
+        <div class="flex-center flex-column col-50 py-2">
+          <span>How Many?</span>
+          <input type="number" min="1" placeholder="0" id="purchaserInput" class="fs24 p-2 mt-1 text-center">
+        </div>
+        <div class="flex-center flex-column brdrleft col-50 py-2">
+          <button id="purchaserSubmit" class="selected fs24">Buy</button>
+        </div>
+      </div>
+      <div id="purchaserErr" class="errcolor d-hide py-2 d-hide"></div>
+    </form>
+
+    <form id="purchaseTicketsConfirm" class="flex-center flex-column p-2 m-4 mw-425">
+      
     </form>
   </div>
 </div>

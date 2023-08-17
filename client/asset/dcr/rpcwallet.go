@@ -145,6 +145,7 @@ type rpcClient interface {
 	GetTickets(ctx context.Context, includeImmature bool) ([]*chainhash.Hash, error)
 	GetVoteChoices(ctx context.Context) (*walletjson.GetVoteChoicesResult, error)
 	SetVoteChoice(ctx context.Context, agendaID, choiceID string) error
+	SetTxFee(ctx context.Context, fee dcrutil.Amount) error
 }
 
 // newRPCWallet creates an rpcClient and uses it to construct a new instance
@@ -1023,6 +1024,10 @@ func (w *rpcWallet) SetVotingPreferences(ctx context.Context, choices, tSpendPol
 		}
 	}
 	return nil
+}
+
+func (w *rpcWallet) SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error {
+	return w.rpcClient.SetTxFee(ctx, feePerKB)
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and

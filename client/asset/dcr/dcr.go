@@ -33,6 +33,8 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
+	"decred.org/dcrwallet/v3/wallet/txrules"
+	"decred.org/dcrwallet/v3/wallet/txsizes"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -5233,12 +5235,16 @@ func (dcr *ExchangeWallet) SetVSP(url string) error {
 
 // PurchaseTickets purchases n number of tickets. Part of the asset.TicketBuyer
 // interface.
-func (dcr *ExchangeWallet) PurchaseTickets(n int) ([]string, error) {
+func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) ([]string, error) {
 	if n < 1 {
 		return nil, nil
 	}
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
+	}
+	feePerKB := dcrutil.Amount(dcr.feeRateWithFallback(feeSuggestion) * 1000)
+	if err := dcr.wallet.SetTxFee(dcr.ctx, feePerKB); err != nil {
+		return nil, fmt.Errorf("error setting wallet tx fee: %w", err)
 	}
 	if !dcr.isNative() {
 		return dcr.wallet.PurchaseTickets(dcr.ctx, n, "", "")
@@ -5249,6 +5255,35 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int) ([]string, error) {
 	}
 	vInfo := v.(*vsp)
 	return dcr.wallet.PurchaseTickets(dcr.ctx, n, vInfo.URL, vInfo.PubKey)
+}
+
+func (dcr *ExchangeWallet) EstimateTicketTxFees(n int, feeSuggestion uint64) (uint64, error) {
+	v := dcr.vspV.Load()
+	if v == nil {
+		return 0, errors.New("no vsp set")
+	}
+	vInfo := v.(*vsp)
+	feePerKB := dcrutil.Amount(dcr.feeRateWithFallback(feeSuggestion) * 1000)
+	sdiff, err := dcr.wallet.StakeDiff(dcr.ctx)
+	if err != nil {
+		return 0, err
+	}
+	height := dcr.cachedBestBlock().height
+	const dcp0010Active = true
+	vspFee := txrules.StakePoolTicketFee(sdiff, feePerKB, int32(height), vInfo.FeePercentage, dcr.chainParams, dcp0010Active)
+
+	var dummyPK [20]byte
+	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(dummyPK[:], dcr.chainParams)
+	if err != nil {
+		return 0, fmt.Errorf("error generating dummy address?: %w", err)
+	}
+
+	version, pkScript := addr.PaymentScript()
+
+	outputs := []*wire.TxOut{{Version: version, PkScript: pkScript}}
+	txsize := txsizes.EstimateSerializeSize([]int{txsizes.RedeemP2PKHInputSize}, outputs, txsizes.P2PKHPkScriptSize)
+	txFee := txrules.FeeForSerializeSize(feePerKB, txsize)
+	return uint64(vspFee + 2*txFee), nil
 }
 
 // SetVotingPreferences sets the vote choices for all active tickets and future

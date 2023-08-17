@@ -43,7 +43,7 @@ const traitRestorer = 1 << 8
 const traitTxFeeEstimator = 1 << 9
 const traitPeerManager = 1 << 10
 const traitTokenApprover = 1 << 13
-const traitTicketBuyer = 1 << 16
+const traitTicketBuyer = 1 << 15
 
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
 
@@ -180,6 +180,9 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.unapproveTokenAllowance, 'click', async () => { this.showUnapproveTokenAllowanceTableForm() })
     Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
     Doc.bind(page.showVSPs, 'click', () => { this.showVSPPicker() })
+    Doc.bind(page.purchaseTicketsBttn, 'click', () => { this.showPurchaseTicketsDialog() })
+    Doc.bind(page.purchaserSubmit, 'click', () => { this.purchaseTickets() })
+    Doc.bind(page.purchaserInput, 'change', () => { this.purchaserInputChanged() })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -813,24 +816,31 @@ export default class WalletsPage extends BasePage {
 
   async updateTicketBuyer (assetID: number) {
     const { wallet, unitInfo: ui } = app().assets[assetID]
-    if (wallet.traits & traitTicketBuyer) return
+    if ((wallet.traits & traitTicketBuyer) === 0) return
     const page = this.page
-    Doc.hide(page.pickVSP, page.stakingSummary, page.stakingErr, page.vspDisplayBox)
+    Doc.hide(
+      page.pickVSP, page.stakingSummary, page.stakingErr, page.vspDisplayBox,
+      page.ticketPriceBox, page.purchaseTicketsBox
+    )
     Doc.show(page.stakingBox)
+    const loaded = app().loading(page.stakingBox)
     const res = await postJSON('/api/stakestatus', assetID)
+    loaded()
     if (assetID !== this.selectedAssetID) return // User changed asset while we were fetching
     if (!app().checkResponse(res)) {
       Doc.show(page.stakingErr)
       page.stakingErr.textContent = res.msg
       return
     }
-    Doc.show(page.stakingSummary)
+    Doc.show(page.stakingSummary, page.ticketPriceBox)
     const status = res.status as TicketStakingStatus
     page.stakingTicketCount.textContent = String(status.tickets.length)
     page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.ticketPriceUnit.textContent = ui.conventional.unit
+    page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
+    page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
     if (status.vsp) {
-      Doc.show(page.vspDisplayBox)
+      Doc.show(page.vspDisplayBox, page.purchaseTicketsBox)
       page.vspDisplay.textContent = status.vsp
     } else Doc.show(page.pickVSP)
   }
@@ -863,6 +873,32 @@ export default class WalletsPage extends BasePage {
         this.setVSP(assetID, vsp)
       })
     }
+  }
+
+  showPurchaseTicketsDialog () {
+    const page = this.page
+    page.purchaserInput.value = '0'
+    Doc.hide(page.purchaserErr)
+    this.showForm(this.page.purchaseTicketsForm)
+  }
+
+  purchaserInputChanged () {
+    const page = this.page
+    const n = parseInt(page.purchaserInput.value || '0')
+    if (n <= 1) {
+      page.purchaserInput.value = '1'
+      return
+    }
+    page.purchaserInput.value = String(n)
+  }
+
+  async purchaseTickets () {
+    const { page, selectedAssetID: assetID } = this
+    const n = parseInt(page.purchaserInput.value || '0')
+    if (n < 1) return
+    const loaded = app().loading(page.purchaseTicketsForm)
+    const res = await postJSON('/api/purchasetickets', { assetID, n })
+    loaded()
   }
 
   async setVSP (assetID: number, vsp: VotingServiceProvider) {

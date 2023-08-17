@@ -213,6 +213,7 @@ export default class Application {
     const user = (resp as any) as User
     this.seedGenTime = user.seedgentime
     this.user = user
+    console.log("--fetchUser", user)
     this.assets = user.assets
     this.exchanges = user.exchanges
     this.walletMap = {}

@@ -969,7 +969,10 @@ type TicketBuyer interface {
 	SetVSP(addr string) error
 	// PurchaseTickets purchases n amount of tickets. Returns the purchased
 	// ticket hashes if successful.
-	PurchaseTickets(n int) ([]string, error)
+	PurchaseTickets(n int, feeSuggestion uint64) ([]string, error)
+	// EstimatePurchaseTickets estimates the fees for purchasing a specified
+	// number of tickets.
+	EstimateTicketTxFees(n int, feeSuggestion uint64) (uint64, error)
 	// SetVotingPreferences sets default voting settings for all active
 	// tickets and future tickets. Nil maps can be provided for no change.
 	SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy map[string]string) error
