@@ -5306,7 +5306,7 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 		return nil, err
 	}
 
-	// This stuct is not quite compatible with vspdjson.VspInfoResponse.
+	// This struct is not quite compatible with vspdjson.VspInfoResponse.
 	var res map[string]*struct {
 		Network       string   `json:"network"`
 		Launched      uint64   `json:"launched"`    // seconds
