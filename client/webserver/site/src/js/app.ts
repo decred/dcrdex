@@ -184,6 +184,7 @@ export default class Application {
     this.attachHeader()
     this.attachCommon(this.header)
     this.attach({})
+    this.updateMenuItemsDisplay()
     // Load recent notifications from Window.localStorage.
     const notes = State.fetchLocal(State.notificationsLK)
     this.setNotes(notes || [])
