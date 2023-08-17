@@ -236,6 +236,7 @@ func (s *WebServer) handleInit(w http.ResponseWriter, r *http.Request) {
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	common := s.commonArgs(r, "Settings | Decred DEX")
+	xcs := s.core.Exchanges()
 	data := &struct {
 		CommonArguments
 		KnownExchanges  []string
@@ -244,10 +245,10 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		Exchanges       map[string]*core.Exchange
 	}{
 		CommonArguments: *common,
-		KnownExchanges:  s.knownUnregisteredExchanges(s.core.Exchanges()),
+		KnownExchanges:  s.knownUnregisteredExchanges(xcs),
 		FiatCurrency:    core.DefaultFiatCurrency,
 		FiatRateSources: s.core.FiatRateSources(),
-		Exchanges:       s.core.Exchanges(),
+		Exchanges:       xcs,
 	}
 	s.sendTemplate(w, "settings", data)
 }
