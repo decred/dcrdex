@@ -87,7 +87,8 @@ type registerTmplData struct {
 	KnownExchanges []string
 	// Host is optional. If provided, the register page will not display the add
 	// dex form, instead this host will be pre-selected for registration.
-	Host string
+	Host        string
+	Initialized bool
 }
 
 // handleRegister is the handler for the '/register' page request.
@@ -97,7 +98,8 @@ func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "register", &registerTmplData{
 		CommonArguments: *common,
 		Host:            host,
-		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
+		KnownExchanges:  s.knownUnregisteredExchanges(s.core.Exchanges()),
+		Initialized:     s.core.IsInitialized(),
 	})
 }
 
@@ -234,16 +236,19 @@ func (s *WebServer) handleInit(w http.ResponseWriter, r *http.Request) {
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	common := s.commonArgs(r, "Settings | Decred DEX")
+	xcs := s.core.Exchanges()
 	data := &struct {
 		CommonArguments
 		KnownExchanges  []string
 		FiatRateSources map[string]bool
 		FiatCurrency    string
+		Exchanges       map[string]*core.Exchange
 	}{
 		CommonArguments: *common,
-		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
+		KnownExchanges:  s.knownUnregisteredExchanges(xcs),
 		FiatCurrency:    core.DefaultFiatCurrency,
 		FiatRateSources: s.core.FiatRateSources(),
+		Exchanges:       xcs,
 	}
 	s.sendTemplate(w, "settings", data)
 }
@@ -272,7 +277,7 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 	}{
 		CommonArguments: common,
 		Exchange:        exchange,
-		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
+		KnownExchanges:  s.knownUnregisteredExchanges(s.core.Exchanges()),
 	}
 
 	s.sendTemplate(w, "dexsettings", data)
@@ -295,15 +300,15 @@ var allStatuses = map[uint8]string{
 
 // handleOrders is the handler for the /orders page request.
 func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
-	user := extractUserInfo(r).User
-	hosts := make([]string, 0, len(user.Exchanges))
-	for _, xc := range user.Exchanges {
+	xcs := s.core.Exchanges()
+	hosts := make([]string, 0, len(xcs))
+	for _, xc := range xcs {
 		hosts = append(hosts, xc.Host)
 	}
 
 	s.sendTemplate(w, "orders", &ordersTmplData{
 		CommonArguments: *s.commonArgs(r, "Orders | Decred DEX"),
-		Assets:          user.Assets,
+		Assets:          s.core.SupportedAssets(),
 		Hosts:           hosts,
 		Statuses:        allStatuses,
 	})

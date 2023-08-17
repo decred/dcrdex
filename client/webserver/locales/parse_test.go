@@ -25,12 +25,6 @@ func TestTokens(t *testing.T) {
     <span class="ico-info"></span>
     </span>
     <div>
-      <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
-        <h5>[[[registered dexes]]]</h5>
-        {{range $host, $xc := .UserInfo.Exchanges}}
-          <a href="/dexsettings/{{$host}}"><button class="bg2 selected"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings"></span></div></button></a>
-        {{end}}
-      </div>
       <br>
       <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
         <p>
@@ -50,7 +44,6 @@ func TestTokens(t *testing.T) {
 		"[[[Show pop-up notifications]]]",
 		"[[[fiat_exchange_rate_msg]]]",
 		"[[[fiat_exchange_rate_sources]]]",
-		"[[[registered dexes]]]",
 		"[[[simultaneous_servers_msg]]]",
 		"[[[Add a DEX]]]",
 		"[[[Import Account]]]",
@@ -63,7 +56,6 @@ func TestTokens(t *testing.T) {
 		"Show pop-up notifications",
 		"fiat_exchange_rate_msg",
 		"fiat_exchange_rate_sources",
-		"registered dexes",
 		"simultaneous_servers_msg",
 		"Add a DEX",
 		"Import Account",
