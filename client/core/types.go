@@ -148,7 +148,7 @@ type ExtensionModeConfig struct {
 		// should not be displayed to the user.
 		HiddenFields []string `json:"hiddenFields"`
 		// DisableWalletType indicates that we should not offer the user an
-		// an option to chznge the wallet type.
+		// an option to change the wallet type.
 		DisableWalletType bool `json:"disableWalletType"`
 		// DisablePassword indicates that we should not offer the user an option
 		// to change the wallet password.
