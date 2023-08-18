@@ -33,7 +33,7 @@
     {{end}}
     </div>
     <div {{if not $authed}} class="d-hide"{{end}}>
-      <div id="exchanges" {{if eq {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
+      <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
         <h5>[[[registered dexes]]]</h5>
         {{range $host, $xc := .Exchanges}}
           <a href="/dexsettings/{{$host}}"><button class="bg2 selected"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings"></span></div></button></a>
