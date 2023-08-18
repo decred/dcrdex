@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrwallet/v3/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v3/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -873,16 +874,35 @@ func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address)
 }
 
 // StakeDiff returns the current stake difficulty.
-func (w *rpcWallet) StakeDiff(ctx context.Context) (dcrutil.Amount, error) {
-	si, err := w.rpcClient.GetStakeInfo(ctx)
+func (w *rpcWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
+	res, err := w.rpcClient.GetStakeInfo(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	amt, err := dcrutil.NewAmount(si.Difficulty)
+	sdiff, err := dcrutil.NewAmount(res.Difficulty)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return amt, nil
+	totalSubsidy, err := dcrutil.NewAmount(res.TotalSubsidy)
+	if err != nil {
+		return nil, err
+	}
+	return &wallet.StakeInfoData{
+		BlockHeight:    res.BlockHeight,
+		TotalSubsidy:   totalSubsidy,
+		Sdiff:          sdiff,
+		OwnMempoolTix:  res.OwnMempoolTix,
+		Unspent:        res.Unspent,
+		Voted:          res.Voted,
+		Revoked:        res.Revoked,
+		UnspentExpired: res.UnspentExpired,
+		PoolSize:       res.PoolSize,
+		AllMempoolTix:  res.AllMempoolTix,
+		Immature:       res.Immature,
+		Live:           res.Live,
+		Missed:         res.Missed,
+		Expired:        res.Expired,
+	}, nil
 }
 
 // PurchaseTickets purchases n amount of tickets. Returns the purchased ticket

@@ -128,14 +128,43 @@
             {{- /* STAKING */ -}}
             <div id="stakingBox" class="position-relative m-3 w-100 d-flex align-items-stretch">
               <div class="d-flex flex-column align-items-stretch flex-grow-1">
-                <div class="fs28 sans-light flex-center brdrbottom"><span class="ico-ticket me-2 fs20"></span>Staking</div>
-                <div id="stakingSummary" class="d-flex flex-column justify-content-around align-items-center fs16 flex-grow-1">
-                  <span>You have <span id="stakingTicketCount" class="demi"></span> active tickets</span>
-                  <div id="pickVSP" class="fs16 p-2 flex-center">
-                    <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
+                <div class="d-flex align-items-center fs24 brdrbottom px-2"><span class="ico-ticket me-2 fs20"></span>Staking</div>
+                <div id="stakingSummary" class="d-flex align-items-stretch flex-grow-1">
+                  <div class="d-flex flex-column align-items-stretch fs14 flex-grow-1 ps-1 pe-2">
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center">Active Tickets</div>
+                      <div id="stakingTicketCount" class="flex-center demi"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center">Tickets Bought</div>
+                      <div id="totalTicketCount" class="flex-center demi"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center">Total Rewards</div>
+                      <div id="totalTicketRewards" class="flex-center demi"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center">VotesCast</div>
+                      <div id="totalTicketVotes" class="flex-center demi"></div>
+                    </div>
+                    <div id="vspDisplayBox" class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center">VSP</div>
+                      <div id="vspDisplay" class="flex-center demi"></div>
+                    </div>
+                    <div id="pickVSP" class="fs16 p-2 flex-center">
+                      <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
+                    </div>
                   </div>
-                  <div id="vspDisplayBox" class="fs16 p-2 flex-center">
-                    <span>VSP: <span id="vspDisplay"></span></span>
+                  <div id="setVotes" class="flex-center p-3 flex-column brdrleft hoverbg pointer">
+                    <div class="flex-center fs18">
+                      <span class="fs22 ico-check"></span>
+                      <span class="ms-2 fs18">Set Votes</span>
+                    </div>
+                    <hr class="dashed my-1 w-75">
+                    <div class="flex-center flex-column fs14">
+                      <span><span id="stakingAgendaCount"></span> agendas</span>
+                      <span><span id="stakingTspendCount"></span> treasury</span>
+                    </div>
                   </div>
                 </div>
                 <div id="stakingErr" class="fs16 p-2 errcolor"></div>
@@ -152,18 +181,16 @@
               <div id="ticketPriceBox" class="flex-center p-3 brdrleft">
                 <div class="d-flex flex-column">
                   <div>
-                    <span class="fs18 demi">Ticket Price</span>
-                    <hr class="my-1">
+                    <span class="fs14 demi lh1 pb-1">Ticket Price</span>
                     <span class="d-flex align-items-end">
-                      <span class="fs18 lh-1" id="ticketPrice"></span>
+                      <span class="fs18" id="ticketPrice"></span>
                     </span>
                   </div>
                   <hr class="dotted my-3">
                   <div>
-                    <span class="fs18 demi">Vote Reward</span>
-                    <hr class="my-1">
+                    <span class="fs14 demi lh1 pb-1">Vote Reward</span>
                     <span class="d-flex align-items-end">
-                      <span class="fs18 lh-1" id="votingSubsidy"></span>
+                      <span class="fs18" id="votingSubsidy"></span>
                     </span>
                   </div>
                 </div>

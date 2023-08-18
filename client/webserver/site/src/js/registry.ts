@@ -636,6 +636,13 @@ export interface Stances {
   treasuryPolicy: PolicyResult[]
 }
 
+export interface TicketStats{
+  totalRewards: number
+  ticketCount: number
+  votes: number
+  revokes: number
+}
+
 export interface TicketStakingStatus {
   ticketPrice: number
   votingSubsidy: number
@@ -643,6 +650,7 @@ export interface TicketStakingStatus {
   isRPC: boolean
   tickets: Ticket[]
   stances: Stances
+  stats: TicketStats
 }
 
 // VotingServiceProvider is information about a voting service provider.

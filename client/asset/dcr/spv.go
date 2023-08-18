@@ -836,12 +836,8 @@ func (w *spvWallet) AddressPrivKey(ctx context.Context, addr stdaddr.Address) (*
 }
 
 // StakeDiff returns the current stake difficulty.
-func (w *spvWallet) StakeDiff(ctx context.Context) (dcrutil.Amount, error) {
-	si, err := w.dcrWallet.StakeInfo(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return si.Sdiff, nil
+func (w *spvWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
+	return w.dcrWallet.StakeInfo(ctx)
 }
 
 func newVSPClient(w vspclient.Wallet, vspHost, vspPubKey string, log dex.Logger) (*vspclient.AutoClient, error) {

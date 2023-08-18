@@ -652,6 +652,15 @@ type ExchangeWallet struct {
 	connected atomic.Bool
 
 	subsidyCache *blockchain.SubsidyCache
+
+	ticketHistory struct {
+		sync.RWMutex
+		lastScannedBlock uint32
+		nTickets         uint32
+		nVotes           uint32
+		costSum          uint64
+		voteRewards      uint64
+	}
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -5154,7 +5163,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
-	ticketPrice, err := dcr.wallet.StakeDiff(dcr.ctx)
+	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -5186,7 +5195,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 		return nil, fmt.Errorf("error retrieving stances: %w", err)
 	}
 	return &asset.TicketStakingStatus{
-		TicketPrice:   uint64(ticketPrice),
+		TicketPrice:   uint64(sinfo.Sdiff),
 		VotingSubsidy: uint64(voteSubsidy),
 		VSP:           vspURL,
 		IsRPC:         isRPC,
@@ -5195,6 +5204,12 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 			VoteChoices:    voteChoices,
 			TSpendPolicy:   tSpendPolicy,
 			TreasuryPolicy: treasuryPolicy,
+		},
+		Stats: asset.TicketStats{
+			TotalRewards: uint64(sinfo.TotalSubsidy),
+			TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
+			Votes:        sinfo.Voted,
+			Revokes:      sinfo.Revoked,
 		},
 	}, nil
 }

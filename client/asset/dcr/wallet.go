@@ -10,6 +10,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v3/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -144,8 +145,6 @@ type Wallet interface {
 	PeerCount(ctx context.Context) (uint32, error)
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
-	// StakeDiff gets the stake difficulty.
-	StakeDiff(ctx context.Context) (dcrutil.Amount, error)
 	// PurchaseTickets purchases n tickets. vspHost and vspPubKey only
 	// needed for internal wallets.
 	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]string, error)
@@ -159,6 +158,7 @@ type Wallet interface {
 	SetVotingPreferences(ctx context.Context, choices, tspendPolicy, treasuryPolicy map[string]string) error
 	SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error
 	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error)
+	StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error)
 }
 
 // WalletTransaction is a pared down version of walletjson.GetTransactionResult.

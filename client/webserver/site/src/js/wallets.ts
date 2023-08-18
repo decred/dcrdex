@@ -862,8 +862,13 @@ export default class WalletsPage extends BasePage {
     this.stakeStatus = status
     const liveTicketCount = status.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
     page.stakingTicketCount.textContent = String(liveTicketCount)
+    page.totalTicketCount.textContent = String(status.stats.ticketCount)
+    page.totalTicketRewards.textContent = Doc.formatFourSigFigs(status.stats.totalRewards / ui.conventional.conversionFactor)
+    page.totalTicketVotes.textContent = String(status.stats.votes)
     page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.votingSubsidy.textContent = Doc.formatFourSigFigs(status.votingSubsidy / ui.conventional.conversionFactor)
+    page.stakingAgendaCount.textContent = String(status.stances.voteChoices.length)
+    page.stakingTspendCount.textContent = String(status.stances.tSpendPolicy.length)
     page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
     if (status.vsp) {

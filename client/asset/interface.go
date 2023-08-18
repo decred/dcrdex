@@ -940,6 +940,13 @@ type VotingServiceProvider struct {
 	NetShare      float32     `json:"netShare"`
 }
 
+type TicketStats struct {
+	TotalRewards uint64 `json:"totalRewards"`
+	TicketCount  uint32 `json:"ticketCount"`
+	Votes        uint32 `json:"votes"`
+	Revokes      uint32 `json:"revokes"`
+}
+
 // TicketStakingStatus holds various stake information from the wallet.
 type TicketStakingStatus struct {
 	// TicketPrice is the current price of one ticket. Also known as the
@@ -957,6 +964,8 @@ type TicketStakingStatus struct {
 	Tickets []*Ticket `json:"tickets"`
 	// Stances returns current voting preferences.
 	Stances Stances `json:"stances"`
+	// Stats is statistical info about staking history.
+	Stats TicketStats `json:"stats"`
 }
 
 // TicketBuyer is a wallet that can participate in decred staking.
