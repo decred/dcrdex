@@ -7263,6 +7263,47 @@ func TestChangeAppPass(t *testing.T) {
 	}
 }
 
+func TestResetAppPass(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	crypter := newTCrypterSmart()
+	rig.crypter = crypter
+	rig.core.newCrypter = func([]byte) encrypt.Crypter { return crypter }
+	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return rig.crypter, crypter.recryptErr }
+
+	tCore := rig.core
+
+	rig.core.credentials.EncRecoverySeed = nil // trigger cred update
+	err := tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("Unexpected error during login: %v", err)
+	}
+
+	if tCore.credentials.EncRecoverySeed == nil {
+		t.Fatal("App Password recovery seed was not updated for first login")
+	}
+
+	seed, err := tCore.ExportSeed(tPW)
+	if err != nil {
+		t.Fatalf("seed export failed: %v", err)
+	}
+
+	// Invalid seed error
+	invalidSeed := seed[:24]
+	err = tCore.ResetAppPass(tPW, invalidSeed)
+	if !strings.Contains(err.Error(), "invalid seed length") {
+		t.Fatalf("wrong error for invalid seed length: %v", err)
+	}
+
+	// Want incorrect seed error.
+	rig.crypter.(*tCrypterSmart).recryptErr = tErr
+	seed = append(seed, randBytes(8)...) // tCrypter is used to encode the orginal seed but we don't need it here, so we need to add 8 bytes to commplete the expected seed lenght(64).
+	err = tCore.ResetAppPass(tPW, seed)
+	if err.Error() != "incorrect seed" {
+		t.Fatalf("wrong error for incorrect seed: %v", err)
+	}
+}
+
 func TestReconfigureWallet(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()

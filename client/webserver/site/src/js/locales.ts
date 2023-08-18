@@ -97,7 +97,7 @@ export const ID_MATCH_STATUS_COMPLETE = 'MATCH_STATUS_COMPLETE'
 export const ID_TAKER_FOUND_MAKER_REDEMPTION = 'TAKER_FOUND_MAKER_REDEMPTION'
 export const ID_OPEN_WALLET_ERR_MSG = 'OPEN_WALLET_ERR_MSG'
 export const ID_ORDER_ACCELERATION_FEE_ERR_MSG = 'ORDER_ACCELERATION_FEE_ERR_MSG'
-export const ID_ORDER_ACCELERATION_ERR_MSG = 'ORDER_ACCELERATION_FEE_ERR_MSG'
+export const ID_ORDER_ACCELERATION_ERR_MSG = 'ORDER_ACCELERATION_ERR_MSG'
 export const ID_CONNECTED = 'CONNECTED'
 export const ID_DISCONNECTED = 'DISCONNECTED'
 export const ID_INVALID_CERTIFICATE = 'INVALID_CERTIFICATE'
@@ -141,6 +141,8 @@ export const ID_TICKET_STATUS_MISSED = 'TICKET_STATUS_MISSED'
 export const ID_TICKET_STATUS_EXPIRED = 'TICKET_STATUS_EXPIRED'
 export const ID_TICKET_STATUS_UNSPENT = 'TICKET_STATUS_UNSPENT'
 export const ID_TICKET_STATUS_REVOKED = 'TICKET_STATUS_REVOKED'
+export const ID_INVALID_SEED = 'INVALID_SEED'
+export const ID_PASSWORD_RESET_SUCCESS_MSG = 'PASSWORD_RESET_SUCCESS_MSG '
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -237,7 +239,6 @@ export const enUS: Locale = {
   [ID_MATCH_STATUS_REDEEM_PENDING]: 'Redeem PENDING',
   [ID_MATCH_STATUS_REDEMPTION_CONFIRMED]: 'Redemption Confirmed',
   [ID_MATCH_STATUS_COMPLETE]: 'Complete',
-  [ID_TAKER_FOUND_MAKER_REDEMPTION]: 'redeemed by {{ makerAddr }}',
   [ID_OPEN_WALLET_ERR_MSG]: 'Error opening wallet: {{ msg }}',
   [ID_ORDER_ACCELERATION_FEE_ERR_MSG]: 'Error estimating acceleration fee: {{ msg }}',
   [ID_ORDER_ACCELERATION_ERR_MSG]: 'Error accelerating order: {{ msg }}',
@@ -284,7 +285,9 @@ export const enUS: Locale = {
   [ID_TICKET_STATUS_MISSED]: 'missed',
   [ID_TICKET_STATUS_EXPIRED]: 'expired',
   [ID_TICKET_STATUS_UNSPENT]: 'unspent',
-  [ID_TICKET_STATUS_REVOKED]: 'revoked'
+  [ID_TICKET_STATUS_REVOKED]: 'revoked',
+  [ID_INVALID_SEED]: 'Invalid seed',
+  [ID_PASSWORD_RESET_SUCCESS_MSG]: 'Your password reset was successful. You can proceed to login with your new password.'
 }
 
 export const ptBR: Locale = {

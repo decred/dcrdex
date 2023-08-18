@@ -113,6 +113,7 @@ type clientCore interface {
 	ReconfigureWallet([]byte, []byte, *core.WalletForm) error
 	ToggleWalletStatus(assetID uint32, disable bool) error
 	ChangeAppPass([]byte, []byte) error
+	ResetAppPass(newPass []byte, seed []byte) error
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
@@ -461,6 +462,7 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/init", s.apiInit)
 		r.Get("/isinitialized", s.apiIsInitialized)
+		r.Post("/resetapppassword", s.apiResetAppPassword)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
@@ -882,6 +884,7 @@ func readPost(w http.ResponseWriter, r *http.Request, thing any) bool {
 type userInfo struct {
 	Authed           bool
 	PasswordIsCached bool
+	IsInitialized    bool
 	DarkMode         bool
 }
 

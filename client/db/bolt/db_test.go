@@ -125,7 +125,7 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		t.Fatalf("no error for missing credentials: %v", err)
 	}
 
-	newCreds := func(seed, inner, innerParams, outerParams bool) *db.PrimaryCredentials {
+	newCreds := func(seed, inner, innerParams, outerParams, encRecoverySeed, encRecoverySeedP bool) *db.PrimaryCredentials {
 		creds := &db.PrimaryCredentials{}
 		if seed {
 			creds.EncSeed = []byte("EncSeed")
@@ -139,6 +139,12 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		if outerParams {
 			creds.OuterKeyParams = []byte("OuterKeyParams")
 		}
+		if encRecoverySeed {
+			creds.EncRecoverySeed = []byte("EncRecoverySeed")
+		}
+		if encRecoverySeedP {
+			creds.EncRecoverySeedParams = []byte("EncRecoverySeedParams")
+		}
 		return creds
 	}
 
@@ -148,13 +154,15 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		}
 	}
 
-	ensureErr("no EncSeed", newCreds(false, true, true, true))
-	ensureErr("no EncInnerKey", newCreds(true, false, true, true))
-	ensureErr("no InnerKeyParams", newCreds(true, true, false, true))
-	ensureErr("no OuterKeyParams", newCreds(true, true, true, false))
+	ensureErr("no EncSeed", newCreds(false, true, true, true, true, true))
+	ensureErr("no EncInnerKey", newCreds(true, false, true, true, true, true))
+	ensureErr("no InnerKeyParams", newCreds(true, true, false, true, true, true))
+	ensureErr("no OuterKeyParams", newCreds(true, true, true, false, true, true))
+	ensureErr("no EncRecoverySeed", newCreds(true, true, true, true, false, true))
+	ensureErr("no EncRecoverySeedParams", newCreds(true, true, true, true, true, false))
 
 	// Success
-	goodCreds := newCreds(true, true, true, true)
+	goodCreds := newCreds(true, true, true, true, true, true)
 	err = boltdb.SetPrimaryCredentials(goodCreds)
 	if err != nil {
 		t.Fatalf("SetPrimaryCredentials error: %v", err)
@@ -177,6 +185,12 @@ func TestStorePrimaryCredentials(t *testing.T) {
 	}
 	if !bytes.Equal(reCreds.OuterKeyParams, goodCreds.OuterKeyParams) {
 		t.Fatalf("OuterKeyParams wrong, wanted %x, got %x", goodCreds.OuterKeyParams, reCreds.OuterKeyParams)
+	}
+	if !bytes.Equal(reCreds.EncRecoverySeed, goodCreds.EncRecoverySeed) {
+		t.Fatalf("EncRecoverySeed wrong, wanted %x, got %x", goodCreds.EncRecoverySeed, reCreds.EncRecoverySeed)
+	}
+	if !bytes.Equal(reCreds.EncRecoverySeedParams, goodCreds.EncRecoverySeedParams) {
+		t.Fatalf("EncRecoverySeedParams wrong, wanted %x, got %x", goodCreds.EncRecoverySeedParams, reCreds.EncRecoverySeedParams)
 	}
 }
 

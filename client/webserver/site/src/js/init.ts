@@ -85,9 +85,16 @@ class AppInitForm {
     this.success = success
     const page = this.page = Doc.idDescendants(form)
     bindForm(form, page.appPWSubmit, () => this.setAppPass())
-    bindForm(form, page.showSeedRestore, () => {
-      Doc.show(page.seedRestore)
-      Doc.hide(page.showSeedRestore)
+    bindForm(form, page.toggleSeedInput, () => {
+      if (Doc.isHidden(page.seedInput)) {
+        page.toggleSeedInputIcon.classList.remove('ico-plus')
+        page.toggleSeedInputIcon.classList.add('ico-minus')
+        Doc.show(page.seedInput)
+      } else {
+        page.toggleSeedInputIcon.classList.remove('ico-minus')
+        page.toggleSeedInputIcon.classList.add('ico-plus')
+        Doc.hide(page.seedInput)
+      }
     })
   }
 

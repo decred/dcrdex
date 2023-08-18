@@ -78,17 +78,18 @@
 
   <div id="profileBox" class="d-hide">
     <div class="icon fs20 ico-hamburger p-1" id="innerBurgerIcon"></div>
-    <div class="demi hoverbright pointer d-flex align-items-center py-1 authed-only" id="profileSignout">
+    <div class="demi hoverbright pointer d-flex align-items-center py-1 authed-only d-hide" id="profileSignout">
       <span class="ico-profile fs16 me-2"></span>
       [[[Sign Out]]]
     </div>
     <span class="errcolor" id="logoutErr"></span>
-    <a href="/orders" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
+    <a href="/orders" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only d-hide">
       <span class="ico-settings fs16 me-2"></span>
       [[[Order History]]]
     </a>
     {{if .Experimental}}
     <a href="/mm" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
+    <a href="/markets" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only d-hide">
       <span class="ico-barchart fs16 me-2"></span>
       [[[Market Making]]]
     </a>

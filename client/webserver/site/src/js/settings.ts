@@ -24,6 +24,7 @@ export default class SettingsPage extends BasePage {
   newWalletForm: forms.NewWalletForm
   walletWaitForm: forms.WalletWaitForm
   dexAddrForm: forms.DEXAddressForm
+  appPassResetForm: forms.AppPassResetForm
   currentForm: PageElement
   pwCache: PasswordCache
   keyup: (e: KeyboardEvent) => void
@@ -128,11 +129,24 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.changeAppPW, 'click', () => this.showForm(page.changeAppPWForm))
     forms.bind(page.changeAppPWForm, page.submitNewPW, () => this.changeAppPW())
 
+    this.appPassResetForm = new forms.AppPassResetForm(page.resetAppPWForm, async () => {
+      await app().loadPage('login')
+      Doc.hide(page.forms)
+    })
+    Doc.bind(page.resetAppPW, 'click', () => {
+      this.appPassResetForm.refresh()
+      this.showForm(page.resetAppPWForm)
+      this.appPassResetForm.focus()
+    })
+
     Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
     Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
     Doc.bind(page.addAccount, 'click', () => page.accountFile.click())
 
-    Doc.bind(page.exportSeed, 'click', () => this.showForm(page.exportSeedAuth))
+    Doc.bind(page.exportSeed, 'click', () => {
+      Doc.hide(page.exportSeedErr)
+      this.showForm(page.exportSeedAuth)
+    })
     forms.bind(page.exportSeedAuth, page.exportSeedSubmit, () => this.submitExportSeedReq())
 
     const closePopups = () => {
@@ -242,8 +256,7 @@ export default class SettingsPage extends BasePage {
       return
     }
     if (typeof account === 'undefined') {
-      page.importAccountErr.textContent = intl.prep(intl.ID_ACCT_UNDEFINED)
-      Doc.show(page.importAccountErr)
+      Doc.showFormError(page.importAccountErr, intl.prep(intl.ID_ACCT_UNDEFINED))
       return
     }
     const { bonds = [], ...acctInf } = account
@@ -253,11 +266,10 @@ export default class SettingsPage extends BasePage {
       bonds: bonds
     }
     const loaded = app().loading(this.body)
-    const importResponse = await postJSON('/api/importaccount', req)
+    const res = await postJSON('/api/importaccount', req)
     loaded()
-    if (!app().checkResponse(importResponse)) {
-      page.importAccountErr.textContent = importResponse.msg
-      Doc.show(page.importAccountErr)
+    if (!app().checkResponse(res)) {
+      Doc.showFormError(page.importAccountErr, res.msg)
       return
     }
     await app().fetchUser()
@@ -273,8 +285,7 @@ export default class SettingsPage extends BasePage {
     const res = await postJSON('/api/exportseed', { pass: pw })
     loaded()
     if (!app().checkResponse(res)) {
-      page.exportAccountErr.textContent = res.msg
-      Doc.show(page.exportSeedE)
+      Doc.showFormError(page.exportSeedErr, res.msg)
       return
     }
     page.exportSeedPW.value = ''
@@ -327,15 +338,13 @@ export default class SettingsPage extends BasePage {
     }
     // Ensure password fields are nonempty.
     if (!page.appPW.value || !page.newAppPW.value || !page.confirmNewPW.value) {
-      page.changePWErrMsg.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
-      Doc.show(page.changePWErrMsg)
+      Doc.showFormError(page.changePWErrMsg, intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG))
       clearValues()
       return
     }
     // Ensure password confirmation matches.
     if (page.newAppPW.value !== page.confirmNewPW.value) {
-      page.changePWErrMsg.textContent = intl.prep(intl.ID_PASSWORD_NOT_MATCH)
-      Doc.show(page.changePWErrMsg)
+      Doc.showFormError(page.changePWErrMsg, intl.prep(intl.ID_PASSWORD_NOT_MATCH))
       clearValues()
       return
     }
@@ -348,8 +357,7 @@ export default class SettingsPage extends BasePage {
     const res = await postJSON('/api/changeapppass', req)
     loaded()
     if (!app().checkResponse(res)) {
-      page.changePWErrMsg.textContent = res.msg
-      Doc.show(page.changePWErrMsg)
+      Doc.showFormError(page.changePWErrMsg, res.msg)
       return
     }
     Doc.hide(page.forms)

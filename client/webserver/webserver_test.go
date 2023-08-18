@@ -161,6 +161,7 @@ func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool) error {
 	return c.walletStatusErr
 }
 func (c *TCore) ChangeAppPass(appPW, newAppPW []byte) error                         { return nil }
+func (c *TCore) ResetAppPass(newAppPW, seed []byte) error                           { return nil }
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
 func (c *TCore) NewDepositAddress(assetID uint32) (string, error)                   { return "", nil }
 func (c *TCore) AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error) {

@@ -80,6 +80,9 @@ const (
 	// tier, so we calculate our bonus/revoked tier from the score in the
 	// ConnectResult.
 	defaultPenaltyThreshold = 20
+	
+	// seedLen is the length of the generated app seed used for app protection.
+	seedLen = 64
 )
 
 var (
@@ -3265,20 +3268,42 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 	if err != nil {
 		return newError(authErr, "old password error: %w", err)
 	}
+	defer outerCrypter.Close()
 	innerKey, err := outerCrypter.Decrypt(creds.EncInnerKey)
 	if err != nil {
 		return fmt.Errorf("inner key decryption error: %w", err)
 	}
 	newOuterCrypter := c.newCrypter(newAppPW)
+	defer newOuterCrypter.Close()
 	newEncInnerKey, err := newOuterCrypter.Encrypt(innerKey)
 	if err != nil {
 		return fmt.Errorf("encryption error: %v", err)
 	}
+
+	// Retrieve app seed for re-encrypting recovery seed.
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return err
+	}
+	defer crypter.Close()
+
+	seed, err := crypter.Decrypt(creds.EncSeed)
+	if err != nil {
+		return fmt.Errorf("app seed decryption error: %w", err)
+	}
+
+	encRecoverySeed, recoverySeedCrypterParams, err := c.encodeRecoverySeed(seed, newAppPW)
+	if err != nil {
+		return fmt.Errorf("client seed encryption error: %w", err)
+	}
+
 	newCreds := &db.PrimaryCredentials{
-		EncSeed:        creds.EncSeed,
-		EncInnerKey:    newEncInnerKey,
-		InnerKeyParams: creds.InnerKeyParams,
-		OuterKeyParams: newOuterCrypter.Serialize(),
+		EncSeed:               creds.EncSeed,
+		EncInnerKey:           newEncInnerKey,
+		InnerKeyParams:        creds.InnerKeyParams,
+		OuterKeyParams:        newOuterCrypter.Serialize(),
+		EncRecoverySeed:       encRecoverySeed,
+		EncRecoverySeedParams: recoverySeedCrypterParams,
 	}
 
 	err = c.db.SetPrimaryCredentials(newCreds)
@@ -3289,6 +3314,25 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 	c.setCredentials(newCreds)
 
 	return nil
+}
+
+// ResetAppPass resets the application password to the provided new password.
+func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
+	if !c.IsInitialized() {
+		return fmt.Errorf("cannot reset password before client is initialized")
+	}
+
+	// Validate the seed.
+	appPass, err := c.checkIfSeedMatch(seed)
+	if err != nil {
+		return err
+	}
+
+	if bytes.Equal(appPass, newPass) {
+		return fmt.Errorf("new password must be different from previous password")
+	}
+
+	return c.ChangeAppPass(appPass, newPass)
 }
 
 // ReconfigureWallet updates the wallet configuration settings, it also updates
@@ -4535,14 +4579,12 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 			return fmt.Errorf("SetSeedGenerationTime error: %w", err)
 		}
 		c.seedGenerationTime = now
-	}
 
-	c.setCredentials(creds)
-
-	if len(restorationSeed) == 0 {
 		subject, details := c.formatDetails(TopicSeedNeedsSaving)
 		c.notify(newSecurityNote(TopicSeedNeedsSaving, subject, details, db.Success))
 	}
+
+	c.setCredentials(creds)
 	return nil
 }
 
@@ -4587,7 +4629,6 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 	}
 
 	// Generate a seed to use as the root for all future key generation.
-	const seedLen = 64
 	if len(seed) == 0 {
 		seed = encode.RandomBytes(seedLen)
 	} else if len(seed) != seedLen {
@@ -4600,11 +4641,18 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 		return nil, nil, fmt.Errorf("client seed encryption error: %w", err)
 	}
 
+	encRawSeed, rawSeedCrypterParams, err := c.encodeRecoverySeed(seed, pw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("client seed encryption error: %w", err)
+	}
+
 	creds := &db.PrimaryCredentials{
-		EncSeed:        encSeed,
-		EncInnerKey:    encInnerKey,
-		InnerKeyParams: innerCrypter.Serialize(),
-		OuterKeyParams: outerCrypter.Serialize(),
+		EncSeed:               encSeed,
+		EncInnerKey:           encInnerKey,
+		InnerKeyParams:        innerCrypter.Serialize(),
+		OuterKeyParams:        outerCrypter.Serialize(),
+		EncRecoverySeed:       encRawSeed,
+		EncRecoverySeedParams: rawSeedCrypterParams,
 	}
 
 	return innerCrypter, creds, nil
@@ -4614,6 +4662,55 @@ func (c *Core) bondKeysReady() bool {
 	c.loginMtx.Lock()
 	defer c.loginMtx.Unlock()
 	return c.bondXPriv != nil && c.bondXPriv.IsPrivate() // infer not Zeroed via IsPrivate
+}
+
+// encodeRecoverySeed encrypts the raw seed and app password using part of the
+// original seed.
+func (c *Core) encodeRecoverySeed(rawSeed, pw []byte) ([]byte, []byte, error) {
+	var encRecoverySeedPw = rawSeed[:seedLen/2]
+
+	encRecoverySeedCrypter := c.newCrypter(encRecoverySeedPw)
+	defer encRecoverySeedCrypter.Close()
+
+	seedAndPass := append(rawSeed, pw...)
+	encRecoverySeed, err := encRecoverySeedCrypter.Encrypt(seedAndPass)
+	if err != nil {
+		return nil, nil, fmt.Errorf("recovery seed encryption error: %v", err)
+	}
+
+	return encRecoverySeed, encRecoverySeedCrypter.Serialize(), nil
+}
+
+// checkIfSeedMatch checks if the provided seed matches the stored recovery seed
+// and returns the decrypted app password.
+func (c *Core) checkIfSeedMatch(seed []byte) ([]byte, error) {
+	creds := c.creds()
+	if creds == nil {
+		return nil, fmt.Errorf("no credentials stored")
+	}
+
+	if len(seed) != seedLen {
+		return nil, fmt.Errorf("invalid seed length %d", len(seed))
+	}
+
+	var encRecoverySeedPW = seed[:seedLen/2]
+	encRecoverySeedCrypter, err := c.reCrypter(encRecoverySeedPW, creds.EncRecoverySeedParams)
+	if err != nil {
+		c.log.Errorf("Password reset with seed failed: %v", err)
+		return nil, errors.New("incorrect seed")
+	}
+
+	decRecoverySeed, err := encRecoverySeedCrypter.Decrypt(creds.EncRecoverySeed)
+	if err != nil {
+		c.log.Errorf("Decrypting password recovery seed failed: %v", err)
+		return nil, errors.New("incorrect seed")
+	}
+
+	if !bytes.Equal(decRecoverySeed[:seedLen], seed) {
+		return nil, fmt.Errorf("incorrect seed")
+	}
+
+	return decRecoverySeed[seedLen:], nil
 }
 
 // Login logs the user in. On the first login after startup or after a logout,
@@ -4648,6 +4745,43 @@ func (c *Core) Login(pw []byte) error {
 		return err
 	}
 	defer crypter.Close()
+
+	if len(creds.EncRecoverySeed) == 0 {
+		// The user is logging in for the first time since the implementation of
+		// password reset.
+		seed, err := crypter.Decrypt(creds.EncSeed)
+		if err != nil {
+			return err
+		}
+
+		// Retrieve the credentials again, since they may have been updated by
+		// the call to c.initializePrimaryCredentials above.
+		c.credMtx.RLock()
+		creds = c.credentials
+		c.credMtx.RUnlock()
+
+		creds.EncRecoverySeed, creds.EncRecoverySeedParams, err = c.encodeRecoverySeed(seed, pw)
+		if err != nil {
+			return err
+		}
+
+		newCreds := &db.PrimaryCredentials{
+			EncSeed:               creds.EncSeed,
+			EncInnerKey:           creds.EncInnerKey,
+			InnerKeyParams:        creds.InnerKeyParams,
+			OuterKeyParams:        creds.OuterKeyParams,
+			EncRecoverySeed:       creds.EncRecoverySeed,
+			EncRecoverySeedParams: creds.EncRecoverySeedParams,
+		}
+
+		err = c.db.SetPrimaryCredentials(newCreds)
+		if err != nil {
+			return fmt.Errorf("SetPrimaryCredentials error: %w", err)
+		}
+
+		c.setCredentials(newCreds)
+		c.log.Debug("Client password recovery seed has been encrypted and stored successfully...")
+	}
 
 	c.loginMtx.Lock()
 	defer c.loginMtx.Unlock()

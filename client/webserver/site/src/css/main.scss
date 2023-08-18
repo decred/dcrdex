@@ -330,8 +330,8 @@ div.popup-notes {
   }
 }
 
-#noteBox,
-#profileBox {
+#profileBox,
+#noteBox {
   position: fixed;
   display: flex;
   flex-direction: column;
@@ -362,10 +362,6 @@ div.popup-notes {
         opacity: 1;
       }
     }
-  }
-
-  .authed-only:not(.authed) {
-    display: none;
   }
 }
 
@@ -544,6 +540,14 @@ sup.token-parent {
 
 .form-check-label {
   cursor: pointer;
+
+  &:hover {
+    font-weight: bold;
+  }
+}
+
+#forgotPassBtn {
+  text-decoration: underline;
 
   &:hover {
     font-weight: bold;

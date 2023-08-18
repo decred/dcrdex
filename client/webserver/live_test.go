@@ -1702,6 +1702,10 @@ func (c *TCore) ChangeAppPass(appPW, newAppPW []byte) error {
 	return nil
 }
 
+func (c *TCore) ResetAppPass(newAppPW, seed []byte) error {
+	return nil
+}
+
 func (c *TCore) NewDepositAddress(assetID uint32) (string, error) {
 	return ordertest.RandomAddress(), nil
 }
