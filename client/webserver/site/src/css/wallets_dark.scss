@@ -24,7 +24,8 @@ body.dark {
       border-color: $dark_border_color;
     }
 
-    table#vspPickerTable {
+    table#vspPickerTable,
+    table#ticketHistoryTable {
       border: 1px solid $dark_border_color;
 
       th,

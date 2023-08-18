@@ -15,9 +15,9 @@ import {
 } from './registry'
 import { setOptionTemplates } from './opts'
 
-const Mainnet = 0
-const Testnet = 1
-// const Regtest = 3
+export const Mainnet = 0
+export const Testnet = 1
+export const Simnet = 2
 
 // lockTimeMakerMs must match the value returned from LockTimeMaker func in dexc.
 const lockTimeMakerMs = 20 * 60 * 60 * 1000
@@ -609,11 +609,13 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   42: { // dcr
     [Mainnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')
-      return `https://explorer.dcrdata.org/tx/${txid}/out/${vout}`
+      if (vout !== undefined) return `https://explorer.dcrdata.org/tx/${txid}/out/${vout}`
+      return `https://explorer.dcrdata.org/tx/${txid}`
     },
     [Testnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')
-      return `https://testnet.dcrdata.org/tx/${txid}/out/${vout}`
+      if (vout !== undefined) return `https://testnet.dcrdata.org/tx/${txid}/out/${vout}`
+      return `https://testnet.dcrdata.org/tx/${txid}`
     }
   },
   0: { // btc

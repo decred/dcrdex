@@ -131,6 +131,16 @@ export const ID_LOCKED_ORDER_BAL_MSG = 'LOCKED_ORDER_BAL_MSG'
 export const ID_CREATING_WALLETS = 'CREATING_WALLETS'
 export const ID_ADDING_SERVERS = 'ADDING_SERVER'
 export const ID_WALLET_RECOVERY_SUPPORT_MSG = 'WALLET_RECOVERY_SUPPORT_MSG'
+export const ID_TICKETS_PURCHASED = 'TICKETS_PURCHASED'
+export const ID_TICKET_STATUS_UNKNOWN = 'TICKET_STATUS_UNKNOWN'
+export const ID_TICKET_STATUS_UNMINED = 'TICKET_STATUS_UNMINED'
+export const ID_TICKET_STATUS_IMMATURE = 'TICKET_STATUS_IMMATURE'
+export const ID_TICKET_STATUS_LIVE = 'TICKET_STATUS_LIVE'
+export const ID_TICKET_STATUS_VOTED = 'TICKET_STATUS_VOTED'
+export const ID_TICKET_STATUS_MISSED = 'TICKET_STATUS_MISSED'
+export const ID_TICKET_STATUS_EXPIRED = 'TICKET_STATUS_EXPIRED'
+export const ID_TICKET_STATUS_UNSPENT = 'TICKET_STATUS_UNSPENT'
+export const ID_TICKET_STATUS_REVOKED = 'TICKET_STATUS_REVOKED'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -264,7 +274,17 @@ export const enUS: Locale = {
   [ID_LOCKED_ORDER_BAL_MSG]: 'Funds locked in unmatched orders',
   [ID_CREATING_WALLETS]: 'Creating wallets',
   [ID_ADDING_SERVERS]: 'Connecting to servers',
-  [ID_WALLET_RECOVERY_SUPPORT_MSG]: 'Native {{ walletSymbol }} wallet failed to load properly. Try clicking the "Recover" button below to fix it'
+  [ID_WALLET_RECOVERY_SUPPORT_MSG]: 'Native {{ walletSymbol }} wallet failed to load properly. Try clicking the "Recover" button below to fix it',
+  [ID_TICKETS_PURCHASED]: 'Purchased {{ n }} Tickets!',
+  [ID_TICKET_STATUS_UNKNOWN]: 'unknown',
+  [ID_TICKET_STATUS_UNMINED]: 'unmined',
+  [ID_TICKET_STATUS_IMMATURE]: 'immature',
+  [ID_TICKET_STATUS_LIVE]: 'live',
+  [ID_TICKET_STATUS_VOTED]: 'voted',
+  [ID_TICKET_STATUS_MISSED]: 'missed',
+  [ID_TICKET_STATUS_EXPIRED]: 'expired',
+  [ID_TICKET_STATUS_UNSPENT]: 'unspent',
+  [ID_TICKET_STATUS_REVOKED]: 'revoked'
 }
 
 export const ptBR: Locale = {

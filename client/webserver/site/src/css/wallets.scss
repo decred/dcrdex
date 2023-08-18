@@ -200,7 +200,8 @@
     border-color: $light_border_color;
   }
 
-  table#vspPickerTable {
+  table#vspPickerTable,
+  table#ticketHistoryTable {
     border: 1px solid $light_border_color;
 
     th,
@@ -219,6 +220,10 @@
       border-left-width: 1px;
       border-color: $light_border_color;
     }
+  }
+
+  #purchaserInput {
+    width: 4em;
   }
 }
 

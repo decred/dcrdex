@@ -865,6 +865,7 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 	if err != nil {
 		return nil, err
 	}
+
 	request := &wallet.PurchaseTicketsRequest{
 		Count:                n,
 		MinConf:              1,
@@ -886,10 +887,10 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 
 // Tickets returns current active tickets.
 func (w *spvWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
-	return w.ticketsInRange(ctx, 0, 0)
+	return w.ticketsInRange(ctx, -1, -1)
 }
 
-func (w *spvWallet) ticketsInRange(ctx context.Context, fromHeight, toHeight int32) ([]*asset.Ticket, error) {
+func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight /* 0 = mempool */ int32) ([]*asset.Ticket, error) {
 	params := w.ChainParams()
 
 	tickets := make([]*asset.Ticket, 0)
@@ -914,7 +915,7 @@ func (w *spvWallet) ticketsInRange(ctx context.Context, fromHeight, toHeight int
 			}
 
 			tickets = append(tickets, &asset.Ticket{
-				Ticket: asset.TicketTransaction{
+				Tx: asset.TicketTransaction{
 					Hash:        ticketSummary.Ticket.Hash.String(),
 					TicketPrice: uint64(ticketSummary.Ticket.MyOutputs[0].Amount),
 					Fees:        uint64(ticketSummary.Ticket.Fee),
@@ -930,17 +931,20 @@ func (w *spvWallet) ticketsInRange(ctx context.Context, fromHeight, toHeight int
 	}
 
 	const requiredConfs = 6 + 2
-	endBlockNum := toHeight
-	if endBlockNum == 0 {
-		_, endBlockNum = w.MainChainTip(ctx)
+	var startBlock, endBlock *wallet.BlockIdentifier // null goes through mempool
+	// Iterate backwards, so that fromHeight is the higher
+	if upperHeight == -1 {
+		_, upperHeight = w.MainChainTip(ctx)
+	} else {
+		endBlock = wallet.NewBlockIdentifierFromHeight(upperHeight)
 	}
-	startBlockNum := fromHeight
-	if startBlockNum == 0 {
-		startBlockNum = endBlockNum -
-			int32(params.TicketExpiry+uint32(params.TicketMaturity)-requiredConfs)
+	if lowerHeight == -1 {
+		bn := upperHeight - int32(params.TicketExpiry+uint32(params.TicketMaturity)-requiredConfs)
+		startBlock = wallet.NewBlockIdentifierFromHeight(bn)
+	} else {
+		startBlock = wallet.NewBlockIdentifierFromHeight(lowerHeight)
 	}
-	startBlock := wallet.NewBlockIdentifierFromHeight(startBlockNum)
-	endBlock := wallet.NewBlockIdentifierFromHeight(endBlockNum)
+
 	if err := w.dcrWallet.GetTickets(ctx, processTicket, startBlock, endBlock); err != nil {
 		return nil, err
 	}

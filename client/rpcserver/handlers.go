@@ -1673,7 +1673,7 @@ an spv wallet and enables options to view and set the vsp.
       tickets (array): An array of ticket objects.
       [
         {
-          ticket (obj): Ticket transaction data.
+          tx (obj): Ticket transaction data.
           {
             hash (string): The ticket hash as hex.
             ticketPrice (int): The amount paid for the ticket in atoms.
@@ -1681,8 +1681,8 @@ an spv wallet and enables options to view and set the vsp.
             stamp (int): The UNIX time the ticket was purchased.
             blockHeight (int): The block number the ticket was mined.
           },
-	  status: (int) The ticket status. 0: unknown, 1: unmined, 2: immature, 3: live,
-4: voted, 5: missed, 6:expired, 7: unspent, 8: revoked.
+          status: (int) The ticket status. 0: unknown, 1: unmined, 2: immature, 3: live,
+                        4: voted, 5: missed, 6:expired, 7: unspent, 8: revoked.
           spender (string): The transaction that votes on or revokes the ticket if available.
        },
      ],...

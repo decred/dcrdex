@@ -942,7 +942,7 @@ func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
 		feeAmt, _ := dcrutil.NewAmount(-tx.Fee)
 
 		tickets = append(tickets, &asset.Ticket{
-			Ticket: asset.TicketTransaction{
+			Tx: asset.TicketTransaction{
 				Hash:        h.String(),
 				TicketPrice: uint64(msgTx.TxOut[0].Value),
 				Fees:        uint64(feeAmt),

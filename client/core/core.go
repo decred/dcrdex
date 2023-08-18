@@ -10582,7 +10582,7 @@ func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	hashes, err := tb.PurchaseTickets(n)
+	hashes, err := tb.PurchaseTickets(n, c.feeSuggestionAny(assetID))
 	if err != nil {
 		return nil, err
 	}

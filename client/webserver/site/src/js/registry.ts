@@ -612,7 +612,7 @@ export interface TicketTransaction {
 }
 
 export interface Ticket {
-  ticket: TicketTransaction
+  tx: TicketTransaction
   status: number
   spender: string
 }
@@ -638,6 +638,7 @@ export interface Stances {
 
 export interface TicketStakingStatus {
   ticketPrice: number
+  votingSubsidy: number
   vsp: string
   isRPC: boolean
   tickets: Ticket[]

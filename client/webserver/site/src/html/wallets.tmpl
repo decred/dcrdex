@@ -126,41 +126,46 @@
             </div>
 
             {{- /* STAKING */ -}}
-            <div id="stakingBox" class="m-3 p-2 w-100 d-flex flex-column">
-              {{- /* STAKING SUMMARY */ -}}
-              <div class="position-relative w-100 d-flex align-items-stretch">
-                <div class="flex-grow-1">
-                  <div class="fs28 sans-light flex-center lh1"><span class="ico-ticket me-2 fs22"></span>Staking</div>
-                  <hr class="dashed my-2">
-                  <div id="stakingSummary" class="flex-center fs16">
-                    <span>You have <span id="stakingTicketCount" class="demi"></span> live tickets</span>
-                  </div>
+            <div id="stakingBox" class="position-relative m-3 w-100 d-flex align-items-stretch">
+              <div class="d-flex flex-column align-items-stretch flex-grow-1">
+                <div class="fs28 sans-light flex-center brdrbottom"><span class="ico-ticket me-2 fs20"></span>Staking</div>
+                <div id="stakingSummary" class="d-flex flex-column justify-content-around align-items-center fs16 flex-grow-1">
+                  <span>You have <span id="stakingTicketCount" class="demi"></span> active tickets</span>
                   <div id="pickVSP" class="fs16 p-2 flex-center">
                     <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
                   </div>
                   <div id="vspDisplayBox" class="fs16 p-2 flex-center">
                     <span>VSP: <span id="vspDisplay"></span></span>
                   </div>
-                  <div id="stakingErr" class="fs16 p-2 errcolor"></div>
                 </div>
-                <div id="ticketPriceBox" class="flex-center p-4 brdrleft">
-                  <div class="d-flex flex-column">
-                    <span class="fs18 demi">Ticket Price</span>
-                    <hr class="dotted my-2">
-                    <span class="d-flex align-items-end">
-                      <span class="fs22 lh-1" id="ticketPrice"></span>
-                      <span class="fs18 lh-1 grey ms-1" id="ticketPriceUnit"></span>
-                    </span>
+                <div id="stakingErr" class="fs16 p-2 errcolor"></div>
+                {{- /* PURCHASE TICKETS */ -}}
+                <div id="purchaseTicketsBox" class="w-100 d-flex align-items-stretch brdrtop">
+                  <div id="purchaseTicketsBttn" class="hoverbg pointer flex-center flex-grow-1 brdrright p-2">
+                    <span><span class="ico-ticket me-1"></span> Purchase Tickets</span>
+                  </div>
+                  <div id="ticketHistory" class="hoverbg pointer flex-center flex-grow-1 p-2">
+                    <span><span class="ico-textfile me-1"></span> Tickets</span>
                   </div>
                 </div>
               </div>
-
-              {{- /* PURCHASE TICKETS */ -}}
-              <div id="purchaseTicketsBox" class="w-100 flex-center d-flex flex-column align-items-stretch py-1">
-                <hr class="dotted my-2">
-                <div class="px-2 pt-2">
-                  <button id="purchaseTicketsBttn" class="me-2"><span class="ico-ticket me-1"></span> Purchase Tickets</button>
-                  <button id="ticketHistory"><span class="ico-textfile me-1"></span> Tickets</button>
+              <div id="ticketPriceBox" class="flex-center p-3 brdrleft">
+                <div class="d-flex flex-column">
+                  <div>
+                    <span class="fs18 demi">Ticket Price</span>
+                    <hr class="my-1">
+                    <span class="d-flex align-items-end">
+                      <span class="fs18 lh-1" id="ticketPrice"></span>
+                    </span>
+                  </div>
+                  <hr class="dotted my-3">
+                  <div>
+                    <span class="fs18 demi">Vote Reward</span>
+                    <hr class="my-1">
+                    <span class="d-flex align-items-end">
+                      <span class="fs18 lh-1" id="votingSubsidy"></span>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -642,6 +647,7 @@
       <div id="errorModalMsg" class="fs16 errcolor my-2 text-center"></div>
     </form>
 
+    {{- /* PICK A VOTING SERVICE PROVIDER */ -}}
     <form id="vspPicker" class="flex-center flex-column p-2 m-4">
       <div class="fs24 sans-light">Select a Voting Service Provider</div>
       <hr class="dashed my-2">
@@ -660,11 +666,14 @@
             <td data-tmpl="voting"></td>
           </tr>
         </tbody>
-      </table>
+      </table>{{/* TODO: ADD MANUAL INPUT */}}
     </form>
 
+    {{- /* PURCHASE TICKETS */ -}}
     <form id="purchaseTicketsForm" class="flex-center flex-column p-2 m-4 mw-425">
-      <div class="d-flex">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="flex-center fs22 sans-light">Purchase Tickets</div>
+      <div class="d-flex pt-2">
         <div class="flex-center flex-column col-50 p-4">
           <span>Current Price</span>
           <hr class="dotted my-1 w-100">
@@ -677,20 +686,49 @@
         </div>
       </div>
       <hr class="dotted w-100">
-      <div class="d-flex">
-        <div class="flex-center flex-column col-50 py-2">
+      <div class="d-flex w-100 flex-wrap">
+        <div class="flex-center flex-column col-12 py-2 brdrright">
           <span>How Many?</span>
           <input type="number" min="1" placeholder="0" id="purchaserInput" class="fs24 p-2 mt-1 text-center">
         </div>
-        <div class="flex-center flex-column brdrleft col-50 py-2">
+        <div id="purchaserAppPWBox" class="flex-center flex-column col-12 p-2">
+          <span>App Password</span>
+          <input type="password" id="purchaserAppPW" class="form-control select" autocomplete="off">
+        </div>
+        <div class="flex-center flex-column col-12 py-2">
           <button id="purchaserSubmit" class="selected fs24">Buy</button>
         </div>
       </div>
       <div id="purchaserErr" class="errcolor d-hide py-2 d-hide"></div>
     </form>
 
-    <form id="purchaseTicketsConfirm" class="flex-center flex-column p-2 m-4 mw-425">
-      
+    {{- /* TICKET HISTORY */ -}}
+    <form id="ticketHistoryForm" class="flex-center flex-column p-2 m-4">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="flex-center fs28 sans-light mb-2">Ticket History</div>
+      <table id="ticketHistoryTable" class="fs14">
+        <thead>
+          <tr>
+            <th>Age</th>
+            <th>Price</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ticketHistoryRows">
+          <tr id="ticketHistoryRowTmpl">
+            <td data-tmpl="age"></td>
+            <td data-tmpl="price"></td>
+            <td data-tmpl="status"></td>
+            <td data-tmpl="detailsLink" class="pointer hoverbg">
+              <span class="mono">
+                <span data-tmpl="hashStart"></span>…<span data-tmpl="hashEnd"></span>
+              </span>
+              <span class="ico-open ms-1"></span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </form>
   </div>
 </div>

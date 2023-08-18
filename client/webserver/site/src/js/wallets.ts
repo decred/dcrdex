@@ -30,9 +30,10 @@ import {
   CustomBalance,
   WalletState,
   TicketStakingStatus,
-  VotingServiceProvider
+  VotingServiceProvider,
+  Ticket
 } from './registry'
-import { CoinExplorers } from './order'
+import { CoinExplorers, Simnet, Testnet } from './order'
 
 const animationLength = 300
 const traitRescanner = 1
@@ -46,6 +47,28 @@ const traitTokenApprover = 1 << 13
 const traitTicketBuyer = 1 << 15
 
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
+
+export const ticketStatusUnknown = 0
+export const ticketStatusUnmined = 1
+export const ticketStatusImmature = 2
+export const ticketStatusLive = 3
+export const ticketStatusVoted = 4
+export const ticketStatusMissed = 5
+export const ticketStatusExpired = 6
+export const ticketStatusUnspent = 7
+export const ticketStatusRevoked = 8
+
+export const ticketStatusTranslationKeys = [
+  intl.ID_TICKET_STATUS_UNKNOWN,
+  intl.ID_TICKET_STATUS_UNMINED,
+  intl.ID_TICKET_STATUS_IMMATURE,
+  intl.ID_TICKET_STATUS_LIVE,
+  intl.ID_TICKET_STATUS_VOTED,
+  intl.ID_TICKET_STATUS_MISSED,
+  intl.ID_TICKET_STATUS_EXPIRED,
+  intl.ID_TICKET_STATUS_UNSPENT,
+  intl.ID_TICKET_STATUS_REVOKED
+]
 
 interface ReconfigRequest {
   assetID: number
@@ -94,6 +117,7 @@ export default class WalletsPage extends BasePage {
   currentForm: PageElement
   restoreInfoCard: HTMLElement
   selectedAssetID: number
+  stakeStatus: TicketStakingStatus
   maxSend: number
   unapprovingTokenVersion: number
 
@@ -181,8 +205,9 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
     Doc.bind(page.showVSPs, 'click', () => { this.showVSPPicker() })
     Doc.bind(page.purchaseTicketsBttn, 'click', () => { this.showPurchaseTicketsDialog() })
-    Doc.bind(page.purchaserSubmit, 'click', () => { this.purchaseTickets() })
+    bindForm(page.purchaseTicketsForm, page.purchaserSubmit, () => { this.purchaseTickets() })
     Doc.bind(page.purchaserInput, 'change', () => { this.purchaserInputChanged() })
+    Doc.bind(page.ticketHistory, 'click', () => { this.showTicketHistory() })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -834,9 +859,11 @@ export default class WalletsPage extends BasePage {
     }
     Doc.show(page.stakingSummary, page.ticketPriceBox)
     const status = res.status as TicketStakingStatus
-    page.stakingTicketCount.textContent = String(status.tickets.length)
+    this.stakeStatus = status
+    const liveTicketCount = status.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
+    page.stakingTicketCount.textContent = String(liveTicketCount)
     page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
-    page.ticketPriceUnit.textContent = ui.conventional.unit
+    page.votingSubsidy.textContent = Doc.formatFourSigFigs(status.votingSubsidy / ui.conventional.conversionFactor)
     page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
     if (status.vsp) {
@@ -877,8 +904,10 @@ export default class WalletsPage extends BasePage {
 
   showPurchaseTicketsDialog () {
     const page = this.page
-    page.purchaserInput.value = '0'
+    page.purchaserInput.value = ''
+    page.purchaserAppPW.value = ''
     Doc.hide(page.purchaserErr)
+    Doc.setVis(!State.passwordIsCached(), page.purchaserAppPWBox)
     this.showForm(this.page.purchaseTicketsForm)
   }
 
@@ -896,9 +925,16 @@ export default class WalletsPage extends BasePage {
     const { page, selectedAssetID: assetID } = this
     const n = parseInt(page.purchaserInput.value || '0')
     if (n < 1) return
+    // TODO: Add confirmation dialog.
     const loaded = app().loading(page.purchaseTicketsForm)
-    const res = await postJSON('/api/purchasetickets', { assetID, n })
+    const res = await postJSON('/api/purchasetickets', { assetID, n, appPW: page.purchaserAppPW.value || '' })
     loaded()
+    if (!app().checkResponse(res)) {
+      page.purchaserErr.textContent = res.msg
+      Doc.show(page.purchaserErr)
+      return
+    }
+    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: n.toLocaleString(navigator.languages) }))
   }
 
   async setVSP (assetID: number, vsp: VotingServiceProvider) {
@@ -911,6 +947,28 @@ export default class WalletsPage extends BasePage {
     if (app().checkResponse(res)) return this.updateTicketBuyer(assetID)
     Doc.show(page.stakingErr)
     page.stakingErr.textContent = res.msg
+  }
+
+  async showTicketHistory () {
+    const { page, selectedAssetID: assetID, stakeStatus } = this
+    const ui = app().unitInfo(assetID)
+    Doc.empty(page.ticketHistoryRows)
+    const net = app().user.net
+    let coinLink = CoinExplorers[assetID][net]
+    // Use testnet links for simnet just for testing purposes.
+    if (!coinLink && net === Simnet) coinLink = CoinExplorers[assetID][Testnet]
+    for (const { tx, status } of [...stakeStatus.tickets].reverse()) {
+      const tr = page.ticketHistoryRowTmpl.cloneNode(true) as PageElement
+      page.ticketHistoryRows.appendChild(tr)
+      const tmpl = Doc.parseTemplate(tr)
+      tmpl.age.textContent = Doc.timeSince(tx.stamp * 1000)
+      tmpl.price.textContent = Doc.formatFullPrecision(tx.ticketPrice, ui)
+      tmpl.status.textContent = intl.prep(ticketStatusTranslationKeys[status])
+      tmpl.hashStart.textContent = tx.hash.slice(0, 6)
+      tmpl.hashEnd.textContent = tx.hash.slice(-6)
+      Doc.bind(tmpl.detailsLink, 'click', () => { window.open(coinLink(tx.hash), '_blank') })
+    }
+    this.showForm(page.ticketHistoryForm)
   }
 
   updateDisplayedAssetBalance (): void {

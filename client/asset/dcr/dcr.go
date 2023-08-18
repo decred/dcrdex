@@ -33,10 +33,9 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
-	"decred.org/dcrwallet/v3/wallet/txrules"
-	"decred.org/dcrwallet/v3/wallet/txsizes"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/blockchain/standalone/v2"
+	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -651,6 +650,8 @@ type ExchangeWallet struct {
 	vspV atomic.Value // *vsp
 
 	connected atomic.Bool
+
+	subsidyCache *blockchain.SubsidyCache
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -890,6 +891,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		mempoolRedeems:      make(map[[32]byte]*mempoolRedeem),
 		vspFilepath:         vspFilepath,
 		walletType:          cfg.Type,
+		subsidyCache:        blockchain.NewSubsidyCache(chainParams),
 	}
 
 	if b, err := os.ReadFile(vspFilepath); err == nil {
@@ -5152,10 +5154,22 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
-	sdiff, err := dcr.wallet.StakeDiff(dcr.ctx)
+	ticketPrice, err := dcr.wallet.StakeDiff(dcr.ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Chance of a given ticket voting in a block is
+	// p = chainParams.TicketsPerBlock / (chainParams.TicketPoolSize * chainParams.TicketsPerBlock)
+	//   = 1 / chainParams.TicketPoolSize
+	// Expecation value of number of blocks to vote is
+	// 1 / p = chainParams.TicketPoolSize
+	expectedBlocksToVote := int64(dcr.chainParams.TicketPoolSize)
+	voteHeightExpectationValue := dcr.cachedBestBlock().height + expectedBlocksToVote
+	voteSubsidy := dcr.subsidyCache.CalcStakeVoteSubsidyV3(voteHeightExpectationValue, blockchain.SSVDCP0012)
+	// expectedTimeToVote := time.Duration(expectedBlocksToVote) * dcr.chainParams.TargetTimePerBlock
+	// nCompound := float64((time.Hour * 24 * 365) / expectedTimeToVote)
+	// subsidyRate := float64(voteSubsidy) / float64(ticketPrice)
+	// apy := math.Pow(1+subsidyRate, nCompound) - 1
 	isRPC := !dcr.isNative()
 	var vspURL string
 	if !isRPC {
@@ -5163,7 +5177,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 			vspURL = v.(*vsp).URL
 		}
 	}
-	tickets, err := dcr.wallet.Tickets(dcr.ctx)
+	tickets, err := dcr.tickets(dcr.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving tickets: %w", err)
 	}
@@ -5172,16 +5186,35 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 		return nil, fmt.Errorf("error retrieving stances: %w", err)
 	}
 	return &asset.TicketStakingStatus{
-		TicketPrice: uint64(sdiff),
-		VSP:         vspURL,
-		IsRPC:       isRPC,
-		Tickets:     tickets,
+		TicketPrice:   uint64(ticketPrice),
+		VotingSubsidy: uint64(voteSubsidy),
+		VSP:           vspURL,
+		IsRPC:         isRPC,
+		Tickets:       tickets,
 		Stances: asset.Stances{
 			VoteChoices:    voteChoices,
 			TSpendPolicy:   tSpendPolicy,
 			TreasuryPolicy: treasuryPolicy,
 		},
 	}, nil
+}
+
+func (dcr *ExchangeWallet) tickets(ctx context.Context) ([]*asset.Ticket, error) {
+	tickets, err := dcr.wallet.Tickets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving tickets: %w", err)
+	}
+	// Adjust status for SPV tickets that aren't expired.
+	oldestTicketsBlock := dcr.cachedBestBlock().height - int64(dcr.chainParams.TicketExpiry) - int64(dcr.chainParams.TicketMaturity)
+	for _, t := range tickets {
+		if t.Status != asset.TicketStatusUnspent {
+			continue
+		}
+		if t.Tx.BlockHeight == -1 || t.Tx.BlockHeight > oldestTicketsBlock {
+			t.Status = asset.TicketStatusLive
+		}
+	}
+	return tickets, nil
 }
 
 func vspInfo(url string) (*vspdjson.VspInfoResponse, error) {
@@ -5255,35 +5288,6 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) ([]strin
 	}
 	vInfo := v.(*vsp)
 	return dcr.wallet.PurchaseTickets(dcr.ctx, n, vInfo.URL, vInfo.PubKey)
-}
-
-func (dcr *ExchangeWallet) EstimateTicketTxFees(n int, feeSuggestion uint64) (uint64, error) {
-	v := dcr.vspV.Load()
-	if v == nil {
-		return 0, errors.New("no vsp set")
-	}
-	vInfo := v.(*vsp)
-	feePerKB := dcrutil.Amount(dcr.feeRateWithFallback(feeSuggestion) * 1000)
-	sdiff, err := dcr.wallet.StakeDiff(dcr.ctx)
-	if err != nil {
-		return 0, err
-	}
-	height := dcr.cachedBestBlock().height
-	const dcp0010Active = true
-	vspFee := txrules.StakePoolTicketFee(sdiff, feePerKB, int32(height), vInfo.FeePercentage, dcr.chainParams, dcp0010Active)
-
-	var dummyPK [20]byte
-	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(dummyPK[:], dcr.chainParams)
-	if err != nil {
-		return 0, fmt.Errorf("error generating dummy address?: %w", err)
-	}
-
-	version, pkScript := addr.PaymentScript()
-
-	outputs := []*wire.TxOut{{Version: version, PkScript: pkScript}}
-	txsize := txsizes.EstimateSerializeSize([]int{txsizes.RedeemP2PKHInputSize}, outputs, txsizes.P2PKHPkScriptSize)
-	txFee := txrules.FeeForSerializeSize(feePerKB, txsize)
-	return uint64(vspFee + 2*txFee), nil
 }
 
 // SetVotingPreferences sets the vote choices for all active tickets and future

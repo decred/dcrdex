@@ -911,7 +911,7 @@ const (
 
 // Ticket holds information about a decred ticket.
 type Ticket struct {
-	Ticket  TicketTransaction `json:"ticket"`
+	Tx      TicketTransaction `json:"tx"`
 	Status  TicketStatus      `json:"status"`
 	Spender string            `json:"spender"`
 }
@@ -945,6 +945,8 @@ type TicketStakingStatus struct {
 	// TicketPrice is the current price of one ticket. Also known as the
 	// stake difficulty.
 	TicketPrice uint64 `json:"ticketPrice"`
+	// VotingSubsidy is the current reward for a vote.
+	VotingSubsidy uint64 `json:"votingSubsidy"`
 	// VSP is the currently set VSP address and fee.
 	VSP string `json:"vsp"`
 	// IsRPC will be true if this is an RPC wallet, in which case we can't
@@ -970,9 +972,6 @@ type TicketBuyer interface {
 	// PurchaseTickets purchases n amount of tickets. Returns the purchased
 	// ticket hashes if successful.
 	PurchaseTickets(n int, feeSuggestion uint64) ([]string, error)
-	// EstimatePurchaseTickets estimates the fees for purchasing a specified
-	// number of tickets.
-	EstimateTicketTxFees(n int, feeSuggestion uint64) (uint64, error)
 	// SetVotingPreferences sets default voting settings for all active
 	// tickets and future tickets. Nil maps can be provided for no change.
 	SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy map[string]string) error
