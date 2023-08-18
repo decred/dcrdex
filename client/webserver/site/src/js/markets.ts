@@ -478,11 +478,10 @@ export default class MarketsPage extends BasePage {
     for (const row of this.marketList.markets) {
       bind(row.node, 'click', () => {
         // return early if the market is already set
-        const quote = row.mkt.quoteid
-        const base = row.mkt.baseid
-        if (this.market && this.market.base.id === base && this.market.quote.id === quote) return
+        const { quoteid: quoteID, baseid: baseID, xc: { host } } = row.mkt
+        if (this.market && this.market.base.id === baseID && this.market.quote.id === quoteID) return
         this.startLoadingAnimations()
-        this.setMarket(row.mkt.xc.host, base, quote)
+        this.setMarket(host, baseID, quoteID)
       })
     }
     if (State.fetchLocal(State.leftMarketDockLK) !== '1') { // It is shown by default, hiding if necessary.
@@ -2376,7 +2375,7 @@ export default class MarketsPage extends BasePage {
     if (!mkt || !mkt.dex || mkt.dex.connectionStatus !== ConnectionStatus.Connected) return
 
     const wgt = this.balanceWgt
-    // Display the widget if the balance note is for it's base or qoute wallet.
+    // Display the widget if the balance note is for its base or quote wallet.
     if ((note.assetID === wgt.base.id || note.assetID === wgt.quote.id)) wgt.setBalanceVisibility(true)
 
     // If there's a balance update, refresh the max order section.
@@ -2996,7 +2995,7 @@ class BalanceWidget {
     this.quote.cfg = this.dex.assets[quoteID]
     this.updateWallet(this.base)
     this.updateWallet(this.quote)
-    this.setBalanceVisibility(true)
+    this.setBalanceVisibility(this.dex.connectionStatus === ConnectionStatus.Connected)
   }
 
   /*
