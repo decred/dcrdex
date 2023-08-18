@@ -29,9 +29,11 @@ import {
   ApprovalStatus,
   CustomBalance,
   WalletState,
+  UnitInfo,
   TicketStakingStatus,
   VotingServiceProvider,
-  Ticket
+  Ticket,
+  TicketStats
 } from './registry'
 import { CoinExplorers, Simnet, Testnet } from './order'
 
@@ -70,6 +72,9 @@ export const ticketStatusTranslationKeys = [
   intl.ID_TICKET_STATUS_REVOKED
 ]
 
+const ticketPageSize = 10
+const scanStartChainTip = -1
+
 interface ReconfigRequest {
   assetID: number
   walletType: string
@@ -96,6 +101,12 @@ interface AssetButton {
   bttn: PageElement
 }
 
+interface TicketPage {
+  page: number
+  history: Ticket[]
+  scanned: boolean
+}
+
 let net = 0
 
 export default class WalletsPage extends BasePage {
@@ -120,6 +131,7 @@ export default class WalletsPage extends BasePage {
   stakeStatus: TicketStakingStatus
   maxSend: number
   unapprovingTokenVersion: number
+  ticketPage: TicketPage
 
   constructor (body: HTMLElement) {
     super()
@@ -139,7 +151,8 @@ export default class WalletsPage extends BasePage {
 
     this.selectedAssetID = -1
     Doc.cleanTemplates(
-      page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl
+      page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl,
+      page.ticketHistoryRowTmpl
     )
 
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
@@ -208,6 +221,8 @@ export default class WalletsPage extends BasePage {
     bindForm(page.purchaseTicketsForm, page.purchaserSubmit, () => { this.purchaseTickets() })
     Doc.bind(page.purchaserInput, 'change', () => { this.purchaserInputChanged() })
     Doc.bind(page.ticketHistory, 'click', () => { this.showTicketHistory() })
+    Doc.bind(page.ticketHistoryNextPage, 'click', () => { this.nextTicketPage() })
+    Doc.bind(page.ticketHistoryPrevPage, 'click', () => { this.prevTicketPage() })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -275,6 +290,13 @@ export default class WalletsPage extends BasePage {
   closePopups () {
     Doc.hide(this.page.forms)
     if (this.animation) this.animation.stop()
+  }
+
+  async safePost (path: string, args: any): Promise<any> {
+    const assetID = this.selectedAssetID
+    const res = await postJSON(path, args)
+    if (assetID !== this.selectedAssetID) throw Error('asset changed during request. aborting')
+    return res
   }
 
   // stepSend makes a request to get an estimated fee and displays the confirm
@@ -801,6 +823,7 @@ export default class WalletsPage extends BasePage {
     this.updateDisplayedAsset(assetID)
     this.showAvailableMarkets(assetID)
     this.showRecentActivity(assetID)
+    this.updateTicketBuyer(assetID)
   }
 
   updateDisplayedAsset (assetID: number) {
@@ -813,7 +836,7 @@ export default class WalletsPage extends BasePage {
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.stakingBox
+      page.peerCountBox, page.syncProgressBox, page.statusDisabled
     )
     if (wallet) {
       this.updateDisplayedAssetBalance()
@@ -832,7 +855,6 @@ export default class WalletsPage extends BasePage {
           Doc.show(page.statusReady)
           if (!app().haveActiveOrders(assetID) && wallet.encrypted) Doc.show(page.lockBttnBox)
         } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
-        this.updateTicketBuyer(assetID)
       } else Doc.show(page.statusOff, page.connectBttnBox) // wallet not running
     } else Doc.show(page.createWalletBox) // no wallet
 
@@ -840,18 +862,22 @@ export default class WalletsPage extends BasePage {
   }
 
   async updateTicketBuyer (assetID: number) {
+    this.ticketPage = {
+      page: 0,
+      history: [],
+      scanned: false
+    }
     const { wallet, unitInfo: ui } = app().assets[assetID]
-    if ((wallet.traits & traitTicketBuyer) === 0) return
+    if (!wallet?.running || (wallet.traits & traitTicketBuyer) === 0) return
     const page = this.page
     Doc.hide(
-      page.pickVSP, page.stakingSummary, page.stakingErr, page.vspDisplayBox,
-      page.ticketPriceBox, page.purchaseTicketsBox
+      page.stakingBox, page.pickVSP, page.stakingSummary, page.stakingErr,
+      page.vspDisplayBox, page.ticketPriceBox, page.purchaseTicketsBox
     )
     Doc.show(page.stakingBox)
     const loaded = app().loading(page.stakingBox)
-    const res = await postJSON('/api/stakestatus', assetID)
+    const res = await this.safePost('/api/stakestatus', assetID)
     loaded()
-    if (assetID !== this.selectedAssetID) return // User changed asset while we were fetching
     if (!app().checkResponse(res)) {
       Doc.show(page.stakingErr)
       page.stakingErr.textContent = res.msg
@@ -862,19 +888,33 @@ export default class WalletsPage extends BasePage {
     this.stakeStatus = status
     const liveTicketCount = status.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
     page.stakingTicketCount.textContent = String(liveTicketCount)
-    page.totalTicketCount.textContent = String(status.stats.ticketCount)
-    page.totalTicketRewards.textContent = Doc.formatFourSigFigs(status.stats.totalRewards / ui.conventional.conversionFactor)
-    page.totalTicketVotes.textContent = String(status.stats.votes)
     page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.votingSubsidy.textContent = Doc.formatFourSigFigs(status.votingSubsidy / ui.conventional.conversionFactor)
     page.stakingAgendaCount.textContent = String(status.stances.voteChoices.length)
     page.stakingTspendCount.textContent = String(status.stances.tSpendPolicy.length)
     page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
-    if (status.vsp) {
+    this.updateTicketStats(status.stats, ui)
+    this.setVSPViz(status.vsp)
+  }
+
+  setVSPViz (vsp: string) {
+    const page = this.page
+    if (vsp) {
       Doc.show(page.vspDisplayBox, page.purchaseTicketsBox)
-      page.vspDisplay.textContent = status.vsp
-    } else Doc.show(page.pickVSP)
+      Doc.hide(page.pickVSP)
+      page.vspDisplay.textContent = vsp
+      return
+    }
+    Doc.show(page.pickVSP)
+    Doc.hide(page.vspDisplayBox, page.purchaseTicketsBox)
+  }
+
+  updateTicketStats (stats: TicketStats, ui: UnitInfo) {
+    const page = this.page
+    page.totalTicketCount.textContent = String(stats.ticketCount)
+    page.totalTicketRewards.textContent = Doc.formatFourSigFigs(stats.totalRewards / ui.conventional.conversionFactor)
+    page.totalTicketVotes.textContent = String(stats.votes)
   }
 
   async showVSPPicker () {
@@ -884,9 +924,8 @@ export default class WalletsPage extends BasePage {
     Doc.empty(page.vspPickerList)
     Doc.hide(page.stakingErr)
     const loaded = app().loading(page.vspPicker)
-    const res = await postJSON('/api/listvsps', assetID)
+    const res = await this.safePost('/api/listvsps', assetID)
     loaded()
-    if (assetID !== this.selectedAssetID) return // User changed asset while we were fetching
     if (!app().checkResponse(res)) {
       Doc.show(page.stakingErr)
       page.stakingErr.textContent = res.msg
@@ -909,7 +948,7 @@ export default class WalletsPage extends BasePage {
 
   showPurchaseTicketsDialog () {
     const page = this.page
-    page.purchaserInput.value = ''
+    page.purchaserInput.value = '1'
     page.purchaserAppPW.value = ''
     Doc.hide(page.purchaserErr)
     Doc.setVis(!State.passwordIsCached(), page.purchaserAppPWBox)
@@ -927,42 +966,68 @@ export default class WalletsPage extends BasePage {
   }
 
   async purchaseTickets () {
-    const { page, selectedAssetID: assetID } = this
+    const { page, selectedAssetID: assetID, stakeStatus } = this
     const n = parseInt(page.purchaserInput.value || '0')
     if (n < 1) return
     // TODO: Add confirmation dialog.
     const loaded = app().loading(page.purchaseTicketsForm)
-    const res = await postJSON('/api/purchasetickets', { assetID, n, appPW: page.purchaserAppPW.value || '' })
+    const res = await this.safePost('/api/purchasetickets', { assetID, n, appPW: page.purchaserAppPW.value || '' })
     loaded()
     if (!app().checkResponse(res)) {
       page.purchaserErr.textContent = res.msg
       Doc.show(page.purchaserErr)
       return
     }
-    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: n.toLocaleString(navigator.languages) }))
+
+    const tickets = res.tickets as Ticket[]
+    stakeStatus.stats.ticketCount += tickets.length
+    stakeStatus.tickets = tickets.concat(stakeStatus.tickets)
+    this.updateTicketStats(stakeStatus.stats, app().unitInfo(assetID))
+
+    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: tickets.length.toLocaleString(navigator.languages) }))
   }
 
   async setVSP (assetID: number, vsp: VotingServiceProvider) {
     this.closePopups()
     const page = this.page
     const loaded = app().loading(page.stakingBox)
-    const res = await postJSON('/api/setvsp', { assetID, url: vsp.url })
+    const res = await this.safePost('/api/setvsp', { assetID, url: vsp.url })
     loaded()
-    if (assetID !== this.selectedAssetID) return
-    if (app().checkResponse(res)) return this.updateTicketBuyer(assetID)
-    Doc.show(page.stakingErr)
-    page.stakingErr.textContent = res.msg
+    if (!app().checkResponse(res)) {
+      Doc.show(page.stakingErr)
+      page.stakingErr.textContent = res.msg
+      return
+    }
+    this.setVSPViz(vsp.url)
   }
 
-  async showTicketHistory () {
-    const { page, selectedAssetID: assetID, stakeStatus } = this
+  pageOfTickets (pgNum: number) {
+    const { stakeStatus, ticketPage } = this
+    let startOffset = pgNum * ticketPageSize
+    const pageOfTickets: Ticket[] = []
+    if (startOffset < stakeStatus.tickets.length) {
+      pageOfTickets.push(...stakeStatus.tickets.slice(startOffset, startOffset + ticketPageSize))
+      if (pageOfTickets.length < ticketPageSize) {
+        const need = ticketPageSize - pageOfTickets.length
+        pageOfTickets.push(...ticketPage.history.slice(0, need))
+      }
+    } else {
+      startOffset -= stakeStatus.tickets.length
+      pageOfTickets.push(...ticketPage.history.slice(startOffset, startOffset + ticketPageSize))
+    }
+    return pageOfTickets
+  }
+
+  displayTicketPage (pageOfTickets: Ticket[]) {
+    const { page, selectedAssetID: assetID, ticketPage } = this
     const ui = app().unitInfo(assetID)
-    Doc.empty(page.ticketHistoryRows)
     const net = app().user.net
     let coinLink = CoinExplorers[assetID][net]
     // Use testnet links for simnet just for testing purposes.
     if (!coinLink && net === Simnet) coinLink = CoinExplorers[assetID][Testnet]
-    for (const { tx, status } of [...stakeStatus.tickets].reverse()) {
+    Doc.empty(page.ticketHistoryRows)
+    page.ticketHistoryPage.textContent = String(ticketPage.page)
+    for (const { tx, status } of pageOfTickets) {
       const tr = page.ticketHistoryRowTmpl.cloneNode(true) as PageElement
       page.ticketHistoryRows.appendChild(tr)
       const tmpl = Doc.parseTemplate(tr)
@@ -973,7 +1038,92 @@ export default class WalletsPage extends BasePage {
       tmpl.hashEnd.textContent = tx.hash.slice(-6)
       Doc.bind(tmpl.detailsLink, 'click', () => { window.open(coinLink(tx.hash), '_blank') })
     }
+  }
+
+  async showTicketHistory () {
+    const { page, selectedAssetID: assetID, stakeStatus } = this
+    Doc.hide(page.ticketHistoryPrevPage, page.ticketHistoryPagination)
     this.showForm(page.ticketHistoryForm)
+
+    // Get first page of tickets.
+    const pageOfTickets = stakeStatus.tickets.slice(0, ticketPageSize)
+    if (pageOfTickets.length < ticketPageSize) {
+      const n = ticketPageSize - pageOfTickets.length
+      let scanStart = scanStartChainTip
+      let skipN = 0
+      if (pageOfTickets.length > 0) {
+        const blockHeight = pageOfTickets[pageOfTickets.length - 1].tx.blockHeight
+        if (blockHeight >= 0) {
+          scanStart = blockHeight
+          skipN = pageOfTickets.filter((tkt: Ticket) => tkt.tx.blockHeight === blockHeight).length
+        }
+      }
+      const loaded = app().loading(page.ticketHistoryForm)
+      const res = await this.safePost('/api/ticketpage', { assetID, scanStart, n, skipN })
+      loaded()
+      if (!app().checkResponse(res)) {
+        console.error('error fetching ticket page', res.msg)
+        return
+      }
+      this.ticketPage.history.push(...res.tickets)
+      pageOfTickets.push(...res.tickets)
+      if (res.tickets.length < n) this.ticketPage.scanned = true
+    }
+
+    if (!stakeStatus.isRPC && !this.ticketPage.scanned) {
+      Doc.show(page.ticketHistoryPagination, page.ticketHistoryNextPage)
+    }
+    this.displayTicketPage(pageOfTickets)
+  }
+
+  async nextTicketPage () {
+    const { page, stakeStatus, ticketPage, selectedAssetID: assetID } = this
+    const pageOfTickets = this.pageOfTickets(ticketPage.page + 1)
+    // let startOffset = (ticketPage.page + 1) * ticketPageSize
+    // const pageOfTickets: Ticket[] = []
+    // if (startOffset < stakeStatus.tickets.length) {
+    //   pageOfTickets.push(...stakeStatus.tickets.slice(startOffset, startOffset + ticketPageSize))
+    //   if (pageOfTickets.length < ticketPageSize) {
+    //     const need = ticketPageSize - pageOfTickets.length
+    //     pageOfTickets.push(...ticketPage.history.slice(0, need))
+    //   }
+    // } else {
+    //   startOffset -= stakeStatus.tickets.length
+    //   pageOfTickets.push(...ticketPage.history.slice(startOffset, startOffset + ticketPageSize))
+    // }
+    if (pageOfTickets.length < ticketPageSize && !ticketPage.scanned) {
+      const n = ticketPageSize - pageOfTickets.length
+      const lastList = ticketPage.history.length > 0 ? ticketPage.history : stakeStatus.tickets
+      const scanStart = lastList[lastList.length - 1].tx.blockHeight
+      const skipN = lastList.filter((tkt: Ticket) => tkt.tx.blockHeight === scanStart).length
+      const loaded = app().loading(page.ticketHistoryForm)
+      const res = await this.safePost('/api/ticketpage', { assetID, scanStart, n, skipN })
+      loaded()
+      if (!app().checkResponse(res)) {
+        console.error('error fetching ticket page', res.msg)
+        return
+      }
+      this.ticketPage.history.push(...res.tickets)
+      pageOfTickets.push(...res.tickets)
+      if (res.tickets.length < n) this.ticketPage.scanned = true
+    }
+    if (pageOfTickets.length === 0 || this.ticketPage.scanned) {
+      Doc.hide(page.ticketHistoryNextPage)
+      if (pageOfTickets.length === ticketPageSize) Doc.hide(page.ticketHistoryPagination) // Exactly one page of results
+      if (pageOfTickets.length === 0) return
+    }
+    ticketPage.page++
+    Doc.show(page.ticketHistoryPrevPage)
+    this.displayTicketPage(pageOfTickets)
+  }
+
+  prevTicketPage () {
+    const { page, ticketPage } = this
+    const pageOfTickets = this.pageOfTickets(ticketPage.page - 1)
+    ticketPage.page--
+    Doc.setVis(ticketPage.page > 0, page.ticketHistoryPrevPage)
+    Doc.show(page.ticketHistoryNextPage)
+    this.displayTicketPage(pageOfTickets)
   }
 
   updateDisplayedAssetBalance (): void {

@@ -313,7 +313,7 @@ func (c *TCore) SetVSP(assetID uint32, addr string) error {
 	return nil
 }
 
-func (c *TCore) PurchaseTickets(assetID uint32, appPW []byte, n int) ([]string, error) {
+func (c *TCore) PurchaseTickets(assetID uint32, appPW []byte, n int) ([]*asset.Ticket, error) {
 	return nil, nil
 }
 
@@ -322,6 +322,10 @@ func (c *TCore) SetVotingPreferences(assetID uint32, choices, tSpendPolicy, trea
 }
 
 func (c *TCore) ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error) {
+	return nil, nil
+}
+
+func (c *TCore) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
 	return nil, nil
 }
 

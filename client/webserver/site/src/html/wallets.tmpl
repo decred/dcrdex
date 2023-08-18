@@ -132,19 +132,19 @@
                 <div id="stakingSummary" class="d-flex align-items-stretch flex-grow-1">
                   <div class="d-flex flex-column align-items-stretch fs14 flex-grow-1 ps-1 pe-2">
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center">Active Tickets</div>
+                      <div class="flex-center">Active tickets</div>
                       <div id="stakingTicketCount" class="flex-center demi"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center">Tickets Bought</div>
+                      <div class="flex-center">Tickets bought</div>
                       <div id="totalTicketCount" class="flex-center demi"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center">Total Rewards</div>
+                      <div class="flex-center">Total rewards</div>
                       <div id="totalTicketRewards" class="flex-center demi"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center">VotesCast</div>
+                      <div class="flex-center">Votes cast</div>
                       <div id="totalTicketVotes" class="flex-center demi"></div>
                     </div>
                     <div id="vspDisplayBox" class="d-flex justify-content-between align-items-stretch">
@@ -163,7 +163,7 @@
                     <hr class="dashed my-1 w-75">
                     <div class="flex-center flex-column fs14">
                       <span><span id="stakingAgendaCount"></span> agendas</span>
-                      <span><span id="stakingTspendCount"></span> treasury</span>
+                      <span><span id="stakingTspendCount"></span> treasury spends</span>
                     </div>
                   </div>
                 </div>
@@ -716,7 +716,7 @@
       <div class="d-flex w-100 flex-wrap">
         <div class="flex-center flex-column col-12 py-2 brdrright">
           <span>How Many?</span>
-          <input type="number" min="1" placeholder="0" id="purchaserInput" class="fs24 p-2 mt-1 text-center">
+          <input type="number" id="purchaserInput" min="1" placeholder="0" class="fs24 p-2 mt-1 text-center">
         </div>
         <div id="purchaserAppPWBox" class="flex-center flex-column col-12 p-2">
           <span>App Password</span>
@@ -730,7 +730,7 @@
     </form>
 
     {{- /* TICKET HISTORY */ -}}
-    <form id="ticketHistoryForm" class="flex-center flex-column p-2 m-4">
+    <form id="ticketHistoryForm" class="flex-center flex-column align-items-stretch p-2 m-4">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="flex-center fs28 sans-light mb-2">Ticket History</div>
       <table id="ticketHistoryTable" class="fs14">
@@ -739,7 +739,7 @@
             <th>Age</th>
             <th>Price</th>
             <th>Status</th>
-            <th></th>
+            <th>Ticket</th>
           </tr>
         </thead>
         <tbody id="ticketHistoryRows">
@@ -756,6 +756,11 @@
           </tr>
         </tbody>
       </table>
+      <div id="ticketHistoryPagination" class="d-flex justify-content-end align-items-center fs18">
+        <span id="ticketHistoryPrevPage" class="ico-arrowback me-1 p-1 hoverbg pointer"></span>
+        <span id="ticketHistoryPage" class="me-1"></span>
+        <span id="ticketHistoryNextPage" class="ico-arrowright p-1 hoverbg pointer"></span>
+      </div>
     </form>
   </div>
 </div>

@@ -10568,7 +10568,7 @@ func (c *Core) SetVSP(assetID uint32, addr string) error {
 
 // PurchaseTickets purchases n tickets. Returns the purchased ticket hashes if
 // successful. Used for ticket purchasing.
-func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, error) {
+func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error) {
 	wallet, tb, err := c.stakingWallet(assetID)
 	if err != nil {
 		return nil, err
@@ -10582,7 +10582,7 @@ func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	hashes, err := tb.PurchaseTickets(n, c.feeSuggestionAny(assetID))
+	tickets, err := tb.PurchaseTickets(n, c.feeSuggestionAny(assetID))
 	if err != nil {
 		return nil, err
 	}
@@ -10590,7 +10590,7 @@ func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, erro
 	// TODO: Send tickets bought notification.
 	//subject, details := c.formatDetails(TopicSendSuccess, sentValue, unbip(assetID), address, coin)
 	//c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
-	return hashes, nil
+	return tickets, nil
 }
 
 // SetVotingPreferences sets default voting settings for all active tickets and
@@ -10612,4 +10612,12 @@ func (c *Core) ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error) 
 		return nil, err
 	}
 	return tb.ListVSPs()
+}
+
+func (c *Core) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	_, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	return tb.TicketPage(scanStart, n, skipN)
 }

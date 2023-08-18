@@ -980,12 +980,18 @@ type TicketBuyer interface {
 	SetVSP(addr string) error
 	// PurchaseTickets purchases n amount of tickets. Returns the purchased
 	// ticket hashes if successful.
-	PurchaseTickets(n int, feeSuggestion uint64) ([]string, error)
+	PurchaseTickets(n int, feeSuggestion uint64) ([]*Ticket, error)
 	// SetVotingPreferences sets default voting settings for all active
 	// tickets and future tickets. Nil maps can be provided for no change.
 	SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy map[string]string) error
 	// ListVSPs lists known available voting service providers.
 	ListVSPs() ([]*VotingServiceProvider, error)
+	// TicketPage fetches a page of tickets within a range of block numbers with
+	// a target page size and optional offset. scanStart it the block in which
+	// to start the scan. The scan progresses in reverse block number order,
+	// starting at scanStart and going to progressively lower blocks. scanStart
+	// can be set to -1 to indicate the current chain tip.
+	TicketPage(scanStart int32, n, skipN int) ([]*Ticket, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

@@ -1665,17 +1665,17 @@ func (s *WebServer) apiPurchaseTickets(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	coinIDs, err := s.core.PurchaseTickets(req.AssetID, appPW, req.N)
+	tickets, err := s.core.PurchaseTickets(req.AssetID, appPW, req.N)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error purchasing tickets for asset ID %d: %w", req.AssetID, err))
 		return
 	}
 	writeJSON(w, &struct {
-		OK      bool     `json:"ok"`
-		CoinIDs []string `json:"coinIDs"`
+		OK      bool            `json:"ok"`
+		Tickets []*asset.Ticket `json:"tickets"`
 	}{
 		OK:      true,
-		CoinIDs: coinIDs,
+		Tickets: tickets,
 	}, s.indent)
 }
 
@@ -1712,6 +1712,30 @@ func (s *WebServer) apiListVSPs(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:   true,
 		VSPs: vsps,
+	}, s.indent)
+}
+
+func (s *WebServer) apiTicketPage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID   uint32 `json:"assetID"`
+		ScanStart int32  `json:"scanStart"`
+		N         int    `json:"n"`
+		SkipN     int    `json:"skipN"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	tickets, err := s.core.TicketPage(req.AssetID, req.ScanStart, req.N, req.SkipN)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error retrieving ticket page for %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK      bool            `json:"ok"`
+		Tickets []*asset.Ticket `json:"tickets"`
+	}{
+		OK:      true,
+		Tickets: tickets,
 	}, s.indent)
 }
 

@@ -5283,7 +5283,7 @@ func (dcr *ExchangeWallet) SetVSP(url string) error {
 
 // PurchaseTickets purchases n number of tickets. Part of the asset.TicketBuyer
 // interface.
-func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) ([]string, error) {
+func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) ([]*asset.Ticket, error) {
 	if n < 1 {
 		return nil, nil
 	}
@@ -5394,6 +5394,17 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 		})
 	}
 	return vspds, nil
+}
+
+func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	if !dcr.connected.Load() {
+		return nil, errors.New("not connected, login first")
+	}
+	pager, is := dcr.wallet.(ticketPager)
+	if !is {
+		return nil, errors.New("ticket pagination not supported for this wallet")
+	}
+	return pager.TicketPage(dcr.ctx, scanStart, n, skipN)
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {

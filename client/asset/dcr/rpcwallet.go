@@ -907,15 +907,51 @@ func (w *rpcWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error
 
 // PurchaseTickets purchases n amount of tickets. Returns the purchased ticket
 // hashes if successful.
-func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string) ([]string, error) {
-	hashes, err := w.rpcClient.PurchaseTicket(ctx, "default", 0 /*spendLimit dcrutil.Amount*/, nil, /*minConf *int*/
-		nil /*ticketAddress stdaddr.Address*/, &n, nil /*poolAddress stdaddr.Address*/, nil, /*poolFees *dcrutil.Amount*/
-		nil /*expiry *int*/, nil /*ticketChange *bool*/, nil /*ticketFee *dcrutil.Amount*/)
-	hashStrs := make([]string, len(hashes))
-	for i := range hashes {
-		hashStrs[i] = hashes[i].String()
+func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string) ([]*asset.Ticket, error) {
+	hashes, err := w.rpcClient.PurchaseTicket(
+		ctx,
+		"default",
+		0,   // spendLimit
+		nil, // minConf
+		nil, // ticketAddress
+		&n,  // numTickets
+		nil, // poolAddress
+		nil, // poolFees
+		nil, // expiry
+		nil, // ticketChange
+		nil, // ticketFee
+	)
+	if err != nil {
+		return nil, err
 	}
-	return hashStrs, err
+
+	now := uint64(time.Now().Unix())
+	tickets := make([]*asset.Ticket, len(hashes))
+	for i, h := range hashes {
+		// Need to get the ticket price
+		tx, err := w.rpcClient.GetTransaction(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("error getting transaction for new ticket %s: %w", h, err)
+		}
+		msgTx, err := msgTxFromHex(tx.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding ticket %s tx hex: %v", h, err)
+		}
+		if len(msgTx.TxOut) == 0 {
+			return nil, fmt.Errorf("malformed ticket transaction %s", h)
+		}
+		tickets[i] = &asset.Ticket{
+			Tx: asset.TicketTransaction{
+				Hash:        h.String(),
+				TicketPrice: uint64(msgTx.TxOut[0].Value),
+				Fees:        0, // tickets txs don't have fees, right?
+				Stamp:       now,
+				BlockHeight: -1,
+			},
+			Status: asset.TicketStatusUnmined,
+		}
+	}
+	return tickets, nil
 }
 
 // Tickets returns active tickets.

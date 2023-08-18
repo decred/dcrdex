@@ -987,11 +987,16 @@ func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePay
 	}
 	defer form.appPass.Clear()
 
-	hashes, err := s.core.PurchaseTickets(form.assetID, form.appPass, form.num)
+	tickets, err := s.core.PurchaseTickets(form.assetID, form.appPass, form.num)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to purchase tickets: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, errMsg)
 		return createResponse(purchaseTicketsRoute, nil, resErr)
+	}
+
+	hashes := make([]string, len(tickets))
+	for i, tkt := range tickets {
+		hashes[i] = tkt.Tx.Hash
 	}
 
 	return createResponse(purchaseTicketsRoute, hashes, nil)

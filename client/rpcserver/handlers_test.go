@@ -1371,7 +1371,7 @@ func TestPurchaseTickets(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{
-			purchseTickets:     test.purchaseTickets,
+			purchaseTickets:    test.purchaseTickets,
 			purchaseTicketsErr: test.purchaseTicketsErr,
 		}
 		r := &RPCServer{core: tc}

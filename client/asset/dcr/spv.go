@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -93,6 +94,7 @@ type dcrWallet interface {
 	SetTSpendPolicy(ctx context.Context, tspendHash *chainhash.Hash, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetRelayFee(relayFee dcrutil.Amount)
+	GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*wallet.TicketSummary, *wire.BlockHeader, error)
 	vspclient.Wallet
 	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
@@ -856,7 +858,7 @@ func newVSPClient(w vspclient.Wallet, vspHost, vspPubKey string, log dex.Logger)
 
 // PurchaseTickets purchases n tickets, tells the provided vspd to monitor the
 // ticket, and pays the vsp fee.
-func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]string, error) {
+func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]*asset.Ticket, error) {
 	vspClient, err := newVSPClient(w.dcrWallet, vspHost, vspPubKey, w.log.SubLogger("VSP"))
 	if err != nil {
 		return nil, err
@@ -873,77 +875,97 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 	if err != nil {
 		return nil, err
 	}
-	hashes := res.TicketHashes
-	hashStrs := make([]string, len(hashes))
-	for i := range hashes {
-		hashStrs[i] = hashes[i].String()
+	tickets := make([]*asset.Ticket, len(res.TicketHashes))
+	for i, h := range res.TicketHashes {
+		ticketSummary, hdr, err := w.dcrWallet.GetTicketInfo(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching info for new ticket")
+		}
+		ticket := ticketSummaryToAssetTicket(ticketSummary, hdr, w.log)
+		if ticket == nil {
+			return nil, fmt.Errorf("invalid ticket summary for %s", h)
+		}
+		tickets[i] = ticket
 	}
-	return hashStrs, err
+	return tickets, err
 }
+
+const (
+	upperHeightMempool   = -1
+	lowerHeightAutomatic = -1
+	pageSizeUnlimited    = 0
+)
 
 // Tickets returns current active tickets.
 func (w *spvWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
-	return w.ticketsInRange(ctx, -1, -1)
+	return w.ticketsInRange(ctx, lowerHeightAutomatic, upperHeightMempool, pageSizeUnlimited, 0)
 }
 
-func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight /* 0 = mempool */ int32) ([]*asset.Ticket, error) {
-	params := w.ChainParams()
+var _ ticketPager = (*spvWallet)(nil)
 
-	tickets := make([]*asset.Ticket, 0)
-
-	// TODO: This does not seem to return tickets withought confirmations.
-	// Investigate this and return unconfirmed tickets with block height
-	// set to -1 if possible.
-	processTicket := func(ticketSummaries []*wallet.TicketSummary, hdr *wire.BlockHeader) (bool, error) {
-		for _, ticketSummary := range ticketSummaries {
-			spender := ""
-			if ticketSummary.Spender != nil {
-				spender = ticketSummary.Spender.Hash.String()
-			}
-
-			if ticketSummary.Ticket == nil || len(ticketSummary.Ticket.MyOutputs) < 1 {
-				w.log.Errorf("No zeroth output")
-			}
-
-			var blockHeight int64 = -1
-			if hdr != nil {
-				blockHeight = int64(hdr.Height)
-			}
-
-			tickets = append(tickets, &asset.Ticket{
-				Tx: asset.TicketTransaction{
-					Hash:        ticketSummary.Ticket.Hash.String(),
-					TicketPrice: uint64(ticketSummary.Ticket.MyOutputs[0].Amount),
-					Fees:        uint64(ticketSummary.Ticket.Fee),
-					Stamp:       uint64(ticketSummary.Ticket.Timestamp),
-					BlockHeight: blockHeight,
-				},
-				Status:  asset.TicketStatus(ticketSummary.Status),
-				Spender: spender,
-			})
-		}
-
-		return false, nil
+func (w *spvWallet) TicketPage(ctx context.Context, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	if scanStart == -1 {
+		_, scanStart = w.MainChainTip(ctx)
 	}
+	return w.ticketsInRange(ctx, 0, scanStart, n, skipN)
+}
 
+func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight int32, maxN, skipN /* 0 = mempool */ int) ([]*asset.Ticket, error) {
+	p := w.chainParams
 	const requiredConfs = 6 + 2
-	var startBlock, endBlock *wallet.BlockIdentifier // null goes through mempool
-	// Iterate backwards, so that fromHeight is the higher
-	if upperHeight == -1 {
+	var startBlock, endBlock *wallet.BlockIdentifier // null endBlock goes through mempool
+	// If mempool is included, there is no way to scan backwards.
+	includeMempool := upperHeight == upperHeightMempool
+	if includeMempool {
 		_, upperHeight = w.MainChainTip(ctx)
 	} else {
 		endBlock = wallet.NewBlockIdentifierFromHeight(upperHeight)
 	}
-	if lowerHeight == -1 {
-		bn := upperHeight - int32(params.TicketExpiry+uint32(params.TicketMaturity)-requiredConfs)
+	if lowerHeight == lowerHeightAutomatic {
+		bn := upperHeight - int32(p.TicketExpiry+uint32(p.TicketMaturity)-requiredConfs)
 		startBlock = wallet.NewBlockIdentifierFromHeight(bn)
 	} else {
 		startBlock = wallet.NewBlockIdentifierFromHeight(lowerHeight)
 	}
 
+	// If not looking at mempool, we can reverse iteration order by swapping
+	// start and end blocks.
+	if endBlock != nil {
+		startBlock, endBlock = endBlock, startBlock
+	}
+
+	tickets := make([]*asset.Ticket, 0)
+	var skipped int
+	processTicket := func(ticketSummaries []*wallet.TicketSummary, hdr *wire.BlockHeader) (bool, error) {
+		for _, ticketSummary := range ticketSummaries {
+			if skipped < skipN {
+				skipped++
+				continue
+			}
+			if ticket := ticketSummaryToAssetTicket(ticketSummary, hdr, w.log); ticket != nil {
+				tickets = append(tickets, ticket)
+			}
+
+			if maxN > 0 && len(tickets) >= maxN {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	}
+
 	if err := w.dcrWallet.GetTickets(ctx, processTicket, startBlock, endBlock); err != nil {
 		return nil, err
 	}
+
+	// If this is a mempool scan, we cannot scan backwards, so reverse the
+	// result order.
+	if includeMempool {
+		ReverseSlice(tickets)
+	}
+
+	debug.PrintStack()
+
 	return tickets, nil
 }
 
@@ -1302,4 +1324,39 @@ func initLogging(netDir string) error {
 	connmgr.UseLogger(logger("CONMGR", slog.LevelInfo))
 
 	return nil
+}
+
+func ReverseSlice[T any](s []T) {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
+func ticketSummaryToAssetTicket(ticketSummary *wallet.TicketSummary, hdr *wire.BlockHeader, log dex.Logger) *asset.Ticket {
+	spender := ""
+	if ticketSummary.Spender != nil {
+		spender = ticketSummary.Spender.Hash.String()
+	}
+
+	if ticketSummary.Ticket == nil || len(ticketSummary.Ticket.MyOutputs) < 1 {
+		log.Errorf("No zeroth output")
+		return nil
+	}
+
+	var blockHeight int64 = -1
+	if hdr != nil {
+		blockHeight = int64(hdr.Height)
+	}
+
+	return &asset.Ticket{
+		Tx: asset.TicketTransaction{
+			Hash:        ticketSummary.Ticket.Hash.String(),
+			TicketPrice: uint64(ticketSummary.Ticket.MyOutputs[0].Amount),
+			Fees:        uint64(ticketSummary.Ticket.Fee),
+			Stamp:       uint64(ticketSummary.Ticket.Timestamp),
+			BlockHeight: blockHeight,
+		},
+		Status:  asset.TicketStatus(ticketSummary.Status),
+		Spender: spender,
+	}
 }
