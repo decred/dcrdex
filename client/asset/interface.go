@@ -921,6 +921,23 @@ type Stances struct {
 	TreasuryPolicy []*dcrwalletjson.TreasuryPolicyResult `json:"treasuryPolicy"`
 }
 
+// VotingServiceProvider is information about a voting service provider.
+type VotingServiceProvider struct {
+	URL           string      `json:"host"`
+	Network       dex.Network `json:"network"`
+	Launched      uint64      `json:"launched"`    // milliseconds
+	LastUpdated   uint64      `json:"lastUpdated"` // milliseconds
+	APIVersions   []uint32    `json:"apiVersions"`
+	FeePercentage float64     `json:"feePercentage"`
+	Closed        bool        `json:"closed"`
+	Voting        uint64      `json:"voting"`
+	Voted         uint64      `json:"voted"`
+	Revoked       uint64      `json:"revoked"`
+	VSPDVersion   string      `json:"vspdVersion"`
+	BlockHeight   uint64      `json:"blockHeight"`
+	NetShare      float64     `json:"netShare"`
+}
+
 // TicketStakingStatus holds various stake information from the wallet.
 type TicketStakingStatus struct {
 	// TicketPrice is the current price of one ticket. Also known as the
@@ -954,6 +971,8 @@ type TicketBuyer interface {
 	// SetVotingPreferences sets default voting settings for all active
 	// tickets and future tickets. Nil maps can be provided for no change.
 	SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy map[string]string) error
+	// ListVSPs lists known available voting service providers.
+	ListVSPs() ([]*VotingServiceProvider, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

@@ -602,7 +602,7 @@ type ExchangeWallet struct {
 	tipChange     func(error)
 	lastPeerCount uint32
 	peersChange   func(uint32, error)
-	dir           string
+	vspFilepath   string
 	walletType    string
 
 	oracleFeesMtx sync.Mutex
@@ -853,6 +853,8 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		return nil, fmt.Errorf("unable to create wallet dir: %v", err)
 	}
 
+	vspFilepath := filepath.Join(dir, vspFileName)
+
 	w := &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
@@ -864,11 +866,11 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
 		oracleFees:          make(map[uint64]feeStamped),
 		mempoolRedeems:      make(map[[32]byte]*mempoolRedeem),
-		dir:                 dir,
+		vspFilepath:         vspFilepath,
 		walletType:          cfg.Type,
 	}
 
-	if b, err := os.ReadFile(filepath.Join(dir, vspFileName)); err == nil {
+	if b, err := os.ReadFile(vspFilepath); err == nil {
 		var v vsp
 		err = json.Unmarshal(b, &v)
 		if err != nil {
@@ -5256,7 +5258,7 @@ func (dcr *ExchangeWallet) SetVSP(url string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dcr.dir, vspFileName), b, 0666); err != nil {
+	if err := os.WriteFile(dcr.vspFilepath, b, 0666); err != nil {
 		return err
 	}
 	dcr.vspV.Store(&v)
@@ -5291,6 +5293,64 @@ func (dcr *ExchangeWallet) SetVotingPreferences(choices map[string]string, tspen
 		return errors.New("not connected, login first")
 	}
 	return dcr.wallet.SetVotingPreferences(dcr.ctx, choices, tspendPolicy, treasuryPolicy)
+}
+
+// ListVSPs lists known available voting service providers.
+func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
+	resp, err := http.Get("https://api.decred.org/?c=vsp")
+	if err != nil {
+		return nil, fmt.Errorf("http get error: %v", err)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// This struct is not quite compatible with vspdjson.VspInfoResponse.
+	var res map[string]*struct {
+		Network       string   `json:"network"`
+		Launched      uint64   `json:"launched"`    // seconds
+		LastUpdated   uint64   `json:"lastupdated"` // seconds
+		APIVersions   []uint32 `json:"apiversions"`
+		FeePercentage float64  `json:"feepercentage"`
+		Closed        bool     `json:"closed"`
+		Voting        uint64   `json:"voting"`
+		Voted         uint64   `json:"voted"`
+		Revoked       uint64   `json:"revoked"`
+		VSPDVersion   string   `json:"vspdversion"`
+		BlockHeight   uint64   `json:"blockheight"`
+		NetShare      float64  `json:"estimatednetworkproportion"`
+	}
+	if err = json.Unmarshal(b, &res); err != nil {
+		return nil, err
+	}
+
+	vspds := make([]*asset.VotingServiceProvider, 0)
+	for host, v := range res {
+		net, err := dex.NetFromString(v.Network)
+		if err != nil {
+			dcr.log.Warnf("error parsing VSP network from %q", v.Network)
+		}
+		if net != dcr.network {
+			continue
+		}
+		vspds = append(vspds, &asset.VotingServiceProvider{
+			URL:           "https://" + host,
+			Network:       net,
+			Launched:      v.Launched * 1000,    // to milliseconds
+			LastUpdated:   v.LastUpdated * 1000, // to milliseconds
+			APIVersions:   v.APIVersions,
+			FeePercentage: v.FeePercentage,
+			Closed:        v.Closed,
+			Voting:        v.Voting,
+			Voted:         v.Voted,
+			Revoked:       v.Revoked,
+			VSPDVersion:   v.VSPDVersion,
+			BlockHeight:   v.BlockHeight,
+			NetShare:      v.NetShare,
+		})
+	}
+	return vspds, nil
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
