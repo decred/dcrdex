@@ -250,6 +250,7 @@ func (w *spvWallet) initializeSimnetTspends(ctx context.Context) {
 		AddTSpend(tx wire.MsgTx) error
 		GetAllTSpends(ctx context.Context) []*wire.MsgTx
 		SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
+		TreasuryKeyPolicies() []wallet.TreasuryKeyPolicy
 	})
 	if !is {
 		return
@@ -269,6 +270,10 @@ func (w *spvWallet) initializeSimnetTspends(ctx context.Context) {
 		if err := tspendWallet.AddTSpend(*tx); err != nil {
 			w.log.Errorf("Error adding simnet tspend: %v", err)
 		}
+	}
+	if len(tspendWallet.TreasuryKeyPolicies()) == 0 {
+		priv, _ := secp256k1.GeneratePrivateKey()
+		tspendWallet.SetTreasuryKeyPolicy(ctx, priv.PubKey().SerializeCompressed(), 0x01 /* yes */, nil)
 	}
 }
 
@@ -895,8 +900,17 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 		return nil, err
 	}
 
+	// DRAFT NOTE: When purchasing N tickets, if there is utxo contention, the
+	// dcrwallet algorithm will reduce the Count until resolved.
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1480-L1490
+	// As a result, the user will get an actual ticket count somewhere in the
+	// range 1 <= tickets_purchased <= n.
+	// How do we handle that here? Or do we just let the front end handle it?
+	// If we set MinConf to 0 can we just loop until we have enough?
 	request := &wallet.PurchaseTicketsRequest{
-		Count:                n,
+		Count: n,
+		// DRAFT NOTE: Why not 0? We count zero-conf as available, so this
+		// doesn't match.
 		MinConf:              1,
 		VSPFeePaymentProcess: vspClient.Process,
 		VSPFeeProcess:        vspClient.FeePercentage,
@@ -906,6 +920,7 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 	if err != nil {
 		return nil, err
 	}
+
 	tickets := make([]*asset.Ticket, len(res.TicketHashes))
 	for i, h := range res.TicketHashes {
 		ticketSummary, hdr, err := w.dcrWallet.GetTicketInfo(ctx, h)

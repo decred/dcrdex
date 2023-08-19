@@ -73,6 +73,7 @@ export const ticketStatusTranslationKeys = [
 ]
 
 const ticketPageSize = 10
+const scanStartMempool = -1
 
 interface ReconfigRequest {
   assetID: number
@@ -869,17 +870,23 @@ export default class WalletsPage extends BasePage {
       scanned: false
     }
     const { wallet, unitInfo: ui } = app().assets[assetID]
-    if (!wallet?.running || (wallet.traits & traitTicketBuyer) === 0) return
     const page = this.page
     Doc.hide(
       page.stakingBox, page.pickVSP, page.stakingSummary, page.stakingErr,
-      page.vspDisplayBox, page.ticketPriceBox, page.purchaseTicketsBox
+      page.vspDisplayBox, page.ticketPriceBox, page.purchaseTicketsBox,
+      page.stakingRpcSpvMsg
     )
+    if (!wallet?.running || (wallet.traits & traitTicketBuyer) === 0) return
     Doc.show(page.stakingBox)
     const loaded = app().loading(page.stakingBox)
     const res = await this.safePost('/api/stakestatus', assetID)
     loaded()
     if (!app().checkResponse(res)) {
+      // Look for common error for RPC + SPV wallet.
+      if (res.msg.includes('disconnected from consensus RPC')) {
+        Doc.show(page.stakingRpcSpvMsg)
+        return
+      }
       Doc.show(page.stakingErr)
       page.stakingErr.textContent = res.msg
       return
@@ -887,8 +894,6 @@ export default class WalletsPage extends BasePage {
     Doc.show(page.stakingSummary, page.ticketPriceBox)
     const status = res.status as TicketStakingStatus
     this.stakeStatus = status
-    const liveTicketCount = status.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
-    page.stakingTicketCount.textContent = String(liveTicketCount)
     page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.votingSubsidy.textContent = Doc.formatFourSigFigs(status.votingSubsidy / ui.conventional.conversionFactor)
     page.stakingAgendaCount.textContent = String(status.stances.agendas.length)
@@ -900,19 +905,22 @@ export default class WalletsPage extends BasePage {
   }
 
   setVSPViz (vsp: string) {
-    const page = this.page
+    const { page, stakeStatus } = this
+    Doc.hide(page.vspDisplayBox)
     if (vsp) {
       Doc.show(page.vspDisplayBox, page.purchaseTicketsBox)
       Doc.hide(page.pickVSP)
       page.vspDisplay.textContent = vsp
       return
     }
-    Doc.show(page.pickVSP)
-    Doc.hide(page.vspDisplayBox, page.purchaseTicketsBox)
+    Doc.setVis(!stakeStatus.isRPC, page.pickVSP)
+    Doc.setVis(stakeStatus.isRPC, page.purchaseTicketsBox)
   }
 
   updateTicketStats (stats: TicketStats, ui: UnitInfo) {
-    const page = this.page
+    const { page, stakeStatus } = this
+    const liveTicketCount = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
+    page.stakingTicketCount.textContent = String(liveTicketCount)
     page.totalTicketCount.textContent = String(stats.ticketCount)
     page.totalTicketRewards.textContent = Doc.formatFourSigFigs(stats.totalRewards / ui.conventional.conversionFactor)
     page.totalTicketVotes.textContent = String(stats.votes)
@@ -968,6 +976,11 @@ export default class WalletsPage extends BasePage {
 
   async purchaseTickets () {
     const { page, selectedAssetID: assetID, stakeStatus } = this
+    // DRAFT NOTE: The user will get an actual ticket count somewhere in the
+    // range 1 <= tickets_purchased <= n. See notes in
+    // (*spvWallet).PurchaseTickets.
+    // How do we handle this at the UI. Or do we handle it all in the backend
+    // somehow?
     const n = parseInt(page.purchaserInput.value || '0')
     if (n < 1) return
     // TODO: Add confirmation dialog.
@@ -1044,7 +1057,7 @@ export default class WalletsPage extends BasePage {
     if (pageOfTickets.length < ticketPageSize && !ticketPage.scanned) {
       const n = ticketPageSize - pageOfTickets.length
       const lastList = ticketPage.history.length > 0 ? ticketPage.history : stakeStatus.tickets
-      const scanStart = lastList[lastList.length - 1].tx.blockHeight
+      const scanStart = lastList.length > 0 ? lastList[lastList.length - 1].tx.blockHeight : scanStartMempool
       const skipN = lastList.filter((tkt: Ticket) => tkt.tx.blockHeight === scanStart).length
       const loaded = app().loading(page.ticketHistoryForm)
       const res = await this.safePost('/api/ticketpage', { assetID, scanStart, n, skipN })
@@ -1057,6 +1070,11 @@ export default class WalletsPage extends BasePage {
       pageOfTickets.push(...res.tickets)
       if (res.tickets.length < n) this.ticketPage.scanned = true
     }
+
+    const totalTix = stakeStatus.tickets.length + ticketPage.history.length
+    Doc.setVis(totalTix >= ticketPageSize, page.ticketHistoryPagination)
+    Doc.setVis(totalTix > 0, page.ticketHistoryTable)
+    Doc.setVis(totalTix === 0, page.noTicketsMessage)
     if (pageOfTickets.length === 0) {
       // Probably ended with a page of size ticketPageSize, so didn't know we
       // had hit the end until the user clicked the arrow and we went looking
@@ -1067,11 +1085,7 @@ export default class WalletsPage extends BasePage {
     }
     this.displayTicketPage(pageNumber, pageOfTickets)
     ticketPage.number = pageNumber
-
-    // Set visibility of pagination controls.
-    const totalTix = stakeStatus.tickets.length + ticketPage.history.length
     const atEnd = pageNumber * ticketPageSize + pageOfTickets.length === totalTix
-    Doc.setVis(totalTix >= ticketPageSize, page.ticketHistoryPagination)
     Doc.setVis(!atEnd || !ticketPage.scanned, page.ticketHistoryNextPage)
     Doc.setVis(pageNumber > 0, page.ticketHistoryPrevPage)
   }
@@ -1237,6 +1251,7 @@ export default class WalletsPage extends BasePage {
       if (bal.locked) balCategory = lockedBal(balCategory)
       addSubBalance(balCategory, bal.amt, tooltipMsg)
     }
+    page.purchaserBal.textContent = Doc.formatFourSigFigs(bal.available / ui.conventional.conversionFactor)
     app().bindTooltips(page.balanceDetailBox)
   }
 
@@ -1689,7 +1704,7 @@ export default class WalletsPage extends BasePage {
       walletType: walletType
     }
     if (this.changeWalletPW) req.newWalletPW = page.newPW.value
-    const res = await postJSON('/api/reconfigurewallet', req)
+    const res = await this.safePost('/api/reconfigurewallet', req)
     page.appPW.value = ''
     page.newPW.value = ''
     loaded()
@@ -1698,6 +1713,7 @@ export default class WalletsPage extends BasePage {
       return
     }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RECONFIG_SUCCESS))
+    this.updateTicketBuyer(assetID)
   }
 
   /* lock instructs the API to lock the wallet. */

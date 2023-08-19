@@ -5187,6 +5187,11 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
+	// Try to get tickets first, because this will error for RPC + SPV wallets.
+	tickets, err := dcr.tickets(dcr.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving tickets: %w", err)
+	}
 	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
 	if err != nil {
 		return nil, err
@@ -5209,10 +5214,6 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 		if v := dcr.vspV.Load(); v != nil {
 			vspURL = v.(*vsp).URL
 		}
-	}
-	tickets, err := dcr.tickets(dcr.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving tickets: %w", err)
 	}
 	voteChoices, tSpends, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
 	if err != nil {
