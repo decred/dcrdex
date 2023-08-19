@@ -337,6 +337,11 @@ func (ord *OrderReader) RateString() string {
 	rateStr := ord.formatRate(ord.Rate)
 	if ord.Type == order.MarketOrderType {
 		rateStr = ord.AverageRateString()
+		if len(ord.Matches) > 1 {
+			rateStr = "~ " + rateStr // "~" only makes sense if the order has more than one match.
+		} else {
+			return "market" // "market" is better than 0 BTC/ETH ?
+		}
 	}
 	return fmt.Sprintf("%s %s/%s", rateStr, ord.QuoteUnitInfo.Conventional.Unit, ord.BaseUnitInfo.Conventional.Unit)
 }
@@ -354,9 +359,6 @@ func (ord *OrderReader) AverageRateString() string {
 		rateProduct += match.Rate * match.Qty // order ~ 1e16
 	}
 	rateStr := ord.formatRate(rateProduct / baseQty)
-	if nMatch > 1 {
-		rateStr = "~ " + rateStr // "~" only makes sense if the order has more than one match.
-	}
 	return rateStr
 }
 
