@@ -336,11 +336,13 @@ func (ord *OrderReader) SimpleRateString() string {
 func (ord *OrderReader) RateString() string {
 	rateStr := ord.formatRate(ord.Rate)
 	if ord.Type == order.MarketOrderType {
+		nMatches := len(ord.Matches) 
+		if nMatches == 0 {
+			return "market" // "market" is better than 0 BTC/ETH ?
+		}
 		rateStr = ord.AverageRateString()
 		if len(ord.Matches) > 1 {
 			rateStr = "~ " + rateStr // "~" only makes sense if the order has more than one match.
-		} else {
-			return "market" // "market" is better than 0 BTC/ETH ?
 		}
 	}
 	return fmt.Sprintf("%s %s/%s", rateStr, ord.QuoteUnitInfo.Conventional.Unit, ord.BaseUnitInfo.Conventional.Unit)
@@ -349,8 +351,7 @@ func (ord *OrderReader) RateString() string {
 // AverageRateString returns a formatting string containing the average rate of
 // the matches that have been filled in an order.
 func (ord *OrderReader) AverageRateString() string {
-	nMatch := len(ord.Matches)
-	if nMatch == 0 {
+	if len(ord.Matches) == 0 {
 		return "0"
 	}
 	var baseQty, rateProduct uint64
@@ -358,8 +359,7 @@ func (ord *OrderReader) AverageRateString() string {
 		baseQty += match.Qty
 		rateProduct += match.Rate * match.Qty // order ~ 1e16
 	}
-	rateStr := ord.formatRate(rateProduct / baseQty)
-	return rateStr
+	return ord.formatRate(rateProduct / baseQty)
 }
 
 // SwapFeesString is a formatted string of the paid swap fees.
