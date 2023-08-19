@@ -5159,6 +5159,30 @@ func (dcr *ExchangeWallet) isNative() bool {
 	return dcr.walletType == walletTypeSPV
 }
 
+func currentAgendas(chainParams *chaincfg.Params) (agendas []*asset.TBAgenda) {
+	var bestID uint32
+	for deploymentID := range chainParams.Deployments {
+		if bestID == 0 || deploymentID > bestID {
+			bestID = deploymentID
+		}
+	}
+	for _, deployment := range chainParams.Deployments[bestID] {
+		v := deployment.Vote
+		agenda := &asset.TBAgenda{
+			ID:          v.Id,
+			Description: v.Description,
+		}
+		for _, choice := range v.Choices {
+			agenda.Choices = append(agenda.Choices, &asset.TBChoice{
+				ID:          choice.Id,
+				Description: choice.Description,
+			})
+		}
+		agendas = append(agendas, agenda)
+	}
+	return
+}
+
 func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
@@ -5190,10 +5214,20 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving tickets: %w", err)
 	}
-	voteChoices, tSpendPolicy, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
+	voteChoices, tSpends, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving stances: %w", err)
 	}
+	agendas := currentAgendas(dcr.chainParams)
+	for _, agenda := range agendas {
+		for _, c := range voteChoices {
+			if c.AgendaID == agenda.ID {
+				agenda.CurrentChoice = c.ChoiceID
+				break
+			}
+		}
+	}
+
 	return &asset.TicketStakingStatus{
 		TicketPrice:   uint64(sinfo.Sdiff),
 		VotingSubsidy: uint64(voteSubsidy),
@@ -5201,9 +5235,9 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 		IsRPC:         isRPC,
 		Tickets:       tickets,
 		Stances: asset.Stances{
-			VoteChoices:    voteChoices,
-			TSpendPolicy:   tSpendPolicy,
-			TreasuryPolicy: treasuryPolicy,
+			Agendas:        agendas,
+			TreasurySpends: tSpends,
+			TreasuryKeys:   treasuryPolicy,
 		},
 		Stats: asset.TicketStats{
 			TotalRewards: uint64(sinfo.TotalSubsidy),

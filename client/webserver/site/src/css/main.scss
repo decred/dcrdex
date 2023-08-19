@@ -167,6 +167,11 @@ header.maintop a:hover,
   cursor: pointer;
 }
 
+.hashwrap {
+  word-break: break-all;
+  user-select: all;
+}
+
 #header .hoverbright:hover {
   color: #222;
 }

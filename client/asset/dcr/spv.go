@@ -13,7 +13,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -243,6 +242,36 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	return nil
 }
 
+func (w *spvWallet) initializeSimnetTspends(ctx context.Context) {
+	if w.chainParams.Net != wire.SimNet {
+		return
+	}
+	tspendWallet, is := w.dcrWallet.(interface {
+		AddTSpend(tx wire.MsgTx) error
+		GetAllTSpends(ctx context.Context) []*wire.MsgTx
+		SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
+	})
+	if !is {
+		return
+	}
+	const numFakeTspends = 3
+	if len(tspendWallet.GetAllTSpends(ctx)) >= numFakeTspends {
+		return
+	}
+	expiryBase := uint32(time.Now().Add(time.Hour * 24 * 365).Unix())
+	for i := uint32(0); i < numFakeTspends; i++ {
+		var signatureScript [100]byte
+		tx := &wire.MsgTx{
+			Expiry: expiryBase + i,
+			TxIn:   []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, signatureScript[:])},
+			TxOut:  []*wire.TxOut{{Value: int64(i+1) * 1e8}},
+		}
+		if err := tspendWallet.AddTSpend(*tx); err != nil {
+			w.log.Errorf("Error adding simnet tspend: %v", err)
+		}
+	}
+}
+
 func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error) {
 	return cfg.Type != walletTypeSPV, nil
 }
@@ -290,6 +319,8 @@ func (w *spvWallet) startWallet(ctx context.Context) error {
 		defer w.wg.Done()
 		w.notesLoop(ctx, dcrw)
 	}()
+
+	w.initializeSimnetTspends(ctx)
 
 	return nil
 }
@@ -964,13 +995,11 @@ func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight
 		ReverseSlice(tickets)
 	}
 
-	debug.PrintStack()
-
 	return tickets, nil
 }
 
 // VotingPreferences returns current voting preferences.
-func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*walletjson.TSpendPolicyResult, []*walletjson.TreasuryPolicyResult, error) {
+func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*asset.TBTreasurySpend, []*walletjson.TreasuryPolicyResult, error) {
 	_, agendas := wallet.CurrentAgendas(w.chainParams)
 
 	choices, _, err := w.dcrWallet.AgendaChoices(ctx, nil)
@@ -1004,15 +1033,20 @@ func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 		return policy
 	}
 	tspends := w.dcrWallet.GetAllTSpends(ctx)
-	tSpendPolicy := make([]*walletjson.TSpendPolicyResult, 0, len(tspends))
+	tSpendPolicy := make([]*asset.TBTreasurySpend, 0, len(tspends))
 	for i := range tspends {
-		tspendHash := tspends[i].TxHash()
-		p := w.dcrWallet.TSpendPolicy(&tspendHash, nil)
-		r := walletjson.TSpendPolicyResult{
-			Hash:   tspendHash.String(),
-			Policy: policyToStr(p),
+		msgTx := tspends[i]
+		tspendHash := msgTx.TxHash()
+		var val uint64
+		for _, txOut := range msgTx.TxOut {
+			val += uint64(txOut.Value)
 		}
-		tSpendPolicy = append(tSpendPolicy, &r)
+		p := w.dcrWallet.TSpendPolicy(&tspendHash, nil)
+		tSpendPolicy = append(tSpendPolicy, &asset.TBTreasurySpend{
+			Hash:          tspendHash.String(),
+			CurrentPolicy: policyToStr(p),
+			Value:         val,
+		})
 	}
 
 	policies := w.dcrWallet.TreasuryKeyPolicies()
@@ -1103,6 +1137,7 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 	}
 	clientCache := make(map[string]*vspclient.AutoClient)
 	// Set voting preferences for VSPs. Continuing for all errors.
+	// NOTE: Doing this in an unmetered loop like this is a privacy breaker.
 	return w.dcrWallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
 		vspHost, err := w.dcrWallet.VSPHostForTicket(ctx, hash)
 		if err != nil {

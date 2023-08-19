@@ -1019,7 +1019,7 @@ func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
 }
 
 // VotingPreferences returns current wallet voting preferences.
-func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*walletjson.TSpendPolicyResult, []*walletjson.TreasuryPolicyResult, error) {
+func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*asset.TBTreasurySpend, []*walletjson.TreasuryPolicyResult, error) {
 	// Get consensus vote choices.
 	choices, err := w.rpcClient.GetVoteChoices(ctx)
 	if err != nil {
@@ -1037,10 +1037,14 @@ func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get treasury spend policy: %v", err)
 	}
-	tSpendPolicy := make([]*walletjson.TSpendPolicyResult, len(tSpendRes))
-	for i, v := range tSpendRes {
-		tp := v
-		tSpendPolicy[i] = &tp
+	tSpendPolicy := make([]*asset.TBTreasurySpend, len(tSpendRes))
+	for i, tp := range tSpendRes {
+		// TODO: Find a way to get the tspend total value? Probably only
+		// possible with a full node and txindex.
+		tSpendPolicy[i] = &asset.TBTreasurySpend{
+			Hash:          tp.Hash,
+			CurrentPolicy: tp.Policy,
+		}
 	}
 	// Get treasury voting policy.
 	const treasuryPolicyMethod = "treasurypolicy"

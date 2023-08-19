@@ -152,7 +152,7 @@ type Wallet interface {
 	// or revoked. Includes unconfirmed tickets.
 	Tickets(ctx context.Context) ([]*asset.Ticket, error)
 	// VotingPreferences returns current voting preferences.
-	VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*walletjson.TSpendPolicyResult, []*walletjson.TreasuryPolicyResult, error)
+	VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*asset.TBTreasurySpend, []*walletjson.TreasuryPolicyResult, error)
 	// SetVotingPreferences sets preferences used when a ticket is chosen to
 	// be voted on.
 	SetVotingPreferences(ctx context.Context, choices, tspendPolicy, treasuryPolicy map[string]string) error

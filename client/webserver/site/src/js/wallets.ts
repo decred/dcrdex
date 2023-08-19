@@ -35,7 +35,7 @@ import {
   Ticket,
   TicketStats
 } from './registry'
-import { CoinExplorers, Simnet, Testnet } from './order'
+import { CoinExplorers } from './order'
 
 const animationLength = 300
 const traitRescanner = 1
@@ -73,7 +73,6 @@ export const ticketStatusTranslationKeys = [
 ]
 
 const ticketPageSize = 10
-const scanStartChainTip = -1
 
 interface ReconfigRequest {
   assetID: number
@@ -101,10 +100,10 @@ interface AssetButton {
   bttn: PageElement
 }
 
-interface TicketPage {
-  page: number
+interface TicketPagination {
+  number: number
   history: Ticket[]
-  scanned: boolean
+  scanned: boolean // Reached the end of history. All tickets cached.
 }
 
 let net = 0
@@ -131,7 +130,7 @@ export default class WalletsPage extends BasePage {
   stakeStatus: TicketStakingStatus
   maxSend: number
   unapprovingTokenVersion: number
-  ticketPage: TicketPage
+  ticketPage: TicketPagination
 
   constructor (body: HTMLElement) {
     super()
@@ -152,7 +151,8 @@ export default class WalletsPage extends BasePage {
     this.selectedAssetID = -1
     Doc.cleanTemplates(
       page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl,
-      page.ticketHistoryRowTmpl
+      page.ticketHistoryRowTmpl, page.votingChoiceTmpl, page.votingAgendaTmpl, page.tspendTmpl,
+      page.tkeyTmpl
     )
 
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
@@ -223,6 +223,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.ticketHistory, 'click', () => { this.showTicketHistory() })
     Doc.bind(page.ticketHistoryNextPage, 'click', () => { this.nextTicketPage() })
     Doc.bind(page.ticketHistoryPrevPage, 'click', () => { this.prevTicketPage() })
+    Doc.bind(page.setVotes, 'click', () => { this.showSetVotesDialog() })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -863,7 +864,7 @@ export default class WalletsPage extends BasePage {
 
   async updateTicketBuyer (assetID: number) {
     this.ticketPage = {
-      page: 0,
+      number: 0,
       history: [],
       scanned: false
     }
@@ -890,8 +891,8 @@ export default class WalletsPage extends BasePage {
     page.stakingTicketCount.textContent = String(liveTicketCount)
     page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.votingSubsidy.textContent = Doc.formatFourSigFigs(status.votingSubsidy / ui.conventional.conversionFactor)
-    page.stakingAgendaCount.textContent = String(status.stances.voteChoices.length)
-    page.stakingTspendCount.textContent = String(status.stances.tSpendPolicy.length)
+    page.stakingAgendaCount.textContent = String(status.stances.agendas.length)
+    page.stakingTspendCount.textContent = String(status.stances.tspends.length)
     page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
     page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
     this.updateTicketStats(status.stats, ui)
@@ -1018,15 +1019,12 @@ export default class WalletsPage extends BasePage {
     return pageOfTickets
   }
 
-  displayTicketPage (pageOfTickets: Ticket[]) {
-    const { page, selectedAssetID: assetID, ticketPage } = this
+  displayTicketPage (pageNumber: number, pageOfTickets: Ticket[]) {
+    const { page, selectedAssetID: assetID } = this
     const ui = app().unitInfo(assetID)
-    const net = app().user.net
-    let coinLink = CoinExplorers[assetID][net]
-    // Use testnet links for simnet just for testing purposes.
-    if (!coinLink && net === Simnet) coinLink = CoinExplorers[assetID][Testnet]
+    const coinLink = CoinExplorers[assetID][app().user.net]
     Doc.empty(page.ticketHistoryRows)
-    page.ticketHistoryPage.textContent = String(ticketPage.page)
+    page.ticketHistoryPage.textContent = String(pageNumber)
     for (const { tx, status } of pageOfTickets) {
       const tr = page.ticketHistoryRowTmpl.cloneNode(true) as PageElement
       page.ticketHistoryRows.appendChild(tr)
@@ -1036,61 +1034,13 @@ export default class WalletsPage extends BasePage {
       tmpl.status.textContent = intl.prep(ticketStatusTranslationKeys[status])
       tmpl.hashStart.textContent = tx.hash.slice(0, 6)
       tmpl.hashEnd.textContent = tx.hash.slice(-6)
-      Doc.bind(tmpl.detailsLink, 'click', () => { window.open(coinLink(tx.hash), '_blank') })
+      Doc.bind(tmpl.detailsLink, 'click', () => window.open(coinLink(tx.hash), '_blank'))
     }
   }
 
-  async showTicketHistory () {
-    const { page, selectedAssetID: assetID, stakeStatus } = this
-    Doc.hide(page.ticketHistoryPrevPage, page.ticketHistoryPagination)
-    this.showForm(page.ticketHistoryForm)
-
-    // Get first page of tickets.
-    const pageOfTickets = stakeStatus.tickets.slice(0, ticketPageSize)
-    if (pageOfTickets.length < ticketPageSize) {
-      const n = ticketPageSize - pageOfTickets.length
-      let scanStart = scanStartChainTip
-      let skipN = 0
-      if (pageOfTickets.length > 0) {
-        const blockHeight = pageOfTickets[pageOfTickets.length - 1].tx.blockHeight
-        if (blockHeight >= 0) {
-          scanStart = blockHeight
-          skipN = pageOfTickets.filter((tkt: Ticket) => tkt.tx.blockHeight === blockHeight).length
-        }
-      }
-      const loaded = app().loading(page.ticketHistoryForm)
-      const res = await this.safePost('/api/ticketpage', { assetID, scanStart, n, skipN })
-      loaded()
-      if (!app().checkResponse(res)) {
-        console.error('error fetching ticket page', res.msg)
-        return
-      }
-      this.ticketPage.history.push(...res.tickets)
-      pageOfTickets.push(...res.tickets)
-      if (res.tickets.length < n) this.ticketPage.scanned = true
-    }
-
-    if (!stakeStatus.isRPC && !this.ticketPage.scanned) {
-      Doc.show(page.ticketHistoryPagination, page.ticketHistoryNextPage)
-    }
-    this.displayTicketPage(pageOfTickets)
-  }
-
-  async nextTicketPage () {
+  async ticketPageN (pageNumber: number) {
     const { page, stakeStatus, ticketPage, selectedAssetID: assetID } = this
-    const pageOfTickets = this.pageOfTickets(ticketPage.page + 1)
-    // let startOffset = (ticketPage.page + 1) * ticketPageSize
-    // const pageOfTickets: Ticket[] = []
-    // if (startOffset < stakeStatus.tickets.length) {
-    //   pageOfTickets.push(...stakeStatus.tickets.slice(startOffset, startOffset + ticketPageSize))
-    //   if (pageOfTickets.length < ticketPageSize) {
-    //     const need = ticketPageSize - pageOfTickets.length
-    //     pageOfTickets.push(...ticketPage.history.slice(0, need))
-    //   }
-    // } else {
-    //   startOffset -= stakeStatus.tickets.length
-    //   pageOfTickets.push(...ticketPage.history.slice(startOffset, startOffset + ticketPageSize))
-    // }
+    const pageOfTickets = this.pageOfTickets(pageNumber)
     if (pageOfTickets.length < ticketPageSize && !ticketPage.scanned) {
       const n = ticketPageSize - pageOfTickets.length
       const lastList = ticketPage.history.length > 0 ? ticketPage.history : stakeStatus.tickets
@@ -1107,23 +1057,132 @@ export default class WalletsPage extends BasePage {
       pageOfTickets.push(...res.tickets)
       if (res.tickets.length < n) this.ticketPage.scanned = true
     }
-    if (pageOfTickets.length === 0 || this.ticketPage.scanned) {
+    if (pageOfTickets.length === 0) {
+      // Probably ended with a page of size ticketPageSize, so didn't know we
+      // had hit the end until the user clicked the arrow and we went looking
+      // for the next. Would be good to figure out a way to hide the arrow in
+      // that case.
       Doc.hide(page.ticketHistoryNextPage)
-      if (pageOfTickets.length === ticketPageSize) Doc.hide(page.ticketHistoryPagination) // Exactly one page of results
-      if (pageOfTickets.length === 0) return
+      return
     }
-    ticketPage.page++
-    Doc.show(page.ticketHistoryPrevPage)
-    this.displayTicketPage(pageOfTickets)
+    this.displayTicketPage(pageNumber, pageOfTickets)
+    ticketPage.number = pageNumber
+
+    // Set visibility of pagination controls.
+    const totalTix = stakeStatus.tickets.length + ticketPage.history.length
+    const atEnd = pageNumber * ticketPageSize + pageOfTickets.length === totalTix
+    Doc.setVis(totalTix >= ticketPageSize, page.ticketHistoryPagination)
+    Doc.setVis(!atEnd || !ticketPage.scanned, page.ticketHistoryNextPage)
+    Doc.setVis(pageNumber > 0, page.ticketHistoryPrevPage)
   }
 
-  prevTicketPage () {
-    const { page, ticketPage } = this
-    const pageOfTickets = this.pageOfTickets(ticketPage.page - 1)
-    ticketPage.page--
-    Doc.setVis(ticketPage.page > 0, page.ticketHistoryPrevPage)
-    Doc.show(page.ticketHistoryNextPage)
-    this.displayTicketPage(pageOfTickets)
+  async showTicketHistory () {
+    this.showForm(this.page.ticketHistoryForm)
+    await this.ticketPageN(this.ticketPage.number)
+  }
+
+  async nextTicketPage () {
+    await this.ticketPageN(this.ticketPage.number + 1)
+  }
+
+  async prevTicketPage () {
+    await this.ticketPageN(this.ticketPage.number - 1)
+  }
+
+  showSetVotesDialog () {
+    const { page, stakeStatus, selectedAssetID: assetID } = this
+    const ui = app().unitInfo(assetID)
+    Doc.hide(page.votingFormErr)
+    const coinLink = CoinExplorers[assetID][app().user.net]
+    const upperCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+    const setVotes = async (req: any) => {
+      Doc.hide(page.votingFormErr)
+      const loaded = app().loading(page.votingForm)
+      const res = await this.safePost('/api/setvotes', req)
+      loaded()
+      if (!app().checkResponse(res)) {
+        Doc.show(page.votingFormErr)
+        page.votingFormErr.textContent = res.msg
+        throw Error(res.msg)
+      }
+    }
+
+    const setAgendaChoice = async (agendaID: string, choiceID: string) => {
+      await setVotes({ assetID, choices: { [agendaID]: choiceID } })
+      for (const agenda of stakeStatus.stances.agendas) if (agenda.id === agendaID) agenda.currentChoice = choiceID
+    }
+
+    Doc.empty(page.votingAgendas)
+    for (const agenda of stakeStatus.stances.agendas) {
+      const div = page.votingAgendaTmpl.cloneNode(true) as PageElement
+      page.votingAgendas.appendChild(div)
+      const tmpl = Doc.parseTemplate(div)
+      tmpl.description.textContent = agenda.description
+      for (const choice of agenda.choices) {
+        if (choice.id === 'abstain') continue
+        const div = page.votingChoiceTmpl.cloneNode(true) as PageElement
+        tmpl.choices.appendChild(div)
+        const choiceTmpl = Doc.parseTemplate(div)
+        choiceTmpl.id.textContent = upperCase(choice.id)
+        choiceTmpl.id.dataset.tooltip = choice.description
+        choiceTmpl.radio.value = choice.id
+        choiceTmpl.radio.name = agenda.id
+        Doc.bind(choiceTmpl.radio, 'change', () => {
+          if (!choiceTmpl.radio.checked) return
+          setAgendaChoice(agenda.id, choice.id)
+        })
+        if (choice.id === agenda.currentChoice) choiceTmpl.radio.checked = true
+      }
+      app().bindTooltips(tmpl.choices)
+    }
+
+    const setTspendVote = async (txHash: string, policyID: string) => {
+      await setVotes({ assetID, tSpendPolicy: { [txHash]: policyID } })
+      for (const tspend of stakeStatus.stances.tspends) if (tspend.hash === txHash) tspend.currentPolicy = policyID
+    }
+
+    Doc.empty(page.votingTspends)
+    for (const tspend of stakeStatus.stances.tspends) {
+      const div = page.tspendTmpl.cloneNode(true) as PageElement
+      page.votingTspends.appendChild(div)
+      const tmpl = Doc.parseTemplate(div)
+      for (const opt of [tmpl.yes, tmpl.no]) {
+        opt.name = tspend.hash
+        if (tspend.currentPolicy === opt.value) opt.checked = true
+        Doc.bind(opt, 'change', () => {
+          if (!opt.checked) return
+          setTspendVote(tspend.hash, opt.value ?? '')
+        })
+      }
+      if (tspend.value > 0) tmpl.value.textContent = Doc.formatFourSigFigs(tspend.value / ui.conventional.conversionFactor)
+      else Doc.hide(tmpl.value)
+      tmpl.hash.textContent = tspend.hash
+      Doc.bind(tmpl.explorerLink, 'click', () => window.open(coinLink(tspend.hash), '_blank'))
+    }
+
+    const setTKeyPolicy = async (key: string, policy: string) => {
+      await setVotes({ assetID, treasuryPolicy: { [key]: policy } })
+      for (const tkey of stakeStatus.stances.treasuryKeys) if (tkey.key === key) tkey.policy = policy
+    }
+
+    Doc.empty(page.votingTKeys)
+    for (const keyPolicy of stakeStatus.stances.treasuryKeys) {
+      const div = page.tkeyTmpl.cloneNode(true) as PageElement
+      page.votingTKeys.appendChild(div)
+      const tmpl = Doc.parseTemplate(div)
+      for (const opt of [tmpl.yes, tmpl.no]) {
+        opt.name = keyPolicy.key
+        if (keyPolicy.policy === opt.value) opt.checked = true
+        Doc.bind(opt, 'change', () => {
+          if (!opt.checked) return
+          setTKeyPolicy(keyPolicy.key, opt.value ?? '')
+        })
+      }
+      tmpl.key.textContent = keyPolicy.key
+    }
+
+    this.showForm(page.votingForm)
   }
 
   updateDisplayedAssetBalance (): void {

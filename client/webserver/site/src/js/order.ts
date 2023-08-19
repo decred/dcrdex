@@ -616,6 +616,11 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
       const [txid, vout] = cid.split(':')
       if (vout !== undefined) return `https://testnet.dcrdata.org/tx/${txid}/out/${vout}`
       return `https://testnet.dcrdata.org/tx/${txid}`
+    },
+    [Simnet]: (cid: string) => {
+      const [txid, vout] = cid.split(':')
+      if (vout !== undefined) return `http://127.0.0.1:17779/tx/${txid}/out/${vout}`
+      return `https://127.0.0.1:17779/tx/${txid}`
     }
   },
   0: { // btc

@@ -427,6 +427,7 @@ export interface PageElement extends HTMLElement {
   checked?: boolean
   href?: string
   htmlFor?: string
+  name?: string
 }
 
 export interface BooleanConfig {
@@ -617,23 +618,34 @@ export interface Ticket {
   spender: string
 }
 
-export interface VoteChoice {
-  agendaid: string
-  agendadescription: string
-  choiceid: string
-  choicedescription: string
+export interface TBChoice {
+  id: string
+  description: string
 }
 
-export interface PolicyResult {
-  hash: string
+export interface TBAgenda {
+  id: string
+  description: string
+  currentChoice: string
+  choices: TBChoice[]
+}
+
+export interface TKeyPolicyResult {
+  key: string
   policy: string
   ticket?: string
 }
 
+export interface TBTreasurySpend {
+  hash: string
+  value: number
+  currentPolicy: string
+}
+
 export interface Stances {
-  voteChoices: VoteChoice[]
-  tSpendPolicy: PolicyResult[]
-  treasuryPolicy: PolicyResult[]
+  agendas: TBAgenda[]
+  tspends: TBTreasurySpend[]
+  treasuryKeys: TKeyPolicyResult[]
 }
 
 export interface TicketStats{

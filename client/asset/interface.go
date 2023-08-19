@@ -916,11 +916,29 @@ type Ticket struct {
 	Spender string            `json:"spender"`
 }
 
+type TBChoice struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+type TBAgenda struct {
+	ID            string      `json:"id"`
+	Description   string      `json:"description"`
+	CurrentChoice string      `json:"currentChoice"`
+	Choices       []*TBChoice `json:"choices"`
+}
+
+type TBTreasurySpend struct {
+	Hash          string `json:"hash"`
+	Value         uint64 `json:"value"`
+	CurrentPolicy string `json:"currentPolicy"`
+}
+
 // Stances are vote choices.
 type Stances struct {
-	VoteChoices    []*dcrwalletjson.VoteChoice           `json:"voteChoices"`
-	TSpendPolicy   []*dcrwalletjson.TSpendPolicyResult   `json:"tSpendPolicy"`
-	TreasuryPolicy []*dcrwalletjson.TreasuryPolicyResult `json:"treasuryPolicy"`
+	Agendas        []*TBAgenda                           `json:"agendas"`
+	TreasurySpends []*TBTreasurySpend                    `json:"tspends"`
+	TreasuryKeys   []*dcrwalletjson.TreasuryPolicyResult `json:"treasuryKeys"`
 }
 
 // VotingServiceProvider is information about a voting service provider.

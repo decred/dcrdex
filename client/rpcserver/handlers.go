@@ -1693,23 +1693,24 @@ an spv wallet and enables options to view and set the vsp.
      ],...
      stances (obj): Voting policies.
      {
-       voteChoices (array): An array of consensus vote choices.
+       agendas (array): An array of consensus vote choices.
        [
          {
-           agendaid (string): The agenda ID,
-           agendadescription (string): A description of the agenda being voted on.
-           choiceid (string): The current choice.
-           choicedescription (string): A description of the chosen choice.
+           id (string): The agenda ID,
+           description (string): A description of the agenda being voted on.
+           currentChoice (string): Your current choice.
+           choices ([{id: "string", description: "string"}, ...]): A description of the available choices.
          },
        ],...
-       tSpendPolicy (array): An array of TSpend policies.
+       tspends (array): An array of TSpend policies.
        [
          {
            hash (string): The TSpend txid.,
-           policy (string): The policy.
+           value (int): The total value send in the tspend.,
+           currentValue (string): The policy.
          },
        ],...
-       treasuryPolicy (array): An array of treasury policies.
+       treasuryKeys (array): An array of treasury policies.
        [
          {
            key (string): The pubkey of the tspend creator.
