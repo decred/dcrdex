@@ -892,16 +892,16 @@ export default class WalletsPage extends BasePage {
       return
     }
     Doc.show(page.stakingSummary, page.ticketPriceBox)
-    const status = res.status as TicketStakingStatus
-    this.stakeStatus = status
-    page.ticketPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
-    page.votingSubsidy.textContent = Doc.formatFourSigFigs(status.votingSubsidy / ui.conventional.conversionFactor)
-    page.stakingAgendaCount.textContent = String(status.stances.agendas.length)
-    page.stakingTspendCount.textContent = String(status.stances.tspends.length)
-    page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(status.ticketPrice / ui.conventional.conversionFactor)
+    const stakeStatus = res.status as TicketStakingStatus
+    this.stakeStatus = stakeStatus
+    page.ticketPrice.textContent = Doc.formatFourSigFigs(stakeStatus.ticketPrice / ui.conventional.conversionFactor)
+    page.votingSubsidy.textContent = Doc.formatFourSigFigs(stakeStatus.votingSubsidy / ui.conventional.conversionFactor)
+    page.stakingAgendaCount.textContent = String(stakeStatus.stances.agendas.length)
+    page.stakingTspendCount.textContent = String(stakeStatus.stances.tspends.length)
+    page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(stakeStatus.ticketPrice / ui.conventional.conversionFactor)
     page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
-    this.updateTicketStats(status.stats, ui)
-    this.setVSPViz(status.vsp)
+    this.updateTicketStats(stakeStatus.stats, ui)
+    this.setVSPViz(stakeStatus.vsp)
   }
 
   setVSPViz (vsp: string) {
@@ -957,7 +957,7 @@ export default class WalletsPage extends BasePage {
 
   showPurchaseTicketsDialog () {
     const page = this.page
-    page.purchaserInput.value = '1'
+    page.purchaserInput.value = ''
     page.purchaserAppPW.value = ''
     Doc.hide(page.purchaserErr)
     Doc.setVis(!State.passwordIsCached(), page.purchaserAppPWBox)

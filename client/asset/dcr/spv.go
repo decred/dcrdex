@@ -242,6 +242,7 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	return nil
 }
 
+// If we're running on simnet, add some tspends and treasury keys.
 func (w *spvWallet) initializeSimnetTspends(ctx context.Context) {
 	if w.chainParams.Net != wire.SimNet {
 		return
@@ -873,7 +874,7 @@ func (w *spvWallet) AddressPrivKey(ctx context.Context, addr stdaddr.Address) (*
 	return privKey, err
 }
 
-// StakeDiff returns the current stake difficulty.
+// StakeInfo returns the current stake info.
 func (w *spvWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
 	return w.dcrWallet.StakeInfo(ctx)
 }

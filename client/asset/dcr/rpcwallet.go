@@ -873,7 +873,7 @@ func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address)
 	return &priv, nil
 }
 
-// StakeDiff returns the current stake difficulty.
+// StakeInfo returns the current gestakeinfo results.
 func (w *rpcWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
 	res, err := w.rpcClient.GetStakeInfo(ctx)
 	if err != nil {

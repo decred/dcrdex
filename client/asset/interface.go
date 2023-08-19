@@ -916,11 +916,13 @@ type Ticket struct {
 	Spender string            `json:"spender"`
 }
 
+// TBChoice is a possible agenda choice for a TicketBuyer.
 type TBChoice struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
 }
 
+// TBAgenda is an agenda that the TicketBuyer can vote on.
 type TBAgenda struct {
 	ID            string      `json:"id"`
 	Description   string      `json:"description"`
@@ -928,13 +930,14 @@ type TBAgenda struct {
 	Choices       []*TBChoice `json:"choices"`
 }
 
+// TBTreasurySpend represents a treasury spend that the TicketBuyer can vote on.
 type TBTreasurySpend struct {
 	Hash          string `json:"hash"`
 	Value         uint64 `json:"value"`
 	CurrentPolicy string `json:"currentPolicy"`
 }
 
-// Stances are vote choices.
+// Stances are current policy preferences for the TicketBuyer.
 type Stances struct {
 	Agendas        []*TBAgenda                           `json:"agendas"`
 	TreasurySpends []*TBTreasurySpend                    `json:"tspends"`
@@ -958,6 +961,8 @@ type VotingServiceProvider struct {
 	NetShare      float32     `json:"netShare"`
 }
 
+// TicketStats sums up some statistics for historical staking data for a
+// TicketBuyer.
 type TicketStats struct {
 	TotalRewards uint64 `json:"totalRewards"`
 	TicketCount  uint32 `json:"ticketCount"`

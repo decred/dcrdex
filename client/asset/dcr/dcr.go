@@ -652,15 +652,6 @@ type ExchangeWallet struct {
 	connected atomic.Bool
 
 	subsidyCache *blockchain.SubsidyCache
-
-	ticketHistory struct {
-		sync.RWMutex
-		lastScannedBlock uint32
-		nTickets         uint32
-		nVotes           uint32
-		costSum          uint64
-		voteRewards      uint64
-	}
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -5159,6 +5150,8 @@ func (dcr *ExchangeWallet) isNative() bool {
 	return dcr.walletType == walletTypeSPV
 }
 
+// currentAgendas gets the most recent agendas from the chain params. The caller
+// must populate the CurrentChoice field of the agendas.
 func currentAgendas(chainParams *chaincfg.Params) (agendas []*asset.TBAgenda) {
 	var bestID uint32
 	for deploymentID := range chainParams.Deployments {
@@ -5204,10 +5197,6 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	expectedBlocksToVote := int64(dcr.chainParams.TicketPoolSize)
 	voteHeightExpectationValue := dcr.cachedBestBlock().height + expectedBlocksToVote
 	voteSubsidy := dcr.subsidyCache.CalcStakeVoteSubsidyV3(voteHeightExpectationValue, blockchain.SSVDCP0012)
-	// expectedTimeToVote := time.Duration(expectedBlocksToVote) * dcr.chainParams.TargetTimePerBlock
-	// nCompound := float64((time.Hour * 24 * 365) / expectedTimeToVote)
-	// subsidyRate := float64(voteSubsidy) / float64(ticketPrice)
-	// apy := math.Pow(1+subsidyRate, nCompound) - 1
 	isRPC := !dcr.isNative()
 	var vspURL string
 	if !isRPC {
@@ -5249,6 +5238,22 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	}, nil
 }
 
+// tickets gets tickets from the wallet and changes the status of "unspent"
+// tickets that haven't reached expiration "live".
+// DRAFT NOTE: From dcrwallet:
+//
+//	TicketStatusUnspent is a matured ticket that has not been spent.  It
+//	is only used under SPV mode where it is unknown if a ticket is live,
+//	was missed, or expired.
+//
+// But if the ticket has not reached a certain number of confirmations, we
+// can say for sure it's not expired. With auto-revocations, "missed" or
+// "expired" tickets are actually "revoked", I think.
+// The only thing I can't figure out is how SPV wallets set the spender in the
+// case of an auto-revocation. It might be happening here
+// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/chainntfns.go#L770-L775
+// If we're seeing auto-revocations, we're find to make the changes in this
+// method.
 func (dcr *ExchangeWallet) tickets(ctx context.Context) ([]*asset.Ticket, error) {
 	tickets, err := dcr.wallet.Tickets(ctx)
 	if err != nil {
@@ -5325,6 +5330,8 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) ([]*asse
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
+	// I think we need to set this, otherwise we probably end up with default
+	// of DefaultRelayFeePerKb = 1e4 => 10 atoms/byte.
 	feePerKB := dcrutil.Amount(dcr.feeRateWithFallback(feeSuggestion) * 1000)
 	if err := dcr.wallet.SetTxFee(dcr.ctx, feePerKB); err != nil {
 		return nil, fmt.Errorf("error setting wallet tx fee: %w", err)
@@ -5431,6 +5438,11 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 	return vspds, nil
 }
 
+// TicketPage fetches a page of tickets within a range of block numbers with a
+// target page size and optional offset. scanStart it the block in which to
+// start the scan. The scan progresses in reverse block number order, starting
+// at scanStart and going to progressively lower blocks. scanStart can be set to
+// -1 to indicate the current chain tip.
 func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")

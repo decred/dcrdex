@@ -10614,6 +10614,11 @@ func (c *Core) ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error) 
 	return tb.ListVSPs()
 }
 
+// TicketPage fetches a page of TicketBuyer tickets within a range of block
+// numbers with a target page size and optional offset. scanStart it the block
+// in which to start the scan. The scan progresses in reverse block number
+// order, starting at scanStart and going to progressively lower blocks.
+// scanStart can be set to -1 to indicate the current chain tip.
 func (c *Core) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
 	_, tb, err := c.stakingWallet(assetID)
 	if err != nil {
