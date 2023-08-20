@@ -336,7 +336,7 @@ func (ord *OrderReader) SimpleRateString() string {
 func (ord *OrderReader) RateString() string {
 	rateStr := ord.formatRate(ord.Rate)
 	if ord.Type == order.MarketOrderType {
-		nMatches := len(ord.Matches) 
+		nMatches := len(ord.Matches)
 		if nMatches == 0 {
 			return "market" // "market" is better than 0 BTC/ETH ?
 		}
