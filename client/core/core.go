@@ -5308,6 +5308,7 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) {
 	// resumeTrades will be a no-op if there are no trades in any
 	// dexConnection's trades map that is not ready to tick.
 	c.resumeTrades(crypter)
+	c.resumeMixing(crypter)
 }
 
 func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error), action func(error)) {
@@ -7590,6 +7591,31 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	}
 
 	return trackers, nil
+}
+
+// resumeMixing unlocks and starts mixing on any FundsMixer that is enabled.
+func (c *Core) resumeMixing(crypter encrypt.Crypter) {
+	for _, w := range c.xcWallets() {
+		if mixer, is := w.Wallet.(asset.FundsMixer); is {
+			stats, err := mixer.FundsMixingStats()
+			if err != nil {
+				c.log.Errorf("FundsMixingStats error during login: %v", err)
+				continue
+			}
+			if !stats.Enabled {
+				continue
+			}
+			if !w.unlocked() {
+				if err := w.Unlock(crypter); err != nil {
+					c.log.Errorf("Error unlocking mixing wallet on initialization: %v", err)
+					continue
+				}
+			}
+			if err := mixer.StartFundsMixer(c.ctx); err != nil {
+				c.log.Errorf("Error starting funds mixer on initialization: %v", err)
+			}
+		}
+	}
 }
 
 // loadDBTrades load's the active trades from the db, populates the trade's
