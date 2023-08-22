@@ -48,7 +48,7 @@
         <button id="importAccount" class="bg2 selected ms-2">[[[Import Account]]]</button>
       </div>
     </div>
-    <div {{if not .UserInfo.Initialized}}class="d-hide"{{end}}>
+    <div {{if not .IsInitialized}}class="d-hide"{{end}}>
         <button id="changeAppPW" class="bg2 selected my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
         <button id="resetAppPW" class="bg2 selected my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
     </div>

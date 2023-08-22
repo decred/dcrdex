@@ -884,7 +884,6 @@ func readPost(w http.ResponseWriter, r *http.Request, thing any) bool {
 type userInfo struct {
 	Authed           bool
 	PasswordIsCached bool
-	IsInitialized    bool
 	DarkMode         bool
 }
 

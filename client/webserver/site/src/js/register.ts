@@ -9,7 +9,8 @@ import {
   ConfirmRegistrationForm,
   FeeAssetSelectionForm,
   WalletWaitForm,
-  slideSwap
+  slideSwap,
+  AppPassResetForm
 } from './forms'
 import {
   app,
@@ -25,6 +26,7 @@ export default class RegistrationPage extends BasePage {
   currentDEX: Exchange
   page: Record<string, PageElement>
   loginForm: LoginForm
+  appPassResetForm: AppPassResetForm
   dexAddrForm: DEXAddressForm
   discoverAcctForm: DiscoverAccountForm
   newWalletForm: NewWalletForm
@@ -44,9 +46,6 @@ export default class RegistrationPage extends BasePage {
       page.discoverAcctForm.dataset.host = data.host
     }
 
-    // Hide the form closers for the registration process.
-    body.querySelectorAll('.form-closer').forEach(el => Doc.hide(el))
-
     this.loginForm = new LoginForm(page.loginForm, async () => {
       await app().fetchUser()
       if (this.discoverAcctForm) {
@@ -57,6 +56,24 @@ export default class RegistrationPage extends BasePage {
         slideSwap(page.loginForm, page.dexAddrForm)
       }
     }, this.pwCache)
+
+    const prepAndDisplayLoginForm = () => {
+      Doc.hide(page.resetAppPWForm)
+      this.loginForm.refresh()
+      Doc.show(page.loginForm)
+      this.loginForm.focus()
+    }
+
+    this.appPassResetForm = new AppPassResetForm(page.resetAppPWForm, () => { prepAndDisplayLoginForm() })
+    Doc.bind(page.forgotPassBtn, 'click', () => slideSwap(page.loginForm, page.resetAppPWForm))
+    Doc.bind(page.resetPassFormCloser, 'click', () => { prepAndDisplayLoginForm() })
+    Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
+      if (!Doc.mouseInElement(e, page.resetAppPWForm) && Doc.isDisplayed(page.resetAppPWForm)) { prepAndDisplayLoginForm() }
+    })
+
+    // Hide the form closers for the registration process except for the
+    // password reset form closer.
+    for (const el of body.querySelectorAll('.form-closer')) if (el !== page.resetPassFormCloser) Doc.hide(el)
 
     this.newWalletForm = new NewWalletForm(
       page.newWalletForm,
