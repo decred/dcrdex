@@ -1666,10 +1666,9 @@ export default class MarketsPage extends BasePage {
    market order rate.
   */
   marketOrderRateString (ord: Order, mkt: CurrentMarket) :string {
-    const nMatch = ord.matches?.length
-    if (nMatch === 0) return intl.prep(intl.ID_MARKET_ORDER)
+    if (!ord.matches) return intl.prep(intl.ID_MARKET_ORDER)
     let rateStr = Doc.formatRateFullPrecision(OrderUtil.averageRate(ord), mkt.baseUnitInfo, mkt.quoteUnitInfo, mkt.cfg.ratestep)
-    if (nMatch > 1) rateStr = '~ ' + rateStr // ~ only makes sense if the order has more than one match
+    if (ord.matches.length > 1) rateStr = '~ ' + rateStr // ~ only makes sense if the order has more than one match
     return rateStr
   }
 
@@ -2379,10 +2378,7 @@ export default class MarketsPage extends BasePage {
     else if (mord.ord.type === OrderUtil.Market && note.match.status === OrderUtil.NewlyMatched) { // Update the average market rate display.
       // Fetch and use the updated order.
       const ord = app().order(note.orderID)
-      if (ord) {
-        const rateStr = this.marketOrderRateString(ord, this.market)
-        mord.details.rate.textContent = mord.details.header.textContent = rateStr
-      }
+      if (ord) mord.details.rate.textContent = mord.header.rate.textContent = this.marketOrderRateString(ord, this.market)
     }
     if (app().canAccelerateOrder(mord.ord)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
