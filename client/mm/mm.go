@@ -560,21 +560,21 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 	orderInfo.matchesSettled[matchID] = struct{}{}
 
 	if match.Refund != nil {
-		var maxRefundFees uint64
+		var singleLotRefundFees uint64
 		if orderInfo.initialRefundFeesLocked == 0 {
-			maxRefundFees = orderInfo.singleLotRefundFees
+			singleLotRefundFees = orderInfo.singleLotRefundFees
 		}
 
 		var balanceMods []*balanceMod
 		if orderInfo.order.Sell {
 			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRefund, match.Qty - maxRefundFees},
-				{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty - maxRefundFees},
+				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRefund, match.Qty - singleLotRefundFees},
+				{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty - singleLotRefundFees},
 			}
 		} else {
 			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRefund, calc.BaseToQuote(match.Rate, match.Qty) - maxRefundFees},
-				{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty) - maxRefundFees},
+				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRefund, calc.BaseToQuote(match.Rate, match.Qty) - singleLotRefundFees},
+				{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty) - singleLotRefundFees},
 			}
 		}
 		m.log.Tracef("oid: %s, increasing balance due to refund")

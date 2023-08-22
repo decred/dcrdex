@@ -2018,9 +2018,10 @@ func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, u
 	var refundTxSize uint64
 	if btc.segwit {
 		witnessVBytes := uint64((dexbtc.RefundSigScriptSize + 2 + 3) / 4)
-		refundTxSize = dexbtc.MinimumTxOverhead + witnessVBytes + dexbtc.P2WPKHOutputSize
+		refundTxSize = dexbtc.MinimumTxOverhead + dexbtc.TxInOverhead + witnessVBytes + dexbtc.P2WPKHOutputSize
 	} else {
-		refundTxSize = dexbtc.MinimumTxOverhead + dexbtc.RefundSigScriptSize + dexbtc.P2PKHOutputSize
+		inputSize := uint64(dexbtc.TxInOverhead + dexbtc.RefundSigScriptSize)
+		refundTxSize = dexbtc.MinimumTxOverhead + inputSize + dexbtc.P2PKHOutputSize
 	}
 
 	return swapTxSize * feeSuggestion, refundTxSize * feeSuggestion, nil
