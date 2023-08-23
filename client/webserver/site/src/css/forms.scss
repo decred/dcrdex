@@ -323,8 +323,7 @@ button.form-button {
 #dexAddrForm,
 #verifyForm,
 #appPWForm,
-#deleteArchivedRecordsForm,
-#updateBondOptionsForm {
+#deleteArchivedRecordsForm {
   width: 325px;
 }
 
@@ -332,7 +331,8 @@ button.form-button {
 #vSendForm,
 #exportSeedAuth,
 #cancelForm,
-#quickConfigForm {
+#quickConfigForm,
+#bondDetailsForm {
   width: 375px;
 }
 

@@ -31,6 +31,7 @@ var EnUS = map[string]string{
 	"reg_confirm_submit":             `When you submit this form, funds will be spent from your wallet to post a fidelity bond, which is redeemable by you in the future.`,
 	"bond_strength":                  "Bond Strength",
 	"update_bond_options":            "Update Bond Options",
+	"bond_options":                   "Bond Options",
 	"bond_options_update_success":    "Bond Options have been updated successfully",
 	"target_tier":                    "Target Tier",
 	"target_tier_tooltip":            "This is the target account tier you wish to maintain. Set to zero if you wish to disable tier maintenance (do not post new bonds).",
@@ -419,4 +420,8 @@ var EnUS = map[string]string{
 	"market_making_running":       "Market making is running",
 	"cannot_manually_trade":       "You cannot manually place orders while market making is running",
 	"back":                        "Back",
+	"bond_details":                "Bond Details",
+	"pending_bonds":               "Pending Bonds",
+	"current_tier":                "Current Tier",
+	"expired_bonds":               "Expired Bonds",
 }

@@ -32,7 +32,7 @@ export default class DexSettingsPage extends BasePage {
 
     Doc.bind(page.exportDexBtn, 'click', () => this.prepareAccountExport(page.authorizeAccountExportForm))
     Doc.bind(page.disableAcctBtn, 'click', () => this.prepareAccountDisable(page.disableAccountForm))
-    Doc.bind(page.updateBondOptionsBtn, 'click', () => this.prepareUpdateBondOptions())
+    Doc.bind(page.bondDetailsBtn, 'click', () => this.prepareBondDetailsForm())
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
@@ -41,7 +41,7 @@ export default class DexSettingsPage extends BasePage {
       window.location.assign(`/dexsettings/${xc.host}`)
     }, undefined, this.host)
 
-    forms.bind(page.updateBondOptionsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
+    forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
@@ -156,10 +156,12 @@ export default class DexSettingsPage extends BasePage {
     this.showForm(disableAccountForm)
   }
 
-  // prepareUpdateBondOptions resets and prepares the Update Bond Options form.
-  async prepareUpdateBondOptions () {
+  // prepareBondDetailsForm resets and prepares the Bond Details form.
+  async prepareBondDetailsForm () {
     const page = this.page
     const xc = app().user.exchanges[this.host]
+    // Populate bond details on this form
+    page.currentTier.textContent = `${xc.auth.effectiveTier}`
     page.bondTargetTier.setAttribute('placeholder', xc.auth.targetTier.toString())
     Doc.empty(page.bondAssetSelect)
     for (const [assetSymbol, bondAsset] of Object.entries(xc.bondAssets)) {
@@ -171,7 +173,7 @@ export default class DexSettingsPage extends BasePage {
     }
     page.bondOptionsErr.textContent = ''
     Doc.hide(page.bondOptionsErr)
-    this.showForm(page.updateBondOptionsForm)
+    this.showForm(page.bondDetailsForm)
   }
 
   async prepareUpdateHost () {
@@ -255,7 +257,6 @@ export default class DexSettingsPage extends BasePage {
       Doc.show(page.bondOptionsMsg)
       setTimeout(() => {
         Doc.hide(page.bondOptionsMsg)
-        Doc.hide(page.forms)
       }, 5000)
       // update the in-memory values.
       const xc = app().user.exchanges[this.host]
