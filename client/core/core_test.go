@@ -319,6 +319,10 @@ func (conn *TWebsocket) Send(msg *msgjson.Message) error {
 
 	return conn.sendErr
 }
+
+func (conn *TWebsocket) SendRaw([]byte) error {
+	return conn.sendErr
+}
 func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.RequestWithTimeout(msg, f, 0, func() {})
 }

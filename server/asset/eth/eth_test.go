@@ -903,3 +903,78 @@ func TestIsRemoteURL(t *testing.T) {
 		}
 	}
 }
+
+func TestParseEndpoints(t *testing.T) {
+	type test struct {
+		name              string
+		fileContents      string
+		relayAddr         string
+		expectedEndpoints []string
+		wantErr           bool
+	}
+
+	url1 := "http://127.0.0.1:1234"
+	url2 := "https://example.com"
+	relayAddr := "123.111.4.8:1111"
+	relayURL := "http://" + relayAddr
+
+	tests := []*test{
+		{
+			name:              "single localhost in file",
+			fileContents:      url1,
+			expectedEndpoints: []string{"http://127.0.0.1:1234"},
+		},
+		{
+			name:    "no path provided error",
+			wantErr: true,
+		},
+		{
+			name:              "two from file and a noderelay",
+			fileContents:      url1 + "\n" + url2,
+			relayAddr:         relayAddr,
+			expectedEndpoints: []string{relayURL, url1, url2},
+		},
+		{
+			name:              "just a relay adddress",
+			relayAddr:         relayAddr,
+			expectedEndpoints: []string{relayURL},
+		},
+	}
+
+	runTest := func(t *testing.T, tt *test) {
+		var configPath string
+		if tt.fileContents != "" {
+			f, err := os.CreateTemp("", "")
+			if err != nil {
+				t.Fatalf("error getting temporary file")
+			}
+			configPath = f.Name()
+			defer os.Remove(configPath)
+			defer f.Close()
+			f.WriteString(tt.fileContents)
+		}
+		endpoints, err := parseEndpoints(&asset.BackendConfig{
+			ConfigPath: configPath,
+			RelayAddr:  tt.relayAddr,
+		})
+		if err != nil {
+			if tt.wantErr {
+				return
+			}
+			t.Fatalf("parseEndpoints error: %v", err)
+		}
+		if len(endpoints) != len(tt.expectedEndpoints) {
+			t.Fatalf("wrong number of endpoints. wanted %d, got %d", len(tt.expectedEndpoints), len(endpoints))
+		}
+		for i, pt := range endpoints {
+			if expURL := tt.expectedEndpoints[i]; pt.url != expURL {
+				t.Fatalf("wrong endpoint at index %d: wanted %s, got %s", i, expURL, pt.url)
+			}
+		}
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runTest(t, tt)
+		})
+	}
+}

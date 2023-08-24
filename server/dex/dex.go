@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg"
 	"decred.org/dcrdex/server/market"
+	"decred.org/dcrdex/server/noderelay"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -56,6 +58,7 @@ type AssetConf struct {
 	BondAmt     uint64 `json:"bondAmt,omitempty"`
 	BondConfs   uint32 `json:"bondConfs,omitempty"`
 	Disabled    bool   `json:"disabled"`
+	NodeRelayID string `json:"nodeRelayID,omitempty"`
 }
 
 // DBConf groups the database configuration parameters.
@@ -89,6 +92,7 @@ type DexConf struct {
 	DEXPrivKey        *secp256k1.PrivateKey
 	CommsCfg          *RPCConfig
 	NoResumeSwaps     bool
+	NodeRelayAddr     string
 }
 
 type signer struct {
@@ -300,6 +304,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 	// Check each configured asset.
 	assetIDs := make([]uint32, len(cfg.Assets))
+	var nodeRelayIDs []string
 	for i, assetConf := range cfg.Assets {
 		symbol := strings.ToLower(assetConf.Symbol)
 
@@ -322,6 +327,10 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 		if assetConf.MaxFeeRate == 0 {
 			return nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", symbol)
+		}
+
+		if assetConf.NodeRelayID != "" {
+			nodeRelayIDs = append(nodeRelayIDs, assetConf.NodeRelayID)
 		}
 
 		assetIDs[i] = assetID
@@ -383,6 +392,34 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("db.Open: %w", err)
 	}
 
+	relayAddrs := make(map[string]string, len(nodeRelayIDs))
+	if len(nodeRelayIDs) > 0 {
+		relayDir := filepath.Join(cfg.DataDir, "noderelay")
+		relay, err := noderelay.NewNexus(&noderelay.NexusConfig{
+			ExternalAddr: cfg.NodeRelayAddr,
+			Dir:          relayDir,
+			// Port: , Using default value of 17537
+			Logger:   dex.StdOutLogger("T", dex.LevelDebug),
+			RelayIDs: nodeRelayIDs,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("error creating node relay: %w", err)
+		}
+		if err := startSubSys("Node relay", relay); err != nil {
+			return nil, fmt.Errorf("error starting node relay: %w", err)
+		}
+		select {
+		case <-relay.WaitForSourceNodes():
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		for _, relayID := range nodeRelayIDs {
+			if relayAddrs[relayID], err = relay.RelayAddr(relayID); err != nil {
+				return nil, fmt.Errorf("error getting relay address for ID %s: %w", relayID, err)
+			}
+		}
+	}
+
 	dataAPI := apidata.NewDataAPI(storage)
 
 	// Create a MasterCoinLocker for each asset.
@@ -432,7 +469,14 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				return fmt.Errorf("failed to setup token %q: %w", symbol, err)
 			}
 		} else {
-			be, err = asset.Setup(assetID, assetConf.ConfigPath, logger, cfg.Network)
+			cfg := &asset.BackendConfig{
+				AssetID:    assetID,
+				ConfigPath: assetConf.ConfigPath,
+				Logger:     logger,
+				Net:        cfg.Network,
+				RelayAddr:  relayAddrs[assetConf.NodeRelayID],
+			}
+			be, err = asset.Setup(cfg)
 			if err != nil {
 				return fmt.Errorf("failed to setup asset %q: %w", symbol, err)
 			}

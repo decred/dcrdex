@@ -126,8 +126,8 @@ type Driver struct {
 }
 
 // Setup creates the ETH backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	return NewEVMBackend(BipID, configPath, logger, dexeth.ContractAddresses, registeredTokens, network)
+func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
+	return NewEVMBackend(cfg, dexeth.ContractAddresses, registeredTokens)
 }
 
 type TokenDriver struct {
@@ -251,26 +251,25 @@ func unconnectedETH(bipID uint32, contractAddr common.Address, vTokens map[uint3
 	}}, nil
 }
 
-// NewEVMBackend is the exported constructor by which the DEX will import the
-// Backend.
-func NewEVMBackend(
-	baseChainID uint32,
-	configPath string,
-	log dex.Logger,
-	contractAddrs map[uint32]map[dex.Network]common.Address,
-	vTokens map[uint32]*VersionedToken,
-	net dex.Network,
-) (*ETHBackend, error) {
-
-	file, err := os.Open(configPath)
+func parseEndpoints(cfg *asset.BackendConfig) ([]endpoint, error) {
+	var endpoints []endpoint
+	if cfg.RelayAddr != "" {
+		endpoints = append(endpoints, endpoint{
+			url:      "http://" + cfg.RelayAddr,
+			priority: 1,
+		})
+	}
+	file, err := os.Open(cfg.ConfigPath)
 	if err != nil {
+		if os.IsNotExist(err) && len(endpoints) > 0 {
+			return endpoints, nil
+		}
 		return nil, err
 	}
 	defer file.Close()
 
-	assetName := strings.ToUpper(dex.BipIDSymbol(baseChainID))
+	assetName := strings.ToUpper(dex.BipIDSymbol(cfg.AssetID))
 
-	var endpoints []endpoint
 	endpointsMap := make(map[string]bool) // to avoid duplicates
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -285,6 +284,7 @@ func NewEVMBackend(
 		if len(parts) < 1 || len(parts) > 2 {
 			return nil, fmt.Errorf(ethCfgInstructions, assetName, line)
 		}
+
 		url := strings.TrimSpace(parts[0])
 		var priority uint16
 		if len(parts) == 2 {
@@ -304,12 +304,30 @@ func NewEVMBackend(
 		})
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading %s config file at %q. %v", assetName, configPath, err)
+		return nil, fmt.Errorf("error reading %s config file at %q. %v", assetName, cfg.ConfigPath, err)
 	}
 	if len(endpoints) == 0 {
-		return nil, fmt.Errorf("no endpoint found in the %s config file at %q", assetName, configPath)
+		return nil, fmt.Errorf("no endpoint found in the %s config file at %q", assetName, cfg.ConfigPath)
 	}
-	log.Debugf("Parsed %d endpoints from the %s config file", len(endpoints), assetName)
+
+	return endpoints, nil
+}
+
+// NewEVMBackend is the exported constructor by which the DEX will import the
+// Backend.
+func NewEVMBackend(
+	cfg *asset.BackendConfig,
+	contractAddrs map[uint32]map[dex.Network]common.Address,
+	vTokens map[uint32]*VersionedToken,
+) (*ETHBackend, error) {
+
+	endpoints, err := parseEndpoints(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	baseChainID, net, log := cfg.AssetID, cfg.Net, cfg.Logger
+	assetName := strings.ToUpper(dex.BipIDSymbol(baseChainID))
 
 	netAddrs, found := contractAddrs[ethContractVersion]
 	if !found {

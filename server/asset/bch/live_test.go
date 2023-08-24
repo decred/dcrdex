@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
 	"github.com/btcsuite/btcd/btcutil"
 )
@@ -51,7 +52,12 @@ func TestMain(m *testing.M) {
 
 		maxFeeBlocks = 1000
 
-		dexAsset, err := NewBackend(configPath, logger, dex.Mainnet)
+		dexAsset, err := NewBackend(&asset.BackendConfig{
+			AssetID:    BipID,
+			ConfigPath: configPath,
+			Logger:     logger,
+			Net:        dex.Mainnet,
+		})
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1

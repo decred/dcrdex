@@ -78,6 +78,8 @@ type WSLink struct {
 	handler func(*msgjson.Message) *msgjson.Error
 	// pingPeriod is how often to ping the peer.
 	pingPeriod time.Duration
+
+	RawHandler func([]byte)
 }
 
 type sendData struct {
@@ -171,16 +173,17 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// period is a very generous initial pong wait; the readWait provided to
 	// NewConnection could be stored and used here (once) instead.
 	if !atomic.CompareAndSwapUint32(&c.on, 0, 1) {
-		return nil, fmt.Errorf("Attempted to Start a running WSLink")
+		return nil, fmt.Errorf("attempted to Start a running WSLink")
 	}
 	linkCtx, quit := context.WithCancel(ctx)
+
 	// Note that there is a brief window where c.on is true but quit and stopped
 	// are not set.
 	c.quit = quit
 	c.stopped = make(chan struct{}) // control signal to block send
 	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %w", c.addr, err)
+		return nil, fmt.Errorf("failed to set initial read deadline for %v: %w", c.addr, err)
 	}
 
 	c.log.Tracef("Starting websocket messaging with peer %s", c.addr)
@@ -269,6 +272,12 @@ out:
 			c.log.Errorf("Websocket receive error from peer %s: %v (%T)", c.addr, err, err)
 			break out
 		}
+
+		if c.RawHandler != nil {
+			c.RawHandler(msgBytes)
+			continue
+		}
+
 		// Attempt to unmarshal the request. Only requests that successfully decode
 		// will be accepted by the server, though failure to decode does not force
 		// a disconnect.
