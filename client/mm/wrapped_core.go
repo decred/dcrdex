@@ -267,7 +267,6 @@ func (c *wrappedCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error
 		lotSize:                 mkt.LotSize,
 		matchesSettled:          make(map[order.MatchID]struct{}),
 		matchesSeen:             make(map[order.MatchID]struct{}),
-		revokedMatchesSeen:      make(map[order.MatchID]struct{}),
 	}
 	c.mm.ordersMtx.Unlock()
 
@@ -351,7 +350,6 @@ func (c *wrappedCore) MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.
 			lotSize:                 mkt.LotSize,
 			matchesSettled:          make(map[order.MatchID]struct{}),
 			matchesSeen:             make(map[order.MatchID]struct{}),
-			revokedMatchesSeen:      make(map[order.MatchID]struct{}),
 		}
 		c.mm.ordersMtx.Unlock()
 

@@ -1198,19 +1198,21 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    true,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -1234,6 +1236,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1257,6 +1261,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1292,6 +1297,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 							},
 						},
@@ -1355,18 +1362,20 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    false,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
 									Status:  order.MakerSwapCast,
 								},
 							},
@@ -1390,6 +1399,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1412,6 +1423,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1514,19 +1526,21 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    true,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -1550,6 +1564,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1573,6 +1589,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1607,12 +1624,15 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    55e6,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -1637,6 +1657,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    55e6,
 							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1660,6 +1681,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    55e6,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1694,12 +1716,16 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 									Status:  order.MatchConfirmed,
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    55e6,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 									Status:  order.MatchConfirmed,
 								},
 							},
@@ -1764,18 +1790,20 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    false,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
 									Status:  order.MakerSwapCast,
 								},
 							},
@@ -1799,6 +1827,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1821,6 +1851,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1854,12 +1885,15 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 									Status:  order.MatchConfirmed,
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    45e6,
+									Swap:    &core.Coin{},
 									Status:  order.MakerSwapCast,
 								},
 							},
@@ -1973,18 +2007,20 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    true,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
 									Status:  order.MakerSwapCast,
 								},
 							},
@@ -2010,6 +2046,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 						},
 					},
 					balance: map[uint32]*botBalance{
@@ -2032,6 +2070,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -2066,12 +2105,15 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    55e6,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -2097,6 +2139,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Rate:    55e6,
 							Status:  order.MatchComplete,
 							Redeem:  &core.Coin{},
+							Swap:    &core.Coin{},
 						},
 					},
 					balance: map[uint32]*botBalance{
@@ -2120,6 +2163,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Rate:    55e6,
 							Status:  order.MatchConfirmed,
 							Redeem:  &core.Coin{},
+							Swap:    &core.Coin{},
 						},
 					},
 					balance: map[uint32]*botBalance{
@@ -2154,12 +2198,16 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    55e6,
 									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 							},
 						},
@@ -2177,7 +2225,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 		},
 		// "fully filled order, buy, accountLocker"
 		{
-			name: "fully filled order, buy, account locker",
+			name: "fully filled order, buy, accountLocker",
 			cfg: &BotConfig{
 				Host:             "host1",
 				BaseAsset:        42,
@@ -2225,19 +2273,21 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    false,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -2261,6 +2311,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 						},
 					},
 					balance: map[uint32]*botBalance{
@@ -2282,6 +2334,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -2316,12 +2369,15 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    45e6,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -2345,6 +2401,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    45e6,
 							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -2367,6 +2424,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    45e6,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -2431,13 +2489,14 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    false,
-							Filled:  2e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    2e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
@@ -2450,7 +2509,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    5e7,
-									Status:  order.MakerSwapCast,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],
@@ -2470,30 +2529,6 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 						42: {
 							Available:     (1e7 / 2),
 							PendingRedeem: 3e6 - 3000,
-						},
-					},
-				},
-				{
-					note: &core.MatchNote{
-						OrderID: id,
-						Match: &core.Match{
-							MatchID: matchIDs[0][:],
-							Qty:     1e6,
-							Rate:    5e7,
-							Revoked: true,
-							Swap:    &core.Coin{},
-							Status:  order.MakerSwapCast,
-						},
-					},
-					balance: map[uint32]*botBalance{
-						0: {
-							Available:     (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 3e6),
-							PendingRefund: calc.BaseToQuote(5e7, 1e6) - 800,
-							FundingOrder:  3000,
-						},
-						42: {
-							Available:     (1e7 / 2),
-							PendingRedeem: 2e6 - 2000,
 						},
 					},
 				},
@@ -2529,13 +2564,13 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Revoked: true,
-							Status:  order.MatchConfirmed,
+							Status:  order.NewlyMatched,
 						},
 					},
 					balance: map[uint32]*botBalance{
 						0: {
-							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 1e6) - 800,
-							FundingOrder: 3000,
+							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 2e6) - 800,
+							FundingOrder: 3000 + calc.BaseToQuote(5e7, 1e6),
 						},
 						42: {
 							Available:     (1e7 / 2),
@@ -2557,8 +2592,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 					},
 					balance: map[uint32]*botBalance{
 						0: {
-							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 1e6) - 800,
-							FundingOrder: 3000,
+							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 2e6) - 800,
+							FundingOrder: 3000 + calc.BaseToQuote(5e7, 1e6),
 						},
 						42: {
 							Available: (1e7 / 2) + 1e6 - 1000,
@@ -2596,7 +2631,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Revoked: true,
-									Status:  order.MatchComplete,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],
@@ -2669,13 +2704,14 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    true,
-							Filled:  2e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    2e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
@@ -2688,7 +2724,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    5e7,
-									Status:  order.MakerSwapCast,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],
@@ -2708,30 +2744,6 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 						42: {
 							Available:    (1e7 / 2) - 3e6 - 3000,
 							FundingOrder: 3000,
-						},
-					},
-				},
-				{
-					note: &core.MatchNote{
-						OrderID: id,
-						Match: &core.Match{
-							MatchID: matchIDs[0][:],
-							Qty:     1e6,
-							Rate:    5e7,
-							Revoked: true,
-							Swap:    &core.Coin{},
-							Status:  order.MakerSwapCast,
-						},
-					},
-					balance: map[uint32]*botBalance{
-						0: {
-							Available:     (1e7 / 2),
-							PendingRedeem: calc.BaseToQuote(5e7, 2e6) - 2000,
-						},
-						42: {
-							Available:     (1e7 / 2) - 3e6 - 3000,
-							PendingRefund: 1e6 - 800,
-							FundingOrder:  3000,
 						},
 					},
 				},
@@ -2767,7 +2779,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Revoked: true,
-							Status:  order.MatchConfirmed,
+							Status:  order.NewlyMatched,
 						},
 					},
 					balance: map[uint32]*botBalance{
@@ -2776,8 +2788,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							PendingRedeem: calc.BaseToQuote(5e7, 1e6) - 1000,
 						},
 						42: {
-							Available:    (1e7 / 2) - 1e6 - 3000 - 800,
-							FundingOrder: 3000,
+							Available:    (1e7 / 2) - 2e6 - 3000 - 800,
+							FundingOrder: 3000 + 1e6,
 						},
 					},
 				},
@@ -2798,8 +2810,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Available: (1e7 / 2) + calc.BaseToQuote(5e7, 1e6) - 1000,
 						},
 						42: {
-							Available:    (1e7 / 2) - 1e6 - 3000 - 800,
-							FundingOrder: 3000,
+							Available:    (1e7 / 2) - 2e6 - 3000 - 800,
+							FundingOrder: 3000 + 1e6,
 						},
 					},
 				},
@@ -2834,7 +2846,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Revoked: true,
-									Status:  order.MatchComplete,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],
@@ -2908,13 +2920,14 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    false,
-							Filled:  2e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    2e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
@@ -2927,7 +2940,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    5e7,
-									Status:  order.MakerSwapCast,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],
@@ -2947,30 +2960,6 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 						42: {
 							Available:     (1e7 / 2),
 							PendingRedeem: 3e6 - 3000,
-						},
-					},
-				},
-				{
-					note: &core.MatchNote{
-						OrderID: id,
-						Match: &core.Match{
-							MatchID: matchIDs[0][:],
-							Qty:     1e6,
-							Rate:    5e7,
-							Revoked: true,
-							Swap:    &core.Coin{},
-							Status:  order.MakerSwapCast,
-						},
-					},
-					balance: map[uint32]*botBalance{
-						0: {
-							Available:     (1e7 / 2) - calc.BaseToQuote(5e7, 3e6) - 3000 - 2400,
-							PendingRefund: calc.BaseToQuote(5e7, 1e6),
-							FundingOrder:  3000 + 2400,
-						},
-						42: {
-							Available:     (1e7 / 2),
-							PendingRedeem: 2e6 - 2000,
 						},
 					},
 				},
@@ -3006,13 +2995,13 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Revoked: true,
-							Status:  order.MatchConfirmed,
+							Status:  order.NewlyMatched,
 						},
 					},
 					balance: map[uint32]*botBalance{
 						0: {
-							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 1e6) - 3000 - 2400,
-							FundingOrder: 3000 + 2400,
+							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 2e6) - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + calc.BaseToQuote(5e7, 1e6),
 						},
 						42: {
 							Available:     (1e7 / 2),
@@ -3034,8 +3023,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 					},
 					balance: map[uint32]*botBalance{
 						0: {
-							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 1e6) - 3000 - 2400,
-							FundingOrder: 3000 + 2400,
+							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 2e6) - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + calc.BaseToQuote(5e7, 1e6),
 						},
 						42: {
 							Available: (1e7 / 2) + 1e6 - 1000,
@@ -3073,7 +3062,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Revoked: true,
-									Status:  order.MatchComplete,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],
@@ -3147,13 +3136,14 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    true,
-							Filled:  2e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    2e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
@@ -3166,7 +3156,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    5e7,
-									Status:  order.MakerSwapCast,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],
@@ -3186,30 +3176,6 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 						42: {
 							Available:    (1e7 / 2) - 3e6 - 3000 - 2400,
 							FundingOrder: 3000 + 2400,
-						},
-					},
-				},
-				{
-					note: &core.MatchNote{
-						OrderID: id,
-						Match: &core.Match{
-							MatchID: matchIDs[0][:],
-							Qty:     1e6,
-							Rate:    5e7,
-							Revoked: true,
-							Swap:    &core.Coin{},
-							Status:  order.MakerSwapCast,
-						},
-					},
-					balance: map[uint32]*botBalance{
-						0: {
-							Available:     (1e7 / 2),
-							PendingRedeem: calc.BaseToQuote(5e7, 2e6) - 2000,
-						},
-						42: {
-							Available:     (1e7 / 2) - 3e6 - 3000 - 2400,
-							PendingRefund: 1e6,
-							FundingOrder:  3000 + 2400,
 						},
 					},
 				},
@@ -3245,7 +3211,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Revoked: true,
-							Status:  order.MatchConfirmed,
+							Status:  order.NewlyMatched,
 						},
 					},
 					balance: map[uint32]*botBalance{
@@ -3254,8 +3220,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							PendingRedeem: calc.BaseToQuote(5e7, 1e6) - 1000,
 						},
 						42: {
-							Available:    (1e7 / 2) - 1e6 - 3000 - 2400,
-							FundingOrder: 3000 + 2400,
+							Available:    (1e7 / 2) - 2e6 - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + 1e6,
 						},
 					},
 				},
@@ -3276,8 +3242,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Available: (1e7 / 2) + calc.BaseToQuote(5e7, 1e6) - 1000,
 						},
 						42: {
-							Available:    (1e7 / 2) - 1e6 - 3000 - 2400,
-							FundingOrder: 3000 + 2400,
+							Available:    (1e7 / 2) - 2e6 - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + 1e6,
 						},
 					},
 				},
@@ -3312,7 +3278,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Revoked: true,
-									Status:  order.MatchComplete,
+									Status:  order.NewlyMatched,
 								},
 								{
 									MatchID: matchIDs[2][:],

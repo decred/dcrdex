@@ -50,22 +50,21 @@ type dexOrderBook interface {
 var _ dexOrderBook = (*orderbook.OrderBook)(nil)
 
 // botBalance keeps track of the amount of funds available for a
-// bot's use, and the amount that is currently locked/pending for
-// various reasons. Only the Available balance matters for the
-// behavior of the bots. The others are just tracked to inform the
-// user.
+// bot's use, and the amount that is currently locked/pending redemption. Only
+// the Available balance matters for the behavior of the bots. The others are
+// just tracked to inform the user.
 type botBalance struct {
 	Available     uint64 `json:"available"`
 	FundingOrder  uint64 `json:"fundingOrder"`
 	PendingRedeem uint64 `json:"pendingRedeem"`
-	PendingRefund uint64 `json:"pendingRefund"`
 }
 
 // botBalance keeps track of the bot balances.
 // When the MarketMaker is created, it will allocate the proper amount of
 // funds for each bot. Then, as the bot makes trades, each bot's balances
 // will be increased and decreased as needed.
-// Below is of how the balances are adjusted during trading.
+// Below is of how the balances are adjusted during trading. This only
+// outlines the changes to the Available balance.
 //
 // 1. A trade is made:
 //
@@ -76,12 +75,7 @@ type botBalance struct {
 //   - ToAsset:
 //     DECREASE: if isAccountLocker, RedeemFeesLockedFunds
 //
-// 2. MatchConfirmed:
-//
-//   - FromAsset:
-//     INCREASE: RefundedAmount - RefundFees
-//     if isAccountLocker, RefundFeesLockedFunds
-//
+// 2a. MatchConfirmed, Redeemed:
 //   - ToAsset:
 //     INCREASE: if isAccountLocker, RedeemedAmount
 //     else RedeemedAmount - MaxRedeemFeesForLotsRedeemed
@@ -89,16 +83,15 @@ type botBalance struct {
 //     do not know the exact amount used for this match. The
 //     difference is handled later.)
 //
-// 3. Match Refunded:
+// 2b. MatchConfirmed, Refunded:
+//   - FromAsset:
+//     INCREASE: RefundedAmount - RefundFees
+//     if isAccountLocker, RefundFeesLockedFunds
+//
+// 4. order.LockedAmount == 0: (This means no more swap tx will be made, over lock can be returned)
 //
 //   - FromAsset:
-//     INCREASE: if isAccountLocker, RefundedAmount
-//     else RefundedAmount - MaxRefundFees
-//
-// 4. Order Status > Booked:
-//
-//   - FromAsset:
-//     INCREASE: OverLockedAmount (LockedFunds - FilledAmount - MaxSwapFees)
+//     INCREASE: OverLockedAmount (LockedFunds - SwappedAmount - MaxSwapFees)
 //
 // 5. All Fees Confirmed:
 //
@@ -134,7 +127,6 @@ type orderInfo struct {
 	excessFeesReturned        bool
 	matchesSeen               map[order.MatchID]struct{}
 	matchesSettled            map[order.MatchID]struct{}
-	revokedMatchesSeen        map[order.MatchID]struct{}
 }
 
 // finishedProcessing returns true when the MarketMaker no longer needs to
@@ -369,7 +361,6 @@ const (
 	balTypeAvailable botBalanceType = iota
 	balTypeFundingOrder
 	balTypePendingRedeem
-	balTypePendingRefund
 )
 
 const (
@@ -424,8 +415,6 @@ func (m *MarketMaker) modifyBotBalance(botID string, mods []*balanceMod) {
 			assetBalance.FundingOrder = newFieldValue("funding order", assetBalance.FundingOrder)
 		case balTypePendingRedeem:
 			assetBalance.PendingRedeem = newFieldValue("pending redeem", assetBalance.PendingRedeem)
-		case balTypePendingRefund:
-			assetBalance.PendingRefund = newFieldValue("pending refund", assetBalance.PendingRefund)
 		}
 	}
 }
@@ -459,7 +448,7 @@ func (m *MarketMaker) getOrderInfo(id dex.Bytes) *orderInfo {
 }
 
 func (m *MarketMaker) removeOrderInfo(id dex.Bytes) {
-	m.log.Tracef("Removing oid %s from tracked orders", hex.EncodeToString(id))
+	m.log.Tracef("Removing oid %s from tracked orders", id)
 
 	var oid order.OrderID
 	copy(oid[:], id[:])
@@ -469,12 +458,16 @@ func (m *MarketMaker) removeOrderInfo(id dex.Bytes) {
 	delete(m.orders, oid)
 }
 
-// handleMatchUpdate adds the redeem/refund amount to the bot's balance if the
-// match is in the confirmed state.
+// handleMatchUpdate updates the bots balances based on a match's status.
+// Balances are updated due to a match two times, once when the match is
+// first seen, and once when the match is settled.
+//
+//   - When a match is seen, it is assumed that the match will eventually be
+//     redeemed, so funding balance is decreased and pending redeem balance
+//     is increased.
+//   - When a match is settles, the balances are updated differently depending
+//     on whether the match was refunded or redeemed.
 func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
-	var matchID order.MatchID
-	copy(matchID[:], match.MatchID)
-
 	orderInfo := m.getOrderInfo(oid)
 	if orderInfo == nil {
 		m.log.Debugf("did not find order info for order %s", oid)
@@ -486,6 +479,9 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		numLots := match.Qty / orderInfo.lotSize
 		maxRedeemFees = numLots * orderInfo.singleLotRedeemFees
 	}
+
+	var matchID order.MatchID
+	copy(matchID[:], match.MatchID)
 
 	if _, seen := orderInfo.matchesSeen[matchID]; !seen {
 		orderInfo.matchesSeen[matchID] = struct{}{}
@@ -501,62 +497,19 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 				{balanceModIncrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
 			}
 		}
-
 		m.modifyBotBalance(orderInfo.bot, balanceMods)
 	}
 
-	if match.Revoked {
-		if _, seen := orderInfo.revokedMatchesSeen[matchID]; !seen {
-			orderInfo.revokedMatchesSeen[matchID] = struct{}{}
-
-			if match.Swap == nil { // There will be no refund
-				var balanceMods []*balanceMod
-				if orderInfo.order.Sell {
-					balanceMods = []*balanceMod{
-						{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty},
-						{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
-					}
-				} else {
-					balanceMods = []*balanceMod{
-						{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty)},
-						{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
-					}
-				}
-				m.modifyBotBalance(orderInfo.bot, balanceMods)
-				orderInfo.matchesSettled[matchID] = struct{}{}
-				return
-			}
-
-			var singleLotRefundFees uint64
-			if orderInfo.initialRefundFeesLocked == 0 {
-				singleLotRefundFees = orderInfo.singleLotRefundFees
-			}
-
-			var balanceMods []*balanceMod
-			if orderInfo.order.Sell {
-				balanceMods = []*balanceMod{
-					{balanceModIncrease, orderInfo.order.BaseID, balTypePendingRefund, match.Qty - singleLotRefundFees},
-					{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
-				}
-			} else {
-				balanceMods = []*balanceMod{
-					{balanceModIncrease, orderInfo.order.QuoteID, balTypePendingRefund, calc.BaseToQuote(match.Rate, match.Qty) - singleLotRefundFees},
-					{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
-				}
-			}
-
-			m.modifyBotBalance(orderInfo.bot, balanceMods)
-		}
-	}
-
-	if match.Status != order.MatchConfirmed && match.Refund == nil {
+	unconfirmed := match.Status != order.MatchConfirmed
+	notRefunded := match.Refund == nil
+	revokedPreSwap := match.Revoked && match.Swap == nil
+	if unconfirmed && notRefunded && !revokedPreSwap {
 		return
 	}
 
-	if _, handled := orderInfo.matchesSettled[matchID]; handled {
+	if _, settled := orderInfo.matchesSettled[matchID]; settled {
 		return
 	}
-
 	orderInfo.matchesSettled[matchID] = struct{}{}
 
 	if match.Refund != nil {
@@ -564,39 +517,58 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 		if orderInfo.initialRefundFeesLocked == 0 {
 			singleLotRefundFees = orderInfo.singleLotRefundFees
 		}
-
 		var balanceMods []*balanceMod
 		if orderInfo.order.Sell {
 			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRefund, match.Qty - singleLotRefundFees},
+				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
 				{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty - singleLotRefundFees},
 			}
 		} else {
 			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRefund, calc.BaseToQuote(match.Rate, match.Qty) - singleLotRefundFees},
+				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
 				{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty) - singleLotRefundFees},
 			}
 		}
-		m.log.Tracef("oid: %s, increasing balance due to refund")
 		m.modifyBotBalance(orderInfo.bot, balanceMods)
-	} else {
+	} else if match.Redeem != nil {
 		redeemAsset := orderInfo.order.BaseID
 		redeemQty := match.Qty
 		if orderInfo.order.Sell {
 			redeemAsset = orderInfo.order.QuoteID
 			redeemQty = calc.BaseToQuote(match.Rate, redeemQty)
 		}
-
-		var maxRedeemFees uint64
-		if orderInfo.initialRedeemFeesLocked == 0 {
-			numLots := match.Qty / orderInfo.lotSize
-			maxRedeemFees = numLots * orderInfo.singleLotRedeemFees
-		}
-		m.log.Tracef("oid: %s, increasing balance due to redeem, redeemQty - %v, maxRedeemFees - %v", oid, redeemQty, maxRedeemFees)
-
 		balanceMods := []*balanceMod{
 			{balanceModDecrease, redeemAsset, balTypePendingRedeem, redeemQty - maxRedeemFees},
 			{balanceModIncrease, redeemAsset, balTypeAvailable, redeemQty - maxRedeemFees},
+		}
+		m.modifyBotBalance(orderInfo.bot, balanceMods)
+	} else if match.Swap != nil {
+		// Something went wrong.. we made a swap tx, but did not get a refund or redeem.
+		m.log.Errorf("oid: %s, match %s is in confirmed state, but no refund or redeem", oid, matchID)
+		redeemAsset := orderInfo.order.BaseID
+		redeemQty := match.Qty
+		if orderInfo.order.Sell {
+			redeemAsset = orderInfo.order.QuoteID
+			redeemQty = calc.BaseToQuote(match.Rate, redeemQty)
+		}
+		balanceMods := []*balanceMod{
+			{balanceModDecrease, redeemAsset, balTypePendingRedeem, redeemQty - maxRedeemFees},
+		}
+		m.modifyBotBalance(orderInfo.bot, balanceMods)
+	} else {
+		// We did not even make a swap tx. The modifications here are the
+		// opposite of what happened when the match was first seen.
+		var balanceMods []*balanceMod
+		if orderInfo.order.Sell {
+			balanceMods = []*balanceMod{
+				{balanceModIncrease, orderInfo.order.BaseID, balTypeFundingOrder, match.Qty},
+				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
+			}
+		} else {
+			balanceMods = []*balanceMod{
+				{balanceModIncrease, orderInfo.order.QuoteID, balTypeFundingOrder, calc.BaseToQuote(match.Rate, match.Qty)},
+				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
+			}
 		}
 		m.modifyBotBalance(orderInfo.bot, balanceMods)
 	}
@@ -608,14 +580,13 @@ func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
 
 // handleOrderNotification checks if any funds are ready to be made available
 // for use by a bot depending on the order's state.
-//   - If any matches are
-//     in the confirmed state that have not yet been processed, the redeemed
-//     or refunded amount is added to the bot's balance.
+//   - First, any updates to the balances based on the state of the matches
+//     are made.
 //   - If the order is no longer booked, the difference between the order's
 //     quantity and the amount that was matched can be returned to the bot.
 //   - If all fees have been confirmed, the rest of the difference between
-//     the amount the at was initially locked and the amount that was used
-//     can be returned.
+//     the amount that was either initially locked or max possible to be used
+//     and the amount that was actually used can be returned.
 func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 	orderInfo := m.getOrderInfo(o.ID)
 	if orderInfo == nil {
@@ -624,14 +595,14 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 
 	orderInfo.order = o
 
-	// Step 2/3 (from botBalance doc): add redeem/refund amount to balance
 	for _, match := range o.Matches {
 		m.handleMatchUpdate(match, o.ID)
 	}
 
-	if o.Status <= order.OrderStatusBooked || // Not ready to process
-		(orderInfo.unusedLockedFundsReturned && orderInfo.excessFeesReturned) || // Complete
-		(orderInfo.unusedLockedFundsReturned && !orderInfo.excessFeesReturned && !o.AllFeesConfirmed) { // Step 1 complete, but not ready for step 2
+	notReadyToReturnOverLock := o.LockedAmt > 0
+	returnedOverLockButNotReadyToReturnExcessFees := orderInfo.unusedLockedFundsReturned && !orderInfo.excessFeesReturned && !o.AllFeesConfirmed
+	complete := orderInfo.unusedLockedFundsReturned && orderInfo.excessFeesReturned
+	if notReadyToReturnOverLock || returnedOverLockButNotReadyToReturnExcessFees || complete {
 		return
 	}
 
@@ -640,51 +611,49 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 		fromAsset, toAsset = toAsset, fromAsset
 	}
 
-	var filledQty, filledLots uint64
-	var redeemedLots uint64
-	var refundedMatches uint64
+	var swappedLots, swappedMatches, swappedQty, redeemedLots, refundedMatches uint64
 	for _, match := range o.Matches {
 		if match.IsCancel {
 			continue
 		}
-		filledLots += match.Qty / orderInfo.lotSize
+		numLots := match.Qty / orderInfo.lotSize
+		fromAssetQty := match.Qty
+		if fromAsset == o.QuoteID {
+			fromAssetQty = calc.BaseToQuote(match.Rate, fromAssetQty)
+		}
+		if match.Swap != nil {
+			swappedLots += numLots
+			swappedMatches++
+			swappedQty += fromAssetQty
+		}
 		if match.Refund != nil {
 			refundedMatches++
 		}
 		if match.Redeem != nil {
-			redeemedLots += match.Qty / orderInfo.lotSize
-		}
-		if fromAsset == o.QuoteID {
-			filledQty += calc.BaseToQuote(match.Rate, match.Qty)
-		} else {
-			filledQty += match.Qty
+			redeemedLots += numLots
 		}
 	}
 
-	// Step 4 (from botBalance doc): OrderStatus > Booked - return over locked amount
 	if !orderInfo.unusedLockedFundsReturned {
-		maxSwapFees := filledLots * orderInfo.singleLotSwapFees
-		usedFunds := filledQty + maxSwapFees
+		maxSwapFees := swappedMatches * orderInfo.singleLotSwapFees
+		usedFunds := swappedQty + maxSwapFees
 		if usedFunds < orderInfo.initialFundsLocked {
-			m.log.Tracef("oid: %s, returning unused locked funds, initialFundsLocked %v, filledQty %v, filledLots %v, maxSwapFees %v",
-				o.ID, orderInfo.initialFundsLocked, filledQty, filledLots, maxSwapFees)
+			overLock := orderInfo.initialFundsLocked - usedFunds
 			balanceMods := []*balanceMod{
-				{balanceModIncrease, fromAsset, balTypeAvailable, orderInfo.initialFundsLocked - usedFunds},
-				{balanceModDecrease, fromAsset, balTypeFundingOrder, orderInfo.initialFundsLocked - usedFunds},
+				{balanceModIncrease, fromAsset, balTypeAvailable, overLock},
+				{balanceModDecrease, fromAsset, balTypeFundingOrder, overLock},
 			}
 			m.modifyBotBalance(orderInfo.bot, balanceMods)
 		} else {
-			m.log.Errorf("oid: %v - usedFunds %d >= initialFundsLocked %d",
-				hex.EncodeToString(o.ID), orderInfo.initialFundsLocked)
+			m.log.Errorf("oid: %s - usedFunds %d >= initialFundsLocked %d",
+				o.ID, orderInfo.initialFundsLocked)
 		}
-
 		orderInfo.unusedLockedFundsReturned = true
 	}
 
-	// Step 5 (from botBalance doc): All Fees Confirmed - return excess fees
 	if !orderInfo.excessFeesReturned && o.AllFeesConfirmed {
 		// Return excess swap fees
-		maxSwapFees := filledLots * orderInfo.singleLotSwapFees
+		maxSwapFees := swappedMatches * orderInfo.singleLotSwapFees
 		if maxSwapFees > o.FeesPaid.Swap {
 			balanceMods := []*balanceMod{
 				{balanceModIncrease, fromAsset, balTypeAvailable, maxSwapFees - o.FeesPaid.Swap},
@@ -692,27 +661,24 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 			}
 			m.modifyBotBalance(orderInfo.bot, balanceMods)
 		} else if maxSwapFees < o.FeesPaid.Swap {
-			m.log.Errorf("oid: %v - maxSwapFees %d < swap fees %d", hex.EncodeToString(o.ID), maxSwapFees, o.FeesPaid.Swap)
+			m.log.Errorf("oid: %s - maxSwapFees %d < swap fees %d", o.ID, maxSwapFees, o.FeesPaid.Swap)
 		}
 
 		// Return excess redeem fees
 		if orderInfo.initialRedeemFeesLocked > 0 { // AccountLocker
 			if orderInfo.initialRedeemFeesLocked > o.FeesPaid.Redemption {
-				m.log.Tracef("oid: %s, return excess redeem fees (accountLocker), initialRedeemFeesLocked %v, redemption fees %v",
-					o.ID, orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
 				balanceMods := []*balanceMod{
 					{balanceModIncrease, toAsset, balTypeAvailable, orderInfo.initialRedeemFeesLocked - o.FeesPaid.Redemption},
 					{balanceModDecrease, toAsset, balTypeFundingOrder, orderInfo.initialRedeemFeesLocked},
 				}
 				m.modifyBotBalance(orderInfo.bot, balanceMods)
 			} else {
-				m.log.Errorf("oid: %v - initialRedeemFeesLocked %d > redemption fees %d",
-					hex.EncodeToString(o.ID), orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
+				m.log.Errorf("oid: %s - initialRedeemFeesLocked %d > redemption fees %d",
+					o.ID, orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
 			}
 		} else {
 			maxRedeemFees := redeemedLots * orderInfo.singleLotRedeemFees
 			if maxRedeemFees > o.FeesPaid.Redemption {
-				m.log.Tracef("oid: %s, return excess redeem fees, maxRedeemFees %v, redemption fees %v", o.ID, maxRedeemFees, o.FeesPaid.Redemption)
 				balanceMods := []*balanceMod{
 					{balanceModIncrease, toAsset, balTypeAvailable, maxRedeemFees - o.FeesPaid.Redemption},
 				}
@@ -740,8 +706,8 @@ func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
 				}
 				m.modifyBotBalance(orderInfo.bot, balanceMods)
 			} else if maxRefundFees < o.FeesPaid.Refund {
-				m.log.Errorf("oid: %v - max refund fees %d < refund fees %d",
-					hex.EncodeToString(o.ID), maxRefundFees, o.FeesPaid.Refund)
+				m.log.Errorf("oid: %s - max refund fees %d < refund fees %d",
+					o.ID, maxRefundFees, o.FeesPaid.Refund)
 			}
 		}
 
