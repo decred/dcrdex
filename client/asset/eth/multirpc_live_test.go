@@ -52,7 +52,7 @@ func TestMonitorMainnet(t *testing.T) {
 }
 
 func TestRPC(t *testing.T) {
-	mt.TestRPC(t)
+	mt.TestRPC(t, dex.Mainnet)
 }
 
 var freeServers = []string{
@@ -66,7 +66,7 @@ var freeServers = []string{
 }
 
 func TestFreeServers(t *testing.T) {
-	mt.TestFreeServers(t, freeServers)
+	mt.TestFreeServers(t, freeServers, dex.Testnet)
 }
 
 func TestMainnetCompliance(t *testing.T) {

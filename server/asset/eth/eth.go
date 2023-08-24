@@ -322,7 +322,7 @@ func NewEVMBackend(
 	if len(endpoints) == 0 {
 		return nil, fmt.Errorf("no endpoint found in the %s config file at %q", assetName, configPath)
 	}
-	log.Debugf("Parsed %d endpoints from the %v config file", assetName, len(endpoints))
+	log.Debugf("Parsed %d endpoints from the %s config file", len(endpoints), assetName)
 
 	netAddrs, found := contractAddrs[ethContractVersion]
 	if !found {

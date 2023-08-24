@@ -52,19 +52,45 @@ func TestMonitorMainnet(t *testing.T) {
 	mt.TestMonitorNet(t, dex.Mainnet)
 }
 
-func TestRPC(t *testing.T) {
-	mt.TestRPC(t)
+func TestRPCMainnet(t *testing.T) {
+	mt.TestRPC(t, dex.Mainnet)
 }
 
-var freeServers = []string{
-	"wss://polygon-mainnet.public.blastapi.io",
-	"https://polygon.blockpi.network/v1/rpc/public",
-	"https://polygon.publicnode.com",
-	"https://rpc.ankr.com/polygon",
+func TestRPCTestnet(t *testing.T) {
+	mt.TestRPC(t, dex.Testnet)
 }
 
 func TestFreeServers(t *testing.T) {
-	mt.TestFreeServers(t, freeServers)
+	freeServers := []string{
+		"wss://polygon-mainnet.public.blastapi.io",
+		"https://polygon.blockpi.network/v1/rpc/public",
+		"https://polygon.publicnode.com",
+		"https://rpc.ankr.com/polygon",
+	}
+	mt.TestFreeServers(t, freeServers, dex.Mainnet)
+}
+
+func TestFreeTestnetServers(t *testing.T) {
+	// https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/
+	// https://www.alchemy.com/chain-connect/chain/mumbai
+	// https://chainlist.org/chain/80001
+	freeServers := []string{
+		// Passing
+		"https://rpc.ankr.com/polygon_mumbai",
+		"https://polygon-testnet.public.blastapi.io",
+		"https://polygon-mumbai.blockpi.network/v1/rpc/public",
+		"https://rpc-mumbai.maticvigil.com",
+
+		// Not passing
+		"https://polygon-mumbai-bor.publicnode.com",
+		"https://endpoints.omniatech.io/v1/matic/mumbai/public",
+		"https://polygontestapi.terminet.io/rpc",
+		"https://matic-mumbai.chainstacklabs.com",
+		"https://matic-testnet-archive-rpc.bwarelabs.com",
+		"https://g.w.lavanet.xyz:443/gateway/polygon1t/rpc-http/f7ee0000000000000000000000000000",
+		"https://api.zan.top/node/v1/polygon/mumbai/public",
+	}
+	mt.TestFreeServers(t, freeServers, dex.Testnet)
 }
 
 func TestMainnetCompliance(t *testing.T) {

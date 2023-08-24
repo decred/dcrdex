@@ -191,7 +191,7 @@ func (m *MRPCTest) TestMonitorNet(t *testing.T, net dex.Network) {
 	<-ctx.Done()
 }
 
-func (m *MRPCTest) TestRPC(t *testing.T) {
+func (m *MRPCTest) TestRPC(t *testing.T, net dex.Network) {
 	// To skip automatic websocket resolution, pass flag --skipws.
 
 	endpoint := os.Getenv("PROVIDER")
@@ -200,7 +200,7 @@ func (m *MRPCTest) TestRPC(t *testing.T) {
 	}
 	dir, _ := os.MkdirTemp("", "")
 	defer os.RemoveAll(dir)
-	cl, err := m.rpcClient(dir, encode.RandomBytes(32), []string{endpoint}, dex.Mainnet, true)
+	cl, err := m.rpcClient(dir, encode.RandomBytes(32), []string{endpoint}, net, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func (m *MRPCTest) TestRPC(t *testing.T) {
 		t.Fatalf("connect error: %v", err)
 	}
 
-	compat, err := m.compatDataLookup(dex.Mainnet)
+	compat, err := m.compatDataLookup(net)
 	if err != nil {
 		t.Fatalf("compatDataLookup error: %v", err)
 	}
@@ -223,15 +223,15 @@ func (m *MRPCTest) TestRPC(t *testing.T) {
 	}
 }
 
-func (m *MRPCTest) TestFreeServers(t *testing.T, freeServers []string) {
-	compat, err := m.compatDataLookup(dex.Mainnet)
+func (m *MRPCTest) TestFreeServers(t *testing.T, freeServers []string, net dex.Network) {
+	compat, err := m.compatDataLookup(net)
 	if err != nil {
 		t.Fatalf("compatDataLookup error: %v", err)
 	}
 	runTest := func(endpoint string) error {
 		dir, _ := os.MkdirTemp("", "")
 		defer os.RemoveAll(dir)
-		cl, err := m.rpcClient(dir, encode.RandomBytes(32), []string{endpoint}, dex.Mainnet, true)
+		cl, err := m.rpcClient(dir, encode.RandomBytes(32), []string{endpoint}, net, true)
 		if err != nil {
 			return fmt.Errorf("tRPCClient error: %v", err)
 		}
