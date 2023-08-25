@@ -273,10 +273,6 @@ func (w *xcWallet) state() *WalletState {
 	var peerCount uint32
 	if w.peerCount > 0 { // initialized to -1 initially, means no count yet
 		peerCount = uint32(w.peerCount)
-		if mixer, ok := w.Wallet.(asset.FundsMixer); ok {
-			stats, _ := mixer.FundsMixingStats(context.TODO())
-			fmt.Println(stats)
-		}
 	}
 
 	var tokenApprovals map[uint32]asset.ApprovalStatus

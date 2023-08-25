@@ -67,13 +67,6 @@ type XCWalletAccounts struct {
 	PrimaryAccount string `ini:"account"`
 	UnmixedAccount string `ini:"unmixedaccount"`
 	TradingAccount string `ini:"tradingaccount"`
-
-	// primaryAcct    string
-	// unmixedAccount string // mixing-enabled wallets only
-	// // tradingAccount (mixing-enabled wallets only) stores utxos reserved for
-	// // executing order matches, the external branch stores split tx outputs,
-	// // internal branch stores chained (non-final) swap change.
-	// tradingAccount string
 }
 
 // Wallet defines methods that the ExchangeWallet uses for communicating with
@@ -183,18 +176,6 @@ type WalletTransaction struct {
 	BlockHash     string
 	Details       []walletjson.GetTransactionDetailsResult
 	Hex           string
-}
-
-// fundsMixer defines methods for mixing funds in a wallet.
-type fundsMixer interface {
-	// IsMixing is true if the wallet is currently mixing funds.
-	IsMixing() bool
-	// StartFundsMixer starts mixing funds. Creates the required accounts
-	// (including the dex trading account) if any does not already exist.
-	StartFundsMixer(ctx context.Context, passphrase []byte) error
-	// StopFundsMixer stops the funds mixer. This will error if the mixer was
-	// not already running.
-	StopFundsMixer() error
 }
 
 // tipNotifier can be implemented if the Wallet is able to provide a stream of

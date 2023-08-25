@@ -64,20 +64,20 @@ type tDcrWallet struct {
 	filterErr            error
 	blockInfo            *wallet.BlockInfo
 	blockInfoErr         error
-	walletLocked         bool
-	acctLocked           bool
-	acctUnlockedErr      error
-	lockAcctErr          error
-	unlockAcctErr        error
-	priv                 *secp256k1.PrivateKey
-	privKeyErr           error
-	txDetails            *udb.TxDetails
-	txDetailsErr         error
-	remotePeers          map[string]*p2p.RemotePeer
-	spvBlocks            []*wire.MsgBlock
-	spvBlocksErr         error
-	unlockedOutpoint     *wire.OutPoint
-	lockedOutpoint       *wire.OutPoint
+	// walletLocked         bool
+	acctLocked       bool
+	acctUnlockedErr  error
+	lockAcctErr      error
+	unlockAcctErr    error
+	priv             *secp256k1.PrivateKey
+	privKeyErr       error
+	txDetails        *udb.TxDetails
+	txDetailsErr     error
+	remotePeers      map[string]*p2p.RemotePeer
+	spvBlocks        []*wire.MsgBlock
+	spvBlocksErr     error
+	unlockedOutpoint *wire.OutPoint
+	lockedOutpoint   *wire.OutPoint
 }
 
 func (w *tDcrWallet) KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error) {
@@ -177,6 +177,10 @@ func (w *tDcrWallet) AccountHasPassphrase(ctx context.Context, account uint32) (
 	return false, fmt.Errorf("not stubbed")
 }
 
+func (w *tDcrWallet) SetAccountPassphrase(ctx context.Context, account uint32, passphrase []byte) error {
+	return fmt.Errorf("not stubbed")
+}
+
 func (w *tDcrWallet) AccountUnlocked(ctx context.Context, account uint32) (bool, error) {
 	return !w.acctLocked, w.acctUnlockedErr
 }
@@ -187,14 +191,6 @@ func (w *tDcrWallet) LockAccount(ctx context.Context, account uint32) error {
 
 func (w *tDcrWallet) UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error {
 	return w.unlockAcctErr
-}
-
-func (w *tDcrWallet) Unlocked() bool {
-	return !w.walletLocked
-}
-
-func (w *tDcrWallet) Lock() {
-	w.walletLocked = true
 }
 
 func (w *tDcrWallet) Unlock(ctx context.Context, passphrase []byte, timeout <-chan time.Time) error {

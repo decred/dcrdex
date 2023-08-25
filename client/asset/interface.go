@@ -697,42 +697,41 @@ type FeeRater interface {
 
 // FundsMixingStats describes the current state of a wallet's funds mixer.
 type FundsMixingStats struct {
-	// CanControlMixer is true if mixing can be started and stopped for this
-	// wallet. Stats may be returned even when the wallet cannot start or stop
-	// funds mixing.
-	CanControlMixer bool
-	// Enabled is true if the wallet is currently configured for funds mixing.
-	// If Enabled is false and CanControlMixer is true, the first call to the
-	// StartFundsMixer() method will configure the wallet for funds mixing and
-	// then start the mixer.
+	// Enabled is true if the wallet is configured for funds mixing. The wallet
+	// must be configured before mixing can be started.
 	Enabled bool
-	// Active is true if the wallet is currently mixing funds.
-	Active bool
+	// IsMixing is true if the wallet is currently mixing funds.
+	IsMixing bool
 	// MixedBalance is the amount of funds that have been successfully mixed and
 	// may be withdrawn or used to fund trades.
 	MixedBalance uint64
 	// UnmixedBalance is the amount of funds that are available and ready for
-	// mixing.
+	// mixing. If the wallet is not configured for mixing, this balance may be
+	// withdrawn or used to fund trades.
 	UnmixedBalance uint64
 	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
-	// be in the wallet for mixing to happen. If the UnmixedBalance is less than
-	// this, then mixing cannot happen. TODO: Does dcrwallet care? Related:
-	// should the mixer stop when the unmixed balance is below this threshold?
+	// be in the wallet for mixing to happen.
 	UnmixedBalanceThreshold uint64
 }
 
 // FundsMixer defines methods for mixing funds in a wallet.
 type FundsMixer interface {
 	// FundsMixingStats returns the current state of the wallet's funds mixer.
-	FundsMixingStats(ctx context.Context) (*FundsMixingStats, error)
+	FundsMixingStats() (*FundsMixingStats, error)
+	// ConfigureFundsMixer configures the wallet for funds mixing.
+	ConfigureFundsMixer(serverAddress, serverTLSCertPath string) error
 	// StartFundsMixer starts the funds mixer. This will error if the wallet
 	// does not allow starting or stopping the mixer or if the mixer was already
 	// started.
-	StartFundsMixer(ctx context.Context, passphrase []byte) error
+	StartFundsMixer(ctx context.Context) error
 	// StopFundsMixer stops the funds mixer. This will error if the wallet does
 	// not allow starting or stopping the mixer or if the mixer was not already
 	// running.
 	StopFundsMixer() error
+	// DisableFundsMixer disables the funds mixer and moves all funds to the
+	// default account. The wallet will need to be re-configured to re-enable
+	// mixing.
+	DisableFundsMixer() error
 }
 
 // WalletRestoration contains all the information needed for a user to restore

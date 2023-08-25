@@ -2,9 +2,10 @@ package dcr
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 
-	"decred.org/dcrwallet/v3/errors"
 	"decred.org/dcrwallet/v3/wallet/udb"
 )
 
@@ -15,76 +16,74 @@ const (
 	tradingAccount        = "dextrading"
 )
 
-// checkMixingAccounts checks if the mixed, unmixed and trading accounts
-// required to use this wallet for funds mixing are created and optionally
-// creates any non-existing account. If the accounts exist or are created, the
-// wallet is marked as having mixing accounts and the account numbers for the
-// mixed and unmixed accounts are returned. If any of the accounts do not exist
-// and is not created, an error is returned.
-func (w *spvWallet) checkMixingAccounts(ctx context.Context, create bool) (uint32, uint32, error) {
-	// returns an error if the account doesn't exist and is not created.
-	checkAccount := func(acct string) (uint32, error) {
-		acctNum, err := w.dcrWallet.AccountNumber(ctx, acct)
-		if errors.Is(err, errors.NotExist) && create {
-			acctNum, err = w.dcrWallet.NextAccount(ctx, acct)
-		}
-		return acctNum, err
+func (w *spvWallet) updateCSPPServerConfig(serverAddress string, tlsConfig *tls.Config) {
+	if serverAddress == w.csppServer && tlsConfig.ServerName == w.csppTLSConfig.ServerName &&
+		tlsConfig.RootCAs.Equal(w.csppTLSConfig.RootCAs) {
+		return // nothing to update
 	}
 
-	unmixedAcctNum := defaultAcct // the default acct is the unmixed account
+	w.csppMtx.Lock()
+	defer w.csppMtx.Unlock()
 
-	mixedAcctNum, err := checkAccount(mixedAccountName)
-	if err != nil {
-		return 0, 0, err
+	// Stop the mixer if it is currently running. The next run will use the
+	// updated server address and tlsConfig.
+	if w.cancelCSPPMixer != nil {
+		w.cancelCSPPMixer()
+		w.cancelCSPPMixer = nil
 	}
 
-	_, err = checkAccount(tradingAccount) // don't need the account number, but should exist as well
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// If we got here, all required accounts exist.
-	w.hasMixedAccount.Store(true)
-	return mixedAcctNum, uint32(unmixedAcctNum), nil
+	w.csppServer = serverAddress
+	w.csppTLSConfig = tlsConfig
 }
 
-// IsMixing is true if the wallet is currently mixing funds.
-func (w *spvWallet) IsMixing() bool {
+func (w *spvWallet) isMixerEnabled() bool {
+	w.csppMtx.Lock()
+	defer w.csppMtx.Unlock()
+	return w.csppServer != ""
+}
+
+// isMixing is true if the wallet is currently mixing funds.
+func (w *spvWallet) isMixing() bool {
 	w.csppMtx.Lock()
 	defer w.csppMtx.Unlock()
 	return w.cancelCSPPMixer != nil
 }
 
-// StartFundsMixer starts mixing funds. Creates the required accounts (including
-// the dex trading account) if any does not already exist.
-func (w *spvWallet) StartFundsMixer(ctx context.Context, passphrase []byte) error {
+// startFundsMixer starts mixing funds. Requires the wallet to be unlocked.
+func (w *spvWallet) startFundsMixer(ctx context.Context) error {
 	w.csppMtx.Lock()
+	defer w.csppMtx.Unlock()
+
 	if w.cancelCSPPMixer != nil {
-		w.csppMtx.Unlock()
 		return fmt.Errorf("funds mixer is already running")
 	}
 
+	if w.csppServer == "" {
+		return fmt.Errorf("funds mixer is disabled, configure first")
+	}
+
+	mixedAccount, err := w.dcrWallet.AccountNumber(ctx, mixedAccountName)
+	if err != nil {
+		return fmt.Errorf("unable to look up mixed account: %v", err)
+	}
+
+	// unmixed account is the default account
+	unmixedAccount := uint32(defaultAcct)
+
 	ctx, cancel := context.WithCancel(ctx)
 	w.cancelCSPPMixer = cancel
-	w.csppMtx.Unlock()
 
-	if len(passphrase) > 0 {
-		// Unlock wallet to create accounts if necessary and also ensures the
-		// unmixed account is unlocked as it does not have an account-level
-		// encryption.
-		err := w.Unlock(ctx, passphrase, nil)
+	csppServer, csppTLSConfig := w.csppServer, w.csppTLSConfig
+	dialCSPPServer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := new(net.Dialer).DialContext(ctx, network, addr)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		conn = tls.Client(conn, csppTLSConfig)
+		return conn, nil
 	}
 
-	mixedAccount, unmixedAccount, err := w.checkMixingAccounts(ctx, true)
-	if err != nil {
-		return err
-	}
-
-	cfg := w.cfgV.Load().(*spvConfig)
-	w.log.Debugf("Starting cspp funds mixer with %s", cfg.CSPPServer)
+	w.log.Debugf("Starting cspp funds mixer with %s", csppServer)
 
 	go func() {
 		tipChangeCh, stopTipChangeNtfn := w.dcrWallet.MainTipChangedNotifications()
@@ -110,9 +109,8 @@ func (w *spvWallet) StartFundsMixer(ctx context.Context, passphrase []byte) erro
 					continue
 				}
 
-				dial, csppServer := cfg.dialCSPPServer, cfg.CSPPServer
 				go func() {
-					err := w.dcrWallet.MixAccount(ctx, dial, csppServer, unmixedAccount, mixedAccount, mixedAccountBranch)
+					err := w.dcrWallet.MixAccount(ctx, dialCSPPServer, csppServer, unmixedAccount, mixedAccount, mixedAccountBranch)
 					if err != nil {
 						w.log.Error(err)
 					}

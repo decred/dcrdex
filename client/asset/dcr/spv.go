@@ -5,6 +5,7 @@ package dcr
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -64,7 +65,6 @@ const (
 type dcrWallet interface {
 	KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error)
 	AccountNumber(ctx context.Context, accountName string) (uint32, error)
-	NextAccount(ctx context.Context, name string) (uint32, error)
 	AccountBalance(ctx context.Context, account uint32, confirms int32) (wallet.Balances, error)
 	LockedOutpoints(ctx context.Context, accountName string) ([]chainjson.TransactionInput, error)
 	ListUnspent(ctx context.Context, minconf, maxconf int32, addresses map[string]struct{}, accountName string) ([]*walletjson.ListUnspentResult, error)
@@ -80,13 +80,9 @@ type dcrWallet interface {
 	BlockInMainChain(ctx context.Context, hash *chainhash.Hash) (haveBlock, invalidated bool, err error)
 	CFilterV2(ctx context.Context, blockHash *chainhash.Hash) ([gcs.KeySize]byte, *gcs.FilterV2, error)
 	BlockInfo(ctx context.Context, blockID *wallet.BlockIdentifier) (*wallet.BlockInfo, error)
-	AccountHasPassphrase(ctx context.Context, account uint32) (bool, error)
 	AccountUnlocked(ctx context.Context, account uint32) (bool, error)
 	LockAccount(ctx context.Context, account uint32) error
 	UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error
-	Unlocked() bool
-	Lock()
-	Unlock(ctx context.Context, passphrase []byte, timeout <-chan time.Time) error
 	LoadPrivateKey(ctx context.Context, addr stdaddr.Address) (key *secp256k1.PrivateKey, zero func(), err error)
 	TxDetails(ctx context.Context, txHash *chainhash.Hash) (*udb.TxDetails, error)
 	GetTransactionsByHashes(ctx context.Context, txHashes []*chainhash.Hash) (txs []*wire.MsgTx, notFound []*wire.InvVect, err error)
@@ -137,7 +133,9 @@ func (w *extendedWallet) TxDetails(ctx context.Context, txHash *chainhash.Hash) 
 	return wallet.UnstableAPI(w.Wallet).TxDetails(ctx, txHash)
 }
 
-// TODO
+// MainTipChangedNotifications returns a channel for receiving main tip change
+// notifications, along with a function to close the channel when it is no
+// longer needed.
 func (w *extendedWallet) MainTipChangedNotifications() (chan *wallet.MainTipChangedNotification, func()) {
 	ntfn := w.NtfnServer.MainTipChangedNotifications()
 	return ntfn.C, ntfn.Done
@@ -151,15 +149,19 @@ type spvWallet struct {
 	dir               string
 	chainParams       *chaincfg.Params
 	log               dex.Logger
-	cfgV              atomic.Value // *spvConfig
-	spv               spvSyncer    // *spv.Syncer
-	bestSpvPeerHeight int32        // atomic
+	spv               spvSyncer // *spv.Syncer
+	bestSpvPeerHeight int32     // atomic
 	tipChan           chan *block
 
 	blockCache blockCache
 
-	hasMixedAccount atomic.Bool
+	// hasMixingAccts is used to track if a wallet has the accounts required for
+	// funds mixing.
+	hasMixingAccts atomic.Bool
+
 	csppMtx         sync.Mutex
+	csppServer      string
+	csppTLSConfig   *tls.Config
 	cancelCSPPMixer context.CancelFunc
 
 	cancel context.CancelFunc
@@ -168,7 +170,6 @@ type spvWallet struct {
 
 var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
-var _ fundsMixer = (*spvWallet)(nil)
 
 func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
 	netDir := filepath.Join(dataDir, chainParams.Name)
@@ -249,6 +250,11 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 		return fmt.Errorf("error setting Decred account %d passphrase: %v", defaultAcct, err)
 	}
 
+	err = setupMixingAccounts(ctx, w, pw)
+	if err != nil {
+		return fmt.Errorf("error setting up mixing accounts: %v", err)
+	}
+
 	w.Lock()
 
 	if extIdx > 0 || intIdx > 0 {
@@ -297,45 +303,50 @@ func (w *spvWallet) initializeSimnetTspends(ctx context.Context) {
 	}
 }
 
-// Accounts returns the names of the accounts for use by the exchange wallet.
-func (w *spvWallet) Accounts() XCWalletAccounts {
-	accounts := XCWalletAccounts{
-		PrimaryAccount: defaultAcctName,
-	}
-	if w.hasMixedAccount.Load() {
-		accounts.PrimaryAccount = mixedAccountName
-		accounts.UnmixedAccount = defaultAcctName // the default acct is the unmixed account
-		accounts.TradingAccount = tradingAccount
-	}
-	return accounts
-}
+// setupMixingAccounts checks if the mixed, unmixed and trading accounts
+// required to use this wallet for funds mixing exists and creates any of the
+// accounts that does not yet exist. The wallet should be unlocked before
+// calling this function.
+func setupMixingAccounts(ctx context.Context, w *wallet.Wallet, pw []byte) error {
+	requiredAccts := []string{mixedAccountName, tradingAccount} // unmixed (default) acct already exists
+	for _, acct := range requiredAccts {
+		_, err := w.AccountNumber(ctx, acct)
+		if err == nil {
+			continue // account exist, check next account
+		}
 
-func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error) {
-	spvCfg, chainParams, err := loadSPVConfig(cfg.Settings, net)
-	if err != nil {
-		return false, fmt.Errorf("error parsing config: %w", err)
-	}
+		if !errors.Is(err, walleterrors.NotExist) {
+			return err
+		}
 
-	if chainParams.Net != w.chainParams.Net {
-		return false, errors.New("cannot reconfigure to use different network")
-	}
-
-	startMixer := spvCfg.MixFunds
-	if w.IsMixing() {
-		_ = w.StopFundsMixer() // would only error if mixing wasn't active
-		startMixer = true
-	}
-
-	w.cfgV.Swap(spvCfg)
-
-	if startMixer {
-		// no password available, wallet must be unlocked else this may error
-		err = w.StartFundsMixer(ctx, nil)
+		acctNum, err := w.NextAccount(ctx, acct)
 		if err != nil {
-			w.log.Errorf("failed to start or restart cspp funds mixer: %v", err)
+			return err
+		}
+		if err = w.SetAccountPassphrase(ctx, acctNum, pw); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+// Accounts returns the names of the accounts for use by the exchange wallet.
+func (w *spvWallet) Accounts() XCWalletAccounts {
+	if w.isMixerEnabled() {
+		return XCWalletAccounts{
+			PrimaryAccount: mixedAccountName,
+			UnmixedAccount: defaultAcctName,
+			TradingAccount: tradingAccount,
+		}
+	}
+
+	return XCWalletAccounts{
+		PrimaryAccount: defaultAcctName,
+	}
+}
+
+func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error) {
 	return cfg.Type != walletTypeSPV, nil
 }
 
@@ -372,20 +383,6 @@ func (w *spvWallet) startWallet(ctx context.Context) error {
 
 	spv := newSpvSyncer(dcrw, w.dir, connectPeers)
 	w.spv = spv
-
-	_, _, err = w.checkMixingAccounts(ctx, false)
-	if err != nil && !errors.Is(err, walleterrors.NotExist) {
-		return fmt.Errorf("error checking if wallet is configured for mixing: %v", err)
-	}
-
-	if w.cfgV.Load().(*spvConfig).MixFunds {
-		// password is definitely required for a wallet that's just starting
-		// TODO: perhaps move this call to when the wallet is unlocked.
-		err = w.StartFundsMixer(ctx, nil)
-		if err != nil {
-			w.log.Errorf("failed to start cspp funds mixer: %v", err)
-		}
-	}
 
 	w.wg.Add(2)
 	go func() {
@@ -906,12 +903,7 @@ func (w *spvWallet) AccountUnlocked(ctx context.Context, accountName string) (bo
 	if err != nil {
 		return false, err
 	}
-	if acctIsEncryped, err := w.dcrWallet.AccountHasPassphrase(ctx, acctNum); err != nil {
-		return false, err
-	} else if acctIsEncryped {
-		return w.dcrWallet.AccountUnlocked(ctx, acctNum)
-	}
-	return w.dcrWallet.Unlocked(), nil
+	return w.dcrWallet.AccountUnlocked(ctx, acctNum)
 }
 
 // LockAccount locks the specified account.
@@ -921,13 +913,7 @@ func (w *spvWallet) LockAccount(ctx context.Context, accountName string) error {
 	if err != nil {
 		return err
 	}
-	if acctIsEncryped, err := w.dcrWallet.AccountHasPassphrase(ctx, acctNum); err != nil {
-		return err
-	} else if acctIsEncryped {
-		return w.dcrWallet.LockAccount(ctx, acctNum)
-	}
-	w.dcrWallet.Lock()
-	return nil
+	return w.dcrWallet.LockAccount(ctx, acctNum)
 }
 
 // UnlockAccount unlocks the specified account or the wallet if account is not
@@ -937,19 +923,33 @@ func (w *spvWallet) UnlockAccount(ctx context.Context, pw []byte, accountName st
 	if err != nil {
 		return err
 	}
-	return w.unlockAccount(ctx, pw, acctNum)
+	if err = w.checkMixingAccounts(ctx, pw); err != nil {
+		return fmt.Errorf("error checking mixing accounts: %v", err)
+	}
+	return w.dcrWallet.UnlockAccount(ctx, acctNum, pw)
 }
 
-// unlockAccount is like UnlockAccount but takes an account number rather than
-// an account name. Unlocks the specified account or the wallet if account is
-// not encrypted.
-func (w *spvWallet) unlockAccount(ctx context.Context, pw []byte, acctNum uint32) error {
-	if acctIsEncryped, err := w.dcrWallet.AccountHasPassphrase(ctx, acctNum); err != nil {
-		return err
-	} else if acctIsEncryped {
-		return w.dcrWallet.UnlockAccount(ctx, acctNum, pw)
+func (w *spvWallet) checkMixingAccounts(ctx context.Context, pw []byte) error {
+	if w.hasMixingAccts.Load() {
+		return nil
 	}
-	return w.dcrWallet.Unlock(ctx, pw, nil)
+
+	originalW, ok := w.dcrWallet.(*extendedWallet)
+	if !ok {
+		return nil // assume the accts exist, since we can't verify
+	}
+
+	if err := originalW.Unlock(ctx, pw, nil); err != nil {
+		return fmt.Errorf("cannot unlock wallet to check mixing accts: %v", err)
+	}
+	defer originalW.Lock()
+
+	if err := setupMixingAccounts(ctx, originalW.Wallet, pw); err != nil {
+		return err
+	}
+
+	w.hasMixingAccts.Store(true)
+	return nil
 }
 
 // SyncStatus returns the wallet's sync status.

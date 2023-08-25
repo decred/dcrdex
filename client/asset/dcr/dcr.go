@@ -100,6 +100,9 @@ const (
 	requiredRedeemConfirms = 2
 
 	vspFileName = "vsp.json"
+
+	defaultCSPPMainnet  = "mix.decred.org:5760"
+	defaultCSPPTestnet3 = "mix.decred.org:15760"
 )
 
 var (
@@ -230,24 +233,6 @@ var (
 			IsDate:            true,
 			DisableWhenActive: true,
 			IsBirthdayConfig:  true,
-		},
-		{
-			Key:          "csppserver",
-			DisplayName:  "CSPP Server",
-			Description:  "Network address of CoinShuffle++ server (host or host:port)",
-			DefaultValue: defaultCSPPMainnet,
-		},
-		{
-			Key:         "csppserver.ca",
-			DisplayName: "CSPP Server TLS Certificate",
-			Description: "Path to the CSPP Server TLS certificate file",
-		},
-		{
-			Key:          "mixfunds",
-			DisplayName:  "Mix Funds",
-			Description:  "Start CSPP funds mixer once wallet is opened",
-			IsBoolean:    true,
-			DefaultValue: false,
 		},
 	}
 
@@ -607,12 +592,6 @@ type feeStamped struct {
 // exchangeWalletConfig is the validated, unit-converted, user-configurable
 // wallet settings.
 type exchangeWalletConfig struct {
-	// primaryAcct    string
-	// unmixedAccount string // mixing-enabled wallets only
-	// // tradingAccount (mixing-enabled wallets only) stores utxos reserved for
-	// // executing order matches, the external branch stores split tx outputs,
-	// // internal branch stores chained (non-final) swap change.
-	// tradingAccount   string
 	useSplitTx       bool
 	fallbackFeeRate  uint64
 	feeRateLimit     uint64
@@ -692,7 +671,6 @@ var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 var _ asset.Bonder = (*ExchangeWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWallet)(nil)
 var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
-var _ asset.FundsMixer = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -722,7 +700,7 @@ type findRedemptionResult struct {
 
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
-func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
+func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// variable.
 	walletCfg := new(walletConfig)
@@ -736,6 +714,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
+	var w asset.Wallet = dcr
+
 	switch cfg.Type {
 	case walletTypeDcrwRPC, walletTypeLegacy:
 		dcr.wallet, err = newRPCWallet(cfg.Settings, logger, network)
@@ -743,7 +723,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 			return nil, err
 		}
 	case walletTypeSPV:
-		dcr.wallet, err = openSPVWallet(cfg.DataDir, cfg.Settings, logger, network)
+		dcr.wallet, err = openSPVWallet(cfg.DataDir, chainParams, logger)
+		if err != nil {
+			return nil, err
+		}
+		w, err = initNativeWallet(dcr)
 		if err != nil {
 			return nil, err
 		}
@@ -758,7 +742,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		}
 	}
 
-	return dcr, nil
+	return w, nil
 }
 
 func getExchangeWalletCfg(dcrCfg *walletConfig, logger dex.Logger) (*exchangeWalletConfig, error) {
@@ -845,12 +829,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 }
 
 // openSPVWallet opens the previously created native SPV wallet.
-func openSPVWallet(dataDir string, settings map[string]string, log dex.Logger, network dex.Network) (*spvWallet, error) {
-	cfg, chainParams, err := loadSPVConfig(settings, network)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing config: %w", err)
-	}
-
+func openSPVWallet(dataDir string, chainParams *chaincfg.Params, log dex.Logger) (*spvWallet, error) {
 	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 	if exists, err := walletExists(dir); err != nil {
 		return nil, err
@@ -858,7 +837,7 @@ func openSPVWallet(dataDir string, settings map[string]string, log dex.Logger, n
 		return nil, fmt.Errorf("wallet at %q doesn't exists", dir)
 	}
 
-	w := &spvWallet{
+	return &spvWallet{
 		dir:         dir,
 		chainParams: chainParams,
 		log:         log.SubLogger("SPV"),
@@ -866,10 +845,7 @@ func openSPVWallet(dataDir string, settings map[string]string, log dex.Logger, n
 			blocks: make(map[chainhash.Hash]*cachedBlock),
 		},
 		tipChan: make(chan *block, 1),
-	}
-	w.cfgV.Store(cfg)
-
-	return w, nil
+	}, nil
 }
 
 // Info returns basic information about the wallet and asset.
@@ -1258,67 +1234,6 @@ func (dcr *ExchangeWallet) feeRateWithFallback(feeSuggestion uint64) uint64 {
 	}
 	dcr.log.Warnf("No usable fee rate suggestion. Using fallback of %d", cfg.fallbackFeeRate)
 	return cfg.fallbackFeeRate
-}
-
-// FundsMixingStats returns the current state of the wallet's funds mixer. Part
-// of the asset.FundsMixer interface.
-func (dcr *ExchangeWallet) FundsMixingStats(ctx context.Context) (*asset.FundsMixingStats, error) {
-	var canControlMixer, isMixing bool
-	if mixer, ok := dcr.wallet.(fundsMixer); ok {
-		canControlMixer = true
-		isMixing = mixer.IsMixing()
-	}
-
-	accts := dcr.wallet.Accounts()
-	stats := &asset.FundsMixingStats{
-		CanControlMixer:         canControlMixer,
-		Enabled:                 accts.UnmixedAccount != "",
-		Active:                  isMixing,
-		UnmixedBalanceThreshold: smalletCSPPSplitPoint,
-	}
-
-	var minConf int32
-	primaryAcctBalance, err := dcr.wallet.AccountBalance(ctx, 0, accts.PrimaryAccount)
-	if err != nil {
-		return nil, err
-	}
-
-	if !stats.Enabled {
-		// Wallet not configured for mixing (yet). Return the default account
-		// balance only.
-		stats.UnmixedBalance = toAtoms(primaryAcctBalance.Total) // assume default balance as unmixed
-		return stats, nil
-	}
-
-	minConf = 1 // dcrwallet MixAccount uses minConf=1 to select mixable inputs
-	unmixedBalance, err := dcr.wallet.AccountBalance(ctx, minConf, accts.UnmixedAccount)
-	if err != nil {
-		return nil, err
-	}
-
-	stats.MixedBalance = toAtoms(primaryAcctBalance.Total)
-	stats.UnmixedBalance = toAtoms(unmixedBalance.Total)
-	return stats, nil
-}
-
-// StartFundsMixer starts the funds mixer.  This will error if the wallet does
-// not allow starting or stopping the mixer or if the mixer was already
-// started. Part of the asset.FundsMixer interface.
-func (dcr *ExchangeWallet) StartFundsMixer(ctx context.Context, passphrase []byte) error {
-	if mixer, ok := dcr.wallet.(fundsMixer); ok {
-		return mixer.StartFundsMixer(ctx, passphrase)
-	}
-	return fmt.Errorf("cannot control funds mixer for this wallet")
-}
-
-// StopFundsMixer stops the funds mixer. This will error if the wallet does not
-// allow starting or stopping the mixer or if the mixer is not already running.
-// Part of the asset.FundsMixer interface.
-func (dcr *ExchangeWallet) StopFundsMixer() error {
-	if mixer, ok := dcr.wallet.(fundsMixer); ok {
-		return mixer.StopFundsMixer()
-	}
-	return fmt.Errorf("cannot control funds mixer for this wallet")
 }
 
 type amount uint64
