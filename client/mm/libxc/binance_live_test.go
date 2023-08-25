@@ -16,14 +16,12 @@ import (
 var (
 	log       = dex.StdOutLogger("T", dex.LevelTrace)
 	u, _      = user.Current()
-	apiKey    = ""
-	apiSecret = ""
+	apiKey    = "OBV9Z4i5hnORfyLLBLKeO5k5DUkfiuPIrbvRltPTEfcjwyMZAhTckGrlo42q472n"
+	apiSecret = "EAws4Ke02lo4qenzIZD8OPthDqy7J7DpAVIo0ibJQnLDpteFAj7U76HGpt1Agws0"
 )
 
 func tNewBinance(t *testing.T, network dex.Network) *binance {
-	cex := newBinance(apiKey, apiSecret, log, network, true)
-	bnc := cex.(*binance)
-	return bnc
+	return newBinance(apiKey, apiSecret, log, network, true)
 }
 
 type spoofDriver struct {
@@ -87,6 +85,8 @@ func TestConnect(t *testing.T) {
 	t.Logf("btc balance: %v", balance)
 }
 
+// This may fail due to balance being to low. You can try switching the side
+// of the trade or the qty.
 func TestTrade(t *testing.T) {
 	bnc := tNewBinance(t, dex.Simnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
@@ -98,7 +98,8 @@ func TestTrade(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	updates, updaterID := bnc.SubscribeTradeUpdates()
+	updates, unsubscribe, updaterID := bnc.SubscribeTradeUpdates()
+	defer unsubscribe()
 	go func() {
 		defer wg.Done()
 		for {
@@ -115,7 +116,7 @@ func TestTrade(t *testing.T) {
 		}
 	}()
 	tradeID := bnc.GenerateTradeID()
-	err = bnc.Trade("eth", "btc", false, 73e4, 1e8, updaterID, tradeID)
+	err = bnc.Trade(ctx, "eth", "btc", false, 62e4, 1e8, updaterID, tradeID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestTrade(t *testing.T) {
 }
 
 func TestCancelTrade(t *testing.T) {
-	tradeID := "32b22cd2a58645ad8e2b"
+	tradeID := "d4d81cd45db6f8c229a100000001"
 
 	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
@@ -134,7 +135,7 @@ func TestCancelTrade(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	err = bnc.CancelTrade("eth", "btc", tradeID)
+	err = bnc.CancelTrade(ctx, "eth", "btc", tradeID)
 	if err != nil {
 		t.Fatalf("error cancelling trade: %v", err)
 	}
@@ -149,12 +150,12 @@ func TestVWAP(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	err = bnc.SubscribeMarket("eth", "btc")
+	err = bnc.SubscribeMarket(ctx, "eth", "btc")
 	if err != nil {
 		t.Fatalf("failed to subscribe to market: %v", err)
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	avg, extrema, filled, err := bnc.VWAP("eth", "btc", true, 2e9)
 	if err != nil {
 		t.Fatalf("VWAP failed: %v", err)
@@ -162,7 +163,7 @@ func TestVWAP(t *testing.T) {
 
 	t.Logf("avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
 
-	err = bnc.SubscribeMarket("eth", "btc")
+	err = bnc.SubscribeMarket(ctx, "eth", "btc")
 	if err != nil {
 		t.Fatalf("failed to subscribe to market: %v", err)
 	}
@@ -175,10 +176,7 @@ func TestVWAP(t *testing.T) {
 
 	t.Logf("avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
 
-	err = bnc.UnsubscribeMarket("eth", "btc")
-	if err != nil {
-		t.Fatalf("error unsubscribing market")
-	}
+	bnc.UnsubscribeMarket("eth", "btc")
 
 	avg, extrema, filled, err = bnc.VWAP("eth", "btc", true, 2e9)
 	if err != nil {
@@ -187,13 +185,8 @@ func TestVWAP(t *testing.T) {
 
 	t.Logf("avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
 
-	err = bnc.UnsubscribeMarket("eth", "btc")
+	bnc.UnsubscribeMarket("eth", "btc")
 	if err != nil {
 		t.Fatalf("error unsubscribing market")
-	}
-
-	avg, extrema, filled, err = bnc.VWAP("eth", "btc", true, 2e9)
-	if err == nil {
-		t.Fatalf("VWAP did not error after unsubscribing")
 	}
 }

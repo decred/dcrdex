@@ -54,6 +54,7 @@ type bookBin struct {
 type bncBook struct {
 	bids           []*bookBin
 	asks           []*bookBin
+	latestUpdate   int64
 	numSubscribers uint32
 }
 
@@ -115,15 +116,15 @@ type bncBalance struct {
 }
 
 type binance struct {
-	log          dex.Logger
-	url          string
-	wsURL        string
-	apiKey       string
-	secretKey    string
-	knownAssets  map[uint32]bool
-	net          dex.Network
-	ctx          context.Context
-	tradeIDNonce atomic.Uint32
+	log                dex.Logger
+	url                string
+	wsURL              string
+	apiKey             string
+	secretKey          string
+	knownAssets        map[uint32]bool
+	net                dex.Network
+	tradeIDNonce       atomic.Uint32
+	tradeIDNoncePrefix dex.Bytes
 
 	markets atomic.Value // map[string]*symbol
 
@@ -142,12 +143,12 @@ type binance struct {
 	tradeUpdateCounter int
 
 	cexUpdatersMtx sync.RWMutex
-	cexUpdaters    []chan interface{}
+	cexUpdaters    map[int]chan interface{}
 }
 
 var _ CEX = (*binance)(nil)
 
-func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binanceUS bool) CEX {
+func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binanceUS bool) *binance {
 	url, wsURL := httpURL, websocketURL
 	if binanceUS {
 		url, wsURL = usHttpURL, usWebsocketURL
@@ -163,23 +164,24 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 	}
 
 	bnc := &binance{
-		log:            log,
-		url:            url,
-		wsURL:          wsURL,
-		apiKey:         apiKey,
-		secretKey:      secretKey,
-		knownAssets:    knownAssets,
-		balances:       make(map[string]*bncBalance),
-		books:          make(map[string]*bncBook),
-		net:            net,
-		tradeToUpdater: make(map[string]int),
-		tradeUpdaters:  make(map[int]chan *TradeUpdate),
-		cexUpdaters:    make([]chan interface{}, 0),
+		log:                log,
+		url:                url,
+		wsURL:              wsURL,
+		apiKey:             apiKey,
+		secretKey:          secretKey,
+		knownAssets:        knownAssets,
+		balances:           make(map[string]*bncBalance),
+		books:              make(map[string]*bncBook),
+		net:                net,
+		tradeToUpdater:     make(map[string]int),
+		tradeUpdaters:      make(map[int]chan *TradeUpdate),
+		cexUpdaters:        make(map[int]chan interface{}, 0),
+		tradeIDNoncePrefix: encode.RandomBytes(10),
 	}
 
 	bnc.markets.Store(make(map[string]symbol))
 
-	return (CEX)(bnc)
+	return bnc
 }
 
 func (bnc *binance) updateBalances(coinsData []*binanceCoinInfo) {
@@ -194,13 +196,9 @@ func (bnc *binance) updateBalances(coinsData []*binanceCoinInfo) {
 	}
 }
 
-func (bnc *binance) getCoinInfo() error {
-	if bnc.net == dex.Testnet {
-		return nil
-	}
-
+func (bnc *binance) getCoinInfo(ctx context.Context) error {
 	coins := make([]*binanceCoinInfo, 0)
-	err := bnc.getAPI("/sapi/v1/capital/config/getall", nil, true, true, &coins)
+	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
 	if err != nil {
 		return fmt.Errorf("error getting binance coin info: %v", err)
 	}
@@ -209,9 +207,9 @@ func (bnc *binance) getCoinInfo() error {
 	return nil
 }
 
-func (bnc *binance) getMarkets() error {
+func (bnc *binance) getMarkets(ctx context.Context) error {
 	exchangeInfo := &exchangeInfo{}
-	err := bnc.getAPI("/api/v3/exchangeInfo", nil, false, false, exchangeInfo)
+	err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, exchangeInfo)
 	if err != nil {
 		return fmt.Errorf("error getting markets from Binance: %w", err)
 	}
@@ -228,17 +226,15 @@ func (bnc *binance) getMarkets() error {
 
 // Connect connects to the binance API.
 func (bnc *binance) Connect(ctx context.Context) error {
-	bnc.ctx = ctx
-
-	if err := bnc.getCoinInfo(); err != nil {
+	if err := bnc.getCoinInfo(ctx); err != nil {
 		return fmt.Errorf("error getting coin info: %v", err)
 	}
 
-	if err := bnc.getMarkets(); err != nil {
+	if err := bnc.getMarkets(ctx); err != nil {
 		return fmt.Errorf("error getting markets: %v", err)
 	}
 
-	if err := bnc.getUserDataStream(); err != nil {
+	if err := bnc.getUserDataStream(ctx); err != nil {
 		return err
 	}
 
@@ -248,9 +244,9 @@ func (bnc *binance) Connect(ctx context.Context) error {
 		for {
 			select {
 			case <-nextTick:
-				err := bnc.getMarkets()
+				err := bnc.getMarkets(ctx)
 				if err != nil {
-					bnc.log.Errorf("error fetching markets: %v", err)
+					bnc.log.Errorf("Error fetching markets: %v", err)
 					nextTick = time.After(time.Minute)
 				} else {
 					nextTick = time.After(time.Hour)
@@ -268,9 +264,9 @@ func (bnc *binance) Connect(ctx context.Context) error {
 		for {
 			select {
 			case <-nextTick:
-				err := bnc.getCoinInfo()
+				err := bnc.getCoinInfo(ctx)
 				if err != nil {
-					bnc.log.Errorf("error fetching markets: %v", err)
+					bnc.log.Errorf("Error fetching markets: %v", err)
 					nextTick = time.After(time.Minute)
 				} else {
 					nextTick = time.After(time.Hour)
@@ -287,12 +283,20 @@ func (bnc *binance) Connect(ctx context.Context) error {
 
 // SubscribeCEXUpdates returns a channel which sends an empty struct when
 // the balance of an asset on the CEX has been updated.
-func (bnc *binance) SubscribeCEXUpdates() <-chan interface{} {
+func (bnc *binance) SubscribeCEXUpdates() (<-chan interface{}, func()) {
 	updater := make(chan interface{}, 128)
 	bnc.cexUpdatersMtx.Lock()
-	bnc.cexUpdaters = append(bnc.cexUpdaters, updater)
+	id := len(bnc.cexUpdaters)
+	bnc.cexUpdaters[id] = updater
 	bnc.cexUpdatersMtx.Unlock()
-	return updater
+
+	unsubscribe := func() {
+		bnc.cexUpdatersMtx.Lock()
+		delete(bnc.cexUpdaters, id)
+		bnc.cexUpdatersMtx.Unlock()
+	}
+
+	return updater, unsubscribe
 }
 
 // Balance returns the balance of an asset at the CEX.
@@ -323,13 +327,13 @@ func (bnc *binance) Balance(symbol string) (*ExchangeBalance, error) {
 func (bnc *binance) GenerateTradeID() string {
 	nonce := bnc.tradeIDNonce.Add(1)
 	nonceB := encode.Uint32Bytes(nonce)
-	return fmt.Sprintf("%x", append(encode.RandomBytes(10), nonceB...))
+	return hex.EncodeToString(append(bnc.tradeIDNoncePrefix, nonceB...))
 }
 
 // Trade executes a trade on the CEX. updaterID takes an ID returned from
 // SubscribeTradeUpdates, and tradeID takes an ID returned from
 // GenerateTradeID.
-func (bnc *binance) Trade(baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, updaterID int, orderID string) error {
+func (bnc *binance) Trade(ctx context.Context, baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, updaterID int, tradeID string) error {
 	side := "BUY"
 	if sell {
 		side = "SELL"
@@ -361,7 +365,7 @@ func (bnc *binance) Trade(baseSymbol, quoteSymbol string, sell bool, rate, qty u
 	v.Add("side", side)
 	v.Add("type", "LIMIT")
 	v.Add("timeInForce", "GTC")
-	v.Add("newClientOrderId", orderID)
+	v.Add("newClientOrderId", tradeID)
 	v.Add("quantity", strconv.FormatFloat(amt, 'f', market.BaseAssetPrecision, 64))
 	v.Add("price", strconv.FormatFloat(price, 'f', market.QuoteAssetPrecision, 64))
 
@@ -371,28 +375,35 @@ func (bnc *binance) Trade(baseSymbol, quoteSymbol string, sell bool, rate, qty u
 		bnc.tradeUpdaterMtx.Unlock()
 		return fmt.Errorf("no trade updater with ID %v", updaterID)
 	}
-	bnc.tradeToUpdater[orderID] = updaterID
+	bnc.tradeToUpdater[tradeID] = updaterID
 	bnc.tradeUpdaterMtx.Unlock()
 
-	return bnc.postAPI("/api/v3/order", v, nil, true, true, &struct{}{})
+	return bnc.postAPI(ctx, "/api/v3/order", v, nil, true, true, &struct{}{})
 }
 
-// SubscribeTradeUpdates returns a channel that the caller can use to listen
-// for updates to a trade's status. If the integer returned from this function
-// is passed as the updaterID argument to Trade, then updates to the trade will
-// be sent on the channel.
-func (bnc *binance) SubscribeTradeUpdates() (<-chan *TradeUpdate, int) {
+// SubscribeTradeUpdates returns a channel that the caller can use to
+// listen for updates to a trade's status. When the subscription ID
+// returned from this function is passed as the updaterID argument to
+// Trade, then updates to the trade will be sent on the updated channel
+// returned from this function.
+func (bnc *binance) SubscribeTradeUpdates() (<-chan *TradeUpdate, func(), int) {
 	bnc.tradeUpdaterMtx.Lock()
 	defer bnc.tradeUpdaterMtx.Unlock()
-
 	bnc.tradeUpdateCounter++
 	updater := make(chan *TradeUpdate, 256)
 	bnc.tradeUpdaters[bnc.tradeUpdateCounter] = updater
-	return updater, bnc.tradeUpdateCounter
+
+	unsubscribe := func() {
+		bnc.tradeUpdaterMtx.Lock()
+		delete(bnc.tradeUpdaters, bnc.tradeUpdateCounter)
+		bnc.tradeUpdaterMtx.Unlock()
+	}
+
+	return updater, unsubscribe, bnc.tradeUpdateCounter
 }
 
 // CancelTrade cancels a trade on the CEX.
-func (bnc *binance) CancelTrade(baseSymbol, quoteSymbol string, tradeID string) error {
+func (bnc *binance) CancelTrade(ctx context.Context, baseSymbol, quoteSymbol string, tradeID string) error {
 	baseCfg, err := bncSymbolData(baseSymbol)
 	if err != nil {
 		return fmt.Errorf("error getting symbol data for %s: %w", baseSymbol, err)
@@ -409,7 +420,7 @@ func (bnc *binance) CancelTrade(baseSymbol, quoteSymbol string, tradeID string) 
 	v.Add("symbol", slug)
 	v.Add("origClientOrderId", tradeID)
 
-	req, err := bnc.generateRequest("DELETE", "/api/v3/order", v, nil, true, true)
+	req, err := bnc.generateRequest(ctx, "DELETE", "/api/v3/order", v, nil, true, true)
 	if err != nil {
 		return err
 	}
@@ -449,16 +460,16 @@ func (bnc *binance) Markets() ([]*Market, error) {
 	return markets, nil
 }
 
-func (bnc *binance) getAPI(endpoint string, query url.Values, key, sign bool, thing interface{}) error {
-	req, err := bnc.generateRequest(http.MethodGet, endpoint, query, nil, key, sign)
+func (bnc *binance) getAPI(ctx context.Context, endpoint string, query url.Values, key, sign bool, thing interface{}) error {
+	req, err := bnc.generateRequest(ctx, http.MethodGet, endpoint, query, nil, key, sign)
 	if err != nil {
 		return fmt.Errorf("generateRequest error: %w", err)
 	}
 	return bnc.requestInto(req, thing)
 }
 
-func (bnc *binance) postAPI(endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
-	req, err := bnc.generateRequest(http.MethodPost, endpoint, query, form, key, sign)
+func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
+	req, err := bnc.generateRequest(ctx, http.MethodPost, endpoint, query, form, key, sign)
 	if err != nil {
 		return fmt.Errorf("generateRequest error: %w", err)
 	}
@@ -466,7 +477,7 @@ func (bnc *binance) postAPI(endpoint string, query, form url.Values, key, sign b
 }
 
 func (bnc *binance) requestInto(req *http.Request, thing interface{}) error {
-	bnc.log.Tracef("sending request: %+v", req)
+	bnc.log.Tracef("Sending request: %+v", req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -494,9 +505,9 @@ func (bnc *binance) requestInto(req *http.Request, thing interface{}) error {
 	return nil
 }
 
-func (bnc *binance) generateRequest(method, endpoint string, query, form url.Values, key, sign bool) (*http.Request, error) {
+func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool) (*http.Request, error) {
 	var fullURL string
-	if bnc.net == dex.Simnet && strings.Contains(endpoint, "sapi") {
+	if (bnc.net == dex.Simnet || bnc.net == dex.Testnet) && strings.Contains(endpoint, "sapi") {
 		fullURL = fakeBinanceURL + endpoint
 	} else {
 		fullURL = bnc.url + endpoint
@@ -538,7 +549,7 @@ func (bnc *binance) generateRequest(method, endpoint string, query, form url.Val
 		fullURL = fmt.Sprintf("%s?%s", fullURL, queryString)
 	}
 
-	req, err := http.NewRequestWithContext(bnc.ctx, method, fullURL, body)
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("NewRequestWithContext error: %w", err)
 	}
@@ -548,11 +559,11 @@ func (bnc *binance) generateRequest(method, endpoint string, query, form url.Val
 	return req, nil
 }
 
-func (bnc *binance) getListenID() (string, error) {
+func (bnc *binance) getListenID(ctx context.Context) (string, error) {
 	var resp struct {
 		ListenKey string `json:"listenKey"`
 	}
-	return resp.ListenKey, bnc.postAPI("/api/v3/userDataStream", nil, nil, true, false, &resp)
+	return resp.ListenKey, bnc.postAPI(ctx, "/api/v3/userDataStream", nil, nil, true, false, &resp)
 }
 
 type wsBalance struct {
@@ -594,7 +605,10 @@ func (bnc *binance) sendCexUpdateNotes() {
 }
 
 func (bnc *binance) handleOutboundAccountPosition(update *bncStreamUpdate) {
-	bnc.log.Tracef("received outboundAccountPosition: %+v", update)
+	bnc.log.Tracef("Received outboundAccountPosition: %+v", update)
+	for _, bal := range update.Balances {
+		bnc.log.Tracef("balance: %+v", bal)
+	}
 
 	bnc.balanceMtx.Lock()
 	for _, bal := range update.Balances {
@@ -608,28 +622,28 @@ func (bnc *binance) handleOutboundAccountPosition(update *bncStreamUpdate) {
 	bnc.sendCexUpdateNotes()
 }
 
-func (bnc *binance) getTradeUpdater(orderID string) (chan *TradeUpdate, error) {
+func (bnc *binance) getTradeUpdater(tradeID string) (chan *TradeUpdate, error) {
 	bnc.tradeUpdaterMtx.RLock()
 	defer bnc.tradeUpdaterMtx.RUnlock()
 
-	updaterID, found := bnc.tradeToUpdater[orderID]
+	updaterID, found := bnc.tradeToUpdater[tradeID]
 	if !found {
-		return nil, fmt.Errorf("updater not found for trade ID %v", orderID)
+		return nil, fmt.Errorf("updater not found for trade ID %v", tradeID)
 	}
 	updater, found := bnc.tradeUpdaters[updaterID]
 	if !found {
-		return nil, fmt.Errorf("no updater with ID %v", updaterID)
+		return nil, fmt.Errorf("no updater with ID %v", tradeID)
 	}
 
 	return updater, nil
 }
 
 func (bnc *binance) handleExecutionReport(update *bncStreamUpdate) {
-	bnc.log.Tracef("received executionReport: %+v", update)
+	bnc.log.Tracef("Received executionReport: %+v", update)
 
 	updater, err := bnc.getTradeUpdater(update.ClientOrderID)
 	if err != nil {
-		bnc.log.Errorf("error getting trade updater: %v", err)
+		bnc.log.Errorf("Error getting trade updater: %v", err)
 		return
 	}
 
@@ -641,12 +655,12 @@ func (bnc *binance) handleExecutionReport(update *bncStreamUpdate) {
 	}
 }
 
-func (bnc *binance) getUserDataStream() (err error) {
+func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 	streamHandler := func(b []byte) {
 		u, err := decodeStreamUpdate(b)
 		if err != nil {
-			bnc.log.Errorf("error unmarshaling user stream update: %v", err)
-			bnc.log.Errorf("raw message: %s", string(b))
+			bnc.log.Errorf("Error unmarshaling user stream update: %v", err)
+			bnc.log.Errorf("Raw message: %s", string(b))
 			return
 		}
 		switch u.EventType {
@@ -656,13 +670,13 @@ func (bnc *binance) getUserDataStream() (err error) {
 			bnc.handleExecutionReport(u)
 		case "balanceUpdate":
 			// TODO: check if we need this.. is outbound account position enough?
-			bnc.log.Tracef("received balanceUpdate: %s", string(b))
+			bnc.log.Tracef("Received balanceUpdate: %s", string(b))
 		}
 	}
 
 	var listenKey string
 	newConn := func() (*dex.ConnectionMaster, error) {
-		listenKey, err = bnc.getListenID()
+		listenKey, err = bnc.getListenID(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -688,7 +702,7 @@ func (bnc *binance) getUserDataStream() (err error) {
 		}
 
 		cm := dex.NewConnectionMaster(conn)
-		if err = cm.ConnectOnce(bnc.ctx); err != nil {
+		if err = cm.ConnectOnce(ctx); err != nil {
 			return nil, fmt.Errorf("websocketHandler remote connect: %v", err)
 		}
 
@@ -720,7 +734,7 @@ func (bnc *binance) getUserDataStream() (err error) {
 				cm, err = newConn()
 				if err != nil {
 					connected = false
-					bnc.log.Errorf("error reconnecting: %v", err)
+					bnc.log.Errorf("Error reconnecting: %v", err)
 					reconnect = time.After(time.Second * 30)
 				} else {
 					connected = true
@@ -733,15 +747,15 @@ func (bnc *binance) getUserDataStream() (err error) {
 				q := make(url.Values)
 				q.Add("listenKey", listenKey)
 				// Doing a PUT on a listenKey will extend its validity for 60 minutes.
-				req, err := bnc.generateRequest(http.MethodPut, "/api/v3/userDataStream", q, nil, true, false)
+				req, err := bnc.generateRequest(ctx, http.MethodPut, "/api/v3/userDataStream", q, nil, true, false)
 				if err != nil {
-					bnc.log.Errorf("error generating keep-alive request: %v", err)
+					bnc.log.Errorf("Error generating keep-alive request: %v", err)
 					continue
 				}
 				if err := bnc.requestInto(req, nil); err != nil {
-					bnc.log.Errorf("error sending keep-alive request: %v", err)
+					bnc.log.Errorf("Error sending keep-alive request: %v", err)
 				}
-			case <-bnc.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -805,7 +819,7 @@ func (bnc *binance) subUnsubDepth(conn comms.WsConn, method, slug string) error 
 		return fmt.Errorf("error marshaling subscription stream request: %w", err)
 	}
 
-	bnc.log.Debugf("sending %v for market %v", method, slug)
+	bnc.log.Debugf("Sending %v for market %v", method, slug)
 	if err := conn.SendRaw(b); err != nil {
 		return fmt.Errorf("error sending subscription stream request: %w", err)
 	}
@@ -821,33 +835,34 @@ func (bnc *binance) stopMarketDataStream(slug string) (err error) {
 		return fmt.Errorf("can't unsubscribe. no stream - %p", bnc)
 	}
 
-	bnc.booksMtx.Lock()
-	defer bnc.booksMtx.Unlock()
-
 	var unsubscribe bool
-	book, found := bnc.books[slug]
-	if found {
-		book.numSubscribers--
-		if book.numSubscribers == 0 {
-			unsubscribe = true
-			delete(bnc.books, slug)
+
+	bnc.booksMtx.Lock()
+	defer func() {
+		bnc.booksMtx.Unlock()
+		if unsubscribe {
+			if err := bnc.subUnsubDepth(conn, "UNSUBSCRIBE", slug); err != nil {
+				bnc.log.Errorf("subUnsubDepth(UNSUBSCRIBE): %v", err)
+			}
 		}
-	} else {
-		bnc.log.Debugf("no book")
+	}()
+
+	book, found := bnc.books[slug]
+	if !found {
 		unsubscribe = true
-	}
-	if !unsubscribe {
 		return nil
 	}
 
-	if err := bnc.subUnsubDepth(conn, "UNSUBSCRIBE", slug); err != nil {
-		return fmt.Errorf("subUnsubDepth(UNSUBSCRIBE): %v", err)
+	book.numSubscribers--
+	if book.numSubscribers == 0 {
+		unsubscribe = true
+		delete(bnc.books, slug)
 	}
 
 	return nil
 }
 
-func (bnc *binance) startMarketDataStream(baseSymbol, quoteSymbol string) (err error) {
+func (bnc *binance) startMarketDataStream(ctx context.Context, baseSymbol, quoteSymbol string) (err error) {
 	slug := strings.ToLower(baseSymbol + quoteSymbol)
 
 	bnc.marketStreamMtx.Lock()
@@ -873,33 +888,33 @@ func (bnc *binance) startMarketDataStream(baseSymbol, quoteSymbol string) (err e
 	streamHandler := func(b []byte) {
 		var note *bncBookNote
 		if err := json.Unmarshal(b, &note); err != nil {
-			bnc.log.Errorf("error unmarshaling book note: %v", err)
+			bnc.log.Errorf("Error unmarshaling book note: %v", err)
 			return
 		}
 
 		if note == nil || note.Data == nil {
-			bnc.log.Debugf("no data in %q update: %+v", slug, note)
+			bnc.log.Debugf("No data in %q update: %+v", slug, note)
 			return
 		}
 
 		parts := strings.Split(note.StreamName, "@")
 		if len(parts) != 2 || parts[1] != "depth20" {
-			bnc.log.Errorf("unknown stream name %q", note.StreamName)
+			bnc.log.Errorf("Unknown stream name %q", note.StreamName)
 			return
 		}
 		slug = parts[0] // will be lower-case
 
-		bnc.log.Tracef("received %d bids and %d asks in a book update for %s", len(note.Data.Bids), len(note.Data.Asks), slug)
+		bnc.log.Tracef("Received %d bids and %d asks in a book update for %s", len(note.Data.Bids), len(note.Data.Asks), slug)
 
 		bids, err := bncParseBookUpdates(note.Data.Bids)
 		if err != nil {
-			bnc.log.Errorf("error parsing bid updates: %v", err)
+			bnc.log.Errorf("Error parsing bid updates: %v", err)
 			return
 		}
 
 		asks, err := bncParseBookUpdates(note.Data.Asks)
 		if err != nil {
-			bnc.log.Errorf("error parsing ask updates: %v", err)
+			bnc.log.Errorf("Error parsing ask updates: %v", err)
 			return
 		}
 
@@ -907,17 +922,18 @@ func (bnc *binance) startMarketDataStream(baseSymbol, quoteSymbol string) (err e
 		defer bnc.booksMtx.Unlock()
 		book := bnc.books[slug]
 		if book == nil {
-			bnc.log.Errorf("no book for stream %q", slug)
+			bnc.log.Errorf("No book for stream %q", slug)
 			return
 		}
 
+		book.latestUpdate = time.Now().Unix()
 		book.asks = asks
 		book.bids = bids
 	}
 
 	newConn := func() (comms.WsConn, *dex.ConnectionMaster, error) {
-		if bnc.ctx.Err() != nil {
-			return nil, nil, bnc.ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
 		}
 		bnc.log.Debugf("Creating a new Binance market stream handler")
 		// Get a list of current subscriptions so we can restart them all.
@@ -948,7 +964,7 @@ func (bnc *binance) startMarketDataStream(baseSymbol, quoteSymbol string) (err e
 		}
 
 		cm := dex.NewConnectionMaster(conn)
-		if err = cm.ConnectOnce(bnc.ctx); err != nil {
+		if err = cm.ConnectOnce(ctx); err != nil {
 			return nil, nil, fmt.Errorf("websocketHandler remote connect: %v", err)
 		}
 
@@ -978,13 +994,13 @@ func (bnc *binance) startMarketDataStream(baseSymbol, quoteSymbol string) (err e
 				}
 				conn, cm, err = newConn()
 				if err != nil {
-					bnc.log.Errorf("error reconnecting: %v", err)
+					bnc.log.Errorf("Error reconnecting: %v", err)
 					reconnect = time.After(time.Second * 30)
 				} else {
 					bnc.storeMarketStream(conn)
 					reconnect = time.After(time.Hour * 12)
 				}
-			case <-bnc.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -994,14 +1010,14 @@ func (bnc *binance) startMarketDataStream(baseSymbol, quoteSymbol string) (err e
 }
 
 // UnsubscribeMarket unsubscribes from order book updates on a market.
-func (bnc *binance) UnsubscribeMarket(baseSymbol, quoteSymbol string) error {
-	return bnc.stopMarketDataStream(strings.ToLower(baseSymbol + quoteSymbol))
+func (bnc *binance) UnsubscribeMarket(baseSymbol, quoteSymbol string) {
+	bnc.stopMarketDataStream(strings.ToLower(baseSymbol + quoteSymbol))
 }
 
 // SubscribeMarket subscribes to order book updates on a market. This must
 // be called before calling VWAP.
-func (bnc *binance) SubscribeMarket(baseSymbol, quoteSymbol string) error {
-	return bnc.startMarketDataStream(baseSymbol, quoteSymbol)
+func (bnc *binance) SubscribeMarket(ctx context.Context, baseSymbol, quoteSymbol string) error {
+	return bnc.startMarketDataStream(ctx, baseSymbol, quoteSymbol)
 }
 
 // VWAP returns the volume weighted average price for a certain quantity
@@ -1013,9 +1029,11 @@ func (bnc *binance) VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) 
 
 	slug := strings.ToLower(baseSymbol + quoteSymbol)
 	var side []*bookBin
+	var latestUpdate int64
 	bnc.booksMtx.RLock()
 	book, found := bnc.books[slug]
 	if found {
+		latestUpdate = book.latestUpdate
 		if sell {
 			side = book.asks
 		} else {
@@ -1025,6 +1043,10 @@ func (bnc *binance) VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) 
 	bnc.booksMtx.RUnlock()
 	if side == nil {
 		return fail(fmt.Errorf("no book found for %s", slug))
+	}
+
+	if latestUpdate < time.Now().Unix()-60 {
+		return fail(fmt.Errorf("book for %s is stale", slug))
 	}
 
 	baseCfg, err := bncSymbolData(baseSymbol)

@@ -268,7 +268,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
 	cexTradeID := a.cex.GenerateTradeID()
-	err := a.cex.Trade(dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize, a.cexTradeUpdatesID, cexTradeID)
+	err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize, a.cexTradeUpdatesID, cexTradeID)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -286,7 +286,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	if err != nil {
 		a.log.Errorf("error placing dex order: %v", err)
 
-		err := a.cex.CancelTrade(dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), cexTradeID)
+		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), cexTradeID)
 		if err != nil {
 			a.log.Errorf("error canceling cex order: %v", err)
 			// TODO: keep retrying failed cancel
@@ -343,7 +343,7 @@ func (a *simpleArbMarketMaker) selfMatch(sell bool, rate uint64) bool {
 // if they have not yet been filled.
 func (a *simpleArbMarketMaker) cancelArbSequence(arb *arbSequence) {
 	if !arb.cexOrderFilled {
-		err := a.cex.CancelTrade(dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), arb.cexOrderID)
+		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), arb.cexOrderID)
 		if err != nil {
 			a.log.Errorf("failed to cancel cex trade ID %s: %v", arb.cexOrderID, err)
 		}
@@ -430,13 +430,14 @@ func (a *simpleArbMarketMaker) run() {
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote))
+	err = a.cex.SubscribeMarket(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote))
 	if err != nil {
 		a.log.Errorf("Failed to subscribe to cex market: %v", err)
 		return
 	}
 
-	tradeUpdates, tradeUpdatesID := a.cex.SubscribeTradeUpdates()
+	tradeUpdates, unsubscribe, tradeUpdatesID := a.cex.SubscribeTradeUpdates()
+	defer unsubscribe()
 	a.cexTradeUpdatesID = tradeUpdatesID
 
 	wg := &sync.WaitGroup{}
