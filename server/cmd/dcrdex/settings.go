@@ -85,6 +85,9 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 	// Normalize the asset names to lower case.
 	var assets []*dexsrv.AssetConf
 	for assetName, assetConf := range conf.Assets {
+		if assetConf.Disabled {
+			continue
+		}
 		net, err := dex.NetFromString(assetConf.Network)
 		if err != nil {
 			return nil, nil, fmt.Errorf("unrecognized network %s for asset %s",
