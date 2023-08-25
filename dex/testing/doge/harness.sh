@@ -51,6 +51,10 @@ SESSION="${SYMBOL}-harness"
 
 SHELL=$(which bash)
 
+# Background watch mining by default:
+# 'export NOMINER="1"' or uncomment this line to disable
+#NOMINER="1"
+
 ################################################################################
 # Load prepared wallets.
 ################################################################################

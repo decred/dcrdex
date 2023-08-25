@@ -24,7 +24,8 @@ pingpong **traders** in parallel.
 The **sidestacker** program runs 2 **traders**, one seller and one buyer. Each
 epoch, the **traders** will attempt to create order book depth on their side.
 If the book is deep enough already, they will place taker orders targeting
-the other side.
+the other side. Can be further altered by setting a linear increase
+(trending market) or an automatic ascending/descending pattern (sideways market).
 
 #### compound
 
@@ -37,6 +38,12 @@ regularly pick off the best order from a random side.
 The **heavy** program is like **compound** on steroids. Four
 **sidestacker traders** with 6 orders per epoch, and a 5-order per epoch
 **sniper**.
+
+#### whale
+
+The **whale** program runs multiple **traders** that randomly push the market in
+one direction or the other. Can be run separately with other programs to create
+a volatile market.
 
 ### Logging
 

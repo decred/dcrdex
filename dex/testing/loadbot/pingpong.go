@@ -18,9 +18,6 @@ type pingPonger struct{}
 var _ Trader = (*pingPonger)(nil)
 
 func runPingPong(n int) {
-	// For this program, we'll want to mine a block about every epoch or so.
-	go moreThanOneBlockPer()
-
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -35,7 +32,7 @@ func runPingPong(n int) {
 // SetupWallets is part of the Trader interface.
 func (p *pingPonger) SetupWallets(m *Mantle) {
 	numCoins := 4
-	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins)
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, uint64(defaultMidGap*rateEncFactor))
 	m.createWallet(baseSymbol, alpha, minBaseQty, maxBaseQty, numCoins)
 	m.createWallet(quoteSymbol, alpha, minQuoteQty, maxQuoteQty, numCoins)
 	m.log.Infof("Ping Ponger has been initialized with %s to %s %s balance, "+
@@ -47,7 +44,7 @@ func (p *pingPonger) SetupWallets(m *Mantle) {
 // HandleNotification is part of the Trader interface.
 func (p *pingPonger) HandleNotification(m *Mantle, note core.Notification) {
 	switch n := note.(type) {
-	case *core.FeePaymentNote:
+	case *core.BondPostNote:
 		if n.Topic() == core.TopicAccountRegistered {
 			p.buy(m)
 			p.sell(m)
@@ -65,6 +62,18 @@ func (p *pingPonger) HandleNotification(m *Mantle, note core.Notification) {
 			} else {
 				p.buy(m)
 			}
+		}
+	case *core.EpochNotification:
+		if n.MarketID == market {
+			numCoins := 4
+			book := m.book()
+			midGap := midGap(book)
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, midGap)
+			wmm := walletMinMax{
+				baseID:  {min: minBaseQty, max: maxBaseQty},
+				quoteID: {min: minQuoteQty, max: maxQuoteQty},
+			}
+			m.replenishBalances(wmm)
 		}
 	case *core.BalanceNote:
 		log.Infof("pingponger balance: %s = %d available, %d locked", unbip(n.AssetID), n.Balance.Available, n.Balance.Locked)

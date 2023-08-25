@@ -13,17 +13,20 @@ import (
 // runCompound runs the 'compound' program, consisting of 2 (5/3) unmetered
 // sideStackers, a 1-order sniper, and a pingPonger.
 func runCompound() {
-	go blockEvery2()
-
+	var oscillator uint64
 	var wg sync.WaitGroup
 	wg.Add(4)
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(true, 5, 3, alpha, false, log.SubLogger("STACKER:0")), "CMPD:STACKER:0")
+		seller, metered, oscillatorWrite := true, false, true
+		runTrader(newSideStacker(20, 3, alpha, seller, metered, oscillatorWrite,
+			&oscillator, log.SubLogger("STACKER:0")), "CMPD:STACKER:0")
 	}()
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(false, 5, 3, alpha, false, log.SubLogger("STACKER:1")), "CMPD:STACKER:1")
+		seller, metered, oscillatorWrite := false, false, false
+		runTrader(newSideStacker(20, 3, alpha, seller, metered, oscillatorWrite,
+			&oscillator, log.SubLogger("STACKER:1")), "CMPD:STACKER:1")
 	}()
 	go func() {
 		defer wg.Done()
@@ -59,25 +62,32 @@ func runHeavy() {
 		}
 	}
 
-	go blockEvery2()
-
+	var oscillator uint64
 	var wg sync.WaitGroup
 	wg.Add(5)
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(true, 12, 6, alpha, true, log.SubLogger("STACKER:0")), "HEAVY:STACKER:0")
+		seller, metered, oscillatorWrite := true, false, true
+		runTrader(newSideStacker(24, 6, alpha, seller, metered, oscillatorWrite,
+			&oscillator, log.SubLogger("STACKER:0")), "HEAVY:STACKER:0")
 	}()
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(false, 12, 6, alpha, true, log.SubLogger("STACKER:1")), "HEAVY:STACKER:1")
+		seller, metered, oscillatorWrite := false, false, false
+		runTrader(newSideStacker(24, 6, alpha, seller, metered, oscillatorWrite,
+			&oscillator, log.SubLogger("STACKER:1")), "HEAVY:STACKER:1")
 	}()
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(true, 8, 4, beta, false, log.SubLogger("STACKER:2")), "HEAVY:STACKER:2")
+		seller, metered, oscillatorWrite := true, false, false
+		runTrader(newSideStacker(16, 4, beta, seller, metered, oscillatorWrite,
+			&oscillator, log.SubLogger("STACKER:2")), "HEAVY:STACKER:2")
 	}()
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(false, 8, 4, beta, false, log.SubLogger("STACKER:3")), "HEAVY:STACKER:3")
+		seller, metered, oscillatorWrite := false, false, false
+		runTrader(newSideStacker(16, 4, beta, seller, metered, oscillatorWrite,
+			&oscillator, log.SubLogger("STACKER:3")), "HEAVY:STACKER:3")
 	}()
 	go func() {
 		defer wg.Done()
