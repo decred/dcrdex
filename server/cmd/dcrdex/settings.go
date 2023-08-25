@@ -24,6 +24,7 @@ type marketConfig struct {
 		Duration       uint64  `json:"epochDuration"`
 		MBBuffer       float64 `json:"marketBuyBuffer"`
 		BookedLotLimit uint32  `json:"userBookedLotLimit"`
+		Disabled       bool    `json:"disabled"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.AssetConf `json:"assets"`
 }
@@ -112,6 +113,9 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 
 	var markets []*dex.MarketInfo
 	for _, mktConf := range conf.Markets {
+		if mktConf.Disabled {
+			continue
+		}
 		baseConf, ok := conf.Assets[mktConf.Base]
 		if !ok {
 			return nil, nil, fmt.Errorf("Missing configuration for asset %s", mktConf.Base)
