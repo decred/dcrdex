@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -31,7 +32,6 @@ const (
 	minNetworkVersion  = 141201 // bitcoin 0.14 base
 	walletTypeRPC      = "firodRPC"
 	walletTypeElectrum = "electrumRPC"
-	walletTypeLegacy   = ""
 	estimateFeeConfs   = 2 // 2 blocks should be enough
 
 	mainnetExplorerFeeAPI = "https://explorer.firo.org/insight-api-zcoin/utils/estimatefee"
@@ -119,6 +119,15 @@ func (d *Driver) Info() *asset.WalletInfo {
 // canceled. The configPath can be an empty string, in which case the standard
 // system location of the firod config file is assumed.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
+	if flag.Lookup("test.v") != nil {
+		// If testing we need to do a workaround check for legacy no-type wallet.
+		// This Only happens calling from regnet_test.go when the btc livetest code
+		// calls NewWallet. Maybe bch client had a similar problem.
+		if cfg.Type == "" {
+			cfg.Type = walletTypeRPC
+		}
+	}
+
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
@@ -152,7 +161,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Segwit:                   false,
 		InitTxSize:               dexbtc.InitTxSize,
 		InitTxSizeBase:           dexbtc.InitTxSizeBase,
-		LegacyBalance:            false, // set true only for walletTypeRPC below
+		LegacyBalance:            cfg.Type == walletTypeRPC,
 		LegacyRawFeeLimit:        true,  // sendrawtransaction Has single arg allowhighfees
 		ArglessChangeAddrRPC:     true,  // getrawchangeaddress has No address-type arg
 		OmitAddressType:          true,  // getnewaddress has No address-type arg
@@ -161,7 +170,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		NumericGetRawRPC:         false, // getrawtransaction uses either 0/1 Or true/false
 		LegacyValidateAddressRPC: true,  // use validateaddress to read 'ismine' bool
 		SingularWallet:           true,  // one wallet/node
-		UnlockSpends:             true,  // does Not unlock coins after sendrawtransaction
+		UnlockSpends:             true,  // Firo chain wallet does Not unlock coins after sendrawtransaction
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     fetchExternalFee,
@@ -169,10 +178,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 
 	switch cfg.Type {
-	case walletTypeRPC, walletTypeLegacy:
-		cloneCFG.LegacyBalance = true
+	case walletTypeRPC:
 		var exw *btc.ExchangeWalletFullNode
-		// override PrivKeyFunc - we Do need our own Firo dumpprivkey fn
+		// override PrivKeyFunc - we need our own Firo dumpprivkey fn
 		cloneCFG.PrivKeyFunc = func(addr string) (*btcec.PrivateKey, error) {
 			return privKeyForAddress(exw, addr)
 		}

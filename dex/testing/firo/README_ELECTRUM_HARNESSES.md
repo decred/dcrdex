@@ -38,7 +38,8 @@ The **electrum.sh** script depends on [python3], [python3 pip] and [git] to run.
 Python3 v3.6 is coded but this script was tested using python3.10. Some testing
 (minimal) was done with 3.7. Python 3.8, 3.9 would be expected to work although
 untested. However using Python 3.11 there are dependencies which will not build
-and are unsupported by their respective maintainers on PyPI. Git should be latest.Pip will be re-downloaded and it's version upgraded by the script into a virtual environment each time.
+and are unsupported by their respective maintainers on PyPI. Git should be latest.
+Pip will be re-downloaded and it's version upgraded by the script into a virtual environment each time.
 
 ### Architecture
 
@@ -102,7 +103,7 @@ from files in `contrib/requirements` directory into the sandbox. If any need bui
 this point.
 
 A prepared, empty but encrypted electrum wallet is copied to the electrum data
-directory at **~/dextest/electrum/firo/client/wallet/regtest/wallets** directory.
+directory at **~/dextest/electrum/firo/client/wallet/regtest/wallets**.
 
 By default the electrum client is started as a daemon and the default wallet is loaded.
 Use **stop-daemon** script to stop the daemon.
