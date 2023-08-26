@@ -117,6 +117,12 @@ func (drv *tDriver) Info() *asset.WalletInfo {
 	return drv.winfo
 }
 
+type tBookFeed struct{}
+
+func (t *tBookFeed) Next() <-chan *core.BookUpdate { return make(chan *core.BookUpdate, 1) }
+func (t *tBookFeed) Close()                        {}
+func (t *tBookFeed) Candles(dur string) error      { return nil }
+
 type tCore struct {
 	assetBalances     map[uint32]*core.WalletBalance
 	assetBalanceErr   error
@@ -143,6 +149,7 @@ type tCore struct {
 	sellsPlaced       []*core.TradeForm
 	multiTradesPlaced []*core.MultiTradeForm
 	maxFundingFees    uint64
+	book              *orderbook.OrderBook
 }
 
 func (c *tCore) NotificationFeed() *core.NoteFeed {
@@ -152,16 +159,10 @@ func (c *tCore) ExchangeMarket(host string, base, quote uint32) (*core.Market, e
 	return c.market, nil
 }
 
-type tBookFeed struct{}
-
-func (t *tBookFeed) Next() <-chan *core.BookUpdate { return make(<-chan *core.BookUpdate) }
-func (t *tBookFeed) Close()                        {}
-func (t *tBookFeed) Candles(string) error          { return nil }
-
 var _ core.BookFeed = (*tBookFeed)(nil)
 
-func (*tCore) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
-	return nil, &tBookFeed{}, nil
+func (t *tCore) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
+	return t.book, &tBookFeed{}, nil
 }
 func (*tCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return nil
@@ -175,7 +176,8 @@ func (c *tCore) SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uin
 	}
 	return c.buySwapFees, c.buyRedeemFees, c.buyRefundFees, nil
 }
-func (*tCore) Cancel(oidB dex.Bytes) error {
+func (t *tCore) Cancel(oidB dex.Bytes) error {
+	t.cancelsPlaced = append(t.cancelsPlaced, oidB)
 	return nil
 }
 func (c *tCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
@@ -284,6 +286,32 @@ func newTCore() *tCore {
 type tOrderBook struct {
 	midGap    uint64
 	midGapErr error
+
+	bidsVWAP map[uint64]vwapResult
+	asksVWAP map[uint64]vwapResult
+	vwapErr  error
+}
+
+var _ dexOrderBook = (*tOrderBook)(nil)
+
+func (t *tOrderBook) VWAP(numLots, _ uint64, sell bool) (avg, extrema uint64, filled bool, err error) {
+	if t.vwapErr != nil {
+		return 0, 0, false, t.vwapErr
+	}
+
+	if sell {
+		res, found := t.asksVWAP[numLots]
+		if !found {
+			return 0, 0, false, nil
+		}
+		return res.avg, res.extrema, true, nil
+	}
+
+	res, found := t.bidsVWAP[numLots]
+	if !found {
+		return 0, 0, false, nil
+	}
+	return res.avg, res.extrema, true, nil
 }
 
 func (o *tOrderBook) MidGap() (uint64, error) {
@@ -4092,7 +4120,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 		mm.doNotKillWhenBotsStop = true
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err = mm.Run(ctx, []*BotConfig{test.cfg}, []byte{})
+		err = mm.Run(ctx, []*BotConfig{test.cfg}, []*CEXConfig{}, []byte{})
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
