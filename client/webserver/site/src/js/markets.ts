@@ -477,8 +477,11 @@ export default class MarketsPage extends BasePage {
     // Prepare the list of markets.
     for (const row of this.marketList.markets) {
       bind(row.node, 'click', () => {
+        // return early if the market is already set
+        const { quoteid: quoteID, baseid: baseID, xc: { host } } = row.mkt
+        if (this.market && this.market.base.id === baseID && this.market.quote.id === quoteID) return
         this.startLoadingAnimations()
-        this.setMarket(row.mkt.xc.host, row.mkt.baseid, row.mkt.quoteid)
+        this.setMarket(host, baseID, quoteID)
       })
     }
     if (State.fetchLocal(State.leftMarketDockLK) !== '1') { // It is shown by default, hiding if necessary.
@@ -527,10 +530,10 @@ export default class MarketsPage extends BasePage {
       if (first) selected = { host: first.mkt.xc.host, base: first.mkt.baseid, quote: first.mkt.quoteid }
     }
     if (selected) this.setMarket(selected.host, selected.base, selected.quote)
+    else this.balanceWgt.setBalanceVisibility(false) // no market to display balance widget for.
 
     // set the initial state for the registration status
     this.setRegistrationStatusVisibility()
-    this.setBalanceVisibility()
   }
 
   startLoadingAnimations () {
@@ -1014,6 +1017,19 @@ export default class MarketsPage extends BasePage {
     page.qtyField.value = ''
     page.rateField.value = ''
 
+    // clear depth chart and orderbook.
+    this.depthChart.clear()
+    Doc.empty(this.page.buyRows)
+    Doc.empty(this.page.sellRows)
+
+    // Clear recent matches for the previous market. This will be set when we
+    // receive the order book subscription response.
+    this.recentMatches = []
+    Doc.empty(page.recentMatchesLiveList)
+
+    // Hide the balance widget
+    this.balanceWgt.setBalanceVisibility(false)
+
     Doc.hide(page.notRegistered, page.bondRequired, page.noWallet)
 
     // If we have not yet connected, there is no dex.assets or any other
@@ -1041,7 +1057,7 @@ export default class MarketsPage extends BasePage {
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
     const baseAsset = app().assets[base]
     const quoteAsset = app().assets[quote]
-    this.market = {
+    const mkt = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
       cfg: dex.markets[mktId],
@@ -1062,16 +1078,26 @@ export default class MarketsPage extends BasePage {
       buyBalance: 0
     }
 
-    Doc.setVis(!(baseAsset && quoteAsset) || !(baseAsset.wallet && quoteAsset.wallet), page.noWallet)
+    this.market = mkt
+    page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
+    page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
+
+    if ((!baseAsset && !quoteAsset) || (!baseAsset.wallet && !quoteAsset.wallet)) Doc.setVis(true, page.noWallet)
+    else this.balanceWgt.setWallets(host, base, quote)
     this.setMarketDetails()
     this.setCurrMarketPrice()
-    this.refreshRecentMatchesTable()
 
     // if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
 
     // depth chart
     ws.request('loadmarket', makeMarket(host, base, quote))
 
+    State.storeLocal(State.lastMarketLK, {
+      host: host,
+      base: base,
+      quote: quote
+    })
+    this.marketList.select(host, base, quote)
     this.setLoaderMsgVisibility()
     this.setTokenApprovalVisibility()
     this.setRegistrationStatusVisibility()
@@ -1079,6 +1105,7 @@ export default class MarketsPage extends BasePage {
     this.setOrderBttnText()
     this.setCandleDurBttns()
     this.previewQuoteAmt(false)
+    this.updateTitle()
   }
 
   /*
@@ -1579,13 +1606,11 @@ export default class MarketsPage extends BasePage {
     // gets first price value from buy or from sell, so we can show it on
     // title.
     const midGapValue = this.midGapConventional()
-    if (!midGapValue) return
-
     const { baseCfg: b, quoteCfg: q } = this.market
     const baseSymb = b.symbol.toUpperCase()
     const quoteSymb = q.symbol.toUpperCase()
-    // more than 6 numbers it gets too big for the title.
-    document.title = `${Doc.formatCoinValue(midGapValue)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
+    if (!midGapValue) document.title = `${baseSymb}${quoteSymb} | ${this.ogTitle}`
+    else document.title = `${Doc.formatCoinValue(midGapValue)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}` // more than 6 numbers it gets too big for the title.
   }
 
   /* handleBookRoute is the handler for the 'book' notification, which is sent
@@ -1595,24 +1620,10 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (note: BookUpdate) {
     app().log('book', 'handleBookRoute:', note)
     const mktBook = note.payload
-    const market = this.market
-    const page = this.page
-    const host = market.dex.host
-    const [b, q] = [market.baseCfg, market.quoteCfg]
-    if (mktBook.base !== b.id || mktBook.quote !== q.id) return
-    this.refreshActiveOrders()
+    const [b, q] = [this.market.baseCfg, this.market.quoteCfg]
+    if (mktBook.base !== b.id || mktBook.quote !== q.id) return // user already changed markets
     this.handleBook(mktBook)
     this.updateTitle()
-    this.marketList.select(host, b.id, q.id)
-
-    State.storeLocal(State.lastMarketLK, {
-      host: note.host,
-      base: mktBook.base,
-      quote: mktBook.quote
-    })
-
-    page.lotSize.textContent = Doc.formatCoinValue(market.cfg.lotsize, market.baseUnitInfo)
-    page.rateStep.textContent = Doc.formatCoinValue(market.cfg.ratestep / market.rateConversionFactor)
     this.baseUnits.forEach(el => {
       Doc.empty(el)
       el.appendChild(Doc.symbolize(b.symbol))
@@ -1621,7 +1632,6 @@ export default class MarketsPage extends BasePage {
       Doc.empty(el)
       el.appendChild(Doc.symbolize(q.symbol))
     })
-    this.balanceWgt.setWallets(host, b.id, q.id)
     this.setMarketBuyOrderEstimate()
     this.refreshActiveOrders()
   }
@@ -2356,20 +2366,18 @@ export default class MarketsPage extends BasePage {
     this.recentMatches = [...matches, ...this.recentMatches].slice(0, 100)
   }
 
-  setBalanceVisibility () {
-    const mkt = this.market
-    if (!mkt || !mkt.dex) return
-    this.balanceWgt.setBalanceVisibility(mkt.dex.connectionStatus === ConnectionStatus.Connected)
-  }
-
   /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note: BalanceNote) {
-    this.setBalanceVisibility()
     this.preorderCache = {} // invalidate previous preorder results
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
     const mkt = this.market
     if (!mkt || !mkt.dex || mkt.dex.connectionStatus !== ConnectionStatus.Connected) return
+
+    const wgt = this.balanceWgt
+    // Display the widget if the balance note is for its base or quote wallet.
+    if ((note.assetID === wgt.base.id || note.assetID === wgt.quote.id)) wgt.setBalanceVisibility(true)
+
     // If there's a balance update, refresh the max order section.
     const avail = note.balance.available
     switch (note.assetID) {
@@ -2969,7 +2977,8 @@ class BalanceWidget {
   }
 
   /*
-   * setWallet sets the balance widget to display data for specified market.
+   * setWallet sets the balance widget to display data for specified market and
+   * will display the widget.
    */
   setWallets (host: string, baseID: number, quoteID: number) {
     const parentID = (assetID: number) => {
@@ -2986,6 +2995,7 @@ class BalanceWidget {
     this.quote.cfg = this.dex.assets[quoteID]
     this.updateWallet(this.base)
     this.updateWallet(this.quote)
+    this.setBalanceVisibility(this.dex.connectionStatus === ConnectionStatus.Connected)
   }
 
   /*
