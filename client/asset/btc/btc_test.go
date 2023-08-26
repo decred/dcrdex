@@ -2026,17 +2026,13 @@ func testMaxFundingFees(t *testing.T, segwit bool, walletType string) {
 	wallet, _, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
 
-	feeRateLimit := uint64(100)
-
-	wallet.cfgV.Store(&baseWalletConfig{
-		feeRateLimit: feeRateLimit,
-	})
+	maxFeeRate := uint64(100)
 
 	useSplitOptions := map[string]string{
-		splitKey: "true",
+		multiSplitKey: "true",
 	}
 	noSplitOptions := map[string]string{
-		splitKey: "false",
+		multiSplitKey: "false",
 	}
 
 	var inputSize, outputSize uint64
@@ -2050,13 +2046,13 @@ func testMaxFundingFees(t *testing.T, segwit bool, walletType string) {
 
 	const maxSwaps = 3
 	const numInputs = 12
-	maxFundingFees := wallet.MaxFundingFees(maxSwaps, useSplitOptions)
-	expectedFees := feeRateLimit * (inputSize*numInputs + outputSize*(maxSwaps+1) + dexbtc.MinimumTxOverhead)
+	maxFundingFees := wallet.MaxFundingFees(maxSwaps, maxFeeRate, useSplitOptions)
+	expectedFees := maxFeeRate * (inputSize*numInputs + outputSize*(maxSwaps+1) + dexbtc.MinimumTxOverhead)
 	if maxFundingFees != expectedFees {
 		t.Fatalf("unexpected max funding fees. expected %d, got %d", expectedFees, maxFundingFees)
 	}
 
-	maxFundingFees = wallet.MaxFundingFees(maxSwaps, noSplitOptions)
+	maxFundingFees = wallet.MaxFundingFees(maxSwaps, maxFeeRate, noSplitOptions)
 	if maxFundingFees != 0 {
 		t.Fatalf("unexpected max funding fees. expected 0, got %d", maxFundingFees)
 	}

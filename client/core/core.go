@@ -5557,12 +5557,12 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
 		}
 	}
 
-	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeRate, form.Options)
+	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeRate, form.UseSafeTxSize)
 	if err != nil {
 		return 0, 0, fmt.Errorf("error calculating swap fees: %w", err)
 	}
 
-	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeRate, form.Options)
+	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeRate)
 	if err != nil {
 		return 0, 0, fmt.Errorf("error calculating redeem fees: %w", err)
 	}
@@ -5571,13 +5571,25 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
 }
 
 // MaxFundingFees gives the max fees required to fund a Trade or MultiTrade.
-func (c *Core) MaxFundingFees(fromAsset uint32, numTrades uint32, options map[string]string) (uint64, error) {
+// The host is needed to get the MaxFeeRate, which is used to calculate
+// the funding fees.
+func (c *Core) MaxFundingFees(fromAsset uint32, host string, numTrades uint32, options map[string]string) (uint64, error) {
 	wallet, found := c.wallet(fromAsset)
 	if !found {
 		return 0, newError(missingWalletErr, "no wallet found for %s", unbip(fromAsset))
 	}
 
-	return wallet.MaxFundingFees(numTrades, options), nil
+	exchange, err := c.Exchange(host)
+	if err != nil {
+		return 0, err
+	}
+
+	asset, found := exchange.Assets[fromAsset]
+	if !found {
+		return 0, fmt.Errorf("asset %d not found for %s", fromAsset, host)
+	}
+
+	return wallet.MaxFundingFees(numTrades, asset.MaxFeeRate, options), nil
 }
 
 // PreOrder calculates fee estimates for a trade.

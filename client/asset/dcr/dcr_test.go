@@ -1,4 +1,4 @@
-//go:build !harness
+//go:build !harness && !vspd
 
 package dcr
 
@@ -709,26 +709,22 @@ func TestMaxFundingFees(t *testing.T) {
 	wallet, _, shutdown := tNewWallet()
 	defer shutdown()
 
-	feeRateLimit := uint64(100)
-
-	wallet.cfgV.Store(&exchangeWalletConfig{
-		feeRateLimit: feeRateLimit,
-	})
+	maxFeeRate := uint64(100)
 
 	useSplitOptions := map[string]string{
-		splitKey: "true",
+		multiSplitKey: "true",
 	}
 	noSplitOptions := map[string]string{
-		splitKey: "false",
+		multiSplitKey: "false",
 	}
 
-	maxFundingFees := wallet.MaxFundingFees(3, useSplitOptions)
-	expectedFees := feeRateLimit * (dexdcr.P2PKHInputSize*12 + dexdcr.P2PKHOutputSize*4 + dexdcr.MsgTxOverhead)
+	maxFundingFees := wallet.MaxFundingFees(3, maxFeeRate, useSplitOptions)
+	expectedFees := maxFeeRate * (dexdcr.P2PKHInputSize*12 + dexdcr.P2PKHOutputSize*4 + dexdcr.MsgTxOverhead)
 	if maxFundingFees != expectedFees {
 		t.Fatalf("unexpected max funding fees. expected %d, got %d", expectedFees, maxFundingFees)
 	}
 
-	maxFundingFees = wallet.MaxFundingFees(3, noSplitOptions)
+	maxFundingFees = wallet.MaxFundingFees(3, maxFeeRate, noSplitOptions)
 	if maxFundingFees != 0 {
 		t.Fatalf("unexpected max funding fees. expected 0, got %d", maxFundingFees)
 	}

@@ -52,6 +52,12 @@ type priceOracle struct {
 	cachedPrices map[string]*cachedPrice
 }
 
+type oracle interface {
+	getMarketPrice(base, quote uint32) float64
+}
+
+var _ oracle = (*priceOracle)(nil)
+
 func (o *priceOracle) getMarketPrice(base, quote uint32) float64 {
 	mktStr := (&mkt{base, quote}).String()
 

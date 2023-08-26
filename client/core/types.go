@@ -1031,12 +1031,12 @@ type MultiTradeForm struct {
 
 // SingleLotFeesForm is used to determine the fees for a single lot trade.
 type SingleLotFeesForm struct {
-	Host          string            `json:"host"`
-	Base          uint32            `json:"base"`
-	Quote         uint32            `json:"quote"`
-	Sell          bool              `json:"sell"`
-	Options       map[string]string `json:"options"`
-	UseMaxFeeRate bool              `json:"useMaxFeeRate"`
+	Host          string `json:"host"`
+	Base          uint32 `json:"base"`
+	Quote         uint32 `json:"quote"`
+	Sell          bool   `json:"sell"`
+	UseMaxFeeRate bool   `json:"useMaxFeeRate"`
+	UseSafeTxSize bool   `json:"useSafeTxSize"`
 }
 
 // marketName is a string ID constructed from the asset IDs.

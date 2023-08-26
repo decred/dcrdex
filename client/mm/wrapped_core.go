@@ -37,7 +37,7 @@ func (c *wrappedCore) maxBuyQty(host string, base, quote uint32, rate uint64, op
 		return 0, err
 	}
 
-	fundingFees, err := c.MaxFundingFees(quote, 1, options)
+	fundingFees, err := c.MaxFundingFees(quote, host, 1, options)
 	if err != nil {
 		return 0, err
 	}
@@ -80,7 +80,7 @@ func (c *wrappedCore) maxSellQty(host string, base, quote, numTrades uint32, opt
 		return 0, err
 	}
 
-	fundingFees, err := c.MaxFundingFees(base, numTrades, options)
+	fundingFees, err := c.MaxFundingFees(base, host, numTrades, options)
 	if err != nil {
 		return 0, err
 	}
@@ -158,7 +158,7 @@ func (c *wrappedCore) sufficientBalanceForMultiBuy(host string, base, quote uint
 		return false, err
 	}
 
-	fundingFees, err := c.MaxFundingFees(quote, uint32(len(placements)), options)
+	fundingFees, err := c.MaxFundingFees(quote, host, uint32(len(placements)), options)
 	if err != nil {
 		return false, err
 	}

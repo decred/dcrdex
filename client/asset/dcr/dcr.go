@@ -231,6 +231,24 @@ var (
 		IsBirthdayConfig:  true,
 	}}
 
+	multiFundingOpts = []*asset.ConfigOption{
+		{
+			Key:         multiSplitKey,
+			DisplayName: "External fee rate estimates",
+			Description: "Allow split funding transactions that pre-size outputs to " +
+				"prevent excessive overlock.",
+			IsBoolean:    true,
+			DefaultValue: true,
+		},
+		{
+			Key:         multiSplitBufferKey,
+			DisplayName: "External fee rate estimates",
+			Description: "Add an integer percent buffer to split output amounts to " +
+				"facilitate output reuse",
+			DefaultValue: true,
+		},
+	}
+
 	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Decred",
@@ -239,11 +257,12 @@ var (
 		UnitInfo:          dexdcr.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			{
-				Type:        walletTypeSPV,
-				Tab:         "Native",
-				Description: "Use the built-in SPV wallet",
-				ConfigOpts:  append(spvOpts, walletOpts...),
-				Seeded:      true,
+				Type:             walletTypeSPV,
+				Tab:              "Native",
+				Description:      "Use the built-in SPV wallet",
+				ConfigOpts:       append(spvOpts, walletOpts...),
+				Seeded:           true,
+				MultiFundingOpts: multiFundingOpts,
 			},
 			{
 				Type:              walletTypeDcrwRPC,
@@ -251,6 +270,7 @@ var (
 				Description:       "Connect to dcrwallet",
 				DefaultConfigPath: defaultConfigPath,
 				ConfigOpts:        append(rpcOpts, walletOpts...),
+				MultiFundingOpts:  multiFundingOpts,
 			},
 		},
 	}
@@ -602,7 +622,7 @@ type ExchangeWallet struct {
 	tipChange     func(error)
 	lastPeerCount uint32
 	peersChange   func(uint32, error)
-	dir           string
+	vspFilepath   string
 	walletType    string
 
 	oracleFeesMtx sync.Mutex
@@ -853,6 +873,8 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		return nil, fmt.Errorf("unable to create wallet dir: %v", err)
 	}
 
+	vspFilepath := filepath.Join(dir, vspFileName)
+
 	w := &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
@@ -864,11 +886,11 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
 		oracleFees:          make(map[uint64]feeStamped),
 		mempoolRedeems:      make(map[[32]byte]*mempoolRedeem),
-		dir:                 dir,
+		vspFilepath:         vspFilepath,
 		walletType:          cfg.Type,
 	}
 
-	if b, err := os.ReadFile(filepath.Join(dir, vspFileName)); err == nil {
+	if b, err := os.ReadFile(vspFilepath); err == nil {
 		var v vsp
 		err = json.Unmarshal(b, &v)
 		if err != nil {
@@ -1696,54 +1718,29 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 }
 
 // SingleLotSwapFees returns the fees for a swap transaction for a single lot.
-func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, options map[string]string) (fees uint64, err error) {
-	// Load the user's selected order-time options.
-	customCfg := new(swapOptions)
-	err = config.Unmapify(options, customCfg)
-	if err != nil {
-		return 0, fmt.Errorf("error parsing selected swap options: %w", err)
+func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (fees uint64, err error) {
+	var numInputs uint64
+	if useSafeTxSize {
+		numInputs = 12
+	} else {
+		numInputs = 2
 	}
 
-	// Parse the configured split transaction.
-	split := dcr.config().useSplitTx
-	if customCfg.Split != nil {
-		split = *customCfg.Split
-	}
-
-	feeBump, err := customCfg.feeBump()
-	if err != nil {
-		return 0, err
-	}
-
-	bumpedNetRate := feeSuggestion
-	if feeBump > 1 {
-		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
-	}
-
-	const numInputs = 12 // plan for lots of inputs to get a safe estimate
 	var txSize uint64 = dexdcr.InitTxSizeBase + (numInputs * dexdcr.P2PKHInputSize)
 
-	var splitTxSize uint64
-	if split {
-		// If there is a split, the split tx could have more inputs, and the
-		// swap would just have one, but the math works out the same this way
-		// anyways.
-		splitTxSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + (2 * dexdcr.P2PKHOutputSize)
-	}
+	dcr.log.Infof("SingleLotSwapFees: txSize = %d, feeSuggestion = %d", txSize, feeSuggestion)
 
-	totalTxSize := txSize + splitTxSize
-	return totalTxSize * bumpedNetRate, nil
+	return txSize * feeSuggestion, nil
 }
 
 // MaxFundingFees returns the maximum funding fees for an order/multi-order.
-func (dcr *ExchangeWallet) MaxFundingFees(numTrades uint32, options map[string]string) uint64 {
-	useSplit := dcr.config().useSplitTx
-	if options != nil {
-		if split, ok := options[splitKey]; ok {
-			useSplit, _ = strconv.ParseBool(split)
-		}
+func (dcr *ExchangeWallet) MaxFundingFees(numTrades uint32, feeRate uint64, options map[string]string) uint64 {
+	customCfg, err := decodeFundMultiOptions(options)
+	if err != nil {
+		dcr.log.Errorf("Error decoding multi-fund settings: %v", err)
+		return 0
 	}
-	if !useSplit {
+	if !customCfg.Split {
 		return 0
 	}
 
@@ -1875,11 +1872,13 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 }
 
 // SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
-func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64, options map[string]string) (uint64, error) {
-	preRedeem, err := dcr.preRedeem(1, feeSuggestion, options)
+func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64) (uint64, error) {
+	preRedeem, err := dcr.preRedeem(1, feeSuggestion, nil)
 	if err != nil {
 		return 0, err
 	}
+
+	dcr.log.Infof("SingleLotRedeemFees: worst case = %d, feeSuggestion = %d", preRedeem.Estimate.RealisticWorstCase, feeSuggestion)
 
 	return preRedeem.Estimate.RealisticWorstCase, nil
 }
@@ -2009,7 +2008,7 @@ type fundMultiOptions struct {
 	// will be created with one output per order.
 	//
 	// Use the multiSplitKey const defined above in the options map to set this option.
-	Split *bool
+	Split bool `ini:"multisplit"`
 	// SplitBuffer, if set, will instruct the wallet to add a buffer onto each
 	// output of the multi-order split transaction (if the split is needed).
 	// SplitBuffer is defined as a percentage of the output. If a .1 BTC output
@@ -2026,32 +2025,12 @@ type fundMultiOptions struct {
 	// is no split buffer, this may necessitate a new split transaction.
 	//
 	// Use the multiSplitBufferKey const defined above in the options map to set this.
-	SplitBuffer *uint64
+	SplitBuffer uint64 `ini:"multisplitbuffer"`
 }
 
 func decodeFundMultiOptions(options map[string]string) (*fundMultiOptions, error) {
 	opts := new(fundMultiOptions)
-	if options == nil {
-		return opts, nil
-	}
-
-	if split, ok := options[multiSplitKey]; ok {
-		b, err := strconv.ParseBool(split)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing split option: %w", err)
-		}
-		opts.Split = &b
-	}
-
-	if splitBuffer, ok := options[multiSplitBufferKey]; ok {
-		b, err := strconv.ParseUint(splitBuffer, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing split buffer option: %w", err)
-		}
-		opts.SplitBuffer = &b
-	}
-
-	return opts, nil
+	return opts, config.Unmapify(options, opts)
 }
 
 // orderWithLeastOverFund returns the index of the order from a slice of orders
@@ -2533,16 +2512,7 @@ func (dcr *ExchangeWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) 
 		return nil, nil, 0, fmt.Errorf("error decoding options: %w", err)
 	}
 
-	var useSplit bool
-	var splitBuffer uint64
-	if customCfg.Split != nil {
-		useSplit = *customCfg.Split
-	}
-	if useSplit && customCfg.SplitBuffer != nil {
-		splitBuffer = *customCfg.SplitBuffer
-	}
-
-	return dcr.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, useSplit, splitBuffer)
+	return dcr.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, customCfg.Split, customCfg.SplitBuffer)
 }
 
 // fundOrder finds coins from a set of UTXOs for a specified value. This method
@@ -5256,7 +5226,7 @@ func (dcr *ExchangeWallet) SetVSP(url string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dcr.dir, vspFileName), b, 0666); err != nil {
+	if err := os.WriteFile(dcr.vspFilepath, b, 0666); err != nil {
 		return err
 	}
 	dcr.vspV.Store(&v)
@@ -5291,6 +5261,64 @@ func (dcr *ExchangeWallet) SetVotingPreferences(choices map[string]string, tspen
 		return errors.New("not connected, login first")
 	}
 	return dcr.wallet.SetVotingPreferences(dcr.ctx, choices, tspendPolicy, treasuryPolicy)
+}
+
+// ListVSPs lists known available voting service providers.
+func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
+	resp, err := http.Get("https://api.decred.org/?c=vsp")
+	if err != nil {
+		return nil, fmt.Errorf("http get error: %v", err)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// This struct is not quite compatible with vspdjson.VspInfoResponse.
+	var res map[string]*struct {
+		Network       string   `json:"network"`
+		Launched      uint64   `json:"launched"`    // seconds
+		LastUpdated   uint64   `json:"lastupdated"` // seconds
+		APIVersions   []uint32 `json:"apiversions"`
+		FeePercentage float64  `json:"feepercentage"`
+		Closed        bool     `json:"closed"`
+		Voting        uint64   `json:"voting"`
+		Voted         uint64   `json:"voted"`
+		Revoked       uint64   `json:"revoked"`
+		VSPDVersion   string   `json:"vspdversion"`
+		BlockHeight   uint64   `json:"blockheight"`
+		NetShare      float64  `json:"estimatednetworkproportion"`
+	}
+	if err = json.Unmarshal(b, &res); err != nil {
+		return nil, err
+	}
+
+	vspds := make([]*asset.VotingServiceProvider, 0)
+	for host, v := range res {
+		net, err := dex.NetFromString(v.Network)
+		if err != nil {
+			dcr.log.Warnf("error parsing VSP network from %q", v.Network)
+		}
+		if net != dcr.network {
+			continue
+		}
+		vspds = append(vspds, &asset.VotingServiceProvider{
+			URL:           "https://" + host,
+			Network:       net,
+			Launched:      v.Launched * 1000,    // to milliseconds
+			LastUpdated:   v.LastUpdated * 1000, // to milliseconds
+			APIVersions:   v.APIVersions,
+			FeePercentage: v.FeePercentage,
+			Closed:        v.Closed,
+			Voting:        v.Voting,
+			Voted:         v.Voted,
+			Revoked:       v.Revoked,
+			VSPDVersion:   v.VSPDVersion,
+			BlockHeight:   v.BlockHeight,
+			NetShare:      v.NetShare,
+		})
+	}
+	return vspds, nil
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
