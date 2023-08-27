@@ -16,8 +16,8 @@ import (
 var (
 	log       = dex.StdOutLogger("T", dex.LevelTrace)
 	u, _      = user.Current()
-	apiKey    = "OBV9Z4i5hnORfyLLBLKeO5k5DUkfiuPIrbvRltPTEfcjwyMZAhTckGrlo42q472n"
-	apiSecret = "EAws4Ke02lo4qenzIZD8OPthDqy7J7DpAVIo0ibJQnLDpteFAj7U76HGpt1Agws0"
+	apiKey    = ""
+	apiSecret = ""
 )
 
 func tNewBinance(t *testing.T, network dex.Network) *binance {
@@ -116,7 +116,7 @@ func TestTrade(t *testing.T) {
 		}
 	}()
 	tradeID := bnc.GenerateTradeID()
-	err = bnc.Trade(ctx, "eth", "btc", false, 62e4, 1e8, updaterID, tradeID)
+	err = bnc.Trade(ctx, "eth", "btc", true, 6327e2, 1e8, updaterID, tradeID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
 	}

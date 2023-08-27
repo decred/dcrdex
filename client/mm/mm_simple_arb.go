@@ -34,6 +34,10 @@ type SimpleArbConfig struct {
 	// NumEpochsLeaveOpen is the number of epochs an arbitrage sequence will
 	// stay open if one or both of the orders were not filled.
 	NumEpochsLeaveOpen uint32 `json:"numEpochsLeaveOpen"`
+	// BaseOptions are the multi-order options for the base asset wallet.
+	BaseOptions map[string]string `json:"baseOptions"`
+	// QuoteOptions are the multi-order options for the quote asset wallet.
+	QuoteOptions map[string]string `json:"quoteOptions"`
 }
 
 func (c *SimpleArbConfig) Validate() error {
@@ -274,17 +278,33 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 		return
 	}
 
-	dexOrder, err := a.core.Trade(nil, &core.TradeForm{
-		Host:    a.host,
-		IsLimit: true,
-		Sell:    sellOnDex,
-		Base:    a.base,
-		Quote:   a.quote,
-		Qty:     lotsToArb * a.mkt.LotSize,
-		Rate:    dexRate,
+	var options map[string]string
+	if sellOnDex {
+		options = a.cfg.BaseOptions
+	} else {
+		options = a.cfg.QuoteOptions
+	}
+
+	dexOrders, err := a.core.MultiTrade(nil, &core.MultiTradeForm{
+		Host:  a.host,
+		Sell:  sellOnDex,
+		Base:  a.base,
+		Quote: a.quote,
+		Placements: []*core.QtyRate{
+			{
+				Qty:  lotsToArb * a.mkt.LotSize,
+				Rate: dexRate,
+			},
+		},
+		Options: options,
 	})
-	if err != nil {
-		a.log.Errorf("error placing dex order: %v", err)
+	if err != nil || len(dexOrders) != 1 {
+		if err != nil {
+			a.log.Errorf("error placing dex order: %v", err)
+		}
+		if len(dexOrders) != 1 {
+			a.log.Errorf("expected 1 dex order, got %v", len(dexOrders))
+		}
 
 		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), cexTradeID)
 		if err != nil {
@@ -295,7 +315,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	}
 
 	a.activeArbs = append(a.activeArbs, &arbSequence{
-		dexOrder:   dexOrder,
+		dexOrder:   dexOrders[0],
 		dexRate:    dexRate,
 		cexOrderID: cexTradeID,
 		cexRate:    cexRate,

@@ -13,6 +13,13 @@
                 "profitTrigger": 0.01,
                 "maxActiveArbs": 5,
                 "numEpochsLeaveOpen": 5
+            },
+            "baseOptions": {
+                "multisplit": "true"
+            },
+            "quoteOptions": {
+                "multisplit": "true",
+                "multisplitbuffer": "5"
             }
         }
     ],

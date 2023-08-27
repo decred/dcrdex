@@ -77,25 +77,24 @@ func (c *tCEX) Balance(symbol string) (*libxc.ExchangeBalance, error) {
 func (c *tCEX) GenerateTradeID() string {
 	return c.tradeID
 }
-func (c *tCEX) Trade(baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, updaterID int, orderID string) error {
+func (c *tCEX) Trade(ctx context.Context, baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, updaterID int, orderID string) error {
 	if c.tradeErr != nil {
 		return c.tradeErr
 	}
 	c.lastTrade = &cexOrder{baseSymbol, quoteSymbol, qty, rate, sell}
 	return nil
 }
-func (c *tCEX) CancelTrade(baseSymbol, quoteSymbol, tradeID string) error {
+func (c *tCEX) CancelTrade(ctx context.Context, baseSymbol, quoteSymbol, tradeID string) error {
 	if c.cancelTradeErr != nil {
 		return c.cancelTradeErr
 	}
 	c.cancelledTrades = append(c.cancelledTrades, tradeID)
 	return nil
 }
-func (c *tCEX) SubscribeMarket(baseSymbol, quoteSymbol string) error {
+func (c *tCEX) SubscribeMarket(ctx context.Context, baseSymbol, quoteSymbol string) error {
 	return nil
 }
-func (c *tCEX) UnsubscribeMarket(baseSymbol, quoteSymbol string) error {
-	return nil
+func (c *tCEX) UnsubscribeMarket(baseSymbol, quoteSymbol string) {
 }
 func (c *tCEX) VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
 	if c.vwapErr != nil {
@@ -116,11 +115,11 @@ func (c *tCEX) VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) (vwap
 	}
 	return res.avg, res.extrema, true, nil
 }
-func (c *tCEX) SubscribeTradeUpdates() (<-chan *libxc.TradeUpdate, int) {
-	return c.tradeUpdates, c.tradeUpdatesID
+func (c *tCEX) SubscribeTradeUpdates() (<-chan *libxc.TradeUpdate, func(), int) {
+	return c.tradeUpdates, func() {}, c.tradeUpdatesID
 }
-func (c *tCEX) SubscribeCEXUpdates() <-chan interface{} {
-	return nil
+func (c *tCEX) SubscribeCEXUpdates() (<-chan interface{}, func()) {
+	return nil, func() {}
 }
 
 var _ libxc.CEX = (*tCEX)(nil)
@@ -844,8 +843,10 @@ func TestArbRebalance(t *testing.T) {
 		tCore.maxSellErr = test.dexMaxSellErr
 		tCore.maxBuyErr = test.dexMaxBuyErr
 		if test.expectedDexOrder != nil {
-			tCore.tradeResult = &core.Order{
-				ID: encode.RandomBytes(32),
+			tCore.multiTradeResult = []*core.Order{
+				{
+					ID: encode.RandomBytes(32),
+				},
 			}
 		}
 
@@ -905,25 +906,32 @@ func TestArbRebalance(t *testing.T) {
 		}
 		if test.expectedDexOrder != nil {
 			if test.expectedDexOrder.sell {
-				if len(tCore.sellsPlaced) != 1 {
+				if len(tCore.multiTradesPlaced[0].Placements) != 1 {
 					t.Fatalf("%s: expected 1 sell order but got %d", test.name, len(tCore.sellsPlaced))
 				}
-				if test.expectedDexOrder.rate != tCore.sellsPlaced[0].Rate {
+				if !tCore.multiTradesPlaced[0].Sell {
+					t.Fatalf("%s: expected sell order but got buy order", test.name)
+				}
+				if test.expectedDexOrder.rate != tCore.multiTradesPlaced[0].Placements[0].Rate {
 					t.Fatalf("%s: expected sell order rate %d but got %d", test.name, test.expectedDexOrder.rate, tCore.sellsPlaced[0].Rate)
 				}
-				if test.expectedDexOrder.lots*mkt.LotSize != tCore.sellsPlaced[0].Qty {
+				if test.expectedDexOrder.lots*mkt.LotSize != tCore.multiTradesPlaced[0].Placements[0].Qty {
 					t.Fatalf("%s: expected sell order qty %d but got %d", test.name, test.expectedDexOrder.lots*mkt.LotSize, tCore.sellsPlaced[0].Qty)
 				}
 			}
 
 			if !test.expectedDexOrder.sell {
-				if len(tCore.buysPlaced) != 1 {
+				fmt.Printf("multi trades placed: %v\n", tCore.multiTradesPlaced)
+				if len(tCore.multiTradesPlaced[0].Placements) != 1 {
 					t.Fatalf("%s: expected 1 buy order but got %d", test.name, len(tCore.buysPlaced))
 				}
-				if test.expectedDexOrder.rate != tCore.buysPlaced[0].Rate {
+				if tCore.multiTradesPlaced[0].Sell {
+					t.Fatalf("%s: expected buy order but got sell order", test.name)
+				}
+				if test.expectedDexOrder.rate != tCore.multiTradesPlaced[0].Placements[0].Rate {
 					t.Fatalf("%s: expected buy order rate %d but got %d", test.name, test.expectedDexOrder.rate, tCore.buysPlaced[0].Rate)
 				}
-				if test.expectedDexOrder.lots*mkt.LotSize != tCore.buysPlaced[0].Qty {
+				if test.expectedDexOrder.lots*mkt.LotSize != tCore.multiTradesPlaced[0].Placements[0].Qty {
 					t.Fatalf("%s: expected buy order qty %d but got %d", test.name, test.expectedDexOrder.lots*mkt.LotSize, tCore.buysPlaced[0].Qty)
 				}
 			}
