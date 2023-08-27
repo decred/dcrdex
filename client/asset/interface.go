@@ -330,8 +330,13 @@ type ConfigOption struct {
 	Repeatable string `json:"repeatable"`
 	// RepeatN signals how many times text input should be repeated, replicating
 	// this option N times.
-	RepeatN  int32 `json:"repeatN"`
-	Required bool  `json:"required"`
+	RepeatN        int32 `json:"repeatN"`
+	Required       bool  `json:"required"`
+	QuoteAssetOnly bool  `json:"quoteAssetOnly"`
+	// DependsOn is the key of another config option that if is set to true,
+	// this config option will be shown.
+	DependsOn string   `json:"dependsOn"`
+	Range     *XYRange `json:"range"`
 
 	// ShowByDefault to show or not options on "hide advanced options".
 	ShowByDefault bool `json:"showByDefault,omitempty"`

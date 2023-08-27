@@ -15,10 +15,12 @@ type BooleanConfig struct {
 // linear, e.g. y = mx + b. The value submitted to FundOrder/Swap/Redeem should
 // specify the x value.
 type XYRange struct {
-	Start XYRangePoint `json:"start"`
-	End   XYRangePoint `json:"end"`
-	XUnit string       `json:"xUnit"`
-	YUnit string       `json:"yUnit"`
+	Start  XYRangePoint `json:"start"`
+	End    XYRangePoint `json:"end"`
+	XUnit  string       `json:"xUnit"`
+	YUnit  string       `json:"yUnit"`
+	RoundX bool         `json:"roundX"`
+	RoundY bool         `json:"roundY"`
 }
 
 // XYRangePoint is a point specifying the start or end of an XYRange.

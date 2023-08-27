@@ -234,7 +234,7 @@ var (
 	multiFundingOpts = []*asset.ConfigOption{
 		{
 			Key:         multiSplitKey,
-			DisplayName: "External fee rate estimates",
+			DisplayName: "Allow multi split",
 			Description: "Allow split funding transactions that pre-size outputs to " +
 				"prevent excessive overlock.",
 			IsBoolean:    true,
@@ -242,10 +242,28 @@ var (
 		},
 		{
 			Key:         multiSplitBufferKey,
-			DisplayName: "External fee rate estimates",
+			DisplayName: "Multi split buffer",
 			Description: "Add an integer percent buffer to split output amounts to " +
-				"facilitate output reuse",
-			DefaultValue: true,
+				"facilitate output reuse. This is only required for quote assets.",
+			DefaultValue:   5,
+			QuoteAssetOnly: true,
+			DependsOn:      multiSplitKey,
+			Range: &asset.XYRange{
+				Start: asset.XYRangePoint{
+					Label: "0%",
+					X:     0,
+					Y:     0,
+				},
+				End: asset.XYRangePoint{
+					Label: "100%",
+					X:     100,
+					Y:     100,
+				},
+				XUnit:  "%",
+				YUnit:  "%",
+				RoundX: true,
+				RoundY: true,
+			},
 		},
 	}
 

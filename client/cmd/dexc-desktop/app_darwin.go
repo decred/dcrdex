@@ -270,7 +270,7 @@ func mainCore() error {
 
 	// Default to serving the web interface over TLS.
 	cfg.WebTLS = true
-	webSrv, err := webserver.New(cfg.Web(clientCore, logMaker.Logger("WEB"), utc))
+	webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc))
 	if err != nil {
 		return fmt.Errorf("failed creating web server: %w", err)
 	}

@@ -1,0 +1,153 @@
+
+#main.mmsettings {
+  .bot-settings-container {
+    display: flex;
+    margin-left: 3%;
+    margin-right: 3%;
+    margin-top: 20px;
+  }
+
+  img {
+    width: 16px;
+    height: 16px;
+  }
+
+  .placement-settings-column {
+    padding: 0 5px;
+    width: 34%;
+  }
+
+  .bot-settings-column {
+    min-width: 22%;
+    padding: 0 5px;
+  }
+
+  .bot-balance-column {
+    min-width: 22%;
+    padding: 0 5px;
+  }
+
+  .oracles-column {
+    min-width: 22%;
+    padding: 0 5px;
+  }
+
+  .placement-table {
+    @extend .table;
+    @extend .table-striped;
+    @extend .table-sm;
+  }
+
+  .table-wrapper {
+    display: table-caption;
+    border: 1px solid #7777;
+    border-radius: 0.25rem;
+  }
+
+  .slider-container {
+    border: 1px solid #424242;
+    border-radius: 3px;
+    padding: 4px;
+    margin-top: 8px;
+    opacity: 0.7;
+
+    .xy-range-input {
+      width: 35px;
+      font-size: 14px;
+      height: 16px;
+    }
+
+    .slider {
+      margin: 10px 10px 5px;
+      height: 2px;
+      background-color: grey;
+      position: relative;
+
+      .slider-handle {
+        position: absolute;
+        height: 20px;
+        width: 14px;
+        top: -9px;
+        border-radius: 7px;
+        background-color: #2cce9c;
+        border: 2px solid #424242;
+        cursor: pointer;
+      }
+    }
+  }
+
+  .modified {
+    border: 1px solid orange !important;
+  }
+
+  .setting-container {
+    padding: 5px;
+  }
+
+  .indent {
+    margin-left: 10px;
+  }
+
+  .remove-placement-btn {
+    color: #99302b99;
+  }
+
+  .add-placement-btn {
+    color: green;
+  }
+
+  .settings-updated-msg {
+    color: green;
+    font-weight: bold;
+  }
+
+  #gapStrategySelect {
+    display: block;
+  }
+
+  table.oracles-table {
+    font-size: 15px;
+
+    img {
+      width: 16px;
+      height: 16px;
+    }
+
+    tr {
+      border-style: solid none;
+      border-width: 1px;
+      border-color: #7777;
+    }
+
+    td:first-child {
+      width: 25px;
+    }
+
+    td {
+      white-space: nowrap;
+    }
+
+    td:last-child {
+      text-align: right;
+      padding-left: 10px;
+    }
+  }
+
+  .gap-factor-input {
+    max-width: 100px;
+  }
+
+  .lots-input {
+    max-width: 80px;
+  }
+}
+
+body.dark #main.mmsettings {
+  .placement-table {
+    @extend .table-dark;
+  }
+
+  #gapStrategySelect:disabled {
+      background-color: #343232;
+  }
+}

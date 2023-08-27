@@ -149,7 +149,7 @@ type Config struct {
 // Web creates a configuration for the webserver. This is a Config method
 // instead of a WebConfig method because Language is an app-level setting used
 // by both core and rpcserver.
-func (cfg *Config) Web(c *core.Core, log dex.Logger, utc bool) *webserver.Config {
+func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool) *webserver.Config {
 	addr := cfg.WebAddr
 	host, _, err := net.SplitHostPort(addr)
 	if err == nil && host != "" {
@@ -166,8 +166,12 @@ func (cfg *Config) Web(c *core.Core, log dex.Logger, utc bool) *webserver.Config
 		keyFile = filepath.Join(cfg.AppData, "web.key")
 	}
 
+	_, _, mmCfgPath := setNet(cfg.AppData, cfg.Net.String())
+
 	return &webserver.Config{
 		Core:          c,
+		MarketMaker:   mm,
+		MMCfgPath:     mmCfgPath,
 		Addr:          cfg.WebAddr,
 		CustomSiteDir: cfg.SiteDir,
 		Logger:        log,
@@ -288,13 +292,13 @@ func ResolveConfig(appData string, cfg *Config) error {
 	switch {
 	case cfg.Testnet:
 		cfg.Net = dex.Testnet
-		defaultDBPath, defaultLogPath = setNet(appData, "testnet")
+		defaultDBPath, defaultLogPath, _ = setNet(appData, "testnet")
 	case cfg.Simnet:
 		cfg.Net = dex.Simnet
-		defaultDBPath, defaultLogPath = setNet(appData, "simnet")
+		defaultDBPath, defaultLogPath, _ = setNet(appData, "simnet")
 	default:
 		cfg.Net = dex.Mainnet
-		defaultDBPath, defaultLogPath = setNet(appData, "mainnet")
+		defaultDBPath, defaultLogPath, _ = setNet(appData, "mainnet")
 	}
 	defaultHost := DefaultHostByNetwork(cfg.Net)
 
@@ -335,10 +339,11 @@ func ResolveConfig(appData string, cfg *Config) error {
 // files. It returns a suggested path for the database file and a log file. If
 // using a file rotator, the directory of the log filepath as parsed  by
 // filepath.Dir is suitable for use.
-func setNet(applicationDirectory, net string) (dbPath, logPath string) {
+func setNet(applicationDirectory, net string) (dbPath, logPath, mmCfgPath string) {
 	netDirectory := filepath.Join(applicationDirectory, net)
 	logDirectory := filepath.Join(netDirectory, "logs")
 	logFilename := filepath.Join(logDirectory, "dexc.log")
+	mmCfgFilename := filepath.Join(netDirectory, "mm_cfg.json")
 	err := os.MkdirAll(netDirectory, 0700)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create net directory: %v\n", err)
@@ -349,7 +354,7 @@ func setNet(applicationDirectory, net string) (dbPath, logPath string) {
 		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
 		os.Exit(1)
 	}
-	return filepath.Join(netDirectory, "dexc.db"), logFilename
+	return filepath.Join(netDirectory, "dexc.db"), logFilename, mmCfgFilename
 }
 
 // DefaultHostByNetwork accepts configured network and returns the network

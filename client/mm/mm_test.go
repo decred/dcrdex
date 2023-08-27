@@ -331,7 +331,7 @@ type tOracle struct {
 	marketPrice float64
 }
 
-func (o *tOracle) getMarketPrice(base, quote uint32) float64 {
+func (o *tOracle) GetMarketPrice(base, quote uint32) float64 {
 	return o.marketPrice
 }
 
