@@ -374,15 +374,15 @@ type FeeTx interface {
 	FeeRate(map[chainhash.Hash]map[int]int64) (uint64, error)
 }
 
-// btcFeeTx is the FeeTx for a standard Bitcoin MsgTx.
-type btcFeeTx struct {
+// BTCFeeTx is the FeeTx for a standard Bitcoin MsgTx.
+type BTCFeeTx struct {
 	*wire.MsgTx
 }
 
-var _ FeeTx = (*btcFeeTx)(nil)
+var _ FeeTx = (*BTCFeeTx)(nil)
 
 // PrevOuts returns a list of previous outpoints for this tx.
-func (tx *btcFeeTx) PrevOuts() []wire.OutPoint {
+func (tx *BTCFeeTx) PrevOuts() []wire.OutPoint {
 	ops := make([]wire.OutPoint, len(tx.TxIn))
 	for i, txIn := range tx.TxIn {
 		ops[i] = txIn.PreviousOutPoint
@@ -391,7 +391,7 @@ func (tx *btcFeeTx) PrevOuts() []wire.OutPoint {
 }
 
 // FeeRate calculates this tx's fee rate.
-func (tx *btcFeeTx) FeeRate(prevOuts map[chainhash.Hash]map[int]int64) (uint64, error) {
+func (tx *BTCFeeTx) FeeRate(prevOuts map[chainhash.Hash]map[int]int64) (uint64, error) {
 	var in, out int64
 	for i, vin := range tx.TxIn {
 		prevOut := vin.PreviousOutPoint
@@ -431,7 +431,7 @@ func btcBlockFeeTransactions(rc *RPCClient, blockHash *chainhash.Hash) (feeTxs [
 
 	feeTxs = make([]FeeTx, len(blk.Transactions)-1)
 	for i, msgTx := range blk.Transactions[1:] { // skip coinbase
-		feeTxs[i] = &btcFeeTx{msgTx}
+		feeTxs[i] = &BTCFeeTx{msgTx}
 	}
 	return feeTxs, blk.Header.PrevBlock, nil
 }
