@@ -1666,7 +1666,7 @@ export default class MarketsPage extends BasePage {
    market order rate.
   */
   marketOrderRateString (ord: Order, mkt: CurrentMarket) :string {
-    if (!ord.matches) return intl.prep(intl.ID_MARKET_ORDER)
+    if (!ord.matches?.length) return intl.prep(intl.ID_MARKET_ORDER)
     let rateStr = Doc.formatRateFullPrecision(OrderUtil.averageRate(ord), mkt.baseUnitInfo, mkt.quoteUnitInfo, mkt.cfg.ratestep)
     if (ord.matches.length > 1) rateStr = '~ ' + rateStr // ~ only makes sense if the order has more than one match
     return rateStr
