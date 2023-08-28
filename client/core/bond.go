@@ -205,6 +205,7 @@ type dexAcctBondState struct {
 	bondAssetID                                 uint32
 	maxBondedAmt                                uint64
 	mustPost                                    int64
+	inBonds                                     uint64
 }
 
 // bondStateOfDEX collects all the information needed to determine what
@@ -239,6 +240,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	state.tierChange = dc.acct.tierChange // since last reserves update
 	state.tier, state.targetTier = dc.acct.tier, dc.acct.targetTier
 	state.bondAssetID, state.maxBondedAmt = dc.acct.bondAsset, dc.acct.maxBondedAmt
+	state.inBonds, _ = dc.bondTotalInternal(state.bondAssetID)
 	// Screen the unexpired bonds slices.
 	dc.acct.bonds = filterExpiredBonds(dc.acct.bonds)
 	dc.acct.pendingBonds = filterExpiredBonds(dc.acct.pendingBonds) // possibly expired before confirmed
@@ -464,7 +466,16 @@ func (c *Core) repostPendingBonds(dc *dexConnection, cfg *dexBondCfg, state *dex
 }
 
 // postRequiredBonds posts any required bond increments for a dexConnection.
-func (c *Core) postRequiredBonds(dc *dexConnection, cfg *dexBondCfg, state *dexAcctBondState, bondAsset *msgjson.BondAsset, wallet *xcWallet, expiredStrength int64, unlocked bool) {
+func (c *Core) postRequiredBonds(
+	dc *dexConnection,
+	cfg *dexBondCfg,
+	state *dexAcctBondState,
+	bondAsset *msgjson.BondAsset,
+	wallet *xcWallet,
+	expiredStrength int64,
+	unlocked bool,
+) (newlyBonded uint64) {
+
 	if state.targetTier == 0 || state.mustPost <= 0 || cfg.bondExpiry <= 0 {
 		return
 	}
@@ -515,8 +526,11 @@ func (c *Core) postRequiredBonds(dc *dexConnection, cfg *dexBondCfg, state *dexA
 		_, err = c.makeAndPostBond(dc, true, wallet, amt, c.feeSuggestionAny(wallet.AssetID), lockTime, bondAsset)
 		if err != nil {
 			c.log.Errorf("Unable to post bond: %v", err)
-		} // else it's now in pendingBonds
+		} else { // it's now in pendingBonds
+			newlyBonded = amt
+		}
 	}
+	return
 }
 
 // rotateBonds should only be run sequentially i.e. in the watchBonds loop.
@@ -533,7 +547,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 
 	now := time.Now().Unix()
 
-	actuatedTierChanges := make(map[uint32][]acctUpdate)
+	acctUpdates := make(map[uint32][]acctUpdate)
 
 	for _, dc := range c.dexConnections() {
 		initialized, unlocked := dc.acct.status()
@@ -574,23 +588,17 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			continue
 		}
 
-		if acctBondState.tierChange != 0 {
-			// Reserve enough funds to recreate current bonds.
-			reserve := bondOverlap * uint64(acctBondState.liveStrength) * bondAsset.Amt
-			// After applying the reserve, we would normally *zero* the
-			// tierChange field, but it could change, so we remember it.
-			actuatedTierChanges[acctBondState.bondAssetID] = append(actuatedTierChanges[acctBondState.bondAssetID],
-				acctUpdate{dc.acct, acctBondState.tierChange, reserve},
-			)
-		}
-
-		c.postRequiredBonds(dc, bondCfg, acctBondState, bondAsset, wallet, expiredStrength, unlocked)
+		newlyBonded := c.postRequiredBonds(dc, bondCfg, acctBondState, bondAsset, wallet, expiredStrength, unlocked)
+		reserve := bondOverlap*acctBondState.targetTier*bondAsset.Amt - acctBondState.inBonds - newlyBonded
+		acctUpdates[acctBondState.bondAssetID] = append(acctUpdates[acctBondState.bondAssetID],
+			acctUpdate{dc.acct, acctBondState.tierChange, reserve},
+		)
 	}
 
-	for assetID, actuatedTierChange := range actuatedTierChanges {
+	for assetID, update := range acctUpdates {
 		var reserveDelta int64
 		// Update the unactuated tier change counter.
-		for _, s := range actuatedTierChange {
+		for _, s := range update {
 			s.acct.authMtx.Lock()
 			reserveDelta += s.acct.totalReserved - int64(s.reserve)
 			s.acct.totalReserved = int64(s.reserve)
