@@ -65,6 +65,10 @@ regtest wallet.
 
 Password is "abc".
 
+The script starts the Electrum-Firo wallet client in CLI mode with debug level
+logging to stderr. Change STARTUP= in the script to "GUI" to start the Gui or
+"DAEMON" to start as a daemon. Stop the daemon with the `stop_daemon` script.
+
 ## Development
 
 ### Firo Chain Server

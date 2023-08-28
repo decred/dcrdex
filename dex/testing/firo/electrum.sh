@@ -34,9 +34,9 @@ REPO_DIR=${ELECTRUM_DIR}/electrum-repo
 WALLET_DIR=${ELECTRUM_DIR}/wallet
 NET_DIR=${WALLET_DIR}/regtest
 
-# startup options (Default start as a daemon)
-# Uncomment this line to start with gui
-#START_WITH_GUI="1"
+# startup options
+# CLI, DAEMON, GUI  (Default start as CLI)
+STARTUP=CLI
 ELECTRUM_REGTEST_ARGS="--regtest --dir=${WALLET_DIR}"
 WALLET_PASSWORD="abc"
 
@@ -66,7 +66,7 @@ python --version
 python -m pip install --upgrade pip # can support more versions than ensurepip
 pip install -e .
 pip install requests cryptography pycryptodomex
-if [ -n "$START_WITH_GUI" ];
+if [ "${STARTUP}" == "GUI" ];
 then
     pip install pyqt5
 fi
@@ -110,13 +110,21 @@ rpcpassword=pass
 rpcbind=127.0.0.1:${RPCPORT}
 EOF
 
-if [ -n "$START_WITH_GUI" ];
+if [  "${STARTUP}" == "GUI" ];
 then
-    ./electrum-firo ${ELECTRUM_REGTEST_ARGS}
+    echo "Starting GUI wallet"
+    ./electrum-firo ${ELECTRUM_REGTEST_ARGS}    
 else
-    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} daemon --detach
-    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} load_wallet --password=${WALLET_PASSWORD}
-    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} list_wallets
-    ./electrum-firo ${ELECTRUM_REGTEST_ARGS} getinfo
-    echo "use 'stop_daemon.sh' to stop the daemon"
+    if [  "${STARTUP}" == "DAEMON" ];
+    then
+        echo "Starting wallet as a DAEMON"
+        ./electrum-firo ${ELECTRUM_REGTEST_ARGS} daemon --detach
+        ./electrum-firo ${ELECTRUM_REGTEST_ARGS} load_wallet --password=${WALLET_PASSWORD}
+        ./electrum-firo ${ELECTRUM_REGTEST_ARGS} list_wallets
+        ./electrum-firo ${ELECTRUM_REGTEST_ARGS} getinfo
+        echo "use 'stop_daemon' to stop the daemon"
+    else
+        echo "Starting CLI wallet"
+        ./electrum-firo ${ELECTRUM_REGTEST_ARGS} -v daemon
+    fi
 fi
