@@ -1089,10 +1089,14 @@ export default class WalletsPage extends BasePage {
     this.updateDisplayedReconfigFields(currentDef)
   }
 
-  showOrHideRecoverySupportMsg (wallet:WalletState, seeded: boolean) {
+  showOrHideRecoverySupportMsg (wallet: WalletState, seeded: boolean) {
+    this.setRecoverySupportMsgViz(seeded && !wallet.running && !wallet.disabled && Boolean(wallet.traits & traitRecoverer), wallet.symbol)
+  }
+
+  setRecoverySupportMsgViz (viz: boolean, symbol: string) {
     const page = this.page
-    if (seeded && !wallet.running && !wallet.disabled && wallet.traits & traitRecoverer) {
-      page.reconfigSupportMsg.textContent = intl.prep(intl.ID_WALLET_RECOVERY_SUPPORT_MSG, { walletSymbol: wallet.symbol.toLocaleUpperCase() })
+    if (viz) {
+      page.reconfigSupportMsg.textContent = intl.prep(intl.ID_WALLET_RECOVERY_SUPPORT_MSG, { walletSymbol: symbol.toLocaleUpperCase() })
       Doc.show(page.reconfigSupportMsg)
       page.submitReconfig.setAttribute('disabled', '')
       page.submitReconfig.classList.add('grey')
@@ -1110,7 +1114,9 @@ export default class WalletsPage extends BasePage {
     const walletDef = app().walletDefinition(this.selectedAssetID, walletType)
     this.reconfigForm.update(this.selectedAssetID, walletDef.configopts || [], false)
     const wallet = app().walletMap[this.selectedAssetID]
-    this.showOrHideRecoverySupportMsg(wallet, walletDef.seeded)
+    const currentDef = app().currentWalletDefinition(this.selectedAssetID)
+    if (walletDef.type !== currentDef.type) this.setRecoverySupportMsgViz(false, wallet.symbol)
+    else this.showOrHideRecoverySupportMsg(wallet, walletDef.seeded)
     this.setGuideLink(walletDef.guidelink)
     this.updateDisplayedReconfigFields(walletDef)
   }
