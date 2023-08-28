@@ -2001,8 +2001,9 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	}, nil
 }
 
-// SingleLotSwapFees returns the fees for a swap transaction for a single lot.
-func (btc *baseWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (fees uint64, err error) {
+// SingleLotSwapRefundFees returns the fees for a swap and refund transaction
+// for a single lot.
+func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (swapFees uint64, redeemFees uint64, err error) {
 	var numInputs uint64
 	if useSafeTxSize {
 		numInputs = 12
@@ -2013,14 +2014,23 @@ func (btc *baseWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, useSafe
 	// TODO: The following is not correct for all BTC clones. e.g. Zcash has
 	// a different MinimumTxOverhead (29).
 
-	var txSize uint64
+	var swapTxSize uint64
 	if btc.segwit {
-		txSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2WPKHInputSize) + dexbtc.P2WSHOutputSize + dexbtc.P2WPKHOutputSize
+		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2WPKHInputSize) + dexbtc.P2WSHOutputSize + dexbtc.P2WPKHOutputSize
 	} else {
-		txSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2PKHInputSize) + dexbtc.P2SHOutputSize + dexbtc.P2PKHOutputSize
+		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2PKHInputSize) + dexbtc.P2SHOutputSize + dexbtc.P2PKHOutputSize
 	}
 
-	return txSize * feeSuggestion, nil
+	var refundTxSize uint64
+	if btc.segwit {
+		witnessVBytes := uint64((dexbtc.RefundSigScriptSize + 2 + 3) / 4)
+		refundTxSize = dexbtc.MinimumTxOverhead + dexbtc.TxInOverhead + witnessVBytes + dexbtc.P2WPKHOutputSize
+	} else {
+		inputSize := uint64(dexbtc.TxInOverhead + dexbtc.RefundSigScriptSize)
+		refundTxSize = dexbtc.MinimumTxOverhead + inputSize + dexbtc.P2PKHOutputSize
+	}
+
+	return swapTxSize * feeSuggestion, refundTxSize * feeSuggestion, nil
 }
 
 // splitOption constructs an *asset.OrderOption with customized text based on the

@@ -1717,20 +1717,18 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}, nil
 }
 
-// SingleLotSwapFees returns the fees for a swap transaction for a single lot.
-func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (fees uint64, err error) {
+// SingleLotSwapRefundFees returns the fees for a swap and refund transaction
+// for a single lot.
+func (dcr *ExchangeWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (swapFees uint64, refundFees uint64, err error) {
 	var numInputs uint64
 	if useSafeTxSize {
 		numInputs = 12
 	} else {
 		numInputs = 2
 	}
-
-	var txSize uint64 = dexdcr.InitTxSizeBase + (numInputs * dexdcr.P2PKHInputSize)
-
-	dcr.log.Infof("SingleLotSwapFees: txSize = %d, feeSuggestion = %d", txSize, feeSuggestion)
-
-	return txSize * feeSuggestion, nil
+	swapTxSize := dexdcr.InitTxSizeBase + (numInputs * dexdcr.P2PKHInputSize)
+	refundTxSize := dexdcr.MsgTxOverhead + dexdcr.TxInOverhead + dexdcr.RefundSigScriptSize + dexdcr.P2PKHOutputSize
+	return swapTxSize * feeSuggestion, uint64(refundTxSize) * feeSuggestion, nil
 }
 
 // MaxFundingFees returns the maximum funding fees for an order/multi-order.

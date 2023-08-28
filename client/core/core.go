@@ -5511,26 +5511,26 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 	return estimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
 }
 
-// SingleLotFees returns the estimated swap and redeem fees for a single lot
+// SingleLotFees returns the estimated swap, refund, and redeem fees for a single lot
 // trade.
-func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
+func (c *Core) SingleLotFees(form *SingleLotFeesForm) (swapFees, redeemFees, refundFees uint64, err error) {
 	dc, err := c.registeredDEX(form.Host)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
 	mktID := marketName(form.Base, form.Quote)
 	mktConf := dc.marketConfig(mktID)
 	if mktConf == nil {
-		return 0, 0, newError(marketErr, "unknown market %q", mktID)
+		return 0, 0, 0, newError(marketErr, "unknown market %q", mktID)
 	}
 
 	wallets, assetConfigs, versCompat, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	if !versCompat { // covers missing asset config, but that's unlikely since there is a market config
-		return 0, 0, fmt.Errorf("client and server asset versions are incompatible for %v", form.Host)
+		return 0, 0, 0, fmt.Errorf("client and server asset versions are incompatible for %v", form.Host)
 	}
 
 	var swapFeeRate, redeemFeeRate uint64
@@ -5540,34 +5540,34 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
 		swapAsset, redeemAsset := dc.assets[wallets.fromWallet.AssetID], dc.assets[wallets.toWallet.AssetID]
 		dc.assetsMtx.Unlock()
 		if swapAsset == nil {
-			return 0, 0, fmt.Errorf("no asset found for %d", wallets.fromWallet.AssetID)
+			return 0, 0, 0, fmt.Errorf("no asset found for %d", wallets.fromWallet.AssetID)
 		}
 		if redeemAsset == nil {
-			return 0, 0, fmt.Errorf("no asset found for %d", wallets.toWallet.AssetID)
+			return 0, 0, 0, fmt.Errorf("no asset found for %d", wallets.toWallet.AssetID)
 		}
 		swapFeeRate, redeemFeeRate = swapAsset.MaxFeeRate, redeemAsset.MaxFeeRate
 	} else {
 		swapFeeRate = c.feeSuggestionAny(wallets.fromWallet.AssetID) // server rates only for the swap init
 		if swapFeeRate == 0 {
-			return 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
+			return 0, 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
 		}
 		redeemFeeRate = c.feeSuggestionAny(wallets.toWallet.AssetID) // wallet rate or server rate
 		if redeemFeeRate == 0 {
-			return 0, 0, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", wallets.toWallet.Symbol, form.Host)
+			return 0, 0, 0, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", wallets.toWallet.Symbol, form.Host)
 		}
 	}
 
-	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeRate, form.UseSafeTxSize)
+	swapFees, refundFees, err = wallets.fromWallet.SingleLotSwapRefundFees(assetConfigs.fromAsset.Version, swapFeeRate, form.UseSafeTxSize)
 	if err != nil {
-		return 0, 0, fmt.Errorf("error calculating swap fees: %w", err)
+		return 0, 0, 0, fmt.Errorf("error calculating swap/refund fees: %w", err)
 	}
 
-	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeRate)
+	redeemFees, err = wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeRate)
 	if err != nil {
-		return 0, 0, fmt.Errorf("error calculating redeem fees: %w", err)
+		return 0, 0, 0, fmt.Errorf("error calculating redeem fees: %w", err)
 	}
 
-	return swapFees, redeemFees, nil
+	return swapFees, redeemFees, refundFees, nil
 }
 
 // MaxFundingFees gives the max fees required to fund a Trade or MultiTrade.

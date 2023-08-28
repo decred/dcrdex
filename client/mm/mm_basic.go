@@ -196,6 +196,7 @@ func steppedRate(r, step uint64) uint64 {
 type orderFees struct {
 	swap       uint64
 	redemption uint64
+	refund     uint64
 	funding    uint64
 }
 
@@ -357,13 +358,13 @@ func (m *basicMarketMaker) halfSpread(basisPrice uint64) (uint64, error) {
 		return 0, fmt.Errorf("basis price cannot be zero")
 	}
 
-	baseFees, quoteFees, err := m.core.SingleLotFees(form)
+	baseFees, quoteFees, _, err := m.core.SingleLotFees(form)
 	if err != nil {
 		return 0, fmt.Errorf("SingleLotFees error: %v", err)
 	}
 
 	form.Sell = false
-	newQuoteFees, newBaseFees, err := m.core.SingleLotFees(form)
+	newQuoteFees, newBaseFees, _, err := m.core.SingleLotFees(form)
 	if err != nil {
 		return 0, fmt.Errorf("SingleLotFees error: %v", err)
 	}
@@ -648,6 +649,7 @@ func basicMMRebalance(newEpoch uint64, m rebalancer, c clientCore, cfg *MarketMa
 
 			log.Debugf("placement %d: placing %d lots", i, lotsToPlace)
 
+			// TODO: handle redeem/refund fees for account lockers
 			var requiredPerLot uint64
 			if sell {
 				requiredPerLot = sellFees.swap + mkt.LotSize
@@ -734,7 +736,7 @@ func (m *basicMarketMaker) cancelAllOrders() {
 }
 
 func (m *basicMarketMaker) updateFeeRates() error {
-	buySwapFees, buyRedeemFees, err := m.core.SingleLotFees(&core.SingleLotFeesForm{
+	buySwapFees, buyRedeemFees, buyRefundFees, err := m.core.SingleLotFees(&core.SingleLotFeesForm{
 		Host:          m.host,
 		Base:          m.base,
 		Quote:         m.quote,
@@ -745,7 +747,7 @@ func (m *basicMarketMaker) updateFeeRates() error {
 		return fmt.Errorf("failed to get fees: %v", err)
 	}
 
-	sellSwapFees, sellRedeemFees, err := m.core.SingleLotFees(&core.SingleLotFeesForm{
+	sellSwapFees, sellRedeemFees, sellRefundFees, err := m.core.SingleLotFees(&core.SingleLotFeesForm{
 		Host:          m.host,
 		Base:          m.base,
 		Quote:         m.quote,
@@ -772,11 +774,13 @@ func (m *basicMarketMaker) updateFeeRates() error {
 	m.buyFees = &orderFees{
 		swap:       buySwapFees,
 		redemption: buyRedeemFees,
+		refund:     buyRefundFees,
 		funding:    buyFundingFees,
 	}
 	m.sellFees = &orderFees{
 		swap:       sellSwapFees,
 		redemption: sellRedeemFees,
+		refund:     sellRefundFees,
 		funding:    sellFundingFees,
 	}
 

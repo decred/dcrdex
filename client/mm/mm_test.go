@@ -118,27 +118,31 @@ func (drv *tDriver) Info() *asset.WalletInfo {
 }
 
 type tCore struct {
-	assetBalances                map[uint32]*core.WalletBalance
-	assetBalanceErr              error
-	market                       *core.Market
-	orderEstimate                *core.OrderEstimate
-	sellSwapFees, sellRedeemFees uint64
-	buySwapFees, buyRedeemFees   uint64
-	singleLotFeesErr             error
-	preOrderParam                *core.TradeForm
-	tradeResult                  *core.Order
-	multiTradeResult             []*core.Order
-	noteFeed                     chan core.Notification
-	isAccountLocker              map[uint32]bool
-	maxBuyEstimate               *core.MaxOrderEstimate
-	maxBuyErr                    error
-	maxSellEstimate              *core.MaxOrderEstimate
-	maxSellErr                   error
-	cancelsPlaced                []dex.Bytes
-	buysPlaced                   []*core.TradeForm
-	sellsPlaced                  []*core.TradeForm
-	multiTradesPlaced            []*core.MultiTradeForm
-	maxFundingFees               uint64
+	assetBalances     map[uint32]*core.WalletBalance
+	assetBalanceErr   error
+	market            *core.Market
+	orderEstimate     *core.OrderEstimate
+	sellSwapFees      uint64
+	sellRedeemFees    uint64
+	sellRefundFees    uint64
+	buySwapFees       uint64
+	buyRedeemFees     uint64
+	buyRefundFees     uint64
+	singleLotFeesErr  error
+	preOrderParam     *core.TradeForm
+	tradeResult       *core.Order
+	multiTradeResult  []*core.Order
+	noteFeed          chan core.Notification
+	isAccountLocker   map[uint32]bool
+	maxBuyEstimate    *core.MaxOrderEstimate
+	maxBuyErr         error
+	maxSellEstimate   *core.MaxOrderEstimate
+	maxSellErr        error
+	cancelsPlaced     []dex.Bytes
+	buysPlaced        []*core.TradeForm
+	sellsPlaced       []*core.TradeForm
+	multiTradesPlaced []*core.MultiTradeForm
+	maxFundingFees    uint64
 }
 
 func (c *tCore) NotificationFeed() *core.NoteFeed {
@@ -162,14 +166,14 @@ func (*tCore) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, c
 func (*tCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return nil
 }
-func (c *tCore) SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, error) {
+func (c *tCore) SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uint64, error) {
 	if c.singleLotFeesErr != nil {
-		return 0, 0, c.singleLotFeesErr
+		return 0, 0, 0, c.singleLotFeesErr
 	}
 	if form.Sell {
-		return c.sellSwapFees, c.sellRedeemFees, nil
+		return c.sellSwapFees, c.sellRedeemFees, c.sellRefundFees, nil
 	}
-	return c.buySwapFees, c.buyRedeemFees, nil
+	return c.buySwapFees, c.buyRedeemFees, c.buyRefundFees, nil
 }
 func (*tCore) Cancel(oidB dex.Bytes) error {
 	return nil
@@ -539,6 +543,7 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 		market        *core.Market
 		swapFees      uint64
 		redeemFees    uint64
+		refundFees    uint64
 
 		expectPreOrderParam *core.TradeForm
 		wantErr             bool
@@ -674,6 +679,66 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 				Qty:     1e6,
 			},
 		},
+		{
+			name: "2 lots with refund fees, not account locker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Amount,
+				BaseBalance:      2e6 + 2000,
+				QuoteBalanceType: Amount,
+				QuoteBalance:     1000,
+			},
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			expectPreOrderParam: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    true,
+				Qty:     2e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 1000,
+		},
+		{
+			name: "1 lot with refund fees, account locker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       60,
+				BaseBalanceType:  Amount,
+				BaseBalance:      2e6 + 2000,
+				QuoteBalanceType: Amount,
+				QuoteBalance:     1000,
+			},
+			assetBalances: map[uint32]uint64{
+				60: 1e7,
+				42: 1e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			expectPreOrderParam: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   60,
+				Sell:    true,
+				Qty:     1e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 1000,
+		},
 	}
 
 	for _, test := range tests {
@@ -681,6 +746,7 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 		tCore.market = test.market
 		tCore.sellSwapFees = test.swapFees
 		tCore.sellRedeemFees = test.redeemFees
+		tCore.sellRefundFees = test.refundFees
 
 		mm, err := NewMarketMaker(tCore, tLogger)
 		if err != nil {
@@ -769,6 +835,7 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 		rate          uint64
 		swapFees      uint64
 		redeemFees    uint64
+		refundFees    uint64
 
 		expectPreOrderParam *core.TradeForm
 		wantErr             bool
@@ -912,9 +979,76 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 				Rate:    5e7,
 			},
 		},
+		{
+			name: "2 lots with refund fees, not account locker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Amount,
+				BaseBalance:      1000,
+				QuoteBalanceType: Amount,
+				QuoteBalance:     (2e6 * 5e7 / 1e8) + 2000,
+			},
+			rate: 5e7,
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			expectPreOrderParam: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    false,
+				Qty:     2e6,
+				Rate:    5e7,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 1000,
+		},
+		{
+			name: "1 lot with refund fees, account locker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        60,
+				QuoteAsset:       0,
+				BaseBalanceType:  Amount,
+				BaseBalance:      1000,
+				QuoteBalanceType: Amount,
+				QuoteBalance:     (2e6 * 5e7 / 1e8) + 2000,
+			},
+			rate: 5e7,
+			assetBalances: map[uint32]uint64{
+				60: 1e7,
+				0:  1e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			expectPreOrderParam: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    60,
+				Quote:   0,
+				Sell:    false,
+				Qty:     1e6,
+				Rate:    5e7,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 1000,
+		},
 	}
 
 	for _, test := range tests {
+		if test.name != "1 lot with refund fees, account locker" {
+			continue
+		}
 		tCore.setAssetBalances(test.assetBalances)
 		tCore.market = test.market
 		tCore.buySwapFees = test.swapFees
@@ -976,8 +1110,6 @@ func TestSegregatedCoreTrade(t *testing.T) {
 }
 
 func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
-	dcrBtcID := fmt.Sprintf("%s-%d-%d", "host1", 42, 0)
-
 	id := encode.RandomBytes(order.OrderIDSize)
 	id2 := encode.RandomBytes(order.OrderIDSize)
 
@@ -1005,6 +1137,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 		market            *core.Market
 		swapFees          uint64
 		redeemFees        uint64
+		refundFees        uint64
 		tradeRes          *core.Order
 		multiTradeRes     []*core.Order
 		notifications     []*noteAndBalances
@@ -1065,19 +1198,21 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    true,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -1101,6 +1236,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1124,6 +1261,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1159,6 +1297,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 							},
 						},
@@ -1222,18 +1362,20 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    false,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
 									Status:  order.MakerSwapCast,
 								},
 							},
@@ -1257,6 +1399,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1279,6 +1423,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1314,6 +1459,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 							},
 						},
@@ -1379,19 +1526,21 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    true,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -1415,6 +1564,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1438,6 +1589,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1472,12 +1624,15 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									Qty:     1e6,
 									Rate:    5e7,
 									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    55e6,
 									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
 								},
 							},
 						},
@@ -1502,6 +1657,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    55e6,
 							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1525,6 +1681,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    55e6,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1559,12 +1716,16 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 									Status:  order.MatchConfirmed,
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    55e6,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 									Status:  order.MatchConfirmed,
 								},
 							},
@@ -1629,18 +1790,20 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 				{
 					note: &core.OrderNote{
 						Order: &core.Order{
-							ID:      id,
-							Status:  order.OrderStatusBooked,
-							BaseID:  42,
-							QuoteID: 0,
-							Qty:     2e6,
-							Sell:    false,
-							Filled:  1e6,
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    1e6,
+							LockedAmt: 1e6,
 							Matches: []*core.Match{
 								{
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
 									Status:  order.MakerSwapCast,
 								},
 							},
@@ -1664,6 +1827,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							MatchID: matchIDs[0][:],
 							Qty:     1e6,
 							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
 							Status:  order.MatchComplete,
 						},
 					},
@@ -1686,6 +1851,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 							Qty:     1e6,
 							Rate:    5e7,
 							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
 							Redeem:  &core.Coin{},
 						},
 					},
@@ -1719,12 +1885,15 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 									MatchID: matchIDs[0][:],
 									Qty:     1e6,
 									Rate:    5e7,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
 									Status:  order.MatchConfirmed,
 								},
 								{
 									MatchID: matchIDs[1][:],
 									Qty:     1e6,
 									Rate:    45e6,
+									Swap:    &core.Coin{},
 									Status:  order.MakerSwapCast,
 								},
 							},
@@ -1781,6 +1950,1353 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 						},
 						42: {
 							Available: (1e7 / 2) + 2e6 - 2000,
+						},
+					},
+				},
+			},
+		},
+		// "fully filled order, sell, accountLocker"
+		{
+			name: "fully filled order, sell, accountLocker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      50,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     50,
+			},
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			trade: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    true,
+				Qty:     2e6,
+				Rate:    5e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 800,
+			tradeRes: &core.Order{
+				ID:              id,
+				LockedAmt:       2e6 + 2000,
+				RedeemLockedAmt: 2000,
+				RefundLockedAmt: 1600,
+				Sell:            true,
+			},
+			postTradeBalances: map[uint32]*botBalance{
+				0: {
+					Available:    (1e7 / 2) - 2000,
+					FundingOrder: 2000,
+				},
+				42: {
+					Available:    (1e7 / 2) - 2e6 - 2000 - 1600,
+					FundingOrder: 2e6 + 2000 + 1600,
+				},
+			},
+			notifications: []*noteAndBalances{
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    1e6,
+							LockedAmt: 1e6,
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Swap:    &core.Coin{},
+									Status:  order.MakerSwapCast,
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2) - 2000,
+							FundingOrder:  2000,
+							PendingRedeem: calc.BaseToQuote(5e7, 1e6),
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 2000 - 1600,
+							FundingOrder: 1e6 + 2000 + 1600,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2) - 2000,
+							FundingOrder:  2000,
+							PendingRedeem: calc.BaseToQuote(5e7, 1e6),
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 2000 - 1600,
+							FundingOrder: 1e6 + 2000 + 1600,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 + calc.BaseToQuote(5e7, 1e6),
+							FundingOrder: 2000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 2000 - 1600,
+							FundingOrder: 1e6 + 2000 + 1600,
+						},
+					},
+				},
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:      id,
+							Status:  order.OrderStatusExecuted,
+							BaseID:  42,
+							QuoteID: 0,
+							Qty:     2e6,
+							Sell:    true,
+							Filled:  2e6,
+							FeesPaid: &core.FeeBreakdown{
+								Swap:       1600,
+								Redemption: 1600,
+							},
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    55e6,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2) - 2000 + calc.BaseToQuote(5e7, 1e6),
+							FundingOrder:  2000,
+							PendingRedeem: calc.BaseToQuote(55e6, 1e6),
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 2000 - 1600,
+							FundingOrder: 2000 + 1600,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    55e6,
+							Status:  order.MatchComplete,
+							Redeem:  &core.Coin{},
+							Swap:    &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2) - 2000 + calc.BaseToQuote(5e7, 1e6),
+							FundingOrder:  2000,
+							PendingRedeem: calc.BaseToQuote(55e6, 1e6),
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 2000 - 1600,
+							FundingOrder: 2000 + 1600,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    55e6,
+							Status:  order.MatchConfirmed,
+							Redeem:  &core.Coin{},
+							Swap:    &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 + calc.BaseToQuote(5e7, 1e6) + calc.BaseToQuote(55e6, 1e6),
+							FundingOrder: 2000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 2000 - 1600,
+							FundingOrder: 2000 + 1600,
+						},
+					},
+				},
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:               id,
+							Status:           order.OrderStatusExecuted,
+							BaseID:           42,
+							QuoteID:          0,
+							Qty:              2e6,
+							Sell:             true,
+							Filled:           2e6,
+							AllFeesConfirmed: true,
+							FeesPaid: &core.FeeBreakdown{
+								Swap:       1600,
+								Redemption: 1600,
+							},
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    55e6,
+									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available: (1e7 / 2) - 1600 + calc.BaseToQuote(5e7, 1e6) + calc.BaseToQuote(55e6, 1e6),
+						},
+						42: {
+							Available: (1e7 / 2) - 2e6 - 1600,
+						},
+					},
+				},
+			},
+		},
+		// "fully filled order, buy, accountLocker"
+		{
+			name: "fully filled order, buy, accountLocker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      50,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     50,
+			},
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			trade: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    false,
+				Qty:     2e6,
+				Rate:    5e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 800,
+			tradeRes: &core.Order{
+				ID:              id,
+				LockedAmt:       calc.BaseToQuote(5e7, 2e6) + 2000,
+				RefundLockedAmt: 1600,
+				Sell:            true,
+			},
+			postTradeBalances: map[uint32]*botBalance{
+				0: {
+					Available:    (1e7 / 2) - 2000 - calc.BaseToQuote(5e7, 2e6) - 1600,
+					FundingOrder: calc.BaseToQuote(5e7, 2e6) + 2000 + 1600,
+				},
+				42: {
+					Available: (1e7 / 2),
+				},
+			},
+			notifications: []*noteAndBalances{
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    1e6,
+							LockedAmt: 1e6,
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 - calc.BaseToQuote(5e7, 2e6) - 1600,
+							FundingOrder: calc.BaseToQuote(5e7, 1e6) + 2000 + 1600,
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 - calc.BaseToQuote(5e7, 2e6) - 1600,
+							FundingOrder: calc.BaseToQuote(5e7, 1e6) + 2000 + 1600,
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 - calc.BaseToQuote(5e7, 2e6) - 1600,
+							FundingOrder: calc.BaseToQuote(5e7, 1e6) + 2000 + 1600,
+						},
+						42: {
+							Available: (1e7 / 2) - 1000 + 1e6,
+						},
+					},
+				},
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:      id,
+							Status:  order.OrderStatusExecuted,
+							BaseID:  42,
+							QuoteID: 0,
+							Qty:     2e6,
+							Rate:    5e7,
+							Sell:    false,
+							Filled:  2e6,
+							FeesPaid: &core.FeeBreakdown{
+								Swap:       1600,
+								Redemption: 1600,
+							},
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchConfirmed,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    45e6,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 - calc.BaseToQuote(5e7, 1e6) - calc.BaseToQuote(45e6, 1e6) - 1600,
+							FundingOrder: 2000 + 1600,
+						},
+						42: {
+							Available:     (1e7 / 2) + 1e6 - 1000,
+							PendingRedeem: 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    45e6,
+							Status:  order.MatchComplete,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 - calc.BaseToQuote(5e7, 1e6) - calc.BaseToQuote(45e6, 1e6) - 1600,
+							FundingOrder: 2000 + 1600,
+						},
+						42: {
+							Available:     (1e7 / 2) + 1e6 - 1000,
+							PendingRedeem: 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    45e6,
+							Status:  order.MatchConfirmed,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 2000 - calc.BaseToQuote(5e7, 1e6) - calc.BaseToQuote(45e6, 1e6) - 1600,
+							FundingOrder: 2000 + 1600,
+						},
+						42: {
+							Available: (1e7 / 2) + 2e6 - 2000,
+						},
+					},
+				},
+			},
+		},
+		// "buy, 1 match refunded, 1 revoked before swap, 1 redeemed match, not accountLocker"
+		{
+			name: "buy, 1 refunded, 1 revoked before swap, 1 redeemed match, not accountLocker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      50,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     50,
+			},
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			trade: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    false,
+				Qty:     3e6,
+				Rate:    5e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 800,
+			tradeRes: &core.Order{
+				ID:        id,
+				LockedAmt: calc.BaseToQuote(5e7, 3e6) + 3000,
+				Sell:      false,
+			},
+			postTradeBalances: map[uint32]*botBalance{
+				0: {
+					Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 3e6) - 3000,
+					FundingOrder: calc.BaseToQuote(5e7, 3e6) + 3000,
+				},
+				42: {
+					Available: (1e7 / 2),
+				},
+			},
+			notifications: []*noteAndBalances{
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    2e6,
+							LockedAmt: 1e6,
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 3e6),
+							FundingOrder: 3000,
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 3e6 - 3000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Swap:    &core.Coin{},
+							Refund:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 2e6) - 800,
+							FundingOrder: 3000,
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 2e6 - 2000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Status:  order.NewlyMatched,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 2e6) - 800,
+							FundingOrder: 3000 + calc.BaseToQuote(5e7, 1e6),
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[2][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - 3000 - calc.BaseToQuote(5e7, 2e6) - 800,
+							FundingOrder: 3000 + calc.BaseToQuote(5e7, 1e6),
+						},
+						42: {
+							Available: (1e7 / 2) + 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:               id,
+							Status:           order.OrderStatusRevoked,
+							BaseID:           42,
+							QuoteID:          0,
+							Qty:              2e6,
+							Sell:             false,
+							Filled:           2e6,
+							AllFeesConfirmed: true,
+							FeesPaid: &core.FeeBreakdown{
+								Swap:       1600,
+								Refund:     400,
+								Redemption: 500,
+							},
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Revoked: true,
+									Refund:  &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Revoked: true,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available: (1e7 / 2) - calc.BaseToQuote(5e7, 1e6) - 1600 - 400,
+						},
+						42: {
+							Available: (1e7 / 2) + 1e6 - 500,
+						},
+					},
+				},
+			},
+		},
+		// "sell, 1 match refunded, 1 revoked before swap, 1 redeemed match, not accountLocker"
+		{
+			name: "sell, 1 refunded, 1 revoked before swap, 1 redeemed match, not accountLocker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      50,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     50,
+			},
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			trade: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    true,
+				Qty:     3e6,
+				Rate:    5e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 800,
+			tradeRes: &core.Order{
+				ID:        id,
+				LockedAmt: 3e6 + 3000,
+				Sell:      false,
+			},
+			postTradeBalances: map[uint32]*botBalance{
+				0: {
+					Available: (1e7 / 2),
+				},
+				42: {
+					Available:    (1e7 / 2) - 3e6 - 3000,
+					FundingOrder: 3e6 + 3000,
+				},
+			},
+			notifications: []*noteAndBalances{
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    2e6,
+							LockedAmt: 1e6,
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2),
+							PendingRedeem: calc.BaseToQuote(5e7, 3e6) - 3000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 3e6 - 3000,
+							FundingOrder: 3000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Swap:    &core.Coin{},
+							Refund:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2),
+							PendingRedeem: calc.BaseToQuote(5e7, 2e6) - 2000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 3000 - 800,
+							FundingOrder: 3000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Status:  order.NewlyMatched,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2),
+							PendingRedeem: calc.BaseToQuote(5e7, 1e6) - 1000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 3000 - 800,
+							FundingOrder: 3000 + 1e6,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[2][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available: (1e7 / 2) + calc.BaseToQuote(5e7, 1e6) - 1000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 3000 - 800,
+							FundingOrder: 3000 + 1e6,
+						},
+					},
+				},
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:               id,
+							Status:           order.OrderStatusRevoked,
+							BaseID:           42,
+							QuoteID:          0,
+							Qty:              3e6,
+							Sell:             true,
+							Filled:           3e6,
+							AllFeesConfirmed: true,
+							FeesPaid: &core.FeeBreakdown{
+								Swap:       1600,
+								Refund:     400,
+								Redemption: 500,
+							},
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Revoked: true,
+									Refund:  &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Revoked: true,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available: (1e7 / 2) + calc.BaseToQuote(5e7, 1e6) - 500,
+						},
+						42: {
+							Available: (1e7 / 2) - 1e6 - 1600 - 400,
+						},
+					},
+				},
+			},
+		},
+		// "buy, 1 match refunded, 1 revoked before swap, 1 redeemed match, accountLocker"
+		{
+			name: "buy, 1 refunded, 1 revoked before swap, 1 redeemed match, accountLocker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      50,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     50,
+			},
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			trade: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    false,
+				Qty:     3e6,
+				Rate:    5e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 800,
+			tradeRes: &core.Order{
+				ID:              id,
+				LockedAmt:       calc.BaseToQuote(5e7, 3e6) + 3000,
+				RefundLockedAmt: 2400,
+				Sell:            false,
+			},
+			postTradeBalances: map[uint32]*botBalance{
+				0: {
+					Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 3e6) - 3000 - 2400,
+					FundingOrder: calc.BaseToQuote(5e7, 3e6) + 3000 + 2400,
+				},
+				42: {
+					Available: (1e7 / 2),
+				},
+			},
+			notifications: []*noteAndBalances{
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      false,
+							Filled:    2e6,
+							LockedAmt: 1e6,
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 3e6) - 3000 - 2400,
+							FundingOrder: 3000 + 2400,
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 3e6 - 3000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Swap:    &core.Coin{},
+							Refund:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 2e6) - 3000 - 2400,
+							FundingOrder: 3000 + 2400,
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 2e6 - 2000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Status:  order.NewlyMatched,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 2e6) - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + calc.BaseToQuote(5e7, 1e6),
+						},
+						42: {
+							Available:     (1e7 / 2),
+							PendingRedeem: 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[2][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:    (1e7 / 2) - calc.BaseToQuote(5e7, 2e6) - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + calc.BaseToQuote(5e7, 1e6),
+						},
+						42: {
+							Available: (1e7 / 2) + 1e6 - 1000,
+						},
+					},
+				},
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:               id,
+							Status:           order.OrderStatusRevoked,
+							BaseID:           42,
+							QuoteID:          0,
+							Qty:              3e6,
+							Sell:             false,
+							Filled:           3e6,
+							AllFeesConfirmed: true,
+							FeesPaid: &core.FeeBreakdown{
+								Swap:       1600,
+								Refund:     400,
+								Redemption: 500,
+							},
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Revoked: true,
+									Refund:  &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Revoked: true,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available: (1e7 / 2) - calc.BaseToQuote(5e7, 1e6) - 1600 - 400,
+						},
+						42: {
+							Available: (1e7 / 2) + 1e6 - 500,
+						},
+					},
+				},
+			},
+		},
+		// "sell, 1 match refunded, 1 revoked before swap, 1 redeemed match, accountLocker"
+		{
+			name: "sell, 1 refunded, 1 revoked before swap, 1 redeemed match, accountLocker",
+			cfg: &BotConfig{
+				Host:             "host1",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      50,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     50,
+			},
+			assetBalances: map[uint32]uint64{
+				0:  1e7,
+				42: 1e7,
+			},
+			trade: &core.TradeForm{
+				Host:    "host1",
+				IsLimit: true,
+				Base:    42,
+				Quote:   0,
+				Sell:    true,
+				Qty:     3e6,
+				Rate:    5e7,
+			},
+			market: &core.Market{
+				LotSize: 1e6,
+			},
+			swapFees:   1000,
+			redeemFees: 1000,
+			refundFees: 800,
+			tradeRes: &core.Order{
+				ID:              id,
+				LockedAmt:       3e6 + 3000,
+				RefundLockedAmt: 2400,
+				Sell:            false,
+			},
+			postTradeBalances: map[uint32]*botBalance{
+				0: {
+					Available: (1e7 / 2),
+				},
+				42: {
+					Available:    (1e7 / 2) - 3e6 - 3000 - 2400,
+					FundingOrder: 3e6 + 3000 + 2400,
+				},
+			},
+			notifications: []*noteAndBalances{
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:        id,
+							Status:    order.OrderStatusBooked,
+							BaseID:    42,
+							QuoteID:   0,
+							Qty:       2e6,
+							Sell:      true,
+							Filled:    2e6,
+							LockedAmt: 1e6,
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MakerSwapCast,
+									Swap:    &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2),
+							PendingRedeem: calc.BaseToQuote(5e7, 3e6) - 3000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 3e6 - 3000 - 2400,
+							FundingOrder: 3000 + 2400,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[0][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Swap:    &core.Coin{},
+							Refund:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2),
+							PendingRedeem: calc.BaseToQuote(5e7, 2e6) - 2000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 3000 - 2400,
+							FundingOrder: 3000 + 2400,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[1][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Revoked: true,
+							Status:  order.NewlyMatched,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available:     (1e7 / 2),
+							PendingRedeem: calc.BaseToQuote(5e7, 1e6) - 1000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + 1e6,
+						},
+					},
+				},
+				{
+					note: &core.MatchNote{
+						OrderID: id,
+						Match: &core.Match{
+							MatchID: matchIDs[2][:],
+							Qty:     1e6,
+							Rate:    5e7,
+							Swap:    &core.Coin{},
+							Redeem:  &core.Coin{},
+							Status:  order.MatchConfirmed,
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available: (1e7 / 2) + calc.BaseToQuote(5e7, 1e6) - 1000,
+						},
+						42: {
+							Available:    (1e7 / 2) - 2e6 - 3000 - 2400,
+							FundingOrder: 3000 + 2400 + 1e6,
+						},
+					},
+				},
+				{
+					note: &core.OrderNote{
+						Order: &core.Order{
+							ID:               id,
+							Status:           order.OrderStatusRevoked,
+							BaseID:           42,
+							QuoteID:          0,
+							Qty:              3e6,
+							Sell:             true,
+							Filled:           3e6,
+							AllFeesConfirmed: true,
+							FeesPaid: &core.FeeBreakdown{
+								Swap:       1600,
+								Refund:     400,
+								Redemption: 500,
+							},
+							Matches: []*core.Match{
+								{
+									MatchID: matchIDs[0][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Revoked: true,
+									Refund:  &core.Coin{},
+								},
+								{
+									MatchID: matchIDs[1][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Revoked: true,
+									Status:  order.NewlyMatched,
+								},
+								{
+									MatchID: matchIDs[2][:],
+									Qty:     1e6,
+									Rate:    5e7,
+									Status:  order.MatchComplete,
+									Swap:    &core.Coin{},
+									Redeem:  &core.Coin{},
+								},
+							},
+						},
+					},
+					balance: map[uint32]*botBalance{
+						0: {
+							Available: (1e7 / 2) + calc.BaseToQuote(5e7, 1e6) - 500,
+						},
+						42: {
+							Available: (1e7 / 2) - 1e6 - 1600 - 400,
 						},
 					},
 				},
@@ -2529,26 +4045,28 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			return
 		}
 
+		mktID := dexMarketID(test.cfg.Host, test.cfg.BaseAsset, test.cfg.QuoteAsset)
+
 		tCore := newTCore()
 		tCore.setAssetBalances(test.assetBalances)
 		tCore.market = test.market
-		if !test.multiTradeOnly {
-			if test.trade.Sell {
-				tCore.sellSwapFees = test.swapFees
-				tCore.sellRedeemFees = test.redeemFees
-			} else {
-				tCore.buySwapFees = test.swapFees
-				tCore.buyRedeemFees = test.redeemFees
-			}
+		var sell bool
+		if test.multiTradeOnly {
+			sell = test.multiTrade.Sell
 		} else {
-			if test.multiTrade.Sell {
-				tCore.sellSwapFees = test.swapFees
-				tCore.sellRedeemFees = test.redeemFees
-			} else {
-				tCore.buySwapFees = test.swapFees
-				tCore.buyRedeemFees = test.redeemFees
-			}
+			sell = test.trade.Sell
 		}
+
+		if sell {
+			tCore.sellSwapFees = test.swapFees
+			tCore.sellRedeemFees = test.redeemFees
+			tCore.sellRefundFees = test.refundFees
+		} else {
+			tCore.buySwapFees = test.swapFees
+			tCore.buyRedeemFees = test.redeemFees
+			tCore.buyRefundFees = test.refundFees
+		}
+
 		if test.isAccountLocker == nil {
 			tCore.isAccountLocker = make(map[uint32]bool)
 		} else {
@@ -2579,7 +4097,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		segregatedCore := mm.wrappedCoreForBot(dcrBtcID)
+		segregatedCore := mm.wrappedCoreForBot(mktID)
 
 		if testMultiTrade {
 
@@ -2613,7 +4131,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		if err := assetBalancesMatch(test.postTradeBalances, dcrBtcID, mm); err != nil {
+		if err := assetBalancesMatch(test.postTradeBalances, mktID, mm); err != nil {
 			t.Fatalf("%s: unexpected post trade balance: %v", test.name, err)
 		}
 
@@ -2622,7 +4140,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			tCore.noteFeed <- noteAndBalances.note
 			tCore.noteFeed <- dummyNote
 
-			if err := assetBalancesMatch(noteAndBalances.balance, dcrBtcID, mm); err != nil {
+			if err := assetBalancesMatch(noteAndBalances.balance, mktID, mm); err != nil {
 				t.Fatalf("%s: unexpected balances after note %d: %v", test.name, i, err)
 			}
 		}
