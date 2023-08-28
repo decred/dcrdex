@@ -268,10 +268,21 @@ var _ tipNotifier = (*spvWallet)(nil)
 // error is generated if the birthday is reduced and the special_activelyUsed
 // flag is set.
 func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+	// If the wallet type is not SPV, then we can't reconfigure the wallet.
 	if cfg.Type != walletTypeSPV {
 		restartRequired = true
 		return
 	}
+
+	// Check if the SPV wallet exists. If it doesn't, then we can't reconfigure it.
+	exists, err := walletExists(w.dir, w.chainParams)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, errors.New("wallet not found")
+	}
+
 	return w.wallet.Reconfigure(cfg, currentAddress)
 }
 

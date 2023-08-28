@@ -3044,7 +3044,7 @@ func (c *Core) updateWallet(assetID uint32, wallet *xcWallet) {
 }
 
 // RecoverWallet will retrieve some recovery information from the wallet,
-// which may not be possible if the wallet is too corrupted, disconnect and
+// which may not be possible if the wallet is too corrupted. Disconnect and
 // destroy the old wallet, create a new one, and if the recovery information
 // was retrieved from the old wallet, send this information to the new one.
 // If force is false, this will check for active orders involving this

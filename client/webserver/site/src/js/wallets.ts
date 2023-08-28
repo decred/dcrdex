@@ -27,7 +27,8 @@ import {
   PeerSource,
   WalletPeer,
   ApprovalStatus,
-  CustomBalance
+  CustomBalance,
+  WalletState
 } from './registry'
 import { CoinExplorers } from './order'
 
@@ -1069,6 +1070,8 @@ export default class WalletsPage extends BasePage {
     if (wallet.disabled) Doc.show(page.enableWallet)
     else Doc.show(page.disableWallet)
 
+    this.showOrHideRecoverySupportMsg(wallet, currentDef.seeded)
+
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.name
     if (!skipAnimation) this.showForm(page.reconfigForm)
@@ -1086,11 +1089,34 @@ export default class WalletsPage extends BasePage {
     this.updateDisplayedReconfigFields(currentDef)
   }
 
+  showOrHideRecoverySupportMsg (wallet: WalletState, seeded: boolean) {
+    this.setRecoverySupportMsgViz(seeded && !wallet.running && !wallet.disabled && Boolean(wallet.traits & traitRecoverer), wallet.symbol)
+  }
+
+  setRecoverySupportMsgViz (viz: boolean, symbol: string) {
+    const page = this.page
+    if (viz) {
+      page.reconfigSupportMsg.textContent = intl.prep(intl.ID_WALLET_RECOVERY_SUPPORT_MSG, { walletSymbol: symbol.toLocaleUpperCase() })
+      Doc.show(page.reconfigSupportMsg)
+      page.submitReconfig.setAttribute('disabled', '')
+      page.submitReconfig.classList.add('grey')
+      return
+    }
+    page.submitReconfig.removeAttribute('disabled')
+    page.submitReconfig.classList.remove('grey')
+    Doc.empty(page.reconfigSupportMsg)
+    Doc.hide(page.reconfigSupportMsg)
+  }
+
   changeWalletType () {
     const page = this.page
     const walletType = page.changeWalletTypeSelect.value || ''
     const walletDef = app().walletDefinition(this.selectedAssetID, walletType)
     this.reconfigForm.update(this.selectedAssetID, walletDef.configopts || [], false)
+    const wallet = app().walletMap[this.selectedAssetID]
+    const currentDef = app().currentWalletDefinition(this.selectedAssetID)
+    if (walletDef.type !== currentDef.type) this.setRecoverySupportMsgViz(false, wallet.symbol)
+    else this.showOrHideRecoverySupportMsg(wallet, walletDef.seeded)
     this.setGuideLink(walletDef.guidelink)
     this.updateDisplayedReconfigFields(walletDef)
   }

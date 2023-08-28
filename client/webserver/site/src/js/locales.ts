@@ -130,6 +130,7 @@ export const ID_ORDER = 'ORDER'
 export const ID_LOCKED_ORDER_BAL_MSG = 'LOCKED_ORDER_BAL_MSG'
 export const ID_CREATING_WALLETS = 'CREATING_WALLETS'
 export const ID_ADDING_SERVERS = 'ADDING_SERVER'
+export const ID_WALLET_RECOVERY_SUPPORT_MSG = 'WALLET_RECOVERY_SUPPORT_MSG'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -262,7 +263,8 @@ export const enUS: Locale = {
   [ID_ORDER]: 'Order',
   [ID_LOCKED_ORDER_BAL_MSG]: 'Funds locked in unmatched orders',
   [ID_CREATING_WALLETS]: 'Creating wallets',
-  [ID_ADDING_SERVERS]: 'Connecting to servers'
+  [ID_ADDING_SERVERS]: 'Connecting to servers',
+  [ID_WALLET_RECOVERY_SUPPORT_MSG]: 'Native {{ walletSymbol }} wallet failed to load properly. Try clicking the "Recover" button below to fix it'
 }
 
 export const ptBR: Locale = {
