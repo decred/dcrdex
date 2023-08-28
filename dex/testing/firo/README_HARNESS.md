@@ -100,6 +100,7 @@ them if this happens.
 (debian)
 
 ```bash
-$   killall -9 firod                    # kill running daemons
+$   kill -9 <pid>                       # find & kill any running regtest daemons
+    ...
 $   tmux kill-session -t firo-harness   # kill firo-harness session
 ```

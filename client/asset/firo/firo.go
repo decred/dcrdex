@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -119,15 +118,6 @@ func (d *Driver) Info() *asset.WalletInfo {
 // canceled. The configPath can be an empty string, in which case the standard
 // system location of the firod config file is assumed.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	if flag.Lookup("test.v") != nil {
-		// If testing we need to do a workaround check for legacy no-type wallet.
-		// This Only happens calling from regnet_test.go when the btc livetest code
-		// calls NewWallet. Maybe bch client had a similar problem.
-		if cfg.Type == "" {
-			cfg.Type = walletTypeRPC
-		}
-	}
-
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:

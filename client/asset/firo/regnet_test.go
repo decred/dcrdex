@@ -33,16 +33,25 @@ var (
 	}
 )
 
+// Run harness with NOMINER="1"
 func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
 		NewWallet: NewWallet,
 		LotSize:   tLotSize,
 		Asset:     tFIRO,
 		SplitTx:   true,
+		FirstWallet: &livetest.WalletName{
+			WalletType: walletTypeRPC,
+			Node:       "alpha",
+		},
+		SecondWallet: &livetest.WalletName{
+			WalletType: walletTypeRPC,
+			Node:       "gamma",
+		},
 	})
 }
 
-// Tests only mainnet, testnet expected to return -1 normally
+// Tests only mainnet, testnet is expected to return -1 normally
 func TestFetchExternalFee(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()

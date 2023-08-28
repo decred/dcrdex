@@ -128,4 +128,4 @@ mining.
 $  ./run dcrfiroelectrum --runonce --all
 ```
 
-Best results by nuking everything after each run.
+Best results by nuking everything after each run of the simnet-trade-test test suite.
