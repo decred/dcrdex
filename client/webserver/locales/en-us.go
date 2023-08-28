@@ -424,4 +424,7 @@ var EnUS = map[string]string{
 	"pending_bonds":               "Pending Bonds",
 	"current_tier":                "Current Tier",
 	"expired_bonds":               "Expired Bonds",
+	"pending_bonds_tooltip":  "Number of bonds that will be active when enough on chain confirmations have been reached. These do not yet count towards the current tier.",
+	"expired_bonds_tooltip":  "Bonds that are still locked but have passed the expiry threshold. These do not count towards current tier and will be refunded soon.",
+	"current_tier_tooltip":   "Number of active bonds that have not yet reached the expiry threshold.",
 }
