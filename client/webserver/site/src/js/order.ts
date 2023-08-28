@@ -577,7 +577,7 @@ function inConfirmingTakerRedeem (m: Match) {
  * assetID and data-explorer-coin value present on supplied link element.
  */
 function setCoinHref (assetID: number, link: PageElement) {
-  const assetExplorer = CoinExplorers[assetID]
+  const assetExplorer = CoinExplorers[baseChainID(assetID)]
   if (!assetExplorer) return
   const formatter = assetExplorer[net]
   if (!formatter) return
@@ -667,4 +667,13 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
       return isAddr ? `https://mumbai.polygonscan.com/address/${arg}` : `https://mumbai.polygonscan.com/tx/${arg}`
     }
   }
+}
+
+/*
+ * baseChainID returns the asset ID for the asset's parent if the asset is a
+ * token, otherwise the ID for the asset itself.
+ */
+export function baseChainID (assetID: number) {
+  const asset = app().user.assets[assetID]
+  return asset.token ? asset.token.parentID : assetID
 }
