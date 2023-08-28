@@ -1,5 +1,5 @@
 {{define "microIcon"}}
-<img src="/img/coins/{{.}}.png" class="micro-icon">
+<img src="/img/coins/{{baseAssetSymbol .}}.png" class="micro-icon">
 {{end}}
 
 {{define "order"}}
@@ -40,7 +40,7 @@
       </div>
       <div class="order-datum">
         <div>[[[Offering]]]</div>
-        <div>{{$ord.OfferString}} {{$ord.FromSymbol}} {{template "microIcon" $ord.FromSymbol}}</div>
+        <div>{{$ord.OfferString}} {{$ord.FromTicker}} {{template "microIcon" $ord.FromTicker}}</div>
       </div>
       <div class="order-datum">
         <div>[[[Asking]]]</div>

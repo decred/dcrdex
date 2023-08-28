@@ -317,15 +317,15 @@
     {{- /* SEND */ -}}
     <form class="pb-3 d-hide" id="sendForm" autocomplete="off">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="py-1 text-center position-relative fs24 sans-light">
+      <div class="py-1 flex-center position-relative fs24 sans-light">
         [[[Send]]]
-        <img id="sendLogo" class="mini-icon mx-1">
+        <img id="sendLogo" class="mini-icon mx-2">
         <span id="sendName"></span>
-        <div class="flex-center pt-1 d-hide fs18 sans" id="sendTokenMsgBox">
-          <span>[[[Token on]]]</span>
-          <img id="sendTokenParentLogo" class="ms-1 micro-icon">
-          <span id="sendTokenParentName"></span>
-        </div>
+      </div>
+      <div class="flex-center pt-1 d-hide fs18 sans" id="sendTokenMsgBox">
+        <span>[[[Token on]]]</span>
+        <img id="sendTokenParentLogo" class="ms-1 micro-icon">
+        <span id="sendTokenParentName"></span>
       </div>
       <div class="mt-3">
         <label for="sendAddr" class="form-label ps-1 mb-1">[[[Address]]]</label>

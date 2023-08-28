@@ -1802,7 +1802,7 @@ export class DepositAddress {
     const asset = app().assets[assetID]
     page.depositLogo.src = Doc.logoPath(asset.symbol)
     const wallet = app().walletMap[assetID]
-    page.depositName.textContent = asset.name
+    page.depositName.textContent = asset.unitInfo.conventional.unit
     page.depositAddress.textContent = wallet.address
     page.qrcode.src = `/generateqrcode?address=${wallet.address}`
     if (asset.token) {

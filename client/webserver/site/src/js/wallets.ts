@@ -1558,7 +1558,7 @@ export default class WalletsPage extends BasePage {
   async showSendForm (assetID: number) {
     const page = this.page
     const box = page.sendForm
-    const { wallet, name, unitInfo: ui, symbol, token } = app().assets[assetID]
+    const { wallet, unitInfo: ui, symbol, token } = app().assets[assetID]
     Doc.hide(page.toggleSubtract)
     page.subtractCheckBox.checked = false
 
@@ -1574,7 +1574,7 @@ export default class WalletsPage extends BasePage {
     this.showFiatValue(assetID, 0, page.sendValue)
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
     page.sendLogo.src = Doc.logoPath(symbol)
-    page.sendName.textContent = name
+    page.sendName.textContent = ui.conventional.unit
     if (token) {
       const parentAsset = app().assets[token.parentID]
       page.sendTokenParentLogo.src = Doc.logoPath(parentAsset.symbol)

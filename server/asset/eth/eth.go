@@ -91,7 +91,7 @@ var (
 
 	// blockPollInterval is the delay between calls to bestBlockHash to check
 	// for new blocks. Modify at compile time via blockPollIntervalStr:
-	// go build -tags lgpl -ldflags "-X 'decred.org/dcrdex/server/asset/eth.blockPollIntervalStr=10s'"
+	// go build -ldflags "-X 'decred.org/dcrdex/server/asset/eth.blockPollIntervalStr=10s'"
 	blockPollInterval    = time.Second
 	blockPollIntervalStr string
 )
