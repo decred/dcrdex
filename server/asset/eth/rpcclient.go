@@ -56,11 +56,11 @@ type ethConn struct {
 	caller          ContextCaller
 	txPoolSupported bool
 
-	blockNumberCache struct {
+	tipCache struct {
 		sync.Mutex
-		expiration  time.Duration
-		lastUpdate  time.Time
-		blockHeight uint64
+		expiration time.Duration
+		lastUpdate time.Time
+		hdr        *types.Header
 	}
 }
 
@@ -68,9 +68,69 @@ func (ec *ethConn) String() string {
 	return ec.endpoint
 }
 
+// monitorBlocks creates a block header subscription and updates the tipCache.
+func (ec *ethConn) monitorBlocks(ctx context.Context, log dex.Logger) {
+	c := &ec.tipCache
+
+	// No matter why we exit, revert to manual tip checks.
+	defer func() {
+		log.Tracef("Exiting block monitor for %s", ec.endpoint)
+		c.Lock()
+		c.expiration = time.Second * 99 / 10 // 9.9 seconds.
+		c.Unlock()
+	}()
+
+	h := make(chan *types.Header, 8)
+	sub, err := ec.SubscribeNewHead(ctx, h)
+	if err != nil {
+		log.Errorf("Error connecting to Websockets headers: %w", err)
+		return
+	}
+	defer sub.Unsubscribe()
+
+	for {
+		select {
+		case hdr := <-h:
+			c.Lock()
+			c.hdr = hdr
+			c.lastUpdate = time.Now()
+			c.Unlock()
+		case err, ok := <-sub.Err():
+			if !ok {
+				// Subscription cancelled
+				return
+			}
+			if ctx.Err() != nil || err == nil { // Both conditions indicate normal close
+				return
+			}
+			log.Errorf("Header subscription to %s failed with error: %v", err)
+			log.Info("Falling back to manual header requests")
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 type endpoint struct {
 	url      string
 	priority uint16
+}
+
+func (ec *ethConn) tip(ctx context.Context) (*types.Header, error) {
+	cache := &ec.tipCache
+	cache.Lock()
+	defer cache.Unlock()
+	if time.Since(cache.lastUpdate) < cache.expiration && cache.hdr != nil {
+		return cache.hdr, nil
+	}
+	hdr, err := ec.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	cache.lastUpdate = time.Now()
+	cache.hdr = hdr
+	return hdr, nil
 }
 
 func (ep endpoint) String() string {
@@ -149,15 +209,19 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 	}
 
 	// ETHBackend will check rpcclient.blockNumber() once per second. For
-	// external sources, that's an excessive request rate. Cache most recent
-	// results for up to 10 seconds for external providers.
-	uri, err := url.Parse(endpoint.url)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing url %q: %w", endpoint.url, err)
-	}
-	ec.blockNumberCache.expiration = time.Second * 9 / 10
-	if ip := net.ParseIP(uri.Hostname()); ip != nil && !ip.IsLoopback() {
-		ec.blockNumberCache.expiration = time.Second * 99 / 10
+	// external http sources, that's an excessive request rate.
+	uri, _ := url.Parse(endpoint.url) // err already checked by DialContext
+	isWS := uri.Scheme == "ws" || uri.Scheme == "wss"
+	// High block tip check frequency for local http.
+	ec.tipCache.expiration = time.Second * 9 / 10
+	// Websocket endpoints receive headers through a notification feed, so
+	// shouldn't make requests unless something seems wrong.
+	if isWS {
+		ec.tipCache.expiration = headerExpirationTime // time.Minute
+	} else if ip := net.ParseIP(uri.Hostname()); ip != nil && !ip.IsLoopback() {
+		// Lower the request rate for non-loopback IPs to avoid running into
+		// rate limits.
+		ec.tipCache.expiration = time.Second * 99 / 10
 	}
 
 	reqModules := []string{"eth", "txpool"}
@@ -182,6 +246,11 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 		}
 		ec.tokens[assetID] = tkn
 	}
+
+	if isWS {
+		go ec.monitorBlocks(ctx, c.log)
+	}
+
 	success = true
 
 	return ec, nil
@@ -190,27 +259,27 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 type connectionStatus int
 
 const (
-	failed connectionStatus = iota
-	outdated
-	connected
+	connectionStatusFailed connectionStatus = iota
+	connectionStatusOutdated
+	connectionStatusConnected
 )
 
-func (c *rpcclient) checkConnectionStatus(ctx context.Context, conn *ethConn) connectionStatus {
-	hdr, err := conn.HeaderByNumber(ctx, nil)
+func (c *rpcclient) checkConnectionStatus(ctx context.Context, ec *ethConn) connectionStatus {
+	hdr, err := ec.tip(ctx)
 	if err != nil {
-		c.log.Errorf("Failed to get header from %q: %v", conn.endpoint, err)
-		return failed
+		c.log.Errorf("Failed to get header from %q: %v", ec.endpoint, err)
+		return connectionStatusFailed
 	}
 
 	if c.headerIsOutdated(hdr) {
 		hdrTime := time.Unix(int64(hdr.Time), 0)
 		c.log.Warnf("header fetched from %q appears to be outdated (time %s is %v old). "+
 			"If you continue to see this message, you might need to check your system clock",
-			conn.endpoint, hdrTime, time.Since(hdrTime))
-		return outdated
+			ec.endpoint, hdrTime, time.Since(hdrTime))
+		return connectionStatusOutdated
 	}
 
-	return connected
+	return connectionStatusConnected
 }
 
 // sortConnectionsByHealth checks the health of the connections and sorts them
@@ -230,11 +299,11 @@ func (c *rpcclient) sortConnectionsByHealth(ctx context.Context) bool {
 	categorizeConnection := func(conn *ethConn) {
 		status := c.checkConnectionStatus(ctx, conn)
 		switch status {
-		case connected:
+		case connectionStatusConnected:
 			healthyConnections = append(healthyConnections, conn)
-		case outdated:
+		case connectionStatusOutdated:
 			outdatedConnections = append(outdatedConnections, conn)
-		case failed:
+		case connectionStatusFailed:
 			failingConnections = append(failingConnections, conn)
 		}
 	}
@@ -435,7 +504,7 @@ func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {
 // bestHeader gets the best header at the time of calling.
 func (c *rpcclient) bestHeader(ctx context.Context) (hdr *types.Header, err error) {
 	return hdr, c.withClient(func(ec *ethConn) error {
-		hdr, err = ec.HeaderByNumber(ctx, nil)
+		hdr, err = ec.tip(ctx)
 		return err
 	})
 }
@@ -460,20 +529,11 @@ func (c *rpcclient) suggestGasTipCap(ctx context.Context) (tipCap *big.Int, err 
 // blockNumber gets the chain length at the time of calling.
 func (c *rpcclient) blockNumber(ctx context.Context) (bn uint64, err error) {
 	return bn, c.withClient(func(ec *ethConn) error {
-		c := &ec.blockNumberCache
-		c.Lock()
-		defer c.Unlock()
-		if time.Since(c.lastUpdate) < c.expiration && c.blockHeight > 0 {
-			bn = c.blockHeight
-			return nil
+		hdr, err := ec.tip(ctx)
+		if err == nil {
+			bn = hdr.Number.Uint64()
 		}
-		bn, err = ec.BlockNumber(ctx)
-		if err != nil {
-			return err
-		}
-		c.lastUpdate = time.Now()
-		c.blockHeight = bn
-		return nil
+		return err
 	})
 }
 
