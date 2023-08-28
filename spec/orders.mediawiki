@@ -10,26 +10,26 @@ overview of the settlement process.
 
 There are three available types of order.
 
-* [[#Limit_Order|Limit orders]] are used to buy or sell a specified amount of an asset at a rate no higher (buy) or lower (sell) than a specified price.
-* [[#Market_Order|Market orders]] are used to buy or sell a specified amount of an asset at the best price available.
-* [[#Cancel_Order|Cancel orders]] are used to remove standing limit orders from the order book.
+* [[#limit-order|Limit orders]] are used to buy or sell a specified amount of an asset at a rate no higher (buy) or lower (sell) than a specified price.
+* [[#market-order|Market orders]] are used to buy or sell a specified amount of an asset at the best price available.
+* [[#cancel-order|Cancel orders]] are used to remove standing limit orders from the order book.
 
 The order book holds only limit orders with time in force ''standing'' that have
 not completely filled or been canceled. All other orders are only valid for one
-[[fundamentals.mediawiki/#Epochbased_Order_Matching|epoch match cycle]].
+[[fundamentals.mediawiki/#epoch-based-order-matching|epoch match cycle]].
 
 ==Connection Persistence==
 
 Regardless of connection status, if a client does not respond to their
 <code>preimage</code> request, they are in violation of
-[[community.mediawiki/#Rule_1_Clients_must_respond_to_all_preimage_requests|rule 1]] and subject to
+[[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|rule 1]] and subject to
 penalty.
 
 If a client's connection is lost during match negotiation, the client is
 expected to reconnect and complete settlement.
 Once a match is made, a client is always subject to violation of
-[[community.mediawiki/#Rule_2_Every_match_must_be_fully_settled|rule 2]] via the
-[[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]].
+[[community.mediawiki/#rule-2-every-match-must-be-fully-settled|rule 2]] via the
+[[fundamentals.mediawiki/#global-variables|broadcast timeout]].
 
 ==Order Book Subscriptions==
 
@@ -83,7 +83,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | qty     || int      || order size (atoms) || epoch_order, book_order
 |-
-| rate    || int    || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]] || only set on limit orders
+| rate    || int    || price rate. [[comm.mediawiki/#rate-encoding|message-rate encoding]] || only set on limit orders
 |-
 | tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing'' || only set on limit orders
 |-
@@ -132,8 +132,8 @@ on the book with a reduced matchable quantity.
 
 At the beginning of the matching cycle, the DEX will publish a list of order
 preimages, the seed hash used for
-[[fundamentals.mediawiki/#Pseudorandom_Order_Matching|order sequencing]], and the
-[[#Preimage_Reveal|commitment checksum]], which together can be used to
+[[fundamentals.mediawiki/#pseudorandom-order-matching|order sequencing]], and the
+[[#preimage-reveal|commitment checksum]], which together can be used to
 independently verify matching.
 
 '''Notification route:''' <code>match_proof</code>, '''originator: ''' DEX
@@ -173,7 +173,7 @@ WebSocket connection.
 
 As part of the order, the client must demonstrate control of funds.
 This is accomplished by supplying information and a signature for each
-[[comm.mediawiki/#Coin_ID|coin]] that will be spent.
+[[comm.mediawiki/#coin-id|coin]] that will be spent.
 The client covers the ''backing fees'' associated with the inputs spending their
 own coins.
 
@@ -220,7 +220,7 @@ The DEX will verify the coin sum before accepting the order.
 With the exception of market buy orders, which are detailed below, for an order
 of quantity '''''Q''''', the sum value of the selected coins, '''''V''''',
 must satisfy the relation
-(with [[#Calculating_Transaction_Fees|fees]])
+(with [[#calculating-transaction-fees|fees]])
 
 <!--V \ge Q + f_{base} + f_{coin}-->
 [[File:images/coin-sum.png]]
@@ -277,10 +277,10 @@ The client responds with their preimage(s). If the client fails to respond to
 their <code>preimage</code> requests, or if their <code>preimage</code> response
 does not hash to their order commitment, the order is not matched and the client
 is considered in violation of
-[[community.mediawiki/#Rule_1_Clients_must_respond_to_all_preimage_requests|rule 1]].
+[[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|rule 1]].
 
 The preimages are used as the inputs to
-[[fundamentals.mediawiki/#Pseudorandom_Order_Matching|the shuffling algorithm]] to determine
+[[fundamentals.mediawiki/#pseudorandom-order-matching|the shuffling algorithm]] to determine
 matching order. Before matching commences, the preimages are broadcast
 in the <code>match_proof</code> message.
 
@@ -290,7 +290,7 @@ All orders must be signed by the client and the server.
 The basic signing procedure will involve serializing order data into a byte array
 following a specific procedure that can be replicated on the server.
 The serialized data is then signed using the client's
-[[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|private account key]].
+[[fundamentals.mediawiki/#identities-based-on-public-key-infrastructure-pki-key-pairs|private account key]].
 
 All integer encoding for all serialized structures is big endian.
 
@@ -357,7 +357,7 @@ The client may specify the ''time in force'' of a limit order as one of: (a)
 such, the ''immediate'' option is intended for limit orders with a price that
 crosses the spread (i.e. a taker rather than a maker). The
 <code>ordersize</code> must be an integer multiple of the asset's
-[[fundamentals.mediawiki/#Exchange_Variables|lot size]].
+[[fundamentals.mediawiki/#global-variabless|lot size]].
 
 '''Request route:''' <code>limit</code>, '''originator:''' client
 
@@ -371,7 +371,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | ordersize   || int || order size (atoms)
 |-
-| rate        || int || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
+| rate        || int || price rate. [[comm.mediawiki/#rate-encoding|message-rate encoding]]
 |-
 | timeinforce || int || standing = 1, immediate = 2
 |-
@@ -387,17 +387,17 @@ crosses the spread (i.e. a taker rather than a maker). The
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 99 || [[#Order_Signing|the order prefix]]
+| prefix     || 99 || [[#order-signing|the order prefix]]
 |-
 | coin count || 1  || The number of funding coins
 |-
-| coin data  || coin length x count || [[#Coin_Preparation|sequence of coin IDs]]
+| coin data  || coin length x count || [[#coin-preparation|sequence of coin IDs]]
 |-
 | side       || 1 || 1 for buy, 2 for sell
 |-
 | quantity   || 8 || quantity to buy or sell (atoms)
 |-
-| rate       || 8 || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
+| rate       || 8 || price rate. [[comm.mediawiki/#rate-encoding|message-rate encoding]]
 |-
 | time in force || 1 || 1 for ''standing'', 2 for ''immediate''
 |-
@@ -435,7 +435,7 @@ the epoch match cycle) is left unfilled.
 |-
 | ordersize   || int || order size (atoms)
 |-
-| coins       ||  &#91;[[#Coin_Preparation|Coin]]&#93; || array of funding coins
+| coins       ||  &#91;[[#coin-preparation|Coin]]&#93; || array of funding coins
 |-
 | address     || string || address where the matched client will send funds
 |-
@@ -447,11 +447,11 @@ the epoch match cycle) is left unfilled.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 99 || [[#Order_Signing|the order prefix]]
+| prefix     || 99 || [[#order-signing|the order prefix]]
 |-
 | coin count || 1  || The number of funding coins
 |-
-| coin data  || coin length x count || [[#Coin_Preparation|sequence of coin IDs]]
+| coin data  || coin length x count || [[#coin-preparation|sequence of coin IDs]]
 |-
 | side       || 1 || 1 for buy, 2 for sell
 |-
@@ -506,7 +506,7 @@ If the ''market buy buffer'' is set too low or the market is particularly
 volatile and the price exceeds '''''b<sub>m</sub> r''''', an order that was
 accepted but is now too small to match is considered executed but unfilled and
 there is no change to the account's
-[[community.mediawiki/#Rules_of_Community_Conduct|cancellation statistics]].
+[[community.mediawiki/#rules-of-community-conduct|cancellation statistics]].
 
 ===Cancel Order===
 
@@ -536,7 +536,7 @@ This is by design and discourages certain types of spoofing.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 99 || [[#Order_Signing|the order prefix]]
+| prefix     || 99 || [[#order-signing|the order prefix]]
 |-
 | orderid    || 32 || the order ID
 |}
@@ -621,7 +621,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | qty       || int    || the matched amount, in atoms of the base asset
 |-
-| rate      || int    || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
+| rate      || int    || the matched price rate. [[comm.mediawiki/#rate-encoding|message-rate encoding]]
 |-
 | tserver   || int    || server's UNIX timestamp (milliseconds)
 |-
@@ -645,7 +645,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | quantity   || 8  || the matched amount, in atoms of the base asset
 |-
-| rate       || 8  || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
+| rate       || 8  || the matched price rate. [[comm.mediawiki/#rate-encoding|message-rate encoding]]
 |-
 | tserver  || 8  || server's UNIX timestamp (milliseconds)
 |-
@@ -670,7 +670,7 @@ relay to the matching party.
 |-
 | orderid    || string || the order ID
 |-
-| matchid    || string    || the matchid, retrieved from the [[#Match_negotiation|match notification]]
+| matchid    || string    || the matchid, retrieved from the [[#match-negotiation|match notification]]
 |-
 | coinid    || string || hex-encoded coin ID
 |-
@@ -889,7 +889,7 @@ records. No error is set in the case of unfound matches.
 ==Match Revocation==
 
 A match can be revoked by the server if a client fails to act within the
-[[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]]. A match revocation will result in
+[[fundamentals.mediawiki/#global-variables|broadcast timeout]]. A match revocation will result in
 penalties for the violating party only.
 The revoked match quantity is not added back to the order book in any form.
 
@@ -941,7 +941,7 @@ This would be the case if the DEX needs to change an asset variable such as
 the lot size or minimum transaction fee rate.
 
 If standing limit orders are persisted, they will be auto-revoked if the client
-does not reconnect before the next [[comm.mediawiki/#Session_Authentication|start epoch]].
+does not reconnect before the next [[comm.mediawiki/#session-authentication|start epoch]].
 
 '''Request route: ''' <code>suspension</code>, '''originator:''' DEX
 
@@ -969,5 +969,5 @@ Clients will also be informed when trading is resumed.
 |-
 | startepoch  || uint64 || the epoch number at which trading did or will commence. May be in the future
 |-
-| epochlen || uint64 || the [[#Epochbased_Order_Matching|epoch duration]] (milliseconds)
+| epochlen || uint64 || the [[#epoch-based-order-matching|epoch duration]] (milliseconds)
 |}

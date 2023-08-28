@@ -13,7 +13,7 @@ __NOTOC__
 ** [[#configuration-data-request|Configuration Data Request]]
 * [[#bonds|Bonds]]
 * [[#transaction-fees|Transaction Fees]]
-* [[#epochbased-order-matching|Epoch-based Order Matching]]
+* [[#epoch-based-order-matching|Epoch-based Order Matching]]
 ** [[#epoch-time|Epoch Time]]
 ** [[#pseudorandom-order-matching|Pseudorandom Order Matching]]
 * [[#identities-based-on-public-key-infrastructure-pki-key-pairs|Identification]]
@@ -128,7 +128,7 @@ The '''epoch duration''' (<code>epochlen</code>) is the length of one [[#epoch-t
 
 
 If the client connects shortly after a
-[[orders.mediawiki/#Trade_Suspension|trade suspension]], it's possible that
+[[orders.mediawiki/#trade-suspension|trade suspension]], it's possible that
 trading will not commence until a future epoch. This information can be found in the config response's '''market status'''
 (<code>status</code>) which inclues a few variables:
 
@@ -136,7 +136,7 @@ trading will not commence until a future epoch. This information can be found in
 
 * A '''final epoch''' (<code>finalepoch</code>) may also be present if the dex is scheduled to go into trade suspension. If this variable is present, there may also be a '''persists''' (<code>persistbook</code>) boolean that is true when booked orders will not be purged after market suspension.
 
-The [[orders.mediawiki/#Market_Buy_Orders|'''market buy buffer''']] (<code>buybuffer</code>)
+The [[orders.mediawiki/#market-buy-orders|'''market buy buffer''']] (<code>buybuffer</code>)
 defines the minimum order size for a market buy order.
 
 ===Bond Asset Variables===
@@ -168,7 +168,7 @@ respond with its current configuration.
 |-
 | btimeout       || int   || the broadcast timeout
 |-
-| apiver         || int   || the server's [[#API_Version|api version]]
+| apiver         || int   || the server's [[#api-version|api version]]
 |-
 | pubkey         || bytes || the server's public ecdsa key
 |-
@@ -236,7 +236,7 @@ respond with its current configuration.
 |-
 | ratestep    || int    || the price rate increment (atoms)
 |-
-| epochlen    || int    || the [[#epochbased-order-matching|epoch duration]] (milliseconds)
+| epochlen    || int    || the [[#epoch-based-order-matching|epoch duration]] (milliseconds)
 |-
 | buybuffer   || float  || the [[orders.mediawiki/#market-buy-orders|market buy buffer]]
 |-
@@ -264,7 +264,7 @@ add considerable complexity to the swap process and incentivize DEX operators to
 facilitate wash trading.
 Instead, time locked bonds are considered during registration. <!-- TODO: Create and link to bond specifics. -->
 Locked funds discourage certain spam attacks and enable punitive actions when
-[[community.mediawiki/#Rules_of_Community_Conduct|conduct rules]] are violated.
+[[community.mediawiki/#rules-of-community-conduct|conduct rules]] are violated.
 
 ==Transaction Fees==
 

@@ -61,9 +61,9 @@ func (s *Server) apiConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.core.ConfigMsg())
 }
 
-// apiAsset is the handler for the '/asset/{assetID}' API request.
+// apiAsset is the handler for the '/asset/{"assetSymbol"}' API request.
 func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
-	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymbol))
 	assetID, found := dex.BipSymbolID(assetSymbol)
 	if !found {
 		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
@@ -104,8 +104,10 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
+// apiSetFeeScale is the handler for the
+// '/asset/{"assetSymbol"}/setfeescale/{"scaleKey"}' API request.
 func (s *Server) apiSetFeeScale(w http.ResponseWriter, r *http.Request) {
-	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymbol))
 	assetID, found := dex.BipSymbolID(assetSymbol)
 	if !found {
 		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
@@ -131,6 +133,7 @@ func (s *Server) apiSetFeeScale(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// apiMarkets is the handler for the '/markets' API request.
 func (s *Server) apiMarkets(w http.ResponseWriter, r *http.Request) {
 	statuses := s.core.MarketStatuses()
 	mktStatuses := make(map[string]*MarketStatus)

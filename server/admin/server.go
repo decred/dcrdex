@@ -40,7 +40,7 @@ const (
 	accountIDKey       = "account"
 	yesKey             = "yes"
 	matchIDKey         = "match"
-	assetSymKey        = "asset"
+	assetSymbol        = "asset"
 	ruleKey            = "rule"
 	scaleKey           = "scale"
 	includeInactiveKey = "includeinactive"
@@ -147,7 +147,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
 		})
-		r.Route("/asset/{"+assetSymKey+"}", func(rm chi.Router) {
+		r.Route("/asset/{"+assetSymbol+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAsset)
 			rm.Get("/setfeescale/{"+scaleKey+"}", s.apiSetFeeScale)
 		})
