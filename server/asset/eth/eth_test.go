@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/big"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -877,6 +878,28 @@ func TestValidateSignature(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+	}
+}
+
+func TestIsRemoteURL(t *testing.T) {
+	for _, tt := range []struct {
+		url        string
+		wantRemote bool
+	}{
+		{"http://localhost:1234", false},
+		{"http://127.0.0.1", false},
+		{"http://127.0.0.1:1234", false},
+		{"https://127.0.0.1:1234", false},
+		{"https://decred.org", true},
+		{"https://241.45.173.171", true},
+		{"http://[::1]:8080", false},
+		{"https://[2001:db8::1]:8080", true},
+		{"https://241.45.173.171:1234", true},
+	} {
+		uri, _ := url.Parse(tt.url)
+		if is := isRemoteURL(uri); is != tt.wantRemote {
+			t.Fatalf("%s: wanted %t, got %t", tt.url, tt.wantRemote, is)
 		}
 	}
 }

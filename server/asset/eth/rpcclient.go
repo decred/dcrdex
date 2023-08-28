@@ -218,7 +218,7 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 	// shouldn't make requests unless something seems wrong.
 	if isWS {
 		ec.tipCache.expiration = headerExpirationTime // time.Minute
-	} else if ip := net.ParseIP(uri.Hostname()); ip != nil && !ip.IsLoopback() {
+	} else if isRemoteURL(uri) {
 		// Lower the request rate for non-loopback IPs to avoid running into
 		// rate limits.
 		ec.tipCache.expiration = time.Second * 99 / 10
@@ -680,4 +680,17 @@ type RPCTransaction struct {
 	// V                *hexutil.Big      `json:"v"`
 	// R                *hexutil.Big      `json:"r"`
 	// S                *hexutil.Big      `json:"s"`
+}
+
+func isRemoteURL(uri *url.URL) bool {
+	host := uri.Hostname()
+	ip := net.ParseIP(host)
+	if ip == nil {
+		ips, _ := net.LookupIP(host)
+		if len(ips) == 0 {
+			return true
+		}
+		ip = ips[0]
+	}
+	return !ip.IsLoopback()
 }
