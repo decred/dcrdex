@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -53,6 +55,13 @@ type ethConn struct {
 	// caller is a client for raw calls not implemented by *ethclient.Client.
 	caller          ContextCaller
 	txPoolSupported bool
+
+	blockNumberCache struct {
+		sync.Mutex
+		expiration  time.Duration
+		lastUpdate  time.Time
+		blockHeight uint64
+	}
 }
 
 func (ec *ethConn) String() string {
@@ -137,6 +146,18 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 		priority: endpoint.priority,
 		tokens:   make(map[uint32]*tokener),
 		caller:   client,
+	}
+
+	// ETHBackend will check rpcclient.blockNumber() once per second. For
+	// external sources, that's an excessive request rate. Cache most recent
+	// results for up to 10 seconds for external providers.
+	uri, err := url.Parse(endpoint.url)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing url %q: %w", endpoint.url, err)
+	}
+	ec.blockNumberCache.expiration = time.Second * 9 / 10
+	if ip := net.ParseIP(uri.Hostname()); ip != nil && !ip.IsLoopback() {
+		ec.blockNumberCache.expiration = time.Second * 99 / 10
 	}
 
 	reqModules := []string{"eth", "txpool"}
@@ -439,8 +460,20 @@ func (c *rpcclient) suggestGasTipCap(ctx context.Context) (tipCap *big.Int, err 
 // blockNumber gets the chain length at the time of calling.
 func (c *rpcclient) blockNumber(ctx context.Context) (bn uint64, err error) {
 	return bn, c.withClient(func(ec *ethConn) error {
+		c := &ec.blockNumberCache
+		c.Lock()
+		defer c.Unlock()
+		if time.Since(c.lastUpdate) < c.expiration && c.blockHeight > 0 {
+			bn = c.blockHeight
+			return nil
+		}
 		bn, err = ec.BlockNumber(ctx)
-		return err
+		if err != nil {
+			return err
+		}
+		c.lastUpdate = time.Now()
+		c.blockHeight = bn
+		return nil
 	})
 }
 

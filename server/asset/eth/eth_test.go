@@ -249,7 +249,7 @@ func TestRun(t *testing.T) {
 		select {
 		case <-ch:
 			cancel()
-		case <-time.After(blockPollInterval * 2):
+		case <-time.After(time.Second * 2):
 		}
 	}()
 	backend.run(ctx)
