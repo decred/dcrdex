@@ -940,11 +940,18 @@ func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string) ([]
 		if len(msgTx.TxOut) == 0 {
 			return nil, fmt.Errorf("malformed ticket transaction %s", h)
 		}
+		var fees uint64
+		for _, txIn := range msgTx.TxIn {
+			fees += uint64(txIn.ValueIn)
+		}
+		for _, txOut := range msgTx.TxOut {
+			fees -= uint64(txOut.Value)
+		}
 		tickets[i] = &asset.Ticket{
 			Tx: asset.TicketTransaction{
 				Hash:        h.String(),
 				TicketPrice: uint64(msgTx.TxOut[0].Value),
-				Fees:        0, // tickets txs don't have fees, right?
+				Fees:        fees,
 				Stamp:       now,
 				BlockHeight: -1,
 			},

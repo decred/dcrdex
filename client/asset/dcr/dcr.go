@@ -34,7 +34,6 @@ import (
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
-	"github.com/decred/dcrd/blockchain/standalone/v2"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
@@ -3464,7 +3463,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		if err != nil {
 			return nil, fmt.Errorf("invalid contract tx data: %w", err)
 		}
-		if err = standalone.CheckTransactionSanity(contractTx, uint64(dcr.chainParams.MaxTxSize)); err != nil {
+		if err = blockchain.CheckTransactionSanity(contractTx, uint64(dcr.chainParams.MaxTxSize)); err != nil {
 			return nil, fmt.Errorf("invalid contract tx data: %w", err)
 		}
 		if checkHash := contractTx.TxHash(); checkHash != *txHash {
@@ -5192,7 +5191,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	// Chance of a given ticket voting in a block is
 	// p = chainParams.TicketsPerBlock / (chainParams.TicketPoolSize * chainParams.TicketsPerBlock)
 	//   = 1 / chainParams.TicketPoolSize
-	// Expecation value of number of blocks to vote is
+	// Expected number of blocks to vote is
 	// 1 / p = chainParams.TicketPoolSize
 	expectedBlocksToVote := int64(dcr.chainParams.TicketPoolSize)
 	voteHeightExpectationValue := dcr.cachedBestBlock().height + expectedBlocksToVote
@@ -5252,7 +5251,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 // The only thing I can't figure out is how SPV wallets set the spender in the
 // case of an auto-revocation. It might be happening here
 // https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/chainntfns.go#L770-L775
-// If we're seeing auto-revocations, we're find to make the changes in this
+// If we're seeing auto-revocations, we're fine to make the changes in this
 // method.
 func (dcr *ExchangeWallet) tickets(ctx context.Context) ([]*asset.Ticket, error) {
 	tickets, err := dcr.wallet.Tickets(ctx)
@@ -5439,7 +5438,7 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 }
 
 // TicketPage fetches a page of tickets within a range of block numbers with a
-// target page size and optional offset. scanStart it the block in which to
+// target page size and optional offset. scanStart is the block in which to
 // start the scan. The scan progresses in reverse block number order, starting
 // at scanStart and going to progressively lower blocks. scanStart can be set to
 // -1 to indicate the current chain tip.

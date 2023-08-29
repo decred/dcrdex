@@ -225,6 +225,16 @@
   #purchaserInput {
     width: 4em;
   }
+
+  #vspDisplay {
+    #vspEditIcon {
+      display: none;
+    }
+
+    &:hover #vspEditIcon {
+      display: inline;
+    }
+  }
 }
 
 @include media-breakpoint-up(xxl) {

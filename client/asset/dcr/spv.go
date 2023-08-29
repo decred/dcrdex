@@ -901,29 +901,65 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 		return nil, err
 	}
 
-	// DRAFT NOTE: When purchasing N tickets, if there is utxo contention, the
-	// dcrwallet algorithm will reduce the Count until resolved.
-	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1480-L1490
-	// As a result, the user will get an actual ticket count somewhere in the
-	// range 1 <= tickets_purchased <= n.
-	// How do we handle that here? Or do we just let the front end handle it?
-	// If we set MinConf to 0 can we just loop until we have enough?
-	request := &wallet.PurchaseTicketsRequest{
-		Count: n,
-		// DRAFT NOTE: Why not 0? We count zero-conf as available, so this
-		// doesn't match.
-		MinConf:              1,
+	// TODO: When purchasing N tickets with a VSP, if the wallet doesn't find a
+	// suitable already-existing output for each ticket + vsp fee = 2*N outputs
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1439-L1471
+	// it will end up in the lowBalance loop, where the requested ticket count
+	// (req.Count) is reduced
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1499-L1501
+	// before ultimately ending with a errVSPFeeRequiresUTXOSplit
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1537C17-L1537C43
+	// which leads us into the special handling in (*Wallet).PurchaseTickets,
+	// where the requested ticket count is, unceremoniously, forced to 1.
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/wallet.go#L1725C15-L1725C15
+	//
+	// tldr; The wallet will apparently not generate split outputs for vsp fees,
+	//       so unless we have existing outputs of suitable size, will
+	//       automatically reduce the requested ticket count to 1.
+	//
+	// How do we handle that? Is that a bug?
+
+	req := &wallet.PurchaseTicketsRequest{
+		Count:                n,
 		VSPFeePaymentProcess: vspClient.Process,
 		VSPFeeProcess:        vspClient.FeePercentage,
 		// TODO: CSPP/mixing
 	}
-	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, request)
+
+	// This loop (+ minconf=0) doesn't work. Results in double spend errors when
+	// split tx outputs already spent in a previous loops tickets are somehow
+	// selected again for the next loop's split tx.
+	//
+	// ticketHashes := make([]*chainhash.Hash, 0, n)
+	// remain := n
+	// for remain > 0 {
+	// 	req.Count = remain
+	// 	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
+	// 	if err != nil {
+	// 		if len(ticketHashes) > 0 {
+	// 			w.log.Errorf("ticket loop error: %v", err)
+	// 			break
+	// 		}
+	// 		return nil, err
+	// 	}
+	// 	for _, tx := range res.Tickets {
+	// 		for _, txIn := range tx.TxIn {
+	// 			w.dcrWallet.LockOutpoint(&txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index)
+	// 		}
+	// 	}
+	// 	w.log.Tracef("Purchased %d tickets. %d tickets requested. %d tickets left for this request.", len(res.TicketHashes), n, remain)
+	// 	ticketHashes = append(ticketHashes, res.TicketHashes...)
+	// 	remain -= len(res.TicketHashes)
+	// }
+
+	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
 	if err != nil {
 		return nil, err
 	}
 
 	tickets := make([]*asset.Ticket, len(res.TicketHashes))
 	for i, h := range res.TicketHashes {
+		w.log.Debugf("Purchased ticket %s", h)
 		ticketSummary, hdr, err := w.dcrWallet.GetTicketInfo(ctx, h)
 		if err != nil {
 			return nil, fmt.Errorf("error fetching info for new ticket")
@@ -959,7 +995,6 @@ func (w *spvWallet) TicketPage(ctx context.Context, scanStart int32, n, skipN in
 
 func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight int32, maxN, skipN /* 0 = mempool */ int) ([]*asset.Ticket, error) {
 	p := w.chainParams
-	const requiredConfs = 6 + 2
 	var startBlock, endBlock *wallet.BlockIdentifier // null endBlock goes through mempool
 	// If mempool is included, there is no way to scan backwards.
 	includeMempool := upperHeight == upperHeightMempool
@@ -969,7 +1004,7 @@ func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight
 		endBlock = wallet.NewBlockIdentifierFromHeight(upperHeight)
 	}
 	if lowerHeight == lowerHeightAutomatic {
-		bn := upperHeight - int32(p.TicketExpiry+uint32(p.TicketMaturity)-requiredConfs)
+		bn := upperHeight - int32(p.TicketExpiry+uint32(p.TicketMaturity))
 		startBlock = wallet.NewBlockIdentifierFromHeight(bn)
 	} else {
 		startBlock = wallet.NewBlockIdentifierFromHeight(lowerHeight)
@@ -1008,7 +1043,7 @@ func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight
 	// If this is a mempool scan, we cannot scan backwards, so reverse the
 	// result order.
 	if includeMempool {
-		ReverseSlice(tickets)
+		reverseSlice(tickets)
 	}
 
 	return tickets, nil
@@ -1377,7 +1412,7 @@ func initLogging(netDir string) error {
 	return nil
 }
 
-func ReverseSlice[T any](s []T) {
+func reverseSlice[T any](s []T) {
 	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
 		s[i], s[j] = s[j], s[i]
 	}

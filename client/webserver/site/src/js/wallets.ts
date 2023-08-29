@@ -218,6 +218,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.unapproveTokenAllowance, 'click', async () => { this.showUnapproveTokenAllowanceTableForm() })
     Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
     Doc.bind(page.showVSPs, 'click', () => { this.showVSPPicker() })
+    Doc.bind(page.vspDisplay, 'click', () => { this.showVSPPicker() })
     Doc.bind(page.purchaseTicketsBttn, 'click', () => { this.showPurchaseTicketsDialog() })
     bindForm(page.purchaseTicketsForm, page.purchaserSubmit, () => { this.purchaseTickets() })
     Doc.bind(page.purchaserInput, 'change', () => { this.purchaserInputChanged() })
@@ -910,7 +911,7 @@ export default class WalletsPage extends BasePage {
     if (vsp) {
       Doc.show(page.vspDisplayBox, page.purchaseTicketsBox)
       Doc.hide(page.pickVSP)
-      page.vspDisplay.textContent = vsp
+      page.vspURL.textContent = vsp
       return
     }
     Doc.setVis(!stakeStatus.isRPC, page.pickVSP)
