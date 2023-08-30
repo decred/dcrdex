@@ -426,13 +426,10 @@ func TestCheckForNewBlocks(t *testing.T) {
 
 	for _, test := range tests {
 		var err error
-		blocker := make(chan struct{})
 		ctx, cancel := context.WithCancel(context.Background())
-		tipChange := func(tipErr error) {
-			err = tipErr
-			close(blocker)
-		}
 		node := &testNode{}
+		notes := make(chan asset.WalletNotification, 1)
+		emit := asset.NewWalletEmitter(notes, BipID, tLogger)
 
 		node.bestHdr = test.bestHeader
 		node.bestHdrErr = test.blockErr
@@ -445,17 +442,21 @@ func TestCheckForNewBlocks(t *testing.T) {
 					log:        tLogger,
 					currentTip: header0,
 				},
-				log:       tLogger.SubLogger("ETH"),
-				tipChange: tipChange,
-				assetID:   BipID,
+				log:     tLogger.SubLogger("ETH"),
+				emit:    emit,
+				assetID: BipID,
 			},
 		}
 		w.wallets = map[uint32]*assetWallet{BipID: w.assetWallet}
 		w.assetWallet.connected.Store(true)
-		w.checkForNewBlocks(ctx, tipChange)
+		w.checkForNewBlocks(ctx)
 
 		if test.hasTipChange {
-			<-blocker
+			ni := <-notes
+			switch n := ni.(type) {
+			case *asset.AsyncWalletErrorNote:
+				err = n.Err
+			}
 		}
 		cancel()
 		if test.wantErr {

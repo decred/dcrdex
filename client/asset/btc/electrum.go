@@ -292,7 +292,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			// unimportant because of how electrum searches for transactions.
 			stat, err := btc.node.syncStatus()
 			if err != nil {
-				go btc.tipChange(fmt.Errorf("failed to get sync status: %w", err))
+				btc.emit.Errorf("failed to get sync status: %w", err)
 				continue
 			}
 
@@ -307,8 +307,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			if err != nil {
 				// NOTE: often says "height X out of range", then succeeds on next tick
 				if !strings.Contains(err.Error(), "out of range") {
-					go btc.tipChange(fmt.Errorf("failed to get best block from %s electrum server: %w",
-						btc.symbol, err))
+					btc.emit.Errorf("failed to get best block from %s electrum server: %w", btc.symbol, err)
 				}
 				continue
 			}
@@ -316,7 +315,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			btc.log.Debugf("tip change: %d (%s) => %d (%s)", currentTip.height, currentTip.hash,
 				newTip.height, newTip.hash)
 			currentTip = newTip
-			go btc.tipChange(nil)
+			btc.emit.TipChange(uint64(newTip.height))
 			go btc.tryRedemptionRequests(ctx)
 
 		case <-ctx.Done():

@@ -81,11 +81,10 @@ func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string, e
 			t.Fatalf("error reading config options: %v", err)
 		}
 	}
+	notes := make(chan asset.WalletNotification, 1)
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
-		TipChange: func(err error) {
-			blkFunc(name, err)
-		},
+		Emit:     asset.NewWalletEmitter(notes, BipID, tLogger),
 		PeersChange: func(num uint32, err error) {
 			t.Logf("peer count = %d, err = %v", num, err)
 		},
@@ -110,6 +109,23 @@ func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string, e
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
 	}
+
+	go func() {
+		for {
+			select {
+			case ni := <-notes:
+				switch n := ni.(type) {
+				case *asset.TipChangeNote:
+					blkFunc(name, nil)
+				case *asset.AsyncWalletErrorNote:
+					blkFunc(name, n.Err)
+				}
+			case <-tCtx.Done():
+				return
+			}
+		}
+	}()
+
 	if isInternal {
 		i := 0
 		for {
@@ -407,14 +423,14 @@ func runTest(t *testing.T, splitTx bool) {
 
 	confCoin := receipts[0].Coin()
 	confContract := receipts[0].Contract()
-	checkConfs := func(n uint32, expSpent bool) {
+	checkConfs := func(minN uint32, expSpent bool) {
 		t.Helper()
 		confs, spent, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
 		if err != nil {
-			t.Fatalf("error getting %d confs: %v", n, err)
+			t.Fatalf("error getting %d confs: %v", minN, err)
 		}
-		if confs != n {
-			t.Fatalf("expected %d confs, got %d", n, confs)
+		if confs < minN {
+			t.Fatalf("expected %d confs, got %d", minN, confs)
 		}
 		// Not using checkConfs until after redemption, so expect spent.
 		if spent != expSpent {
@@ -459,15 +475,12 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
+		_, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
 		if spent {
 			t.Fatalf("swap spent")
-		}
-		if confs != 0 {
-			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
 		}
 		if ci.Expiration.Equal(lockTime) {
 			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration)

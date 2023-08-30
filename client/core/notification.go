@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
@@ -35,6 +36,7 @@ const (
 	NoteTypeFiatRates    = "fiatrateupdate"
 	NoteTypeCreateWallet = "createwallet"
 	NoteTypeLogin        = "login"
+	NoteTypeWalletNote   = "walletnote"
 )
 
 var noteChanCounter uint64
@@ -645,5 +647,20 @@ const TopicLoginStatus Topic = "LoginStatus"
 func newLoginNote(message string) *LoginNote {
 	return &LoginNote{
 		Notification: db.NewNotification(NoteTypeLogin, TopicLoginStatus, "", message, db.Data),
+	}
+}
+
+// WalletNote is a notification originating from a wallet.
+type WalletNote struct {
+	db.Notification
+	Payload asset.WalletNotification `json:"payload"`
+}
+
+const TopicWalletNotification Topic = "WalletNotification"
+
+func newWalletNote(n asset.WalletNotification) *WalletNote {
+	return &WalletNote{
+		Notification: db.NewNotification(NoteTypeWalletNote, TopicWalletNotification, "", "", db.Data),
+		Payload:      n,
 	}
 }

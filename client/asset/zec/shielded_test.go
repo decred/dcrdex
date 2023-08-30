@@ -32,6 +32,7 @@ func harnessCmd(ctx context.Context, exe string, args ...string) (string, error)
 }
 
 func getDeltaWallet(t *testing.T) (*zecWallet, func()) {
+	notes := make(chan asset.WalletNotification, 1)
 	wi, err := NewWallet(&asset.WalletConfig{
 		Type: walletTypeRPC,
 		Settings: map[string]string{
@@ -40,7 +41,7 @@ func getDeltaWallet(t *testing.T) (*zecWallet, func()) {
 			"rpcport":     "33770",
 		},
 		PeersChange: func(uint32, error) {},
-		TipChange:   func(err error) {},
+		Emit:        asset.NewWalletEmitter(notes, BipID, log),
 	}, log, dex.Simnet)
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +55,17 @@ func getDeltaWallet(t *testing.T) (*zecWallet, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Keep the notes channel drained.
+	go func() {
+		for {
+			select {
+			case <-notes:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	return w, cancel
 }

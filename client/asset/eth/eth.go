@@ -504,7 +504,7 @@ type baseWallet struct {
 type assetWallet struct {
 	*baseWallet
 	assetID   uint32
-	tipChange func(error)
+	emit      *asset.WalletEmitter
 	log       dex.Logger
 	ui        dex.UnitInfo
 	connected atomic.Bool
@@ -796,7 +796,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		versionedGases:     cfg.VersionedGases,
 		maxSwapGas:         maxSwapGas,
 		maxRedeemGas:       maxRedeemGas,
-		tipChange:          cfg.AssetCfg.TipChange,
+		emit:               cfg.AssetCfg.Emit,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
 		approvalCache:      make(map[uint32]bool),
@@ -936,7 +936,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		w.monitorBlocks(ctx, w.tipChange)
+		w.monitorBlocks(ctx)
 		w.shutdown()
 	}()
 	wg.Add(1)
@@ -1122,7 +1122,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		versionedGases:     gases,
 		maxSwapGas:         maxSwapGas,
 		maxRedeemGas:       maxRedeemGas,
-		tipChange:          tokenCfg.TipChange,
+		emit:               tokenCfg.Emit,
 		peersChange:        tokenCfg.PeersChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
@@ -3493,13 +3493,13 @@ func (eth *ETHWallet) monitorPeers(ctx context.Context) {
 // monitorBlocks pings for new blocks and runs the tipChange callback function
 // when the block changes. New blocks are also scanned for potential contract
 // redeems.
-func (eth *ETHWallet) monitorBlocks(ctx context.Context, reportErr func(error)) {
+func (eth *ETHWallet) monitorBlocks(ctx context.Context) {
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			eth.checkForNewBlocks(ctx, reportErr)
+			eth.checkForNewBlocks(ctx)
 		case <-ctx.Done():
 			return
 		}
@@ -3512,12 +3512,12 @@ func (eth *ETHWallet) monitorBlocks(ctx context.Context, reportErr func(error)) 
 // checkForNewBlocks checks for new blocks. When a tip change is detected, the
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
-func (eth *ETHWallet) checkForNewBlocks(ctx context.Context, reportErr func(error)) {
+func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
-		go reportErr(fmt.Errorf("failed to get best hash: %w", err))
+		eth.emit.Errorf("failed to get best hash: %w", err)
 		return
 	}
 	bestHash := bestHdr.Hash()
@@ -3543,7 +3543,7 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context, reportErr func(erro
 
 	go func() {
 		for _, w := range connectedWallets {
-			w.tipChange(nil)
+			w.emit.TipChange(bestHdr.Number.Uint64())
 		}
 	}()
 	go func() {

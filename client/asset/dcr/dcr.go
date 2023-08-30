@@ -619,7 +619,7 @@ type ExchangeWallet struct {
 	chainParams   *chaincfg.Params
 	log           dex.Logger
 	network       dex.Network
-	tipChange     func(error)
+	emit          *asset.WalletEmitter
 	lastPeerCount uint32
 	peersChange   func(uint32, error)
 	vspFilepath   string
@@ -881,7 +881,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		log:                 logger,
 		chainParams:         chainParams,
 		network:             network,
-		tipChange:           cfg.TipChange,
+		emit:                cfg.Emit,
 		peersChange:         cfg.PeersChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
@@ -5520,6 +5520,21 @@ func (dcr *ExchangeWallet) monitorPeers(ctx context.Context) {
 	}
 }
 
+func (dcr *ExchangeWallet) emitTipChange(height int64) {
+	var data interface{}
+	// stakeInfo, err := dcr.wallet.StakeInfo(dcr.ctx)
+	// if err != nil {
+	// 	dcr.log.Errorf("Error getting stake info for tip change notification data: %v", err)
+	// } else {
+	// 	data = &struct {
+	// 		TicketPrice uint64 `json:"ticketPrice"`
+	// 	}{
+	// 		TicketPrice: uint64(stakeInfo.Sdiff),
+	// 	}
+	// }
+	dcr.emit.TipChange(uint64(height), data)
+}
+
 // monitorBlocks pings for new blocks and runs the tipChange callback function
 // when the block changes. New blocks are also scanned for potential contract
 // redeems.
@@ -5551,7 +5566,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 
 		newTip, err := dcr.getBestBlock(ctxInternal)
 		if err != nil {
-			dcr.handleTipChange(ctx, nil, 0, fmt.Errorf("failed to get best block: %w", err))
+			dcr.emit.Errorf("failed to get best block: %w", err)
 			return
 		}
 
@@ -5622,7 +5637,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 
 func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chainhash.Hash, newTipHeight int64, err error) {
 	if err != nil {
-		go dcr.tipChange(err)
+		dcr.emit.Error(err)
 		return
 	}
 
@@ -5635,7 +5650,7 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 
 	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
 
-	go dcr.tipChange(nil)
+	dcr.emitTipChange(newTipHeight)
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.

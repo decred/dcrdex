@@ -1303,6 +1303,7 @@ func newTestRig() *testRig {
 			localePrinter: message.NewPrinter(language.AmericanEnglish),
 
 			fiatRateSources: make(map[string]*commonRateSource),
+			notes:           make(chan asset.WalletNotification, 128),
 		},
 		db:      tdb,
 		queue:   queue,
@@ -1960,7 +1961,7 @@ func TestRegister(t *testing.T) {
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
 						tWallet.setConfs(tWallet.sendCoin.id, 0, nil) // 0 ????
-						tCore.tipChange(tUTXOAssetA.ID, nil)
+						tCore.tipChange(tUTXOAssetA.ID)
 						return
 					}
 				case <-timeout.C:

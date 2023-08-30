@@ -5,6 +5,7 @@ package asset
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -345,14 +346,11 @@ type WalletConfig struct {
 	// Settings are supplied by the user according the the WalletInfo's
 	// ConfigOpts.
 	Settings map[string]string
-	// TipChange is a function that will be called when the blockchain
-	// monitoring loop detects a new block. If the error supplied is nil, the
-	// client should check the confirmations on any negotiating swaps to see if
-	// action is needed. If the error is non-nil, the wallet monitoring loop
-	// encountered an error while retrieving tip information. This function
-	// should not be blocking, and Wallet implementations should not rely on any
-	// specific side effect of the function call.
-	TipChange func(error)
+	// Emit is a WalletEmitter that manages a channel over which an asset may
+	// issue notifications. Every asset is expected to issue a TipChangeNote
+	// when a network change occurs that might require balance updates or action
+	// on swaps.
+	Emit *WalletEmitter
 	// PeersChange is a function that will be called when the number of
 	// wallet/node peers changes, or the wallet fails to get the count. This
 	// should not be called prior to Connect of the constructed wallet.
@@ -778,8 +776,9 @@ type TokenConfig struct {
 	AssetID uint32
 	// Settings correspond to Token.Definition.ConfigOpts.
 	Settings map[string]string
-	// TipChange will be called after the parent's TipChange.
-	TipChange func(error)
+	// Emit is a WalletEmitter that manages a channel over which an asset may
+	// issue notifications.
+	Emit *WalletEmitter
 	// PeersChange will be called after the parent's PeersChange.
 	PeersChange func(uint32, error)
 }
@@ -1315,4 +1314,80 @@ type MultiOrder struct {
 	RedeemVersion uint32
 	// RedeemAssetID is the asset ID of the "to" asset.
 	RedeemAssetID uint32
+}
+
+// WalletNotification can be any asynchronous information the wallet needs
+// to convey.
+type WalletNotification interface{}
+
+// TipChangeNote is the only required wallet notification. All wallets should
+// emit a TipChangeNote when a state change occurs that might necessitate swap
+// progression or new balance checks.
+type TipChangeNote struct {
+	AssetID uint32      `json:"assetID"`
+	Tip     uint64      `json:"tip"`
+	Data    interface{} `json:"data"`
+}
+
+// AsyncWalletErrorNote is issued when the wallet detects it is in an error
+// state.
+type AsyncWalletErrorNote struct {
+	AssetID uint32 `json:"assetID"`
+	Err     error  `json:"err"`
+}
+
+// CustomWalletNote is any other information the wallet wishes to convey to
+// the user.
+type CustomWalletNote struct {
+	AssetID uint32      `json:"assetID"`
+	Payload interface{} `json:"payload"`
+}
+
+// WalletEmitter handles a channel for wallet notifications and provides methods
+// that generates notifications.
+type WalletEmitter struct {
+	c       chan<- WalletNotification
+	assetID uint32
+	log     dex.Logger
+}
+
+// NewWalletEmitter constructs a WalletEmitter for an asset.
+func NewWalletEmitter(c chan<- WalletNotification, assetID uint32, log dex.Logger) *WalletEmitter {
+	return &WalletEmitter{
+		c:       c,
+		assetID: assetID,
+		log:     log,
+	}
+}
+
+func (e *WalletEmitter) emit(note WalletNotification) {
+	select {
+	case e.c <- note:
+	default:
+		e.log.Warn("blocking WalletNotification channel")
+	}
+}
+
+// Data sends a CustomWalletNote with the specified data payload.
+func (e *WalletEmitter) Data(payload interface{}) {
+	e.emit(&CustomWalletNote{AssetID: e.assetID, Payload: payload})
+}
+
+// Errorf formats and sends an AsyncWalletErrorNote.
+func (e *WalletEmitter) Errorf(s string, a ...interface{}) {
+	e.emit(&AsyncWalletErrorNote{AssetID: e.assetID, Err: fmt.Errorf(s, a...)})
+}
+
+// Error sends an AsyncWalletErrorNote.
+func (e *WalletEmitter) Error(err error) {
+	e.emit(&AsyncWalletErrorNote{AssetID: e.assetID, Err: err})
+}
+
+// TipChange sends a TipChangeNote with optional extra data.
+func (e *WalletEmitter) TipChange(tip uint64, datas ...interface{}) {
+	var data interface{}
+	if len(datas) > 0 {
+		data = datas[0]
+	}
+	e.emit(&TipChangeNote{AssetID: e.assetID, Tip: tip, Data: data})
 }
