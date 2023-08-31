@@ -33,10 +33,12 @@ ELECTRUM_DIR=${ASSET_DIR}/client
 REPO_DIR=${ELECTRUM_DIR}/electrum-repo
 WALLET_DIR=${ELECTRUM_DIR}/wallet
 NET_DIR=${WALLET_DIR}/regtest
+HARNESS_DIR=~/dextest/firo/harness-ctl
 
 # startup options
 # CLI, DAEMON, GUI  (Default start as CLI)
-STARTUP=CLI
+# To change the mode, run with e.g.
+#   STARTUP=DAEMON ./electrum.sh
 ELECTRUM_REGTEST_ARGS="--regtest --dir=${WALLET_DIR}"
 WALLET_PASSWORD="abc"
 
@@ -54,8 +56,11 @@ fi
 
 git remote -v
 
-git fetch --depth 1 origin ${COMMIT}
-git reset --hard FETCH_HEAD
+CURRENT_COMMIT=$(git rev-parse HEAD)
+if [ ! "${CURRENT_COMMIT}" == "${COMMIT}" ]; then
+    git fetch --depth 1 origin ${COMMIT}
+    git reset --hard FETCH_HEAD
+fi
 
 if [ ! -d "${ELECTRUM_DIR}/venv" ]; then
     # The venv interpreter will be this python version, e.g. python3.10
@@ -110,6 +115,13 @@ rpcpassword=pass
 rpcbind=127.0.0.1:${RPCPORT}
 EOF
 
+cat > "${HARNESS_DIR}/electrum-cli" <<EOF
+source ${ELECTRUM_DIR}/venv/bin/activate
+PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python ${REPO_DIR}/electrum-firo ${ELECTRUM_REGTEST_ARGS} "\$@" --password=${WALLET_PASSWORD}
+deactivate
+EOF
+chmod +x "${HARNESS_DIR}/electrum-cli"
+
 if [  "${STARTUP}" == "GUI" ];
 then
     echo "Starting GUI wallet"
@@ -126,5 +138,8 @@ else
     else
         echo "Starting CLI wallet"
         ./electrum-firo ${ELECTRUM_REGTEST_ARGS} -v daemon
+        # Run
+        #    ./electrum-cli load_wallet
+        # from the firo harness-ctl directory.
     fi
 fi
