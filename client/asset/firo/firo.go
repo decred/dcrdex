@@ -26,18 +26,19 @@ import (
 )
 
 const (
-	version           = 0
-	BipID             = 136    // Zcoin XZC
-	minNetworkVersion = 141201 // bitcoin 0.14 base
-	walletTypeRPC     = "firodRPC"
-	estimateFeeConfs  = 2 // 2 blocks should be enough
+	version            = 0
+	BipID              = 136    // Zcoin XZC
+	minNetworkVersion  = 141201 // bitcoin 0.14 base
+	walletTypeRPC      = "firodRPC"
+	walletTypeElectrum = "electrumRPC"
+	estimateFeeConfs   = 2 // 2 blocks should be enough
 
 	mainnetExplorerFeeAPI = "https://explorer.firo.org/insight-api-zcoin/utils/estimatefee"
 	testnetExplorerFeeAPI = "https://testexplorer.firo.org/insight-api-zcoin/utils/estimatefee"
 )
 
 var (
-	configOpts = append(btc.RPCConfigOpts("Firo", "8168"), []*asset.ConfigOption{
+	configOpts = append(btc.RPCConfigOpts("Firo", "8888"), []*asset.ConfigOption{
 		{
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
@@ -70,13 +71,21 @@ var (
 		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexfiro.UnitInfo,
-		AvailableWallets: []*asset.WalletDefinition{{
-			Type:              walletTypeRPC,
-			Tab:               "External",
-			Description:       "Connect to firod",
-			DefaultConfigPath: dexbtc.SystemConfigPath("firo"),
-			ConfigOpts:        configOpts,
-		}},
+		AvailableWallets: []*asset.WalletDefinition{
+			{
+				Type:              walletTypeRPC,
+				Tab:               "Firo Core (external)",
+				Description:       "Connect to firod",
+				DefaultConfigPath: dexbtc.SystemConfigPath("firo"),
+				ConfigOpts:        configOpts,
+			},
+			{
+				Type:        walletTypeElectrum,
+				Tab:         "Electrum-Firo (external)",
+				Description: "Use an external Electrum-Firo Wallet",
+				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", false)...),
+			},
+		},
 	}
 )
 
@@ -128,8 +137,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Simnet:  "28888",
 	}
 
-	var w *btc.ExchangeWalletFullNode
-
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:                cfg,
 		MinNetworkVersion:        minNetworkVersion,
@@ -144,7 +151,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Segwit:                   false,
 		InitTxSize:               dexbtc.InitTxSize,
 		InitTxSizeBase:           dexbtc.InitTxSizeBase,
-		LegacyBalance:            true,
+		LegacyBalance:            cfg.Type == walletTypeRPC,
 		LegacyRawFeeLimit:        true,  // sendrawtransaction Has single arg allowhighfees
 		ArglessChangeAddrRPC:     true,  // getrawchangeaddress has No address-type arg
 		OmitAddressType:          true,  // getnewaddress has No address-type arg
@@ -153,18 +160,30 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		NumericGetRawRPC:         false, // getrawtransaction uses either 0/1 Or true/false
 		LegacyValidateAddressRPC: true,  // use validateaddress to read 'ismine' bool
 		SingularWallet:           true,  // one wallet/node
-		UnlockSpends:             false, // checked after sendtoaddress
+		UnlockSpends:             true,  // Firo chain wallet does Not unlock coins after sendrawtransaction
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     fetchExternalFee,
-		PrivKeyFunc: func(addr string) (*btcec.PrivateKey, error) {
-			return privKeyForAddress(w, addr)
-		},
+		PrivKeyFunc:              nil, // set only for walletTypeRPC below
 	}
 
-	var err error
-	w, err = btc.BTCCloneWallet(cloneCFG)
-	return w, err
+	switch cfg.Type {
+	case walletTypeRPC:
+		var exw *btc.ExchangeWalletFullNode
+		// override PrivKeyFunc - we need our own Firo dumpprivkey fn
+		cloneCFG.PrivKeyFunc = func(addr string) (*btcec.PrivateKey, error) {
+			return privKeyForAddress(exw, addr)
+		}
+		var err error
+		exw, err = btc.BTCCloneWallet(cloneCFG)
+		return exw, err
+	case walletTypeElectrum:
+		// override Ports - no default ports
+		cloneCFG.Ports = dexbtc.NetPorts{}
+		return btc.ElectrumWallet(cloneCFG)
+	default:
+		return nil, fmt.Errorf("unknown wallet type %q for firo", cfg.Type)
+	}
 }
 
 // rpcCaller is satisfied by ExchangeWalletFullNode (baseWallet), providing

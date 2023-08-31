@@ -5,14 +5,9 @@ package firo
 // Regnet tests expect the Firo test harness to be running.
 //
 // Sim harness info:
-// The harness has three wallets, alpha, beta, and gamma.
-// All three wallets have confirmed UTXOs.
-// The beta wallet has only coinbase outputs.
-// The alpha wallet has coinbase outputs too, but has sent some to the gamma
-//   wallet, so also has some change outputs.
-// The gamma wallet has regular transaction outputs of varying size and
-// confirmation count. Value:Confirmations =
-// 10:8, 18:7, 5:6, 7:5, 1:4, 15:3, 3:2, 25:1
+// The harness has four nodes: alpha, beta, gamma and delta with one wallet
+// per node. All wallets have confirmed UTXOs. The alpha wallet has only
+// coinbase outputs.
 
 import (
 	"context"
@@ -38,23 +33,25 @@ var (
 	}
 )
 
+// Run harness with NOMINER="1"
 func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
 		NewWallet: NewWallet,
 		LotSize:   tLotSize,
 		Asset:     tFIRO,
+		SplitTx:   true,
 		FirstWallet: &livetest.WalletName{
-			Node: "alpha",
-			Name: "alpha",
+			WalletType: walletTypeRPC,
+			Node:       "alpha",
 		},
 		SecondWallet: &livetest.WalletName{
-			Node: "beta",
-			Name: "beta",
+			WalletType: walletTypeRPC,
+			Node:       "gamma",
 		},
 	})
 }
 
-// Tests only mainnet, testnet expected to return -1 normally
+// Tests only mainnet, testnet is expected to return -1 normally
 func TestFetchExternalFee(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
@@ -62,5 +59,5 @@ func TestFetchExternalFee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("#### External fee rate fetched:: %d sat/B\n", rate)
+	fmt.Printf("External fee rate fetched:: %d sat/B\n", rate)
 }
