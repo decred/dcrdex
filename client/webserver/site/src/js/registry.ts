@@ -427,6 +427,7 @@ export interface PageElement extends HTMLElement {
   checked?: boolean
   href?: string
   htmlFor?: string
+  name?: string
 }
 
 export interface BooleanConfig {
@@ -601,6 +602,84 @@ export interface WalletPeer {
   addr: string
   source: PeerSource
   connected: boolean
+}
+
+export interface TicketTransaction {
+  hash: string
+  ticketPrice: number
+  fees: number
+  stamp: number
+  blockHeight: number
+}
+
+export interface Ticket {
+  tx: TicketTransaction
+  status: number
+  spender: string
+}
+
+export interface TBChoice {
+  id: string
+  description: string
+}
+
+export interface TBAgenda {
+  id: string
+  description: string
+  currentChoice: string
+  choices: TBChoice[]
+}
+
+export interface TKeyPolicyResult {
+  key: string
+  policy: string
+  ticket?: string
+}
+
+export interface TBTreasurySpend {
+  hash: string
+  value: number
+  currentPolicy: string
+}
+
+export interface Stances {
+  agendas: TBAgenda[]
+  tspends: TBTreasurySpend[]
+  treasuryKeys: TKeyPolicyResult[]
+}
+
+export interface TicketStats{
+  totalRewards: number
+  ticketCount: number
+  votes: number
+  revokes: number
+}
+
+export interface TicketStakingStatus {
+  ticketPrice: number
+  votingSubsidy: number
+  vsp: string
+  isRPC: boolean
+  tickets: Ticket[]
+  stances: Stances
+  stats: TicketStats
+}
+
+// VotingServiceProvider is information about a voting service provider.
+export interface VotingServiceProvider {
+  url: string
+  network: number
+  launched: number
+  lastUpdated: number
+  apiVersions: number[]
+  feePercentage: number
+  closed: boolean
+  voting: number
+  voted: number
+  revoked: number
+  vspdVersion: string
+  blockHeight: number
+  netShare: number
 }
 
 export interface Application {

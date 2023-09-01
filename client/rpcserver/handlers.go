@@ -987,11 +987,16 @@ func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePay
 	}
 	defer form.appPass.Clear()
 
-	hashes, err := s.core.PurchaseTickets(form.assetID, form.appPass, form.num)
+	tickets, err := s.core.PurchaseTickets(form.assetID, form.appPass, form.num)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to purchase tickets: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, errMsg)
 		return createResponse(purchaseTicketsRoute, nil, resErr)
+	}
+
+	hashes := make([]string, len(tickets))
+	for i, tkt := range tickets {
+		hashes[i] = tkt.Tx.Hash
 	}
 
 	return createResponse(purchaseTicketsRoute, hashes, nil)
@@ -1673,7 +1678,7 @@ an spv wallet and enables options to view and set the vsp.
       tickets (array): An array of ticket objects.
       [
         {
-          ticket (obj): Ticket transaction data.
+          tx (obj): Ticket transaction data.
           {
             hash (string): The ticket hash as hex.
             ticketPrice (int): The amount paid for the ticket in atoms.
@@ -1681,30 +1686,31 @@ an spv wallet and enables options to view and set the vsp.
             stamp (int): The UNIX time the ticket was purchased.
             blockHeight (int): The block number the ticket was mined.
           },
-	  status: (int) The ticket status. 0: unknown, 1: unmined, 2: immature, 3: live,
-4: voted, 5: missed, 6:expired, 7: unspent, 8: revoked.
+          status: (int) The ticket status. 0: unknown, 1: unmined, 2: immature, 3: live,
+                        4: voted, 5: missed, 6:expired, 7: unspent, 8: revoked.
           spender (string): The transaction that votes on or revokes the ticket if available.
        },
      ],...
      stances (obj): Voting policies.
      {
-       voteChoices (array): An array of consensus vote choices.
+       agendas (array): An array of consensus vote choices.
        [
          {
-           agendaid (string): The agenda ID,
-           agendadescription (string): A description of the agenda being voted on.
-           choiceid (string): The current choice.
-           choicedescription (string): A description of the chosen choice.
+           id (string): The agenda ID,
+           description (string): A description of the agenda being voted on.
+           currentChoice (string): Your current choice.
+           choices ([{id: "string", description: "string"}, ...]): A description of the available choices.
          },
        ],...
-       tSpendPolicy (array): An array of TSpend policies.
+       tspends (array): An array of TSpend policies.
        [
          {
            hash (string): The TSpend txid.,
-           policy (string): The policy.
+           value (int): The total value send in the tspend.,
+           currentValue (string): The policy.
          },
        ],...
-       treasuryPolicy (array): An array of treasury policies.
+       treasuryKeys (array): An array of treasury policies.
        [
          {
            key (string): The pubkey of the tspend creator.

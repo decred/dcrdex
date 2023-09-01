@@ -1616,6 +1616,129 @@ func (s *WebServer) apiSendShielded(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
+	var assetID uint32
+	if !readPost(w, r, &assetID) {
+		return
+	}
+	status, err := s.core.StakeStatus(assetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error fetching stake status for asset ID %d: %w", assetID, err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK     bool                       `json:"ok"`
+		Status *asset.TicketStakingStatus `json:"status"`
+	}{
+		OK:     true,
+		Status: status,
+	}, s.indent)
+}
+
+func (s *WebServer) apiSetVSP(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID uint32 `json:"assetID"`
+		URL     string `json:"url"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	if err := s.core.SetVSP(req.AssetID, req.URL); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error settings vsp to %q for asset ID %d: %w", req.URL, req.AssetID, err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiPurchaseTickets(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID uint32           `json:"assetID"`
+		N       int              `json:"n"`
+		AppPW   encode.PassBytes `json:"appPW"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	appPW, err := s.resolvePass(req.AppPW, r)
+	defer zero(appPW)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	tickets, err := s.core.PurchaseTickets(req.AssetID, appPW, req.N)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error purchasing tickets for asset ID %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK      bool            `json:"ok"`
+		Tickets []*asset.Ticket `json:"tickets"`
+	}{
+		OK:      true,
+		Tickets: tickets,
+	}, s.indent)
+}
+
+func (s *WebServer) apiSetVotingPreferences(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID        uint32            `json:"assetID"`
+		Choices        map[string]string `json:"choices"`
+		TSpendPolicy   map[string]string `json:"tSpendPolicy"`
+		TreasuryPolicy map[string]string `json:"treasuryPolicy"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	if err := s.core.SetVotingPreferences(req.AssetID, req.Choices, req.TSpendPolicy, req.TreasuryPolicy); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error setting voting preferences for asset ID %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiListVSPs(w http.ResponseWriter, r *http.Request) {
+	var assetID uint32
+	if !readPost(w, r, &assetID) {
+		return
+	}
+	vsps, err := s.core.ListVSPs(assetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error listing VSPs for asset ID %d: %w", assetID, err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK   bool                           `json:"ok"`
+		VSPs []*asset.VotingServiceProvider `json:"vsps"`
+	}{
+		OK:   true,
+		VSPs: vsps,
+	}, s.indent)
+}
+
+func (s *WebServer) apiTicketPage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID   uint32 `json:"assetID"`
+		ScanStart int32  `json:"scanStart"`
+		N         int    `json:"n"`
+		SkipN     int    `json:"skipN"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	tickets, err := s.core.TicketPage(req.AssetID, req.ScanStart, req.N, req.SkipN)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error retrieving ticket page for %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK      bool            `json:"ok"`
+		Tickets []*asset.Ticket `json:"tickets"`
+	}{
+		OK:      true,
+		Tickets: tickets,
+	}, s.indent)
+}
+
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
 func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {

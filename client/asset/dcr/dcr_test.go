@@ -688,6 +688,10 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 	return nil, fmt.Errorf("method %v not implemented by (*tRPCClient).RawRequest", method)
 }
 
+func (c *tRPCClient) SetTxFee(ctx context.Context, fee dcrutil.Amount) error {
+	return nil
+}
+
 func TestMain(m *testing.M) {
 	tChainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = stdaddr.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)

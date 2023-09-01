@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrwallet/v3/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v3/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -145,6 +146,7 @@ type rpcClient interface {
 	GetTickets(ctx context.Context, includeImmature bool) ([]*chainhash.Hash, error)
 	GetVoteChoices(ctx context.Context) (*walletjson.GetVoteChoicesResult, error)
 	SetVoteChoice(ctx context.Context, agendaID, choiceID string) error
+	SetTxFee(ctx context.Context, fee dcrutil.Amount) error
 }
 
 // newRPCWallet creates an rpcClient and uses it to construct a new instance
@@ -871,30 +873,92 @@ func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address)
 	return &priv, nil
 }
 
-// StakeDiff returns the current stake difficulty.
-func (w *rpcWallet) StakeDiff(ctx context.Context) (dcrutil.Amount, error) {
-	si, err := w.rpcClient.GetStakeInfo(ctx)
+// StakeInfo returns the current gestakeinfo results.
+func (w *rpcWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
+	res, err := w.rpcClient.GetStakeInfo(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	amt, err := dcrutil.NewAmount(si.Difficulty)
+	sdiff, err := dcrutil.NewAmount(res.Difficulty)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return amt, nil
+	totalSubsidy, err := dcrutil.NewAmount(res.TotalSubsidy)
+	if err != nil {
+		return nil, err
+	}
+	return &wallet.StakeInfoData{
+		BlockHeight:    res.BlockHeight,
+		TotalSubsidy:   totalSubsidy,
+		Sdiff:          sdiff,
+		OwnMempoolTix:  res.OwnMempoolTix,
+		Unspent:        res.Unspent,
+		Voted:          res.Voted,
+		Revoked:        res.Revoked,
+		UnspentExpired: res.UnspentExpired,
+		PoolSize:       res.PoolSize,
+		AllMempoolTix:  res.AllMempoolTix,
+		Immature:       res.Immature,
+		Live:           res.Live,
+		Missed:         res.Missed,
+		Expired:        res.Expired,
+	}, nil
 }
 
 // PurchaseTickets purchases n amount of tickets. Returns the purchased ticket
 // hashes if successful.
-func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string) ([]string, error) {
-	hashes, err := w.rpcClient.PurchaseTicket(ctx, "default", 0 /*spendLimit dcrutil.Amount*/, nil, /*minConf *int*/
-		nil /*ticketAddress stdaddr.Address*/, &n, nil /*poolAddress stdaddr.Address*/, nil, /*poolFees *dcrutil.Amount*/
-		nil /*expiry *int*/, nil /*ticketChange *bool*/, nil /*ticketFee *dcrutil.Amount*/)
-	hashStrs := make([]string, len(hashes))
-	for i := range hashes {
-		hashStrs[i] = hashes[i].String()
+func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string) ([]*asset.Ticket, error) {
+	hashes, err := w.rpcClient.PurchaseTicket(
+		ctx,
+		"default",
+		0,   // spendLimit
+		nil, // minConf
+		nil, // ticketAddress
+		&n,  // numTickets
+		nil, // poolAddress
+		nil, // poolFees
+		nil, // expiry
+		nil, // ticketChange
+		nil, // ticketFee
+	)
+	if err != nil {
+		return nil, err
 	}
-	return hashStrs, err
+
+	now := uint64(time.Now().Unix())
+	tickets := make([]*asset.Ticket, len(hashes))
+	for i, h := range hashes {
+		// Need to get the ticket price
+		tx, err := w.rpcClient.GetTransaction(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("error getting transaction for new ticket %s: %w", h, err)
+		}
+		msgTx, err := msgTxFromHex(tx.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding ticket %s tx hex: %v", h, err)
+		}
+		if len(msgTx.TxOut) == 0 {
+			return nil, fmt.Errorf("malformed ticket transaction %s", h)
+		}
+		var fees uint64
+		for _, txIn := range msgTx.TxIn {
+			fees += uint64(txIn.ValueIn)
+		}
+		for _, txOut := range msgTx.TxOut {
+			fees -= uint64(txOut.Value)
+		}
+		tickets[i] = &asset.Ticket{
+			Tx: asset.TicketTransaction{
+				Hash:        h.String(),
+				TicketPrice: uint64(msgTx.TxOut[0].Value),
+				Fees:        fees,
+				Stamp:       now,
+				BlockHeight: -1,
+			},
+			Status: asset.TicketStatusUnmined,
+		}
+	}
+	return tickets, nil
 }
 
 // Tickets returns active tickets.
@@ -941,7 +1005,7 @@ func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
 		feeAmt, _ := dcrutil.NewAmount(-tx.Fee)
 
 		tickets = append(tickets, &asset.Ticket{
-			Ticket: asset.TicketTransaction{
+			Tx: asset.TicketTransaction{
 				Hash:        h.String(),
 				TicketPrice: uint64(msgTx.TxOut[0].Value),
 				Fees:        uint64(feeAmt),
@@ -962,7 +1026,7 @@ func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
 }
 
 // VotingPreferences returns current wallet voting preferences.
-func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*walletjson.TSpendPolicyResult, []*walletjson.TreasuryPolicyResult, error) {
+func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*asset.TBTreasurySpend, []*walletjson.TreasuryPolicyResult, error) {
 	// Get consensus vote choices.
 	choices, err := w.rpcClient.GetVoteChoices(ctx)
 	if err != nil {
@@ -980,10 +1044,14 @@ func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get treasury spend policy: %v", err)
 	}
-	tSpendPolicy := make([]*walletjson.TSpendPolicyResult, len(tSpendRes))
-	for i, v := range tSpendRes {
-		tp := v
-		tSpendPolicy[i] = &tp
+	tSpendPolicy := make([]*asset.TBTreasurySpend, len(tSpendRes))
+	for i, tp := range tSpendRes {
+		// TODO: Find a way to get the tspend total value? Probably only
+		// possible with a full node and txindex.
+		tSpendPolicy[i] = &asset.TBTreasurySpend{
+			Hash:          tp.Hash,
+			CurrentPolicy: tp.Policy,
+		}
 	}
 	// Get treasury voting policy.
 	const treasuryPolicyMethod = "treasurypolicy"
@@ -1023,6 +1091,10 @@ func (w *rpcWallet) SetVotingPreferences(ctx context.Context, choices, tSpendPol
 		}
 	}
 	return nil
+}
+
+func (w *rpcWallet) SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error {
+	return w.rpcClient.SetTxFee(ctx, feePerKB)
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and

@@ -68,7 +68,7 @@ type TCore struct {
 	archivedRecords          int
 	deleteArchivedRecordsErr error
 	setVSPErr                error
-	purchseTickets           []string
+	purchaseTickets          []string
 	purchaseTicketsErr       error
 	stakeStatus              *asset.TicketStakingStatus
 	stakeStatusErr           error
@@ -184,8 +184,16 @@ func (c *TCore) MultiTrade(appPass []byte, form *core.MultiTradeForm) ([]*core.O
 func (c *TCore) SetVSP(assetID uint32, addr string) error {
 	return c.setVSPErr
 }
-func (c *TCore) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, error) {
-	return c.purchseTickets, c.purchaseTicketsErr
+func (c *TCore) PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error) {
+	tickets := make([]*asset.Ticket, len(c.purchaseTickets))
+	for i, h := range c.purchaseTickets {
+		tickets[i] = &asset.Ticket{
+			Tx: asset.TicketTransaction{
+				Hash: h,
+			},
+		}
+	}
+	return tickets, c.purchaseTicketsErr
 }
 func (c *TCore) StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error) {
 	return c.stakeStatus, c.stakeStatusErr

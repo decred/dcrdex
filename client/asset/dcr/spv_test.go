@@ -333,6 +333,12 @@ func (w *tDcrWallet) SignMessage(ctx context.Context, msg string, addr stdaddr.A
 	return nil, nil
 }
 
+func (w *tDcrWallet) SetRelayFee(relayFee dcrutil.Amount) {}
+
+func (w *tDcrWallet) GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*wallet.TicketSummary, *wire.BlockHeader, error) {
+	return nil, nil, nil
+}
+
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 	dcrw := &tDcrWallet{
 		blockHeader:    make(map[chainhash.Hash]*wire.BlockHeader),

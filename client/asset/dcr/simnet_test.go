@@ -619,7 +619,7 @@ func testTickets(t *testing.T, isInternal bool, ew *ExchangeWallet) {
 	if err := ew.Unlock(walletPassword); err != nil {
 		t.Fatalf("unable to unlock wallet: %v", err)
 	}
-	tickets, err := ew.PurchaseTickets(3)
+	tickets, err := ew.PurchaseTickets(3, 20)
 	if err != nil {
 		t.Fatalf("error purchasing tickets: %v", err)
 	}
@@ -679,25 +679,25 @@ func testTickets(t *testing.T, isInternal bool, ew *ExchangeWallet) {
 	tLogger.Info("The following are stake status after setting vsp and purchasing tickets.")
 	spew.Dump(ss)
 
-	if len(ss.Stances.VoteChoices) != len(choices) {
-		t.Fatalf("wrong number of vote choices. expected %d, got %d", len(choices), len(ss.Stances.VoteChoices))
+	if len(ss.Stances.Agendas) != len(choices) {
+		t.Fatalf("wrong number of vote choices. expected %d, got %d", len(choices), len(ss.Stances.Agendas))
 	}
 
-	for _, reportedChoice := range ss.Stances.VoteChoices {
-		choiceID, found := choices[reportedChoice.AgendaID]
+	for _, agenda := range ss.Stances.Agendas {
+		choiceID, found := choices[agenda.ID]
 		if !found {
-			t.Fatalf("unknown agenda %s", reportedChoice.AgendaID)
+			t.Fatalf("unknown agenda %s", agenda.ID)
 		}
-		if reportedChoice.ChoiceID != choiceID {
-			t.Fatalf("wrong choice reported. expected %s, got %s", choiceID, reportedChoice.ChoiceID)
+		if agenda.CurrentChoice != choiceID {
+			t.Fatalf("wrong choice reported. expected %s, got %s", choiceID, agenda.CurrentChoice)
 		}
 	}
 
-	if len(ss.Stances.TreasuryPolicy) != len(treasuryPolicy) {
-		t.Fatalf("wrong number of treasury keys. expected %d, got %d", len(treasuryPolicy), len(ss.Stances.TreasuryPolicy))
+	if len(ss.Stances.TreasuryKeys) != len(treasuryPolicy) {
+		t.Fatalf("wrong number of treasury keys. expected %d, got %d", len(treasuryPolicy), len(ss.Stances.TreasuryKeys))
 	}
 
-	for _, tp := range ss.Stances.TreasuryPolicy {
+	for _, tp := range ss.Stances.TreasuryKeys {
 		policy, found := treasuryPolicy[tp.Key]
 		if !found {
 			t.Fatalf("unknown treasury key %s", tp.Key)
@@ -707,17 +707,17 @@ func testTickets(t *testing.T, isInternal bool, ew *ExchangeWallet) {
 		}
 	}
 
-	if len(ss.Stances.TSpendPolicy) != len(tspendPolicy) {
-		t.Fatalf("wrong number of tspends. expected %d, got %d", len(tspendPolicy), len(ss.Stances.TSpendPolicy))
+	if len(ss.Stances.TreasurySpends) != len(tspendPolicy) {
+		t.Fatalf("wrong number of tspends. expected %d, got %d", len(tspendPolicy), len(ss.Stances.TreasurySpends))
 	}
 
-	for _, p := range ss.Stances.TSpendPolicy {
-		policy, found := tspendPolicy[p.Hash]
+	for _, tspend := range ss.Stances.TreasurySpends {
+		policy, found := tspendPolicy[tspend.Hash]
 		if !found {
-			t.Fatalf("unknown tspend tx %s", p.Hash)
+			t.Fatalf("unknown tspend tx %s", tspend.Hash)
 		}
-		if p.Policy != policy {
-			t.Fatalf("wrong policy reported. expected %s, got %s", policy, p.Policy)
+		if tspend.CurrentPolicy != policy {
+			t.Fatalf("wrong policy reported. expected %s, got %s", policy, tspend.CurrentPolicy)
 		}
 	}
 }

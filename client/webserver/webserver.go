@@ -161,6 +161,12 @@ type clientCore interface {
 	ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConrim func()) (string, error)
 	UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error)
 	ApproveTokenFee(assetID uint32, version uint32, approval bool) (uint64, error)
+	StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error)
+	SetVSP(assetID uint32, addr string) error
+	PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error)
+	SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error
+	ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error)
+	TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error)
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -513,6 +519,13 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/shieldfunds", s.apiShieldFunds)
 			apiAuth.Post("/unshieldfunds", s.apiUnshieldFunds)
 			apiAuth.Post("/sendshielded", s.apiSendShielded)
+
+			apiAuth.Post("/stakestatus", s.apiStakeStatus)
+			apiAuth.Post("/setvsp", s.apiSetVSP)
+			apiAuth.Post("/purchasetickets", s.apiPurchaseTickets)
+			apiAuth.Post("/setvotes", s.apiSetVotingPreferences)
+			apiAuth.Post("/listvsps", s.apiListVSPs)
+			apiAuth.Post("/ticketpage", s.apiTicketPage)
 		})
 	})
 

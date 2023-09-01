@@ -19,5 +19,23 @@ body.dark {
         border-top: 1px solid $dark_border_color;
       }
     }
+
+    #stakingBox {
+      border-color: $dark_border_color;
+    }
+
+    table#vspPickerTable,
+    table#ticketHistoryTable {
+      border: 1px solid $dark_border_color;
+
+      th,
+      tr:not(:last-child) {
+        border-bottom: 1px solid $dark_border_color;
+      }
+
+      td:not(:first-child) {
+        border-color: $dark_border_color;
+      }
+    }
   }
 }

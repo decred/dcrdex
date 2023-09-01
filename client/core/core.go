@@ -10568,7 +10568,7 @@ func (c *Core) SetVSP(assetID uint32, addr string) error {
 
 // PurchaseTickets purchases n tickets. Returns the purchased ticket hashes if
 // successful. Used for ticket purchasing.
-func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, error) {
+func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error) {
 	wallet, tb, err := c.stakingWallet(assetID)
 	if err != nil {
 		return nil, err
@@ -10582,7 +10582,7 @@ func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	hashes, err := tb.PurchaseTickets(n)
+	tickets, err := tb.PurchaseTickets(n, c.feeSuggestionAny(assetID))
 	if err != nil {
 		return nil, err
 	}
@@ -10590,7 +10590,7 @@ func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]string, erro
 	// TODO: Send tickets bought notification.
 	//subject, details := c.formatDetails(TopicSendSuccess, sentValue, unbip(assetID), address, coin)
 	//c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
-	return hashes, nil
+	return tickets, nil
 }
 
 // SetVotingPreferences sets default voting settings for all active tickets and
@@ -10603,4 +10603,26 @@ func (c *Core) SetVotingPreferences(assetID uint32, choices, tSpendPolicy,
 		return err
 	}
 	return tb.SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy)
+}
+
+// ListVSPs lists known available voting service providers.
+func (c *Core) ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error) {
+	_, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	return tb.ListVSPs()
+}
+
+// TicketPage fetches a page of TicketBuyer tickets within a range of block
+// numbers with a target page size and optional offset. scanStart it the block
+// in which to start the scan. The scan progresses in reverse block number
+// order, starting at scanStart and going to progressively lower blocks.
+// scanStart can be set to -1 to indicate the current chain tip.
+func (c *Core) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	_, tb, err := c.stakingWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	return tb.TicketPage(scanStart, n, skipN)
 }

@@ -1981,6 +1981,30 @@ func (c *TCore) ApproveTokenFee(assetID uint32, version uint32, approval bool) (
 	return 0, nil
 }
 
+func (c *TCore) StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error) {
+	return nil, nil
+}
+
+func (c *TCore) SetVSP(assetID uint32, addr string) error {
+	return nil
+}
+
+func (c *TCore) PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error) {
+	return nil, nil
+}
+
+func (c *TCore) SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error {
+	return nil
+}
+
+func (c *TCore) ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error) {
+	return nil, nil
+}
+
+func (c *TCore) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	return nil, nil
+}
+
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
 	asset.Register(22, &TDriver{})                 // mona

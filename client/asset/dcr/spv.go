@@ -92,6 +92,8 @@ type dcrWallet interface {
 	SetAgendaChoices(ctx context.Context, ticketHash *chainhash.Hash, choices ...wallet.AgendaChoice) (voteBits uint16, err error)
 	SetTSpendPolicy(ctx context.Context, tspendHash *chainhash.Hash, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
+	SetRelayFee(relayFee dcrutil.Amount)
+	GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*wallet.TicketSummary, *wire.BlockHeader, error)
 	vspclient.Wallet
 	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
@@ -240,6 +242,42 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	return nil
 }
 
+// If we're running on simnet, add some tspends and treasury keys.
+func (w *spvWallet) initializeSimnetTspends(ctx context.Context) {
+	if w.chainParams.Net != wire.SimNet {
+		return
+	}
+	tspendWallet, is := w.dcrWallet.(interface {
+		AddTSpend(tx wire.MsgTx) error
+		GetAllTSpends(ctx context.Context) []*wire.MsgTx
+		SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
+		TreasuryKeyPolicies() []wallet.TreasuryKeyPolicy
+	})
+	if !is {
+		return
+	}
+	const numFakeTspends = 3
+	if len(tspendWallet.GetAllTSpends(ctx)) >= numFakeTspends {
+		return
+	}
+	expiryBase := uint32(time.Now().Add(time.Hour * 24 * 365).Unix())
+	for i := uint32(0); i < numFakeTspends; i++ {
+		var signatureScript [100]byte
+		tx := &wire.MsgTx{
+			Expiry: expiryBase + i,
+			TxIn:   []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, signatureScript[:])},
+			TxOut:  []*wire.TxOut{{Value: int64(i+1) * 1e8}},
+		}
+		if err := tspendWallet.AddTSpend(*tx); err != nil {
+			w.log.Errorf("Error adding simnet tspend: %v", err)
+		}
+	}
+	if len(tspendWallet.TreasuryKeyPolicies()) == 0 {
+		priv, _ := secp256k1.GeneratePrivateKey()
+		tspendWallet.SetTreasuryKeyPolicy(ctx, priv.PubKey().SerializeCompressed(), 0x01 /* yes */, nil)
+	}
+}
+
 func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error) {
 	return cfg.Type != walletTypeSPV, nil
 }
@@ -287,6 +325,8 @@ func (w *spvWallet) startWallet(ctx context.Context) error {
 		defer w.wg.Done()
 		w.notesLoop(ctx, dcrw)
 	}()
+
+	w.initializeSimnetTspends(ctx)
 
 	return nil
 }
@@ -834,13 +874,9 @@ func (w *spvWallet) AddressPrivKey(ctx context.Context, addr stdaddr.Address) (*
 	return privKey, err
 }
 
-// StakeDiff returns the current stake difficulty.
-func (w *spvWallet) StakeDiff(ctx context.Context) (dcrutil.Amount, error) {
-	si, err := w.dcrWallet.StakeInfo(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return si.Sdiff, nil
+// StakeInfo returns the current stake info.
+func (w *spvWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
+	return w.dcrWallet.StakeInfo(ctx)
 }
 
 func newVSPClient(w vspclient.Wallet, vspHost, vspPubKey string, log dex.Logger) (*vspclient.AutoClient, error) {
@@ -859,95 +895,162 @@ func newVSPClient(w vspclient.Wallet, vspHost, vspPubKey string, log dex.Logger)
 
 // PurchaseTickets purchases n tickets, tells the provided vspd to monitor the
 // ticket, and pays the vsp fee.
-func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]string, error) {
+func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]*asset.Ticket, error) {
 	vspClient, err := newVSPClient(w.dcrWallet, vspHost, vspPubKey, w.log.SubLogger("VSP"))
 	if err != nil {
 		return nil, err
 	}
-	request := &wallet.PurchaseTicketsRequest{
+
+	// TODO: When purchasing N tickets with a VSP, if the wallet doesn't find a
+	// suitable already-existing output for each ticket + vsp fee = 2*N outputs
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1439-L1471
+	// it will end up in the lowBalance loop, where the requested ticket count
+	// (req.Count) is reduced
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1499-L1501
+	// before ultimately ending with a errVSPFeeRequiresUTXOSplit
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1537C17-L1537C43
+	// which leads us into the special handling in (*Wallet).PurchaseTickets,
+	// where the requested ticket count is, unceremoniously, forced to 1.
+	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/wallet.go#L1725C15-L1725C15
+	//
+	// tldr; The wallet will apparently not generate split outputs for vsp fees,
+	//       so unless we have existing outputs of suitable size, will
+	//       automatically reduce the requested ticket count to 1.
+	//
+	// How do we handle that? Is that a bug?
+
+	req := &wallet.PurchaseTicketsRequest{
 		Count:                n,
-		MinConf:              1,
 		VSPFeePaymentProcess: vspClient.Process,
 		VSPFeeProcess:        vspClient.FeePercentage,
 		// TODO: CSPP/mixing
 	}
-	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, request)
+
+	// This loop (+ minconf=0) doesn't work. Results in double spend errors when
+	// split tx outputs already spent in a previous loops tickets are somehow
+	// selected again for the next loop's split tx.
+	//
+	// ticketHashes := make([]*chainhash.Hash, 0, n)
+	// remain := n
+	// for remain > 0 {
+	// 	req.Count = remain
+	// 	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
+	// 	if err != nil {
+	// 		if len(ticketHashes) > 0 {
+	// 			w.log.Errorf("ticket loop error: %v", err)
+	// 			break
+	// 		}
+	// 		return nil, err
+	// 	}
+	// 	for _, tx := range res.Tickets {
+	// 		for _, txIn := range tx.TxIn {
+	// 			w.dcrWallet.LockOutpoint(&txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index)
+	// 		}
+	// 	}
+	// 	w.log.Tracef("Purchased %d tickets. %d tickets requested. %d tickets left for this request.", len(res.TicketHashes), n, remain)
+	// 	ticketHashes = append(ticketHashes, res.TicketHashes...)
+	// 	remain -= len(res.TicketHashes)
+	// }
+
+	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
 	if err != nil {
 		return nil, err
 	}
-	hashes := res.TicketHashes
-	hashStrs := make([]string, len(hashes))
-	for i := range hashes {
-		hashStrs[i] = hashes[i].String()
+
+	tickets := make([]*asset.Ticket, len(res.TicketHashes))
+	for i, h := range res.TicketHashes {
+		w.log.Debugf("Purchased ticket %s", h)
+		ticketSummary, hdr, err := w.dcrWallet.GetTicketInfo(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching info for new ticket")
+		}
+		ticket := ticketSummaryToAssetTicket(ticketSummary, hdr, w.log)
+		if ticket == nil {
+			return nil, fmt.Errorf("invalid ticket summary for %s", h)
+		}
+		tickets[i] = ticket
 	}
-	return hashStrs, err
+	return tickets, err
 }
+
+const (
+	upperHeightMempool   = -1
+	lowerHeightAutomatic = -1
+	pageSizeUnlimited    = 0
+)
 
 // Tickets returns current active tickets.
 func (w *spvWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
-	return w.ticketsInRange(ctx, 0, 0)
+	return w.ticketsInRange(ctx, lowerHeightAutomatic, upperHeightMempool, pageSizeUnlimited, 0)
 }
 
-func (w *spvWallet) ticketsInRange(ctx context.Context, fromHeight, toHeight int32) ([]*asset.Ticket, error) {
-	params := w.ChainParams()
+var _ ticketPager = (*spvWallet)(nil)
+
+func (w *spvWallet) TicketPage(ctx context.Context, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	if scanStart == -1 {
+		_, scanStart = w.MainChainTip(ctx)
+	}
+	return w.ticketsInRange(ctx, 0, scanStart, n, skipN)
+}
+
+func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight int32, maxN, skipN /* 0 = mempool */ int) ([]*asset.Ticket, error) {
+	p := w.chainParams
+	var startBlock, endBlock *wallet.BlockIdentifier // null endBlock goes through mempool
+	// If mempool is included, there is no way to scan backwards.
+	includeMempool := upperHeight == upperHeightMempool
+	if includeMempool {
+		_, upperHeight = w.MainChainTip(ctx)
+	} else {
+		endBlock = wallet.NewBlockIdentifierFromHeight(upperHeight)
+	}
+	if lowerHeight == lowerHeightAutomatic {
+		bn := upperHeight - int32(p.TicketExpiry+uint32(p.TicketMaturity))
+		startBlock = wallet.NewBlockIdentifierFromHeight(bn)
+	} else {
+		startBlock = wallet.NewBlockIdentifierFromHeight(lowerHeight)
+	}
+
+	// If not looking at mempool, we can reverse iteration order by swapping
+	// start and end blocks.
+	if endBlock != nil {
+		startBlock, endBlock = endBlock, startBlock
+	}
 
 	tickets := make([]*asset.Ticket, 0)
-
-	// TODO: This does not seem to return tickets withought confirmations.
-	// Investigate this and return unconfirmed tickets with block height
-	// set to -1 if possible.
+	var skipped int
 	processTicket := func(ticketSummaries []*wallet.TicketSummary, hdr *wire.BlockHeader) (bool, error) {
 		for _, ticketSummary := range ticketSummaries {
-			spender := ""
-			if ticketSummary.Spender != nil {
-				spender = ticketSummary.Spender.Hash.String()
+			if skipped < skipN {
+				skipped++
+				continue
+			}
+			if ticket := ticketSummaryToAssetTicket(ticketSummary, hdr, w.log); ticket != nil {
+				tickets = append(tickets, ticket)
 			}
 
-			if ticketSummary.Ticket == nil || len(ticketSummary.Ticket.MyOutputs) < 1 {
-				w.log.Errorf("No zeroth output")
+			if maxN > 0 && len(tickets) >= maxN {
+				return true, nil
 			}
-
-			var blockHeight int64 = -1
-			if hdr != nil {
-				blockHeight = int64(hdr.Height)
-			}
-
-			tickets = append(tickets, &asset.Ticket{
-				Ticket: asset.TicketTransaction{
-					Hash:        ticketSummary.Ticket.Hash.String(),
-					TicketPrice: uint64(ticketSummary.Ticket.MyOutputs[0].Amount),
-					Fees:        uint64(ticketSummary.Ticket.Fee),
-					Stamp:       uint64(ticketSummary.Ticket.Timestamp),
-					BlockHeight: blockHeight,
-				},
-				Status:  asset.TicketStatus(ticketSummary.Status),
-				Spender: spender,
-			})
 		}
 
 		return false, nil
 	}
 
-	const requiredConfs = 6 + 2
-	endBlockNum := toHeight
-	if endBlockNum == 0 {
-		_, endBlockNum = w.MainChainTip(ctx)
-	}
-	startBlockNum := fromHeight
-	if startBlockNum == 0 {
-		startBlockNum = endBlockNum -
-			int32(params.TicketExpiry+uint32(params.TicketMaturity)-requiredConfs)
-	}
-	startBlock := wallet.NewBlockIdentifierFromHeight(startBlockNum)
-	endBlock := wallet.NewBlockIdentifierFromHeight(endBlockNum)
 	if err := w.dcrWallet.GetTickets(ctx, processTicket, startBlock, endBlock); err != nil {
 		return nil, err
 	}
+
+	// If this is a mempool scan, we cannot scan backwards, so reverse the
+	// result order.
+	if includeMempool {
+		reverseSlice(tickets)
+	}
+
 	return tickets, nil
 }
 
 // VotingPreferences returns current voting preferences.
-func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*walletjson.TSpendPolicyResult, []*walletjson.TreasuryPolicyResult, error) {
+func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*asset.TBTreasurySpend, []*walletjson.TreasuryPolicyResult, error) {
 	_, agendas := wallet.CurrentAgendas(w.chainParams)
 
 	choices, _, err := w.dcrWallet.AgendaChoices(ctx, nil)
@@ -981,15 +1084,20 @@ func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 		return policy
 	}
 	tspends := w.dcrWallet.GetAllTSpends(ctx)
-	tSpendPolicy := make([]*walletjson.TSpendPolicyResult, 0, len(tspends))
+	tSpendPolicy := make([]*asset.TBTreasurySpend, 0, len(tspends))
 	for i := range tspends {
-		tspendHash := tspends[i].TxHash()
-		p := w.dcrWallet.TSpendPolicy(&tspendHash, nil)
-		r := walletjson.TSpendPolicyResult{
-			Hash:   tspendHash.String(),
-			Policy: policyToStr(p),
+		msgTx := tspends[i]
+		tspendHash := msgTx.TxHash()
+		var val uint64
+		for _, txOut := range msgTx.TxOut {
+			val += uint64(txOut.Value)
 		}
-		tSpendPolicy = append(tSpendPolicy, &r)
+		p := w.dcrWallet.TSpendPolicy(&tspendHash, nil)
+		tSpendPolicy = append(tSpendPolicy, &asset.TBTreasurySpend{
+			Hash:          tspendHash.String(),
+			CurrentPolicy: policyToStr(p),
+			Value:         val,
+		})
 	}
 
 	policies := w.dcrWallet.TreasuryKeyPolicies()
@@ -1080,6 +1188,7 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 	}
 	clientCache := make(map[string]*vspclient.AutoClient)
 	// Set voting preferences for VSPs. Continuing for all errors.
+	// NOTE: Doing this in an unmetered loop like this is a privacy breaker.
 	return w.dcrWallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
 		vspHost, err := w.dcrWallet.VSPHostForTicket(ctx, hash)
 		if err != nil {
@@ -1112,6 +1221,11 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 		}
 		return nil
 	})
+}
+
+func (w *spvWallet) SetTxFee(_ context.Context, feePerKB dcrutil.Amount) error {
+	w.dcrWallet.SetRelayFee(feePerKB)
+	return nil
 }
 
 // cacheBlock caches a block for future use. The block has a lastAccess stamp
@@ -1296,4 +1410,39 @@ func initLogging(netDir string) error {
 	connmgr.UseLogger(logger("CONMGR", slog.LevelInfo))
 
 	return nil
+}
+
+func reverseSlice[T any](s []T) {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
+func ticketSummaryToAssetTicket(ticketSummary *wallet.TicketSummary, hdr *wire.BlockHeader, log dex.Logger) *asset.Ticket {
+	spender := ""
+	if ticketSummary.Spender != nil {
+		spender = ticketSummary.Spender.Hash.String()
+	}
+
+	if ticketSummary.Ticket == nil || len(ticketSummary.Ticket.MyOutputs) < 1 {
+		log.Errorf("No zeroth output")
+		return nil
+	}
+
+	var blockHeight int64 = -1
+	if hdr != nil {
+		blockHeight = int64(hdr.Height)
+	}
+
+	return &asset.Ticket{
+		Tx: asset.TicketTransaction{
+			Hash:        ticketSummary.Ticket.Hash.String(),
+			TicketPrice: uint64(ticketSummary.Ticket.MyOutputs[0].Amount),
+			Fees:        uint64(ticketSummary.Ticket.Fee),
+			Stamp:       uint64(ticketSummary.Ticket.Timestamp),
+			BlockHeight: blockHeight,
+		},
+		Status:  asset.TicketStatus(ticketSummary.Status),
+		Spender: spender,
+	}
 }

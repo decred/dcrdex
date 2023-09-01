@@ -34,7 +34,7 @@ import (
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
-	"github.com/decred/dcrd/blockchain/standalone/v2"
+	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -649,6 +649,8 @@ type ExchangeWallet struct {
 	vspV atomic.Value // *vsp
 
 	connected atomic.Bool
+
+	subsidyCache *blockchain.SubsidyCache
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -888,6 +890,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		mempoolRedeems:      make(map[[32]byte]*mempoolRedeem),
 		vspFilepath:         vspFilepath,
 		walletType:          cfg.Type,
+		subsidyCache:        blockchain.NewSubsidyCache(chainParams),
 	}
 
 	if b, err := os.ReadFile(vspFilepath); err == nil {
@@ -3460,7 +3463,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		if err != nil {
 			return nil, fmt.Errorf("invalid contract tx data: %w", err)
 		}
-		if err = standalone.CheckTransactionSanity(contractTx, uint64(dcr.chainParams.MaxTxSize)); err != nil {
+		if err = blockchain.CheckTransactionSanity(contractTx, uint64(dcr.chainParams.MaxTxSize)); err != nil {
 			return nil, fmt.Errorf("invalid contract tx data: %w", err)
 		}
 		if checkHash := contractTx.TxHash(); checkHash != *txHash {
@@ -5146,14 +5149,53 @@ func (dcr *ExchangeWallet) isNative() bool {
 	return dcr.walletType == walletTypeSPV
 }
 
+// currentAgendas gets the most recent agendas from the chain params. The caller
+// must populate the CurrentChoice field of the agendas.
+func currentAgendas(chainParams *chaincfg.Params) (agendas []*asset.TBAgenda) {
+	var bestID uint32
+	for deploymentID := range chainParams.Deployments {
+		if bestID == 0 || deploymentID > bestID {
+			bestID = deploymentID
+		}
+	}
+	for _, deployment := range chainParams.Deployments[bestID] {
+		v := deployment.Vote
+		agenda := &asset.TBAgenda{
+			ID:          v.Id,
+			Description: v.Description,
+		}
+		for _, choice := range v.Choices {
+			agenda.Choices = append(agenda.Choices, &asset.TBChoice{
+				ID:          choice.Id,
+				Description: choice.Description,
+			})
+		}
+		agendas = append(agendas, agenda)
+	}
+	return
+}
+
 func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
-	sdiff, err := dcr.wallet.StakeDiff(dcr.ctx)
+	// Try to get tickets first, because this will error for RPC + SPV wallets.
+	tickets, err := dcr.tickets(dcr.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving tickets: %w", err)
+	}
+	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Chance of a given ticket voting in a block is
+	// p = chainParams.TicketsPerBlock / (chainParams.TicketPoolSize * chainParams.TicketsPerBlock)
+	//   = 1 / chainParams.TicketPoolSize
+	// Expected number of blocks to vote is
+	// 1 / p = chainParams.TicketPoolSize
+	expectedBlocksToVote := int64(dcr.chainParams.TicketPoolSize)
+	voteHeightExpectationValue := dcr.cachedBestBlock().height + expectedBlocksToVote
+	voteSubsidy := dcr.subsidyCache.CalcStakeVoteSubsidyV3(voteHeightExpectationValue, blockchain.SSVDCP0012)
 	isRPC := !dcr.isNative()
 	var vspURL string
 	if !isRPC {
@@ -5161,25 +5203,72 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 			vspURL = v.(*vsp).URL
 		}
 	}
-	tickets, err := dcr.wallet.Tickets(dcr.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving tickets: %w", err)
-	}
-	voteChoices, tSpendPolicy, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
+	voteChoices, tSpends, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving stances: %w", err)
 	}
+	agendas := currentAgendas(dcr.chainParams)
+	for _, agenda := range agendas {
+		for _, c := range voteChoices {
+			if c.AgendaID == agenda.ID {
+				agenda.CurrentChoice = c.ChoiceID
+				break
+			}
+		}
+	}
+
 	return &asset.TicketStakingStatus{
-		TicketPrice: uint64(sdiff),
-		VSP:         vspURL,
-		IsRPC:       isRPC,
-		Tickets:     tickets,
+		TicketPrice:   uint64(sinfo.Sdiff),
+		VotingSubsidy: uint64(voteSubsidy),
+		VSP:           vspURL,
+		IsRPC:         isRPC,
+		Tickets:       tickets,
 		Stances: asset.Stances{
-			VoteChoices:    voteChoices,
-			TSpendPolicy:   tSpendPolicy,
-			TreasuryPolicy: treasuryPolicy,
+			Agendas:        agendas,
+			TreasurySpends: tSpends,
+			TreasuryKeys:   treasuryPolicy,
+		},
+		Stats: asset.TicketStats{
+			TotalRewards: uint64(sinfo.TotalSubsidy),
+			TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
+			Votes:        sinfo.Voted,
+			Revokes:      sinfo.Revoked,
 		},
 	}, nil
+}
+
+// tickets gets tickets from the wallet and changes the status of "unspent"
+// tickets that haven't reached expiration "live".
+// DRAFT NOTE: From dcrwallet:
+//
+//	TicketStatusUnspent is a matured ticket that has not been spent.  It
+//	is only used under SPV mode where it is unknown if a ticket is live,
+//	was missed, or expired.
+//
+// But if the ticket has not reached a certain number of confirmations, we
+// can say for sure it's not expired. With auto-revocations, "missed" or
+// "expired" tickets are actually "revoked", I think.
+// The only thing I can't figure out is how SPV wallets set the spender in the
+// case of an auto-revocation. It might be happening here
+// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/chainntfns.go#L770-L775
+// If we're seeing auto-revocations, we're fine to make the changes in this
+// method.
+func (dcr *ExchangeWallet) tickets(ctx context.Context) ([]*asset.Ticket, error) {
+	tickets, err := dcr.wallet.Tickets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving tickets: %w", err)
+	}
+	// Adjust status for SPV tickets that aren't expired.
+	oldestTicketsBlock := dcr.cachedBestBlock().height - int64(dcr.chainParams.TicketExpiry) - int64(dcr.chainParams.TicketMaturity)
+	for _, t := range tickets {
+		if t.Status != asset.TicketStatusUnspent {
+			continue
+		}
+		if t.Tx.BlockHeight == -1 || t.Tx.BlockHeight > oldestTicketsBlock {
+			t.Status = asset.TicketStatusLive
+		}
+	}
+	return tickets, nil
 }
 
 func vspInfo(url string) (*vspdjson.VspInfoResponse, error) {
@@ -5233,12 +5322,18 @@ func (dcr *ExchangeWallet) SetVSP(url string) error {
 
 // PurchaseTickets purchases n number of tickets. Part of the asset.TicketBuyer
 // interface.
-func (dcr *ExchangeWallet) PurchaseTickets(n int) ([]string, error) {
+func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) ([]*asset.Ticket, error) {
 	if n < 1 {
 		return nil, nil
 	}
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
+	}
+	// I think we need to set this, otherwise we probably end up with default
+	// of DefaultRelayFeePerKb = 1e4 => 10 atoms/byte.
+	feePerKB := dcrutil.Amount(dcr.feeRateWithFallback(feeSuggestion) * 1000)
+	if err := dcr.wallet.SetTxFee(dcr.ctx, feePerKB); err != nil {
+		return nil, fmt.Errorf("error setting wallet tx fee: %w", err)
 	}
 	if !dcr.isNative() {
 		return dcr.wallet.PurchaseTickets(dcr.ctx, n, "", "")
@@ -5263,6 +5358,29 @@ func (dcr *ExchangeWallet) SetVotingPreferences(choices map[string]string, tspen
 
 // ListVSPs lists known available voting service providers.
 func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
+	if dcr.network == dex.Simnet {
+		const simnetVSPUrl = "http://127.0.0.1:19591"
+		vspi, err := vspInfo(simnetVSPUrl)
+		if err != nil {
+			dcr.log.Warnf("Error getting simnet VSP info: %v", err)
+			return []*asset.VotingServiceProvider{}, nil
+		}
+		return []*asset.VotingServiceProvider{{
+			URL:           simnetVSPUrl,
+			Network:       dex.Simnet,
+			Launched:      uint64(time.Now().Add(-time.Hour * 24 * 180).UnixMilli()),
+			LastUpdated:   uint64(time.Now().Add(-time.Minute * 15).UnixMilli()),
+			APIVersions:   vspi.APIVersions,
+			FeePercentage: vspi.FeePercentage,
+			Closed:        vspi.VspClosed,
+			Voting:        vspi.Voting,
+			Voted:         vspi.Voted,
+			Revoked:       vspi.Revoked,
+			VSPDVersion:   vspi.VspdVersion,
+			BlockHeight:   vspi.BlockHeight,
+			NetShare:      vspi.NetworkProportion,
+		}}, nil
+	}
 	resp, err := http.Get("https://api.decred.org/?c=vsp")
 	if err != nil {
 		return nil, fmt.Errorf("http get error: %v", err)
@@ -5274,18 +5392,18 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 
 	// This struct is not quite compatible with vspdjson.VspInfoResponse.
 	var res map[string]*struct {
-		Network       string   `json:"network"`
-		Launched      uint64   `json:"launched"`    // seconds
-		LastUpdated   uint64   `json:"lastupdated"` // seconds
-		APIVersions   []uint32 `json:"apiversions"`
-		FeePercentage float64  `json:"feepercentage"`
-		Closed        bool     `json:"closed"`
-		Voting        uint64   `json:"voting"`
-		Voted         uint64   `json:"voted"`
-		Revoked       uint64   `json:"revoked"`
-		VSPDVersion   string   `json:"vspdversion"`
-		BlockHeight   uint64   `json:"blockheight"`
-		NetShare      float64  `json:"estimatednetworkproportion"`
+		Network       string  `json:"network"`
+		Launched      uint64  `json:"launched"`    // seconds
+		LastUpdated   uint64  `json:"lastupdated"` // seconds
+		APIVersions   []int64 `json:"apiversions"`
+		FeePercentage float64 `json:"feepercentage"`
+		Closed        bool    `json:"closed"`
+		Voting        int64   `json:"voting"`
+		Voted         int64   `json:"voted"`
+		Revoked       int64   `json:"revoked"`
+		VSPDVersion   string  `json:"vspdversion"`
+		BlockHeight   uint32  `json:"blockheight"`
+		NetShare      float32 `json:"estimatednetworkproportion"`
 	}
 	if err = json.Unmarshal(b, &res); err != nil {
 		return nil, err
@@ -5317,6 +5435,22 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 		})
 	}
 	return vspds, nil
+}
+
+// TicketPage fetches a page of tickets within a range of block numbers with a
+// target page size and optional offset. scanStart is the block in which to
+// start the scan. The scan progresses in reverse block number order, starting
+// at scanStart and going to progressively lower blocks. scanStart can be set to
+// -1 to indicate the current chain tip.
+func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	if !dcr.connected.Load() {
+		return nil, errors.New("not connected, login first")
+	}
+	pager, is := dcr.wallet.(ticketPager)
+	if !is {
+		return nil, errors.New("ticket pagination not supported for this wallet")
+	}
+	return pager.TicketPage(dcr.ctx, scanStart, n, skipN)
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {

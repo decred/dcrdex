@@ -10,6 +10,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v3/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -144,20 +145,20 @@ type Wallet interface {
 	PeerCount(ctx context.Context) (uint32, error)
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
-	// StakeDiff gets the stake difficulty.
-	StakeDiff(ctx context.Context) (dcrutil.Amount, error)
 	// PurchaseTickets purchases n tickets. vspHost and vspPubKey only
 	// needed for internal wallets.
-	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]string, error)
+	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]*asset.Ticket, error)
 	// Tickets returns current active ticket hashes up until they are voted
 	// or revoked. Includes unconfirmed tickets.
 	Tickets(ctx context.Context) ([]*asset.Ticket, error)
 	// VotingPreferences returns current voting preferences.
-	VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*walletjson.TSpendPolicyResult, []*walletjson.TreasuryPolicyResult, error)
+	VotingPreferences(ctx context.Context) ([]*walletjson.VoteChoice, []*asset.TBTreasurySpend, []*walletjson.TreasuryPolicyResult, error)
 	// SetVotingPreferences sets preferences used when a ticket is chosen to
 	// be voted on.
 	SetVotingPreferences(ctx context.Context, choices, tspendPolicy, treasuryPolicy map[string]string) error
+	SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error
 	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error)
+	StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error)
 }
 
 // WalletTransaction is a pared down version of walletjson.GetTransactionResult.
@@ -188,6 +189,10 @@ type FeeRateEstimator interface {
 type Mempooler interface {
 	// GetRawMempool returns hashes for all txs in a node's mempool.
 	GetRawMempool(ctx context.Context) ([]*chainhash.Hash, error)
+}
+
+type ticketPager interface {
+	TicketPage(ctx context.Context, scanStart int32, n, skipN int) ([]*asset.Ticket, error)
 }
 
 // TxOutput defines properties of a transaction output, including the

@@ -39,17 +39,17 @@
               ~ <span id="fiatBalance" class="mx-1 lh1"></span> USD
             </div>
 
-            <div class="d-flex align-items-start align-items-stretch mt-2 flex-column flex-md-row mw-90p" id="walletDetails">
+            <div class="d-flex align-items-start align-items-stretch mt-2 flex-column flex-md-row w-100 px-3" id="walletDetails">
               <div class="d-flex flex-column align-items-stretch flex-grow-1" id="balanceBreakdownBox">
                 <div>
-                  <table id="balanceTable" class="fs15 mt-2 w-100">
+                  <table id="balanceTable" class="fs14 mt-2 w-100">
                     <tbody id="balanceDetailBox">
                       <tr id="balanceDetailRow">
                         <td data-tmpl="category" class="grey">
                          <span data-tmpl="name"></span>
                          <span data-tmpl="tooltipMsg" data-tooltip="" class="ico-info d-hide"></span>
                         </td>
-                        <td data-tmpl="subBalance"></td>
+                        <td data-tmpl="subBalance" class="demi"></td>
                       </tr>
                     </tbody>
                   </table>
@@ -67,23 +67,23 @@
               </div>
 
               <div class="d-flex justify-content-start align-items-start flex-column flex-grow-1" id="walletInfo">
-                <table id="walletInfoTable" class="fs15 mt-2 w-100">
+                <table id="walletInfoTable" class="fs14 mt-2 w-100">
                   <tbody>
                     <tr id="statusLocked">
                       <td class="grey">[[[Status]]]</td>
-                      <td><span class="ico-locked fs14 me-2"></span>[[[:title:locked]]]</td>
+                      <td><span class="ico-locked fs14 me-2"></span class="demi">[[[:title:locked]]]</td>
                     </tr>
                     <tr id="statusReady">
                       <td class="grey">[[[Status]]]</td>
-                      <td><span class="ico-unlocked fs14 me-2"></span>[[[:title:ready]]]</td>
+                      <td class="demi"><span class="ico-unlocked fs14 me-2"></span>[[[:title:ready]]]</td>
                     </tr>
                     <tr id="statusOff">
                       <td class="grey">[[[Status]]]</td>
-                      <td><span class="ico-sleeping fs14 me-2"></span>[[[:title:off]]]</td>
+                      <td><span class="ico-sleeping fs14 me-2"></span class="demi">[[[:title:off]]]</td>
                     </tr>
                     <tr id="statusDisabled">
                       <td class="grey">[[[Status]]]</td>
-                      <td><span class="ico-cross errcolor fs14 me-2"></span>[[[Disabled]]]</td>
+                      <td><span class="ico-cross errcolor fs14 me-2"></span class="demi">[[[Disabled]]]</td>
                     </tr>
                     <tr id="unlockBttnBox">
                       <td colspan="2" class="pb-2">
@@ -102,15 +102,15 @@
                     </tr>
                     <tr>
                       <td class="grey text-nowrap">[[[Wallet Type]]]</td>
-                      <td id="walletType"></td>
+                      <td id="walletType" class="demi"></td>
                     </tr>
                     <tr id="peerCountBox">
                       <td class="grey text-nowrap">[[[Peer Count]]]</td>
-                      <td id="peerCount"></td>
+                      <td id="peerCount" class="demi"></td>
                     </tr>
                     <tr id="syncProgressBox">
                       <td class="grey text-nowrap">[[[Sync Progress]]]</td>
-                      <td id="syncProgress"></td>
+                      <td id="syncProgress" class="demi"></td>
                     </tr>
                     <tr id="reconfigureBox">
                       <td colspan="2" class="pt-2">
@@ -124,7 +124,87 @@
                 </table>
               </div>
             </div>
-          </div>
+
+            {{- /* STAKING */ -}}
+            <div id="stakingBox" class="position-relative m-3 w-100 d-flex align-items-stretch">
+              <div class="d-flex flex-column align-items-stretch flex-grow-1">
+                <div class="flex-center fs24 brdrbottom px-2 py-1">
+                  <span class="ico-ticket me-2"></span>Staking
+                </div>
+                <div id="stakingSummary" class="d-flex align-items-stretch flex-grow-1">
+                  <div class="d-flex flex-column align-items-stretch justify-content-center fs14 flex-grow-1 px-3">
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center grey">Active tickets</div>
+                      <div id="stakingTicketCount" class="flex-center demi"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center grey">Tickets bought</div>
+                      <div id="totalTicketCount" class="flex-center demi"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center grey">Total rewards</div>
+                      <div id="totalTicketRewards" class="flex-center demi"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center grey">Votes cast</div>
+                      <div id="totalTicketVotes" class="flex-center demi"></div>
+                    </div>
+                    <div id="vspDisplayBox" class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center grey">VSP</div>
+                      <div id="vspDisplay" class="flex-center demi pointer hoverbg">
+                        <span id="vspEditIcon" class="ico-edit me-2"></span>
+                        <span id="vspURL"></span>
+                      </div>
+                    </div>
+                    <div id="pickVSP" class="fs16 p-2 flex-center">
+                      <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
+                    </div>
+                  </div>
+                  <div id="setVotes" class="flex-center p-3 flex-column brdrleft hoverbg pointer">
+                    <div class="flex-center fs18">
+                      <span class="fs22 ico-check"></span>
+                      <span class="ms-2 fs18">Set Votes</span>
+                    </div>
+                    <hr class="dashed my-1 w-75">
+                    <div class="flex-center flex-column fs14">
+                      <span><span id="stakingAgendaCount"></span> agendas</span>
+                      <span><span id="stakingTspendCount"></span> treasury spends</span>
+                    </div>
+                  </div>
+                </div>
+                <div id="stakingErr" class="text-center fs16 p-2 errcolor"></div>
+                <div id="stakingRpcSpvMsg" class="flex-center fs16 py-1 px-2">
+                  <span class="ico-info fs12 me-2"></span>Staking unavailable for RPC wallets using SPV
+                </div>
+                {{- /* PURCHASE TICKETS */ -}}
+                <div id="purchaseTicketsBox" class="w-100 d-flex align-items-stretch brdrtop fs18">
+                  <div id="purchaseTicketsBttn" class="hoverbg pointer flex-center flex-grow-1 brdrright p-2">
+                    <span><span class="ico-ticket me-1"></span> Purchase Tickets</span>
+                  </div>
+                  <div id="ticketHistory" class="hoverbg pointer flex-center flex-grow-1 p-2">
+                    <span><span class="ico-textfile me-1"></span> Tickets</span>
+                  </div>
+                </div>
+              </div>
+              <div id="ticketPriceBox" class="flex-center p-3 brdrleft">
+                <div class="d-flex flex-column">
+                  <div>
+                    <span class="fs14 demi lh1 pb-1">Ticket Price</span>
+                    <span class="d-flex align-items-end">
+                      <span class="fs18" id="ticketPrice"></span>
+                    </span>
+                  </div>
+                  <hr class="dotted my-3">
+                  <div>
+                    <span class="fs14 demi lh1 pb-1">Vote Reward</span>
+                    <span class="d-flex align-items-end">
+                      <span class="fs18" id="votingSubsidy"></span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>{{- /* END STAKING */ -}}
         </div>{{/* END WALLET DETAILS */}}
 
         {{- /* MARKETS OVERVIEW */ -}}
@@ -602,6 +682,160 @@
       <div id="errorModalMsg" class="fs16 errcolor my-2 text-center"></div>
     </form>
 
+    {{- /* PICK A VOTING SERVICE PROVIDER */ -}}
+    <form id="vspPicker" class="flex-center flex-column p-2 m-4">
+      <div class="fs24 sans-light">Select a Voting Service Provider</div>
+      <hr class="dashed my-2">
+      <table id="vspPickerTable">
+        <thead>
+          <tr>
+            <th>URL</th>
+            <th>Fee Rate (%)</th>
+            <th>Live Tickets</th>
+          </tr>
+        </thead>
+        <tbody id="vspPickerList">
+          <tr id="vspRowTmpl" class="hoverbg pointer">
+            <td data-tmpl="url"></td>
+            <td data-tmpl="feeRate"></td>
+            <td data-tmpl="voting"></td>
+          </tr>
+        </tbody>
+      </table>{{/* TODO: ADD MANUAL INPUT */}}
+    </form>
+
+    {{- /* PURCHASE TICKETS */ -}}
+    <form id="purchaseTicketsForm" class="flex-center flex-column p-2 m-4 mw-425">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="flex-center fs22 sans-light">Purchase Tickets</div>
+      <div class="d-flex pt-2">
+        <div class="flex-center flex-column col-50 p-4">
+          <span>Current Price</span>
+          <hr class="dotted my-1 w-100">
+          <span id="purchaserCurrentPrice">a</span>
+        </div>
+        <div class="flex-center flex-column  col-50 p-4">
+          <span>Available Balance</span>
+          <hr class="dotted my-1 w-100">
+          <span id="purchaserBal">a</span>
+        </div>
+      </div>
+      <hr class="dotted w-100">
+      <div class="d-flex w-100 flex-wrap">
+        <div class="flex-center flex-column col-12 py-2 brdrright">
+          <span>How Many?</span>
+          <input type="number" id="purchaserInput" min="1" placeholder="0" class="fs24 p-2 mt-1 text-center">
+        </div>
+        <div id="purchaserAppPWBox" class="flex-center flex-column col-12 p-2">
+          <span>App Password</span>
+          <input type="password" id="purchaserAppPW" class="form-control select" autocomplete="off">
+        </div>
+        <div class="flex-center flex-column col-12 py-2">
+          <button id="purchaserSubmit" class="selected fs24">Buy</button>
+        </div>
+      </div>
+      <div id="purchaserErr" class="errcolor d-hide py-2 d-hide"></div>
+    </form>
+
+    {{- /* TICKET HISTORY */ -}}
+    <form id="ticketHistoryForm" class="flex-center flex-column align-items-stretch p-2 m-4">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="flex-center fs28 sans-light mb-2">Ticket History</div>
+      <table id="ticketHistoryTable" class="fs14">
+        <thead>
+          <tr>
+            <th>Age</th>
+            <th>Price</th>
+            <th>Status</th>
+            <th>Ticket</th>
+          </tr>
+        </thead>
+        <tbody id="ticketHistoryRows">
+          <tr id="ticketHistoryRowTmpl">
+            <td data-tmpl="age"></td>
+            <td data-tmpl="price"></td>
+            <td data-tmpl="status"></td>
+            <td data-tmpl="detailsLink" class="pointer hoverbg">
+              <span class="mono">
+                <span data-tmpl="hashStart"></span>…<span data-tmpl="hashEnd"></span>
+              </span>
+              <span class="ico-open ms-1"></span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div id="ticketHistoryPagination" class="d-flex justify-content-end align-items-center fs18">
+        <span id="ticketHistoryPrevPage" class="ico-arrowback me-1 p-1 hoverbg pointer"></span>
+        <span id="ticketHistoryPage" class="me-1"></span>
+        <span id="ticketHistoryNextPage" class="ico-arrowright p-1 hoverbg pointer"></span>
+      </div>
+      <div id="noTicketsMessage" class="text-center p-2">No tickets to show</div>
+    </form>
+
+    {{- /* SET VOTES */ -}}
+    <form id="votingForm" class="flex-center flex-column p-2 m-4 mw-425">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+
+      {{- /* AGENDAS */ -}}
+      <div class="flex-center fs28 sans-light mb-2 w-100 brdrtop">Agendas</div>
+      <div id="votingAgendas" class="d-flex flex-column align-items-stretch w-100">
+        <div id="votingAgendaTmpl" class="d-flex justify-content-between py-2 brdrtop">
+          <div class="d-flex flex-column flex-grow-1 fs16 pe-3">
+            <div data-tmpl="description" class="w-100"></div>
+          </div>
+          <div data-tmpl="choices" class="d-flex align-items-stretch">
+            <div id="votingChoiceTmpl" class="flex-center flex-column pe-2">
+              <span data-tmpl="id"></span>
+              <input data-tmpl="radio" type="radio" class="form-check-input">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {{- /* TREASURY SPENDS */ -}}
+      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">Treasury Spends</div>
+      <div id="votingTspends" class="d-flex flex-column align-items-stretch w-100">
+        <div id="tspendTmpl" class="d-flex justify-content-between align-items-stretch py-2 brdrtop">
+          <div class="flex-center flex-grow-1 pe-3">
+            <div data-tmpl="value" class="flex-center fs16 p-2"></div>
+            <div data-tmpl="hash" class="hashwrap fs14 p-1"></div>
+            <div data-tmpl="explorerLink" class="p-2 hoverbg pointer"><span class="fs16 ico-open"></span></div>
+          </div>
+          <div class="d-flex align-items-stretch">
+            <div class="flex-center flex-column pe-2">
+              <span>No</span>
+              <input data-tmpl="no" type="radio" value="no" class="form-check-input">
+            </div>
+            <div class="flex-center flex-column pe-2">
+              <span>Yes</span>
+              <input data-tmpl="yes" type="radio" value="yes" class="form-check-input">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {{- /* TREASURY KEYS */ -}}
+      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">Treasury Keys</div>
+      <div id="votingTKeys" class="d-flex flex-column align-items-stretch w-100">
+        <div id="tkeyTmpl" class="d-flex justify-content-between align-items-stretch py-2 brdrtop">
+          <div class="flex-center flex-grow-1 pe-3">
+            <div data-tmpl="key" class="hashwrap fs14 p-1"></div>
+          </div>
+          <div class="d-flex align-items-stretch">
+            <div class="flex-center flex-column pe-2">
+              <span>No</span>
+              <input data-tmpl="no" type="radio" value="no" class="form-check-input">
+            </div>
+            <div class="flex-center flex-column pe-2">
+              <span>Yes</span>
+              <input data-tmpl="yes" type="radio" value="yes" class="form-check-input">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="votingFormErr" class="fs14 errcolor d-hide"></div>
+    </form>
   </div>
 </div>
 {{template "bottom"}}

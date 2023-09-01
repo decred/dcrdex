@@ -911,33 +911,63 @@ const (
 
 // Ticket holds information about a decred ticket.
 type Ticket struct {
-	Ticket  TicketTransaction `json:"ticket"`
+	Tx      TicketTransaction `json:"tx"`
 	Status  TicketStatus      `json:"status"`
 	Spender string            `json:"spender"`
 }
 
-// Stances are vote choices.
+// TBChoice is a possible agenda choice for a TicketBuyer.
+type TBChoice struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+// TBAgenda is an agenda that the TicketBuyer can vote on.
+type TBAgenda struct {
+	ID            string      `json:"id"`
+	Description   string      `json:"description"`
+	CurrentChoice string      `json:"currentChoice"`
+	Choices       []*TBChoice `json:"choices"`
+}
+
+// TBTreasurySpend represents a treasury spend that the TicketBuyer can vote on.
+type TBTreasurySpend struct {
+	Hash          string `json:"hash"`
+	Value         uint64 `json:"value"`
+	CurrentPolicy string `json:"currentPolicy"`
+}
+
+// Stances are current policy preferences for the TicketBuyer.
 type Stances struct {
-	VoteChoices    []*dcrwalletjson.VoteChoice           `json:"voteChoices"`
-	TSpendPolicy   []*dcrwalletjson.TSpendPolicyResult   `json:"tSpendPolicy"`
-	TreasuryPolicy []*dcrwalletjson.TreasuryPolicyResult `json:"treasuryPolicy"`
+	Agendas        []*TBAgenda                           `json:"agendas"`
+	TreasurySpends []*TBTreasurySpend                    `json:"tspends"`
+	TreasuryKeys   []*dcrwalletjson.TreasuryPolicyResult `json:"treasuryKeys"`
 }
 
 // VotingServiceProvider is information about a voting service provider.
 type VotingServiceProvider struct {
-	URL           string      `json:"host"`
+	URL           string      `json:"url"`
 	Network       dex.Network `json:"network"`
 	Launched      uint64      `json:"launched"`    // milliseconds
 	LastUpdated   uint64      `json:"lastUpdated"` // milliseconds
-	APIVersions   []uint32    `json:"apiVersions"`
+	APIVersions   []int64     `json:"apiVersions"`
 	FeePercentage float64     `json:"feePercentage"`
 	Closed        bool        `json:"closed"`
-	Voting        uint64      `json:"voting"`
-	Voted         uint64      `json:"voted"`
-	Revoked       uint64      `json:"revoked"`
+	Voting        int64       `json:"voting"`
+	Voted         int64       `json:"voted"`
+	Revoked       int64       `json:"revoked"`
 	VSPDVersion   string      `json:"vspdVersion"`
-	BlockHeight   uint64      `json:"blockHeight"`
-	NetShare      float64     `json:"netShare"`
+	BlockHeight   uint32      `json:"blockHeight"`
+	NetShare      float32     `json:"netShare"`
+}
+
+// TicketStats sums up some statistics for historical staking data for a
+// TicketBuyer.
+type TicketStats struct {
+	TotalRewards uint64 `json:"totalRewards"`
+	TicketCount  uint32 `json:"ticketCount"`
+	Votes        uint32 `json:"votes"`
+	Revokes      uint32 `json:"revokes"`
 }
 
 // TicketStakingStatus holds various stake information from the wallet.
@@ -945,6 +975,8 @@ type TicketStakingStatus struct {
 	// TicketPrice is the current price of one ticket. Also known as the
 	// stake difficulty.
 	TicketPrice uint64 `json:"ticketPrice"`
+	// VotingSubsidy is the current reward for a vote.
+	VotingSubsidy uint64 `json:"votingSubsidy"`
 	// VSP is the currently set VSP address and fee.
 	VSP string `json:"vsp"`
 	// IsRPC will be true if this is an RPC wallet, in which case we can't
@@ -955,6 +987,8 @@ type TicketStakingStatus struct {
 	Tickets []*Ticket `json:"tickets"`
 	// Stances returns current voting preferences.
 	Stances Stances `json:"stances"`
+	// Stats is statistical info about staking history.
+	Stats TicketStats `json:"stats"`
 }
 
 // TicketBuyer is a wallet that can participate in decred staking.
@@ -969,12 +1003,18 @@ type TicketBuyer interface {
 	SetVSP(addr string) error
 	// PurchaseTickets purchases n amount of tickets. Returns the purchased
 	// ticket hashes if successful.
-	PurchaseTickets(n int) ([]string, error)
+	PurchaseTickets(n int, feeSuggestion uint64) ([]*Ticket, error)
 	// SetVotingPreferences sets default voting settings for all active
 	// tickets and future tickets. Nil maps can be provided for no change.
 	SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy map[string]string) error
 	// ListVSPs lists known available voting service providers.
 	ListVSPs() ([]*VotingServiceProvider, error)
+	// TicketPage fetches a page of tickets within a range of block numbers with
+	// a target page size and optional offset. scanStart is the block in which
+	// to start the scan. The scan progresses in reverse block number order,
+	// starting at scanStart and going to progressively lower blocks. scanStart
+	// can be set to -1 to indicate the current chain tip.
+	TicketPage(scanStart int32, n, skipN int) ([]*Ticket, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,
