@@ -205,6 +205,7 @@ type dexAcctBondState struct {
 	bondAssetID                                 uint32
 	maxBondedAmt                                uint64
 	mustPost                                    int64
+	inBonds                                     uint64
 }
 
 // bondStateOfDEX collects all the information needed to determine what
@@ -227,6 +228,8 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 			} else {
 				if int64(bond.LockTime) <= bondCfg.replaceThresh {
 					state.weak = append(state.weak, bond) // but not yet expired (still live or pending)
+					c.log.Infof("Soon to expire bond found: %v (%s)",
+						coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 				}
 				liveBonds = append(liveBonds, bond)
 			}
@@ -237,6 +240,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	state.tierChange = dc.acct.tierChange // since last reserves update
 	state.tier, state.targetTier = dc.acct.tier, dc.acct.targetTier
 	state.bondAssetID, state.maxBondedAmt = dc.acct.bondAsset, dc.acct.maxBondedAmt
+	state.inBonds, _ = dc.bondTotalInternal(state.bondAssetID)
 	// Screen the unexpired bonds slices.
 	dc.acct.bonds = filterExpiredBonds(dc.acct.bonds)
 	dc.acct.pendingBonds = filterExpiredBonds(dc.acct.pendingBonds) // possibly expired before confirmed
@@ -257,8 +261,41 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 		}
 	}
 
-	tierDeficit := int64(state.targetTier) - state.tier
-	state.mustPost = tierDeficit + state.weakStrength - state.pendingStrength
+	// This old way is bugged because we have no way of knowing how many bonus
+	// tiers the server has assigned us, because it is not directly reported in
+	// any comms and  to calculate it locally, we would need to know the
+	// server's ban score, which is configurable and not reported. We would also
+	// need to know our own score, but after the ConnectResult, the server
+	// doesn't send score updates.
+	//
+	// The old way
+	// -----------
+	// tierDeficit := int64(state.targetTier) - state.tier
+	// state.mustPost = tierDeficit + state.weakStrength - state.pendingStrength
+	// -----------
+	//
+	// Instead, if the server says we're short, we assume that we have zero
+	// bonus tiers and use the old calculation.
+	serverTierDeficit := int64(state.targetTier) - state.tier + state.weakStrength - state.pendingStrength
+	if serverTierDeficit > 0 {
+		state.mustPost = serverTierDeficit
+	} else {
+		// But if the server says we're tiered up, we may be so because we have
+		// bonus tiers, which ultimately causes us to ignore weak bonds. In
+		// that case, just make sure that our local bond data is sufficient to
+		// get our target tier. For clients with low targetTier and good trading
+		// history, this will be the primary route through which weak bonds are
+		// renewed.
+		// Note: For users with targetTier > 1, unknown bonus tiers can also
+		// cause us to broadcast renewal bonds that are too small, resulting
+		// in split bonds that cost the user unnecessary tx fees. This solution
+		// is only a stop-gap. A proper solution will require more data from the
+		// API so we can know our bonus tiers.
+		bondTierDeficit := int64(state.targetTier) - state.liveStrength - state.pendingStrength + state.weakStrength
+		if bondTierDeficit > 0 {
+			state.mustPost = bondTierDeficit
+		}
+	}
 
 	return state
 }
@@ -269,9 +306,9 @@ type bondID struct {
 }
 
 type acctUpdate struct {
-	acct         *dexAccount
-	tierChange   int64
-	reserveDelta int64
+	acct       *dexAccount
+	tierChange int64
+	reserve    uint64
 }
 
 // refundExpiredBonds refunds expired bonds and returns the list of bonds that
@@ -429,7 +466,16 @@ func (c *Core) repostPendingBonds(dc *dexConnection, cfg *dexBondCfg, state *dex
 }
 
 // postRequiredBonds posts any required bond increments for a dexConnection.
-func (c *Core) postRequiredBonds(dc *dexConnection, cfg *dexBondCfg, state *dexAcctBondState, bondAsset *msgjson.BondAsset, wallet *xcWallet, expiredStrength int64, unlocked bool) {
+func (c *Core) postRequiredBonds(
+	dc *dexConnection,
+	cfg *dexBondCfg,
+	state *dexAcctBondState,
+	bondAsset *msgjson.BondAsset,
+	wallet *xcWallet,
+	expiredStrength int64,
+	unlocked bool,
+) (newlyBonded uint64) {
+
 	if state.targetTier == 0 || state.mustPost <= 0 || cfg.bondExpiry <= 0 {
 		return
 	}
@@ -480,8 +526,11 @@ func (c *Core) postRequiredBonds(dc *dexConnection, cfg *dexBondCfg, state *dexA
 		_, err = c.makeAndPostBond(dc, true, wallet, amt, c.feeSuggestionAny(wallet.AssetID), lockTime, bondAsset)
 		if err != nil {
 			c.log.Errorf("Unable to post bond: %v", err)
-		} // else it's now in pendingBonds
+		} else { // it's now in pendingBonds
+			newlyBonded = amt
+		}
 	}
+	return
 }
 
 // rotateBonds should only be run sequentially i.e. in the watchBonds loop.
@@ -498,8 +547,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 
 	now := time.Now().Unix()
 
-	netReserveDeltas := make(map[uint32]int64) // for all DEX conns, per asset, compare to lastReserves
-	actuatedTierChanges := make(map[uint32][]acctUpdate)
+	acctUpdates := make(map[uint32][]acctUpdate)
 
 	for _, dc := range c.dexConnections() {
 		initialized, unlocked := dc.acct.status()
@@ -540,20 +588,23 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			continue
 		}
 
-		if acctBondState.tierChange != 0 {
-			reserveDelta := bondOverlap * -acctBondState.tierChange * int64(bondAsset.Amt)
-			netReserveDeltas[acctBondState.bondAssetID] += reserveDelta // negative means free reserves
-			// After applying the net reserveDelta, we would normally *zero* the
-			// tierChange field, but it could change, so we remember it.
-			actuatedTierChanges[acctBondState.bondAssetID] = append(actuatedTierChanges[acctBondState.bondAssetID],
-				acctUpdate{dc.acct, acctBondState.tierChange, reserveDelta},
-			)
-		}
-
-		c.postRequiredBonds(dc, bondCfg, acctBondState, bondAsset, wallet, expiredStrength, unlocked)
+		newlyBonded := c.postRequiredBonds(dc, bondCfg, acctBondState, bondAsset, wallet, expiredStrength, unlocked)
+		reserve := bondOverlap*acctBondState.targetTier*bondAsset.Amt - acctBondState.inBonds - newlyBonded
+		acctUpdates[acctBondState.bondAssetID] = append(acctUpdates[acctBondState.bondAssetID],
+			acctUpdate{dc.acct, acctBondState.tierChange, reserve},
+		)
 	}
 
-	for assetID, reserveDelta := range netReserveDeltas {
+	for assetID, update := range acctUpdates {
+		var reserveDelta int64
+		// Update the unactuated tier change counter.
+		for _, s := range update {
+			s.acct.authMtx.Lock()
+			reserveDelta += s.acct.totalReserved - int64(s.reserve)
+			s.acct.totalReserved = int64(s.reserve)
+			s.acct.tierChange -= s.tierChange
+			s.acct.authMtx.Unlock()
+		}
 		if reserveDelta != 0 { // net adjustment across all dexConnections
 			wallet, err := c.connectedWallet(assetID)
 			if err != nil { // we grabbed it above so shouldn't happen
@@ -563,13 +614,6 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			c.log.Infof("Updating bond reserves by %s (automatic tier change adjustments)",
 				wallet.amtStringSigned(reserveDelta))
 			wallet.ReserveBondFunds(reserveDelta, 0, false) // fee buffer already added when first enabled
-		}
-		// Update the unactuated tier change counter.
-		for _, s := range actuatedTierChanges[assetID] {
-			s.acct.authMtx.Lock()
-			s.acct.tierChange -= s.tierChange
-			s.acct.totalReserved += s.reserveDelta
-			s.acct.authMtx.Unlock()
 		}
 	}
 }
