@@ -69,11 +69,11 @@ type arbSequence struct {
 }
 
 type simpleArbMarketMaker struct {
-	ctx   context.Context
-	host  string
-	base  uint32
-	quote uint32
-	cex   libxc.CEX
+	ctx     context.Context
+	host    string
+	baseID  uint32
+	quoteID uint32
+	cex     libxc.CEX
 	// cexTradeUpdatesID is passed to the Trade function of the cex
 	// so that the cex knows to send update notifications for the
 	// trade back to this bot.
@@ -123,15 +123,15 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 
 // arbExists checks if an arbitrage opportunity exists.
 func (a *simpleArbMarketMaker) arbExists() (exists, sellOnDex bool, lotsToArb, dexRate, cexRate uint64) {
-	cexBaseBalance, err := a.cex.Balance(dex.BipIDSymbol(a.base))
+	cexBaseBalance, err := a.cex.Balance(dex.BipIDSymbol(a.baseID))
 	if err != nil {
-		a.log.Errorf("failed to get cex balance for %v: %v", dex.BipIDSymbol(a.base), err)
+		a.log.Errorf("failed to get cex balance for %v: %v", dex.BipIDSymbol(a.baseID), err)
 		return false, false, 0, 0, 0
 	}
 
-	cexQuoteBalance, err := a.cex.Balance(dex.BipIDSymbol(a.quote))
+	cexQuoteBalance, err := a.cex.Balance(dex.BipIDSymbol(a.quoteID))
 	if err != nil {
-		a.log.Errorf("failed to get cex balance for %v: %v", dex.BipIDSymbol(a.quote), err)
+		a.log.Errorf("failed to get cex balance for %v: %v", dex.BipIDSymbol(a.quoteID), err)
 		return false, false, 0, 0, 0
 	}
 
@@ -159,7 +159,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool, cexBaseBalance, c
 	// on the exchange where the base asset is being sold.
 	var maxLots uint64
 	if sellOnDEX {
-		maxOrder, err := a.core.MaxSell(a.host, a.base, a.quote)
+		maxOrder, err := a.core.MaxSell(a.host, a.baseID, a.quoteID)
 		if err != nil {
 			a.log.Errorf("MaxSell error: %v", err)
 			return noArb()
@@ -183,7 +183,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool, cexBaseBalance, c
 		}
 		// If buying on dex, check that we have enough to buy at this rate.
 		if !sellOnDEX {
-			maxBuy, err := a.core.MaxBuy(a.host, a.base, a.quote, dexExtrema)
+			maxBuy, err := a.core.MaxBuy(a.host, a.baseID, a.quoteID, dexExtrema)
 			if err != nil {
 				a.log.Errorf("maxBuy error: %v")
 				return noArb()
@@ -193,7 +193,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool, cexBaseBalance, c
 			}
 		}
 
-		cexAvg, cexExtrema, cexFilled, err := a.cex.VWAP(dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), sellOnDEX, numLots*lotSize)
+		cexAvg, cexExtrema, cexFilled, err := a.cex.VWAP(dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), sellOnDEX, numLots*lotSize)
 		if err != nil {
 			a.log.Errorf("error calculating cex VWAP: %v", err)
 			return
@@ -201,8 +201,6 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool, cexBaseBalance, c
 		if !cexFilled {
 			break
 		}
-
-		a.log.Infof("cexExtrema %v -- dexExtrema %v", cexExtrema, dexExtrema)
 
 		// If buying on cex, make sure we have enough to buy at this rate
 		amountNeeded := calc.BaseToQuote(cexExtrema, numLots*lotSize)
@@ -272,7 +270,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
 	cexTradeID := a.cex.GenerateTradeID()
-	err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize, a.cexTradeUpdatesID, cexTradeID)
+	err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize, a.cexTradeUpdatesID, cexTradeID)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -288,8 +286,8 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	dexOrders, err := a.core.MultiTrade(nil, &core.MultiTradeForm{
 		Host:  a.host,
 		Sell:  sellOnDex,
-		Base:  a.base,
-		Quote: a.quote,
+		Base:  a.baseID,
+		Quote: a.quoteID,
 		Placements: []*core.QtyRate{
 			{
 				Qty:  lotsToArb * a.mkt.LotSize,
@@ -306,7 +304,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 			a.log.Errorf("expected 1 dex order, got %v", len(dexOrders))
 		}
 
-		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), cexTradeID)
+		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), cexTradeID)
 		if err != nil {
 			a.log.Errorf("error canceling cex order: %v", err)
 			// TODO: keep retrying failed cancel
@@ -363,7 +361,7 @@ func (a *simpleArbMarketMaker) selfMatch(sell bool, rate uint64) bool {
 // if they have not yet been filled.
 func (a *simpleArbMarketMaker) cancelArbSequence(arb *arbSequence) {
 	if !arb.cexOrderFilled {
-		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), arb.cexOrderID)
+		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), arb.cexOrderID)
 		if err != nil {
 			a.log.Errorf("failed to cancel cex trade ID %s: %v", arb.cexOrderID, err)
 		}
@@ -443,14 +441,14 @@ func (m *simpleArbMarketMaker) handleNotification(note core.Notification) {
 }
 
 func (a *simpleArbMarketMaker) run() {
-	book, bookFeed, err := a.core.SyncBook(a.host, a.base, a.quote)
+	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
 	if err != nil {
 		a.log.Errorf("Failed to sync book: %v", err)
 		return
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote))
+	err = a.cex.SubscribeMarket(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID))
 	if err != nil {
 		a.log.Errorf("Failed to subscribe to cex market: %v", err)
 		return
@@ -535,8 +533,8 @@ func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex libx
 	(&simpleArbMarketMaker{
 		ctx:        ctx,
 		host:       cfg.Host,
-		base:       cfg.BaseAsset,
-		quote:      cfg.QuoteAsset,
+		baseID:     cfg.BaseAsset,
+		quoteID:    cfg.QuoteAsset,
 		cex:        cex,
 		core:       c,
 		log:        log,

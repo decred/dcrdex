@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"decred.org/dcrdex/client/asset"
@@ -62,8 +63,8 @@ func newTCEX() *tCEX {
 	}
 }
 
-func (c *tCEX) Connect(ctx context.Context) error {
-	return nil
+func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	return nil, nil
 }
 func (c *tCEX) Balances() (map[uint32]*libxc.ExchangeBalance, error) {
 	return nil, nil
@@ -876,8 +877,8 @@ func TestArbRebalance(t *testing.T) {
 			log:        log,
 			cex:        cex,
 			mkt:        mkt,
-			base:       42,
-			quote:      0,
+			baseID:     42,
+			quoteID:    0,
 			core:       tCore,
 			activeArbs: test.existingArbs,
 			cfg: &SimpleArbConfig{
@@ -1057,8 +1058,8 @@ func TestArbDexTradeUpdates(t *testing.T) {
 			ctx:        ctx,
 			log:        log,
 			cex:        cex,
-			base:       42,
-			quote:      0,
+			baseID:     42,
+			quoteID:    0,
 			core:       tCore,
 			activeArbs: test.activeArbs,
 			cfg: &SimpleArbConfig{
@@ -1179,8 +1180,8 @@ func TestCexTradeUpdates(t *testing.T) {
 			ctx:        ctx,
 			log:        log,
 			cex:        cex,
-			base:       42,
-			quote:      0,
+			baseID:     42,
+			quoteID:    0,
 			core:       tCore,
 			activeArbs: test.activeArbs,
 			cfg: &SimpleArbConfig{

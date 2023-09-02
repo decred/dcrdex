@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -75,10 +76,10 @@ type bncAssetConfig struct {
 	// For a token like USDC, the coin field will be USDC, but
 	// symbol field will be usdc.eth.
 	coin string
-	// network will be the same as coin for the base assets of
-	// a blockchain, but for tokens it will be the network
+	// chain will be the same as coin for the base assets of
+	// a blockchain, but for tokens it will be the chain
 	// that the token is hosted such as "ETH".
-	network          string
+	chain            string
 	conversionFactor uint64
 }
 
@@ -103,7 +104,7 @@ func bncSymbolData(symbol string) (*bncAssetConfig, error) {
 		assetID:          assetID,
 		symbol:           symbol,
 		coin:             coin,
-		network:          strings.ToUpper(dex.BipIDSymbol(networkID)),
+		chain:            strings.ToUpper(dex.BipIDSymbol(networkID)),
 		conversionFactor: ui.Conventional.ConversionFactor,
 	}, nil
 }
@@ -126,7 +127,7 @@ type binance struct {
 	tradeIDNonce       atomic.Uint32
 	tradeIDNoncePrefix dex.Bytes
 
-	markets atomic.Value // map[string]*symbol
+	markets atomic.Value // map[string]*market
 
 	balanceMtx sync.RWMutex
 	balances   map[string]*bncBalance
@@ -143,7 +144,7 @@ type binance struct {
 	tradeUpdateCounter int
 
 	cexUpdatersMtx sync.RWMutex
-	cexUpdaters    map[int]chan interface{}
+	cexUpdaters    map[chan interface{}]struct{}
 }
 
 var _ CEX = (*binance)(nil)
@@ -175,7 +176,7 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 		net:                net,
 		tradeToUpdater:     make(map[string]int),
 		tradeUpdaters:      make(map[int]chan *TradeUpdate),
-		cexUpdaters:        make(map[int]chan interface{}, 0),
+		cexUpdaters:        make(map[chan interface{}]struct{}, 0),
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 	}
 
@@ -225,21 +226,25 @@ func (bnc *binance) getMarkets(ctx context.Context) error {
 }
 
 // Connect connects to the binance API.
-func (bnc *binance) Connect(ctx context.Context) error {
+func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	wg := new(sync.WaitGroup)
+
 	if err := bnc.getCoinInfo(ctx); err != nil {
-		return fmt.Errorf("error getting coin info: %v", err)
+		return nil, fmt.Errorf("error getting coin info: %v", err)
 	}
 
 	if err := bnc.getMarkets(ctx); err != nil {
-		return fmt.Errorf("error getting markets: %v", err)
+		return nil, fmt.Errorf("error getting markets: %v", err)
 	}
 
 	if err := bnc.getUserDataStream(ctx); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Refresh the markets periodically.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		nextTick := time.After(time.Hour)
 		for {
 			select {
@@ -259,7 +264,9 @@ func (bnc *binance) Connect(ctx context.Context) error {
 	}()
 
 	// Refresh the coin info periodically.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		nextTick := time.After(time.Hour)
 		for {
 			select {
@@ -278,7 +285,7 @@ func (bnc *binance) Connect(ctx context.Context) error {
 		}
 	}()
 
-	return nil
+	return wg, nil
 }
 
 // SubscribeCEXUpdates returns a channel which sends an empty struct when
@@ -286,13 +293,12 @@ func (bnc *binance) Connect(ctx context.Context) error {
 func (bnc *binance) SubscribeCEXUpdates() (<-chan interface{}, func()) {
 	updater := make(chan interface{}, 128)
 	bnc.cexUpdatersMtx.Lock()
-	id := len(bnc.cexUpdaters)
-	bnc.cexUpdaters[id] = updater
+	bnc.cexUpdaters[updater] = struct{}{}
 	bnc.cexUpdatersMtx.Unlock()
 
 	unsubscribe := func() {
 		bnc.cexUpdatersMtx.Lock()
-		delete(bnc.cexUpdaters, id)
+		delete(bnc.cexUpdaters, updater)
 		bnc.cexUpdatersMtx.Unlock()
 	}
 
@@ -315,8 +321,8 @@ func (bnc *binance) Balance(symbol string) (*ExchangeBalance, error) {
 	}
 
 	return &ExchangeBalance{
-		Available: uint64(bal.available * float64(assetConfig.conversionFactor)),
-		Locked:    uint64(bal.locked * float64(assetConfig.conversionFactor)),
+		Available: uint64(math.Floor(bal.available * float64(assetConfig.conversionFactor))),
+		Locked:    uint64(math.Floor(bal.locked * float64(assetConfig.conversionFactor))),
 	}, nil
 }
 
@@ -389,17 +395,18 @@ func (bnc *binance) Trade(ctx context.Context, baseSymbol, quoteSymbol string, s
 func (bnc *binance) SubscribeTradeUpdates() (<-chan *TradeUpdate, func(), int) {
 	bnc.tradeUpdaterMtx.Lock()
 	defer bnc.tradeUpdaterMtx.Unlock()
+	updaterID := bnc.tradeUpdateCounter
 	bnc.tradeUpdateCounter++
 	updater := make(chan *TradeUpdate, 256)
-	bnc.tradeUpdaters[bnc.tradeUpdateCounter] = updater
+	bnc.tradeUpdaters[updaterID] = updater
 
 	unsubscribe := func() {
 		bnc.tradeUpdaterMtx.Lock()
-		delete(bnc.tradeUpdaters, bnc.tradeUpdateCounter)
+		delete(bnc.tradeUpdaters, updaterID)
 		bnc.tradeUpdaterMtx.Unlock()
 	}
 
-	return updater, unsubscribe, bnc.tradeUpdateCounter
+	return updater, unsubscribe, updaterID
 }
 
 // CancelTrade cancels a trade on the CEX.
@@ -454,7 +461,7 @@ func (bnc *binance) Markets() ([]*Market, error) {
 
 	markets := make([]*Market, 0, 16)
 	for _, symbol := range symbols {
-		markets = append(markets, symbol.markets()...)
+		markets = append(markets, symbol.dexMarkets()...)
 	}
 
 	return markets, nil
@@ -573,23 +580,20 @@ type wsBalance struct {
 }
 
 type bncStreamUpdate struct {
-	Asset              string       `json:"a"`
-	EventType          string       `json:"e"`
-	ClientOrderID      string       `json:"c"`
-	CurrentOrderStatus string       `json:"X"`
-	Balances           []*wsBalance `json:"B"`
-	BalanceDelta       float64      `json:"d,string"`
-	Filled             float64      `json:"z,string"`
-	OrderQty           float64      `json:"q,string"`
+	Asset              string          `json:"a"`
+	EventType          string          `json:"e"`
+	ClientOrderID      string          `json:"c"`
+	CurrentOrderStatus string          `json:"X"`
+	Balances           []*wsBalance    `json:"B"`
+	BalanceDelta       float64         `json:"d,string"`
+	Filled             float64         `json:"z,string"`
+	OrderQty           float64         `json:"q,string"`
+	E                  json.RawMessage `json:"E"`
+	C                  json.RawMessage `json:"C"`
 }
 
 func decodeStreamUpdate(b []byte) (*bncStreamUpdate, error) {
 	var msg *bncStreamUpdate
-	// Go's json doesn't handle case-sensitivity all that well.
-	// We only use the lower case "e" and "c" fields, so replace the upper case
-	// with "E0" and "C0" to avoid them interfering.
-	b = bytes.ReplaceAll(b, []byte(`"E"`), []byte(`"E0"`))
-	b = bytes.ReplaceAll(b, []byte(`"C"`), []byte(`"C0"`))
 	if err := json.Unmarshal(b, &msg); err != nil {
 		return nil, err
 	}
@@ -599,7 +603,7 @@ func decodeStreamUpdate(b []byte) (*bncStreamUpdate, error) {
 func (bnc *binance) sendCexUpdateNotes() {
 	bnc.cexUpdatersMtx.RLock()
 	defer bnc.cexUpdatersMtx.RUnlock()
-	for _, updater := range bnc.cexUpdaters {
+	for updater := range bnc.cexUpdaters {
 		updater <- struct{}{}
 	}
 }
@@ -1129,11 +1133,11 @@ type symbol struct {
 	OrderTypes          []string `json:"orderTypes"`
 }
 
-// markets returns all the possible markets for this symbol. A symbol
+// dexMarkets returns all the possible markets for this symbol. A symbol
 // represents a single market on the CEX, but tokens on the DEX have a
 // different assetID for each network they are on, therefore they will
 // match multiple markets as defined using assetID.
-func (s *symbol) markets() []*Market {
+func (s *symbol) dexMarkets() []*Market {
 	var baseAssetIDs, quoteAssetIDs []uint32
 
 	getAssetIDs := func(coin string) []uint32 {
@@ -1164,11 +1168,11 @@ func (s *symbol) markets() []*Market {
 	}
 
 	markets := make([]*Market, 0, len(baseAssetIDs)*len(quoteAssetIDs))
-	for _, base := range baseAssetIDs {
-		for _, quote := range quoteAssetIDs {
+	for _, baseID := range baseAssetIDs {
+		for _, quoteID := range quoteAssetIDs {
 			markets = append(markets, &Market{
-				Base:  base,
-				Quote: quote,
+				BaseID:  baseID,
+				QuoteID: quoteID,
 			})
 		}
 	}

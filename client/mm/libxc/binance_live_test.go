@@ -67,7 +67,7 @@ func TestConnect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
-	err := bnc.Connect(ctx)
+	_, err := bnc.Connect(ctx)
 	if err != nil {
 		t.Fatalf("Connect error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestTrade(t *testing.T) {
 	bnc := tNewBinance(t, dex.Simnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
-	err := bnc.Connect(ctx)
+	_, err := bnc.Connect(ctx)
 	if err != nil {
 		t.Fatalf("Connect error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestCancelTrade(t *testing.T) {
 	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
-	err := bnc.Connect(ctx)
+	_, err := bnc.Connect(ctx)
 	if err != nil {
 		t.Fatalf("Connect error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestVWAP(t *testing.T) {
 	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
-	err := bnc.Connect(ctx)
+	_, err := bnc.Connect(ctx)
 	if err != nil {
 		t.Fatalf("Connect error: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestVWAP(t *testing.T) {
 		t.Fatalf("failed to subscribe to market: %v", err)
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(10 * time.Second)
 	avg, extrema, filled, err := bnc.VWAP("eth", "btc", true, 2e9)
 	if err != nil {
 		t.Fatalf("VWAP failed: %v", err)

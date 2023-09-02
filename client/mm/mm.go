@@ -765,6 +765,7 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 
 	user := m.core.User()
 	cexes := make(map[string]libxc.CEX)
+	cexCMs := make(map[string]*dex.ConnectionMaster)
 
 	startedMarketMaking = true
 
@@ -795,6 +796,33 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 		}
 	}
 
+	getConnectedCEX := func(cexName string) (libxc.CEX, error) {
+		var cex libxc.CEX
+		var found bool
+		if cex, found = cexes[cexName]; !found {
+			cexCfg := cexCfgMap[cexName]
+			if cexCfg == nil {
+				return nil, fmt.Errorf("no CEX config provided for %s", cexName)
+			}
+			logger := m.log.SubLogger(fmt.Sprintf("CEX-%s", cexName))
+			cex, err = libxc.NewCEX(cexName, cexCfg.APIKey, cexCfg.APISecret, logger, dex.Simnet)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create CEX: %v", err)
+			}
+			cm := dex.NewConnectionMaster(cex)
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect to CEX: %v", err)
+			}
+			cexCMs[cexName] = cm
+			err = cm.Connect(m.ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect to CEX: %v", err)
+			}
+			cexes[cexName] = cex
+		}
+		return cex, nil
+	}
+
 	for _, cfg := range enabledCfgs {
 		switch {
 		case cfg.MMCfg != nil:
@@ -815,25 +843,10 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 			go func(cfg *BotConfig) {
 				defer wg.Done()
 				logger := m.log.SubLogger(fmt.Sprintf("Arbitrage-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
-				var cex libxc.CEX
-				var found bool
-				if cex, found = cexes[cfg.ArbCfg.CEXName]; !found {
-					cexCfg := cexCfgMap[cfg.ArbCfg.CEXName]
-					if cexCfg == nil {
-						logger.Errorf("No CEX config provided for %s", cfg.ArbCfg.CEXName)
-						return
-					}
-					cex, err = libxc.NewCEX(cfg.ArbCfg.CEXName, cexCfg.APIKey, cexCfg.APISecret, logger, dex.Simnet)
-					if err != nil {
-						logger.Errorf("Failed to create CEX: %v", err)
-						return
-					}
-					err = cex.Connect(m.ctx)
-					if err != nil {
-						logger.Errorf("Failed to connect to CEX: %v", err)
-						return
-					}
-					cexes[cfg.ArbCfg.CEXName] = cex
+				cex, err := getConnectedCEX(cfg.ArbCfg.CEXName)
+				if err != nil {
+					logger.Errorf("failed to connect to CEX: %v", err)
+					return
 				}
 				RunSimpleArbBot(m.ctx, cfg, m.core, cex, logger)
 			}(cfg)
@@ -844,6 +857,11 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 
 	go func() {
 		wg.Wait()
+		for cexName, cm := range cexCMs {
+			m.log.Infof("Shutting down connection to %s", cexName)
+			cm.Wait()
+			m.log.Infof("Connection to %s shut down", cexName)
+		}
 		m.running.Store(false)
 	}()
 

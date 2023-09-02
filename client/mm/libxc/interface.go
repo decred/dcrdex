@@ -23,8 +23,8 @@ type TradeUpdate struct {
 
 // Market is the base and quote assets of a market on a CEX.
 type Market struct {
-	Base  uint32 `json:"base"`
-	Quote uint32 `json:"quote"`
+	BaseID  uint32 `json:"base"`
+	QuoteID uint32 `json:"quote"`
 }
 
 // CEX implements a set of functions that can be used to interact with a
@@ -32,8 +32,7 @@ type Market struct {
 // when interacting with the CEX interface will adhere to the standard
 // rates and quantities of the DEX.
 type CEX interface {
-	// Connect connects to the CEX.
-	Connect(context.Context) error
+	dex.Connector
 	// Balance returns the balance of an asset at the CEX.
 	Balance(symbol string) (*ExchangeBalance, error)
 	// Balances returns a list of all asset balances at the CEX. Only assets that are

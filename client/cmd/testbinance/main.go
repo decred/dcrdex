@@ -132,7 +132,7 @@ func (f *fakeBinance) coinInfo() (coins []*fakeBinanceCoinInfo) {
 	return
 }
 
-// writeJSON writes marshals the provided interface and writes the bytes to the
+// writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
