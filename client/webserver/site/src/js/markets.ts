@@ -59,7 +59,8 @@ import {
   ConnectionStatus,
   RecentMatch,
   MatchNote,
-  ApprovalStatus
+  ApprovalStatus,
+  OrderFilter
 } from './registry'
 import { setOptionTemplates } from './opts'
 import { CoinExplorers } from './order'
@@ -79,6 +80,7 @@ const epochMatchSummaryRoute = 'epoch_match_summary'
 const animationLength = 500
 
 const anHour = 60 * 60 * 1000 // milliseconds
+const maxUserOrdersShown = 10
 
 const check = document.createElement('span')
 check.classList.add('ico-check')
@@ -846,14 +848,14 @@ export default class MarketsPage extends BasePage {
     let baseAssetApprovalStatus = ApprovalStatus.Approved
     let quoteAssetApprovalStatus = ApprovalStatus.Approved
 
-    if (base.token) {
+    if (base?.token) {
       const baseAsset = app().assets[base.id]
       const baseVersion = this.market.dex.assets[base.id].version
       if (baseAsset && baseAsset.wallet.approved && baseAsset.wallet.approved[baseVersion] !== undefined) {
         baseAssetApprovalStatus = baseAsset.wallet.approved[baseVersion]
       }
     }
-    if (quote.token) {
+    if (quote?.token) {
       const quoteAsset = app().assets[quote.id]
       const quoteVersion = this.market.dex.assets[quote.id].version
       if (quoteAsset?.wallet?.approved && quoteAsset.wallet.approved[quoteVersion] !== undefined) {
@@ -1106,6 +1108,7 @@ export default class MarketsPage extends BasePage {
     this.setCandleDurBttns()
     this.previewQuoteAmt(false)
     this.updateTitle()
+    this.loadUserOrders()
   }
 
   /*
@@ -1464,23 +1467,62 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  maxUserOrderCount (): number {
+    const { dex: { host }, cfg: { name: mktID } } = this.market
+    return Math.max(maxUserOrdersShown, app().orders(host, mktID).length)
+  }
+
+  async loadUserOrders () {
+    const { base: b, quote: q, dex: { host }, cfg: { name: mktID } } = this.market
+    for (const oid in this.metaOrders) delete this.metaOrders[oid]
+    if (!b || !q) return this.resolveUserOrders([]) // unsupported asset
+    const activeOrders = app().orders(host, mktID)
+    if (activeOrders.length >= maxUserOrdersShown) return this.resolveUserOrders(activeOrders)
+    const filter: OrderFilter = {
+      hosts: [host],
+      market: { baseID: b.id, quoteID: q.id },
+      n: this.maxUserOrderCount()
+    }
+    const res = await postJSON('/api/orders', filter)
+    const orders = res.orders || []
+    // Make sure all active orders are in there. The /orders API sorts by time,
+    // so if there is are 10 cancelled/executed orders newer than an old active
+    // order, the active order wouldn't be included in the result.
+    for (const activeOrd of activeOrders) if (!orders.some((dbOrd: Order) => dbOrd.id === activeOrd.id)) orders.push(activeOrd)
+    return this.resolveUserOrders(res.orders || [])
+  }
+
   /* refreshActiveOrders refreshes the user's active order list. */
   refreshActiveOrders () {
-    const page = this.page
-    const metaOrders = this.metaOrders
-    const market = this.market
-    const cfg = this.market.cfg
+    const orders = app().orders(this.market.dex.host, marketID(this.market.baseCfg.symbol, this.market.quoteCfg.symbol))
+    return this.resolveUserOrders(orders)
+  }
+
+  resolveUserOrders (orders: Order[]) {
+    const { page, metaOrders, market } = this
+    const cfg = market.cfg
+
+    const orderIsActive = (ord: Order) => ord.status < OrderUtil.StatusExecuted || OrderUtil.hasActiveMatches(ord)
+
+    for (const ord of orders) metaOrders[ord.id] = { ord: ord } as MetaOrder
+    let sortedOrders = Object.keys(metaOrders).map((oid: string) => metaOrders[oid])
+    sortedOrders.sort((a: MetaOrder, b: MetaOrder) => {
+      const [aActive, bActive] = [orderIsActive(a.ord), orderIsActive(b.ord)]
+      if (aActive && !bActive) return -1
+      else if (!aActive && bActive) return 1
+      return b.ord.submitTime - a.ord.submitTime
+    })
+    const n = this.maxUserOrderCount()
+    if (sortedOrders.length > n) { sortedOrders = sortedOrders.slice(0, n) }
+
     for (const oid in metaOrders) delete metaOrders[oid]
-    const orders = app().orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
-    // Sort orders by sort key.
-    orders.sort((a: Order, b: Order) => b.submitTime - a.submitTime)
 
     Doc.empty(page.userOrders)
-    Doc.setVis(orders?.length, page.userOrders)
-    Doc.setVis(!orders?.length, page.userNoOrders)
+    Doc.setVis(sortedOrders?.length, page.userOrders)
+    Doc.setVis(!sortedOrders?.length, page.userNoOrders)
 
     let unreadyOrders = false
-    for (const ord of orders) {
+    for (const mord of sortedOrders) {
       const div = page.userOrderTmpl.cloneNode(true) as HTMLElement
       page.userOrders.appendChild(div)
 
@@ -1489,22 +1531,24 @@ export default class MarketsPage extends BasePage {
       const detailsDiv = Doc.tmplElement(div, 'details')
       const details = Doc.parseTemplate(detailsDiv)
 
-      const mord: MetaOrder = {
-        div: div,
-        header: header,
-        details: details,
-        ord: ord
-      }
+      mord.div = div
+      mord.header = header
+      mord.details = details
+
+      const ord = mord.ord
+      const orderID = ord.id
+      const isActive = orderIsActive(ord)
 
       // No need to track in-flight orders here. We've already added it to
       // display.
-      if (ord.id) metaOrders[ord.id] = mord
+      if (orderID) metaOrders[orderID] = mord
 
-      if (!ord.readyToTick) {
+      if (!ord.readyToTick && OrderUtil.hasActiveMatches(ord)) {
         headerEl.classList.add('unready-user-order')
         unreadyOrders = true
       }
       header.sideLight.classList.add(ord.sell ? 'sell' : 'buy')
+      if (!isActive) header.sideLight.classList.add('inactive')
       details.side.textContent = header.side.textContent = OrderUtil.sellString(ord)
       details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
@@ -1519,30 +1563,35 @@ export default class MarketsPage extends BasePage {
         this.setDepthMarkers()
       })
 
-      if (!ord.id) {
+      const showCancel = (e: Event) => {
+        e.stopPropagation()
+        this.showCancel(div, orderID)
+      }
+
+      const showAccelerate = (e: Event) => {
+        e.stopPropagation()
+        this.showAccelerate(ord)
+      }
+
+      if (!orderID) {
         Doc.hide(details.accelerateBttn)
         Doc.hide(details.cancelBttn)
         Doc.hide(details.link)
       } else {
-        if (ord.type === OrderUtil.Limit && (ord.tif === OrderUtil.StandingTiF && ord.status < OrderUtil.StatusExecuted)) {
+        if (OrderUtil.isCancellable(ord)) {
           Doc.show(details.cancelBttn)
-          bind(details.cancelBttn, 'click', e => {
-            e.stopPropagation()
-            this.showCancel(div, ord.id)
-          })
+          bind(details.cancelBttn, 'click', (e: Event) => { showCancel(e) })
         }
 
-        bind(details.accelerateBttn, 'click', e => {
-          e.stopPropagation()
-          this.showAccelerate(ord)
-        })
+        bind(details.accelerateBttn, 'click', (e: Event) => { showAccelerate(e) })
         if (app().canAccelerateOrder(ord)) {
           Doc.show(details.accelerateBttn)
         }
-        details.link.href = `order/${ord.id}`
+
+        details.link.href = `order/${orderID}`
         app().bindInternalNavigation(div)
       }
-
+      let currentFloater: (PageElement | null)
       Doc.bind(headerEl, 'click', () => {
         if (Doc.isDisplayed(detailsDiv)) {
           Doc.hide(detailsDiv)
@@ -1553,6 +1602,56 @@ export default class MarketsPage extends BasePage {
         Doc.show(detailsDiv)
         header.expander.classList.remove('ico-arrowdown')
         header.expander.classList.add('ico-arrowup')
+        if (currentFloater) currentFloater.remove()
+      })
+      /**
+       * We'll show the button menu when they hover over the header. To avoid
+       * pushing the layout around, we'll show the buttons as an absolutely
+       * positioned copy of the button menu.
+       */
+      Doc.bind(headerEl, 'mouseenter', () => {
+        // Don't show the copy if the details are already displayed.
+        if (Doc.isDisplayed(detailsDiv)) return
+        if (currentFloater) currentFloater.remove()
+        // Create and position the element based on the position of the header.
+        const floater = document.createElement('div')
+        currentFloater = floater
+        document.body.appendChild(floater)
+        floater.className = 'user-order-floaty-menu'
+        const m = Doc.layoutMetrics(headerEl)
+        const y = m.bodyTop + m.height
+        floater.style.top = `${y - 1}px` // - 1 to hide border on header div
+        floater.style.left = `${m.bodyLeft}px`
+        // Get the updated version of the order
+        const mord = this.metaOrders[orderID]
+        const ord = mord.ord
+
+        const addButton = (baseBttn: PageElement, cb: ((e: Event) => void)) => {
+          const icon = baseBttn.cloneNode(true) as PageElement
+          floater.appendChild(icon)
+          Doc.show(icon)
+          Doc.bind(icon, 'click', (e: Event) => { cb(e) })
+        }
+
+        if (OrderUtil.isCancellable(ord)) addButton(details.cancelBttn, (e: Event) => { showCancel(e) })
+        if (app().canAccelerateOrder(ord)) addButton(details.accelerateBttn, (e: Event) => { showAccelerate(e) })
+        floater.appendChild(details.link.cloneNode(true))
+
+        const ogScrollY = page.orderScroller.scrollTop
+        // Set up the hover interactions.
+        const moved = (e: MouseEvent) => {
+          // If the user scrolled, reposition the float menu. This keeps the
+          // menu from following us around, which can prevent removal below.
+          const yShift = page.orderScroller.scrollTop - ogScrollY
+          floater.style.top = `${y + yShift}px`
+          if (Doc.mouseInElement(e, floater) || Doc.mouseInElement(e, div)) return
+          floater.remove()
+          currentFloater = null
+          document.removeEventListener('mousemove', moved)
+          page.orderScroller.removeEventListener('scroll', moved)
+        }
+        document.addEventListener('mousemove', moved)
+        page.orderScroller.addEventListener('scroll', moved)
       })
       app().bindTooltips(div)
     }
@@ -1633,7 +1732,6 @@ export default class MarketsPage extends BasePage {
       el.appendChild(Doc.symbolize(q.symbol))
     })
     this.setMarketBuyOrderEstimate()
-    this.refreshActiveOrders()
   }
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
@@ -2238,7 +2336,7 @@ export default class MarketsPage extends BasePage {
   handleWalletState (note: WalletStateNote) {
     if (!this.market) return // This note can arrive before the market is set.
     // if (note.topic !== 'TokenApproval') return
-    if (note.wallet.assetID !== this.market.base.id && note.wallet.assetID !== this.market.quote.id) return
+    if (note.wallet.assetID !== this.market.base?.id && note.wallet.assetID !== this.market.quote?.id) return
     this.setTokenApprovalVisibility()
     this.resolveOrderFormVisibility()
   }

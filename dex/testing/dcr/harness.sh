@@ -360,7 +360,6 @@ tmux send-keys -t $SESSION:0 "./alpha getmasterpubkey server_fees${WAIT}" C-m\; 
 # Prepare the wallets
 ################################################################################
 
-tmux select-window -t $SESSION:0
 for WALLET in alpha beta trading1 trading2; do
   tmux send-keys -t $SESSION:0 "./${WALLET} getnewaddress${WAIT}" C-m\; wait-for donedcr
   tmux send-keys -t $SESSION:0 "./${WALLET} getnewaddress${WAIT}" C-m\; wait-for donedcr
@@ -407,6 +406,8 @@ if [ -z "$NOMINER" ] ; then
   tmux send-keys -t $SESSION:9 "cd ${NODES_ROOT}/harness-ctl" C-m
   tmux send-keys -t $SESSION:9 "watch -n 15 ./mine-alpha 1" C-m
 fi
+
+tmux select-window -t $SESSION:0
 
 # Reenable history and attach to the control session.
 tmux send-keys -t $SESSION:0 "set -o history" C-m

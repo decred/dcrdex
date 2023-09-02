@@ -13,6 +13,8 @@
 // ElectrumX-Firo server:	dex/testing/firo/electrumx.sh
 // export REGTEST=1
 
+//go:build live
+
 package firo
 
 import (

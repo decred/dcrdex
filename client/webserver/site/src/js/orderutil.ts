@@ -210,3 +210,7 @@ export function optionElement (opt: OrderOption, order: TradeForm, change: () =>
 function dexAssetSymbol (host: string, assetID: number): string {
   return app().exchanges[host].assets[assetID].symbol
 }
+
+export function isCancellable (ord: Order): boolean {
+  return ord.type === Limit && ord.tif === StandingTiF && ord.status < StatusExecuted
+}

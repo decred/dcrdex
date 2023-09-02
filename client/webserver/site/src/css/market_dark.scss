@@ -184,6 +184,11 @@ body.dark {
     border-color: $dark_border_color;
     background-color: $dark_body_bg;
   }
+
+  .user-order-floaty-menu {
+    border-color: $dark_border_color $dark_input_border $dark_input_border $dark_input_border;
+    background-color: $dark_body_bg;
+  }
 }
 
 @include media-breakpoint-up(lg) {

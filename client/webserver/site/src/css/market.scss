@@ -130,7 +130,6 @@ div[data-handler=markets] {
   }
 
   .user-order {
-    margin: 0 20px;
     border: 1px solid $light_border_color;
 
     &:not(:last-child) {
@@ -164,6 +163,10 @@ div[data-handler=markets] {
         &.sell {
           background-color: $sellcolor_light;
         }
+
+        &.inactive {
+          opacity: 0.5;
+        }
       }
 
       .active-indicator {
@@ -187,6 +190,7 @@ div[data-handler=markets] {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr 1fr;
       row-gap: 10px;
+      column-gap: 5px;
       line-height: 1;
 
       .user-order-datum {
@@ -893,5 +897,29 @@ div[data-handler=markets] {
   #recentMatchesBox {
     overflow: visible;
     max-height: none;
+  }
+}
+
+.user-order-floaty-menu {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  z-index: 5;
+  border-style: none solid solid;
+  border-width: 0 2px 2px 1px;
+  border-color: $light_input_border;
+  background-color: $light_body_bg;
+  cursor: pointer;
+  overflow: hidden;
+
+  & > span,
+  & > a {
+    margin: 0 5px;
+    padding-right: 10px;
+    padding-left: 10px;
+
+    &:hover {
+      background-color: #7775;
+    }
   }
 }

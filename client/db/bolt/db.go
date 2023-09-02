@@ -1162,6 +1162,13 @@ func (db *BoltDB) Orders(orderFilter *dexdb.OrderFilter) (ords []*dexdb.MetaOrde
 		}
 	}
 
+	if orderFilter.Market != nil {
+		filters = append(filters, func(_ []byte, oBkt *bbolt.Bucket) bool {
+			baseID, quoteID := intCoder.Uint32(oBkt.Get(baseKey)), intCoder.Uint32(oBkt.Get(quoteKey))
+			return orderFilter.Market.Base == baseID && orderFilter.Market.Quote == quoteID
+		})
+	}
+
 	if !orderFilter.Offset.IsZero() {
 		offsetOID := orderFilter.Offset
 		var stampB []byte

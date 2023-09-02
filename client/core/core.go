@@ -4847,11 +4847,20 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 		copy(oid[:], filter.Offset)
 	}
 
+	var mkt *db.OrderFilterMarket
+	if filter.Market != nil {
+		mkt = &db.OrderFilterMarket{
+			Base:  filter.Market.Base,
+			Quote: filter.Market.Quote,
+		}
+	}
+
 	ords, err := c.db.Orders(&db.OrderFilter{
 		N:        filter.N,
 		Offset:   oid,
 		Hosts:    filter.Hosts,
 		Assets:   filter.Assets,
+		Market:   mkt,
 		Statuses: filter.Statuses,
 	})
 	if err != nil {
@@ -4864,6 +4873,10 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 		if err != nil {
 			return nil, err
 		}
+		baseWallet, baseOK := c.wallet(corder.BaseID)
+		quoteWallet, quoteOK := c.wallet(corder.QuoteID)
+		corder.ReadyToTick = baseOK && baseWallet.connected() && baseWallet.unlocked() &&
+			quoteOK && quoteWallet.connected() && quoteWallet.unlocked()
 		cords = append(cords, corder)
 	}
 
