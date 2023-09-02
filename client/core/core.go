@@ -80,7 +80,7 @@ const (
 	// where we don't have the necessary information to calculate our bonded
 	// tier, so we calculate our bonus/revoked tier from the score in the
 	// ConnectResult.
-	defaultBanScore = 20
+	defaultPenaltyThreshold = 20
 )
 
 var (
@@ -455,7 +455,7 @@ func (dc *dexConnection) pendingBonds() map[string]*PendingBondState {
 	return pendingBonds
 }
 
-func (dc *dexConnection) exchangeInfo() *Exchange {
+func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 	// Set AcctID to empty string if not registered.
 	acctID := dc.acct.ID().String()
 	var emptyAcctID account.AccountID
@@ -477,12 +477,16 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	}
 
 	bondAssets := make(map[string]*BondAsset, len(cfg.BondAssets))
+	msgBondAssets := make(map[uint32]*msgjson.BondAsset)
 	for symb, bondAsset := range cfg.BondAssets {
-		if assetID, ok := dex.BipSymbolID(symb); !ok || assetID != bondAsset.ID {
+		assetID, ok := dex.BipSymbolID(symb)
+		if !ok || assetID != bondAsset.ID {
 			dc.log.Warnf("Invalid bondAssets config with mismatched asset symbol %q and ID %d",
 				symb, bondAsset.ID)
 		}
+		msgBondAssets[assetID] = bondAsset
 		coreBondAsset := BondAsset(*bondAsset) // convert msgjson.BondAsset to core.BondAsset
+
 		bondAssets[symb] = &coreBondAsset
 	}
 
@@ -502,12 +506,15 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		}
 	}
 
-	dc.acct.authMtx.RLock()
-	// TODO: List bonds in core.Exchange. For now, just tier.
-	effectiveTier := dc.acct.effectiveTier
-	bondAssetID := dc.acct.bondAsset
-	targetTier, maxBondedAmt := dc.acct.targetTier, dc.acct.maxBondedAmt
-	dc.acct.authMtx.RUnlock()
+	// dc.acct.authMtx.RLock()
+	// // TODO: List bonds in core.Exchange. For now, just tier.
+	// bondAssetID, rep := dc.acct.bondAsset, dc.acct.reputation
+	// targetTier, maxBondedAmt := dc.acct.targetTier, dc.acct.maxBondedAmt
+	// bondedTier := sumBondStrengths(dc.acct.bonds, cfg.BondAssets)
+	// dc.acct.authMtx.RUnlock()
+
+	bondCfg := c.dexBondConfig(dc, time.Now().Unix())
+	acctBondState := c.bondStateOfDEX(dc, bondCfg)
 
 	return &Exchange{
 		Host:             dc.acct.host,
@@ -519,11 +526,12 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		ConnectionStatus: dc.status(),
 		CandleDurs:       cfg.BinSizes,
 		ViewOnly:         dc.acct.isViewOnly(),
-		Tier:             effectiveTier,
+		Reputation:       acctBondState.Reputation,
+		BondedTier:       acctBondState.liveStrength,
 		BondOptions: &BondOptions{
-			BondAsset:    bondAssetID,
-			TargetTier:   targetTier,
-			MaxBondedAmt: maxBondedAmt,
+			BondAsset:    acctBondState.bondAssetID,
+			TargetTier:   acctBondState.targetTier,
+			MaxBondedAmt: acctBondState.maxBondedAmt,
 		},
 		PendingBonds: dc.pendingBonds(),
 		// TODO: Bonds
@@ -1809,7 +1817,7 @@ func (c *Core) Exchanges() map[string]*Exchange {
 	dcs := c.dexConnections()
 	infos := make(map[string]*Exchange, len(dcs))
 	for _, dc := range dcs {
-		infos[dc.acct.host] = dc.exchangeInfo()
+		infos[dc.acct.host] = c.exchangeInfo(dc)
 	}
 	return infos
 }
@@ -1821,7 +1829,7 @@ func (c *Core) Exchange(host string) (*Exchange, error) {
 	if err != nil {
 		return nil, err
 	}
-	return dc.exchangeInfo(), nil
+	return c.exchangeInfo(dc), nil
 }
 
 // ExchangeMarket returns the market with the given base and quote assets at the
@@ -1975,22 +1983,6 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 	err = w.Connect() // ensures valid deposit address
 	if err != nil {
 		return "", newError(connectWalletErr, "failed to connect %s wallet: %w", w.Symbol, err)
-	}
-
-	// Register existing bonds with wallets for possible reserves accounting.
-	for _, dc := range c.dexConnections() {
-		// Register all current unspent bonds with this xcWallet instance.
-		if unspent, _ := dc.bondTotal(w.AssetID); unspent > 0 {
-			w.RegisterUnspent(unspent)
-			// We are assuming that if this is a reused instance, the prior
-			// disconnect cleared it all, but if not we may need to move this to
-			// a login-only method like connectWallets and have
-			// ReconfigureWallet also do this as part of reReserveFunds.
-			// However, doing it on wallet connect assures that if a wallet
-			// failed to connect on login, reserves will be set properly when it
-			// is connected later. A dc.acct.unregistered bonds slice could
-			// address this, but let's avoid that if we can.
-		}
 	}
 
 	// This may be a wallet that does not require a password, so we can attempt
@@ -3805,7 +3797,7 @@ func (c *Core) GetDEXConfig(dexAddr string, certI any) (*Exchange, error) {
 
 	// Since connectDEX succeeded, we have the server config. exchangeInfo is
 	// guaranteed to return an *Exchange with full asset and market info.
-	return dc.exchangeInfo(), nil
+	return c.exchangeInfo(dc), nil
 }
 
 // AddDEX configures a view-only DEX connection. This allows watching trade
@@ -3949,11 +3941,13 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 
 		// DRAFT NOTE: This was wrong? Isn't account suspended at tier 0?
 		// cannotTrade := dc.acct.effectiveTier < 0 || (dc.acct.effectiveTier == 0 && dc.apiVersion() < serverdex.BondAPIVersion)
-		if dc.acct.effectiveTier <= 0 {
+		rep := dc.acct.rep
+		// Using <= though acknowledging that this ignore the possibility that
+		// an existing revoked bond coudl be ressurected.
+		if rep.BondedTier <= int64(rep.Penalties) {
 			dc.acct.unAuth() // acct was marked as authenticated by authDEX above.
-			c.log.Infof("HD account key for %s has tier %d (not able to trade). Deriving another account key.",
-				dc.acct.host, dc.acct.effectiveTier)
-			keyIndex++
+			c.log.Infof("HD account key for %s has tier %d, but %d penalties (not able to trade). Deriving another account key.",
+				dc.acct.host, rep.BondedTier, rep.Penalties)
 			time.Sleep(200 * time.Millisecond) // don't hammer
 			continue
 		}
@@ -4061,7 +4055,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI any) (*Exchan
 	c.connMtx.RUnlock()
 	if existingConn && !dc.acct.isViewOnly() {
 		// Already registered, but connection may be down and/or PostBond needed.
-		return dc.exchangeInfo(), true, nil // *Exchange has Tier and BondsPending
+		return c.exchangeInfo(dc), true, nil // *Exchange has Tier and BondsPending
 	}
 
 	var ready bool
@@ -4085,7 +4079,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI any) (*Exchan
 	// Older DEX server. We won't allow registering without an HD account key,
 	// but discovery can conclude we do not have an HD account with this DEX.
 	if dc.acct.dexPubKey == nil {
-		return dc.exchangeInfo(), false, nil
+		return c.exchangeInfo(dc), false, nil
 	}
 
 	// Don't allow registering for another dex with the same pubKey. There can only
@@ -4105,12 +4099,12 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI any) (*Exchan
 		return nil, false, err
 	}
 	if !paid {
-		return dc.exchangeInfo(), false, nil // all good, just go register or postbond now
+		return c.exchangeInfo(dc), false, nil // all good, just go register or postbond now
 	}
 
 	ready = true // do not disconnect
 
-	return dc.exchangeInfo(), true, nil
+	return c.exchangeInfo(dc), true, nil
 }
 
 // EstimateRegistrationTxFee provides an estimate for the tx fee needed to
@@ -6586,59 +6580,40 @@ func bondKey(assetID uint32, coinID []byte) string {
 	return string(append(encode.Uint32Bytes(assetID), coinID...))
 }
 
-// updateTierReport sets the account's tier-related fields. updateTierReport
+// updateReputation sets the account's tier-related fields. updateTierReport
 // must be called with the authMtx locked.
-func (dc *dexConnection) updateTierReport(
-	newTierReport *account.TierReport,
+func (dc *dexConnection) updateReputation(
+	newTierReport *account.Reputation,
 	tier *int64,
 	legacyFee *bool,
 	scor *int32,
 ) {
 
-	defer func() {
-		dc.acct.effectiveTier = dc.acct.tier.Effective()
-	}()
-
-	if newTierReport != nil {
-		dc.acct.tier = newTierReport
-		return
-	}
-	var score int32
-	if scor != nil {
-		score = *scor
-	}
-	if tier == nil { // legacy server (V0PURGE)
-		// A legacy server does not set ConnectResult.LegacyFeePaid, but unpaid
-		// legacy ('register') users get an UnpaidAccountError from Connect, so
-		// we know the account is paid and not suspended.
-		// These legacy responses are unlikely to exist in the wild anymore, but
-		// there are no bonus tiers in these servers.
-		dc.acct.tier = &account.TierReport{
-			Legacy: true,
-			Score:  -score, // Sign switched in v2 connect result.
-		}
+	if newTierReport != nil { // v2 reputation
+		dc.acct.rep = newTierReport
 		return
 	}
 
-	// tier != nil
+	// v1 reputation
 	// We have tier info, but server isn't sending a TierReportV2.
 	effectiveTier := *tier
 	legacyFeePaid := dc.acct.legacyFeePaid
 	if legacyFee != nil {
 		legacyFeePaid = *legacyFee
 	}
-	// We need to know the tier contribution from active bonds, but that
-	// depends on things like the server's ban score, which we don't have.
-	// Also, we can't add up active bonds and divide by current bond asset
-	// configuration values, beause the server doesn't do it that way. They
-	// sum the bond.Strength in the DB entries that corresponds to the bond
-	// strength at postbond, so we'd have no way of knowing if the server's
-	// bond configuration had changed. That's why TierReportV2 was added,
-	// but in the meantime, we have to make some assumptions. In this case,
-	// we'll assume that the server has the default ban score (20) and work
-	// from there.
-	var bonusTiers, revokedTiers int64
-	oldTierReport := dc.acct.tier
+	// We need to know the tier contribution from active bonds, but that depends
+	// on things like the server's penalty theshold, which we don't have. Also,
+	// we can't add up active bonds and divide by current bond asset
+	// configuration values, beause the server doesn't do it that way. They sum
+	// the bond.Strength in the DB entries that corresponds to the bond strength
+	// at postbond, so we'd have no way of knowing if the server's bond
+	// configuration had changed. That's why TierReportV2 was added, but in the
+	// meantime, we have to make some assumptions. In this case, we'll assume
+	// that the server has the default penalty threshold (20) and work from
+	// there.
+	var penalties uint16
+	var score int32
+	oldTierReport := dc.acct.rep
 	// If we got here through authDEX -> ConnectResult, we won't have an
 	// oldTierReport, but we will have a score. For other paths, we will have
 	// an oldTierReport but we won't have a score.
@@ -6647,25 +6622,21 @@ func (dc *dexConnection) updateTierReport(
 		// here via e.g. postBond, the best we can do is to assume these values
 		// haven't changed.
 		score = oldTierReport.Score
-		bonusTiers, revokedTiers = oldTierReport.Bonus, oldTierReport.Revoked
+		penalties = oldTierReport.Penalties
 	} else if scor != nil { // via authDEX -> ConnectResult
-		score = *scor * -1 // Sign switched in v2 connect result.
-		tierAdj := int64(score / defaultBanScore)
-		if tierAdj < 0 {
-			bonusTiers = -tierAdj
-		} else if tierAdj > 0 {
-			revokedTiers = tierAdj
+		score = *scor * -1 // In v1 rep, positive score was worse.
+		if score < 0 {
+			penalties = uint16(-score / defaultPenaltyThreshold)
 		}
 	}
 
 	// effectiveTier = bondedTier + bonusTiers - revokedTiers
-	bondedTier := effectiveTier - bonusTiers + revokedTiers
-	dc.acct.tier = &account.TierReport{
-		Bonded:  bondedTier,
-		Revoked: revokedTiers,
-		Bonus:   bonusTiers,
-		Legacy:  legacyFeePaid,
-		Score:   score,
+	bondedTier := effectiveTier + int64(penalties)
+	dc.acct.rep = &account.Reputation{
+		BondedTier: bondedTier,
+		Penalties:  penalties,
+		Legacy:     legacyFeePaid,
+		Score:      score,
 	}
 
 }
@@ -6795,7 +6766,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			continue
 		}
 
-		c.log.Warnf("Locally-active bond %v (%s) not reported by server. Will repost...",
+		c.log.Warnf("Locally-active bond %v (%s) not reported by server",
 			bondIDStr, symb) // unexpected, but postbond again
 
 		// Unknown on server. postBond at required confs.
@@ -6855,70 +6826,16 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// totalReserved is non-zero in #3, but zero in #1. There are no reserves
 	// actions to take in #3 since PostBond reserves prior to post.
 
-	dc.updateTierReport(result.TierReportV2, result.Tier, result.LegacyFeePaid, &result.Score)
+	dc.updateReputation(result.Reputation, result.Tier, result.LegacyFeePaid, &result.Score)
+	rep := *dc.acct.rep
+	effectiveTier := rep.EffectiveTier()
 	c.log.Infof("Authenticated connection to %s, acct %v, %d active bonds, %d active orders, %d active matches, score %d, tier %d",
-		dc.acct.host, acctID, len(result.ActiveBonds), len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, dc.acct.effectiveTier)
-	loginAuth := !dc.acct.isAuthed && dc.acct.totalReserved == 0
+		dc.acct.host, acctID, len(result.ActiveBonds), len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, effectiveTier)
 	dc.acct.isAuthed = true
-	effectiveTier := dc.acct.effectiveTier
-	dc.acct.tierChange += dc.acct.tier.Bonded - int64(bondedTiers)
-	dc.acct.legacyFeePaid = dc.acct.tier.Legacy
+	dc.acct.legacyFeePaid = rep.Legacy
 
-	c.log.Debugf("Tier/bonding with %v: effectiveTier = %d, tierChange = %d, targetTier = %d, bondedTiers = %d, revokedTiers = %d, legacy = %t",
-		dc.acct.host, dc.acct.effectiveTier, dc.acct.tierChange, dc.acct.targetTier, dc.acct.tier.Bonded, dc.acct.tier.Revoked, dc.acct.legacyFeePaid)
-	// If tier maintenance is enabled AND tier changed, update reserves.
-	if dc.acct.targetTier > 0 && (dc.acct.tierChange != 0 || loginAuth) {
-		if bondAsset := bondAssets[dc.acct.bondAsset]; bondAsset == nil {
-			c.log.Warnf("Selected bond asset %s is not supported by %s", unbip(dc.acct.bondAsset), dc.acct.host)
-		} else if bondWallet, ok := c.wallet(bondAsset.ID); ok {
-			// Here we correct for reserves inaccuracies from the previously
-			// known tier, which in the case of the first login is 0. If this is
-			// a reauth after reconnect and we discover our tier has changed, we
-			// are adjusting in either direction. Remember: Tier increase is
-			// reserves reduction (and vice versa).
-
-			var future int64
-			var feeBuffer uint64
-			if loginAuth {
-				// If we are enabling reserves enforcement for spendable
-				// balance, we need to subtract how much we have already locked
-				// in bonds from the full amount based on the target tier. When
-				// restarting with a fully bonded account, this is expected to
-				// be zero, which simply enables reserves accounting for this
-				// asset, including any transaction fee buffering. This amount
-				// may also be negative, which signifies unbonding.
-				inBonds, _ := dc.bondTotalInternal(bondAsset.ID)
-				future = int64(bondOverlap*dc.acct.targetTier*bondAsset.Amt - inBonds) // note: minus inBonds
-				if tierOffset := dc.acct.tier.Bonded - int64(bondedTiers); tierOffset != 0 {
-					c.log.Warnf("Discrepancy between actual bonded tier (%v) and expected tier from active bonds (%v). "+
-						"Offset: %v (negative implies penalties / positive implies bonus)", // or bug
-						dc.acct.tier.Bonded, bondedTiers, tierOffset)
-					if tierOffset < 0 { // make up for penalties, but don't go the other way yet
-						future -= tierOffset * int64(bondAsset.Amt)
-					}
-				}
-				feeBuffer = bondWallet.BondsFeeBuffer(c.feeSuggestionAny(bondAsset.ID, dc))
-				dc.acct.totalReserved = int64(inBonds) + future // enabling starts with inBonds
-				c.log.Infof("First login at %v, with %v (x%d) in unspent bonds, "+
-					"reserving %v for future bonds with target tier of %d",
-					dc.acct.host, bondWallet.amtString(inBonds), inBonds/bondAsset.Amt,
-					bondWallet.amtStringSigned(future), dc.acct.targetTier)
-			} else {
-				// Subsequent re-auth, such as on reconnect, only needs to apply
-				// any unactuated tier changes.
-				future = bondOverlap * -dc.acct.tierChange * int64(bondAsset.Amt)
-				dc.acct.totalReserved += future
-			}
-
-			// TODO: limit dc.acct.totalReserved+future against maxBondedAmt
-
-			bondWallet.ReserveBondFunds(future, feeBuffer, false) // may create a deficit if fees are higher now and wallet lacks funds (OK)
-			dc.log.Infof("Total reserved for %v is now %v (%v more future in bonds)", dc.acct.host,
-				bondWallet.amtStringSigned(dc.acct.totalReserved), bondWallet.amtStringSigned(future))
-			updatedAssets.count(bondAsset.ID)
-			dc.acct.tierChange = 0 // tier change is now actuated with wallet reserves
-		}
-	}
+	c.log.Debugf("Tier/bonding with %v: effectiveTier = %d, targetTier = %d, bondedTiers = %d, revokedTiers = %d, legacy = %t",
+		dc.acct.host, effectiveTier, dc.acct.targetTier, rep.BondedTier, rep.Penalties, dc.acct.legacyFeePaid)
 	dc.acct.authMtx.Unlock()
 
 	for _, pending := range toPost {
@@ -6928,7 +6845,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		bond := confirmed.bond
 		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
 		c.log.Debugf("Confirming pending bond %v that is confirmed server side", bondIDStr)
-		if err = c.bondConfirmed(dc, bond.AssetID, bond.CoinID, effectiveTier /* no change */); err != nil {
+		if err = c.bondConfirmed(dc, bond.AssetID, bond.CoinID, &msgjson.PostBondResult{Reputation: &rep} /* no change */); err != nil {
 			c.log.Errorf("Unable to confirm bond %s: %v", bondIDStr, err)
 		}
 	}
@@ -7905,22 +7822,9 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 		}
 	}
 
+	c.updateBondReserves()
+
 	for _, dc := range c.dexConnections() {
-		dc.acct.authMtx.RLock()
-		if w.AssetID == dc.acct.bondAsset && dc.acct.targetTier > 0 {
-			inBonds, _ := dc.bondTotalInternal(w.AssetID)
-			// Wallet Connect currently does the RegisterUnspent part:
-			// w.RegisterUnspent(inBonds)
-
-			// Here we re-reserve for future bonds, whatever that amount was
-			// (totalReserved minus what's locked in bonds, see the firstAuth
-			// path in authDEX, and the "enabling reserves" parts of
-			// UpdateBondOptions):
-			feeBuffer := w.BondsFeeBuffer(c.feeSuggestionAny(w.AssetID, dc))
-			w.ReserveBondFunds(dc.acct.totalReserved-int64(inBonds), feeBuffer, false)
-		}
-		dc.acct.authMtx.RUnlock()
-
 		for _, tracker := range dc.trackedTrades() {
 			// TODO: Consider tokens
 			if tracker.Base() != w.AssetID && tracker.Quote() != w.AssetID {
@@ -8760,9 +8664,7 @@ func handleTierChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return newError(signatureErr, "handleTierChangeMsg: DEX signature validation error: %v", err) // warn?
 	}
 	dc.acct.authMtx.Lock()
-	dc.acct.tierChange += tierChanged.Tier - dc.acct.effectiveTier // normally negative with this ntfn
-	dc.acct.effectiveTier = tierChanged.Tier
-	dc.updateTierReport(tierChanged.TierReportV2, &tierChanged.Tier, nil, nil)
+	dc.updateReputation(tierChanged.Reputation, &tierChanged.Tier, nil, nil)
 	targetTier := dc.acct.targetTier
 	dc.acct.authMtx.Unlock()
 	c.log.Infof("Received tierchanged notification from %v for account %v. New tier = %v (target = %d)",
@@ -8793,7 +8695,7 @@ func handleBondExpiredMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 	c.log.Infof("Received bondexpired notification from %v for account %v...", dc.acct.host, acctID)
 
-	return c.bondExpired(dc, bondExpired.AssetID, bondExpired.BondCoinID, bondExpired.Tier)
+	return c.bondExpired(dc, bondExpired.AssetID, bondExpired.BondCoinID, bondExpired)
 }
 
 // routeHandler is a handler for a message from the DEX.

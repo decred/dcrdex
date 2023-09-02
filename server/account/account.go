@@ -167,19 +167,18 @@ func (r Rule) Punishable() bool {
 	return r > NoRule && r < MaxRule
 }
 
-// TierReport is a part of a number of server-originating messages. It was
+// Reputation is a part of a number of server-originating messages. It was
 // introduced with the v2 ConnectResult.
-type TierReport struct {
-	Bonded  int64 `json:"bondTier"`
-	Revoked int64 `json:"revokedTiers"`
-	Bonus   int64 `json:"bonusTiers"`
-	Legacy  bool  `json:"legacyTier"`
-	Score   int32 `json:"score"`
+type Reputation struct {
+	BondedTier int64  `json:"bondTier"`
+	Penalties  uint16 `json:"penalties"`
+	Legacy     bool   `json:"legacyTier"`
+	Score      int32  `json:"score"`
 }
 
 // Effective calculates the effective tier for trading limit calculations.
-func (r *TierReport) Effective() int64 {
-	tier := r.Bonded - r.Revoked + r.Bonus
+func (r *Reputation) EffectiveTier() int64 {
+	tier := r.BondedTier - int64(r.Penalties)
 	if r.Legacy {
 		tier++
 	}

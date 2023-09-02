@@ -203,12 +203,12 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 	// check has an unexpected error or times out.
 	expireTime := time.Unix(lockTime, 0).Add(-auth.bondExpiry)
 	postBondRes := &msgjson.PostBondResult{
-		AccountID:    acctID[:],
-		AssetID:      assetID,
-		Amount:       uint64(amt),
-		Expiry:       uint64(expireTime.Unix()),
-		BondID:       bondCoinID,
-		TierReportV2: auth.ComputeUserTier(acctID),
+		AccountID:  acctID[:],
+		AssetID:    assetID,
+		Amount:     uint64(amt),
+		Expiry:     uint64(expireTime.Unix()),
+		BondID:     bondCoinID,
+		Reputation: auth.ComputeUserReputation(acctID),
 	}
 	auth.Sign(postBondRes)
 
@@ -327,15 +327,15 @@ func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acc
 	}
 
 	// Integrate active bonds and score to report tier.
-	tierReport := auth.addBond(acctID, bond)
-	if tierReport == nil { // user not authenticated, use DB
-		tierReport = auth.ComputeUserTier(acctID)
+	rep := auth.addBond(acctID, bond)
+	if rep == nil { // user not authenticated, use DB
+		rep = auth.ComputeUserReputation(acctID)
 	}
-	postBondRes.Tier = tierReport.Effective()
-	postBondRes.TierReportV2 = tierReport
+	postBondRes.Tier = rep.EffectiveTier()
+	postBondRes.Reputation = rep
 
 	log.Infof("Bond accepted: acct %v from %v locked %d in %v. Bond total %d, tier %d",
-		acctID, conn.Addr(), bond.Amount, coinIDString(bond.AssetID, coinID), tierReport.Bonded, tierReport.Effective())
+		acctID, conn.Addr(), bond.Amount, coinIDString(bond.AssetID, coinID), rep.BondedTier, rep.EffectiveTier())
 
 	// Respond
 	resp, err := msgjson.NewResponse(reqID, postBondRes, nil)

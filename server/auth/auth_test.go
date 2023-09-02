@@ -654,7 +654,7 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 			},
-			wantScore: -4,
+			wantScore: 4,
 		},
 		{
 			name:          "nuthin",
@@ -833,12 +833,12 @@ func TestConnect(t *testing.T) {
 
 	*/
 
-	// Connect with a violation score above ban score.
+	// Connect with a violation score above revocation threshold.
 	wantScore := setViolations()
 	defer clearViolations()
 
-	if wantScore < int32(rig.mgr.banScore) {
-		t.Fatalf("test score of %v is not at least the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	if wantScore > rig.mgr.penaltyThreshold {
+		t.Fatalf("test score of %v is not at least the revocation threshold of %v, revise the test", wantScore, rig.mgr.penaltyThreshold)
 	}
 
 	// Test loadUserScore while here.
@@ -857,8 +857,8 @@ func TestConnect(t *testing.T) {
 	makerSwapCastIdx := 3
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes[:makerSwapCastIdx], rig.storage.userMatchOutcomes[makerSwapCastIdx+1:]...)
 	wantScore -= noSwapAsTakerScore
-	if wantScore >= int32(rig.mgr.banScore) {
-		t.Fatalf("test score of %v is not less than the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	if wantScore <= rig.mgr.penaltyThreshold {
+		t.Fatalf("test score of %v is not more than the penalty threshold of %v, revise the test", wantScore, rig.mgr.penaltyThreshold)
 	}
 	score, err = rig.mgr.loadUserScore(user.acctID)
 	if err != nil {
@@ -1035,7 +1035,7 @@ func TestAccountErrors(t *testing.T) {
 
 	// closed accounts allowed to connect
 
-	// Make a violation score above ban score reflected by the DB.
+	// Make a violation score above penalty threshold reflected by the DB.
 	score := setViolations()
 	defer clearViolations()
 
@@ -1053,10 +1053,10 @@ func TestAccountErrors(t *testing.T) {
 		t.Errorf("client should have been tier 0")
 	}
 
-	// Raise the ban score threshold to ensure automatic reinstatement.
-	initBanScore := rig.mgr.banScore
-	defer func() { rig.mgr.banScore = initBanScore }()
-	rig.mgr.banScore = uint32(score + 1)
+	// Raise the penalty threshold to ensure automatic reinstatement.
+	initPenaltyThresh := rig.mgr.penaltyThreshold
+	defer func() { rig.mgr.penaltyThreshold = initPenaltyThresh }()
+	rig.mgr.penaltyThreshold = score - 1
 
 	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first, NOTE that link.Disconnect is async
 	user.conn = tNewRPCClient()                     // disconnect necessitates new conn ID

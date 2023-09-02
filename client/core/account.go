@@ -417,5 +417,5 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (
 	}
 
 	updatedHost = true
-	return newDc.exchangeInfo(), nil
+	return c.exchangeInfo(newDc), nil
 }

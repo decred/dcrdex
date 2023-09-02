@@ -212,7 +212,7 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		feeCoin:   []byte("somecoin"),
 		// feeAssetID is 0 (btc)
 		// tier, bonds, etc. set on auth
-		effectiveTier: 1, // not suspended by default
+		rep: &account.Reputation{BondedTier: 1}, // not suspended by default
 	}
 }
 
@@ -1087,11 +1087,7 @@ func (*TXCWallet) BondsFeeBuffer(feeRate uint64) uint64 {
 	return 4 * 1000 * feeRate * 2
 }
 
-func (*TXCWallet) RegisterUnspent(live uint64) {}
-
-func (*TXCWallet) ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool {
-	return true
-}
+func (*TXCWallet) SetBondReserves(reserves uint64) {}
 
 func (*TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
 	return nil, nil
@@ -1482,7 +1478,7 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match
 				// my read, you are suspended at tier = 0.
 				tier := int64(0)
 				result.Tier = &tier
-				result.Score = defaultBanScore
+				result.Score = defaultPenaltyThreshold
 			}
 		}
 		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
@@ -5801,10 +5797,9 @@ var (
 )
 
 // auth sets the account as authenticated at the provided tier.
-func auth(a *dexAccount, effectiveTier int64, legacyFeePaid bool) {
+func auth(a *dexAccount, legacyFeePaid bool) {
 	a.authMtx.Lock()
 	a.isAuthed = true
-	a.effectiveTier = effectiveTier
 	a.legacyFeePaid = legacyFeePaid
 	a.authMtx.Unlock()
 }
@@ -5814,7 +5809,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	auth(rig.acct, 1, false) // Short path through initializeDEXConnections
+	auth(rig.acct, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -5980,7 +5975,7 @@ func TestReReserveFunding(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	auth(rig.acct, 1, false) // Short path through initializeDEXConnections
+	auth(rig.acct, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 

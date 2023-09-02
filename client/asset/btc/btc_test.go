@@ -858,13 +858,13 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 	}
 
 	type test struct {
-		name                 string
-		multiOrder           *asset.MultiOrder
-		allOrNothing         bool
-		maxLock              uint64
-		utxos                []*ListUnspentResult
-		bondReservesEnforced int64
-		balance              uint64
+		name         string
+		multiOrder   *asset.MultiOrder
+		allOrNothing bool
+		maxLock      uint64
+		utxos        []*ListUnspentResult
+		bondReserves uint64
+		balance      uint64
 
 		// if expectedCoins is nil, all the coins are from
 		// the split output. If any of the coins are nil,
@@ -1081,8 +1081,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					multiSplitKey: "false",
 				},
 			},
-			maxLock:              46e5,
-			bondReservesEnforced: 12e5,
+			maxLock:      46e5,
+			bondReserves: 12e5,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1486,7 +1486,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					multiSplitKey: "true",
 				},
 			},
-			bondReservesEnforced: 2e6,
+			bondReserves: 2e6,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1540,7 +1540,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					multiSplitKey: "true",
 				},
 			},
-			bondReservesEnforced: 2e6,
+			bondReserves: 2e6,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1783,10 +1783,10 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					Vout:          0,
 				},
 			},
-			maxLock:              0,
-			bondReservesEnforced: 1e6,
-			balance:              144e5,
-			expectSendRawTx:      true,
+			maxLock:         0,
+			bondReserves:    1e6,
+			balance:         144e5,
+			expectSendRawTx: true,
 			expectedInputs: []*wire.TxIn{
 				{
 					PreviousOutPoint: wire.OutPoint{
@@ -1823,7 +1823,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 		}
 		wallet.fundingCoins = make(map[outPoint]*utxo)
-		wallet.bondReservesEnforced = test.bondReservesEnforced
+		wallet.bondReserves.Store(test.bondReserves)
 
 		allCoins, _, splitFee, err := wallet.FundMultiOrder(test.multiOrder, test.maxLock)
 		if test.expectErr {
@@ -3781,10 +3781,10 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 	}
 
 	type test struct {
-		name                 string
-		val                  uint64
-		unspents             []*ListUnspentResult
-		bondReservesEnforced int64
+		name         string
+		val          uint64
+		unspents     []*ListUnspentResult
+		bondReserves uint64
 
 		expectedInputs []*outPoint
 		expectSentVal  uint64
@@ -3829,9 +3829,9 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 				{txHash: txHash,
 					vout: 0},
 			},
-			expectSentVal:        expectedSentVal(toSatoshi(5), expectedFees(1)),
-			expectChange:         expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1)),
-			bondReservesEnforced: int64(expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1))),
+			expectSentVal: expectedSentVal(toSatoshi(5), expectedFees(1)),
+			expectChange:  expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1)),
+			bondReserves:  expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1)),
 		},
 		{
 			name: "not enough change for bond reserves",
@@ -3850,8 +3850,8 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 				{txHash: txHash,
 					vout: 0},
 			},
-			bondReservesEnforced: int64(expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1))) + 1,
-			expectErr:            true,
+			bondReserves: expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1)) + 1,
+			expectErr:    true,
 		},
 		{
 			name: "1 satoshi less than needed",
@@ -3892,7 +3892,7 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 
 	for _, test := range tests {
 		node.listUnspent = test.unspents
-		wallet.bondReservesEnforced = test.bondReservesEnforced
+		wallet.bondReserves.Store(test.bondReserves)
 
 		_, err := sender(addr.String(), test.val)
 		if test.expectErr {

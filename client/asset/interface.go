@@ -584,28 +584,8 @@ type Bonder interface {
 	// the first bond to ensure it succeeds, assuming balance was checked.
 	BondsFeeBuffer(feeRate uint64) uint64
 
-	// RegisterUnspent informs the wallet of a certain amount already locked in
-	// unspent bonds that will eventually be refunded with RefundBond. This
-	// should be used prior to ReserveBondFunds. This alone does not enable
-	// reserves enforcement, and it should be called on bring-up when existing
-	// bonds that may refund to this wallet are known. Once ReserveBondFunds is
-	// called, these live bond amounts will become enforced reserves when they
-	// are refunded via RefundBond.
-	RegisterUnspent(live uint64)
-	// ReserveBondFunds (un)reserves funds for creation of future bonds.
-	// MakeBondTx will create transactions that decrease these reserves, while
-	// RefundBond will replenish the reserves. If the wallet's available balance
-	// should be respected when adding reserves, the boolean argument may be set
-	// to indicate this, in which case the return value indicates if it was able
-	// to reserve the funds. In this manner, funds may be pre-reserved so that
-	// when the wallet receives funds (from either external deposits or
-	// refunding of live bonds), they will go directly into locked balance. When
-	// the reserves are decremented to zero (by the amount that they were
-	// incremented), all enforcement including any fee buffering is disabled.
-	// The fee buffer amount is used only when enabling the reserves (when
-	// starting from zero). It may also be zero, in which case the wallet will
-	// attempt to obtain it's own estimate if it is needed.
-	ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool
+	// SetReserves sets the bond reserve amount for the wallet.
+	SetBondReserves(reserves uint64)
 
 	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
 	// provided amount, lock time, and dex account ID. An explicit private key

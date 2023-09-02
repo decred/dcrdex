@@ -658,7 +658,9 @@ type Exchange struct {
 	ConnectionStatus comms.ConnectionStatus       `json:"connectionStatus"`
 	CandleDurs       []string                     `json:"candleDurs"`
 	ViewOnly         bool                         `json:"viewOnly"`
-	Tier             int64                        `json:"tier"`
+	Reputation       account.Reputation           `json:"reputation"`
+	BondedTier       int64                        `json:"bondedTier"`
+	WeakBonds        uint32                       `json:"weakTiers"`
 	BondOptions      *BondOptions                 `json:"bondOptions"`
 	PendingBonds     map[string]*PendingBondState `json:"pendingBonds"`
 	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
@@ -767,14 +769,12 @@ type dexAccount struct {
 	pendingBonds      []*db.Bond // not yet confirmed
 	bonds             []*db.Bond // confirmed, and not yet expired
 	expiredBonds      []*db.Bond // expired and needing refund
-	tier              *account.TierReport
-	effectiveTier     int64 // before *account.TierReport, effectiveTier can be out of sync with and takes precedence over tier.Effective()
-	tierChange        int64 // unactuated with bond reserves
+	rep               *account.Reputation
 	targetTier        uint64
 	maxBondedAmt      uint64
-	totalReserved     int64  // total of bondAsset reserved for bonds (future and liveunspent), set iff maintaining bonds
 	bondAsset         uint32 // asset used for bond maintenance/rotation
 	legacyFeePaid     bool   // server reports a legacy fee paid
+	getOutOfJail      bool
 
 	// Legacy reg fee (V0PURGE)
 	feeAssetID uint32
@@ -946,8 +946,7 @@ func (a *dexAccount) authed() bool {
 func (a *dexAccount) unAuth() {
 	a.authMtx.Lock()
 	a.isAuthed = false
-	a.tier = nil
-	a.effectiveTier = 0
+	a.rep = nil
 	a.legacyFeePaid = false
 	a.authMtx.Unlock()
 }
@@ -956,7 +955,7 @@ func (a *dexAccount) unAuth() {
 func (a *dexAccount) suspended() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
-	return a.effectiveTier < 1
+	return a.rep.EffectiveTier() < 1
 }
 
 // feePending checks whether the fee transaction has been broadcast, but the

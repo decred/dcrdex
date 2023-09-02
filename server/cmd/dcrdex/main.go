@@ -138,7 +138,7 @@ func mainCore(ctx context.Context) error {
 		TxWaitExpiration:  cfg.TxWaitExpiration,
 		CancelThreshold:   cfg.CancelThreshold,
 		FreeCancels:       cfg.FreeCancels,
-		BanScore:          cfg.BanScore,
+		PenaltyThreshold:  cfg.PenaltyThreshold,
 		InitTakerLotLimit: cfg.InitTakerLotLimit,
 		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
 		DEXPrivKey:        privKey,

@@ -242,7 +242,7 @@ type AuthManager struct {
 	feeAssets  map[uint32]*msgjson.FeeAsset // DEPRECATED (V0PURGE)
 
 	freeCancels       bool
-	banScore          uint32
+	penaltyThreshold  int32
 	cancelThresh      float64
 	initTakerLotLimit int64
 	absTakerLotLimit  int64
@@ -272,20 +272,20 @@ type AuthManager struct {
 // violation badness
 const (
 	// preimage miss
-	preimageMissScore = 2 // book spoof, no match, no stuck funds
+	preimageMissScore = -2 // book spoof, no match, no stuck funds
 
 	// failure to act violations
-	noSwapAsMakerScore   = 4  // book spoof, match with taker order affected, no stuck funds
-	noSwapAsTakerScore   = 11 // maker has contract stuck for 20 hrs
-	noRedeemAsMakerScore = 7  // taker has contract stuck for 8 hrs
-	noRedeemAsTakerScore = 1  // just dumb, counterparty not inconvenienced
+	noSwapAsMakerScore   = -4  // book spoof, match with taker order affected, no stuck funds
+	noSwapAsTakerScore   = -11 // maker has contract stuck for 20 hrs
+	noRedeemAsMakerScore = -7  // taker has contract stuck for 8 hrs
+	noRedeemAsTakerScore = -1  // just dumb, counterparty not inconvenienced
 
 	// cancel rate exceeds threshold
-	excessiveCancels = 5
+	excessiveCancels = -5
 
-	successScore = -1 // offsets the violations
+	successScore = 1 // offsets the violations
 
-	DefaultBanScore = 20
+	DefaultPenaltyThreshold = 20
 )
 
 // Violation represents a specific infraction. For example, not broadcasting a
@@ -309,7 +309,7 @@ var violations = map[Violation]struct {
 	desc  string
 }{
 	ViolationSwapSuccess:     {successScore, "swap success"},
-	ViolationForgiven:        {-1, "forgiveness"},
+	ViolationForgiven:        {1, "forgiveness"},
 	ViolationPreimageMiss:    {preimageMissScore, "preimage miss"},
 	ViolationNoSwapAsMaker:   {noSwapAsMakerScore, "no swap as maker"},
 	ViolationNoSwapAsTaker:   {noSwapAsTakerScore, "no swap as taker"},
@@ -407,8 +407,10 @@ type Config struct {
 
 	CancelThreshold float64
 	FreeCancels     bool
-	// BanScore defines the penalty score when an account gets closed.
-	BanScore uint32
+
+	// PenaltyThreshold defines the score deficit at which a user's bond is
+	// revoked.
+	PenaltyThreshold uint32
 
 	// InitTakerLotLimit is the number of lots per-market a new user is
 	// permitted to have in active orders and swaps.
@@ -425,10 +427,14 @@ const (
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
-	// A ban score of 0 is not sensible, so have a default.
-	banScore := cfg.BanScore
-	if banScore == 0 {
-		banScore = DefaultBanScore
+	// A penalty threshold of 0 is not sensible, so have a default.
+	penaltyThreshold := int32(cfg.PenaltyThreshold)
+	if penaltyThreshold == 0 {
+		penaltyThreshold = DefaultPenaltyThreshold
+	}
+	// Invert sign for internal use.
+	if penaltyThreshold > 0 {
+		penaltyThreshold *= -1
 	}
 	initTakerLotLimit := int64(cfg.InitTakerLotLimit)
 	if initTakerLotLimit == 0 {
@@ -461,7 +467,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		feeAddress:        cfg.FeeAddress,
 		feeAssets:         feeAssets,
 		freeCancels:       cfg.FreeCancels,
-		banScore:          banScore,
+		penaltyThreshold:  penaltyThreshold,
 		cancelThresh:      cfg.CancelThreshold,
 		initTakerLotLimit: initTakerLotLimit,
 		absTakerLotLimit:  absTakerLotLimit,
@@ -522,17 +528,17 @@ func (auth *AuthManager) GraceLimit() int {
 func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, epochGap int32, t time.Time) {
 	score := auth.recordOrderDone(user, oid, &target, epochGap, t.UnixMilli())
 
-	tierReport, changed := auth.computeUserTier(user, score)
-	effectiveTier := tierReport.Effective()
+	rep, changed := auth.computeUserReputation(user, score)
+	effectiveTier := rep.EffectiveTier()
 	log.Debugf("RecordCancel: user %v strikes %d, bond tier %v => trading tier %v",
-		user, score, tierReport.Bonded, effectiveTier)
+		user, score, rep.BondedTier, effectiveTier)
 	// If their tier sinks below 1, unbook their orders and send a note.
 	if changed && effectiveTier < 1 {
 		details := fmt.Sprintf("excessive cancellation rate, new tier = %d", effectiveTier)
 		auth.Penalize(user, account.CancellationRate, details)
 	}
 	if changed {
-		go auth.sendTierChanged(user, tierReport, "excessive, cancellation rate")
+		go auth.sendTierChanged(user, rep, "excessive, cancellation rate")
 	}
 }
 
@@ -541,11 +547,11 @@ func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.
 // longer on the books if it ever was.
 func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time) {
 	score := auth.recordOrderDone(user, oid, nil, db.EpochGapNA, t.UnixMilli())
-	tierReport, changed := auth.computeUserTier(user, score) // may raise tier
+	rep, changed := auth.computeUserReputation(user, score) // may raise tier
 	if changed {
 		log.Tracef("RecordCompletedOrder: tier changed for user %v strikes %d, bond tier %v => trading tier %v",
-			user, score, tierReport.Bonded, tierReport.Effective())
-		go auth.sendTierChanged(user, tierReport, "successful order completion")
+			user, score, rep.BondedTier, rep.EffectiveTier())
+		go auth.sendTierChanged(user, rep, "successful order completion")
 	}
 }
 
@@ -898,24 +904,16 @@ func (auth *AuthManager) UserScore(user account.AccountID) (score int32) {
 	return
 }
 
-// tierReport computes the breakdown of a user's tier.
-func (auth *AuthManager) tierReport(bondTier int64, score int32, legacyFeePaid bool) *account.TierReport {
-	tierAdj := int64(score) / int64(auth.banScore)
-	var bonusTiers, revokedTiers int64
-	if tierAdj < 0 {
-		bonusTiers = -tierAdj
-	} else if tierAdj > 0 {
-		revokedTiers = tierAdj
+// userReputation computes the breakdown of a user's tier and score.
+func (auth *AuthManager) userReputation(bondTier int64, score int32, legacyFeePaid bool) *account.Reputation {
+	var penalties int32
+	if score < 0 {
+		penalties = int32(score) / int32(auth.penaltyThreshold)
 	}
-
-	if bonusTiers > 0 && bondTier == 0 {
-		bonusTiers = 0 // no bonus tiers unless bonded
-	}
-	return &account.TierReport{
-		Bonded:  bondTier,
-		Revoked: revokedTiers,
-		Bonus:   bonusTiers,
-		Legacy:  legacyFeePaid,
+	return &account.Reputation{
+		BondedTier: bondTier,
+		Penalties:  uint16(penalties),
+		Legacy:     legacyFeePaid,
 		// TODO: Reverse the signage of all violations so we get postiive scores
 		// from successes and negative score from violations.
 		Score: -score,
@@ -924,15 +922,15 @@ func (auth *AuthManager) tierReport(bondTier int64, score int32, legacyFeePaid b
 
 // tier computes a user's tier from their conduct score and bond tier.
 func (auth *AuthManager) tier(bondTier int64, score int32, legacyFeePaid bool) int64 {
-	return auth.tierReport(bondTier, score, legacyFeePaid).Effective()
+	return auth.userReputation(bondTier, score, legacyFeePaid).EffectiveTier()
 }
 
-// computeUserTier computes the user's tier given the provided score weighed
-// against known active bonds. Note that bondTier is not a specific asset, and
-// is just for logging, and it may be removed or changed to a map by asset ID.
-// For online users, this will also indicate if the tier changed; this will
-// always return false for offline users.
-func (auth *AuthManager) computeUserTier(user account.AccountID, score int32) (r *account.TierReport, changed bool) {
+// computeUserReputation computes the user's tier given the provided score
+// weighed against known active bonds. Note that bondTier is not a specific
+// asset, and is just for logging, and it may be removed or changed to a map by
+// asset ID. For online users, this will also indicate if the tier changed; this
+// will always return false for offline users.
+func (auth *AuthManager) computeUserReputation(user account.AccountID, score int32) (r *account.Reputation, changed bool) {
 	client := auth.user(user)
 	if client == nil {
 		// Offline. Load active bonds and legacyFeePaid flag from DB.
@@ -942,15 +940,15 @@ func (auth *AuthManager) computeUserTier(user account.AccountID, score int32) (r
 		for _, bond := range bonds {
 			bondTier += int64(bond.Strength)
 		}
-		return auth.tierReport(bondTier, score, legacyFeePaid), false
+		return auth.userReputation(bondTier, score, legacyFeePaid), false
 	}
 
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
 	wasTier := client.tier
 	bondTier := client.bondTier()
-	r = auth.tierReport(bondTier, score, client.legacyFeePaid)
-	client.tier = r.Effective()
+	r = auth.userReputation(bondTier, score, client.legacyFeePaid)
+	client.tier = r.EffectiveTier()
 	changed = wasTier != client.tier
 
 	return
@@ -960,13 +958,13 @@ func (auth *AuthManager) computeUserTier(user account.AccountID, score int32) (r
 // score. The bondTier is also returned. The DB is always consulted for
 // computing the conduct score. Summing bond amounts may access the DB if the
 // user is not presently connected. The tier for an unknown user is -1.
-func (auth *AuthManager) ComputeUserTier(user account.AccountID) *account.TierReport {
+func (auth *AuthManager) ComputeUserReputation(user account.AccountID) *account.Reputation {
 	score, err := auth.loadUserScore(user)
 	if err != nil {
 		log.Errorf("failed to load user score: %v", err)
 		return nil
 	}
-	r, _ := auth.computeUserTier(user, score)
+	r, _ := auth.computeUserReputation(user, score)
 	return r
 }
 
@@ -1006,14 +1004,14 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 // has no clue about lot size, and neither does DB!
 func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, redeemTime time.Time) {
 	score := auth.registerMatchOutcome(user, SwapSuccess, mmid, value, redeemTime)
-	tierReport, changed := auth.computeUserTier(user, score) // may raise tier
-	effectiveTier := tierReport.Effective()
+	rep, changed := auth.computeUserReputation(user, score) // may raise tier
+	effectiveTier := rep.EffectiveTier()
 	log.Debugf("Match success for user %v: strikes %d, bond tier %v => tier %v",
-		user, score, tierReport.Bonded, effectiveTier)
+		user, score, rep.BondedTier, effectiveTier)
 	if changed {
 		log.Infof("SwapSuccess: tier change for user %v, strikes %d, bond tier %v => trading tier %v",
-			user, score, tierReport.Bonded, effectiveTier)
-		go auth.sendTierChanged(user, tierReport, "successful swap completion")
+			user, score, rep.BondedTier, effectiveTier)
+		go auth.sendTierChanged(user, rep, "successful swap completion")
 	}
 }
 
@@ -1034,10 +1032,10 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 	score := auth.registerMatchOutcome(user, misstep, mmid, matchValue, refTime)
 
 	// Recompute tier.
-	tierReport, changed := auth.computeUserTier(user, score)
-	effectiveTier := tierReport.Effective()
+	rep, changed := auth.computeUserReputation(user, score)
+	effectiveTier := rep.EffectiveTier()
 	log.Infof("Match failure for user %v: %q (badness %v), strikes %d, bond tier %v => trading tier %v",
-		user, violation, violation.Score(), score, tierReport.Bonded, effectiveTier)
+		user, violation, violation.Score(), score, rep.BondedTier, effectiveTier)
 	// If their tier sinks below 1, unbook their orders and send a note.
 	if changed && effectiveTier < 1 {
 		details := fmt.Sprintf("swap %v failure (%v) for order %v, new tier = %d",
@@ -1046,7 +1044,7 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 	}
 	if changed {
 		reason := fmt.Sprintf("swap failure for match %v order %v: %v", mmid.MatchID, oid, misstep)
-		go auth.sendTierChanged(user, tierReport, reason)
+		go auth.sendTierChanged(user, rep, reason)
 	}
 }
 
@@ -1081,20 +1079,20 @@ func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bo
 // PreimageSuccess registers an accepted preimage for the user.
 func (auth *AuthManager) PreimageSuccess(user account.AccountID, epochEnd time.Time, oid order.OrderID) {
 	score := auth.registerPreimageOutcome(user, false, oid, epochEnd)
-	auth.computeUserTier(user, score) // may raise tier, but no action needed
+	auth.computeUserReputation(user, score) // may raise tier, but no action needed
 }
 
 // MissedPreimage registers a missed preimage violation by the user.
 func (auth *AuthManager) MissedPreimage(user account.AccountID, epochEnd time.Time, oid order.OrderID) {
 	score := auth.registerPreimageOutcome(user, true, oid, epochEnd)
-	if score < int32(auth.banScore) {
+	if score < auth.penaltyThreshold {
 		return
 	}
 
 	// Recompute tier.
-	tierReport, changed := auth.computeUserTier(user, score)
-	effectiveTier := tierReport.Effective()
-	log.Debugf("MissedPreimage: user %v strikes %d, bond tier %v => trading tier %v", user, score, tierReport.Bonded, effectiveTier)
+	rep, changed := auth.computeUserReputation(user, score)
+	effectiveTier := rep.EffectiveTier()
+	log.Debugf("MissedPreimage: user %v strikes %d, bond tier %v => trading tier %v", user, score, rep.BondedTier, effectiveTier)
 	// If their tier sinks below 1, unbook their orders and send a note.
 	if changed && effectiveTier < 1 {
 		details := fmt.Sprintf("preimage for order %v not provided upon request: new tier = %d", oid, effectiveTier)
@@ -1102,7 +1100,7 @@ func (auth *AuthManager) MissedPreimage(user account.AccountID, epochEnd time.Ti
 	}
 	if changed {
 		reason := fmt.Sprintf("preimage not provided upon request for order %v", oid)
-		go auth.sendTierChanged(user, tierReport, reason)
+		go auth.sendTierChanged(user, rep, reason)
 	}
 }
 
@@ -1143,9 +1141,9 @@ func (auth *AuthManager) AcctStatus(user account.AccountID) (connected bool, tie
 	client := auth.user(user)
 	if client == nil {
 		// Load user info from DB.
-		tierReport := auth.ComputeUserTier(user)
-		if tierReport != nil {
-			tier = tierReport.Effective()
+		rep := auth.ComputeUserReputation(user)
+		if rep != nil {
+			tier = rep.EffectiveTier()
 		}
 		return
 	}
@@ -1183,12 +1181,12 @@ func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.Matc
 	score, _, _ := auth.integrateOutcomes(latestMatches, latestPreimageResults, latestFinished)
 
 	// Recompute tier.
-	tierReport, changed := auth.computeUserTier(user, score)
+	tierReport, changed := auth.computeUserReputation(user, score)
 	if changed {
 		go auth.sendTierChanged(user, tierReport, "swap failure forgiven")
 	}
 
-	unbanned = tierReport.Effective() > 0
+	unbanned = tierReport.EffectiveTier() > 0
 
 	return
 }
@@ -1210,14 +1208,14 @@ func (auth *AuthManager) conn(conn comms.Link) *clientInfo {
 }
 
 // sendTierChanged sends a tierchanged notification to an account.
-func (auth *AuthManager) sendTierChanged(acctID account.AccountID, tierReport *account.TierReport, reason string) {
-	effectiveTier := tierReport.Effective()
+func (auth *AuthManager) sendTierChanged(acctID account.AccountID, rep *account.Reputation, reason string) {
+	effectiveTier := rep.EffectiveTier()
 	log.Debugf("Sending tierchanged notification to %v, new tier = %d, reason = %v",
 		acctID, effectiveTier, reason)
 	tierChangedNtfn := &msgjson.TierChangedNotification{
-		Tier:         effectiveTier,
-		TierReportV2: tierReport,
-		Reason:       reason,
+		Tier:       effectiveTier,
+		Reputation: rep,
+		Reason:     reason,
 	}
 	auth.Sign(tierChangedNtfn)
 	resp, err := msgjson.NewNotification(msgjson.TierChangeRoute, tierChangedNtfn)
@@ -1232,14 +1230,16 @@ func (auth *AuthManager) sendTierChanged(acctID account.AccountID, tierReport *a
 }
 
 // sendBondExpired sends a bondexpired notification to an account.
-func (auth *AuthManager) sendBondExpired(acctID account.AccountID, bond *db.Bond, newTier int64) {
+func (auth *AuthManager) sendBondExpired(acctID account.AccountID, bond *db.Bond, rep *account.Reputation) {
+	effectiveTier := rep.EffectiveTier()
 	log.Debugf("Sending bondexpired notification to %v for bond %v (%s), new tier = %d",
-		acctID, coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID), newTier)
+		acctID, coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID), effectiveTier)
 	bondExpNtfn := &msgjson.BondExpiredNotification{
 		AssetID:    bond.AssetID,
 		BondCoinID: bond.CoinID,
 		AccountID:  acctID[:],
-		Tier:       newTier,
+		Tier:       effectiveTier,
+		Reputation: rep,
 	}
 	auth.Sign(bondExpNtfn)
 	resp, err := msgjson.NewNotification(msgjson.BondExpiredRoute, bondExpNtfn)
@@ -1258,12 +1258,12 @@ func (auth *AuthManager) sendBondExpired(acctID account.AccountID, bond *db.Bond
 func (auth *AuthManager) checkBonds() {
 	lockTimeThresh := time.Now().Add(auth.bondExpiry).Unix()
 
-	checkClientBonds := func(client *clientInfo) ([]*db.Bond, int64, int64) {
+	checkClientBonds := func(client *clientInfo) ([]*db.Bond, *account.Reputation) {
 		client.mtx.Lock()
 		defer client.mtx.Unlock()
 		pruned, bondTier := client.pruneBonds(lockTimeThresh)
 		if len(pruned) == 0 {
-			return nil, bondTier, client.tier // no tier change
+			return nil, nil // no tier change
 		}
 
 		auth.violationMtx.Lock()
@@ -1272,23 +1272,23 @@ func (auth *AuthManager) checkBonds() {
 
 		client.tier = auth.tier(bondTier, score, client.legacyFeePaid)
 
-		return pruned, bondTier, client.tier
+		return pruned, auth.userReputation(bondTier, score, client.legacyFeePaid)
 	}
 
 	auth.connMtx.RLock()
 	defer auth.connMtx.RUnlock()
 
 	type checkRes struct {
-		tier  int64
+		rep   *account.Reputation
 		bonds []*db.Bond
 	}
 	expiredBonds := make(map[account.AccountID]checkRes)
 	for acct, client := range auth.users {
-		pruned, bondTier, newTier := checkClientBonds(client)
+		pruned, rep := checkClientBonds(client)
 		if len(pruned) > 0 {
 			log.Infof("Pruned %d expired bonds for user %v, new bond tier = %d, new trading tier = %d",
-				len(pruned), acct, bondTier, client.tier)
-			expiredBonds[acct] = checkRes{newTier, pruned}
+				len(pruned), acct, rep.BondedTier, client.tier)
+			expiredBonds[acct] = checkRes{rep, pruned}
 		}
 	}
 
@@ -1305,7 +1305,7 @@ func (auth *AuthManager) checkBonds() {
 					log.Errorf("Failed to delete expired bond %v (%s) for user %v: %v",
 						coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID), acct, err)
 				}
-				auth.sendBondExpired(acct, bond, prunes.tier)
+				auth.sendBondExpired(acct, bond, prunes.rep)
 			}
 		}
 	}()
@@ -1314,7 +1314,7 @@ func (auth *AuthManager) checkBonds() {
 // addBond registers a new active bond for an authenticated user. This only
 // updates their clientInfo.{bonds,tier} fields. It does not touch the DB. If
 // the user is not authenticated, it returns -1, -1.
-func (auth *AuthManager) addBond(user account.AccountID, bond *db.Bond) *account.TierReport {
+func (auth *AuthManager) addBond(user account.AccountID, bond *db.Bond) *account.Reputation {
 	client := auth.user(user)
 	if client == nil {
 		return nil // offline
@@ -1328,10 +1328,10 @@ func (auth *AuthManager) addBond(user account.AccountID, bond *db.Bond) *account
 	defer client.mtx.Unlock()
 
 	bondTier := client.addBond(bond)
-	tier := auth.tierReport(bondTier, score, client.legacyFeePaid)
-	client.tier = tier.Effective()
+	rep := auth.userReputation(bondTier, score, client.legacyFeePaid)
+	client.tier = rep.EffectiveTier()
 
-	return tier
+	return rep
 }
 
 // addClient adds the client to the users and conns maps, and stops any unbook
@@ -1543,7 +1543,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		oldClient.mtx.Unlock()
 	}
 
-	// Compute the user's ban score, loading the preimage/order/match outcomes.
+	// Compute the user's score, loading the preimage/order/match outcomes.
 	latestMatches, latestPreimageResults, latestFinished, err := auth.loadUserOutcomes(user)
 	if err != nil {
 		log.Errorf("Failed to compute user %v score: %v", user, err)
@@ -1554,12 +1554,12 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 	score, successCount, piMissCount := auth.integrateOutcomes(latestMatches, latestPreimageResults, latestFinished)
 
-	successScore := successCount * successScore // negative
+	successScore := successCount * successScore
 	piMissScore := piMissCount * preimageMissScore
 	// score = violationScore + piMissScore + successScore
 	violationScore := score - piMissScore - successScore // work backwards as per above comment
-	log.Debugf("User %v score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
-		user, score, violationScore, piMissScore, piMissCount, -successScore, successCount)
+	log.Debugf("User %v score = %d:%d (%d successes) - %d (violations) - %d (%d preimage misses) ",
+		user, score, successScore, successCount, -violationScore, -piMissScore, piMissCount)
 
 	// Make outcome entries for the user.
 	auth.violationMtx.Lock()
@@ -1676,8 +1676,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Ensure tier and filtered bonds agree.
-	tierReport := auth.tierReport(bondTier, score, legacyPaid)
-	tier := tierReport.Effective()
+	rep := auth.userReputation(bondTier, score, legacyPaid)
+	tier := rep.EffectiveTier()
 	client.tier = tier
 	client.bonds = activeBonds
 
@@ -1693,7 +1693,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		ActiveBonds:         msgBonds,
 		Suspended:           &suspended,  // V0PURGE
 		LegacyFeePaid:       &legacyPaid, // courtesy for account discovery
-		TierReportV2:        tierReport,
+		Reputation:          rep,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {
