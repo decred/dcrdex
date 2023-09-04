@@ -93,6 +93,7 @@ const (
 	RPCPurchaseTicketsError              // 75
 	RPCStakeStatusError                  // 76
 	RPCSetVotingPreferencesError         // 77
+	RPCTxHistoryError                    // 78
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

@@ -33,6 +33,7 @@ const (
 	WalletTraitTokenApprover                          // The wallet is a TokenApprover
 	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
 	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
+	WalletTraitHistorian                              // This wallet can return its transaction history
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -131,6 +132,12 @@ func (wt WalletTrait) IsTicketBuyer() bool {
 	return wt&WalletTraitTicketBuyer != 0
 }
 
+// IsHistorian tests if the WalletTrait has the WalletTraitHistorian bit set,
+// which indicates the wallet implements the WalletHistorian interface.
+func (wt WalletTrait) IsHistorian() bool {
+	return wt&WalletTraitHistorian != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -180,6 +187,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(TicketBuyer); is {
 		t |= WalletTraitTicketBuyer
+	}
+	if _, is := w.(TicketBuyer); is {
+		t |= WalletTraitHistorian
 	}
 	return t
 }
@@ -1015,6 +1025,47 @@ type TicketBuyer interface {
 	// starting at scanStart and going to progressively lower blocks. scanStart
 	// can be set to -1 to indicate the current chain tip.
 	TicketPage(scanStart int32, n, skipN int) ([]*Ticket, error)
+}
+
+// TransactionType is type type of transaction made by a wallet.
+type TransactionType uint16
+
+const (
+	Send TransactionType = iota
+	Receive
+	Swap
+	Redeem
+	Refund
+	CreateBond
+	RedeemBond
+	ApproveToken
+	Acceleration
+)
+
+// WalletTransaction represents a transaction that was made by a wallet.
+type WalletTransaction struct {
+	Type           TransactionType `json:"type"`
+	ID             dex.Bytes       `json:"id"`
+	AmtIn          uint64          `json:"amtIn"`
+	AmtOut         uint64          `json:"amtOut"`
+	Fees           uint64          `json:"fees"`
+	BlockNumber    uint64          `json:"blockNumber"`
+	UpdatedBalance uint64          `json:"updatedBalance"`
+	// AdditionalData contains asset specific information, i.e. nonce
+	// for ETH.
+	AdditionalData map[string]string `json:"additionalData"`
+}
+
+// WalletHistorian is a wallet that is able to retrieve the history of all
+// transactions it has made.
+type WalletHistorian interface {
+	// TxHistory returns all the transactions a wallet has made. If refID
+	// is nil, then transactions starting from the most recent are returned
+	// (past is ignored). If past is true, the transactions prior to the
+	// refID are returned, otherwise the transactions after the refID are
+	// returned. n is the number of transactions to return. If n is <= 0,
+	// all the transactions will be returned.
+	TxHistory(n int, refID *dex.Bytes, past bool) ([]*WalletTransaction, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

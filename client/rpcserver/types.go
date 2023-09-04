@@ -213,6 +213,13 @@ type setVotingPreferencesForm struct {
 	voteChoices, tSpendPolicy, treasuryPolicy map[string]string
 }
 
+type txHistoryForm struct {
+	assetID uint32
+	num     int
+	refID   *dex.Bytes
+	past    bool
+}
+
 // checkNArgs checks that args and pwArgs are the correct length.
 func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	// For want, one integer indicates an exact match, two are the min and max.
@@ -939,4 +946,51 @@ func parseSetVotingPreferencesArgs(params *RawParams) (*setVotingPreferencesForm
 		}
 	}
 	return form, nil
+}
+
+func parseTxHistoryArgs(params *RawParams) (*txHistoryForm, error) {
+	err := checkNArgs(params, []int{0}, []int{1, 4})
+	if err != nil {
+		return nil, err
+	}
+
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid assetID: %v", err)
+	}
+
+	var num int64
+	if len(params.Args) > 1 {
+		num, err = checkIntArg(params.Args[1], "num", 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid num: %v", err)
+		}
+	}
+
+	var refID *dex.Bytes
+	var past bool
+	if len(params.Args) > 2 {
+		if len(params.Args) != 4 {
+			return nil, fmt.Errorf("refID provided without past")
+		}
+
+		id, err := hex.DecodeString(params.Args[2])
+		if err != nil {
+			return nil, fmt.Errorf("invalid refID: %v", err)
+		}
+		idDB := dex.Bytes(id)
+		refID = &idDB
+
+		past, err = checkBoolArg(params.Args[3], "past")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &txHistoryForm{
+		assetID: uint32(assetID),
+		num:     int(num),
+		refID:   refID,
+		past:    past,
+	}, nil
 }
