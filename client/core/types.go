@@ -191,6 +191,7 @@ type BondOptionsForm struct {
 	Addr         string  `json:"host"`
 	TargetTier   *uint64 `json:"targetTier,omitempty"`
 	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
+	PenaltyComps uint16  `json:"penaltyComps"`
 	BondAsset    *uint32 `json:"bondAsset,omitempty"`
 }
 
@@ -645,6 +646,7 @@ type BondOptions struct {
 	BondAsset    uint32 `json:"bondAsset"`
 	TargetTier   uint64 `json:"targetTier"`
 	MaxBondedAmt uint64 `json:"maxBondedAmt"`
+	PenaltyComps uint16 `json:"PenaltyComps"`
 }
 
 // Exchange represents a single DEX with any number of markets.
@@ -772,6 +774,7 @@ type dexAccount struct {
 	rep               account.Reputation
 	targetTier        uint64
 	maxBondedAmt      uint64
+	penaltyComps      uint16 // max penalties to compensate for
 	bondAsset         uint32 // asset used for bond maintenance/rotation
 	legacyFeePaid     bool   // server reports a legacy fee paid
 

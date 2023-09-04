@@ -526,12 +526,13 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		ConnectionStatus: dc.status(),
 		CandleDurs:       cfg.BinSizes,
 		ViewOnly:         dc.acct.isViewOnly(),
-		Reputation:       acctBondState.Reputation,
+		Reputation:       acctBondState.rep,
 		BondedTier:       acctBondState.liveStrength,
 		BondOptions: &BondOptions{
 			BondAsset:    acctBondState.bondAssetID,
 			TargetTier:   acctBondState.targetTier,
 			MaxBondedAmt: acctBondState.maxBondedAmt,
+			PenaltyComps: acctBondState.penaltyComps,
 		},
 		PendingBonds: dc.pendingBonds(),
 		// TODO: Bonds

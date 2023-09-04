@@ -10658,6 +10658,7 @@ func TestRotateBonds(t *testing.T) {
 	bondExpiry := rig.dc.config().BondExpiry
 	// bondDuration := minBondLifetime(rig.core.net, bondExpiry)
 	locktimeThresh := now + bondExpiry
+	mergeableLocktimeThresh := locktimeThresh + bondExpiry/4 + uint64(pendingBuffer(rig.core.net))
 	// unexpired := locktimeThresh + 1
 	locktimeExpired := locktimeThresh - 1
 	locktimeRefundable := now - 1
@@ -10704,4 +10705,26 @@ func TestRotateBonds(t *testing.T) {
 	acct.targetTier = 2
 	rig.queuePrevalidateBond()
 	run(2, 0, (overlappedReservesPerTier*2+bondFeeBuffer)-2*bondAsset.Amt)
+
+	// Check that a new bond will be scheduled for merge with an existing bond
+	// if the locktime is not too soon.
+	acct.bonds = append(acct.bonds, acct.pendingBonds[0])
+	acct.pendingBonds = nil
+	acct.bonds[0].LockTime = mergeableLocktimeThresh + 1
+	rig.queuePrevalidateBond()
+	run(1, 0, (overlappedReservesPerTier*2+bondFeeBuffer)-2*bondAsset.Amt)
+	mergingBond := acct.pendingBonds[0]
+	if mergingBond.LockTime != acct.bonds[0].LockTime {
+		t.Fatalf("Mergeable bond was not merged")
+	}
+
+	// Same thing, but without the merge, just to check our threshold calc.
+	acct.pendingBonds = nil
+	acct.bonds[0].LockTime = mergeableLocktimeThresh - 1
+	rig.queuePrevalidateBond()
+	run(1, 0, (overlappedReservesPerTier*2+bondFeeBuffer)-2*bondAsset.Amt)
+	unmergingBond := acct.pendingBonds[0]
+	if unmergingBond.LockTime == acct.bonds[0].LockTime {
+		t.Fatalf("Unmergeable bond was scheduled for merged")
+	}
 }
