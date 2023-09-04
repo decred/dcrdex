@@ -293,7 +293,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 		return liveBonds
 	}
 
-	state.Reputation, state.targetTier = *dc.acct.rep, dc.acct.targetTier
+	state.Reputation, state.targetTier = dc.acct.rep, dc.acct.targetTier
 	state.bondAssetID, state.maxBondedAmt = dc.acct.bondAsset, dc.acct.maxBondedAmt
 	state.inBonds, _ = dc.bondTotalInternal(state.bondAssetID)
 	// Screen the unexpired bonds slices.
@@ -614,7 +614,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		refundedAssets, expiredStrength, err := c.refundExpiredBonds(ctx, dc.acct, bondCfg, acctBondState, now)
 		if err != nil {
 			c.log.Errorf("Failed to refund expired bonds for %v: %v", dc.acct.host, err)
-			return
+			continue
 		}
 		for assetID := range refundedAssets {
 			c.updateAssetBalance(assetID)
@@ -963,8 +963,12 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 	}
 
 	maxBonded := maxBondedMult * bondAssetAmt * targetTier // the min if none specified
-	if form.MaxBondedAmt != nil && *form.MaxBondedAmt > maxBonded {
-		maxBonded = *form.MaxBondedAmt
+	if form.MaxBondedAmt != nil {
+		requested := *form.MaxBondedAmt
+		if requested < maxBonded {
+			return fmt.Errorf("requested bond maximum of %d is lower than minimum of %d", requested, maxBonded)
+		}
+		maxBonded = requested
 	}
 
 	var found bool
@@ -989,58 +993,53 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		}
 		avail := bal.Available + bal.BondReserves
 
+		var nominalReserves uint64
+		inBonds, _ := dc.bondTotalInternal(bondAssetID)
+		totalReserves := bondOverlap * bondAssetAmt * targetTier // this dexConnection
+		if totalReserves > inBonds {
+			nominalReserves += totalReserves - inBonds
+		}
+		var n uint64
 		if targetTier > 0 {
-			var nominalReserves uint64
-			inBonds, _ := dc.bondTotalInternal(bondAssetID)
-			minBonded := bondAssetAmt * targetTier
-			totalReserves := bondOverlap * bondAssetAmt * targetTier // this dexConnection
-			if totalReserves > inBonds {
-				nominalReserves += totalReserves - inBonds
+			n = 1
+		}
+		var tiers uint64 = targetTier
+		for _, otherDC := range c.dexConnections() {
+			if otherDC.acct.host == dc.acct.host { // Only adding others
+				continue
 			}
-			var n, tiers uint64 // for logging
-			for _, otherDC := range c.dexConnections() {
-				if otherDC.acct.host == dc.acct.host { // Skip this one. authMtx is locked.
-					continue
-				}
-				assetID, targetTier, _ := dc.bondOpts()
-				if assetID != bondAssetID {
-					continue
-				}
-				bondAsset, _ := dc.bondAsset(assetID)
-				if bondAsset == nil {
-					continue
-				}
-				inBonds, _ := dc.bondTotal(assetID)
-				minBonded += targetTier * bondAsset.Amt
-				totalReserves := bondOverlap * targetTier * bondAsset.Amt
-				n++
-				tiers += targetTier
-				if inBonds >= totalReserves {
-					continue
-				}
-				nominalReserves += totalReserves - inBonds
+			assetID, targetTier, _ := otherDC.bondOpts()
+			if assetID != bondAssetID {
+				continue
 			}
-			var feeReserves uint64
-			if n > 0 {
-				feeReserves = n * bonder.BondsFeeBuffer(c.feeSuggestionAny(bondAssetID))
+			bondAsset, _ := otherDC.bondAsset(assetID)
+			if bondAsset == nil {
+				continue
 			}
+			inBonds, _ := otherDC.bondTotal(assetID)
+			totalReserves := bondOverlap * targetTier * bondAsset.Amt
+			n++
+			tiers += targetTier
+			if inBonds >= totalReserves {
+				continue
+			}
+			nominalReserves += totalReserves - inBonds
+		}
+
+		var feeReserves uint64
+		if tiers > 0 {
+			feeBuffer := bonder.BondsFeeBuffer(c.feeSuggestionAny(bondAssetID))
+			feeReserves = n * feeBuffer
 			req := nominalReserves + feeReserves
-			minBonded += feeReserves
-
-			if minBonded > maxBonded {
-				return fmt.Errorf("Bonding %d tier(s) for %d DEX accounts would require a minimum "+
-					"of %d %s, but the account is only configured for a maximum bonded amount of %d",
-					tiers, n, minBonded, unbip(bondAssetID), maxBonded)
-			}
-
 			c.log.Infof("%d DEX server(s) using %s for bonding a total of %d tiers. %d required includes %d in fee reserves. Current balance = %d",
 				n, unbip(bondAssetID), tiers, req, feeReserves, avail)
-
-			if req > avail {
-				return fmt.Errorf("insufficient funds for these bond options. need %d, have %d", req, avail)
+			// If raising the tier or changing asset, enforce available funds.
+			if (assetChanged || targetTier > targetTier0) && req > avail {
+				return fmt.Errorf("insufficient funds. need %d, have %d", req, avail)
 			}
-			bonder.SetBondReserves(nominalReserves + feeReserves)
 		}
+
+		bonder.SetBondReserves(nominalReserves + feeReserves)
 
 		dc.acct.bondAsset = bondAssetID
 		dbAcct.BondAsset = bondAssetID
@@ -1424,7 +1423,7 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 	}
 
 	if pbr.Reputation != nil {
-		dc.acct.rep = pbr.Reputation
+		dc.acct.rep = *pbr.Reputation
 	} else {
 		// We get no score updates before v2, so we assume no change in
 		// penalties.
@@ -1503,7 +1502,7 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, not
 	}
 
 	if note.Reputation != nil {
-		dc.acct.rep = note.Reputation
+		dc.acct.rep = *note.Reputation
 	} else {
 		dc.acct.rep.BondedTier = note.Tier + int64(dc.acct.rep.Penalties)
 	}

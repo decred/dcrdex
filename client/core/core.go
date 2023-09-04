@@ -6580,17 +6580,17 @@ func bondKey(assetID uint32, coinID []byte) string {
 	return string(append(encode.Uint32Bytes(assetID), coinID...))
 }
 
-// updateReputation sets the account's tier-related fields. updateTierReport
-// must be called with the authMtx locked.
+// updateReputation sets the account's reputation-related fields.
+// updateReputation must be called with the authMtx locked.
 func (dc *dexConnection) updateReputation(
-	newTierReport *account.Reputation,
+	newReputation *account.Reputation,
 	tier *int64,
 	legacyFee *bool,
 	scor *int32,
 ) {
 
-	if newTierReport != nil { // v2 reputation
-		dc.acct.rep = newTierReport
+	if newReputation != nil { // v2 reputation
+		dc.acct.rep = *newReputation
 		return
 	}
 
@@ -6613,16 +6613,16 @@ func (dc *dexConnection) updateReputation(
 	// there.
 	var penalties uint16
 	var score int32
-	oldTierReport := dc.acct.rep
+	oldRep := dc.acct.rep
 	// If we got here through authDEX -> ConnectResult, we won't have an
 	// oldTierReport, but we will have a score. For other paths, we will have
 	// an oldTierReport but we won't have a score.
-	if oldTierReport != nil {
+	if !dc.acct.isAuthed {
 		// We don't get a score in anything but the ConnectResult, so if we got
 		// here via e.g. postBond, the best we can do is to assume these values
 		// haven't changed.
-		score = oldTierReport.Score
-		penalties = oldTierReport.Penalties
+		score = oldRep.Score
+		penalties = oldRep.Penalties
 	} else if scor != nil { // via authDEX -> ConnectResult
 		score = *scor * -1 // In v1 rep, positive score was worse.
 		if score < 0 {
@@ -6632,7 +6632,7 @@ func (dc *dexConnection) updateReputation(
 
 	// effectiveTier = bondedTier + bonusTiers - revokedTiers
 	bondedTier := effectiveTier + int64(penalties)
-	dc.acct.rep = &account.Reputation{
+	dc.acct.rep = account.Reputation{
 		BondedTier: bondedTier,
 		Penalties:  penalties,
 		Legacy:     legacyFeePaid,
@@ -6827,7 +6827,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// actions to take in #3 since PostBond reserves prior to post.
 
 	dc.updateReputation(result.Reputation, result.Tier, result.LegacyFeePaid, &result.Score)
-	rep := *dc.acct.rep
+	rep := dc.acct.rep
 	effectiveTier := rep.EffectiveTier()
 	c.log.Infof("Authenticated connection to %s, acct %v, %d active bonds, %d active orders, %d active matches, score %d, tier %d",
 		dc.acct.host, acctID, len(result.ActiveBonds), len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, effectiveTier)

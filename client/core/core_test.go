@@ -212,7 +212,8 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		feeCoin:   []byte("somecoin"),
 		// feeAssetID is 0 (btc)
 		// tier, bonds, etc. set on auth
-		rep: &account.Reputation{BondedTier: 1}, // not suspended by default
+		pendingBondsConfs: make(map[string]uint32),
+		rep:               account.Reputation{BondedTier: 1}, // not suspended by default
 	}
 }
 
@@ -710,7 +711,10 @@ type TXCWallet struct {
 	accelerateOrderErr          error
 	info                        *asset.WalletInfo
 	bondTxCoinID                []byte
+	refundBondCoin              asset.Coin
+	refundBondErr               error
 	makeBondTxErr               error
+	reserves                    uint64
 
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
@@ -1087,10 +1091,12 @@ func (*TXCWallet) BondsFeeBuffer(feeRate uint64) uint64 {
 	return 4 * 1000 * feeRate * 2
 }
 
-func (*TXCWallet) SetBondReserves(reserves uint64) {}
+func (w *TXCWallet) SetBondReserves(reserves uint64) {
+	w.reserves = reserves
+}
 
-func (*TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
-	return nil, nil
+func (w *TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
+	return w.refundBondCoin, w.refundBondErr
 }
 
 func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
@@ -10477,4 +10483,225 @@ func TestUpdateFeesPaid(t *testing.T) {
 			t.Fatalf("%s: want %d but got %d fees paid", test.name, test.paid, got)
 		}
 	}
+}
+
+func TestUpdateBondOptions(t *testing.T) {
+	const feeRate = 50
+
+	rig := newTestRig()
+	defer rig.shutdown()
+	acct := rig.dc.acct
+	acct.isAuthed = true
+
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	dcrWallet.Wallet = &TFeeRater{tDcrWallet, feeRate}
+	rig.core.wallets[tUTXOAssetA.ID] = dcrWallet
+	bondFeeBuffer := tDcrWallet.BondsFeeBuffer(feeRate)
+
+	bondAsset := dcrBondAsset
+	var wrongBondAssetID uint32 = 0
+	var targetTier uint64 = 1
+	var targetTierZero uint64 = 0
+	defaultMaxBondedAmt := maxBondedMult * bondAsset.Amt * targetTier
+	tooLowMaxBonded := defaultMaxBondedAmt - 1
+	singlyBondedReserves := bondAsset.Amt*bondOverlap*targetTier + bondFeeBuffer
+
+	type acctState struct {
+		targetTier   uint64
+		maxBondedAmt uint64
+	}
+
+	for _, tt := range []struct {
+		name        string
+		bal         uint64
+		form        BondOptionsForm
+		before      acctState
+		after       acctState
+		expReserves uint64
+		addOtherDC  bool
+		wantErr     bool
+	}{
+		{
+			name: "set target tier to 1",
+			bal:  singlyBondedReserves,
+			form: BondOptionsForm{
+				Addr:       acct.host,
+				TargetTier: &targetTier,
+				BondAsset:  &bondAsset.ID,
+			},
+			after: acctState{
+				targetTier:   1,
+				maxBondedAmt: defaultMaxBondedAmt,
+			},
+			expReserves: singlyBondedReserves,
+		},
+		{
+			name: "low balance",
+			bal:  singlyBondedReserves - 1,
+			form: BondOptionsForm{
+				Addr:       acct.host,
+				TargetTier: &targetTier,
+				BondAsset:  &bondAsset.ID,
+			},
+			wantErr: true,
+		},
+		{
+			name: "max-bonded too low",
+			bal:  singlyBondedReserves,
+			form: BondOptionsForm{
+				Addr:         acct.host,
+				TargetTier:   &targetTier,
+				BondAsset:    &bondAsset.ID,
+				MaxBondedAmt: &tooLowMaxBonded,
+			},
+			wantErr: true,
+		},
+		{
+			name: "unsupported bond asset",
+			form: BondOptionsForm{
+				Addr:       acct.host,
+				TargetTier: &targetTier,
+				BondAsset:  &wrongBondAssetID,
+			},
+			wantErr: true,
+		},
+		{
+			name: "lower target tier with zero balance OK",
+			bal:  0,
+			form: BondOptionsForm{
+				Addr:       acct.host,
+				TargetTier: &targetTierZero,
+				BondAsset:  &bondAsset.ID,
+			},
+			before: acctState{
+				targetTier:   1,
+				maxBondedAmt: defaultMaxBondedAmt,
+			},
+			after:       acctState{},
+			expReserves: 0,
+		},
+		{
+			name: "lower target tier to zero with other exchanges still keeps reserves",
+			bal:  0,
+			form: BondOptionsForm{
+				Addr:       acct.host,
+				TargetTier: &targetTierZero,
+				BondAsset:  &bondAsset.ID,
+			},
+			before: acctState{
+				targetTier:   1,
+				maxBondedAmt: defaultMaxBondedAmt,
+			},
+			addOtherDC:  true,
+			after:       acctState{},
+			expReserves: singlyBondedReserves,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			before, after := tt.before, tt.after
+			acct.targetTier = before.targetTier
+			acct.maxBondedAmt = before.maxBondedAmt
+			tDcrWallet.bal = &asset.Balance{Available: tt.bal}
+
+			if tt.addOtherDC {
+				dc, _, acct := testDexConnection(rig.core.ctx, rig.crypter.(*tCrypter))
+				acct.host = "someotherhost.com"
+				rig.core.conns[acct.host] = dc
+				defer delete(rig.core.conns, acct.host)
+				acct.bondAsset = bondAsset.ID
+				acct.targetTier = 1
+			}
+
+			if err := rig.core.UpdateBondOptions(&tt.form); err != nil {
+				if tt.wantErr {
+					return
+				}
+				t.Fatalf("UpdateBondOptions error: %v", err)
+			}
+			if tt.wantErr {
+				t.Fatalf("No error when one was expected")
+			}
+
+			if acct.targetTier != after.targetTier {
+				t.Fatalf("Wrong targetTier. %d != %d", acct.targetTier, after.targetTier)
+			}
+			if acct.maxBondedAmt != after.maxBondedAmt {
+				t.Fatalf("Wrong maxBondedAmt. %d != %d", acct.maxBondedAmt, after.maxBondedAmt)
+			}
+			if tDcrWallet.reserves != tt.expReserves {
+				t.Fatalf("Wrong reserves. %d != %d", tDcrWallet.reserves, tt.expReserves)
+			}
+		})
+	}
+}
+
+func TestRotateBonds(t *testing.T) {
+	const feeRate = 50
+
+	rig := newTestRig()
+	defer rig.shutdown()
+	rig.core.Login(tPW)
+
+	acct := rig.dc.acct
+	acct.isAuthed = true
+
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	dcrWallet.Wallet = &TFeeRater{tDcrWallet, feeRate}
+	rig.core.wallets[tUTXOAssetA.ID] = dcrWallet
+	bondAsset := dcrBondAsset
+	bondFeeBuffer := tDcrWallet.BondsFeeBuffer(feeRate)
+	maxBondedPerTier := maxBondedMult * bondAsset.Amt
+	overlappedReservesPerTier := bondAsset.Amt * bondOverlap
+	singlyTieredMaxReserves := overlappedReservesPerTier + bondFeeBuffer
+
+	now := uint64(time.Now().Unix())
+	bondExpiry := rig.dc.config().BondExpiry
+	// bondDuration := minBondLifetime(rig.core.net, bondExpiry)
+	locktimeThresh := now + bondExpiry
+	// unexpired := locktimeThresh + 1
+	locktimeExpired := locktimeThresh - 1
+	locktimeRefundable := now - 1
+
+	run := func(wantPending, wantExpired int, expectedReserves uint64) {
+		ctx, cancel := context.WithTimeout(rig.core.ctx, time.Second)
+		rig.core.rotateBonds(ctx)
+		cancel()
+
+		t.Helper()
+		if len(acct.pendingBonds) != wantPending {
+			t.Fatalf("wanted %d pending bonds, got %d", wantPending, len(acct.pendingBonds))
+		}
+		if len(acct.expiredBonds) != wantExpired {
+			t.Fatalf("wanted %d expired bonds, got %d", wantExpired, len(acct.expiredBonds))
+		}
+		if tDcrWallet.reserves != expectedReserves {
+			t.Fatalf("wrong reserves. expected %d, got %d", expectedReserves, tDcrWallet.reserves)
+		}
+	}
+
+	// No bonds, target tier 1. Should create a new bond and add it to pending.
+	var targetTier uint64 = 1
+	acct.targetTier = targetTier
+	acct.maxBondedAmt = maxBondedPerTier * targetTier
+	acct.bondAsset = bondAsset.ID
+	tDcrWallet.bal = &asset.Balance{Available: bondAsset.Amt*targetTier + bondFeeBuffer}
+	rig.queuePrevalidateBond()
+	run(1, 0, singlyTieredMaxReserves-bondAsset.Amt)
+
+	// Post and then expire the bond. This first bond should move to expired and we
+	// should create another bond.
+	acct.bonds, acct.pendingBonds = acct.pendingBonds, nil
+	acct.bonds[0].LockTime = locktimeExpired
+	rig.queuePrevalidateBond()
+	run(1, 1, singlyTieredMaxReserves-2*bondAsset.Amt)
+
+	// Refund the expired bond
+	acct.expiredBonds[0].LockTime = locktimeRefundable
+	tDcrWallet.contractExpired = true
+	tDcrWallet.refundBondCoin = &tCoin{}
+	run(1, 0, singlyTieredMaxReserves-bondAsset.Amt)
+
+	acct.targetTier = 2
+	rig.queuePrevalidateBond()
+	run(2, 0, (overlappedReservesPerTier*2+bondFeeBuffer)-2*bondAsset.Amt)
 }

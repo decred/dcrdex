@@ -769,12 +769,11 @@ type dexAccount struct {
 	pendingBonds      []*db.Bond // not yet confirmed
 	bonds             []*db.Bond // confirmed, and not yet expired
 	expiredBonds      []*db.Bond // expired and needing refund
-	rep               *account.Reputation
+	rep               account.Reputation
 	targetTier        uint64
 	maxBondedAmt      uint64
 	bondAsset         uint32 // asset used for bond maintenance/rotation
 	legacyFeePaid     bool   // server reports a legacy fee paid
-	getOutOfJail      bool
 
 	// Legacy reg fee (V0PURGE)
 	feeAssetID uint32
@@ -946,7 +945,6 @@ func (a *dexAccount) authed() bool {
 func (a *dexAccount) unAuth() {
 	a.authMtx.Lock()
 	a.isAuthed = false
-	a.rep = nil
 	a.legacyFeePaid = false
 	a.authMtx.Unlock()
 }
