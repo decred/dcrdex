@@ -2161,6 +2161,7 @@ func TestPostBond(t *testing.T) {
 				}
 			case *BalanceNote:
 				balanceNotes++
+			case *ReputationNote: // ignore
 			default:
 				t.Fatalf("wrong notification (%T). Expected FeePaymentNote or BalanceNote", ntfn)
 			}

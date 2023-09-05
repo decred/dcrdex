@@ -3935,7 +3935,7 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 		// cannotTrade := dc.acct.effectiveTier < 0 || (dc.acct.effectiveTier == 0 && dc.apiVersion() < serverdex.BondAPIVersion)
 		rep := dc.acct.rep
 		// Using <= though acknowledging that this ignore the possibility that
-		// an existing revoked bond coudl be ressurected.
+		// an existing revoked bond could be ressurected.
 		if rep.BondedTier <= int64(rep.Penalties) {
 			dc.acct.unAuth() // acct was marked as authenticated by authDEX above.
 			c.log.Infof("HD account key for %s has tier %d, but %d penalties (not able to trade). Deriving another account key.",
@@ -6580,7 +6580,8 @@ func (dc *dexConnection) updateReputation(
 	legacyFee *bool,
 	scor *int32,
 ) {
-	// Retired v0 (ConnectResult.Tier == nil) standard.
+	// reputation v0 results are upgraded to v1 in authDEX, which is the only
+	// place this would be called for a reputation v0 server.
 
 	// v2 reputation
 	if newReputation != nil {
@@ -6589,11 +6590,14 @@ func (dc *dexConnection) updateReputation(
 	}
 
 	// v1 reputation
-	// We have tier info, but server isn't sending a TierReportV2.
-	effectiveTier := tier
+	// We have tier info, but server isn't sending an account.Reputation.
+	bondedTier := tier
 	legacyFeePaid := dc.acct.legacyFeePaid
 	if legacyFee != nil {
 		legacyFeePaid = *legacyFee
+		if legacyFeePaid {
+			bondedTier--
+		}
 	}
 	// We need to know the tier contribution from active bonds, but that depends
 	// on things like the server's penalty theshold, which we don't have. Also,
@@ -6601,30 +6605,20 @@ func (dc *dexConnection) updateReputation(
 	// configuration values, beause the server doesn't do it that way. They sum
 	// the bond.Strength in the DB entries that corresponds to the bond strength
 	// at postbond, so we'd have no way of knowing if the server's bond
-	// configuration had changed. That's why TierReportV2 was added, but in the
-	// meantime, we have to make some assumptions. In this case, we'll assume
-	// that the server has the default penalty threshold (20) and work from
-	// there.
-	var penalties uint16
-	var score int32
-	oldRep := dc.acct.rep
-	// If we got here through authDEX -> ConnectResult, we won't have an oldRep,
-	// but we will have a score. For other paths, we will have an oldRep but we
-	// won't have a score.
-	if !dc.acct.isAuthed {
-		// We don't get a score in anything but the ConnectResult, so if we got
-		// here via e.g. postBond, the best we can do is to assume these values
-		// haven't changed.
-		score = oldRep.Score
-		penalties = oldRep.Penalties
-	} else if scor != nil { // via authDEX -> ConnectResult
+	// configuration had changed. Version 2 reputation was implemented to fix
+	// these issues, but in the meantime, we have to make some assumptions. In
+	// this case, we'll assume that the server has the default penalty threshold
+	// (20) and work from there.
+	score := dc.acct.rep.Score
+	penalties := dc.acct.rep.Penalties
+	if scor != nil { // via authDEX -> ConnectResult
 		score = *scor * -1 // In v1 rep, positive score was worse.
 		if score < 0 {
 			penalties = uint16(-score / defaultPenaltyThreshold)
 		}
 	}
 
-	bondedTier := effectiveTier + int64(penalties)
+	bondedTier += int64(penalties)
 	dc.acct.rep = account.Reputation{
 		BondedTier: bondedTier,
 		Penalties:  penalties,
@@ -6700,18 +6694,26 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		return fmt.Errorf("'connect' error: %w", err)
 	}
 
-	if result.Tier == nil {
-		return fmt.Errorf("pre-bond servers no longer supported by this client")
-	}
-
 	// Before the v2 model reputation, we didn't get score updates, so we poll
 	// for them by recalling authDEX periodically.
-	if isV1 := result.Reputation == nil; isV1 {
+	if isV1 := result.Reputation == nil && result.Tier != nil; isV1 {
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
 			c.monitorV1Rep(dc)
 		}()
+	}
+
+	// Upgrade v0 results to v1.
+	if result.Tier == nil {
+		var tier int64
+		if result.Suspended == nil || !*result.Suspended {
+			tier = 1
+		}
+		result.Tier = &tier
+		legacyFeePaid := true
+		result.LegacyFeePaid = &legacyFeePaid
+		return fmt.Errorf("pre-bond servers no longer supported by this client")
 	}
 
 	// Check the servers response signature.
@@ -6762,7 +6764,12 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			// still have N tiers from existing bonds, but by ours we would have
 			// floor(N / 2). If they halve the bond size, they'd say we have N,
 			// and we'd think we should have 2N.
-			bondedTiers += bond.Amount / bondAsset.Amt
+			if bond.Strength > 0 {
+				bondedTiers += uint64(bond.Strength)
+			} else {
+				bondedTiers += bond.Amount / bondAsset.Amt
+			}
+
 			continue // good, it's live server-side too
 		} // else needs post retry or it's expired
 
@@ -6800,7 +6807,11 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		if found {
 			// It's live server-side. Confirm it locally (db and slices).
 			toConfirmLocally = append(toConfirmLocally, queuedBond{assetBond(bond), 0})
-			bondedTiers += bond.Amount / bondAsset.Amt
+			if bond.Strength > 0 {
+				bondedTiers += uint64(bond.Strength)
+			} else {
+				bondedTiers += bond.Amount / bondAsset.Amt
+			}
 			continue
 		}
 
@@ -6810,19 +6821,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		c.log.Debugf("Preparing to post pending bond %v (%s).", bondIDStr, symb)
 		toPost = append(toPost, queuedBond{assetBond(bond), bondAsset.Confs})
 	}
-
-	// // just a little debugging block, can remove
-	// if bondAssetID, targetTier, _ := dc.bondOpts(); targetTier > 0 {
-	// 	bondAsset := bondAssets[bondAssetID]
-	// 	if bondAsset == nil {
-	// 		c.log.Warnf("Selected bond asset %v is not supported by %v", unbip(bondAssetID), dc.acct.host)
-	// 	} else { // adjust reserves given observed tier offset
-	// 		tierOffset := tier - int64(bondedTiers) // negative means penalties, positive means bonus (trade history or legacy fee)
-	// 		c.log.Tracef("actual (%d) - bonded (%d) tiers = %d", tier, int64(bondedTiers), tierOffset)
-	// 		tierSurplus := tier - int64(dc.acct.targetTier) // captured by inBonds, _ := dc.bondTotalInternal(bondAsset.ID)
-	// 		c.log.Tracef("actual (%d) - target (%d) tiers = %d", tier, int64(dc.acct.targetTier), tierSurplus)
-	// 	}
-	// }
 
 	updatedAssets := make(assetMap)
 	// Flag as authenticated before bondConfirmed and monitorBondConfs, which
@@ -6843,6 +6841,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	c.log.Debugf("Tier/bonding with %v: effectiveTier = %d, targetTier = %d, bondedTiers = %d, revokedTiers = %d, legacy = %t",
 		dc.acct.host, effectiveTier, dc.acct.targetTier, rep.BondedTier, rep.Penalties, dc.acct.legacyFeePaid)
 	dc.acct.authMtx.Unlock()
+
+	c.notify(newReputationNote(dc.acct.host, rep))
 
 	for _, pending := range toPost {
 		c.monitorBondConfs(dc, pending.bond, pending.confs, true)
@@ -7040,7 +7040,11 @@ func (c *Core) monitorV1Rep(dc *dexConnection) {
 	if !dc.monitoringV1Rep.CompareAndSwap(false, true) {
 		return
 	}
-	ticker := time.NewTicker(time.Hour)
+	tick := time.Hour
+	if c.net == dex.Simnet {
+		tick = time.Minute * 5
+	}
+	ticker := time.NewTicker(tick)
 	for {
 		select {
 		case <-ticker.C:
@@ -7051,7 +7055,7 @@ func (c *Core) monitorV1Rep(dc *dexConnection) {
 			continue
 		}
 		if err := c.authDEX(dc); err != nil {
-			c.log.Errorf("Error re-authorizing ")
+			c.log.Errorf("Error re-authorizing v1 reputation: %v", err)
 		} else {
 			dc.acct.authMtx.RLock()
 			rep := dc.acct.rep
@@ -8701,8 +8705,6 @@ func handleScoreChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	if scoreChange == nil {
 		return errors.New("empty message")
 	}
-
-	fmt.Println("--handleScoreChangeMsg", scoreChange.Reputation.Score)
 
 	// Check the signature.
 	err = dc.acct.checkSig(scoreChange.Serialize(), scoreChange.Sig)

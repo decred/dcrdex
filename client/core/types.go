@@ -661,6 +661,7 @@ type ExchangeAuth struct {
 	MaxBondedAmt    uint64              `json:"maxBondedAmt"`
 	PenaltyComps    uint16              `json:"penaltyComps"`
 	PendingBonds    []*PendingBondState `json:"pendingBonds"`
+	Compensation    int64               `json:"compensation"`
 }
 
 // Exchange represents a single DEX with any number of markets.

@@ -41,6 +41,7 @@ export interface ExchangeAuth {
   maxBondedAmt: number
   penaltyComps: number
   pendingBonds: PendingBondState[]
+  compensation: number
 }
 
 export interface Exchange {

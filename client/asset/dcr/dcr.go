@@ -982,18 +982,6 @@ func (dcr *ExchangeWallet) Reconfigure(ctx context.Context, cfg *asset.WalletCon
 		return false, err
 	}
 	dcr.cfgV.Store(exchangeWalletCfg)
-	// DRAFT TODO: Caller should re-reserve after reconfig.
-	// if oldCfg.feeRateLimit != exchangeWalletCfg.feeRateLimit {
-	// 	// Adjust the bond reserves fee buffer, if enforcing.
-	// 	dcr.reservesMtx.Lock()
-	// 	if dcr.bondReservesNominal != 0 {
-
-	// 		dcr.bondReservesEnforced += int64(bondsFeeBuffer(exchangeWalletCfg.feeRateLimit)) -
-	// 			int64(bondsFeeBuffer(oldCfg.feeRateLimit))
-	// 	}
-	// 	dcr.reservesMtx.Unlock()
-	// }
-
 	return false, nil
 }
 

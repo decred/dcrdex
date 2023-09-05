@@ -235,6 +235,8 @@ func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 		for _, v := range bondValues {
 			nominalReserves += v
 		}
+		// One bondFeeBuffer for each exchange using this asset as their bond
+		// asset.
 		n := uint64(len(bondValues))
 		feeReserves := n * bonder.BondsFeeBuffer(c.feeSuggestionAny(w.AssetID))
 		// Even if reserves are 0, we may still want to reserve fees for
@@ -352,6 +354,8 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	strongBondedTier := bondedTier - state.WeakStrength
 	if uint64(strongBondedTier) < state.TargetTier {
 		state.mustPost += int64(state.TargetTier) - strongBondedTier
+	} else if uint64(strongBondedTier) > state.TargetTier {
+		state.Compensation = strongBondedTier - int64(state.TargetTier)
 	}
 	// Look for penalties to replace.
 	expectedServerTier := state.LiveStrength
@@ -361,13 +365,12 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	reportedServerTier := state.Rep.EffectiveTier()
 	if reportedServerTier < expectedServerTier {
 		state.toComp = expectedServerTier - reportedServerTier
-		if state.toComp > int64(state.Rep.Penalties) {
-			c.log.Tracef("Our discrepancy with server at %s is greater than their reported penalties", dc.acct.host)
-			state.toComp = int64(state.Rep.Penalties)
+		penaltyCompRemainder := int64(dc.acct.penaltyComps) - state.Compensation
+		if penaltyCompRemainder <= 0 {
+			penaltyCompRemainder = 0
 		}
-		if state.toComp > int64(dc.acct.penaltyComps) {
-			c.log.Tracef("Cannot compensate %d penalties. penaltyComps = %d", state.toComp, dc.acct.penaltyComps)
-			state.toComp = int64(dc.acct.penaltyComps)
+		if state.toComp > penaltyCompRemainder {
+			state.toComp = penaltyCompRemainder
 		}
 	}
 	state.mustPost += state.toComp
@@ -1297,11 +1300,18 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.updateBondReserves() // Can probably reduce reserves because of the pending bond.
 	success = true
 	bondCoinStr := coinIDString(bondAssetID, bondCoin)
 	return &PostBondResult{BondID: bondCoinStr, ReqConfirms: uint16(bondAsset.Confs)}, nil
 }
 
+// calculateMergingLockTime calculates a locktime for a new bond for the
+// specified account, with consideration for merging parallel bond tracks.
+// Tracks are merged by choosing the locktime of an existing bond if one exists
+// and has a locktime value in an acceptable range. We will merge tracks even if
+// it means reducing the live period associated with the bond by as much as
+// ~75%.
 func (c *Core) calculateMergingLockTime(dc *dexConnection) (time.Time, error) {
 	bondExpiry := int64(dc.config().BondExpiry)
 	lockDur := minBondLifetime(c.net, bondExpiry)
@@ -1327,7 +1337,9 @@ func (c *Core) calculateMergingLockTime(dc *dexConnection) (time.Time, error) {
 	dc.acct.authMtx.RUnlock()
 	if bestMergeableLocktime > 0 {
 		newLockTime := time.Unix(int64(bestMergeableLocktime), 0)
-		c.log.Infof("Reducing bond locktime from %s to %s to facilitate merge with parallel bond track", lockTime, newLockTime)
+		bondExpiryDur := time.Duration(bondExpiry) * time.Second
+		c.log.Infof("Reducing bond expiration date from %s to %s to facilitate merge with parallel bond track",
+			lockTime.Add(-bondExpiryDur), newLockTime.Add(-bondExpiryDur))
 		lockTime = newLockTime
 	}
 	return lockTime, nil
