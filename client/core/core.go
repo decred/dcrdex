@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"net/url"
 	"os"
@@ -1997,9 +1996,12 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 	defer w.mtx.RUnlock()
 	depositAddr = w.address
 
-	// If the wallet is not synced, start a loop to check the sync status until
-	// it is.
-	if !w.synced {
+	// If the wallet is synced, update the bond reserves, logging any balance
+	// insufficiencies, otherwise start a loop to check the sync status until it
+	// is.
+	if w.synced {
+		c.updateBondReserves(w.AssetID)
+	} else {
 		c.startWalletSyncMonitor(w)
 	}
 
@@ -2954,7 +2956,8 @@ func (c *Core) isActiveBondAsset(assetID uint32, includeLive bool) bool {
 // walletCheckAndNotify sets the xcWallet's synced and syncProgress fields from
 // the wallet's SyncStatus result, emits a WalletStateNote, and returns the
 // synced value. When synced is true, this also updates the wallet's balance,
-// stores the balance in the DB, and emits a BalanceNote.
+// stores the balance in the DB, emits a BalanceNote, and updates the bond
+// reserves (with balance checking).
 func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 	synced, progress, err := w.SyncStatus()
 	if err != nil {
@@ -2975,6 +2978,7 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 	if synced && !wasSynced {
 		c.updateWalletBalance(w)
 		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
+		c.updateBondReserves(w.AssetID)
 	}
 	return synced
 }
@@ -6714,7 +6718,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		return fmt.Errorf("pre-bond servers no longer supported by this client")
 	}
 
-	if result.Reputation == nil {
+	// Before the v2 model reputation, we didn't get score updates, so we poll
+	// for them by recalling authDEX periodically.
+	if isV1 := result.Reputation == nil; isV1 {
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
@@ -6877,28 +6883,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		if _, found := localBondMap[key]; found {
 			continue
 		}
-		// EXPERIMENT: Server knows of a bond we do not! Store what we can for
-		// tier accounting, but we can't redeem it (or we have already redeemed
-		// it and thus not loaded it already). We'll make en entry in
-		// dc.acct.bonds just for tier accounting to match server.
-		dbBond := &db.Bond{
-			AssetID:  bond.AssetID,
-			CoinID:   bond.CoinID,
-			Amount:   bond.Amount,
-			LockTime: bond.Expiry, // trust?
-			// RefundTx/KeyIndex unknown. If this is really our bond and not
-			// garbage from an untrusted server, the user better have a backup!
-			KeyIndex:  math.MaxUint32,
-			Confirmed: true,
-		}
-
 		symb := dex.BipIDSymbol(bond.AssetID)
 		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
 		c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
-
-		dc.acct.authMtx.Lock()
-		dc.acct.bonds = append(dc.acct.bonds, dbBond) // for tier accounting, but we cannot redeem it
-		dc.acct.authMtx.Unlock()
 	}
 
 	// Associate the matches with known trades.
@@ -7866,7 +7853,7 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 		}
 	}
 
-	c.updateBondReserves()
+	c.updateBondReserves(w.AssetID)
 
 	for _, dc := range c.dexConnections() {
 		for _, tracker := range dc.trackedTrades() {

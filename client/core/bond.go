@@ -171,7 +171,7 @@ type dexBondCfg struct {
 	haveConnected  bool
 }
 
-func (c *Core) updateBondReserves() {
+func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 	reserves := make(map[uint32][]uint64)
 	processDC := func(dc *dexConnection) {
 		bondAssets, _ := dc.bondAssets()
@@ -207,21 +207,34 @@ func (c *Core) updateBondReserves() {
 		if !is {
 			continue
 		}
-		r, found := reserves[w.AssetID]
+		bondValues, found := reserves[w.AssetID]
 		if !found {
 			// Not selected as a bond asset for any exchanges.
 			bonder.SetBondReserves(0)
 			return
 		}
 		var nominalReserves uint64
-		for _, v := range r {
+		for _, v := range bondValues {
 			nominalReserves += v
 		}
-		n := uint64(len(r))
+		n := uint64(len(bondValues))
 		feeReserves := n * bonder.BondsFeeBuffer(c.feeSuggestionAny(w.AssetID))
 		// Even if reserves are 0, we may still want to reserve fees for
 		// renewing bonds.
-		bonder.SetBondReserves(nominalReserves + feeReserves)
+		paddedReserves := nominalReserves + feeReserves
+		if len(balanceCheckID) == 1 && w.AssetID == balanceCheckID[0] && w.connected() {
+			bal, err := w.Balance()
+			if err != nil {
+				c.log.Errorf("Error getting balance for reserves check")
+			} else {
+				avail := bal.Available + bal.BondReserves
+				if avail < paddedReserves {
+					c.log.Warnf("Bond reserves of %d %s exceed available balance of %d",
+						paddedReserves, unbip(w.AssetID), avail)
+				}
+			}
+		}
+		bonder.SetBondReserves(paddedReserves)
 	}
 }
 
