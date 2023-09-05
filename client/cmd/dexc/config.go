@@ -107,6 +107,8 @@ type Config struct {
 	NoAutoWalletLock   bool `long:"no-wallet-lock" description:"Disable locking of wallets on shutdown or logout. Use this if you want your external wallets to stay unlocked after closing the DEX app."`
 	NoAutoDBBackup     bool `long:"no-db-backup" description:"Disable creation of a database backup on shutdown."`
 	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
+
+	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
 }
 
 var defaultConfig = Config{
