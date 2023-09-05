@@ -487,14 +487,13 @@ export default class Application {
   /*
    * updateBondConfs updates the information for a pending bond.
    */
-  updateBondConfs (dexAddr: string, coinID: string, confs: number, assetID: number) {
+  updateBondConfs (dexAddr: string, coinID: string, confs: number) {
     const dex = this.exchanges[dexAddr]
-    const symbol = this.assets[assetID].symbol
-    dex.pendingBonds[coinID] = { confs, assetID, symbol }
+    for (const bond of dex.auth.pendingBonds) if (bond.coinID === coinID) bond.confs = confs
   }
 
-  updateTier (host: string, tier: number) {
-    this.exchanges[host].tier = tier
+  updateTier (host: string, bondedTier: number) {
+    this.exchanges[host].auth.rep.bondedTier = bondedTier
   }
 
   /*
@@ -505,7 +504,7 @@ export default class Application {
     switch (note.topic) {
       case 'RegUpdate':
         if (note.coinID !== null) { // should never be null for RegUpdate
-          this.updateBondConfs(note.dex, note.coinID, note.confirmations, note.asset)
+          this.updateBondConfs(note.dex, note.coinID, note.confirmations)
         }
         break
       case 'BondConfirmed':

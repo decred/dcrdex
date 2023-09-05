@@ -1656,8 +1656,6 @@ func (btc *baseWallet) Balance() (*asset.Balance, error) {
 
 	reserves := btc.bondReserves.Load()
 	if reserves > bal.Available {
-		// TODO: Send wallet notification.
-		// https://github.com/decred/dcrdex/pull/2492
 		btc.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toBTC(bal.Available), toBTC(reserves))
 		bal.ReservesDeficit = reserves - bal.Available

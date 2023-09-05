@@ -510,7 +510,7 @@ func parseBondOptsArgs(params *RawParams) (*core.BondOptionsForm, error) {
 		Addr:         params.Args[0],
 		TargetTier:   targetTierP,
 		MaxBondedAmt: maxBondedP,
-		BondAsset:    bondAssetP,
+		BondAssetID:  bondAssetP,
 	}
 	return req, nil
 }

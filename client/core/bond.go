@@ -14,7 +14,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/keygen"
 	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 )
@@ -278,18 +277,12 @@ func (c *Core) dexBondConfig(dc *dexConnection, now int64) *dexBondCfg {
 }
 
 type dexAcctBondState struct {
-	rep                                         account.Reputation
-	targetTier                                  uint64
-	pendingStrength, weakStrength, liveStrength int64
-	weak                                        []*db.Bond
-	expiredBonds                                []*db.Bond
-	repost                                      []*asset.Bond
-	bondAssetID                                 uint32
-	maxBondedAmt                                uint64
-	penaltyComps                                uint16
-	mustPost                                    int64 // includes toComp
-	toComp                                      int64
-	inBonds                                     uint64
+	ExchangeAuth
+	expiredBonds []*db.Bond
+	repost       []*asset.Bond
+	mustPost     int64 // includes toComp
+	toComp       int64
+	inBonds      uint64
 }
 
 // bondStateOfDEX collects all the information needed to determine what
@@ -299,7 +292,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	defer dc.acct.authMtx.Unlock()
 
 	state := new(dexAcctBondState)
-	state.weak = make([]*db.Bond, 0, len(dc.acct.bonds))
+	weakBonds := make([]*db.Bond, 0, len(dc.acct.bonds))
 
 	filterExpiredBonds := func(bonds []*db.Bond) (liveBonds []*db.Bond) {
 		for _, bond := range bonds {
@@ -311,7 +304,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 				c.log.Infof("Newly expired bond found: %v (%s)", coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 			} else {
 				if int64(bond.LockTime) <= bondCfg.replaceThresh {
-					state.weak = append(state.weak, bond) // but not yet expired (still live or pending)
+					weakBonds = append(weakBonds, bond) // but not yet expired (still live or pending)
 					c.log.Infof("Soon to expire bond found: %v (%s)",
 						coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 				}
@@ -321,15 +314,15 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 		return liveBonds
 	}
 
-	state.rep, state.targetTier = dc.acct.rep, dc.acct.targetTier
-	state.bondAssetID, state.maxBondedAmt, state.penaltyComps = dc.acct.bondAsset, dc.acct.maxBondedAmt, dc.acct.penaltyComps
-	state.inBonds, _ = dc.bondTotalInternal(state.bondAssetID)
+	state.Rep, state.TargetTier, state.EffectiveTier = dc.acct.rep, dc.acct.targetTier, dc.acct.rep.EffectiveTier()
+	state.BondAssetID, state.MaxBondedAmt, state.PenaltyComps = dc.acct.bondAsset, dc.acct.maxBondedAmt, dc.acct.penaltyComps
+	state.inBonds, _ = dc.bondTotalInternal(state.BondAssetID)
 	// Screen the unexpired bonds slices.
 	dc.acct.bonds = filterExpiredBonds(dc.acct.bonds)
 	dc.acct.pendingBonds = filterExpiredBonds(dc.acct.pendingBonds) // possibly expired before confirmed
-	state.pendingStrength = sumBondStrengths(dc.acct.pendingBonds, bondCfg.bondAssets)
-	state.weakStrength = sumBondStrengths(state.weak, bondCfg.bondAssets)
-	state.liveStrength = sumBondStrengths(dc.acct.bonds, bondCfg.bondAssets) // for max bonded check
+	state.PendingStrength = sumBondStrengths(dc.acct.pendingBonds, bondCfg.bondAssets)
+	state.WeakStrength = sumBondStrengths(weakBonds, bondCfg.bondAssets)
+	state.LiveStrength = sumBondStrengths(dc.acct.bonds, bondCfg.bondAssets) // for max bonded check
 	// Extract the expired bonds.
 	state.expiredBonds = make([]*db.Bond, len(dc.acct.expiredBonds))
 	copy(state.expiredBonds, dc.acct.expiredBonds)
@@ -345,22 +338,22 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	}
 
 	// Calculate number of bonds increments to post.
-	bondedTier := state.liveStrength + state.pendingStrength
-	strongBondedTier := bondedTier - state.weakStrength
-	if uint64(strongBondedTier) < state.targetTier {
-		state.mustPost += int64(state.targetTier) - strongBondedTier
+	bondedTier := state.LiveStrength + state.PendingStrength
+	strongBondedTier := bondedTier - state.WeakStrength
+	if uint64(strongBondedTier) < state.TargetTier {
+		state.mustPost += int64(state.TargetTier) - strongBondedTier
 	}
 	// Look for penalties to replace.
-	expectedServerTier := state.liveStrength
-	if state.rep.Legacy {
+	expectedServerTier := state.LiveStrength
+	if state.Rep.Legacy {
 		expectedServerTier++
 	}
-	reportedServerTier := state.rep.EffectiveTier()
+	reportedServerTier := state.Rep.EffectiveTier()
 	if reportedServerTier < expectedServerTier {
 		state.toComp = expectedServerTier - reportedServerTier
-		if state.toComp > int64(state.rep.Penalties) {
+		if state.toComp > int64(state.Rep.Penalties) {
 			c.log.Tracef("Our discrepancy with server at %s is greater than their reported penalties", dc.acct.host)
-			state.toComp = int64(state.rep.Penalties)
+			state.toComp = int64(state.Rep.Penalties)
 		}
 		if state.toComp > int64(dc.acct.penaltyComps) {
 			c.log.Tracef("Cannot compensate %d penalties. penaltyComps = %d", state.toComp, dc.acct.penaltyComps)
@@ -368,68 +361,6 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 		}
 	}
 	state.mustPost += state.toComp
-
-	// if state.weakStrength
-
-	// if bondedTier < state.targetTier {
-	// 	maxToPost := serverTier - int64(state.targetTier)
-	// 	if maxToPost > 0 {
-	// 		toPost := int64(state.targetTier) - bondedTier + state.weakStrength
-	// 	}
-	// } else if serverTier < int64(state.targetTier) {
-	// 	//
-	// }
-	// bondTierDeficit := int64(state.targetTier) - bondedTier + state.weakStrength
-
-	// currentPenaltyComps := bondedTier - int64(state.targetTier)
-	// if currentPenaltyComps < 0 {
-	// 	currentPenaltyComps = 0
-	// }
-	// var penaltiesToComp int64
-
-	// if serverTier < state.liveStrength && state.rep.Penalties > 0 {
-	// 	penaltiesToComp = state.liveStrength - serverTier
-	// 	if penaltiesToComp > int64(state.rep.Penalties) {
-	// 		penaltiesToComp = int64(state.rep.Penalties)
-	// 	}
-	// }
-
-	// // DRAFT TODO: Update for v2 tier data.
-	// // This old way is bugged because we have no way of knowing how many bonus
-	// // tiers the server has assigned us, because it is not directly reported in
-	// // any comms and  to calculate it locally, we would need to know the
-	// // server's penalty threshold, which is configurable and not reported. We
-	// // would also need to know our own score, but after the ConnectResult, the
-	// // server doesn't send score updates.
-	// //
-	// // The old way
-	// // -----------
-	// // tierDeficit := int64(state.targetTier) - state.tier
-	// // state.mustPost = tierDeficit + state.weakStrength - state.pendingStrength
-	// // -----------
-	// //
-	// // Instead, if the server says we're short, we assume that we have zero
-	// // bonus tiers and use the old calculation.
-	// serverTierDeficit := int64(state.targetTier) - state.rep.EffectiveTier() + state.weakStrength - state.pendingStrength
-	// if serverTierDeficit > 0 {
-	// 	state.mustPost = serverTierDeficit
-	// } else {
-	// 	// But if the server says we're tiered up, we may be so because we have
-	// 	// bonus tiers, which ultimately causes us to ignore weak bonds. In
-	// 	// that case, just make sure that our local bond data is sufficient to
-	// 	// get our target tier. For clients with low targetTier and good trading
-	// 	// history, this will be the primary route through which weak bonds are
-	// 	// renewed.
-	// 	// Note: For users with targetTier > 1, unknown bonus tiers can also
-	// 	// cause us to broadcast renewal bonds that are too small, resulting
-	// 	// in split bonds that cost the user unnecessary tx fees. This solution
-	// 	// is only a stop-gap. A proper solution will require more data from the
-	// 	// API so we can know our bonus tiers.
-	// 	bondTierDeficit := int64(state.targetTier) - state.liveStrength - state.pendingStrength + state.weakStrength
-	// 	if bondTierDeficit > 0 {
-	// 		state.mustPost = bondTierDeficit
-	// 	}
-	// }
 
 	return state
 }
@@ -604,12 +535,12 @@ func (c *Core) postRequiredBonds(
 	unlocked bool,
 ) (newlyBonded uint64) {
 
-	if state.targetTier == 0 || state.mustPost <= 0 || cfg.bondExpiry <= 0 {
+	if state.TargetTier == 0 || state.mustPost <= 0 || cfg.bondExpiry <= 0 {
 		return
 	}
 
 	c.log.Infof("Gotta post %d bond increments now. Target tier %d, current bonded tier %d (%d weak, %d pending), compensating %d penalties",
-		state.mustPost, state.targetTier, state.rep.BondedTier, state.weakStrength, state.pendingStrength, state.toComp)
+		state.mustPost, state.TargetTier, state.Rep.BondedTier, state.WeakStrength, state.PendingStrength, state.toComp)
 
 	if !unlocked || dc.status() != comms.Connected {
 		c.log.Warnf("Unable to post the required bond while disconnected or account is locked.")
@@ -617,7 +548,7 @@ func (c *Core) postRequiredBonds(
 	}
 	_, err := wallet.refreshUnlock()
 	if err != nil {
-		c.log.Errorf("failed to unlock bond asset wallet %v: %v", unbip(state.bondAssetID), err)
+		c.log.Errorf("failed to unlock bond asset wallet %v: %v", unbip(state.BondAssetID), err)
 		return
 	}
 	err = wallet.checkPeersAndSyncStatus()
@@ -630,22 +561,22 @@ func (c *Core) postRequiredBonds(
 	// currently selected bond asset.
 	toPost := state.mustPost
 	amt := bondAsset.Amt * uint64(state.mustPost)
-	currentlyBondedAmt := uint64(state.pendingStrength+state.liveStrength+expiredStrength) * bondAsset.Amt
-	for state.maxBondedAmt > 0 && amt+currentlyBondedAmt > state.maxBondedAmt && toPost > 0 {
+	currentlyBondedAmt := uint64(state.PendingStrength+state.LiveStrength+expiredStrength) * bondAsset.Amt
+	for state.MaxBondedAmt > 0 && amt+currentlyBondedAmt > state.MaxBondedAmt && toPost > 0 {
 		toPost-- // dumber, but reads easier
 		amt = bondAsset.Amt * uint64(toPost)
 	}
 	if toPost == 0 {
 		c.log.Warnf("Unable to post new bond with equivalent of %s currently bonded (limit of %s)",
-			wallet.amtString(currentlyBondedAmt), wallet.amtString(state.maxBondedAmt))
+			wallet.amtString(currentlyBondedAmt), wallet.amtString(state.MaxBondedAmt))
 		return
 	}
 	if toPost < state.mustPost {
 		c.log.Warnf("Only posting %d bond increments instead of %d because of current bonding limit of %s",
-			toPost, state.mustPost, wallet.amtString(state.maxBondedAmt))
+			toPost, state.mustPost, wallet.amtString(state.MaxBondedAmt))
 	}
 
-	lockTime, err := c.calculateMergingLocktime(dc)
+	lockTime, err := c.calculateMergingLockTime(dc)
 	if err != nil {
 		c.log.Errorf("Error calculating merging locktime: %v", err)
 		return
@@ -696,18 +627,18 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			c.updateAssetBalance(assetID)
 		}
 
-		bondAsset := bondCfg.bondAssets[acctBondState.bondAssetID]
+		bondAsset := bondCfg.bondAssets[acctBondState.BondAssetID]
 		if bondAsset == nil {
-			if acctBondState.targetTier > 0 {
-				c.log.Warnf("Bond asset %d not supported by DEX %v", acctBondState.bondAssetID, dc.acct.host)
+			if acctBondState.TargetTier > 0 {
+				c.log.Warnf("Bond asset %d not supported by DEX %v", acctBondState.BondAssetID, dc.acct.host)
 			}
 			continue
 		}
 
-		wallet, err := c.connectedWallet(acctBondState.bondAssetID)
+		wallet, err := c.connectedWallet(acctBondState.BondAssetID)
 		if err != nil {
-			if acctBondState.targetTier > 0 {
-				c.log.Errorf("%v wallet not available for bonds: %v", unbip(acctBondState.bondAssetID), err)
+			if acctBondState.TargetTier > 0 {
+				c.log.Errorf("%v wallet not available for bonds: %v", unbip(acctBondState.BondAssetID), err)
 			}
 			continue
 		}
@@ -1015,8 +946,8 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 
 	// Verify the new bond asset wallet first.
 	bondAssetID := bondAssetID0
-	if form.BondAsset != nil {
-		bondAssetID = *form.BondAsset
+	if form.BondAssetID != nil {
+		bondAssetID = *form.BondAssetID
 	}
 	assetChanged = bondAssetID != bondAssetID0
 
@@ -1075,6 +1006,10 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		}
 		avail := bal.Available + bal.BondReserves
 
+		// We need to recalculate bond reserves, including all other exchanges.
+		// We're under the dc.acct.authMtx lock, so we'll add our contribution
+		// first and then iterate the others in a loop where we're okay to lock
+		// their authMtx (via bondTotal).
 		var nominalReserves uint64
 		inBonds, _ := dc.bondTotalInternal(bondAssetID)
 		totalReserves := bondOverlap * bondAssetAmt * targetTier // this dexConnection
@@ -1308,7 +1243,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	if form.LockTime > 0 {
 		lockTime = time.Unix(int64(form.LockTime), 0)
 	} else {
-		lockTime, err = c.calculateMergingLocktime(dc)
+		lockTime, err = c.calculateMergingLockTime(dc)
 		if err != nil {
 			return nil, err
 		}
@@ -1355,7 +1290,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	return &PostBondResult{BondID: bondCoinStr, ReqConfirms: uint16(bondAsset.Confs)}, nil
 }
 
-func (c *Core) calculateMergingLocktime(dc *dexConnection) (time.Time, error) {
+func (c *Core) calculateMergingLockTime(dc *dexConnection) (time.Time, error) {
 	bondExpiry := int64(dc.config().BondExpiry)
 	lockDur := minBondLifetime(c.net, bondExpiry)
 	lockTime := time.Now().Add(lockDur).Truncate(time.Second)
@@ -1539,6 +1474,7 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 		dc.acct.rep.BondedTier = pbr.Tier + int64(dc.acct.rep.Penalties)
 	}
 	effectiveTier := dc.acct.rep.EffectiveTier()
+	bondedTier := dc.acct.rep.BondedTier
 	targetTier := dc.acct.targetTier
 	isAuthed := dc.acct.isAuthed
 	dc.acct.authMtx.Unlock()
@@ -1551,7 +1487,7 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 		}
 		c.log.Infof("Bond %s (%s) confirmed.", bondIDStr, unbip(assetID))
 		details := fmt.Sprintf("New tier = %d (target = %d).", effectiveTier, targetTier) // TODO: format to subject,details
-		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, string(TopicBondConfirmed), details, db.Success, dc.acct.host, effectiveTier))
+		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, string(TopicBondConfirmed), details, db.Success, dc.acct.host, bondedTier))
 	} else if !foundConfirmed {
 		c.log.Errorf("bondConfirmed: Bond %s (%s) not found", bondIDStr, unbip(assetID))
 		// just try to authenticate...
@@ -1577,7 +1513,7 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 
 	details := fmt.Sprintf("New tier = %d", effectiveTier) // TODO: format to subject,details
 	c.notify(newBondPostNoteWithTier(TopicAccountRegistered, string(TopicAccountRegistered),
-		details, db.Success, dc.acct.host, effectiveTier)) // possibly redundant with SubjectBondConfirmed
+		details, db.Success, dc.acct.host, bondedTier)) // possibly redundant with SubjectBondConfirmed
 
 	return nil
 }
@@ -1617,6 +1553,7 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, not
 	}
 	targetTier := dc.acct.targetTier
 	effectiveTier := dc.acct.rep.EffectiveTier()
+	bondedTier := dc.acct.rep.BondedTier
 	dc.acct.authMtx.Unlock()
 
 	bondIDStr := coinIDString(assetID, coinID)
@@ -1628,7 +1565,7 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, not
 	if int64(targetTier) > effectiveTier {
 		details := fmt.Sprintf("New tier = %d (target = %d).", effectiveTier, targetTier)
 		c.notify(newBondPostNoteWithTier(TopicBondExpired, string(TopicBondExpired),
-			details, db.WarningLevel, dc.acct.host, effectiveTier))
+			details, db.WarningLevel, dc.acct.host, bondedTier))
 	}
 
 	return nil

@@ -170,7 +170,7 @@ func (r Rule) Punishable() bool {
 // Reputation is a part of a number of server-originating messages. It was
 // introduced with the v2 ConnectResult.
 type Reputation struct {
-	BondedTier int64  `json:"bondTier"`
+	BondedTier int64  `json:"bondedTier"`
 	Penalties  uint16 `json:"penalties"`
 	Legacy     bool   `json:"legacyTier"`
 	Score      int32  `json:"score"`

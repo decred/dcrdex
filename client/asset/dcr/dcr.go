@@ -1094,8 +1094,6 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 
 	reserves := dcr.bondReserves.Load()
 	if reserves > bal.Available { // unmixed (immature) probably needs to trickle in
-		// TODO: Send wallet notification.
-		// https://github.com/decred/dcrdex/pull/2492
 		dcr.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toDCR(bal.Available), toDCR(reserves))
 		bal.ReservesDeficit = reserves - bal.Available

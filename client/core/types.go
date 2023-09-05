@@ -192,7 +192,7 @@ type BondOptionsForm struct {
 	TargetTier   *uint64 `json:"targetTier,omitempty"`
 	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
 	PenaltyComps uint16  `json:"penaltyComps"`
-	BondAsset    *uint32 `json:"bondAsset,omitempty"`
+	BondAssetID  *uint32 `json:"bondAssetID,omitempty"`
 }
 
 // PostBondForm is information necessary to post a new bond for a new or
@@ -633,6 +633,7 @@ type FeeAsset BondAsset
 // PendingBondState conveys a pending bond's asset and current confirmation
 // count.
 type PendingBondState struct {
+	CoinID  string `json:"coinID"`
 	Symbol  string `json:"symbol"`
 	AssetID uint32 `json:"assetID"`
 	Confs   uint32 `json:"confs"`
@@ -649,22 +650,31 @@ type BondOptions struct {
 	PenaltyComps uint16 `json:"PenaltyComps"`
 }
 
+type ExchangeAuth struct {
+	Rep             account.Reputation           `json:"rep"`
+	BondAssetID     uint32                       `json:"bondAssetID"`
+	PendingStrength int64                        `json:"pendingStrength"`
+	WeakStrength    int64                        `json:"weakStrength"`
+	LiveStrength    int64                        `json:"liveStrength"`
+	TargetTier      uint64                       `json:"targetTier"`
+	EffectiveTier   int64                        `json:"effectiveTier"`
+	MaxBondedAmt    uint64                       `json:"maxBondedAmt"`
+	PenaltyComps    uint16                       `json:"penaltyComps"`
+	PendingBonds    map[string]*PendingBondState `json:"pendingBonds"`
+}
+
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host             string                       `json:"host"`
-	AcctID           string                       `json:"acctID"`
-	Markets          map[string]*Market           `json:"markets"`
-	Assets           map[uint32]*dex.Asset        `json:"assets"`
-	BondExpiry       uint64                       `json:"bondExpiry"`
-	BondAssets       map[string]*BondAsset        `json:"bondAssets"`
-	ConnectionStatus comms.ConnectionStatus       `json:"connectionStatus"`
-	CandleDurs       []string                     `json:"candleDurs"`
-	ViewOnly         bool                         `json:"viewOnly"`
-	Reputation       account.Reputation           `json:"reputation"`
-	BondedTier       int64                        `json:"bondedTier"`
-	WeakBonds        uint32                       `json:"weakTiers"`
-	BondOptions      *BondOptions                 `json:"bondOptions"`
-	PendingBonds     map[string]*PendingBondState `json:"pendingBonds"`
+	Host             string                 `json:"host"`
+	AcctID           string                 `json:"acctID"`
+	Markets          map[string]*Market     `json:"markets"`
+	Assets           map[uint32]*dex.Asset  `json:"assets"`
+	BondExpiry       uint64                 `json:"bondExpiry"`
+	BondAssets       map[string]*BondAsset  `json:"bondAssets"`
+	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
+	CandleDurs       []string               `json:"candleDurs"`
+	ViewOnly         bool                   `json:"viewOnly"`
+	Auth             ExchangeAuth           `json:"auth"`
 	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
 
 	// OLD fields for the legacy registration fee (V0PURGE):

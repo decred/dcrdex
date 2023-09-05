@@ -437,16 +437,15 @@ func (dc *dexConnection) getPendingFee() *PendingFeeState {
 	}
 }
 
-// pendingBonds returns the PendingBondState for all pending bonds.
+// pendingBonds returns the PendingBondState for all pending bonds. pendingBonds
+// should be called with the acct.authMtx locked.
 func (dc *dexConnection) pendingBonds() map[string]*PendingBondState {
-	dc.acct.authMtx.RLock()
-	defer dc.acct.authMtx.RUnlock()
-
 	pendingBonds := make(map[string]*PendingBondState, len(dc.acct.pendingBonds))
 	for _, pb := range dc.acct.pendingBonds {
 		bondIDStr := coinIDString(pb.AssetID, pb.CoinID)
 		confs := dc.acct.pendingBondsConfs[bondIDStr]
 		pendingBonds[bondIDStr] = &PendingBondState{
+			CoinID:  bondIDStr,
 			AssetID: pb.AssetID,
 			Symbol:  unbip(pb.AssetID),
 			Confs:   confs,
@@ -471,20 +470,17 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 			Host:             dc.acct.host,
 			AcctID:           acctID,
 			ConnectionStatus: dc.status(),
-			PendingBonds:     dc.pendingBonds(),
 			PendingFee:       dc.getPendingFee(), // V0PURGE - deprecated with bonds in v1
 		}
 	}
 
 	bondAssets := make(map[string]*BondAsset, len(cfg.BondAssets))
-	msgBondAssets := make(map[uint32]*msgjson.BondAsset)
 	for symb, bondAsset := range cfg.BondAssets {
 		assetID, ok := dex.BipSymbolID(symb)
 		if !ok || assetID != bondAsset.ID {
 			dc.log.Warnf("Invalid bondAssets config with mismatched asset symbol %q and ID %d",
 				symb, bondAsset.ID)
 		}
-		msgBondAssets[assetID] = bondAsset
 		coreBondAsset := BondAsset(*bondAsset) // convert msgjson.BondAsset to core.BondAsset
 
 		bondAssets[symb] = &coreBondAsset
@@ -506,13 +502,6 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		}
 	}
 
-	// dc.acct.authMtx.RLock()
-	// // TODO: List bonds in core.Exchange. For now, just tier.
-	// bondAssetID, rep := dc.acct.bondAsset, dc.acct.reputation
-	// targetTier, maxBondedAmt := dc.acct.targetTier, dc.acct.maxBondedAmt
-	// bondedTier := sumBondStrengths(dc.acct.bonds, cfg.BondAssets)
-	// dc.acct.authMtx.RUnlock()
-
 	bondCfg := c.dexBondConfig(dc, time.Now().Unix())
 	acctBondState := c.bondStateOfDEX(dc, bondCfg)
 
@@ -526,15 +515,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		ConnectionStatus: dc.status(),
 		CandleDurs:       cfg.BinSizes,
 		ViewOnly:         dc.acct.isViewOnly(),
-		Reputation:       acctBondState.rep,
-		BondedTier:       acctBondState.liveStrength,
-		BondOptions: &BondOptions{
-			BondAsset:    acctBondState.bondAssetID,
-			TargetTier:   acctBondState.targetTier,
-			MaxBondedAmt: acctBondState.maxBondedAmt,
-			PenaltyComps: acctBondState.penaltyComps,
-		},
-		PendingBonds: dc.pendingBonds(),
+		Auth:             acctBondState.ExchangeAuth,
 		// TODO: Bonds
 
 		// Legacy reg fee (V0PURGE)
@@ -2871,11 +2852,14 @@ func (c *Core) walletIsActive(assetID uint32) bool {
 		if pf := dc.getPendingFee(); pf != nil && pf.AssetID == assetID {
 			return true
 		}
+		dc.acct.authMtx.RLock()
 		for _, pb := range dc.pendingBonds() {
 			if pb.AssetID == assetID {
+				dc.acct.authMtx.RUnlock()
 				return true
 			}
 		}
+		dc.acct.authMtx.RUnlock()
 	}
 	return false
 }

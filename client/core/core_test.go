@@ -10533,9 +10533,9 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "set target tier to 1",
 			bal:  singlyBondedReserves,
 			form: BondOptionsForm{
-				Addr:       acct.host,
-				TargetTier: &targetTier,
-				BondAsset:  &bondAsset.ID,
+				Addr:        acct.host,
+				TargetTier:  &targetTier,
+				BondAssetID: &bondAsset.ID,
 			},
 			after: acctState{
 				targetTier:   1,
@@ -10547,9 +10547,9 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "low balance",
 			bal:  singlyBondedReserves - 1,
 			form: BondOptionsForm{
-				Addr:       acct.host,
-				TargetTier: &targetTier,
-				BondAsset:  &bondAsset.ID,
+				Addr:        acct.host,
+				TargetTier:  &targetTier,
+				BondAssetID: &bondAsset.ID,
 			},
 			wantErr: true,
 		},
@@ -10559,7 +10559,7 @@ func TestUpdateBondOptions(t *testing.T) {
 			form: BondOptionsForm{
 				Addr:         acct.host,
 				TargetTier:   &targetTier,
-				BondAsset:    &bondAsset.ID,
+				BondAssetID:  &bondAsset.ID,
 				MaxBondedAmt: &tooLowMaxBonded,
 			},
 			wantErr: true,
@@ -10567,9 +10567,9 @@ func TestUpdateBondOptions(t *testing.T) {
 		{
 			name: "unsupported bond asset",
 			form: BondOptionsForm{
-				Addr:       acct.host,
-				TargetTier: &targetTier,
-				BondAsset:  &wrongBondAssetID,
+				Addr:        acct.host,
+				TargetTier:  &targetTier,
+				BondAssetID: &wrongBondAssetID,
 			},
 			wantErr: true,
 		},
@@ -10577,9 +10577,9 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "lower target tier with zero balance OK",
 			bal:  0,
 			form: BondOptionsForm{
-				Addr:       acct.host,
-				TargetTier: &targetTierZero,
-				BondAsset:  &bondAsset.ID,
+				Addr:        acct.host,
+				TargetTier:  &targetTierZero,
+				BondAssetID: &bondAsset.ID,
 			},
 			before: acctState{
 				targetTier:   1,
@@ -10592,9 +10592,9 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "lower target tier to zero with other exchanges still keeps reserves",
 			bal:  0,
 			form: BondOptionsForm{
-				Addr:       acct.host,
-				TargetTier: &targetTierZero,
-				BondAsset:  &bondAsset.ID,
+				Addr:        acct.host,
+				TargetTier:  &targetTierZero,
+				BondAssetID: &bondAsset.ID,
 			},
 			before: acctState{
 				targetTier:   1,

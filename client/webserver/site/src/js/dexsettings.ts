@@ -160,13 +160,13 @@ export default class DexSettingsPage extends BasePage {
   async prepareUpdateBondOptions () {
     const page = this.page
     const xc = app().user.exchanges[this.host]
-    page.bondTargetTier.setAttribute('placeholder', xc.bondOptions.targetTier.toString())
+    page.bondTargetTier.setAttribute('placeholder', xc.auth.targetTier.toString())
     Doc.empty(page.bondAssetSelect)
     for (const [assetSymbol, bondAsset] of Object.entries(xc.bondAssets)) {
       const option = document.createElement('option') as HTMLOptionElement
       option.value = bondAsset.id.toString()
       option.textContent = assetSymbol.toUpperCase()
-      if (bondAsset.id === xc.bondOptions.bondAsset) option.selected = true
+      if (bondAsset.id === xc.auth.bondAssetID) option.selected = true
       page.bondAssetSelect.appendChild(option)
     }
     page.bondOptionsErr.textContent = ''
@@ -236,12 +236,12 @@ export default class DexSettingsPage extends BasePage {
   async updateBondOptions () {
     const page = this.page
     const targetTier = parseInt(page.bondTargetTier.value ?? '')
-    const bondAsset = parseInt(page.bondAssetSelect.value ?? '')
+    const bondAssetID = parseInt(page.bondAssetSelect.value ?? '')
 
     const bondOptions = {
       host: this.host,
       targetTier: targetTier,
-      bondAsset: bondAsset
+      bondAssetID: bondAssetID
     }
 
     const loaded = app().loading(this.body)
@@ -259,8 +259,8 @@ export default class DexSettingsPage extends BasePage {
       }, 5000)
       // update the in-memory values.
       const xc = app().user.exchanges[this.host]
-      xc.bondOptions.bondAsset = bondAsset
-      xc.bondOptions.targetTier = targetTier
+      xc.auth.bondAssetID = bondAssetID
+      xc.auth.targetTier = targetTier
     }
   }
 }
