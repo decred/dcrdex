@@ -8710,10 +8710,33 @@ func handleTierChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	dc.acct.authMtx.Lock()
 	dc.updateReputation(tierChanged.Reputation, tierChanged.Tier, nil, nil)
 	targetTier := dc.acct.targetTier
+	rep := dc.acct.rep
 	dc.acct.authMtx.Unlock()
 	c.log.Infof("Received tierchanged notification from %v for account %v. New tier = %v (target = %d)",
 		dc.acct.host, dc.acct.ID(), tierChanged.Tier, targetTier)
 	// TODO: notify sub consumers e.g. frontend
+	c.notify(newReputationNote(dc.acct.host, rep))
+	return nil
+}
+
+func handleScoreChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var scoreChange *msgjson.ScoreChangedNotification
+	err := msg.Unmarshal(&scoreChange)
+	if err != nil {
+		return fmt.Errorf("tier changed note unmarshal error: %w", err)
+	}
+	if scoreChange == nil {
+		return errors.New("empty message")
+	}
+	// Check the signature.
+	err = dc.acct.checkSig(scoreChange.Serialize(), scoreChange.Sig)
+	if err != nil {
+		return newError(signatureErr, "handleScoreChangeMsg: DEX signature validation error: %v", err) // warn?
+	}
+	dc.acct.authMtx.Lock()
+	dc.updateReputation(&scoreChange.Reputation, scoreChange.Reputation.EffectiveTier() /* unused. this note is >= v2 */, nil, nil)
+	dc.acct.authMtx.Unlock()
+	c.notify(newReputationNote(dc.acct.host, scoreChange.Reputation))
 	return nil
 }
 
@@ -8768,6 +8791,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.RevokeOrderRoute:     handleRevokeOrderMsg,
 	msgjson.RevokeMatchRoute:     handleRevokeMatchMsg,
 	msgjson.TierChangeRoute:      handleTierChangeMsg,
+	msgjson.ScoreChangeRoute:     handleScoreChangeMsg,
 	msgjson.BondExpiredRoute:     handleBondExpiredMsg,
 }
 

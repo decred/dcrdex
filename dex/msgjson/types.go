@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 )
 
@@ -187,8 +188,11 @@ const (
 	// according to the configure bond expiry duration and the bond's lock time.
 	BondExpiredRoute = "bondexpired"
 	// TierChangeRoute is a server-originating notification sent to a connected
-	// user who's tier changes for any reason.
+	// user whose tier changes for any reason.
 	TierChangeRoute = "tierchange" // (TODO: use in many auth mgr events)
+	// ScoreChangeRoute is a server-originating notificdation sent to a
+	// connected user when their score changes.
+	ScoreChangeRoute = "scorechanged"
 	// ConfigRoute is the client-originating request-type message requesting the
 	// DEX configuration information.
 	ConfigRoute = "config"
@@ -965,7 +969,7 @@ type ConnectResult struct {
 	Suspended *bool `json:"suspended,omitempty"` // DEPRECATED - implied by tier<1
 }
 
-// TierChangedNotification is the dex-originating notification send when the
+// TierChangedNotification is the dex-originating notification sent when the
 // user's tier changes as a result of account conduct violations. Tier change
 // due to bond expiry is communicated with a BondExpiredNotification.
 type TierChangedNotification struct {
@@ -982,6 +986,27 @@ func (tc *TierChangedNotification) Serialize() []byte {
 	b := make([]byte, 0, 8+len(tc.Reason))
 	b = append(b, uint64Bytes(uint64(tc.Tier))...)
 	return append(b, []byte(tc.Reason)...)
+}
+
+// ScoreChangedNotification is the dex-originating notification sent when the
+// user's score changes.
+type ScoreChangedNotification struct {
+	Signature
+	Reputation account.Reputation `json:"reputation"`
+}
+
+// Serialize serializes the ScoreChangedNotification data.
+func (tc *ScoreChangedNotification) Serialize() []byte {
+	// serialization: bondedTier 8 + penalties 2 + legacy 1 + score 4
+	b := make([]byte, 0, 11)
+	b = append(b, uint64Bytes(uint64(tc.Reputation.BondedTier))...)
+	b = append(b, uint16Bytes(tc.Reputation.Penalties)...)
+	legacy := encode.ByteFalse
+	if tc.Reputation.Legacy {
+		legacy = encode.ByteTrue
+	}
+	b = append(b, legacy...)
+	return append(b, uint32Bytes(uint32(tc.Reputation.Score))...)
 }
 
 // PenaltyNote is the payload of a Penalty notification.

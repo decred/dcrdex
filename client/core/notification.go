@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 )
 
 // Notifications should use the following note type strings.
@@ -37,6 +38,7 @@ const (
 	NoteTypeCreateWallet = "createwallet"
 	NoteTypeLogin        = "login"
 	NoteTypeWalletNote   = "walletnote"
+	NoteTypeReputation   = "reputation"
 )
 
 var noteChanCounter uint64
@@ -666,5 +668,19 @@ func newWalletNote(n asset.WalletNotification) *WalletNote {
 	return &WalletNote{
 		Notification: db.NewNotification(NoteTypeWalletNote, TopicWalletNotification, "", "", db.Data),
 		Payload:      n,
+	}
+}
+
+type ReputationNote struct {
+	db.Notification
+	Host       string
+	Reputation account.Reputation
+}
+
+const TopicReputationUpdate = "ReputationUpdate"
+
+func newReputationNote(host string, rep account.Reputation) *LoginNote {
+	return &LoginNote{
+		Notification: db.NewNotification(NoteTypeReputation, TopicReputationUpdate, "", "", db.Data),
 	}
 }
