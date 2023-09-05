@@ -914,7 +914,7 @@ func (auth *AuthManager) UserScore(user account.AccountID) (score int32) {
 func (auth *AuthManager) userReputation(bondTier int64, score int32, legacyFeePaid bool) *account.Reputation {
 	var penalties int32
 	if score < 0 {
-		penalties = int32(score) / int32(auth.penaltyThreshold)
+		penalties = score / auth.penaltyThreshold
 	}
 	return &account.Reputation{
 		BondedTier: bondTier,
@@ -1702,11 +1702,12 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		bondTier += int64(bond.Strength)
 		expireTime := lockTime.Add(-auth.bondExpiry)
 		msgBonds = append(msgBonds, &msgjson.Bond{
-			Version: bond.Version,
-			Amount:  uint64(bond.Amount),
-			Expiry:  uint64(expireTime.Unix()),
-			CoinID:  bond.CoinID,
-			AssetID: bond.AssetID,
+			Version:  bond.Version,
+			Amount:   uint64(bond.Amount),
+			Expiry:   uint64(expireTime.Unix()),
+			CoinID:   bond.CoinID,
+			AssetID:  bond.AssetID,
+			Strength: bond.Strength, // Added with v2 reputation
 		})
 		activeBonds = append(activeBonds, bond)
 	}

@@ -107,6 +107,8 @@ type Bond struct {
 
 	Confirmed bool `json:"confirmed"` // if reached required confs according to server, not in serialization
 	Refunded  bool `json:"refunded"`  // not in serialization
+
+	Strength uint32 `json:"strength"`
 }
 
 // UniqueID computes the bond's unique ID for keying purposes.
@@ -116,7 +118,7 @@ func (b *Bond) UniqueID() []byte {
 
 // Encode serialized the Bond. Confirmed and Refund are not included.
 func (b *Bond) Encode() []byte {
-	return versionedBytes(1).
+	return versionedBytes(2).
 		AddData(uint16Bytes(b.Version)).
 		AddData(uint32Bytes(b.AssetID)).
 		AddData(b.CoinID).
@@ -126,7 +128,8 @@ func (b *Bond) Encode() []byte {
 		AddData(uint64Bytes(b.Amount)).
 		AddData(uint64Bytes(b.LockTime)).
 		AddData(uint32Bytes(b.KeyIndex)).
-		AddData(b.RefundTx)
+		AddData(b.RefundTx).
+		AddData(uint32Bytes(b.Strength))
 	// Confirmed and Refunded are not part of the encoding.
 }
 
@@ -141,6 +144,8 @@ func DecodeBond(b []byte) (*Bond, error) {
 		return decodeBond_v0(pushes)
 	case 1:
 		return decodeBond_v1(pushes)
+	case 2:
+		return decodeBond_v2(pushes)
 	}
 	return nil, fmt.Errorf("unknown Bond version %d", ver)
 }
@@ -176,10 +181,17 @@ func decodeBond_v1(pushes [][]byte) (*Bond, error) {
 	if len(pushes) != 10 {
 		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
 	}
+	return decodeBond_v2(append(pushes, []byte{0, 0, 0, 0} /* uint32 strength */))
+}
+
+func decodeBond_v2(pushes [][]byte) (*Bond, error) {
+	if len(pushes) != 11 {
+		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
+	}
 	ver, assetIDB, coinID := pushes[0], pushes[1], pushes[2]
 	utx, stx := pushes[3], pushes[4]
 	data, amtB, lockTimeB := pushes[5], pushes[6], pushes[7]
-	keyIndex, refundTx := pushes[8], pushes[9]
+	keyIndex, refundTx, strength := pushes[8], pushes[9], pushes[10]
 	return &Bond{
 		Version:    intCoder.Uint16(ver),
 		AssetID:    intCoder.Uint32(assetIDB),
@@ -191,6 +203,7 @@ func decodeBond_v1(pushes [][]byte) (*Bond, error) {
 		LockTime:   intCoder.Uint64(lockTimeB),
 		KeyIndex:   intCoder.Uint32(keyIndex),
 		RefundTx:   refundTx,
+		Strength:   intCoder.Uint32(strength),
 	}, nil
 }
 
@@ -272,6 +285,8 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 		return decodeAccountInfo_v2(pushes)
 	case 3:
 		return decodeAccountInfo_v3(pushes)
+	case 4:
+		return decodeAccountInfo_v4(pushes)
 	}
 	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }

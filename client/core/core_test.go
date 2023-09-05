@@ -714,7 +714,7 @@ type TXCWallet struct {
 	refundBondCoin              asset.Coin
 	refundBondErr               error
 	makeBondTxErr               error
-	reserves                    uint64
+	reserves                    atomic.Uint64
 
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
@@ -1092,7 +1092,7 @@ func (*TXCWallet) BondsFeeBuffer(feeRate uint64) uint64 {
 }
 
 func (w *TXCWallet) SetBondReserves(reserves uint64) {
-	w.reserves = reserves
+	w.reserves.Store(reserves)
 }
 
 func (w *TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
@@ -3103,14 +3103,22 @@ wait:
 	form.Rate = rate
 
 	// No from wallet
+	tCore.walletMtx.Lock()
 	delete(tCore.wallets, tUTXOAssetA.ID)
+	tCore.walletMtx.Unlock()
 	ensureErr("no dcr wallet")
+	tCore.walletMtx.Lock()
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
+	tCore.walletMtx.Unlock()
 
 	// No to wallet
+	tCore.walletMtx.Lock()
 	delete(tCore.wallets, tUTXOAssetB.ID)
+	tCore.walletMtx.Unlock()
 	ensureErr("no btc wallet")
+	tCore.walletMtx.Lock()
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
+	tCore.walletMtx.Unlock()
 
 	// Address error
 	tBtcWallet.addrErr = tErr
@@ -10628,8 +10636,8 @@ func TestUpdateBondOptions(t *testing.T) {
 			if acct.maxBondedAmt != after.maxBondedAmt {
 				t.Fatalf("Wrong maxBondedAmt. %d != %d", acct.maxBondedAmt, after.maxBondedAmt)
 			}
-			if tDcrWallet.reserves != tt.expReserves {
-				t.Fatalf("Wrong reserves. %d != %d", tDcrWallet.reserves, tt.expReserves)
+			if tDcrWallet.reserves.Load() != tt.expReserves {
+				t.Fatalf("Wrong reserves. %d != %d", tDcrWallet.reserves.Load(), tt.expReserves)
 			}
 		})
 	}
@@ -10675,8 +10683,8 @@ func TestRotateBonds(t *testing.T) {
 		if len(acct.expiredBonds) != wantExpired {
 			t.Fatalf("wanted %d expired bonds, got %d", wantExpired, len(acct.expiredBonds))
 		}
-		if tDcrWallet.reserves != expectedReserves {
-			t.Fatalf("wrong reserves. expected %d, got %d", expectedReserves, tDcrWallet.reserves)
+		if tDcrWallet.reserves.Load() != expectedReserves {
+			t.Fatalf("wrong reserves. expected %d, got %d", expectedReserves, tDcrWallet.reserves.Load())
 		}
 	}
 

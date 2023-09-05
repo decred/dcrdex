@@ -646,7 +646,7 @@ func (c *TCore) PostBond(form *core.PostBondForm) (*core.PostBondResult, error) 
 	ba := xc.BondAssets[symbol]
 	tier := form.Bond / ba.Amt
 	xc.BondOptions.TargetTier = tier
-	xc.Tier = int64(tier)
+	xc.Reputation.BondedTier = int64(tier)
 	return &core.PostBondResult{
 		BondID:      "abc",
 		ReqConfirms: uint16(ba.Confs),

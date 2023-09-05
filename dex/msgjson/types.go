@@ -946,11 +946,12 @@ func (c *Connect) Serialize() []byte {
 // Bond is information on a fidelity bond. This is part of the ConnectResult and
 // PostBondResult payloads.
 type Bond struct {
-	Version uint16 `json:"version"`
-	Amount  uint64 `json:"amount"`
-	Expiry  uint64 `json:"expiry"` // when it expires, not the lock time
-	CoinID  Bytes  `json:"coinID"` // NOTE: ID capitalization not consistent with other payloads, but internally consistent with assetID
-	AssetID uint32 `json:"assetID"`
+	Version  uint16 `json:"version"`
+	Amount   uint64 `json:"amount"`
+	Expiry   uint64 `json:"expiry"` // when it expires, not the lock time
+	CoinID   Bytes  `json:"coinID"` // NOTE: ID capitalization not consistent with other payloads, but internally consistent with assetID
+	AssetID  uint32 `json:"assetID"`
+	Strength uint32 `json:"strength"`
 }
 
 // ConnectResult is the result for the ConnectRoute request.

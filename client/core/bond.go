@@ -155,6 +155,11 @@ func minBondLifetime(net dex.Network, bondExpiry int64) time.Duration {
 // sumBondStrengths calculates the total strength of a list of bonds.
 func sumBondStrengths(bonds []*db.Bond, bondAssets map[uint32]*msgjson.BondAsset) (total int64) {
 	for _, bond := range bonds {
+		if bond.Strength > 0 { // Added with v2 reputation
+			total += int64(bond.Strength)
+			continue
+		}
+		// v1. Gotta hope the server didn't change the bond amount.
 		if ba := bondAssets[bond.AssetID]; ba != nil && ba.Amt > 0 {
 			strength := bond.Amount / ba.Amt
 			total += int64(strength)
@@ -171,6 +176,11 @@ type dexBondCfg struct {
 	haveConnected  bool
 }
 
+// updateBondReserves iterates existing accounts and calculates the amount that
+// should be reserved for bonds for each asset. The wallets reserves are
+// updated regardless of whether the wallet balance can support it. If
+// exactly 1 balanceCheckID is provided, the balance will be checked for that
+// asset, and any insufficiencies will be logged.
 func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 	reserves := make(map[uint32][]uint64)
 	processDC := func(dc *dexConnection) {
@@ -223,15 +233,19 @@ func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 		// renewing bonds.
 		paddedReserves := nominalReserves + feeReserves
 		if len(balanceCheckID) == 1 && w.AssetID == balanceCheckID[0] && w.connected() {
-			bal, err := w.Balance()
-			if err != nil {
-				c.log.Errorf("Error getting balance for reserves check")
-			} else {
-				avail := bal.Available + bal.BondReserves
-				if avail < paddedReserves {
-					c.log.Warnf("Bond reserves of %d %s exceed available balance of %d",
-						paddedReserves, unbip(w.AssetID), avail)
-				}
+			// There are a few paths that request balance checks, and the
+			// cached balance is expected to be up-to-date in them all, with the
+			// only possible exception of ReconfigureWallet -> reReserveFunding,
+			// where an error updating the balance in ReconfigureWallet is only
+			// logged as a warning, for some reason. Either way, worst that
+			// happens in that scenario is log an outdated message.
+			w.mtx.RLock()
+			bal := w.balance
+			w.mtx.RUnlock()
+			avail := bal.Available + bal.BondReserves
+			if avail < paddedReserves {
+				c.log.Warnf("Bond reserves of %d %s exceeds available balance of %d",
+					paddedReserves, unbip(w.AssetID), avail)
 			}
 		}
 		bonder.SetBondReserves(paddedReserves)
@@ -1300,38 +1314,6 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 		}
 	}
 
-	// lockDur := minBondLifetime(c.net, int64(bondExpiry))
-	// lockTime := time.Now().Add(lockDur).Truncate(time.Second)
-	// if form.LockTime > 0 {
-	// 	lockTime = time.Unix(int64(form.LockTime), 0)
-	// }
-	// expireTime := lockTime.Add(time.Second * time.Duration(-bondExpiry)) // when the server would expire the bond
-	// if time.Until(expireTime) < time.Minute {
-	// 	return nil, newError(bondTimeErr, "bond would expire in less than one minute")
-	// }
-	// if lockDur := time.Until(lockTime); lockDur > lockTimeLimit {
-	// 	return nil, newError(bondTimeErr, "excessive lock time (%v>%v)", lockDur, lockTimeLimit)
-	// } else if lockDur <= 0 { // should be redundant, but be sure
-	// 	return nil, newError(bondTimeErr, "lock time of %d in the past", form.LockTime)
-	// }
-
-	// // If we have parallel bond tracks out of sync, we may use an earlier lock
-	// // time in order to get back in sync.
-	// mergeableLocktimeThresh := uint64(time.Now().Unix()) + bondExpiry*5/4 + uint64(pendingBuffer(c.net))
-	// var bestMergeableLocktime uint64
-	// dc.acct.authMtx.RLock()
-	// for _, b := range dc.acct.bonds {
-	// 	if b.LockTime > mergeableLocktimeThresh && (bestMergeableLocktime == 0 || b.LockTime > bestMergeableLocktime) {
-	// 		bestMergeableLocktime = b.LockTime
-	// 	}
-	// }
-	// dc.acct.authMtx.RUnlock()
-	// if bestMergeableLocktime > 0 {
-	// 	newLockTime := time.Unix(int64(bestMergeableLocktime), 0)
-	// 	c.log.Infof("Reducing bond locktime from %s to %s to facilitate merge with parallel bond track", lockTime, newLockTime)
-	// 	lockTime = newLockTime
-	// }
-
 	// Check that the bond amount matches the caller's expectations.
 	if form.Bond < bondAsset.Amt {
 		return nil, newError(bondAmtErr, "specified bond amount is less than the DEX-provided amount. %d < %d",
@@ -1375,7 +1357,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 
 func (c *Core) calculateMergingLocktime(dc *dexConnection) (time.Time, error) {
 	bondExpiry := int64(dc.config().BondExpiry)
-	lockDur := minBondLifetime(c.net, int64(bondExpiry))
+	lockDur := minBondLifetime(c.net, bondExpiry)
 	lockTime := time.Now().Add(lockDur).Truncate(time.Second)
 	expireTime := lockTime.Add(time.Second * time.Duration(-bondExpiry)) // when the server would expire the bond
 	if time.Until(expireTime) < time.Minute {
@@ -1449,6 +1431,7 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 		LockTime:   uint64(lockTime.Unix()),
 		KeyIndex:   keyIndex,
 		RefundTx:   bond.RedeemTx,
+		Strength:   uint32(amt / bondAsset.Amt),
 		// Confirmed and Refunded are false (new bond tx)
 	}
 
