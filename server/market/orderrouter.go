@@ -37,7 +37,7 @@ type AuthManager interface {
 	MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, epochGap int32, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
-	UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64
+	UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error)
 }
 
 const (
@@ -96,14 +96,19 @@ type MarketTunnel interface {
 	// cancellation marked against the user, coins unlocked, and orderbook
 	// subscribers notified). See Unbook for details.
 	CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
+
+	Parcels(user account.AccountID, settlingQty uint64) uint32
 }
+
+type marketParcelCalculator func(settlingQty uint64) (parcels uint32)
 
 // orderRecord contains the information necessary to respond to an order
 // request.
 type orderRecord struct {
-	order order.Order
-	req   msgjson.Stampable
-	msgID uint64
+	order        order.Order
+	req          msgjson.Stampable
+	msgID        uint64
+	checkParcels func(marketParcelCalculator) bool
 }
 
 // assetSet is pointers to two different assets, but with 4 ways of addressing
@@ -134,6 +139,11 @@ type FeeSource interface {
 	LastRate(assetID uint32) (feeRate uint64)
 }
 
+// MatchSwapper is a source for information about settling matches.
+type MatchSwapper interface {
+	UnsettledQuantity(user account.AccountID) map[[2]uint32]uint64
+}
+
 // OrderRouter handles the 'limit', 'market', and 'cancel' DEX routes. These
 // are authenticated routes used for placing and canceling orders.
 type OrderRouter struct {
@@ -143,15 +153,17 @@ type OrderRouter struct {
 	latencyQ    *wait.TickerQueue
 	feeSource   FeeSource
 	dexBalancer *DEXBalancer
+	swapper     MatchSwapper
 }
 
 // OrderRouterConfig is the configuration settings for an OrderRouter.
 type OrderRouterConfig struct {
-	AuthManager AuthManager
-	Assets      map[uint32]*asset.BackedAsset
-	Markets     map[string]MarketTunnel
-	FeeSource   FeeSource
-	DEXBalancer *DEXBalancer
+	AuthManager  AuthManager
+	Assets       map[uint32]*asset.BackedAsset
+	Markets      map[string]MarketTunnel
+	FeeSource    FeeSource
+	DEXBalancer  *DEXBalancer
+	MatchSwapper MatchSwapper
 }
 
 // NewOrderRouter is a constructor for an OrderRouter.
@@ -163,6 +175,7 @@ func NewOrderRouter(cfg *OrderRouterConfig) *OrderRouter {
 		latencyQ:    wait.NewTickerQueue(2 * time.Second),
 		feeSource:   cfg.FeeSource,
 		dexBalancer: cfg.DEXBalancer,
+		swapper:     cfg.MatchSwapper,
 	}
 	cfg.AuthManager.Route(msgjson.LimitRoute, router.handleLimit)
 	cfg.AuthManager.Route(msgjson.MarketRoute, router.handleMarket)
@@ -661,7 +674,69 @@ func (r *OrderRouter) sufficientAccountBalance(accountAddr string, ord order.Ord
 	return r.dexBalancer.CheckBalance(accountAddr, assetID, redeemAssetID, fundingQty, fundingLots, redeems)
 }
 
+// calcParcelLimit computes the users score-scaled user parcel limit.
+func calcParcelLimit(tier int64, score, maxScore int32) uint32 {
+	// Users limit starts at 2 parcels per tier.
+	lowerLimit := tier * dex.PerTierBaseParcelLimit
+	// Limit can scale up to 3x with score.
+	upperLimit := lowerLimit * dex.ParcelLimitScoreMultiplier
+	limitRange := upperLimit - lowerLimit
+	var scaleFactor float64
+	if score > 0 {
+		scaleFactor = float64(score) / float64(maxScore)
+	}
+	return uint32(lowerLimit) + uint32(math.Round(scaleFactor*float64(limitRange)))
+}
+
+// checkParcelLimit checks that an order does not cause the user to exceed
+// their parcel limit. The calcParcels function must be provided by the order's
+// targeted Market, and calculated the number of parcels from that market when
+// quantity from settling matches is taken into consideration.
+func (r *OrderRouter) checkParcelLimit(oRecord *orderRecord, calcParcels marketParcelCalculator) bool {
+	user := oRecord.order.User()
+	prefix := oRecord.order.Prefix()
+
+	targetMarketName, _ := dex.MarketName(prefix.BaseAsset, prefix.QuoteAsset)
+
+	tier, score, maxScore, err := r.auth.UserReputation(user)
+	if err != nil {
+		log.Errorf("error getting user score for parcel limit check: %w", err)
+		return false
+	}
+	if tier <= 0 {
+		return false
+	}
+	parcelLimit := calcParcelLimit(tier, score, maxScore)
+
+	settlingQuantities := make(map[string]uint64)
+	for bq, qty := range r.swapper.UnsettledQuantity(user) {
+		mktName, _ := dex.MarketName(bq[0], bq[1])
+		settlingQuantities[mktName] += qty
+	}
+
+	var otherMarketParcels uint32
+	var settlingQty uint64
+	for mktName, mkt := range r.tunnels {
+		if mktName == targetMarketName {
+			settlingQty = settlingQuantities[mktName]
+			continue
+		}
+
+		otherMarketParcels += mkt.Parcels(user, settlingQuantities[mktName])
+		if otherMarketParcels > parcelLimit {
+			return false
+		}
+	}
+	targetMarketParcels := calcParcels(settlingQty)
+
+	return otherMarketParcels+targetMarketParcels <= parcelLimit
+}
+
 func (r *OrderRouter) submitOrderToMarket(tunnel MarketTunnel, oRecord *orderRecord) *msgjson.Error {
+	oRecord.checkParcels = func(f marketParcelCalculator) bool {
+		return r.checkParcelLimit(oRecord, f)
+	}
+
 	if err := tunnel.SubmitOrder(oRecord); err != nil {
 		code := msgjson.UnknownMarketError
 		switch {

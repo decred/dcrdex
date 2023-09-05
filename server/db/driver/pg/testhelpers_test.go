@@ -55,13 +55,13 @@ func randomCommitment() (com order.Commitment) {
 }
 
 func mktConfig() (markets []*dex.MarketInfo) {
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, RateStep, EpochDuration, 0, MarketBuyBuffer)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}
 	markets = append(markets, mktConfig)
 
-	mktConfig, err = dex.NewMarketInfoFromSymbols("BTC", "LTC", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err = dex.NewMarketInfoFromSymbols("BTC", "LTC", LotSize, RateStep, EpochDuration, 0, MarketBuyBuffer)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}

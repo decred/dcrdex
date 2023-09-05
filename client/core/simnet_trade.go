@@ -1527,13 +1527,13 @@ HELPER TYPES, FUNCTIONS AND METHODS
 // marketConfig taken from dcrdex/server/cmd/dcrdex/settings.go
 type marketConfig struct {
 	Markets []*struct {
-		Base           string  `json:"base"`
-		Quote          string  `json:"quote"`
-		LotSize        uint64  `json:"lotSize"`
-		RateStep       uint64  `json:"rateStep"`
-		Duration       uint64  `json:"epochDuration"`
-		MBBuffer       float64 `json:"marketBuyBuffer"`
-		BookedLotLimit uint32  `json:"userBookedLotLimit"`
+		Base       string  `json:"base"`
+		Quote      string  `json:"quote"`
+		LotSize    uint64  `json:"lotSize"`
+		RateStep   uint64  `json:"rateStep"`
+		Duration   uint64  `json:"epochDuration"`
+		MBBuffer   float64 `json:"marketBuyBuffer"`
+		ParcelSize uint32  `json:"parcelSize"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.AssetConf `json:"assets"`
 }

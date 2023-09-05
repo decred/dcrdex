@@ -23,7 +23,7 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// valid market
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, RateStep, EpochDuration, 0, MarketBuyBuffer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPrepareTables(t *testing.T) {
 
 	// Mutated existing market. Should return mutated markets in purge
 	// returns.
-	mktConfig, err = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8, RateStep, EpochDuration, MarketBuyBuffer) // lot size change
+	mktConfig, err = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8, RateStep, EpochDuration, 0, MarketBuyBuffer) // lot size change
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// Add a new market.
-	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9, RateStep, EpochDuration, 0, MarketBuyBuffer)
 	purgeMkts, err = prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig})
 	if err != nil {
 		t.Error(err)
@@ -79,7 +79,7 @@ func TestUpdateLotSize(t *testing.T) {
 	}
 
 	// valid market
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, RateStep, EpochDuration, 0, MarketBuyBuffer)
 	if err != nil {
 		t.Fatal(err)
 	}

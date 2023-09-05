@@ -12,7 +12,7 @@ import (
 )
 
 func TestValidateOrder(t *testing.T) {
-	mktInfo, err := dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	mktInfo, err := dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, RateStep, EpochDuration, 0, MarketBuyBuffer)
 	if err != nil {
 		t.Fatalf("invalid market: %v", err)
 	}

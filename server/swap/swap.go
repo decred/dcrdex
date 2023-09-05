@@ -432,22 +432,31 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 	}
 }
 
-// UserSwappingAmt gets the total amount in active swaps for a user in a
-// specified market. This helps the market compute a user's order size limit.
-func (s *Swapper) UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64) {
+// UnsettledQuantity sums up the settling quantity per market for a user. Part
+// of the market.MatchSwapper interface.
+func (s *Swapper) UnsettledQuantity(user account.AccountID) map[[2]uint32]uint64 {
 	s.matchMtx.RLock()
-	um, found := s.userMatches[user]
-	s.matchMtx.RUnlock()
+	defer s.matchMtx.RUnlock()
+	marketQuantities := make(map[[2]uint32]uint64)
+	userMatches, found := s.userMatches[user]
 	if !found {
-		return
+		return marketQuantities
 	}
-	for _, mt := range um {
-		if mt.Maker.BaseAsset == base && mt.Maker.QuoteAsset == quote {
-			amt += mt.Quantity
-			count++
+	for _, mt := range userMatches {
+		mt.mtx.RLock()
+		matchStatus := mt.Status
+		mt.mtx.RUnlock()
+		if mt.Maker.AccountID == user {
+			if matchStatus >= order.MakerRedeemed {
+				continue
+			}
+		} else if matchStatus >= order.TakerSwapCast {
+			continue
 		}
+		mktID := [2]uint32{mt.Maker.BaseAsset, mt.Maker.QuoteAsset}
+		marketQuantities[mktID] += mt.Quantity
 	}
-	return
+	return marketQuantities
 }
 
 // pendingAccountStats is used to sum in-process match stats for the

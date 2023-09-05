@@ -68,7 +68,7 @@ func TestNewMarketInfo(t *testing.T) {
 
 func TestNewMarketInfoFromSymbols(t *testing.T) {
 	// ok
-	mktInfo, err := NewMarketInfoFromSymbols("dcr", "btc", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	mktInfo, err := NewMarketInfoFromSymbols("dcr", "btc", LotSize, RateStep, EpochDuration, DefaultParcelSize, MarketBuyBuffer)
 	if err != nil {
 		t.Errorf("NewMarketInfoFromSymbols failed: %v", err)
 	}
@@ -77,13 +77,13 @@ func TestNewMarketInfoFromSymbols(t *testing.T) {
 	}
 
 	// bad base
-	_, err = NewMarketInfoFromSymbols("super fake asset", "btc", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	_, err = NewMarketInfoFromSymbols("super fake asset", "btc", LotSize, RateStep, EpochDuration, DefaultParcelSize, MarketBuyBuffer)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent base asset")
 	}
 
 	// bad quote
-	_, err = NewMarketInfoFromSymbols("dcr", "btc not BTC or bTC", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	_, err = NewMarketInfoFromSymbols("dcr", "btc not BTC or bTC", LotSize, RateStep, EpochDuration, DefaultParcelSize, MarketBuyBuffer)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent quote asset")
 	}

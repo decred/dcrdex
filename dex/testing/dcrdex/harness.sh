@@ -474,8 +474,6 @@ adminsrvaddr=127.0.0.1:16542
 bcasttimeout=1m
 # freecancels=1
 maxepochcancels=128
-inittakerlotlimit=40
-abstakerlotlimit=1200
 httpprof=1
 noderelayaddr=127.0.0.1:17539
 EOF
