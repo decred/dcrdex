@@ -757,7 +757,7 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 	}
 
 	dc.acct.authMtx.Lock()
-	dc.updateReputation(postBondRes.Reputation, &postBondRes.Tier, nil, nil)
+	dc.updateReputation(postBondRes.Reputation, postBondRes.Tier, nil, nil)
 	dc.acct.authMtx.Unlock()
 
 	// Check the response signature.

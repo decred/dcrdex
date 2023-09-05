@@ -142,7 +142,8 @@ type dexConnection struct {
 	notify     func(Notification)
 	ticker     *dexTicker
 	// apiVer is an atomic. An uninitiated connection should be set to -1.
-	apiVer int32
+	apiVer          int32
+	monitoringV1Rep atomic.Bool
 
 	assetsMtx sync.RWMutex
 	assets    map[uint32]*dex.Asset
@@ -6585,19 +6586,21 @@ func bondKey(assetID uint32, coinID []byte) string {
 // updateReputation must be called with the authMtx locked.
 func (dc *dexConnection) updateReputation(
 	newReputation *account.Reputation,
-	tier *int64,
+	tier int64,
 	legacyFee *bool,
 	scor *int32,
 ) {
+	// Retired v0 (ConnectResult.Tier == nil) standard.
 
-	if newReputation != nil { // v2 reputation
+	// v2 reputation
+	if newReputation != nil {
 		dc.acct.rep = *newReputation
 		return
 	}
 
 	// v1 reputation
 	// We have tier info, but server isn't sending a TierReportV2.
-	effectiveTier := *tier
+	effectiveTier := tier
 	legacyFeePaid := dc.acct.legacyFeePaid
 	if legacyFee != nil {
 		legacyFeePaid = *legacyFee
@@ -6615,9 +6618,9 @@ func (dc *dexConnection) updateReputation(
 	var penalties uint16
 	var score int32
 	oldRep := dc.acct.rep
-	// If we got here through authDEX -> ConnectResult, we won't have an
-	// oldTierReport, but we will have a score. For other paths, we will have
-	// an oldTierReport but we won't have a score.
+	// If we got here through authDEX -> ConnectResult, we won't have an oldRep,
+	// but we will have a score. For other paths, we will have an oldRep but we
+	// won't have a score.
 	if !dc.acct.isAuthed {
 		// We don't get a score in anything but the ConnectResult, so if we got
 		// here via e.g. postBond, the best we can do is to assume these values
@@ -6631,7 +6634,6 @@ func (dc *dexConnection) updateReputation(
 		}
 	}
 
-	// effectiveTier = bondedTier + bonusTiers - revokedTiers
 	bondedTier := effectiveTier + int64(penalties)
 	dc.acct.rep = account.Reputation{
 		BondedTier: bondedTier,
@@ -6706,6 +6708,18 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 	if err != nil {
 		return fmt.Errorf("'connect' error: %w", err)
+	}
+
+	if result.Tier == nil {
+		return fmt.Errorf("pre-bond servers no longer supported by this client")
+	}
+
+	if result.Reputation == nil {
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.monitorV1Rep(dc)
+		}()
 	}
 
 	// Check the servers response signature.
@@ -6826,8 +6840,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// reconnect, (3) bondConfirmed for the initial bond for the account.
 	// totalReserved is non-zero in #3, but zero in #1. There are no reserves
 	// actions to take in #3 since PostBond reserves prior to post.
-
-	dc.updateReputation(result.Reputation, result.Tier, result.LegacyFeePaid, &result.Score)
+	dc.updateReputation(result.Reputation, *result.Tier, result.LegacyFeePaid, &result.Score)
 	rep := dc.acct.rep
 	effectiveTier := rep.EffectiveTier()
 	c.log.Infof("Authenticated connection to %s, acct %v, %d active bonds, %d active orders, %d active matches, score %d, tier %d",
@@ -7045,6 +7058,36 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	return nil
+}
+
+// Servers using the V1 reputation model must calculate their penalties from
+// their score, and the ConnectResult is the only place to get their score.
+// Poll every hour for score updates to adjust our penalty count.
+func (c *Core) monitorV1Rep(dc *dexConnection) {
+	if !dc.monitoringV1Rep.CompareAndSwap(false, true) {
+		return
+	}
+	ticker := time.NewTicker(time.Hour)
+	for {
+		select {
+		case <-ticker.C:
+		case <-c.ctx.Done():
+			return
+		}
+		if !dc.acct.authed() {
+			continue
+		}
+		if err := c.authDEX(dc); err != nil {
+			c.log.Errorf("Error re-authorizing ")
+		} else {
+			dc.acct.authMtx.RLock()
+			rep := dc.acct.rep
+			dc.acct.authMtx.RUnlock()
+			c.log.Debugf("Updated v1 reputation for %s. Score = %d, penalties = %d",
+				dc.acct.host, rep.Score, rep.Penalties)
+		}
+
+	}
 }
 
 // AssetBalance retrieves and updates the current wallet balance.
@@ -8665,7 +8708,7 @@ func handleTierChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return newError(signatureErr, "handleTierChangeMsg: DEX signature validation error: %v", err) // warn?
 	}
 	dc.acct.authMtx.Lock()
-	dc.updateReputation(tierChanged.Reputation, &tierChanged.Tier, nil, nil)
+	dc.updateReputation(tierChanged.Reputation, tierChanged.Tier, nil, nil)
 	targetTier := dc.acct.targetTier
 	dc.acct.authMtx.Unlock()
 	c.log.Infof("Received tierchanged notification from %v for account %v. New tier = %v (target = %d)",
