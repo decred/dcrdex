@@ -439,12 +439,12 @@ func (dc *dexConnection) getPendingFee() *PendingFeeState {
 
 // pendingBonds returns the PendingBondState for all pending bonds. pendingBonds
 // should be called with the acct.authMtx locked.
-func (dc *dexConnection) pendingBonds() map[string]*PendingBondState {
-	pendingBonds := make(map[string]*PendingBondState, len(dc.acct.pendingBonds))
-	for _, pb := range dc.acct.pendingBonds {
+func (dc *dexConnection) pendingBonds() []*PendingBondState {
+	pendingBonds := make([]*PendingBondState, len(dc.acct.pendingBonds))
+	for i, pb := range dc.acct.pendingBonds {
 		bondIDStr := coinIDString(pb.AssetID, pb.CoinID)
 		confs := dc.acct.pendingBondsConfs[bondIDStr]
-		pendingBonds[bondIDStr] = &PendingBondState{
+		pendingBonds[i] = &PendingBondState{
 			CoinID:  bondIDStr,
 			AssetID: pb.AssetID,
 			Symbol:  unbip(pb.AssetID),
@@ -1404,6 +1404,7 @@ type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
 	ready         chan struct{}
+	rotate        chan struct{}
 	cfg           *Config
 	log           dex.Logger
 	db            db.DB
@@ -1544,6 +1545,7 @@ func New(cfg *Config) (*Core, error) {
 		cfg:           cfg,
 		credentials:   creds,
 		ready:         make(chan struct{}),
+		rotate:        make(chan struct{}, 1),
 		log:           cfg.Logger,
 		db:            boltDB,
 		conns:         make(map[string]*dexConnection),
@@ -8699,6 +8701,9 @@ func handleScoreChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	if scoreChange == nil {
 		return errors.New("empty message")
 	}
+
+	fmt.Println("--handleScoreChangeMsg", scoreChange.Reputation.Score)
+
 	// Check the signature.
 	err = dc.acct.checkSig(scoreChange.Serialize(), scoreChange.Sig)
 	if err != nil {

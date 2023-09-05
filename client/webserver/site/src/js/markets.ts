@@ -583,7 +583,7 @@ export default class MarketsPage extends BasePage {
 
   /* hasPendingBonds is true if there are pending bonds */
   hasPendingBonds (): boolean {
-    return Object.keys(this.market.dex.auth.pendingBonds).length > 0
+    return Object.keys(this.market.dex.auth.pendingBonds || []).length > 0
   }
 
   /* setCurrMarketPrice updates the current market price on the stats displays
@@ -730,7 +730,7 @@ export default class MarketsPage extends BasePage {
       if (!this.market || this.market.dex.auth.effectiveTier < 1) return false// acct suspended or not registered
 
       const { baseAssetApprovalStatus, quoteAssetApprovalStatus } = this.tokenAssetApprovalStatuses()
-      if (baseAssetApprovalStatus !== ApprovalStatus.Approved && quoteAssetApprovalStatus !== ApprovalStatus.Approved) return false
+      if (baseAssetApprovalStatus !== ApprovalStatus.Approved || quoteAssetApprovalStatus !== ApprovalStatus.Approved) return false
 
       const { base, quote } = this.market
       const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
@@ -954,7 +954,7 @@ export default class MarketsPage extends BasePage {
       return
     }
 
-    const confStatuses = Object.values(dex.auth.pendingBonds).map(pending => {
+    const confStatuses = (dex.auth.pendingBonds || []).map(pending => {
       const confirmationsRequired = dex.bondAssets[pending.symbol].confs
       return `${pending.confs} / ${confirmationsRequired}`
     })

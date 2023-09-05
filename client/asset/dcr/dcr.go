@@ -1136,7 +1136,7 @@ func (dcr *ExchangeWallet) SetBondReserves(reserves uint64) {
 func (dcr *ExchangeWallet) FeeRate() uint64 {
 	const confTarget = 2 // 1 historically gives crazy rates
 	rate, err := dcr.feeRate(confTarget)
-	if err != nil { // log and return 0
+	if err != nil && dcr.network != dex.Simnet { // log and return 0
 		dcr.log.Errorf("feeRate error: %v", err)
 	}
 	return rate

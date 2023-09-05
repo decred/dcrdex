@@ -679,8 +679,10 @@ type ReputationNote struct {
 
 const TopicReputationUpdate = "ReputationUpdate"
 
-func newReputationNote(host string, rep account.Reputation) *LoginNote {
-	return &LoginNote{
+func newReputationNote(host string, rep account.Reputation) *ReputationNote {
+	return &ReputationNote{
 		Notification: db.NewNotification(NoteTypeReputation, TopicReputationUpdate, "", "", db.Data),
+		Host:         host,
+		Reputation:   rep,
 	}
 }

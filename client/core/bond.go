@@ -36,6 +36,13 @@ func cutBond(bonds []*db.Bond, i int) []*db.Bond { // input slice modified
 	return bonds
 }
 
+func (c *Core) triggerBondRotation() {
+	select {
+	case c.rotate <- struct{}{}:
+	default:
+	}
+}
+
 func (c *Core) watchBonds(ctx context.Context) {
 	t := time.NewTicker(bondTickInterval)
 	defer t.Stop()
@@ -45,6 +52,8 @@ func (c *Core) watchBonds(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			c.rotateBonds(ctx)
+		case <-c.rotate:
 			c.rotateBonds(ctx)
 		}
 	}
@@ -323,6 +332,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	state.PendingStrength = sumBondStrengths(dc.acct.pendingBonds, bondCfg.bondAssets)
 	state.WeakStrength = sumBondStrengths(weakBonds, bondCfg.bondAssets)
 	state.LiveStrength = sumBondStrengths(dc.acct.bonds, bondCfg.bondAssets) // for max bonded check
+	state.PendingBonds = dc.pendingBonds()
 	// Extract the expired bonds.
 	state.expiredBonds = make([]*db.Bond, len(dc.acct.expiredBonds))
 	copy(state.expiredBonds, dc.acct.expiredBonds)
@@ -1066,6 +1076,8 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		dc.acct.maxBondedAmt = maxBonded
 		dbAcct.MaxBondedAmt = maxBonded
 	}
+
+	c.triggerBondRotation()
 
 	c.log.Debugf("Bond options for %v: target tier %d, bond asset %d, maxBonded %v",
 		dbAcct.Host, dc.acct.targetTier, dc.acct.bondAsset, dbAcct.MaxBondedAmt)

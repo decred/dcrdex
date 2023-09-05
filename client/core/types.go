@@ -651,16 +651,16 @@ type BondOptions struct {
 }
 
 type ExchangeAuth struct {
-	Rep             account.Reputation           `json:"rep"`
-	BondAssetID     uint32                       `json:"bondAssetID"`
-	PendingStrength int64                        `json:"pendingStrength"`
-	WeakStrength    int64                        `json:"weakStrength"`
-	LiveStrength    int64                        `json:"liveStrength"`
-	TargetTier      uint64                       `json:"targetTier"`
-	EffectiveTier   int64                        `json:"effectiveTier"`
-	MaxBondedAmt    uint64                       `json:"maxBondedAmt"`
-	PenaltyComps    uint16                       `json:"penaltyComps"`
-	PendingBonds    map[string]*PendingBondState `json:"pendingBonds"`
+	Rep             account.Reputation  `json:"rep"`
+	BondAssetID     uint32              `json:"bondAssetID"`
+	PendingStrength int64               `json:"pendingStrength"`
+	WeakStrength    int64               `json:"weakStrength"`
+	LiveStrength    int64               `json:"liveStrength"`
+	TargetTier      uint64              `json:"targetTier"`
+	EffectiveTier   int64               `json:"effectiveTier"`
+	MaxBondedAmt    uint64              `json:"maxBondedAmt"`
+	PenaltyComps    uint16              `json:"penaltyComps"`
+	PendingBonds    []*PendingBondState `json:"pendingBonds"`
 }
 
 // Exchange represents a single DEX with any number of markets.

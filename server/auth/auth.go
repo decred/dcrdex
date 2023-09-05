@@ -920,9 +920,7 @@ func (auth *AuthManager) userReputation(bondTier int64, score int32, legacyFeePa
 		BondedTier: bondTier,
 		Penalties:  uint16(penalties),
 		Legacy:     legacyFeePaid,
-		// TODO: Reverse the signage of all violations so we get postiive scores
-		// from successes and negative score from violations.
-		Score: -score,
+		Score:      score,
 	}
 }
 

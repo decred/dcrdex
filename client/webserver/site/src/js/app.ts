@@ -157,6 +157,12 @@ export default class Application {
       }, 0)
     }
 
+    if (process.env.NODE_ENV === 'development') {
+      window.user = () => {
+        console.log(this.user)
+      }
+    }
+
     // use user current locale set by backend
     intl.setLocale()
   }

@@ -7,6 +7,7 @@ declare global {
     localeDiscrepancies: () => void
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
+    user: () => void
   }
 }
 
