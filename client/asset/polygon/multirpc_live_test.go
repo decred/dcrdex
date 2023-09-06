@@ -61,11 +61,39 @@ func TestRPCTestnet(t *testing.T) {
 }
 
 func TestFreeServers(t *testing.T) {
+	// https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/
+	// https://www.alchemy.com/chain-connect/chain/polygon-pos
+	// https://chainlist.org/?search=Polygon+Mainnet
 	freeServers := []string{
-		"wss://polygon-mainnet.public.blastapi.io",
-		"https://polygon.blockpi.network/v1/rpc/public",
-		"https://polygon.publicnode.com",
-		"https://rpc.ankr.com/polygon",
+		// Passing
+		"https://rpc-mainnet.maticvigil.com"
+		"https://rpc.ankr.com/polygon"
+		"https://polygon.blockpi.network/v1/rpc/public"
+		"https://1rpc.io/matic"
+		"https://polygon.api.onfinality.io/public"
+		"https://rpc-mainnet.matic.quiknode.pro"
+		"https://polygon.drpc.org"
+		// Not passing
+		"https://matic-mainnet-full-rpc.bwarelabs.com"
+		"https://polygon-rpc.com"
+		"https://polygon-mainnet.rpcfast.com?api_key=xbhWBI1Wkguk8SNMu1bvvLurPGLXmgwYeC4S6g2H7WdwFigZSmPWVZRxrskEQwIf"
+		"https://polygon.rpc.blxrbdn.com"
+		"https://rpc-mainnet.matic.network"
+		"https://endpoints.omniatech.io/v1/matic/mainnet/public"
+		"https://matic-mainnet.chainstacklabs.com"
+		"https://polygon-bor.publicnode.com"
+		"https://polygon.llamarpc.com"
+		"https://polygon-mainnet.public.blastapi.io"
+		"https://poly-rpc.gateway.pokt.network"
+		"https://polygon-mainnet-public.unifra.io"
+		"https://g.w.lavanet.xyz:443/gateway/polygon1/rpc-http/f7ee0000000000000000000000000000"
+		"https://matic-mainnet-archive-rpc.bwarelabs.com"
+		"https://polygonapi.terminet.io/rpc"
+		"https://polygon.meowrpc.com"
+
+		// DEPRECATED
+		// "https://matic-mainnet-archive-rpc.bwarelabs.com",
+		// "https://matic-mainnet-full-rpc.bwarelabs.com",
 	}
 	mt.TestFreeServers(t, freeServers, dex.Mainnet)
 }
