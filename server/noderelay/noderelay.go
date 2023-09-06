@@ -371,7 +371,7 @@ func (n *Nexus) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 		log.Infof("Server off")
 	}()
-	log.Infof("Server listening on %s", addr)
+	log.Infof("Noderelay server listening on %s", addr)
 
 	go n.monitorNodeConnections()
 
