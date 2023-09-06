@@ -198,7 +198,9 @@ export default class OrdersPage extends BasePage {
       tmpl.toLogo.src = Doc.logoPath(toSymbol)
       tmpl.toSymbol.textContent = toUnit
       tmpl.type.textContent = `${OrderUtil.typeString(ord)} ${OrderUtil.sellString(ord)}`
-      tmpl.rate.textContent = Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate, xc))
+      let rate = Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate, xc))
+      if (ord.type === OrderUtil.Market) rate = OrderUtil.averageMarketOrderRateString(ord)
+      tmpl.rate.textContent = rate
       tmpl.status.textContent = OrderUtil.statusString(ord)
       tmpl.filled.textContent = `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`
       tmpl.settled.textContent = `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`

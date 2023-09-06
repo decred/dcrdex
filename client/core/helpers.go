@@ -326,15 +326,26 @@ func (ord *OrderReader) StatusString() string {
 
 // SimpleRateString is the formatted match rate.
 func (ord *OrderReader) SimpleRateString() string {
+	if ord.Type == order.MarketOrderType {
+		return ord.AverageRateString()
+	}
 	return ord.formatRate(ord.Rate)
 }
 
 // RateString is a formatted rate with units.
 func (ord *OrderReader) RateString() string {
+	rateStr := ord.formatRate(ord.Rate)
 	if ord.Type == order.MarketOrderType {
-		return "market"
+		nMatches := len(ord.Matches)
+		if nMatches == 0 {
+			return "market" // "market" is better than 0 BTC/ETH ?
+		}
+		rateStr = ord.AverageRateString()
+		if len(ord.Matches) > 1 {
+			rateStr = "~ " + rateStr // "~" only makes sense if the order has more than one match.
+		}
 	}
-	return fmt.Sprintf("%s %s/%s", ord.formatRate(ord.Rate), ord.QuoteUnitInfo.Conventional.Unit, ord.BaseUnitInfo.Conventional.Unit)
+	return fmt.Sprintf("%s %s/%s", rateStr, ord.QuoteUnitInfo.Conventional.Unit, ord.BaseUnitInfo.Conventional.Unit)
 }
 
 // AverageRateString returns a formatting string containing the average rate of

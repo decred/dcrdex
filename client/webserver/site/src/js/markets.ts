@@ -1552,7 +1552,10 @@ export default class MarketsPage extends BasePage {
       details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       details.qty.textContent = mord.header.qty.textContent = Doc.formatCoinValue(ord.qty, market.baseUnitInfo)
-      details.rate.textContent = mord.header.rate.textContent = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
+      let rateStr: string
+      if (ord.type === OrderUtil.Market) rateStr = this.marketOrderRateString(ord, market)
+      else rateStr = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
+      details.rate.textContent = mord.header.rate.textContent = rateStr
       header.baseSymbol.textContent = market.baseUnitInfo.conventional.unit
       details.type.textContent = market.quoteUnitInfo.conventional.unit
       this.updateMetaOrder(mord)
@@ -1656,6 +1659,17 @@ export default class MarketsPage extends BasePage {
     }
     Doc.setVis(unreadyOrders, page.unreadyOrdersMsg)
     this.setDepthMarkers()
+  }
+
+  /*
+   marketOrderRateString uses the market config rate step to format the average
+   market order rate.
+  */
+  marketOrderRateString (ord: Order, mkt: CurrentMarket) :string {
+    if (!ord.matches?.length) return intl.prep(intl.ID_MARKET_ORDER)
+    let rateStr = Doc.formatRateFullPrecision(OrderUtil.averageRate(ord), mkt.baseUnitInfo, mkt.quoteUnitInfo, mkt.cfg.ratestep)
+    if (ord.matches.length > 1) rateStr = '~ ' + rateStr // ~ only makes sense if the order has more than one match
+    return rateStr
   }
 
   /*
@@ -2361,6 +2375,11 @@ export default class MarketsPage extends BasePage {
   handleMatchNote (note: MatchNote) {
     const mord = this.metaOrders[note.orderID]
     if (!mord) return this.refreshActiveOrders()
+    else if (mord.ord.type === OrderUtil.Market && note.match.status === OrderUtil.NewlyMatched) { // Update the average market rate display.
+      // Fetch and use the updated order.
+      const ord = app().order(note.orderID)
+      if (ord) mord.details.rate.textContent = mord.header.rate.textContent = this.marketOrderRateString(ord, this.market)
+    }
     if (app().canAccelerateOrder(mord.ord)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
   }

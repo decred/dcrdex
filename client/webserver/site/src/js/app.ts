@@ -846,7 +846,7 @@ export default class Application {
     const wallet = this.walletMap[fromAssetID]
     if (!wallet || !(wallet.traits & walletTraitAccelerator)) return false
     if (order.matches) {
-      for (let i = 0; i < order.matches.length; i++) {
+      for (let i = 0; i < order.matches?.length; i++) {
         const match = order.matches[i]
         if (match.swap && match.swap.confs && match.swap.confs.count === 0 && !match.revoked) {
           return true
