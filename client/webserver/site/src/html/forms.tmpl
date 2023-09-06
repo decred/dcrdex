@@ -57,6 +57,11 @@
 </div>
 <div class="bordertop py-2 text-center fs22 sans-light position-relative" data-tmpl="header">
   [[[add_a_x_wallet]]]
+  <div class="flex-center pt-1 d-hide fs18 sans" data-tmpl="tokenMsgBox">
+    <span>[[[Token on]]]</span>
+    <img data-tmpl="tokenParentLogo" class="ms-1 micro-icon">
+    <span data-tmpl="tokenParentName"></span>
+  </div>
 </div>
 <div class="position-relative" data-tmpl="mainForm">
   <div class="flex-center py-3" data-tmpl="oneBttnBox">
@@ -128,10 +133,15 @@
 
 {{define "depositAddress"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-<div class="px-2 py-1 mb-2 text-center position-relative fs22 sans-light">
+<div class="px-2 py-1 mb-2 text-center position-relative fs24 sans-light">
   [[[Deposit]]]
-  <img id="depositLogo" class="micro-icon mx-1">
+  <img id="depositLogo" class="mini-icon mx-1">
   <span id="depositName"></span>
+  <div class="flex-center pt-1 d-hide fs18 sans" id="depositTokenMsgBox">
+    <span>[[[Token on]]]</span>
+    <img id="depositTokenParentLogo" class="ms-1 micro-icon">
+    <span id="depositTokenParentName"></span>
+  </div>
 </div>
 <img class="mb-3" id="qrcode" />
 <div class="mono deposit-address select-all">

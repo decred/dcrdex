@@ -179,6 +179,7 @@ var EnUS = map[string]string{
 	"Restore from seed":           "Restore from seed",
 	"Import Account":              "Import Account",
 	"no_wallet":                   "no wallet",
+	"Token on":                    "Token on",
 	"create_a_x_wallet":           "Create a <span data-asset-name=1></span> Wallet",
 	"dont_share":                  "Don't share it. Don't lose it.",
 	"Show Me":                     "Show Me",

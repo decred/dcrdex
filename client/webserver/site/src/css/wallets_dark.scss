@@ -38,4 +38,13 @@ body.dark {
       }
     }
   }
+
+  #assetSelect {
+    .icon-select {
+      img[data-tmpl=parentImg] {
+        background-color: $dark_body_bg;
+        border-color: $dark_body_bg;
+      }
+    }
+  }
 }

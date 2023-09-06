@@ -406,45 +406,15 @@ func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, max
 	}
 }
 
-func gases(parentID, assetID uint32, contractVer uint32, net dex.Network) *dexeth.Gases {
-	isToken := parentID != assetID
-	if !isToken { // ETH or EVM-compatible asset.
-		if contractVer != contractVersionNewest {
-			return dexeth.VersionedGases[contractVer]
-		}
-		var bestVer uint32
-		var bestGases *dexeth.Gases
-		for ver, gases := range dexeth.VersionedGases {
-			if ver >= bestVer {
-				bestGases = gases
-				bestVer = ver
-			}
-		}
-		return bestGases
-	}
-
-	token, found := dexeth.Tokens[assetID]
-	if !found {
-		return nil
-	}
-	netToken, found := token.NetTokens[net]
-	if !found {
-		return nil
-	}
-
+func gases(contractVer uint32, versionedGases map[uint32]*dexeth.Gases) *dexeth.Gases {
 	if contractVer != contractVersionNewest {
-		contract, found := netToken.SwapContracts[contractVer]
-		if !found {
-			return nil
-		}
-		return &contract.Gas
+		return versionedGases[contractVer]
 	}
-
 	var bestVer uint32
 	var bestGases *dexeth.Gases
-	for ver, contract := range netToken.SwapContracts {
+	for ver, gases := range versionedGases {
 		if ver >= bestVer {
-			bestGases = &contract.Gas
+			bestGases = gases
 			bestVer = ver
 		}
 	}

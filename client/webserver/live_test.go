@@ -1389,7 +1389,7 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
-	60: eth.WalletInfo,
+	60: &eth.WalletInfo,
 	145: {
 		Version:           0,
 		SupportedVersions: []uint32{0},

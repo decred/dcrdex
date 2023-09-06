@@ -31,8 +31,8 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
+	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
@@ -105,7 +105,7 @@ var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker     = time.Second
 	peerCountTicker = 5 * time.Second
-	WalletOpts      = []*asset.ConfigOption{
+	walletOpts      = []*asset.ConfigOption{
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -129,7 +129,7 @@ var (
 		},
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
-	WalletInfo = &asset.WalletInfo{
+	WalletInfo = asset.WalletInfo{
 		Name:    "Ethereum",
 		Version: 0,
 		// SupportedVersions: For Ethereum, the server backend maintains a
@@ -153,13 +153,14 @@ var (
 				Type:        walletTypeRPC,
 				Tab:         "RPC",
 				Description: "Infrastructure providers (e.g. Infura) or local nodes",
-				ConfigOpts:  append(RPCOpts, WalletOpts...),
+				ConfigOpts:  append(RPCOpts, walletOpts...),
 				Seeded:      true,
 				GuideLink:   "https://github.com/decred/dcrdex/blob/master/docs/wiki/Ethereum.md",
 			},
 			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
 			// the value cannot be known until we connect and get network info.
 		},
+		IsAccountBased: true,
 	}
 
 	// unlimitedAllowance is the maximum supported allowance for an erc20
@@ -178,24 +179,32 @@ var (
 		0,                                // branch 0
 		0,                                // index 0
 	}
-
-	// perTxGasLimit is the most gas we can use on a transaction. It is the
-	// lower of either the per tx or per block gas limit.
-	perTxGasLimit = func() uint64 {
-		// blockGasLimit is the amount of gas we can use in one transaction
-		// according to the block gas limit.
-		blockGasLimit := ethconfig.Defaults.Miner.GasCeil / maxProportionOfBlockGasLimitToUse
-
-		// txGasLimit is the amount of gas we can use in one transaction
-		// according to the default transaction gas fee limit.
-		txGasLimit := uint64(maxTxFeeGwei / defaultGasFeeLimit)
-
-		if blockGasLimit > txGasLimit {
-			return txGasLimit
-		}
-		return blockGasLimit
-	}()
 )
+
+// perTxGasLimit is the most gas we can use on a transaction. It is the lower of
+// either the per tx or per block gas limit.
+func perTxGasLimit(gasFeeLimit uint64) uint64 {
+	// maxProportionOfBlockGasLimitToUse sets the maximum proportion of a
+	// block's gas limit that a swap and redeem transaction will use. Since it
+	// is set to 4, the max that will be used is 25% (1/4) of the block's gas
+	// limit.
+	const maxProportionOfBlockGasLimitToUse = 4
+
+	// blockGasLimit is the amount of gas we can use in one transaction
+	// according to the block gas limit.
+
+	// Ethereum GasCeil: 30_000_000, Polygon: 8_000_000
+	blockGasLimit := ethconfig.Defaults.Miner.GasCeil / maxProportionOfBlockGasLimitToUse
+
+	// txGasLimit is the amount of gas we can use in one transaction
+	// according to the default transaction gas fee limit.
+	txGasLimit := maxTxFeeGwei / gasFeeLimit
+
+	if blockGasLimit > txGasLimit {
+		return txGasLimit
+	}
+	return blockGasLimit
+}
 
 // WalletConfig are wallet-level configuration settings.
 type WalletConfig struct {
@@ -221,7 +230,7 @@ var _ asset.Creator = (*Driver)(nil)
 
 // Open opens the ETH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	return NewEVMWallet(BipID, dexeth.ChainIDs[network], cfg, logger, network)
+	return newWallet(cfg, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
@@ -271,16 +280,10 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return "", fmt.Errorf("unknown coin ID format: %x", coinID)
 }
 
-func ethWalletInfo(maxSwaps, maxRedeems uint64) *asset.WalletInfo {
-	wi := *WalletInfo
-	wi.MaxSwapsInTx = maxSwaps
-	wi.MaxRedeemsInTx = maxRedeems
-	return &wi
-}
-
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
-	return WalletInfo
+	wi := WalletInfo
+	return &wi
 }
 
 // Exists checks the existence of the wallet.
@@ -299,7 +302,11 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 }
 
 func (d *Driver) Create(cfg *asset.CreateWalletParams) error {
-	return CreateEVMWallet(dexeth.ChainIDs[cfg.Net], cfg, false)
+	comp, err := NetworkCompatibilityData(cfg.Net)
+	if err != nil {
+		return fmt.Errorf("error finding compatibility data: %v", err)
+	}
+	return CreateEVMWallet(dexeth.ChainIDs[cfg.Net], cfg, &comp, false)
 }
 
 // Balance is the current balance, including information about the pending
@@ -438,7 +445,7 @@ var _ asset.Wallet = (*TokenWallet)(nil)
 var _ asset.AccountLocker = (*ETHWallet)(nil)
 var _ asset.AccountLocker = (*TokenWallet)(nil)
 var _ asset.TokenMaster = (*ETHWallet)(nil)
-var _ asset.WalletRestorer = (*assetWallet)(nil)
+var _ asset.WalletRestorer = (*ETHWallet)(nil)
 var _ asset.LiveReconfigurer = (*ETHWallet)(nil)
 var _ asset.LiveReconfigurer = (*TokenWallet)(nil)
 var _ asset.TxFeeEstimator = (*ETHWallet)(nil)
@@ -459,10 +466,11 @@ type baseWallet struct {
 	dir        string
 	walletType string
 
-	// bipID is the asset ID of the chain's native token (e.g. ETH, MATIC, etc).
-	// This becomes the parent asset ID for non-native tokens(e.g USDC etc).
-	bipID   uint32
-	chainID int64
+	baseChainID uint32
+	chainCfg    *params.ChainConfig
+	chainID     int64
+	compat      *CompatibilityData
+	tokens      map[uint32]*dexeth.Token
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Header
@@ -500,6 +508,13 @@ type assetWallet struct {
 	log       dex.Logger
 	ui        dex.UnitInfo
 	connected atomic.Bool
+	wi        asset.WalletInfo
+
+	versionedContracts map[uint32]common.Address
+	versionedGases     map[uint32]*dexeth.Gases
+
+	maxSwapGas   uint64
+	maxRedeemGas uint64
 
 	lockedFunds struct {
 		mtx                sync.RWMutex
@@ -522,9 +537,6 @@ type assetWallet struct {
 
 	evmify  func(uint64) *big.Int
 	atomize func(*big.Int) uint64
-
-	maxSwapsInTx   uint64
-	maxRedeemsInTx uint64
 
 	// pendingTxCheckBal is protected by the pendingTxMtx. We use this field
 	// as a secondary check to see if we need to request confirmations for
@@ -553,26 +565,18 @@ type TokenWallet struct {
 	netToken *dexeth.NetToken
 }
 
-// maxProportionOfBlockGasLimitToUse sets the maximum proportion of a block's
-// gas limit that a swap and redeem transaction will use. Since it is set to
-// 4, the max that will be used is 25% (1/4) of the block's gas limit.
-const maxProportionOfBlockGasLimitToUse = 4
-
-// Info returns basic information about the wallet and asset.
-func (w *ETHWallet) Info() *asset.WalletInfo {
-	return ethWalletInfo(w.maxSwapsInTx, w.maxRedeemsInTx)
+func (w *assetWallet) maxSwapsAndRedeems() (maxSwaps, maxRedeems uint64) {
+	txGasLimit := perTxGasLimit(atomic.LoadUint64(&w.gasFeeLimitV))
+	return txGasLimit / w.maxSwapGas, txGasLimit / w.maxRedeemGas
 }
 
 // Info returns basic information about the wallet and asset.
-func (w *TokenWallet) Info() *asset.WalletInfo {
-	return &asset.WalletInfo{
-		Name:              w.token.Name,
-		Version:           WalletInfo.Version,
-		SupportedVersions: WalletInfo.SupportedVersions,
-		UnitInfo:          w.token.UnitInfo,
-		MaxSwapsInTx:      w.maxSwapsInTx,
-		MaxRedeemsInTx:    w.maxRedeemsInTx,
-	}
+func (w *assetWallet) Info() *asset.WalletInfo {
+	wi := w.wi
+	maxSwaps, maxRedeems := w.maxSwapsAndRedeems()
+	wi.MaxSwapsInTx = maxSwaps
+	wi.MaxRedeemsInTx = maxRedeems
+	return &wi
 }
 
 // genWalletSeed uses the wallet seed passed from core as the entropy for
@@ -609,7 +613,7 @@ func privKeyFromSeed(seed []byte) (pk []byte, zero func(), err error) {
 	return pk, extKey.Zero, nil
 }
 
-func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams, skipConnect bool) error {
+func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams, compat *CompatibilityData, skipConnect bool) error {
 	switch createWalletParams.Type {
 	case walletTypeGeth:
 		return asset.ErrWalletTypeDisabled
@@ -639,7 +643,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 	// 	return importKeyToNode(node, privateKey, createWalletParams.Pass)
 	case walletTypeRPC:
 		// Make the wallet dir if it does not exist, otherwise we may fail to
-		// write the compliant_providers.json file. Create the keystore
+		// write the compliant-providers.json file. Create the keystore
 		// subdirectory as well to avoid a "failed to watch keystore folder"
 		// error from the keystore's internal account cache supervisor.
 		keystoreDir := filepath.Join(walletDir, "keystore")
@@ -664,7 +668,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 
 		if !skipConnect {
 			if err := createAndCheckProviders(context.Background(), walletDir, endpoints,
-				big.NewInt(chainID), createWalletParams.Net, createWalletParams.Logger); err != nil {
+				big.NewInt(chainID), compat, createWalletParams.Net, createWalletParams.Logger); err != nil {
 				return fmt.Errorf("create and check providers: %v", err)
 			}
 		}
@@ -674,38 +678,91 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 	return fmt.Errorf("unknown wallet type %q", createWalletParams.Type)
 }
 
-// NewEVMWallet is the exported constructor required for asset.Wallet.
-func NewEVMWallet(assetID uint32, chainID int64, assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
+// newWallet is the constructor for an Ethereum asset.Wallet.
+func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
+	chainCfg, err := ChainConfig(net)
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate Ethereum genesis configuration for network %s", net)
+	}
+	comp, err := NetworkCompatibilityData(net)
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate Ethereum compatibility data: %s", net)
+	}
+	contracts := make(map[uint32]common.Address, 1)
+	for ver, netAddrs := range dexeth.ContractAddresses {
+		for netw, addr := range netAddrs {
+			if netw == net {
+				contracts[ver] = addr
+				break
+			}
+		}
+	}
+
+	return NewEVMWallet(&EVMWalletConfig{
+		BaseChainID:        BipID,
+		ChainCfg:           chainCfg,
+		AssetCfg:           assetCFG,
+		CompatData:         &comp,
+		VersionedGases:     dexeth.VersionedGases,
+		Tokens:             dexeth.Tokens,
+		Logger:             logger,
+		BaseChainContracts: contracts,
+		WalletInfo:         WalletInfo,
+		Net:                net,
+	})
+}
+
+// EVMWalletConfig is the configuration for an evm-compatible wallet.
+type EVMWalletConfig struct {
+	BaseChainID        uint32
+	ChainCfg           *params.ChainConfig
+	AssetCfg           *asset.WalletConfig
+	CompatData         *CompatibilityData
+	VersionedGases     map[uint32]*dexeth.Gases
+	Tokens             map[uint32]*dexeth.Token
+	Logger             dex.Logger
+	BaseChainContracts map[uint32]common.Address
+	WalletInfo         asset.WalletInfo
+	Net                dex.Network
+}
+
+func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
+	assetID := cfg.BaseChainID
+	chainID := cfg.ChainCfg.ChainID.Int64()
+
 	// var cl ethFetcher
-	switch assetCFG.Type {
+	switch cfg.AssetCfg.Type {
 	case walletTypeGeth:
 		return nil, asset.ErrWalletTypeDisabled
 	case walletTypeRPC:
-		if _, found := assetCFG.Settings[providersKey]; !found {
+		if _, found := cfg.AssetCfg.Settings[providersKey]; !found {
 			return nil, errors.New("no providers specified")
 		}
 	default:
-		return nil, fmt.Errorf("unknown wallet type %q", assetCFG.Type)
+		return nil, fmt.Errorf("unknown wallet type %q", cfg.AssetCfg.Type)
 	}
 
-	cfg, err := parseWalletConfig(assetCFG.Settings)
+	wCfg, err := parseWalletConfig(cfg.AssetCfg.Settings)
 	if err != nil {
 		return nil, err
 	}
 
-	gasFeeLimit := cfg.GasFeeLimit
+	gasFeeLimit := wCfg.GasFeeLimit
 	if gasFeeLimit == 0 {
 		gasFeeLimit = defaultGasFeeLimit
 	}
 
 	eth := &baseWallet{
-		bipID:        assetID,
+		net:          cfg.Net,
+		baseChainID:  cfg.BaseChainID,
+		chainCfg:     cfg.ChainCfg,
 		chainID:      chainID,
-		log:          logger,
-		net:          net,
-		dir:          assetCFG.DataDir,
-		walletType:   assetCFG.Type,
-		settings:     assetCFG.Settings,
+		compat:       cfg.CompatData,
+		tokens:       cfg.Tokens,
+		log:          cfg.Logger,
+		dir:          cfg.AssetCfg.DataDir,
+		walletType:   cfg.AssetCfg.Type,
+		settings:     cfg.AssetCfg.Settings,
 		gasFeeLimitV: gasFeeLimit,
 		wallets:      make(map[uint32]*assetWallet),
 		monitoredTxs: make(map[common.Hash]*monitoredTx),
@@ -713,7 +770,7 @@ func NewEVMWallet(assetID uint32, chainID int64, assetCFG *asset.WalletConfig, l
 	}
 
 	var maxSwapGas, maxRedeemGas uint64
-	for _, gases := range dexeth.VersionedGases {
+	for _, gases := range cfg.VersionedGases {
 		if gases.Swap > maxSwapGas {
 			maxSwapGas = gases.Swap
 		}
@@ -722,33 +779,40 @@ func NewEVMWallet(assetID uint32, chainID int64, assetCFG *asset.WalletConfig, l
 		}
 	}
 
-	if maxSwapGas == 0 || perTxGasLimit < maxSwapGas {
+	txGasLimit := perTxGasLimit(gasFeeLimit)
+
+	if maxSwapGas == 0 || txGasLimit < maxSwapGas {
 		return nil, errors.New("max swaps cannot be zero or undefined")
 	}
-	if maxRedeemGas == 0 || perTxGasLimit < maxRedeemGas {
+	if maxRedeemGas == 0 || txGasLimit < maxRedeemGas {
 		return nil, errors.New("max redeems cannot be zero or undefined")
 	}
 
 	aw := &assetWallet{
 		baseWallet:         eth,
-		log:                logger,
+		log:                cfg.Logger,
 		assetID:            assetID,
-		tipChange:          assetCFG.TipChange,
+		versionedContracts: cfg.BaseChainContracts,
+		versionedGases:     cfg.VersionedGases,
+		maxSwapGas:         maxSwapGas,
+		maxRedeemGas:       maxRedeemGas,
+		tipChange:          cfg.AssetCfg.TipChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
 		approvalCache:      make(map[uint32]bool),
-		peersChange:        assetCFG.PeersChange,
+		peersChange:        cfg.AssetCfg.PeersChange,
 		contractors:        make(map[uint32]contractor),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		ui:                 dexeth.UnitInfo,
-		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
-		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
 		pendingTxCheckBal:  new(big.Int),
+		wi:                 cfg.WalletInfo,
 	}
 
-	logger.Infof("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
-		aw.maxSwapsInTx, aw.maxRedeemsInTx)
+	maxSwaps, maxRedeems := aw.maxSwapsAndRedeems()
+
+	cfg.Logger.Infof("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
+		maxSwaps, maxRedeems)
 
 	aw.wallets = map[uint32]*assetWallet{
 		assetID: aw,
@@ -807,11 +871,6 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		w.settingsMtx.RLock()
 		defer w.settingsMtx.RUnlock()
 		endpoints := strings.Split(w.settings[providersKey], " ")
-		ethCfg, err := chainConfig(w.chainID, w.net)
-		if err != nil {
-			return nil, err
-		}
-		chainConfig := ethCfg.Genesis.Config
 
 		// Point to a harness node on simnet, if not specified.
 		if w.net == dex.Simnet && len(endpoints) == 0 {
@@ -819,7 +878,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 			endpoints = append(endpoints, filepath.Join(u.HomeDir, "dextest", "eth", "beta", "node", "geth.ipc"))
 		}
 
-		cl, err = newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), chainConfig, big.NewInt(w.chainID), w.net)
+		cl, err = newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), w.chainCfg, w.net)
 		if err != nil {
 			return nil, err
 		}
@@ -836,7 +895,11 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	}
 
 	for ver, constructor := range contractorConstructors {
-		c, err := constructor(w.net, w.addr, w.node.contractBackend())
+		contractAddr, exists := w.versionedContracts[ver]
+		if !exists || contractAddr == (common.Address{}) {
+			return nil, fmt.Errorf("no contract address for version %d, net %s", ver, w.net)
+		}
+		c, err := constructor(contractAddr, w.addr, w.node.contractBackend())
 		if err != nil {
 			return nil, fmt.Errorf("error constructor version %d contractor: %v", ver, err)
 		}
@@ -937,7 +1000,7 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 
 	if rpc, is := w.node.(*multiRPCClient); is {
 		walletDir := getWalletDir(w.dir, w.net)
-		if err := rpc.reconfigure(ctx, cfg.Settings, walletDir); err != nil {
+		if err := rpc.reconfigure(ctx, cfg.Settings, w.compat, walletDir); err != nil {
 			return false, err
 		}
 	}
@@ -1000,9 +1063,9 @@ func parseTokenWalletConfig(settings map[string]string) (cfg *tokenWalletConfig,
 
 // CreateTokenWallet "creates" a wallet for a token. There is really nothing
 // to do, except check that the token exists.
-func (*baseWallet) CreateTokenWallet(tokenID uint32, _ map[string]string) error {
+func (w *baseWallet) CreateTokenWallet(tokenID uint32, _ map[string]string) error {
 	// Just check that the token exists for now.
-	if dexeth.Tokens[tokenID] == nil {
+	if w.tokens[tokenID] == nil {
 		return fmt.Errorf("token not found for asset ID %d", tokenID)
 	}
 	return nil
@@ -1010,7 +1073,7 @@ func (*baseWallet) CreateTokenWallet(tokenID uint32, _ map[string]string) error 
 
 // OpenTokenWallet creates a new TokenWallet.
 func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, error) {
-	token, found := dexeth.Tokens[tokenCfg.AssetID]
+	token, found := w.tokens[tokenCfg.AssetID]
 	if !found {
 		return nil, fmt.Errorf("token %d not found", tokenCfg.AssetID)
 	}
@@ -1035,17 +1098,30 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		}
 	}
 
-	if maxSwapGas == 0 || perTxGasLimit < maxSwapGas {
+	txGasLimit := perTxGasLimit(atomic.LoadUint64(&w.gasFeeLimitV))
+
+	if maxSwapGas == 0 || txGasLimit < maxSwapGas {
 		return nil, errors.New("max swaps cannot be zero or undefined")
 	}
-	if maxRedeemGas == 0 || perTxGasLimit < maxRedeemGas {
+	if maxRedeemGas == 0 || txGasLimit < maxRedeemGas {
 		return nil, errors.New("max redeems cannot be zero or undefined")
+	}
+
+	contracts := make(map[uint32]common.Address)
+	gases := make(map[uint32]*dexeth.Gases)
+	for ver, c := range netToken.SwapContracts {
+		contracts[ver] = c.Address
+		gases[ver] = &c.Gas
 	}
 
 	aw := &assetWallet{
 		baseWallet:         w.baseWallet,
 		log:                w.baseWallet.log.SubLogger(strings.ToUpper(dex.BipIDSymbol(tokenCfg.AssetID))),
 		assetID:            tokenCfg.AssetID,
+		versionedContracts: contracts,
+		versionedGases:     gases,
+		maxSwapGas:         maxSwapGas,
+		maxRedeemGas:       maxRedeemGas,
 		tipChange:          tokenCfg.TipChange,
 		peersChange:        tokenCfg.PeersChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
@@ -1055,9 +1131,13 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
 		ui:                 token.UnitInfo,
-		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
-		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
-		pendingTxCheckBal:  new(big.Int),
+		wi: asset.WalletInfo{
+			Name:              token.Name,
+			Version:           w.wi.Version,
+			SupportedVersions: w.wi.SupportedVersions,
+			UnitInfo:          token.UnitInfo,
+		},
+		pendingTxCheckBal: new(big.Int),
 	}
 
 	w.baseWallet.walletsMtx.Lock()
@@ -1341,7 +1421,7 @@ func (w *assetWallet) estimateSwap(lots, lotSize uint64, maxFeeRate uint64, ver 
 
 // gases gets the gas table for the specified contract version.
 func (w *assetWallet) gases(contractVer uint32) *dexeth.Gases {
-	return gases(w.bipID, w.assetID, contractVer, w.net)
+	return gases(contractVer, w.versionedGases)
 }
 
 // PreRedeem generates an estimate of the range of redemption fees that could
@@ -1647,9 +1727,10 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, err err
 	// determining the maximum number of swaps that can be in one
 	// transaction. Limit our gas estimate to the same number of swaps.
 	nMax := n
+	maxSwaps, _ := w.maxSwapsAndRedeems()
 	var nRemain, nFull int
-	if uint64(n) > w.maxSwapsInTx {
-		nMax = int(w.maxSwapsInTx)
+	if uint64(n) > maxSwaps {
+		nMax = int(maxSwaps)
 		nFull = n / nMax
 		nSwap = (oneSwap + uint64(nMax-1)*g.SwapAdd) * uint64(nFull)
 		nRemain = n % nMax
@@ -1941,7 +2022,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	txHash := tx.Hash()
-	w.addPendingTx(w.bipID, txHash, tx.Nonce(), swapVal, 0, fees)
+	w.addPendingTx(w.assetID, txHash, tx.Nonce(), swapVal, 0, fees)
 
 	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
@@ -1953,7 +2034,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 			txHash:       txHash,
 			secretHash:   secretHash,
 			ver:          swaps.Version,
-			contractAddr: dexeth.ContractAddresses[swaps.Version][w.net].String(),
+			contractAddr: w.versionedContracts[swaps.Version].String(),
 		})
 	}
 
@@ -2288,7 +2369,7 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate, gasLimit uint64,
 }
 
 func (w *assetWallet) approvalStatus(version uint32) (asset.ApprovalStatus, error) {
-	if w.assetID == BipID {
+	if w.assetID == w.baseChainID {
 		return asset.Approved, nil
 	}
 
@@ -2356,7 +2437,7 @@ func (w *TokenWallet) ApproveToken(assetVer uint32, onConfirm func()) (string, e
 		return "", fmt.Errorf("error getting eth balance: %w", err)
 	}
 	if ethBal.Available < approvalGas*feeRateGwei {
-		return "", fmt.Errorf("insufficient eth balance for approval. required: %d, available: %d",
+		return "", fmt.Errorf("insufficient fee balance for approval. required: %d, available: %d",
 			approvalGas*feeRateGwei, ethBal.Available)
 	}
 
@@ -3080,7 +3161,7 @@ func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract b
 
 // RestorationInfo returns information about how to restore the wallet in
 // various external wallets.
-func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, error) {
+func (w *ETHWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, error) {
 	privateKey, zero, err := privKeyFromSeed(seed)
 	if err != nil {
 		return nil, err
@@ -3991,12 +4072,12 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 	tip := w.currentTip.Number.Uint64()
 	w.tipMtx.RUnlock()
 
-	isToken := w.assetID != w.bipID
+	isToken := w.assetID != w.baseChainID
 
 	addPendingTx := func(pt *pendingTx) {
 		in += pt.in
 		if !isToken {
-			if pt.assetID != w.bipID {
+			if pt.assetID != w.baseChainID {
 				out += pt.maxFees
 			} else {
 				out += pt.out + pt.maxFees
@@ -4051,7 +4132,7 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 }
 
 func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
-	isToken := w.assetID != w.bipID
+	isToken := w.assetID != w.baseChainID
 
 	getBal := func() (*big.Int, error) {
 		if !isToken {
@@ -4210,7 +4291,7 @@ func (w *assetWallet) initiate(ctx context.Context, assetID uint32, contracts []
 	maxFeeRate, gasLimit uint64, contractVer uint32) (tx *types.Transaction, err error) {
 
 	var val uint64
-	if assetID == w.bipID {
+	if assetID == w.baseChainID {
 		for _, c := range contracts {
 			val += c.Value
 		}
@@ -4262,7 +4343,7 @@ func (w *assetWallet) estimateRefundGas(ctx context.Context, secretHash [32]byte
 
 // loadContractors prepares the token contractors and add them to the map.
 func (w *assetWallet) loadContractors() error {
-	token, found := dexeth.Tokens[w.assetID]
+	token, found := w.tokens[w.assetID]
 	if !found {
 		return fmt.Errorf("token %d not found", w.assetID)
 	}
@@ -4277,7 +4358,7 @@ func (w *assetWallet) loadContractors() error {
 			w.log.Errorf("contractor constructor not found for token %s, version %d", token.Name, ver)
 			continue
 		}
-		c, err := constructor(w.net, w.assetID, w.addr, w.node.contractBackend())
+		c, err := constructor(w.net, token, w.addr, w.node.contractBackend())
 		if err != nil {
 			return fmt.Errorf("error constructing token %s contractor version %d: %w", token.Name, ver, err)
 		}
@@ -4430,60 +4511,64 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 	return nil
 }
 
-// fileCredentials contain the seed and providers to use for GetGasEstimates.
-type fileCredentials struct {
-	Seed      dex.Bytes         `json:"seed"`
-	Providers map[string]string `json:"providers"`
+// providersFile reads a file located at ~/dextest/credentials.json.
+// The file contains seed and provider information for wallets used for
+// getgas, deploy, and nodeclient testing. If simnet providers are not
+// specified, getFileCredentials will add the simnet alpha node.
+type providersFile struct {
+	Seed      dex.Bytes                                                   `json:"seed"`
+	Providers map[string] /* symbol */ map[string] /* network */ []string `json:"providers"`
 }
 
 // getFileCredentials reads the file at path and extracts the seed and the
 // provider for the network.
-func getFileCredentials(path string, net dex.Network) (*fileCredentials, string, error) {
+func getFileCredentials(chain, path string, net dex.Network) (seed []byte, providers []string, err error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("error reading credentials file: %v", err)
+		return nil, nil, fmt.Errorf("error reading credentials file: %v", err)
 	}
-	creds := new(fileCredentials)
-	if err := json.Unmarshal(b, creds); err != nil {
-		return nil, "", fmt.Errorf("error parsing credentials file: %v", err)
+	var p providersFile
+	if err := json.Unmarshal(b, &p); err != nil {
+		return nil, nil, fmt.Errorf("error parsing credentials file: %v", err)
 	}
-	if len(creds.Seed) == 0 {
-		return nil, "", fmt.Errorf("must provide both seeds in testnet credentials file")
+	if len(p.Seed) == 0 {
+		return nil, nil, fmt.Errorf("must provide both seeds in credentials file")
 	}
-	provider := creds.Providers[net.String()]
-	if provider == "" {
-		return nil, "", fmt.Errorf("credentials file does not specify an RPC provider")
+	seed = p.Seed
+	providers = p.Providers[chain][net.String()]
+	if net == dex.Simnet && len(providers) == 0 {
+		u, _ := user.Current()
+		switch chain {
+		case "polygon":
+			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "bor", "bor.ipc")}
+		default:
+			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "node", "geth.ipc")}
+		}
 	}
-	return creds, provider, nil
+	return
 }
 
 // quickNode constructs a multiRPCClient and a contractor for the specified
 // asset. The client is connected and unlocked.
-func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint32,
-	seed []byte, provider string, net dex.Network, log dex.Logger) (*multiRPCClient, contractor, error) {
+func quickNode(ctx context.Context, walletDir string, contractVer uint32,
+	seed []byte, providers []string, wParams *GetGasWalletParams, net dex.Network, log dex.Logger) (*multiRPCClient, contractor, error) {
 
 	pw := []byte("abc")
+	chainID := wParams.ChainCfg.ChainID.Int64()
 
-	chainID := dexeth.ChainIDs[net]
 	if err := CreateEVMWallet(chainID, &asset.CreateWalletParams{
 		Type:     walletTypeRPC,
 		Seed:     seed,
 		Pass:     pw,
-		Settings: map[string]string{providersKey: provider},
+		Settings: map[string]string{providersKey: strings.Join(providers, " ")},
 		DataDir:  walletDir,
 		Net:      net,
 		Logger:   log,
-	}, false); err != nil {
+	}, wParams.Compat, false); err != nil {
 		return nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
 
-	ethCfg, err := chainConfig(chainID, net)
-	if err != nil {
-		return nil, nil, err
-	}
-	chainConfig := ethCfg.Genesis.Config
-
-	cl, err := newMultiRPCClient(walletDir, []string{provider}, log, chainConfig, big.NewInt(chainID), net)
+	cl, err := newMultiRPCClient(walletDir, providers, log, wParams.ChainCfg, net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error opening initiator rpc client: %v", err)
 	}
@@ -4504,12 +4589,12 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 	}
 
 	var c contractor
-	if assetID == BipID {
+	if wParams.Token == nil {
 		ctor := contractorConstructors[contractVer]
 		if ctor == nil {
 			return nil, nil, fmt.Errorf("no contractor constructor for eth contract version %d", contractVer)
 		}
-		c, err = ctor(net, cl.address(), cl.contractBackend())
+		c, err = ctor(wParams.ContractAddr, cl.address(), cl.contractBackend())
 		if err != nil {
 			return nil, nil, fmt.Errorf("contractor constructor error: %v", err)
 		}
@@ -4518,7 +4603,7 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 		if ctor == nil {
 			return nil, nil, fmt.Errorf("no token contractor constructor for eth contract version %d", contractVer)
 		}
-		c, err = ctor(net, assetID, cl.address(), cl.contractBackend())
+		c, err = ctor(net, wParams.Token, cl.address(), cl.contractBackend())
 		if err != nil {
 			return nil, nil, fmt.Errorf("token contractor constructor error: %v", err)
 		}
@@ -4563,7 +4648,7 @@ func waitForConfirmation(ctx context.Context, cl ethFetcher, txHash common.Hash)
 // runSimnetMiner starts a gouroutine to generate a simnet block every 5 seconds
 // until the ctx is canceled. By default, the eth harness will mine a block
 // every 15s. We want to speed it up a bit for e.g. GetGas testing.
-func runSimnetMiner(ctx context.Context, log dex.Logger) {
+func runSimnetMiner(ctx context.Context, symbol string, log dex.Logger) {
 	log.Infof("Starting the simnet miner")
 	go func() {
 		tick := time.NewTicker(time.Second * 5)
@@ -4577,7 +4662,7 @@ func runSimnetMiner(ctx context.Context, log dex.Logger) {
 			case <-tick.C:
 				log.Debugf("Mining a simnet block")
 				mine := exec.CommandContext(ctx, "./mine-alpha", "1")
-				mine.Dir = filepath.Join(u.HomeDir, "dextest", "eth", "harness-ctl")
+				mine.Dir = filepath.Join(u.HomeDir, "dextest", symbol, "harness-ctl")
 				b, err := mine.CombinedOutput()
 				if err != nil {
 					log.Errorf("Mining error: %v", err)
@@ -4595,22 +4680,33 @@ type getGas byte
 // GetGas provides access to the gas estimation utilities.
 var GetGas getGas
 
+// GetGasWalletParams are the configuration parameters required to estimate
+// swap contract gas usage.
+type GetGasWalletParams struct {
+	ChainCfg     *params.ChainConfig
+	Gas          *dexeth.Gases
+	Token        *dexeth.Token
+	UnitInfo     *dex.UnitInfo
+	BaseUnitInfo *dex.UnitInfo
+	Compat       *CompatibilityData
+	ContractAddr common.Address // Base chain contract addr.
+}
+
 // ReadCredentials reads the credentials for the network from the credentials
 // file.
-func (getGas) ReadCredentials(credentialsPath string, net dex.Network) (addr, provider string, err error) {
-	var creds *fileCredentials
-	creds, provider, err = getFileCredentials(credentialsPath, net)
+func (getGas) ReadCredentials(chain, credentialsPath string, net dex.Network) (addr string, providers []string, err error) {
+	seed, providers, err := getFileCredentials(chain, credentialsPath, net)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
-	privB, zero, err := privKeyFromSeed(creds.Seed)
+	privB, zero, err := privKeyFromSeed(seed)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 	defer zero()
 	privateKey, err := crypto.ToECDSA(privB)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 
 	addr = crypto.PubkeyToAddress(privateKey.PublicKey).String()
@@ -4618,17 +4714,12 @@ func (getGas) ReadCredentials(credentialsPath string, net dex.Network) (addr, pr
 }
 
 func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int,
-	walletDir, provider string, seed []byte, log dex.Logger) (cl *multiRPCClient, c contractor, g *dexeth.Gases,
+	walletDir string, providers []string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
 	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
 
-	g = gases(uint32(dexeth.ChainIDs[net]), assetID, contractVer, net)
-	if g == nil {
-		return nil, nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("no gas table found for %s, contract version %d", dex.BipIDSymbol(assetID), contractVer)
-	}
-
-	cl, c, err = quickNode(ctx, walletDir, assetID, contractVer, seed, provider, net, log)
+	cl, c, err = quickNode(ctx, walletDir, contractVer, seed, providers, wParams, net, log)
 	if err != nil {
-		return nil, nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
+		return nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
 
 	var success bool
@@ -4640,17 +4731,18 @@ func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Networ
 
 	base, tip, err := cl.currentFees(ctx)
 	if err != nil {
-		return nil, nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("Error estimating fee rate: %v", err)
+		return nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("Error estimating fee rate: %v", err)
 	}
 
 	ethBal, err = cl.addressBalance(ctx, cl.address())
 	if err != nil {
-		return nil, nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error getting eth balance: %v", err)
+		return nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error getting eth balance: %v", err)
 	}
 
 	feeRate = dexeth.WeiToGwei(new(big.Int).Add(tip, new(big.Int).Mul(base, big.NewInt(2))))
 
 	// Check that we have a balance for swaps and fees.
+	g := wParams.Gas
 	const swapVal = 1
 	n := uint64(maxSwaps)
 	swapReq = n * (n + 1) / 2 * swapVal // Sum of positive integers up to n
@@ -4663,13 +4755,13 @@ func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Networ
 		6 / 5 * // base rate increase accommodation
 		feeRate
 
-	isToken := assetID != BipID
+	isToken := wParams.Token != nil
 	ethReq = fees + swapReq
 	if isToken {
 		tc := c.(tokenContractor)
 		tokenBal, err = tc.balance(ctx)
 		if err != nil {
-			return nil, nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error fetching token balance: %v", err)
+			return nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("error fetching token balance: %v", err)
 		}
 
 		fees += (g.Transfer*2 + g.Approve*2*2 /* two approvals */ + defaultSendGasLimit /* approval client fee funding tx */) *
@@ -4680,19 +4772,23 @@ func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Networ
 	return
 }
 
+func (getGas) chainForAssetID(assetID uint32) string {
+	ti := asset.TokenInfo(assetID)
+	if ti == nil {
+		return dex.BipIDSymbol(assetID)
+	}
+	return dex.BipIDSymbol(ti.ParentID)
+}
+
 // EstimateFunding estimates how much funding is needed for estimating gas, and
 // prints helpful messages for the user.
 func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, contractVer uint32,
-	maxSwaps int, credentialsPath string, log dex.Logger) error {
+	maxSwaps int, credentialsPath string, wParams *GetGasWalletParams, log dex.Logger) error {
 
 	symbol := dex.BipIDSymbol(assetID)
-	log.Infof("Estimating required funding for up to %d swaps of asset %s, contract version %d on %s", maxSwaps, symbol, contractVer, symbol)
+	log.Infof("Estimating required funding for up to %d swaps of asset %s, contract version %d on %s", maxSwaps, symbol, contractVer, net)
 
-	if net == dex.Simnet {
-		dexeth.MaybeReadSimnetAddrs()
-	}
-
-	creds, provider, err := getFileCredentials(credentialsPath, net)
+	seed, providers, err := getFileCredentials(GetGas.chainForAssetID(assetID), credentialsPath, net)
 	if err != nil {
 		return err
 	}
@@ -4703,45 +4799,50 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, _, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, provider, creds.Seed, log)
+	cl, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
 		return err
 	}
 	defer cl.shutdown()
 	ethBal := dexeth.WeiToGwei(ethBalBig)
 
-	ethFmt := dexeth.UnitInfo.ConventionalString
+	ui := wParams.UnitInfo
+	assetFmt := ui.ConventionalString
+	bui := wParams.BaseUnitInfo
+	ethFmt := bui.ConventionalString
 
 	log.Info("Address:", cl.address())
-	log.Info("Ethereum balance:", ethFmt(ethBal), "ETH")
+	log.Infof("%s balance: %s", bui.Conventional.Unit, ethFmt(ethBal))
 
-	isToken := assetID != BipID
+	isToken := wParams.Token != nil
 	tokenBalOK := true
 	if isToken {
-		log.Infof("Ethereum required for fees: %s", ethFmt(ethReq))
+		log.Infof("%s required for fees: %s", bui.Conventional.Unit, ethFmt(ethReq))
 
 		ui, err := asset.UnitInfo(assetID)
 		if err != nil {
 			return fmt.Errorf("error getting unit info for %d: %v", assetID, err)
 		}
 
-		tokenBal := dexeth.Tokens[assetID].EVMToAtomic(tokenBalBig)
-		log.Infof("%s balance: %s", ui.Conventional.Unit, ui.ConventionalString(tokenBal))
-		log.Infof("%s required for trading: %s", ui.Conventional.Unit, ui.ConventionalString(swapReq))
+		tokenBal := wParams.Token.EVMToAtomic(tokenBalBig)
+		log.Infof("%s balance: %s", ui.Conventional.Unit, assetFmt(tokenBal))
+		log.Infof("%s required for trading: %s", ui.Conventional.Unit, assetFmt(swapReq))
 		if tokenBal < swapReq {
 			tokenBalOK = false
-			log.Infof("❌ Insufficient token balance. Deposit %s %s before getting a gas estimate",
-				ui.ConventionalString(swapReq-tokenBal), ui.Conventional.Unit)
+			log.Infof("❌ Insufficient %[2]s balance. Deposit %[1]s %[2]s before getting a gas estimate",
+				assetFmt(swapReq-tokenBal), ui.Conventional.Unit)
 		}
 
 	} else {
-		log.Infof("Ethereum required: %s (swaps) + %s (fees) = %s", ethFmt(swapReq), ethFmt(ethReq-swapReq), ethFmt(ethReq))
+		log.Infof("%s required: %s (swaps) + %s (fees) = %s",
+			ui.Conventional.Unit, ethFmt(swapReq), ethFmt(ethReq-swapReq), ethFmt(ethReq))
 	}
 
 	if ethBal < ethReq {
 		// Add 10% for fee drift.
 		ethRecommended := ethReq * 11 / 10
-		log.Infof("❌ Insufficient Ethereum Balance. Deposit about %s ETH before getting a gas estimate", ethFmt(ethRecommended-ethBal))
+		log.Infof("❌ Insufficient %s balance. Deposit about %s %s before getting a gas estimate",
+			bui.Conventional.Unit, ethFmt(ethRecommended-ethBal), bui.Conventional.Unit)
 	} else if tokenBalOK {
 		log.Infof("👍 You have sufficient funding to run a gas estimate")
 	}
@@ -4749,20 +4850,25 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	return nil
 }
 
-// ReturnETH returns the estimation wallet's Ethereum balance to a specified
-// address, if it is more than fees required to send. Note: There is no way yet
-// to get token balances returned, because the amount of token balance required
-// is typically only a few atoms. The user should only fund a token's balance
-// with the recommended amount from EstimateFunding.
-func (getGas) ReturnETH(ctx context.Context, credentialsPath, returnAddr string, net dex.Network, log dex.Logger) error {
-	const assetID = BipID // Only return ethereum. For tokens, the wallets should only ever be loaded with a few atoms.
+// Return returns the estimation wallet's base-chain or token balance to a
+// specified address, if it is more than fees required to send.
+func (getGas) Return(
+	ctx context.Context,
+	assetID uint32,
+	credentialsPath,
+	returnAddr string,
+	wParams *GetGasWalletParams,
+	net dex.Network,
+	log dex.Logger,
+) error {
+
 	const contractVer = 0 // Doesn't matter
 
 	if !common.IsHexAddress(returnAddr) {
 		return fmt.Errorf("supplied return address %q is not an Ethereum address", returnAddr)
 	}
 
-	creds, provider, err := getFileCredentials(credentialsPath, net)
+	seed, providers, err := getFileCredentials(GetGas.chainForAssetID(assetID), credentialsPath, net)
 	if err != nil {
 		return err
 	}
@@ -4773,7 +4879,7 @@ func (getGas) ReturnETH(ctx context.Context, credentialsPath, returnAddr string,
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, _, err := quickNode(ctx, walletDir, assetID, contractVer, creds.Seed, provider, net, log)
+	cl, _, err := quickNode(ctx, walletDir, contractVer, seed, providers, wParams, net, log)
 	if err != nil {
 		return fmt.Errorf("error creating initiator wallet: %v", err)
 	}
@@ -4786,29 +4892,89 @@ func (getGas) ReturnETH(ctx context.Context, credentialsPath, returnAddr string,
 
 	recommendedFeeRate := new(big.Int).Add(tip, new(big.Int).Mul(base, big.NewInt(2)))
 
+	return GetGas.returnFunds(ctx, cl, recommendedFeeRate, common.HexToAddress(returnAddr), wParams.Token, wParams.UnitInfo, log, net)
+}
+
+func (getGas) returnFunds(
+	ctx context.Context,
+	cl *multiRPCClient,
+	feeRate *big.Int,
+	returnAddr common.Address,
+	token *dexeth.Token, // nil for base chain
+	ui *dex.UnitInfo,
+	log dex.Logger,
+	net dex.Network,
+) error {
+
 	bigEthBal, err := cl.addressBalance(ctx, cl.address())
 	if err != nil {
 		return fmt.Errorf("error getting eth balance: %v", err)
 	}
 	ethBal := dexeth.WeiToGwei(bigEthBal)
 
-	bigFees := new(big.Int).Mul(new(big.Int).SetUint64(defaultSendGasLimit), recommendedFeeRate)
+	if token != nil {
+		nt, found := token.NetTokens[net]
+		if !found {
+			return fmt.Errorf("no %s token for %s", token.Name, net)
+		}
+		var g dexeth.Gases
+		for _, sc := range nt.SwapContracts {
+			g = sc.Gas
+			break
+		}
+		fees := g.Transfer * dexeth.WeiToGwei(feeRate)
+		if fees > ethBal {
+			return fmt.Errorf("not enough base chain balance (%s) to cover fees (%s)",
+				dexeth.UnitInfo.ConventionalString(ethBal), dexeth.UnitInfo.ConventionalString(fees))
+		}
+
+		tokenContract, err := erc20.NewIERC20(nt.Address, cl.contractBackend())
+		if err != nil {
+			return fmt.Errorf("NewIERC20 error: %v", err)
+		}
+
+		callOpts := &bind.CallOpts{
+			From:    cl.address(),
+			Context: ctx,
+		}
+
+		bigTokenBal, err := tokenContract.BalanceOf(callOpts, cl.address())
+		if err != nil {
+			return fmt.Errorf("error getting token balance: %w", err)
+		}
+
+		txOpts, err := cl.txOpts(ctx, 0, g.Transfer, feeRate, nil)
+		if err != nil {
+			return fmt.Errorf("error generating tx opts: %w", err)
+		}
+
+		tx, err := tokenContract.Transfer(txOpts, returnAddr, bigTokenBal)
+		if err != nil {
+			return fmt.Errorf("error transferring tokens : %w", err)
+		}
+		log.Infof("Sent %s in transaction %s", ui.ConventionalString(token.EVMToAtomic(bigTokenBal)), tx.Hash())
+		return nil
+	}
+
+	bigFees := new(big.Int).Mul(new(big.Int).SetUint64(defaultSendGasLimit), feeRate)
+
 	fees := dexeth.WeiToGwei(bigFees)
-	ethFmt := dexeth.UnitInfo.ConventionalString
+
+	ethFmt := ui.ConventionalString
 	if fees >= ethBal {
 		return fmt.Errorf("balance is lower than projected fees: %s < %s", ethFmt(ethBal), ethFmt(fees))
 	}
 
 	remainder := ethBal - fees
-	txOpts, err := cl.txOpts(ctx, remainder, defaultSendGasLimit, recommendedFeeRate, nil)
+	txOpts, err := cl.txOpts(ctx, remainder, defaultSendGasLimit, feeRate, nil)
 	if err != nil {
 		return fmt.Errorf("error generating tx opts: %w", err)
 	}
-	tx, err := cl.sendTransaction(ctx, txOpts, common.HexToAddress(returnAddr), nil)
+	tx, err := cl.sendTransaction(ctx, txOpts, returnAddr, nil)
 	if err != nil {
 		return fmt.Errorf("error sending funds: %w", err)
 	}
-	log.Info("!!! Success!!! txid =", tx.Hash())
+	log.Infof("Sent %s in transaction %s", ui.ConventionalString(remainder), tx.Hash())
 	return nil
 }
 
@@ -4821,17 +4987,15 @@ func (getGas) ReturnETH(ctx context.Context, credentialsPath, returnAddr string,
 // not recoverable. If you run this function with insufficient or zero ETH
 // and/or token balance on the seed, the function will error with a message
 // indicating the amount of funding needed to run.
-func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int, credentialsPath string, log dex.Logger) error {
+func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int,
+	credentialsPath string, wParams *GetGasWalletParams, log dex.Logger) error {
+
 	symbol := dex.BipIDSymbol(assetID)
 	log.Infof("Getting gas estimates for up to %d swaps of asset %s, contract version %d on %s", maxSwaps, symbol, contractVer, symbol)
 
-	if net == dex.Simnet {
-		dexeth.MaybeReadSimnetAddrs()
-	}
+	isToken := wParams.Token != nil
 
-	isToken := assetID != BipID
-
-	creds, provider, err := getFileCredentials(credentialsPath, net)
+	seed, providers, err := getFileCredentials(GetGas.chainForAssetID(assetID), credentialsPath, net)
 	if err != nil {
 		return err
 	}
@@ -4842,7 +5006,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, c, gases, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, provider, creds.Seed, log)
+	cl, c, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
 		return err
 	}
@@ -4850,39 +5014,42 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 
 	log.Infof("Initiator address: %s", cl.address())
 
-	log.Infof("ETH balance: %s", dexeth.UnitInfo.ConventionalString(dexeth.WeiToGwei(ethBal)))
+	ui := wParams.UnitInfo
+	assetFmt := ui.ConventionalString
+	bui := wParams.BaseUnitInfo
+	bUnit := bui.Conventional.Unit
+	ethFmt := bui.ConventionalString
+
+	log.Infof("%s balance: %s", bUnit, ethFmt(dexeth.WeiToGwei(ethBal)))
 	atomicBal := dexeth.WeiToGwei(ethBal)
 	if atomicBal < ethReq {
-		return fmt.Errorf("eth balance insufficient to get gas estimates. current: %s, required %s ETH. send eth to %s",
-			dexeth.UnitInfo.ConventionalString(atomicBal), dexeth.UnitInfo.ConventionalString(ethReq), cl.address())
+		return fmt.Errorf("%s balance insufficient to get gas estimates. current: %[2]s, required ~ %[3]s %[1]s. send %[1]s to %[4]s",
+			bUnit, ethFmt(atomicBal), ethFmt(ethReq*5/4), cl.address())
 	}
 
 	// Run the miner now, in case we need it for the approval client preload.
 	if net == dex.Simnet {
-		runSimnetMiner(ctx, log)
+		symbolParts := strings.Split(symbol, ".") // e.g. dextt.polygon, dextt.eth
+		runSimnetMiner(ctx, symbolParts[len(symbolParts)-1], log)
 	}
 
 	var approvalClient *multiRPCClient
 	var approvalContractor tokenContractor
 	if isToken {
-		ui, err := asset.UnitInfo(assetID)
-		if err != nil {
-			return fmt.Errorf("error getting unit info for %d: %v", assetID, err)
-		}
 
-		atomicBal := dexeth.Tokens[assetID].EVMToAtomic(tokenBal)
+		atomicBal := wParams.Token.EVMToAtomic(tokenBal)
 
 		convUnit := ui.Conventional.Unit
-		log.Infof("%s balance: %s %s", strings.ToUpper(symbol), ui.ConventionalString(atomicBal), convUnit)
+		log.Infof("%s balance: %s %s", strings.ToUpper(symbol), assetFmt(atomicBal), convUnit)
 		log.Infof("%d %s required for swaps", swapReq, ui.AtomicUnit)
-		log.Infof("%d gwei eth required for fees", ethReq)
+		log.Infof("%d gwei %s required for fees", ethReq, bui.Conventional.Unit)
 		if atomicBal < swapReq {
-			return fmt.Errorf("token balance insufficient to get gas estimates. current: %s, required %s %s. send %s to %s",
-				ui.ConventionalString(atomicBal), ui.ConventionalString(swapReq), convUnit, symbol, cl.address())
+			return fmt.Errorf("%[3]s balance insufficient to get gas estimates. current: %[1]s, required ~ %[2]s %[3]s. send %[3]s to %[4]s",
+				assetFmt(atomicBal), assetFmt(swapReq), convUnit, cl.address())
 		}
 
 		var mrc contractor
-		approvalClient, mrc, err = quickNode(ctx, filepath.Join(walletDir, "ac_dir"), assetID, contractVer, encode.RandomBytes(32), provider, net, log)
+		approvalClient, mrc, err = quickNode(ctx, filepath.Join(walletDir, "ac_dir"), contractVer, encode.RandomBytes(32), providers, wParams, net, log)
 		if err != nil {
 			return fmt.Errorf("error creating approval contract node: %v", err)
 		}
@@ -4892,7 +5059,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 		// TODO: We're overloading by probably 140% here, but this is what
 		// we've reserved in our fee checks. Is it worth recovering unused
 		// balance?
-		feePreload := gases.Approve * 2 * 6 / 5 * feeRate
+		feePreload := wParams.Gas.Approve * 2 * 6 / 5 * feeRate
 		txOpts, err := cl.txOpts(ctx, feePreload, defaultSendGasLimit, nil, nil)
 		if err != nil {
 			return fmt.Errorf("error creating tx opts for sending fees for approval client: %v", err)
@@ -4907,11 +5074,11 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 		}
 
 	} else {
-		log.Infof("%d gwei eth required for fees and swaps", ethReq)
+		log.Infof("%d gwei %s required for fees and swaps", ethReq, bui.Conventional.Unit)
 	}
 
 	log.Debugf("Getting gas estimates")
-	return getGasEstimates(ctx, cl, approvalClient, c, approvalContractor, maxSwaps, gases, log)
+	return getGasEstimates(ctx, cl, approvalClient, c, approvalContractor, maxSwaps, wParams.Gas, log)
 }
 
 // getGasEstimate is used to get a gas table for an asset's contract(s). The
@@ -5151,25 +5318,4 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 	}
 
 	return nil
-}
-
-// simnetDataDir returns the data directory for the given simnet chainID. See:
-// dex/testing/{dir}
-func simnetDataDir(chainID int64) (string, error) {
-	var dir string
-	switch chainID {
-	case dexpolygon.SimnetChainID:
-		dir = "polygon"
-	case dexeth.SimnetChainID:
-		dir = "eth"
-	default:
-		return "", fmt.Errorf("unknown simnet chainID %d", chainID)
-	}
-
-	u, err := user.Current()
-	if err != nil {
-		return "", fmt.Errorf("error getting current user: %w", err)
-	}
-
-	return filepath.Join(u.HomeDir, "dextest", dir), nil
 }

@@ -165,21 +165,21 @@ export default class OrdersPage extends BasePage {
     const tbody = this.page.tableBody
     for (const ord of orders) {
       const tr = this.orderTmpl.cloneNode(true) as HTMLElement
-      const set = (tmplID: string, s: string) => { Doc.tmplElement(tr, tmplID).textContent = s }
-      const mktID = `${ord.baseSymbol.toUpperCase()}-${ord.quoteSymbol.toUpperCase()}`
-      set('host', `${mktID} @ ${ord.host}`)
-      let from, to, fromQty
+      const tmpl = Doc.parseTemplate(tr)
+      let fromSymbol, toSymbol, fromUnit, toUnit, fromQty
       let toQty = ''
       const xc = app().exchanges[ord.host] || undefined
       const [baseUnitInfo, quoteUnitInfo] = [app().unitInfo(ord.baseID, xc), app().unitInfo(ord.quoteID, xc)]
       if (ord.sell) {
-        [from, to] = [ord.baseSymbol, ord.quoteSymbol]
+        [fromSymbol, toSymbol] = [ord.baseSymbol, ord.quoteSymbol];
+        [fromUnit, toUnit] = [baseUnitInfo.conventional.unit, quoteUnitInfo.conventional.unit]
         fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         if (ord.type === OrderUtil.Limit) {
           toQty = Doc.formatCoinValue(ord.qty / OrderUtil.RateEncodingFactor * ord.rate, quoteUnitInfo)
         }
       } else {
-        [from, to] = [ord.quoteSymbol, ord.baseSymbol]
+        [fromSymbol, toSymbol] = [ord.quoteSymbol, ord.baseSymbol];
+        [fromUnit, toUnit] = [quoteUnitInfo.conventional.unit, baseUnitInfo.conventional.unit]
         if (ord.type === OrderUtil.Market) {
           fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         } else {
@@ -188,19 +188,22 @@ export default class OrdersPage extends BasePage {
         }
       }
 
-      set('fromQty', fromQty)
-      Doc.tmplElement(tr, 'fromLogo').src = Doc.logoPath(from)
-      set('fromSymbol', from)
-      set('toQty', toQty)
-      Doc.tmplElement(tr, 'toLogo').src = Doc.logoPath(to)
-      set('toSymbol', to)
-      set('type', `${OrderUtil.typeString(ord)} ${OrderUtil.sellString(ord)}`)
-      set('rate', Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate, xc)))
-      set('status', OrderUtil.statusString(ord))
-      set('filled', `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`)
-      set('settled', `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`)
+      const mktID = `${baseUnitInfo.conventional.unit}-${quoteUnitInfo.conventional.unit}`
+      tmpl.host.textContent = `${mktID} @ ${ord.host}`
+
+      tmpl.fromQty.textContent = fromQty
+      tmpl.fromLogo.src = Doc.logoPath(fromSymbol)
+      tmpl.fromSymbol.textContent = fromUnit
+      tmpl.toQty.textContent = toQty
+      tmpl.toLogo.src = Doc.logoPath(toSymbol)
+      tmpl.toSymbol.textContent = toUnit
+      tmpl.type.textContent = `${OrderUtil.typeString(ord)} ${OrderUtil.sellString(ord)}`
+      tmpl.rate.textContent = Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate, xc))
+      tmpl.status.textContent = OrderUtil.statusString(ord)
+      tmpl.filled.textContent = `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`
+      tmpl.settled.textContent = `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`
       const dateTime = new Date(ord.submitTime).toLocaleString()
-      set('time', `${Doc.timeSince(ord.submitTime)} ago, ${dateTime}`)
+      tmpl.time.textContent = `${Doc.timeSince(ord.submitTime)} ago, ${dateTime}`
       const link = Doc.tmplElement(tr, 'link')
       link.href = `order/${ord.id}`
       app().bindInternalNavigation(tr)

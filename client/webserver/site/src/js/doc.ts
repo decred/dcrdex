@@ -3,7 +3,8 @@ import {
   UnitInfo,
   LayoutMetrics,
   WalletState,
-  PageElement
+  PageElement,
+  SupportedAsset
 } from './registry'
 import { RateEncodingFactor } from './orderutil'
 
@@ -24,9 +25,11 @@ const BipIDs: Record<number, string> = {
   60: 'eth',
   136: 'firo',
   133: 'zec',
-  966: 'matic',
+  966: 'polygon',
   60000: 'dextt.eth',
-  60001: 'usdc.eth'
+  60001: 'usdc.eth',
+  966000: 'dextt.polygon',
+  966001: 'usdc.polygon'
 }
 
 const BipSymbols = Object.values(BipIDs)
@@ -315,6 +318,7 @@ export default class Doc {
    */
   static logoPath (symbol: string): string {
     if (BipSymbols.indexOf(symbol) === -1) symbol = symbol.substring(0, 1)
+    symbol = symbol.split('.')[0] // e.g. usdc.eth => usdc
     return `/img/coins/${symbol}.png`
   }
 
@@ -331,17 +335,25 @@ export default class Doc {
    * non-token assets, this is simply a <span>SYMBOL</span>. For tokens, it'll
    * be <span><span>SYMBOL</span><sup>PARENT</sup></span>.
    */
-  static symbolize (symbol: string): PageElement {
-    const parts = symbol.split('.')
-    const assetSymbol = document.createElement('span')
-    assetSymbol.textContent = parts[0].toUpperCase()
-    if (parts.length === 1) return assetSymbol
+  static symbolize (asset: SupportedAsset, useLogo?: boolean): PageElement {
+    const symbol = asset.unitInfo.conventional.unit
+    const symbolSpan = document.createElement('span')
+    symbolSpan.textContent = symbol.toUpperCase()
+    if (!asset.token) return symbolSpan
+    const parentSymbol = asset.symbol.split('.')[1]
     const span = document.createElement('span')
-    span.classList.add('token-aware-symbol')
-    span.appendChild(assetSymbol)
-    const parent = document.createElement('sup')
-    parent.textContent = parts[1].toUpperCase()
-    span.appendChild(parent)
+    span.appendChild(symbolSpan)
+    if (useLogo) {
+      const parentLogo = document.createElement('img')
+      parentLogo.src = Doc.logoPath(parentSymbol)
+      parentLogo.classList.add('token-parent')
+      span.appendChild(parentLogo)
+      return span
+    }
+    const parentSup = document.createElement('sup')
+    parentSup.textContent = parentSymbol.toUpperCase()
+    parentSup.classList.add('token-parent')
+    span.appendChild(parentSup)
     return span
   }
 

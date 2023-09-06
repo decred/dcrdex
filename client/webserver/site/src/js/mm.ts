@@ -225,34 +225,33 @@ export default class MarketMakerPage extends BasePage {
       const clickedSymbol = isBase ? this.currentMarket.basesymbol : this.currentMarket.quotesymbol
 
       // Look through markets for other base assets for the counter asset.
-      const matches: Set<string> = new Set()
-      const otherAssets: Set<string> = new Set()
+      const matches: Set<SupportedAsset> = new Set()
+      const otherAssets: Set<SupportedAsset> = new Set()
 
       for (const mkt of sortedMarkets()) {
-        otherAssets.add(mkt.basesymbol)
-        otherAssets.add(mkt.quotesymbol)
+        otherAssets.add(app().assets[mkt.baseid])
+        otherAssets.add(app().assets[mkt.quoteid])
         const [firstID, secondID] = isBase ? [mkt.quoteid, mkt.baseid] : [mkt.baseid, mkt.quoteid]
-        const [firstSymbol, secondSymbol] = isBase ? [mkt.quotesymbol, mkt.basesymbol] : [mkt.basesymbol, mkt.quotesymbol]
-        if (firstID === counterAsset) matches.add(secondSymbol)
-        else if (secondID === counterAsset) matches.add(firstSymbol)
+        if (firstID === counterAsset) matches.add(app().assets[secondID])
+        else if (secondID === counterAsset) matches.add(app().assets[firstID])
       }
 
       const options = Array.from(matches)
-      options.sort((a: string, b: string) => a.localeCompare(b))
+      options.sort((a: SupportedAsset, b: SupportedAsset) => a.symbol.localeCompare(b.symbol))
       for (const symbol of options) otherAssets.delete(symbol)
       const nonOptions = Array.from(otherAssets)
-      nonOptions.sort((a: string, b: string) => a.localeCompare(b))
+      nonOptions.sort((a: SupportedAsset, b: SupportedAsset) => a.symbol.localeCompare(b.symbol))
 
       Doc.empty(page.assetDropdown)
-      const addOptions = (symbols: string[], avail: boolean): void => {
-        for (const symbol of symbols) {
-          const row = this.assetRow(symbol)
+      const addOptions = (assets: SupportedAsset[], avail: boolean): void => {
+        for (const a of assets) {
+          const row = this.assetRow(a)
           Doc.bind(row, 'click', (e: MouseEvent) => {
             e.stopPropagation()
-            if (symbol === clickedSymbol) return this.hideAssetDropdown() // no change
+            if (a.symbol === clickedSymbol) return this.hideAssetDropdown() // no change
             this.leaveEditMode()
-            if (isBase) this.setCreationBase(symbol)
-            else this.setCreationQuote(symbol)
+            if (isBase) this.setCreationBase(a.symbol)
+            else this.setCreationQuote(a.symbol)
           })
           if (!avail) row.classList.add('ghost')
           page.assetDropdown.appendChild(row)
@@ -448,12 +447,12 @@ export default class MarketMakerPage extends BasePage {
     Doc.hide(page.assetDropdown)
   }
 
-  assetRow (symbol: string): PageElement {
+  assetRow (asset: SupportedAsset): PageElement {
     const row = this.page.assetRowTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(row)
-    tmpl.logo.src = Doc.logoPath(symbol)
+    tmpl.logo.src = Doc.logoPath(asset.symbol)
     Doc.empty(tmpl.symbol)
-    tmpl.symbol.appendChild(Doc.symbolize(symbol))
+    tmpl.symbol.appendChild(Doc.symbolize(asset))
     return row
   }
 
@@ -575,15 +574,18 @@ export default class MarketMakerPage extends BasePage {
     State.storeLocal(State.lastMMMarketLK, mkt)
 
     Doc.empty(page.baseSelect, page.quoteSelect)
-    page.baseSelect.appendChild(this.assetRow(mkt.basesymbol))
-    page.quoteSelect.appendChild(this.assetRow(mkt.quotesymbol))
+    page.baseSelect.appendChild(this.assetRow(app().assets[mkt.baseid]))
+    page.quoteSelect.appendChild(this.assetRow(app().assets[mkt.quoteid]))
     this.hideAssetDropdown()
 
+    const [b, q] = [app().assets[mkt.baseid], app().assets[mkt.quoteid]]
+
     const addMarketSelect = (mkt: HostedMarket, el: PageElement) => {
+      const [b, q] = [app().assets[mkt.baseid], app().assets[mkt.quoteid]]
       Doc.setContent(el,
-        Doc.symbolize(mkt.basesymbol),
+        Doc.symbolize(b),
         new Text('-') as any,
-        Doc.symbolize(mkt.quotesymbol),
+        Doc.symbolize(q),
         new Text(' @ ') as any,
         new Text(mkt.host) as any
       )
@@ -606,8 +608,8 @@ export default class MarketMakerPage extends BasePage {
 
     if (skipMarketUpdate) return
 
-    Doc.setContent(page.lotEstBaseSymbol, Doc.symbolize(mkt.basesymbol))
-    Doc.setContent(page.lotEstQuoteSymbol, Doc.symbolize(mkt.quotesymbol))
+    Doc.setContent(page.lotEstBaseSymbol, Doc.symbolize(b))
+    Doc.setContent(page.lotEstQuoteSymbol, Doc.symbolize(q))
 
     const setNoWallet = (a: SupportedAsset, noWalletBox: PageElement): boolean => {
       Doc.show(noWalletBox)
@@ -621,7 +623,6 @@ export default class MarketMakerPage extends BasePage {
       page.lotEstQuoteBox, page.lotEstQuoteNoWallet, page.lotEstBaseBox, page.lotEstBaseNoWallet, page.availHeader,
       page.lotEstimateBox, page.marketInfo, page.oraclesBox, page.lotsBox, page.options, page.advancedBox
     )
-    const [b, q] = [app().assets[mkt.baseid], app().assets[mkt.quoteid]]
     if (b.wallet && q.wallet) {
       Doc.show(
         page.lotEstQuoteBox, page.lotEstBaseBox, page.availHeader, page.fetchingMarkets,
@@ -798,8 +799,8 @@ export default class MarketMakerPage extends BasePage {
       this.setEditProgram(this.programs[report.programID])
     })
     const [b, q] = [app().assets[report.program.baseID], app().assets[report.program.quoteID]]
-    tmpl.base.appendChild(this.assetRow(b.symbol))
-    tmpl.quote.appendChild(this.assetRow(q.symbol))
+    tmpl.base.appendChild(this.assetRow(b))
+    tmpl.quote.appendChild(this.assetRow(q))
     tmpl.baseSymbol.textContent = b.symbol.toUpperCase()
     tmpl.quoteSymbol.textContent = q.symbol.toUpperCase()
     tmpl.host.textContent = report.program.host

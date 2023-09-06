@@ -32,6 +32,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -72,58 +73,46 @@ var (
 	homeDir                     = os.Getenv("HOME")
 	simnetWalletDir             = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "simnet")
 	participantWalletDir        = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "participant")
-	testnetWalletDir            = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletA")
-	testnetParticipantWalletDir = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletB")
-	alphaNodeDir                = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
-	alphaIPCFile                = filepath.Join(alphaNodeDir, "geth.ipc")
-	betaNodeDir                 = filepath.Join(homeDir, "dextest", "eth", "beta", "node")
-	betaIPCFile                 = filepath.Join(betaNodeDir, "geth.ipc")
-	ctx                         context.Context
-	tLogger                     = dex.StdOutLogger("ETHTEST", dex.LevelWarn)
-	simnetWalletSeed            = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
-	simnetAddr                  common.Address
-	simnetAcct                  *accounts.Account
-	ethClient                   ethFetcher
-	participantWalletSeed       = "a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
-	participantAddr             common.Address
-	participantAcct             *accounts.Account
-	participantEthClient        ethFetcher
-	ethSwapContractAddr         common.Address
-	simnetContractor            contractor
-	participantContractor       contractor
-	simnetTokenContractor       tokenContractor
-	participantTokenContractor  tokenContractor
-	ethGases                    = dexeth.VersionedGases[0]
-	tokenGases                  *dexeth.Gases
-	testnetSecPerBlock          = 15 * time.Second
-	// secPerBlock is one for simnet, because it takes one second to mine a
-	// block currently. Is set in code to testnetSecPerBlock if running on
-	// testnet.
-	secPerBlock = time.Second
+	testnetWalletDir            string
+	testnetParticipantWalletDir string
+
+	alphaNodeDir               = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
+	alphaIPCFile               = filepath.Join(alphaNodeDir, "geth.ipc")
+	betaNodeDir                = filepath.Join(homeDir, "dextest", "eth", "beta", "node")
+	betaIPCFile                = filepath.Join(betaNodeDir, "geth.ipc")
+	ctx                        context.Context
+	tLogger                    = dex.StdOutLogger("ETHTEST", dex.LevelWarn)
+	simnetWalletSeed           = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
+	simnetAddr                 common.Address
+	simnetAcct                 *accounts.Account
+	ethClient                  ethFetcher
+	participantWalletSeed      = "a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
+	participantAddr            common.Address
+	participantAcct            *accounts.Account
+	participantEthClient       ethFetcher
+	ethSwapContractAddr        common.Address
+	simnetContractor           contractor
+	participantContractor      contractor
+	simnetTokenContractor      tokenContractor
+	participantTokenContractor tokenContractor
+	ethGases                   = dexeth.VersionedGases[0]
+	tokenGases                 *dexeth.Gases
+	secPerBlock                = 15 * time.Second
 	// If you are testing on testnet, you must specify the rpcNode. You can also
 	// specify it in the testnet-credentials.json file.
-	rpcNode string
+	rpcProviders []string
 	// useRPC can be set to true to test the RPC clients.
 	useRPC bool
 
 	// isTestnet can be set to true to perform tests on the goerli testnet.
 	// May need some setup including sending testnet coins to the addresses
-	// and a lengthy sync. Wallet addresses are the same as simnet. All
-	// wait and lock times are multiplied by testnetSecPerBlock. Tests may
+	// and a lengthy sync. Wallet addresses are the same as simnet. Tests may
 	// need to be run with a high --timeout=2h for the initial sync.
 	//
 	// Only for non-token tests, so run with --run=TestGroupName.
 	//
 	// TODO: Make this also work for token tests.
 	isTestnet bool
-
-	// For testnet credentials, use a JSON file formatted like...
-	// {
-	// 	"key0": "deadbeef",
-	// 	"key1": "beefdead",
-	// 	"provider": "https://myprovider.com/MYAPIKEY"
-	// }
-	testnetCredentialsPath = filepath.Join(homeDir, "ethtest", "testnet-credentials.json")
 
 	// testnetWalletSeed and testnetParticipantWalletSeed are required for
 	// use on testnet and can be any 256 bit hex. If the wallets created by
@@ -211,14 +200,12 @@ func waitForMinedRPC() error {
 	}
 }
 
-// waitForMined will multiply the time limit by testnetSecPerBlock for
+// waitForMined will multiply the time limit by secPerBlock for
 // testnet and mine blocks when on simnet.
 func waitForMined(nBlock int, waitTimeLimit bool) error {
 	timesUp := time.After(time.Duration(nBlock) * secPerBlock)
-	if isTestnet && useRPC {
-		if err := waitForMinedRPC(); err != nil {
-			return err
-		}
+	if useRPC {
+		return waitForMinedRPC()
 	}
 	if !isTestnet {
 		err := exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.start()").Run()
@@ -263,15 +250,13 @@ out:
 	return nil
 }
 
-func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
-	chainID := dexeth.ChainIDs[net]
-	ethCfg, err := chainConfig(chainID, net)
+func prepareRPCClient(name, dataDir string, providers []string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
+	cfg, err := ChainConfig(net)
 	if err != nil {
 		return nil, nil, err
 	}
-	cfg := ethCfg.Genesis.Config
 
-	c, err := newMultiRPCClient(dataDir, []string{endpoint}, tLogger.SubLogger(name), cfg, big.NewInt(dexeth.ChainIDs[net]), net)
+	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
 	}
@@ -281,28 +266,27 @@ func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRP
 	return c, c.creds.acct, nil
 }
 
-func rpcEndpoints(net dex.Network) (string, string) {
+func rpcEndpoints(net dex.Network) ([]string, []string) {
 	if net == dex.Testnet {
-		return rpcNode, rpcNode
+		return rpcProviders, rpcProviders
 	}
-	return alphaIPCFile, betaIPCFile
+	return []string{alphaIPCFile}, []string{betaIPCFile}
 }
 
 func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network) (err error) {
-	initiatorEndpoint, participantEndpoint := rpcEndpoints(net)
+	initiatorEndpoints, participantEndpoints := rpcEndpoints(net)
 
-	ethClient, simnetAcct, err = prepareRPCClient("initiator", initiatorDir, initiatorEndpoint, net)
+	ethClient, simnetAcct, err = prepareRPCClient("initiator", initiatorDir, initiatorEndpoints, net)
 	if err != nil {
 		return err
 	}
+	fmt.Println("initiator address is", ethClient.address())
 
-	participantEthClient, participantAcct, err = prepareRPCClient("participant", participantDir, participantEndpoint, net)
+	participantEthClient, participantAcct, err = prepareRPCClient("participant", participantDir, participantEndpoints, net)
 	if err != nil {
 		ethClient.shutdown()
 		return err
 	}
-
-	fmt.Println("initiator address is", ethClient.address())
 	fmt.Println("participant address is", participantEthClient.address())
 	return nil
 }
@@ -367,25 +351,27 @@ func runSimnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("error creating participant wallet dir: %v", err)
 	}
 
-	tokenGases = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
+	const contractVer = 0
+
+	tokenGases = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[contractVer].Gas
 
 	// ETH swap contract.
 	masterToken = dexeth.Tokens[testTokenID]
 	token := masterToken.NetTokens[dex.Simnet]
-	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[0][dex.Simnet])
+	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[contractVer][dex.Simnet])
 	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[0].Address)
 	fmt.Printf("Test token contract addr is %v\n", token.Address)
 
-	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Simnet]
+	ethSwapContractAddr = dexeth.ContractAddresses[contractVer][dex.Simnet]
 
-	initiatorRPC, participantRPC := rpcEndpoints(dex.Simnet)
+	initiatorProviders, participantProviders := rpcEndpoints(dex.Simnet)
 
-	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", initiatorRPC, dex.Simnet)
+	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", initiatorProviders, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
 
-	err = setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356", participantRPC, dex.Simnet)
+	err = setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356", participantProviders, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
@@ -411,14 +397,19 @@ func runSimnet(m *testing.M) (int, error) {
 	simnetAddr = simnetAcct.Address
 	participantAddr = participantAcct.Address
 
-	if simnetContractor, err = newV0Contractor(dex.Simnet, simnetAddr, ethClient.contractBackend()); err != nil {
+	contractAddr, exists := dexeth.ContractAddresses[contractVer][dex.Simnet]
+	if !exists || contractAddr == (common.Address{}) {
+		return 1, fmt.Errorf("no contract address for version %d", contractVer)
+	}
+
+	if simnetContractor, err = newV0Contractor(contractAddr, simnetAddr, ethClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("newV0Contractor error: %w", err)
 	}
-	if participantContractor, err = newV0Contractor(dex.Simnet, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantContractor, err = newV0Contractor(contractAddr, participantAddr, participantEthClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("participant newV0Contractor error: %w", err)
 	}
 
-	if simnetTokenContractor, err = newV0TokenContractor(dex.Simnet, testTokenID, simnetAddr, ethClient.contractBackend()); err != nil {
+	if simnetTokenContractor, err = newV0TokenContractor(dex.Simnet, dexeth.Tokens[testTokenID], simnetAddr, ethClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("newV0TokenContractor error: %w", err)
 	}
 
@@ -427,7 +418,7 @@ func runSimnet(m *testing.M) (int, error) {
 	// (*BoundContract).Call while calling (*ERC20Swap).TokenAddress.
 	time.Sleep(time.Second)
 
-	if participantTokenContractor, err = newV0TokenContractor(dex.Simnet, testTokenID, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantTokenContractor, err = newV0TokenContractor(dex.Simnet, dexeth.Tokens[testTokenID], participantAddr, participantEthClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("participant newV0TokenContractor error: %w", err)
 	}
 
@@ -506,8 +497,8 @@ func runTestnet(m *testing.M) (int, error) {
 	if err != nil {
 		return 1, fmt.Errorf("error creating testnet participant wallet dir: %v", err)
 	}
-	secPerBlock = testnetSecPerBlock
-	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Testnet]
+	const contractVer = 0
+	ethSwapContractAddr = dexeth.ContractAddresses[contractVer][dex.Testnet]
 	fmt.Printf("ETH swap contract address is %v\n", ethSwapContractAddr)
 
 	initiatorRPC, participantRPC := rpcEndpoints(dex.Testnet)
@@ -557,10 +548,15 @@ func runTestnet(m *testing.M) (int, error) {
 	simnetAddr = simnetAcct.Address
 	participantAddr = participantAcct.Address
 
-	if simnetContractor, err = newV0Contractor(dex.Testnet, simnetAddr, ethClient.contractBackend()); err != nil {
+	contractAddr, exists := dexeth.ContractAddresses[contractVer][dex.Testnet]
+	if !exists || contractAddr == (common.Address{}) {
+		return 1, fmt.Errorf("no contract address for version %d", contractVer)
+	}
+
+	if simnetContractor, err = newV0Contractor(contractAddr, simnetAddr, ethClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("newV0Contractor error: %w", err)
 	}
-	if participantContractor, err = newV0Contractor(dex.Testnet, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantContractor, err = newV0Contractor(contractAddr, participantAddr, participantEthClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("participant newV0Contractor error: %w", err)
 	}
 
@@ -571,7 +567,7 @@ func runTestnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("error unlocking initiator client: %w", err)
 	}
 
-	if simnetTokenContractor, err = newV0TokenContractor(dex.Testnet, usdcID, simnetAddr, ethClient.contractBackend()); err != nil {
+	if simnetTokenContractor, err = newV0TokenContractor(dex.Testnet, dexeth.Tokens[usdcID], simnetAddr, ethClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("newV0TokenContractor error: %w", err)
 	}
 
@@ -580,7 +576,7 @@ func runTestnet(m *testing.M) (int, error) {
 	// (*BoundContract).Call while calling (*ERC20Swap).TokenAddress.
 	time.Sleep(time.Second)
 
-	if participantTokenContractor, err = newV0TokenContractor(dex.Testnet, usdcID, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantTokenContractor, err = newV0TokenContractor(dex.Testnet, dexeth.Tokens[usdcID], participantAddr, participantEthClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("participant newV0TokenContractor error: %w", err)
 	}
 
@@ -602,27 +598,21 @@ func runTestnet(m *testing.M) (int, error) {
 
 func useTestnet() error {
 	isTestnet = true
-	b, err := os.ReadFile(testnetCredentialsPath)
+	b, err := os.ReadFile(filepath.Join(homeDir, "dextest", "credentials.json"))
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("error reading credentials file: %v", err)
-		}
-	} else {
-		var creds struct {
-			Key0     string `json:"key0"`
-			Key1     string `json:"key1"`
-			Provider string `json:"provider"`
-		}
-		if err := json.Unmarshal(b, &creds); err != nil {
-			return fmt.Errorf("error parsing credentials file: %v", err)
-		}
-		if creds.Key0 == "" || creds.Key1 == "" {
-			return fmt.Errorf("must provide both keys in testnet credentials file")
-		}
-		testnetWalletSeed = creds.Key0
-		testnetParticipantWalletSeed = creds.Key1
-		rpcNode = creds.Provider
+		return fmt.Errorf("error reading credentials file: %v", err)
 	}
+	var creds providersFile
+	if err = json.Unmarshal(b, &creds); err != nil {
+		return fmt.Errorf("error decoding credential: %w", err)
+	}
+	if len(creds.Seed) == 0 {
+		return errors.New("no seed found in credentials file")
+	}
+	seed2 := sha256.Sum256(creds.Seed)
+	testnetWalletSeed = hex.EncodeToString(creds.Seed)
+	testnetParticipantWalletSeed = hex.EncodeToString(seed2[:])
+	rpcProviders = creds.Providers["eth"][dex.Testnet.String()]
 	return nil
 }
 
@@ -630,10 +620,19 @@ func TestMain(m *testing.M) {
 	dexeth.MaybeReadSimnetAddrs()
 
 	flag.BoolVar(&isTestnet, "testnet", false, "use testnet")
-	flag.BoolVar(&useRPC, "rpc", false, "use RPC")
+	flag.BoolVar(&useRPC, "rpc", true, "use RPC")
 	flag.Parse()
 
 	if isTestnet {
+		tmpDir, err := os.MkdirTemp("", "")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating temporary directory: %v", err)
+			os.Exit(1)
+		}
+		testnetWalletDir = filepath.Join(tmpDir, "initiator")
+		defer os.RemoveAll(testnetWalletDir)
+		testnetParticipantWalletDir = filepath.Join(tmpDir, "participant")
+		defer os.RemoveAll(testnetParticipantWalletDir)
 		if err := useTestnet(); err != nil {
 			fmt.Fprintf(os.Stderr, "error loading testnet: %v", err)
 			os.Exit(1)
@@ -665,7 +664,7 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network) error {
+func setupWallet(walletDir, seed, listenAddress string, providers []string, net dex.Network) error {
 	walletType := walletTypeGeth
 	settings := map[string]string{
 		"nodelistenaddr": listenAddress,
@@ -673,7 +672,7 @@ func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network
 	if useRPC {
 		walletType = walletTypeRPC
 		settings = map[string]string{
-			providersKey: rpcAddr,
+			providersKey: strings.Join(providers, " "),
 		}
 	}
 	seedB, _ := hex.DecodeString(seed)
@@ -686,7 +685,11 @@ func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network
 		Net:      net,
 		Logger:   tLogger,
 	}
-	return CreateEVMWallet(dexeth.ChainIDs[net], &createWalletParams, true)
+	compat, err := NetworkCompatibilityData(net)
+	if err != nil {
+		return err
+	}
+	return CreateEVMWallet(dexeth.ChainIDs[net], &createWalletParams, &compat, true)
 }
 
 func prepareTokenClients(t *testing.T) {
@@ -1122,17 +1125,21 @@ func testInitiateGas(t *testing.T, assetID uint32) {
 		prepareTokenClients(t)
 	}
 
-	c := simnetContractor
-
-	if assetID != BipID {
-		c = simnetTokenContractor
-	}
-
 	net := dex.Simnet
 	if isTestnet {
 		net = dex.Testnet
 	}
-	gases := gases(BipID, assetID, 0, net)
+
+	c := simnetContractor
+	versionedGases := dexeth.VersionedGases
+	if assetID != BipID {
+		c = simnetTokenContractor
+		versionedGases = make(map[uint32]*dexeth.Gases)
+		for ver, c := range dexeth.Tokens[assetID].NetTokens[net].SwapContracts {
+			versionedGases[ver] = &c.Gas
+		}
+	}
+	gases := gases(0, versionedGases)
 
 	var previousGas uint64
 	maxSwaps := 50
@@ -2302,7 +2309,7 @@ func testSignMessage(t *testing.T) {
 func TestTokenGasEstimates(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	runSimnetMiner(ctx, tLogger)
+	runSimnetMiner(ctx, "eth", tLogger)
 	prepareTokenClients(t)
 	tLogger.SetLevel(dex.LevelInfo)
 	if err := getGasEstimates(ctx, ethClient, participantEthClient, simnetTokenContractor, participantTokenContractor, 5, tokenGases, tLogger); err != nil {

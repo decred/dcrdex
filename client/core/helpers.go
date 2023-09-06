@@ -41,6 +41,22 @@ func (ord *OrderReader) ToSymbol() string {
 	return ord.BaseSymbol
 }
 
+// FromTicker if the conventional unit for the from asset.
+func (ord *OrderReader) FromTicker() string {
+	if ord.Sell {
+		return ord.BaseUnitInfo.Conventional.Unit
+	}
+	return ord.QuoteUnitInfo.Conventional.Unit
+}
+
+// ToTicker if the conventional unit for the to asset.
+func (ord *OrderReader) ToTicker() string {
+	if ord.Sell {
+		return ord.QuoteUnitInfo.Conventional.Unit
+	}
+	return ord.BaseUnitInfo.Conventional.Unit
+}
+
 // FromFeeSymbol is the symbol of the asset used to pay swap fees.
 func (ord *OrderReader) FromFeeSymbol() string {
 	if ord.Sell {
@@ -318,7 +334,7 @@ func (ord *OrderReader) RateString() string {
 	if ord.Type == order.MarketOrderType {
 		return "market"
 	}
-	return fmt.Sprintf("%s %s/%s", ord.formatRate(ord.Rate), ord.QuoteSymbol, ord.BaseSymbol)
+	return fmt.Sprintf("%s %s/%s", ord.formatRate(ord.Rate), ord.QuoteUnitInfo.Conventional.Unit, ord.BaseUnitInfo.Conventional.Unit)
 }
 
 // AverageRateString returns a formatting string containing the average rate of

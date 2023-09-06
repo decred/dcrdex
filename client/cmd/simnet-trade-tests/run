@@ -80,6 +80,14 @@ case $1 in
     ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote dextt.eth ${@:2}
     ;;
 
+  polygondcr)
+    ./simnet-trade-tests --quote1node trading1 --quote2node trading2 --quote dcr --base polygon --regasset dcr ${@:2}
+    ;;
+
+  polydexttdcr)
+    ./simnet-trade-tests --quote1node trading1 --quote2node trading2 --base dextt.polygon --quote dcr --regasset dcr  ${@:2}
+    ;;
+
   help|--help|-h)
     ./simnet-trade-tests --help
     cat <<EOF
@@ -100,11 +108,13 @@ ltcelectrumdcr - Litecoin Electrum wallet and Decred RPC wallet on LTC-DCR marke
 dcrdash - RPC wallets on DCR-DASH market
 dcrdoge - RPC wallets on DCR-DOGE market
 dcrdgb - RPC wallets on DCR-DGB market
-dcreth - Decred RPC wallet and Ethereum native wallet on DCR-ETH market
+dcreth - Decred RPC wallet and Ethereum RPC wallet on DCR-ETH market
 dcrfiro - RPC wallets on DCR-FIRO market
 dcrfiroelectrum - Decred RPC wallet and Firo Electrum wallet on DCR-FIRO market
 zecbtc - RPC wallets on ZEC-BTC market
 dcrdextt - Decred RPC wallet and Ethereum wallet with dextt.eth test token on market DCR-DEXTT.ETH
+polygondcr - Decred RPC wallet and Polygon RPC wallet on POLYGON-DCR market
+polydexttdcr - Decred RPC wallet and Polygon wallet with dextt.polygon test token on market DEXTT.POLYGON-DCR
 
 ---------------------
 

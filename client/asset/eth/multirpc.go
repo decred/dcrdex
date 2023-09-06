@@ -27,7 +27,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -55,14 +54,25 @@ const (
 	tipCapSuggestionExpiration   = time.Hour
 	brickedFailCount             = 100
 	providerDelimiter            = " "
-	defaultRequestTimeout        = time.Second * 10
+	// Infura and Rivet (basic plans) seem to have a 15 second delay for 1)
+	// initializing websocket connection, or 2) the first eth_chainId request on
+	// HTTPS, but not for other requests.
+	// TODO: Keep a file mapping provider URL to retrieved chain IDs, and skip
+	// the eth_chainId request after verified for the first time?
+	defaultRequestTimeout = time.Second * 20
 )
 
-// nonceProviderStickiness is the minimum amount of time that must pass between
-// requests to DIFFERENT nonce providers. If we use a provider for a
-// nonce-sensitive (NS) operation, and later have another NS operation, we will
-// use the same provider if < nonceProviderStickiness has passed.
-var nonceProviderStickiness = time.Minute
+var (
+	// nonceProviderStickiness is the minimum amount of time that must pass
+	// between requests to DIFFERENT nonce providers. If we use a provider for a
+	// nonce-sensitive (NS) operation, and later have another NS operation, we
+	// will use the same provider if < nonceProviderStickiness has passed.
+	nonceProviderStickiness = time.Minute
+	// By default, connectProviders will attempt to get a WebSockets endpoint
+	// when given an HTTP(S) provider URL. Can be disabled for testing
+	// ((*MRPCTest).TestRPC).
+	forceTryWS = true
+)
 
 // TODO: Handle rate limiting? From the docs:
 // When you are rate limited, your JSON-RPC responses have HTTP Status code 429.
@@ -380,7 +390,7 @@ type multiRPCClient struct {
 
 var _ ethFetcher = (*multiRPCClient)(nil)
 
-func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *params.ChainConfig, chainID *big.Int, net dex.Network) (*multiRPCClient, error) {
+func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *params.ChainConfig, net dex.Network) (*multiRPCClient, error) {
 	walletDir := getWalletDir(dir, net)
 	creds, err := pathCredentials(filepath.Join(walletDir, "keystore"))
 	if err != nil {
@@ -392,7 +402,7 @@ func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *para
 		cfg:       cfg,
 		log:       log,
 		creds:     creds,
-		chainID:   chainID,
+		chainID:   cfg.ChainID,
 		endpoints: endpoints,
 	}
 	m.receipts.cache = make(map[common.Hash]*receiptRecord)
@@ -417,8 +427,13 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		}
 	}()
 
+	// We'll connect concurrently, and cancel the context on the first error
+	// received.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// addEndpoint only returns errors that should be propagated immediately.
-	addEndpoint := func(endpoint string) error {
+	addEndpoint := func(endpoint string) (*provider, error) {
 		// Give ourselves a limited time to resolve a connection.
 		timedCtx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 		defer cancel()
@@ -432,12 +447,18 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		var wsSubscribed bool
 		var h chan *types.Header
 		host := providerIPC
-		if !strings.HasSuffix(endpoint, ".ipc") {
-			wsURL, err := url.Parse(endpoint)
+		var scratchURL *url.URL
+		isIPC := strings.HasSuffix(endpoint, ".ipc")
+		if !isIPC {
+			var err error
+			scratchURL, err = url.Parse(endpoint)
 			if err != nil {
-				return fmt.Errorf("failed to parse url %q: %w", endpoint, err)
+				return nil, fmt.Errorf("failed to parse url %q: %w", endpoint, err)
 			}
-			host = wsURL.Host
+			host = scratchURL.Host
+		}
+		if forceTryWS && !isIPC {
+			wsURL := scratchURL
 			ogScheme := wsURL.Scheme
 			switch ogScheme {
 			case "https":
@@ -446,7 +467,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				wsURL.Scheme = "ws"
 			case "ws", "wss":
 			default:
-				return fmt.Errorf("unknown scheme for endpoint %q: %q, expected any of: ws(s)/http(s)",
+				return nil, fmt.Errorf("unknown scheme for endpoint %q: %q, expected any of: ws(s)/http(s)",
 					endpoint, wsURL.Scheme)
 			}
 			replaced := ogScheme != wsURL.Scheme
@@ -463,7 +484,11 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				host = providerRivetCloud
 			}
 
+			// Some providers appear to meter websocket connections.
+			var err error
+			startTime := time.Now()
 			rpcClient, err = rpc.DialWebsocket(timedCtx, wsURL.String(), "")
+			log.Tracef("%s to connect to %s", time.Since(startTime), wsURL)
 			if err == nil {
 				ec = ethclient.NewClient(rpcClient)
 				h = make(chan *types.Header, 8)
@@ -491,26 +516,30 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		// path discrimination, so I won't even try to validate the protocol.
 		if ec == nil {
 			var err error
+			startTime := time.Now()
 			rpcClient, err = rpc.DialContext(timedCtx, endpoint)
+			log.Tracef("%s to connect to %s", time.Since(startTime), endpoint)
 			if err != nil {
 				log.Errorf("error creating http client for %q: %v", endpoint, err)
-				return nil
+				return nil, nil
 			}
 			ec = ethclient.NewClient(rpcClient)
 		}
 
-		// Get chain ID.
+		// Chain ID seems to be metered for some providers.
+		startTime := time.Now()
 		reportedChainID, err := ec.ChainID(timedCtx)
+		log.Tracef("%s to fetch chain ID for verification at %s", time.Since(startTime), host)
 		if err != nil {
 			// If we can't get a header, don't use this provider.
 			ec.Close()
 			log.Errorf("Failed to get chain ID from %q: %v", endpoint, err)
-			return nil
+			return nil, nil
 		}
 		if chainID.Cmp(reportedChainID) != 0 {
 			ec.Close()
 			log.Errorf("%q reported wrong chain ID. expected %d, got %d", endpoint, chainID, reportedChainID)
-			return nil
+			return nil, nil
 		}
 
 		hdr, err := ec.HeaderByNumber(timedCtx, nil /* latest */)
@@ -518,7 +547,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			// If we can't get a header, don't use this provider.
 			ec.Close()
 			log.Errorf("Failed to get header from %q: %v", endpoint, err)
-			return nil
+			return nil, nil
 		}
 
 		p := &provider{
@@ -556,19 +585,48 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			wg.Wait()
 		}
 
-		providers = append(providers, p)
-
-		return nil
+		return p, nil
 	}
 
+	type addResult struct {
+		provider *provider
+		err      error
+		endpoint string
+	}
+	resultChan := make(chan *addResult)
 	for _, endpoint := range endpoints {
-		if err := addEndpoint(endpoint); err != nil {
-			return nil, err
+		go func(endpoint string) {
+			p, err := addEndpoint(endpoint)
+			resultChan <- &addResult{p, err, endpoint}
+		}(endpoint)
+	}
+	var resCount int
+	var err error
+out:
+	for {
+		select {
+		case res := <-resultChan:
+			resCount++
+			if res.provider != nil {
+				providers = append(providers, res.provider)
+			}
+			if res.err != nil && err == nil {
+				err = res.err
+				cancel()
+			}
+			if resCount == len(endpoints) {
+				break out
+			}
+		case <-ctx.Done():
 		}
 	}
 
+	if err != nil {
+		return nil, err
+	}
+
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("failed to connect to even single provider among: %s",
+		return nil, fmt.Errorf("failed to connect to even a single provider among: %s",
 			failedProviders(providers, endpoints))
 	}
 
@@ -652,8 +710,9 @@ func (m *multiRPCClient) voidUnusedNonce() {
 // createAndCheckProviders creates and connects to providers. It checks that
 // unknown providers have a sufficient api to trade and saves good providers to
 // file. One bad provider or connect problem will cause this to error.
-func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, chainID *big.Int, net dex.Network,
-	log dex.Logger) error {
+func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, chainID *big.Int,
+	compat *CompatibilityData, net dex.Network, log dex.Logger) error {
+
 	var localCP map[string]bool
 	path := filepath.Join(walletDir, "compliant-providers.json")
 	b, err := os.ReadFile(path)
@@ -703,7 +762,7 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 			return fmt.Errorf("expected to successfully connect to all of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
 		}
-		if err := checkProvidersCompliance(ctx, providers, dex.Disabled /* logger is for testing only */); err != nil {
+		if err := checkProvidersCompliance(ctx, providers, compat, dex.Disabled /* logger is for testing only */); err != nil {
 			return err
 		}
 	}
@@ -739,15 +798,16 @@ func failedProviders(succeeded []*provider, tried []string) string {
 	return strings.Join(notOK, " ")
 }
 
-func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]string, walletDir string) error {
+func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]string, compat *CompatibilityData, walletDir string) error {
 	providerDef := settings[providersKey]
 	if len(providerDef) == 0 {
 		return errors.New("no providers specified")
 	}
 	endpoints := strings.Split(providerDef, " ")
-	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, m.net, m.log); err != nil {
+	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
+	// TODO: If endpoints haven't change, do nothing.
 	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net)
 	if err != nil {
 		return err
@@ -1519,67 +1579,9 @@ type rpcTest struct {
 
 // newCompatibilityTests returns a list of RPC tests to run to determine API
 // compatibility.
-func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Network, log dex.Logger) []*rpcTest {
-	// NOTE: The logger is intended for use the execution of the compatibility
-	// tests, and it will generally be dex.Disabled in production.
-	var (
-		// Vitalik's address from https://twitter.com/VitalikButerin/status/1050126908589887488
-		mainnetAddr      = common.HexToAddress("0xab5801a7d398351b8be11c439e05c5b3259aec9b")
-		mainnetUSDC      = common.HexToAddress("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
-		mainnetTxHash    = common.HexToHash("0xea1a717af9fad5702f189d6f760bb9a5d6861b4ee915976fe7732c0c95cd8a0e")
-		mainnetBlockHash = common.HexToHash("0x44ebd6f66b4fd546bccdd700869f6a433ef9a47e296a594fa474228f86eeb353")
-
-		testnetAddr      = common.HexToAddress("0x8879F72728C5eaf5fB3C55e6C3245e97601FBa32")
-		testnetUSDC      = common.HexToAddress("0x07865c6E87B9F70255377e024ace6630C1Eaa37F")
-		testnetTxHash    = common.HexToHash("0x4e1d455f7eac7e3a5f7c1e0989b637002755eaee3a262f90b0f3aef1f1c4dcf0")
-		testnetBlockHash = common.HexToHash("0x8896021c2666303a85b7e4a6a6f2b075bc705d4e793bf374cd44b83bca23ef9a")
-
-		simnetAddr        = common.HexToAddress("18d65fb8d60c1199bb1ad381be47aa692b482605")
-		addr, usdc        common.Address
-		txHash, blockHash common.Hash
-	)
-
-	switch net {
-	case dex.Mainnet:
-		addr = mainnetAddr
-		usdc = mainnetUSDC
-		txHash = mainnetTxHash
-		blockHash = mainnetBlockHash
-	case dex.Testnet:
-		addr = testnetAddr
-		usdc = testnetUSDC
-		txHash = testnetTxHash
-		blockHash = testnetBlockHash
-	case dex.Simnet:
-		if big.NewInt(dexpolygon.SimnetChainID).Cmp(chainID) == 0 {
-			break // TODO: add simnet tests for polygon this will require the ~/dextest/polygon dir to be populated with the files below.
-		}
-
-		tDir, err := simnetDataDir(chainID.Int64())
-		if err != nil {
-			panic(fmt.Sprintf("Problem getting simnet data dir: %v", err))
-		}
-
-		addr = simnetAddr
-		var (
-			tTxHashFile    = filepath.Join(tDir, "test_tx_hash.txt")
-			tBlockHashFile = filepath.Join(tDir, "test_block10_hash.txt")
-			tContractFile  = filepath.Join(tDir, "test_token_contract_address.txt")
-		)
-		readIt := func(path string) string {
-			b, err := os.ReadFile(path)
-			if err != nil {
-				panic(fmt.Sprintf("Problem reading simnet testing file %q: %v", path, err))
-			}
-			return strings.TrimSpace(string(b)) // mainly the trailing "\r\n"
-		}
-		usdc = common.HexToAddress(readIt(tContractFile))
-		txHash = common.HexToHash(readIt(tTxHashFile))
-		blockHash = common.HexToHash(readIt(tBlockHashFile))
-	default: // caller should have checked though
-		panic(fmt.Sprintf("Unknown net %v in compatibility tests. Testing data not initiated.", net))
-	}
-
+// NOTE: The logger is intended for use the execution of the compatibility
+// tests, and it will generally be dex.Disabled in production.
+func newCompatibilityTests(cb bind.ContractBackend, compat *CompatibilityData, log dex.Logger) []*rpcTest {
 	return []*rpcTest{
 		{
 			name: "HeaderByNumber",
@@ -1591,21 +1593,21 @@ func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Ne
 		{
 			name: "HeaderByHash",
 			f: func(ctx context.Context, p *provider) error {
-				_, err := p.ec.HeaderByHash(ctx, blockHash)
+				_, err := p.ec.HeaderByHash(ctx, compat.BlockHash)
 				return err
 			},
 		},
 		{
 			name: "TransactionReceipt",
 			f: func(ctx context.Context, p *provider) error {
-				_, err := p.ec.TransactionReceipt(ctx, txHash)
+				_, err := p.ec.TransactionReceipt(ctx, compat.TxHash)
 				return err
 			},
 		},
 		{
 			name: "PendingNonceAt",
 			f: func(ctx context.Context, p *provider) error {
-				_, err := p.ec.PendingNonceAt(ctx, addr)
+				_, err := p.ec.PendingNonceAt(ctx, compat.Addr)
 				return err
 			},
 		},
@@ -1623,7 +1625,7 @@ func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Ne
 		{
 			name: "BalanceAt",
 			f: func(ctx context.Context, p *provider) error {
-				bal, err := p.ec.BalanceAt(ctx, addr, nil)
+				bal, err := p.ec.BalanceAt(ctx, compat.Addr, nil)
 				if err != nil {
 					return err
 				}
@@ -1634,7 +1636,11 @@ func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Ne
 		{
 			name: "CodeAt",
 			f: func(ctx context.Context, p *provider) error {
-				code, err := p.ec.CodeAt(ctx, usdc, nil)
+				if compat.TokenAddr == (common.Address{}) {
+					log.Debug("#### Skipping CodeAt. No token address provided")
+					return nil
+				}
+				code, err := p.ec.CodeAt(ctx, compat.TokenAddr, nil)
 				if err != nil {
 					return err
 				}
@@ -1645,14 +1651,18 @@ func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Ne
 		{
 			name: "CallContract(balanceOf)",
 			f: func(ctx context.Context, p *provider) error {
-				caller, err := erc20.NewIERC20(usdc, cb)
+				if compat.TokenAddr == (common.Address{}) {
+					log.Debug("#### Skipping CallContract. No token address provided")
+					return nil
+				}
+				caller, err := erc20.NewIERC20(compat.TokenAddr, cb)
 				if err != nil {
 					return err
 				}
 				bal, err := caller.BalanceOf(&bind.CallOpts{
-					From:    addr,
+					From:    compat.Addr,
 					Context: ctx,
-				}, addr)
+				}, compat.Addr)
 				if err != nil {
 					return err
 				}
@@ -1677,7 +1687,7 @@ func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Ne
 		{
 			name: "getRPCTransaction",
 			f: func(ctx context.Context, p *provider) error {
-				rpcTx, err := getRPCTransaction(ctx, p, txHash)
+				rpcTx, err := getRPCTransaction(ctx, p, compat.TxHash)
 				if err != nil {
 					return err
 				}
@@ -1763,15 +1773,15 @@ func domain(addr string) (string, error) {
 // requires by sending a series of requests and verifying the responses. If a
 // provider is found to be compliant, their domain name is added to a list and
 // stored in a file on disk so that future checks can be short-circuited.
-func checkProvidersCompliance(ctx context.Context, providers []*provider, log dex.Logger) error {
+func checkProvidersCompliance(ctx context.Context, providers []*provider, compat *CompatibilityData, log dex.Logger) error {
 	for _, p := range providers {
 		// Need to run API tests on this endpoint.
-		for _, t := range newCompatibilityTests(p.ec, p.chainID, p.net, log) {
+		for _, t := range newCompatibilityTests(p.ec, compat, log) {
 			ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 			err := t.f(ctx, p)
 			cancel()
 			if err != nil {
-				return fmt.Errorf("RPC Provider @ %q has a non-compliant API: %v", p.host, err)
+				return fmt.Errorf("%s: RPC Provider @ %q has a non-compliant API: %v", t.name, p.host, err)
 			}
 		}
 	}

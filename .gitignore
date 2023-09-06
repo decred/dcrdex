@@ -37,4 +37,5 @@ client/asset/btc/electrum/example/server/server
 client/asset/btc/electrum/example/wallet/wallet
 **/testdata/fuzz
 client/asset/eth/cmd/getgas/getgas
+client/asset/eth/cmd/deploy/deploy
 client/cmd/dexc-desktop/pkg/installers

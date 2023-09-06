@@ -11,9 +11,12 @@ package main
 
 import (
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	_ "decred.org/dcrdex/server/asset/eth" // register eth asset
+	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
+	_ "decred.org/dcrdex/server/asset/eth"     // register eth asset
+	_ "decred.org/dcrdex/server/asset/polygon" // register polygon asset
 )
 
 func init() {
 	dexeth.MaybeReadSimnetAddrs()
+	dexpolygon.MaybeReadSimnetAddrs()
 }

@@ -40,8 +40,11 @@ abigen --abi ./temp/${CONTRACT_NAME}.abi --bin ./temp/${CONTRACT_NAME}.bin --pkg
  --type ${CONTRACT_NAME} --out ./${PKG_NAME}/contract.go
 
 BYTECODE=$(<./temp/${CONTRACT_NAME}.bin)
-sed -i.tmp "s/ETH_SWAP_V${VERSION}=.*/ETH_SWAP_V${VERSION}=\"${BYTECODE}\"/" ../../../testing/eth/harness.sh
-# mac needs a temp file specified above.
-rm ../../../testing/eth/harness.sh.tmp
+
+for HARNESS_PATH in "$(realpath ../../../testing/eth/harness.sh)" "$(realpath ../../../testing/polygon/harness.sh)"; do
+  sed -i.tmp "s/ETH_SWAP_V${VERSION}=.*/ETH_SWAP_V${VERSION}=\"${BYTECODE}\"/" "${HARNESS_PATH}"
+  # mac needs a temp file specified above.
+  rm "${HARNESS_PATH}.tmp"
+done
 
 rm -fr temp

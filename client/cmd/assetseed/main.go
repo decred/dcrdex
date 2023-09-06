@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 )
 
@@ -33,6 +34,11 @@ func main() {
 
 	if len(appSeedB) != 64 {
 		fmt.Fprintf(os.Stderr, "app seed is %d bytes, expected 64\n", len(appSeedB))
+		os.Exit(1)
+	}
+
+	if tkn := asset.TokenInfo(uint32(assetID)); tkn != nil {
+		fmt.Fprintf(os.Stderr, "this is a token. did you want asset ID %d for %s?\n", tkn.ParentID, asset.Asset(tkn.ParentID).Info.Name)
 		os.Exit(1)
 	}
 

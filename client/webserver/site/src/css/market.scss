@@ -340,7 +340,7 @@ div[data-handler=markets] {
         margin-bottom: 10px;
         width: 100%;
 
-        img {
+        img.market-tmpl-pair-img {
           width: 20px;
           height: 20px;
           position: relative;
@@ -707,7 +707,7 @@ div[data-handler=markets] {
     }
   }
 
-  img {
+  img.market-stats-pair-img {
     width: 30px;
     height: 30px;
 

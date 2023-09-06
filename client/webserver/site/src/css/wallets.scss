@@ -47,14 +47,25 @@
       cursor: pointer;
       min-height: fit-content;
 
-      & > img {
+      img[data-tmpl=img] {
         width: 40px;
         height: 40px;
+      }
+
+      img[data-tmpl=parentImg] {
+        position: absolute;
+        left: 20px;
+        bottom: 20px;
+        width: 28px;
+        height: 28px;
+        border-radius: 15px;
+        background-color: $light_body_bg;
+        border: 3px solid $light_body_bg;
       }
     }
 
     .icon-select.nowallet {
-      opacity: 0.6;
+      opacity: 0.7;
 
       [data-tmpl=balance] {
         display: none;
@@ -66,11 +77,6 @@
       opacity: 1;
       background-color: #fff1;
     }
-  }
-
-  #assetLogo {
-    width: 35px;
-    height: 35px;
   }
 
   #assetName {
@@ -182,6 +188,16 @@
 
   #walletDetailsBox {
     border-bottom: $light_border_color;
+
+    #assetLogo {
+      width: 35px;
+      height: 35px;
+    }
+
+    #tokenParentLogo {
+      width: 18px;
+      height: 18px;
+    }
   }
 
   .peers-table-icon {

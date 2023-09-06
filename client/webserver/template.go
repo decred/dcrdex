@@ -204,4 +204,11 @@ var templateFuncs = template.FuncMap{
 		}
 		return "/img/coins/" + string(char) + ".png"
 	},
+	"baseAssetSymbol": func(symbol string) string {
+		parts := strings.Split(symbol, ".")
+		if len(parts) == 0 {
+			return "wtf"
+		}
+		return parts[0]
+	},
 }

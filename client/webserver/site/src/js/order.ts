@@ -128,10 +128,9 @@ export default class OrderPage extends BasePage {
     else {
       ord = await this.fetchOrder()
     }
-
     // Swap out the dot-notation symbols with token-aware symbols.
-    this.page.mktBaseSymbol.replaceWith(Doc.symbolize(ord.baseSymbol))
-    this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(ord.quoteSymbol))
+    this.page.mktBaseSymbol.replaceWith(Doc.symbolize(app().assets[ord.baseID]))
+    this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(app().assets[ord.quoteID]))
 
     this.setAccelerationButtonVis()
     this.showMatchCards()
@@ -174,6 +173,7 @@ export default class OrderPage extends BasePage {
     const quoteSymbol = Doc.bipSymbol(this.order.quoteID)
     const baseUnitInfo = app().unitInfo(this.order.baseID)
     const quoteUnitInfo = app().unitInfo(this.order.quoteID)
+    const [bUnit, qUnit] = [baseUnitInfo.conventional.unit.toLowerCase(), quoteUnitInfo.conventional.unit.toLowerCase()]
     const quoteAmount = OrderUtil.baseToQuote(match.rate, match.qty)
 
     if (match.isCancel) {
@@ -230,19 +230,19 @@ export default class OrderPage extends BasePage {
 
     if ((match.side === OrderUtil.Maker && this.order.sell) ||
           (match.side === OrderUtil.Taker && !this.order.sell)) {
-      tmpl.makerSwapAsset.textContent = baseSymbol
-      tmpl.takerSwapAsset.textContent = quoteSymbol
-      tmpl.makerRedeemAsset.textContent = quoteSymbol
-      tmpl.takerRedeemAsset.textContent = baseSymbol
+      tmpl.makerSwapAsset.textContent = bUnit
+      tmpl.takerSwapAsset.textContent = qUnit
+      tmpl.makerRedeemAsset.textContent = qUnit
+      tmpl.takerRedeemAsset.textContent = bUnit
     } else {
-      tmpl.makerSwapAsset.textContent = quoteSymbol
-      tmpl.takerSwapAsset.textContent = baseSymbol
-      tmpl.makerRedeemAsset.textContent = baseSymbol
-      tmpl.takerRedeemAsset.textContent = quoteSymbol
+      tmpl.makerSwapAsset.textContent = qUnit
+      tmpl.takerSwapAsset.textContent = bUnit
+      tmpl.makerRedeemAsset.textContent = bUnit
+      tmpl.takerRedeemAsset.textContent = qUnit
     }
 
     const rate = app().conventionalRate(this.order.baseID, this.order.quoteID, match.rate)
-    tmpl.rate.textContent = `${rate} ${baseSymbol}/${quoteSymbol}`
+    tmpl.rate.textContent = `${rate} ${bUnit}/${qUnit}`
 
     if (this.order.sell) {
       tmpl.refundAsset.textContent = baseSymbol
@@ -577,7 +577,7 @@ function inConfirmingTakerRedeem (m: Match) {
  * assetID and data-explorer-coin value present on supplied link element.
  */
 function setCoinHref (assetID: number, link: PageElement) {
-  const assetExplorer = CoinExplorers[assetID]
+  const assetExplorer = CoinExplorers[baseChainID(assetID)]
   if (!assetExplorer) return
   const formatter = assetExplorer[net]
   if (!formatter) return
@@ -667,4 +667,13 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
       return isAddr ? `https://mumbai.polygonscan.com/address/${arg}` : `https://mumbai.polygonscan.com/tx/${arg}`
     }
   }
+}
+
+/*
+ * baseChainID returns the asset ID for the asset's parent if the asset is a
+ * token, otherwise the ID for the asset itself.
+ */
+export function baseChainID (assetID: number) {
+  const asset = app().user.assets[assetID]
+  return asset.token ? asset.token.parentID : assetID
 }
