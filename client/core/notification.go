@@ -69,6 +69,10 @@ func (c *Core) logNote(n Notification) {
 	logFun("notify: %v", n)
 }
 
+func (c *Core) Broadcast(n Notification) {
+	c.notify(n)
+}
+
 // notify sends a notification to all subscribers. If the notification is of
 // sufficient severity, it is stored in the database.
 func (c *Core) notify(n Notification) {

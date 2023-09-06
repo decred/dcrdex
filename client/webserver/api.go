@@ -1929,9 +1929,9 @@ func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request
 	running := s.mm.Running()
 	runningBots := s.mm.RunningBots()
 	writeJSON(w, &struct {
-		OK          bool                 `json:"ok"`
-		Running     bool                 `json:"running"`
-		RunningBots []*mm.MarketWithHost `json:"runningBots"`
+		OK          bool                `json:"ok"`
+		Running     bool                `json:"running"`
+		RunningBots []mm.MarketWithHost `json:"runningBots"`
 	}{
 		OK:          true,
 		Running:     running,

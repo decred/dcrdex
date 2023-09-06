@@ -999,7 +999,6 @@ export default class Application {
     const status = {} as MarketMakingStatus
     status.running = !!res.running
     status.runningBots = res.runningBots
-    console.log('market making status', status)
     return status
   }
 }

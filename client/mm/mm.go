@@ -8,8 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -40,6 +38,7 @@ type clientCore interface {
 	User() *core.User
 	Login(pw []byte) error
 	OpenWallet(assetID uint32, appPW []byte) error
+	Broadcast(core.Notification)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -168,7 +167,7 @@ type MarketMaker struct {
 	unsyncedOracle *priceOracle
 
 	runningBotsMtx sync.RWMutex
-	runningBots    map[string]interface{}
+	runningBots    map[MarketWithHost]interface{}
 
 	noteMtx   sync.RWMutex
 	noteChans map[uint64]chan core.Notification
@@ -184,7 +183,7 @@ func NewMarketMaker(c clientCore, log dex.Logger) (*MarketMaker, error) {
 		log:            log,
 		running:        atomic.Bool{},
 		orders:         make(map[order.OrderID]*orderInfo),
-		runningBots:    make(map[string]interface{}),
+		runningBots:    make(map[MarketWithHost]interface{}),
 		noteChans:      make(map[uint64]chan core.Notification),
 		unsyncedOracle: newUnsyncedPriceOracle(log),
 	}, nil
@@ -197,49 +196,23 @@ func (m *MarketMaker) Running() bool {
 
 // MarketWithHost represents a market on a specific dex server.
 type MarketWithHost struct {
-	Host  string `json:"host"`
-	Base  uint32 `json:"base"`
-	Quote uint32 `json:"quote"`
+	Host    string `json:"host"`
+	BaseID  uint32 `json:"base"`
+	QuoteID uint32 `json:"quote"`
 }
 
 func (m *MarketWithHost) String() string {
-	return fmt.Sprintf("%s-%d-%d", m.Host, m.Base, m.Quote)
-}
-
-func parseMarketWithHost(mkt string) (*MarketWithHost, error) {
-	parts := strings.Split(mkt, "-")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid market %s", mkt)
-	}
-	host := parts[0]
-	base64, err := strconv.ParseUint(parts[1], 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("invalid market %s", mkt)
-	}
-	quote64, err := strconv.ParseUint(parts[2], 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("invalid market %s", mkt)
-	}
-	return &MarketWithHost{
-		Host:  host,
-		Base:  uint32(base64),
-		Quote: uint32(quote64),
-	}, nil
+	return fmt.Sprintf("%s-%d-%d", m.Host, m.BaseID, m.QuoteID)
 }
 
 // RunningBots returns the markets on which a bot is running.
-func (m *MarketMaker) RunningBots() []*MarketWithHost {
+func (m *MarketMaker) RunningBots() []MarketWithHost {
 	m.runningBotsMtx.RLock()
 	defer m.runningBotsMtx.RUnlock()
 
-	mkts := make([]*MarketWithHost, 0, len(m.runningBots))
+	mkts := make([]MarketWithHost, 0, len(m.runningBots))
 	for mkt := range m.runningBots {
-		mktWithHost, err := parseMarketWithHost(mkt)
-		if err != nil {
-			m.log.Errorf("failed to parse market %s: %v", mkt, err)
-			continue
-		}
-		mkts = append(mkts, mktWithHost)
+		mkts = append(mkts, mkt)
 	}
 
 	return mkts
@@ -287,13 +260,13 @@ func priceOracleFromConfigs(ctx context.Context, cfgs []*BotConfig, log dex.Logg
 	return oracle, nil
 }
 
-func (m *MarketMaker) markBotAsRunning(id string, running bool) {
+func (m *MarketMaker) markBotAsRunning(mkt MarketWithHost, running bool) {
 	m.runningBotsMtx.Lock()
 	defer m.runningBotsMtx.Unlock()
 	if running {
-		m.runningBots[id] = struct{}{}
+		m.runningBots[mkt] = struct{}{}
 	} else {
-		delete(m.runningBots, id)
+		delete(m.runningBots, mkt)
 	}
 
 	if len(m.runningBots) == 0 {
@@ -310,8 +283,11 @@ func (m *MarketMaker) MarketReport(base, quote uint32) (*MarketReport, error) {
 
 	m.syncedOracleMtx.RLock()
 	if m.syncedOracle != nil {
-		price, oracles, err := m.syncedOracle.GetOracleInfo(base, quote)
+		price, oracles, err := m.syncedOracle.getOracleInfo(base, quote)
 		m.syncedOracleMtx.RUnlock()
+		if err != nil && !errors.Is(err, errUnsyncedMarket) {
+			m.log.Errorf("failed to get oracle info for market %d-%d: %v", base, quote, err)
+		}
 		if err == nil {
 			return &MarketReport{
 				Price:         price,
@@ -323,7 +299,7 @@ func (m *MarketMaker) MarketReport(base, quote uint32) (*MarketReport, error) {
 	}
 	m.syncedOracleMtx.RUnlock()
 
-	price, oracles, err := m.unsyncedOracle.GetOracleInfo(base, quote)
+	price, oracles, err := m.unsyncedOracle.getOracleInfo(base, quote)
 	if err != nil {
 		return nil, err
 	}
@@ -892,7 +868,7 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 	cexCMs := make(map[string]*dex.ConnectionMaster)
 
 	startedMarketMaking = true
-	m.notify(newMMStartStopNote(true))
+	m.core.Broadcast(newMMStartStopNote(true))
 
 	wg := new(sync.WaitGroup)
 
@@ -954,15 +930,15 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
-				mkt := &MarketWithHost{cfg.Host, cfg.BaseAsset, cfg.QuoteAsset}
-				m.markBotAsRunning(mkt.String(), true)
+				mkt := MarketWithHost{cfg.Host, cfg.BaseAsset, cfg.QuoteAsset}
+				m.markBotAsRunning(mkt, true)
 				defer func() {
-					m.markBotAsRunning(mkt.String(), false)
+					m.markBotAsRunning(mkt, false)
 				}()
 
-				m.notify(newBotStartStopNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, true))
+				m.core.Broadcast(newBotStartStopNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, true))
 				defer func() {
-					m.notify(newBotStartStopNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, false))
+					m.core.Broadcast(newBotStartStopNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, false))
 				}()
 				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
 				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
@@ -971,7 +947,7 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 					baseFiatRate = user.FiatRates[cfg.BaseAsset]
 					quoteFiatRate = user.FiatRates[cfg.QuoteAsset]
 				}
-				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, baseFiatRate, quoteFiatRate, logger, m.notify)
+				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, baseFiatRate, quoteFiatRate, logger)
 			}(cfg)
 		case cfg.ArbCfg != nil:
 			wg.Add(1)
@@ -998,7 +974,7 @@ func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*
 			m.log.Infof("Connection to %s shut down", cexName)
 		}
 		m.running.Store(false)
-		m.notify(newMMStartStopNote(false))
+		m.core.Broadcast(newMMStartStopNote(false))
 	}()
 
 	return nil

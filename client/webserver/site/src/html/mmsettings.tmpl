@@ -21,20 +21,20 @@
       <div class="setting-container">
         <label>[[[gap_strategy]]]</label>
         <span class="ico-info fs12 me-1" data-tooltip="
-          multiplier: a multiple of the break-even spread,
+          percent: gap set to a percent of the spot price,
+          percent-plus: percent + add the break-even spread,
           absolute: set an absolute sell - buy rate difference,
           absolute-plus: absolute + add the break-even spread,
-          percent: gap set to a percent of the spot price,
-          percent-plus: percent + add the break-even spread
+          multiplier: a multiple of the break-even spread
         "></span>
         <select class="w-50 form-select" id="gapStrategySelect">
-          <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
-          <option value="absolute">[[[gap_strategy_absolute]]]</option>
+          <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
+          <option value="percent">[[[gap_strategy_percent]]]</option>
           <option value="absolute-plus">
             [[[gap_strategy_absolute_plus]]]
           </option>
-          <option value="percent">[[[gap_strategy_percent]]]</option>
-          <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
+          <option value="absolute">[[[gap_strategy_absolute]]]</option>
+          <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
         </select>
       </div>
 

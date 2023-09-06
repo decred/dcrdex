@@ -23,7 +23,10 @@ const (
 	oraclePriceExpiration = time.Minute * 10
 	oracleRecheckInterval = time.Minute * 3
 
-	ErrNoMarkets = dex.ErrorKind("no markets")
+	errNoMarkets = dex.ErrorKind("no markets")
+	// an autosync oracle will return errUnsyncedMarket if the price oracle
+	// was not initialized with the market that it was queried for.
+	errUnsyncedMarket = dex.ErrorKind("market not synced")
 )
 
 // MarketReport contains a market's rates on various exchanges and the fiat
@@ -55,6 +58,10 @@ type cachedPrice struct {
 }
 
 // priceOracle periodically fetches market prices from a set of oracles.
+// The priceOracle may be synced or unsynced. A synced priceOracle will
+// periodically fetch market prices for all markets that it was initialized
+// with. An unsynced priceOracle will only fetch market prices when they are
+// requested.
 type priceOracle struct {
 	ctx      context.Context
 	log      dex.Logger
@@ -65,7 +72,7 @@ type priceOracle struct {
 }
 
 type oracle interface {
-	GetMarketPrice(base, quote uint32) float64
+	getMarketPrice(base, quote uint32) float64
 }
 
 var _ oracle = (*priceOracle)(nil)
@@ -77,13 +84,15 @@ func (o *priceOracle) getOracleDataAutoSync(base, quote uint32) (float64, []*Ora
 	price, ok := o.cachedPrices[mktStr]
 	o.cachedPricesMtx.RUnlock()
 
-	if ok {
-		price.mtx.RLock()
-		defer price.mtx.RUnlock()
+	if !ok {
+		return 0, nil, errUnsyncedMarket
+	}
 
-		if o.autoSync && time.Since(price.stamp) < oraclePriceExpiration {
-			return price.price, price.oracles, nil
-		}
+	price.mtx.RLock()
+	defer price.mtx.RUnlock()
+
+	if time.Since(price.stamp) < oraclePriceExpiration {
+		return price.price, price.oracles, nil
 	}
 
 	return 0, nil, fmt.Errorf("expired price data for %s", mktStr)
@@ -107,8 +116,7 @@ func (o *priceOracle) getOracleDataNoAutoSync(base, quote uint32) (float64, []*O
 
 	price.mtx.RLock()
 	if time.Since(price.stamp) < oracleRecheckInterval {
-		o.log.Infof("priceOracle: within recheck interval %v", mktStr)
-		price.mtx.RUnlock()
+		defer price.mtx.RUnlock()
 		return price.price, price.oracles, nil
 	}
 	price.mtx.RUnlock()
@@ -123,7 +131,10 @@ func (o *priceOracle) getOracleDataNoAutoSync(base, quote uint32) (float64, []*O
 	return price.price, price.oracles, nil
 }
 
-func (o *priceOracle) GetMarketPrice(base, quote uint32) float64 {
+// getMarketPrice returns the volume weighted market rate for the specified
+// base/quote pair. This market rate is used as the "oracleRate" in the
+// basic market making strategy.
+func (o *priceOracle) getMarketPrice(base, quote uint32) float64 {
 	var price float64
 	var err error
 	if o.autoSync {
@@ -138,7 +149,11 @@ func (o *priceOracle) GetMarketPrice(base, quote uint32) float64 {
 	return price
 }
 
-func (o *priceOracle) GetOracleInfo(base, quote uint32) (float64, []*OracleReport, error) {
+// getOracleInfo returns the volume weighted market rate for a given base/quote pair
+// and details about the market on each available exchange that was used to determine
+// the market rate. This market rate is used as the "oracleRate" in the basic market
+// making strategy.
+func (o *priceOracle) getOracleInfo(base, quote uint32) (float64, []*OracleReport, error) {
 	var price float64
 	var oracles []*OracleReport
 	var err error
@@ -163,16 +178,14 @@ func (mkt *mkt) String() string {
 }
 
 func newCachedPrice(baseID, quoteID uint32, registeredAssets map[uint32]*asset.RegisteredAsset) (*cachedPrice, error) {
-	var baseAsset, quoteAsset *asset.RegisteredAsset
-	if b, ok := registeredAssets[baseID]; !ok {
+	baseAsset, ok := registeredAssets[baseID]
+	if !ok {
 		return nil, fmt.Errorf("base asset %d (%s) not supported", baseID, dex.BipIDSymbol(baseID))
-	} else {
-		baseAsset = b
 	}
-	if q, ok := registeredAssets[quoteID]; !ok {
+
+	quoteAsset, ok := registeredAssets[quoteID]
+	if !ok {
 		return nil, fmt.Errorf("quote asset %d (%s) not supported", quoteID, dex.BipIDSymbol(quoteID))
-	} else {
-		quoteAsset = q
 	}
 
 	return &cachedPrice{
@@ -295,7 +308,7 @@ func fetchMarketPrice(ctx context.Context, b, q *asset.RegisteredAsset, log dex.
 		return 0, nil, err
 	}
 	price, err := oracleAverage(oracles, log)
-	if err != nil && !errors.Is(err, ErrNoMarkets) {
+	if err != nil && !errors.Is(err, errNoMarkets) {
 		return 0, nil, err
 	}
 
@@ -312,7 +325,7 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 	}
 	if usdVolume == 0 {
 		log.Tracef("marketAveragedPrice: no markets")
-		return 0, ErrNoMarkets
+		return 0, errNoMarkets
 	}
 
 	rate := weightedSum / usdVolume

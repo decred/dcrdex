@@ -241,6 +241,8 @@ func (c *tCore) User() *core.User {
 	return nil
 }
 
+func (c *tCore) Broadcast(core.Notification) {}
+
 var _ clientCore = (*tCore)(nil)
 
 func tMaxOrderEstimate(lots uint64, swapFees, redeemFees uint64) *core.MaxOrderEstimate {
@@ -331,7 +333,7 @@ type tOracle struct {
 	marketPrice float64
 }
 
-func (o *tOracle) GetMarketPrice(base, quote uint32) float64 {
+func (o *tOracle) getMarketPrice(base, quote uint32) float64 {
 	return o.marketPrice
 }
 

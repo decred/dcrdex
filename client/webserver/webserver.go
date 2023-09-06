@@ -678,14 +678,6 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		s.readNotifications(ctx)
 	}()
 
-	if s.mm != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.readMMNotifications(ctx)
-		}()
-	}
-
 	log.Infof("Web server listening on %s (https = %v)", s.addr, https)
 	scheme := "http"
 	if https {
@@ -852,20 +844,6 @@ func (s *WebServer) isPasswordCached(r *http.Request) bool {
 // websocket clients.
 func (s *WebServer) readNotifications(ctx context.Context) {
 	ch := s.core.NotificationFeed()
-	defer ch.ReturnFeed()
-
-	for {
-		select {
-		case n := <-ch.C:
-			s.wsServer.Notify(notifyRoute, n)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (s *WebServer) readMMNotifications(ctx context.Context) {
-	ch := s.mm.NotificationFeed()
 	defer ch.ReturnFeed()
 
 	for {
