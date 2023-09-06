@@ -105,7 +105,7 @@ var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker     = time.Second
 	peerCountTicker = 5 * time.Second
-	WalletOpts      = []*asset.ConfigOption{
+	walletOpts      = []*asset.ConfigOption{
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -153,7 +153,7 @@ var (
 				Type:        walletTypeRPC,
 				Tab:         "RPC",
 				Description: "Infrastructure providers (e.g. Infura) or local nodes",
-				ConfigOpts:  append(RPCOpts, WalletOpts...),
+				ConfigOpts:  append(RPCOpts, walletOpts...),
 				Seeded:      true,
 				GuideLink:   "https://github.com/decred/dcrdex/blob/master/docs/wiki/Ethereum.md",
 			},

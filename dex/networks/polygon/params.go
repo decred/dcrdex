@@ -22,12 +22,20 @@ var (
 		},
 	}
 
+	// First swap used 134434 gas Recommended Gases.Swap = 174764
+	//   4 additional swaps averaged 112609 gas each. Recommended Gases.SwapAdd = 146391
+	//   [134434 247061 359676 472279 584870]
+	// First redeem used 60454 gas. Recommended Gases.Redeem = 78590
+	//   4 additional redeems averaged 31623 gas each. recommended Gases.RedeemAdd = 41109
+	//   [60454 92095 123724 155329 186946]
+	// Average of 5 refunds: 42707. Recommended Gases.Refund = 55519
+	//   [42700 42712 42712 42712 42700]
 	v0Gases = &dexeth.Gases{
-		Swap:      174500,
-		SwapAdd:   146400,
-		Redeem:    78600,
-		RedeemAdd: 41000,
-		Refund:    57000,
+		Swap:      174_000, // 134_482 https://polygonscan.com/tx/0xd568d6c832d0a96dee25212e7b08643ba395459b5b0df20d99463ec0fbca575f
+		SwapAdd:   146_000,
+		Redeem:    78_000, // 60_466 https://polygonscan.com/tx/0xf671574a711b4bc31daa1431dcf029818d6b5eb2276f4205ff17f58b66d85605
+		RedeemAdd: 41_000,
+		Refund:    55_000,
 	}
 
 	VersionedGases = map[uint32]*dexeth.Gases{

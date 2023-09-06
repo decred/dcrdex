@@ -34,9 +34,10 @@ func init() {
 
 const (
 	// BipID is the BIP-0044 asset ID for Polygon.
-	BipID           = 966
-	walletTypeRPC   = "rpc"
-	walletTypeToken = "token"
+	BipID              = 966
+	defaultGasFeeLimit = 1000
+	walletTypeRPC      = "rpc"
+	walletTypeToken    = "token"
 )
 
 var (
@@ -44,6 +45,18 @@ var (
 	usdcTokenID, _   = dex.BipSymbolID("usdc.polygon")
 	// WalletInfo defines some general information about a Polygon Wallet(EVM
 	// Compatible).
+
+	walletOpts = []*asset.ConfigOption{
+		{
+			Key:         "gasfeelimit",
+			DisplayName: "Gas Fee Limit",
+			Description: "This is the highest network fee rate you are willing to " +
+				"pay on swap transactions. If gasfeelimit is lower than a market's " +
+				"maxfeerate, you will not be able to trade on that market with this " +
+				"wallet.  Units: gwei / gas",
+			DefaultValue: defaultGasFeeLimit,
+		},
+	}
 	WalletInfo = asset.WalletInfo{
 		Name:              "Polygon",
 		Version:           0,
@@ -54,7 +67,7 @@ var (
 				Type:        walletTypeRPC,
 				Tab:         "External",
 				Description: "Infrastructure providers (e.g. Infura) or local nodes",
-				ConfigOpts:  append(eth.RPCOpts, eth.WalletOpts...),
+				ConfigOpts:  append(eth.RPCOpts, walletOpts...),
 				Seeded:      true,
 				NoAuth:      true,
 			},

@@ -807,6 +807,7 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
+	// TODO: If endpoints haven't change, do nothing.
 	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net)
 	if err != nil {
 		return err
