@@ -134,7 +134,7 @@ else
         ./electrum-firo ${ELECTRUM_REGTEST_ARGS} load_wallet --password=${WALLET_PASSWORD}
         ./electrum-firo ${ELECTRUM_REGTEST_ARGS} list_wallets
         ./electrum-firo ${ELECTRUM_REGTEST_ARGS} getinfo
-        echo "use 'stop_daemon' to stop the daemon"
+        echo "use 'stop-daemon' to stop the daemon"
     else
         echo "Starting CLI wallet"
         ./electrum-firo ${ELECTRUM_REGTEST_ARGS} -v daemon

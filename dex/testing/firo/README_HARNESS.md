@@ -79,7 +79,7 @@ respective node-wallets.
 
 By default the harness also sets up a background miner which mines on the alpha
 node every 15s. This can upset some test logic so it can be disabled by
-setting environment var NOMINER="1"
+setting environment variable NOMINER="1"
 
 ## Dev Stuff
 

@@ -47,7 +47,7 @@ Pip will be re-downloaded and it's version upgraded by the script into a virtual
 - ELECTRUMX SERVER
 - FIRO CHAIN HARNESS
 
-All three scripts store data in **~/dextest/...** dirsectory tree.
+All three scripts store data in **~/dextest/...** directory tree.
 
 ## Using
 
@@ -64,10 +64,6 @@ The Electrum-Firo wallet client will have a prepared, empty but encrypted
 regtest wallet.
 
 Password is "abc".
-
-The script starts the Electrum-Firo wallet client in CLI mode with debug level
-logging to stderr. Change STARTUP= in the script to "GUI" to start the Gui or
-"DAEMON" to start as a daemon. Stop the daemon with the `stop_daemon` script.
 
 ## Development
 
@@ -109,10 +105,11 @@ this point.
 A prepared, empty but encrypted electrum wallet is copied to the electrum data
 directory at **~/dextest/electrum/firo/client/wallet/regtest/wallets**.
 
-By default the electrum client is started as a daemon and the default wallet is loaded.
-Use **stop-daemon** script to stop the daemon.
+The script starts the Electrum-Firo wallet client in CLI mode with debug level
+logging to stderr. Change STARTUP= in the script to "GUI" to start the Gui or
+"DAEMON" to start as a daemon. Stop the daemon with the `stop-daemon` script.
 
-The electrum client wallet will connect to the firo electrumX daemon.
+The electrum client wallet will connect to the firo electrumX server.
 
 ### Simnet Trade Testing
 
