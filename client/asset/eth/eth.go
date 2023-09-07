@@ -3763,6 +3763,8 @@ func (w *assetWallet) resubmitRedemption(tx *types.Transaction, contractVersion 
 	var replacementHash common.Hash
 	copy(replacementHash[:], txs[0])
 
+	w.log.Infof("Redemption transaction %s was broadcast to replace transaction %s (original tx: %s)", replacementHash, monitoredTx.tx.Hash(), tx.Hash())
+
 	if monitoredTx != nil {
 		err = w.recordReplacementTx(monitoredTx, replacementHash)
 		if err != nil {
@@ -4637,10 +4639,9 @@ func getFileCredentials(chain, path string, net dex.Network) (seed []byte, provi
 	}
 	seed = p.Seed
 	for _, uri := range p.Providers[chain][net.String()] {
-		if strings.HasPrefix(uri, "#") || strings.HasPrefix(uri, ";") {
-			continue
+		if !strings.HasPrefix(uri, "#") && !strings.HasPrefix(uri, ";") {
+			providers = append(providers, uri)
 		}
-		providers = append(providers, uri)
 	}
 	if net == dex.Simnet && len(providers) == 0 {
 		u, _ := user.Current()
@@ -5319,7 +5320,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		copy(randomAddr[:], encode.RandomBytes(20))
 		transferTx, err := tc.transfer(txOpts, randomAddr, big.NewInt(1))
 		if err != nil {
-			return fmt.Errorf("error estimating transfer gas: %w", err)
+			return fmt.Errorf("transfer error: %w", err)
 		}
 		if err = waitForConfirmation(ctx, cl, transferTx.Hash()); err != nil {
 			return fmt.Errorf("error waiting for transfer tx: %w", err)

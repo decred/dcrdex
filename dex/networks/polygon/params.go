@@ -57,6 +57,8 @@ var (
 
 	testTokenID, _ = dex.BipSymbolID("dextt.polygon")
 	usdcTokenID, _ = dex.BipSymbolID("usdc.polygon")
+	wethTokenID, _ = dex.BipSymbolID("weth.polygon")
+	wbtcTokenID, _ = dex.BipSymbolID("wbtc.polygon")
 
 	Tokens = map[uint32]*dexeth.Token{
 		testTokenID: {
@@ -179,6 +181,105 @@ var (
 								// 	[63705]
 								Transfer: 82_816,
 							},
+						},
+					},
+				},
+			},
+		},
+		wethTokenID: TokenWETH,
+		wbtcTokenID: TokenWBTC,
+	}
+
+	// Wrapped ETH
+	TokenWETH = &dexeth.Token{
+		Token: &dex.Token{
+			ParentID: PolygonBipID,
+			Name:     "WETH",
+			UnitInfo: dex.UnitInfo{
+				AtomicUnit: "gwei",
+				Conventional: dex.Denomination{
+					Unit:             "WETH",
+					ConversionFactor: 1e9,
+				},
+			},
+		},
+		NetTokens: map[dex.Network]*dexeth.NetToken{
+			dex.Mainnet: {
+				Address: common.HexToAddress("0x7ceb23fd6bc0add59e62ac25578270cff1b9f619"), // https://polygonscan.com/token/0x7ceb23fd6bc0add59e62ac25578270cff1b9f619
+				SwapContracts: map[uint32]*dexeth.SwapContract{
+					0: {
+						// deploy tx: https://polygonscan.com/tx/0xc569774add0a9f41eace3ff6289eafd4c17fbcaafcf8b7758e0a5c4d74dcf307
+						// swap contract: https://polygonscan.com/address/0x878dF60d47Afa9C665dFaDCB6BF4e303C080032f
+						Address: common.HexToAddress("0x878dF60d47Afa9C665dFaDCB6BF4e303C080032f"),
+						Gas: dexeth.Gases{
+							// First swap used 158846 gas Recommended Gases.Swap = 206499
+							// 	4 additional swaps averaged 112618 gas each. Recommended Gases.SwapAdd = 146403
+							// 	[158846 271461 384064 496691 609318]
+							Swap:    206_499,
+							SwapAdd: 146_403,
+							// First redeem used 70222 gas. Recommended Gases.Redeem = 91288
+							// 	4 additional redeems averaged 31629 gas each. recommended Gases.RedeemAdd = 41117
+							// 	[70222 101851 133468 165110 196739]
+							Redeem:    91_288,
+							RedeemAdd: 41_117,
+							// Average of 5 refunds: 50354. Recommended Gases.Refund = 65460
+							// 	[50350 50362 50338 50362 50362]
+							Refund: 65_460,
+							// Average of 2 approvals: 36762. Recommended Gases.Approve = 47790
+							// 	[46712 26812]
+							Approve: 47_790,
+							// Average of 1 transfers: 51910. Recommended Gases.Transfer = 67483
+							// 	[51910]
+							Transfer: 67_483,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Wrapped BTC
+	TokenWBTC = &dexeth.Token{
+		EVMFactor: new(int64),
+		Token: &dex.Token{
+			ParentID: PolygonBipID,
+			Name:     "Wrapped Bitcoin",
+			UnitInfo: dex.UnitInfo{
+				AtomicUnit: "Sats",
+				Conventional: dex.Denomination{
+					Unit:             "WBTC",
+					ConversionFactor: 1e8,
+				},
+			},
+		},
+		NetTokens: map[dex.Network]*dexeth.NetToken{
+			dex.Mainnet: {
+				Address: common.HexToAddress("0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6"), // https://polygonscan.com/token/0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6
+				SwapContracts: map[uint32]*dexeth.SwapContract{
+					0: {
+						// deploy tx: https://polygonscan.com/tx/0xcd84a1fa2f890d5fc1fcb0dde6c5a3bb50d9b25927ec5666b96b5ad3d6902b0a
+						// swap contract: https://polygonscan.com/address/0x625B7Ecd21B25b0808c4221dA281CD3A82f8b797
+						Address: common.HexToAddress("0x625B7Ecd21B25b0808c4221dA281CD3A82f8b797"),
+						Gas: dexeth.Gases{
+							// First swap used 181278 gas Recommended Gases.Swap = 235661
+							// 	4 additional swaps averaged 112591 gas each. Recommended Gases.SwapAdd = 146368
+							// 	[181278 293857 406460 519039 631642]
+							Swap:    235_661,
+							SwapAdd: 146_368,
+							// First redeem used 70794 gas. Recommended Gases.Redeem = 92032
+							// 	4 additional redeems averaged 31629 gas each. recommended Gases.RedeemAdd = 41117
+							// 	[70794 102399 134052 165646 197311]
+							Redeem:    92_032,
+							RedeemAdd: 41_117,
+							// Average of 5 refunds: 63126. Recommended Gases.Refund = 82063
+							// 	[63126 63126 63126 63126 63126]
+							Refund: 82_063,
+							// Average of 2 approvals: 52072. Recommended Gases.Approve = 67693
+							// 	[52072 52072]
+							Approve: 67_693,
+							// Average of 1 transfers: 57270. Recommended Gases.Transfer = 74451
+							// 	[57270]
+							Transfer: 74_451,
 						},
 					},
 				},
