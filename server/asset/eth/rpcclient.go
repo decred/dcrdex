@@ -103,8 +103,8 @@ func (ec *ethConn) monitorBlocks(ctx context.Context, log dex.Logger) {
 			if ctx.Err() != nil || err == nil { // Both conditions indicate normal close
 				return
 			}
-			log.Errorf("Header subscription to %s failed with error: %v", err)
-			log.Info("Falling back to manual header requests")
+			log.Errorf("Header subscription to %s failed with error: %v", ec.endpoint, err)
+			log.Infof("Falling back to manual header requests for %s", ec.endpoint)
 			return
 		case <-ctx.Done():
 			return

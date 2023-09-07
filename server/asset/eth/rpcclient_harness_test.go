@@ -203,7 +203,7 @@ func TestHeaderSubscription(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, headerExpirationTime)
 	defer cancel()
 	ept := endpoint{url: wsEndpoint}
-	cl := newRPCClient(dex.Simnet, []endpoint{ept}, ethClient.ethContractAddr, ethClient.log)
+	cl := newRPCClient(BipID, dex.Simnet, []endpoint{ept}, ethClient.ethContractAddr, ethClient.log)
 	ec, err := cl.connectToEndpoint(ctx, ept)
 	if err != nil {
 		t.Fatalf("connectToEndpoint error: %v", err)
