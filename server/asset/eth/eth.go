@@ -256,7 +256,7 @@ func parseEndpoints(cfg *asset.BackendConfig) ([]endpoint, error) {
 	if cfg.RelayAddr != "" {
 		endpoints = append(endpoints, endpoint{
 			url:      "http://" + cfg.RelayAddr,
-			priority: 1,
+			priority: 10,
 		})
 	}
 	file, err := os.Open(cfg.ConfigPath)

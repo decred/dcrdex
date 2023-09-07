@@ -320,7 +320,7 @@ type BackendCloneConfig struct {
 	ShieldedIO     func(tx *VerboseTxExtended) (in, out uint64, err error)
 	InitTxSize     uint32
 	InitTxSizeBase uint32
-	// RelayAddr is a source of node relayu addresses.
+	// RelayAddr is an address for a NodeRelay.
 	RelayAddr string
 }
 

@@ -477,7 +477,7 @@ maxepochcancels=128
 inittakerlotlimit=40
 abstakerlotlimit=1200
 httpprof=1
-noderelayaddr=127.0.0.1:17537
+noderelayaddr=127.0.0.1:17539
 EOF
 
 # Set the postgres user pass if provided.

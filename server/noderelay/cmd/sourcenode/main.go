@@ -218,7 +218,7 @@ func mainErr() (err error) {
 			// Prepare mirrored request for local service.
 			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
 			defer cancel()
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, localNodeURL, bytes.NewReader(msg.Body))
+			req, err := http.NewRequestWithContext(ctx, msg.Method, localNodeURL, bytes.NewReader(msg.Body))
 			if err != nil {
 				atomic.AddUint32(&stats.errors, 1)
 				log.Errorf("Error constructing request: %v", err)
