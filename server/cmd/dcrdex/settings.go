@@ -24,6 +24,7 @@ type marketConfig struct {
 		Duration       uint64  `json:"epochDuration"`
 		MBBuffer       float64 `json:"marketBuyBuffer"`
 		BookedLotLimit uint32  `json:"userBookedLotLimit"`
+		Disabled       bool    `json:"disabled"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.AssetConf `json:"assets"`
 }
@@ -84,6 +85,9 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 	// Normalize the asset names to lower case.
 	var assets []*dexsrv.AssetConf
 	for assetName, assetConf := range conf.Assets {
+		if assetConf.Disabled {
+			continue
+		}
 		net, err := dex.NetFromString(assetConf.Network)
 		if err != nil {
 			return nil, nil, fmt.Errorf("unrecognized network %s for asset %s",
@@ -112,6 +116,9 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 
 	var markets []*dex.MarketInfo
 	for _, mktConf := range conf.Markets {
+		if mktConf.Disabled {
+			continue
+		}
 		baseConf, ok := conf.Assets[mktConf.Base]
 		if !ok {
 			return nil, nil, fmt.Errorf("Missing configuration for asset %s", mktConf.Base)
