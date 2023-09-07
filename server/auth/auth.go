@@ -894,14 +894,14 @@ func (auth *AuthManager) UserScore(user account.AccountID) (score int32) {
 
 // tier computes a user's tier from their conduct score and bond tier.
 func (auth *AuthManager) tier(bondTier int64, score int32, legacyFeePaid bool) int64 {
-	tierAdj := int64(score) / int64(auth.banScore)
-	if tierAdj < 0 && bondTier == 0 {
-		tierAdj = 0 // no bonus tiers unless bonded
+	var penalties int64
+	if score > 0 {
+		penalties = int64(score) / int64(auth.banScore)
 	}
 	if legacyFeePaid {
 		bondTier++
 	}
-	return bondTier - tierAdj
+	return bondTier - penalties
 }
 
 // computeUserTier computes the user's tier given the provided score weighed
