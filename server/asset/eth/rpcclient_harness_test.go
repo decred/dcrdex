@@ -199,6 +199,35 @@ func TestMonitorHealth(t *testing.T) {
 	}
 }
 
+func TestHeaderSubscription(t *testing.T) {
+	ctx, cancel := context.WithTimeout(ctx, headerExpirationTime)
+	defer cancel()
+	ept := endpoint{url: wsEndpoint}
+	cl := newRPCClient(BipID, dex.Simnet, []endpoint{ept}, ethClient.ethContractAddr, ethClient.log)
+	ec, err := cl.connectToEndpoint(ctx, ept)
+	if err != nil {
+		t.Fatalf("connectToEndpoint error: %v", err)
+	}
+	hdr, err := ec.tip(ctx)
+	if err != nil {
+		t.Fatalf("Error getting initial tip: %v", err)
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+		ec.tipCache.Lock()
+		bestHdr := ec.tipCache.hdr
+		ec.tipCache.Unlock()
+		if bestHdr.Number.Cmp(hdr.Number) > 0 {
+			hdr = bestHdr
+			fmt.Println("New header seen at height", bestHdr.Number)
+		}
+	}
+}
+
 func tmuxRun(cmd string) error {
 	cmd += "; tmux wait-for -S harnessdone"
 	err := exec.Command("tmux", "send-keys", "-t", "eth-harness:0", cmd, "C-m").Run() // ; wait-for harnessdone
