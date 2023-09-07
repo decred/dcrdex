@@ -96,7 +96,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		FeeConfs: 2,
 		// Firo mainnet blocks are rarely full so this should be the most
 		// common fee rate .. as can be seen from looking at the explorer
-		NoCompetitionFeeRate: 10,   // 10 Sats/B
+		NoCompetitionFeeRate: 1,    // 1 Sats/B
 		ManualMedianFee:      true, // no getblockstats
 		// BlockFeeTransactions: testnet never returns a result for estimatefee,
 		// apparently, and we don't have getblockstats, so we need to scan
@@ -126,14 +126,14 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 type FiroBlock struct {
 	wire.MsgBlock
 	// ProgPOW
-	Height       uint32
-	Nonce64      uint64
+	Height  uint32
+	Nonce64 uint64
+	MixHash chainhash.Hash
+	// MTP
 	NVersionMTP  int32
 	MTPHashValue chainhash.Hash
 	Reserved     [2]chainhash.Hash
-	MixHash      chainhash.Hash
-	// MTP
-	HashRootMTP [16]byte
+	HashRootMTP  [16]byte
 	// Discarding MTP proofs
 
 	mtpTime     uint32 // Params::nMTPSwitchTime
@@ -181,7 +181,7 @@ func deserializeFiroBlock(b []byte, net dex.Network) (*FiroBlock, error) {
 	r := bytes.NewReader(b)
 	blk := NewFiroBlock(net)
 	if err := blk.readBlockHeader(r); err != nil {
-		return nil, fmt.Errorf("readBlocHeader error: %v", err)
+		return nil, fmt.Errorf("readBlockHeader error: %v", err)
 	}
 
 	const pver = 0
@@ -210,7 +210,7 @@ func deserializeFiroBlock(b []byte, net dex.Network) (*FiroBlock, error) {
 				return nil, fmt.Errorf("ReadVarInt error: %v", err)
 			}
 			if _, err = io.CopyN(io.Discard, r, int64(sz)); err != nil {
-				return nil, fmt.Errorf("error discaring vExtraPayload: %v", err)
+				return nil, fmt.Errorf("error discarding vExtraPayload: %v", err)
 			}
 		}
 
