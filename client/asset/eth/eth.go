@@ -3517,7 +3517,7 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 	defer cancel()
 	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
-		eth.emit.Errorf("failed to get best hash: %w", err)
+		eth.log.Errorf("failed to get best hash: %w", err)
 		return
 	}
 	bestHash := bestHdr.Hash()

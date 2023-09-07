@@ -66,7 +66,7 @@ func mineAlpha() error {
 	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:0", "./mine-alpha 1", "C-m").Run()
 }
 
-func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
+func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string)) (*ExchangeWallet, *dex.ConnectionMaster) {
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
@@ -114,11 +114,9 @@ func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string, e
 		for {
 			select {
 			case ni := <-notes:
-				switch n := ni.(type) {
+				switch ni.(type) {
 				case *asset.TipChangeNote:
-					blkFunc(name, nil)
-				case *asset.AsyncWalletErrorNote:
-					blkFunc(name, n.Err)
+					blkFunc(name)
 				}
 			case <-tCtx.Done():
 				return
@@ -151,7 +149,7 @@ type testRig struct {
 	connectionMasters map[string]*dex.ConnectionMaster
 }
 
-func newTestRig(t *testing.T, blkFunc func(string, error)) *testRig {
+func newTestRig(t *testing.T, blkFunc func(string)) *testRig {
 	t.Helper()
 	rig := &testRig{
 		backends:          make(map[string]*ExchangeWallet),
@@ -216,8 +214,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestMakeBondTx(t *testing.T) {
-	rig := newTestRig(t, func(name string, err error) {
-		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+	rig := newTestRig(t, func(name string) {
+		tLogger.Infof("%s has reported a new block", name)
 	})
 	defer rig.close(t)
 
@@ -309,9 +307,9 @@ func TestWallet(t *testing.T) {
 func runTest(t *testing.T, splitTx bool) {
 	tStart := time.Now()
 	blockReported := false
-	rig := newTestRig(t, func(name string, err error) {
+	rig := newTestRig(t, func(name string) {
 		blockReported = true
-		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+		tLogger.Infof("%s has reported a new block", name)
 	})
 	defer rig.close(t)
 	contractValue := toAtoms(2)
@@ -594,8 +592,8 @@ func runTest(t *testing.T, splitTx bool) {
 }
 
 func TestTickets(t *testing.T) {
-	rig := newTestRig(t, func(name string, err error) {
-		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+	rig := newTestRig(t, func(name string) {
+		tLogger.Infof("%s has reported a new block", name)
 	})
 	defer rig.close(t)
 	tLogger.Info("Testing ticket methods with the alpha rig.")

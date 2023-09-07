@@ -38,7 +38,7 @@ var tLogger dex.Logger
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
-func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, walletName *WalletName, blkFunc func(string, error)) *connectedWallet {
+func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, walletName *WalletName, blkFunc func(string)) *connectedWallet {
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
@@ -88,11 +88,9 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, wallet
 		for {
 			select {
 			case ni := <-notes:
-				switch n := ni.(type) {
+				switch ni.(type) {
 				case *asset.TipChangeNote:
-					blkFunc(reportName, nil)
-				case *asset.AsyncWalletErrorNote:
-					blkFunc(reportName, n.Err)
+					blkFunc(reportName)
 				}
 			case <-ctx.Done():
 				return
@@ -190,9 +188,9 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	var blockReported uint32
-	blkFunc := func(name string, err error) {
+	blkFunc := func(name string) {
 		atomic.StoreUint32(&blockReported, 1)
-		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+		tLogger.Infof("%s has reported a new block", name)
 	}
 
 	rig := &testRig{

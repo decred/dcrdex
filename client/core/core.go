@@ -9411,8 +9411,6 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	switch n := ni.(type) {
 	case *asset.TipChangeNote:
 		c.tipChange(n.AssetID)
-	case *asset.AsyncWalletErrorNote:
-		c.log.Errorf("%s wallet is reporting an asynchronous error: %v", unbip(n.AssetID), n.Err)
 	}
 	c.notify(newWalletNote(ni))
 }

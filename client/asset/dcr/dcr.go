@@ -5566,7 +5566,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 
 		newTip, err := dcr.getBestBlock(ctxInternal)
 		if err != nil {
-			dcr.emit.Errorf("failed to get best block: %w", err)
+			dcr.log.Errorf("failed to get best block: %w", err)
 			return
 		}
 
@@ -5637,7 +5637,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 
 func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chainhash.Hash, newTipHeight int64, err error) {
 	if err != nil {
-		dcr.emit.Error(err)
+		dcr.log.Error(err)
 		return
 	}
 

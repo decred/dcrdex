@@ -156,9 +156,8 @@ func TestElectrumExchangeWallet(t *testing.T) {
 	case <-time.After(10 * time.Second): // a bit of best block polling
 		cancel()
 	case ni := <-notes:
-		cancel()
-		if n, is := ni.(*asset.AsyncWalletErrorNote); is {
-			t.Fatalf("Wallet sent an error: %v", n.Err)
+		if _, is := ni.(*asset.TipChangeNote); is {
+			cancel()
 		}
 
 	case <-ctx.Done(): // or until TipChange cancels the context

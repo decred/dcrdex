@@ -292,7 +292,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			// unimportant because of how electrum searches for transactions.
 			stat, err := btc.node.syncStatus()
 			if err != nil {
-				btc.emit.Errorf("failed to get sync status: %w", err)
+				btc.log.Errorf("failed to get sync status: %w", err)
 				continue
 			}
 
@@ -307,7 +307,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			if err != nil {
 				// NOTE: often says "height X out of range", then succeeds on next tick
 				if !strings.Contains(err.Error(), "out of range") {
-					btc.emit.Errorf("failed to get best block from %s electrum server: %w", btc.symbol, err)
+					btc.log.Errorf("failed to get best block from %s electrum server: %w", btc.symbol, err)
 				}
 				continue
 			}

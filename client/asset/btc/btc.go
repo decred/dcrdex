@@ -5070,12 +5070,12 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 		case <-ticker.C:
 			newTipHdr, err := btc.node.getBestBlockHeader()
 			if err != nil {
-				btc.emit.Errorf("failed to get best block header from %s node: %w", btc.symbol, err)
+				btc.log.Errorf("failed to get best block header from %s node: %w", btc.symbol, err)
 				continue
 			}
 			newTipHash, err := chainhash.NewHashFromStr(newTipHdr.Hash)
 			if err != nil {
-				btc.emit.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
+				btc.log.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
 				continue
 			}
 

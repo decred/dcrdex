@@ -5,7 +5,6 @@ package asset
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -1329,13 +1328,6 @@ type TipChangeNote struct {
 	Data    interface{} `json:"data"`
 }
 
-// AsyncWalletErrorNote is issued when the wallet detects it is in an error
-// state.
-type AsyncWalletErrorNote struct {
-	AssetID uint32 `json:"assetID"`
-	Err     error  `json:"err"`
-}
-
 // CustomWalletNote is any other information the wallet wishes to convey to
 // the user.
 type CustomWalletNote struct {
@@ -1371,16 +1363,6 @@ func (e *WalletEmitter) emit(note WalletNotification) {
 // Data sends a CustomWalletNote with the specified data payload.
 func (e *WalletEmitter) Data(payload interface{}) {
 	e.emit(&CustomWalletNote{AssetID: e.assetID, Payload: payload})
-}
-
-// Errorf formats and sends an AsyncWalletErrorNote.
-func (e *WalletEmitter) Errorf(s string, a ...interface{}) {
-	e.emit(&AsyncWalletErrorNote{AssetID: e.assetID, Err: fmt.Errorf(s, a...)})
-}
-
-// Error sends an AsyncWalletErrorNote.
-func (e *WalletEmitter) Error(err error) {
-	e.emit(&AsyncWalletErrorNote{AssetID: e.assetID, Err: err})
 }
 
 // TipChange sends a TipChangeNote with optional extra data.
