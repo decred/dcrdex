@@ -2891,7 +2891,7 @@ func (t *trackedTrade) confirmRedemptions(matches []*matchTracker) {
 // mutex lock held for writes.
 func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 	if confs := match.redemptionConfs; confs > 0 && confs >= match.redemptionConfsReq { // already there, stop checking
-		if len(match.MetaData.Proof.Auth.RedeemSig) == 0 && !t.isSelfGoverned() {
+		if len(match.MetaData.Proof.Auth.RedeemSig) == 0 && (!t.isSelfGoverned() && !match.MetaData.Proof.IsRevoked()) {
 			return false, nil // waiting on redeem request to succeed
 		}
 		// Redeem request just succeeded or we gave up on the server.
