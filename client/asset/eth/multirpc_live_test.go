@@ -56,17 +56,41 @@ func TestRPC(t *testing.T) {
 }
 
 var freeServers = []string{
-	"https://cloudflare-eth.com/", // cloudflare-eth.com "SuggestGasTipCap" error: Method not found
+	// https://www.alchemy.com/chain-connect/chain/ethereum
+	// Passing 09-10-2023
+	"https://rpc.builder0x69.io",
+	"https://rpc.ankr.com/eth",
+	"https://eth-mainnet.public.blastapi.io",
+	"https://ethereum.blockpi.network/v1/rpc/public",
+	"https://rpc.flashbots.net",
+	"https://eth.api.onfinality.io/public",
+	"https://eth-mainnet-public.unifra.io",
+	// Not passing 09-10-2023
+	"https://api.securerpc.com/v1",
+	"https://virginia.rpc.blxrbdn.com",
+	"https://eth.rpc.blxrbdn.com",
+	"https://1rpc.io/eth",
+	"https://g.w.lavanet.xyz:443/gateway/eth/rpc-http/f7ee0000000000000000000000000000",
+	"https://api.mycryptoapi.com/eth",
+	"https://rpc.mevblocker.io",
+	"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
+	"https://endpoints.omniatech.io/v1/eth/mainnet/public",
+	"https://uk.rpc.blxrbdn.com",
+	"https://singapore.rpc.blxrbdn.com",
+	"https://eth.llamarpc.com",
+	"https://ethereum.publicnode.com",
+	"https://api.zmok.io/mainnet/oaen6dy8ff6hju9k",
+	"https://ethereumnodelight.app.runonflux.io",
+	"https://eth-rpc.gateway.pokt.network",
+	"https://main-light.eth.linkpool.io",
+	"https://rpc.payload.de",
+	"https://cloudflare-eth.com",
 	"https://main-rpc.linkpool.io/",
 	"https://nodes.mewapi.io/rpc/eth",
-	"https://rpc.flashbots.net/",
-	"https://rpc.ankr.com/eth", // Passes, but doesn't support SyncProgress, which don't use and just lie about right now.
-	"https://api.mycryptoapi.com/eth",
-	"https://ethereumnodelight.app.runonflux.io",
 }
 
 func TestFreeServers(t *testing.T) {
-	mt.TestFreeServers(t, freeServers, dex.Testnet)
+	mt.TestFreeServers(t, freeServers, dex.Mainnet)
 }
 
 func TestMainnetCompliance(t *testing.T) {
