@@ -384,7 +384,12 @@ func (bnc *binance) Trade(ctx context.Context, baseSymbol, quoteSymbol string, s
 	bnc.tradeToUpdater[tradeID] = updaterID
 	bnc.tradeUpdaterMtx.Unlock()
 
-	return bnc.postAPI(ctx, "/api/v3/order", v, nil, true, true, &struct{}{})
+	err = bnc.postAPI(ctx, "/api/v3/order", v, nil, true, true, &struct{}{})
+	if err != nil {
+		bnc.removeTradeUpdater(tradeID)
+	}
+
+	return err
 }
 
 // SubscribeTradeUpdates returns a channel that the caller can use to
@@ -588,8 +593,8 @@ type bncStreamUpdate struct {
 	BalanceDelta       float64         `json:"d,string"`
 	Filled             float64         `json:"z,string"`
 	OrderQty           float64         `json:"q,string"`
+	CancelledOrderID   string          `json:"C"`
 	E                  json.RawMessage `json:"E"`
-	C                  json.RawMessage `json:"C"`
 }
 
 func decodeStreamUpdate(b []byte) (*bncStreamUpdate, error) {
@@ -642,20 +647,37 @@ func (bnc *binance) getTradeUpdater(tradeID string) (chan *TradeUpdate, error) {
 	return updater, nil
 }
 
+func (bnc *binance) removeTradeUpdater(tradeID string) {
+	bnc.tradeUpdaterMtx.RLock()
+	defer bnc.tradeUpdaterMtx.RUnlock()
+	delete(bnc.tradeToUpdater, tradeID)
+}
+
 func (bnc *binance) handleExecutionReport(update *bncStreamUpdate) {
 	bnc.log.Tracef("Received executionReport: %+v", update)
 
-	updater, err := bnc.getTradeUpdater(update.ClientOrderID)
+	status := update.CurrentOrderStatus
+	var id string
+	if status == "CANCELED" {
+		id = update.CancelledOrderID
+	} else {
+		id = update.ClientOrderID
+	}
+
+	updater, err := bnc.getTradeUpdater(id)
 	if err != nil {
 		bnc.log.Errorf("Error getting trade updater: %v", err)
 		return
 	}
 
-	status := update.CurrentOrderStatus
-
+	complete := status == "FILLED" || status == "CANCELED" || status == "REJECTED" || status == "EXPIRED"
 	updater <- &TradeUpdate{
-		TradeID:  update.ClientOrderID,
-		Complete: status == "FILLED" || status == "CANCELED" || status == "REJECTED" || status == "EXPIRED",
+		TradeID:  id,
+		Complete: complete,
+	}
+
+	if complete {
+		bnc.removeTradeUpdater(id)
 	}
 }
 
@@ -707,7 +729,7 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 
 		cm := dex.NewConnectionMaster(conn)
 		if err = cm.ConnectOnce(ctx); err != nil {
-			return nil, fmt.Errorf("websocketHandler remote connect: %v", err)
+			return nil, fmt.Errorf("user data stream connection error: %v", err)
 		}
 
 		return cm, nil
@@ -1146,12 +1168,8 @@ func (s *symbol) dexMarkets() []*Market {
 			return []uint32{assetID}
 		}
 
-		if networks, found := dex.BipTokenSymbolNetworks(symbol); found {
-			ids := make([]uint32, 0, len(networks))
-			for _, assetID := range networks {
-				ids = append(ids, assetID)
-			}
-			return ids
+		if chains, found := dex.TokenChains[symbol]; found {
+			return chains
 		}
 
 		return nil

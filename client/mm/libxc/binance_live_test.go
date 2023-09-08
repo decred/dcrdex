@@ -1,9 +1,10 @@
-//go:build bnclive && lgpl
+//go:build bnclive
 
 package libxc
 
 import (
 	"context"
+	"os"
 	"os/user"
 	"sync"
 	"testing"
@@ -19,6 +20,17 @@ var (
 	apiKey    = ""
 	apiSecret = ""
 )
+
+func TestMain(m *testing.M) {
+	if s := os.Getenv("SECRET"); s != "" {
+		apiSecret = s
+	}
+	if k := os.Getenv("KEY"); k != "" {
+		apiKey = k
+	}
+
+	m.Run()
+}
 
 func tNewBinance(t *testing.T, network dex.Network) *binance {
 	return newBinance(apiKey, apiSecret, log, network, true)
@@ -107,6 +119,9 @@ func TestTrade(t *testing.T) {
 			case tradeUpdate := <-updates:
 				t.Logf("Trade Update: %+v", tradeUpdate)
 				if tradeUpdate.Complete {
+					// Sleep because context might get cancelled before
+					// Trade returns.
+					time.Sleep(1 * time.Second)
 					cancel()
 					return
 				}
@@ -116,16 +131,24 @@ func TestTrade(t *testing.T) {
 		}
 	}()
 	tradeID := bnc.GenerateTradeID()
-	err = bnc.Trade(ctx, "eth", "btc", true, 6327e2, 1e8, updaterID, tradeID)
+	err = bnc.Trade(ctx, "eth", "btc", false, 6127e2, 1e7, updaterID, tradeID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
+	}
+
+	if true { // Cancel the trade
+		time.Sleep(1 * time.Second)
+		err = bnc.CancelTrade(ctx, "eth", "btc", tradeID)
+		if err != nil {
+			t.Fatalf("error cancelling trade: %v", err)
+		}
 	}
 
 	wg.Wait()
 }
 
 func TestCancelTrade(t *testing.T) {
-	tradeID := "d4d81cd45db6f8c229a100000001"
+	tradeID := "42641326270691d752e000000001"
 
 	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
@@ -138,6 +161,26 @@ func TestCancelTrade(t *testing.T) {
 	err = bnc.CancelTrade(ctx, "eth", "btc", tradeID)
 	if err != nil {
 		t.Fatalf("error cancelling trade: %v", err)
+	}
+}
+
+func TestMarkets(t *testing.T) {
+	bnc := tNewBinance(t, dex.Simnet)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
+	defer cancel()
+
+	_, err := bnc.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
+
+	markets, err := bnc.Markets()
+	if err != nil {
+		t.Fatalf("failed to load markets")
+	}
+
+	for _, market := range markets {
+		t.Logf("%v - %v", dex.BipIDSymbol(market.BaseID), dex.BipIDSymbol(market.QuoteID))
 	}
 }
 
