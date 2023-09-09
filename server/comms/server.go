@@ -179,6 +179,7 @@ type RPCConfig struct {
 	// generated and saved to these locations.
 	RPCKey  string
 	RPCCert string
+	NoTLS   bool
 	// AltDNSNames specifies allowable request addresses for an auto-generated
 	// TLS keypair. Changing AltDNSNames does not force the keypair to be
 	// regenerated. To regenerate, delete or move the old files.
@@ -288,21 +289,29 @@ type Server struct {
 // IP-based quarantine to short-circuit to an error response for misbehaving
 // clients, if necessary.
 func NewServer(cfg *RPCConfig) (*Server, error) {
-	// Find or create the key pair.
-	keyExists := dex.FileExists(cfg.RPCKey)
-	certExists := dex.FileExists(cfg.RPCCert)
-	if certExists == !keyExists {
-		return nil, fmt.Errorf("missing cert pair file")
-	}
-	if !keyExists && !certExists {
-		err := genCertPair(cfg.RPCCert, cfg.RPCKey, cfg.AltDNSNames)
+
+	var tlsConfig *tls.Config
+	if !cfg.NoTLS {
+		// Prepare the TLS configuration.
+		keyExists := dex.FileExists(cfg.RPCKey)
+		certExists := dex.FileExists(cfg.RPCCert)
+		if certExists == !keyExists {
+			return nil, fmt.Errorf("missing cert pair file")
+		}
+		if !keyExists && !certExists {
+			err := genCertPair(cfg.RPCCert, cfg.RPCKey, cfg.AltDNSNames)
+			if err != nil {
+				return nil, err
+			}
+		}
+		keypair, err := tls.LoadX509KeyPair(cfg.RPCCert, cfg.RPCKey)
 		if err != nil {
 			return nil, err
 		}
-	}
-	keypair, err := tls.LoadX509KeyPair(cfg.RPCCert, cfg.RPCKey)
-	if err != nil {
-		return nil, err
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{keypair}, // TODO: multiple key pairs for virtual hosting
+			MinVersion:   tls.VersionTLS12,
+		}
 	}
 
 	// Start with the hidden service listener, if specified.
@@ -331,29 +340,34 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 		}
 	}
 
-	// Prepare the TLS configuration.
-	tlsConfig := tls.Config{
-		Certificates: []tls.Certificate{keypair}, // TODO: multiple key pairs for virtual hosting
-		MinVersion:   tls.VersionTLS12,
-	}
 	// Parse the specified listen addresses and create the []net.Listener.
 	ipv4ListenAddrs, ipv6ListenAddrs, _, err := parseListeners(cfg.ListenAddrs)
 	if err != nil {
 		return nil, err
 	}
-	for _, addr := range ipv4ListenAddrs {
-		listener, err := tls.Listen("tcp4", addr, &tlsConfig)
+	parseListener := func(network, addr string) (err error) {
+		var listener net.Listener
+		if cfg.NoTLS {
+			listener, err = net.Listen(network, addr)
+		} else {
+			listener, err = tls.Listen(network, addr, tlsConfig)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("cannot listen on %s: %w", addr, err)
+			return fmt.Errorf("cannot listen on %s: %w", addr, err)
 		}
 		listeners = append(listeners, listener)
+		return nil
+	}
+
+	for _, addr := range ipv4ListenAddrs {
+		if err := parseListener("tcp4", addr); err != nil {
+			return nil, err
+		}
 	}
 	for _, addr := range ipv6ListenAddrs {
-		listener, err := tls.Listen("tcp6", addr, &tlsConfig)
-		if err != nil {
-			return nil, fmt.Errorf("cannot listen on %s: %w", addr, err)
+		if err := parseListener("tcp6", addr); err != nil {
+			return nil, err
 		}
-		listeners = append(listeners, listener)
 	}
 	if len(listeners) == 0 {
 		return nil, fmt.Errorf("RPCS: No valid listen address")
