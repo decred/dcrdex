@@ -27,7 +27,7 @@ To reinitialize the wallet, [open the wallet settings dialog](#opening-the-btc-w
 
 The `dexc.log` should say:
 
-> [DBG] CORE[btc][SPV]: Starting native BTC wallet...
+> \[DBG\] CORE\[btc\]\[SPV\]: Starting native BTC wallet...
 
 The wallet will begin re-synchronizing.  This may take several minutes.
 
@@ -38,11 +38,9 @@ The wallet will begin re-synchronizing.  This may take several minutes.
     - `~/.dexc/mainnet/assetdb/btc/mainnet/` on Linux
     - `~/Library/Application\ Support/Dexc/mainnet/assetdb/btc/mainnet/` on MacOS
     - `C:\Users\<Username>\AppData\Dexc\mainnet\assetdb\btc\mainnet` on Windows.
-
-  There may be a wallet.db file in this folder, which you should rename wallet.db.bak.
-
+    There may be a wallet.db file in this folder, which you should rename wallet.db.bak.
 3. Startup and login to DEX.
-4. [Open the BTC wallet settings](#opening-the-btc-wallet-settings) and click `Recover` again.
+4. \[Open the BTC wallet settings\](#opening-the-btc-wallet-settings) and click `Recover` again.
 
 If you still encounter any error in the logs or notification, you can reach out to us on our chat channels. We will be happy to help you out.
 
