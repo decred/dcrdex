@@ -8144,15 +8144,9 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
 	}
-	// The scheme switches gorilla/websocket to use the tls.Config or not.
-	scheme := "wss"
-	if len(acctInfo.Cert) == 0 {
-		scheme = "ws" // only supported for .onion hosts, but could allow private IP too
-	}
-	wsAddr := scheme + "://" + host + "/ws"
-	wsURL, err := url.Parse(wsAddr)
+	wsURL, err := url.Parse("wss://" + host + "/ws")
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing ws address %s: %w", wsAddr, err)
+		return nil, newError(addressParseErr, "error parsing ws address from host %s: %w", host, err)
 	}
 
 	listen := flag&connectDEXFlagTemporary == 0
@@ -8199,9 +8193,8 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 			TorIsolation: c.cfg.TorIsolation, // need socks.NewPool with isolation???
 		}
 		wsCfg.NetDialContext = proxy.DialContext
-	}
-	if scheme == "ws" && !isOnionHost {
-		return nil, errors.New("a TLS connection is required when not using a hidden service")
+		wsURL.Scheme = "ws"
+		wsCfg.URL = wsURL.String()
 	}
 
 	wsCfg.ConnectEventFunc = func(status comms.ConnectionStatus) {
