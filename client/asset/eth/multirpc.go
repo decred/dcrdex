@@ -59,7 +59,7 @@ const (
 	// HTTPS, but not for other requests.
 	// TODO: Keep a file mapping provider URL to retrieved chain IDs, and skip
 	// the eth_chainId request after verified for the first time?
-	defaultRequestTimeout = time.Second * 20
+	defaultRequestTimeout = time.Second * 10
 )
 
 var (
