@@ -1500,6 +1500,7 @@ func TestBookFeed(t *testing.T) {
 	dc := rig.dc
 
 	checkAction := func(feed BookFeed, action string) {
+		t.Helper()
 		select {
 		case u := <-feed.Next():
 			if u.Action != action {
@@ -1728,6 +1729,8 @@ func TestBookFeed(t *testing.T) {
 		t.Fatalf("handleEpochReportMsg error: %v", err)
 	}
 
+	checkAction(feed2, EpochMatchSummary)
+
 	// We'll only receive 1 candle update, since we only synced one set of
 	// candles so far.
 	checkAction(feed2, CandleUpdateAction)
@@ -1743,6 +1746,7 @@ func TestBookFeed(t *testing.T) {
 	if err := handleEpochReportMsg(tCore, dc, epochReport); err != nil {
 		t.Fatalf("handleEpochReportMsg error: %v", err)
 	}
+	checkAction(feed2, EpochMatchSummary)
 	checkAction(feed2, CandleUpdateAction)
 	checkAction(feed2, CandleUpdateAction)
 
