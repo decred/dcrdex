@@ -45,7 +45,9 @@ func main() {
 func mainErr() (err error) {
 	var (
 		// port is a required argument.
-		port          string
+		port string
+		// optional, but required for e.g. dcrd, which uses an encrypted
+		// connection.
 		localNodeCert string
 
 		// User can provide NodeRelay server configuration in one of two ways.
