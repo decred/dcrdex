@@ -405,10 +405,10 @@ func TestCheckForNewBlocks(t *testing.T) {
 	header0 := &types.Header{Number: new(big.Int)}
 	header1 := &types.Header{Number: big.NewInt(1)}
 	tests := []struct {
-		name                  string
-		hashErr, blockErr     error
-		bestHeader            *types.Header
-		wantErr, hasTipChange bool
+		name              string
+		hashErr, blockErr error
+		bestHeader        *types.Header
+		hasTipChange      bool
 	}{{
 		name:         "ok",
 		bestHeader:   header1,
@@ -416,23 +416,13 @@ func TestCheckForNewBlocks(t *testing.T) {
 	}, {
 		name:       "ok same hash",
 		bestHeader: header0,
-	}, {
-		name:         "block error",
-		bestHeader:   header1,
-		hasTipChange: true,
-		blockErr:     errors.New(""),
-		wantErr:      true,
 	}}
 
 	for _, test := range tests {
-		var err error
-		blocker := make(chan struct{})
 		ctx, cancel := context.WithCancel(context.Background())
-		tipChange := func(tipErr error) {
-			err = tipErr
-			close(blocker)
-		}
 		node := &testNode{}
+		notes := make(chan asset.WalletNotification, 1)
+		emit := asset.NewWalletEmitter(notes, BipID, tLogger)
 
 		node.bestHdr = test.bestHeader
 		node.bestHdrErr = test.blockErr
@@ -445,28 +435,37 @@ func TestCheckForNewBlocks(t *testing.T) {
 					log:        tLogger,
 					currentTip: header0,
 				},
-				log:       tLogger.SubLogger("ETH"),
-				tipChange: tipChange,
-				assetID:   BipID,
+				log:     tLogger.SubLogger("ETH"),
+				emit:    emit,
+				assetID: BipID,
 			},
 		}
 		w.wallets = map[uint32]*assetWallet{BipID: w.assetWallet}
 		w.assetWallet.connected.Store(true)
-		w.checkForNewBlocks(ctx, tipChange)
+		w.checkForNewBlocks(ctx)
 
 		if test.hasTipChange {
-			<-blocker
+		out:
+			for {
+				select {
+				case ni := <-notes:
+					switch n := ni.(type) {
+					case *asset.TipChangeNote:
+						if n.Tip != test.bestHeader.Number.Uint64() {
+							t.Fatalf("expected tip change but didn't get it")
+						}
+						break out
+					}
+				case <-time.After(time.Second * 5):
+					t.Fatal("timed out waiting for tip change")
+				}
+			}
+		} else {
+			if w.currentTip.Number.Cmp(test.bestHeader.Number) != 0 {
+				t.Fatalf("tip was changed. wasn't supposed to be changed")
+			}
 		}
 		cancel()
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
-		}
 
 	}
 }

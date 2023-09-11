@@ -49,7 +49,7 @@ func TestElectrumExchangeWallet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tipChanged := make(chan struct{}, 1)
+	notes := make(chan asset.WalletNotification)
 	walletCfg := &asset.WalletConfig{
 		Type: walletTypeElectrum,
 		Settings: map[string]string{
@@ -57,15 +57,7 @@ func TestElectrumExchangeWallet(t *testing.T) {
 			"rpcpassword": "pass",
 			"rpcbind":     "127.0.0.1:6789",
 		},
-		TipChange: func(error) {
-			select {
-			case tipChanged <- struct{}{}:
-				t.Log("tip change, that's enough testing")
-				time.Sleep(300 * time.Millisecond)
-				cancel()
-			default:
-			}
-		},
+		Emit: asset.NewWalletEmitter(notes, BipID, tLogger),
 		PeersChange: func(num uint32, err error) {
 			t.Logf("peer count = %d, err = %v", num, err)
 		},
@@ -163,6 +155,11 @@ func TestElectrumExchangeWallet(t *testing.T) {
 	select {
 	case <-time.After(10 * time.Second): // a bit of best block polling
 		cancel()
+	case ni := <-notes:
+		if _, is := ni.(*asset.TipChangeNote); is {
+			cancel()
+		}
+
 	case <-ctx.Done(): // or until TipChange cancels the context
 	}
 

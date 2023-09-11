@@ -143,8 +143,9 @@ func dummyTx() *wire.MsgTx {
 // case we replace the wallet.
 func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, func()) {
 	client := newTRPCClient()
+	log := tLogger.SubLogger("trpc")
 	walletCfg := &asset.WalletConfig{
-		TipChange:   func(error) {},
+		Emit:        asset.NewWalletEmitter(make(chan asset.WalletNotification, 128), BipID, log),
 		PeersChange: func(uint32, error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
@@ -156,7 +157,7 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 	}
 	wallet.wallet = &rpcWallet{
 		rpcClient: client,
-		log:       tLogger.SubLogger("trpc"),
+		log:       log,
 	}
 	wallet.ctx = walletCtx
 
@@ -519,7 +520,7 @@ func (c *tRPCClient) Disconnected() bool {
 }
 
 func (c *tRPCClient) GetStakeInfo(ctx context.Context) (*walletjson.GetStakeInfoResult, error) {
-	return nil, nil
+	return &walletjson.GetStakeInfoResult{}, nil
 }
 
 func (c *tRPCClient) PurchaseTicket(ctx context.Context, fromAccount string, spendLimit dcrutil.Amount, minConf *int,

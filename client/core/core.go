@@ -1460,6 +1460,8 @@ type Core struct {
 
 	pendingWalletsMtx sync.RWMutex
 	pendingWallets    map[uint32]bool
+
+	notes chan asset.WalletNotification
 }
 
 // New is the constructor for a new Core.
@@ -1570,6 +1572,8 @@ func New(cfg *Config) (*Core, error) {
 
 		fiatRateSources: make(map[string]*commonRateSource),
 		pendingWallets:  make(map[uint32]bool),
+
+		notes: make(chan asset.WalletNotification, 128),
 	}
 
 	// Populate the initial user data. User won't include any DEX info yet, as
@@ -1641,6 +1645,20 @@ func (c *Core) Run(ctx context.Context) {
 	go func() {
 		defer c.wg.Done()
 		c.watchBonds(ctx)
+	}()
+
+	// Handle wallet notifications.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for {
+			select {
+			case n := <-c.notes:
+				c.handleWalletNotification(n)
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	c.wg.Wait() // block here until all goroutines except DB complete
@@ -2771,29 +2789,15 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		}()
 	}
 
-	tipChange := func(err error) {
-		if c.ctx.Err() != nil {
-			return
-		}
-
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
-			// asset.Wallet implementations should not need wait for the
-			// callback, as they don't know what it is, and will likely launch
-			// TipChange as a goroutine. However, guard against the possibility
-			// of deadlocking a Core method that calls Wallet.Disconnect.
-			c.tipChange(assetID, err)
-		}()
-	}
-
+	log := c.log.SubLogger(unbip(assetID))
 	var w asset.Wallet
 	var err error
 	if token == nil {
+
 		walletCfg := &asset.WalletConfig{
 			Type:        dbWallet.Type,
 			Settings:    dbWallet.Settings,
-			TipChange:   tipChange,
+			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 			DataDir:     c.assetDataDirectory(assetID),
 		}
@@ -2802,8 +2806,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
 		defer delete(walletCfg.Settings, asset.SpecialSettingActivelyUsed)
 
-		logger := c.log.SubLogger(unbip(assetID))
-		w, err = asset.OpenWallet(assetID, walletCfg, logger, c.net)
+		w, err = asset.OpenWallet(assetID, walletCfg, log, c.net)
 	} else {
 		var found bool
 		parent, found = c.wallet(token.ParentID)
@@ -2819,7 +2822,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		w, err = tokenMaster.OpenTokenWallet(&asset.TokenConfig{
 			AssetID:     assetID,
 			Settings:    dbWallet.Settings,
-			TipChange:   tipChange,
+			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 		})
 	}
@@ -9399,19 +9402,23 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 					db.WarningLevel, w.state()))
 			}
 		}
-
 		c.notify(newWalletStateNote(w.state()))
 	}
+}
+
+// handleWalletNotification processes an asynchronous wallet notification.
+func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
+	switch n := ni.(type) {
+	case *asset.TipChangeNote:
+		c.tipChange(n.AssetID)
+	}
+	c.notify(newWalletNote(ni))
 }
 
 // tipChange is called by a wallet backend when the tip block changes, or when
 // a connection error is encountered such that tip change reporting may be
 // adversely affected.
-func (c *Core) tipChange(assetID uint32, nodeErr error) {
-	if nodeErr != nil {
-		c.log.Errorf("%s wallet is reporting a failed state: %v", unbip(assetID), nodeErr)
-		return
-	}
+func (c *Core) tipChange(assetID uint32) {
 	c.log.Tracef("Processing tip change for %s", unbip(assetID))
 	c.waiterMtx.RLock()
 	for id, waiter := range c.blockWaiters {

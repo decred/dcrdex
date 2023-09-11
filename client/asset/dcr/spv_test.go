@@ -194,7 +194,7 @@ func (w *tDcrWallet) GetTransactionsByHashes(ctx context.Context, txHashes []*ch
 }
 
 func (w *tDcrWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
-	return nil, nil
+	return &wallet.StakeInfoData{}, nil
 }
 
 func (w *tDcrWallet) PurchaseTickets(context.Context, wallet.NetworkBackend, *wallet.PurchaseTicketsRequest) (*wallet.PurchaseTicketsResponse, error) {

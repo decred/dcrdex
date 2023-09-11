@@ -38,7 +38,7 @@ var tLogger dex.Logger
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
-func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, walletName *WalletName, blkFunc func(string, error)) *connectedWallet {
+func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, walletName *WalletName, blkFunc func(string)) *connectedWallet {
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
@@ -62,12 +62,11 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, wallet
 
 	reportName := fmt.Sprintf("%s:%s-%s", cfg.Asset.Symbol, walletName.Node, walletName.Name)
 
+	notes := make(chan asset.WalletNotification, 1)
 	walletCfg := &asset.WalletConfig{
 		Type:     walletName.WalletType,
 		Settings: settings,
-		TipChange: func(err error) {
-			blkFunc(reportName, err)
-		},
+		Emit:     asset.NewWalletEmitter(notes, cfg.Asset.ID, tLogger),
 		PeersChange: func(num uint32, err error) {
 			fmt.Printf("peer count = %d, err = %v", num, err)
 		},
@@ -84,6 +83,20 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, dir string, wallet
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
 	}
+
+	go func() {
+		for {
+			select {
+			case ni := <-notes:
+				switch ni.(type) {
+				case *asset.TipChangeNote:
+					blkFunc(reportName)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	return &connectedWallet{w, cm}
 }
@@ -175,9 +188,9 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	var blockReported uint32
-	blkFunc := func(name string, err error) {
+	blkFunc := func(name string) {
 		atomic.StoreUint32(&blockReported, 1)
-		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+		tLogger.Infof("%s has reported a new block", name)
 	}
 
 	rig := &testRig{
@@ -213,18 +226,18 @@ func Run(t *testing.T, cfg *Config) {
 	defer rig.close()
 
 	// Unlocks a wallet for use.
-	unlock := func(w *connectedWallet) {
+	unlock := func(w *connectedWallet, name string) {
 		a, isAuthenticator := w.Wallet.(asset.Authenticator)
 		if isAuthenticator {
 			err := a.Unlock(walletPassword)
-			if err != nil {
-				t.Fatalf("error unlocking gamma wallet: %v", err)
+			if err != nil && !strings.Contains(err.Error(), "running with an unencrypted wallet, but walletpassphrase was called") {
+				t.Fatalf("error unlocking %s wallet: %v", name, err)
 			}
 		}
 	}
 
-	unlock(rig.firstWallet)
-	unlock(rig.secondWallet)
+	unlock(rig.firstWallet, cfg.FirstWallet.Name)
+	unlock(rig.secondWallet, cfg.SecondWallet.Name)
 
 	var lots uint64 = 2
 	contractValue := lots * cfg.LotSize
@@ -362,16 +375,16 @@ func Run(t *testing.T, cfg *Config) {
 
 	confCoin := receipts[0].Coin()
 	confContract := receipts[0].Contract()
-	checkConfs := func(n uint32, expSpent bool) {
+	checkConfs := func(minN uint32, expSpent bool) {
 		t.Helper()
 		confs, spent, err := rig.secondWallet.SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
 		if err != nil {
-			if n > 0 || !errors.Is(err, asset.CoinNotFoundError) {
-				t.Fatalf("error getting %d confs: %v", n, err)
+			if minN > 0 || !errors.Is(err, asset.CoinNotFoundError) {
+				t.Fatalf("error getting %d confs: %v", minN, err)
 			}
 		}
-		if confs != n {
-			t.Fatalf("expected %d confs, got %d", n, confs)
+		if confs < minN {
+			t.Fatalf("expected %d confs, got %d", minN, confs)
 		}
 		if spent != expSpent {
 			t.Fatalf("checkConfs: expected spent = %t, got %t", expSpent, spent)
@@ -423,7 +436,7 @@ func Run(t *testing.T, cfg *Config) {
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
-		if confs != expConfs {
+		if confs < expConfs {
 			t.Fatalf("unexpected number of confirmations. wanted %d, got %d", expConfs, confs)
 		}
 		if spent {

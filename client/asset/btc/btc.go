@@ -856,7 +856,7 @@ type baseWallet struct {
 	chainParams       *chaincfg.Params
 	log               dex.Logger
 	symbol            string
-	tipChange         func(error)
+	emit              *asset.WalletEmitter
 	lastPeerCount     uint32
 	peersChange       func(uint32, error)
 	minNetworkVersion uint64
@@ -1331,7 +1331,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		chainParams:         cfg.ChainParams,
 		cloneParams:         cfg,
 		log:                 cfg.Logger,
-		tipChange:           cfg.WalletCFG.TipChange,
+		emit:                cfg.WalletCFG.Emit,
 		peersChange:         cfg.WalletCFG.PeersChange,
 		fundingCoins:        make(map[outPoint]*utxo),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
@@ -1586,6 +1586,7 @@ func (btc *baseWallet) SyncStatus() (bool, float32, error) {
 	if err != nil {
 		return false, 0, err
 	}
+
 	if ss.Target == 0 { // do not say progress = 1
 		return false, 0, nil
 	}
@@ -5069,12 +5070,12 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 		case <-ticker.C:
 			newTipHdr, err := btc.node.getBestBlockHeader()
 			if err != nil {
-				go btc.tipChange(fmt.Errorf("failed to get best block header from %s node: %v", btc.symbol, err))
+				btc.log.Errorf("failed to get best block header from %s node: %w", btc.symbol, err)
 				continue
 			}
 			newTipHash, err := chainhash.NewHashFromStr(newTipHdr.Hash)
 			if err != nil {
-				go btc.tipChange(fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err))
+				btc.log.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
 				continue
 			}
 
@@ -5172,7 +5173,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 	prevTip := btc.currentTip
 	btc.currentTip = newTip
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
-	go btc.tipChange(nil)
+	btc.emit.TipChange(uint64(newTip.height))
 
 	reqs := btc.prepareRedemptionRequestsForBlockCheck()
 	// Redemption search would be compromised if the starting point cannot

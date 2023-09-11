@@ -178,7 +178,7 @@ type testData struct {
 	signTxErr            error
 	listUnspent          []*ListUnspentResult
 	listUnspentErr       error
-	tipChanged           chan struct{}
+	tipChanged           chan asset.WalletNotification
 
 	// spv
 	fetchInputInfoTx  *wire.MsgTx
@@ -210,7 +210,7 @@ func newTestData() *testData {
 		getCFilterScripts: make(map[chainhash.Hash][][]byte),
 		confsErr:          WalletTransactionNotFound,
 		checkpoints:       make(map[outPoint]*scanCheckpoint),
-		tipChanged:        make(chan struct{}, 1),
+		tipChanged:        make(chan asset.WalletNotification, 1),
 		getTransactionMap: make(map[string]*GetTransactionResult),
 	}
 }
@@ -636,13 +636,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 
 	data := newTestData()
 	walletCfg := &asset.WalletConfig{
-		TipChange: func(error) {
-			select {
-			case data.tipChanged <- struct{}{}:
-			default:
-				fmt.Println("BACKED UP tipChanged channel!!!")
-			}
-		},
+		Emit: asset.NewWalletEmitter(data.tipChanged, BipID, tLogger),
 		PeersChange: func(num uint32, err error) {
 			fmt.Printf("peer count = %d, err = %v", num, err)
 		},
