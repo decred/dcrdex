@@ -86,6 +86,7 @@ type dexConf struct {
 	DEXPrivKeyPath    string
 	RPCCert           string
 	RPCKey            string
+	NoTLS             bool
 	RPCListen         []string
 	HiddenService     string
 	BroadcastTimeout  time.Duration
@@ -117,6 +118,7 @@ type flagsData struct {
 	RPCCert       string   `long:"rpccert" description:"RPC server TLS certificate file."`
 	RPCKey        string   `long:"rpckey" description:"RPC server TLS private key file."`
 	RPCListen     []string `long:"rpclisten" description:"IP addresses on which the RPC server should listen for incoming connections."`
+	NoTLS         bool     `long:"notls" description:"Run without TLS encryption."`
 	AltDNSNames   []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
 	HiddenService string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
 
@@ -542,6 +544,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		DEXPrivKeyPath:    cfg.DEXPrivKeyPath,
 		RPCCert:           cfg.RPCCert,
 		RPCKey:            cfg.RPCKey,
+		NoTLS:             cfg.NoTLS,
 		RPCListen:         RPCListen,
 		HiddenService:     HiddenService,
 		BroadcastTimeout:  cfg.BroadcastTimeout,

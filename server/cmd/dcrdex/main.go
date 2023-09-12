@@ -144,6 +144,7 @@ func mainCore(ctx context.Context) error {
 		DEXPrivKey:        privKey,
 		CommsCfg: &dexsrv.RPCConfig{
 			RPCCert:           cfg.RPCCert,
+			NoTLS:             cfg.NoTLS,
 			RPCKey:            cfg.RPCKey,
 			ListenAddrs:       cfg.RPCListen,
 			AltDNSNames:       cfg.AltDNSNames,
