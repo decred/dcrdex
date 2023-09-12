@@ -533,6 +533,25 @@ func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contrac
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, time.UnixMilli(int64(matchTime)))
 }
 
+// TxHistory returns all the transactions a wallet has made. If refID
+// is nil, then transactions starting from the most recent are returned
+// (past is ignored). If past is true, the transactions prior to the
+// refID are returned, otherwise the transactions after the refID are
+// returned. n is the number of transactions to return. If n is <= 0,
+// all the transactions will be returned.
+func (w *xcWallet) TxHistory(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+	if !w.connected() {
+		return nil, errWalletNotConnected
+	}
+
+	historian, ok := w.Wallet.(asset.WalletHistorian)
+	if !ok {
+		return nil, fmt.Errorf("wallet does not support transaction history")
+	}
+
+	return historian.TxHistory(n, refID, past)
+}
+
 // MakeBondTx authors a DEX time-locked fidelity bond transaction if the
 // asset.Wallet implementation is a Bonder.
 func (w *xcWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, priv *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {

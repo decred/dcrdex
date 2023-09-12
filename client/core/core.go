@@ -5791,6 +5791,21 @@ func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) ([]*Order, error) {
 	return orders, nil
 }
 
+// TxHistory returns all the transactions a wallet has made. If refID
+// is nil, then transactions starting from the most recent are returned
+// (past is ignored). If past is true, the transactions prior to the
+// refID are returned, otherwise the transactions after the refID are
+// returned. n is the number of transactions to return. If n is <= 0,
+// all the transactions will be returned
+func (c *Core) TxHistory(assetID uint32, n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	return wallet.TxHistory(n, refID, past)
+}
+
 // Trade is used to place a market or limit order.
 func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	req, err := c.prepareTradeRequest(pw, form)

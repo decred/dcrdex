@@ -59,6 +59,7 @@ const (
 	setVSPRoute                = "setvsp"
 	purchaseTicketsRoute       = "purchasetickets"
 	setVotingPreferencesRoute  = "setvotingprefs"
+	txHistoryRoute             = "txhistory"
 )
 
 const (
@@ -130,6 +131,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	setVSPRoute:                handleSetVSP,
 	purchaseTicketsRoute:       handlePurchaseTickets,
 	setVotingPreferencesRoute:  handleSetVotingPreferences,
+	txHistoryRoute:             handleTxHistory,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -1033,6 +1035,22 @@ func handleSetVotingPreferences(s *RPCServer, params *RawParams) *msgjson.Respon
 	return createResponse(setVotingPreferencesRoute, "vote preferences set", nil)
 }
 
+func handleTxHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseTxHistoryArgs(params)
+	if err != nil {
+		return usage(txHistoryRoute, err)
+	}
+
+	txs, err := s.core.TxHistory(form.assetID, form.num, form.refID, form.past)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get tx history: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, errMsg)
+		return createResponse(txHistoryRoute, nil, resErr)
+	}
+
+	return createResponse(txHistoryRoute, txs, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1751,5 +1769,16 @@ an spv wallet and enables options to view and set the vsp.
   treasuryPolicyMap ({"key": "policy", ...}): A map of treasury spender public keys to tSpend policies.`,
 		returns: `Returns:
   string: The message "` + setVotePrefsStr + `"`,
+	},
+	txHistoryRoute: {
+		argsShort:  `assetID (n) (refTxID) (past)`,
+		cmdSummary: `Get transaction history for a wallet`,
+		argsLong: `Args:
+		  assetID (int): The asset's BIP-44 registered coin index.
+		  n (int): Optional. The number of transactions to return. If <= 0 or unset, all transactions are returned.
+		  refTxID (string): Optional. If set, the transactions before or after this tx (depending on the past argument)
+		  will be returned.
+		  past (bool): If true, the transactions before the reference tx will be returned. If false, the
+		  transactions after the reference tx will be returned.`,
 	},
 }
