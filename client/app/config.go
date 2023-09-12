@@ -121,6 +121,11 @@ type LogConfig struct {
 	LocalLogs  bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 }
 
+// MMConfig encapsulates the settings specific to market making.
+type MMConfig struct {
+	BotConfigPath string `long:"botConfigPath"`
+}
+
 // Config is the common application configuration definition. This composite
 // struct captures the configuration needed for core and both web and rpc
 // servers, as well as some application-level directives.
@@ -129,6 +134,7 @@ type Config struct {
 	RPCConfig
 	WebConfig
 	LogConfig
+	MMConfig
 	// AppData and ConfigPath should be parsed from the command-line,
 	// as it makes no sense to set these in the config file itself. If no values
 	// are assigned, defaults will be used.
@@ -166,12 +172,9 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		keyFile = filepath.Join(cfg.AppData, "web.key")
 	}
 
-	_, _, mmCfgPath := setNet(cfg.AppData, cfg.Net.String())
-
 	return &webserver.Config{
 		Core:          c,
 		MarketMaker:   mm,
-		MMCfgPath:     mmCfgPath,
 		Addr:          cfg.WebAddr,
 		CustomSiteDir: cfg.SiteDir,
 		Logger:        log,
@@ -203,6 +206,15 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		SimnetFiatRates:    cfg.SimnetFiatRates,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
 	}
+}
+
+// MarketMakerConfigPath returns the path to the market maker config file.
+func (cfg *Config) MarketMakerConfigPath() string {
+	if cfg.MMConfig.BotConfigPath != "" {
+		return cfg.MMConfig.BotConfigPath
+	}
+	_, _, mmCfgPath := setNet(cfg.AppData, cfg.Net.String())
+	return mmCfgPath
 }
 
 var DefaultConfig = Config{

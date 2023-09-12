@@ -100,7 +100,7 @@ func runCore(cfg *app.Config) error {
 	if cfg.Experimental {
 		// TODO: on shutdown, stop market making and wait for trades to be
 		// canceled.
-		marketMaker, err = mm.NewMarketMaker(clientCore, logMaker.Logger("MM"))
+		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MarketMakerConfigPath(), logMaker.Logger("MM"))
 		if err != nil {
 			return fmt.Errorf("error creating market maker: %w", err)
 		}

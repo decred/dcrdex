@@ -10320,6 +10320,12 @@ func (c *Core) FiatRateSources() map[string]bool {
 	return rateSources
 }
 
+// FiatConversionRates are the currently cached fiat conversion rates. Must have
+// 1 or more fiat rate sources enabled.
+func (c *Core) FiatConversionRates() map[uint32]float64 {
+	return c.fiatConversions()
+}
+
 // fiatConversions returns fiat rate for all supported assets that have a
 // wallet.
 func (c *Core) fiatConversions() map[uint32]float64 {

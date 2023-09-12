@@ -6,14 +6,12 @@ package rpcserver
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"sort"
 	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -916,42 +914,13 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(notificationsRoute, notes, nil)
 }
 
-// parseMarketMakingConfig takes a path to a json file, parses the contents, and
-// returns a []*mm.BotConfig.
-func parseMarketMakingConfig(path string) ([]*mm.BotConfig, []*mm.CEXConfig, error) {
-	type mmConfig struct {
-		BotCfgs []*mm.BotConfig `json:"botCfgs"`
-		CexCfgs []*mm.CEXConfig `json:"cexCfgs"`
-	}
-
-	contents, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cfg := mmConfig{}
-	err = json.Unmarshal(contents, &cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return cfg.BotCfgs, cfg.CexCfgs, nil
-}
-
 func handleStartMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	form, err := parseStartMarketMakingArgs(params)
 	if err != nil {
 		return usage(startMarketMakingRoute, err)
 	}
 
-	botConfigs, cexConfigs, err := parseMarketMakingConfig(form.cfgFilePath)
-	if err != nil {
-		errMsg := fmt.Sprintf("unable to parse market making config: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
-		return createResponse(startMarketMakingRoute, nil, resErr)
-	}
-
-	err = s.mm.Run(s.ctx, botConfigs, cexConfigs, form.appPass)
+	err = s.mm.Run(s.ctx, form.appPass, &form.cfgFilePath)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to start market making: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
