@@ -350,9 +350,6 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 	// Consider reworking the tests (TODO).
 	return &sync.WaitGroup{}, conn.connectErr
 }
-func (conn *TWebsocket) SendRaw(b []byte) error {
-	return nil
-}
 
 type TDB struct {
 	updateWalletErr          error

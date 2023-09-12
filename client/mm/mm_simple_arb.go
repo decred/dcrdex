@@ -269,8 +269,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTradeID := a.cex.GenerateTradeID()
-	err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize, a.cexTradeUpdatesID, cexTradeID)
+	cexTradeID, err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize, a.cexTradeUpdatesID)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -435,8 +434,6 @@ func (m *simpleArbMarketMaker) handleNotification(note core.Notification) {
 			return
 		}
 		m.handleDEXOrderUpdate(ord)
-	case *core.EpochNotification:
-		m.rebalance(n.Epoch)
 	}
 }
 
@@ -465,9 +462,11 @@ func (a *simpleArbMarketMaker) run() {
 		defer wg.Done()
 		for {
 			select {
-			case <-bookFeed.Next():
-				// Really nothing to do with the updates. We just need to keep
-				// the subscription live in order to get VWAP on dex orderbook.
+			case n := <-bookFeed.Next():
+				if n.Action == core.EpochMatchSummary {
+					payload := n.Payload.(*core.EpochMatchSummaryPayload)
+					a.rebalance(payload.Epoch + 1)
+				}
 			case <-a.ctx.Done():
 				return
 			}

@@ -117,9 +117,11 @@ func (drv *tDriver) Info() *asset.WalletInfo {
 	return drv.winfo
 }
 
-type tBookFeed struct{}
+type tBookFeed struct {
+	c chan *core.BookUpdate
+}
 
-func (t *tBookFeed) Next() <-chan *core.BookUpdate { return make(chan *core.BookUpdate, 1) }
+func (t *tBookFeed) Next() <-chan *core.BookUpdate { return t.c }
 func (t *tBookFeed) Close()                        {}
 func (t *tBookFeed) Candles(dur string) error      { return nil }
 
@@ -150,6 +152,7 @@ type tCore struct {
 	multiTradesPlaced []*core.MultiTradeForm
 	maxFundingFees    uint64
 	book              *orderbook.OrderBook
+	bookFeed          *tBookFeed
 }
 
 func (c *tCore) NotificationFeed() *core.NoteFeed {
@@ -162,7 +165,7 @@ func (c *tCore) ExchangeMarket(host string, base, quote uint32) (*core.Market, e
 var _ core.BookFeed = (*tBookFeed)(nil)
 
 func (t *tCore) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
-	return t.book, &tBookFeed{}, nil
+	return t.book, t.bookFeed, nil
 }
 func (*tCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return nil
@@ -280,6 +283,9 @@ func newTCore() *tCore {
 		cancelsPlaced:   make([]dex.Bytes, 0),
 		buysPlaced:      make([]*core.TradeForm, 0),
 		sellsPlaced:     make([]*core.TradeForm, 0),
+		bookFeed: &tBookFeed{
+			c: make(chan *core.BookUpdate, 1),
+		},
 	}
 }
 

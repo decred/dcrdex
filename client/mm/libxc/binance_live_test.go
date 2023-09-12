@@ -130,8 +130,7 @@ func TestTrade(t *testing.T) {
 			}
 		}
 	}()
-	tradeID := bnc.GenerateTradeID()
-	err = bnc.Trade(ctx, "eth", "btc", false, 6127e2, 1e7, updaterID, tradeID)
+	tradeID, err := bnc.Trade(ctx, "eth", "btc", false, 6000e2, 1e7, updaterID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
 	}
@@ -165,7 +164,7 @@ func TestCancelTrade(t *testing.T) {
 }
 
 func TestMarkets(t *testing.T) {
-	bnc := tNewBinance(t, dex.Simnet)
+	bnc := tNewBinance(t, dex.Mainnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 

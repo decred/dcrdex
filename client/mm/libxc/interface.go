@@ -40,11 +40,6 @@ type CEX interface {
 	Balances() (map[uint32]*ExchangeBalance, error)
 	// CancelTrade cancels a trade on the CEX.
 	CancelTrade(ctx context.Context, baseSymbol, quoteSymbol, tradeID string) error
-	// GenerateTradeID returns a trade ID that must be passed as an argument
-	// when calling Trade. This ID will be used to identify updates to the
-	// trade. It is necessary to pre-generate this because updates to the
-	// trade may be sent before Trade returns.
-	GenerateTradeID() string
 	// Markets returns the list of markets at the CEX.
 	Markets() ([]*Market, error)
 	// SubscribeCEXUpdates returns a channel which sends an empty struct when
@@ -60,12 +55,8 @@ type CEX interface {
 	// returned from this function.
 	SubscribeTradeUpdates() (updates <-chan *TradeUpdate, unsubscribe func(), subscriptionID int)
 	// Trade executes a trade on the CEX. updaterID takes a subscriptionID
-	// returned from SubscribeTradeUpdates, and tradeID takes an ID returned
-	// from GenerateTradeID. The trade ID must be generated and passed to
-	// Trade instead being returned from trade, because trade updates may
-	// be sent before Trade returns.
-	Trade(ctx context.Context, baseSymbol, quoteSymbol string, sell bool, rate, qty uint64,
-		tradeUpdatesSubscriptionID int, tradeID string) error
+	// returned from SubscribeTradeUpdates.
+	Trade(ctx context.Context, baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, subscriptionID int) (string, error)
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseSymbol, quoteSymbol string)
 	// VWAP returns the volume weighted average price for a certain quantity

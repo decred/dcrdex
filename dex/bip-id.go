@@ -639,7 +639,9 @@ var bipIDs = map[uint32]string{
 	99999999: "qkc",
 }
 
-var TokenChains = make(map[string][]uint32)
+// TokenChains is a map of token symbol to a list of [2]uint32, where the first
+// element is the token's BIP ID and the second element is the chain's BIP ID.
+var TokenChains = make(map[string][][2]uint32)
 
 func init() {
 	for id, symbol := range bipIDs {
@@ -647,7 +649,11 @@ func init() {
 		if len(parts) < 2 {
 			continue
 		}
-		tokenSymbol, _ := parts[0], parts[1]
-		TokenChains[tokenSymbol] = append(TokenChains[tokenSymbol], id)
+		tokenSymbol, chainSymbol := parts[0], parts[1]
+		chainID, found := BipSymbolID(chainSymbol)
+		if !found {
+			panic("unknown chain symbol: " + chainSymbol)
+		}
+		TokenChains[tokenSymbol] = append(TokenChains[tokenSymbol], [2]uint32{id, chainID})
 	}
 }
