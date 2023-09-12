@@ -70,7 +70,7 @@ func mainErr() error {
 
 	var contractVerI int
 	var chain, credentialsPath, tokenAddress, returnAddr string
-	var useTestnet, useMainnet, useSimnet, trace, debug, readCreds, fundingReq bool
+	var useTestnet, useMainnet, useSimnet, trace, debug, readCreds, fundingReq, multiBal bool
 	flag.BoolVar(&readCreds, "readcreds", false, "does not run gas estimates. read the credentials file and print the address")
 	flag.BoolVar(&fundingReq, "fundingrequired", false, "does not run gas estimates. calculate the funding required by the wallet to get estimates")
 	flag.StringVar(&returnAddr, "return", "", "does not run gas estimates. return ethereum funds to supplied address")
@@ -83,6 +83,7 @@ func mainErr() error {
 	flag.StringVar(&tokenAddress, "tokenaddr", "", "launches an erc20-linked contract with this token. default launches a base chain contract")
 	flag.IntVar(&contractVerI, "ver", 0, "contract version")
 	flag.StringVar(&credentialsPath, "creds", defaultCredentialsPath, "path for JSON credentials file.")
+	flag.BoolVar(&multiBal, "multibalance", false, "deploy / estimate the MultiBalanceV0 contract instead of the swap contract")
 	flag.Parse()
 
 	if !useMainnet && !useTestnet && !useSimnet {
@@ -161,6 +162,17 @@ func mainErr() error {
 
 	switch {
 	case fundingReq:
+		if multiBal {
+			return eth.ContractDeployer.EstimateMultiBalanceDeployFunding(
+				ctx,
+				chain,
+				credentialsPath,
+				chainCfg,
+				bui,
+				log,
+				net,
+			)
+		}
 		return eth.ContractDeployer.EstimateDeployFunding(
 			ctx,
 			chain,
@@ -178,6 +190,16 @@ func mainErr() error {
 		}
 		addr := common.HexToAddress(returnAddr)
 		return eth.ContractDeployer.ReturnETH(ctx, chain, addr, credentialsPath, chainCfg, bui, log, net)
+	case multiBal:
+		return eth.ContractDeployer.DeployMultiBalance(
+			ctx,
+			chain,
+			credentialsPath,
+			chainCfg,
+			bui,
+			log,
+			net,
+		)
 	default:
 		return eth.ContractDeployer.DeployContract(
 			ctx,

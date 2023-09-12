@@ -238,12 +238,13 @@ var Tokens = map[uint32]*Token{
 // simnet harness to populate swap contract and token addresses in
 // ContractAddresses and Tokens.
 func MaybeReadSimnetAddrs() {
-	MaybeReadSimnetAddrsDir("eth", ContractAddresses, Tokens[testTokenID].NetTokens[dex.Simnet])
+	MaybeReadSimnetAddrsDir("eth", ContractAddresses, MultiBalanceAddresses, Tokens[testTokenID].NetTokens[dex.Simnet])
 }
 
 func MaybeReadSimnetAddrsDir(
 	dir string,
 	contractsAddrs map[uint32]map[dex.Network]common.Address,
+	multiBalandAddresses map[dex.Network]common.Address,
 	token *NetToken,
 ) {
 
@@ -264,8 +265,10 @@ func MaybeReadSimnetAddrsDir(
 	ethSwapContractAddrFile := filepath.Join(harnessDir, "eth_swap_contract_address.txt")
 	tokenSwapContractAddrFile := filepath.Join(harnessDir, "erc20_swap_contract_address.txt")
 	testTokenContractAddrFile := filepath.Join(harnessDir, "test_token_contract_address.txt")
+	multiBalanceContractAddrFile := filepath.Join(harnessDir, "multibalance_address.txt")
 
 	contractsAddrs[0][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFile)
+	multiBalandAddresses[dex.Simnet] = getContractAddrFromFile(multiBalanceContractAddrFile)
 
 	token.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapContractAddrFile)
 	token.Address = getContractAddrFromFile(testTokenContractAddrFile)

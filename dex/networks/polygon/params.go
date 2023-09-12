@@ -50,6 +50,11 @@ var (
 		},
 	}
 
+	MultiBalanceAddresses = map[dex.Network]common.Address{
+		dex.Mainnet: common.HexToAddress("0x23d8203d8E3c839F359bcC85BFB71cf0d707EDF0"), // tx: 0xc593222106c700b153977fdf290f8d9656610cd2dd88522724e85b3f7fd600cf
+		dex.Testnet: common.HexToAddress("0xFbF60393F5AB800139F283cc6e090a17db6cC7a1"), // tx 0x1a0c86f80d4d66692072d7ad4246ca6f61b749030b930aad98e5309c16e8adc0
+	}
+
 	testTokenID, _ = dex.BipSymbolID("dextt.polygon")
 	usdcTokenID, _ = dex.BipSymbolID("usdc.polygon")
 
@@ -186,5 +191,5 @@ var (
 // simnet harness to populate swap contract and token addresses in
 // ContractAddresses and Tokens.
 func MaybeReadSimnetAddrs() {
-	dexeth.MaybeReadSimnetAddrsDir("polygon", ContractAddresses, Tokens[testTokenID].NetTokens[dex.Simnet])
+	dexeth.MaybeReadSimnetAddrsDir("polygon", ContractAddresses, MultiBalanceAddresses, Tokens[testTokenID].NetTokens[dex.Simnet])
 }

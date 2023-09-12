@@ -63,6 +63,11 @@ var (
 			dex.Testnet: common.HexToAddress("0x198463496037754564e9bea5418Bf4117Db0520C"),
 		},
 	}
+
+	MultiBalanceAddresses = map[dex.Network]common.Address{
+		// DRAFT TODO: Deploy to Ethereum mainnet.
+		dex.Testnet: common.HexToAddress("0x0F7F7C2979554B89F4Ca974fe0d382008888f699"), // tx 0x540d3e82888b18f89566a988712a7c2ecd45bd2df472f8dd689e319ae9fa4445
+	}
 )
 
 var v0Gases = &Gases{
