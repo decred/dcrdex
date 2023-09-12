@@ -3,6 +3,8 @@
 
 package dex
 
+import "strings"
+
 var symbolBipIDs map[string]uint32
 
 // BipSymbolID returns the asset ID associated with a given ticker symbol.
@@ -24,6 +26,17 @@ func BipSymbolID(symbol string) (uint32, bool) {
 // BipIDSymbol returns the BIP ID for a given symbol.
 func BipIDSymbol(id uint32) string {
 	return bipIDs[id]
+}
+
+// TokenSymbol returns the tokens raw symbol if this is compound symbol that
+// encodes the blockchain, or else the input is returned unaltered.
+// e.g. usdc.eth => usdc
+func TokenSymbol(symbol string) string {
+	parts := strings.Split(symbol, ".")
+	if len(parts) > 1 {
+		return parts[0]
+	}
+	return symbol
 }
 
 var bipIDs = map[uint32]string{

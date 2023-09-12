@@ -1454,9 +1454,8 @@ type Core struct {
 
 	ratesMtx        sync.RWMutex
 	fiatRateSources map[string]*commonRateSource
-	// stopFiatRateFetching will be used to shutdown fetchFiatExchangeRates
-	// goroutine when all rate sources have been disabled.
-	stopFiatRateFetching context.CancelFunc
+
+	reFiat chan struct{}
 
 	pendingWalletsMtx sync.RWMutex
 	pendingWallets    map[uint32]bool
@@ -1571,6 +1570,7 @@ func New(cfg *Config) (*Core, error) {
 		seedGenerationTime:  seedGenerationTime,
 
 		fiatRateSources: make(map[string]*commonRateSource),
+		reFiat:          make(chan struct{}, 1),
 		pendingWallets:  make(map[uint32]bool),
 
 		notes: make(chan asset.WalletNotification, 128),
@@ -1613,7 +1613,6 @@ func (c *Core) Run(ctx context.Context) {
 	// Skip rate fetch setup if on simnet. Rate fetching maybe enabled if
 	// desired.
 	if c.cfg.Net != dex.Simnet || c.cfg.SimnetFiatRates {
-		c.ratesMtx.Lock()
 		// Retrieve disabled fiat rate sources from database.
 		disabledSources, err := c.db.DisabledRateSources()
 		if err != nil {
@@ -1630,15 +1629,8 @@ func (c *Core) Run(ctx context.Context) {
 			}
 			c.fiatRateSources[token] = newCommonRateSource(rateFetcher)
 		}
-
-		// Start goroutine for fiat rate fetcher's if we have at least one source.
-		if len(c.fiatRateSources) != 0 {
-			c.fetchFiatExchangeRates()
-		} else {
-			c.log.Debug("no fiat rate source initialized")
-		}
-		c.ratesMtx.Unlock()
 	}
+	c.fetchFiatExchangeRates(ctx)
 
 	// Start bond supervisor.
 	c.wg.Add(1)
@@ -10260,14 +10252,7 @@ func (c *Core) findActiveOrder(oid order.OrderID) (*trackedTrade, error) {
 
 // fetchFiatExchangeRates starts the fiat rate fetcher goroutine and schedules
 // refresh cycles. Use under ratesMtx lock.
-func (c *Core) fetchFiatExchangeRates() {
-	if c.stopFiatRateFetching != nil {
-		c.log.Debug("Fiat exchange rate fetching is already enabled")
-		return
-	}
-	ctx, cancel := context.WithCancel(c.ctx)
-	c.stopFiatRateFetching = cancel
-
+func (c *Core) fetchFiatExchangeRates(ctx context.Context) {
 	c.log.Debug("starting fiat rate fetching")
 
 	c.wg.Add(1)
@@ -10279,32 +10264,39 @@ func (c *Core) fetchFiatExchangeRates() {
 			c.refreshFiatRates(ctx)
 
 			select {
+			case <-tick.C:
+			case <-c.reFiat:
 			case <-ctx.Done():
 				return
-			case <-tick.C:
+
 			}
 		}
 	}()
+}
+
+func (c *Core) fiatSources() []*commonRateSource {
+	c.ratesMtx.RLock()
+	defer c.ratesMtx.RUnlock()
+	sources := make([]*commonRateSource, 0, len(c.fiatRateSources))
+	for _, s := range c.fiatRateSources {
+		sources = append(sources, s)
+	}
+	return sources
 }
 
 // refreshFiatRates refreshes the fiat rates for rate sources whose values have
 // not been updated since fiatRateRequestInterval. It also checks if fiat rates
 // are expired and does some clean-up.
 func (c *Core) refreshFiatRates(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-
 	var wg sync.WaitGroup
 	supportedAssets := c.SupportedAssets()
-	c.ratesMtx.RLock()
-	for _, source := range c.fiatRateSources {
+	for _, source := range c.fiatSources() {
 		wg.Add(1)
 		go func(source *commonRateSource) {
 			defer wg.Done()
 			source.refreshRates(ctx, c.log, supportedAssets)
 		}(source)
 	}
-	c.ratesMtx.RUnlock()
 	wg.Wait()
 
 	// Remove expired rate source if any.
@@ -10340,13 +10332,11 @@ func (c *Core) fiatConversions() map[uint32]float64 {
 		}
 	}
 
-	c.ratesMtx.RLock()
-	defer c.ratesMtx.RUnlock()
 	fiatRatesMap := make(map[uint32]float64, len(supportedAssets))
 	for assetID := range assetIDs {
 		var rateSum float64
 		var sources int
-		for _, source := range c.fiatRateSources {
+		for _, source := range c.fiatSources() {
 			rateInfo := source.assetRate(assetID)
 			if rateInfo != nil && time.Since(rateInfo.lastUpdate) < fiatRateDataExpiry && rateInfo.rate > 0 {
 				sources++
@@ -10387,17 +10377,9 @@ func (c *Core) enableRateSource(source string) error {
 	rateSource := newCommonRateSource(rateFetcher)
 	c.fiatRateSources[source] = rateSource
 
-	// If this is our first fiat rate source, start fiat rate fetcher goroutine,
-	// else fetch rates.
-	if len(c.fiatRateSources) == 1 {
-		c.fetchFiatExchangeRates()
-	} else {
-		go func() {
-			supportedAssets := c.SupportedAssets() // not with ratesMtx locked!
-			ctx, cancel := context.WithTimeout(c.ctx, 4*time.Second)
-			defer cancel()
-			rateSource.refreshRates(ctx, c.log, supportedAssets)
-		}()
+	select {
+	case c.reFiat <- struct{}{}:
+	default:
 	}
 
 	// Update disabled fiat rate source.
@@ -10463,13 +10445,6 @@ func (c *Core) saveDisabledRateSources() {
 		if c.fiatRateSources[token] == nil {
 			disabled = append(disabled, token)
 		}
-	}
-
-	// Shutdown rate fetching if there are no exchange rate source.
-	if len(c.fiatRateSources) == 0 && c.stopFiatRateFetching != nil {
-		c.stopFiatRateFetching()
-		c.stopFiatRateFetching = nil
-		c.log.Debug("shutting down rate fetching")
 	}
 
 	err := c.db.SaveDisabledRateSources(disabled)

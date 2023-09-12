@@ -10209,8 +10209,6 @@ func TestFiatConversions(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
-	ctx, cancel := context.WithCancel(tCore.ctx)
-	tCore.stopFiatRateFetching = cancel
 
 	// No fiat rate source initialized
 	fiatRates := tCore.fiatConversions()
@@ -10227,7 +10225,7 @@ func TestFiatConversions(t *testing.T) {
 	tCore.wg.Add(1)
 	go func() {
 		defer tCore.wg.Done()
-		tCore.refreshFiatRates(ctx)
+		tCore.refreshFiatRates(tCtx)
 	}()
 	tCore.wg.Wait()
 

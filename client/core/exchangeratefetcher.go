@@ -23,6 +23,7 @@ const (
 	fiatRateRequestInterval = 12 * time.Minute
 	// fiatRateDataExpiry : Any data older than fiatRateDataExpiry will be discarded.
 	fiatRateDataExpiry = 60 * time.Minute
+	fiatRequestTimeout = time.Second * 5
 
 	// Tokens. Used to identify fiat rate source, source name must not contain a
 	// comma.
@@ -32,11 +33,33 @@ const (
 )
 
 var (
-	dcrDataURL     = "https://explorer.dcrdata.org/api/exchangerate"
+	dcrDataURL = "https://explorer.dcrdata.org/api/exchangerate"
+	// coinpaprika has two options. /tickers is for the top 2500 assets all in
+	// one request. /ticker/[slug] is for a single ticker. From testing
+	//    Single ticker request took 274.626125ms
+	//    Size of single ticker response: 0.733 kB
+	//    All tickers request took 47.651851ms
+	//    Size of all tickers response: 1828.863 kB
+	// Single ticker requests were < 1 kB, while all tickers were 1.8 MB, but
+	// the larger request was faster (without json decoding). Coinpaprika's,
+	// free tier allows up to 25k requests per month. For a
+	// fiatRateRequestInterval of 12 minutes, that 3600 requests per
+	// month for the all tickers request, and 3600 * N requests for N assets.
+	// So any more than 25000 / 3600 = 6.9 assets, and we can expect to run into
+	// rate limits. But the bandwidth of the full tickers request is kinda
+	// ridiculous too. Solution needed.
 	coinpaprikaURL = "https://api.coinpaprika.com/v1/tickers/%s"
-	messariURL     = "https://data.messari.io/api/v1/assets/%s/metrics/market-data"
-	btcBipID, _    = dex.BipSymbolID("btc")
-	dcrBipID, _    = dex.BipSymbolID("dcr")
+	// The best info I can find on Messari says
+	//    Without an API key requests are rate limited to 20 requests per minute
+	//    and 1000 requests per day.
+	// For a
+	// fiatRateRequestInterval of 12 minutes, to hit 20 requests per minute, we
+	// would need to have 20 * 12 = 480 assets. To hit 1000 requests per day,
+	// we would need 12 * 60 / (86,400 / 1000) = 8.33 assets. Very likely. So
+	// we're in a similar position to coinpaprika here too.
+	messariURL  = "https://data.messari.io/api/v1/assets/%s/metrics/market-data"
+	btcBipID, _ = dex.BipSymbolID("btc")
+	dcrBipID, _ = dex.BipSymbolID("dcr")
 )
 
 // fiatRateFetchers is the list of all supported fiat rate fetchers.
@@ -119,10 +142,11 @@ func newCommonRateSource(fetcher rateFetcher) *commonRateSource {
 // for sample request and response information.
 func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
 	fiatRates := make(map[uint32]float64)
-	for assetID, sa := range assets {
+	fetchRate := func(sa *SupportedAsset) {
+		assetID := sa.ID
 		if sa.Wallet == nil {
 			// we don't want to fetch rates for assets with no wallet.
-			continue
+			return
 		}
 
 		res := new(struct {
@@ -133,23 +157,35 @@ func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint3
 			} `json:"quotes"`
 		})
 
-		symbol := sa.Symbol
+		symbol := dex.TokenSymbol(sa.Symbol)
+		if symbol == "dextt" {
+			return
+		}
+
 		name := sa.Name
 		// TODO: Store these within the *SupportedAsset.
-		switch assetID {
-		case 60001: // usdc
-			symbol = "usdc"
+		switch symbol {
+		case "usdc":
 			name = "usd-coin"
+		case "polygon":
+			symbol = "matic"
+			name = "polygon"
 		}
 
 		reqStr := fmt.Sprintf(coinpaprikaURL, coinpapSlug(symbol, name))
 
+		ctx, cancel := context.WithTimeout(ctx, fiatRequestTimeout)
+		defer cancel()
+
 		if err := getRates(ctx, reqStr, res); err != nil {
-			log.Error(err)
-			continue
+			log.Errorf("Error getting fiat exchange rates from coinpaprika: %v", err)
+			return
 		}
 
 		fiatRates[assetID] = res.Quotes.Currency.Price
+	}
+	for _, sa := range assets {
+		fetchRate(sa)
 	}
 	return fiatRates
 }
@@ -191,10 +227,11 @@ func fetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 // sample request and response information.
 func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
 	fiatRates := make(map[uint32]float64)
-	for assetID, asset := range assets {
-		if asset.Wallet == nil {
+	fetchRate := func(sa *SupportedAsset) {
+		assetID := sa.ID
+		if sa.Wallet == nil {
 			// we don't want to fetch rate for assets with no wallet.
-			continue
+			return
 		}
 
 		res := new(struct {
@@ -205,22 +242,26 @@ func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 			} `json:"data"`
 		})
 
-		slug := strings.ToLower(asset.Symbol)
-
-		// TODO: Store these within the *SupportedAsset.
-		switch assetID {
-		case 60001: // usdc
-			slug = "usdc"
+		slug := dex.TokenSymbol(sa.Symbol)
+		if slug == "dextt" {
+			return
 		}
 
 		reqStr := fmt.Sprintf(messariURL, slug)
 
+		ctx, cancel := context.WithTimeout(ctx, fiatRequestTimeout)
+		defer cancel()
+
 		if err := getRates(ctx, reqStr, res); err != nil {
-			log.Error(err)
-			continue
+			log.Errorf("Error getting fiat exchange rates from messari: %v", err)
+			return
 		}
 
 		fiatRates[assetID] = res.Data.MarketData.Price
+	}
+
+	for _, sa := range assets {
+		fetchRate(sa)
 	}
 	return fiatRates
 }
@@ -244,7 +285,7 @@ func getRates(ctx context.Context, url string, thing interface{}) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response, got status code %d", resp.StatusCode)
+		return fmt.Errorf("error %d fetching %q", resp.StatusCode, url)
 	}
 
 	reader := io.LimitReader(resp.Body, 1<<20)
