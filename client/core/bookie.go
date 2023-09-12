@@ -184,13 +184,16 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 
 	marketID := marketName(b.base, b.quote)
 	matchSummaries := b.AddRecentMatches(note.MatchSummary, note.EndStamp)
-	if len(note.MatchSummary) > 0 {
-		b.send(&BookUpdate{
-			Action:   EpochMatchSummary,
-			MarketID: marketID,
-			Payload:  matchSummaries,
-		})
-	}
+
+	b.send(&BookUpdate{
+		Action:   EpochMatchSummary,
+		MarketID: marketID,
+		Payload: &EpochMatchSummaryPayload{
+			MatchSummaries: matchSummaries,
+			Epoch:          note.Epoch,
+		},
+	})
+
 	for durStr, cache := range b.candleCaches {
 		c, ok := cache.addCandle(&note.Candle)
 		if !ok {

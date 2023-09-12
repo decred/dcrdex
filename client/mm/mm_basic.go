@@ -716,8 +716,6 @@ func (m *basicMarketMaker) handleNotification(note core.Notification) {
 			return
 		}
 		m.processTrade(ord)
-	case *core.EpochNotification:
-		go m.rebalance(n.Epoch)
 	case *core.FiatRatesNote:
 		go m.processFiatRates(n.FiatRates)
 	}
@@ -803,11 +801,11 @@ func (m *basicMarketMaker) run() {
 		defer wg.Done()
 		for {
 			select {
-			case <-bookFeed.Next():
-				// Really nothing to do with the updates. We just need to keep
-				// the subscription live in order to get a mid-gap rate when
-				// needed. We could use this to trigger rebalances mid-epoch
-				// though, which I think would provide some advantage.
+			case n := <-bookFeed.Next():
+				if n.Action == core.EpochMatchSummary {
+					payload := n.Payload.(*core.EpochMatchSummaryPayload)
+					m.rebalance(payload.Epoch + 1)
+				}
 			case <-m.ctx.Done():
 				return
 			}

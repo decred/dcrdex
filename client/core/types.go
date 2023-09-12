@@ -743,6 +743,11 @@ type CandlesPayload struct {
 	Candles      []msgjson.Candle `json:"candles"`
 }
 
+type EpochMatchSummaryPayload struct {
+	MatchSummaries []*orderbook.MatchSummary `json:"matchSummaries"`
+	Epoch          uint64                    `json:"epoch"`
+}
+
 // dexAccount is the core type to represent the client's account information for
 // a DEX.
 type dexAccount struct {

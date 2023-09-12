@@ -1812,7 +1812,7 @@ export default class MarketsPage extends BasePage {
   }
 
   handleEpochMatchSummary (data: BookUpdate) {
-    this.addRecentMatches(data.payload)
+    this.addRecentMatches(data.payload.matchSummaries)
     this.refreshRecentMatchesTable()
   }
 
