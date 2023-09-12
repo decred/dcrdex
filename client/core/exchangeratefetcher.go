@@ -157,7 +157,10 @@ func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint3
 			} `json:"quotes"`
 		})
 
-		symbol := tokenSymbol(sa.Symbol)
+		symbol := dex.TokenSymbol(sa.Symbol)
+		if symbol == "dextt" {
+			return
+		}
 
 		name := sa.Name
 		// TODO: Store these within the *SupportedAsset.
@@ -239,7 +242,10 @@ func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 			} `json:"data"`
 		})
 
-		slug := tokenSymbol(sa.Symbol)
+		slug := dex.TokenSymbol(sa.Symbol)
+		if slug == "dextt" {
+			return
+		}
 
 		reqStr := fmt.Sprintf(messariURL, slug)
 
@@ -284,12 +290,4 @@ func getRates(ctx context.Context, url string, thing interface{}) error {
 
 	reader := io.LimitReader(resp.Body, 1<<20)
 	return json.NewDecoder(reader).Decode(thing)
-}
-
-func tokenSymbol(symbol string) string {
-	parts := strings.Split(symbol, ".")
-	if len(parts) > 1 {
-		return parts[0]
-	}
-	return symbol
 }
