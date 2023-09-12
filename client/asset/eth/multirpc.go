@@ -995,7 +995,7 @@ func allRPCErrorsAreFails(err error) (discard, propagate, fail bool) {
 	return false, false, true
 }
 
-func errorFilter(err error, matches ...interface{}) bool {
+func errorFilter(err error, matches ...any) bool {
 	errStr := err.Error()
 	for _, mi := range matches {
 		var s string

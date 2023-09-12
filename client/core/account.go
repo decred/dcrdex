@@ -352,7 +352,7 @@ func (c *Core) UpdateCert(host string, cert []byte) error {
 // UpdateDEXHost updates the host for a connection to a dex. The dex at oldHost
 // and newHost must be the same dex, which means that the dex at both hosts use
 // the same public key.
-func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interface{}) (*Exchange, error) {
+func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (*Exchange, error) {
 	if oldHost == newHost {
 		return nil, errors.New("old host and new host are the same")
 	}

@@ -138,7 +138,7 @@ func (c *Core) AckNotes(ids []dex.Bytes) {
 	}
 }
 
-func (c *Core) formatDetails(topic Topic, args ...interface{}) (translatedSubject, details string) {
+func (c *Core) formatDetails(topic Topic, args ...any) (translatedSubject, details string) {
 	trans, found := c.locale[topic]
 	if !found {
 		c.log.Errorf("No translation found for topic %q", topic)

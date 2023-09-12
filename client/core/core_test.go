@@ -2012,7 +2012,7 @@ func TestRegister(t *testing.T) {
 		_, err = tCore.Register(form)
 	}
 
-	getNotification := func(tag string) interface{} {
+	getNotification := func(tag string) any {
 		t.Helper()
 		select {
 		case n := <-ch.C:
@@ -7567,7 +7567,7 @@ func TestHandlePenaltyMsg(t *testing.T) {
 	tests := []struct {
 		name    string
 		key     *secp256k1.PrivateKey
-		payload interface{}
+		payload any
 		wantErr bool
 	}{{
 		name:    "ok",

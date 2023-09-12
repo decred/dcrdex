@@ -188,7 +188,7 @@ type BlockUpdate struct {
 type ConnectionError error
 
 // NewConnectionError is a constructor for a ConnectionError.
-func NewConnectionError(s string, a ...interface{}) ConnectionError {
+func NewConnectionError(s string, a ...any) ConnectionError {
 	return ConnectionError(fmt.Errorf(s, a...))
 }
 

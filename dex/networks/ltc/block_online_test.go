@@ -58,7 +58,7 @@ func TestOnlineDeserializeBlock(t *testing.T) {
 	isTestNet := gbci.Chain == "test"
 	t.Log("Network:", gbci.Chain)
 
-	makeParams := func(args ...interface{}) []json.RawMessage {
+	makeParams := func(args ...any) []json.RawMessage {
 		params := make([]json.RawMessage, 0, len(args))
 		for i := range args {
 			p, err := json.Marshal(args[i])

@@ -10,14 +10,14 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-func loadINIConfig(cfgPathOrData interface{}) (*ini.File, error) {
+func loadINIConfig(cfgPathOrData any) (*ini.File, error) {
 	loadOpts := ini.LoadOptions{Insensitive: true}
 	return ini.LoadSources(loadOpts, cfgPathOrData)
 }
 
 // Parse returns a collection of all key-value options in the provided config
 // file path or []byte data.
-func Parse(cfgPathOrData interface{}) (map[string]string, error) {
+func Parse(cfgPathOrData any) (map[string]string, error) {
 	cfgFile, err := loadINIConfig(cfgPathOrData)
 	if err != nil {
 		return nil, err
@@ -33,7 +33,7 @@ func Parse(cfgPathOrData interface{}) (map[string]string, error) {
 
 // ParseInto parses config options from the provided config file path or []byte
 // data into the specified interface.
-func ParseInto(cfgPathOrData, obj interface{}) error {
+func ParseInto(cfgPathOrData, obj any) error {
 	cfgFile, err := loadINIConfig(cfgPathOrData)
 	if err != nil {
 		return err
@@ -58,14 +58,14 @@ func Data(settings map[string]string) []byte {
 
 // Unmapify parses config options from the provided settings map into the
 // specified interface.
-func Unmapify(settings map[string]string, obj interface{}) error {
+func Unmapify(settings map[string]string, obj any) error {
 	cfgData := Data(settings)
 	return ParseInto(cfgData, obj)
 }
 
 // Mapify takes an interface with ini tags, and parses it into
 // a settings map. obj must be a pointer to a struct.
-func Mapify(obj interface{}) (map[string]string, error) {
+func Mapify(obj any) (map[string]string, error) {
 	cfg := ini.Empty()
 	err := ini.ReflectFrom(cfg, obj)
 	if err != nil {

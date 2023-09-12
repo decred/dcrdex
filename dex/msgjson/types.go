@@ -288,7 +288,7 @@ func (e Error) String() string {
 }
 
 // NewError is a constructor for an Error.
-func NewError(code int, format string, a ...interface{}) *Error {
+func NewError(code int, format string, a ...any) *Error {
 	return &Error{
 		Code:    code,
 		Message: fmt.Sprintf(format, a...),
@@ -359,7 +359,7 @@ func DecodeMessage(b []byte) (*Message, error) {
 }
 
 // NewRequest is the constructor for a Request-type *Message.
-func NewRequest(id uint64, route string, payload interface{}) (*Message, error) {
+func NewRequest(id uint64, route string, payload any) (*Message, error) {
 	if id == 0 {
 		return nil, fmt.Errorf("id = 0 not allowed for a request-type message")
 	}
@@ -379,7 +379,7 @@ func NewRequest(id uint64, route string, payload interface{}) (*Message, error) 
 }
 
 // NewResponse encodes the result and creates a Response-type *Message.
-func NewResponse(id uint64, result interface{}, rpcErr *Error) (*Message, error) {
+func NewResponse(id uint64, result any, rpcErr *Error) (*Message, error) {
 	if id == 0 {
 		return nil, fmt.Errorf("id = 0 not allowed for response-type message")
 	}
@@ -421,7 +421,7 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 }
 
 // NewNotification encodes the payload and creates a Notification-type *Message.
-func NewNotification(route string, payload interface{}) (*Message, error) {
+func NewNotification(route string, payload any) (*Message, error) {
 	if route == "" {
 		return nil, fmt.Errorf("empty string not allowed for route of notification-type message")
 	}
@@ -439,13 +439,13 @@ func NewNotification(route string, payload interface{}) (*Message, error) {
 // Unmarshal unmarshals the Payload field into the provided interface. Note that
 // the payload interface must contain a pointer. If it is a pointer to a
 // pointer, it may become nil for a Message.Payload of []byte("null").
-func (msg *Message) Unmarshal(payload interface{}) error {
+func (msg *Message) Unmarshal(payload any) error {
 	return json.Unmarshal(msg.Payload, payload)
 }
 
 // UnmarshalResult is a convenience method for decoding the Result field of a
 // ResponsePayload.
-func (msg *Message) UnmarshalResult(result interface{}) error {
+func (msg *Message) UnmarshalResult(result any) error {
 	resp, err := msg.Response()
 	if err != nil {
 		return err

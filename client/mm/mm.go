@@ -224,7 +224,7 @@ func (m *MarketMaker) loginAndUnlockWallets(pw []byte, cfgs []*BotConfig) error 
 	if err != nil {
 		return fmt.Errorf("failed to login: %w", err)
 	}
-	unlocked := make(map[uint32]interface{})
+	unlocked := make(map[uint32]any)
 	for _, cfg := range cfgs {
 		if _, done := unlocked[cfg.BaseAsset]; !done {
 			err := m.core.OpenWallet(cfg.BaseAsset, pw)

@@ -24,7 +24,7 @@ import (
 
 var tLogger = dex.StdOutLogger("conn_TEST", dex.LevelTrace)
 
-func makeRequest(id uint64, route string, msg interface{}) *msgjson.Message {
+func makeRequest(id uint64, route string, msg any) *msgjson.Message {
 	req, _ := msgjson.NewRequest(id, route, msg)
 	return req
 }
@@ -62,7 +62,7 @@ func TestWsConn(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 
 	pingCh := make(chan struct{})
-	readPumpCh := make(chan interface{})
+	readPumpCh := make(chan any)
 	writePumpCh := make(chan *msgjson.Message)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

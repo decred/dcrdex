@@ -47,7 +47,7 @@ type RemoteOrderBook interface {
 // CachedOrderNote represents a cached order not entry.
 type cachedOrderNote struct {
 	Route     string
-	OrderNote interface{}
+	OrderNote any
 }
 
 // rateSell provides the rate and book side information about an order that is
@@ -154,7 +154,7 @@ func (ob *OrderBook) setSeq(seq uint64) {
 }
 
 // cacheOrderNote caches an order note.
-func (ob *OrderBook) cacheOrderNote(route string, entry interface{}) error {
+func (ob *OrderBook) cacheOrderNote(route string, entry any) error {
 	note := new(cachedOrderNote)
 
 	switch route {

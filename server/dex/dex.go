@@ -228,7 +228,7 @@ func marketSubSysName(name string) string {
 	return fmt.Sprintf("Market[%s]", name)
 }
 
-func (dm *DEX) handleDEXConfig(interface{}) (interface{}, error) {
+func (dm *DEX) handleDEXConfig(any) (any, error) {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()
 	return dm.configResp.configEnc, nil
@@ -263,7 +263,7 @@ type Bonder interface {
 //  9. Create and start the comms server.
 func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	var subsystems []subsystem
-	startSubSys := func(name string, rc interface{}) (err error) {
+	startSubSys := func(name string, rc any) (err error) {
 		subsys := subsystem{name: name}
 		switch st := rc.(type) {
 		case dex.Runner:

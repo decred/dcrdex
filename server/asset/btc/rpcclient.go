@@ -231,7 +231,7 @@ type GetBlockVerboseResult struct {
 }
 
 func (rc *RPCClient) GetRawBlock(blockHash *chainhash.Hash) ([]byte, error) {
-	arg := interface{}(0)
+	arg := any(0)
 	if rc.booleanGetBlockRPC {
 		arg = false
 	}
@@ -285,7 +285,7 @@ func (rc *RPCClient) getBlockWithVerboseHeader(blockHash *chainhash.Hash) (*wire
 
 // GetBlockVerbose fetches verbose block data for the block with the given hash.
 func (rc *RPCClient) GetBlockVerbose(blockHash *chainhash.Hash) (*GetBlockVerboseResult, error) {
-	arg := interface{}(1)
+	arg := any(1)
 	if rc.booleanGetBlockRPC {
 		arg = true
 	}
@@ -539,18 +539,18 @@ func (rc *RPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 // Call is used to marshal parameters and send requests to the RPC server via
 // (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result will be
 // marshaled into `thing`.
-func (rc *RPCClient) Call(method string, args []interface{}, thing interface{}) error {
+func (rc *RPCClient) Call(method string, args []any, thing any) error {
 	return rc.call(method, args, thing)
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and
 // sent via RawRequest.
-type anylist []interface{}
+type anylist []any
 
 // call is used internally to marshal parameters and send requests to the RPC
 // server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
 // will be marshaled into `thing`.
-func (rc *RPCClient) call(method string, args anylist, thing interface{}) error {
+func (rc *RPCClient) call(method string, args anylist, thing any) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])

@@ -1970,7 +1970,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
 
-	fail := func(s string, a ...interface{}) ([]asset.Receipt, asset.Coin, uint64, error) {
+	fail := func(s string, a ...any) ([]asset.Receipt, asset.Coin, uint64, error) {
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
@@ -2057,7 +2057,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
 
-	fail := func(s string, a ...interface{}) ([]asset.Receipt, asset.Coin, uint64, error) {
+	fail := func(s string, a ...any) ([]asset.Receipt, asset.Coin, uint64, error) {
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 

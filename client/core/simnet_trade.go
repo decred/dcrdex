@@ -96,7 +96,7 @@ type assetConfig struct {
 	id               uint32
 	symbol           string
 	conversionFactor uint64
-	valFmt           func(interface{}) string
+	valFmt           func(any) string
 	isToken          bool
 }
 
@@ -201,8 +201,8 @@ func RunSimulationTest(cfg *SimulationConfig) error {
 	if cfg.RegistrationAsset == cfg.QuoteSymbol {
 		regAsset = quoteID
 	}
-	valFormatter := func(valFmt func(uint64) string) func(interface{}) string {
-		return func(vi interface{}) string {
+	valFormatter := func(valFmt func(uint64) string) func(any) string {
+		return func(vi any) string {
 			var vu uint64
 			var negative bool
 			switch vt := vi.(type) {

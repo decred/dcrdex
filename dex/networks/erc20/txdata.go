@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func parseCallData(method string, data []byte, expArgs int) ([]interface{}, error) {
+func parseCallData(method string, data []byte, expArgs int) ([]any, error) {
 	decoded, err := dexeth.ParseCallData(data, ERC20ABI)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)

@@ -42,7 +42,7 @@ func (coins dbCoins) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (coins *dbCoins) Scan(src interface{}) error {
+func (coins *dbCoins) Scan(src any) error {
 	b := src.([]byte)
 	if len(b) == 0 {
 		*coins = dbCoins{}

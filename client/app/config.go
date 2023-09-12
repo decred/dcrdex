@@ -213,7 +213,7 @@ var DefaultConfig = Config{
 // ParseCLIConfig parses the command-line arguments into the provided struct
 // with go-flags tags. If the --help flag has been passed, the struct is
 // described back to the terminal and the program exits using os.Exit.
-func ParseCLIConfig(cfg interface{}) error {
+func ParseCLIConfig(cfg any) error {
 	preParser := flags.NewParser(cfg, flags.HelpFlag|flags.PassDoubleDash)
 	_, flagerr := preParser.Parse()
 
@@ -251,7 +251,7 @@ func ResolveCLIConfigPaths(cfg *Config) (appData, configPath string) {
 
 // ParseFileConfig parses the INI file into the provided struct with go-flags
 // tags. The CLI args are then parsed, and take precedence over the file values.
-func ParseFileConfig(path string, cfg interface{}) error {
+func ParseFileConfig(path string, cfg any) error {
 	parser := flags.NewParser(cfg, flags.Default)
 	err := flags.NewIniParser(parser).ParseFile(path)
 	if err != nil {

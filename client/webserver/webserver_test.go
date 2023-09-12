@@ -91,13 +91,13 @@ type TCore struct {
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
 func (c *TCore) Exchanges() map[string]*core.Exchange         { return nil }
 func (c *TCore) Exchange(host string) (*core.Exchange, error) { return nil, nil }
-func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
+func (c *TCore) GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error) {
 	return nil, c.getDEXConfigErr // TODO along with test for apiUser / Exchanges() / User()
 }
-func (c *TCore) AddDEX(dexAddr string, certI interface{}) error {
+func (c *TCore) AddDEX(dexAddr string, certI any) error {
 	return nil
 }
-func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
+func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI any) (*core.Exchange, bool, error) {
 	return nil, false, nil
 }
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
@@ -107,7 +107,7 @@ func (c *TCore) PostBond(r *core.PostBondForm) (*core.PostBondResult, error) {
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	return c.postBondErr
 }
-func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
+func (c *TCore) EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error) {
 	return 0, nil
 }
 func (c *TCore) BondsFeeBuffer(assetID uint32) (uint64, error) {
@@ -259,7 +259,7 @@ func (c *TCore) RecoverWallet(uint32, []byte, bool) error {
 func (c *TCore) UpdateCert(string, []byte) error {
 	return nil
 }
-func (c *TCore) UpdateDEXHost(string, string, []byte, interface{}) (*core.Exchange, error) {
+func (c *TCore) UpdateDEXHost(string, string, []byte, any) (*core.Exchange, error) {
 	return nil, nil
 }
 func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
@@ -398,7 +398,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 	return s, c, shutdown
 }
 
-func ensureResponse(t *testing.T, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}, cookies map[string]string) {
+func ensureResponse(t *testing.T, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body any, cookies map[string]string) {
 	t.Helper()
 	var err error
 	reader.msg, err = json.Marshal(body)
@@ -496,7 +496,7 @@ func TestConnectBindError(t *testing.T) {
 
 func TestAPIRegister(t *testing.T) {
 	writer := new(TWriter)
-	var body interface{}
+	var body any
 	reader := new(TReader)
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
@@ -531,7 +531,7 @@ func TestAPIRegister(t *testing.T) {
 
 func TestAPILogin(t *testing.T) {
 	writer := new(TWriter)
-	var body interface{}
+	var body any
 	reader := new(TReader)
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
@@ -568,7 +568,7 @@ func TestAPISendAndAPIWithdraw(t *testing.T) {
 
 func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
 	writer := new(TWriter)
-	var body interface{}
+	var body any
 	reader := new(TReader)
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
@@ -626,7 +626,7 @@ func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
 
 func TestAPIInit(t *testing.T) {
 	writer := new(TWriter)
-	var body interface{}
+	var body any
 	reader := new(TReader)
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
@@ -661,7 +661,7 @@ func TestAPIInit(t *testing.T) {
 
 func TestAPINewWallet(t *testing.T) {
 	writer := new(TWriter)
-	var body interface{}
+	var body any
 	reader := new(TReader)
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
@@ -776,7 +776,7 @@ func TestGetOrderIDCtx(t *testing.T) {
 	}
 
 	// Test some negative paths
-	for name, v := range map[string]interface{}{
+	for name, v := range map[string]any{
 		"nil":          nil,
 		"int":          5,
 		"wrong length": "abc",

@@ -76,7 +76,7 @@ func (e *Error) Unwrap() error {
 }
 
 // newError is a constructor for a new Error.
-func newError(code int, s string, a ...interface{}) error {
+func newError(code int, s string, a ...any) error {
 	return &Error{
 		code: code,
 		err:  fmt.Errorf(s, a...), // s may contain a %w verb to wrap an error

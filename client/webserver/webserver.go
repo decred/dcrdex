@@ -115,9 +115,9 @@ type clientCore interface {
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
-	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
-	AddDEX(dexAddr string, certI interface{}) error
-	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
+	GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error)
+	AddDEX(dexAddr string, certI any) error
+	DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
@@ -136,13 +136,13 @@ type clientCore interface {
 	ExportSeed(pw []byte) ([]byte, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
-	EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error)
+	EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error)
 	BondsFeeBuffer(assetID uint32) (uint64, error)
 	PreAccelerateOrder(oidB dex.Bytes) (*core.PreAccelerate, error)
 	AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error)
 	AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, error)
 	UpdateCert(host string, cert []byte) error
-	UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interface{}) (*core.Exchange, error)
+	UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (*core.Exchange, error)
 	WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error)
 	ToggleRateSourceStatus(src string, disable bool) error
 	FiatRateSources() map[string]bool
@@ -835,7 +835,7 @@ func (s *WebServer) readNotifications(ctx context.Context) {
 }
 
 // readPost unmarshals the request body into the provided interface.
-func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
+func readPost(w http.ResponseWriter, r *http.Request, thing any) bool {
 	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -1004,13 +1004,13 @@ func fileServer(r chi.Router, pathPrefix, siteDir, subDir, forceContentType stri
 
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
-func writeJSON(w http.ResponseWriter, thing interface{}, indent bool) {
+func writeJSON(w http.ResponseWriter, thing any, indent bool) {
 	writeJSONWithStatus(w, thing, http.StatusOK, indent)
 }
 
 // writeJSON writes marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
-func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int, indent bool) {
+func writeJSONWithStatus(w http.ResponseWriter, thing any, code int, indent bool) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	b, err := json.Marshal(thing)
 	if err != nil {
@@ -1036,6 +1036,6 @@ type chiLogger struct {
 	dex.Logger
 }
 
-func (l *chiLogger) Print(v ...interface{}) {
+func (l *chiLogger) Print(v ...any) {
 	l.Trace(v...)
 }

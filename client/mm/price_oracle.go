@@ -206,7 +206,7 @@ func coinpapSlug(symbol, name string) string {
 	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
 }
 
-func getRates(ctx context.Context, url string, thing interface{}) error {
+func getRates(ctx context.Context, url string, thing any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err

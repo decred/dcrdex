@@ -52,7 +52,7 @@ type zGetAddressForAccountResult struct {
 
 // z_getaddressforaccount account ( ["receiver_type", ...] diversifier_index )
 func zGetAddressForAccount(c rpcCaller, acctNumber uint32, addrTypes []string) (unified *zGetAddressForAccountResult, err error) {
-	return unified, c.CallRPC(methodZGetAddressForAccount, []interface{}{acctNumber, addrTypes}, &unified)
+	return unified, c.CallRPC(methodZGetAddressForAccount, []any{acctNumber, addrTypes}, &unified)
 }
 
 type unifiedReceivers struct {
@@ -63,7 +63,7 @@ type unifiedReceivers struct {
 
 // z_listunifiedreceivers unified_address
 func zGetUnifiedReceivers(c rpcCaller, unifiedAddr string) (receivers *unifiedReceivers, err error) {
-	return receivers, c.CallRPC(methodZListUnifiedReceivers, []interface{}{unifiedAddr}, &receivers)
+	return receivers, c.CallRPC(methodZListUnifiedReceivers, []any{unifiedAddr}, &receivers)
 }
 
 func zGetBalanceForAccount(c rpcCaller, acct uint32) (uint64, error) {
@@ -76,7 +76,7 @@ func zGetBalanceForAccount(c rpcCaller, acct uint32) (uint64, error) {
 			} `json:"orchard"`
 		} `json:"pools"`
 	}
-	return res.Pools.Orchard.ValueZat, c.CallRPC(methodZGetBalanceForAccount, []interface{}{acct, minConf}, &res)
+	return res.Pools.Orchard.ValueZat, c.CallRPC(methodZGetBalanceForAccount, []any{acct, minConf}, &res)
 }
 
 type zValidateAddressResult struct {
@@ -92,7 +92,7 @@ type zValidateAddressResult struct {
 
 // z_validateaddress "address"
 func zValidateAddress(c rpcCaller, addr string) (res *zValidateAddressResult, err error) {
-	return res, c.CallRPC(methodZValidateAddress, []interface{}{addr}, &res)
+	return res, c.CallRPC(methodZValidateAddress, []any{addr}, &res)
 }
 
 type zSendManyRecipient struct {
@@ -124,7 +124,7 @@ const (
 // z_sendmany "fromaddress" [{"address":... ,"amount":...},...] ( minconf ) ( fee ) ( privacyPolicy )
 func zSendMany(c rpcCaller, fromAddress string, recips []*zSendManyRecipient, priv privacyPolicy) (operationID string, err error) {
 	const minConf, fee = 1, 0.00001
-	return operationID, c.CallRPC(methodZSendMany, []interface{}{fromAddress, recips, minConf, fee, priv}, &operationID)
+	return operationID, c.CallRPC(methodZSendMany, []any{fromAddress, recips, minConf, fee, priv}, &operationID)
 }
 
 type operationStatus struct {
@@ -159,7 +159,7 @@ const ErrEmptyOpResults = dex.ErrorKind("no z_getoperationstatus results")
 // z_getoperationresult (["operationid", ... ])
 func zGetOperationResult(c rpcCaller, operationID string) (s *operationStatus, err error) {
 	var res []*operationStatus
-	if err := c.CallRPC(methodZGetOperationResult, []interface{}{[]string{operationID}}, &res); err != nil {
+	if err := c.CallRPC(methodZGetOperationResult, []any{[]string{operationID}}, &res); err != nil {
 		return nil, err
 	}
 	if len(res) == 0 {

@@ -125,7 +125,7 @@ type MsgHandler func(Link, *msgjson.Message) *msgjson.Error
 var rpcRoutes = make(map[string]MsgHandler)
 
 // HTTPHandler describes a handler for an HTTP route.
-type HTTPHandler func(thing interface{}) (interface{}, error)
+type HTTPHandler func(thing any) (any, error)
 
 // httpRoutes maps HTTP routes to the handlers.
 var httpRoutes = make(map[string]HTTPHandler)
@@ -841,7 +841,7 @@ func routeHandler(route string) func(w http.ResponseWriter, r *http.Request) {
 
 // writeJSONWithStatus writes the JSON response with the specified HTTP response
 // code.
-func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
+func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	b, err := json.Marshal(thing)
 	if err != nil {
