@@ -59,7 +59,7 @@ func getSyncAddress(syncDir string) (addr, killKey string, err error) {
 	return lines[0], lines[1], nil
 }
 
-// sendKillSignal yeets a kill command to any address in the sync file.
+// sendKillSignal sends a kill command to any address in the sync file.
 func sendKillSignal(syncDir string) {
 	addr, killKey, err := getSyncAddress(syncDir)
 	if err != nil {
@@ -103,7 +103,7 @@ func synchronize(syncDir string) (startServer bool, err error) {
 			// Other instance will open the window.
 			return false, nil
 		} else {
-			return false, fmt.Errorf("sync server unexpected resonse code %d: %q", resp.StatusCode, http.StatusText(resp.StatusCode))
+			return false, fmt.Errorf("sync server unexpected response code %d: %q", resp.StatusCode, http.StatusText(resp.StatusCode))
 		}
 	}
 	// Error will probably be something like "...: no route to host", but we'll
@@ -159,7 +159,6 @@ type syncServer struct {
 }
 
 func (s *syncServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
 	switch r.URL.Path {
 	case "/":
 		w.WriteHeader(http.StatusOK)
@@ -193,5 +192,4 @@ func (s *syncServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		log.Errorf("syncServer received a request with an unknown path %q", r.URL.Path)
 	}
-
 }
