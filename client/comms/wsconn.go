@@ -165,28 +165,26 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 		return nil, fmt.Errorf("ping wait cannot be negative")
 	}
 
-	var tlsConfig *tls.Config
+	uri, err := url.Parse(cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing URL: %w", err)
+	}
+
+	rootCAs, _ := x509.SystemCertPool()
+	if rootCAs == nil {
+		rootCAs = x509.NewCertPool()
+	}
+
 	if len(cfg.Cert) > 0 {
-
-		uri, err := url.Parse(cfg.URL)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing URL: %w", err)
-		}
-
-		rootCAs, _ := x509.SystemCertPool()
-		if rootCAs == nil {
-			rootCAs = x509.NewCertPool()
-		}
-
 		if ok := rootCAs.AppendCertsFromPEM(cfg.Cert); !ok {
 			return nil, ErrInvalidCert
 		}
+	}
 
-		tlsConfig = &tls.Config{
-			RootCAs:    rootCAs,
-			MinVersion: tls.VersionTLS12,
-			ServerName: uri.Hostname(),
-		}
+	tlsConfig := &tls.Config{
+		RootCAs:    rootCAs,
+		MinVersion: tls.VersionTLS12,
+		ServerName: uri.Hostname(),
 	}
 
 	return &wsConn{
@@ -229,7 +227,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	if err != nil {
 		if isErrorInvalidCert(err) {
 			conn.setConnectionStatus(InvalidCert)
-			if conn.tlsCfg == nil {
+			if len(conn.cfg.Cert) == 0 {
 				return dex.NewError(ErrCertRequired, err.Error())
 			}
 			return dex.NewError(ErrInvalidCert, err.Error())
