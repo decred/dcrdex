@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -25,7 +26,6 @@ const (
 	defaultBondAsset = 42 // DCR
 
 	maxBondedMult    = 4
-	bondOverlap      = 2
 	bondTickInterval = 20 * time.Second
 )
 
@@ -202,17 +202,13 @@ func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 		if dc.acct.targetTier == 0 {
 			return
 		}
+
 		bondAsset := bondAssets[dc.acct.bondAsset]
 		if bondAsset == nil {
 			// Logged at login auth.
 			return
 		}
-		inBonds, _ := dc.bondTotalInternal(bondAsset.ID)
-		totalReserves := bondOverlap * dc.acct.targetTier * bondAsset.Amt
-		var future uint64
-		if inBonds < totalReserves {
-			future = totalReserves - inBonds
-		}
+		future := c.minBondReserves(dc, bondAsset)
 		reserves[bondAsset.ID] = append(reserves[bondAsset.ID], future)
 	}
 
@@ -260,6 +256,89 @@ func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 		}
 		bonder.SetBondReserves(paddedReserves)
 	}
+}
+
+// minBondReserveTiers calculates the minimum number of tiers that we need to
+// reserve funds for. minBondReserveTiers must be called with the authMtx
+// RLocked.
+func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
+	acct, targetTier := dc.acct, dc.acct.targetTier
+	if targetTier == 0 {
+		return 0
+	}
+	// Keep a list of tuples of [weakTime, bondStrength]. Later, we'll checks
+	// these against expired bonds, to see how many tiers we can expect to have
+	// refunded funds avilable for.
+	activeTiers := make([][2]uint64, 0)
+	dexCfg := dc.config()
+	bondExpiry := dexCfg.BondExpiry
+	pBuffer := uint64(pendingBuffer(c.net))
+	var tierSum uint64
+	for _, bond := range append(acct.pendingBonds, acct.bonds...) {
+		weakTime := bond.LockTime - bondExpiry - pBuffer
+		ba := dexCfg.BondAssets[dex.BipIDSymbol(bond.AssetID)]
+		if ba == nil {
+			// Bond asset no longer supported Can't calculate strength. Consdier
+			// it strength one.
+			activeTiers = append(activeTiers, [2]uint64{weakTime, 1})
+			continue
+		}
+
+		tiers := bond.Amount / ba.Amt
+		// We won't count any active bond strength > our tier target.
+		if tiers > targetTier-tierSum {
+			tiers = targetTier - tierSum
+		}
+		tierSum += tiers
+		activeTiers = append(activeTiers, [2]uint64{weakTime, tiers})
+		if tierSum == targetTier {
+			break
+		}
+	}
+	// If our active+pending bonds don't cover our target tier for some reason,
+	// we need to add the missing bond strength.
+	reserveTiers := targetTier - tierSum
+	sort.Slice(activeTiers, func(i, j int) bool {
+		return activeTiers[i][0] < activeTiers[j][1]
+	})
+	sort.Slice(acct.expiredBonds, func(i, j int) bool { // probably already is sorted, but whatever
+		return acct.expiredBonds[i].LockTime < acct.expiredBonds[j].LockTime
+	})
+	sBuffer := uint64(spendableDelay(c.net))
+out:
+	for _, bond := range acct.expiredBonds {
+		if bond.AssetID != bondAsset.ID {
+			continue
+		}
+		strength := bond.Amount / bondAsset.Amt
+		refundableTime := bond.LockTime + sBuffer
+		for i, pair := range activeTiers {
+			weakTime, tiers := pair[0], pair[1]
+			if tiers == 0 {
+				continue
+			}
+			if refundableTime >= weakTime {
+				// Everything is time-sorted. If this bond won't be refunded
+				// in time, none of the others will either.
+				break out
+			}
+			// Modify the activeTiers strengths in-place. Will cause some
+			// extra iteration, but beats the complexity of trying to modify
+			// the slice somehow.
+			if tiers < strength {
+				strength -= tiers
+				activeTiers[i][1] = 0
+			} else {
+				activeTiers[i][1] = tiers - strength
+				// strength = 0
+				break
+			}
+		}
+	}
+	for _, pair := range activeTiers {
+		reserveTiers += pair[1]
+	}
+	return reserveTiers * bondAsset.Amt
 }
 
 // dexBondConfig retrieves a dex's configuration related to bonds.
@@ -374,7 +453,6 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 		}
 	}
 	state.mustPost += state.toComp
-
 	return state
 }
 
@@ -979,7 +1057,8 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 	dbAcct.PenaltyComps = penaltyComps
 
 	var bondAssetAmt uint64 // because to disable we must proceed even with no config
-	if bondAsset := bondAssets[bondAssetID]; bondAsset == nil {
+	bondAsset := bondAssets[bondAssetID]
+	if bondAsset == nil {
 		if targetTier > 0 || assetChanged {
 			return fmt.Errorf("dex %v is does not support %v as a bond asset (or we lack their config)",
 				dbAcct.Host, unbip(bondAssetID))
@@ -1023,12 +1102,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		// We're under the dc.acct.authMtx lock, so we'll add our contribution
 		// first and then iterate the others in a loop where we're okay to lock
 		// their authMtx (via bondTotal).
-		var nominalReserves uint64
-		inBonds, _ := dc.bondTotalInternal(bondAssetID)
-		totalReserves := bondOverlap * bondAssetAmt * targetTier // this dexConnection
-		if totalReserves > inBonds {
-			nominalReserves += totalReserves - inBonds
-		}
+		nominalReserves := c.minBondReserves(dc, bondAsset)
 		var n uint64
 		if targetTier > 0 {
 			n = 1
@@ -1038,7 +1112,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 			if otherDC.acct.host == dc.acct.host { // Only adding others
 				continue
 			}
-			assetID, targetTier, _ := otherDC.bondOpts()
+			assetID, _, _ := otherDC.bondOpts()
 			if assetID != bondAssetID {
 				continue
 			}
@@ -1046,18 +1120,16 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 			if bondAsset == nil {
 				continue
 			}
-			inBonds, _ := otherDC.bondTotal(assetID)
-			totalReserves := bondOverlap * targetTier * bondAsset.Amt
 			n++
 			tiers += targetTier
-			if inBonds >= totalReserves {
-				continue
-			}
-			nominalReserves += totalReserves - inBonds
+			ba := BondAsset(*bondAsset)
+			otherDC.acct.authMtx.RLock()
+			nominalReserves += c.minBondReserves(dc, &ba)
+			otherDC.acct.authMtx.RUnlock()
 		}
 
 		var feeReserves uint64
-		if tiers > 0 {
+		if n > 0 {
 			feeBuffer := bonder.BondsFeeBuffer(c.feeSuggestionAny(bondAssetID))
 			feeReserves = n * feeBuffer
 			req := nominalReserves + feeReserves

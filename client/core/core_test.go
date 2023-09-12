@@ -10513,7 +10513,7 @@ func TestUpdateBondOptions(t *testing.T) {
 	var targetTierZero uint64 = 0
 	defaultMaxBondedAmt := maxBondedMult * bondAsset.Amt * targetTier
 	tooLowMaxBonded := defaultMaxBondedAmt - 1
-	singlyBondedReserves := bondAsset.Amt*bondOverlap*targetTier + bondFeeBuffer
+	singlyBondedReserves := bondAsset.Amt*targetTier + bondFeeBuffer
 
 	type acctState struct {
 		targetTier   uint64
@@ -10603,7 +10603,7 @@ func TestUpdateBondOptions(t *testing.T) {
 			},
 			addOtherDC:  true,
 			after:       acctState{},
-			expReserves: singlyBondedReserves,
+			expReserves: bondFeeBuffer,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -10660,17 +10660,17 @@ func TestRotateBonds(t *testing.T) {
 	bondAsset := dcrBondAsset
 	bondFeeBuffer := tDcrWallet.BondsFeeBuffer(feeRate)
 	maxBondedPerTier := maxBondedMult * bondAsset.Amt
-	overlappedReservesPerTier := bondAsset.Amt * bondOverlap
-	singlyTieredMaxReserves := overlappedReservesPerTier + bondFeeBuffer
 
 	now := uint64(time.Now().Unix())
 	bondExpiry := rig.dc.config().BondExpiry
 	// bondDuration := minBondLifetime(rig.core.net, bondExpiry)
 	locktimeThresh := now + bondExpiry
-	mergeableLocktimeThresh := locktimeThresh + bondExpiry/4 + uint64(pendingBuffer(rig.core.net))
+	pBuffer := uint64(pendingBuffer(rig.core.net))
+	mergeableLocktimeThresh := locktimeThresh + bondExpiry/4 + pBuffer
 	// unexpired := locktimeThresh + 1
 	locktimeExpired := locktimeThresh - 1
 	locktimeRefundable := now - 1
+	weakTimeThresh := locktimeThresh + pBuffer
 
 	run := func(wantPending, wantExpired int, expectedReserves uint64) {
 		ctx, cancel := context.WithTimeout(rig.core.ctx, time.Second)
@@ -10696,24 +10696,39 @@ func TestRotateBonds(t *testing.T) {
 	acct.bondAsset = bondAsset.ID
 	tDcrWallet.bal = &asset.Balance{Available: bondAsset.Amt*targetTier + bondFeeBuffer}
 	rig.queuePrevalidateBond()
-	run(1, 0, singlyTieredMaxReserves-bondAsset.Amt)
+	run(1, 0, bondAsset.Amt+bondFeeBuffer)
 
 	// Post and then expire the bond. This first bond should move to expired and we
 	// should create another bond.
 	acct.bonds, acct.pendingBonds = acct.pendingBonds, nil
 	acct.bonds[0].LockTime = locktimeExpired
 	rig.queuePrevalidateBond()
-	run(1, 1, singlyTieredMaxReserves-2*bondAsset.Amt)
+	// The newly expired bond will be refunded in time to fund our next round,
+	// so we only need fees reserved.
+	run(1, 1, bondFeeBuffer)
+
+	// If the live bond is closer to expiration, the expired bond won't be
+	// ready in time, so we'll need more reserves.
+	acct.bonds, acct.pendingBonds = acct.pendingBonds, nil
+	acct.bonds[0].LockTime = weakTimeThresh + 1
+	run(0, 1, bondAsset.Amt+bondFeeBuffer)
+
+	// Make the live bond weak. Should get a pending bond. Only fees reserves,
+	// because we still have an expired bond.
+	acct.bonds[0].LockTime = weakTimeThresh - 1
+	rig.queuePrevalidateBond()
+	run(1, 1, bondFeeBuffer)
 
 	// Refund the expired bond
 	acct.expiredBonds[0].LockTime = locktimeRefundable
 	tDcrWallet.contractExpired = true
 	tDcrWallet.refundBondCoin = &tCoin{}
-	run(1, 0, singlyTieredMaxReserves-bondAsset.Amt)
+	run(1, 0, bondAsset.Amt+bondFeeBuffer)
 
 	acct.targetTier = 2
+	acct.bonds = nil
 	rig.queuePrevalidateBond()
-	run(2, 0, (overlappedReservesPerTier*2+bondFeeBuffer)-2*bondAsset.Amt)
+	run(2, 0, bondAsset.Amt*2+bondFeeBuffer)
 
 	// Check that a new bond will be scheduled for merge with an existing bond
 	// if the locktime is not too soon.
@@ -10721,7 +10736,7 @@ func TestRotateBonds(t *testing.T) {
 	acct.pendingBonds = nil
 	acct.bonds[0].LockTime = mergeableLocktimeThresh + 1
 	rig.queuePrevalidateBond()
-	run(1, 0, (overlappedReservesPerTier*2+bondFeeBuffer)-2*bondAsset.Amt)
+	run(1, 0, 2*bondAsset.Amt+bondFeeBuffer)
 	mergingBond := acct.pendingBonds[0]
 	if mergingBond.LockTime != acct.bonds[0].LockTime {
 		t.Fatalf("Mergeable bond was not merged")
@@ -10731,7 +10746,7 @@ func TestRotateBonds(t *testing.T) {
 	acct.pendingBonds = nil
 	acct.bonds[0].LockTime = mergeableLocktimeThresh - 1
 	rig.queuePrevalidateBond()
-	run(1, 0, (overlappedReservesPerTier*2+bondFeeBuffer)-2*bondAsset.Amt)
+	run(1, 0, 2*bondAsset.Amt+bondFeeBuffer)
 	unmergingBond := acct.pendingBonds[0]
 	if unmergingBond.LockTime == acct.bonds[0].LockTime {
 		t.Fatalf("Unmergeable bond was scheduled for merged")

@@ -170,10 +170,18 @@ func (r Rule) Punishable() bool {
 // Reputation is a part of a number of server-originating messages. It was
 // introduced with the v2 ConnectResult.
 type Reputation struct {
-	BondedTier int64  `json:"bondedTier"`
-	Penalties  uint16 `json:"penalties"`
-	Legacy     bool   `json:"legacyTier"`
-	Score      int32  `json:"score"`
+	// BondedTier is the tier indicated by the users active bonds. BondedTier
+	// does not account for penalties.
+	BondedTier int64 `json:"bondedTier"`
+	// Penalties are the number of tiers that are currently revoked due to low
+	// user score.
+	Penalties uint16 `json:"penalties"`
+	// Legacy is true if the server recognizes a legacy registration for this
+	// user. Legacy registration increases effective tier by 1.
+	Legacy bool `json:"legacyTier"`
+	// Score is the user's current score. Score must be evaluated against a
+	// server's configured penalty threshold to calculate penalties.
+	Score int32 `json:"score"`
 }
 
 // Effective calculates the effective tier for trading limit calculations.

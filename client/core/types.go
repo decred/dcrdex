@@ -650,18 +650,35 @@ type BondOptions struct {
 	PenaltyComps uint16 `json:"PenaltyComps"`
 }
 
+// ExchangeAuth is data characterizing the state of client bonding.
 type ExchangeAuth struct {
-	Rep             account.Reputation  `json:"rep"`
-	BondAssetID     uint32              `json:"bondAssetID"`
-	PendingStrength int64               `json:"pendingStrength"`
-	WeakStrength    int64               `json:"weakStrength"`
-	LiveStrength    int64               `json:"liveStrength"`
-	TargetTier      uint64              `json:"targetTier"`
-	EffectiveTier   int64               `json:"effectiveTier"`
-	MaxBondedAmt    uint64              `json:"maxBondedAmt"`
-	PenaltyComps    uint16              `json:"penaltyComps"`
-	PendingBonds    []*PendingBondState `json:"pendingBonds"`
-	Compensation    int64               `json:"compensation"`
+	// Rep is the user's Reputation as reported by the DEX server.
+	Rep account.Reputation `json:"rep"`
+	// BondAssetID is the user's currently configured bond asset.
+	BondAssetID uint32 `json:"bondAssetID"`
+	// PendingStrength counts how many tiers are in unconfirmed bonds.
+	PendingStrength int64 `json:"pendingStrength"`
+	// WeakStrength counts the number of tiers that are about to expire.
+	WeakStrength int64 `json:"weakStrength"`
+	// LiveStrength counts all active bond tiers, including weak.
+	LiveStrength int64 `json:"liveStrength"`
+	// TargetTier is the user's current configured tier level.
+	TargetTier uint64 `json:"targetTier"`
+	// EffectiveTier is the user's current tier, after considering reputation.
+	EffectiveTier int64 `json:"effectiveTier"`
+	// MaxBondedAmt is the maximum amount that can be locked in bonds at a given
+	// time. If not provided, a default is calculated based on TargetTier and
+	// PenaltyComps.
+	MaxBondedAmt uint64 `json:"maxBondedAmt"`
+	// PenaltyComps is the maximum number of penalized tiers to automatically
+	// compensate.
+	PenaltyComps uint16 `json:"penaltyComps"`
+	// PendingBonds are currently pending bonds and their confirmation count.
+	PendingBonds []*PendingBondState `json:"pendingBonds"`
+	// Compensation is the amount we have locked in bonds greater than what
+	// is needed to maintain our target tier. This could be from penalty
+	// compensation, or it could be due to the user lowering their target tier.
+	Compensation int64 `json:"compensation"`
 }
 
 // Exchange represents a single DEX with any number of markets.

@@ -430,7 +430,7 @@ const (
 func NewAuthManager(cfg *Config) *AuthManager {
 	// A penalty threshold of 0 is not sensible, so have a default.
 	penaltyThreshold := int32(cfg.PenaltyThreshold)
-	if penaltyThreshold == 0 {
+	if penaltyThreshold <= 0 {
 		penaltyThreshold = DefaultPenaltyThreshold
 	}
 	// Invert sign for internal use.
