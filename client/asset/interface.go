@@ -188,7 +188,7 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(TicketBuyer); is {
 		t |= WalletTraitTicketBuyer
 	}
-	if _, is := w.(TicketBuyer); is {
+	if _, is := w.(WalletHistorian); is {
 		t |= WalletTraitHistorian
 	}
 	return t
@@ -1027,15 +1027,17 @@ type TicketBuyer interface {
 	TicketPage(scanStart int32, n, skipN int) ([]*Ticket, error)
 }
 
-// TransactionType is type type of transaction made by a wallet.
+// TransactionType is the type of transaction made by a wallet.
 type TransactionType uint16
 
 const (
-	Send TransactionType = iota
+	Unknown TransactionType = iota
+	Send
 	Receive
 	Swap
 	Redeem
 	Refund
+	Split
 	CreateBond
 	RedeemBond
 	ApproveToken
@@ -1044,13 +1046,14 @@ const (
 
 // WalletTransaction represents a transaction that was made by a wallet.
 type WalletTransaction struct {
-	Type           TransactionType `json:"type"`
-	ID             dex.Bytes       `json:"id"`
-	AmtIn          uint64          `json:"amtIn"`
-	AmtOut         uint64          `json:"amtOut"`
-	Fees           uint64          `json:"fees"`
-	BlockNumber    uint64          `json:"blockNumber"`
-	UpdatedBalance uint64          `json:"updatedBalance"`
+	Type TransactionType `json:"type"`
+	ID   dex.Bytes       `json:"id"`
+	// BalanceDelta is the amount the wallet balance changed as a result of
+	// the transaction, excluding fees.
+	BalanceDelta int64  `json:"balanceDelta"`
+	Fees         uint64 `json:"fees"`
+	// BlockNumber is 0 for txs in the mempool.
+	BlockNumber uint64 `json:"blockNumber"`
 	// AdditionalData contains asset specific information, i.e. nonce
 	// for ETH.
 	AdditionalData map[string]string `json:"additionalData"`
