@@ -1,6 +1,6 @@
 module decred.org/dcrdex/dex/testing/loadbot
 
-go 1.18
+go 1.19
 
 replace decred.org/dcrdex => ../../../
 

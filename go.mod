@@ -1,6 +1,6 @@
 module decred.org/dcrdex
 
-go 1.18
+go 1.19
 
 require (
 	decred.org/dcrwallet/v3 v3.0.1
