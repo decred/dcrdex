@@ -3,19 +3,19 @@
 # IMPORTANT NOTE: It can take the beta node a little bit to get caught up with
 # alpha after the harness initializes.
 
-SYMBOL="zec"
-DAEMON="zcashd"
-CLI="zcash-cli"
+SYMBOL="zcl"
+DAEMON="zclassicd"
+CLI="zclassic-cli"
 RPC_USER="user"
 RPC_PASS="pass"
-ALPHA_LISTEN_PORT="33764"
-BETA_LISTEN_PORT="33765"
-DELTA_LISTEN_PORT="33766"
-GAMMA_LISTEN_PORT="33767"
-ALPHA_RPC_PORT="33768"
-BETA_RPC_PORT="33769"
-DELTA_RPC_PORT="33770"
-GAMMA_RPC_PORT="33771"
+ALPHA_LISTEN_PORT="35764"
+BETA_LISTEN_PORT="35765"
+DELTA_LISTEN_PORT="35766"
+GAMMA_LISTEN_PORT="35767"
+ALPHA_RPC_PORT="35768"
+BETA_RPC_PORT="35769"
+DELTA_RPC_PORT="35770"
+GAMMA_RPC_PORT="35771"
 
 set -ex
 NODES_ROOT=~/dextest/${SYMBOL}
@@ -82,10 +82,6 @@ exportdir=${SOURCE_DIR}
 # Activate all the things.
 nuparams=5ba81b19:1
 nuparams=76b809bb:1
-nuparams=2bb40e60:1
-nuparams=f5b9230b:1
-nuparams=e9ff75a6:2
-nuparams=c2d6d0b4:3
 EOF
 
 cat > "${BETA_DIR}/beta.conf" <<EOF
@@ -97,10 +93,6 @@ rpcport=${BETA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
 nuparams=76b809bb:1
-nuparams=2bb40e60:1
-nuparams=f5b9230b:1
-nuparams=e9ff75a6:2
-nuparams=c2d6d0b4:3
 EOF
 
 cat > "${DELTA_DIR}/delta.conf" <<EOF
@@ -111,10 +103,6 @@ rpcport=${DELTA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
 nuparams=76b809bb:1
-nuparams=2bb40e60:1
-nuparams=f5b9230b:1
-nuparams=e9ff75a6:2
-nuparams=c2d6d0b4:3
 EOF
 
 cat > "${GAMMA_DIR}/gamma.conf" <<EOF
@@ -125,10 +113,6 @@ rpcport=${GAMMA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
 nuparams=76b809bb:1
-nuparams=2bb40e60:1
-nuparams=f5b9230b:1
-nuparams=e9ff75a6:2
-nuparams=c2d6d0b4:3
 EOF
 
 ################################################################################
@@ -193,6 +177,7 @@ tmux send-keys -t $SESSION:3 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
   -port=${GAMMA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
   tmux wait-for -S gamma${SYMBOL}" C-m
+
 sleep 30
 
 ################################################################################
@@ -213,12 +198,11 @@ cat > "./start-wallet" <<EOF
 
 mkdir ${NODES_ROOT}/\$1
 
-printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:1\nnuparams=2bb40e60:1\nnuparams=f5b9230b:1\nnuparams=e9ff75a6:2\nnuparams=c2d6d0b4:3\n" > ${NODES_ROOT}/\$1/\$1.conf
+printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:1\n" > ${NODES_ROOT}/\$1/\$1.conf
 
 ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -regtest=1 -conf=\$1.conf \
--debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
--whitelist=127.0.0.0/8 -whitelist=::1 \
+-debug=addrman -whitelist=127.0.0.0/8 -whitelist=::1 \
 -port=\$3 -fallbackfee=0.00001 -printtoconsole
 EOF
 chmod +x "./start-wallet"
@@ -295,9 +279,13 @@ tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
 tmux send-keys -t $SESSION:3 C-c
+echo "waiting on alpha"
 tmux wait-for alpha${SYMBOL}
+echo "waiting on beta"
 tmux wait-for beta${SYMBOL}
+echo "waiting on delta"
 tmux wait-for delta${SYMBOL}
+echo "waiting on gamma"
 tmux wait-for gamma${SYMBOL}
 # seppuku
 tmux kill-session
@@ -309,17 +297,17 @@ sleep 10
 tmux send-keys -t $SESSION:4 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./delta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./gamma addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
-# This timeout is apparently critical. Give the nodes time to sync.
+# # This timeout is apparently critical. Give the nodes time to sync.
 sleep 3
 
 echo "Generating the genesis block"
 tmux send-keys -t $SESSION:4 "./alpha generate 1${DONE}" C-m\; ${WAIT}
 sleep 1
 
-tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/alphawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/betawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/../zec/alphawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/../zec/betawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/../zec/deltawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/../zec/gammawallet ${DONE}" C-m\; ${WAIT}
 
 echo "Generating 400 blocks for alpha"
 tmux send-keys -t $SESSION:4 "./alpha generate 400${DONE}" C-m\; ${WAIT}
@@ -334,7 +322,7 @@ DELTA_ADDR="tmYBxRStK3QCFeML4qJmzuvFCR9Kob82bi8"
 GAMMA_ADDR="tmEWZVKveNfnrdmkgizFWBtD18bnxT1NYFc"
 
 # Send the lazy wallets some dough.
-echo "Sending 174 ZEC to beta in 8 blocks"
+echo "Sending 174 ZCL to beta in 8 blocks"
 for i in 100 18 5 7 1 15 3 25
 do
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i}${DONE}" C-m\; ${WAIT}

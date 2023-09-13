@@ -66,6 +66,7 @@ go test -c -o /dev/null -tags ltclive ./server/asset/ltc
 go test -c -o /dev/null -tags bchlive ./server/asset/bch
 go test -c -o /dev/null -tags dogelive ./server/asset/doge
 go test -c -o /dev/null -tags zeclive ./server/asset/zec
+go test -c -o /dev/null -tags zcllive ./server/asset/zcl
 go test -c -o /dev/null -tags firolive ./server/asset/firo
 go test -c -o /dev/null -tags harness ./server/asset/eth
 go test -c -o /dev/null -tags pgonline ./server/db/driver/pg

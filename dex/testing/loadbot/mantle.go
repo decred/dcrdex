@@ -322,7 +322,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 			return
 		}
 		<-time.After(time.Second)
-	case doge, firo, zec:
+	case doge, firo, zec, zcl:
 		// Some coins require a totally new node. Create it and monitor
 		// it. Shut it down with the stop function before exiting.
 		addrs, err := findOpenAddrs(2)
@@ -354,11 +354,11 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 			<-harnessCtl(ctx, symbol, "./stop-wallet", rpcPort)
 		}
 		if err = harnessProcessCtl(symbol, stopFn, "./start-wallet", name, rpcPort, networkPort); err != nil {
-			m.fatalError("%s create account error: %v", symbol, err)
+			m.fatalError("%s start-wallet error: %v", symbol, err)
 			return
 		}
 		<-time.After(time.Second * 3)
-		if symbol == zec {
+		if symbol == zec || symbol == zcl {
 			<-time.After(time.Second * 10)
 		}
 		// Connect the new node to the alpha node.
@@ -460,7 +460,7 @@ func send(symbol, node, addr string, val uint64) error {
 	switch symbol {
 	case btc, dcr, ltc, dash, doge, firo, bch, dgb:
 		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
-	case zec:
+	case zec, zcl:
 		// sendtoaddress will choose spent outputs if a block was
 		// recently mined. Use the zecSendMtx to ensure we have waited
 		// a sec after mining.
@@ -700,6 +700,17 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 		form = &core.WalletForm{
 			Type:    "zcashdRPC",
 			AssetID: zecID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     port,
+			},
+		}
+	case zcl:
+		form = &core.WalletForm{
+			Type:    "zclassicdRPC",
+			AssetID: zclID,
 			Config: map[string]string{
 				"walletname":  name,
 				"rpcuser":     "user",

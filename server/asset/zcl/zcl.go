@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package zec
+package zcl
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexzcl "decred.org/dcrdex/dex/networks/zcl"
 	dexzec "decred.org/dcrdex/dex/networks/zec"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
@@ -23,8 +24,8 @@ import (
 type Driver struct{}
 
 // Setup creates the Zcash backend. Start the backend with its Run method.
-func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
-	return NewBackend(cfg)
+func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+	return NewBackend(configPath, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -50,49 +51,48 @@ func init() {
 
 const (
 	version   = 0
-	BipID     = 133
-	assetName = "zec"
+	BipID     = 147
+	assetName = "zcl"
 	feeConfs  = 10 // Block time is 75 seconds
 )
 
 // NewBackend generates the network parameters and creates a zec backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
+func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	var btcParams *chaincfg.Params
 	var addrParams *dexzec.AddressParams
-	switch cfg.Net {
+	switch network {
 	case dex.Mainnet:
-		btcParams = dexzec.MainNetParams
+		btcParams = dexzcl.MainNetParams
 		addrParams = dexzec.MainNetAddressParams
 	case dex.Testnet:
-		btcParams = dexzec.TestNet4Params
+		btcParams = dexzcl.TestNet4Params
 		addrParams = dexzec.TestNet4AddressParams
 	case dex.Regtest:
-		btcParams = dexzec.RegressionNetParams
+		btcParams = dexzcl.RegressionNetParams
 		addrParams = dexzec.RegressionNetAddressParams
 	default:
-		return nil, fmt.Errorf("unknown network ID %v", cfg.Net)
+		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
 	ports := dexbtc.NetPorts{
-		Mainnet: "8232",
-		Testnet: "18232",
-		Simnet:  "18232",
+		Mainnet: "8023",
+		Testnet: "18023",
+		Simnet:  "35768", // zclassic uses 18023 for regtest too. Using our alpha harness port instead.
 	}
 
-	configPath := cfg.ConfigPath
 	if configPath == "" {
-		configPath = dexbtc.SystemConfigPath("zcash")
+		configPath = dexbtc.SystemConfigPath("zclassic")
 	}
 
 	be, err := btc.NewBTCClone(&btc.BackendCloneConfig{
 		Name:        assetName,
 		Segwit:      false,
 		ConfigPath:  configPath,
-		Logger:      cfg.Logger,
-		Net:         cfg.Net,
+		Logger:      logger,
+		Net:         network,
 		ChainParams: btcParams,
 		Ports:       ports,
 		AddressDecoder: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
@@ -124,7 +124,6 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 		BlockFeeTransactions: blockFeeTransactions,
 		NumericGetRawRPC:     true,
 		ShieldedIO:           shieldedIO,
-		RelayAddr:            cfg.RelayAddr,
 	})
 	if err != nil {
 		return nil, err

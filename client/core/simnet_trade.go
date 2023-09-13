@@ -45,6 +45,7 @@ import (
 	"decred.org/dcrdex/client/asset/firo"
 	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/asset/polygon"
+	"decred.org/dcrdex/client/asset/zcl"
 	"decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/dex"
@@ -1576,7 +1577,7 @@ func newHarnessCtrl(assetID uint32) *harnessCtrl {
 		baseChainSymbol = symbolParts[1]
 	}
 	switch assetID {
-	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, firo.BipID, zec.BipID, dgb.BipID, dash.BipID:
+	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, firo.BipID, zec.BipID, zcl.BipID, dgb.BipID, dash.BipID:
 		return &harnessCtrl{
 			dir:     filepath.Join(dextestDir, baseChainSymbol, "harness-ctl"),
 			fundCmd: "./alpha",
@@ -1616,6 +1617,7 @@ var cloneTypes = map[uint32]string{
 	3:   "dogecoindRPC",
 	136: "firodRPC",
 	133: "zcashdRPC",
+	147: "zclassicdRPC",
 	5:   "dashdRPC",
 }
 
@@ -1738,14 +1740,14 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 
 	parentNode := node
 	pass := []byte("abc")
-	if node == "gamma" || node == "delta" || assetID == zec.BipID {
+	if node == "gamma" || node == "delta" || assetID == zec.BipID || assetID == zcl.BipID {
 		if assetID != dash.BipID {
 			pass = nil
 		}
 	}
 
 	switch assetID {
-	case doge.BipID, zec.BipID, firo.BipID:
+	case doge.BipID, zec.BipID, zcl.BipID, firo.BipID:
 	// dogecoind, zcashd and firod don't support > 1 wallet, so gamma and delta
 	// have their own nodes.
 	default:
@@ -1800,6 +1802,10 @@ func zecWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(zec.BipID, node, WTCoreClone)
 }
 
+func zclWallet(node string) (*tWallet, error) {
+	return btcCloneWallet(zcl.BipID, node, WTCoreClone)
+}
+
 func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClient, error) {
 	wallets := make(map[uint32]*tWallet, 2)
 	addWallet := func(assetID uint32, wt SimWalletType, node string) error {
@@ -1832,6 +1838,8 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = firoWallet(wt, node)
 		case zec.BipID:
 			tw, err = zecWallet(node)
+		case zcl.BipID:
+			tw, err = zclWallet(node)
 		default:
 			return fmt.Errorf("no method to create wallet for asset %d", assetID)
 		}

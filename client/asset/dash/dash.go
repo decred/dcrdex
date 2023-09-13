@@ -134,7 +134,6 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		DefaultFallbackFee:  dexdash.DefaultFee,
 		DefaultFeeRateLimit: dexdash.DefaultFeeRateLimit,
 		LegacyBalance:       false,
-		ZECStyleBalance:     false,
 		Segwit:              false,
 		// Dash v19.1.0 has a breaking change from the true/false 'allowhighfees'
 		// to 'maxfeerate' in DASH/kB, the same as btc.

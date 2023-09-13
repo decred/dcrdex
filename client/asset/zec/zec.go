@@ -101,7 +101,7 @@ var (
 		AvailableWallets: []*asset.WalletDefinition{{
 			Type:              walletTypeRPC,
 			Tab:               "External",
-			Description:       "Connect to zcashcoind",
+			Description:       "Connect to zcashd",
 			DefaultConfigPath: dexbtc.SystemConfigPath("zcash"),
 			ConfigOpts:        configOpts,
 			NoAuth:            true,
@@ -172,18 +172,29 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	var w *btc.ExchangeWalletNoAuth
 	cloneCFG := &btc.BTCCloneCFG{
-		WalletCFG:                cfg,
-		MinNetworkVersion:        minNetworkVersion,
-		WalletInfo:               WalletInfo,
-		Symbol:                   "zec",
-		Logger:                   logger,
-		Network:                  net,
-		ChainParams:              btcParams,
-		Ports:                    ports,
-		DefaultFallbackFee:       defaultFee,
-		DefaultFeeRateLimit:      defaultFeeRateLimit,
-		LegacyRawFeeLimit:        true,
-		ZECStyleBalance:          true,
+		WalletCFG:           cfg,
+		MinNetworkVersion:   minNetworkVersion,
+		WalletInfo:          WalletInfo,
+		Symbol:              "zec",
+		Logger:              logger,
+		Network:             net,
+		ChainParams:         btcParams,
+		Ports:               ports,
+		DefaultFallbackFee:  defaultFee,
+		DefaultFeeRateLimit: defaultFeeRateLimit,
+		LegacyRawFeeLimit:   true,
+		BalanceFunc: func(ctx context.Context, locked uint64) (*asset.Balance, error) {
+			var bal uint64
+			// args: "(dummy)" minconf includeWatchonly
+			if err := w.CallRPC("getbalance", []interface{}{"", 0, false, true}, &bal); err != nil {
+				return nil, err
+			}
+			return &asset.Balance{
+				Available: bal - locked,
+				Locked:    locked,
+				Other:     make(map[asset.BalanceCategory]asset.CustomBalance),
+			}, nil
+		},
 		Segwit:                   false,
 		InitTxSize:               dexzec.InitTxSize,
 		InitTxSizeBase:           dexzec.InitTxSizeBase,
@@ -581,7 +592,7 @@ func signTx(btcTx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHa
 
 	tx := zecTx(btcTx)
 
-	sigHash, err := tx.SignatureDigest(idx, hashType, amts, prevScripts)
+	sigHash, err := tx.SignatureDigest(idx, hashType, pkScript, amts, prevScripts)
 	if err != nil {
 		return nil, fmt.Errorf("sighash calculation error: %v", err)
 	}

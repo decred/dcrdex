@@ -33,20 +33,24 @@ const (
 	saplingJoinSplitSize    = 1698
 
 	pkTransparentDigest = "ZTxIdTranspaHash"
-	pkPrevOuts          = "ZTxIdPrevoutHash"
+	pkPrevOutsV5        = "ZTxIdPrevoutHash"
 	pkAmounts           = "ZTxTrAmountsHash"
 	pkPrevScripts       = "ZTxTrScriptsHash"
-	pkSequence          = "ZTxIdSequencHash"
-	pkOutputs           = "ZTxIdOutputsHash"
+	pkSequenceV5        = "ZTxIdSequencHash"
+	pkOutputsV5         = "ZTxIdOutputsHash"
 	pkTxIn              = "Zcash___TxInHash"
 	pkV5TxDigest        = "ZcashTxHash_"
 	pkHeader            = "ZTxIdHeadersHash"
+	pkPrevOutsV4        = "ZcashPrevoutHash"
+	pkSequenceV4        = "ZcashSequencHash"
+	pkOutputsV4         = "ZcashOutputsHash"
 )
 
 var (
 	// Little-endian encoded CONSENSUS_BRANCH_IDs.
 	// https://zcash.readthedocs.io/en/latest/rtd_pages/nu_dev_guide.html#canopy
-	ConsensusBranchNU5 = [4]byte{0xB4, 0xD0, 0xD6, 0xC2} // 1687104, testnet: 1842420
+	ConsensusBranchNU5     = [4]byte{0xB4, 0xD0, 0xD6, 0xC2} // 1687104, testnet: 1842420
+	ConsensusBranchSapling = [4]byte{0xBB, 0x09, 0xB8, 0x76}
 
 	emptySaplingDigest = [32]byte{0x6f, 0x2f, 0xc8, 0xf9, 0x8f, 0xea, 0xfd, 0x94,
 		0xe7, 0x4a, 0x0d, 0xf4, 0xbe, 0xd7, 0x43, 0x91, 0xee, 0x0b, 0x5a, 0x69,
@@ -100,7 +104,7 @@ func (tx *Tx) TxHash() chainhash.Hash {
 }
 
 func (tx *Tx) txHashV5() (_ chainhash.Hash, err error) {
-	td, err := tx.transparentDigest()
+	td, err := tx.transparentDigestV5()
 	if err != nil {
 		return
 	}
@@ -109,8 +113,11 @@ func (tx *Tx) txHashV5() (_ chainhash.Hash, err error) {
 
 // SignatureDigest produces a hash of tx data suitable for signing.
 // SignatureDigest only works correctly for unshielded version 5 transactions.
-func (tx *Tx) SignatureDigest(vin int, hashType txscript.SigHashType, vals []int64, prevScripts [][]byte) (_ [32]byte, err error) {
-	td, err := tx.transparentSigDigest(vin, hashType, vals, prevScripts)
+func (tx *Tx) SignatureDigest(vin int, hashType txscript.SigHashType, script []byte, vals []int64, prevScripts [][]byte) (_ [32]byte, err error) {
+	if tx.Version == 4 {
+		return tx.txDigestV4(hashType, vin, vals, script)
+	}
+	td, err := tx.transparentSigDigestV5(vin, hashType, vals, prevScripts)
 	if err != nil {
 		return
 	}
@@ -119,7 +126,7 @@ func (tx *Tx) SignatureDigest(vin int, hashType txscript.SigHashType, vals []int
 
 // txDigestV5 produces hashes of transaction data in accordance with ZIP-244.
 func (tx *Tx) txDigestV5(transparentPart [32]byte) (_ chainhash.Hash, err error) {
-	hd, err := tx.headerDigest()
+	hd, err := tx.headerDigestV5()
 	if err != nil {
 		return
 	}
@@ -137,7 +144,7 @@ func (tx *Tx) txDigestV5(transparentPart [32]byte) (_ chainhash.Hash, err error)
 	return txHash, nil
 }
 
-func (tx *Tx) headerDigest() ([32]byte, error) {
+func (tx *Tx) headerDigestV5() ([32]byte, error) {
 	b := make([]byte, 20)
 	copy(b[:4], uint32Bytes(uint32(tx.Version)|(1<<31)))
 	copy(b[4:8], uint32Bytes(versionNU5GroupID))
@@ -147,18 +154,73 @@ func (tx *Tx) headerDigest() ([32]byte, error) {
 	return blake2bHash(b, []byte(pkHeader))
 }
 
-func (tx *Tx) transparentDigest() (h [32]byte, err error) {
-	prevoutsDigest, err := tx.calcHashPrevOuts()
+// ZIP-0243
+func (tx *Tx) txDigestV4(hashType txscript.SigHashType, vin int, vals []int64, script []byte) (_ chainhash.Hash, err error) {
+	b, err := tx.sighashPreimageV4(hashType, vin, vals, script)
 	if err != nil {
 		return
 	}
 
-	seqDigest, err := tx.hashSequence()
+	h, err := blake2bHash(b, append([]byte("ZcashSigHash"), ConsensusBranchSapling[:]...))
 	if err != nil {
 		return
 	}
 
-	outputsDigest, err := tx.hashOutputs()
+	var txHash chainhash.Hash
+	copy(txHash[:], h[:])
+	return txHash, nil
+}
+
+func (tx *Tx) sighashPreimageV4(hashType txscript.SigHashType, vin int, vals []int64, script []byte) (_ []byte, err error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 270+len(script)))
+	buf.Write(uint32Bytes(uint32(tx.Version) | (1 << 31))) // 4 bytes
+	buf.Write(uint32Bytes(versionSaplingGroupID))          // + 4 = 8
+	prevoutsDigest, err := tx.calcHashPrevOuts(pkPrevOutsV4)
+	if err != nil {
+		return
+	}
+	buf.Write(prevoutsDigest[:]) // + 32 = 40
+
+	seqDigest, err := tx.hashSequence(pkSequenceV4)
+	if err != nil {
+		return
+	}
+	buf.Write(seqDigest[:]) // + 32 = 72
+
+	outputsDigest, err := tx.hashOutputs(pkOutputsV4)
+	if err != nil {
+		return
+	}
+	buf.Write(outputsDigest[:]) // + 32 = 104
+	// The following three fields are all zero hashes for transparent txs.
+	// hashJoinSplits, hashShieldedSpends, hashShieldedOutputs [32]byte
+	buf.Write(make([]byte, 96))             // + 96 = 200
+	buf.Write(uint32Bytes(tx.LockTime))     // + 4 = 204
+	buf.Write(uint32Bytes(tx.ExpiryHeight)) // + 4 = 208
+	// valueBalance
+	buf.Write(uint64Bytes(0))                // + 8 = 216
+	buf.Write(uint32Bytes(uint32(hashType))) // + 4 = 220
+
+	txInsDigest, err := tx.preimageTxInSig(vin, vals[vin], script) // + 50 + len(prevScript) = 270 + len(prevScript)
+	if err != nil {
+		return
+	}
+	buf.Write(txInsDigest[:])
+	return buf.Bytes(), nil
+}
+
+func (tx *Tx) transparentDigestV5() (h [32]byte, err error) {
+	prevoutsDigest, err := tx.calcHashPrevOuts(pkPrevOutsV5)
+	if err != nil {
+		return
+	}
+
+	seqDigest, err := tx.hashSequence(pkSequenceV5)
+	if err != nil {
+		return
+	}
+
+	outputsDigest, err := tx.hashOutputs(pkOutputsV5)
 	if err != nil {
 		return
 	}
@@ -170,14 +232,14 @@ func (tx *Tx) transparentDigest() (h [32]byte, err error) {
 	return blake2bHash(b, []byte(pkTransparentDigest))
 }
 
-func (tx *Tx) transparentSigDigest(vin int, hashType txscript.SigHashType, vals []int64, prevScripts [][]byte) (h [32]byte, err error) {
+func (tx *Tx) transparentSigDigestV5(vin int, hashType txscript.SigHashType, vals []int64, prevScripts [][]byte) (h [32]byte, err error) {
 	buf := bytes.NewBuffer(make([]byte, 0, 193))
 
 	buf.Write([]byte{byte(hashType)})
 
 	anyoneCanPay := hashType&txscript.SigHashAnyOneCanPay > 0
 
-	prevoutsDigest, err := tx.hashPrevOutsSig(anyoneCanPay)
+	prevoutsDigest, err := tx.hashPrevOutsSigV5(anyoneCanPay)
 	if err != nil {
 		return
 	}
@@ -195,13 +257,13 @@ func (tx *Tx) transparentSigDigest(vin int, hashType txscript.SigHashType, vals 
 	}
 	buf.Write(prevScriptsDigest[:])
 
-	seqsDigest, err := tx.hashSequenceSig(anyoneCanPay)
+	seqsDigest, err := tx.hashSequenceSigV5(anyoneCanPay)
 	if err != nil {
 		return
 	}
 	buf.Write(seqsDigest[:])
 
-	outputsDigest, err := tx.hashOutputsSig(anyoneCanPay)
+	outputsDigest, err := tx.hashOutputsSigV5(anyoneCanPay)
 	if err != nil {
 		return
 	}
@@ -216,7 +278,7 @@ func (tx *Tx) transparentSigDigest(vin int, hashType txscript.SigHashType, vals 
 	return blake2bHash(buf.Bytes(), []byte(pkTransparentDigest))
 }
 
-func (tx *Tx) calcHashPrevOuts() ([32]byte, error) {
+func (tx *Tx) calcHashPrevOuts(pk string) ([32]byte, error) {
 	var buf bytes.Buffer
 	for _, in := range tx.TxIn {
 		buf.Write(in.PreviousOutPoint.Hash[:])
@@ -224,14 +286,14 @@ func (tx *Tx) calcHashPrevOuts() ([32]byte, error) {
 		binary.LittleEndian.PutUint32(b[:], in.PreviousOutPoint.Index)
 		buf.Write(b[:])
 	}
-	return blake2bHash(buf.Bytes(), []byte(pkPrevOuts))
+	return blake2bHash(buf.Bytes(), []byte(pk))
 }
 
-func (tx *Tx) hashPrevOutsSig(anyoneCanPay bool) ([32]byte, error) {
+func (tx *Tx) hashPrevOutsSigV5(anyoneCanPay bool) ([32]byte, error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte(pkPrevOuts))
+		return blake2bHash([]byte{}, []byte(pkPrevOutsV5))
 	}
-	return tx.calcHashPrevOuts()
+	return tx.calcHashPrevOuts(pkPrevOutsV5)
 }
 
 func (tx *Tx) hashAmountsSig(anyoneCanPay bool, vals []int64) ([32]byte, error) {
@@ -259,58 +321,71 @@ func (tx *Tx) hashPrevScriptsSig(anyoneCanPay bool, prevScripts [][]byte) (_ [32
 	return blake2bHash(buf.Bytes(), []byte(pkPrevScripts))
 }
 
-func (tx *Tx) hashSequence() ([32]byte, error) {
+func (tx *Tx) hashSequence(pk string) ([32]byte, error) {
 	var b bytes.Buffer
 	for _, in := range tx.TxIn {
 		var buf [4]byte
 		binary.LittleEndian.PutUint32(buf[:], in.Sequence)
 		b.Write(buf[:])
 	}
-	return blake2bHash(b.Bytes(), []byte(pkSequence))
+	return blake2bHash(b.Bytes(), []byte(pk))
 }
 
-func (tx *Tx) hashSequenceSig(anyoneCanPay bool) (h [32]byte, err error) {
+func (tx *Tx) hashSequenceSigV5(anyoneCanPay bool) (h [32]byte, err error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte(pkSequence))
+		return blake2bHash([]byte{}, []byte(pkSequenceV5))
 	}
-	return tx.hashSequence()
+	return tx.hashSequence(pkSequenceV5)
 }
 
-func (tx *Tx) hashOutputs() (_ [32]byte, err error) {
+func (tx *Tx) hashOutputs(pk string) (_ [32]byte, err error) {
 	var b bytes.Buffer
 	for _, out := range tx.TxOut {
 		if err = wire.WriteTxOut(&b, 0, 0, out); err != nil {
 			return chainhash.Hash{}, err
 		}
 	}
-	return blake2bHash(b.Bytes(), []byte(pkOutputs))
+	return blake2bHash(b.Bytes(), []byte(pk))
 }
 
-func (tx *Tx) hashOutputsSig(anyoneCanPay bool) (_ [32]byte, err error) {
+func (tx *Tx) hashOutputsSigV5(anyoneCanPay bool) (_ [32]byte, err error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte(pkOutputs))
+		return blake2bHash([]byte{}, []byte(pkOutputsV5))
 	}
-	return tx.hashOutputs()
+	return tx.hashOutputs(pkOutputsV5)
 }
 
 func (tx *Tx) hashTxInSig(idx int, prevVal int64, prevScript []byte) (h [32]byte, err error) {
+	b, err := tx.preimageTxInSig(idx, prevVal, prevScript)
+	if err != nil {
+		return
+	}
+	return blake2bHash(b, []byte(pkTxIn))
+}
+
+func (tx *Tx) preimageTxInSig(idx int, prevVal int64, script []byte) ([]byte, error) {
 	if len(tx.TxIn) <= idx {
-		return h, fmt.Errorf("no input at index %d", idx)
+		return nil, fmt.Errorf("no input at index %d", idx)
 	}
 	txIn := tx.TxIn[idx]
 
 	// prev_hash 32 + prev_index 4 + prev_value 8 + script_pub_key var_int+L (size) + nSequence 4
-	b := bytes.NewBuffer(make([]byte, 0, 50+len(prevScript)))
+	b := bytes.NewBuffer(make([]byte, 0, 50+len(script)))
 
 	b.Write(txIn.PreviousOutPoint.Hash[:])
 	b.Write(uint32Bytes(txIn.PreviousOutPoint.Index))
-	b.Write(int64Bytes(prevVal))
-	if err = wire.WriteVarBytes(b, pver, prevScript); err != nil {
-		return
+	if tx.Version >= 5 {
+		b.Write(int64Bytes(prevVal))
+	}
+	if err := wire.WriteVarBytes(b, pver, script); err != nil {
+		return nil, err
+	}
+	if tx.Version < 5 {
+		b.Write(int64Bytes(prevVal))
 	}
 	b.Write(uint32Bytes(txIn.Sequence))
 
-	return blake2bHash(b.Bytes(), []byte(pkTxIn))
+	return b.Bytes(), nil
 
 }
 
