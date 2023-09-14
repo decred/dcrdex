@@ -12,16 +12,20 @@ const (
 		name TEXT PRIMARY KEY,
 		base INT8,
 		quote INT8,
-		lot_size INT8
+		lot_size INT8,
+		lot_limit_coefficient INT8
 	)`
 
 	// SelectAllMarkets retrieves the active market information.
-	SelectAllMarkets = `SELECT name, base, quote, lot_size FROM %s;`
+	SelectAllMarkets = `SELECT name, base, quote, lot_size, lot_limit_coefficient FROM %s;`
 
 	// InsertMarket inserts a new market in to the markets tables
-	InsertMarket = `INSERT INTO %s (name, base, quote, lot_size)
-		VALUES ($1, $2, $3, $4);`
+	InsertMarket = `INSERT INTO %s (name, base, quote, lot_size, lot_limit_coefficient)
+		VALUES ($1, $2, $3, $4, $5);`
 
 	// UpdateLotSize updates the market's lot size.
 	UpdateLotSize = `UPDATE %s SET lot_size = $2 WHERE name = $1;`
+
+	// UpdateLotLimitCoefficient updates the market's lot limit coefficient.
+	UpdateLotLimitCoefficient = `UPDATE %s SET lot_limit_coefficient = $2 WHERE name = $1;`
 )

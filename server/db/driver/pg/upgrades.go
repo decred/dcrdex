@@ -48,6 +48,9 @@ var upgrades = []func(db *sql.Tx) error{
 	// old_fee_coin column to the accounts table for when a manual refund is
 	// processed.
 	v6Upgrade,
+
+	// v7upgrade adds a lot_limit_coefficient column to the markets table
+	v7Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -352,6 +355,17 @@ func v6Upgrade(tx *sql.Tx) error {
 	_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS broken_rule;", namespacedAccountsTable))
 	if err != nil {
 		return fmt.Errorf("failed to drop the accounts.broken_rule column: %w", err)
+	}
+
+	return nil
+}
+
+// v7Upgrade adds the lot_limit_coefficient column to the markets table
+func v7Upgrade(tx *sql.Tx) error {
+	// drop the accounts.broken_rule column
+	_, err := tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS lot_limit_coefficient INT8 DEFAULT 1;", marketsTableName))
+	if err != nil {
+		return fmt.Errorf("failed to create the markets.lot_limit_coefficient column: %w", err)
 	}
 
 	return nil

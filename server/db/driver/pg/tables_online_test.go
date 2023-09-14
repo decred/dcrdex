@@ -23,7 +23,7 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// valid market
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, 1, RateStep, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPrepareTables(t *testing.T) {
 
 	// Mutated existing market. Should return mutated markets in purge
 	// returns.
-	mktConfig, err = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8, RateStep, EpochDuration, MarketBuyBuffer) // lot size change
+	mktConfig, err = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8, 1, RateStep, EpochDuration, MarketBuyBuffer) // lot size change
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// Add a new market.
-	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9, 1, RateStep, EpochDuration, MarketBuyBuffer)
 	purgeMkts, err = prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig})
 	if err != nil {
 		t.Error(err)
@@ -79,7 +79,7 @@ func TestUpdateLotSize(t *testing.T) {
 	}
 
 	// valid market
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, 1, RateStep, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,5 +110,45 @@ func TestUpdateLotSize(t *testing.T) {
 	}
 	if mkts[0].LotSize != 1337 {
 		t.Error("lot size is not 1337 after updating")
+	}
+}
+
+func TestUpdateLotLimitCoefficient(t *testing.T) {
+	if err := nukeAll(archie.db); err != nil {
+		t.Fatal(err)
+	}
+
+	// valid market
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, 2, RateStep, EpochDuration, MarketBuyBuffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create new tables and schemas.
+	markets := []*dex.MarketInfo{mktConfig}
+	_, err = prepareTables(context.Background(), archie.db, markets)
+	if err != nil {
+		t.Error(err)
+	}
+
+	mkts, err := loadMarkets(archie.db, marketsTableName)
+	if err != nil {
+		t.Error(err)
+	}
+	if mkts[0].LotLimitCoefficient != 2 {
+		t.Error("unexpected lot limit coefficient before updating")
+	}
+
+	err = updateLotLimitCoefficient(archie.db, publicSchema, "dcr_btc", 42)
+	if err != nil {
+		t.Error(err)
+	}
+
+	mkts, err = loadMarkets(archie.db, marketsTableName)
+	if err != nil {
+		t.Error(err)
+	}
+	if mkts[0].LotLimitCoefficient != 42 {
+		t.Error("lot limit coefficient is not 42 after updating")
 	}
 }

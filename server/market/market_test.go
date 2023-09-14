@@ -331,7 +331,7 @@ func newTestMarket(opts ...interface{}) (*Market, *TArchivist, *TAuth, func(), e
 
 	mbBuffer := 1.1
 	mktInfo, err := dex.NewMarketInfo(baseAsset.ID, quoteAsset.ID,
-		dcrLotSize, btcRateStep, epochDurationMSec, mbBuffer)
+		dcrLotSize, dcrLotLimitCoefficient, btcRateStep, epochDurationMSec, mbBuffer)
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("dex.NewMarketInfo() failure: %w", err)
 	}

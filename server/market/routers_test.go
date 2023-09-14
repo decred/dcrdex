@@ -33,25 +33,26 @@ import (
 )
 
 const (
-	dummySize    = 50
-	tRedeemSize  = 50
-	btcLotSize   = 10_0000 // 0.001
-	btcRateStep  = 1_000
-	dcrLotSize   = 1000_0000 // 0.1
-	dcrRateStep  = 100_000
-	initLotLimit = 2
-	btcID        = 0
-	dcrID        = 42
-	ltcID        = 2
-	dogeID       = 3
-	btcAddr      = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
-	dcrAddr      = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
-	mktName1     = "btc_ltc"
-	mkt1BaseRate = 5e7
-	mktName2     = "dcr_doge"
-	mkt2BaseRate = 8e9
-	mktName3     = "dcr_btc"
-	mkt3BaseRate = 3e9
+	dummySize              = 50
+	tRedeemSize            = 50
+	btcLotSize             = 10_0000 // 0.001
+	btcRateStep            = 1_000
+	dcrLotSize             = 1000_0000 // 0.1
+	dcrLotLimitCoefficient = 1
+	dcrRateStep            = 100_000
+	initLotLimit           = 2
+	btcID                  = 0
+	dcrID                  = 42
+	ltcID                  = 2
+	dogeID                 = 3
+	btcAddr                = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
+	dcrAddr                = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
+	mktName1               = "btc_ltc"
+	mkt1BaseRate           = 5e7
+	mktName2               = "dcr_doge"
+	mkt2BaseRate           = 8e9
+	mktName3               = "dcr_btc"
+	mkt3BaseRate           = 3e9
 
 	clientPreimageDelay = 75 * time.Millisecond
 )

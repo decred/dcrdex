@@ -25,15 +25,17 @@ func loadMarkets(db sqlQueryer, marketsTableName string) ([]*dex.MarketInfo, err
 		var name string
 		var base, quote uint32
 		var lotSize uint64
-		err = rows.Scan(&name, &base, &quote, &lotSize)
+		var lotLimitCoefficient uint64
+		err = rows.Scan(&name, &base, &quote, &lotSize, &lotLimitCoefficient)
 		if err != nil {
 			return nil, err
 		}
 		mkts = append(mkts, &dex.MarketInfo{
-			Name:    name,
-			Base:    base,
-			Quote:   quote,
-			LotSize: lotSize,
+			Name:                name,
+			Base:                base,
+			Quote:               quote,
+			LotSize:             lotSize,
+			LotLimitCoefficient: lotLimitCoefficient,
 		})
 	}
 
@@ -46,7 +48,7 @@ func loadMarkets(db sqlQueryer, marketsTableName string) ([]*dex.MarketInfo, err
 
 func newMarket(db *sql.DB, marketsTableName string, mkt *dex.MarketInfo) error {
 	stmt := fmt.Sprintf(internal.InsertMarket, marketsTableName)
-	res, err := db.Exec(stmt, mkt.Name, mkt.Base, mkt.Quote, mkt.LotSize)
+	res, err := db.Exec(stmt, mkt.Name, mkt.Base, mkt.Quote, mkt.LotSize, mkt.LotLimitCoefficient)
 	if err != nil {
 		return err
 	}

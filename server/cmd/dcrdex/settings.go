@@ -17,14 +17,15 @@ import (
 
 type marketConfig struct {
 	Markets []*struct {
-		Base           string  `json:"base"`
-		Quote          string  `json:"quote"`
-		LotSize        uint64  `json:"lotSize"`
-		RateStep       uint64  `json:"rateStep"`
-		Duration       uint64  `json:"epochDuration"`
-		MBBuffer       float64 `json:"marketBuyBuffer"`
-		BookedLotLimit uint32  `json:"userBookedLotLimit"`
-		Disabled       bool    `json:"disabled"`
+		Base                string  `json:"base"`
+		Quote               string  `json:"quote"`
+		LotSize             uint64  `json:"lotSize"`
+		LotLimitCoefficient uint64  `json:"lotLimitCoefficient"`
+		RateStep            uint64  `json:"rateStep"`
+		Duration            uint64  `json:"epochDuration"`
+		MBBuffer            float64 `json:"marketBuyBuffer"`
+		BookedLotLimit      uint32  `json:"userBookedLotLimit"`
+		Disabled            bool    `json:"disabled"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.AssetConf `json:"assets"`
 }
@@ -147,7 +148,7 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 		}
 
 		mkt, err := dex.NewMarketInfoFromSymbols(baseConf.Symbol, quoteConf.Symbol,
-			mktConf.LotSize, mktConf.RateStep, mktConf.Duration, mktConf.MBBuffer)
+			mktConf.LotSize, mktConf.LotLimitCoefficient, mktConf.RateStep, mktConf.Duration, mktConf.MBBuffer)
 		if err != nil {
 			return nil, nil, err
 		}

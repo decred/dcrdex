@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	LotSize         = uint64(100_0000_0000) // 100
-	RateStep        = uint64(10_0000)       // 0.001
-	EpochDuration   = uint64(10_000)
-	MarketBuyBuffer = 1.1
+	LotSize             = uint64(100_0000_0000) // 100
+	RateStep            = uint64(10_0000)       // 0.001
+	EpochDuration       = uint64(10_000)
+	MarketBuyBuffer     = 1.1
+	LotLimitCoefficient = 1
 )
 
 // The asset integer IDs should set in TestMain or other bring up function (e.g.

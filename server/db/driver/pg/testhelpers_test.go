@@ -19,10 +19,11 @@ func startLogger() {
 }
 
 const (
-	LotSize         = uint64(100_0000_0000) // 100
-	RateStep        = uint64(10_0000)       // 0.001
-	EpochDuration   = uint64(10_000)
-	MarketBuyBuffer = 1.1
+	LotSize             = uint64(100_0000_0000) // 100
+	RateStep            = uint64(10_0000)       // 0.001
+	EpochDuration       = uint64(10_000)
+	MarketBuyBuffer     = 1.1
+	LotLimitCoefficient = 1
 )
 
 // The asset integer IDs should set in TestMain or other bring up function (e.g.
@@ -55,13 +56,13 @@ func randomCommitment() (com order.Commitment) {
 }
 
 func mktConfig() (markets []*dex.MarketInfo) {
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, LotLimitCoefficient, RateStep, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}
 	markets = append(markets, mktConfig)
 
-	mktConfig, err = dex.NewMarketInfoFromSymbols("BTC", "LTC", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
+	mktConfig, err = dex.NewMarketInfoFromSymbols("BTC", "LTC", LotSize, LotLimitCoefficient, RateStep, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}

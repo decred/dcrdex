@@ -801,7 +801,13 @@ func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.Mark
 	// bond strength, and balance that with weighted swap history.
 
 	currentLotSize := int64(mkt.LotSize)
-	baseLimit := currentLotSize * auth.initTakerLotLimit
+	lotLimitCoefficient := int64(mkt.LotLimitCoefficient)
+	// if the lot limit coefficient is not defined, it should default to 1
+	if lotLimitCoefficient == 0 {
+		lotLimitCoefficient = 1
+	}
+
+	baseLimit := currentLotSize * auth.initTakerLotLimit * lotLimitCoefficient
 
 	// The base limit scales with bond strength (plus one if legacy fee paid).
 	// This is particularly important for an account that has offset their

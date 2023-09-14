@@ -227,6 +227,15 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) ([]string, error) {
 				schema := marketSchema(mkt.Name)
 				purgeMarkets = append(purgeMarkets, schema)
 			}
+			if mkt.LotLimitCoefficient != existingMkt.LotLimitCoefficient {
+				err = updateLotLimitCoefficient(db, publicSchema, mkt.Name, mkt.LotLimitCoefficient)
+				if err != nil {
+					return nil, fmt.Errorf("unable to update lot limit coefficient for %s: %w", mkt.Name, err)
+				}
+				// archiver.markets use market schema name.
+				schema := marketSchema(mkt.Name)
+				purgeMarkets = append(purgeMarkets, schema)
+			}
 		}
 
 		// Create the tables in the markets schema.
@@ -252,5 +261,21 @@ func updateLotSize(db sqlQueryExecutor, schema, mktName string, lotSize uint64) 
 		return err
 	}
 	log.Debugf("Updated %s lot size to %d.", mktName, lotSize)
+	return nil
+}
+
+// updateLotLimitCoefficient updates the lot limit coefficient for a market. Must only be called on an
+// existing market.
+func updateLotLimitCoefficient(db sqlQueryExecutor, schema, mktName string, lotLimitCoefficient uint64) error {
+	if schema == "" {
+		schema = publicSchema
+	}
+	nameSpacedTable := schema + "." + marketsTableName
+	stmt := fmt.Sprintf(internal.UpdateLotLimitCoefficient, nameSpacedTable)
+	_, err := db.Exec(stmt, mktName, lotLimitCoefficient)
+	if err != nil {
+		return err
+	}
+	log.Debugf("Updated %s lot limit coefficient to %d.", mktName, lotLimitCoefficient)
 	return nil
 }
