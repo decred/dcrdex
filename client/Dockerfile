@@ -10,16 +10,16 @@
 #
 
 # frontend build
-FROM node:19-buster-slim AS nodebuilder
+FROM node:20-bookworm-slim AS nodebuilder
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git
 WORKDIR /root/dex
 COPY . .
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git
 WORKDIR /root/dex/client/webserver/site/
 RUN npm clean-install
 RUN npm run build
 
 # dexc binary build
-FROM golang:1.19-alpine AS gobuilder
+FROM golang:1.21-alpine AS gobuilder
 COPY --from=nodebuilder /root/dex/ /root/dex/
 WORKDIR /root/dex/client/cmd/dexc/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
@@ -27,7 +27,7 @@ WORKDIR /root/dex/client/cmd/dexcctl/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
 
 # Final image
-FROM debian:buster-slim
+FROM debian:bookworm-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates
 WORKDIR /dex
 ENV HOME /dex
