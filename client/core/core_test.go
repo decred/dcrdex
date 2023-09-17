@@ -10513,7 +10513,9 @@ func TestUpdateBondOptions(t *testing.T) {
 	var targetTierZero uint64 = 0
 	defaultMaxBondedAmt := maxBondedMult * bondAsset.Amt * targetTier
 	tooLowMaxBonded := defaultMaxBondedAmt - 1
-	singlyBondedReserves := bondAsset.Amt*targetTier + bondFeeBuffer
+	// Double because we will reserve for the bond that's about to be posted
+	// in rotateBonds too.
+	singlyBondedReserves := bondAsset.Amt*targetTier*2 + bondFeeBuffer
 
 	type acctState struct {
 		targetTier   uint64

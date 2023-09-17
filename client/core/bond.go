@@ -258,7 +258,7 @@ func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 	}
 }
 
-// minBondReserveTiers calculates the minimum number of tiers that we need to
+// minBondReserves calculates the minimum number of tiers that we need to
 // reserve funds for. minBondReserveTiers must be called with the authMtx
 // RLocked.
 func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
@@ -266,7 +266,7 @@ func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
 	if targetTier == 0 {
 		return 0
 	}
-	// Keep a list of tuples of [weakTime, bondStrength]. Later, we'll checks
+	// Keep a list of tuples of [weakTime, bondStrength]. Later, we'll check
 	// these against expired bonds, to see how many tiers we can expect to have
 	// refunded funds avilable for.
 	activeTiers := make([][2]uint64, 0)
@@ -278,8 +278,8 @@ func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
 		weakTime := bond.LockTime - bondExpiry - pBuffer
 		ba := dexCfg.BondAssets[dex.BipIDSymbol(bond.AssetID)]
 		if ba == nil {
-			// Bond asset no longer supported Can't calculate strength. Consdier
-			// it strength one.
+			// Bond asset no longer supported. Can't calculate strength.
+			// Consider it strength one.
 			activeTiers = append(activeTiers, [2]uint64{weakTime, 1})
 			continue
 		}
@@ -295,11 +295,13 @@ func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
 			break
 		}
 	}
+
 	// If our active+pending bonds don't cover our target tier for some reason,
-	// we need to add the missing bond strength.
-	reserveTiers := targetTier - tierSum
+	// we need to add the missing bond strength. Double-count because we
+	// needed to renew these bonds too.
+	reserveTiers := (targetTier - tierSum) * 2
 	sort.Slice(activeTiers, func(i, j int) bool {
-		return activeTiers[i][0] < activeTiers[j][1]
+		return activeTiers[i][0] < activeTiers[j][0]
 	})
 	sort.Slice(acct.expiredBonds, func(i, j int) bool { // probably already is sorted, but whatever
 		return acct.expiredBonds[i].LockTime < acct.expiredBonds[j].LockTime
