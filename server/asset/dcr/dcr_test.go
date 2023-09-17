@@ -22,6 +22,7 @@ import (
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -741,7 +742,7 @@ func testMsgTxRevocation() *testMsgTx {
 
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
-	dcr := unconnectedDCR(tLogger, nil) // never actually Connect, so no rpc config
+	dcr := unconnectedDCR(&asset.BackendConfig{Logger: tLogger}, nil) // never actually Connect, so no rpc config
 	dcr.node = &testNode{}
 
 	ctx, cancel := context.WithCancel(context.Background())

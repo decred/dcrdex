@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
 )
 
@@ -50,7 +51,11 @@ func TestMain(m *testing.M) {
 		}()
 
 		logger := dex.StdOutLogger("LTCTEST", dex.LevelTrace)
-		dexAsset, err := NewBackend("", logger, dex.Mainnet)
+		dexAsset, err := NewBackend(&asset.BackendConfig{
+			AssetID: BipID,
+			Logger:  logger,
+			Net:     dex.Mainnet,
+		})
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1

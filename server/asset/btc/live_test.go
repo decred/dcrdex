@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
@@ -96,7 +97,12 @@ func TestMain(m *testing.M) {
 	doIt := func() int {
 		logger := dex.StdOutLogger("BTCTEST", dex.LevelTrace)
 
-		dexAsset, err := NewBackend(os.Getenv("DEX_BTC_CONFIGPATH"), logger, dex.Mainnet)
+		dexAsset, err := NewBackend(&asset.BackendConfig{
+			AssetID:    BipID,
+			ConfigPath: os.Getenv("DEX_BTC_CONFIGPATH"),
+			Logger:     logger,
+			Net:        dex.Mainnet,
+		})
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1

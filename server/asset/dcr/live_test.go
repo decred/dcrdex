@@ -33,6 +33,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/wire"
@@ -62,7 +63,11 @@ func TestMain(m *testing.M) {
 		}()
 
 		var err error
-		dcr, err = NewBackend("", logger, dex.Mainnet)
+		dcr, err = NewBackend(&asset.BackendConfig{
+			AssetID: BipID,
+			Logger:  logger,
+			Net:     dex.Mainnet,
+		})
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1

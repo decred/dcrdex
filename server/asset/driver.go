@@ -36,7 +36,7 @@ type driverBase interface {
 type Driver interface {
 	driverBase
 	// Setup should create a Backend, but not start the backend connection.
-	Setup(configPath string, logger dex.Logger, network dex.Network) (Backend, error)
+	Setup(*BackendConfig) (Backend, error)
 }
 
 // TokenDriver is the interface required of all token assets.
@@ -132,15 +132,23 @@ func RegisterToken(assetID uint32, drv TokenDriver) {
 	tokens[assetID] = drv
 }
 
+type BackendConfig struct {
+	AssetID    uint32
+	ConfigPath string
+	Logger     dex.Logger
+	Net        dex.Network
+	RelayAddr  string
+}
+
 // Setup sets up the named asset. The RPC connection parameters are obtained
 // from the asset's configuration file located at configPath. Setup is only
 // called for base chain assets, not tokens.
-func Setup(assetID uint32, configPath string, logger dex.Logger, network dex.Network) (Backend, error) {
-	drv, ok := drivers[assetID]
+func Setup(cfg *BackendConfig) (Backend, error) {
+	drv, ok := drivers[cfg.AssetID]
 	if !ok {
-		return nil, fmt.Errorf("asset: unknown asset driver %d", assetID)
+		return nil, fmt.Errorf("asset: unknown asset driver %d", cfg.AssetID)
 	}
-	return drv.Setup(configPath, logger, network)
+	return drv.Setup(cfg)
 }
 
 // Version retrieves the version of the named asset's Backend implementation.

@@ -74,6 +74,6 @@ type Driver struct {
 }
 
 // Setup creates the ETH backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, net dex.Network) (asset.Backend, error) {
-	return eth.NewEVMBackend(BipID, configPath, logger, dexpolygon.ContractAddresses, registeredTokens, net)
+func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
+	return eth.NewEVMBackend(cfg, dexpolygon.ContractAddresses, registeredTokens)
 }

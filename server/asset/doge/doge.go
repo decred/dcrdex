@@ -20,8 +20,8 @@ var maxFeeBlocks = 16
 type Driver struct{}
 
 // Setup creates the LTC backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	return NewBackend(configPath, logger, network)
+func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
+	return NewBackend(cfg)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -54,9 +54,9 @@ const (
 
 // NewBackend generates the network parameters and creates a ltc backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 	var params *chaincfg.Params
-	switch network {
+	switch cfg.Net {
 	case dex.Mainnet:
 		params = dexdoge.MainNetParams
 	case dex.Testnet:
@@ -64,7 +64,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	case dex.Regtest:
 		params = dexdoge.RegressionNetParams
 	default:
-		return nil, fmt.Errorf("unknown network ID %v", network)
+		return nil, fmt.Errorf("unknown network ID %v", cfg.Net)
 	}
 
 	// Designate the clone ports. These will be overwritten by any explicit
@@ -75,6 +75,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Simnet:  "18332",
 	}
 
+	configPath := cfg.ConfigPath
 	if configPath == "" {
 		configPath = dexbtc.SystemConfigPath("dogecoin")
 	}
@@ -88,8 +89,8 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		// think about how to transition once activated.
 		Segwit:               false,
 		ConfigPath:           configPath,
-		Logger:               logger,
-		Net:                  network,
+		Logger:               cfg.Logger,
+		Net:                  cfg.Net,
 		ChainParams:          params,
 		Ports:                ports,
 		DumbFeeEstimates:     true, // dogecoind actually has estimatesmartfee, but it is marked deprecated
@@ -99,5 +100,6 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		MaxFeeBlocks:         maxFeeBlocks,
 		BooleanGetBlockRPC:   true,
 		BlockDeserializer:    dexdoge.DeserializeBlock,
+		RelayAddr:            cfg.RelayAddr,
 	})
 }

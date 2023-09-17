@@ -20,8 +20,8 @@ var maxFeeBlocks = 3
 type Driver struct{}
 
 // Setup creates the BCH backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	return NewBackend(configPath, logger, network)
+func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
+	return NewBackend(cfg)
 }
 
 // Version returns the Backend implementation's version number.
@@ -53,9 +53,9 @@ const (
 
 // NewBackend generates the network parameters and creates a bch backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 	var params *chaincfg.Params
-	switch network {
+	switch cfg.Net {
 	case dex.Mainnet:
 		params = dexbch.MainNetParams
 	case dex.Testnet:
@@ -63,7 +63,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	case dex.Regtest:
 		params = dexbch.RegressionNetParams
 	default:
-		return nil, fmt.Errorf("unknown network ID %v", network)
+		return nil, fmt.Errorf("unknown network ID %v", cfg.Net)
 	}
 
 	// Designate the clone ports. These will be overwritten by any explicit
@@ -75,6 +75,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Simnet:  "18443",
 	}
 
+	configPath := cfg.ConfigPath
 	if configPath == "" {
 		configPath = dexbtc.SystemConfigPath("bitcoin") // Yes, Bitcoin Cash's default config path is the same as bitcoin.
 	}
@@ -84,8 +85,8 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Segwit:           false,
 		ConfigPath:       configPath,
 		AddressDecoder:   dexbch.DecodeCashAddress,
-		Logger:           logger,
-		Net:              network,
+		Logger:           cfg.Logger,
+		Net:              cfg.Net,
 		ChainParams:      params,
 		Ports:            ports,
 		DumbFeeEstimates: true,
@@ -95,6 +96,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		NoCompetitionFeeRate: 2,
 		MaxFeeBlocks:         maxFeeBlocks,
 		ArglessFeeEstimates:  true,
+		RelayAddr:            cfg.RelayAddr,
 	})
 	if err != nil {
 		return nil, err

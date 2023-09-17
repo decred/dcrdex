@@ -20,8 +20,8 @@ var maxFeeBlocks = 16
 type Driver struct{}
 
 // Setup creates the DGB backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	return NewBackend(configPath, logger, network)
+func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
+	return NewBackend(cfg)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -54,9 +54,9 @@ const (
 
 // NewBackend generates the network parameters and creates a dgb backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 	var params *chaincfg.Params
-	switch network {
+	switch cfg.Net {
 	case dex.Mainnet:
 		params = dexdgb.MainNetParams
 	case dex.Testnet:
@@ -64,7 +64,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	case dex.Regtest:
 		params = dexdgb.RegressionNetParams
 	default:
-		return nil, fmt.Errorf("unknown network ID %v", network)
+		return nil, fmt.Errorf("unknown network ID %v", cfg.Net)
 	}
 
 	// Designate the clone ports. These will be overwritten by any explicit
@@ -75,6 +75,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Simnet:  "18443",
 	}
 
+	configPath := cfg.ConfigPath
 	if configPath == "" {
 		configPath = dexbtc.SystemConfigPath("digibyte")
 	}
@@ -83,12 +84,13 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Name:                 assetName,
 		Segwit:               true,
 		ConfigPath:           configPath,
-		Logger:               logger,
-		Net:                  network,
+		Logger:               cfg.Logger,
+		Net:                  cfg.Net,
 		ChainParams:          params,
 		Ports:                ports,
 		FeeConfs:             feeConfs,
 		NoCompetitionFeeRate: 210, // 0.0021 DGB/kB
 		MaxFeeBlocks:         maxFeeBlocks,
+		RelayAddr:            cfg.RelayAddr,
 	})
 }
