@@ -219,6 +219,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
     Doc.bind(page.showVSPs, 'click', () => { this.showVSPPicker() })
     Doc.bind(page.vspDisplay, 'click', () => { this.showVSPPicker() })
+    bindForm(page.vspPicker, page.customVspSubmit, async () => { this.setCustomVSP() })
     Doc.bind(page.purchaseTicketsBttn, 'click', () => { this.showPurchaseTicketsDialog() })
     bindForm(page.purchaseTicketsForm, page.purchaserSubmit, () => { this.purchaseTickets() })
     Doc.bind(page.purchaserInput, 'change', () => { this.purchaserInputChanged() })
@@ -1027,6 +1028,12 @@ export default class WalletsPage extends BasePage {
       return
     }
     this.setVSPViz(vsp.url)
+  }
+
+  setCustomVSP () {
+    const assetID = this.selectedAssetID
+    const vsp = { url: this.page.customVspUrl.value } as VotingServiceProvider
+    this.setVSP(assetID, vsp)
   }
 
   pageOfTickets (pgNum: number) {
