@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -45,6 +46,7 @@ var _ clientCore = (*core.Core)(nil)
 // Avoids having to mock the entire orderbook in tests.
 type dexOrderBook interface {
 	MidGap() (uint64, error)
+	VWAP(lots, lotSize uint64, sell bool) (avg, extrema uint64, filled bool, err error)
 }
 
 var _ dexOrderBook = (*orderbook.OrderBook)(nil)
@@ -729,7 +731,7 @@ func (m *MarketMaker) handleNotification(n core.Notification) {
 }
 
 // Run starts the MarketMaker. There can only be one BotConfig per dex market.
-func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) error {
+func (m *MarketMaker) Run(ctx context.Context, botCfgs []*BotConfig, cexCfgs []*CEXConfig, pw []byte) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return errors.New("market making is already running")
 	}
@@ -743,7 +745,7 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 
 	m.ctx, m.die = context.WithCancel(ctx)
 
-	enabledCfgs, err := validateAndFilterEnabledConfigs(cfgs)
+	enabledCfgs, err := validateAndFilterEnabledConfigs(botCfgs)
 	if err != nil {
 		return err
 	}
@@ -762,6 +764,8 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 	}
 
 	user := m.core.User()
+	cexes := make(map[string]libxc.CEX)
+	cexCMs := make(map[string]*dex.ConnectionMaster)
 
 	startedMarketMaking = true
 
@@ -784,12 +788,47 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 		}
 	}()
 
-	// Start each bot.
+	var cexCfgMap map[string]*CEXConfig
+	if len(cexCfgs) > 0 {
+		cexCfgMap = make(map[string]*CEXConfig, len(cexCfgs))
+		for _, cexCfg := range cexCfgs {
+			cexCfgMap[cexCfg.CEXName] = cexCfg
+		}
+	}
+
+	getConnectedCEX := func(cexName string) (libxc.CEX, error) {
+		var cex libxc.CEX
+		var found bool
+		if cex, found = cexes[cexName]; !found {
+			cexCfg := cexCfgMap[cexName]
+			if cexCfg == nil {
+				return nil, fmt.Errorf("no CEX config provided for %s", cexName)
+			}
+			logger := m.log.SubLogger(fmt.Sprintf("CEX-%s", cexName))
+			cex, err = libxc.NewCEX(cexName, cexCfg.APIKey, cexCfg.APISecret, logger, dex.Simnet)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create CEX: %v", err)
+			}
+			cm := dex.NewConnectionMaster(cex)
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect to CEX: %v", err)
+			}
+			cexCMs[cexName] = cm
+			err = cm.Connect(m.ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect to CEX: %v", err)
+			}
+			cexes[cexName] = cex
+		}
+		return cex, nil
+	}
+
 	for _, cfg := range enabledCfgs {
 		switch {
 		case cfg.MMCfg != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
+				defer wg.Done()
 				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
 				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
 				var baseFiatRate, quoteFiatRate float64
@@ -798,16 +837,31 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 					quoteFiatRate = user.FiatRates[cfg.QuoteAsset]
 				}
 				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, baseFiatRate, quoteFiatRate, logger)
-				wg.Done()
+			}(cfg)
+		case cfg.ArbCfg != nil:
+			wg.Add(1)
+			go func(cfg *BotConfig) {
+				defer wg.Done()
+				logger := m.log.SubLogger(fmt.Sprintf("Arbitrage-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
+				cex, err := getConnectedCEX(cfg.ArbCfg.CEXName)
+				if err != nil {
+					logger.Errorf("failed to connect to CEX: %v", err)
+					return
+				}
+				RunSimpleArbBot(m.ctx, cfg, m.core, cex, logger)
 			}(cfg)
 		default:
-			m.log.Errorf("Only basic market making is supported at this time. Skipping %s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+			m.log.Errorf("No bot config provided. Skipping %s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
 		}
 	}
 
 	go func() {
 		wg.Wait()
-		m.log.Infof("All bots have stopped running.")
+		for cexName, cm := range cexCMs {
+			m.log.Infof("Shutting down connection to %s", cexName)
+			cm.Wait()
+			m.log.Infof("Connection to %s shut down", cexName)
+		}
 		m.running.Store(false)
 	}()
 

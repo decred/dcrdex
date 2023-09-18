@@ -643,7 +643,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 		label     string
 		orderBook *OrderBook
 		n         int
-		side      uint8
+		sell      bool
 		expected  []*Order
 		wantErr   bool
 	}{
@@ -662,7 +662,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:    3,
-			side: msgjson.BuyOrderNum,
+			sell: false,
 			expected: []*Order{
 				makeOrder([32]byte{'e'}, msgjson.BuyOrderNum, 8, 4, 12),
 				makeOrder([32]byte{'d'}, msgjson.BuyOrderNum, 5, 3, 10),
@@ -685,7 +685,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:        3,
-			side:     msgjson.SellOrderNum,
+			sell:     true,
 			expected: []*Order{},
 			wantErr:  false,
 		},
@@ -704,7 +704,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:    5,
-			side: msgjson.SellOrderNum,
+			sell: true,
 			expected: []*Order{
 				makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
 				makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
@@ -728,7 +728,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				false,
 			),
 			n:        5,
-			side:     msgjson.SellOrderNum,
+			sell:     true,
 			expected: nil,
 			wantErr:  true,
 		},
@@ -747,7 +747,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:    3,
-			side: msgjson.SellOrderNum,
+			sell: true,
 			expected: []*Order{
 				makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
 				makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
@@ -758,7 +758,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 	}
 
 	for idx, tc := range tests {
-		best, _, err := tc.orderBook.BestNOrders(tc.n, tc.side)
+		best, _, err := tc.orderBook.BestNOrders(tc.n, tc.sell)
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("[OrderBook.BestNOrders] #%d: error: %v, wantErr: %v",
 				idx+1, err, tc.wantErr)
@@ -913,6 +913,140 @@ func TestOrderBookBestFill(t *testing.T) {
 					"index %d to have quantity %d, got %d", idx+1, i,
 					tc.expected[i].Quantity, best[i].Quantity)
 			}
+		}
+	}
+}
+
+func TestVWAP(t *testing.T) {
+	orders := []*Order{
+		// buys
+		makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 200, 2),
+		makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 20, 180, 2),
+		makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 160, 2),
+
+		// sells
+		makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 220, 2),
+		makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 20, 240, 2),
+		makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 260, 2),
+	}
+
+	ob := makeOrderBook(1, "ob", orders, make([]*cachedOrderNote, 0), true)
+
+	type test struct {
+		sell    bool
+		lots    uint64
+		lotSize uint64
+
+		expectedFilled  bool
+		expectedAvg     uint64
+		expectedExtrema uint64
+	}
+
+	tests := []test{
+		{
+			sell:    true,
+			lots:    1,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     220,
+			expectedExtrema: 220,
+		},
+		{
+			sell:    true,
+			lots:    2,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     230,
+			expectedExtrema: 240,
+		},
+		{
+			sell:    true,
+			lots:    3,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     (220 + 240 + 240) / 3,
+			expectedExtrema: 240,
+		},
+		{
+			sell:    true,
+			lots:    4,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     (220 + 240 + 240 + 260) / 4,
+			expectedExtrema: 260,
+		},
+		{
+			sell:    true,
+			lots:    5,
+			lotSize: 10,
+
+			expectedFilled: false,
+		},
+		{
+			sell:    false,
+			lots:    1,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     200,
+			expectedExtrema: 200,
+		},
+		{
+			sell:    false,
+			lots:    2,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     190,
+			expectedExtrema: 180,
+		},
+		{
+			sell:    false,
+			lots:    3,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     (200 + 180 + 180) / 3,
+			expectedExtrema: 180,
+		},
+		{
+			sell:    false,
+			lots:    4,
+			lotSize: 10,
+
+			expectedFilled:  true,
+			expectedAvg:     (200 + 180 + 180 + 160) / 4,
+			expectedExtrema: 160,
+		},
+		{
+			sell:    false,
+			lots:    5,
+			lotSize: 10,
+
+			expectedFilled: false,
+		},
+	}
+
+	for idx, test := range tests {
+		avg, extrema, filled, err := ob.VWAP(test.lots, test.lotSize, test.sell)
+		if err != nil {
+			t.Fatalf("[VWAP] #%d: unexpected error: %v", idx+1, err)
+		}
+
+		if filled != test.expectedFilled {
+			t.Fatalf("[VWAP] #%d: expected filled to be %t, got %t", idx+1, test.expectedFilled, filled)
+		}
+
+		if avg != test.expectedAvg {
+			t.Fatalf("[VWAP] #%d: expected average to be %d, got %d", idx+1, test.expectedAvg, avg)
+		}
+
+		if extrema != test.expectedExtrema {
+			t.Fatalf("[VWAP] #%d: expected extrema to be %d, got %d", idx+1, test.expectedExtrema, extrema)
 		}
 	}
 }

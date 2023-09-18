@@ -1,37 +1,33 @@
-[{
-    "host": "127.0.0.1:17273",
-    "baseAsset": 42,
-    "quoteAsset": 0,
-    "baseBalanceType": 0,
-    "baseBalance": 50,
-    "quoteBalanceType": 0,
-    "quoteBalance": 50,
-    "marketMakingConfig": {
-        "gapStrategy": "multiplier",
-        "sellPlacements": [{
-            "gapFactor": 2,
-            "lots": 2
-        },{
-            "gapFactor": 3,
-            "lots": 1
-        }],
-        "buyPlacements": [{
-            "gapFactor": 2,
-            "lots": 2
-        },{
-            "gapFactor": 3,
-            "lots": 1
-        }],
-        "driftTolerance": 0.001,
-        "oracleWeighting": 0.5,
-        "oracleBias": 0,
-        "emptyMarketRate": 0.005,
-        "baseOptions": {
-            "multisplit": "true"
-        },
-        "quoteOptions": {
-            "multisplit": "true",
-            "multisplitbuffer": "5"
+{
+    "botCfgs": [
+        {
+            "host": "127.0.0.1:17273",
+            "baseAsset": 60,
+            "quoteAsset": 0,
+            "baseBalanceType": 0,
+            "quoteBalanceType": 0,
+            "baseBalance": 100,
+            "quoteBalance": 100,
+            "arbConfig": {
+                "cexName": "Binance",
+                "profitTrigger": 0.01,
+                "maxActiveArbs": 5,
+                "numEpochsLeaveOpen": 5
+            },
+            "baseOptions": {
+                "multisplit": "true"
+            },
+            "quoteOptions": {
+                "multisplit": "true",
+                "multisplitbuffer": "5"
+            }
         }
-    }
-}]
+    ],
+    "cexCfgs": [
+        {
+            "cexName": "Binance",
+            "apiKey": "",
+            "apiSecret": ""
+        }
+    ]
+}

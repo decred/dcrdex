@@ -659,7 +659,6 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 			counterConfs, int64(t.metaData.ToSwapConf),
 			int64(mt.redemptionConfs), int64(mt.redemptionConfsReq)))
 	}
-
 	corder.AllFeesConfirmed = allFeesConfirmed
 
 	return corder

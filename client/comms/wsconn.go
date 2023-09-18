@@ -139,6 +139,8 @@ type WsCfg struct {
 	// RawHandler overrides the msgjson parsing and forwards all messages to
 	// the provided function.
 	RawHandler func([]byte)
+
+	ConnectHeaders http.Header
 }
 
 // wsConn represents a client websocket connection.
@@ -231,7 +233,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		dialer.Proxy = http.ProxyFromEnvironment
 	}
 
-	ws, _, err := dialer.DialContext(ctx, conn.cfg.URL, nil)
+	ws, _, err := dialer.DialContext(ctx, conn.cfg.URL, conn.cfg.ConnectHeaders)
 	if err != nil {
 		if isErrorInvalidCert(err) {
 			conn.setConnectionStatus(InvalidCert)
@@ -291,7 +293,6 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		} else {
 			conn.read(ctx)
 		}
-
 	}()
 
 	return nil
@@ -357,10 +358,6 @@ func (conn *wsConn) close() {
 
 func (conn *wsConn) readRaw(ctx context.Context) {
 	for {
-		if ctx.Err() != nil {
-			return
-		}
-
 		// Lock since conn.ws may be set by connect.
 		conn.wsMtx.Lock()
 		ws := conn.ws
@@ -368,6 +365,10 @@ func (conn *wsConn) readRaw(ctx context.Context) {
 
 		// Block until a message is received or an error occurs.
 		_, msgBytes, err := ws.ReadMessage()
+		// Drop the read error on context cancellation.
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			conn.handleReadError(err)
 			return
@@ -601,6 +602,7 @@ func (conn *wsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) erro
 // For example, to wait on a response or timeout:
 //
 //	errChan := make(chan error, 1)
+//
 //	err := conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
 //	    errChan <- msg.UnmarshalResult(responseStructPointer)
 //	}, timeout, func() {

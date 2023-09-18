@@ -11,17 +11,22 @@ import (
 type MarketMakingWithCEXConfig struct {
 }
 
-// ArbitrageConfig is the configuration for an arbitrage bot that only places
-// when there is a profitable arbitrage opportunity.
-type ArbitrageConfig struct {
-}
-
 type BalanceType uint8
 
 const (
 	Percentage BalanceType = iota
 	Amount
 )
+
+// CEXConfig is a configuration for connecting to a CEX API.
+type CEXConfig struct {
+	// CEXName is the name of the cex.
+	CEXName string `json:"cexName"`
+	// APIKey is the API key for the CEX.
+	APIKey string `json:"apiKey"`
+	// APISecret is the API secret for the CEX.
+	APISecret string `json:"apiSecret"`
+}
 
 // BotConfig is the configuration for a market making bot.
 // The balance fields are the initial amounts that will be reserved to use for
@@ -40,7 +45,7 @@ type BotConfig struct {
 	// Only one of the following configs should be set
 	MMCfg        *MarketMakingConfig        `json:"marketMakingConfig,omitempty"`
 	MMWithCEXCfg *MarketMakingWithCEXConfig `json:"marketMakingWithCEXConfig,omitempty"`
-	ArbCfg       *ArbitrageConfig           `json:"arbitrageConfig,omitempty"`
+	ArbCfg       *SimpleArbConfig           `json:"arbConfig,omitempty"`
 
 	Disabled bool `json:"disabled"`
 }

@@ -3,7 +3,9 @@
 
 package dex
 
-import "strings"
+import (
+	"strings"
+)
 
 var symbolBipIDs map[string]uint32
 
@@ -635,4 +637,23 @@ var bipIDs = map[uint32]string{
 	91927009: "kusd",
 	99999998: "fluid",
 	99999999: "qkc",
+}
+
+// TokenChains is a map of token symbol to a list of [2]uint32, where the first
+// element is the token's BIP ID and the second element is the chain's BIP ID.
+var TokenChains = make(map[string][][2]uint32)
+
+func init() {
+	for id, symbol := range bipIDs {
+		parts := strings.Split(symbol, ".")
+		if len(parts) < 2 {
+			continue
+		}
+		tokenSymbol, chainSymbol := parts[0], parts[1]
+		chainID, found := BipSymbolID(chainSymbol)
+		if !found {
+			panic("unknown chain symbol: " + chainSymbol)
+		}
+		TokenChains[tokenSymbol] = append(TokenChains[tokenSymbol], [2]uint32{id, chainID})
+	}
 }
