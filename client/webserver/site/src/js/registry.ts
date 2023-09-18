@@ -241,7 +241,7 @@ export interface WalletDefinition {
   description: string
   configpath: string
   configopts: ConfigOption[]
-  multifundingopts: ConfigOption[]
+  multifundingopts: OrderOption[]
   noauth: boolean
   guidelink: string
 }
@@ -262,9 +262,7 @@ export interface ConfigOption {
   repeatN?: number
   regAsset?: number
   required?: boolean
-  quoteAssetOnly?: boolean
   dependsOn?: string
-  range?: XYRange
 }
 
 export interface Coin {
@@ -498,6 +496,7 @@ export interface OrderOption extends ConfigOption {
   boolean?: BooleanConfig
   xyRange?: XYRange
   showByDefault?: boolean
+  quoteAssetOnly?: boolean
 }
 
 export interface SwapEstimate {

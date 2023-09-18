@@ -33,6 +33,7 @@ type XYRangePoint struct {
 // OrderOption is an available option for an order.
 type OrderOption struct {
 	ConfigOption
+	QuoteAssetOnly bool `json:"quoteAssetOnly"`
 
 	// Fields below are mutually exclusive. The consumer should use nilness to
 	// determine what type of option to display.

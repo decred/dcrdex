@@ -255,7 +255,7 @@ type WalletDefinition struct {
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*ConfigOption `json:"configopts"`
 	// MultiFundingOpts are options related to funding multi-trades.
-	MultiFundingOpts []*ConfigOption `json:"multifundingopts"`
+	MultiFundingOpts []*OrderOption `json:"multifundingopts"`
 	// NoAuth indicates that the wallet does not implement the Authenticator
 	// interface. A better way to check is to use the wallet traits but wallet
 	// construction is presently required to discern traits.
@@ -330,13 +330,11 @@ type ConfigOption struct {
 	Repeatable string `json:"repeatable"`
 	// RepeatN signals how many times text input should be repeated, replicating
 	// this option N times.
-	RepeatN        int32 `json:"repeatN"`
-	Required       bool  `json:"required"`
-	QuoteAssetOnly bool  `json:"quoteAssetOnly"`
+	RepeatN  int32 `json:"repeatN"`
+	Required bool  `json:"required"`
 	// DependsOn is the key of another config option that if is set to true,
 	// this config option will be shown.
-	DependsOn string   `json:"dependsOn"`
-	Range     *XYRange `json:"range"`
+	DependsOn string `json:"dependsOn"`
 
 	// ShowByDefault to show or not options on "hide advanced options".
 	ShowByDefault bool `json:"showByDefault,omitempty"`

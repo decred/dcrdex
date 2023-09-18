@@ -361,7 +361,6 @@ export default class MarketMakerPage extends BasePage {
       // Sort by lots.
       return b.spot.vol24 / b.lotsize - a.spot.vol24 / a.lotsize
     })
-    console.log(JSON.stringify(filteredMkts))
     return filteredMkts
   }
 

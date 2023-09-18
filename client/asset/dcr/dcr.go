@@ -231,24 +231,28 @@ var (
 		IsBirthdayConfig:  true,
 	}}
 
-	multiFundingOpts = []*asset.ConfigOption{
+	multiFundingOpts = []*asset.OrderOption{
 		{
-			Key:         multiSplitKey,
-			DisplayName: "Allow multi split",
-			Description: "Allow split funding transactions that pre-size outputs to " +
-				"prevent excessive overlock.",
-			IsBoolean:    true,
-			DefaultValue: true,
+			ConfigOption: asset.ConfigOption{
+				Key:         multiSplitKey,
+				DisplayName: "Allow multi split",
+				Description: "Allow split funding transactions that pre-size outputs to " +
+					"prevent excessive overlock.",
+				IsBoolean:    true,
+				DefaultValue: true,
+			},
 		},
 		{
-			Key:         multiSplitBufferKey,
-			DisplayName: "Multi split buffer",
-			Description: "Add an integer percent buffer to split output amounts to " +
-				"facilitate output reuse. This is only required for quote assets.",
-			DefaultValue:   5,
+			ConfigOption: asset.ConfigOption{
+				Key:         multiSplitBufferKey,
+				DisplayName: "Multi split buffer",
+				Description: "Add an integer percent buffer to split output amounts to " +
+					"facilitate output reuse. This is only required for quote assets.",
+				DefaultValue: 5,
+				DependsOn:    multiSplitKey,
+			},
 			QuoteAssetOnly: true,
-			DependsOn:      multiSplitKey,
-			Range: &asset.XYRange{
+			XYRange: &asset.XYRange{
 				Start: asset.XYRangePoint{
 					Label: "0%",
 					X:     0,

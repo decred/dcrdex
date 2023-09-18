@@ -6,7 +6,7 @@ import {
   BalanceType,
   app,
   MarketReport,
-  ConfigOption
+  OrderOption
 } from './registry'
 import { postJSON } from './http'
 import Doc from './doc'
@@ -1015,7 +1015,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         return this.updatedConfig.marketMakingConfig.baseOptions[key]
       }
     }
-    const addOpt = (opt: ConfigOption, quote: boolean) => {
+    const addOpt = (opt: OrderOption, quote: boolean) => {
       let currVal
       let container
       if (quote) {
@@ -1047,20 +1047,20 @@ export default class MarketMakerSettingsPage extends BasePage {
         storeWalletSettingControl(opt.key, tmpl.input, setValue, quote)
         if (opt.description) tmpl.tooltip.dataset.tooltip = opt.description
         container.appendChild(setting)
-      } else if (opt.range) {
+      } else if (opt.xyRange) {
         setting = page.rangeSettingTmpl.cloneNode(true) as PageElement
         const tmpl = Doc.parseTemplate(setting)
         tmpl.name.textContent = opt.displayname
         if (opt.description) tmpl.tooltip.dataset.tooltip = opt.description
         const currValNum = parseInt(currVal)
         const handler = new XYRangeHandler(
-          opt.range,
+          opt.xyRange,
           currValNum,
           (x: number) => { setWalletOption(quote, opt.key, `${x}`) },
           () => { this.updateModifiedMarkers() },
           () => { /* do nothing */ },
-          opt.range.roundX,
-          opt.range.roundY,
+          opt.xyRange.roundX,
+          opt.xyRange.roundY,
           running
         )
         const setValue = (x: string) => {
