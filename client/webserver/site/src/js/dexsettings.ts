@@ -13,6 +13,7 @@ import {
 } from './registry'
 
 const animationLength = 300
+const bondOverlap = 2 // See client/core/bond.go#L28
 
 export default class DexSettingsPage extends BasePage {
   body: HTMLElement
@@ -36,6 +37,8 @@ export default class DexSettingsPage extends BasePage {
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
+    Doc.bind(page.bondAssetSelect, 'change', () => this.updateBondAssetCosts())
+    Doc.bind(page.bondTargetTier, 'input', () => this.updateBondAssetCosts())
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
       window.location.assign(`/dexsettings/${xc.host}`)
@@ -160,9 +163,12 @@ export default class DexSettingsPage extends BasePage {
   async prepareBondDetailsForm () {
     const page = this.page
     const xc = app().user.exchanges[this.host]
-    // Populate bond details on this form
+    // Update bond details on this form
+    const targetTier = xc.auth.targetTier.toString()
+    page.currentTargetTier.textContent = `${targetTier}`
     page.currentTier.textContent = `${xc.auth.effectiveTier}`
-    page.bondTargetTier.setAttribute('placeholder', xc.auth.targetTier.toString())
+    page.bondTargetTier.setAttribute('placeholder', targetTier)
+    page.bondTargetTier.value = ''
     Doc.empty(page.bondAssetSelect)
     for (const [assetSymbol, bondAsset] of Object.entries(xc.bondAssets)) {
       const option = document.createElement('option') as HTMLOptionElement
@@ -173,7 +179,50 @@ export default class DexSettingsPage extends BasePage {
     }
     page.bondOptionsErr.textContent = ''
     Doc.hide(page.bondOptionsErr)
+    await this.updateBondAssetCosts()
     this.showForm(page.bondDetailsForm)
+  }
+
+  async updateBondAssetCosts () {
+    const xc = app().user.exchanges[this.host]
+    const page = this.page
+    const bondAssetID = parseInt(page.bondAssetSelect.value ?? '')
+    Doc.hide(page.bondCostFiat.parentElement as Element)
+    Doc.hide(page.bondReservationAmtFiat.parentElement as Element)
+    const assetInfo = xc.assets[bondAssetID]
+    if (!assetInfo) return
+    const bondAsset = xc.bondAssets[assetInfo.symbol]
+    if (!bondAsset) return
+
+    const bondCost = bondAsset.amount
+    const ui = assetInfo.unitInfo
+    const assetID = bondAsset.id
+    Doc.applySelector(page.bondDetailsForm, '.bondAssetSym').forEach((el) => { el.textContent = assetInfo.symbol.toLocaleUpperCase() })
+    page.bondCost.textContent = Doc.formatFullPrecision(bondCost, ui)
+    Doc.showFiatValue(assetID, bondCost, page.bondCostFiat)
+
+    const feeBuffer = await this.getBondsFeeBuffer(assetID, page.bondDetailsForm)
+    if (feeBuffer === 0) {
+      page.bondReservationAmt.textContent = intl.prep(intl.ID_UNAVAILABLE)
+      return
+    }
+
+    const targetTier = parseInt(page.bondTargetTier.value ?? '')
+    let reservation = 0
+    if (targetTier > 0) reservation = bondCost * targetTier * bondOverlap + feeBuffer
+    page.bondReservationAmt.textContent = Doc.formatFullPrecision(reservation, ui)
+    Doc.showFiatValue(assetID, reservation, page.bondReservationAmtFiat)
+  }
+
+  // Retrieve an estimate for the tx fee needed to create new bond reserves.
+  async getBondsFeeBuffer (assetID: number, form: HTMLElement) {
+    const loaded = app().loading(form)
+    const res = await postJSON('/api/bondsfeebuffer', { assetID })
+    loaded()
+    if (!app().checkResponse(res)) {
+      return 0
+    }
+    return res.feeBuffer
   }
 
   async prepareUpdateHost () {
@@ -262,6 +311,7 @@ export default class DexSettingsPage extends BasePage {
       const xc = app().user.exchanges[this.host]
       xc.auth.bondAssetID = bondAssetID
       xc.auth.targetTier = targetTier
+      page.currentTargetTier.textContent = `${targetTier}`
     }
   }
 }

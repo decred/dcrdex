@@ -4,7 +4,8 @@ import {
   LayoutMetrics,
   WalletState,
   PageElement,
-  SupportedAsset
+  SupportedAsset,
+  app
 } from './registry'
 import { RateEncodingFactor } from './orderutil'
 
@@ -465,6 +466,15 @@ export default class Doc {
   static showFormError (el: PageElement, msg: any) {
     el.textContent = msg
     Doc.show(el)
+  }
+
+  // showFiatValue displays the fiat equivalent for the provided amount.
+  static showFiatValue (assetID: number, amount: number, display: PageElement): void {
+    const rate = app().fiatRatesMap[assetID]
+    if (rate) {
+      display.textContent = Doc.formatFiatConversion(amount, rate, app().unitInfo(assetID))
+      Doc.show(display.parentElement as Element)
+    } else Doc.hide(display.parentElement as Element)
   }
 }
 

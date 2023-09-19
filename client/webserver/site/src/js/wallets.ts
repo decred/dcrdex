@@ -240,7 +240,7 @@ export default class WalletsPage extends BasePage {
       const { unitInfo: ui } = app().assets[this.selectedAssetID]
       const amt = parseFloat(page.sendAmt.value || '0')
       const conversionFactor = ui.conventional.conversionFactor
-      this.showFiatValue(this.selectedAssetID, amt * conversionFactor, page.sendValue)
+      Doc.showFiatValue(this.selectedAssetID, amt * conversionFactor, page.sendValue)
     })
 
     // Clicking on maxSend on the send form should populate the amount field.
@@ -358,14 +358,14 @@ export default class WalletsPage extends BasePage {
     } else {
       page.vSendFee.textContent = Doc.formatFullPrecision(txfee, ui)
     }
-    this.showFiatValue(assetID, txfee, page.vSendFeeFiat)
+    Doc.showFiatValue(assetID, txfee, page.vSendFeeFiat)
     page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - txfee, ui)
     page.vTotalSend.textContent = Doc.formatFullPrecision(value, ui)
-    this.showFiatValue(assetID, value, page.vTotalSendFiat)
+    Doc.showFiatValue(assetID, value, page.vTotalSendFiat)
     page.vSendAddr.textContent = page.sendAddr.value || ''
     const bal = wallet.balance.available - value
     page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, ui)
-    this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
+    Doc.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
     Doc.show(page.approxSign)
     // NOTE: All tokens take this route because they cannot pay the fee.
     if (!subtract) {
@@ -374,17 +374,17 @@ export default class WalletsPage extends BasePage {
       let totalSend = value
       if (!token) totalSend += txfee
       page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, ui)
-      this.showFiatValue(assetID, totalSend, page.vTotalSendFiat)
+      Doc.showFiatValue(assetID, totalSend, page.vTotalSendFiat)
       let bal = wallet.balance.available - value
       if (!token) bal -= txfee
       // handle edge cases where bal is not enough to cover totalSend.
       // we don't want a minus display of user bal.
       if (bal <= 0) {
         page.balanceAfterSend.textContent = Doc.formatFullPrecision(0, ui)
-        this.showFiatValue(assetID, 0, page.balanceAfterSendFiat)
+        Doc.showFiatValue(assetID, 0, page.balanceAfterSendFiat)
       } else {
         page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, ui)
-        this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
+        Doc.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
       }
     }
     Doc.hide(page.sendForm)
@@ -1578,7 +1578,7 @@ export default class WalletsPage extends BasePage {
     page.sendAddr.classList.remove('invalid')
     page.sendAddr.value = ''
     page.sendAmt.value = ''
-    this.showFiatValue(assetID, 0, page.sendValue)
+    Doc.showFiatValue(assetID, 0, page.sendValue)
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
     page.sendLogo.src = Doc.logoPath(symbol)
     page.sendName.textContent = ui.conventional.unit
@@ -1609,20 +1609,20 @@ export default class WalletsPage extends BasePage {
         }
         this.maxSend = canSend
         page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)
-        this.showFiatValue(assetID, canSend, page.maxSendFiat)
+        Doc.showFiatValue(assetID, canSend, page.maxSendFiat)
         if (token) {
           const { unitInfo: feeUI, symbol: feeSymbol } = app().assets[token.parentID]
           page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, feeUI) + ' ' + feeSymbol
-          this.showFiatValue(token.parentID, res.txfee, page.maxSendFeeFiat)
+          Doc.showFiatValue(token.parentID, res.txfee, page.maxSendFeeFiat)
         } else {
           page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, ui)
-          this.showFiatValue(assetID, res.txfee, page.maxSendFeeFiat)
+          Doc.showFiatValue(assetID, res.txfee, page.maxSendFeeFiat)
         }
         Doc.show(page.maxSendDisplay)
       }
     }
 
-    this.showFiatValue(assetID, 0, page.sendValue)
+    Doc.showFiatValue(assetID, 0, page.sendValue)
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
     box.dataset.assetID = String(assetID)
     this.showForm(box)
@@ -1668,12 +1668,12 @@ export default class WalletsPage extends BasePage {
     // subtract checkbox for assets that don't have a withdraw method.
     if ((asset.wallet.traits & traitWithdrawer) === 0) {
       page.sendAmt.value = String(this.maxSend / asset.unitInfo.conventional.conversionFactor)
-      this.showFiatValue(asset.id, this.maxSend, page.sendValue)
+      Doc.showFiatValue(asset.id, this.maxSend, page.sendValue)
       page.subtractCheckBox.checked = false
     } else {
       const amt = asset.wallet.balance.available
       page.sendAmt.value = String(amt / asset.unitInfo.conventional.conversionFactor)
-      this.showFiatValue(asset.id, amt, page.sendValue)
+      Doc.showFiatValue(asset.id, amt, page.sendValue)
       page.subtractCheckBox.checked = true
     }
   }
@@ -1864,15 +1864,6 @@ export default class WalletsPage extends BasePage {
     this.updateAssetButton(this.selectedAssetID)
     if (!note.fiatRates[this.selectedAssetID]) return
     this.updateDisplayedAssetBalance()
-  }
-
-  // showFiatValue displays the fiat equivalent for the provided amount.
-  showFiatValue (assetID: number, amount: number, display: PageElement): void {
-    const rate = app().fiatRatesMap[assetID]
-    if (rate) {
-      display.textContent = Doc.formatFiatConversion(amount, rate, app().unitInfo(assetID))
-      Doc.show(display.parentElement as Element)
-    } else Doc.hide(display.parentElement as Element)
   }
 
   /*
