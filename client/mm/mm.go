@@ -185,6 +185,18 @@ type MarketMaker struct {
 
 // NewMarketMaker creates a new MarketMaker.
 func NewMarketMaker(c clientCore, cfgPath string, log dex.Logger) (*MarketMaker, error) {
+	if _, err := os.Stat(cfgPath); err != nil {
+		cfg := new(MarketMakingConfig)
+		cfgB, err := json.Marshal(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal empty config file: %w", err)
+		}
+		err = os.WriteFile(cfgPath, cfgB, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed to write empty config file: %w", err)
+		}
+	}
+
 	return &MarketMaker{
 		core:           c,
 		log:            log,
@@ -837,7 +849,7 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 	if alternateConfigPath != nil {
 		path = *alternateConfigPath
 	}
-	botCfgs, err := getMarketMakingConfig(path)
+	cfg, err := getMarketMakingConfig(path)
 	if err != nil {
 		return fmt.Errorf("error getting market making config: %v", err)
 	}
@@ -851,16 +863,16 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 
 	m.ctx, m.die = context.WithCancel(ctx)
 
-	enabledCfgs, err := validateAndFilterEnabledConfigs(botCfgs)
+	enabledBots, err := validateAndFilterEnabledConfigs(cfg.BotConfigs)
 	if err != nil {
 		return err
 	}
 
-	if err := m.loginAndUnlockWallets(pw, enabledCfgs); err != nil {
+	if err := m.loginAndUnlockWallets(pw, enabledBots); err != nil {
 		return err
 	}
 
-	oracle, err := priceOracleFromConfigs(m.ctx, enabledCfgs, m.log.SubLogger("PriceOracle"))
+	oracle, err := priceOracleFromConfigs(m.ctx, enabledBots, m.log.SubLogger("PriceOracle"))
 	if err != nil {
 		return err
 	}
@@ -874,7 +886,7 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 		m.syncedOracleMtx.Unlock()
 	}()
 
-	if err := m.setupBalances(enabledCfgs); err != nil {
+	if err := m.setupBalances(enabledBots); err != nil {
 		return err
 	}
 
@@ -905,10 +917,10 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 	}()
 
 	var cexCfgMap map[string]*CEXConfig
-	if len(cexCfgs) > 0 {
-		cexCfgMap = make(map[string]*CEXConfig, len(cexCfgs))
-		for _, cexCfg := range cexCfgs {
-			cexCfgMap[cexCfg.CEXName] = cexCfg
+	if len(cfg.CexConfigs) > 0 {
+		cexCfgMap = make(map[string]*CEXConfig, len(cfg.CexConfigs))
+		for _, cexCfg := range cfg.CexConfigs {
+			cexCfgMap[cexCfg.Name] = cexCfg
 		}
 	}
 
@@ -939,9 +951,9 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 		return cex, nil
 	}
 
-	for _, cfg := range enabledCfgs {
+	for _, cfg := range enabledBots {
 		switch {
-		case cfg.MMCfg != nil:
+		case cfg.BasicMMConfig != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
@@ -964,12 +976,12 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 				}
 				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, baseFiatRate, quoteFiatRate, logger)
 			}(cfg)
-		case cfg.ArbCfg != nil:
+		case cfg.SimpleArbConfig != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
 				logger := m.log.SubLogger(fmt.Sprintf("Arbitrage-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
-				cex, err := getConnectedCEX(cfg.ArbCfg.CEXName)
+				cex, err := getConnectedCEX(cfg.SimpleArbConfig.CEXName)
 				if err != nil {
 					logger.Errorf("failed to connect to CEX: %v", err)
 					return
@@ -995,44 +1007,47 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 	return nil
 }
 
-func getMarketMakingConfig(path string) ([]*BotConfig, error) {
-	cfg := []*BotConfig{}
+func getMarketMakingConfig(path string) (*MarketMakingConfig, error) {
 	if path == "" {
-		return cfg, nil
+		return nil, fmt.Errorf("no config file provided")
 	}
+
 	data, err := os.ReadFile(path)
-	if err == nil {
-		return cfg, json.Unmarshal(data, &cfg)
+	if err != nil {
+		return nil, err
 	}
-	if os.IsNotExist(err) {
-		return cfg, nil
+
+	cfg := &MarketMakingConfig{}
+	err = json.Unmarshal(data, cfg)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("error reading file: %w", err)
+
+	return cfg, nil
 }
 
 // GetMarketMakingConfig returns the market making config.
-func (m *MarketMaker) GetMarketMakingConfig() ([]*BotConfig, error) {
+func (m *MarketMaker) GetMarketMakingConfig() (*MarketMakingConfig, error) {
 	return getMarketMakingConfig(m.cfgPath)
 }
 
-// UpdateMarketMakingConfig updates the market making config for one of the
-// bots.
-func (m *MarketMaker) UpdateMarketMakingConfig(updatedCfg *BotConfig) ([]*BotConfig, error) {
+// UpdateMarketMakingConfig updates the configuration for one of the bots.
+func (m *MarketMaker) UpdateBotConfig(updatedCfg *BotConfig) (*MarketMakingConfig, error) {
 	cfg, err := m.GetMarketMakingConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error getting market making config: %v", err)
 	}
 
 	var updated bool
-	for i, c := range cfg {
+	for i, c := range cfg.BotConfigs {
 		if c.Host == updatedCfg.Host && c.QuoteAsset == updatedCfg.QuoteAsset && c.BaseAsset == updatedCfg.BaseAsset {
-			cfg[i] = updatedCfg
+			cfg.BotConfigs[i] = updatedCfg
 			updated = true
 			break
 		}
 	}
 	if !updated {
-		cfg = append(cfg, updatedCfg)
+		cfg.BotConfigs = append(cfg.BotConfigs, updatedCfg)
 	}
 
 	data, err := json.MarshalIndent(cfg, "", "    ")
@@ -1048,16 +1063,16 @@ func (m *MarketMaker) UpdateMarketMakingConfig(updatedCfg *BotConfig) ([]*BotCon
 }
 
 // RemoveConfig removes a bot config from the market making config.
-func (m *MarketMaker) RemoveConfig(host string, baseID, quoteID uint32) ([]*BotConfig, error) {
+func (m *MarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) (*MarketMakingConfig, error) {
 	cfg, err := m.GetMarketMakingConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error getting market making config: %v", err)
 	}
 
 	var updated bool
-	for i, c := range cfg {
+	for i, c := range cfg.BotConfigs {
 		if c.Host == host && c.QuoteAsset == quoteID && c.BaseAsset == baseID {
-			cfg = append(cfg[:i], cfg[i+1:]...)
+			cfg.BotConfigs = append(cfg.BotConfigs[:i], cfg.BotConfigs[i+1:]...)
 			updated = true
 			break
 		}

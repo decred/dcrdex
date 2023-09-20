@@ -76,7 +76,8 @@ export default class MarketMakerPage extends BasePage {
 
     const status = await app().getMarketMakingStatus()
     const running = status.running
-    const botConfigs = this.botConfigs = await app().getMarketMakingConfig()
+    const marketMakingCfg = await app().getMarketMakingConfig()
+    const botConfigs = this.botConfigs = marketMakingCfg.botConfigs || []
     app().registerNoteFeeder({
       botstartstop: (note: BotStartStopNote) => { this.handleBotStartStopNote(note) },
       mmstartstop: (note: MMStartStopNote) => { this.handleMMStartStopNote(note) },
@@ -345,8 +346,9 @@ export default class MarketMakerPage extends BasePage {
     for (const xc of Object.values(app().user.exchanges)) mkts.push(...convertMarkets(xc))
 
     const mmCfg = await app().getMarketMakingConfig()
+    const botCfgs = mmCfg.botConfigs || []
     const existingMarkets : Record<string, boolean> = {}
-    for (const cfg of mmCfg) {
+    for (const cfg of botCfgs) {
       existingMarkets[marketStr(cfg.host, cfg.baseAsset, cfg.quoteAsset)] = true
     }
     const filteredMkts = mkts.filter((mkt) => {
@@ -454,7 +456,7 @@ export default class MarketMakerPage extends BasePage {
         await app().removeMarketMakingConfig(botCfg)
         row.remove()
         const mmCfg = await app().getMarketMakingConfig()
-        const noBots = !mmCfg || !mmCfg.length
+        const noBots = !mmCfg || !mmCfg.botConfigs || mmCfg.botConfigs.length === 0
         Doc.setVis(noBots, page.noBotsHeader)
         Doc.setVis(!noBots, page.botTable)
       }

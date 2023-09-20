@@ -608,14 +608,14 @@ export interface OrderPlacement {
   gapFactor : number
 }
 
-export interface MarketMakingConfig {
+export interface BasicMarketMakingCfg {
   gapStrategy: string
   sellPlacements: OrderPlacement[]
   buyPlacements: OrderPlacement[]
   driftTolerance: number
   oracleWeighting: number
   oracleBias: number
-  emptyMarketRate?: number
+  emptyMarketRate: number
   baseOptions?: Record<string, string>
   quoteOptions?: Record<string, string>
 }
@@ -633,8 +633,19 @@ export interface BotConfig {
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
-  marketMakingConfig: MarketMakingConfig
+  basicMarketMakingConfig: BasicMarketMakingCfg
   disabled: boolean
+}
+
+export interface CEXConfig {
+  name: string
+  apiKey: string
+  apiSecret: string
+}
+
+export interface MarketMakingConfig {
+  botConfigs?: BotConfig[]
+  cexConfigs?: CEXConfig[]
 }
 
 export interface MarketWithHost {
@@ -797,7 +808,7 @@ export interface Application {
   getMarketMakingStatus (): Promise<MarketMakingStatus>
   startMarketMaking (pw: string): Promise<void>
   stopMarketMaking (): Promise<void>
-  getMarketMakingConfig (): Promise<BotConfig[]>
+  getMarketMakingConfig (): Promise<MarketMakingConfig>
   updateMarketMakingConfig (cfg: BotConfig): Promise<void>
   removeMarketMakingConfig (cfg: BotConfig): Promise<void>
   setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean): void

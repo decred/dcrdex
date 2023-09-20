@@ -1,5 +1,5 @@
 {
-    "botCfgs": [
+    "botConfigs": [
         {
             "host": "127.0.0.1:17273",
             "baseAsset": 60,
@@ -8,7 +8,7 @@
             "quoteBalanceType": 0,
             "baseBalance": 100,
             "quoteBalance": 100,
-            "arbConfig": {
+            "simpleArbConfig": {
                 "cexName": "Binance",
                 "profitTrigger": 0.01,
                 "maxActiveArbs": 5,
@@ -23,9 +23,9 @@
             }
         }
     ],
-    "cexCfgs": [
+    "cexConfigs": [
         {
-            "cexName": "Binance",
+            "name": "Binance",
             "apiKey": "",
             "apiSecret": ""
         }

@@ -1794,8 +1794,8 @@ func (s *WebServer) apiMarketMakingConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, &struct {
-		OK  bool            `json:"ok"`
-		Cfg []*mm.BotConfig `json:"cfg"`
+		OK  bool                   `json:"ok"`
+		Cfg *mm.MarketMakingConfig `json:"cfg"`
 	}{
 		OK:  true,
 		Cfg: cfg,
@@ -1809,15 +1809,15 @@ func (s *WebServer) apiUpdateMarketMakingConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	cfg, err := s.mm.UpdateMarketMakingConfig(updatedCfg)
+	cfg, err := s.mm.UpdateBotConfig(updatedCfg)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
 	writeJSON(w, &struct {
-		OK  bool            `json:"ok"`
-		Cfg []*mm.BotConfig `json:"cfg"`
+		OK  bool                   `json:"ok"`
+		Cfg *mm.MarketMakingConfig `json:"cfg"`
 	}{
 		OK:  true,
 		Cfg: cfg,
@@ -1835,15 +1835,15 @@ func (s *WebServer) apiRemoveMarketMakingConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	cfg, err := s.mm.RemoveConfig(form.Host, form.BaseAsset, form.QuoteAsset)
+	cfg, err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
 	writeJSON(w, &struct {
-		OK  bool            `json:"ok"`
-		Cfg []*mm.BotConfig `json:"cfg"`
+		OK  bool                   `json:"ok"`
+		Cfg *mm.MarketMakingConfig `json:"cfg"`
 	}{
 		OK:  true,
 		Cfg: cfg,

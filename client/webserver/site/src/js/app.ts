@@ -43,7 +43,8 @@ import {
   InFlightOrder,
   BotConfig,
   MMStartStopNote,
-  MarketMakingStatus
+  MarketMakingStatus,
+  MarketMakingConfig
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -103,7 +104,7 @@ export default class Application {
   popupNotes: HTMLElement
   popupTmpl: HTMLElement
   noteReceivers: Record<string, (n: CoreNote) => void>[]
-  marketMakingCfg: BotConfig[]
+  marketMakingCfg: MarketMakingConfig
   marketMakingStatus: MarketMakingStatus | undefined
 
   constructor () {
@@ -938,7 +939,7 @@ export default class Application {
     window.location.href = '/login'
   }
 
-  async getMarketMakingConfig () : Promise<BotConfig[]> {
+  async getMarketMakingConfig () : Promise<MarketMakingConfig> {
     if (this.marketMakingCfg) return this.marketMakingCfg
     const res = await getJSON('/api/marketmakingconfig')
     if (!this.checkResponse(res)) {
@@ -969,7 +970,8 @@ export default class Application {
   }
 
   async setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean) : Promise<void> {
-    const mktCfg = this.marketMakingCfg.find(cfg => {
+    const botCfgs = this.marketMakingCfg.botConfigs || []
+    const mktCfg = botCfgs.find((cfg : BotConfig) => {
       return cfg.host === host && cfg.baseAsset === baseAsset && cfg.quoteAsset === quoteAsset
     })
     if (!mktCfg) {

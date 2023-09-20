@@ -6,7 +6,8 @@ import {
   BalanceType,
   app,
   MarketReport,
-  OrderOption
+  OrderOption,
+  BasicMarketMakingCfg
 } from './registry'
 import { postJSON } from './http'
 import Doc from './doc'
@@ -64,13 +65,14 @@ const oracleWeightRange: XYRange = {
   yUnit: '%'
 }
 
-const defaultMarketMakingConfig = {
+const defaultMarketMakingConfig : BasicMarketMakingCfg = {
   gapStrategy: GapStrategyPercentPlus,
   sellPlacements: [],
   buyPlacements: [],
   driftTolerance: 0.001,
   oracleWeighting: 0.1,
-  oracleBias: 0
+  oracleBias: 0,
+  emptyMarketRate: 0
 }
 
 // walletSettingControl is used by the modified highlighting and
@@ -126,7 +128,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       await this.saveSettings()
       app().loadPage('mm')
     })
-    Doc.bind(page.cancelButton, 'click', () => {
+    Doc.bind(page.backButton, 'click', () => {
       app().loadPage('mm')
     })
 
@@ -172,7 +174,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   async setup () {
     const page = this.page
-    const botConfigs = await app().getMarketMakingConfig()
+    const mmCfg = await app().getMarketMakingConfig()
+    const botConfigs = mmCfg.botConfigs || []
     const status = await app().getMarketMakingStatus()
 
     for (const cfg of botConfigs) {
@@ -185,19 +188,21 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.creatingNewBot = !this.updatedConfig
 
     if (this.creatingNewBot) {
-      this.originalConfig = JSON.parse(JSON.stringify({
-        host: this.host,
-        baseAsset: this.baseID,
-        quoteAsset: this.quoteID,
-        baseBalanceType: BalanceType.Percentage,
-        baseBalance: 0,
-        quoteBalanceType: BalanceType.Percentage,
-        quoteBalance: 0,
-        marketMakingConfig: defaultMarketMakingConfig,
-        disabled: false
-      }))
-      this.originalConfig.marketMakingConfig.baseOptions = this.defaultWalletOptions(this.baseID)
-      this.originalConfig.marketMakingConfig.quoteOptions = this.defaultWalletOptions(this.quoteID)
+      const newConfig: BotConfig =
+        {
+          host: this.host,
+          baseAsset: this.baseID,
+          quoteAsset: this.quoteID,
+          baseBalanceType: BalanceType.Percentage,
+          baseBalance: 0,
+          quoteBalanceType: BalanceType.Percentage,
+          quoteBalance: 0,
+          basicMarketMakingConfig: defaultMarketMakingConfig,
+          disabled: false
+        }
+      this.originalConfig = JSON.parse(JSON.stringify(newConfig))
+      this.originalConfig.basicMarketMakingConfig.baseOptions = this.defaultWalletOptions(this.baseID)
+      this.originalConfig.basicMarketMakingConfig.quoteOptions = this.defaultWalletOptions(this.quoteID)
       this.updatedConfig = JSON.parse(JSON.stringify(this.originalConfig))
       Doc.hide(page.updateButton, page.resetButton)
       Doc.show(page.createButton)
@@ -224,8 +229,8 @@ export default class MarketMakerSettingsPage extends BasePage {
   updateModifiedMarkers () {
     if (this.creatingNewBot) return
     const page = this.page
-    const originalMMCfg = this.originalConfig.marketMakingConfig
-    const updatedMMCfg = this.updatedConfig.marketMakingConfig
+    const originalMMCfg = this.originalConfig.basicMarketMakingConfig
+    const updatedMMCfg = this.updatedConfig.basicMarketMakingConfig
 
     // Gap strategy input
     const gapStrategyModified = originalMMCfg.gapStrategy !== updatedMMCfg.gapStrategy
@@ -282,7 +287,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     // Empty market rates inputs
     const emptyMarketRateModified = originalMMCfg.emptyMarketRate !== updatedMMCfg.emptyMarketRate
     page.emptyMarketRateInput.classList.toggle('modified', emptyMarketRateModified)
-    const emptyMarketRateCheckboxModified = (originalMMCfg.emptyMarketRate === undefined) !== (updatedMMCfg.emptyMarketRate === undefined)
+    const emptyMarketRateCheckboxModified = (originalMMCfg.emptyMarketRate === 0) !== !page.emptyMarketRateCheckbox.checked
     page.emptyMarketRateCheckbox.classList.toggle('modified', emptyMarketRateCheckboxModified)
 
     // Base balance input
@@ -295,20 +300,20 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     // Base wallet settings
     for (const opt of Object.keys(this.baseWalletSettingControl)) {
-      if (!this.updatedConfig.marketMakingConfig.baseOptions) break
-      if (!this.originalConfig.marketMakingConfig.baseOptions) break
-      const originalValue = this.originalConfig.marketMakingConfig.baseOptions[opt]
-      const updatedValue = this.updatedConfig.marketMakingConfig.baseOptions[opt]
+      if (!this.updatedConfig.basicMarketMakingConfig.baseOptions) break
+      if (!this.originalConfig.basicMarketMakingConfig.baseOptions) break
+      const originalValue = this.originalConfig.basicMarketMakingConfig.baseOptions[opt]
+      const updatedValue = this.updatedConfig.basicMarketMakingConfig.baseOptions[opt]
       const modified = originalValue !== updatedValue
       this.baseWalletSettingControl[opt].toHighlight.classList.toggle('modified', modified)
     }
 
     // Quote wallet settings
     for (const opt of Object.keys(this.quoteWalletSettingControl)) {
-      if (!this.updatedConfig.marketMakingConfig.quoteOptions) break
-      if (!this.originalConfig.marketMakingConfig.quoteOptions) break
-      const originalValue = this.originalConfig.marketMakingConfig.quoteOptions[opt]
-      const updatedValue = this.updatedConfig.marketMakingConfig.quoteOptions[opt]
+      if (!this.updatedConfig.basicMarketMakingConfig.quoteOptions) break
+      if (!this.originalConfig.basicMarketMakingConfig.quoteOptions) break
+      const originalValue = this.originalConfig.basicMarketMakingConfig.quoteOptions[opt]
+      const updatedValue = this.updatedConfig.basicMarketMakingConfig.quoteOptions[opt]
       const modified = originalValue !== updatedValue
       this.quoteWalletSettingControl[opt].toHighlight.classList.toggle('modified', modified)
     }
@@ -412,9 +417,9 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const getPlacementsList = (buy: boolean) : OrderPlacement[] => {
       if (buy) {
-        return this.updatedConfig.marketMakingConfig.buyPlacements
+        return this.updatedConfig.basicMarketMakingConfig.buyPlacements
       }
-      return this.updatedConfig.marketMakingConfig.sellPlacements
+      return this.updatedConfig.basicMarketMakingConfig.sellPlacements
     }
 
     // updateArrowVis updates the visibility of the move up/down arrows in
@@ -442,7 +447,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     let lots : number
     let actualGapFactor : number
     let displayedGapFactor : number
-    const gapStrategy = this.updatedConfig.marketMakingConfig.gapStrategy
+    const gapStrategy = this.updatedConfig.basicMarketMakingConfig.gapStrategy
     const unit = this.gapFactorHeaderUnit(gapStrategy)[1]
     if (initialLoadPlacement) {
       lots = initialLoadPlacement.lots
@@ -560,15 +565,15 @@ export default class MarketMakerSettingsPage extends BasePage {
     // Gap Strategy
     page.gapStrategySelect.onchange = () => {
       if (!page.gapStrategySelect.value) return
-      this.updatedConfig.marketMakingConfig.gapStrategy = page.gapStrategySelect.value
+      this.updatedConfig.basicMarketMakingConfig.gapStrategy = page.gapStrategySelect.value
       while (page.buyPlacementsTableBody.children.length > 1) {
         page.buyPlacementsTableBody.children[0].remove()
       }
       while (page.sellPlacementsTableBody.children.length > 1) {
         page.sellPlacementsTableBody.children[0].remove()
       }
-      this.updatedConfig.marketMakingConfig.buyPlacements = []
-      this.updatedConfig.marketMakingConfig.sellPlacements = []
+      this.updatedConfig.basicMarketMakingConfig.buyPlacements = []
+      this.updatedConfig.basicMarketMakingConfig.sellPlacements = []
       this.setGapFactorLabels(page.gapStrategySelect.value)
       this.updateModifiedMarkers()
     }
@@ -593,7 +598,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     // Drift tolerance
     const updatedDriftTolerance = (x: number) => {
-      this.updatedConfig.marketMakingConfig.driftTolerance = x
+      this.updatedConfig.basicMarketMakingConfig.driftTolerance = x
     }
     const changed = () => {
       this.updateModifiedMarkers()
@@ -601,7 +606,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const doNothing = () => {
       /* do nothing */
     }
-    const currDriftTolerance = this.updatedConfig.marketMakingConfig.driftTolerance
+    const currDriftTolerance = this.updatedConfig.basicMarketMakingConfig.driftTolerance
     this.driftToleranceRangeHandler = new XYRangeHandler(
       driftToleranceRange,
       currDriftTolerance,
@@ -620,14 +625,14 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.useOracleCheckbox.onchange = () => {
       if (page.useOracleCheckbox.checked) {
         Doc.show(page.oracleBiasSection, page.oracleWeightingSection)
-        this.updatedConfig.marketMakingConfig.oracleWeighting = defaultMarketMakingConfig.oracleWeighting
-        this.updatedConfig.marketMakingConfig.oracleBias = defaultMarketMakingConfig.oracleBias
+        this.updatedConfig.basicMarketMakingConfig.oracleWeighting = defaultMarketMakingConfig.oracleWeighting
+        this.updatedConfig.basicMarketMakingConfig.oracleBias = defaultMarketMakingConfig.oracleBias
         this.oracleWeightingRangeHandler.setValue(defaultMarketMakingConfig.oracleWeighting)
         this.oracleBiasRangeHandler.setValue(defaultMarketMakingConfig.oracleBias)
       } else {
         Doc.hide(page.oracleBiasSection, page.oracleWeightingSection)
-        this.updatedConfig.marketMakingConfig.oracleWeighting = 0
-        this.updatedConfig.marketMakingConfig.oracleBias = 0
+        this.updatedConfig.basicMarketMakingConfig.oracleWeighting = 0
+        this.updatedConfig.basicMarketMakingConfig.oracleBias = 0
       }
       this.updateModifiedMarkers()
     }
@@ -636,9 +641,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     // Oracle Bias
-    const currOracleBias = this.originalConfig.marketMakingConfig.oracleBias
+    const currOracleBias = this.originalConfig.basicMarketMakingConfig.oracleBias
     const updatedOracleBias = (x: number) => {
-      this.updatedConfig.marketMakingConfig.oracleBias = x
+      this.updatedConfig.basicMarketMakingConfig.oracleBias = x
     }
     this.oracleBiasRangeHandler = new XYRangeHandler(
       oracleBiasRange,
@@ -653,9 +658,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.oracleBiasContainer.appendChild(this.oracleBiasRangeHandler.control)
 
     // Oracle Weighting
-    const currOracleWeighting = this.originalConfig.marketMakingConfig.oracleWeighting
+    const currOracleWeighting = this.originalConfig.basicMarketMakingConfig.oracleWeighting
     const updatedOracleWeighting = (x: number) => {
-      this.updatedConfig.marketMakingConfig.oracleWeighting = x
+      this.updatedConfig.basicMarketMakingConfig.oracleWeighting = x
     }
     this.oracleWeightingRangeHandler = new XYRangeHandler(
       oracleWeightRange,
@@ -674,13 +679,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     // Empty Market Rate
     page.emptyMarketRateCheckbox.onchange = () => {
       if (page.emptyMarketRateCheckbox.checked) {
-        this.updatedConfig.marketMakingConfig.emptyMarketRate = 0
-        page.emptyMarketRateInput.value = '0'
+        this.updatedConfig.basicMarketMakingConfig.emptyMarketRate = this.originalConfig.basicMarketMakingConfig.emptyMarketRate
+        page.emptyMarketRateInput.value = `${this.updatedConfig.basicMarketMakingConfig.emptyMarketRate}`
         Doc.show(page.emptyMarketRateInput)
         this.updateModifiedMarkers()
       } else {
-        console.log(JSON.stringify(this.updatedConfig.marketMakingConfig))
-        this.updatedConfig.marketMakingConfig.emptyMarketRate = undefined
+        this.updatedConfig.basicMarketMakingConfig.emptyMarketRate = 0
         Doc.hide(page.emptyMarketRateInput)
         this.updateModifiedMarkers()
       }
@@ -689,7 +693,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       const emptyMarketRate = parseFloat(
         page.emptyMarketRateInput.value || '0'
       )
-      this.updatedConfig.marketMakingConfig.emptyMarketRate = emptyMarketRate
+      this.updatedConfig.basicMarketMakingConfig.emptyMarketRate = emptyMarketRate
       this.updateModifiedMarkers()
     }
     if (running) {
@@ -711,12 +715,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (!page.gapStrategySelect.options) return
     Array.from(page.gapStrategySelect.options).forEach(
       (opt: HTMLOptionElement) => {
-        if (opt.value === this.originalConfig.marketMakingConfig.gapStrategy) {
+        if (opt.value === this.originalConfig.basicMarketMakingConfig.gapStrategy) {
           opt.selected = true
         }
       }
     )
-    this.setGapFactorLabels(this.originalConfig.marketMakingConfig.gapStrategy)
+    this.setGapFactorLabels(this.originalConfig.basicMarketMakingConfig.gapStrategy)
 
     // Buy/Sell placements
     while (page.buyPlacementsTableBody.children.length > 1) {
@@ -725,38 +729,39 @@ export default class MarketMakerSettingsPage extends BasePage {
     while (page.sellPlacementsTableBody.children.length > 1) {
       page.sellPlacementsTableBody.children[0].remove()
     }
-    this.originalConfig.marketMakingConfig.buyPlacements.forEach((placement) => {
+    this.originalConfig.basicMarketMakingConfig.buyPlacements.forEach((placement) => {
       this.addPlacement(true, placement, running)
     })
-    this.originalConfig.marketMakingConfig.sellPlacements.forEach((placement) => {
+    this.originalConfig.basicMarketMakingConfig.sellPlacements.forEach((placement) => {
       this.addPlacement(false, placement, running)
     })
 
     // Empty market rate
+    console.log(this.originalConfig.basicMarketMakingConfig.emptyMarketRate)
     page.emptyMarketRateCheckbox.checked =
-    this.originalConfig.marketMakingConfig.emptyMarketRate !== undefined
+      this.originalConfig.basicMarketMakingConfig.emptyMarketRate > 0
     Doc.setVis(
       !!page.emptyMarketRateCheckbox.checked,
       page.emptyMarketRateInput
     )
     page.emptyMarketRateInput.value = `${
-      this.originalConfig.marketMakingConfig.emptyMarketRate || 0
+      this.originalConfig.basicMarketMakingConfig.emptyMarketRate || 0
     }`
 
     // Use oracles
-    if (this.originalConfig.marketMakingConfig.oracleWeighting === 0) {
+    if (this.originalConfig.basicMarketMakingConfig.oracleWeighting === 0) {
       page.useOracleCheckbox.checked = false
       Doc.hide(page.oracleBiasSection, page.oracleWeightingSection)
     }
 
     // Oracle bias
-    this.oracleBiasRangeHandler.setValue(this.originalConfig.marketMakingConfig.oracleBias)
+    this.oracleBiasRangeHandler.setValue(this.originalConfig.basicMarketMakingConfig.oracleBias)
 
     // Oracle weight
-    this.oracleWeightingRangeHandler.setValue(this.originalConfig.marketMakingConfig.oracleWeighting)
+    this.oracleWeightingRangeHandler.setValue(this.originalConfig.basicMarketMakingConfig.oracleWeighting)
 
     // Drift tolerance
-    this.driftToleranceRangeHandler.setValue(this.originalConfig.marketMakingConfig.driftTolerance)
+    this.driftToleranceRangeHandler.setValue(this.originalConfig.basicMarketMakingConfig.driftTolerance)
 
     // Base balance
     if (this.baseBalanceRangeHandler) {
@@ -769,10 +774,10 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     // Base wallet options
-    if (this.updatedConfig.marketMakingConfig.baseOptions && this.originalConfig.marketMakingConfig.baseOptions) {
-      for (const opt of Object.keys(this.updatedConfig.marketMakingConfig.baseOptions)) {
-        const value = this.originalConfig.marketMakingConfig.baseOptions[opt]
-        this.updatedConfig.marketMakingConfig.baseOptions[opt] = value
+    if (this.updatedConfig.basicMarketMakingConfig.baseOptions && this.originalConfig.basicMarketMakingConfig.baseOptions) {
+      for (const opt of Object.keys(this.updatedConfig.basicMarketMakingConfig.baseOptions)) {
+        const value = this.originalConfig.basicMarketMakingConfig.baseOptions[opt]
+        this.updatedConfig.basicMarketMakingConfig.baseOptions[opt] = value
         if (this.baseWalletSettingControl[opt]) {
           this.baseWalletSettingControl[opt].setValue(value)
         }
@@ -780,10 +785,10 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     // Quote wallet options
-    if (this.updatedConfig.marketMakingConfig.quoteOptions && this.originalConfig.marketMakingConfig.quoteOptions) {
-      for (const opt of Object.keys(this.updatedConfig.marketMakingConfig.quoteOptions)) {
-        const value = this.originalConfig.marketMakingConfig.quoteOptions[opt]
-        this.updatedConfig.marketMakingConfig.quoteOptions[opt] = value
+    if (this.updatedConfig.basicMarketMakingConfig.quoteOptions && this.originalConfig.basicMarketMakingConfig.quoteOptions) {
+      for (const opt of Object.keys(this.updatedConfig.basicMarketMakingConfig.quoteOptions)) {
+        const value = this.originalConfig.basicMarketMakingConfig.quoteOptions[opt]
+        this.updatedConfig.basicMarketMakingConfig.quoteOptions[opt] = value
         if (this.quoteWalletSettingControl[opt]) {
           this.quoteWalletSettingControl[opt].setValue(value)
         }
@@ -999,33 +1004,33 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
     const setWalletOption = (quote: boolean, key: string, value: string) => {
       if (quote) {
-        if (!this.updatedConfig.marketMakingConfig.quoteOptions) return
-        this.updatedConfig.marketMakingConfig.quoteOptions[key] = value
+        if (!this.updatedConfig.basicMarketMakingConfig.quoteOptions) return
+        this.updatedConfig.basicMarketMakingConfig.quoteOptions[key] = value
       } else {
-        if (!this.updatedConfig.marketMakingConfig.baseOptions) return
-        this.updatedConfig.marketMakingConfig.baseOptions[key] = value
+        if (!this.updatedConfig.basicMarketMakingConfig.baseOptions) return
+        this.updatedConfig.basicMarketMakingConfig.baseOptions[key] = value
       }
     }
     const getWalletOption = (quote: boolean, key: string) : string | undefined => {
       if (quote) {
-        if (!this.updatedConfig.marketMakingConfig.quoteOptions) return
-        return this.updatedConfig.marketMakingConfig.quoteOptions[key]
+        if (!this.updatedConfig.basicMarketMakingConfig.quoteOptions) return
+        return this.updatedConfig.basicMarketMakingConfig.quoteOptions[key]
       } else {
-        if (!this.updatedConfig.marketMakingConfig.baseOptions) return
-        return this.updatedConfig.marketMakingConfig.baseOptions[key]
+        if (!this.updatedConfig.basicMarketMakingConfig.baseOptions) return
+        return this.updatedConfig.basicMarketMakingConfig.baseOptions[key]
       }
     }
     const addOpt = (opt: OrderOption, quote: boolean) => {
       let currVal
       let container
       if (quote) {
-        if (!this.updatedConfig.marketMakingConfig.quoteOptions) return
-        currVal = this.updatedConfig.marketMakingConfig.quoteOptions[opt.key]
+        if (!this.updatedConfig.basicMarketMakingConfig.quoteOptions) return
+        currVal = this.updatedConfig.basicMarketMakingConfig.quoteOptions[opt.key]
         container = page.quoteWalletSettingsContainer
       } else {
         if (opt.quoteAssetOnly) return
-        if (!this.updatedConfig.marketMakingConfig.baseOptions) return
-        currVal = this.updatedConfig.marketMakingConfig.baseOptions[opt.key]
+        if (!this.updatedConfig.basicMarketMakingConfig.baseOptions) return
+        currVal = this.updatedConfig.basicMarketMakingConfig.baseOptions[opt.key]
         container = page.baseWalletSettingsContainer
       }
       let setting : PageElement | undefined

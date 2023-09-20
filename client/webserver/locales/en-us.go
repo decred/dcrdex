@@ -418,4 +418,5 @@ var EnUS = map[string]string{
 	"fiat_rates":                  "Fiat Rates",
 	"market_making_running":       "Market making is running",
 	"cannot_manually_trade":       "You cannot manually place orders while market making is running",
+	"back":                        "Back",
 }

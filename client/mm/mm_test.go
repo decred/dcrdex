@@ -799,6 +799,7 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 		},
 	}
 
+	tempDir := t.TempDir()
 	for _, test := range tests {
 		tCore.setAssetBalances(test.assetBalances)
 		tCore.market = test.market
@@ -806,7 +807,7 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 		tCore.sellRedeemFees = test.redeemFees
 		tCore.sellRefundFees = test.refundFees
 
-		mm, err := NewMarketMaker(tCore, "", tLogger)
+		mm, err := NewMarketMaker(tCore, filepath.Join(tempDir, "mm.cfg"), tLogger)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -1103,6 +1104,7 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 		},
 	}
 
+	tempDir := t.TempDir()
 	for _, test := range tests {
 		if test.name != "1 lot with refund fees, account locker" {
 			continue
@@ -1112,7 +1114,7 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 		tCore.buySwapFees = test.swapFees
 		tCore.buyRedeemFees = test.redeemFees
 
-		mm, err := NewMarketMaker(tCore, "", tLogger)
+		mm, err := NewMarketMaker(tCore, filepath.Join(tempDir, "mm.cfg"), tLogger)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -4148,7 +4150,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 		mm.doNotKillWhenBotsStop = true
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		mm.UpdateMarketMakingConfig(test.cfg)
+		mm.UpdateBotConfig(test.cfg)
 		err := mm.Run(ctx, []byte{}, nil)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
