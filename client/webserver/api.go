@@ -425,24 +425,30 @@ func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zero(pass)
 
-	feeBuffer, err := s.bondsFeeBuffer(assetID) // could also put it in postBondForm, with some work on the frontend
-	if err != nil {
-		s.writeAPIError(w, err)
-		return
-	}
-
-	_, err = s.core.PostBond(&core.PostBondForm{
+	bondForm := &core.PostBondForm{
 		Addr:      post.Addr,
 		Cert:      []byte(post.Cert),
 		AppPass:   pass,
 		Bond:      post.Bond,
 		Asset:     &assetID,
 		LockTime:  post.LockTime,
-		FeeBuffer: feeBuffer,
 		// Options valid only when creating an account with bond:
 		MaintainTier: post.Maintain,
 		MaxBondedAmt: post.MaxBondedAmt,
-	})
+	}
+
+	if post.FeeBuffer != nil {
+		bondForm.FeeBuffer = *post.FeeBuffer
+	} else {
+		feeBuffer, err := s.bondsFeeBuffer(assetID) // or let wallet use internal feeBuffer?
+		if err != nil {
+			s.writeAPIError(w, err)
+			return
+		}
+		post.FeeBuffer = &feeBuffer
+	}
+
+	_, err = s.core.PostBond(bondForm)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("add bond error: %w", err))
 		return
