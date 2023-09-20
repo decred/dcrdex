@@ -4170,7 +4170,7 @@ func (w *assetWallet) getConfirmedBalance() (*big.Int, error) {
 	if w.balances.m == nil {
 		w.balances.m = make(map[uint32]*cachedBalance)
 	}
-	// Check to see if wa already have one up-to-date
+	// Check to see if we already have one up-to-date
 	cached := w.balances.m[w.assetID]
 	if cached != nil && cached.height == tipHeight && time.Since(cached.stamp) < time.Minute {
 		return cached.bal, nil
@@ -4180,7 +4180,6 @@ func (w *assetWallet) getConfirmedBalance() (*big.Int, error) {
 		var bal *big.Int
 		var err error
 		if w.assetID == w.baseChainID {
-
 			bal, err = w.node.addressBalance(w.ctx, w.addr)
 		} else {
 			bal, err = w.tokenBalance()
