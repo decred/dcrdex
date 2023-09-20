@@ -446,7 +446,7 @@ func TestAccountImport(t *testing.T) {
 		t.Fatalf("expected execution of db.CreateAccount")
 	}
 	if rig.db.accountInfoPersisted.Host != host {
-		t.Fatalf("unexprected accountInfo Host")
+		t.Fatalf("unexpected accountInfo Host")
 	}
 	DEXpubKey, _ := hex.DecodeString(account.DEXPubKey)
 	if !bytes.Equal(rig.db.accountInfoPersisted.DEXPubKey.SerializeCompressed(), DEXpubKey) {

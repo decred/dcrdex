@@ -138,7 +138,7 @@ type DB interface {
 	// If no time is supplied, the current time is used. Accepts an optional
 	// function to perform on deleted matches that includes if it was a sell
 	// order.
-	DeleteInactiveMatches(ctx context.Context, olderThan *time.Time, perMatchFn func(mtch *MetaMatch, isSell bool) error) (int, error)
+	DeleteInactiveMatches(ctx context.Context, olderThan *time.Time, perMatchFn func(match *MetaMatch, isSell bool) error) (int, error)
 	// SetSeedGenerationTime stores the time when the app seed was generated.
 	SetSeedGenerationTime(time uint64) error
 	// SeedGenerationTime fetches the time when the app seed was generated.

@@ -397,7 +397,7 @@ func TestWsConn(t *testing.T) {
 		t.Fatalf("expected next id to be %d, got %d", 2, next)
 	}
 
-	// Ensure the request got logged, also unregistering the response handler.
+	// Ensure the request got logged, also unregister the response handler.
 	hndlr := wsc.respHandler(mId)
 	if hndlr == nil {
 		t.Fatalf("no handler found")

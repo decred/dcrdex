@@ -702,7 +702,7 @@ func decodeMatchProof_v1(pushes [][]byte) (*MatchProof, error) {
 
 func decodeMatchProof_v2(pushes [][]byte) (*MatchProof, error) {
 	// Add the MatchProof SwapFeeConfirmed and RedemptionFeeConfirmed bytes.
-	// True because all fees until now are comfirmed.
+	// True because all fees until now are confirmed.
 	pushes = append(pushes, encode.ByteTrue, encode.ByteTrue)
 	return decodeMatchProof_v3(pushes)
 }
@@ -924,7 +924,7 @@ func (w *Wallet) ID() []byte {
 	return uint32Bytes(w.AssetID)
 }
 
-// SID is a string respresentation of the wallet's asset ID.
+// SID is a string representation of the wallet's asset ID.
 func (w *Wallet) SID() string {
 	return strconv.Itoa(int(w.AssetID))
 }

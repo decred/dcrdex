@@ -1223,15 +1223,15 @@ func TestDeleteInactiveMatches(t *testing.T) {
 
 	numToDoO := 1000
 	numActiveO := 500
-	numActiveOrdWithMtch := 481
+	numActiveOrdWithMatch := 481
 
 	if testing.Short() {
 		numToDoO = 24
 		numActiveO = 11
-		numActiveOrdWithMtch = 6
+		numActiveOrdWithMatch = 6
 	}
 
-	activeOrdsWithMtch := make([]order.OrderID, numActiveOrdWithMtch)
+	activeOrdsWithMatch := make([]order.OrderID, numActiveOrdWithMatch)
 	var anInactiveOrder order.OrderID
 	orders := make(map[int]*db.MetaOrder, numToDoO)
 	nTimes(numToDoO, func(i int) {
@@ -1267,8 +1267,8 @@ func TestDeleteInactiveMatches(t *testing.T) {
 		if i == numActiveO {
 			anInactiveOrder = ord.ID()
 		}
-		if i < numActiveOrdWithMtch {
-			activeOrdsWithMtch[i] = ord.ID()
+		if i < numActiveOrdWithMatch {
+			activeOrdsWithMatch[i] = ord.ID()
 		}
 	})
 
@@ -1313,8 +1313,8 @@ func TestDeleteInactiveMatches(t *testing.T) {
 		} else {
 			// Some matches will not be deleted if they have an
 			// active order.
-			if i >= numNewer+numActive && i < numActive+numNewer+numActiveOrdWithMtch {
-				m.OrderID = activeOrdsWithMtch[i-numActive-numNewer]
+			if i >= numNewer+numActive && i < numActive+numNewer+numActiveOrdWithMatch {
+				m.OrderID = activeOrdsWithMatch[i-numActive-numNewer]
 			} else {
 				m.OrderID = anInactiveOrder
 			}
@@ -1337,10 +1337,10 @@ func TestDeleteInactiveMatches(t *testing.T) {
 	var (
 		olderThan  = time.UnixMilli(int64(stamp))
 		matchN     = 0
-		perMatchFn = func(mtch *db.MetaMatch, isSell bool) error {
+		perMatchFn = func(m *db.MetaMatch, isSell bool) error {
 			matchN++
 			if matchN%100 == 0 {
-				fmt.Printf("Deleted %d'th match %v with isSell %v\n", matchN, mtch.MatchID, isSell)
+				fmt.Printf("Deleted %d'th match %v with isSell %v\n", matchN, m.MatchID, isSell)
 			}
 			return nil
 		}
@@ -1375,7 +1375,7 @@ func TestDeleteInactiveMatches(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("unable to count archived matches: %v", err)
 	}
-	numLeft := numNewer + numActiveOrdWithMtch
+	numLeft := numNewer + numActiveOrdWithMatch
 	if numArchivedMatches != numLeft {
 		t.Fatalf("expected %d archived matches left after deletion but got %d", numLeft, numArchivedMatches)
 	}
@@ -1402,14 +1402,14 @@ func TestDeleteInactiveOrders(t *testing.T) {
 	numToDo := 10008
 	numActive := 1000
 	numNewer := 1111
-	numActiveMtchWithOrd := 481
+	numActiveMatchWithOrd := 481
 	if testing.Short() {
 		numToDo = 48
 		numActive = 10
 		numNewer = 4
-		numActiveMtchWithOrd = 5
+		numActiveMatchWithOrd = 5
 	}
-	activeMtchsWithOrd := make([]order.OrderID, numActiveMtchWithOrd)
+	activeMatchsWithOrd := make([]order.OrderID, numActiveMatchWithOrd)
 	orders := make(map[int]*db.MetaOrder, numToDo)
 	orderIndex := make(map[order.OrderID]order.Order)
 	nTimes(numToDo, func(i int) {
@@ -1431,8 +1431,8 @@ func TestDeleteInactiveOrders(t *testing.T) {
 		ord := randOrderForMarket(base, quote)
 
 		// These orders will be inserted into active matches.
-		if i > numToDo/2 && i <= numToDo/2+numActiveMtchWithOrd {
-			activeMtchsWithOrd[i-numToDo/2-1] = ord.ID()
+		if i > numToDo/2 && i <= numToDo/2+numActiveMatchWithOrd {
+			activeMatchsWithOrd[i-numToDo/2-1] = ord.ID()
 		}
 
 		orders[i] = &db.MetaOrder{
@@ -1464,7 +1464,7 @@ func TestDeleteInactiveOrders(t *testing.T) {
 	t.Logf("~ %d milliseconds to insert %d MetaOrder", int(time.Since(tStart)/time.Millisecond)-numToDo, numToDo)
 
 	numToDoM := 1000
-	numActiveM := 500 // must be more than numActiveMtchWithOrd
+	numActiveM := 500 // must be more than numActiveMatchWithOrd
 	if testing.Short() {
 		numToDoM = 24
 		numActiveM = 8
@@ -1483,8 +1483,8 @@ func TestDeleteInactiveOrders(t *testing.T) {
 			UserMatch: ordertest.RandomUserMatch(),
 		}
 		// Insert orders in active matches to be ignored.
-		if i < numActiveMtchWithOrd {
-			m.OrderID = activeMtchsWithOrd[i]
+		if i < numActiveMatchWithOrd {
+			m.OrderID = activeMatchsWithOrd[i]
 		}
 		if i < numActiveM {
 			m.Status = order.MatchStatus(rand.Intn(4))
@@ -1544,7 +1544,7 @@ func TestDeleteInactiveOrders(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("unable to count archived orders: %v", err)
 	}
-	numUntouched := numNewer + numActiveMtchWithOrd
+	numUntouched := numNewer + numActiveMatchWithOrd
 	if numArchivedOrders != numUntouched {
 		t.Fatalf("expected %d archived orders left after deletion but got %d", numUntouched, numArchivedOrders)
 	}
