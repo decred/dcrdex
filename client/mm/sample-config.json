@@ -8,18 +8,54 @@
             "quoteBalanceType": 0,
             "baseBalance": 100,
             "quoteBalance": 100,
-            "simpleArbConfig": {
+            "arbMarketMakerConfig": {
                 "cexName": "Binance",
-                "profitTrigger": 0.01,
-                "maxActiveArbs": 5,
-                "numEpochsLeaveOpen": 5
-            },
-            "baseOptions": {
-                "multisplit": "true"
-            },
-            "quoteOptions": {
-                "multisplit": "true",
-                "multisplitbuffer": "5"
+                "buyPlacements": [
+                    {
+                        "lots": 1,
+                        "multiplier": 1.5
+                    },
+                    {
+                        "lots": 1,
+                        "multiplier": 4
+                    },
+                    {
+                        "lots": 1,
+                        "multiplier": 4
+                    },
+                    {
+                        "lots": 1,
+                        "multiplier": 4
+                    }
+                ],
+                "sellPlacements": [
+                    {
+                        "lots": 1,
+                        "multiplier": 1.5
+                    },
+                    {
+                        "lots": 1,
+                        "multiplier": 4
+                    },
+                    {
+                        "lots": 1,
+                        "multiplier": 4
+                    },
+                    {
+                        "lots": 1,
+                        "multiplier": 4
+                    }
+                ],
+                "profit": 0.01,
+                "driftTolerance" : 0.001,
+                "numEpochsLeaveOpen": 10,
+                "baseOptions": {
+                    "multisplit": "true"
+                },
+                "quoteOptions": {
+                    "multisplit": "true",
+                    "multisplitbuffer": "5"
+                }
             }
         }
     ],

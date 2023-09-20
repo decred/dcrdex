@@ -4,13 +4,6 @@ import (
 	"fmt"
 )
 
-// MarketMakingWithCEXConfig is the configuration for a market
-// maker that places orders on both sides of the order book, but
-// only if there is profitable counter-trade on the CEX
-// order book.
-type MarketMakingWithCEXConfig struct {
-}
-
 type BalanceType uint8
 
 const (
@@ -49,9 +42,9 @@ type BotConfig struct {
 	QuoteBalance     uint64      `json:"quoteBalance"`
 
 	// Only one of the following configs should be set
-	BasicMMConfig   *BasicMarketMakingConfig   `json:"basicMarketMakingConfig,omitempty"`
-	SimpleArbConfig *SimpleArbConfig           `json:"simpleArbConfig,omitempty"`
-	MMWithCEXConfig *MarketMakingWithCEXConfig `json:"marketMakingWithCEXConfig,omitempty"`
+	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`
+	SimpleArbConfig      *SimpleArbConfig         `json:"simpleArbConfig,omitempty"`
+	ArbMarketMakerConfig *ArbMarketMakerConfig    `json:"arbMarketMakerConfig,omitempty"`
 
 	Disabled bool `json:"disabled"`
 }

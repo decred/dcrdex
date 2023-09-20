@@ -233,25 +233,23 @@ type groupedOrder struct {
 	epoch uint64
 }
 
-// groupedOrders returns the buy and sell orders grouped by placement index.
-func (m *basicMarketMaker) groupedOrders() (buys, sells map[int][]*groupedOrder) {
+func groupOrders(orders map[order.OrderID]*core.Order, oidToPlacement map[order.OrderID]int, lotSize uint64) (buys, sells map[int][]*groupedOrder) {
 	makeGroupedOrder := func(o *core.Order) *groupedOrder {
 		var oid order.OrderID
 		copy(oid[:], o.ID)
 		return &groupedOrder{
 			id:    oid,
 			rate:  o.Rate,
-			lots:  (o.Qty - o.Filled) / m.mkt.LotSize,
+			lots:  (o.Qty - o.Filled) / lotSize,
 			epoch: o.Epoch,
 		}
 	}
 
 	buys, sells = make(map[int][]*groupedOrder), make(map[int][]*groupedOrder)
-	m.ordMtx.RLock()
-	for _, ord := range m.ords {
+	for _, ord := range orders {
 		var oid order.OrderID
 		copy(oid[:], ord.ID)
-		placementIndex := m.oidToPlacement[oid]
+		placementIndex := oidToPlacement[oid]
 		if ord.Sell {
 			if _, found := sells[placementIndex]; !found {
 				sells[placementIndex] = make([]*groupedOrder, 0, 1)
@@ -264,9 +262,15 @@ func (m *basicMarketMaker) groupedOrders() (buys, sells map[int][]*groupedOrder)
 			buys[placementIndex] = append(buys[placementIndex], makeGroupedOrder(ord))
 		}
 	}
-	m.ordMtx.RUnlock()
 
 	return buys, sells
+}
+
+// groupedOrders returns the buy and sell orders grouped by placement index.
+func (m *basicMarketMaker) groupedOrders() (buys, sells map[int][]*groupedOrder) {
+	m.ordMtx.RLock()
+	defer m.ordMtx.RUnlock()
+	return groupOrders(m.ords, m.oidToPlacement, m.mkt.LotSize)
 }
 
 // basisPrice calculates the basis price for the market maker.
