@@ -426,12 +426,12 @@ func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 	defer zero(pass)
 
 	bondForm := &core.PostBondForm{
-		Addr:      post.Addr,
-		Cert:      []byte(post.Cert),
-		AppPass:   pass,
-		Bond:      post.Bond,
-		Asset:     &assetID,
-		LockTime:  post.LockTime,
+		Addr:     post.Addr,
+		Cert:     []byte(post.Cert),
+		AppPass:  pass,
+		Bond:     post.Bond,
+		Asset:    &assetID,
+		LockTime: post.LockTime,
 		// Options valid only when creating an account with bond:
 		MaintainTier: post.Maintain,
 		MaxBondedAmt: post.MaxBondedAmt,
