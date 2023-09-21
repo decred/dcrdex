@@ -45,7 +45,7 @@ few simple *options* for obtaining the software. The standalone DEX client is
 strongly recommended as it is the easiest to setup and generally has the most
 up-to-date downloads. Pick **just one** method:
 
-1. Download the the standalone DEX client for your operating system for the
+1. Download the standalone DEX client for your operating system for the
    [latest release on GitHub](https://github.com/decred/dcrdex/releases).
 2. Use your operating system's package manager. See [OS Packages](#os-packages)
    for more info.
@@ -64,7 +64,7 @@ you want to set up a new DEX server and host markets of your choice, see
 
 ## OS Packages
 
-We are in the process of adding the application to various OS package mangers:
+We are in the process of adding the application to various OS package managers:
 
 - Arch Linux ([AUR](https://aur.archlinux.org/packages/dcrdex)). e.g. `$ yay dcrdex`.  Accessible to [Arch-based distros](https://wiki.archlinux.org/title/Arch-based_distributions) like Manjaro.
 - MacOS. Homebrew cask **coming soon**.
@@ -89,7 +89,7 @@ start with some smaller orders to build up your reputation. As you complete
 orders, your limit will go up.
 
 **If you fail to complete swaps** when your orders are matched, your account
-will accumulate strikes that may be lead your account becoming automatically
+will accumulate strikes that may lead to your account becoming automatically
 suspended. These situations are not always intentional (e.g. prolonged loss of
 internet access, crashed computer, etc.), so for technical assistance, please
 reach out
@@ -125,7 +125,7 @@ for more details about how atomic swaps work.
 
 The [DEX specification](spec/README.mediawiki) details the messaging and trading
 protocols required to use the Market API. Not only is the code in
-in the **decred/dcrdex** repository open-source, but the entire protocol is
+the **decred/dcrdex** repository open-source, but the entire protocol is
 open-source. So anyone can, in principle, write their own client or server based
 on the specification. Such an endeavor would be ill-advised in these early
 stages, while the protocols are undergoing constant change.
