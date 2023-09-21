@@ -73,6 +73,14 @@ div[data-handler=markets] {
         padding: 5px 25px;
         border-radius: 3px;
         color: #555;
+
+        &:disabled {
+          opacity: 0.4;
+        
+          &:hover {
+            cursor: not-allowed;
+          }
+        }
       }
 
       button:hover,

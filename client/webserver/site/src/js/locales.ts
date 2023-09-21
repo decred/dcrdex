@@ -148,6 +148,10 @@ export const ID_BROWSER_NTFN_ORDERS = 'ID_BROWSER_NTFN_ORDERS'
 export const ID_BROWSER_NTFN_MATCHES = 'ID_BROWSER_NTFN_MATCHES'
 export const ID_BROWSER_NTFN_BONDS = 'ID_BROWSER_NTFN_BONDS'
 export const ID_BROWSER_NTFN_CONNECTIONS = 'ID_BROWSER_NTFN_CONNECTIONS'
+export const ID_ORDER_BUTTON_BUY_BALANCE_ERROR = 'ID_ORDER_BUTTON_BUY_BALANCE_ERROR'
+export const ID_ORDER_BUTTON_SELL_BALANCE_ERROR = 'ID_ORDER_BUTTON_SELL_BALANCE_ERROR'
+export const ID_ORDER_BUTTON_QTY_ERROR = 'ID_ORDER_BUTTON_QTY_ERROR'
+export const ID_ORDER_BUTTON_QTY_RATE_ERROR = 'ID_ORDER_BUTTON_QTY_RATE_ERROR'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -155,6 +159,10 @@ export const enUS: Locale = {
   [ID_PASSWORD_NOT_MATCH]: 'passwords do not match',
   [ID_SET_BUTTON_BUY]: 'Place order to buy  {{ asset }}',
   [ID_SET_BUTTON_SELL]: 'Place order to sell {{ asset }}',
+  [ID_ORDER_BUTTON_BUY_BALANCE_ERROR]: 'Insufficient balance to buy.',
+  [ID_ORDER_BUTTON_SELL_BALANCE_ERROR]: 'Insufficient balance to sell.',
+  [ID_ORDER_BUTTON_QTY_ERROR]: 'Order quantity must be specified.',
+  [ID_ORDER_BUTTON_QTY_RATE_ERROR]: 'Order quantity and price must be specified.',
   [ID_OFF]: 'off',
   [ID_READY]: 'ready',
   [ID_LOCKED]: 'locked',
