@@ -562,15 +562,16 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:     randomBalance(0),
-			2:     randomBalance(2),
-			42:    randomBalance(42),
-			22:    randomBalance(22),
-			3:     randomBalance(3),
-			28:    randomBalance(28),
-			60:    randomBalance(60),
-			145:   randomBalance(145),
-			60000: randomBalance(60000),
+			0:                  randomBalance(0),
+			2:                  randomBalance(2),
+			42:                 randomBalance(42),
+			22:                 randomBalance(22),
+			3:                  randomBalance(3),
+			28:                 randomBalance(28),
+			60:                 randomBalance(60),
+			145:                randomBalance(145),
+			60000:              randomBalance(60000),
+			unsupportedAssetID: randomBalance(unsupportedAssetID),
 		},
 		noteFeed: make(chan core.Notification, 1),
 		fiatSources: map[string]bool{
@@ -1390,6 +1391,30 @@ var winfos = map[uint32]*asset.WalletInfo{
 		}},
 	},
 	60: &eth.WalletInfo,
+	unsupportedAssetID: {
+		Version:           0,
+		SupportedVersions: []uint32{0},
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "Sats",
+			Conventional: dex.Denomination{
+				Unit:             "KMD",
+				ConversionFactor: 1e6,
+			},
+		},
+		Name: "Komodo",
+		AvailableWallets: []*asset.WalletDefinition{
+			{
+				Type:   "1",
+				Tab:    "Native",
+				Seeded: true,
+			},
+			{
+				Type:       "2",
+				Tab:        "External",
+				ConfigOpts: configOpts,
+			},
+		},
+	},
 	145: {
 		Version:           0,
 		SupportedVersions: []uint32{0},
@@ -1714,15 +1739,15 @@ func (c *TCore) User() *core.User {
 		Initialized: c.inited,
 		Assets:      c.SupportedAssets(),
 		FiatRates: map[uint32]float64{
-			0:   21_208.61, // btc
-			2:   59.08,     // ltc
-			42:  25.46,     // dcr
-			22:  0.5117,    // mona
-			28:  0.1599,    // vtc
-			141: 0.2048,    // kmd
-			3:   0.06769,   // doge
-			145: 114.68,    // bch
-			60:  1_209.51,  // eth
+			0:                  21_208.61, // btc
+			2:                  59.08,     // ltc
+			42:                 25.46,     // dcr
+			22:                 0.5117,    // mona
+			28:                 0.1599,    // vtc
+			unsupportedAssetID: 0.2048,    // kmd
+			3:                  0.06769,   // doge
+			145:                114.68,    // bch
+			60:                 1_209.51,  // eth
 		},
 	}
 	return user
@@ -1739,15 +1764,16 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:     mkSupportedAsset("btc", c.walletState(0)),
-		42:    mkSupportedAsset("dcr", c.walletState(42)),
-		2:     mkSupportedAsset("ltc", c.walletState(2)),
-		22:    mkSupportedAsset("mona", c.walletState(22)),
-		3:     mkSupportedAsset("doge", c.walletState(3)),
-		28:    mkSupportedAsset("vtc", c.walletState(28)),
-		60:    mkSupportedAsset("eth", c.walletState(60)),
-		145:   mkSupportedAsset("bch", c.walletState(145)),
-		60000: mkSupportedAsset("dextt.eth", c.walletState(60000)),
+		0:                  mkSupportedAsset("btc", c.walletState(0)),
+		42:                 mkSupportedAsset("dcr", c.walletState(42)),
+		2:                  mkSupportedAsset("ltc", c.walletState(2)),
+		22:                 mkSupportedAsset("mona", c.walletState(22)),
+		3:                  mkSupportedAsset("doge", c.walletState(3)),
+		28:                 mkSupportedAsset("vtc", c.walletState(28)),
+		60:                 mkSupportedAsset("eth", c.walletState(60)),
+		unsupportedAssetID: mkSupportedAsset("kmd", c.walletState(unsupportedAssetID)),
+		145:                mkSupportedAsset("bch", c.walletState(145)),
+		60000:              mkSupportedAsset("dextt.eth", c.walletState(60000)),
 	}
 }
 
