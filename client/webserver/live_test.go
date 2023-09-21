@@ -25,7 +25,9 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/client/asset/eth"
+	"decred.org/dcrdex/client/asset/firo"
 	"decred.org/dcrdex/client/asset/ltc"
+	"decred.org/dcrdex/client/asset/polygon"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
@@ -1426,6 +1428,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
+	136: firo.WalletInfo,
+	966: &polygon.WalletInfo,
 }
 
 var tinfos map[uint32]*asset.Token
@@ -1773,7 +1777,11 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 		60:                 mkSupportedAsset("eth", c.walletState(60)),
 		unsupportedAssetID: mkSupportedAsset("kmd", c.walletState(unsupportedAssetID)),
 		145:                mkSupportedAsset("bch", c.walletState(145)),
+		136:                mkSupportedAsset("firo", c.walletState(136)),
+		966:                mkSupportedAsset("polygon", c.walletState(966)),
 		60000:              mkSupportedAsset("dextt.eth", c.walletState(60000)),
+		966000:             mkSupportedAsset("dextt.polygon", c.walletState(966000)),
+		966001:             mkSupportedAsset("usdc.polygon", c.walletState(966001)),
 	}
 }
 
@@ -2039,7 +2047,9 @@ func TestServer(t *testing.T) {
 	asset.Register(3, &TDriver{})                  // doge
 
 	tinfos = map[uint32]*asset.Token{
-		60000: asset.TokenInfo(60000),
+		60000:  asset.TokenInfo(60000),
+		966000: asset.TokenInfo(966000),
+		966001: asset.TokenInfo(966001),
 	}
 
 	numBuys = 10
