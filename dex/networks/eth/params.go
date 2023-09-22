@@ -63,6 +63,11 @@ var (
 			dex.Testnet: common.HexToAddress("0x198463496037754564e9bea5418Bf4117Db0520C"),
 		},
 	}
+
+	MultiBalanceAddresses = map[dex.Network]common.Address{
+		dex.Mainnet: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"), // tx 0xaf6cb861578c0ded0750397d7e044a7dd86c94aa47211d02188e146a2424dda4
+		dex.Testnet: common.HexToAddress("0x0F7F7C2979554B89F4Ca974fe0d382008888f699"), // tx 0x540d3e82888b18f89566a988712a7c2ecd45bd2df472f8dd689e319ae9fa4445
+	}
 )
 
 var v0Gases = &Gases{

@@ -260,6 +260,12 @@ func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (
 	return n.receipt, n.receiptTx, n.receiptErr
 }
 
+func (n *testNode) setBalanceError(w *assetWallet, err error) {
+	n.balErr = err
+	n.tokenContractor.balErr = err
+	w.balances.m = nil
+}
+
 type tMempoolNode struct {
 	*testNode
 	pendingTxs []*types.Transaction
@@ -618,6 +624,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			monitoredTxs:  make(map[common.Hash]*monitoredTx),
 			monitoredTxDB: kvdb.NewMemoryDB(),
 			pendingTxs:    make(map[common.Hash]*pendingTx),
+			currentTip:    &types.Header{Number: new(big.Int)},
 		},
 		versionedGases:     versionedGases,
 		maxSwapGas:         versionedGases[0].Swap,
@@ -1339,12 +1346,12 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	}
 	checkBalance(eth, walletBalanceGwei, 0, "returned correct amount")
 
-	node.balErr = errors.New("")
+	node.setBalanceError(eth, errors.New(""))
 	_, _, _, err = w.FundOrder(&order)
 	if err == nil {
 		t.Fatalf("balance error should cause error but did not")
 	}
-	node.balErr = nil
+	node.setBalanceError(eth, nil)
 
 	// Test that funding without allowance causes error
 	if assetID != BipID {
@@ -1683,6 +1690,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 	}
 
 	for _, test := range tests {
+		node.setBalanceError(eth, nil)
 		if assetID == BipID {
 			if test.tokenOnly {
 				continue
@@ -4024,11 +4032,9 @@ func testSend(t *testing.T, assetID uint32) {
 	}}
 
 	for _, test := range tests {
-
-		node.balErr = test.balErr
+		node.setBalanceError(eth, test.balErr)
 		node.sendTxErr = test.sendTxErr
 		node.tokenContractor.transferErr = test.sendTxErr
-
 		if assetID == BipID {
 			node.bal = dexeth.GweiToWei(val + ethFees - test.sendAdj - test.feeAdj)
 		} else {
@@ -4988,7 +4994,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 	}}
 
 	for _, test := range tests {
-		node.balErr = test.balErr
+		node.setBalanceError(eth, test.balErr)
 		if assetID == BipID {
 			node.bal = dexeth.GweiToWei(val + ethFees - test.sendAdj - test.feeAdj)
 		} else {

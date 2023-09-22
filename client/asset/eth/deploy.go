@@ -14,9 +14,11 @@ import (
 	"decred.org/dcrdex/dex"
 	erc20v0 "decred.org/dcrdex/dex/networks/erc20/contracts/v0"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	multibal "decred.org/dcrdex/dex/networks/eth/contracts/multibalance"
 	ethv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
@@ -38,6 +40,25 @@ func (contractDeployer) EstimateDeployFunding(
 	chain string,
 	contractVer uint32,
 	tokenAddress common.Address,
+	credentialsPath string,
+	chainCfg *params.ChainConfig,
+	ui *dex.UnitInfo,
+	log dex.Logger,
+	net dex.Network,
+) error {
+	txData, err := ContractDeployer.txData(contractVer, tokenAddress)
+	if err != nil {
+		return err
+	}
+	const deploymentGas = 1_000_000 // eth v0: 687_671, token v0 825_478
+	return ContractDeployer.estimateDeployFunding(ctx, txData, deploymentGas, chain, credentialsPath, chainCfg, ui, log, net)
+}
+
+func (contractDeployer) estimateDeployFunding(
+	ctx context.Context,
+	txData []byte,
+	deploymentGas uint64,
+	chain string,
 	credentialsPath string,
 	chainCfg *params.ChainConfig,
 	ui *dex.UnitInfo,
@@ -66,11 +87,6 @@ func (contractDeployer) EstimateDeployFunding(
 
 	log.Infof("Balance: %s %s", ui.ConventionalString(dexeth.WeiToGwei(baseChainBal)), ui.Conventional.Unit)
 
-	txData, err := ContractDeployer.txData(contractVer, tokenAddress)
-	if err != nil {
-		return err
-	}
-
 	var gas uint64
 	if baseChainBal.Cmp(new(big.Int)) > 0 {
 		// We may be able to get a proper estimate.
@@ -86,7 +102,6 @@ func (contractDeployer) EstimateDeployFunding(
 		}
 	}
 
-	const deploymentGas = 1_500_000 // eth v0: 687_671, token v0 825_478
 	if gas == 0 {
 		gas = deploymentGas
 	}
@@ -107,6 +122,20 @@ func (contractDeployer) EstimateDeployFunding(
 		ui.ConventionalString(shortage), cl.address())
 
 	return nil
+}
+
+func (contractDeployer) EstimateMultiBalanceDeployFunding(
+	ctx context.Context,
+	chain string,
+	credentialsPath string,
+	chainCfg *params.ChainConfig,
+	ui *dex.UnitInfo,
+	log dex.Logger,
+	net dex.Network,
+) error {
+	const deploymentGas = 400_000 // 302_647 for https://goerli.etherscan.io/tx/0x540d3e82888b18f89566a988712a7c2ecd45bd2df472f8dd689e319ae9fa4445
+	txData := common.FromHex(multibal.MultiBalanceV0MetaData.Bin)
+	return ContractDeployer.estimateDeployFunding(ctx, txData, deploymentGas, chain, credentialsPath, chainCfg, ui, log, net)
 }
 
 func (contractDeployer) txData(contractVer uint32, tokenAddr common.Address) (txData []byte, err error) {
@@ -155,6 +184,52 @@ func (contractDeployer) DeployContract(
 	log dex.Logger,
 	net dex.Network,
 ) error {
+	txData, err := ContractDeployer.txData(contractVer, tokenAddress)
+	if err != nil {
+		return err
+	}
+
+	var deployer deployerFunc
+	isToken := tokenAddress != (common.Address{})
+	if isToken {
+		switch contractVer {
+		case 0:
+			deployer = func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
+				contractAddr, tx, _, err := erc20v0.DeployERC20Swap(txOpts, cb, tokenAddress)
+				return contractAddr, tx, err
+			}
+
+		}
+	} else {
+		switch contractVer {
+		case 0:
+			deployer = func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
+				contractAddr, tx, _, err := ethv0.DeployETHSwap(txOpts, cb)
+				return contractAddr, tx, err
+			}
+		}
+	}
+	if deployer == nil {
+		return fmt.Errorf("contract version unknown")
+	}
+
+	return ContractDeployer.deployContract(ctx, txData, deployer, chain, credentialsPath, chainCfg, ui, log, net)
+}
+
+type deployerFunc func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error)
+
+// DeployContract deployes a dcrdex swap contract.
+func (contractDeployer) deployContract(
+	ctx context.Context,
+	txData []byte,
+	deployer deployerFunc,
+	chain string,
+	credentialsPath string,
+	chainCfg *params.ChainConfig,
+	ui *dex.UnitInfo,
+	log dex.Logger,
+	net dex.Network,
+) error {
 
 	walletDir, err := os.MkdirTemp("", "")
 	if err != nil {
@@ -176,11 +251,6 @@ func (contractDeployer) DeployContract(
 	}
 
 	log.Infof("Balance: %s %s", ui.ConventionalString(dexeth.WeiToGwei(baseChainBal)), ui.Conventional.Unit)
-
-	txData, err := ContractDeployer.txData(contractVer, tokenAddress)
-	if err != nil {
-		return err
-	}
 
 	// We may be able to get a proper estimate.
 	gas, err := cl.EstimateGas(ctx, ethereum.CallMsg{
@@ -210,25 +280,9 @@ func (contractDeployer) DeployContract(
 		return err
 	}
 
-	isToken := tokenAddress != (common.Address{})
-	var contractAddr common.Address
-	var tx *types.Transaction
-	if isToken {
-		switch contractVer {
-		case 0:
-			contractAddr, tx, _, err = erc20v0.DeployERC20Swap(txOpts, cl.contractBackend(), tokenAddress)
-		}
-	} else {
-		switch contractVer {
-		case 0:
-			contractAddr, tx, _, err = ethv0.DeployETHSwap(txOpts, cl.contractBackend())
-		}
-	}
+	contractAddr, tx, err := deployer(txOpts, cl.contractBackend())
 	if err != nil {
-		return fmt.Errorf("error deploying contract: %w", err)
-	}
-	if tx == nil {
-		return fmt.Errorf("no deployment function for version %d", contractVer)
+		return err
 	}
 
 	log.Infof("👍 Contract %s launched with tx %s", contractAddr, tx.Hash())
@@ -316,4 +370,23 @@ func (contractDeployer) nodeAndRate(
 
 	feeRate := dexeth.WeiToGwei(new(big.Int).Add(tip, new(big.Int).Mul(base, big.NewInt(2))))
 	return cl, feeRate, nil
+}
+
+// DeployMultiBalance deployes a contract with a function for reading all
+// balances in one call.
+func (contractDeployer) DeployMultiBalance(
+	ctx context.Context,
+	chain string,
+	credentialsPath string,
+	chainCfg *params.ChainConfig,
+	ui *dex.UnitInfo,
+	log dex.Logger,
+	net dex.Network,
+) error {
+	txData := common.FromHex(multibal.MultiBalanceV0MetaData.Bin)
+	deployer := func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
+		contractAddr, tx, _, err := multibal.DeployMultiBalanceV0(txOpts, cb)
+		return contractAddr, tx, err
+	}
+	return ContractDeployer.deployContract(ctx, txData, deployer, chain, credentialsPath, chainCfg, ui, log, net)
 }

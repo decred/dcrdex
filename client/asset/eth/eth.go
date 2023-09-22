@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/dex/keygen"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	multibal "decred.org/dcrdex/dex/networks/eth/contracts/multibalance"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
@@ -439,6 +440,12 @@ type pendingApproval struct {
 	onConfirm func()
 }
 
+type cachedBalance struct {
+	stamp  time.Time
+	height uint64
+	bal    *big.Int
+}
+
 // Check that assetWallet satisfies the asset.Wallet interface.
 var _ asset.Wallet = (*ETHWallet)(nil)
 var _ asset.Wallet = (*TokenWallet)(nil)
@@ -465,6 +472,9 @@ type baseWallet struct {
 	log        dex.Logger
 	dir        string
 	walletType string
+
+	multiBalanceAddress  common.Address
+	multiBalanceContract *multibal.MultiBalanceV0
 
 	baseChainID uint32
 	chainCfg    *params.ChainConfig
@@ -496,6 +506,11 @@ type baseWallet struct {
 	// nonceSendMtx should be locked for the node.txOpts -> tx send sequence
 	// for all txs, to ensure nonce correctness.
 	nonceSendMtx sync.Mutex
+
+	balances struct {
+		sync.Mutex
+		m map[uint32]*cachedBalance
+	}
 }
 
 // assetWallet is a wallet backend for Ethereum and Eth tokens. The backend is
@@ -707,6 +722,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		Tokens:             dexeth.Tokens,
 		Logger:             logger,
 		BaseChainContracts: contracts,
+		MultiBalAddress:    dexeth.MultiBalanceAddresses[net],
 		WalletInfo:         WalletInfo,
 		Net:                net,
 	})
@@ -722,6 +738,7 @@ type EVMWalletConfig struct {
 	Tokens             map[uint32]*dexeth.Token
 	Logger             dex.Logger
 	BaseChainContracts map[uint32]common.Address
+	MultiBalAddress    common.Address
 	WalletInfo         asset.WalletInfo
 	Net                dex.Network
 }
@@ -767,6 +784,8 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		wallets:      make(map[uint32]*assetWallet),
 		monitoredTxs: make(map[common.Hash]*monitoredTx),
 		pendingTxs:   make(map[common.Hash]*pendingTx),
+		// Can be empty
+		multiBalanceAddress: cfg.MultiBalAddress,
 	}
 
 	var maxSwapGas, maxRedeemGas uint64
@@ -904,6 +923,13 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 			return nil, fmt.Errorf("error constructor version %d contractor: %v", ver, err)
 		}
 		w.contractors[ver] = c
+	}
+
+	if w.multiBalanceAddress != (common.Address{}) {
+		w.multiBalanceContract, err = multibal.NewMultiBalanceV0(w.multiBalanceAddress, cl.contractBackend())
+		if err != nil {
+			w.log.Errorf("Error loading MultiBalance contract: %v", err)
+		}
 	}
 
 	db, err := kvdb.NewFileDB(filepath.Join(w.dir, "tx.db"), w.log.SubLogger("TXDB"))
@@ -4131,18 +4157,92 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 	return
 }
 
-func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
-	isToken := w.assetID != w.baseChainID
+func (w *assetWallet) getConfirmedBalance() (*big.Int, error) {
 
-	getBal := func() (*big.Int, error) {
-		if !isToken {
-			return w.node.addressBalance(w.ctx, w.addr)
-		} else {
-			return w.tokenBalance()
-		}
+	now := time.Now()
+	w.tipMtx.RLock()
+	tipHeight := w.currentTip.Number.Uint64()
+	w.tipMtx.RUnlock()
+
+	w.balances.Lock()
+	defer w.balances.Unlock()
+
+	if w.balances.m == nil {
+		w.balances.m = make(map[uint32]*cachedBalance)
+	}
+	// Check to see if we already have one up-to-date
+	cached := w.balances.m[w.assetID]
+	if cached != nil && cached.height == tipHeight && time.Since(cached.stamp) < time.Minute {
+		return cached.bal, nil
 	}
 
-	confirmed, err := getBal()
+	if w.multiBalanceContract == nil {
+		var bal *big.Int
+		var err error
+		if w.assetID == w.baseChainID {
+			bal, err = w.node.addressBalance(w.ctx, w.addr)
+		} else {
+			bal, err = w.tokenBalance()
+		}
+		if err != nil {
+			return nil, err
+		}
+		w.balances.m[w.assetID] = &cachedBalance{
+			stamp:  now,
+			height: tipHeight,
+			bal:    bal,
+		}
+		return bal, nil
+	}
+
+	// Either not cached, or outdated. Fetch anew.
+	var tokenAddrs []common.Address
+	idIndexes := map[int]uint32{
+		0: w.baseChainID,
+	}
+	i := 1
+	for assetID, tkn := range w.tokens {
+		netToken := tkn.NetTokens[w.net]
+		if netToken == nil || netToken.Address == (common.Address{}) {
+			continue
+		}
+		tokenAddrs = append(tokenAddrs, netToken.Address)
+		idIndexes[i] = assetID
+		i++
+	}
+	callOpts := &bind.CallOpts{
+		From:    w.addr,
+		Context: w.ctx,
+	}
+
+	bals, err := w.multiBalanceContract.Balances(callOpts, w.addr, tokenAddrs)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching multi-balance: %w", err)
+	}
+	if len(bals) != len(idIndexes) {
+		return nil, fmt.Errorf("wrong number of balances in multi-balance result. wanted %d, got %d", len(idIndexes), len(bals))
+	}
+	var reqBal *big.Int
+	for i, bal := range bals {
+		assetID := idIndexes[i]
+		if assetID == w.assetID {
+			reqBal = bal
+		}
+		w.balances.m[assetID] = &cachedBalance{
+			stamp:  now,
+			height: tipHeight,
+			bal:    bal,
+		}
+	}
+	if reqBal == nil {
+		return nil, fmt.Errorf("requested asset not in multi-balance result: %v", err)
+	}
+	return reqBal, nil
+}
+
+func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
+	isToken := w.assetID != w.baseChainID
+	confirmed, err := w.getConfirmedBalance()
 	if err != nil {
 		return nil, fmt.Errorf("balance error: %v", err)
 	}
@@ -4151,7 +4251,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 	if !is {
 		for {
 			out, in := w.sumPendingTxs(confirmed)
-			checkBal, err := getBal()
+			checkBal, err := w.getConfirmedBalance()
 			if err != nil {
 				return nil, fmt.Errorf("balance consistency check error: %v", err)
 			}
@@ -4264,6 +4364,7 @@ func (w *TokenWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate *bi
 	if g == nil {
 		return nil, fmt.Errorf("no gas table")
 	}
+
 	txOpts, err := w.node.txOpts(w.ctx, 0, g.Transfer, nil, nil)
 	if err != nil {
 		return nil, err
@@ -4535,7 +4636,12 @@ func getFileCredentials(chain, path string, net dex.Network) (seed []byte, provi
 		return nil, nil, fmt.Errorf("must provide both seeds in credentials file")
 	}
 	seed = p.Seed
-	providers = p.Providers[chain][net.String()]
+	for _, uri := range p.Providers[chain][net.String()] {
+		if strings.HasPrefix(uri, "#") || strings.HasPrefix(uri, ";") {
+			continue
+		}
+		providers = append(providers, uri)
+	}
 	if net == dex.Simnet && len(providers) == 0 {
 		u, _ := user.Current()
 		switch chain {

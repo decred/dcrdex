@@ -109,6 +109,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		Tokens:             dexpolygon.Tokens,
 		Logger:             logger,
 		BaseChainContracts: contracts,
+		MultiBalAddress:    dexpolygon.MultiBalanceAddresses[net],
 		WalletInfo:         WalletInfo,
 		Net:                net,
 	})
