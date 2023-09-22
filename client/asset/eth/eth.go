@@ -368,7 +368,8 @@ type monitoredTx struct {
 	// replacedTx could be set when the tx is created, be immutable, and not
 	// need the mutex, but since Redeem doesn't know if the transaction is a
 	// replacement or a new one, this variable is set in recordReplacementTx.
-	replacedTx *common.Hash
+	replacedTx       *common.Hash
+	errorsBroadcated uint16
 }
 
 // MarshalBinary marshals a monitoredTx into a byte array.
@@ -4043,11 +4044,27 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 			w.clearMonitoredTx(monitoredTx)
 			return confStatus(txConfsNeededToConfirm, txHash), nil
 		}
-		replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nil, feeWallet, monitoredTx)
-		if err != nil {
-			return nil, err
+
+		w.log.Errorf("Redemption transaction rejected!!! Tx %s failed to redeem %s funds", tx.Hash(), dex.BipIDSymbol(w.assetID))
+		// Only broadcast a single replacement before giving up.
+		if monitoredTx.replacedTx == nil {
+			w.log.Infof("Attempting to resubmit a %s redemption with secret hash %s", dex.BipIDSymbol(w.assetID), hex.EncodeToString(secretHash[:]))
+			replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nil, feeWallet, monitoredTx)
+			if err != nil {
+				return nil, err
+			}
+			return confStatus(0, *replacementTxHash), nil
 		}
-		return confStatus(0, *replacementTxHash), nil
+		// We've failed to redeem twice. We can't keep broadcasting txs into the
+		// void. We have to give up. Print a bunch of errors and then report
+		// the redemption as confirmed so we'll stop following it.
+		if monitoredTx.errorsBroadcated < 100 {
+			monitoredTx.errorsBroadcated++
+			return nil, fmt.Errorf("failed to redeem %s swap with secret hash %s twice. not trying again",
+				dex.BipIDSymbol(w.assetID), hex.EncodeToString(secretHash[:]))
+		}
+		const aTonOfFakeConfs = 1e3
+		return confStatus(aTonOfFakeConfs, txHash), nil
 	}
 	if confirmations > 0 {
 		return confStatus(confirmations, txHash), nil
