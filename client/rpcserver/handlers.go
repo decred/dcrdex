@@ -915,6 +915,12 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 }
 
 func handleStartMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if s.mm == nil {
+		errMsg := "experimental flag must be set to use market making"
+		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
+		return createResponse(startMarketMakingRoute, nil, resErr)
+	}
+
 	form, err := parseStartMarketMakingArgs(params)
 	if err != nil {
 		return usage(startMarketMakingRoute, err)
@@ -931,6 +937,12 @@ func handleStartMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponseP
 }
 
 func handleStopMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if s.mm == nil {
+		errMsg := "experimental flag must be set to use market making"
+		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
+		return createResponse(startMarketMakingRoute, nil, resErr)
+	}
+
 	if !s.mm.Running() {
 		errMsg := "market making is not running"
 		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)

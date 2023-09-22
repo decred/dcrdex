@@ -537,13 +537,15 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/listvsps", s.apiListVSPs)
 			apiAuth.Post("/ticketpage", s.apiTicketPage)
 
-			apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)
-			apiAuth.Post("/stopmarketmaking", s.apiStopMarketMaking)
-			apiAuth.Get("/marketmakingconfig", s.apiMarketMakingConfig)
-			apiAuth.Post("/updatemarketmakingconfig", s.apiUpdateMarketMakingConfig)
-			apiAuth.Post("/removemarketmakingconfig", s.apiRemoveMarketMakingConfig)
-			apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
-			apiAuth.Post("/marketreport", s.apiMarketReport)
+			if cfg.Experimental {
+				apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)
+				apiAuth.Post("/stopmarketmaking", s.apiStopMarketMaking)
+				apiAuth.Get("/marketmakingconfig", s.apiMarketMakingConfig)
+				apiAuth.Post("/updatemarketmakingconfig", s.apiUpdateMarketMakingConfig)
+				apiAuth.Post("/removemarketmakingconfig", s.apiRemoveMarketMakingConfig)
+				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
+				apiAuth.Post("/marketreport", s.apiMarketReport)
+			}
 		})
 	})
 
