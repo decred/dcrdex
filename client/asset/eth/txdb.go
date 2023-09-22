@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package eth
 
 import (
@@ -50,7 +53,8 @@ type monitoredTx struct {
 	// replacedTx could be set when the tx is created, be immutable, and not
 	// need the mutex, but since Redeem doesn't know if the transaction is a
 	// replacement or a new one, this variable is set in recordReplacementTx.
-	replacedTx *common.Hash
+	replacedTx        *common.Hash
+	errorsBroadcasted uint16
 }
 
 // MarshalBinary marshals a monitoredTx into a byte array.
@@ -119,7 +123,10 @@ var (
 )
 
 func nonceKey(nonce uint64) []byte {
-	return binary.BigEndian.AppendUint64(noncePrefix, nonce)
+	key := make([]byte, len(noncePrefix)+8)
+	copy(key, noncePrefix)
+	binary.BigEndian.PutUint64(key[len(noncePrefix):], nonce)
+	return key
 }
 
 func nonceFromKey(nk []byte) (uint64, error) {
@@ -130,11 +137,17 @@ func nonceFromKey(nk []byte) (uint64, error) {
 }
 
 func txHashKey(txHash dex.Bytes) []byte {
-	return append(txHashPrefix, txHash...)
+	key := make([]byte, len(txHashPrefix)+len(txHash))
+	copy(key, txHashPrefix)
+	copy(key[len(txHashPrefix):], txHash)
+	return key
 }
 
 func monitoredTxKey(txHash dex.Bytes) []byte {
-	return append(monitoredTxPrefix, txHash...)
+	key := make([]byte, len(monitoredTxPrefix)+len(txHash))
+	copy(key, monitoredTxPrefix)
+	copy(key[len(monitoredTxPrefix):], txHash)
+	return key
 }
 
 func monitoredTxHashFromKey(mtk []byte) (common.Hash, error) {
@@ -148,13 +161,22 @@ func monitoredTxHashFromKey(mtk []byte) (common.Hash, error) {
 
 var maxNonceKey = nonceKey(math.MaxUint64)
 
-const txDBVersion = 1
+// initialDBVersion only contained mappings from txHash -> monitoredTx.
+const initialDBVersion = 0
+
+// prefixDBVersion contains three mappings each marked with a prefix:
+//
+//	nonceKey -> extendedWalletTx (noncePrefix)
+//	txHash -> nonceKey (txHashPrefix)
+//	txHash -> monitoredTx (monitoredTxPrefix)
+const prefixDBVersion = 1
+const txDBVersion = prefixDBVersion
 
 type txDB interface {
 	storeTx(nonce uint64, wt *extendedWalletTx) error
 	removeTx(id dex.Bytes) error
 	getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error)
-	getUnconfirmedTxs() (map[uint64]*extendedWalletTx, error)
+	getPendingTxs() (map[uint64]*extendedWalletTx, error)
 	storeMonitoredTx(txHash common.Hash, tx *monitoredTx) error
 	getMonitoredTxs() (map[common.Hash]*monitoredTx, error)
 	removeMonitoredTxs([]common.Hash) error
@@ -237,11 +259,8 @@ func (s *badgerTxDB) updateVersion() error {
 		s.log.Errorf("error retrieving database version: %v", err)
 	}
 
-	// If the version is 0, add the monitoredTx prefix to all the keys
-	// and store 1 in the version field.
-	if version == 0 {
-		return s.Update(func(txn *badger.Txn) error {
-
+	if version == initialDBVersion {
+		err = s.Update(func(txn *badger.Txn) error {
 			opts := badger.DefaultIteratorOptions
 			it := txn.NewIterator(opts)
 			defer it.Close()
@@ -269,6 +288,10 @@ func (s *badgerTxDB) updateVersion() error {
 			binary.BigEndian.PutUint64(versionB, 1)
 			return txn.Set(dbVersionKey, versionB)
 		})
+		if err != nil {
+			return err
+		}
+		s.log.Infof("Updated database to version %d", prefixDBVersion)
 	} else if version > txDBVersion {
 		return fmt.Errorf("database version %d is not supported", version)
 	}
@@ -335,7 +358,6 @@ func (s *badgerTxDB) removeTx(id dex.Bytes) error {
 		if err != nil {
 			return err
 		}
-
 		err = txn.Delete(tk)
 		if err != nil {
 			return err
@@ -346,32 +368,11 @@ func (s *badgerTxDB) removeTx(id dex.Bytes) error {
 			return err
 		}
 
-		nkEntry, err := txn.Get(nk)
-		if err != nil {
-			return nil
-		}
-
-		wtB, err := nkEntry.ValueCopy(nil)
-		if err != nil {
-			return err
-		}
-
-		wt := new(extendedWalletTx)
-		err = json.Unmarshal(wtB, wt)
-		if err != nil {
-			s.log.Errorf("unable to unmarhsal wallet transaction: %s: %v", string(wtB), err)
-			return err
-		}
-
-		if bytes.Equal(wt.ID, id) {
-			return txn.Delete(nk)
-		}
-
-		return nil
+		return txn.Delete(nk)
 	})
 }
 
-// getTxs returns the n more recent transaction in refID is nil, or the
+// getTxs returns the n more recent transaction if refID is nil, or the
 // n transactions before/after refID depending on the value of past. The
 // transactions are returned in chronological order.
 func (s *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
@@ -435,9 +436,9 @@ func (s *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Wallet
 	return txs, err
 }
 
-// getUnconfirmedTxs returns a map of nonce to extendedWalletTx for all
-// unconfirmed transactions.
-func (s *badgerTxDB) getUnconfirmedTxs() (map[uint64]*extendedWalletTx, error) {
+// getPendingTxs returns a map of nonce to extendedWalletTx for all
+// pending transactions.
+func (s *badgerTxDB) getPendingTxs() (map[uint64]*extendedWalletTx, error) {
 	// We will be iterating backwards from the most recent nonce.
 	// If we find numConfirmedTxsToCheck consecutive confirmed transactions,
 	// we can stop iterating.

@@ -438,7 +438,7 @@ func (db *tTxDB) removeTx(id dex.Bytes) error {
 func (db *tTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
 	return nil, nil
 }
-func (db *tTxDB) getUnconfirmedTxs() (map[uint64]*extendedWalletTx, error) {
+func (db *tTxDB) getPendingTxs() (map[uint64]*extendedWalletTx, error) {
 	return nil, nil
 }
 func (db *tTxDB) getMonitoredTxs() (map[common.Hash]*monitoredTx, error) {
@@ -635,7 +635,7 @@ func TestCheckUnconfirmedTxs(t *testing.T) {
 			for nonce, pt := range tt.unconfirmedTxs {
 				txHash := common.BytesToHash(encode.RandomBytes(32))
 				pt.wt.ID = txHash[:]
-				eth.unconfirmedTxs[nonce] = pt.wt
+				eth.pendingTxs[nonce] = pt.wt
 				var blockNumber *big.Int
 				if pt.confs > 0 {
 					blockNumber = big.NewInt(int64(tipHeight - pt.confs + 1))
@@ -648,13 +648,13 @@ func TestCheckUnconfirmedTxs(t *testing.T) {
 				node.receiptErrs[txHash] = pt.txReceiptErr
 			}
 
-			eth.checkUnconfirmedTxs(tipHeight)
+			eth.checkPendingTxs()
 
-			if len(eth.unconfirmedTxs) != len(tt.expTxsAfter) {
-				t.Fatalf("expected %d unconfirmed txs, got %d", len(tt.expTxsAfter), len(eth.unconfirmedTxs))
+			if len(eth.pendingTxs) != len(tt.expTxsAfter) {
+				t.Fatalf("expected %d unconfirmed txs, got %d", len(tt.expTxsAfter), len(eth.pendingTxs))
 			}
 			for nonce, expTx := range tt.expTxsAfter {
-				if tx, ok := eth.unconfirmedTxs[nonce]; !ok {
+				if tx, ok := eth.pendingTxs[nonce]; !ok {
 					t.Fatalf("expected unconfirmed tx with nonce %d", nonce)
 				} else {
 					if tx.Fees != expTx.Fees {
@@ -882,18 +882,19 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
-			baseChainID:    BipID,
-			chainID:        dexeth.ChainIDs[dex.Simnet],
-			tokens:         dexeth.Tokens,
-			addr:           node.addr,
-			net:            dex.Simnet,
-			node:           node,
-			ctx:            ctx,
-			log:            tLogger,
-			gasFeeLimitV:   defaultGasFeeLimit,
-			monitoredTxs:   make(map[common.Hash]*monitoredTx),
-			unconfirmedTxs: make(map[uint64]*extendedWalletTx),
-			currentTip:     &types.Header{Number: new(big.Int)},
+			baseChainID:  BipID,
+			chainID:      dexeth.ChainIDs[dex.Simnet],
+			tokens:       dexeth.Tokens,
+			addr:         node.addr,
+			net:          dex.Simnet,
+			node:         node,
+			ctx:          ctx,
+			log:          tLogger,
+			gasFeeLimitV: defaultGasFeeLimit,
+			monitoredTxs: make(map[common.Hash]*monitoredTx),
+			pendingTxs:   make(map[uint64]*extendedWalletTx),
+			txDB:         &tTxDB{},
+			currentTip:   &types.Header{Number: new(big.Int)},
 		},
 		versionedGases:     versionedGases,
 		maxSwapGas:         versionedGases[0].Swap,
@@ -1230,7 +1231,7 @@ func TestBalanceNoMempool(t *testing.T) {
 			for nonce, pt := range tt.unconfirmedTxs {
 				txHash := common.BytesToHash(encode.RandomBytes(32))
 				pt.wt.ID = txHash[:]
-				eth.unconfirmedTxs[nonce] = pt.wt
+				eth.pendingTxs[nonce] = pt.wt
 				var blockNumber *big.Int
 				if pt.confs > 0 {
 					blockNumber = big.NewInt(int64(tipHeight - pt.confs + 1))
@@ -1254,8 +1255,8 @@ func TestBalanceNoMempool(t *testing.T) {
 				t.Fatalf("wrong PendingOut. wanted %d, got %d", tt.expPendingOut, out)
 			}
 
-			if len(eth.unconfirmedTxs) != tt.expCountAfter {
-				t.Fatalf("wrong pending tx count after balance check. expected %d, got %d", tt.expCountAfter, len(eth.unconfirmedTxs))
+			if len(eth.pendingTxs) != tt.expCountAfter {
+				t.Fatalf("wrong pending tx count after balance check. expected %d, got %d", tt.expCountAfter, len(eth.pendingTxs))
 			}
 		})
 	}

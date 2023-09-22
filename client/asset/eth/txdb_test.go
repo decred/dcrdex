@@ -189,7 +189,7 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
 
-	unconfirmedTxs, err := txHistoryStore.getUnconfirmedTxs()
+	unconfirmedTxs, err := txHistoryStore.getPendingTxs()
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
@@ -210,12 +210,10 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-
 	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction, wt4.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
-
 	txHashes := make([]common.Hash, 3)
 	for i := range txHashes {
 		txHashes[i] = common.BytesToHash(encode.RandomBytes(32))

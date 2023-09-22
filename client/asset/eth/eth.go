@@ -410,8 +410,8 @@ type baseWallet struct {
 	monitoredTxsMtx sync.RWMutex
 	monitoredTxs    map[common.Hash]*monitoredTx
 
-	unconfirmedTxsMtx sync.RWMutex
-	unconfirmedTxs    map[uint64]*extendedWalletTx // nonce -> tx
+	pendingTxsMtx sync.RWMutex
+	pendingTxs    map[uint64]*extendedWalletTx // nonce -> tx
 
 	// nonceSendMtx should be locked for the node.txOpts -> tx send sequence
 	// for all txs, to ensure nonce correctness.
@@ -465,7 +465,7 @@ type assetWallet struct {
 	evmify  func(uint64) *big.Int
 	atomize func(*big.Int) uint64
 
-	// pendingTxCheckBal is protected by the pendingTxMtx. We use this field
+	// pendingTxCheckBal is protected by the pendingTxsMtx. We use this field
 	// as a secondary check to see if we need to request confirmations for
 	// pending txs, since tips are cached for up to 10 seconds. We check the
 	// status of pending txs if the tip has changed OR if the balance has
@@ -681,20 +681,20 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		gasFeeLimit = defaultGasFeeLimit
 	}
 	eth := &baseWallet{
-		net:            cfg.Net,
-		baseChainID:    cfg.BaseChainID,
-		chainCfg:       cfg.ChainCfg,
-		chainID:        chainID,
-		compat:         cfg.CompatData,
-		tokens:         cfg.Tokens,
-		log:            cfg.Logger,
-		dir:            cfg.AssetCfg.DataDir,
-		walletType:     cfg.AssetCfg.Type,
-		settings:       cfg.AssetCfg.Settings,
-		gasFeeLimitV:   gasFeeLimit,
-		wallets:        make(map[uint32]*assetWallet),
-		monitoredTxs:   make(map[common.Hash]*monitoredTx),
-		unconfirmedTxs: make(map[uint64]*extendedWalletTx),
+		net:          cfg.Net,
+		baseChainID:  cfg.BaseChainID,
+		chainCfg:     cfg.ChainCfg,
+		chainID:      chainID,
+		compat:       cfg.CompatData,
+		tokens:       cfg.Tokens,
+		log:          cfg.Logger,
+		dir:          cfg.AssetCfg.DataDir,
+		walletType:   cfg.AssetCfg.Type,
+		settings:     cfg.AssetCfg.Settings,
+		gasFeeLimitV: gasFeeLimit,
+		wallets:      make(map[uint32]*assetWallet),
+		monitoredTxs: make(map[common.Hash]*monitoredTx),
+		pendingTxs:   make(map[uint64]*extendedWalletTx),
 		// Can be empty
 		multiBalanceAddress: cfg.MultiBalAddress,
 	}
@@ -830,7 +830,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		return nil, err
 	}
 
-	w.unconfirmedTxs, err = w.txDB.getUnconfirmedTxs()
+	w.pendingTxs, err = w.txDB.getPendingTxs()
 	if err != nil {
 		return nil, err
 	}
@@ -1940,10 +1940,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	txHash := tx.Hash()
-	err = w.addToTxHistory(tx.Nonce(), -int64(swapVal), swaps.FeeRate*gasLimit, 0, w.assetID, txHash[:], asset.Swap)
-	if err != nil {
-		w.log.Errorf("error storing tx data: %v", err)
-	}
+	w.addToTxHistory(tx.Nonce(), -int64(swapVal), swaps.FeeRate*gasLimit, 0, w.assetID, txHash[:], asset.Swap)
 
 	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
@@ -2034,10 +2031,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	contractAddr := w.netToken.SwapContracts[swaps.Version].Address.String()
 
 	txHash := tx.Hash()
-	err = w.addToTxHistory(tx.Nonce(), -int64(swapVal), swaps.FeeRate*gasLimit, 0, w.assetID, txHash[:], asset.Swap)
-	if err != nil {
-		w.log.Errorf("error storing tx data: %v", err)
-	}
+	w.addToTxHistory(tx.Nonce(), -int64(swapVal), swaps.FeeRate*gasLimit, 0, w.assetID, txHash[:], asset.Swap)
 
 	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
@@ -2210,10 +2204,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	}
 
 	txHash := tx.Hash()
-	err = w.addToTxHistory(tx.Nonce(), int64(redeemedValue), gasFeeCap*gasLimit, 0, w.assetID, txHash[:], asset.Redeem)
-	if err != nil {
-		w.log.Errorf("error storing tx data: %v", err)
-	}
+	w.addToTxHistory(tx.Nonce(), int64(redeemedValue), gasFeeCap*gasLimit, 0, w.assetID, txHash[:], asset.Redeem)
 
 	txs := make([]dex.Bytes, len(form.Redemptions))
 	for i := range txs {
@@ -2290,10 +2281,7 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate, gasLimit uint64,
 			dex.BipIDSymbol(w.assetID), c.tokenAddress(), txOpts.Nonce, tx.Hash().Hex())
 
 		txHash := tx.Hash()
-		err = w.addToTxHistory(tx.Nonce(), 0, maxFeeRate*gasLimit, 0, w.assetID, txHash[:], asset.ApproveToken)
-		if err != nil {
-			w.log.Errorf("error storing tx data: %v", err)
-		}
+		w.addToTxHistory(tx.Nonce(), 0, maxFeeRate*gasLimit, 0, w.assetID, txHash[:], asset.ApproveToken)
 
 		return nil
 	})
@@ -2885,10 +2873,7 @@ func (w *assetWallet) Refund(_, contract dex.Bytes, feeRate uint64) (dex.Bytes, 
 
 	txHash := tx.Hash()
 	refundValue := dexeth.WeiToGwei(swap.Value)
-	err = w.addToTxHistory(tx.Nonce(), int64(refundValue), fees, 0, w.assetID, txHash[:], asset.Refund)
-	if err != nil {
-		w.log.Errorf("error storing tx data: %v", err)
-	}
+	w.addToTxHistory(tx.Nonce(), int64(refundValue), fees, 0, w.assetID, txHash[:], asset.Refund)
 
 	return txHash[:], nil
 }
@@ -3164,10 +3149,7 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	}
 
 	txHash := tx.Hash()
-	err = w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
-	if err != nil {
-		w.log.Errorf("error storing tx data: %v", err)
-	}
+	w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
 
 	return &coin{id: txHash, value: value}, nil
 }
@@ -3191,10 +3173,7 @@ func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	}
 
 	txHash := tx.Hash()
-	err = w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
-	if err != nil {
-		w.log.Errorf("error storing tx data: %v", err)
-	}
+	w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
 
 	return &coin{id: txHash, value: value}, nil
 }
@@ -3495,7 +3474,7 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 		}
 	}()
 
-	go eth.checkUnconfirmedTxs(bestHdr.Number.Uint64())
+	go eth.checkPendingTxs()
 }
 
 // getLatestMonitoredTx looks up a txHash in the monitoredTxs map. If the
@@ -4025,25 +4004,21 @@ func (w *assetWallet) checkPendingApprovals() {
 	}
 }
 
-func (w *baseWallet) unconfirmedTxsCopy() map[uint64]*extendedWalletTx {
-	w.unconfirmedTxsMtx.Lock()
-	defer w.unconfirmedTxsMtx.Unlock()
-
-	unconfirmed := make(map[uint64]*extendedWalletTx, len(w.unconfirmedTxs))
-	for nonce, tx := range w.unconfirmedTxs {
-		unconfirmed[nonce] = tx
-	}
-
-	return unconfirmed
-}
-
-// sumPendingTxs sums the expected incoming and outgoing values in unconfirmed
-// transactions stored in unconfirmedTxs. Not used if the node is a
+// sumPendingTxs sums the expected incoming and outgoing values in pending
+// transactions stored in pendingTxs. Not used if the node is a
 // txPoolFetcher.
 func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 	isToken := w.assetID != w.baseChainID
+
+	pendingTxsCopy := make(map[uint64]*extendedWalletTx, len(w.pendingTxs))
+	w.pendingTxsMtx.Lock()
+	for nonce, tx := range w.pendingTxs {
+		pendingTxsCopy[nonce] = tx
+	}
 	balanceHasChanged := w.pendingTxCheckBal == nil || bal.Cmp(w.pendingTxCheckBal) != 0
 	w.pendingTxCheckBal = bal
+	w.pendingTxsMtx.Unlock()
+
 	tip := w.tip()
 
 	addPendingTx := func(txAssetID uint32, pt *extendedWalletTx) {
@@ -4059,7 +4034,7 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 		}
 	}
 
-	processUnconfirmedTx := func(nonce uint64, wt *extendedWalletTx) {
+	processPendingTx := func(nonce uint64, wt *extendedWalletTx) {
 		wt.mtx.Lock()
 		defer wt.mtx.Unlock()
 
@@ -4083,7 +4058,7 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 			return
 		}
 
-		givenUp := w.checkUnconfirmedTx(nonce, wt)
+		givenUp := w.checkPendingTx(nonce, wt)
 		if givenUp {
 			return
 		}
@@ -4093,9 +4068,8 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 		}
 	}
 
-	unconfirmedTxs := w.unconfirmedTxsCopy()
-	for nonce, wt := range unconfirmedTxs {
-		processUnconfirmedTx(nonce, wt)
+	for nonce, wt := range pendingTxsCopy {
+		processPendingTx(nonce, wt)
 	}
 
 	return
@@ -4556,76 +4530,77 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 	return nil
 }
 
-// checkUnconfirmedTx checks the confirmation status of a transaction. The BlockNumber
+// checkPendingTx checks the confirmation status of a transaction. The BlockNumber
 // and Fees fields of the extendedWalletTx are updated if the transaction is confirmed,
 // and if the transaction has reached the required number of confirmations, it is removed
-// from w.unconfirmedTxs.
+// from w.pendingTxs.
 // True is returned from this function if we have given up on the transaction, and it
 // should not be considered in the pending tx calculation.
 //
-// extendedWalletTx.mtx MUST be held while calling this function.
-func (w *baseWallet) checkUnconfirmedTx(nonce uint64, unconfirmedTx *extendedWalletTx) (givenUp bool) {
+// extendedWalletTx.mtx MUST be held while calling this function, but the
+// w.pendingTxsMtx MUST NOT be held.
+func (w *baseWallet) checkPendingTx(nonce uint64, pendingTx *extendedWalletTx) (givenUp bool) {
 	tip := w.tip()
 
 	var updated bool
 	defer func() {
 		if givenUp {
-			err := w.txDB.removeTx(unconfirmedTx.ID)
+			err := w.txDB.removeTx(pendingTx.ID)
 			if err != nil {
 				w.log.Errorf("failed to remove tx from db: %v", err)
 			} else {
-				w.unconfirmedTxsMtx.Lock()
-				delete(w.unconfirmedTxs, nonce)
-				w.unconfirmedTxsMtx.Unlock()
+				w.pendingTxsMtx.Lock()
+				delete(w.pendingTxs, nonce)
+				w.pendingTxsMtx.Unlock()
 			}
 			return
 		}
 
-		if updated || !unconfirmedTx.savedToDB {
-			err := w.txDB.storeTx(nonce, unconfirmedTx)
+		if updated || !pendingTx.savedToDB {
+			err := w.txDB.storeTx(nonce, pendingTx)
 			if err != nil {
 				w.log.Errorf("error updating tx in db: %w", err)
-				unconfirmedTx.savedToDB = false
+				pendingTx.savedToDB = false
 				return
 			}
 
-			unconfirmedTx.savedToDB = true
-			if unconfirmedTx.Confirmed {
-				w.unconfirmedTxsMtx.Lock()
-				delete(w.unconfirmedTxs, nonce)
-				w.unconfirmedTxsMtx.Unlock()
+			pendingTx.savedToDB = true
+			if pendingTx.Confirmed {
+				w.pendingTxsMtx.Lock()
+				delete(w.pendingTxs, nonce)
+				w.pendingTxsMtx.Unlock()
 			}
 		}
 	}()
 
-	if unconfirmedTx.lastCheck == tip {
+	if pendingTx.lastCheck == tip {
 		return false
 	}
-	unconfirmedTx.lastCheck = tip
+	pendingTx.lastCheck = tip
 
 	var txHash common.Hash
-	copy(txHash[:], unconfirmedTx.ID)
+	copy(txHash[:], pendingTx.ID)
 	receipt, tx, err := w.node.transactionReceipt(w.ctx, txHash)
 	if err != nil {
-		if errors.Is(err, asset.CoinNotFoundError) && unconfirmedTx.BlockNumber > 0 {
-			w.log.Warnf("TxID %v was previously confirmed but now cannot be found", unconfirmedTx.ID)
-			unconfirmedTx.BlockNumber = 0
+		if errors.Is(err, asset.CoinNotFoundError) && pendingTx.BlockNumber > 0 {
+			w.log.Warnf("TxID %v was previously confirmed but now cannot be found", pendingTx.ID)
+			pendingTx.BlockNumber = 0
 			updated = true
 		}
 		if !errors.Is(err, asset.CoinNotFoundError) {
 			w.log.Errorf("Error getting confirmations for pending tx %s: %v", txHash, err)
 		}
-		if time.Since(time.Unix(int64(unconfirmedTx.TimeStamp), 0)) > time.Minute*5 {
+		if time.Since(time.Unix(int64(pendingTx.TimeStamp), 0)) > time.Minute*3 && tip%4 == 0 {
 			currentNonce, err := w.node.getConfirmedNonce(w.ctx)
 			if err != nil {
 				w.log.Errorf("Error getting account nonce for stale pending tx check: %v", err)
 				return
 			}
-			if currentNonce >= nonce {
+			if currentNonce > nonce {
 				givenUp = true
 			}
 		}
-		if time.Since(time.Unix(int64(unconfirmedTx.TimeStamp), 0)) > time.Minute*10 {
+		if time.Since(time.Unix(int64(pendingTx.TimeStamp), 0)) > time.Minute*6 {
 			givenUp = true
 		}
 
@@ -4633,9 +4608,9 @@ func (w *baseWallet) checkUnconfirmedTx(nonce uint64, unconfirmedTx *extendedWal
 	}
 
 	if receipt.BlockNumber == nil || receipt.BlockNumber.Cmp(new(big.Int)) == 0 {
-		if unconfirmedTx.BlockNumber > 0 {
-			w.log.Warnf("TxID %v was previously confirmed but now is not confirmed", unconfirmedTx.ID)
-			unconfirmedTx.BlockNumber = 0
+		if pendingTx.BlockNumber > 0 {
+			w.log.Warnf("TxID %v was previously confirmed but now is not confirmed", pendingTx.ID)
+			pendingTx.BlockNumber = 0
 			updated = true
 		}
 		return
@@ -4655,9 +4630,9 @@ func (w *baseWallet) checkUnconfirmedTx(nonce uint64, unconfirmedTx *extendedWal
 
 	fees := dexeth.WeiToGwei(bigFees)
 	blockNumber := receipt.BlockNumber.Uint64()
-	if unconfirmedTx.BlockNumber != blockNumber || unconfirmedTx.Fees != fees {
-		unconfirmedTx.Fees = dexeth.WeiToGwei(bigFees)
-		unconfirmedTx.BlockNumber = blockNumber
+	if pendingTx.BlockNumber != blockNumber || pendingTx.Fees != fees {
+		pendingTx.Fees = dexeth.WeiToGwei(bigFees)
+		pendingTx.BlockNumber = blockNumber
 		updated = true
 	}
 
@@ -4666,28 +4641,35 @@ func (w *baseWallet) checkUnconfirmedTx(nonce uint64, unconfirmedTx *extendedWal
 		confs = tip - blockNumber + 1
 	}
 	if confs >= txConfsNeededToConfirm {
-		if !unconfirmedTx.Confirmed {
+		if !pendingTx.Confirmed {
 			updated = true
 		}
-		unconfirmedTx.Confirmed = true
+		pendingTx.Confirmed = true
 	}
 
 	return
 }
 
-func (w *baseWallet) checkUnconfirmedTxs(bestBlock uint64) {
-	unconfirmed := w.unconfirmedTxsCopy()
-	for nonce, unconfirmedTx := range unconfirmed {
-		unconfirmedTx.mtx.Lock()
-		w.checkUnconfirmedTx(nonce, unconfirmedTx)
-		unconfirmedTx.mtx.Unlock()
+// checkPendingTxs checks the confirmation status of all pending transactions.
+func (w *baseWallet) checkPendingTxs() {
+	pendingTxsCopy := make(map[uint64]*extendedWalletTx, len(w.pendingTxs))
+	w.pendingTxsMtx.Lock()
+	for nonce, tx := range w.pendingTxs {
+		pendingTxsCopy[nonce] = tx
+	}
+	w.pendingTxsMtx.Unlock()
+
+	for nonce, pendingTx := range pendingTxsCopy {
+		pendingTx.mtx.Lock()
+		w.checkPendingTx(nonce, pendingTx)
+		pendingTx.mtx.Unlock()
 	}
 }
 
 const txHistoryNonceKey = "Nonce"
 
 func (w *baseWallet) addToTxHistory(nonce uint64, balanceDelta int64, fees, blockNumber uint64,
-	assetID uint32, id dex.Bytes, typ asset.TransactionType) error {
+	assetID uint32, id dex.Bytes, typ asset.TransactionType) {
 	var confs uint64
 	tip := w.tip()
 	if blockNumber > 0 && tip >= blockNumber {
@@ -4716,9 +4698,9 @@ func (w *baseWallet) addToTxHistory(nonce uint64, balanceDelta int64, fees, bloc
 	}
 
 	if !wt.Confirmed {
-		w.unconfirmedTxsMtx.Lock()
-		w.unconfirmedTxs[nonce] = wt
-		w.unconfirmedTxsMtx.Unlock()
+		w.pendingTxsMtx.Lock()
+		w.pendingTxs[nonce] = wt
+		w.pendingTxsMtx.Unlock()
 	}
 
 	err := w.txDB.storeTx(nonce, wt)
@@ -4726,14 +4708,12 @@ func (w *baseWallet) addToTxHistory(nonce uint64, balanceDelta int64, fees, bloc
 		if wt.Confirmed {
 			// If it's confirmed but we failed to store it in the db, add
 			// it to the map so we can retry.
-			w.unconfirmedTxsMtx.Lock()
-			w.unconfirmedTxs[nonce] = wt
-			w.unconfirmedTxsMtx.Unlock()
+			w.pendingTxsMtx.Lock()
+			w.pendingTxs[nonce] = wt
+			w.pendingTxsMtx.Unlock()
 		}
-		return err
+		w.log.Errorf("error storing tx in db: %v", err)
 	}
-
-	return nil
 }
 
 // TxHistory returns all the transactions the wallet has made. This
