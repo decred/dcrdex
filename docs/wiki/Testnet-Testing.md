@@ -1,6 +1,6 @@
 # Testnet Testing
 
-- [Prepare Wallets](#prepare-wallets)
+- [Prepare RPC Wallets](#prepare-rpc-wallets)
   - [Run Bitcoin Daemon](#run-bitcoin-daemon)
   - [Create the Bitcoin Testnet Wallet](#create-the-bitcoin-testnet-wallet)
   - [Create a Bitcoin Exchange Wallet Configuration File](#create-a-bitcoin-exchange-wallet-configuration-file)
@@ -8,18 +8,25 @@
   - [Create a Decred Exchange Wallet Configuration File](#create-a-decred-exchange-wallet-configuration-file)
 - [Get the Testnet Server TLS Certificate](#get-the-testnet-server-tls-certificate)
 - [Start the Client](#start-the-client)
-- [Register the Client](#register-the-client)
 - [Acquire Testnet Funds](#acquire-testnet-funds)
 
-## Prepare Wallets
+To get started, you must have followed all of the required steps in [Client
+Installation and
+Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration).
+If you have and do not wish to use the testnet RPC wallets, you can proceed to
+[acquiring Testnet funds](#acquire-testnet-funds). 
+
+However, if you wish to use testnet RPC wallets, let's see how we can do that
+for BTC and DCR.
+
+## Prepare RPC Wallets
 
 ### Run Bitcoin Daemon
 
-The initial release of DEX requires a full Bitcoin node. Bitcoin Core
-(`bitcoind` or `bitcoin-qt`) is recommended. Pruning is okay for testnet testing, because you
-won't be running the server, but **if you ever plan to test the server**, you
-will need to run without pruning and with the transaction index built,
-`-txindex`.
+To run a full Bitcoin node, Bitcoin Core (`bitcoind` or `bitcoin-qt`) is
+recommended. Pruning is okay for testnet testing, because you won't be running
+the server, but **if you ever plan to test the server**, you will need to run
+without pruning and with the transaction index built, `-txindex`.
 
 Be sure to set the `rpcuser` and `rpcpassword` in your `bitcoind` configuration
 file (recommended, shown), or as a command line argument (adjust commands below
@@ -146,40 +153,17 @@ Start `dexc` with the web UI and RPC server in testnet mode and trace level logg
 ./dexc --testnet --rpc --log=trace
 ```
 
-### Register the Client
-
-In a browser, navigate to <http://127.0.0.1:5758/>, and be sure JavaScript is
-enabled. This should redirect to <http://127.0.0.1:5758/register>.
-
-1. Setup the app pass.
-2. Configure the DCR exchange wallet by loading the settings from the *dcr_testnet.conf* file created above.
-
-   <img src="images/testnet-dcr-reg-wallet-form.png" width="350">
-
-3. Specify the DEX server and upload the TLS certificate.
-
-   <img src="images/testnet_dex-reg-form.png" width="350">
-
-4. Pay fee (type in app pass to authorize payment from DCR wallet).
-5. Wait for the notification indicating that registration is complete. This requires confirmations of your fee payment, and may take some time.
-6. Set up your BTC wallet from the markets view or the wallets view. You will load settings from the **btc_testnet.conf** file.
-7. Once you have both wallets created, and your registration fee is confirmed, gather some funds and start trading.
-
 ### Acquire Testnet Funds
+
+You can generate a deposit address for any of the available wallets through the
+wallets view in the client app.
 
 #### DCR
 
-Get an address for your Decred testnet account using **dcrctl**.
-
-`dcrctl --testnet --wallet getnewaddress dex`
-
-Take that address to the testnet faucet at <https://faucet.decred.org/> and get
-some DCR.
+Take the address to the testnet faucet at <https://faucet.decred.org/> and get
+some DCR or reach out to us on matrix.
 
 #### BTC
-
-You can generate a deposit address for BTC through the wallets view in the
-client app.
 
 Testnet BTC is hard to come by. If you can't get your hands on any, place an
 order on testnet DEX to sell some DCR for BTC.
