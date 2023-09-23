@@ -9,6 +9,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -43,6 +44,7 @@ type Wallet interface {
 	ownsAddress(addr btcutil.Address) (bool, error) // this should probably just take a string
 	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
 	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
+	listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error)
 }
 
 type tipRedemptionWallet interface {

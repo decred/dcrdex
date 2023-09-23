@@ -366,6 +366,44 @@ func (w *ltcSPVWallet) CalculateAccountBalances(account uint32, confirms int32) 
 	}, nil
 }
 
+func (w *ltcSPVWallet) ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error) {
+	res, err := w.Wallet.ListSinceBlock(start, end, syncHeight)
+	if err != nil {
+		return nil, err
+	}
+
+	btcRes := make([]btcjson.ListTransactionsResult, len(res))
+	for i, r := range res {
+		btcRes[i] = btcjson.ListTransactionsResult{
+			Abandoned:         r.Abandoned,
+			Account:           r.Account,
+			Address:           r.Address,
+			Amount:            r.Amount,
+			BIP125Replaceable: r.BIP125Replaceable,
+			BlockHash:         r.BlockHash,
+			BlockHeight:       r.BlockHeight,
+			BlockIndex:        r.BlockIndex,
+			BlockTime:         r.BlockTime,
+			Category:          r.Category,
+			Confirmations:     r.Confirmations,
+			Fee:               r.Fee,
+			Generated:         r.Generated,
+			InvolvesWatchOnly: r.InvolvesWatchOnly,
+			Label:             r.Label,
+			Time:              r.Time,
+			TimeReceived:      r.TimeReceived,
+			Trusted:           r.Trusted,
+			TxID:              r.TxID,
+			Vout:              r.Vout,
+			WalletConflicts:   r.WalletConflicts,
+			Comment:           r.Comment,
+			OtherAccount:      r.OtherAccount,
+		}
+	}
+
+	return btcRes, nil
+}
+
 func (w *ltcSPVWallet) ListUnspent(minconf, maxconf int32, acctName string) ([]*btcjson.ListUnspentResult, error) {
 	// ltcwallet's ListUnspent takes either a list of addresses, or else returns
 	// all non-locked unspent outputs for all accounts. We need to iterate the

@@ -39,6 +39,10 @@ type tBtcWallet struct {
 	*testData
 }
 
+func (c *tBtcWallet) ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error) {
+	return nil, nil
+}
+
 func (c *tBtcWallet) PublishTransaction(tx *wire.MsgTx, label string) error {
 	c.sentRawTx = tx
 	if c.sendErr != nil {
