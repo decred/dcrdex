@@ -801,6 +801,7 @@ func (auth *AuthManager) userScore(user account.AccountID) (score int32) {
 	return score
 }
 
+// UserScore calculates the user's score, loading it from storage if necessary.
 func (auth *AuthManager) UserScore(user account.AccountID) (score int32, err error) {
 	auth.violationMtx.Lock()
 	if _, found := auth.matchOutcomes[user]; found {
@@ -820,6 +821,8 @@ func (auth *AuthManager) UserScore(user account.AccountID) (score int32, err err
 	return
 }
 
+// UserReputation calculates some quantities related to the user's reputation.
+// UserReputation satisfies market.AuthManager.
 func (auth *AuthManager) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
 	maxScore = ScoringMatchLimit
 	score, err = auth.UserScore(user)

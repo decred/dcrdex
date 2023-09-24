@@ -97,18 +97,18 @@ type MarketTunnel interface {
 	// subscribers notified). See Unbook for details.
 	CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
 
+	// Parcels calculates the number of active parcels for the market.
 	Parcels(user account.AccountID, settlingQty uint64) uint32
 }
 
-type marketParcelCalculator func(settlingQty uint64) (parcels uint32)
+type MarketParcelCalculator func(settlingQty uint64) (parcels uint32)
 
 // orderRecord contains the information necessary to respond to an order
 // request.
 type orderRecord struct {
-	order        order.Order
-	req          msgjson.Stampable
-	msgID        uint64
-	checkParcels func(marketParcelCalculator) bool
+	order order.Order
+	req   msgjson.Stampable
+	msgID uint64
 }
 
 // assetSet is pointers to two different assets, but with 4 ways of addressing
@@ -688,16 +688,13 @@ func calcParcelLimit(tier int64, score, maxScore int32) uint32 {
 	return uint32(lowerLimit) + uint32(math.Round(scaleFactor*float64(limitRange)))
 }
 
-// checkParcelLimit checks that an order does not cause the user to exceed
-// their parcel limit. The calcParcels function must be provided by the order's
-// targeted Market, and calculated the number of parcels from that market when
-// quantity from settling matches is taken into consideration.
-func (r *OrderRouter) checkParcelLimit(oRecord *orderRecord, calcParcels marketParcelCalculator) bool {
-	user := oRecord.order.User()
-	prefix := oRecord.order.Prefix()
-
-	targetMarketName, _ := dex.MarketName(prefix.BaseAsset, prefix.QuoteAsset)
-
+// CheckParcelLimit checks that the user does not exceed their parcel limit.
+// The calcParcels function must be provided by the order's targeted Market, and
+// calculate the number of parcels from that market when quantity from settling
+// matches is taken into consideration. CheckParcelLimit checks the global
+// parcel limit, based on the users tier and score and active orders for ALL
+// markets.
+func (r *OrderRouter) CheckParcelLimit(user account.AccountID, targetMarketName string, calcParcels MarketParcelCalculator) bool {
 	tier, score, maxScore, err := r.auth.UserReputation(user)
 	if err != nil {
 		log.Errorf("error getting user score for parcel limit check: %w", err)
@@ -733,10 +730,6 @@ func (r *OrderRouter) checkParcelLimit(oRecord *orderRecord, calcParcels marketP
 }
 
 func (r *OrderRouter) submitOrderToMarket(tunnel MarketTunnel, oRecord *orderRecord) *msgjson.Error {
-	oRecord.checkParcels = func(f marketParcelCalculator) bool {
-		return r.checkParcelLimit(oRecord, f)
-	}
-
 	if err := tunnel.SubmitOrder(oRecord); err != nil {
 		code := msgjson.UnknownMarketError
 		switch {

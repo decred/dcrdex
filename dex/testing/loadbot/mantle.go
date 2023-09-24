@@ -69,12 +69,15 @@ func runTrader(t Trader, name string) {
 		return
 	}
 
+	const tradingTier = 20
+	maintain := true
 	_, err = m.PostBond(&core.PostBondForm{
-		Addr:    hostAddr,
-		Cert:    cert,
-		AppPass: pass,
-		Bond:    bond, // Automatically sets target tier to one.
-		Asset:   &regAsset,
+		Addr:         hostAddr,
+		Cert:         cert,
+		AppPass:      pass,
+		Bond:         bond * tradingTier, // Automatically sets target tier to one.
+		MaintainTier: &maintain,
+		Asset:        &regAsset,
 	})
 	if err != nil {
 		m.fatalError("registration error: %v", err)

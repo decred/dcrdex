@@ -2231,20 +2231,20 @@ func TestParcelLimits(t *testing.T) {
 
 	lotSize := mkt0.LotSize()
 	calcParcels := func(settlingWeight uint64) uint32 {
-		return calc.Parcels(settlingWeight+lo.Quantity, 0, lotSize, dex.DefaultParcelSize)
+		return calc.Parcels(settlingWeight+lo.Quantity, 0, lotSize, 1)
 	}
 
 	ensureSuccess := func() {
 		t.Helper()
 		// Single lot should definitely be ok.
-		if ok := oRig.router.checkParcelLimit(oRecord, calcParcels); !ok {
+		if ok := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", calcParcels); !ok {
 			t.Fatalf("not ok")
 		}
 	}
 
 	ensureErr := func() {
 		t.Helper()
-		if ok := oRig.router.checkParcelLimit(oRecord, calcParcels); ok {
+		if ok := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", calcParcels); ok {
 			t.Fatalf("not error")
 		}
 	}
@@ -2260,7 +2260,7 @@ func TestParcelLimits(t *testing.T) {
 	rep.tier = 1
 
 	var maxParcels uint64 = dex.PerTierBaseParcelLimit // based on score of 0
-	maxMakerQty := lotSize * dex.DefaultParcelSize * maxParcels
+	maxMakerQty := lotSize * maxParcels
 
 	lo.Quantity = maxMakerQty
 	ensureSuccess()
@@ -2271,7 +2271,7 @@ func TestParcelLimits(t *testing.T) {
 	// Max out score
 	rep.score = rep.maxScore
 	maxParcels *= dex.ParcelLimitScoreMultiplier
-	parcelQty := lotSize * dex.DefaultParcelSize
+	parcelQty := lotSize
 	maxMakerQty = parcelQty * maxParcels
 
 	// too much

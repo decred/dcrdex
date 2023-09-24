@@ -764,6 +764,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	// Markets
+	var orderRouter *market.OrderRouter
 	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
 		// nilness of the coin locker signals account-based asset.
@@ -786,6 +787,9 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			CoinLockerQuote: quoteCoinLocker,
 			DataCollector:   dataAPI,
 			Balancer:        dexBalancer,
+			CheckParcelLimit: func(user account.AccountID, calcParcels market.MarketParcelCalculator) bool {
+				return orderRouter.CheckParcelLimit(user, mktInf.Name, calcParcels)
+			},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
@@ -836,6 +840,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			RateStep:        mkt.RateStep(),
 			EpochLen:        mkt.EpochDuration(),
 			MarketBuyBuffer: mkt.MarketBuyBuffer(),
+			ParcelSize:      mkt.ParcelSize(),
 			MarketStatus: msgjson.MarketStatus{
 				StartEpoch: uint64(startEpochIdx),
 			},
@@ -855,7 +860,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	// Order router
-	orderRouter := market.NewOrderRouter(&market.OrderRouterConfig{
+	orderRouter = market.NewOrderRouter(&market.OrderRouterConfig{
 		Assets:       backedAssets,
 		AuthManager:  authMgr,
 		Markets:      marketTunnels,

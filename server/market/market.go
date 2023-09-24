@@ -85,16 +85,17 @@ type Balancer interface {
 
 // Config is the Market configuration.
 type Config struct {
-	MarketInfo      *dex.MarketInfo
-	Storage         Storage
-	Swapper         Swapper
-	AuthManager     AuthManager
-	FeeFetcherBase  FeeFetcher
-	CoinLockerBase  coinlock.CoinLocker
-	FeeFetcherQuote FeeFetcher
-	CoinLockerQuote coinlock.CoinLocker
-	DataCollector   DataCollector
-	Balancer        Balancer
+	MarketInfo       *dex.MarketInfo
+	Storage          Storage
+	Swapper          Swapper
+	AuthManager      AuthManager
+	FeeFetcherBase   FeeFetcher
+	CoinLockerBase   coinlock.CoinLocker
+	FeeFetcherQuote  FeeFetcher
+	CoinLockerQuote  coinlock.CoinLocker
+	DataCollector    DataCollector
+	Balancer         Balancer
+	CheckParcelLimit func(user account.AccountID, calcParcels MarketParcelCalculator) bool
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -167,6 +168,8 @@ type Market struct {
 	// Data API
 	dataCollector DataCollector
 	lastRate      uint64
+
+	checkParcelLimit func(user account.AccountID, calcParcels MarketParcelCalculator) bool
 }
 
 // Storage is the DB interface required by Market.
@@ -497,6 +500,7 @@ ordersLoop:
 		quoteFeeFetcher:  cfg.FeeFetcherQuote,
 		dataCollector:    cfg.DataCollector,
 		lastRate:         lastEpochEndRate,
+		checkParcelLimit: cfg.CheckParcelLimit,
 	}, nil
 }
 
@@ -1724,6 +1728,15 @@ func (m *Market) analysisHelpers() (
 	return
 }
 
+// ParcelSize returns market's configured parcel size.
+func (m *Market) ParcelSize() uint32 {
+	return m.marketInfo.ParcelSize
+}
+
+// Parcels calculates the total parcels for the market with the specified
+// settling quantity. Parcels is used as part of order validation for global
+// parcel limits. Parcels is not called for the market for which the order is
+// for, which will use m.checkParcelLimit to validate in processOrder.
 func (m *Market) Parcels(user account.AccountID, settlingQty uint64) uint32 {
 	return m.parcels(user, settlingQty)
 }
@@ -1736,12 +1749,6 @@ func (m *Market) parcels(user account.AccountID, addParcelWeight uint64) uint32 
 		if epOrd.User() != user || epOrd.Type() == order.CancelOrderType {
 			continue
 		}
-
-		// // For purposes of the user's book qty limit, assumed standing limits
-		// // will be booked.
-		// if lo, ok := epOrd.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
-		// 	userStandingEpochQty += lo.Quantity
-		// }
 
 		// Even if standing, may count as taker for purposes of taker qty limit.
 		if likelyTaker(epOrd) {
@@ -1835,7 +1842,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		calcParcels := func(settlingWeight uint64) uint32 {
 			return m.parcels(user, settlingWeight+orderWeight)
 		}
-		if !rec.checkParcels(calcParcels) {
+		if !m.checkParcelLimit(user, calcParcels) {
 			log.Debugf("Received order %s that pushed user over the parcel limit", oid)
 			errChan <- ErrQuantityTooHigh
 			return nil

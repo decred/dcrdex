@@ -35,9 +35,9 @@ const (
 	// which are likely to be takers have their parcel weight doubled. The
 	// quantity in settling matches has the same weight as maker quantity.
 
-	// DefaultParcelSize is the default number of lots per parcel, configurable
+	// defaultParcelSize is the default number of lots per parcel, configurable
 	// per market.
-	DefaultParcelSize = 4 // lots per parcel
+	defaultParcelSize = 1 // lots per parcel
 	// PerTierBaseParcelLimit is the number of parcels users can trade per tier.
 	PerTierBaseParcelLimit = 2
 	// ParcelLimitScoreMultiplier defines the maximum parcel limit multiplier
@@ -87,6 +87,7 @@ func MarketName(base, quote uint32) (string, error) {
 // NewMarketInfo creates a new market configuration (MarketInfo) from the given
 // base and quote asset indexes, order lot size, and epoch duration in
 // milliseconds. See also MarketName.
+// TODO: Only used in tests. Should just use NewMarketInfoFromSymbols instead.
 func NewMarketInfo(base, quote uint32, lotSize, rateStep, epochDuration uint64, marketBuyBuffer float64) (*MarketInfo, error) {
 	name, err := MarketName(base, quote)
 	if err != nil {
@@ -103,7 +104,7 @@ func NewMarketInfo(base, quote uint32, lotSize, rateStep, epochDuration uint64, 
 		Base:                   base,
 		Quote:                  quote,
 		LotSize:                lotSize,
-		ParcelSize:             DefaultParcelSize,
+		ParcelSize:             defaultParcelSize,
 		RateStep:               rateStep,
 		EpochDuration:          epochDuration,
 		MarketBuyBuffer:        marketBuyBuffer,
@@ -133,7 +134,7 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, rateStep, epochDurati
 	}
 
 	if parcelSize == 0 {
-		parcelSize = DefaultParcelSize
+		parcelSize = defaultParcelSize
 	}
 
 	return &MarketInfo{

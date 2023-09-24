@@ -266,6 +266,12 @@ func randomOrderID() order.OrderID {
 	return id
 }
 
+const (
+	tUserTier, tUserScore, tMaxScore = int64(1), int32(30), int32(60)
+)
+
+var parcelLimit = calcParcelLimit(tUserTier, tUserScore, tMaxScore)
+
 func newTestMarket(opts ...any) (*Market, *TArchivist, *TAuth, func(), error) {
 	// The DEX will make MasterCoinLockers for each asset.
 	masterLockerBase := coinlock.NewMasterCoinLocker()
@@ -347,6 +353,10 @@ func newTestMarket(opts ...any) (*Market, *TArchivist, *TAuth, func(), error) {
 		CoinLockerQuote: bookLockerQuote,
 		DataCollector:   new(TCollector),
 		Balancer:        balancer,
+		CheckParcelLimit: func(_ account.AccountID, f MarketParcelCalculator) bool {
+			parcels := f(0)
+			return parcels <= parcelLimit
+		},
 	})
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %w", err)
@@ -887,13 +897,7 @@ func TestMarket_Run(t *testing.T) {
 		}
 	}
 
-	tier, score, maxScore := int64(1), int32(30), int32(60)
-	parcelLimit := calcParcelLimit(tier, score, maxScore)
-	checkParcels := func(f marketParcelCalculator) bool {
-		parcels := f(0)
-		return parcels <= parcelLimit
-	}
-	parcelQty := uint64(dcrLotSize) * dex.DefaultParcelSize
+	parcelQty := uint64(dcrLotSize)
 	maxMakerQty := parcelQty * uint64(parcelLimit)
 	maxTakerQty := maxMakerQty / 2
 
@@ -901,10 +905,9 @@ func TestMarket_Run(t *testing.T) {
 	nextMsgID := func() uint64 { msgID++; return msgID }
 	newOR := func() *orderRecord {
 		return &orderRecord{
-			msgID:        nextMsgID(),
-			req:          limit,
-			order:        newLimit(),
-			checkParcels: checkParcels,
+			msgID: nextMsgID(),
+			req:   limit,
+			order: newLimit(),
 		}
 	}
 
@@ -1512,19 +1515,9 @@ func TestMarket_Cancelable(t *testing.T) {
 		mkt.Start(ctx, startEpochIdx)
 	}()
 
-	tier, score, maxScore := int64(1), int32(30), int32(60)
-	parcelLimit := calcParcelLimit(tier, score, maxScore)
-	checkParcels := func(f marketParcelCalculator) bool {
-		parcels := f(0)
-		return parcels <= parcelLimit
-	}
-	// parcelQty := uint64(dcrLotSize) * dex.DefaultParcelSize
-	// maxMakerQty := parcelQty * uint64(parcelLimit)
-	// maxTakerQty := maxMakerQty / 2
-
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := 8
+	lots := dex.PerTierBaseParcelLimit
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
@@ -1572,10 +1565,9 @@ func TestMarket_Cancelable(t *testing.T) {
 	lo := newLimit()
 
 	oRecord := orderRecord{
-		msgID:        1,
-		req:          limitMsg,
-		order:        lo,
-		checkParcels: checkParcels,
+		msgID: 1,
+		req:   limitMsg,
+		order: lo,
 	}
 
 	auth.piMtx.Lock()

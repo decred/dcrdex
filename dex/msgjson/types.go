@@ -1260,6 +1260,7 @@ type Market struct {
 	LotSize         uint64  `json:"lotsize"`
 	RateStep        uint64  `json:"ratestep"`
 	MarketBuyBuffer float64 `json:"buybuffer"`
+	ParcelSize      uint32  `json:"parcelSize"`
 	MarketStatus    `json:"status"`
 }
 

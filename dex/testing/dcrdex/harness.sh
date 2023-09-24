@@ -94,7 +94,8 @@ cat > "./markets.json" <<EOF
             "lotSize": 1000000000,
             "rateStep": 100,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
 EOF
 
 if [ $LTC_ON -eq 0 ]; then
@@ -103,10 +104,11 @@ if [ $LTC_ON -eq 0 ]; then
         {
             "base": "LTC_simnet",
             "quote": "DCR_simnet",
-            "lotSize": 50000000,
+            "lotSize": 5000000,
             "rateStep": 100000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 1000
 EOF
 else echo "WARNING: Litecoin is not running. Configuring dcrdex markets without LTC."
 fi
@@ -117,10 +119,11 @@ if [ $BCH_ON -eq 0 ]; then
         {
             "base": "BCH_simnet",
             "quote": "DCR_simnet",
-            "lotSize": 1000000,
+            "lotSize": 100000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 1200
 EOF
 else echo "WARNING: Bitcoin Cash is not running. Configuring dcrdex markets without BCH."
 fi
@@ -134,7 +137,8 @@ if [ $ETH_ON -eq 0 ]; then
             "lotSize": 1000000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
         },
         {
             "base": "BTC_simnet",
@@ -142,7 +146,8 @@ if [ $ETH_ON -eq 0 ]; then
             "lotSize": 1000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
         },
         {
             "base": "DCR_simnet",
@@ -150,7 +155,8 @@ if [ $ETH_ON -eq 0 ]; then
             "lotSize": 100000000,
             "rateStep": 100000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
 EOF
 else echo "WARNING: Ethereum is not running. Configuring dcrdex markets without ETH."
 fi
@@ -164,7 +170,8 @@ if [ $POLYGON_ON -eq 0 ]; then
             "lotSize": 100000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 2500
         },
         {
             "base": "DEXTT_POLYGON_simnet",
@@ -172,7 +179,8 @@ if [ $POLYGON_ON -eq 0 ]; then
             "lotSize": 100000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 500
 EOF
 else echo "WARNING: Polygon is not running. Configuring dcrdex markets without Polygon."
 fi
@@ -183,10 +191,11 @@ if [ $DOGE_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "DOGE_simnet",
-            "lotSize": 100000000,
+            "lotSize": 1000000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 1500
 EOF
 else echo "WARNING: Dogecoin is not running. Configuring dcrdex markets without DOGE."
 fi
@@ -197,10 +206,11 @@ if [ $FIRO_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "FIRO_simnet",
-            "lotSize": 100000000,
+            "lotSize": 1000000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 1500
 EOF
 else echo "WARNING: Firo is not running. Configuring dcrdex markets without FIRO."
 fi
@@ -211,10 +221,11 @@ if [ $ZEC_ON -eq 0 ]; then
         {
             "base": "ZEC_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 1000000000,
+            "lotSize": 1000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 1000
 EOF
 else echo "WARNING: Zcash is not running. Configuring dcrdex markets without ZEC."
 fi
@@ -225,10 +236,11 @@ if [ $DGB_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "DGB_simnet",
-            "lotSize": 100000000,
+            "lotSize": 1000000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 1500
 EOF
 else echo "WARNING: Digibyte is not running. Configuring dcrdex markets without DGB."
 fi
@@ -239,10 +251,11 @@ if [ $DASH_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "DASH_simnet",
-            "lotSize": 100000000,
+            "lotSize": 1000000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 1500
 EOF
 else echo "WARNING: Dash is not running. Configuring dcrdex markets without DASH."
 fi
@@ -283,7 +296,7 @@ cat << EOF >> "./markets.json"
             "regConfs": 1,
             "regFee": 100000000,
             "regXPub": "spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE",
-            "bondAmt": 1000000000,
+            "bondAmt": 50000000,
             "bondConfs": 1,
             "nodeRelayID": "${DCR_NODERELAY_ID}"
         },
@@ -296,10 +309,9 @@ cat << EOF >> "./markets.json"
             "regConfs": 2,
             "regFee": 20000000,
             "regXPub": "vpub5SLqN2bLY4WeZJ9SmNJHsyzqVKreTXD4ZnPC22MugDNcjhKX5xNX9QiQWcE4SSRzVWyHWUihpKRT7hckDGNzVc69wSX2JPcfGeNiT5c2XZy",
-            "bondAmt": 10000000,
+            "bondAmt": 10000,
             "bondConfs": 1,
             "nodeRelayID": "${BTC_NODERELAY_ID}"
-
 EOF
 
 if [ $LTC_ON -eq 0 ]; then
@@ -311,7 +323,7 @@ if [ $LTC_ON -eq 0 ]; then
             "maxFeeRate": 20,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf",
-            "bondAmt": 10000000,
+            "bondAmt": 1000000,
             "bondConfs": 1
 EOF
 fi
@@ -325,7 +337,7 @@ if [ $BCH_ON -eq 0 ]; then
             "maxFeeRate": 20,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/bch/alpha/alpha.conf",
-            "bondAmt": 10000000,
+            "bondAmt": 1000000,
             "bondConfs": 1
 EOF
 fi
@@ -395,7 +407,7 @@ if [ $DOGE_ON -eq 0 ]; then
             "maxFeeRate": 40000,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/doge/alpha/alpha.conf",
-            "bondAmt": 200000000,
+            "bondAmt": 2000000000,
             "bondConfs": 1
 EOF
 fi
@@ -449,7 +461,7 @@ if [ $DGB_ON -eq 0 ]; then
             "maxFeeRate": 2000,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/dgb/alpha/alpha.conf",
-            "bondAmt": 800000000,
+            "bondAmt": 20000000000,
             "bondConfs": 1
 EOF
 fi
