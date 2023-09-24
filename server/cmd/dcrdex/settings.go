@@ -146,6 +146,10 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 			continue
 		}
 
+		if mktConf.ParcelSize == 0 {
+			return nil, nil, fmt.Errorf("parcel size cannot be zero")
+		}
+
 		mkt, err := dex.NewMarketInfoFromSymbols(baseConf.Symbol, quoteConf.Symbol,
 			mktConf.LotSize, mktConf.RateStep, mktConf.Duration, mktConf.ParcelSize, mktConf.MBBuffer)
 		if err != nil {

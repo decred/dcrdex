@@ -31,9 +31,6 @@ const (
 	// which are likely to be takers have their parcel weight doubled. The
 	// quantity in settling matches has the same weight as maker quantity.
 
-	// defaultParcelSize is the default number of lots per parcel, configurable
-	// per market.
-	defaultParcelSize = 1 // lots per parcel
 	// PerTierBaseParcelLimit is the number of parcels users can trade per tier.
 	PerTierBaseParcelLimit = 2
 	// ParcelLimitScoreMultiplier defines the maximum parcel limit multiplier
@@ -100,7 +97,7 @@ func NewMarketInfo(base, quote uint32, lotSize, rateStep, epochDuration uint64, 
 		Base:                   base,
 		Quote:                  quote,
 		LotSize:                lotSize,
-		ParcelSize:             defaultParcelSize,
+		ParcelSize:             1,
 		RateStep:               rateStep,
 		EpochDuration:          epochDuration,
 		MarketBuyBuffer:        marketBuyBuffer,
@@ -127,10 +124,6 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, rateStep, epochDurati
 	// Check for sensible epoch duration.
 	if epochDuration == 0 {
 		epochDuration = defaultEpochDuration
-	}
-
-	if parcelSize == 0 {
-		parcelSize = defaultParcelSize
 	}
 
 	return &MarketInfo{

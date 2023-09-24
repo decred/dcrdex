@@ -6,7 +6,8 @@
             "lotSize": 100000000,
             "rateStep": 100000,
             "epochDuration": 10000,
-            "marketBuyBuffer": 1.25
+            "marketBuyBuffer": 1.25,
+            "parcelSize": 4
         },
         {
             "base": "BTC_testnet",
@@ -14,7 +15,8 @@
             "lotSize": 100000,
             "rateStep": 1000000,
             "epochDuration": 6000,
-            "marketBuyBuffer": 1.25
+            "marketBuyBuffer": 1.25,
+            "parcelSize": 4
         }
     ],
     "assets": {
@@ -24,10 +26,7 @@
             "maxFeeRate": 10,
             "swapConf": 4,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf",
-            "regConfs": 2,
-            "regFee": 10000000,
-            "regXPub": "xpubdecredonlyadsf",
-            "bondAmt": 100000000,
+            "bondAmt": 10000000,
             "bondConfs": 1
         },
         "DCR_testnet": {
@@ -36,8 +35,6 @@
             "maxFeeRate": 10,
             "swapConf": 1,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf",
-            "regFee": 10000000,
-            "regXPub": "tpubdecredonlyadsf",
             "bondAmt": 100000000,
             "bondConfs": 1
         },
@@ -45,10 +42,7 @@
             "bip44symbol": "btc",
             "network": "mainnet",
             "maxFeeRate": 100,
-            "swapConf": 3,
-            "regConfs": 2,
-            "regFee": 500000,
-            "regXPub": "xpubbitcoinonlyasdf"
+            "swapConf": 3
         },
         "BTC_testnet": {
             "bip44symbol": "btc",
@@ -71,8 +65,6 @@
         "ETH_testnet": {
             "bip44symbol": "eth",
             "network": "testnet",
-            "lotSize": 1000000000,
-            "rateStep": 1000000000,
             "maxFeeRate": 200,
             "swapConf": 12,
             "configPath": "/home/.ethereum/dex.conf"
