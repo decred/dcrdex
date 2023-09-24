@@ -3236,8 +3236,13 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, c
 	}
 
 	spent = swapData.State >= dexeth.SSRedeemed
-	confs = uint32(hdr.Number.Uint64() - swapData.BlockHeight + 1)
-
+	tip := hdr.Number.Uint64()
+	// TODO: If tip < swapData.BlockHeight (which has been observed), what does
+	// that mean? Are we using the wrong provider in a multi-provider setup? How
+	// do we resolve provider relevance?
+	if tip >= swapData.BlockHeight {
+		confs = uint32(hdr.Number.Uint64() - swapData.BlockHeight + 1)
+	}
 	return
 }
 
