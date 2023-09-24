@@ -98,10 +98,10 @@ type MarketTunnel interface {
 	CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
 
 	// Parcels calculates the number of active parcels for the market.
-	Parcels(user account.AccountID, settlingQty uint64) uint32
+	Parcels(user account.AccountID, settlingQty uint64) float64
 }
 
-type MarketParcelCalculator func(settlingQty uint64) (parcels uint32)
+type MarketParcelCalculator func(settlingQty uint64) (parcels float64)
 
 // orderRecord contains the information necessary to respond to an order
 // request.
@@ -703,6 +703,16 @@ func (r *OrderRouter) CheckParcelLimit(user account.AccountID, targetMarketName 
 	if tier <= 0 {
 		return false
 	}
+
+	roundParcels := func(parcels float64) uint32 {
+		// Rounding to 8 decimal places first should resolve any floating point
+		// error, then we take the floor. 1e8 is not completetly arbitrary. We
+		// need to choose a number of decimals of an order > the expected parcel
+		// size of a low-lot-size market, which I expect wouldn't be greater
+		// than 1e5.
+		return uint32(math.Round(parcels*1e8) / 1e8)
+	}
+
 	parcelLimit := calcParcelLimit(tier, score, maxScore)
 
 	settlingQuantities := make(map[string]uint64)
@@ -711,7 +721,7 @@ func (r *OrderRouter) CheckParcelLimit(user account.AccountID, targetMarketName 
 		settlingQuantities[mktName] += qty
 	}
 
-	var otherMarketParcels uint32
+	var otherMarketParcels float64
 	var settlingQty uint64
 	for mktName, mkt := range r.tunnels {
 		if mktName == targetMarketName {
@@ -720,13 +730,13 @@ func (r *OrderRouter) CheckParcelLimit(user account.AccountID, targetMarketName 
 		}
 
 		otherMarketParcels += mkt.Parcels(user, settlingQuantities[mktName])
-		if otherMarketParcels > parcelLimit {
+		if roundParcels(otherMarketParcels) > parcelLimit {
 			return false
 		}
 	}
 	targetMarketParcels := calcParcels(settlingQty)
 
-	return otherMarketParcels+targetMarketParcels <= parcelLimit
+	return roundParcels(otherMarketParcels+targetMarketParcels) <= parcelLimit
 }
 
 func (r *OrderRouter) submitOrderToMarket(tunnel MarketTunnel, oRecord *orderRecord) *msgjson.Error {

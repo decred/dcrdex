@@ -6,12 +6,8 @@ package calc
 // Parcels calculates the number of parcels associated with the given order
 // quantities, lot size and parcel size. Any quantity currently settling
 // should be summed in with the makerQty.
-func Parcels(makerQty, takerQty, lotSize uint64, parcelSize uint32) uint32 {
+func Parcels(makerQty, takerQty, lotSize uint64, parcelSize uint32) float64 {
 	parcelWeight := makerQty + takerQty*2
 	parcelQty := lotSize * uint64(parcelSize)
-	parcels := parcelWeight / parcelQty
-	if parcelWeight%parcelQty != 0 {
-		parcels++
-	}
-	return uint32(parcels)
+	return float64(parcelWeight) / float64(parcelQty)
 }

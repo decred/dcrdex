@@ -270,7 +270,7 @@ const (
 	tUserTier, tUserScore, tMaxScore = int64(1), int32(30), int32(60)
 )
 
-var parcelLimit = calcParcelLimit(tUserTier, tUserScore, tMaxScore)
+var parcelLimit = float64(calcParcelLimit(tUserTier, tUserScore, tMaxScore))
 
 func newTestMarket(opts ...any) (*Market, *TArchivist, *TAuth, func(), error) {
 	// The DEX will make MasterCoinLockers for each asset.

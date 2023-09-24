@@ -24,11 +24,7 @@ const (
 	// assessed globally.
 
 	// When calculating trading limits, each market will report its parcels
-	// for the user. There are no partial parcels for the purposes of
-	// calculation. If the parcel size is 10 lots, and the user has 11 lots
-	// booked. the market will report 2 parcels. This fact effectively limits
-	// the number of markets singly-tiered, score 0 users can trade on to
-	// PerTierBaseParcelLimit.
+	// for the user.
 
 	// Parcel limits are measured in units of "parcel weight", which is kind of
 	// like "effective quantity". For makers, parcel weight = quantity. Orders

@@ -1737,11 +1737,11 @@ func (m *Market) ParcelSize() uint32 {
 // settling quantity. Parcels is used as part of order validation for global
 // parcel limits. Parcels is not called for the market for which the order is
 // for, which will use m.checkParcelLimit to validate in processOrder.
-func (m *Market) Parcels(user account.AccountID, settlingQty uint64) uint32 {
+func (m *Market) Parcels(user account.AccountID, settlingQty uint64) float64 {
 	return m.parcels(user, settlingQty)
 }
 
-func (m *Market) parcels(user account.AccountID, addParcelWeight uint64) uint32 {
+func (m *Market) parcels(user account.AccountID, addParcelWeight uint64) float64 {
 	likelyTaker, baseQty := m.analysisHelpers()
 	var takerQty, makerQty uint64
 	m.epochMtx.RLock()
@@ -1839,7 +1839,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		if likelyTaker(ord) {
 			orderWeight *= 2
 		}
-		calcParcels := func(settlingWeight uint64) uint32 {
+		calcParcels := func(settlingWeight uint64) float64 {
 			return m.parcels(user, settlingWeight+orderWeight)
 		}
 		if !m.checkParcelLimit(user, calcParcels) {

@@ -282,7 +282,7 @@ type TMarketTunnel struct {
 	acctLots    uint64
 	acctRedeems int
 	base, quote uint32
-	parcels     uint32
+	parcels     float64
 }
 
 func tNewMarket(auth *TAuth) *TMarketTunnel {
@@ -383,7 +383,7 @@ func (m *TMarketTunnel) Quote() uint32 {
 	return m.quote
 }
 
-func (m *TMarketTunnel) Parcels(account.AccountID, uint64) uint32 {
+func (m *TMarketTunnel) Parcels(account.AccountID, uint64) float64 {
 	return m.parcels
 }
 
@@ -2230,7 +2230,7 @@ func TestParcelLimits(t *testing.T) {
 	oRecord := &orderRecord{order: lo}
 
 	lotSize := mkt0.LotSize()
-	calcParcels := func(settlingWeight uint64) uint32 {
+	calcParcels := func(settlingWeight uint64) float64 {
 		return calc.Parcels(settlingWeight+lo.Quantity, 0, lotSize, 1)
 	}
 
