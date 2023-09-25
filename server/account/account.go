@@ -170,7 +170,7 @@ func (r Rule) Punishable() bool {
 // Reputation is a part of a number of server-originating messages. It was
 // introduced with the v2 ConnectResult.
 type Reputation struct {
-	// BondedTier is the tier indicated by the users active bonds. BondedTier
+	// BondedTier is the tier indicated by the user's active bonds. BondedTier
 	// does not account for penalties.
 	BondedTier int64 `json:"bondedTier"`
 	// Penalties are the number of tiers that are currently revoked due to low

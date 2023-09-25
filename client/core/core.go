@@ -3934,13 +3934,14 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 		// DRAFT NOTE: This was wrong? Isn't account suspended at tier 0?
 		// cannotTrade := dc.acct.effectiveTier < 0 || (dc.acct.effectiveTier == 0 && dc.apiVersion() < serverdex.BondAPIVersion)
 		rep := dc.acct.rep
-		// Using <= though acknowledging that this ignore the possibility that
-		// an existing revoked bond could be ressurected.
+		// Using <= though acknowledging that this ignores the possibility that
+		// an existing revoked bond could be resurrected.
 		if rep.BondedTier <= int64(rep.Penalties) {
 			dc.acct.unAuth() // acct was marked as authenticated by authDEX above.
 			c.log.Infof("HD account key for %s has tier %d, but %d penalties (not able to trade). Deriving another account key.",
 				dc.acct.host, rep.BondedTier, rep.Penalties)
 			time.Sleep(200 * time.Millisecond) // don't hammer
+			keyIndex++
 			continue
 		}
 
@@ -6759,7 +6760,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			// On the server, they do
 			//    bondTier += int64(bond.Strength)
 			// where bond.Strength is a value stored in the database during
-			// postbond. This means if ther server doubles the bond size for an
+			// postbond. This means if the server doubles the bond size for an
 			// asset we're bonded in up to N tiers, by their calculation we'll
 			// still have N tiers from existing bonds, but by ours we would have
 			// floor(N / 2). If they halve the bond size, they'd say we have N,
@@ -8691,7 +8692,6 @@ func handleTierChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	dc.acct.authMtx.Unlock()
 	c.log.Infof("Received tierchanged notification from %v for account %v. New tier = %v (target = %d)",
 		dc.acct.host, dc.acct.ID(), tierChanged.Tier, targetTier)
-	// TODO: notify sub consumers e.g. frontend
 	c.notify(newReputationNote(dc.acct.host, rep))
 	return nil
 }
