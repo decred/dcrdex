@@ -211,7 +211,7 @@
               </div>
 
               {{- /* ORDER TYPE BUTTONS */ -}}
-              <div id="orderTypeBttns" class="fs14 d-flex justify-content-start align-items-stretch d-hide min-fit">
+              <div id="orderTypeBttns" class="fs14 d-hide d-flex justify-content-start align-items-stretch d-hide min-fit">
                 <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrbottom selected">[[[Limit Order]]]</button>
                 <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrbottom brdrleft brdrright">[[[Market Order]]]</button>
               </div>
@@ -259,6 +259,16 @@
                   [[[acct_tier_post_bond]]]
                   <a id="dexSettingsLink" class="fs15 hoverbg subtlelink">[[[enable_bond_maintenance]]]</a>
                   </p>
+                </div>
+              </div>
+
+              {{- /* MM RUNNING */ -}}
+              <div class="d-hide fs15 pt-1 pb-3 text-center brdrbottom" id="mmRunning">
+                <div class="p-0 w-100">
+                  <div class="d-flex flex-column justify-content-center align-items-center">
+                    <span class="p-3 flex-center fs16 grey">[[[market_making_running]]]</span>
+                    <p class="text-center fs14 p-2 m-0">[[[cannot_manually_trade]]]</p>
+                  </div>
                 </div>
               </div>
 

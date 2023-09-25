@@ -186,6 +186,7 @@ export default class MarketsPage extends BasePage {
   stats: [StatsDisplay, StatsDisplay]
   loadingAnimations: { candles?: Wave, depth?: Wave }
   approvingBaseToken: boolean
+  mmRunning: boolean | undefined
 
   constructor (main: HTMLElement, data: any) {
     super()
@@ -720,24 +721,35 @@ export default class MarketsPage extends BasePage {
   /* resolveOrderFormVisibility displays or hides the 'orderForm' based on
    * a set of conditions to be met.
    */
-  resolveOrderFormVisibility () {
+  async resolveOrderFormVisibility () {
     const page = this.page
-    // By default the order form should be hidden, and only if market is set
-    // and ready for trading the form should show up.
-    Doc.hide(page.orderForm, page.orderTypeBttns)
 
-    if (!this.assetsAreSupported().isSupported) return // assets not supported
+    const showOrderForm = async () : Promise<boolean> => {
+      if (!this.assetsAreSupported().isSupported) return false // assets not supported
 
-    if (!this.market || this.market.dex.tier < 1) return // acct suspended or not registered
+      if (!this.market || this.market.dex.tier < 1) return false // acct suspended or not registered
 
-    const { baseAssetApprovalStatus, quoteAssetApprovalStatus } = this.tokenAssetApprovalStatuses()
-    if (baseAssetApprovalStatus !== ApprovalStatus.Approved && quoteAssetApprovalStatus !== ApprovalStatus.Approved) return
+      const { baseAssetApprovalStatus, quoteAssetApprovalStatus } = this.tokenAssetApprovalStatuses()
+      if (baseAssetApprovalStatus !== ApprovalStatus.Approved && quoteAssetApprovalStatus !== ApprovalStatus.Approved) return false
 
-    const { base, quote } = this.market
-    const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
-    if (!hasWallets) return
+      const { base, quote } = this.market
+      const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
+      if (!hasWallets) return false
+      if (this.mmRunning) return false
+      return true
+    }
 
-    Doc.show(page.orderForm, page.orderTypeBttns)
+    Doc.setVis(await showOrderForm(), page.orderForm, page.orderTypeBttns)
+
+    if (this.mmRunning === undefined) {
+      const marketMakingStatus = await app().getMarketMakingStatus()
+      this.mmRunning = marketMakingStatus.running
+    }
+
+    if (this.mmRunning) {
+      Doc.show(page.mmRunning)
+      Doc.hide(page.orderForm, page.orderTypeBttns)
+    }
   }
 
   /* setLoaderMsgVisibility displays a message in case a dex asset is not
@@ -965,7 +977,7 @@ export default class MarketsPage extends BasePage {
     this.updateRegistrationStatusView()
 
     if (market.dex.tier >= 1) {
-      const toggle = () => {
+      const toggle = async () => {
         Doc.hide(page.registrationStatus, page.bondRequired, page.bondCreationPending)
         this.resolveOrderFormVisibility()
       }
@@ -2348,7 +2360,7 @@ export default class MarketsPage extends BasePage {
     this.marketList.updateSpots(note)
   }
 
-  handleWalletState (note: WalletStateNote) {
+  async handleWalletState (note: WalletStateNote) {
     if (!this.market) return // This note can arrive before the market is set.
     // if (note.topic !== 'TokenApproval') return
     if (note.wallet.assetID !== this.market.base?.id && note.wallet.assetID !== this.market.quote?.id) return

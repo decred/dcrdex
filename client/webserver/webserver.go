@@ -30,6 +30,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
@@ -205,6 +206,8 @@ type cachedPassword struct {
 
 type Config struct {
 	Core          clientCore
+	MarketMaker   *mm.MarketMaker
+	MMCfgPath     string
 	Addr          string
 	CustomSiteDir string
 	Language      string
@@ -231,9 +234,12 @@ type valStamp struct {
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
+	ctx          context.Context
 	wsServer     *websocket.Server
 	mux          *chi.Mux
 	core         clientCore
+	mm           *mm.MarketMaker
+	mmCfgPath    string
 	addr         string
 	csp          string
 	srv          *http.Server
@@ -345,6 +351,8 @@ func New(cfg *Config) (*WebServer, error) {
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
 		core:            cfg.Core,
+		mm:              cfg.MarketMaker,
+		mmCfgPath:       cfg.MMCfgPath,
 		mux:             mux,
 		srv:             httpServer,
 		addr:            cfg.Addr,
@@ -439,6 +447,8 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(exportOrderRoute, s.handleExportOrders)
 					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(marketsRoute, s.handleMarkets)
+					webAuth.Get(mmSettingsRoute, s.handleMMSettings)
+					webAuth.Get(marketMakerRoute, s.handleMarketMaking)
 					webAuth.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
 				})
 			})
@@ -526,6 +536,16 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/setvotes", s.apiSetVotingPreferences)
 			apiAuth.Post("/listvsps", s.apiListVSPs)
 			apiAuth.Post("/ticketpage", s.apiTicketPage)
+
+			if cfg.Experimental {
+				apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)
+				apiAuth.Post("/stopmarketmaking", s.apiStopMarketMaking)
+				apiAuth.Get("/marketmakingconfig", s.apiMarketMakingConfig)
+				apiAuth.Post("/updatemarketmakingconfig", s.apiUpdateMarketMakingConfig)
+				apiAuth.Post("/removemarketmakingconfig", s.apiRemoveMarketMakingConfig)
+				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
+				apiAuth.Post("/marketreport", s.apiMarketReport)
+			}
 		})
 	})
 
@@ -584,7 +604,9 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 		addTemplate("orders", bb).
 		addTemplate("order", bb, "forms").
 		addTemplate("dexsettings", bb, "forms").
-		addTemplate("init", bb)
+		addTemplate("init", bb).
+		addTemplate("mm", bb, "forms").
+		addTemplate("mmsettings", bb, "forms")
 
 	return s.html.buildErr()
 }
@@ -606,6 +628,8 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if https {
 		listener = tls.NewListener(listener, s.srv.TLSConfig)
 	}
+
+	s.ctx = ctx
 
 	addr, allowInCSP := prepareAddr(listener.Addr())
 	if allowInCSP {
