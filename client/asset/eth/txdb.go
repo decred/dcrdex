@@ -408,6 +408,7 @@ func (s *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Wallet
 				return err
 			}
 			err = item.Value(func(nonceB []byte) error {
+				// Does this need to be copied?
 				startNonceKey = nonceB
 				return nil
 			})

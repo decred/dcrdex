@@ -3898,7 +3898,8 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 // DepositAddress returns an address for depositing funds into the exchange
 // wallet.
 func (dcr *ExchangeWallet) DepositAddress() (string, error) {
-	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
+	acct := dcr.depositAccount()
+	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, acct)
 	if err != nil {
 		return "", err
 	}

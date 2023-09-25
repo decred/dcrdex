@@ -94,6 +94,7 @@ type WsConn interface {
 	Send(msg *msgjson.Message) error
 	SendRaw(b []byte) error
 	Request(msg *msgjson.Message, respHandler func(*msgjson.Message)) error
+	RequestRaw(msgID uint64, rawMsg []byte, respHandler func(*msgjson.Message)) error
 	RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error
 	Connect(ctx context.Context) (*sync.WaitGroup, error)
 	MessageSource() <-chan *msgjson.Message
@@ -139,6 +140,9 @@ type WsCfg struct {
 	// RawHandler overrides the msgjson parsing and forwards all messages to
 	// the provided function.
 	RawHandler func([]byte)
+
+	// DisableAutoReconnect disables automatic reconnection.
+	DisableAutoReconnect bool
 
 	ConnectHeaders http.Header
 }
@@ -310,7 +314,9 @@ func (conn *wsConn) SetReadLimit(limit int64) {
 func (conn *wsConn) handleReadError(err error) {
 	reconnect := func() {
 		conn.setConnectionStatus(Disconnected)
-		conn.reconnectCh <- struct{}{}
+		if !conn.cfg.DisableAutoReconnect {
+			conn.reconnectCh <- struct{}{}
+		}
 	}
 
 	var netErr net.Error
@@ -486,7 +492,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		// If the certificate is invalid or missing, do not start the reconnect
 		// loop, and return an error with no WaitGroup.
-		if errors.Is(err, ErrInvalidCert) || errors.Is(err, ErrCertRequired) {
+		if conn.cfg.DisableAutoReconnect || errors.Is(err, ErrInvalidCert) || errors.Is(err, ErrCertRequired) {
 			conn.cancel()
 			conn.wg.Wait() // probably a no-op
 			close(conn.readCh)
@@ -501,11 +507,15 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		})
 	}
 
-	conn.wg.Add(2)
-	go func() {
-		defer conn.wg.Done()
-		conn.keepAlive(ctxInternal)
-	}()
+	if !conn.cfg.DisableAutoReconnect {
+		conn.wg.Add(1)
+		go func() {
+			defer conn.wg.Done()
+			conn.keepAlive(ctxInternal)
+		}()
+	}
+
+	conn.wg.Add(1)
 	go func() {
 		defer conn.wg.Done()
 		<-ctxInternal.Done()
@@ -562,6 +572,10 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 
 // SendRaw sends a raw byte string over the websocket connection.
 func (conn *wsConn) SendRaw(b []byte) error {
+	if conn.IsDown() {
+		return fmt.Errorf("cannot send on a broken connection")
+	}
+
 	conn.wsMtx.Lock()
 	defer conn.wsMtx.Unlock()
 	err := conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
@@ -587,6 +601,10 @@ func (conn *wsConn) SendRaw(b []byte) error {
 // guarantees that the request message was successfully sent.
 func (conn *wsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) error {
 	return conn.RequestWithTimeout(msg, f, DefaultResponseTimeout, func() {})
+}
+
+func (conn *wsConn) RequestRaw(msgID uint64, rawMsg []byte, f func(*msgjson.Message)) error {
+	return conn.RequestRawWithTimeout(msgID, rawMsg, f, DefaultResponseTimeout, func() {})
 }
 
 // RequestWithTimeout sends the Request-type message and does not wait for a
@@ -616,16 +634,29 @@ func (conn *wsConn) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Mes
 	if msg.Type != msgjson.Request {
 		return fmt.Errorf("Message is not a request: %v", msg.Type)
 	}
+	rawMsg, err := json.Marshal(msg)
+	if err != nil {
+		conn.log.Errorf("Failed to marshal message: %v", err)
+		return err
+	}
+	err = conn.RequestRawWithTimeout(msg.ID, rawMsg, f, expireTime, expire)
+	if err != nil {
+		conn.log.Errorf("(*wsConn).Request(route '%s') Send error (%v), unregistering msg ID %d handler",
+			msg.Route, err, msg.ID)
+	}
+	return err
+}
+
+func (conn *wsConn) RequestRawWithTimeout(msgID uint64, rawMsg []byte, f func(*msgjson.Message), expireTime time.Duration, expire func()) error {
+
 	// Register the response and expire handlers for this request.
-	conn.logReq(msg.ID, f, expireTime, expire)
-	err := conn.Send(msg)
+	conn.logReq(msgID, f, expireTime, expire)
+	err := conn.SendRaw(rawMsg)
 	if err != nil {
 		// Neither expire nor the handler should run. Stop the expire timer
 		// created by logReq and delete the response handler it added. The
 		// caller receives a non-nil error to deal with it.
-		conn.log.Errorf("(*wsConn).Request(route '%s') Send error (%v), unregistering msg ID %d handler",
-			msg.Route, err, msg.ID)
-		conn.respHandler(msg.ID) // drop the responseHandler logged by logReq that is no longer necessary
+		conn.respHandler(msgID) // drop the responseHandler logged by logReq that is no longer necessary
 	}
 	return err
 }

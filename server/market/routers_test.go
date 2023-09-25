@@ -790,7 +790,7 @@ func TestMain(m *testing.M) {
 		// Not counted as coverage, must test Archiver constructor explicitly.
 		var shutdown context.CancelFunc
 		testCtx, shutdown = context.WithCancel(context.Background())
-		rig.router = NewBookRouter(rig.sources(), &tFeeSource{})
+		rig.router = NewBookRouter(rig.sources(), &tFeeSource{}, func(route string, handler comms.MsgHandler) {})
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
@@ -1608,6 +1608,9 @@ func (conn *TLink) getSend() *msgjson.Message {
 func (conn *TLink) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	return nil
 }
+func (conn *TLink) RequestRaw(msgID uint64, rawMsg []byte, f func(comms.Link, *msgjson.Message), expireTime time.Duration, expire func()) error {
+	return nil
+}
 func (conn *TLink) Banish() {
 	conn.banished = true
 }
@@ -1619,6 +1622,9 @@ func (conn *TLink) Disconnect() {
 		close(conn.closed)
 	}
 }
+
+func (conn *TLink) SetCustomID(string) {}
+func (conn *TLink) CustomID() string   { return "" }
 
 type testRig struct {
 	router  *BookRouter

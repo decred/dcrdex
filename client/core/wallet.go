@@ -395,7 +395,7 @@ func (w *xcWallet) Connect() error {
 	// ConnectOnce so that the ConnectionMaster's On method will report false.
 	err := w.connector.ConnectOnce(context.Background())
 	if err != nil {
-		return err
+		return fmt.Errorf("ConnectOnce error: %w", err)
 	}
 
 	var ready bool
@@ -409,7 +409,7 @@ func (w *xcWallet) Connect() error {
 
 	synced, progress, err := w.SyncStatus()
 	if err != nil {
-		return err
+		return fmt.Errorf("SyncStatus error: %w", err)
 	}
 
 	w.mtx.Lock()
@@ -417,12 +417,12 @@ func (w *xcWallet) Connect() error {
 	haveAddress := w.address != ""
 	if haveAddress {
 		if haveAddress, err = w.OwnsDepositAddress(w.address); err != nil {
-			return err
+			return fmt.Errorf("OwnsDepositAddress error: %w", err)
 		}
 	}
 	if !haveAddress {
 		if w.address, err = w.DepositAddress(); err != nil {
-			return err
+			return fmt.Errorf("DepositAddress error: %w", err)
 		}
 	}
 	w.hookedUp = true

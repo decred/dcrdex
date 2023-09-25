@@ -121,44 +121,32 @@ func NextID() uint64 {
 // MsgHandler describes a handler for a specific message route.
 type MsgHandler func(Link, *msgjson.Message) *msgjson.Error
 
-// rpcRoutes maps message routes to the handlers.
-var rpcRoutes = make(map[string]MsgHandler)
-
 // HTTPHandler describes a handler for an HTTP route.
 type HTTPHandler func(thing any) (any, error)
-
-// httpRoutes maps HTTP routes to the handlers.
-var httpRoutes = make(map[string]HTTPHandler)
 
 // Route registers a handler for a specified route. The handler map is global
 // and has no mutex protection. All calls to Route should be done before the
 // Server is started.
-func Route(route string, handler MsgHandler) {
+func (s *Server) Route(route string, handler MsgHandler) {
 	if route == "" {
 		panic("Route: route is empty string")
 	}
-	_, alreadyHave := rpcRoutes[route]
+	_, alreadyHave := s.rpcRoutes[route]
 	if alreadyHave {
 		panic(fmt.Sprintf("Route: double registration: %s", route))
 	}
-	rpcRoutes[route] = handler
+	s.rpcRoutes[route] = handler
 }
 
-// RouteHandler gets the handler registered to the specified route, if it
-// exists.
-func RouteHandler(route string) MsgHandler {
-	return rpcRoutes[route]
-}
-
-func RegisterHTTP(route string, handler HTTPHandler) {
+func (s *Server) RegisterHTTP(route string, handler HTTPHandler) {
 	if route == "" {
 		panic("RegisterHTTP: route is empty string")
 	}
-	_, alreadyHave := httpRoutes[route]
+	_, alreadyHave := s.httpRoutes[route]
 	if alreadyHave {
 		panic(fmt.Sprintf("RegisterHTTP: double registration: %s", route))
 	}
-	httpRoutes[route] = handler
+	s.httpRoutes[route] = handler
 }
 
 // The RPCConfig is the server configuration settings and the only argument
@@ -260,6 +248,7 @@ type ipWsLimiter struct {
 // Server is a low-level communications hub. It supports websocket clients
 // and an HTTP API.
 type Server struct {
+	mux *chi.Mux
 	// One listener for each address specified at (RPCConfig).ListenAddrs.
 	listeners []net.Listener
 
@@ -281,6 +270,11 @@ type Server struct {
 	quarantine map[dex.IPKey]time.Time
 
 	dataEnabled uint32 // atomic
+
+	// rpcRoutes maps message routes to the handlers.
+	rpcRoutes map[string]MsgHandler
+	// httpRoutes maps HTTP routes to the handlers.
+	httpRoutes map[string]HTTPHandler
 }
 
 // NewServer constructs a Server that should be started with Run. The server is
@@ -377,13 +371,21 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 		dataEnabled = 0
 	}
 
+	// Create an HTTP router, putting a couple of useful middlewares in place.
+	mux := chi.NewRouter()
+	mux.Use(middleware.RealIP)
+	mux.Use(middleware.Recoverer)
+
 	return &Server{
+		mux:         mux,
 		listeners:   listeners,
 		clients:     make(map[uint64]*wsLink),
 		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
 		v6Prefixes:  make(map[dex.IPKey]int),
 		quarantine:  make(map[dex.IPKey]time.Time),
 		dataEnabled: dataEnabled,
+		rpcRoutes:   make(map[string]MsgHandler),
+		httpRoutes:  make(map[string]HTTPHandler),
 	}, nil
 }
 
@@ -392,27 +394,14 @@ type onionListener struct{ net.Listener }
 // Run starts the server. Run should be called only after all routes are
 // registered.
 func (s *Server) Run(ctx context.Context) {
-	log.Trace("Starting RPC server")
+	log.Trace("Starting server")
 
-	// Create an HTTP router, putting a couple of useful middlewares in place.
-	mux := chi.NewRouter()
-	mux.Use(middleware.RealIP)
-	mux.Use(middleware.Recoverer)
-	httpServer := &http.Server{
-		Handler:      mux,
-		ReadTimeout:  rpcTimeoutSeconds * time.Second, // slow requests should not hold connections opened
-		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
-		BaseContext: func(l net.Listener) context.Context {
-			return context.WithValue(ctx, ctxListener, l) // the actual listener is not really useful, maybe drop it
-		},
-	}
-
+	mux := s.mux
 	var wg sync.WaitGroup
 
 	// Websocket endpoint.
 	mux.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ip := dex.NewIPKey(r.RemoteAddr)
-
 		if s.isQuarantined(ip) {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
@@ -429,6 +418,7 @@ func (s *Server) Run(ctx context.Context) {
 			http.Error(w, "too many connections from your address", http.StatusServiceUnavailable)
 			return
 		}
+
 		wsConn, err := ws.NewConnection(w, r, pongWait)
 		if err != nil {
 			log.Errorf("ws connection error: %v", err)
@@ -454,24 +444,20 @@ func (s *Server) Run(ctx context.Context) {
 		}()
 	})
 
-	// Data API endpoints.
-	mux.Route("/api", func(rr chi.Router) {
-		if log.Level() == dex.LevelTrace {
-			rr.Use(middleware.Logger)
-		}
-		rr.Use(s.limitRate)
-		rr.Get("/config", routeHandler(msgjson.ConfigRoute))
-		rr.Get("/spots", routeHandler(msgjson.SpotsRoute))
-		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}", routeHandler(msgjson.CandlesRoute))
-		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}/{count}", routeHandler(msgjson.CandlesRoute))
-		rr.With(orderBookParamsParser).Get("/orderbook/{baseSymbol}/{quoteSymbol}", routeHandler(msgjson.OrderBookRoute))
-	})
+	httpServer := &http.Server{
+		Handler:      mux,
+		ReadTimeout:  rpcTimeoutSeconds * time.Second, // slow requests should not hold connections opened
+		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
+		BaseContext: func(l net.Listener) context.Context {
+			return context.WithValue(ctx, ctxListener, l) // the actual listener is not really useful, maybe drop it
+		},
+	}
 
 	// Start serving.
 	for _, listener := range s.listeners {
 		wg.Add(1)
 		go func(listener net.Listener) {
-			log.Infof("RPC server listening on %s", listener.Addr())
+			log.Infof("Server listening on %s", listener.Addr())
 			err := httpServer.Serve(listener)
 			if !errors.Is(err, http.ErrServerClosed) {
 				log.Warnf("unexpected (http.Server).Serve error: %v", err)
@@ -504,7 +490,7 @@ func (s *Server) Run(ctx context.Context) {
 	<-ctx.Done()
 
 	// Shutdown the server. This stops all listeners and waits for connections.
-	log.Infof("RPC server shutting down...")
+	log.Infof("Server shutting down...")
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := httpServer.Shutdown(ctxTimeout)
@@ -518,7 +504,11 @@ func (s *Server) Run(ctx context.Context) {
 	// When the http.Server is shut down, all websocket clients are gone, and
 	// the listener goroutines have returned, the server is shut down.
 	wg.Wait()
-	log.Infof("RPC server shutdown complete")
+	log.Infof("Server shutdown complete")
+}
+
+func (s *Server) Mux() *chi.Mux {
+	return s.mux
 }
 
 // Check if the IP address is quarantined.
@@ -658,7 +648,8 @@ func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip de
 		return
 	}
 	defer s.wsLimiterDone(ip)
-	client := newWSLink(addr, conn, wsLimiter, dataRoutesMeter)
+	client := s.newWSLink(addr, conn, wsLimiter, dataRoutesMeter)
+
 	cm, err := s.addClient(ctx, client)
 	if err != nil {
 		log.Errorf("Failed to add client %s", addr)
@@ -836,15 +827,15 @@ func parseListeners(addrs []string) ([]string, []string, bool, error) {
 	return ipv4ListenAddrs, ipv6ListenAddrs, haveWildcard, nil
 }
 
-// routeHandler creates a HandlerFunc for a route. Middleware should have
+// NewRouteHandler creates a HandlerFunc for a route. Middleware should have
 // already processed the request and added the request struct to the Context.
-func routeHandler(route string) func(w http.ResponseWriter, r *http.Request) {
-	handler := httpRoutes[route]
+func (s *Server) NewRouteHandler(route string) func(w http.ResponseWriter, r *http.Request) {
+	handler := s.httpRoutes[route]
 	if handler == nil {
-		panic("no known handler")
+		panic("no known handler for " + route)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		resp, err := handler(r.Context().Value(ctxThing))
+		resp, err := handler(r.Context().Value(CtxThing))
 		if err != nil {
 			writeJSONWithStatus(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
 			return

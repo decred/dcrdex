@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -30,6 +31,8 @@ import (
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
@@ -427,8 +430,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 	}
 
-	dataAPI := apidata.NewDataAPI(storage)
-
 	// Create a MasterCoinLocker for each asset.
 	dexCoinLocker := coinlock.NewDEXCoinLocker(assetIDs)
 
@@ -678,6 +679,14 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		cfg.PenaltyThreshold = auth.DefaultPenaltyThreshold
 	}
 
+	// Client comms RPC server.
+	server, err := comms.NewServer(cfg.CommsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("NewServer failed: %w", err)
+	}
+
+	dataAPI := apidata.NewDataAPI(storage, server.RegisterHTTP)
+
 	authCfg := auth.Config{
 		Storage:          storage,
 		Signer:           signer{cfg.DEXPrivKey},
@@ -694,6 +703,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		FreeCancels:      cfg.FreeCancels,
 		PenaltyThreshold: cfg.PenaltyThreshold,
 		TxDataSources:    txDataSources,
+		Route:            server.Route,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
@@ -848,7 +858,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	// Book router
-	bookRouter := market.NewBookRouter(bookSources, feeMgr)
+	bookRouter := market.NewBookRouter(bookSources, feeMgr, server.Route)
 	startSubSys("BookRouter", bookRouter)
 
 	// The data API gets the order book from the book router.
@@ -874,12 +884,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
-	// Client comms RPC server.
-	server, err := comms.NewServer(cfg.CommsCfg)
-	if err != nil {
-		return nil, fmt.Errorf("NewServer failed: %w", err)
-	}
-
 	cfgResp, err := newConfigResponse(cfg, feeAssets, bondAssets, cfgAssets, cfgMarkets)
 	if err != nil {
 		return nil, err
@@ -899,7 +903,22 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		configResp:  cfgResp,
 	}
 
-	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+	server.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+
+	mux := server.Mux()
+
+	// Data API endpoints.
+	mux.Route("/api", func(rr chi.Router) {
+		if log.Level() == dex.LevelTrace {
+			rr.Use(middleware.Logger)
+		}
+		rr.Use(server.LimitRate)
+		rr.Get("/config", server.NewRouteHandler(msgjson.ConfigRoute))
+		rr.Get("/spots", server.NewRouteHandler(msgjson.SpotsRoute))
+		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}", server.NewRouteHandler(msgjson.CandlesRoute))
+		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}/{count}", server.NewRouteHandler(msgjson.CandlesRoute))
+		rr.With(orderBookParamsParser).Get("/orderbook/{baseSymbol}/{quoteSymbol}", server.NewRouteHandler(msgjson.OrderBookRoute))
+	})
 
 	startSubSys("Comms Server", server)
 
@@ -1233,4 +1252,72 @@ func (dm *DEX) MarketMatches(base, quote uint32) ([]*MatchData, error) {
 // API endpoints.
 func (dm *DEX) EnableDataAPI(yes bool) {
 	dm.server.EnableDataAPI(yes)
+}
+
+// candlesParamsParser is middleware for the /candles routes. Parses the
+// *msgjson.CandlesRequest from the URL parameters.
+func candleParamsParser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		baseID, quoteID, errMsg := parseBaseQuoteIDs(r)
+		if errMsg != "" {
+			http.Error(w, errMsg, http.StatusBadRequest)
+			return
+		}
+
+		// Ensure the bin size is a valid duration string.
+		binSize := chi.URLParam(r, "binSize")
+		_, err := time.ParseDuration(binSize)
+		if err != nil {
+			http.Error(w, "bin size unparseable", http.StatusBadRequest)
+			return
+		}
+
+		countStr := chi.URLParam(r, "count")
+		count := 0
+		if countStr != "" {
+			count, err = strconv.Atoi(countStr)
+			if err != nil {
+				http.Error(w, "count unparseable", http.StatusBadRequest)
+				return
+			}
+		}
+		ctx := context.WithValue(r.Context(), comms.CtxThing, &msgjson.CandlesRequest{
+			BaseID:     baseID,
+			QuoteID:    quoteID,
+			BinSize:    binSize,
+			NumCandles: count,
+		})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// orderBookParamsParser is middleware for the /orderbook route. Parses the
+// *msgjson.OrderBookSubscription from the URL parameters.
+func orderBookParamsParser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		baseID, quoteID, errMsg := parseBaseQuoteIDs(r)
+		if errMsg != "" {
+			http.Error(w, errMsg, http.StatusBadRequest)
+			return
+		}
+		ctx := context.WithValue(r.Context(), comms.CtxThing, &msgjson.OrderBookSubscription{
+			Base:  baseID,
+			Quote: quoteID,
+		})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// parseBaseQuoteIDs parses the "baseSymbol" and "quoteSymbol" URL parameters
+// from the request.
+func parseBaseQuoteIDs(r *http.Request) (baseID, quoteID uint32, errMsg string) {
+	baseID, found := dex.BipSymbolID(chi.URLParam(r, "baseSymbol"))
+	if !found {
+		return 0, 0, "unknown base"
+	}
+	quoteID, found = dex.BipSymbolID(chi.URLParam(r, "quoteSymbol"))
+	if !found {
+		return 0, 0, "unknown quote"
+	}
+	return
 }

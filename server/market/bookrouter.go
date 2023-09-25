@@ -295,7 +295,7 @@ type BookRouter struct {
 // comms and a monitoring goroutine is started for each BookSource specified.
 // The input sources is a mapping of market names to sources for order and epoch
 // queue information.
-func NewBookRouter(sources map[string]BookSource, feeSource FeeSource) *BookRouter {
+func NewBookRouter(sources map[string]BookSource, feeSource FeeSource, route func(route string, handler comms.MsgHandler)) *BookRouter {
 	router := &BookRouter{
 		books:     make(map[string]*msgBook),
 		feeSource: feeSource,
@@ -318,10 +318,10 @@ func NewBookRouter(sources map[string]BookSource, feeSource FeeSource) *BookRout
 		}
 		router.books[mkt] = book
 	}
-	comms.Route(msgjson.OrderBookRoute, router.handleOrderBook)
-	comms.Route(msgjson.UnsubOrderBookRoute, router.handleUnsubOrderBook)
-	comms.Route(msgjson.FeeRateRoute, router.handleFeeRate)
-	comms.Route(msgjson.PriceFeedRoute, router.handlePriceFeeder)
+	route(msgjson.OrderBookRoute, router.handleOrderBook)
+	route(msgjson.UnsubOrderBookRoute, router.handleUnsubOrderBook)
+	route(msgjson.FeeRateRoute, router.handleFeeRate)
+	route(msgjson.PriceFeedRoute, router.handlePriceFeeder)
 
 	return router
 }

@@ -348,13 +348,16 @@ type Message struct {
 	// Payload is any data attached to the message. How Payload is decoded
 	// depends on the Route.
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// Sig is a signature of the message. This is the new-style signature
+	// scheme. The old way was to sign individual payloads. Which is used
+	// depends on the route.
+	Sig dex.Bytes `json:"sig"`
 }
 
 // DecodeMessage decodes a *Message from JSON-formatted bytes. Note that
 // *Message may be nil even if error is nil, when the message is JSON null,
 // []byte("null").
-func DecodeMessage(b []byte) (*Message, error) {
-	msg := new(Message)
+func DecodeMessage(b []byte) (msg *Message, _ error) {
 	err := json.Unmarshal(b, &msg)
 	if err != nil {
 		return nil, err
