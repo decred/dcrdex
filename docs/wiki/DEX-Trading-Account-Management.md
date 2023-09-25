@@ -7,8 +7,8 @@ Let's get started!
 ## Prerequisites
 
 This guide requires that you've followed the steps in the [Initial Setup
-Guide](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#initial-setup).
-If not, please do before proceeding.
+Guide](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#initial-setup)
+or you've already setup your DEX client. If not, please do before proceeding.
 
 ## Setting Up Your DEX Trading Account
 

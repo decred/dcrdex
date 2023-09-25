@@ -102,10 +102,9 @@ several blocks.
 
    <img src="images/quick-config.png" width="350">
 
-   The checked native wallets will be created for you and you'll be connected to
-   the checked DEX server when you submit the form. Feel free to uncheck any of
-   the wallets you do not need.
-4. Backup your app seed, This seed is used to restore your DEX accounts and any
+   The selected native wallets will be created for you and you'll be connected
+   to the selected DEX server when you submit the form.
+4. Backup your app seed. This seed is used to restore your DEX accounts and any
    native wallets, so keep it safe.
 
    If you skip this step now (not recommended), you can go to the Settings page
