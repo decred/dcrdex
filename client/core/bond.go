@@ -1069,7 +1069,13 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		bondAssetAmt = bondAsset.Amt
 	}
 
-	maxBonded := maxBondedMult * bondAssetAmt * (targetTier + uint64(penaltyComps)) // the min if none specified
+	// If we're lowering our bond, we can't set the max bonded amount too low.
+	tierForDefaultMaxBonded := targetTier
+	if targetTier > 0 && targetTier0 > targetTier {
+		tierForDefaultMaxBonded = targetTier0
+	}
+
+	maxBonded := maxBondedMult * bondAssetAmt * (tierForDefaultMaxBonded + uint64(penaltyComps)) // the min if none specified
 	if form.MaxBondedAmt != nil {
 		requested := *form.MaxBondedAmt
 		if requested < maxBonded {
