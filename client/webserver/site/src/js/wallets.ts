@@ -1079,7 +1079,7 @@ export default class WalletsPage extends BasePage {
       tmpl.status.textContent = intl.prep(ticketStatusTranslationKeys[status])
       tmpl.hashStart.textContent = tx.hash.slice(0, 6)
       tmpl.hashEnd.textContent = tx.hash.slice(-6)
-      Doc.bind(tmpl.detailsLink, 'click', () => window.open(coinLink(tx.hash), '_blank'))
+      tmpl.detailsLinkUrl.setAttribute('href', coinLink(tx.hash))
     }
   }
 
@@ -1204,7 +1204,7 @@ export default class WalletsPage extends BasePage {
       if (tspend.value > 0) tmpl.value.textContent = Doc.formatFourSigFigs(tspend.value / ui.conventional.conversionFactor)
       else Doc.hide(tmpl.value)
       tmpl.hash.textContent = tspend.hash
-      Doc.bind(tmpl.explorerLink, 'click', () => window.open(coinLink(tspend.hash), '_blank'))
+      tmpl.explorerLink.setAttribute('href', coinLink(tspend.hash))
     }
 
     const setTKeyPolicy = async (key: string, policy: string) => {
