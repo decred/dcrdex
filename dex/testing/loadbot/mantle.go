@@ -69,13 +69,13 @@ func runTrader(t Trader, name string) {
 		return
 	}
 
-	const tradingTier = 20
+	const tradingTier = 100 // ~ 50 DCR
 	maintain := true
 	_, err = m.PostBond(&core.PostBondForm{
 		Addr:         hostAddr,
 		Cert:         cert,
 		AppPass:      pass,
-		Bond:         bond * tradingTier, // Automatically sets target tier to one.
+		Bond:         bond * tradingTier,
 		MaintainTier: &maintain,
 		Asset:        &regAsset,
 	})
