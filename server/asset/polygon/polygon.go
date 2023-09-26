@@ -43,6 +43,8 @@ func init() {
 
 	registerToken(testTokenID, 0)
 	registerToken(usdcID, 0)
+	registerToken(wethTokenID, 0)
+	registerToken(wbtcTokenID, 0)
 
 	if blockPollIntervalStr != "" {
 		blockPollInterval, _ = time.ParseDuration(blockPollIntervalStr)
@@ -61,6 +63,8 @@ const (
 var (
 	testTokenID, _ = dex.BipSymbolID("dextt.polygon")
 	usdcID, _      = dex.BipSymbolID("usdc.polygon")
+	wethTokenID, _ = dex.BipSymbolID("weth.polygon")
+	wbtcTokenID, _ = dex.BipSymbolID("wbtc.polygon")
 
 	// blockPollInterval is the delay between calls to bestBlockHash to check
 	// for new blocks. Modify at compile time via blockPollIntervalStr:
