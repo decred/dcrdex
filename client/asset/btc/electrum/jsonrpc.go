@@ -10,7 +10,7 @@ import (
 	"strconv"
 )
 
-type positional []interface{}
+type positional []any
 
 type request struct {
 	Jsonrpc string          `json:"jsonrpc"`
@@ -43,7 +43,7 @@ type ntfnData struct {
 	Params json.RawMessage `json:"params"`
 }
 
-func prepareRequest(id uint64, method string, args interface{}) ([]byte, error) {
+func prepareRequest(id uint64, method string, args any) ([]byte, error) {
 	// nil args should marshal as [] instead of null.
 	if args == nil {
 		args = []json.RawMessage{}

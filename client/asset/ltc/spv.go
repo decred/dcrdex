@@ -1034,32 +1034,32 @@ type fileLoggerPlus struct {
 	log dex.Logger
 }
 
-func (f *fileLoggerPlus) Warnf(format string, params ...interface{}) {
+func (f *fileLoggerPlus) Warnf(format string, params ...any) {
 	f.log.Warnf(format, params...)
 	f.Logger.Warnf(format, params...)
 }
 
-func (f *fileLoggerPlus) Errorf(format string, params ...interface{}) {
+func (f *fileLoggerPlus) Errorf(format string, params ...any) {
 	f.log.Errorf(format, params...)
 	f.Logger.Errorf(format, params...)
 }
 
-func (f *fileLoggerPlus) Criticalf(format string, params ...interface{}) {
+func (f *fileLoggerPlus) Criticalf(format string, params ...any) {
 	f.log.Criticalf(format, params...)
 	f.Logger.Criticalf(format, params...)
 }
 
-func (f *fileLoggerPlus) Warn(v ...interface{}) {
+func (f *fileLoggerPlus) Warn(v ...any) {
 	f.log.Warn(v...)
 	f.Logger.Warn(v...)
 }
 
-func (f *fileLoggerPlus) Error(v ...interface{}) {
+func (f *fileLoggerPlus) Error(v ...any) {
 	f.log.Error(v...)
 	f.Logger.Error(v...)
 }
 
-func (f *fileLoggerPlus) Critical(v ...interface{}) {
+func (f *fileLoggerPlus) Critical(v ...any) {
 	f.log.Critical(v...)
 	f.Logger.Critical(v...)
 }

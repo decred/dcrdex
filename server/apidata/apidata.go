@@ -168,7 +168,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 }
 
 // handleSpots implements comms.HTTPHandler for the /spots endpoint.
-func (s *DataAPI) handleSpots(interface{}) (interface{}, error) {
+func (s *DataAPI) handleSpots(any) (any, error) {
 	s.spotsMtx.RLock()
 	defer s.spotsMtx.RUnlock()
 	spots := make([]json.RawMessage, 0, len(s.spots))
@@ -179,7 +179,7 @@ func (s *DataAPI) handleSpots(interface{}) (interface{}, error) {
 }
 
 // handleCandles implements comms.HTTPHandler for the /candles endpoints.
-func (s *DataAPI) handleCandles(thing interface{}) (interface{}, error) {
+func (s *DataAPI) handleCandles(thing any) (any, error) {
 	req, ok := thing.(*msgjson.CandlesRequest)
 	if !ok {
 		return nil, fmt.Errorf("candles request unparseable")
@@ -218,7 +218,7 @@ func (s *DataAPI) handleCandles(thing interface{}) (interface{}, error) {
 }
 
 // handleOrderBook implements comms.HTTPHandler for the /orderbook endpoints.
-func (s *DataAPI) handleOrderBook(thing interface{}) (interface{}, error) {
+func (s *DataAPI) handleOrderBook(thing any) (any, error) {
 	req, ok := thing.(*msgjson.OrderBookSubscription)
 	if !ok {
 		return nil, fmt.Errorf("unparseable orderbook request")

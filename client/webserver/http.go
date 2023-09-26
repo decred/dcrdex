@@ -37,7 +37,7 @@ const (
 )
 
 // sendTemplate processes the template and sends the result.
-func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data interface{}) {
+func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data any) {
 	page, err := s.html.exec(tmplID, data)
 	if err != nil {
 		log.Errorf("template exec error for %s: %v", tmplID, err)

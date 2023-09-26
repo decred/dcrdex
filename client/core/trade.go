@@ -265,7 +265,7 @@ type trackedTrade struct {
 	lockTimeTaker      time.Duration
 	lockTimeMaker      time.Duration
 	notify             func(Notification)
-	formatDetails      func(Topic, ...interface{}) (string, string)
+	formatDetails      func(Topic, ...any) (string, string)
 	fromAssetID        uint32            // wallets.fromWallet.AssetID
 	options            map[string]string // metaData.Options (immutable) for Redeem and Swap
 	redemptionReserves uint64            // metaData.RedemptionReserves (immutable)
@@ -292,7 +292,7 @@ type trackedTrade struct {
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
-	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string)) *trackedTrade {
+	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...any) (string, string)) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {

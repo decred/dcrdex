@@ -39,7 +39,7 @@ var (
 )
 
 type ContextCaller interface {
-	CallContext(ctx context.Context, result interface{}, method string, args ...interface{}) error
+	CallContext(ctx context.Context, result any, method string, args ...any) error
 }
 
 type ethConn struct {

@@ -189,7 +189,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 // rpcCaller is satisfied by ExchangeWalletFullNode (baseWallet), providing
 // direct RPC requests.
 type rpcCaller interface {
-	CallRPC(method string, args []interface{}, thing interface{}) error
+	CallRPC(method string, args []any, thing any) error
 }
 
 // privKeyForAddress is Firo's dumpprivkey RPC which calls dumpprivkey once
@@ -198,7 +198,7 @@ type rpcCaller interface {
 func privKeyForAddress(c rpcCaller, addr string) (*btcec.PrivateKey, error) {
 	const methodDumpPrivKey = "dumpprivkey"
 	var privkeyStr string
-	err := c.CallRPC(methodDumpPrivKey, []interface{}{addr}, &privkeyStr)
+	err := c.CallRPC(methodDumpPrivKey, []any{addr}, &privkeyStr)
 	if err == nil { // really, expect an error...
 		return nil, errors.New("firo dumpprivkey: no authorization challenge")
 	}
@@ -213,7 +213,7 @@ func privKeyForAddress(c rpcCaller, addr string) (*btcec.PrivateKey, error) {
 	auth := errStr[i : i+4]
 	/// fmt.Printf("OTA: %s\n", auth)
 
-	err = c.CallRPC(methodDumpPrivKey, []interface{}{addr, auth}, &privkeyStr)
+	err = c.CallRPC(methodDumpPrivKey, []any{addr, auth}, &privkeyStr)
 	if err != nil {
 		return nil, err
 	}

@@ -58,8 +58,8 @@ func TestConfigParsing(t *testing.T) {
 
 	type test struct {
 		name      string
-		cfgData   interface{}
-		parsedCfg interface{}
+		cfgData   any
+		parsedCfg any
 		expect    expectations
 	}
 

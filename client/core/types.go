@@ -46,12 +46,12 @@ type errorSet struct {
 }
 
 // newErrorSet constructs an error set with a prefix.
-func newErrorSet(s string, a ...interface{}) *errorSet {
+func newErrorSet(s string, a ...any) *errorSet {
 	return &errorSet{prefix: fmt.Sprintf(s, a...)}
 }
 
 // add adds the message to the slice as an error and returns the errorSet.
-func (set *errorSet) add(s string, a ...interface{}) *errorSet {
+func (set *errorSet) add(s string, a ...any) *errorSet {
 	set.errs = append(set.errs, fmt.Errorf(s, a...))
 	return set
 }
@@ -214,7 +214,7 @@ type PostBondForm struct {
 	// Cert is needed if posting bond to a new DEX. Cert can be a string, which
 	// is interpreted as a filepath, or a []byte, which is interpreted as the
 	// file contents of the certificate.
-	Cert interface{} `json:"cert"`
+	Cert any `json:"cert"`
 }
 
 // RegisterForm is information necessary to register an account on a DEX. Old
@@ -226,7 +226,7 @@ type RegisterForm struct {
 	Asset   *uint32          `json:"assetID,omitempty"` // do not default to 0
 	// Cert can be a string, which is interpreted as a filepath, or a []byte,
 	// which is interpreted as the file contents of the certificate.
-	Cert interface{} `json:"cert"`
+	Cert any `json:"cert"`
 }
 
 // Match represents a match on an order. An order may have many matches.
@@ -731,10 +731,10 @@ const (
 
 // BookUpdate is an order book update.
 type BookUpdate struct {
-	Action   string      `json:"action"`
-	Host     string      `json:"host"`
-	MarketID string      `json:"marketID"`
-	Payload  interface{} `json:"payload"`
+	Action   string `json:"action"`
+	Host     string `json:"host"`
+	MarketID string `json:"marketID"`
+	Payload  any    `json:"payload"`
 }
 
 type CandlesPayload struct {

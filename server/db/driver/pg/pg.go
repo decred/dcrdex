@@ -18,7 +18,7 @@ import (
 type Driver struct{}
 
 // Open creates the DB backend, returning a DEXArchivist.
-func (d *Driver) Open(ctx context.Context, cfg interface{}) (db.DEXArchivist, error) {
+func (d *Driver) Open(ctx context.Context, cfg any) (db.DEXArchivist, error) {
 	switch c := cfg.(type) {
 	case *Config:
 		return NewArchiver(ctx, c)

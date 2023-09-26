@@ -57,7 +57,7 @@ func giveItASecond(f func() bool) bool {
 	}
 }
 
-func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
+func readChannel(t *testing.T, tag string, c chan any) any {
 	t.Helper()
 	select {
 	case i := <-c:
@@ -228,7 +228,7 @@ func sendToConn(t *testing.T, conn *wsConnStub, method, msg string) {
 	conn.msg <- encMsg
 }
 
-func sendReplace(t *testing.T, conn *wsConnStub, thing interface{}, old, new string) {
+func sendReplace(t *testing.T, conn *wsConnStub, thing any, old, new string) {
 	enc, err := json.Marshal(thing)
 	if err != nil {
 		t.Fatalf("error encoding thing for sendReplace: %v", err)
@@ -271,7 +271,7 @@ func TestMain(m *testing.M) {
 	defer shutdown()
 	// Register dummy handlers for the HTTP routes.
 	for _, route := range []string{msgjson.ConfigRoute, msgjson.SpotsRoute, msgjson.CandlesRoute, msgjson.OrderBookRoute} {
-		RegisterHTTP(route, func(interface{}) (interface{}, error) { return nil, nil })
+		RegisterHTTP(route, func(any) (any, error) { return nil, nil })
 	}
 	UseLogger(tLogger)
 	os.Exit(m.Run())
@@ -328,7 +328,7 @@ func TestClientRequests(t *testing.T) {
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
-	srvChan := make(chan interface{})
+	srvChan := make(chan any)
 	Route("getclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
 		client, ok := c.(*wsLink)
 		if !ok {
@@ -377,7 +377,7 @@ func TestClientRequests(t *testing.T) {
 		return nil
 	})
 	var httpSeen uint32
-	RegisterHTTP("httproute", func(thing interface{}) (interface{}, error) {
+	RegisterHTTP("httproute", func(thing any) (any, error) {
 		atomic.StoreUint32(&httpSeen, 1)
 		srvChan <- nil
 		return struct{}{}, nil
@@ -546,7 +546,7 @@ func TestClientResponses(t *testing.T) {
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
-	srvChan := make(chan interface{})
+	srvChan := make(chan any)
 	Route("grabclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
 		client, ok := c.(*wsLink)
 		if !ok {
@@ -712,7 +712,7 @@ func TestOnline(t *testing.T) {
 		return nil
 	})
 	// The 'banuser' route quarantines the user.
-	banChan := make(chan interface{})
+	banChan := make(chan any)
 	Route("banuser", func(c Link, req *msgjson.Message) *msgjson.Error {
 		rpcErr := msgjson.NewError(msgjson.RPCQuarantineClient, "test quarantine")
 		msg, _ := msgjson.NewResponse(req.ID, nil, rpcErr)
@@ -755,7 +755,7 @@ func TestOnline(t *testing.T) {
 	}
 
 	// A loop to grab responses from the server.
-	recv := make(chan interface{})
+	recv := make(chan any)
 	go func() {
 		for {
 			_, r, err := remoteClient.ReadMessage()

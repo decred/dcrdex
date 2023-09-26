@@ -73,7 +73,7 @@ const (
 )
 
 // createResponse creates a msgjson response payload.
-func createResponse(op string, res interface{}, resErr *msgjson.Error) *msgjson.ResponsePayload {
+func createResponse(op string, res any, resErr *msgjson.Error) *msgjson.ResponsePayload {
 	encodedRes, err := json.Marshal(res)
 	if err != nil {
 		err := fmt.Errorf("unable to marshal data for %s: %w", op, err)
@@ -486,9 +486,9 @@ func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 // handleExchanges handles requests for exchanges. It takes no arguments and
 // returns a map of exchanges.
 func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
-	// Convert something to a map[string]interface{}.
-	convM := func(in interface{}) map[string]interface{} {
-		var m map[string]interface{}
+	// Convert something to a map[string]any.
+	convM := func(in any) map[string]any {
+		var m map[string]any
 		b, err := json.Marshal(in)
 		if err != nil {
 			panic(err)

@@ -39,7 +39,7 @@ type ethLogger struct {
 
 // New returns a new Logger that has this logger's context plus the given
 // context.
-func (el *ethLogger) New(ctx ...interface{}) log.Logger {
+func (el *ethLogger) New(ctx ...any) log.Logger {
 	s := ""
 	for _, v := range ctx {
 		if s == "" {
@@ -74,8 +74,8 @@ func (el *ethLogger) GetHandler() log.Handler {
 // Used during setup in geth when a logger is not supplied. Does nothing here.
 func (el *ethLogger) SetHandler(h log.Handler) {}
 
-func formatEthLog(msg string, ctx ...interface{}) []interface{} {
-	msgs := []interface{}{msg, "         "}
+func formatEthLog(msg string, ctx ...any) []any {
+	msgs := []any{msg, "         "}
 	alternator := 0
 	for _, v := range ctx {
 		deliminator := "="
@@ -89,32 +89,32 @@ func formatEthLog(msg string, ctx ...interface{}) []interface{} {
 }
 
 // Trace logs at Trace level.
-func (el *ethLogger) Trace(msg string, ctx ...interface{}) {
+func (el *ethLogger) Trace(msg string, ctx ...any) {
 	el.dl.Trace(formatEthLog(msg, ctx...)...)
 }
 
 // Debug logs at debug level.
-func (el *ethLogger) Debug(msg string, ctx ...interface{}) {
+func (el *ethLogger) Debug(msg string, ctx ...any) {
 	el.dl.Debug(formatEthLog(msg, ctx...)...)
 }
 
 // Info logs at info level.
-func (el *ethLogger) Info(msg string, ctx ...interface{}) {
+func (el *ethLogger) Info(msg string, ctx ...any) {
 	el.dl.Info(formatEthLog(msg, ctx...)...)
 }
 
 // Warn logs at warn level.
-func (el *ethLogger) Warn(msg string, ctx ...interface{}) {
+func (el *ethLogger) Warn(msg string, ctx ...any) {
 	el.dl.Warn(formatEthLog(msg, ctx...)...)
 }
 
 // Error logs at error level.
-func (el *ethLogger) Error(msg string, ctx ...interface{}) {
+func (el *ethLogger) Error(msg string, ctx ...any) {
 	el.dl.Error(formatEthLog(msg, ctx...)...)
 }
 
 // Crit logs at critical level.
-func (el *ethLogger) Crit(msg string, ctx ...interface{}) {
+func (el *ethLogger) Crit(msg string, ctx ...any) {
 	el.dl.Critical(formatEthLog(msg, ctx...)...)
 }
 

@@ -12,7 +12,7 @@ import (
 // postgresql type of INT8 (8-byte integer) that scan a value of type int64.
 type fastUint64 uint64
 
-func (n *fastUint64) Scan(value interface{}) error {
+func (n *fastUint64) Scan(value any) error {
 	if value == nil {
 		*n = 0
 		return fmt.Errorf("NULL not supported")

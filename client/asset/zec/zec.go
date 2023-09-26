@@ -247,7 +247,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 }
 
 type rpcCaller interface {
-	CallRPC(method string, args []interface{}, thing interface{}) error
+	CallRPC(method string, args []any, thing any) error
 }
 
 type zecWallet struct {

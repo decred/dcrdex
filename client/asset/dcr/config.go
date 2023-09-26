@@ -81,7 +81,7 @@ func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig,
 // RPCListen or RPCCert in the specified file, default values will be used. If
 // there is no error, the module-level chainParams variable will be set
 // appropriately for the network.
-func loadConfig(settings map[string]string, network dex.Network, cfg interface{}) (*chaincfg.Params, error) {
+func loadConfig(settings map[string]string, network dex.Network, cfg any) (*chaincfg.Params, error) {
 	if err := config.Unmapify(settings, cfg); err != nil {
 		return nil, fmt.Errorf("error parsing config: %w", err)
 	}

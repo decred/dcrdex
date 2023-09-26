@@ -5543,7 +5543,7 @@ func (dcr *ExchangeWallet) monitorPeers(ctx context.Context) {
 }
 
 func (dcr *ExchangeWallet) emitTipChange(height int64) {
-	var data interface{}
+	var data any
 	// stakeInfo, err := dcr.wallet.StakeInfo(dcr.ctx)
 	// if err != nil {
 	// 	dcr.log.Errorf("Error getting stake info for tip change notification data: %v", err)
@@ -5693,7 +5693,7 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 	// be determined, as searching just the new tip might result in blocks
 	// being omitted from the search operation. If that happens, cancel all
 	// find redemption requests in queue.
-	notifyFatalFindRedemptionError := func(s string, a ...interface{}) {
+	notifyFatalFindRedemptionError := func(s string, a ...any) {
 		dcr.fatalFindRedemptionsError(fmt.Errorf("tipChange handler - "+s, a...), contractOutpoints)
 	}
 

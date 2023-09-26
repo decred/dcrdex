@@ -86,7 +86,7 @@ func (bua updateAction) String() string {
 // applies.
 type updateSignal struct {
 	action updateAction
-	data   interface{} // sigData* type
+	data   any // sigData* type
 }
 
 func (us updateSignal) String() string {
@@ -369,7 +369,7 @@ out:
 			}
 
 			// Prepare the book/unbook/epoch note.
-			var note interface{}
+			var note any
 			var route string
 			var spot *msgjson.Spot
 			switch sigData := u.data.(type) {
@@ -723,7 +723,7 @@ func (r *BookRouter) handlePriceFeeder(conn comms.Link, msg *msgjson.Message) *m
 }
 
 // sendNote sends a notification to the specified subscribers.
-func (r *BookRouter) sendNote(route string, subs *subscribers, note interface{}) {
+func (r *BookRouter) sendNote(route string, subs *subscribers, note any) {
 	msg, err := msgjson.NewNotification(route, note)
 	if err != nil {
 		log.Errorf("error creating notification-type Message: %v", err)

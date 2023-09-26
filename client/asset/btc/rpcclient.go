@@ -94,7 +94,7 @@ type RawRequester interface {
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and
 // sent via RawRequest.
-type anylist []interface{}
+type anylist []any
 
 type rpcCore struct {
 	rpcConfig                *RPCConfig
@@ -1132,11 +1132,11 @@ func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[out
 // call is used internally to marshal parameters and send requests to the RPC
 // server via (*rpcclient.Client).RawRequest. If thing is non-nil, the result
 // will be marshaled into thing.
-func (wc *rpcClient) call(method string, args anylist, thing interface{}) error {
+func (wc *rpcClient) call(method string, args anylist, thing any) error {
 	return call(wc.ctx, wc.requester(), method, args, thing)
 }
 
-func call(ctx context.Context, r RawRequester, method string, args anylist, thing interface{}) error {
+func call(ctx context.Context, r RawRequester, method string, args anylist, thing any) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])

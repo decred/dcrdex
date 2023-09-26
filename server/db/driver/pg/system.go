@@ -59,7 +59,7 @@ func connect(host, port, user, pass, dbName string) (*sql.DB, error) {
 		// https://www.postgresql.org/docs/13/runtime-config-client.html#GUC-CLIENT-MIN-MESSAGES
 		// The default setting is NOTICE, which excludes DEBUG and LOG, but not
 		// INFO since that is sent to the client regardless of the setting.
-		var printer func(format string, params ...interface{})
+		var printer func(format string, params ...any)
 		switch notice.Severity {
 		case pq.Efatal, pq.Epanic: // error caused database session to abort
 			printer = log.Criticalf
@@ -103,17 +103,17 @@ func connect(host, port, user, pass, dbName string) (*sql.DB, error) {
 
 // sqlExecutor is implemented by both sql.DB and sql.Tx.
 type sqlExecutor interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
+	Exec(query string, args ...any) (sql.Result, error)
 }
 
 type sqlQueryer interface {
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
 }
 
 // sqlExec executes the SQL statement string with any optional arguments, and
 // returns the number of rows affected.
-func sqlExec(db sqlExecutor, stmt string, args ...interface{}) (int64, error) {
+func sqlExec(db sqlExecutor, stmt string, args ...any) (int64, error) {
 	res, err := db.Exec(stmt, args...)
 	if err != nil {
 		return 0, err
@@ -129,7 +129,7 @@ func sqlExec(db sqlExecutor, stmt string, args ...interface{}) (int64, error) {
 
 // sqlExecStmt executes the prepared SQL statement with any optional arguments,
 // and returns the number of rows affected.
-func sqlExecStmt(stmt *sql.Stmt, args ...interface{}) (int64, error) {
+func sqlExecStmt(stmt *sql.Stmt, args ...any) (int64, error) {
 	res, err := stmt.Exec(args...)
 	if err != nil {
 		return 0, err

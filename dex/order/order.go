@@ -77,7 +77,7 @@ func (oid OrderID) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (oid *OrderID) Scan(src interface{}) error {
+func (oid *OrderID) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		copy(oid[:], src)
@@ -116,7 +116,7 @@ func (ot OrderType) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (ot *OrderType) Scan(src interface{}) error {
+func (ot *OrderType) Scan(src any) error {
 	// Use sql.(NullInt32).Scan because it uses the unexported
 	// sql.convertAssignRows to coerce compatible types.
 	v := new(sql.NullInt32)
@@ -256,7 +256,7 @@ func (c Commitment) Value() (driver.Value, error) {
 
 // Scan implements the sql.Scanner interface. NULL table values are scanned as
 // the zero-value Commitment.
-func (c *Commitment) Scan(src interface{}) error {
+func (c *Commitment) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		copy(c[:], src)
@@ -294,7 +294,7 @@ func (pi Preimage) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (pi *Preimage) Scan(src interface{}) error {
+func (pi *Preimage) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		copy(pi[:], src)

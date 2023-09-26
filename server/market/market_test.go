@@ -266,7 +266,7 @@ func randomOrderID() order.OrderID {
 	return id
 }
 
-func newTestMarket(opts ...interface{}) (*Market, *TArchivist, *TAuth, func(), error) {
+func newTestMarket(opts ...any) (*Market, *TArchivist, *TAuth, func(), error) {
 	// The DEX will make MasterCoinLockers for each asset.
 	masterLockerBase := coinlock.NewMasterCoinLocker()
 	bookLockerBase := masterLockerBase.Book()

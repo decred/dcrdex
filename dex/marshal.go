@@ -26,7 +26,7 @@ func (b Bytes) MarshalJSON() ([]byte, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (b *Bytes) Scan(src interface{}) error {
+func (b *Bytes) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		// src may be reused, so create a new slice.

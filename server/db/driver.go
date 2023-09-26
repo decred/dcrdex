@@ -19,7 +19,7 @@ var (
 // Driver is the interface required of all DB drivers. Open should create a
 // DEXArchivist and verify connectivity with the asset's chain server.
 type Driver interface {
-	Open(ctx context.Context, cfg interface{}) (DEXArchivist, error)
+	Open(ctx context.Context, cfg any) (DEXArchivist, error)
 	UseLogger(logger dex.Logger)
 }
 
@@ -38,7 +38,7 @@ func Register(name string, driver Driver) {
 }
 
 // Open loads the named DB driver with the provided configuration.
-func Open(ctx context.Context, name string, cfg interface{}) (DEXArchivist, error) {
+func Open(ctx context.Context, name string, cfg any) (DEXArchivist, error) {
 	driversMtx.Lock()
 	drv, ok := drivers[name]
 	driversMtx.Unlock()

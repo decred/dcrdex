@@ -37,14 +37,14 @@ type DecodedCallData struct {
 	inputs    []decodedArgument
 
 	Name string
-	Args []interface{}
+	Args []any
 }
 
 // decodedArgument is an internal type to represent an argument parsed according
 // to an ABI method signature.
 type decodedArgument struct {
 	soltype abi.Argument
-	value   interface{}
+	value   any
 }
 
 // String implements stringer interface, tries to use the underlying value-type

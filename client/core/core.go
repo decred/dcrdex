@@ -735,7 +735,7 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 
 // signAndRequest signs and sends the request, unmarshaling the response into
 // the provided interface.
-func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result interface{}, timeout time.Duration) error {
+func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result any, timeout time.Duration) error {
 	if dc.acct.locked() {
 		return fmt.Errorf("cannot sign: %s account locked", dc.acct.host)
 	}
@@ -2531,7 +2531,7 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 		}
 	}
 
-	initErr := func(s string, a ...interface{}) (*xcWallet, error) {
+	initErr := func(s string, a ...any) (*xcWallet, error) {
 		_ = wallet.Lock(2 * time.Second) // just try, but don't confuse the user with an error
 		wallet.Disconnect()
 		return nil, fmt.Errorf(s, a...)
@@ -3758,7 +3758,7 @@ func (c *Core) AutoWalletConfig(assetID uint32, walletType string) (map[string]s
 
 // tempDexConnection creates an unauthenticated dexConnection. The caller must
 // dc.connMaster.Disconnect when done with the connection.
-func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnection, error) {
+func (c *Core) tempDexConnection(dexAddr string, certI any) (*dexConnection, error) {
 	host, err := addrHost(dexAddr)
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %w", err)
@@ -3791,7 +3791,7 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 // since a DEX connection is already established and the config is accessible
 // via the User or Exchanges methods. A TLS certificate, certI, can be provided
 // as either a string filename, or []byte file contents.
-func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error) {
+func (c *Core) GetDEXConfig(dexAddr string, certI any) (*Exchange, error) {
 	dc, err := c.tempDexConnection(dexAddr, certI)
 	if err != nil {
 		return nil, err
@@ -3806,7 +3806,7 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 // activity without setting up account keys or communicating account identity
 // with the DEX. DiscoverAccount, Post Bond or Register (deprecated) may be used
 // to set up a trading account for this DEX if required.
-func (c *Core) AddDEX(dexAddr string, certI interface{}) error {
+func (c *Core) AddDEX(dexAddr string, certI any) error {
 	if !c.IsInitialized() { // TODO: Allow adding view-only DEX without init.
 		return fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
@@ -4032,7 +4032,7 @@ func (c *Core) upgradeConnection(dc *dexConnection) {
 // The Tier and BondsPending fields may be consulted to determine if it is still
 // necessary to PostBond (i.e. Tier == 0 && !BondsPending) before trading. The
 // Connected field should be consulted first.
-func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) (*Exchange, bool, error) {
+func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI any) (*Exchange, bool, error) {
 	if !c.IsInitialized() {
 		return nil, false, fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
@@ -4109,7 +4109,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 // pay the registration fee for a certain asset. The dex host is required
 // because the dex server is used as a fallback to determine the current
 // fee rate in case the client wallet is unable to do it.
-func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
+func (c *Core) EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return 0, err
@@ -7520,7 +7520,7 @@ func (c *Core) loadDBTrades(dc *dexConnection) error {
 // readyToTick will be set to true, even if the funding coins for the order could
 // not be found or the audit info could not be loaded.
 func (c *Core) resumeTrade(tracker *trackedTrade, crypter encrypt.Crypter, failed map[uint32]bool, relocks assetMap) bool {
-	notifyErr := func(tracker *trackedTrade, topic Topic, args ...interface{}) {
+	notifyErr := func(tracker *trackedTrade, topic Topic, args ...any) {
 		subject, detail := c.formatDetails(topic, args...)
 		c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrderInternal()))
 	}
@@ -7840,7 +7840,7 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 				continue
 			}
 
-			notifyErr := func(topic Topic, args ...interface{}) {
+			notifyErr := func(topic Topic, args ...any) {
 				subject, detail := c.formatDetails(topic, args...)
 				c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrderInternal()))
 			}
@@ -9513,7 +9513,7 @@ func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) {
 // the response into the provided interface.
 // TODO: Modify to accept a context.Context argument so callers can pass core's
 // context to break out of the reply wait when Core starts shutting down.
-func sendRequest(conn comms.WsConn, route string, request, response interface{}, timeout time.Duration) error {
+func sendRequest(conn comms.WsConn, route string, request, response any, timeout time.Duration) error {
 	reqMsg, err := msgjson.NewRequest(conn.NextID(), route, request)
 	if err != nil {
 		return fmt.Errorf("error encoding %q request: %w", route, err)
@@ -9655,7 +9655,7 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 // string, it will be treated as a filepath and the raw file contents returned.
 // if certI is already a []byte, it is presumed to be the raw file contents, and
 // is returned unmodified.
-func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) {
+func parseCert(host string, certI any, net dex.Network) ([]byte, error) {
 	switch c := certI.(type) {
 	case string:
 		if len(c) == 0 {
@@ -9900,7 +9900,7 @@ func deleteMatchFn(matchesFileStr string) (perMatchFn func(*db.MetaMatch, bool) 
 		return nil, nil, fmt.Errorf("error writing matches CSV: %v", err)
 	}
 	return func(mtch *db.MetaMatch, isSell bool) error {
-		numToStr := func(n interface{}) string {
+		numToStr := func(n any) string {
 			return fmt.Sprintf("%d", n)
 		}
 		base, quote := mtch.MetaData.Base, mtch.MetaData.Quote

@@ -30,13 +30,13 @@ const (
 
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
-func writeJSON(w http.ResponseWriter, thing interface{}) {
+func writeJSON(w http.ResponseWriter, thing any) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
-func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
+func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	b, err := json.MarshalIndent(thing, "", "    ")
 	if err != nil {
