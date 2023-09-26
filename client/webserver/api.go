@@ -439,13 +439,6 @@ func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 
 	if post.FeeBuffer != nil {
 		bondForm.FeeBuffer = *post.FeeBuffer
-	} else {
-		feeBuffer, err := s.bondsFeeBuffer(assetID) // or let wallet use internal feeBuffer?
-		if err != nil {
-			s.writeAPIError(w, err)
-			return
-		}
-		post.FeeBuffer = &feeBuffer
 	}
 
 	_, err = s.core.PostBond(bondForm)
