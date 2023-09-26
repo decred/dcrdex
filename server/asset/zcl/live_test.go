@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
 )
 
@@ -37,7 +38,11 @@ func TestMain(m *testing.M) {
 	// Wrap everything for defers.
 	doIt := func() int {
 		logger := dex.StdOutLogger("ZECTEST", dex.LevelTrace)
-		be, err := NewBackend("", logger, dex.Mainnet)
+		be, err := NewBackend(&asset.BackendConfig{
+			AssetID: BipID,
+			Logger:  logger,
+			Net:     dex.Mainnet,
+		})
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1

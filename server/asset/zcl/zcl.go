@@ -25,7 +25,7 @@ type Driver struct{}
 
 // Setup creates the Zcash backend. Start the backend with its Run method.
 func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
-	return NewBackend(cfg.ConfigPath, cfg.Logger, cfg.Net)
+	return NewBackend(cfg)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -58,10 +58,10 @@ const (
 
 // NewBackend generates the network parameters and creates a zec backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 	var btcParams *chaincfg.Params
 	var addrParams *dexzec.AddressParams
-	switch network {
+	switch cfg.Net {
 	case dex.Mainnet:
 		btcParams = dexzcl.MainNetParams
 		addrParams = dexzec.MainNetAddressParams
@@ -72,7 +72,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		btcParams = dexzcl.RegressionNetParams
 		addrParams = dexzec.RegressionNetAddressParams
 	default:
-		return nil, fmt.Errorf("unknown network ID %v", network)
+		return nil, fmt.Errorf("unknown network ID %v", cfg.Net)
 	}
 
 	// Designate the clone ports. These will be overwritten by any explicit
@@ -83,16 +83,16 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Simnet:  "35768", // zclassic uses 18023 for regtest too. Using our alpha harness port instead.
 	}
 
-	if configPath == "" {
-		configPath = dexbtc.SystemConfigPath("zclassic")
+	if cfg.ConfigPath == "" {
+		cfg.ConfigPath = dexbtc.SystemConfigPath("zclassic")
 	}
 
 	be, err := btc.NewBTCClone(&btc.BackendCloneConfig{
 		Name:        assetName,
 		Segwit:      false,
-		ConfigPath:  configPath,
-		Logger:      logger,
-		Net:         network,
+		ConfigPath:  cfg.ConfigPath,
+		Logger:      cfg.Logger,
+		Net:         cfg.Net,
 		ChainParams: btcParams,
 		Ports:       ports,
 		AddressDecoder: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
@@ -124,6 +124,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		BlockFeeTransactions: blockFeeTransactions,
 		NumericGetRawRPC:     true,
 		ShieldedIO:           shieldedIO,
+		RelayAddr:            cfg.RelayAddr,
 	})
 	if err != nil {
 		return nil, err
