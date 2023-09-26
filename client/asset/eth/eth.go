@@ -368,8 +368,8 @@ type monitoredTx struct {
 	// replacedTx could be set when the tx is created, be immutable, and not
 	// need the mutex, but since Redeem doesn't know if the transaction is a
 	// replacement or a new one, this variable is set in recordReplacementTx.
-	replacedTx       *common.Hash
-	errorsBroadcated uint16
+	replacedTx        *common.Hash
+	errorsBroadcasted uint16
 }
 
 // MarshalBinary marshals a monitoredTx into a byte array.
@@ -4063,8 +4063,8 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 		// We've failed to redeem twice. We can't keep broadcasting txs into the
 		// void. We have to give up. Print a bunch of errors and then report
 		// the redemption as confirmed so we'll stop following it.
-		if monitoredTx.errorsBroadcated < 100 {
-			monitoredTx.errorsBroadcated++
+		if monitoredTx.errorsBroadcasted < 100 {
+			monitoredTx.errorsBroadcasted++
 			return nil, fmt.Errorf("failed to redeem %s swap with secret hash %s twice. not trying again",
 				dex.BipIDSymbol(w.assetID), hex.EncodeToString(secretHash[:]))
 		}
