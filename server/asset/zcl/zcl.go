@@ -24,8 +24,8 @@ import (
 type Driver struct{}
 
 // Setup creates the Zcash backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	return NewBackend(configPath, logger, network)
+func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
+	return NewBackend(cfg.ConfigPath, cfg.Logger, cfg.Net)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
