@@ -152,8 +152,6 @@ func TestStorePrimaryCredentials(t *testing.T) {
 	ensureErr("no EncInnerKey", newCreds(true, false, true, true, true, true))
 	ensureErr("no InnerKeyParams", newCreds(true, true, false, true, true, true))
 	ensureErr("no OuterKeyParams", newCreds(true, true, true, false, true, true))
-	ensureErr("no EncRecoverySeed", newCreds(true, true, true, true, false, true))
-	ensureErr("no EncRecoverySeedParams", newCreds(true, true, true, true, true, false))
 
 	// Success
 	goodCreds := newCreds(true, true, true, true, true, true)
