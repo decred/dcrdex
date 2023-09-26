@@ -69,58 +69,57 @@ var (
 	credentialsBucket      = []byte("credentials")
 
 	// value keys
-	versionKey               = []byte("version")
-	linkedKey                = []byte("linked")
-	feeProofKey              = []byte("feecoin")
-	statusKey                = []byte("status")
-	baseKey                  = []byte("base")
-	quoteKey                 = []byte("quote")
-	orderKey                 = []byte("order")
-	matchKey                 = []byte("match")
-	orderIDKey               = []byte("orderID")
-	matchIDKey               = []byte("matchID")
-	proofKey                 = []byte("proof")
-	activeKey                = []byte("active")
-	bondKey                  = []byte("bond")
-	confirmedKey             = []byte("confirmed")
-	refundedKey              = []byte("refunded")
-	lockTimeKey              = []byte("lockTime")
-	dexKey                   = []byte("dex")
-	updateTimeKey            = []byte("utime")
-	accountKey               = []byte("account")
-	balanceKey               = []byte("balance")
-	walletKey                = []byte("wallet")
-	changeKey                = []byte("change")
-	noteKey                  = []byte("note")
-	stampKey                 = []byte("stamp")
-	severityKey              = []byte("severity")
-	ackKey                   = []byte("ack")
-	swapFeesKey              = []byte("swapFees")
-	maxFeeRateKey            = []byte("maxFeeRate")
-	redeemMaxFeeRateKey      = []byte("redeemMaxFeeRate")
-	redemptionFeesKey        = []byte("redeemFees")
-	fundingFeesKey           = []byte("fundingFees")
-	accelerationsKey         = []byte("accelerations")
-	typeKey                  = []byte("type")
-	seedGenTimeKey           = []byte("seedGenTime")
-	encSeedKey               = []byte("encSeed")
-	encInnerKeyKey           = []byte("encInnerKey")
-	innerKeyParamsKey        = []byte("innerKeyParams")
-	outerKeyParamsKey        = []byte("outerKeyParams")
-	encRecoverySeedKey       = []byte("encRecoverySeedKey")
-	encRecoverySeedParamsKey = []byte("encRecoverySeedParams")
-	legacyKeyParamsKey       = []byte("keyParams")
-	epochDurKey              = []byte("epochDur")
-	fromVersionKey           = []byte("fromVersion")
-	toVersionKey             = []byte("toVersion")
-	fromSwapConfKey          = []byte("fromSwapConf")
-	toSwapConfKey            = []byte("toSwapConf")
-	optionsKey               = []byte("options")
-	redemptionReservesKey    = []byte("redemptionReservesKey")
-	refundReservesKey        = []byte("refundReservesKey")
-	disabledRateSourceKey    = []byte("disabledRateSources")
-	walletDisabledKey        = []byte("walletDisabled")
-	programKey               = []byte("program")
+	versionKey            = []byte("version")
+	linkedKey             = []byte("linked")
+	feeProofKey           = []byte("feecoin")
+	statusKey             = []byte("status")
+	baseKey               = []byte("base")
+	quoteKey              = []byte("quote")
+	orderKey              = []byte("order")
+	matchKey              = []byte("match")
+	orderIDKey            = []byte("orderID")
+	matchIDKey            = []byte("matchID")
+	proofKey              = []byte("proof")
+	activeKey             = []byte("active")
+	bondKey               = []byte("bond")
+	confirmedKey          = []byte("confirmed")
+	refundedKey           = []byte("refunded")
+	lockTimeKey           = []byte("lockTime")
+	dexKey                = []byte("dex")
+	updateTimeKey         = []byte("utime")
+	accountKey            = []byte("account")
+	balanceKey            = []byte("balance")
+	walletKey             = []byte("wallet")
+	changeKey             = []byte("change")
+	noteKey               = []byte("note")
+	stampKey              = []byte("stamp")
+	severityKey           = []byte("severity")
+	ackKey                = []byte("ack")
+	swapFeesKey           = []byte("swapFees")
+	maxFeeRateKey         = []byte("maxFeeRate")
+	redeemMaxFeeRateKey   = []byte("redeemMaxFeeRate")
+	redemptionFeesKey     = []byte("redeemFees")
+	fundingFeesKey        = []byte("fundingFees")
+	accelerationsKey      = []byte("accelerations")
+	typeKey               = []byte("type")
+	seedGenTimeKey        = []byte("seedGenTime")
+	encSeedKey            = []byte("encSeed")
+	encInnerKeyKey        = []byte("encInnerKey")
+	innerKeyParamsKey     = []byte("innerKeyParams")
+	outerKeyParamsKey     = []byte("outerKeyParams")
+	credsVersionKey       = []byte("credsVersion")
+	legacyKeyParamsKey    = []byte("keyParams")
+	epochDurKey           = []byte("epochDur")
+	fromVersionKey        = []byte("fromVersion")
+	toVersionKey          = []byte("toVersion")
+	fromSwapConfKey       = []byte("fromSwapConf")
+	toSwapConfKey         = []byte("toSwapConf")
+	optionsKey            = []byte("options")
+	redemptionReservesKey = []byte("redemptionReservesKey")
+	refundReservesKey     = []byte("refundReservesKey")
+	disabledRateSourceKey = []byte("disabledRateSources")
+	walletDisabledKey     = []byte("walletDisabled")
+	programKey            = []byte("program")
 
 	// values
 	byteTrue   = encode.ByteTrue
@@ -359,21 +358,29 @@ func (db *BoltDB) Recrypt(creds *dexdb.PrimaryCredentials, oldCrypter, newCrypte
 			if err != nil {
 				return err
 			}
-			if len(acctInfo.LegacyEncKey) == 0 {
-				db.log.Warnf("no LegacyEncKey for %s during Recrypt?", string(hostB))
-				return nil
-			}
-			privB, err := oldCrypter.Decrypt(acctInfo.LegacyEncKey)
-			if err != nil {
-				return err
+			if len(acctInfo.LegacyEncKey) != 0 {
+				privB, err := oldCrypter.Decrypt(acctInfo.LegacyEncKey)
+				if err != nil {
+					return err
+				}
+
+				acctInfo.LegacyEncKey, err = newCrypter.Encrypt(privB)
+				if err != nil {
+					return err
+				}
+				acctUpdates[acctInfo.Host] = acctInfo.LegacyEncKey
+			} else if len(acctInfo.EncKeyV2) > 0 {
+				privB, err := oldCrypter.Decrypt(acctInfo.EncKeyV2)
+				if err != nil {
+					return err
+				}
+				acctInfo.EncKeyV2, err = newCrypter.Encrypt(privB)
+				if err != nil {
+					return err
+				}
+				acctUpdates[acctInfo.Host] = acctInfo.EncKeyV2
 			}
 
-			acctInfo.LegacyEncKey, err = newCrypter.Encrypt(privB)
-			if err != nil {
-				return err
-			}
-
-			acctUpdates[acctInfo.Host] = acctInfo.LegacyEncKey
 			return acct.Put(accountKey, acctInfo.Encode())
 		})
 		if err != nil {
@@ -411,12 +418,6 @@ func validateCreds(creds *dexdb.PrimaryCredentials) error {
 	if len(creds.OuterKeyParams) == 0 {
 		return errors.New("OuterKeyParams not set")
 	}
-	if len(creds.EncRecoverySeed) == 0 {
-		return errors.New("EncRecoverySeed not set")
-	}
-	if len(creds.EncRecoverySeedParams) == 0 {
-		return errors.New("EncRecoveryKeyParams not set")
-	}
 	return nil
 }
 
@@ -430,13 +431,18 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 		if bkt.Stats().KeyN == 0 {
 			return dexdb.ErrNoCredentials
 		}
+
+		versionB := getCopy(bkt, credsVersionKey)
+		if len(versionB) != 2 {
+			versionB = []byte{0x00, 0x00}
+		}
+
 		creds = &dexdb.PrimaryCredentials{
-			EncSeed:               getCopy(bkt, encSeedKey),
-			EncInnerKey:           getCopy(bkt, encInnerKeyKey),
-			InnerKeyParams:        getCopy(bkt, innerKeyParamsKey),
-			OuterKeyParams:        getCopy(bkt, outerKeyParamsKey),
-			EncRecoverySeed:       getCopy(bkt, encRecoverySeedKey),
-			EncRecoverySeedParams: getCopy(bkt, encRecoverySeedParamsKey),
+			EncSeed:        getCopy(bkt, encSeedKey),
+			EncInnerKey:    getCopy(bkt, encInnerKeyKey),
+			InnerKeyParams: getCopy(bkt, innerKeyParamsKey),
+			OuterKeyParams: getCopy(bkt, outerKeyParamsKey),
+			Version:        intCoder.Uint16(versionB),
 		}
 		return nil
 	})
@@ -453,8 +459,7 @@ func (db *BoltDB) setCreds(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials) error 
 		put(encInnerKeyKey, creds.EncInnerKey).
 		put(innerKeyParamsKey, creds.InnerKeyParams).
 		put(outerKeyParamsKey, creds.OuterKeyParams).
-		put(encRecoverySeedKey, creds.EncRecoverySeed).
-		put(encRecoverySeedParamsKey, creds.EncRecoverySeedParams).
+		put(credsVersionKey, uint16Bytes(creds.Version)).
 		err()
 }
 

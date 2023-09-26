@@ -64,12 +64,11 @@ func RandomBalance() *asset.Balance {
 
 func RandomPrimaryCredentials() *db.PrimaryCredentials {
 	return &db.PrimaryCredentials{
-		EncSeed:               randBytes(10),
-		EncInnerKey:           randBytes(10),
-		InnerKeyParams:        randBytes(10),
-		OuterKeyParams:        randBytes(10),
-		EncRecoverySeed:       randBytes(10),
-		EncRecoverySeedParams: randBytes(10),
+		EncSeed:        randBytes(10),
+		EncInnerKey:    randBytes(10),
+		InnerKeyParams: randBytes(10),
+		OuterKeyParams: randBytes(10),
+		Version:        1,
 	}
 }
 

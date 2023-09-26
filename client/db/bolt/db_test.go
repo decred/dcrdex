@@ -139,12 +139,6 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		if outerParams {
 			creds.OuterKeyParams = []byte("OuterKeyParams")
 		}
-		if encRecoverySeed {
-			creds.EncRecoverySeed = []byte("EncRecoverySeed")
-		}
-		if encRecoverySeedP {
-			creds.EncRecoverySeedParams = []byte("EncRecoverySeedParams")
-		}
 		return creds
 	}
 
@@ -185,12 +179,6 @@ func TestStorePrimaryCredentials(t *testing.T) {
 	}
 	if !bytes.Equal(reCreds.OuterKeyParams, goodCreds.OuterKeyParams) {
 		t.Fatalf("OuterKeyParams wrong, wanted %x, got %x", goodCreds.OuterKeyParams, reCreds.OuterKeyParams)
-	}
-	if !bytes.Equal(reCreds.EncRecoverySeed, goodCreds.EncRecoverySeed) {
-		t.Fatalf("EncRecoverySeed wrong, wanted %x, got %x", goodCreds.EncRecoverySeed, reCreds.EncRecoverySeed)
-	}
-	if !bytes.Equal(reCreds.EncRecoverySeedParams, goodCreds.EncRecoverySeedParams) {
-		t.Fatalf("EncRecoverySeedParams wrong, wanted %x, got %x", goodCreds.EncRecoverySeedParams, reCreds.EncRecoverySeedParams)
 	}
 }
 

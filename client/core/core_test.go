@@ -7272,17 +7272,6 @@ func TestResetAppPass(t *testing.T) {
 	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return rig.crypter, crypter.recryptErr }
 
 	tCore := rig.core
-
-	rig.core.credentials.EncRecoverySeed = nil // trigger cred update
-	err := tCore.Login(tPW)
-	if err != nil {
-		t.Fatalf("Unexpected error during login: %v", err)
-	}
-
-	if tCore.credentials.EncRecoverySeed == nil {
-		t.Fatal("App Password recovery seed was not updated for first login")
-	}
-
 	seed, err := tCore.ExportSeed(tPW)
 	if err != nil {
 		t.Fatalf("seed export failed: %v", err)
