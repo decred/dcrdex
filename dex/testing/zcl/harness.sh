@@ -81,7 +81,10 @@ rpcport=${ALPHA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 # Activate all the things.
 nuparams=5ba81b19:1
-nuparams=76b809bb:1
+nuparams=76b809bb:2
+# These upgrades are busted. Waiting for an upstream fix.
+# nuparams=821a451c:3
+# nuparams=930b540d:4
 EOF
 
 cat > "${BETA_DIR}/beta.conf" <<EOF
@@ -92,7 +95,10 @@ regtest=1
 rpcport=${BETA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
-nuparams=76b809bb:1
+nuparams=76b809bb:2
+# These upgrades are busted. Waiting for an upstream fix.
+# nuparams=821a451c:3
+# nuparams=930b540d:4
 EOF
 
 cat > "${DELTA_DIR}/delta.conf" <<EOF
@@ -102,7 +108,10 @@ regtest=1
 rpcport=${DELTA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
-nuparams=76b809bb:1
+nuparams=76b809bb:2
+# These upgrades are busted. Waiting for an upstream fix.
+# nuparams=821a451c:3
+# nuparams=930b540d:4
 EOF
 
 cat > "${GAMMA_DIR}/gamma.conf" <<EOF
@@ -112,7 +121,10 @@ regtest=1
 rpcport=${GAMMA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
-nuparams=76b809bb:1
+nuparams=76b809bb:2
+# These upgrades are busted. Waiting for an upstream fix.
+# nuparams=821a451c:3
+# nuparams=930b540d:4
 EOF
 
 ################################################################################
@@ -198,7 +210,7 @@ cat > "./start-wallet" <<EOF
 
 mkdir ${NODES_ROOT}/\$1
 
-printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:1\n" > ${NODES_ROOT}/\$1/\$1.conf
+printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:2\n#nuparams=821a451c:3\n#nuparams=930b540d:4\n" > ${NODES_ROOT}/\$1/\$1.conf
 
 ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -regtest=1 -conf=\$1.conf \

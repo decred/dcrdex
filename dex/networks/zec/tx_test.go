@@ -233,7 +233,7 @@ func TestV5SigDigest(t *testing.T) {
 		t.Fatalf("wrong digest")
 	}
 
-	sd, err := tx.SignatureDigest(0, txscript.SigHashAll, nil, []int64{prevValue}, [][]byte{prevScript})
+	sd, err := tx.SignatureDigest(0, txscript.SigHashAll, nil, []int64{prevValue}, [][]byte{prevScript}, false)
 	if err != nil {
 		t.Fatalf("transparentSigDigest error: %v", err)
 	}
@@ -284,13 +284,13 @@ func TestV4SigDigest(t *testing.T) {
 	// After fixing the vector's preimage, the sighash obviously changed, but
 	// I'll leave this here to maintain expected behavior in case of future code
 	// updates.
-	expSighash, _ := hex.DecodeString("f27411aa9bd02879181c763a80bdb6f9ea9158f0de71757e7e12ed17760ebe3f")
-	h, err := tx.SignatureDigest(0, txscript.SigHashAll, script, vals, nil)
+	expSighash, _ := hex.DecodeString("a358eb2ce8b214facba92761be09cc3e889e91a2e301146e8e40b5a6417da3d8")
+	h, err := tx.SignatureDigest(0, txscript.SigHashAll, script, vals, nil, false)
 	if err != nil {
 		t.Fatalf("SignatureDigest error: %v", err)
 	}
 	if !bytes.Equal(expSighash, h[:]) {
 		fmt.Println("sighash:", hex.EncodeToString(h[:]))
-		t.Fatal("wrong preimage")
+		t.Fatal("wrong sighash")
 	}
 }

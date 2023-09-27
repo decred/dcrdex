@@ -52,6 +52,9 @@ var (
 	ConsensusBranchNU5     = [4]byte{0xB4, 0xD0, 0xD6, 0xC2} // 1687104, testnet: 1842420
 	ConsensusBranchSapling = [4]byte{0xBB, 0x09, 0xB8, 0x76}
 
+	// Zclassic only
+	ConsensusBranchButtercup = [4]byte{0x0d, 0x54, 0x0b, 0x93}
+
 	emptySaplingDigest = [32]byte{0x6f, 0x2f, 0xc8, 0xf9, 0x8f, 0xea, 0xfd, 0x94,
 		0xe7, 0x4a, 0x0d, 0xf4, 0xbe, 0xd7, 0x43, 0x91, 0xee, 0x0b, 0x5a, 0x69,
 		0x94, 0x5e, 0x4c, 0xed, 0x8c, 0xa8, 0xa0, 0x95, 0x20, 0x6f, 0x00, 0xae}
@@ -113,9 +116,13 @@ func (tx *Tx) txHashV5() (_ chainhash.Hash, err error) {
 
 // SignatureDigest produces a hash of tx data suitable for signing.
 // SignatureDigest only works correctly for unshielded version 5 transactions.
-func (tx *Tx) SignatureDigest(vin int, hashType txscript.SigHashType, script []byte, vals []int64, prevScripts [][]byte) (_ [32]byte, err error) {
+// isSimnetZCL is hack: https://github.com/ZclassicCommunity/zclassic/issues/83
+func (tx *Tx) SignatureDigest(
+	vin int, hashType txscript.SigHashType, script []byte, vals []int64, prevScripts [][]byte, isSimnetZCL bool,
+) (_ [32]byte, err error) {
+
 	if tx.Version == 4 {
-		return tx.txDigestV4(hashType, vin, vals, script)
+		return tx.txDigestV4(hashType, vin, vals, script, isSimnetZCL)
 	}
 	td, err := tx.transparentSigDigestV5(vin, hashType, vals, prevScripts)
 	if err != nil {
@@ -154,14 +161,19 @@ func (tx *Tx) headerDigestV5() ([32]byte, error) {
 	return blake2bHash(b, []byte(pkHeader))
 }
 
-// ZIP-0243
-func (tx *Tx) txDigestV4(hashType txscript.SigHashType, vin int, vals []int64, script []byte) (_ chainhash.Hash, err error) {
+// Zclassic only. Based on ZIP-0243, but uses ConsensusBranchButtercup from
+// Zclassic.
+// isSimnet is hack for https://github.com/ZclassicCommunity/zclassic/issues/83
+func (tx *Tx) txDigestV4(hashType txscript.SigHashType, vin int, vals []int64, script []byte, isSimnet bool) (_ chainhash.Hash, err error) {
 	b, err := tx.sighashPreimageV4(hashType, vin, vals, script)
 	if err != nil {
 		return
 	}
-
-	h, err := blake2bHash(b, append([]byte("ZcashSigHash"), ConsensusBranchSapling[:]...))
+	consensusBranchID := ConsensusBranchButtercup
+	if isSimnet {
+		consensusBranchID = ConsensusBranchSapling
+	}
+	h, err := blake2bHash(b, append([]byte("ZcashSigHash"), consensusBranchID[:]...))
 	if err != nil {
 		return
 	}
@@ -386,7 +398,6 @@ func (tx *Tx) preimageTxInSig(idx int, prevVal int64, script []byte) ([]byte, er
 	b.Write(uint32Bytes(txIn.Sequence))
 
 	return b.Bytes(), nil
-
 }
 
 // Bytes encodes the receiver to w using the bitcoin protocol encoding.

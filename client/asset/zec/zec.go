@@ -592,7 +592,7 @@ func signTx(btcTx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHa
 
 	tx := zecTx(btcTx)
 
-	sigHash, err := tx.SignatureDigest(idx, hashType, pkScript, amts, prevScripts)
+	sigHash, err := tx.SignatureDigest(idx, hashType, pkScript, amts, prevScripts, false)
 	if err != nil {
 		return nil, fmt.Errorf("sighash calculation error: %v", err)
 	}

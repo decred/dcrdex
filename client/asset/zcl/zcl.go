@@ -216,7 +216,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 			return dexzec.EncodeAddress(addr, addrParams)
 		},
 		TxSizeCalculator: dexzec.CalcTxSize,
-		NonSegwitSigner:  signTx,
+		NonSegwitSigner: func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, vals []int64, prevScripts [][]byte) ([]byte, error) {
+			return signTx(tx, idx, subScript, hashType, key, vals, prevScripts, net == dex.Simnet)
+		},
 		TxDeserializer: func(b []byte) (*wire.MsgTx, error) {
 			zecTx, err := dexzec.DeserializeTx(b)
 			if err != nil {
@@ -266,10 +268,10 @@ func zecTx(tx *wire.MsgTx) *dexzec.Tx {
 // signTx signs the transaction input with Zcash's BLAKE-2B sighash digest.
 // Won't work with shielded or blended transactions.
 func signTx(btcTx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType,
-	key *btcec.PrivateKey, amts []int64, prevScripts [][]byte) ([]byte, error) {
+	key *btcec.PrivateKey, amts []int64, prevScripts [][]byte, isSimnet bool) ([]byte, error) {
 
 	tx := zecTx(btcTx)
-	sigHash, err := tx.SignatureDigest(idx, hashType, pkScript, amts, prevScripts)
+	sigHash, err := tx.SignatureDigest(idx, hashType, pkScript, amts, prevScripts, isSimnet)
 	if err != nil {
 		return nil, fmt.Errorf("sighash calculation error: %v", err)
 	}
