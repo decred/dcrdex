@@ -82,9 +82,12 @@ exportdir=${SOURCE_DIR}
 # Activate all the things.
 nuparams=5ba81b19:1
 nuparams=76b809bb:2
-# These upgrades are busted. Waiting for an upstream fix.
-# nuparams=821a451c:3
-# nuparams=930b540d:4
+nuparams=821a451c:3
+nuparams=930b540d:4
+eqparams=5ba81b19:48:5
+eqparams=76b809bb:48:5
+eqparams=821a451c:48:5
+eqparams=930b540d:48:5
 EOF
 
 cat > "${BETA_DIR}/beta.conf" <<EOF
@@ -96,9 +99,12 @@ rpcport=${BETA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
 nuparams=76b809bb:2
-# These upgrades are busted. Waiting for an upstream fix.
-# nuparams=821a451c:3
-# nuparams=930b540d:4
+nuparams=821a451c:3
+nuparams=930b540d:4
+eqparams=5ba81b19:48:5
+eqparams=76b809bb:48:5
+eqparams=821a451c:48:5
+eqparams=930b540d:48:5
 EOF
 
 cat > "${DELTA_DIR}/delta.conf" <<EOF
@@ -109,9 +115,12 @@ rpcport=${DELTA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
 nuparams=76b809bb:2
-# These upgrades are busted. Waiting for an upstream fix.
-# nuparams=821a451c:3
-# nuparams=930b540d:4
+nuparams=821a451c:3
+nuparams=930b540d:4
+eqparams=5ba81b19:48:5
+eqparams=76b809bb:48:5
+eqparams=821a451c:48:5
+eqparams=930b540d:48:5
 EOF
 
 cat > "${GAMMA_DIR}/gamma.conf" <<EOF
@@ -122,9 +131,12 @@ rpcport=${GAMMA_RPC_PORT}
 exportdir=${SOURCE_DIR}
 nuparams=5ba81b19:1
 nuparams=76b809bb:2
-# These upgrades are busted. Waiting for an upstream fix.
-# nuparams=821a451c:3
-# nuparams=930b540d:4
+nuparams=821a451c:3
+nuparams=930b540d:4
+eqparams=5ba81b19:48:5
+eqparams=76b809bb:48:5
+eqparams=821a451c:48:5
+eqparams=930b540d:48:5
 EOF
 
 ################################################################################
@@ -210,7 +222,7 @@ cat > "./start-wallet" <<EOF
 
 mkdir ${NODES_ROOT}/\$1
 
-printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:2\n#nuparams=821a451c:3\n#nuparams=930b540d:4\n" > ${NODES_ROOT}/\$1/\$1.conf
+printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:2\nnuparams=821a451c:3\nnuparams=930b540d:4\n" > ${NODES_ROOT}/\$1/\$1.conf
 
 ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -regtest=1 -conf=\$1.conf \

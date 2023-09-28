@@ -233,7 +233,7 @@ func TestV5SigDigest(t *testing.T) {
 		t.Fatalf("wrong digest")
 	}
 
-	sd, err := tx.SignatureDigest(0, txscript.SigHashAll, nil, []int64{prevValue}, [][]byte{prevScript}, false)
+	sd, err := tx.SignatureDigest(0, txscript.SigHashAll, nil, []int64{prevValue}, [][]byte{prevScript})
 	if err != nil {
 		t.Fatalf("transparentSigDigest error: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestV4SigDigest(t *testing.T) {
 	// I'll leave this here to maintain expected behavior in case of future code
 	// updates.
 	expSighash, _ := hex.DecodeString("a358eb2ce8b214facba92761be09cc3e889e91a2e301146e8e40b5a6417da3d8")
-	h, err := tx.SignatureDigest(0, txscript.SigHashAll, script, vals, nil, false)
+	h, err := tx.SignatureDigest(0, txscript.SigHashAll, script, vals, nil)
 	if err != nil {
 		t.Fatalf("SignatureDigest error: %v", err)
 	}

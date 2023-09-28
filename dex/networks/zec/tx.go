@@ -116,13 +116,12 @@ func (tx *Tx) txHashV5() (_ chainhash.Hash, err error) {
 
 // SignatureDigest produces a hash of tx data suitable for signing.
 // SignatureDigest only works correctly for unshielded version 5 transactions.
-// isSimnetZCL is hack: https://github.com/ZclassicCommunity/zclassic/issues/83
 func (tx *Tx) SignatureDigest(
-	vin int, hashType txscript.SigHashType, script []byte, vals []int64, prevScripts [][]byte, isSimnetZCL bool,
+	vin int, hashType txscript.SigHashType, script []byte, vals []int64, prevScripts [][]byte,
 ) (_ [32]byte, err error) {
 
 	if tx.Version == 4 {
-		return tx.txDigestV4(hashType, vin, vals, script, isSimnetZCL)
+		return tx.txDigestV4(hashType, vin, vals, script)
 	}
 	td, err := tx.transparentSigDigestV5(vin, hashType, vals, prevScripts)
 	if err != nil {
@@ -164,15 +163,15 @@ func (tx *Tx) headerDigestV5() ([32]byte, error) {
 // Zclassic only. Based on ZIP-0243, but uses ConsensusBranchButtercup from
 // Zclassic.
 // isSimnet is hack for https://github.com/ZclassicCommunity/zclassic/issues/83
-func (tx *Tx) txDigestV4(hashType txscript.SigHashType, vin int, vals []int64, script []byte, isSimnet bool) (_ chainhash.Hash, err error) {
+func (tx *Tx) txDigestV4(
+	hashType txscript.SigHashType, vin int, vals []int64, script []byte,
+) (_ chainhash.Hash, err error) {
+
 	b, err := tx.sighashPreimageV4(hashType, vin, vals, script)
 	if err != nil {
 		return
 	}
 	consensusBranchID := ConsensusBranchButtercup
-	if isSimnet {
-		consensusBranchID = ConsensusBranchSapling
-	}
 	h, err := blake2bHash(b, append([]byte("ZcashSigHash"), consensusBranchID[:]...))
 	if err != nil {
 		return
