@@ -61,8 +61,8 @@ ICON_BUILDDIR="${DEB_DIR}${ICON_TARGETDIR}"
 DESKTOPICON_BUILDPATH="${ICON_BUILDDIR}/${ICON_FILENAME}"
 
 # Prepare the directory structure.
-rm -r "${BUILD_DIR}"
-mkdir -p "${CONTROL_DIR}"
+rm -fr "${BUILD_DIR}"
+mkdir -p -m 0755 "${CONTROL_DIR}"
 mkdir -p "${SRC_BUILDDIR}" # subdir of BIN_BUILDDIR
 mkdir -p "${DOT_DESKTOP_BUILDDIR}"
 mkdir -p "${ICON_BUILDDIR}"
