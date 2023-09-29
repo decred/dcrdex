@@ -6,7 +6,7 @@ To add a new locale, the translations must be defined in the following locations
 
 1. HTML strings (client/webserver/locales)
 2. Notification strings (client/core/locale_ntfn.go)
-3. JavaScript strings (client/webserver/site/src/js/locales.js)
+3. JavaScript strings (client/webserver/site/src/js/locales.ts)
 
 If you decide to do the following for a different language, please see the [Contribution Guide](https://github.com/decred/dcrdex/wiki/Contribution-Guide) for help with the github workflow.
 
@@ -33,7 +33,7 @@ Once the translations are added to **client/core/locale_ntfn.go**, the new map i
 
 ## Step 3 - JavaScript
 
-To update the JavaScript strings translation in [client/webserver/site/src/js/locales.js](https://github.com/decred/dcrdex/blob/master/client/webserver/site/src/js/locales.js), add or modify the translation in the appropriate language object.
+To update the JavaScript strings translation in [client/webserver/site/src/js/locales.ts](https://github.com/decred/dcrdex/blob/master/client/webserver/site/src/js/locales.ts), add or modify the translation in the appropriate language object.
 
 When creating a dictionary for a new language, create the language dictionary object (e.g `export const ar: Locale = { ... }`) then add strings translation corresponding to the English text in the `enUS` object at the top of the same file.  Finally, the new object should be listed in the `const localesMap` at the end of the file.
 

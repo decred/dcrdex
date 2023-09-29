@@ -137,74 +137,74 @@
             <div id="stakingBox" class="position-relative m-3 w-100 d-flex align-items-stretch">
               <div class="d-flex flex-column align-items-stretch flex-grow-1">
                 <div class="flex-center fs24 brdrbottom px-2 py-1">
-                  <span class="ico-ticket me-2"></span>Staking
+                  <span class="ico-ticket me-2"></span>[[[Staking]]]
                 </div>
                 <div id="stakingSummary" class="d-flex align-items-stretch flex-grow-1">
                   <div class="d-flex flex-column align-items-stretch justify-content-center fs14 flex-grow-1 px-3">
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center grey">Active tickets</div>
+                      <div class="flex-center grey">[[[Active tickets]]]</div>
                       <div id="stakingTicketCount" class="flex-center demi"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center grey">Tickets bought</div>
+                      <div class="flex-center grey">[[[Tickets bought]]]</div>
                       <div id="totalTicketCount" class="flex-center demi"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center grey">Total rewards</div>
+                      <div class="flex-center grey">[[[Total rewards]]]</div>
                       <div id="totalTicketRewards" class="flex-center demi"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center grey">Votes cast</div>
+                      <div class="flex-center grey">[[[Votes cast]]]</div>
                       <div id="totalTicketVotes" class="flex-center demi"></div>
                     </div>
                     <div id="vspDisplayBox" class="d-flex justify-content-between align-items-stretch">
-                      <div class="flex-center grey">VSP</div>
+                      <div class="flex-center grey">[[[VSP]]]</div>
                       <div id="vspDisplay" class="flex-center demi pointer hoverbg">
                         <span id="vspEditIcon" class="ico-edit me-2"></span>
                         <span id="vspURL"></span>
                       </div>
                     </div>
                     <div id="pickVSP" class="fs16 p-2 flex-center">
-                      <button id="showVSPs" class="fs15 hoverbg p-1">Select a Voting Service Provider</button>
+                      <button id="showVSPs" class="fs15 hoverbg p-1">[[[select_vsp_from_list]]]</button>
                     </div>
                   </div>
                   <div id="setVotes" class="flex-center p-3 flex-column brdrleft hoverbg pointer">
                     <div class="flex-center fs18">
                       <span class="fs22 ico-check"></span>
-                      <span class="ms-2 fs18">Set Votes</span>
+                      <span class="ms-2 fs18">[[[Set Votes]]]</span>
                     </div>
                     <hr class="dashed my-1 w-75">
                     <div class="flex-center flex-column fs14">
-                      <span><span id="stakingAgendaCount"></span> agendas</span>
-                      <span><span id="stakingTspendCount"></span> treasury spends</span>
+                      <span><span id="stakingAgendaCount"></span> [[[agendas]]]</span>
+                      <span><span id="stakingTspendCount"></span> [[[treasury spends]]]</span>
                     </div>
                   </div>
                 </div>
                 <div id="stakingErr" class="text-center fs16 p-2 errcolor"></div>
                 <div id="stakingRpcSpvMsg" class="flex-center fs16 py-1 px-2">
-                  <span class="ico-info fs12 me-2"></span>Staking unavailable for RPC wallets using SPV
+                  <span class="ico-info fs12 me-2"></span>[[[staking_unavailable_for_rpc]]]
                 </div>
                 {{- /* PURCHASE TICKETS */ -}}
                 <div id="purchaseTicketsBox" class="w-100 d-flex align-items-stretch brdrtop fs18">
                   <div id="purchaseTicketsBttn" class="hoverbg pointer flex-center flex-grow-1 brdrright p-2">
-                    <span><span class="ico-ticket me-1"></span> Purchase Tickets</span>
+                    <span><span class="ico-ticket me-1"></span> [[[Purchase Tickets]]]</span>
                   </div>
                   <div id="ticketHistory" class="hoverbg pointer flex-center flex-grow-1 p-2">
-                    <span><span class="ico-textfile me-1"></span> Tickets</span>
+                    <span><span class="ico-textfile me-1"></span> [[[Tickets]]]</span>
                   </div>
                 </div>
               </div>
               <div id="ticketPriceBox" class="flex-center p-3 brdrleft">
                 <div class="d-flex flex-column">
                   <div>
-                    <span class="fs14 demi lh1 pb-1">Ticket Price</span>
+                    <span class="fs14 demi lh1 pb-1">[[[Ticket Price]]]</span>
                     <span class="d-flex align-items-end">
                       <span class="fs18" id="ticketPrice"></span>
                     </span>
                   </div>
                   <hr class="dotted my-3">
                   <div>
-                    <span class="fs14 demi lh1 pb-1">Vote Reward</span>
+                    <span class="fs14 demi lh1 pb-1">[[[Vote Reward]]]</span>
                     <span class="d-flex align-items-end">
                       <span class="fs18" id="votingSubsidy"></span>
                     </span>
@@ -346,7 +346,7 @@
       <span class="mt-2 d-hide">~<span id="sendValue" class="mx-1"></span>USD</span>
       <div id="toggleSubtract" class="form-check pt-2">
           <input class="form-check-input" type="checkbox" id="subtractCheckBox">
-          <label for="subtractCheckBox" class="form-check-label ps-1">Subtract fees from amount sent.</label>
+          <label for="subtractCheckBox" class="form-check-label ps-1">[[[subtract_fees_from_amount]]]</label>
       </div>
       <div id="maxSendDisplay" class="mt-3">
         <hr class="dashed mt-2">
@@ -412,7 +412,7 @@
          ~<span id="balanceAfterSendFiat" class="mx-1"></span>USD
         </span>
       </div>
-      <div id="txFeeNotAvailable" class="d-hide" data-tooltip="Fee unavailable">[[[txfee_not_available]]]
+      <div id="txFeeNotAvailable" class="d-hide" data-tooltip="[[[Fee unavailable]]]">[[[txfee_not_available]]]
         <span class="ico-info errcolor"></span>
       </div>
       <hr class="dashed my-4">
@@ -627,7 +627,7 @@
         [[[recover_warning]]]
       </div>
       <div class="text-left mt-2">
-        <label for="recoverWalletPW" class="form-label pl-1 mb-1">Password</label>
+        <label for="recoverWalletPW" class="form-label pl-1 mb-1">[[[Password]]]</label>
         <input type="password" class="form-control select" id="recoverWalletPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end mt-4">
@@ -680,7 +680,7 @@
           <div>
             <span data-tmpl="seed" class="mono fs14"></span>
           </div>
-          <span>Instructions:</span>
+          <span>[[[Instructions:]]]</span>
           <br />
           <span data-tmpl="instructions" class="sans-light text-break preline"></span>
           <hr />
@@ -700,14 +700,14 @@
       <div class="form-closer hoverbg">
         <span class="ico-cross"></span>
       </div>
-      <div class="fs24 sans-light">Select a Voting Service Provider</div>
+      <div class="fs24 sans-light">[[[select_vsp_from_list]]]</div>
       <hr class="dashed my-2">
       <table id="vspPickerTable">
         <thead>
           <tr>
-            <th>URL</th>
-            <th>Fee Rate (%)</th>
-            <th>Live Tickets</th>
+            <th>[[[URL]]]</th>
+            <th>[[[fee_rate_percent]]]</th>
+            <th>[[[Live Tickets]]]</th>
           </tr>
         </thead>
         <tbody id="vspPickerList">
@@ -719,7 +719,7 @@
         </tbody>
       </table>
       <p class="mt-3">
-        <label for="customVspUrl">Or add custom VSP URL:</label>
+        <label for="customVspUrl">[[[Or add custom VSP URL:]]]</label>
       </p>
        <div class="d-flex align-items-stretch w-100">
         <input 
@@ -727,24 +727,24 @@
           type="url" 
           class="flex-grow-1"
           placeholder="https://" 
-          aria-label="Custom VSP URL"
+          aria-label="[[[Custom VSP URL]]]"
         >
-        <button id="customVspSubmit" class="btn btn-outline-secondary" type="button">Add</button>
+        <button id="customVspSubmit" class="btn btn-outline-secondary" type="button">[[[Add]]]</button>
       </div>
     </form>
 
     {{- /* PURCHASE TICKETS */ -}}
     <form id="purchaseTicketsForm" class="flex-center flex-column p-2 m-4 mw-425">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="flex-center fs22 sans-light">Purchase Tickets</div>
+      <div class="flex-center fs22 sans-light">[[[Purchase Tickets]]]</div>
       <div class="d-flex pt-2">
         <div class="flex-center flex-column col-50 p-4">
-          <span>Current Price</span>
+          <span>[[[Current Price]]]</span>
           <hr class="dotted my-1 w-100">
           <span id="purchaserCurrentPrice">a</span>
         </div>
         <div class="flex-center flex-column  col-50 p-4">
-          <span>Available Balance</span>
+          <span>[[[Available Balance]]]</span>
           <hr class="dotted my-1 w-100">
           <span id="purchaserBal">a</span>
         </div>
@@ -752,15 +752,15 @@
       <hr class="dotted w-100">
       <div class="d-flex w-100 flex-wrap">
         <div class="flex-center flex-column col-12 py-2 brdrright">
-          <span>How Many?</span>
+          <span>[[[ticket_qty_label]]]</span>
           <input type="number" id="purchaserInput" min="1" placeholder="0" class="fs24 p-2 mt-1 text-center">
         </div>
         <div id="purchaserAppPWBox" class="flex-center flex-column col-12 p-2">
-          <span>App Password</span>
+          <span>[[[App Password]]]</span>
           <input type="password" id="purchaserAppPW" class="form-control select" autocomplete="off">
         </div>
         <div class="flex-center flex-column col-12 py-2">
-          <button id="purchaserSubmit" class="selected fs24">Buy</button>
+          <button id="purchaserSubmit" class="selected fs24">[[[Buy]]]</button>
         </div>
       </div>
       <div id="purchaserErr" class="errcolor d-hide py-2 d-hide"></div>
@@ -769,14 +769,14 @@
     {{- /* TICKET HISTORY */ -}}
     <form id="ticketHistoryForm" class="flex-center flex-column align-items-stretch p-2 m-4">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="flex-center fs28 sans-light mb-2">Ticket History</div>
+      <div class="flex-center fs28 sans-light mb-2">[[[Ticket History]]]</div>
       <table id="ticketHistoryTable" class="fs14">
         <thead>
           <tr>
-            <th>Age</th>
-            <th>Price</th>
-            <th>Status</th>
-            <th>Ticket</th>
+            <th>[[[Age]]]</th>
+            <th>[[[Price]]]</th>
+            <th>[[[Status]]]</th>
+            <th>[[[Ticket]]]</th>
           </tr>
         </thead>
         <tbody id="ticketHistoryRows">
@@ -798,7 +798,7 @@
         <span id="ticketHistoryPage" class="me-1"></span>
         <span id="ticketHistoryNextPage" class="ico-arrowright p-1 hoverbg pointer"></span>
       </div>
-      <div id="noTicketsMessage" class="text-center p-2">No tickets to show</div>
+      <div id="noTicketsMessage" class="text-center p-2">[[[No tickets to show]]]</div>
     </form>
 
     {{- /* SET VOTES */ -}}
@@ -806,7 +806,7 @@
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 
       {{- /* AGENDAS */ -}}
-      <div class="flex-center fs28 sans-light mb-2 w-100 brdrtop">Agendas</div>
+      <div class="flex-center fs28 sans-light mb-2 w-100 brdrtop">[[[Agendas]]]</div>
       <div id="votingAgendas" class="d-flex flex-column align-items-stretch w-100">
         <div id="votingAgendaTmpl" class="d-flex justify-content-between py-2 brdrtop">
           <div class="d-flex flex-column flex-grow-1 fs16 pe-3">
@@ -822,7 +822,7 @@
       </div>
 
       {{- /* TREASURY SPENDS */ -}}
-      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">Treasury Spends</div>
+      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">[[[Treasury Spends]]]</div>
       <div id="votingTspends" class="d-flex flex-column align-items-stretch w-100">
         <div id="tspendTmpl" class="d-flex justify-content-between align-items-stretch py-2 brdrtop">
           <div class="flex-center flex-grow-1 pe-3">
@@ -832,11 +832,11 @@
           </div>
           <div class="d-flex align-items-stretch">
             <div class="flex-center flex-column pe-2">
-              <span>No</span>
+              <span>[[[No]]]</span>
               <input data-tmpl="no" type="radio" value="no" class="form-check-input">
             </div>
             <div class="flex-center flex-column pe-2">
-              <span>Yes</span>
+              <span>[[[Yes]]]</span>
               <input data-tmpl="yes" type="radio" value="yes" class="form-check-input">
             </div>
           </div>
@@ -844,7 +844,7 @@
       </div>
 
       {{- /* TREASURY KEYS */ -}}
-      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">Treasury Keys</div>
+      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">[[[Treasury Keys]]]</div>
       <div id="votingTKeys" class="d-flex flex-column align-items-stretch w-100">
         <div id="tkeyTmpl" class="d-flex justify-content-between align-items-stretch py-2 brdrtop">
           <div class="flex-center flex-grow-1 pe-3">
@@ -852,11 +852,11 @@
           </div>
           <div class="d-flex align-items-stretch">
             <div class="flex-center flex-column pe-2">
-              <span>No</span>
+              <span>[[[No]]]</span>
               <input data-tmpl="no" type="radio" value="no" class="form-check-input">
             </div>
             <div class="flex-center flex-column pe-2">
-              <span>Yes</span>
+              <span>[[[Yes]]]</span>
               <input data-tmpl="yes" type="radio" value="yes" class="form-check-input">
             </div>
           </div>
