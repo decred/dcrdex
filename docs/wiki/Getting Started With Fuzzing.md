@@ -85,7 +85,7 @@ The fuzzing arguments can only be the following types:
 
 To enable fuzzing, run go test with the `-fuzz` flag, providing a test name (e.g `FuzzTestName`) or regex matching a **single** fuzz test. By default, all other tests in that package will run before fuzzing begins. This is to ensure that fuzzing won’t report any issues that would already be caught by an existing test.
 
-**Note**: Fuzzing cannot be run for multiple packages at the same time using the `-fuzz` flag. You **must** specify **at most one Fuzz test** (e.g `-fuzz=FuzzXXX`) [See: [suppport for multiple Fuzz tests](https://go.googlesource.com/proposal/+/master/design/draft-fuzzing.md#fuzzing-engine-supports-multiple-fuzz-tests-at-once)].
+**Note**: Fuzzing cannot be run for multiple packages at the same time using the `-fuzz` flag. You **must** specify **at most one Fuzz test** (e.g `-fuzz=FuzzXXX`) [See: [support for multiple Fuzz tests](https://go.googlesource.com/proposal/+/master/design/draft-fuzzing.md#fuzzing-engine-supports-multiple-fuzz-tests-at-once)].
 
 ## Command Line Output
 
