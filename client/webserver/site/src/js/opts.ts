@@ -175,18 +175,19 @@ export class XYRangeHandler {
   scrollingX: number
   y: number
   r: number
+  roundX: boolean
   roundY: boolean
   updated: (x:number, y:number) => void
   changed: () => void
   selected: () => void
   setConfig: (cfg: XYRange) => void
 
-  constructor (cfg: XYRange, initVal: number, updated: (x:number, y:number) => void, changed: () => void, selected: () => void, roundY?: boolean) {
+  constructor (cfg: XYRange, initVal: number, updated: (x:number, y:number) => void, changed: () => void, selected: () => void, roundY?: boolean, roundX?: boolean, disabled?: boolean) {
     const control = this.control = rangeOptTmpl.cloneNode(true) as HTMLElement
     const tmpl = this.tmpl = Doc.parseTemplate(control)
+    this.roundX = Boolean(roundX)
     this.roundY = Boolean(roundY)
     this.cfg = cfg
-
     this.changed = changed
     this.selected = selected
     this.updated = updated
@@ -221,6 +222,10 @@ export class XYRangeHandler {
     this.r = normalizeX(initVal)
     this.scrollingX = this.x = initVal
     this.y = this.r * rangeY + cfg.start.y
+    this.accept(this.scrollingX, true)
+    if (disabled) {
+      return
+    }
 
     // Set up the handlers for the x and y text input fields.
     const clickOutX = (e: MouseEvent) => {
@@ -306,12 +311,11 @@ export class XYRangeHandler {
       Doc.bind(document, 'mousemove', trackMouse)
       Doc.bind(document, 'mouseup', mouseUp)
     })
-
-    this.accept(this.scrollingX, true)
   }
 
   accept (x: number, skipUpdate?: boolean): void {
     const tmpl = this.tmpl
+    if (this.roundX) x = Math.round(x)
     if (this.roundY) this.y = Math.round(this.y)
     tmpl.x.textContent = threeSigFigs.format(x)
     tmpl.y.textContent = threeSigFigs.format(this.y)

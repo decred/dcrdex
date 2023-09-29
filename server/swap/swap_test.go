@@ -261,7 +261,7 @@ func (m *TAuthManager) pushReq(id account.AccountID, req *TRequest) {
 	m.reqs[id] = append([]*TRequest{req}, m.reqs[id]...)
 }
 
-func (m *TAuthManager) getNtfn(id account.AccountID, route string, payload interface{}) error {
+func (m *TAuthManager) getNtfn(id account.AccountID, route string, payload any) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	msgs := m.ntfns[id]

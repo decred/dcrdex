@@ -255,7 +255,7 @@ type WalletDefinition struct {
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*ConfigOption `json:"configopts"`
 	// MultiFundingOpts are options related to funding multi-trades.
-	MultiFundingOpts []*ConfigOption `json:"multifundingopts"`
+	MultiFundingOpts []*OrderOption `json:"multifundingopts"`
 	// NoAuth indicates that the wallet does not implement the Authenticator
 	// interface. A better way to check is to use the wallet traits but wallet
 	// construction is presently required to discern traits.
@@ -310,14 +310,14 @@ type WalletInfo struct {
 
 // ConfigOption is a wallet configuration option.
 type ConfigOption struct {
-	Key          string      `json:"key"`
-	DisplayName  string      `json:"displayname"`
-	Description  string      `json:"description"`
-	DefaultValue interface{} `json:"default"`
+	Key          string `json:"key"`
+	DisplayName  string `json:"displayname"`
+	Description  string `json:"description"`
+	DefaultValue any    `json:"default"`
 	// If MaxValue/MinValue are set to the string "now" for a date config, the
 	// UI will display the current date.
-	MaxValue          interface{} `json:"max"`
-	MinValue          interface{} `json:"min"`
+	MaxValue          any `json:"max"`
+	MinValue          any `json:"min"`
 	Options           map[string]*ConfigOption
 	NoEcho            bool `json:"noecho"`
 	IsBoolean         bool `json:"isboolean"`
@@ -332,6 +332,9 @@ type ConfigOption struct {
 	// this option N times.
 	RepeatN  int32 `json:"repeatN"`
 	Required bool  `json:"required"`
+	// DependsOn is the key of another config option that if is set to true,
+	// this config option will be shown.
+	DependsOn string `json:"dependsOn"`
 
 	// ShowByDefault to show or not options on "hide advanced options".
 	ShowByDefault bool `json:"showByDefault,omitempty"`
@@ -1371,22 +1374,22 @@ type MultiOrder struct {
 
 // WalletNotification can be any asynchronous information the wallet needs
 // to convey.
-type WalletNotification interface{}
+type WalletNotification any
 
 // TipChangeNote is the only required wallet notification. All wallets should
 // emit a TipChangeNote when a state change occurs that might necessitate swap
 // progression or new balance checks.
 type TipChangeNote struct {
-	AssetID uint32      `json:"assetID"`
-	Tip     uint64      `json:"tip"`
-	Data    interface{} `json:"data"`
+	AssetID uint32 `json:"assetID"`
+	Tip     uint64 `json:"tip"`
+	Data    any    `json:"data"`
 }
 
 // CustomWalletNote is any other information the wallet wishes to convey to
 // the user.
 type CustomWalletNote struct {
-	AssetID uint32      `json:"assetID"`
-	Payload interface{} `json:"payload"`
+	AssetID uint32 `json:"assetID"`
+	Payload any    `json:"payload"`
 }
 
 // WalletEmitter handles a channel for wallet notifications and provides methods
@@ -1415,13 +1418,13 @@ func (e *WalletEmitter) emit(note WalletNotification) {
 }
 
 // Data sends a CustomWalletNote with the specified data payload.
-func (e *WalletEmitter) Data(payload interface{}) {
+func (e *WalletEmitter) Data(payload any) {
 	e.emit(&CustomWalletNote{AssetID: e.assetID, Payload: payload})
 }
 
 // TipChange sends a TipChangeNote with optional extra data.
-func (e *WalletEmitter) TipChange(tip uint64, datas ...interface{}) {
-	var data interface{}
+func (e *WalletEmitter) TipChange(tip uint64, datas ...any) {
+	var data any
 	if len(datas) > 0 {
 		data = datas[0]
 	}

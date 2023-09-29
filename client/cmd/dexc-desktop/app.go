@@ -184,7 +184,7 @@ func mainCore() error {
 	if cfg.Experimental {
 		// TODO: on shutdown, stop market making and wait for trades to be
 		// canceled.
-		marketMaker, err = mm.NewMarketMaker(clientCore, logMaker.Logger("MM"))
+		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MarketMakerConfigPath(), logMaker.Logger("MM"))
 		if err != nil {
 			return fmt.Errorf("error creating market maker: %w", err)
 		}
@@ -210,7 +210,7 @@ func mainCore() error {
 		}()
 	}
 
-	webSrv, err := webserver.New(cfg.Web(clientCore, logMaker.Logger("WEB"), utc))
+	webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc))
 	if err != nil {
 		return fmt.Errorf("failed creating web server: %w", err)
 	}

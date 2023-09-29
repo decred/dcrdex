@@ -79,7 +79,7 @@ in your configuration file, you'll need to specify that port instead.
 
 ### Run Decred Daemon and Wallet Software
 
-Get the dcrd/dcrwallet/dcrctl command line suite from [the latest release binaries](https://github.com/decred/decred-release/releases/tag/v1.5.1) or building from master ([`dcrd`](https://github.com/decred/dcrd#build-from-source-all-platforms), [`dcrwallet`](https://github.com/decred/dcrwallet#build-from-source-all-platforms), [`dcrctl`](https://github.com/decred/dcrctl#build-and-installation) or alternatively [this dcrbuild.sh script](https://gist.github.com/chappjc/6cfc52a5b700a43c03d533172f91aa57) on Linux/Mac), which fairly simple.
+Get the dcrd/dcrwallet/dcrctl command line suite from [the latest release binaries](https://github.com/decred/decred-release/releases/tag/v1.5.1) or building from master ([`dcrd`](https://github.com/decred/dcrd#build-from-source-all-platforms), [`dcrwallet`](https://github.com/decred/dcrwallet#build-from-source-all-platforms), [`dcrctl`](https://github.com/decred/dcrctl#build-and-installation) or alternatively [this dcrbuild.sh script](https://gist.github.com/chappjc/6cfc52a5b700a43c03d533172f91aa57) on Linux/Mac), which is fairly simple.
 
 Sync the Decred blockchain. Set the `username` and `password` in the `dcrd`
 configuration file (recommended, shown), or as a command line argument (adjust

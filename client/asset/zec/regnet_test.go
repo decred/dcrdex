@@ -100,7 +100,7 @@ func TestDeserializeTestnetBlocks(t *testing.T) {
 		t.Fatalf("GetBlockHash(%d) error: %v", testnetOverwinterActivationHeight-1, err)
 	}
 
-	mustMarshal := func(thing interface{}) json.RawMessage {
+	mustMarshal := func(thing any) json.RawMessage {
 		b, err := json.Marshal(thing)
 		if err != nil {
 			t.Fatalf("Failed to marshal %T thing: %v", thing, err)

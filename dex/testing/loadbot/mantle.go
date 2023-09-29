@@ -186,7 +186,7 @@ func newMantle(name string) (*Mantle, error) {
 }
 
 // fatalError kills the LoadBot by cancelling the global Context.
-func (m *Mantle) fatalError(s string, a ...interface{}) {
+func (m *Mantle) fatalError(s string, a ...any) {
 	m.log.Criticalf(s, a...)
 	if !ignoreErrors || ctx.Err() != nil {
 		quit()
@@ -546,7 +546,7 @@ func (m *Mantle) replenishBalance(w *botWallet, minFunds, maxFunds uint64) {
 
 // mustJSON JSON-encodes the thing. If an error is encountered, the error text
 // is returned instead.
-func mustJSON(thing interface{}) string {
+func mustJSON(thing any) string {
 	s, err := json.Marshal(thing)
 	if err != nil {
 		return "invalid json: " + err.Error()

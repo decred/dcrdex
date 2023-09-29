@@ -110,7 +110,7 @@ several blocks.
 
    <img src="images/choose-bond-asset.png" width="400">
 
-   NOTE: A dedicate wiki page describing time-locked fidelity bonds will be
+   NOTE: A dedicated wiki page describing time-locked fidelity bonds will be
    created, but in short, fidelity bonds are funds redeemable only by you, but
    in the future. Having a potential trader lock some amount of funds before
    placing orders is an anti-spam mechanism to combat disruptive behavior like

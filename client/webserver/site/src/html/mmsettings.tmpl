@@ -1,0 +1,294 @@
+{{define "mmsettings"}}
+{{template "top" .}}
+<div id="main" data-handler="mmsettings" class="mmsettings w-100 overflow-y-auto">
+  <div class="flex-center fs28 text-break">Market Maker Settings</div>
+  <div class="flex-center fs20 text-break">
+    <img id="baseLogo"><img class="mx-1" id="quoteLogo"><span id="baseHeader"></span> - <span id="quoteHeader"></span>  @  <span id="hostHeader"></span>
+  </div>
+  <div class="d-flex mt-1">
+    <div class="col-12 px-3">
+      <span id="settingsUpdatedMsg" class="settings-updated-msg px-2 d-hide">[[[settings_updated]]]</span>
+      <br/>
+      <button id="backButton" class="fs20 px-2 mx-1 selected">[[[back]]]</button>
+      <button id="updateButton" class="fs20 px-2 mx-1 selected">[[[update_settings]]]</button>
+      <button id="createButton" class="fs20 px-2 mx-1 selected d-hide">[[[create_bot]]]</button>
+      <button id="resetButton" class="fs20 px-2 mx-1 selected">[[[reset_settings]]]</button>
+    </div>
+  </div>
+
+  <div id="botSettingsContainer" class="d-hide bot-settings-container">
+    <div class="placement-settings-column">
+      <div class="setting-container">
+        <label>[[[gap_strategy]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="
+          percent: gap set to a percent of the spot price,
+          percent-plus: percent + add the break-even spread,
+          absolute: set an absolute sell - buy rate difference,
+          absolute-plus: absolute + add the break-even spread,
+          multiplier: a multiple of the break-even spread
+        "></span>
+        <select class="w-50 form-select" id="gapStrategySelect">
+          <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
+          <option value="percent">[[[gap_strategy_percent]]]</option>
+          <option value="absolute-plus">
+            [[[gap_strategy_absolute_plus]]]
+          </option>
+          <option value="absolute">[[[gap_strategy_absolute]]]</option>
+          <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
+        </select>
+      </div>
+
+      <div class="setting-container">
+        <label>[[[buy_placements]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
+        <div class="table-wrapper d-flex" id="buyPlacementsTableWrapper">
+          <table class="placement-table">
+            <thead>
+              <th scope="col">[[[priority]]]</th>
+              <th scope="col">[[[Lots]]]</th>
+              <th scope="col" id="buyGapFactorHdr"></th>
+              <th scope="col"></th>
+              <th scope="col"></th>
+              <th scope="col"></th>
+            </thead>
+            <tbody id="buyPlacementsTableBody">
+              <tr id="placementRowTmpl">
+                <td data-tmpl="priority">1</td>
+                <td data-tmpl="lots">2</td>
+                <td data-tmpl="gapFactor">2.5</td>
+                <td>
+                  <span
+                    class="ico-cross fs15 pointer remove-placement-btn"
+                    data-tmpl="removeBtn"
+                  ></span>
+                </td>
+                <td>
+                  <span
+                    class="ico-arrowup fs15 pointer"
+                    data-tmpl="upBtn"
+                  ></span>
+                </td>
+                <td>
+                  <span
+                    class="ico-arrowdown fs15 pointer"
+                    data-tmpl="downBtn"
+                  ></span>
+                </td>
+              </tr>
+              <tr id="addBuyPlacementRow">
+                <td></td>
+                <td><input class="lots-input" step="1" type="number" id="addBuyPlacementLots" /></td>
+                <td><input class="gap-factor-input" type="number" id="addBuyPlacementGapFactor" /></td>
+                <td>
+                  <span
+                    class="ico-plus fs15 pointer add-placement-btn"
+                    id="addBuyPlacementBtn"
+                  ></span>
+                </td>
+                <td></td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+          <span
+            class="fs15 pt-3 text-center d-hide errcolor text-break"
+            id="buyPlacementsErr"
+          ></span>
+        </div>
+      </div>
+
+      <div class="setting-container">
+        <label>Sell Placements</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
+        <div class="table-wrapper d-flex" id="sellPlacementsTableWrapper">
+          <table class="placement-table">
+            <thead>
+              <th scope="col">[[[priority]]]</th>
+              <th scope="col">[[[Lots]]]</th>
+              <th scope="col" id="sellGapFactorHdr"></th>
+              <th scope="col"></th>
+              <th scope="col"></th>
+              <th scope="col"></th>
+            </thead>
+            <tbody id="sellPlacementsTableBody">
+              <tr id="addSellPlacementRow">
+                <td></td>
+                <td><input class="lots-input" step="1" type="number" id="addSellPlacementLots" /></td>
+                <td><input class="gap-factor-input" type="number" id="addSellPlacementGapFactor" /></td>
+                <td>
+                  <span
+                    class="ico-plus fs15 pointer add-placement-btn"
+                    id="addSellPlacementBtn"
+                  ></span>
+                </td>
+                <td></td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+          <span
+            class="fs15 pt-3 text-center d-hide errcolor text-break"
+            id="sellPlacementsErr"
+          ></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bot-settings-column">
+
+      <div class="setting-container">
+        <label>[[[Drift tolerance]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
+        <div
+          class="slider-container"
+          id="driftToleranceContainer"
+        ></div>
+      </div>
+
+      <div class="setting-container">
+        <label>[[[use_oracles]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[use_oracles_tooltip]]]"></span>
+        <input
+          class="form-check-input"
+          type="checkbox"
+          id="useOracleCheckbox"
+          checked
+        />
+      </div>
+
+      <div class="setting-container indent" id="oracleWeightingSection">
+        <label>[[[Oracle weight]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
+        <div
+          class="slider-container"
+          id="oracleWeightingContainer"
+        ></div>
+      </div>
+
+      <div class="setting-container indent" id="oracleBiasSection">
+        <label>[[[Oracle bias]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
+        <div
+          class="slider-container"
+          id="oracleBiasContainer"
+        ></div>
+      </div>
+
+      <div class="setting-container">
+        <label>[[[empty_market_rate]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[empty_market_rate_tooltip]]]"></span>
+        <input
+          class="form-check-input"
+          type="checkbox"
+          id="emptyMarketRateCheckbox"
+          checked
+        />
+        <br/>
+        <input type="number" class="indent mt-1" id="emptyMarketRateInput" />
+      </div>
+    </div>
+
+    <div class="bot-balance-column">
+      <div class="setting-container">
+        <label><img id="baseBalanceLogo"> [[[base_asset_balance]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[base_asset_balance_tooltip]]]"></span>
+        <br />
+        <span class="d-hide errcolor text-break" id="noBaseBalance">[[[no_balance_available]]]</span>
+        <div
+          class="slider-container"
+          id="baseBalanceContainer"
+        ></div>
+      </div>
+
+      <div id="baseWalletSettings">
+        <label><img id="baseSettingsLogo"> [[[base_wallet_settings]]]</label>
+        <div id="baseWalletSettingsContainer">
+
+          <div class="setting-container" id="boolSettingTmpl">
+            <label data-tmpl="name"></label>
+            <span data-tmpl="tooltip" class="ico-info fs12 me-1"></span>
+            <input
+              data-tmpl="input"
+              class="form-check-input"
+              type="checkbox"
+            />
+          </div>
+          <div class="setting-container" id="rangeSettingTmpl">
+            <label data-tmpl="name"></label>
+            <span data-tmpl="tooltip" class="ico-info fs12 me-1"></span>
+            <div class="slider-container" data-tmpl="sliderContainer">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-container">
+        <label><img id="quoteBalanceLogo"> [[[quote_asset_balance]]]</label>
+        <span class="ico-info fs12 me-1" data-tooltip="[[[quote_asset_balance_tooltip]]]"></span>
+        <br/>
+        <span class="d-hide errcolor text-break" id="noQuoteBalance">[[[no_balance_available]]]</span>
+        <div
+          class="slider-container"
+          id="quoteBalanceContainer"
+        ></div>
+      </div>
+
+      <div id="quoteWalletSettings">
+        <label><img id="quoteSettingsLogo"> [[[quote_wallet_settings]]]</label>
+        <div id="quoteWalletSettingsContainer">
+        </div>
+      </div>
+    </div>
+
+    <div class="oracles-column">
+      <div id="oraclesLoading">
+        [[[loading_oracles]]]      
+        <div class="ico-spinner spinner fs14 d-inline-block" data-tmpl="syncSpinner"></div>
+      </div>
+      <div id="oraclesErr" class="d-hide">
+        <span class="errcolor text-break" id="oraclesErrMsg"></span>
+      </div>
+      <div id="noOracles" class="d-hide">
+        [[[no_oracles]]]
+      </div>
+
+      <table id="oraclesTable" class="py-2 oracles-table my-3 w-100 d-hide">
+        <thead>
+          <tr>
+            <td>[[[Oracles]]]</td>
+            <td colspan="2">avg: <span id="avgPrice"></span></td>
+          </tr>
+        </thead>
+        <tbody id="oracles">
+          <tr id="oracleTmpl">
+            <td class="text-left"><span class="d-flex align-items-center"><img data-tmpl="logo" class="me-1"><span data-tmpl="host"></span></span></td>
+            <td><span class="fs12 demi me-1">USD</span><span data-tmpl="volume"></span></td>
+            <td data-tmpl="price"></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table id="fiatRates" class="py-2 oracles-table my-3 w-100 d-hide">
+        <thead>
+          <tr>
+            <td>[[[fiat_rates]]]</td>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="text-left"><img id="baseFiatRateLogo" class="me-1"><span id="baseFiatRateSymbol"></span></td>
+            <td><span id="baseFiatRate"></span><span class="fs12 demi me-1">USD</span></td>
+          </tr>
+          <tr>
+            <td class="text-left"><img id="quoteFiatRateLogo" class="me-1"><span id="quoteFiatRateSymbol"></span></td>
+            <td><span id="quoteFiatRate"></span><span class="fs12 demi me-1">USD</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+    </div>
+  </div>
+
+  <div id="vOrderOpts">{{template "orderOptionTemplates"}}</div>
+</div>
+{{template "bottom"}} {{end}}

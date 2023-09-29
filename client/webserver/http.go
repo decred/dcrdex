@@ -33,10 +33,11 @@ const (
 	ordersRoute      = "/orders"
 	exportOrderRoute = "/orders/export"
 	marketMakerRoute = "/mm"
+	mmSettingsRoute  = "/mmsettings"
 )
 
 // sendTemplate processes the template and sends the result.
-func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data interface{}) {
+func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data any) {
 	page, err := s.html.exec(tmplID, data)
 	if err != nil {
 		log.Errorf("template exec error for %s: %v", tmplID, err)
@@ -119,6 +120,11 @@ func (s *WebServer) knownUnregisteredExchanges(registeredExchanges map[string]*c
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "markets", s.commonArgs(r, "Markets | Decred DEX"))
+}
+
+// handleMarketMaking is the handler for the '/mm' page request.
+func (s *WebServer) handleMarketMaking(w http.ResponseWriter, r *http.Request) {
+	s.sendTemplate(w, "mm", s.commonArgs(r, "Market Making | Decred DEX"))
 }
 
 // handleWallets is the handler for the '/wallets' page request.
@@ -281,6 +287,12 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendTemplate(w, "dexsettings", data)
+}
+
+// handleMMSettings is the handler for the '/mmsettings' page request.
+func (s *WebServer) handleMMSettings(w http.ResponseWriter, r *http.Request) {
+	common := *s.commonArgs(r, "Market Making Settings | Decred DEX")
+	s.sendTemplate(w, "mmsettings", common)
 }
 
 type ordersTmplData struct {

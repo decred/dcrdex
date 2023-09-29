@@ -26,19 +26,19 @@ import (
 )
 
 // Printer is a function with the signature of a logger method.
-type Printer func(format string, params ...interface{})
+type Printer func(format string, params ...any)
 
 var (
 	// StdoutPrinter is a DebugLogger that uses fmt.Printf.
-	StdoutPrinter = Printer(func(format string, params ...interface{}) {
+	StdoutPrinter = Printer(func(format string, params ...any) {
 		fmt.Printf(format+"\n", params...) // discard the returns
 	})
 	// StderrPrinter is a DebugLogger that uses fmt.Fprintf(os.Stderr, ...).
-	StderrPrinter = Printer(func(format string, params ...interface{}) {
+	StderrPrinter = Printer(func(format string, params ...any) {
 		fmt.Fprintf(os.Stderr, format+"\n", params...)
 	})
 
-	disabledPrinter = Printer(func(string, ...interface{}) {})
+	disabledPrinter = Printer(func(string, ...any) {})
 )
 
 const pingInterval = 10 * time.Second
@@ -356,7 +356,7 @@ func (sc *ServerConn) deleteSubscriptions() {
 // arguments. args may not be any other basic type. The the response does not
 // include an error, the result will be unmarshalled into result, unless the
 // provided result is nil in which case the response payload will be ignored.
-func (sc *ServerConn) Request(ctx context.Context, method string, args interface{}, result interface{}) error {
+func (sc *ServerConn) Request(ctx context.Context, method string, args any, result any) error {
 	id := sc.nextID()
 	reqMsg, err := prepareRequest(id, method, args)
 	if err != nil {
@@ -417,7 +417,7 @@ type ServerFeatures struct {
 	Hosts    map[string]map[string]uint32 `json:"hosts"` // e.g. {"host.com": {"tcp_port": 51001, "ssl_port": 51002}}, may be unset!
 	ProtoMax string                       `json:"protocol_max"`
 	ProtoMin string                       `json:"protocol_min"`
-	Pruning  interface{}                  `json:"pruning,omitempty"` // supposedly an integer, but maybe a string or even JSON null
+	Pruning  any                          `json:"pruning,omitempty"` // supposedly an integer, but maybe a string or even JSON null
 	Version  string                       `json:"server_version"`    // server software version, not proto
 	HashFunc string                       `json:"hash_function"`     // e.g. sha256
 	// Services []string                     `json:"services,omitempty"` // e.g. ["tcp://host.com:51001", "ssl://host.com:51002"]
@@ -450,8 +450,8 @@ func (sc *ServerConn) Peers(ctx context.Context) ([]*PeersResult, error) {
 	// (*WalletClient).GetServers. We might wish to in the future though.
 
 	// [["ip", "host", ["featA", "featB", ...]], ...]
-	// [][]interface{}{string, string, []interface{}{string, ...}}
-	var resp [][]interface{}
+	// [][]any{string, string, []any{string, ...}}
+	var resp [][]any
 	err := sc.Request(ctx, "server.peers.subscribe", nil, &resp) // not really a subscription!
 	if err != nil {
 		return nil, err
@@ -472,7 +472,7 @@ func (sc *ServerConn) Peers(ctx context.Context) ([]*PeersResult, error) {
 			sc.debug("bad peer hostname: %v (%T)", peer[1], peer[1])
 			continue
 		}
-		featsI, ok := peer[2].([]interface{})
+		featsI, ok := peer[2].([]any)
 		if !ok {
 			sc.debug("bad peer feature data: %v (%T)", peer[2], peer[2])
 			continue

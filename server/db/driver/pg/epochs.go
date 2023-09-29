@@ -40,7 +40,7 @@ func (oids orderIDs) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (oids *orderIDs) Scan(src interface{}) error {
+func (oids *orderIDs) Scan(src any) error {
 	var ba pq.ByteaArray
 	err := ba.Scan(src)
 	if err != nil {

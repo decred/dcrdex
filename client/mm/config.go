@@ -18,10 +18,16 @@ const (
 	Amount
 )
 
+// MarketMakingConfig is the overall configuration of the market maker.
+type MarketMakingConfig struct {
+	BotConfigs []*BotConfig `json:"botConfigs"`
+	CexConfigs []*CEXConfig `json:"cexConfigs"`
+}
+
 // CEXConfig is a configuration for connecting to a CEX API.
 type CEXConfig struct {
-	// CEXName is the name of the cex.
-	CEXName string `json:"cexName"`
+	// Name is the name of the cex.
+	Name string `json:"name"`
 	// APIKey is the API key for the CEX.
 	APIKey string `json:"apiKey"`
 	// APISecret is the API secret for the CEX.
@@ -43,16 +49,16 @@ type BotConfig struct {
 	QuoteBalance     uint64      `json:"quoteBalance"`
 
 	// Only one of the following configs should be set
-	MMCfg        *MarketMakingConfig        `json:"marketMakingConfig,omitempty"`
-	MMWithCEXCfg *MarketMakingWithCEXConfig `json:"marketMakingWithCEXConfig,omitempty"`
-	ArbCfg       *SimpleArbConfig           `json:"arbConfig,omitempty"`
+	BasicMMConfig   *BasicMarketMakingConfig   `json:"basicMarketMakingConfig,omitempty"`
+	SimpleArbConfig *SimpleArbConfig           `json:"simpleArbConfig,omitempty"`
+	MMWithCEXConfig *MarketMakingWithCEXConfig `json:"marketMakingWithCEXConfig,omitempty"`
 
 	Disabled bool `json:"disabled"`
 }
 
 func (c *BotConfig) requiresPriceOracle() bool {
-	if c.MMCfg != nil {
-		return c.MMCfg.OracleWeighting != nil && *c.MMCfg.OracleWeighting > 0
+	if c.BasicMMConfig != nil {
+		return c.BasicMMConfig.OracleWeighting != nil && *c.BasicMMConfig.OracleWeighting > 0
 	}
 	return false
 }

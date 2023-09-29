@@ -517,7 +517,7 @@ func (a *simpleArbMarketMaker) cancelAllOrders() {
 }
 
 func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex libxc.CEX, log dex.Logger) {
-	if cfg.ArbCfg == nil {
+	if cfg.SimpleArbConfig == nil {
 		// implies bug in caller
 		log.Errorf("No arb config provided. Exiting.")
 		return
@@ -537,7 +537,7 @@ func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex libx
 		cex:        cex,
 		core:       c,
 		log:        log,
-		cfg:        cfg.ArbCfg,
+		cfg:        cfg.SimpleArbConfig,
 		mkt:        mkt,
 		activeArbs: make([]*arbSequence, 0),
 	}).run()

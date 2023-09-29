@@ -88,7 +88,7 @@ func TestRebalance(t *testing.T) {
 
 	type test struct {
 		name       string
-		cfg        *MarketMakingConfig
+		cfg        *BasicMarketMakingConfig
 		epoch      uint64
 		rebalancer *tRebalancer
 
@@ -137,7 +137,7 @@ func TestRebalance(t *testing.T) {
 		// "no existing orders, one order per side"
 		{
 			name: "no existing orders, one order per side",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -173,7 +173,7 @@ func TestRebalance(t *testing.T) {
 		// "no existing orders, no sell placements"
 		{
 			name: "no existing orders, no sell placements",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy:    GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{},
 				BuyPlacements: []*OrderPlacement{
@@ -200,7 +200,7 @@ func TestRebalance(t *testing.T) {
 		// "no existing orders, no buy placements"
 		{
 			name: "no existing orders, no buy placements",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -227,7 +227,7 @@ func TestRebalance(t *testing.T) {
 		//  "no existing orders, multiple placements per side"
 		{
 			name: "no existing orders, multiple placements per side",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -284,7 +284,7 @@ func TestRebalance(t *testing.T) {
 		// "test balances edge, enough for orders"
 		{
 			name: "test balances edge, enough for orders",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -358,7 +358,7 @@ func TestRebalance(t *testing.T) {
 		// "test balances edge, not enough for orders"
 		{
 			name: "test balances edge, not enough for orders",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -420,7 +420,7 @@ func TestRebalance(t *testing.T) {
 		// "test balances edge, enough for 2 lot orders"
 		{
 			name: "test balances edge, enough for 2 lot orders",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -495,7 +495,7 @@ func TestRebalance(t *testing.T) {
 		// "test balances edge, not enough for 2 lot orders, place 1 lot"
 		{
 			name: "test balances edge, not enough for 2 lot orders, place 1 lot",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -567,7 +567,7 @@ func TestRebalance(t *testing.T) {
 		//  "existing orders outside edge of drift tolerance"
 		{
 			name: "existing orders outside edge of drift tolerance",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -628,7 +628,7 @@ func TestRebalance(t *testing.T) {
 		//  "existing orders within edge of drift tolerance"
 		{
 			name: "existing orders within edge of drift tolerance",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -684,7 +684,7 @@ func TestRebalance(t *testing.T) {
 		//  "existing partially filled orders within drift tolerance"
 		{
 			name: "existing partially filled orders within drift tolerance",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				BuyPlacements: []*OrderPlacement{
 					{
@@ -749,7 +749,7 @@ func TestRebalance(t *testing.T) {
 		//  "existing partially filled orders outside drift tolerance"
 		{
 			name: "existing partially filled orders outside drift tolerance",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				BuyPlacements: []*OrderPlacement{
 					{
@@ -818,7 +818,7 @@ func TestRebalance(t *testing.T) {
 		// "cannot place buy order due to self matching"
 		{
 			name: "cannot place buy order due to self matching",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -874,7 +874,7 @@ func TestRebalance(t *testing.T) {
 		// "cannot place sell order due to self matching"
 		{
 			name: "cannot place sell order due to self matching",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -930,7 +930,7 @@ func TestRebalance(t *testing.T) {
 		// "cannot place buy order due to self matching, can't cancel because too soon"
 		{
 			name: "cannot place buy order due to self matching, can't cancel because too soon",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -984,7 +984,7 @@ func TestRebalance(t *testing.T) {
 		// "cannot place sell order due to self matching, can't cancel because too soon"
 		{
 			name: "cannot place sell order due to self matching, can't cancel because too soon",
-			cfg: &MarketMakingConfig{
+			cfg: &BasicMarketMakingConfig{
 				GapStrategy: GapStrategyMultiplier,
 				SellPlacements: []*OrderPlacement{
 					{
@@ -1180,7 +1180,7 @@ func TestBasisPrice(t *testing.T) {
 		ob := &tOrderBook{
 			midGap: tt.midGap,
 		}
-		cfg := &MarketMakingConfig{
+		cfg := &BasicMarketMakingConfig{
 			OracleWeighting: &tt.oracleWeight,
 			OracleBias:      tt.oracleBias,
 		}

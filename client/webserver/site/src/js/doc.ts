@@ -29,8 +29,17 @@ const BipIDs: Record<number, string> = {
   60000: 'dextt.eth',
   60001: 'usdc.eth',
   966000: 'dextt.polygon',
-  966001: 'usdc.polygon'
+  966001: 'usdc.polygon',
+  966002: 'weth.polygon',
+  966003: 'wbtc.polygon'
 }
+
+const BipSymbolIDs: Record<string, number> = {};
+(function () {
+  for (const k of Object.keys(BipIDs)) {
+    BipSymbolIDs[BipIDs[parseInt(k)]] = parseInt(k)
+  }
+})()
 
 const BipSymbols = Object.values(BipIDs)
 
@@ -268,6 +277,11 @@ export default class Doc {
     return decimalFormatter(prec).format(v)
   }
 
+  static conventionalCoinValue (vAtomic: number, unitInfo?: UnitInfo): number {
+    const [v] = convertToConventional(vAtomic, unitInfo)
+    return v
+  }
+
   /*
    * formatRateFullPrecision formats rate to represent it exactly at rate step
    * precision, trimming non-effectual zeros if there are any.
@@ -324,6 +338,10 @@ export default class Doc {
 
   static bipSymbol (assetID: number): string {
     return BipIDs[assetID]
+  }
+
+  static bipIDFromSymbol (symbol: string): number {
+    return BipSymbolIDs[symbol]
   }
 
   static logoPathFromID (assetID: number): string {

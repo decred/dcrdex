@@ -605,14 +605,14 @@ func (c *TCore) InitializeClient(pw, seed []byte) error {
 	c.inited = true
 	return nil
 }
-func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, error) {
+func (c *TCore) GetDEXConfig(host string, certI any) (*core.Exchange, error) {
 	if xc := tExchanges[host]; xc != nil {
 		return xc, nil
 	}
 	return tExchanges[firstDEX], nil
 }
 
-func (c *TCore) AddDEX(dexAddr string, certI interface{}) error {
+func (c *TCore) AddDEX(dexAddr string, certI any) error {
 	randomDelay()
 	if initErrors {
 		return fmt.Errorf("forced init error")
@@ -621,7 +621,7 @@ func (c *TCore) AddDEX(dexAddr string, certI interface{}) error {
 }
 
 // DiscoverAccount - use secondDEX = "thisdexwithalongname.com" to get paid = true.
-func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
+func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI any) (*core.Exchange, bool, error) {
 	xc := tExchanges[dexAddr]
 	if xc == nil {
 		xc = tExchanges[firstDEX]
@@ -655,7 +655,7 @@ func (c *TCore) PostBond(form *core.PostBondForm) (*core.PostBondResult, error) 
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	return nil
 }
-func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
+func (c *TCore) EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error) {
 	xc := tExchanges[host]
 	if xc == nil {
 		xc = tExchanges[firstDEX]
@@ -1946,7 +1946,7 @@ func (c *TCore) RecoverWallet(uint32, []byte, bool) error {
 func (c *TCore) UpdateCert(string, []byte) error {
 	return nil
 }
-func (c *TCore) UpdateDEXHost(string, string, []byte, interface{}) (*core.Exchange, error) {
+func (c *TCore) UpdateDEXHost(string, string, []byte, any) (*core.Exchange, error) {
 	return nil, nil
 }
 func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
@@ -1982,7 +1982,19 @@ func (c *TCore) ApproveTokenFee(assetID uint32, version uint32, approval bool) (
 }
 
 func (c *TCore) StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error) {
-	return nil, nil
+	res := asset.TicketStakingStatus{
+		TicketPrice:   24000000000,
+		VotingSubsidy: 1200000,
+		VSP:           "",
+		IsRPC:         false,
+		Tickets:       []*asset.Ticket{},
+		Stances: asset.Stances{
+			Agendas:        []*asset.TBAgenda{},
+			TreasurySpends: []*asset.TBTreasurySpend{},
+		},
+		Stats: asset.TicketStats{},
+	}
+	return &res, nil
 }
 
 func (c *TCore) SetVSP(assetID uint32, addr string) error {
@@ -1998,7 +2010,14 @@ func (c *TCore) SetVotingPreferences(assetID uint32, choices, tSpendPolicy, trea
 }
 
 func (c *TCore) ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error) {
-	return nil, nil
+	vsps := []*asset.VotingServiceProvider{
+		{
+			URL:           "https://example.com",
+			FeePercentage: 0.1,
+			Voting:        12345,
+		},
+	}
+	return vsps, nil
 }
 
 func (c *TCore) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {

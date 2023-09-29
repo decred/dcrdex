@@ -117,7 +117,7 @@ type badgerLoggerWrapper struct {
 var _ badger.Logger = (*badgerLoggerWrapper)(nil)
 
 // Warningf -> dex.Logger.Warnf
-func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
+func (log *badgerLoggerWrapper) Warningf(s string, a ...any) {
 	log.Warnf(s, a...)
 }
 

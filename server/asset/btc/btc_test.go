@@ -307,7 +307,7 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 	return txHash.String() + ":" + strconv.Itoa(int(index))
 }
 
-func mustUnmarshal(data []byte, thing interface{}) {
+func mustUnmarshal(data []byte, thing any) {
 	if err := json.Unmarshal(data, thing); err != nil {
 		panic(err.Error())
 	}

@@ -619,6 +619,8 @@ var bipIDs = map[uint32]string{
 	// Polygon reserved token range 966000-966999
 	966000: "dextt.polygon",
 	966001: "usdc.polygon",
+	966002: "weth.polygon",
+	966003: "wbtc.polygon",
 	// END Polygon reserved token range
 	1171337:  "ilt",
 	1313114:  "etho",

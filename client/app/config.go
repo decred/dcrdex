@@ -121,6 +121,11 @@ type LogConfig struct {
 	LocalLogs  bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 }
 
+// MMConfig encapsulates the settings specific to market making.
+type MMConfig struct {
+	BotConfigPath string `long:"botConfigPath"`
+}
+
 // Config is the common application configuration definition. This composite
 // struct captures the configuration needed for core and both web and rpc
 // servers, as well as some application-level directives.
@@ -129,6 +134,7 @@ type Config struct {
 	RPCConfig
 	WebConfig
 	LogConfig
+	MMConfig
 	// AppData and ConfigPath should be parsed from the command-line,
 	// as it makes no sense to set these in the config file itself. If no values
 	// are assigned, defaults will be used.
@@ -149,7 +155,7 @@ type Config struct {
 // Web creates a configuration for the webserver. This is a Config method
 // instead of a WebConfig method because Language is an app-level setting used
 // by both core and rpcserver.
-func (cfg *Config) Web(c *core.Core, log dex.Logger, utc bool) *webserver.Config {
+func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool) *webserver.Config {
 	addr := cfg.WebAddr
 	host, _, err := net.SplitHostPort(addr)
 	if err == nil && host != "" {
@@ -168,6 +174,7 @@ func (cfg *Config) Web(c *core.Core, log dex.Logger, utc bool) *webserver.Config
 
 	return &webserver.Config{
 		Core:          c,
+		MarketMaker:   mm,
 		Addr:          cfg.WebAddr,
 		CustomSiteDir: cfg.SiteDir,
 		Logger:        log,
@@ -201,6 +208,15 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 	}
 }
 
+// MarketMakerConfigPath returns the path to the market maker config file.
+func (cfg *Config) MarketMakerConfigPath() string {
+	if cfg.MMConfig.BotConfigPath != "" {
+		return cfg.MMConfig.BotConfigPath
+	}
+	_, _, mmCfgPath := setNet(cfg.AppData, cfg.Net.String())
+	return mmCfgPath
+}
+
 var DefaultConfig = Config{
 	AppData:    defaultApplicationDirectory,
 	ConfigPath: defaultConfigPath,
@@ -213,7 +229,7 @@ var DefaultConfig = Config{
 // ParseCLIConfig parses the command-line arguments into the provided struct
 // with go-flags tags. If the --help flag has been passed, the struct is
 // described back to the terminal and the program exits using os.Exit.
-func ParseCLIConfig(cfg interface{}) error {
+func ParseCLIConfig(cfg any) error {
 	preParser := flags.NewParser(cfg, flags.HelpFlag|flags.PassDoubleDash)
 	_, flagerr := preParser.Parse()
 
@@ -251,7 +267,7 @@ func ResolveCLIConfigPaths(cfg *Config) (appData, configPath string) {
 
 // ParseFileConfig parses the INI file into the provided struct with go-flags
 // tags. The CLI args are then parsed, and take precedence over the file values.
-func ParseFileConfig(path string, cfg interface{}) error {
+func ParseFileConfig(path string, cfg any) error {
 	parser := flags.NewParser(cfg, flags.Default)
 	err := flags.NewIniParser(parser).ParseFile(path)
 	if err != nil {
@@ -288,13 +304,13 @@ func ResolveConfig(appData string, cfg *Config) error {
 	switch {
 	case cfg.Testnet:
 		cfg.Net = dex.Testnet
-		defaultDBPath, defaultLogPath = setNet(appData, "testnet")
+		defaultDBPath, defaultLogPath, _ = setNet(appData, "testnet")
 	case cfg.Simnet:
 		cfg.Net = dex.Simnet
-		defaultDBPath, defaultLogPath = setNet(appData, "simnet")
+		defaultDBPath, defaultLogPath, _ = setNet(appData, "simnet")
 	default:
 		cfg.Net = dex.Mainnet
-		defaultDBPath, defaultLogPath = setNet(appData, "mainnet")
+		defaultDBPath, defaultLogPath, _ = setNet(appData, "mainnet")
 	}
 	defaultHost := DefaultHostByNetwork(cfg.Net)
 
@@ -335,10 +351,11 @@ func ResolveConfig(appData string, cfg *Config) error {
 // files. It returns a suggested path for the database file and a log file. If
 // using a file rotator, the directory of the log filepath as parsed  by
 // filepath.Dir is suitable for use.
-func setNet(applicationDirectory, net string) (dbPath, logPath string) {
+func setNet(applicationDirectory, net string) (dbPath, logPath, mmCfgPath string) {
 	netDirectory := filepath.Join(applicationDirectory, net)
 	logDirectory := filepath.Join(netDirectory, "logs")
 	logFilename := filepath.Join(logDirectory, "dexc.log")
+	mmCfgFilename := filepath.Join(netDirectory, "mm_cfg.json")
 	err := os.MkdirAll(netDirectory, 0700)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create net directory: %v\n", err)
@@ -349,7 +366,7 @@ func setNet(applicationDirectory, net string) (dbPath, logPath string) {
 		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
 		os.Exit(1)
 	}
-	return filepath.Join(netDirectory, "dexc.db"), logFilename
+	return filepath.Join(netDirectory, "dexc.db"), logFilename, mmCfgFilename
 }
 
 // DefaultHostByNetwork accepts configured network and returns the network

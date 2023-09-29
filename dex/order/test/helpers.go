@@ -322,7 +322,7 @@ func CompareUserMatch(m1, m2 *order.UserMatch) error {
 
 type testKiller interface {
 	Helper()
-	Fatalf(string, ...interface{})
+	Fatalf(string, ...any)
 }
 
 // MustComparePrefix compares the Prefix field-by-field and calls the Fatalf

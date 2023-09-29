@@ -247,7 +247,7 @@ func (c *testData) bestBlock() (*chainhash.Hash, int64) {
 	return bestHash, bestBlkHeight
 }
 
-func encodeOrError(thing interface{}, err error) (json.RawMessage, error) {
+func encodeOrError(thing any, err error) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +718,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 	return wallet, data, shutdownAndWait
 }
 
-func mustMarshal(thing interface{}) []byte {
+func mustMarshal(thing any) []byte {
 	b, err := json.Marshal(thing)
 	if err != nil {
 		panic("mustMarshal error: " + err.Error())
@@ -1980,7 +1980,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 		if totalNumCoins != len(node.lockedCoins) {
 			t.Fatalf("%s: expected %d locked coins, got %d", test.name, totalNumCoins, len(node.lockedCoins))
 		}
-		lockedCoins := make(map[RPCOutpoint]interface{})
+		lockedCoins := make(map[RPCOutpoint]any)
 		for _, coin := range node.lockedCoins {
 			lockedCoins[*coin] = true
 		}

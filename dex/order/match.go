@@ -44,7 +44,7 @@ func (id MatchID) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (id *MatchID) Scan(src interface{}) error {
+func (id *MatchID) Scan(src any) error {
 	idB, ok := src.([]byte)
 	if !ok {
 		return fmt.Errorf("cannot convert %T to OrderID", src)

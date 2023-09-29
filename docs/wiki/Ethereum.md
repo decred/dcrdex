@@ -22,7 +22,7 @@ List](#rpc-provider-list-partial) below for suggestions.
 ## Wallet Setup
 
 From the "Wallets" page of the DEX application, you select Ethereum from the
-left menu, which will show you your the ETH balance if you already have a
+left menu, which will show you your ETH balance if you already have a
 wallet, or you will see a "Create a Ethereum Wallet" button:
 
    <img src="images/eth-create-wallet.png" width="320">

@@ -231,21 +231,43 @@ var (
 		IsBirthdayConfig:  true,
 	}}
 
-	multiFundingOpts = []*asset.ConfigOption{
+	multiFundingOpts = []*asset.OrderOption{
 		{
-			Key:         multiSplitKey,
-			DisplayName: "External fee rate estimates",
-			Description: "Allow split funding transactions that pre-size outputs to " +
-				"prevent excessive overlock.",
-			IsBoolean:    true,
-			DefaultValue: true,
+			ConfigOption: asset.ConfigOption{
+				Key:         multiSplitKey,
+				DisplayName: "Allow multi split",
+				Description: "Allow split funding transactions that pre-size outputs to " +
+					"prevent excessive overlock.",
+				IsBoolean:    true,
+				DefaultValue: true,
+			},
 		},
 		{
-			Key:         multiSplitBufferKey,
-			DisplayName: "External fee rate estimates",
-			Description: "Add an integer percent buffer to split output amounts to " +
-				"facilitate output reuse",
-			DefaultValue: true,
+			ConfigOption: asset.ConfigOption{
+				Key:         multiSplitBufferKey,
+				DisplayName: "Multi split buffer",
+				Description: "Add an integer percent buffer to split output amounts to " +
+					"facilitate output reuse. This is only required for quote assets.",
+				DefaultValue: 5,
+				DependsOn:    multiSplitKey,
+			},
+			QuoteAssetOnly: true,
+			XYRange: &asset.XYRange{
+				Start: asset.XYRangePoint{
+					Label: "0%",
+					X:     0,
+					Y:     0,
+				},
+				End: asset.XYRangePoint{
+					Label: "100%",
+					X:     100,
+					Y:     100,
+				},
+				XUnit:  "%",
+				YUnit:  "%",
+				RoundX: true,
+				RoundY: true,
+			},
 		},
 	}
 
@@ -5521,7 +5543,7 @@ func (dcr *ExchangeWallet) monitorPeers(ctx context.Context) {
 }
 
 func (dcr *ExchangeWallet) emitTipChange(height int64) {
-	var data interface{}
+	var data any
 	// stakeInfo, err := dcr.wallet.StakeInfo(dcr.ctx)
 	// if err != nil {
 	// 	dcr.log.Errorf("Error getting stake info for tip change notification data: %v", err)
@@ -5671,7 +5693,7 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 	// be determined, as searching just the new tip might result in blocks
 	// being omitted from the search operation. If that happens, cancel all
 	// find redemption requests in queue.
-	notifyFatalFindRedemptionError := func(s string, a ...interface{}) {
+	notifyFatalFindRedemptionError := func(s string, a ...any) {
 		dcr.fatalFindRedemptionsError(fmt.Errorf("tipChange handler - "+s, a...), contractOutpoints)
 	}
 

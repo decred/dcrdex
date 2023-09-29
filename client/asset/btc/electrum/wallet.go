@@ -62,7 +62,7 @@ func (ec *WalletClient) nextID() uint64 {
 // should have their fields appropriately tagged for JSON marshalling. The
 // result is marshaled into result if it is non-nil, otherwise the result is
 // discarded.
-func (ec *WalletClient) Call(ctx context.Context, method string, args interface{}, result interface{}) error {
+func (ec *WalletClient) Call(ctx context.Context, method string, args any, result any) error {
 	reqMsg, err := prepareRequest(ec.nextID(), method, args)
 	if err != nil {
 		return err

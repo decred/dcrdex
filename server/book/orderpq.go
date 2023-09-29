@@ -242,7 +242,7 @@ func (pq *OrderPQ) Swap(i, j int) {
 
 // Push an order, which must be a *LimitOrder. Use heap.Push, not this directly.
 // Push is required for heap.Interface. It is not thread-safe.
-func (pq *OrderPQ) Push(ord interface{}) {
+func (pq *OrderPQ) Push(ord any) {
 	lo, ok := ord.(*order.LimitOrder)
 	if !ok || lo == nil {
 		fmt.Printf("Failed to push an order: %v", ord)
@@ -261,10 +261,10 @@ func (pq *OrderPQ) Push(ord interface{}) {
 	pq.push(entry)
 }
 
-// Pop will return an interface{} that may be cast to *LimitOrder. Use heap.Pop,
+// Pop will return an any that may be cast to *LimitOrder. Use heap.Pop,
 // Extract*, or Remove*, not this method. Pop is required for heap.Interface. It
 // is not thread-safe.
-func (pq *OrderPQ) Pop() interface{} {
+func (pq *OrderPQ) Pop() any {
 	// heap.Pop put the best value at the end and re-heaped without it. Now
 	// actually pop it off the heap's slice.
 	n := pq.Len()

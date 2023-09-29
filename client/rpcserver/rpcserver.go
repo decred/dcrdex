@@ -62,14 +62,14 @@ type clientCore interface {
 	Cancel(orderID dex.Bytes) error
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
-	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
+	DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error)
 	Exchanges() (exchanges map[string]*core.Exchange)
 	InitializeClient(appPass, seed []byte) error
 	Login(appPass []byte) error
 	Logout() error
 	OpenWallet(assetID uint32, appPass []byte) error
 	ToggleWalletStatus(assetID uint32, disable bool) error
-	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
+	GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error) // V0PURGE
 	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
 	UpdateBondOptions(form *core.BondOptionsForm) error
@@ -137,13 +137,13 @@ func genCertPair(certFile, keyFile string, hosts []string) error {
 
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
-func writeJSON(w http.ResponseWriter, thing interface{}) {
+func writeJSON(w http.ResponseWriter, thing any) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
 // writeJSONWithStatus marshals the provided interface and writes the bytes to
 // the ResponseWriter with the specified response code.
-func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
+func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	b, err := json.Marshal(thing)
 	if err != nil {

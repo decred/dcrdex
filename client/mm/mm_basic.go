@@ -62,9 +62,9 @@ type OrderPlacement struct {
 	GapFactor float64 `json:"gapFactor"`
 }
 
-// MarketMakingConfig is the configuration for a simple market
+// BasicMarketMakingConfig is the configuration for a simple market
 // maker that places orders on both sides of the order book.
-type MarketMakingConfig struct {
+type BasicMarketMakingConfig struct {
 	// GapStrategy selects an algorithm for calculating the distance from
 	// the basis price to place orders.
 	GapStrategy GapStrategy `json:"gapStrategy"`
@@ -111,7 +111,7 @@ func needBreakEvenHalfSpread(strat GapStrategy) bool {
 	return strat == GapStrategyAbsolutePlus || strat == GapStrategyPercentPlus || strat == GapStrategyMultiplier
 }
 
-func (c *MarketMakingConfig) Validate() error {
+func (c *BasicMarketMakingConfig) Validate() error {
 	if c.OracleBias < -0.05 || c.OracleBias > 0.05 {
 		return fmt.Errorf("bias %f out of bounds", c.OracleBias)
 	}
@@ -205,7 +205,7 @@ type basicMarketMaker struct {
 	host   string
 	base   uint32
 	quote  uint32
-	cfg    *MarketMakingConfig
+	cfg    *BasicMarketMakingConfig
 	book   dexOrderBook
 	log    dex.Logger
 	core   clientCore
@@ -279,7 +279,7 @@ func (m *basicMarketMaker) groupedOrders() (buys, sells map[int][]*groupedOrder)
 // or oracle weighting is 0, the fiat rate is used.
 // If there is no fiat rate available, the empty market rate in the
 // configuration is used.
-func basisPrice(book dexOrderBook, oracle oracle, cfg *MarketMakingConfig, mkt *core.Market, fiatRate uint64, log dex.Logger) uint64 {
+func basisPrice(book dexOrderBook, oracle oracle, cfg *BasicMarketMakingConfig, mkt *core.Market, fiatRate uint64, log dex.Logger) uint64 {
 	midGap, err := book.MidGap()
 	if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
 		log.Errorf("MidGap error: %v", err)
@@ -504,7 +504,7 @@ type rateLots struct {
 	placementIndex int
 }
 
-func basicMMRebalance(newEpoch uint64, m rebalancer, c clientCore, cfg *MarketMakingConfig, mkt *core.Market, buyFees,
+func basicMMRebalance(newEpoch uint64, m rebalancer, c clientCore, cfg *BasicMarketMakingConfig, mkt *core.Market, buyFees,
 	sellFees *orderFees, log dex.Logger) (cancels []dex.Bytes, buyOrders, sellOrders []*rateLots) {
 	basisPrice := m.basisPrice()
 	if basisPrice == 0 {
@@ -855,15 +855,15 @@ func (m *basicMarketMaker) run() {
 
 // RunBasicMarketMaker starts a basic market maker bot.
 func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, oracle oracle, baseFiatRate, quoteFiatRate float64, log dex.Logger) {
-	if cfg.MMCfg == nil {
+	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
 		log.Errorf("No market making config provided. Exiting.")
 		return
 	}
 
-	err := cfg.MMCfg.Validate()
+	err := cfg.BasicMMConfig.Validate()
 	if err != nil {
-		log.Errorf("Invalid market making config: %v. Exiting.", err)
+		c.Broadcast(newValidationErrorNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, fmt.Sprintf("invalid market making config: %v", err)))
 		return
 	}
 
@@ -877,7 +877,7 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, orac
 		ctx:            ctx,
 		core:           c,
 		log:            log,
-		cfg:            cfg.MMCfg,
+		cfg:            cfg.BasicMMConfig,
 		host:           cfg.Host,
 		base:           cfg.BaseAsset,
 		quote:          cfg.QuoteAsset,

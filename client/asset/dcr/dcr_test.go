@@ -2479,7 +2479,7 @@ func TestFundMultiOrder(t *testing.T) {
 		if totalNumCoins != len(node.lockedCoins) {
 			t.Fatalf("%s: expected %d locked coins, got %d", test.name, totalNumCoins, len(node.lockedCoins))
 		}
-		lockedCoins := make(map[wire.OutPoint]interface{})
+		lockedCoins := make(map[wire.OutPoint]any)
 		for _, coin := range node.lockedCoins {
 			lockedCoins[*coin] = true
 		}

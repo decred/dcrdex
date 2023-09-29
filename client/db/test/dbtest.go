@@ -171,7 +171,7 @@ func RandomNotification(maxTime uint64) *db.Notification {
 
 type testKiller interface {
 	Helper()
-	Fatalf(string, ...interface{})
+	Fatalf(string, ...any)
 }
 
 // MustCompareMatchAuth ensures the two MatchAuth are identical, calling the

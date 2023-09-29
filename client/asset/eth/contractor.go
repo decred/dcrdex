@@ -243,7 +243,7 @@ func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, erro
 }
 
 // estimateGas estimates the gas used to interact with the swap contract.
-func (c *contractorV0) estimateGas(ctx context.Context, value *big.Int, method string, args ...interface{}) (uint64, error) {
+func (c *contractorV0) estimateGas(ctx context.Context, value *big.Int, method string, args ...any) (uint64, error) {
 	data, err := c.abi.Pack(method, args...)
 	if err != nil {
 		return 0, fmt.Errorf("Pack error: %v", err)
@@ -422,7 +422,7 @@ func (c *tokenContractorV0) estimateTransferGas(ctx context.Context, amount *big
 
 // estimateGas estimates the gas needed for methods on the ERC20 token contract.
 // For estimating methods on the swap contract, use (contractorV0).estimateGas.
-func (c *tokenContractorV0) estimateGas(ctx context.Context, method string, args ...interface{}) (uint64, error) {
+func (c *tokenContractorV0) estimateGas(ctx context.Context, method string, args ...any) (uint64, error) {
 	data, err := erc20.ERC20ABI.Pack(method, args...)
 	if err != nil {
 		return 0, fmt.Errorf("token estimateGas Pack error: %v", err)

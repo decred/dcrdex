@@ -158,7 +158,7 @@ func (t *templates) buildErr() error {
 //
 // DRAFT NOTE: Might consider writing directly to the the buffer here. Could
 // still set the error code appropriately.
-func (t *templates) exec(name string, data interface{}) (string, error) {
+func (t *templates) exec(name string, data any) (string, error) {
 	tmpl, found := t.templates[name]
 	if !found {
 		return "", fmt.Errorf("template %q not found", name)

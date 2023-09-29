@@ -30,6 +30,8 @@ func init() {
 	asset.Register(BipID, &Driver{})
 	registerToken(simnetTokenID, "A token wallet for the DEX test token. Used for testing DEX software.", dex.Simnet)
 	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.", dex.Mainnet, dex.Testnet)
+	registerToken(wbtcTokenID, "Wrapped BTC.", dex.Mainnet)
+	registerToken(wethTokenID, "Wrapped ETH.", dex.Mainnet)
 }
 
 const (
@@ -43,6 +45,8 @@ const (
 var (
 	simnetTokenID, _ = dex.BipSymbolID("dextt.polygon")
 	usdcTokenID, _   = dex.BipSymbolID("usdc.polygon")
+	wethTokenID, _   = dex.BipSymbolID("weth.polygon")
+	wbtcTokenID, _   = dex.BipSymbolID("wbtc.polygon")
 	// WalletInfo defines some general information about a Polygon Wallet(EVM
 	// Compatible).
 

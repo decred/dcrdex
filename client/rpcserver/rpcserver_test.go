@@ -127,7 +127,7 @@ func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool) error {
 func (c *TCore) RescanWallet(assetID uint32, force bool) error {
 	return c.rescanWalletErr
 }
-func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
+func (c *TCore) GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error) {
 	return c.dexExchange, c.getDEXConfigErr
 }
 func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
@@ -157,7 +157,7 @@ func (c *TCore) Send(pw []byte, assetID uint32, value uint64, addr string, subtr
 func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 	return c.exportSeed, c.exportSeedErr
 }
-func (c *TCore) DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error) {
+func (c *TCore) DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error) {
 	return c.dexExchange, false, c.discoverAcctErr
 }
 func (c *TCore) DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) (int, error) {

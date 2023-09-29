@@ -150,7 +150,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 
 		// Prepare the thing and unmarshal.
-		var thing interface{}
+		var thing any
 		switch msg.Route {
 		case msgjson.CandlesRoute:
 			thing = new(msgjson.CandlesRequest)

@@ -1099,12 +1099,12 @@ func (w *rpcWallet) SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and
 // sent via nodeRawRequest.
-type anylist []interface{}
+type anylist []any
 
 // rpcClientRawRequest is used to marshal parameters and send requests to the
 // RPC server via rpcClient.RawRequest. If `thing` is non-nil, the result will
 // be marshaled into `thing`.
-func (w *rpcWallet) rpcClientRawRequest(ctx context.Context, method string, args anylist, thing interface{}) error {
+func (w *rpcWallet) rpcClientRawRequest(ctx context.Context, method string, args anylist, thing any) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])

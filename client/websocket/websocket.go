@@ -174,7 +174,7 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 }
 
 // Notify sends a notification to the websocket client.
-func (s *Server) Notify(route string, payload interface{}) {
+func (s *Server) Notify(route string, payload any) {
 	msg, err := msgjson.NewNotification(route, payload)
 	if err != nil {
 		s.log.Errorf("%q notification encoding error: %v", route, err)

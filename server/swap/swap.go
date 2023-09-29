@@ -1261,7 +1261,7 @@ func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errM
 }
 
 // respondSuccess sends a successful response to a user.
-func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result interface{}) {
+func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result any) {
 	msg, err := msgjson.NewResponse(id, result, nil)
 	if err != nil {
 		log.Errorf("failed to send success: %v", err)

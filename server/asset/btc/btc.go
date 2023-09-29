@@ -1352,7 +1352,7 @@ func (btc *Backend) run(ctx context.Context) {
 		}
 	}
 
-	sendErrFmt := func(s string, a ...interface{}) {
+	sendErrFmt := func(s string, a ...any) {
 		sendErr(fmt.Errorf(s, a...))
 	}
 

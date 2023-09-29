@@ -28,7 +28,7 @@ func init() {
 	})
 }
 
-func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCode int) error {
+func verifyResponse(payload *msgjson.ResponsePayload, res any, wantErrCode int) error {
 	if wantErrCode != -1 {
 		if payload.Error == nil {
 			return errors.New("no error")
@@ -98,7 +98,7 @@ type Dummy struct {
 func TestCreateResponse(t *testing.T) {
 	tests := []struct {
 		name        string
-		res         interface{}
+		res         any
 		resErr      *msgjson.Error
 		wantErrCode int
 	}{{

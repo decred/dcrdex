@@ -53,7 +53,7 @@ func (aid AccountID) Value() (driver.Value, error) {
 }
 
 // Scan implements the sql.Scanner interface.
-func (aid *AccountID) Scan(src interface{}) error {
+func (aid *AccountID) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		copy(aid[:], src)

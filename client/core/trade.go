@@ -265,7 +265,7 @@ type trackedTrade struct {
 	lockTimeTaker      time.Duration
 	lockTimeMaker      time.Duration
 	notify             func(Notification)
-	formatDetails      func(Topic, ...interface{}) (string, string)
+	formatDetails      func(Topic, ...any) (string, string)
 	fromAssetID        uint32            // wallets.fromWallet.AssetID
 	options            map[string]string // metaData.Options (immutable) for Redeem and Swap
 	redemptionReserves uint64            // metaData.RedemptionReserves (immutable)
@@ -292,7 +292,7 @@ type trackedTrade struct {
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
-	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string)) *trackedTrade {
+	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...any) (string, string)) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -2890,7 +2890,7 @@ func (t *trackedTrade) confirmRedemptions(matches []*matchTracker) {
 // mutex lock held for writes.
 func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 	if confs := match.redemptionConfs; confs > 0 && confs >= match.redemptionConfsReq { // already there, stop checking
-		if len(match.MetaData.Proof.Auth.RedeemSig) == 0 && !t.isSelfGoverned() {
+		if len(match.MetaData.Proof.Auth.RedeemSig) == 0 && (!t.isSelfGoverned() && !match.MetaData.Proof.IsRevoked()) {
 			return false, nil // waiting on redeem request to succeed
 		}
 		// Redeem request just succeeded or we gave up on the server.

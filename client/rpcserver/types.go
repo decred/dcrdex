@@ -110,7 +110,7 @@ type match struct {
 type discoverAcctForm struct {
 	addr    string
 	appPass encode.PassBytes
-	cert    interface{}
+	cert    any
 }
 
 // openWalletForm is information necessary to open a wallet.

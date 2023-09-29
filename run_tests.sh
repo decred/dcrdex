@@ -32,7 +32,7 @@ do
 
 	# Run `go mod tidy` and fail if the git status of go.mod and/or
 	# go.sum changes. Only do this for the latest Go version.
-	if [[ "$GV" =~ ^1.20 ]]; then
+	if [[ "$GV" =~ ^1.21 ]]; then
 		MOD_STATUS=$(git status --porcelain go.mod go.sum)
 		go mod tidy
 		UPDATED_MOD_STATUS=$(git status --porcelain go.mod go.sum)
@@ -70,6 +70,7 @@ go test -c -o /dev/null -tags rpclive ./client/asset/eth
 go test -c -o /dev/null -tags harness ./client/asset/zec
 go test -c -o /dev/null -tags harness ./client/asset/dash
 go test -c -o /dev/null -tags harness ./client/asset/firo
+go test -c -o /dev/null -tags rpclive ./client/asset/polygon
 go test -c -o /dev/null -tags live ./dex/testing/firo/test
 go test -c -o /dev/null -tags live ./server/noderelay
 go test -c -o /dev/null -tags dcrlive ./server/asset/dcr

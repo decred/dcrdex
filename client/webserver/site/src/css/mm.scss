@@ -9,6 +9,10 @@
     margin-top: 10px;
   }
 
+  .ico-plus {
+    color: green;
+  }
+
   .asset-row {
     img {
       width: 30px;
@@ -186,40 +190,30 @@
     max-width: 300px;
   }
 
-  #pwSubmit {
-    padding: 5px 10px;
-  }
-
-  table.oracles-table {
-    font-size: 15px;
-
+  #botTable {
+    @extend .table; 
+    @extend .table-striped; 
+  
     img {
       width: 16px;
       height: 16px;
     }
-
-    tr {
-      border-style: solid none;
-      border-width: 1px;
-      border-color: #7777;
+  
+    .ico-rocket {
+      color: #29bb77;
     }
-
-    td:first-child {
-      width: 25px;
+    
+    .ico-sleeping {
+      color: #7777;
     }
-
-    td {
-      white-space: nowrap;
-    }
-
-    td:last-child {
-      text-align: right;
-      padding-left: 10px;
+  
+    .ico-cross {
+      color: #99302b99;
     }
   }
-
-  #noFiatBox {
-    max-width: 275px;
+  
+  .stopred-bg {
+    background-color: #99302b99 !important; 
   }
 }
 
@@ -230,5 +224,9 @@ body.dark #main.mm {
 
   #assetDropdown {
     background-color: $dark_body_bg;
+  }
+
+  #botTable {
+    @extend .table-dark;
   }
 }

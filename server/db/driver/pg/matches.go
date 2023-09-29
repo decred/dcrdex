@@ -617,7 +617,7 @@ func (a *Archiver) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapDa
 // updateMatchStmt executes a SQL statement with the provided arguments,
 // choosing the market's matches table from the MarketMatchID. Exactly 1 table
 // row must be updated, otherwise an error is returned.
-func (a *Archiver) updateMatchStmt(mid db.MarketMatchID, stmt string, args ...interface{}) error {
+func (a *Archiver) updateMatchStmt(mid db.MarketMatchID, stmt string, args ...any) error {
 	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
 	if err != nil {
 		return err

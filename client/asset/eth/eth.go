@@ -368,7 +368,8 @@ type monitoredTx struct {
 	// replacedTx could be set when the tx is created, be immutable, and not
 	// need the mutex, but since Redeem doesn't know if the transaction is a
 	// replacement or a new one, this variable is set in recordReplacementTx.
-	replacedTx *common.Hash
+	replacedTx        *common.Hash
+	errorsBroadcasted uint16
 }
 
 // MarshalBinary marshals a monitoredTx into a byte array.
@@ -1996,7 +1997,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
 
-	fail := func(s string, a ...interface{}) ([]asset.Receipt, asset.Coin, uint64, error) {
+	fail := func(s string, a ...any) ([]asset.Receipt, asset.Coin, uint64, error) {
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
@@ -2083,7 +2084,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
 
-	fail := func(s string, a ...interface{}) ([]asset.Receipt, asset.Coin, uint64, error) {
+	fail := func(s string, a ...any) ([]asset.Receipt, asset.Coin, uint64, error) {
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
@@ -3235,8 +3236,13 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, c
 	}
 
 	spent = swapData.State >= dexeth.SSRedeemed
-	confs = uint32(hdr.Number.Uint64() - swapData.BlockHeight + 1)
-
+	tip := hdr.Number.Uint64()
+	// TODO: If tip < swapData.BlockHeight (which has been observed), what does
+	// that mean? Are we using the wrong provider in a multi-provider setup? How
+	// do we resolve provider relevance?
+	if tip >= swapData.BlockHeight {
+		confs = uint32(hdr.Number.Uint64() - swapData.BlockHeight + 1)
+	}
 	return
 }
 
@@ -3763,6 +3769,8 @@ func (w *assetWallet) resubmitRedemption(tx *types.Transaction, contractVersion 
 	var replacementHash common.Hash
 	copy(replacementHash[:], txs[0])
 
+	w.log.Infof("Redemption transaction %s was broadcast to replace transaction %s (original tx: %s)", replacementHash, monitoredTx.tx.Hash(), tx.Hash())
+
 	if monitoredTx != nil {
 		err = w.recordReplacementTx(monitoredTx, replacementHash)
 		if err != nil {
@@ -4041,11 +4049,27 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 			w.clearMonitoredTx(monitoredTx)
 			return confStatus(txConfsNeededToConfirm, txHash), nil
 		}
-		replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nil, feeWallet, monitoredTx)
-		if err != nil {
-			return nil, err
+
+		w.log.Errorf("Redemption transaction rejected!!! Tx %s failed to redeem %s funds", tx.Hash(), dex.BipIDSymbol(w.assetID))
+		// Only broadcast a single replacement before giving up.
+		if monitoredTx.replacedTx == nil {
+			w.log.Infof("Attempting to resubmit a %s redemption with secret hash %s", dex.BipIDSymbol(w.assetID), hex.EncodeToString(secretHash[:]))
+			replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nil, feeWallet, monitoredTx)
+			if err != nil {
+				return nil, err
+			}
+			return confStatus(0, *replacementTxHash), nil
 		}
-		return confStatus(0, *replacementTxHash), nil
+		// We've failed to redeem twice. We can't keep broadcasting txs into the
+		// void. We have to give up. Print a bunch of errors and then report
+		// the redemption as confirmed so we'll stop following it.
+		if monitoredTx.errorsBroadcasted < 100 {
+			monitoredTx.errorsBroadcasted++
+			return nil, fmt.Errorf("failed to redeem %s swap with secret hash %s twice. not trying again",
+				dex.BipIDSymbol(w.assetID), hex.EncodeToString(secretHash[:]))
+		}
+		const aTonOfFakeConfs = 1e3
+		return confStatus(aTonOfFakeConfs, txHash), nil
 	}
 	if confirmations > 0 {
 		return confStatus(confirmations, txHash), nil
@@ -4637,10 +4661,9 @@ func getFileCredentials(chain, path string, net dex.Network) (seed []byte, provi
 	}
 	seed = p.Seed
 	for _, uri := range p.Providers[chain][net.String()] {
-		if strings.HasPrefix(uri, "#") || strings.HasPrefix(uri, ";") {
-			continue
+		if !strings.HasPrefix(uri, "#") && !strings.HasPrefix(uri, ";") {
+			providers = append(providers, uri)
 		}
-		providers = append(providers, uri)
 	}
 	if net == dex.Simnet && len(providers) == 0 {
 		u, _ := user.Current()
@@ -5319,7 +5342,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		copy(randomAddr[:], encode.RandomBytes(20))
 		transferTx, err := tc.transfer(txOpts, randomAddr, big.NewInt(1))
 		if err != nil {
-			return fmt.Errorf("error estimating transfer gas: %w", err)
+			return fmt.Errorf("transfer error: %w", err)
 		}
 		if err = waitForConfirmation(ctx, cl, transferTx.Hash()); err != nil {
 			return fmt.Errorf("error waiting for transfer tx: %w", err)
