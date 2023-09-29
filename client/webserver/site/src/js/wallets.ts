@@ -23,6 +23,8 @@ import {
   Order,
   OrderFilter,
   WalletCreationNote,
+  WalletNote,
+  TipChangeNote,
   Market,
   PeerSource,
   WalletPeer,
@@ -36,6 +38,12 @@ import {
   TicketStats
 } from './registry'
 import { CoinExplorers } from './order'
+
+interface DecredTicketTipUpdate {
+  ticketPrice: number
+  votingSubsidy: number
+  stats: TicketStats
+}
 
 const animationLength = 300
 const traitRescanner = 1
@@ -281,7 +289,8 @@ export default class WalletsPage extends BasePage {
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       walletconfig: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
-      createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) }
+      createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) },
+      walletnote: (note: WalletNote) => { this.handleCustomWalletNote(note) }
     })
 
     const firstAsset = this.sortAssetButtons()
@@ -1888,6 +1897,19 @@ export default class WalletsPage extends BasePage {
   handleCreateWalletNote (note: WalletCreationNote) {
     this.updateAssetButton(note.assetID)
     this.assetUpdated(note.assetID)
+  }
+
+  handleCustomWalletNote (note: WalletNote) {
+    const payload = note.payload
+    if (payload.tip) {
+      const n = payload as TipChangeNote
+      switch (n.assetID) {
+        case 42: { // dcr
+          const data = n.data as DecredTicketTipUpdate
+          console.log('updating ticket buyer data', data)
+        }
+      }
+    }
   }
 
   /*

@@ -4981,14 +4981,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Chance of a given ticket voting in a block is
-	// p = chainParams.TicketsPerBlock / (chainParams.TicketPoolSize * chainParams.TicketsPerBlock)
-	//   = 1 / chainParams.TicketPoolSize
-	// Expected number of blocks to vote is
-	// 1 / p = chainParams.TicketPoolSize
-	expectedBlocksToVote := int64(dcr.chainParams.TicketPoolSize)
-	voteHeightExpectationValue := dcr.cachedBestBlock().height + expectedBlocksToVote
-	voteSubsidy := dcr.subsidyCache.CalcStakeVoteSubsidyV3(voteHeightExpectationValue, blockchain.SSVDCP0012)
+
 	isRPC := !dcr.isNative()
 	var vspURL string
 	if !isRPC {
@@ -5012,7 +5005,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 
 	return &asset.TicketStakingStatus{
 		TicketPrice:   uint64(sinfo.Sdiff),
-		VotingSubsidy: uint64(voteSubsidy),
+		VotingSubsidy: dcr.voteSubsidy(dcr.cachedBestBlock().height),
 		VSP:           vspURL,
 		IsRPC:         isRPC,
 		Tickets:       tickets,
@@ -5028,6 +5021,17 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 			Revokes:      sinfo.Revoked,
 		},
 	}, nil
+}
+
+func (dcr *ExchangeWallet) voteSubsidy(tipHeight int64) uint64 {
+	// Chance of a given ticket voting in a block is
+	// p = chainParams.TicketsPerBlock / (chainParams.TicketPoolSize * chainParams.TicketsPerBlock)
+	//   = 1 / chainParams.TicketPoolSize
+	// Expected number of blocks to vote is
+	// 1 / p = chainParams.TicketPoolSize
+	expectedBlocksToVote := int64(dcr.chainParams.TicketPoolSize)
+	voteHeightExpectationValue := tipHeight + expectedBlocksToVote
+	return uint64(dcr.subsidyCache.CalcStakeVoteSubsidyV3(voteHeightExpectationValue, blockchain.SSVDCP0012))
 }
 
 // tickets gets tickets from the wallet and changes the status of "unspent"
@@ -5315,16 +5319,25 @@ func (dcr *ExchangeWallet) monitorPeers(ctx context.Context) {
 
 func (dcr *ExchangeWallet) emitTipChange(height int64) {
 	var data any
-	// stakeInfo, err := dcr.wallet.StakeInfo(dcr.ctx)
-	// if err != nil {
-	// 	dcr.log.Errorf("Error getting stake info for tip change notification data: %v", err)
-	// } else {
-	// 	data = &struct {
-	// 		TicketPrice uint64 `json:"ticketPrice"`
-	// 	}{
-	// 		TicketPrice: uint64(stakeInfo.Sdiff),
-	// 	}
-	// }
+	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
+	if err != nil {
+		dcr.log.Errorf("Error getting stake info for tip change notification data: %v", err)
+	} else {
+		data = &struct {
+			TicketPrice   uint64            `json:"ticketPrice"`
+			VotingSubsidy uint64            `json:"votingSubsidy"`
+			Stats         asset.TicketStats `json:"stats"`
+		}{
+			TicketPrice: uint64(sinfo.Sdiff),
+			Stats: asset.TicketStats{
+				TotalRewards: uint64(sinfo.TotalSubsidy),
+				TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
+				Votes:        sinfo.Voted,
+				Revokes:      sinfo.Revoked,
+			},
+			VotingSubsidy: dcr.voteSubsidy(height),
+		}
+	}
 	dcr.emit.TipChange(uint64(height), data)
 }
 
