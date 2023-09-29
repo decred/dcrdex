@@ -45,15 +45,16 @@ few simple *options* for obtaining the software. The standalone DEX client is
 strongly recommended as it is the easiest to setup and generally has the most
 up-to-date downloads. Pick **just one** method:
 
-1. Download the the standalone DEX client for your operating system for the
-   [latest release on GitHub](https://github.com/decred/dcrdex/releases).
-2. Use your operating system's package manager. See [OS Packages](#os-packages)
+1. Download [standalone DEX client for your operating system](https://dex.decred.org/#downloads).
+2. Download [the latest standalone DEX client release from GitHub](https://github.com/decred/dcrdex/releases)
+   for your operating system.
+3. Use your operating system's package manager. See [OS Packages](#os-packages)
    for more info.
-3. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
+4. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
    the official graphical Decred wallet, which integrates the DEX client, and go
    to the DEX tab.
-4. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/). Not recommended unless you already have this in your workflow.
-5. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
+5. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/). Not recommended unless you already have this in your workflow.
+6. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
 
 See the [Client Installation and Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration)
 page on the wiki for more information and a detailed walk-through of the initial setup.
