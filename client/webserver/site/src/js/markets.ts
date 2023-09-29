@@ -482,7 +482,7 @@ export default class MarketsPage extends BasePage {
       bind(row.node, 'click', () => {
         // return early if the market is already set
         const { quoteid: quoteID, baseid: baseID, xc: { host } } = row.mkt
-        if (this.market && this.market.base.id === baseID && this.market.quote.id === quoteID) return
+        if (this.market?.base?.id === baseID && this.market?.quote?.id === quoteID) return
         this.startLoadingAnimations()
         this.setMarket(host, baseID, quoteID)
       })
@@ -613,7 +613,7 @@ export default class MarketsPage extends BasePage {
   setMarketDetails () {
     if (!this.market) return
     for (const s of this.stats) {
-      const [ba, qa] = [app().assets[this.market.base.id], app().assets[this.market.quote.id]]
+      const { baseCfg: ba, quoteCfg: qa } = this.market
       s.tmpl.baseIcon.src = Doc.logoPath(ba.symbol)
       s.tmpl.quoteIcon.src = Doc.logoPath(qa.symbol)
       Doc.empty(s.tmpl.baseSymbol, s.tmpl.quoteSymbol)
@@ -1097,7 +1097,7 @@ export default class MarketsPage extends BasePage {
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
 
-    if ((!baseAsset && !quoteAsset) || (!baseAsset.wallet && !quoteAsset.wallet)) Doc.setVis(true, page.noWallet)
+    if (!baseAsset?.wallet || !quoteAsset?.wallet) Doc.setVis(true, page.noWallet)
     else this.balanceWgt.setWallets(host, base, quote)
     this.setMarketDetails()
     this.setCurrMarketPrice()
@@ -1742,7 +1742,7 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (note: BookUpdate) {
     app().log('book', 'handleBookRoute:', note)
     const mktBook = note.payload
-    const [b, q] = [app().assets[this.market.base.id], app().assets[this.market.quote.id]]
+    const { baseCfg: b, quoteCfg: q } = this.market
     if (mktBook.base !== b.id || mktBook.quote !== q.id) return // user already changed markets
     this.handleBook(mktBook)
     this.updateTitle()
@@ -3033,8 +3033,8 @@ class MarketRow {
     const tmpl = this.tmpl = Doc.parseTemplate(this.node)
     tmpl.baseIcon.src = Doc.logoPath(mkt.basesymbol)
     tmpl.quoteIcon.src = Doc.logoPath(mkt.quotesymbol)
-    tmpl.baseSymbol.appendChild(Doc.symbolize(app().assets[mkt.baseid], true))
-    tmpl.quoteSymbol.appendChild(Doc.symbolize(app().assets[mkt.quoteid], true))
+    tmpl.baseSymbol.appendChild(Doc.symbolize(mkt.xc.assets[mkt.baseid], true))
+    tmpl.quoteSymbol.appendChild(Doc.symbolize(mkt.xc.assets[mkt.quoteid], true))
     tmpl.baseName.textContent = mkt.baseName
     tmpl.host.textContent = mkt.xc.host
     tmpl.host.style.color = hostColor(mkt.xc.host)
