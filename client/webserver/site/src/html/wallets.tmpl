@@ -697,6 +697,9 @@
 
     {{- /* PICK A VOTING SERVICE PROVIDER */ -}}
     <form id="vspPicker" class="flex-center flex-column p-2 m-4">
+      <div class="form-closer hoverbg">
+        <span class="ico-cross"></span>
+      </div>
       <div class="fs24 sans-light">Select a Voting Service Provider</div>
       <hr class="dashed my-2">
       <table id="vspPickerTable">
@@ -714,7 +717,20 @@
             <td data-tmpl="voting"></td>
           </tr>
         </tbody>
-      </table>{{/* TODO: ADD MANUAL INPUT */}}
+      </table>
+      <p class="mt-3">
+        <label for="customVspUrl">Or add custom VSP URL:</label>
+      </p>
+       <div class="d-flex align-items-stretch w-100">
+        <input 
+          id="customVspUrl"
+          type="url" 
+          class="flex-grow-1"
+          placeholder="https://" 
+          aria-label="Custom VSP URL"
+        >
+        <button id="customVspSubmit" class="btn btn-outline-secondary" type="button">Add</button>
+      </div>
     </form>
 
     {{- /* PURCHASE TICKETS */ -}}
