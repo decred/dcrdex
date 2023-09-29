@@ -406,6 +406,7 @@ export default class OrderPage extends BasePage {
   addNewMatchCard (match: Match) {
     const page = this.page
     const matchCard = page.matchCardTmpl.cloneNode(true) as HTMLElement
+    app().bindUrlHandlers(matchCard)
     matchCard.dataset.matchID = match.matchID
     this.setImmutableMatchCardElements(matchCard, match)
     this.setMutableMatchCardElements(matchCard, match)
