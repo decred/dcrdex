@@ -17,6 +17,7 @@ import {
   Exchange,
   PageElement
 } from './registry'
+import State from './state'
 
 export default class RegistrationPage extends BasePage {
   body: HTMLElement
@@ -121,6 +122,13 @@ export default class RegistrationPage extends BasePage {
         this.discoverAcctForm.animate()
     }
     Doc.show(currentForm)
+
+    // There's nothing on the page.discoverAcctForm except to receive user pass
+    // before attempting to discover user account and there's no need to have
+    // them click another button when we can carry on without user interaction.
+    if (currentForm === page.discoverAcctForm && (State.passwordIsCached() || this.pwCache?.pw)) {
+      this.discoverAcctForm.page.submit.click()
+    }
 
     if (app().authed()) this.auth()
   }
