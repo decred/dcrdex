@@ -362,7 +362,7 @@ func MakeContract(rAddr, sAddr btcutil.Address, secretHash []byte, lockTime int6
 	} else {
 		_, ok := rAddr.(*btcutil.AddressPubKeyHash)
 		if !ok {
-			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", rAddr.String())
+			return nil, fmt.Errorf("recipient address %s is not a pubkey-hash address", rAddr.String())
 		}
 		_, ok = sAddr.(*btcutil.AddressPubKeyHash)
 		if !ok {

@@ -394,7 +394,7 @@ type TBackend struct {
 	synced         uint32
 	syncedErr      error
 	confsMinus2    int64
-	feeRateMinus10 int64
+	invalidFeeRate bool
 }
 
 func tNewUTXOBackend() *tUTXOBackend {
@@ -427,7 +427,7 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 		val:     v,
 		decoded: str,
 		confs:   b.confsMinus2 + 2,
-		feeRate: uint64(b.feeRateMinus10 + 10),
+		feeRate: 20,
 	}, b.utxoErr
 }
 func (b *TBackend) Contract(coinID, redeemScript []byte) (*asset.Contract, error) {
@@ -471,8 +471,8 @@ func (b *TBackend) TxData([]byte) ([]byte, error) { return nil, nil }
 func (*TBackend) Info() *asset.BackendInfo {
 	return &asset.BackendInfo{}
 }
-func (*TBackend) ValidateFeeRate(*asset.Contract, uint64) bool {
-	return true
+func (b *TBackend) ValidateFeeRate(asset.Coin, uint64) bool {
+	return !b.invalidFeeRate
 }
 
 type tUTXOBackend struct {
@@ -516,6 +516,7 @@ type tUTXO struct {
 
 var utxoAuthErr error
 
+func (u *tUTXO) Coin() asset.Coin                             { return u }
 func (u *tUTXO) Confirmations(context.Context) (int64, error) { return u.confs, nil }
 func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
@@ -526,7 +527,7 @@ func (u *tUTXO) TxID() string                    { return "" }
 func (u *tUTXO) String() string                  { return u.decoded }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
-func (u *tUTXO) FeeRate() uint64                 { return u.feeRate }
+func (u *tUTXO) FeeRate() uint64                 { return 0 }
 
 type tUser struct {
 	acct    account.AccountID
@@ -903,16 +904,13 @@ func TestLimit(t *testing.T) {
 		func(tag string, code int) { t.Helper(); ensureErr(tag, sendLimit(), code) },
 	)
 
-	// Zero confs is ok, because fees are > 90% of last known fee rate.
+	// Zero-conf fails fee rate validation.
 	oRig.dcr.confsMinus2 = -2
-	oRig.dcr.feeRateMinus10 = -1 // fee rate 9 >= 0.9 * 10.
-	ensureSuccess("valid zero-conf order")
-	// But any lower fees on the funding coin, and the order will fail.
-	oRig.dcr.feeRateMinus10--
+	oRig.dcr.invalidFeeRate = true
 	ensureErr("low-fee zero-conf order", sendLimit(), msgjson.FundingError)
 	// reset
 	oRig.dcr.confsMinus2 = 0
-	oRig.dcr.feeRateMinus10 = 0
+	oRig.dcr.invalidFeeRate = false
 
 	// Rate = 0
 	limit.Rate = 0
@@ -1128,17 +1126,12 @@ func TestMarketStartProcessStop(t *testing.T) {
 		func(tag string, code int) { t.Helper(); ensureErr(tag, sendMarket(), code) },
 	)
 
-	// Zero confs is ok, because fees are > 90% of last known fee rate.
+	// Zero-conf fails fee rate validation.
 	oRig.dcr.confsMinus2 = -2
-	oRig.dcr.feeRateMinus10 = -1 // fee rate 9 >= 0.9 * 10.
-	ensureSuccess("valid zero-conf order")
-
-	// But any lower fees on the funding coin, and the order will fail.
-	oRig.dcr.feeRateMinus10--
+	oRig.dcr.invalidFeeRate = true
 	ensureErr("low-fee zero-conf order", sendMarket(), msgjson.FundingError)
-	// reset
 	oRig.dcr.confsMinus2 = 0
-	oRig.dcr.feeRateMinus10 = 0
+	oRig.dcr.invalidFeeRate = false
 
 	// Redeem to a quote asset.
 	mkt.Quote = assetETH.ID

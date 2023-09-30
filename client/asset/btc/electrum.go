@@ -24,6 +24,9 @@ type ExchangeWalletElectrum struct {
 	*baseWallet
 	*authAddOn
 	ew *electrumWallet
+
+	findRedemptionMtx   sync.RWMutex
+	findRedemptionQueue map[OutPoint]*FindRedemptionReq
 }
 
 var _ asset.Wallet = (*ExchangeWalletElectrum)(nil)
@@ -49,21 +52,20 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 	ewc := electrum.NewWalletClient(rpcCfg.RPCUser, rpcCfg.RPCPass,
 		"http://"+rpcCfg.RPCBind, rpcCfg.WalletName)
 	ew := newElectrumWallet(ewc, &electrumWalletConfig{
-		params:         cfg.ChainParams,
-		log:            cfg.Logger.SubLogger("ELECTRUM"),
-		addrDecoder:    cfg.AddressDecoder,
-		addrStringer:   cfg.AddressStringer,
-		txDeserializer: cfg.TxDeserializer,
-		txSerializer:   cfg.TxSerializer,
-		segwit:         cfg.Segwit,
-		rpcCfg:         rpcCfg,
+		params:       cfg.ChainParams,
+		log:          cfg.Logger.SubLogger("ELECTRUM"),
+		addrDecoder:  cfg.AddressDecoder,
+		addrStringer: cfg.AddressStringer,
+		segwit:       cfg.Segwit,
+		rpcCfg:       rpcCfg,
 	})
-	btc.node = ew
+	btc.setNode(ew)
 
 	eew := &ExchangeWalletElectrum{
-		baseWallet: btc,
-		authAddOn:  &authAddOn{btc.node},
-		ew:         ew,
+		baseWallet:          btc,
+		authAddOn:           &authAddOn{btc.node},
+		ew:                  ew,
+		findRedemptionQueue: make(map[OutPoint]*FindRedemptionReq),
 	}
 	// In (*baseWallet).feeRate, use ExchangeWalletElectrum's walletFeeRate
 	// override for localFeeRate. No externalFeeRate is required but will be
@@ -138,6 +140,18 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 	return wg, nil
 }
 
+func (btc *ExchangeWalletElectrum) cancelRedemptionSearches() {
+	// Close all open channels for contract redemption searches
+	// to prevent leakages and ensure goroutines that are started
+	// to wait on these channels end gracefully.
+	btc.findRedemptionMtx.Lock()
+	for contractOutpoint, req := range btc.findRedemptionQueue {
+		req.fail("shutting down")
+		delete(btc.findRedemptionQueue, contractOutpoint)
+	}
+	btc.findRedemptionMtx.Unlock()
+}
+
 // walletFeeRate satisfies BTCCloneCFG.FeeEstimator.
 func (btc *ExchangeWalletElectrum) walletFeeRate(ctx context.Context, _ RawRequester, confTarget uint64) (uint64, error) {
 	satPerKB, err := btc.ew.wallet.FeeRate(ctx, int64(confTarget))
@@ -152,8 +166,8 @@ func (btc *ExchangeWalletElectrum) walletFeeRate(ctx context.Context, _ RawReque
 // If not found, but otherwise without an error, a nil Hash will be returned
 // along with a nil error. Thus, both the error and the Hash should be checked.
 // This convention is only used since this is not part of the public API.
-func (btc *ExchangeWalletElectrum) findRedemption(ctx context.Context, op outPoint, contractHash []byte) (*chainhash.Hash, uint32, []byte, error) {
-	msgTx, vin, err := btc.ew.findOutputSpender(ctx, &op.txHash, op.vout)
+func (btc *ExchangeWalletElectrum) findRedemption(ctx context.Context, op OutPoint, contractHash []byte) (*chainhash.Hash, uint32, []byte, error) {
+	msgTx, vin, err := btc.ew.findOutputSpender(ctx, &op.TxHash, op.Vout)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -173,7 +187,7 @@ func (btc *ExchangeWalletElectrum) findRedemption(ctx context.Context, op outPoi
 
 func (btc *ExchangeWalletElectrum) tryRedemptionRequests(ctx context.Context) {
 	btc.findRedemptionMtx.RLock()
-	reqs := make([]*findRedemptionReq, 0, len(btc.findRedemptionQueue))
+	reqs := make([]*FindRedemptionReq, 0, len(btc.findRedemptionQueue))
 	for _, req := range btc.findRedemptionQueue {
 		reqs = append(reqs, req)
 	}
@@ -188,8 +202,8 @@ func (btc *ExchangeWalletElectrum) tryRedemptionRequests(ctx context.Context) {
 		if txHash == nil {
 			continue // maybe next time
 		}
-		req.success(&findRedemptionResult{
-			redemptionCoinID: toCoinID(txHash, vin),
+		req.success(&FindRedemptionResult{
+			redemptionCoinID: ToCoinID(txHash, vin),
 			secret:           secret,
 		})
 	}
@@ -212,18 +226,18 @@ func (btc *ExchangeWalletElectrum) FindRedemption(ctx context.Context, coinID, c
 	// contractHash := dexbtc.ExtractScriptHash(txOut.PkScript)
 
 	// Check once before putting this in the queue.
-	outPt := newOutPoint(txHash, vout)
+	outPt := NewOutPoint(txHash, vout)
 	spendTxID, vin, secret, err := btc.findRedemption(ctx, outPt, contractHash)
 	if err != nil {
 		return nil, nil, err
 	}
 	if spendTxID != nil {
-		return toCoinID(spendTxID, vin), secret, nil
+		return ToCoinID(spendTxID, vin), secret, nil
 	}
 
-	req := &findRedemptionReq{
+	req := &FindRedemptionReq{
 		outPt:        outPt,
-		resultChan:   make(chan *findRedemptionResult, 1),
+		resultChan:   make(chan *FindRedemptionResult, 1),
 		contractHash: contractHash,
 		// blockHash, blockHeight, and pkScript not used by this impl.
 		blockHash: &chainhash.Hash{},
@@ -232,7 +246,7 @@ func (btc *ExchangeWalletElectrum) FindRedemption(ctx context.Context, coinID, c
 		return nil, nil, err
 	}
 
-	var result *findRedemptionResult
+	var result *FindRedemptionResult
 	select {
 	case result = <-req.resultChan:
 		if result == nil {
@@ -257,6 +271,16 @@ func (btc *ExchangeWalletElectrum) FindRedemption(ctx context.Context, coinID, c
 	return nil, nil, err
 }
 
+func (btc *ExchangeWalletElectrum) queueFindRedemptionRequest(req *FindRedemptionReq) error {
+	btc.findRedemptionMtx.Lock()
+	defer btc.findRedemptionMtx.Unlock()
+	if _, exists := btc.findRedemptionQueue[req.outPt]; exists {
+		return fmt.Errorf("duplicate find redemption request for %s", req.outPt)
+	}
+	btc.findRedemptionQueue[req.outPt] = req
+	return nil
+}
+
 // watchBlocks pings for new blocks and runs the tipChange callback function
 // when the block changes.
 func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
@@ -264,7 +288,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 	ticker := time.NewTicker(electrumBlockTick)
 	defer ticker.Stop()
 
-	bestBlock := func() (*block, error) {
+	bestBlock := func() (*BlockVector, error) {
 		hdr, err := btc.node.getBestBlockHeader()
 		if err != nil {
 			return nil, fmt.Errorf("getBestBlockHeader: %v", err)
@@ -273,13 +297,13 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid best block hash %s: %v", hdr.Hash, err)
 		}
-		return &block{hdr.Height, *hash}, nil
+		return &BlockVector{hdr.Height, *hash}, nil
 	}
 
 	currentTip, err := bestBlock()
 	if err != nil {
 		btc.log.Errorf("Failed to get best block: %v", err)
-		currentTip = new(block) // zero height and hash
+		currentTip = new(BlockVector) // zero height and hash
 	}
 
 	for {
@@ -296,7 +320,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 				continue
 			}
 
-			sameTip := currentTip.height == int64(stat.Height)
+			sameTip := currentTip.Height == int64(stat.Height)
 			if sameTip {
 				// Could have actually been a reorg to different block at same
 				// height. We'll report a new tip block on the next block.
@@ -312,10 +336,10 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 				continue
 			}
 
-			btc.log.Debugf("tip change: %d (%s) => %d (%s)", currentTip.height, currentTip.hash,
-				newTip.height, newTip.hash)
+			btc.log.Debugf("tip change: %d (%s) => %d (%s)", currentTip.Height, currentTip.Hash,
+				newTip.Height, newTip.Hash)
 			currentTip = newTip
-			btc.emit.TipChange(uint64(newTip.height))
+			btc.emit.TipChange(uint64(newTip.Height))
 			go btc.tryRedemptionRequests(ctx)
 
 		case <-ctx.Done():

@@ -145,7 +145,7 @@ type testData struct {
 	verboseBlocks       map[string]*msgBlockWithHeight
 	dbBlockForTx        map[chainhash.Hash]*hashEntry
 	mainchain           map[int64]*chainhash.Hash
-	getBlockchainInfo   *getBlockchainInfoResult
+	getBlockchainInfo   *GetBlockchainInfoResult
 	getBestBlockHashErr error
 
 	mempoolTxs        map[chainhash.Hash]*wire.MsgTx
@@ -183,7 +183,7 @@ type testData struct {
 	// spv
 	fetchInputInfoTx  *wire.MsgTx
 	getCFilterScripts map[chainhash.Hash][][]byte
-	checkpoints       map[outPoint]*scanCheckpoint
+	checkpoints       map[OutPoint]*scanCheckpoint
 	confs             uint32
 	confsSpent        bool
 	confsErr          error
@@ -209,7 +209,7 @@ func newTestData() *testData {
 		fetchInputInfoTx:  dummyTx(),
 		getCFilterScripts: make(map[chainhash.Hash][][]byte),
 		confsErr:          WalletTransactionNotFound,
-		checkpoints:       make(map[outPoint]*scanCheckpoint),
+		checkpoints:       make(map[OutPoint]*scanCheckpoint),
 		tipChanged:        make(chan asset.WalletNotification, 1),
 		getTransactionMap: make(map[string]*GetTransactionResult),
 	}
@@ -402,7 +402,7 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		// block may get modified concurrently, lock mtx before reading fields.
 		c.blockchainMtx.RLock()
 		defer c.blockchainMtx.RUnlock()
-		return json.Marshal(&blockHeader{
+		return json.Marshal(&BlockHeader{
 			Hash:   block.msgBlock.BlockHash().String(),
 			Height: block.height,
 			// Confirmations: block.Confirmations,
@@ -670,19 +670,20 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 				cfg:         &WalletConfig{},
 				wallet:      &tBtcWallet{data},
 				cl:          neutrinoClient,
-				tipChan:     make(chan *block, 1),
+				tipChan:     make(chan *BlockVector, 1),
 				acctNum:     0,
 				txBlocks:    data.dbBlockForTx,
 				checkpoints: data.checkpoints,
 				log:         cfg.Logger.SubLogger("SPV"),
 				decodeAddr:  btcutil.DecodeAddress,
 			}
-			w.node = spvw
+			w.setNode(spvw)
 			wallet = &intermediaryWallet{
 				baseWallet:     w,
 				txFeeEstimator: spvw,
 				tipRedeemer:    spvw,
 			}
+			wallet.prepareRedemptionFinder()
 		}
 	}
 
@@ -701,9 +702,9 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 		panic(err.Error())
 	}
 	wallet.tipMtx.Lock()
-	wallet.currentTip = &block{
-		height: data.GetBestBlockHeight(),
-		hash:   *bestHash,
+	wallet.currentTip = &BlockVector{
+		Height: data.GetBestBlockHeight(),
+		Hash:   *bestHash,
 	}
 	wallet.tipMtx.Unlock()
 	var wg sync.WaitGroup
@@ -729,7 +730,7 @@ func mustMarshal(thing any) []byte {
 }
 
 func TestMain(m *testing.M) {
-	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", dex.LevelCritical)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tTxHash, _ = chainhash.NewHashFromStr(tTxID)
@@ -926,8 +927,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 			balance: 35e5,
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 19e5)},
-				{newOutput(txHashes[1], 0, 35e5)},
+				{NewOutput(txHashes[0], 0, 19e5)},
+				{NewOutput(txHashes[1], 0, 35e5)},
 			},
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
@@ -988,8 +989,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 			balance: 33e5,
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 6e5), newOutput(txHashes[1], 0, 5e5)},
-				{newOutput(txHashes[2], 0, 22e5)},
+				{NewOutput(txHashes[0], 0, 6e5), NewOutput(txHashes[1], 0, 5e5)},
+				{NewOutput(txHashes[2], 0, 22e5)},
 			},
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil, nil},
@@ -1055,7 +1056,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 			balance: 46e5,
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 11e5)},
+				{NewOutput(txHashes[0], 0, 11e5)},
 			},
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
@@ -1119,7 +1120,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 			balance: 46e5,
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 11e5)},
+				{NewOutput(txHashes[0], 0, 11e5)},
 			},
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
@@ -1186,9 +1187,9 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 			balance: 50e5,
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[2], 0, 26e5)},
-				{newOutput(txHashes[1], 0, 13e5)},
-				{newOutput(txHashes[0], 0, 11e5)},
+				{NewOutput(txHashes[2], 0, 26e5)},
+				{NewOutput(txHashes[1], 0, 13e5)},
+				{NewOutput(txHashes[0], 0, 11e5)},
 			},
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
@@ -1256,8 +1257,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 			balance: 43e5,
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 11e5)},
-				{newOutput(txHashes[1], 0, 22e5)},
+				{NewOutput(txHashes[0], 0, 11e5)},
+				{NewOutput(txHashes[1], 0, 22e5)},
 			},
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
@@ -1725,8 +1726,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				{nil},
 			},
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 12e5)},
-				{newOutput(txHashes[1], 0, 12e5)},
+				{NewOutput(txHashes[0], 0, 12e5)},
+				{NewOutput(txHashes[1], 0, 12e5)},
 				nil,
 			},
 		},
@@ -1808,8 +1809,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				{nil},
 			},
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 12e5)},
-				{newOutput(txHashes[1], 0, 12e5)},
+				{NewOutput(txHashes[0], 0, 12e5)},
+				{NewOutput(txHashes[1], 0, 12e5)},
 				nil,
 			},
 		},
@@ -1824,7 +1825,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				Trusted: toBTC(test.balance),
 			},
 		}
-		wallet.fundingCoins = make(map[outPoint]*utxo)
+		wallet.cm.lockedOutputs = make(map[OutPoint]*UTxO)
 		wallet.bondReserves.Store(test.bondReserves)
 
 		allCoins, _, splitFee, err := wallet.FundMultiOrder(test.multiOrder, test.maxLock)
@@ -1914,13 +1915,13 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			// This means all coins are split outputs
 			if test.expectedCoins == nil {
 				for i, actualCoin := range allCoins {
-					actualOut := actualCoin[0].(*output)
+					actualOut := actualCoin[0].(*Output)
 					expectedOut := node.sentRawTx.TxOut[i]
-					if uint64(expectedOut.Value) != actualOut.value {
-						t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.value)
+					if uint64(expectedOut.Value) != actualOut.Val {
+						t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.Val)
 					}
-					if !bytes.Equal(actualOut.pt.txHash[:], splitTxID[:]) {
-						t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.pt.txHash)
+					if !bytes.Equal(actualOut.Pt.TxHash[:], splitTxID[:]) {
+						t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.Pt.TxHash)
 					}
 				}
 			} else {
@@ -1931,13 +1932,13 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 
 					// This means the coins are the split outputs
 					if expected == nil {
-						actualOut := actual[0].(*output)
+						actualOut := actual[0].(*Output)
 						expectedOut := node.sentRawTx.TxOut[splitTxOutputIndex]
-						if uint64(expectedOut.Value) != actualOut.value {
-							t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.value)
+						if uint64(expectedOut.Value) != actualOut.Val {
+							t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.Val)
 						}
-						if !bytes.Equal(actualOut.pt.txHash[:], splitTxID[:]) {
-							t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.pt.txHash)
+						if !bytes.Equal(actualOut.Pt.TxHash[:], splitTxID[:]) {
+							t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.Pt.TxHash)
 						}
 						splitTxOutputIndex++
 						continue
@@ -1975,8 +1976,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 		for _, coins := range allCoins {
 			totalNumCoins += len(coins)
 		}
-		if totalNumCoins != len(wallet.fundingCoins) {
-			t.Fatalf("%s: expected %d funding coins in wallet, got %d", test.name, totalNumCoins, len(wallet.fundingCoins))
+		if totalNumCoins != len(wallet.cm.lockedOutputs) {
+			t.Fatalf("%s: expected %d funding coins in wallet, got %d", test.name, totalNumCoins, len(wallet.cm.lockedOutputs))
 		}
 		totalNumCoins += len(test.expectedInputs)
 		if totalNumCoins != len(node.lockedCoins) {
@@ -1992,16 +1993,16 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			}
 		}
 		checkFundingCoin := func(txHash chainhash.Hash, vout uint32) {
-			if _, ok := wallet.fundingCoins[outPoint{txHash: txHash, vout: vout}]; !ok {
+			if _, ok := wallet.cm.lockedOutputs[OutPoint{TxHash: txHash, Vout: vout}]; !ok {
 				t.Fatalf("%s: expected locked coin %s:%d not found in wallet", test.name, txHash, vout)
 			}
 		}
 		for _, coins := range allCoins {
 			for _, coin := range coins {
 				// decode coin to output
-				out := coin.(*output)
-				checkLockedCoin(out.pt.txHash, out.pt.vout)
-				checkFundingCoin(out.pt.txHash, out.pt.vout)
+				out := coin.(*Output)
+				checkLockedCoin(out.Pt.TxHash, out.Pt.Vout)
+				checkFundingCoin(out.Pt.TxHash, out.Pt.Vout)
 			}
 		}
 		for _, expectedIn := range test.expectedInputs {
@@ -2122,7 +2123,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 		"any": {
 			BlockHash:  blockHash.String(),
 			BlockIndex: blockHeight,
-			Hex:        txBuf.Bytes(),
+			Bytes:      txBuf.Bytes(),
 		}}
 
 	bal, err = wallet.Balance()
@@ -2236,6 +2237,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	// Return/unlock the reserved coins to avoid warning in subsequent tests
 	// about fundingCoins map containing the coins already. i.e.
 	// "Known order-funding coin %v returned by listunspent"
+
 	_ = wallet.ReturnCoins(spendables)
 
 	// Now with safe confirmed littleUTXO.
@@ -2495,7 +2497,7 @@ func TestReturnCoins(t *testing.T) {
 
 	// Test it with the local output type.
 	coins := asset.Coins{
-		newOutput(tTxHash, 0, 1),
+		NewOutput(tTxHash, 0, 1),
 	}
 	err := wallet.ReturnCoins(coins)
 	if err != nil {
@@ -2509,12 +2511,12 @@ func TestReturnCoins(t *testing.T) {
 	}
 
 	// nil unlocks all
-	wallet.fundingCoins[outPoint{*tTxHash, 0}] = &utxo{}
+	wallet.cm.lockedOutputs[OutPoint{*tTxHash, 0}] = &UTxO{}
 	err = wallet.ReturnCoins(nil)
 	if err != nil {
 		t.Fatalf("error for nil coins: %v", err)
 	}
-	if len(wallet.fundingCoins) != 0 {
+	if len(wallet.cm.lockedOutputs) != 0 {
 		t.Errorf("all funding coins not unlocked")
 	}
 
@@ -2547,7 +2549,7 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 	tx0 := makeRawTx([]dex.Bytes{{0x01}, tP2PKH}, []*wire.TxIn{dummyInput()})
 	txHash0 := tx0.TxHash()
 	_, _ = node.addRawTx(txBlockHeight, tx0)
-	coinID0 := toCoinID(&txHash0, vout0)
+	coinID0 := ToCoinID(&txHash0, vout0)
 	// Make spendable (confs > 0)
 	node.addRawTx(txBlockHeight+1, dummyTx())
 
@@ -2568,7 +2570,7 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 	tx1 := makeRawTx([]dex.Bytes{tP2PKH, {0x02}}, []*wire.TxIn{dummyInput()})
 	txHash1 := tx1.TxHash()
 	_, _ = node.addRawTx(txBlockHeight, tx1)
-	coinID1 := toCoinID(&txHash1, vout1)
+	coinID1 := ToCoinID(&txHash1, vout1)
 	// Make spendable (confs > 0)
 	node.addRawTx(txBlockHeight+1, dummyTx())
 
@@ -2602,7 +2604,7 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 	ensureErr := func(tag string) {
 		t.Helper()
 		// Clear the cache.
-		wallet.fundingCoins = make(map[outPoint]*utxo)
+		wallet.cm.lockedOutputs = make(map[OutPoint]*UTxO)
 		_, err := wallet.FundingCoins(coinIDs)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
@@ -2636,11 +2638,11 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 
 	txRaw0, _ := serializeMsgTx(tx0)
 	getTxRes0 := &GetTransactionResult{
-		Hex: txRaw0,
+		Bytes: txRaw0,
 	}
 	txRaw1, _ := serializeMsgTx(tx1)
 	getTxRes1 := &GetTransactionResult{
-		Hex: txRaw1,
+		Bytes: txRaw1,
 	}
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
@@ -3035,8 +3037,8 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 
 	swapVal := toSatoshi(5)
 	coins := asset.Coins{
-		newOutput(tTxHash, 0, toSatoshi(3)),
-		newOutput(tTxHash, 0, toSatoshi(3)),
+		NewOutput(tTxHash, 0, toSatoshi(3)),
+		NewOutput(tTxHash, 0, toSatoshi(3)),
 	}
 	addrStr := tP2PKHAddr
 	if segwit {
@@ -3167,7 +3169,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	secret, _, _, contract, addr, _, lockTime := makeSwapContract(segwit, time.Hour*12)
 
-	coin := newOutput(tTxHash, 0, swapVal)
+	coin := NewOutput(tTxHash, 0, swapVal)
 	ci := &asset.AuditInfo{
 		Coin:       coin,
 		Contract:   contract,
@@ -3235,12 +3237,12 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 	redemption.Secret = secret
 
 	// too low of value
-	coin.value = 200
+	coin.Val = 200
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
-	coin.value = swapVal
+	coin.Val = swapVal
 
 	// Change address error
 	node.changeAddrErr = tErr
@@ -3299,9 +3301,9 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 	signature := ecdsa.Sign(privKey, msgHash)
 	sig := signature.Serialize()
 
-	pt := newOutPoint(tTxHash, vout)
-	utxo := &utxo{address: tP2PKHAddr}
-	wallet.fundingCoins[pt] = utxo
+	pt := NewOutPoint(tTxHash, vout)
+	utxo := &UTxO{Address: tP2PKHAddr}
+	wallet.cm.lockedOutputs[pt] = utxo
 	node.privKeyForAddr = wif
 	node.signMsgFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		if len(params) != 2 {
@@ -3327,7 +3329,7 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 		return r, nil
 	}
 
-	var coin asset.Coin = newOutput(tTxHash, vout, 5e7)
+	var coin asset.Coin = NewOutput(tTxHash, vout, 5e7)
 	pubkeys, sigs, err := wallet.SignMessage(coin, msg)
 	if err != nil {
 		t.Fatalf("SignMessage error: %v", err)
@@ -3346,12 +3348,12 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Unknown UTXO
-	delete(wallet.fundingCoins, pt)
+	delete(wallet.cm.lockedOutputs, pt)
 	_, _, err = wallet.SignMessage(coin, msg)
 	if err == nil {
 		t.Fatalf("no error for unknown utxo")
 	}
-	wallet.fundingCoins[pt] = utxo
+	wallet.cm.lockedOutputs[pt] = utxo
 
 	// dumpprivkey error
 	node.privKeyForAddrErr = tErr
@@ -3405,7 +3407,7 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	txHash := tx.TxHash()
 	const vout = 0
 
-	audit, err := wallet.AuditContract(toCoinID(&txHash, vout), contract, txData, false)
+	audit, err := wallet.AuditContract(ToCoinID(&txHash, vout), contract, txData, false)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -3429,7 +3431,7 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := btcutil.NewAddressPubKeyHash(pkh, &chaincfg.MainNetParams)
 	badContract, _ := txscript.PayToAddrScript(wrongAddr)
-	_, err = wallet.AuditContract(toCoinID(&txHash, vout), badContract, nil, false)
+	_, err = wallet.AuditContract(ToCoinID(&txHash, vout), badContract, nil, false)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
@@ -3479,7 +3481,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
 	contractTx := makeRawTx([]dex.Bytes{otherScript, pkScript}, inputs)
 	contractTxHash := contractTx.TxHash()
-	coinID := toCoinID(&contractTxHash, contractVout)
+	coinID := ToCoinID(&contractTxHash, contractVout)
 	blockHash, _ := node.addRawTx(contractHeight, contractTx)
 	txHex, err := makeTxHex([]dex.Bytes{otherScript, pkScript}, inputs)
 	if err != nil {
@@ -3488,7 +3490,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	getTxRes := &GetTransactionResult{
 		BlockHash:  blockHash.String(),
 		BlockIndex: contractHeight,
-		Hex:        txHex,
+		Bytes:      txHex,
 	}
 	node.getTransactionMap = map[string]*GetTransactionResult{
 		"any": getTxRes}
@@ -3503,9 +3505,9 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	node.getCFilterScripts[*redeemBlockHash] = [][]byte{pkScript}
 
 	// Update currentTip from "RPC". Normally run() would do this.
-	wallet.reportNewTip(tCtx, &block{
-		hash:   *redeemBlockHash,
-		height: contractHeight + 2,
+	wallet.reportNewTip(tCtx, &BlockVector{
+		Hash:   *redeemBlockHash,
+		Height: contractHeight + 2,
 	})
 
 	// Check find redemption result.
@@ -3598,12 +3600,12 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	const vout = 0
 	tx.TxOut[vout].Value = 1e8
 	txHash := tx.TxHash()
-	outPt := newOutPoint(&txHash, vout)
+	outPt := NewOutPoint(&txHash, vout)
 	blockHash, _ := node.addRawTx(1, tx)
 	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 	node.getTransactionErr = WalletTransactionNotFound
 
-	contractOutput := newOutput(&txHash, 0, 1e8)
+	contractOutput := NewOutput(&txHash, 0, 1e8)
 	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
@@ -3634,7 +3636,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.txOutErr = nil
 
 	// bad contract
-	badContractOutput := newOutput(tTxHash, 0, 1e8)
+	badContractOutput := NewOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
 	_, err = wallet.Refund(badContractOutput.ID(), badContract, feeSuggestion)
 	if err == nil {
@@ -3788,7 +3790,7 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		unspents     []*ListUnspentResult
 		bondReserves uint64
 
-		expectedInputs []*outPoint
+		expectedInputs []*OutPoint
 		expectSentVal  uint64
 		expectChange   uint64
 		expectErr      bool
@@ -3807,9 +3809,8 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 				SafePtr:       boolPtr(true),
 				Spendable:     true,
 			}},
-			expectedInputs: []*outPoint{
-				{txHash: txHash,
-					vout: 0},
+			expectedInputs: []*OutPoint{
+				{TxHash: txHash, Vout: 0},
 			},
 			expectSentVal: expectedSentVal(toSatoshi(5), expectedFees(1)),
 			expectChange:  expectedChangeVal(toSatoshi(100), toSatoshi(5), expectedFees(1)),
@@ -3827,9 +3828,9 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 				SafePtr:       boolPtr(true),
 				Spendable:     true,
 			}},
-			expectedInputs: []*outPoint{
-				{txHash: txHash,
-					vout: 0},
+			expectedInputs: []*OutPoint{
+				{TxHash: txHash,
+					Vout: 0},
 			},
 			expectSentVal: expectedSentVal(toSatoshi(5), expectedFees(1)),
 			expectChange:  expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1)),
@@ -3848,9 +3849,8 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 				SafePtr:       boolPtr(true),
 				Spendable:     true,
 			}},
-			expectedInputs: []*outPoint{
-				{txHash: txHash,
-					vout: 0},
+			expectedInputs: []*OutPoint{
+				{TxHash: txHash, Vout: 0},
 			},
 			bondReserves: expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1)) + 1,
 			expectErr:    true,
@@ -3883,9 +3883,8 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 				SafePtr:       boolPtr(true),
 				Spendable:     true,
 			}},
-			expectedInputs: []*outPoint{
-				{txHash: txHash,
-					vout: 0},
+			expectedInputs: []*OutPoint{
+				{TxHash: txHash, Vout: 0},
 			},
 			expectSentVal: expectedSentVal(toSatoshi(5), expectedFees(1)),
 			expectChange:  0,
@@ -3913,8 +3912,8 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		}
 
 		for i, input := range tx.TxIn {
-			if input.PreviousOutPoint.Hash != test.expectedInputs[i].txHash ||
-				input.PreviousOutPoint.Index != test.expectedInputs[i].vout {
+			if input.PreviousOutPoint.Hash != test.expectedInputs[i].TxHash ||
+				input.PreviousOutPoint.Index != test.expectedInputs[i].Vout {
 				t.Fatalf("expected input %d to be %v, got %v", i, test.expectedInputs[i], input.PreviousOutPoint)
 			}
 		}
@@ -4108,7 +4107,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
 	blockHash, swapBlock := node.addRawTx(swapHeight, tx)
 	txHash := tx.TxHash()
-	coinID := toCoinID(&txHash, 0)
+	coinID := ToCoinID(&txHash, 0)
 	// Simulate a spending transaction, and advance the tip so that the swap
 	// has two confirmations.
 	spendingTx := dummyTx()
@@ -4158,7 +4157,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	node.getTransactionMap = map[string]*GetTransactionResult{
 		"any": {
 			BlockHash: blockHash.String(),
-			Hex:       txB,
+			Bytes:     txB,
 		}}
 
 	node.getCFilterScripts[*spendingBlockHash] = [][]byte{pkScript}
@@ -4265,7 +4264,7 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	defer shutdown()
 
 	// full node
-	node.getBlockchainInfo = &getBlockchainInfoResult{
+	node.getBlockchainInfo = &GetBlockchainInfoResult{
 		Headers: 100,
 		Blocks:  99, // full node allowed to be synced when 1 block behind
 	}
@@ -4301,7 +4300,7 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	node.blockchainMtx.Unlock()
 
 	wallet.tipAtConnect = 100
-	node.getBlockchainInfo = &getBlockchainInfoResult{
+	node.getBlockchainInfo = &GetBlockchainInfoResult{
 		Headers: 200,
 		Blocks:  150,
 	}
@@ -4476,7 +4475,7 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 		notRedeemed                   bool
 	}
 
-	redeemReq := func(r *tRedeem) *findRedemptionReq {
+	redeemReq := func(r *tRedeem) *FindRedemptionReq {
 		var swapBlockHash *chainhash.Hash
 		var swapHeight int64
 		if r.swapHeight >= 0 {
@@ -4509,15 +4508,15 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 			}
 		}
 
-		req := &findRedemptionReq{
-			outPt:        newOutPoint(swapTxHash, swapVout),
+		req := &FindRedemptionReq{
+			outPt:        NewOutPoint(swapTxHash, swapVout),
 			blockHash:    swapBlockHash,
 			blockHeight:  int32(swapHeight),
-			resultChan:   make(chan *findRedemptionResult, 1),
+			resultChan:   make(chan *FindRedemptionResult, 1),
 			pkScript:     pkScript,
 			contractHash: hashContract(segwit, contract),
 		}
-		wallet.findRedemptionQueue[req.outPt] = req
+		wallet.rf.redemptions[req.outPt] = req
 		return req
 	}
 
@@ -4638,7 +4637,7 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 		}
 
 		node.truncateChains()
-		wallet.findRedemptionQueue = make(map[outPoint]*findRedemptionReq)
+		wallet.rf.redemptions = make(map[OutPoint]*FindRedemptionReq)
 		node.blockchainMtx.Lock()
 		node.getBestBlockHashErr = nil
 		if tt.forcedErr {
@@ -4658,12 +4657,12 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 			cancel()
 		}
 
-		reqs := make([]*findRedemptionReq, 0, len(tt.redeems))
+		reqs := make([]*FindRedemptionReq, 0, len(tt.redeems))
 		for _, redeem := range tt.redeems {
 			reqs = append(reqs, redeemReq(redeem))
 		}
 
-		wallet.tryRedemptionRequests(ctx, startBlock, reqs)
+		wallet.rf.tryRedemptionRequests(ctx, startBlock, reqs)
 
 		for i, req := range reqs {
 			select {
@@ -4791,7 +4790,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			}
 			node.getTransactionMap[txs[i].TxHash().String()] = &GetTransactionResult{
 				TxID:          txs[i].TxHash().String(),
-				Hex:           serializedTxs[i],
+				Bytes:         serializedTxs[i],
 				BlockHash:     blockHash,
 				Confirmations: confs[i]}
 
@@ -4845,7 +4844,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			}},
 		}
 		fudingTxHex, _ := serializeMsgTx(&fundingTx)
-		node.getTransactionMap[fundingTx.TxHash().String()] = &GetTransactionResult{Hex: fudingTxHex, BlockHash: blockHash100.String()}
+		node.getTransactionMap[fundingTx.TxHash().String()] = &GetTransactionResult{Bytes: fudingTxHex, BlockHash: blockHash100.String()}
 
 		txs[0] = &wire.MsgTx{
 			TxIn: []*wire.TxIn{{
@@ -4888,14 +4887,14 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			hash := tx.TxHash()
 
 			if i == 2 && addAcceleration {
-				accelerationCoins = append(accelerationCoins, toCoinID(&hash, 0))
+				accelerationCoins = append(accelerationCoins, ToCoinID(&hash, 0))
 			} else {
-				toCoinID(&hash, 0)
-				swapCoins = append(swapCoins, toCoinID(&hash, 0))
+				ToCoinID(&hash, 0)
+				swapCoins = append(swapCoins, ToCoinID(&hash, 0))
 			}
 
 			if i == len(txs)-1 {
-				changeCoin = toCoinID(&hash, 0)
+				changeCoin = ToCoinID(&hash, 0)
 				if addChangeToUnspent {
 					node.listUnspent = append(node.listUnspent, &ListUnspentResult{
 						TxID: hash.String(),
@@ -4952,7 +4951,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 
 		node.getTransactionMap[node.listUnspent[len(node.listUnspent)-1].TxID] = &GetTransactionResult{
 			TxID:          tx.TxHash().String(),
-			Hex:           unspentTxHex,
+			Bytes:         unspentTxHex,
 			BlockHash:     blockHash,
 			Confirmations: uint64(confs)}
 	}
@@ -4964,7 +4963,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			if !found {
 				t.Fatalf("tx id not found: %v", input.PreviousOutPoint.Hash.String())
 			}
-			inputTx, err := msgTxFromHex(inputGtr.Hex.String())
+			inputTx, err := msgTxFromHex(inputGtr.Bytes.String())
 			if err != nil {
 				t.Fatalf("failed to deserialize tx: %v", err)
 			}
@@ -5467,7 +5466,7 @@ func testGetTxFee(t *testing.T, segwit bool, walletType string) {
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
 		"any": {
-			Hex: txBytes,
+			Bytes: txBytes,
 		},
 	}
 
@@ -5752,7 +5751,7 @@ func TestReconfigure(t *testing.T) {
 	shutdown()
 
 	reconfigurer := &tReconfigurer{rpcClient: wallet.node.(*rpcClient)}
-	wallet.baseWallet.node = reconfigurer
+	wallet.baseWallet.setNode(reconfigurer)
 
 	cfg := &asset.WalletConfig{
 		Settings: map[string]string{
@@ -5810,7 +5809,7 @@ func TestConfirmRedemption(t *testing.T) {
 
 	secret, _, _, contract, addr, _, lockTime := makeSwapContract(segwit, time.Hour*12)
 
-	coin := newOutput(tTxHash, 0, swapVal)
+	coin := NewOutput(tTxHash, 0, swapVal)
 	ci := &asset.AuditInfo{
 		Coin:       coin,
 		Contract:   contract,
@@ -5938,8 +5937,8 @@ func TestAddressRecycling(t *testing.T) {
 	}
 
 	checkAddrs := func(tag string, expAddrs ...string) {
-		memList := make([]string, 0, len(w.recycledAddrs))
-		for addr := range w.recycledAddrs {
+		memList := make([]string, 0, len(w.ar.addrs))
+		for addr := range w.ar.addrs {
 			memList = append(memList, addr)
 		}
 		compareAddrLists(tag, expAddrs, memList)
@@ -5988,8 +5987,8 @@ func TestAddressRecycling(t *testing.T) {
 	// Check address loading.
 	w.ReturnRefundContracts(contracts)
 
-	w.writeRecycledAddrsToFile()
-	b, _ := os.ReadFile(w.recyclePath)
+	w.ar.WriteRecycledAddrsToFile()
+	b, _ := os.ReadFile(w.ar.recyclePath)
 	var fileAddrs []string
 	for _, addr := range strings.Split(string(b), "\n") {
 		if addr == "" {
@@ -6000,7 +5999,7 @@ func TestAddressRecycling(t *testing.T) {
 	compareAddrLists("filecheck", []string{addr1.String(), addr2.String()}, fileAddrs)
 
 	otherW, _ := newUnconnectedWallet(w.cloneParams, &WalletConfig{})
-	if len(otherW.recycledAddrs) != 2 {
+	if len(otherW.ar.addrs) != 2 {
 		t.Fatalf("newly opened wallet didn't load recycled addrs")
 	}
 

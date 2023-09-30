@@ -1557,15 +1557,15 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		reqFeeRate = stepInfo.match.FeeRateBase
 	}
 
-	if !chain.ValidateFeeRate(contract, reqFeeRate) {
+	if !chain.ValidateFeeRate(contract.Coin, reqFeeRate) {
 		confs := swapConfs()
 		if confs < 1 {
 			actor.status.endSwapSearch() // allow client retry even before notifying him
 			s.respondError(msg.ID, actor.user, msgjson.ContractError, "low tx fee")
 			return wait.DontTryAgain
 		}
-		log.Infof("Swap txn %v (%s) with low fee rate %v (%v required), accepted with %d confirmations.",
-			contract, stepInfo.asset.Symbol, contract.FeeRate(), reqFeeRate, confs)
+		log.Infof("Swap txn %v (%s) with low fee rate (%v required), accepted with %d confirmations.",
+			contract, stepInfo.asset.Symbol, reqFeeRate, confs)
 	}
 	if contract.SwapAddress != counterParty.order.Trade().SwapAddress() {
 		actor.status.endSwapSearch() // allow client retry even before notifying him
@@ -1669,8 +1669,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	actor.status.endSwapSearch()
 
 	log.Debugf("processInit: valid contract %v (%s) received at %v from user %v (%s) for match %v, "+
-		"fee rate = %d, swapStatus %v => %v", contract, stepInfo.asset.Symbol, swapTime, actor.user,
-		makerTaker(actor.isMaker), matchID, contract.FeeRate(), stepInfo.step, stepInfo.nextStep)
+		"swapStatus %v => %v", contract, stepInfo.asset.Symbol, swapTime, actor.user,
+		makerTaker(actor.isMaker), matchID, stepInfo.step, stepInfo.nextStep)
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)

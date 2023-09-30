@@ -62,11 +62,11 @@ const (
 	methodFundRawTransaction = "fundrawtransaction"
 )
 
-// isTxNotFoundErr will return true if the error indicates that the requested
+// IsTxNotFoundErr will return true if the error indicates that the requested
 // transaction is not known. The error must be dcrjson.RPCError with a numeric
 // code equal to btcjson.ErrRPCNoTxInfo. WARNING: This is specific to errors
 // from an RPC to a bitcoind (or clone) using dcrd's rpcclient!
-func isTxNotFoundErr(err error) bool {
+func IsTxNotFoundErr(err error) bool {
 	// We are using dcrd's client with Bitcoin Core, so errors will be of type
 	// dcrjson.RPCError, but numeric codes should come from btcjson.
 	const errRPCNoTxInfo = int(btcjson.ErrRPCNoTxInfo)
@@ -97,30 +97,31 @@ type RawRequester interface {
 type anylist []any
 
 type rpcCore struct {
-	rpcConfig                *RPCConfig
-	cloneParams              *BTCCloneCFG
-	requesterV               atomic.Value // RawRequester
-	segwit                   bool
-	decodeAddr               dexbtc.AddressDecoder
-	stringAddr               dexbtc.AddressStringer
-	legacyRawSends           bool
-	minNetworkVersion        uint64
-	log                      dex.Logger
-	chainParams              *chaincfg.Params
-	omitAddressType          bool
-	legacySignTx             bool
-	booleanGetBlock          bool
-	unlockSpends             bool
-	deserializeTx            func([]byte) (*wire.MsgTx, error)
-	serializeTx              func(*wire.MsgTx) ([]byte, error)
+	rpcConfig         *RPCConfig
+	cloneParams       *BTCCloneCFG
+	requesterV        atomic.Value // RawRequester
+	segwit            bool
+	decodeAddr        dexbtc.AddressDecoder
+	stringAddr        dexbtc.AddressStringer
+	legacyRawSends    bool
+	minNetworkVersion uint64
+	log               dex.Logger
+	chainParams       *chaincfg.Params
+	omitAddressType   bool
+	legacySignTx      bool
+	booleanGetBlock   bool
+	unlockSpends      bool
+
+	deserializeTx      func([]byte) (*wire.MsgTx, error)
+	serializeTx        func(*wire.MsgTx) ([]byte, error)
+	hashTx             func(*wire.MsgTx) *chainhash.Hash
+	numericGetRawTxRPC bool
+	manualMedianTime   bool
+	addrFunc           func() (btcutil.Address, error)
+
 	deserializeBlock         func([]byte) (*wire.MsgBlock, error)
-	hashTx                   func(*wire.MsgTx) *chainhash.Hash
-	numericGetRawTxRPC       bool
 	legacyValidateAddressRPC bool
-	manualMedianTime         bool
 	omitRPCOptionsArg        bool
-	addrFunc                 func() (btcutil.Address, error)
-	connectFunc              func() error
 	privKeyFunc              func(addr string) (*btcec.PrivateKey, error)
 }
 
@@ -143,8 +144,8 @@ func newRPCClient(cfg *rpcCore) *rpcClient {
 	return &rpcClient{rpcCore: cfg}
 }
 
-// chainOK is for screening the chain field of the getblockchaininfo result.
-func chainOK(net dex.Network, str string) bool {
+// ChainOK is for screening the chain field of the getblockchaininfo result.
+func ChainOK(net dex.Network, str string) bool {
 	var chainStr string
 	switch net {
 	case dex.Mainnet:
@@ -176,7 +177,7 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("getblockchaininfo error: %w", err)
 	}
-	if !chainOK(wc.cloneParams.Network, chainInfo.Chain) {
+	if !ChainOK(wc.cloneParams.Network, chainInfo.Chain) {
 		return errors.New("wrong net")
 	}
 	wiRes, err := wc.GetWalletInfo()
@@ -190,11 +191,6 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 				" for descriptor wallets", netVer, minDescriptorVersion)
 		}
 		wc.log.Debug("Using a descriptor wallet.")
-	}
-	if wc.connectFunc != nil {
-		if err := wc.connectFunc(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -227,10 +223,6 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 	// If the RPC configuration has changed, try to update the client.
 	oldCfg := wc.rpcConfig
 	if *newCfg != *oldCfg {
-		if wc.connectFunc != nil {
-			return true, nil // this asset needs a new rpcClient, then connect
-		}
-
 		cl, err := newRPCConnection(parsedCfg, wc.cloneParams.SingularWallet)
 		if err != nil {
 			return false, fmt.Errorf("error creating RPC client with new credentials: %v", err)
@@ -244,7 +236,7 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 			method = methodValidateAddress
 		}
 		ai := new(GetAddressInfoResult)
-		if err := call(wc.ctx, cl, method, anylist{currentAddress}, ai); err != nil {
+		if err := Call(wc.ctx, cl, method, anylist{currentAddress}, ai); err != nil {
 			return false, fmt.Errorf("error getting address info with new RPC client: %w", err)
 		} else if !ai.IsMine {
 			// If the wallet is in active use, check the supplied address.
@@ -256,11 +248,11 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 			return true, nil
 		} // else same wallet, skip full reconnect
 
-		chainInfo := new(getBlockchainInfoResult)
-		if err := call(wc.ctx, cl, methodGetBlockchainInfo, nil, chainInfo); err != nil {
+		chainInfo := new(GetBlockchainInfoResult)
+		if err := Call(wc.ctx, cl, methodGetBlockchainInfo, nil, chainInfo); err != nil {
 			return false, fmt.Errorf("%s: %w", methodGetBlockchainInfo, err)
 		}
-		if !chainOK(wc.cloneParams.Network, chainInfo.Chain) {
+		if !ChainOK(wc.cloneParams.Network, chainInfo.Chain) {
 			return false, errors.New("wrong net")
 		}
 
@@ -281,7 +273,7 @@ func (wc *rpcClient) RawRequest(ctx context.Context, method string, params []jso
 // given parameters.
 func estimateSmartFee(ctx context.Context, rr RawRequester, confTarget uint64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
 	res := new(btcjson.EstimateSmartFeeResult)
-	return res, call(ctx, rr, methodEstimateSmartFee, anylist{confTarget, mode}, res)
+	return res, Call(ctx, rr, methodEstimateSmartFee, anylist{confTarget, mode}, res)
 }
 
 // SendRawTransactionLegacy broadcasts the transaction with an additional legacy
@@ -323,12 +315,12 @@ func (wc *rpcClient) sendRawTransaction(tx *wire.MsgTx) (txHash *chainhash.Hash,
 		return txHash, nil
 	}
 
-	// TODO: lockUnspent should really just take a []*outPoint, since it doesn't
+	// TODO: lockUnspent should really just take a []*OutPoint, since it doesn't
 	// need the value.
-	ops := make([]*output, 0, len(tx.TxIn))
+	ops := make([]*Output, 0, len(tx.TxIn))
 	for _, txIn := range tx.TxIn {
 		prevOut := &txIn.PreviousOutPoint
-		ops = append(ops, &output{pt: newOutPoint(&prevOut.Hash, prevOut.Index)})
+		ops = append(ops, &Output{Pt: NewOutPoint(&prevOut.Hash, prevOut.Index)})
 	}
 	if err := wc.lockUnspent(true, ops); err != nil {
 		wc.log.Warnf("error unlocking spent outputs: %v", err)
@@ -400,7 +392,7 @@ func (wc *rpcClient) getBestBlockHash() (*chainhash.Hash, error) {
 }
 
 // getBestBlockHeight returns the height of the top mainchain block.
-func (wc *rpcClient) getBestBlockHeader() (*blockHeader, error) {
+func (wc *rpcClient) getBestBlockHeader() (*BlockHeader, error) {
 	tipHash, err := wc.getBestBlockHash()
 	if err != nil {
 		return nil, err
@@ -438,7 +430,17 @@ func (wc *rpcClient) medianTime() (stamp time.Time, err error) {
 		return
 	}
 	if wc.manualMedianTime {
-		return calcMedianTime(wc, tipHash)
+		return CalcMedianTime(func(blockHash *chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error) {
+			hdr, _, err := wc.getBlockHeader(blockHash)
+			if err != nil {
+				return
+			}
+			prevHash, err = chainhash.NewHashFromStr(hdr.PreviousBlockHash)
+			if err != nil {
+				return
+			}
+			return time.Unix(hdr.Time, 0), prevHash, nil
+		}, tipHash)
 	}
 	hdr, err := wc.getRPCBlockHeader(tipHash)
 	if err != nil {
@@ -498,7 +500,7 @@ func (wc *rpcClient) listUnspent() ([]*ListUnspentResult, error) {
 // lockUnspent locks and unlocks outputs for spending. An output that is part of
 // an order, but not yet spent, should be locked until spent or until the order
 // is canceled or fails.
-func (wc *rpcClient) lockUnspent(unlock bool, ops []*output) error {
+func (wc *rpcClient) lockUnspent(unlock bool, ops []*Output) error {
 	var rpcops []*RPCOutpoint // To clear all, this must be nil->null, not empty slice.
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
@@ -564,8 +566,6 @@ func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
 	var addrStr string
 	var err error
 	switch {
-	case wc.addrFunc != nil:
-		return wc.addrFunc()
 	case wc.omitAddressType:
 		err = wc.call(methodChangeAddress, nil, &addrStr)
 	case wc.segwit:
@@ -580,9 +580,6 @@ func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
 }
 
 func (wc *rpcClient) externalAddress() (btcutil.Address, error) {
-	if wc.addrFunc != nil {
-		return wc.addrFunc()
-	}
 	if wc.segwit {
 		return wc.address("bech32")
 	}
@@ -817,7 +814,7 @@ func (wc *rpcClient) getWalletTransaction(txHash *chainhash.Hash) (*GetTransacti
 	tx := new(GetTransactionResult)
 	err := wc.call(methodGetTransaction, anylist{txHash.String()}, tx)
 	if err != nil {
-		if isTxNotFoundErr(err) {
+		if IsTxNotFoundErr(err) {
 			return nil, asset.CoinNotFoundError
 		}
 		return nil, err
@@ -862,31 +859,20 @@ func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
 	feeRateOption := float64(feeRate) / 1e5
-	if wc.omitRPCOptionsArg {
-		var success bool
-		err := wc.call(methodSetTxFee, anylist{feeRateOption}, &success)
-		if err != nil {
-			return 0, fmt.Errorf("error setting transaction fee: %w", err)
-		}
-		if !success {
-			return 0, fmt.Errorf("failed to set transaction fee")
-		}
-	} else {
-		options := &btcjson.FundRawTransactionOpts{
-			FeeRate: &feeRateOption,
-		}
-		if !wc.omitAddressType {
-			if wc.segwit {
-				options.ChangeType = &btcjson.ChangeTypeBech32
-			} else {
-				options.ChangeType = &btcjson.ChangeTypeLegacy
-			}
-		}
-		if subtract {
-			options.SubtractFeeFromOutputs = []int{0}
-		}
-		args = append(args, options)
+	options := &btcjson.FundRawTransactionOpts{
+		FeeRate: &feeRateOption,
 	}
+	if !wc.omitAddressType {
+		if wc.segwit {
+			options.ChangeType = &btcjson.ChangeTypeBech32
+		} else {
+			options.ChangeType = &btcjson.ChangeTypeLegacy
+		}
+	}
+	if subtract {
+		options.SubtractFeeFromOutputs = []int{0}
+	}
+	args = append(args, options)
 
 	var res struct {
 		TxBytes        dex.Bytes `json:"hex"`
@@ -948,23 +934,16 @@ func (wc *rpcClient) ownsAddress(addr btcutil.Address) (bool, error) {
 	return ai.IsMine, nil
 }
 
-// syncStatus is the current synchronization state of the node.
-type syncStatus struct {
-	Target  int32 `json:"target"`
-	Height  int32 `json:"height"`
-	Syncing bool  `json:"syncing"`
-}
-
 // syncStatus is information about the blockchain sync status.
-func (wc *rpcClient) syncStatus() (*syncStatus, error) {
+func (wc *rpcClient) syncStatus() (*SyncStatus, error) {
 	chainInfo, err := wc.getBlockchainInfo()
 	if err != nil {
 		return nil, fmt.Errorf("getblockchaininfo error: %w", err)
 	}
-	return &syncStatus{
+	return &SyncStatus{
 		Target:  int32(chainInfo.Headers),
 		Height:  int32(chainInfo.Blocks),
-		Syncing: chainInfo.syncing(),
+		Syncing: chainInfo.Syncing(),
 	}, nil
 }
 
@@ -980,7 +959,7 @@ func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 	// Check wallet transactions.
 	tx, err := wc.getWalletTransaction(txHash)
 	if err != nil {
-		if isTxNotFoundErr(err) {
+		if IsTxNotFoundErr(err) {
 			return 0, false, asset.CoinNotFoundError
 		}
 		return 0, false, err
@@ -988,15 +967,9 @@ func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 	return uint32(tx.Confirmations), true, nil
 }
 
-// rpcBlockHeader adds a MedianTime field to blockHeader.
-type rpcBlockHeader struct {
-	blockHeader
-	MedianTime int64 `json:"mediantime"`
-}
-
 // getBlockHeader gets the *rpcBlockHeader for the specified block hash.
-func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*rpcBlockHeader, error) {
-	blkHeader := new(rpcBlockHeader)
+func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*BlockHeader, error) {
+	blkHeader := new(BlockHeader)
 	err := wc.call(methodGetBlockHeader,
 		anylist{blockHash.String(), true}, blkHeader)
 	if err != nil {
@@ -1009,14 +982,14 @@ func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*rpcBlockHead
 // getBlockHeader gets the *blockHeader for the specified block hash. It also
 // returns a bool value to indicate whether this block is a part of main chain.
 // For orphaned blocks header.Confirmations is negative (typically -1).
-func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (header *blockHeader, mainchain bool, err error) {
+func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (header *BlockHeader, mainchain bool, err error) {
 	hdr, err := wc.getRPCBlockHeader(blockHash)
 	if err != nil {
 		return nil, false, err
 	}
 	// RPC wallet must return negative confirmations number for orphaned blocks.
 	mainchain = hdr.Confirmations >= 0
-	return &hdr.blockHeader, mainchain, nil
+	return hdr, mainchain, nil
 }
 
 // getBlockHeight gets the mainchain height for the specified block. Returns
@@ -1044,8 +1017,8 @@ func (wc *rpcClient) peerCount() (uint32, error) {
 }
 
 // getBlockchainInfo sends the getblockchaininfo request and returns the result.
-func (wc *rpcClient) getBlockchainInfo() (*getBlockchainInfoResult, error) {
-	chainInfo := new(getBlockchainInfoResult)
+func (wc *rpcClient) getBlockchainInfo() (*GetBlockchainInfoResult, error) {
+	chainInfo := new(GetBlockchainInfoResult)
 	err := wc.call(methodGetBlockchainInfo, nil, chainInfo)
 	if err != nil {
 		return nil, err
@@ -1072,11 +1045,25 @@ func (wc *rpcClient) getVersion() (uint64, uint64, error) {
 
 // findRedemptionsInMempool attempts to find spending info for the specified
 // contracts by searching every input of all txs in the mempool.
-func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult) {
-	contractsCount := len(reqs)
-	wc.log.Debugf("finding redemptions for %d contracts in mempool", contractsCount)
+func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult) {
+	return FindRedemptionsInMempool(ctx, wc.log, reqs, wc.GetRawMempool, wc.GetRawTransaction, wc.segwit, wc.hashTx, wc.chainParams)
+}
 
-	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
+func FindRedemptionsInMempool(
+	ctx context.Context,
+	log dex.Logger,
+	reqs map[OutPoint]*FindRedemptionReq,
+	getMempool func() ([]*chainhash.Hash, error),
+	getTx func(txHash *chainhash.Hash) (*wire.MsgTx, error),
+	segwit bool,
+	hashTx func(*wire.MsgTx) *chainhash.Hash,
+	chainParams *chaincfg.Params,
+
+) (discovered map[OutPoint]*FindRedemptionResult) {
+	contractsCount := len(reqs)
+	log.Debugf("finding redemptions for %d contracts in mempool", contractsCount)
+
+	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
 
 	var totalFound, totalCanceled int
 	logAbandon := func(reason string) {
@@ -1084,14 +1071,14 @@ func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outP
 		// as they could be subsequently redeemed in some mined tx(s),
 		// which would be captured when a new tip is reported.
 		if totalFound+totalCanceled > 0 {
-			wc.log.Debugf("%d redemptions found, %d canceled out of %d contracts in mempool",
+			log.Debugf("%d redemptions found, %d canceled out of %d contracts in mempool",
 				totalFound, totalCanceled, contractsCount)
 		}
-		wc.log.Errorf("abandoning mempool redemption search for %d contracts because of %s",
+		log.Errorf("abandoning mempool redemption search for %d contracts because of %s",
 			contractsCount-totalFound-totalCanceled, reason)
 	}
 
-	mempoolTxs, err := wc.GetRawMempool()
+	mempoolTxs, err := getMempool()
 	if err != nil {
 		logAbandon(fmt.Sprintf("error retrieving transactions: %v", err))
 		return
@@ -1101,12 +1088,12 @@ func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outP
 		if ctx.Err() != nil {
 			return nil
 		}
-		tx, err := wc.GetRawTransaction(txHash)
+		tx, err := getTx(txHash)
 		if err != nil {
 			logAbandon(fmt.Sprintf("getrawtransaction error for tx hash %v: %v", txHash, err))
 			return
 		}
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, wc.segwit, reqs, tx, wc.chainParams, wc.hashTx)
+		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, segwit, reqs, tx, chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -1117,17 +1104,28 @@ func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outP
 
 // searchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
-func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult) {
+func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq, blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult) {
 	msgBlock, err := wc.getBlock(blockHash)
 	if err != nil {
 		wc.log.Errorf("RPC GetBlock error: %v", err)
 		return
 	}
+	return SearchBlockForRedemptions(ctx, reqs, msgBlock, wc.segwit, wc.hashTx, wc.chainParams)
+}
 
-	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
+func SearchBlockForRedemptions(
+	ctx context.Context,
+	reqs map[OutPoint]*FindRedemptionReq,
+	msgBlock *wire.MsgBlock,
+	segwit bool,
+	hashTx func(*wire.MsgTx) *chainhash.Hash,
+	chainParams *chaincfg.Params,
+) (discovered map[OutPoint]*FindRedemptionResult) {
+
+	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
 
 	for _, msgTx := range msgBlock.Transactions {
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, wc.segwit, reqs, msgTx, wc.chainParams, wc.hashTx)
+		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, segwit, reqs, msgTx, chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -1139,10 +1137,10 @@ func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[out
 // server via (*rpcclient.Client).RawRequest. If thing is non-nil, the result
 // will be marshaled into thing.
 func (wc *rpcClient) call(method string, args anylist, thing any) error {
-	return call(wc.ctx, wc.requester(), method, args, thing)
+	return Call(wc.ctx, wc.requester(), method, args, thing)
 }
 
-func call(ctx context.Context, r RawRequester, method string, args anylist, thing any) error {
+func Call(ctx context.Context, r RawRequester, method string, args anylist, thing any) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])

@@ -85,7 +85,7 @@ type Backend interface {
 	Info() *BackendInfo
 	// ValidateFeeRate checks that the transaction fees used to initiate the
 	// contract are sufficient.
-	ValidateFeeRate(contract *Contract, reqFeeRate uint64) bool
+	ValidateFeeRate(coin Coin, reqFeeRate uint64) bool
 }
 
 // OutputTracker is implemented by backends for UTXO-based blockchains.
@@ -147,7 +147,7 @@ type Coin interface {
 
 // FundingCoin is some unspent value on the blockchain.
 type FundingCoin interface {
-	Coin
+	Coin() Coin
 	// Auth checks that the owner of the provided pubkeys can spend the
 	// FundingCoin. The signatures (sigs) generated with the private keys
 	// corresponding to pubkeys must validate against the pubkeys and signing

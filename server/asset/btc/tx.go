@@ -29,6 +29,7 @@ type Tx struct {
 	lastLookup *chainhash.Hash
 	// The calculated transaction fee rate, in satoshis/vbyte
 	feeRate uint64
+	fees    uint64
 	// raw is the raw tx bytes.
 	raw []byte
 }
@@ -45,28 +46,6 @@ type txIn struct {
 type txOut struct {
 	value    uint64
 	pkScript []byte
-}
-
-// A getter for a new Tx.
-func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
-	blockHeight int64, isCoinbase bool, ins []txIn, outs []txOut, feeRate uint64, rawTx []byte) *Tx {
-	// Set a nil blockHash to the zero hash.
-	hash := blockHash
-	if hash == nil {
-		hash = &zeroHash
-	}
-	return &Tx{
-		btc:        btc,
-		blockHash:  *hash,
-		height:     blockHeight,
-		hash:       *txHash,
-		ins:        ins,
-		outs:       outs,
-		isCoinbase: isCoinbase,
-		lastLookup: lastLookup,
-		feeRate:    feeRate,
-		raw:        rawTx,
-	}
 }
 
 // JoinSplit represents a Zcash JoinSplit.

@@ -26,17 +26,17 @@ const (
 	testnetOverwinterActivationHeight = 207500
 )
 
-var (
-	tLotSize uint64 = 1e6
-	tZEC            = &dex.Asset{
-		ID:           BipID,
-		Symbol:       "zec",
-		SwapSize:     dexzec.InitTxSize,
-		SwapSizeBase: dexzec.InitTxSizeBase,
-		MaxFeeRate:   100,
-		SwapConf:     1,
-	}
-)
+// var (
+// 	tLotSize uint64 = 1e6
+// 	tZEC            = &dex.Asset{
+// 		ID:           BipID,
+// 		Symbol:       "zec",
+// 		SwapSize:     dexzec.InitTxSize,
+// 		SwapSizeBase: dexzec.InitTxSizeBase,
+// 		MaxFeeRate:   100,
+// 		SwapConf:     1,
+// 	}
+// )
 
 func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
@@ -56,6 +56,14 @@ func TestWallet(t *testing.T) {
 
 // TestDeserializeTestnet must be run against a full RPC node.
 func TestDeserializeTestnetBlocks(t *testing.T) {
+	testDeserializeBlocks(t, "18232", testnetNU5ActivationHeight, testnetSaplingActivationHeight, testnetOverwinterActivationHeight)
+}
+
+func TestDeserializeMainnetBlocks(t *testing.T) {
+	testDeserializeBlocks(t, "8232")
+}
+
+func testDeserializeBlocks(t *testing.T, port string, upgradeHeights ...int64) {
 	cfg := struct {
 		RPCUser string `ini:"rpcuser"`
 		RPCPass string `ini:"rpcpassword"`
@@ -69,7 +77,7 @@ func TestDeserializeTestnetBlocks(t *testing.T) {
 	cl, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
-		Host:         "localhost:18232",
+		Host:         "localhost:" + port,
 		User:         cfg.RPCUser,
 		Pass:         cfg.RPCPass,
 	}, nil)
@@ -83,21 +91,6 @@ func TestDeserializeTestnetBlocks(t *testing.T) {
 	tipHash, err := cl.GetBestBlockHash(ctx)
 	if err != nil {
 		t.Fatalf("GetBestBlockHash error: %v", err)
-	}
-
-	lastV4Block, err := cl.GetBlockHash(ctx, testnetNU5ActivationHeight-1)
-	if err != nil {
-		t.Fatalf("GetBlockHash(%d) error: %v", testnetNU5ActivationHeight-1, err)
-	}
-
-	lastV3Block, err := cl.GetBlockHash(ctx, testnetSaplingActivationHeight-1)
-	if err != nil {
-		t.Fatalf("GetBlockHash(%d) error: %v", testnetSaplingActivationHeight-1, err)
-	}
-
-	lastV2Block, err := cl.GetBlockHash(ctx, testnetOverwinterActivationHeight-1)
-	if err != nil {
-		t.Fatalf("GetBlockHash(%d) error: %v", testnetOverwinterActivationHeight-1, err)
 	}
 
 	mustMarshal := func(thing any) json.RawMessage {
@@ -126,22 +119,24 @@ func TestDeserializeTestnetBlocks(t *testing.T) {
 				t.Fatalf("Error deserializing %s: %v", hashStr, err)
 			}
 
-			// for i, tx := range zecBlock.Transactions {
-			// 	switch {
-			// 	case tx.NActionsOrchard > 0 && tx.NOutputsSapling > 0:
-			// 		fmt.Printf("orchard + sapling shielded tx: %s:%d \n", hashStr, i)
-			// 	case tx.NActionsOrchard > 0:
-			// 		fmt.Printf("orchard shielded tx: %s:%d \n", hashStr, i)
-			// 	case tx.NOutputsSapling > 0 || tx.NSpendsSapling > 0:
-			// 		fmt.Printf("sapling shielded tx: %s:%d \n", hashStr, i)
-			// 	case tx.NJoinSplit > 0:
-			// 		fmt.Printf("joinsplit tx: %s:%d \n", hashStr, i)
-			// 	default:
-			// 		if i > 0 {
-			// 			fmt.Printf("unshielded tx: %s:%d \n", hashStr, i)
-			// 		}
-			// 	}
-			// }
+			for _, tx := range zecBlock.Transactions {
+				switch {
+				case tx.NActionsOrchard > 0:
+					fmt.Printf("Orchard transaction with nActionsOrchard = %d \n", tx.NActionsOrchard)
+					// case tx.NActionsOrchard > 0 && tx.NOutputsSapling > 0:
+					// 	fmt.Printf("orchard + sapling shielded tx: %s:%d \n", hashStr, i)
+					// 	case tx.NActionsOrchard > 0:
+					// 		fmt.Printf("orchard shielded tx: %s:%d \n", hashStr, i)
+					// 	case tx.NOutputsSapling > 0 || tx.NSpendsSapling > 0:
+					// 		fmt.Printf("sapling shielded tx: %s:%d \n", hashStr, i)
+					// 	case tx.NJoinSplit > 0:
+					// 		fmt.Printf("joinsplit tx: %s:%d \n", hashStr, i)
+					// 	default:
+					// 		if i > 0 {
+					// 			fmt.Printf("unshielded tx: %s:%d \n", hashStr, i)
+					// 		}
+				}
+			}
 
 			hashStr = zecBlock.Header.PrevBlock.String()
 		}
@@ -151,15 +146,14 @@ func TestDeserializeTestnetBlocks(t *testing.T) {
 	fmt.Println("Testing version 5 blocks")
 	nBlocksFromHash(tipHash.String(), 1000)
 
-	// Test version 4 blocks.
-	fmt.Println("Testing version 4 blocks")
-	nBlocksFromHash(lastV4Block.String(), 1000)
-
-	// Test version 3 blocks.
-	fmt.Println("Testing version 3 blocks")
-	nBlocksFromHash(lastV3Block.String(), 1000)
-
-	// Test version 2 blocks.
-	fmt.Println("Testing version 2 blocks")
-	nBlocksFromHash(lastV2Block.String(), 1000)
+	ver := 4
+	for _, upgradeHeight := range upgradeHeights {
+		lastVerBlock, err := cl.GetBlockHash(ctx, upgradeHeight-1)
+		if err != nil {
+			t.Fatalf("GetBlockHash(%d) error: %v", upgradeHeight-1, err)
+		}
+		fmt.Printf("Testing version %d blocks \n", ver)
+		nBlocksFromHash(lastVerBlock.String(), 1000)
+		ver--
+	}
 }

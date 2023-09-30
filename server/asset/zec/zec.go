@@ -132,6 +132,7 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 
 	return &ZECBackend{
 		Backend:    be,
+		log:        cfg.Logger,
 		addrParams: addrParams,
 		btcParams:  btcParams,
 	}, nil
@@ -141,6 +142,7 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 // with Zcash address translation.
 type ZECBackend struct {
 	*btc.Backend
+	log        dex.Logger
 	btcParams  *chaincfg.Params
 	addrParams *dexzec.AddressParams
 }
@@ -165,6 +167,24 @@ func (be *ZECBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Contr
 // guarantee the tx get over the legacy 0.00001 standard tx fee.
 func (be *ZECBackend) FeeRate(context.Context) (uint64, error) {
 	return dexzec.LegacyFeeRate, nil
+}
+
+func (be *ZECBackend) ValidateFeeRate(ci asset.Coin, reqFeeRate uint64) bool {
+	c, is := ci.(interface {
+		Fees() uint64
+		RawTx() []byte
+	})
+	if !is {
+		be.log.Error("ValidateFeeRate contract does not implement TXIO methods")
+		return false
+	}
+	tx, err := dexzec.DeserializeTx(c.RawTx())
+	if err != nil {
+		be.log.Errorf("error deserializing tx for fee validation: %v", err)
+		return false
+	}
+
+	return c.Fees() >= tx.TxFeesZIP317()
 }
 
 func blockFeeTransactions(rc *btc.RPCClient, blockHash *chainhash.Hash) (feeTxs []btc.FeeTx, prevBlock chainhash.Hash, err error) {

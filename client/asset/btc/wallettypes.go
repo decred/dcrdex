@@ -74,7 +74,7 @@ type GetTransactionResult struct {
 	TxID         string    `json:"txid"`
 	Time         uint64    `json:"time"`
 	TimeReceived uint64    `json:"timereceived"`
-	Hex          dex.Bytes `json:"hex"` // []byte, although it marshals/unmarshals a hex string
+	Bytes        dex.Bytes `json:"hex"` // []byte, although it marshals/unmarshals a hex string
 	// BipReplaceable string    `json:"bip125-replaceable"` // unused
 	// Details        []*WalletTxDetails `json:"details"` // unused, and nearly impossible to satisfy in a generic interface
 }

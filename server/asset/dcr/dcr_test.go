@@ -1411,10 +1411,10 @@ func TestAuxiliary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if txHash.String() != utxo.TxID() {
+	if txHash.String() != utxo.Coin().TxID() {
 		t.Fatalf("utxo tx hash doesn't match")
 	}
-	if utxo.TxID() != txid {
+	if utxo.Coin().TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")
 	}
 

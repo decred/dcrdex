@@ -111,7 +111,7 @@ var (
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
-	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelDebug)
+	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelInfo)
 	tMaxFeeRate         uint64 = 10
 	tWalletInfo                = &asset.WalletInfo{
 		Version:           0,
@@ -752,6 +752,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		version:           w.info.Version,
 		supportedVersions: w.info.SupportedVersions,
 		Wallet:            w,
+		Symbol:            dex.BipIDSymbol(assetID),
 		connector:         dex.NewConnectionMaster(w),
 		AssetID:           assetID,
 		hookedUp:          true,
@@ -9355,7 +9356,7 @@ func TestSuspectTrades(t *testing.T) {
 	setSwaps()
 	tDcrWallet.swapErr = tErr
 	_, err = tCore.tick(tracker)
-	if err == nil || !strings.Contains(err.Error(), "error sending swap transaction") {
+	if err == nil || !strings.Contains(err.Error(), "error sending dcr swap transaction") {
 		t.Fatalf("swap error not propagated, err = %v", err)
 	}
 	if tDcrWallet.swapCounter != 1 {

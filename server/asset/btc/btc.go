@@ -840,8 +840,8 @@ func (*Backend) Info() *asset.BackendInfo {
 
 // ValidateFeeRate checks that the transaction fees used to initiate the
 // contract are sufficient.
-func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
-	return contract.FeeRate() >= reqFeeRate
+func (btc *Backend) ValidateFeeRate(c asset.Coin, reqFeeRate uint64) bool {
+	return c.FeeRate() >= reqFeeRate
 }
 
 // CheckSwapAddress checks that the given address is parseable, and suitable as
@@ -1197,9 +1197,29 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 		// For non-segwit transactions, Size = Vsize anyway, so use Size to
 		// cover assets that won't set Vsize in their RPC response.
 		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
-
 	}
-	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate, verboseTx.Raw), nil
+	hash := blockHash
+	if hash == nil {
+		hash = &zeroHash
+	}
+	fees := sumIn - sumOut
+	if sumOut > sumIn {
+		btc.log.Errorf("tx %s has more out than in", txHash)
+		fees = 0
+	}
+	return &Tx{
+		btc:        btc,
+		blockHash:  *hash,
+		height:     blockHeight,
+		hash:       *txHash,
+		ins:        inputs,
+		outs:       outputs,
+		isCoinbase: isCoinbase,
+		lastLookup: lastLookup,
+		fees:       fees,
+		feeRate:    feeRate,
+		raw:        verboseTx.Raw,
+	}, nil
 }
 
 // Get information for an unspent transaction output and it's transaction.

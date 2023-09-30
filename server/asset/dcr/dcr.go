@@ -445,8 +445,8 @@ func (*Backend) Info() *asset.BackendInfo {
 
 // ValidateFeeRate checks that the transaction fees used to initiate the
 // contract are sufficient.
-func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
-	return contract.FeeRate() >= reqFeeRate
+func (dcr *Backend) ValidateFeeRate(c asset.Coin, reqFeeRate uint64) bool {
+	return c.FeeRate() >= reqFeeRate
 }
 
 // BlockChannel creates and returns a new channel on which to receive block

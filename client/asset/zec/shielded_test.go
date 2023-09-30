@@ -135,7 +135,7 @@ func TestSendShielded(t *testing.T) {
 		t.Fatalf("SendShielded error: %v", err)
 	}
 
-	tAddr, err := w.NewAddress()
+	tAddr, err := w.DepositAddress()
 	if err != nil {
 		t.Fatalf("NewAddress error: %v", err)
 	}

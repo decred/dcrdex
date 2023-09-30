@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 )
 
 var (
@@ -15,6 +16,8 @@ var (
 	simnetBlockHeader []byte
 	//go:embed test-data/block_1624455.dat
 	block1624455 []byte
+	//go:embed test-data/header_1624455.dat
+	header1624455 []byte
 	//go:embed test-data/solution_1624455.dat
 	solution1624455 []byte
 )
@@ -30,37 +33,44 @@ func TestBlock(t *testing.T) {
 	expBits := binary.LittleEndian.Uint32(mustDecodeHex("d0aa011c"))
 	const expTime = 1649294915
 
+	checkHeader := func(hdr *wire.BlockHeader) {
+		if hdr.Version != expVersion {
+			t.Fatalf("wrong version. expected %d, got %d", expVersion, hdr.Version)
+		}
+
+		if *expPrevBlock != hdr.PrevBlock {
+			t.Fatal("wrong previous block", expPrevBlock, hdr.PrevBlock[:])
+		}
+
+		if *expMerkleRoot != hdr.MerkleRoot {
+			t.Fatal("wrong merkle root", expMerkleRoot, hdr.MerkleRoot[:])
+		}
+
+		// TODO: Find out why this is not right.
+		// if !bytes.Equal(zecBlock.HashBlockCommitments[:], expHashBlockCommitments) {
+		// 	t.Fatal("wrong hashBlockCommitments", zecBlock.HashBlockCommitments[:], expHashBlockCommitments, h)
+		// }
+
+		if hdr.Bits != expBits {
+			t.Fatalf("wrong bits")
+		}
+
+		if hdr.Timestamp.Unix() != expTime {
+			t.Fatalf("wrong timestamp")
+		}
+	}
+
+	hdr, err := DeserializeBlockHeader(header1624455)
+	if err != nil {
+		t.Fatalf("DeserializeBlockHeader error: %v", err)
+	}
+	checkHeader(hdr)
+
 	zecBlock, err := DeserializeBlock(block1624455)
 	if err != nil {
 		t.Fatalf("decodeBlockHeader error: %v", err)
 	}
-
-	hdr := &zecBlock.MsgBlock.Header
-
-	if hdr.Version != expVersion {
-		t.Fatalf("wrong version. expected %d, got %d", expVersion, hdr.Version)
-	}
-
-	if *expPrevBlock != hdr.PrevBlock {
-		t.Fatal("wrong previous block", expPrevBlock, hdr.PrevBlock[:])
-	}
-
-	if *expMerkleRoot != hdr.MerkleRoot {
-		t.Fatal("wrong merkle root", expMerkleRoot, hdr.MerkleRoot[:])
-	}
-
-	// TODO: Find out why this is not right.
-	// if !bytes.Equal(zecBlock.HashBlockCommitments[:], expHashBlockCommitments) {
-	// 	t.Fatal("wrong hashBlockCommitments", zecBlock.HashBlockCommitments[:], expHashBlockCommitments, h)
-	// }
-
-	if hdr.Bits != expBits {
-		t.Fatalf("wrong bits")
-	}
-
-	if hdr.Timestamp.Unix() != expTime {
-		t.Fatalf("wrong timestamp")
-	}
+	checkHeader(&zecBlock.MsgBlock.Header)
 
 	if !bytes.Equal(zecBlock.Nonce[:], expNonce) {
 		t.Fatal("wrong nonce", zecBlock.Nonce[:], expNonce)

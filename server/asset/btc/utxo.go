@@ -99,6 +99,14 @@ func (txio *TXIO) FeeRate() uint64 {
 	return txio.tx.feeRate
 }
 
+func (txio *TXIO) Fees() uint64 {
+	return txio.tx.fees
+}
+
+func (txio *TXIO) RawTx() []byte {
+	return txio.tx.raw
+}
+
 // Input is a transaction input.
 type Input struct {
 	TXIO
@@ -275,6 +283,10 @@ func (output *Output) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 // A UTXO is information regarding an unspent transaction output.
 type UTXO struct {
 	*Output
+}
+
+func (utxo *UTXO) Coin() asset.Coin {
+	return utxo
 }
 
 // Confirmations returns the number of confirmations on this output's

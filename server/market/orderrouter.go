@@ -545,7 +545,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			}
 
 			delete(neededCoins, key) // don't check this coin again
-			valSum += dexCoin.Value()
+			valSum += dexCoin.Coin().Value()
 			// NOTE: Summing like this is actually not quite sufficient to
 			// estimate the size associated with the input, because if it's a
 			// BTC segwit output, we would also have to account for the marker
@@ -761,7 +761,7 @@ func (r *OrderRouter) submitOrderToMarket(tunnel MarketTunnel, oRecord *orderRec
 func (r *OrderRouter) checkZeroConfs(dexCoin asset.FundingCoin, fundingAsset *asset.BackedAsset) *msgjson.Error {
 	// Verify that zero-conf coins are within 10% of the last known fee
 	// rate.
-	confs, err := coinConfirmations(dexCoin)
+	confs, err := coinConfirmations(dexCoin.Coin())
 	if err != nil {
 		log.Debugf("Confirmations error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
 		return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("failed to verify coin %v", dexCoin))
@@ -771,11 +771,11 @@ func (r *OrderRouter) checkZeroConfs(dexCoin asset.FundingCoin, fundingAsset *as
 	}
 	lastKnownFeeRate := r.feeSource.LastRate(fundingAsset.ID) // MaxFeeRate applied inside feeSource
 	feeMinimum := uint64(math.Round(float64(lastKnownFeeRate) * ZeroConfFeeRateThreshold))
-	feeRate := dexCoin.FeeRate()
-	if lastKnownFeeRate > 0 && feeRate < feeMinimum {
-		log.Debugf("Fee rate too low %s coin %s: %d < %d", fundingAsset.Symbol, dexCoin, feeRate, feeMinimum)
+
+	if !fundingAsset.Backend.ValidateFeeRate(dexCoin.Coin(), feeMinimum) {
+		log.Debugf("Fees too low %s coin %s: fee mim %d", fundingAsset.Symbol, dexCoin, feeMinimum)
 		return msgjson.NewError(msgjson.FundingError,
-			fmt.Sprintf("fee rate for %s is too low. %d < %d", dexCoin, feeRate, feeMinimum))
+			fmt.Sprintf("fee rate for %s is too low. fee min %d", dexCoin, feeMinimum))
 	}
 	return nil
 }

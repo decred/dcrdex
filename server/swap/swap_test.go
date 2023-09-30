@@ -466,7 +466,7 @@ func (a *TBackend) setRedemption(redeem asset.Coin, cpSwap asset.Coin, resetErr 
 func (*TBackend) Info() *asset.BackendInfo {
 	return &asset.BackendInfo{}
 }
-func (a *TBackend) ValidateFeeRate(*asset.Contract, uint64) bool {
+func (a *TBackend) ValidateFeeRate(asset.Coin, uint64) bool {
 	return !a.invalidFeeRate
 }
 

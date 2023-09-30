@@ -224,11 +224,11 @@ if [ $ZEC_ON -eq 0 ]; then
         {
             "base": "ZEC_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 1000000,
+            "lotSize": 1000000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
-            "parcelSize": 1000
+            "parcelSize": 5
 EOF
 else echo "Zcash is not running. Configuring dcrdex markets without ZEC."
 fi
@@ -239,11 +239,11 @@ if [ $ZCL_ON -eq 0 ]; then
         {
             "base": "ZCL_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 100000000,
+            "lotSize": 10000000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
-            "parcelSize": 5000
+            "parcelSize": 8
 EOF
 else echo "Zclassic is not running. Configuring dcrdex markets without ZCL."
 fi

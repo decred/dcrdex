@@ -141,30 +141,20 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		InitTxSize:               dexbtc.InitTxSize,
 		InitTxSizeBase:           dexbtc.InitTxSizeBase,
 		PrivKeyFunc:              nil,
-		AddrFunc:                 nil,
 		AddressDecoder:           nil,
 		AddressStringer:          nil,
 		BlockDeserializer:        nil,
 		ArglessChangeAddrRPC:     true, // getrawchangeaddress has No address-type arg
 		NonSegwitSigner:          nil,
-		ConnectFunc:              nil,
 		FeeEstimator:             nil, // estimatesmartfee + getblockstats
 		ExternalFeeEstimator:     nil,
 		OmitAddressType:          true,  // getnewaddress has No address-type arg
 		LegacySignTxRPC:          false, // Has signrawtransactionwithwallet RPC
 		BooleanGetBlockRPC:       false, // Use 0/1 for verbose param
-		NumericGetRawRPC:         false, // getrawtransaction uses true/false
 		LegacyValidateAddressRPC: false, // getaddressinfo
 		SingularWallet:           false, // wallet can have "" as a path but also a name like "gamma"
 		UnlockSpends:             false,
 		ConstantDustLimit:        0,
-		TxDeserializer:           nil,
-		TxSerializer:             nil,
-		TxHasher:                 nil,
-		TxSizeCalculator:         nil,
-		TxVersion:                nil,
-		ManualMedianTime:         false,
-		OmitRPCOptionsArg:        false,
 		AssetID:                  BipID,
 	}
 

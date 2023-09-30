@@ -106,7 +106,7 @@ func TestElectrumExchangeWallet(t *testing.T) {
 	// contractHash, _ := hex.DecodeString("2b00eaeab6fc2f23bd96fc20fdc2b73a9e7510e03e8c7c66712c6a3f086c5e99")
 	contractHash := sha256.Sum256(contract)
 	wantSecret, _ := hex.DecodeString("aa8e04bb335da65d362b89ec0630dc76fd02ffaca783ae58cb712a2820f504ce")
-	foundTxHash, foundVin, secret, err := eew.findRedemption(ctx, newOutPoint(swapTxHash, swapVout), contractHash[:])
+	foundTxHash, foundVin, secret, err := eew.findRedemption(ctx, NewOutPoint(swapTxHash, swapVout), contractHash[:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestElectrumExchangeWallet(t *testing.T) {
 	}
 
 	// FindRedemption
-	redeemCoin, secretBytes, err := eew.FindRedemption(ctx, toCoinID(swapTxHash, swapVout), contract)
+	redeemCoin, secretBytes, err := eew.FindRedemption(ctx, ToCoinID(swapTxHash, swapVout), contract)
 	if err != nil {
 		t.Fatal(err)
 	}

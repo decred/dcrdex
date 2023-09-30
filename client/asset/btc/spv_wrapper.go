@@ -252,11 +252,11 @@ type spvWallet struct {
 	txBlocks    map[chainhash.Hash]*hashEntry
 
 	checkpointMtx sync.Mutex
-	checkpoints   map[outPoint]*scanCheckpoint
+	checkpoints   map[OutPoint]*scanCheckpoint
 
 	log dex.Logger
 
-	tipChan            chan *block
+	tipChan            chan *BlockVector
 	syncTarget         int32
 	lastPrenatalHeight int32
 }
@@ -289,7 +289,7 @@ func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) 
 
 // tipFeed satisfies the tipNotifier interface, signaling that *spvWallet
 // will take precedence in sending block notifications.
-func (w *spvWallet) tipFeed() <-chan *block {
+func (w *spvWallet) tipFeed() <-chan *BlockVector {
 	return w.tipChan
 }
 
@@ -324,7 +324,7 @@ func (w *spvWallet) cacheCheckpoint(txHash *chainhash.Hash, vout uint32, res *fi
 	}
 	w.checkpointMtx.Lock()
 	defer w.checkpointMtx.Unlock()
-	w.checkpoints[newOutPoint(txHash, vout)] = &scanCheckpoint{
+	w.checkpoints[NewOutPoint(txHash, vout)] = &scanCheckpoint{
 		res:        res,
 		lastAccess: time.Now(),
 	}
@@ -334,7 +334,7 @@ func (w *spvWallet) cacheCheckpoint(txHash *chainhash.Hash, vout uint32, res *fi
 func (w *spvWallet) unvalidatedCheckpoint(txHash *chainhash.Hash, vout uint32) *filterScanResult {
 	w.checkpointMtx.Lock()
 	defer w.checkpointMtx.Unlock()
-	check, found := w.checkpoints[newOutPoint(txHash, vout)]
+	check, found := w.checkpoints[NewOutPoint(txHash, vout)]
 	if !found {
 		return nil
 	}
@@ -354,9 +354,9 @@ func (w *spvWallet) checkpoint(txHash *chainhash.Hash, vout uint32) *filterScanR
 	if !w.blockIsMainchain(&res.checkpoint, -1) {
 		// reorg detected, abandon the checkpoint.
 		w.log.Debugf("abandoning checkpoint %s because checkpoint block %q is orphaned",
-			newOutPoint(txHash, vout), res.checkpoint)
+			NewOutPoint(txHash, vout), res.checkpoint)
 		w.checkpointMtx.Lock()
-		delete(w.checkpoints, newOutPoint(txHash, vout))
+		delete(w.checkpoints, NewOutPoint(txHash, vout))
 		w.checkpointMtx.Unlock()
 		return nil
 	}
@@ -460,7 +460,7 @@ func (w *spvWallet) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, p
 // medianTime is the median time for the current best block.
 func (w *spvWallet) medianTime() (time.Time, error) {
 	blk := w.wallet.SyncedTo()
-	return calcMedianTime(w, &blk.Hash)
+	return CalcMedianTime(w.getChainStamp, &blk.Hash)
 }
 
 // getChainHeight is only for confirmations since it does not reflect the wallet
@@ -505,7 +505,7 @@ func (w *spvWallet) syncHeight() int32 {
 	return maxHeight
 }
 
-// syncStatus is information about the wallet's sync status.
+// SyncStatus is information about the wallet's sync status.
 //
 // The neutrino wallet has a two stage sync:
 //  1. chain service fetching block headers and filter headers
@@ -515,7 +515,7 @@ func (w *spvWallet) syncHeight() int32 {
 // the chain service sync stage that comes before the wallet has performed any
 // address recovery/rescan, and switch to the wallet's sync height when it
 // reports non-zero height.
-func (w *spvWallet) syncStatus() (*syncStatus, error) {
+func (w *spvWallet) syncStatus() (*SyncStatus, error) {
 	// Chain service headers (block and filter) height.
 	chainBlk, err := w.cl.BestBlock()
 	if err != nil {
@@ -532,7 +532,7 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	}
 
 	var synced bool
-	var blk *block
+	var blk *BlockVector
 	// Wallet address manager sync height.
 	if chainBlk.Timestamp.After(w.wallet.Birthday()) {
 		// After the wallet's birthday, the wallet address manager should begin
@@ -543,23 +543,23 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 		if walletBlock.Height == 0 {
 			// The wallet is about to start its sync, so just return the last
 			// chain service height prior to wallet birthday until it begins.
-			return &syncStatus{
+			return &SyncStatus{
 				Target:  target,
 				Height:  atomic.LoadInt32(&w.lastPrenatalHeight),
 				Syncing: true,
 			}, nil
 		}
-		blk = &block{
-			height: int64(walletBlock.Height),
-			hash:   walletBlock.Hash,
+		blk = &BlockVector{
+			Height: int64(walletBlock.Height),
+			Hash:   walletBlock.Hash,
 		}
 		currentHeight = walletBlock.Height
 		synced = currentHeight >= target // maybe && w.wallet.ChainSynced()
 	} else {
 		// Chain service still syncing.
-		blk = &block{
-			height: int64(currentHeight),
-			hash:   chainBlk.Hash,
+		blk = &BlockVector{
+			Height: int64(currentHeight),
+			Hash:   chainBlk.Hash,
 		}
 		atomic.StoreInt32(&w.lastPrenatalHeight, currentHeight)
 	}
@@ -568,9 +568,9 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 		w.tipChan <- blk
 	}
 
-	return &syncStatus{
+	return &SyncStatus{
 		Target:  target,
-		Height:  int32(blk.height),
+		Height:  int32(blk.Height),
 		Syncing: !synced,
 	}, nil
 }
@@ -689,13 +689,13 @@ func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
 // lockUnspent locks and unlocks outputs for spending. An output that is part of
 // an order, but not yet spent, should be locked until spent or until the order
 // is  canceled or fails.
-func (w *spvWallet) lockUnspent(unlock bool, ops []*output) error {
+func (w *spvWallet) lockUnspent(unlock bool, ops []*Output) error {
 	switch {
 	case unlock && len(ops) == 0:
 		w.wallet.ResetLockedOutpoints()
 	default:
 		for _, op := range ops {
-			op := wire.OutPoint{Hash: op.pt.txHash, Index: op.pt.vout}
+			op := wire.OutPoint{Hash: op.Pt.TxHash, Index: op.Pt.Vout}
 			if unlock {
 				w.wallet.UnlockOutpoint(op)
 			} else {
@@ -779,7 +779,7 @@ func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract b
 	}
 
 	enough := sendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
-	sum, _, inputsSize, _, _, _, _, err := tryFund(utxos, enough)
+	sum, _, inputsSize, _, _, _, _, err := TryFund(utxos, enough)
 	if err != nil {
 		return 0, err
 	}
@@ -922,7 +922,7 @@ func (w *spvWallet) walletUnlock(pw []byte) error {
 // getBlockHeader gets the *blockHeader for the specified block hash. It also
 // returns a bool value to indicate whether this block is a part of main chain.
 // For orphaned blocks header.Confirmations is negative.
-func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHeader, mainchain bool, err error) {
+func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *BlockHeader, mainchain bool, err error) {
 	hdr, err := w.cl.GetBlockHeader(blockHash)
 	if err != nil {
 		return nil, false, err
@@ -944,7 +944,7 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHead
 		confirmations = int64(confirms(blockHeight, tip.Height))
 	}
 
-	return &blockHeader{
+	return &BlockHeader{
 		Hash:              hdr.BlockHash().String(),
 		Confirmations:     confirmations,
 		Height:            int64(blockHeight),
@@ -953,7 +953,7 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHead
 	}, mainchain, nil
 }
 
-func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
+func (w *spvWallet) getBestBlockHeader() (*BlockHeader, error) {
 	hash, err := w.getBestBlockHash()
 	if err != nil {
 		return nil, err
@@ -1010,9 +1010,9 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error)
 				}
 
 				select {
-				case w.tipChan <- &block{
-					hash:   blk.Hash,
-					height: int64(blk.Height),
+				case w.tipChan <- &BlockVector{
+					Hash:   blk.Hash,
+					Height: int64(blk.Height),
 				}:
 				default:
 					w.log.Warnf("tip report channel was blocking")
@@ -1400,8 +1400,8 @@ search:
 		if res.spend != nil && res.blockHash == nil {
 			w.log.Warnf("A spending input (%s) was found during the scan but the output (%s) "+
 				"itself wasn't found. Was the startBlockHeight early enough?",
-				newOutPoint(&res.spend.txHash, res.spend.vin),
-				newOutPoint(&txHash, vout),
+				NewOutPoint(&res.spend.txHash, res.spend.vin),
+				NewOutPoint(&txHash, vout),
 			)
 			return res, nil
 		}
@@ -1498,8 +1498,8 @@ func (w *spvWallet) matchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (
 
 // searchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
-func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq,
-	blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult) {
+func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq,
+	blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult) {
 
 	// Just match all the scripts together.
 	scripts := make([][]byte, 0, len(reqs))
@@ -1507,7 +1507,7 @@ func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[outP
 		scripts = append(scripts, req.pkScript)
 	}
 
-	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
+	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
 
 	matchFound, err := w.matchPkScript(&blockHash, scripts)
 	if err != nil {
@@ -1527,7 +1527,7 @@ func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[outP
 	}
 
 	for _, msgTx := range block.MsgBlock().Transactions {
-		newlyDiscovered := findRedemptionsInTx(ctx, true, reqs, msgTx, w.chainParams)
+		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, true, reqs, msgTx, w.chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -1536,7 +1536,7 @@ func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[outP
 }
 
 // findRedemptionsInMempool is unsupported for SPV.
-func (w *spvWallet) findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult) {
+func (w *spvWallet) findRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult) {
 	return
 }
 
@@ -1605,7 +1605,7 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 
 	ret := &GetTransactionResult{
 		TxID:         txHash.String(),
-		Hex:          txRaw, // 'Hex' field name is a lie, kinda
+		Bytes:        txRaw, // 'Hex' field name is a lie, kinda
 		Time:         uint64(details.Received.Unix()),
 		TimeReceived: uint64(details.Received.Unix()),
 	}
