@@ -453,6 +453,7 @@ func (db *tTxDB) removeMonitoredTxs(txHash []common.Hash) error {
 func (db *tTxDB) close() error {
 	return nil
 }
+func (db *tTxDB) run(context.Context) {}
 
 func TestCheckUnconfirmedTxs(t *testing.T) {
 	const tipHeight = 50

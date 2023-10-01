@@ -423,6 +423,9 @@ type baseWallet struct {
 	}
 
 	txDB txDB
+	// All processes which may write to txDB must add an entry to this
+	// WaitGroup, and they must all complete before the db is closed.
+	txDbWg sync.WaitGroup
 }
 
 // assetWallet is a wallet backend for Ethereum and Eth tokens. The backend is
@@ -759,6 +762,7 @@ func getWalletDir(dataDir string, network dex.Network) string {
 
 func (w *ETHWallet) shutdown() {
 	w.node.shutdown()
+	w.txDbWg.Wait()
 	if err := w.txDB.close(); err != nil {
 		w.log.Errorf("error closing tx history db: %v", err)
 	}
@@ -824,6 +828,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	if err != nil {
 		return nil, err
 	}
+	w.txDbWg = sync.WaitGroup{}
 
 	w.monitoredTxs, err = w.txDB.getMonitoredTxs()
 	if err != nil {
@@ -851,12 +856,22 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.connected.Store(true)
 
 	var wg sync.WaitGroup
+
+	wg.Add(1)
+	w.txDbWg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer w.txDbWg.Done()
+		w.txDB.run(ctx)
+	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		w.monitorBlocks(ctx)
 		w.shutdown()
 	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -895,6 +910,7 @@ func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			w.connected.Store(false)
 		}
 	}()
+
 	return &wg, nil
 }
 
@@ -2697,15 +2713,6 @@ func (w *assetWallet) ContractLockTimeExpired(ctx context.Context, contract dex.
 	return expired, swap.LockTime, nil
 }
 
-func (eth *baseWallet) tip() uint64 {
-	ethWallet := eth.wallet(eth.baseChainID)
-	if ethWallet == nil || !ethWallet.connected.Load() {
-		return 0
-	}
-
-	return eth.currentTip.Number.Uint64()
-}
-
 // findRedemptionResult is used internally for queued findRedemptionRequests.
 type findRedemptionResult struct {
 	err       error
@@ -3463,7 +3470,10 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 			w.emit.TipChange(bestHdr.Number.Uint64())
 		}
 	}()
+
+	eth.txDbWg.Add(1)
 	go func() {
+		defer eth.txDbWg.Done()
 		for _, w := range connectedWallets {
 			w.checkFindRedemptions()
 		}
@@ -3474,7 +3484,11 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 		}
 	}()
 
-	go eth.checkPendingTxs()
+	eth.txDbWg.Add(1)
+	go func() {
+		defer eth.txDbWg.Done()
+		eth.checkPendingTxs()
+	}()
 }
 
 // getLatestMonitoredTx looks up a txHash in the monitoredTxs map. If the
@@ -4019,7 +4033,9 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 	w.pendingTxCheckBal = bal
 	w.pendingTxsMtx.Unlock()
 
-	tip := w.tip()
+	w.tipMtx.RLock()
+	tip := w.currentTip.Number.Uint64()
+	w.tipMtx.RUnlock()
 
 	addPendingTx := func(txAssetID uint32, pt *extendedWalletTx) {
 		if txAssetID == w.assetID {
@@ -4540,7 +4556,9 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 // extendedWalletTx.mtx MUST be held while calling this function, but the
 // w.pendingTxsMtx MUST NOT be held.
 func (w *baseWallet) checkPendingTx(nonce uint64, pendingTx *extendedWalletTx) (givenUp bool) {
-	tip := w.tip()
+	w.tipMtx.RLock()
+	tip := w.currentTip.Number.Uint64()
+	w.tipMtx.RUnlock()
 
 	var updated bool
 	defer func() {
@@ -4589,16 +4607,6 @@ func (w *baseWallet) checkPendingTx(nonce uint64, pendingTx *extendedWalletTx) (
 		}
 		if !errors.Is(err, asset.CoinNotFoundError) {
 			w.log.Errorf("Error getting confirmations for pending tx %s: %v", txHash, err)
-		}
-		if time.Since(time.Unix(int64(pendingTx.TimeStamp), 0)) > time.Minute*3 && tip%4 == 0 {
-			currentNonce, err := w.node.getConfirmedNonce(w.ctx)
-			if err != nil {
-				w.log.Errorf("Error getting account nonce for stale pending tx check: %v", err)
-				return
-			}
-			if currentNonce > nonce {
-				givenUp = true
-			}
 		}
 		if time.Since(time.Unix(int64(pendingTx.TimeStamp), 0)) > time.Minute*6 {
 			givenUp = true
@@ -4670,8 +4678,10 @@ const txHistoryNonceKey = "Nonce"
 
 func (w *baseWallet) addToTxHistory(nonce uint64, balanceDelta int64, fees, blockNumber uint64,
 	assetID uint32, id dex.Bytes, typ asset.TransactionType) {
+	w.tipMtx.RLock()
+	tip := w.currentTip.Number.Uint64()
+	w.tipMtx.RUnlock()
 	var confs uint64
-	tip := w.tip()
 	if blockNumber > 0 && tip >= blockNumber {
 		confs = tip - blockNumber + 1
 	}

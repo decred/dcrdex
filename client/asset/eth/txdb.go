@@ -5,12 +5,14 @@ package eth
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -181,6 +183,7 @@ type txDB interface {
 	getMonitoredTxs() (map[common.Hash]*monitoredTx, error)
 	removeMonitoredTxs([]common.Hash) error
 	close() error
+	run(context.Context)
 }
 
 type badgerTxDB struct {
@@ -213,7 +216,7 @@ func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
 	if err == badger.ErrTruncateNeeded {
 		// Probably a Windows thing.
 		// https://github.com/dgraph-io/badger/issues/744
-		log.Warnf("newTxHistoryStore badger db: %v", err)
+		log.Warnf("error opening badger db: %v", err)
 		// Try again with value log truncation enabled.
 		opts.Truncate = true
 		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
@@ -225,7 +228,8 @@ func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
 
 	txDB := &badgerTxDB{
 		DB:  db,
-		log: log}
+		log: log,
+	}
 
 	err = txDB.updateVersion()
 	if err != nil {
@@ -301,6 +305,22 @@ func (s *badgerTxDB) updateVersion() error {
 
 func (s *badgerTxDB) close() error {
 	return s.Close()
+}
+
+func (s *badgerTxDB) run(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			err := s.RunValueLogGC(0.5)
+			if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
+				s.log.Errorf("garbage collection error: %v", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // storeTx stores a mapping from nonce to extendedWalletTx and a mapping from
