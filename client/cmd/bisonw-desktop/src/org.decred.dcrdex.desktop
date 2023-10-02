@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Bison Wallet
+Comment=Multi-wallet backed by Decred DEX
+Categories=Office;Finance;
+Icon=org.decred.dcrdex
+Exec=dexc
+Terminal=false
+StartupWMClass=BisonWallet
