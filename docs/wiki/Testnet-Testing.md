@@ -8,6 +8,7 @@
   - [Create a Decred Exchange Wallet Configuration File](#create-a-decred-exchange-wallet-configuration-file)
 - [Get the Testnet Server TLS Certificate](#get-the-testnet-server-tls-certificate)
 - [Start the Client](#start-the-client)
+- [Add RPC Wallet](#add-rpc-wallet)
 - [Acquire Testnet Funds](#acquire-testnet-funds)
 
 To get started, you must have followed all of the required steps in [Client
@@ -16,8 +17,8 @@ Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Con
 If you have and do not wish to use the testnet RPC wallets, you can proceed to
 [acquiring Testnet funds](#acquire-testnet-funds). 
 
-However, if you wish to use testnet RPC wallets, let's see how we can do that
-for BTC and DCR.
+However, if you wish to use testnet RPC wallets, follow the guide below to set
+up RPC wallet for BTC and DCR.
 
 ## Prepare RPC Wallets
 
@@ -152,6 +153,15 @@ Start `dexc` with the web UI and RPC server in testnet mode and trace level logg
 ```sh
 ./dexc --testnet --rpc --log=trace
 ```
+
+## Add RPC Wallet
+
+If you already created an SPV wallet, you can change to an RPC wallet from the
+wallet settings page.
+
+If not, visit the wallets page and click on the "Create a {asset name} wallet"
+button. Click on the "External" tab, input the RPC wallet config info and submit
+the form. If everything went well your RPC wallet will be added to dcrdex.
 
 ### Acquire Testnet Funds
 
