@@ -2,6 +2,7 @@
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="text-center py-5 overflow-y-auto">
+  <div class="go-back-to-settings"><span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24"></span></div>
   <span class="settings-gear ico-settings"></span>
   <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
   <div class="flex-center fs16 mb-2">
