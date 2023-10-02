@@ -3,7 +3,8 @@
 # in this directory.
 
 # pick up the release tag from git
-VER=$(git describe --tags --abbrev=0 | sed -e 's/^v//')
+# VER=$(git describe --tags --always | sed -e 's/^v//')
+VER="0.7.0"
 META= # "release"
 REV="0"
 
@@ -16,4 +17,6 @@ BUILD_DIR="./build"
 
 # DEB_NAME follows the prescribed format for debian packaging.
 DEB_NAME="${APP}_${VER}-${REV}_${ARCH}"
+
+echo "Build version: ${VER}-${REV}_${ARCH}"
 

@@ -293,8 +293,8 @@ github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 h1:8UrgZ3GkP4i/CLijOJx79Yu+etly
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0/go.mod h1:v57UDF4pDQJcEfFUCRop3lJL149eHGSe9Jvczhzjo/0=
 github.com/decred/dcrd/dcrjson/v4 v4.0.1 h1:vyQuB1miwGqbCVNm8P6br3V65WQ6wyrh0LycMkvaBBg=
 github.com/decred/dcrd/dcrjson/v4 v4.0.1/go.mod h1:2qVikafVF9/X3PngQVmqkbUbyAl32uik0k/kydgtqMc=
-github.com/decred/dcrd/dcrutil/v4 v4.0.1 h1:E+d2TNbpOj0f1L9RqkZkEm1QolFjajvkzxWC5WOPf1s=
-github.com/decred/dcrd/dcrutil/v4 v4.0.1/go.mod h1:7EXyHYj8FEqY+WzMuRkF0nh32ueLqhutZDoW4eQ+KRc=
+github.com/decred/dcrd/dcrutil/v4 v4.0.2-0.20231005000813-c102e54b4128 h1:hDyaGr+CuE9M/fCC7raFGH89wPd49tnjuc4wftISwa4=
+github.com/decred/dcrd/dcrutil/v4 v4.0.2-0.20231005000813-c102e54b4128/go.mod h1:7EXyHYj8FEqY+WzMuRkF0nh32ueLqhutZDoW4eQ+KRc=
 github.com/decred/dcrd/gcs/v4 v4.0.0 h1:bet+Ax1ZFUqn2M0g1uotm0b8F6BZ9MmblViyJ088E8k=
 github.com/decred/dcrd/gcs/v4 v4.0.0/go.mod h1:9z+EBagzpEdAumwS09vf/hiGaR8XhNmsBgaVq6u7/NI=
 github.com/decred/dcrd/hdkeychain/v3 v3.1.1 h1:4WhyHNBy7ec6qBUC7Fq7JFVGSd7bpuR5H+AJRID8Lyk=

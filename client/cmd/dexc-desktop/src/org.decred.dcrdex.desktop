@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Decred DEX Client
+Comment=Multi-wallet backed by Decred DEX
+Categories=Office;Finance;
+Icon=org.decred.dcrdex
+Exec=dexc
+Terminal=false
+StartupWMClass=DCRDEX

@@ -1,0 +1,48 @@
+name: Build and Publish Snap Package
+
+on:
+# manually trigger the workflow from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build-snap:
+    runs-on: ubuntu-latest
+
+    steps:
+        - name: Checkout code
+          uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+          with:
+            fetch-depth: 0
+
+        - name: Compile frontend
+          working-directory: client/webserver/site
+          run: |
+            npm install
+            npm run build
+
+        - name: Install deb deps
+          run: |
+            sudo apt-get update
+            sudo apt-get -y install libgtk-3-dev libwebkit2gtk-4.0-dev build-essential
+
+        - name: Build deb package
+          working-directory: client/cmd/dexc-desktop
+          run: pkg/pkg-debian.sh
+
+        - name: Prepare snapcraft.yml
+          working-directory: client/cmd/dexc-desktop
+          run: pkg/prepare-snap.sh
+
+        - name: Build snap package
+          uses: snapcore/action-build@2ee46bc29d163c9c836f2820cc46b39664bf0de2 # v1.1.3
+          id: build
+          with:
+            path: client/cmd/dexc-desktop
+
+        - name: Publish snap to Snap Store
+          uses: snapcore/action-publish@0a8d537ae06f4a292e8b4ef1084cd5631b3c6871 # v1.1.1
+          env:
+            SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          with:
+            snap: ${{ steps.build.outputs.snap }}
+            release: stable

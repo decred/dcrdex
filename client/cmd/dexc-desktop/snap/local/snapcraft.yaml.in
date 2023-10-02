@@ -1,0 +1,102 @@
+name: dexc
+adopt-info: metainfo
+version: '$VERSION'
+license: BlueOak-1.0.0
+
+base: core22 
+grade: stable
+confinement: strict
+
+architectures:
+  - build-on: amd64
+compression: lzo
+
+plugs:
+  dbus-svc:
+    bus: system
+    interface: dbus
+    name: org.freedesktop.portal
+  dbus-statusnotifier:
+    bus: session
+    interface: dbus
+    name: org.kde.StatusNotifierWatcher
+  dbus-dbusmenu:
+    bus: session
+    interface: dbus
+    name: com.canonical.dbusmenu
+
+apps:
+  dexc:
+    common-id: org.decred.dcrdex
+    command: usr/bin/dexc
+    desktop: usr/share/applications/dexc.desktop
+    extensions: [gnome]
+    environment:
+      GTK_USE_PORTAL: "1"
+      #TMPDIR: $XDG_RUNTIME_DIR
+      #XDG_CURRENT_DESKTOP: Unity
+      #DISABLE_WAYLAND: 1
+    plugs: 
+      - home
+      - opengl
+      - x11
+      - desktop
+      - desktop-legacy
+      - network
+      - network-status
+      - browser-support
+      - screen-inhibit-control
+      - dbus-svc
+      - dbus-dbusmenu
+      - dbus-statusnotifier
+
+parts:
+  metainfo:
+    plugin: nil
+    source: .
+    parse-info: [./src/org.decred.dcrdex.metainfo.xml]
+
+  dexc-desktop:
+    plugin: dump
+    source: ./build/$DEB_NAME.deb
+    source-type: deb
+    override-build: |
+      craftctl default
+      # Point icon to the correct location
+      sed -i -e 's|Icon=.*$|Icon=usr/share/icons/hicolor/scalable/apps/dexc.svg|' $SNAPCRAFT_PART_INSTALL/usr/share/applications/dexc.desktop
+  
+    prime:
+      - -usr/lib/x86_64-linux-gnu/libEGL_mesa*
+      - -usr/lib/x86_64-linux-gnu/libGLX_mesa*
+      - -usr/lib/x86_64-linux-gnu/libGLESv2*
+      - -usr/lib/x86_64-linux-gnu/libcaca++*
+      - -usr/lib/x86_64-linux-gnu/libcolordprivate*
+      - -usr/lib/x86_64-linux-gnu/libdconf*
+      - -usr/lib/x86_64-linux-gnu/libexslt*
+      - -usr/lib/x86_64-linux-gnu/libgstcheck-1.0*
+      - -usr/lib/x86_64-linux-gnu/libgstcontroller-1.0*
+      - -usr/lib/x86_64-linux-gnu/libicuio*
+      - -usr/lib/x86_64-linux-gnu/libicutest*
+      - -usr/lib/x86_64-linux-gnu/libjacknet*
+      - -usr/lib/x86_64-linux-gnu/libjackserver*
+      - -usr/lib/x86_64-linux-gnu/liborc-test-0.4*
+      - -usr/lib/x86_64-linux-gnu/libpulse-simple*
+      - -usr/lib/x86_64-linux-gnu/libunwind-coredump*
+      - -usr/lib/x86_64-linux-gnu/libunwind-ptrace*
+      - -usr/lib/x86_64-linux-gnu/libunwind-x86_64*
+      - -usr/lib/x86_64-linux-gnu/libwoff2enc*
+      - -usr/lib/x86_64-linux-gnu/libicutu*
+      - -usr/lib/x86_64-linux-gnu/libsamplerate*
+      - -usr/lib/x86_64-linux-gnu/libxcb-dri2*
+      - -usr/lib/x86_64-linux-gnu/libxcb-glx*
+      - -usr/lib/x86_64-linux-gnu/libxcb-present*
+      - -usr/lib/x86_64-linux-gnu/libxcb-randr*
+      - -usr/lib/x86_64-linux-gnu/libxcb-sync*
+      - -usr/lib/x86_64-linux-gnu/libxcb-xfixes*
+      - -usr/lib/x86_64-linux-gnu/libxshmfence*
+
+    stage-packages:
+      - desktop-file-utils
+      - libwebkit2gtk-4.0-37
+      - libgtk-3-0
+

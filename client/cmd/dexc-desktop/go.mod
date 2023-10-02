@@ -66,7 +66,7 @@ require (
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.3 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
 	github.com/decred/dcrd/dcrjson/v4 v4.0.1 // indirect
-	github.com/decred/dcrd/dcrutil/v4 v4.0.1 // indirect
+	github.com/decred/dcrd/dcrutil/v4 v4.0.2-0.20231005000813-c102e54b4128 // indirect
 	github.com/decred/dcrd/gcs/v4 v4.0.0 // indirect
 	github.com/decred/dcrd/hdkeychain/v3 v3.1.1 // indirect
 	github.com/decred/dcrd/lru v1.1.1 // indirect
