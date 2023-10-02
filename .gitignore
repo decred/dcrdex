@@ -40,4 +40,5 @@ client/asset/eth/cmd/getgas/getgas
 client/asset/eth/cmd/deploy/deploy
 client/cmd/dexc-desktop/pkg/installers
 server/noderelay/cmd/sourcenode/sourcenode
+client/cmd/dexc-desktop/snap/snapcraft.yaml
 tatanka/cmd/demo/demo
