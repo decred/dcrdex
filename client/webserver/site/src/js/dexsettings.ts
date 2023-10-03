@@ -199,7 +199,8 @@ export default class DexSettingsPage extends BasePage {
     const assetID = bondAsset.id
     Doc.applySelector(page.bondDetailsForm, '.bondAssetSym').forEach((el) => { el.textContent = assetInfo.symbol.toLocaleUpperCase() })
     page.bondCost.textContent = Doc.formatFullPrecision(bondCost, ui)
-    Doc.showFiatValue(assetID, bondCost, page.bondCostFiat)
+    const xcRate = app().fiatRatesMap[assetID]
+    Doc.showFiatValue(page.bondCostFiat, bondCost, xcRate, ui)
 
     let feeBuffer = this.bondFeeBufferCache[assetInfo.symbol]
     if (!feeBuffer) {
@@ -214,7 +215,7 @@ export default class DexSettingsPage extends BasePage {
     let reservation = 0
     if (targetTier > 0) reservation = bondCost * targetTier * bondOverlap + feeBuffer
     page.bondReservationAmt.textContent = Doc.formatFullPrecision(reservation, ui)
-    Doc.showFiatValue(assetID, reservation, page.bondReservationAmtFiat)
+    Doc.showFiatValue(page.bondReservationAmtFiat, reservation, xcRate, ui)
   }
 
   // Retrieve an estimate for the tx fee needed to create new bond reserves.
