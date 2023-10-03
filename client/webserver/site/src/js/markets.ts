@@ -583,7 +583,7 @@ export default class MarketsPage extends BasePage {
 
   /* hasPendingBonds is true if there are pending bonds */
   hasPendingBonds (): boolean {
-    return Object.keys(this.market.dex.pendingBonds).length > 0
+    return Object.keys(this.market.dex.auth.pendingBonds || []).length > 0
   }
 
   /* setCurrMarketPrice updates the current market price on the stats displays
@@ -727,10 +727,10 @@ export default class MarketsPage extends BasePage {
     const showOrderForm = async () : Promise<boolean> => {
       if (!this.assetsAreSupported().isSupported) return false // assets not supported
 
-      if (!this.market || this.market.dex.tier < 1) return false // acct suspended or not registered
+      if (!this.market || this.market.dex.auth.effectiveTier < 1) return false// acct suspended or not registered
 
       const { baseAssetApprovalStatus, quoteAssetApprovalStatus } = this.tokenAssetApprovalStatuses()
-      if (baseAssetApprovalStatus !== ApprovalStatus.Approved && quoteAssetApprovalStatus !== ApprovalStatus.Approved) return false
+      if (baseAssetApprovalStatus !== ApprovalStatus.Approved || quoteAssetApprovalStatus !== ApprovalStatus.Approved) return false
 
       const { base, quote } = this.market
       const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
@@ -949,12 +949,12 @@ export default class MarketsPage extends BasePage {
     page.regStatusDex.textContent = dex.host
     page.postingBondsDex.textContent = dex.host
 
-    if (dex.tier >= 1) {
+    if (dex.auth.effectiveTier >= 1) {
       this.setRegistrationStatusView(intl.prep(intl.ID_REGISTRATION_FEE_SUCCESS), '', 'completed')
       return
     }
 
-    const confStatuses = Object.values(dex.pendingBonds).map(pending => {
+    const confStatuses = (dex.auth.pendingBonds || []).map(pending => {
       const confirmationsRequired = dex.bondAssets[pending.symbol].confs
       return `${pending.confs} / ${confirmationsRequired}`
     })
@@ -976,7 +976,7 @@ export default class MarketsPage extends BasePage {
 
     this.updateRegistrationStatusView()
 
-    if (market.dex.tier >= 1) {
+    if (market.dex.auth.effectiveTier >= 1) {
       const toggle = async () => {
         Doc.hide(page.registrationStatus, page.bondRequired, page.bondCreationPending)
         this.resolveOrderFormVisibility()
@@ -993,10 +993,10 @@ export default class MarketsPage extends BasePage {
       Doc.show(page.notRegistered)
     } else if (this.hasPendingBonds()) {
       Doc.show(page.registrationStatus)
-    } else if (market.dex.bondOptions.targetTier > 0) {
+    } else if (market.dex.auth.targetTier > 0) {
       Doc.show(page.bondCreationPending)
     } else {
-      page.acctTier.textContent = `${market.dex.tier}`
+      page.acctTier.textContent = `${market.dex.auth.effectiveTier}`
       page.dexSettingsLink.href = `/dexsettings/${market.dex.host}`
       Doc.show(page.bondRequired)
     }

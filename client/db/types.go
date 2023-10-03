@@ -107,6 +107,8 @@ type Bond struct {
 
 	Confirmed bool `json:"confirmed"` // if reached required confs according to server, not in serialization
 	Refunded  bool `json:"refunded"`  // not in serialization
+
+	Strength uint32 `json:"strength"`
 }
 
 // UniqueID computes the bond's unique ID for keying purposes.
@@ -116,7 +118,7 @@ func (b *Bond) UniqueID() []byte {
 
 // Encode serialized the Bond. Confirmed and Refund are not included.
 func (b *Bond) Encode() []byte {
-	return versionedBytes(1).
+	return versionedBytes(2).
 		AddData(uint16Bytes(b.Version)).
 		AddData(uint32Bytes(b.AssetID)).
 		AddData(b.CoinID).
@@ -126,7 +128,8 @@ func (b *Bond) Encode() []byte {
 		AddData(uint64Bytes(b.Amount)).
 		AddData(uint64Bytes(b.LockTime)).
 		AddData(uint32Bytes(b.KeyIndex)).
-		AddData(b.RefundTx)
+		AddData(b.RefundTx).
+		AddData(uint32Bytes(b.Strength))
 	// Confirmed and Refunded are not part of the encoding.
 }
 
@@ -141,6 +144,8 @@ func DecodeBond(b []byte) (*Bond, error) {
 		return decodeBond_v0(pushes)
 	case 1:
 		return decodeBond_v1(pushes)
+	case 2:
+		return decodeBond_v2(pushes)
 	}
 	return nil, fmt.Errorf("unknown Bond version %d", ver)
 }
@@ -176,10 +181,17 @@ func decodeBond_v1(pushes [][]byte) (*Bond, error) {
 	if len(pushes) != 10 {
 		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
 	}
+	return decodeBond_v2(append(pushes, []byte{0, 0, 0, 0} /* uint32 strength */))
+}
+
+func decodeBond_v2(pushes [][]byte) (*Bond, error) {
+	if len(pushes) != 11 {
+		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
+	}
 	ver, assetIDB, coinID := pushes[0], pushes[1], pushes[2]
 	utx, stx := pushes[3], pushes[4]
 	data, amtB, lockTimeB := pushes[5], pushes[6], pushes[7]
-	keyIndex, refundTx := pushes[8], pushes[9]
+	keyIndex, refundTx, strength := pushes[8], pushes[9], pushes[10]
 	return &Bond{
 		Version:    intCoder.Uint16(ver),
 		AssetID:    intCoder.Uint32(assetIDB),
@@ -191,6 +203,7 @@ func decodeBond_v1(pushes [][]byte) (*Bond, error) {
 		LockTime:   intCoder.Uint64(lockTimeB),
 		KeyIndex:   intCoder.Uint32(keyIndex),
 		RefundTx:   refundTx,
+		Strength:   intCoder.Uint32(strength),
 	}, nil
 }
 
@@ -213,6 +226,7 @@ type AccountInfo struct {
 	Bonds        []*Bond
 	TargetTier   uint64 // zero means no bond maintenance (allows actual tier to drop negative)
 	MaxBondedAmt uint64
+	PenaltyComps uint16
 	BondAsset    uint32 // the asset to use when auto-posting bonds
 
 	// DEPRECATED reg fee data. Bond txns are in a sub-bucket.
@@ -228,7 +242,7 @@ type AccountInfo struct {
 // DB upgrade at some point. But how to deal with old accounts needing to store
 // this data forever?
 func (ai *AccountInfo) Encode() []byte {
-	return versionedBytes(3).
+	return versionedBytes(4).
 		AddData([]byte(ai.Host)).
 		AddData(ai.Cert).
 		AddData(ai.DEXPubKey.SerializeCompressed()).
@@ -238,7 +252,8 @@ func (ai *AccountInfo) Encode() []byte {
 		AddData(encode.Uint64Bytes(ai.MaxBondedAmt)).
 		AddData(encode.Uint32Bytes(ai.BondAsset)).
 		AddData(encode.Uint32Bytes(ai.LegacyFeeAssetID)).
-		AddData(ai.LegacyFeeCoin)
+		AddData(ai.LegacyFeeCoin).
+		AddData(encode.Uint16Bytes(ai.PenaltyComps))
 }
 
 // ViewOnly is true if account keys are not saved.
@@ -270,6 +285,8 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 		return decodeAccountInfo_v2(pushes)
 	case 3:
 		return decodeAccountInfo_v3(pushes)
+	case 4:
+		return decodeAccountInfo_v4(pushes)
 	}
 	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }
@@ -327,12 +344,20 @@ func decodeAccountInfo_v2(pushes [][]byte) (*AccountInfo, error) {
 
 func decodeAccountInfo_v3(pushes [][]byte) (*AccountInfo, error) {
 	if len(pushes) != 10 {
-		return nil, fmt.Errorf("decodeAccountInfo: expected 10 data pushes, got %d", len(pushes))
+		return nil, fmt.Errorf("decodeAccountInfo_v3: expected 10 data pushes, got %d", len(pushes))
+	}
+	pushes = append(pushes, []byte{0, 0}) // 16-bit PenaltyComps
+	return decodeAccountInfo_v4(pushes)
+}
+
+func decodeAccountInfo_v4(pushes [][]byte) (*AccountInfo, error) {
+	if len(pushes) != 11 {
+		return nil, fmt.Errorf("decodeAccountInfo: expected 11 data pushes, got %d", len(pushes))
 	}
 	hostB, certB, dexPkB := pushes[0], pushes[1], pushes[2]                // dex identity
 	v2Key, legacyKeyB := pushes[3], pushes[4]                              // account identity
 	targetTierB, maxBondedB, bondAssetB := pushes[5], pushes[6], pushes[7] // bond options
-	regAssetB, coinB := pushes[8], pushes[9]                               // legacy reg fee data
+	regAssetB, coinB, penaltyComps := pushes[8], pushes[9], pushes[10]     // legacy reg fee data
 	pk, err := secp256k1.ParsePubKey(dexPkB)
 	if err != nil {
 		return nil, err
@@ -346,6 +371,7 @@ func decodeAccountInfo_v3(pushes [][]byte) (*AccountInfo, error) {
 		// Bonds decoded by DecodeBond from separate pushes.
 		TargetTier:       intCoder.Uint64(targetTierB),
 		MaxBondedAmt:     intCoder.Uint64(maxBondedB),
+		PenaltyComps:     intCoder.Uint16(penaltyComps),
 		BondAsset:        intCoder.Uint32(bondAssetB),
 		LegacyFeeAssetID: intCoder.Uint32(regAssetB),
 		LegacyFeeCoin:    coinB, // NOTE: no longer in current serialization.

@@ -86,7 +86,7 @@ type DexConf struct {
 	TxWaitExpiration  time.Duration
 	CancelThreshold   float64
 	FreeCancels       bool
-	BanScore          uint32
+	PenaltyThreshold  uint32
 	InitTakerLotLimit uint32
 	AbsTakerLotLimit  uint32
 	DEXPrivKey        *secp256k1.PrivateKey
@@ -160,6 +160,8 @@ func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, bon
 		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)), // temporary while we figure it out
 		BinSizes:         candles.BinSizes,
 		RegFees:          regAssets,
+		PenaltyThreshold: cfg.PenaltyThreshold,
+		MaxScore:         auth.ScoringMatchLimit,
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -674,6 +676,10 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return
 	}
 
+	if cfg.PenaltyThreshold == 0 {
+		cfg.PenaltyThreshold = auth.DefaultPenaltyThreshold
+	}
+
 	authCfg := auth.Config{
 		Storage:           storage,
 		Signer:            signer{cfg.DEXPrivKey},
@@ -688,7 +694,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		MiaUserTimeout:    cfg.BroadcastTimeout,
 		CancelThreshold:   cfg.CancelThreshold,
 		FreeCancels:       cfg.FreeCancels,
-		BanScore:          cfg.BanScore,
+		PenaltyThreshold:  cfg.PenaltyThreshold,
 		InitTakerLotLimit: cfg.InitTakerLotLimit,
 		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
 		TxDataSources:     txDataSources,
@@ -701,7 +707,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	if authCfg.FreeCancels {
 		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")
 	}
-	log.Infof("Ban score threshold is %v", cfg.BanScore)
+	log.Infof("Penalty threshold is %v", cfg.PenaltyThreshold)
 
 	// Create a swapDone dispatcher for the Swapper.
 	swapDone := func(ord order.Order, match *order.Match, fail bool) {

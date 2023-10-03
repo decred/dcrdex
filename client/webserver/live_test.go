@@ -378,19 +378,19 @@ var tExchanges = map[string]*core.Exchange{
 				Amt:   1e12,
 			},
 		},
-		CandleDurs:   []string{"1h", "24h"},
-		PendingBonds: map[string]*core.PendingBondState{},
+		CandleDurs: []string{"1h", "24h"},
+		Auth: core.ExchangeAuth{
+			PendingBonds: []*core.PendingBondState{},
+			BondAssetID:  42,
+			TargetTier:   0,
+			MaxBondedAmt: 100e8,
+		},
 		BondAssets: map[string]*core.BondAsset{
 			"dcr": {
 				ID:    42,
 				Confs: 2,
 				Amt:   1,
 			},
-		},
-		BondOptions: &core.BondOptions{
-			BondAsset:    42,
-			TargetTier:   0,
-			MaxBondedAmt: 100e8,
 		},
 		ViewOnly: true,
 	},
@@ -436,19 +436,19 @@ var tExchanges = map[string]*core.Exchange{
 				Amt:   1e10,
 			},
 		},
-		CandleDurs:   []string{"5m", "1h", "24h"},
-		PendingBonds: map[string]*core.PendingBondState{},
+		CandleDurs: []string{"5m", "1h", "24h"},
+		Auth: core.ExchangeAuth{
+			PendingBonds: []*core.PendingBondState{},
+			BondAssetID:  42,
+			TargetTier:   0,
+			MaxBondedAmt: 100e8,
+		},
 		BondAssets: map[string]*core.BondAsset{
 			"dcr": {
 				ID:    42,
 				Confs: 2,
 				Amt:   1,
 			},
-		},
-		BondOptions: &core.BondOptions{
-			BondAsset:    42,
-			TargetTier:   0,
-			MaxBondedAmt: 100e8,
 		},
 		ViewOnly: true,
 	},
@@ -645,8 +645,8 @@ func (c *TCore) PostBond(form *core.PostBondForm) (*core.PostBondResult, error) 
 	symbol := dex.BipIDSymbol(*form.Asset)
 	ba := xc.BondAssets[symbol]
 	tier := form.Bond / ba.Amt
-	xc.BondOptions.TargetTier = tier
-	xc.Tier = int64(tier)
+	xc.Auth.TargetTier = tier
+	xc.Auth.Rep.BondedTier = int64(tier)
 	return &core.PostBondResult{
 		BondID:      "abc",
 		ReqConfirms: uint16(ba.Confs),

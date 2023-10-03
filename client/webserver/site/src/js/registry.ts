@@ -7,6 +7,7 @@ declare global {
     localeDiscrepancies: () => void
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
+    user: () => void
   }
 }
 
@@ -17,22 +18,41 @@ export enum ConnectionStatus {
 }
 
 export interface BondOptions {
-  bondAsset: number
+  bondAssetID: number
   targetTier: number
   maxBondedAmt: number
+}
+
+export interface Reputation {
+  bondedTier: number
+  penalties: number
+  legacyTier: boolean
+  score: number
+}
+
+export interface ExchangeAuth {
+  rep: Reputation
+  bondAssetID: number
+  pendingStrength: number
+  weakStrength: number
+  liveStrength: number
+  targetTier: number
+  effectiveTier: number
+  maxBondedAmt: number
+  penaltyComps: number
+  pendingBonds: PendingBondState[]
+  compensation: number
 }
 
 export interface Exchange {
   host: string
   acctID: string
+  auth: ExchangeAuth
   markets: Record<string, Market>
   assets: Record<number, Asset>
   connectionStatus: ConnectionStatus
   viewOnly: boolean
   bondAssets: Record<string, BondAsset>
-  tier: number
-  bondOptions: BondOptions
-  pendingBonds: Record<string, PendingBondState>
   candleDurs: string[]
 }
 
@@ -156,6 +176,7 @@ export interface BondAsset {
 export interface PendingBondState {
   symbol: string
   assetID: number
+  coinID: string
   confs: number
 }
 

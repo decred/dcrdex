@@ -1317,13 +1317,14 @@ Registration is complete after the fee transaction has been confirmed.`,
     }`,
 	},
 	bondOptionsRoute: {
-		argsShort:  `"addr" targetTier (maxBondedAmt bondAssetID)`,
+		argsShort:  `"addr" targetTier (maxBondedAmt bondAssetID penaltyComps)`,
 		cmdSummary: `Change bond options for a DEX.`,
 		argsLong: `Args:
     addr (string): The DEX address to post bond for for.
     targetTier (int): The target trading tier.
     maxBondedAmt (int): The maximum amount that may be locked in bonds.
-    bondAssetID (int): The asset ID with which to auto-post bonds.`,
+    bondAssetID (int): The asset ID with which to auto-post bonds.
+    penaltyComp (int): The maximum number of penalties to compensate`,
 		returns: `Returns: "ok"`,
 	},
 	exchangesRoute: {

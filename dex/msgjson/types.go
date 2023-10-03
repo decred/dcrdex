@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 )
 
@@ -187,8 +188,11 @@ const (
 	// according to the configure bond expiry duration and the bond's lock time.
 	BondExpiredRoute = "bondexpired"
 	// TierChangeRoute is a server-originating notification sent to a connected
-	// user who's tier changes for any reason.
+	// user whose tier changes for any reason.
 	TierChangeRoute = "tierchange" // (TODO: use in many auth mgr events)
+	// ScoreChangeRoute is a server-originating notificdation sent to a
+	// connected user when their score changes.
+	ScoreChangeRoute = "scorechanged"
 	// ConfigRoute is the client-originating request-type message requesting the
 	// DEX configuration information.
 	ConfigRoute = "config"
@@ -942,36 +946,39 @@ func (c *Connect) Serialize() []byte {
 // Bond is information on a fidelity bond. This is part of the ConnectResult and
 // PostBondResult payloads.
 type Bond struct {
-	Version uint16 `json:"version"`
-	Amount  uint64 `json:"amount"`
-	Expiry  uint64 `json:"expiry"` // when it expires, not the lock time
-	CoinID  Bytes  `json:"coinID"` // NOTE: ID capitalization not consistent with other payloads, but internally consistent with assetID
-	AssetID uint32 `json:"assetID"`
+	Version  uint16 `json:"version"`
+	Amount   uint64 `json:"amount"`
+	Expiry   uint64 `json:"expiry"` // when it expires, not the lock time
+	CoinID   Bytes  `json:"coinID"` // NOTE: ID capitalization not consistent with other payloads, but internally consistent with assetID
+	AssetID  uint32 `json:"assetID"`
+	Strength uint32 `json:"strength"`
 }
 
 // ConnectResult is the result for the ConnectRoute request.
 //
 // TODO: Include penalty data as specified in the spec.
 type ConnectResult struct {
-	Sig                 Bytes          `json:"sig"`
-	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
-	ActiveMatches       []*Match       `json:"activematches"`
-	Score               int32          `json:"score"`
-	Tier                *int64         `json:"tier"` // 1+ means bonded and may trade, a function of active bond amounts and conduct, nil legacy
-	ActiveBonds         []*Bond        `json:"activeBonds"`
-	LegacyFeePaid       *bool          `json:"legacyFeePaid"` // not set by legacy server
+	Sig                 Bytes               `json:"sig"`
+	ActiveOrderStatuses []*OrderStatus      `json:"activeorderstatuses"`
+	ActiveMatches       []*Match            `json:"activematches"`
+	Score               int32               `json:"score"`
+	Tier                *int64              `json:"tier"` // == v1. Deprecated in v2. means bonded and may trade, a function of active bond amounts and conduct, nil legacy
+	ActiveBonds         []*Bond             `json:"activeBonds"`
+	LegacyFeePaid       *bool               `json:"legacyFeePaid"` // == v1. Deprected in v2.
+	Reputation          *account.Reputation `json:"reputation"`    // v2
 
 	Suspended *bool `json:"suspended,omitempty"` // DEPRECATED - implied by tier<1
 }
 
-// TierChangedNotification is the dex-originating notification send when the
+// TierChangedNotification is the dex-originating notification sent when the
 // user's tier changes as a result of account conduct violations. Tier change
 // due to bond expiry is communicated with a BondExpiredNotification.
 type TierChangedNotification struct {
 	Signature
 	// AccountID Bytes  `json:"accountID"`
-	Tier   int64  `json:"tier"`
-	Reason string `json:"reason"`
+	Tier       int64               `json:"tier"`
+	Reputation *account.Reputation `json:"reputation"` // replaces Tier field
+	Reason     string              `json:"reason"`
 }
 
 // Serialize serializes the TierChangedNotification data.
@@ -980,6 +987,27 @@ func (tc *TierChangedNotification) Serialize() []byte {
 	b := make([]byte, 0, 8+len(tc.Reason))
 	b = append(b, uint64Bytes(uint64(tc.Tier))...)
 	return append(b, []byte(tc.Reason)...)
+}
+
+// ScoreChangedNotification is the dex-originating notification sent when the
+// user's score changes.
+type ScoreChangedNotification struct {
+	Signature
+	Reputation account.Reputation `json:"reputation"`
+}
+
+// Serialize serializes the ScoreChangedNotification data.
+func (tc *ScoreChangedNotification) Serialize() []byte {
+	// serialization: bondedTier 8 + penalties 2 + legacy 1 + score 4
+	b := make([]byte, 0, 11)
+	b = append(b, uint64Bytes(uint64(tc.Reputation.BondedTier))...)
+	b = append(b, uint16Bytes(tc.Reputation.Penalties)...)
+	legacy := encode.ByteFalse
+	if tc.Reputation.Legacy {
+		legacy = encode.ByteTrue
+	}
+	b = append(b, legacy...)
+	return append(b, uint32Bytes(uint32(tc.Reputation.Score))...)
 }
 
 // PenaltyNote is the payload of a Penalty notification.
@@ -1095,13 +1123,14 @@ func (pb *PostBond) Serialize() []byte {
 // true, the bond was applied to the account; if false it is not confirmed, but
 // was otherwise validated.
 type PostBondResult struct {
-	Signature        // message is BondID | AccountID
-	AccountID Bytes  `json:"accountID"`
-	AssetID   uint32 `json:"assetID"`
-	Amount    uint64 `json:"amount"`
-	Expiry    uint64 `json:"expiry"` // not locktime, but time when bond expires for dex
-	BondID    Bytes  `json:"bondID"`
-	Tier      int64  `json:"tier"`
+	Signature                      // message is BondID | AccountID
+	AccountID  Bytes               `json:"accountID"`
+	AssetID    uint32              `json:"assetID"`
+	Amount     uint64              `json:"amount"`
+	Expiry     uint64              `json:"expiry"` // not locktime, but time when bond expires for dex
+	BondID     Bytes               `json:"bondID"`
+	Tier       int64               `json:"tier"`
+	Reputation *account.Reputation `json:"reputation"`
 }
 
 // Serialize serializes the PostBondResult data for the signature.
@@ -1116,10 +1145,11 @@ func (pbr *PostBondResult) Serialize() []byte {
 // expires.
 type BondExpiredNotification struct {
 	Signature
-	AccountID  Bytes  `json:"accountID"`
-	AssetID    uint32 `json:"assetid"`
-	BondCoinID Bytes  `json:"coinid"`
-	Tier       int64  `json:"tier"`
+	AccountID  Bytes               `json:"accountID"`
+	AssetID    uint32              `json:"assetid"`
+	BondCoinID Bytes               `json:"coinid"`
+	Tier       int64               `json:"tier"`
+	Reputation *account.Reputation `json:"reputation"`
 }
 
 // Serialize serializes the BondExpiredNotification data.
@@ -1306,6 +1336,9 @@ type ConfigResult struct {
 	BondExpiry uint64 `json:"DEV_bondExpiry"`
 
 	RegFees map[string]*FeeAsset `json:"regFees"`
+
+	PenaltyThreshold uint32 `json:"penaltyThreshold"`
+	MaxScore         uint32 `json:"maxScore"`
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot

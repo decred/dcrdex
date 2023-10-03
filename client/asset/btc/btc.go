@@ -914,22 +914,7 @@ type baseWallet struct {
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
 
-	reservesMtx sync.RWMutex // frequent reads for balance, infrequent updates
-	// bondReservesEnforced is used to reserve unspent amounts for upcoming bond
-	// transactions, including projected transaction fees, and does not include
-	// amounts that are currently locked in unspent bonds, which are in
-	// bondReservesUsed. When bonds are created, bondReservesEnforced is
-	// decremented and bondReservesUsed are incremented; when bonds are
-	// refunded, the reverse. bondReservesEnforced may become negative during
-	// the unbonding process.
-	bondReservesEnforced int64  // set by ReserveBondFunds, modified by bondSpent and bondLocked
-	bondReservesUsed     uint64 // set by RegisterUnspent, modified by bondSpent and bondLocked
-	// When bondReservesEnforced is non-zero, bondReservesNominal is the
-	// cumulative of all ReserveBondFunds and RegisterUnspent input amounts,
-	// with no fee padding. It includes the future and live (currently unspent)
-	// bond amounts. This amount only changes via ReserveBondFunds, and it is
-	// used to recognize when all reserves have been released.
-	bondReservesNominal int64 // only set by ReserveBondFunds
+	bondReserves atomic.Uint64
 
 	recycledAddrMtx sync.Mutex
 	// recycledAddrs are returned, unused redemption addresses. We track these
@@ -1669,7 +1654,7 @@ func (btc *baseWallet) Balance() (*asset.Balance, error) {
 		return nil, err
 	}
 
-	reserves := btc.reserves()
+	reserves := btc.bondReserves.Load()
 	if reserves > bal.Available {
 		btc.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toBTC(bal.Available), toBTC(reserves))
@@ -1762,7 +1747,9 @@ func (btc *baseWallet) feeRate(confTarget uint64) (uint64, error) {
 	// may use btc.fallbackFeeRate(), as in targetFeeRateWithFallback.
 	feeRate, err = btc.externalFeeRate(btc.ctx, btc.Network) // e.g. externalFeeEstimator
 	if err != nil {
-		btc.log.Errorf("Failed to get fee rate from external API: %v", err)
+		if btc.cloneParams.Network != dex.Simnet {
+			btc.log.Errorf("Failed to get fee rate from external API: %v", err)
+		}
 		return 0, err
 	}
 	if feeRate <= 0 || feeRate > btc.feeRateLimit() { // but fetcher shouldn't return <= 0 without error
@@ -2117,7 +2104,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 	for _, utxo := range utxos {
 		avail += utxo.amount
 	}
-	reserves := btc.reserves()
+	reserves := btc.bondReserves.Load()
 
 	// If there is a fee bump, the networkFeeRate can be higher than the
 	// MaxFeeRate
@@ -2330,7 +2317,7 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, ui
 		useSplit = *customCfg.Split
 	}
 
-	reserves := btc.reserves()
+	reserves := btc.bondReserves.Load()
 	minConfs := uint32(0)
 	coins, fundingCoins, spents, redeemScripts, inputsSize, sum, err := btc.fund(reserves, minConfs, true,
 		orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, useSplit))
@@ -2869,7 +2856,7 @@ func (btc *baseWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue
 	btc.fundingMtx.Lock()
 	defer btc.fundingMtx.Unlock()
 
-	reserves := btc.reserves()
+	reserves := btc.bondReserves.Load()
 
 	coins, redeemScripts, fundingCoins, spents, err := btc.fundMultiBestEffort(reserves, maxLock, values, maxFeeRate, allowSplit)
 	if err != nil {
@@ -3552,7 +3539,7 @@ func (btc *baseWallet) signedAccelerationTx(previousTxs []*GetTransactionResult,
 			return totalReq <= totalVal, totalVal - totalReq
 		}
 		minConfs := uint32(1)
-		additionalInputs, _, _, _, _, _, err = btc.fundInternal(btc.reserves(), minConfs, false, enough)
+		additionalInputs, _, _, _, _, _, err = btc.fundInternal(btc.bondReserves.Load(), minConfs, false, enough)
 		if err != nil {
 			return makeError(fmt.Errorf("failed to fund acceleration tx: %w", err))
 		}
@@ -4971,7 +4958,7 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 
 	enough := sendEnough(val, feeRate, subtract, uint64(baseSize), btc.segwit, true)
 	minConfs := uint32(0)
-	coins, _, _, _, inputsSize, _, err := btc.fundInternal(btc.reserves(), minConfs, false, enough)
+	coins, _, _, _, inputsSize, _, err := btc.fundInternal(btc.bondReserves.Load(), minConfs, false, enough)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("error funding transaction: %w", err)
 	}
@@ -5603,196 +5590,8 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 	return fee, isValidAddress, nil
 }
 
-func (btc *baseWallet) reserves() uint64 {
-	btc.reservesMtx.RLock()
-	defer btc.reservesMtx.RUnlock()
-	if r := btc.bondReservesEnforced; r > 0 {
-		return uint64(r)
-	}
-	if btc.bondReservesNominal == 0 { // disabled
-		return 0
-	}
-	// When enforced is negative, we're unbonding. If nominal is still positive,
-	// we're partially unbonding and we need to report the remaining reserves
-	// after excess is unbonded, offsetting the negative enforced amount. This
-	// is the relatively small fee buffer.
-	if int64(btc.bondReservesUsed) == btc.bondReservesNominal {
-		return uint64(-btc.bondReservesEnforced)
-	}
-
-	return 0
-}
-
-// bondLocked reduces reserves, increases bonded (used) amount.
-func (btc *baseWallet) bondLocked(amt uint64) (reserved int64, unspent uint64) {
-	btc.reservesMtx.Lock()
-	defer btc.reservesMtx.Unlock()
-	e0 := btc.bondReservesEnforced
-	btc.bondReservesEnforced -= int64(amt)
-	btc.bondReservesUsed += amt
-	btc.log.Tracef("bondLocked (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
-		toBTC(amt), toBTC(e0), toBTC(btc.bondReservesEnforced),
-		toBTC(btc.bondReservesUsed), toBTC(btc.bondReservesNominal))
-	return btc.bondReservesEnforced, btc.bondReservesUsed
-}
-
-// bondSpent increases enforce reserves, decreases bonded amount. When the
-// tracked unspent amount is reduced to zero, this clears the enforced amount
-// (just the remaining fee buffer).
-func (btc *baseWallet) bondSpent(amt uint64) (reserved int64, unspent uint64) {
-	btc.reservesMtx.Lock()
-	defer btc.reservesMtx.Unlock()
-
-	if amt <= btc.bondReservesUsed {
-		btc.bondReservesUsed -= amt
-	} else {
-		btc.log.Errorf("bondSpent: live bonds accounting error, spending bond worth %v with %v known live (zeroing!)",
-			amt, btc.bondReservesUsed)
-		btc.bondReservesUsed = 0
-	}
-
-	if btc.bondReservesNominal == 0 { // disabled
-		return btc.bondReservesEnforced, btc.bondReservesUsed // return 0, ...
-	}
-
-	e0 := btc.bondReservesEnforced
-	btc.bondReservesEnforced += int64(amt)
-
-	btc.log.Tracef("bondSpent (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
-		toBTC(amt), toBTC(e0), toBTC(btc.bondReservesEnforced),
-		toBTC(btc.bondReservesUsed), toBTC(btc.bondReservesNominal))
-	return btc.bondReservesEnforced, btc.bondReservesUsed
-}
-
-// RegisterUnspent should be called once for every configured DEX with existing
-// unspent bond amounts, prior to login, which is when reserves for future bonds
-// are then added given the actual account tier, target tier, and this combined
-// existing bonds amount. This must be used before ReserveBondFunds, which
-// begins reserves enforcement provided a future amount that may be required
-// before the existing bonds are refunded. No reserves enforcement is enabled
-// until ReserveBondFunds is called, even with a future value of 0. A wallet
-// that is not enforcing reserves, but which has unspent bonds should use this
-// method to facilitate switching to the wallet for bonds in future.
-func (btc *baseWallet) RegisterUnspent(inBonds uint64) {
-	btc.reservesMtx.Lock()
-	defer btc.reservesMtx.Unlock()
-	btc.log.Tracef("RegisterUnspent(%v) changing unspent in bonds: %v => %v",
-		toBTC(inBonds), toBTC(btc.bondReservesUsed), toBTC(btc.bondReservesUsed+inBonds))
-	btc.bondReservesUsed += inBonds
-	// This method should be called before ReserveBondFunds, prior to login on
-	// application initialization (if there are existing for this asset bonds).
-	// The nominal counter is not modified until ReserveBondFunds is called.
-	if btc.bondReservesNominal != 0 {
-		btc.log.Warnf("BUG: RegisterUnspent called with existing nominal reserves of %v BTC",
-			toBTC(btc.bondReservesNominal))
-	}
-}
-
-// ReserveBondFunds increases the bond reserves to accommodate a certain nominal
-// amount of future bonds, or reduces the amount if a negative value is
-// provided. If indicated, updating the reserves will require sufficient
-// available balance, otherwise reserves will be adjusted regardless and the
-// funds are pre-reserved. This returns false if the available balance was
-// insufficient iff the caller requested it be respected, otherwise it always
-// returns true (success). The fee buffer is used only when enabling the
-// reserves (when starting from zero) to compute the fee buffer. It may also be
-// zero, in which case the wallet will attempt to obtain it's own estimate.
-//
-// The reserves enabled with this method are enforced when funding transactions
-// (e.g. regular withdraws/sends or funding orders), and deducted from available
-// balance. Amounts may be reserved beyond the available balance, but only the
-// amount that is offset by the available balance is reflected in the locked
-// balance category. Like funds locked in swap contracts, the caller must
-// supplement balance reporting with known bond amounts. However, via
-// RegisterUnspent, the wallet is made aware of pre-existing unspent bond
-// amounts (cumulative) that will eventually be spent with RefundBond.
-//
-// If this wallet is enforcing reserves (this method has been called, even with
-// a future value of zero), when new bonds are created the nominal bond amount
-// is deducted from the enforced reserves; when bonds are spent with RefundBond,
-// the nominal bond amount is added back into the enforced reserves. That is,
-// when there are no active bonds, the locked balance category will reflect the
-// entire amount requested with ReserveBondFunds (plus a fee buffer, see below),
-// and when bonds are created with MakeBondTx, the locked amount decreases since
-// that portion of the reserves are now held in inaccessible UTXOs, the amounts
-// of which the caller tracks independently. When spent with RefundBond, that
-// same *nominal* bond value is added back to the enforced reserves amount.
-//
-// The amounts requested for bond reserves should be the nominal amounts of the
-// bonds, but the reserved amount reflected in the locked balance category will
-// include a considerable buffer for transaction fees. Therefore when the full
-// amount of the reserves are presently locked in unspent bonds, the locked
-// balance will include this fee buffer while the wallet is enforcing reserves.
-//
-// Until this method is called, reserves enforcement is disabled, and any
-// unspent bonds registered with RegisterUnspent do not go into the enforced
-// reserves when spent. In this way, all Bonder wallets remain aware of the
-// total nominal value of unspent bonds even if the wallet is not presently
-// being used to maintain a target bonding amount that necessitates reserves
-// enforcement.
-//
-// A negative value may be provided to reduce allocated reserves. When the
-// amount is reduced by the same amount it was previously increased by both
-// ReserveBondFunds and RegisterUnspent, reserves enforcement including fee
-// padding is disabled. Consider the following example: on startup, .2 BTC of
-// existing unspent bonds are registered via RegisterUnspent, then on login and
-// auth with the relevant DEX host, .4 BTC of future bond reserves are requested
-// with ReserveBondFunds to maintain a configured target tier given the current
-// tier and amounts of the existing unspent bonds. To disable reserves, the
-// client would call ReserveBondFunds with -.6 BTC, which the wallet's internal
-// accounting recognizes as complete removal of the reserves.
-func (btc *baseWallet) ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool {
-	btc.reservesMtx.Lock()
-	defer btc.reservesMtx.Unlock()
-
-	defer func(enforced0, used0, nominal0 int64) {
-		btc.log.Tracef("ReserveBondFunds(%v, %v): enforced = %v / bonded = %v / nominal = %v "+
-			" ==>  enforced = %v / bonded = %v / nominal = %v",
-			toBTC(future), respectBalance,
-			toBTC(enforced0), toBTC(used0), toBTC(nominal0),
-			toBTC(btc.bondReservesEnforced), toBTC(btc.bondReservesUsed), toBTC(uint64(btc.bondReservesNominal)))
-	}(btc.bondReservesEnforced, int64(btc.bondReservesUsed), btc.bondReservesNominal)
-
-	enforcedDelta := future
-
-	// For the reserves initialization, add the fee buffer.
-	if btc.bondReservesNominal == 0 { // enabling, add a fee buffer
-		if feeBuffer == 0 {
-			feeRate := 2 * btc.targetFeeRateWithFallback(1, 0)
-			feeBuffer = bondsFeeBuffer(btc.segwit, feeRate)
-		}
-		enforcedDelta += int64(feeBuffer)
-	}
-
-	// How much of that is covered by the available balance, when increasing
-	// reserves.
-	if respectBalance && future > 0 {
-		bal, err := btc.balance()
-		if err != nil {
-			btc.log.Errorf("Failed to retrieve balance: %v")
-			return false
-		}
-		if int64(bal.Available) < btc.bondReservesEnforced+enforcedDelta {
-			return false
-		}
-	}
-
-	if btc.bondReservesNominal == 0 { // enabling, add any previously-registered unspent
-		btc.log.Debugf("Re-enabling reserves with %v in existing unspent bonds (added to nominal).", toBTC(btc.bondReservesUsed))
-		btc.bondReservesNominal += int64(btc.bondReservesUsed)
-	}
-	btc.bondReservesNominal += future
-	btc.bondReservesEnforced += enforcedDelta
-
-	// When disabling/zeroing reserves, wipe the fee buffer too. If there are
-	// unspent bonds, this will be done in bondSpent when the last one is spent.
-	if btc.bondReservesNominal <= 0 { // nominal should not go negative though
-		btc.log.Infof("Nominal reserves depleted -- clearing enforced reserves!")
-		btc.bondReservesEnforced = 0
-		btc.bondReservesNominal = 0
-	}
-
-	return true
+func (btc *baseWallet) SetBondReserves(reserves uint64) {
+	btc.bondReserves.Store(reserves)
 }
 
 // MakeBondTx creates a time-locked fidelity bond transaction. The V0
@@ -5891,17 +5690,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		return nil, nil, fmt.Errorf("failed to fund bond tx: %w", err)
 	}
 
-	// Reduce the reserves counter now that utxos are explicitly allocated. When
-	// the bond is refunded and we pay back into our wallet, we will increase
-	// the reserves counter.
-	newReserves, unspent := btc.bondLocked(amt) // nominal, not spent amount
-	btc.log.Debugf("New bond reserves (new post) = %f BTC with %f in unspent bonds",
-		toBTC(newReserves), toBTC(unspent)) // decrement and report new
-
 	abandon := func() { // if caller does not broadcast, or we fail in this method
-		newReserves, unspent = btc.bondSpent(amt)
-		btc.log.Debugf("New bond reserves (abandoned post) = %f BTC with %f in unspent bonds",
-			toBTC(newReserves), toBTC(unspent)) // increment/restore and report new
 		err := btc.ReturnCoins(coins)
 		if err != nil {
 			btc.log.Errorf("error returning coins for unused bond tx: %v", coins)
@@ -6059,15 +5848,8 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 		return nil, err
 	}
 
-	newReserves, unspent := btc.bondSpent(amt)
-	btc.log.Debugf("New bond reserves (new refund of %f BTC) = %f BTC with %f in unspent bonds",
-		toBTC(amt), toBTC(newReserves), toBTC(unspent))
-
 	_, err = btc.node.sendRawTransaction(msgTx)
 	if err != nil {
-		newReserves, unspent = btc.bondLocked(amt) // assume it didn't really send :/
-		btc.log.Debugf("New bond reserves (failed refund broadcast) = %f BTC with %f in unspent bonds",
-			toBTC(newReserves), toBTC(unspent)) // increment/restore and report new
 		return nil, fmt.Errorf("error sending refund bond transaction: %w", err)
 	}
 

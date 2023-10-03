@@ -1252,13 +1252,13 @@ func TestFundMultiOrder(t *testing.T) {
 	}
 
 	type test struct {
-		name                 string
-		multiOrder           *asset.MultiOrder
-		allOrNothing         bool
-		maxLock              uint64
-		utxos                []walletjson.ListUnspentResult
-		bondReservesEnforced int64
-		balance              uint64
+		name         string
+		multiOrder   *asset.MultiOrder
+		allOrNothing bool
+		maxLock      uint64
+		utxos        []walletjson.ListUnspentResult
+		bondReserves uint64
+		balance      uint64
 
 		// if expectedCoins is nil, all the coins are from
 		// the split output. If any of the coins are nil,
@@ -1474,8 +1474,8 @@ func TestFundMultiOrder(t *testing.T) {
 					multiSplitKey: "false",
 				},
 			},
-			maxLock:              46e5,
-			bondReservesEnforced: 12e5,
+			maxLock:      46e5,
+			bondReserves: 12e5,
 			utxos: []walletjson.ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1879,7 +1879,7 @@ func TestFundMultiOrder(t *testing.T) {
 					multiSplitKey: "true",
 				},
 			},
-			bondReservesEnforced: 2e6,
+			bondReserves: 2e6,
 			utxos: []walletjson.ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1933,7 +1933,7 @@ func TestFundMultiOrder(t *testing.T) {
 					multiSplitKey: "true",
 				},
 			},
-			bondReservesEnforced: 2e6,
+			bondReserves: 2e6,
 			utxos: []walletjson.ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -2176,10 +2176,10 @@ func TestFundMultiOrder(t *testing.T) {
 					Vout:          0,
 				},
 			},
-			maxLock:              0,
-			bondReservesEnforced: 1e6,
-			balance:              144e5,
-			expectSendRawTx:      true,
+			maxLock:         0,
+			bondReserves:    1e6,
+			balance:         144e5,
+			expectSendRawTx: true,
 			expectedInputs: []*wire.TxIn{
 				{
 					PreviousOutPoint: wire.OutPoint{
@@ -2269,10 +2269,10 @@ func TestFundMultiOrder(t *testing.T) {
 					Vout:          0,
 				},
 			},
-			maxLock:              35e5,
-			bondReservesEnforced: 0,
-			balance:              42e5,
-			expectSendRawTx:      true,
+			maxLock:         35e5,
+			bondReserves:    0,
+			balance:         42e5,
+			expectSendRawTx: true,
 			expectedInputs: []*wire.TxIn{
 				{
 					PreviousOutPoint: wire.OutPoint{
@@ -2322,7 +2322,7 @@ func TestFundMultiOrder(t *testing.T) {
 			},
 		}
 		wallet.fundingCoins = make(map[outPoint]*fundingCoin)
-		wallet.bondReservesEnforced = test.bondReservesEnforced
+		wallet.bondReserves.Store(test.bondReserves)
 
 		allCoins, _, splitFee, err := wallet.FundMultiOrder(test.multiOrder, test.maxLock)
 		if test.expectErr {

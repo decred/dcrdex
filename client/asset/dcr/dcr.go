@@ -617,24 +617,8 @@ type vsp struct {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	reservesMtx sync.RWMutex // frequent reads for balance, infrequent updates
-	// bondReservesEnforced is used to reserve unspent amounts for upcoming bond
-	// transactions, including projected transaction fees, and does not include
-	// amounts that are currently locked in unspent bonds, which are in
-	// bondReservesUsed. When bonds are created, bondReservesEnforced is
-	// decremented and bondReservesUsed are incremented; when bonds are
-	// refunded, the reverse. bondReservesEnforced may become negative during
-	// the unbonding process.
-	bondReservesEnforced int64  // set by ReserveBondFunds, modified by bondSpent and bondLocked
-	bondReservesUsed     uint64 // set by RegisterUnspent, modified by bondSpent and bondLocked
-	// When bondReservesEnforced is non-zero, bondReservesNominal is the
-	// cumulative of all ReserveBondFunds and RegisterUnspent input amounts,
-	// with no fee padding. It includes the future and live (currently unspent)
-	// bond amounts. This amount only changes via ReserveBondFunds, and it is
-	// used to recognize when all reserves have been released.
-	bondReservesNominal int64 // only set by ReserveBondFunds
-
-	cfgV atomic.Value // *exchangeWalletConfig
+	bondReserves atomic.Uint64
+	cfgV         atomic.Value // *exchangeWalletConfig
 
 	ctx           context.Context // the asset subsystem starts with Connect(ctx)
 	wallet        Wallet
@@ -677,69 +661,6 @@ type ExchangeWallet struct {
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
 	return dcr.cfgV.Load().(*exchangeWalletConfig)
-}
-
-// reserves returns the total non-negative amount reserved to inform balance
-// reporting and transaction funding.
-func (dcr *ExchangeWallet) reserves() uint64 {
-	dcr.reservesMtx.RLock()
-	defer dcr.reservesMtx.RUnlock()
-	if r := dcr.bondReservesEnforced; r > 0 {
-		return uint64(r)
-	}
-	if dcr.bondReservesNominal == 0 { // disabled
-		return 0
-	}
-	// When enforced is negative, we're unbonding. If nominal is still positive,
-	// we're partially unbonding and we need to report the remaining reserves
-	// after excess is unbonded, offsetting the negative enforced amount. This
-	// is the relatively small fee buffer.
-	if int64(dcr.bondReservesUsed) == dcr.bondReservesNominal {
-		return uint64(-dcr.bondReservesEnforced)
-	}
-
-	return 0
-}
-
-// bondLocked reduces reserves, increases bonded (used) amount.
-func (dcr *ExchangeWallet) bondLocked(amt uint64) (reserved int64, unspent uint64) {
-	dcr.reservesMtx.Lock()
-	defer dcr.reservesMtx.Unlock()
-	e0 := dcr.bondReservesEnforced
-	dcr.bondReservesEnforced -= int64(amt)
-	dcr.bondReservesUsed += amt
-	dcr.log.Tracef("bondLocked (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
-		toDCR(amt), toDCR(e0), toDCR(dcr.bondReservesEnforced),
-		toDCR(dcr.bondReservesUsed), toDCR(dcr.bondReservesNominal))
-	return dcr.bondReservesEnforced, dcr.bondReservesUsed
-}
-
-// bondSpent increases enforce reserves, decreases bonded amount. When the
-// tracked unspent amount is reduced to zero, this clears the enforced amount
-// (just the remaining fee buffer).
-func (dcr *ExchangeWallet) bondSpent(amt uint64) (reserved int64, unspent uint64) {
-	dcr.reservesMtx.Lock()
-	defer dcr.reservesMtx.Unlock()
-
-	if amt <= dcr.bondReservesUsed {
-		dcr.bondReservesUsed -= amt
-	} else {
-		dcr.log.Errorf("bondSpent: live bonds accounting error, spending bond worth %v with %v known live (zeroing!)",
-			amt, dcr.bondReservesUsed)
-		dcr.bondReservesUsed = 0
-	}
-
-	if dcr.bondReservesNominal == 0 { // disabled
-		return dcr.bondReservesEnforced, dcr.bondReservesUsed // return 0, ...
-	}
-
-	e0 := dcr.bondReservesEnforced
-	dcr.bondReservesEnforced += int64(amt)
-
-	dcr.log.Tracef("bondSpent (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
-		toDCR(amt), toDCR(e0), toDCR(dcr.bondReservesEnforced),
-		toDCR(dcr.bondReservesUsed), toDCR(dcr.bondReservesNominal))
-	return dcr.bondReservesEnforced, dcr.bondReservesUsed
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -1060,18 +981,7 @@ func (dcr *ExchangeWallet) Reconfigure(ctx context.Context, cfg *asset.WalletCon
 	if err != nil {
 		return false, err
 	}
-
-	oldCfg := dcr.cfgV.Swap(exchangeWalletCfg).(*exchangeWalletConfig)
-	if oldCfg.feeRateLimit != exchangeWalletCfg.feeRateLimit {
-		// Adjust the bond reserves fee buffer, if enforcing.
-		dcr.reservesMtx.Lock()
-		if dcr.bondReservesNominal != 0 {
-			dcr.bondReservesEnforced += int64(bondsFeeBuffer(exchangeWalletCfg.feeRateLimit)) -
-				int64(bondsFeeBuffer(oldCfg.feeRateLimit))
-		}
-		dcr.reservesMtx.Unlock()
-	}
-
+	dcr.cfgV.Store(exchangeWalletCfg)
 	return false, nil
 }
 
@@ -1170,7 +1080,7 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 		return nil, err
 	}
 
-	reserves := dcr.reserves()
+	reserves := dcr.bondReserves.Load()
 	if reserves > bal.Available { // unmixed (immature) probably needs to trickle in
 		dcr.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toDCR(bal.Available), toDCR(reserves))
@@ -1206,141 +1116,15 @@ func (dcr *ExchangeWallet) BondsFeeBuffer(feeRate uint64) uint64 {
 	return bondsFeeBuffer(feeRate)
 }
 
-// RegisterUnspent should be called once for every configured DEX with existing
-// unspent bond amounts, prior to login, which is when reserves for future bonds
-// are then added given the actual account tier, target tier, and this combined
-// existing bonds amount. This must be used before ReserveBondFunds, which
-// begins reserves enforcement provided a future amount that may be required
-// before the existing bonds are refunded. No reserves enforcement is enabled
-// until ReserveBondFunds is called, even with a future value of 0. A wallet
-// that is not enforcing reserves, but which has unspent bonds should use this
-// method to facilitate switching to the wallet for bonds in future.
-func (dcr *ExchangeWallet) RegisterUnspent(inBonds uint64) {
-	dcr.reservesMtx.Lock()
-	defer dcr.reservesMtx.Unlock()
-	dcr.log.Tracef("RegisterUnspent(%v) changing unspent in bonds: %v => %v",
-		toDCR(inBonds), toDCR(dcr.bondReservesUsed), toDCR(dcr.bondReservesUsed+inBonds))
-	dcr.bondReservesUsed += inBonds
-	// This method should be called before ReserveBondFunds, prior to login on
-	// application initialization (if there are existing for this asset bonds).
-	// The nominal counter is not modified until ReserveBondFunds is called.
-	if dcr.bondReservesNominal != 0 {
-		dcr.log.Warnf("BUG: RegisterUnspent called with existing nominal reserves of %v DCR",
-			toDCR(dcr.bondReservesNominal))
-	}
-}
-
-// ReserveBondFunds increases the bond reserves to accommodate a certain nominal
-// amount of future bonds, or reduces the amount if a negative value is
-// provided. If indicated, updating the reserves will require sufficient
-// available balance, otherwise reserves will be adjusted regardless and the
-// funds are pre-reserved. This returns false if the available balance was
-// insufficient iff the caller requested it be respected, otherwise it always
-// returns true (success).
-//
-// The reserves enabled with this method are enforced when funding transactions
-// (e.g. regular withdraws/sends or funding orders), and deducted from available
-// balance. Amounts may be reserved beyond the available balance, but only the
-// amount that is offset by the available balance is reflected in the locked
-// balance category. Like funds locked in swap contracts, the caller must
-// supplement balance reporting with known bond amounts. However, via
-// RegisterUnspent, the wallet is made aware of pre-existing unspent bond
-// amounts (cumulative) that will eventually be spent with RefundBond.
-//
-// If this wallet is enforcing reserves (this method has been called, even with
-// a future value of zero), when new bonds are created the nominal bond amount
-// is deducted from the enforced reserves; when bonds are spent with RefundBond,
-// the nominal bond amount is added back into the enforced reserves. That is,
-// when there are no active bonds, the locked balance category will reflect the
-// entire amount requested with ReserveBondFunds (plus a fee buffer, see below),
-// and when bonds are created with MakeBondTx, the locked amount decreases since
-// that portion of the reserves are now held in inaccessible UTXOs, the amounts
-// of which the caller tracks independently. When spent with RefundBond, that
-// same *nominal* bond value is added back to the enforced reserves amount.
-//
-// The amounts requested for bond reserves should be the nominal amounts of the
-// bonds, but the reserved amount reflected in the locked balance category will
-// include a considerable buffer for transaction fees. Therefore when the full
-// amount of the reserves are presently locked in unspent bonds, the locked
-// balance will include this fee buffer while the wallet is enforcing reserves.
-//
-// Until this method is called, reserves enforcement is disabled, and any
-// unspent bonds registered with RegisterUnspent do not go into the enforced
-// reserves when spent. In this way, all Bonder wallets remain aware of the
-// total nominal value of unspent bonds even if the wallet is not presently
-// being used to maintain a target bonding amount that necessitates reserves
-// enforcement.
-//
-// A negative value may be provided to reduce allocated reserves. When the
-// amount is reduced by the same amount it was previously increased by both
-// ReserveBondFunds and RegisterUnspent, reserves enforcement including fee
-// padding is disabled. Consider the following example: on startup, 20 DCR of
-// existing unspent bonds are registered via RegisterUnspent, then on login and
-// auth with the relevant DEX host, 40 DCR of future bond reserves are requested
-// with ReserveBondFunds to maintain a configured target tier given the current
-// tier and amounts of the existing unspent bonds. To disable reserves, the
-// client would call ReserveBondFunds with -60 DCR, which the wallet's internal
-// accounting recognizes as complete removal of the reserves.
-func (dcr *ExchangeWallet) ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool {
-	dcr.reservesMtx.Lock()
-	defer dcr.reservesMtx.Unlock()
-
-	defer func(enforced0, used0, nominal0 int64) {
-		dcr.log.Tracef("ReserveBondFunds(%v, %v): enforced = %v / bonded = %v / nominal = %v "+
-			" ==>  enforced = %v / bonded = %v / nominal = %v",
-			toDCR(future), respectBalance,
-			toDCR(enforced0), toDCR(used0), toDCR(nominal0),
-			toDCR(dcr.bondReservesEnforced), toDCR(dcr.bondReservesUsed), toDCR(uint64(dcr.bondReservesNominal)))
-	}(dcr.bondReservesEnforced, int64(dcr.bondReservesUsed), dcr.bondReservesNominal)
-
-	enforcedDelta := future
-
-	// For the reserves initialization, add the fee buffer.
-	if dcr.bondReservesNominal == 0 { // enabling, add a fee buffer
-		if feeBuffer == 0 {
-			feeBuffer = bondsFeeBuffer(2 * dcr.targetFeeRateWithFallback(2, 0))
-		}
-		enforcedDelta += int64(feeBuffer)
-	}
-
-	// Check how much of that is covered by the available balance.
-	if respectBalance {
-		bal, err := dcr.balance()
-		if err != nil {
-			dcr.log.Errorf("Failed to retrieve balance: %v")
-			return false
-		}
-		if int64(bal.Available) < dcr.bondReservesEnforced+enforcedDelta {
-			if future > 0 {
-				return false
-			} // always allow reducing reserves, but make noise if still in the red
-			dcr.log.Warnf("Reducing bond reserves, but available balance still low.")
-		}
-	}
-
-	if dcr.bondReservesNominal == 0 { // enabling, add any previously-registered unspent
-		dcr.log.Debugf("Re-enabling reserves with %v in existing unspent bonds (added to nominal).", toDCR(dcr.bondReservesUsed))
-		dcr.bondReservesNominal += int64(dcr.bondReservesUsed)
-	}
-	dcr.bondReservesNominal += future
-	dcr.bondReservesEnforced += enforcedDelta
-
-	// When disabling/zeroing reserves, wipe the fee buffer too. If there are
-	// unspent bonds, this will be done in bondSpent when the last one is spent.
-	if dcr.bondReservesNominal <= 0 { // nominal should not go negative though
-		dcr.log.Infof("Nominal reserves depleted -- clearing enforced reserves!")
-		dcr.bondReservesEnforced = 0
-		dcr.bondReservesNominal = 0
-	}
-
-	return true
+func (dcr *ExchangeWallet) SetBondReserves(reserves uint64) {
+	dcr.bondReserves.Store(reserves)
 }
 
 // FeeRate satisfies asset.FeeRater.
 func (dcr *ExchangeWallet) FeeRate() uint64 {
 	const confTarget = 2 // 1 historically gives crazy rates
 	rate, err := dcr.feeRate(confTarget)
-	if err != nil { // log and return 0
+	if err != nil && dcr.network != dex.Simnet { // log and return 0
 		dcr.log.Errorf("feeRate error: %v", err)
 	}
 	return rate
@@ -1565,7 +1349,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 	}
 
 	avail := sumUTXOs(utxos)
-	reserves := dcr.reserves()
+	reserves := dcr.bondReserves.Load()
 
 	digestInputs := func(inputsSize uint32) (reqFunds, maxFees, estHighFees, estLowFees uint64) {
 		// NOTE: reqFunds = val + fees, so change (extra) will be sum-reqFunds
@@ -1961,7 +1745,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 
 	changeForReserves := useSplit && cfg.unmixedAccount == ""
-	reserves := dcr.reserves()
+	reserves := dcr.bondReserves.Load()
 	coins, redeemScripts, sum, inputsSize, err := dcr.fund(reserves,
 		orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, changeForReserves))
 	if err != nil {
@@ -2479,7 +2263,7 @@ func (dcr *ExchangeWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderV
 	dcr.fundingMtx.Lock()
 	defer dcr.fundingMtx.Unlock()
 
-	reserves := dcr.reserves()
+	reserves := dcr.bondReserves.Load()
 
 	coins, redeemScripts, fundingCoins, err := dcr.fundMultiBestEffort(reserves, maxLock, values, maxFeeRate, allowSplit)
 	if err != nil {
@@ -4311,17 +4095,8 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 		return nil, nil, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
 			amount(amt), feeRate, err)
 	}
-	// Reduce the reserves counter now that utxos are explicitly allocated. When
-	// the bond is refunded and we pay back into our wallet, we will increase
-	// the reserves counter.
-	newReserves, unspent := dcr.bondLocked(amt) // nominal, not spent amount
-	dcr.log.Debugf("New bond reserves (new post) = %f DCR with %f in unspent bonds",
-		toDCR(newReserves), toDCR(unspent)) // decrement and report new
 
 	abandon := func() { // if caller does not broadcast, or we fail in this method
-		newReserves, unspent = dcr.bondSpent(amt)
-		dcr.log.Debugf("New bond reserves (abandoned post) = %f DCR with %f in unspent bonds",
-			toDCR(newReserves), toDCR(unspent)) // increment/restore and report new
 		_, err := dcr.returnCoins(coins)
 		if err != nil {
 			dcr.log.Errorf("error returning coins for unused bond tx: %v", coins)
@@ -4455,17 +4230,9 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 	if err != nil {
 		return nil, err
 	}
-	// Increment the enforced reserves before the refunded coins make it to the
-	// spendable balance, which could be spent by another concurrent process.
-	newReserves, unspent := dcr.bondSpent(amt) // nominal, not refundAmt
-	dcr.log.Debugf("New bond reserves (new refund of %f DCR) = %f DCR with %f in unspent bonds",
-		toDCR(amt), toDCR(newReserves), toDCR(unspent))
 
 	redeemHash, err := dcr.wallet.SendRawTransaction(ctx, msgTx, false)
 	if err != nil { // TODO: we need to be much smarter about these send error types/codes
-		newReserves, unspent = dcr.bondLocked(amt) // assume it didn't really send :/
-		dcr.log.Debugf("New bond reserves (failed refund broadcast) = %f DCR with %f in unspent bonds",
-			toDCR(newReserves), toDCR(unspent)) // increment/restore and report new
 		return nil, translateRPCCancelErr(err)
 	}
 
@@ -4657,11 +4424,7 @@ func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (
 }
 
 func (dcr *ExchangeWallet) shutdown() {
-	dcr.reservesMtx.Lock()
-	dcr.bondReservesEnforced = 0
-	dcr.bondReservesNominal = 0
-	dcr.bondReservesUsed = 0
-	dcr.reservesMtx.Unlock()
+	dcr.bondReserves.Store(0)
 	// or should it remember reserves in case we reconnect? There's a
 	// reReserveFunds Core method for this... unclear
 
@@ -4775,7 +4538,7 @@ func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (
 	baseSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2)
 	reportChange := dcr.config().unmixedAccount == "" // otherwise change goes to unmixed account
 	enough := sendEnough(val, feeRate, true, baseSize, reportChange)
-	reserves := dcr.reserves()
+	reserves := dcr.bondReserves.Load()
 	coins, _, _, _, err := dcr.fund(reserves, enough)
 	if err != nil {
 		return nil, 0, fmt.Errorf("unable to withdraw %s DCR to address %s with feeRate %d atoms/byte: %w",
@@ -4799,7 +4562,7 @@ func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint
 	baseSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2) // may be extra if change gets omitted (see signTxAndAddChange)
 	reportChange := dcr.config().unmixedAccount == ""                   // otherwise change goes to unmixed account
 	enough := sendEnough(amt, feeRate, false, baseSize, reportChange)
-	reserves := dcr.reserves()
+	reserves := dcr.bondReserves.Load()
 	coins, _, _, _, err := dcr.fund(reserves, enough)
 	if err != nil {
 		return nil, 0, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
@@ -5134,7 +4897,7 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 		return 0, false, err
 	}
 
-	reserves := dcr.reserves()
+	reserves := dcr.bondReserves.Load()
 	avail := sumUTXOs(utxos)
 	if avail-sum+extra /* avail-sendAmount-fees */ < reserves {
 		return 0, false, errors.New("violates reserves")

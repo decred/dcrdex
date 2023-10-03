@@ -191,7 +191,8 @@ type BondOptionsForm struct {
 	Addr         string  `json:"host"`
 	TargetTier   *uint64 `json:"targetTier,omitempty"`
 	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
-	BondAsset    *uint32 `json:"bondAsset,omitempty"`
+	PenaltyComps uint16  `json:"penaltyComps"`
+	BondAssetID  *uint32 `json:"bondAssetID,omitempty"`
 }
 
 // PostBondForm is information necessary to post a new bond for a new or
@@ -632,6 +633,7 @@ type FeeAsset BondAsset
 // PendingBondState conveys a pending bond's asset and current confirmation
 // count.
 type PendingBondState struct {
+	CoinID  string `json:"coinID"`
 	Symbol  string `json:"symbol"`
 	AssetID uint32 `json:"assetID"`
 	Confs   uint32 `json:"confs"`
@@ -645,22 +647,52 @@ type BondOptions struct {
 	BondAsset    uint32 `json:"bondAsset"`
 	TargetTier   uint64 `json:"targetTier"`
 	MaxBondedAmt uint64 `json:"maxBondedAmt"`
+	PenaltyComps uint16 `json:"PenaltyComps"`
+}
+
+// ExchangeAuth is data characterizing the state of client bonding.
+type ExchangeAuth struct {
+	// Rep is the user's Reputation as reported by the DEX server.
+	Rep account.Reputation `json:"rep"`
+	// BondAssetID is the user's currently configured bond asset.
+	BondAssetID uint32 `json:"bondAssetID"`
+	// PendingStrength counts how many tiers are in unconfirmed bonds.
+	PendingStrength int64 `json:"pendingStrength"`
+	// WeakStrength counts the number of tiers that are about to expire.
+	WeakStrength int64 `json:"weakStrength"`
+	// LiveStrength counts all active bond tiers, including weak.
+	LiveStrength int64 `json:"liveStrength"`
+	// TargetTier is the user's current configured tier level.
+	TargetTier uint64 `json:"targetTier"`
+	// EffectiveTier is the user's current tier, after considering reputation.
+	EffectiveTier int64 `json:"effectiveTier"`
+	// MaxBondedAmt is the maximum amount that can be locked in bonds at a given
+	// time. If not provided, a default is calculated based on TargetTier and
+	// PenaltyComps.
+	MaxBondedAmt uint64 `json:"maxBondedAmt"`
+	// PenaltyComps is the maximum number of penalized tiers to automatically
+	// compensate.
+	PenaltyComps uint16 `json:"penaltyComps"`
+	// PendingBonds are currently pending bonds and their confirmation count.
+	PendingBonds []*PendingBondState `json:"pendingBonds"`
+	// Compensation is the amount we have locked in bonds greater than what
+	// is needed to maintain our target tier. This could be from penalty
+	// compensation, or it could be due to the user lowering their target tier.
+	Compensation int64 `json:"compensation"`
 }
 
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host             string                       `json:"host"`
-	AcctID           string                       `json:"acctID"`
-	Markets          map[string]*Market           `json:"markets"`
-	Assets           map[uint32]*dex.Asset        `json:"assets"`
-	BondExpiry       uint64                       `json:"bondExpiry"`
-	BondAssets       map[string]*BondAsset        `json:"bondAssets"`
-	ConnectionStatus comms.ConnectionStatus       `json:"connectionStatus"`
-	CandleDurs       []string                     `json:"candleDurs"`
-	ViewOnly         bool                         `json:"viewOnly"`
-	Tier             int64                        `json:"tier"`
-	BondOptions      *BondOptions                 `json:"bondOptions"`
-	PendingBonds     map[string]*PendingBondState `json:"pendingBonds"`
+	Host             string                 `json:"host"`
+	AcctID           string                 `json:"acctID"`
+	Markets          map[string]*Market     `json:"markets"`
+	Assets           map[uint32]*dex.Asset  `json:"assets"`
+	BondExpiry       uint64                 `json:"bondExpiry"`
+	BondAssets       map[string]*BondAsset  `json:"bondAssets"`
+	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
+	CandleDurs       []string               `json:"candleDurs"`
+	ViewOnly         bool                   `json:"viewOnly"`
+	Auth             ExchangeAuth           `json:"auth"`
 	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
 
 	// OLD fields for the legacy registration fee (V0PURGE):
@@ -767,11 +799,10 @@ type dexAccount struct {
 	pendingBonds      []*db.Bond // not yet confirmed
 	bonds             []*db.Bond // confirmed, and not yet expired
 	expiredBonds      []*db.Bond // expired and needing refund
-	tier              int64      // check instead of isSuspended
-	tierChange        int64      // unactuated with bond reserves
+	rep               account.Reputation
 	targetTier        uint64
 	maxBondedAmt      uint64
-	totalReserved     int64  // total of bondAsset reserved for bonds (future and liveunspent), set iff maintaining bonds
+	penaltyComps      uint16 // max penalties to compensate for
 	bondAsset         uint32 // asset used for bond maintenance/rotation
 	legacyFeePaid     bool   // server reports a legacy fee paid
 
@@ -945,7 +976,6 @@ func (a *dexAccount) authed() bool {
 func (a *dexAccount) unAuth() {
 	a.authMtx.Lock()
 	a.isAuthed = false
-	a.tier = 0
 	a.legacyFeePaid = false
 	a.authMtx.Unlock()
 }
@@ -954,7 +984,7 @@ func (a *dexAccount) unAuth() {
 func (a *dexAccount) suspended() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
-	return a.tier < 1
+	return a.rep.EffectiveTier() < 1
 }
 
 // feePending checks whether the fee transaction has been broadcast, but the

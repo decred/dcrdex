@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -468,7 +469,7 @@ func parseBondAssetsArgs(params *RawParams) (host string, cert []byte, err error
 
 // bondopts 127.0.0.1:17273 2 2012345678 42
 func parseBondOptsArgs(params *RawParams) (*core.BondOptionsForm, error) {
-	if err := checkNArgs(params, []int{0}, []int{2, 4}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{2, 5}); err != nil {
 		return nil, err
 	}
 
@@ -506,11 +507,26 @@ func parseBondOptsArgs(params *RawParams) (*core.BondOptionsForm, error) {
 		}
 	}
 
+	var penaltyComps uint16
+	if len(params.Args) > 4 {
+		pc, err := checkIntArg(params.Args[4], "penaltyComps", 16)
+		if err != nil {
+			return nil, err
+		}
+		if pc > math.MaxUint16 {
+			return nil, fmt.Errorf("penaltyComps out of range (0, %d)", math.MaxUint16)
+		}
+		if pc > 0 {
+			penaltyComps = uint16(pc)
+		}
+	}
+
 	req := &core.BondOptionsForm{
 		Addr:         params.Args[0],
 		TargetTier:   targetTierP,
 		MaxBondedAmt: maxBondedP,
-		BondAsset:    bondAssetP,
+		BondAssetID:  bondAssetP,
+		PenaltyComps: penaltyComps,
 	}
 	return req, nil
 }

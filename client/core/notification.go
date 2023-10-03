@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 )
 
 // Notifications should use the following note type strings.
@@ -37,6 +38,7 @@ const (
 	NoteTypeCreateWallet = "createwallet"
 	NoteTypeLogin        = "login"
 	NoteTypeWalletNote   = "walletnote"
+	NoteTypeReputation   = "reputation"
 )
 
 var noteChanCounter uint64
@@ -268,7 +270,7 @@ type BondPostNote struct {
 	db.Notification
 	Asset         *uint32 `json:"asset,omitempty"`
 	Confirmations *int32  `json:"confirmations,omitempty"`
-	Tier          *int64  `json:"tier,omitempty"`
+	BondedTier    *int64  `json:"bondedTier,omitempty"`
 	CoinID        *string `json:"coinID,omitempty"`
 	Dex           string  `json:"dex,omitempty"`
 }
@@ -289,9 +291,9 @@ func newBondPostNoteWithConfirmations(topic Topic, subject, details string, seve
 	return bondPmtNt
 }
 
-func newBondPostNoteWithTier(topic Topic, subject, details string, severity db.Severity, dexAddr string, tier int64) *BondPostNote {
+func newBondPostNoteWithTier(topic Topic, subject, details string, severity db.Severity, dexAddr string, bondedTier int64) *BondPostNote {
 	bondPmtNt := newBondPostNote(topic, subject, details, severity, dexAddr)
-	bondPmtNt.Tier = &tier
+	bondPmtNt.BondedTier = &bondedTier
 	return bondPmtNt
 }
 
@@ -666,5 +668,21 @@ func newWalletNote(n asset.WalletNotification) *WalletNote {
 	return &WalletNote{
 		Notification: db.NewNotification(NoteTypeWalletNote, TopicWalletNotification, "", "", db.Data),
 		Payload:      n,
+	}
+}
+
+type ReputationNote struct {
+	db.Notification
+	Host       string
+	Reputation account.Reputation
+}
+
+const TopicReputationUpdate = "ReputationUpdate"
+
+func newReputationNote(host string, rep account.Reputation) *ReputationNote {
+	return &ReputationNote{
+		Notification: db.NewNotification(NoteTypeReputation, TopicReputationUpdate, "", "", db.Data),
+		Host:         host,
+		Reputation:   rep,
 	}
 }

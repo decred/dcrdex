@@ -125,6 +125,7 @@ var (
 			Type: "type",
 		}},
 	}
+	dcrBondAsset = &msgjson.BondAsset{ID: 42, Amt: tFee, Confs: 1}
 )
 
 type tMsg = *msgjson.Message
@@ -184,7 +185,9 @@ type TWebsocket struct {
 	msgs           <-chan *msgjson.Message
 	// handlers simulates a peer (server) response for request, and handles the
 	// response with the msgFunc.
-	handlers map[string][]func(*msgjson.Message, msgFunc) error
+	handlers       map[string][]func(*msgjson.Message, msgFunc) error
+	submittedBond  *msgjson.PostBond
+	liveBondExpiry uint64
 }
 
 func newTWebsocket() *TWebsocket {
@@ -209,7 +212,8 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		feeCoin:   []byte("somecoin"),
 		// feeAssetID is 0 (btc)
 		// tier, bonds, etc. set on auth
-		tier: 1, // not suspended by default
+		pendingBondsConfs: make(map[string]uint32),
+		rep:               account.Reputation{BondedTier: 1}, // not suspended by default
 	}
 }
 
@@ -271,7 +275,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			},
 			BondExpiry: 86400, // >0 make client treat as API v1
 			BondAssets: map[string]*msgjson.BondAsset{
-				"dcr": {ID: 42, Amt: tFee, Confs: 1},
+				"dcr": dcrBondAsset,
 			},
 			RegFees: map[string]*msgjson.FeeAsset{
 				"dcr": {ID: 42, Amt: tFee, Confs: 0},
@@ -400,7 +404,7 @@ func (tdb *TDB) ListAccounts() ([]string, error) {
 }
 
 func (tdb *TDB) Accounts() ([]*db.AccountInfo, error) {
-	return nil, nil
+	return []*db.AccountInfo{}, nil
 }
 
 func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
@@ -706,6 +710,11 @@ type TXCWallet struct {
 	accelerationEstimate        uint64
 	accelerateOrderErr          error
 	info                        *asset.WalletInfo
+	bondTxCoinID                []byte
+	refundBondCoin              asset.Coin
+	refundBondErr               error
+	makeBondTxErr               error
+	reserves                    atomic.Uint64
 
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
@@ -735,6 +744,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 			Version:           0, // match tUTXOAssetA/tUTXOAssetB
 			SupportedVersions: []uint32{0},
 		},
+		bondTxCoinID: encode.RandomBytes(32),
 	}
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
@@ -925,10 +935,6 @@ func (w *TXCWallet) Send(address string, value, feeSuggestion uint64) (asset.Coi
 	return w.sendCoin, w.sendErr
 }
 
-func (w *TXCWallet) MakeBondTx(ver uint64, address string, regFee uint64, acctID []byte) (*asset.Bond, error) {
-	return nil, errors.New("not used")
-}
-
 func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 	return w.feeCoinSent, w.sendTxnErr
 }
@@ -1077,6 +1083,32 @@ func (w *TXCWallet) MaxFundingFees(_ uint32, _ uint64, _ map[string]string) uint
 
 func (*TXCWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) (coins []asset.Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error) {
 	return nil, nil, 0, nil
+}
+
+var _ asset.Bonder = (*TXCWallet)(nil)
+
+func (*TXCWallet) BondsFeeBuffer(feeRate uint64) uint64 {
+	return 4 * 1000 * feeRate * 2
+}
+
+func (w *TXCWallet) SetBondReserves(reserves uint64) {
+	w.reserves.Store(reserves)
+}
+
+func (w *TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
+	return w.refundBondCoin, w.refundBondErr
+}
+
+func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
+	if w.makeBondTxErr != nil {
+		return nil, nil, w.makeBondTxErr
+	}
+	return &asset.Bond{
+		Version: ver,
+		AssetID: dcrBondAsset.ID,
+		Amount:  amt,
+		CoinID:  w.bondTxCoinID,
+	}, func() {}, nil
 }
 
 type TAccountLocker struct {
@@ -1263,7 +1295,6 @@ func newTestRig() *testRig {
 		Cert:      acct.cert,
 		DEXPubKey: acct.dexPubKey,
 		EncKeyV2:  acct.encKey,
-		// Bonds: nil,
 		// LegacyFeeCoin:    acct.feeCoin,
 		// LegacyFeeAssetID: acct.feeAssetID,
 		// LegacyFeePaid: true,
@@ -1367,6 +1398,37 @@ func (rig *testRig) queueRegister(regRes *msgjson.RegisterResult) {
 	})
 }
 
+func (rig *testRig) queuePrevalidateBond() {
+	rig.ws.queueResponse(msgjson.PreValidateBondRoute, func(msg *msgjson.Message, f msgFunc) error {
+		preEval := new(msgjson.PreValidateBond)
+		msg.Unmarshal(preEval)
+
+		preEvalResult := &msgjson.PreValidateBondResult{
+			AccountID: rig.dc.acct.id[:],
+			AssetID:   preEval.AssetID,
+			Amount:    dcrBondAsset.Amt,
+			// Expiry: ,
+		}
+		sign(tDexPriv, preEvalResult)
+		resp, _ := msgjson.NewResponse(msg.ID, preEvalResult, nil)
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queuePostBond(postBondResult *msgjson.PostBondResult) {
+	rig.ws.queueResponse(msgjson.PostBondRoute, func(msg *msgjson.Message, f msgFunc) error {
+		bond := new(msgjson.PostBond)
+		msg.Unmarshal(bond)
+		rig.ws.submittedBond = bond
+		postBondResult.BondID = bond.CoinID
+		sign(tDexPriv, postBondResult)
+		resp, _ := msgjson.NewResponse(msg.ID, postBondResult, nil)
+		f(resp)
+		return nil
+	})
+}
+
 func (rig *testRig) queueNotifyFee() {
 	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
 		req := new(msgjson.NotifyFee)
@@ -1382,23 +1444,50 @@ func (rig *testRig) queueNotifyFee() {
 
 func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.OrderStatus, suspended ...bool) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
+		if rpcErr != nil {
+			resp, _ := msgjson.NewResponse(msg.ID, nil, rpcErr)
+			f(resp)
+			return nil
+		}
+
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
-		result := &msgjson.ConnectResult{Sig: connect.Sig, ActiveMatches: matches, ActiveOrderStatuses: orders}
+		// Default position is post-legacy but pre-v1, singly-bonded.
+		legacyFeePaid, tier := false, int64(1)
+
+		activeBonds := make([]*msgjson.Bond, 0, 1)
+		if b := rig.ws.submittedBond; b != nil {
+			activeBonds = append(activeBonds, &msgjson.Bond{
+				Version: b.Version,
+				Amount:  dcrBondAsset.Amt,
+				Expiry:  rig.ws.liveBondExpiry,
+				CoinID:  b.CoinID,
+				AssetID: b.AssetID,
+			})
+		}
+
+		result := &msgjson.ConnectResult{
+			Sig:                 connect.Sig,
+			ActiveMatches:       matches,
+			ActiveOrderStatuses: orders,
+			LegacyFeePaid:       &legacyFeePaid,
+			ActiveBonds:         activeBonds,
+			Tier:                &tier,
+			Score:               10,
+		}
 		if len(suspended) > 0 {
 			result.Suspended = &suspended[0]
 			if suspended[0] {
-				tier := int64(-1) // even <0 so keys cycle even with v1 api
+				// DRAFT NOTE: I've modified this value. There was a comment
+				// that said "even <0 so keys cycle even with v1 api", but from
+				// my read, you are suspended at tier = 0.
+				tier := int64(0)
 				result.Tier = &tier
+				result.Score = defaultPenaltyThreshold
 			}
 		}
-		var resp *msgjson.Message
-		if rpcErr != nil {
-			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
-		} else {
-			resp, _ = msgjson.NewResponse(msg.ID, result, nil)
-		}
+		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 		f(resp)
 		return nil
 	})
@@ -1914,7 +2003,7 @@ func TestGetFee(t *testing.T) {
 }
 */
 
-func TestRegister(t *testing.T) {
+func TestPostBond(t *testing.T) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
 	rig := newTestRig()
@@ -1938,16 +2027,20 @@ func TestRegister(t *testing.T) {
 	// an error (no dupes). Initial state is to return an error.
 	rig.db.acctErr = tErr
 
+	_ = tCore.Login(tPW)
+
 	// (*Core).Register does setupCryptoV2 to make the dc.acct.privKey etc., so
 	// we don't know the ClientPubKey here. It must be set in the request
 	// handler configured by queueRegister.
-
-	regRes := &msgjson.RegisterResult{
-		DEXPubKey: rig.acct.dexPubKey.SerializeCompressed(),
-		// ClientPubKey is set in the handler, where the sig is made
-		Address: "someaddr",
-		Fee:     tFee,
-		Time:    uint64(time.Now().UnixMilli()),
+	rig.ws.liveBondExpiry = uint64(time.Now().Add(time.Duration(pendingBuffer(dex.Simnet)) * 2 * time.Second).Unix())
+	postBondResult := &msgjson.PostBondResult{
+		AccountID: rig.acct.id[:],
+		AssetID:   dcrBondAsset.ID,
+		Amount:    dcrBondAsset.Amt,
+		Expiry:    rig.ws.liveBondExpiry,
+		Tier:      1,
+		// BondID , // set in queuePostBond
+		// TierReportV2: , // DRAFT TODO: Add tests for v2
 	}
 
 	var wg sync.WaitGroup
@@ -1967,8 +2060,16 @@ func TestRegister(t *testing.T) {
 					tCore.waiterMtx.Lock()
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
+
+					// Every tick, increase the bond tx confirmation count.
 					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
-						tWallet.setConfs(tWallet.sendCoin.id, 0, nil) // 0 ????
+						confs, found := tWallet.confs[dex.Bytes(tWallet.bondTxCoinID).String()]
+						if !found {
+							tWallet.setConfs(tWallet.bondTxCoinID, 0, nil)
+						} else {
+							tWallet.setConfs(tWallet.bondTxCoinID, confs+1, nil)
+						}
+
 						tCore.tipChange(tUTXOAssetA.ID)
 						return
 					}
@@ -1983,27 +2084,40 @@ func TestRegister(t *testing.T) {
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, "test account not found error")
 
 	queueConfigAndConnectUnknownAcct := func() {
+		rig.ws.submittedBond = nil
 		rig.queueConfig()
 		rig.queueConnect(accountNotFoundError, nil, nil) // for discoverAccount
+		rig.ws.queueResponse(msgjson.FeeRateRoute, func(msg *msgjson.Message, f msgFunc) error {
+			const feeRate = 50
+			resp, _ := msgjson.NewResponse(msg.ID, feeRate, nil)
+			f(resp)
+			return nil
+		})
 	}
 
-	queueResponses := func() {
-		queueConfigAndConnectUnknownAcct()
-		rig.queueRegister(regRes)
+	queuePostBondSequence := func() {
+		rig.queuePrevalidateBond()
+		rig.queuePostBond(postBondResult)
 		queueTipChange()
 		rig.queueNotifyFee()
 		rig.queueConnect(nil, nil, nil)
 	}
 
-	form := &RegisterForm{
+	queueResponses := func() {
+		queueConfigAndConnectUnknownAcct()
+		queuePostBondSequence()
+	}
+
+	form := &PostBondForm{
 		Addr:    tDexHost,
 		AppPass: tPW,
-		Fee:     tFee,
-		Asset:   &tFeeAsset,
+		Asset:   &dcrBondAsset.ID,
+		Bond:    dcrBondAsset.Amt,
 		Cert:    []byte{0x1}, // not empty signals TLS, otherwise no TLS allowed hidden services
 	}
 
-	tWallet.sendCoin = &tCoin{id: encode.RandomBytes(36)}
+	// Suppress warnings about SendTransaction returning a mismatching ID.
+	tWallet.feeCoinSent = tWallet.bondTxCoinID
 
 	ch := tCore.NotificationFeed()
 
@@ -2012,8 +2126,8 @@ func TestRegister(t *testing.T) {
 		// Register method will error if url is already in conns map.
 		clearConn()
 
-		tWallet.setConfs(tWallet.sendCoin.id, 0, nil)
-		_, err = tCore.Register(form)
+		tWallet.setConfs(tWallet.bondTxCoinID, 0, nil)
+		_, err = tCore.PostBond(form)
 	}
 
 	getNotification := func(tag string) any {
@@ -2032,44 +2146,41 @@ func TestRegister(t *testing.T) {
 	// The feepayment note for mined fee payment txn notification to server, and
 	// the balance note from tip change are concurrent and thus come in no
 	// guaranteed order.
-	getFeeAndBalanceNote := func() *FeePaymentNote {
+	getBondAndBalanceNote := func() {
 		t.Helper()
-		var feeNote *FeePaymentNote
-		var balanceNote *BalanceNote
-		for feeNote == nil || balanceNote == nil {
-			ntfn := getNotification("feepayment or balance")
+		var bondNote *BondPostNote
+		var balanceNotes uint8
+		// For a normal PostBond, there are three balance updates.
+		// 1) makeAndPostBond, 2) monitorBondConfs.trigger, and 3) tipChange.
+		for bondNote == nil || balanceNotes < 3 {
+			ntfn := getNotification("bond posted or balance")
 			switch note := ntfn.(type) {
-			case *FeePaymentNote:
-				feeNote = note
+			case *BondPostNote:
+				if note.TopicID == TopicAccountRegistered {
+					bondNote = note
+				}
 			case *BalanceNote:
-				balanceNote = note
+				balanceNotes++
+			case *ReputationNote: // ignore
 			default:
 				t.Fatalf("wrong notification (%T). Expected FeePaymentNote or BalanceNote", ntfn)
 			}
 		}
-		return feeNote
 	}
 
 	queueResponses()
 	run()
 	if err != nil {
-		t.Fatalf("registration error: %v", err)
+		t.Fatalf("postbond error: %v", err)
 	}
 
 	// Should be two success notifications. One for fee paid on-chain, one for
 	// fee notification sent, each along with a balance note.
-	feeNote := getFeeAndBalanceNote() // payment in progress
-	if feeNote.Severity() != db.Success {
-		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
-	}
-	feeNote = getFeeAndBalanceNote() // balance note concurrent with fee note (Account registered)
-	if feeNote.Severity() != db.Success {
-		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
-	}
+	getBondAndBalanceNote()
 
 	// password error
 	rig.crypter.(*tCrypter).recryptErr = tErr
-	_, err = tCore.Register(form)
+	run()
 	if !errorHasCode(err, passwordErr) {
 		t.Fatalf("wrong password error: %v", err)
 	}
@@ -2077,18 +2188,11 @@ func TestRegister(t *testing.T) {
 
 	// no host error
 	form.Addr = ""
-	_, err = tCore.Register(form)
+	run()
 	if !errorHasCode(err, emptyHostErr) {
 		t.Fatalf("wrong empty host error: %v", err)
 	}
 	form.Addr = tDexHost
-
-	// account already exists
-	tCore.addDexConnection(dc)
-	_, err = tCore.Register(form)
-	if !errorHasCode(err, dupeDEXErr) {
-		t.Fatalf("wrong account exists error: %v", err)
-	}
 
 	// wallet not found
 	delete(tCore.wallets, tUTXOAssetA.ID)
@@ -2101,7 +2205,7 @@ func TestRegister(t *testing.T) {
 	// Unlock wallet error
 	tWallet.unlockErr = tErr
 	tWallet.locked = true
-	_, err = tCore.Register(form)
+	run()
 	if !errorHasCode(err, walletAuthErr) {
 		t.Fatalf("wrong wallet auth error: %v", err)
 	}
@@ -2110,29 +2214,21 @@ func TestRegister(t *testing.T) {
 
 	// connectDEX error
 	form.Addr = tUnparseableHost
-	_, err = tCore.Register(form)
+	run()
 	if !errorHasCode(err, connectionErr) {
 		t.Fatalf("wrong connectDEX error: %v", err)
 	}
 	form.Addr = tDexHost
 
 	// fee asset not found, no cfg.Fee fallback
-	mkts := dc.cfg.Markets
-	dc.cfg.RegFees = nil
-	dc.cfg.Markets = []*msgjson.Market{}
-	rig.queueConfig()
+	bondAssets := dc.cfg.BondAssets
+	dc.cfg.BondAssets = nil
+	queueConfigAndConnectUnknownAcct()
 	run()
 	if !errorHasCode(err, assetSupportErr) {
 		t.Fatalf("wrong error for missing asset: %v", err)
 	}
-	dc.cfg.RegFees = map[string]*msgjson.FeeAsset{
-		"dcr": {
-			ID:    42,
-			Confs: 0, // skip block mining and register immediately
-			Amt:   tFee,
-		},
-	}
-	dc.cfg.Markets = mkts
+	dc.cfg.BondAssets = bondAssets
 
 	// error creating signing key
 	rig.crypter.(*tCrypter).encryptErr = tErr
@@ -2145,10 +2241,9 @@ func TestRegister(t *testing.T) {
 
 	bal0 := tWallet.bal.Available
 	tWallet.bal.Available = 0
-	queueConfigAndConnectUnknownAcct()
 	run()
 	if !errorHasCode(err, walletBalanceErr) {
-		t.Fatalf("expected low balance error")
+		t.Fatalf("expected low balance error, got: %v", err)
 	}
 	tWallet.bal.Available = bal0
 
@@ -2163,89 +2258,43 @@ func TestRegister(t *testing.T) {
 	}
 
 	// signature error
-	goodSig := regRes.Sig
-	regRes.Sig = []byte("badsig")
 	queueConfigAndConnectUnknownAcct()
-	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-		reg := new(msgjson.Register)
-		msg.Unmarshal(reg)
-		regRes.ClientPubKey = reg.PubKey
-		// NOT re-signing it, just keep badsig
-		resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
+	rig.ws.queueResponse(msgjson.PreValidateBondRoute, func(msg *msgjson.Message, f msgFunc) error {
+		preEval := new(msgjson.PreValidateBond)
+		msg.Unmarshal(preEval)
+
+		preEvalResult := &msgjson.PreValidateBondResult{
+			Signature: msgjson.Signature{
+				Sig: []byte{0xb, 0xa, 0xd},
+			},
+		}
+		resp, _ := msgjson.NewResponse(msg.ID, preEvalResult, nil)
 		f(resp)
 		return nil
 	})
 	run()
 	if !errorHasCode(err, signatureErr) {
-		t.Fatalf("wrong error for bad signature on register response: %v", err)
-	}
-	regRes.Sig = goodSig
-
-	// zero fee error
-	goodFee := regRes.Fee
-	regRes.Fee = 0
-	queueConfigAndConnectUnknownAcct()
-	rig.queueRegister(regRes)
-	run()
-	if !errorHasCode(err, zeroFeeErr) {
-		t.Fatalf("wrong error for zero fee: %v", err)
+		t.Fatalf("wrong error for bad signature on prevalidate response: %v", err)
 	}
 
-	// wrong fee error
-	regRes.Fee = tFee + 1
+	// Wrong bond size on form
+	goodAmt := form.Bond
+	form.Bond = goodAmt + 1
 	queueConfigAndConnectUnknownAcct()
-	rig.queueRegister(regRes)
 	run()
-	if !errorHasCode(err, feeMismatchErr) {
-		t.Fatalf("wrong error for wrong fee: %v", err)
-	}
-	regRes.Fee = goodFee
-
-	// Form fee error
-	form.Fee = tFee + 1
-	queueConfigAndConnectUnknownAcct()
-	rig.queueRegister(regRes)
-	run()
-	if !errorHasCode(err, feeMismatchErr) {
+	if !errorHasCode(err, bondAmtErr) {
 		t.Fatalf("wrong error for wrong fee in form: %v", err)
 	}
-	form.Fee = tFee
+	form.Bond = goodAmt
 
-	// Send error
+	// MakeBondTx error
 	queueConfigAndConnectUnknownAcct()
-	rig.queueRegister(regRes)
-	tWallet.sendErr = tErr
+	tWallet.makeBondTxErr = tErr
 	run()
-	if !errorHasCode(err, feeSendErr) {
-		t.Fatalf("no error for sendErr error")
+	if !errorHasCode(err, bondPostErr) {
+		t.Fatalf("wrong error for bondPostErr: %v", err)
 	}
-	tWallet.sendErr = nil
-
-	// notifyfee response error
-	queueConfigAndConnectUnknownAcct()
-	rig.queueRegister(regRes)
-	queueTipChange()
-	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
-		m, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error message"))
-		f(m)
-		return nil
-	})
-	run()
-	// This should not return a registration error, but the 2nd FeePaymentNote
-	// should indicate an error.
-	if err != nil {
-		t.Fatalf("error for notifyfee response error: %v", err)
-	}
-	// register: balance note followed by fee payment note
-	feeNote = getFeeAndBalanceNote() // Fee payment in progress
-	if feeNote.Severity() != db.Success {
-		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
-	}
-	// fee error. fee and balance note from tip change in no guaranteed order.
-	feeNote = getFeeAndBalanceNote() // Fee payment error "test error message"
-	if feeNote.Severity() != db.ErrorLevel {
-		t.Fatalf("non-error fee payment notification for notifyfee response error: %s: %s", feeNote.Subject(), feeNote.Details())
-	}
+	tWallet.makeBondTxErr = nil
 
 	// Make sure it's good again.
 	queueResponses()
@@ -2253,58 +2302,24 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error after regaining valid state: %v", err)
 	}
-	feeNote = getFeeAndBalanceNote() // Fee payment in progress
-	if feeNote.Severity() != db.Success {
-		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
-	}
-	getFeeAndBalanceNote() // account registered
-
-	// Existing but unpaid account. Server would sent previously-requested fee
-	// address and asset ID.
-	clearConn()
-	rig.queueConfig()
-	unpaidAccountError := msgjson.NewError(msgjson.UnpaidAccountError, "test account not found error")
-	rig.queueConnect(unpaidAccountError, nil, nil) // for discoverAccount
-	rig.queueRegister(regRes)
-	queueTipChange()
-	rig.queueNotifyFee()
-	rig.queueConnect(nil, nil, nil)
-
-	_, err = tCore.Register(form)
-	if err != nil {
-		t.Fatalf("Unpaid Register error: %v", err)
-	}
-
-	getFeeAndBalanceNote() // payment in progress
-	getFeeAndBalanceNote() // account registered
+	getBondAndBalanceNote()
 
 	// Test the account recovery path.
-	clearConn()
 	rig.queueConfig()
 	rig.queueConnect(nil, nil, nil) // account exists
-
-	_, err = tCore.Register(form)
+	run()
 	if err != nil {
-		t.Fatalf("Pre-paid Register error: %v", err)
+		t.Fatalf("Paid account error: %v", err)
 	}
-
-	// no fee payment notes
 
 	// Account suspended should derive new HD credentials.
-	clearConn()
 	rig.queueConnect(nil, nil, nil, true) // first try exists but suspended
 	queueResponses()
-
-	_, err = tCore.Register(form)
+	run()
 	if err != nil {
-		t.Fatalf("Suspended Register error: %v", err)
+		t.Fatalf("Suspension recovery error: %v", err)
 	}
-
-	if len(rig.db.acct.EncKeyV2) == 0 || len(rig.db.acct.LegacyEncKey) != 0 {
-		t.Fatalf("Keys not generated correctly for suspended account. %d %d", len(rig.db.acct.EncKeyV2), len(rig.db.acct.LegacyEncKey))
-	}
-	getFeeAndBalanceNote() // payment in progress
-	getFeeAndBalanceNote() // account registered
+	getBondAndBalanceNote()
 }
 
 func TestCredentialsUpgrade(t *testing.T) {
@@ -3089,14 +3104,22 @@ wait:
 	form.Rate = rate
 
 	// No from wallet
+	tCore.walletMtx.Lock()
 	delete(tCore.wallets, tUTXOAssetA.ID)
+	tCore.walletMtx.Unlock()
 	ensureErr("no dcr wallet")
+	tCore.walletMtx.Lock()
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
+	tCore.walletMtx.Unlock()
 
 	// No to wallet
+	tCore.walletMtx.Lock()
 	delete(tCore.wallets, tUTXOAssetB.ID)
+	tCore.walletMtx.Unlock()
 	ensureErr("no btc wallet")
+	tCore.walletMtx.Lock()
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
+	tCore.walletMtx.Unlock()
 
 	// Address error
 	tBtcWallet.addrErr = tErr
@@ -5789,10 +5812,9 @@ var (
 )
 
 // auth sets the account as authenticated at the provided tier.
-func auth(a *dexAccount, tier int64, legacyFeePaid bool) {
+func auth(a *dexAccount, legacyFeePaid bool) {
 	a.authMtx.Lock()
 	a.isAuthed = true
-	a.tier = tier
 	a.legacyFeePaid = legacyFeePaid
 	a.authMtx.Unlock()
 }
@@ -5802,7 +5824,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	auth(rig.acct, 1, false) // Short path through initializeDEXConnections
+	auth(rig.acct, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -5968,7 +5990,7 @@ func TestReReserveFunding(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	auth(rig.acct, 1, false) // Short path through initializeDEXConnections
+	auth(rig.acct, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -10469,5 +10491,266 @@ func TestUpdateFeesPaid(t *testing.T) {
 		if got != test.paid {
 			t.Fatalf("%s: want %d but got %d fees paid", test.name, test.paid, got)
 		}
+	}
+}
+
+func TestUpdateBondOptions(t *testing.T) {
+	const feeRate = 50
+
+	rig := newTestRig()
+	defer rig.shutdown()
+	acct := rig.dc.acct
+	acct.isAuthed = true
+
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	dcrWallet.Wallet = &TFeeRater{tDcrWallet, feeRate}
+	rig.core.wallets[tUTXOAssetA.ID] = dcrWallet
+	bondFeeBuffer := tDcrWallet.BondsFeeBuffer(feeRate)
+
+	bondAsset := dcrBondAsset
+	var wrongBondAssetID uint32 = 0
+	var targetTier uint64 = 1
+	var targetTierZero uint64 = 0
+	defaultMaxBondedAmt := maxBondedMult * bondAsset.Amt * targetTier
+	tooLowMaxBonded := defaultMaxBondedAmt - 1
+	// Double because we will reserve for the bond that's about to be posted
+	// in rotateBonds too.
+	singlyBondedReserves := bondAsset.Amt*targetTier*2 + bondFeeBuffer
+
+	type acctState struct {
+		targetTier   uint64
+		maxBondedAmt uint64
+	}
+
+	for _, tt := range []struct {
+		name        string
+		bal         uint64
+		form        BondOptionsForm
+		before      acctState
+		after       acctState
+		expReserves uint64
+		addOtherDC  bool
+		wantErr     bool
+	}{
+		{
+			name: "set target tier to 1",
+			bal:  singlyBondedReserves,
+			form: BondOptionsForm{
+				Addr:        acct.host,
+				TargetTier:  &targetTier,
+				BondAssetID: &bondAsset.ID,
+			},
+			after: acctState{
+				targetTier:   1,
+				maxBondedAmt: defaultMaxBondedAmt,
+			},
+			expReserves: singlyBondedReserves,
+		},
+		{
+			name: "low balance",
+			bal:  singlyBondedReserves - 1,
+			form: BondOptionsForm{
+				Addr:        acct.host,
+				TargetTier:  &targetTier,
+				BondAssetID: &bondAsset.ID,
+			},
+			wantErr: true,
+		},
+		{
+			name: "max-bonded too low",
+			bal:  singlyBondedReserves,
+			form: BondOptionsForm{
+				Addr:         acct.host,
+				TargetTier:   &targetTier,
+				BondAssetID:  &bondAsset.ID,
+				MaxBondedAmt: &tooLowMaxBonded,
+			},
+			wantErr: true,
+		},
+		{
+			name: "unsupported bond asset",
+			form: BondOptionsForm{
+				Addr:        acct.host,
+				TargetTier:  &targetTier,
+				BondAssetID: &wrongBondAssetID,
+			},
+			wantErr: true,
+		},
+		{
+			name: "lower target tier with zero balance OK",
+			bal:  0,
+			form: BondOptionsForm{
+				Addr:        acct.host,
+				TargetTier:  &targetTierZero,
+				BondAssetID: &bondAsset.ID,
+			},
+			before: acctState{
+				targetTier:   1,
+				maxBondedAmt: defaultMaxBondedAmt,
+			},
+			after:       acctState{},
+			expReserves: 0,
+		},
+		{
+			name: "lower target tier to zero with other exchanges still keeps reserves",
+			bal:  0,
+			form: BondOptionsForm{
+				Addr:        acct.host,
+				TargetTier:  &targetTierZero,
+				BondAssetID: &bondAsset.ID,
+			},
+			before: acctState{
+				targetTier:   1,
+				maxBondedAmt: defaultMaxBondedAmt,
+			},
+			addOtherDC:  true,
+			after:       acctState{},
+			expReserves: bondFeeBuffer,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			before, after := tt.before, tt.after
+			acct.targetTier = before.targetTier
+			acct.maxBondedAmt = before.maxBondedAmt
+			tDcrWallet.bal = &asset.Balance{Available: tt.bal}
+
+			if tt.addOtherDC {
+				dc, _, acct := testDexConnection(rig.core.ctx, rig.crypter.(*tCrypter))
+				acct.host = "someotherhost.com"
+				rig.core.conns[acct.host] = dc
+				defer delete(rig.core.conns, acct.host)
+				acct.bondAsset = bondAsset.ID
+				acct.targetTier = 1
+			}
+
+			if err := rig.core.UpdateBondOptions(&tt.form); err != nil {
+				if tt.wantErr {
+					return
+				}
+				t.Fatalf("UpdateBondOptions error: %v", err)
+			}
+			if tt.wantErr {
+				t.Fatalf("No error when one was expected")
+			}
+
+			if acct.targetTier != after.targetTier {
+				t.Fatalf("Wrong targetTier. %d != %d", acct.targetTier, after.targetTier)
+			}
+			if acct.maxBondedAmt != after.maxBondedAmt {
+				t.Fatalf("Wrong maxBondedAmt. %d != %d", acct.maxBondedAmt, after.maxBondedAmt)
+			}
+			if tDcrWallet.reserves.Load() != tt.expReserves {
+				t.Fatalf("Wrong reserves. %d != %d", tDcrWallet.reserves.Load(), tt.expReserves)
+			}
+		})
+	}
+}
+
+func TestRotateBonds(t *testing.T) {
+	const feeRate = 50
+
+	rig := newTestRig()
+	defer rig.shutdown()
+	rig.core.Login(tPW)
+
+	acct := rig.dc.acct
+	acct.isAuthed = true
+
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	dcrWallet.Wallet = &TFeeRater{tDcrWallet, feeRate}
+	rig.core.wallets[tUTXOAssetA.ID] = dcrWallet
+	bondAsset := dcrBondAsset
+	bondFeeBuffer := tDcrWallet.BondsFeeBuffer(feeRate)
+	maxBondedPerTier := maxBondedMult * bondAsset.Amt
+
+	now := uint64(time.Now().Unix())
+	bondExpiry := rig.dc.config().BondExpiry
+	// bondDuration := minBondLifetime(rig.core.net, bondExpiry)
+	locktimeThresh := now + bondExpiry
+	pBuffer := uint64(pendingBuffer(rig.core.net))
+	mergeableLocktimeThresh := locktimeThresh + bondExpiry/4 + pBuffer
+	// unexpired := locktimeThresh + 1
+	locktimeExpired := locktimeThresh - 1
+	locktimeRefundable := now - 1
+	weakTimeThresh := locktimeThresh + pBuffer
+
+	run := func(wantPending, wantExpired int, expectedReserves uint64) {
+		ctx, cancel := context.WithTimeout(rig.core.ctx, time.Second)
+		rig.core.rotateBonds(ctx)
+		cancel()
+
+		t.Helper()
+		if len(acct.pendingBonds) != wantPending {
+			t.Fatalf("wanted %d pending bonds, got %d", wantPending, len(acct.pendingBonds))
+		}
+		if len(acct.expiredBonds) != wantExpired {
+			t.Fatalf("wanted %d expired bonds, got %d", wantExpired, len(acct.expiredBonds))
+		}
+		if tDcrWallet.reserves.Load() != expectedReserves {
+			t.Fatalf("wrong reserves. expected %d, got %d", expectedReserves, tDcrWallet.reserves.Load())
+		}
+	}
+
+	// No bonds, target tier 1. Should create a new bond and add it to pending.
+	var targetTier uint64 = 1
+	acct.targetTier = targetTier
+	acct.maxBondedAmt = maxBondedPerTier * targetTier
+	acct.bondAsset = bondAsset.ID
+	tDcrWallet.bal = &asset.Balance{Available: bondAsset.Amt*targetTier + bondFeeBuffer}
+	rig.queuePrevalidateBond()
+	run(1, 0, bondAsset.Amt+bondFeeBuffer)
+
+	// Post and then expire the bond. This first bond should move to expired and we
+	// should create another bond.
+	acct.bonds, acct.pendingBonds = acct.pendingBonds, nil
+	acct.bonds[0].LockTime = locktimeExpired
+	rig.queuePrevalidateBond()
+	// The newly expired bond will be refunded in time to fund our next round,
+	// so we only need fees reserved.
+	run(1, 1, bondFeeBuffer)
+
+	// If the live bond is closer to expiration, the expired bond won't be
+	// ready in time, so we'll need more reserves.
+	acct.bonds, acct.pendingBonds = acct.pendingBonds, nil
+	acct.bonds[0].LockTime = weakTimeThresh + 1
+	run(0, 1, bondAsset.Amt+bondFeeBuffer)
+
+	// Make the live bond weak. Should get a pending bond. Only fees reserves,
+	// because we still have an expired bond.
+	acct.bonds[0].LockTime = weakTimeThresh - 1
+	rig.queuePrevalidateBond()
+	run(1, 1, bondFeeBuffer)
+
+	// Refund the expired bond
+	acct.expiredBonds[0].LockTime = locktimeRefundable
+	tDcrWallet.contractExpired = true
+	tDcrWallet.refundBondCoin = &tCoin{}
+	run(1, 0, bondAsset.Amt+bondFeeBuffer)
+
+	acct.targetTier = 2
+	acct.bonds = nil
+	rig.queuePrevalidateBond()
+	run(2, 0, bondAsset.Amt*2+bondFeeBuffer)
+
+	// Check that a new bond will be scheduled for merge with an existing bond
+	// if the locktime is not too soon.
+	acct.bonds = append(acct.bonds, acct.pendingBonds[0])
+	acct.pendingBonds = nil
+	acct.bonds[0].LockTime = mergeableLocktimeThresh + 1
+	rig.queuePrevalidateBond()
+	run(1, 0, 2*bondAsset.Amt+bondFeeBuffer)
+	mergingBond := acct.pendingBonds[0]
+	if mergingBond.LockTime != acct.bonds[0].LockTime {
+		t.Fatalf("Mergeable bond was not merged")
+	}
+
+	// Same thing, but without the merge, just to check our threshold calc.
+	acct.pendingBonds = nil
+	acct.bonds[0].LockTime = mergeableLocktimeThresh - 1
+	rig.queuePrevalidateBond()
+	run(1, 0, 2*bondAsset.Amt+bondFeeBuffer)
+	unmergingBond := acct.pendingBonds[0]
+	if unmergingBond.LockTime == acct.bonds[0].LockTime {
+		t.Fatalf("Unmergeable bond was scheduled for merged")
 	}
 }
