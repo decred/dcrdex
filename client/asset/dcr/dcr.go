@@ -4271,31 +4271,31 @@ func (dcr *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
 // Withdraw satisfies asset.Withdrawer.
-func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (string, asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("invalid address: %s", address)
+		return "", nil, fmt.Errorf("invalid address: %s", address)
 	}
 	msgTx, sentVal, err := dcr.withdraw(addr, value, dcr.feeRateWithFallback(feeRate))
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
+	return msgTx.CachedTxHash().String(), newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
 }
 
 // Send sends the exact value to the specified address. This is different from
 // Withdraw, which subtracts the tx fees from the amount sent. feeRate is in
 // units of atoms/byte.
-func (dcr *ExchangeWallet) Send(address string, value, feeRate uint64) (asset.Coin, error) {
+func (dcr *ExchangeWallet) Send(address string, value, feeRate uint64) (string, asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("invalid address: %s", address)
+		return "", nil, fmt.Errorf("invalid address: %s", address)
 	}
 	msgTx, sentVal, err := dcr.sendToAddress(addr, value, dcr.feeRateWithFallback(feeRate))
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
+	return msgTx.CachedTxHash().String(), newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -4351,6 +4351,20 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 		err = nil
 	}
 	return confs, spent, err
+}
+
+// TransactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (dcr *ExchangeWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding txid %s: %w", txID, err)
+	}
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(tx.Confirmations), nil
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified

@@ -3365,14 +3365,14 @@ func testSender(t *testing.T, senderType tSenderType) {
 	var unspentVal uint64 = 100e8
 	const feeSuggestion = 100
 	funName := "Send"
-	sender := func(addr string, val uint64) (asset.Coin, error) {
+	sender := func(addr string, val uint64) (string, asset.Coin, error) {
 		return wallet.Send(addr, val, feeSuggestion)
 	}
 	if senderType == tWithdrawSender {
 		funName = "Withdraw"
 		// For withdraw, test with unspent total = withdraw value
 		unspentVal = sendVal
-		sender = func(addr string, val uint64) (asset.Coin, error) {
+		sender = func(addr string, val uint64) (string, asset.Coin, error) {
 			return wallet.Withdraw(addr, val, feeSuggestion)
 		}
 	}
@@ -3391,13 +3391,13 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}}
 	//node.unspent = append(node.unspent, node.unspent[0])
 
-	_, err := sender(addr, sendVal)
+	_, _, err := sender(addr, sendVal)
 	if err != nil {
 		t.Fatalf(funName+" error: %v", err)
 	}
 
 	// invalid address
-	_, err = sender("badaddr", sendVal)
+	_, _, err = sender("badaddr", sendVal)
 	if err == nil {
 		t.Fatalf("no error for bad address: %v", err)
 	}
@@ -3405,7 +3405,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 	// GetRawChangeAddress error
 	if senderType == tSendSender { // withdraw test does not get a change address
 		node.changeAddrErr = tErr
-		_, err = sender(addr, sendVal)
+		_, _, err = sender(addr, sendVal)
 		if err == nil {
 			t.Fatalf("no error for rawchangeaddress: %v", err)
 		}
@@ -3413,7 +3413,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}
 
 	// good again
-	_, err = sender(addr, sendVal)
+	_, _, err = sender(addr, sendVal)
 	if err != nil {
 		t.Fatalf(funName+" error afterwards: %v", err)
 	}

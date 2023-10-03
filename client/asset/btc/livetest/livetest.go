@@ -561,7 +561,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	// Test Send.
 	tLogger.Info("Testing Send")
-	coin, err := rig.secondWallet.Send(address, cfg.LotSize, defaultFee)
+	_, coin, err := rig.secondWallet.Send(address, cfg.LotSize, defaultFee)
 	if err != nil {
 		t.Fatalf("error sending: %v", err)
 	}
@@ -573,7 +573,7 @@ func Run(t *testing.T, cfg *Config) {
 	// Test Withdraw.
 	withdrawer, _ := rig.secondWallet.Wallet.(asset.Withdrawer)
 	tLogger.Info("Testing Withdraw")
-	coin, err = withdrawer.Withdraw(address, cfg.LotSize, defaultFee)
+	_, coin, err = withdrawer.Withdraw(address, cfg.LotSize, defaultFee)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}

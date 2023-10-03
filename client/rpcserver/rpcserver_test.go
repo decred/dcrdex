@@ -151,8 +151,8 @@ func (c *TCore) Wallets() []*core.WalletState {
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	return c.walletState
 }
-func (c *TCore) Send(pw []byte, assetID uint32, value uint64, addr string, subtract bool) (asset.Coin, error) {
-	return c.coin, c.sendErr
+func (c *TCore) Send(pw []byte, assetID uint32, value uint64, addr string, subtract bool) (string, asset.Coin, error) {
+	return "", c.coin, c.sendErr
 }
 func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 	return c.exportSeed, c.exportSeedErr

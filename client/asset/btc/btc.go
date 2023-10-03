@@ -4209,23 +4209,23 @@ func (btc *baseWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of sats/byte.
 // Withdraw satisfies asset.Withdrawer.
-func (btc *baseWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+func (btc *baseWallet) Withdraw(address string, value, feeRate uint64) (string, asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(feeRate), true)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return NewOutput(txHash, vout, sent), nil
+	return txHash.String(), NewOutput(txHash, vout, sent), nil
 }
 
 // Send sends the exact value to the specified address. This is different from
 // Withdraw, which subtracts the tx fees from the amount sent. feeRate is in
 // units of sats/byte.
-func (btc *baseWallet) Send(address string, value, feeRate uint64) (asset.Coin, error) {
+func (btc *baseWallet) Send(address string, value, feeRate uint64) (string, asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(feeRate), false)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return NewOutput(txHash, vout, sent), nil
+	return txHash.String(), NewOutput(txHash, vout, sent), nil
 }
 
 // SendTransaction broadcasts a valid fully-signed transaction.
@@ -4337,6 +4337,17 @@ func (btc *baseWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contra
 		return 0, false, err
 	}
 	return btc.node.swapConfirmations(txHash, vout, pkScript, startTime)
+}
+
+// TransactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (btc *baseWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding txid %q: %w", txID, err)
+	}
+	_, confs, err = btc.rawWalletTx(txHash)
+	return
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified output

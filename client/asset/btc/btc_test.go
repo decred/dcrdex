@@ -3729,11 +3729,11 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
 	const feeSuggestion = 100
-	sender := func(addr string, val uint64) (asset.Coin, error) {
+	sender := func(addr string, val uint64) (string, asset.Coin, error) {
 		return wallet.Send(addr, val, defaultFee)
 	}
 	if senderType == tWithdrawSender {
-		sender = func(addr string, val uint64) (asset.Coin, error) {
+		sender = func(addr string, val uint64) (string, asset.Coin, error) {
 			return wallet.Withdraw(addr, val, feeSuggestion)
 		}
 	}
@@ -3895,7 +3895,7 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		node.listUnspent = test.unspents
 		wallet.bondReserves.Store(test.bondReserves)
 
-		_, err := sender(addr.String(), test.val)
+		_, _, err := sender(addr.String(), test.val)
 		if test.expectErr {
 			if err == nil {
 				t.Fatalf("%s: no error for expected error", test.name)

@@ -4335,7 +4335,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
 	feeRate := c.feeSuggestionAny(feeAsset.ID, dc)
-	coin, err := wallet.Send(regRes.Address, regRes.Fee, feeRate)
+	_, coin, err := wallet.Send(regRes.Address, regRes.Fee, feeRate)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %w", err)
 	}
@@ -5452,54 +5452,55 @@ func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32) (feeSuggestion u
 	return dc.fetchFeeRate(assetID)
 }
 
-// Withdraw initiates a withdraw from an exchange wallet. The client password
-// must be provided as an additional verification. This method is DEPRECATED. Use
-// Send with the subtract option instead.
-func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
-	return c.Send(pw, assetID, value, address, true)
-}
-
 // Send initiates either send or withdraw from an exchange wallet. if subtract
 // is true, fees are subtracted from the value else fees are taken from the
-// exchange wallet. The client password must be provided as an additional
-// verification.
-func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
-	crypter, err := c.encryptionKey(pw)
-	if err != nil {
-		return nil, fmt.Errorf("password error: %w", err)
+// exchange wallet.
+func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (string, asset.Coin, error) {
+	var crypter encrypt.Crypter
+	// Empty password can be provided if wallet is already unlocked. Webserver
+	// and RPCServer should not allow empty password, but this is used for
+	// bots.
+	if len(pw) > 0 {
+		var err error
+		crypter, err = c.encryptionKey(pw)
+		if err != nil {
+			return "", nil, fmt.Errorf("Trade password error: %w", err)
+		}
+		defer crypter.Close()
 	}
-	defer crypter.Close()
+
 	if value == 0 {
-		return nil, fmt.Errorf("cannot send/withdraw zero %s", unbip(assetID))
+		return "", nil, fmt.Errorf("cannot send/withdraw zero %s", unbip(assetID))
 	}
 	wallet, found := c.wallet(assetID)
 	if !found {
-		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+		return "", nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
-	err = c.connectAndUnlock(crypter, wallet)
+	err := c.connectAndUnlock(crypter, wallet)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	if err = wallet.checkPeersAndSyncStatus(); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	var coin asset.Coin
+	var txID string
 	feeSuggestion := c.feeSuggestionAny(assetID)
 	if !subtract {
-		coin, err = wallet.Wallet.Send(address, value, feeSuggestion)
+		txID, coin, err = wallet.Wallet.Send(address, value, feeSuggestion)
 	} else {
 		if withdrawer, isWithdrawer := wallet.Wallet.(asset.Withdrawer); isWithdrawer {
-			coin, err = withdrawer.Withdraw(address, value, feeSuggestion)
+			txID, coin, err = withdrawer.Withdraw(address, value, feeSuggestion)
 		} else {
-			return nil, fmt.Errorf("wallet does not support subtracting network fee from withdraw amount")
+			return "", nil, fmt.Errorf("wallet does not support subtracting network fee from withdraw amount")
 		}
 	}
 	if err != nil {
 		subject, details := c.formatDetails(TopicSendError, unbip(assetID), err)
 		c.notify(newSendNote(TopicSendError, subject, details, db.ErrorLevel))
-		return nil, err
+		return "", nil, err
 	}
 
 	sentValue := wallet.Info().UnitInfo.ConventionalString(coin.Value())
@@ -5507,7 +5508,18 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
 
 	c.updateAssetBalance(assetID)
-	return coin, nil
+	return txID, coin, nil
+}
+
+// TransactionConfirmations returns the number of confirmations of
+// a transaction.
+func (c *Core) TransactionConfirmations(assetID uint32, txid string) (confirmations uint32, err error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, err
+	}
+
+	return wallet.TransactionConfirmations(c.ctx, txid)
 }
 
 // ValidateAddress checks that the provided address is valid.

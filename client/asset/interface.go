@@ -526,9 +526,12 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
+	// TransactionConfirmations gets the number of confirmations for the specified
+	// transaction.
+	TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error)
 	// Send sends the exact value to the specified address. This is different
 	// from Withdraw, which subtracts the tx fees from the amount sent.
-	Send(address string, value, feeRate uint64) (Coin, error)
+	Send(address string, value, feeRate uint64) (txID string, coin Coin, err error)
 	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 	// pay the registration fee using the provided feeRate.
 	EstimateRegistrationTxFee(feeRate uint64) uint64
@@ -640,7 +643,7 @@ type Recoverer interface {
 type Withdrawer interface {
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
-	Withdraw(address string, value, feeRate uint64) (Coin, error)
+	Withdraw(address string, value, feeRate uint64) (txID string, coin Coin, err error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
