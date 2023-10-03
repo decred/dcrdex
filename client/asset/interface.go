@@ -1039,6 +1039,9 @@ type WalletTransaction struct {
 	Fees         uint64 `json:"fees"`
 	// BlockNumber is 0 for txs in the mempool.
 	BlockNumber uint64 `json:"blockNumber"`
+	// TokenID will be non-nil if the BalanceDelta applies to the balance
+	// of a token.
+	TokenID *uint32 `json:"tokenID,omitempty"`
 	// AdditionalData contains asset specific information, i.e. nonce
 	// for ETH.
 	AdditionalData map[string]string `json:"additionalData"`

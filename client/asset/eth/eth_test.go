@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -21,7 +22,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/client/asset/kvdb"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -117,8 +117,10 @@ type testNode struct {
 	receipt         *types.Receipt
 	receiptTx       *types.Transaction
 	receiptErr      error
+	receipts        map[common.Hash]*types.Receipt
+	receiptTxs      map[common.Hash]*types.Transaction
+	receiptErrs     map[common.Hash]error
 	hdrByHash       *types.Header
-	txReceipt       *types.Receipt
 	lastSignedTx    *types.Transaction
 	sendTxTx        *types.Transaction
 	sendTxErr       error
@@ -180,7 +182,9 @@ func (n *testNode) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, n
 	if maxFeeRate == nil {
 		maxFeeRate = n.maxFeeRate
 	}
-	return newTxOpts(ctx, n.addr, val, maxGas, maxFeeRate, dexeth.GweiToWei(2)), nil
+	txOpts := newTxOpts(ctx, n.addr, val, maxGas, maxFeeRate, dexeth.GweiToWei(2))
+	txOpts.Nonce = big.NewInt(1)
+	return txOpts, nil
 }
 
 func (n *testNode) currentFees(ctx context.Context) (baseFees, tipCap *big.Int, err error) {
@@ -257,7 +261,14 @@ func (n *testNode) headerByHash(_ context.Context, txHash common.Hash) (*types.H
 }
 
 func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
-	return n.receipt, n.receiptTx, n.receiptErr
+	if n.receiptErr != nil {
+		return nil, nil, n.receiptErr
+	}
+	if n.receipt != nil {
+		return n.receipt, n.receiptTx, nil
+	}
+
+	return n.receipts[txHash], n.receiptTxs[txHash], n.receiptErrs[txHash]
 }
 
 func (n *testNode) setBalanceError(w *assetWallet, err error) {
@@ -407,6 +418,265 @@ func (c *tTokenContractor) estimateTransferGas(context.Context, *big.Int) (uint6
 	return c.transferEstimate, c.transferEstimateErr
 }
 
+type tTxDB struct {
+	storeTxCalled  bool
+	storeTxErr     error
+	removeTxCalled bool
+	removeTxErr    error
+}
+
+var _ txDB = (*tTxDB)(nil)
+
+func (db *tTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
+	db.storeTxCalled = true
+	return db.storeTxErr
+}
+func (db *tTxDB) removeTx(id dex.Bytes) error {
+	db.removeTxCalled = true
+	return db.removeTxErr
+}
+func (db *tTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
+func (db *tTxDB) getPendingTxs() (map[uint64]*extendedWalletTx, error) {
+	return nil, nil
+}
+func (db *tTxDB) getMonitoredTxs() (map[common.Hash]*monitoredTx, error) {
+	return nil, nil
+}
+func (db *tTxDB) storeMonitoredTx(txHash common.Hash, monitoredTx *monitoredTx) error {
+	return nil
+}
+func (db *tTxDB) removeMonitoredTxs(txHash []common.Hash) error {
+	return nil
+}
+func (db *tTxDB) close() error {
+	return nil
+}
+func (db *tTxDB) run(context.Context) {}
+
+func TestCheckUnconfirmedTxs(t *testing.T) {
+	const tipHeight = 50
+	const baseFeeGwei = 100
+	const gasTipCapGwei = 2
+
+	type tExtendedWalletTx struct {
+		wt           *extendedWalletTx
+		confs        uint32
+		gasUsed      uint64
+		txReceiptErr error
+	}
+
+	newExtendedWalletTx := func(assetID uint32, maxFees uint64, currBlockNumber uint64, txReceiptConfs uint32,
+		txReceiptGasUsed uint64, txReceiptErr error, timeStamp int64, savedToDB bool) *tExtendedWalletTx {
+		var tokenID *uint32
+		if assetID != BipID {
+			tokenID = &assetID
+		}
+
+		return &tExtendedWalletTx{
+			wt: &extendedWalletTx{
+				WalletTransaction: &asset.WalletTransaction{
+					BlockNumber: currBlockNumber,
+					TokenID:     tokenID,
+					Fees:        maxFees,
+				},
+				TimeStamp: uint64(timeStamp),
+				savedToDB: savedToDB,
+			},
+			confs:        txReceiptConfs,
+			gasUsed:      txReceiptGasUsed,
+			txReceiptErr: txReceiptErr,
+		}
+	}
+
+	gasFee := func(gasUsed uint64) uint64 {
+		return gasUsed * (baseFeeGwei + gasTipCapGwei)
+	}
+
+	now := time.Now().Unix()
+
+	tests := []struct {
+		name           string
+		assetID        uint32
+		unconfirmedTxs map[uint64]*tExtendedWalletTx
+		confirmedNonce uint64
+
+		expTxsAfter       map[uint64]*extendedWalletTx
+		expStoreTxCalled  bool
+		expRemoveTxCalled bool
+		storeTxErr        error
+		removeTxErr       error
+	}{
+		{
+			name:    "coin not found",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now, true),
+			},
+			expTxsAfter: map[uint64]*extendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now, true).wt,
+			},
+		},
+		{
+			name:    "tx was nonce replaced",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(5*60+1), true),
+			},
+			confirmedNonce:    1,
+			expTxsAfter:       map[uint64]*extendedWalletTx{},
+			expRemoveTxCalled: true,
+		},
+		{
+			name:    "leave in unconfirmed txs if txDB.removeTx fails",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(5*60+1), true),
+			},
+			confirmedNonce: 1,
+			expTxsAfter: map[uint64]*extendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(5*60+1), true).wt,
+			},
+			removeTxErr:       errors.New(""),
+			expRemoveTxCalled: true,
+		},
+		{
+			name:    "not nonce replaced, but still cannot find after 10 mins",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(10*60+1), true),
+			},
+			confirmedNonce:    0,
+			expTxsAfter:       map[uint64]*extendedWalletTx{},
+			expRemoveTxCalled: true,
+		},
+		{
+			name:    "still in mempool",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, nil, now, true),
+			},
+			expTxsAfter: map[uint64]*extendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, nil, now, true).wt,
+			},
+		},
+		{
+			name:    "1 confirmation",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 1, 6e5, nil, now, true),
+			},
+			expTxsAfter: map[uint64]*extendedWalletTx{
+				1: newExtendedWalletTx(BipID, gasFee(6e5), tipHeight, 0, 0, nil, now, true).wt,
+			},
+			expStoreTxCalled: true,
+		},
+		{
+			name:    "3 confirmations",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, gasFee(6e5), tipHeight, 3, 6e5, nil, now, true),
+			},
+			expTxsAfter:      map[uint64]*extendedWalletTx{},
+			expStoreTxCalled: true,
+		},
+		{
+			name:    "3 confirmations, leave in unconfirmed txs if txDB.storeTx fails",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, gasFee(6e5), tipHeight-2, 3, 6e5, nil, now, true),
+			},
+			expTxsAfter: map[uint64]*extendedWalletTx{
+				1: newExtendedWalletTx(BipID, gasFee(6e5), tipHeight-2, 3, 6e5, nil, now, true).wt,
+			},
+			expStoreTxCalled: true,
+			storeTxErr:       errors.New(""),
+		},
+		{
+			name:    "was confirmed but now not found",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, tipHeight-1, 0, 0, asset.CoinNotFoundError, now, true),
+			},
+			expTxsAfter: map[uint64]*extendedWalletTx{
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now, true).wt,
+			},
+			expStoreTxCalled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		if tt.name != "1 confirmation" {
+			continue
+		}
+		t.Run(tt.name, func(t *testing.T) {
+			_, eth, node, shutdown := tassetWallet(tt.assetID)
+			defer shutdown()
+
+			node.tokenContractor.bal = unlimitedAllowance
+			node.receipts = make(map[common.Hash]*types.Receipt)
+			node.receiptTxs = make(map[common.Hash]*types.Transaction)
+			node.receiptErrs = make(map[common.Hash]error)
+			node.hdrByHash = &types.Header{
+				BaseFee: dexeth.GweiToWei(baseFeeGwei),
+			}
+			node.confNonce = tt.confirmedNonce
+			eth.connected.Store(true)
+			eth.tipMtx.Lock()
+			eth.currentTip = &types.Header{Number: new(big.Int).SetUint64(tipHeight)}
+			eth.tipMtx.Unlock()
+
+			txDB := &tTxDB{
+				storeTxErr:  tt.storeTxErr,
+				removeTxErr: tt.removeTxErr,
+			}
+			eth.txDB = txDB
+
+			for nonce, pt := range tt.unconfirmedTxs {
+				txHash := common.BytesToHash(encode.RandomBytes(32))
+				pt.wt.ID = txHash[:]
+				eth.pendingTxs[nonce] = pt.wt
+				var blockNumber *big.Int
+				if pt.confs > 0 {
+					blockNumber = big.NewInt(int64(tipHeight - pt.confs + 1))
+				}
+				node.receipts[txHash] = &types.Receipt{BlockNumber: blockNumber, GasUsed: pt.gasUsed}
+				node.receiptTxs[txHash] = types.NewTx(&types.DynamicFeeTx{
+					GasTipCap: dexeth.GweiToWei(gasTipCapGwei),
+					GasFeeCap: dexeth.GweiToWei(2 * baseFeeGwei),
+				})
+				node.receiptErrs[txHash] = pt.txReceiptErr
+			}
+
+			eth.checkPendingTxs()
+
+			if len(eth.pendingTxs) != len(tt.expTxsAfter) {
+				t.Fatalf("expected %d unconfirmed txs, got %d", len(tt.expTxsAfter), len(eth.pendingTxs))
+			}
+			for nonce, expTx := range tt.expTxsAfter {
+				if tx, ok := eth.pendingTxs[nonce]; !ok {
+					t.Fatalf("expected unconfirmed tx with nonce %d", nonce)
+				} else {
+					if tx.Fees != expTx.Fees {
+						t.Fatalf("expected fees %d, got %d", expTx.Fees, tx.Fees)
+					}
+					if tx.BlockNumber != expTx.BlockNumber {
+						t.Fatalf("expected block number %d, got %d", expTx.BlockNumber, tx.BlockNumber)
+					}
+				}
+			}
+
+			if txDB.storeTxCalled != tt.expStoreTxCalled {
+				t.Fatalf("expected storeTx called %v, got %v", tt.expStoreTxCalled, txDB.storeTxCalled)
+			}
+			if txDB.removeTxCalled != tt.expRemoveTxCalled {
+				t.Fatalf("expected removeTx called %v, got %v", tt.expRemoveTxCalled, txDB.removeTxCalled)
+			}
+		})
+	}
+}
+
 func TestCheckForNewBlocks(t *testing.T) {
 	header0 := &types.Header{Number: new(big.Int)}
 	header1 := &types.Header{Number: big.NewInt(1)}
@@ -440,6 +710,7 @@ func TestCheckForNewBlocks(t *testing.T) {
 					ctx:        ctx,
 					log:        tLogger,
 					currentTip: header0,
+					txDB:       &tTxDB{},
 				},
 				log:     tLogger.SubLogger("ETH"),
 				emit:    emit,
@@ -612,19 +883,19 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
-			baseChainID:   BipID,
-			chainID:       dexeth.ChainIDs[dex.Simnet],
-			tokens:        dexeth.Tokens,
-			addr:          node.addr,
-			net:           dex.Simnet,
-			node:          node,
-			ctx:           ctx,
-			log:           tLogger,
-			gasFeeLimitV:  defaultGasFeeLimit,
-			monitoredTxs:  make(map[common.Hash]*monitoredTx),
-			monitoredTxDB: kvdb.NewMemoryDB(),
-			pendingTxs:    make(map[common.Hash]*pendingTx),
-			currentTip:    &types.Header{Number: new(big.Int)},
+			baseChainID:  BipID,
+			chainID:      dexeth.ChainIDs[dex.Simnet],
+			tokens:       dexeth.Tokens,
+			addr:         node.addr,
+			net:          dex.Simnet,
+			node:         node,
+			ctx:          ctx,
+			log:          tLogger,
+			gasFeeLimitV: defaultGasFeeLimit,
+			monitoredTxs: make(map[common.Hash]*monitoredTx),
+			pendingTxs:   make(map[uint64]*extendedWalletTx),
+			txDB:         &tTxDB{},
+			currentTip:   &types.Header{Number: new(big.Int)},
 		},
 		versionedGases:     versionedGases,
 		maxSwapGas:         versionedGases[0].Swap,
@@ -830,42 +1101,47 @@ func TestBalanceWithMempool(t *testing.T) {
 }
 
 func TestBalanceNoMempool(t *testing.T) {
-
 	const tipHeight = 50
 	const lastCheck = tipHeight - 1
 
-	type tPendingTx struct {
-		*pendingTx
+	type tExtendedWalletTx struct {
+		wt    *extendedWalletTx
 		confs uint32
 	}
 
-	newPendingTx := func(assetID uint32, out, in, maxFees uint64, confs uint32) *tPendingTx {
-		return &tPendingTx{
-			pendingTx: &pendingTx{
-				assetID:   assetID,
-				out:       out,
-				in:        in,
-				maxFees:   maxFees,
-				stamp:     time.Now(),
+	newExtendedWalletTx := func(assetID uint32, out, in, maxFees uint64, currBlockNumber uint64, txReceiptConfs uint32) *tExtendedWalletTx {
+		var tokenID *uint32
+		if assetID != BipID {
+			tokenID = &assetID
+		}
+
+		return &tExtendedWalletTx{
+			wt: &extendedWalletTx{
+				WalletTransaction: &asset.WalletTransaction{
+					BalanceDelta: int64(in) - int64(out),
+					BlockNumber:  0,
+					TokenID:      tokenID,
+					Fees:         maxFees,
+				},
 				lastCheck: lastCheck,
 			},
-			confs: confs,
+			confs: txReceiptConfs,
 		}
 	}
 
 	tests := []struct {
-		name          string
-		assetID       uint32
-		pendingTxs    []*tPendingTx
-		expPendingIn  uint64
-		expPendingOut uint64
-		expCountAfter int
+		name           string
+		assetID        uint32
+		unconfirmedTxs map[uint64]*tExtendedWalletTx
+		expPendingIn   uint64
+		expPendingOut  uint64
+		expCountAfter  int
 	}{
 		{
 			name:    "single eth tx",
 			assetID: BipID,
-			pendingTxs: []*tPendingTx{
-				newPendingTx(BipID, 1, 0, 2, 0),
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(BipID, 1, 0, 2, 0, 0),
 			},
 			expPendingOut: 3,
 			expCountAfter: 1,
@@ -873,15 +1149,23 @@ func TestBalanceNoMempool(t *testing.T) {
 		{
 			name:    "single tx expired",
 			assetID: BipID,
-			pendingTxs: []*tPendingTx{
-				newPendingTx(BipID, 1, 0, 1, 1),
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(BipID, 1, 0, 1, 0, 1),
+			},
+			expCountAfter: 1,
+		},
+		{
+			name:    "single tx expired, txConfsNeededToConfirm confs",
+			assetID: BipID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(BipID, 1, 0, 1, 0, txConfsNeededToConfirm),
 			},
 		},
 		{
 			name:    "eth with token fees",
 			assetID: BipID,
-			pendingTxs: []*tPendingTx{
-				newPendingTx(simnetTokenID, 4, 0, 5, 0),
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(simnetTokenID, 4, 0, 5, 0, 0),
 			},
 			expPendingOut: 5,
 			expCountAfter: 1,
@@ -889,9 +1173,9 @@ func TestBalanceNoMempool(t *testing.T) {
 		{
 			name:    "token with 1 tx and other ignored assets",
 			assetID: simnetTokenID,
-			pendingTxs: []*tPendingTx{
-				newPendingTx(simnetTokenID, 4, 0, 5, 0),
-				newPendingTx(simnetTokenID+1, 8, 0, 9, 0),
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(simnetTokenID, 4, 0, 5, 0, 0),
+				1: newExtendedWalletTx(simnetTokenID+1, 8, 0, 9, 0, 0),
 			},
 			expPendingOut: 4,
 			expCountAfter: 2,
@@ -899,8 +1183,8 @@ func TestBalanceNoMempool(t *testing.T) {
 		{
 			name:    "token with 1 tx incoming",
 			assetID: simnetTokenID,
-			pendingTxs: []*tPendingTx{
-				newPendingTx(simnetTokenID, 0, 15, 5, 0),
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(simnetTokenID, 0, 15, 5, 0, 0),
 			},
 			expPendingIn:  15,
 			expCountAfter: 1,
@@ -908,15 +1192,23 @@ func TestBalanceNoMempool(t *testing.T) {
 		{
 			name:    "eth mixed txs",
 			assetID: BipID,
-			pendingTxs: []*tPendingTx{
-				newPendingTx(BipID, 1, 0, 2, 0),         // 3 eth out
-				newPendingTx(simnetTokenID, 3, 0, 4, 1), // confirmed
-				newPendingTx(simnetTokenID, 5, 0, 6, 0), // 6 eth out
-				newPendingTx(BipID, 0, 7, 1, 0),         // 1 eth out, 7 eth in
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(BipID, 1, 0, 2, 0, 0),                              // 3 eth out
+				1: newExtendedWalletTx(simnetTokenID, 3, 0, 4, 0, txConfsNeededToConfirm), // confirmed
+				2: newExtendedWalletTx(simnetTokenID, 5, 0, 6, 0, 0),                      // 6 eth out
+				3: newExtendedWalletTx(BipID, 0, 7, 1, 0, 0),                              // 1 eth out, 7 eth in
 			},
 			expPendingOut: 10,
 			expPendingIn:  7,
 			expCountAfter: 3,
+		},
+		{
+			name:    "already confirmed, but still waiting for txConfsNeededToConfirm",
+			assetID: simnetTokenID,
+			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
+				0: newExtendedWalletTx(simnetTokenID, 0, 15, 5, tipHeight, 1),
+			},
+			expCountAfter: 1,
 		},
 	}
 
@@ -925,23 +1217,30 @@ func TestBalanceNoMempool(t *testing.T) {
 			_, eth, tNode, shutdown := tassetWallet(tt.assetID)
 			defer shutdown()
 			eth.node = tNode.testNode // no mempool
-			tNode.txConfirmations = make(map[common.Hash]uint32)
-			tNode.txConfsErr = make(map[common.Hash]error)
 			tNode.bal = unlimitedAllowance
 			tNode.tokenContractor.bal = unlimitedAllowance
-
+			tNode.receipts = make(map[common.Hash]*types.Receipt)
+			tNode.receiptTxs = make(map[common.Hash]*types.Transaction)
+			tNode.hdrByHash = &types.Header{
+				BaseFee: big.NewInt(100e9),
+			}
+			eth.connected.Store(true)
 			eth.tipMtx.Lock()
 			eth.currentTip = &types.Header{Number: new(big.Int).SetUint64(tipHeight)}
 			eth.tipMtx.Unlock()
 
-			for _, pt := range tt.pendingTxs {
+			for nonce, pt := range tt.unconfirmedTxs {
 				txHash := common.BytesToHash(encode.RandomBytes(32))
-				eth.pendingTxs[txHash] = pt.pendingTx
-				if pt.confs == 0 {
-					tNode.txConfsErr[txHash] = asset.CoinNotFoundError
-				} else {
-					tNode.txConfirmations[txHash] = pt.confs
+				pt.wt.ID = txHash[:]
+				eth.pendingTxs[nonce] = pt.wt
+				var blockNumber *big.Int
+				if pt.confs > 0 {
+					blockNumber = big.NewInt(int64(tipHeight - pt.confs + 1))
 				}
+				tNode.receipts[txHash] = &types.Receipt{BlockNumber: blockNumber}
+				tNode.receiptTxs[txHash] = types.NewTx(&types.DynamicFeeTx{
+					GasTipCap: big.NewInt(2e9),
+				})
 			}
 
 			bal, err := eth.balanceWithTxPool()
@@ -4135,7 +4434,14 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		}
 	}
 
-	tests := []struct {
+	tempDir := t.TempDir()
+	txDB, err := newBadgerTxDB(filepath.Join(tempDir, "tx.db"), tLogger)
+	if err != nil {
+		t.Fatalf("error creating tx db: %v", err)
+	}
+	defer eth.txDB.close()
+
+	type test struct {
 		name string
 
 		redemption *asset.Redemption
@@ -4166,7 +4472,9 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 
 		receipt    *types.Receipt
 		receiptErr error
-	}{
+	}
+
+	tests := []*test{
 		{
 			name:       "in monitored txs, found by geth, not yet confirmed",
 			coinID:     toEthTxCoinID(3, 200, redeem0Data),
@@ -4698,7 +5006,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		},
 	}
 
-	for _, test := range tests {
+	runTest := func(test *test) {
 		fmt.Printf("###### %s ###### \n", test.name)
 		node.getTxResMap = make(map[common.Hash]*tGetTxRes)
 		for hash, txData := range test.getTxResMap {
@@ -4728,13 +5036,30 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		node.receipt = test.receipt
 		node.receiptErr = test.receiptErr
 
-		eth.monitoredTxDB = kvdb.NewMemoryDB()
+		eth.txDB = txDB
 		eth.monitoredTxs = test.monitoredTxs
+
 		for h, tx := range test.monitoredTxs {
-			if err := eth.monitoredTxDB.Store(h[:], tx); err != nil {
+			if err := eth.txDB.storeMonitoredTx(h, tx); err != nil {
 				t.Fatalf("%s: error storing monitored tx: %v", test.name, err)
 			}
 		}
+
+		// clear the monitored txs after each test
+		defer func() {
+			storedTxs, err := eth.txDB.getMonitoredTxs()
+			if err != nil {
+				t.Fatalf("%s: failed to load stored txs", test.name)
+			}
+			storedTxHashes := make([]common.Hash, 0, len(storedTxs))
+			for h := range storedTxs {
+				storedTxHashes = append(storedTxHashes, h)
+			}
+			err = eth.txDB.removeMonitoredTxs(storedTxHashes)
+			if err != nil {
+				t.Fatalf("%s: failed to remove stored txs", test.name)
+			}
+		}()
 
 		result, err := wi.ConfirmRedemption(test.coinID, test.redemption, 0)
 		if test.expectErr {
@@ -4744,7 +5069,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			if test.expectSwapRefundedErr && !errors.Is(asset.ErrSwapRefunded, err) {
 				t.Fatalf("%s: expected swap refunded error but got %v", test.name, err)
 			}
-			continue
+			return
 		}
 		if err != nil {
 			t.Fatalf("%s: unexpected error %v", test.name, err)
@@ -4803,7 +5128,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			}
 			return true
 		}
-		storedTxs, err := loadMonitoredTxs(eth.monitoredTxDB)
+		storedTxs, err := eth.txDB.getMonitoredTxs()
 		if err != nil {
 			t.Fatalf("%s: failed to load stored txs", test.name)
 		}
@@ -4837,6 +5162,10 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			test.expectedResult.Req != result.Req {
 			t.Fatalf("%s: expected result %+v != result %+v", test.name, test.expectedResult, result)
 		}
+	}
+
+	for _, test := range tests {
+		runTest(test)
 	}
 }
 
@@ -5245,8 +5574,10 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		wantErr:      true,
 	}}
 	for _, test := range tests {
-		node.receipt = test.receipt
+		var txHash common.Hash
+		copy(txHash[:], test.coinID)
 		node.receiptTx = test.receiptTx
+		node.receipt = test.receipt
 		node.receiptErr = test.receiptErr
 		node.hdrByHash = test.hdrByHash
 		node.bestHdr = test.bestHdr
