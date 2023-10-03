@@ -68,38 +68,36 @@ type procOpts struct {
 
 // dexConf is the data that is required to setup the dex.
 type dexConf struct {
-	DataDir           string
-	Network           dex.Network
-	DBName            string
-	DBUser            string
-	DBPass            string
-	DBHost            string
-	DBPort            uint16
-	ShowPGConfig      bool
-	MarketsConfPath   string
-	CancelThreshold   float64
-	FreeCancels       bool
-	MaxUserCancels    uint32
-	PenaltyThreshold  uint32
-	InitTakerLotLimit uint32
-	AbsTakerLotLimit  uint32
-	DEXPrivKeyPath    string
-	RPCCert           string
-	RPCKey            string
-	NoTLS             bool
-	RPCListen         []string
-	HiddenService     string
-	BroadcastTimeout  time.Duration
-	TxWaitExpiration  time.Duration
-	AltDNSNames       []string
-	LogMaker          *dex.LoggerMaker
-	SigningKeyPW      []byte
-	AdminSrvOn        bool
-	AdminSrvAddr      string
-	AdminSrvPW        []byte
-	NoResumeSwaps     bool
-	DisableDataAPI    bool
-	NodeRelayAddr     string
+	DataDir          string
+	Network          dex.Network
+	DBName           string
+	DBUser           string
+	DBPass           string
+	DBHost           string
+	DBPort           uint16
+	ShowPGConfig     bool
+	MarketsConfPath  string
+	CancelThreshold  float64
+	FreeCancels      bool
+	MaxUserCancels   uint32
+	PenaltyThreshold uint32
+	DEXPrivKeyPath   string
+	RPCCert          string
+	RPCKey           string
+	NoTLS            bool
+	RPCListen        []string
+	HiddenService    string
+	BroadcastTimeout time.Duration
+	TxWaitExpiration time.Duration
+	AltDNSNames      []string
+	LogMaker         *dex.LoggerMaker
+	SigningKeyPW     []byte
+	AdminSrvOn       bool
+	AdminSrvAddr     string
+	AdminSrvPW       []byte
+	NoResumeSwaps    bool
+	DisableDataAPI   bool
+	NodeRelayAddr    string
 }
 
 type flagsData struct {
@@ -128,12 +126,10 @@ type flagsData struct {
 	TxWaitExpiration time.Duration `long:"txwaitexpiration" description:"How long the server will search for a client-reported transaction before responding to the client with an error indicating that it was not found. This should ideally be less than half of swaps BroadcastTimeout to allow for more than one retry of the client's request (default: 2 minutes)."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
-	CancelThreshold   float64 `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
-	FreeCancels       bool    `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders)."`
-	MaxUserCancels    uint32  `long:"maxepochcancels" description:"The maximum number of cancel orders allowed for a user in a given epoch."`
-	PenaltyThreshold  uint32  `long:"penaltythreshold" description:"The accumulated penalty score at which when a bond is revoked."`
-	InitTakerLotLimit uint32  `long:"inittakerlotlimit" description:"The starting limit on the number of settling lots per-market for new users. Used to limit size of likely-taker orders."`
-	AbsTakerLotLimit  uint32  `long:"abstakerlotlimit" description:"The upper limit on the number of settling lots per-market for a user regardless of their swap history. Used to limit size of likely-taker orders."`
+	CancelThreshold  float64 `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
+	FreeCancels      bool    `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders)."`
+	MaxUserCancels   uint32  `long:"maxepochcancels" description:"The maximum number of cancel orders allowed for a user in a given epoch."`
+	PenaltyThreshold uint32  `long:"penaltythreshold" description:"The accumulated penalty score at which when a bond is revoked."`
 
 	HTTPProfile bool   `long:"httpprof" short:"p" description:"Start HTTP profiler."`
 	CPUProfile  string `long:"cpuprofile" description:"File for CPU profiling."`
@@ -529,38 +525,36 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	cfg.PGDBName = strings.ReplaceAll(cfg.PGDBName, "{netname}", network.String())
 
 	dexCfg := &dexConf{
-		DataDir:           cfg.DataDir,
-		Network:           network,
-		DBName:            cfg.PGDBName,
-		DBHost:            dbHost,
-		DBPort:            dbPort,
-		DBUser:            cfg.PGUser,
-		DBPass:            cfg.PGPass,
-		ShowPGConfig:      cfg.ShowPGConfig,
-		MarketsConfPath:   cfg.MarketsConfPath,
-		CancelThreshold:   cfg.CancelThreshold,
-		MaxUserCancels:    cfg.MaxUserCancels,
-		FreeCancels:       cfg.FreeCancels,
-		PenaltyThreshold:  cfg.PenaltyThreshold,
-		InitTakerLotLimit: cfg.InitTakerLotLimit,
-		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
-		DEXPrivKeyPath:    cfg.DEXPrivKeyPath,
-		RPCCert:           cfg.RPCCert,
-		RPCKey:            cfg.RPCKey,
-		NoTLS:             cfg.NoTLS,
-		RPCListen:         RPCListen,
-		HiddenService:     HiddenService,
-		BroadcastTimeout:  cfg.BroadcastTimeout,
-		TxWaitExpiration:  cfg.TxWaitExpiration,
-		AltDNSNames:       cfg.AltDNSNames,
-		LogMaker:          logMaker,
-		SigningKeyPW:      []byte(cfg.SigningKeyPassword),
-		AdminSrvAddr:      adminSrvAddr,
-		AdminSrvOn:        cfg.AdminSrvOn,
-		AdminSrvPW:        []byte(cfg.AdminSrvPassword),
-		NoResumeSwaps:     cfg.NoResumeSwaps,
-		DisableDataAPI:    cfg.DisableDataAPI,
-		NodeRelayAddr:     cfg.NodeRelayAddr,
+		DataDir:          cfg.DataDir,
+		Network:          network,
+		DBName:           cfg.PGDBName,
+		DBHost:           dbHost,
+		DBPort:           dbPort,
+		DBUser:           cfg.PGUser,
+		DBPass:           cfg.PGPass,
+		ShowPGConfig:     cfg.ShowPGConfig,
+		MarketsConfPath:  cfg.MarketsConfPath,
+		CancelThreshold:  cfg.CancelThreshold,
+		MaxUserCancels:   cfg.MaxUserCancels,
+		FreeCancels:      cfg.FreeCancels,
+		PenaltyThreshold: cfg.PenaltyThreshold,
+		DEXPrivKeyPath:   cfg.DEXPrivKeyPath,
+		RPCCert:          cfg.RPCCert,
+		RPCKey:           cfg.RPCKey,
+		NoTLS:            cfg.NoTLS,
+		RPCListen:        RPCListen,
+		HiddenService:    HiddenService,
+		BroadcastTimeout: cfg.BroadcastTimeout,
+		TxWaitExpiration: cfg.TxWaitExpiration,
+		AltDNSNames:      cfg.AltDNSNames,
+		LogMaker:         logMaker,
+		SigningKeyPW:     []byte(cfg.SigningKeyPassword),
+		AdminSrvAddr:     adminSrvAddr,
+		AdminSrvOn:       cfg.AdminSrvOn,
+		AdminSrvPW:       []byte(cfg.AdminSrvPassword),
+		NoResumeSwaps:    cfg.NoResumeSwaps,
+		DisableDataAPI:   cfg.DisableDataAPI,
+		NodeRelayAddr:    cfg.NodeRelayAddr,
 	}
 
 	opts := &procOpts{

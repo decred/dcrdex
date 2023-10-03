@@ -6629,6 +6629,13 @@ func (dc *dexConnection) updateReputation(
 
 }
 
+func (dc *dexConnection) maxScore() uint32 {
+	if maxScore := dc.config().MaxScore; maxScore > 0 {
+		return maxScore
+	}
+	return 60 // Assume the default for < v2 servers.
+}
+
 // authDEX authenticates the connection for a DEX.
 func (c *Core) authDEX(dc *dexConnection) error {
 	bondAssets, bondExpiry := dc.bondAssets()
@@ -8711,10 +8718,18 @@ func handleScoreChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	if err != nil {
 		return newError(signatureErr, "handleScoreChangeMsg: DEX signature validation error: %v", err) // warn?
 	}
+
+	r := scoreChange.Reputation
+	tier := r.EffectiveTier()
+
 	dc.acct.authMtx.Lock()
-	dc.updateReputation(&scoreChange.Reputation, scoreChange.Reputation.EffectiveTier() /* unused. this note is >= v2 */, nil, nil)
+	dc.updateReputation(&r, tier /* unused. this note is >= v2 */, nil, nil)
 	dc.acct.authMtx.Unlock()
-	c.notify(newReputationNote(dc.acct.host, scoreChange.Reputation))
+
+	dc.log.Debugf("Score changed at %s. New score is %d / %d, tier = %d, penalties = %d",
+		dc.acct.host, r.Score, dc.maxScore(), tier, r.Penalties)
+
+	c.notify(newReputationNote(dc.acct.host, r))
 	return nil
 }
 

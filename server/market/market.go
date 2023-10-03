@@ -58,7 +58,6 @@ const (
 type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet)
 	CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error
-	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
 	ChainsSynced(base, quote uint32) (bool, error)
 }
 
@@ -86,16 +85,17 @@ type Balancer interface {
 
 // Config is the Market configuration.
 type Config struct {
-	MarketInfo      *dex.MarketInfo
-	Storage         Storage
-	Swapper         Swapper
-	AuthManager     AuthManager
-	FeeFetcherBase  FeeFetcher
-	CoinLockerBase  coinlock.CoinLocker
-	FeeFetcherQuote FeeFetcher
-	CoinLockerQuote coinlock.CoinLocker
-	DataCollector   DataCollector
-	Balancer        Balancer
+	MarketInfo       *dex.MarketInfo
+	Storage          Storage
+	Swapper          Swapper
+	AuthManager      AuthManager
+	FeeFetcherBase   FeeFetcher
+	CoinLockerBase   coinlock.CoinLocker
+	FeeFetcherQuote  FeeFetcher
+	CoinLockerQuote  coinlock.CoinLocker
+	DataCollector    DataCollector
+	Balancer         Balancer
+	CheckParcelLimit func(user account.AccountID, calcParcels MarketParcelCalculator) bool
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -168,6 +168,8 @@ type Market struct {
 	// Data API
 	dataCollector DataCollector
 	lastRate      uint64
+
+	checkParcelLimit func(user account.AccountID, calcParcels MarketParcelCalculator) bool
 }
 
 // Storage is the DB interface required by Market.
@@ -190,8 +192,6 @@ func NewMarket(cfg *Config) (*Market, error) {
 	if err := storage.LastErr(); err != nil {
 		return nil, err
 	}
-
-	log.Infof("Allowing %d lots on the book per user.", mktInfo.BookedLotLimit)
 
 	// Load existing book orders from the DB.
 	base, quote := mktInfo.Base, mktInfo.Quote
@@ -500,6 +500,7 @@ ordersLoop:
 		quoteFeeFetcher:  cfg.FeeFetcherQuote,
 		dataCollector:    cfg.DataCollector,
 		lastRate:         lastEpochEndRate,
+		checkParcelLimit: cfg.CheckParcelLimit,
 	}, nil
 }
 
@@ -1689,6 +1690,80 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 	}
 }
 
+func (m *Market) analysisHelpers() (
+	likelyTaker func(ord order.Order) bool,
+	baseQty func(ord order.Order) uint64,
+) {
+	bestBuy, midGap, bestSell := m.rates()
+	likelyTaker = func(ord order.Order) bool {
+		lo, ok := ord.(*order.LimitOrder)
+		if !ok || lo.Force == order.ImmediateTiF {
+			return true
+		}
+		// Must cross the spread to be a taker (not so conservative).
+		switch {
+		case midGap == 0:
+			return false // empty market: could be taker, but assume not
+		case lo.Sell:
+			return lo.Rate <= bestBuy
+		default:
+			return lo.Rate >= bestSell
+		}
+	}
+	baseQty = func(ord order.Order) uint64 {
+		if ord.Type() == order.CancelOrderType {
+			return 0
+		}
+		qty := ord.Trade().Quantity
+		if ord.Type() == order.MarketOrderType && !ord.Trade().Sell {
+			// Market buy qty is in quote asset. Convert to base.
+			if midGap == 0 {
+				qty = m.marketInfo.LotSize // no orders on the book; call it 1 lot
+			} else {
+				qty = calc.QuoteToBase(midGap, qty)
+			}
+		}
+		return qty
+	}
+	return
+}
+
+// ParcelSize returns market's configured parcel size.
+func (m *Market) ParcelSize() uint32 {
+	return m.marketInfo.ParcelSize
+}
+
+// Parcels calculates the total parcels for the market with the specified
+// settling quantity. Parcels is used as part of order validation for global
+// parcel limits. Parcels is not called for the market for which the order is
+// for, which will use m.checkParcelLimit to validate in processOrder.
+func (m *Market) Parcels(user account.AccountID, settlingQty uint64) float64 {
+	return m.parcels(user, settlingQty)
+}
+
+func (m *Market) parcels(user account.AccountID, addParcelWeight uint64) float64 {
+	likelyTaker, baseQty := m.analysisHelpers()
+	var takerQty, makerQty uint64
+	m.epochMtx.RLock()
+	for _, epOrd := range m.epochOrders {
+		if epOrd.User() != user || epOrd.Type() == order.CancelOrderType {
+			continue
+		}
+
+		// Even if standing, may count as taker for purposes of taker qty limit.
+		if likelyTaker(epOrd) {
+			takerQty += baseQty(epOrd)
+		} else {
+			makerQty += baseQty(epOrd)
+		}
+	}
+	m.epochMtx.RUnlock()
+
+	bookedBuyAmt, bookedSellAmt, _, _ := m.book.UserOrderTotals(user)
+	makerQty += bookedBuyAmt + bookedSellAmt
+	return calc.Parcels(makerQty+addParcelWeight, takerQty, m.marketInfo.LotSize, m.marketInfo.ParcelSize)
+}
+
 // processOrder performs the following actions:
 // 1. Verify the order is new and that none of the backing coins are locked.
 // 2. Lock the order's coins.
@@ -1714,6 +1789,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	ord := rec.order
 	oid := ord.ID()
 	user := ord.User()
+
 	commit := ord.Commitment()
 	m.epochMtx.RLock()
 	otherOid, found := m.epochCommitments[commit]
@@ -1723,84 +1799,6 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			oid, commit, otherOid)
 		errChan <- ErrInvalidCommitment
 		return nil
-	}
-
-	// Whether an order is a taker depends on type, and for limit orders it
-	// depends on force and rates.
-	bestBuy, midGap, bestSell := m.rates()
-	likelyTaker := func(ord order.Order) bool {
-		lo, ok := ord.(*order.LimitOrder)
-		if !ok || lo.Force == order.ImmediateTiF {
-			return true
-		}
-		// Must cross the spread to be a taker (not so conservative).
-		switch {
-		case midGap == 0:
-			return false // empty market: could be taker, but assume not
-		case lo.Sell:
-			return lo.Rate <= bestBuy
-		default:
-			return lo.Rate >= bestSell
-		}
-	}
-	// Note: bestSell and bestBuy do not include other epoch orders with
-	// standing force that might become booked. Doing so would only make this
-	// order less likely to be assumed a taker by moving bestSell down or
-	// bestBuy up, so be conservative and only consider current book.
-
-	// helper to compute an order's quantity in base asset units, using current
-	// midGap rate for market buys.
-	baseQty := func(ord order.Order) uint64 {
-		if ord.Type() == order.CancelOrderType {
-			return 0
-		}
-		qty := ord.Trade().Quantity
-		if ord.Type() == order.MarketOrderType && !ord.Trade().Sell {
-			// Market buy qty is in quote asset. Convert to base.
-			if midGap == 0 {
-				qty = m.marketInfo.LotSize // no orders on the book; call it 1 lot
-			} else {
-				qty = calc.QuoteToBase(midGap, qty)
-			}
-		}
-		return qty
-	}
-
-	// Include user's own epoch orders when enforcing both booked order and
-	// taker settling amount limits.
-	var userStandingEpochQty, userTakerEpochQty uint64
-	m.epochMtx.RLock()
-	for _, epOrd := range m.epochOrders {
-		if epOrd.User() != user || epOrd.Type() == order.CancelOrderType {
-			continue
-		}
-
-		// For purposes of the user's book qty limit, assumed standing limits
-		// will be booked.
-		if lo, ok := epOrd.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
-			userStandingEpochQty += lo.Quantity
-		}
-
-		// Even if standing, may count as taker for purposes of taker qty limit.
-		if likelyTaker(epOrd) {
-			userTakerEpochQty += baseQty(epOrd)
-		}
-	}
-	m.epochMtx.RUnlock()
-
-	// Now that epoch orders are considered, check this candidate order.
-	if lo, ok := ord.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
-		// Check the user's current booked amount.
-		bookedBuyAmt, bookedSellAmt, _, _ := m.book.UserOrderTotals(user)
-		bookedAmt := bookedBuyAmt + bookedSellAmt + userStandingEpochQty
-		qty := lo.Quantity
-		if (qty+bookedAmt)/m.marketInfo.LotSize > uint64(m.marketInfo.BookedLotLimit) {
-			log.Debugf("Rejecting user %v order %v: too much in booked orders", user, oid)
-			errChan <- dex.NewError(ErrQuantityTooHigh,
-				fmt.Sprintf("Order quantity %d (%d lots) too large. User book limit is %d lots, and you have %d lots booked already).",
-					qty, qty/m.marketInfo.LotSize, uint64(m.marketInfo.BookedLotLimit), bookedAmt/m.marketInfo.LotSize))
-			return nil
-		}
 	}
 
 	// Verify that another cancel order targeting the same order is not already
@@ -1835,39 +1833,18 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 		epochGap = int32(epoch.Epoch - loTime.UnixMilli()/epoch.Duration)
 
-	} else if likelyTaker(ord) { // Likely-taker trade order. Check the quantity against user's limit.
-		// NOTE: We can entirely change this so that the taker limit is not
-		// based on just this market. Also so that it's based on lots rather
-		// than amount, but we risk comparing apples to oranges. Further, I'm
-		// open to going even simpler and scaling an absolute max by the user's
-		// current score, but that takes swapped value entirely out of the
-		// picture; adding swapped value into the users score is another
-		// possibility, but which has the same units selection challenge.
-
-		// Swapper knows how much is in active swaps for this asset pair.
-		amtInSwaps, activeSwaps := m.swapper.UserSwappingAmt(user, ord.Base(), ord.Quote()) // swapper knows nothing of lots, and we know nothing of other markets
-
-		// Get the settling amount limit in units of the base asset from the
-		// AuthManager, which tracks the user's swap outcome amount history.
-		userLimit := m.auth.UserSettlingLimit(user, m.marketInfo) // hard to make this lots across all markets, partly because db stores base value
-		// Subtract the user's total active amount from their limit.
-		orderQtyAllowed := userLimit - int64(amtInSwaps+userTakerEpochQty)
-
-		qty := baseQty(ord)
-		symb := dex.BipIDSymbol(m.marketInfo.Base)
-		log.Debugf("User placing likely-taker order on market %s worth %d (%s units) of %d allowed. "+
-			"User has %d (%s units) in %d active swaps, %d in epoch taker orders.",
-			m.marketInfo.Name, qty, symb, orderQtyAllowed,
-			amtInSwaps, symb, activeSwaps, userTakerEpochQty)
-
-		if int64(qty) > orderQtyAllowed {
-			log.Infof("Rejecting user %v likely-taker order %v: qty %d > %d allowed "+
-				"(already have %d swapping and %d epoch takers with %d limit)",
-				user, oid, qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty, userLimit)
-			errChan <- dex.NewError(ErrQuantityTooHigh,
-				fmt.Sprintf("Order quantity %d too large. Current likely-taker order limit: %d "+
-					"(you have %d settling already and %d in epoch taker orders)",
-					qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty))
+	} else { // Not a cancel order, check user limits.
+		likelyTaker, baseQty := m.analysisHelpers()
+		orderWeight := baseQty(ord)
+		if likelyTaker(ord) {
+			orderWeight *= 2
+		}
+		calcParcels := func(settlingWeight uint64) float64 {
+			return m.parcels(user, settlingWeight+orderWeight)
+		}
+		if !m.checkParcelLimit(user, calcParcels) {
+			log.Debugf("Received order %s that pushed user over the parcel limit", oid)
+			errChan <- ErrQuantityTooHigh
 			return nil
 		}
 	}

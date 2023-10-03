@@ -135,6 +135,11 @@ type TAuth struct {
 	suspensions        map[account.AccountID]bool
 	canceledOrder      order.OrderID
 	cancelOrder        order.OrderID
+	rep                struct {
+		tier            int64
+		score, maxScore int32
+		err             error
+	}
 }
 
 func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
@@ -246,8 +251,11 @@ func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value
 }
 func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 }
-func (a *TAuth) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
-	return dcrLotSize * initLotLimit // everyone gets a clean slate
+func (a *TAuth) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
+	if a.rep.maxScore == 0 {
+		return 1, 30, 60, a.rep.err
+	}
+	return a.rep.tier, a.rep.score, a.rep.maxScore, a.rep.err
 }
 func (a *TAuth) AcctStatus(user account.AccountID) (connected bool, tier int64) {
 	return true, 1
@@ -274,6 +282,21 @@ type TMarketTunnel struct {
 	acctLots    uint64
 	acctRedeems int
 	base, quote uint32
+	parcels     float64
+}
+
+func tNewMarket(auth *TAuth) *TMarketTunnel {
+	return &TMarketTunnel{
+		adds:       make([]*orderRecord, 0),
+		auth:       auth,
+		midGap:     btcRateStep * 1000,
+		lotSize:    dcrLotSize,
+		rateStep:   btcRateStep,
+		mbBuffer:   1.5, // 150% of lot size
+		cancelable: true,
+		epochIdx:   1573773894,
+		epochDur:   60_000,
+	}
 }
 
 func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
@@ -358,6 +381,10 @@ func (m *TMarketTunnel) Base() uint32 {
 
 func (m *TMarketTunnel) Quote() uint32 {
 	return m.quote
+}
+
+func (m *TMarketTunnel) Parcels(account.AccountID, uint64) float64 {
+	return m.parcels
 }
 
 type TBackend struct {
@@ -533,6 +560,7 @@ type tOrderRig struct {
 	market          *TMarketTunnel
 	router          *OrderRouter
 	matchNegotiator *tMatchNegotiator
+	swapper         *tMatchSwapper
 }
 
 func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin {
@@ -656,6 +684,17 @@ func (s *tFeeSource) LastRate(assetID uint32) (feeRate uint64) {
 	return uint64(s.feeMinus10 + 10)
 }
 
+type tMatchSwapper struct {
+	qtys map[[2]uint32]uint64
+}
+
+func (s *tMatchSwapper) UnsettledQuantity(user account.AccountID) map[[2]uint32]uint64 {
+	if s.qtys != nil {
+		return s.qtys
+	}
+	return make(map[[2]uint32]uint64)
+}
+
 func TestMain(m *testing.M) {
 	logger := slog.NewBackend(os.Stdout).Logger("MARKETTEST")
 	logger.SetLevel(slog.LevelDebug)
@@ -673,6 +712,8 @@ func TestMain(m *testing.M) {
 		preimagesByOrdID: make(map[string]order.Preimage),
 	}
 	matchNegotiator := tNewMatchNegotiator()
+	swapper := &tMatchSwapper{}
+
 	oRig = &tOrderRig{
 		btc:     tNewUTXOBackend(),
 		dcr:     tNewUTXOBackend(),
@@ -682,19 +723,10 @@ func TestMain(m *testing.M) {
 			acct:    ordertest.NextAccount(),
 			privKey: privKey,
 		},
-		auth: auth,
-		market: &TMarketTunnel{
-			adds:       make([]*orderRecord, 0),
-			auth:       auth,
-			midGap:     btcRateStep * 1000,
-			lotSize:    dcrLotSize,
-			rateStep:   btcRateStep,
-			mbBuffer:   1.5, // 150% of lot size
-			cancelable: true,
-			epochIdx:   1573773894,
-			epochDur:   60_000,
-		},
+		auth:            auth,
+		market:          tNewMarket(auth),
 		matchNegotiator: matchNegotiator,
+		swapper:         swapper,
 	}
 	assetDCR.Backend = oRig.dcr
 	assetBTC.Backend = oRig.btc
@@ -721,11 +753,12 @@ func TestMain(m *testing.M) {
 		panic("NewDEXBalancer error:" + err.Error())
 	}
 	oRig.router = NewOrderRouter(&OrderRouterConfig{
-		AuthManager: oRig.auth,
-		Assets:      assets,
-		Markets:     tunnels,
-		FeeSource:   &tFeeSource{},
-		DEXBalancer: balancer,
+		AuthManager:  oRig.auth,
+		Assets:       assets,
+		Markets:      tunnels,
+		FeeSource:    &tFeeSource{},
+		DEXBalancer:  balancer,
+		MatchSwapper: swapper,
 	})
 	rig = newTestRig()
 	src1 := rig.source1
@@ -2165,4 +2198,102 @@ func TestPriceFeed(t *testing.T) {
 	if spot.Vol24 != 12345 {
 		t.Fatal("update volume not communicated")
 	}
+}
+
+func TestParcelLimits(t *testing.T) {
+	mkt0 := tNewMarket(oRig.auth)
+	mkt1 := tNewMarket(oRig.auth)
+	mkt2 := tNewMarket(oRig.auth)
+
+	oRig.router.tunnels = map[string]MarketTunnel{
+		"dcr_btc":      mkt0,
+		"dcr_eth":      mkt1,
+		"firo_polygon": mkt2,
+	}
+
+	dcrID, btcID := uint32(42), uint32(0)
+
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			BaseAsset:  dcrID,
+			QuoteAsset: btcID,
+			OrderType:  order.LimitOrderType,
+		},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: dcrLotSize,
+		},
+		Rate:  dcrRateStep * 100,
+		Force: order.StandingTiF,
+	}
+
+	oRecord := &orderRecord{order: lo}
+
+	lotSize := mkt0.LotSize()
+	calcParcels := func(settlingWeight uint64) float64 {
+		return calc.Parcels(settlingWeight+lo.Quantity, 0, lotSize, 1)
+	}
+
+	ensureSuccess := func() {
+		t.Helper()
+		// Single lot should definitely be ok.
+		if ok := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", calcParcels); !ok {
+			t.Fatalf("not ok")
+		}
+	}
+
+	ensureErr := func() {
+		t.Helper()
+		if ok := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", calcParcels); ok {
+			t.Fatalf("not error")
+		}
+	}
+
+	// Single lot should definitely be ok.
+	ensureSuccess()
+
+	// User at tier 0 cannot place orders
+	rep := &oRig.auth.rep
+	rep.maxScore = 60
+	rep.tier = 0
+	ensureErr()
+	rep.tier = 1
+
+	var maxParcels uint64 = dex.PerTierBaseParcelLimit // based on score of 0
+	maxMakerQty := lotSize * maxParcels
+
+	lo.Quantity = maxMakerQty
+	ensureSuccess()
+
+	lo.Quantity = maxMakerQty + lotSize
+	ensureErr()
+
+	// Max out score
+	rep.score = rep.maxScore
+	maxParcels *= dex.ParcelLimitScoreMultiplier
+	parcelQty := lotSize
+	maxMakerQty = parcelQty * maxParcels
+
+	// too much
+	lo.Quantity = maxMakerQty + lotSize
+	ensureErr()
+
+	// max ok
+	lo.Quantity = maxMakerQty
+	ensureSuccess()
+
+	// Adding some settling quantity.
+	oRig.swapper.qtys = map[[2]uint32]uint64{
+		{dcrID, btcID}: lotSize,
+	}
+	ensureErr()
+
+	// Parcels from another market lowers our limit for this order.
+	mkt1.parcels = 1
+	maxMakerQty = (maxParcels-1)*parcelQty - lotSize /* settling */
+	lo.Quantity = maxMakerQty
+	ensureSuccess()
+
+	lo.Quantity += lotSize
+	ensureErr()
 }

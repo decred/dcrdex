@@ -76,23 +76,21 @@ type RPCConfig = comms.RPCConfig
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
-	DataDir           string
-	LogBackend        *dex.LoggerMaker
-	Markets           []*dex.MarketInfo
-	Assets            []*AssetConf
-	Network           dex.Network
-	DBConf            *DBConf
-	BroadcastTimeout  time.Duration
-	TxWaitExpiration  time.Duration
-	CancelThreshold   float64
-	FreeCancels       bool
-	PenaltyThreshold  uint32
-	InitTakerLotLimit uint32
-	AbsTakerLotLimit  uint32
-	DEXPrivKey        *secp256k1.PrivateKey
-	CommsCfg          *RPCConfig
-	NoResumeSwaps     bool
-	NodeRelayAddr     string
+	DataDir          string
+	LogBackend       *dex.LoggerMaker
+	Markets          []*dex.MarketInfo
+	Assets           []*AssetConf
+	Network          dex.Network
+	DBConf           *DBConf
+	BroadcastTimeout time.Duration
+	TxWaitExpiration time.Duration
+	CancelThreshold  float64
+	FreeCancels      bool
+	PenaltyThreshold uint32
+	DEXPrivKey       *secp256k1.PrivateKey
+	CommsCfg         *RPCConfig
+	NoResumeSwaps    bool
+	NodeRelayAddr    string
 }
 
 type signer struct {
@@ -681,23 +679,21 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	authCfg := auth.Config{
-		Storage:           storage,
-		Signer:            signer{cfg.DEXPrivKey},
-		FeeAddress:        feeAddresser,
-		FeeAssets:         feeAssets,
-		FeeChecker:        feeChecker,
-		BondAssets:        bondAssets,
-		BondTxParser:      bondTxParser,
-		BondChecker:       bondChecker,
-		BondExpiry:        uint64(dex.BondExpiry(cfg.Network)),
-		UserUnbooker:      userUnbookFun,
-		MiaUserTimeout:    cfg.BroadcastTimeout,
-		CancelThreshold:   cfg.CancelThreshold,
-		FreeCancels:       cfg.FreeCancels,
-		PenaltyThreshold:  cfg.PenaltyThreshold,
-		InitTakerLotLimit: cfg.InitTakerLotLimit,
-		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
-		TxDataSources:     txDataSources,
+		Storage:          storage,
+		Signer:           signer{cfg.DEXPrivKey},
+		FeeAddress:       feeAddresser,
+		FeeAssets:        feeAssets,
+		FeeChecker:       feeChecker,
+		BondAssets:       bondAssets,
+		BondTxParser:     bondTxParser,
+		BondChecker:      bondChecker,
+		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)),
+		UserUnbooker:     userUnbookFun,
+		MiaUserTimeout:   cfg.BroadcastTimeout,
+		CancelThreshold:  cfg.CancelThreshold,
+		FreeCancels:      cfg.FreeCancels,
+		PenaltyThreshold: cfg.PenaltyThreshold,
+		TxDataSources:    txDataSources,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
@@ -768,6 +764,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	// Markets
+	var orderRouter *market.OrderRouter
 	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
 		// nilness of the coin locker signals account-based asset.
@@ -790,6 +787,9 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			CoinLockerQuote: quoteCoinLocker,
 			DataCollector:   dataAPI,
 			Balancer:        dexBalancer,
+			CheckParcelLimit: func(user account.AccountID, calcParcels market.MarketParcelCalculator) bool {
+				return orderRouter.CheckParcelLimit(user, mktInf.Name, calcParcels)
+			},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
@@ -840,6 +840,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			RateStep:        mkt.RateStep(),
 			EpochLen:        mkt.EpochDuration(),
 			MarketBuyBuffer: mkt.MarketBuyBuffer(),
+			ParcelSize:      mkt.ParcelSize(),
 			MarketStatus: msgjson.MarketStatus{
 				StartEpoch: uint64(startEpochIdx),
 			},
@@ -859,12 +860,13 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	// Order router
-	orderRouter := market.NewOrderRouter(&market.OrderRouterConfig{
-		Assets:      backedAssets,
-		AuthManager: authMgr,
-		Markets:     marketTunnels,
-		FeeSource:   feeMgr,
-		DEXBalancer: dexBalancer,
+	orderRouter = market.NewOrderRouter(&market.OrderRouterConfig{
+		Assets:       backedAssets,
+		AuthManager:  authMgr,
+		Markets:      marketTunnels,
+		FeeSource:    feeMgr,
+		DEXBalancer:  dexBalancer,
+		MatchSwapper: swapper,
 	})
 	startSubSys("OrderRouter", orderRouter)
 

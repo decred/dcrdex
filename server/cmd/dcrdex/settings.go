@@ -17,14 +17,14 @@ import (
 
 type marketConfig struct {
 	Markets []*struct {
-		Base           string  `json:"base"`
-		Quote          string  `json:"quote"`
-		LotSize        uint64  `json:"lotSize"`
-		RateStep       uint64  `json:"rateStep"`
-		Duration       uint64  `json:"epochDuration"`
-		MBBuffer       float64 `json:"marketBuyBuffer"`
-		BookedLotLimit uint32  `json:"userBookedLotLimit"`
-		Disabled       bool    `json:"disabled"`
+		Base       string  `json:"base"`
+		Quote      string  `json:"quote"`
+		LotSize    uint64  `json:"lotSize"`
+		ParcelSize uint32  `json:"parcelSize"`
+		RateStep   uint64  `json:"rateStep"`
+		Duration   uint64  `json:"epochDuration"`
+		MBBuffer   float64 `json:"marketBuyBuffer"`
+		Disabled   bool    `json:"disabled"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.AssetConf `json:"assets"`
 }
@@ -121,24 +121,24 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 		}
 		baseConf, ok := conf.Assets[mktConf.Base]
 		if !ok {
-			return nil, nil, fmt.Errorf("Missing configuration for asset %s", mktConf.Base)
+			return nil, nil, fmt.Errorf("missing configuration for asset %s", mktConf.Base)
 		}
 		quoteConf, ok := conf.Assets[mktConf.Quote]
 		if !ok {
-			return nil, nil, fmt.Errorf("Missing configuration for asset %s", mktConf.Quote)
+			return nil, nil, fmt.Errorf("missing configuration for asset %s", mktConf.Quote)
 		}
 
 		baseNet, err := dex.NetFromString(baseConf.Network)
 		if err != nil {
-			return nil, nil, fmt.Errorf("Unrecognized network %s", baseConf.Network)
+			return nil, nil, fmt.Errorf("unrecognized network %s", baseConf.Network)
 		}
 		quoteNet, err := dex.NetFromString(quoteConf.Network)
 		if err != nil {
-			return nil, nil, fmt.Errorf("Unrecognized network %s", quoteConf.Network)
+			return nil, nil, fmt.Errorf("unrecognized network %s", quoteConf.Network)
 		}
 
 		if baseNet != quoteNet {
-			return nil, nil, fmt.Errorf("Assets are for different networks (%s and %s)",
+			return nil, nil, fmt.Errorf("assets are for different networks (%s and %s)",
 				baseConf.Network, quoteConf.Network)
 		}
 
@@ -146,13 +146,14 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 			continue
 		}
 
+		if mktConf.ParcelSize == 0 {
+			return nil, nil, fmt.Errorf("parcel size cannot be zero")
+		}
+
 		mkt, err := dex.NewMarketInfoFromSymbols(baseConf.Symbol, quoteConf.Symbol,
-			mktConf.LotSize, mktConf.RateStep, mktConf.Duration, mktConf.MBBuffer)
+			mktConf.LotSize, mktConf.RateStep, mktConf.Duration, mktConf.ParcelSize, mktConf.MBBuffer)
 		if err != nil {
 			return nil, nil, err
-		}
-		if mktConf.BookedLotLimit != 0 {
-			mkt.BookedLotLimit = mktConf.BookedLotLimit
 		}
 		markets = append(markets, mkt)
 	}

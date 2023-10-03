@@ -242,11 +242,9 @@ type AuthManager struct {
 	feeAddress func(assetID uint32) string  // DEPRECATED (V0PURGE)
 	feeAssets  map[uint32]*msgjson.FeeAsset // DEPRECATED (V0PURGE)
 
-	freeCancels       bool
-	penaltyThreshold  int32
-	cancelThresh      float64
-	initTakerLotLimit int64
-	absTakerLotLimit  int64
+	freeCancels      bool
+	penaltyThreshold int32
+	cancelThresh     float64
 
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
@@ -412,19 +410,7 @@ type Config struct {
 	// PenaltyThreshold defines the score deficit at which a user's bond is
 	// revoked.
 	PenaltyThreshold uint32
-
-	// InitTakerLotLimit is the number of lots per-market a new user is
-	// permitted to have in active orders and swaps.
-	InitTakerLotLimit uint32
-	// AbsTakerLotLimit is a cap on the per-market taker lot limit regardless of
-	// how good the user's swap history is.
-	AbsTakerLotLimit uint32
 }
-
-const (
-	defaultInitTakerLotLimit = 6
-	defaultAbsTakerLotLimit  = 375
-)
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
@@ -437,14 +423,6 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	if penaltyThreshold > 0 {
 		penaltyThreshold *= -1
 	}
-	initTakerLotLimit := int64(cfg.InitTakerLotLimit)
-	if initTakerLotLimit == 0 {
-		initTakerLotLimit = defaultInitTakerLotLimit
-	}
-	absTakerLotLimit := int64(cfg.AbsTakerLotLimit)
-	if absTakerLotLimit == 0 {
-		absTakerLotLimit = defaultAbsTakerLotLimit
-	}
 	// Re-key the maps for efficiency in AuthManager methods.
 	feeAssets := make(map[uint32]*msgjson.FeeAsset, len(cfg.FeeAssets))
 	for _, asset := range cfg.FeeAssets {
@@ -456,32 +434,30 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	}
 
 	auth := &AuthManager{
-		storage:           cfg.Storage,
-		signer:            cfg.Signer,
-		bondAssets:        bondAssets,
-		bondExpiry:        time.Duration(cfg.BondExpiry) * time.Second,
-		checkFee:          cfg.FeeChecker,   // e.g. dcr's FeeCoin
-		parseBondTx:       cfg.BondTxParser, // e.g. dcr's ParseBondTx
-		checkBond:         cfg.BondChecker,  // e.g. dcr's BondCoin
-		miaUserTimeout:    cfg.MiaUserTimeout,
-		unbookFun:         cfg.UserUnbooker,
-		feeAddress:        cfg.FeeAddress,
-		feeAssets:         feeAssets,
-		freeCancels:       cfg.FreeCancels,
-		penaltyThreshold:  penaltyThreshold,
-		cancelThresh:      cfg.CancelThreshold,
-		initTakerLotLimit: initTakerLotLimit,
-		absTakerLotLimit:  absTakerLotLimit,
-		latencyQ:          wait.NewTickerQueue(recheckInterval),
-		users:             make(map[account.AccountID]*clientInfo),
-		conns:             make(map[uint64]*clientInfo),
-		unbookers:         make(map[account.AccountID]*time.Timer),
-		feeWaiterIdx:      make(map[account.AccountID]struct{}),
-		bondWaiterIdx:     make(map[string]struct{}),
-		matchOutcomes:     make(map[account.AccountID]*latestMatchOutcomes),
-		preimgOutcomes:    make(map[account.AccountID]*latestPreimageOutcomes),
-		orderOutcomes:     make(map[account.AccountID]*latestOrders),
-		txDataSources:     cfg.TxDataSources,
+		storage:          cfg.Storage,
+		signer:           cfg.Signer,
+		bondAssets:       bondAssets,
+		bondExpiry:       time.Duration(cfg.BondExpiry) * time.Second,
+		checkFee:         cfg.FeeChecker,   // e.g. dcr's FeeCoin
+		parseBondTx:      cfg.BondTxParser, // e.g. dcr's ParseBondTx
+		checkBond:        cfg.BondChecker,  // e.g. dcr's BondCoin
+		miaUserTimeout:   cfg.MiaUserTimeout,
+		unbookFun:        cfg.UserUnbooker,
+		feeAddress:       cfg.FeeAddress,
+		feeAssets:        feeAssets,
+		freeCancels:      cfg.FreeCancels,
+		penaltyThreshold: penaltyThreshold,
+		cancelThresh:     cfg.CancelThreshold,
+		latencyQ:         wait.NewTickerQueue(recheckInterval),
+		users:            make(map[account.AccountID]*clientInfo),
+		conns:            make(map[uint64]*clientInfo),
+		unbookers:        make(map[account.AccountID]*time.Timer),
+		feeWaiterIdx:     make(map[account.AccountID]struct{}),
+		bondWaiterIdx:    make(map[string]struct{}),
+		matchOutcomes:    make(map[account.AccountID]*latestMatchOutcomes),
+		preimgOutcomes:   make(map[account.AccountID]*latestPreimageOutcomes),
+		orderOutcomes:    make(map[account.AccountID]*latestOrders),
+		txDataSources:    cfg.TxDataSources,
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -600,9 +576,6 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 // Run runs the AuthManager until the context is canceled. Satisfies the
 // dex.Runner interface.
 func (auth *AuthManager) Run(ctx context.Context) {
-	log.Infof("Allowing %d settling + taker order lots per market for new users.", auth.initTakerLotLimit)
-	log.Infof("Allowing up to %d settling + taker order lots per market for established users.", auth.absTakerLotLimit)
-
 	auth.wg.Add(1)
 	go func() {
 		defer auth.wg.Done()
@@ -780,17 +753,6 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 	return auth.request(user, msg, f, expireTimeout, expire)
 }
 
-// userSwapAmountHistory retrieves the summary of recent swap amounts for the
-// given user and market. The user should be connected.
-func (auth *AuthManager) userSwapAmountHistory(user account.AccountID, base, quote uint32) *SwapAmounts {
-	auth.violationMtx.Lock()
-	defer auth.violationMtx.Unlock()
-	if outcomes, found := auth.matchOutcomes[user]; found {
-		return outcomes.mktSwapAmounts(base, quote)
-	}
-	return new(SwapAmounts)
-}
-
 const (
 	// These coefficients are used to compute a user's swap limit adjustment via
 	// UserOrderLimitAdjustment based on the cumulative amounts in the different
@@ -800,56 +762,6 @@ const (
 	stuckShortWeight int64 = -3
 	spoofedWeight    int64 = -1
 )
-
-// UserSettlingLimit returns a user's settling amount limit for the given market
-// in units of the base asset. The limit may be negative for accounts with poor
-// swap history. The user must be connected.
-func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
-	// WIP: https://github.com/orgs/decred/projects/2?pane=issue&itemId=2420755
-	// tier is a balance of bonding strength (bondTier) and user score, where
-	// the latter is computed from all violations and match outcomes. See the
-	// integrateOutcomes and tier methods. However, for order size limits, we
-	// consider swap outcome amounts, and consider only swap outcomes (ignore
-	// preimage and cancel rate violations). Thus, we scale the base limit by
-	// bond strength, and balance that with weighted swap history.
-
-	currentLotSize := int64(mkt.LotSize)
-	baseLimit := currentLotSize * auth.initTakerLotLimit
-
-	// The base limit scales with bond strength (plus one if legacy fee paid).
-	// This is particularly important for an account that has offset their
-	// violations with additional bond to gain a positive tier.
-	client := auth.user(user)
-	if client == nil {
-		return 0 // offline
-	}
-	client.mtx.Lock()
-	tier := client.tier
-	baseScale := client.bondTier()
-	if client.legacyFeePaid {
-		baseScale++
-	}
-	client.mtx.Unlock()
-
-	if tier < 1 { // but order router should have checked this
-		return 0
-	}
-
-	// Balance base limit with weighted swap history.
-	sa := auth.userSwapAmountHistory(user, mkt.Base, mkt.Quote)
-	limit := baseLimit*baseScale +
-		sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight +
-		sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
-	// Clamp the effective lot limit.
-	if lotLimit := limit / currentLotSize; lotLimit >= auth.absTakerLotLimit {
-		limit = auth.absTakerLotLimit * currentLotSize
-	} else if lotLimit < 1 {
-		// This possibility is a bad code smell, but for this limit we are
-		// considering swap amounts, unlike with user score.
-		limit = currentLotSize // ensure non-zero tier users are not prohibited
-	}
-	return limit
-}
 
 func (auth *AuthManager) integrateOutcomes(
 	matchOutcomes *latestMatchOutcomes,
@@ -889,7 +801,8 @@ func (auth *AuthManager) userScore(user account.AccountID) (score int32) {
 	return score
 }
 
-func (auth *AuthManager) UserScore(user account.AccountID) (score int32) {
+// UserScore calculates the user's score, loading it from storage if necessary.
+func (auth *AuthManager) UserScore(user account.AccountID) (score int32, err error) {
 	auth.violationMtx.Lock()
 	if _, found := auth.matchOutcomes[user]; found {
 		score = auth.userScore(user)
@@ -901,11 +814,25 @@ func (auth *AuthManager) UserScore(user account.AccountID) (score int32) {
 	// The user is currently not connected and authenticated. When the user logs
 	// back in, their history will be reloaded (loadUserScore) and their tier
 	// recomputed, but compute their score now from DB for the caller.
-	var err error
 	score, err = auth.loadUserScore(user)
 	if err != nil {
-		log.Errorf("Failed to load order and match outcomes for user %v: %v", user, err)
-		return 0
+		return 0, fmt.Errorf("failed to load order and match outcomes for user %v: %v", user, err)
+	}
+	return
+}
+
+// UserReputation calculates some quantities related to the user's reputation.
+// UserReputation satisfies market.AuthManager.
+func (auth *AuthManager) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
+	maxScore = ScoringMatchLimit
+	score, err = auth.UserScore(user)
+	if err != nil {
+		return
+	}
+	r, _, _ := auth.computeUserReputation(user, score)
+	if r != nil {
+		return r.EffectiveTier(), r.Score, ScoringMatchLimit, nil
+
 	}
 	return
 }

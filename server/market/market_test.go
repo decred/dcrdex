@@ -266,6 +266,12 @@ func randomOrderID() order.OrderID {
 	return id
 }
 
+const (
+	tUserTier, tUserScore, tMaxScore = int64(1), int32(30), int32(60)
+)
+
+var parcelLimit = float64(calcParcelLimit(tUserTier, tUserScore, tMaxScore))
+
 func newTestMarket(opts ...any) (*Market, *TArchivist, *TAuth, func(), error) {
 	// The DEX will make MasterCoinLockers for each asset.
 	masterLockerBase := coinlock.NewMasterCoinLocker()
@@ -347,6 +353,10 @@ func newTestMarket(opts ...any) (*Market, *TArchivist, *TAuth, func(), error) {
 		CoinLockerQuote: bookLockerQuote,
 		DataCollector:   new(TCollector),
 		Balancer:        balancer,
+		CheckParcelLimit: func(_ account.AccountID, f MarketParcelCalculator) bool {
+			parcels := f(0)
+			return parcels <= parcelLimit
+		},
 	})
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %w", err)
@@ -841,7 +851,7 @@ func TestMarket_Run(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := 6
+	lots := 1
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
@@ -886,6 +896,10 @@ func TestMarket_Run(t *testing.T) {
 			Force: order.StandingTiF,
 		}
 	}
+
+	parcelQty := uint64(dcrLotSize)
+	maxMakerQty := parcelQty * uint64(parcelLimit)
+	maxTakerQty := maxMakerQty / 2
 
 	var msgID uint64
 	nextMsgID := func() uint64 { msgID++; return msgID }
@@ -938,7 +952,9 @@ func TestMarket_Run(t *testing.T) {
 		t.Errorf("market not running after backend sync finished")
 	}
 
-	// Submit again
+	// Submit again.
+	limit.Quantity = dcrLotSize
+
 	oRecord = newOR()
 	storMsgPI(oRecord.msgID, pi)
 	err = mkt.SubmitOrder(oRecord)
@@ -953,6 +969,7 @@ func TestMarket_Run(t *testing.T) {
 	<-storage.epochInserted
 
 	// Submit an immediate taker sell (taker) over user taker limit
+
 	piSell := test.RandomPreimage()
 	commitSell := piSell.Commit()
 	oRecordSell := newOR()
@@ -960,7 +977,7 @@ func TestMarket_Run(t *testing.T) {
 	loSell := oRecordSell.order.(*order.LimitOrder)
 	loSell.P.Commit = commitSell
 	loSell.Force = order.ImmediateTiF // likely taker
-	loSell.Quantity = dcrLotSize * (initLotLimit + 1)
+	loSell.Quantity = maxTakerQty     // one lot already booked
 
 	storMsgPI(oRecordSell.msgID, pi)
 	err = mkt.SubmitOrder(oRecordSell)
@@ -977,19 +994,19 @@ func TestMarket_Run(t *testing.T) {
 	loBuy := oRecordBuy.order.(*order.LimitOrder)
 	loBuy.P.Commit = commitBuy
 	loBuy.Sell = false
-	loBuy.Quantity = dcrLotSize * (initLotLimit + 1)
+	loBuy.Quantity = maxTakerQty // One lot already booked
 	// rate matches with the booked sell = likely taker
 
-	storMsgPI(oRecordBuy.msgID, pi)
+	storMsgPI(oRecordBuy.msgID, piBuy)
 	err = mkt.SubmitOrder(oRecordBuy)
 	if err == nil {
 		t.Fatal("should have rejected too large likely-taker")
 	}
 
 	// Submit a likely taker with an acceptable limit
-	loSell.Quantity = dcrLotSize * initLotLimit // the limit
+	loSell.Quantity = maxTakerQty - dcrLotSize // the limit
 
-	storMsgPI(oRecordBuy.msgID, pi)
+	storMsgPI(oRecordSell.msgID, piSell)
 	err = mkt.SubmitOrder(oRecordSell)
 	if err != nil {
 		t.Fatalf("should have allowed that likely-taker: %v", err)
@@ -1500,7 +1517,7 @@ func TestMarket_Cancelable(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := 8
+	lots := dex.PerTierBaseParcelLimit
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
