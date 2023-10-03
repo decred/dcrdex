@@ -119,15 +119,19 @@ func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*candles.Cache) e
 	sinceCaches := make(map[uint64]*candles.Cache, 0) // maps oldest end stamp
 	now := uint64(time.Now().UnixMilli())
 	for _, cache := range caches {
-		since := now - (cache.BinSize * candles.CacheSize)
-		since = since - since%cache.BinSize // truncate to first end stamp of the epoch
-		if err = a.loadCandles(base, quote, cache, since); err != nil {
+		if err = a.loadCandles(base, quote, cache, candles.CacheSize); err != nil {
 			return fmt.Errorf("loadCandles: %w", err)
 		}
-		// If we have candles, move our since value up to the next expected epoch stamp.
+
+		var since uint64
 		if len(cache.Candles) > 0 {
+			// If we have candles, set our since value to the next expected
+			// epoch stamp.
 			idx := cache.Last().EndStamp / cache.BinSize
 			since = (idx + 1) * cache.BinSize
+		} else {
+			since = now - (cache.BinSize * candles.CacheSize)
+			since = since - since%cache.BinSize // truncate to first end stamp of the epoch
 		}
 		if since < oldestNeeded {
 			oldestNeeded = since
@@ -228,9 +232,9 @@ func (a *Archiver) InsertCandles(base, quote uint32, dur uint64, cs []*candles.C
 	return nil
 }
 
-// loadCandles loads all candles of a specified duration and market into the
-// provided cache.
-func (a *Archiver) loadCandles(base, quote uint32, cache *candles.Cache, since uint64) error {
+// loadCandles loads the last n candles of a specified duration and market into
+// the provided cache.
+func (a *Archiver) loadCandles(base, quote uint32, cache *candles.Cache, n uint64) error {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return err
@@ -243,7 +247,7 @@ func (a *Archiver) loadCandles(base, quote uint32, cache *candles.Cache, since u
 
 	dur := cache.BinSize
 
-	rows, err := a.db.QueryContext(ctx, stmt, dur, since)
+	rows, err := a.db.QueryContext(ctx, stmt, dur, n)
 	if err != nil {
 		return fmt.Errorf("QueryContext: %w", err)
 	}

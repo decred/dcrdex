@@ -87,8 +87,8 @@ const (
 		high_rate, low_rate, start_rate, end_rate
 	FROM %s
 	WHERE candle_dur = $1
-		AND end_stamp >= $2
-	ORDER BY end_stamp;`
+	ORDER BY end_stamp
+	LIMIT $2;`
 
 	SelectLastEndStamp = `SELECT (end_stamp)
 		FROM %s

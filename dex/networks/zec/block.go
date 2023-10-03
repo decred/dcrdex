@@ -9,7 +9,7 @@ import (
 	"io"
 	"time"
 
-	"decred.org/dcrdex/dex/generics"
+	"decred.org/dcrdex/dex/utils"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -120,6 +120,6 @@ func readInternalByteOrder(r io.Reader, b []byte) error {
 		return err
 	}
 	// Reverse the bytes
-	generics.ReverseSlice(b)
+	utils.ReverseSlice(b)
 	return nil
 }

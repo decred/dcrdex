@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/generics"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // ErrEmptyOrderbook is returned from MidGap when the order book is empty.
@@ -691,7 +691,7 @@ func (ob *OrderBook) AddRecentMatches(matches [][2]int64, ts uint64) []*MatchSum
 	}
 
 	// Put the newest first.
-	generics.ReverseSlice(newMatches)
+	utils.ReverseSlice(newMatches)
 
 	ob.matchSummaryMtx.Lock()
 	defer ob.matchSummaryMtx.Unlock()

@@ -6,8 +6,8 @@ package candles
 import (
 	"time"
 
-	"decred.org/dcrdex/dex/generics"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/utils"
 )
 
 const (
@@ -201,7 +201,7 @@ func (c *Cache) CompletedCandlesSince(lastStoredEndStamp uint64) (cs []*Candle) 
 		}
 		cs = append(cs, candle)
 	}
-	generics.ReverseSlice(cs)
+	utils.ReverseSlice(cs)
 	return
 }
 

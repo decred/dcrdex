@@ -21,6 +21,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/utils"
 	"decred.org/dcrwallet/v3/chain"
 	walleterrors "decred.org/dcrwallet/v3/errors"
 	"decred.org/dcrwallet/v3/p2p"
@@ -1050,7 +1051,7 @@ func (w *spvWallet) ticketsInRange(ctx context.Context, lowerHeight, upperHeight
 	// If this is a mempool scan, we cannot scan backwards, so reverse the
 	// result order.
 	if includeMempool {
-		reverseSlice(tickets)
+		utils.ReverseSlice(tickets)
 	}
 
 	return tickets, nil
@@ -1417,12 +1418,6 @@ func initLogging(netDir string) error {
 	connmgr.UseLogger(logger("CONMGR", slog.LevelInfo))
 
 	return nil
-}
-
-func reverseSlice[T any](s []T) {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
-	}
 }
 
 func ticketSummaryToAssetTicket(ticketSummary *wallet.TicketSummary, hdr *wire.BlockHeader, log dex.Logger) *asset.Ticket {
