@@ -125,7 +125,7 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		t.Fatalf("no error for missing credentials: %v", err)
 	}
 
-	newCreds := func(seed, inner, innerParams, outerParams, encRecoverySeed, encRecoverySeedP bool) *db.PrimaryCredentials {
+	newCreds := func(seed, inner, innerParams, outerParams bool) *db.PrimaryCredentials {
 		creds := &db.PrimaryCredentials{}
 		if seed {
 			creds.EncSeed = []byte("EncSeed")
@@ -148,13 +148,13 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		}
 	}
 
-	ensureErr("no EncSeed", newCreds(false, true, true, true, true, true))
-	ensureErr("no EncInnerKey", newCreds(true, false, true, true, true, true))
-	ensureErr("no InnerKeyParams", newCreds(true, true, false, true, true, true))
-	ensureErr("no OuterKeyParams", newCreds(true, true, true, false, true, true))
+	ensureErr("no EncSeed", newCreds(false, true, true, true))
+	ensureErr("no EncInnerKey", newCreds(true, false, true, true))
+	ensureErr("no InnerKeyParams", newCreds(true, true, false, true))
+	ensureErr("no OuterKeyParams", newCreds(true, true, true, false))
 
 	// Success
-	goodCreds := newCreds(true, true, true, true, true, true)
+	goodCreds := newCreds(true, true, true, true)
 	err = boltdb.SetPrimaryCredentials(goodCreds)
 	if err != nil {
 		t.Fatalf("SetPrimaryCredentials error: %v", err)

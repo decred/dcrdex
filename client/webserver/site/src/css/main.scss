@@ -363,6 +363,10 @@ div.popup-notes {
       }
     }
   }
+
+  &:not(.authed) .authed-only {
+    display: none !important;
+  }
 }
 
 #noteBox {
@@ -546,10 +550,3 @@ sup.token-parent {
   }
 }
 
-#forgotPassBtn {
-  text-decoration: underline;
-
-  &:hover {
-    font-weight: bold;
-  }
-}

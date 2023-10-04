@@ -476,11 +476,11 @@ export default class Application {
     }
     const authed = user && user.authed
     if (!authed) {
-      for (const el of Doc.applySelector(page.profileBox, '.authed-only')) Doc.hide(el)
+      page.profileBox.classList.remove('authed')
       Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
       return
     }
-    for (const el of Doc.applySelector(page.profileBox, '.authed-only')) Doc.show(el)
+    page.profileBox.classList.add('authed')
     Doc.show(page.noteBell, page.walletsMenuEntry)
     Doc.setVis(Object.keys(user.exchanges).length > 0, page.marketsMenuEntry)
   }

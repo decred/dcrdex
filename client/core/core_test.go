@@ -7286,10 +7286,19 @@ func TestResetAppPass(t *testing.T) {
 
 	// Want incorrect seed error.
 	rig.crypter.(*tCrypterSmart).recryptErr = tErr
-	seed = append(seed, randBytes(8)...) // tCrypter is used to encode the orginal seed but we don't need it here, so we need to add 8 bytes to commplete the expected seed lenght(64).
+	// tCrypter is used to encode the orginal seed but we don't need it here, so
+	// we need to add 8 bytes to commplete the expected seed lenght(64).
+	seed = append(seed, randBytes(8)...)
 	err = tCore.ResetAppPass(tPW, seed)
 	if err.Error() != "incorrect seed" {
 		t.Fatalf("wrong error for incorrect seed: %v", err)
+	}
+
+	// ok, no crypter error.
+	rig.crypter.(*tCrypterSmart).recryptErr = nil
+	err = tCore.ResetAppPass(tPW, seed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
