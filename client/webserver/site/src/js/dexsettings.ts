@@ -192,9 +192,7 @@ export default class DexSettingsPage extends BasePage {
     Doc.hide(page.bondCostFiat.parentElement as Element)
     Doc.hide(page.bondReservationAmtFiat.parentElement as Element)
     const assetInfo = xc.assets[bondAssetID]
-    if (!assetInfo) return
     const bondAsset = xc.bondAssets[assetInfo.symbol]
-    if (!bondAsset) return
 
     const bondCost = bondAsset.amount
     const ui = assetInfo.unitInfo
