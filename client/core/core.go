@@ -80,7 +80,7 @@ const (
 	// tier, so we calculate our bonus/revoked tier from the score in the
 	// ConnectResult.
 	defaultPenaltyThreshold = 20
-	
+
 	// seedLen is the length of the generated app seed used for app protection.
 	seedLen = 64
 )
