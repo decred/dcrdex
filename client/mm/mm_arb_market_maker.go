@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package mm
 
 import (
@@ -37,7 +40,7 @@ type ArbMarketMakingPlacement struct {
 // both trades are filled, the bot will earn the profit specified in the
 // configuration.
 //
-// The multiplier is important because it ensures that even some of the
+// The multiplier is important because it ensures that even if some of the
 // trades closest to the mid-gap on the CEX order book are filled before
 // the bot's orders on the DEX are matched, the bot will still be able to
 // earn the expected profit.
@@ -137,7 +140,7 @@ func (a *arbMarketMaker) processDEXMatch(o *core.Order, match *core.Match) {
 	copy(matchID[:], match.MatchID)
 
 	a.matchesMtx.Lock()
-	if _, seen := a.matchesSeen[matchID]; seen {
+	if a.matchesSeen[matchID] {
 		a.matchesMtx.Unlock()
 		return
 	}
@@ -173,11 +176,10 @@ func (a *arbMarketMaker) processDEXMatchNote(note *core.MatchNote) {
 
 	a.ordMtx.RLock()
 	o, found := a.ords[oid]
+	a.ordMtx.RUnlock()
 	if !found {
-		a.ordMtx.RUnlock()
 		return
 	}
-	a.ordMtx.RUnlock()
 
 	a.processDEXMatch(o, note.Match)
 }
@@ -334,7 +336,7 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, c
 			fundingFees = buyFees.funding
 		}
 
-		// Enough balance on the CEX needs to maintained for counter-trades
+		// Enough balance on the CEX needs to be maintained for counter-trades
 		// for each existing trade on the DEX. Here, we reduce the available
 		// balance on the CEX by the amount required for each order on the
 		// DEX books.
@@ -347,7 +349,7 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, c
 				} else {
 					requiredOnCEX = o.lots * mkt.LotSize
 				}
-				if requiredOnCEX < remainingCEXBalance {
+				if requiredOnCEX <= remainingCEXBalance {
 					remainingCEXBalance -= requiredOnCEX
 				} else {
 					log.Warnf("rebalance: not enough CEX balance to cover existing order. cancelling.")
