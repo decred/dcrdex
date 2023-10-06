@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -18,6 +19,7 @@ import (
 )
 
 type extendedWalletTx struct {
+	mtx sync.Mutex
 	*asset.WalletTransaction
 	Confirmed bool `json:"confirmed"`
 	// Create bond transactions are added to the store before
@@ -25,6 +27,8 @@ type extendedWalletTx struct {
 	Submitted bool `json:"submitted"`
 }
 
+// "b" and "c" must be the first two prefixes.
+// getPendingTxs relies on this.
 var blockPrefix = []byte("b")
 var pendingPrefix = []byte("c")
 var lastQueryKey = []byte("lq")
@@ -225,8 +229,8 @@ func (db *badgerTxDB) markTxAsSubmitted(txID dex.Bytes) error {
 			return err
 		}
 
-		var wt extendedWalletTx
-		if err := json.Unmarshal(wtB, &wt); err != nil {
+		var wt *extendedWalletTx
+		if err := json.Unmarshal(wtB, wt); err != nil {
 			return err
 		}
 
