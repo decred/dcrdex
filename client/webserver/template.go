@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 
+	"runtime/debug"
+
 	"decred.org/dcrdex/client/webserver/locales"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -183,6 +185,18 @@ func (t *templates) exec(name string, data any) (string, error) {
 	return page.String(), err
 }
 
+var commit = func() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				return setting.Value
+			}
+		}
+	}
+
+	return ""
+}()
+
 // templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
 	"toUpper": strings.ToUpper,
@@ -210,5 +224,8 @@ var templateFuncs = template.FuncMap{
 			return "wtf"
 		}
 		return parts[0]
+	},
+	"commitHash": func() string {
+		return commit[:8]
 	},
 }
