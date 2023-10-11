@@ -1038,58 +1038,51 @@ export default class MarketsPage extends BasePage {
     const orderQty = order.qty
     const orderRate = order.rate
     const baseWallet = app().assets[this.market.base.id].wallet
+    const quoteWallet = app().assets[mkt.quote.id].wallet
+    if (!baseWallet || !quoteWallet) return
 
-    // market orders
-    if (!order.isLimit) {
-      if (orderQty <= 0) {
-        this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_QTY_ERROR))
-        return
-      }
-      if (order.sell) {
-        this.setOrderBttnEnabled(orderQty <= baseWallet.balance.available, intl.prep(intl.ID_ORDER_BUTTON_SELL_BALANCE_ERROR))
-        return
-      }
+    if (orderQty <= 0) {
+      this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_QTY_ERROR))
+      return
     }
 
-    if (orderQty <= 0 || !orderRate) {
+    // Market orders
+    if (!order.isLimit) {
+      if (order.sell) {
+        this.setOrderBttnEnabled(orderQty <= baseWallet.balance.available, intl.prep(intl.ID_ORDER_BUTTON_SELL_BALANCE_ERROR))
+      } else {
+        this.setOrderBttnEnabled(orderQty <= quoteWallet.balance.available, intl.prep(intl.ID_ORDER_BUTTON_BUY_BALANCE_ERROR))
+      }
+      return
+    }
+
+    if (!orderRate) {
       this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_QTY_RATE_ERROR))
       return
     }
 
+    // Limit sell
     if (order.sell) {
-      const baseWallet = app().assets[mkt.base.id].wallet
-
       if (baseWallet.balance.available < mkt.cfg.lotsize) {
         this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_SELL_BALANCE_ERROR))
         return
       }
-
       if (mkt.maxSell) {
-        if (orderQty > mkt.maxSell.swap.value) {
-          this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_SELL_BALANCE_ERROR))
-          return
-        }
-        this.setOrderBttnEnabled(true)
+        this.setOrderBttnEnabled(orderQty <= mkt.maxSell.swap.value, intl.prep(intl.ID_ORDER_BUTTON_SELL_BALANCE_ERROR))
       }
-    } else {
-      const quoteWallet = app().assets[mkt.quote.id].wallet
-      if (!quoteWallet) return
+      return
+    }
 
-      const rate = this.adjustedRate()
-      const aLot = mkt.cfg.lotsize * (rate / OrderUtil.RateEncodingFactor)
-
-      if (quoteWallet.balance.available < aLot) {
-        this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_BUY_BALANCE_ERROR))
-        return
-      }
-
-      if (mkt.maxBuys[rate]) {
-        if (orderQty > mkt.maxBuys[rate].swap.lots * mkt.cfg.lotsize) {
-          this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_BUY_BALANCE_ERROR))
-          return
-        }
-        this.setOrderBttnEnabled(true)
-      }
+    // Limit buy
+    const rate = this.adjustedRate()
+    const aLot = mkt.cfg.lotsize * (rate / OrderUtil.RateEncodingFactor)
+    if (quoteWallet.balance.available < aLot) {
+      this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_BUY_BALANCE_ERROR))
+      return
+    }
+    if (mkt.maxBuys[rate]) {
+      const enable = orderQty <= mkt.maxBuys[rate].swap.lots * mkt.cfg.lotsize
+      this.setOrderBttnEnabled(enable, intl.prep(intl.ID_ORDER_BUTTON_BUY_BALANCE_ERROR))
     }
   }
 
