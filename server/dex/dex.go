@@ -45,20 +45,21 @@ const (
 // implementation version, has Network and ConfigPath strings, and has JSON
 // tags.
 type AssetConf struct {
-	Symbol      string `json:"bip44symbol"`
-	Network     string `json:"network"`
-	LotSizeOLD  uint64 `json:"lotSize,omitempty"`
-	RateStepOLD uint64 `json:"rateStep,omitempty"`
-	MaxFeeRate  uint64 `json:"maxFeeRate"`
-	SwapConf    uint32 `json:"swapConf"`
-	ConfigPath  string `json:"configPath"`
-	RegFee      uint64 `json:"regFee,omitempty"`
-	RegConfs    uint32 `json:"regConfs,omitempty"`
-	RegXPub     string `json:"regXPub,omitempty"`
-	BondAmt     uint64 `json:"bondAmt,omitempty"`
-	BondConfs   uint32 `json:"bondConfs,omitempty"`
-	Disabled    bool   `json:"disabled"`
-	NodeRelayID string `json:"nodeRelayID,omitempty"`
+	Symbol        string `json:"bip44symbol"`
+	Network       string `json:"network"`
+	LotSizeOLD    uint64 `json:"lotSize,omitempty"`
+	RateStepOLD   uint64 `json:"rateStep,omitempty"`
+	MaxFeeRate    uint64 `json:"maxFeeRate"`
+	SwapConf      uint32 `json:"swapConf"`
+	ConfigPath    string `json:"configPath"`
+	RegFee        uint64 `json:"regFee,omitempty"`
+	RegConfs      uint32 `json:"regConfs,omitempty"`
+	RegXPub       string `json:"regXPub,omitempty"`
+	BondAmt       uint64 `json:"bondAmt,omitempty"`
+	BondConfs     uint32 `json:"bondConfs,omitempty"`
+	Disabled      bool   `json:"disabled"`
+	NodeRelayID   string `json:"nodeRelayID,omitempty"`
+	BlockInterval uint32 `json:"blockInterval"`
 }
 
 // DBConf groups the database configuration parameters.
@@ -885,6 +886,20 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
+	monitoredAssets := make(map[uint32]*MonitoredAsset)
+	for i, assetConf := range cfg.Assets {
+		assetID := assetIDs[i]
+		ba := backedAssets[assetID]
+		if ba == nil {
+			continue
+		}
+		monitoredAssets[assetID] = &MonitoredAsset{
+			AssetID:       assetID,
+			Backend:       ba.Backend,
+			BlockInterval: assetConf.BlockInterval,
+		}
+	}
+
 	dexMgr := &DEX{
 		network:     cfg.Network,
 		markets:     markets,
@@ -898,6 +913,14 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		server:      server,
 		configResp:  cfgResp,
 	}
+
+	am := NewAssetMonitor(&AssetMonitorConfig{
+		DEX:     dexMgr,
+		Logger:  cfg.LogBackend.Logger("ASSETMON"),
+		Assets:  monitoredAssets,
+		Markets: markets,
+	})
+	startSubSys("AssetMonitor", am)
 
 	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
 

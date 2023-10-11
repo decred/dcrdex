@@ -298,7 +298,8 @@ cat << EOF >> "./markets.json"
             "regXPub": "spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE",
             "bondAmt": 50000000,
             "bondConfs": 1,
-            "nodeRelayID": "${DCR_NODERELAY_ID}"
+            "nodeRelayID": "${DCR_NODERELAY_ID}",
+            "blockInterval": 300
         },
         "BTC_simnet": {
             "bip44symbol": "btc",
@@ -311,7 +312,8 @@ cat << EOF >> "./markets.json"
             "regXPub": "vpub5SLqN2bLY4WeZJ9SmNJHsyzqVKreTXD4ZnPC22MugDNcjhKX5xNX9QiQWcE4SSRzVWyHWUihpKRT7hckDGNzVc69wSX2JPcfGeNiT5c2XZy",
             "bondAmt": 10000,
             "bondConfs": 1,
-            "nodeRelayID": "${BTC_NODERELAY_ID}"
+            "nodeRelayID": "${BTC_NODERELAY_ID}",
+            "blockInterval": 300
 EOF
 
 if [ $LTC_ON -eq 0 ]; then
@@ -324,7 +326,8 @@ if [ $LTC_ON -eq 0 ]; then
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf",
             "bondAmt": 1000000,
-            "bondConfs": 1
+            "bondConfs": 1,
+            "blockInterval": 300
 EOF
 fi
 

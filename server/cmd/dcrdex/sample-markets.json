@@ -27,7 +27,8 @@
             "swapConf": 4,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf",
             "bondAmt": 10000000,
-            "bondConfs": 1
+            "bondConfs": 1,
+            "blockInterval": 3600
         },
         "DCR_testnet": {
             "bip44symbol": "dcr",
@@ -36,31 +37,36 @@
             "swapConf": 1,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf",
             "bondAmt": 100000000,
-            "bondConfs": 1
+            "bondConfs": 1,
+            "blockInterval": 3600
         },
         "BTC_mainnet": {
             "bip44symbol": "btc",
             "network": "mainnet",
             "maxFeeRate": 100,
-            "swapConf": 3
+            "swapConf": 3,
+            "blockInterval": 3600
         },
         "BTC_testnet": {
             "bip44symbol": "btc",
             "network": "testnet",
             "maxFeeRate": 100,
-            "swapConf": 1
+            "swapConf": 1,
+            "blockInterval": 3600
         },
         "LTC_mainnet": {
             "bip44symbol": "ltc",
             "network": "mainnet",
             "maxFeeRate": 20,
-            "swapConf": 6
+            "swapConf": 6,
+            "blockInterval": 1200
         },
         "LTC_testnet": {
             "bip44symbol": "ltc",
             "network": "testnet",
             "maxFeeRate": 20,
-            "swapConf": 6
+            "swapConf": 6,
+            "blockInterval": 1200
         },
         "ETH_testnet": {
             "bip44symbol": "eth",
