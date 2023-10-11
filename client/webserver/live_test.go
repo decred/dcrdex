@@ -1813,14 +1813,6 @@ func (c *TCore) NotificationFeed() *core.NoteFeed {
 	}
 }
 
-func (c *TCore) GetNtfnSettings() map[string]bool {
-	return make(map[string]bool)
-}
-
-func (c *TCore) UpdateNtfnSetting(noteType string, enabled bool) error {
-	return nil
-}
-
 func (c *TCore) runEpochs() {
 	epochTick := time.NewTimer(time.Second).C
 out:

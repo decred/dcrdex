@@ -1,6 +1,6 @@
-import { CoreNote, app } from './registry'
-import { postJSON } from './http'
+import { CoreNote } from './registry'
 import * as intl from './locales'
+import State from './state'
 
 export const IGNORE = 0
 export const DATA = 1
@@ -41,6 +41,10 @@ type BrowserNtfnSettingLabel = {
 
 type BrowserNtfnSetting = {
   [x: string]: boolean
+}
+
+function browserNotificationsSettingsKey (): string {
+  return `browser_notifications-${window.location.host}`
 }
 
 export const browserNtfnLabels: BrowserNtfnSettingLabel = {
@@ -93,26 +97,17 @@ export function browserNotify (note: CoreNote) {
   showBrowserNtfn(note.subject, note.details)
 }
 
-export async function fetchBrowserNtfnSettings () {
+export async function fetchBrowserNtfnSettings (): Promise<BrowserNtfnSetting> {
   if (browserNtfnSettings !== undefined) {
     return browserNtfnSettings
   }
-  const res = await postJSON('/api/getntfnsettings', {})
-  if (!app().checkResponse(res)) {
-    return defaultBrowserNtfnSettings
-  }
-  browserNtfnSettings = res.notetypes
+  const k = browserNotificationsSettingsKey()
+  browserNtfnSettings = (await State.fetchLocal(k) ?? {}) as BrowserNtfnSetting
   return browserNtfnSettings
 }
 
 export async function updateNtfnSetting (noteType: string, enabled: boolean) {
-  const request: {
-    notetype: string,
-    enabled: boolean
-  } = {
-    notetype: noteType,
-    enabled: enabled
-  }
+  await fetchBrowserNtfnSettings()
   browserNtfnSettings[noteType] = enabled
-  return await postJSON('/api/updatentfnsetting', request)
+  State.storeLocal(browserNotificationsSettingsKey(), browserNtfnSettings)
 }

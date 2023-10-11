@@ -149,8 +149,4 @@ type DB interface {
 	// SaveDisabledRateSources saves disabled fiat rate sources in the database.
 	// A source name must not contain a comma.
 	SaveDisabledRateSources(disabledSources []string) error
-	// GetNtfnSettings retrieves browser notification settings from the db
-	GetNtfnSettings() (map[string]bool, error)
-	// UpdateNtfnSetting updates a browser notification setting in the db
-	UpdateNtfnSetting(noteType string, enabled bool) error
 }
