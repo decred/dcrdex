@@ -1518,6 +1518,46 @@ func (s *WebServer) apiToggleRateSource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiGetNtfnSettings handles the /getntfnsettings API request
+func (s *WebServer) apiGetNtfnSettings(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	noteTypes := s.core.GetNtfnSettings()
+	res := &struct {
+		NoteTypes map[string]bool `json:"notetypes"`
+		OK        bool            `json:"ok"`
+	}{
+		NoteTypes: noteTypes,
+		OK:        true,
+	}
+	writeJSON(w, res, s.indent)
+}
+
+// apiUpdateNtfnSetting handles the /updatentfnsetting API request
+func (s *WebServer) apiUpdateNtfnSetting(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		NoteType string `json:"notetype"`
+		Enabled  bool   `json:"enabled"`
+	}{}
+
+	if !readPost(w, r, &form) {
+		return
+	}
+	err := s.core.UpdateNtfnSetting(form.NoteType, form.Enabled)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK bool `json:"ok"`
+	}{
+		OK: true,
+	}, s.indent)
+}
+
 // apiDeleteArchiveRecords handles the '/deletearchivedrecords' API request.
 func (s *WebServer) apiDeleteArchivedRecords(w http.ResponseWriter, r *http.Request) {
 	form := new(deleteRecordsForm)

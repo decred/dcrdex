@@ -544,6 +544,15 @@ func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
 	return tdb.storeAccountProofErr
 }
 
+func (tdb *TDB) GetNtfnSettings() (map[string]bool, error) {
+	settings := make(map[string]bool)
+	return settings, nil
+}
+
+func (tdb *TDB) UpdateNtfnSetting(noteType string, enabled bool) error {
+	return nil
+}
+
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
 func (tdb *TDB) BackupTo(dst string, overwrite, compact bool) error { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error)     { return nil, nil }

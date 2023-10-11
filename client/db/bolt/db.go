@@ -67,6 +67,7 @@ var (
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
 	credentialsBucket      = []byte("credentials")
+	ntfnSettingsBucket     = []byte("ntfnSettings")
 
 	// value keys
 	versionKey            = []byte("version")
@@ -1877,6 +1878,42 @@ func (db *BoltDB) SaveNotification(note *dexdb.Notification) error {
 			return err
 		}
 		return noteBkt.Put(noteKey, noteB)
+	})
+}
+
+// GetNtfnSettings retrieves the desktop notification permissions
+func (db *BoltDB) GetNtfnSettings() (map[string]bool, error) {
+	settings := make(map[string]bool)
+	err := db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(ntfnSettingsBucket)
+		if bucket == nil {
+			return fmt.Errorf("ntfnSettings not found")
+		}
+
+		return bucket.ForEach(func(k, v []byte) error {
+			settings[string(k)] = v[0] == 1
+			return nil
+		})
+	})
+	return settings, err
+}
+
+// UpdateNtfnSetting saves a flag with a specified noteType
+func (db *BoltDB) UpdateNtfnSetting(noteType string, enabled bool) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(ntfnSettingsBucket)
+		if err != nil {
+			return err
+		}
+
+		valueToStore := byte(0)
+		if enabled {
+			valueToStore = byte(1)
+		}
+		if err := bucket.Put([]byte(noteType), []byte{valueToStore}); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 

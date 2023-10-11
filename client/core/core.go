@@ -10839,3 +10839,18 @@ func (c *Core) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*ass
 	}
 	return tb.TicketPage(scanStart, n, skipN)
 }
+
+// GetNtfnSettings returns settings for browser notifications
+func (c *Core) GetNtfnSettings() map[string]bool {
+	settings, err := c.db.GetNtfnSettings()
+	if err != nil {
+		// not found in the db, return empty map
+		return make(map[string]bool)
+	}
+	return settings
+}
+
+// UpdateNtfnSetting creates/updates a browser notification setting flag
+func (c *Core) UpdateNtfnSetting(noteType string, enabled bool) error {
+	return c.db.UpdateNtfnSetting(noteType, enabled)
+}

@@ -4,6 +4,7 @@ import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
 import * as intl from './locales'
+import * as ntfn from './notifications'
 import {
   app,
   Exchange,
@@ -169,6 +170,68 @@ export default class SettingsPage extends BasePage {
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
+
+    this.renderDesktopNtfnSettings()
+  }
+
+  async updateNtfnSetting (e: Event) {
+    const checkbox = e.target as HTMLInputElement
+    const noteType = checkbox.getAttribute('name')
+    if (noteType === null) return
+    const enabled = checkbox.checked
+    await ntfn.updateNtfnSetting(noteType, enabled)
+  }
+
+  async getBrowserNtfnSettings (form: HTMLElement) {
+    const loaded = app().loading(form)
+    const permissions = await ntfn.fetchBrowserNtfnSettings()
+    loaded()
+    return permissions
+  }
+
+  async renderDesktopNtfnSettings () {
+    const page = this.page
+    const ntfnSettings = await this.getBrowserNtfnSettings(page.browserNotificationsForm)
+    const labels = ntfn.browserNtfnLabels
+    const tmpl = page.browserNtfnCheckboxTemplate
+    tmpl.removeAttribute('id')
+    const container = page.browserNtfnCheckboxContainer
+    Doc.empty(page.browserNtfnCheckboxContainer)
+
+    Object.keys(labels).forEach((noteType) => {
+      const html = tmpl.cloneNode(true) as PageElement
+      const enabled = ntfnSettings[noteType]
+      const checkbox = Doc.tmplElement(html, 'checkbox')
+      Doc.tmplElement(html, 'label').textContent = intl.prep(labels[noteType])
+      checkbox.setAttribute('name', noteType)
+      if (enabled) checkbox.setAttribute('checked', 'checked')
+      container.appendChild(html)
+      Doc.bind(checkbox, 'click', this.updateNtfnSetting)
+    })
+
+    const enabledCheckbox = page.browserNtfnEnabled
+
+    Doc.bind(enabledCheckbox, 'click', async (e: Event) => {
+      if (ntfn.ntfnPermissionDenied()) return
+      const checkbox = e.target as HTMLInputElement
+      if (checkbox.checked) {
+        await ntfn.requestNtfnPermission()
+        checkbox.checked = !ntfn.ntfnPermissionDenied()
+      }
+      await this.updateNtfnSetting(e)
+      checkbox.dispatchEvent(new Event('change'))
+    })
+
+    Doc.bind(enabledCheckbox, 'change', (e: Event) => {
+      const checkbox = e.target as HTMLInputElement
+      const permDenied = ntfn.ntfnPermissionDenied()
+      Doc.setVis(checkbox.checked, page.browserNtfnCheckboxContainer)
+      Doc.setVis(permDenied, page.browserNtfnBlockedMsg)
+      checkbox.disabled = permDenied
+    })
+
+    enabledCheckbox.checked = (ntfn.ntfnPermissionGranted() && ntfnSettings.browserNtfnEnabled)
+    enabledCheckbox.dispatchEvent(new Event('change'))
   }
 
   /*

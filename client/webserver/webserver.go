@@ -169,6 +169,8 @@ type clientCore interface {
 	SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error
 	ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error)
 	TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error)
+	GetNtfnSettings() map[string]bool
+	UpdateNtfnSetting(noteType string, enabled bool) error
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -538,6 +540,9 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/setvotes", s.apiSetVotingPreferences)
 			apiAuth.Post("/listvsps", s.apiListVSPs)
 			apiAuth.Post("/ticketpage", s.apiTicketPage)
+
+			apiAuth.Post("/getntfnsettings", s.apiGetNtfnSettings)
+			apiAuth.Post("/updatentfnsetting", s.apiUpdateNtfnSetting)
 
 			if cfg.Experimental {
 				apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)

@@ -54,3 +54,17 @@ div.settings-exchange {
   font-size: 15;
   margin-left: 0.5rem;
 }
+
+#browserNotificationsForm {
+  & .checkbox-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin-left: 1rem;
+    
+    & .form-check {
+      width: 48%; 
+      box-sizing: border-box;
+    }
+  }
+}
