@@ -3322,7 +3322,7 @@ func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
 		return fmt.Errorf("no credentials stored")
 	}
 
-	innerKey := blake256.Sum256(seed)
+	innerKey := seedInnerKey(seed)
 	_, err := c.reCrypter(innerKey[:], creds.InnerKeyParams)
 	if err != nil {
 		c.log.Errorf("Error reseting password with seed: %v", err)
@@ -4623,7 +4623,7 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 	defer encode.ClearBytes(seed)
 
 	// Generate an inner key and it's Crypter.
-	innerKey := blake256.Sum256(seed)
+	innerKey := seedInnerKey(seed)
 	innerCrypter := c.newCrypter(innerKey[:])
 	encSeed, err := innerCrypter.Encrypt(seed)
 	if err != nil {
@@ -4646,6 +4646,26 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 	}
 
 	return innerCrypter, creds, nil
+}
+
+func seedInnerKey(seed []byte) []byte {
+	// keyParam is a domain-specific value to ensure the resulting key is unique
+	// for the specific use case of deriving an inner encryption key from the
+	// seed. Any other uses of derivation from the seed should similarly create
+	// their own domain-specific value to ensure uniqueness.
+	//
+	// It is equal to BLAKE-256([]byte("DCRDEX-InnerKey-v0")).
+	keyParam := [32]byte{
+		0x75, 0x25, 0xb1, 0xb6, 0x53, 0x33, 0x9e, 0x33,
+		0xbe, 0x11, 0x61, 0x45, 0x1a, 0x88, 0x6f, 0x37,
+		0xe7, 0x74, 0xdf, 0xca, 0xb4, 0x8a, 0xee, 0x0e,
+		0x7c, 0x84, 0x60, 0x01, 0xed, 0xe5, 0xf6, 0x97,
+	}
+	key := make([]byte, len(seed)+len(keyParam))
+	copy(key, seed)
+	copy(key[len(seed):], keyParam[:])
+	innerKey := blake256.Sum256(key)
+	return innerKey[:]
 }
 
 func (c *Core) bondKeysReady() bool {
@@ -4747,7 +4767,7 @@ func (c *Core) upgradeV0CredsToV1(appPW []byte, creds db.PrimaryCredentials) (en
 	}
 
 	// Update all the fields.
-	newInnerKey := blake256.Sum256(seed)
+	newInnerKey := seedInnerKey(seed)
 	newInnerCrypter := c.newCrypter(newInnerKey[:])
 	creds.Version = 1
 	creds.InnerKeyParams = newInnerCrypter.Serialize()
