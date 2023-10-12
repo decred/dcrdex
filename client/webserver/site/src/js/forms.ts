@@ -1607,7 +1607,7 @@ export class DEXAddressForm {
       }
       return
     }
-    if (!this.dexToUpdate && (skipRegistration || res.paid)) {
+    if (!this.dexToUpdate && (skipRegistration || res.paid || Object.keys(res.xc.auth.pendingBonds).length > 0)) {
       await app().fetchUser()
       await app().loadPage('markets')
       return
