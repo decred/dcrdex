@@ -174,7 +174,7 @@ export default class Application {
   async start () {
     // Handle back navigation from the browser.
     bind(window, 'popstate', (e: PopStateEvent) => {
-      const page = e.state.page
+      const page = e.state?.page
       if (!page && page !== '') return
       this.loadPage(page, e.state.data, true)
     })
