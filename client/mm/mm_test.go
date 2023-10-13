@@ -2,17 +2,20 @@ package mm
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -42,6 +45,7 @@ var (
 		MaxFeeRate:   2,
 		SwapConf:     1,
 	}
+
 	tACCTAsset = &dex.Asset{
 		ID:           60,
 		Symbol:       "eth",
@@ -52,6 +56,7 @@ var (
 		MaxFeeRate:   20,
 		SwapConf:     1,
 	}
+
 	tWalletInfo = &asset.WalletInfo{
 		Version:           0,
 		SupportedVersions: []uint32{0},
@@ -65,21 +70,6 @@ var (
 		}},
 	}
 )
-
-type tCreator struct {
-	*tDriver
-	doesntExist bool
-	existsErr   error
-	createErr   error
-}
-
-func (ctr *tCreator) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	return !ctr.doesntExist, ctr.existsErr
-}
-
-func (ctr *tCreator) Create(*asset.CreateWalletParams) error {
-	return ctr.createErr
-}
 
 func init() {
 	asset.Register(tUTXOAssetA.ID, &tDriver{
@@ -99,6 +89,21 @@ func init() {
 		},
 	})
 	rand.Seed(time.Now().UnixNano())
+}
+
+type tCreator struct {
+	*tDriver
+	doesntExist bool
+	existsErr   error
+	createErr   error
+}
+
+func (ctr *tCreator) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	return !ctr.doesntExist, ctr.existsErr
+}
+
+func (ctr *tCreator) Create(*asset.CreateWalletParams) error {
+	return ctr.createErr
 }
 
 type tDriver struct {
@@ -127,6 +132,13 @@ func (t *tBookFeed) Next() <-chan *core.BookUpdate { return t.c }
 func (t *tBookFeed) Close()                        {}
 func (t *tBookFeed) Candles(dur string) error      { return nil }
 
+type sendArgs struct {
+	assetID  uint32
+	value    uint64
+	address  string
+	subtract bool
+}
+
 type tCore struct {
 	assetBalances     map[uint32]*core.WalletBalance
 	assetBalanceErr   error
@@ -144,6 +156,7 @@ type tCore struct {
 	multiTradeResult  []*core.Order
 	noteFeed          chan core.Notification
 	isAccountLocker   map[uint32]bool
+	isWithdrawer      map[uint32]bool
 	maxBuyEstimate    *core.MaxOrderEstimate
 	maxBuyErr         error
 	maxSellEstimate   *core.MaxOrderEstimate
@@ -155,7 +168,30 @@ type tCore struct {
 	maxFundingFees    uint64
 	book              *orderbook.OrderBook
 	bookFeed          *tBookFeed
+	lastSendArgs      *sendArgs
+	sendTxID          string
+	txConfs           uint32
+	txConfsErr        error
+	txConfsTxID       string
+	newDepositAddress string
 }
+
+func newTCore() *tCore {
+	return &tCore{
+		assetBalances:   make(map[uint32]*core.WalletBalance),
+		noteFeed:        make(chan core.Notification),
+		isAccountLocker: make(map[uint32]bool),
+		isWithdrawer:    make(map[uint32]bool),
+		cancelsPlaced:   make([]dex.Bytes, 0),
+		buysPlaced:      make([]*core.TradeForm, 0),
+		sellsPlaced:     make([]*core.TradeForm, 0),
+		bookFeed: &tBookFeed{
+			c: make(chan *core.BookUpdate, 1),
+		},
+	}
+}
+
+var _ clientCore = (*tCore)(nil)
 
 func (c *tCore) NotificationFeed() *core.NoteFeed {
 	return &core.NoteFeed{C: c.noteFeed}
@@ -181,8 +217,8 @@ func (c *tCore) SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uin
 	}
 	return c.buySwapFees, c.buyRedeemFees, c.buyRefundFees, nil
 }
-func (t *tCore) Cancel(oidB dex.Bytes) error {
-	t.cancelsPlaced = append(t.cancelsPlaced, oidB)
+func (c *tCore) Cancel(oidB dex.Bytes) error {
+	c.cancelsPlaced = append(c.cancelsPlaced, oidB)
 	return nil
 }
 func (c *tCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
@@ -216,13 +252,16 @@ func (c *tCore) MultiTrade(pw []byte, forms *core.MultiTradeForm) ([]*core.Order
 	c.multiTradesPlaced = append(c.multiTradesPlaced, forms)
 	return c.multiTradeResult, nil
 }
-
 func (c *tCore) WalletState(assetID uint32) *core.WalletState {
 	isAccountLocker := c.isAccountLocker[assetID]
+	isWithdrawer := c.isWithdrawer[assetID]
 
 	var traits asset.WalletTrait
 	if isAccountLocker {
 		traits |= asset.WalletTraitAccountLocker
+	}
+	if isWithdrawer {
+		traits |= asset.WalletTraitWithdrawer
 	}
 
 	return &core.WalletState{
@@ -238,18 +277,29 @@ func (c *tCore) Login(pw []byte) error {
 func (c *tCore) OpenWallet(assetID uint32, pw []byte) error {
 	return nil
 }
-
 func (c *tCore) User() *core.User {
 	return nil
 }
-
 func (c *tCore) Broadcast(core.Notification) {}
-
 func (c *tCore) FiatConversionRates() map[uint32]float64 {
 	return nil
 }
-
-var _ clientCore = (*tCore)(nil)
+func (c *tCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (string, asset.Coin, error) {
+	c.lastSendArgs = &sendArgs{
+		assetID:  assetID,
+		value:    value,
+		address:  address,
+		subtract: subtract,
+	}
+	return c.sendTxID, nil, nil
+}
+func (c *tCore) NewDepositAddress(assetID uint32) (string, error) {
+	return c.newDepositAddress, nil
+}
+func (c *tCore) TransactionConfirmations(assetID uint32, txID string) (confirmations uint32, err error) {
+	c.txConfsTxID = txID
+	return c.txConfs, c.txConfsErr
+}
 
 func tMaxOrderEstimate(lots uint64, swapFees, redeemFees uint64) *core.MaxOrderEstimate {
 	return &core.MaxOrderEstimate{
@@ -281,20 +331,6 @@ func (c *tCore) clearTradesAndCancels() {
 	c.buysPlaced = make([]*core.TradeForm, 0)
 	c.sellsPlaced = make([]*core.TradeForm, 0)
 	c.multiTradesPlaced = make([]*core.MultiTradeForm, 0)
-}
-
-func newTCore() *tCore {
-	return &tCore{
-		assetBalances:   make(map[uint32]*core.WalletBalance),
-		noteFeed:        make(chan core.Notification),
-		isAccountLocker: make(map[uint32]bool),
-		cancelsPlaced:   make([]dex.Bytes, 0),
-		buysPlaced:      make([]*core.TradeForm, 0),
-		sellsPlaced:     make([]*core.TradeForm, 0),
-		bookFeed: &tBookFeed{
-			c: make(chan *core.BookUpdate, 1),
-		},
-	}
 }
 
 type tOrderBook struct {
@@ -365,14 +401,18 @@ func TestSetupBalances(t *testing.T) {
 	dcrEthID := fmt.Sprintf("%s-%d-%d", "host1", 42, 60)
 
 	type ttest struct {
-		name          string
-		cfgs          []*BotConfig
-		assetBalances map[uint32]uint64
+		name string
+		cfgs []*BotConfig
 
-		wantReserves map[string]map[uint32]uint64
-		wantErr      bool
+		assetBalances map[uint32]uint64
+		cexBalances   map[string]map[uint32]uint64
+
+		wantReserves    map[string]map[uint32]uint64
+		wantCEXReserves map[string]map[uint32]uint64
+		wantErr         bool
 	}
 	tests := []*ttest{
+		// "percentages only, ok"
 		{
 			name: "percentages only, ok",
 			cfgs: []*BotConfig{
@@ -413,7 +453,7 @@ func TestSetupBalances(t *testing.T) {
 				},
 			},
 		},
-
+		// "50% + 51% error"
 		{
 			name: "50% + 51% error",
 			cfgs: []*BotConfig{
@@ -445,7 +485,7 @@ func TestSetupBalances(t *testing.T) {
 
 			wantErr: true,
 		},
-
+		// "combine amount and percentages, ok"
 		{
 			name: "combine amount and percentages, ok",
 			cfgs: []*BotConfig{
@@ -486,6 +526,7 @@ func TestSetupBalances(t *testing.T) {
 				},
 			},
 		},
+		// "combine amount and percentages, too high error"
 		{
 			name: "combine amount and percentages, too high error",
 			cfgs: []*BotConfig{
@@ -517,6 +558,418 @@ func TestSetupBalances(t *testing.T) {
 
 			wantErr: true,
 		},
+		// "CEX percentages only, ok"
+		{
+			name: "CEX percentages only, ok",
+			cfgs: []*BotConfig{
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       0,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       60,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+					CEXCfg: &BotCEXCfg{
+						Name:             "Kraken",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     100,
+					},
+				},
+			},
+
+			assetBalances: map[uint32]uint64{
+				0:  1000,
+				42: 1000,
+				60: 2000,
+			},
+
+			cexBalances: map[string]map[uint32]uint64{
+				"Binance": {
+					42: 2000,
+					0:  3000,
+				},
+				"Kraken": {
+					42: 4000,
+					60: 2000,
+				},
+			},
+
+			wantReserves: map[string]map[uint32]uint64{
+				dcrBtcID: {
+					0:  500,
+					42: 500,
+				},
+				dcrEthID: {
+					42: 500,
+					60: 2000,
+				},
+			},
+
+			wantCEXReserves: map[string]map[uint32]uint64{
+				dcrBtcID: {
+					0:  1500,
+					42: 1000,
+				},
+				dcrEthID: {
+					42: 2000,
+					60: 2000,
+				},
+			},
+		},
+		// "CEX 50% + 51% error"
+		{
+			name: "CEX 50% + 51% error",
+			cfgs: []*BotConfig{
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       0,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       60,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      51,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+			},
+
+			assetBalances: map[uint32]uint64{
+				0:  1000,
+				42: 1000,
+				60: 2000,
+			},
+
+			cexBalances: map[string]map[uint32]uint64{
+				"Binance": {
+					42: 2000,
+					60: 1000,
+					0:  3000,
+				},
+			},
+
+			wantErr: true,
+		},
+		// "CEX combine amount and percentages, ok"
+		{
+			name: "CEX combine amount and percentages, ok",
+			cfgs: []*BotConfig{
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       0,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       60,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Amount,
+						BaseBalance:      600,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     100,
+					},
+				},
+			},
+
+			assetBalances: map[uint32]uint64{
+				0:  1000,
+				42: 1000,
+				60: 2000,
+			},
+
+			cexBalances: map[string]map[uint32]uint64{
+				"Binance": {
+					42: 2000,
+					0:  3000,
+					60: 2000,
+				},
+				"Kraken": {
+					42: 4000,
+					60: 2000,
+				},
+			},
+
+			wantReserves: map[string]map[uint32]uint64{
+				dcrBtcID: {
+					0:  500,
+					42: 500,
+				},
+				dcrEthID: {
+					42: 500,
+					60: 2000,
+				},
+			},
+
+			wantCEXReserves: map[string]map[uint32]uint64{
+				dcrBtcID: {
+					0:  1500,
+					42: 1000,
+				},
+				dcrEthID: {
+					42: 600,
+					60: 2000,
+				},
+			},
+		},
+
+		// "CEX combine amount and percentages"
+		{
+			name: "CEX combine amount and percentages, too high error",
+			cfgs: []*BotConfig{
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       0,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+				{
+					Host:             "host1",
+					BaseAsset:        42,
+					QuoteAsset:       60,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Amount,
+						BaseBalance:      1501,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     100,
+					},
+				},
+			},
+
+			assetBalances: map[uint32]uint64{
+				0:  1000,
+				42: 1000,
+				60: 2000,
+			},
+
+			cexBalances: map[string]map[uint32]uint64{
+				"Binance": {
+					42: 2000,
+					0:  3000,
+					60: 2000,
+				},
+				"Kraken": {
+					42: 4000,
+					60: 2000,
+				},
+			},
+
+			wantErr: true,
+		},
+
+		// "CEX same asset on different chains"
+		{
+			name: "CEX combine amount and percentages, too high error",
+			cfgs: []*BotConfig{
+				{
+					Host:             "host1",
+					BaseAsset:        60001,
+					QuoteAsset:       0,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+				{
+					Host:             "host1",
+					BaseAsset:        966001,
+					QuoteAsset:       60,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+			},
+
+			assetBalances: map[uint32]uint64{
+				0:      1000,
+				60:     2000,
+				60001:  2000,
+				966001: 2000,
+			},
+
+			cexBalances: map[string]map[uint32]uint64{
+				"Binance": {
+					0:      3000,
+					60:     2000,
+					60001:  2000,
+					966001: 2000,
+					61001:  2000,
+				},
+			},
+
+			wantReserves: map[string]map[uint32]uint64{
+				dexMarketID("host1", 60001, 0): {
+					60001: 1000,
+					0:     500,
+				},
+				dexMarketID("host1", 966001, 60): {
+					966001: 1000,
+					60:     1000,
+				},
+			},
+
+			wantCEXReserves: map[string]map[uint32]uint64{
+				dexMarketID("host1", 60001, 0): {
+					60001: 1000,
+					0:     1500,
+				},
+				dexMarketID("host1", 966001, 60): {
+					966001: 1000,
+					60:     1000,
+				},
+			},
+		},
+
+		// "CEX same asset on different chains, too high error"
+		{
+			name: "CEX combine amount and percentages, too high error",
+			cfgs: []*BotConfig{
+				{
+					Host:             "host1",
+					BaseAsset:        60001,
+					QuoteAsset:       0,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      50,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     50,
+					},
+				},
+				{
+					Host:             "host1",
+					BaseAsset:        966001,
+					QuoteAsset:       60,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+
+					CEXCfg: &BotCEXCfg{
+						Name:             "Binance",
+						BaseBalanceType:  Percentage,
+						BaseBalance:      51,
+						QuoteBalanceType: Percentage,
+						QuoteBalance:     100,
+					},
+				},
+			},
+
+			assetBalances: map[uint32]uint64{
+				0:      1000,
+				60:     2000,
+				60001:  2000,
+				966001: 2000,
+			},
+
+			cexBalances: map[string]map[uint32]uint64{
+				"Binance": {
+					0:      3000,
+					60:     2000,
+					60001:  2000,
+					966001: 2000,
+					61001:  2000,
+				},
+			},
+
+			wantErr: true,
+		},
 	}
 
 	runTest := func(test *ttest) {
@@ -525,7 +978,19 @@ func TestSetupBalances(t *testing.T) {
 		mm, done := tNewMarketMaker(t, tCore)
 		defer done()
 
-		err := mm.setupBalances(test.cfgs)
+		cexes := make(map[string]libxc.CEX)
+		for cexName, balances := range test.cexBalances {
+			cex := newTCEX()
+			cexes[cexName] = cex
+			cex.balances = make(map[uint32]*libxc.ExchangeBalance)
+			for assetID, balance := range balances {
+				cex.balances[assetID] = &libxc.ExchangeBalance{
+					Available: balance,
+				}
+			}
+		}
+
+		err := mm.setupBalances(test.cfgs, cexes)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%s: expected error, got nil", test.name)
@@ -543,6 +1008,15 @@ func TestSetupBalances(t *testing.T) {
 					t.Fatalf("%s: unexpected reserve for bot %s, asset %d. "+
 						"want %d, got %d", test.name, botID, assetID, wantReserve,
 						botReserves.balances[assetID])
+				}
+			}
+
+			wantCEXReserves := test.wantCEXReserves[botID]
+			for assetID, wantReserve := range wantCEXReserves {
+				if botReserves.cexBalances[assetID] != wantReserve {
+					t.Fatalf("%s: unexpected cex reserve for bot %s, asset %d. "+
+						"want %d, got %d", test.name, botID, assetID, wantReserve,
+						botReserves.cexBalances[assetID])
 				}
 			}
 		}
@@ -812,7 +1286,7 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		err = mm.setupBalances([]*BotConfig{test.cfg})
+		err = mm.setupBalances([]*BotConfig{test.cfg}, nil)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -1119,7 +1593,7 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		err = mm.setupBalances([]*BotConfig{test.cfg})
+		err = mm.setupBalances([]*BotConfig{test.cfg}, nil)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -4207,5 +4681,699 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 
 	for _, test := range tests {
 		runTest(&test)
+	}
+}
+
+func cexBalancesMatch(expected map[uint32]uint64, botName string, mm *MarketMaker) error {
+	for assetID, exp := range expected {
+		actual := mm.botBalances[botName].cexBalances[assetID]
+		if exp != actual {
+			return fmt.Errorf("asset %d expected %d != actual %d", assetID, exp, actual)
+		}
+	}
+
+	return nil
+}
+
+func TestSegregatedCEXTrade(t *testing.T) {
+	type noteAndBalances struct {
+		note     *libxc.TradeUpdate
+		balances map[uint32]uint64
+	}
+
+	tradeID := "abc"
+
+	type test struct {
+		name string
+
+		cfg           *BotConfig
+		assetBalances map[uint32]uint64
+		cexBalances   map[uint32]uint64
+		baseAsset     uint32
+		quoteAsset    uint32
+		sell          bool
+		rate          uint64
+		qty           uint64
+		postTradeBals map[uint32]uint64
+		notes         []*noteAndBalances
+	}
+
+	tests := []test{
+		// "sell trade fully filled"
+		{
+			name: "sell trade fully filled",
+			cfg: &BotConfig{
+				Host:             "host",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             "Binance",
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			assetBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			baseAsset:  42,
+			quoteAsset: 0,
+			sell:       true,
+			rate:       5e7,
+			qty:        2e6,
+			postTradeBals: map[uint32]uint64{
+				42: 1e7 - 2e6,
+				0:  1e7,
+			},
+			notes: []*noteAndBalances{
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  1e6,
+						QuoteFilled: calc.BaseToQuote(5.1e7, 1e6),
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 - 2e6,
+						0:  1e7 + calc.BaseToQuote(5.1e7, 1e6),
+					},
+				},
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  2e6,
+						QuoteFilled: calc.BaseToQuote(5.05e7, 2e6),
+						Complete:    true,
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 - 2e6,
+						0:  1e7 + calc.BaseToQuote(5.05e7, 2e6),
+					},
+				},
+			},
+		},
+		// "buy trade fully filled"
+		{
+			name: "buy trade fully filled",
+			cfg: &BotConfig{
+				Host:             "host",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             "Binance",
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			assetBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			baseAsset:  42,
+			quoteAsset: 0,
+			sell:       false,
+			rate:       5e7,
+			qty:        2e6,
+			postTradeBals: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7 - calc.BaseToQuote(5e7, 2e6),
+			},
+			notes: []*noteAndBalances{
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  1e6,
+						QuoteFilled: calc.BaseToQuote(4.9e7, 1e6),
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 + 1e6,
+						0:  1e7 - calc.BaseToQuote(5e7, 2e6),
+					},
+				},
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  2e6,
+						QuoteFilled: calc.BaseToQuote(4.95e7, 2e6),
+						Complete:    true,
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 + 2e6,
+						0:  1e7 - calc.BaseToQuote(4.95e7, 2e6),
+					},
+				},
+			},
+		},
+		// "sell trade partially filled"
+		{
+			name: "sell trade partially filled",
+			cfg: &BotConfig{
+				Host:             "host",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             "Binance",
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			assetBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			baseAsset:  42,
+			quoteAsset: 0,
+			sell:       true,
+			rate:       5e7,
+			qty:        2e6,
+			postTradeBals: map[uint32]uint64{
+				42: 1e7 - 2e6,
+				0:  1e7,
+			},
+			notes: []*noteAndBalances{
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  1e6,
+						QuoteFilled: calc.BaseToQuote(5.1e7, 1e6),
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 - 2e6,
+						0:  1e7 + calc.BaseToQuote(5.1e7, 1e6),
+					},
+				},
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  1e6,
+						QuoteFilled: calc.BaseToQuote(5.1e7, 1e6),
+						Complete:    true,
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 - 1e6,
+						0:  1e7 + calc.BaseToQuote(5.1e7, 1e6),
+					},
+				},
+			},
+		},
+		// "buy trade partially filled"
+		{
+			name: "buy trade partially filled",
+			cfg: &BotConfig{
+				Host:             "host",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             "Binance",
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			assetBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			baseAsset:  42,
+			quoteAsset: 0,
+			sell:       false,
+			rate:       5e7,
+			qty:        2e6,
+			postTradeBals: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7 - calc.BaseToQuote(5e7, 2e6),
+			},
+			notes: []*noteAndBalances{
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  1e6,
+						QuoteFilled: calc.BaseToQuote(4.9e7, 1e6),
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 + 1e6,
+						0:  1e7 - calc.BaseToQuote(5e7, 2e6),
+					},
+				},
+				{
+					note: &libxc.TradeUpdate{
+						TradeID:     tradeID,
+						BaseFilled:  1e6,
+						QuoteFilled: calc.BaseToQuote(4.9e7, 1e6),
+						Complete:    true,
+					},
+					balances: map[uint32]uint64{
+						42: 1e7 + 1e6,
+						0:  1e7 - calc.BaseToQuote(4.9e7, 1e6),
+					},
+				},
+			},
+		},
+	}
+
+	runTest := func(tt test) {
+		tCore := newTCore()
+		tCore.setAssetBalances(tt.assetBalances)
+		mm, done := tNewMarketMaker(t, tCore)
+		defer done()
+
+		cex := newTCEX()
+		cex.balances = make(map[uint32]*libxc.ExchangeBalance)
+		cex.tradeID = tradeID
+		for assetID, balance := range tt.cexBalances {
+			cex.balances[assetID] = &libxc.ExchangeBalance{
+				Available: balance,
+			}
+		}
+
+		botCfgs := []*BotConfig{tt.cfg}
+		cexes := map[string]libxc.CEX{
+			tt.cfg.CEXCfg.Name: cex,
+		}
+
+		mm.setupBalances(botCfgs, cexes)
+
+		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseAsset, tt.cfg.QuoteAsset)
+		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
+
+		_, unsubscribe := wrappedCEX.SubscribeTradeUpdates()
+		defer unsubscribe()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		_, err := wrappedCEX.Trade(ctx, tt.baseAsset, tt.quoteAsset, tt.sell, tt.rate, tt.qty)
+		if err != nil {
+			t.Fatalf("%s: unexpected Trade error: %v", tt.name, err)
+		}
+
+		err = cexBalancesMatch(tt.postTradeBals, mktID, mm)
+		if err != nil {
+			t.Fatalf("%s: post trade bals do not match: %v", tt.name, err)
+		}
+
+		for i, note := range tt.notes {
+			cex.tradeUpdates <- note.note
+			// send dummy update
+			cex.tradeUpdates <- &libxc.TradeUpdate{
+				TradeID: "",
+			}
+			err = cexBalancesMatch(note.balances, mktID, mm)
+			if err != nil {
+				t.Fatalf("%s: balances do not match after note %d: %v", tt.name, i, err)
+			}
+		}
+	}
+
+	for _, test := range tests {
+		runTest(test)
+	}
+}
+
+func TestSegregatedCEXDeposit(t *testing.T) {
+	cexName := "Binance"
+
+	type test struct {
+		name           string
+		dexBalances    map[uint32]uint64
+		cexBalances    map[uint32]uint64
+		cfg            *BotConfig
+		depositAmt     uint64
+		depositAsset   uint32
+		cexConfirm     bool
+		cexReceivedAmt uint64
+		isWithdrawer   bool
+
+		expError       bool
+		expDexBalances map[uint32]*botBalance
+		expCexBalances map[uint32]uint64
+	}
+
+	tests := []test{
+		{
+			name: "ok",
+			dexBalances: map[uint32]uint64{
+				42: 1e8,
+				0:  1e8,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e8,
+			},
+			cfg: &BotConfig{
+				Host:             "dex.com",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             cexName,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			depositAmt:     4e7,
+			depositAsset:   42,
+			cexConfirm:     true,
+			cexReceivedAmt: 4e7 - 2000,
+			isWithdrawer:   true,
+			expDexBalances: map[uint32]*botBalance{
+				42: {
+					Available: 1e8 - 4e7,
+				},
+				0: {
+					Available: 1e8,
+				},
+			},
+			expCexBalances: map[uint32]uint64{
+				42: 1e7 + 4e7 - 2000,
+				0:  1e8,
+			},
+		},
+		{
+			name: "insufficient balance",
+			dexBalances: map[uint32]uint64{
+				42: 4e7 - 1,
+				0:  1e8,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e8,
+			},
+			cfg: &BotConfig{
+				Host:             "dex.com",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             cexName,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			depositAmt:     4e7,
+			depositAsset:   42,
+			cexConfirm:     true,
+			cexReceivedAmt: 4e7 - 2000,
+			isWithdrawer:   true,
+			expError:       true,
+		},
+		{
+			name: "cex failed to confirm deposit",
+			dexBalances: map[uint32]uint64{
+				42: 1e8,
+				0:  1e8,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e8,
+			},
+			cfg: &BotConfig{
+				Host:             "dex.com",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             cexName,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			depositAmt:     4e7,
+			depositAsset:   42,
+			cexConfirm:     false,
+			cexReceivedAmt: 4e7 - 2000,
+			isWithdrawer:   true,
+			expDexBalances: map[uint32]*botBalance{
+				42: {
+					Available: 1e8 - 4e7,
+				},
+				0: {
+					Available: 1e8,
+				},
+			},
+			expCexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e8,
+			},
+		},
+	}
+
+	runTest := func(tt test) {
+		tCore := newTCore()
+		tCore.isWithdrawer[tt.depositAsset] = tt.isWithdrawer
+		tCore.setAssetBalances(tt.dexBalances)
+
+		cex := newTCEX()
+		for assetID, balance := range tt.cexBalances {
+			cex.balances[assetID] = &libxc.ExchangeBalance{
+				Available: balance,
+			}
+		}
+		cex.depositConfirmed = tt.cexConfirm
+		cex.confirmDepositAmt = tt.cexReceivedAmt
+		cex.depositAddress = hex.EncodeToString(encode.RandomBytes(32))
+
+		mm, done := tNewMarketMaker(t, tCore)
+		defer done()
+		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]libxc.CEX{cexName: cex})
+		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseAsset, tt.cfg.QuoteAsset)
+		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		onConfirm := func() {
+			wg.Done()
+		}
+		err := wrappedCEX.Deposit(context.Background(), tt.depositAsset, tt.depositAmt, onConfirm)
+		if err != nil {
+			if tt.expError {
+				return
+			}
+			t.Fatalf("%s: unexpected error: %v", tt.name, err)
+		}
+		if tt.expError {
+			t.Fatalf("%s: expected error but did not get", tt.name)
+		}
+
+		wg.Wait()
+
+		if err := assetBalancesMatch(tt.expDexBalances, mktID, mm); err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if err := cexBalancesMatch(tt.expCexBalances, mktID, mm); err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if tCore.lastSendArgs.address != cex.depositAddress {
+			t.Fatalf("%s: did not send to deposit address", tt.name)
+		}
+		if tCore.lastSendArgs.subtract != tt.isWithdrawer {
+			t.Fatalf("%s: withdrawer %v != subtract %v", tt.name, tt.isWithdrawer, tCore.lastSendArgs.subtract)
+		}
+		if tCore.lastSendArgs.value != tt.depositAmt {
+			t.Fatalf("%s: send value %d != expected %d", tt.name, tCore.lastSendArgs.value, tt.depositAmt)
+		}
+	}
+
+	for _, test := range tests {
+		runTest(test)
+	}
+}
+
+func TestSegregatedCEXWithdraw(t *testing.T) {
+	cexName := "Binance"
+
+	type test struct {
+		name            string
+		dexBalances     map[uint32]uint64
+		cexBalances     map[uint32]uint64
+		cfg             *BotConfig
+		withdrawAmt     uint64
+		withdrawAsset   uint32
+		cexWithdrawnAmt uint64
+
+		expError       bool
+		expDexBalances map[uint32]*botBalance
+		expCexBalances map[uint32]uint64
+	}
+
+	tests := []test{
+		{
+			name: "ok",
+			dexBalances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e8,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 1e8,
+				0:  1e8,
+			},
+			cfg: &BotConfig{
+				Host:             "dex.com",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             cexName,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      100,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     100,
+				},
+			},
+			withdrawAmt:     4e7,
+			withdrawAsset:   42,
+			cexWithdrawnAmt: 4e7 - 2000,
+			expDexBalances: map[uint32]*botBalance{
+				42: {
+					Available: 5e7 - 2000,
+				},
+				0: {
+					Available: 1e8,
+				},
+			},
+			expCexBalances: map[uint32]uint64{
+				42: 1e8 - 4e7,
+				0:  1e8,
+			},
+		},
+		{
+			name: "insufficient balance",
+			dexBalances: map[uint32]uint64{
+				42: 1e8,
+				0:  1e8,
+			},
+			cexBalances: map[uint32]uint64{
+				42: 4e7 - 1,
+				0:  1e8,
+			},
+			cfg: &BotConfig{
+				Host:             "dex.com",
+				BaseAsset:        42,
+				QuoteAsset:       0,
+				BaseBalanceType:  Percentage,
+				BaseBalance:      100,
+				QuoteBalanceType: Percentage,
+				QuoteBalance:     100,
+				CEXCfg: &BotCEXCfg{
+					Name:             cexName,
+					BaseBalanceType:  Percentage,
+					BaseBalance:      50,
+					QuoteBalanceType: Percentage,
+					QuoteBalance:     50,
+				},
+			},
+			withdrawAmt:     4e7,
+			withdrawAsset:   42,
+			cexWithdrawnAmt: 4e7 - 2000,
+			expError:        true,
+		},
+	}
+
+	runTest := func(tt test) {
+		tCore := newTCore()
+		tCore.setAssetBalances(tt.dexBalances)
+		tCore.newDepositAddress = hex.EncodeToString(encode.RandomBytes(32))
+
+		cex := newTCEX()
+		for assetID, balance := range tt.cexBalances {
+			cex.balances[assetID] = &libxc.ExchangeBalance{
+				Available: balance,
+			}
+		}
+		cex.withdrawAmt = tt.cexWithdrawnAmt
+		cex.withdrawTxID = hex.EncodeToString(encode.RandomBytes(32))
+
+		mm, done := tNewMarketMaker(t, tCore)
+		defer done()
+		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]libxc.CEX{cexName: cex})
+		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseAsset, tt.cfg.QuoteAsset)
+		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		onConfirm := func() {
+			wg.Done()
+		}
+		err := wrappedCEX.Withdraw(context.Background(), tt.withdrawAsset, tt.withdrawAmt, onConfirm)
+		if err != nil {
+			if tt.expError {
+				return
+			}
+			t.Fatalf("%s: unexpected error: %v", tt.name, err)
+		}
+		if tt.expError {
+			t.Fatalf("%s: expected error but did not get", tt.name)
+		}
+		wg.Wait()
+
+		if err := assetBalancesMatch(tt.expDexBalances, mktID, mm); err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if err := cexBalancesMatch(tt.expCexBalances, mktID, mm); err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if cex.lastWithdrawArgs.address != tCore.newDepositAddress {
+			t.Fatalf("%s: did not send to deposit address", tt.name)
+		}
+	}
+
+	for _, test := range tests {
+		runTest(test)
 	}
 }
