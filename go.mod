@@ -5,6 +5,7 @@ go 1.19
 require (
 	decred.org/dcrwallet/v3 v3.0.1
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
+	github.com/aead/poly1305 v0.0.0-20180717145839-3fee0db0b635
 	github.com/btcsuite/btcd v0.23.4
 	github.com/btcsuite/btcd/btcec/v2 v2.2.2
 	github.com/btcsuite/btcd/btcutil v1.1.3

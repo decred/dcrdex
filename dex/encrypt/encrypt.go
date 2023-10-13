@@ -9,9 +9,9 @@ import (
 	"runtime"
 
 	"decred.org/dcrdex/dex/encode"
+	"github.com/aead/poly1305"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
-	"golang.org/x/crypto/poly1305"
 )
 
 // Crypter is an interface for an encryption key and encryption/decryption
@@ -120,7 +120,7 @@ func newArgonPolyCrypter(pw []byte) *argonPolyCrypter {
 	}
 	// Use the mac key and the serialized parameters to generate the
 	// authenticator.
-	poly1305.Sum(&c.tag, c.serializeParams(), &polyKey)
+	c.tag = poly1305.Sum(c.serializeParams(), polyKey)
 	return c
 }
 
@@ -232,7 +232,7 @@ func decodeArgonPoly_v0(pw []byte, pushes [][]byte) (*argonPolyCrypter, error) {
 	polyKeyB := keyB[KeySize:]
 	var polyKey [KeySize]byte
 	copy(polyKey[:], polyKeyB)
-	if !poly1305.Verify(&c.tag, c.serializeParams(), &polyKey) {
+	if !poly1305.Verify(&c.tag, c.serializeParams(), polyKey) {
 		return nil, fmt.Errorf("incorrect password")
 	}
 
