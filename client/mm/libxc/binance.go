@@ -68,8 +68,6 @@ func newBNCBook() *bncBook {
 }
 
 type bncAssetConfig struct {
-	// assetID is the bip id
-	assetID uint32
 	// symbol is the DEX asset symbol, always lower case
 	symbol string
 	// coin is the asset symbol on binance, always upper case.
@@ -83,28 +81,37 @@ type bncAssetConfig struct {
 	conversionFactor uint64
 }
 
-func bncSymbolData(symbol string) (*bncAssetConfig, error) {
-	coin := strings.ToUpper(symbol)
-	var ok bool
-	assetID, ok := dex.BipSymbolID(symbol)
-	if !ok {
-		return nil, fmt.Errorf("not id found for %q", symbol)
+// TODO: check all symbols
+func mapDEXSymbolToBinance(symbol string) string {
+	if symbol == "POLYGON" {
+		return "MATIC"
 	}
-	networkID := assetID
+	return symbol
+}
+
+func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
+	symbol := dex.BipIDSymbol(assetID)
+	if symbol == "" {
+		return nil, fmt.Errorf("no symbol found for %d", assetID)
+	}
+
+	coin := strings.ToUpper(symbol)
+	chain := strings.ToUpper(symbol)
 	if token := asset.TokenInfo(assetID); token != nil {
-		networkID = token.ParentID
 		parts := strings.Split(symbol, ".")
 		coin = strings.ToUpper(parts[0])
+		chain = strings.ToUpper(parts[1])
 	}
+
 	ui, err := asset.UnitInfo(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("no unit info found for %d", assetID)
 	}
+
 	return &bncAssetConfig{
-		assetID:          assetID,
 		symbol:           symbol,
-		coin:             coin,
-		chain:            strings.ToUpper(dex.BipIDSymbol(networkID)),
+		coin:             mapDEXSymbolToBinance(coin),
+		chain:            mapDEXSymbolToBinance(chain),
 		conversionFactor: ui.Conventional.ConversionFactor,
 	}, nil
 }
@@ -114,6 +121,12 @@ func bncSymbolData(symbol string) (*bncAssetConfig, error) {
 type bncBalance struct {
 	available float64
 	locked    float64
+}
+
+type tradeInfo struct {
+	updaterID int
+	baseID    uint32
+	quoteID   uint32
 }
 
 type binance struct {
@@ -143,7 +156,7 @@ type binance struct {
 	books    map[string]*bncBook
 
 	tradeUpdaterMtx    sync.RWMutex
-	tradeToUpdater     map[string]int
+	tradeInfo          map[string]*tradeInfo
 	tradeUpdaters      map[int]chan *TradeUpdate
 	tradeUpdateCounter int
 
@@ -178,7 +191,7 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 		balances:           make(map[string]*bncBalance),
 		books:              make(map[string]*bncBook),
 		net:                net,
-		tradeToUpdater:     make(map[string]int),
+		tradeInfo:          make(map[string]*tradeInfo),
 		tradeUpdaters:      make(map[int]chan *TradeUpdate),
 		cexUpdaters:        make(map[chan interface{}]struct{}, 0),
 		tradeIDNoncePrefix: encode.RandomBytes(10),
@@ -354,8 +367,8 @@ func (bnc *binance) SubscribeCEXUpdates() (<-chan interface{}, func()) {
 }
 
 // Balance returns the balance of an asset at the CEX.
-func (bnc *binance) Balance(symbol string) (*ExchangeBalance, error) {
-	assetConfig, err := bncSymbolData(symbol)
+func (bnc *binance) Balance(assetID uint32) (*ExchangeBalance, error) {
+	assetConfig, err := bncAssetCfg(assetID)
 	if err != nil {
 		return nil, err
 	}
@@ -382,20 +395,20 @@ func (bnc *binance) generateTradeID() string {
 
 // Trade executes a trade on the CEX. subscriptionID takes an ID returned from
 // SubscribeTradeUpdates.
-func (bnc *binance) Trade(ctx context.Context, baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, subscriptionID int) (string, error) {
+func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (string, error) {
 	side := "BUY"
 	if sell {
 		side = "SELL"
 	}
 
-	baseCfg, err := bncSymbolData(baseSymbol)
+	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
-		return "", fmt.Errorf("error getting symbol data for %s: %w", baseSymbol, err)
+		return "", fmt.Errorf("error getting asset cfg for %d", baseID)
 	}
 
-	quoteCfg, err := bncSymbolData(quoteSymbol)
+	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
-		return "", fmt.Errorf("error getting symbol data for %s: %w", quoteSymbol, err)
+		return "", fmt.Errorf("error getting asset cfg for %d", quoteID)
 	}
 
 	slug := baseCfg.coin + quoteCfg.coin
@@ -434,9 +447,194 @@ func (bnc *binance) Trade(ctx context.Context, baseSymbol, quoteSymbol string, s
 
 	bnc.tradeUpdaterMtx.Lock()
 	defer bnc.tradeUpdaterMtx.Unlock()
-	bnc.tradeToUpdater[tradeID] = subscriptionID
+	bnc.tradeInfo[tradeID] = &tradeInfo{
+		updaterID: subscriptionID,
+		baseID:    baseID,
+		quoteID:   quoteID,
+	}
 
 	return tradeID, err
+}
+
+func (bnc *binance) assetPrecision(coin string) (int, error) {
+	for _, market := range bnc.markets.Load().(map[string]*bnMarket) {
+		if market.BaseAsset == coin {
+			return market.BaseAssetPrecision, nil
+		}
+		if market.QuoteAsset == coin {
+			return market.QuoteAssetPrecision, nil
+		}
+	}
+	return 0, fmt.Errorf("asset %s not found", coin)
+}
+
+func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(uint64, string)) error {
+	assetCfg, err := bncAssetCfg(assetID)
+	if err != nil {
+		return fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
+	}
+
+	precision, err := bnc.assetPrecision(assetCfg.coin)
+	if err != nil {
+		return fmt.Errorf("error getting precision for %s: %w", assetCfg.coin, err)
+	}
+
+	amt := float64(qty) / float64(assetCfg.conversionFactor)
+	v := make(url.Values)
+	v.Add("coin", assetCfg.coin)
+	v.Add("network", assetCfg.chain)
+	v.Add("address", address)
+	v.Add("amount", strconv.FormatFloat(amt, 'f', precision, 64))
+
+	withdrawResp := struct {
+		ID string `json:"id"`
+	}{}
+	err = bnc.postAPI(ctx, "/sapi/v1/capital/withdraw/apply", nil, v, true, true, &withdrawResp)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		getWithdrawalStatus := func() (complete bool, amount uint64, txID string) {
+			type withdrawalHistoryStatus struct {
+				ID     string  `json:"id"`
+				Amount float64 `json:"amount,string"`
+				Status int     `json:"status"`
+				TxID   string  `json:"txId"`
+			}
+
+			withdrawHistoryResponse := []*withdrawalHistoryStatus{}
+			v := make(url.Values)
+			v.Add("coin", assetCfg.coin)
+			err = bnc.getAPI(ctx, "/sapi/v1/capital/withdraw/history", v, true, true, &withdrawHistoryResponse)
+			if err != nil {
+				bnc.log.Errorf("Error getting withdrawal status: %v", err)
+				return false, 0, ""
+			}
+
+			var status *withdrawalHistoryStatus
+			for _, s := range withdrawHistoryResponse {
+				if s.ID == withdrawResp.ID {
+					status = s
+				}
+			}
+			if status == nil {
+				bnc.log.Errorf("Withdrawal status not found for %s", withdrawResp.ID)
+				return false, 0, ""
+			}
+
+			amt := status.Amount * float64(assetCfg.conversionFactor)
+			return status.Status == 6, uint64(amt), status.TxID
+		}
+
+		for {
+			ticker := time.NewTicker(time.Second * 20)
+			defer ticker.Stop()
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if complete, amt, txID := getWithdrawalStatus(); complete {
+					onComplete(amt, txID)
+					return
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (string, error) {
+	assetCfg, err := bncAssetCfg(assetID)
+	if err != nil {
+		return "", fmt.Errorf("error getting asset cfg for %d: %w", assetID, err)
+	}
+
+	v := make(url.Values)
+	v.Add("coin", assetCfg.coin)
+	v.Add("network", assetCfg.chain)
+
+	resp := struct {
+		Address string `json:"address"`
+	}{}
+	err = bnc.getAPI(ctx, "/sapi/v1/capital/deposit/address", v, true, true, &resp)
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Address, nil
+}
+
+func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(bool, uint64)) {
+	const pendingStatus = 0
+	const successStatus = 1
+	const creditedStatus = 6
+	const wrongDepositStatus = 7
+	const waitingUserConfirmStatus = 8
+
+	type depositHistory struct {
+		Amount       float64 `json:"amount,string"`
+		Coin         string  `json:"coin"`
+		Network      string  `json:"network"`
+		Status       int     `json:"status"`
+		Address      string  `json:"address"`
+		AddressTag   string  `json:"addressTag"`
+		TxID         string  `json:"txId"`
+		InsertTime   int64   `json:"insertTime"`
+		TransferType int     `json:"transferType"`
+		ConfirmTimes string  `json:"confirmTimes"`
+	}
+
+	checkDepositStatus := func() (success, done bool) {
+		resp := []*depositHistory{}
+		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", nil, true, true, resp)
+		if err != nil {
+			bnc.log.Errorf("error getting deposit status: %v", err)
+			return false, false
+		}
+
+		for _, status := range resp {
+			if status.TxID == txID {
+				switch status.Status {
+				case successStatus, creditedStatus:
+					return true, true
+				case pendingStatus:
+					return false, false
+				case waitingUserConfirmStatus:
+					// This shouldn't ever happen.
+					bnc.log.Errorf("Deposit %s to binance requires user confirmation!")
+					return false, false
+				case wrongDepositStatus:
+					return false, true
+				default:
+					bnc.log.Errorf("Deposit %s to binance has an unknown status %d", status.Status)
+				}
+			}
+		}
+
+		return false, false
+	}
+
+	go func() {
+		for {
+			ticker := time.NewTicker(time.Second * 20)
+			defer ticker.Stop()
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				success, done := checkDepositStatus()
+				if done {
+					// TODO: get amount
+					onConfirm(success, 0)
+					return
+				}
+			}
+		}
+	}()
 }
 
 // SubscribeTradeUpdates returns a channel that the caller can use to
@@ -462,15 +660,15 @@ func (bnc *binance) SubscribeTradeUpdates() (<-chan *TradeUpdate, func(), int) {
 }
 
 // CancelTrade cancels a trade on the CEX.
-func (bnc *binance) CancelTrade(ctx context.Context, baseSymbol, quoteSymbol string, tradeID string) error {
-	baseCfg, err := bncSymbolData(baseSymbol)
+func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error {
+	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
-		return fmt.Errorf("error getting symbol data for %s: %w", baseSymbol, err)
+		return fmt.Errorf("error getting asset cfg for %d", baseID)
 	}
 
-	quoteCfg, err := bncSymbolData(quoteSymbol)
+	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
-		return fmt.Errorf("error getting symbol data for %s: %w", quoteSymbol, err)
+		return fmt.Errorf("error getting asset cfg for %d", quoteID)
 	}
 
 	slug := baseCfg.coin + quoteCfg.coin
@@ -485,27 +683,6 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseSymbol, quoteSymbol str
 	}
 
 	return bnc.requestInto(req, &struct{}{})
-}
-
-func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
-	bnc.balanceMtx.RLock()
-	defer bnc.balanceMtx.RUnlock()
-
-	balances := make(map[uint32]*ExchangeBalance)
-
-	for coin, bal := range bnc.balances {
-		assetConfig, err := bncSymbolData(strings.ToLower(coin))
-		if err != nil {
-			continue
-		}
-
-		balances[assetConfig.assetID] = &ExchangeBalance{
-			Available: uint64(bal.available * float64(assetConfig.conversionFactor)),
-			Locked:    uint64(bal.locked * float64(assetConfig.conversionFactor)),
-		}
-	}
-
-	return balances, nil
 }
 
 func (bnc *binance) Markets() ([]*Market, error) {
@@ -639,7 +816,9 @@ type bncStreamUpdate struct {
 	Balances           []*wsBalance    `json:"B"`
 	BalanceDelta       float64         `json:"d,string"`
 	Filled             float64         `json:"z,string"`
+	QuoteFilled        float64         `json:"Z,string"`
 	OrderQty           float64         `json:"q,string"`
+	QuoteOrderQty      float64         `json:"Q,string"`
 	CancelledOrderID   string          `json:"C"`
 	E                  json.RawMessage `json:"E"`
 }
@@ -678,26 +857,26 @@ func (bnc *binance) handleOutboundAccountPosition(update *bncStreamUpdate) {
 	bnc.sendCexUpdateNotes()
 }
 
-func (bnc *binance) getTradeUpdater(tradeID string) (chan *TradeUpdate, error) {
+func (bnc *binance) getTradeUpdater(tradeID string) (chan *TradeUpdate, *tradeInfo, error) {
 	bnc.tradeUpdaterMtx.RLock()
 	defer bnc.tradeUpdaterMtx.RUnlock()
 
-	updaterID, found := bnc.tradeToUpdater[tradeID]
+	tradeInfo, found := bnc.tradeInfo[tradeID]
 	if !found {
-		return nil, fmt.Errorf("updater not found for trade ID %v", tradeID)
+		return nil, nil, fmt.Errorf("info not found for trade ID %v", tradeID)
 	}
-	updater, found := bnc.tradeUpdaters[updaterID]
+	updater, found := bnc.tradeUpdaters[tradeInfo.updaterID]
 	if !found {
-		return nil, fmt.Errorf("no updater with ID %v", tradeID)
+		return nil, nil, fmt.Errorf("no updater with ID %v", tradeID)
 	}
 
-	return updater, nil
+	return updater, tradeInfo, nil
 }
 
 func (bnc *binance) removeTradeUpdater(tradeID string) {
 	bnc.tradeUpdaterMtx.RLock()
 	defer bnc.tradeUpdaterMtx.RUnlock()
-	delete(bnc.tradeToUpdater, tradeID)
+	delete(bnc.tradeInfo, tradeID)
 }
 
 func (bnc *binance) handleExecutionReport(update *bncStreamUpdate) {
@@ -711,16 +890,31 @@ func (bnc *binance) handleExecutionReport(update *bncStreamUpdate) {
 		id = update.ClientOrderID
 	}
 
-	updater, err := bnc.getTradeUpdater(id)
+	updater, tradeInfo, err := bnc.getTradeUpdater(id)
 	if err != nil {
 		bnc.log.Errorf("Error getting trade updater: %v", err)
 		return
 	}
 
 	complete := status == "FILLED" || status == "CANCELED" || status == "REJECTED" || status == "EXPIRED"
+
+	baseCfg, err := bncAssetCfg(tradeInfo.baseID)
+	if err != nil {
+		bnc.log.Errorf("Error getting asset cfg for %d: %v", tradeInfo.baseID, err)
+		return
+	}
+
+	quoteCfg, err := bncAssetCfg(tradeInfo.quoteID)
+	if err != nil {
+		bnc.log.Errorf("Error getting asset cfg for %d: %v", tradeInfo.quoteID, err)
+		return
+	}
+
 	updater <- &TradeUpdate{
-		TradeID:  id,
-		Complete: complete,
+		TradeID:     id,
+		Complete:    complete,
+		BaseFilled:  uint64(update.Filled * float64(baseCfg.conversionFactor)),
+		QuoteFilled: uint64(update.QuoteFilled * float64(quoteCfg.conversionFactor)),
 	}
 
 	if complete {
@@ -1083,24 +1277,55 @@ func (bnc *binance) startMarketDataStream(ctx context.Context, baseSymbol, quote
 }
 
 // UnsubscribeMarket unsubscribes from order book updates on a market.
-func (bnc *binance) UnsubscribeMarket(baseSymbol, quoteSymbol string) {
-	bnc.stopMarketDataStream(strings.ToLower(baseSymbol + quoteSymbol))
+func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
+	baseCfg, err := bncAssetCfg(baseID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d", baseID)
+	}
+
+	quoteCfg, err := bncAssetCfg(quoteID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d", quoteID)
+	}
+
+	bnc.stopMarketDataStream(strings.ToLower(baseCfg.coin + quoteCfg.coin))
+	return nil
 }
 
 // SubscribeMarket subscribes to order book updates on a market. This must
 // be called before calling VWAP.
-func (bnc *binance) SubscribeMarket(ctx context.Context, baseSymbol, quoteSymbol string) error {
-	return bnc.startMarketDataStream(ctx, baseSymbol, quoteSymbol)
+func (bnc *binance) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
+	baseCfg, err := bncAssetCfg(baseID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d", baseID)
+	}
+
+	quoteCfg, err := bncAssetCfg(quoteID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d", quoteID)
+	}
+
+	return bnc.startMarketDataStream(ctx, baseCfg.coin, quoteCfg.coin)
 }
 
 // VWAP returns the volume weighted average price for a certain quantity
 // of the base asset on a market.
-func (bnc *binance) VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
+func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
 	fail := func(err error) (uint64, uint64, bool, error) {
 		return 0, 0, false, err
 	}
 
-	slug := strings.ToLower(baseSymbol + quoteSymbol)
+	baseCfg, err := bncAssetCfg(baseID)
+	if err != nil {
+		return fail(fmt.Errorf("error getting asset cfg for %d", baseID))
+	}
+
+	quoteCfg, err := bncAssetCfg(quoteID)
+	if err != nil {
+		return fail(fmt.Errorf("error getting asset cfg for %d", quoteID))
+	}
+
+	slug := strings.ToLower(baseCfg.coin + quoteCfg.coin)
 	var side []*bookBin
 	var latestUpdate int64
 	bnc.booksMtx.RLock()
@@ -1120,16 +1345,6 @@ func (bnc *binance) VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) 
 
 	if latestUpdate < time.Now().Unix()-60 {
 		return fail(fmt.Errorf("book for %s is stale", slug))
-	}
-
-	baseCfg, err := bncSymbolData(baseSymbol)
-	if err != nil {
-		return fail(fmt.Errorf("error getting symbol data for %s: %w", baseSymbol, err))
-	}
-
-	quoteCfg, err := bncSymbolData(quoteSymbol)
-	if err != nil {
-		return fail(fmt.Errorf("error getting symbol data for %s: %w", quoteSymbol, err))
 	}
 
 	remaining := qty
@@ -1202,24 +1417,27 @@ type bnMarket struct {
 	OrderTypes          []string `json:"orderTypes"`
 }
 
-// dexMarkets returns all the possible markets for this symbol. A symbol
-// represents a single market on the CEX, but tokens on the DEX have a
-// different assetID for each network they are on, therefore they will
+// dexMarkets returns all the possible dex markets for this binance market.
+// A symbol represents a single market on the CEX, but tokens on the DEX
+// have a different assetID for each network they are on, therefore they will
 // match multiple markets as defined using assetID.
 func (s *bnMarket) dexMarkets(tokenIDs map[string][]uint32) []*Market {
 	var baseAssetIDs, quoteAssetIDs []uint32
 
 	getAssetIDs := func(coin string) []uint32 {
 		symbol := strings.ToLower(coin)
+		assetIDs := make([]uint32, 0, 1)
+
+		// In some cases a token may also be a base asset. For example btc
+		// should return the btc ID as well as the ID of all wbtc tokens.
 		if assetID, found := dex.BipSymbolID(symbol); found {
-			return []uint32{assetID}
+			assetIDs = append(assetIDs, assetID)
 		}
-
 		if tokenIDs, found := tokenIDs[symbol]; found {
-			return tokenIDs
+			assetIDs = append(assetIDs, tokenIDs...)
 		}
 
-		return nil
+		return assetIDs
 	}
 
 	baseAssetIDs = getAssetIDs(s.BaseAsset)
