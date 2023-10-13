@@ -1878,11 +1878,6 @@ export class AppPassResetForm {
       return
     }
 
-    // Clear the notification cache. Useful for development purposes, since
-    // the Application will only clear them on login, which would leave old
-    // browser-cached notifications in place after registering even if the
-    // client db is wiped.
-    app().setNotes([])
     const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
     if (!seed || seed.length !== 128 /* 64 bytes hex encoded value, check and fail early */) {
       Doc.showFormError(page.appPWResetErrMsg, intl.prep(intl.ID_INVALID_SEED))
