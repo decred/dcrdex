@@ -30,38 +30,50 @@ type dexOrder struct {
 }
 
 type cexOrder struct {
-	baseSymbol, quoteSymbol string
-	qty, rate               uint64
-	sell                    bool
+	baseID, quoteID uint32
+	qty, rate       uint64
+	sell            bool
+}
+
+type withdrawArgs struct {
+	address string
+	amt     uint64
+	assetID uint32
 }
 
 type tCEX struct {
-	bidsVWAP   map[uint64]vwapResult
-	asksVWAP   map[uint64]vwapResult
-	vwapErr    error
-	balances   map[string]*libxc.ExchangeBalance
-	balanceErr error
-
-	tradeID   string
-	tradeErr  error
-	lastTrade *cexOrder
-
-	cancelledTrades []string
-	cancelTradeErr  error
-
-	tradeUpdates   chan *libxc.TradeUpdate
-	tradeUpdatesID int
+	bidsVWAP             map[uint64]vwapResult
+	asksVWAP             map[uint64]vwapResult
+	vwapErr              error
+	balances             map[uint32]*libxc.ExchangeBalance
+	balanceErr           error
+	tradeID              string
+	tradeErr             error
+	lastTrade            *cexOrder
+	cancelledTrades      []string
+	cancelTradeErr       error
+	tradeUpdates         chan *libxc.TradeUpdate
+	tradeUpdatesID       int
+	lastConfirmDepositTx string
+	confirmDepositAmt    uint64
+	depositConfirmed     bool
+	depositAddress       string
+	withdrawAmt          uint64
+	withdrawTxID         string
+	lastWithdrawArgs     *withdrawArgs
 }
 
 func newTCEX() *tCEX {
 	return &tCEX{
 		bidsVWAP:        make(map[uint64]vwapResult),
 		asksVWAP:        make(map[uint64]vwapResult),
-		balances:        make(map[string]*libxc.ExchangeBalance),
+		balances:        make(map[uint32]*libxc.ExchangeBalance),
 		cancelledTrades: make([]string, 0),
 		tradeUpdates:    make(chan *libxc.TradeUpdate),
 	}
 }
+
+var _ libxc.CEX = (*tCEX)(nil)
 
 func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return nil, nil
@@ -72,29 +84,30 @@ func (c *tCEX) Balances() (map[uint32]*libxc.ExchangeBalance, error) {
 func (c *tCEX) Markets() ([]*libxc.Market, error) {
 	return nil, nil
 }
-func (c *tCEX) Balance(symbol string) (*libxc.ExchangeBalance, error) {
-	return c.balances[symbol], c.balanceErr
+func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
+	return c.balances[assetID], c.balanceErr
 }
-func (c *tCEX) Trade(ctx context.Context, baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, updaterID int) (string, error) {
+func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, updaterID int) (string, error) {
 	if c.tradeErr != nil {
 		return "", c.tradeErr
 	}
-	c.lastTrade = &cexOrder{baseSymbol, quoteSymbol, qty, rate, sell}
+	c.lastTrade = &cexOrder{baseID, quoteID, qty, rate, sell}
 	return c.tradeID, nil
 }
-func (c *tCEX) CancelTrade(ctx context.Context, baseSymbol, quoteSymbol, tradeID string) error {
+func (c *tCEX) CancelTrade(ctx context.Context, seID, quoteID uint32, tradeID string) error {
 	if c.cancelTradeErr != nil {
 		return c.cancelTradeErr
 	}
 	c.cancelledTrades = append(c.cancelledTrades, tradeID)
 	return nil
 }
-func (c *tCEX) SubscribeMarket(ctx context.Context, baseSymbol, quoteSymbol string) error {
+func (c *tCEX) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
 	return nil
 }
-func (c *tCEX) UnsubscribeMarket(baseSymbol, quoteSymbol string) {
+func (c *tCEX) UnsubscribeMarket(baseID, quoteID uint32) error {
+	return nil
 }
-func (c *tCEX) VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+func (c *tCEX) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
 	if c.vwapErr != nil {
 		return 0, 0, false, c.vwapErr
 	}
@@ -119,8 +132,113 @@ func (c *tCEX) SubscribeTradeUpdates() (<-chan *libxc.TradeUpdate, func(), int) 
 func (c *tCEX) SubscribeCEXUpdates() (<-chan interface{}, func()) {
 	return nil, func() {}
 }
+func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, error) {
+	return c.depositAddress, nil
+}
 
-var _ libxc.CEX = (*tCEX)(nil)
+func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(uint64, string)) error {
+	c.lastWithdrawArgs = &withdrawArgs{
+		address: address,
+		amt:     qty,
+		assetID: assetID,
+	}
+	onComplete(c.withdrawAmt, c.withdrawTxID)
+	return nil
+}
+
+func (c *tCEX) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(bool, uint64)) {
+	c.lastConfirmDepositTx = txID
+	onConfirm(c.depositConfirmed, c.confirmDepositAmt)
+}
+
+type tWrappedCEX struct {
+	bidsVWAP         map[uint64]vwapResult
+	asksVWAP         map[uint64]vwapResult
+	vwapErr          error
+	balances         map[uint32]*libxc.ExchangeBalance
+	balanceErr       error
+	tradeID          string
+	tradeErr         error
+	lastTrade        *cexOrder
+	cancelledTrades  []string
+	cancelTradeErr   error
+	tradeUpdates     chan *libxc.TradeUpdate
+	lastWithdrawArgs *withdrawArgs
+	lastDepositArgs  *withdrawArgs
+	confirmDeposit   func()
+	confirmWithdraw  func()
+}
+
+func newTWrappedCEX() *tWrappedCEX {
+	return &tWrappedCEX{
+		bidsVWAP:        make(map[uint64]vwapResult),
+		asksVWAP:        make(map[uint64]vwapResult),
+		balances:        make(map[uint32]*libxc.ExchangeBalance),
+		cancelledTrades: make([]string, 0),
+		tradeUpdates:    make(chan *libxc.TradeUpdate),
+	}
+}
+
+var _ cex = (*tWrappedCEX)(nil)
+
+func (c *tWrappedCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
+	return c.balances[assetID], c.balanceErr
+}
+func (c *tWrappedCEX) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error {
+	if c.cancelTradeErr != nil {
+		return c.cancelTradeErr
+	}
+	c.cancelledTrades = append(c.cancelledTrades, tradeID)
+	return nil
+}
+func (c *tWrappedCEX) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
+	return nil
+}
+func (c *tWrappedCEX) SubscribeTradeUpdates() (updates <-chan *libxc.TradeUpdate, unsubscribe func()) {
+	return c.tradeUpdates, func() {}
+}
+func (c *tWrappedCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64) (string, error) {
+	if c.tradeErr != nil {
+		return "", c.tradeErr
+	}
+	c.lastTrade = &cexOrder{baseID, quoteID, qty, rate, sell}
+	return c.tradeID, nil
+}
+func (c *tWrappedCEX) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	if c.vwapErr != nil {
+		return 0, 0, false, c.vwapErr
+	}
+
+	if sell {
+		res, found := c.asksVWAP[qty]
+		if !found {
+			return 0, 0, false, nil
+		}
+		return res.avg, res.extrema, true, nil
+	}
+
+	res, found := c.bidsVWAP[qty]
+	if !found {
+		return 0, 0, false, nil
+	}
+	return res.avg, res.extrema, true, nil
+}
+func (c *tWrappedCEX) Deposit(ctx context.Context, assetID uint32, amount uint64, onConfirm func()) error {
+	c.lastDepositArgs = &withdrawArgs{
+		assetID: assetID,
+		amt:     amount,
+	}
+	c.confirmDeposit = onConfirm
+	return nil
+}
+func (c *tWrappedCEX) Withdraw(ctx context.Context, assetID uint32, amount uint64, onConfirm func()) error {
+	c.lastWithdrawArgs = &withdrawArgs{
+		assetID: assetID,
+		amt:     amount,
+	}
+	c.confirmWithdraw = onConfirm
+	return nil
+}
 
 func TestArbRebalance(t *testing.T) {
 	mkt := &core.Market{
@@ -244,6 +362,11 @@ func TestArbRebalance(t *testing.T) {
 		cexAsksExtrema: []uint64{2.5e6, 2.7e6},
 	}
 
+	type assetAmt struct {
+		assetID uint32
+		amt     uint64
+	}
+
 	type test struct {
 		name          string
 		books         *testBooks
@@ -251,17 +374,26 @@ func TestArbRebalance(t *testing.T) {
 		dexMaxBuy     *core.MaxOrderEstimate
 		dexMaxSellErr error
 		dexMaxBuyErr  error
-		cexBalances   map[string]*libxc.ExchangeBalance
-		dexVWAPErr    error
-		cexVWAPErr    error
-		cexTradeErr   error
-		existingArbs  []*arbSequence
+		// The strategy uses maxSell/maxBuy to determine how much it can trade.
+		// dexBalances is just used for auto rebalancing.
+		dexBalances           map[uint32]uint64
+		cexBalances           map[uint32]*libxc.ExchangeBalance
+		dexVWAPErr            error
+		cexVWAPErr            error
+		cexTradeErr           error
+		existingArbs          []*arbSequence
+		pendingBaseRebalance  bool
+		pendingQuoteRebalance bool
+		autoRebalance         bool
+		minBaseAmt            uint64
+		minQuoteAmt           uint64
 
 		expectedDexOrder   *dexOrder
 		expectedCexOrder   *cexOrder
 		expectedDEXCancels []dex.Bytes
 		expectedCEXCancels []string
-		//expectedActiveArbs []*arbSequence
+		expectedWithdrawal *assetAmt
+		expectedDeposit    *assetAmt
 	}
 
 	tests := []test{
@@ -279,9 +411,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 		},
 		// "1 lot, buy on dex, sell on cex"
@@ -298,9 +430,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedDexOrder: &dexOrder{
 				lots: 1,
@@ -308,11 +440,11 @@ func TestArbRebalance(t *testing.T) {
 				sell: false,
 			},
 			expectedCexOrder: &cexOrder{
-				baseSymbol:  "dcr",
-				quoteSymbol: "btc",
-				qty:         mkt.LotSize,
-				rate:        2.2e6,
-				sell:        true,
+				baseID:  42,
+				quoteID: 0,
+				qty:     mkt.LotSize,
+				rate:    2.2e6,
+				sell:    true,
 			},
 		},
 		// "1 lot, buy on dex, sell on cex, but dex base balance not enough"
@@ -329,9 +461,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: mkt.LotSize / 2},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: mkt.LotSize / 2},
 			},
 		},
 		// "2 lot, buy on dex, sell on cex, but dex quote balance only enough for 1"
@@ -349,9 +481,9 @@ func TestArbRebalance(t *testing.T) {
 				},
 			},
 
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 
 			expectedDexOrder: &dexOrder{
@@ -360,11 +492,11 @@ func TestArbRebalance(t *testing.T) {
 				sell: false,
 			},
 			expectedCexOrder: &cexOrder{
-				baseSymbol:  "dcr",
-				quoteSymbol: "btc",
-				qty:         mkt.LotSize,
-				rate:        2.2e6,
-				sell:        true,
+				baseID:  42,
+				quoteID: 0,
+				qty:     mkt.LotSize,
+				rate:    2.2e6,
+				sell:    true,
 			},
 		},
 		// "1 lot, sell on dex, buy on cex"
@@ -381,9 +513,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedDexOrder: &dexOrder{
 				lots: 1,
@@ -391,11 +523,11 @@ func TestArbRebalance(t *testing.T) {
 				sell: true,
 			},
 			expectedCexOrder: &cexOrder{
-				baseSymbol:  "dcr",
-				quoteSymbol: "btc",
-				qty:         mkt.LotSize,
-				rate:        2e6,
-				sell:        false,
+				baseID:  42,
+				quoteID: 0,
+				qty:     mkt.LotSize,
+				rate:    2e6,
+				sell:    false,
 			},
 		},
 		// "2 lot, buy on cex, sell on dex, but cex quote balance only enough for 1"
@@ -412,9 +544,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: calc.BaseToQuote(2e6, mkt.LotSize*3/2)},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: calc.BaseToQuote(2e6, mkt.LotSize*3/2)},
+				42: {Available: 1e19},
 			},
 			expectedDexOrder: &dexOrder{
 				lots: 1,
@@ -422,11 +554,11 @@ func TestArbRebalance(t *testing.T) {
 				sell: true,
 			},
 			expectedCexOrder: &cexOrder{
-				baseSymbol:  "dcr",
-				quoteSymbol: "btc",
-				qty:         mkt.LotSize,
-				rate:        2e6,
-				sell:        false,
+				baseID:  42,
+				quoteID: 0,
+				qty:     mkt.LotSize,
+				rate:    2e6,
+				sell:    false,
 			},
 		},
 		// "1 lot, sell on dex, buy on cex"
@@ -443,9 +575,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedDexOrder: &dexOrder{
 				lots: 1,
@@ -453,11 +585,11 @@ func TestArbRebalance(t *testing.T) {
 				sell: true,
 			},
 			expectedCexOrder: &cexOrder{
-				baseSymbol:  "dcr",
-				quoteSymbol: "btc",
-				qty:         mkt.LotSize,
-				rate:        2e6,
-				sell:        false,
+				baseID:  42,
+				quoteID: 0,
+				qty:     mkt.LotSize,
+				rate:    2e6,
+				sell:    false,
 			},
 		},
 		// "2 lots arb still above profit trigger, but second not worth it on its own"
@@ -474,9 +606,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedDexOrder: &dexOrder{
 				lots: 1,
@@ -484,11 +616,11 @@ func TestArbRebalance(t *testing.T) {
 				sell: false,
 			},
 			expectedCexOrder: &cexOrder{
-				baseSymbol:  "dcr",
-				quoteSymbol: "btc",
-				qty:         mkt.LotSize,
-				rate:        2.2e6,
-				sell:        true,
+				baseID:  42,
+				quoteID: 0,
+				qty:     mkt.LotSize,
+				rate:    2.2e6,
+				sell:    true,
 			},
 		},
 		// "2 lot, buy on cex, sell on dex, but cex quote balance only enough for 1"
@@ -505,9 +637,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: calc.BaseToQuote(2e6, mkt.LotSize*3/2)},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: calc.BaseToQuote(2e6, mkt.LotSize*3/2)},
+				42: {Available: 1e19},
 			},
 			expectedDexOrder: &dexOrder{
 				lots: 1,
@@ -515,11 +647,11 @@ func TestArbRebalance(t *testing.T) {
 				sell: true,
 			},
 			expectedCexOrder: &cexOrder{
-				baseSymbol:  "dcr",
-				quoteSymbol: "btc",
-				qty:         mkt.LotSize,
-				rate:        2e6,
-				sell:        false,
+				baseID:  42,
+				quoteID: 0,
+				qty:     mkt.LotSize,
+				rate:    2e6,
+				sell:    false,
 			},
 		},
 		// "cex no asks"
@@ -549,9 +681,9 @@ func TestArbRebalance(t *testing.T) {
 				},
 			},
 
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 		},
 		// "dex no asks"
@@ -581,9 +713,9 @@ func TestArbRebalance(t *testing.T) {
 				},
 			},
 
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 		},
 		// "dex max sell error"
@@ -595,9 +727,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			dexMaxSellErr: errors.New(""),
 		},
@@ -610,9 +742,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			dexMaxBuyErr: errors.New(""),
 		},
@@ -630,9 +762,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			dexVWAPErr: errors.New(""),
 		},
@@ -650,9 +782,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			cexVWAPErr: errors.New(""),
 		},
@@ -671,9 +803,9 @@ func TestArbRebalance(t *testing.T) {
 				},
 			},
 
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 
 			existingArbs: []*arbSequence{{
@@ -741,9 +873,9 @@ func TestArbRebalance(t *testing.T) {
 			},
 			expectedCEXCancels: []string{cexTradeIDs[1], cexTradeIDs[3]},
 			expectedDEXCancels: []dex.Bytes{orderIDs[1][:], orderIDs[2][:]},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 		},
 		// "already max active arbs"
@@ -760,9 +892,9 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			existingArbs: []*arbSequence{
 				{
@@ -821,16 +953,112 @@ func TestArbRebalance(t *testing.T) {
 					Lots: 5,
 				},
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			cexTradeErr: errors.New(""),
+		},
+		// "no arb, base needs withdrawal, quote needs deposit"
+		{
+			name:  "no arb, base needs withdrawal, quote needs deposit",
+			books: noArbBooks,
+			dexMaxSell: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexMaxBuy: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexBalances: map[uint32]uint64{
+				42: 1e14,
+				0:  1e17,
+			},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				42: {Available: 1e19},
+				0:  {Available: 1e10},
+			},
+			autoRebalance: true,
+			minBaseAmt:    1e16,
+			minQuoteAmt:   1e12,
+			expectedWithdrawal: &assetAmt{
+				assetID: 42,
+				amt:     4.99995e18,
+			},
+			expectedDeposit: &assetAmt{
+				assetID: 0,
+				amt:     4.9999995e16,
+			},
+		},
+		// "no arb, quote needs withdrawal, base needs deposit"
+		{
+			name:  "no arb, quote needs withdrawal, base needs deposit",
+			books: noArbBooks,
+			dexMaxSell: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexMaxBuy: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexBalances: map[uint32]uint64{
+				42: 1e19,
+				0:  1e10,
+			},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				42: {Available: 1e14},
+				0:  {Available: 1e17},
+			},
+			autoRebalance: true,
+			minBaseAmt:    1e16,
+			minQuoteAmt:   1e12,
+			expectedWithdrawal: &assetAmt{
+				assetID: 0,
+				amt:     4.9999995e16,
+			},
+			expectedDeposit: &assetAmt{
+				assetID: 42,
+				amt:     4.99995e18,
+			},
+		},
+		// "no arb, quote needs withdrawal, base needs deposit, already pending"
+		{
+			name:  "no arb, quote needs withdrawal, base needs deposit, already pending",
+			books: noArbBooks,
+			dexMaxSell: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexMaxBuy: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexBalances: map[uint32]uint64{
+				42: 1e19,
+				0:  1e10,
+			},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				42: {Available: 1e14},
+				0:  {Available: 1e17},
+			},
+			autoRebalance:         true,
+			minBaseAmt:            1e16,
+			minQuoteAmt:           1e12,
+			pendingBaseRebalance:  true,
+			pendingQuoteRebalance: true,
 		},
 	}
 
 	runTest := func(test *test) {
-		cex := newTCEX()
+		cex := newTWrappedCEX()
 		cex.vwapErr = test.cexVWAPErr
 		cex.balances = test.cexBalances
 		cex.tradeErr = test.cexTradeErr
@@ -840,6 +1068,7 @@ func TestArbRebalance(t *testing.T) {
 		tCore.maxSellEstimate = test.dexMaxSell
 		tCore.maxSellErr = test.dexMaxSellErr
 		tCore.maxBuyErr = test.dexMaxBuyErr
+		tCore.setAssetBalances(test.dexBalances)
 		if test.expectedDexOrder != nil {
 			tCore.multiTradeResult = []*core.Order{
 				{
@@ -882,8 +1111,14 @@ func TestArbRebalance(t *testing.T) {
 				ProfitTrigger:      profitTrigger,
 				MaxActiveArbs:      maxActiveArbs,
 				NumEpochsLeaveOpen: numEpochsLeaveOpen,
+				AutoRebalance:      test.autoRebalance,
+				MinBaseAmt:         test.minBaseAmt,
+				MinQuoteAmt:        test.minQuoteAmt,
 			},
 		}
+
+		arbEngine.pendingBaseRebalance.Store(test.pendingBaseRebalance)
+		arbEngine.pendingQuoteRebalance.Store(test.pendingQuoteRebalance)
 
 		go arbEngine.run()
 
@@ -965,6 +1200,74 @@ func TestArbRebalance(t *testing.T) {
 		for i := range test.expectedCEXCancels {
 			if test.expectedCEXCancels[i] != cex.cancelledTrades[i] {
 				t.Fatalf("%s: expected cex cancel %s but got %s", test.name, test.expectedCEXCancels[i], cex.cancelledTrades[i])
+			}
+		}
+
+		// Test auto rebalancing
+		expectBasePending := test.pendingBaseRebalance
+		expectQuotePending := test.pendingQuoteRebalance
+		if test.expectedWithdrawal != nil {
+			if cex.lastWithdrawArgs == nil {
+				t.Fatalf("%s: expected withdrawal %+v but got none", test.name, test.expectedWithdrawal)
+			}
+			if test.expectedWithdrawal.assetID != cex.lastWithdrawArgs.assetID {
+				t.Fatalf("%s: expected withdrawal asset %d but got %d", test.name, test.expectedWithdrawal.assetID, cex.lastWithdrawArgs.assetID)
+			}
+			if test.expectedWithdrawal.amt != cex.lastWithdrawArgs.amt {
+				t.Fatalf("%s: expected withdrawal amt %d but got %d", test.name, test.expectedWithdrawal.amt, cex.lastWithdrawArgs.amt)
+			}
+			if test.expectedWithdrawal.assetID == arbEngine.baseID {
+				expectBasePending = true
+			} else {
+				expectQuotePending = true
+			}
+		} else if cex.lastWithdrawArgs != nil {
+			t.Fatalf("%s: expected no withdrawal but got %+v", test.name, cex.lastWithdrawArgs)
+		}
+		if test.expectedDeposit != nil {
+			if cex.lastDepositArgs == nil {
+				t.Fatalf("%s: expected deposit %+v but got none", test.name, test.expectedDeposit)
+			}
+			if test.expectedDeposit.assetID != cex.lastDepositArgs.assetID {
+				t.Fatalf("%s: expected deposit asset %d but got %d", test.name, test.expectedDeposit.assetID, cex.lastDepositArgs.assetID)
+			}
+			if test.expectedDeposit.amt != cex.lastDepositArgs.amt {
+				t.Fatalf("%s: expected deposit amt %d but got %d", test.name, test.expectedDeposit.amt, cex.lastDepositArgs.amt)
+			}
+			if test.expectedDeposit.assetID == arbEngine.baseID {
+				expectBasePending = true
+			} else {
+				expectQuotePending = true
+			}
+
+		} else if cex.lastDepositArgs != nil {
+			t.Fatalf("%s: expected no deposit but got %+v", test.name, cex.lastDepositArgs)
+		}
+		if expectBasePending != arbEngine.pendingBaseRebalance.Load() {
+			t.Fatalf("%s: expected base pending %v but got %v", test.name, expectBasePending, !expectBasePending)
+		}
+		if expectQuotePending != arbEngine.pendingQuoteRebalance.Load() {
+			t.Fatalf("%s: expected base pending %v but got %v", test.name, expectBasePending, !expectBasePending)
+		}
+
+		// Make sure that when withdraw/deposit is confirmed, the pending field
+		// gets set back to false.
+		if cex.confirmWithdraw != nil {
+			cex.confirmWithdraw()
+			if cex.lastWithdrawArgs.assetID == arbEngine.baseID && arbEngine.pendingBaseRebalance.Load() {
+				t.Fatalf("%s: pending base rebalance was not reset after confirmation", test.name)
+			}
+			if cex.lastWithdrawArgs.assetID != arbEngine.baseID && arbEngine.pendingQuoteRebalance.Load() {
+				t.Fatalf("%s: pending quote rebalance was not reset after confirmation", test.name)
+			}
+		}
+		if cex.confirmDeposit != nil {
+			cex.confirmDeposit()
+			if cex.lastDepositArgs.assetID == arbEngine.baseID && arbEngine.pendingBaseRebalance.Load() {
+				t.Fatalf("%s: pending base rebalance was not reset after confirmation", test.name)
+			}
+			if cex.lastDepositArgs.assetID != arbEngine.baseID && arbEngine.pendingQuoteRebalance.Load() {
+				t.Fatalf("%s: pending quote rebalance was not reset after confirmation", test.name)
 			}
 		}
 	}
@@ -1049,7 +1352,7 @@ func TestArbDexTradeUpdates(t *testing.T) {
 	}
 
 	runTest := func(test *test) {
-		cex := newTCEX()
+		cex := newTWrappedCEX()
 		tCore := newTCore()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1171,7 +1474,7 @@ func TestCexTradeUpdates(t *testing.T) {
 	}
 
 	runTest := func(test *test) {
-		cex := newTCEX()
+		cex := newTWrappedCEX()
 		tCore := newTCore()
 
 		ctx, cancel := context.WithCancel(context.Background())
