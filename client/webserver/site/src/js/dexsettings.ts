@@ -13,6 +13,7 @@ import {
 } from './registry'
 
 const animationLength = 300
+const bondOverlap = 2 // See client/core/bond.go#L28
 
 export default class DexSettingsPage extends BasePage {
   body: HTMLElement
@@ -22,6 +23,7 @@ export default class DexSettingsPage extends BasePage {
   host: string
   keyup: (e: KeyboardEvent) => void
   dexAddrForm: forms.DEXAddressForm
+  bondFeeBufferCache: Record<string, number>
 
   constructor (body: HTMLElement) {
     super()
@@ -32,16 +34,18 @@ export default class DexSettingsPage extends BasePage {
 
     Doc.bind(page.exportDexBtn, 'click', () => this.prepareAccountExport(page.authorizeAccountExportForm))
     Doc.bind(page.disableAcctBtn, 'click', () => this.prepareAccountDisable(page.disableAccountForm))
-    Doc.bind(page.updateBondOptionsBtn, 'click', () => this.prepareUpdateBondOptions())
+    Doc.bind(page.bondDetailsBtn, 'click', () => this.prepareBondDetailsForm())
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
+    Doc.bind(page.bondAssetSelect, 'change', () => this.updateBondAssetCosts())
+    Doc.bind(page.bondTargetTier, 'input', () => this.updateBondAssetCosts())
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
       window.location.assign(`/dexsettings/${xc.host}`)
     }, undefined, this.host)
 
-    forms.bind(page.updateBondOptionsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
+    forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
@@ -156,11 +160,17 @@ export default class DexSettingsPage extends BasePage {
     this.showForm(disableAccountForm)
   }
 
-  // prepareUpdateBondOptions resets and prepares the Update Bond Options form.
-  async prepareUpdateBondOptions () {
+  // prepareBondDetailsForm resets and prepares the Bond Details form.
+  async prepareBondDetailsForm () {
     const page = this.page
     const xc = app().user.exchanges[this.host]
-    page.bondTargetTier.setAttribute('placeholder', xc.auth.targetTier.toString())
+    // Update bond details on this form
+    const targetTier = xc.auth.targetTier.toString()
+    page.currentTargetTier.textContent = `${targetTier}`
+    page.currentTier.textContent = `${xc.auth.effectiveTier}`
+    page.bondTargetTier.setAttribute('placeholder', targetTier)
+    page.bondTargetTier.value = ''
+    this.bondFeeBufferCache = {}
     Doc.empty(page.bondAssetSelect)
     for (const [assetSymbol, bondAsset] of Object.entries(xc.bondAssets)) {
       const option = document.createElement('option') as HTMLOptionElement
@@ -171,7 +181,52 @@ export default class DexSettingsPage extends BasePage {
     }
     page.bondOptionsErr.textContent = ''
     Doc.hide(page.bondOptionsErr)
-    this.showForm(page.updateBondOptionsForm)
+    await this.updateBondAssetCosts()
+    this.showForm(page.bondDetailsForm)
+  }
+
+  async updateBondAssetCosts () {
+    const xc = app().user.exchanges[this.host]
+    const page = this.page
+    const bondAssetID = parseInt(page.bondAssetSelect.value ?? '')
+    Doc.hide(page.bondCostFiat.parentElement as Element)
+    Doc.hide(page.bondReservationAmtFiat.parentElement as Element)
+    const assetInfo = xc.assets[bondAssetID]
+    const bondAsset = xc.bondAssets[assetInfo.symbol]
+
+    const bondCost = bondAsset.amount
+    const ui = assetInfo.unitInfo
+    const assetID = bondAsset.id
+    Doc.applySelector(page.bondDetailsForm, '.bondAssetSym').forEach((el) => { el.textContent = assetInfo.symbol.toLocaleUpperCase() })
+    page.bondCost.textContent = Doc.formatFullPrecision(bondCost, ui)
+    const xcRate = app().fiatRatesMap[assetID]
+    Doc.showFiatValue(page.bondCostFiat, bondCost, xcRate, ui)
+
+    let feeBuffer = this.bondFeeBufferCache[assetInfo.symbol]
+    if (!feeBuffer) {
+      feeBuffer = await this.getBondsFeeBuffer(assetID, page.bondDetailsForm)
+      if (feeBuffer > 0) this.bondFeeBufferCache[assetInfo.symbol] = feeBuffer
+    }
+    if (feeBuffer === 0) {
+      page.bondReservationAmt.textContent = intl.prep(intl.ID_UNAVAILABLE)
+      return
+    }
+    const targetTier = parseInt(page.bondTargetTier.value ?? '')
+    let reservation = 0
+    if (targetTier > 0) reservation = bondCost * targetTier * bondOverlap + feeBuffer
+    page.bondReservationAmt.textContent = Doc.formatFullPrecision(reservation, ui)
+    Doc.showFiatValue(page.bondReservationAmtFiat, reservation, xcRate, ui)
+  }
+
+  // Retrieve an estimate for the tx fee needed to create new bond reserves.
+  async getBondsFeeBuffer (assetID: number, form: HTMLElement) {
+    const loaded = app().loading(form)
+    const res = await postJSON('/api/bondsfeebuffer', { assetID })
+    loaded()
+    if (!app().checkResponse(res)) {
+      return 0
+    }
+    return res.feeBuffer
   }
 
   async prepareUpdateHost () {
@@ -238,10 +293,16 @@ export default class DexSettingsPage extends BasePage {
     const targetTier = parseInt(page.bondTargetTier.value ?? '')
     const bondAssetID = parseInt(page.bondAssetSelect.value ?? '')
 
-    const bondOptions = {
+    const bondOptions: Record<any, any> = {
       host: this.host,
       targetTier: targetTier,
       bondAssetID: bondAssetID
+    }
+
+    const assetInfo = app().assets[bondAssetID]
+    if (assetInfo) {
+      const feeBuffer = this.bondFeeBufferCache[assetInfo.symbol]
+      if (feeBuffer > 0) bondOptions.feeBuffer = feeBuffer
     }
 
     const loaded = app().loading(this.body)
@@ -255,12 +316,12 @@ export default class DexSettingsPage extends BasePage {
       Doc.show(page.bondOptionsMsg)
       setTimeout(() => {
         Doc.hide(page.bondOptionsMsg)
-        Doc.hide(page.forms)
       }, 5000)
       // update the in-memory values.
       const xc = app().user.exchanges[this.host]
       xc.auth.bondAssetID = bondAssetID
       xc.auth.targetTier = targetTier
+      page.currentTargetTier.textContent = `${targetTier}`
     }
   }
 }

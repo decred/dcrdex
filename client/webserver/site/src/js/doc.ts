@@ -466,6 +466,14 @@ export default class Doc {
     el.textContent = msg
     Doc.show(el)
   }
+
+  // showFiatValue displays the fiat equivalent for the provided amount.
+  static showFiatValue (display: PageElement, amount: number, rate: number, ui: UnitInfo): void {
+    if (rate) {
+      display.textContent = Doc.formatFiatConversion(amount, rate, ui)
+      Doc.show(display.parentElement as Element)
+    } else Doc.hide(display.parentElement as Element)
+  }
 }
 
 /*
