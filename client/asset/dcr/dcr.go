@@ -3372,6 +3372,14 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 	if confs == 0 {
 		// Only counts as spent if spent in a mined transaction,
 		// unconfirmed tx outputs can't be spent in a mined tx.
+
+		// There is a dcrwallet bug by which the user can shut down at the wrong
+		// time and a tx will never be marked as confirmed. We'll force a
+		// cfilter scan for unconfirmed txs until the bug is resolved.
+		// https://github.com/decred/dcrdex/pull/2444
+		if dcr.wallet.SpvMode() {
+			return txOut, confs, -1, nil
+		}
 		return txOut, confs, 0, nil
 	}
 
