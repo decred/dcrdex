@@ -76,10 +76,6 @@ div[data-handler=markets] {
 
         &:disabled {
           opacity: 0.4;
-        
-          &:hover {
-            cursor: not-allowed;
-          }
         }
       }
 
