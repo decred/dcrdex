@@ -1,8 +1,6 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-//go:build live
-
 // Connects to one ElectrumX-Firo testnet server and one ElectrumX-Firo
 // mainnet server and tests a subset of electrumx-firo commands.
 //
@@ -32,8 +30,8 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc/electrum"
 
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/gcash/bchd/wire"
 )
 
 type electrumNetwork string
