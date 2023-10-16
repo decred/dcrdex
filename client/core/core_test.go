@@ -7263,6 +7263,45 @@ func TestChangeAppPass(t *testing.T) {
 	}
 }
 
+func TestResetAppPass(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	crypter := newTCrypterSmart()
+	rig.crypter = crypter
+	rig.core.newCrypter = func([]byte) encrypt.Crypter { return crypter }
+	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return rig.crypter, crypter.recryptErr }
+
+	tCore := rig.core
+	seed, err := tCore.ExportSeed(tPW)
+	if err != nil {
+		t.Fatalf("seed export failed: %v", err)
+	}
+
+	// Invalid seed error
+	invalidSeed := seed[:24]
+	err = tCore.ResetAppPass(tPW, invalidSeed)
+	if !strings.Contains(err.Error(), "invalid seed length") {
+		t.Fatalf("wrong error for invalid seed length: %v", err)
+	}
+
+	// Want incorrect seed error.
+	rig.crypter.(*tCrypterSmart).recryptErr = tErr
+	// tCrypter is used to encode the orginal seed but we don't need it here, so
+	// we need to add 8 bytes to commplete the expected seed lenght(64).
+	seed = append(seed, randBytes(8)...)
+	err = tCore.ResetAppPass(tPW, seed)
+	if err.Error() != "incorrect seed" {
+		t.Fatalf("wrong error for incorrect seed: %v", err)
+	}
+
+	// ok, no crypter error.
+	rig.crypter.(*tCrypterSmart).recryptErr = nil
+	err = tCore.ResetAppPass(tPW, seed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestReconfigureWallet(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()

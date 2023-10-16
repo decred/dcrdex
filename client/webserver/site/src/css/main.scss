@@ -330,8 +330,8 @@ div.popup-notes {
   }
 }
 
-#noteBox,
-#profileBox {
+#profileBox,
+#noteBox {
   position: fixed;
   display: flex;
   flex-direction: column;
@@ -364,8 +364,8 @@ div.popup-notes {
     }
   }
 
-  .authed-only:not(.authed) {
-    display: none;
+  &:not(.authed) .authed-only {
+    display: none !important;
   }
 }
 
@@ -549,3 +549,4 @@ sup.token-parent {
     font-weight: bold;
   }
 }
+

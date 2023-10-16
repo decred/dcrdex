@@ -1275,6 +1275,27 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiResetAppPassword resets the application password.
+func (s *WebServer) apiResetAppPassword(w http.ResponseWriter, r *http.Request) {
+	form := new(struct {
+		NewPass encode.PassBytes `json:"newPass"`
+		Seed    dex.Bytes        `json:"seed"`
+	})
+	defer form.NewPass.Clear()
+	defer zero(form.Seed)
+	if !readPost(w, r, form) {
+		return
+	}
+
+	err := s.core.ResetAppPass(form.NewPass, form.Seed)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiReconfig sets new configuration details for the wallet.
 func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	form := &struct {

@@ -249,12 +249,14 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		FiatRateSources map[string]bool
 		FiatCurrency    string
 		Exchanges       map[string]*core.Exchange
+		IsInitialized   bool
 	}{
 		CommonArguments: *common,
 		KnownExchanges:  s.knownUnregisteredExchanges(xcs),
 		FiatCurrency:    core.DefaultFiatCurrency,
 		FiatRateSources: s.core.FiatRateSources(),
 		Exchanges:       xcs,
+		IsInitialized:   s.core.IsInitialized(),
 	}
 	s.sendTemplate(w, "settings", data)
 }

@@ -68,6 +68,7 @@ func RandomPrimaryCredentials() *db.PrimaryCredentials {
 		EncInnerKey:    randBytes(10),
 		InnerKeyParams: randBytes(10),
 		OuterKeyParams: randBytes(10),
+		Version:        1,
 	}
 }
 
@@ -360,20 +361,5 @@ func MustCompareNotifications(t testKiller, n1, n2 *db.Notification) {
 	}
 	if n1.ID().String() != n2.ID().String() {
 		t.Fatalf("ID mismatch. %s != %s", n1.ID(), n2.ID())
-	}
-}
-
-func MustComparePrimaryCredentials(t testKiller, c1, c2 *db.PrimaryCredentials) {
-	if !bytes.Equal(c1.EncSeed, c2.EncSeed) {
-		t.Fatalf("EncSeed mismatch. %x != %x", c1.EncSeed, c2.EncSeed)
-	}
-	if !bytes.Equal(c1.EncInnerKey, c2.EncInnerKey) {
-		t.Fatalf("EncInnerKey mismatch. %x != %x", c1.EncInnerKey, c2.EncInnerKey)
-	}
-	if !bytes.Equal(c1.InnerKeyParams, c2.InnerKeyParams) {
-		t.Fatalf("InnerKeyParams mismatch. %x != %x", c1.InnerKeyParams, c2.InnerKeyParams)
-	}
-	if !bytes.Equal(c1.OuterKeyParams, c2.OuterKeyParams) {
-		t.Fatalf("OuterKeyParams mismatch. %x != %x", c1.OuterKeyParams, c2.OuterKeyParams)
 	}
 }

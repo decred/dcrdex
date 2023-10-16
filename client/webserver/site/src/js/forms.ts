@@ -1739,23 +1739,27 @@ export class LoginForm {
     this.page.pw.focus()
   }
 
+  refresh () {
+    Doc.hide(this.page.errMsg)
+    this.page.pw.value = ''
+    this.page.rememberPass.checked = false
+  }
+
   async submit () {
     const page = this.page
     Doc.hide(page.errMsg)
     const pw = page.pw.value || ''
-    page.pw.value = ''
     const rememberPass = page.rememberPass.checked
     if (pw === '') {
-      page.errMsg.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
-      Doc.show(page.errMsg)
+      Doc.showFormError(page.errMsg, intl.prep(intl.ID_NO_PASS_ERROR_MSG))
       return
     }
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/login', { pass: pw, rememberPass })
     loaded()
+    page.pw.value = ''
     if (!app().checkResponse(res)) {
-      page.errMsg.textContent = res.msg
-      Doc.show(page.errMsg)
+      Doc.showFormError(page.errMsg, res.msg)
       return
     }
     if (res.notes) {
@@ -1845,6 +1849,66 @@ export class DepositAddress {
       .catch((reason) => {
         console.error('Unable to copy: ', reason)
       })
+  }
+}
+
+// AppPassResetForm is used to reset the app apssword using the app seed.
+export class AppPassResetForm {
+  form: PageElement
+  page: Record<string, PageElement>
+  success: () => void
+
+  constructor (form: PageElement, success: () => void) {
+    this.form = form
+    this.success = success
+    const page = this.page = Doc.idDescendants(form)
+    bind(form, page.resetAppPWSubmitBtn, () => this.resetAppPW())
+  }
+
+  async resetAppPW () {
+    const page = this.page
+    const newAppPW = page.newAppPassword.value || ''
+    const confirmNewAppPW = page.confirmNewAppPassword.value
+    if (newAppPW === '') {
+      Doc.showFormError(page.appPWResetErrMsg, intl.prep(intl.ID_NO_PASS_ERROR_MSG))
+      return
+    }
+    if (newAppPW !== confirmNewAppPW) {
+      Doc.showFormError(page.appPWResetErrMsg, intl.prep(intl.ID_PASSWORD_NOT_MATCH))
+      return
+    }
+
+    const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
+    if (!seed || seed.length !== 128 /* 64 bytes hex encoded value, check and fail early */) {
+      Doc.showFormError(page.appPWResetErrMsg, intl.prep(intl.ID_INVALID_SEED))
+      return
+    }
+    const loaded = app().loading(this.form)
+    const res = await postJSON('/api/resetapppassword', {
+      newPass: newAppPW,
+      seed
+    })
+    loaded()
+    if (!app().checkResponse(res)) {
+      Doc.showFormError(page.appPWResetErrMsg, res.msg)
+      return
+    }
+
+    if (Doc.isDisplayed(page.appPWResetErrMsg)) Doc.hide(page.appPWResetErrMsg)
+    page.appPWResetSuccessMsg.textContent = intl.prep(intl.ID_PASSWORD_RESET_SUCCESS_MSG)
+    Doc.show(page.appPWResetSuccessMsg)
+    setTimeout(() => this.success(), 3000) // allow time to view the message
+  }
+
+  focus () {
+    this.page.newAppPassword.focus()
+  }
+
+  refresh () {
+    const page = this.page
+    page.newAppPassword.value = ''
+    page.confirmNewAppPassword.value = ''
+    Doc.hide(page.appPWResetSuccessMsg, page.appPWResetErrMsg)
   }
 }
 

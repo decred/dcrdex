@@ -1,6 +1,7 @@
 {{define "settings"}}
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
+{{$authed := .UserInfo.Authed}}
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
   <span class="settings-gear ico-settings"></span><br>
   <div class="settings">
@@ -16,10 +17,10 @@
         [[[Show pop-up notifications]]]
       </label>
     </div>
-    <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+    <div {{if not $authed}} class="d-hide"{{end}}>
     <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
     </div>
-    <div id="fiatRateSources" {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+    <div id="fiatRateSources" {{if not $authed}} class="d-hide"{{end}}>
     <span class="mb-2" data-tooltip="[[[fiat_exchange_rate_msg]]]">
      [[[fiat_exchange_rate_sources]]]:
     <span class="ico-info"></span>
@@ -31,7 +32,7 @@
     </div>
     {{end}}
     </div>
-    <div>
+    <div {{if not $authed}} class="d-hide"{{end}}>
       <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
         <h5>[[[registered dexes]]]</h5>
         {{range $host, $xc := .Exchanges}}
@@ -39,7 +40,7 @@
         {{end}}
       </div>
       <br>
-      <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <div>
         <p>
         [[[simultaneous_servers_msg]]]
         </p>
@@ -47,10 +48,11 @@
         <button id="importAccount" class="bg2 selected ms-2">[[[Import Account]]]</button>
       </div>
     </div>
-    <div>
-        <button id="changeAppPW" class="bg2 selected">[[[Change App Password]]]</button>
+    <div {{if not .IsInitialized}}class="d-hide"{{end}}>
+        <button id="changeAppPW" class="bg2 selected my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
+        <button id="resetAppPW" class="bg2 selected my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
     </div>
-    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+    <div{{if not $authed}} class="d-hide"{{end}}>
       [[[seed_implore_msg]]]<br>
       <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>
     </div>
@@ -87,6 +89,11 @@
     {{- /* CHANGE APP PASSWORD */ -}}
     <form class="d-hide" id="changeAppPWForm">
       {{template "changeAppPWForm"}}
+    </form>
+
+    {{- /* RESET APP PASSWORD */ -}}
+    <form class="d-hide" id="resetAppPWForm">
+      {{template "appPassResetForm"}}
     </form>
 
     {{- /* EXPORT SEED AUTHORIZATION */ -}}

@@ -429,4 +429,7 @@ var EnUS = map[string]string{
 	"bond_cost_tooltip":           "Cost of a single bond without fees and bond maintenance fund reservation.",
 	"bond_reservations":           "Bond Reservation",
 	"bond_reservations_tooltip":   "Total funds that will be locked when you post a bond to cover fees and bond maintenance costs.",
+	"Reset App Password":          "Reset App Password",
+	"reset_app_pw_msg":            "Reset your app password using your app seed. If you provide the correct app seed, you can login again with the new password.",
+	"Forgot Password":             "Forgot Password?",
 }

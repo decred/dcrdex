@@ -8,6 +8,11 @@
       {{template "loginForm"}}
     </form>
 
+    {{- /* RESET APP PASSWORD */ -}}
+    <form class="mx-auto my-5 d-hide" id="resetAppPWForm">
+      {{template "appPassResetForm"}}
+    </form>
+
     {{- /* Form to set up a wallet. Shown on demand when a user clicks a setupWallet button. */ -}}
     <form class="d-hide" id="newWalletForm">
       {{template "newWalletForm" }}

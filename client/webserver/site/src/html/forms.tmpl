@@ -295,13 +295,18 @@
 <div class="pb-2">
   <label for="pw" class="form-label ps-1 mb-1">[[[Password]]]</label>
   <input type="password" class="form-control select" data-tmpl="pw" autocomplete="current-password">
-  <div class="form-check pt-2">
-    <input class="form-check-input" type="checkbox" data-tmpl="rememberPass" id="logRememberPass">
-    <label for="logRememberPass" class="form-check-label ps-1">[[[Remember my password]]]</label>
+  <div class="d-flex justify-content-between pt-2">
+    <div class="form-check">
+     <input class="form-check-input" type="checkbox" data-tmpl="rememberPass" id="logRememberPass">
+     <label for="logRememberPass" class="form-check-label ps-1">[[[Remember my password]]]</label>
+    </div>
   </div>
 </div>
 <div class="d-flex justify-content-center mt-2">
-  <button data-tmpl="submit" type="button" class="justify-content-center fs15 bg2 selected" id="loginSubmit">[[[Submit]]]</button>
+  <button data-tmpl="submit" type="button" class="justify-content-center fs15 bg2 selected w-50" id="loginSubmit">[[[Submit]]]</button>
+</div>
+<div class="d-flex justify-content-center mt-3">
+  <span id="forgotPassBtn" class="fs16 grey pointer bold">[[[Forgot Password]]]</span>
 </div>
 <div class="fs15 pt-3 text-center d-hide errcolor text-break" data-tmpl="errMsg"></div>
 {{end}}
@@ -634,4 +639,28 @@
   <button id="toggleWalletStatusSubmit" type="button" class="justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide errcolor" id="toggleWalletStatusErr"></div>
+{{end}}
+
+{{define "appPassResetForm"}}
+ <div class="form-closer hoverbg" id="resetPassFormCloser"><span class="ico-cross"></span></div>
+ <div class="px-2 py-1 text-center fs28 sans-light">[[[Reset App Password]]]</div>
+ <div class="fs18 mt-2 sans-light">[[[reset_app_pw_msg]]]</div>
+ <hr class="dashed my-4">
+ <div class="pb-3">
+   <label for="newAppPassword" class="form-label ps-1 mb-1">[[[New Password]]]</label>
+   <input type="password" class="form-control select" id="newAppPassword" autocomplete="new-password">
+ </div>
+ <div class="pb-3">
+   <label for="confirmNewAppPassword" class="form-label ps-1 mb-1">[[[Confirm New Password]]]</label>
+   <input type="password" class="form-control select" id="confirmNewAppPassword" autocomplete="off">
+ </div>
+ <div class="pb-3 mt-3">
+   <label for="seedInput" class="form-label ps-1 mb-1">[[[Restoration Seed]]]</label>
+   <textarea class="form-control select mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
+ </div>
+ <div class="d-flex justify-content-end mt-4">
+    <button id="resetAppPWSubmitBtn" type="submit" class="col-8 justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
+ </div>
+ <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="appPWResetErrMsg"></div>
+ <div id="appPWResetSuccessMsg" class="d-hide text-break text-center pt-3 fs15"></div> 
 {{end}}

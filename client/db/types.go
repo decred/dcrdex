@@ -81,6 +81,8 @@ type PrimaryCredentials struct {
 	InnerKeyParams []byte
 	// OuterKeyParams are the key parameters for the outer key.
 	OuterKeyParams []byte
+	// Version is the current PrimaryCredentials version.
+	Version uint16
 }
 
 // when updating to bonds, default to 42 (DCR)

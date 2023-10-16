@@ -20,13 +20,16 @@
         <input class="form-check-input" type="checkbox" id="rememberPass">
         <label for="rememberPass" class="form-check-label ps-1">[[[Remember my password]]]</label>
       </div>
-      <div class="pb-3 d-hide mt-3" id="seedRestore">
-        <label for="seedInput" class="form-label ps-1 mb-1">[[[Restoration Seed]]]</label>
-        <textarea class="form-control select mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
+      <div class="pb-2 mt-3">
+        <div class="py-2 d-flex justify-content-between align-items-center">
+         <label for="seedInput" class="form-label ps-1 mb-1" id="toggleSeedInput">
+          <span id="toggleSeedInputIcon" class="fs11 ico-plus"></span>
+          [[[Restoration Seed]]]
+          </label>
+        </div>
+        <textarea class="form-control select mono d-hide" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
       </div>
-      <div class="d-flex justify-content-between mt-4">
-        <div class="px-1 fs13 pointer d-flex justify-content-start align-items-center" id="showSeedRestore"><span class="ico-plus fs11"></span> <div class="ps-2">[[[Restore from seed]]]</div></div>
-        <span></span>
+      <div class="d-flex justify-content-end mt-2">
         <button id="appPWSubmit" type="submit" class="col-8 justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="appPWErrMsg"></div>

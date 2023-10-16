@@ -107,6 +107,7 @@ var (
 	encInnerKeyKey        = []byte("encInnerKey")
 	innerKeyParamsKey     = []byte("innerKeyParams")
 	outerKeyParamsKey     = []byte("outerKeyParams")
+	credsVersionKey       = []byte("credsVersion")
 	legacyKeyParamsKey    = []byte("keyParams")
 	epochDurKey           = []byte("epochDur")
 	fromVersionKey        = []byte("fromVersion")
@@ -357,21 +358,29 @@ func (db *BoltDB) Recrypt(creds *dexdb.PrimaryCredentials, oldCrypter, newCrypte
 			if err != nil {
 				return err
 			}
-			if len(acctInfo.LegacyEncKey) == 0 {
-				db.log.Warnf("no LegacyEncKey for %s during Recrypt?", string(hostB))
-				return nil
-			}
-			privB, err := oldCrypter.Decrypt(acctInfo.LegacyEncKey)
-			if err != nil {
-				return err
+			if len(acctInfo.LegacyEncKey) != 0 {
+				privB, err := oldCrypter.Decrypt(acctInfo.LegacyEncKey)
+				if err != nil {
+					return err
+				}
+
+				acctInfo.LegacyEncKey, err = newCrypter.Encrypt(privB)
+				if err != nil {
+					return err
+				}
+				acctUpdates[acctInfo.Host] = acctInfo.LegacyEncKey
+			} else if len(acctInfo.EncKeyV2) > 0 {
+				privB, err := oldCrypter.Decrypt(acctInfo.EncKeyV2)
+				if err != nil {
+					return err
+				}
+				acctInfo.EncKeyV2, err = newCrypter.Encrypt(privB)
+				if err != nil {
+					return err
+				}
+				acctUpdates[acctInfo.Host] = acctInfo.EncKeyV2
 			}
 
-			acctInfo.LegacyEncKey, err = newCrypter.Encrypt(privB)
-			if err != nil {
-				return err
-			}
-
-			acctUpdates[acctInfo.Host] = acctInfo.LegacyEncKey
 			return acct.Put(accountKey, acctInfo.Encode())
 		})
 		if err != nil {
@@ -422,11 +431,18 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 		if bkt.Stats().KeyN == 0 {
 			return dexdb.ErrNoCredentials
 		}
+
+		versionB := getCopy(bkt, credsVersionKey)
+		if len(versionB) != 2 {
+			versionB = []byte{0x00, 0x00}
+		}
+
 		creds = &dexdb.PrimaryCredentials{
 			EncSeed:        getCopy(bkt, encSeedKey),
 			EncInnerKey:    getCopy(bkt, encInnerKeyKey),
 			InnerKeyParams: getCopy(bkt, innerKeyParamsKey),
 			OuterKeyParams: getCopy(bkt, outerKeyParamsKey),
+			Version:        intCoder.Uint16(versionB),
 		}
 		return nil
 	})
@@ -443,6 +459,7 @@ func (db *BoltDB) setCreds(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials) error 
 		put(encInnerKeyKey, creds.EncInnerKey).
 		put(innerKeyParamsKey, creds.InnerKeyParams).
 		put(outerKeyParamsKey, creds.OuterKeyParams).
+		put(credsVersionKey, uint16Bytes(creds.Version)).
 		err()
 }
 

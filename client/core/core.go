@@ -80,6 +80,9 @@ const (
 	// tier, so we calculate our bonus/revoked tier from the score in the
 	// ConnectResult.
 	defaultPenaltyThreshold = 20
+
+	// seedLen is the length of the generated app seed used for app protection.
+	seedLen = 64
 )
 
 var (
@@ -3265,15 +3268,24 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 	if err != nil {
 		return newError(authErr, "old password error: %w", err)
 	}
+	defer outerCrypter.Close()
 	innerKey, err := outerCrypter.Decrypt(creds.EncInnerKey)
 	if err != nil {
 		return fmt.Errorf("inner key decryption error: %w", err)
 	}
+
+	return c.changeAppPass(newAppPW, innerKey, creds)
+}
+
+// changeAppPass is a shared method to reset or change user password.
+func (c *Core) changeAppPass(newAppPW, innerKey []byte, creds *db.PrimaryCredentials) error {
 	newOuterCrypter := c.newCrypter(newAppPW)
+	defer newOuterCrypter.Close()
 	newEncInnerKey, err := newOuterCrypter.Encrypt(innerKey)
 	if err != nil {
 		return fmt.Errorf("encryption error: %v", err)
 	}
+
 	newCreds := &db.PrimaryCredentials{
 		EncSeed:        creds.EncSeed,
 		EncInnerKey:    newEncInnerKey,
@@ -3289,6 +3301,35 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 	c.setCredentials(newCreds)
 
 	return nil
+}
+
+// ResetAppPass resets the application password to the provided new password.
+func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
+	if !c.IsInitialized() {
+		return fmt.Errorf("cannot reset password before client is initialized")
+	}
+
+	if len(newPass) == 0 {
+		return fmt.Errorf("application password cannot be empty")
+	}
+
+	if len(seed) != seedLen {
+		return fmt.Errorf("invalid seed length %d", len(seed))
+	}
+
+	creds := c.creds()
+	if creds == nil {
+		return fmt.Errorf("no credentials stored")
+	}
+
+	innerKey := seedInnerKey(seed)
+	_, err := c.reCrypter(innerKey[:], creds.InnerKeyParams)
+	if err != nil {
+		c.log.Errorf("Error reseting password with seed: %v", err)
+		return errors.New("incorrect seed")
+	}
+
+	return c.changeAppPass(newPass, innerKey[:], creds)
 }
 
 // ReconfigureWallet updates the wallet configuration settings, it also updates
@@ -4535,14 +4576,12 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 			return fmt.Errorf("SetSeedGenerationTime error: %w", err)
 		}
 		c.seedGenerationTime = now
-	}
 
-	c.setCredentials(creds)
-
-	if len(restorationSeed) == 0 {
 		subject, details := c.formatDetails(TopicSeedNeedsSaving)
 		c.notify(newSecurityNote(TopicSeedNeedsSaving, subject, details, db.Success))
 	}
+
+	c.setCredentials(creds)
 	return nil
 }
 
@@ -4575,19 +4614,7 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 		return nil, nil, fmt.Errorf("empty password not allowed")
 	}
 
-	// Generate an inner key and it's Crypter.
-	innerKey := encode.RandomBytes(32)
-	innerCrypter := c.newCrypter(innerKey)
-
-	// Generate the outer key.
-	outerCrypter := c.newCrypter(pw)
-	encInnerKey, err := outerCrypter.Encrypt(innerKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("inner key encryption error: %w", err)
-	}
-
 	// Generate a seed to use as the root for all future key generation.
-	const seedLen = 64
 	if len(seed) == 0 {
 		seed = encode.RandomBytes(seedLen)
 	} else if len(seed) != seedLen {
@@ -4595,9 +4622,19 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 	}
 	defer encode.ClearBytes(seed)
 
+	// Generate an inner key and it's Crypter.
+	innerKey := seedInnerKey(seed)
+	innerCrypter := c.newCrypter(innerKey[:])
 	encSeed, err := innerCrypter.Encrypt(seed)
 	if err != nil {
 		return nil, nil, fmt.Errorf("client seed encryption error: %w", err)
+	}
+
+	// Generate the outer key.
+	outerCrypter := c.newCrypter(pw)
+	encInnerKey, err := outerCrypter.Encrypt(innerKey[:])
+	if err != nil {
+		return nil, nil, fmt.Errorf("inner key encryption error: %w", err)
 	}
 
 	creds := &db.PrimaryCredentials{
@@ -4605,9 +4642,30 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 		EncInnerKey:    encInnerKey,
 		InnerKeyParams: innerCrypter.Serialize(),
 		OuterKeyParams: outerCrypter.Serialize(),
+		Version:        1,
 	}
 
 	return innerCrypter, creds, nil
+}
+
+func seedInnerKey(seed []byte) []byte {
+	// keyParam is a domain-specific value to ensure the resulting key is unique
+	// for the specific use case of deriving an inner encryption key from the
+	// seed. Any other uses of derivation from the seed should similarly create
+	// their own domain-specific value to ensure uniqueness.
+	//
+	// It is equal to BLAKE-256([]byte("DCRDEX-InnerKey-v0")).
+	keyParam := [32]byte{
+		0x75, 0x25, 0xb1, 0xb6, 0x53, 0x33, 0x9e, 0x33,
+		0xbe, 0x11, 0x61, 0x45, 0x1a, 0x88, 0x6f, 0x37,
+		0xe7, 0x74, 0xdf, 0xca, 0xb4, 0x8a, 0xee, 0x0e,
+		0x7c, 0x84, 0x60, 0x01, 0xed, 0xe5, 0xf6, 0x97,
+	}
+	key := make([]byte, len(seed)+len(keyParam))
+	copy(key, seed)
+	copy(key[len(seed):], keyParam[:])
+	innerKey := blake256.Sum256(key)
+	return innerKey[:]
 }
 
 func (c *Core) bondKeysReady() bool {
@@ -4649,6 +4707,13 @@ func (c *Core) Login(pw []byte) error {
 	}
 	defer crypter.Close()
 
+	switch creds.Version {
+	case 0:
+		if crypter, creds, err = c.upgradeV0CredsToV1(pw, *creds); err != nil {
+			return fmt.Errorf("error upgrading primary credentials from version 0 to 1: %w", err)
+		}
+	}
+
 	c.loginMtx.Lock()
 	defer c.loginMtx.Unlock()
 
@@ -4679,6 +4744,45 @@ func (c *Core) Login(pw []byte) error {
 	}
 
 	return nil
+}
+
+// upgradeV0CredsToV1 upgrades version 0 credentials to version 1. This update
+// changes the inner key to be derived from the seed.
+func (c *Core) upgradeV0CredsToV1(appPW []byte, creds db.PrimaryCredentials) (encrypt.Crypter, *db.PrimaryCredentials, error) {
+	outerCrypter, err := c.reCrypter(appPW, creds.OuterKeyParams)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app password error: %w", err)
+	}
+	innerKey, err := outerCrypter.Decrypt(creds.EncInnerKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("inner key decryption error: %w", err)
+	}
+	innerCrypter, err := c.reCrypter(innerKey, creds.InnerKeyParams)
+	if err != nil {
+		return nil, nil, fmt.Errorf("inner key deserialization error: %w", err)
+	}
+	seed, err := innerCrypter.Decrypt(creds.EncSeed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app seed decryption error: %w", err)
+	}
+
+	// Update all the fields.
+	newInnerKey := seedInnerKey(seed)
+	newInnerCrypter := c.newCrypter(newInnerKey[:])
+	creds.Version = 1
+	creds.InnerKeyParams = newInnerCrypter.Serialize()
+	if creds.EncSeed, err = newInnerCrypter.Encrypt(seed); err != nil {
+		return nil, nil, fmt.Errorf("error encrypting version 1 seed: %w", err)
+	}
+	if creds.EncInnerKey, err = outerCrypter.Encrypt(newInnerKey[:]); err != nil {
+		return nil, nil, fmt.Errorf("error encrypting version 1 inner key: %w", err)
+	}
+	if err := c.recrypt(&creds, innerCrypter, newInnerCrypter); err != nil {
+		return nil, nil, fmt.Errorf("recrypt error during v0 -> v1 credentials upgrade: %w", err)
+	}
+
+	c.log.Infof("Upgraded to version 1 credentials")
+	return newInnerCrypter, &creds, nil
 }
 
 // connectWallets attempts to connect to and retrieve balance from all known
@@ -4747,28 +4851,13 @@ func (c *Core) Notifications(n int) ([]*db.Notification, error) {
 	return notes, nil
 }
 
-// initializePrimaryCredentials sets the PrimaryCredential fields after the DB
-// upgrade.
-func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) error {
-	oldCrypter, err := c.reCrypter(pw, oldKeyParams)
-	if err != nil {
-		return fmt.Errorf("legacy encryption key deserialization error: %w", err)
-	}
-
-	newCrypter, creds, err := c.generateCredentials(pw, nil)
-	if err != nil {
-		return err
-	}
-
+func (c *Core) recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) error {
 	walletUpdates, acctUpdates, err := c.db.Recrypt(creds, oldCrypter, newCrypter)
 	if err != nil {
 		return err
 	}
 
 	c.setCredentials(creds)
-
-	subject, details := c.formatDetails(TopicUpgradedToSeed)
-	c.notify(newSecurityNote(TopicUpgradedToSeed, subject, details, db.WarningLevel))
 
 	for assetID, newEncPW := range walletUpdates {
 		w, found := c.wallet(assetID)
@@ -4791,6 +4880,28 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 		acct.keyMtx.Unlock()
 	}
 
+	return nil
+}
+
+// initializePrimaryCredentials sets the PrimaryCredential fields after the DB
+// upgrade.
+func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) error {
+	oldCrypter, err := c.reCrypter(pw, oldKeyParams)
+	if err != nil {
+		return fmt.Errorf("legacy encryption key deserialization error: %w", err)
+	}
+
+	newCrypter, creds, err := c.generateCredentials(pw, nil)
+	if err != nil {
+		return err
+	}
+
+	if err := c.recrypt(creds, oldCrypter, newCrypter); err != nil {
+		return err
+	}
+
+	subject, details := c.formatDetails(TopicUpgradedToSeed)
+	c.notify(newSecurityNote(TopicUpgradedToSeed, subject, details, db.WarningLevel))
 	return nil
 }
 

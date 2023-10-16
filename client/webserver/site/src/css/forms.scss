@@ -303,7 +303,7 @@ button.form-button {
 }
 
 #loginForm {
-  width: 250px;
+  width: 325px;
 
   #loader {
     -webkit-backdrop-filter: blur(4px);
@@ -320,6 +320,7 @@ button.form-button {
 }
 
 #changeAppPWForm,
+#resetAppPWForm,
 #dexAddrForm,
 #verifyForm,
 #appPWForm,
