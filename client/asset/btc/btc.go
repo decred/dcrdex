@@ -450,8 +450,7 @@ type BTCCloneCFG struct {
 	// OmitRPCOptionsArg is for clones that don't take an options argument.
 	OmitRPCOptionsArg bool
 	// AssetID is the asset ID of the clone.
-	AssetID          uint32
-	SupportTxHistory bool
+	AssetID uint32
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -1002,7 +1001,7 @@ var _ asset.Authenticator = (*ExchangeWalletSPV)(nil)
 var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
 var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
 var _ asset.AddressReturner = (*baseWallet)(nil)
-var _ asset.WalletHistorian = (*intermediaryWallet)(nil)
+var _ asset.WalletHistorian = (*ExchangeWalletSPV)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -1163,7 +1162,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	switch cfg.Type {
 	case walletTypeSPV:
-		cloneCFG.SupportTxHistory = true
 		return OpenSPVWallet(cloneCFG, openSPVWallet)
 	case walletTypeRPC, walletTypeLegacy:
 		rpcWallet, err := BTCCloneWallet(cloneCFG)
@@ -1375,6 +1373,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		calcTxSize:          txSizeCalculator,
 		txVersion:           txVersion,
 		Network:             cfg.Network,
+		pendingTxs:          make(map[chainhash.Hash]*extendedWalletTx),
 		txHistoryDBPath:     filepath.Join(walletDir, "txhistory.db"),
 		recyclePath:         filepath.Join(walletDir, "recycled-addrs.txt"),
 	}
@@ -1430,6 +1429,12 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	if err != nil {
 		return nil, err
 	}
+
+	txHistoryDB, err := newBadgerTxDB(btc.txHistoryDBPath, btc.log.SubLogger("TXHISTORYDB"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tx history db: %v", err)
+	}
+	btc.txHistoryDB.Store(txHistoryDB)
 
 	spvw := &spvWallet{
 		chainParams: cfg.ChainParams,
@@ -1496,20 +1501,13 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	btc.tipMtx.Unlock()
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
 
-	if btc.cloneParams.SupportTxHistory {
-		txHistoryDB, err := newBadgerTxDB(btc.txHistoryDBPath, btc.log.SubLogger("TXHISTORYDB"))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create tx history db: %v", err)
-		}
-		btc.txHistoryDB.Store(txHistoryDB)
-
+	if txHistoryDB := btc.txDB(); txHistoryDB != nil {
 		pendingTxs, err := txHistoryDB.getPendingTxs()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
 		}
 
 		btc.pendingTxsMtx.Lock()
-		btc.pendingTxs = make(map[chainhash.Hash]*extendedWalletTx)
 		for _, tx := range pendingTxs {
 			var txHash chainhash.Hash
 			copy(txHash[:], tx.ID)
@@ -3987,8 +3985,17 @@ func preAccelerate(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, ch
 	return currentEffectiveRate, &suggestedRange, earlyAcceleration, nil
 }
 
+func (btc *baseWallet) txDB() txDB {
+	dbi := btc.txHistoryDB.Load()
+	if dbi == nil {
+		return nil
+	}
+	return dbi.(txDB)
+}
+
 func (btc *baseWallet) markTxAsSubmitted(id dex.Bytes) {
-	if !btc.cloneParams.SupportTxHistory {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
 		return
 	}
 
@@ -4004,12 +4011,6 @@ func (btc *baseWallet) markTxAsSubmitted(id dex.Bytes) {
 	}
 	btc.pendingTxsMtx.Unlock()
 
-	txHistoryDB := btc.txHistoryDB.Load().(txDB)
-	if txHistoryDB == nil {
-		btc.log.Errorf("markTxAsSubmitted: tx history db is nil")
-		return
-	}
-
 	err := txHistoryDB.markTxAsSubmitted(id)
 	if err != nil {
 		btc.log.Errorf("failed to mark tx as submitted in tx history db: %v", err)
@@ -4017,13 +4018,8 @@ func (btc *baseWallet) markTxAsSubmitted(id dex.Bytes) {
 }
 
 func (btc *baseWallet) removeTxFromHistory(id dex.Bytes) {
-	if !btc.cloneParams.SupportTxHistory {
-		return
-	}
-
-	txHistoryDB := btc.txHistoryDB.Load().(txDB)
+	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
-		btc.log.Errorf("removeTxFromHistory: tx history db is nil")
 		return
 	}
 
@@ -4034,7 +4030,8 @@ func (btc *baseWallet) removeTxFromHistory(id dex.Bytes) {
 }
 
 func (btc *baseWallet) addTxToHistory(txType asset.TransactionType, id dex.Bytes, balanceDelta int64, fees uint64, submitted bool) {
-	if !btc.cloneParams.SupportTxHistory {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
 		return
 	}
 
@@ -4046,12 +4043,6 @@ func (btc *baseWallet) addTxToHistory(txType asset.TransactionType, id dex.Bytes
 			Fees:         fees,
 		},
 		Submitted: submitted,
-	}
-
-	txHistoryDB := btc.txHistoryDB.Load().(txDB)
-	if txHistoryDB == nil {
-		btc.log.Errorf("addTxToHistory: tx history db is nil")
-		return
 	}
 
 	var txHash chainhash.Hash
@@ -6154,7 +6145,8 @@ func (btc *baseWallet) MaxFundingFees(numTrades uint32, feeRate uint64, options 
 // a block, and if so, updates the transaction history to reflect the
 // block height.
 func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
-	if !btc.cloneParams.SupportTxHistory {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
 		return
 	}
 
@@ -6164,12 +6156,6 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		return
 	}
 	if !synced {
-		return
-	}
-
-	txHistoryDB := btc.txHistoryDB.Load().(txDB)
-	if txHistoryDB == nil {
-		btc.log.Errorf("tx history db is nil")
 		return
 	}
 
@@ -6334,14 +6320,10 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (btc *intermediaryWallet) TxHistory(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
-	if !btc.cloneParams.SupportTxHistory {
-		return nil, fmt.Errorf("this wallet does not support tx history")
-	}
-
-	txHistoryDB := btc.txHistoryDB.Load().(txDB)
+func (btc *ExchangeWalletSPV) TxHistory(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
-		return nil, fmt.Errorf("tx history db not loaded")
+		return nil, fmt.Errorf("tx database not initialized")
 	}
 
 	return txHistoryDB.getTxs(n, refID, past)
