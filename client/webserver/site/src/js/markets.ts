@@ -741,7 +741,7 @@ export default class MarketsPage extends BasePage {
 
     Doc.setVis(await showOrderForm(), page.orderForm, page.orderTypeBttns)
 
-    if (this.mmRunning === undefined) {
+    if (app().user.experimental && this.mmRunning === undefined) {
       const marketMakingStatus = await app().getMarketMakingStatus()
       this.mmRunning = marketMakingStatus.running
     }
