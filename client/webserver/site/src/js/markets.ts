@@ -1033,10 +1033,7 @@ export default class MarketsPage extends BasePage {
   }
 
   updateOrderBttnState () {
-    const mkt = this.market
-    const order = this.currentOrder
-    const orderQty = order.qty
-    const orderRate = order.rate
+    const { market: mkt, currentOrder: { qty: orderQty, rate: orderRate, isLimit, sell } } = this
     const baseWallet = app().assets[this.market.base.id].wallet
     const quoteWallet = app().assets[mkt.quote.id].wallet
     if (!baseWallet || !quoteWallet) return
@@ -1047,8 +1044,8 @@ export default class MarketsPage extends BasePage {
     }
 
     // Market orders
-    if (!order.isLimit) {
-      if (order.sell) {
+    if (!isLimit) {
+      if (sell) {
         this.setOrderBttnEnabled(orderQty <= baseWallet.balance.available, intl.prep(intl.ID_ORDER_BUTTON_SELL_BALANCE_ERROR))
       } else {
         this.setOrderBttnEnabled(orderQty <= quoteWallet.balance.available, intl.prep(intl.ID_ORDER_BUTTON_BUY_BALANCE_ERROR))
@@ -1062,7 +1059,7 @@ export default class MarketsPage extends BasePage {
     }
 
     // Limit sell
-    if (order.sell) {
+    if (sell) {
       if (baseWallet.balance.available < mkt.cfg.lotsize) {
         this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_SELL_BALANCE_ERROR))
         return
