@@ -5,6 +5,7 @@ package webserver
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"runtime/debug"
 
 	"decred.org/dcrdex/client/webserver/locales"
+	"decred.org/dcrdex/dex/encode"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -188,13 +190,13 @@ func (t *templates) exec(name string, data any) (string, error) {
 var commit = func() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, setting := range info.Settings {
-			if setting.Key == "vcs.revision" {
+			if setting.Key == "vcs.revision" && len(setting.Value) >= 8 {
 				return setting.Value
 			}
 		}
 	}
 
-	return ""
+	return hex.EncodeToString(encode.RandomBytes(4))
 }()
 
 // templateFuncs are able to be called during template execution.

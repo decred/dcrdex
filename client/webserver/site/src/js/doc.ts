@@ -3,10 +3,16 @@ import {
   UnitInfo,
   LayoutMetrics,
   WalletState,
-  PageElement,
-  SupportedAsset
+  PageElement
 } from './registry'
 import { RateEncodingFactor } from './orderutil'
+
+// Symbolizer is satisfied by both dex.Asset and core.SupportedAsset. Used by
+// Doc.symbolize.
+interface Symbolizer {
+  symbol: string
+  unitInfo: UnitInfo
+}
 
 const parser = new window.DOMParser()
 
@@ -353,12 +359,14 @@ export default class Doc {
    * non-token assets, this is simply a <span>SYMBOL</span>. For tokens, it'll
    * be <span><span>SYMBOL</span><sup>PARENT</sup></span>.
    */
-  static symbolize (asset: SupportedAsset, useLogo?: boolean): PageElement {
-    const symbol = asset.unitInfo.conventional.unit
+  static symbolize (asset: Symbolizer, useLogo?: boolean): PageElement {
+    const ticker = asset.unitInfo.conventional.unit
     const symbolSpan = document.createElement('span')
-    symbolSpan.textContent = symbol.toUpperCase()
-    if (!asset.token) return symbolSpan
-    const parentSymbol = asset.symbol.split('.')[1]
+    symbolSpan.textContent = ticker.toUpperCase()
+    const parts = asset.symbol.split('.')
+    const isToken = parts.length === 2
+    if (!isToken) return symbolSpan
+    const parentSymbol = parts[1]
     const span = document.createElement('span')
     span.appendChild(symbolSpan)
     if (useLogo) {

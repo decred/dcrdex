@@ -229,6 +229,16 @@ func mkSupportedAsset(symbol string, state *core.WalletState) *core.SupportedAss
 
 func mkDexAsset(symbol string) *dex.Asset {
 	assetID, _ := dex.BipSymbolID(symbol)
+	ui, err := asset.UnitInfo(assetID)
+	if err != nil /* unknown asset*/ {
+		ui = dex.UnitInfo{
+			AtomicUnit: "Sats",
+			Conventional: dex.Denomination{
+				ConversionFactor: 1e8,
+				Unit:             strings.ToUpper(symbol),
+			},
+		}
+	}
 	a := &dex.Asset{
 		ID:           assetID,
 		Symbol:       symbol,
@@ -237,7 +247,7 @@ func mkDexAsset(symbol string) *dex.Asset {
 		SwapSize:     uint64(rand.Intn(150) + 150),
 		SwapSizeBase: uint64(rand.Intn(150) + 15),
 		SwapConf:     uint32(rand.Intn(5) + 2),
-		UnitInfo:     dex.UnitInfo{Conventional: dex.Denomination{ConversionFactor: 1e8}},
+		UnitInfo:     ui,
 	}
 	return a
 }

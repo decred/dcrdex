@@ -331,6 +331,7 @@ export interface User {
   bots: BotReport[]
   net: number
   extensionModeConfig: ExtensionModeConfig
+  experimental: boolean
 }
 
 export interface CoreNote {

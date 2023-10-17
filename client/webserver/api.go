@@ -1489,12 +1489,14 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 	response := struct {
 		*core.User
-		Authed bool `json:"authed"`
-		OK     bool `json:"ok"`
+		Authed       bool `json:"authed"`
+		OK           bool `json:"ok"`
+		Experimental bool `json:"experimental"`
 	}{
-		User:   s.core.User(),
-		Authed: s.isAuthed(r),
-		OK:     true,
+		User:         s.core.User(),
+		Authed:       s.isAuthed(r),
+		OK:           true,
+		Experimental: s.experimental,
 	}
 	writeJSON(w, response, s.indent)
 }
