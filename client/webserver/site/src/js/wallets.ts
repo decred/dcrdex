@@ -1906,6 +1906,7 @@ export default class WalletsPage extends BasePage {
       const n = payload as TipChangeNote
       switch (n.assetID) {
         case 42: { // dcr
+          if (!this.stakeStatus) return
           const data = n.data as DecredTicketTipUpdate
           const synced = app().walletMap[n.assetID].synced
           if (synced) {
