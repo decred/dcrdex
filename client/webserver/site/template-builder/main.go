@@ -57,7 +57,6 @@ func main() {
 		if filepath.Ext(baseName) != ".tmpl" {
 			return nil
 		}
-		fmt.Println(baseName)
 		rawTmplPath := filepath.Join(templateDir, baseName)
 		rawTmpl, err := os.ReadFile(rawTmplPath)
 		if err != nil {
@@ -68,7 +67,6 @@ func main() {
 		enDict := locales.Locales["en-US"]
 
 		for lang := range locales.Locales {
-			fmt.Println("Prepping", lang)
 			tmpl := make([]byte, len(rawTmpl))
 			copy(tmpl, rawTmpl)
 			localizedTemplates[lang] = tmpl
@@ -100,7 +98,6 @@ func main() {
 						if replacement, found = enDict[key]; !found {
 							return fmt.Errorf("no %s translation in %q and no default replacement for %s", lang, baseName, key)
 						}
-						fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
 					}
 				}
 
@@ -119,7 +116,7 @@ func main() {
 				// ext := filepath.Ext(d.Name())
 				// name := baseName[:len(baseName)-len(ext)]
 				// localizedName := filepath.Join(outputDirectory, name+"_"+lang+ext)
-				fmt.Println("Writing", localizedName)
+				// fmt.Println("Writing", localizedName)
 				if err := os.WriteFile(localizedName, tmpl, 0644); err != nil {
 					return fmt.Errorf("error writing localized template %s: %v", localizedName, err)
 				}
