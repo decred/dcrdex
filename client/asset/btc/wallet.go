@@ -44,6 +44,9 @@ type Wallet interface {
 	ownsAddress(addr btcutil.Address) (bool, error) // this should probably just take a string
 	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
 	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
+}
+
+type txLister interface {
 	listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error)
 }
 

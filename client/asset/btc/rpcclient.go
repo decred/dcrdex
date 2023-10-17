@@ -495,10 +495,6 @@ func (wc *rpcClient) listUnspent() ([]*ListUnspentResult, error) {
 	return unspents, wc.call(methodListUnspent, anylist{uint8(0)}, &unspents)
 }
 
-func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error) {
-	return nil, fmt.Errorf("not supported")
-}
-
 // lockUnspent locks and unlocks outputs for spending. An output that is part of
 // an order, but not yet spent, should be locked until spent or until the order
 // is canceled or fails.

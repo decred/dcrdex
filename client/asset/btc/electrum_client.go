@@ -27,7 +27,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -633,10 +632,6 @@ func (ew *electrumWallet) balances() (*GetBalancesResult, error) {
 			Immature: eBal.Immature,
 		},
 	}, nil
-}
-
-func (wc *electrumWallet) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error) {
-	return nil, fmt.Errorf("not supported")
 }
 
 // part of btc.Wallet interface

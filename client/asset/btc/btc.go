@@ -958,6 +958,7 @@ type intermediaryWallet struct {
 	*baseWallet
 	txFeeEstimator txFeeEstimator
 	tipRedeemer    tipRedemptionWallet
+	txLister       txLister
 }
 
 // ExchangeWalletSPV embeds a ExchangeWallet, but also provides the Rescan
@@ -1457,6 +1458,7 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 			baseWallet:     btc,
 			txFeeEstimator: spvw,
 			tipRedeemer:    spvw,
+			txLister:       spvw,
 		},
 		authAddOn: &authAddOn{spvw},
 		spvNode:   spvw,
@@ -6171,7 +6173,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		} else {
 			blockToQuery = tip - blockQueryBuffer
 		}
-		recentTxs, err := btc.node.listTransactionsSinceBlock(int32(blockToQuery))
+		recentTxs, err := btc.txLister.listTransactionsSinceBlock(int32(blockToQuery))
 		if err != nil {
 			btc.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
 			recentTxs = nil
