@@ -1,9 +1,11 @@
 {{define "dexsettings"}}
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="text-center py-5 overflow-y-auto">
-  <div class="go-back-to-settings"><span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24"></span></div>
-  <span class="settings-gear ico-settings"></span>
+<div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="flex-center flex-column align-items-stretch py-5 mx-auto">
+  <div class="d-flex justify-content-start align-items-center pointer py-2">
+    <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 lh1"></span>
+  </div>
+  <div class="flex-center pb-2"><span class="settings-gear ico-settings"></span></div>
   <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
   <div class="flex-center fs16 mb-2">
     <span class="me-2 connection ico-connection d-hide" id="connectedIcon"></span>

@@ -40,7 +40,7 @@ export default class DexSettingsPage extends BasePage {
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
     Doc.bind(page.bondAssetSelect, 'change', () => this.updateBondAssetCosts())
     Doc.bind(page.bondTargetTier, 'input', () => this.updateBondAssetCosts())
-    Doc.bind(page.goBackToSettings, 'click', () => window.location.assign('/settings'))
+    Doc.bind(page.goBackToSettings, 'click', () => app().loadPage('settings'))
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
       window.location.assign(`/dexsettings/${xc.host}`)
