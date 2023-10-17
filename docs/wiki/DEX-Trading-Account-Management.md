@@ -20,7 +20,7 @@ account.
 
     <img src="./images/create-account-market-page.png" width="300">
 
-4. The DEX host will show all offered markets, and a choice of assets with which
+3. The DEX host will show all offered markets, and a choice of assets with which
    you can lock in a bond to enable trading. Select the asset you wish to use.
 
    <img src="images/choose-bond-asset.png" width="400">
@@ -31,29 +31,23 @@ account.
    placing orders is an anti-spam mechanism to combat disruptive behavior like
    backing out on swaps.
 
-5. If you already created the selected asset wallet, you'll **skip this step**.
+4. If you already created the selected asset wallet, you'll **skip this step**.
    Choose the type of wallet to use. In this screenshot, we choose a native BTC
    wallet and click "Create!". The wallet will begin to synchronize with the
    asset's network.
 
    <img src="images/create-btc.png" width="360">
 
-   NOTE: This is your own **self-hosted** wallet. The wallet's address keys are
-   derived from the DEX application's "seed", which you may backup from the
-   Settings page at any time. Further, no central wallet backend service is
-   involved, only the nodes on the coin's decentralized network.
-
-6. The next form will show you synchronization progress, and give you the
+5. The next form will show you synchronization progress, and give you the
    deposit address for your wallet and the minimum amount you should deposit to
    be able to create your first bond in the next step, which is required to
-   place orders. **This is your wallet**, so deposit as much as you like! After
-   sending to your address, the transaction **must confirm** (i.e. be mined in a
-   block) before the form will update your balance. This form will be skipped if
-   the wallet is already funded and synchronized.
+   place orders. After sending to your address, the transaction **must confirm**
+   (i.e. be mined in a block) before the form will update your balance. This
+   form will be skipped if the wallet is already funded and synchronized.
 
    <img src="images/sync-fund-btc.png" width="360">
 
-   **IMPORTANT**: This is your own local wallet, and you can send as much as you
+   **IMPORTANT**: This is your own wallet, and you can send as much as you
    like to it since *only* the amount required for the bond will be spent in the
    next step. The remaining amount, minus a small reserve for future bond
    transactions, will be in your available balance. For example, you can send
@@ -64,7 +58,7 @@ account.
 
    You may disable future bonds at any time by changing the "Target Tier" to 0
    in the "Update Bond Options" form accessible from DEX host settings form
-   accessible from the Settings page. This will return any reserves to the
+   accessible from the Settings view. This will return any reserves to the
    available balance. Any active bonds will automatically be refunded when their
    lock time expires (currently 2 months after creation).
 
@@ -74,7 +68,7 @@ account.
    patient; otherwise you can bootstrap the process using a known seed node such
    as the Litecoin nodes on [this list](https://gist.github.com/chappjc/d0f26b12258f8531bb78b37f38d080a0).
 
-7. Once the wallet is synchronized and has at least enough to create your
+6. Once the wallet is synchronized and has at least enough to create your
    time-locked fidelity bond, the form will update, and you should click the
    button to create and broadcast your bond transaction.
 
@@ -83,7 +77,7 @@ account.
    After proceeding, the available balance will be the amount you deposited
    in the previous step minus this bond amount and transaction fees.
 
-8. You will then be taken to the **Markets** page, where you must wait for
+7. You will then be taken to the **Markets** page, where you must wait for
    confirmations on your bond transaction:
 
    <img src="images/wait-for-confs.png" width="360">
@@ -104,7 +98,7 @@ account.
    the same wallets, add the same DEX host, and *then* import the bonds from
    this backup.
 
-10. That's it! Use the Buy/Sell form on the Markets page to begin placing
+   That's it! Use the Buy/Sell form on the Markets page to begin placing
    orders. Go to the Wallets page to obtain addresses for your wallets so that
    you can send yourself funds to trade.
 
@@ -119,7 +113,7 @@ need to export it. Here's how you can do it:
 
     <img src="./images/dex-account-settings.png" width="360">
 
-3. On the DEX account settings page, click `Export Account`.
+3. On the DEX account settings view, click `Export Account`.
 4. Select the directory where you want to save the `.json` file. Make sure to
    keep your exported account file safe.
 
@@ -146,7 +140,7 @@ Easy as that!
 If you want to temporarily disable your DEX trading account, follow these steps:
 
 1. Visit the DEX account settings as in [Exporting your DEX Trading Account](#exporting-your-dex-trading-account)(**Step 1 and 2**).
-2. On the selected DEX account settings page, click on the `Disable Account`.
+2. On the selected DEX account settings view, click on the `Disable Account`.
 3. Confirm the action with your app password.
 
 If successful, the DEX trading account **will not be listed until it is added again**.
@@ -172,7 +166,7 @@ To add a new DEX server:
    check the "No account" box. You will have an opportunity to create an
    identity later, but if you are ready to trade [follow the remaining
    steps](#setting-up-your-dex-trading-account).
-   
+
    If you had an account with the newly added DEX server, it'll be automatically
    discovered and enabled but you you'll need to create fidelity bonds to trade
    with your account.
@@ -182,13 +176,11 @@ To add a new DEX server:
 To manage your DEX trading account tier, here's what you need to do:
 
 1. Visit the DEX account settings as in [Exporting your DEX Trading Account](#exporting-your-dex-trading-account)(**Step 1 and 2**).
-2. On the DEX account settings page, click `Update Bond Options`.
+2. On the DEX account settings view, click `Update Bond Options`.
 3. Choose the asset for your fidelity bonds and set your `Target Tier`.
 4. Click `Submit` to update your bond options.
 
-**Note**: Make sure you have enough funds (bond amount * target tier * 2[bond
-overlap to ensure you always have enough bonds to allow you trade] + fees) to
-cover your desired `Target Tier`.
+**Note**: Make sure you have enough funds to cover your `Target Tier`.
 
 ## Wrapping Up
 

@@ -104,21 +104,23 @@ several blocks.
 
    The selected native wallets will be created for you and you'll be connected
    to the selected DEX server when you submit the form.
-4. Backup your app seed. This seed is used to restore your DEX accounts and any
+
+   **Note**: If you encounter an error about not being able to connect to the
+   selected DEX server during the quick configuration, you can manually [add the DEX server](https://github.com/decred/dcrdex/wiki/DEX-Trading-Account-Management#adding-a-dex-trading-account). You will see a list of known DEX server(s) you can choose from.
+
+5. Backup your app seed. This seed is used to restore your DEX accounts and any
    native wallets, so keep it safe.
 
-   If you skip this step now (not recommended), you can go to the Settings page
+   If you skip this step now (not recommended), you can go to the Settings view
    via the "gears" icon in the top navigation bar to retrieve your application
-   seed later. 
+   seed later.
 
     <img src="images/view-seed.png" width="360">
-    
-5. That's it! You'll be redirected to the wallets page after step 4 above.
-6. To start trading, follow the guide to [Setting Up Your DEX Trading
-   Account](https://github.com/decred/dcrdex/wiki/DEX-Trading-Account-Management).
 
-**Note**: If you encounter an error about not being able to connect to the
-selected DEX server during the quick configuration, you can manually [add the DEX server](https://github.com/decred/dcrdex/wiki/DEX-Trading-Account-Management#adding-a-dex-trading-account). You will see a list of known DEX server(s) you can choose from.
+6. That's it! You'll be redirected to the wallets page after step 4 above.
+
+7. To start trading, follow the guide to [Setting Up Your DEX Trading
+   Account](https://github.com/decred/dcrdex/wiki/DEX-Trading-Account-Management).
 
 ## Advanced Client Installation
 
