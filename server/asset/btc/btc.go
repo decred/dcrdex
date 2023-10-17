@@ -91,7 +91,7 @@ var (
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
 	// check for new blocks. Modify at compile time via blockPollIntervalStr:
 	// go build -ldflags "-X 'decred.org/dcrdex/server/asset/btc.blockPollIntervalStr=4s'"
-	blockPollInterval            = time.Second
+	blockPollInterval            time.Duration
 	blockPollIntervalStr         string
 	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
 	defaultMaxFeeBlocks          = 3
@@ -357,7 +357,7 @@ func (btc *Backend) shutdown() {
 func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	client, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
-		DisableTLS:   true,
+		DisableTLS:   !btc.rpcCfg.IsPublicProvider,
 		Host:         btc.rpcCfg.RPCBind,
 		User:         btc.rpcCfg.RPCUser,
 		Pass:         btc.rpcCfg.RPCPass,
@@ -401,11 +401,17 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	txindex, err := btc.node.checkTxIndex()
-	if err != nil {
-		btc.log.Warnf(`Please ensure txindex is enabled in the node config and you might need to re-index if txindex was not previously enabled for %s`, btc.name)
-		btc.shutdown()
-		return nil, fmt.Errorf("error checking txindex for %s: %w", btc.name, err)
+	// Assume public RPC providers have txindex, or maybe want to check an old
+	// transaction or something, but the getindexinfo method may not be
+	// available for public providers.
+	txindex := btc.rpcCfg.IsPublicProvider
+	if !txindex {
+		txindex, err = btc.node.checkTxIndex()
+		if err != nil {
+			btc.log.Warnf(`Please ensure txindex is enabled in the node config and you might need to re-index if txindex was not previously enabled for %s`, btc.name)
+			btc.shutdown()
+			return nil, fmt.Errorf("error checking txindex for %s: %w", btc.name, err)
+		}
 	}
 	if !txindex {
 		btc.shutdown()
@@ -1304,6 +1310,13 @@ func (btc *Backend) auditContract(contract *Output) (*asset.Contract, error) {
 // context to trigger a clean shutdown.
 func (btc *Backend) run(ctx context.Context) {
 	defer btc.shutdown()
+
+	if blockPollInterval == 0 {
+		blockPollInterval = time.Second
+		if btc.rpcCfg.IsPublicProvider {
+			blockPollInterval = time.Second * 10
+		}
+	}
 
 	btc.log.Infof("Starting %v block polling with interval of %v",
 		strings.ToUpper(btc.name), blockPollInterval)

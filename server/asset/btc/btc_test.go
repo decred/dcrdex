@@ -128,6 +128,9 @@ func TestConfig(t *testing.T) {
 	if parsedCfg.RPCPass != cfg.RPCPass {
 		t.Fatalf("password mismatch")
 	}
+	if parsedCfg.IsPublicProvider {
+		t.Fatalf("IsPublicProvider was unexpectedly set true")
+	}
 
 	// Check with a designated port, but no host specified.
 	err = runCfg(&dexbtc.RPCConfig{
@@ -231,6 +234,20 @@ func TestConfig(t *testing.T) {
 	}
 	if p != "1234" {
 		t.Fatalf("unexpected custom port when trying IPv6. wanted 1234, got %s", p)
+	}
+
+	// Check with an https URL, signifying a public RPC provider.
+	err = runCfg(&dexbtc.RPCConfig{
+		RPCBind: "https://provider.com/my-api-key/btc",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error when trying public provider: %v", err)
+	}
+	if parsedCfg.RPCBind != "provider.com/my-api-key/btc" {
+		t.Fatalf("wrong host parsed. wanted %s, go %s", "provider.com/my-api-key/btc", parsedCfg.RPCBind)
+	}
+	if !parsedCfg.IsPublicProvider {
+		t.Fatalf("UseTLS not set")
 	}
 }
 

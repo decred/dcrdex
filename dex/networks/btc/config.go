@@ -8,6 +8,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcutil"
@@ -36,15 +37,14 @@ type RPCConfig struct {
 	RPCBind    string `ini:"rpcbind"`
 	RPCPort    int    `ini:"rpcport"`
 	RPCConnect string `ini:"rpcconnect"` // (bitcoin-cli) if set, reflected in RPCBind
+	// IsPublicProvider: Set rpcbind with a URL with protocol https, and we'll
+	// assume it's a public RPC provider. This means that we assume TLS and
+	// permit omission of the RPCUser and RPCPass, since they might be encoded
+	// in the URL.
+	IsPublicProvider bool
 }
 
 func CheckRPCConfig(cfg *RPCConfig, name string, network dex.Network, ports NetPorts) error {
-	if cfg.RPCUser == "" {
-		return fmt.Errorf("no rpcuser set in %q config file", name)
-	}
-	if cfg.RPCPass == "" {
-		return fmt.Errorf("no rpcpassword set in %q config file", name)
-	}
 
 	var port string
 	switch network {
@@ -60,6 +60,16 @@ func CheckRPCConfig(cfg *RPCConfig, name string, network dex.Network, ports NetP
 
 	StandardizeRPCConf(cfg, port)
 
+	// When using a public provider, the credentials can be in the url's path.
+	if !cfg.IsPublicProvider {
+		if cfg.RPCUser == "" {
+			return fmt.Errorf("no rpcuser set in %q config file", name)
+		}
+		if cfg.RPCPass == "" {
+			return fmt.Errorf("no rpcpassword set in %q config file", name)
+		}
+	}
+
 	return nil
 }
 
@@ -74,6 +84,13 @@ func StandardizeRPCConf(cfg *RPCConfig, defaultPort string) {
 	}
 
 	if cfg.RPCBind != "" {
+		// Allow RPC providers
+		if strings.HasPrefix(cfg.RPCBind, "https://") {
+			cfg.IsPublicProvider = true
+			cfg.RPCBind = cfg.RPCBind[len("https://"):]
+			port = ""
+		}
+
 		h, p, err := net.SplitHostPort(cfg.RPCBind)
 		if err != nil {
 			// Will error for i.e. "localhost", but not for "localhost:" or ":1234"
