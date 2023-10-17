@@ -23,6 +23,8 @@ import {
   Order,
   OrderFilter,
   WalletCreationNote,
+  WalletNote,
+  TipChangeNote,
   Market,
   PeerSource,
   WalletPeer,
@@ -36,6 +38,12 @@ import {
   TicketStats
 } from './registry'
 import { CoinExplorers } from './order'
+
+interface DecredTicketTipUpdate {
+  ticketPrice: number
+  votingSubsidy: number
+  stats: TicketStats
+}
 
 const animationLength = 300
 const traitRescanner = 1
@@ -281,7 +289,8 @@ export default class WalletsPage extends BasePage {
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       walletconfig: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
-      createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) }
+      createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) },
+      walletnote: (note: WalletNote) => { this.handleCustomWalletNote(note) }
     })
 
     const firstAsset = this.sortAssetButtons()
@@ -910,13 +919,11 @@ export default class WalletsPage extends BasePage {
     Doc.show(page.stakingSummary, page.ticketPriceBox)
     const stakeStatus = res.status as TicketStakingStatus
     this.stakeStatus = stakeStatus
-    page.ticketPrice.textContent = Doc.formatFourSigFigs(stakeStatus.ticketPrice / ui.conventional.conversionFactor)
-    page.votingSubsidy.textContent = Doc.formatFourSigFigs(stakeStatus.votingSubsidy / ui.conventional.conversionFactor)
     page.stakingAgendaCount.textContent = String(stakeStatus.stances.agendas.length)
     page.stakingTspendCount.textContent = String(stakeStatus.stances.tspends.length)
     page.purchaserCurrentPrice.textContent = Doc.formatFourSigFigs(stakeStatus.ticketPrice / ui.conventional.conversionFactor)
     page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
-    this.updateTicketStats(stakeStatus.stats, ui)
+    this.updateTicketStats(stakeStatus.stats, ui, stakeStatus.ticketPrice, stakeStatus.votingSubsidy)
     this.setVSPViz(stakeStatus.vsp)
   }
 
@@ -933,13 +940,15 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(stakeStatus.isRPC, page.purchaseTicketsBox)
   }
 
-  updateTicketStats (stats: TicketStats, ui: UnitInfo) {
+  updateTicketStats (stats: TicketStats, ui: UnitInfo, ticketPrice?: number, votingSubsidy?: number) {
     const { page, stakeStatus } = this
     const liveTicketCount = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
     page.stakingTicketCount.textContent = String(liveTicketCount)
     page.totalTicketCount.textContent = String(stats.ticketCount)
     page.totalTicketRewards.textContent = Doc.formatFourSigFigs(stats.totalRewards / ui.conventional.conversionFactor)
     page.totalTicketVotes.textContent = String(stats.votes)
+    if (ticketPrice) page.ticketPrice.textContent = Doc.formatFourSigFigs(ticketPrice / ui.conventional.conversionFactor)
+    if (votingSubsidy) page.votingSubsidy.textContent = Doc.formatFourSigFigs(votingSubsidy / ui.conventional.conversionFactor)
   }
 
   async showVSPPicker () {
@@ -978,6 +987,7 @@ export default class WalletsPage extends BasePage {
     Doc.hide(page.purchaserErr)
     Doc.setVis(!State.passwordIsCached(), page.purchaserAppPWBox)
     this.showForm(this.page.purchaseTicketsForm)
+    page.purchaserInput.focus()
   }
 
   purchaserInputChanged () {
@@ -1888,6 +1898,24 @@ export default class WalletsPage extends BasePage {
   handleCreateWalletNote (note: WalletCreationNote) {
     this.updateAssetButton(note.assetID)
     this.assetUpdated(note.assetID)
+  }
+
+  handleCustomWalletNote (note: WalletNote) {
+    const payload = note.payload
+    if (payload.tip) {
+      const n = payload as TipChangeNote
+      switch (n.assetID) {
+        case 42: { // dcr
+          if (!this.stakeStatus) return
+          const data = n.data as DecredTicketTipUpdate
+          const synced = app().walletMap[n.assetID].synced
+          if (synced) {
+            const ui = app().unitInfo(n.assetID)
+            this.updateTicketStats(data.stats, ui, data.ticketPrice, data.votingSubsidy)
+          }
+        }
+      }
+    }
   }
 
   /*

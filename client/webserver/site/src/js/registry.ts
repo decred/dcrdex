@@ -372,6 +372,16 @@ export interface WalletCreationNote extends CoreNote {
   assetID: number
 }
 
+export interface TipChangeNote {
+  assetID: number
+  tip: number
+  data: any
+}
+
+export interface WalletNote extends CoreNote {
+  payload: any
+}
+
 export interface SpotPriceNote extends CoreNote {
   host: string
   spots: Record<string, Spot>
