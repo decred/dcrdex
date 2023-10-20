@@ -2,7 +2,7 @@
 // pragma should be as specific as possible to allow easier validation.
 pragma solidity = 0.8.18;
 
-// ETHSwap creates a contract to be deployed on an ethereum network. In
+// ERC20Swap creates a contract to be deployed on an ethereum network. In
 // order to save on gas fees, a separate ERC20Swap contract is deployed
 // for each ERC20 token. After deployed, it keeps a map of swaps that
 // facilitates atomic swapping of ERC20 tokens with other crypto currencies

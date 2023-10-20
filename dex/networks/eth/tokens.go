@@ -140,6 +140,19 @@ var Tokens = map[uint32]*Token{
 							Transfer:  35_000,
 						},
 					},
+					1: {
+						// DRAFT TODO
+						Address: common.Address{},
+						Gas: Gases{
+							Swap:      174_000, // [171756 284366 396976 509586 622184]
+							SwapAdd:   115_000,
+							Redeem:    70_000, // [63214 94858 126502 158135 189779]
+							RedeemAdd: 33_000,
+							Refund:    50_000, // [48127 48127 48127 48127 48127]
+							Approve:   46_000, // [44465 27365 27365 27365 27365]
+							Transfer:  35_000, // [32540 32540 32540 32540 32540]
+						},
+					},
 				},
 			},
 		},
@@ -224,6 +237,27 @@ var Tokens = map[uint32]*Token{
 							Transfer:  85_100,  // actual ~65,524 (initial receive, subsequent 48,424)
 						},
 					},
+					1: {
+						// Swap contract address. The simnet harness writes this
+						// address to file. Live tests must populate this field.
+						Address: common.Address{},
+						Gas: Gases{
+							Swap:      95_000, // [86009 112920 139831 166742 193651]
+							SwapAdd:   30_000, // avg SwapAdd 26910
+							Redeem:    50_000, // [42569 53614 64646 75703 86734]
+							RedeemAdd: 14_000, // avg RedeemAdd 11038
+							Refund:    50_000, // [45306 45306 45306 45306 45294] avg: 45303
+							// Approve is the gas used to call the approve
+							// method of the contract. For Approve transactions,
+							// the very first approval for an account-spender
+							// pair takes more than subsequent approvals. The
+							// results are repeated for a different account's
+							// first approvals on the same contract, so it's not
+							// just the global first.
+							Approve:  46_000,
+							Transfer: 33_000,
+						},
+					},
 				},
 			},
 			dex.Simnet: { // no usdc on simnet, dextt instead
@@ -262,15 +296,19 @@ func MaybeReadSimnetAddrsDir(
 		return
 	}
 
-	ethSwapContractAddrFile := filepath.Join(harnessDir, "eth_swap_contract_address.txt")
-	tokenSwapContractAddrFile := filepath.Join(harnessDir, "erc20_swap_contract_address.txt")
+	ethSwapContractAddrFileV0 := filepath.Join(harnessDir, "eth_swap_contract_address.txt")
+	tokenSwapContractAddrFileV0 := filepath.Join(harnessDir, "erc20_swap_contract_address.txt")
+	ethSwapContractAddrFileV1 := filepath.Join(harnessDir, "eth_swap_contract_address_v1.txt")
+	tokenSwapContractAddrFileV1 := filepath.Join(harnessDir, "erc20_swap_contract_address_v1.txt")
 	testTokenContractAddrFile := filepath.Join(harnessDir, "test_token_contract_address.txt")
 	multiBalanceContractAddrFile := filepath.Join(harnessDir, "multibalance_address.txt")
 
-	contractsAddrs[0][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFile)
+	contractsAddrs[0][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFileV0)
+	contractsAddrs[1][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFileV1)
 	multiBalandAddresses[dex.Simnet] = getContractAddrFromFile(multiBalanceContractAddrFile)
 
-	token.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapContractAddrFile)
+	token.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapContractAddrFileV0)
+	token.SwapContracts[1].Address = getContractAddrFromFile(tokenSwapContractAddrFileV1)
 	token.Address = getContractAddrFromFile(testTokenContractAddrFile)
 }
 

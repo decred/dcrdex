@@ -29,7 +29,10 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 )
 
-const contractVersionNewest = ^uint32(0)
+const (
+	contractVersionNewest = ^uint32(0)
+	approveGas            = 4e5
+)
 
 var (
 	// https://github.com/ethereum/go-ethereum/blob/16341e05636fd088aa04a27fca6dc5cda5dbab8f/eth/backend.go#L110-L113

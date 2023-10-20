@@ -42,6 +42,7 @@ func TestMain(m *testing.M) {
 	monitorConnectionsInterval = 3 * time.Second
 
 	// Run in function so that defers happen before os.Exit is called.
+	dexeth.MaybeReadSimnetAddrs()
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
@@ -110,10 +111,8 @@ func TestSuggestGasTipCap(t *testing.T) {
 	}
 }
 
-func TestSwap(t *testing.T) {
-	var secretHash [32]byte
-	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.swap(ctx, BipID, secretHash)
+func TestStatus(t *testing.T) {
+	_, err := ethClient.status(ctx, BipID, &dexeth.SwapVector{})
 	if err != nil {
 		t.Fatal(err)
 	}
