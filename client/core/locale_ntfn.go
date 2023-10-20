@@ -1978,30 +1978,13 @@ func init() {
 }
 
 // CheckTopicLangs is used to report missing notification translations.
-func CheckTopicLangs() (missing, stale map[string][]Topic) {
-	missing = make(map[string][]Topic, len(locales)-1)
-	stale = make(map[string][]Topic, len(locales)-1)
-
-	for lang, translations := range locales {
-		if lang == originLang {
-			continue
-		}
-		var missingTopics, staleTopics []Topic
-		for topic := range originLocale {
-			t, found := translations[topic]
-			if !found {
-				missingTopics = append(missingTopics, topic)
-			} else if t.stale {
-				staleTopics = append(staleTopics, topic)
+func CheckTopicLangs() (missingTranslations int) {
+	for topic := range originLocale {
+		for _, m := range locales {
+			if m[topic] == nil {
+				missingTranslations += len(m)
 			}
 		}
-		if len(missingTopics) > 0 {
-			missing[lang] = missingTopics
-		}
-		if len(staleTopics) > 0 {
-			stale[lang] = staleTopics
-		}
 	}
-
 	return
 }
