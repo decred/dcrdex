@@ -4,8 +4,10 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -17,6 +19,7 @@ import (
 	erc20v0 "decred.org/dcrdex/dex/networks/erc20/contracts/v0"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -28,19 +31,21 @@ import (
 // The intention is that if a new contract is implemented, the contractor
 // interface itself will not require any updates.
 type contractor interface {
-	swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error)
+	status(ctx context.Context, locator []byte) (*dexeth.SwapStatus, error)
+	vector(ctx context.Context, locator []byte) (*dexeth.SwapVector, error)
+	statusAndVector(ctx context.Context, locator []byte) (*dexeth.SwapStatus, *dexeth.SwapVector, error)
 	initiate(*bind.TransactOpts, []*asset.Contract) (*types.Transaction, error)
 	redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemption) (*types.Transaction, error)
-	refund(opts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error)
+	refund(opts *bind.TransactOpts, locator []byte) (*types.Transaction, error)
 	estimateInitGas(ctx context.Context, n int) (uint64, error)
-	estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error)
-	estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error)
+	estimateRedeemGas(ctx context.Context, secrets [][32]byte, locators [][]byte) (uint64, error)
+	estimateRefundGas(ctx context.Context, locator []byte) (uint64, error)
 	// value checks the incoming or outgoing contract value. This is just the
 	// one of redeem, refund, or initiate values. It is not an error if the
 	// transaction does not pay to the contract, and the values returned in that
 	// case will always be zero.
 	value(context.Context, *types.Transaction) (incoming, outgoing uint64, err error)
-	isRefundable(secretHash [32]byte) (bool, error)
+	isRefundable(locator []byte) (bool, error)
 }
 
 // tokenContractor interacts with an ERC20 token contract and a token swap
@@ -57,8 +62,11 @@ type tokenContractor interface {
 	estimateTransferGas(context.Context, *big.Int) (uint64, error)
 }
 
-type contractorConstructor func(contractAddr, addr common.Address, ec bind.ContractBackend) (contractor, error)
-type tokenContractorConstructor func(net dex.Network, token *dexeth.Token, acctAddr common.Address, ec bind.ContractBackend) (tokenContractor, error)
+type unifiedContractor interface {
+	tokenContractor(token *dexeth.Token) (tokenContractor, error)
+}
+
+type contractorConstructor func(net dex.Network, contractAddr, acctAddr common.Address, ec bind.ContractBackend) (contractor, error)
 
 // contractV0 is the interface common to a version 0 swap contract or version 0
 // token swap contract.
@@ -69,6 +77,21 @@ type contractV0 interface {
 	Refund(opts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error)
 	IsRefundable(opts *bind.CallOpts, secretHash [32]byte) (bool, error)
 }
+
+var _ contractV0 = (*swapv0.ETHSwap)(nil)
+
+type contractV1 interface {
+	Initiate(opts *bind.TransactOpts, token common.Address, contracts []swapv1.ETHSwapVector) (*types.Transaction, error)
+	Redeem(opts *bind.TransactOpts, token common.Address, redemptions []swapv1.ETHSwapRedemption) (*types.Transaction, error)
+	Status(opts *bind.CallOpts, token common.Address, c swapv1.ETHSwapVector) (swapv1.ETHSwapStatus, error)
+	Refund(opts *bind.TransactOpts, token common.Address, c swapv1.ETHSwapVector) (*types.Transaction, error)
+	IsRedeemable(opts *bind.CallOpts, token common.Address, c swapv1.ETHSwapVector) (bool, error)
+
+	ContractKey(opts *bind.CallOpts, token common.Address, v swapv1.ETHSwapVector) ([32]byte, error)
+	Swaps(opts *bind.CallOpts, arg0 [32]byte) ([32]byte, error)
+}
+
+var _ contractV1 = (*swapv1.ETHSwap)(nil)
 
 // contractorV0 is the contractor for contract version 0.
 // Redeem and Refund methods of swapv0.ETHSwap already have suitable return types.
@@ -88,7 +111,7 @@ var _ contractor = (*contractorV0)(nil)
 // newV0Contractor is the constructor for a version 0 ETH swap contract. For
 // token swap contracts, use newV0TokenContractor to construct a
 // tokenContractorV0.
-func newV0Contractor(contractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
+func newV0Contractor(_ dex.Network, contractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
 	c, err := swapv0.NewETHSwap(contractAddr, cb)
 	if err != nil {
 		return nil, err
@@ -154,6 +177,11 @@ func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Re
 		if secretHashes[secretHash] {
 			return nil, fmt.Errorf("duplicate secret hash %x", secretHash[:])
 		}
+		checkHash := sha256.Sum256(secretB)
+		if checkHash != secretHash {
+			return nil, errors.New("wrong secret")
+		}
+
 		secretHashes[secretHash] = true
 
 		redemps = append(redemps, swapv0.ETHSwapRedemption{
@@ -164,7 +192,73 @@ func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Re
 	return c.contractV0.Redeem(txOpts, redemps)
 }
 
-// swap retrieves the swap info from the read-only swap method.
+// status fetches the SwapStatus, which specifies the current state of mutable
+// swap data.
+func (c *contractorV0) status(ctx context.Context, locator []byte) (*dexeth.SwapStatus, error) {
+	secretHash, err := dexeth.ParseV0Locator(locator)
+	if err != nil {
+		return nil, err
+	}
+	swap, err := c.swap(ctx, secretHash)
+	if err != nil {
+		return nil, err
+	}
+	status := &dexeth.SwapStatus{
+		Step:        swap.State,
+		Secret:      swap.Secret,
+		BlockHeight: swap.BlockHeight,
+	}
+	return status, nil
+}
+
+// vector generates a SwapVector, containing the immutable data that defines
+// the swap.
+func (c *contractorV0) vector(ctx context.Context, locator []byte) (*dexeth.SwapVector, error) {
+	secretHash, err := dexeth.ParseV0Locator(locator)
+	if err != nil {
+		return nil, err
+	}
+	swap, err := c.swap(ctx, secretHash)
+	if err != nil {
+		return nil, err
+	}
+	vector := &dexeth.SwapVector{
+		From:       swap.Initiator,
+		To:         swap.Participant,
+		Value:      swap.Value,
+		SecretHash: secretHash,
+		LockTime:   uint64(swap.LockTime.Unix()),
+	}
+	return vector, nil
+}
+
+// statusAndVector generates both the status and the vector simultaneously. For
+// version 0, this is better than calling status and vector separately, since
+// each makes an identical call to c.swap.
+func (c *contractorV0) statusAndVector(ctx context.Context, locator []byte) (*dexeth.SwapStatus, *dexeth.SwapVector, error) {
+	secretHash, err := dexeth.ParseV0Locator(locator)
+	if err != nil {
+		return nil, nil, err
+	}
+	swap, err := c.swap(ctx, secretHash)
+	if err != nil {
+		return nil, nil, err
+	}
+	vector := &dexeth.SwapVector{
+		From:       swap.Initiator,
+		To:         swap.Participant,
+		Value:      swap.Value,
+		SecretHash: secretHash,
+		LockTime:   uint64(swap.LockTime.Unix()),
+	}
+	status := &dexeth.SwapStatus{
+		Step:        swap.State,
+		Secret:      swap.Secret,
+		BlockHeight: swap.BlockHeight,
+	}
+	return status, vector, nil
+}
+
 func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
 	callOpts := &bind.CallOpts{
 		From:    c.acctAddr,
@@ -188,19 +282,35 @@ func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 
 // refund issues the refund command to the swap contract. Use isRefundable first
 // to ensure the refund will be accepted.
-func (c *contractorV0) refund(txOpts *bind.TransactOpts, secretHash [32]byte) (tx *types.Transaction, err error) {
+func (c *contractorV0) refund(txOpts *bind.TransactOpts, locator []byte) (tx *types.Transaction, err error) {
+	secretHash, err := dexeth.ParseV0Locator(locator)
+	if err != nil {
+		return nil, err
+	}
+	return c.refundImpl(txOpts, secretHash)
+}
+
+func (c *contractorV0) refundImpl(txOpts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error) {
 	return c.contractV0.Refund(txOpts, secretHash)
 }
 
 // isRefundable exposes the isRefundable method of the swap contract.
-func (c *contractorV0) isRefundable(secretHash [32]byte) (bool, error) {
+func (c *contractorV0) isRefundable(locator []byte) (bool, error) {
+	secretHash, err := dexeth.ParseV0Locator(locator)
+	if err != nil {
+		return false, err
+	}
+	return c.isRefundableImpl(secretHash)
+}
+
+func (c *contractorV0) isRefundableImpl(secretHash [32]byte) (bool, error) {
 	return c.contractV0.IsRefundable(&bind.CallOpts{From: c.acctAddr}, secretHash)
 }
 
 // estimateRedeemGas estimates the gas used to redeem. The secret hashes
 // supplied must reference existing swaps, so this method can't be used until
 // the swap is initiated.
-func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error) {
+func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte, _ [][]byte) (uint64, error) {
 	redemps := make([]swapv0.ETHSwapRedemption, 0, len(secrets))
 	for _, secret := range secrets {
 		redemps = append(redemps, swapv0.ETHSwapRedemption{
@@ -214,7 +324,15 @@ func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte
 // estimateRefundGas estimates the gas used to refund. The secret hashes
 // supplied must reference existing swaps that are refundable, so this method
 // can't be used until the swap is initiated and the lock time has expired.
-func (c *contractorV0) estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error) {
+func (c *contractorV0) estimateRefundGas(ctx context.Context, locator []byte) (uint64, error) {
+	secretHash, err := dexeth.ParseV0Locator(locator)
+	if err != nil {
+		return 0, err
+	}
+	return c.estimateRefundGasImpl(ctx, secretHash)
+}
+
+func (c *contractorV0) estimateRefundGasImpl(ctx context.Context, secretHash [32]byte) (uint64, error) {
 	return c.estimateGas(ctx, nil, "refund", secretHash)
 }
 
@@ -246,7 +364,7 @@ func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, erro
 func (c *contractorV0) estimateGas(ctx context.Context, value *big.Int, method string, args ...any) (uint64, error) {
 	data, err := c.abi.Pack(method, args...)
 	if err != nil {
-		return 0, fmt.Errorf("Pack error: %v", err)
+		return 0, fmt.Errorf("pack error: %v", err)
 	}
 
 	return c.cb.EstimateGas(ctx, ethereum.CallMsg{
@@ -275,7 +393,7 @@ func (c *contractorV0) value(ctx context.Context, tx *types.Transaction) (in, ou
 
 // incomingValue calculates the value being redeemed for refunded in the tx.
 func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction) (uint64, error) {
-	if redeems, err := dexeth.ParseRedeemData(tx.Data(), 0); err == nil {
+	if redeems, err := dexeth.ParseRedeemDataV0(tx.Data()); err == nil {
 		var redeemed uint64
 		for _, redeem := range redeems {
 			swap, err := c.swap(ctx, redeem.SecretHash)
@@ -286,7 +404,7 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 		}
 		return redeemed, nil
 	}
-	secretHash, err := dexeth.ParseRefundData(tx.Data(), 0)
+	secretHash, err := dexeth.ParseRefundDataV0(tx.Data())
 	if err != nil {
 		return 0, nil
 	}
@@ -299,7 +417,7 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 
 // outgoingValue calculates the value sent in swaps in the tx.
 func (c *contractorV0) outgoingValue(tx *types.Transaction) (swapped uint64) {
-	if inits, err := dexeth.ParseInitiateData(tx.Data(), 0); err == nil {
+	if inits, err := dexeth.ParseInitiateDataV0(tx.Data()); err == nil {
 		for _, init := range inits {
 			swapped += c.atomize(init.Value)
 		}
@@ -307,12 +425,84 @@ func (c *contractorV0) outgoingValue(tx *types.Transaction) (swapped uint64) {
 	return
 }
 
+// erc20Contractor supports the ERC20 ABI. Embedded in token contractors.
+type erc20Contractor struct {
+	cb                bind.ContractBackend
+	tokenContract     *erc20.IERC20
+	tokenContractAddr common.Address
+	acctAddr          common.Address
+	swapAddr          common.Address
+}
+
+// balance exposes the read-only balanceOf method of the erc20 token contract.
+func (c *erc20Contractor) balance(ctx context.Context) (*big.Int, error) {
+	callOpts := &bind.CallOpts{
+		From:    c.acctAddr,
+		Context: ctx,
+	}
+
+	return c.tokenContract.BalanceOf(callOpts, c.acctAddr)
+}
+
+// allowance exposes the read-only allowance method of the erc20 token contract.
+func (c *erc20Contractor) allowance(ctx context.Context) (*big.Int, error) {
+	callOpts := &bind.CallOpts{
+		From:    c.acctAddr,
+		Context: ctx,
+	}
+	return c.tokenContract.Allowance(callOpts, c.acctAddr, c.swapAddr)
+}
+
+// approve sends an approve transaction approving the linked contract to call
+// transferFrom for the specified amount.
+func (c *erc20Contractor) approve(txOpts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
+	return c.tokenContract.Approve(txOpts, c.swapAddr, amount)
+}
+
+// transfer calls the transfer method of the erc20 token contract. Used for
+// sends or withdrawals.
+func (c *erc20Contractor) transfer(txOpts *bind.TransactOpts, addr common.Address, amount *big.Int) (*types.Transaction, error) {
+	return c.tokenContract.Transfer(txOpts, addr, amount)
+}
+
+// estimateApproveGas estimates the gas needed to send an approve tx.
+func (c *erc20Contractor) estimateApproveGas(ctx context.Context, amount *big.Int) (uint64, error) {
+	return estimateGas(ctx, c.acctAddr, c.tokenContractAddr, erc20.ERC20ABI, c.cb, new(big.Int), "approve", c.swapAddr, amount)
+}
+
+// estimateTransferGas estimates the gas needed for a transfer tx. The account
+// needs to have > amount tokens to use this method.
+func (c *erc20Contractor) estimateTransferGas(ctx context.Context, amount *big.Int) (uint64, error) {
+	return estimateGas(ctx, c.acctAddr, c.swapAddr, erc20.ERC20ABI, c.cb, new(big.Int), "transfer", c.acctAddr, amount)
+}
+
+func (c *erc20Contractor) parseTransfer(receipt *types.Receipt) (uint64, error) {
+	var transferredAmt uint64
+	for _, log := range receipt.Logs {
+		if log.Address != c.tokenContractAddr {
+			continue
+		}
+		transfer, err := c.tokenContract.ParseTransfer(*log)
+		if err != nil {
+			continue
+		}
+		if transfer.To == c.acctAddr {
+			transferredAmt += transfer.Value.Uint64()
+		}
+	}
+
+	if transferredAmt > 0 {
+		return transferredAmt, nil
+	}
+
+	return 0, fmt.Errorf("transfer log to %s not found", c.tokenContractAddr)
+}
+
 // tokenContractorV0 is a contractor that implements the tokenContractor
 // methods, providing access to the methods of the token's ERC20 contract.
 type tokenContractorV0 struct {
 	*contractorV0
-	tokenAddr     common.Address
-	tokenContract *erc20.IERC20
+	*erc20Contractor
 }
 
 var _ contractor = (*tokenContractorV0)(nil)
@@ -361,91 +551,15 @@ func newV0TokenContractor(net dex.Network, token *dexeth.Token, acctAddr common.
 			evmify:       token.AtomicToEVM,
 			atomize:      token.EVMToAtomic,
 		},
-		tokenAddr:     tokenAddr,
-		tokenContract: tokenContract,
+
+		erc20Contractor: &erc20Contractor{
+			cb:                cb,
+			tokenContract:     tokenContract,
+			tokenContractAddr: tokenAddr,
+			acctAddr:          acctAddr,
+			swapAddr:          swapContractAddr,
+		},
 	}, nil
-}
-
-// balance exposes the read-only balanceOf method of the erc20 token contract.
-func (c *tokenContractorV0) balance(ctx context.Context) (*big.Int, error) {
-	callOpts := &bind.CallOpts{
-		From:    c.acctAddr,
-		Context: ctx,
-	}
-
-	return c.tokenContract.BalanceOf(callOpts, c.acctAddr)
-}
-
-// allowance exposes the read-only allowance method of the erc20 token contract.
-func (c *tokenContractorV0) allowance(ctx context.Context) (*big.Int, error) {
-	// See if we support the pending state.
-	_, pendingUnavailable := c.cb.(*multiRPCClient)
-	callOpts := &bind.CallOpts{
-		Pending: !pendingUnavailable,
-		From:    c.acctAddr,
-		Context: ctx,
-	}
-	return c.tokenContract.Allowance(callOpts, c.acctAddr, c.contractAddr)
-}
-
-// approve sends an approve transaction approving the linked contract to call
-// transferFrom for the specified amount.
-func (c *tokenContractorV0) approve(txOpts *bind.TransactOpts, amount *big.Int) (tx *types.Transaction, err error) {
-	return c.tokenContract.Approve(txOpts, c.contractAddr, amount)
-}
-
-// transfer calls the transfer method of the erc20 token contract. Used for
-// sends or withdrawals.
-func (c *tokenContractorV0) transfer(txOpts *bind.TransactOpts, addr common.Address, amount *big.Int) (tx *types.Transaction, err error) {
-	return c.tokenContract.Transfer(txOpts, addr, amount)
-}
-
-func (c *tokenContractorV0) parseTransfer(receipt *types.Receipt) (uint64, error) {
-	var transferredAmt uint64
-	for _, log := range receipt.Logs {
-		if log.Address != c.tokenAddr {
-			continue
-		}
-		transfer, err := c.tokenContract.ParseTransfer(*log)
-		if err != nil {
-			continue
-		}
-		if transfer.To == c.acctAddr {
-			transferredAmt += transfer.Value.Uint64()
-		}
-	}
-
-	if transferredAmt > 0 {
-		return transferredAmt, nil
-	}
-
-	return 0, fmt.Errorf("transfer log to %s not found", c.acctAddr)
-}
-
-// estimateApproveGas estimates the gas needed to send an approve tx.
-func (c *tokenContractorV0) estimateApproveGas(ctx context.Context, amount *big.Int) (uint64, error) {
-	return c.estimateGas(ctx, "approve", c.contractAddr, amount)
-}
-
-// estimateTransferGas estimates the gas needed for a transfer tx. The account
-// needs to have > amount tokens to use this method.
-func (c *tokenContractorV0) estimateTransferGas(ctx context.Context, amount *big.Int) (uint64, error) {
-	return c.estimateGas(ctx, "transfer", c.acctAddr, amount)
-}
-
-// estimateGas estimates the gas needed for methods on the ERC20 token contract.
-// For estimating methods on the swap contract, use (contractorV0).estimateGas.
-func (c *tokenContractorV0) estimateGas(ctx context.Context, method string, args ...any) (uint64, error) {
-	data, err := erc20.ERC20ABI.Pack(method, args...)
-	if err != nil {
-		return 0, fmt.Errorf("token estimateGas Pack error: %v", err)
-	}
-
-	return c.cb.EstimateGas(ctx, ethereum.CallMsg{
-		From: c.acctAddr,
-		To:   &c.tokenAddr,
-		Data: data,
-	})
 }
 
 // value finds incoming or outgoing value for the tx to either the swap contract
@@ -457,13 +571,13 @@ func (c *tokenContractorV0) value(ctx context.Context, tx *types.Transaction) (i
 	if to == c.contractAddr {
 		return c.contractorV0.value(ctx, tx)
 	}
-	if to != c.tokenAddr {
+	if to != c.tokenContractAddr {
 		return 0, 0, nil
 	}
 
 	// Consider removing. We'll never be sending transferFrom transactions
 	// directly.
-	if sender, _, value, err := erc20.ParseTransferFromData(tx.Data()); err == nil && sender == c.acctAddr {
+	if sender, _, value, err := erc20.ParseTransferFromData(tx.Data()); err == nil && sender == c.contractorV0.acctAddr {
 		return 0, c.atomize(value), nil
 	}
 
@@ -477,13 +591,354 @@ func (c *tokenContractorV0) value(ctx context.Context, tx *types.Transaction) (i
 // tokenAddress exposes the token_address immutable address of the token-bound
 // swap contract.
 func (c *tokenContractorV0) tokenAddress() common.Address {
+	return c.tokenContractAddr
+}
+
+type contractorV1 struct {
+	contractV1
+	net              dex.Network
+	abi              *abi.ABI
+	tokenAddr        common.Address // zero-address for base-chain asset, e.g. ETH, POL
+	swapContractAddr common.Address
+	acctAddr         common.Address
+	cb               bind.ContractBackend
+	isToken          bool
+	evmify           func(uint64) *big.Int
+	atomize          func(*big.Int) uint64
+}
+
+var _ contractor = (*contractorV1)(nil)
+
+func newV1Contractor(net dex.Network, swapContractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
+	c, err := swapv1.NewETHSwap(swapContractAddr, cb)
+	if err != nil {
+		return nil, err
+	}
+	return &contractorV1{
+		contractV1:       c,
+		net:              net,
+		abi:              dexeth.ABIs[1],
+		swapContractAddr: swapContractAddr,
+		acctAddr:         acctAddr,
+		cb:               cb,
+		atomize:          dexeth.WeiToGwei,
+		evmify:           dexeth.GweiToWei,
+	}, nil
+}
+
+func (c *contractorV1) status(ctx context.Context, locator []byte) (*dexeth.SwapStatus, error) {
+	v, err := dexeth.ParseV1Locator(locator)
+	if err != nil {
+		return nil, err
+	}
+	rec, err := c.Status(&bind.CallOpts{From: c.acctAddr}, c.tokenAddr, dexeth.SwapVectorToAbigen(v))
+	if err != nil {
+		return nil, err
+	}
+	return &dexeth.SwapStatus{
+		Step:        dexeth.SwapStep(rec.Step),
+		Secret:      rec.Secret,
+		BlockHeight: rec.BlockNumber.Uint64(),
+	}, err
+}
+
+func (c *contractorV1) vector(ctx context.Context, locator []byte) (*dexeth.SwapVector, error) {
+	return dexeth.ParseV1Locator(locator)
+}
+
+func (c *contractorV1) statusAndVector(ctx context.Context, locator []byte) (*dexeth.SwapStatus, *dexeth.SwapVector, error) {
+	v, err := dexeth.ParseV1Locator(locator)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rec, err := c.Status(&bind.CallOpts{From: c.acctAddr}, c.tokenAddr, dexeth.SwapVectorToAbigen(v))
+	if err != nil {
+		return nil, nil, err
+	}
+	return &dexeth.SwapStatus{
+		Step:        dexeth.SwapStep(rec.Step),
+		Secret:      rec.Secret,
+		BlockHeight: rec.BlockNumber.Uint64(),
+	}, v, err
+}
+
+// func (c *contractorV1) record(v *dexeth.SwapVector) (r [32]byte, err error) {
+// 	abiVec := dexeth.SwapVectorToAbigen(v)
+// 	ck, err := c.ContractKey(&bind.CallOpts{From: c.acctAddr}, abiVec)
+// 	if err != nil {
+// 		return r, fmt.Errorf("ContractKey error: %v", err)
+// 	}
+// 	return c.Swaps(&bind.CallOpts{From: c.acctAddr}, ck)
+// }
+
+func (c *contractorV1) initiate(txOpts *bind.TransactOpts, contracts []*asset.Contract) (*types.Transaction, error) {
+	versionedContracts := make([]swapv1.ETHSwapVector, 0, len(contracts))
+	for _, ac := range contracts {
+		v := &dexeth.SwapVector{
+			From:     c.acctAddr,
+			To:       common.HexToAddress(ac.Address),
+			Value:    c.evmify(ac.Value),
+			LockTime: ac.LockTime,
+		}
+		copy(v.SecretHash[:], ac.SecretHash)
+		versionedContracts = append(versionedContracts, dexeth.SwapVectorToAbigen(v))
+	}
+	return c.Initiate(txOpts, c.tokenAddr, versionedContracts)
+}
+
+func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemption) (*types.Transaction, error) {
+	versionedRedemptions := make([]swapv1.ETHSwapRedemption, 0, len(redeems))
+	secretHashes := make(map[[32]byte]bool, len(redeems))
+	for _, r := range redeems {
+		var secret [32]byte
+		copy(secret[:], r.Secret)
+		secretHash := sha256.Sum256(r.Secret)
+		if !bytes.Equal(secretHash[:], r.Spends.SecretHash) {
+			return nil, errors.New("wrong secret")
+		}
+		if secretHashes[secretHash] {
+			return nil, fmt.Errorf("duplicate secret hash %x", secretHash[:])
+		}
+		secretHashes[secretHash] = true
+
+		// Not checking version from DecodeLocator because it was already
+		// audited and incorrect version locator would err below anyway.
+		_, locator, err := dexeth.DecodeContractData(r.Spends.Contract)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing locator redeem: %w", err)
+		}
+		v, err := dexeth.ParseV1Locator(locator)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing locator: %w", err)
+		}
+		versionedRedemptions = append(versionedRedemptions, swapv1.ETHSwapRedemption{
+			V:      dexeth.SwapVectorToAbigen(v),
+			Secret: secret,
+		})
+	}
+	return c.Redeem(txOpts, c.tokenAddr, versionedRedemptions)
+}
+
+func (c *contractorV1) refund(txOpts *bind.TransactOpts, locator []byte) (*types.Transaction, error) {
+	v, err := dexeth.ParseV1Locator(locator)
+	if err != nil {
+		return nil, err
+	}
+	return c.Refund(txOpts, c.tokenAddr, dexeth.SwapVectorToAbigen(v))
+}
+
+func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, error) {
+	initiations := make([]swapv1.ETHSwapVector, 0, n)
+	for j := 0; j < n; j++ {
+		var secretHash [32]byte
+		copy(secretHash[:], encode.RandomBytes(32))
+		initiations = append(initiations, swapv1.ETHSwapVector{
+			RefundTimestamp: 1,
+			SecretHash:      secretHash,
+			Initiator:       c.acctAddr,
+			Participant:     common.BytesToAddress(encode.RandomBytes(20)),
+			Value:           big.NewInt(dexeth.GweiFactor),
+		})
+	}
+
+	var value *big.Int
+	if !c.isToken {
+		value = dexeth.GweiToWei(uint64(n))
+	}
+
+	return c.estimateGas(ctx, value, "initiate", c.tokenAddr, initiations)
+}
+
+func (c *contractorV1) estimateGas(ctx context.Context, value *big.Int, method string, args ...interface{}) (uint64, error) {
+	return estimateGas(ctx, c.acctAddr, c.swapContractAddr, c.abi, c.cb, value, method, args...)
+}
+
+func (c *contractorV1) estimateRedeemGas(ctx context.Context, secrets [][32]byte, locators [][]byte) (uint64, error) {
+	if len(secrets) != len(locators) {
+		return 0, fmt.Errorf("number of secrets (%d) does not match number of contracts (%d)", len(secrets), len(locators))
+	}
+
+	vectors := make([]*dexeth.SwapVector, len(locators))
+	for i, loc := range locators {
+		v, err := dexeth.ParseV1Locator(loc)
+		if err != nil {
+			return 0, fmt.Errorf("unable to parse locator # %d (%x): %v", i, loc, err)
+		}
+		vectors[i] = v
+	}
+
+	redemps := make([]swapv1.ETHSwapRedemption, 0, len(secrets))
+	for i, secret := range secrets {
+		redemps = append(redemps, swapv1.ETHSwapRedemption{
+			Secret: secret,
+			V:      dexeth.SwapVectorToAbigen(vectors[i]),
+		})
+	}
+	return c.estimateGas(ctx, nil, "redeem", c.tokenAddr, redemps)
+}
+
+func (c *contractorV1) estimateRefundGas(ctx context.Context, locator []byte) (uint64, error) {
+	v, err := dexeth.ParseV1Locator(locator)
+	if err != nil {
+		return 0, err
+	}
+	return c.estimateGas(ctx, nil, "refund", c.tokenAddr, dexeth.SwapVectorToAbigen(v))
+}
+
+func (c *contractorV1) isRedeemable(locator []byte, secret [32]byte) (bool, error) {
+	v, err := dexeth.ParseV1Locator(locator)
+	if err != nil {
+		return false, err
+	}
+	if v.To != c.acctAddr {
+		return false, nil
+	}
+	if is, err := c.IsRedeemable(&bind.CallOpts{From: c.acctAddr}, c.tokenAddr, dexeth.SwapVectorToAbigen(v)); err != nil || !is {
+		return is, err
+	}
+	return sha256.Sum256(secret[:]) == v.SecretHash, nil
+}
+
+func (c *contractorV1) isRefundable(locator []byte) (bool, error) {
+	v, err := dexeth.ParseV1Locator(locator)
+	if err != nil {
+		return false, err
+	}
+	if is, err := c.IsRedeemable(&bind.CallOpts{From: c.acctAddr}, c.tokenAddr, dexeth.SwapVectorToAbigen(v)); err != nil || !is {
+		return is, err
+	}
+	return time.Now().Unix() >= int64(v.LockTime), nil
+}
+
+func (c *contractorV1) incomingValue(ctx context.Context, tx *types.Transaction) (uint64, error) {
+	if _, redeems, err := dexeth.ParseRedeemDataV1(tx.Data()); err == nil {
+		var redeemed *big.Int
+		for _, r := range redeems {
+			redeemed.Add(redeemed, r.Contract.Value)
+		}
+		return c.atomize(redeemed), nil
+	}
+	refund, err := dexeth.ParseRefundDataV1(tx.Data())
+	if err != nil {
+		return 0, nil
+	}
+	return c.atomize(refund.Value), nil
+}
+
+func (c *contractorV1) outgoingValue(tx *types.Transaction) (swapped uint64) {
+	if _, inits, err := dexeth.ParseInitiateDataV1(tx.Data()); err == nil {
+		for _, init := range inits {
+			swapped += c.atomize(init.Value)
+		}
+	}
+	return
+}
+
+func (c *contractorV1) value(ctx context.Context, tx *types.Transaction) (in, out uint64, err error) {
+	if *tx.To() != c.swapContractAddr {
+		return 0, 0, nil
+	}
+
+	if v, err := c.incomingValue(ctx, tx); err != nil {
+		return 0, 0, fmt.Errorf("incomingValue error: %w", err)
+	} else if v > 0 {
+		return v, 0, nil
+	}
+
+	return 0, c.outgoingValue(tx), nil
+}
+
+type tokenContractorV1 struct {
+	*contractorV1
+	*erc20Contractor
+}
+
+func (c *contractorV1) tokenContractor(token *dexeth.Token) (tokenContractor, error) {
+	netToken, found := token.NetTokens[c.net]
+	if !found {
+		return nil, fmt.Errorf("token %s has no network %s", token.Name, c.net)
+	}
+	tokenAddr := netToken.Address
+
+	tokenContract, err := erc20.NewIERC20(tokenAddr, c.cb)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tokenContractorV1{
+		contractorV1: &contractorV1{
+			contractV1:       c.contractV1,
+			net:              c.net,
+			abi:              c.abi,
+			tokenAddr:        tokenAddr,
+			swapContractAddr: c.swapContractAddr,
+			acctAddr:         c.acctAddr,
+			cb:               c.cb,
+			isToken:          true,
+			evmify:           token.AtomicToEVM,
+			atomize:          token.EVMToAtomic,
+		},
+		erc20Contractor: &erc20Contractor{
+			cb:                c.cb,
+			tokenContract:     tokenContract,
+			tokenContractAddr: tokenAddr,
+			acctAddr:          c.acctAddr,
+			swapAddr:          c.swapContractAddr,
+		},
+	}, nil
+}
+
+// value finds incoming or outgoing value for the tx to either the swap contract
+// or the erc20 token contract. For the token contract, only transfer and
+// transferFrom are parsed. It is not an error if this tx is a call to another
+// method of the token contract, but no values will be parsed.
+func (c *tokenContractorV1) value(ctx context.Context, tx *types.Transaction) (in, out uint64, err error) {
+	to := *tx.To()
+	if to == c.swapContractAddr {
+		return c.contractorV1.value(ctx, tx)
+	}
+	if to != c.tokenAddr {
+		return 0, 0, nil
+	}
+
+	// Consider removing. We'll never be sending transferFrom transactions
+	// directly.
+	if sender, _, value, err := erc20.ParseTransferFromData(tx.Data()); err == nil && sender == c.contractorV1.acctAddr {
+		return 0, c.atomize(value), nil
+	}
+
+	if _, value, err := erc20.ParseTransferData(tx.Data()); err == nil {
+		return 0, c.atomize(value), nil
+	}
+
+	return 0, 0, nil
+}
+
+// tokenAddress exposes the token_address immutable address of the token-bound
+// swap contract.
+func (c *tokenContractorV1) tokenAddress() common.Address {
 	return c.tokenAddr
+}
+
+var _ contractor = (*tokenContractorV1)(nil)
+var _ tokenContractor = (*tokenContractorV1)(nil)
+
+func estimateGas(ctx context.Context, from, to common.Address, abi *abi.ABI, cb bind.ContractBackend, value *big.Int, method string, args ...interface{}) (uint64, error) {
+	data, err := abi.Pack(method, args...)
+	if err != nil {
+		return 0, fmt.Errorf("Pack error: %v", err)
+	}
+
+	return cb.EstimateGas(ctx, ethereum.CallMsg{
+		From:  from,
+		To:    &to,
+		Data:  data,
+		Value: value,
+	})
 }
 
 var contractorConstructors = map[uint32]contractorConstructor{
 	0: newV0Contractor,
-}
-
-var tokenContractorConstructors = map[uint32]tokenContractorConstructor{
-	0: newV0TokenContractor,
+	1: newV1Contractor,
 }

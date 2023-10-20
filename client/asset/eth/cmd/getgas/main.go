@@ -48,8 +48,8 @@ func mainErr() error {
 	flag.BoolVar(&useMainnet, "mainnet", false, "use mainnet")
 	flag.BoolVar(&useTestnet, "testnet", false, "use testnet")
 	flag.BoolVar(&useSimnet, "simnet", false, "use simnet")
-	flag.BoolVar(&trace, "trace", false, "use simnet")
-	flag.BoolVar(&debug, "debug", false, "use simnet")
+	flag.BoolVar(&trace, "trace", false, "use trace logging")
+	flag.BoolVar(&debug, "debug", false, "use debug logging")
 	flag.IntVar(&maxSwaps, "n", 5, "max number of swaps per transaction. minimum is 2. test will run from 2 swap up to n swaps.")
 	flag.StringVar(&chain, "chain", "eth", "symbol of the base chain")
 	flag.StringVar(&token, "token", "", "symbol of the token. if token is not specified, will check gas for base chain")
@@ -125,7 +125,8 @@ func mainErr() error {
 
 		wParams := new(eth.GetGasWalletParams)
 		wParams.BaseUnitInfo = bui
-		if token != chain {
+		isToken := token != chain
+		if isToken {
 			var exists bool
 			tkn, exists := tokens[assetID]
 			if !exists {
@@ -139,16 +140,18 @@ func mainErr() error {
 			}
 			swapContract, exists := netToken.SwapContracts[contractVer]
 			if !exists {
-				return nil, fmt.Errorf("no verion %d contract for %s token on %s network %s", contractVer, tkn.Name, chain, net)
+				return nil, fmt.Errorf("no version %d contract for %s token on %s network %s", contractVer, tkn.Name, chain, net)
 			}
 			wParams.Gas = &swapContract.Gas
 		} else {
 			wParams.UnitInfo = bui
 			g, exists := gases[contractVer]
 			if !exists {
-				return nil, fmt.Errorf("no verion %d contract for %s network %s", contractVer, chain, net)
+				return nil, fmt.Errorf("no version %d contract for %s network %s", contractVer, chain, net)
 			}
 			wParams.Gas = g
+		}
+		if !isToken || contractVer == 1 {
 			cs, exists := contracts[contractVer]
 			if !exists {
 				return nil, fmt.Errorf("no version %d base chain swap contract on %s", contractVer, chain)

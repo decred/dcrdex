@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
@@ -19,12 +20,13 @@ var _ asset.Coin = (*swapCoin)(nil)
 var _ asset.Coin = (*redeemCoin)(nil)
 
 type baseCoin struct {
+	tokenAddr    common.Address
 	backend      *AssetBackend
-	secretHash   [32]byte
+	locator      []byte
 	gasFeeCap    *big.Int
 	gasTipCap    *big.Int
 	txHash       common.Hash
-	value        *big.Int
+	value        uint64
 	txData       []byte
 	serializedTx []byte
 	contractVer  uint32
@@ -32,13 +34,13 @@ type baseCoin struct {
 
 type swapCoin struct {
 	*baseCoin
-	dexAtoms uint64
-	init     *dexeth.Initiation
+	vector *dexeth.SwapVector
 }
 
 type redeemCoin struct {
 	*baseCoin
 	secret [32]byte
+	// vector *dexeth.SwapVector
 }
 
 // newSwapCoin creates a new swapCoin that stores and retrieves info about a
@@ -55,30 +57,68 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 		return nil, err
 	}
 
-	inits, err := dexeth.ParseInitiateData(bc.txData, ethContractVersion)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
-	}
+	var sum uint64
+	var vector *dexeth.SwapVector
+	switch bc.contractVer {
+	case 0:
+		var secretHash [32]byte
+		copy(secretHash[:], bc.locator)
 
-	init, ok := inits[bc.secretHash]
-	if !ok {
-		return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", bc.txHash, bc.secretHash)
-	}
+		inits, err := dexeth.ParseInitiateDataV0(bc.txData)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse v0 initiate call data: %v", err)
+		}
 
-	if be.assetID == be.baseChainID {
-		sum := new(big.Int)
+		init, ok := inits[secretHash]
+		if !ok {
+			return nil, fmt.Errorf("tx %v does not contain v0 initiation with secret hash %x", bc.txHash, secretHash[:])
+		}
 		for _, in := range inits {
-			sum.Add(sum, in.Value)
+			sum = +be.atomize(in.Value)
 		}
-		if bc.value.Cmp(sum) < 0 {
-			return nil, fmt.Errorf("tx %s value < sum of inits. %d < %d", bc.txHash, bc.value, sum)
+
+		vector = &dexeth.SwapVector{
+			// From: ,
+			To:         init.Participant,
+			Value:      init.Value,
+			SecretHash: secretHash,
+			LockTime:   uint64(init.LockTime.Unix()),
 		}
+	case 1:
+		contractVector, err := dexeth.ParseV1Locator(bc.locator)
+		if err != nil {
+			return nil, fmt.Errorf("contract data vector decoding error: %w", err)
+		}
+		tokenAddr, txVectors, err := dexeth.ParseInitiateDataV1(bc.txData)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse v1 initiate call data: %v", err)
+		}
+		if tokenAddr != be.tokenAddr {
+			return nil, fmt.Errorf("token address in init tx data is incorrect. %s != %s", tokenAddr, be.tokenAddr)
+		}
+		txVector, ok := txVectors[contractVector.SecretHash]
+		if !ok {
+			return nil, fmt.Errorf("tx %v does not contain v1 initiation with vector %s", bc.txHash, contractVector)
+		}
+		if !dexeth.CompareVectors(contractVector, txVector) {
+			return nil, fmt.Errorf("contract and transaction vectors do not match. %+v != %+v", contractVector, txVector)
+		}
+		vector = txVector
+		if vector.SecretHash == refundRecordHash {
+			return nil, errors.New("illegal secret hash (refund record hash)")
+		}
+		for _, v := range txVectors {
+			sum += be.atomize(v.Value)
+		}
+	}
+
+	if be.assetID == BipID && bc.value < sum {
+		return nil, fmt.Errorf("tx %s value < sum of inits. %d < %d", bc.txHash, bc.value, sum)
 	}
 
 	return &swapCoin{
 		baseCoin: bc,
-		init:     init,
-		dexAtoms: be.atomize(init.Value),
+		vector:   vector,
 	}, nil
 }
 
@@ -92,47 +132,85 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 	if err == asset.CoinNotFoundError {
 		// If the coin is not found, check to see if the swap has been
 		// redeemed by another transaction.
-		contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
+		contractVer, locator, err := dexeth.DecodeContractData(contractData)
 		if err != nil {
 			return nil, err
 		}
-		be.log.Warnf("redeem coin with ID %x for secret hash %x was not found", coinID, secretHash)
-		swapState, err := be.node.swap(be.ctx, be.assetID, secretHash)
+		if be.contractVer != contractVer {
+			return nil, fmt.Errorf("wrong contract version for %s. wanted %d, got %d", dex.BipIDSymbol(be.assetID), be.contractVer, contractVer)
+		}
+
+		status, vec, err := be.node.statusAndVector(be.ctx, be.assetID, locator)
 		if err != nil {
 			return nil, err
 		}
-		if swapState.State != dexeth.SSRedeemed {
+		be.log.Warnf("redeem coin with ID %x for %s was not found", coinID, vec)
+		if status.Step != dexeth.SSRedeemed {
 			return nil, asset.CoinNotFoundError
 		}
+
 		bc = &baseCoin{
+			tokenAddr:   be.tokenAddr,
 			backend:     be,
-			secretHash:  secretHash,
+			locator:     locator,
 			contractVer: contractVer,
 		}
 		return &redeemCoin{
 			baseCoin: bc,
-			secret:   swapState.Secret,
+			secret:   status.Secret,
+			// vector:   vec,
 		}, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	if bc.value.Cmp(new(big.Int)) != 0 {
+	if bc.value != 0 {
 		return nil, fmt.Errorf("expected tx value of zero for redeem but got: %d", bc.value)
 	}
 
-	redemptions, err := dexeth.ParseRedeemData(bc.txData, ethContractVersion)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
-	}
-	redemption, ok := redemptions[bc.secretHash]
-	if !ok {
-		return nil, fmt.Errorf("tx %v does not contain redemption with secret hash %x", bc.txHash, bc.secretHash)
+	var secret [32]byte
+	switch bc.contractVer {
+	case 0:
+		secretHash, err := dexeth.ParseV0Locator(bc.locator)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing vector from v0 locator '%x': %w", bc.locator, err)
+		}
+		redemptions, err := dexeth.ParseRedeemDataV0(bc.txData)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse v0 redemption call data: %v", err)
+		}
+		redemption, ok := redemptions[secretHash]
+		if !ok {
+			return nil, fmt.Errorf("tx %v does not contain redemption for v0 secret hash %x", bc.txHash, secretHash[:])
+		}
+		secret = redemption.Secret
+	case 1:
+		vector, err := dexeth.ParseV1Locator(bc.locator)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing vector from v1 locator '%x': %w", bc.locator, err)
+		}
+		tokenAddr, redemptions, err := dexeth.ParseRedeemDataV1(bc.txData)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse v1 redemption call data: %v", err)
+		}
+		if tokenAddr != be.tokenAddr {
+			return nil, fmt.Errorf("token address in redeem tx data is incorrect. %s != %s", tokenAddr, be.tokenAddr)
+		}
+		redemption, ok := redemptions[vector.SecretHash]
+		if !ok {
+			return nil, fmt.Errorf("tx %v does not contain redemption for v1 vector %s", bc.txHash, vector)
+		}
+		if !dexeth.CompareVectors(redemption.Contract, vector) {
+			return nil, fmt.Errorf("encoded vector %q doesn't match expected vector %q", redemption.Contract, vector)
+		}
+		secret = redemption.Secret
+	default:
+		return nil, fmt.Errorf("version %d redeem coin not supported", bc.contractVer)
 	}
 
 	return &redeemCoin{
 		baseCoin: bc,
-		secret:   redemption.Secret,
+		secret:   secret,
 	}, nil
 }
 
@@ -155,13 +233,11 @@ func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin,
 		return nil, err
 	}
 
-	contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
+	contractVer, locator, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
 		return nil, err
 	}
-	if contractVer != version {
-		return nil, fmt.Errorf("contract version %d not supported, only %d", contractVer, version)
-	}
+
 	contractAddr := tx.To()
 	if *contractAddr != be.contractAddr {
 		return nil, fmt.Errorf("contract address is not supported: %v", contractAddr)
@@ -180,21 +256,22 @@ func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin,
 	zero := new(big.Int)
 	gasFeeCap := tx.GasFeeCap()
 	if gasFeeCap == nil || gasFeeCap.Cmp(zero) <= 0 {
-		return nil, fmt.Errorf("Failed to parse gas fee cap from tx %s", txHash)
+		return nil, fmt.Errorf("failed to parse gas fee cap from tx %s", txHash)
 	}
 
 	gasTipCap := tx.GasTipCap()
 	if gasTipCap == nil || gasTipCap.Cmp(zero) <= 0 {
-		return nil, fmt.Errorf("Failed to parse gas tip cap from tx %s", txHash)
+		return nil, fmt.Errorf("failed to parse gas tip cap from tx %s", txHash)
 	}
 
 	return &baseCoin{
 		backend:      be,
-		secretHash:   secretHash,
+		tokenAddr:    be.tokenAddr,
+		locator:      locator,
 		gasFeeCap:    gasFeeCap,
 		gasTipCap:    gasTipCap,
 		txHash:       txHash,
-		value:        tx.Value(),
+		value:        be.atomize(tx.Value()),
 		txData:       tx.Data(),
 		serializedTx: serializedTx,
 		contractVer:  contractVer,
@@ -211,7 +288,7 @@ func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin,
 // and the same account and nonce, effectively voiding the transaction we
 // expected to be mined.
 func (c *swapCoin) Confirmations(ctx context.Context) (int64, error) {
-	swap, err := c.backend.node.swap(ctx, c.backend.assetID, c.secretHash)
+	status, checkVec, err := c.backend.node.statusAndVector(ctx, c.backend.assetID, c.locator)
 	if err != nil {
 		return -1, err
 	}
@@ -220,7 +297,7 @@ func (c *swapCoin) Confirmations(ctx context.Context) (int64, error) {
 	// It is important to only trust confirmations according to the
 	// swap contract. Until there are confirmations we cannot be sure
 	// that initiation happened successfully.
-	if swap.State == dexeth.SSNone {
+	if status.Step == dexeth.SSNone {
 		// Assume the tx still has a chance of being mined.
 		return 0, nil
 	}
@@ -231,30 +308,50 @@ func (c *swapCoin) Confirmations(ctx context.Context) (int64, error) {
 	// confirmations, and we are sure the secret hash belongs to
 	// this swap. Assert that the value, receiver, and locktime are
 	// as expected.
-	if swap.Value.Cmp(c.init.Value) != 0 {
-		return -1, fmt.Errorf("tx data swap val (%d) does not match contract value (%d)",
-			c.init.Value, swap.Value)
-	}
-	if swap.Participant != c.init.Participant {
-		return -1, fmt.Errorf("tx data participant %q does not match contract value %q",
-			c.init.Participant, swap.Participant)
-	}
-
-	// locktime := swap.RefundBlockTimestamp.Int64()
-	if !swap.LockTime.Equal(c.init.LockTime) {
-		return -1, fmt.Errorf("expected swap locktime (%s) does not match expected (%s)",
-			c.init.LockTime, swap.LockTime)
+	switch c.contractVer {
+	case 0:
+		if checkVec.Value.Cmp(c.vector.Value) != 0 {
+			return -1, fmt.Errorf("tx data swap val (%d) does not match contract value (%d)",
+				c.vector.Value, checkVec.Value)
+		}
+		if checkVec.To != c.vector.To {
+			return -1, fmt.Errorf("tx data participant %q does not match contract value %q",
+				c.vector.To, checkVec.To)
+		}
+		if checkVec.LockTime != c.vector.LockTime {
+			return -1, fmt.Errorf("expected swap locktime (%d) does not match expected (%d)",
+				c.vector.LockTime, checkVec.LockTime)
+		}
+	case 1:
+		if err := setV1StatusBlockHeight(ctx, c.backend.node, status, c.baseCoin); err != nil {
+			return 0, err
+		}
 	}
 
 	bn, err := c.backend.node.blockNumber(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("unable to fetch block number: %v", err)
 	}
-	return int64(bn - swap.BlockHeight + 1), nil
+	return int64(bn - status.BlockHeight + 1), nil
+}
+
+func setV1StatusBlockHeight(ctx context.Context, node ethFetcher, status *dexeth.SwapStatus, bc *baseCoin) error {
+	switch status.Step {
+	case dexeth.SSNone, dexeth.SSInitiated:
+	case dexeth.SSRedeemed, dexeth.SSRefunded:
+		// No block height for redeemed or refunded version 1 contracts,
+		// only SSInitiated.
+		r, err := node.transactionReceipt(ctx, bc.txHash)
+		if err != nil {
+			return err
+		}
+		status.BlockHeight = r.BlockNumber.Uint64()
+	}
+	return nil
 }
 
 func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
-	swap, err := c.backend.node.swap(ctx, c.backend.assetID, c.secretHash)
+	status, err := c.backend.node.status(ctx, c.backend.assetID, c.tokenAddr, c.locator)
 	if err != nil {
 		return -1, err
 	}
@@ -265,16 +362,21 @@ func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
 	// is the expected address and value was also as expected. Also
 	// not validating the locktime, as the swap is redeemed and
 	// locktime no longer relevant.
-	if swap.State == dexeth.SSRedeemed {
+	if status.Step == dexeth.SSRedeemed {
+		if c.contractVer == 1 {
+			if err := setV1StatusBlockHeight(ctx, c.backend.node, status, c.baseCoin); err != nil {
+				return -1, err
+			}
+		}
 		bn, err := c.backend.node.blockNumber(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("unable to fetch block number: %v", err)
 		}
-		return int64(bn - swap.BlockHeight + 1), nil
+		return int64(bn - status.BlockHeight + 1), nil
 	}
 	// If swap is in the Initiated state, the redemption may be
 	// unmined.
-	if swap.State == dexeth.SSInitiated {
+	if status.Step == dexeth.SSInitiated {
 		// Assume the tx still has a chance of being mined.
 		return 0, nil
 	}
@@ -282,7 +384,7 @@ func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
 	// succeed as the swap must already be in the Initialized state
 	// to redeem. If the swap is in the Refunded state, then the
 	// redemption either failed or never happened.
-	return -1, fmt.Errorf("redemption in failed state with swap at %s state", swap.State)
+	return -1, fmt.Errorf("redemption in failed state with swap at %s state", status.Step)
 }
 
 func (c *redeemCoin) Value() uint64 { return 0 }
@@ -310,5 +412,5 @@ func (c *baseCoin) FeeRate() uint64 {
 
 // Value returns the value of one swap in order to validate during processing.
 func (c *swapCoin) Value() uint64 {
-	return c.dexAtoms
+	return c.backend.atomize(c.vector.Value)
 }
