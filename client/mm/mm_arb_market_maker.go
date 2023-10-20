@@ -158,7 +158,7 @@ func (a *arbMarketMaker) processDEXMatch(o *core.Order, match *core.Match) {
 	a.cexTradesMtx.Lock()
 	defer a.cexTradesMtx.Unlock()
 
-	tradeID, err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), !o.Sell, cexRate, match.Qty, a.cexTradeUpdatesID)
+	tradeID, err := a.cex.Trade(a.ctx, a.base, a.quote, !o.Sell, cexRate, match.Qty, a.cexTradeUpdatesID)
 	if err != nil {
 		a.log.Errorf("Error sending trade to CEX: %v", err)
 		return
@@ -218,7 +218,7 @@ func (a *arbMarketMaker) processDEXOrderNote(note *core.OrderNote) {
 }
 
 func (a *arbMarketMaker) vwap(sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
-	return a.cex.VWAP(dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), sell, qty)
+	return a.cex.VWAP(a.base, a.quote, sell, qty)
 }
 
 type arbMMRebalancer interface {
@@ -273,7 +273,7 @@ func (a *arbMarketMaker) cancelCEXTrades() {
 
 	for tradeID, epoch := range a.cexTrades {
 		if currEpoch-epoch >= a.cfg.NumEpochsLeaveOpen {
-			err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), tradeID)
+			err := a.cex.CancelTrade(a.ctx, a.base, a.quote, tradeID)
 			if err != nil {
 				a.log.Errorf("Error canceling CEX trade %s: %v", tradeID, err)
 			}
@@ -314,13 +314,13 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, c
 		return
 	}
 
-	baseCEXBalance, err := cex.Balance(mkt.BaseSymbol)
+	baseCEXBalance, err := cex.Balance(mkt.BaseID)
 	if err != nil {
 		log.Errorf("error getting base CEX balance: %v", err)
 		return
 	}
 
-	quoteCEXBalance, err := cex.Balance(mkt.QuoteSymbol)
+	quoteCEXBalance, err := cex.Balance(mkt.QuoteID)
 	if err != nil {
 		log.Errorf("error getting quote CEX balance: %v", err)
 		return
@@ -572,7 +572,7 @@ func (a *arbMarketMaker) run() {
 
 	a.updateFeeRates()
 
-	err = a.cex.SubscribeMarket(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote))
+	err = a.cex.SubscribeMarket(a.ctx, a.base, a.quote)
 	if err != nil {
 		a.log.Errorf("Failed to subscribe to cex market: %v", err)
 		return

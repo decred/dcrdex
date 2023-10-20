@@ -1111,9 +1111,10 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 			go func(cfg *BotConfig) {
 				defer wg.Done()
 				logger := m.log.SubLogger(fmt.Sprintf("SimpleArbitrage-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
-				cex, err := getConnectedCEX(cfg.SimpleArbConfig.CEXName)
-				if err != nil {
-					logger.Errorf("Failed to connect to CEX: %v", err)
+				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+				cex, found := cexes[cfg.CEXCfg.Name]
+				if !found {
+					logger.Errorf("Cannot start %s bot due to CEX not starting", mktID)
 					return
 				}
 				mkt := MarketWithHost{cfg.Host, cfg.BaseAsset, cfg.QuoteAsset}
@@ -1121,12 +1122,6 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 				defer func() {
 					m.markBotAsRunning(mkt, false)
 				}()
-				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
-				cex, found := cexes[cfg.CEXCfg.Name]
-				if !found {
-					logger.Errorf("Cannot start %s bot due to CEX not starting", mktID)
-					return
-				}
 				RunSimpleArbBot(m.ctx, cfg, m.wrappedCoreForBot(mktID), m.wrappedCEXForBot(mktID, cex), logger)
 			}(cfg)
 		case cfg.ArbMarketMakerConfig != nil:
@@ -1134,11 +1129,17 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 			go func(cfg *BotConfig) {
 				defer wg.Done()
 				logger := m.log.SubLogger(fmt.Sprintf("ArbMarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
-				cex, err := getConnectedCEX(cfg.ArbMarketMakerConfig.CEXName)
-				if err != nil {
-					logger.Errorf("Failed to connect to CEX: %v", err)
+				cex, found := cexes[cfg.CEXCfg.Name]
+				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+				if !found {
+					logger.Errorf("Cannot start %s bot due to CEX not starting", mktID)
 					return
 				}
+				mkt := MarketWithHost{cfg.Host, cfg.BaseAsset, cfg.QuoteAsset}
+				m.markBotAsRunning(mkt, true)
+				defer func() {
+					m.markBotAsRunning(mkt, false)
+				}()
 				RunArbMarketMaker(m.ctx, cfg, m.core, cex, logger)
 			}(cfg)
 		default:

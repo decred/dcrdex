@@ -4209,23 +4209,23 @@ func (btc *baseWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of sats/byte.
 // Withdraw satisfies asset.Withdrawer.
-func (btc *baseWallet) Withdraw(address string, value, feeRate uint64) (string, asset.Coin, error) {
+func (btc *baseWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(feeRate), true)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return txHash.String(), NewOutput(txHash, vout, sent), nil
+	return NewOutput(txHash, vout, sent), nil
 }
 
 // Send sends the exact value to the specified address. This is different from
 // Withdraw, which subtracts the tx fees from the amount sent. feeRate is in
 // units of sats/byte.
-func (btc *baseWallet) Send(address string, value, feeRate uint64) (string, asset.Coin, error) {
+func (btc *baseWallet) Send(address string, value, feeRate uint64) (asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(feeRate), false)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return txHash.String(), NewOutput(txHash, vout, sent), nil
+	return NewOutput(txHash, vout, sent), nil
 }
 
 // SendTransaction broadcasts a valid fully-signed transaction.

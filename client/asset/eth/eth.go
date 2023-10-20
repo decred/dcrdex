@@ -1408,6 +1408,10 @@ func (c *coin) ID() dex.Bytes {
 	return c.id[:]
 }
 
+func (c *coin) TxID() string {
+	return c.String()
+}
+
 // String is a string representation of the coin.
 func (c *coin) String() string {
 	return c.id.String()
@@ -3144,14 +3148,14 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, c
 
 // Send sends the exact value to the specified address. The provided fee rate is
 // ignored since all sends will use an internally derived fee rate.
-func (w *ETHWallet) Send(addr string, value, _ uint64) (string, asset.Coin, error) {
+func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	if err := isValidSend(addr, value, false); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	maxFee, maxFeeRate, err := w.canSend(value, true, false)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	// TODO: Subtract option.
 	// if avail < value+maxFee {
@@ -3160,37 +3164,37 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (string, asset.Coin, erro
 
 	tx, err := w.sendToAddr(common.HexToAddress(addr), value, maxFeeRate)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	txHash := tx.Hash()
 	w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
 
-	return txHash.String(), &coin{id: txHash, value: value}, nil
+	return &coin{id: txHash, value: value}, nil
 }
 
 // Send sends the exact value to the specified address. Fees are taken from the
 // parent wallet. The provided fee rate is ignored since all sends will use an
 // internally derived fee rate.
-func (w *TokenWallet) Send(addr string, value, _ uint64) (string, asset.Coin, error) {
+func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	if err := isValidSend(addr, value, false); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	maxFee, maxFeeRate, err := w.canSend(value, true, false)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	tx, err := w.sendToAddr(common.HexToAddress(addr), value, maxFeeRate)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	txHash := tx.Hash()
 	w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
 
-	return txHash.String(), &coin{id: txHash, value: value}, nil
+	return &coin{id: txHash, value: value}, nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.

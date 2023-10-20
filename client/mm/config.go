@@ -68,7 +68,7 @@ func (c *BotConfig) requiresPriceOracle() bool {
 }
 
 func (c *BotConfig) requiresCEX() bool {
-	return c.SimpleArbConfig != nil || c.MMWithCEXConfig != nil
+	return c.SimpleArbConfig != nil || c.ArbMarketMakerConfig != nil
 }
 
 func dexMarketID(host string, base, quote uint32) string {

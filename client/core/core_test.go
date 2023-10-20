@@ -606,6 +606,10 @@ func (c *tCoin) ID() dex.Bytes {
 	return c.id
 }
 
+func (c *tCoin) TxID() string {
+	return ""
+}
+
 func (c *tCoin) String() string {
 	return hex.EncodeToString(c.id)
 }
@@ -932,19 +936,19 @@ func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) 
 	return time.Time{}, nil
 }
 
-func (w *TXCWallet) Send(address string, value, feeSuggestion uint64) (string, asset.Coin, error) {
+func (w *TXCWallet) Send(address string, value, feeSuggestion uint64) (asset.Coin, error) {
 	w.sendFeeSuggestion = feeSuggestion
 	w.sendCoin.val = value
-	return "", w.sendCoin, w.sendErr
+	return w.sendCoin, w.sendErr
 }
 
 func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 	return w.feeCoinSent, w.sendTxnErr
 }
 
-func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (string, asset.Coin, error) {
+func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
 	w.sendFeeSuggestion = feeSuggestion
-	return "", w.sendCoin, w.sendErr
+	return w.sendCoin, w.sendErr
 }
 
 func (w *TXCWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {

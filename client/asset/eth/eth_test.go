@@ -4340,7 +4340,7 @@ func testSend(t *testing.T, assetID uint32) {
 			node.tokenContractor.bal = dexeth.GweiToWei(val - test.sendAdj)
 			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
 		}
-		_, coin, err := w.Send(test.addr, val, 0)
+		coin, err := w.Send(test.addr, val, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -5253,7 +5253,7 @@ func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
 		if err != nil {
 			t.Fatalf("error converting canSend to gwei: %v", err)
 		}
-		_, _, err = w.Send(testAddr, canSendGwei, 0)
+		_, err = w.Send(testAddr, canSendGwei, 0)
 		if err != nil {
 			t.Fatalf("error sending: %v", err)
 		}
@@ -5261,7 +5261,7 @@ func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
 		tokenVal := uint64(10e9)
 		node.tokenContractor.bal = dexeth.GweiToWei(tokenVal)
 		node.bal = dexeth.GweiToWei(fee)
-		_, _, err = w.Send(testAddr, tokenVal, 0)
+		_, err = w.Send(testAddr, tokenVal, 0)
 		if err != nil {
 			t.Fatalf("error sending: %v", err)
 		}

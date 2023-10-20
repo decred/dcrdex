@@ -4335,7 +4335,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
 	feeRate := c.feeSuggestionAny(feeAsset.ID, dc)
-	_, coin, err := wallet.Send(regRes.Address, regRes.Fee, feeRate)
+	coin, err := wallet.Send(regRes.Address, regRes.Fee, feeRate)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %w", err)
 	}
@@ -5486,13 +5486,12 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	}
 
 	var coin asset.Coin
-	var txID string
 	feeSuggestion := c.feeSuggestionAny(assetID)
 	if !subtract {
-		txID, coin, err = wallet.Wallet.Send(address, value, feeSuggestion)
+		coin, err = wallet.Wallet.Send(address, value, feeSuggestion)
 	} else {
 		if withdrawer, isWithdrawer := wallet.Wallet.(asset.Withdrawer); isWithdrawer {
-			txID, coin, err = withdrawer.Withdraw(address, value, feeSuggestion)
+			coin, err = withdrawer.Withdraw(address, value, feeSuggestion)
 		} else {
 			return "", nil, fmt.Errorf("wallet does not support subtracting network fee from withdraw amount")
 		}
@@ -5508,7 +5507,13 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
 
 	c.updateAssetBalance(assetID)
-	return txID, coin, nil
+
+	txCoin, is := coin.(asset.TxCoin)
+	if !is {
+		return "", nil, fmt.Errorf("Send successful, but returned coin is not a TxCoin")
+	}
+
+	return txCoin.TxID(), coin, nil
 }
 
 // TransactionConfirmations returns the number of confirmations of

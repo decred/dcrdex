@@ -2115,12 +2115,12 @@ func (w *zecWallet) EstimateSendTxFee(
 	return
 }
 
-func (w *zecWallet) Send(address string, value, feeRate uint64) (string, asset.Coin, error) {
+func (w *zecWallet) Send(address string, value, feeRate uint64) (asset.Coin, error) {
 	txHash, vout, sent, err := w.send(address, value, false)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return txHash.String(), btc.NewOutput(txHash, vout, sent), nil
+	return btc.NewOutput(txHash, vout, sent), nil
 }
 
 // TransactionConfirmations gets the number of confirmations for the specified

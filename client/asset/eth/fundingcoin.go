@@ -32,6 +32,10 @@ func (c *fundingCoin) ID() dex.Bytes {
 	return []byte(c.addr.String())
 }
 
+func (c *fundingCoin) TxID() string {
+	return ""
+}
+
 // Value returns the value reserved in the funding coin.
 func (c *fundingCoin) Value() uint64 {
 	return c.amt
