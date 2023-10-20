@@ -23,28 +23,14 @@ then
 fi
 
 mkdir temp
+mkdir -p ${PKG_NAME}
 
 solc --abi --bin --bin-runtime --overwrite --optimize ${SOLIDITY_FILE} -o ./temp/
-BYTECODE=$(<./temp/${CONTRACT_NAME}.bin-runtime)
-
-cat > "./${PKG_NAME}/BinRuntimeV${VERSION}.go" <<EOF
-// Code generated - DO NOT EDIT.
-// This file is a generated binding and any manual changes will be lost.
-
-package ${PKG_NAME}
-
-const ${CONTRACT_NAME}RuntimeBin = "${BYTECODE}"
-EOF
-
 abigen --abi ./temp/${CONTRACT_NAME}.abi --bin ./temp/${CONTRACT_NAME}.bin --pkg ${PKG_NAME} \
  --type ${CONTRACT_NAME} --out ./${PKG_NAME}/contract.go
 
 BYTECODE=$(<./temp/${CONTRACT_NAME}.bin)
 
-for HARNESS_PATH in "$(realpath ../../../testing/eth/harness.sh)" "$(realpath ../../../testing/polygon/harness.sh)"; do
-  sed -i.tmp "s/ETH_SWAP_V${VERSION}=.*/ETH_SWAP_V${VERSION}=\"${BYTECODE}\"/" "${HARNESS_PATH}"
-  # mac needs a temp file specified above.
-  rm "${HARNESS_PATH}.tmp"
-done
+echo "${BYTECODE}" | xxd -r -p > "v${VERSION}/contract.bin"
 
 rm -fr temp
