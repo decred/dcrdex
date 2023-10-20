@@ -125,6 +125,15 @@ tmux kill-session -t $SESSION
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/quit"
 
+cat > "${DCRDEX_DATA_DIR}/evm-protocol-overrides.json" <<EOF
+{
+    "usdt.eth": 0,
+    "usdt.polygon": 0,
+    "weth.polygon": 0,
+    "wbtc.polygon": 0
+}
+EOF
+
 cat > "${DCRDEX_DATA_DIR}/run" <<EOF
 #!/usr/bin/env bash
 ${HARNESS_DIR}/genmarkets.sh
