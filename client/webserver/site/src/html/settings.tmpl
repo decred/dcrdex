@@ -11,13 +11,7 @@
         [[[Dark Mode]]]
       </label>
     </div>
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
-      <label class="form-check-label" for="showPokes">
-        [[[Show pop-up notifications]]]
-      </label>
-    </div>
-    <div {{if not $authed}} class="d-hide"{{end}}>
+    <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
     <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
     </div>
     <div id="fiatRateSources" {{if not $authed}} class="d-hide"{{end}}>
@@ -52,7 +46,33 @@
         <button id="changeAppPW" class="bg2 selected my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
         <button id="resetAppPW" class="bg2 selected my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
     </div>
-    <div{{if not $authed}} class="d-hide"{{end}}>
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
+      <label class="form-check-label" for="showPokes">
+        [[[Show pop-up notifications]]]
+      </label>
+    </div>
+    <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <form id="browserNotificationsForm">
+        <div class="form-check">
+          <label class="form-check-label">
+            <input class="form-check-input" name="browserNtfnEnabled" type="checkbox" value="1" id="browserNtfnEnabled">
+            [[[enable_browser_ntfn]]]
+            <span class="ico-info" data-tooltip="[[[enable_browser_ntfn_info]]]"></span>
+          </label>
+        </div>
+        <div id="browserNtfnBlockedMsg" class="d-hide">[[[browser_ntfn_blocked]]]</div>
+        <div id="browserNtfnCheckboxContainer" class="d-hide checkbox-container">
+          <div class="form-check" id="browserNtfnCheckboxTemplate">
+            <label class="form-check-label" >
+            <span data-tmpl="label"></span>
+              <input class="form-check-input" type="checkbox" value="1" data-tmpl="checkbox">
+            </label>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
       [[[seed_implore_msg]]]<br>
       <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>
     </div>

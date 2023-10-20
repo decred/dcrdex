@@ -143,6 +143,11 @@ export const ID_TICKET_STATUS_UNSPENT = 'TICKET_STATUS_UNSPENT'
 export const ID_TICKET_STATUS_REVOKED = 'TICKET_STATUS_REVOKED'
 export const ID_INVALID_SEED = 'INVALID_SEED'
 export const ID_PASSWORD_RESET_SUCCESS_MSG = 'PASSWORD_RESET_SUCCESS_MSG '
+export const ID_BROWSER_NTFN_ENABLED = 'ID_BROWSER_NTFN_ENABLED'
+export const ID_BROWSER_NTFN_ORDERS = 'ID_BROWSER_NTFN_ORDERS'
+export const ID_BROWSER_NTFN_MATCHES = 'ID_BROWSER_NTFN_MATCHES'
+export const ID_BROWSER_NTFN_BONDS = 'ID_BROWSER_NTFN_BONDS'
+export const ID_BROWSER_NTFN_CONNECTIONS = 'ID_BROWSER_NTFN_CONNECTIONS'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -287,7 +292,12 @@ export const enUS: Locale = {
   [ID_TICKET_STATUS_UNSPENT]: 'unspent',
   [ID_TICKET_STATUS_REVOKED]: 'revoked',
   [ID_INVALID_SEED]: 'Invalid seed',
-  [ID_PASSWORD_RESET_SUCCESS_MSG]: 'Your password reset was successful. You can proceed to login with your new password.'
+  [ID_PASSWORD_RESET_SUCCESS_MSG]: 'Your password reset was successful. You can proceed to login with your new password.',
+  [ID_BROWSER_NTFN_ENABLED]: 'DCRDEX notifications enabled',
+  [ID_BROWSER_NTFN_ORDERS]: 'Orders',
+  [ID_BROWSER_NTFN_MATCHES]: 'Matches',
+  [ID_BROWSER_NTFN_BONDS]: 'Bonds',
+  [ID_BROWSER_NTFN_CONNECTIONS]: 'Server connections'
 }
 
 export const ptBR: Locale = {
