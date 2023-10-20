@@ -371,8 +371,8 @@ MULTIBALANCE_CONTRACT_HASH=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/de
 mine_pending_txs
 
 ETH_SWAP_CONTRACT_ADDR=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/contractAddress.js --exec contractAddress(\"${ETH_SWAP_CONTRACT_HASH}\")" | sed 's/"//g')
-echo "ETH SWAP contract address is ${ETH_SWAP_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/eth_swap_contract_address.txt"
-cat > "${NODES_ROOT}/eth_swap_contract_address.txt" <<EOF
+echo "ETH SWAP contract address is ${ETH_SWAP_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/eth_swap_contract_address_v0.txt"
+cat > "${NODES_ROOT}/eth_swap_contract_address_v0.txt" <<EOF
 ${ETH_SWAP_CONTRACT_ADDR}
 EOF
 
@@ -439,8 +439,8 @@ USDT_SWAP_CONTRACT_HASH=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/deplo
 mine_pending_txs
 
 USDC_SWAP_CONTRACT_ADDR=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/contractAddress.js --exec contractAddress(\"${USDC_SWAP_CONTRACT_HASH}\")" | sed 's/"//g')
-echo "USDC SWAP contract address is ${USDC_SWAP_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/usdc_swap_contract_address.txt"
-cat > "${NODES_ROOT}/usdc_swap_contract_address.txt" <<EOF
+echo "USDC SWAP contract address is ${USDC_SWAP_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/usdc_swap_contract_address_v0.txt"
+cat > "${NODES_ROOT}/usdc_swap_contract_address_v0.txt" <<EOF
 ${USDC_SWAP_CONTRACT_ADDR}
 EOF
 

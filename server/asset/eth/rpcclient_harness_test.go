@@ -29,8 +29,8 @@ var (
 	homeDir      = os.Getenv("HOME")
 	alphaIPCFile = filepath.Join(homeDir, "dextest", "eth", "alpha", "node", "geth.ipc")
 
-	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
-	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
+	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address_v0.txt")
+	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "usdc_swap_contract_address_v0.txt")
 	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_usdc_contract_address.txt")
 	deltaAddress       = "d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
 	gammaAddress       = "41293c2032bac60aa747374e966f79f575d42379"
@@ -42,6 +42,7 @@ func TestMain(m *testing.M) {
 	monitorConnectionsInterval = 3 * time.Second
 
 	// Run in function so that defers happen before os.Exit is called.
+	dexeth.MaybeReadSimnetAddrs()
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
@@ -110,10 +111,8 @@ func TestSuggestGasTipCap(t *testing.T) {
 	}
 }
 
-func TestSwap(t *testing.T) {
-	var secretHash [32]byte
-	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.swap(ctx, BipID, secretHash)
+func TestStatus(t *testing.T) {
+	_, err := ethClient.status(ctx, BipID, &dexeth.SwapVector{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 )
@@ -65,6 +66,7 @@ var (
 
 	VersionedGases = map[uint32]*Gases{
 		0: v0Gases,
+		1: v1Gases,
 	}
 
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
@@ -72,6 +74,11 @@ var (
 			dex.Mainnet: common.HexToAddress("0x8C17e4968B6903E1601be82Ca989c5B5E2c7b400"),
 			dex.Testnet: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"), // tx 0xb24b44beebc0e34fa57bd9f08f9aaf70f40c654f3ddbe0b15dd942ee23ce02f4
 			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
+		},
+		1: {
+			dex.Mainnet: common.Address{},
+			dex.Testnet: common.Address{},
+			dex.Simnet:  common.Address{},
 		},
 	}
 
@@ -87,6 +94,25 @@ var v0Gases = &Gases{
 	Redeem:    78600,  // 60,456 actual -- https://goerli.etherscan.io/tx/0x5b22c48052df4a8ecd03a31b62e5015e6afe18c9ffb05e6cdd77396dfc3ca917, verified on mainnet
 	RedeemAdd: 41000,  // 31,672 actual (92,083 for 2, 123,724 for 3) -- https://goerli.etherscan.io/tx/0xae424cc9b0d43bf934112245cb74ab9eca9c2611eabcd6257b6ec258b071c1e6, https://goerli.etherscan.io/tx/0x7ba7cb945da108d39a5a0ac580d4841c4017a32cd0e244f26845c6ed501d2475, verified on mainnet
 	Refund:    57000,  // 43,014 actual -- https://goerli.etherscan.io/tx/0x586ed4cb7dab043f98d4cc08930d9eb291b0052d140d949b20232ceb6ad15f25
+}
+
+var v1Gases = &Gases{
+	// First swap used 48769 gas Recommended Gases.Swap = 63399
+	// 	4 additional swaps averaged 26904 gas each. Recommended Gases.SwapAdd = 34975
+	// 	[48769 75679 102590 129486 156385]
+	Swap:    63_399,
+	SwapAdd: 34_975,
+	// First redeem used 39792 gas. Recommended Gases.Redeem = 51729
+	// 	4 additional redeems averaged 11037 gas each. recommended Gases.RedeemAdd = 14348
+	// 	[39792 50836 61880 72898 83943]
+
+	// Compare expected Swap + Redeem = 88k with UniSwap v2: 102k, v3: 127k
+	// A 1-match order is cheaper that UniSwap with v1 gases.
+	Redeem:    51_729,
+	RedeemAdd: 14_348,
+	// Average of 5 refunds: 40155. Recommended Gases.Refund = 52201
+	// 	[40158 40158 40158 40158 40146]
+	Refund: 52_201,
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
@@ -105,23 +131,37 @@ func LoadGenesisFile(genesisFile string) (*core.Genesis, error) {
 	return &genesis, nil
 }
 
-// EncodeContractData packs the contract version and the secret hash into a byte
+// EncodeContractData packs the contract version and the locator into a byte
 // slice for communicating a swap's identity.
-func EncodeContractData(contractVersion uint32, swapKey [SecretHashSize]byte) []byte {
-	b := make([]byte, SecretHashSize+4)
+func EncodeContractData(contractVersion uint32, locator []byte) []byte {
+	b := make([]byte, len(locator)+4)
 	binary.BigEndian.PutUint32(b[:4], contractVersion)
-	copy(b[4:], swapKey[:])
+	copy(b[4:], locator[:])
 	return b
 }
 
-// DecodeContractData unpacks the contract version and secret hash.
-func DecodeContractData(data []byte) (contractVersion uint32, swapKey [SecretHashSize]byte, err error) {
-	if len(data) != SecretHashSize+4 {
-		err = errors.New("invalid swap data")
+// DecodeLocator unpacks the contract version and secret hash.
+func DecodeLocator(data []byte) (contractVersion uint32, locator []byte, err error) {
+	if len(data) < 4 {
+		err = errors.New("invalid short encoding")
 		return
 	}
+	locator = data[4:]
 	contractVersion = binary.BigEndian.Uint32(data[:4])
-	copy(swapKey[:], data[4:])
+	switch contractVersion {
+	case 0:
+		if len(locator) != SecretHashSize {
+			err = fmt.Errorf("v0 locator is too small. expected %d, got %d", SecretHashSize, len(locator))
+			return
+		}
+	case 1:
+		if len(locator) != LocatorV1Length {
+			err = fmt.Errorf("v1 locator is too small. expected %d, got %d", LocatorV1Length, len(locator))
+			return
+		}
+	default:
+		err = fmt.Errorf("unkown contract version %d", contractVersion)
+	}
 	return
 }
 
@@ -250,7 +290,35 @@ func (ss SwapStep) String() string {
 	return "unknown"
 }
 
-// SwapState is the current state of an in-process swap.
+// SwapVector is immutable contract data.
+type SwapVector struct {
+	From       common.Address
+	To         common.Address
+	Value      uint64
+	SecretHash [32]byte
+	LockTime   uint64
+}
+
+// Locator encodes a version 1 locator for the SwapVector.
+func (v *SwapVector) Locator() []byte {
+	locator := make([]byte, LocatorV1Length)
+	copy(locator[0:20], v.From[:])
+	copy(locator[20:40], v.To[:])
+	binary.BigEndian.PutUint64(locator[40:48], v.Value)
+	copy(locator[48:80], v.SecretHash[:])
+	binary.BigEndian.PutUint64(locator[80:88], v.LockTime)
+	return locator
+}
+
+// SwapStatus is the contract data that specifies the current contract state.
+type SwapStatus struct {
+	BlockHeight uint64
+	Secret      [32]byte
+	Step        SwapStep
+}
+
+// SwapState is the current state of an in-process swap, as stored on-chain by
+// the v0 contract.
 type SwapState struct {
 	BlockHeight uint64
 	LockTime    time.Time
@@ -330,4 +398,43 @@ func (g *Gases) RedeemN(n int) uint64 {
 		return 0
 	}
 	return g.Redeem + g.RedeemAdd*(uint64(n)-1)
+}
+
+func ParseV0Locator(locator []byte) (secretHash [32]byte, err error) {
+	if len(locator) == SecretHashSize {
+		copy(secretHash[:], locator)
+	} else {
+		err = fmt.Errorf("wrong v0 locator length. wanted %d, got %d", SecretHashSize, len(locator))
+	}
+	return
+}
+
+// LocatorV1Length = from 20 + to 20 + value 8 + secretHash 32 +
+// lockTime 8 = 88 bytes
+const LocatorV1Length = 88
+
+func ParseV1Locator(locator []byte) (v *SwapVector, err error) {
+	// from 20 + to 20 + value 8 + secretHash 32 + lockTime 8
+	if len(locator) == LocatorV1Length {
+		v = &SwapVector{
+			From:     common.BytesToAddress(locator[:20]),
+			To:       common.BytesToAddress(locator[20:40]),
+			Value:    binary.BigEndian.Uint64(locator[40:48]),
+			LockTime: binary.BigEndian.Uint64(locator[80:88]),
+		}
+		copy(v.SecretHash[:], locator[48:80])
+	} else {
+		err = fmt.Errorf("wrong v1 locator length. wanted %d, got %d", LocatorV1Length, len(locator))
+	}
+	return
+}
+
+func SwapVectorToAbigen(c *SwapVector) swapv1.ETHSwapVector {
+	return swapv1.ETHSwapVector{
+		SecretHash:      c.SecretHash,
+		Initiator:       c.From,
+		RefundTimestamp: c.LockTime,
+		Participant:     c.To,
+		Value:           c.Value,
+	}
 }

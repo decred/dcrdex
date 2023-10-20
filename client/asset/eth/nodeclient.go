@@ -29,7 +29,9 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 )
 
-const contractVersionNewest = ^uint32(0)
+const (
+	approveGas = 4e5
+)
 
 var (
 	// https://github.com/ethereum/go-ethereum/blob/16341e05636fd088aa04a27fca6dc5cda5dbab8f/eth/backend.go#L110-L113
@@ -423,7 +425,7 @@ func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, max
 }
 
 func gases(contractVer uint32, versionedGases map[uint32]*dexeth.Gases) *dexeth.Gases {
-	if contractVer != contractVersionNewest {
+	if contractVer != contractVersionERC20 {
 		return versionedGases[contractVer]
 	}
 	var bestVer uint32

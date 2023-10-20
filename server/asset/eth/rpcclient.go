@@ -17,7 +17,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -243,11 +243,11 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 		ec.txPoolSupported = true
 	}
 
-	es, err := swapv0.NewETHSwap(c.ethContractAddr, ec.Client)
+	es, err := swapv1.NewETHSwap(c.ethContractAddr, ec.Client)
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize %v contract for %q: %v", c.baseChainName, endpoint, err)
 	}
-	ec.swapContract = &swapSourceV0{es}
+	ec.swapContract = &swapSourceV1{es}
 
 	for assetID, vToken := range c.tokensLoaded {
 		tkn, err := newTokener(ctx, vToken, c.net, ec.Client)
@@ -548,17 +548,19 @@ func (c *rpcclient) blockNumber(ctx context.Context) (bn uint64, err error) {
 }
 
 // swap gets a swap keyed by secretHash in the contract.
-func (c *rpcclient) swap(ctx context.Context, assetID uint32, secretHash [32]byte) (state *dexeth.SwapState, err error) {
+func (c *rpcclient) status(ctx context.Context, assetID uint32, vector *dexeth.SwapVector) (status *dexeth.SwapStatus, err error) {
 	if assetID == c.baseChainID {
-		return state, c.withClient(func(ec *ethConn) error {
-			state, err = ec.swapContract.Swap(ctx, secretHash)
+		err = c.withClient(func(ec *ethConn) error {
+			status, err = ec.swapContract.Status(ctx, vector)
+			return err
+		})
+	} else {
+		err = c.withTokener(assetID, func(tkn *tokener) error {
+			status, err = tkn.Status(ctx, vector)
 			return err
 		})
 	}
-	return state, c.withTokener(assetID, func(tkn *tokener) error {
-		state, err = tkn.Swap(ctx, secretHash)
-		return err
-	})
+	return
 }
 
 // transaction gets the transaction that hashes to hash from the chain or
@@ -584,6 +586,7 @@ func (c *rpcclient) dumbBalance(ctx context.Context, ec *ethConn, assetID uint32
 }
 
 // smartBalance gets the account balance, including the effects of known
+// accountBalance gets the account balance, including the effects of known
 // unmined transactions.
 func (c *rpcclient) smartBalance(ctx context.Context, ec *ethConn, assetID uint32, addr common.Address) (bal *big.Int, err error) {
 	tip, err := c.blockNumber(ctx)
@@ -654,6 +657,14 @@ func (c *rpcclient) smartBalance(ctx context.Context, ec *ethConn, assetID uint3
 		}
 	}
 	return bal, nil
+}
+
+// receipt fetches the transaction receipt.
+func (c *rpcclient) receipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, err error) {
+	return r, c.withClient(func(ec *ethConn) error {
+		r, err = ec.TransactionReceipt(ctx, txHash)
+		return err
+	})
 }
 
 // accountBalance gets the account balance. If txPool functions are supported by the

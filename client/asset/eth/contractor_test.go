@@ -2,6 +2,7 @@ package eth
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 	"testing"
@@ -128,7 +129,8 @@ func TestRedeemV0(t *testing.T) {
 	c := contractorV0{contractV0: abiContract, evmify: dexeth.GweiToWei}
 
 	secretB := encode.RandomBytes(32)
-	secretHashB := encode.RandomBytes(32)
+	secretHash := sha256.Sum256(secretB)
+	secretHashB := secretHash[:]
 
 	redemption := &asset.Redemption{
 		Secret: secretB,
@@ -160,12 +162,12 @@ func TestRedeemV0(t *testing.T) {
 	// bad secret hash length
 	redemption.Spends.SecretHash = encode.RandomBytes(20)
 	checkResult("bad secret hash length", true)
-	redemption.Spends.SecretHash = encode.RandomBytes(32)
+	redemption.Spends.SecretHash = secretHashB
 
 	// bad secret length
 	redemption.Secret = encode.RandomBytes(20)
 	checkResult("bad secret length", true)
-	redemption.Secret = encode.RandomBytes(32)
+	redemption.Secret = secretB
 
 	// Redeem error
 	abiContract.redeemErr = fmt.Errorf("test error")
@@ -177,9 +179,11 @@ func TestRedeemV0(t *testing.T) {
 	checkResult("dupe error", true)
 
 	// two OK
+	secretB2 := encode.RandomBytes(32)
+	secretHash2 := sha256.Sum256(secretB2)
 	redemption2 := &asset.Redemption{
-		Secret: encode.RandomBytes(32),
-		Spends: &asset.AuditInfo{SecretHash: encode.RandomBytes(32)},
+		Secret: secretB2,
+		Spends: &asset.AuditInfo{SecretHash: secretHash2[:]},
 	}
 	redemptions = []*asset.Redemption{redemption, redemption2}
 	checkResult("two ok", false)
