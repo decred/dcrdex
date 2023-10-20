@@ -42,7 +42,7 @@ func (d *Driver) Version() uint32 {
 
 // UnitInfo returns the dex.UnitInfo for the asset.
 func (d *Driver) UnitInfo() dex.UnitInfo {
-	return dexzec.UnitInfo
+	return dexzcl.UnitInfo
 }
 
 func init() {

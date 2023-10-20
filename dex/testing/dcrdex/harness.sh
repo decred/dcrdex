@@ -239,10 +239,11 @@ if [ $ZCL_ON -eq 0 ]; then
         {
             "base": "ZCL_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 1000000000,
+            "lotSize": 100000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
-            "marketBuyBuffer": 1.2
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 5000
 EOF
 else echo "Zclassic is not running. Configuring dcrdex markets without ZCL."
 fi
