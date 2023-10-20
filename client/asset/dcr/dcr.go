@@ -5422,6 +5422,15 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			checkTip()
 
 		case walletTip := <-walletBlock:
+			if walletTip == nil {
+				// Mempool tx seen.
+				if bal, err := dcr.Balance(); err != nil {
+					dcr.log.Errorf("Error getting balance after mempool tx notification: %v", err)
+				} else {
+					dcr.emit.BalanceChange(bal)
+				}
+				continue
+			}
 			if queuedBlock != nil && walletTip.height >= queuedBlock.height {
 				if !queuedBlock.queue.Stop() && walletTip.hash == queuedBlock.hash {
 					continue

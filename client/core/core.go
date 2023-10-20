@@ -2089,15 +2089,19 @@ func (c *Core) updateWalletBalance(wallet *xcWallet) (*WalletBalance, error) {
 	if err != nil {
 		return nil, err
 	}
+	return walletBal, c.storeAndSendWalletBalance(wallet, walletBal)
+}
+
+func (c *Core) storeAndSendWalletBalance(wallet *xcWallet, walletBal *WalletBalance) error {
 	wallet.setBalance(walletBal)
 
 	// Store the db.Balance.
-	err = c.db.UpdateBalance(wallet.dbID, walletBal.Balance)
+	err := c.db.UpdateBalance(wallet.dbID, walletBal.Balance)
 	if err != nil {
-		return nil, fmt.Errorf("error updating %s balance in database: %w", unbip(wallet.AssetID), err)
+		return fmt.Errorf("error updating %s balance in database: %w", unbip(wallet.AssetID), err)
 	}
 	c.notify(newBalanceNote(wallet.AssetID, walletBal))
-	return walletBal, nil
+	return nil
 }
 
 // lockedAmounts returns the total amount locked in unredeemed and unrefunded
@@ -9573,6 +9577,25 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	switch n := ni.(type) {
 	case *asset.TipChangeNote:
 		c.tipChange(n.AssetID)
+	case *asset.BalanceChangeNote:
+		w, ok := c.wallet(n.AssetID)
+		if !ok {
+			return
+		}
+		contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(n.AssetID)
+		bal := &WalletBalance{
+			Balance: &db.Balance{
+				Balance: *n.Balance,
+				Stamp:   time.Now(),
+			},
+			OrderLocked:    orderLockedAmt,
+			ContractLocked: contractLockedAmt,
+			BondLocked:     bondLockedAmt,
+		}
+		if err := c.storeAndSendWalletBalance(w, bal); err != nil {
+			c.log.Errorf("Error storing and sending emitted balance: %v", err)
+		}
+		return // Notification sent already.
 	}
 	c.notify(newWalletNote(ni))
 }

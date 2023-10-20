@@ -371,6 +371,13 @@ func (w *spvWallet) notesLoop(ctx context.Context, dcrw *wallet.Wallet) {
 		select {
 		case n := <-txNotes.C:
 			if len(n.AttachedBlocks) == 0 {
+				if len(n.UnminedTransactions) > 0 {
+					select {
+					case w.tipChan <- nil:
+					default:
+						w.log.Warnf("tx report channel was blocking")
+					}
+				}
 				continue
 			}
 			lastBlock := n.AttachedBlocks[len(n.AttachedBlocks)-1]

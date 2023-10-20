@@ -1368,6 +1368,13 @@ type TipChangeNote struct {
 	Data    any    `json:"data"`
 }
 
+// BalanceChangeNote can be sent when the wallet detects a balance change
+// between tip changes.
+type BalanceChangeNote struct {
+	AssetID uint32
+	Balance *Balance
+}
+
 // CustomWalletNote is any other information the wallet wishes to convey to
 // the user.
 type CustomWalletNote struct {
@@ -1412,4 +1419,9 @@ func (e *WalletEmitter) TipChange(tip uint64, datas ...any) {
 		data = datas[0]
 	}
 	e.emit(&TipChangeNote{AssetID: e.assetID, Tip: tip, Data: data})
+}
+
+// BalanceChange sends a BalanceChangeNote.
+func (e *WalletEmitter) BalanceChange(bal *Balance) {
+	e.emit(&BalanceChangeNote{AssetID: e.assetID, Balance: bal})
 }
