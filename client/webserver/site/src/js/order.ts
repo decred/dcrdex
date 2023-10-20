@@ -649,6 +649,9 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
     [Mainnet]: (cid: string) => `https://zcashblockexplorer.com/transactions/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/zcash/testnet/tx/${cid.split(':')[0]}`
   },
+  147: { // zcl
+    [Mainnet]: (cid: string) => `https://explorer.zcl.zelcore.io/tx/${cid.split(':')[0]}`
+  },
   136: { // firo
     [Mainnet]: (cid: string) => `https://explorer.firo.org/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://testexplorer.firo.org/tx/${cid.split(':')[0]}`

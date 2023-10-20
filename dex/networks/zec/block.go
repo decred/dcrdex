@@ -101,7 +101,7 @@ func (z *Block) decodeBlockHeader(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if solSize != 1344 && solSize != 36 {
+	if solSize != 1344 && solSize != 36 && solSize != 400 /* zclassic */ {
 		return fmt.Errorf("wrong solution size %d", solSize)
 	}
 	z.Solution = make([]byte, solSize)

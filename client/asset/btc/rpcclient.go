@@ -888,9 +888,14 @@ func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 		args = append(args, options)
 	}
 
-	res := &btcjson.FundRawTransactionResult{}
+	var res struct {
+		TxBytes        dex.Bytes `json:"hex"`
+		Fees           float64   `json:"fee"`
+		ChangePosition uint32    `json:"changepos"`
+	}
 	err = wc.call(methodFundRawTransaction, args, &res)
 	if err != nil {
+		wc.log.Debugf("%s fundrawtranasaction error for args %+v: %v \n", wc.cloneParams.WalletInfo.Name, args, err)
 		// This is a work around for ZEC wallet, which does not support options
 		// argument for fundrawtransaction.
 		if wc.omitRPCOptionsArg {
@@ -898,18 +903,19 @@ func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 			for _, txOut := range tx.TxOut {
 				sendAmount += uint64(txOut.Value)
 			}
-			var bal uint64
+			var bal float64
 			// args: "(dummy)" minconf includeWatchonly inZat
-			if err := wc.call(methodGetBalance, anylist{"", 0, false, true}, &bal); err != nil {
+			// Using default inZat = false for compatibility with ZCL.
+			if err := wc.call(methodGetBalance, anylist{"", 0, false}, &bal); err != nil {
 				return 0, err
 			}
-			if subtract && sendAmount <= bal {
+			if subtract && sendAmount <= toSatoshi(bal) {
 				return 0, errors.New("wallet does not support options")
 			}
 		}
 		return 0, fmt.Errorf("error calculating transaction fee: %w", err)
 	}
-	return toSatoshi(res.Fee.ToBTC()), nil
+	return toSatoshi(res.Fees), nil
 }
 
 // GetWalletInfo gets the getwalletinfo RPC result.

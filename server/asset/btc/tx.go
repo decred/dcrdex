@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
@@ -80,7 +81,8 @@ type JoinSplit struct {
 // VerboseTxExtended is a subset of *btcjson.TxRawResult, with the addition of
 // some asset-specific fields.
 type VerboseTxExtended struct {
-	Hex           string          `json:"hex"`
+	Raw           dex.Bytes `json:"hex"`
+	Hex           string
 	Txid          string          `json:"txid"`
 	Size          int32           `json:"size,omitempty"`
 	Vsize         int32           `json:"vsize,omitempty"`

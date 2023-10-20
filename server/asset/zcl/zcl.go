@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package zec
+package zcl
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexzcl "decred.org/dcrdex/dex/networks/zcl"
 	dexzec "decred.org/dcrdex/dex/networks/zec"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
@@ -41,7 +42,7 @@ func (d *Driver) Version() uint32 {
 
 // UnitInfo returns the dex.UnitInfo for the asset.
 func (d *Driver) UnitInfo() dex.UnitInfo {
-	return dexzec.UnitInfo
+	return dexzcl.UnitInfo
 }
 
 func init() {
@@ -50,8 +51,8 @@ func init() {
 
 const (
 	version   = 0
-	BipID     = 133
-	assetName = "zec"
+	BipID     = 147
+	assetName = "zcl"
 	feeConfs  = 10 // Block time is 75 seconds
 )
 
@@ -62,13 +63,13 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 	var addrParams *dexzec.AddressParams
 	switch cfg.Net {
 	case dex.Mainnet:
-		btcParams = dexzec.MainNetParams
+		btcParams = dexzcl.MainNetParams
 		addrParams = dexzec.MainNetAddressParams
 	case dex.Testnet:
-		btcParams = dexzec.TestNet4Params
+		btcParams = dexzcl.TestNet4Params
 		addrParams = dexzec.TestNet4AddressParams
 	case dex.Regtest:
-		btcParams = dexzec.RegressionNetParams
+		btcParams = dexzcl.RegressionNetParams
 		addrParams = dexzec.RegressionNetAddressParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", cfg.Net)
@@ -77,20 +78,19 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
 	ports := dexbtc.NetPorts{
-		Mainnet: "8232",
-		Testnet: "18232",
-		Simnet:  "18232",
+		Mainnet: "8023",
+		Testnet: "18023",
+		Simnet:  "35768", // zclassic uses 18023 for regtest too. Using our alpha harness port instead.
 	}
 
-	configPath := cfg.ConfigPath
-	if configPath == "" {
-		configPath = dexbtc.SystemConfigPath("zcash")
+	if cfg.ConfigPath == "" {
+		cfg.ConfigPath = dexbtc.SystemConfigPath("zclassic")
 	}
 
 	be, err := btc.NewBTCClone(&btc.BackendCloneConfig{
 		Name:        assetName,
 		Segwit:      false,
-		ConfigPath:  configPath,
+		ConfigPath:  cfg.ConfigPath,
 		Logger:      cfg.Logger,
 		Net:         cfg.Net,
 		ChainParams: btcParams,

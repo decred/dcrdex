@@ -34,6 +34,9 @@ DGB_ON=$?
 ~/dextest/dash/harness-ctl/alpha getblockchaininfo > /dev/null
 DASH_ON=$?
 
+~/dextest/zcl/harness-ctl/alpha getblockchaininfo > /dev/null
+ZCL_ON=$?
+
 set -e
 
 echo initializing
@@ -85,6 +88,11 @@ fi
 if [ $DASH_ON -eq 0 ]; then
 	echo configuring dash wallet
 	./dexcctl -p abc -p "" --simnet newwallet 5 dashdRPC ~/dextest/dash/alpha/alpha.conf
+fi
+
+if [ $ZCL_ON -eq 0 ]; then
+	echo configuring Zclassic wallet
+	./dexcctl -p abc -p "" --simnet newwallet 147 zclassicdRPC ~/dextest/zcl/alpha/alpha.conf
 fi
 
 echo checking if we have an account already

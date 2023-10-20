@@ -359,9 +359,9 @@ type BTCCloneCFG struct {
 	// LegacyBalance is for clones that don't yet support the 'getbalances' RPC
 	// call.
 	LegacyBalance bool
-	// ZECStyleBalance is for clones that don't support getbalances or
-	// walletinfo, and don't take an account name argument.
-	ZECStyleBalance bool
+	// BalanceFunc is a custom function for getting the wallet's balance.
+	// BalanceFunc precludes any other methods of balance retrieval.
+	BalanceFunc func(ctx context.Context, locked uint64) (*asset.Balance, error)
 	// If segwit is false, legacy addresses and contracts will be used. This
 	// setting must match the configuration of the server's asset backend.
 	Segwit bool
@@ -886,7 +886,7 @@ type baseWallet struct {
 	initTxSize        uint64
 	initTxSizeBase    uint64
 	useLegacyBalance  bool
-	zecStyleBalance   bool
+	balanceFunc       func(ctx context.Context, locked uint64) (*asset.Balance, error)
 	segwit            bool
 	signNonSegwit     TxInSigner
 	localFeeRate      func(context.Context, RawRequester, uint64) (uint64, error)
@@ -1345,7 +1345,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		minNetworkVersion:   cfg.MinNetworkVersion,
 		dustLimit:           cfg.ConstantDustLimit,
 		useLegacyBalance:    cfg.LegacyBalance,
-		zecStyleBalance:     cfg.ZECStyleBalance,
+		balanceFunc:         cfg.BalanceFunc,
 		segwit:              cfg.Segwit,
 		initTxSize:          uint64(initTxSize),
 		initTxSizeBase:      uint64(initTxSizeBase),
@@ -1627,7 +1627,14 @@ func (btc *baseWallet) OwnsDepositAddress(address string) (bool, error) {
 }
 
 func (btc *baseWallet) balance() (*asset.Balance, error) {
-	if btc.useLegacyBalance || btc.zecStyleBalance {
+	if btc.balanceFunc != nil {
+		locked, err := btc.lockedSats()
+		if err != nil {
+			return nil, fmt.Errorf("(legacy) lockedSats error: %w", err)
+		}
+		return btc.balanceFunc(btc.ctx, locked)
+	}
+	if btc.useLegacyBalance {
 		return btc.legacyBalance()
 	}
 	balances, err := btc.node.balances()
@@ -1698,19 +1705,6 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 	locked, err := btc.lockedSats()
 	if err != nil {
 		return nil, fmt.Errorf("(legacy) lockedSats error: %w", err)
-	}
-
-	if btc.zecStyleBalance {
-		var bal uint64
-		// args: "(dummy)" minconf includeWatchonly inZat
-		if err := cl.call(methodGetBalance, anylist{"", 0, false, true}, &bal); err != nil {
-			return nil, err
-		}
-		return &asset.Balance{
-			Available: bal - locked,
-			Locked:    locked,
-			Other:     make(map[asset.BalanceCategory]asset.CustomBalance),
-		}, nil
 	}
 
 	walletInfo, err := cl.GetWalletInfo()

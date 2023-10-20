@@ -3,6 +3,7 @@ package zec
 import (
 	"bytes"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"testing"
@@ -17,6 +18,8 @@ var (
 	unshieldedSaplingTx []byte // mainnet
 	//go:embed test-data/unshielded_orchard_tx.dat
 	unshieldedOrchardTx []byte // testnet
+	//go:embed test-data/v4_sighash_vector_tx.dat
+	v4SighashVectorTx []byte
 	//go:embed test-data/v3_tx.dat
 	v3Tx []byte
 	//go:embed test-data/v2_joinsplit_tx.dat
@@ -173,7 +176,7 @@ func TestV5SigDigest(t *testing.T) {
 	outputs, _ := hex.DecodeString("25f311cc149ecccef0e8ca8c9facd897ef88806008bc15818069470db9f84a37")
 	txinDigest, _ := hex.DecodeString("bb4ab0249df12a12df3d0d160f9ca6fbb0658c30dd44fd62d237994e77f2c1c6")
 
-	prevoutsDigest, err := tx.hashPrevOutsSig(false)
+	prevoutsDigest, err := tx.hashPrevOutsSigV5(false)
 	if err != nil {
 		return
 	}
@@ -197,7 +200,7 @@ func TestV5SigDigest(t *testing.T) {
 		t.Fatalf("wrong prevScriptsDigest")
 	}
 
-	seqsDigest, err := tx.hashSequenceSig(false)
+	seqsDigest, err := tx.hashSequenceSigV5(false)
 	if err != nil {
 		return
 	}
@@ -205,7 +208,7 @@ func TestV5SigDigest(t *testing.T) {
 		t.Fatalf("wrong seqsDigest")
 	}
 
-	outputsDigest, err := tx.hashOutputsSig(false)
+	outputsDigest, err := tx.hashOutputsSigV5(false)
 	if err != nil {
 		return
 	}
@@ -221,7 +224,7 @@ func TestV5SigDigest(t *testing.T) {
 		t.Fatalf("wrong txInsDigest")
 	}
 
-	td, err := tx.transparentSigDigest(0, txscript.SigHashAll, []int64{prevValue}, [][]byte{prevScript})
+	td, err := tx.transparentSigDigestV5(0, txscript.SigHashAll, []int64{prevValue}, [][]byte{prevScript})
 	if err != nil {
 		t.Fatalf("transparentSigDigest error: %v", err)
 	}
@@ -230,12 +233,64 @@ func TestV5SigDigest(t *testing.T) {
 		t.Fatalf("wrong digest")
 	}
 
-	sd, err := tx.SignatureDigest(0, txscript.SigHashAll, []int64{prevValue}, [][]byte{prevScript})
+	sd, err := tx.SignatureDigest(0, txscript.SigHashAll, nil, []int64{prevValue}, [][]byte{prevScript})
 	if err != nil {
 		t.Fatalf("transparentSigDigest error: %v", err)
 	}
 
 	if !bytes.Equal(sd[:], sigDigest) {
 		t.Fatalf("wrong signatureDigest")
+	}
+}
+
+func TestV4SigDigest(t *testing.T) {
+	// Test Vector 3 from ZIP-0243, but fixed.
+	// Preimage and test vector in ZIP-0243 are WRONG!!!!
+	// The test vector's preimage DOES NOT include a varint for script size, but
+	// it should, and I modified zclassicd to log the preimage just to make
+	// sure. I had run into this problem in the Zcash docs before too. When they
+	// say "(serialized as scripts inside CTxOuts)", that's apparently code for
+	// adding the varint, but the guy tasked with generating test vectors
+	// apparently didn't get it either.
+	tx, err := DeserializeTx(v4SighashVectorTx)
+	if err != nil {
+		t.Fatalf("error decoding tx: %v", err)
+	}
+	amtLE, _ := hex.DecodeString("80f0fa0200000000")
+	val := binary.LittleEndian.Uint64(amtLE)
+	vals := []int64{int64(val)}
+
+	script, _ := hex.DecodeString("1976a914507173527b4c3318a2aecd793bf1cfed705950cf88ac")
+	pimg, err := tx.sighashPreimageV4(txscript.SigHashAll, 0, vals, script)
+	if err != nil {
+		t.Fatalf("sighashPreimageV4 error: %v", err)
+	}
+
+	expPimg, _ := hex.DecodeString(
+		"0400008085202f89fae31b8dec7b0b77e2c8d6b6eb0e7e4e55abc6574c26dd44464d94" +
+			"08a8e33f116c80d37f12d89b6f17ff198723e7db1247c4811d1a695d74d930f99e9841" +
+			"8790d2b04118469b7810a0d1cc59568320aad25a84f407ecac40b4f605a4e686845400" +
+			"0000000000000000000000000000000000000000000000000000000000000000000000" +
+			"0000000000000000000000000000000000000000000000000000000000000000000000" +
+			"0000000000000000000000000000000000000000000000000029b0040048b004000000" +
+			"00000000000001000000a8c685478265f4c14dada651969c45a65e1aeb8cd6791f2f5b" +
+			"b6a1d9952104d9010000001a1976a914507173527b4c3318a2aecd793bf1cfed705950" +
+			"cf88ac80f0fa0200000000feffffff",
+	)
+	if !bytes.Equal(pimg, expPimg) {
+		fmt.Println("preimage:", hex.EncodeToString(pimg))
+		t.Fatal("wrong preimage")
+	}
+	// After fixing the vector's preimage, the sighash obviously changed, but
+	// I'll leave this here to maintain expected behavior in case of future code
+	// updates.
+	expSighash, _ := hex.DecodeString("a358eb2ce8b214facba92761be09cc3e889e91a2e301146e8e40b5a6417da3d8")
+	h, err := tx.SignatureDigest(0, txscript.SigHashAll, script, vals, nil)
+	if err != nil {
+		t.Fatalf("SignatureDigest error: %v", err)
+	}
+	if !bytes.Equal(expSighash, h[:]) {
+		fmt.Println("sighash:", hex.EncodeToString(h[:]))
+		t.Fatal("wrong sighash")
 	}
 }

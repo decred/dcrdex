@@ -88,6 +88,10 @@ case $1 in
     ./simnet-trade-tests --quote1node trading1 --quote2node trading2 --base dextt.polygon --quote dcr --regasset dcr  ${@:2}
     ;;
 
+  zclbtc)
+    ./simnet-trade-tests --base zcl --quote btc --regasset btc ${@:2}
+    ;;
+
   help|--help|-h)
     ./simnet-trade-tests --help
     cat <<EOF
@@ -115,6 +119,7 @@ zecbtc - RPC wallets on ZEC-BTC market
 dcrdextt - Decred RPC wallet and Ethereum wallet with dextt.eth test token on market DCR-DEXTT.ETH
 polygondcr - Decred RPC wallet and Polygon RPC wallet on POLYGON-DCR market
 polydexttdcr - Decred RPC wallet and Polygon wallet with dextt.polygon test token on market DEXTT.POLYGON-DCR
+zclbtc - Zclassic RPC wallet and Bitcoin RPC wallet on ZCL-BTC
 
 ---------------------
 

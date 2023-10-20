@@ -199,7 +199,7 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	var expConfs uint32
-	blockWait := time.Second
+	blockWait := time.Second * 5
 	if cfg.SPV {
 		blockWait = time.Second * 6
 	}

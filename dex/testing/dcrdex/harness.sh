@@ -68,6 +68,9 @@ FIRO_ON=$?
 ~/dextest/zec/harness-ctl/alpha getblockchaininfo &> /dev/null
 ZEC_ON=$?
 
+~/dextest/zcl/harness-ctl/alpha getblockchaininfo &> /dev/null
+ZCL_ON=$?
+
 ~/dextest/dgb/harness-ctl/alpha getblockchaininfo &> /dev/null
 DGB_ON=$?
 
@@ -110,7 +113,7 @@ if [ $LTC_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 1000
 EOF
-else echo "WARNING: Litecoin is not running. Configuring dcrdex markets without LTC."
+else echo "Litecoin is not running. Configuring dcrdex markets without LTC."
 fi
 
 if [ $BCH_ON -eq 0 ]; then
@@ -125,7 +128,7 @@ if [ $BCH_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 1200
 EOF
-else echo "WARNING: Bitcoin Cash is not running. Configuring dcrdex markets without BCH."
+else echo "Bitcoin Cash is not running. Configuring dcrdex markets without BCH."
 fi
 
 if [ $ETH_ON -eq 0 ]; then
@@ -158,7 +161,7 @@ if [ $ETH_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 4
 EOF
-else echo "WARNING: Ethereum is not running. Configuring dcrdex markets without ETH."
+else echo "Ethereum is not running. Configuring dcrdex markets without ETH."
 fi
 
 if [ $POLYGON_ON -eq 0 ]; then
@@ -182,7 +185,7 @@ if [ $POLYGON_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 500
 EOF
-else echo "WARNING: Polygon is not running. Configuring dcrdex markets without Polygon."
+else echo "Polygon is not running. Configuring dcrdex markets without Polygon."
 fi
 
 if [ $DOGE_ON -eq 0 ]; then
@@ -197,7 +200,7 @@ if [ $DOGE_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 1500
 EOF
-else echo "WARNING: Dogecoin is not running. Configuring dcrdex markets without DOGE."
+else echo "Dogecoin is not running. Configuring dcrdex markets without DOGE."
 fi
 
 if [ $FIRO_ON -eq 0 ]; then
@@ -212,7 +215,7 @@ if [ $FIRO_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 1500
 EOF
-else echo "WARNING: Firo is not running. Configuring dcrdex markets without FIRO."
+else echo "Firo is not running. Configuring dcrdex markets without FIRO."
 fi
 
 if [ $ZEC_ON -eq 0 ]; then
@@ -227,7 +230,22 @@ if [ $ZEC_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 1000
 EOF
-else echo "WARNING: Zcash is not running. Configuring dcrdex markets without ZEC."
+else echo "Zcash is not running. Configuring dcrdex markets without ZEC."
+fi
+
+if [ $ZCL_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "ZCL_simnet",
+            "quote": "BTC_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 5000
+EOF
+else echo "Zclassic is not running. Configuring dcrdex markets without ZCL."
 fi
 
 if [ $DGB_ON -eq 0 ]; then
@@ -242,7 +260,7 @@ if [ $DGB_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 1500
 EOF
-else echo "WARNING: Digibyte is not running. Configuring dcrdex markets without DGB."
+else echo "Digibyte is not running. Configuring dcrdex markets without DGB."
 fi
 
 if [ $DASH_ON -eq 0 ]; then
@@ -257,7 +275,7 @@ if [ $DASH_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2,
             "parcelSize": 1500
 EOF
-else echo "WARNING: Dash is not running. Configuring dcrdex markets without DASH."
+else echo "Dash is not running. Configuring dcrdex markets without DASH."
 fi
 
 # run with NODERELAY=1 to use a node relay for the bitcoin node.
@@ -433,6 +451,20 @@ if [ $ZEC_ON -eq 0 ]; then
             "maxFeeRate": 200,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf",
+            "bondAmt": 40000000,
+            "bondConfs": 1
+EOF
+fi
+
+if [ $ZCL_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "ZCL_simnet": {
+            "bip44symbol": "zcl",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 1,
+            "configPath": "${TEST_ROOT}/zcl/alpha/alpha.conf",
             "bondAmt": 40000000,
             "bondConfs": 1
 EOF

@@ -707,13 +707,8 @@ func (btc *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (am
 
 	confs = int64(verboseTx.Confirmations)
 
-	rawTx, err := hex.DecodeString(verboseTx.Hex)
-	if err != nil {
-		err = fmt.Errorf("failed to decode transaction %s: %w", txHash, err)
-		return
-	}
 	var msgTx *wire.MsgTx
-	msgTx, err = btc.txDeserializer(rawTx)
+	msgTx, err = btc.txDeserializer(verboseTx.Raw)
 	if err != nil {
 		return
 	}
@@ -1187,9 +1182,10 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 			pkScript: pkScript,
 		})
 	}
-	rawTx, err := hex.DecodeString(verboseTx.Hex)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding tx hex: %w", err)
+
+	// TODO: Unneeded after https://github.com/ZclassicCommunity/zclassic/pull/82
+	if verboseTx.Size == 0 {
+		verboseTx.Size = int32(len(verboseTx.Raw))
 	}
 
 	var feeRate uint64
@@ -1203,7 +1199,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
 
 	}
-	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate, rawTx), nil
+	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate, verboseTx.Raw), nil
 }
 
 // Get information for an unspent transaction output and it's transaction.

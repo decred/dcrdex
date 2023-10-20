@@ -264,18 +264,33 @@ func (rc *RPCClient) GetMsgBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, err
 	return msgBlock, nil
 }
 
+type VerboseHeader struct {
+	Hash          string `json:"hash"`
+	Confirmations int64  `json:"confirmations"`
+	Height        int32  `json:"height"`
+	Version       int32  `json:"version"`
+	VersionHex    string `json:"versionHex"`
+	MerkleRoot    string `json:"merkleroot"`
+	Time          int64  `json:"time"`
+	// Nonce         uint64  `json:"nonce"`
+	Bits         string  `json:"bits"`
+	Difficulty   float64 `json:"difficulty"`
+	PreviousHash string  `json:"previousblockhash,omitempty"`
+	NextHash     string  `json:"nextblockhash,omitempty"`
+}
+
 // getBlockWithVerboseHeader fetches raw block data, and the "verbose" block
 // header, for the block with the given hash. The verbose block header return is
 // separate because it contains other useful info like the height and median
 // time that the wire type does not contain.
-func (rc *RPCClient) getBlockWithVerboseHeader(blockHash *chainhash.Hash) (*wire.MsgBlock, *btcjson.GetBlockHeaderVerboseResult, error) {
+func (rc *RPCClient) getBlockWithVerboseHeader(blockHash *chainhash.Hash) (*wire.MsgBlock, *VerboseHeader, error) {
 	msgBlock, err := rc.GetMsgBlock(blockHash)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	verboseHeader := new(btcjson.GetBlockHeaderVerboseResult)
-	err = rc.call(methodGetBlockHeader, anylist{blockHash.String(), true}, verboseHeader)
+	var verboseHeader *VerboseHeader
+	err = rc.call(methodGetBlockHeader, anylist{blockHash.String(), true}, &verboseHeader)
 	if err != nil {
 		return nil, nil, err
 	}

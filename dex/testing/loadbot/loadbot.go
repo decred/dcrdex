@@ -41,6 +41,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/eth"
 	_ "decred.org/dcrdex/client/asset/firo"
 	_ "decred.org/dcrdex/client/asset/ltc"
+	_ "decred.org/dcrdex/client/asset/zcl"
 	_ "decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -66,6 +67,7 @@ const (
 	dgb              = "dgb"
 	bch              = "bch"
 	zec              = "zec"
+	zcl              = "zcl"
 	dextt            = "dextt.eth"
 	maxOrderLots     = 10
 	ethFeeRate       = 200 // gwei
@@ -89,6 +91,7 @@ var (
 	firoID, _   = dex.BipSymbolID(firo)
 	bchID, _    = dex.BipSymbolID(bch)
 	zecID, _    = dex.BipSymbolID(zec)
+	zclID, _    = dex.BipSymbolID(zcl)
 	loggerMaker *dex.LoggerMaker
 	hostAddr    = "127.0.0.1:17273"
 	pass        = []byte("abc")
@@ -173,7 +176,7 @@ func rpcAddr(symbol, node string) string {
 	switch symbol {
 	case dcr:
 		key = "rpclisten"
-	case btc, ltc, bch, zec, doge, firo, dash:
+	case btc, ltc, bch, zec, zcl, doge, firo, dash:
 		key = "rpcport"
 	case eth, dextt:
 		key = "ListenAddr"
@@ -213,7 +216,7 @@ func mine(symbol, node string) <-chan *harnessResult {
 	case eth:
 		// geth may not include some tx at first because ???. Mine more.
 		n = 4
-	case zec:
+	case zec, zcl:
 		// Zcash has a problem selecting unused utxo for a second when
 		// also mining. https://github.com/zcash/zcash/issues/6045
 		zecSendMtx.Lock()
@@ -262,7 +265,7 @@ func harnessCtl(ctx context.Context, symbol, cmd string, args ...string) <-chan 
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
-				log.Errorf("exec error (%s) %q: %v: %s", symbol, cmd, err, string(exitErr.Stderr))
+				log.Errorf("exec error (%s) %q: %v: %s", symbol, command, err, string(exitErr.Stderr))
 			} else {
 				log.Errorf("%s harnessCtl error running %q: %v", symbol, cmd, err)
 			}
@@ -497,7 +500,7 @@ func run() error {
 		switch symbol {
 		case btc, ltc, dgb:
 			args = []string{"getnewaddress", "''", "bech32"}
-		case dash, doge, bch, firo, zec:
+		case dash, doge, bch, firo, zec, zcl:
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
@@ -535,7 +538,7 @@ func run() error {
 			<-harnessCtl(ctx, dcr, "./alpha", "walletpassphrase", "abc", "0")
 			<-harnessCtl(ctx, dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
 			<-harnessCtl(ctx, dcr, "./beta", "unlockaccount", "default", "abc")
-		case eth, zec, dextt:
+		case eth, zec, zcl, dextt:
 			// eth unlocking for send, so no need to here. Mining
 			// accounts are always unlocked. zec is unlocked already.
 		default:
