@@ -113,10 +113,6 @@ func main() {
 			for lang, tmpl := range localizedTemplates {
 				langDir := filepath.Join(outputDirectory, lang)
 				localizedName := filepath.Join(langDir, baseName)
-				// ext := filepath.Ext(d.Name())
-				// name := baseName[:len(baseName)-len(ext)]
-				// localizedName := filepath.Join(outputDirectory, name+"_"+lang+ext)
-				// fmt.Println("Writing", localizedName)
 				if err := os.WriteFile(localizedName, tmpl, 0644); err != nil {
 					return fmt.Errorf("error writing localized template %s: %v", localizedName, err)
 				}
