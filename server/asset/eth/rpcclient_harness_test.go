@@ -6,16 +6,15 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
-
-	"context"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
@@ -29,8 +28,8 @@ var (
 	homeDir      = os.Getenv("HOME")
 	alphaIPCFile = filepath.Join(homeDir, "dextest", "eth", "alpha", "node", "geth.ipc")
 
-	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
-	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
+	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address_v0.txt")
+	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "usdc_swap_contract_address_v0.txt")
 	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_usdc_contract_address.txt")
 	deltaAddress       = "d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
 	gammaAddress       = "41293c2032bac60aa747374e966f79f575d42379"
@@ -48,16 +47,14 @@ func TestMain(m *testing.M) {
 		defer cancel()
 		log := dex.StdOutLogger("T", dex.LevelTrace)
 
-		netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
-		if !found {
-			return 1, fmt.Errorf("no contract address for eth version %d", ethContractVersion)
-		}
-		ethContractAddr, found := netAddrs[dex.Simnet]
-		if !found {
-			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
-		}
+		contractVer := defaultProtocolVersion.ContractVersion()
+		netAddrs := dexeth.ContractAddresses[contractVer]
+		ethContractAddr := netAddrs[dex.Simnet]
 
-		ethClient = newRPCClient(BipID, 42, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
+		netAddrsV1 := dexeth.ContractAddresses[1]
+		ethContractAddrV1 := netAddrsV1[dex.Simnet]
+
+		ethClient = newRPCClient(BipID, 42, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, contractVer, ethContractAddr, ethContractAddrV1, log)
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
@@ -110,10 +107,10 @@ func TestSuggestGasTipCap(t *testing.T) {
 	}
 }
 
-func TestSwap(t *testing.T) {
+func TestStatus(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.swap(ctx, BipID, secretHash)
+	_, err := ethClient.status(ctx, BipID, common.Address{}, secretHash[:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +200,7 @@ func TestHeaderSubscription(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, headerExpirationTime)
 	defer cancel()
 	ept := endpoint{url: wsEndpoint}
-	cl := newRPCClient(BipID, 42, dex.Simnet, []endpoint{ept}, ethClient.ethContractAddr, ethClient.log)
+	cl := newRPCClient(BipID, 42, dex.Simnet, []endpoint{ept}, ethClient.ethContractVer, ethClient.ethContractAddr, ethClient.ethContractAddrV1, ethClient.log)
 	ec, err := cl.connectToEndpoint(ctx, ept)
 	if err != nil {
 		t.Fatalf("connectToEndpoint error: %v", err)

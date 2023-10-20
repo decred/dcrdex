@@ -2130,7 +2130,7 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient, isRefund
 	if isRefund {
 		// NOTE: Gas price may be higher if the eth harness has
 		// had a lot of use. The minimum is the gas tip cap.
-		ethRefundFees := int64(dexeth.RefundGas(0 /*version*/)) * dexeth.MinGasTipCap
+		ethRefundFees := int64(dexeth.RefundGas(1 /*version*/)) * dexeth.MinGasTipCap
 
 		msgTx := wire.NewMsgTx(0)
 		prevOut := wire.NewOutPoint(&chainhash.Hash{}, 0)
