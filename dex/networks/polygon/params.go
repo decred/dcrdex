@@ -48,6 +48,7 @@ var (
 			dex.Testnet: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"), // txid: 0x88f656a8e432fdd50f33e67bdc39a66d24f663e33792bfab16b033dd2c609a99
 			dex.Simnet:  common.HexToAddress(""),                                           // Filled in by MaybeReadSimnetAddrs
 		},
+		1: {},
 	}
 
 	MultiBalanceAddresses = map[dex.Network]common.Address{
@@ -156,6 +157,18 @@ var (
 							Refund:    62_527,
 							Approve:   58_180,
 							Transfer:  64_539,
+						},
+					},
+					1: {
+						Address: common.Address{},
+						Gas: dexeth.Gases{
+							Swap:      174_000, // [171756 284366 396976 509586 622184]
+							SwapAdd:   115_000,
+							Redeem:    70_000, // [63214 94858 126502 158135 189779]
+							RedeemAdd: 33_000,
+							Refund:    50_000, // [48127 48127 48127 48127 48127]
+							Approve:   46_000, // [44465 27365 27365 27365 27365]
+							Transfer:  35_000, // [32540 32540 32540 32540 32540]
 						},
 					},
 				},

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Script for creating eth nodes.
-set -ex
+set -e
 
 # The following are required script arguments.
 TMUX_WIN_ID=$1
