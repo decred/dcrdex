@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset/btc/electrum"
-
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 )
