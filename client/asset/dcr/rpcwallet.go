@@ -204,7 +204,11 @@ func newRPCWallet(settings map[string]string, logger dex.Logger, net dex.Network
 	rpcw.rpcConnector = nodeRPCClient
 	rpcw.rpcClient = newCombinedClient(nodeRPCClient, chainParams)
 
-	rpcw.accountsV.Store(cfg.XCWalletAccounts)
+	rpcw.accountsV.Store(XCWalletAccounts{
+		PrimaryAccount: cfg.PrimaryAccount,
+		UnmixedAccount: cfg.UnmixedAccount,
+		TradingAccount: cfg.TradingAccount,
+	})
 
 	return rpcw, nil
 }
@@ -243,7 +247,11 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 	var allOk bool
 	defer func() {
 		if allOk { // update the account names as the last step
-			w.accountsV.Store(rpcCfg.XCWalletAccounts)
+			w.accountsV.Store(XCWalletAccounts{
+				PrimaryAccount: rpcCfg.PrimaryAccount,
+				UnmixedAccount: rpcCfg.UnmixedAccount,
+				TradingAccount: rpcCfg.TradingAccount,
+			})
 		}
 	}()
 
@@ -271,10 +279,10 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 			return false, err
 		}
 		var depositAccount string
-		if rpcCfg.XCWalletAccounts.UnmixedAccount != "" {
-			depositAccount = rpcCfg.XCWalletAccounts.UnmixedAccount
+		if rpcCfg.UnmixedAccount != "" {
+			depositAccount = rpcCfg.UnmixedAccount
 		} else {
-			depositAccount = rpcCfg.XCWalletAccounts.PrimaryAccount
+			depositAccount = rpcCfg.PrimaryAccount
 		}
 		owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
 		if err != nil {

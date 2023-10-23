@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -156,15 +155,14 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 		shutdown()
 		panic(err.Error())
 	}
-	var accounts atomic.Value
-	accounts.Store(XCWalletAccounts{
-		PrimaryAccount: tAcctName,
-	})
-	wallet.wallet = &rpcWallet{
-		accountsV: accounts,
+	rpcw := &rpcWallet{
 		rpcClient: client,
 		log:       log,
 	}
+	rpcw.accountsV.Store(XCWalletAccounts{
+		PrimaryAccount: tAcctName,
+	})
+	wallet.wallet = rpcw
 	wallet.ctx = walletCtx
 
 	// Initialize the best block.

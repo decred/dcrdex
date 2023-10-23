@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package dcr
 
 import (
@@ -183,6 +186,10 @@ func (dcr *NativeWallet) StopFundsMixer() error {
 // account. The wallet will need to be re-configured to re-enable mixing. Part
 // of the asset.FundsMixer interface.
 func (dcr *NativeWallet) DisableFundsMixer() error {
+	if spvWallet, ok := dcr.wallet.(*spvWallet); ok {
+		spvWallet.StopFundsMixer() // ignore any error, just means mixer wasn't running
+	}
+
 	// Move funds from mixed and trading account to default account.
 	unspents, err := dcr.wallet.Unspents(dcr.ctx, mixedAccountName)
 	if err != nil {
@@ -215,10 +222,9 @@ func (dcr *NativeWallet) DisableFundsMixer() error {
 		}
 	}
 
-	if spvWallet, ok := dcr.wallet.(*spvWallet); ok {
-		spvWallet.StopFundsMixer() // ignore any error, just means mixer wasn't running
-	}
-
+	// Delete the cspp config file after moving funds, to prevent the mixer from
+	// starting when the wallet is restarted. If moving the funds above failed,
+	// this file will be left untouched and the mixer isn't really disabled yet.
 	if err := os.Remove(dcr.csppConfigFilePath); err != nil {
 		return fmt.Errorf("unable to delete cfg file: %v", err)
 	}

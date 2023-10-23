@@ -64,9 +64,9 @@ type AddressInfo struct {
 }
 
 type XCWalletAccounts struct {
-	PrimaryAccount string `ini:"account"`
-	UnmixedAccount string `ini:"unmixedaccount"`
-	TradingAccount string `ini:"tradingaccount"`
+	PrimaryAccount string
+	UnmixedAccount string
+	TradingAccount string
 }
 
 // Wallet defines methods that the ExchangeWallet uses for communicating with

@@ -40,11 +40,13 @@ type walletConfig struct {
 }
 
 type rpcConfig struct {
-	XCWalletAccounts        //  part of the rpc config options
-	RPCUser          string `ini:"username"`
-	RPCPass          string `ini:"password"`
-	RPCListen        string `ini:"rpclisten"`
-	RPCCert          string `ini:"rpccert"`
+	PrimaryAccount string `ini:"account"`
+	UnmixedAccount string `ini:"unmixedaccount"`
+	TradingAccount string `ini:"tradingaccount"`
+	RPCUser        string `ini:"username"`
+	RPCPass        string `ini:"password"`
+	RPCListen      string `ini:"rpclisten"`
+	RPCCert        string `ini:"rpccert"`
 }
 
 func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig, *chaincfg.Params, error) {
@@ -72,6 +74,10 @@ func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig,
 		cfg.RPCCert = defaultRPCCert
 	} else {
 		cfg.RPCCert = dex.CleanAndExpandPath(cfg.RPCCert)
+	}
+
+	if cfg.PrimaryAccount == "" {
+		cfg.PrimaryAccount = defaultAcctName
 	}
 
 	// Both UnmixedAccount and TradingAccount must be provided if primary
