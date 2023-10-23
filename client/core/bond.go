@@ -458,6 +458,10 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	return state
 }
 
+func (c *Core) exchangeAuth(dc *dexConnection) *ExchangeAuth {
+	return &c.bondStateOfDEX(dc, c.dexBondConfig(dc, time.Now().Unix())).ExchangeAuth
+}
+
 type bondID struct {
 	assetID uint32
 	coinID  []byte
@@ -908,7 +912,7 @@ func (c *Core) monitorBondConfs(dc *dexConnection, bond *asset.Bond, reqConfs ui
 		if confs < reqConfs {
 			details := fmt.Sprintf("Bond confirmations %v/%v", confs, reqConfs)
 			c.notify(newBondPostNoteWithConfirmations(TopicRegUpdate, string(TopicRegUpdate),
-				details, db.Data, assetID, coinIDStr, int32(confs), host))
+				details, db.Data, assetID, coinIDStr, int32(confs), host, c.exchangeAuth(dc)))
 		}
 
 		return confs >= reqConfs, nil
@@ -1015,8 +1019,14 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		}
 	}()
 
+	var success bool
 	dc.acct.authMtx.Lock()
-	defer dc.acct.authMtx.Unlock()
+	defer func() {
+		dc.acct.authMtx.Unlock()
+		if success {
+			c.notify(newBondAuthUpdate(dc.acct.host, c.exchangeAuth(dc)))
+		}
+	}()
 
 	if !dc.acct.isAuthed {
 		return errors.New("login or register first")
@@ -1025,7 +1035,6 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 	// Revert to initial values if we encounter any error below.
 	bondAssetID0 = dc.acct.bondAsset
 	targetTier0, maxBondedAmt0, penaltyComps0 = dc.acct.targetTier, dc.acct.maxBondedAmt, dc.acct.penaltyComps
-	var success bool
 	defer func() { // still under authMtx lock on defer stack
 		if !success {
 			dc.acct.bondAsset = bondAssetID0
@@ -1169,6 +1178,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		success = true
 	} // else we might have already done ReserveBondFunds...
 	return err
+
 }
 
 // BondsFeeBuffer suggests how much extra may be required for the transaction
@@ -1530,7 +1540,7 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	details := fmt.Sprintf("Waiting for %d confirmations to post bond %v (%s) to %s",
 		reqConfs, bondCoinStr, unbip(bond.AssetID), dc.acct.host) // TODO: subject, detail := c.formatDetails(...)
 	c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, string(TopicBondConfirming),
-		details, db.Success, bond.AssetID, bondCoinStr, 0, dc.acct.host))
+		details, db.Success, bond.AssetID, bondCoinStr, 0, dc.acct.host, c.exchangeAuth(dc)))
 	// Set up the coin waiter, which watches confirmations so the user knows
 	// when to expect their account to be marked paid by the server.
 	c.monitorBondConfs(dc, bond, reqConfs)
@@ -1591,7 +1601,8 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 		}
 		c.log.Infof("Bond %s (%s) confirmed.", bondIDStr, unbip(assetID))
 		details := fmt.Sprintf("New tier = %d (target = %d).", effectiveTier, targetTier) // TODO: format to subject,details
-		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, string(TopicBondConfirmed), details, db.Success, dc.acct.host, bondedTier))
+
+		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, string(TopicBondConfirmed), details, db.Success, dc.acct.host, bondedTier, c.exchangeAuth(dc)))
 	} else if !foundConfirmed {
 		c.log.Errorf("bondConfirmed: Bond %s (%s) not found", bondIDStr, unbip(assetID))
 		// just try to authenticate...
@@ -1617,7 +1628,7 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 
 	details := fmt.Sprintf("New tier = %d", effectiveTier) // TODO: format to subject,details
 	c.notify(newBondPostNoteWithTier(TopicAccountRegistered, string(TopicAccountRegistered),
-		details, db.Success, dc.acct.host, bondedTier)) // possibly redundant with SubjectBondConfirmed
+		details, db.Success, dc.acct.host, bondedTier, c.exchangeAuth(dc))) // possibly redundant with SubjectBondConfirmed
 
 	return nil
 }
@@ -1669,7 +1680,7 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, not
 	if int64(targetTier) > effectiveTier {
 		details := fmt.Sprintf("New tier = %d (target = %d).", effectiveTier, targetTier)
 		c.notify(newBondPostNoteWithTier(TopicBondExpired, string(TopicBondExpired),
-			details, db.WarningLevel, dc.acct.host, bondedTier))
+			details, db.WarningLevel, dc.acct.host, bondedTier, c.exchangeAuth(dc)))
 	}
 
 	return nil

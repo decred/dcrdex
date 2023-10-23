@@ -1,35 +1,59 @@
 {{define "dexsettings"}}
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="flex-center flex-column align-items-stretch py-5 mx-auto">
-  <div class="d-flex justify-content-start align-items-center pointer py-2">
-    <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 lh1"></span>
-  </div>
-  <div class="flex-center pb-2"><span class="settings-gear ico-settings"></span></div>
-  <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
-  <div class="flex-center fs16 mb-2">
-    <span class="me-2 connection ico-connection d-hide" id="connectedIcon"></span>
-    <span class="me-2 errcolor ico-disconnected d-hide" id="disconnectedIcon"></span>
-    <span id="connectionStatus"></span>
-  </div>
-  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="errMsg"></div>
-  <div class="settings">
-    <div{{if .Exchange.ViewOnly}} class="d-hide"{{end}}>
-      <button id="exportDexBtn" class="bg2 selected">[[[Export Account]]]</button>
+<div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="py-5 overflow-y-auto">
+  <div class="d-flex align-items-stretch flex-column mw-425 mx-auto">
+    <div class="flex-center"><span class="settings-gear ico-settings"></span></div>
+    <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
+    <div class="flex-center fs16 mb-2">
+      <span class="me-2 connection ico-connection d-hide" id="connectedIcon"></span>
+      <span class="me-2 errcolor ico-disconnected d-hide" id="disconnectedIcon"></span>
+      <span id="connectionStatus"></span>
     </div>
-    <div>
-      <button id="disableAcctBtn" class="bg2 selected">[[[Disable Account]]]</button>
+    <hr>
+    <div class="d-flex flex-column align-items-stretch">
+      <div class="d-flex align-items-stretch">
+        <div class="flex-center flex-grow-1 pe-3">
+          <div class="d-flex flex-column align-items-stretch w-100">
+            <div class="d-flex justify-content-between align-items-center">
+              <span>[[[target_tier]]] <span class="fs14 ico-info me-1" data-tooltip="[[[target_tier_tooltip]]]"></span></span>
+              <span id="targetTier"></span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center">
+              <span>[[[Actual Tier]]] <span class="fs14 ico-info me-1" data-tooltip="[[[current_tier_tooltip]]]"></span></span>
+              <span id="effectiveTier"></span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center">
+              <span>[[[Penalties]]]</span>
+              <span id="penalties"></span>
+            </div>
+          </div>
+        </div>
+        <div class="flex-center p-4 brdrleft">
+          <button id="changeTier" class="p-2 fs15 hoverbg pointer">[[[Change Tier]]]</button>
+        </div>
+      </div>
+      <hr class="mb-1">
+      <div id="repMeter">
+        {{template "reputationMeter"}}
+      </div>
     </div>
-    <div {{if .Exchange.ViewOnly}} class="d-hide"{{end}}>
-      <button id="bondDetailsBtn" class="bg2 selected">[[[bond_details]]]</button>
-    </div>
-    <div>
-      <input type="file" class="form-control select d-none" id="certFileInput">
-      <button id="updateCertBtn" class="bg2 selected">[[[Update TLS Certificate]]]</button>
-      <span class="update-cert-msg mx-2 d-hide" id="updateCertMsg">[[[successful_cert_update]]]</span>
-    </div>
-    <div>
-      <button id="updateHostBtn" class="bg2 selected">[[[update dex host]]]</button>
+    <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="errMsg"></div>
+    <div class="settings">
+      <div{{if .Exchange.ViewOnly}} class="d-hide"{{end}}>
+        <button id="exportDexBtn" class="bg2 selected">[[[Export Account]]]</button>
+      </div>
+      <div>
+        <button id="disableAcctBtn" class="bg2 selected">[[[Disable Account]]]</button>
+      </div>
+      <div>
+        <input type="file" class="form-control select d-none" id="certFileInput">
+        <button id="updateCertBtn" class="bg2 selected">[[[Update TLS Certificate]]]</button>
+        <span class="update-cert-msg mx-2 d-hide" id="updateCertMsg">[[[successful_cert_update]]]</span>
+      </div>
+      <div>
+        <button id="updateHostBtn" class="bg2 selected">[[[update dex host]]]</button>
+      </div>
     </div>
   </div>
 
@@ -49,64 +73,37 @@
       {{template "dexAddrForm" .}}
     </form>
 
-    {{- /* BOND DETAILS */ -}}
-    <form class="d-hide" id="bondDetailsForm" autocomplete="off">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="py-1 fs28 text-center sans-light">[[[bond_details]]]</div>
-      <div class="d-flex justify-content-around my-3">
-        <span class="text-center">
-          [[[current_tier]]]
-          <span class="ico-info" data-tooltip="[[[current_tier_tooltip]]]"></span>
-          <br>
-          <span id="currentTier"></span>
-        </span>
-        <span class="text-center">
-          [[[current_target_tier]]]
-          <span class="ico-info" data-tooltip="[[[current_target_tier_tooltip]]]"></span>
-          <br>
-          <span id="currentTargetTier"></span>
-        </span>
+    {{- /* SUCCESS ANIMATION */ -}}
+    <form id="checkmarkForm" class="flex-center flex-column">
+      <div id="checkmarkBox" class="flex-center">
+        <span class="ico-check" id="checkmark"></span>
       </div>
-      <div class="d-flex justify-content-around my-3">
-        <span class="text-center">
-          [[[bond_cost]]]
-          <span class="ico-info" data-tooltip="[[[bond_cost_tooltip]]]"></span>
-          <br>
-          <span id="bondCost"></span>
-          <span class="bondAssetSym mx-2"></span>
-          <br>
-          <span class="d-flex d-hide justify-content-center grey fs14">
-            ~<span id="bondCostFiat" class="mx-1"></span>USD
-          </span>
-        </span>
-        <span class="text-center justify-content-center">
-          [[[bond_reservations]]]
-          <span class="ico-info" data-tooltip="[[[bond_reservations_tooltip]]]"></span>
-          <br>
-          <span id="bondReservationAmt"></span>
-          <span class="bondAssetSym mx-2"></span>
-          <br>
-          <span class="d-flex d-hide justify-content-center grey fs14">
-            ~<span id="bondReservationAmtFiat" class="mx-1"></span>USD
-          </span>
-      </div>
-      <div class="fs18 mt-2">[[[bond_options]]]:</div>
-      <div class="selectBondAsset py-1">
-       <label for="bondAssetSelect" class="form-label">[[[Asset]]]</label>
-       <select id="bondAssetSelect" class="w-100"></select>
-      </div>
-      <div class="mt-3">
-        <label for="bondTargetTier" class="form-label">
-          [[[target_tier]]]
-          <span class="ico-info fs12" data-tooltip="[[[target_tier_tooltip]]]"></span>
-        </label>
-        <input type="number" min="0" class="form-control select bg1" id="bondTargetTier" autocomplete="off">
-      </div>
-      <div class="d-flex justify-content-end mt-3">
-        <button id="updateBondOptionsConfirm" class="submit bg2 fs18 selected">[[[update_bond_options]]]</button>
-      </div>
-      <div id="bondOptionsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></div>
-      <div id="bondOptionsMsg" class="fs15 pt-3 text-center d-hide text-break">[[[bond_options_update_success]]]</div>
+      <div id="successMessage" class="fs22"></div>
+    </form>
+
+    {{- /* REG ASSET SELECTOR */ -}}
+    <form class="d-hide mw-425" id="regAssetForm">
+      {{template "regAssetForm"}}
+    </form>
+
+    {{- /* CONFIRM POST BOND */ -}}
+    <form class="d-hide mw-425" id="confirmRegForm">
+      {{template "confirmRegistrationForm"}}
+    </form>
+
+    {{- /* SYNC AND BALANCE FORM */ -}}
+    <form class="d-hide" id="walletWait">
+      {{template "waitingForWalletForm"}}
+    </form>
+
+    {{- /* Form to set up a wallet. Shown on demand when a user clicks a setupWallet button. */ -}}
+    <form class="d-hide" id="newWalletForm">
+      {{template "newWalletForm" }}
+    </form>
+
+    {{- /* UNLOCK WALLET */ -}}
+    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
+      {{template "unlockWalletForm"}}
     </form>
 
   </div>

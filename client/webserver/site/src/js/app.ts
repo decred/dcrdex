@@ -22,6 +22,7 @@ import {
   Exchange,
   WalletState,
   BondNote,
+  ReputationNote,
   CoreNote,
   OrderNote,
   Market,
@@ -528,6 +529,7 @@ export default class Application {
    * is used to update the dex tier and registration status.
    */
   handleBondNote (note: BondNote) {
+    if (note.auth) this.exchanges[note.dex].auth = note.auth
     switch (note.topic) {
       case 'RegUpdate':
         if (note.coinID !== null) { // should never be null for RegUpdate
@@ -622,6 +624,11 @@ export default class Application {
       case 'bondpost':
         this.handleBondNote(note as BondNote)
         break
+      case 'reputation': {
+        const n = note as ReputationNote
+        this.exchanges[n.host].auth.rep = n.rep
+        break
+      }
       case 'walletstate':
       case 'walletconfig': {
         // assets can be null if failed to connect to dex server.

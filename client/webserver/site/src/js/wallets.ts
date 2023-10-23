@@ -7,7 +7,8 @@ import {
   UnlockWalletForm,
   DepositAddress,
   bind as bindForm,
-  baseChainSymbol
+  baseChainSymbol,
+  showSuccess
 } from './forms'
 import State from './state'
 import * as intl from './locales'
@@ -751,25 +752,12 @@ export default class WalletsPage extends BasePage {
   }
 
   async showSuccess (msg: string) {
-    const page = this.page
-    page.successMessage.textContent = msg
-    this.currentForm = page.checkmarkForm
     this.forms.forEach(form => Doc.hide(form))
-    Doc.show(page.forms, page.checkmarkForm)
-    page.checkmarkForm.style.right = '0'
-    page.checkmark.style.fontSize = '0px'
-
-    const [startR, startG, startB] = State.isDark() ? [223, 226, 225] : [51, 51, 51]
-    const [endR, endG, endB] = [16, 163, 16]
-    const [diffR, diffG, diffB] = [endR - startR, endG - startG, endB - startB]
-
-    this.animation = new Animation(1200, (prog: number) => {
-      page.checkmark.style.fontSize = `${prog * 80}px`
-      page.checkmark.style.color = `rgb(${startR + prog * diffR}, ${startG + prog * diffG}, ${startB + prog * diffB})`
-    }, 'easeOutElastic', () => {
-      this.animation = new Animation(1500, () => { /* pass */ }, '', () => {
-        if (this.currentForm === page.checkmarkForm) this.closePopups()
-      })
+    this.currentForm = this.page.checkmarkForm
+    this.animation = showSuccess(this.page, msg)
+    await this.animation.wait()
+    this.animation = new Animation(1500, () => { /* pass */ }, '', () => {
+      if (this.currentForm === this.page.checkmarkForm) this.closePopups()
     })
   }
 

@@ -169,7 +169,6 @@ var PtBr = map[string]string{
 	"All markets at":             "Todos mercados",
 	"pick a different asset":     "Escolher ativo diferente",
 	"Create":                     "Criar",
-	"Register_loudly":            "Registre!",
 	"1 Sync the Blockchain":      "1: Sincronizar a Blockchain",
 	"Progress":                   "Progresso",
 	"remaining":                  "Faltando",

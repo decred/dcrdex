@@ -178,7 +178,6 @@ var Ar = map[string]string{
 	"All markets at":              "جميع الأسواق في",
 	"pick a different asset":      "اختر أصلًا مختلفًا",
 	"Create":                      "انشاء",
-	"Register_loudly":             "التسجيل!",
 	"1 Sync the Blockchain":       "1: مزامنة سلسلة الكتل",
 	"Progress":                    "قيد التنفيذ",
 	"remaining":                   "الوقت المتبقي",

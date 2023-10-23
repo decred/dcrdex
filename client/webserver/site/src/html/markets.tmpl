@@ -378,6 +378,15 @@
                   <div class="text-end">
                     <button id="submitBttn" type="button" class="my-1 fs14 submit text-center buygreen-bg" disabled></button> {{/* textContent set by script */}}
                   </div>
+
+                  {{- /* ORDER LIMITS */ -}}
+                  <div id="orderLimitBox" class="mt-2 p-2 brdr">
+                    <span id="orderFormParcels">0</span> parcels
+                    of the <span id="orderParcelsRemain">0</span> unused parcels in your
+                    tier <span id="orderTradingTier">0</span> trading limit
+                  </div>
+
+
                 </div>
                 <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="orderErr"></div>
               </form>
@@ -412,6 +421,55 @@
                     <div data-tmpl="bal" class="flex-center"></div>
                   </div>
                 </div>
+              </div>
+
+              {{- /* REPUTATION */ -}}
+              <div class="d-flex align-items-stretch fs15 mx-2 brdr">
+                <div class="d-flex flex-column flex-grow-1 align-items-stretch px-2">
+
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span>Parcel Size</span>
+                    <span>
+                      <span id="parcelSizeLots"></span> <span>lots</span>
+                    </span>
+                  </div>
+
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span><!-- Base --></span>
+                    <span>
+                      <span id="marketLimitBase"></span> <span id="marketLimitBaseUnit"></span>
+                    </span>
+                  </div>
+
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span><!-- Market Limit Quote --></span>
+                    <span>
+                      ~<span id="marketLimitQuote"></span> <span id="marketLimitQuoteUnit"></span>
+                    </span>
+                  </div>
+
+                </div>
+                <div class="d-flex flex-column flex-grow-1 align-items-stretch px-2 brdrleft">
+
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span>Trading Tier</span>
+                    <span id="tradingTier"></span>
+                  </div>
+
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span>Trading Limit</span>
+                    <span><span id="tradingLimit"></span> parcels</span>
+                  </div>
+
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span>Current usage</span>
+                    <span><span id="limitUsage"></span>%</span>
+                  </div>
+                  
+                </div>
+              </div>
+              <div id="reputationMeter" class="px-2 mt-2">
+                {{template "reputationMeter"}}
               </div>
 
               {{- /* USER ORDERS */ -}}

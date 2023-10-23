@@ -250,6 +250,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 					Base:            tUTXOAssetA.ID,
 					Quote:           tUTXOAssetB.ID,
 					LotSize:         dcrBtcLotSize,
+					ParcelSize:      100,
 					RateStep:        dcrBtcRateStep,
 					EpochLen:        60000,
 					MarketBuyBuffer: 1.1,
@@ -10775,7 +10776,7 @@ func TestRotateBonds(t *testing.T) {
 	// if the locktime is not too soon.
 	acct.bonds = append(acct.bonds, acct.pendingBonds[0])
 	acct.pendingBonds = nil
-	acct.bonds[0].LockTime = mergeableLocktimeThresh + 1
+	acct.bonds[0].LockTime = mergeableLocktimeThresh + 5
 	rig.queuePrevalidateBond()
 	run(1, 0, 2*bondAsset.Amt+bondFeeBuffer)
 	mergingBond := acct.pendingBonds[0]

@@ -56,6 +56,8 @@ export interface Exchange {
   viewOnly: boolean
   bondAssets: Record<string, BondAsset>
   candleDurs: string[]
+  maxScore: number
+  penaltyThreshold: number
 }
 
 export interface Candle {
@@ -82,6 +84,7 @@ export interface Market {
   quoteid: number
   quotesymbol: string
   lotsize: number
+  parcelsize: number
   ratestep: number
   epochlen: number
   startepoch: number
@@ -353,6 +356,12 @@ export interface BondNote extends CoreNote {
   dex: string
   coinID: string | null
   tier: number | null
+  auth: ExchangeAuth | null
+}
+
+export interface ReputationNote extends CoreNote {
+  host: string
+  rep: Reputation
 }
 
 export interface BalanceNote extends CoreNote {

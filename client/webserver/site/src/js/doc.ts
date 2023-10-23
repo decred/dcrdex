@@ -59,11 +59,6 @@ const fourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
   maximumSignificantDigits: 4
 })
 
-const oneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[]), {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1
-})
-
 /* A cache for formatters used for Doc.formatCoinValue. */
 const decimalFormatters: Record<number, Intl.NumberFormat> = {}
 
@@ -302,7 +297,7 @@ export default class Doc {
   }
 
   static formatFourSigFigs (n: number): string {
-    return formatSigFigsWithFormatters(oneFractionalDigit, fourSigFigs, n)
+    return formatSigFigsWithFormatters(intFormatter, fourSigFigs, n)
   }
 
   /*

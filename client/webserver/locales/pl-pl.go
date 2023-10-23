@@ -168,7 +168,6 @@ var PlPL = map[string]string{
 	"All markets at":             "Wszystkie rynki na",
 	"pick a different asset":     "wybierz inne aktywo",
 	"Create":                     "Utwórz",
-	"Register_loudly":            "Zarejestruj!",
 	"1 Sync the Blockchain":      "1: Zsynchronizuj blockchain",
 	"Progress":                   "Postęp",
 	"remaining":                  "pozostało",

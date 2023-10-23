@@ -1,18 +1,5 @@
 #regAssetForm {
-  #whatsabond {
-    max-width: 425px;
-  }
-
-  div.reg-asset-allmkts {
-    min-width: 210px;
-    max-width: 320px;
-  }
-
   div.reg-asset {
-    min-width: 425px;
-    padding: 20px 10px;
-    border-bottom: dashed 2px #7777;
-
     .fader {
       position: absolute;
       bottom: 0;
@@ -44,11 +31,6 @@
     }
   }
 
-  img.reg-asset-logo {
-    width: 50px;
-    height: 50px;
-  }
-
   img.reg-market-logo {
     width: 14px;
     height: 14px;
@@ -59,7 +41,7 @@
     @extend .stylish-overflow;
 
     display: block;
-    max-height: 65px;
+    max-height: 120px;
     line-height: 1.15;
     overflow-y: hidden;
     margin-right: 8px;
@@ -83,13 +65,6 @@
     }
   }
 
-  div.reg-asset-details {
-    box-sizing: content-box;
-    line-height: 1.25;
-    width: 100px;
-    padding: 0 50px 0 25px;
-  }
-
   div.reg-assets-markets-wrap {
     position: relative;
 
@@ -100,6 +75,25 @@
 
   #regAssets {
     color: #c7c3cc;
+  }
+
+  .reg-asset-table {
+    thead > tr > th {
+      border-top: 1px solid;
+    }
+
+    th,
+    td {
+      border-color: $light_border_color;
+      border-width: 1px;
+      border-style: none solid solid;
+      padding: 5px;
+      text-align: left;
+    }
+  }
+
+  input[data-tmpl=regAssetTier] {
+    width: 3em;
   }
 
   .readygreen {
@@ -125,11 +119,6 @@
     }
   }
 
-  img.logo {
-    width: 30px;
-    height: 30px;
-  }
-
   input.app-pass {
     // margin: 0 auto;
     display: inline-block;
@@ -142,6 +131,10 @@
 
   div.borderright {
     border-right: 1px solid #777;
+  }
+
+  .mw50 {
+    max-width: 50%;
   }
 }
 
@@ -275,11 +268,6 @@ div[data-handler=register] {
     width: 25px;
   }
 
-  .borderleft {
-    padding-left: 25px;
-    border-left: solid 1px #777;
-  }
-
   .logo {
     width: 40px;
     height: 40px;
@@ -339,8 +327,7 @@ div[data-handler=register] {
 #vSendForm,
 #exportSeedAuth,
 #cancelForm,
-#quickConfigForm,
-#bondDetailsForm {
+#quickConfigForm {
   width: 375px;
 }
 
@@ -420,6 +407,48 @@ a[data-tmpl=walletCfgGuide] {
       background-color: #2cce9c;
     }
   }
+}
+
+div[data-tmpl=scoreTray] {
+  background-color: $buycolor_dark;
+  height: 12px;
+  border-radius: 100px;
+  overflow: hidden;
+
+  div[data-tmpl=scoreWarn] {
+    background-color: $sellcolor_dark;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+  }
+}
+
+span[data-tmpl=scorePointer] {
+  transform: translateX(-50%);
+
+  div[data-tmpl=scoreData] {
+    top: 0;
+    bottom: 0;
+
+    &.positive {
+      right: 150%;
+    }
+
+    &.negative {
+      left: 150%;
+    }
+  }
+}
+
+.penalty-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 10%;
+  width: 2px;
+  z-index: 2;
+  background-color: black;
 }
 
 div[data-handler=init] {

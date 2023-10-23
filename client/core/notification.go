@@ -265,14 +265,19 @@ func newBondRefundNote(topic Topic, subject, details string, severity db.Severit
 	}
 }
 
+const (
+	TopicBondAuthUpdate Topic = "BondAuthUpdate"
+)
+
 // BondPostNote is a notification regarding bond posting.
 type BondPostNote struct {
 	db.Notification
-	Asset         *uint32 `json:"asset,omitempty"`
-	Confirmations *int32  `json:"confirmations,omitempty"`
-	BondedTier    *int64  `json:"bondedTier,omitempty"`
-	CoinID        *string `json:"coinID,omitempty"`
-	Dex           string  `json:"dex,omitempty"`
+	Asset         *uint32       `json:"asset,omitempty"`
+	Confirmations *int32        `json:"confirmations,omitempty"`
+	BondedTier    *int64        `json:"bondedTier,omitempty"`
+	CoinID        *string       `json:"coinID,omitempty"`
+	Dex           string        `json:"dex,omitempty"`
+	Auth          *ExchangeAuth `json:"auth,omitempty"`
 }
 
 func newBondPostNote(topic Topic, subject, details string, severity db.Severity, dexAddr string) *BondPostNote {
@@ -283,18 +288,37 @@ func newBondPostNote(topic Topic, subject, details string, severity db.Severity,
 	}
 }
 
-func newBondPostNoteWithConfirmations(topic Topic, subject, details string, severity db.Severity, asset uint32, coinID string, currConfs int32, dexAddr string) *BondPostNote {
-	bondPmtNt := newBondPostNote(topic, subject, details, severity, dexAddr)
+func newBondPostNoteWithConfirmations(
+	topic Topic,
+	subject string,
+	details string,
+	severity db.Severity,
+	asset uint32,
+	coinID string,
+	currConfs int32,
+	host string,
+	auth *ExchangeAuth,
+) *BondPostNote {
+
+	bondPmtNt := newBondPostNote(topic, subject, details, severity, host)
 	bondPmtNt.Asset = &asset
 	bondPmtNt.CoinID = &coinID
 	bondPmtNt.Confirmations = &currConfs
+	bondPmtNt.Auth = auth
 	return bondPmtNt
 }
 
-func newBondPostNoteWithTier(topic Topic, subject, details string, severity db.Severity, dexAddr string, bondedTier int64) *BondPostNote {
+func newBondPostNoteWithTier(topic Topic, subject, details string, severity db.Severity, dexAddr string, bondedTier int64, auth *ExchangeAuth) *BondPostNote {
 	bondPmtNt := newBondPostNote(topic, subject, details, severity, dexAddr)
 	bondPmtNt.BondedTier = &bondedTier
+	bondPmtNt.Auth = auth
 	return bondPmtNt
+}
+
+func newBondAuthUpdate(host string, auth *ExchangeAuth) *BondPostNote {
+	n := newBondPostNote(TopicBondAuthUpdate, "", "", db.Data, host)
+	n.Auth = auth
+	return n
 }
 
 // SendNote is a notification regarding a requested send or withdraw.
@@ -673,8 +697,8 @@ func newWalletNote(n asset.WalletNotification) *WalletNote {
 
 type ReputationNote struct {
 	db.Notification
-	Host       string
-	Reputation account.Reputation
+	Host       string             `json:"host"`
+	Reputation account.Reputation `json:"rep"`
 }
 
 const TopicReputationUpdate = "ReputationUpdate"

@@ -1,9 +1,15 @@
-import Doc from './doc'
+import Doc, { Animation } from './doc'
 import { postJSON } from './http'
 import State from './state'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
 import { Wave } from './charts'
+import {
+  bondReserveMultiplier,
+  perTierBaseParcelLimit,
+  parcelLimitScoreMultiplier,
+  strongTier
+} from './account'
 import {
   app,
   PasswordCache,
@@ -753,6 +759,8 @@ export class ConfirmRegistrationForm {
   xc: Exchange
   certFile: string
   bondAssetID: number
+  tier: number
+  fees: number
   pwCache: PasswordCache
 
   constructor (form: HTMLElement, success: () => void, goBack: () => void, pwCache: PasswordCache) {
@@ -763,17 +771,6 @@ export class ConfirmRegistrationForm {
     this.pwCache = pwCache
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
-    // bondStrengthField is presently hidden since there is no scaling of user
-    // limits yet, and there needs to be considerable explanation of why
-    // anything other than 1 would be used. Unhide bondStrengthInput to show it
-    // when we are ready. (TODO)
-    Doc.bind(this.page.bondStrengthField, 'input', () => {
-      const asset = app().assets[this.bondAssetID]
-      if (!asset) return
-      const ui = asset.unitInfo
-      const bondAsset = this.xc.bondAssets[asset.symbol]
-      this.page.bondAmt.textContent = Doc.formatCoinValue(this.totalBondAmount(bondAsset.amount), ui)
-    })
     bind(form, this.page.submit, () => this.submitForm())
   }
 
@@ -786,20 +783,33 @@ export class ConfirmRegistrationForm {
     page.host.textContent = xc.host
   }
 
-  setAsset (assetID: number) {
+  setAsset (assetID: number, tier: number, fees: number) {
     const asset = app().assets[assetID]
-    const ui = asset.unitInfo
+    const { conversionFactor, unit } = asset.unitInfo.conventional
     this.bondAssetID = asset.id
+    this.tier = tier
+    this.fees = fees
     const page = this.page
-    const bondAsset = this.xc.bondAssets[asset.symbol]
-    page.bondAmt.textContent = Doc.formatCoinValue(this.totalBondAmount(bondAsset.amount), ui)
-    page.bondUnit.textContent = ui.conventional.unit.toUpperCase()
+    const xc = this.xc
+    const bondAsset = xc.bondAssets[asset.symbol]
+    const bondLock = bondAsset.amount * tier * bondReserveMultiplier
+    const bondLockConventional = bondLock / conversionFactor
+    page.tradingTier.textContent = String(tier)
     page.logo.src = Doc.logoPath(asset.symbol)
+    page.bondLock.textContent = Doc.formatFourSigFigs(bondLockConventional)
+    page.bondUnit.textContent = unit
+    const r = app().fiatRatesMap[assetID]
+    Doc.show(page.bondLockUSDBox)
+    if (r) page.bondLockUSD.textContent = Doc.formatFourSigFigs(bondLockConventional * r)
+    else Doc.hide(page.bondLockUSDBox)
+    if (fees) page.feeReserves.textContent = Doc.formatFourSigFigs(fees / conversionFactor)
+    page.reservesUnit.textContent = unit
   }
 
-  totalBondAmount (singleBondAmount: number): number {
-    const bondStrength = +(this.page.bondStrengthField.value ?? 1)
-    return bondStrength * singleBondAmount
+  setFees (assetID: number, fees: number) {
+    this.fees = fees
+    const conversionFactor = app().assets[assetID].unitInfo.conventional.conversionFactor
+    this.page.feeReserves.textContent = Doc.formatFourSigFigs(fees / conversionFactor)
   }
 
   /* Form expands into its space quickly from the lower-right as it fades in. */
@@ -830,20 +840,34 @@ export class ConfirmRegistrationForm {
       return
     }
     Doc.hide(page.regErr)
-    const bondAsset = this.xc.bondAssets[asset.wallet.symbol]
+    const xc = this.xc
+    const bondAsset = xc.bondAssets[asset.wallet.symbol]
     const cert = await this.certFile
-    const dexAddr = this.xc.host
+    const dexAddr = xc.host
     const pw = page.appPass.value || (this.pwCache ? this.pwCache.pw : '')
-    const postBondForm = {
-      addr: dexAddr,
-      cert: cert,
-      pass: pw,
-      bond: this.totalBondAmount(bondAsset.amount),
-      asset: bondAsset.id
+    let form: any
+    let url: string
+
+    if (xc.viewOnly || !app().exchanges[xc.host]) {
+      form = {
+        addr: dexAddr,
+        cert: cert,
+        pass: pw,
+        bond: bondAsset.amount * this.tier,
+        asset: bondAsset.id
+      }
+      url = '/api/postbond'
+    } else {
+      form = {
+        host: dexAddr,
+        targetTier: this.tier,
+        bondAssetID: this.bondAssetID
+      }
+      url = '/api/updatebondoptions'
     }
     page.appPass.value = ''
     const loaded = app().loading(this.form)
-    const res = await postJSON('/api/postbond', postBondForm)
+    const res = await postJSON(url, form)
     loaded()
     if (!app().checkResponse(res)) {
       page.regErr.textContent = res.msg
@@ -854,21 +878,54 @@ export class ConfirmRegistrationForm {
   }
 }
 
+interface RegAssetTemplate {
+  tmpl: Record<string, PageElement>
+  asset: SupportedAsset
+  setTier: ((tier: number) => void)
+}
+
 /*
  * FeeAssetSelectionForm should be used with the "regAssetForm" template.
  */
 export class FeeAssetSelectionForm {
   form: HTMLElement
-  success: (assetID: number) => void
+  success: (assetID: number, tier: number) => Promise<void>
   xc: Exchange
   page: Record<string, PageElement>
-  assetTmpls: Record<number, Record<string, PageElement>>
+  assetTmpls: Record<string, RegAssetTemplate>
 
-  constructor (form: HTMLElement, success: (assetID: number) => Promise<void>) {
+  constructor (form: HTMLElement, success: (assetID: number, tier: number) => Promise<void>) {
     this.form = form
     this.success = success
-    this.page = Doc.parseTemplate(form)
-    Doc.cleanTemplates(this.page.marketTmpl, this.page.assetTmpl)
+    const page = this.page = Doc.parseTemplate(form)
+    Doc.cleanTemplates(page.assetTmpl, page.marketTmpl)
+
+    Doc.bind(page.regAssetTier, 'input', () => {
+      this.clearError()
+      const raw = page.regAssetTier.value ?? ''
+      const tier = parseInt(raw)
+      if (isNaN(tier)) {
+        if (raw) this.setError(intl.prep(intl.ID_INVALID_TIER_VALUE))
+        return
+      }
+      for (const a of Object.values(this.assetTmpls)) a.setTier(tier)
+    })
+
+    Doc.bind(page.regAssetTier, 'keyup', (e: KeyboardEvent) => {
+      if (!(e.key === 'Enter')) return
+      const { auth: { targetTier, bondAssetID }, viewOnly } = this.xc
+      if (viewOnly || targetTier === 0) { // They need to select an asset.
+        Doc.hide(page.assetSelected) // Probably already showing, but do it anyway.
+        Doc.show(page.assetSelection)
+        return
+      }
+      this.submit(bondAssetID)
+    })
+
+    Doc.bind(page.chooseDifferentAsset, 'click', () => {
+      Doc.hide(page.assetSelected)
+      Doc.show(page.assetSelection)
+    })
 
     app().registerNoteFeeder({
       createwallet: (note: WalletCreationNote) => {
@@ -877,11 +934,21 @@ export class FeeAssetSelectionForm {
     })
   }
 
+  setError (errMsg: string) {
+    this.page.regAssetErr.textContent = errMsg
+    Doc.show(this.page.regAssetErr)
+  }
+
+  clearError () {
+    Doc.hide(this.page.regAssetErr)
+  }
+
   setExchange (xc: Exchange) {
     this.xc = xc
     this.assetTmpls = {}
     const page = this.page
-    Doc.empty(page.assets, page.allMarkets)
+    Doc.empty(page.assets, page.otherAssets, page.allMarkets)
+    this.clearError()
 
     const cFactor = (ui: UnitInfo) => ui.conventional.conversionFactor
 
@@ -889,10 +956,10 @@ export class FeeAssetSelectionForm {
       const n = page.marketTmpl.cloneNode(true) as HTMLElement
       const marketTmpl = Doc.parseTemplate(n)
 
-      const baseAsset = app().assets[mkt.baseid]
-      const quoteAsset = app().assets[mkt.quoteid]
+      const { symbol: baseSymbol, unitInfo: bui } = xc.assets[mkt.baseid]
+      const { symbol: quoteSymbol, unitInfo: qui } = xc.assets[mkt.quoteid]
 
-      if (cFactor(baseAsset.unitInfo) === 0 || cFactor(quoteAsset.unitInfo) === 0) return null
+      if (cFactor(bui) === 0 || cFactor(qui) === 0) return null
 
       if (typeof excludeIcon !== 'undefined') {
         const excludeBase = excludeIcon === mkt.baseid
@@ -900,55 +967,131 @@ export class FeeAssetSelectionForm {
         marketTmpl.logo.src = Doc.logoPath(otherSymbol)
       } else {
         const otherLogo = marketTmpl.logo.cloneNode(true) as PageElement
-        marketTmpl.logo.src = Doc.logoPath(baseAsset.symbol)
-        otherLogo.src = Doc.logoPath(quoteAsset.symbol)
+        marketTmpl.logo.src = Doc.logoPath(baseSymbol)
+        otherLogo.src = Doc.logoPath(quoteSymbol)
         const parent = marketTmpl.logo.parentNode
         if (parent) parent.insertBefore(otherLogo, marketTmpl.logo.nextSibling)
       }
 
-      marketTmpl.baseName.replaceWith(Doc.symbolize(baseAsset))
-      marketTmpl.quoteName.replaceWith(Doc.symbolize(quoteAsset))
+      marketTmpl.baseName.textContent = bui.conventional.unit
+      marketTmpl.quoteName.textContent = qui.conventional.unit
 
-      marketTmpl.lotSize.textContent = Doc.formatCoinValue(mkt.lotsize, baseAsset.unitInfo)
-      marketTmpl.lotSizeSymbol.replaceWith(Doc.symbolize(baseAsset))
+      marketTmpl.lotSize.textContent = Doc.formatCoinValue(mkt.lotsize, bui)
+      marketTmpl.lotSizeSymbol.replaceWith(bui.conventional.unit)
 
       if (mkt.spot) {
         Doc.show(marketTmpl.quoteLotSize)
-        const r = cFactor(quoteAsset.unitInfo) / cFactor(baseAsset.unitInfo)
+        const r = cFactor(qui) / cFactor(bui)
         const quoteLot = mkt.lotsize * mkt.spot.rate / OrderUtil.RateEncodingFactor * r
-        const s = Doc.formatCoinValue(quoteLot, quoteAsset.unitInfo)
-        marketTmpl.quoteLotSize.textContent = `(~${s} ${quoteAsset.symbol})`
+        const s = Doc.formatCoinValue(quoteLot, qui)
+        marketTmpl.quoteLotSize.textContent = `(~${s} ${qui})`
       }
       return n
     }
 
-    for (const [symbol, bondAsset] of Object.entries(xc.bondAssets)) {
-      const asset = app().assets[bondAsset.id]
-      if (!asset) continue
+    const addAssetRow = (table: PageElement, assetID: number, bondAsset?: BondAsset) => {
+      const asset = app().assets[assetID]
+      if (!asset) return
       const unitInfo = asset.unitInfo
-      const assetNode = page.assetTmpl.cloneNode(true) as HTMLElement
-      Doc.bind(assetNode, 'click', () => { this.success(bondAsset.id) })
-      const assetTmpl = this.assetTmpls[bondAsset.id] = Doc.parseTemplate(assetNode)
-      page.assets.appendChild(assetNode)
-      assetTmpl.logo.src = Doc.logoPath(symbol)
-      const fee = Doc.formatCoinValue(bondAsset.amount, unitInfo)
-      assetTmpl.feeAmt.textContent = String(fee)
-      assetTmpl.feeSymbol.replaceWith(Doc.symbolize(asset))
-      assetTmpl.confs.textContent = String(bondAsset.confs)
-      setReadyMessage(assetTmpl.ready, asset)
+      const tr = page.assetTmpl.cloneNode(true) as HTMLElement
+      table.appendChild(tr)
+      const tmpl = Doc.parseTemplate(tr)
 
-      let count = 0
-      for (const mkt of Object.values(xc.markets)) {
-        if (mkt.baseid !== bondAsset.id && mkt.quoteid !== bondAsset.id) continue
-        const node = marketNode(mkt, bondAsset.id)
-        if (!node) continue
-        count++
-        assetTmpl.markets.appendChild(node)
+      tmpl.logo.src = Doc.logoPath(asset.symbol)
+
+      tmpl.tradeLimitSymbol.textContent = unitInfo.conventional.unit
+      tmpl.name.textContent = asset.name
+      // assetTmpl.confs.textContent = String(bondAsset.confs)
+      const setTier = (tier: number) => {
+        let low = 0
+        let high = 0
+        const cFactor = app().unitInfo(asset.id, xc).conventional.conversionFactor
+        for (const { baseid: baseID, quoteid: quoteID, parcelsize: parcelSize, lotsize: lotSize, spot } of Object.values(xc.markets)) {
+          const conventionalLotSize = lotSize / cFactor
+          let resolvedLotSize = 0
+          if (baseID === asset.id) {
+            resolvedLotSize = conventionalLotSize
+          } else if (quoteID === asset.id) {
+            const baseRate = app().fiatRatesMap[baseID]
+            const quoteRate = app().fiatRatesMap[quoteID]
+            if (baseRate && quoteRate) {
+              resolvedLotSize = conventionalLotSize * baseRate / quoteRate
+            } else if (spot) {
+              const bui = xc.assets[baseID].unitInfo
+              const qui = xc.assets[quoteID].unitInfo
+              const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
+              const conventionalRate = spot.rate / rateConversionFactor
+              resolvedLotSize = conventionalLotSize * conventionalRate
+            }
+          }
+          if (resolvedLotSize) {
+            const startingLimit = resolvedLotSize * parcelSize * perTierBaseParcelLimit * tier
+            const privilegedLimit = resolvedLotSize * parcelSize * perTierBaseParcelLimit * parcelLimitScoreMultiplier * tier
+            if (low === 0 || startingLimit < low) low = startingLimit
+            if (privilegedLimit > high) high = privilegedLimit
+          }
+        }
+
+        const r = app().fiatRatesMap[assetID]
+
+        if (low && high) {
+          tmpl.tradeLimitLow.textContent = Doc.formatFourSigFigs(low)
+          tmpl.tradeLimitHigh.textContent = Doc.formatFourSigFigs(high)
+          if (r) {
+            tmpl.fiatTradeLimitLow.textContent = Doc.formatFourSigFigs(low * r)
+            tmpl.fiatTradeLimitHigh.textContent = Doc.formatFourSigFigs(high * r)
+          }
+        }
+
+        if (!bondAsset) {
+          Doc.hide(tmpl.bondData, tmpl.ready)
+          tr.classList.remove('hoverbg', 'pointer')
+          return
+        }
+        setReadyMessage(tmpl.ready, asset)
+        const bondLock = bondAsset.amount * bondReserveMultiplier * tier
+        const fee = Doc.formatCoinValue(bondLock, unitInfo)
+        tmpl.feeAmt.textContent = String(fee)
+        if (r) tmpl.fiatBondAmount.textContent = Doc.formatFiatConversion(bondLock, r, asset.unitInfo)
       }
-      if (count < 3) Doc.hide(assetTmpl.fader)
+
+      if (bondAsset) {
+        Doc.bind(tr, 'click', () => { this.submit(assetID) })
+        tmpl.feeSymbol.textContent = unitInfo.conventional.unit
+      }
+
+      setTier(strongTier(xc.auth) || 1)
+      this.assetTmpls[asset.symbol] = { tmpl, asset, setTier }
+    }
+
+    const nonBondAssets: number[] = []
+    for (const { symbol, id: assetID } of Object.values(xc.assets)) {
+      if (!app().assets[assetID]) continue
+      const bondAsset = xc.bondAssets[symbol]
+      if (bondAsset) {
+        addAssetRow(page.assets, assetID, bondAsset)
+        continue
+      }
+      nonBondAssets.push(assetID)
+    }
+
+    for (const assetID of nonBondAssets) {
+      addAssetRow(page.otherAssets, assetID)
     }
 
     page.host.textContent = xc.host
+    page.regAssetTier.value = xc.auth.targetTier ? String(xc.auth.targetTier) : '1'
+
+    Doc.show(page.assetSelection)
+    Doc.hide(page.assetSelected)
+    if (!xc.viewOnly && xc.auth.targetTier > 0) {
+      const currentBondAsset = app().assets[xc.auth.bondAssetID]
+      page.currentAssetLogo.src = Doc.logoPath(currentBondAsset.symbol)
+      page.currentAssetName.textContent = currentBondAsset.name
+      Doc.hide(page.assetSelection)
+      Doc.show(page.assetSelected)
+    }
+
     for (const mkt of Object.values(xc.markets)) {
       const node = marketNode(mkt)
       if (!node) continue
@@ -961,13 +1104,24 @@ export class FeeAssetSelectionForm {
    * completes successfully.
    */
   walletCreated (assetID: number) {
-    const tmpl = this.assetTmpls[assetID]
+    const a = this.assetTmpls[assetID]
     const asset = app().assets[assetID]
-    setReadyMessage(tmpl.ready, asset)
+    setReadyMessage(a.tmpl.ready, asset)
   }
 
   refresh () {
     this.setExchange(this.xc)
+  }
+
+  submit (assetID: number) {
+    this.clearError()
+    const raw = this.page.regAssetTier.value ?? ''
+    const tier = parseInt(raw)
+    if (isNaN(tier)) {
+      if (raw) this.setError(intl.prep(intl.ID_INVALID_TIER_VALUE))
+      return
+    }
+    this.success(assetID, tier)
   }
 
   /*
@@ -976,10 +1130,8 @@ export class FeeAssetSelectionForm {
    */
   async animate () {
     const { page, form } = this
-    const how = page.how
     const extraMargin = 75
     const extraTop = 50
-    const fontSize = 24
     const regAssetElements = Array.from(page.assets.children) as PageElement[]
     regAssetElements.push(page.allmkts)
     form.style.opacity = '0'
@@ -992,7 +1144,6 @@ export class FeeAssetSelectionForm {
       }
       form.style.opacity = Math.pow(prog, 4).toFixed(1)
       form.style.top = `${(1 - prog) * extraTop}px`
-      how.style.fontSize = `${fontSize * prog}px`
     }, 'easeOut')
   }
 }
@@ -1607,8 +1758,8 @@ export class DEXAddressForm {
       }
       return
     }
+    await app().fetchUser()
     if (!this.dexToUpdate && (skipRegistration || res.paid || Object.keys(res.xc.auth.pendingBonds).length > 0)) {
-      await app().fetchUser()
       await app().loadPage('markets')
       return
     }
@@ -1931,6 +2082,22 @@ export async function slideSwap (form1: HTMLElement, form2: HTMLElement) {
     form2.style.right = `${-shift + progress * shift}px`
   }, 'easeOutHard')
   form2.style.right = '0'
+}
+
+export function showSuccess (page: Record<string, PageElement>, msg: string) {
+  page.successMessage.textContent = msg
+  Doc.show(page.forms, page.checkmarkForm)
+  page.checkmarkForm.style.right = '0'
+  page.checkmark.style.fontSize = '0px'
+
+  const [startR, startG, startB] = State.isDark() ? [223, 226, 225] : [51, 51, 51]
+  const [endR, endG, endB] = [16, 163, 16]
+  const [diffR, diffG, diffB] = [endR - startR, endG - startG, endB - startB]
+
+  return new Animation(1200, (prog: number) => {
+    page.checkmark.style.fontSize = `${prog * 80}px`
+    page.checkmark.style.color = `rgb(${startR + prog * diffR}, ${startG + prog * diffG}, ${startB + prog * diffB})`
+  }, 'easeOutElastic')
 }
 
 /*

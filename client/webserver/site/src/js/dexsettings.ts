@@ -1,19 +1,24 @@
-import Doc from './doc'
+import Doc, { Animation } from './doc'
 import BasePage from './basepage'
 import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
 import * as intl from './locales'
-
+import { ReputationMeter, strongTier } from './account'
 import {
   app,
   PageElement,
   ConnectionStatus,
-  Exchange
+  Exchange,
+  PasswordCache,
+  WalletState
 } from './registry'
 
+interface Animator {
+  animate: (() => Promise<void>)
+}
+
 const animationLength = 300
-const bondOverlap = 2 // See client/core/bond.go#L28
 
 export default class DexSettingsPage extends BasePage {
   body: HTMLElement
@@ -24,60 +29,177 @@ export default class DexSettingsPage extends BasePage {
   keyup: (e: KeyboardEvent) => void
   dexAddrForm: forms.DEXAddressForm
   bondFeeBufferCache: Record<string, number>
+  newWalletForm: forms.NewWalletForm
+  unlockWalletForm: forms.UnlockWalletForm
+  regAssetForm: forms.FeeAssetSelectionForm
+  walletWaitForm: forms.WalletWaitForm
+  confirmRegisterForm: forms.ConfirmRegistrationForm
+  reputationMeter: ReputationMeter
+  animation: Animation
+  pwCache: PasswordCache
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
-    this.host = body.dataset.host ? body.dataset.host : ''
+    this.pwCache = { pw: '' }
+    const host = this.host = body.dataset.host ? body.dataset.host : ''
+    const xc = app().exchanges[host]
     const page = this.page = Doc.idDescendants(body)
     this.forms = Doc.applySelector(page.forms, ':scope > form')
 
+    this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
+      this.showSuccess(intl.prep(intl.ID_TRADING_TIER_UPDATED))
+    }, () => {
+      this.runAnimation(this.regAssetForm, page.regAssetForm)
+    }, this.pwCache)
+    this.confirmRegisterForm.setExchange(xc, '')
+
+    this.walletWaitForm = new forms.WalletWaitForm(page.walletWait, () => {
+      this.runAnimation(this.confirmRegisterForm, page.confirmRegForm)
+    }, () => {
+      this.runAnimation(this.regAssetForm, page.regAssetForm)
+    })
+    this.walletWaitForm.setExchange(xc)
+
+    this.newWalletForm = new forms.NewWalletForm(
+      page.newWalletForm,
+      assetID => this.newWalletCreated(assetID),
+      this.pwCache,
+      () => this.runAnimation(this.regAssetForm, page.regAssetForm)
+    )
+
+    this.unlockWalletForm = new forms.UnlockWalletForm(page.unlockWalletForm, (assetID: number) => {
+      this.progressTierFormsWithWallet(assetID, app().walletMap[assetID])
+    }, this.pwCache)
+
+    this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, async (assetID: number, tier: number) => {
+      const asset = app().assets[assetID]
+      const wallet = asset.wallet
+      if (wallet) {
+        const loaded = app().loading(page.regAssetForm)
+        const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
+        this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
+        loaded()
+        this.progressTierFormsWithWallet(assetID, wallet)
+        return
+      }
+      this.confirmRegisterForm.setAsset(assetID, tier, 0)
+      this.newWalletForm.setAsset(assetID)
+      this.showForm(page.newWalletForm)
+    })
+    this.regAssetForm.setExchange(xc)
+
+    this.reputationMeter = new ReputationMeter(page.repMeter)
+    this.reputationMeter.setHost(host)
+
     Doc.bind(page.exportDexBtn, 'click', () => this.prepareAccountExport(page.authorizeAccountExportForm))
     Doc.bind(page.disableAcctBtn, 'click', () => this.prepareAccountDisable(page.disableAccountForm))
-    Doc.bind(page.bondDetailsBtn, 'click', () => this.prepareBondDetailsForm())
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
-    Doc.bind(page.bondAssetSelect, 'change', () => this.updateBondAssetCosts())
-    Doc.bind(page.bondTargetTier, 'input', () => this.updateBondAssetCosts())
     Doc.bind(page.goBackToSettings, 'click', () => app().loadPage('settings'))
+    Doc.bind(page.changeTier, 'click', () => {
+      this.regAssetForm.setExchange(app().exchanges[host]) // reset form
+      this.showForm(page.regAssetForm)
+    })
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
       window.location.assign(`/dexsettings/${xc.host}`)
     }, undefined, this.host)
 
-    forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
+    // forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
-    const closePopups = () => {
-      Doc.hide(page.forms)
-    }
-
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
-      if (!Doc.mouseInElement(e, this.currentForm)) { closePopups() }
+      if (!Doc.mouseInElement(e, this.currentForm)) { this.closePopups() }
     })
 
     this.keyup = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        closePopups()
+        this.closePopups()
       }
     }
     Doc.bind(document, 'keyup', this.keyup)
 
     page.forms.querySelectorAll('.form-closer').forEach(el => {
-      Doc.bind(el, 'click', () => { closePopups() })
+      Doc.bind(el, 'click', () => { this.closePopups() })
     })
 
     app().registerNoteFeeder({
-      conn: () => { this.setConnectionStatus() }
+      conn: () => { this.setConnectionStatus() },
+      reputation: () => { this.updateReputation() },
+      feepayment: () => { this.updateReputation() },
+      bondpost: () => { this.updateReputation() }
     })
 
     this.setConnectionStatus()
+    this.updateReputation()
   }
 
   unload () {
     Doc.unbind(document, 'keyup', this.keyup)
+  }
+
+  async progressTierFormsWithWallet (assetID: number, wallet: WalletState) {
+    const { page, host, confirmRegisterForm: { fees } } = this
+    const asset = app().assets[assetID]
+    const xc = app().exchanges[host]
+    const bondAsset = xc.bondAssets[asset.symbol]
+    if (!wallet.open) {
+      if (State.passwordIsCached()) {
+        const loaded = app().loading(page.forms)
+        const res = await postJSON('/api/openwallet', { assetID: assetID })
+        loaded()
+        if (!app().checkResponse(res)) {
+          this.regAssetForm.setError(`error unlocking wallet: ${res.msg}`)
+          this.runAnimation(this.regAssetForm, page.regAssetForm)
+        }
+        return
+      } else {
+        // Password not cached. Show the unlock wallet form.
+        this.unlockWalletForm.refresh(asset)
+        this.showForm(page.unlockWalletForm)
+        return
+      }
+    }
+    if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + fees) {
+      // If we are raising our tier, we'll show a confirmation form
+      this.progressTierFormWithSyncedFundedWallet(assetID)
+      return
+    }
+    this.walletWaitForm.setWallet(wallet, fees)
+    this.showForm(page.walletWait)
+  }
+
+  async progressTierFormWithSyncedFundedWallet (assetID: number) {
+    const xc = app().exchanges[this.host]
+    const tier = this.confirmRegisterForm.tier
+    const page = this.page
+    const strongTier = xc.auth.liveStrength + xc.auth.pendingStrength - xc.auth.weakStrength
+    if (tier > xc.auth.targetTier && tier > strongTier) {
+      this.runAnimation(this.confirmRegisterForm, page.confirmRegForm)
+      return
+    }
+    // Lowering tier
+    const updateErr = await this.updateBondOptions(assetID, tier)
+    if (updateErr) {
+      this.regAssetForm.setError(updateErr)
+      return
+    }
+    // this.animateConfirmForm(page.regAssetForm)
+    this.showSuccess(intl.prep(intl.ID_TRADING_TIER_UPDATED))
+  }
+
+  updateReputation () {
+    const page = this.page
+    const auth = app().exchanges[this.host].auth
+    const { rep: { penalties }, targetTier } = auth
+    const displayTier = strongTier(auth)
+    page.targetTier.textContent = String(targetTier)
+    page.effectiveTier.textContent = String(displayTier)
+    page.penalties.textContent = String(penalties)
+    this.reputationMeter.update()
   }
 
   /* showForm shows a modal form with a little animation. */
@@ -92,6 +214,28 @@ export default class DexSettingsPage extends BasePage {
       form.style.right = `${(1 - progress) * shift}px`
     }, 'easeOutHard')
     form.style.right = '0'
+  }
+
+  async runAnimation (ani: Animator, form: PageElement) {
+    Doc.hide(this.currentForm)
+    await ani.animate()
+    this.currentForm = form
+    Doc.show(form)
+  }
+
+  closePopups () {
+    Doc.hide(this.page.forms)
+    if (this.animation) this.animation.stop()
+  }
+
+  async showSuccess (msg: string) {
+    this.forms.forEach(form => Doc.hide(form))
+    this.currentForm = this.page.checkmarkForm
+    this.animation = forms.showSuccess(this.page, msg)
+    await this.animation.wait()
+    this.animation = new Animation(1500, () => { /* pass */ }, '', () => {
+      if (this.currentForm === this.page.checkmarkForm) this.closePopups()
+    })
   }
 
   // exportAccount exports and downloads the account info.
@@ -159,64 +303,6 @@ export default class DexSettingsPage extends BasePage {
     page.disableAccountHost.textContent = this.host
     page.disableAccountErr.textContent = ''
     this.showForm(disableAccountForm)
-  }
-
-  // prepareBondDetailsForm resets and prepares the Bond Details form.
-  async prepareBondDetailsForm () {
-    const page = this.page
-    const xc = app().user.exchanges[this.host]
-    // Update bond details on this form
-    const targetTier = xc.auth.targetTier.toString()
-    page.currentTargetTier.textContent = `${targetTier}`
-    page.currentTier.textContent = `${xc.auth.effectiveTier}`
-    page.bondTargetTier.setAttribute('placeholder', targetTier)
-    page.bondTargetTier.value = ''
-    this.bondFeeBufferCache = {}
-    Doc.empty(page.bondAssetSelect)
-    for (const [assetSymbol, bondAsset] of Object.entries(xc.bondAssets)) {
-      const option = document.createElement('option') as HTMLOptionElement
-      option.value = bondAsset.id.toString()
-      option.textContent = assetSymbol.toUpperCase()
-      if (bondAsset.id === xc.auth.bondAssetID) option.selected = true
-      page.bondAssetSelect.appendChild(option)
-    }
-    page.bondOptionsErr.textContent = ''
-    Doc.hide(page.bondOptionsErr)
-    await this.updateBondAssetCosts()
-    this.showForm(page.bondDetailsForm)
-  }
-
-  async updateBondAssetCosts () {
-    const xc = app().user.exchanges[this.host]
-    const page = this.page
-    const bondAssetID = parseInt(page.bondAssetSelect.value ?? '')
-    Doc.hide(page.bondCostFiat.parentElement as Element)
-    Doc.hide(page.bondReservationAmtFiat.parentElement as Element)
-    const assetInfo = xc.assets[bondAssetID]
-    const bondAsset = xc.bondAssets[assetInfo.symbol]
-
-    const bondCost = bondAsset.amount
-    const ui = assetInfo.unitInfo
-    const assetID = bondAsset.id
-    Doc.applySelector(page.bondDetailsForm, '.bondAssetSym').forEach((el) => { el.textContent = assetInfo.symbol.toLocaleUpperCase() })
-    page.bondCost.textContent = Doc.formatFullPrecision(bondCost, ui)
-    const xcRate = app().fiatRatesMap[assetID]
-    Doc.showFiatValue(page.bondCostFiat, bondCost, xcRate, ui)
-
-    let feeBuffer = this.bondFeeBufferCache[assetInfo.symbol]
-    if (!feeBuffer) {
-      feeBuffer = await this.getBondsFeeBuffer(assetID, page.bondDetailsForm)
-      if (feeBuffer > 0) this.bondFeeBufferCache[assetInfo.symbol] = feeBuffer
-    }
-    if (feeBuffer === 0) {
-      page.bondReservationAmt.textContent = intl.prep(intl.ID_UNAVAILABLE)
-      return
-    }
-    const targetTier = parseInt(page.bondTargetTier.value ?? '')
-    let reservation = 0
-    if (targetTier > 0) reservation = bondCost * targetTier * bondOverlap + feeBuffer
-    page.bondReservationAmt.textContent = Doc.formatFullPrecision(reservation, ui)
-    Doc.showFiatValue(page.bondReservationAmtFiat, reservation, xcRate, ui)
   }
 
   // Retrieve an estimate for the tx fee needed to create new bond reserves.
@@ -289,40 +375,39 @@ export default class DexSettingsPage extends BasePage {
    * updateBondOptions is called when the form to update bond options is
    * submitted.
    */
-  async updateBondOptions () {
-    const page = this.page
-    const targetTier = parseInt(page.bondTargetTier.value ?? '')
-    const bondAssetID = parseInt(page.bondAssetSelect.value ?? '')
-
+  async updateBondOptions (bondAssetID: number, targetTier: number): Promise<string> {
     const bondOptions: Record<any, any> = {
       host: this.host,
       targetTier: targetTier,
       bondAssetID: bondAssetID
     }
 
-    const assetInfo = app().assets[bondAssetID]
-    if (assetInfo) {
-      const feeBuffer = this.bondFeeBufferCache[assetInfo.symbol]
-      if (feeBuffer > 0) bondOptions.feeBuffer = feeBuffer
-    }
-
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/updatebondoptions', bondOptions)
     loaded()
-    if (!app().checkResponse(res)) {
-      page.bondOptionsErr.textContent = res.msg
-      Doc.show(page.bondOptionsErr)
-    } else {
-      Doc.hide(page.bondOptionsErr)
-      Doc.show(page.bondOptionsMsg)
-      setTimeout(() => {
-        Doc.hide(page.bondOptionsMsg)
-      }, 5000)
-      // update the in-memory values.
-      const xc = app().user.exchanges[this.host]
-      xc.auth.bondAssetID = bondAssetID
-      xc.auth.targetTier = targetTier
-      page.currentTargetTier.textContent = `${targetTier}`
+    if (!app().checkResponse(res)) return res.msg
+    return ''
+  }
+
+  async newWalletCreated (assetID: number) {
+    this.regAssetForm.refresh()
+    const user = await app().fetchUser()
+    if (!user) return
+    const page = this.page
+    const asset = user.assets[assetID]
+    const wallet = asset.wallet
+    const xc = app().exchanges[this.host]
+    const bondAmt = xc.bondAssets[asset.symbol].amount
+
+    const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
+    this.confirmRegisterForm.setFees(assetID, bondsFeeBuffer)
+
+    if (wallet.synced && wallet.balance.available >= 2 * bondAmt + bondsFeeBuffer) {
+      this.progressTierFormWithSyncedFundedWallet(assetID)
+      return
     }
+
+    this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+    await this.showForm(page.walletWait)
   }
 }
