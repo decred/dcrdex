@@ -130,6 +130,8 @@ func (w *wrappedCEX) Withdraw(ctx context.Context, assetID uint32, amount uint64
 
 			ticker := time.NewTicker(time.Second * 20)
 			giveUp := time.NewTimer(time.Minute * 10)
+			defer ticker.Stop()
+			defer giveUp.Stop()
 			for {
 				select {
 				case <-ctx.Done():
@@ -254,16 +256,16 @@ func (w *wrappedCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell boo
 		}
 	}()
 
-	w.tradesMtx.Lock()
-	defer w.tradesMtx.Unlock()
-
 	w.subscriptionIDMtx.RLock()
-	defer w.subscriptionIDMtx.RUnlock()
+	subscriptionID := w.subscriptionID
+	w.subscriptionIDMtx.RUnlock()
 	if w.subscriptionID == nil {
 		return "", fmt.Errorf("Trade called before SubscribeTradeUpdates")
 	}
 
-	tradeID, err := w.CEX.Trade(ctx, baseID, quoteID, sell, rate, qty, *w.subscriptionID)
+	w.tradesMtx.Lock()
+	defer w.tradesMtx.Unlock()
+	tradeID, err := w.CEX.Trade(ctx, baseID, quoteID, sell, rate, qty, *subscriptionID)
 	if err != nil {
 		return "", err
 	}

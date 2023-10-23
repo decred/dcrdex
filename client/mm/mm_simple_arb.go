@@ -40,10 +40,14 @@ type SimpleArbConfig struct {
 	// dips below MinBaseAmt or MinQuoteAmt respectively, the bot will deposit
 	// or withdraw funds from the CEX to have an equal amount on both the DEX
 	// and the CEX. If it is not possible to bring both the DEX and CEX balances
-	// above the minimum amount, no action will be taken.
-	AutoRebalance bool   `json:"autoRebalance"`
-	MinBaseAmt    uint64 `json:"minBaseAmt"`
-	MinQuoteAmt   uint64 `json:"minQuoteAmt"`
+	// above the minimum amount, no action will be taken. Also, if the amount
+	// required to bring the balances to equal is less than MinBaseTransfer or
+	// MinQuoteTransfer, no action will be taken.
+	AutoRebalance    bool   `json:"autoRebalance"`
+	MinBaseAmt       uint64 `json:"minBaseAmt"`
+	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
+	MinQuoteAmt      uint64 `json:"minQuoteAmt"`
+	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
 }
 
 func (c *SimpleArbConfig) Validate() error {
@@ -108,28 +112,32 @@ type simpleArbMarketMaker struct {
 func (a *simpleArbMarketMaker) rebalanceAsset(base bool) {
 	var assetID uint32
 	var minAmount uint64
+	var minTransferAmount uint64
 	if base {
 		assetID = a.baseID
 		minAmount = a.cfg.MinBaseAmt
+		minTransferAmount = a.cfg.MinBaseTransfer
 	} else {
 		assetID = a.quoteID
 		minAmount = a.cfg.MinQuoteAmt
+		minTransferAmount = a.cfg.MinQuoteTransfer
 	}
+	symbol := dex.BipIDSymbol(assetID)
 
 	dexBalance, err := a.core.AssetBalance(assetID)
 	if err != nil {
-		a.log.Errorf("Error getting asset %d balance: %v", assetID, err)
+		a.log.Errorf("Error getting %s balance: %v", symbol, err)
 		return
 	}
 
 	cexBalance, err := a.cex.Balance(assetID)
 	if err != nil {
-		a.log.Errorf("Error getting asset %d balance on cex: %v", assetID, err)
+		a.log.Errorf("Error getting %s balance on cex: %v", symbol, err)
 		return
 	}
 
 	if (dexBalance.Available+cexBalance.Available)/2 < minAmount {
-		a.log.Warnf("Cannot rebalance asset %d because balance is too low on both DEX and CEX", assetID)
+		a.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX", symbol)
 		return
 	}
 
@@ -151,6 +159,11 @@ func (a *simpleArbMarketMaker) rebalanceAsset(base bool) {
 
 	if requireDeposit {
 		amt := (dexBalance.Available+cexBalance.Available)/2 - cexBalance.Available
+		if amt < minTransferAmount {
+			a.log.Warnf("Amount required to rebalance %s (%d) is less than the min transfer amount %v",
+				symbol, amt, minTransferAmount)
+			return
+		}
 		err = a.cex.Deposit(a.ctx, assetID, amt, onConfirm)
 		if err != nil {
 			a.log.Errorf("Error depositing %d to cex: %v", assetID, err)
@@ -158,6 +171,11 @@ func (a *simpleArbMarketMaker) rebalanceAsset(base bool) {
 		}
 	} else {
 		amt := (dexBalance.Available+cexBalance.Available)/2 - dexBalance.Available
+		if amt < minTransferAmount {
+			a.log.Warnf("Amount required to rebalance %s (%d) is less than the min transfer amount %v",
+				symbol, amt, minTransferAmount)
+			return
+		}
 		err = a.cex.Withdraw(a.ctx, assetID, amt, onConfirm)
 		if err != nil {
 			a.log.Errorf("Error withdrawing %d from cex: %v", assetID, err)

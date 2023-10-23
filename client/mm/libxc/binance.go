@@ -568,27 +568,27 @@ func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (stri
 }
 
 func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(bool, uint64)) {
-	const pendingStatus = 0
-	const successStatus = 1
-	const creditedStatus = 6
-	const wrongDepositStatus = 7
-	const waitingUserConfirmStatus = 8
-
-	type depositHistory struct {
-		Amount       float64 `json:"amount,string"`
-		Coin         string  `json:"coin"`
-		Network      string  `json:"network"`
-		Status       int     `json:"status"`
-		Address      string  `json:"address"`
-		AddressTag   string  `json:"addressTag"`
-		TxID         string  `json:"txId"`
-		InsertTime   int64   `json:"insertTime"`
-		TransferType int     `json:"transferType"`
-		ConfirmTimes string  `json:"confirmTimes"`
-	}
+	const (
+		pendingStatus            = 0
+		successStatus            = 1
+		creditedStatus           = 6
+		wrongDepositStatus       = 7
+		waitingUserConfirmStatus = 8
+	)
 
 	checkDepositStatus := func() (success, done bool) {
-		resp := []*depositHistory{}
+		var resp []*struct {
+			Amount       float64 `json:"amount,string"`
+			Coin         string  `json:"coin"`
+			Network      string  `json:"network"`
+			Status       int     `json:"status"`
+			Address      string  `json:"address"`
+			AddressTag   string  `json:"addressTag"`
+			TxID         string  `json:"txId"`
+			InsertTime   int64   `json:"insertTime"`
+			TransferType int     `json:"transferType"`
+			ConfirmTimes string  `json:"confirmTimes"`
+		}
 		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", nil, true, true, resp)
 		if err != nil {
 			bnc.log.Errorf("error getting deposit status: %v", err)

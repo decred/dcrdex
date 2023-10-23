@@ -386,7 +386,9 @@ func TestArbRebalance(t *testing.T) {
 		pendingQuoteRebalance bool
 		autoRebalance         bool
 		minBaseAmt            uint64
+		minBaseTransfer       uint64
 		minQuoteAmt           uint64
+		minQuoteTransfer      uint64
 
 		expectedDexOrder   *dexOrder
 		expectedCexOrder   *cexOrder
@@ -993,6 +995,70 @@ func TestArbRebalance(t *testing.T) {
 				amt:     4.9999995e16,
 			},
 		},
+		// "no arb, base needs withdrawal, quote needs deposit, edge of min transfer amount"
+		{
+			name:  "no arb, base needs withdrawal, quote needs deposit, edge of min transfer amount",
+			books: noArbBooks,
+			dexMaxSell: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexMaxBuy: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexBalances: map[uint32]uint64{
+				42: 9.5e15,
+				0:  1.1e12,
+			},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				42: {Available: 1.1e16},
+				0:  {Available: 9.5e11},
+			},
+			autoRebalance:    true,
+			minBaseAmt:       1e16,
+			minQuoteAmt:      1e12,
+			minBaseTransfer:  (1.1e16+9.5e15)/2 - 9.5e15,
+			minQuoteTransfer: (1.1e12+9.5e11)/2 - 9.5e11,
+			expectedWithdrawal: &assetAmt{
+				assetID: 42,
+				amt:     (1.1e16+9.5e15)/2 - 9.5e15,
+			},
+			expectedDeposit: &assetAmt{
+				assetID: 0,
+				amt:     (1.1e12+9.5e11)/2 - 9.5e11,
+			},
+		},
+		// "no arb, base needs withdrawal, quote needs deposit, below min transfer amount"
+		{
+			name:  "no arb, base needs withdrawal, quote needs deposit, below min transfer amount",
+			books: noArbBooks,
+			dexMaxSell: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexMaxBuy: &core.MaxOrderEstimate{
+				Swap: &asset.SwapEstimate{
+					Lots: 5,
+				},
+			},
+			dexBalances: map[uint32]uint64{
+				42: 9.5e15,
+				0:  1.1e12,
+			},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				42: {Available: 1.1e16},
+				0:  {Available: 9.5e11},
+			},
+			autoRebalance:    true,
+			minBaseAmt:       1e16,
+			minQuoteAmt:      1e12,
+			minBaseTransfer:  (1.1e16+9.5e15)/2 - 9.5e15 + 1,
+			minQuoteTransfer: (1.1e12+9.5e11)/2 - 9.5e11 + 1,
+		},
 		// "no arb, quote needs withdrawal, base needs deposit"
 		{
 			name:  "no arb, quote needs withdrawal, base needs deposit",
@@ -1114,6 +1180,8 @@ func TestArbRebalance(t *testing.T) {
 				AutoRebalance:      test.autoRebalance,
 				MinBaseAmt:         test.minBaseAmt,
 				MinQuoteAmt:        test.minQuoteAmt,
+				MinBaseTransfer:    test.minBaseTransfer,
+				MinQuoteTransfer:   test.minQuoteTransfer,
 			},
 		}
 
