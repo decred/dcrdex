@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -150,6 +151,13 @@ func (db *badgerTxDB) findFreeBlockKey(txn *badger.Txn, blockNumber uint64) ([]b
 	}
 }
 
+func hasPrefix(b, prefix []byte) bool {
+	if len(b) < len(prefix) {
+		return false
+	}
+	return bytes.Equal(b[:len(prefix)], prefix)
+}
+
 func (db *badgerTxDB) storeTx(tx *extendedWalletTx) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(tx.ID)
@@ -168,11 +176,11 @@ func (db *badgerTxDB) storeTx(tx *extendedWalletTx) error {
 				return err
 			}
 
-			if currBlockKey[0] == pendingPrefix[0] {
+			if hasPrefix(currBlockKey, pendingPrefix) {
 				if tx.BlockNumber > 0 {
 					needNewBlockKey = true
 				}
-			} else if currBlockKey[0] == blockPrefix[0] {
+			} else if hasPrefix(currBlockKey, blockPrefix) {
 				blockHeight, _ := parseBlockKey(currBlockKey)
 				if blockHeight != tx.BlockNumber {
 					needNewBlockKey = true
@@ -270,19 +278,12 @@ func (db *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Walle
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		pendingOrBlock := func() bool {
-			if it.ValidForPrefix(blockPrefix) {
-				return true
-			}
-
-			if it.ValidForPrefix(pendingPrefix) {
-				return true
-			}
-
-			return false
+		canIterate := func() bool {
+			validPrefix := it.ValidForPrefix(blockPrefix) || it.ValidForPrefix(pendingPrefix)
+			withinLimit := n <= 0 || len(txs) < n
+			return validPrefix && withinLimit
 		}
-
-		for it.Seek(startKey); pendingOrBlock() && (n <= 0 || len(txs) < n); it.Next() {
+		for it.Seek(startKey); canIterate(); it.Next() {
 			item := it.Item()
 			wtB, err := item.ValueCopy(nil)
 			if err != nil {
