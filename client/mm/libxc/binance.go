@@ -82,11 +82,49 @@ type bncAssetConfig struct {
 }
 
 // TODO: check all symbols
-func mapDEXSymbolToBinance(symbol string) string {
-	if symbol == "POLYGON" {
-		return "MATIC"
+var dexToBinanceSymbol = map[string]string{
+	"POLYGON": "MATIC",
+	"WETH":    "ETH",
+}
+
+var binanceToDexSymbol = make(map[string]string)
+
+func init() {
+	for key, value := range dexToBinanceSymbol {
+		binanceToDexSymbol[value] = key
+	}
+}
+
+func mapDexToBinanceSymbol(symbol string) string {
+	if binanceSymbol, found := dexToBinanceSymbol[symbol]; found {
+		return binanceSymbol
 	}
 	return symbol
+}
+
+func binanceCoinNetworkToDexSymbol(coin, network string) string {
+	if coin == "ETH" && network == "ETH" {
+		return "eth"
+	}
+
+	var dexSymbol, dexNetwork string
+	if symbol, found := binanceToDexSymbol[coin]; found {
+		dexSymbol = strings.ToLower(symbol)
+	} else {
+		dexSymbol = strings.ToLower(coin)
+	}
+
+	if symbol, found := binanceToDexSymbol[network]; found && network != "ETH" {
+		dexNetwork = strings.ToLower(symbol)
+	} else {
+		dexNetwork = strings.ToLower(network)
+	}
+
+	if dexSymbol == dexNetwork {
+		return dexSymbol
+	}
+
+	return fmt.Sprintf("%s.%s", dexSymbol, dexNetwork)
 }
 
 func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
@@ -97,8 +135,7 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 
 	coin := strings.ToUpper(symbol)
 	chain := strings.ToUpper(symbol)
-	if token := asset.TokenInfo(assetID); token != nil {
-		parts := strings.Split(symbol, ".")
+	if parts := strings.Split(symbol, "."); len(parts) > 1 {
 		coin = strings.ToUpper(parts[0])
 		chain = strings.ToUpper(parts[1])
 	}
@@ -110,8 +147,8 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 
 	return &bncAssetConfig{
 		symbol:           symbol,
-		coin:             mapDEXSymbolToBinance(coin),
-		chain:            mapDEXSymbolToBinance(chain),
+		coin:             mapDexToBinanceSymbol(coin),
+		chain:            mapDexToBinanceSymbol(chain),
 		conversionFactor: ui.Conventional.ConversionFactor,
 	}, nil
 }
@@ -226,6 +263,12 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 
 	tokenIDs := make(map[string][]uint32)
 	for _, nfo := range coins {
+		if nfo.Coin == "WBTC" {
+			bnc.log.Infof("WBTC INFO: %+v", nfo)
+			for _, netInfo := range nfo.NetworkList {
+				bnc.log.Infof("%+v", netInfo)
+			}
+		}
 		tokenSymbol := strings.ToLower(nfo.Coin)
 		chainIDs, isToken := dex.TokenChains[tokenSymbol]
 		if !isToken {
@@ -523,6 +566,8 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 				return false, 0, ""
 			}
 
+			bnc.log.Tracef("Withdrawal status: %+v", status)
+
 			amt := status.Amount * float64(assetCfg.conversionFactor)
 			return status.Status == 6, uint64(amt), status.TxID
 		}
@@ -576,45 +621,52 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 		waitingUserConfirmStatus = 8
 	)
 
-	checkDepositStatus := func() (success, done bool) {
-		var resp []*struct {
-			Amount       float64 `json:"amount,string"`
-			Coin         string  `json:"coin"`
-			Network      string  `json:"network"`
-			Status       int     `json:"status"`
-			Address      string  `json:"address"`
-			AddressTag   string  `json:"addressTag"`
-			TxID         string  `json:"txId"`
-			InsertTime   int64   `json:"insertTime"`
-			TransferType int     `json:"transferType"`
-			ConfirmTimes string  `json:"confirmTimes"`
+	checkDepositStatus := func() (success, done bool, amt uint64) {
+		var resp []struct {
+			Amount  float64 `json:"amount,string"`
+			Coin    string  `json:"coin"`
+			Network string  `json:"network"`
+			Status  int     `json:"status"`
+			TxID    string  `json:"txId"`
 		}
-		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", nil, true, true, resp)
+		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", nil, true, true, &resp)
 		if err != nil {
 			bnc.log.Errorf("error getting deposit status: %v", err)
-			return false, false
+			return false, false, 0
 		}
 
 		for _, status := range resp {
 			if status.TxID == txID {
 				switch status.Status {
 				case successStatus, creditedStatus:
-					return true, true
+					dexSymbol := binanceCoinNetworkToDexSymbol(status.Coin, status.Network)
+					assetID, found := dex.BipSymbolID(dexSymbol)
+					if !found {
+						bnc.log.Errorf("Failed to find DEX asset ID for Coin: %s, Network %s", status.Coin, status.Network)
+						return false, true, 0
+					}
+					ui, err := asset.UnitInfo(assetID)
+					if err != nil {
+						bnc.log.Errorf("Failed to find unit info for asset ID %d", assetID)
+						return false, true, 0
+					}
+					amount := uint64(status.Amount * float64(ui.Conventional.ConversionFactor))
+					return true, true, amount
 				case pendingStatus:
-					return false, false
+					return false, false, 0
 				case waitingUserConfirmStatus:
 					// This shouldn't ever happen.
 					bnc.log.Errorf("Deposit %s to binance requires user confirmation!")
-					return false, false
+					return false, true, 0
 				case wrongDepositStatus:
-					return false, true
+					return false, true, 0
 				default:
 					bnc.log.Errorf("Deposit %s to binance has an unknown status %d", status.Status)
 				}
 			}
 		}
 
-		return false, false
+		return false, false, 0
 	}
 
 	go func() {
@@ -626,10 +678,9 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				success, done := checkDepositStatus()
+				success, done, amt := checkDepositStatus()
 				if done {
-					// TODO: get amount
-					onConfirm(success, 0)
+					onConfirm(success, amt)
 					return
 				}
 			}

@@ -57,8 +57,8 @@ var (
 
 	testTokenID, _ = dex.BipSymbolID("dextt.polygon")
 	usdcTokenID, _ = dex.BipSymbolID("usdc.polygon")
-	wethTokenID, _ = dex.BipSymbolID("eth.polygon")
-	wbtcTokenID, _ = dex.BipSymbolID("btc.polygon")
+	wethTokenID, _ = dex.BipSymbolID("weth.polygon")
+	wbtcTokenID, _ = dex.BipSymbolID("wbtc.polygon")
 
 	Tokens = map[uint32]*dexeth.Token{
 		testTokenID: TestToken,

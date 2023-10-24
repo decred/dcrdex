@@ -63,8 +63,8 @@ const (
 var (
 	testTokenID, _ = dex.BipSymbolID("dextt.polygon")
 	usdcID, _      = dex.BipSymbolID("usdc.polygon")
-	wethTokenID, _ = dex.BipSymbolID("eth.polygon")
-	wbtcTokenID, _ = dex.BipSymbolID("btc.polygon")
+	wethTokenID, _ = dex.BipSymbolID("weth.polygon")
+	wbtcTokenID, _ = dex.BipSymbolID("wbtc.polygon")
 
 	// blockPollInterval is the delay between calls to bestBlockHash to check
 	// for new blocks. Modify at compile time via blockPollIntervalStr:

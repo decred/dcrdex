@@ -73,6 +73,15 @@ func init() {
 			},
 		},
 	}, &asset.WalletDefinition{}, dex.Mainnet, dex.Testnet, dex.Simnet)
+	asset.RegisterToken(966002, &dex.Token{
+		ParentID: 966,
+		Name:     "WETH",
+		UnitInfo: dex.UnitInfo{
+			Conventional: dex.Denomination{
+				ConversionFactor: 1e9,
+			},
+		},
+	}, &asset.WalletDefinition{}, dex.Mainnet, dex.Testnet, dex.Simnet)
 }
 
 func TestConnect(t *testing.T) {
@@ -235,7 +244,7 @@ func TestVWAP(t *testing.T) {
 }
 
 func TestWithdrawal(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance(t, dex.Mainnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -251,11 +260,33 @@ func TestWithdrawal(t *testing.T) {
 		wg.Done()
 	}
 
-	err = bnc.Withdraw(ctx, 60001, 4e10, "", onComplete)
+	err = bnc.Withdraw(ctx, 966, 2e10, "", onComplete)
 	if err != nil {
 		fmt.Printf("withdrawal error: %v", err)
 		return
 	}
+
+	wg.Wait()
+}
+
+func TestConfirmDeposit(t *testing.T) {
+	bnc := tNewBinance(t, dex.Mainnet)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
+	defer cancel()
+
+	_, err := bnc.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	onComplete := func(success bool, amount uint64) {
+		t.Logf("deposit complete: %v, %v", success, amount)
+		wg.Done()
+	}
+
+	bnc.ConfirmDeposit(ctx, "", onComplete)
 
 	wg.Wait()
 }
