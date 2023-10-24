@@ -1172,7 +1172,7 @@ export default class MarketsPage extends BasePage {
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
 
-    if (!baseAsset?.wallet || !quoteAsset?.wallet) Doc.setVis(true, page.noWallet)
+    if (!baseAsset?.wallet && !quoteAsset?.wallet) Doc.setVis(true, page.noWallet)
     else this.balanceWgt.setWallets(host, base, quote)
     this.setMarketDetails()
     this.setCurrMarketPrice()
