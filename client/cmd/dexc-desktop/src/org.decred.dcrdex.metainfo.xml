@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.decred.dcrdex</id>
+  <launchable type="desktop-id">org.decred.dcrdex.desktop</launchable>
+  <name>DCRDEX</name>
+  <summary>Decentralized cryptocurrency exchange</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>BlueOak-1.0.0</project_license>
+  <url type="homepage">https://dex.decred.org</url>
+  <url type="help">https://chat.decred.org/#/room/#dex:decred.org</url>
+  <developer_name>The Decred Developers</developer_name>
+  <description>
+    <p>
+      Non-custodial peer-to-peer exchange where your funds never leave your wallet.  
+      Trade Bitcoin, USDC, Ethereum, Decred, Dogecoin, Zcash and more without KYC 
+      and fees, using atomic swaps technology.
+    </p>
+  </description>
+</component>
