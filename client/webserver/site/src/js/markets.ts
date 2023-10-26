@@ -1172,8 +1172,15 @@ export default class MarketsPage extends BasePage {
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
 
-    if (!baseAsset?.wallet && !quoteAsset?.wallet) Doc.setVis(true, page.noWallet)
-    else this.balanceWgt.setWallets(host, base, quote)
+    let noWalletMsg = ''
+    if (!baseAsset?.wallet && !quoteAsset?.wallet) noWalletMsg = intl.prep(intl.ID_NO_WALLET_MSG, { asset1: baseCfg.symbol, asset2: quoteCfg.symbol })
+    else if (!baseAsset?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: baseCfg.symbol })
+    else if (!quoteAsset?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: quoteCfg.symbol })
+    if (noWalletMsg) {
+      page.noWallet.textContent = noWalletMsg
+      Doc.setVis(true, page.noWallet)
+    }
+    this.balanceWgt.setWallets(host, base, quote)
     this.setMarketDetails()
     this.setCurrMarketPrice()
 
