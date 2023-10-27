@@ -65,8 +65,7 @@ const (
 	// CreateEpochReportTable creates an candles table that holds binned
 	// candle data.
 	CreateCandlesTable = `CREATE TABLE IF NOT EXISTS %s (
-		end_stamp INT8,
-		candle_dur INT8,
+		end_stamp INT8 PRIMARY KEY,
 		match_volume INT8,
 		quote_volume INT8,
 		high_rate INT8,
@@ -75,24 +74,21 @@ const (
 		end_rate INT8
 	);`
 
-	CreateCandlesIndex = `CREATE INDEX IF NOT EXISTS %s ON %s (end_stamp, candle_dur);`
-
-	InsertCandle = `INSERT INTO %s (end_stamp, candle_dur, match_volume,
-		quote_volume, high_rate, low_rate, start_rate, end_rate
+	InsertCandle = `INSERT INTO %s (
+		end_stamp, match_volume, quote_volume, high_rate, low_rate, start_rate, end_rate
 	)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`
-	// How to ON CONFLICT (end_stamp, candle_dur) DO NOTHING ?
+	VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (end_stamp) DO UPDATE
+	SET match_volume = $2, quote_volume = $3, high_rate = $4, low_rate = $5, start_rate = $6, end_rate = $7;`
 
 	SelectCandles = `SELECT end_stamp, match_volume, quote_volume,
 		high_rate, low_rate, start_rate, end_rate
 	FROM %s
-	WHERE candle_dur = $1
 	ORDER BY end_stamp
-	LIMIT $2;`
+	LIMIT $1;`
 
 	SelectLastEndStamp = `SELECT (end_stamp)
 		FROM %s
-		WHERE candle_dur = $1
 		ORDER BY end_stamp
 		DESC
 		LIMIT 1;`

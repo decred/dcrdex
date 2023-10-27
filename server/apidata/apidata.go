@@ -163,7 +163,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 				continue
 			}
 			if err := s.db.InsertCandles(base, quote, cache.BinSize, newCandles); err != nil {
-				return 0, 0, 0, 0, err
+				return 0, 0, 0, 0, fmt.Errorf("InsertCandles: %w", err)
 			}
 			cache.lastStoredEndStamp = newCandles[len(newCandles)-1].EndStamp
 		}
@@ -190,6 +190,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 		High24:   high24,
 		Low24:    low24,
 	}
+
 	s.spotsMtx.Lock()
 	s.spots[mktName], err = json.Marshal(spot)
 	s.spotsMtx.Unlock()

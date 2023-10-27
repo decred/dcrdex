@@ -183,13 +183,14 @@ func (a *Archiver) LastCandleEndStamp(base, quote uint32, candleDur uint64) (uin
 	if err != nil {
 		return 0, err
 	}
-	tableName := fullCandlesTableName(a.dbName, marketSchema)
+
+	tableName := fullCandlesTableName(a.dbName, marketSchema, candleDur)
 
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	defer cancel()
 
 	stmt := fmt.Sprintf(internal.SelectLastEndStamp, tableName)
-	row := a.db.QueryRowContext(ctx, stmt, candleDur)
+	row := a.db.QueryRowContext(ctx, stmt)
 	var endStamp fastUint64
 	if err = row.Scan(&endStamp); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -201,12 +202,12 @@ func (a *Archiver) LastCandleEndStamp(base, quote uint32, candleDur uint64) (uin
 }
 
 // InsertCandles inserts new candles for a market and candle duration.
-func (a *Archiver) InsertCandles(base, quote uint32, dur uint64, cs []*candles.Candle) error {
+func (a *Archiver) InsertCandles(base, quote uint32, candleDur uint64, cs []*candles.Candle) error {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return err
 	}
-	tableName := fullCandlesTableName(a.dbName, marketSchema)
+	tableName := fullCandlesTableName(a.dbName, marketSchema, candleDur)
 	stmt := fmt.Sprintf(internal.InsertCandle, tableName)
 
 	insert := func(c *candles.Candle) error {
@@ -214,8 +215,7 @@ func (a *Archiver) InsertCandles(base, quote uint32, dur uint64, cs []*candles.C
 		defer cancel()
 
 		_, err = a.db.ExecContext(ctx, stmt,
-			c.EndStamp, dur, c.MatchVolume,
-			c.QuoteVolume, c.HighRate, c.LowRate, c.StartRate, c.EndRate,
+			c.EndStamp, c.MatchVolume, c.QuoteVolume, c.HighRate, c.LowRate, c.StartRate, c.EndRate,
 		)
 		if err != nil {
 			a.fatalBackendErr(err)
@@ -239,15 +239,16 @@ func (a *Archiver) loadCandles(base, quote uint32, cache *candles.Cache, n uint6
 	if err != nil {
 		return err
 	}
-	tableName := fullCandlesTableName(a.dbName, marketSchema)
+
+	candleDur := cache.BinSize
+
+	tableName := fullCandlesTableName(a.dbName, marketSchema, candleDur)
 	stmt := fmt.Sprintf(internal.SelectCandles, tableName)
 
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	defer cancel()
 
-	dur := cache.BinSize
-
-	rows, err := a.db.QueryContext(ctx, stmt, dur, n)
+	rows, err := a.db.QueryContext(ctx, stmt, n)
 	if err != nil {
 		return fmt.Errorf("QueryContext: %w", err)
 	}
@@ -260,7 +261,7 @@ func (a *Archiver) loadCandles(base, quote uint32, cache *candles.Cache, n uint6
 			return fmt.Errorf("Scan: %w", err)
 		}
 		cache.Add(&candles.Candle{
-			StartStamp:  uint64(endStamp) - dur,
+			StartStamp:  uint64(endStamp) - candleDur,
 			EndStamp:    uint64(endStamp),
 			MatchVolume: uint64(matchVol),
 			QuoteVolume: uint64(quoteVol),

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
@@ -83,10 +84,9 @@ func createMarketTables(db *sql.DB, marketName string) error {
 		}
 	}
 
-	for _, c := range createMarketIndexesStatements {
-		idxName := fmt.Sprintf(indexCandlesOnDurEndFmt, marketUID)
-		err := createIndexStmt(db, c.stmt, idxName, marketUID+"."+c.tableName)
-		if err != nil {
+	// Create tables for the candles.
+	for _, binSize := range append(candles.BinSizes, "epoch") {
+		if _, err := createTableStmt(db, internal.CreateCandlesTable, marketUID, candlesTableName+"_"+binSize); err != nil {
 			return err
 		}
 	}

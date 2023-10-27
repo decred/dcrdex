@@ -33,8 +33,6 @@ const (
 	cancelsActiveTableName   = "cancels_active"
 	epochReportsTableName    = "epoch_reports"
 	candlesTableName         = "candles"
-
-	indexCandlesOnDurEndFmt = "idx_candles_on_dur_end_%s"
 )
 
 type tableStmt struct {
@@ -72,17 +70,6 @@ var createMarketTableStatements = []tableStmt{
 	{matchesTableName, internal.CreateMatchesTable}, // just one matches table per market for now
 	{epochsTableName, internal.CreateEpochsTable},
 	{epochReportsTableName, internal.CreateEpochReportTable},
-	{candlesTableName, internal.CreateCandlesTable},
-}
-
-type marketIdx struct {
-	tableName string
-	idxFmt    string
-	stmt      string
-}
-
-var createMarketIndexesStatements = []marketIdx{
-	{candlesTableName, indexCandlesOnDurEndFmt, internal.CreateCandlesIndex},
 }
 
 var tableMap = func() map[string]string {
@@ -134,8 +121,22 @@ func fullEpochReportsTableName(dbName, marketSchema string) string {
 	return dbName + "." + marketSchema + "." + epochReportsTableName
 }
 
-func fullCandlesTableName(dbName, marketSchema string) string {
-	return dbName + "." + marketSchema + "." + candlesTableName
+func fullCandlesTableName(dbName, marketSchema string, candleDur uint64) string {
+	const fiveMin = 5 * 60 * 1000
+	const oneHour = 60 * 60 * 1000
+	const aDay = 24 * oneHour
+	var binSize string
+	switch candleDur {
+	case fiveMin:
+		binSize = "5m"
+	case oneHour:
+		binSize = "1h"
+	case aDay:
+		binSize = "24h"
+	default:
+		binSize = "epoch"
+	}
+	return dbName + "." + marketSchema + "." + candlesTableName + "_" + binSize
 }
 
 // createTable creates one of the known tables by name. The table will be
