@@ -43,6 +43,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/ltc"
 	_ "decred.org/dcrdex/client/asset/zcl"
 	_ "decred.org/dcrdex/client/asset/zec"
+	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
@@ -106,6 +107,7 @@ var (
 
 	ctx, quit = context.WithCancel(context.Background())
 
+	supportedAssets                                                                             = assetMap()
 	alphaAddrBase, betaAddrBase, alphaAddrQuote, betaAddrQuote, market, baseSymbol, quoteSymbol string
 	alphaCfgBase, betaCfgBase,
 	alphaCfgQuote, betaCfgQuote map[string]string
@@ -118,11 +120,11 @@ var (
 	rateShift, rateIncrease                               int64
 	conversionFactors                                     = make(map[string]uint64)
 
-	ethInitFee                                     = (dexeth.InitGas(1, 0) + dexeth.RefundGas(0)) * ethFeeRate
-	ethRedeemFee                                   = dexeth.RedeemGas(1, 0) * ethFeeRate
-	defaultMidGap, marketBuyBuffer, whalePercent   float64
-	keepMidGap, oscillate, randomOsc, ignoreErrors bool
-	oscInterval, oscStep, whaleFrequency           uint64
+	ethInitFee                                                 = (dexeth.InitGas(1, 0) + dexeth.RefundGas(0)) * ethFeeRate
+	ethRedeemFee                                               = dexeth.RedeemGas(1, 0) * ethFeeRate
+	defaultMidGap, marketBuyBuffer, whalePercent               float64
+	keepMidGap, oscillate, randomOsc, ignoreErrors, liveMidGap bool
+	oscInterval, oscStep, whaleFrequency                       uint64
 
 	processesMtx sync.Mutex
 	processes    []*process
@@ -375,7 +377,8 @@ func run() error {
 	flag.Uint64Var(&oscStep, "oscstep", 50, "for compound and sidestacker, the number of rate step to increase or decrease per epoch")
 	flag.BoolVar(&ignoreErrors, "ignoreerrors", false, "log and ignore errors rather than the default behavior of stopping loadbot")
 	flag.Uint64Var(&whaleFrequency, "whalefrequency", 4, "controls the frequency with which the whale \"whales\" after it is ready. To whale is to choose a rate and attempt to buy up the entire book at that price. If frequency is N, the whale will whale an average of 1 out of every N+1 epochs (default 4)")
-	flag.Float64Var(&whalePercent, "whalepercent", 0.1, "The percent of the current mid gap to whale within. If 0.1 the whale will pick a target price between 0.9 and 1.1 percent of the current mid gap (default 0.1)")
+	flag.Float64Var(&whalePercent, "whalepercent", 0.1, "The percent of the current mid gap to whale within. If 0.1 the whale will pick a target price between 0.9 and 1.1 percent of the current mid gap (default 0.1). Ignored if livemidgap is true")
+	flag.BoolVar(&liveMidGap, "livemidgap", false, "set true to start with a fetched midgap. Also forces the whale to only whale towards the mid gap")
 	flag.Parse()
 
 	if programName == "" {
@@ -465,6 +468,19 @@ func run() error {
 	// Adjust to be comparable to the dcr_btc market.
 	defaultMidGap = defaultBtcPerDcr * float64(rateStep) / 100
 
+	loggerMaker, err = dex.NewLoggerMaker(os.Stdout, logLevel)
+	if err != nil {
+		return fmt.Errorf("error creating LoggerMaker: %v", err)
+	}
+	log /* global */ = loggerMaker.NewLogger("LOADBOT")
+
+	if liveMidGap {
+		defaultMidGap, err = liveRate()
+		if err != nil {
+			return fmt.Errorf("error retrieving live rates: %v", err)
+		}
+	}
+
 	if epochDuration == 0 {
 		return fmt.Errorf("failed to find %q market in harness config. Available markets: %s", market, strings.Join(markets, ", "))
 	}
@@ -486,12 +502,6 @@ func run() error {
 	betaCfgBase = loadNodeConfig(baseSymbol, beta)
 	alphaCfgQuote = loadNodeConfig(quoteSymbol, alpha)
 	betaCfgQuote = loadNodeConfig(quoteSymbol, beta)
-
-	loggerMaker, err = dex.NewLoggerMaker(os.Stdout, logLevel)
-	if err != nil {
-		return fmt.Errorf("error creating LoggerMaker: %v", err)
-	}
-	log /* global */ = loggerMaker.NewLogger("LOADBOT")
 
 	log.Infof("Running program %s", programName)
 
@@ -749,4 +759,57 @@ func symmetricWalletConfig(numCoins int, midGap uint64) (
 	}
 	maxBaseQty, maxQuoteQty = minBaseQty*2, minQuoteQty*2
 	return
+}
+
+// assetMap returns a map of asset information for supported assets.
+func assetMap() map[uint32]*core.SupportedAsset {
+	supported := asset.Assets()
+	assets := make(map[uint32]*core.SupportedAsset, len(supported))
+	for assetID, asset := range supported {
+		wallet := &core.WalletState{}
+		assets[assetID] = &core.SupportedAsset{
+			ID:       assetID,
+			Symbol:   asset.Symbol,
+			Wallet:   wallet,
+			Info:     asset.Info,
+			Name:     asset.Info.Name,
+			UnitInfo: asset.Info.UnitInfo,
+		}
+		for tokenID, token := range asset.Tokens {
+			assets[tokenID] = &core.SupportedAsset{
+				ID:       tokenID,
+				Symbol:   dex.BipIDSymbol(tokenID),
+				Wallet:   wallet,
+				Token:    token,
+				Name:     token.Name,
+				UnitInfo: token.UnitInfo,
+			}
+		}
+	}
+	return assets
+}
+
+func liveRate() (float64, error) {
+	b, ok := supportedAssets[baseID]
+	if !ok {
+		return 0.0, fmt.Errorf("%d not a supported asset", baseID)
+	}
+	q, ok := supportedAssets[quoteID]
+	if !ok {
+		return 0.0, fmt.Errorf("%d not a supported asset", quoteID)
+	}
+	as := map[uint32]*core.SupportedAsset{baseID: b, quoteID: q}
+	liveRates := core.FetchCoinpaprikaRates(ctx, log, as)
+	if len(liveRates) != 2 {
+		liveRates = core.FetchMessariRates(ctx, log, as)
+	}
+	// If decred check dcrdata.
+	if len(liveRates) != 2 && (quoteID == 42 || baseID == 42) {
+		liveRates = core.FetchDcrdataRates(ctx, log, as)
+	}
+	if len(liveRates) != 2 {
+		return 0.0, errors.New("unable to get live rates")
+	}
+	conversionRatio := float64(q.UnitInfo.Conventional.ConversionFactor) / float64(b.UnitInfo.Conventional.ConversionFactor)
+	return liveRates[baseID] / liveRates[quoteID] * conversionRatio, nil
 }

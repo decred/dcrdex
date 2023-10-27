@@ -43,7 +43,8 @@ The **heavy** program is like **compound** on steroids. Four
 
 The **whale** program runs multiple **traders** that randomly push the market in
 one direction or the other. Can be run separately with other programs to create
-a volatile market.
+a volatile market. Can be used with the `--livemidgap` flag to always push the
+price towards the global rate for that market.
 
 ### Logging
 
