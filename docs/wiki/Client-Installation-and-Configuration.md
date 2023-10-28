@@ -82,6 +82,9 @@ several blocks.
    Windows, `dexc-tray.exe` may be run instead. If using Decrediton instead of
    **dexc**, just click the "DEX" tab and skip to step 3.
 
+   **Note**: You can start dexc with another network via a command line flag:
+   `--testnet` or `--simnet`, the default is `mainnet`.
+
 2. In your web browser, navigate to <http://localhost:5758>. Skip this step if
    using Decrediton.
 
@@ -95,109 +98,29 @@ several blocks.
    NOTE: Checking the "Remember my password" box only applies to the current
    session. It is easiest for most users to have it checked.
 
-4. Choose the DEX host that you would like to use. Either click one of the
-   pre-defined hosts, or enter the address of a known host that you would like
-   to use.
+4. After creating your app password, you'll be taken to the `Quick Configuration` form:
 
-   <img src="images/add-dex-reg.png" width="320">
+   <img src="images/quick-config.png" width="350">
 
-   NOTE: If you just want to view the markets without being able to trade, check
-   the "No account" box. You will have an opportunity to create an identity
-   later, but the remaining steps assume you are preparing to trade.
+   The selected native wallets will be created for you and you'll be connected
+   to the selected DEX server when you submit the form.
 
-5. The DEX host will show all offered markets, and a choice of assets with which
-   you can lock in a bond to enable trading. Select the asset you wish to use.
+   **Note**: If you encounter an error about not being able to connect to the
+   selected DEX server during the quick configuration, you can manually [add the DEX server](https://github.com/decred/dcrdex/wiki/DEX-Trading-Account-Management#adding-a-dex-trading-account). You will see a list of known DEX server(s) you can choose from.
 
-   <img src="images/choose-bond-asset.png" width="400">
+5. Backup your app seed. This seed is used to restore your DEX accounts and any
+   native wallets, so keep it safe.
 
-   NOTE: A dedicated wiki page describing time-locked fidelity bonds will be
-   created, but in short, fidelity bonds are funds redeemable only by you, but
-   in the future. Having a potential trader lock some amount of funds before
-   placing orders is an anti-spam mechanism to combat disruptive behavior like
-   backing out on swaps.
-
-6. Choose the type of wallet to use. In this screenshot, we choose a native BTC
-   wallet and click "Create!". The wallet will begin to synchronize with the
-   asset's network.
-
-   <img src="images/create-btc.png" width="360">
-
-   NOTE: This is your own **self-hosted** wallet. The wallet's address keys are
-   derived from the DEX application's "seed", which you may backup from the
-   Settings page at any time. Further, no central wallet backend service is
-   involved, only the nodes on the coin's decentralized network.
-
-7. The next form will show you synchronization progress, and give you the first
-   deposit address for the wallet and the minimum amount you should deposit to
-   be able to create your first bond in the next step, which is required to
-   place orders. **This is your wallet**, so deposit as much as you like! After
-   sending to your address, the transaction **must confirm** (i.e. be mined in a
-   block) before the form will update your balance. This form will be skipped if
-   the wallet is already funded and synchronized.
-
-   <img src="images/sync-fund-btc.png" width="360">
-
-   **IMPORTANT**: This is your own local wallet, and you can send as much as you
-   like to it since *only* the amount required for the bond will be spent in the
-   next step. The remaining amount, minus a small reserve for future bond
-   transactions, will be in your available balance. For example, you can send
-   yourself 5 BTC and only the required amount (0.0014 BTC in the case pictured
-   above) will be spent to create the bond in the next step, with an equivalent
-   amount plus fees in reserves. The remainder goes to your available balance,
-   which can then be traded, sent, or simply held in the wallet.
-
-   You may disable future bonds at any time by changing the "Target Tier" to 0
-   in the "Update Bond Options" form accessible from DEX host settings form
-   accessible from the Settings page. This will return any reserves to the
-   available balance. Any active bonds will automatically be refunded when their
-   lock time expires (currently 2 months after creation).
-
-   NOTE: The native Litecoin and Bitcoin Cash wallets connect to full nodes on
-   the blockchain network that have "compact block filters" enabled. It may take
-   time for the wallet to crawl the network until it finds such nodes. Be
-   patient; otherwise you can bootstrap the process using a known seed node such
-   as the Litecoin nodes on [this list](https://gist.github.com/chappjc/d0f26b12258f8531bb78b37f38d080a0).
-
-8. Once the wallet is synchronized and has at least enough to create your
-   time-locked fidelity bond, the form will update, and you should click the
-   button to create and broadcast your bond transaction.
-
-   <img src="images/register-button.png" width="360">
-
-   After proceeding, the available balance will be the amount you deposited
-   in the previous step minus this bond amount and transaction fees.
-
-9. You will then be taken to the **Markets** page, where you must wait for
-   confirmations on your bond transaction:
-
-   <img src="images/wait-for-confs.png" width="360">
-
-   While waiting, you may create additional wallets either directly from the
-   displayed market or on the Wallets page accessible from the navigation bar at
-   the top. This is also a good time to retrieve your application "seed", as
-   described in the next step.
-
-   After the transaction is confirmed, the application will submit the bond for
-   validation and you will be ready to trade:
-
-   <img src="images/bond-accepted.png" width="360">
-
-   It is recommended to export bond information whenever they are created since
-   they are not automatically restored from just the application seed. Do this
-   using the "Export Account" button of the DEX host settings accessible from
-   the Settings page. If you restore from seed in the future: create the same
-   wallets, add the same DEX host, and *then* import the bonds from this backup.
-
-10. At any time you can go to the Settings page via the "gears" icon in the top
-    navigation bar to retrieve the application seed that was generated when
-    initializing the application in the first dialog. This seed is used to
-    restore your DEX accounts and any native wallets, so keep it safe.
+   If you skip this step now (not recommended), you can go to the Settings view
+   via the "gears" icon in the top navigation bar to retrieve your application
+   seed later.
 
     <img src="images/view-seed.png" width="360">
 
-11. That's it! Use the Buy/Sell form on the Markets page to begin placing
-   orders. Go to the Wallets page to obtain addresses for your wallets so that
-   you can send yourself funds to trade.
+6. That's it! You'll be redirected to the wallets page after step 4 above.
+
+7. To start trading, follow the guide to [Setting Up Your DEX Trading
+   Account](https://github.com/decred/dcrdex/wiki/DEX-Trading-Account-Management).
 
 ## Advanced Client Installation
 

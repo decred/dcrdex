@@ -2,7 +2,7 @@
 
 ## Opening the BTC Wallet Settings
 
-In this guide, we will be using the Native BTC wallet that is built into DEX and you should learn how to navigate to the settings page.  The settings page is where you can reinitialize the wallet, rescan the wallet, etc.
+In this guide, we will be using the Native BTC wallet that is built into DEX and you should learn how to navigate to the settings view.  The settings view is where you can reinitialize the wallet, rescan the wallet, etc.
 
 1. Navigate to the `Wallets` page (`/wallets`) and select the Bitcoin wallet if it is not already selected.
 2. Click the `Settings` button that has a gears icon to open the settings dialog.
