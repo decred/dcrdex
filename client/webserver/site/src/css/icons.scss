@@ -110,6 +110,11 @@
   transform: rotate(180deg);
 }
 
+.ico-wide-headed-left-arrow::before {
+  content: "\e919";
+  display: inline-block;
+}
+
 .ico-arrowup::before {
   content: "\e90c";
   display: inline-block;
