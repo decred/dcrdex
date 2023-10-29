@@ -1027,7 +1027,7 @@ export default class MarketsPage extends BasePage {
       btn.removeAttribute('disabled')
       btn.removeAttribute('title')
     } else {
-      btn.setAttribute('disabled', 'disabled')
+      btn.setAttribute('disabled', 'true')
       if (disabledTooltipMsg) btn.setAttribute('title', disabledTooltipMsg)
     }
   }
