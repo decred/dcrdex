@@ -1038,7 +1038,7 @@ export default class MarketsPage extends BasePage {
     const quoteWallet = app().assets[mkt.quote.id].wallet
     if (!baseWallet || !quoteWallet) return
 
-    if (orderQty <= 0) {
+    if (orderQty <= 0 || orderQty < mkt.cfg.lotsize) {
       this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_QTY_ERROR))
       return
     }
@@ -2693,18 +2693,16 @@ export default class MarketsPage extends BasePage {
   quantityChanged (finalize: boolean) {
     const page = this.page
     const order = this.currentOrder = this.parseOrder()
-    if (order.qty <= 0) {
+    if (order.qty < 0) {
       page.lotField.value = '0'
       page.qtyField.value = ''
       this.previewQuoteAmt(false)
-      this.updateOrderBttnState()
       return
     }
     const lotSize = this.market.cfg.lotsize
     const lots = Math.floor(order.qty / lotSize)
     const adjusted = order.qty = this.currentOrder.qty = lots * lotSize
     page.lotField.value = String(lots)
-    this.updateOrderBttnState()
 
     if (!order.isLimit && !order.sell) return
 
