@@ -390,16 +390,11 @@ func bindJSFunctions(w webview.WebView) {
 		switch runtime.GOOS {
 		case "linux":
 			err = exec.Command("xdg-open", url).Start()
-			break
 		case "windows":
-			err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-			break
-		case "darwin":
-			err = exec.Command("open", url).Start()
-			break
+			err = exec.Command("rundll32", "url.dll", "FileProtocolHandler", url).Start()
 		}
 		if err != nil {
-			log.Errorf(err.Error())
+			log.Errorf("unable to run URL handler: %s", err.Error())
 		}
 	})
 }
