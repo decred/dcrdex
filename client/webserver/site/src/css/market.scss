@@ -18,14 +18,13 @@ div[data-handler=markets] {
   .ordertable-header {
     height: 30px;
     padding: 0 45px 0 10px;
+    background-color: $light_dialog_bg;
   }
 
   .orderbook {
     min-width: 300px;
     width: 90%;
-    border-right: 1px solid $light_border_color;
-    border-left: 1px solid $light_border_color;
-    border-top: 1px solid $light_border_color;
+    border-right: 5px solid $light_body_bg;
 
     & > div:first-child { // buy orders
       order: 3;
@@ -43,12 +42,17 @@ div[data-handler=markets] {
   .order-panel {
     min-width: 375px;
     width: 90%;
+    border-left: 5px solid $light_body_bg;
 
-    & > div {
-      border: 1px solid $light_border_color;
+    #orderTypeBttns {
+      button {
+        border-radius: 5px 5px 0 0;
+      }
     }
 
     #orderForm {
+      background: $light_dialog_bg;
+   
       input[type=number] {
         height: 30px;
         border-radius: 0;
@@ -133,6 +137,20 @@ div[data-handler=markets] {
     background-color: #6e0909;
   }
 
+  #notRegistered,
+  #registrationStatus,
+  #bondCreationPending {
+    background-color: $light_dialog_bg;
+  }
+
+  .charts, 
+  .orderbook,
+  .balances-panel,
+  .user-order-panel,
+  #recentMatchesBox {
+    background: $light_main_bg;
+  }
+
   .user-order {
     border: 1px solid $light_border_color;
 
@@ -143,6 +161,10 @@ div[data-handler=markets] {
     &:last-child .order-details {
       border-bottom-style: none;
       padding-bottom: 0;
+    }
+
+    &.inactive {
+      opacity: 0.5;
     }
 
     .user-order-header {
@@ -168,9 +190,6 @@ div[data-handler=markets] {
           background-color: $sellcolor_light;
         }
 
-        &.inactive {
-          opacity: 0.5;
-        }
       }
 
       .active-indicator {
@@ -244,22 +263,28 @@ div[data-handler=markets] {
       min-width: 30px;
     }
 
-    tbody > tr:hover,
-    tbody > tr.hover {
-      background-color: white;
-    }
-
     .ico-check {
       color: #9b8c09;
     }
   }
 
+  #orderTypeBttns {
+    border-bottom: 1px solid $light_border_color;
+  }
+
   .markettab {
     height: 30px;
     border-style: none;
+    border: 1px solid $light_border_color;
+    border-bottom: none;
+    background-color: $light_main_bg;
+    position: relative;
+    opacity: 0.8;
 
     &.selected {
-      background-color: #fffe;
+      top: 1px;
+      opacity: 1;
+      background-color: $light_dialog_bg;
     }
   }
 
@@ -675,34 +700,26 @@ div[data-handler=markets] {
     }
   }
 
+  span.label {
+    text-transform: uppercase;
+    font-weight: normal;
+    font-size: small;
+  }
+
   .twentyfour {
-    margin-left: 0;
-    border-left: 1px solid $light_border_color;
+    padding-left: 5px;
 
     .data-point {
       margin-left: 0;
 
       & > * {
+        align-items: flex-start;
         padding-right: 20px;
       }
 
       span.label {
+        text-align: left;
         width: 100%;
-        border-bottom: 1px solid $light_border_color;
-      }
-
-      &:first-child > span.label {
-        padding-right: 5px;
-        padding-left: 5px;
-      }
-
-      &:nth-child(3),
-      &:nth-child(4) {
-        align-items: flex-end;
-
-        span.label {
-          text-align: right;
-        }
       }
 
       &:nth-child(4) > * {
@@ -885,7 +902,6 @@ div[data-handler=markets] {
 
         height: 100%;
         overflow-x: hidden;
-        border-style: none none none solid;
       }
     }
 

@@ -52,10 +52,7 @@
 
 {{define "newWalletForm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-<div class="wallet-tabs" data-tmpl="walletTypeTabs">
-  <div class="wtab" data-tmpl="walletTabTmpl"></div>
-</div>
-<div class="bordertop py-2 text-center fs22 sans-light position-relative" data-tmpl="header">
+<div class="bordertop py-2 text-center fs22 sans-light position-relative mb-3" data-tmpl="header">
   [[[add_a_x_wallet]]]
   <div class="flex-center pt-1 d-hide fs18 sans" data-tmpl="tokenMsgBox">
     <span>[[[Token on]]]</span>
@@ -63,10 +60,10 @@
     <span data-tmpl="tokenParentName"></span>
   </div>
 </div>
-<div class="position-relative" data-tmpl="mainForm">
-  <div class="flex-center py-3" data-tmpl="oneBttnBox">
-    <button class="one-bttn w-auto" data-tmpl="oneBttn">[[[Create]]]!</button>
-  </div>
+<div class="wallet-tabs tabs" data-tmpl="walletTypeTabs">
+  <div class="wtab" data-tmpl="walletTabTmpl"></div>
+</div>
+<div class="position-relative p-3" data-tmpl="mainForm">
   <div class="py-2 fs14 grey">
     <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
   </div>
@@ -105,6 +102,9 @@
   <div class="p-3">
     <img data-tmpl="childLogo" class="micro-icon"> <span data-tmpl="childName"></span> [[[wallet_wait_synced]]].
   </div>
+</div>
+<div class="flex-center py-3" data-tmpl="oneBttnBox">
+  <button class="one-bttn w-auto" data-tmpl="oneBttn">[[[Create]]]!</button>
 </div>
 {{end}}
 
@@ -227,7 +227,7 @@
 {{end}}
 
 {{define "regAssetForm"}}
-<div class="text-center sans-light fs24 mb-3" data-tmpl="how">[[[how_reg]]]</div>
+<div class="text-center sans-light fs24 mb-3 mt-3" data-tmpl="how">[[[how_reg]]]</div>
 <div id="whatsabond" class="mt-1 fs14">
   <span class="ico-info"></span>
   <span class="ms-1">[[[whatsabond]]]</span>

@@ -49,11 +49,11 @@
     <div id="loaderMsg" class="mx-2"></div>
   </div>
 
-  <div id="noteBox" class="d-hide">
+  <div id="noteBox" class="d-hide dialog-panel">
     <div class="icon fs20 ico-bell p-1" id="innerNoteIcon"></div>
-    <div class="header d-flex align-items-center justify-content-start fs17 demi hoverbg px-3 py-2 min-fit">
-      <div id="noteCat" class="active">[[[Notifications]]]</div>
-      <div id="pokeCat">[[[Recent Activity]]]</div>
+    <div class="header d-flex align-items-center justify-content-start fs17 demi px-3 py-2 min-fit">
+      <div id="noteCat" class="hoverbg active">[[[Notifications]]]</div>
+      <div id="pokeCat" class="hoverbg">[[[Recent Activity]]]</div>
     </div>
     <div id="noteList" class="flex-grow-1 stylish-overflow">
       <div id="noteTmpl" class="note firstview p-2">
@@ -76,7 +76,7 @@
     </div>
   </div>
 
-  <div id="profileBox" class="d-hide">
+  <div id="profileBox" class="d-hide dialog-panel">
     <div class="icon fs20 ico-hamburger p-1" id="innerBurgerIcon"></div>
     <span class="errcolor" id="logoutErr"></span>
     <a href="/orders" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">

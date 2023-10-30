@@ -24,7 +24,7 @@
         linear-gradient(
           to bottom,
           #e0e0e000,
-          $light_body_bg
+          $light_dialog_bg
           90%
         );
     }
@@ -153,16 +153,17 @@
     display: flex;
     justify-content: flex-start;
     align-items: stretch;
+    border-bottom: 1px solid $light_border_color;
+    padding-left: 15px;
 
     .wtab {
       padding: 8px 20px;
       font-size: 15px;
-      border-style: solid solid none;
       border-radius: 5px 5px 0 0;
-      border-width: 1px;
-      border-color: #555;
-      opacity: 0.8;
-      background-color: $light_body_bg;
+      border: 1px solid $light_border_color;
+      border-bottom: none;
+      opacity: 0.6;
+      background-color: transparent;
       position: relative;
       z-index: 150;
     }
@@ -175,6 +176,8 @@
       opacity: 1;
       top: 1px;
       cursor: default;
+      background: linear-gradient(0deg, $light_dialog_bg 20%, #ddd 100%);
+      border-top: none;
     }
 
     .wtab:not(.selected) {
@@ -187,7 +190,7 @@
   }
 
   .bordertop {
-    border-top: solid 1px #555;
+    border-top: solid 1px $light_border_color;
     border-radius: 0 10px 0 0;
   }
 

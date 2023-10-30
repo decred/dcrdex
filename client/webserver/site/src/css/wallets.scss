@@ -40,8 +40,6 @@
   }
 
   #assetSelect {
-    border-right: 1px solid $dark-border-color;
-
     .icon-select {
       padding: 15px;
       cursor: pointer;
@@ -75,7 +73,7 @@
     .icon-select:hover,
     .icon-select.selected {
       opacity: 1;
-      background-color: #fff1;
+      background-color: $light_main_bg;
     }
   }
 
@@ -108,7 +106,7 @@
 
   #walletInfo {
     padding-top: 25px;
-    border-top: solid 1px #777;
+    border-top: solid 1px $light_border_color;
 
     table#walletInfoTable {
       width: 100%;
@@ -181,14 +179,7 @@
     height: 100px;
   }
 
-  #marketsOverviewBox {
-    border-left: 1px solid $light_border_color;
-    border-bottom: 1px solid $light_border_color;
-  }
-
   #walletDetailsBox {
-    border-bottom: $light_border_color;
-
     #assetLogo {
       width: 35px;
       height: 35px;
@@ -210,10 +201,8 @@
     @extend .table-striped;
   }
 
-  #stakingBox {
-    border-width: 1px;
-    border-style: solid none;
-    border-color: $light_border_color;
+  #vspPicker {
+    padding: 50px !important;
   }
 
   table#vspPickerTable,
@@ -279,12 +268,18 @@
   }
 
   .walletspage {
-    #orderActivityBox {
-      border-top: 1px solid $dark-border-color;
+    #walletDetailsBox,
+    #orderActivityBox,
+    #marketsOverviewBox {
+      background-color: $light_main_bg;
+    }
+
+    #stakingBox {
+      border-top: 8px solid $light_body_bg;
     }
 
     #marketsOverviewBox {
-      border-right: 1px solid $dark-border-color;
+      border-left: 8px solid $light_body_bg;
       border-bottom: none;
     }
 
@@ -304,7 +299,7 @@
       padding-top: 0;
       padding-left: 25px;
       border-top: none;
-      border-left: solid 1px #777;
+      border-left: solid 1px $light_border_color;
 
       table#walletInfoTable {
         width: auto;

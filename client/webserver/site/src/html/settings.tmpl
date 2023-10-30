@@ -3,8 +3,8 @@
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{$authed := .UserInfo.Authed}}
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
-  <span class="settings-gear ico-settings"></span><br>
-  <div class="settings">
+  <div class="settings dialog-panel">
+    <span class="settings-gear ico-settings mt-4"></span>
     <div class="form-check">
       <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
       <label class="form-check-label" for="darkMode">
@@ -83,41 +83,41 @@
   <div id="forms" class="d-hide">
     
     {{- /* DEX ADDRESS */ -}}
-    <form class="position-relative text-start" id="dexAddrForm" autocomplete="off">
+    <form class="position-relative text-start dialog-panel" id="dexAddrForm" autocomplete="off">
       {{template "dexAddrForm" .}}
     </form>
 
     {{- /* REG ASSET SELECTOR */ -}}
-    <form class="d-hide" id="regAssetForm">
+    <form class="d-hide dialog-panel" id="regAssetForm">
       {{template "regAssetForm"}}
     </form>
     {{- /* CONFIRM REGISTRATION */ -}}
-    <form class="d-hide" id="confirmRegForm">
+    <form class="d-hide dialog-panel" id="confirmRegForm">
       {{template "confirmRegistrationForm"}}
     </form>
 
     {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
-    <form class="d-hide" id="authorizeAccountImportForm">
+    <form class="d-hide dialog-panel" id="authorizeAccountImportForm">
       {{template "authorizeAccountImportForm" .}}
     </form>
 
     {{- /* NEW WALLET */ -}}
-    <form class="d-hide" id="newWalletForm">
+    <form class="d-hide dialog-panel" id="newWalletForm">
       {{template "newWalletForm" }}
     </form>
 
     {{- /* CHANGE APP PASSWORD */ -}}
-    <form class="d-hide" id="changeAppPWForm">
+    <form class="d-hide dialog-panel" id="changeAppPWForm">
       {{template "changeAppPWForm"}}
     </form>
 
     {{- /* RESET APP PASSWORD */ -}}
-    <form class="d-hide" id="resetAppPWForm">
+    <form class="d-hide dialog-panel" id="resetAppPWForm">
       {{template "appPassResetForm"}}
     </form>
 
     {{- /* EXPORT SEED AUTHORIZATION */ -}}
-    <form class="d-hide" id="exportSeedAuth">
+    <form class="d-hide dialog-panel" id="exportSeedAuth">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
         [[[Export Seed]]]
@@ -136,7 +136,7 @@
     </form>
 
     {{- /* SEED DISPLAY */ -}}
-    <form class="d-hide" id="authorizeSeedDisplay">
+    <form class="d-hide dialog-panel" id="authorizeSeedDisplay">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="fs18 sans-light text-center mb-2">[[[dont_share]]]</div>
       <div class="my-2 p-2 flex-center">
@@ -145,7 +145,7 @@
     </form>
 
     {{- /* SYNC AND BALANCE FORM */ -}}
-    <form class="d-hide" id="walletWait">
+    <form class="d-hide dialog-panel" id="walletWait">
       {{template "waitingForWalletForm"}}
     </form>
 

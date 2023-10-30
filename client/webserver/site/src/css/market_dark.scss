@@ -2,19 +2,23 @@ body.dark {
   div[data-handler=markets] {
     table.ordertable {
       color: #a1a1a1;
-
-      tbody > tr:hover,
-      tbody > tr.hover {
-        background-color: #1d2936;
-      }
     }
 
     .numorders {
       background-color: #141488;
     }
 
-    .markettab.selected {
-      background-color: #fff1;
+    #orderTypeBttns {
+      border-color: $dark_border_color;
+    }
+
+    .markettab {
+      background-color: $dark_main_bg;
+      border-color: $dark_border_color;
+
+      &.selected {
+        background-color: $dark_dialog_bg;
+      }
     }
 
     .market-bal {
@@ -56,18 +60,39 @@ body.dark {
       }
     }
 
-    .orderbook {
-      border-right: 1px solid $dark_border_color;
-      border-left: 1px solid $dark_border_color;
-      border-top: 1px solid $dark_border_color;
+    #notRegistered,
+    #registrationStatus,
+    #bondCreationPending {
+      background-color: $dark_dialog_bg;
     }
 
-    .order-panel > div {
-      border: 1px solid $dark_border_color;
+    .charts, 
+    .orderbook,
+    .balances-panel,
+    .user-order-panel,
+    #recentMatchesBox {
+      background: $dark_main_bg;
+    }
+
+    .order-panel {
+      border-left-color: $dark_body_bg;
+    }
+
+    .orderbook {
+      border-right-color: $dark_body_bg;
+
+      .ordertable-header {
+        background-color: $dark_dialog_bg;
+      }
     }
 
     .user-order {
-      border: 1px solid $dark_border_color;
+      border: none;
+      border-bottom: 1px solid $dark_border_color;
+
+      &:first-child {
+        border-top: 1px solid $dark_border_color;
+      }
 
       .order-details {
         border-color: $dark_border_color;
@@ -91,6 +116,7 @@ body.dark {
     }
 
     #orderForm {
+      background: $dark_dialog_bg;
       color: #a1a1a1;
 
       button {
@@ -147,7 +173,7 @@ body.dark {
 
     #leftMarketDock {
       border-color: $dark_border_color;
-      background-color: $dark_body_bg;
+      background-color: $dark_main_bg;
 
       #searchBoxV1 {
         border-color: $dark_border_color;
@@ -159,35 +185,27 @@ body.dark {
     }
   }
 
-  .twentyfour {
-    border-left: 1px solid $dark_border_color;
-
-    .data-point span.label {
-      border-bottom: 1px solid $dark_border_color;
-    }
-  }
-
   #main .market-stats-v1 {
     border-bottom: 1px solid $dark_border_color;
   }
 
   #durBttnBox,
   #epochLine {
-    background-color: $dark_body_bg;
+    background-color: $dark_main_bg;
 
     .candle-dur-bttn {
-      background-color: $dark_body_bg;
+      background-color: $dark_main_bg;
     }
   }
 
   #marketReopener {
     border-color: $dark_border_color;
-    background-color: $dark_body_bg;
+    background-color: $dark_main_bg;
   }
 
   .user-order-floaty-menu {
     border-color: $dark_border_color $dark_input_border $dark_input_border $dark_input_border;
-    background-color: $dark_body_bg;
+    background-color: $dark_main_bg;
   }
 }
 

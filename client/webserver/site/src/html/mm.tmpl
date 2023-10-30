@@ -48,7 +48,7 @@
     {{template "orderOptionTemplates"}}
 
     {{- /* APP PASSWORD */ -}}
-    <form id="pwForm" class="d-flex flex-column align-items-stretch">
+    <form id="pwForm" class="d-flex flex-column align-items-stretch dialog-panel">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div>
         <label for="pwInput" class="form-label pt-3 ps-1 mb-1">[[[App Password]]]</label>
@@ -60,12 +60,12 @@
     </form>
 
     {{- /* NEW WALLET */ -}}
-    <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
+    <form class="position-relative d-hide dialog-panel" id="newWalletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
     {{- /* ADD BOT FORM */ -}}
-    <form class="position-relative d-hide" id="addBotForm" autocomplete="off">
+    <form class="position-relative d-hide dialog-panel" id="addBotForm" autocomplete="off">
 
       {{- /* ABSOLUTELY-POSITIONED CUSTOM ASSET SELECT */ -}}
       <div id="assetDropdown" class="position-absolute d-flex flex-column align-items-stretch d-hide"></div>

@@ -103,8 +103,8 @@ interface Theme {
 
 const darkTheme: Theme = {
   axisLabel: '#b1b1b1',
-  gridBorder: '#383f4b',
-  gridLines: '#383f4b',
+  gridBorder: '#383f4b80',
+  gridLines: '#383f4b80',
   gapLine: '#6b6b6b',
   value: '#9a9a9a',
   zoom: '#5b5b5b',

@@ -257,7 +257,7 @@
         </div>{{/* END MARKETS OVERVIEW */}}
 
         {{- /* RECENT ORDERS */ -}}
-        <div class="col-24 col-xxl-8 d-flex stylish-overflow-lg invisible" id="orderActivityBox">
+        <div class="col-24 col-xxl-8 d-flex stylish-overflow-lg invisible mt-2" id="orderActivityBox">
           <div class="my-auto flex-center w-100 p-3" id="orderActivity">
             <div class="d-flex align-items-start flex-column mw-90p">
               <span class="fs28 sans-light mb-2">[[[Recent asset_name Activity]]]</span>
@@ -310,12 +310,12 @@
     </form>
 
     {{- /* NEW WALLET */ -}}
-    <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
+    <form class="position-relative d-hide dialog-panel" id="newWalletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
     {{- /* SEND */ -}}
-    <form class="pb-3 d-hide" id="sendForm" autocomplete="off">
+    <form class="pb-3 d-hide dialog-panel" id="sendForm" autocomplete="off">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 flex-center position-relative fs24 sans-light">
         [[[Send]]]
@@ -375,7 +375,7 @@
     </form>
 
     {{- /* Verify Send */ -}}
-    <form class="pb-3 d-hide" id="vSendForm">
+    <form class="pb-3 d-hide dialog-panel" id="vSendForm">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative header fs22 sans-light">
       [[[confirm]]]
@@ -434,17 +434,17 @@
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}
-    <form class="position-relative flex-center flex-column fs20 d-hide" id="deposit">
+    <form class="position-relative flex-center flex-column fs20 d-hide dialog-panel" id="deposit">
       {{template "depositAddress"}}
     </form>
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
+    <form class="position-relative d-hide dialog-panel" id="unlockWalletForm" autocomplete="off">
       {{template "unlockWalletForm"}}
     </form>
 
     {{- /* RECONFIGURE WALLET */ -}}
-    <form class="pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
+    <form class="pb-3 d-hide mt-3 dialog-panel" id="reconfigForm" autocomplete="off">
       <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
         [[[Reconfigure]]]
@@ -509,12 +509,12 @@
     </form>
 
     {{- /* TOGGLE WALLET STATUS AUTHORIZATION */ -}}
-    <form class="d-hide" id="toggleWalletStatusConfirm">
+    <form class="d-hide dialog-panel" id="toggleWalletStatusConfirm">
       {{template "toggleWalletStatusConfirm"}}
     </form>
 
     {{- /* MANAGE PEERS */ -}}
-    <form class="d-hide" id="managePeersForm">
+    <form class="d-hide dialog-panel" id="managePeersForm">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-2 py-1 text-center position-relative fs22 sans-light">
         [[[manage_peers]]]
@@ -548,7 +548,7 @@
     </form>
 
     {{- /* UNAPPROVE TOKEN VERSIONS TABLE FORM */ -}}
-    <form class="d-hide" id="unapproveTokenTableForm">
+    <form class="d-hide dialog-panel" id="unapproveTokenTableForm">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-2 py-1 text-center position-relative fs22 sans-light">
         [[[unapprove_token_for]]]
@@ -575,7 +575,7 @@
     </form>
 
     {{- /* UNAPPROVE SPECIFIC TOKEN VERSION FORM */ -}}
-    <form class="position-relative flex-center flex-column fs20 d-hide" id="unapproveTokenForm">
+    <form class="position-relative flex-center flex-column fs20 d-hide dialog-panel" id="unapproveTokenForm">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-2 py-1 text-center fs22 text-nowrap sans-light position-relative">
         [[[unapprove_token_version]]]
@@ -602,7 +602,7 @@
     </form>
 
     {{- /* CONFIRM FORCE FORM */ -}}
-    <form class="d-hide" id="confirmForce">
+    <form class="d-hide dialog-panel" id="confirmForce">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-2 py-1 text-center position-relative fs22 sans-light">
         [[[wallet_actively_used]]]
@@ -618,7 +618,7 @@
     </form>
 
     {{- /* RECOVER WALLET AUTHORIZATION */ -}}
-    <form class="d-hide" id="recoverWalletConfirm">
+    <form class="d-hide dialog-panel" id="recoverWalletConfirm">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-2 py-1 text-center position-relative fs22 sans-light">
         [[[recover_wallet]]]
@@ -637,7 +637,7 @@
     </form>
 
     {{- /* EXPORT WALLET AUTHORIZATION */ -}}
-    <form class="d-hide" id="exportWalletAuth">
+    <form class="d-hide dialog-panel" id="exportWalletAuth">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
         [[[export_wallet]]]
@@ -659,7 +659,7 @@
     </form>
 
     {{- /* RESTORE WALLET INFO */ -}}
-    <form class="d-hide" id="restoreWalletInfo">
+    <form class="d-hide dialog-panel" id="restoreWalletInfo">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-2 py-1 text-center position-relative fs22 sans-light">
         [[[export_wallet]]]
@@ -689,14 +689,14 @@
     </form>
 
     {{- /* Error Modal */ -}}
-    <form id="errorModal" class="d-hide mw-425">
+    <form id="errorModal" class="d-hide mw-425 dialog-panel">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="fs22 text-center">[[[Error]]]</div>
       <div id="errorModalMsg" class="fs16 errcolor my-2 text-center"></div>
     </form>
 
     {{- /* PICK A VOTING SERVICE PROVIDER */ -}}
-    <form id="vspPicker" class="flex-center flex-column p-2 m-4">
+    <form id="vspPicker" class="flex-center flex-column p-2 m-4 dialog-panel">
       <div class="form-closer hoverbg">
         <span class="ico-cross"></span>
       </div>
@@ -734,7 +734,7 @@
     </form>
 
     {{- /* PURCHASE TICKETS */ -}}
-    <form id="purchaseTicketsForm" class="flex-center flex-column p-2 m-4 mw-425">
+    <form id="purchaseTicketsForm" class="flex-center flex-column p-2 m-4 mw-425 dialog-panel">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="flex-center fs22 sans-light">[[[Purchase Tickets]]]</div>
       <div class="d-flex pt-2">
@@ -767,7 +767,7 @@
     </form>
 
     {{- /* TICKET HISTORY */ -}}
-    <form id="ticketHistoryForm" class="flex-center flex-column align-items-stretch p-2 m-4">
+    <form id="ticketHistoryForm" class="flex-center flex-column align-items-stretch p-5 m-4 dialog-panel">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="flex-center fs28 sans-light mb-2">[[[Ticket History]]]</div>
       <table id="ticketHistoryTable" class="fs14">
@@ -802,7 +802,7 @@
     </form>
 
     {{- /* SET VOTES */ -}}
-    <form id="votingForm" class="flex-center flex-column p-2 m-4 mw-425">
+    <form id="votingForm" class="flex-center flex-column p-2 m-4 mw-425 dialog-panel">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 
       {{- /* AGENDAS */ -}}
@@ -822,7 +822,7 @@
       </div>
 
       {{- /* TREASURY SPENDS */ -}}
-      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">[[[Treasury Spends]]]</div>
+      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100 dialog-panel">[[[Treasury Spends]]]</div>
       <div id="votingTspends" class="d-flex flex-column align-items-stretch w-100">
         <div id="tspendTmpl" class="d-flex justify-content-between align-items-stretch py-2 brdrtop">
           <div class="flex-center flex-grow-1 pe-3">
@@ -844,7 +844,7 @@
       </div>
 
       {{- /* TREASURY KEYS */ -}}
-      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100">[[[Treasury Keys]]]</div>
+      <div class="flex-center fs28 sans-light mt-2 brdrtop w-100 dialog-panel">[[[Treasury Keys]]]</div>
       <div id="votingTKeys" class="d-flex flex-column align-items-stretch w-100">
         <div id="tkeyTmpl" class="d-flex justify-content-between align-items-stretch py-2 brdrtop">
           <div class="flex-center flex-grow-1 pe-3">

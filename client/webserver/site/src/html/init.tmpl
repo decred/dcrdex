@@ -4,7 +4,7 @@
   <div class="position-absolute" id="forms">
 
     {{- /* App Initialization */ -}}
-    <form id="appPWForm">
+    <form id="appPWForm" class="dialog-panel">
       <div class="px-2 py-1 text-center fs28 sans-light">[[[Set App Password]]]</div>
       <div class="fs18 mt-2 sans-light">[[[reg_set_app_pw_msg]]]</div>
       <hr class="dashed my-4">
@@ -36,7 +36,7 @@
     </form>
 
     {{- /* Quick Config Form */ -}}
-    <form id="quickConfigForm" class="d-hide">
+    <form id="quickConfigForm" class="d-hide dialog-panel">
       <div class="px-2 py-1 text-center fs28 sans-light">[[[Quick Configuration]]]</div>
       <div id="qcChoices">
         <div class="fs18 mt-2">[[[quickconfig_wallet_header]]]</div>
@@ -83,7 +83,7 @@
     </form>
 
     {{- /* Seed Backup */ -}}
-    <form id="seedBackupForm" class="d-hide">
+    <form id="seedBackupForm" class="d-hide dialog-panel">
       <div class="px-2 py-1 text-center fs28 sans-light">[[[Backup App Seed]]]</div>
       <div id="sbWanna">
         <div class="fs18 mt-2">

@@ -4,42 +4,42 @@
   <div class="position-absolute" id="forms">
 
     {{- /* LOGIN FORM */ -}}
-    <form class="d-hide{{if and (not .UserInfo.Authed) .Initialized }} selected{{end}}" id="loginForm">
+    <form class="d-hide{{if and (not .UserInfo.Authed) .Initialized }} selected{{end}} dialog-panel" id="loginForm">
       {{template "loginForm"}}
     </form>
 
     {{- /* RESET APP PASSWORD */ -}}
-    <form class="mx-auto my-5 d-hide" id="resetAppPWForm">
+    <form class="mx-auto my-5 d-hide dialog-panel" id="resetAppPWForm">
       {{template "appPassResetForm"}}
     </form>
 
     {{- /* Form to set up a wallet. Shown on demand when a user clicks a setupWallet button. */ -}}
-    <form class="d-hide" id="newWalletForm">
+    <form class="d-hide dialog-panel" id="newWalletForm">
       {{template "newWalletForm" }}
     </form>
 
     {{- /* DEX ADDRESS FORM */ -}}
-    <form class="d-hide{{if and .Initialized .UserInfo.Authed (not .Host)}} selected{{end}}" id="dexAddrForm">
+    <form class="d-hide{{if and .Initialized .UserInfo.Authed (not .Host)}} selected{{end}} dialog-panel" id="dexAddrForm">
       {{template "dexAddrForm" .}}
     </form>
 
     {{- /* DISCOVER ACCOUNT FORM */ -}}
-    <form class="d-hide{{if and .Initialized .UserInfo.Authed .Host}} selected{{end}}" id="discoverAcctForm" data-host="{{.Host}}">
+    <form class="d-hide{{if and .Initialized .UserInfo.Authed .Host}} selected{{end}} dialog-panel" id="discoverAcctForm" data-host="{{.Host}}">
       {{template "discoverAcctForm" .}}
     </form>
 
     {{- /* REG ASSET SELECTOR */ -}}
-    <form class="d-hide" id="regAssetForm">
+    <form class="d-hide dialog-panel" id="regAssetForm">
       {{template "regAssetForm"}}
     </form>
 
     {{- /* CONFIRM FEE PAYMENT */ -}}
-    <form class="d-hide" id="confirmRegForm">
+    <form class="d-hide dialog-panel" id="confirmRegForm">
       {{template "confirmRegistrationForm"}}
     </form>
 
     {{- /* SYNC AND BALANCE FORM */ -}}
-    <form class="d-hide" id="walletWait">
+    <form class="d-hide dialog-panel" id="walletWait">
       {{template "waitingForWalletForm"}}
     </form>
 

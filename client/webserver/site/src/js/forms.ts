@@ -134,9 +134,11 @@ export class NewWalletForm {
       parentForm: parentForm
     }
 
-    const ani = new Wave(this.page.mainForm, { backgroundColor: true })
+    Doc.conceal(...Doc.kids(this.page.mainForm))
+    const ani = new Wave(this.page.mainForm, { backgroundColor: false })
     const res = await postJSON('/api/newwallet', createForm)
     ani.stop()
+    Doc.reveal(...Doc.kids(this.page.mainForm))
     return res
   }
 

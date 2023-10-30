@@ -1,12 +1,21 @@
 body.dark {
   .walletspage {
+    #walletDetailsBox,
+    #orderActivityBox,
     #marketsOverviewBox {
-      border-left: 1px solid $dark_border_color;
-      border-bottom: 1px solid $dark_border_color;
+      background-color: $dark_main_bg;
     }
 
-    #walletDetailsBox {
-      border-bottom: $dark_border_color;
+    #stakingBox {
+      border-top-color: $dark_body_bg;
+    }
+
+    #marketsOverviewBox {
+      border-left-color: $dark_body_bg;
+    }
+
+    #walletInfo {
+      border-color: $dark_border_color
     }
 
     #peersTable,
@@ -18,10 +27,6 @@ body.dark {
       tr.first-other {
         border-top: 1px solid $dark_border_color;
       }
-    }
-
-    #stakingBox {
-      border-color: $dark_border_color;
     }
 
     table#vspPickerTable,
@@ -44,6 +49,12 @@ body.dark {
       img[data-tmpl=parentImg] {
         background-color: $dark_body_bg;
         border-color: $dark_body_bg;
+      }
+
+      &:hover,
+      &.selected {
+        opacity: 1;
+        background-color: $dark_main_bg;
       }
     }
   }

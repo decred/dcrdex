@@ -1642,7 +1642,7 @@ export default class MarketsPage extends BasePage {
         unreadyOrders = true
       }
       header.sideLight.classList.add(ord.sell ? 'sell' : 'buy')
-      if (!isActive) header.sideLight.classList.add('inactive')
+      if (!isActive) div.classList.add('inactive')
       details.side.textContent = mord.header.side.textContent = OrderUtil.sellString(ord)
       details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')

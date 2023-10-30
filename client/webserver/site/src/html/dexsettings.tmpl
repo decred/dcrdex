@@ -35,7 +35,7 @@
 
   <div id="forms" class="d-hide">
     {{- /* DISABLE ACCOUNT */ -}}
-    <form class="d-hide" id="disableAccountForm">
+    <form class="d-hide dialog-panel" id="disableAccountForm">
       {{template "disableAccountForm"}}
     </form>
 
@@ -45,14 +45,15 @@
     </form>
 
     {{- /* DEX ADDRESS */ -}}
-    <form class="d-hide" id="dexAddrForm" autocomplete="off">
+    <form class="d-hide dialog-panel" id="dexAddrForm" autocomplete="off">
       {{template "dexAddrForm" .}}
     </form>
 
     {{- /* BOND DETAILS */ -}}
-    <form class="d-hide" id="bondDetailsForm" autocomplete="off">
+    <form class="d-hide dialog-panel" id="bondDetailsForm" autocomplete="off">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 fs28 text-center sans-light">[[[bond_details]]]</div>
+      <hr class="dashed my-2">
       <div class="d-flex justify-content-around my-3">
         <span class="text-center">
           [[[current_tier]]]

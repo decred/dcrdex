@@ -4,7 +4,7 @@ body.dark {
 
   header.maintop {
     background-color: $dark_body_bg;
-    border-bottom-style: solid;
+    border-bottom-style: none;
     border-color: $dark_border_color;
     border-width: 1px;
   }
@@ -60,6 +60,10 @@ body.dark {
     color: #d1d1ff;
     cursor: pointer;
     text-decoration: underline;
+  }
+
+  .hoverbg:hover {
+    background-color: #1d2936a0;
   }
 
   button {
@@ -125,7 +129,7 @@ body.dark {
 
   #noteBox,
   #profileBox {
-    background-color: $dark_body_bg;
+    background-color: $dark_dialog_bg;
   }
 
   #tooltip {
@@ -145,5 +149,10 @@ body.dark {
     &:checked {
       background-color: #27278d;
     }
+  }
+
+  .dialog-panel {
+    background-color: $dark_dialog_bg;
+    filter: drop-shadow(3px 3px 8px #00000040);
   }
 }

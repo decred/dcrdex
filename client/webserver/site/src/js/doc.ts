@@ -236,6 +236,23 @@ export default class Doc {
   }
 
   /*
+   * conceal hides the specified elements while keeping the element's display
+   * attribute unchanged. This is accomplished by adding the d-conceal
+   * class to the element. Use Doc.reveal to undo.
+   */
+  static conceal (...els: Element[]) {
+    for (const el of els) el.classList.add('d-conceal')
+  }
+
+  /*
+   * reveal shows the specified elements. This is accomplished by removing the
+   * d-conceal class as added with Doc.conceal.
+   */
+  static reveal (...els: Element[]) {
+    for (const el of els) el.classList.remove('d-conceal')
+  }
+
+  /*
    * animate runs the supplied function, which should be a "progress" function
    * accepting one argument. The progress function will be called repeatedly
    * with the argument varying from 0.0 to 1.0. The exact path that animate

@@ -6,7 +6,7 @@
 }
 
 .orders-left-side {
-  border-right: 1px solid black;
+  border-right: 1px solid $light_border_color;
 }
 
 .filter-opts {
@@ -47,6 +47,7 @@
 }
 
 #ordersTable {
+  background-color: $light_dialog_bg;
   width: 100%;
   // max-width: 90%;
   margin: 0 auto;
@@ -70,6 +71,30 @@
 
     tr:hover {
       background-color: #7774;
+    }
+  }
+}
+
+body.dark {
+  .orders-left-side {
+    border-color: $dark_border_color;
+  }
+
+  #ordersTable {
+    background-color: $dark_main_bg;
+
+    thead {
+      background-color: $dark_dialog_bg;
+    }
+
+    tbody {
+      tr:nth-child(even) {
+        background-color: #7771;
+      }
+  
+      tr:hover {
+        background-color: #77777716;
+      }
     }
   }
 }
