@@ -1793,9 +1793,12 @@ func (s *WebServer) apiStartMarketMaking(w http.ResponseWriter, r *http.Request)
 		s.writeAPIError(w, fmt.Errorf("failed to read form"))
 		return
 	}
-
-	err := s.mm.Run(s.ctx, form.AppPW, nil)
+	appPW, err := s.resolvePass(form.AppPW, r)
 	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	if err = s.mm.Run(s.ctx, appPW, nil); err != nil {
 		s.writeAPIError(w, fmt.Errorf("Error starting market making: %v", err))
 		return
 	}

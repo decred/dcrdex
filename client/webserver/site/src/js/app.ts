@@ -1004,13 +1004,6 @@ export default class Application {
     await this.updateMarketMakingConfig(mktCfg)
   }
 
-  async startMarketMaking (appPW: string) : Promise<void> {
-    const res = await postJSON('/api/startmarketmaking', { appPW })
-    if (!this.checkResponse(res)) {
-      throw new Error(res.msg)
-    }
-  }
-
   async stopMarketMaking () : Promise<void> {
     await postJSON('/api/stopmarketmaking')
   }

@@ -1,46 +1,96 @@
 {{define "mm"}}
 {{template "top" .}}
 <div id="main" data-handler="mm" class="main mm w-100 overflow-y-auto">
-  <div class="px-5 py-3 w-100">
-    <div class="flex-center fs28 text-break">[[[Market Making]]]</div>
-    <div class="px-1 py-2">
-      <span id="mmErr" class="errcolor px-2 d-hide"></span>
-      <br/>
-      <button type="button" class="fs20 mx-1 px-2 selected" id="addBotBtn">[[[add_a_bot]]]</button>
-      <button type="button" class="fs20 mx-1 px-2 selected d-hide" id="startBotsBtn">[[[start_market_making]]]</button>
-      <button type="button" class="fs20 mx-1 px-2 selected stopred-bg d-hide" id="stopBotsBtn">[[[stop_market_making]]]</button>
+  <div class="d-flex align-items-stretch justify-content-center flex-column align-items-stretch w-100 p-2">
+    <div id="onOff" class="flex-center align-items-stretch py-2">
+      <div class="flex-center flex-column p-3">
+        <div class="fs28 text-nowrap">[[[Market Making]]]</div>
+        <div class="flex-center mt-1 fs20">
+          <span id="onIndicator" class="off me-2"></span>
+          <span id="onMsg" class="d-hide">Running</span>
+          <span id="offMsg">Off</span>
+        </div>
+      </div>
+      <div class="flex-center p-3 brdrleft">
+        <button type="button" class="fs24 p-2 mt-2" id="startBotsBtn">
+          <span class="ico-arrowright me-1"></span>
+          [[[start_market_making]]]
+        </button>
+        <button type="button" class="fs24 p-2 mt-2 d-hide" id="stopBotsBtn">
+          <span class="ico-pause me-1"></span>
+          [[[stop_market_making]]]
+        </button>
+      </div>
     </div>
 
-    <table id="botTable" class="d-hide">
-      <thead>
-        <th scope="col" id="enabledHeader">[[[enabled]]]</th>
-        <th scope="col" id="runningHeader" class="d-hide">[[[running]]]</th>
-        <th scope="col">[[[Host]]]</th>
-        <th scope="col">[[[Market]]]</th>
-        <th scope="col">[[[bot_type]]]</th>
-        <th scope="col" id="baseBalanceHeader">[[[base_balance]]]</th>
-        <th scope="col" id="quoteBalanceHeader">[[[quote_balance]]]</th>
-        <th scope="col" id="removeHeader">[[[Remove]]]</th>
-        <th scope="col">[[[Settings]]]</th>
-      </thead>
-      <tbody id="botTableBody">
-        <tr id="botTableRowTmpl">
-          <td data-tmpl="enabled"><input data-tmpl="enabledCheckbox" class="form-check-input" type="checkbox"></td>
-          <td class="d-hide" data-tmpl="running">
-            <span class="ico-rocket fs20 mx-2" data-tmpl="runningIcon"></span>
-            <span class="ico-sleeping fs20 mx-2" data-tmpl="notRunningIcon"></span>
-          </td>
-          <td data-tmpl="host"></td>
-          <td><img data-tmpl="baseMktLogo"><img class="mx-1" data-tmpl="quoteMktLogo"><span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span></td>
-          <td data-tmpl="botType"></td>
-          <td data-tmpl="baseBalanceTd"><span data-tmpl="baseBalance"></span><img class="mx-1" data-tmpl="baseBalanceLogo"></td>
-          <td data-tmpl="quoteBalanceTd"><span data-tmpl="quoteBalance"></span><img class="mx-1" data-tmpl="quoteBalanceLogo"></td>
-          <td data-tmpl="removeTd"><span class="ico-cross fs20 pointer mx-2 red" data-tmpl="remove"></span></td>
-          <td><span class="ico-settings fs20 pointer mx-2" data-tmpl="settings"></span></td>          
-        </tr>
-      </tbody>
-    </table>
-    <h2 id="noBotsHeader" class="text-center d-hide">[[[add_bot_get_started]]]</h2>
+    <div id="noBots" class="w-100 flex-center flex-column">
+      <div class="d-flex align-items-stretch brdrleft brdrright">
+        <div class="col-12 d-flex flex-column align-items-stretch mw-425 p-2">
+          <div class="fs28 flex-center text-nowrap brdrbottom">[[[Market Making]]]</div>
+          <div class="p-2 text-justify fs15">
+            Add a market maker bot to make a market.
+            When you make a market, you strategically maintain orders on both sides of a market's order book.
+            In addition to potential profits, market makers improve the health
+            of a market by providing liquidity and limiting slippage.
+          </div>
+        </div>
+        <div class="col-12 flex-center flex-column mw-425 p-3 brdrleft">
+          <span class="ico-robot mb-3"></span>
+          <button id="addBotBtn" class="p-2 selected rounded3">Add a Market Maker Bot</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mmErr"  class="flex-center errcolor d-hide"></div>
+
+    <div class="px-5 py-3 w-100">
+      <table id="botTable" class="w-100 d-hide">
+        <thead>
+          <th id="enabledHeader">[[[enabled]]]</th>
+          <th id="runningHeader" class="d-hide">[[[running]]]</th>
+          <th>[[[Host]]]</th>
+          <th>[[[Market]]]</th>
+          <th>[[[bot_type]]]</th>
+          <th id="baseBalanceHeader">[[[base_balance]]]</th>
+          <th id="quoteBalanceHeader">[[[quote_balance]]]</th>
+          <th id="removeHeader" class="text-end">[[[Remove]]]</th>
+          <th class="text-end">[[[Settings]]]</th>
+        </thead>
+        <tbody id="botTableBody" class="fs18">
+          <tr id="botTableRowTmpl">
+            <td data-tmpl="enabled"><input data-tmpl="enabledCheckbox" class="form-check-input" type="checkbox"></td>
+            <td class="d-hide" data-tmpl="running">
+              <span class="ico-rocket fs20 mx-2" data-tmpl="runningIcon"></span>
+              <span class="ico-sleeping fs20 mx-2" data-tmpl="notRunningIcon"></span>
+            </td>
+            <td data-tmpl="host"></td>
+            <td>
+              <div class="d-flex align-items-center justify-content-start">
+                <img data-tmpl="baseMktLogo" class="micro-icon">
+                <img class="mx-1 micro-icon" data-tmpl="quoteMktLogo">
+                <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
+              </div>
+            </td>
+            <td data-tmpl="botType"></td>
+            <td data-tmpl="baseBalanceTd"><span data-tmpl="baseBalance"></span><img class="mx-1 micro-icon" data-tmpl="baseBalanceLogo"></td>
+            <td data-tmpl="quoteBalanceTd"><span data-tmpl="quoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="quoteBalanceLogo"></td>
+            <td class="text-end hoverbg pointer" data-tmpl="removeTd"><span class="ico-cross fs20 p-2 red"></span></td>
+            <td class="text-end hoverbg pointer" data-tmpl="settings"><span class="ico-settings fs24 p-2"></span></td>
+          </tr>
+        </tbody>
+        <tbody>
+          <tr id="addBotBtn2" class="hoverbg pointer">
+            <td colspan="9">
+              <div class="flex-center p-2 fs20">
+                <span class="ico-plus me-2"></span>
+                Add another bot
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
     
 
   {{- /* FORMS */ -}}
