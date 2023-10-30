@@ -32,6 +32,14 @@ func (db *TDBSource) LoadEpochStats(base, quote uint32, caches []*candles.Cache)
 	return db.loadEpochErr
 }
 
+func (db *TDBSource) LastCandleEndStamp(base, quote uint32, candleDur uint64) (uint64, error) {
+	return 0, nil
+}
+
+func (db *TDBSource) InsertCandles(base, quote uint32, dur uint64, cs []*candles.Candle) error {
+	return nil
+}
+
 type TBookSource struct {
 	book *msgjson.OrderBook
 }

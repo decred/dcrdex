@@ -61,4 +61,35 @@ const (
 		FROM %s
 		WHERE epoch_end >= $1
 		ORDER BY epoch_end;`
+
+	// CreateEpochReportTable creates an candles table that holds binned
+	// candle data.
+	CreateCandlesTable = `CREATE TABLE IF NOT EXISTS %s (
+		end_stamp INT8 PRIMARY KEY,
+		match_volume INT8,
+		quote_volume INT8,
+		high_rate INT8,
+		low_rate INT8,
+		start_rate INT8,
+		end_rate INT8
+	);`
+
+	InsertCandle = `INSERT INTO %s (
+		end_stamp, match_volume, quote_volume, high_rate, low_rate, start_rate, end_rate
+	)
+	VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (end_stamp) DO UPDATE
+	SET match_volume = $2, quote_volume = $3, high_rate = $4, low_rate = $5, start_rate = $6, end_rate = $7;`
+
+	SelectCandles = `SELECT end_stamp, match_volume, quote_volume,
+		high_rate, low_rate, start_rate, end_rate
+	FROM %s
+	ORDER BY end_stamp
+	LIMIT $1;`
+
+	SelectLastEndStamp = `SELECT (end_stamp)
+		FROM %s
+		ORDER BY end_stamp
+		DESC
+		LIMIT 1;`
 )

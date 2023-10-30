@@ -32,6 +32,7 @@ const (
 	cancelsArchivedTableName = "cancels_archived"
 	cancelsActiveTableName   = "cancels_active"
 	epochReportsTableName    = "epoch_reports"
+	candlesTableName         = "candles"
 )
 
 type tableStmt struct {
@@ -118,6 +119,24 @@ func fullEpochsTableName(dbName, marketSchema string) string {
 
 func fullEpochReportsTableName(dbName, marketSchema string) string {
 	return dbName + "." + marketSchema + "." + epochReportsTableName
+}
+
+func fullCandlesTableName(dbName, marketSchema string, candleDur uint64) string {
+	const fiveMin = 5 * 60 * 1000
+	const oneHour = 60 * 60 * 1000
+	const aDay = 24 * oneHour
+	var binSize string
+	switch candleDur {
+	case fiveMin:
+		binSize = "5m"
+	case oneHour:
+		binSize = "1h"
+	case aDay:
+		binSize = "24h"
+	default:
+		binSize = "epoch"
+	}
+	return dbName + "." + marketSchema + "." + candlesTableName + "_" + binSize
 }
 
 // createTable creates one of the known tables by name. The table will be

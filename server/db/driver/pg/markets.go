@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
@@ -80,6 +81,13 @@ func createMarketTables(db *sql.DB, marketName string) error {
 		if newTable && !newMarket {
 			log.Warnf(`Created missing table "%s" for existing market %s.`,
 				c.name, marketUID)
+		}
+	}
+
+	// Create tables for the candles.
+	for _, binSize := range append(candles.BinSizes, "epoch") {
+		if _, err := createTableStmt(db, internal.CreateCandlesTable, marketUID, candlesTableName+"_"+binSize); err != nil {
+			return err
 		}
 	}
 

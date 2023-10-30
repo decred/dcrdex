@@ -85,6 +85,8 @@ type DEXArchivist interface {
 
 	// LoadEpochStats reads all market epoch history from the database.
 	LoadEpochStats(uint32, uint32, []*candles.Cache) error
+	LastCandleEndStamp(base, quote uint32, candleDur uint64) (uint64, error)
+	InsertCandles(base, quote uint32, dur uint64, cs []*candles.Candle) error
 
 	OrderArchiver
 	AccountArchiver
