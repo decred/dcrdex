@@ -63,7 +63,7 @@ export default class DexSettingsPage extends BasePage {
 
     this.newWalletForm = new forms.NewWalletForm(
       page.newWalletForm,
-      assetID => this.newWalletCreated(assetID),
+      assetID => this.newWalletCreated(assetID, this.confirmRegisterForm.tier),
       this.pwCache,
       () => this.runAnimation(this.regAssetForm, page.regAssetForm)
     )
@@ -168,7 +168,7 @@ export default class DexSettingsPage extends BasePage {
       this.progressTierFormWithSyncedFundedWallet(assetID)
       return
     }
-    this.walletWaitForm.setWallet(wallet, fees)
+    this.walletWaitForm.setWallet(assetID, fees, this.confirmRegisterForm.tier)
     this.showForm(page.walletWait)
   }
 
@@ -389,7 +389,7 @@ export default class DexSettingsPage extends BasePage {
     return ''
   }
 
-  async newWalletCreated (assetID: number) {
+  async newWalletCreated (assetID: number, tier: number) {
     this.regAssetForm.refresh()
     const user = await app().fetchUser()
     if (!user) return
@@ -407,7 +407,7 @@ export default class DexSettingsPage extends BasePage {
       return
     }
 
-    this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+    this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
     await this.showForm(page.walletWait)
   }
 }

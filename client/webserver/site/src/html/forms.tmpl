@@ -227,117 +227,139 @@
 {{end}}
 
 {{define "regAssetForm"}}
-<div class="d-flex align-items-stretch">
-  <div class="d-flex justify-content-start flex-grow-1 flex-column px-2">
-    <span class="fs22">[[[Choose your trading tier]]]</span>
-    <span class="fs15 mt-1">[[[trading_tier_message]]]</span>
-  </div>
-  <div class="flex-center flex-grow-1 p-3">
-    <input data-tmpl="regAssetTier" type="number" class="fs24 p-2 text-center" value="1" min="0" step="1">
-    <input type="text" class="d-hide"> <!--two inputs to prevent auto form submission-->
+<div data-tmpl="whatsABondPanel" class="d-hide">
+  <div class="flex-center fs22 mb-2">[[[What is a fidelity bond]]]</div>
+  <ul class="fs16">
+    <li>
+      [[[bond_definition]]]
+    </li>
+    <li>
+      [[[bonds_can_be_revoked]]]
+    </li>
+    <li>
+      [[[bigger_bonds_higher_limit]]]
+    </li>
+    <li>
+      [[[limits_reputation]]]
+    </li>
+    <li>
+      [[[wallet_bond_reserves]]]
+    </li>
+  </ul>
+  <div class="flex-center p-3">
+    <div data-tmpl="bondGotIt" class="brdr rounded3 hoverbg pointer p-2 fs20">[[[Got it]]]</div>
   </div>
 </div>
-<hr class="dashed mt-3">
-<div data-tmpl="regAssetErr" class="fs14 errcolor flex-center"></div>
-<div data-tmpl="assetSelected" class="flex-center flex-column mb-3">
-  <div class="fs20">[[[current_bonding_asset]]]</div>
-  <div data-tmpl="chooseDifferentAsset" class="fs16 underline grey pointer hoverbg mt-1">[[[choose a different asset]]]</div>
-</div>
-<div data-tmpl="assetSelection">
-  <div class="w-100 flex-center fs18 my-3">[[[Select your bond asset]]]</div>
-  <table class="reg-asset-table w-100">
-    <thead>
-      <tr class="fs16">
-        <th>[[[Asset]]]</th>
-        <th>[[[Bond Lock]]]</th>
-        <th>Trading Limits</th>
-      </tr>
-    </thead>
-    <tbody data-tmpl="assets">
-      <tr data-tmpl="assetTmpl" class="hoverbg pointer">
-        <td>
-          <div class="d-flex flex-column align-items-start">
-            <div class="flex-center">
-              <img class="mini-icon" data-tmpl="logo">
-              <span class="fs18 ms-1" data-tmpl="name"></span>
-            </div>
-            <div class="fs14 readygreen" data-tmpl="ready"></div>
-          </div>
-        </td>
-        <td data-tmpl="bondData">
-          <div class="d-flex flex-column align-items-start">
-            <div class="flex-center">
-              <span data-tmpl="feeAmt" class="fs18"></span>
-              <span class="fs14 grey ms-1" data-tmpl="feeSymbol"></span>
-            </div>
-            <div class="flex-center fs14">
-              <span>~</span>
-              <span data-tmpl="fiatBondAmount"></span>
-              <span class="grey ms-1">[[[USD]]]</span>
-            </div>
-          </div>
-        </td>
-        <td>
-          <div class="d-flex flex-column align-items-start">
-            <div class="flex-center">
-              <span class="fs16" data-tmpl="tradeLimits" class="flex-center">
-                <span data-tmpl="tradeLimitLow"></span><span>&ndash;</span><span data-tmpl="tradeLimitHigh"></span>
-                <span data-tmpl="tradeLimitSymbol" class="ms-1 fs14 grey"></span>
-              </span>
-            </div>
-            <div class="flex-center">
-              <span class="fs14" data-tmpl="tradeLimits" class="flex-center">
-                <span>~</span>
-                <span data-tmpl="fiatTradeLimitLow"></span><span>&ndash;</span><span data-tmpl="fiatTradeLimitHigh"></span>
-                <span class="grey ms-1">[[[USD]]]</span>
-              </span>
-          </div>
-        </td>
-      </tr>
-    </tbody>
-  </table>
-  <div class="py-2 flex-center fs18">[[[Other Trading Limits]]]</div>
-  <table class="reg-asset-table brdrtop w-100">
-    <tbody data-tmpl="otherAssets">
-    </tbody>
-  </table>
-  <div class="d-flex align-items-stretch reg-asset nohover py-2" data-tmpl="allmkts">
-    <div class="flex-column flex-center">
-      <div class="fs20 sans-light">[[[All markets at]]]</div>
-      <span class="fs18 text-break" data-tmpl="host"></span>
+<div data-tmpl="mainBondingForm">
+  <div class="d-flex align-items-stretch">
+    <div class="d-flex justify-content-start flex-grow-1 flex-column px-2">
+      <span class="fs22">[[[Choose your trading tier]]]</span>
+      <span class="fs15 mt-1">[[[trading_tier_message]]]</span>
     </div>
-    <div class="reg-assets-markets-wrap flex-center flex-grow-1">
-      <table class="reg-asset-markets">
-        <thead>
-          <tr>
-            <th class="grey">[[[Market]]]</th>
-            <th class="grey">[[[:title:lot_size]]]</th>
-          </tr>
-        </thead>
-        <tbody data-tmpl="allMarkets">
-          <tr data-tmpl="marketTmpl">
-            <td class="pe-3">
-              <div class="d-flex align-items-center">
-                <img class="reg-market-logo" data-tmpl="logo">
-                <span data-tmpl="baseName"></span>-<span data-tmpl="quoteName"></span>
+    <div class="flex-center flex-grow-1 p-3">
+      <input data-tmpl="regAssetTier" type="number" class="fs24 p-2 text-center" value="1" min="0" step="1">
+      <input type="text" class="d-hide"> <!--two inputs to prevent auto form submission-->
+    </div>
+  </div>
+  <hr class="dashed mt-3">
+  <div data-tmpl="regAssetErr" class="fs14 errcolor flex-center"></div>
+  <div data-tmpl="assetSelected" class="flex-center flex-column mb-3">
+    <div class="fs20">[[[current_bonding_asset]]]</div>
+    <div data-tmpl="chooseDifferentAsset" class="fs16 underline grey pointer hoverbg mt-1">[[[choose a different asset]]]</div>
+  </div>
+  <div data-tmpl="assetSelection">
+    <div class="w-100 flex-center fs20 mt-3">[[[Select your bond asset]]]</div>
+    <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2 mb-2">What's a bond?</div>
+    <table class="reg-asset-table w-100">
+      <thead>
+        <tr class="fs16">
+          <th>[[[Asset]]]</th>
+          <th>[[[Bond Lock]]]</th>
+          <th>[[[Trading Limits]]]</th>
+        </tr>
+      </thead>
+      <tbody data-tmpl="assets">
+        <tr data-tmpl="assetTmpl" class="hoverbg pointer">
+          <td>
+            <div class="d-flex flex-column align-items-start">
+              <div class="flex-center">
+                <img class="mini-icon" data-tmpl="logo">
+                <span class="fs18 ms-1" data-tmpl="name"></span>
               </div>
-            </td>
-            <td>
-              <span data-tmpl="lotSize"></span>
-              <span data-tmpl="lotSizeSymbol"></span>
-              <span data-tmpl="quoteLotSize" class="d-hide"></span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="fader" data-tmpl="fader"></div>
+              <div class="fs14 readygreen" data-tmpl="ready"></div>
+            </div>
+          </td>
+          <td data-tmpl="bondData">
+            <div class="d-flex flex-column align-items-start">
+              <div class="flex-center">
+                <span data-tmpl="feeAmt" class="fs18"></span>
+                <span class="fs14 grey ms-1" data-tmpl="feeSymbol"></span>
+              </div>
+              <div class="flex-center fs14">
+                <span>~</span>
+                <span data-tmpl="fiatBondAmount"></span>
+                <span class="grey ms-1">[[[USD]]]</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="d-flex flex-column align-items-start">
+              <div class="flex-center">
+                <span class="fs16" data-tmpl="tradeLimits" class="flex-center">
+                  <span data-tmpl="tradeLimitLow"></span><span>&ndash;</span><span data-tmpl="tradeLimitHigh"></span>
+                  <span data-tmpl="tradeLimitSymbol" class="ms-1 fs14 grey"></span>
+                </span>
+              </div>
+              <div class="flex-center">
+                <span class="fs14" data-tmpl="tradeLimits" class="flex-center">
+                  <span>~</span>
+                  <span data-tmpl="fiatTradeLimitLow"></span><span>&ndash;</span><span data-tmpl="fiatTradeLimitHigh"></span>
+                  <span class="grey ms-1">[[[USD]]]</span>
+                </span>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="py-2 flex-center fs18">[[[Other Trading Limits]]]</div>
+    <table class="reg-asset-table brdrtop w-100">
+      <tbody data-tmpl="otherAssets">
+      </tbody>
+    </table>
+    <div class="d-flex align-items-stretch reg-asset nohover py-2" data-tmpl="allmkts">
+      <div class="flex-column flex-center">
+        <div class="fs20 sans-light">[[[All markets at]]]</div>
+        <span class="fs18 text-break" data-tmpl="host"></span>
+      </div>
+      <div class="reg-assets-markets-wrap flex-center flex-grow-1">
+        <table class="reg-asset-markets">
+          <thead>
+            <tr>
+              <th class="grey">[[[Market]]]</th>
+              <th class="grey">[[[:title:lot_size]]]</th>
+            </tr>
+          </thead>
+          <tbody data-tmpl="allMarkets">
+            <tr data-tmpl="marketTmpl">
+              <td class="pe-3">
+                <div class="d-flex align-items-center">
+                  <img class="reg-market-logo" data-tmpl="logo">
+                  <span data-tmpl="baseName"></span>-<span data-tmpl="quoteName"></span>
+                </div>
+              </td>
+              <td>
+                <span data-tmpl="lotSize"></span>
+                <span data-tmpl="lotSizeSymbol"></span>
+                <span data-tmpl="quoteLotSize" class="d-hide"></span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="fader" data-tmpl="fader"></div>
+      </div>
     </div>
   </div>
-</div>
-<hr class="dashed mb-3 mt-0">
-<div class="fs14">
-  <span class="ico-info"></span>
-  <span class="ms-1">[[[whatsabond]]]</span>
+  <hr class="dashed mb-3 mt-0">
 </div>
 {{end}}
 
@@ -405,7 +427,7 @@
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor text-break" data-tmpl="regErr"></div>
   <hr class="dashed">
-  <div class="fs15 reg-conf-msg mt-3" data-tmpl="text">
+  <div class="fs16 reg-conf-msg mt-3" data-tmpl="text">
     <span class="ico-info"></span> [[[reg_confirm_submit]]]
   </div>
 </div>
@@ -612,18 +634,17 @@
   </div>
   <div class="d-flex flex-column align-items-start" data-tmpl="balanceBox">
     <div class="flex-center mt-1">
-      <span class="fs16 me-1">[[[Balance]]]:</span>
+      <span class="fs16 me-1">[[[Available Balance]]]:</span>
       <span class="fs20 me-1" data-tmpl="balance"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
-    <div class="mt-1">
-      <span class="ico-info"></span>
-      <span class="fs14">[[[whatsabond]]]</span>
-    </div>
     <div class="mb-1 flex-center flex-row">
-      <span class="fs16 me-1">[[[Bond amount]]]:</span>
+      <span class="fs16 me-1">Bond Lock:</span>
       <span class="fs20 me-1" data-tmpl="fee"></span>
       <span class="fs16 grey unit">XYZ</span>
+    </div>
+    <div data-tmpl="bondCostBreakdown" class="mb-1">
+      Includes <span data-tmpl="bondLockNoFees"></span> for your bond and <span data-tmpl="bondLockFees"></span> for transaction fees.
     </div>
     <span data-tmpl="sendEnoughWithEst">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes totalForBond */}}
     <span data-tmpl="sendEnoughForToken">[[[Send funds for token]]]</span>
@@ -745,6 +766,9 @@
         <span data-tmpl="score"></span>
       </span>
     </span>
+  </div>
+  <div class="py-2 fs14">
+    [[[score_factors]]]
   </div>
 </div>
 {{end}}

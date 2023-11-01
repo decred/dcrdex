@@ -760,6 +760,11 @@ export default class MarketsPage extends BasePage {
 
     Doc.setVis(await showOrderForm(), page.orderForm, page.orderTypeBttns)
 
+    if (this.market) {
+      const { auth: { effectiveTier, pendingStrength } } = this.market.dex
+      Doc.setVis(effectiveTier > 0 || pendingStrength > 0, page.tradingLimits, page.reputationMeter)
+    }
+
     if (app().user.experimental && this.mmRunning === undefined) {
       const marketMakingStatus = await app().getMarketMakingStatus()
       this.mmRunning = marketMakingStatus.running
@@ -1205,7 +1210,6 @@ export default class MarketsPage extends BasePage {
     this.updateTitle()
     this.reputationMeter.setHost(dex.host)
     this.updateReputation()
-    this.updateTradeLimits(null)
     this.loadUserOrders()
   }
 
@@ -1353,7 +1357,6 @@ export default class MarketsPage extends BasePage {
       }]
     }
     this.drawChartLines()
-    this.updateTradeLimits(order)
     if (!show || !adjusted || !order.qty) {
       page.orderPreview.textContent = ''
       this.drawChartLines()
@@ -1366,24 +1369,6 @@ export default class MarketsPage extends BasePage {
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
     if (this.isSell()) this.preSell()
     else this.preBuy()
-  }
-
-  updateTradeLimits (ord: TradeForm | null) {
-    const { page, market: { cfg: mkt } } = this
-    if (!ord) {
-      page.orderFormParcels.textContent = '0'
-      return
-    }
-    const [msgRate, conversionRate] = this.anyRate()
-
-    let parcelWeight = ord.qty / mkt.lotsize
-    if (!ord.isLimit && !ord.sell) {
-      if (conversionRate) parcelWeight = ord.qty / conversionRate / mkt.lotsize
-      else parcelWeight = 1 / mkt.parcelsize
-    }
-
-    if (!ord.isLimit || ord.tifnow || ((ord.sell && ord.rate < msgRate) || (!ord.sell && ord.rate > msgRate))) parcelWeight *= 2
-    page.orderFormParcels.textContent = (parcelWeight / mkt.parcelsize).toFixed(1)
   }
 
   /**
@@ -2535,9 +2520,10 @@ export default class MarketsPage extends BasePage {
     const tier = strongTier(auth)
     page.tradingTier.textContent = String(tier)
     const [usedParcels, parcelLimit] = tradingLimits(host)
-    page.tradingLimit.textContent = parcelLimit.toFixed(1)
-    page.limitUsage.textContent = (usedParcels / parcelLimit * 100).toFixed(1)
-    page.orderParcelsRemain.textContent = (parcelLimit - usedParcels).toFixed(1)
+    page.tradingLimit.textContent = String(parcelLimit * mkt.parcelsize)
+    page.limitUsage.textContent = parcelLimit > 0 ? (usedParcels / parcelLimit * 100).toFixed(1) : '0'
+
+    page.orderLimitRemain.textContent = ((parcelLimit - usedParcels) * mkt.parcelsize).toFixed(1)
     page.orderTradingTier.textContent = String(tier)
 
     this.reputationMeter.update()
@@ -2565,14 +2551,18 @@ export default class MarketsPage extends BasePage {
   }
 
   handleMatchNote (note: MatchNote) {
-    this.updateReputation()
     const mord = this.metaOrders[note.orderID]
+    const match = note.match
     if (!mord) return this.refreshActiveOrders()
-    else if (mord.ord.type === OrderUtil.Market && note.match.status === OrderUtil.NewlyMatched) { // Update the average market rate display.
+    else if (mord.ord.type === OrderUtil.Market && match.status === OrderUtil.NewlyMatched) { // Update the average market rate display.
       // Fetch and use the updated order.
       const ord = app().order(note.orderID)
       if (ord) mord.details.rate.textContent = mord.header.rate.textContent = this.marketOrderRateString(ord, this.market)
     }
+    if (
+      (match.side === OrderUtil.MatchSideMaker && match.status === OrderUtil.MakerRedeemed) ||
+      (match.side === OrderUtil.MatchSideTaker && match.status === OrderUtil.MatchComplete)
+    ) this.updateReputation()
     if (app().canAccelerateOrder(mord.ord)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
   }
@@ -2582,9 +2572,8 @@ export default class MarketsPage extends BasePage {
    * used to update a user's order's status.
    */
   handleOrderNote (note: OrderNote) {
-    this.updateReputation()
-    const order = note.order
-    const mord = this.metaOrders[order.id]
+    const ord = note.order
+    const mord = this.metaOrders[ord.id]
     // - If metaOrder doesn't exist for the given order it means it was created
     //  via dexcctl and the GUI isn't aware of it or it was an inflight order.
     //  refreshActiveOrders must be called to grab this order.
@@ -2593,19 +2582,24 @@ export default class MarketsPage extends BasePage {
     //   and unlocked) has now become ready to tick. The active orders section
     //   needs to be refreshed.
     const wasInflight = note.topic === 'AsyncOrderFailure' || note.topic === 'AsyncOrderSubmitted'
-    if (!mord || wasInflight || (note.topic === 'OrderLoaded' && order.readyToTick)) {
+    if (!mord || wasInflight || (note.topic === 'OrderLoaded' && ord.readyToTick)) {
       return this.refreshActiveOrders()
     }
     const oldStatus = mord.ord.status
-    mord.ord = order
+    mord.ord = ord
     if (note.topic === 'MissedCancel') Doc.show(mord.details.cancelBttn)
-    if (order.filled === order.qty) Doc.hide(mord.details.cancelBttn)
-    if (app().canAccelerateOrder(order)) Doc.show(mord.details.accelerateBttn)
+    if (ord.filled === ord.qty) Doc.hide(mord.details.cancelBttn)
+    if (app().canAccelerateOrder(ord)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
     this.updateMetaOrder(mord)
     // Only reset markers if there is a change, since the chart is redrawn.
-    if ((oldStatus === OrderUtil.StatusEpoch && order.status === OrderUtil.StatusBooked) ||
-      (oldStatus === OrderUtil.StatusBooked && order.status > OrderUtil.StatusBooked)) this.setDepthMarkers()
+    if (
+      (oldStatus === OrderUtil.StatusEpoch && ord.status === OrderUtil.StatusBooked) ||
+      (oldStatus === OrderUtil.StatusBooked && ord.status > OrderUtil.StatusBooked)
+    ) {
+      this.setDepthMarkers()
+      this.updateReputation()
+    }
   }
 
   /*
@@ -2830,7 +2824,6 @@ export default class MarketsPage extends BasePage {
     } else {
       this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_QTY_ERROR))
     }
-    this.updateTradeLimits(this.parseOrder())
     if (!gap || !qty) {
       page.mktBuyLots.textContent = '0'
       page.mktBuyScore.textContent = '0'

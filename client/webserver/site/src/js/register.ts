@@ -77,7 +77,7 @@ export default class RegistrationPage extends BasePage {
 
     this.newWalletForm = new NewWalletForm(
       page.newWalletForm,
-      assetID => this.newWalletCreated(assetID),
+      assetID => this.newWalletCreated(assetID, this.confirmRegisterForm.tier),
       this.pwCache,
       () => this.animateRegAsset(page.newWalletForm)
     )
@@ -106,7 +106,7 @@ export default class RegistrationPage extends BasePage {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
-        this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+        this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
         slideSwap(page.regAssetForm, page.walletWait)
         return
       }
@@ -207,7 +207,7 @@ export default class RegistrationPage extends BasePage {
     await app().loadPage('markets')
   }
 
-  async newWalletCreated (assetID: number) {
+  async newWalletCreated (assetID: number, tier: number) {
     this.regAssetForm.refresh()
     const user = await app().fetchUser()
     if (!user) return
@@ -222,7 +222,7 @@ export default class RegistrationPage extends BasePage {
       return
     }
 
-    this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+    this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
     await slideSwap(page.newWalletForm, page.walletWait)
   }
 }

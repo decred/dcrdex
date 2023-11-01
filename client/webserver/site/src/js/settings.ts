@@ -87,7 +87,7 @@ export default class SettingsPage extends BasePage {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
-        this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+        this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
         this.slideSwap(page.walletWait)
         return
       }
@@ -107,7 +107,7 @@ export default class SettingsPage extends BasePage {
     // Create a new wallet
     this.newWalletForm = new forms.NewWalletForm(
       page.newWalletForm,
-      assetID => this.newWalletCreated(assetID),
+      assetID => this.newWalletCreated(assetID, this.confirmRegisterForm.tier),
       this.pwCache,
       () => this.animateRegAsset(page.newWalletForm)
     )
@@ -255,7 +255,7 @@ export default class SettingsPage extends BasePage {
     return res.feeBuffer
   }
 
-  async newWalletCreated (assetID: number) {
+  async newWalletCreated (assetID: number, tier: number) {
     const user = await app().fetchUser()
     if (!user) return
     const page = this.page
@@ -270,7 +270,7 @@ export default class SettingsPage extends BasePage {
       return
     }
 
-    this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+    this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
     this.slideSwap(page.walletWait)
   }
 

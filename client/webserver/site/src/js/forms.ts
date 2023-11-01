@@ -927,6 +927,16 @@ export class FeeAssetSelectionForm {
       Doc.show(page.assetSelection)
     })
 
+    Doc.bind(page.whatsABond, 'click', () => {
+      Doc.hide(page.mainBondingForm)
+      Doc.show(page.whatsABondPanel)
+    })
+
+    Doc.bind(page.bondGotIt, 'click', () => {
+      Doc.show(page.mainBondingForm)
+      Doc.hide(page.whatsABondPanel)
+    })
+
     app().registerNoteFeeder({
       createwallet: (note: WalletCreationNote) => {
         if (note.topic === 'QueuedCreationSuccess') this.walletCreated(note.assetID)
@@ -984,7 +994,7 @@ export class FeeAssetSelectionForm {
         const r = cFactor(qui) / cFactor(bui)
         const quoteLot = mkt.lotsize * mkt.spot.rate / OrderUtil.RateEncodingFactor * r
         const s = Doc.formatCoinValue(quoteLot, qui)
-        marketTmpl.quoteLotSize.textContent = `(~${s} ${qui})`
+        marketTmpl.quoteLotSize.textContent = `(~${s} ${qui.conventional.unit})`
       }
       return n
     }
@@ -1205,17 +1215,18 @@ export class WalletWaitForm {
   }
 
   /* setWallet must be called before showing the WalletWaitForm. */
-  setWallet (wallet: WalletState, bondFeeBuffer: number) {
-    this.assetID = wallet.assetID
+  setWallet (assetID: number, bondFeeBuffer: number, tier: number) {
+    this.assetID = assetID
     this.progressCache = []
     this.progressed = false
     this.funded = false
     this.bondFeeBuffer = bondFeeBuffer // in case we're a token, parent's balance must cover
     this.parentAssetSynced = false
     const page = this.page
-    const asset = app().assets[wallet.assetID]
-    this.parentID = asset.token?.parentID
-    const bondAsset = this.bondAsset = this.xc.bondAssets[asset.symbol]
+    const asset = app().assets[assetID]
+    const { symbol, unitInfo: ui, wallet: { balance: bal, address, synced, syncProgress }, token } = asset
+    this.parentID = token?.parentID
+    const bondAsset = this.bondAsset = this.xc.bondAssets[symbol]
 
     const symbolize = (el: PageElement, asset: SupportedAsset) => {
       Doc.empty(el)
@@ -1223,26 +1234,30 @@ export class WalletWaitForm {
     }
 
     for (const span of Doc.applySelector(this.form, '.unit')) symbolize(span, asset)
-    page.logo.src = Doc.logoPath(asset.symbol)
-    page.depoAddr.textContent = wallet.address
-    page.fee.textContent = Doc.formatCoinValue(bondAsset.amount, asset.unitInfo)
+    page.logo.src = Doc.logoPath(symbol)
+    page.depoAddr.textContent = address
 
-    Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
+    Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox, page.bondCostBreakdown)
     Doc.show(page.balanceBox)
 
+    let bondLock = 2 * bondAsset.amount * tier
     if (bondFeeBuffer > 0) {
-      // overlap * increment + buffer
-      page.totalForBond.textContent = Doc.formatCoinValue(2 * bondAsset.amount + bondFeeBuffer, asset.unitInfo)
+      Doc.show(page.bondCostBreakdown)
+      page.bondLockNoFees.textContent = Doc.formatCoinValue(bondLock, ui)
+      page.bondLockFees.textContent = Doc.formatCoinValue(bondFeeBuffer, ui)
+      bondLock += bondFeeBuffer
+      const need = Math.max(bondLock - bal.available + bal.reservesDeficit, 0)
+      page.totalForBond.textContent = Doc.formatCoinValue(need, ui)
       Doc.hide(page.sendEnough) // generic msg when no fee info available when
       Doc.hide(page.txFeeBox, page.sendEnoughForToken, page.txFeeBalanceBox) // for tokens
       Doc.hide(page.sendEnoughWithEst) // non-tokens
 
-      if (asset.token) {
+      if (token) {
         Doc.show(page.txFeeBox, page.sendEnoughForToken, page.txFeeBalanceBox)
-        const parentAsset = app().assets[asset.token.parentID]
+        const parentAsset = app().assets[token.parentID]
         page.txFee.textContent = Doc.formatCoinValue(bondFeeBuffer, parentAsset.unitInfo)
         page.parentFees.textContent = Doc.formatCoinValue(bondFeeBuffer, parentAsset.unitInfo)
-        page.tokenFees.textContent = Doc.formatCoinValue(bondAsset.amount, asset.unitInfo)
+        page.tokenFees.textContent = Doc.formatCoinValue(need, ui)
         symbolize(page.txFeeUnit, parentAsset)
         symbolize(page.parentUnit, parentAsset)
         symbolize(page.parentBalUnit, parentAsset)
@@ -1250,19 +1265,20 @@ export class WalletWaitForm {
       } else {
         Doc.show(page.sendEnoughWithEst)
       }
+      page.fee.textContent = Doc.formatCoinValue(bondLock, ui)
     } else { // show some generic message with no amounts, this shouldn't happen... show wallet error?
       Doc.show(page.sendEnough)
     }
 
-    Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
-    Doc.show(wallet.balance.available >= 2 * bondAsset.amount + bondFeeBuffer ? page.balCheck : page.balUncheck)
+    Doc.show(synced ? page.syncCheck : syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
+    Doc.show(bal.available >= 2 * bondAsset.amount + bondFeeBuffer ? page.balCheck : page.balUncheck)
 
-    page.progress.textContent = (wallet.syncProgress * 100).toFixed(1)
+    page.progress.textContent = (syncProgress * 100).toFixed(1)
 
-    if (wallet.synced) {
+    if (synced) {
       this.progressed = true
     }
-    this.reportBalance(wallet.assetID)
+    this.reportBalance(assetID)
   }
 
   /*
