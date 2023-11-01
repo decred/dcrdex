@@ -1172,14 +1172,7 @@ export default class MarketsPage extends BasePage {
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
 
-    let noWalletMsg = ''
-    if (!baseAsset?.wallet && !quoteAsset?.wallet) noWalletMsg = intl.prep(intl.ID_NO_WALLET_MSG, { asset1: baseCfg.symbol, asset2: quoteCfg.symbol })
-    else if (!baseAsset?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: baseCfg.symbol })
-    else if (!quoteAsset?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: quoteCfg.symbol })
-    if (noWalletMsg) {
-      page.noWallet.textContent = noWalletMsg
-      Doc.setVis(true, page.noWallet)
-    }
+    this.displayMessageIfMissingWallet()
     this.balanceWgt.setWallets(host, base, quote)
     this.setMarketDetails()
     this.setCurrMarketPrice()
@@ -2678,6 +2671,9 @@ export default class MarketsPage extends BasePage {
     if (!user) return
     const asset = user.assets[this.currentCreate.id]
     Doc.hide(this.page.forms)
+    const mkt = this.market
+    if (mkt.baseCfg.id === asset.id) mkt.base = asset
+    else if (mkt.quoteCfg.id === asset.id) mkt.quote = asset
     this.balanceWgt.updateAsset(asset.id)
     this.displayMessageIfMissingWallet()
     this.resolveOrderFormVisibility()
