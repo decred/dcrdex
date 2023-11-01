@@ -309,7 +309,7 @@ export const enUS: Locale = {
   [ID_BROWSER_NTFN_BONDS]: 'Bonds',
   [ID_BROWSER_NTFN_CONNECTIONS]: 'Server connections',
   [ID_CREATE_ASSET_WALLET_MSG]: 'Create a {{ asset }} wallet to trade',
-  [ID_NO_WALLET_MSG]: 'Create a {{ asset1 }} and {{ asset2 }} wallet to trade'
+  [ID_NO_WALLET_MSG]: 'Create {{ asset1 }} and {{ asset2 }} wallet to trade'
 }
 
 export const ptBR: Locale = {

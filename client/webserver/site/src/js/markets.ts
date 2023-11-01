@@ -1208,6 +1208,27 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
+    displayMessageForMissingWallet displays custom message on the market's view
+    if one or more of the selected market's wallet is missing.
+  */
+  displayMessageIfMissingWallet () {
+    const page = this.page
+    const mkt = this.market
+    const baseSym = mkt.baseCfg.symbol.toLocaleUpperCase()
+    const quoteSym = mkt.quoteCfg.symbol.toLocaleUpperCase()
+    let noWalletMsg = ''
+    Doc.hide(page.noWallet)
+    if (!mkt.base?.wallet && !mkt.quote?.wallet) noWalletMsg = intl.prep(intl.ID_NO_WALLET_MSG, { asset1: baseSym, asset2: quoteSym })
+    else if (!mkt.base?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: baseSym })
+    else if (!mkt.quote?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: quoteSym })
+    if (!noWalletMsg) {
+      return
+    }
+    page.noWallet.textContent = noWalletMsg
+    Doc.show(page.noWallet)
+  }
+
+  /*
    * reportDepthClick is a callback used by the DepthChart when the user clicks
    * on the chart area. The rate field is set to the x-value of the click.
    */
@@ -2658,7 +2679,7 @@ export default class MarketsPage extends BasePage {
     const asset = user.assets[this.currentCreate.id]
     Doc.hide(this.page.forms)
     this.balanceWgt.updateAsset(asset.id)
-    Doc.setVis(!(this.market.base.wallet && this.market.quote.wallet), this.page.noWallet)
+    this.displayMessageIfMissingWallet()
     this.resolveOrderFormVisibility()
   }
 
