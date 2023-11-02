@@ -292,6 +292,11 @@ export default class Application {
 
     // Bind the tooltips.
     this.bindTooltips(this.main)
+
+    if (window.isWebview) {
+      // Bind webview URL handlers
+      this.bindUrlHandlers(this.main)
+    }
   }
 
   bindTooltips (ancestor: HTMLElement) {
@@ -311,6 +316,15 @@ export default class Application {
         this.tooltip.style.left = '-10000px'
       })
     })
+  }
+
+  bindUrlHandlers (ancestor: HTMLElement) {
+    for (const link of Doc.applySelector(ancestor, 'a[target=_blank]')) {
+      Doc.bind(link, 'click', (e: MouseEvent) => {
+        e.preventDefault()
+        window.openUrl(link.href ?? '')
+      })
+    }
   }
 
   /* attachHeader attaches the header element, which unlike the main element,

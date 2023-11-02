@@ -379,6 +379,26 @@ func closeAllWindows() {
 	}
 }
 
+// bindJSFunctions exports functions callable in the frontend
+func bindJSFunctions(w webview.WebView) {
+	w.Bind("isWebview", func() bool {
+		return true
+	})
+
+	w.Bind("openUrl", func(url string) {
+		var err error
+		switch runtime.GOOS {
+		case "linux":
+			err = exec.Command("xdg-open", url).Start()
+		case "windows":
+			err = exec.Command("rundll32", "url.dll", "FileProtocolHandler", url).Start()
+		}
+		if err != nil {
+			log.Errorf("unable to run URL handler: %s", err.Error())
+		}
+	})
+}
+
 func runWebview(url string) {
 	w := webview.New(true)
 	defer w.Destroy()
@@ -389,6 +409,7 @@ func runWebview(url string) {
 
 	w.SetSize(width, height, webview.HintNone)
 	w.Navigate(url)
+	bindJSFunctions(w)
 	w.Run()
 }
 

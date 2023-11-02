@@ -8,6 +8,8 @@ declare global {
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
     user: () => void
+    isWebview?: () => boolean
+    openUrl: (url: string) => void
   }
 }
 
@@ -808,6 +810,7 @@ export interface Application {
   loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean>
   attach (data: any): void
   bindTooltips (ancestor: HTMLElement): void
+  bindUrlHandlers (ancestor: HTMLElement): void
   attachHeader (): void
   showDropdown (icon: HTMLElement, dialog: HTMLElement): void
   ackNotes (): void
