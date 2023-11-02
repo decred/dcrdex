@@ -104,6 +104,14 @@ func TestTxDB(t *testing.T) {
 	getTxsAndCheck(0, nil, true, []*asset.WalletTransaction{tx1.WalletTransaction})
 	getPendingTxsAndCheck([]*extendedWalletTx{tx1})
 
+	// Storing same pending tx twice should not change anything.
+	err = txHistoryStore.storeTx(tx1)
+	if err != nil {
+		t.Fatalf("failed to store tx: %v", err)
+	}
+	getTxsAndCheck(0, nil, true, []*asset.WalletTransaction{tx1.WalletTransaction})
+	getPendingTxsAndCheck([]*extendedWalletTx{tx1})
+
 	tx1.BlockNumber = 100
 	err = txHistoryStore.storeTx(tx1)
 	if err != nil {

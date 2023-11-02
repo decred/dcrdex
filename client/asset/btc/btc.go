@@ -4001,11 +4001,11 @@ func (btc *baseWallet) markTxAsSubmitted(id dex.Bytes) {
 		return
 	}
 
-	var hash chainhash.Hash
-	copy(hash[:], id)
+	var txHash chainhash.Hash
+	copy(txHash[:], id)
 
 	btc.pendingTxsMtx.Lock()
-	wt, found := btc.pendingTxs[hash]
+	wt, found := btc.pendingTxs[txHash]
 	if found {
 		wt.mtx.Lock()
 		wt.Submitted = true
@@ -6187,13 +6187,13 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 
 		for _, tx := range recentTxs {
 			if tx.Category == "receive" {
-				hash, err := chainhash.NewHashFromStr(tx.TxID)
+				txHash, err := chainhash.NewHashFromStr(tx.TxID)
 				if err != nil {
 					btc.log.Errorf("Error decoding txid %s: %v", tx.TxID, err)
 					continue
 				}
-				txID := dex.Bytes(hash[:])
-				_, err = txHistoryDB.getTxs(1, &txID, false)
+				txID := dex.Bytes(txHash[:])
+				_, err = txHistoryDB.getTx(txID)
 				if err == nil {
 					continue
 				}
@@ -6228,7 +6228,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 				}
 				if !wt.Confirmed || err != nil {
 					btc.pendingTxsMtx.Lock()
-					btc.pendingTxs[*hash] = wt
+					btc.pendingTxs[*txHash] = wt
 					btc.pendingTxsMtx.Unlock()
 				}
 			}

@@ -73,7 +73,14 @@ func txKey(txid []byte) []byte {
 type txDB interface {
 	storeTx(tx *extendedWalletTx) error
 	markTxAsSubmitted(txID dex.Bytes) error
+	// getTxs retrieves n transactions from the database. refID optionally
+	// takes a transaction ID, and returns that transaction and the at most
+	// (n - 1) transactions that were made either before or after it, depending
+	// on the value of past. If refID is nil, the most recent n transactions
+	// are returned, and the value of past is ignored. If the transaction with
+	// ID refID is not in the database, asset.CoinNotFoundError is returned.
 	getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error)
+	getTx(txID dex.Bytes) (*asset.WalletTransaction, error)
 	getPendingTxs() ([]*extendedWalletTx, error)
 	removeTx(hash dex.Bytes) error
 	// setLastReceiveTxQuery stores the last time the wallet was queried for
@@ -161,48 +168,34 @@ func hasPrefix(b, prefix []byte) bool {
 func (db *badgerTxDB) storeTx(tx *extendedWalletTx) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(tx.ID)
-		txKeyItem, err := txn.Get(txKey)
-		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+		txKeyItem, getErr := txn.Get(txKey)
+		if getErr != nil && !errors.Is(getErr, badger.ErrKeyNotFound) {
+			return getErr
+		}
+
+		key, err := db.findFreeBlockKey(txn, tx.BlockNumber)
+		if err != nil {
 			return err
 		}
 
-		var currBlockKey []byte
-		needNewBlockKey := true
-
-		if err == nil {
-			needNewBlockKey = false
-			currBlockKey, err = txKeyItem.ValueCopy(nil)
+		if getErr == nil { // already stored
+			currBlockKey, err := txKeyItem.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
-
-			if hasPrefix(currBlockKey, pendingPrefix) {
-				if tx.BlockNumber > 0 {
-					needNewBlockKey = true
-				}
+			err = txn.Delete(currBlockKey)
+			if err != nil {
+				return err
+			}
+			// Only update the key if it is a pending tx that has been confirmed,
+			// or if the block number has changed indicating a reorg.
+			if hasPrefix(currBlockKey, pendingPrefix) && tx.BlockNumber == 0 {
+				key = currBlockKey
 			} else if hasPrefix(currBlockKey, blockPrefix) {
 				blockHeight, _ := parseBlockKey(currBlockKey)
-				if blockHeight != tx.BlockNumber {
-					needNewBlockKey = true
+				if blockHeight == tx.BlockNumber {
+					key = currBlockKey
 				}
-			} else {
-				return fmt.Errorf("invalid block key %s", string(currBlockKey))
-			}
-
-			if needNewBlockKey {
-				if err := txn.Delete(currBlockKey); err != nil {
-					return err
-				}
-			}
-		}
-
-		if needNewBlockKey {
-			currBlockKey, err = db.findFreeBlockKey(txn, tx.BlockNumber)
-			if err != nil {
-				return err
-			}
-			if err = txn.Set(txKey, currBlockKey); err != nil {
-				return err
 			}
 		}
 
@@ -210,7 +203,13 @@ func (db *badgerTxDB) storeTx(tx *extendedWalletTx) error {
 		if err != nil {
 			return err
 		}
-		return txn.Set(currBlockKey, txB)
+
+		err = txn.Set(txKey, key)
+		if err != nil {
+			return err
+		}
+
+		return txn.Set(key, txB)
 	})
 }
 
@@ -252,6 +251,12 @@ func (db *badgerTxDB) markTxAsSubmitted(txID dex.Bytes) error {
 	})
 }
 
+// getTxs retrieves n transactions from the database. refID optionally
+// takes a transaction ID, and returns that transaction and the at most
+// (n - 1) transactions that were made either before or after it, depending
+// on the value of past. If refID is nil, the most recent n transactions
+// are returned, and the value of past is ignored. If the transaction with
+// ID refID is not in the database, asset.CoinNotFoundError is returned.
 func (db *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
 	var txs []*asset.WalletTransaction
 	err := db.View(func(txn *badger.Txn) error {
@@ -303,6 +308,18 @@ func (db *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Walle
 		return nil
 	})
 	return txs, err
+}
+
+func (db *badgerTxDB) getTx(txID dex.Bytes) (*asset.WalletTransaction, error) {
+	txs, err := db.getTxs(1, &txID, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 {
+		// This should never happen.
+		return nil, fmt.Errorf("no results returned from getTxs")
+	}
+	return txs[0], nil
 }
 
 func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
