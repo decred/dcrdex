@@ -421,7 +421,7 @@ export default class MarketsPage extends BasePage {
     bind(page.mktBuyField, 'change', () => { this.marketBuyChanged() })
     bind(page.mktBuyField, 'keyup', () => { this.marketBuyChanged() })
     bind(page.rateField, 'change', () => { this.rateFieldChanged() })
-    bind(page.rateField, 'keyup', () => { this.rateFieldChanged() })
+    bind(page.rateField, 'keyup', () => { this.previewQuoteAmt(true) })
 
     // Market search input bindings.
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
