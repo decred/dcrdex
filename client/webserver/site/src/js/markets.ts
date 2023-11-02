@@ -1201,8 +1201,8 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-    displayMessageForMissingWallet displays custom message on the market's view
-    if one or more of the selected market's wallet is missing.
+    displayMessageForMissingWallet displays a custom message on the market's
+    view if one or more of the selected market's wallet is missing.
   */
   displayMessageIfMissingWallet () {
     const page = this.page
@@ -1214,9 +1214,8 @@ export default class MarketsPage extends BasePage {
     if (!mkt.base?.wallet && !mkt.quote?.wallet) noWalletMsg = intl.prep(intl.ID_NO_WALLET_MSG, { asset1: baseSym, asset2: quoteSym })
     else if (!mkt.base?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: baseSym })
     else if (!mkt.quote?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: quoteSym })
-    if (!noWalletMsg) {
-      return
-    }
+    else return
+
     page.noWallet.textContent = noWalletMsg
     Doc.show(page.noWallet)
   }
