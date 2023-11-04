@@ -180,6 +180,8 @@ type Token struct {
 	Name string `json:"name"`
 	// UnitInfo is the UnitInfo for the token.
 	UnitInfo UnitInfo `json:"unitInfo"`
+	// ContractAddresses stores the token's ERC20 contract addresses.
+	ContractAddresses map[Network]string `json:"contractAddresses"`
 }
 
 // IntDivUp divides two integers, rounding up, without using floating point

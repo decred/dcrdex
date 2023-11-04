@@ -19,6 +19,12 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 	if !found {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
 	}
+	token.ContractAddresses = make(map[dex.Network]string)
+	for _, net := range nets {
+		if t, found := token.NetTokens[net]; found {
+			token.ContractAddresses[net] = t.Address.String()
+		}
+	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        walletTypeToken,
 		Tab:         "Polygon token",
