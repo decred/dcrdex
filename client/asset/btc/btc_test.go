@@ -484,6 +484,8 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		return json.Marshal(resp)
 	case methodGetWalletInfo:
 		return json.Marshal(&GetWalletInfoResult{UnlockedUntil: nil /* unencrypted -> unlocked */})
+	case methodGetAddressInfo:
+		return json.Marshal(&btcjson.GetAddressInfoResult{})
 	}
 	panic("method not registered: " + method)
 }

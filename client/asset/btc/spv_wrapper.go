@@ -117,6 +117,7 @@ type BTCWallet interface {
 	Peers() ([]*asset.WalletPeer, error)
 	AddPeer(string) error
 	RemovePeer(string) error
+	ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error)
 }
 
 // BlockNotification is block hash and height delivered by a BTCWallet when it
@@ -597,6 +598,10 @@ func (w *spvWallet) ownsInputs(txid string) bool {
 		}
 	}
 	return true
+}
+
+func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error) {
+	return w.wallet.ListSinceBlock(-1, blockHeight, 0)
 }
 
 // balances retrieves a wallet's balance details.

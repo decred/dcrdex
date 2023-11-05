@@ -921,6 +921,17 @@ type baseWallet struct {
 	// to avoid issues with the gap policy.
 	recycledAddrs map[string]struct{}
 	recyclePath   string
+
+	pendingTxsMtx sync.RWMutex
+	pendingTxs    map[chainhash.Hash]*extendedWalletTx
+
+	// receiveTxLastQuery stores the last block height at which the wallet
+	// was queried for recieve transactions. This is also stored in the
+	// txHistoryDB.
+	receiveTxLastQuery atomic.Uint64
+
+	txHistoryDB     atomic.Value // txDB
+	txHistoryDBPath string
 }
 
 func (w *baseWallet) fallbackFeeRate() uint64 {
@@ -947,6 +958,7 @@ type intermediaryWallet struct {
 	*baseWallet
 	txFeeEstimator txFeeEstimator
 	tipRedeemer    tipRedemptionWallet
+	txLister       txLister
 }
 
 // ExchangeWalletSPV embeds a ExchangeWallet, but also provides the Rescan
@@ -990,6 +1002,7 @@ var _ asset.Authenticator = (*ExchangeWalletSPV)(nil)
 var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
 var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
 var _ asset.AddressReturner = (*baseWallet)(nil)
+var _ asset.WalletHistorian = (*ExchangeWalletSPV)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -1361,6 +1374,8 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		calcTxSize:          txSizeCalculator,
 		txVersion:           txVersion,
 		Network:             cfg.Network,
+		pendingTxs:          make(map[chainhash.Hash]*extendedWalletTx),
+		txHistoryDBPath:     filepath.Join(walletDir, "txhistory.db"),
 		recyclePath:         filepath.Join(walletDir, "recycled-addrs.txt"),
 	}
 	w.cfgV.Store(baseCfg)
@@ -1416,6 +1431,12 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 		return nil, err
 	}
 
+	txHistoryDB, err := newBadgerTxDB(btc.txHistoryDBPath, btc.log.SubLogger("TXHISTORYDB"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tx history db: %v", err)
+	}
+	btc.txHistoryDB.Store(txHistoryDB)
+
 	spvw := &spvWallet{
 		chainParams: cfg.ChainParams,
 		cfg:         walletCfg,
@@ -1437,6 +1458,7 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 			baseWallet:     btc,
 			txFeeEstimator: spvw,
 			tipRedeemer:    spvw,
+			txLister:       spvw,
 		},
 		authAddOn: &authAddOn{spvw},
 		spvNode:   spvw,
@@ -1480,6 +1502,37 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	btc.currentTip = bestBlock
 	btc.tipMtx.Unlock()
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
+
+	if txHistoryDB := btc.txDB(); txHistoryDB != nil {
+		pendingTxs, err := txHistoryDB.getPendingTxs()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
+		}
+
+		btc.pendingTxsMtx.Lock()
+		for _, tx := range pendingTxs {
+			var txHash chainhash.Hash
+			copy(txHash[:], tx.ID)
+			btc.pendingTxs[txHash] = tx
+		}
+		btc.pendingTxsMtx.Unlock()
+
+		lastQuery, err := txHistoryDB.getLastReceiveTxQuery()
+		if errors.Is(err, errNeverQueried) {
+			lastQuery = 0
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to load last query time: %v", err)
+		}
+
+		btc.receiveTxLastQuery.Store(lastQuery)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			txHistoryDB.run(ctx)
+			txHistoryDB.close()
+		}()
+	}
 
 	wg.Add(1)
 	go func() {
@@ -2697,14 +2750,14 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*ou
 		return nil, 0, err
 	}
 
-	txHash := tx.TxHash()
+	txHash := btc.hashTx(tx)
 	coins := make([]asset.Coins, len(orders))
 	ops := make([]*output, len(orders))
 	for i := range coins {
-		coins[i] = asset.Coins{newOutput(&txHash, uint32(i), uint64(tx.TxOut[i].Value))}
-		ops[i] = newOutput(&txHash, uint32(i), uint64(tx.TxOut[i].Value))
+		coins[i] = asset.Coins{newOutput(txHash, uint32(i), uint64(tx.TxOut[i].Value))}
+		ops[i] = newOutput(txHash, uint32(i), uint64(tx.TxOut[i].Value))
 		btc.fundingCoins[ops[i].pt] = &utxo{
-			txHash:  &txHash,
+			txHash:  txHash,
 			vout:    uint32(i),
 			amount:  uint64(tx.TxOut[i].Value),
 			address: outputAddresses[i].String(),
@@ -2716,6 +2769,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*ou
 	for _, txOut := range tx.TxOut {
 		totalOut += uint64(txOut.Value)
 	}
+	btc.addTxToHistory(asset.Split, txHash[:], 0, totalIn-totalOut, true)
 
 	success = true
 	return coins, totalIn - totalOut, nil
@@ -3046,6 +3100,8 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, input
 	for i := 1; i < len(msgTx.TxOut); i++ {
 		totalOut += uint64(msgTx.TxOut[i].Value)
 	}
+
+	btc.addTxToHistory(asset.Split, txHash[:], 0, coinSum-totalOut, true)
 
 	// Need to save one funding coin (in the deferred function).
 	fundingCoins = map[outPoint]*utxo{op.pt: {
@@ -3612,7 +3668,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 	if err != nil {
 		return nil, "", err
 	}
-	signedTx, newChange, _, err :=
+	signedTx, newChange, fees, err :=
 		btc.signedAccelerationTx(previousTxs, changeOutput, requiredForRemainingSwaps, newFeeRate)
 	if err != nil {
 		return nil, "", err
@@ -3623,11 +3679,14 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 		return nil, "", err
 	}
 
+	txHash := btc.hashTx(signedTx)
+	btc.addTxToHistory(asset.Acceleration, txHash[:], 0, fees, true)
+
 	// Delete the old change from the cache
 	delete(btc.fundingCoins, newOutPoint(changeTxHash, changeVout))
 
 	if newChange == nil {
-		return nil, btc.hashTx(signedTx).String(), nil
+		return nil, txHash.String(), nil
 	}
 
 	// Add the new change to the cache if needed. We check if
@@ -3655,7 +3714,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 
 	// return nil error since tx is already broadcast, and core needs to update
 	// the change coin
-	return newChange, btc.hashTx(signedTx).String(), nil
+	return newChange, txHash.String(), nil
 }
 
 // AccelerationEstimate takes the same parameters as AccelerateOrder, but
@@ -3922,6 +3981,79 @@ func preAccelerate(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, ch
 	return currentEffectiveRate, &suggestedRange, earlyAcceleration, nil
 }
 
+func (btc *baseWallet) txDB() txDB {
+	dbi := btc.txHistoryDB.Load()
+	if dbi == nil {
+		return nil
+	}
+	return dbi.(txDB)
+}
+
+func (btc *baseWallet) markTxAsSubmitted(id dex.Bytes) {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	var txHash chainhash.Hash
+	copy(txHash[:], id)
+
+	btc.pendingTxsMtx.Lock()
+	wt, found := btc.pendingTxs[txHash]
+	if found {
+		wt.mtx.Lock()
+		wt.Submitted = true
+		wt.mtx.Unlock()
+	}
+	btc.pendingTxsMtx.Unlock()
+
+	err := txHistoryDB.markTxAsSubmitted(id)
+	if err != nil {
+		btc.log.Errorf("failed to mark tx as submitted in tx history db: %v", err)
+	}
+}
+
+func (btc *baseWallet) removeTxFromHistory(id dex.Bytes) {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	err := txHistoryDB.removeTx(id)
+	if err != nil {
+		btc.log.Errorf("failed to remove tx from tx history db: %v", err)
+	}
+}
+
+func (btc *baseWallet) addTxToHistory(txType asset.TransactionType, id dex.Bytes, balanceDelta int64, fees uint64, submitted bool) {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	wt := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			Type:         txType,
+			ID:           id,
+			BalanceDelta: balanceDelta,
+			Fees:         fees,
+		},
+		Submitted: submitted,
+	}
+
+	var txHash chainhash.Hash
+	copy(txHash[:], wt.ID)
+
+	btc.pendingTxsMtx.Lock()
+	btc.pendingTxs[txHash] = wt
+	btc.pendingTxsMtx.Unlock()
+
+	err := txHistoryDB.storeTx(wt)
+	if err != nil {
+		btc.log.Errorf("failed to store tx in tx history db: %v", err)
+	}
+}
+
 // Swap sends the swaps in a single transaction and prepares the receipts. The
 // Receipts returned can be used to refund a failed transaction. The Input coins
 // are NOT manually unlocked because they're auto-unlocked when the transaction
@@ -4049,6 +4181,8 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
+	btc.addTxToHistory(asset.Swap, txHash[:], -int64(totalOut), fees, true)
 
 	// If change is nil, return a nil asset.Coin.
 	var changeCoin asset.Coin
@@ -4214,6 +4348,9 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
+	btc.addTxToHistory(asset.Redeem, txHash[:], int64(totalIn), fee, true)
+
 	// Log the change output.
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
 	for i := range form.Redemptions {
@@ -4692,6 +4829,13 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.B
 	if err != nil {
 		return nil, fmt.Errorf("broadcastTx: %w", err)
 	}
+
+	var fee uint64
+	if len(msgTx.TxOut) > 0 { // something went very wrong if not true
+		fee = uint64(utxo.Value - msgTx.TxOut[0].Value)
+	}
+	btc.addTxToHistory(asset.Refund, txHash[:], utxo.Value, fee, true)
+
 	return toCoinID(refundHash, 0), nil
 }
 
@@ -4914,10 +5058,14 @@ func (btc *baseWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	txHash, err := btc.node.sendRawTransaction(msgTx)
 	if err != nil {
 		return nil, err
 	}
+
+	btc.markTxAsSubmitted(txHash[:])
+
 	return toCoinID(txHash, 0), nil
 }
 
@@ -4938,6 +5086,11 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 	pay2script, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("PayToAddrScript error: %w", err)
+	}
+
+	selfSend, err := btc.OwnsDepositAddress(address)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("error checking address ownership: %w", err)
 	}
 
 	baseSize := dexbtc.MinimumTxOverhead
@@ -4982,6 +5135,19 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 	}
 
 	txHash := btc.hashTx(msgTx)
+
+	var totalOut uint64
+	for _, txOut := range msgTx.TxOut {
+		totalOut += uint64(txOut.Value)
+	}
+
+	var amtSent int64
+	if !selfSend {
+		amtSent = -int64(toSend)
+	}
+
+	btc.addTxToHistory(asset.Send, txHash[:], amtSent, totalIn-totalOut, true)
+
 	return txHash, 0, toSend, nil
 }
 
@@ -5177,6 +5343,8 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 	btc.currentTip = newTip
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
 	btc.emit.TipChange(uint64(newTip.height))
+
+	go btc.checkPendingTxs(uint64(newTip.height))
 
 	reqs := btc.prepareRedemptionRequestsForBlockCheck()
 	// Redemption search would be compromised if the starting point cannot
@@ -5684,10 +5852,15 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		return nil, nil, fmt.Errorf("failed to fund bond tx: %w", err)
 	}
 
+	var txIDToRemoveFromHistory *chainhash.Hash // will be non-nil if tx was added to history
+
 	abandon := func() { // if caller does not broadcast, or we fail in this method
 		err := btc.ReturnCoins(coins)
 		if err != nil {
 			btc.log.Errorf("error returning coins for unused bond tx: %v", coins)
+		}
+		if txIDToRemoveFromHistory != nil {
+			btc.removeTxFromHistory(txIDToRemoveFromHistory[:])
 		}
 	}
 
@@ -5707,7 +5880,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
-	signedTx, _, _, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, amt, feeRate)
+	signedTx, _, fee, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, amt, feeRate)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to sign bond tx: %w", err)
 	}
@@ -5744,6 +5917,9 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		RedeemTx:   redeemTx,
 	}
 	success = true
+
+	btc.addTxToHistory(asset.CreateBond, txid[:], -int64(amt), fee, false)
+	txIDToRemoveFromHistory = txid
 
 	return bond, abandon, nil
 }
@@ -5846,6 +6022,13 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 	if err != nil {
 		return nil, fmt.Errorf("error sending refund bond transaction: %w", err)
 	}
+
+	txID := btc.hashTx(msgTx)
+	var fees uint64
+	if len(msgTx.TxOut) == 1 {
+		fees = amt - uint64(msgTx.TxOut[0].Value)
+	}
+	btc.addTxToHistory(asset.RedeemBond, txID[:], int64(amt), fees, true)
 
 	return newOutput(txHash, 0, uint64(msgTx.TxOut[0].Value)), nil
 }
@@ -5950,6 +6133,196 @@ func (btc *baseWallet) MaxFundingFees(numTrades uint32, feeRate uint64, options 
 
 	txSize := dexbtc.MinimumTxOverhead + numInputs*inputSize + uint64(numTrades+1)*outputSize
 	return feeRate * txSize
+}
+
+// checkPendingTxs checks to see if the wallet has received any incoming
+// transactions that need to be added to the transaction history. It also
+// checks all the pending transactions to see if they have been mined into
+// a block, and if so, updates the transaction history to reflect the
+// block height.
+func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	synced, _, err := btc.SyncStatus()
+	if err != nil {
+		btc.log.Errorf("Error getting sync status: %v", err)
+		return
+	}
+	if !synced {
+		return
+	}
+
+	// First, check to see if there are any recieving transactions we have not
+	// yet seen.
+	{
+		const blockQueryBuffer = 3
+		var blockToQuery uint64
+		lastQuery := btc.receiveTxLastQuery.Load()
+
+		if lastQuery != 0 && lastQuery < tip-blockQueryBuffer {
+			blockToQuery = lastQuery - blockQueryBuffer
+		} else {
+			blockToQuery = tip - blockQueryBuffer
+		}
+		recentTxs, err := btc.txLister.listTransactionsSinceBlock(int32(blockToQuery))
+		if err != nil {
+			btc.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
+			recentTxs = nil
+		} else {
+			btc.receiveTxLastQuery.Store(tip)
+			err = txHistoryDB.setLastReceiveTxQuery(tip)
+			if err != nil {
+				btc.log.Errorf("Error setting last query to %d: %v", tip, err)
+			}
+		}
+
+		for _, tx := range recentTxs {
+			if tx.Category == "receive" {
+				txHash, err := chainhash.NewHashFromStr(tx.TxID)
+				if err != nil {
+					btc.log.Errorf("Error decoding txid %s: %v", tx.TxID, err)
+					continue
+				}
+				txID := dex.Bytes(txHash[:])
+				_, err = txHistoryDB.getTx(txID)
+				if err == nil {
+					continue
+				}
+				if !errors.Is(err, asset.CoinNotFoundError) {
+					btc.log.Errorf("Error getting tx %s: %v", tx.TxID, err)
+					continue
+				}
+
+				var fee uint64
+				if tx.Fee != nil {
+					// Fee always seems to be negative in btcwallet, but just
+					// in case.
+					if *tx.Fee < 0 {
+						fee = toSatoshi(-*tx.Fee)
+					} else {
+						fee = toSatoshi(*tx.Fee)
+					}
+				}
+				wt := &extendedWalletTx{
+					WalletTransaction: &asset.WalletTransaction{
+						Type:         asset.Receive,
+						ID:           txID,
+						BalanceDelta: int64(toSatoshi(tx.Amount)),
+						Fees:         fee,
+					},
+					Submitted: true,
+				}
+
+				err = txHistoryDB.storeTx(wt)
+				if err != nil {
+					btc.log.Errorf("Error storing tx %s: %v", tx.TxID, err)
+				}
+				if !wt.Confirmed || err != nil {
+					btc.pendingTxsMtx.Lock()
+					btc.pendingTxs[*txHash] = wt
+					btc.pendingTxsMtx.Unlock()
+				}
+			}
+		}
+	}
+
+	pendingTxsCopy := make(map[chainhash.Hash]*extendedWalletTx, len(btc.pendingTxs))
+	btc.pendingTxsMtx.RLock()
+	for hash, tx := range btc.pendingTxs {
+		pendingTxsCopy[hash] = tx
+	}
+	btc.pendingTxsMtx.RUnlock()
+
+	handlePendingTx := func(hash chainhash.Hash, tx *extendedWalletTx) {
+		tx.mtx.Lock()
+		defer tx.mtx.Unlock()
+
+		if !tx.Submitted {
+			return
+		}
+		gtr, err := btc.node.getWalletTransaction(&hash)
+		if errors.Is(err, asset.CoinNotFoundError) {
+			err = txHistoryDB.removeTx(hash[:])
+			if err == nil {
+				btc.pendingTxsMtx.Lock()
+				delete(btc.pendingTxs, hash)
+				btc.pendingTxsMtx.Unlock()
+			} else {
+				// Leave it in the pendingPendingTxs and attempt to remove it
+				// again next time.
+				btc.log.Errorf("Error removing tx %s from the history store: %v", hash, err)
+			}
+			return
+		}
+		if err != nil {
+			btc.log.Errorf("Error getting transaction %s: %v", hash, err)
+			return
+		}
+
+		var updated bool
+		if gtr.BlockHash != "" {
+			blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
+			if err != nil {
+				btc.log.Errorf("Error decoding block hash %s: %v", gtr.BlockHash, err)
+				return
+			}
+			blockHeight, err := btc.tipRedeemer.getBlockHeight(blockHash)
+			if err != nil {
+				btc.log.Errorf("Error getting block height for %s: %v", blockHash, err)
+				return
+			}
+			if tx.BlockNumber != uint64(blockHeight) {
+				tx.BlockNumber = uint64(blockHeight)
+				updated = true
+			}
+		} else if gtr.BlockHash == "" && tx.BlockNumber != 0 {
+			tx.BlockNumber = 0
+			updated = true
+		}
+
+		var confs uint64
+		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
+			confs = tip - tx.BlockNumber + 1
+		}
+		if confs >= defaultRedeemConfTarget {
+			tx.Confirmed = true
+			updated = true
+		}
+
+		if updated {
+			err = txHistoryDB.storeTx(tx)
+			if err != nil {
+				btc.log.Errorf("Error updating tx %s: %v", hash, err)
+				return
+			}
+			if tx.Confirmed {
+				btc.pendingTxsMtx.Lock()
+				delete(btc.pendingTxs, hash)
+				btc.pendingTxsMtx.Unlock()
+			}
+		}
+	}
+
+	for hash, tx := range pendingTxsCopy {
+		handlePendingTx(hash, tx)
+	}
+}
+
+// TxHistory returns all the transactions the wallet has made. If refID is nil,
+// then transactions starting from the most recent are returned (past is ignored).
+// If past is true, the transactions prior to the refID are returned, otherwise
+// the transactions after the refID are returned. n is the number of
+// transactions to return. If n is <= 0, all the transactions will be returned.
+func (btc *ExchangeWalletSPV) TxHistory(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
+	}
+
+	return txHistoryDB.getTxs(n, refID, past)
 }
 
 type utxo struct {
