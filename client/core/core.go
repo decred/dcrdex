@@ -5103,7 +5103,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 	lotSize := mktConf.LotSize
 	quoteLotEst := calc.BaseToQuote(rate, lotSize)
 	if quoteLotEst == 0 {
-		return nil, errors.New("cannot divide by lot size zero")
+		return nil, fmt.Errorf("quote lot estimate of zero for market %s", mktID)
 	}
 
 	swapFeeSuggestion := c.feeSuggestion(dc, quote)
@@ -5162,7 +5162,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	}
 	lotSize := mktConf.LotSize
 	if lotSize == 0 {
-		return nil, errors.New("cannot divide by lot size zero")
+		return nil, fmt.Errorf("cannot divide by lot size zero for max sell estimate on market %s", mktID)
 	}
 
 	swapFeeSuggestion := c.feeSuggestion(dc, base)
