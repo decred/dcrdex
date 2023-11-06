@@ -17,8 +17,7 @@ import (
 )
 
 // FindRedemptionReq represents a request to find a contract's redemption,
-// which is added to the findRedemptionQueue with the contract outpoint as
-// key.
+// which is submitted to the RedemptionFinder.
 type FindRedemptionReq struct {
 	outPt        OutPoint
 	blockHash    *chainhash.Hash
@@ -29,11 +28,14 @@ type FindRedemptionReq struct {
 }
 
 func (req *FindRedemptionReq) fail(s string, a ...any) {
-	req.success(&FindRedemptionResult{err: fmt.Errorf(s, a...)})
-
+	req.sendResult(&FindRedemptionResult{err: fmt.Errorf(s, a...)})
 }
 
 func (req *FindRedemptionReq) success(res *FindRedemptionResult) {
+	req.sendResult(res)
+}
+
+func (req *FindRedemptionReq) sendResult(res *FindRedemptionResult) {
 	select {
 	case req.resultChan <- res:
 	default:
@@ -48,6 +50,7 @@ type FindRedemptionResult struct {
 	err              error
 }
 
+// RedemptionFinder searches on-chain for the redemption of a swap transactions.
 type RedemptionFinder struct {
 	mtx         sync.RWMutex
 	log         dex.Logger
@@ -157,8 +160,8 @@ func (r *RedemptionFinder) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		err = fmt.Errorf("context cancelled during search for redemption for %s", outPt)
 	}
 
-	// If this contract is still in the findRedemptionQueue, remove from the queue
-	// to prevent further redemption search attempts for this contract.
+	// If this contract is still tracked, remove from the queue to prevent
+	// further redemption search attempts for this contract.
 	r.mtx.Lock()
 	delete(r.redemptions, outPt)
 	r.mtx.Unlock()
@@ -354,8 +357,8 @@ func (r *RedemptionFinder) tryRedemptionRequests(ctx context.Context, startBlock
 	}
 }
 
-// prepareRedemptionRequestsForBlockCheck prepares a copy of the
-// findRedemptionQueue, checking for missing block data along the way.
+// prepareRedemptionRequestsForBlockCheck prepares a copy of the currently
+// tracked redemptions, checking for missing block data along the way.
 func (r *RedemptionFinder) prepareRedemptionRequestsForBlockCheck() []*FindRedemptionReq {
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.
@@ -502,14 +505,6 @@ func (r *RedemptionFinder) CancelRedemptionSearches() {
 	}
 	r.mtx.Unlock()
 }
-
-// // findRedemptionsInTx searches the MsgTx for the redemptions for the specified
-// // swaps.
-// func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[OutPoint]*FindRedemptionReq, msgTx *wire.MsgTx,
-// 	chainParams *chaincfg.Params) (discovered map[OutPoint]*FindRedemptionResult) {
-
-// 	return findRedemptionsInTxWithHasher(ctx, segwit, reqs, msgTx, chainParams, hashTx)
-// }
 
 func findRedemptionsInTxWithHasher(ctx context.Context, segwit bool, reqs map[OutPoint]*FindRedemptionReq, msgTx *wire.MsgTx,
 	chainParams *chaincfg.Params, hashTx func(*wire.MsgTx) *chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult) {

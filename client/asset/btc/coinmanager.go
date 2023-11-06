@@ -25,7 +25,7 @@ type CompositeUTXO struct {
 	Input        *dexbtc.SpendInfo
 }
 
-// EnoughFunc considers infomation about funding inputs and indicates whether
+// EnoughFunc considers information about funding inputs and indicates whether
 // it is enough to fund an order. EnoughFunc is bound to an order by the
 // OrderFundingThresholder.
 type EnoughFunc func(inputCount, inputsSize, sum uint64) (bool, uint64)
@@ -34,10 +34,13 @@ type EnoughFunc func(inputCount, inputsSize, sum uint64) (bool, uint64)
 // estimates the total required funds needed for the order.
 type OrderEstimator func(swapVal, inputCount, inputsSize, maxSwaps, feeRate uint64) uint64
 
-// OrderFundingThresholder creastes accepts information about an order and
-// generates an EnoughFunc that can be used to test funding input combinations.
+// OrderFundingThresholder accepts information about an order and generates an
+// EnoughFunc that can be used to test funding input combinations.
 type OrderFundingThresholder func(val, lots, maxFeeRate uint64, reportChange bool) EnoughFunc
 
+// CoinManager provides utilities for working with unspent transaction outputs.
+// In addition to translation to and from custom wallet types, there are
+// CoinManager methods to help pick UTXOs for funding in various contexts.
 type CoinManager struct {
 	// Coins returned by Fund are cached for quick reference.
 	mtx sync.RWMutex
@@ -78,6 +81,8 @@ func NewCoinManager(
 	}
 }
 
+// FundWithUTXOs attempts to find the best combination of UTXOs to satisfy the
+// given EnoughFunc while respecting the specified keep reserves (if non-zero).
 func (c *CoinManager) FundWithUTXOs(
 	utxos []*CompositeUTXO,
 	keep uint64,
@@ -153,6 +158,9 @@ func (c *CoinManager) fund(keep uint64, minConfs uint32, lockUnspents bool,
 	return c.fundWithUTXOs(utxos, avail, keep, lockUnspents, enough)
 }
 
+// Fund attempts to satisfy the given EnoughFunc with all available UTXOs. For
+// situations where Fund might be called repeatedly, the caller should instead
+// do SpendableUTXOs and use the results in FundWithUTXOs.
 func (c *CoinManager) Fund(
 	keep uint64,
 	minConfs uint32,
@@ -195,7 +203,7 @@ func (c *CoinManager) OrderWithLeastOverFund(maxLock, feeRate uint64, orders []*
 	return
 }
 
-// fundMultiBestEffors makes a best effort to fund every order. If it is not
+// fundMultiBestEffort makes a best effort to fund every order. If it is not
 // possible, it returns coins for the orders that could be funded. The coins
 // that fund each order are returned in the same order as the values that were
 // passed in. If a split is allowed and all orders cannot be funded, nil slices
@@ -323,7 +331,6 @@ func (c *CoinManager) FundMultiBestEffort(keep, maxLock uint64, values []*asset.
 // regards to the DEX's configuration, and considered safe to spend according to
 // confirmations and coin source. The UTXOs will be sorted by ascending value.
 // spendableUTXOs should only be called with the fundingMtx RLock'ed.
-// TODO: Move below with other CoinManager methdos
 func (c *CoinManager) SpendableUTXOs(confs uint32) ([]*CompositeUTXO, map[OutPoint]*CompositeUTXO, uint64, error) {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
@@ -366,6 +373,7 @@ func (c *CoinManager) spendableUTXOs(confs uint32) ([]*CompositeUTXO, map[OutPoi
 	return utxos, utxoMap, sum, nil
 }
 
+// ReturnCoins makes the locked utxos available for use again.
 func (c *CoinManager) ReturnCoins(unspents asset.Coins) error {
 	if unspents == nil { // not just empty to make this harder to do accidentally
 		c.log.Debugf("Returning all coins.")
@@ -401,6 +409,8 @@ func (c *CoinManager) ReturnCoins(unspents asset.Coins) error {
 	return nil
 }
 
+// ReturnOutPoint makes the UTXO represented by the OutPoint available for use
+// again.
 func (c *CoinManager) ReturnOutPoint(pt OutPoint) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -411,6 +421,7 @@ func (c *CoinManager) ReturnOutPoint(pt OutPoint) error {
 	return nil
 }
 
+// FundingCoins attempts to find the specified utxos and locks them.
 func (c *CoinManager) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
@@ -516,6 +527,7 @@ func (c *CoinManager) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	return coins, nil
 }
 
+// LockOutputs locks the specified utxos.
 func (c *CoinManager) LockOutputs(utxos []*UTxO) {
 	c.mtx.Lock()
 	for _, utxo := range utxos {
@@ -524,6 +536,7 @@ func (c *CoinManager) LockOutputs(utxos []*UTxO) {
 	c.mtx.Unlock()
 }
 
+// LockOutputs locks the utxos in the provided mapping.
 func (c *CoinManager) LockOutputsMap(utxos map[OutPoint]*UTxO) {
 	c.mtx.Lock()
 	for pt, utxo := range utxos {
@@ -532,6 +545,7 @@ func (c *CoinManager) LockOutputsMap(utxos map[OutPoint]*UTxO) {
 	c.mtx.Unlock()
 }
 
+// UnlockOutPoints unlocks the utxos represented by the provided outpoints.
 func (c *CoinManager) UnlockOutPoints(pts []OutPoint) {
 	c.mtx.Lock()
 	for _, pt := range pts {
@@ -540,6 +554,8 @@ func (c *CoinManager) UnlockOutPoints(pts []OutPoint) {
 	c.mtx.Unlock()
 }
 
+// LockedOutput returns the currently locked utxo represented by the provided
+// outpoint, or nil if there is no record of the utxo in the local map.
 func (c *CoinManager) LockedOutput(pt OutPoint) *UTxO {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()

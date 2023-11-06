@@ -9,12 +9,12 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	dexzec "decred.org/dcrdex/dex/networks/zec"
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/rpcclient/v8"
-	"github.com/gcash/bchd/btcjson"
 )
 
 func listUnspent(c rpcCaller) (res []*btc.ListUnspentResult, err error) {
@@ -158,7 +158,10 @@ func getTxOut(c rpcCaller, txHash *chainhash.Hash, index uint32) (*wire.TxOut, u
 	if res == nil {
 		return nil, 0, nil
 	}
-	outputScript, _ := hex.DecodeString(res.ScriptPubKey.Hex)
+	outputScript, err := hex.DecodeString(res.ScriptPubKey.Hex)
+	if err != nil {
+		return nil, 0, err
+	}
 	return wire.NewTxOut(int64(toZats(res.Value)), outputScript), uint32(res.Confirmations), nil
 }
 

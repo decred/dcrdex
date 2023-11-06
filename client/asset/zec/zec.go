@@ -168,7 +168,6 @@ type WalletConfig struct {
 	UseSplitTx       bool   `ini:"txsplit"`
 	RedeemConfTarget uint64 `ini:"redeemconftarget"`
 	ActivelyUsed     bool   `ini:"special_activelyUsed"` // injected by core
-	Birthday         uint64 `ini:"walletbirthday"`       // SPV
 }
 
 func newRPCConnection(cfg *dexbtc.RPCConfig) (*rpcclient.Client, error) {
@@ -335,7 +334,7 @@ func (w *zecWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("error getting account balance: %w", err)
 	}
 
-	locked, err := w.lockedSats()
+	locked, err := w.lockedZats()
 	if err != nil {
 		return nil, fmt.Errorf("error getting locked zats: %w", err)
 	}
@@ -420,7 +419,7 @@ func (w *zecWallet) prepareCoinManager() {
 	w.cm = btc.NewCoinManager(
 		w.log,
 		w.btcParams,
-		func(val, lots, maxFeeRate uint64, reportChange bool) btc.EnoughFunc {
+		func(val, lots, maxFeeRate uint64, reportChange bool) btc.EnoughFunc { // orderEnough
 			return func(inputCount, inputsSize, sum uint64) (bool, uint64) {
 				req := dexzec.RequiredOrderFunds(val, inputCount, inputsSize, lots)
 				if sum >= req {
@@ -557,9 +556,6 @@ func (w *zecWallet) connectRPC(ctx context.Context) error {
 	if err := createAccount(shieldedAcctNumber); err != nil {
 		return err
 	}
-	// if err := createAccount(1); err != nil {
-	// 	return err
-	// }
 	return nil
 }
 
@@ -594,9 +590,6 @@ func (w *zecWallet) watchBlocks(ctx context.Context) {
 			}
 
 			newTip := &btc.BlockVector{Height: newTipHdr.Height, Hash: *newTipHash}
-
-			// If the wallet is not offering tip reports, send this one right
-			// away.
 			w.reportNewTip(ctx, newTip)
 
 		case <-ctx.Done():
@@ -624,18 +617,6 @@ func (w *zecWallet) reportNewTip(ctx context.Context, newTip *btc.BlockVector) {
 
 	w.rf.ReportNewTip(ctx, prevTip, newTip)
 }
-
-// func (w *zecWallet) cancelRedemptionSearches() {
-// 	// Close all open channels for contract redemption searches
-// 	// to prevent leakages and ensure goroutines that are started
-// 	// to wait on these channels end gracefully.
-// 	w.findRedemptionMtx.Lock()
-// 	for contractOutpoint, req := range w.findRedemptionQueue {
-// 		req.fail("shutting down")
-// 		delete(w.findRedemptionQueue, contractOutpoint)
-// 	}
-// 	w.findRedemptionMtx.Unlock()
-// }
 
 type swapOptions struct {
 	Split *bool `ini:"swapsplit"`
@@ -911,8 +892,7 @@ func (w *zecWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uin
 	return coinIDs, btc.NewOutput(txHash, 0, uint64(txOut.Value)), fee, nil
 }
 
-// scriptHashAddress returns a new p2sh or p2wsh address, depending on whether
-// the wallet is configured for segwit.
+// scriptHashAddress returns a new p2sh address.
 func (w *zecWallet) scriptHashAddress(contract []byte) (btcutil.Address, error) {
 	return btcutil.NewAddressScriptHash(contract, w.btcParams)
 }
@@ -948,7 +928,7 @@ func (w *zecWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos [
 	lots := avail / lotSize
 	for lots > 0 {
 		est, _, _, err := w.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, true)
-		// The only failure mode of estimateSwap -> btc.fund is when there is
+		// The only failure mode of estimateSwap -> zec.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
 		if err != nil {
@@ -2499,7 +2479,7 @@ func (w *zecWallet) Balance() (*asset.Balance, error) {
 	if err != nil {
 		return nil, codedError(errBalanceRetrieval, err)
 	}
-	locked, err := w.lockedSats()
+	locked, err := w.lockedZats()
 	if err != nil {
 		return nil, err
 	}
@@ -2531,7 +2511,7 @@ func (w *zecWallet) Balance() (*asset.Balance, error) {
 }
 
 // lockedSats is the total value of locked outputs, as locked with LockUnspent.
-func (w *zecWallet) lockedSats() (uint64, error) {
+func (w *zecWallet) lockedZats() (uint64, error) {
 	lockedOutpoints, err := listLockUnspent(w, w.log)
 	if err != nil {
 		return 0, err

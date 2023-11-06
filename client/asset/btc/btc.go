@@ -2284,7 +2284,7 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, ui
 	return coins, redeemScripts, 0, nil
 }
 
-// FundsRequiredForMultiOrders returns an slice of the required funds for each
+// fundsRequiredForMultiOrders returns an slice of the required funds for each
 // of a slice of orders and the total required funds.
 func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, feeRate, splitBuffer, swapInputSize uint64) ([]uint64, uint64) {
 	requiredForOrders := make([]uint64, len(orders))
@@ -3734,7 +3734,7 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
 	// One last check for dust.
 	if btc.IsDust(txOut, feeRate) {
-		return nil, nil, 0, fmt.Errorf("redeem output is dust")
+		return nil, nil, 0, fmt.Errorf("swap redeem output is dust")
 	}
 	msgTx.AddTxOut(txOut)
 
@@ -4487,8 +4487,7 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 }
 
 // reportNewTip sets the currentTip. The tipChange callback function is invoked
-// and a goroutine is started to check if any contracts in the
-// findRedemptionQueue are redeemed in the new blocks.
+// and RedemptionFinder is informed of the new block.
 func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVector) {
 	btc.tipMtx.Lock()
 	defer btc.tipMtx.Unlock()
@@ -4951,8 +4950,8 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 		return nil, fmt.Errorf("error creating pubkey script: %w", err)
 	}
 	redeemTxOut := wire.NewTxOut(int64(amt-fee), redeemPkScript)
-	if dexbtc.IsDust(redeemTxOut, feeRate) { // hard to imagine
-		return nil, fmt.Errorf("redeem output is dust")
+	if btc.IsDust(redeemTxOut, feeRate) { // hard to imagine
+		return nil, fmt.Errorf("bond redeem output is dust")
 	}
 	msgTx.AddTxOut(redeemTxOut)
 
