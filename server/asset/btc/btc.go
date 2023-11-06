@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/account"
@@ -512,6 +513,11 @@ func (btc *Backend) FundingCoin(_ context.Context, coinID []byte, redeemScript [
 		return nil, fmt.Errorf("non-standard script")
 	}
 	return utxo, nil
+}
+
+func (*Backend) ValidateOrderFunding(swapVal, valSum, _, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
+	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, nfo)
+	return valSum >= reqVal
 }
 
 // ValidateCoinID attempts to decode the coinID.

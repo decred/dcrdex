@@ -711,14 +711,15 @@ func (w *zecWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 		spents = []*btc.Output{op}
 	} else if useSplit {
 		// No shielded split needed. Should we do a split to avoid overlock.
-		baggage := dexzec.TxFeesZIP317(inputsSize, 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, 0)
-		excess := sum - dexzec.RequiredOrderFunds(ord.Value, 1, dexbtc.RedeemP2PKHInputSize, ord.MaxSwapCount)
-		if baggage >= excess {
+		splitTxFees := dexzec.TxFeesZIP317(inputsSize, 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, 0)
+		requiredForOrderWithoutSplit := dexzec.RequiredOrderFunds(ord.Value, uint64(len(coins)), inputsSize, ord.MaxSwapCount)
+		excessWithoutSplit := sum - requiredForOrderWithoutSplit
+		if splitTxFees >= excessWithoutSplit {
 			w.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. "+
-				"%s > %s", btcutil.Amount(baggage), btcutil.Amount(excess))
+				"%s > %s", btcutil.Amount(splitTxFees), btcutil.Amount(excessWithoutSplit))
 		} else {
 			splitOutputVal := dexzec.RequiredOrderFunds(ord.Value, 1, dexbtc.RedeemP2PKHInputSize, ord.MaxSwapCount)
-			transparentSplitFees = baggage
+			transparentSplitFees = splitTxFees
 			baseTx, _, _, err := w.fundedTx(spents)
 			if err != nil {
 				return nil, nil, 0, fmt.Errorf("fundedTx error: %w", err)
@@ -782,7 +783,6 @@ func (w *zecWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 	if err != nil {
 		return nil, nil, 0, newError(errLockUnspent, "LockUnspent error: %w", err)
 	}
-
 	return coins, redeemScripts, shieldedSplitFees + transparentSplitFees, nil
 }
 

@@ -1192,8 +1192,8 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		useLegacyBalance:  cfg.LegacyBalance,
 		balanceFunc:       cfg.BalanceFunc,
 		segwit:            cfg.Segwit,
-		initTxSize:        uint64(initTxSize),
-		initTxSizeBase:    uint64(initTxSizeBase),
+		initTxSize:        initTxSize,
+		initTxSizeBase:    initTxSizeBase,
 		signNonSegwit:     nonSegwitSigner,
 		localFeeRate:      cfg.FeeEstimator,
 		externalFeeRate:   cfg.ExternalFeeEstimator,
@@ -4794,8 +4794,8 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		return nil, nil, fmt.Errorf("error constructing p2sh script: %v", err)
 	}
 	txOut := wire.NewTxOut(int64(amt), pkScript)
-	if dexbtc.IsDust(txOut, feeRate) {
-		return nil, nil, fmt.Errorf("bond output value of %d is dust", amt)
+	if btc.IsDust(txOut, feeRate) {
+		return nil, nil, fmt.Errorf("bond output value of %d (fee rate %d) is dust", amt, feeRate)
 	}
 	baseTx.AddTxOut(txOut)
 
@@ -4951,7 +4951,7 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 	}
 	redeemTxOut := wire.NewTxOut(int64(amt-fee), redeemPkScript)
 	if btc.IsDust(redeemTxOut, feeRate) { // hard to imagine
-		return nil, fmt.Errorf("bond redeem output is dust")
+		return nil, fmt.Errorf("bond redeem output (amt = %d, feeRate = %d, outputSize = %d) is dust", amt, feeRate, redeemTxOut.SerializeSize())
 	}
 	msgTx.AddTxOut(redeemTxOut)
 

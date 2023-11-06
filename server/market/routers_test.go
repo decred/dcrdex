@@ -395,6 +395,7 @@ type TBackend struct {
 	syncedErr      error
 	confsMinus2    int64
 	invalidFeeRate bool
+	unfunded       bool
 }
 
 func tNewUTXOBackend() *tUTXOBackend {
@@ -486,6 +487,10 @@ func (b *tUTXOBackend) FundingCoin(ctx context.Context, coinID, redeemScript []b
 func (b *tUTXOBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 	_, err := b.utxo(coinID)
 	return err
+}
+
+func (b *tUTXOBackend) ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
+	return !b.unfunded
 }
 
 type tAccountBackend struct {
@@ -1434,7 +1439,9 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 
 	// Not enough funding
 	trade.Coins = ogUTXOs[:1]
+	fundingAsset.unfunded = true
 	checkCode("unfunded", msgjson.FundingError)
+	fundingAsset.unfunded = false
 	trade.Coins = ogUTXOs
 
 	// Invalid address

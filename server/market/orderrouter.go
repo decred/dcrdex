@@ -473,6 +473,11 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 
 	// Funding coins are from a utxo-based asset. Need to find them.
 
+	funder, is := assets.funding.Backend.(asset.OutputTracker)
+	if !is {
+		return msgjson.NewError(msgjson.RPCInternal, "internal error")
+	}
+
 	// Validate coin IDs and prepare some strings for debug logging.
 	coinStrs := make([]string, 0, len(coins))
 	for _, coinID := range trade.Coins {
@@ -563,13 +568,12 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		}
 
 		// Calculate the fees and check that the utxo sum is enough.
-		var reqVal uint64
+		var swapVal uint64
 		if sell {
-			reqVal = calc.RequiredOrderFunds(trade.Quantity, uint64(spendSize), lots, &fundingAsset.Asset)
+			swapVal = trade.Quantity
 		} else {
 			if rate > 0 { // limit buy
-				quoteQty := calc.BaseToQuote(rate, trade.Quantity)
-				reqVal = calc.RequiredOrderFunds(quoteQty, uint64(spendSize), lots, &assets.quote.Asset)
+				swapVal = calc.BaseToQuote(rate, trade.Quantity)
 			} else {
 				// This is a market buy order, so the quantity gets special handling.
 				// 1. The quantity is in units of the quote asset.
@@ -580,18 +584,16 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 				}
 				buyBuffer := tunnel.MarketBuyBuffer()
 				lotWithBuffer := uint64(float64(lotSize) * buyBuffer)
-				minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
-				if trade.Quantity < minReq {
-					errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", trade.Quantity, minReq, midGap)
+				swapVal = matcher.BaseToQuote(midGap, lotWithBuffer)
+				if trade.Quantity < swapVal {
+					errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", trade.Quantity, swapVal, midGap)
 					return false, msgjson.NewError(msgjson.FundingError, errStr)
 				}
-				reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.quote.Asset)
 			}
-
 		}
-		if valSum < reqVal {
-			return false, msgjson.NewError(msgjson.FundingError,
-				fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
+
+		if !funder.ValidateOrderFunding(swapVal, valSum, uint64(len(trade.Coins)), uint64(spendSize), lots, &assets.funding.Asset) {
+			return false, msgjson.NewError(msgjson.FundingError, "failed funding validation")
 		}
 
 		return false, nil

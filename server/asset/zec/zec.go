@@ -169,6 +169,11 @@ func (be *ZECBackend) FeeRate(context.Context) (uint64, error) {
 	return dexzec.LegacyFeeRate, nil
 }
 
+func (*ZECBackend) ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize, maxSwaps uint64, _ *dex.Asset) bool {
+	reqVal := dexzec.RequiredOrderFunds(swapVal, inputCount, inputsSize, maxSwaps)
+	return valSum >= reqVal
+}
+
 func (be *ZECBackend) ValidateFeeRate(ci asset.Coin, reqFeeRate uint64) bool {
 	c, is := ci.(interface {
 		Fees() uint64

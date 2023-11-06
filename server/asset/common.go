@@ -100,6 +100,8 @@ type OutputTracker interface {
 	// with non-standard pkScripts or scripts that require zero signatures to
 	// redeem must return an error.
 	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
+	// ValidateOrderFunding validates that the supplied utxos are enough to fund an order.
+	ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool
 }
 
 // AccountBalancer is implemented by backends for account-based blockchains.
