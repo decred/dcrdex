@@ -2595,10 +2595,13 @@ export default class MarketsPage extends BasePage {
     const avail = note.balance.available
     switch (note.assetID) {
       case mkt.baseCfg.id:
+        // If we're not showing the max order panel yet, don't do anything.
+        if (!mkt.maxSell) break
         if (typeof mkt.sellBalance === 'number' && mkt.sellBalance !== avail) mkt.maxSell = null
         if (this.isSell()) this.preSell()
         break
       case mkt.quoteCfg.id:
+        if (!Object.keys(mkt.maxBuys).length) break
         if (typeof mkt.buyBalance === 'number' && mkt.buyBalance !== avail) mkt.maxBuys = {}
         if (!this.isSell()) this.preBuy()
     }
