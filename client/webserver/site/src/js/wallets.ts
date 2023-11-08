@@ -1320,11 +1320,11 @@ function assetIsConfigurable (assetID: number) {
   return defs.length > 1 || (zerothOpts && zerothOpts.length > 0)
 }
 
-const FourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+const FourSigFigs = new Intl.NumberFormat(Doc.languages(), {
   maximumSignificantDigits: 4
 })
 
-const OneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[]), {
+const OneFractionalDigit = new Intl.NumberFormat(Doc.languages(), {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1
 })

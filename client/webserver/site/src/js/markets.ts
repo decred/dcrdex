@@ -3107,11 +3107,11 @@ function sortedMarkets (): ExchangeMarket[] {
   return mkts
 }
 
-const FourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+const FourSigFigs = new Intl.NumberFormat(Doc.languages(), {
   maximumSignificantDigits: 4
 })
 
-const OneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[]), {
+const OneFractionalDigit = new Intl.NumberFormat(Doc.languages(), {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1
 })

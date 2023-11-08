@@ -25,16 +25,18 @@ const BipIDs: Record<number, string> = {
   60001: 'usdc.eth'
 }
 
+const languages = navigator.languages.filter((locale: string) => locale !== 'c')
+
 const BipSymbols = Object.values(BipIDs)
 
-const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
+const intFormatter = new Intl.NumberFormat(languages)
 
-const threeSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+const threeSigFigs = new Intl.NumberFormat(languages, {
   minimumSignificantDigits: 3,
   maximumSignificantDigits: 3
 })
 
-const fiveSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+const fiveSigFigs = new Intl.NumberFormat(languages, {
   minimumSignificantDigits: 5,
   maximumSignificantDigits: 5
 })
@@ -69,7 +71,7 @@ function formatter (formatters: Record<string, Intl.NumberFormat>, min: number, 
   const k = `${min}-${max}`
   let fmt = formatters[k]
   if (!fmt) {
-    fmt = new Intl.NumberFormat((navigator.languages as string[]), {
+    fmt = new Intl.NumberFormat(languages, {
       minimumFractionDigits: min,
       maximumFractionDigits: max
     })
@@ -290,6 +292,10 @@ export default class Doc {
     const [v] = convertToConventional(vAtomic, unitInfo)
     const value = v * rate
     return fullPrecisionFormatter(prec).format(value)
+  }
+
+  static languages (): string[] {
+    return languages
   }
 
   /*
