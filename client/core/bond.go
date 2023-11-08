@@ -986,12 +986,12 @@ func (c *Core) nextBondKey(assetID uint32) (*secp256k1.PrivateKey, uint32, error
 // the target trading tier, the preferred asset to use for bonds, and the
 // maximum amount allowable to be locked in bonds.
 func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
-	dc, _, err := c.dex(form.Addr)
+	dc, _, err := c.dex(form.Host)
 	if err != nil {
 		return err
 	}
 	// TODO: exclude unregistered and/or watch-only
-	dbAcct, err := c.db.Account(form.Addr)
+	dbAcct, err := c.db.Account(form.Host)
 	if err != nil {
 		return err
 	}
@@ -1063,7 +1063,10 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		dbAcct.TargetTier = targetTier
 	}
 
-	penaltyComps := form.PenaltyComps
+	var penaltyComps = penaltyComps0
+	if form.PenaltyComps != nil {
+		penaltyComps = *form.PenaltyComps
+	}
 	dc.acct.penaltyComps = penaltyComps
 	dbAcct.PenaltyComps = penaltyComps
 

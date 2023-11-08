@@ -188,10 +188,10 @@ type SupportedAsset struct {
 // BondOptionsForm is used from the settings page to change the auto-bond
 // maintenance setting for a DEX.
 type BondOptionsForm struct {
-	Addr         string  `json:"host"`
+	Host         string  `json:"host"`
 	TargetTier   *uint64 `json:"targetTier,omitempty"`
 	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
-	PenaltyComps uint16  `json:"penaltyComps"`
+	PenaltyComps *uint16 `json:"penaltyComps,omitempty"`
 	BondAssetID  *uint32 `json:"bondAssetID,omitempty"`
 }
 

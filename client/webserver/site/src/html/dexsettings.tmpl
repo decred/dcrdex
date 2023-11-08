@@ -37,7 +37,31 @@
         </div>
       </div>
       <hr class="mb-1">
-      <div id="repMeter">
+      <div id="otherBondSettings" class="d-flex align-items-stretch brdrbottom pb-1">
+        <div class="col-12 pe-2">
+          <div id="autoRenewBox" class="d-flex justify-content-between align-items-center hoverbg pointer">
+            <span>Auto Renew</span>
+            <div>
+              <div id="toggleAutoRenew" class="anitoggle"></div>
+            </div>
+          </div>
+          <div id="renewErr" class="d-hide flex-center errcolor fs15"></div>
+        </div>
+        <div class="col-12 ps-2 brdrleft">
+          <div id="penaltyCompBox" class="d-flex justify-content-between align-items-center hoverbg pointer">
+            <div>
+              <span>Penalty Comps</span>
+              <span class="ico-info fs14" data-tooltip="[[[compensation_tooltip]]]"></span>
+            </div>
+            <div>
+              <span id="penaltyComps"></span>
+              <input id="penaltyCompInput" type="number" step="1" class="d-hide fs14 text-center">
+            </div>
+          </div>
+          <div id="penaltyCompsErr" class="d-hide flex-center errcolor fs15"></div>
+        </div>
+      </div>
+      <div id="repMeter" class="w-100">
         {{template "reputationMeter"}}
       </div>
     </div>

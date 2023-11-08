@@ -164,9 +164,7 @@ export default class Application {
     }
 
     if (process.env.NODE_ENV === 'development') {
-      window.user = () => {
-        console.log(this.user)
-      }
+      window.user = () => this.user
     }
 
     // use user current locale set by backend

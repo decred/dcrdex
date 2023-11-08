@@ -507,7 +507,7 @@ func parseBondOptsArgs(params *RawParams) (*core.BondOptionsForm, error) {
 		}
 	}
 
-	var penaltyComps uint16
+	var penaltyComps *uint16
 	if len(params.Args) > 4 {
 		pc, err := checkIntArg(params.Args[4], "penaltyComps", 16)
 		if err != nil {
@@ -517,12 +517,13 @@ func parseBondOptsArgs(params *RawParams) (*core.BondOptionsForm, error) {
 			return nil, fmt.Errorf("penaltyComps out of range (0, %d)", math.MaxUint16)
 		}
 		if pc > 0 {
-			penaltyComps = uint16(pc)
+			pc16 := uint16(pc)
+			penaltyComps = &pc16
 		}
 	}
 
 	req := &core.BondOptionsForm{
-		Addr:         params.Args[0],
+		Host:         params.Args[0],
 		TargetTier:   targetTierP,
 		MaxBondedAmt: maxBondedP,
 		BondAssetID:  bondAssetP,

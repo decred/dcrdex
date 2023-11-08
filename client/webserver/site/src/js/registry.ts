@@ -7,7 +7,7 @@ declare global {
     localeDiscrepancies: () => void
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
-    user: () => void
+    user: () => User
     isWebview?: () => boolean
     openUrl: (url: string) => void
   }

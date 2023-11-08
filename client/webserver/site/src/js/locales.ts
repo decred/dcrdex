@@ -156,6 +156,7 @@ export const ID_CREATE_ASSET_WALLET_MSG = 'CREATE_ASSET_WALLET_MSG'
 export const ID_NO_WALLET_MSG = 'ID_NO_WALLET_MSG'
 export const ID_TRADING_TIER_UPDATED = 'TRADING_TIER_UPDATED'
 export const ID_INVALID_TIER_VALUE = 'INVALID_TIER_VALUE'
+export const ID_INVALID_COMPS_VALUE = 'INVALID_COMPS_VALUE'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -313,7 +314,9 @@ export const enUS: Locale = {
   [ID_CREATE_ASSET_WALLET_MSG]: 'Create a {{ asset }} wallet to trade',
   [ID_NO_WALLET_MSG]: 'Create {{ asset1 }} and {{ asset2 }} wallet to trade',
   [ID_TRADING_TIER_UPDATED]: 'Trading Tier Updated',
-  [ID_INVALID_TIER_VALUE]: 'Invalid tier value'
+  [ID_INVALID_TIER_VALUE]: 'Invalid tier value',
+  [ID_INVALID_COMPS_VALUE]: 'Invalid comps value',
+  [ID_API_ERROR]: 'api error: {{ msg }}'
 }
 
 export const ptBR: Locale = {

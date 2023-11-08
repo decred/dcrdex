@@ -457,3 +457,30 @@ div[data-handler=init] {
     height: 25px;
   }
 }
+
+.anitoggle {
+  width: 1.5rem;
+  height: 0.9rem;
+  border-radius: 0.45rem;
+  background-color: #777a;
+  cursor: pointer;
+
+  &.on {
+    background-color: $buycolor_dark;
+  }
+
+  & > div {
+    position: relative;
+    top: 0.1rem;
+    left: 0.1rem;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 0.35rem;
+    transition: left 0.5s;
+    background-color: $dark_body_bg;
+  }
+
+  &.on > div {
+    left: 0.7rem;
+  }
+}

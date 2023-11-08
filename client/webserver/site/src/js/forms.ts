@@ -932,10 +932,14 @@ export class FeeAssetSelectionForm {
       Doc.show(page.whatsABondPanel)
     })
 
-    Doc.bind(page.bondGotIt, 'click', () => {
+    const hideWhatsABond = () => {
       Doc.show(page.mainBondingForm)
       Doc.hide(page.whatsABondPanel)
-    })
+    }
+
+    Doc.bind(page.bondGotIt, 'click', () => { hideWhatsABond() })
+
+    Doc.bind(page.whatsABondBack, 'click', () => { hideWhatsABond() })
 
     app().registerNoteFeeder({
       createwallet: (note: WalletCreationNote) => {

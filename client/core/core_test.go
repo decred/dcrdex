@@ -10576,7 +10576,7 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "set target tier to 1",
 			bal:  singlyBondedReserves,
 			form: BondOptionsForm{
-				Addr:        acct.host,
+				Host:        acct.host,
 				TargetTier:  &targetTier,
 				BondAssetID: &bondAsset.ID,
 			},
@@ -10590,7 +10590,7 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "low balance",
 			bal:  singlyBondedReserves - 1,
 			form: BondOptionsForm{
-				Addr:        acct.host,
+				Host:        acct.host,
 				TargetTier:  &targetTier,
 				BondAssetID: &bondAsset.ID,
 			},
@@ -10600,7 +10600,7 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "max-bonded too low",
 			bal:  singlyBondedReserves,
 			form: BondOptionsForm{
-				Addr:         acct.host,
+				Host:         acct.host,
 				TargetTier:   &targetTier,
 				BondAssetID:  &bondAsset.ID,
 				MaxBondedAmt: &tooLowMaxBonded,
@@ -10610,7 +10610,7 @@ func TestUpdateBondOptions(t *testing.T) {
 		{
 			name: "unsupported bond asset",
 			form: BondOptionsForm{
-				Addr:        acct.host,
+				Host:        acct.host,
 				TargetTier:  &targetTier,
 				BondAssetID: &wrongBondAssetID,
 			},
@@ -10620,7 +10620,7 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "lower target tier with zero balance OK",
 			bal:  0,
 			form: BondOptionsForm{
-				Addr:        acct.host,
+				Host:        acct.host,
 				TargetTier:  &targetTierZero,
 				BondAssetID: &bondAsset.ID,
 			},
@@ -10635,7 +10635,7 @@ func TestUpdateBondOptions(t *testing.T) {
 			name: "lower target tier to zero with other exchanges still keeps reserves",
 			bal:  0,
 			form: BondOptionsForm{
-				Addr:        acct.host,
+				Host:        acct.host,
 				TargetTier:  &targetTierZero,
 				BondAssetID: &bondAsset.ID,
 			},

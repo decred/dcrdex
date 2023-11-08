@@ -18,6 +18,13 @@ interface Animator {
   animate: (() => Promise<void>)
 }
 
+interface BondOptionsForm {
+  host?: string // Required, but set by updateBondOptions
+  bondAssetID?: number
+  targetTier?: number
+  penaltyComps?: number
+}
+
 const animationLength = 300
 
 export default class DexSettingsPage extends BasePage {
@@ -37,6 +44,7 @@ export default class DexSettingsPage extends BasePage {
   reputationMeter: ReputationMeter
   animation: Animation
   pwCache: PasswordCache
+  renewToggle: AniToggle
 
   constructor (body: HTMLElement) {
     super()
@@ -49,6 +57,7 @@ export default class DexSettingsPage extends BasePage {
 
     this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
       this.showSuccess(intl.prep(intl.ID_TRADING_TIER_UPDATED))
+      this.renewToggle.setState(this.confirmRegisterForm.tier > 0)
     }, () => {
       this.runAnimation(this.regAssetForm, page.regAssetForm)
     }, this.pwCache)
@@ -98,9 +107,66 @@ export default class DexSettingsPage extends BasePage {
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
     Doc.bind(page.goBackToSettings, 'click', () => app().loadPage('settings'))
-    Doc.bind(page.changeTier, 'click', () => {
+
+    const showTierForm = () => {
       this.regAssetForm.setExchange(app().exchanges[host]) // reset form
       this.showForm(page.regAssetForm)
+    }
+    Doc.bind(page.changeTier, 'click', () => { showTierForm() })
+    const willAutoRenew = xc.auth.targetTier > 0
+    this.renewToggle = new AniToggle(page.toggleAutoRenew, page.renewErr, willAutoRenew, async (newState: boolean) => {
+      if (newState) showTierForm()
+      else return this.disableAutoRenew()
+    })
+    Doc.bind(page.autoRenewBox, 'click', (e: MouseEvent) => {
+      e.stopPropagation()
+      page.toggleAutoRenew.click()
+    })
+
+    page.penaltyComps.textContent = String(xc.auth.penaltyComps)
+    const hideCompInput = () => {
+      Doc.hide(page.penaltyCompInput)
+      Doc.show(page.penaltyComps)
+    }
+    Doc.bind(page.penaltyCompBox, 'click', (e: MouseEvent) => {
+      e.stopPropagation()
+      const xc = app().exchanges[this.host]
+      page.penaltyCompInput.value = String(xc.auth.penaltyComps)
+      Doc.hide(page.penaltyComps)
+      Doc.show(page.penaltyCompInput)
+      page.penaltyCompInput.focus()
+      const checkClick = (e: MouseEvent) => {
+        if (Doc.mouseInElement(e, page.penaltyCompBox)) return
+        hideCompInput()
+        Doc.unbind(document, 'click', checkClick)
+      }
+      Doc.bind(document, 'click', checkClick)
+    })
+
+    Doc.bind(page.penaltyCompInput, 'keyup', async (e: KeyboardEvent) => {
+      Doc.hide(page.penaltyCompsErr)
+      if (e.key === 'Escape') {
+        hideCompInput()
+        return
+      }
+      if (!(e.key === 'Enter')) return
+      const penaltyComps = parseInt(page.penaltyCompInput.value || '')
+      if (isNaN(penaltyComps)) {
+        Doc.show(page.penaltyCompsErr)
+        page.penaltyCompsErr.textContent = intl.prep(intl.ID_INVALID_COMPS_VALUE)
+        return
+      }
+      const loaded = app().loading(page.otherBondSettings)
+      try {
+        await this.updateBondOptions({ penaltyComps })
+        loaded()
+        page.penaltyComps.textContent = String(penaltyComps)
+      } catch (e) {
+        loaded()
+        Doc.show(page.penaltyCompsErr)
+        page.penaltyCompsErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg })
+      }
+      hideCompInput()
     })
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
@@ -172,19 +238,23 @@ export default class DexSettingsPage extends BasePage {
     this.showForm(page.walletWait)
   }
 
-  async progressTierFormWithSyncedFundedWallet (assetID: number) {
+  async progressTierFormWithSyncedFundedWallet (bondAssetID: number) {
     const xc = app().exchanges[this.host]
-    const tier = this.confirmRegisterForm.tier
+    const targetTier = this.confirmRegisterForm.tier
     const page = this.page
     const strongTier = xc.auth.liveStrength + xc.auth.pendingStrength - xc.auth.weakStrength
-    if (tier > xc.auth.targetTier && tier > strongTier) {
+    if (targetTier > xc.auth.targetTier && targetTier > strongTier) {
       this.runAnimation(this.confirmRegisterForm, page.confirmRegForm)
       return
     }
     // Lowering tier
-    const updateErr = await this.updateBondOptions(assetID, tier)
-    if (updateErr) {
-      this.regAssetForm.setError(updateErr)
+    const loaded = app().loading(this.body)
+    try {
+      await this.updateBondOptions({ bondAssetID, targetTier })
+      loaded()
+    } catch (e) {
+      loaded()
+      this.regAssetForm.setError(e.msg)
       return
     }
     // this.animateConfirmForm(page.regAssetForm)
@@ -371,22 +441,26 @@ export default class DexSettingsPage extends BasePage {
     }
   }
 
+  async disableAutoRenew () {
+    const loaded = app().loading(this.page.otherBondSettings)
+    try {
+      this.updateBondOptions({ targetTier: 0 })
+      loaded()
+    } catch (e) {
+      loaded()
+      throw e
+    }
+  }
+
   /*
    * updateBondOptions is called when the form to update bond options is
    * submitted.
    */
-  async updateBondOptions (bondAssetID: number, targetTier: number): Promise<string> {
-    const bondOptions: Record<any, any> = {
-      host: this.host,
-      targetTier: targetTier,
-      bondAssetID: bondAssetID
-    }
-
-    const loaded = app().loading(this.body)
-    const res = await postJSON('/api/updatebondoptions', bondOptions)
-    loaded()
-    if (!app().checkResponse(res)) return res.msg
-    return ''
+  async updateBondOptions (conf: BondOptionsForm): Promise<any> {
+    conf.host = this.host
+    await postJSON('/api/updatebondoptions', conf)
+    const targetTier = conf.targetTier ?? app().exchanges[this.host].auth.targetTier
+    this.renewToggle.setState(targetTier > 0)
   }
 
   async newWalletCreated (assetID: number, tier: number) {
@@ -409,5 +483,45 @@ export default class DexSettingsPage extends BasePage {
 
     this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
     await this.showForm(page.walletWait)
+  }
+}
+
+/*
+ * AniToggle is a small toggle switch, defined in HTML with the element
+ * <div class="anitoggle"></div>. The animations are defined in the anitoggle
+ * CSS class. AniToggle triggers the callback on click events, but does not
+ * update toggle appearance, so the caller must call the setState method from
+ * the callback or elsewhere if the newState
+ * is accepted.
+ */
+class AniToggle {
+  toggle: PageElement
+  toggling: boolean
+
+  constructor (toggle: PageElement, errorEl: PageElement, initialState: boolean, callback: (newState: boolean) => Promise<any>) {
+    this.toggle = toggle
+    if (toggle.children.length === 0) toggle.appendChild(document.createElement('div'))
+
+    Doc.bind(toggle, 'click', async (e: MouseEvent) => {
+      e.stopPropagation()
+      Doc.hide(errorEl)
+      const newState = !toggle.classList.contains('on')
+      this.toggling = true
+      try {
+        await callback(newState)
+      } catch (e) {
+        this.toggling = false
+        Doc.show(errorEl)
+        errorEl.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg })
+        return
+      }
+      this.toggling = false
+    })
+    this.setState(initialState)
+  }
+
+  setState (state: boolean) {
+    if (state) this.toggle.classList.add('on')
+    else this.toggle.classList.remove('on')
   }
 }
