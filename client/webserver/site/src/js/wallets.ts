@@ -178,6 +178,7 @@ export default class WalletsPage extends BasePage {
       const fmtParams = { assetName: app().assets[assetID].name }
       this.assetUpdated(assetID, page.newWalletForm, intl.prep(intl.ID_NEW_WALLET_SUCCESS, fmtParams))
       this.sortAssetButtons()
+      this.updateTicketBuyer(assetID)
     })
 
     // Bind the wallet reconfig form.
