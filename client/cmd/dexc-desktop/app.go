@@ -397,6 +397,10 @@ func bindJSFunctions(w webview.WebView) {
 			log.Errorf("unable to run URL handler: %s", err.Error())
 		}
 	})
+
+	w.Bind("sendOSNotification", func(title, body string) {
+		sendDesktopNotification(title, body)
+	})
 }
 
 func runWebview(url string) {

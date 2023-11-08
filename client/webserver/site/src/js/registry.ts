@@ -10,6 +10,7 @@ declare global {
     user: () => User
     isWebview?: () => boolean
     openUrl: (url: string) => void
+    sendOSNotification (title: string, body?: string): void
   }
 }
 
