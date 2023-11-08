@@ -55,8 +55,8 @@ export default class MarketMakerPage extends BasePage {
       () => { this.addBotSubmit() }
     )
 
-    Doc.bind(page.addBotBtn, 'click', () => { this.showAddBotForm() })
-    Doc.bind(page.addBotBtn2, 'click', () => { this.showAddBotForm() })
+    Doc.bind(page.addBotBtnNoExisting, 'click', () => { this.showAddBotForm() })
+    Doc.bind(page.addBotBtnWithExisting, 'click', () => { this.showAddBotForm() })
     Doc.bind(page.startBotsBtn, 'click', () => { this.start() })
     Doc.bind(page.stopBotsBtn, 'click', () => { this.stopBots() })
     Doc.bind(page.hostSelect, 'change', () => { this.selectMarketHost() })
@@ -117,7 +117,7 @@ export default class MarketMakerPage extends BasePage {
     page.onIndicator.classList.add(note.running ? 'on' : 'off')
     page.onIndicator.classList.remove(note.running ? 'off' : 'on')
     Doc.setVis(note.running, page.stopBotsBtn, page.runningHeader, page.onMsg)
-    Doc.setVis(!note.running, page.startBotsBtn, page.addBotBtn, page.enabledHeader,
+    Doc.setVis(!note.running, page.startBotsBtn, page.addBotBtnNoExisting, page.enabledHeader,
       page.baseBalanceHeader, page.quoteBalanceHeader, page.removeHeader, page.offMsg)
     const tableRows = page.botTableBody.children
     for (let i = 0; i < tableRows.length; i++) {
