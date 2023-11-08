@@ -203,8 +203,8 @@ export default class Application {
     this.attachCommon(this.header)
     this.attach({})
     this.updateMenuItemsDisplay()
-    // initialize browser notifications
-    ntfn.fetchBrowserNtfnSettings()
+    // initialize desktop notifications
+    ntfn.fetchDesktopNtfnSettings()
     // Load recent notifications from Window.localStorage.
     const notes = State.fetchLocal(State.notificationsLK)
     this.setNotes(notes || [])
@@ -714,8 +714,8 @@ export default class Application {
     if (note.severity === ntfn.POKE) this.prependPokeElement(note)
     else this.prependNoteElement(note)
 
-    // show browser notification
-    ntfn.browserNotify(note)
+    // show desktop notification
+    ntfn.desktopNotify(note)
   }
 
   /*

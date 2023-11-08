@@ -185,7 +185,7 @@ export default class SettingsPage extends BasePage {
 
   async getBrowserNtfnSettings (form: HTMLElement) {
     const loaded = app().loading(form)
-    const permissions = await ntfn.fetchBrowserNtfnSettings()
+    const permissions = await ntfn.fetchDesktopNtfnSettings()
     loaded()
     return permissions
   }
@@ -193,7 +193,7 @@ export default class SettingsPage extends BasePage {
   async renderDesktopNtfnSettings () {
     const page = this.page
     const ntfnSettings = await this.getBrowserNtfnSettings(page.browserNotificationsForm)
-    const labels = ntfn.browserNtfnLabels
+    const labels = ntfn.desktopNtfnLabels
     const tmpl = page.browserNtfnCheckboxTemplate
     tmpl.removeAttribute('id')
     const container = page.browserNtfnCheckboxContainer

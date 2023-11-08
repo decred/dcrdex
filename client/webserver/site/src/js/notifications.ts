@@ -35,79 +35,115 @@ const NoteTypeMatch = 'match'
 const NoteTypeBondPost = 'bondpost'
 const NoteTypeConnEvent = 'conn'
 
-type BrowserNtfnSettingLabel = {
+type DesktopNtfnSettingLabel = {
   [x: string]: string
 }
 
-type BrowserNtfnSetting = {
+type DesktopNtfnSetting = {
   [x: string]: boolean
 }
 
-function browserNotificationsSettingsKey (): string {
-  return `browser_notifications-${window.location.host}`
+function desktopNtfnSettingsKey (): string {
+  return `desktop_notifications-${window.location.host}`
 }
 
-export const browserNtfnLabels: BrowserNtfnSettingLabel = {
+export const desktopNtfnLabels: DesktopNtfnSettingLabel = {
   [NoteTypeOrder]: intl.ID_BROWSER_NTFN_ORDERS,
   [NoteTypeMatch]: intl.ID_BROWSER_NTFN_MATCHES,
   [NoteTypeBondPost]: intl.ID_BROWSER_NTFN_BONDS,
   [NoteTypeConnEvent]: intl.ID_BROWSER_NTFN_CONNECTIONS
 }
 
-export const defaultBrowserNtfnSettings: BrowserNtfnSetting = {
+export const defaultDesktopNtfnSettings: DesktopNtfnSetting = {
   [NoteTypeOrder]: true,
   [NoteTypeMatch]: true,
   [NoteTypeBondPost]: true,
   [NoteTypeConnEvent]: true
 }
 
-let browserNtfnSettings: BrowserNtfnSetting
+let desktopNtfnSettings: DesktopNtfnSetting
 
-export function ntfnPermissionGranted () {
-  return window.Notification.permission === 'granted'
-}
-
-export function ntfnPermissionDenied () {
-  return window.Notification.permission === 'denied'
-}
-
-export async function requestNtfnPermission () {
-  if (!('Notification' in window)) {
-    return
+// BrowserNotifier is a wrapper around the browser's notification API.
+class BrowserNotifier {
+  static ntfnPermissionGranted (): boolean {
+    return window.Notification.permission === 'granted'
   }
-  if (Notification.permission === 'granted') {
-    showBrowserNtfn(intl.prep(intl.ID_BROWSER_NTFN_ENABLED))
-  } else if (Notification.permission !== 'denied') {
-    await Notification.requestPermission()
-    showBrowserNtfn(intl.prep(intl.ID_BROWSER_NTFN_ENABLED))
+
+  static ntfnPermissionDenied (): boolean {
+    return window.Notification.permission === 'denied'
+  }
+
+  static async requestNtfnPermission (): Promise<void> {
+    if (!('Notification' in window)) {
+      return
+    }
+    if (BrowserNotifier.ntfnPermissionGranted()) {
+      BrowserNotifier.sendDesktopNotification(intl.prep(intl.ID_BROWSER_NTFN_ENABLED))
+    } else if (!BrowserNotifier.ntfnPermissionDenied()) {
+      await Notification.requestPermission()
+      BrowserNotifier.sendDesktopNotification(intl.prep(intl.ID_BROWSER_NTFN_ENABLED))
+    }
+  }
+
+  static sendDesktopNotification (title: string, body?: string) {
+    if (window.Notification.permission !== 'granted') return
+    const ntfn = new window.Notification(title, {
+      body: body,
+      icon: '/img/softened-icon.png'
+    })
+    return ntfn
   }
 }
 
-export function showBrowserNtfn (title: string, body?: string) {
-  if (window.Notification.permission !== 'granted') return
-  const ntfn = new window.Notification(title, {
-    body: body,
-    icon: '/img/softened-icon.png'
-  })
-  return ntfn
-}
-
-export function browserNotify (note: CoreNote) {
-  if (!browserNtfnSettings[note.type]) return
-  showBrowserNtfn(note.subject, note.details)
-}
-
-export async function fetchBrowserNtfnSettings (): Promise<BrowserNtfnSetting> {
-  if (browserNtfnSettings !== undefined) {
-    return browserNtfnSettings
+// OSDesktopNotifier manages OS desktop notifications via the same interface
+// as BrowserNotifier, but sends notifications using an underlying Go
+// notification library exposed to the webview.
+class OSDesktopNotifier {
+  static ntfnPermissionGranted (): boolean {
+    return true
   }
-  const k = browserNotificationsSettingsKey()
-  browserNtfnSettings = (await State.fetchLocal(k) ?? {}) as BrowserNtfnSetting
-  return browserNtfnSettings
+
+  static ntfnPermissionDenied (): boolean {
+    return false
+  }
+
+  static async requestNtfnPermission (): Promise<void> {
+    OSDesktopNotifier.sendDesktopNotification(intl.prep(intl.ID_BROWSER_NTFN_ENABLED))
+    return Promise.resolve()
+  }
+
+  static sendDesktopNotification (title: string, body?: string): void {
+    // this calls a function exported via webview.Bind()
+    const w = (window as any)
+    w.sendOSNotification(title, body)
+  }
+}
+
+// determine whether we're running in a webview or in browser, and export
+// the appropriate notifier accordingly.
+export const Notifier = window.isWebview ? OSDesktopNotifier : BrowserNotifier
+
+export const ntfnPermissionGranted = Notifier.ntfnPermissionGranted
+export const ntfnPermissionDenied = Notifier.ntfnPermissionDenied
+export const requestNtfnPermission = Notifier.requestNtfnPermission
+export const sendDesktopNotification = Notifier.sendDesktopNotification
+
+export function desktopNotify (note: CoreNote) {
+  if (!desktopNtfnSettings[note.type]) return
+  Notifier.sendDesktopNotification(note.subject, note.details)
+}
+
+export async function fetchDesktopNtfnSettings (): Promise<DesktopNtfnSetting> {
+  if (desktopNtfnSettings !== undefined) {
+    return desktopNtfnSettings
+  }
+  const k = desktopNtfnSettingsKey()
+  desktopNtfnSettings = (await State.fetchLocal(k) ?? {}) as DesktopNtfnSetting
+  return desktopNtfnSettings
 }
 
 export async function updateNtfnSetting (noteType: string, enabled: boolean) {
-  await fetchBrowserNtfnSettings()
-  browserNtfnSettings[noteType] = enabled
-  State.storeLocal(browserNotificationsSettingsKey(), browserNtfnSettings)
+  await fetchDesktopNtfnSettings()
+  desktopNtfnSettings[noteType] = enabled
+  State.storeLocal(desktopNtfnSettingsKey(), desktopNtfnSettings)
 }
