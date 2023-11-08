@@ -319,6 +319,7 @@ export default class Application {
   }
 
   bindUrlHandlers (ancestor: HTMLElement) {
+    if (!window.openUrl) return
     for (const link of Doc.applySelector(ancestor, 'a[target=_blank]')) {
       Doc.bind(link, 'click', (e: MouseEvent) => {
         e.preventDefault()
