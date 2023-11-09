@@ -14,7 +14,7 @@ import (
 // networks enables filtering out tokens via the package's SetNetwork.
 type nettedToken struct {
 	*Token
-	nets []dex.Network
+	addrs map[dex.Network]string
 }
 
 var (
@@ -82,7 +82,7 @@ func Register(assetID uint32, driver Driver) {
 // RegisterToken should be called to register tokens. If no nets are specified
 // the token will be registered for all networks. The user must invoke
 // SetNetwork to enable net-based filtering of package function output.
-func RegisterToken(tokenID uint32, token *dex.Token, walletDef *WalletDefinition, nets ...dex.Network) {
+func RegisterToken(tokenID uint32, token *dex.Token, walletDef *WalletDefinition, addrs map[dex.Network]string) {
 	driversMtx.Lock()
 	defer driversMtx.Unlock()
 	if _, exists := tokens[tokenID]; exists {
@@ -96,8 +96,9 @@ func RegisterToken(tokenID uint32, token *dex.Token, walletDef *WalletDefinition
 		Token: &Token{
 			Token:      token,
 			Definition: walletDef,
+			// ContractAddress specified in SetNetwork.
 		},
-		nets: nets,
+		addrs: addrs,
 	}
 }
 
@@ -257,16 +258,13 @@ func UnitInfo(assetID uint32) (dex.UnitInfo, error) {
 // SetNetwork will filter registered assets for those available on the specified
 // network. SetNetwork need only be called once during initialization.
 func SetNetwork(net dex.Network) {
-nextasset:
 	for assetID, nt := range tokens {
-		if len(nt.nets) == 0 {
+		addr, exists := nt.addrs[net]
+		if !exists {
+			delete(tokens, assetID)
 			continue
 		}
-		for _, allowedNet := range nt.nets {
-			if net == allowedNet {
-				continue nextasset
-			}
-		}
+		nt.Token.ContractAddress = addr
 		// This network is not supported for this asset.
 		delete(tokens, assetID)
 	}

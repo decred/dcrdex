@@ -268,7 +268,8 @@ type WalletDefinition struct {
 // Token combines the generic dex.Token with a WalletDefinition.
 type Token struct {
 	*dex.Token
-	Definition *WalletDefinition `json:"definition"`
+	Definition      *WalletDefinition `json:"definition"`
+	ContractAddress string            `json:"contractAddress"` // Set in SetNetwork
 }
 
 // WalletInfo is auxiliary information about an ExchangeWallet.

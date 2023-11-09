@@ -202,7 +202,7 @@ export interface Token {
   parentID: number
   name: string
   unitInfo: UnitInfo
-  contractAddresses: Record<number, string>
+  contractAddress: string
   definition: WalletDefinition
 }
 

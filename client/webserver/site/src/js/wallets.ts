@@ -863,7 +863,7 @@ export default class WalletsPage extends BasePage {
       const parentAsset = app().assets[token.parentID]
       page.tokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
       page.tokenParentName.textContent = parentAsset.name
-      page.contractAddress.textContent = token.contractAddresses[net]
+      page.contractAddress.textContent = token.contractAddress
       Doc.show(page.tokenInfoBox)
     }
     if (wallet) {
