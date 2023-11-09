@@ -1378,9 +1378,6 @@ type Config struct {
 	TorIsolation bool
 	// Language. A BCP 47 language tag. Default is en-US.
 	Language string
-	// SimnetFiatRates specifies whether to fetch fiat rates when running on
-	// simnet.
-	SimnetFiatRates bool
 
 	// NoAutoWalletLock instructs Core to skip locking the wallet on shutdown or
 	// logout. This can be helpful if the user wants the wallet to remain
@@ -1612,25 +1609,21 @@ func (c *Core) Run(ctx context.Context) {
 		c.latencyQ.Run(ctx)
 	}()
 
-	// Skip rate fetch setup if on simnet. Rate fetching maybe enabled if
-	// desired.
-	if c.cfg.Net != dex.Simnet || c.cfg.SimnetFiatRates {
-		// Retrieve disabled fiat rate sources from database.
-		disabledSources, err := c.db.DisabledRateSources()
-		if err != nil {
-			c.log.Errorf("Unable to retrieve disabled fiat rate source: %v", err)
-		}
+	// Retrieve disabled fiat rate sources from database.
+	disabledSources, err := c.db.DisabledRateSources()
+	if err != nil {
+		c.log.Errorf("Unable to retrieve disabled fiat rate source: %v", err)
+	}
 
-		// Construct enabled fiat rate sources.
-	fetchers:
-		for token, rateFetcher := range fiatRateFetchers {
-			for _, v := range disabledSources {
-				if token == v {
-					continue fetchers
-				}
+	// Construct enabled fiat rate sources.
+fetchers:
+	for token, rateFetcher := range fiatRateFetchers {
+		for _, v := range disabledSources {
+			if token == v {
+				continue fetchers
 			}
-			c.fiatRateSources[token] = newCommonRateSource(rateFetcher)
 		}
+		c.fiatRateSources[token] = newCommonRateSource(rateFetcher)
 	}
 	c.fetchFiatExchangeRates(ctx)
 

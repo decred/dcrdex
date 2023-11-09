@@ -834,6 +834,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     await app().updateMarketMakingConfig(this.updatedConfig)
     this.originalConfig = JSON.parse(JSON.stringify(this.updatedConfig))
     this.updateModifiedMarkers()
+    app().loadPage('mm')
   }
 
   /*

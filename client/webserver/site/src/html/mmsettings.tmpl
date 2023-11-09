@@ -1,12 +1,12 @@
 {{define "mmsettings"}}
 {{template "top" .}}
 <div id="main" data-handler="mmsettings" class="mmsettings w-100 overflow-y-auto">
-  <div class="w-100 flex-center p-2 fs28 d-flex d-md-none brdrbottom">Market Maker Settings</div>
+  <div class="w-100 flex-center p-2 fs28 d-flex d-md-none brdrbottom">[[[Market Maker Settings]]]</div>
   <div class="d-flex w-100 brdrbottom align-items-stretch">
     <div id="backButton" class="fs18 p-2 hoverbg pointer flex-center brdrright">
       <span class="ico-wide-headed-left-arrow fs28"></span>
     </div>
-    <div id="mmTitle" class="flex-center fs28 d-none d-md-block">Market Maker Settings</div>
+    <div id="mmTitle" class="flex-center fs28 d-none d-md-block">[[[Market Maker Settings]]]</div>
     <div class="flex-center fs24 p-2 flex-grow-1">
       <img id="baseLogo" class="mini-icon"><img id="quoteLogo" class="mx-1 mini-icon">
       <span id="baseHeader"></span> &ndash; <span id="quoteHeader"></span>
@@ -31,25 +31,19 @@
       </div>
       {{- /* STRATEGY DESCRIPTIONS */ -}}
       <div id="percentPlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify">
-        The gap starts at the break-even spread, which is the minimum spread at
-        which a buy-sell combo produces profit, and then adds the specified
-        spread, calculated as a percentage of the mid-gap price.
+        [[[strategy_percent_plus]]]
       </div>
       <div id="percentInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        The gap is set to the specified percent of the mid-gap price.
+        [[[strategy_percent]]]
       </div>
       <div id="absolutePlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        The gap starts at the break-even spread, which is the minimum spread
-        at which a buy-sell combo produces profit, and then adds the specified
-        rate difference to both sides.
+        [[[strategy_absolute_plus]]]
       </div>
       <div id="absoluteInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        The spread is set to the specified value both left and right of the
-        mid-gap, resulting in a total gap of twice the specified value.
+        [[[strategy_absolute]]]
       </div>
       <div id="multiplierInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        The gap is set to the specified multiple of the break-even spread,
-        which is the minimum spread at which a buy-sell combo produces profit.
+        [[[strategy_multiplier]]]
       </div>
 
       <button id="updateButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg brdr pointer">[[[update_settings]]]</button>
@@ -69,9 +63,9 @@
           </thead>
           <tbody id="buyPlacementsTableBody">
             <tr id="placementRowTmpl">
-              <td data-tmpl="priority">1</td>
-              <td data-tmpl="lots">2</td>
-              <td data-tmpl="gapFactor">2.5</td>
+              <td data-tmpl="priority"></td>
+              <td data-tmpl="lots"></td>
+              <td data-tmpl="gapFactor"></td>
               <td>
                 <span data-tmpl="removeBtn" class="ico-cross fs15 pointer remove-placement-btn"></span>
               </td>
