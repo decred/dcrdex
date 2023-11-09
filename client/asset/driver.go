@@ -265,8 +265,6 @@ func SetNetwork(net dex.Network) {
 			continue
 		}
 		nt.Token.ContractAddress = addr
-		// This network is not supported for this asset.
-		delete(tokens, assetID)
 	}
 }
 
