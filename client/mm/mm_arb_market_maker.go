@@ -206,6 +206,14 @@ func (a *arbMarketMaker) processDEXOrderNote(note *core.OrderNote) {
 		delete(a.ords, oid)
 		delete(a.oidToPlacement, oid)
 		a.ordMtx.Unlock()
+
+		a.matchesMtx.Lock()
+		for _, match := range note.Order.Matches {
+			var matchID order.MatchID
+			copy(matchID[:], match.MatchID)
+			delete(a.matchesSeen, matchID)
+		}
+		a.matchesMtx.Unlock()
 	}
 }
 

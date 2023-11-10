@@ -552,7 +552,7 @@ func (bnc *binance) requestInto(req *http.Request, thing interface{}) error {
 		return nil
 	}
 	// TODO: use buffered reader
-	reader := io.LimitReader(resp.Body, 1<<20)
+	reader := io.LimitReader(resp.Body, 1<<22)
 	r, err := io.ReadAll(reader)
 	if err != nil {
 		return err

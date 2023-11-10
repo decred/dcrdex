@@ -708,7 +708,7 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 
 	tests := []*test{
 		{
-			name: "one buy and one cell match notifications",
+			name: "one buy and one sell match notifications",
 			orders: []*core.Order{
 				{
 					ID:   orderIDs[0][:],
