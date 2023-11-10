@@ -603,6 +603,10 @@ const ethExplorers: Record<number, (cid: string) => string> = {
   [Testnet]: (cid: string) => {
     const [arg, isAddr] = ethBasedExplorerArg(cid)
     return isAddr ? `https://goerli.etherscan.io/address/${arg}` : `https://goerli.etherscan.io/tx/${arg}`
+  },
+  [Simnet]: (cid: string) => {
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://etherscan.io/address/${arg}` : `https://etherscan.io/tx/${arg}`
   }
 }
 
@@ -626,40 +630,49 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   },
   0: { // btc
     [Mainnet]: (cid: string) => `https://mempool.space/tx/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://mempool.space/testnet/tx/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://mempool.space/testnet/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://mempool.space/tx/${cid.split(':')[0]}`
   },
   2: { // ltc
     [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://sochain.com/tx/LTCTEST/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://sochain.com/tx/LTCTEST/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`
   },
   20: {
     [Mainnet]: (cid: string) => `https://digiexplorer.info/tx/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://testnetexplorer.digibyteservers.io/tx/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://testnetexplorer.digibyteservers.io/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://digiexplorer.info/tx/${cid.split(':')[0]}`
   },
   60: ethExplorers,
   60001: ethExplorers,
   3: { // doge
     [Mainnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`
   },
   5: { // dash
     [Mainnet]: (cid: string) => `https://blockexplorer.one/dash/mainnet/tx/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://blockexplorer.one/dash/testnet/tx/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://blockexplorer.one/dash/testnet/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://blockexplorer.one/dash/mainnet/tx/${cid.split(':')[0]}`
   },
   133: { // zec
     [Mainnet]: (cid: string) => `https://zcashblockexplorer.com/transactions/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://blockexplorer.one/zcash/testnet/tx/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://blockexplorer.one/zcash/testnet/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://zcashblockexplorer.com/transactions/${cid.split(':')[0]}`
   },
   147: { // zcl
-    [Mainnet]: (cid: string) => `https://explorer.zcl.zelcore.io/tx/${cid.split(':')[0]}`
+    [Mainnet]: (cid: string) => `https://explorer.zcl.zelcore.io/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://explorer.zcl.zelcore.io/tx/${cid.split(':')[0]}`
   },
   136: { // firo
     [Mainnet]: (cid: string) => `https://explorer.firo.org/tx/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://testexplorer.firo.org/tx/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://testexplorer.firo.org/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://explorer.firo.org/tx/${cid.split(':')[0]}`
   },
   145: { // bch
     [Mainnet]: (cid: string) => `https://bch.loping.net/tx/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://tbch4.loping.net/tx/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://tbch4.loping.net/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://bch.loping.net/tx/${cid.split(':')[0]}`
   },
   966: { // matic
     [Mainnet]: (cid: string) => {
@@ -669,6 +682,10 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
     [Testnet]: (cid: string) => {
       const [arg, isAddr] = ethBasedExplorerArg(cid)
       return isAddr ? `https://mumbai.polygonscan.com/address/${arg}` : `https://mumbai.polygonscan.com/tx/${arg}`
+    },
+    [Simnet]: (cid: string) => {
+      const [arg, isAddr] = ethBasedExplorerArg(cid)
+      return isAddr ? `https://polygonscan.com/address/${arg}` : `https://polygonscan.com/tx/${arg}`
     }
   }
 }
