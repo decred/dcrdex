@@ -152,6 +152,8 @@ export const ID_ORDER_BUTTON_BUY_BALANCE_ERROR = 'ID_ORDER_BUTTON_BUY_BALANCE_ER
 export const ID_ORDER_BUTTON_SELL_BALANCE_ERROR = 'ID_ORDER_BUTTON_SELL_BALANCE_ERROR'
 export const ID_ORDER_BUTTON_QTY_ERROR = 'ID_ORDER_BUTTON_QTY_ERROR'
 export const ID_ORDER_BUTTON_QTY_RATE_ERROR = 'ID_ORDER_BUTTON_QTY_RATE_ERROR'
+export const ID_CREATE_ASSET_WALLET_MSG = 'CREATE_ASSET_WALLET_MSG'
+export const ID_NO_WALLET_MSG = 'ID_NO_WALLET_MSG'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -305,7 +307,9 @@ export const enUS: Locale = {
   [ID_BROWSER_NTFN_ORDERS]: 'Orders',
   [ID_BROWSER_NTFN_MATCHES]: 'Matches',
   [ID_BROWSER_NTFN_BONDS]: 'Bonds',
-  [ID_BROWSER_NTFN_CONNECTIONS]: 'Server connections'
+  [ID_BROWSER_NTFN_CONNECTIONS]: 'Server connections',
+  [ID_CREATE_ASSET_WALLET_MSG]: 'Create a {{ asset }} wallet to trade',
+  [ID_NO_WALLET_MSG]: 'Create {{ asset1 }} and {{ asset2 }} wallet to trade'
 }
 
 export const ptBR: Locale = {

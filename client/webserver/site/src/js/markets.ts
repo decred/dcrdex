@@ -1172,8 +1172,8 @@ export default class MarketsPage extends BasePage {
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
 
-    if (!baseAsset?.wallet || !quoteAsset?.wallet) Doc.setVis(true, page.noWallet)
-    else this.balanceWgt.setWallets(host, base, quote)
+    this.displayMessageIfMissingWallet()
+    this.balanceWgt.setWallets(host, base, quote)
     this.setMarketDetails()
     this.setCurrMarketPrice()
 
@@ -1198,6 +1198,26 @@ export default class MarketsPage extends BasePage {
     this.previewQuoteAmt(false)
     this.updateTitle()
     this.loadUserOrders()
+  }
+
+  /*
+    displayMessageForMissingWallet displays a custom message on the market's
+    view if one or more of the selected market's wallet is missing.
+  */
+  displayMessageIfMissingWallet () {
+    const page = this.page
+    const mkt = this.market
+    const baseSym = mkt.baseCfg.symbol.toLocaleUpperCase()
+    const quoteSym = mkt.quoteCfg.symbol.toLocaleUpperCase()
+    let noWalletMsg = ''
+    Doc.hide(page.noWallet)
+    if (!mkt.base?.wallet && !mkt.quote?.wallet) noWalletMsg = intl.prep(intl.ID_NO_WALLET_MSG, { asset1: baseSym, asset2: quoteSym })
+    else if (!mkt.base?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: baseSym })
+    else if (!mkt.quote?.wallet) noWalletMsg = intl.prep(intl.ID_CREATE_ASSET_WALLET_MSG, { asset: quoteSym })
+    else return
+
+    page.noWallet.textContent = noWalletMsg
+    Doc.show(page.noWallet)
   }
 
   /*
@@ -2650,8 +2670,11 @@ export default class MarketsPage extends BasePage {
     if (!user) return
     const asset = user.assets[this.currentCreate.id]
     Doc.hide(this.page.forms)
+    const mkt = this.market
+    if (mkt.baseCfg.id === asset.id) mkt.base = asset
+    else if (mkt.quoteCfg.id === asset.id) mkt.quote = asset
     this.balanceWgt.updateAsset(asset.id)
-    Doc.setVis(!(this.market.base.wallet && this.market.quote.wallet), this.page.noWallet)
+    this.displayMessageIfMissingWallet()
     this.resolveOrderFormVisibility()
   }
 
