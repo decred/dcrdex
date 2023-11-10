@@ -10,7 +10,9 @@ import {
   BalanceNote,
   SupportedAsset
 } from './registry'
+import { postJSON } from './http'
 import Doc from './doc'
+import State from './state'
 import BasePage from './basepage'
 import { setOptionTemplates } from './opts'
 import { bind as bindForm, NewWalletForm } from './forms'
@@ -53,8 +55,9 @@ export default class MarketMakerPage extends BasePage {
       () => { this.addBotSubmit() }
     )
 
-    Doc.bind(page.addBotBtn, 'click', () => { this.showAddBotForm() })
-    Doc.bind(page.startBotsBtn, 'click', () => { this.showPWSubmitForm() })
+    Doc.bind(page.addBotBtnNoExisting, 'click', () => { this.showAddBotForm() })
+    Doc.bind(page.addBotBtnWithExisting, 'click', () => { this.showAddBotForm() })
+    Doc.bind(page.startBotsBtn, 'click', () => { this.start() })
     Doc.bind(page.stopBotsBtn, 'click', () => { this.stopBots() })
     Doc.bind(page.hostSelect, 'change', () => { this.selectMarketHost() })
     bindForm(page.addBotForm, page.addBotSubmit, () => { this.addBotSubmit() })
@@ -85,12 +88,14 @@ export default class MarketMakerPage extends BasePage {
     })
 
     const noBots = !botConfigs || botConfigs.length === 0
-    Doc.setVis(noBots, page.noBotsHeader)
-    Doc.setVis(!noBots, page.botTable)
+    Doc.setVis(noBots, page.noBots)
+    Doc.setVis(!noBots, page.botTable, page.onOff)
     if (noBots) return
 
-    Doc.setVis(running, page.stopBotsBtn)
-    Doc.setVis(!running, page.startBotsBtn, page.addBotBtn)
+    page.onIndicator.classList.add(running ? 'on' : 'off')
+    page.onIndicator.classList.remove(running ? 'off' : 'on')
+    Doc.setVis(running, page.stopBotsBtn, page.onMsg)
+    Doc.setVis(!running, page.startBotsBtn, page.offMsg)
     this.setupBotTable(botConfigs, running, status.runningBots)
   }
 
@@ -109,9 +114,11 @@ export default class MarketMakerPage extends BasePage {
 
   handleMMStartStopNote (note: MMStartStopNote) {
     const page = this.page
-    Doc.setVis(note.running, page.stopBotsBtn, page.runningHeader)
-    Doc.setVis(!note.running, page.startBotsBtn, page.addBotBtn, page.enabledHeader,
-      page.baseBalanceHeader, page.quoteBalanceHeader, page.removeHeader)
+    page.onIndicator.classList.add(note.running ? 'on' : 'off')
+    page.onIndicator.classList.remove(note.running ? 'off' : 'on')
+    Doc.setVis(note.running, page.stopBotsBtn, page.runningHeader, page.onMsg)
+    Doc.setVis(!note.running, page.startBotsBtn, page.addBotBtnNoExisting, page.enabledHeader,
+      page.baseBalanceHeader, page.quoteBalanceHeader, page.removeHeader, page.offMsg)
     const tableRows = page.botTableBody.children
     for (let i = 0; i < tableRows.length; i++) {
       const row = tableRows[i] as PageElement
@@ -439,9 +446,9 @@ export default class MarketMakerPage extends BasePage {
       const quoteLogoPath = Doc.logoPath(quoteSymbol)
 
       rowTmpl.enabledCheckbox.checked = !botCfg.disabled
-      rowTmpl.enabledCheckbox.onclick = async () => {
+      Doc.bind(rowTmpl.enabledCheckbox, 'click', async () => {
         app().setMarketMakingEnabled(botCfg.host, botCfg.baseAsset, botCfg.quoteAsset, !!rowTmpl.enabledCheckbox.checked)
-      }
+      })
       rowTmpl.host.textContent = botCfg.host
       rowTmpl.baseMktLogo.src = baseLogoPath
       rowTmpl.quoteMktLogo.src = quoteLogoPath
@@ -452,17 +459,17 @@ export default class MarketMakerPage extends BasePage {
       rowTmpl.quoteBalance.textContent = this.walletBalanceStr(botCfg.quoteAsset, botCfg.quoteBalance)
       rowTmpl.baseBalanceLogo.src = baseLogoPath
       rowTmpl.quoteBalanceLogo.src = quoteLogoPath
-      rowTmpl.remove.onclick = async () => {
+      Doc.bind(rowTmpl.removeTd, 'click', async () => {
         await app().removeMarketMakingConfig(botCfg)
         row.remove()
         const mmCfg = await app().getMarketMakingConfig()
         const noBots = !mmCfg || !mmCfg.botConfigs || mmCfg.botConfigs.length === 0
-        Doc.setVis(noBots, page.noBotsHeader)
-        Doc.setVis(!noBots, page.botTable)
-      }
-      rowTmpl.settings.onclick = () => {
+        Doc.setVis(noBots, page.noBots)
+        Doc.setVis(!noBots, page.botTable, page.onOff)
+      })
+      Doc.bind(rowTmpl.settings, 'click', () => {
         app().loadPage(`mmsettings?host=${botCfg.host}&base=${botCfg.baseAsset}&quote=${botCfg.quoteAsset}`)
-      }
+      })
       page.botTableBody.appendChild(row)
     }
   }
@@ -478,22 +485,21 @@ export default class MarketMakerPage extends BasePage {
     this.showForm(this.page.addBotForm)
   }
 
-  async showPWSubmitForm () {
-    const page = this.page
-    this.showForm(page.pwForm)
+  async start () {
+    if (State.passwordIsCached()) this.startBots()
+    else this.showForm(this.page.pwForm)
   }
 
   async startBots () {
     const page = this.page
-    try {
-      const pw = page.pwInput.value
-      this.page.pwInput.value = ''
-      this.closePopups()
-      await app().startMarketMaking(pw || '')
-    } catch (e) {
-      page.mmErr.textContent = e.message
+    Doc.hide(page.mmErr)
+    const appPW = page.pwInput.value
+    this.page.pwInput.value = ''
+    this.closePopups()
+    const res = await postJSON('/api/startmarketmaking', { appPW })
+    if (!app().checkResponse(res)) {
+      page.mmErr.textContent = res.msg
       Doc.show(page.mmErr)
-      setTimeout(() => { Doc.hide(page.mmErr) }, 3000)
     }
   }
 

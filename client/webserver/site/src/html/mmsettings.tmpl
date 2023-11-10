@@ -1,33 +1,25 @@
 {{define "mmsettings"}}
 {{template "top" .}}
 <div id="main" data-handler="mmsettings" class="mmsettings w-100 overflow-y-auto">
-  <div class="flex-center fs28 text-break">Market Maker Settings</div>
-  <div class="flex-center fs20 text-break">
-    <img id="baseLogo"><img class="mx-1" id="quoteLogo"><span id="baseHeader"></span> - <span id="quoteHeader"></span>  @  <span id="hostHeader"></span>
-  </div>
-  <div class="d-flex mt-1">
-    <div class="col-12 px-3">
-      <span id="settingsUpdatedMsg" class="settings-updated-msg px-2 d-hide">[[[settings_updated]]]</span>
-      <br/>
-      <button id="backButton" class="fs20 px-2 mx-1 selected">[[[back]]]</button>
-      <button id="updateButton" class="fs20 px-2 mx-1 selected">[[[update_settings]]]</button>
-      <button id="createButton" class="fs20 px-2 mx-1 selected d-hide">[[[create_bot]]]</button>
-      <button id="resetButton" class="fs20 px-2 mx-1 selected">[[[reset_settings]]]</button>
+  <div class="w-100 flex-center p-2 fs28 d-flex d-md-none brdrbottom">[[[Market Maker Settings]]]</div>
+  <div class="d-flex w-100 brdrbottom align-items-stretch">
+    <div id="backButton" class="fs18 p-2 hoverbg pointer flex-center brdrright">
+      <span class="ico-wide-headed-left-arrow fs28"></span>
+    </div>
+    <div id="mmTitle" class="flex-center fs28 d-none d-md-block">[[[Market Maker Settings]]]</div>
+    <div class="flex-center fs24 p-2 flex-grow-1">
+      <img id="baseLogo" class="mini-icon"><img id="quoteLogo" class="mx-1 mini-icon">
+      <span id="baseHeader"></span> &ndash; <span id="quoteHeader"></span>
+      <span class="mx-2">@</span>
+      <span id="hostHeader"></span>
     </div>
   </div>
 
-  <div id="botSettingsContainer" class="d-hide bot-settings-container">
-    <div class="placement-settings-column">
-      <div class="setting-container">
-        <label>[[[gap_strategy]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="
-          percent: gap set to a percent of the spot price,
-          percent-plus: percent + add the break-even spread,
-          absolute: set an absolute sell - buy rate difference,
-          absolute-plus: absolute + add the break-even spread,
-          multiplier: a multiple of the break-even spread
-        "></span>
-        <select class="w-50 form-select" id="gapStrategySelect">
+  <div id="botSettingsContainer" class="d-flex flex-wrap d-hide p-2">
+    <div class="col-24 col-xl-8 col-xxl-6 px-3">
+      <div class="d-flex flex-column align-items-stretch pb-2">
+        <div class="text-nowrap me-2 mb-1 fs18 demi">[[[gap_strategy]]]</div>
+        <select id="gapStrategySelect" class="form-select fs18">
           <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
           <option value="percent">[[[gap_strategy_percent]]]</option>
           <option value="absolute-plus">
@@ -37,210 +29,194 @@
           <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
         </select>
       </div>
-
-      <div class="setting-container">
-        <label>[[[buy_placements]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
-        <div class="table-wrapper d-flex" id="buyPlacementsTableWrapper">
-          <table class="placement-table">
-            <thead>
-              <th scope="col">[[[priority]]]</th>
-              <th scope="col">[[[Lots]]]</th>
-              <th scope="col" id="buyGapFactorHdr"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-            </thead>
-            <tbody id="buyPlacementsTableBody">
-              <tr id="placementRowTmpl">
-                <td data-tmpl="priority">1</td>
-                <td data-tmpl="lots">2</td>
-                <td data-tmpl="gapFactor">2.5</td>
-                <td>
-                  <span
-                    class="ico-cross fs15 pointer remove-placement-btn"
-                    data-tmpl="removeBtn"
-                  ></span>
-                </td>
-                <td>
-                  <span
-                    class="ico-arrowup fs15 pointer"
-                    data-tmpl="upBtn"
-                  ></span>
-                </td>
-                <td>
-                  <span
-                    class="ico-arrowdown fs15 pointer"
-                    data-tmpl="downBtn"
-                  ></span>
-                </td>
-              </tr>
-              <tr id="addBuyPlacementRow">
-                <td></td>
-                <td><input class="lots-input" step="1" type="number" id="addBuyPlacementLots" /></td>
-                <td><input class="gap-factor-input" type="number" id="addBuyPlacementGapFactor" /></td>
-                <td>
-                  <span
-                    class="ico-plus fs15 pointer add-placement-btn"
-                    id="addBuyPlacementBtn"
-                  ></span>
-                </td>
-                <td></td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
-          <span
-            class="fs15 pt-3 text-center d-hide errcolor text-break"
-            id="buyPlacementsErr"
-          ></span>
-        </div>
+      {{- /* STRATEGY DESCRIPTIONS */ -}}
+      <div id="percentPlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify">
+        [[[strategy_percent_plus]]]
+      </div>
+      <div id="percentInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+        [[[strategy_percent]]]
+      </div>
+      <div id="absolutePlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+        [[[strategy_absolute_plus]]]
+      </div>
+      <div id="absoluteInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+        [[[strategy_absolute]]]
+      </div>
+      <div id="multiplierInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+        [[[strategy_multiplier]]]
       </div>
 
-      <div class="setting-container">
-        <label>Sell Placements</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
-        <div class="table-wrapper d-flex" id="sellPlacementsTableWrapper">
-          <table class="placement-table">
-            <thead>
-              <th scope="col">[[[priority]]]</th>
-              <th scope="col">[[[Lots]]]</th>
-              <th scope="col" id="sellGapFactorHdr"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-            </thead>
-            <tbody id="sellPlacementsTableBody">
-              <tr id="addSellPlacementRow">
-                <td></td>
-                <td><input class="lots-input" step="1" type="number" id="addSellPlacementLots" /></td>
-                <td><input class="gap-factor-input" type="number" id="addSellPlacementGapFactor" /></td>
-                <td>
-                  <span
-                    class="ico-plus fs15 pointer add-placement-btn"
-                    id="addSellPlacementBtn"
-                  ></span>
-                </td>
-                <td></td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
-          <span
-            class="fs15 pt-3 text-center d-hide errcolor text-break"
-            id="sellPlacementsErr"
-          ></span>
-        </div>
+      <button id="updateButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg brdr pointer">[[[update_settings]]]</button>
+      <button id="createButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg brdr pointer d-hide">[[[create_bot]]]</button>
+      <button id="resetButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg brdr pointer">[[[reset_settings]]]</button>
+
+      <div class="d-flex align-items-center fs18 mt-3 demi">
+        [[[buy_placements]]]
+        <span class="ico-info fs12 ms-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
       </div>
-    </div>
-
-    <div class="bot-settings-column">
-
-      <div class="setting-container">
-        <label>[[[Drift tolerance]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
-        <div
-          class="slider-container"
-          id="driftToleranceContainer"
-        ></div>
-      </div>
-
-      <div class="setting-container">
-        <label>[[[use_oracles]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[use_oracles_tooltip]]]"></span>
-        <input
-          class="form-check-input"
-          type="checkbox"
-          id="useOracleCheckbox"
-          checked
-        />
+      <div class="d-flex flex-column" id="buyPlacementsTableWrapper">
+        <table class="placement-table">
+          <thead>
+            <th scope="col">[[[priority]]]</th>
+            <th scope="col">[[[Lots]]]</th>
+            <th scope="col" id="buyGapFactorHdr"></th>
+          </thead>
+          <tbody id="buyPlacementsTableBody">
+            <tr id="placementRowTmpl">
+              <td data-tmpl="priority"></td>
+              <td data-tmpl="lots"></td>
+              <td data-tmpl="gapFactor"></td>
+              <td>
+                <span data-tmpl="removeBtn" class="ico-cross fs15 pointer remove-placement-btn"></span>
+              </td>
+              <td>
+                <span data-tmpl="upBtn" class="ico-arrowup fs15 pointer"></span>
+              </td>
+              <td>
+                <span
+                  class="ico-arrowdown fs15 pointer"
+                  data-tmpl="downBtn"
+                ></span>
+              </td>
+            </tr>
+            <tr id="addBuyPlacementRow">
+              <td></td>
+              <td><input id="addBuyPlacementLots" class="lots-input p-2" step="1" type="number"></td>
+              <td><input id="addBuyPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
+              <td></td>
+              <td></td>
+              <td class="text-right">
+                <span id="addBuyPlacementBtn" class="ico-plus fs15 pointer add-placement-btn"></span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <span id="buyPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
       </div>
 
-      <div class="setting-container indent" id="oracleWeightingSection">
-        <label>[[[Oracle weight]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
-        <div
-          class="slider-container"
-          id="oracleWeightingContainer"
-        ></div>
+      <div class="d-flex align-items-center fs18 mt-3 demi">
+        [[[sell_placements]]]
+        <span class="ico-info fs12 ms-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
       </div>
-
-      <div class="setting-container indent" id="oracleBiasSection">
-        <label>[[[Oracle bias]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
-        <div
-          class="slider-container"
-          id="oracleBiasContainer"
-        ></div>
-      </div>
-
-      <div class="setting-container">
-        <label>[[[empty_market_rate]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[empty_market_rate_tooltip]]]"></span>
-        <input
-          class="form-check-input"
-          type="checkbox"
-          id="emptyMarketRateCheckbox"
-          checked
-        />
-        <br/>
-        <input type="number" class="indent mt-1" id="emptyMarketRateInput" />
+      <div class="d-flex flex-column" id="sellPlacementsTableWrapper">
+        <table class="placement-table">
+          <thead>
+            <th scope="col">[[[priority]]]</th>
+            <th scope="col">[[[Lots]]]</th>
+            <th scope="col" id="sellGapFactorHdr"></th>
+            <th scope="col"></th>
+            <th scope="col"></th>
+            <th scope="col"></th>
+          </thead>
+          <tbody id="sellPlacementsTableBody">
+            <tr id="addSellPlacementRow">
+              <td></td>
+              <td><input id="addSellPlacementLots" class="lots-input p-2" step="1" type="number"></td>
+              <td><input id="addSellPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
+              <td></td>
+              <td></td>
+              <td class="text-right">
+                <span id="addSellPlacementBtn" class="ico-plus fs15 pointer add-placement-btn"></span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
       </div>
     </div>
 
-    <div class="bot-balance-column">
-      <div class="setting-container">
-        <label><img id="baseBalanceLogo"> [[[base_asset_balance]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[base_asset_balance_tooltip]]]"></span>
-        <br />
-        <span class="d-hide errcolor text-break" id="noBaseBalance">[[[no_balance_available]]]</span>
-        <div
-          class="slider-container"
-          id="baseBalanceContainer"
-        ></div>
-      </div>
-
-      <div id="baseWalletSettings">
-        <label><img id="baseSettingsLogo"> [[[base_wallet_settings]]]</label>
-        <div id="baseWalletSettingsContainer">
-
-          <div class="setting-container" id="boolSettingTmpl">
-            <label data-tmpl="name"></label>
-            <span data-tmpl="tooltip" class="ico-info fs12 me-1"></span>
-            <input
-              data-tmpl="input"
-              class="form-check-input"
-              type="checkbox"
-            />
+    <div class="col-24 col-xl-10 col-xxl-12 d-flex flex-wrap">
+      <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
+        <div class="settings-card">
+          <div class="fs18 mb-2">
+            [[[Drift tolerance]]]
+            <span class="ico-info fs12 me-1" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
           </div>
-          <div class="setting-container" id="rangeSettingTmpl">
-            <label data-tmpl="name"></label>
-            <span data-tmpl="tooltip" class="ico-info fs12 me-1"></span>
-            <div class="slider-container" data-tmpl="sliderContainer">
+          <div id="driftToleranceContainer" class="slider-container"></div>
+        </div>
+
+        <div class="settings-card">
+          <label for="useOracleCheckbox" class="fs18 d-flex align-items-center w-100">
+            <input type="checkbox" id="useOracleCheckbox" class="form-check-input me-2 mt-0" checked>
+            <span>[[[use_oracles]]]</span>
+            <span class="ico-info fs12 ms-1" data-tooltip="[[[use_oracles_tooltip]]]"></span>
+          </label>
+          <div id="oracleWeightingSection" class="pt-2 mt-2 brdrtop">
+            <span>[[[Oracle weight]]]</span>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
+            <div id="oracleWeightingContainer" class="slider-container"></div>
+          </div>
+          <div id="oracleBiasSection" class="mt-3">
+            <span>[[[Oracle bias]]]</span>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
+            <div id="oracleBiasContainer" class="slider-container"></div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <label for="emptyMarketRateCheckbox" class="fs18 d-flex align-items-center w-100">
+            <input type="checkbox" id="emptyMarketRateCheckbox" class="form-check-input me-2 mt-0" checked>
+            <span>[[[empty_market_rate]]]</span>
+            <span class="ico-info fs12 ms-1" data-tooltip="[[[empty_market_rate_tooltip]]]"></span>
+          </label>
+          <div id="emptyMarketRateInputBox" class="pt-2 mt-2 brdrtop">
+            <input type="number" class="p-2 mt-1" id="emptyMarketRateInput">
+          </div>
+        </div>
+      </div>
+
+      <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
+        <div class="settings-card">
+          <div class="fs18 d-flex align-items-center">
+            <span><img id="baseBalanceLogo" class="micro-icon me-1"> [[[base_asset_balance]]]</span>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[base_asset_balance_tooltip]]]"></span>
+          </div>
+          <span class="d-hide errcolor text-break" id="noBaseBalance">[[[no_balance_available]]]</span>
+          <div id="baseBalanceContainer" class="slider-container"></div>
+        </div>
+
+        <div id="baseWalletSettings" class="settings-card">
+          <div class="fs18 pb-2 mb-2 brdrbottom d-flex align-items-center">
+            <img id="baseSettingsLogo" class="micro-icon me-1">
+            <span>[[[base_wallet_settings]]]</span>
+          </div>
+          <div id="baseWalletSettingsContainer">
+            <div id="boolSettingTmpl" class="d-flex align-items-center">
+              <input type="checkbox" data-tmpl="input" class="form-check-input me-2 mt-0">
+              <span data-tmpl="name"></span>
+              <span data-tmpl="tooltip" class="ico-info fs12 ms-1"></span>
+            </div>
+            <div id="rangeSettingTmpl" class="pt-2">
+              <span data-tmpl="name"></span>
+              <span data-tmpl="tooltip" class="ico-info fs12 me-1"></span>
+              <div class="slider-container" data-tmpl="sliderContainer">
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="setting-container">
-        <label><img id="quoteBalanceLogo"> [[[quote_asset_balance]]]</label>
-        <span class="ico-info fs12 me-1" data-tooltip="[[[quote_asset_balance_tooltip]]]"></span>
-        <br/>
-        <span class="d-hide errcolor text-break" id="noQuoteBalance">[[[no_balance_available]]]</span>
-        <div
-          class="slider-container"
-          id="quoteBalanceContainer"
-        ></div>
-      </div>
-
-      <div id="quoteWalletSettings">
-        <label><img id="quoteSettingsLogo"> [[[quote_wallet_settings]]]</label>
-        <div id="quoteWalletSettingsContainer">
+      <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
+        <div class="settings-card">
+          <div class="fs18 mb-2 d-flex align-items-center">
+            <img id="quoteBalanceLogo" class="micro-icon me-1">
+            <span>[[[quote_asset_balance]]]</span>
+            <span class="ico-info fs12 ms-1" data-tooltip="[[[quote_asset_balance_tooltip]]]"></span>
+          </div>
+          <span class="d-hide errcolor text-break" id="noQuoteBalance">[[[no_balance_available]]]</span>
+          <div id="quoteBalanceContainer" class="slider-container"></div>
+        </div>
+        <div id="quoteWalletSettings" class="settings-card">
+          <div class="fs18 pb-2 mb-2 brdrbottom d-flex align-items-center">
+            <img id="quoteSettingsLogo" class="micro-icon me-1">
+            <span>[[[quote_wallet_settings]]]</span>
+          </div>
+          <div id="quoteWalletSettingsContainer"></div>
         </div>
       </div>
     </div>
 
-    <div class="oracles-column">
+    <div class="col-24 col-xl-6">
       <div id="oraclesLoading">
         [[[loading_oracles]]]      
         <div class="ico-spinner spinner fs14 d-inline-block" data-tmpl="syncSpinner"></div>
@@ -252,7 +228,7 @@
         [[[no_oracles]]]
       </div>
 
-      <table id="oraclesTable" class="py-2 oracles-table my-3 w-100 d-hide">
+      <table id="oraclesTable" class="mb-3 oracles-table w-100 d-hide">
         <thead>
           <tr>
             <td>[[[Oracles]]]</td>
@@ -285,7 +261,6 @@
           </tr>
         </tbody>
       </table>
-
     </div>
   </div>
 

@@ -841,7 +841,6 @@ export interface Application {
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
   getMarketMakingStatus (): Promise<MarketMakingStatus>
-  startMarketMaking (pw: string): Promise<void>
   stopMarketMaking (): Promise<void>
   getMarketMakingConfig (): Promise<MarketMakingConfig>
   updateMarketMakingConfig (cfg: BotConfig): Promise<void>

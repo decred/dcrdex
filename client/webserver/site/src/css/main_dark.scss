@@ -34,6 +34,10 @@ body.dark {
     border-color: #333;
   }
 
+  .brdr {
+    border: 1px solid $dark_border_color;
+  }
+
   .brdrleft {
     border-left: 1px solid $dark_border_color;
   }

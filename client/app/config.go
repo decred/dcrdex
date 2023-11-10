@@ -99,7 +99,6 @@ type CoreConfig struct {
 	NoAutoWalletLock   bool `long:"no-wallet-lock" description:"Disable locking of wallets on shutdown or logout. Use this if you want your external wallets to stay unlocked after closing the DEX app."`
 	NoAutoDBBackup     bool `long:"no-db-backup" description:"Disable creation of a database backup on shutdown."`
 	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
-	SimnetFiatRates    bool `long:"simnet-fiat-rates" description:"Fetch fiat rates when running in simnet mode."`
 
 	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
 }
@@ -203,7 +202,6 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		UnlockCoinsOnLogin: cfg.UnlockCoinsOnLogin,
 		NoAutoWalletLock:   cfg.NoAutoWalletLock,
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
-		SimnetFiatRates:    cfg.SimnetFiatRates,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
 	}
 }

@@ -9,10 +9,6 @@
     margin-top: 10px;
   }
 
-  .ico-plus {
-    color: green;
-  }
-
   .asset-row {
     img {
       width: 30px;
@@ -36,24 +32,6 @@
 
       display: none;
     }
-  }
-
-  .brdr-right,
-  .brdr-top {
-    border-width: 1px;
-    border-color: #7777;
-  }
-
-  .brdr-right {
-    border-right-style: solid;
-  }
-
-  .brdr-top {
-    border-top-style: solid;
-  }
-
-  .bg10 {
-    background-color: transparent; // #787b8924;
   }
 
   .asset-logo {
@@ -191,14 +169,19 @@
   }
 
   #botTable {
-    @extend .table; 
-    @extend .table-striped; 
-  
-    img {
-      width: 16px;
-      height: 16px;
+    td,
+    th {
+      padding: 10px;
     }
-  
+
+    tr {
+      border-top: 1px solid $dark_border_color;
+    }
+
+    tr:last-child {
+      border-bottom: 1px solid $dark_border_color;
+    }
+
     .ico-rocket {
       color: #29bb77;
     }
@@ -208,12 +191,46 @@
     }
   
     .ico-cross {
-      color: #99302b99;
+      color: $sellcolor_light;
     }
   }
-  
-  .stopred-bg {
-    background-color: #99302b99 !important; 
+
+  #onIndicator {
+    width: 15px;
+    height: 15px;
+    border-radius: 8px;
+
+    &.on {
+      background-color: $buycolor_light;
+    }
+
+    &.off {
+      background-color: #777;
+    }
+  }
+
+  #startBotsBtn,
+  #stopBotsBtn {
+    opacity: 0.9;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+
+  #startBotsBtn {
+    background-color: $buycolor_light;
+  }
+
+  #stopBotsBtn {
+    background-color: $sellcolor_dark;
+  }
+
+  #noBots {
+    .ico-robot {
+      font-size: 100px;
+      opacity: 0.7;
+    }
   }
 }
 

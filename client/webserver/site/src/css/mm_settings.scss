@@ -1,47 +1,20 @@
 
 #main.mmsettings {
-  .bot-settings-container {
-    display: flex;
-    margin-left: 3%;
-    margin-right: 3%;
-    margin-top: 20px;
-  }
-
-  img {
-    width: 16px;
-    height: 16px;
-  }
-
-  .placement-settings-column {
-    padding: 0 5px;
-    width: 34%;
-  }
-
-  .bot-settings-column {
-    min-width: 22%;
-    padding: 0 5px;
-  }
-
-  .bot-balance-column {
-    min-width: 22%;
-    padding: 0 5px;
-  }
-
-  .oracles-column {
-    min-width: 22%;
-    padding: 0 5px;
-  }
-
   .placement-table {
-    @extend .table;
-    @extend .table-striped;
-    @extend .table-sm;
-  }
+    width: 100%;
 
-  .table-wrapper {
-    display: table-caption;
-    border: 1px solid #7777;
-    border-radius: 0.25rem;
+    th,
+    td {
+      padding: 5px;
+    }
+
+    tr {
+      border-top: 1px solid $dark_border_color;
+    }
+
+    tr:last-child {
+      border-bottom: 1px solid $dark_border_color;
+    }
   }
 
   .slider-container {
@@ -49,7 +22,7 @@
     border-radius: 3px;
     padding: 4px;
     margin-top: 8px;
-    opacity: 0.7;
+    opacity: 0.9;
 
     .xy-range-input {
       width: 35px;
@@ -80,14 +53,6 @@
     border: 1px solid orange !important;
   }
 
-  .setting-container {
-    padding: 5px;
-  }
-
-  .indent {
-    margin-left: 10px;
-  }
-
   .remove-placement-btn {
     color: #99302b99;
   }
@@ -102,7 +67,7 @@
   }
 
   #gapStrategySelect {
-    display: block;
+    width: 300px;
   }
 
   table.oracles-table {
@@ -133,20 +98,21 @@
     }
   }
 
-  .gap-factor-input {
-    max-width: 100px;
+  .gap-factor-input,
+  .lots-input {
+    max-width: 75px;
   }
 
-  .lots-input {
-    max-width: 80px;
+  .settings-card {
+    background-color: #102332;
+    margin: 0 1rem 2rem;
+    padding: 0.5rem;
+    font-size: 16px;
+    border: 1px solid $dark_border_color;
   }
 }
 
 body.dark #main.mmsettings {
-  .placement-table {
-    @extend .table-dark;
-  }
-
   #gapStrategySelect:disabled {
       background-color: #343232;
   }

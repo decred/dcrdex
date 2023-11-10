@@ -105,6 +105,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const page = (this.page = Doc.idDescendants(main))
 
+    app().headerSpace.appendChild(page.mmTitle)
+
     setOptionTemplates(page)
     Doc.cleanTemplates(
       page.orderOptTmpl,
@@ -119,10 +121,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.resetButton, 'click', () => { this.setOriginalValues(false) })
     Doc.bind(page.updateButton, 'click', () => {
       this.saveSettings()
-      Doc.show(page.settingsUpdatedMsg)
-      setTimeout(() => {
-        Doc.hide(page.settingsUpdatedMsg)
-      }, 2000)
+      // TODO: Show success message/checkmark after #2575 is in.
     })
     Doc.bind(page.createButton, 'click', async () => {
       await this.saveSettings()
@@ -483,7 +482,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     newRowTmpl.priority.textContent = `${tableBody.children.length}`
     newRowTmpl.lots.textContent = `${lots}`
     newRowTmpl.gapFactor.textContent = `${displayedGapFactor} ${unit}`
-    newRowTmpl.removeBtn.onclick = () => {
+    Doc.bind(newRowTmpl.removeBtn, 'click', () => {
       const placements = getPlacementsList(isBuy)
       const index = placements.findIndex((placement) => {
         return placement.lots === lots && placement.gapFactor === actualGapFactor
@@ -493,12 +492,12 @@ export default class MarketMakerSettingsPage extends BasePage {
       newRow.remove()
       updateArrowVis()
       this.updateModifiedMarkers()
-    }
+    })
     if (running) {
       Doc.hide(newRowTmpl.removeBtn)
     }
 
-    newRowTmpl.upBtn.onclick = () => {
+    Doc.bind(newRowTmpl.upBtn, 'click', () => {
       const placements = getPlacementsList(isBuy)
       const index = placements.findIndex(
         (placement) =>
@@ -517,9 +516,9 @@ export default class MarketMakerSettingsPage extends BasePage {
       movedDownTmpl.priority.textContent = `${index + 1}`
       updateArrowVis()
       this.updateModifiedMarkers()
-    }
+    })
 
-    newRowTmpl.downBtn.onclick = () => {
+    Doc.bind(newRowTmpl.downBtn, 'click', () => {
       const placements = getPlacementsList(isBuy)
       const index = placements.findIndex(
         (placement) =>
@@ -538,7 +537,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       movedUpTmpl.priority.textContent = `${index + 1}`
       updateArrowVis()
       this.updateModifiedMarkers()
-    }
+    })
 
     tableBody.insertBefore(newRow, addPlacementRow)
     updateArrowVis()
@@ -553,6 +552,19 @@ export default class MarketMakerSettingsPage extends BasePage {
     const header = this.gapFactorHeaderUnit(gapStrategy)[0]
     page.buyGapFactorHdr.textContent = header
     page.sellGapFactorHdr.textContent = header
+    Doc.hide(page.percentPlusInfo, page.percentInfo, page.absolutePlusInfo, page.absoluteInfo, page.multiplierInfo)
+    switch (gapStrategy) {
+      case 'percent-plus':
+        return Doc.show(page.percentPlusInfo)
+      case 'percent':
+        return Doc.show(page.percentInfo)
+      case 'absolute-plus':
+        return Doc.show(page.absolutePlusInfo)
+      case 'absolute':
+        return Doc.show(page.absoluteInfo)
+      case 'multiplier':
+        return Doc.show(page.multiplierInfo)
+    }
   }
 
   /*
@@ -563,9 +575,10 @@ export default class MarketMakerSettingsPage extends BasePage {
     const page = this.page
 
     // Gap Strategy
-    page.gapStrategySelect.onchange = () => {
+    Doc.bind(page.gapStrategySelect, 'change', () => {
       if (!page.gapStrategySelect.value) return
-      this.updatedConfig.basicMarketMakingConfig.gapStrategy = page.gapStrategySelect.value
+      const gapStrategy = page.gapStrategySelect.value
+      this.updatedConfig.basicMarketMakingConfig.gapStrategy = gapStrategy
       while (page.buyPlacementsTableBody.children.length > 1) {
         page.buyPlacementsTableBody.children[0].remove()
       }
@@ -574,27 +587,51 @@ export default class MarketMakerSettingsPage extends BasePage {
       }
       this.updatedConfig.basicMarketMakingConfig.buyPlacements = []
       this.updatedConfig.basicMarketMakingConfig.sellPlacements = []
-      this.setGapFactorLabels(page.gapStrategySelect.value)
+      this.setGapFactorLabels(gapStrategy)
       this.updateModifiedMarkers()
-    }
+    })
     if (running) {
       page.gapStrategySelect.setAttribute('disabled', 'true')
     }
 
     // Buy/Sell placements
-    page.addBuyPlacementBtn.onclick = () => {
+    Doc.bind(page.addBuyPlacementBtn, 'click', () => {
       this.addPlacement(true, null, false)
       page.addBuyPlacementLots.value = ''
       page.addBuyPlacementGapFactor.value = ''
       this.updateModifiedMarkers()
-    }
-    page.addSellPlacementBtn.onclick = () => {
+    })
+    Doc.bind(page.addSellPlacementBtn, 'click', () => {
       this.addPlacement(false, null, false)
       page.addSellPlacementLots.value = ''
       page.addSellPlacementGapFactor.value = ''
       this.updateModifiedMarkers()
-    }
+    })
     Doc.setVis(!running, page.addBuyPlacementRow, page.addSellPlacementRow)
+
+    const maybeSubmitBuyRow = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter') return
+      if (
+        !isNaN(parseFloat(page.addBuyPlacementGapFactor.value || '')) &&
+        !isNaN(parseFloat(page.addBuyPlacementLots.value || ''))
+      ) {
+        page.addBuyPlacementBtn.click()
+      }
+    }
+    Doc.bind(page.addBuyPlacementGapFactor, 'keyup', (e: KeyboardEvent) => { maybeSubmitBuyRow(e) })
+    Doc.bind(page.addBuyPlacementLots, 'keyup', (e: KeyboardEvent) => { maybeSubmitBuyRow(e) })
+
+    const maybeSubmitSellRow = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter') return
+      if (
+        !isNaN(parseFloat(page.addSellPlacementGapFactor.value || '')) &&
+        !isNaN(parseFloat(page.addSellPlacementLots.value || ''))
+      ) {
+        page.addSellPlacementBtn.click()
+      }
+    }
+    Doc.bind(page.addSellPlacementGapFactor, 'keyup', (e: KeyboardEvent) => { maybeSubmitSellRow(e) })
+    Doc.bind(page.addSellPlacementLots, 'keyup', (e: KeyboardEvent) => { maybeSubmitSellRow(e) })
 
     // Drift tolerance
     const updatedDriftTolerance = (x: number) => {
@@ -622,7 +659,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     )
 
     // User oracle
-    page.useOracleCheckbox.onchange = () => {
+    Doc.bind(page.useOracleCheckbox, 'change', () => {
       if (page.useOracleCheckbox.checked) {
         Doc.show(page.oracleBiasSection, page.oracleWeightingSection)
         this.updatedConfig.basicMarketMakingConfig.oracleWeighting = defaultMarketMakingConfig.oracleWeighting
@@ -635,7 +672,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         this.updatedConfig.basicMarketMakingConfig.oracleBias = 0
       }
       this.updateModifiedMarkers()
-    }
+    })
     if (running) {
       page.useOracleCheckbox.setAttribute('disabled', 'true')
     }
@@ -677,25 +714,23 @@ export default class MarketMakerSettingsPage extends BasePage {
     )
 
     // Empty Market Rate
-    page.emptyMarketRateCheckbox.onchange = () => {
+    Doc.bind(page.emptyMarketRateCheckbox, 'change', () => {
       if (page.emptyMarketRateCheckbox.checked) {
         this.updatedConfig.basicMarketMakingConfig.emptyMarketRate = this.originalConfig.basicMarketMakingConfig.emptyMarketRate
         page.emptyMarketRateInput.value = `${this.updatedConfig.basicMarketMakingConfig.emptyMarketRate}`
-        Doc.show(page.emptyMarketRateInput)
+        Doc.show(page.emptyMarketRateInputBox)
         this.updateModifiedMarkers()
       } else {
         this.updatedConfig.basicMarketMakingConfig.emptyMarketRate = 0
-        Doc.hide(page.emptyMarketRateInput)
+        Doc.hide(page.emptyMarketRateInputBox)
         this.updateModifiedMarkers()
       }
-    }
-    page.emptyMarketRateInput.onchange = () => {
-      const emptyMarketRate = parseFloat(
-        page.emptyMarketRateInput.value || '0'
-      )
+    })
+    Doc.bind(page.emptyMarketRateInput, 'change', () => {
+      const emptyMarketRate = parseFloat(page.emptyMarketRateInput.value || '0')
       this.updatedConfig.basicMarketMakingConfig.emptyMarketRate = emptyMarketRate
       this.updateModifiedMarkers()
-    }
+    })
     if (running) {
       page.emptyMarketRateCheckbox.setAttribute('disabled', 'true')
       page.emptyMarketRateInput.setAttribute('disabled', 'true')
@@ -737,16 +772,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     })
 
     // Empty market rate
-    console.log(this.originalConfig.basicMarketMakingConfig.emptyMarketRate)
-    page.emptyMarketRateCheckbox.checked =
-      this.originalConfig.basicMarketMakingConfig.emptyMarketRate > 0
-    Doc.setVis(
-      !!page.emptyMarketRateCheckbox.checked,
-      page.emptyMarketRateInput
-    )
-    page.emptyMarketRateInput.value = `${
-      this.originalConfig.basicMarketMakingConfig.emptyMarketRate || 0
-    }`
+    page.emptyMarketRateCheckbox.checked = this.originalConfig.basicMarketMakingConfig.emptyMarketRate > 0
+    Doc.setVis(page.emptyMarketRateCheckbox.checked, page.emptyMarketRateInputBox)
+    page.emptyMarketRateInput.value = `${this.originalConfig.basicMarketMakingConfig.emptyMarketRate || 0}`
 
     // Use oracles
     if (this.originalConfig.basicMarketMakingConfig.oracleWeighting === 0) {
@@ -806,6 +834,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     await app().updateMarketMakingConfig(this.updatedConfig)
     this.originalConfig = JSON.parse(JSON.stringify(this.updatedConfig))
     this.updateModifiedMarkers()
+    app().loadPage('mm')
   }
 
   /*
@@ -1040,11 +1069,11 @@ export default class MarketMakerSettingsPage extends BasePage {
         tmpl.name.textContent = opt.displayname
         tmpl.input.checked = currVal === 'true'
         if (running) tmpl.input.setAttribute('disabled', 'true')
-        tmpl.input.onchange = () => {
+        Doc.bind(tmpl.input, 'change', () => {
           setWalletOption(quote, opt.key, tmpl.input.checked ? 'true' : 'false')
           setDependentOptsVis(opt.key, !!tmpl.input.checked, quote)
           this.updateModifiedMarkers()
-        }
+        })
         const setValue = (x: string) => {
           tmpl.input.checked = x === 'true'
           setDependentOptsVis(opt.key, !!tmpl.input.checked, quote)
@@ -1082,6 +1111,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         Doc.setVis(parentOptVal === 'true', setting)
       }
     }
+
     if (baseWalletSettings.multifundingopts && baseWalletSettings.multifundingopts.length > 0) {
       for (const opt of baseWalletSettings.multifundingopts) addOpt(opt, false)
     }
