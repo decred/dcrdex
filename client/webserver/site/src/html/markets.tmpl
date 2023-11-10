@@ -62,7 +62,7 @@
 
       {{- /* MARKET STATS - SMALL SCREENS */ -}}
       <div id="marketStatsV1" class="market-stats-v1 align-items-center justify-content-center p-2 flex-wrap">
-        <div class="flex-center me-2 pointer hoverbg" data-tmpl="marketSelect">
+        <div class="flex-center p-2 pointer hoverbg" data-tmpl="marketSelect">
           <div class="flex-center">
             <img class="market-stats-pair-img" data-tmpl="baseIcon"><img class="market-stats-pair-img" data-tmpl="quoteIcon" class="ms-1">
           </div>
@@ -193,7 +193,7 @@
 
           {{- /* ORDER FORM */ -}}
           <div class="order-panel pb-3 position-relative">
-            <div id="orderScroller" class="d-flex flex-column align-items-stretch">
+            <div id="orderScroller" class="d-flex flex-column align-items-stretch brdrleft">
 
               {{- /* TOKEN APPROVAL */ -}}
               <div class="fs15 pt-1 pb-3 text-center brdrbottom d-hide" id="tokenApproval">
@@ -384,7 +384,7 @@
 
               {{- /* BALANCES */ -}}
               <div id="noWallet" class="p-3 brdrbottom flex-center fs16 grey d-hide"></div>
-              <div id="walletInfoTmpl" class="brdrtop brdrbottom mb-3 d-flex flex-column align-items-stretch min-fit">
+              <div id="walletInfoTmpl" class="brdrtop mb-3 d-flex flex-column align-items-stretch min-fit">
                 <div class="d-flex align-items-center px-3 py-1 brdrbottom" data-tmpl="walletIcons">
                   <img data-tmpl="logo" class="micro-icon me-1">
                   <span data-tmpl="symbol"></span>

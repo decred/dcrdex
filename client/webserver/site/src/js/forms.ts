@@ -991,7 +991,7 @@ export class FeeAssetSelectionForm {
         el.style.transform = `scale(${prog})`
       }
       form.style.opacity = Math.pow(prog, 4).toFixed(1)
-      form.style.paddingTop = `${(1 - prog) * extraTop}px`
+      form.style.top = `${(1 - prog) * extraTop}px`
       how.style.fontSize = `${fontSize * prog}px`
     }, 'easeOut')
   }

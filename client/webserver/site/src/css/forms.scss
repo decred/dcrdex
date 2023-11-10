@@ -24,13 +24,13 @@
         linear-gradient(
           to bottom,
           #e0e0e000,
-          $light_body_bg
+          $light_panel
           90%
         );
     }
 
     &:not(.nohover):hover {
-      background-color: #c7c7c7;
+      background-color: #7773;
 
       .fader {
         background-image:
@@ -162,7 +162,6 @@
       border-width: 1px;
       border-color: #555;
       opacity: 0.8;
-      background-color: $light_body_bg;
       position: relative;
       z-index: 150;
     }
@@ -175,6 +174,7 @@
       opacity: 1;
       top: 1px;
       cursor: default;
+      background-color: white;
     }
 
     .wtab:not(.selected) {
@@ -244,12 +244,12 @@ button.form-button {
   left: 0;
   right: 0;
   padding: 25px 0;
-  background-color: $light_body_bg;
-  z-index: 100;
+  background-color: $light_form_bg;
+  z-index: 101;
 
   & > form {
     box-sizing: content-box;
-    padding: 50px;
+    padding: 2rem;
     margin: auto;
     text-align: left;
     position: relative;
@@ -258,6 +258,14 @@ button.form-button {
       @extend .form-button;
     }
   }
+}
+
+div[data-handler=init],
+div[data-handler=login],
+div[data-handler=register] {
+ #forms {
+  z-index: 99;
+ } 
 }
 
 #walletWait {

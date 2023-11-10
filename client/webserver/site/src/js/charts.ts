@@ -239,8 +239,9 @@ export class Chart {
     this.canvas.height = this.parent.clientHeight
     const xLblHeight = 30
     const yGuess = 40 // y label width guess. Will be adjusted when drawn.
-    const plotExtents = new Extents(yGuess, this.canvas.width, 10, this.canvas.height - xLblHeight)
-    const xLblExtents = new Extents(yGuess, this.canvas.width, this.canvas.height - xLblHeight, this.canvas.height)
+    const xPaddingRight = 20
+    const plotExtents = new Extents(yGuess, this.canvas.width - xPaddingRight, 10, this.canvas.height - xLblHeight)
+    const xLblExtents = new Extents(yGuess, this.canvas.width - xPaddingRight, this.canvas.height - xLblHeight, this.canvas.height)
     const yLblExtents = new Extents(0, yGuess, 10, this.canvas.height - xLblHeight)
     this.plotRegion = new Region(this.ctx, plotExtents)
     this.xRegion = new Region(this.ctx, xLblExtents)

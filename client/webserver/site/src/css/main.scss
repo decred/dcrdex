@@ -78,7 +78,6 @@ header.maintop {
   align-items: center;
   z-index: 100;
   border-bottom: 1px solid $light_border_color;
-  background-color: $light_body_bg;
 }
 
 a.logo-icon {
@@ -96,7 +95,6 @@ div.main {
   flex-grow: 1;
   min-height: 0;
   position: relative;
-  z-index: 0;
 }
 
 div.clear {
@@ -527,12 +525,7 @@ sup.token-parent {
 @include media-breakpoint-up(md) {
   div.mainlinks > div,
   div.mainlinks > a {
-    padding-left: 18px;
-    padding-right: 18px;
-
-    &:last-child {
-      padding-right: 0;
-    }
+    padding: 10px 18px;
   }
 }
 
@@ -554,3 +547,23 @@ sup.token-parent {
   }
 }
 
+.panel {
+  background-color: $light_panel;
+}
+
+div[data-handler=dexsettings],
+div[data-handler=init],
+div[data-handler=login],
+div[data-handler=markets],
+div[data-handler=mm],
+div[data-handler=order],
+div[data-handler=orders],
+div[data-handler=register],
+div[data-handler=settings],
+div[data-handler=wallets] {
+  #forms > form:not(.plain) {
+    border-radius: 5px;
+    background-color: #f3f3f3;
+    box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
+  }
+}
