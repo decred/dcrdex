@@ -885,8 +885,8 @@ func (tx *Tx) SerializeSize() uint64 {
 	return sz
 }
 
-// TxFeesZIP317 calculates the tx fees according to ZIP-0317.
-func (tx *Tx) TxFeesZIP317() uint64 {
+// RequiredTxFeesZIP317 calculates the minimum tx fees according to ZIP-0317.
+func (tx *Tx) RequiredTxFeesZIP317() uint64 {
 	txInsSize := uint64(wire.VarIntSerializeSize(uint64(len(tx.TxIn))))
 	for _, txIn := range tx.TxIn {
 		txInsSize += uint64(txIn.SerializeSize())

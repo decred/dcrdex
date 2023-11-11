@@ -166,15 +166,15 @@ func (c *tRPCClient) queueResponse(method string, resp any) {
 
 func (c *tRPCClient) checkEmptiness(t *testing.T) {
 	t.Helper()
-	var notEmpty bool
+	var stillQueued = map[string]int{}
 	for method, resps := range c.responses {
 		if len(resps) > 0 {
-			notEmpty = true
+			stillQueued[method] = len(resps)
 			fmt.Printf("Method %s still has %d responses queued \n", method, len(resps))
 		}
 	}
-	if notEmpty {
-		t.Fatalf("response queue not empty")
+	if len(stillQueued) > 0 {
+		t.Fatalf("response queue not empty: %+v", stillQueued)
 	}
 }
 
@@ -423,11 +423,17 @@ func TestFundOrder(t *testing.T) {
 	defer shutdown()
 	defer cl.checkEmptiness(t)
 
+	acctBal := &zAccountBalance{}
+	queueAccountBals := func() {
+		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // 0-conf
+		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // minOrchardConfs
+		cl.queueResponse(methodZGetNotesCount, &zNotesCount{Orchard: 1})
+	}
+
 	// With an empty list returned, there should be no error, but the value zero
 	// should be returned.
 	unspents := make([]*btc.ListUnspentResult, 0)
-	cl.queueResponse(methodZGetBalanceForAccount, &zAccountBalance{}) // 0-conf
-	cl.queueResponse(methodZGetBalanceForAccount, &zAccountBalance{}) // minOrchardConfs
+	queueAccountBals()
 	cl.queueResponse("listlockunspent", []*btc.RPCOutpoint{})
 
 	bal, err := w.Balance()
@@ -463,7 +469,7 @@ func TestFundOrder(t *testing.T) {
 	unspents = append(unspents, littleUTXO)
 
 	lockedVal := uint64(1e6)
-	acctBal := &zAccountBalance{
+	acctBal = &zAccountBalance{
 		Pools: zBalancePools{
 			Transparent: valZat{
 				ValueZat: littleFunds - lockedVal,
@@ -478,8 +484,7 @@ func TestFundOrder(t *testing.T) {
 		},
 	}
 
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal) // 0-conf
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal) // minOrchardConfs
+	queueAccountBals()
 	cl.queueResponse("gettxout", &btcjson.GetTxOutResult{})
 	cl.queueResponse("listlockunspent", lockedOutpoints)
 
@@ -532,8 +537,7 @@ func TestFundOrder(t *testing.T) {
 	// bals.Mine.Trusted += float64(lottaFunds) / 1e8
 	// node.getBalances = &bals
 	acctBal.Pools.Transparent.ValueZat = littleFunds + lottaFunds - lockedVal
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal) // 0-conf
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal) // minOrchardConfs
+	queueAccountBals()
 	cl.queueResponse("gettxout", &btcjson.GetTxOutResult{})
 	cl.queueResponse("listlockunspent", lockedOutpoints)
 	bal, err = w.Balance()
@@ -559,6 +563,12 @@ func TestFundOrder(t *testing.T) {
 		ord.MaxSwapCount = v / tLotSize
 	}
 
+	queueBalances := func() {
+		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // 0-conf
+		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // minOrchardConfs
+		cl.queueResponse(methodZGetNotesCount, &zNotesCount{Orchard: nActionsOrchardEstimate})
+	}
+
 	// Zero value
 	_, _, _, err = w.FundOrder(ord)
 	if !errorHasCode(err, errNoFundsRequested) {
@@ -567,7 +577,7 @@ func TestFundOrder(t *testing.T) {
 
 	// Nothing to spend
 	acctBal.Pools.Transparent.ValueZat = 0
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal)
+	queueBalances()
 	cl.queueResponse("listunspent", []*btc.ListUnspentResult{})
 	setOrderValue(littleOrder)
 	_, _, _, err = w.FundOrder(ord)
@@ -577,7 +587,7 @@ func TestFundOrder(t *testing.T) {
 
 	// RPC error
 	acctBal.Pools.Transparent.ValueZat = littleFunds + lottaFunds
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal)
+	queueBalances()
 	cl.queueResponse("listunspent", tErr)
 	_, _, _, err = w.FundOrder(ord)
 	if !errorHasCode(err, errFunding) {
@@ -585,6 +595,7 @@ func TestFundOrder(t *testing.T) {
 	}
 
 	// Negative response when locking outputs.
+	queueBalances()
 	cl.queueResponse("listunspent", unspents)
 	cl.queueResponse("lockunspent", false)
 	_, _, _, err = w.FundOrder(ord)
@@ -595,6 +606,7 @@ func TestFundOrder(t *testing.T) {
 	w.prepareCoinManager()
 
 	queueSuccess := func() {
+		queueBalances()
 		cl.queueResponse("listunspent", unspents)
 		cl.queueResponse("lockunspent", true)
 	}
@@ -709,7 +721,7 @@ func TestFundOrder(t *testing.T) {
 	extraLottaLots := littleLots + lottaLots
 	tweak := float64(littleFunds+lottaFunds-dexzec.RequiredOrderFunds(extraLottaOrder, 2, 2*dexbtc.RedeemP2PKHInputSize, extraLottaLots)+1) / 1e8
 	lottaUTXO.Amount -= tweak
-	cl.queueResponse("listunspent", unspents)
+	// cl.queueResponse("listunspent", unspents)
 	_, _, _, err = w.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough to cover tx fees")
@@ -806,7 +818,7 @@ func TestFundOrder(t *testing.T) {
 	lottaUTXO.Amount = float64(lottaFunds) / 1e8
 	w.reserves.Store(1)
 	cl.queueResponse("listunspent", unspents)
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal)
+	queueBalances()
 	_, _, _, err = w.FundOrder(ord)
 	if !errors.Is(err, asset.ErrInsufficientBalance) {
 		t.Fatalf("wrong error for reserves rejection: %v", err)
@@ -829,8 +841,6 @@ func TestFundOrder(t *testing.T) {
 	w.lastAddress.Store(tUnifiedAddr)
 	acctBal.Pools.Orchard.ValueZat = splitOutputAmt + shieldedSplitFees - lottaFunds
 	queueSuccess()
-	cl.queueResponse(methodZGetBalanceForAccount, acctBal) // for shielded balance
-	cl.queueResponse("listunspent", unspents)
 	cl.queueResponse(methodZGetAddressForAccount, &zGetAddressForAccountResult{Address: tAddr}) // split output
 	cl.queueResponse(methodZListUnifiedReceivers, &unifiedReceivers{Transparent: tAddr})
 	cl.queueResponse(methodZSendMany, "opid-123456")
@@ -856,7 +866,7 @@ func TestFundOrder(t *testing.T) {
 		t.Fatalf("error for shielded split: %v", err)
 	}
 	if len(coins) != 1 {
-		t.Fatalf("shielded split failed - coin count != 1")
+		t.Fatalf("shielded split failed - coin count %d != 1", len(coins))
 	}
 	if fees != shieldedSplitFees {
 		t.Fatalf("shielded split returned unexpected fees. wanted %d, got %d", shieldedSplitFees, fees)
@@ -1364,8 +1374,16 @@ func TestPreSwap(t *testing.T) {
 
 	setFunds(minReq)
 
+	acctBal := &zAccountBalance{}
+	queueFunding := func() {
+		cl.queueResponse("listunspent", unspents)              // maxOrder
+		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // 0-conf
+		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // minOrchardConfs
+		cl.queueResponse(methodZGetNotesCount, &zNotesCount{Orchard: 1})
+	}
+
 	// Initial success.
-	cl.queueResponse("listunspent", unspents) // maxOrder
+	queueFunding()
 	preSwap, err := w.PreSwap(form)
 	if err != nil {
 		t.Fatalf("PreSwap error: %v", err)
@@ -1392,7 +1410,6 @@ func TestPreSwap(t *testing.T) {
 			},
 		},
 	})
-	cl.queueResponse("listunspent", unspents)
 	_, err = w.PreSwap(form)
 	if err == nil {
 		t.Fatalf("no PreSwap error for not enough funds")
@@ -1400,6 +1417,7 @@ func TestPreSwap(t *testing.T) {
 	setFunds(minReq)
 
 	// Success again.
+	queueFunding()
 	_, err = w.PreSwap(form)
 	if err != nil {
 		t.Fatalf("final PreSwap error: %v", err)
@@ -1507,6 +1525,7 @@ func TestFundMultiOrder(t *testing.T) {
 	queueBalance := func() {
 		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // 0-conf
 		cl.queueResponse(methodZGetBalanceForAccount, acctBal) // minOrchardConfs
+		cl.queueResponse(methodZGetNotesCount, &zNotesCount{Orchard: 1})
 		cl.queueResponse("listlockunspent", nil)
 	}
 

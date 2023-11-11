@@ -647,7 +647,19 @@ func (w *zecWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 		useSplit = *customCfg.Split
 	}
 
-	sum, size, shieldedSplitNeeded, shieldedSplitFees, coins, fundingCoins, redeemScripts, spents, err := w.fund(ord.Value, ord.MaxSwapCount, nil)
+	bals, err := w.balances()
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("balances error: %w", err)
+	}
+
+	utxos, _, _, err := w.cm.SpendableUTXOs(0)
+	if err != nil {
+		return nil, nil, 0, newError(errFunding, "error listing utxos: %w", err)
+	}
+
+	sum, size, shieldedSplitNeeded, shieldedSplitFees, coins, fundingCoins, redeemScripts, spents, err := w.fund(
+		ord.Value, ord.MaxSwapCount, utxos, bals.orchard,
+	)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -910,24 +922,31 @@ func (w *zecWallet) ReturnCoins(unspents asset.Coins) error {
 }
 
 func (w *zecWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
-	_, maxEst, err := w.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.MaxFeeRate)
+	_, _, maxEst, err := w.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.MaxFeeRate)
 	return maxEst, err
 }
 
-func (w *zecWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos []*btc.CompositeUTXO, est *asset.SwapEstimate, err error) {
+func (w *zecWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos []*btc.CompositeUTXO, bals *balances, est *asset.SwapEstimate, err error) {
 	if lotSize == 0 {
-		return nil, nil, errors.New("cannot divide by lotSize zero")
+		return nil, nil, nil, errors.New("cannot divide by lotSize zero")
 	}
 
 	utxos, _, avail, err := w.cm.SpendableUTXOs(0)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+		return nil, nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
+
+	bals, err = w.balances()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting current balance: %w", err)
+	}
+
+	avail += bals.orchard.avail
 
 	// Start by attempting max lots with a basic fee.
 	lots := avail / lotSize
 	for lots > 0 {
-		est, _, _, err := w.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, true)
+		est, _, _, err := w.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, bals.orchard, true)
 		// The only failure mode of estimateSwap -> zec.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -935,28 +954,40 @@ func (w *zecWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos [
 			lots--
 			continue
 		}
-		return utxos, est, nil
+		return utxos, bals, est, nil
 	}
-	return utxos, &asset.SwapEstimate{}, nil
+
+	return utxos, bals, &asset.SwapEstimate{}, nil
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
-func (w *zecWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uint64, utxos []*btc.CompositeUTXO,
-	trySplit bool) (*asset.SwapEstimate, bool /*split used*/, uint64 /*amt locked*/, error) {
+func (w *zecWallet) estimateSwap(
+	lots, lotSize, feeSuggestion, maxFeeRate uint64,
+	utxos []*btc.CompositeUTXO,
+	orchardBal *balanceBreakdown,
+	trySplit bool,
+) (*asset.SwapEstimate, bool /*split used*/, uint64 /*amt locked*/, error) {
 
 	var avail uint64
 	for _, utxo := range utxos {
 		avail += utxo.Amount
 	}
-
 	val := lots * lotSize
-	sum, inputsSize, _, shieldedSplitFees, coins, _, _, _, err := w.fund(val, lots, utxos)
-	if err != nil {
-		return nil, false, 0, err
-	}
-
+	sum, inputsSize, shieldedSplitNeeded, shieldedSplitFees, coins, _, _, _, err := w.fund(val, lots, utxos, orchardBal)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error funding swap value %s: %w", btcutil.Amount(val), err)
+	}
+
+	if shieldedSplitNeeded > 0 {
+		// DRAFT TODO: Do we need to "lock" anything here?
+		const splitLocked = 0
+		return &asset.SwapEstimate{
+			Lots:               lots,
+			Value:              val,
+			MaxFees:            shieldedSplitFees,
+			RealisticBestCase:  shieldedSplitFees,
+			RealisticWorstCase: shieldedSplitFees,
+		}, true, splitLocked, nil
 	}
 
 	digestInputs := func(inputsSize uint64, withSplit bool) (reqFunds, maxFees, estHighFees, estLowFees uint64) {
@@ -1014,7 +1045,7 @@ func (w *zecWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	// utxo set, the network fee rate, and the wallet's maximum order size. The
 	// utxo set can then be used repeatedly in estimateSwap at virtually zero
 	// cost since there are no more RPC calls.
-	utxos, maxEst, err := w.maxOrder(req.LotSize, req.FeeSuggestion, req.MaxFeeRate)
+	utxos, bals, maxEst, err := w.maxOrder(req.LotSize, req.FeeSuggestion, req.MaxFeeRate)
 	if err != nil {
 		return nil, err
 	}
@@ -1037,9 +1068,9 @@ func (w *zecWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 
 	// Always offer the split option, even for non-standing orders since
 	// immediately spendable change many be desirable regardless.
-	opts := []*asset.OrderOption{w.splitOption(req, utxos)}
+	opts := []*asset.OrderOption{w.splitOption(req, utxos, bals.orchard)}
 
-	est, _, _, err := w.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.MaxFeeRate, utxos, useSplit)
+	est, _, _, err := w.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.MaxFeeRate, utxos, bals.orchard, useSplit)
 	if err != nil {
 		return nil, err
 	}
@@ -1051,7 +1082,7 @@ func (w *zecWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 
 // splitOption constructs an *asset.OrderOption with customized text based on the
 // difference in fees between the configured and test split condition.
-func (w *zecWallet) splitOption(req *asset.PreSwapForm, utxos []*btc.CompositeUTXO) *asset.OrderOption {
+func (w *zecWallet) splitOption(req *asset.PreSwapForm, utxos []*btc.CompositeUTXO, orchardBal *balanceBreakdown) *asset.OrderOption {
 	opt := &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
 			Key:           "swapsplit",
@@ -1064,14 +1095,14 @@ func (w *zecWallet) splitOption(req *asset.PreSwapForm, utxos []*btc.CompositeUT
 	}
 
 	noSplitEst, _, noSplitLocked, err := w.estimateSwap(req.Lots, req.LotSize,
-		req.FeeSuggestion, req.MaxFeeRate, utxos, false)
+		req.FeeSuggestion, req.MaxFeeRate, utxos, orchardBal, false)
 	if err != nil {
 		w.log.Errorf("estimateSwap (no split) error: %v", err)
 		opt.Boolean.Reason = fmt.Sprintf("estimate without a split failed with \"%v\"", err)
 		return opt // utility and overlock report unavailable, but show the option
 	}
 	splitEst, splitUsed, splitLocked, err := w.estimateSwap(req.Lots, req.LotSize,
-		req.FeeSuggestion, req.MaxFeeRate, utxos, true)
+		req.FeeSuggestion, req.MaxFeeRate, utxos, orchardBal, true)
 	if err != nil {
 		w.log.Errorf("estimateSwap (with split) error: %v", err)
 		opt.Boolean.Reason = fmt.Sprintf("estimate with a split failed with \"%v\"", err)
@@ -1233,8 +1264,9 @@ func (w *zecWallet) signTxAndAddChange(baseTx *dexzec.Tx, addr btcutil.Address, 
 }
 
 type balanceBreakdown struct {
-	avail    uint64
-	maturing uint64
+	avail     uint64
+	maturing  uint64
+	noteCount uint32
 }
 
 type balances struct {
@@ -1252,17 +1284,26 @@ func (w *zecWallet) balances() (*balances, error) {
 	if err != nil {
 		return nil, fmt.Errorf("z_getbalanceforaccount (3) error: %w", err)
 	}
+	noteCounts, err := zGetNotesCount(w)
+	if err != nil {
+		return nil, fmt.Errorf("z_getnotescount error: %w", err)
+	}
 	return &balances{
 		orchard: &balanceBreakdown{
-			avail:    mature.Orchard,
-			maturing: zeroConf.Orchard - mature.Orchard,
+			avail:     mature.Orchard,
+			maturing:  zeroConf.Orchard - mature.Orchard,
+			noteCount: noteCounts.Orchard,
 		},
 		sapling:     zeroConf.Sapling,
 		transparent: zeroConf.Transparent,
 	}, nil
 }
 
-func (w *zecWallet) fund(val, maxSwapCount uint64, utxos []*btc.CompositeUTXO) (
+func (w *zecWallet) fund(
+	val, maxSwapCount uint64,
+	utxos []*btc.CompositeUTXO,
+	orchardBal *balanceBreakdown,
+) (
 	sum, size, shieldedSplitNeeded, shieldedSplitFees uint64,
 	coins asset.Coins,
 	fundingCoins map[btc.OutPoint]*btc.UTxO,
@@ -1270,8 +1311,10 @@ func (w *zecWallet) fund(val, maxSwapCount uint64, utxos []*btc.CompositeUTXO) (
 	spents []*btc.Output,
 	err error,
 ) {
+
 	var shieldedAvail uint64
 	reserves := w.reserves.Load()
+	nActionsOrchard := uint64(orchardBal.noteCount)
 	enough := func(inputCount, inputsSize, sum uint64) (bool, uint64) {
 		req := dexzec.RequiredOrderFunds(val, inputCount, inputsSize, maxSwapCount)
 		if sum >= req {
@@ -1280,7 +1323,7 @@ func (w *zecWallet) fund(val, maxSwapCount uint64, utxos []*btc.CompositeUTXO) (
 		if shieldedAvail == 0 {
 			return false, 0
 		}
-		shieldedFees := dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(inputCount)), dexbtc.P2PKHOutputSize+1, 0, 0, 0, nActionsOrchardEstimate)
+		shieldedFees := dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(inputCount)), dexbtc.P2PKHOutputSize+1, 0, 0, 0, nActionsOrchard)
 		req = dexzec.RequiredOrderFunds(val, 1, dexbtc.RedeemP2PKHInputSize, maxSwapCount)
 		if sum+shieldedAvail >= req+shieldedFees {
 			return true, sum + shieldedAvail - (req + shieldedFees)
@@ -1288,28 +1331,12 @@ func (w *zecWallet) fund(val, maxSwapCount uint64, utxos []*btc.CompositeUTXO) (
 		return false, 0
 	}
 
-	var transparentOnlyErr error
-	if len(utxos) == 0 {
-		coins, fundingCoins, spents, redeemScripts, size, sum, transparentOnlyErr = w.cm.Fund(reserves, 0, false, enough)
-	} else {
-		coins, fundingCoins, spents, redeemScripts, size, sum, transparentOnlyErr = w.cm.FundWithUTXOs(utxos, reserves, false, enough)
-	}
-	if transparentOnlyErr == nil {
+	coins, fundingCoins, spents, redeemScripts, size, sum, err = w.cm.FundWithUTXOs(utxos, reserves, false, enough)
+	if err == nil {
 		return
 	}
 
-	// Now add the shielded balance.
-	bals, err := zGetBalanceForAccount(w, shieldedAcctNumber, minOrchardConfs)
-	if err != nil {
-		err = codedError(errBalanceRetrieval, err)
-		return
-	}
-	shieldedAvail = bals.Orchard
-
-	if shieldedAvail == 0 {
-		err = codedError(errFunding, transparentOnlyErr)
-		return
-	}
+	shieldedAvail = orchardBal.avail
 
 	if shieldedAvail >= reserves {
 		shieldedAvail -= reserves
@@ -1319,11 +1346,30 @@ func (w *zecWallet) fund(val, maxSwapCount uint64, utxos []*btc.CompositeUTXO) (
 		shieldedAvail = 0
 	}
 
-	if len(utxos) == 0 {
-		coins, fundingCoins, spents, redeemScripts, size, sum, err = w.cm.Fund(reserves, 0, false, enough)
-	} else {
-		coins, fundingCoins, spents, redeemScripts, size, sum, err = w.cm.FundWithUTXOs(utxos, reserves, false, enough)
+	if shieldedAvail == 0 {
+		err = codedError(errFunding, err)
+		return
 	}
+
+	shieldedSplitNeeded = dexzec.RequiredOrderFunds(val, 1, dexbtc.RedeemP2PKHInputSize, maxSwapCount)
+
+	// If we don't have any utxos see if a straight shielded split will get us there.
+	if len(utxos) == 0 {
+		// Can we do it with just the shielded balance?
+		shieldedSplitFees = dexzec.TxFeesZIP317(0, dexbtc.P2SHOutputSize+1, 0, 0, 0, nActionsOrchard)
+		req := val + shieldedSplitFees
+		if shieldedAvail < req {
+			// err is still the error from the last call to FundWithUTXOs
+			err = codedError(errShieldedFunding, err)
+		} else {
+			err = nil
+		}
+		return
+	}
+
+	// Check with both transparent and orchard funds. (shieldedAvail has been
+	// set, which changes the behavior of enough.
+	coins, fundingCoins, spents, redeemScripts, size, sum, err = w.cm.FundWithUTXOs(utxos, reserves, false, enough)
 	if err != nil {
 		err = codedError(errFunding, err)
 		return
@@ -1331,10 +1377,8 @@ func (w *zecWallet) fund(val, maxSwapCount uint64, utxos []*btc.CompositeUTXO) (
 
 	req := dexzec.RequiredOrderFunds(val, uint64(len(coins)), size, maxSwapCount)
 	if req > sum {
-		// reqWithShielded := dexzec.RequiredOrderFunds(val, uint64(len(coins))+nActionsOrchardEstimate, inputsSize, maxSwapCount)
-		shieldedSplitNeeded = dexzec.RequiredOrderFunds(val, 1, dexbtc.RedeemP2PKHInputSize, maxSwapCount)
 		txOutsSize := uint64(dexbtc.P2PKHOutputSize + 1) // 1 for varint
-		shieldedSplitFees = dexzec.TxFeesZIP317(size+uint64(wire.VarIntSerializeSize(uint64(len(coins)))), txOutsSize, 0, 0, 0, nActionsOrchardEstimate)
+		shieldedSplitFees = dexzec.TxFeesZIP317(size+uint64(wire.VarIntSerializeSize(uint64(len(coins)))), txOutsSize, 0, 0, 0, nActionsOrchard)
 	}
 
 	if shieldedAvail+sum < shieldedSplitNeeded+shieldedSplitFees {
@@ -1517,6 +1561,10 @@ func (w *zecWallet) ContractLockTimeExpired(ctx context.Context, contract dex.By
 
 func (w *zecWallet) DepositAddress() (string, error) {
 	return transparentAddressString(w)
+}
+
+func (w *zecWallet) NewAddress() (string, error) {
+	return w.DepositAddress()
 }
 
 // DEPRECATED

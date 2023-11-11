@@ -28,8 +28,8 @@ type Tx struct {
 	// calls to Confirmations.
 	lastLookup *chainhash.Hash
 	// The calculated transaction fee rate, in satoshis/vbyte
-	feeRate uint64
-	fees    uint64
+	feeRate  uint64
+	inputSum uint64
 	// raw is the raw tx bytes.
 	raw []byte
 }

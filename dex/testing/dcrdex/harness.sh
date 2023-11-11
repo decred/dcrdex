@@ -316,6 +316,9 @@ cat << EOF >> "./markets.json"
             "maxFeeRate": 10,
             "swapConf": 1,
             "configPath": "${DCR_CONFIG_PATH}",
+            "regConfs": 1,
+            "regFee": 100000000,
+            "regXPub": "spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE",
             "bondAmt": 50000000,
             "bondConfs": 1,
             "nodeRelayID": "${DCR_NODERELAY_ID}"
@@ -326,6 +329,9 @@ cat << EOF >> "./markets.json"
             "maxFeeRate": 100,
             "swapConf": 1,
             "configPath": "${BTC_CONFIG_PATH}",
+            "regConfs": 2,
+            "regFee": 20000000,
+            "regXPub": "vpub5SLqN2bLY4WeZJ9SmNJHsyzqVKreTXD4ZnPC22MugDNcjhKX5xNX9QiQWcE4SSRzVWyHWUihpKRT7hckDGNzVc69wSX2JPcfGeNiT5c2XZy",
             "bondAmt": 50000,
             "bondConfs": 1,
             "nodeRelayID": "${BTC_NODERELAY_ID}"

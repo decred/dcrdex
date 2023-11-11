@@ -1199,7 +1199,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 		if verboseTx.Vsize > 0 {
 			feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
 		}
-	} else if verboseTx.Size > 0 {
+	} else if verboseTx.Size > 0 && sumIn > sumOut {
 		// For non-segwit transactions, Size = Vsize anyway, so use Size to
 		// cover assets that won't set Vsize in their RPC response.
 		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
@@ -1207,11 +1207,6 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 	hash := blockHash
 	if hash == nil {
 		hash = &zeroHash
-	}
-	fees := sumIn - sumOut
-	if sumOut > sumIn {
-		btc.log.Errorf("tx %s has more out than in", txHash)
-		fees = 0
 	}
 	return &Tx{
 		btc:        btc,
@@ -1222,7 +1217,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 		outs:       outputs,
 		isCoinbase: isCoinbase,
 		lastLookup: lastLookup,
-		fees:       fees,
+		inputSum:   sumIn,
 		feeRate:    feeRate,
 		raw:        verboseTx.Raw,
 	}, nil

@@ -99,8 +99,8 @@ func (txio *TXIO) FeeRate() uint64 {
 	return txio.tx.feeRate
 }
 
-func (txio *TXIO) Fees() uint64 {
-	return txio.tx.fees
+func (txio *TXIO) InputsValue() uint64 {
+	return txio.tx.inputSum
 }
 
 func (txio *TXIO) RawTx() []byte {

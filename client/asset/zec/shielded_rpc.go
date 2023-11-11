@@ -17,6 +17,7 @@ const (
 	methodZSendMany             = "z_sendmany"
 	methodZValidateAddress      = "z_validateaddress"
 	methodZGetOperationResult   = "z_getoperationresult"
+	methodZGetNotesCount        = "z_getnotescount"
 )
 
 type zListAccountsResult struct {
@@ -95,6 +96,16 @@ func zGetBalanceForAccount(c rpcCaller, acct uint32, confs int) (*poolBalances, 
 	}, c.CallRPC(methodZGetBalanceForAccount, []any{acct, confs}, &res)
 }
 
+type zNotesCount struct {
+	Sprout  uint32 `json:"sprout"`
+	Sapling uint32 `json:"sapling"`
+	Orchard uint32 `json:"orchard"`
+}
+
+func zGetNotesCount(c rpcCaller) (counts *zNotesCount, _ error) {
+	return counts, c.CallRPC(methodZGetNotesCount, []any{minOrchardConfs}, &counts)
+}
+
 type zValidateAddressResult struct {
 	IsValid     bool   `json:"isvalid"`
 	Address     string `json:"address"`
@@ -131,10 +142,11 @@ func singleSendManyRecipient(addr string, amt uint64) []*zSendManyRecipient {
 type privacyPolicy string
 
 const (
-	FullPrivacy             privacyPolicy = "FullPrivacy"
-	AllowRevealedRecipients privacyPolicy = "AllowRevealedRecipients"
-	AllowRevealedAmounts    privacyPolicy = "AllowRevealedAmounts"
-	AllowRevealedSenders    privacyPolicy = "AllowRevealedSenders"
+	FullPrivacy                  privacyPolicy = "FullPrivacy"
+	AllowRevealedRecipients      privacyPolicy = "AllowRevealedRecipients"
+	AllowRevealedAmounts         privacyPolicy = "AllowRevealedAmounts"
+	AllowRevealedSenders         privacyPolicy = "AllowRevealedSenders"
+	AllowLinkingAccountAddresses privacyPolicy = "AllowLinkingAccountAddresses"
 )
 
 // z_sendmany "fromaddress" [{"address":... ,"amount":...},...] ( minconf ) ( fee ) ( privacyPolicy )

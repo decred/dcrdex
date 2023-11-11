@@ -1953,6 +1953,7 @@ func (s *simulationTest) registerDEX(client *simulationClient) error {
 	}
 	dexFee := feeAsset.Amt
 
+	// TODO: Use bonds.
 	// connect dex and pay fee
 	regRes, err := client.core.Register(&RegisterForm{
 		Addr:    dexHost,

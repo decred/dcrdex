@@ -176,7 +176,7 @@ func (*ZECBackend) ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize,
 
 func (be *ZECBackend) ValidateFeeRate(ci asset.Coin, reqFeeRate uint64) bool {
 	c, is := ci.(interface {
-		Fees() uint64
+		InputsValue() uint64
 		RawTx() []byte
 	})
 	if !is {
@@ -189,7 +189,13 @@ func (be *ZECBackend) ValidateFeeRate(ci asset.Coin, reqFeeRate uint64) bool {
 		return false
 	}
 
-	return c.Fees() >= tx.TxFeesZIP317()
+	fees, err := newFeeTx(tx).Fees(c.InputsValue())
+	if err != nil {
+		be.log.Errorf("error calculating tx fees: %v", err)
+		return false
+	}
+
+	return fees >= tx.RequiredTxFeesZIP317()
 }
 
 func blockFeeTransactions(rc *btc.RPCClient, blockHash *chainhash.Hash) (feeTxs []btc.FeeTx, prevBlock chainhash.Hash, err error) {
@@ -278,12 +284,20 @@ func (tx *feeTx) FeeRate(prevOuts map[chainhash.Hash]map[int]int64) (uint64, err
 		}
 		transparentIn += uint64(prevOutValue)
 	}
+	fees, err := tx.Fees(transparentIn)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(math.Round(float64(fees) / float64(tx.size))), nil
+}
+
+func (tx *feeTx) Fees(transparentIn uint64) (uint64, error) {
 	in := tx.shieldedIn + transparentIn
 	out := tx.shieldedOut + tx.transparentOut
 	if out > in {
 		return 0, fmt.Errorf("out > in. %d > %d", out, in)
 	}
-	return uint64(math.Round(float64(in-out) / float64(tx.size))), nil
+	return in - out, nil
 }
 
 func shieldedIO(tx *btc.VerboseTxExtended) (in, out uint64, err error) {

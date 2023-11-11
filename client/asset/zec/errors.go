@@ -16,11 +16,13 @@ const (
 	errUTxORetrieval
 	errLockUnspent
 	errFunding
+	errShieldedFunding
 	errNoTx
 	errGetChainInfo
 	errGetNetInfo
 	errBadInput
 	errMaxLock
+	errNoteCounts
 )
 
 // Error is an error code and a wrapped error.
