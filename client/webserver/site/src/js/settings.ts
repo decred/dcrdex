@@ -175,24 +175,22 @@ export default class SettingsPage extends BasePage {
     this.renderDesktopNtfnSettings()
   }
 
-  async updateNtfnSetting (e: Event) {
+  updateNtfnSetting (e: Event) {
     const checkbox = e.target as HTMLInputElement
     const noteType = checkbox.getAttribute('name')
     if (noteType === null) return
     const enabled = checkbox.checked
-    await ntfn.updateNtfnSetting(noteType, enabled)
+    ntfn.updateNtfnSetting(noteType, enabled)
   }
 
-  async getBrowserNtfnSettings (form: HTMLElement) {
-    const loaded = app().loading(form)
-    const permissions = await ntfn.fetchDesktopNtfnSettings()
-    loaded()
+  getBrowserNtfnSettings (): ntfn.DesktopNtfnSetting {
+    const permissions = ntfn.fetchDesktopNtfnSettings()
     return permissions
   }
 
   async renderDesktopNtfnSettings () {
     const page = this.page
-    const ntfnSettings = await this.getBrowserNtfnSettings(page.browserNotificationsForm)
+    const ntfnSettings = this.getBrowserNtfnSettings()
     const labels = ntfn.desktopNtfnLabels
     const tmpl = page.browserNtfnCheckboxTemplate
     tmpl.removeAttribute('id')
@@ -219,7 +217,7 @@ export default class SettingsPage extends BasePage {
         await ntfn.requestNtfnPermission()
         checkbox.checked = !ntfn.ntfnPermissionDenied()
       }
-      await this.updateNtfnSetting(e)
+      this.updateNtfnSetting(e)
       checkbox.dispatchEvent(new Event('change'))
     })
 

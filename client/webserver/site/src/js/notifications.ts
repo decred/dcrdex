@@ -39,7 +39,7 @@ type DesktopNtfnSettingLabel = {
   [x: string]: string
 }
 
-type DesktopNtfnSetting = {
+export type DesktopNtfnSetting = {
   [x: string]: boolean
 }
 
@@ -86,7 +86,7 @@ class BrowserNotifier {
   }
 
   static sendDesktopNotification (title: string, body?: string) {
-    if (window.Notification.permission !== 'granted') return
+    if (!BrowserNotifier.ntfnPermissionGranted() || !desktopNtfnSettings.browserNtfnEnabled) return
     const ntfn = new window.Notification(title, {
       body: body,
       icon: '/img/softened-icon.png'
@@ -113,6 +113,7 @@ class OSDesktopNotifier {
   }
 
   static sendDesktopNotification (title: string, body?: string): void {
+    if (!desktopNtfnSettings.browserNtfnEnabled) return
     // this calls a function exported via webview.Bind()
     const w = (window as any)
     w.sendOSNotification(title, body)
@@ -133,17 +134,17 @@ export function desktopNotify (note: CoreNote) {
   Notifier.sendDesktopNotification(note.subject, note.details)
 }
 
-export async function fetchDesktopNtfnSettings (): Promise<DesktopNtfnSetting> {
+export function fetchDesktopNtfnSettings (): DesktopNtfnSetting {
   if (desktopNtfnSettings !== undefined) {
     return desktopNtfnSettings
   }
   const k = desktopNtfnSettingsKey()
-  desktopNtfnSettings = (await State.fetchLocal(k) ?? {}) as DesktopNtfnSetting
+  desktopNtfnSettings = (State.fetchLocal(k) ?? {}) as DesktopNtfnSetting
   return desktopNtfnSettings
 }
 
 export async function updateNtfnSetting (noteType: string, enabled: boolean) {
-  await fetchDesktopNtfnSettings()
+  fetchDesktopNtfnSettings()
   desktopNtfnSettings[noteType] = enabled
   State.storeLocal(desktopNtfnSettingsKey(), desktopNtfnSettings)
 }
