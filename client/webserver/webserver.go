@@ -52,8 +52,6 @@ const (
 	// reading an http request or writing the response, beyond which the http
 	// connection is terminated.
 	httpConnTimeoutSeconds = 10
-	// darkModeCK is the cookie key for dark mode.
-	darkModeCK = "darkMode"
 	// authCK is the authorization token cookie key.
 	authCK = "dexauth"
 	// pwKeyCK is the cookie used to unencrypt the user's password.
@@ -884,7 +882,6 @@ func readPost(w http.ResponseWriter, r *http.Request, thing any) bool {
 type userInfo struct {
 	Authed           bool
 	PasswordIsCached bool
-	DarkMode         bool
 }
 
 // Extract the userInfo from the request context. This should be used with

@@ -3,7 +3,7 @@
 // to localStorage.
 export default class State {
   // Cookie keys.
-  static darkModeCK = 'darkMode'
+  static darkModeLK = 'darkMode'
   static authCK = 'dexauth'
   static pwKeyCK = 'sessionkey'
   // Local storage keys (for data that we don't need at the server).
@@ -51,8 +51,8 @@ export default class State {
   /*
    * isDark returns true if the dark-mode cookie is currently set to '1' = true.
    */
-  static isDark () {
-    return document.cookie.split(';').filter((item) => item.includes(`${State.darkModeCK}=1`)).length
+  static isDark (): boolean {
+    return State.fetchLocal(State.darkModeLK) === '1'
   }
 
   /* passwordIsCached returns whether or not there is a cached password in the cookies. */
@@ -84,6 +84,6 @@ export default class State {
 }
 
 // Setting defaults here, unless specific cookie (or local storage) value was already chosen by the user.
-if (State.getCookie(State.darkModeCK) === null) State.setCookie(State.darkModeCK, '1')
+if (State.fetchLocal(State.darkModeLK) === null) State.storeLocal(State.darkModeLK, '1')
 if (State.fetchLocal(State.popupsLK) === null) State.storeLocal(State.popupsLK, '1')
 if (State.fetchLocal(State.leftMarketDockLK) === null) State.storeLocal(State.leftMarketDockLK, '1')
