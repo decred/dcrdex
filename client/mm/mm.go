@@ -980,13 +980,25 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
-				logger := m.log.SubLogger(fmt.Sprintf("Arbitrage-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
+				logger := m.log.SubLogger(fmt.Sprintf("SimpleArbitrage-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
 				cex, err := getConnectedCEX(cfg.SimpleArbConfig.CEXName)
 				if err != nil {
-					logger.Errorf("failed to connect to CEX: %v", err)
+					logger.Errorf("Failed to connect to CEX: %v", err)
 					return
 				}
 				RunSimpleArbBot(m.ctx, cfg, m.core, cex, logger)
+			}(cfg)
+		case cfg.ArbMarketMakerConfig != nil:
+			wg.Add(1)
+			go func(cfg *BotConfig) {
+				defer wg.Done()
+				logger := m.log.SubLogger(fmt.Sprintf("ArbMarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
+				cex, err := getConnectedCEX(cfg.ArbMarketMakerConfig.CEXName)
+				if err != nil {
+					logger.Errorf("Failed to connect to CEX: %v", err)
+					return
+				}
+				RunArbMarketMaker(m.ctx, cfg, m.core, cex, logger)
 			}(cfg)
 		default:
 			m.log.Errorf("No bot config provided. Skipping %s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
