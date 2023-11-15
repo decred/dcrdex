@@ -118,6 +118,11 @@ export default class Application {
 
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
+    if (State.isDark()) {
+      document.body.classList.add('dark')
+    }
+    document.body.classList.remove('preload')
+
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
     // log method for more info.

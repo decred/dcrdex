@@ -26,6 +26,10 @@ body {
   justify-content: flex-start;
   background-color: $light_body_bg;
   font-family: $sans;
+
+  &.preload {
+    display: none;
+  }
 }
 
 select {

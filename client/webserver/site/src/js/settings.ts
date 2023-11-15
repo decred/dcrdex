@@ -38,8 +38,9 @@ export default class SettingsPage extends BasePage {
     this.forms = Doc.applySelector(page.forms, ':scope > form')
     this.fiatRateSources = Doc.applySelector(page.fiatRateSources, 'input[type=checkbox]')
 
+    page.darkMode.checked = State.fetchLocal(State.darkModeLK) === '1'
     Doc.bind(page.darkMode, 'click', () => {
-      State.setCookie(State.darkModeCK, page.darkMode.checked || false ? '1' : '0')
+      State.storeLocal(State.darkModeLK, page.darkMode.checked || false ? '1' : '0')
       if (page.darkMode.checked) {
         document.body.classList.add('dark')
       } else {
