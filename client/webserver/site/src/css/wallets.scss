@@ -300,6 +300,10 @@
   .flex-wrap-lg {
     flex-wrap: wrap;
   }
+
+  #purchaseTicketsErrBox {
+    background-color: $light_body_bg;
+  }
 }
 
 @include media-breakpoint-up(md) {

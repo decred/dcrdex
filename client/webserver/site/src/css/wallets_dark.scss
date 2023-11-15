@@ -37,6 +37,10 @@ body.dark {
         border-color: $dark_border_color;
       }
     }
+
+    #purchaseTicketsErrBox {
+      background-color: $dark_body_bg;
+    }
   }
 
   #assetSelect {

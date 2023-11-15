@@ -163,7 +163,7 @@ type clientCore interface {
 	ApproveTokenFee(assetID uint32, version uint32, approval bool) (uint64, error)
 	StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error)
 	SetVSP(assetID uint32, addr string) error
-	PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error)
+	PurchaseTickets(assetID uint32, pw []byte, n int) error
 	SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error
 	ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error)
 	TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error)

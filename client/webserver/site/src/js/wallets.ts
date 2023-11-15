@@ -24,7 +24,9 @@ import {
   Order,
   OrderFilter,
   WalletCreationNote,
+  BaseWalletNote,
   WalletNote,
+  CustomWalletNote,
   TipChangeNote,
   Market,
   PeerSource,
@@ -44,6 +46,12 @@ interface DecredTicketTipUpdate {
   ticketPrice: number
   votingSubsidy: number
   stats: TicketStats
+}
+
+interface TicketPurchaseUpdate extends BaseWalletNote {
+  err?: string
+  remaining:number
+  tickets?: Ticket[]
 }
 
 const animationLength = 300
@@ -237,6 +245,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.ticketHistoryNextPage, 'click', () => { this.nextTicketPage() })
     Doc.bind(page.ticketHistoryPrevPage, 'click', () => { this.prevTicketPage() })
     Doc.bind(page.setVotes, 'click', () => { this.showSetVotesDialog() })
+    Doc.bind(page.purchaseTicketsErrCloser, 'click', () => { Doc.hide(page.purchaseTicketsErrBox) })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -932,8 +941,17 @@ export default class WalletsPage extends BasePage {
 
   updateTicketStats (stats: TicketStats, ui: UnitInfo, ticketPrice?: number, votingSubsidy?: number) {
     const { page, stakeStatus } = this
+    stakeStatus.stats = stats
+    if (ticketPrice) stakeStatus.ticketPrice = ticketPrice
+    if (votingSubsidy) stakeStatus.votingSubsidy = votingSubsidy
     const liveTicketCount = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
     page.stakingTicketCount.textContent = String(liveTicketCount)
+    const immatureTicketCount = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status === ticketStatusUnmined).length
+    page.immatureTicketCount.textContent = String(immatureTicketCount)
+    Doc.setVis(immatureTicketCount > 0, page.immatureTicketCountBox)
+    page.queuedTicketCount.textContent = String(stats.queued)
+    page.formQueuedTix.textContent = String(stats.queued)
+    Doc.setVis(stats.queued > 0, page.formQueueTixBox, page.queuedTicketCountBox)
     page.totalTicketCount.textContent = String(stats.ticketCount)
     page.totalTicketRewards.textContent = Doc.formatFourSigFigs(stats.totalRewards / ui.conventional.conversionFactor)
     page.totalTicketVotes.textContent = String(stats.votes)
@@ -991,7 +1009,7 @@ export default class WalletsPage extends BasePage {
   }
 
   async purchaseTickets () {
-    const { page, selectedAssetID: assetID, stakeStatus } = this
+    const { page, selectedAssetID: assetID } = this
     // DRAFT NOTE: The user will get an actual ticket count somewhere in the
     // range 1 <= tickets_purchased <= n. See notes in
     // (*spvWallet).PurchaseTickets.
@@ -1008,13 +1026,30 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.purchaserErr)
       return
     }
+    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: n.toLocaleString(navigator.languages) }))
+  }
 
-    const tickets = res.tickets as Ticket[]
-    stakeStatus.stats.ticketCount += tickets.length
-    stakeStatus.tickets = tickets.concat(stakeStatus.tickets)
-    this.updateTicketStats(stakeStatus.stats, app().unitInfo(assetID))
-
-    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: tickets.length.toLocaleString(navigator.languages) }))
+  processTicketPurchaseUpdate (walletNote: CustomWalletNote) {
+    const { stakeStatus, selectedAssetID, page } = this
+    const { assetID } = walletNote
+    const { err, remaining, tickets } = walletNote.payload as TicketPurchaseUpdate
+    if (assetID !== selectedAssetID) return
+    if (tickets) {
+      stakeStatus.stats.ticketCount += tickets.length
+      stakeStatus.tickets = tickets.concat(stakeStatus.tickets)
+    }
+    stakeStatus.stats.queued = remaining
+    page.queuedTicketCount.textContent = String(remaining)
+    page.formQueuedTix.textContent = String(remaining)
+    Doc.setVis(remaining > 0, page.queuedTicketCountBox)
+    let immature = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status === ticketStatusUnmined).length
+    immature += tickets?.length ?? 0
+    page.immatureTicketCount.textContent = String(immature)
+    Doc.setVis(immature > 0, page.immatureTicketCountBox)
+    if (err) {
+      Doc.show(page.purchaseTicketsErrBox)
+      page.purchaseTicketsErr.textContent = err
+    }
   }
 
   async setVSP (assetID: number, vsp: VotingServiceProvider) {
@@ -1893,19 +1928,25 @@ export default class WalletsPage extends BasePage {
   }
 
   handleCustomWalletNote (note: WalletNote) {
-    const payload = note.payload
-    if (payload.tip) {
-      const n = payload as TipChangeNote
-      switch (n.assetID) {
-        case 42: { // dcr
-          if (!this.stakeStatus) return
-          const data = n.data as DecredTicketTipUpdate
-          const synced = app().walletMap[n.assetID].synced
-          if (synced) {
-            const ui = app().unitInfo(n.assetID)
-            this.updateTicketStats(data.stats, ui, data.ticketPrice, data.votingSubsidy)
+    const walletNote = note.payload as BaseWalletNote
+    switch (walletNote.route) {
+      case 'tipChange': {
+        const n = walletNote as TipChangeNote
+        switch (n.assetID) {
+          case 42: { // dcr
+            if (!this.stakeStatus) return
+            const data = n.data as DecredTicketTipUpdate
+            const synced = app().walletMap[n.assetID].synced
+            if (synced) {
+              const ui = app().unitInfo(n.assetID)
+              this.updateTicketStats(data.stats, ui, data.ticketPrice, data.votingSubsidy)
+            }
           }
         }
+        break
+      }
+      case 'ticketPurchaseUpdate': {
+        this.processTicketPurchaseUpdate(walletNote as CustomWalletNote)
       }
     }
   }

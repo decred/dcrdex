@@ -78,6 +78,7 @@ type tDcrWallet struct {
 	spvBlocksErr     error
 	unlockedOutpoint *wire.OutPoint
 	lockedOutpoint   *wire.OutPoint
+	stakeInfo        wallet.StakeInfoData
 }
 
 func (w *tDcrWallet) KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error) {
@@ -224,7 +225,7 @@ func (w *tDcrWallet) GetTransactionsByHashes(ctx context.Context, txHashes []*ch
 }
 
 func (w *tDcrWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
-	return &wallet.StakeInfoData{}, nil
+	return &w.stakeInfo, nil
 }
 
 func (w *tDcrWallet) PurchaseTickets(context.Context, wallet.NetworkBackend, *wallet.PurchaseTicketsRequest) (*wallet.PurchaseTicketsResponse, error) {

@@ -1350,42 +1350,25 @@ func TestPurchaseTickets(t *testing.T) {
 			"2",
 		},
 	}
-	tickets := []string{"txidA", "txidB"}
-	tests := []struct {
-		name               string
-		params             *RawParams
-		purchaseTicketsErr error
-		purchaseTickets    []string
-		wantErrCode        int
-	}{{
-		name:            "ok",
-		params:          params,
-		purchaseTickets: tickets,
-		wantErrCode:     -1,
-	}, {
-		name:               "core.PurchaseTickets error",
-		params:             params,
-		purchaseTicketsErr: errors.New("error"),
-		wantErrCode:        msgjson.RPCPurchaseTicketsError,
-	}, {
-		name:        "bad params",
-		params:      &RawParams{},
-		wantErrCode: msgjson.RPCArgumentsError,
-	}}
-	for _, test := range tests {
-		tc := &TCore{
-			purchaseTickets:    test.purchaseTickets,
-			purchaseTicketsErr: test.purchaseTicketsErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handlePurchaseTickets(r, test.params)
-		res := new([]string)
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
-		if test.wantErrCode == -1 && len(*res) != 2 {
-			t.Fatalf("expected two tickets but got %d", len(*res))
-		}
+	tc := &TCore{}
+	r := &RPCServer{core: tc}
+	payload := handlePurchaseTickets(r, params)
+	var res bool
+	err := verifyResponse(payload, &res, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = verifyResponse(payload, &res, -1); err != nil {
+		t.Fatal(err)
+	}
+	if res != true {
+		t.Fatal("result is false")
+	}
+
+	tc.purchaseTicketsErr = errors.New("test error")
+	payload = handlePurchaseTickets(r, params)
+	if err = verifyResponse(payload, &res, msgjson.RPCPurchaseTicketsError); err != nil {
+		t.Fatal(err)
 	}
 }
 

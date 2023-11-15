@@ -630,11 +630,10 @@ func testTickets(t *testing.T, isInternal bool, ew *ExchangeWallet) {
 	if err := ew.Unlock(walletPassword); err != nil {
 		t.Fatalf("unable to unlock wallet: %v", err)
 	}
-	tickets, err := ew.PurchaseTickets(3, 20)
-	if err != nil {
+
+	if err := ew.PurchaseTickets(3, 20); err != nil {
 		t.Fatalf("error purchasing tickets: %v", err)
 	}
-	tLogger.Infof("Purchased the following tickets: %v", tickets)
 
 	var currentDeployments []chaincfg.ConsensusDeployment
 	var bestVer uint32

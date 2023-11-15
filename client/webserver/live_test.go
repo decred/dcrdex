@@ -2019,8 +2019,8 @@ func (c *TCore) SetVSP(assetID uint32, addr string) error {
 	return nil
 }
 
-func (c *TCore) PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error) {
-	return nil, nil
+func (c *TCore) PurchaseTickets(assetID uint32, pw []byte, n int) error {
+	return nil
 }
 
 func (c *TCore) SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error {

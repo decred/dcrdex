@@ -385,14 +385,22 @@ export interface WalletCreationNote extends CoreNote {
   assetID: number
 }
 
-export interface TipChangeNote {
+export interface BaseWalletNote {
+  route: string
   assetID: number
+}
+
+export interface TipChangeNote extends BaseWalletNote {
   tip: number
   data: any
 }
 
-export interface WalletNote extends CoreNote {
+export interface CustomWalletNote extends BaseWalletNote {
   payload: any
+}
+
+export interface WalletNote extends CoreNote {
+  payload: BaseWalletNote
 }
 
 export interface SpotPriceNote extends CoreNote {
@@ -774,6 +782,7 @@ export interface TicketStats {
   ticketCount: number
   votes: number
   revokes: number
+  queued: number
 }
 
 export interface TicketStakingStatus {

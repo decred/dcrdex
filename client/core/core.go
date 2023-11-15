@@ -10830,29 +10830,29 @@ func (c *Core) SetVSP(assetID uint32, addr string) error {
 
 // PurchaseTickets purchases n tickets. Returns the purchased ticket hashes if
 // successful. Used for ticket purchasing.
-func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) ([]*asset.Ticket, error) {
+func (c *Core) PurchaseTickets(assetID uint32, pw []byte, n int) error {
 	wallet, tb, err := c.stakingWallet(assetID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("password error: %w", err)
+		return fmt.Errorf("password error: %w", err)
 	}
 	defer crypter.Close()
-	err = c.connectAndUnlock(crypter, wallet)
-	if err != nil {
-		return nil, err
+
+	if err = c.connectAndUnlock(crypter, wallet); err != nil {
+		return err
 	}
-	tickets, err := tb.PurchaseTickets(n, c.feeSuggestionAny(assetID))
-	if err != nil {
-		return nil, err
+
+	if err = tb.PurchaseTickets(n, c.feeSuggestionAny(assetID)); err != nil {
+		return err
 	}
 	c.updateAssetBalance(assetID)
 	// TODO: Send tickets bought notification.
 	//subject, details := c.formatDetails(TopicSendSuccess, sentValue, unbip(assetID), address, coin)
 	//c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
-	return tickets, nil
+	return nil
 }
 
 // SetVotingPreferences sets default voting settings for all active tickets and

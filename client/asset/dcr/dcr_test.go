@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,7 +146,7 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 	client := newTRPCClient()
 	log := tLogger.SubLogger("trpc")
 	walletCfg := &asset.WalletConfig{
-		Emit:        asset.NewWalletEmitter(make(chan asset.WalletNotification, 128), BipID, log),
+		Emit:        asset.NewWalletEmitter(client.emitC, BipID, log),
 		PeersChange: func(uint32, error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
@@ -221,6 +222,11 @@ type tRPCClient struct {
 	lockedCoins    []*wire.OutPoint               // Last submitted to LockUnspent
 	listLockedErr  error
 	estFeeErr      error
+	emitC          chan asset.WalletNotification
+	// tickets
+	purchasedTickets   [][]*chainhash.Hash
+	purchaseTicketsErr error
+	stakeInfo          walletjson.GetStakeInfoResult
 }
 
 type wireTxWithHeight struct {
@@ -334,6 +340,7 @@ func newTRPCClient() *tRPCClient {
 		signFunc: defaultSignFunc,
 		rawRes:   make(map[string]json.RawMessage),
 		rawErr:   make(map[string]error),
+		emitC:    make(chan asset.WalletNotification, 128),
 	}
 }
 
@@ -524,13 +531,23 @@ func (c *tRPCClient) Disconnected() bool {
 }
 
 func (c *tRPCClient) GetStakeInfo(ctx context.Context) (*walletjson.GetStakeInfoResult, error) {
-	return &walletjson.GetStakeInfoResult{}, nil
+	return &c.stakeInfo, nil
 }
 
 func (c *tRPCClient) PurchaseTicket(ctx context.Context, fromAccount string, spendLimit dcrutil.Amount, minConf *int,
 	ticketAddress stdaddr.Address, numTickets *int, poolAddress stdaddr.Address, poolFees *dcrutil.Amount,
-	expiry *int, ticketChange *bool, ticketFee *dcrutil.Amount) ([]*chainhash.Hash, error) {
-	return nil, nil
+	expiry *int, ticketChange *bool, ticketFee *dcrutil.Amount) (tix []*chainhash.Hash, _ error) {
+
+	if c.purchaseTicketsErr != nil {
+		return nil, c.purchaseTicketsErr
+	}
+
+	if len(c.purchasedTickets) > 0 {
+		tix = c.purchasedTickets[0]
+		c.purchasedTickets = c.purchasedTickets[1:]
+	}
+
+	return tix, nil
 }
 
 func (c *tRPCClient) GetTickets(ctx context.Context, includeImmature bool) ([]*chainhash.Hash, error) {
@@ -4376,4 +4393,139 @@ func TestConfirmRedemption(t *testing.T) {
 			t.Fatalf("%q: wanted %d confs but got %d", test.name, test.wantConfs, status.Confs)
 		}
 	}
+}
+
+func TestPurchaseTickets(t *testing.T) {
+	wallet, cl, shutdown := tNewWalletMonitorBlocks(false)
+	defer shutdown()
+	wallet.connected.Store(true)
+	cl.stakeInfo.Difficulty = dcrutil.Amount(1).ToCoin()
+	cl.balanceResult = &walletjson.GetBalanceResult{Balances: []walletjson.GetAccountBalanceResult{{AccountName: tAcctName}}}
+	setBalance := func(avail uint64, reserves uint64) {
+		cl.balanceResult.Balances[0].Spendable = dcrutil.Amount(avail).ToCoin()
+		wallet.bondReserves.Store(reserves)
+	}
+
+	var blocksToConfirm atomic.Int64
+	cl.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
+		txHex, _ := makeTxHex(nil, []dex.Bytes{randBytes(25)})
+		var confs int64 = 1
+		if blocksToConfirm.Load() > 0 {
+			confs = 0
+		}
+		return &walletjson.GetTransactionResult{Hex: txHex, Confirmations: confs}, nil
+	}
+
+	var remains []uint32
+	checkRemains := func(exp ...uint32) {
+		t.Helper()
+		if len(remains) != len(exp) {
+			t.Fatalf("wrong number of remains, wanted %d, got %+v", len(exp), remains)
+		}
+		for i := 0; i < len(remains); i++ {
+			if remains[i] != exp[i] {
+				t.Fatalf("wrong remains updates: wanted %+v, got %+v", exp, remains)
+			}
+		}
+	}
+
+	waitForTicketLoopToExit := func() {
+		// Ensure the loop closes
+		timeout := time.After(time.Second)
+		for {
+			if !wallet.ticketBuyer.running.Load() {
+				break
+			}
+			select {
+			case <-time.After(time.Millisecond):
+				return
+			case <-timeout:
+				t.Fatalf("ticket loop didn't exit")
+			}
+		}
+	}
+
+	buyTickets := func(n int, wantErr bool) {
+		defer waitForTicketLoopToExit()
+		remains = make([]uint32, 0)
+		if err := wallet.PurchaseTickets(n, 100); err != nil {
+			t.Fatalf("initial PurchaseTickets error: %v", err)
+		}
+
+		var emitted int
+		timeout := time.After(time.Second)
+	out:
+		for {
+			var ni asset.WalletNotification
+			select {
+			case ni = <-cl.emitC:
+			case <-timeout:
+				t.Fatalf("timed out looking for ticket updates")
+			default:
+				blocksToConfirm.Add(-1)
+				wallet.runTicketBuyer()
+				continue
+			}
+			switch nt := ni.(type) {
+			case *asset.CustomWalletNote:
+				switch n := nt.Payload.(type) {
+				case *TicketPurchaseUpdate:
+					remains = append(remains, n.Remaining)
+					if n.Err != "" {
+						if wantErr {
+							return
+						}
+						t.Fatalf("Error received in TicketPurchaseUpdate: %s", n.Err)
+					}
+					if n.Remaining == 0 {
+						break out
+					}
+					emitted++
+				}
+
+			}
+		}
+	}
+
+	tixHashes := func(n int) []*chainhash.Hash {
+		hs := make([]*chainhash.Hash, n)
+		for i := 0; i < n; i++ {
+			var ticketHash chainhash.Hash
+			copy(ticketHash[:], randBytes(32))
+			hs[i] = &ticketHash
+		}
+		return hs
+	}
+
+	// Single ticket purchased right away.
+	cl.purchasedTickets = [][]*chainhash.Hash{tixHashes(1)}
+	setBalance(1, 0)
+	buyTickets(1, false)
+	checkRemains(1, 0)
+
+	// Multiple tickets purchased right away.
+	cl.purchasedTickets = [][]*chainhash.Hash{tixHashes(2)}
+	setBalance(2, 0)
+	buyTickets(2, false)
+	checkRemains(2, 0)
+
+	// Two tickets, purchased in two tries, skipping some tries for unconfirmed
+	// tickets.
+	blocksToConfirm.Store(3)
+	cl.purchasedTickets = [][]*chainhash.Hash{tixHashes(1), tixHashes(1)}
+	buyTickets(2, false)
+	checkRemains(2, 1, 0)
+
+	// (Wallet).PurchaseTickets error
+	cl.purchasedTickets = [][]*chainhash.Hash{tixHashes(4)}
+	cl.purchaseTicketsErr = errors.New("test error")
+	setBalance(4, 0)
+	buyTickets(4, true)
+	checkRemains(4, 0)
+
+	// Low-balance error
+	cl.purchasedTickets = [][]*chainhash.Hash{tixHashes(1)}
+	setBalance(1, 1) // reserves make our available balance 0
+	buyTickets(1, true)
+	checkRemains(1, 0)
 }
