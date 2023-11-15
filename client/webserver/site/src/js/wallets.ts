@@ -822,7 +822,7 @@ export default class WalletsPage extends BasePage {
       tmpl.parentImg.classList.remove('d-hide')
       tmpl.parentImg.src ||= Doc.logoPath(parentSymbol)
     }
-
+    if (this.selectedAssetID === assetID) bttn.classList.add('selected')
     tmpl.name.textContent = a.name
     if (a.wallet) {
       bttn.classList.remove('nowallet')
