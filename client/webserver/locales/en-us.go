@@ -206,7 +206,7 @@ var EnUS = map[string]string{
 	"Progress":                    "Progress",
 	"remaining":                   "remaining",
 	"2 Fund your Wallet":          "2: Fund your Wallet",
-	"bond_definition":             "A fidelity bond is funds temporarily locked in an on-chain contract. After the contract expires, your wallet will reclaim the funds. On mainnet, funds are locked for up to 2 months.",
+	"bond_definition":             "A fidelity bond is funds temporarily locked in an on-chain contract. After the contract expires, your wallet will reclaim the funds. On mainnet, funds are locked for 2 months.",
 	"bonds_can_be_revoked":        "Bonds can be revoked if an account engages in continued disruptive behavior, such as backing out on a swap. Revoked bonds can be re-activated with continued normal trading activity.",
 	"bigger_bonds_higher_limit":   "You can create larger bonds to increase your trading tier, enabling trading of larger quantities at a time. Larger bonds also increase your capacity for violations before trading privileges are suspended.",
 	"limits_reputation":           "Trading limits are also increased as you establish reputation by engaging in normal trading activity and successfully completing matches.",
