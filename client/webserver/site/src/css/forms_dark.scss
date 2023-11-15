@@ -14,14 +14,12 @@ body.dark {
           linear-gradient(
             to bottom,
             #13202b00,
-            $dark_body_bg
+            $dark_panel
             90%
           );
       }
 
       &:not(.nohover):hover {
-        background-color: #202c35;
-
         .fader {
           background-image:
             linear-gradient(

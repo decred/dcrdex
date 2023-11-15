@@ -75,7 +75,7 @@
     .icon-select:hover,
     .icon-select.selected {
       opacity: 1;
-      background-color: #fff1;
+      background-color: #fff;
     }
   }
 
@@ -280,11 +280,11 @@
 
   .walletspage {
     #orderActivityBox {
-      border-top: 1px solid $dark-border-color;
+      border-top: 1px solid $light-border-color;
     }
 
     #marketsOverviewBox {
-      border-right: 1px solid $dark-border-color;
+      border-right: 1px solid $light-border-color;
       border-bottom: none;
     }
 

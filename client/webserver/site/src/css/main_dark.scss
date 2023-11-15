@@ -3,10 +3,7 @@ body.dark {
   color: $font-color-dark;
 
   header.maintop {
-    background-color: $dark_body_bg;
-    border-bottom-style: solid;
-    border-color: $dark_border_color;
-    border-width: 1px;
+    border: 1px solid $dark_border_color;
   }
 
   a.logo-icon {
@@ -116,7 +113,7 @@ body.dark {
   }
 
   #forms {
-    background-color: $dark_body_bg;
+    background-color: $dark_form_bg;
   }
 
   .buycolor {
@@ -148,6 +145,27 @@ body.dark {
 
     &:checked {
       background-color: #27278d;
+    }
+  }
+
+  .panel {
+    background-color: $dark_panel;
+  }
+
+  div[data-handler=dexsettings],
+  div[data-handler=markets],
+  div[data-handler=mm],
+  div[data-handler=order],
+  div[data-handler=orders],
+  div[data-handler=settings],
+  div[data-handler=init],
+  div[data-handler=login],
+  div[data-handler=register],
+  div[data-handler=wallets] {
+    #forms > form:not(.plain) {
+      border: 1px solid $dark-border-color;
+      background-color: $dark_panel;
+      box-shadow: 0 3px 6px #00000029, 0 2px 10px #00000049;
     }
   }
 }

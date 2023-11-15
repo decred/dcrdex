@@ -45,6 +45,19 @@ body.dark {
         background-color: $dark_body_bg;
         border-color: $dark_body_bg;
       }
+
+      &.selected,
+      &:hover {
+        background-color: $dark_body_bg;
+      }
+    }
+  }
+
+  @include media-breakpoint-up(lg) {
+    .walletspage {
+      #marketsOverviewBox {
+        border-color: $dark-border-color;
+      }
     }
   }
 }

@@ -44,10 +44,6 @@ div[data-handler=markets] {
     min-width: 375px;
     width: 90%;
 
-    & > div {
-      border: 1px solid $light_border_color;
-    }
-
     #orderForm {
       input[type=number] {
         height: 30px;
@@ -259,7 +255,7 @@ div[data-handler=markets] {
     border-style: none;
 
     &.selected {
-      background-color: #fffe;
+      background-color: #7773;
     }
   }
 
@@ -885,7 +881,6 @@ div[data-handler=markets] {
 
         height: 100%;
         overflow-x: hidden;
-        border-style: none none none solid;
       }
     }
 
