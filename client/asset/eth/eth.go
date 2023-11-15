@@ -46,6 +46,10 @@ import (
 	"github.com/tyler-smith/go-bip39"
 )
 
+func init() {
+	dexeth.MaybeReadSimnetAddrs()
+}
+
 func registerToken(tokenID uint32, desc string) {
 	token, found := dexeth.Tokens[tokenID]
 	if !found {

@@ -14,6 +14,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func init() {
+	dexpolygon.MaybeReadSimnetAddrs()
+}
+
 func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 	token, found := dexpolygon.Tokens[tokenID]
 	if !found {
