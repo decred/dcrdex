@@ -668,6 +668,46 @@ export class WalletIcons {
   }
 }
 
+/*
+ * AniToggle is a small toggle switch, defined in HTML with the element
+ * <div class="anitoggle"></div>. The animations are defined in the anitoggle
+ * CSS class. AniToggle triggers the callback on click events, but does not
+ * update toggle appearance, so the caller must call the setState method from
+ * the callback or elsewhere if the newState
+ * is accepted.
+ */
+export class AniToggle {
+  toggle: PageElement
+  toggling: boolean
+
+  constructor (toggle: PageElement, errorEl: PageElement, initialState: boolean, callback: (newState: boolean) => Promise<any>) {
+    this.toggle = toggle
+    if (toggle.children.length === 0) toggle.appendChild(document.createElement('div'))
+
+    Doc.bind(toggle, 'click', async (e: MouseEvent) => {
+      e.stopPropagation()
+      Doc.hide(errorEl)
+      const newState = !toggle.classList.contains('on')
+      this.toggling = true
+      try {
+        await callback(newState)
+      } catch (e) {
+        this.toggling = false
+        Doc.show(errorEl)
+        errorEl.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg || String(e) })
+        return
+      }
+      this.toggling = false
+    })
+    this.setState(initialState)
+  }
+
+  setState (state: boolean) {
+    if (state) this.toggle.classList.add('on')
+    else this.toggle.classList.remove('on')
+  }
+}
+
 /* sleep can be used by async functions to pause for a specified period. */
 function sleep (ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))

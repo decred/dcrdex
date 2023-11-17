@@ -937,6 +937,23 @@ export default class Application {
     return xc.assets[assetID].unitInfo
   }
 
+  /*
+  * baseChainSymbol returns the symbol for the asset's parent if the asset is a
+  * token, otherwise the symbol for the asset itself.
+  */
+  baseChainSymbol (assetID: number) {
+    const asset = this.user.assets[assetID]
+    return asset.token ? this.user.assets[asset.token.parentID].symbol : asset.symbol
+  }
+
+  /*
+   * extensionWallet returns the ExtensionConfiguredWallet for the asset, if
+   * it exists.
+   */
+  extensionWallet (assetID: number) {
+    return this.user.extensionModeConfig?.restrictedWallets[this.baseChainSymbol(assetID)]
+  }
+
   /* conventionalRate converts the encoded atomic rate to a conventional rate */
   conventionalRate (baseID: number, quoteID: number, encRate: number, xc?: Exchange): number {
     const [b, q] = [this.unitInfo(baseID, xc), this.unitInfo(quoteID, xc)]

@@ -571,3 +571,21 @@ div[data-handler=wallets] {
     box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
   }
 }
+
+.on-indicator {
+  width: 15px;
+  height: 15px;
+  border-radius: 8px;
+
+  &.on {
+    background-color: $buycolor_light;
+  }
+
+  &.off {
+    background-color: #777;
+  }
+}
+
+.bodybg {
+  background-color: $light_body_bg;
+}

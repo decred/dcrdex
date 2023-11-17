@@ -10888,3 +10888,77 @@ func (c *Core) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*ass
 	}
 	return tb.TicketPage(scanStart, n, skipN)
 }
+
+func (c *Core) mixingWallet(assetID uint32) (*xcWallet, asset.FundsMixer, error) {
+	w, known := c.wallet(assetID)
+	if !known {
+		return nil, nil, fmt.Errorf("unknown wallet %d", assetID)
+	}
+	mw, is := w.Wallet.(asset.FundsMixer)
+	if !is {
+		return nil, nil, fmt.Errorf("%s wallet is not a FundsMixer", w.Info().Name)
+	}
+	return w, mw, nil
+}
+
+// FundsMixingStats returns the current state of the wallet's funds mixer.
+func (c *Core) FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error) {
+	_, mw, err := c.mixingWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	return mw.FundsMixingStats()
+}
+
+// ConfigureFundsMixer configures the wallet for funds mixing.
+func (c *Core) ConfigureFundsMixer(assetID uint32, serverAddress string, cert []byte) error {
+	_, mw, err := c.mixingWallet(assetID)
+	if err != nil {
+		return err
+	}
+	return mw.ConfigureFundsMixer(serverAddress, cert)
+}
+
+// StartFundsMixer starts the funds mixer. This will error if the wallet
+// does not allow starting or stopping the mixer or if the mixer was already
+// started.
+func (c *Core) StartFundsMixer(appPW []byte, assetID uint32) error {
+	w, mw, err := c.mixingWallet(assetID)
+	if err != nil {
+		return err
+	}
+	if !w.unlocked() {
+		crypter, err := c.encryptionKey(appPW)
+		if err != nil {
+			return fmt.Errorf("password error: %w", err)
+		}
+		defer crypter.Close()
+		err = c.connectAndUnlock(crypter, w)
+		if err != nil {
+			return fmt.Errorf("unlock error: %w", err)
+		}
+	}
+	return mw.StartFundsMixer(c.ctx)
+}
+
+// StopFundsMixer stops the funds mixer. This will error if the wallet does
+// not allow starting or stopping the mixer or if the mixer was not already
+// running.
+func (c *Core) StopFundsMixer(assetID uint32) error {
+	_, mw, err := c.mixingWallet(assetID)
+	if err != nil {
+		return err
+	}
+	return mw.StopFundsMixer()
+}
+
+// DisableFundsMixer disables the funds mixer and moves all funds to the
+// default account. The wallet will need to be re-configured to re-enable
+// mixing.
+func (c *Core) DisableFundsMixer(assetID uint32) error {
+	_, mw, err := c.mixingWallet(assetID)
+	if err != nil {
+		return err
+	}
+	return mw.DisableFundsMixer()
+}

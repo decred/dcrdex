@@ -5,7 +5,6 @@ package dcr
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -158,12 +157,7 @@ type spvWallet struct {
 
 	// hasMixingAccts is used to track if a wallet has the accounts required for
 	// funds mixing.
-	hasMixingAccts atomic.Bool
-
-	csppMtx         sync.Mutex
-	csppServer      string
-	csppTLSConfig   *tls.Config
-	cancelCSPPMixer context.CancelFunc
+	accts atomic.Value
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -332,19 +326,23 @@ func setupMixingAccounts(ctx context.Context, w *wallet.Wallet, pw []byte) error
 	return nil
 }
 
-// Accounts returns the names of the accounts for use by the exchange wallet.
-func (w *spvWallet) Accounts() XCWalletAccounts {
-	if w.isMixerEnabled() {
-		return XCWalletAccounts{
+func (w *spvWallet) setAccounts(mixingEnabled bool) {
+	if mixingEnabled {
+		w.accts.Store(XCWalletAccounts{
 			PrimaryAccount: mixedAccountName,
 			UnmixedAccount: defaultAcctName,
 			TradingAccount: tradingAccount,
-		}
+		})
+		return
 	}
-
-	return XCWalletAccounts{
+	w.accts.Store(XCWalletAccounts{
 		PrimaryAccount: defaultAcctName,
-	}
+	})
+}
+
+// Accounts returns the names of the accounts for use by the exchange wallet.
+func (w *spvWallet) Accounts() XCWalletAccounts {
+	return w.accts.Load().(XCWalletAccounts)
 }
 
 func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error) {
@@ -924,32 +922,23 @@ func (w *spvWallet) UnlockAccount(ctx context.Context, pw []byte, accountName st
 	if err != nil {
 		return err
 	}
-	if err = w.checkMixingAccounts(ctx, pw); err != nil {
-		return fmt.Errorf("error checking mixing accounts: %v", err)
-	}
 	return w.dcrWallet.UnlockAccount(ctx, acctNum, pw)
 }
 
-func (w *spvWallet) checkMixingAccounts(ctx context.Context, pw []byte) error {
-	if w.hasMixingAccts.Load() {
-		return nil
-	}
-
-	originalW, ok := w.dcrWallet.(*extendedWallet)
+func (w *spvWallet) upgradeAccounts(ctx context.Context, pw []byte) error {
+	ew, ok := w.dcrWallet.(*extendedWallet)
 	if !ok {
 		return nil // assume the accts exist, since we can't verify
 	}
 
-	if err := originalW.Unlock(ctx, pw, nil); err != nil {
+	if err := ew.Unlock(ctx, pw, nil); err != nil {
 		return fmt.Errorf("cannot unlock wallet to check mixing accts: %v", err)
 	}
-	defer originalW.Lock()
+	defer ew.Lock()
 
-	if err := setupMixingAccounts(ctx, originalW.Wallet, pw); err != nil {
+	if err := setupMixingAccounts(ctx, ew.Wallet, pw); err != nil {
 		return err
 	}
-
-	w.hasMixingAccts.Store(true)
 	return nil
 }
 

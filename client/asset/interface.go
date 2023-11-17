@@ -704,19 +704,26 @@ type FeeRater interface {
 type FundsMixingStats struct {
 	// Enabled is true if the wallet is configured for funds mixing. The wallet
 	// must be configured before mixing can be started.
-	Enabled bool
+	Enabled bool `json:"enabled"`
+	// Server is the currently configured server.
+	Server string `json:"server"`
 	// IsMixing is true if the wallet is currently mixing funds.
-	IsMixing bool
-	// MixedBalance is the amount of funds that have been successfully mixed and
-	// may be withdrawn or used to fund trades.
-	MixedBalance uint64
-	// UnmixedBalance is the amount of funds that are available and ready for
-	// mixing. If the wallet is not configured for mixing, this balance may be
-	// withdrawn or used to fund trades.
-	UnmixedBalance uint64
-	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
-	// be in the wallet for mixing to happen.
-	UnmixedBalanceThreshold uint64
+	IsMixing bool `json:"isMixing"`
+
+	// DRAFT NOTE: Umixed balance is reported in the wallet's Balance.
+	// MixedBalance could be confusing because it didn't account for locked
+	// and reserved balance on the mixed account.
+
+	// // MixedBalance is the amount of funds that have been successfully mixed and
+	// // may be withdrawn or used to fund trades.
+	// MixedBalance uint64 `json:"mixedBalance"`
+	// // UnmixedBalance is the amount of funds that are available and ready for
+	// // mixing. If the wallet is not configured for mixing, this balance may be
+	// // withdrawn or used to fund trades.
+	// UnmixedBalance uint64 `json:"unmixedBalance"`
+	// // UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
+	// // be in the wallet for mixing to happen.
+	// UnmixedBalanceThreshold uint64 `json:"unmixedBalanceThreshold"`
 }
 
 // FundsMixer defines methods for mixing funds in a wallet.
@@ -724,7 +731,7 @@ type FundsMixer interface {
 	// FundsMixingStats returns the current state of the wallet's funds mixer.
 	FundsMixingStats() (*FundsMixingStats, error)
 	// ConfigureFundsMixer configures the wallet for funds mixing.
-	ConfigureFundsMixer(serverAddress, serverTLSCertPath string) error
+	ConfigureFundsMixer(serverAddress string, cert []byte) error
 	// StartFundsMixer starts the funds mixer. This will error if the wallet
 	// does not allow starting or stopping the mixer or if the mixer was already
 	// started.
@@ -1236,6 +1243,7 @@ type BalanceCategory string
 // function in the wallet.js file above should be updated with the new value.
 const (
 	BalanceCategoryShielded = "Shielded"
+	BalanceCategoryUnmixed  = "Unmixed"
 )
 
 // Coin is some amount of spendable asset. Coin provides the information needed

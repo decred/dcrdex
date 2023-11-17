@@ -195,20 +195,6 @@
     }
   }
 
-  #onIndicator {
-    width: 15px;
-    height: 15px;
-    border-radius: 8px;
-
-    &.on {
-      background-color: $buycolor_light;
-    }
-
-    &.off {
-      background-color: #777;
-    }
-  }
-
   #startBotsBtn,
   #stopBotsBtn {
     opacity: 0.9;
