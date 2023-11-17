@@ -1108,7 +1108,7 @@ export class Wave extends Chart {
     const { region, msgRegion, canvas: { width: w, height: h }, opts: { backgroundColor: bg, message: msg }, colorShift, ctx } = this
 
     if (bg) {
-      if (bg === true) ctx.fillStyle = window.getComputedStyle(document.body, null).getPropertyValue('background-color')
+      if (bg === true) ctx.fillStyle = State.isDark() ? '#122739' : '#f0f0f0' // $dark_panel or $light_panel
       else ctx.fillStyle = bg
       ctx.fillRect(0, 0, w, h)
     }
