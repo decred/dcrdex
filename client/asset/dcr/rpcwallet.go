@@ -61,6 +61,7 @@ type rpcWallet struct {
 	chainParams *chaincfg.Params
 	log         dex.Logger
 	rpcCfg      *rpcclient.ConnConfig
+	accountsV   atomic.Value // XCWalletAccounts
 
 	rpcMtx  sync.RWMutex
 	spvMode bool
@@ -203,11 +204,22 @@ func newRPCWallet(settings map[string]string, logger dex.Logger, net dex.Network
 	rpcw.rpcConnector = nodeRPCClient
 	rpcw.rpcClient = newCombinedClient(nodeRPCClient, chainParams)
 
+	rpcw.accountsV.Store(XCWalletAccounts{
+		PrimaryAccount: cfg.PrimaryAccount,
+		UnmixedAccount: cfg.UnmixedAccount,
+		TradingAccount: cfg.TradingAccount,
+	})
+
 	return rpcw, nil
 }
 
+// Accounts returns the names of the accounts for use by the exchange wallet.
+func (w *rpcWallet) Accounts() XCWalletAccounts {
+	return w.accountsV.Load().(XCWalletAccounts)
+}
+
 // Reconfigure updates the wallet to user a new configuration.
-func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error) {
+func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error) {
 	if !(cfg.Type == walletTypeDcrwRPC || cfg.Type == walletTypeLegacy) {
 		return true, nil
 	}
@@ -226,14 +238,28 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 	if chainParams.Net != w.chainParams.Net {
 		return false, errors.New("cannot reconfigure to use different network")
 	}
+
 	certs, err := os.ReadFile(rpcCfg.RPCCert)
 	if err != nil {
 		return false, fmt.Errorf("TLS certificate read error: %w", err)
 	}
+
+	var allOk bool
+	defer func() {
+		if allOk { // update the account names as the last step
+			w.accountsV.Store(XCWalletAccounts{
+				PrimaryAccount: rpcCfg.PrimaryAccount,
+				UnmixedAccount: rpcCfg.UnmixedAccount,
+				TradingAccount: rpcCfg.TradingAccount,
+			})
+		}
+	}()
+
 	if rpcCfg.RPCUser == w.rpcCfg.User &&
 		rpcCfg.RPCPass == w.rpcCfg.Pass &&
 		bytes.Equal(certs, w.rpcCfg.Certificates) &&
 		rpcCfg.RPCListen == w.rpcCfg.Host {
+		allOk = true
 		return false, nil
 	}
 
@@ -252,6 +278,12 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		if err != nil {
 			return false, err
 		}
+		var depositAccount string
+		if rpcCfg.UnmixedAccount != "" {
+			depositAccount = rpcCfg.UnmixedAccount
+		} else {
+			depositAccount = rpcCfg.PrimaryAccount
+		}
 		owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
 		if err != nil {
 			return false, err
@@ -269,6 +301,7 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 	w.rpcConnector = newWallet.rpcConnector
 	w.rpcClient = newWallet.rpcClient
 
+	allOk = true
 	return false, nil
 }
 

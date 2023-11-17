@@ -63,6 +63,12 @@ type AddressInfo struct {
 	Branch  uint32
 }
 
+type XCWalletAccounts struct {
+	PrimaryAccount string
+	UnmixedAccount string
+	TradingAccount string
+}
+
 // Wallet defines methods that the ExchangeWallet uses for communicating with
 // a Decred wallet and blockchain.
 type Wallet interface {
@@ -73,6 +79,9 @@ type Wallet interface {
 	// SpvMode returns true if the wallet is connected to the Decred
 	// network via SPV peers.
 	SpvMode() bool
+	// Accounts returns the names of the accounts for use by the exchange
+	// wallet.
+	Accounts() XCWalletAccounts
 	// NotifyOnTipChange registers a callback function that should be
 	// invoked when the wallet sees new mainchain blocks. The return value
 	// indicates if this notification can be provided. Where this tip change
@@ -157,8 +166,8 @@ type Wallet interface {
 	// be voted on.
 	SetVotingPreferences(ctx context.Context, choices, tspendPolicy, treasuryPolicy map[string]string) error
 	SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error
-	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error)
 	StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error)
+	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error)
 }
 
 // WalletTransaction is a pared down version of walletjson.GetTransactionResult.
@@ -174,6 +183,7 @@ type WalletTransaction struct {
 // DRAFT NOTE: This is alternative to NotifyOnTipChange. I prefer this method,
 // and would vote to export this interface and get rid of NotifyOnTipChange.
 // @itswisdomagain might be using the current API though.
+// TODO: Makes sense.
 type tipNotifier interface {
 	tipFeed() <-chan *block
 }

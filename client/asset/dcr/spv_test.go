@@ -5,6 +5,7 @@ package dcr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -63,23 +64,32 @@ type tDcrWallet struct {
 	filterErr            error
 	blockInfo            *wallet.BlockInfo
 	blockInfoErr         error
-	acctLocked           bool
-	acctUnlockedErr      error
-	lockAcctErr          error
-	unlockAcctErr        error
-	priv                 *secp256k1.PrivateKey
-	privKeyErr           error
-	txDetails            *udb.TxDetails
-	txDetailsErr         error
-	remotePeers          map[string]*p2p.RemotePeer
-	spvBlocks            []*wire.MsgBlock
-	spvBlocksErr         error
-	unlockedOutpoint     *wire.OutPoint
-	lockedOutpoint       *wire.OutPoint
+	// walletLocked         bool
+	acctLocked       bool
+	acctUnlockedErr  error
+	lockAcctErr      error
+	unlockAcctErr    error
+	priv             *secp256k1.PrivateKey
+	privKeyErr       error
+	txDetails        *udb.TxDetails
+	txDetailsErr     error
+	remotePeers      map[string]*p2p.RemotePeer
+	spvBlocks        []*wire.MsgBlock
+	spvBlocksErr     error
+	unlockedOutpoint *wire.OutPoint
+	lockedOutpoint   *wire.OutPoint
 }
 
 func (w *tDcrWallet) KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error) {
 	return w.knownAddr, w.knownAddrErr
+}
+
+func (w *tDcrWallet) AccountNumber(ctx context.Context, accountName string) (uint32, error) {
+	return 0, nil
+}
+
+func (w *tDcrWallet) NextAccount(ctx context.Context, name string) (uint32, error) {
+	return 0, fmt.Errorf("not stubbed")
 }
 
 func (w *tDcrWallet) AccountBalance(ctx context.Context, account uint32, confirms int32) (wallet.Balances, error) {
@@ -112,8 +122,16 @@ func (w *tDcrWallet) ListTransactionDetails(ctx context.Context, txHash *chainha
 	return w.listTxs, w.listTxsErr
 }
 
+func (w *tDcrWallet) MixAccount(ctx context.Context, dialTLS wallet.DialFunc, csppserver string, changeAccount, mixAccount, mixBranch uint32) error {
+	return fmt.Errorf("not stubbed")
+}
+
 func (w *tDcrWallet) MainChainTip(ctx context.Context) (hash chainhash.Hash, height int32) {
 	return w.tip.hash, w.tip.height
+}
+
+func (w *tDcrWallet) MainTipChangedNotifications() (chan *wallet.MainTipChangedNotification, func()) {
+	return nil, nil
 }
 
 func (w *tDcrWallet) NewExternalAddress(ctx context.Context, account uint32, callOpts ...wallet.NextAddressCallOption) (stdaddr.Address, error) {
@@ -155,6 +173,14 @@ func (w *tDcrWallet) BlockInfo(ctx context.Context, blockID *wallet.BlockIdentif
 	return w.blockInfo, w.blockInfoErr
 }
 
+func (w *tDcrWallet) AccountHasPassphrase(ctx context.Context, account uint32) (bool, error) {
+	return false, fmt.Errorf("not stubbed")
+}
+
+func (w *tDcrWallet) SetAccountPassphrase(ctx context.Context, account uint32, passphrase []byte) error {
+	return fmt.Errorf("not stubbed")
+}
+
 func (w *tDcrWallet) AccountUnlocked(ctx context.Context, account uint32) (bool, error) {
 	return !w.acctLocked, w.acctUnlockedErr
 }
@@ -165,6 +191,10 @@ func (w *tDcrWallet) LockAccount(ctx context.Context, account uint32) error {
 
 func (w *tDcrWallet) UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error {
 	return w.unlockAcctErr
+}
+
+func (w *tDcrWallet) Unlock(ctx context.Context, passphrase []byte, timeout <-chan time.Time) error {
+	return fmt.Errorf("not stubbed")
 }
 
 func (w *tDcrWallet) LoadPrivateKey(ctx context.Context, addr stdaddr.Address) (key *secp256k1.PrivateKey, zero func(), err error) {
@@ -351,7 +381,6 @@ func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 		blockCache: blockCache{
 			blocks: make(map[chainhash.Hash]*cachedBlock),
 		},
-		acctName: tAcctName,
 	}, dcrw
 }
 
@@ -383,7 +412,7 @@ func TestAccountOwnsAddress(t *testing.T) {
 	dcrw.knownAddr = kaddr
 
 	// Initial success
-	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err != nil {
+	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, tAcctName); err != nil {
 		t.Fatalf("initial success trial failed: %v", err)
 	} else if !have {
 		t.Fatal("failed initial success. have = false")
@@ -391,7 +420,7 @@ func TestAccountOwnsAddress(t *testing.T) {
 
 	// Foreign address
 	dcrw.knownAddrErr = walleterrors.NotExist
-	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err != nil {
+	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, tAcctName); err != nil {
 		t.Fatalf("unexpected error when should just be have = false for foreign address: %v", err)
 	} else if have {
 		t.Fatalf("shouldn't have, but have for foreign address")
@@ -399,14 +428,14 @@ func TestAccountOwnsAddress(t *testing.T) {
 
 	// Other KnownAddress error
 	dcrw.knownAddrErr = tErr
-	if _, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err == nil {
+	if _, err := w.AccountOwnsAddress(tCtx, tPKHAddr, tAcctName); err == nil {
 		t.Fatal("no error for KnownAddress error")
 	}
 	dcrw.knownAddrErr = nil
 
 	// Wrong account
 	kaddr.acctName = "not the right name"
-	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err != nil {
+	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, tAcctName); err != nil {
 		t.Fatalf("unexpected error when should just be have = false for wrong account: %v", err)
 	} else if have {
 		t.Fatalf("shouldn't have, but have for wrong account")
@@ -415,7 +444,7 @@ func TestAccountOwnsAddress(t *testing.T) {
 
 	// Wrong type
 	kaddr.acctType = wallet.AccountKindImportedXpub
-	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err != nil {
+	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, tAcctName); err != nil {
 		t.Fatalf("don't have trial failed: %v", err)
 	} else if have {
 		t.Fatal("have, but shouldn't")

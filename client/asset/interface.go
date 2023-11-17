@@ -34,6 +34,7 @@ const (
 	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
 	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
 	WalletTraitHistorian                              // This wallet can return its transaction history
+	WalletTraitFundsMixer                             // The wallet can mix funds.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -138,6 +139,12 @@ func (wt WalletTrait) IsHistorian() bool {
 	return wt&WalletTraitHistorian != 0
 }
 
+// IsFundsMixer tests if the WalletTrait has the WalletTraitFundsMixer bit set,
+// which indicates the wallet implements the FundsMixer interface.
+func (wt WalletTrait) IsFundsMixer() bool {
+	return wt&WalletTraitFundsMixer != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -190,6 +197,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(WalletHistorian); is {
 		t |= WalletTraitHistorian
+	}
+	if _, is := w.(FundsMixer); is {
+		t |= WalletTraitFundsMixer
 	}
 	return t
 }
@@ -683,6 +693,45 @@ type DynamicSwapper interface {
 // suggestion for swap operations.
 type FeeRater interface {
 	FeeRate() uint64
+}
+
+// FundsMixingStats describes the current state of a wallet's funds mixer.
+type FundsMixingStats struct {
+	// Enabled is true if the wallet is configured for funds mixing. The wallet
+	// must be configured before mixing can be started.
+	Enabled bool
+	// IsMixing is true if the wallet is currently mixing funds.
+	IsMixing bool
+	// MixedBalance is the amount of funds that have been successfully mixed and
+	// may be withdrawn or used to fund trades.
+	MixedBalance uint64
+	// UnmixedBalance is the amount of funds that are available and ready for
+	// mixing. If the wallet is not configured for mixing, this balance may be
+	// withdrawn or used to fund trades.
+	UnmixedBalance uint64
+	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
+	// be in the wallet for mixing to happen.
+	UnmixedBalanceThreshold uint64
+}
+
+// FundsMixer defines methods for mixing funds in a wallet.
+type FundsMixer interface {
+	// FundsMixingStats returns the current state of the wallet's funds mixer.
+	FundsMixingStats() (*FundsMixingStats, error)
+	// ConfigureFundsMixer configures the wallet for funds mixing.
+	ConfigureFundsMixer(serverAddress, serverTLSCertPath string) error
+	// StartFundsMixer starts the funds mixer. This will error if the wallet
+	// does not allow starting or stopping the mixer or if the mixer was already
+	// started.
+	StartFundsMixer(ctx context.Context) error
+	// StopFundsMixer stops the funds mixer. This will error if the wallet does
+	// not allow starting or stopping the mixer or if the mixer was not already
+	// running.
+	StopFundsMixer() error
+	// DisableFundsMixer disables the funds mixer and moves all funds to the
+	// default account. The wallet will need to be re-configured to re-enable
+	// mixing.
+	DisableFundsMixer() error
 }
 
 // WalletRestoration contains all the information needed for a user to restore

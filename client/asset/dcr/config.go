@@ -31,9 +31,6 @@ var (
 )
 
 type walletConfig struct {
-	PrimaryAccount   string  `ini:"account"`
-	UnmixedAccount   string  `ini:"unmixedaccount"`
-	TradingAccount   string  `ini:"tradingaccount"`
 	UseSplitTx       bool    `ini:"txsplit"`
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
@@ -43,10 +40,13 @@ type walletConfig struct {
 }
 
 type rpcConfig struct {
-	RPCUser   string `ini:"username"`
-	RPCPass   string `ini:"password"`
-	RPCListen string `ini:"rpclisten"`
-	RPCCert   string `ini:"rpccert"`
+	PrimaryAccount string `ini:"account"`
+	UnmixedAccount string `ini:"unmixedaccount"`
+	TradingAccount string `ini:"tradingaccount"`
+	RPCUser        string `ini:"username"`
+	RPCPass        string `ini:"password"`
+	RPCListen      string `ini:"rpclisten"`
+	RPCCert        string `ini:"rpccert"`
 }
 
 func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig, *chaincfg.Params, error) {
@@ -55,6 +55,7 @@ func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig,
 	if err != nil {
 		return nil, nil, err
 	}
+
 	var defaultServer string
 	switch network {
 	case dex.Simnet:
@@ -74,6 +75,31 @@ func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig,
 	} else {
 		cfg.RPCCert = dex.CleanAndExpandPath(cfg.RPCCert)
 	}
+
+	if cfg.PrimaryAccount == "" {
+		cfg.PrimaryAccount = defaultAcctName
+	}
+
+	// Both UnmixedAccount and TradingAccount must be provided if primary
+	// account is a mixed account. Providing one but not the other is bad
+	// configuration. If set, the account names will be validated on Connect.
+	if (cfg.UnmixedAccount == "") != (cfg.TradingAccount == "") {
+		return nil, nil, fmt.Errorf("'Change Account Name' and 'Temporary Trading Account' MUST "+
+			"be set to treat %[1]q as a mixed account. If %[1]q is not a mixed account, values "+
+			"should NOT be set for 'Change Account Name' and 'Temporary Trading Account'",
+			cfg.PrimaryAccount)
+	}
+	if cfg.UnmixedAccount != "" {
+		switch {
+		case cfg.PrimaryAccount == cfg.UnmixedAccount:
+			return nil, nil, fmt.Errorf("Primary Account should not be the same as Change Account")
+		case cfg.PrimaryAccount == cfg.TradingAccount:
+			return nil, nil, fmt.Errorf("Primary Account should not be the same as Temporary Trading Account")
+		case cfg.TradingAccount == cfg.UnmixedAccount:
+			return nil, nil, fmt.Errorf("Temporary Trading Account should not be the same as Change Account")
+		}
+	}
+
 	return cfg, chainParams, nil
 }
 
