@@ -171,7 +171,6 @@ var ZhCN = map[string]string{
 	"All markets at":              "所有市场",
 	"pick a different asset":      "选择其它的资产",
 	"Create":                      "创建",
-	"Register_loudly":             "注册!",
 	"1 Sync the Blockchain":       "1: 同步区块链",
 	"Progress":                    "进度",
 	"remaining":                   "剩余",

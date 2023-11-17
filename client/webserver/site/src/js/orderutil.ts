@@ -9,9 +9,13 @@ import {
 import { BooleanOption, XYRangeOption } from './opts'
 import Doc from './doc'
 
-export const Limit = 1
-export const Market = 2
-export const Cancel = 3
+export const Limit = 1 // TODO: Delete for the versions below
+export const Market = 2 // TODO: Delete for the versions below
+export const Cancel = 3 // TODO: Delete for the versions below
+
+export const OrderTypeLimit = 1
+export const OrderTypeMarket = 2
+export const OrderTypeCancel = 3
 
 /* The time-in-force specifiers are a mirror of dex/order.TimeInForce. */
 export const ImmediateTiF = 0
@@ -34,8 +38,11 @@ export const MatchComplete = 4
 export const MatchConfirmed = 5
 
 /* The match sides are a mirror of dex/order.MatchSide. */
-export const Maker = 0
-export const Taker = 1
+export const Maker = 0 // TODO: Delete for the versions below
+export const Taker = 1 // TODO: Delete for the versions below
+
+export const MatchSideMaker = 0
+export const MatchSideTaker = 1
 
 /*
  * RateEncodingFactor is used when encoding an atomic exchange rate as an

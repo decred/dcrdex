@@ -3,80 +3,82 @@
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{$authed := .UserInfo.Authed}}
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
-  <span class="settings-gear ico-settings"></span><br>
-  <div class="settings">
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" value="" id="darkMode">
-      <label class="form-check-label" for="darkMode">
-        [[[Dark Mode]]]
-      </label>
-    </div>
-    <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-    <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
-    </div>
-    <div id="fiatRateSources" {{if not $authed}} class="d-hide"{{end}}>
-    <span class="mb-2" data-tooltip="[[[fiat_exchange_rate_msg]]]">
-     [[[fiat_exchange_rate_sources]]]:
-    <span class="ico-info"></span>
-    </span>
-    {{range $source, $enabled := .FiatRateSources}}
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" value="{{$source}}" id="{{$source}}" {{if $enabled}} checked {{end}}>
-      <label class="form-check-label" for="{{$source}}">{{$source}}</label>
-    </div>
-    {{end}}
-    </div>
-    <div {{if not $authed}} class="d-hide"{{end}}>
-      <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
-        <h5>[[[registered dexes]]]</h5>
-        {{range $host, $xc := .Exchanges}}
-          <a href="/dexsettings/{{$host}}"><button class="bg2 selected"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings"></span></div></button></a>
-        {{end}}
+  <div class="mw-425 d-flex flex-column align-items-stretch mx-auto">
+    <span class="settings-gear ico-settings"></span><br>
+    <div class="settings">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" value="" id="darkMode">
+        <label class="form-check-label" for="darkMode">
+          [[[Dark Mode]]]
+        </label>
       </div>
-      <br>
-      <div>
-        <p>
-        [[[simultaneous_servers_msg]]]
-        </p>
-        <button id="addADex" class="bg2 selected">[[[Add a DEX]]]</button>
-        <button id="importAccount" class="bg2 selected ms-2">[[[Import Account]]]</button>
+      <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
       </div>
-    </div>
-    <div {{if not .IsInitialized}}class="d-hide"{{end}}>
-        <button id="changeAppPW" class="bg2 selected my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
-        <button id="resetAppPW" class="bg2 selected my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
-    </div>
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
-      <label class="form-check-label" for="showPokes">
-        [[[Show pop-up notifications]]]
-      </label>
-    </div>
-    <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-      <form id="browserNotificationsForm">
-        <div class="form-check">
-          <label class="form-check-label">
-            <input class="form-check-input" name="browserNtfnEnabled" type="checkbox" value="1" id="browserNtfnEnabled">
-            [[[enable_browser_ntfn]]]
-            <span class="ico-info" data-tooltip="[[[enable_browser_ntfn_info]]]"></span>
-          </label>
+      <div id="fiatRateSources" {{if not $authed}} class="d-hide"{{end}}>
+      <span class="mb-2" data-tooltip="[[[fiat_exchange_rate_msg]]]">
+      [[[fiat_exchange_rate_sources]]]:
+      <span class="ico-info"></span>
+      </span>
+      {{range $source, $enabled := .FiatRateSources}}
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" value="{{$source}}" id="{{$source}}" {{if $enabled}} checked {{end}}>
+        <label class="form-check-label" for="{{$source}}">{{$source}}</label>
+      </div>
+      {{end}}
+      </div>
+      <div {{if not $authed}} class="d-hide"{{end}}>
+        <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
+          <h5>[[[registered dexes]]]</h5>
+          {{range $host, $xc := .Exchanges}}
+            <a href="/dexsettings/{{$host}}"><button class="bg2 selected"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings"></span></div></button></a>
+          {{end}}
         </div>
-        <div id="browserNtfnBlockedMsg" class="d-hide">[[[browser_ntfn_blocked]]]</div>
-        <div id="browserNtfnCheckboxContainer" class="d-hide checkbox-container">
-          <div class="form-check" id="browserNtfnCheckboxTemplate">
-            <label class="form-check-label" >
-            <span data-tmpl="label"></span>
-              <input class="form-check-input" type="checkbox" value="1" data-tmpl="checkbox">
+        <br>
+        <div>
+          <p>
+          [[[simultaneous_servers_msg]]]
+          </p>
+          <button id="addADex" class="bg2 selected">[[[Add a DEX]]]</button>
+          <button id="importAccount" class="bg2 selected ms-2">[[[Import Account]]]</button>
+        </div>
+      </div>
+      <div {{if not .IsInitialized}}class="d-hide"{{end}}>
+          <button id="changeAppPW" class="bg2 selected my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
+          <button id="resetAppPW" class="bg2 selected my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
+        <label class="form-check-label" for="showPokes">
+          [[[Show pop-up notifications]]]
+        </label>
+      </div>
+      <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+        <form id="browserNotificationsForm">
+          <div class="form-check">
+            <label class="form-check-label">
+              <input class="form-check-input" name="browserNtfnEnabled" type="checkbox" value="1" id="browserNtfnEnabled">
+              [[[enable_browser_ntfn]]]
+              <span class="ico-info" data-tooltip="[[[enable_browser_ntfn_info]]]"></span>
             </label>
           </div>
-        </div>
-      </form>
+          <div id="browserNtfnBlockedMsg" class="d-hide">[[[browser_ntfn_blocked]]]</div>
+          <div id="browserNtfnCheckboxContainer" class="d-hide checkbox-container">
+            <div class="form-check" id="browserNtfnCheckboxTemplate">
+              <label class="form-check-label" >
+              <span data-tmpl="label"></span>
+                <input class="form-check-input" type="checkbox" value="1" data-tmpl="checkbox">
+              </label>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+        [[[seed_implore_msg]]]<br>
+        <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>
+      </div>
+      <div>[[[Build ID]]]: <span id="commitHash" class="mono"></span></div>
     </div>
-    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-      [[[seed_implore_msg]]]<br>
-      <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>
-    </div>
-    <div>[[[Build ID]]]: <span id="commitHash" class="mono"></span></div>
   </div>
 
   {{- /* POP-UP FORMS */ -}}
@@ -88,11 +90,11 @@
     </form>
 
     {{- /* REG ASSET SELECTOR */ -}}
-    <form class="d-hide" id="regAssetForm">
+    <form class="d-hide mw-425" id="regAssetForm">
       {{template "regAssetForm"}}
     </form>
     {{- /* CONFIRM REGISTRATION */ -}}
-    <form class="d-hide" id="confirmRegForm">
+    <form class="d-hide mw-425" id="confirmRegForm">
       {{template "confirmRegistrationForm"}}
     </form>
 

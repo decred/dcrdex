@@ -2,6 +2,7 @@ import Doc, { WalletIcons } from './doc'
 import State from './state'
 import BasePage from './basepage'
 import OrderBook from './orderbook'
+import { ReputationMeter, tradingLimits, strongTier } from './account'
 import {
   CandleChart,
   DepthChart,
@@ -176,6 +177,7 @@ export default class MarketsPage extends BasePage {
   unlockForm: UnlockWalletForm
   newWalletForm: NewWalletForm
   depositAddrForm: DepositAddress
+  reputationMeter: ReputationMeter
   keyup: (e: KeyboardEvent) => void
   secondTicker: number
   candlesLoading: LoadTracker | null
@@ -264,6 +266,8 @@ export default class MarketsPage extends BasePage {
       bind(wgt.quote.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.quote.id) })
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
+
+    this.reputationMeter = new ReputationMeter(page.reputationMeter)
 
     // Bind toggle wallet status form.
     bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
@@ -504,7 +508,9 @@ export default class MarketsPage extends BasePage {
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       bondpost: (note: BondNote) => { this.handleBondUpdate(note) },
       spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) },
-      walletstate: (note: WalletStateNote) => { this.handleWalletState(note) }
+      walletstate: (note: WalletStateNote) => { this.handleWalletState(note) },
+      reputation: () => { this.updateReputation() },
+      feepayment: () => { this.updateReputation() }
     })
 
     this.loadingAnimations = {}
@@ -753,6 +759,11 @@ export default class MarketsPage extends BasePage {
     }
 
     Doc.setVis(await showOrderForm(), page.orderForm, page.orderTypeBttns)
+
+    if (this.market) {
+      const { auth: { effectiveTier, pendingStrength } } = this.market.dex
+      Doc.setVis(effectiveTier > 0 || pendingStrength > 0, page.tradingLimits, page.reputationMeter)
+    }
 
     if (app().user.experimental && this.mmRunning === undefined) {
       const marketMakingStatus = await app().getMarketMakingStatus()
@@ -1197,6 +1208,8 @@ export default class MarketsPage extends BasePage {
     this.setCandleDurBttns()
     this.previewQuoteAmt(false)
     this.updateTitle()
+    this.reputationMeter.setHost(dex.host)
+    this.updateReputation()
     this.loadUserOrders()
   }
 
@@ -1538,7 +1551,7 @@ export default class MarketsPage extends BasePage {
   /*
    * midGapConventional is the same as midGap, but returns the mid-gap rate as
    * the conventional ratio. This is used to convert from a conventional
-   * quantity from base to quote or vice-versa.
+   * quantity from base to quote or vice-versa, or for display purposes.
    */
   midGapConventional () {
     const gap = this.midGap()
@@ -1551,7 +1564,9 @@ export default class MarketsPage extends BasePage {
    * midGap returns the value in the middle of the best buy and best sell. If
    * either one of the buy or sell sides are empty, midGap returns the best rate
    * from the other side. If both sides are empty, midGap returns the value
-   * null. The rate returned is the atomic ratio.
+   * null. The rate returned is the atomic ratio, used for conversion. For a
+   * conventional rate for display or to convert conventional units, use
+   * midGapConventional
    */
   midGap () {
     const book = this.book
@@ -2485,16 +2500,69 @@ export default class MarketsPage extends BasePage {
     // Update local copy of Exchange.
     this.market.dex = app().exchanges[dexAddr]
     this.setRegistrationStatusVisibility()
+    this.updateReputation()
+  }
+
+  updateReputation () {
+    const { page, market: { dex: { host }, cfg: mkt, baseCfg: { unitInfo: bui }, quoteCfg: { unitInfo: qui } } } = this
+    const { auth } = app().exchanges[host]
+
+    page.parcelSizeLots.textContent = String(mkt.parcelsize)
+    page.marketLimitBase.textContent = Doc.formatFourSigFigs(mkt.parcelsize * mkt.lotsize / bui.conventional.conversionFactor)
+    page.marketLimitBaseUnit.textContent = bui.conventional.unit
+    page.marketLimitQuoteUnit.textContent = qui.conventional.unit
+    const conversionRate = this.anyRate()[1]
+    if (conversionRate) {
+      const quoteLot = mkt.lotsize * conversionRate
+      page.marketLimitQuote.textContent = Doc.formatFourSigFigs(quoteLot / qui.conventional.conversionFactor)
+    } else page.marketLimitQuote.textContent = '-'
+
+    const tier = strongTier(auth)
+    page.tradingTier.textContent = String(tier)
+    const [usedParcels, parcelLimit] = tradingLimits(host)
+    page.tradingLimit.textContent = String(parcelLimit * mkt.parcelsize)
+    page.limitUsage.textContent = parcelLimit > 0 ? (usedParcels / parcelLimit * 100).toFixed(1) : '0'
+
+    page.orderLimitRemain.textContent = ((parcelLimit - usedParcels) * mkt.parcelsize).toFixed(1)
+    page.orderTradingTier.textContent = String(tier)
+
+    this.reputationMeter.update()
+  }
+
+  /*
+   * anyRate finds the best rate from any of, in order of priority, the order
+   * book, the server's reported spot rate, or the fiat exchange rates. A
+   * 3-tuple of message-rate encoding, a conversion rate, and a conventional
+   * rate is generated.
+   */
+  anyRate (): [number, number, number] {
+    const { cfg: { spot }, base: { id: baseID }, quote: { id: quoteID }, rateConversionFactor } = this.market
+    const midGap = this.midGap()
+    if (midGap) return [midGap * OrderUtil.RateEncodingFactor, midGap, this.midGapConventional() || 0]
+    if (spot && spot.rate) return [spot.rate, spot.rate / OrderUtil.RateEncodingFactor, spot.rate / rateConversionFactor]
+    const [baseUSD, quoteUSD] = [app().fiatRatesMap[baseID], app().fiatRatesMap[quoteID]]
+    if (baseUSD && quoteUSD) {
+      const conventionalRate = baseUSD / quoteUSD
+      const msgRate = conventionalRate * rateConversionFactor
+      const conversionRate = msgRate / OrderUtil.RateEncodingFactor
+      return [msgRate, conversionRate, conventionalRate]
+    }
+    return [0, 0, 0]
   }
 
   handleMatchNote (note: MatchNote) {
     const mord = this.metaOrders[note.orderID]
+    const match = note.match
     if (!mord) return this.refreshActiveOrders()
-    else if (mord.ord.type === OrderUtil.Market && note.match.status === OrderUtil.NewlyMatched) { // Update the average market rate display.
+    else if (mord.ord.type === OrderUtil.Market && match.status === OrderUtil.NewlyMatched) { // Update the average market rate display.
       // Fetch and use the updated order.
       const ord = app().order(note.orderID)
       if (ord) mord.details.rate.textContent = mord.header.rate.textContent = this.marketOrderRateString(ord, this.market)
     }
+    if (
+      (match.side === OrderUtil.MatchSideMaker && match.status === OrderUtil.MakerRedeemed) ||
+      (match.side === OrderUtil.MatchSideTaker && match.status === OrderUtil.MatchComplete)
+    ) this.updateReputation()
     if (app().canAccelerateOrder(mord.ord)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
   }
@@ -2504,8 +2572,8 @@ export default class MarketsPage extends BasePage {
    * used to update a user's order's status.
    */
   handleOrderNote (note: OrderNote) {
-    const order = note.order
-    const mord = this.metaOrders[order.id]
+    const ord = note.order
+    const mord = this.metaOrders[ord.id]
     // - If metaOrder doesn't exist for the given order it means it was created
     //  via dexcctl and the GUI isn't aware of it or it was an inflight order.
     //  refreshActiveOrders must be called to grab this order.
@@ -2514,19 +2582,24 @@ export default class MarketsPage extends BasePage {
     //   and unlocked) has now become ready to tick. The active orders section
     //   needs to be refreshed.
     const wasInflight = note.topic === 'AsyncOrderFailure' || note.topic === 'AsyncOrderSubmitted'
-    if (!mord || wasInflight || (note.topic === 'OrderLoaded' && order.readyToTick)) {
+    if (!mord || wasInflight || (note.topic === 'OrderLoaded' && ord.readyToTick)) {
       return this.refreshActiveOrders()
     }
     const oldStatus = mord.ord.status
-    mord.ord = order
+    mord.ord = ord
     if (note.topic === 'MissedCancel') Doc.show(mord.details.cancelBttn)
-    if (order.filled === order.qty) Doc.hide(mord.details.cancelBttn)
-    if (app().canAccelerateOrder(order)) Doc.show(mord.details.accelerateBttn)
+    if (ord.filled === ord.qty) Doc.hide(mord.details.cancelBttn)
+    if (app().canAccelerateOrder(ord)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
     this.updateMetaOrder(mord)
     // Only reset markers if there is a change, since the chart is redrawn.
-    if ((oldStatus === OrderUtil.StatusEpoch && order.status === OrderUtil.StatusBooked) ||
-      (oldStatus === OrderUtil.StatusBooked && order.status > OrderUtil.StatusBooked)) this.setDepthMarkers()
+    if (
+      (oldStatus === OrderUtil.StatusEpoch && ord.status === OrderUtil.StatusBooked) ||
+      (oldStatus === OrderUtil.StatusBooked && ord.status > OrderUtil.StatusBooked)
+    ) {
+      this.setDepthMarkers()
+      this.updateReputation()
+    }
   }
 
   /*
@@ -2693,7 +2766,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const lots = parseInt(page.lotField.value || '0')
     if (lots <= 0) {
-      page.lotField.value = '0'
+      page.lotField.value = page.lotField.value === '' ? '' : '0'
       page.qtyField.value = ''
       this.previewQuoteAmt(false)
       this.setOrderBttnEnabled(false, intl.prep(intl.ID_ORDER_BUTTON_QTY_ERROR))

@@ -339,6 +339,7 @@ func coreMarketFromMsgMarket(dc *dexConnection, msgMkt *msgjson.Market) *Market 
 		QuoteID:         quote.ID,
 		QuoteSymbol:     quote.Symbol,
 		LotSize:         msgMkt.LotSize,
+		ParcelSize:      msgMkt.ParcelSize,
 		RateStep:        msgMkt.RateStep,
 		EpochLen:        msgMkt.EpochLen,
 		StartEpoch:      msgMkt.StartEpoch,
@@ -519,7 +520,8 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		CandleDurs:       cfg.BinSizes,
 		ViewOnly:         dc.acct.isViewOnly(),
 		Auth:             acctBondState.ExchangeAuth,
-		// TODO: Bonds
+		MaxScore:         cfg.MaxScore,
+		PenaltyThreshold: cfg.PenaltyThreshold,
 
 		// Legacy reg fee (V0PURGE)
 		RegFees:    feeAssets,

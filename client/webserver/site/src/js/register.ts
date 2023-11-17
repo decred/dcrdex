@@ -23,7 +23,7 @@ import State from './state'
 export default class RegistrationPage extends BasePage {
   body: HTMLElement
   pwCache: PasswordCache
-  currentDEX: Exchange
+  currentDEX: Exchange // TODO: Just use host and pull xc from app() as needed.
   page: Record<string, PageElement>
   loginForm: LoginForm
   appPassResetForm: AppPassResetForm
@@ -77,7 +77,7 @@ export default class RegistrationPage extends BasePage {
 
     this.newWalletForm = new NewWalletForm(
       page.newWalletForm,
-      assetID => this.newWalletCreated(assetID),
+      assetID => this.newWalletCreated(assetID, this.confirmRegisterForm.tier),
       this.pwCache,
       () => this.animateRegAsset(page.newWalletForm)
     )
@@ -95,19 +95,18 @@ export default class RegistrationPage extends BasePage {
     }
 
     // SELECT REG ASSET
-    this.regAssetForm = new FeeAssetSelectionForm(page.regAssetForm, async assetID => {
-      this.confirmRegisterForm.setAsset(assetID)
-
+    this.regAssetForm = new FeeAssetSelectionForm(page.regAssetForm, async (assetID: number, tier: number) => {
       const asset = app().assets[assetID]
       const wallet = asset.wallet
       if (wallet) {
         const bondAsset = this.currentDEX.bondAssets[asset.symbol]
         const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
+        this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
         if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
-        this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+        this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
         slideSwap(page.regAssetForm, page.walletWait)
         return
       }
@@ -208,7 +207,7 @@ export default class RegistrationPage extends BasePage {
     await app().loadPage('markets')
   }
 
-  async newWalletCreated (assetID: number) {
+  async newWalletCreated (assetID: number, tier: number) {
     this.regAssetForm.refresh()
     const user = await app().fetchUser()
     if (!user) return
@@ -223,7 +222,7 @@ export default class RegistrationPage extends BasePage {
       return
     }
 
-    this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+    this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
     await slideSwap(page.newWalletForm, page.walletWait)
   }
 }

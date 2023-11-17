@@ -31,6 +31,12 @@ body.dark {
         }
       }
     }
+
+    .reg-asset-table {
+      th, td {
+        border-color: $dark_border_color;
+      }
+    }
   }
 
   ::-webkit-calendar-picker-indicator {

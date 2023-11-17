@@ -188,10 +188,10 @@ type SupportedAsset struct {
 // BondOptionsForm is used from the settings page to change the auto-bond
 // maintenance setting for a DEX.
 type BondOptionsForm struct {
-	Addr         string  `json:"host"`
+	Host         string  `json:"host"`
 	TargetTier   *uint64 `json:"targetTier,omitempty"`
 	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
-	PenaltyComps uint16  `json:"penaltyComps"`
+	PenaltyComps *uint16 `json:"penaltyComps,omitempty"`
 	BondAssetID  *uint32 `json:"bondAssetID,omitempty"`
 }
 
@@ -525,6 +525,7 @@ type Market struct {
 	QuoteID         uint32        `json:"quoteid"`
 	QuoteSymbol     string        `json:"quotesymbol"`
 	LotSize         uint64        `json:"lotsize"`
+	ParcelSize      uint32        `json:"parcelsize"`
 	RateStep        uint64        `json:"ratestep"`
 	EpochLen        uint64        `json:"epochlen"`
 	StartEpoch      uint64        `json:"startepoch"`
@@ -693,7 +694,8 @@ type Exchange struct {
 	CandleDurs       []string               `json:"candleDurs"`
 	ViewOnly         bool                   `json:"viewOnly"`
 	Auth             ExchangeAuth           `json:"auth"`
-	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
+	PenaltyThreshold uint32                 `json:"penaltyThreshold"`
+	MaxScore         uint32                 `json:"maxScore"`
 
 	// OLD fields for the legacy registration fee (V0PURGE):
 	RegFees    map[string]*FeeAsset `json:"regFees"`

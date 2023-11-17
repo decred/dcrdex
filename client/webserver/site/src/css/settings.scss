@@ -1,11 +1,10 @@
 div.settings {
-  display: inline-block;
-  width: 500px;
-  text-align: left;
+  min-width: 375px;
 
   & > div {
-    position: relative;
-    padding: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 0;
     border-bottom: 1px solid #7777;
   }
 
@@ -13,8 +12,8 @@ div.settings {
     border-top: 1px solid #7777;
   }
 
-  & > div.form-check {
-    padding-left: 35px;
+  div.form-check {
+    padding-left: 25px;
   }
 
   button {
