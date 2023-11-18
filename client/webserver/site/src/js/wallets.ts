@@ -846,13 +846,14 @@ export default class WalletsPage extends BasePage {
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenParentBox
+      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox
     )
     if (token) {
       const parentAsset = app().assets[token.parentID]
       page.tokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
       page.tokenParentName.textContent = parentAsset.name
-      Doc.show(page.tokenParentBox)
+      page.contractAddress.textContent = token.contractAddress
+      Doc.show(page.tokenInfoBox)
     }
     if (wallet) {
       this.updateDisplayedAssetBalance()

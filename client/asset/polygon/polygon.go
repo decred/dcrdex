@@ -14,16 +14,24 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func init() {
+	dexpolygon.MaybeReadSimnetAddrs()
+}
+
 func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 	token, found := dexpolygon.Tokens[tokenID]
 	if !found {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
 	}
+	netAddrs := make(map[dex.Network]string)
+	for net, netToken := range token.NetTokens {
+		netAddrs[net] = netToken.Address.String()
+	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        walletTypeToken,
 		Tab:         "Polygon token",
 		Description: desc,
-	}, nets...)
+	}, netAddrs)
 }
 
 func init() {

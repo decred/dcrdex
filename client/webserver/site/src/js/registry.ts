@@ -205,6 +205,7 @@ export interface Token {
   parentID: number
   name: string
   unitInfo: UnitInfo
+  contractAddress: string
   definition: WalletDefinition
 }
 
