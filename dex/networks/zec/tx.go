@@ -885,6 +885,21 @@ func (tx *Tx) SerializeSize() uint64 {
 	return sz
 }
 
+// RequiredTxFeesZIP317 calculates the minimum tx fees according to ZIP-0317.
+func (tx *Tx) RequiredTxFeesZIP317() uint64 {
+	txInsSize := uint64(wire.VarIntSerializeSize(uint64(len(tx.TxIn))))
+	for _, txIn := range tx.TxIn {
+		txInsSize += uint64(txIn.SerializeSize())
+	}
+
+	txOutsSize := uint64(wire.VarIntSerializeSize(uint64(len(tx.TxOut))))
+	for _, txOut := range tx.TxOut {
+		txOutsSize += uint64(txOut.SerializeSize())
+	}
+
+	return TxFeesZIP317(txInsSize, txOutsSize, tx.NSpendsSapling, tx.NOutputsSapling, tx.NJoinSplit, tx.NActionsOrchard)
+}
+
 // writeTxIn encodes ti to the bitcoin protocol encoding for a transaction
 // input (TxIn) to w.
 func writeTxIn(w io.Writer, ti *wire.TxIn) error {

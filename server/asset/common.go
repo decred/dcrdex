@@ -85,7 +85,7 @@ type Backend interface {
 	Info() *BackendInfo
 	// ValidateFeeRate checks that the transaction fees used to initiate the
 	// contract are sufficient.
-	ValidateFeeRate(contract *Contract, reqFeeRate uint64) bool
+	ValidateFeeRate(coin Coin, reqFeeRate uint64) bool
 }
 
 // OutputTracker is implemented by backends for UTXO-based blockchains.
@@ -100,6 +100,8 @@ type OutputTracker interface {
 	// with non-standard pkScripts or scripts that require zero signatures to
 	// redeem must return an error.
 	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
+	// ValidateOrderFunding validates that the supplied utxos are enough to fund an order.
+	ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool
 }
 
 // AccountBalancer is implemented by backends for account-based blockchains.
@@ -147,7 +149,7 @@ type Coin interface {
 
 // FundingCoin is some unspent value on the blockchain.
 type FundingCoin interface {
-	Coin
+	Coin() Coin
 	// Auth checks that the owner of the provided pubkeys can spend the
 	// FundingCoin. The signatures (sigs) generated with the private keys
 	// corresponding to pubkeys must validate against the pubkeys and signing

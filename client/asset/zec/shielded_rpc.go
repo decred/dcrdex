@@ -17,6 +17,7 @@ const (
 	methodZSendMany             = "z_sendmany"
 	methodZValidateAddress      = "z_validateaddress"
 	methodZGetOperationResult   = "z_getoperationresult"
+	methodZGetNotesCount        = "z_getnotescount"
 )
 
 type zListAccountsResult struct {
@@ -66,17 +67,43 @@ func zGetUnifiedReceivers(c rpcCaller, unifiedAddr string) (receivers *unifiedRe
 	return receivers, c.CallRPC(methodZListUnifiedReceivers, []any{unifiedAddr}, &receivers)
 }
 
-func zGetBalanceForAccount(c rpcCaller, acct uint32) (uint64, error) {
-	const minConf = 1
+type valZat struct { // Ignoring similar fields for Sapling, Transparent...
+	ValueZat uint64 `json:"valueZat"`
+}
 
-	var res struct {
-		Pools struct {
-			Orchard struct { // Ignoring similar fields for Sapling, Transparent...
-				ValueZat uint64 `json:"valueZat"`
-			} `json:"orchard"`
-		} `json:"pools"`
-	}
-	return res.Pools.Orchard.ValueZat, c.CallRPC(methodZGetBalanceForAccount, []any{acct, minConf}, &res)
+type poolBalances struct {
+	Orchard     uint64 `json:"orchard"`
+	Transparent uint64 `json:"transparent"`
+	Sapling     uint64 `json:"sapling"`
+}
+
+type zBalancePools struct {
+	Orchard     valZat `json:"orchard"`
+	Transparent valZat `json:"transparent"`
+	Sapling     valZat `json:"sapling"`
+}
+
+type zAccountBalance struct {
+	Pools zBalancePools `json:"pools"`
+}
+
+func zGetBalanceForAccount(c rpcCaller, acct uint32, confs int) (*poolBalances, error) {
+	var res zAccountBalance
+	return &poolBalances{
+		Orchard:     res.Pools.Orchard.ValueZat,
+		Transparent: res.Pools.Transparent.ValueZat,
+		Sapling:     res.Pools.Sapling.ValueZat,
+	}, c.CallRPC(methodZGetBalanceForAccount, []any{acct, confs}, &res)
+}
+
+type zNotesCount struct {
+	Sprout  uint32 `json:"sprout"`
+	Sapling uint32 `json:"sapling"`
+	Orchard uint32 `json:"orchard"`
+}
+
+func zGetNotesCount(c rpcCaller) (counts *zNotesCount, _ error) {
+	return counts, c.CallRPC(methodZGetNotesCount, []any{minOrchardConfs}, &counts)
 }
 
 type zValidateAddressResult struct {
@@ -115,16 +142,21 @@ func singleSendManyRecipient(addr string, amt uint64) []*zSendManyRecipient {
 type privacyPolicy string
 
 const (
-	FullPrivacy             privacyPolicy = "FullPrivacy"
-	AllowRevealedRecipients privacyPolicy = "AllowRevealedRecipients"
-	AllowRevealedAmounts    privacyPolicy = "AllowRevealedAmounts"
-	AllowRevealedSenders    privacyPolicy = "AllowRevealedSenders"
+	FullPrivacy                  privacyPolicy = "FullPrivacy"
+	AllowRevealedRecipients      privacyPolicy = "AllowRevealedRecipients"
+	AllowRevealedAmounts         privacyPolicy = "AllowRevealedAmounts"
+	AllowRevealedSenders         privacyPolicy = "AllowRevealedSenders"
+	AllowLinkingAccountAddresses privacyPolicy = "AllowLinkingAccountAddresses"
 )
 
 // z_sendmany "fromaddress" [{"address":... ,"amount":...},...] ( minconf ) ( fee ) ( privacyPolicy )
 func zSendMany(c rpcCaller, fromAddress string, recips []*zSendManyRecipient, priv privacyPolicy) (operationID string, err error) {
 	const minConf, fee = 1, 0.00001
 	return operationID, c.CallRPC(methodZSendMany, []any{fromAddress, recips, minConf, fee, priv}, &operationID)
+}
+
+type opResult struct {
+	TxID string `json:"txid"`
 }
 
 type operationStatus struct {
@@ -135,11 +167,9 @@ type operationStatus struct {
 		Code    int32  `json:"code"`
 		Message string `json:"message"`
 	} `json:"error" `
-	Result *struct {
-		TxID string `json:"txid"`
-	} `json:"result"`
-	ExecutionSeconds float64 `json:"execution_secs"`
-	Method           string  `json:"method"`
+	Result           *opResult `json:"result"`
+	ExecutionSeconds float64   `json:"execution_secs"`
+	Method           string    `json:"method"`
 	Params           struct {
 		FromAddress string `json:"fromaddress"`
 		Amounts     []struct {

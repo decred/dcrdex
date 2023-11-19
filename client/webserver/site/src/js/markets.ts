@@ -2520,7 +2520,7 @@ export default class MarketsPage extends BasePage {
     const tier = strongTier(auth)
     page.tradingTier.textContent = String(tier)
     const [usedParcels, parcelLimit] = tradingLimits(host)
-    page.tradingLimit.textContent = String(parcelLimit * mkt.parcelsize)
+    page.tradingLimit.textContent = (parcelLimit * mkt.parcelsize).toFixed(2)
     page.limitUsage.textContent = parcelLimit > 0 ? (usedParcels / parcelLimit * 100).toFixed(1) : '0'
 
     page.orderLimitRemain.textContent = ((parcelLimit - usedParcels) * mkt.parcelsize).toFixed(1)
@@ -3390,7 +3390,6 @@ class BalanceWidget {
         side.parentBal = balTmpl.bal
       }
     }
-
     addRow(intl.prep(intl.ID_AVAILABLE), bal.available, asset.unitInfo)
     addRow(intl.prep(intl.ID_LOCKED), bal.locked + bal.contractlocked + bal.bondlocked, asset.unitInfo)
     addRow(intl.prep(intl.ID_IMMATURE), bal.immature, asset.unitInfo)

@@ -68,23 +68,21 @@ type electrumNetworkClient interface {
 }
 
 type electrumWallet struct {
-	log           dex.Logger
-	chainParams   *chaincfg.Params
-	decodeAddr    dexbtc.AddressDecoder
-	stringAddr    dexbtc.AddressStringer
-	deserializeTx func([]byte) (*wire.MsgTx, error)
-	serializeTx   func(*wire.MsgTx) ([]byte, error)
-	rpcCfg        *RPCConfig // supports live reconfigure check
-	wallet        electrumWalletClient
-	chainV        atomic.Value // electrumNetworkClient
-	segwit        bool
+	log         dex.Logger
+	chainParams *chaincfg.Params
+	decodeAddr  dexbtc.AddressDecoder
+	stringAddr  dexbtc.AddressStringer
+	rpcCfg      *RPCConfig // supports live reconfigure check
+	wallet      electrumWalletClient
+	chainV      atomic.Value // electrumNetworkClient
+	segwit      bool
 
 	// ctx is set on connect, and used in asset.Wallet and btc.Wallet interface
 	// method implementations that have no ctx arg yet (refactoring TODO).
 	ctx context.Context
 
 	lockedOutpointsMtx sync.RWMutex
-	lockedOutpoints    map[outPoint]struct{}
+	lockedOutpoints    map[OutPoint]struct{}
 
 	pwMtx    sync.RWMutex
 	pw       string
@@ -101,14 +99,12 @@ func (ew *electrumWallet) resetChain(cl electrumNetworkClient) {
 }
 
 type electrumWalletConfig struct {
-	params         *chaincfg.Params
-	log            dex.Logger
-	addrDecoder    dexbtc.AddressDecoder
-	addrStringer   dexbtc.AddressStringer
-	txDeserializer func([]byte) (*wire.MsgTx, error)
-	txSerializer   func(*wire.MsgTx) ([]byte, error)
-	segwit         bool // indicates if segwit addresses are expected from requests
-	rpcCfg         *RPCConfig
+	params       *chaincfg.Params
+	log          dex.Logger
+	addrDecoder  dexbtc.AddressDecoder
+	addrStringer dexbtc.AddressStringer
+	segwit       bool // indicates if segwit addresses are expected from requests
+	rpcCfg       *RPCConfig
 }
 
 func newElectrumWallet(ew electrumWalletClient, cfg *electrumWalletConfig) *electrumWallet {
@@ -124,29 +120,18 @@ func newElectrumWallet(ew electrumWalletClient, cfg *electrumWalletConfig) *elec
 		}
 	}
 
-	txDeserializer := cfg.txDeserializer
-	if txDeserializer == nil {
-		txDeserializer = msgTxFromBytes
-	}
-	txSerializer := cfg.txSerializer
-	if txSerializer == nil {
-		txSerializer = serializeMsgTx
-	}
-
 	return &electrumWallet{
-		log:           cfg.log,
-		chainParams:   cfg.params,
-		decodeAddr:    addrDecoder,
-		stringAddr:    addrStringer,
-		deserializeTx: txDeserializer,
-		serializeTx:   txSerializer,
-		wallet:        ew,
-		segwit:        cfg.segwit,
+		log:         cfg.log,
+		chainParams: cfg.params,
+		decodeAddr:  addrDecoder,
+		stringAddr:  addrStringer,
+		wallet:      ew,
+		segwit:      cfg.segwit,
 		// TODO: remove this when all interface methods are given a Context. In
 		// the meantime, init with a valid sentry context until connect().
 		ctx: context.TODO(),
 		// chain is constructed after wallet connects to a server
-		lockedOutpoints: make(map[outPoint]struct{}),
+		lockedOutpoints: make(map[OutPoint]struct{}),
 		rpcCfg:          cfg.rpcCfg,
 	}
 }
@@ -376,7 +361,7 @@ func (ew *electrumWallet) reconfigure(cfg *asset.WalletConfig, currentAddress st
 
 // part of btc.Wallet interface
 func (ew *electrumWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
-	b, err := ew.serializeTx(tx)
+	b, err := serializeMsgTx(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -396,10 +381,10 @@ func (ew *electrumWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, e
 	if err != nil {
 		return nil, err // well that sucks, it's already sent
 	}
-	ops := make([]*output, len(tx.TxIn))
+	ops := make([]*Output, len(tx.TxIn))
 	for i, txIn := range tx.TxIn {
 		prevOut := txIn.PreviousOutPoint
-		ops[i] = &output{pt: newOutPoint(&prevOut.Hash, prevOut.Index)}
+		ops[i] = &Output{Pt: NewOutPoint(&prevOut.Hash, prevOut.Index)}
 	}
 	if err = ew.lockUnspent(true, ops); err != nil {
 		ew.log.Errorf("Failed to unlock spent UTXOs: %v", err)
@@ -464,7 +449,7 @@ func (ew *electrumWallet) getTxOutput(ctx context.Context, txHash *chainhash.Has
 		}
 	}
 
-	msgTx, err := ew.deserializeTx(txRaw)
+	msgTx, err := msgTxFromBytes(txRaw)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -594,7 +579,7 @@ func (ew *electrumWallet) getBestBlockHeight() (int32, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) getBestBlockHeader() (*blockHeader, error) {
+func (ew *electrumWallet) getBestBlockHeader() (*BlockHeader, error) {
 	inf, err := ew.wallet.GetInfo(ew.ctx)
 	if err != nil {
 		return nil, err
@@ -605,7 +590,7 @@ func (ew *electrumWallet) getBestBlockHeader() (*blockHeader, error) {
 		return nil, err
 	}
 
-	header := &blockHeader{
+	header := &BlockHeader{
 		Hash:              hdr.BlockHash().String(),
 		Height:            inf.SyncHeight,
 		Confirmations:     1, // it's the head
@@ -710,20 +695,20 @@ func (ew *electrumWallet) listUnspent() ([]*ListUnspentResult, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) lockUnspent(unlock bool, ops []*output) error {
+func (ew *electrumWallet) lockUnspent(unlock bool, ops []*Output) error {
 	eUnspent, err := ew.wallet.ListUnspent(ew.ctx)
 	if err != nil {
 		return err
 	}
-	opMap := make(map[outPoint]struct{}, len(ops))
+	opMap := make(map[OutPoint]struct{}, len(ops))
 	for _, op := range ops {
-		opMap[op.pt] = struct{}{}
+		opMap[op.Pt] = struct{}{}
 	}
 	// For the ones that appear in listunspent, use (un)freeze_utxo also.
 unspents:
 	for _, utxo := range eUnspent {
 		for op := range opMap {
-			if op.vout == utxo.PrevOutIdx && op.txHash.String() == utxo.PrevOutHash {
+			if op.Vout == utxo.PrevOutIdx && op.TxHash.String() == utxo.PrevOutHash {
 				// FreezeUTXO and UnfreezeUTXO do not error when called
 				// repeatedly for the same UTXO.
 				if unlock {
@@ -771,8 +756,8 @@ func (ew *electrumWallet) listLockedOutpoints() []*RPCOutpoint {
 	locked := make([]*RPCOutpoint, 0, len(ew.lockedOutpoints))
 	for op := range ew.lockedOutpoints {
 		locked = append(locked, &RPCOutpoint{
-			TxID: op.txHash.String(),
-			Vout: op.vout,
+			TxID: op.TxHash.String(),
+			Vout: op.Vout,
 		})
 	}
 	return locked
@@ -819,7 +804,7 @@ func (ew *electrumWallet) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ew.deserializeTx(signedB)
+	return msgTxFromBytes(signedB)
 }
 
 type hash160er interface {
@@ -976,12 +961,12 @@ func (ew *electrumWallet) ownsAddress(addr btcutil.Address) (bool, error) {
 }
 
 // part of the btc.Wallet interface
-func (ew *electrumWallet) syncStatus() (*syncStatus, error) {
+func (ew *electrumWallet) syncStatus() (*SyncStatus, error) {
 	info, err := ew.wallet.GetInfo(ew.ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &syncStatus{
+	return &SyncStatus{
 		Target:  int32(info.ServerHeight),
 		Height:  int32(info.SyncHeight),
 		Syncing: !info.Connected || info.SyncHeight < info.ServerHeight,
@@ -1019,8 +1004,8 @@ func (ew *electrumWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTran
 	txRaw, confs, err := ew.checkWalletTx(txid)
 	if err == nil && confs == 0 {
 		return &GetTransactionResult{
-			TxID: txid,
-			Hex:  txRaw,
+			TxID:  txid,
+			Bytes: txRaw,
 			// Time/TimeReceived? now? needed?
 		}, nil
 	} // else we have to ask a server for the verbose response with block info
@@ -1041,7 +1026,7 @@ func (ew *electrumWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTran
 		TxID:         txInfo.TxID, // txHash.String()
 		Time:         uint64(txInfo.Time),
 		TimeReceived: uint64(txInfo.Time),
-		Hex:          txRaw,
+		Bytes:        txRaw,
 	}, nil
 }
 
@@ -1053,7 +1038,7 @@ func (ew *electrumWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32,
 	// Try the wallet first in case this is a wallet transaction (own swap).
 	txRaw, confs, err := ew.checkWalletTx(txid)
 	if err == nil {
-		msgTx, err := ew.deserializeTx(txRaw)
+		msgTx, err := msgTxFromBytes(txRaw)
 		if err != nil {
 			return 0, false, err
 		}
@@ -1104,7 +1089,7 @@ func (ew *electrumWallet) outPointAddress(ctx context.Context, txid string, vout
 	if err != nil {
 		return "", err
 	}
-	msgTx, err := ew.deserializeTx(txRaw)
+	msgTx, err := msgTxFromBytes(txRaw)
 	if err != nil {
 		return "", err
 	}
@@ -1158,7 +1143,7 @@ func (ew *electrumWallet) findOutputSpender(ctx context.Context, txHash *chainha
 				io.TxHash, addr, err)
 			continue
 		}
-		msgTx, err := ew.deserializeTx(txRaw)
+		msgTx, err := msgTxFromBytes(txRaw)
 		if err != nil {
 			ew.log.Warnf("Unable to decode transaction %v for address %v: %v",
 				io.TxHash, addr, err)

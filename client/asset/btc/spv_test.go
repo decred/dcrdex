@@ -237,7 +237,7 @@ func (c *tBtcWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 		return nil, WalletTransactionNotFound
 	}
 
-	tx, _ := msgTxFromBytes(txData.Hex)
+	tx, _ := msgTxFromBytes(txData.Bytes)
 	blockHash, _ := chainhash.NewHashFromStr(txData.BlockHash)
 
 	blk := c.getBlock(txData.BlockHash)
@@ -263,7 +263,7 @@ func (c *tBtcWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 		// in order to get accurate Fees and Amounts when calling GetWalletTransaction
 		// when using the SPV wallet.
 		if gtr := c.getTransactionMap[in.PreviousOutPoint.Hash.String()]; gtr != nil {
-			tx, _ := msgTxFromBytes(gtr.Hex)
+			tx, _ := msgTxFromBytes(gtr.Bytes)
 			debitAmount = tx.TxOut[in.PreviousOutPoint.Index].Value
 		}
 
@@ -467,7 +467,7 @@ func TestSwapConfirmations(t *testing.T) {
 	swapTx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
 	swapTxHash := swapTx.TxHash()
 	const vout = 0
-	swapOutPt := newOutPoint(&swapTxHash, vout)
+	swapOutPt := NewOutPoint(&swapTxHash, vout)
 	swapBlockHash, _ := node.addRawTx(swapHeight, swapTx)
 
 	spendTx := dummyTx()
@@ -511,7 +511,7 @@ func TestSwapConfirmations(t *testing.T) {
 		"any": {
 			BlockHash:  swapBlockHash.String(),
 			BlockIndex: swapHeight,
-			Hex:        txB,
+			Bytes:      txB,
 		}}
 	node.walletTxSpent = true
 	checkSuccess("confirmations", swapConfs, true)
@@ -622,7 +622,7 @@ func TestGetTxOut(t *testing.T) {
 	const tipHeight = 20
 	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
 	txHash := tx.TxHash()
-	outPt := newOutPoint(&txHash, vout)
+	outPt := NewOutPoint(&txHash, vout)
 	blockHash, _ := node.addRawTx(blockHeight, tx)
 	txB, _ := serializeMsgTx(tx)
 	node.addRawTx(tipHeight, dummyTx())
@@ -646,7 +646,7 @@ func TestGetTxOut(t *testing.T) {
 	node.getTransactionErr = nil
 	node.getTransactionMap = map[string]*GetTransactionResult{"any": {
 		BlockHash: blockHash.String(),
-		Hex:       txB,
+		Bytes:     txB,
 	}}
 
 	_, confs, err := spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
@@ -750,15 +750,15 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 	// (*spvWallet).getBestBlockHeader -> (*spvWallet).getBlockHeader -> (*testData).getBlock [verboseBlocks]
 
 	var tipHeight int64
-	addBlock := func() *block { // update the mainchain and verboseBlocks testData fields
+	addBlock := func() *BlockVector { // update the mainchain and verboseBlocks testData fields
 		tipHeight++
 		h, _ := node.addRawTx(tipHeight, dummyTx())
-		return &block{tipHeight, *h}
+		return &BlockVector{tipHeight, *h}
 	}
 
 	// Start with no blocks so that we're not synced.
 	node.blockchainMtx.Lock()
-	node.getBlockchainInfo = &getBlockchainInfoResult{
+	node.getBlockchainInfo = &GetBlockchainInfoResult{
 		Headers: 3,
 		Blocks:  0,
 	}
@@ -792,7 +792,7 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 	// allowance.
 	addBlock()
 	node.blockchainMtx.Lock()
-	node.getBlockchainInfo = &getBlockchainInfoResult{
+	node.getBlockchainInfo = &GetBlockchainInfoResult{
 		Headers: tipHeight,
 		Blocks:  tipHeight,
 	}

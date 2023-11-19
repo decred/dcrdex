@@ -28,7 +28,7 @@ type Wallet interface {
 	medianTime() (time.Time, error)
 	balances() (*GetBalancesResult, error)
 	listUnspent() ([]*ListUnspentResult, error) // must not return locked coins
-	lockUnspent(unlock bool, ops []*output) error
+	lockUnspent(unlock bool, ops []*Output) error
 	listLockUnspent() ([]*RPCOutpoint, error)
 	changeAddress() (btcutil.Address, error) // warning: don't just use the Stringer if there's a "recode" function for a clone e.g. BCH
 	externalAddress() (btcutil.Address, error)
@@ -37,10 +37,10 @@ type Wallet interface {
 	walletUnlock(pw []byte) error
 	walletLock() error
 	locked() bool
-	syncStatus() (*syncStatus, error)
+	syncStatus() (*SyncStatus, error)
 	peerCount() (uint32, error)
 	swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error)
-	getBestBlockHeader() (*blockHeader, error)
+	getBestBlockHeader() (*BlockHeader, error)
 	ownsAddress(addr btcutil.Address) (bool, error) // this should probably just take a string
 	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
 	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
@@ -53,10 +53,10 @@ type txLister interface {
 type tipRedemptionWallet interface {
 	Wallet
 	getBlockHeight(*chainhash.Hash) (int32, error)
-	getBlockHeader(blockHash *chainhash.Hash) (hdr *blockHeader, mainchain bool, err error)
+	getBlockHeader(blockHash *chainhash.Hash) (hdr *BlockHeader, mainchain bool, err error)
 	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
-	searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
-	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
+	searchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq, blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult)
+	findRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult)
 }
 
 type txFeeEstimator interface {
@@ -73,30 +73,28 @@ type walletTxChecker interface {
 // tipNotifier can be implemented if the Wallet is able to provide a stream of
 // blocks as they are finished being processed.
 type tipNotifier interface {
-	tipFeed() <-chan *block
-}
-
-// chainStamper is a source of the timestamp and the previous block hash for a
-// specified block. A chainStamper is used to manually calculate the median time
-// for a block.
-type chainStamper interface {
-	getChainStamp(*chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error)
+	tipFeed() <-chan *BlockVector
 }
 
 const medianTimeBlocks = 11
 
-// calcMedianTime calculates the median time of the previous 11 block headers.
+// chainStamper is a source of the timestamp and the previous block hash for a
+// specified block. A chainStamper is used to manually calculate the median time
+// for a block.
+type chainStamper func(*chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error)
+
+// CalcMedianTime calculates the median time of the previous 11 block headers.
 // The median time is used for validating time-locked transactions. See notes in
 // btcd/blockchain (*blockNode).CalcPastMedianTime() regarding incorrectly
 // calculated median time for blocks 1, 3, 5, 7, and 9.
-func calcMedianTime(stamper chainStamper, blockHash *chainhash.Hash) (time.Time, error) {
+func CalcMedianTime(stamper chainStamper, blockHash *chainhash.Hash) (time.Time, error) {
 	timestamps := make([]int64, 0, medianTimeBlocks)
 
 	zeroHash := chainhash.Hash{}
 
 	h := blockHash
 	for i := 0; i < medianTimeBlocks; i++ {
-		stamp, prevHash, err := stamper.getChainStamp(h)
+		stamp, prevHash, err := stamper(h)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("BlockHeader error for hash %q: %v", h, err)
 		}

@@ -362,7 +362,7 @@ func MakeContract(rAddr, sAddr btcutil.Address, secretHash []byte, lockTime int6
 	} else {
 		_, ok := rAddr.(*btcutil.AddressPubKeyHash)
 		if !ok {
-			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", rAddr.String())
+			return nil, fmt.Errorf("recipient address %s is not a pubkey-hash address", rAddr.String())
 		}
 		_, ok = sAddr.(*btcutil.AddressPubKeyHash)
 		if !ok {
@@ -413,12 +413,12 @@ func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 }
 
 // IsDustVal is like IsDust but only takes the txSize, amount and if segwit.
-func IsDustVal(txSize, value, minRelayTxFee uint64, segwit bool) bool {
-	totalSize := txSize + 41
+func IsDustVal(txOutSize, value, minRelayTxFee uint64, segwit bool) bool {
+	totalSize := txOutSize + 41
 	if segwit {
 		// This function is taken from btcd, but noting here that we are not
 		// rounding up and probably should be.
-		totalSize += (107 / witnessWeight)
+		totalSize += (107 / witnessWeight) // + 26
 	} else {
 		totalSize += 107
 	}

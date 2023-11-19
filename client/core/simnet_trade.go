@@ -1225,6 +1225,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 	var waitedForOtherSideMakerInit, waitedForOtherSideTakerInit bool
 
 	tryUntil(s.ctx, maxTradeDuration, func() bool {
+
 		var completedTrades int
 		mineAssets := make(map[uint32]uint32)
 		var waitForOtherSideMakerInit, waitForOtherSideTakerInit bool
@@ -1306,6 +1307,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 				logIt("redeem", assetID, nBlocks)
 			}
 		}
+
 		finish := completedTrades == len(tracker.matches)
 		// Do not hold the lock while mining as this hinders trades.
 		tracker.mtx.Unlock()
@@ -1460,7 +1462,7 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 
 	// allow up to 30 seconds for core to get around to refunding the swaps
 	var notRefundedSwaps int
-	refundWaitTimeout := 30 * time.Second
+	refundWaitTimeout := 60 * time.Second
 	refundedSwaps := tryUntil(ctx, refundWaitTimeout, func() bool {
 		tracker.mtx.RLock()
 		defer tracker.mtx.RUnlock()
@@ -1799,7 +1801,17 @@ func dgbWallet(node string) (*tWallet, error) {
 }
 
 func zecWallet(node string) (*tWallet, error) {
-	return btcCloneWallet(zec.BipID, node, WTCoreClone)
+	if node == "alpha" {
+		return nil, errors.New("cannot use alpha wallet on Zcash")
+	}
+	cfg, err := config.Parse(filepath.Join(dextestDir, "zec", node, node+".conf"))
+	if err != nil {
+		return nil, err
+	}
+	return &tWallet{
+		walletType: "zcashdRPC",
+		config:     cfg,
+	}, nil
 }
 
 func zclWallet(node string) (*tWallet, error) {
@@ -1941,6 +1953,7 @@ func (s *simulationTest) registerDEX(client *simulationClient) error {
 	}
 	dexFee := feeAsset.Amt
 
+	// TODO: Use bonds.
 	// connect dex and pay fee
 	regRes, err := client.core.Register(&RegisterForm{
 		Addr:    dexHost,

@@ -132,6 +132,7 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 
 	return &ZECBackend{
 		Backend:    be,
+		log:        cfg.Logger,
 		addrParams: addrParams,
 		btcParams:  btcParams,
 	}, nil
@@ -141,6 +142,7 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 // with Zcash address translation.
 type ZECBackend struct {
 	*btc.Backend
+	log        dex.Logger
 	btcParams  *chaincfg.Params
 	addrParams *dexzec.AddressParams
 }
@@ -165,6 +167,35 @@ func (be *ZECBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Contr
 // guarantee the tx get over the legacy 0.00001 standard tx fee.
 func (be *ZECBackend) FeeRate(context.Context) (uint64, error) {
 	return dexzec.LegacyFeeRate, nil
+}
+
+func (*ZECBackend) ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize, maxSwaps uint64, _ *dex.Asset) bool {
+	reqVal := dexzec.RequiredOrderFunds(swapVal, inputCount, inputsSize, maxSwaps)
+	return valSum >= reqVal
+}
+
+func (be *ZECBackend) ValidateFeeRate(ci asset.Coin, reqFeeRate uint64) bool {
+	c, is := ci.(interface {
+		InputsValue() uint64
+		RawTx() []byte
+	})
+	if !is {
+		be.log.Error("ValidateFeeRate contract does not implement TXIO methods")
+		return false
+	}
+	tx, err := dexzec.DeserializeTx(c.RawTx())
+	if err != nil {
+		be.log.Errorf("error deserializing tx for fee validation: %v", err)
+		return false
+	}
+
+	fees, err := newFeeTx(tx).Fees(c.InputsValue())
+	if err != nil {
+		be.log.Errorf("error calculating tx fees: %v", err)
+		return false
+	}
+
+	return fees >= tx.RequiredTxFeesZIP317()
 }
 
 func blockFeeTransactions(rc *btc.RPCClient, blockHash *chainhash.Hash) (feeTxs []btc.FeeTx, prevBlock chainhash.Hash, err error) {
@@ -253,12 +284,20 @@ func (tx *feeTx) FeeRate(prevOuts map[chainhash.Hash]map[int]int64) (uint64, err
 		}
 		transparentIn += uint64(prevOutValue)
 	}
+	fees, err := tx.Fees(transparentIn)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(math.Round(float64(fees) / float64(tx.size))), nil
+}
+
+func (tx *feeTx) Fees(transparentIn uint64) (uint64, error) {
 	in := tx.shieldedIn + transparentIn
 	out := tx.shieldedOut + tx.transparentOut
 	if out > in {
 		return 0, fmt.Errorf("out > in. %d > %d", out, in)
 	}
-	return uint64(math.Round(float64(in-out) / float64(tx.size))), nil
+	return in - out, nil
 }
 
 func shieldedIO(tx *btc.VerboseTxExtended) (in, out uint64, err error) {

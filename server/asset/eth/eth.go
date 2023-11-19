@@ -516,8 +516,7 @@ func (*baseBackend) Info() *asset.BackendInfo {
 // ValidateFeeRate checks that the transaction fees used to initiate the
 // contract are sufficient. For most assets only the contract.FeeRate() cannot
 // be less than reqFeeRate, but for Eth, the gasTipCap must also be checked.
-func (eth *baseBackend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
-	coin := contract.Coin
+func (eth *baseBackend) ValidateFeeRate(coin asset.Coin, reqFeeRate uint64) bool {
 	sc, ok := coin.(*swapCoin)
 	if !ok {
 		eth.baseLogger.Error("%v contract coin type must be a swapCoin but got %T", eth.baseChainName, sc)
@@ -530,7 +529,7 @@ func (eth *baseBackend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uin
 		return false
 	}
 
-	return contract.FeeRate() >= reqFeeRate
+	return sc.FeeRate() >= reqFeeRate
 }
 
 // BlockChannel creates and returns a new channel on which to receive block

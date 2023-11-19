@@ -506,16 +506,16 @@ func TestValidateFeeRate(t *testing.T) {
 
 	eth, _ := tNewBackend(BipID)
 
-	if !eth.ValidateFeeRate(contract, 100) {
+	if !eth.ValidateFeeRate(contract.Coin, 100) {
 		t.Fatalf("expected valid fee rate, but was not valid")
 	}
 
-	if eth.ValidateFeeRate(contract, 101) {
+	if eth.ValidateFeeRate(contract.Coin, 101) {
 		t.Fatalf("expected invalid fee rate, but was valid")
 	}
 
 	swapCoin.gasTipCap = dexeth.MinGasTipCap - 1
-	if eth.ValidateFeeRate(contract, 100) {
+	if eth.ValidateFeeRate(contract.Coin, 100) {
 		t.Fatalf("expected invalid fee rate, but was valid")
 	}
 }

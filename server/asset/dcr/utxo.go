@@ -302,6 +302,10 @@ type UTXO struct {
 	*Output
 }
 
+func (utxo *UTXO) Coin() asset.Coin {
+	return utxo
+}
+
 // Confirmations returns the number of confirmations on this output's
 // transaction. See also (*Output).Confirmations. This function differs from the
 // Output method in that it is necessary to relocate the utxo after a reorg, it

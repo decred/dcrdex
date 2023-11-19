@@ -59,6 +59,18 @@ func DeserializeBlock(b []byte) (*Block, error) {
 	return zecBlock, nil
 }
 
+func DeserializeBlockHeader(b []byte) (*wire.BlockHeader, error) {
+	zecBlock := &Block{}
+
+	// https://zips.z.cash/protocol/protocol.pdf section 7.6
+	r := bytes.NewReader(b)
+
+	if err := zecBlock.decodeBlockHeader(r); err != nil {
+		return nil, err
+	}
+	return &zecBlock.Header, nil
+}
+
 // See github.com/zcash/zcash CBlockHeader -> SerializeOp
 func (z *Block) decodeBlockHeader(r io.Reader) error {
 	hdr := &z.MsgBlock.Header

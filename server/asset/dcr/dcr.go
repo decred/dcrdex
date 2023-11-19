@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
@@ -445,8 +446,8 @@ func (*Backend) Info() *asset.BackendInfo {
 
 // ValidateFeeRate checks that the transaction fees used to initiate the
 // contract are sufficient.
-func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
-	return contract.FeeRate() >= reqFeeRate
+func (dcr *Backend) ValidateFeeRate(c asset.Coin, reqFeeRate uint64) bool {
+	return c.FeeRate() >= reqFeeRate
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -573,6 +574,11 @@ func ValidateXPub(xpub string) error {
 		return fmt.Errorf("extended key is a private key")
 	}
 	return nil
+}
+
+func (*Backend) ValidateOrderFunding(swapVal, valSum, _, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
+	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, nfo)
+	return valSum >= reqVal
 }
 
 // ValidateCoinID attempts to decode the coinID.

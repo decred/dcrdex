@@ -50,7 +50,7 @@ func DecodeAddress(a string, addrParams *AddressParams, btcParams *chaincfg.Para
 		return btcutil.NewAddressScriptHashFromHash(data, btcParams)
 	}
 
-	return nil, fmt.Errorf("unknown address type %v", addrID)
+	return nil, fmt.Errorf("unknown zec address type %v %v %v", addrID, addrParams.PubKeyHashAddrID, addrParams.ScriptHashAddrID)
 }
 
 // RecodeAddress converts an internal btc address to a Zcash address string.

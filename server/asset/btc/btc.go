@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/account"
@@ -514,6 +515,11 @@ func (btc *Backend) FundingCoin(_ context.Context, coinID []byte, redeemScript [
 	return utxo, nil
 }
 
+func (*Backend) ValidateOrderFunding(swapVal, valSum, _, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
+	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, nfo)
+	return valSum >= reqVal
+}
+
 // ValidateCoinID attempts to decode the coinID.
 func (btc *Backend) ValidateCoinID(coinID []byte) (string, error) {
 	txid, vout, err := decodeCoinID(coinID)
@@ -840,8 +846,8 @@ func (*Backend) Info() *asset.BackendInfo {
 
 // ValidateFeeRate checks that the transaction fees used to initiate the
 // contract are sufficient.
-func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
-	return contract.FeeRate() >= reqFeeRate
+func (btc *Backend) ValidateFeeRate(c asset.Coin, reqFeeRate uint64) bool {
+	return c.FeeRate() >= reqFeeRate
 }
 
 // CheckSwapAddress checks that the given address is parseable, and suitable as
@@ -1193,13 +1199,28 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 		if verboseTx.Vsize > 0 {
 			feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
 		}
-	} else if verboseTx.Size > 0 {
+	} else if verboseTx.Size > 0 && sumIn > sumOut {
 		// For non-segwit transactions, Size = Vsize anyway, so use Size to
 		// cover assets that won't set Vsize in their RPC response.
 		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
-
 	}
-	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate, verboseTx.Raw), nil
+	hash := blockHash
+	if hash == nil {
+		hash = &zeroHash
+	}
+	return &Tx{
+		btc:        btc,
+		blockHash:  *hash,
+		height:     blockHeight,
+		hash:       *txHash,
+		ins:        inputs,
+		outs:       outputs,
+		isCoinbase: isCoinbase,
+		lastLookup: lastLookup,
+		inputSum:   sumIn,
+		feeRate:    feeRate,
+		raw:        verboseTx.Raw,
+	}, nil
 }
 
 // Get information for an unspent transaction output and it's transaction.

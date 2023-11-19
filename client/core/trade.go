@@ -1673,6 +1673,7 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 		}
 		return false
 	}
+
 	if swapLocktimeExpired {
 		return true
 	}
@@ -2390,7 +2391,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 				match.swapErr = err
 			}
 		}
-		errs.add("error sending swap transaction: %v", err)
+		errs.add("error sending %s swap transaction: %v", fromWallet.Symbol, err)
 		return
 	}
 

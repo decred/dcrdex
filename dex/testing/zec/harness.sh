@@ -142,7 +142,7 @@ echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} -conf=alpha.conf \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 \
+  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
   -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
   -printtoconsole; tmux wait-for -S alpha${SYMBOL}" C-m
 
@@ -158,7 +158,7 @@ echo "Starting simnet beta node"
 tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -conf=beta.conf -txindex=1 -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 \
+  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
   -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
   tmux wait-for -S beta${SYMBOL}" C-m
 
@@ -174,7 +174,7 @@ echo "Starting simnet delta node"
 tmux send-keys -t $SESSION:2 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${DELTA_RPC_PORT} -datadir=${DELTA_DIR} -conf=delta.conf -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 \
+  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
   -port=${DELTA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
   tmux wait-for -S delta${SYMBOL}" C-m
 
@@ -190,7 +190,7 @@ echo "Starting simnet gamma node"
 tmux send-keys -t $SESSION:3 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${GAMMA_RPC_PORT} -datadir=${GAMMA_DIR} -conf=gamma.conf -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 \
+  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
   -port=${GAMMA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
   tmux wait-for -S gamma${SYMBOL}" C-m
 sleep 30
@@ -218,7 +218,7 @@ printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOUR
 ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -regtest=1 -conf=\$1.conf \
 -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
--whitelist=127.0.0.0/8 -whitelist=::1 \
+-whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
 -port=\$3 -fallbackfee=0.00001 -printtoconsole
 EOF
 chmod +x "./start-wallet"
@@ -328,10 +328,25 @@ tmux send-keys -t $SESSION:4 "./alpha generate 400${DONE}" C-m\; ${WAIT}
 # Send gamma and delta some coin
 ################################################################################
 
+getaddr () {
+  cd ${HARNESS_DIR}
+  NODE=$1
+  ./${NODE} z_getnewaccount > /dev/null
+  R=$(./${NODE} z_getaddressforaccount 0)
+  UADDR=$(sed -rn 's/.*"address": "([^"]+)".*/\1/p' <<< "${R}")
+  R=$(./${NODE} z_listunifiedreceivers ${UADDR})
+  ADDR=$(sed -rn 's/.*"p2pkh": "([^"]+)".*/\1/p' <<< "${R}")
+  echo $ADDR
+}
+
 ALPHA_ADDR="tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD"
-BETA_ADDR="tmSog4freWuq1aC13yf1996fy4qXPmv3GTB"
-DELTA_ADDR="tmYBxRStK3QCFeML4qJmzuvFCR9Kob82bi8"
-GAMMA_ADDR="tmEWZVKveNfnrdmkgizFWBtD18bnxT1NYFc"
+BETA_ADDR=$(getaddr beta)
+DELTA_ADDR=$(getaddr delta)
+GAMMA_ADDR=$(getaddr gamma)
+
+echo "beta address ${BETA_ADDR}"
+echo "delta address ${DELTA_ADDR}"
+echo "gamma address ${GAMMA_ADDR}"
 
 # Send the lazy wallets some dough.
 echo "Sending 174 ZEC to beta in 8 blocks"

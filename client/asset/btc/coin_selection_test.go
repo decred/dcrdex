@@ -11,75 +11,75 @@ import (
 )
 
 func Test_leastOverFund(t *testing.T) {
-	enough := func(_, sum uint64) (bool, uint64) {
+	enough := func(_, _, sum uint64) (bool, uint64) {
 		return sum >= 10e8, 0
 	}
-	newU := func(amt float64) *compositeUTXO {
-		return &compositeUTXO{
-			utxo: &utxo{
-				amount: uint64(amt) * 1e8,
+	newU := func(amt float64) *CompositeUTXO {
+		return &CompositeUTXO{
+			UTxO: &UTxO{
+				Amount: uint64(amt) * 1e8,
 			},
-			input: &dexbtc.SpendInfo{},
+			Input: &dexbtc.SpendInfo{},
 		}
 	}
 	tests := []struct {
 		name  string
-		utxos []*compositeUTXO
-		want  []*compositeUTXO
+		utxos []*CompositeUTXO
+		want  []*CompositeUTXO
 	}{
 		{
 			"1,3",
-			[]*compositeUTXO{newU(1), newU(8), newU(9)},
-			[]*compositeUTXO{newU(1), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(8), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(9)},
 		},
 		{
 			"1,2",
-			[]*compositeUTXO{newU(1), newU(9)},
-			[]*compositeUTXO{newU(1), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(9)},
 		},
 		{
 			"1,2++",
-			[]*compositeUTXO{newU(2), newU(9)},
-			[]*compositeUTXO{newU(2), newU(9)},
+			[]*CompositeUTXO{newU(2), newU(9)},
+			[]*CompositeUTXO{newU(2), newU(9)},
 		},
 		{
 			"2,3++",
-			[]*compositeUTXO{newU(0), newU(2), newU(9)},
-			[]*compositeUTXO{newU(2), newU(9)},
+			[]*CompositeUTXO{newU(0), newU(2), newU(9)},
+			[]*CompositeUTXO{newU(2), newU(9)},
 		},
 		{
 			"3",
-			[]*compositeUTXO{newU(0), newU(2), newU(10)},
-			[]*compositeUTXO{newU(10)},
+			[]*CompositeUTXO{newU(0), newU(2), newU(10)},
+			[]*CompositeUTXO{newU(10)},
 		},
 		{
 			"subset",
-			[]*compositeUTXO{newU(1), newU(9), newU(11)},
-			[]*compositeUTXO{newU(1), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(9), newU(11)},
+			[]*CompositeUTXO{newU(1), newU(9)},
 		},
 		{
 			"subset small bias",
-			[]*compositeUTXO{newU(3), newU(6), newU(7)},
-			[]*compositeUTXO{newU(3), newU(7)},
+			[]*CompositeUTXO{newU(3), newU(6), newU(7)},
+			[]*CompositeUTXO{newU(3), newU(7)},
 		},
 		{
 			"single exception",
-			[]*compositeUTXO{newU(5), newU(7), newU(11)},
-			[]*compositeUTXO{newU(11)},
+			[]*CompositeUTXO{newU(5), newU(7), newU(11)},
+			[]*CompositeUTXO{newU(11)},
 		},
 		{
 			"1 of 1",
-			[]*compositeUTXO{newU(10)},
-			[]*compositeUTXO{newU(10)},
+			[]*CompositeUTXO{newU(10)},
+			[]*CompositeUTXO{newU(10)},
 		},
 		{
 			"ok nil",
-			[]*compositeUTXO{newU(1), newU(8)},
+			[]*CompositeUTXO{newU(1), newU(8)},
 			nil,
 		},
 		{
 			"ok",
-			[]*compositeUTXO{newU(1)},
+			[]*CompositeUTXO{newU(1)},
 			nil,
 		},
 	}
@@ -87,7 +87,7 @@ func Test_leastOverFund(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := leastOverFund(enough, tt.utxos)
 			sort.Slice(got, func(i int, j int) bool {
-				return got[i].amount < got[j].amount
+				return got[i].Amount < got[j].Amount
 			})
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("subset() = %v, want %v", got, tt.want)
@@ -97,33 +97,33 @@ func Test_leastOverFund(t *testing.T) {
 }
 
 func Test_leastOverFundWithLimit(t *testing.T) {
-	enough := func(_, sum uint64) (bool, uint64) {
+	enough := func(_, _, sum uint64) (bool, uint64) {
 		return sum >= 10e8, 0
 	}
-	newU := func(amt float64) *compositeUTXO {
-		return &compositeUTXO{
-			utxo: &utxo{
-				amount: uint64(amt) * 1e8,
+	newU := func(amt float64) *CompositeUTXO {
+		return &CompositeUTXO{
+			UTxO: &UTxO{
+				Amount: uint64(amt) * 1e8,
 			},
-			input: &dexbtc.SpendInfo{},
+			Input: &dexbtc.SpendInfo{},
 		}
 	}
 	tests := []struct {
 		name  string
 		limit uint64
-		utxos []*compositeUTXO
-		want  []*compositeUTXO
+		utxos []*CompositeUTXO
+		want  []*CompositeUTXO
 	}{
 		{
 			"1,3",
 			10e8,
-			[]*compositeUTXO{newU(1), newU(8), newU(9)},
-			[]*compositeUTXO{newU(1), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(8), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(9)},
 		},
 		{
 			"max fund too low",
 			9e8,
-			[]*compositeUTXO{newU(1), newU(8), newU(9)},
+			[]*CompositeUTXO{newU(1), newU(8), newU(9)},
 			nil,
 		},
 	}
@@ -131,7 +131,7 @@ func Test_leastOverFundWithLimit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := leastOverFundWithLimit(enough, tt.limit, tt.utxos)
 			sort.Slice(got, func(i int, j int) bool {
-				return got[i].amount < got[j].amount
+				return got[i].Amount < got[j].Amount
 			})
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("subset() = %v, want %v", got, tt.want)
@@ -160,12 +160,12 @@ func Fuzz_leastOverFund(f *testing.F) {
 		f.Add(seed.amt, seed.n)
 	}
 
-	newU := func(amt float64) *compositeUTXO {
-		return &compositeUTXO{
-			utxo: &utxo{
-				amount: uint64(amt * 1e8),
+	newU := func(amt float64) *CompositeUTXO {
+		return &CompositeUTXO{
+			UTxO: &UTxO{
+				Amount: uint64(amt * 1e8),
 			},
-			input: &dexbtc.SpendInfo{},
+			Input: &dexbtc.SpendInfo{},
 		}
 	}
 
@@ -177,7 +177,7 @@ func Fuzz_leastOverFund(f *testing.F) {
 			t.Skip()
 		}
 		m := 2 * amt / uint64(n)
-		utxos := make([]*compositeUTXO, n)
+		utxos := make([]*CompositeUTXO, n)
 		for i := range utxos {
 			var v float64
 			if rand.Intn(2) > 0 {
@@ -192,7 +192,7 @@ func Fuzz_leastOverFund(f *testing.F) {
 			utxos[i] = newU(v)
 		}
 		startTime := time.Now()
-		enough := func(_, sum uint64) (bool, uint64) {
+		enough := func(_, _, sum uint64) (bool, uint64) {
 			return sum >= amt*1e8, 0
 		}
 		leastOverFund(enough, utxos)
@@ -206,19 +206,19 @@ func Fuzz_leastOverFund(f *testing.F) {
 func BenchmarkLeastOverFund(b *testing.B) {
 	// Same amounts every time.
 	rnd := rand.New(rand.NewSource(1))
-	utxos := make([]*compositeUTXO, 2_000)
+	utxos := make([]*CompositeUTXO, 2_000)
 	for i := range utxos {
-		utxo := &compositeUTXO{
-			utxo: &utxo{
-				amount: uint64(rnd.Int31n(100) * 1e8),
+		utxo := &CompositeUTXO{
+			UTxO: &UTxO{
+				Amount: uint64(rnd.Int31n(100) * 1e8),
 			},
-			input: &dexbtc.SpendInfo{},
+			Input: &dexbtc.SpendInfo{},
 		}
 		utxos[i] = utxo
 	}
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		enough := func(_, sum uint64) (bool, uint64) {
+		enough := func(_, _, sum uint64) (bool, uint64) {
 			return sum >= 10_000*1e8, 0
 		}
 		leastOverFund(enough, utxos)

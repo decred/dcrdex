@@ -152,15 +152,14 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		InitTxSize:               dexbtc.InitTxSize,
 		InitTxSizeBase:           dexbtc.InitTxSizeBase,
 		LegacyBalance:            cfg.Type == walletTypeRPC,
-		LegacyRawFeeLimit:        true,  // sendrawtransaction Has single arg allowhighfees
-		ArglessChangeAddrRPC:     true,  // getrawchangeaddress has No address-type arg
-		OmitAddressType:          true,  // getnewaddress has No address-type arg
-		LegacySignTxRPC:          true,  // No signrawtransactionwithwallet RPC
-		BooleanGetBlockRPC:       true,  // Use bool true/false text for verbose param
-		NumericGetRawRPC:         false, // getrawtransaction uses either 0/1 Or true/false
-		LegacyValidateAddressRPC: true,  // use validateaddress to read 'ismine' bool
-		SingularWallet:           true,  // one wallet/node
-		UnlockSpends:             true,  // Firo chain wallet does Not unlock coins after sendrawtransaction
+		LegacyRawFeeLimit:        true, // sendrawtransaction Has single arg allowhighfees
+		ArglessChangeAddrRPC:     true, // getrawchangeaddress has No address-type arg
+		OmitAddressType:          true, // getnewaddress has No address-type arg
+		LegacySignTxRPC:          true, // No signrawtransactionwithwallet RPC
+		BooleanGetBlockRPC:       true, // Use bool true/false text for verbose param
+		LegacyValidateAddressRPC: true, // use validateaddress to read 'ismine' bool
+		SingularWallet:           true, // one wallet/node
+		UnlockSpends:             true, // Firo chain wallet does Not unlock coins after sendrawtransaction
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     fetchExternalFee,
