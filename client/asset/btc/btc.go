@@ -4828,7 +4828,8 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		baseSize += dexbtc.P2PKHOutputSize
 	}
 
-	coins, _, _, _, _, _, err := btc.cm.Fund(0, 0, true, sendEnough(amt, feeRate, true, uint64(baseSize), btc.segwit, true))
+	const subtract = false
+	coins, _, _, _, _, _, err := btc.cm.Fund(0, 0, true, sendEnough(amt, feeRate, subtract, uint64(baseSize), btc.segwit, true))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to fund bond tx: %w", err)
 	}

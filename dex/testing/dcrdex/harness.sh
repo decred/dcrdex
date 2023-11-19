@@ -305,6 +305,8 @@ fi
 # To avoid the refund tx output being dust, add fee_rate * 118
 # So the total min bond size is = fee_rate * 448
 # Using maxFeeRate of 100, this means min bond size of 44800.
+# Ugh. But if the wallet is a FeeRater, the prevailing fee might be used rather
+# than a fee limited to the server's configured maxFeeRate. Double it. 100000.
 
 cat << EOF >> "./markets.json"
     }
@@ -332,7 +334,7 @@ cat << EOF >> "./markets.json"
             "regConfs": 2,
             "regFee": 20000000,
             "regXPub": "vpub5SLqN2bLY4WeZJ9SmNJHsyzqVKreTXD4ZnPC22MugDNcjhKX5xNX9QiQWcE4SSRzVWyHWUihpKRT7hckDGNzVc69wSX2JPcfGeNiT5c2XZy",
-            "bondAmt": 50000,
+            "bondAmt": 100000,
             "bondConfs": 1,
             "nodeRelayID": "${BTC_NODERELAY_ID}"
 EOF
@@ -455,9 +457,7 @@ if [ $ZEC_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 1,
-            "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf",
-            "bondAmt": 40000000,
-            "bondConfs": 1
+            "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf"
 EOF
 fi
 
