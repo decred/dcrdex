@@ -425,6 +425,13 @@ var originLocale = map[Topic]*translation{
 		subject:  "Account registered",
 		template: "New tier = %d",
 	},
+	// [bond asset, dex host]
+	TopicUnknownBondTierZero: {
+		subject: "Unknown bond found",
+		template: "Unknown %s bonds were found and added to active bonds " +
+			"but your target tier is zero for the dex at %s. Set your " +
+			"target tier in Settings to stay bonded with auto renewals.",
+	},
 }
 
 var ptBR = map[Topic]*translation{

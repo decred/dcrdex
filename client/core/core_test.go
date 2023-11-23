@@ -723,6 +723,8 @@ type TXCWallet struct {
 	refundBondErr               error
 	makeBondTxErr               error
 	reserves                    atomic.Uint64
+	findBond                    *asset.BondDetails
+	findBondErr                 error
 
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
@@ -1107,6 +1109,10 @@ func (w *TXCWallet) SetBondReserves(reserves uint64) {
 
 func (w *TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
 	return w.refundBondCoin, w.refundBondErr
+}
+
+func (w *TXCWallet) FindBond(ctx context.Context, coinID []byte, searchUntil time.Time) (bond *asset.BondDetails, err error) {
+	return w.findBond, w.findBondErr
 }
 
 func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
@@ -2141,6 +2147,8 @@ func TestPostBond(t *testing.T) {
 		clearConn()
 
 		tWallet.setConfs(tWallet.bondTxCoinID, 0, nil)
+		// Skip finding bonds.
+		tWallet.findBondErr = errors.New("purposeful error")
 		_, err = tCore.PostBond(form)
 	}
 
@@ -10810,5 +10818,92 @@ func TestRotateBonds(t *testing.T) {
 	unmergingBond := acct.pendingBonds[0]
 	if unmergingBond.LockTime == acct.bonds[0].LockTime {
 		t.Fatalf("Unmergeable bond was scheduled for merged")
+	}
+}
+
+func TestFindBondKeyIdx(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	rig.core.Login(tPW)
+
+	pkhEqualFnFn := func(find bool) func(bondKey *secp256k1.PrivateKey) bool {
+		return func(bondKey *secp256k1.PrivateKey) bool {
+			return find
+		}
+	}
+	tests := []struct {
+		name       string
+		pkhEqualFn func(bondKey *secp256k1.PrivateKey) bool
+		wantErr    bool
+	}{{
+		name:       "ok",
+		pkhEqualFn: pkhEqualFnFn(true),
+	}, {
+		name:       "cant find",
+		pkhEqualFn: pkhEqualFnFn(false),
+		wantErr:    true,
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := rig.core.findBondKeyIdx(test.pkhEqualFn, 0)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestFindBond(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	rig.core.wallets[tUTXOAssetA.ID] = dcrWallet
+	rig.core.Login(tPW)
+
+	bd := &asset.BondDetails{
+		Bond: &asset.Bond{
+			Amount:  tFee,
+			AssetID: tUTXOAssetA.ID,
+		},
+		LockTime: time.Now(),
+		CheckPrivKey: func(bondKey *secp256k1.PrivateKey) bool {
+			return true
+		},
+	}
+	msgBond := &msgjson.Bond{
+		Version: 0,
+		AssetID: tUTXOAssetA.ID,
+	}
+
+	tests := []struct {
+		name        string
+		findBond    *asset.BondDetails
+		findBondErr error
+		wantStr     uint32
+	}{{
+		name:     "ok",
+		findBond: bd,
+		wantStr:  1,
+	}, {
+		name:        "find bond error",
+		findBondErr: errors.New("some error"),
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tDcrWallet.findBond = test.findBond
+			tDcrWallet.findBondErr = test.findBondErr
+			str, _ := rig.core.findBond(rig.dc, msgBond)
+			if str != test.wantStr {
+				t.Fatalf("wanted str %d but got %d", test.wantStr, str)
+			}
+		})
 	}
 }

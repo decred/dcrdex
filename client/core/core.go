@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -6823,6 +6824,99 @@ func (dc *dexConnection) updateReputation(
 
 }
 
+// findBondKeyIdx will attempt to find the address index whose public key hashes
+// to a specific hash.
+func (c *Core) findBondKeyIdx(pkhEqualFn func(bondKey *secp256k1.PrivateKey) bool, assetID uint32) (idx uint32, err error) {
+	if !c.bondKeysReady() {
+		return 0, errors.New("bond key is not initialized")
+	}
+	nbki, err := c.db.NextBondKeyIndex(assetID)
+	if err != nil {
+		return 0, fmt.Errorf("unable to get next bond key index: %v", err)
+	}
+	maxIdx := nbki + 10_000
+	for i := uint32(0); i < maxIdx; i++ {
+		bondKey, err := c.bondKeyIdx(assetID, i)
+		if err != nil {
+			return 0, fmt.Errorf("error getting bond key at idx %d: %v", i, err)
+		}
+		equal := pkhEqualFn(bondKey)
+		bondKey.Zero()
+		if equal {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("searched until idx %d but did not find a pubkey match", maxIdx)
+}
+
+// findBond will attempt to find an unknown bond and add it to the live bonds
+// slice and db for refunding later. Returns the bond strength if no error.
+func (c *Core) findBond(dc *dexConnection, bond *msgjson.Bond) (strength, bondAssetID uint32) {
+	symb := dex.BipIDSymbol(bond.AssetID)
+	bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
+	c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
+
+	wallet, err := c.connectedWallet(bond.AssetID)
+	if err != nil {
+		c.log.Errorf("%d -> %s wallet error: %w", bond.AssetID, unbip(bond.AssetID), err)
+		return 0, 0
+	}
+
+	// The server will only tell us about active bonds, so we only need
+	// search in the possible active timeframe before that. Server will tell
+	// us when the expiry is, so can subtract from that. Add a day out of
+	// caution.
+	bondExpiry := int64(dc.config().BondExpiry)
+	activeBondTimeframe := minBondLifetime(c.net, bondExpiry) - time.Second*time.Duration(bondExpiry) + time.Second*(60*60*24) // seconds * minutes * hours
+
+	bondDetails, err := wallet.FindBond(c.ctx, bond.CoinID, time.Unix(int64(bond.Expiry), 0).Add(-activeBondTimeframe))
+	if err != nil {
+		c.log.Errorf("Unable to find active bond reported by the server: %v", err)
+		return 0, 0
+	}
+
+	bondAsset, _ := dc.bondAsset(bond.AssetID)
+	if bondAsset == nil {
+		// Probably not possible since the dex told us about it. Keep
+		// going to refund it later.
+		c.log.Warnf("Dex does not support fidelity bonds in asset %s", symb)
+		strength = bond.Strength
+	} else {
+		strength = uint32(bondDetails.Amount / bondAsset.Amt)
+	}
+
+	idx, err := c.findBondKeyIdx(bondDetails.CheckPrivKey, bond.AssetID)
+	if err != nil {
+		c.log.Warnf("Unable to find bond key index for unknown bond %s, will not be able to refund: %v", bondIDStr, err)
+		idx = math.MaxUint32
+	}
+
+	dbBond := &db.Bond{
+		Version:   bondDetails.Version,
+		AssetID:   bondDetails.AssetID,
+		CoinID:    bondDetails.CoinID,
+		Data:      bondDetails.Data,
+		Amount:    bondDetails.Amount,
+		LockTime:  uint64(bondDetails.LockTime.Unix()),
+		KeyIndex:  idx,
+		Strength:  strength,
+		Confirmed: true,
+	}
+
+	err = c.db.AddBond(dc.acct.host, dbBond)
+	if err != nil {
+		c.log.Errorf("Failed to store bond %s (%s) for dex %v: %w",
+			bondIDStr, unbip(bond.AssetID), dc.acct.host, err)
+		return 0, 0
+	}
+
+	dc.acct.authMtx.Lock()
+	dc.acct.bonds = append(dc.acct.bonds, dbBond)
+	dc.acct.authMtx.Unlock()
+	c.log.Infof("Restored unknown bond %s", bondIDStr)
+	return strength, bondDetails.AssetID
+}
+
 func (dc *dexConnection) maxScore() uint32 {
 	if maxScore := dc.config().MaxScore; maxScore > 0 {
 		return maxScore
@@ -7066,14 +7160,33 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		localBondMap[bondKey(dbBond.AssetID, dbBond.CoinID)] = struct{}{}
 	}
 
+	var unknownBondStrength uint32
+	unknownBondAssetID := -1
 	for _, bond := range result.ActiveBonds {
 		key := bondKey(bond.AssetID, bond.CoinID)
 		if _, found := localBondMap[key]; found {
 			continue
 		}
-		symb := dex.BipIDSymbol(bond.AssetID)
-		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
-		c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
+		// Server reported a bond we do not know about.
+		ubs, ubaID := c.findBond(dc, bond)
+		unknownBondStrength += ubs
+		if unknownBondAssetID != -1 && ubs != 0 && uint32(unknownBondAssetID) != ubaID {
+			c.log.Warnf("Found unknown bonds for different assets. %s and %s.",
+				unbip(uint32(unknownBondAssetID)), unbip(ubaID))
+		}
+		if ubs != 0 {
+			unknownBondAssetID = int(ubaID)
+		}
+	}
+
+	// If there were unknown bonds and tier is zero, this may be a restored
+	// client and so requires action by the user to set their target bond
+	// tier. Warn the user of this.
+	if unknownBondStrength > 0 && dc.acct.targetTier == 0 {
+		subject, details := c.formatDetails(TopicUnknownBondTierZero, unbip(uint32(unknownBondAssetID)), dc.acct.host)
+		c.notify(newUnknownBondTierZeroNote(subject, details))
+		c.log.Warnf("Unknown bonds for asset %s found for dex %s while target tier is zero.",
+			unbip(uint32(unknownBondAssetID)), dc.acct.host)
 	}
 
 	// Associate the matches with known trades.

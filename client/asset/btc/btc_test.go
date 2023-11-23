@@ -142,7 +142,7 @@ type testData struct {
 	signMsgFunc   func([]json.RawMessage) (json.RawMessage, error)
 
 	blockchainMtx       sync.RWMutex
-	verboseBlocks       map[string]*msgBlockWithHeight
+	verboseBlocks       map[chainhash.Hash]*msgBlockWithHeight
 	dbBlockForTx        map[chainhash.Hash]*hashEntry
 	mainchain           map[int64]*chainhash.Hash
 	getBlockchainInfo   *GetBlockchainInfoResult
@@ -198,8 +198,8 @@ func newTestData() *testData {
 	genesisHash := chaincfg.MainNetParams.GenesisHash
 	return &testData{
 		txOutRes: newTxOutResult([]byte{}, 1, 0),
-		verboseBlocks: map[string]*msgBlockWithHeight{
-			genesisHash.String(): {msgBlock: &wire.MsgBlock{}},
+		verboseBlocks: map[chainhash.Hash]*msgBlockWithHeight{
+			*genesisHash: {msgBlock: &wire.MsgBlock{}},
 		},
 		dbBlockForTx: make(map[chainhash.Hash]*hashEntry),
 		mainchain: map[int64]*chainhash.Hash{
@@ -215,7 +215,7 @@ func newTestData() *testData {
 	}
 }
 
-func (c *testData) getBlock(blockHash string) *msgBlockWithHeight {
+func (c *testData) getBlock(blockHash chainhash.Hash) *msgBlockWithHeight {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
 	return c.verboseBlocks[blockHash]
@@ -380,8 +380,11 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		if err != nil {
 			return nil, err
 		}
-
-		blk, found := c.verboseBlocks[blockHashStr]
+		blkHash, err := chainhash.NewHashFromStr(blockHashStr)
+		if err != nil {
+			return nil, err
+		}
+		blk, found := c.verboseBlocks[*blkHash]
 		if !found {
 			return nil, fmt.Errorf("block not found")
 		}
@@ -393,9 +396,13 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		return json.Marshal(hex.EncodeToString(buf.Bytes()))
 
 	case methodGetBlockHeader:
-		var blkHash string
-		_ = json.Unmarshal(params[0], &blkHash)
-		block := c.getBlock(blkHash)
+		var blkHashStr string
+		_ = json.Unmarshal(params[0], &blkHashStr)
+		blkHash, err := chainhash.NewHashFromStr(blkHashStr)
+		if err != nil {
+			return nil, err
+		}
+		block := c.getBlock(*blkHash)
 		if block == nil {
 			return nil, fmt.Errorf("no block verbose found")
 		}
@@ -403,7 +410,7 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		c.blockchainMtx.RLock()
 		defer c.blockchainMtx.RUnlock()
 		return json.Marshal(&BlockHeader{
-			Hash:   block.msgBlock.BlockHash().String(),
+			Hash:   blkHash.String(),
 			Height: block.height,
 			// Confirmations: block.Confirmations,
 			// Time:          block.Time,
@@ -515,13 +522,15 @@ func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash,
 		msgBlock := wire.NewMsgBlock(header) // only now do we know the block hash
 		hash := msgBlock.BlockHash()
 		blockHash = &hash
-		c.verboseBlocks[blockHash.String()] = &msgBlockWithHeight{
+		c.verboseBlocks[*blockHash] = &msgBlockWithHeight{
 			msgBlock: msgBlock,
 			height:   blockHeight,
 		}
 		c.mainchain[blockHeight] = blockHash
 	}
-	block := c.verboseBlocks[blockHash.String()]
+	block := c.verboseBlocks[*blockHash]
+	// NOTE: Adding a transaction changes the msgBlock.BlockHash() so the
+	// map key is technically always wrong.
 	block.msgBlock.AddTransaction(tx)
 	return blockHash, block.msgBlock
 }
@@ -539,7 +548,7 @@ func (c *testData) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgBlo
 	if !found {
 		return nil, nil
 	}
-	blk := c.verboseBlocks[blockHash.String()]
+	blk := c.verboseBlocks[*blockHash]
 	return blockHash, blk
 }
 
@@ -547,7 +556,7 @@ func (c *testData) truncateChains() {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
 	c.mainchain = make(map[int64]*chainhash.Hash)
-	c.verboseBlocks = make(map[string]*msgBlockWithHeight)
+	c.verboseBlocks = make(map[chainhash.Hash]*msgBlockWithHeight)
 	c.mempoolTxs = make(map[chainhash.Hash]*wire.MsgTx)
 }
 
@@ -763,6 +772,11 @@ func TestFundMultiOrder(t *testing.T) {
 	runRubric(t, testFundMultiOrder)
 }
 
+func decodeString(s string) []byte {
+	b, _ := hex.DecodeString(s)
+	return b
+}
+
 func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
@@ -772,11 +786,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 
 	txIDs := make([]string, 0, 5)
 	txHashes := make([]*chainhash.Hash, 0, 5)
-
-	decodeString := func(s string) []byte {
-		b, _ := hex.DecodeString(s)
-		return b
-	}
 
 	addresses_legacy := []string{
 		"n235HrCqx9EcS7teHcJEAthoBF5gvtrAoy",
@@ -4732,7 +4741,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 
 	var blockHash100 chainhash.Hash
 	copy(blockHash100[:], encode.RandomBytes(32))
-	node.verboseBlocks[blockHash100.String()] = &msgBlockWithHeight{height: 100, msgBlock: &wire.MsgBlock{
+	node.verboseBlocks[blockHash100] = &msgBlockWithHeight{height: 100, msgBlock: &wire.MsgBlock{
 		Header: wire.BlockHeader{Timestamp: time.Now()},
 	}}
 	node.mainchain[100] = &blockHash100
@@ -6004,4 +6013,162 @@ func TestAddressRecycling(t *testing.T) {
 		t.Fatalf("newly opened wallet didn't load recycled addrs")
 	}
 
+}
+
+func TestFindBond(t *testing.T) {
+	wallet, node, shutdown := tNewWallet(false, walletTypeRPC)
+	defer shutdown()
+
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
+	}
+
+	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
+	bondKey, _ := btcec.PrivKeyFromBytes(privBytes)
+
+	amt := uint64(500_000)
+	acctID := [32]byte{}
+	lockTime := time.Now().Add(time.Hour * 12)
+	utxo := &ListUnspentResult{
+		TxID:          tTxID,
+		Address:       tP2PKHAddr,
+		Amount:        1.0,
+		Confirmations: 1,
+		Spendable:     true,
+		ScriptPubKey:  decodeString("76a914e114d5bb20cdbd75f3726f27c10423eb1332576288ac"),
+	}
+	node.listUnspent = []*ListUnspentResult{utxo}
+	node.changeAddr = tP2PKHAddr
+
+	bond, _, err := wallet.MakeBondTx(0, amt, 200, lockTime, bondKey, acctID[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txRes := func(tx []byte) *GetTransactionResult {
+		return &GetTransactionResult{
+			BlockHash: hex.EncodeToString(randBytes(32)),
+			Bytes:     tx,
+		}
+	}
+
+	newBondTx := func() *wire.MsgTx {
+		msgTx, err := msgTxFromBytes(bond.SignedTx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msgTx
+	}
+	tooFewOutputs := newBondTx()
+	tooFewOutputs.TxOut = tooFewOutputs.TxOut[2:]
+	tooFewOutputsBytes, err := serializeMsgTx(tooFewOutputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	badBondScript := newBondTx()
+	badBondScript.TxOut[1].PkScript = badBondScript.TxOut[1].PkScript[1:]
+	badBondScriptBytes, err := serializeMsgTx(badBondScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	noBondMatch := newBondTx()
+	noBondMatch.TxOut[0].PkScript = noBondMatch.TxOut[0].PkScript[1:]
+	noBondMatchBytes, err := serializeMsgTx(noBondMatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node.addRawTx(1, newBondTx())
+	verboseBlocks := node.verboseBlocks
+	for _, blk := range verboseBlocks {
+		blk.msgBlock.Header.Timestamp = time.Now()
+	}
+
+	tests := []struct {
+		name              string
+		coinID            []byte
+		txRes             *GetTransactionResult
+		bestBlockErr      error
+		getTransactionErr error
+		verboseBlocks     map[chainhash.Hash]*msgBlockWithHeight
+		searchUntil       time.Time
+		wantErr           bool
+	}{{
+		name:   "ok",
+		coinID: bond.CoinID,
+		txRes:  txRes(bond.SignedTx),
+	}, {
+		name:              "ok with find blocks",
+		coinID:            bond.CoinID,
+		getTransactionErr: asset.CoinNotFoundError,
+	}, {
+		name:    "bad coin id",
+		coinID:  make([]byte, 0),
+		txRes:   txRes(bond.SignedTx),
+		wantErr: true,
+	}, {
+		name:    "missing an output",
+		coinID:  bond.CoinID,
+		txRes:   txRes(tooFewOutputsBytes),
+		wantErr: true,
+	}, {
+		name:    "bad bond commitment script",
+		coinID:  bond.CoinID,
+		txRes:   txRes(badBondScriptBytes),
+		wantErr: true,
+	}, {
+		name:    "bond script does not match commitment",
+		coinID:  bond.CoinID,
+		txRes:   txRes(noBondMatchBytes),
+		wantErr: true,
+	}, {
+		name:    "bad msgtx",
+		coinID:  bond.CoinID,
+		txRes:   txRes(bond.SignedTx[1:]),
+		wantErr: true,
+	}, {
+		name:              "get best block error",
+		coinID:            bond.CoinID,
+		getTransactionErr: asset.CoinNotFoundError,
+		bestBlockErr:      errors.New("some error"),
+		wantErr:           true,
+	}, {
+		name:              "block not found",
+		coinID:            bond.CoinID,
+		getTransactionErr: asset.CoinNotFoundError,
+		verboseBlocks:     map[chainhash.Hash]*msgBlockWithHeight{},
+		wantErr:           true,
+	}, {
+		name:              "did not find by search until time",
+		coinID:            bond.CoinID,
+		getTransactionErr: asset.CoinNotFoundError,
+		searchUntil:       time.Now().Add(time.Hour),
+		wantErr:           true,
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			node.getTransactionMap["any"] = test.txRes
+			node.getBestBlockHashErr = test.bestBlockErr
+			node.verboseBlocks = verboseBlocks
+			if test.verboseBlocks != nil {
+				node.verboseBlocks = test.verboseBlocks
+			}
+			bd, err := wallet.FindBond(tCtx, test.coinID, test.searchUntil)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !bd.CheckPrivKey(bondKey) {
+				t.Fatal("pkh not equal")
+			}
+		})
+	}
 }

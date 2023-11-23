@@ -5098,6 +5098,143 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 	return NewOutput(txHash, 0, uint64(msgTx.TxOut[0].Value)), nil
 }
 
+func (btc *baseWallet) decodeV0BondTx(msgTx *wire.MsgTx, txHash *chainhash.Hash, coinID []byte) (*asset.BondDetails, error) {
+	if len(msgTx.TxOut) < 2 {
+		return nil, fmt.Errorf("tx %s is not a v0 bond transaction: too few outputs", txHash)
+	}
+	_, lockTime, pkh, err := dexbtc.ExtractBondCommitDataV0(0, msgTx.TxOut[1].PkScript)
+	if err != nil {
+		return nil, fmt.Errorf("unable to extract bond commitment details from output 1 of %s: %v", txHash, err)
+	}
+	// Sanity check.
+	bondScript, err := dexbtc.MakeBondScript(0, lockTime, pkh[:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to build bond output redeem script: %w", err)
+	}
+	pkScript, err := btc.scriptHashScript(bondScript)
+	if err != nil {
+		return nil, fmt.Errorf("error constructing p2sh script: %v", err)
+	}
+	if !bytes.Equal(pkScript, msgTx.TxOut[0].PkScript) {
+		return nil, fmt.Errorf("bond script does not match commit data for %s: %x != %x",
+			txHash, bondScript, msgTx.TxOut[0].PkScript)
+	}
+	return &asset.BondDetails{
+		Bond: &asset.Bond{
+			Version: 0,
+			AssetID: btc.cloneParams.AssetID,
+			Amount:  uint64(msgTx.TxOut[0].Value),
+			CoinID:  coinID,
+			Data:    bondScript,
+			//
+			// SignedTx and UnsignedTx not populated because this is
+			// an already posted bond and these fields are no longer used.
+			// SignedTx, UnsignedTx []byte
+			//
+			// RedeemTx cannot be populated because we do not have
+			// the private key that only core knows. Core will need
+			// the BondPKH to determine what the private key was.
+			// RedeemTx []byte
+		},
+		LockTime: time.Unix(int64(lockTime), 0),
+		CheckPrivKey: func(bondKey *secp256k1.PrivateKey) bool {
+			pk := bondKey.PubKey().SerializeCompressed()
+			pkhB := btcutil.Hash160(pk)
+			return bytes.Equal(pkh[:], pkhB)
+		},
+	}, nil
+}
+
+// FindBond finds the bond with coinID and returns the values used to create it.
+func (btc *baseWallet) FindBond(_ context.Context, coinID []byte, _ time.Time) (bond *asset.BondDetails, err error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the bond was funded by this wallet or had a change output paying
+	// to this wallet, it should be found here.
+	tx, err := btc.node.getWalletTransaction(txHash)
+	if err != nil {
+		return nil, fmt.Errorf("did not find the bond output %v:%d", txHash, vout)
+	}
+	msgTx, err := btc.deserializeTx(tx.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
+	}
+	return btc.decodeV0BondTx(msgTx, txHash, coinID)
+}
+
+// FindBond finds the bond with coinID and returns the values used to create it.
+// The intermediate wallet is able to brute force finding blocks.
+func (btc *intermediaryWallet) FindBond(
+	ctx context.Context,
+	coinID []byte,
+	searchUntil time.Time,
+) (bond *asset.BondDetails, err error) {
+
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the bond was funded by this wallet or had a change output paying
+	// to this wallet, it should be found here.
+	tx, err := btc.node.getWalletTransaction(txHash)
+	if err == nil {
+		msgTx, err := btc.deserializeTx(tx.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
+		}
+		return btc.decodeV0BondTx(msgTx, txHash, coinID)
+	}
+	if !errors.Is(err, asset.CoinNotFoundError) {
+		btc.log.Warnf("Unexpected error looking up bond output %v:%d", txHash, vout)
+	}
+
+	// The bond was not funded by this wallet or had no change output when
+	// restored from seed. This is not a problem. However, we are unable to
+	// use filters because we don't know any output scripts. Brute force
+	// finding the transaction.
+	bestBlockHdr, err := btc.node.getBestBlockHeader()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get best hash: %v", err)
+	}
+	blockHash, err := chainhash.NewHashFromStr(bestBlockHdr.Hash)
+	if err != nil {
+		return nil, fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
+	}
+	var (
+		blk   *wire.MsgBlock
+		msgTx *wire.MsgTx
+	)
+out:
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("bond search stopped: %w", err)
+		}
+		blk, err = btc.tipRedeemer.getBlock(*blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
+		}
+		if blk.Header.Timestamp.Before(searchUntil) {
+			return nil, fmt.Errorf("searched blocks until %v but did not find the bond tx %s", searchUntil, txHash)
+		}
+		for _, tx := range blk.Transactions {
+			if tx.TxHash() == *txHash {
+				btc.log.Debugf("Found mined tx %s in block %s.", txHash, blk.BlockHash())
+				msgTx = tx
+				break out
+			}
+		}
+		blockHash = &blk.Header.PrevBlock
+		if blockHash == nil {
+			return nil, fmt.Errorf("did not find the bond output %v:%d", txHash, vout)
+		}
+	}
+	return btc.decodeV0BondTx(msgTx, txHash, coinID)
+}
+
 // BondsFeeBuffer suggests how much extra may be required for the transaction
 // fees part of required bond reserves when bond rotation is enabled. The
 // provided fee rate may be zero, in which case the wallet will use it's own

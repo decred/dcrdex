@@ -20,6 +20,7 @@ const (
 	NoteTypeFeePayment   = "feepayment"
 	NoteTypeBondPost     = "bondpost"
 	NoteTypeBondRefund   = "bondrefund"
+	NoteTypeUnknownBond  = "unknownbond"
 	NoteTypeSend         = "send"
 	NoteTypeOrder        = "order"
 	NoteTypeMatch        = "match"
@@ -722,4 +723,13 @@ func newReputationNote(host string, rep account.Reputation) *ReputationNote {
 		Host:         host,
 		Reputation:   rep,
 	}
+}
+
+const TopicUnknownBondTierZero = "UnknownBondTierZero"
+
+// newUnknownBondTierZeroNote is used when unknown bonds are reported by the
+// server while at target tier zero.
+func newUnknownBondTierZeroNote(subject, details string) *db.Notification {
+	note := db.NewNotification(NoteTypeUnknownBond, TopicUnknownBondTierZero, subject, details, db.WarningLevel)
+	return &note
 }

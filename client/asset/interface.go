@@ -585,6 +585,13 @@ type Broadcaster interface {
 	SendTransaction(rawTx []byte) ([]byte, error)
 }
 
+// BondDetails is the return from Bonder.FindBond.
+type BondDetails struct {
+	*Bond
+	LockTime     time.Time
+	CheckPrivKey func(priv *secp256k1.PrivateKey) bool
+}
+
 // Bonder is a wallet capable of creating and redeeming time-locked fidelity
 // bond transaction outputs.
 type Bonder interface {
@@ -614,6 +621,12 @@ type Bonder interface {
 	// RefundBond will refund the bond given the full bond output details and
 	// private key to spend it. The bond is broadcasted.
 	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (Coin, error)
+
+	// FindBond finds the bond with coinID and returns the values used to
+	// create it. The output should be unspent with the lockTime set to
+	// some time in the future. searchUntil is used for some wallets that
+	// are able to pull blocks.
+	FindBond(ctx context.Context, coinID []byte, searchUntil time.Time) (bondDetails *BondDetails, err error)
 
 	// A RefundBondByCoinID may be created in the future to attempt to refund a
 	// bond by locating it on chain, i.e. without providing the amount or
