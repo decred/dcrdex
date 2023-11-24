@@ -17,38 +17,77 @@
 
   <div id="botSettingsContainer" class="d-flex flex-wrap d-hide p-2">
     <div class="col-24 col-xl-8 col-xxl-6 px-3">
-      <div class="d-flex flex-column align-items-stretch pb-2">
-        <div class="text-nowrap me-2 mb-1 fs18 demi">[[[gap_strategy]]]</div>
-        <select id="gapStrategySelect" class="form-select fs18">
-          <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
-          <option value="percent">[[[gap_strategy_percent]]]</option>
-          <option value="absolute-plus">
-            [[[gap_strategy_absolute_plus]]]
-          </option>
-          <option value="absolute">[[[gap_strategy_absolute]]]</option>
-          <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
-        </select>
+      {{- /* VIEW-ONLY MODE */ -}}
+      <div id="viewOnly" class="w-100 d-flex flex-center pb-2 mb-2 fs18 brdrbottom">
+        <span id="onIndicator" class="on-indicator on me-2"></span> [[[bots_running_view_only]]]
       </div>
-      {{- /* STRATEGY DESCRIPTIONS */ -}}
-      <div id="percentPlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify">
-        [[[strategy_percent_plus]]]
+      {{- /* BOT TYPE CONFIGURATION */ -}}
+      <div class="w-100 d-flex flex-column align-items-stretch pb-2">
+        <div id="cexOptsBox" class="w-100 d-flex flex-column align-items-stretch">
+          <div id="cexPrompt" class="flex-center fs18 py-2">[[[select_a_cex_prompt]]]</div>
+          <div id="cexOpts" class="flex-grow-1 d-flex flex-wrap">
+            <div id="cexOptTmpl" class="p-2 col-12 flex-center flex-column brdr rounded3 hoverbg pointer cex-selector">
+              <div class="flex-center lh1">
+                <img data-tmpl="logo" class="mini-icon me-1 xclogo medium">
+                <span data-tmpl="name" class="me-1 fs22"></span>
+              </div>
+              <span data-tmpl="needsconfig" class="fs14 grey flex-center"><span class="ico-settings fs12 me-1"></span> [[[Configure]]]</span>
+              <span data-tmpl="unavailable" class="fs14 grey">[[[Market not available]]]</span>
+            </div>
+          </div>
+        </div>
       </div>
-      <div id="percentInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        [[[strategy_percent]]]
+      {{- /* STRATEGY SELECTION */ -}}
+      <div id="gapStrategyBox" class="w-100">
+        <div class="d-flex flex-column align-items-stretch pb-2">
+          <hr class="dashed pt-2">
+          <div class="text-nowrap me-2 mb-1 fs18 demi">[[[gap_strategy]]]</div>
+          <select id="gapStrategySelect" class="form-select fs18">
+            <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
+            <option value="percent">[[[gap_strategy_percent]]]</option>
+            <option value="absolute-plus">
+              [[[gap_strategy_absolute_plus]]]
+            </option>
+            <option value="absolute">[[[gap_strategy_absolute]]]</option>
+            <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
+          </select>
+        </div>
+        {{- /* STRATEGY DESCRIPTIONS */ -}}
+        <div id="percentPlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify">
+          [[[strategy_percent_plus]]]
+        </div>
+        <div id="percentInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+          [[[strategy_percent]]]
+        </div>
+        <div id="absolutePlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+          [[[strategy_absolute_plus]]]
+        </div>
+        <div id="absoluteInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+          [[[strategy_absolute]]]
+        </div>
+        <div id="multiplierInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
+          [[[strategy_multiplier]]]
+        </div>
       </div>
-      <div id="absolutePlusInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        [[[strategy_absolute_plus]]]
-      </div>
-      <div id="absoluteInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        [[[strategy_absolute]]]
-      </div>
-      <div id="multiplierInfo" class="w-100 pb-2 brdrbottom fs16 text-justify d-hide">
-        [[[strategy_multiplier]]]
-      </div>
-
       <button id="updateButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg brdr pointer">[[[update_settings]]]</button>
       <button id="createButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg brdr pointer d-hide">[[[create_bot]]]</button>
       <button id="resetButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg brdr pointer">[[[reset_settings]]]</button>
+
+      <div id="profitSelectorBox" class="d-flex align-items-stretch py-2 my-2 brdrtop brdrbottom d-hide">
+        <div class="flex-grow-1 d-flex flex-column pe-2">
+          <span id="profitPrompt" class="fs18">[[[bot_profit_title]]]</span>
+          <span class="fs14 mt-1">
+            [[[bot_profit_explainer]]]
+          </span>
+        </div>
+        <div class="w-100 d-flex flex-column align-items-stretch">
+          <div class="flex-center p-3 brdrleft">
+            <input type="number" id="profitInput" class="p-2 text-center fs24 me-1">
+            <span class="fs24">%</span>
+          </div>
+          <div id="profitInputErr" class="flex-center fs16 errcolor"></div>
+        </div>
+      </div>
 
       <div class="d-flex align-items-center fs18 mt-3 demi">
         [[[buy_placements]]]
@@ -135,7 +174,7 @@
           <div id="driftToleranceContainer" class="slider-container"></div>
         </div>
 
-        <div class="settings-card">
+        <div id="oraclesSettingBox" class="settings-card">
           <label for="useOracleCheckbox" class="fs18 d-flex align-items-center w-100">
             <input type="checkbox" id="useOracleCheckbox" class="form-check-input me-2 mt-0" checked>
             <span>[[[use_oracles]]]</span>
@@ -153,6 +192,14 @@
           </div>
         </div>
 
+        <div id="orderPersistenceBox" class="settings-card">
+          <div class="fs18 mb-2">
+            [[[Order persistence]]]
+            <span class="ico-info fs12 me-1" data-tooltip="[[[order_persistence_tooltip]]]"></span>
+          </div>
+          <div id="orderPersistenceContainer" class="slider-container"></div>
+        </div>
+
         <div class="settings-card">
           <label for="emptyMarketRateCheckbox" class="fs18 d-flex align-items-center w-100">
             <input type="checkbox" id="emptyMarketRateCheckbox" class="form-check-input me-2 mt-0" checked>
@@ -162,17 +209,19 @@
           <div id="emptyMarketRateInputBox" class="pt-2 mt-2 brdrtop">
             <input type="number" class="p-2 mt-1" id="emptyMarketRateInput">
           </div>
+          <div id="emptyMarketRateErr" class="pt-2 flex-center errcolor"></div>
         </div>
       </div>
 
       <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
-        <div class="settings-card">
+        <div id="baseBalanceBox" class="settings-card">
           <div class="fs18 d-flex align-items-center">
             <span><img id="baseBalanceLogo" class="micro-icon me-1"> [[[base_asset_balance]]]</span>
             <span class="ico-info fs12 me-1" data-tooltip="[[[base_asset_balance_tooltip]]]"></span>
           </div>
           <span class="d-hide errcolor text-break" id="noBaseBalance">[[[no_balance_available]]]</span>
           <div id="baseBalanceContainer" class="slider-container"></div>
+          <div id="baseBalanceErr" class="flex-center pt-2 errcolor"></div>
         </div>
 
         <div id="baseWalletSettings" class="settings-card">
@@ -197,7 +246,7 @@
       </div>
 
       <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
-        <div class="settings-card">
+        <div id="quoteBalanceBox" class="settings-card">
           <div class="fs18 mb-2 d-flex align-items-center">
             <img id="quoteBalanceLogo" class="micro-icon me-1">
             <span>[[[quote_asset_balance]]]</span>
@@ -205,6 +254,7 @@
           </div>
           <span class="d-hide errcolor text-break" id="noQuoteBalance">[[[no_balance_available]]]</span>
           <div id="quoteBalanceContainer" class="slider-container"></div>
+          <div id="quoteBalanceErr" class="flex-center pt-2 errcolor"></div>
         </div>
         <div id="quoteWalletSettings" class="settings-card">
           <div class="fs18 pb-2 mb-2 brdrbottom d-flex align-items-center">
@@ -262,6 +312,29 @@
         </tbody>
       </table>
     </div>
+  </div>
+
+  <div id="forms" class="d-hide">
+    <form id="cexConfigForm" class="p-0 mw-425">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <div class="fs16 pb-3 px-3">
+        [[[configure_cex_prompt]]]
+      </div>
+      <div class="flex-center flex-column">
+        <img id="cexConfigLogo" class="xclogo large">
+        <div id="cexConfigName" class="mt-2 fs20"></div>
+      </div>
+      <div class="d-flex flex-column mt-3 px-3">
+        <label for="cexApiKeyInput">[[[API Key]]]</label>
+        <input type="text" id="cexApiKeyInput" class="p-2 mt-1">
+      </div>
+      <div class="d-flex flex-column mt-2 px-3 pb-3">
+        <label for="cexSecretInput">[[[API Secret]]]</label>
+        <input type="text" id="cexSecretInput" class="p-2 mt-1">
+      </div>
+      <div id="cexFormErr" class="flex-center p-2 fs16 errcolor d-hide"></div>
+      <div id="cexSubmit" class="flex-center brdrtop hoverbg pointer p-3">[[[Submit]]]</div>
+    </form>
   </div>
 
   <div id="vOrderOpts">{{template "orderOptionTemplates"}}</div>

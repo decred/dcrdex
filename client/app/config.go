@@ -33,6 +33,7 @@ const (
 	defaultWebPort     = "5758"
 	defaultLogLevel    = "debug"
 	configFilename     = "dexc.conf"
+	mmConfigFilename   = "mm.conf"
 )
 
 var (
@@ -211,15 +212,6 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 	}
 }
 
-// MarketMakerConfigPath returns the path to the market maker config file.
-func (cfg *Config) MarketMakerConfigPath() string {
-	if cfg.MMConfig.BotConfigPath != "" {
-		return cfg.MMConfig.BotConfigPath
-	}
-	_, _, mmCfgPath := setNet(cfg.AppData, cfg.Net.String())
-	return mmCfgPath
-}
-
 var DefaultConfig = Config{
 	AppData:    defaultApplicationDirectory,
 	ConfigPath: defaultConfigPath,
@@ -303,17 +295,17 @@ func ResolveConfig(appData string, cfg *Config) error {
 
 	cfg.AppData = appData
 
-	var defaultDBPath, defaultLogPath string
+	var defaultDBPath, defaultLogPath, defaultMMConfigPath string
 	switch {
 	case cfg.Testnet:
 		cfg.Net = dex.Testnet
-		defaultDBPath, defaultLogPath, _ = setNet(appData, "testnet")
+		defaultDBPath, defaultLogPath, defaultMMConfigPath = setNet(appData, "testnet")
 	case cfg.Simnet:
 		cfg.Net = dex.Simnet
-		defaultDBPath, defaultLogPath, _ = setNet(appData, "simnet")
+		defaultDBPath, defaultLogPath, defaultMMConfigPath = setNet(appData, "simnet")
 	default:
 		cfg.Net = dex.Mainnet
-		defaultDBPath, defaultLogPath, _ = setNet(appData, "mainnet")
+		defaultDBPath, defaultLogPath, defaultMMConfigPath = setNet(appData, "mainnet")
 	}
 	defaultHost := DefaultHostByNetwork(cfg.Net)
 
@@ -340,6 +332,10 @@ func ResolveConfig(appData string, cfg *Config) error {
 
 	if cfg.LogPath == "" {
 		cfg.LogPath = defaultLogPath
+	}
+
+	if cfg.MMConfig.BotConfigPath == "" {
+		cfg.MMConfig.BotConfigPath = defaultMMConfigPath
 	}
 
 	if cfg.ReloadHTML {

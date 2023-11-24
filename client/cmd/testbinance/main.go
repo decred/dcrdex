@@ -112,6 +112,14 @@ func runServer() error {
 				free:   1000.2358249,
 				locked: 0,
 			},
+			"zec": {
+				free:   1000.2358249,
+				locked: 0,
+			},
+			"polygon": {
+				free:   1000.2358249,
+				locked: 0,
+			},
 		},
 		withdrawalHistory: make([]*transfer, 0),
 		depositHistory:    make([]*transfer, 0),

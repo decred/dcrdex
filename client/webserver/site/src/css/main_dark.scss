@@ -114,10 +114,12 @@ body.dark {
     border: 1px solid $dark_input_border;
   }
 
-  input:disabled {
+  input:disabled,
+  .form-select:disabled {
     color: $font-color-dark;
-    background-color: #343232;
+    background-color: $dark_body_bg;
     opacity: 1;
+    cursor: not-allowed;
   }
 
   div.popup-notes > span {
@@ -168,6 +170,7 @@ body.dark {
   div[data-handler=dexsettings],
   div[data-handler=markets],
   div[data-handler=mm],
+  div[data-handler=mmsettings],
   div[data-handler=order],
   div[data-handler=orders],
   div[data-handler=settings],

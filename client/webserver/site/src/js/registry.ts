@@ -534,6 +534,7 @@ export interface PageElement extends HTMLElement {
   name?: string
   options?: HTMLOptionElement[]
   selectedIndex?: number
+  disabled?: boolean
 }
 
 export interface BooleanConfig {
@@ -683,6 +684,22 @@ export interface BasicMarketMakingCfg {
   quoteOptions?: Record<string, string>
 }
 
+export interface ArbMarketMakingPlacement {
+  lots: number
+  multiplier: number
+}
+
+export interface ArbMarketMakingCfg {
+  cexName: string
+  buyPlacements: ArbMarketMakingPlacement[]
+  sellPlacements: ArbMarketMakingPlacement[]
+  profit: number
+  driftTolerance: number
+  orderPersistence: number
+  baseOptions?: Record<string, string>
+  quoteOptions?: Record<string, string>
+}
+
 export enum BalanceType {
   Percentage,
   Amount
@@ -690,13 +707,14 @@ export enum BalanceType {
 
 export interface BotConfig {
   host: string
-  baseAsset: number
-  quoteAsset: number
+  baseID: number
+  quoteID: number
   baseBalanceType: BalanceType
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
-  basicMarketMakingConfig: BasicMarketMakingCfg
+  basicMarketMakingConfig?: BasicMarketMakingCfg
+  arbMarketMakingConfig?: ArbMarketMakingCfg
   disabled: boolean
 }
 
@@ -720,6 +738,11 @@ export interface MarketWithHost {
 export interface MarketMakingStatus {
   running: boolean
   runningBots: MarketWithHost[]
+}
+
+export interface CEXMarket {
+  baseID: number
+  quoteID: number
 }
 
 export interface OracleReport {
@@ -902,12 +925,6 @@ export interface Application {
   checkResponse (resp: APIResponse): boolean
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
-  getMarketMakingStatus (): Promise<MarketMakingStatus>
-  stopMarketMaking (): Promise<void>
-  getMarketMakingConfig (): Promise<MarketMakingConfig>
-  updateMarketMakingConfig (cfg: BotConfig): Promise<void>
-  removeMarketMakingConfig (cfg: BotConfig): Promise<void>
-  setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean): void
   txHistory(assetID: number, n: number, after?: string): Promise<TxHistoryResult>
   getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
   clearTxHistory(assetID: number): void

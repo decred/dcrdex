@@ -437,8 +437,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -446,8 +446,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -478,8 +478,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -487,8 +487,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      51,
 					QuoteBalanceType: Percentage,
@@ -510,8 +510,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Amount,
 					BaseBalance:      499,
 					QuoteBalanceType: Percentage,
@@ -519,8 +519,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -551,8 +551,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Amount,
 					BaseBalance:      501,
 					QuoteBalanceType: Percentage,
@@ -560,8 +560,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -583,8 +583,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -599,8 +599,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -660,8 +660,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -676,8 +676,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -714,8 +714,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -731,8 +731,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -795,8 +795,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       0,
+					BaseID:           42,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -812,8 +812,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        42,
-					QuoteAsset:       60,
+					BaseID:           42,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -856,8 +856,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        60001,
-					QuoteAsset:       0,
+					BaseID:           60001,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -873,8 +873,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        966001,
-					QuoteAsset:       60,
+					BaseID:           966001,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -936,8 +936,8 @@ func TestSetupBalances(t *testing.T) {
 			cfgs: []*BotConfig{
 				{
 					Host:             "host1",
-					BaseAsset:        60001,
-					QuoteAsset:       0,
+					BaseID:           60001,
+					QuoteID:          0,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -953,8 +953,8 @@ func TestSetupBalances(t *testing.T) {
 				},
 				{
 					Host:             "host1",
-					BaseAsset:        966001,
-					QuoteAsset:       60,
+					BaseID:           966001,
+					QuoteID:          60,
 					BaseBalanceType:  Percentage,
 					BaseBalance:      50,
 					QuoteBalanceType: Percentage,
@@ -1103,8 +1103,8 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			name: "ok",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -1132,8 +1132,8 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			name: "1 lot",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e6 + 1000,
 				QuoteBalanceType: Amount,
@@ -1161,8 +1161,8 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			name: "not enough for 1 swap",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e6 + 999,
 				QuoteBalanceType: Amount,
@@ -1183,8 +1183,8 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			name: "not enough for 1 lot of redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       60,
+				BaseID:           42,
+				QuoteID:          60,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e6 + 1000,
 				QuoteBalanceType: Amount,
@@ -1205,8 +1205,8 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			name: "redeem fees don't matter if not account locker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e6 + 1000,
 				QuoteBalanceType: Amount,
@@ -1234,8 +1234,8 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			name: "2 lots with refund fees, not account locker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      2e6 + 2000,
 				QuoteBalanceType: Amount,
@@ -1264,8 +1264,8 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 			name: "1 lot with refund fees, account locker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       60,
+				BaseID:           42,
+				QuoteID:          60,
 				BaseBalanceType:  Amount,
 				BaseBalance:      2e6 + 2000,
 				QuoteBalanceType: Amount,
@@ -1311,12 +1311,12 @@ func TestSegregatedCoreMaxSell(t *testing.T) {
 		}
 
 		mkt := dcrBtcID
-		if test.cfg.QuoteAsset == 60 {
+		if test.cfg.QuoteID == 60 {
 			mkt = dcrEthID
 		}
 
 		segregatedCore := mm.wrappedCoreForBot(mkt)
-		res, err := segregatedCore.MaxSell("host1", test.cfg.BaseAsset, test.cfg.QuoteAsset)
+		res, err := segregatedCore.MaxSell("host1", test.cfg.BaseID, test.cfg.QuoteID)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
@@ -1396,8 +1396,8 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			name: "ok",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -1427,8 +1427,8 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			name: "1 lot",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1000,
 				QuoteBalanceType: Amount,
@@ -1458,8 +1458,8 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			name: "not enough for 1 swap",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1000,
 				QuoteBalanceType: Amount,
@@ -1481,8 +1481,8 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			name: "not enough for 1 lot of redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        60,
-				QuoteAsset:       0,
+				BaseID:           60,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      999,
 				QuoteBalanceType: Amount,
@@ -1504,8 +1504,8 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			name: "only account locker affected by redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      999,
 				QuoteBalanceType: Amount,
@@ -1535,8 +1535,8 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			name: "2 lots with refund fees, not account locker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1000,
 				QuoteBalanceType: Amount,
@@ -1567,8 +1567,8 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 			name: "1 lot with refund fees, account locker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        60,
-				QuoteAsset:       0,
+				BaseID:           60,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1000,
 				QuoteBalanceType: Amount,
@@ -1615,11 +1615,11 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 		}
 
 		mkt := dcrBtcID
-		if test.cfg.BaseAsset != 42 {
+		if test.cfg.BaseID != 42 {
 			mkt = ethBtcID
 		}
 		segregatedCore := mm.wrappedCoreForBot(mkt)
-		res, err := segregatedCore.MaxBuy("host1", test.cfg.BaseAsset, test.cfg.QuoteAsset, test.rate)
+		res, err := segregatedCore.MaxBuy("host1", test.cfg.BaseID, test.cfg.QuoteID, test.rate)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
@@ -1703,8 +1703,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "cancelled order, 1/2 lots filled, sell",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -1869,8 +1869,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "cancelled order, 1/2 lots filled, buy",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -2031,8 +2031,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "fully filled order, sell",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -2297,8 +2297,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "fully filled order, buy",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -2510,8 +2510,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "fully filled order, sell, accountLocker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -2778,8 +2778,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "fully filled order, buy, accountLocker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -2995,8 +2995,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "buy, 1 refunded, 1 revoked before swap, 1 redeemed match, not accountLocker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -3210,8 +3210,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "sell, 1 refunded, 1 revoked before swap, 1 redeemed match, not accountLocker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -3425,8 +3425,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "buy, 1 refunded, 1 revoked before swap, 1 redeemed match, accountLocker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -3641,8 +3641,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "sell, 1 refunded, 1 revoked before swap, 1 redeemed match, accountLocker",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      50,
 				QuoteBalanceType: Percentage,
@@ -3857,8 +3857,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for single buy",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6,
 				QuoteBalanceType: Amount,
@@ -3906,8 +3906,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge not enough balance for single buy",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6,
 				QuoteBalanceType: Amount,
@@ -3939,8 +3939,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for single sell",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6 + 1500,
 				QuoteBalanceType: Amount,
@@ -3990,8 +3990,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge not enough balance for single sell",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6 + 1499,
 				QuoteBalanceType: Amount,
@@ -4023,8 +4023,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for single buy with redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1000,
 				QuoteBalanceType: Amount,
@@ -4069,8 +4069,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge not enough balance for single buy due to redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      999,
 				QuoteBalanceType: Amount,
@@ -4101,8 +4101,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for single sell with redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6 + 1000,
 				QuoteBalanceType: Amount,
@@ -4148,8 +4148,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge not enough balance for single sell due to redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6 + 1000,
 				QuoteBalanceType: Amount,
@@ -4181,8 +4181,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for multi buy",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6,
 				QuoteBalanceType: Amount,
@@ -4244,8 +4244,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge not enough balance for multi buy",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      5e6,
 				QuoteBalanceType: Amount,
@@ -4284,8 +4284,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for multi sell",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e7 + 2500,
 				QuoteBalanceType: Amount,
@@ -4348,8 +4348,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge not enough balance for multi sell",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e7 + 2499,
 				QuoteBalanceType: Amount,
@@ -4389,8 +4389,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for multi buy with redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      2000,
 				QuoteBalanceType: Amount,
@@ -4450,8 +4450,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge not enough balance for multi buy due to redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1999,
 				QuoteBalanceType: Amount,
@@ -4490,8 +4490,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for multi sell with redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e7 + 2000,
 				QuoteBalanceType: Amount,
@@ -4552,8 +4552,8 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			name: "edge enough balance for multi sell with redeem fees",
 			cfg: &BotConfig{
 				Host:             "host1",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Amount,
 				BaseBalance:      1e7 + 2000,
 				QuoteBalanceType: Amount,
@@ -4595,7 +4595,7 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 			return
 		}
 
-		mktID := dexMarketID(test.cfg.Host, test.cfg.BaseAsset, test.cfg.QuoteAsset)
+		mktID := dexMarketID(test.cfg.Host, test.cfg.BaseID, test.cfg.QuoteID)
 
 		tCore := newTCore()
 		tCore.setAssetBalances(test.assetBalances)
@@ -4641,9 +4641,12 @@ func testSegregatedCoreTrade(t *testing.T, testMultiTrade bool) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		mm.UpdateBotConfig(test.cfg)
-		err := mm.Run(ctx, []byte{}, nil)
+		_, err := mm.Connect(ctx)
 		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", test.name, err)
+			t.Fatalf("%s: Connect error: %v", test.name, err)
+		}
+		if err := mm.Start([]byte{}, nil); err != nil {
+			t.Fatalf("%s: Start error: %v", test.name, err)
 		}
 
 		segregatedCore := mm.wrappedCoreForBot(mktID)
@@ -4725,8 +4728,8 @@ func TestSegregatedCEXTrade(t *testing.T) {
 		cfg           *BotConfig
 		assetBalances map[uint32]uint64
 		cexBalances   map[uint32]uint64
-		baseAsset     uint32
-		quoteAsset    uint32
+		baseID        uint32
+		quoteID       uint32
 		sell          bool
 		rate          uint64
 		qty           uint64
@@ -4740,8 +4743,8 @@ func TestSegregatedCEXTrade(t *testing.T) {
 			name: "sell trade fully filled",
 			cfg: &BotConfig{
 				Host:             "host",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -4762,11 +4765,11 @@ func TestSegregatedCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			baseAsset:  42,
-			quoteAsset: 0,
-			sell:       true,
-			rate:       5e7,
-			qty:        2e6,
+			baseID:  42,
+			quoteID: 0,
+			sell:    true,
+			rate:    5e7,
+			qty:     2e6,
 			postTradeBals: map[uint32]uint64{
 				42: 1e7 - 2e6,
 				0:  1e7,
@@ -4802,8 +4805,8 @@ func TestSegregatedCEXTrade(t *testing.T) {
 			name: "buy trade fully filled",
 			cfg: &BotConfig{
 				Host:             "host",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -4824,11 +4827,11 @@ func TestSegregatedCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			baseAsset:  42,
-			quoteAsset: 0,
-			sell:       false,
-			rate:       5e7,
-			qty:        2e6,
+			baseID:  42,
+			quoteID: 0,
+			sell:    false,
+			rate:    5e7,
+			qty:     2e6,
 			postTradeBals: map[uint32]uint64{
 				42: 1e7,
 				0:  1e7 - calc.BaseToQuote(5e7, 2e6),
@@ -4864,8 +4867,8 @@ func TestSegregatedCEXTrade(t *testing.T) {
 			name: "sell trade partially filled",
 			cfg: &BotConfig{
 				Host:             "host",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -4886,11 +4889,11 @@ func TestSegregatedCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			baseAsset:  42,
-			quoteAsset: 0,
-			sell:       true,
-			rate:       5e7,
-			qty:        2e6,
+			baseID:  42,
+			quoteID: 0,
+			sell:    true,
+			rate:    5e7,
+			qty:     2e6,
 			postTradeBals: map[uint32]uint64{
 				42: 1e7 - 2e6,
 				0:  1e7,
@@ -4926,8 +4929,8 @@ func TestSegregatedCEXTrade(t *testing.T) {
 			name: "buy trade partially filled",
 			cfg: &BotConfig{
 				Host:             "host",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -4948,11 +4951,11 @@ func TestSegregatedCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			baseAsset:  42,
-			quoteAsset: 0,
-			sell:       false,
-			rate:       5e7,
-			qty:        2e6,
+			baseID:  42,
+			quoteID: 0,
+			sell:    false,
+			rate:    5e7,
+			qty:     2e6,
 			postTradeBals: map[uint32]uint64{
 				42: 1e7,
 				0:  1e7 - calc.BaseToQuote(5e7, 2e6),
@@ -5007,7 +5010,7 @@ func TestSegregatedCEXTrade(t *testing.T) {
 
 		mm.setupBalances(botCfgs, cexes)
 
-		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseAsset, tt.cfg.QuoteAsset)
+		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseID, tt.cfg.QuoteID)
 		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
 
 		_, unsubscribe := wrappedCEX.SubscribeTradeUpdates()
@@ -5016,7 +5019,7 @@ func TestSegregatedCEXTrade(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		_, err := wrappedCEX.Trade(ctx, tt.baseAsset, tt.quoteAsset, tt.sell, tt.rate, tt.qty)
+		_, err := wrappedCEX.Trade(ctx, tt.baseID, tt.quoteID, tt.sell, tt.rate, tt.qty)
 		if err != nil {
 			t.Fatalf("%s: unexpected Trade error: %v", tt.name, err)
 		}
@@ -5076,8 +5079,8 @@ func TestSegregatedCEXDeposit(t *testing.T) {
 			},
 			cfg: &BotConfig{
 				Host:             "dex.com",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -5120,8 +5123,8 @@ func TestSegregatedCEXDeposit(t *testing.T) {
 			},
 			cfg: &BotConfig{
 				Host:             "dex.com",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -5153,8 +5156,8 @@ func TestSegregatedCEXDeposit(t *testing.T) {
 			},
 			cfg: &BotConfig{
 				Host:             "dex.com",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -5205,7 +5208,7 @@ func TestSegregatedCEXDeposit(t *testing.T) {
 		mm, done := tNewMarketMaker(t, tCore)
 		defer done()
 		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]libxc.CEX{cexName: cex})
-		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseAsset, tt.cfg.QuoteAsset)
+		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseID, tt.cfg.QuoteID)
 		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
 
 		wg := sync.WaitGroup{}
@@ -5278,8 +5281,8 @@ func TestSegregatedCEXWithdraw(t *testing.T) {
 			},
 			cfg: &BotConfig{
 				Host:             "dex.com",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -5320,8 +5323,8 @@ func TestSegregatedCEXWithdraw(t *testing.T) {
 			},
 			cfg: &BotConfig{
 				Host:             "dex.com",
-				BaseAsset:        42,
-				QuoteAsset:       0,
+				BaseID:           42,
+				QuoteID:          0,
 				BaseBalanceType:  Percentage,
 				BaseBalance:      100,
 				QuoteBalanceType: Percentage,
@@ -5359,15 +5362,45 @@ func TestSegregatedCEXWithdraw(t *testing.T) {
 		mm, done := tNewMarketMaker(t, tCore)
 		defer done()
 		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]libxc.CEX{cexName: cex})
-		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseAsset, tt.cfg.QuoteAsset)
+		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseID, tt.cfg.QuoteID)
 		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
+		// mm.doNotKillWhenBotsStop = true
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		cexCM := dex.NewConnectionMaster(cex)
+		if err := cexCM.Connect(ctx); err != nil {
+			t.Fatalf("error connecting tCEX: %v", err)
+		}
+		cexConfig := &CEXConfig{
+			Name: libxc.Binance,
+		}
+		mm.UpdateBotConfig(tt.cfg)
+		mm.UpdateCEXConfig(cexConfig)
+		mm.cexes[libxc.Binance] = &centralizedExchange{
+			CEX:       cex,
+			CEXConfig: cexConfig,
+			cm:        cexCM,
+			mkts:      []*libxc.Market{},
+		}
+		_, err := mm.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", tt.name, err)
+		}
+		if err := mm.Start([]byte{}, nil); err != nil {
+			t.Fatalf("%s: Start error: %v", tt.name, err)
+		}
+
+		// segregatedCore := mm.wrappedCoreForBot(mktID)
+
+		// if testMultiTrade {
 
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		onConfirm := func() {
 			wg.Done()
 		}
-		err := wrappedCEX.Withdraw(context.Background(), tt.withdrawAsset, tt.withdrawAmt, onConfirm)
+		err = wrappedCEX.Withdraw(context.Background(), tt.withdrawAsset, tt.withdrawAmt, onConfirm)
 		if err != nil {
 			if tt.expError {
 				return

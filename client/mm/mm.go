@@ -170,17 +170,30 @@ func (m *MarketWithHost) String() string {
 	return fmt.Sprintf("%s-%d-%d", m.Host, m.BaseID, m.QuoteID)
 }
 
+type centralizedExchange struct {
+	libxc.CEX
+	*CEXConfig
+
+	mtx  sync.RWMutex
+	cm   *dex.ConnectionMaster
+	mkts []*libxc.Market
+}
+
 // MarketMaker handles the market making process. It supports running different
 // strategies on different markets.
 type MarketMaker struct {
 	ctx                   context.Context
-	die                   context.CancelFunc
+	die                   atomic.Value // context.CancelFunc
 	running               atomic.Bool
 	log                   dex.Logger
 	core                  clientCore
 	doNotKillWhenBotsStop bool // used for testing
 	botBalances           map[string]*botBalances
 	cfgPath               string
+
+	cfgMtx sync.RWMutex
+	cfg    *MarketMakingConfig
+
 	// syncedOracle is only available while the MarketMaker is running. It
 	// periodically refreshes the prices for the markets that have bots
 	// running on them.
@@ -197,31 +210,36 @@ type MarketMaker struct {
 
 	ordersMtx sync.RWMutex
 	orders    map[order.OrderID]*orderInfo
+
+	cexMtx sync.RWMutex
+	cexes  map[string]*centralizedExchange
 }
 
 // NewMarketMaker creates a new MarketMaker.
 func NewMarketMaker(c clientCore, cfgPath string, log dex.Logger) (*MarketMaker, error) {
-	if _, err := os.Stat(cfgPath); err != nil {
-		cfg := new(MarketMakingConfig)
-		cfgB, err := json.Marshal(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal empty config file: %w", err)
-		}
-		err = os.WriteFile(cfgPath, cfgB, 0644)
-		if err != nil {
-			return nil, fmt.Errorf("failed to write empty config file: %w", err)
+	var cfg MarketMakingConfig
+	if b, err := os.ReadFile(cfgPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error reading config file from %q: %w", cfgPath, err)
+	} else if len(b) > 0 {
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			return nil, fmt.Errorf("error unmarshaling config file: %v", err)
 		}
 	}
 
-	return &MarketMaker{
+	m := &MarketMaker{
 		core:           c,
 		log:            log,
 		cfgPath:        cfgPath,
+		cfg:            &cfg,
 		running:        atomic.Bool{},
 		orders:         make(map[order.OrderID]*orderInfo),
 		runningBots:    make(map[MarketWithHost]interface{}),
 		unsyncedOracle: newUnsyncedPriceOracle(log),
-	}, nil
+		cexes:          make(map[string]*centralizedExchange),
+	}
+	var dummyCancel context.CancelFunc = func() {}
+	m.die.Store(dummyCancel)
+	return m, nil
 }
 
 // Running returns true if the MarketMaker is running.
@@ -247,11 +265,27 @@ func marketsRequiringPriceOracle(cfgs []*BotConfig) []*mkt {
 
 	for _, cfg := range cfgs {
 		if cfg.requiresPriceOracle() {
-			mkts = append(mkts, &mkt{base: cfg.BaseAsset, quote: cfg.QuoteAsset})
+			mkts = append(mkts, &mkt{baseID: cfg.BaseID, quoteID: cfg.QuoteID})
 		}
 	}
 
 	return mkts
+}
+
+// duplicateBotConfig returns an error if there is more than one bot config for
+// the same market on the same dex host.
+func duplicateBotConfig(cfgs []*BotConfig) error {
+	mkts := make(map[string]struct{})
+
+	for _, cfg := range cfgs {
+		mkt := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
+		if _, found := mkts[mkt]; found {
+			return fmt.Errorf("duplicate bot config for market %s", mkt)
+		}
+		mkts[mkt] = struct{}{}
+	}
+
+	return nil
 }
 
 func priceOracleFromConfigs(ctx context.Context, cfgs []*BotConfig, log dex.Logger) (*priceOracle, error) {
@@ -278,7 +312,7 @@ func (m *MarketMaker) markBotAsRunning(mkt MarketWithHost, running bool) {
 	}
 
 	if len(m.runningBots) == 0 {
-		m.die()
+		m.Stop()
 	}
 }
 
@@ -327,37 +361,21 @@ func (m *MarketMaker) loginAndUnlockWallets(pw []byte, cfgs []*BotConfig) error 
 	}
 	unlocked := make(map[uint32]any)
 	for _, cfg := range cfgs {
-		if _, done := unlocked[cfg.BaseAsset]; !done {
-			err := m.core.OpenWallet(cfg.BaseAsset, pw)
+		if _, done := unlocked[cfg.BaseID]; !done {
+			err := m.core.OpenWallet(cfg.BaseID, pw)
 			if err != nil {
-				return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.BaseAsset, err)
+				return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.BaseID, err)
 			}
-			unlocked[cfg.BaseAsset] = true
+			unlocked[cfg.BaseID] = true
 		}
 
-		if _, done := unlocked[cfg.QuoteAsset]; !done {
-			err := m.core.OpenWallet(cfg.QuoteAsset, pw)
+		if _, done := unlocked[cfg.QuoteID]; !done {
+			err := m.core.OpenWallet(cfg.QuoteID, pw)
 			if err != nil {
-				return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.QuoteAsset, err)
+				return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.QuoteID, err)
 			}
-			unlocked[cfg.QuoteAsset] = true
+			unlocked[cfg.QuoteID] = true
 		}
-	}
-
-	return nil
-}
-
-// duplicateBotConfig returns an error if there is more than one bot config for
-// the same market on the same dex host.
-func duplicateBotConfig(cfgs []*BotConfig) error {
-	mkts := make(map[string]struct{})
-
-	for _, cfg := range cfgs {
-		mkt := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
-		if _, found := mkts[mkt]; found {
-			return fmt.Errorf("duplicate bot config for market %s", mkt)
-		}
-		mkts[mkt] = struct{}{}
 	}
 
 	return nil
@@ -367,7 +385,7 @@ func validateAndFilterEnabledConfigs(cfgs []*BotConfig) ([]*BotConfig, error) {
 	enabledCfgs := make([]*BotConfig, 0, len(cfgs))
 	for _, cfg := range cfgs {
 		if cfg.requiresCEX() && cfg.CEXCfg == nil {
-			mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+			mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 			return nil, fmt.Errorf("bot at %s requires cex config", mktID)
 		}
 		if !cfg.Disabled {
@@ -432,11 +450,9 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]libxc.CE
 		if err != nil {
 			return err
 		}
-
 		cexBalances[assetSymbol] = &trackedBalance{
 			available: balance.Available,
 		}
-
 		return nil
 	}
 
@@ -448,40 +464,40 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]libxc.CE
 	}
 
 	for _, cfg := range cfgs {
-		err := trackAssetOnDEX(cfg.BaseAsset)
+		err := trackAssetOnDEX(cfg.BaseID)
 		if err != nil {
 			return err
 		}
-		err = trackAssetOnDEX(cfg.QuoteAsset)
+		err = trackAssetOnDEX(cfg.QuoteID)
 		if err != nil {
 			return err
 		}
 
-		mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+		mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 
 		// Calculate DEX balances
-		baseBalance := dexBalanceTracker[cfg.BaseAsset]
-		quoteBalance := dexBalanceTracker[cfg.QuoteAsset]
+		baseBalance := dexBalanceTracker[cfg.BaseID]
+		quoteBalance := dexBalanceTracker[cfg.QuoteID]
 		baseRequired := calcBalance(cfg.BaseBalanceType, cfg.BaseBalance, baseBalance.available)
 		quoteRequired := calcBalance(cfg.QuoteBalanceType, cfg.QuoteBalance, quoteBalance.available)
 		if baseRequired == 0 && quoteRequired == 0 {
 			return fmt.Errorf("both base and quote balance are zero for market %s", mktID)
 		}
 		if baseRequired > baseBalance.available-baseBalance.reserved {
-			return fmt.Errorf("insufficient balance for asset %d", cfg.BaseAsset)
+			return fmt.Errorf("insufficient balance for asset %d", cfg.BaseID)
 		}
 		if quoteRequired > quoteBalance.available-quoteBalance.reserved {
-			return fmt.Errorf("insufficient balance for asset %d", cfg.QuoteAsset)
+			return fmt.Errorf("insufficient balance for asset %d", cfg.QuoteID)
 		}
 		baseBalance.reserved += baseRequired
 		quoteBalance.reserved += quoteRequired
 
 		m.botBalances[mktID] = &botBalances{
 			balances: map[uint32]*botBalance{
-				cfg.BaseAsset: {
+				cfg.BaseID: {
 					Available: baseRequired,
 				},
-				cfg.QuoteAsset: {
+				cfg.QuoteID: {
 					Available: quoteRequired,
 				},
 			},
@@ -489,23 +505,23 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]libxc.CE
 
 		// Calculate CEX balances
 		if cfg.CEXCfg != nil {
-			baseSymbol := dex.BipIDSymbol(cfg.BaseAsset)
+			baseSymbol := dex.BipIDSymbol(cfg.BaseID)
 			if baseSymbol == "" {
-				return fmt.Errorf("unknown asset ID %d", cfg.BaseAsset)
+				return fmt.Errorf("unknown asset ID %d", cfg.BaseID)
 			}
 			baseAssetSymbol := dex.TokenSymbol(baseSymbol)
 
-			quoteSymbol := dex.BipIDSymbol(cfg.QuoteAsset)
+			quoteSymbol := dex.BipIDSymbol(cfg.QuoteID)
 			if quoteSymbol == "" {
-				return fmt.Errorf("unknown asset ID %d", cfg.QuoteAsset)
+				return fmt.Errorf("unknown asset ID %d", cfg.QuoteID)
 			}
 			quoteAssetSymbol := dex.TokenSymbol(quoteSymbol)
 
-			err = trackAssetOnCEX(baseAssetSymbol, cfg.BaseAsset, cfg.CEXCfg.Name)
+			err = trackAssetOnCEX(baseAssetSymbol, cfg.BaseID, cfg.CEXCfg.Name)
 			if err != nil {
 				return err
 			}
-			err = trackAssetOnCEX(quoteAssetSymbol, cfg.QuoteAsset, cfg.CEXCfg.Name)
+			err = trackAssetOnCEX(quoteAssetSymbol, cfg.QuoteID, cfg.CEXCfg.Name)
 			if err != nil {
 				return err
 			}
@@ -517,16 +533,16 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]libxc.CE
 				return fmt.Errorf("both base and quote CEX balances are zero for market %s", mktID)
 			}
 			if cexBaseRequired > baseCEXBalance.available-baseCEXBalance.reserved {
-				return fmt.Errorf("insufficient CEX base balance for asset %d", cfg.BaseAsset)
+				return fmt.Errorf("insufficient CEX base balance for asset %d", cfg.BaseID)
 			}
 			if cexQuoteRequired > quoteCEXBalance.available-quoteCEXBalance.reserved {
-				return fmt.Errorf("insufficient CEX quote balance for asset %d", cfg.QuoteAsset)
+				return fmt.Errorf("insufficient CEX quote balance for asset %d", cfg.QuoteID)
 			}
 			baseCEXBalance.reserved += cexBaseRequired
 			quoteCEXBalance.reserved += cexQuoteRequired
 			m.botBalances[mktID].cexBalances = map[uint32]uint64{
-				cfg.BaseAsset:  cexBaseRequired,
-				cfg.QuoteAsset: cexQuoteRequired,
+				cfg.BaseID:  cexBaseRequired,
+				cfg.QuoteID: cexQuoteRequired,
 			}
 		}
 	}
@@ -983,43 +999,138 @@ func (m *MarketMaker) initCEXConnections(cfgs []*CEXConfig) (map[string]libxc.CE
 	cexes := make(map[string]libxc.CEX)
 	cexCMs := make(map[string]*dex.ConnectionMaster)
 
+	findCEXConfig := func(cexName string) *CEXConfig {
+		for _, cfg := range cfgs {
+			if cfg.Name == cexName {
+				return cfg
+			}
+		}
+		return nil
+	}
+
+	getConnectedCEX := func(cexName string) (cex libxc.CEX, err error) {
+		var found bool
+		if cex, found = cexes[cexName]; !found {
+			cexCfg := findCEXConfig(cexName)
+			if cexCfg == nil {
+				return nil, fmt.Errorf("no CEX config provided for %s", cexName)
+			}
+			c, err := m.loadCEX(m.ctx, cexCfg)
+			if err != nil {
+				return nil, fmt.Errorf("error loading CEX: %w", err)
+			}
+			var cm *dex.ConnectionMaster
+			c.mtx.Lock()
+			if c.cm == nil || !c.cm.On() {
+				cm = dex.NewConnectionMaster(c)
+				c.cm = cm
+				cexCMs[cexName] = cm
+			}
+			c.mtx.Unlock()
+			if cm != nil {
+				if err = cm.Connect(m.ctx); err != nil {
+					return nil, fmt.Errorf("failed to connect to CEX: %v", err)
+				}
+			}
+			cex = c.CEX
+			cexes[cexName] = cex
+		}
+		return cex, nil
+	}
+
 	for _, cfg := range cfgs {
-		if _, found := cexes[cfg.Name]; !found {
-			logger := m.log.SubLogger(fmt.Sprintf("CEX-%s", cfg.Name))
-			cex, err := libxc.NewCEX(cfg.Name, cfg.APIKey, cfg.APISecret, logger, dex.Simnet)
-			if err != nil {
-				m.log.Errorf("Failed to create %s: %v", cfg.Name, err)
-				continue
-			}
-
-			cm := dex.NewConnectionMaster(cex)
-			err = cm.Connect(m.ctx)
-			if err != nil {
-				m.log.Errorf("Failed to connect to %s: %v", cfg.Name, err)
-				continue
-			}
-
-			cexes[cfg.Name] = cex
-			cexCMs[cfg.Name] = cm
+		if _, err := getConnectedCEX(cfg.Name); err != nil {
+			m.log.Errorf("Failed to create %s: %v", cfg.Name, err)
 		}
 	}
 
 	return cexes, cexCMs
 }
 
-// Run starts the MarketMaker. There can only be one BotConfig per dex market.
-func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *string) error {
+func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralizedExchange, error) {
+	m.cexMtx.Lock()
+	defer m.cexMtx.Unlock()
+	var success bool
+	if cex := m.cexes[cfg.Name]; cex != nil {
+		if cex.Name == cfg.Name && cex.APISecret == cfg.APISecret {
+			return cex, nil
+		}
+		// New credentials. Delete the old cex.
+		defer func() {
+			if success {
+				cex.mtx.Lock()
+				cex.cm.Disconnect()
+				cex.cm = nil
+				cex.mtx.Unlock()
+			}
+		}()
+	}
+	logger := m.log.SubLogger(fmt.Sprintf("CEX-%s", cfg.Name))
+	cex, err := libxc.NewCEX(cfg.Name, cfg.APIKey, cfg.APISecret, logger, dex.Simnet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CEX: %v", err)
+	}
+	mkts, err := cex.Markets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get markets for %s", err)
+	}
+	c := &centralizedExchange{
+		CEX:       cex,
+		CEXConfig: cfg,
+		mkts:      mkts,
+	}
+	m.cexes[cfg.Name] = c
+	success = true
+	return c, nil
+}
+
+func (m *MarketMaker) config() *MarketMakingConfig {
+	m.cfgMtx.RLock()
+	defer m.cfgMtx.RUnlock()
+	return m.cfg.Copy()
+}
+
+func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	m.ctx = ctx
+	cfg := m.config()
+	for _, cexCfg := range cfg.CexConfigs {
+		if _, err := m.loadCEX(ctx, cexCfg); err != nil {
+			return nil, fmt.Errorf("error adding %s", cexCfg.Name)
+		}
+	}
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		m.cexMtx.Lock()
+		for cexName, cex := range m.cexes {
+			cex.mtx.RLock()
+			cm := cex.cm
+			cex.mtx.RUnlock()
+			if cm != nil {
+				cm.Disconnect()
+			}
+			delete(m.cexes, cexName)
+		}
+		m.cexMtx.Unlock()
+	}()
+	return &wg, nil
+}
+
+// Start the MarketMaker. There can only be one BotConfig per dex market.
+func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) {
 	if !m.running.CompareAndSwap(false, true) {
 		return errors.New("market making is already running")
 	}
 
-	path := m.cfgPath
+	cfg := m.config()
 	if alternateConfigPath != nil {
-		path = *alternateConfigPath
-	}
-	cfg, err := getMarketMakingConfig(path)
-	if err != nil {
-		return fmt.Errorf("error getting market making config: %v", err)
+		cfg, err = getMarketMakingConfig(*alternateConfigPath)
+		if err != nil {
+			return fmt.Errorf("error loading custom market making config: %v", err)
+		}
 	}
 
 	var startedMarketMaking bool
@@ -1029,7 +1140,8 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 		}
 	}()
 
-	m.ctx, m.die = context.WithCancel(ctx)
+	ctx, die := context.WithCancel(m.ctx)
+	m.die.Store(die)
 
 	enabledBots, err := validateAndFilterEnabledConfigs(cfg.BotConfigs)
 	if err != nil {
@@ -1040,7 +1152,7 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 		return err
 	}
 
-	oracle, err := priceOracleFromConfigs(m.ctx, enabledBots, m.log.SubLogger("PriceOracle"))
+	oracle, err := priceOracleFromConfigs(ctx, enabledBots, m.log.SubLogger("PriceOracle"))
 	if err != nil {
 		return err
 	}
@@ -1054,7 +1166,6 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 	}()
 
 	cexes, cexCMs := m.initCEXConnections(cfg.CexConfigs)
-
 	if err := m.setupBalances(enabledBots, cexes); err != nil {
 		return err
 	}
@@ -1074,7 +1185,7 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 
 		for {
 			select {
-			case <-m.ctx.Done():
+			case <-ctx.Done():
 				return
 			case n := <-feed.C:
 				m.handleNotification(n)
@@ -1096,34 +1207,34 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
-				mkt := MarketWithHost{cfg.Host, cfg.BaseAsset, cfg.QuoteAsset}
+				mkt := MarketWithHost{cfg.Host, cfg.BaseID, cfg.QuoteID}
 				m.markBotAsRunning(mkt, true)
 				defer func() {
 					m.markBotAsRunning(mkt, false)
 				}()
 
-				m.core.Broadcast(newBotStartStopNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, true))
+				m.core.Broadcast(newBotStartStopNote(cfg.Host, cfg.BaseID, cfg.QuoteID, true))
 				defer func() {
-					m.core.Broadcast(newBotStartStopNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, false))
+					m.core.Broadcast(newBotStartStopNote(cfg.Host, cfg.BaseID, cfg.QuoteID, false))
 				}()
-				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
-				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
-				baseFiatRate := fiatRates[cfg.BaseAsset]
-				quoteFiatRate := fiatRates[cfg.QuoteAsset]
+				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID))
+				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
+				baseFiatRate := fiatRates[cfg.BaseID]
+				quoteFiatRate := fiatRates[cfg.QuoteID]
 				RunBasicMarketMaker(m.ctx, cfg, m.wrappedCoreForBot(mktID), oracle, baseFiatRate, quoteFiatRate, logger)
 			}(cfg)
 		case cfg.SimpleArbConfig != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
-				logger := m.log.SubLogger(fmt.Sprintf("SimpleArbitrage-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
-				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+				logger := m.log.SubLogger(fmt.Sprintf("SimpleArbitrage-%s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID))
+				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 				cex, found := cexes[cfg.CEXCfg.Name]
 				if !found {
 					logger.Errorf("Cannot start %s bot due to CEX not starting", mktID)
 					return
 				}
-				mkt := MarketWithHost{cfg.Host, cfg.BaseAsset, cfg.QuoteAsset}
+				mkt := MarketWithHost{cfg.Host, cfg.BaseID, cfg.QuoteID}
 				m.markBotAsRunning(mkt, true)
 				defer func() {
 					m.markBotAsRunning(mkt, false)
@@ -1134,14 +1245,14 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
-				logger := m.log.SubLogger(fmt.Sprintf("ArbMarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
+				logger := m.log.SubLogger(fmt.Sprintf("ArbMarketMaker-%s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID))
 				cex, found := cexes[cfg.CEXCfg.Name]
-				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 				if !found {
 					logger.Errorf("Cannot start %s bot due to CEX not starting", mktID)
 					return
 				}
-				mkt := MarketWithHost{cfg.Host, cfg.BaseAsset, cfg.QuoteAsset}
+				mkt := MarketWithHost{cfg.Host, cfg.BaseID, cfg.QuoteID}
 				m.markBotAsRunning(mkt, true)
 				defer func() {
 					m.markBotAsRunning(mkt, false)
@@ -1149,7 +1260,7 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 				RunArbMarketMaker(m.ctx, cfg, m.core, m.wrappedCEXForBot(mktID, cex), logger)
 			}(cfg)
 		default:
-			m.log.Errorf("No bot config provided. Skipping %s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+			m.log.Errorf("No bot config provided. Skipping %s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID)
 		}
 	}
 
@@ -1186,21 +1297,50 @@ func getMarketMakingConfig(path string) (*MarketMakingConfig, error) {
 	return cfg, nil
 }
 
-// GetMarketMakingConfig returns the market making config.
-func (m *MarketMaker) GetMarketMakingConfig() (*MarketMakingConfig, error) {
-	return getMarketMakingConfig(m.cfgPath)
+func (m *MarketMaker) getCexes() []*centralizedExchange {
+	m.cexMtx.RLock()
+	defer m.cexMtx.RUnlock()
+	cs := make([]*centralizedExchange, 0, len(m.cexes))
+	for _, cex := range m.cexes {
+		cs = append(cs, cex)
+	}
+	return cs
 }
 
-// UpdateMarketMakingConfig updates the configuration for one of the bots.
-func (m *MarketMaker) UpdateBotConfig(updatedCfg *BotConfig) (*MarketMakingConfig, error) {
-	cfg, err := m.GetMarketMakingConfig()
-	if err != nil {
-		return nil, fmt.Errorf("error getting market making config: %v", err)
+// GetMarketMakingConfig returns the market making config.
+func (m *MarketMaker) GetMarketMakingConfig() (*MarketMakingConfig, map[string][]*libxc.Market, error) {
+	mkts := make(map[string][]*libxc.Market)
+	for _, cex := range m.getCexes() {
+		cex.mtx.RLock()
+		mkts[cex.Name] = cex.mkts
+		cex.mtx.RUnlock()
 	}
+	return m.config(), mkts, nil
+}
+
+func (m *MarketMaker) writeConfigFile(cfg *MarketMakingConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "    ")
+	if err != nil {
+		return fmt.Errorf("error marshalling market making config: %v", err)
+	}
+
+	err = os.WriteFile(m.cfgPath, data, 0644)
+	if err != nil {
+		return fmt.Errorf("error writing market making config: %v", err)
+	}
+	m.cfgMtx.Lock()
+	m.cfg = cfg
+	m.cfgMtx.Unlock()
+	return nil
+}
+
+// UpdateBotConfig updates the configuration for one of the bots.
+func (m *MarketMaker) UpdateBotConfig(updatedCfg *BotConfig) (*MarketMakingConfig, error) {
+	cfg := m.config()
 
 	var updated bool
 	for i, c := range cfg.BotConfigs {
-		if c.Host == updatedCfg.Host && c.QuoteAsset == updatedCfg.QuoteAsset && c.BaseAsset == updatedCfg.BaseAsset {
+		if c.Host == updatedCfg.Host && c.QuoteID == updatedCfg.QuoteID && c.BaseID == updatedCfg.BaseID {
 			cfg.BotConfigs[i] = updatedCfg
 			updated = true
 			break
@@ -1210,28 +1350,43 @@ func (m *MarketMaker) UpdateBotConfig(updatedCfg *BotConfig) (*MarketMakingConfi
 		cfg.BotConfigs = append(cfg.BotConfigs, updatedCfg)
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "    ")
+	return cfg, m.writeConfigFile(cfg)
+}
+
+func (m *MarketMaker) UpdateCEXConfig(updatedCfg *CEXConfig) (*MarketMakingConfig, []*libxc.Market, error) {
+	cfg := m.config()
+
+	cex, err := m.loadCEX(m.ctx, updatedCfg)
 	if err != nil {
-		return nil, fmt.Errorf("error marshalling market making config: %v", err)
+		return nil, nil, fmt.Errorf("error loading %s with updated config: %w", updatedCfg.Name, err)
 	}
 
-	err = os.WriteFile(m.cfgPath, data, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("error writing market making config: %v", err)
+	cex.mtx.RLock()
+	mkts := cex.mkts
+	cex.mtx.RUnlock()
+
+	var updated bool
+	for i, c := range cfg.CexConfigs {
+		if c.Name == updatedCfg.Name {
+			cfg.CexConfigs[i] = updatedCfg
+			updated = true
+			break
+		}
 	}
-	return cfg, nil
+	if !updated {
+		cfg.CexConfigs = append(cfg.CexConfigs, updatedCfg)
+	}
+
+	return cfg, mkts, m.writeConfigFile(cfg)
 }
 
 // RemoveConfig removes a bot config from the market making config.
 func (m *MarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) (*MarketMakingConfig, error) {
-	cfg, err := m.GetMarketMakingConfig()
-	if err != nil {
-		return nil, fmt.Errorf("error getting market making config: %v", err)
-	}
+	cfg := m.config()
 
 	var updated bool
 	for i, c := range cfg.BotConfigs {
-		if c.Host == host && c.QuoteAsset == quoteID && c.BaseAsset == baseID {
+		if c.Host == host && c.QuoteID == quoteID && c.BaseID == baseID {
 			cfg.BotConfigs = append(cfg.BotConfigs[:i], cfg.BotConfigs[i+1:]...)
 			updated = true
 			break
@@ -1241,21 +1396,10 @@ func (m *MarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) (*Mar
 		return nil, fmt.Errorf("config not found")
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "    ")
-	if err != nil {
-		return nil, fmt.Errorf("error marshalling market making config: %v", err)
-	}
-
-	err = os.WriteFile(m.cfgPath, data, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("error writing market making config: %v", err)
-	}
-	return cfg, nil
+	return cfg, m.writeConfigFile(cfg)
 }
 
 // Stop stops the MarketMaker.
 func (m *MarketMaker) Stop() {
-	if m.die != nil {
-		m.die()
-	}
+	m.die.Load().(context.CancelFunc)()
 }

@@ -182,7 +182,16 @@ export class XYRangeHandler {
   selected: () => void
   setConfig: (cfg: XYRange) => void
 
-  constructor (cfg: XYRange, initVal: number, updated: (x:number, y:number) => void, changed: () => void, selected: () => void, roundY?: boolean, roundX?: boolean, disabled?: boolean) {
+  constructor (
+    cfg: XYRange,
+    initVal: number,
+    updated: (x:number, y:number) => void,
+    changed: () => void,
+    selected: () => void,
+    roundY?: boolean,
+    roundX?: boolean,
+    disabled?: boolean
+  ) {
     const control = this.control = rangeOptTmpl.cloneNode(true) as HTMLElement
     const tmpl = this.tmpl = Doc.parseTemplate(control)
     this.roundX = Boolean(roundX)
@@ -290,6 +299,7 @@ export class XYRangeHandler {
     Doc.bind(handle, 'mousedown', (e: MouseEvent) => {
       if (e.button !== 0) return
       e.preventDefault()
+      e.stopPropagation()
       this.selected()
       const startX = e.pageX
       const w = slider.clientWidth - handle.offsetWidth
@@ -311,6 +321,24 @@ export class XYRangeHandler {
       Doc.bind(document, 'mousemove', trackMouse)
       Doc.bind(document, 'mouseup', mouseUp)
     })
+
+    Doc.bind(tmpl.sliderBox, 'click', (e: MouseEvent) => {
+      if (e.button !== 0) return
+      const x = e.pageX
+      const m = Doc.layoutMetrics(tmpl.slider)
+      this.r = clamp((x - m.bodyLeft) / m.width, 0, 1)
+      this.scrollingX = this.r * rangeX + cfg.start.x
+      this.y = this.r * rangeY + cfg.start.y
+      this.accept(this.scrollingX)
+    })
+  }
+
+  setXLabel (s: string) {
+    this.tmpl.x.textContent = s
+  }
+
+  setYLabel (s: string) {
+    this.tmpl.y.textContent = s
   }
 
   accept (x: number, skipUpdate?: boolean): void {
@@ -323,14 +351,17 @@ export class XYRangeHandler {
     tmpl.handle.style.left = `calc(${this.r * 100}% - ${this.r * 14}px)`
     this.x = x
     this.scrollingX = x
-    if (!skipUpdate) this.updated(x, this.y)
+    if (!skipUpdate) {
+      this.updated(x, this.y)
+      this.changed()
+    }
   }
 
-  setValue (x: number) {
+  setValue (x: number, skipUpdate?: boolean) {
     const cfg = this.cfg
     this.r = (x - cfg.start.x) / (cfg.end.x - cfg.start.x)
     this.y = cfg.start.y + this.r * (cfg.end.y - cfg.start.y)
-    this.accept(x, true)
+    this.accept(x, skipUpdate)
   }
 }
 

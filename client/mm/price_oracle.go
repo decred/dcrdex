@@ -170,11 +170,11 @@ func (o *priceOracle) getOracleInfo(base, quote uint32) (float64, []*OracleRepor
 }
 
 type mkt struct {
-	base, quote uint32
+	baseID, quoteID uint32
 }
 
 func (mkt *mkt) String() string {
-	return fmt.Sprintf("%d-%d", mkt.base, mkt.quote)
+	return fmt.Sprintf("%d-%d", mkt.baseID, mkt.quoteID)
 }
 
 func newCachedPrice(baseID, quoteID uint32, registeredAssets map[uint32]*asset.RegisteredAsset) (*cachedPrice, error) {
@@ -207,7 +207,7 @@ func newAutoSyncPriceOracle(ctx context.Context, markets []*mkt, log dex.Logger)
 			continue
 		}
 
-		cachedPrice, err := newCachedPrice(mkt.base, mkt.quote, registeredAssets)
+		cachedPrice, err := newCachedPrice(mkt.baseID, mkt.quoteID, registeredAssets)
 		if err != nil {
 			return nil, err
 		}
@@ -428,6 +428,10 @@ func oracleMarketReport(ctx context.Context, b, q *asset.RegisteredAsset, log de
 	// Create filter for desirable matches.
 	marketMatches := func(mkt *coinpapMarket) bool {
 		if mkt.TrustScore != "high" {
+			return false
+		}
+
+		if mkt.MarketURL == "" {
 			return false
 		}
 

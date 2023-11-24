@@ -25,8 +25,8 @@ type TradeUpdate struct {
 
 // Market is the base and quote assets of a market on a CEX.
 type Market struct {
-	BaseID  uint32 `json:"base"`
-	QuoteID uint32 `json:"quote"`
+	BaseID  uint32 `json:"baseID"`
+	QuoteID uint32 `json:"quoteID"`
 }
 
 // CEX implements a set of functions that can be used to interact with a
@@ -40,7 +40,7 @@ type CEX interface {
 	// CancelTrade cancels a trade on the CEX.
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
 	// Markets returns the list of markets at the CEX.
-	Markets() ([]*Market, error)
+	Markets(ctx context.Context) ([]*Market, error)
 	// SubscribeCEXUpdates returns a channel which sends an empty struct when
 	// the balance of an asset on the CEX has been updated.
 	SubscribeCEXUpdates() (updates <-chan interface{}, unsubscribe func())

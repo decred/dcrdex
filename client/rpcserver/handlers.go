@@ -930,7 +930,7 @@ func handleStartMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponseP
 		return usage(startMarketMakingRoute, err)
 	}
 
-	err = s.mm.Run(s.ctx, form.appPass, &form.cfgFilePath)
+	err = s.mm.Start(form.appPass, &form.cfgFilePath)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to start market making: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)

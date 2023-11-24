@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/mm"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -1909,7 +1910,7 @@ func (s *WebServer) apiStartMarketMaking(w http.ResponseWriter, r *http.Request)
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	if err = s.mm.Run(s.ctx, appPW, nil); err != nil {
+	if err = s.mm.Start(appPW, nil); err != nil {
 		s.writeAPIError(w, fmt.Errorf("Error starting market making: %v", err))
 		return
 	}
@@ -1923,22 +1924,48 @@ func (s *WebServer) apiStopMarketMaking(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *WebServer) apiMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.mm.GetMarketMakingConfig()
+	cfg, mkts, err := s.mm.GetMarketMakingConfig()
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error getting market making config: %v", err))
 		return
 	}
 
 	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
+		OK   bool                       `json:"ok"`
+		Cfg  *mm.MarketMakingConfig     `json:"cfg"`
+		Mkts map[string][]*libxc.Market `json:"mkts"`
 	}{
-		OK:  true,
-		Cfg: cfg,
+		OK:   true,
+		Cfg:  cfg,
+		Mkts: mkts,
 	}, s.indent)
 }
 
-func (s *WebServer) apiUpdateMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiUpdateCEXConfig(w http.ResponseWriter, r *http.Request) {
+	var updatedCfg *mm.CEXConfig
+	if !readPost(w, r, &updatedCfg) {
+		s.writeAPIError(w, fmt.Errorf("failed to read config"))
+		return
+	}
+
+	cfg, mkts, err := s.mm.UpdateCEXConfig(updatedCfg)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool                   `json:"ok"`
+		Cfg  *mm.MarketMakingConfig `json:"cfg"`
+		Mkts []*libxc.Market        `json:"mkts"`
+	}{
+		OK:   true,
+		Cfg:  cfg,
+		Mkts: mkts,
+	}, s.indent)
+}
+
+func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 	var updatedCfg *mm.BotConfig
 	if !readPost(w, r, &updatedCfg) {
 		s.writeAPIError(w, fmt.Errorf("failed to read config"))

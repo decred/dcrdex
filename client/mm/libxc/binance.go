@@ -285,6 +285,7 @@ func binanceCoinNetworkToDexSymbol(coin, network string) string {
 }
 
 type bncAssetConfig struct {
+	assetID uint32
 	// symbol is the DEX asset symbol, always lower case
 	symbol string
 	// coin is the asset symbol on binance, always upper case.
@@ -317,6 +318,7 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 	}
 
 	return &bncAssetConfig{
+		assetID:          assetID,
 		symbol:           symbol,
 		coin:             mapDexToBinanceSymbol(coin),
 		chain:            mapDexToBinanceSymbol(chain),
@@ -369,7 +371,7 @@ type binance struct {
 	tokenIDs atomic.Value // map[string][]uint32
 
 	balanceMtx sync.RWMutex
-	balances   map[string]*bncBalance
+	balances   map[uint32]*bncBalance
 
 	marketStreamMtx sync.RWMutex
 	marketStream    comms.WsConn
@@ -410,7 +412,7 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 		apiKey:             apiKey,
 		secretKey:          secretKey,
 		knownAssets:        knownAssets,
-		balances:           make(map[string]*bncBalance),
+		balances:           make(map[uint32]*bncBalance),
 		books:              make(map[string]*binanceOrderBook),
 		net:                net,
 		tradeInfo:          make(map[string]*tradeInfo),
@@ -431,10 +433,19 @@ func (bnc *binance) setBalances(coinsData []*binanceCoinInfo) {
 	defer bnc.balanceMtx.Unlock()
 
 	for _, nfo := range coinsData {
-		bnc.balances[nfo.Coin] = &bncBalance{
-			available: nfo.Free,
-			locked:    nfo.Locked,
+		for _, net := range nfo.NetworkList {
+			assetID, found := dex.BipSymbolID(binanceCoinNetworkToDexSymbol(nfo.Coin, net.Coin))
+			if !found {
+				bnc.log.Tracef("no dex asset known for binance coin %q, network %q", nfo.Coin, net.Coin)
+				continue
+			}
+
+			bnc.balances[assetID] = &bncBalance{
+				available: nfo.Free,
+				locked:    nfo.Locked,
+			}
 		}
+
 	}
 }
 
@@ -492,7 +503,7 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 	return nil
 }
 
-func (bnc *binance) getMarkets(ctx context.Context) error {
+func (bnc *binance) getMarkets(ctx context.Context) (map[string]*binanceMarket, error) {
 	var exchangeInfo struct {
 		Timezone   string `json:"timezone"`
 		ServerTime int64  `json:"serverTime"`
@@ -506,7 +517,7 @@ func (bnc *binance) getMarkets(ctx context.Context) error {
 	}
 	err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &exchangeInfo)
 	if err != nil {
-		return fmt.Errorf("error getting markets from Binance: %w", err)
+		return nil, fmt.Errorf("error getting markets from Binance: %w", err)
 	}
 
 	marketsMap := make(map[string]*binanceMarket, len(exchangeInfo.Symbols))
@@ -516,7 +527,7 @@ func (bnc *binance) getMarkets(ctx context.Context) error {
 
 	bnc.markets.Store(marketsMap)
 
-	return nil
+	return marketsMap, nil
 }
 
 // Connect connects to the binance API.
@@ -527,7 +538,7 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("error getting coin info: %v", err)
 	}
 
-	if err := bnc.getMarkets(ctx); err != nil {
+	if _, err := bnc.getMarkets(ctx); err != nil {
 		return nil, fmt.Errorf("error getting markets: %v", err)
 	}
 
@@ -543,7 +554,7 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		for {
 			select {
 			case <-nextTick:
-				err := bnc.getMarkets(ctx)
+				_, err := bnc.getMarkets(ctx)
 				if err != nil {
 					bnc.log.Errorf("Error fetching markets: %v", err)
 					nextTick = time.After(time.Minute)
@@ -609,7 +620,7 @@ func (bnc *binance) Balance(assetID uint32) (*ExchangeBalance, error) {
 	bnc.balanceMtx.RLock()
 	defer bnc.balanceMtx.RUnlock()
 
-	bal, found := bnc.balances[assetConfig.coin]
+	bal, found := bnc.balances[assetConfig.assetID]
 	if !found {
 		return nil, fmt.Errorf("no %q balance found", assetConfig.coin)
 	}
@@ -933,11 +944,37 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 	return bnc.requestInto(req, &struct{}{})
 }
 
-func (bnc *binance) Markets() ([]*Market, error) {
-	binanceMarkets := bnc.markets.Load().(map[string]*binanceMarket)
-	markets := make([]*Market, 0, 16)
+// func (bnc *binance) Markets() ([]*Market, error) {
+// 	binanceMarkets := bnc.markets.Load().(map[string]*binanceMarket)
+// 	markets := make([]*Market, 0, 16)
+// }
+
+func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
+	bnc.balanceMtx.RLock()
+	defer bnc.balanceMtx.RUnlock()
+
+	balances := make(map[uint32]*ExchangeBalance)
+
+	for assetID, bal := range bnc.balances {
+		assetConfig, err := bncAssetCfg(assetID)
+		if err != nil {
+			continue
+		}
+
+		balances[assetConfig.assetID] = &ExchangeBalance{
+			Available: uint64(bal.available * float64(assetConfig.conversionFactor)),
+			Locked:    uint64(bal.locked * float64(assetConfig.conversionFactor)),
+		}
+	}
+
+	return balances, nil
+}
+
+func (bnc *binance) Markets(ctx context.Context) (_ []*Market, err error) {
+	bnMarkets := bnc.markets.Load().(map[string]*binanceMarket)
+	markets := make([]*Market, 0, len(bnMarkets))
 	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
-	for _, mkt := range binanceMarkets {
+	for _, mkt := range bnMarkets {
 		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs)
 		markets = append(markets, dexMarkets...)
 	}
@@ -1057,10 +1094,28 @@ func (bnc *binance) handleOutboundAccountPosition(update *binanceStreamUpdate) {
 		bnc.log.Tracef("balance: %+v", bal)
 	}
 
+	supportedTokens := bnc.tokenIDs.Load().(map[string][]uint32)
+
 	bnc.balanceMtx.Lock()
 	for _, bal := range update.Balances {
 		symbol := strings.ToLower(bal.Asset)
-		bnc.balances[symbol] = &bncBalance{
+		// DRAFT TODO: Need to convert with binanceToDexSymbol or something, but
+		// with consideration for how binance combines assets.
+		if parentIDs := dex.TokenChains[symbol]; parentIDs != nil {
+			supported := supportedTokens[symbol]
+			for _, tokenID := range supported {
+				bnc.balances[tokenID] = &bncBalance{
+					available: bal.Free,
+					locked:    bal.Locked,
+				}
+			}
+			continue
+		}
+		assetID, found := dex.BipSymbolID(symbol)
+		if !found {
+			continue
+		}
+		bnc.balances[assetID] = &bncBalance{
 			available: bal.Free,
 			locked:    bal.Locked,
 		}
@@ -1556,6 +1611,56 @@ func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPric
 
 	return book.vwap(!sell, qty)
 }
+
+// type binanceNetworkInfo struct {
+// 	AddressRegex            string  `json:"addressRegex"`
+// 	Coin                    string  `json:"coin"`
+// 	DepositEnable           bool    `json:"depositEnable"`
+// 	IsDefault               bool    `json:"isDefault"`
+// 	MemoRegex               string  `json:"memoRegex"`
+// 	MinConfirm              int     `json:"minConfirm"`
+// 	Name                    string  `json:"name"`
+// 	Network                 string  `json:"network"`
+// 	ResetAddressStatus      bool    `json:"resetAddressStatus"`
+// 	SpecialTips             string  `json:"specialTips"`
+// 	UnLockConfirm           int     `json:"unLockConfirm"`
+// 	WithdrawEnable          bool    `json:"withdrawEnable"`
+// 	WithdrawFee             float64 `json:"withdrawFee,string"`
+// 	WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
+// 	WithdrawMax             float64 `json:"withdrawMax,string"`
+// 	WithdrawMin             float64 `json:"withdrawMin,string"`
+// 	SameAddress             bool    `json:"sameAddress"`
+// 	EstimatedArrivalTime    int     `json:"estimatedArrivalTime"`
+// 	Busy                    bool    `json:"busy"`
+// }
+
+// type binanceCoinInfo struct {
+// 	Coin              string                `json:"coin"`
+// 	DepositAllEnable  bool                  `json:"depositAllEnable"`
+// 	Free              float64               `json:"free,string"`
+// 	Freeze            float64               `json:"freeze,string"`
+// 	Ipoable           float64               `json:"ipoable,string"`
+// 	Ipoing            float64               `json:"ipoing,string"`
+// 	IsLegalMoney      bool                  `json:"isLegalMoney"`
+// 	Locked            float64               `json:"locked,string"`
+// 	Name              string                `json:"name"`
+// 	Storage           float64               `json:"storage,string"`
+// 	Trading           bool                  `json:"trading"`
+// 	WithdrawAllEnable bool                  `json:"withdrawAllEnable"`
+// 	Withdrawing       float64               `json:"withdrawing,string"`
+// 	NetworkList       []*binanceNetworkInfo `json:"networkList"`
+// }
+
+// type bnMarket struct {
+// 	Symbol              string   `json:"symbol"`
+// 	Status              string   `json:"status"`
+// 	BaseAsset           string   `json:"baseAsset"`
+// 	BaseAssetPrecision  int      `json:"baseAssetPrecision"`
+// 	QuoteAsset          string   `json:"quoteAsset"`
+// 	QuoteAssetPrecision int      `json:"quoteAssetPrecision"`
+// 	OrderTypes          []string `json:"orderTypes"`
+// 	Permissions         []string `json:"permissions"`
+// }
 
 // dexMarkets returns all the possible dex markets for this binance market.
 // A symbol represents a single market on the CEX, but tokens on the DEX

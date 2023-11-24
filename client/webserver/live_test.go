@@ -29,6 +29,8 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/mm"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -2065,6 +2067,137 @@ func (c *TCore) DisableFundsMixer(assetID uint32) error {
 	return nil
 }
 
+var binanceMarkets = []*libxc.Market{
+	{BaseID: 42, QuoteID: 0},
+	{BaseID: 145, QuoteID: 42},
+	{BaseID: 60, QuoteID: 42},
+	{BaseID: 2, QuoteID: 42},
+	// {3, 0},
+	// {3, 42},
+	// {22, 42},
+	// {28, 0},
+	// {60000, 42},
+}
+
+type TMarketMaker struct {
+	core    *TCore
+	running atomic.Bool
+	cfg     *mm.MarketMakingConfig
+	mkts    map[string][]*libxc.Market
+}
+
+func (m *TMarketMaker) MarketReport(baseID, quoteID uint32) (*mm.MarketReport, error) {
+	baseFiatRate := math.Pow10(3 - rand.Intn(6))
+	quoteFiatRate := math.Pow10(3 - rand.Intn(6))
+	price := baseFiatRate / quoteFiatRate
+	mktID := dex.BipIDSymbol(baseID) + "_" + dex.BipIDSymbol(quoteID)
+	midGap, _ := getMarketStats(mktID)
+	return &mm.MarketReport{
+		BaseFiatRate:  baseFiatRate,
+		QuoteFiatRate: quoteFiatRate,
+		Price:         price,
+		Oracles: []*mm.OracleReport{
+			{
+				Host:     "bittrex.com",
+				USDVol:   math.Pow10(rand.Intn(7)),
+				BestBuy:  midGap * 99 / 100,
+				BestSell: midGap * 101 / 100,
+			},
+			{
+				Host:     "bittrex.com",
+				USDVol:   math.Pow10(rand.Intn(7)),
+				BestBuy:  midGap * 98 / 100,
+				BestSell: midGap * 102 / 100,
+			},
+		},
+	}, nil
+}
+
+func (m *TMarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) {
+	m.running.Store(true)
+	m.core.noteFeed <- &struct {
+		db.Notification
+		Running bool `json:"running"`
+	}{
+		Notification: db.NewNotification("mmstartstop", "", "", "", db.Data),
+		Running:      true,
+	}
+	return nil
+}
+
+func (m *TMarketMaker) Stop() {
+	m.running.Store(false)
+	m.core.noteFeed <- &struct {
+		db.Notification
+		Running bool `json:"running"`
+	}{
+		Notification: db.NewNotification("mmstartstop", "", "", "", db.Data),
+		Running:      false,
+	}
+}
+
+func (m *TMarketMaker) GetMarketMakingConfig() (*mm.MarketMakingConfig, map[string][]*libxc.Market, error) {
+	return m.cfg, m.mkts, nil
+}
+
+func (m *TMarketMaker) UpdateCEXConfig(updatedCfg *mm.CEXConfig) (*mm.MarketMakingConfig, []*libxc.Market, error) {
+	switch updatedCfg.Name {
+	case libxc.Binance, libxc.BinanceUS:
+		m.mkts[updatedCfg.Name] = binanceMarkets
+	}
+	for i := 0; i < len(m.cfg.CexConfigs); i++ {
+		cfg := m.cfg.CexConfigs[i]
+		if cfg.Name == updatedCfg.Name {
+			m.cfg.CexConfigs[i] = updatedCfg
+			return m.cfg, m.mkts[updatedCfg.Name], nil
+		}
+	}
+	m.cfg.CexConfigs = append(m.cfg.CexConfigs, updatedCfg)
+	return m.cfg, m.mkts[updatedCfg.Name], nil
+}
+
+func (m *TMarketMaker) UpdateBotConfig(updatedCfg *mm.BotConfig) (*mm.MarketMakingConfig, error) {
+	for i := 0; i < len(m.cfg.BotConfigs); i++ {
+		botCfg := m.cfg.BotConfigs[i]
+		if botCfg.Host == updatedCfg.Host && botCfg.BaseID == updatedCfg.BaseID && botCfg.QuoteID == updatedCfg.QuoteID {
+			m.cfg.BotConfigs[i] = updatedCfg
+			return m.cfg, nil
+		}
+	}
+	m.cfg.BotConfigs = append(m.cfg.BotConfigs, updatedCfg)
+	return m.cfg, nil
+}
+
+func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) (*mm.MarketMakingConfig, error) {
+	for i := 0; i < len(m.cfg.BotConfigs); i++ {
+		botCfg := m.cfg.BotConfigs[i]
+		if botCfg.Host == host && botCfg.BaseID == baseID && botCfg.QuoteID == quoteID {
+			copy(m.cfg.BotConfigs[i:], m.cfg.BotConfigs[i+1:])
+			m.cfg.BotConfigs = m.cfg.BotConfigs[:len(m.cfg.BotConfigs)-1]
+		}
+	}
+	return m.cfg, nil
+}
+
+func (m *TMarketMaker) Running() bool {
+	return m.running.Load()
+}
+
+func (m *TMarketMaker) RunningBots() []mm.MarketWithHost {
+	if !m.running.Load() {
+		return []mm.MarketWithHost{}
+	}
+	ms := make([]mm.MarketWithHost, 0)
+	for _, botCfg := range m.cfg.BotConfigs {
+		ms = append(ms, mm.MarketWithHost{
+			Host:    botCfg.Host,
+			BaseID:  botCfg.BaseID,
+			QuoteID: botCfg.QuoteID,
+		})
+	}
+	return ms
+}
+
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
 	asset.Register(22, &TDriver{})                 // mona
@@ -2079,8 +2212,8 @@ func TestServer(t *testing.T) {
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
-	initialize := false
-	register := false
+	initialize := true
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = false
@@ -2110,11 +2243,17 @@ func TestServer(t *testing.T) {
 	}
 
 	s, err := New(&Config{
-		Core:     tCore,
-		Addr:     "127.0.0.1:54321",
-		Logger:   logger,
-		NoEmbed:  true, // use files on disk, and reload on each page load
-		HttpProf: true,
+		Core: tCore,
+		MarketMaker: &TMarketMaker{
+			core: tCore,
+			cfg:  &mm.MarketMakingConfig{},
+			mkts: make(map[string][]*libxc.Market),
+		},
+		Experimental: true,
+		Addr:         "127.0.0.1:54321",
+		Logger:       logger,
+		NoEmbed:      true, // use files on disk, and reload on each page load
+		HttpProf:     true,
 	})
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)

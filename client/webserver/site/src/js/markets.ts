@@ -65,6 +65,7 @@ import {
 } from './registry'
 import { setOptionTemplates } from './opts'
 import { CoinExplorers } from './coinexplorers'
+import { MM } from './mm'
 
 const bind = Doc.bind
 
@@ -766,7 +767,7 @@ export default class MarketsPage extends BasePage {
     }
 
     if (app().user.experimental && this.mmRunning === undefined) {
-      const marketMakingStatus = await app().getMarketMakingStatus()
+      const marketMakingStatus = await MM.status()
       this.mmRunning = marketMakingStatus.running
     }
 

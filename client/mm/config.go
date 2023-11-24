@@ -17,6 +17,16 @@ type MarketMakingConfig struct {
 	CexConfigs []*CEXConfig `json:"cexConfigs"`
 }
 
+func (cfg *MarketMakingConfig) Copy() *MarketMakingConfig {
+	c := &MarketMakingConfig{
+		BotConfigs: make([]*BotConfig, len(cfg.BotConfigs)),
+		CexConfigs: make([]*CEXConfig, len(cfg.CexConfigs)),
+	}
+	copy(c.BotConfigs, cfg.BotConfigs)
+	copy(c.CexConfigs, cfg.CexConfigs)
+	return c
+}
+
 // CEXConfig is a configuration for connecting to a CEX API.
 type CEXConfig struct {
 	// Name is the name of the cex.
@@ -41,11 +51,13 @@ type BotCEXCfg struct {
 // The balance fields are the initial amounts that will be reserved to use for
 // this bot. As the bot trades, the amounts reserved for it will be updated.
 type BotConfig struct {
-	Host             string      `json:"host"`
-	BaseAsset        uint32      `json:"baseAsset"`
-	QuoteAsset       uint32      `json:"quoteAsset"`
-	BaseBalanceType  BalanceType `json:"baseBalanceType"`
-	BaseBalance      uint64      `json:"baseBalance"`
+	Host    string `json:"host"`
+	BaseID  uint32 `json:"baseID"`
+	QuoteID uint32 `json:"quoteID"`
+
+	BaseBalanceType BalanceType `json:"baseBalanceType"`
+	BaseBalance     uint64      `json:"baseBalance"`
+
 	QuoteBalanceType BalanceType `json:"quoteBalanceType"`
 	QuoteBalance     uint64      `json:"quoteBalance"`
 
@@ -55,7 +67,7 @@ type BotConfig struct {
 	// Only one of the following configs should be set
 	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`
 	SimpleArbConfig      *SimpleArbConfig         `json:"simpleArbConfig,omitempty"`
-	ArbMarketMakerConfig *ArbMarketMakerConfig    `json:"arbMarketMakerConfig,omitempty"`
+	ArbMarketMakerConfig *ArbMarketMakerConfig    `json:"arbMarketMakingConfig,omitempty"`
 
 	Disabled bool `json:"disabled"`
 }

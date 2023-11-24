@@ -4,18 +4,39 @@ import {
   Market,
   Exchange,
   BotConfig,
+  CEXConfig,
   MarketWithHost,
   BotStartStopNote,
   MMStartStopNote,
   BalanceNote,
-  SupportedAsset
+  SupportedAsset,
+  MarketMakingConfig,
+  MarketMakingStatus,
+  CEXMarket
 } from './registry'
-import { postJSON } from './http'
+import { getJSON, postJSON } from './http'
 import Doc from './doc'
 import State from './state'
 import BasePage from './basepage'
 import { setOptionTemplates } from './opts'
 import { bind as bindForm, NewWalletForm } from './forms'
+import * as intl from './locales'
+
+interface CEXDisplayInfo {
+  name: string
+  logo: string
+}
+
+export const CEXDisplayInfos: Record<string, CEXDisplayInfo> = {
+  'Binance': {
+    name: 'Binance',
+    logo: 'binance.com.png'
+  },
+  'BinanceUS': {
+    name: 'Binance U.S.',
+    logo: 'binance.us.png'
+  }
+}
 
 interface HostedMarket extends Market {
   host: string
@@ -58,7 +79,7 @@ export default class MarketMakerPage extends BasePage {
     Doc.bind(page.addBotBtnNoExisting, 'click', () => { this.showAddBotForm() })
     Doc.bind(page.addBotBtnWithExisting, 'click', () => { this.showAddBotForm() })
     Doc.bind(page.startBotsBtn, 'click', () => { this.start() })
-    Doc.bind(page.stopBotsBtn, 'click', () => { this.stopBots() })
+    Doc.bind(page.stopBotsBtn, 'click', () => { MM.stop() })
     Doc.bind(page.hostSelect, 'change', () => { this.selectMarketHost() })
     bindForm(page.addBotForm, page.addBotSubmit, () => { this.addBotSubmit() })
     bindForm(page.pwForm, page.pwSubmit, () => this.startBots())
@@ -77,9 +98,10 @@ export default class MarketMakerPage extends BasePage {
   async setup () {
     const page = this.page
 
-    const status = await app().getMarketMakingStatus()
+    const status = await MM.status()
     const running = status.running
-    const marketMakingCfg = await app().getMarketMakingConfig()
+    const marketMakingCfg = await MM.config()
+
     const botConfigs = this.botConfigs = marketMakingCfg.botConfigs || []
     app().registerNoteFeeder({
       botstartstop: (note: BotStartStopNote) => { this.handleBotStartStopNote(note) },
@@ -130,7 +152,7 @@ export default class MarketMakerPage extends BasePage {
   handleBalanceNote (note: BalanceNote) {
     const getBotConfig = (mktID: string): BotConfig | undefined => {
       for (const cfg of this.botConfigs) {
-        if (marketStr(cfg.host, cfg.baseAsset, cfg.quoteAsset) === mktID) return cfg
+        if (marketStr(cfg.host, cfg.baseID, cfg.quoteID) === mktID) return cfg
       }
     }
     const tableRows = this.page.botTableBody.children
@@ -139,9 +161,9 @@ export default class MarketMakerPage extends BasePage {
       const rowTmpl = Doc.parseTemplate(row)
       const cfg = getBotConfig(row.id)
       if (!cfg) continue
-      if (cfg.baseAsset === note.assetID) {
+      if (cfg.baseID === note.assetID) {
         rowTmpl.baseBalance.textContent = this.walletBalanceStr(note.assetID, cfg.baseBalance)
-      } else if (cfg.quoteAsset === note.assetID) {
+      } else if (cfg.quoteID === note.assetID) {
         rowTmpl.quoteBalance.textContent = this.walletBalanceStr(note.assetID, cfg.quoteBalance)
       }
     }
@@ -188,6 +210,7 @@ export default class MarketMakerPage extends BasePage {
     const addOptions = (symbols: string[], avail: boolean): void => {
       for (const symbol of symbols) {
         const assetID = Doc.bipIDFromSymbol(symbol)
+        if (assetID === undefined) continue // unsupported asset
         const asset = app().assets[assetID]
         const row = this.assetRow(asset)
         Doc.bind(row, 'click', (e: MouseEvent) => {
@@ -352,11 +375,11 @@ export default class MarketMakerPage extends BasePage {
     }
     for (const xc of Object.values(app().user.exchanges)) mkts.push(...convertMarkets(xc))
 
-    const mmCfg = await app().getMarketMakingConfig()
+    const mmCfg = await MM.config()
     const botCfgs = mmCfg.botConfigs || []
     const existingMarkets : Record<string, boolean> = {}
     for (const cfg of botCfgs) {
-      existingMarkets[marketStr(cfg.host, cfg.baseAsset, cfg.quoteAsset)] = true
+      existingMarkets[marketStr(cfg.host, cfg.baseID, cfg.quoteID)] = true
     }
     const filteredMkts = mkts.filter((mkt) => {
       return !existingMarkets[marketStr(mkt.host, mkt.baseid, mkt.quoteid)]
@@ -431,44 +454,53 @@ export default class MarketMakerPage extends BasePage {
 
     for (const botCfg of botConfigs) {
       const row = page.botTableRowTmpl.cloneNode(true) as PageElement
-      row.id = marketStr(botCfg.host, botCfg.baseAsset, botCfg.quoteAsset)
+      row.id = marketStr(botCfg.host, botCfg.baseID, botCfg.quoteID)
       const rowTmpl = Doc.parseTemplate(row)
       const thisBotRunning = runningBots.some((bot) => {
         return bot.host === botCfg.host &&
-          bot.base === botCfg.baseAsset &&
-          bot.quote === botCfg.quoteAsset
+          bot.base === botCfg.baseID &&
+          bot.quote === botCfg.quoteID
       })
       this.setTableRowRunning(rowTmpl, running, thisBotRunning)
 
-      const baseSymbol = app().assets[botCfg.baseAsset].symbol
-      const quoteSymbol = app().assets[botCfg.quoteAsset].symbol
+      const baseSymbol = app().assets[botCfg.baseID].symbol
+      const quoteSymbol = app().assets[botCfg.quoteID].symbol
       const baseLogoPath = Doc.logoPath(baseSymbol)
       const quoteLogoPath = Doc.logoPath(quoteSymbol)
 
       rowTmpl.enabledCheckbox.checked = !botCfg.disabled
       Doc.bind(rowTmpl.enabledCheckbox, 'click', async () => {
-        app().setMarketMakingEnabled(botCfg.host, botCfg.baseAsset, botCfg.quoteAsset, !!rowTmpl.enabledCheckbox.checked)
+        MM.setEnabled(botCfg.host, botCfg.baseID, botCfg.quoteID, !!rowTmpl.enabledCheckbox.checked)
       })
       rowTmpl.host.textContent = botCfg.host
       rowTmpl.baseMktLogo.src = baseLogoPath
       rowTmpl.quoteMktLogo.src = quoteLogoPath
       rowTmpl.baseSymbol.textContent = baseSymbol.toUpperCase()
       rowTmpl.quoteSymbol.textContent = quoteSymbol.toUpperCase()
-      rowTmpl.botType.textContent = 'Market Maker'
-      rowTmpl.baseBalance.textContent = this.walletBalanceStr(botCfg.baseAsset, botCfg.baseBalance)
-      rowTmpl.quoteBalance.textContent = this.walletBalanceStr(botCfg.quoteAsset, botCfg.quoteBalance)
+      rowTmpl.baseBalance.textContent = this.walletBalanceStr(botCfg.baseID, botCfg.baseBalance)
+      rowTmpl.quoteBalance.textContent = this.walletBalanceStr(botCfg.quoteID, botCfg.quoteBalance)
       rowTmpl.baseBalanceLogo.src = baseLogoPath
       rowTmpl.quoteBalanceLogo.src = quoteLogoPath
+      if (botCfg.arbMarketMakingConfig) {
+        rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_ARB_MM)
+        Doc.show(rowTmpl.cexLink)
+        const dinfo = CEXDisplayInfos[botCfg.arbMarketMakingConfig.cexName]
+        rowTmpl.cexLogo.src = '/img/' + dinfo.logo
+        rowTmpl.cexName.textContent = dinfo.name
+      } else {
+        rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_BASIC_MM)
+      }
+
       Doc.bind(rowTmpl.removeTd, 'click', async () => {
-        await app().removeMarketMakingConfig(botCfg)
+        await MM.removeMarketMakingConfig(botCfg)
         row.remove()
-        const mmCfg = await app().getMarketMakingConfig()
+        const mmCfg = await MM.config()
         const noBots = !mmCfg || !mmCfg.botConfigs || mmCfg.botConfigs.length === 0
         Doc.setVis(noBots, page.noBots)
         Doc.setVis(!noBots, page.botTable, page.onOff)
       })
       Doc.bind(rowTmpl.settings, 'click', () => {
-        app().loadPage(`mmsettings?host=${botCfg.host}&base=${botCfg.baseAsset}&quote=${botCfg.quoteAsset}`)
+        app().loadPage(`mmsettings?host=${botCfg.host}&base=${botCfg.baseID}&quote=${botCfg.quoteID}`)
       })
       page.botTableBody.appendChild(row)
     }
@@ -477,10 +509,8 @@ export default class MarketMakerPage extends BasePage {
   async showAddBotForm () {
     const sortedMarkets = await this.sortedMarkets()
     if (sortedMarkets.length === 0) return
-    const initialMarkets = []
-    const base = sortedMarkets[0].basesymbol
-    const quote = sortedMarkets[0].quotesymbol
-    for (const mkt of sortedMarkets) if (mkt.basesymbol === base && mkt.quotesymbol === quote) initialMarkets.push(mkt)
+    const { baseid: baseID, quoteid: quoteID } = sortedMarkets.filter((mkt: HostedMarket) => Boolean(app().assets[mkt.baseid]) && Boolean(app().assets[mkt.quoteid]))[0]
+    const initialMarkets = sortedMarkets.filter((mkt: HostedMarket) => mkt.baseid === baseID && mkt.quoteid === quoteID)
     this.setMarket(initialMarkets)
     this.showForm(this.page.addBotForm)
   }
@@ -493,18 +523,14 @@ export default class MarketMakerPage extends BasePage {
   async startBots () {
     const page = this.page
     Doc.hide(page.mmErr)
-    const appPW = page.pwInput.value
+    const appPW = page.pwInput.value || ''
     this.page.pwInput.value = ''
     this.closePopups()
-    const res = await postJSON('/api/startmarketmaking', { appPW })
+    const res = await MM.start(appPW)
     if (!app().checkResponse(res)) {
       page.mmErr.textContent = res.msg
       Doc.show(page.mmErr)
     }
-  }
-
-  async stopBots () {
-    await app().stopMarketMaking()
   }
 
   /* showForm shows a modal form with a little animation. */
@@ -525,3 +551,121 @@ export default class MarketMakerPage extends BasePage {
     Doc.hide(this.page.forms)
   }
 }
+
+/*
+ * MarketMakerBot is the front end representaion of the server's mm.MarketMaker.
+ * MarketMakerBot is a singleton assigned to MM below.
+ */
+class MarketMakerBot {
+  cfg: MarketMakingConfig
+  st: MarketMakingStatus | undefined
+  mkts: Record<string, CEXMarket[]>
+
+  constructor () {
+    this.mkts = {}
+  }
+
+  handleStartStopNote (n: MMStartStopNote) {
+    if (!this.st) return
+    this.st.running = n.running
+  }
+
+  /*
+   * config returns the curret MarketMakingConfig. config will fetch the
+   * MarketMakingConfig once. Future updates occur in updateCEXConfig and
+   * updateBotConfig. after a page handler calls config during intitialization,
+   * the the config can be accessed directly thr MM.cfg to avoid the async
+   * function.
+   */
+  async config () : Promise<MarketMakingConfig> {
+    if (this.cfg) return this.cfg
+    const res = await getJSON('/api/marketmakingconfig')
+    if (!app().checkResponse(res)) {
+      throw new Error('failed to fetch market making config')
+    }
+    this.cfg = res.cfg
+    this.mkts = res.mkts
+    return this.cfg
+  }
+
+  /*
+   * updateBotConfig appends or updates the specified BotConfig, then updates
+   * the cached MarketMakingConfig,
+   */
+  async updateBotConfig (cfg: BotConfig) : Promise<void> {
+    const res = await postJSON('/api/updatebotconfig', cfg)
+    if (!app().checkResponse(res)) {
+      throw res.msg || Error(res)
+    }
+    this.cfg = res.cfg
+  }
+
+  /*
+   * updateCEXConfig appends or updates the specified CEXConfig, then updates
+   * the cached MarketMakingConfig,
+   */
+  async updateCEXConfig (cfg: CEXConfig) : Promise<void> {
+    const res = await postJSON('/api/updatecexconfig', cfg)
+    if (res.err) {
+      throw new Error(res.err)
+    }
+    this.cfg = res.cfg
+    this.mkts[cfg.name] = res.mkts || []
+  }
+
+  async removeMarketMakingConfig (cfg: BotConfig) : Promise<void> {
+    const res = await postJSON('/api/removemarketmakingconfig', {
+      host: cfg.host,
+      baseAsset: cfg.baseID,
+      quoteAsset: cfg.quoteID
+    })
+    if (res.err) {
+      throw new Error(res.err)
+    }
+    this.cfg = res.cfg
+  }
+
+  async report (baseID: number, quoteID: number) {
+    return postJSON('/api/marketreport', { baseID, quoteID })
+  }
+
+  async setEnabled (host: string, baseID: number, quoteID: number, enabled: boolean) : Promise<void> {
+    const botCfgs = this.cfg.botConfigs || []
+    const mktCfg = botCfgs.find((cfg : BotConfig) => {
+      return cfg.host === host && cfg.baseID === baseID && cfg.quoteID === quoteID
+    })
+    if (!mktCfg) {
+      throw new Error('market making config not found')
+    }
+    mktCfg.disabled = !enabled
+    await this.updateBotConfig(mktCfg)
+  }
+
+  async start (appPW: string) {
+    return await postJSON('/api/startmarketmaking', { appPW })
+  }
+
+  async stop () : Promise<void> {
+    await postJSON('/api/stopmarketmaking')
+  }
+
+  async status () : Promise<MarketMakingStatus> {
+    if (this.st !== undefined) return this.st
+    const res = await getJSON('/api/marketmakingstatus')
+    if (!app().checkResponse(res)) {
+      throw new Error('failed to fetch market making status')
+    }
+    const status = {} as MarketMakingStatus
+    status.running = !!res.running
+    status.runningBots = res.runningBots
+    this.st = status
+    return status
+  }
+
+  cexConfigured (cexName: string) {
+    return (this.cfg.cexConfigs || []).some((cfg: CEXConfig) => cfg.name === cexName)
+  }
+}
+
+// MM is the front end representation of the server's mm.MarketMaker.
+export const MM = new MarketMakerBot()

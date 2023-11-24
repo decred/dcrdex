@@ -220,6 +220,23 @@
   }
 }
 
+div[data-handler=mm],
+div[data-handler=mmsettings] {
+  .on-indicator {
+    width: 15px;
+    height: 15px;
+    border-radius: 8px;
+
+    &.on {
+      background-color: $buycolor_light;
+    }
+
+    &.off {
+      background-color: #777;
+    }
+  }
+}
+
 body.dark #main.mm {
   #marketSelect option {
     background-color: $dark_body_bg;

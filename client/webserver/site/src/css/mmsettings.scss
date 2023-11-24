@@ -17,38 +17,6 @@
     }
   }
 
-  .slider-container {
-    border: 1px solid #424242;
-    border-radius: 3px;
-    padding: 4px;
-    margin-top: 8px;
-    opacity: 0.9;
-
-    .xy-range-input {
-      width: 35px;
-      font-size: 14px;
-      height: 16px;
-    }
-
-    .slider {
-      margin: 10px 10px 5px;
-      height: 2px;
-      background-color: grey;
-      position: relative;
-
-      .slider-handle {
-        position: absolute;
-        height: 20px;
-        width: 14px;
-        top: -9px;
-        border-radius: 7px;
-        background-color: #2cce9c;
-        border: 2px solid #424242;
-        cursor: pointer;
-      }
-    }
-  }
-
   .modified {
     border: 1px solid orange !important;
   }
@@ -110,10 +78,36 @@
     font-size: 16px;
     border: 1px solid $dark_border_color;
   }
-}
 
-body.dark #main.mmsettings {
-  #gapStrategySelect:disabled {
-      background-color: #343232;
+  .xclogo {
+    &.large {
+      width: 60px;
+      height: 60px;
+    }
+
+    &.medium {
+      width: 30px;
+      height: 30px;
+    }
+
+    &.off {
+      filter: grayscale(1);
+    }
+  }
+
+  .cex-selector {
+    &:not(.selected) {
+      opacity: 0.8;
+      transform: scale(0.95);
+    }
+
+    &.selected {
+      border-color: green;
+      border-width: 2px;
+    }
+  }
+
+  #profitInput {
+    width: 70px;
   }
 }

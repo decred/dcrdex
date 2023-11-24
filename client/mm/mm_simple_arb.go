@@ -624,7 +624,7 @@ func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex cex,
 		return
 	}
 
-	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	if err != nil {
 		log.Errorf("Failed to get market: %v", err)
 		return
@@ -633,8 +633,8 @@ func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex cex,
 	(&simpleArbMarketMaker{
 		ctx:        ctx,
 		host:       cfg.Host,
-		baseID:     cfg.BaseAsset,
-		quoteID:    cfg.QuoteAsset,
+		baseID:     cfg.BaseID,
+		quoteID:    cfg.QuoteID,
 		cex:        cex,
 		core:       c,
 		log:        log,
