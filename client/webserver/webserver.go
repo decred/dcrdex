@@ -424,27 +424,28 @@ func New(cfg *Config) (*WebServer, error) {
 				rr.With(dexHostCtx).Get("/{host}", s.handleRegister)
 			})
 
-			// Can go to wallets with init and auth, but not dex.
-			webInit.Group(func(webAuthNoDEX chi.Router) {
-				webAuthNoDEX.Use(s.requireLogin)
-				webAuthNoDEX.Get(walletsRoute, s.handleWallets)
-				webAuthNoDEX.Get(walletLogRoute, s.handleWalletLogFile)
+			webInit.Group(func(webNoAuth chi.Router) {
+				// The login handler requires init but not auth since
+				// it performs the auth.
+				webNoAuth.Get(loginRoute, s.handleLogin)
+
+				// The rest of these handlers require both init and auth.
+				webNoAuth.Group(func(webAuth chi.Router) {
+					webAuth.Use(s.requireLogin)
+					webAuth.Get(homeRoute, s.handleHome)
+					webAuth.Get(walletsRoute, s.handleWallets)
+					webAuth.Get(walletLogRoute, s.handleWalletLogFile)
+				})
 			})
 
+			// Handlers requiring a DEX connection.
 			webInit.Group(func(webDC chi.Router) {
 				webDC.Use(s.requireDEXConnection)
-
-				// The login handler is the only one that requires init and
-				// dexes but not auth since it performs the auth.
-				webDC.Get(loginRoute, s.handleLogin)
-
-				// The rest of these handlers require auth.
 				webDC.Group(func(webAuth chi.Router) {
 					webAuth.Use(s.requireLogin)
 					webAuth.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
 					webAuth.Get(ordersRoute, s.handleOrders)
 					webAuth.Get(exportOrderRoute, s.handleExportOrders)
-					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(marketsRoute, s.handleMarkets)
 					webAuth.Get(mmSettingsRoute, s.handleMMSettings)
 					webAuth.Get(marketMakerRoute, s.handleMarketMaking)
