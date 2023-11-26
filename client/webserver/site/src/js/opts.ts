@@ -310,7 +310,7 @@ export class XYRangeHandler {
         this.r = left(ee) / w
         this.scrollingX = this.r * rangeX + cfg.start.x
         this.y = this.r * rangeY + cfg.start.y
-        this.accept(this.scrollingX)
+        this.accept(this.scrollingX, true)
       }
       const mouseUp = (ee: MouseEvent) => {
         trackMouse(ee)

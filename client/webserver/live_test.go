@@ -2179,6 +2179,14 @@ func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) (*mm
 	return m.cfg, nil
 }
 
+func (m *TMarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error) {
+	bal := randomBalance(assetID)
+	return &libxc.ExchangeBalance{
+		Available: bal.Available,
+		Locked:    bal.Locked,
+	}, nil
+}
+
 func (m *TMarketMaker) Running() bool {
 	return m.running.Load()
 }

@@ -1612,56 +1612,6 @@ func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPric
 	return book.vwap(!sell, qty)
 }
 
-// type binanceNetworkInfo struct {
-// 	AddressRegex            string  `json:"addressRegex"`
-// 	Coin                    string  `json:"coin"`
-// 	DepositEnable           bool    `json:"depositEnable"`
-// 	IsDefault               bool    `json:"isDefault"`
-// 	MemoRegex               string  `json:"memoRegex"`
-// 	MinConfirm              int     `json:"minConfirm"`
-// 	Name                    string  `json:"name"`
-// 	Network                 string  `json:"network"`
-// 	ResetAddressStatus      bool    `json:"resetAddressStatus"`
-// 	SpecialTips             string  `json:"specialTips"`
-// 	UnLockConfirm           int     `json:"unLockConfirm"`
-// 	WithdrawEnable          bool    `json:"withdrawEnable"`
-// 	WithdrawFee             float64 `json:"withdrawFee,string"`
-// 	WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
-// 	WithdrawMax             float64 `json:"withdrawMax,string"`
-// 	WithdrawMin             float64 `json:"withdrawMin,string"`
-// 	SameAddress             bool    `json:"sameAddress"`
-// 	EstimatedArrivalTime    int     `json:"estimatedArrivalTime"`
-// 	Busy                    bool    `json:"busy"`
-// }
-
-// type binanceCoinInfo struct {
-// 	Coin              string                `json:"coin"`
-// 	DepositAllEnable  bool                  `json:"depositAllEnable"`
-// 	Free              float64               `json:"free,string"`
-// 	Freeze            float64               `json:"freeze,string"`
-// 	Ipoable           float64               `json:"ipoable,string"`
-// 	Ipoing            float64               `json:"ipoing,string"`
-// 	IsLegalMoney      bool                  `json:"isLegalMoney"`
-// 	Locked            float64               `json:"locked,string"`
-// 	Name              string                `json:"name"`
-// 	Storage           float64               `json:"storage,string"`
-// 	Trading           bool                  `json:"trading"`
-// 	WithdrawAllEnable bool                  `json:"withdrawAllEnable"`
-// 	Withdrawing       float64               `json:"withdrawing,string"`
-// 	NetworkList       []*binanceNetworkInfo `json:"networkList"`
-// }
-
-// type bnMarket struct {
-// 	Symbol              string   `json:"symbol"`
-// 	Status              string   `json:"status"`
-// 	BaseAsset           string   `json:"baseAsset"`
-// 	BaseAssetPrecision  int      `json:"baseAssetPrecision"`
-// 	QuoteAsset          string   `json:"quoteAsset"`
-// 	QuoteAssetPrecision int      `json:"quoteAssetPrecision"`
-// 	OrderTypes          []string `json:"orderTypes"`
-// 	Permissions         []string `json:"permissions"`
-// }
-
 // dexMarkets returns all the possible dex markets for this binance market.
 // A symbol represents a single market on the CEX, but tokens on the DEX
 // have a different assetID for each network they are on, therefore they will

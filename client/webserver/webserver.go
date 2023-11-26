@@ -182,6 +182,7 @@ type mmCore interface {
 	Stop()
 	GetMarketMakingConfig() (*mm.MarketMakingConfig, map[string][]*libxc.Market, error)
 	UpdateCEXConfig(updatedCfg *mm.CEXConfig) (*mm.MarketMakingConfig, []*libxc.Market, error)
+	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
 	UpdateBotConfig(updatedCfg *mm.BotConfig) (*mm.MarketMakingConfig, error)
 	RemoveBotConfig(host string, baseID, quoteID uint32) (*mm.MarketMakingConfig, error)
 	Running() bool
@@ -571,6 +572,7 @@ func New(cfg *Config) (*WebServer, error) {
 				apiAuth.Post("/removemarketmakingconfig", s.apiRemoveMarketMakingConfig)
 				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
 				apiAuth.Post("/marketreport", s.apiMarketReport)
+				apiAuth.Post("/cexbalance", s.apiCEXBalance)
 			}
 		})
 	})

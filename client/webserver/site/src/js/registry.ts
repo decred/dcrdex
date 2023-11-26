@@ -672,7 +672,14 @@ export interface OrderPlacement {
   gapFactor: number
 }
 
-export interface BasicMarketMakingCfg {
+export interface AutoRebalanceConfig {
+  minBaseAmt: number
+  minBaseTransfer: number
+  minQuoteAmt: number
+  minQuoteTransfer: number
+}
+
+export interface BasicMarketMakingConfig {
   gapStrategy: string
   sellPlacements: OrderPlacement[]
   buyPlacements: OrderPlacement[]
@@ -689,8 +696,7 @@ export interface ArbMarketMakingPlacement {
   multiplier: number
 }
 
-export interface ArbMarketMakingCfg {
-  cexName: string
+export interface ArbMarketMakingConfig {
   buyPlacements: ArbMarketMakingPlacement[]
   sellPlacements: ArbMarketMakingPlacement[]
   profit: number
@@ -698,11 +704,29 @@ export interface ArbMarketMakingCfg {
   orderPersistence: number
   baseOptions?: Record<string, string>
   quoteOptions?: Record<string, string>
+  autoRebalance?: AutoRebalanceConfig
+}
+
+export interface SimpleArbConfig {
+  profitTrigger: number
+  maxActiveArbs: number
+  numEpochsLeaveOpen: number
+  baseOptions?: Record<string, string>
+  quoteOptions?: Record<string, string>
+  autoRebalance?: AutoRebalanceConfig
 }
 
 export enum BalanceType {
   Percentage,
   Amount
+}
+
+export interface BotCEXCfg {
+  name: string
+  baseBalanceType: BalanceType
+  baseBalance: number
+  quoteBalanceType: BalanceType
+  quoteBalance: number
 }
 
 export interface BotConfig {
@@ -713,8 +737,10 @@ export interface BotConfig {
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
-  basicMarketMakingConfig?: BasicMarketMakingCfg
-  arbMarketMakingConfig?: ArbMarketMakingCfg
+  cexCfg?: BotCEXCfg
+  basicMarketMakingConfig?: BasicMarketMakingConfig
+  arbMarketMakingConfig?: ArbMarketMakingConfig
+  simpleArbConfig?: SimpleArbConfig
   disabled: boolean
 }
 
@@ -750,6 +776,11 @@ export interface OracleReport {
   usdVol: number
   bestBuy: number
   bestSell: number
+}
+
+export interface ExchangeBalance {
+  available: number
+  locked: number
 }
 
 // changing the order of the elements in this enum will affect

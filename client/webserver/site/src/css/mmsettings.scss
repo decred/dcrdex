@@ -1,5 +1,5 @@
 
-#main.mmsettings {
+div[data-handler=mmsettings] {
   .placement-table {
     width: 100%;
 
@@ -95,19 +95,94 @@
     }
   }
 
-  .cex-selector {
-    &:not(.selected) {
-      opacity: 0.8;
-      transform: scale(0.95);
+  #profitInput {
+    width: 70px;
+  }
+
+  .bot-type-selector {
+    @extend .brdr;
+    @extend .rounded3;
+
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    user-select: none;
+
+    &.disabled {
+      opacity: 0.5;
     }
 
-    &.selected {
-      border-color: green;
-      border-width: 2px;
+    &:not(.disabled) {
+      @extend .hoverbg;
+
+      cursor: pointer;
+
+      &.selected {
+        border: 2px solid green;
+        background-color: #7772;
+      }
+    }
+
+    
+  }
+
+  table#marketSelectionTable {
+    td,
+    th {
+      padding: 10px 10px 10px 0;
+      border-bottom: 1px solid $dark-border-color;
     }
   }
 
-  #profitInput {
-    width: 70px;
+  #marketFilterIcon {
+    position: absolute;
+    left: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.5;
+  }
+
+  #botTypeForm {
+    min-width: 375px;
+  }
+
+  #cexSelection {
+    .cex-selector {
+      user-select: none;
+
+      &.configured:not(.selected) {
+        opacity: 0.8;
+      }
+    }
+
+    &.disabled {
+      .cex-selector.configured {
+        opacity: 0.5;
+      }
+
+      .cex-selector:not(.configured) {
+        cursor: pointer;
+      }
+    }
+
+    &:not(.disabled) {
+      .cex-selector {
+        @extend .hoverbg;
+
+        cursor: pointer;
+
+        &.selected {
+          border-color: green;
+          border-width: 2px;
+          background-color: #7772;
+        }
+      }
+    }
+  }
+}
+
+body.dark div[data-handler=mmsettings] {
+  .bot-type-selector:not(.disabled).selected {
+    border: 2px solid green;
   }
 }

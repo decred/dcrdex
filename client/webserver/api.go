@@ -1592,6 +1592,28 @@ func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiCEXBalance(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CEXName string `json:"cexName"`
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	bal, err := s.mm.CEXBalance(req.CEXName, req.AssetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting cex balance: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK         bool                   `json:"ok"`
+		CEXBalance *libxc.ExchangeBalance `json:"cexBalance"`
+	}{
+		OK:         true,
+		CEXBalance: bal,
+	}, s.indent)
+}
+
 func (s *WebServer) apiShieldedStatus(w http.ResponseWriter, r *http.Request) {
 	var assetID uint32
 	if !readPost(w, r, &assetID) {

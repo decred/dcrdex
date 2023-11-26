@@ -7,40 +7,29 @@
       <span class="ico-wide-headed-left-arrow fs28"></span>
     </div>
     <div id="mmTitle" class="flex-center fs28 d-none d-md-block">[[[Market Maker Settings]]]</div>
-    <div class="flex-center fs24 p-2 flex-grow-1">
+    <div id="marketHeader" class="flex-center fs24 p-2 flex-grow-1 d-hide">
+      <div id="botTypeDisplay" class="me-2"></div>
+      <div id="cexNameDisplayBox" class="me-2">using <span id="cexNameDisplay"></span></div>
+      <span class="me-2">on</span>
       <img id="baseLogo" class="mini-icon"><img id="quoteLogo" class="mx-1 mini-icon">
       <span id="baseHeader"></span> &ndash; <span id="quoteHeader"></span>
       <span class="mx-2">@</span>
       <span id="hostHeader"></span>
+      <span id="headerReconfig" class="p-2 fs16 ico-edit hoverbg pointer"></span>
     </div>
   </div>
-
+  <div id="noMarket" class="fill-abs flex-center">
+    <button id="noMarketBttn" class="fs22 p-2 feature rounded3">[[[Select a Market]]]</button>
+  </div>
   <div id="botSettingsContainer" class="d-flex flex-wrap d-hide p-2">
     <div class="col-24 col-xl-8 col-xxl-6 px-3">
       {{- /* VIEW-ONLY MODE */ -}}
       <div id="viewOnly" class="w-100 d-flex flex-center pb-2 mb-2 fs18 brdrbottom">
         <span id="onIndicator" class="on-indicator on me-2"></span> [[[bots_running_view_only]]]
       </div>
-      {{- /* BOT TYPE CONFIGURATION */ -}}
-      <div class="w-100 d-flex flex-column align-items-stretch pb-2">
-        <div id="cexOptsBox" class="w-100 d-flex flex-column align-items-stretch">
-          <div id="cexPrompt" class="flex-center fs18 py-2">[[[select_a_cex_prompt]]]</div>
-          <div id="cexOpts" class="flex-grow-1 d-flex flex-wrap">
-            <div id="cexOptTmpl" class="p-2 col-12 flex-center flex-column brdr rounded3 hoverbg pointer cex-selector">
-              <div class="flex-center lh1">
-                <img data-tmpl="logo" class="mini-icon me-1 xclogo medium">
-                <span data-tmpl="name" class="me-1 fs22"></span>
-              </div>
-              <span data-tmpl="needsconfig" class="fs14 grey flex-center"><span class="ico-settings fs12 me-1"></span> [[[Configure]]]</span>
-              <span data-tmpl="unavailable" class="fs14 grey">[[[Market not available]]]</span>
-            </div>
-          </div>
-        </div>
-      </div>
       {{- /* STRATEGY SELECTION */ -}}
       <div id="gapStrategyBox" class="w-100">
         <div class="d-flex flex-column align-items-stretch pb-2">
-          <hr class="dashed pt-2">
           <div class="text-nowrap me-2 mb-1 fs18 demi">[[[gap_strategy]]]</div>
           <select id="gapStrategySelect" class="form-select fs18">
             <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
@@ -89,121 +78,146 @@
         </div>
       </div>
 
-      <div class="d-flex align-items-center fs18 mt-3 demi">
-        [[[buy_placements]]]
-        <span class="ico-info fs12 ms-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
-      </div>
-      <div class="d-flex flex-column" id="buyPlacementsTableWrapper">
-        <table class="placement-table">
-          <thead>
-            <th scope="col">[[[priority]]]</th>
-            <th scope="col">[[[Lots]]]</th>
-            <th scope="col" id="buyGapFactorHdr"></th>
-          </thead>
-          <tbody id="buyPlacementsTableBody">
-            <tr id="placementRowTmpl">
-              <td data-tmpl="priority"></td>
-              <td data-tmpl="lots"></td>
-              <td data-tmpl="gapFactor"></td>
-              <td>
-                <span data-tmpl="removeBtn" class="ico-cross fs15 pointer remove-placement-btn"></span>
-              </td>
-              <td>
-                <span data-tmpl="upBtn" class="ico-arrowup fs15 pointer"></span>
-              </td>
-              <td>
-                <span
-                  class="ico-arrowdown fs15 pointer"
-                  data-tmpl="downBtn"
-                ></span>
-              </td>
-            </tr>
-            <tr id="addBuyPlacementRow">
-              <td></td>
-              <td><input id="addBuyPlacementLots" class="lots-input p-2" step="1" type="number"></td>
-              <td><input id="addBuyPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
-              <td></td>
-              <td></td>
-              <td class="text-right">
-                <span id="addBuyPlacementBtn" class="ico-plus fs15 pointer add-placement-btn"></span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <span id="buyPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+      <div id="buyPlacementsBox">
+        <div class="d-flex align-items-center fs18 mt-3 demi">
+          [[[buy_placements]]]
+          <span class="ico-info fs12 ms-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
+        </div>
+        <div class="d-flex flex-column" id="buyPlacementsTableWrapper">
+          <table class="placement-table">
+            <thead>
+              <th scope="col">[[[priority]]]</th>
+              <th scope="col">[[[Lots]]]</th>
+              <th scope="col" id="buyGapFactorHdr"></th>
+            </thead>
+            <tbody id="buyPlacementsTableBody">
+              <tr id="placementRowTmpl">
+                <td data-tmpl="priority"></td>
+                <td data-tmpl="lots"></td>
+                <td data-tmpl="gapFactor"></td>
+                <td>
+                  <span data-tmpl="removeBtn" class="ico-cross fs15 pointer remove-placement-btn"></span>
+                </td>
+                <td>
+                  <span data-tmpl="upBtn" class="ico-arrowup fs15 pointer"></span>
+                </td>
+                <td>
+                  <span
+                    class="ico-arrowdown fs15 pointer"
+                    data-tmpl="downBtn"
+                  ></span>
+                </td>
+              </tr>
+              <tr id="addBuyPlacementRow">
+                <td></td>
+                <td><input id="addBuyPlacementLots" class="lots-input p-2" step="1" type="number"></td>
+                <td><input id="addBuyPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
+                <td></td>
+                <td></td>
+                <td class="text-right">
+                  <span id="addBuyPlacementBtn" class="ico-plus fs15 pointer add-placement-btn"></span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <span id="buyPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+        </div>
       </div>
 
-      <div class="d-flex align-items-center fs18 mt-3 demi">
-        [[[sell_placements]]]
-        <span class="ico-info fs12 ms-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
-      </div>
-      <div class="d-flex flex-column" id="sellPlacementsTableWrapper">
-        <table class="placement-table">
-          <thead>
-            <th scope="col">[[[priority]]]</th>
-            <th scope="col">[[[Lots]]]</th>
-            <th scope="col" id="sellGapFactorHdr"></th>
-            <th scope="col"></th>
-            <th scope="col"></th>
-            <th scope="col"></th>
-          </thead>
-          <tbody id="sellPlacementsTableBody">
-            <tr id="addSellPlacementRow">
-              <td></td>
-              <td><input id="addSellPlacementLots" class="lots-input p-2" step="1" type="number"></td>
-              <td><input id="addSellPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
-              <td></td>
-              <td></td>
-              <td class="text-right">
-                <span id="addSellPlacementBtn" class="ico-plus fs15 pointer add-placement-btn"></span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+      <div id="sellPlacementsBox">
+        <div class="d-flex align-items-center fs18 mt-3 demi">
+          [[[sell_placements]]]
+          <span class="ico-info fs12 ms-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
+        </div>
+        <div class="d-flex flex-column" id="sellPlacementsTableWrapper">
+          <table class="placement-table">
+            <thead>
+              <th scope="col">[[[priority]]]</th>
+              <th scope="col">[[[Lots]]]</th>
+              <th scope="col" id="sellGapFactorHdr"></th>
+              <th scope="col"></th>
+              <th scope="col"></th>
+              <th scope="col"></th>
+            </thead>
+            <tbody id="sellPlacementsTableBody">
+              <tr id="addSellPlacementRow">
+                <td></td>
+                <td><input id="addSellPlacementLots" class="lots-input p-2" step="1" type="number"></td>
+                <td><input id="addSellPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
+                <td></td>
+                <td></td>
+                <td class="text-right">
+                  <span id="addSellPlacementBtn" class="ico-plus fs15 pointer add-placement-btn"></span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+        </div>
       </div>
     </div>
 
     <div class="col-24 col-xl-10 col-xxl-12 d-flex flex-wrap">
       <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
+
+        <div id="cexRebalanceSettings" class="settings-card">
+          <label for="cexRebalanceCheckbox" class="fs18 d-flex align-items-center justify-content-between w-100">
+            <div class="flex-center">
+              <input type="checkbox" id="cexRebalanceCheckbox" class="form-check-input me-2 mt-0" checked>
+              <span>[[[Arbitrage Rebalance]]]</span>
+            </div>
+            <span class="ico-info fs12 ms-1" data-tooltip="[[[enable_rebalance_tooltip]]]"></span>
+          </label>
+        </div>
+
         <div class="settings-card">
-          <div class="fs18 mb-2">
-            [[[Drift tolerance]]]
+          <div class="fs18 mb-2 d-flex align-items-center justify-content-between">
+            <div class="flex-center">
+              [[[Drift tolerance]]]
+            </div>
             <span class="ico-info fs12 me-1" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
           </div>
           <div id="driftToleranceContainer" class="slider-container"></div>
         </div>
 
         <div id="oraclesSettingBox" class="settings-card">
-          <label for="useOracleCheckbox" class="fs18 d-flex align-items-center w-100">
-            <input type="checkbox" id="useOracleCheckbox" class="form-check-input me-2 mt-0" checked>
-            <span>[[[use_oracles]]]</span>
+          <label for="useOracleCheckbox" class="fs18 d-flex align-items-center justify-content-between w-100">
+            <div class="flex-center">
+              <input type="checkbox" id="useOracleCheckbox" class="form-check-input me-2 mt-0" checked>
+              <span>[[[use_oracles]]]</span>
+            </div>
             <span class="ico-info fs12 ms-1" data-tooltip="[[[use_oracles_tooltip]]]"></span>
           </label>
           <div id="oracleWeightingSection" class="pt-2 mt-2 brdrtop">
-            <span>[[[Oracle weight]]]</span>
-            <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
+            <div class="d-flex align-items-center justify-content-between">
+              <span>[[[Oracle weight]]]</span>
+              <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
+            </div>
             <div id="oracleWeightingContainer" class="slider-container"></div>
           </div>
           <div id="oracleBiasSection" class="mt-3">
-            <span>[[[Oracle bias]]]</span>
-            <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
+            <div class="d-flex align-items-center justify-content-between">
+              <span>[[[Oracle bias]]]</span>
+              <span class="ico-info fs12 me-1" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
+            </div>
             <div id="oracleBiasContainer" class="slider-container"></div>
           </div>
         </div>
 
         <div id="orderPersistenceBox" class="settings-card">
-          <div class="fs18 mb-2">
-            [[[Order persistence]]]
+          <div class="fs18 mb-2 d-flex align-items-center justify-content-between">
+            <span>[[[Order persistence]]]</span>
             <span class="ico-info fs12 me-1" data-tooltip="[[[order_persistence_tooltip]]]"></span>
           </div>
           <div id="orderPersistenceContainer" class="slider-container"></div>
         </div>
 
         <div class="settings-card">
-          <label for="emptyMarketRateCheckbox" class="fs18 d-flex align-items-center w-100">
-            <input type="checkbox" id="emptyMarketRateCheckbox" class="form-check-input me-2 mt-0" checked>
-            <span>[[[empty_market_rate]]]</span>
+          <label for="emptyMarketRateCheckbox" class="fs18 d-flex align-items-center justify-content-between w-100">
+            <div class="flex-center">
+              <input type="checkbox" id="emptyMarketRateCheckbox" class="form-check-input me-2 mt-0" checked>
+              <span>[[[empty_market_rate]]]</span>
+            </div>
             <span class="ico-info fs12 ms-1" data-tooltip="[[[empty_market_rate_tooltip]]]"></span>
           </label>
           <div id="emptyMarketRateInputBox" class="pt-2 mt-2 brdrtop">
@@ -215,13 +229,57 @@
 
       <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
         <div id="baseBalanceBox" class="settings-card">
-          <div class="fs18 d-flex align-items-center">
-            <span><img id="baseBalanceLogo" class="micro-icon me-1"> [[[base_asset_balance]]]</span>
+          <div class="fs18 d-flex align-items-center justify-content-between">
+            <div class="flex-center">
+              <img id="baseBalanceLogo" class="micro-icon me-1">
+              <span>[[[dex_base_asset_balance]]]</span>
+            </div>
             <span class="ico-info fs12 me-1" data-tooltip="[[[base_asset_balance_tooltip]]]"></span>
           </div>
           <span class="d-hide errcolor text-break" id="noBaseBalance">[[[no_balance_available]]]</span>
           <div id="baseBalanceContainer" class="slider-container"></div>
           <div id="baseBalanceErr" class="flex-center pt-2 errcolor"></div>
+        </div>
+
+        <div id="cexBaseBalanceBox" class="settings-card">
+          <div class="fs18 d-flex align-items-center justify-content-between">
+            <div class="flex-center">
+              <img id="cexBaseCEXLogo" class="micro-icon me-1">
+              <img id="cexBaseAssetLogo" class="micro-icon me-1">
+              <span class="me-1">[[[cex_base_asset_balance]]]</span>
+            </div>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[cex_alloc_tooltip]]]"></span>
+          </div>
+          <span class="d-hide errcolor text-break" id="noBaseCEXBalance">[[[no_balance_available]]]</span>
+          <div id="cexBaseBalanceContainer" class="slider-container"></div>
+        </div>
+
+        <div id="cexBaseRebalanceOpts" class="settings-card">
+          <div class="fs18 d-flex align-items-center">
+            <img id="cexBRebalCEXLogo" class="micro-icon me-1">
+            <img id="cexBRebalAssetLogo" class="micro-icon me-1">
+            <span class="me-1">[[[cex_base_rebalance]]]</span>
+          </div>
+          <div class="fs18 mt-2 pt-1 brdrtop d-flex align-items-center justify-content-between">
+            <span>[[[Minimum Balance]]]</span>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[arb_minbal_tooltip]]]"></span>
+          </div>
+          <div id="cexBaseMinBalanceContainer" class="slider-container"></div>
+          <label for="" class="fs18 mt-2 pt-1 brdrtop d-flex align-items-center justify-content-between">
+            <span>[[[Minimum Transfer]]]</span>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[arb_transfer_tooltip]]]"></span>
+          </label>
+          <div class="d-flex align-items-stretch">
+            <input type="number" id="cexBaseTransferInput" class="me-4 text-center fs18 p-2"></input>
+            <div class="d-flex flex-column align-items-stretch">
+              <div id="cexBaseTransferUp" class="flex-center flex-grow-1 hoverbg pointer lh1 px-3">
+                <span class="fs16 ico-arrowup"></span>
+              </div>
+              <div id="cexBaseTransferDown" class="flex-center flex-grow-1 hoverbg pointer lh1 px-3">
+                <span class="fs16 ico-arrowdown"></span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="baseWalletSettings" class="settings-card">
@@ -247,15 +305,59 @@
 
       <div class="col-24 col-xxl-8 d-flex flex-column align-items-stretch">
         <div id="quoteBalanceBox" class="settings-card">
-          <div class="fs18 mb-2 d-flex align-items-center">
-            <img id="quoteBalanceLogo" class="micro-icon me-1">
-            <span>[[[quote_asset_balance]]]</span>
+          <div class="fs18 mb-2 d-flex align-items-center justify-content-between">
+            <div class="flex-center">
+              <img id="quoteBalanceLogo" class="micro-icon me-1">
+              <span class="me-1">[[[dex_quote_asset_balance]]]</span>
+            </div>
             <span class="ico-info fs12 ms-1" data-tooltip="[[[quote_asset_balance_tooltip]]]"></span>
           </div>
           <span class="d-hide errcolor text-break" id="noQuoteBalance">[[[no_balance_available]]]</span>
           <div id="quoteBalanceContainer" class="slider-container"></div>
           <div id="quoteBalanceErr" class="flex-center pt-2 errcolor"></div>
         </div>
+
+        <div id="cexQuoteBalanceBox" class="settings-card">
+          <div class="fs18 d-flex align-items-center justify-content-between">
+            <div class="flex-center">
+              <img id="cexQuoteCEXLogo" class="micro-icon me-1">
+              <img id="cexQuoteAssetLogo" class="micro-icon me-1">
+              <span class="me-1">[[[cex_quote_asset_balance]]]</span>
+            </div>
+            <span class="ico-info fs12 me-1" data-tooltip="The amount of quote asset balance to initially allocate to this bot on the exchange."></span>
+          </div>
+          <span class="d-hide errcolor text-break" id="noQuoteCEXBalance">[[[no_balance_available]]]</span>
+          <div id="cexQuoteBalanceContainer" class="slider-container"></div>
+        </div>
+        
+        <div id="cexQuoteRebalanceOpts" class="settings-card">
+          <div class="fs18 d-flex align-items-center">
+            <img id="cexQRebalCEXLogo" class="micro-icon me-1">
+            <img id="cexQRebalAssetLogo" class="micro-icon me-1">
+            <span class="me-1">[[[cex_quote_rebalance]]]</span>
+          </div>
+          <div class="fs18 mt-2 pt-1 brdrtop">
+            [[[Minimum Balance]]]
+            <span class="ico-info fs12 me-1" data-tooltip="arb_minbal_tooltip"></span>
+          </div>
+          <div id="cexQuoteMinBalanceContainer" class="slider-container"></div>
+          <label for="" class="fs18 mt-2 pt-1 brdrtop">
+            <span>[[[Minimum Transfer]]]</span>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[arb_transfer_tooltip]]]"></span>
+          </label>
+          <div class="d-flex align-items-stretch">
+            <input type="number" id="cexQuoteTransferInput" class="me-4 text-center fs18 p-2"></input>
+            <div class="d-flex flex-column align-items-stretch">
+              <div id="cexQuoteTransferUp" class="flex-center flex-grow-1 hoverbg pointer lh1 px-3">
+                <span class="fs16 ico-arrowup"></span>
+              </div>
+              <div id="cexQuoteTransferDown" class="flex-center flex-grow-1 hoverbg pointer lh1 px-3">
+                <span class="fs16 ico-arrowdown"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div id="quoteWalletSettings" class="settings-card">
           <div class="fs18 pb-2 mb-2 brdrbottom d-flex align-items-center">
             <img id="quoteSettingsLogo" class="micro-icon me-1">
@@ -333,8 +435,119 @@
         <input type="text" id="cexSecretInput" class="p-2 mt-1">
       </div>
       <div id="cexFormErr" class="flex-center p-2 fs16 errcolor d-hide"></div>
-      <div id="cexSubmit" class="flex-center brdrtop hoverbg pointer p-3">[[[Submit]]]</div>
+      <div id="cexSubmit" class="feature flex-center fs18 p-3 mx-3 mb-3">[[[Submit]]]</div>
     </form>
+
+    {{- /* NEW WALLET */ -}}
+    <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
+      {{template "newWalletForm"}}
+    </form>
+
+    {{- /* BOT TYPE FORM */ -}}
+    <form id="botTypeForm" class="position-relative mw-425 p-0 d-hide" autocomplete="off">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+
+      <div class="flex-center py-2 brdrbottom brdrtop">
+        <img id="botTypeBaseLogo" class="mini-icon me-1">
+        <img id="botTypeQuoteLogo" class="mini-icon me-2">
+        <div id="botTypeBaseSymbol" class="fs20"></div>-<div id="botTypeQuoteSymbol" class="fs20"></div>
+        <div id="botTypeChangeMarket" class="p-2 fs14 ico-edit hoverbg pointer"></div>
+      </div>
+
+      <div class="flex-center fs22 mt-2">
+        <span class="fs35 ico-robot me-2"></span>
+        <span class="fs22 pt-1">Choose Your Bot</span>
+      </div>
+
+      <div id="noCexesConfigured" class="fs18 p-3">
+        Only the basic market making bot is available. To enable arbitrage options, configure your exchange API.
+      </div>
+
+      <div id="noCexMarket" class="fs18 p-3">
+        Only the basic market making bot is avilable for this market.
+        <span id="noCexMarketConfigureMore">Configure other exchanges to maximize your options.</span>
+      </div>
+
+      <div id="botSelect">
+        <div id="botTypeBasicMM" data-bot-type="basicMM" class="bot-type-selector mx-3 my-3">
+          <div class="flex-center fs24 p-2">Basic Market Maker</div>
+          <div class="flex-center fs16 px-3 pb-2 d-hide">
+            Keep orders on both sides of a DEX market with a configurable spread.
+            If a buy and a sell order both match with minimal market movement in between, you profit.
+          </div>
+        </div>
+  
+        <div id="botTypeARbMM" data-bot-type="arbMM" class="bot-type-selector mx-3 mb-3">
+          <div class="flex-center fs24 p-2">Market Maker + Arbitrage</div>
+          <div class="flex-center fs16 px-3 pb-2 d-hide">
+            Maintain orders on a DEX market placed at positions calculated for matching profitable existing orders
+            orders on CEX. When the DEX order matches, the CEX order is placed immediately for a profit.
+            Unlike basic arbitrage, MM+arb doesn't wait for conditions to be just right,
+            it creates the right conditions and waits for action to occur.
+          </div>
+        </div>
+  
+        <div id="botTypeBasicArb" data-bot-type="basicArb" class="bot-type-selector mx-3 mb-3">
+          <div class="flex-center fs24 p-2">Basic Arbitrage</div>
+          <div class="flex-center fs16 px-3 pb-2 d-hide">
+            Watch both CEX and DEX order books and wait for conditions favorable to place
+            a pair of orders such that when both match, a profit is made. Basic Arbitrage
+            profits when order books (inevitably) get out of sync.
+          </div>
+        </div>
+      </div>
+
+      <div id="cexSelection" class="d-flex flex-wrap px-3 justify-content-between">
+        <div id="cexOptTmpl" class="p-2 col-11 flex-center flex-column brdr rounded3 cex-selector">
+          <div class="flex-center lh1">
+            <img data-tmpl="logo" class="mini-icon me-1 xclogo medium">
+            <span data-tmpl="name" class="me-1 fs20 text-nowrap"></span>
+          </div>
+          <span data-tmpl="needsconfig" class="fs14 grey flex-center"><span class="ico-settings fs12 me-1"></span> [[[Configure]]]</span>
+          <span data-tmpl="unavailable" class="fs14 grey">[[[Market not available]]]</span>
+        </div>
+      </div>
+
+      <div id="botTypeErr" class="flex-center mb-2 errcolor d-hide"></div>
+
+      <div id="botTypeSubmit" class="feature fs18 flex-center brdr rounded3 p-3 m-2">[[[Submit]]]</div>
+    </form>
+
+    <form id="marketSelectForm" class="p-0 pb-2">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <div class="flex-center fs22 mb-2">[[[Select a Market]]]</div>
+
+      <div id="marketFilterBox" class="flex-center">
+        <div class="position-relative">
+          <input id="marketFilterInput" type="text" class="p-2 text-center fs18">
+          <span id="marketFilterIcon" class="fs22 ico-search"></span>
+        </div>
+      </div>
+
+      <table id="marketSelectionTable" class="mx-3">
+        <thead>
+          <tr>
+            <th>Market</th>
+            <th>Host</th>
+            <th>Arb</th>
+          </tr>
+        </thead>
+        <tbody id="marketSelect">
+          <tr id="marketRowTmpl" class="hoverbg pointer">
+            <td>
+              <img data-tmpl="baseIcon" class="mini-icon me-1">
+              <img data-tmpl="quoteIcon" class="mini-icon me-1">
+              <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
+            </td>
+            <td data-tmpl="host"></td>
+            <td data-tmpl="arbs">
+              <img id="arbBttnTmpl" class="mini-icon me-1">
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </form>
+
   </div>
 
   <div id="vOrderOpts">{{template "orderOptionTemplates"}}</div>

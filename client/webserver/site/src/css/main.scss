@@ -116,7 +116,18 @@ div.clear {
 
 div.feature,
 button.feature {
+  cursor: pointer;
   background-color: #6bc5ff;
+
+  &:hover {
+    background-color: #a3dbff;
+  }
+}
+
+button.selected {
+  background-color: #38cfb0;
+  border: none;
+}
 
   &:hover {
     background-color: #a3dbff;

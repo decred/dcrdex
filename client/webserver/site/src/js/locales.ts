@@ -181,6 +181,10 @@ export const ID_INVALID_VALUE = 'INVALID_VALUE'
 export const ID_NO_ZERO = 'NO_ZERO'
 export const ID_BOTTYPE_BASIC_MM = 'BOTTYPE_BASIC_MM'
 export const ID_BOTTYPE_ARB_MM = 'BOTTYPE_ARB_MM'
+export const ID_BOTTYPE_SIMPLE_ARB = 'BOTTYPE_SIMPLE_ARB'
+export const ID_NO_BOTTYPE = 'NO_BOTTYPE'
+export const ID_NO_CEX = 'NO_CEX'
+export const ID_CEXBALANCE_ERR = 'CEXBALANCE_ERR'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -362,7 +366,11 @@ export const enUS: Locale = {
   [ID_INVALID_VALUE]: 'invalid value',
   [ID_NO_ZERO]: 'zero not allowed',
   [ID_BOTTYPE_BASIC_MM]: 'Market Maker',
-  [ID_BOTTYPE_ARB_MM]: 'Market Maker + Arbitrage'
+  [ID_BOTTYPE_ARB_MM]: 'Market Maker + Arbitrage',
+  [ID_BOTTYPE_SIMPLE_ARB]: 'Simple Arbitrage',
+  [ID_NO_BOTTYPE]: 'choose a bot type',
+  [ID_NO_CEX]: 'choose an exchange for arbitrage',
+  [ID_CEXBALANCE_ERR]: 'error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}'
 }
 
 export const ptBR: Locale = {

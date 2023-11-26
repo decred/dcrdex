@@ -123,8 +123,8 @@ export default class Doc {
   }
 
   /* bind binds the function to the event for the element. */
-  static bind (el: EventTarget, ev: string, f: EventListenerOrEventListenerObject): void {
-    el.addEventListener(ev, f)
+  static bind (el: EventTarget, ev: string | string[], f: EventListenerOrEventListenerObject): void {
+    for (const e of (Array.isArray(ev) ? ev : [ev])) el.addEventListener(e, f)
   }
 
   /* unbind removes the handler for the event from the element. */

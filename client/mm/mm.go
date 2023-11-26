@@ -170,6 +170,7 @@ func (m *MarketWithHost) String() string {
 	return fmt.Sprintf("%s-%d-%d", m.Host, m.BaseID, m.QuoteID)
 }
 
+// centralizedExchange is used to manage an exchange API connection.
 type centralizedExchange struct {
 	libxc.CEX
 	*CEXConfig
@@ -237,8 +238,7 @@ func NewMarketMaker(c clientCore, cfgPath string, log dex.Logger) (*MarketMaker,
 		unsyncedOracle: newUnsyncedPriceOracle(log),
 		cexes:          make(map[string]*centralizedExchange),
 	}
-	var dummyCancel context.CancelFunc = func() {}
-	m.die.Store(dummyCancel)
+	m.die.Store(context.CancelFunc(func() {}))
 	return m, nil
 }
 
@@ -314,6 +314,14 @@ func (m *MarketMaker) markBotAsRunning(mkt MarketWithHost, running bool) {
 	if len(m.runningBots) == 0 {
 		m.Stop()
 	}
+}
+
+func (m *MarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error) {
+	cex, err := m.connectedCEX(cexName)
+	if err != nil {
+		return nil, fmt.Errorf("error getting connected CEX: %w", err)
+	}
+	return cex.Balance(assetID)
 }
 
 // MarketReport returns information about the oracle rates on a market
@@ -995,58 +1003,60 @@ func (m *MarketMaker) handleNotification(n core.Notification) {
 	}
 }
 
+// loadAndConnectCEX initializes the centralizedExchange if required, and
+// connects if not already connected.
+func (m *MarketMaker) loadAndConnectCEX(cfg *CEXConfig) (*centralizedExchange, *dex.ConnectionMaster, error) {
+	c, err := m.loadCEX(m.ctx, cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error loading CEX: %w", err)
+	}
+	var cm *dex.ConnectionMaster
+	c.mtx.Lock()
+	if c.cm == nil || !c.cm.On() {
+		cm = dex.NewConnectionMaster(c)
+		c.cm = cm
+	} else {
+		cm = c.cm
+	}
+	c.mtx.Unlock()
+	if !cm.On() {
+		if err = cm.Connect(m.ctx); err != nil {
+			return nil, nil, fmt.Errorf("failed to connect to CEX: %v", err)
+		}
+	}
+	return c, cm, nil
+}
+
+// connectedCEX returns the connected centralizedExchange, initializing and
+// connecting if required.
+func (m *MarketMaker) connectedCEX(cexName string) (*centralizedExchange, error) {
+	cfg := m.cexConfig(cexName)
+	if cfg == nil {
+		return nil, fmt.Errorf("CEX %q not known", cexName)
+	}
+	cex, _, err := m.loadAndConnectCEX(cfg)
+	return cex, err
+}
+
+// initCEXConnections initializes and connects to the specified cexes.
 func (m *MarketMaker) initCEXConnections(cfgs []*CEXConfig) (map[string]libxc.CEX, map[string]*dex.ConnectionMaster) {
 	cexes := make(map[string]libxc.CEX)
 	cexCMs := make(map[string]*dex.ConnectionMaster)
 
-	findCEXConfig := func(cexName string) *CEXConfig {
-		for _, cfg := range cfgs {
-			if cfg.Name == cexName {
-				return cfg
-			}
-		}
-		return nil
-	}
-
-	getConnectedCEX := func(cexName string) (cex libxc.CEX, err error) {
-		var found bool
-		if cex, found = cexes[cexName]; !found {
-			cexCfg := findCEXConfig(cexName)
-			if cexCfg == nil {
-				return nil, fmt.Errorf("no CEX config provided for %s", cexName)
-			}
-			c, err := m.loadCEX(m.ctx, cexCfg)
-			if err != nil {
-				return nil, fmt.Errorf("error loading CEX: %w", err)
-			}
-			var cm *dex.ConnectionMaster
-			c.mtx.Lock()
-			if c.cm == nil || !c.cm.On() {
-				cm = dex.NewConnectionMaster(c)
-				c.cm = cm
-				cexCMs[cexName] = cm
-			}
-			c.mtx.Unlock()
-			if cm != nil {
-				if err = cm.Connect(m.ctx); err != nil {
-					return nil, fmt.Errorf("failed to connect to CEX: %v", err)
-				}
-			}
-			cex = c.CEX
-			cexes[cexName] = cex
-		}
-		return cex, nil
-	}
-
 	for _, cfg := range cfgs {
-		if _, err := getConnectedCEX(cfg.Name); err != nil {
+		c, cm, err := m.loadAndConnectCEX(cfg)
+		if err != nil {
 			m.log.Errorf("Failed to create %s: %v", cfg.Name, err)
+			continue
 		}
+		cexes[c.Name] = c.CEX
+		cexCMs[c.Name] = cm
 	}
 
 	return cexes, cexCMs
 }
 
+// loadCEX initializes the cex if required and returns the centralizedExchange.“
 func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralizedExchange, error) {
 	m.cexMtx.Lock()
 	defer m.cexMtx.Unlock()
@@ -1088,6 +1098,17 @@ func (m *MarketMaker) config() *MarketMakingConfig {
 	m.cfgMtx.RLock()
 	defer m.cfgMtx.RUnlock()
 	return m.cfg.Copy()
+}
+
+func (m *MarketMaker) cexConfig(cexName string) *CEXConfig {
+	m.cfgMtx.RLock()
+	defer m.cfgMtx.RUnlock()
+	for _, cfg := range m.cfg.CexConfigs {
+		if cfg.Name == cexName {
+			return cfg
+		}
+	}
+	return nil
 }
 
 func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
@@ -1356,7 +1377,7 @@ func (m *MarketMaker) UpdateBotConfig(updatedCfg *BotConfig) (*MarketMakingConfi
 func (m *MarketMaker) UpdateCEXConfig(updatedCfg *CEXConfig) (*MarketMakingConfig, []*libxc.Market, error) {
 	cfg := m.config()
 
-	cex, err := m.loadCEX(m.ctx, updatedCfg)
+	cex, _, err := m.loadAndConnectCEX(updatedCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error loading %s with updated config: %w", updatedCfg.Name, err)
 	}
@@ -1368,13 +1389,17 @@ func (m *MarketMaker) UpdateCEXConfig(updatedCfg *CEXConfig) (*MarketMakingConfi
 	var updated bool
 	for i, c := range cfg.CexConfigs {
 		if c.Name == updatedCfg.Name {
+			m.cfgMtx.Lock()
 			cfg.CexConfigs[i] = updatedCfg
+			m.cfgMtx.Unlock()
 			updated = true
 			break
 		}
 	}
 	if !updated {
+		m.cfgMtx.Lock()
 		cfg.CexConfigs = append(cfg.CexConfigs, updatedCfg)
+		m.cfgMtx.Unlock()
 	}
 
 	return cfg, mkts, m.writeConfigFile(cfg)

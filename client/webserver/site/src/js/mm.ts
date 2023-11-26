@@ -1,26 +1,28 @@
 import {
   app,
   PageElement,
-  Market,
-  Exchange,
   BotConfig,
   CEXConfig,
   MarketWithHost,
   BotStartStopNote,
   MMStartStopNote,
   BalanceNote,
-  SupportedAsset,
   MarketMakingConfig,
   MarketMakingStatus,
-  CEXMarket
+  CEXMarket,
+  ExchangeBalance
 } from './registry'
 import { getJSON, postJSON } from './http'
 import Doc from './doc'
 import State from './state'
 import BasePage from './basepage'
 import { setOptionTemplates } from './opts'
-import { bind as bindForm, NewWalletForm } from './forms'
+import { bind as bindForm, NewWalletForm, Forms } from './forms'
 import * as intl from './locales'
+
+export const botTypeBasicMM = 'basicMM'
+export const botTypeArbMM = 'arbMM'
+export const botTypeBasicArb = 'basicArb'
 
 interface CEXDisplayInfo {
   name: string
@@ -38,21 +40,15 @@ export const CEXDisplayInfos: Record<string, CEXDisplayInfo> = {
   }
 }
 
-interface HostedMarket extends Market {
-  host: string
-}
-
-const animationLength = 300
-
 function marketStr (host: string, baseID: number, quoteID: number): string {
   return `${host}-${baseID}-${quoteID}`
 }
 
 export default class MarketMakerPage extends BasePage {
   page: Record<string, PageElement>
+  forms: Forms
   currentForm: HTMLElement
   keyup: (e: KeyboardEvent) => void
-  currentNewMarket: HostedMarket
   newWalletForm: NewWalletForm
   botConfigs: BotConfig[]
 
@@ -61,36 +57,18 @@ export default class MarketMakerPage extends BasePage {
 
     const page = this.page = Doc.idDescendants(main)
 
-    page.forms.querySelectorAll('.form-closer').forEach(el => {
-      Doc.bind(el, 'click', () => { this.closePopups() })
-    })
+    this.forms = new Forms(page.forms)
 
-    this.keyup = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        this.closePopups()
-      }
-    }
-
-    this.newWalletForm = new NewWalletForm(
-      page.newWalletForm,
-      () => { this.addBotSubmit() }
-    )
-
-    Doc.bind(page.addBotBtnNoExisting, 'click', () => { this.showAddBotForm() })
-    Doc.bind(page.addBotBtnWithExisting, 'click', () => { this.showAddBotForm() })
+    Doc.bind(page.addBotBtnNoExisting, 'click', () => { this.newBot() })
+    Doc.bind(page.addBotBtnWithExisting, 'click', () => { this.newBot() })
     Doc.bind(page.startBotsBtn, 'click', () => { this.start() })
     Doc.bind(page.stopBotsBtn, 'click', () => { MM.stop() })
-    Doc.bind(page.hostSelect, 'change', () => { this.selectMarketHost() })
-    bindForm(page.addBotForm, page.addBotSubmit, () => { this.addBotSubmit() })
     bindForm(page.pwForm, page.pwSubmit, () => this.startBots())
 
     setOptionTemplates(page)
 
     Doc.cleanTemplates(page.orderOptTmpl, page.booleanOptTmpl, page.rangeOptTmpl,
-      page.assetRowTmpl, page.botTableRowTmpl)
-
-    Doc.bind(page.baseSelect, 'click', (e: MouseEvent) => this.selectMarketAssetClicked(e, true))
-    Doc.bind(page.quoteSelect, 'click', (e: MouseEvent) => this.selectMarketAssetClicked(e, false))
+      page.botTableRowTmpl)
 
     this.setup()
   }
@@ -173,243 +151,8 @@ export default class MarketMakerPage extends BasePage {
     Doc.unbind(document, 'keyup', this.keyup)
   }
 
-  /**
-   * The functions below all handle the interactions on the add bot form.
-   */
-
-  async selectMarketAssetClicked (e: MouseEvent, isBase: boolean): Promise<void> {
-    const page = this.page
-    e.stopPropagation()
-    const select = isBase ? page.baseSelect : page.quoteSelect
-    const m = Doc.descendentMetrics(page.addBotForm, select)
-    page.assetDropdown.style.left = `${m.bodyLeft}px`
-    page.assetDropdown.style.top = `${m.bodyTop}px`
-
-    const counterAsset = isBase ? this.currentNewMarket.quoteid : this.currentNewMarket.baseid
-    const clickedSymbol = isBase ? this.currentNewMarket.basesymbol : this.currentNewMarket.quotesymbol
-
-    // Look through markets for other base assets for the counter asset.
-    const matches: Set<string> = new Set()
-    const otherAssets: Set<string> = new Set()
-
-    for (const mkt of await this.sortedMarkets()) {
-      otherAssets.add(mkt.basesymbol)
-      otherAssets.add(mkt.quotesymbol)
-      const [firstID, secondID] = isBase ? [mkt.quoteid, mkt.baseid] : [mkt.baseid, mkt.quoteid]
-      const [firstSymbol, secondSymbol] = isBase ? [mkt.quotesymbol, mkt.basesymbol] : [mkt.basesymbol, mkt.quotesymbol]
-      if (firstID === counterAsset) matches.add(secondSymbol)
-      else if (secondID === counterAsset) matches.add(firstSymbol)
-    }
-    const options = Array.from(matches)
-    options.sort((a: string, b: string) => a.localeCompare(b))
-    for (const symbol of options) otherAssets.delete(symbol)
-    const nonOptions = Array.from(otherAssets)
-    nonOptions.sort((a: string, b: string) => a.localeCompare(b))
-
-    Doc.empty(page.assetDropdown)
-    const addOptions = (symbols: string[], avail: boolean): void => {
-      for (const symbol of symbols) {
-        const assetID = Doc.bipIDFromSymbol(symbol)
-        if (assetID === undefined) continue // unsupported asset
-        const asset = app().assets[assetID]
-        const row = this.assetRow(asset)
-        Doc.bind(row, 'click', (e: MouseEvent) => {
-          e.stopPropagation()
-          if (symbol === clickedSymbol) return this.hideAssetDropdown() // no change
-          if (isBase) this.setCreationBase(symbol)
-          else this.setCreationQuote(symbol)
-        })
-        if (!avail) row.classList.add('ghost')
-        page.assetDropdown.appendChild(row)
-      }
-    }
-    addOptions(options, true)
-    addOptions(nonOptions, false)
-    Doc.show(page.assetDropdown)
-    const clicker = (e: MouseEvent): void => {
-      if (Doc.mouseInElement(e, page.assetDropdown)) return
-      this.hideAssetDropdown()
-      Doc.unbind(document, 'click', clicker)
-    }
-    Doc.bind(document, 'click', clicker)
-  }
-
-  selectMarketHost (): void {
-    if (this.currentNewMarket && this.page.hostSelect.value) {
-      this.currentNewMarket.host = this.page.hostSelect.value
-    }
-  }
-
-  assetRow (asset: SupportedAsset): PageElement {
-    const row = this.page.assetRowTmpl.cloneNode(true) as PageElement
-    const tmpl = Doc.parseTemplate(row)
-    tmpl.logo.src = Doc.logoPath(asset.symbol)
-    Doc.empty(tmpl.symbol)
-    tmpl.symbol.appendChild(Doc.symbolize(asset))
-    return row
-  }
-
-  hideAssetDropdown (): void {
-    const page = this.page
-    page.assetDropdown.scrollTop = 0
-    Doc.hide(page.assetDropdown)
-  }
-
-  async setMarket (mkts: HostedMarket[]): Promise<void> {
-    const page = this.page
-
-    const mkt = mkts[0]
-    this.currentNewMarket = mkt
-
-    Doc.empty(page.baseSelect, page.quoteSelect)
-
-    const baseAsset = app().assets[mkt.baseid]
-    const quoteAsset = app().assets[mkt.quoteid]
-
-    page.baseSelect.appendChild(this.assetRow(baseAsset))
-    page.quoteSelect.appendChild(this.assetRow(quoteAsset))
-    this.hideAssetDropdown()
-
-    const addHostSelect = (mkt: HostedMarket, el: PageElement) => {
-      Doc.setContent(el,
-        Doc.symbolize(baseAsset),
-        new Text('-') as any,
-        Doc.symbolize(quoteAsset),
-        new Text(' @ ') as any,
-        new Text(mkt.host) as any
-      )
-    }
-
-    Doc.hide(page.hostSelect, page.marketOneChoice)
-    if (mkts.length === 1) {
-      Doc.show(page.marketOneChoice)
-      addHostSelect(mkt, page.marketOneChoice)
-    } else {
-      Doc.show(page.hostSelect)
-      Doc.empty(page.hostSelect)
-      for (const mkt of mkts) {
-        const opt = document.createElement('option')
-        page.hostSelect.appendChild(opt)
-        opt.value = `${mkt.host}`
-        addHostSelect(mkt, opt)
-      }
-    }
-  }
-
-  async setCreationBase (symbol: string) {
-    const counterAsset = this.currentNewMarket.quotesymbol
-    const markets = await this.sortedMarkets()
-    const getAllMarketsWithAssets = (base: string, quote: string) : HostedMarket[] => {
-      const mkts: HostedMarket[] = []
-      for (const mkt of markets) if (mkt.basesymbol === base && mkt.quotesymbol === quote) mkts.push(mkt)
-      return mkts
-    }
-    // Best option: find an exact match.
-    let options = getAllMarketsWithAssets(symbol, counterAsset)
-    if (options.length > 0) return this.setMarket(options)
-
-    // Next best option: same assets, reversed order.
-    options = getAllMarketsWithAssets(counterAsset, symbol)
-    if (options.length > 0) return this.setMarket(options)
-
-    // No exact matches. Must have selected a ghost-class market. Next best
-    // option will be the first market where the selected asset is a base asset.
-    let newCounterAsset: string | undefined
-    for (const mkt of markets) if (mkt.basesymbol === symbol) newCounterAsset = mkt.quotesymbol
-    if (newCounterAsset) {
-      return this.setMarket(getAllMarketsWithAssets(symbol, newCounterAsset))
-    }
-
-    // Last option: Market where this is the quote asset.
-    let newBaseAsset : string | undefined
-    for (const mkt of markets) if (mkt.quotesymbol === symbol) newBaseAsset = mkt.basesymbol
-    if (newBaseAsset) {
-      return this.setMarket(getAllMarketsWithAssets(newBaseAsset, symbol))
-    }
-
-    console.error(`No market found for ${symbol}`)
-  }
-
-  async setCreationQuote (symbol: string) {
-    const counterAsset = this.currentNewMarket.basesymbol
-    const markets = await this.sortedMarkets()
-    const getAllMarketsWithAssets = (base: string, quote: string) : HostedMarket[] => {
-      const mkts: HostedMarket[] = []
-      for (const mkt of markets) if (mkt.basesymbol === base && mkt.quotesymbol === quote) mkts.push(mkt)
-      return mkts
-    }
-    // Best option: find an exact match.
-    let options = getAllMarketsWithAssets(counterAsset, symbol)
-    if (options.length > 0) return this.setMarket(options)
-
-    // Next best option: same assets, reversed order.
-    options = getAllMarketsWithAssets(symbol, counterAsset)
-    if (options.length > 0) return this.setMarket(options)
-
-    // No exact matches. Must have selected a ghost-class market. Next best
-    // option will be the first market where the selected asset is a base asset.
-    let newCounterAsset: string | undefined
-    for (const mkt of markets) if (mkt.quotesymbol === symbol) newCounterAsset = mkt.quotesymbol
-    if (newCounterAsset) {
-      return this.setMarket(getAllMarketsWithAssets(newCounterAsset, symbol))
-    }
-
-    // Last option: Market where this is the quote asset.
-    let newQuoteAsset : string | undefined
-    for (const mkt of markets) if (mkt.basesymbol === symbol) newQuoteAsset = mkt.quotesymbol
-    if (newQuoteAsset) {
-      return this.setMarket(getAllMarketsWithAssets(symbol, newQuoteAsset))
-    }
-
-    console.error(`No market found for ${symbol}`)
-  }
-
-  /*
-  * sortedMarkets returns a list of markets that do not yet have a market maker.
-  */
-  async sortedMarkets (): Promise<HostedMarket[]> {
-    const mkts: HostedMarket[] = []
-    const convertMarkets = (xc: Exchange): HostedMarket[] => {
-      if (!xc.markets) return []
-      return Object.values(xc.markets).map((mkt: Market) => Object.assign({ host: xc.host }, mkt))
-    }
-    for (const xc of Object.values(app().user.exchanges)) mkts.push(...convertMarkets(xc))
-
-    const mmCfg = await MM.config()
-    const botCfgs = mmCfg.botConfigs || []
-    const existingMarkets : Record<string, boolean> = {}
-    for (const cfg of botCfgs) {
-      existingMarkets[marketStr(cfg.host, cfg.baseID, cfg.quoteID)] = true
-    }
-    const filteredMkts = mkts.filter((mkt) => {
-      return !existingMarkets[marketStr(mkt.host, mkt.baseid, mkt.quoteid)]
-    })
-    filteredMkts.sort((a: Market, b: Market) => {
-      if (!a.spot) {
-        if (!b.spot) return a.name.localeCompare(b.name)
-        return -1
-      }
-      if (!b.spot) return 1
-      // Sort by lots.
-      return b.spot.vol24 / b.lotsize - a.spot.vol24 / a.lotsize
-    })
-    return filteredMkts
-  }
-
-  addBotSubmit () {
-    const currMkt = this.currentNewMarket
-    if (!app().walletMap[currMkt.baseid]) {
-      this.newWalletForm.setAsset(currMkt.baseid)
-      this.showForm(this.page.newWalletForm)
-      return
-    }
-    if (!app().walletMap[currMkt.quoteid]) {
-      this.newWalletForm.setAsset(currMkt.quoteid)
-      this.showForm(this.page.newWalletForm)
-      return
-    }
-
-    app().loadPage(`mmsettings?host=${currMkt.host}&base=${currMkt.baseid}&&quote=${currMkt.quoteid}`)
+  newBot () {
+    app().loadPage('mmsettings')
   }
 
   /*
@@ -481,10 +224,11 @@ export default class MarketMakerPage extends BasePage {
       rowTmpl.quoteBalance.textContent = this.walletBalanceStr(botCfg.quoteID, botCfg.quoteBalance)
       rowTmpl.baseBalanceLogo.src = baseLogoPath
       rowTmpl.quoteBalanceLogo.src = quoteLogoPath
-      if (botCfg.arbMarketMakingConfig) {
-        rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_ARB_MM)
+      if (botCfg.arbMarketMakingConfig || botCfg.simpleArbConfig) {
+        if (botCfg.arbMarketMakingConfig) rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_ARB_MM)
+        else rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_SIMPLE_ARB)
         Doc.show(rowTmpl.cexLink)
-        const dinfo = CEXDisplayInfos[botCfg.arbMarketMakingConfig.cexName]
+        const dinfo = CEXDisplayInfos[botCfg.cexCfg?.name || '']
         rowTmpl.cexLogo.src = '/img/' + dinfo.logo
         rowTmpl.cexName.textContent = dinfo.name
       } else {
@@ -500,24 +244,26 @@ export default class MarketMakerPage extends BasePage {
         Doc.setVis(!noBots, page.botTable, page.onOff)
       })
       Doc.bind(rowTmpl.settings, 'click', () => {
-        app().loadPage(`mmsettings?host=${botCfg.host}&base=${botCfg.baseID}&quote=${botCfg.quoteID}`)
+        let botType = botTypeBasicMM
+        let cexName
+        switch (true) {
+          case Boolean(botCfg.arbMarketMakingConfig):
+            botType = botTypeArbMM
+            cexName = botCfg.cexCfg?.name as string
+            break
+          case Boolean(botCfg.simpleArbConfig):
+            botType = botTypeBasicArb
+            cexName = botCfg.cexCfg?.name as string
+        }
+        app().loadPage('mmsettings', { host: botCfg.host, baseID: botCfg.baseID, quoteID: botCfg.quoteID, botType, cexName })
       })
       page.botTableBody.appendChild(row)
     }
   }
 
-  async showAddBotForm () {
-    const sortedMarkets = await this.sortedMarkets()
-    if (sortedMarkets.length === 0) return
-    const { baseid: baseID, quoteid: quoteID } = sortedMarkets.filter((mkt: HostedMarket) => Boolean(app().assets[mkt.baseid]) && Boolean(app().assets[mkt.quoteid]))[0]
-    const initialMarkets = sortedMarkets.filter((mkt: HostedMarket) => mkt.baseid === baseID && mkt.quoteid === quoteID)
-    this.setMarket(initialMarkets)
-    this.showForm(this.page.addBotForm)
-  }
-
   async start () {
     if (State.passwordIsCached()) this.startBots()
-    else this.showForm(this.page.pwForm)
+    else this.forms.show(this.page.pwForm)
   }
 
   async startBots () {
@@ -525,30 +271,12 @@ export default class MarketMakerPage extends BasePage {
     Doc.hide(page.mmErr)
     const appPW = page.pwInput.value || ''
     this.page.pwInput.value = ''
-    this.closePopups()
+    this.forms.close()
     const res = await MM.start(appPW)
     if (!app().checkResponse(res)) {
       page.mmErr.textContent = res.msg
       Doc.show(page.mmErr)
     }
-  }
-
-  /* showForm shows a modal form with a little animation. */
-  async showForm (form: HTMLElement): Promise<void> {
-    this.currentForm = form
-    const page = this.page
-    Doc.hide(page.pwForm, page.newWalletForm, page.addBotForm)
-    form.style.right = '10000px'
-    Doc.show(page.forms, form)
-    const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
-    await Doc.animate(animationLength, progress => {
-      form.style.right = `${(1 - progress) * shift}px`
-    }, 'easeOutHard')
-    form.style.right = '0'
-  }
-
-  closePopups (): void {
-    Doc.hide(this.page.forms)
   }
 }
 
@@ -609,6 +337,7 @@ class MarketMakerBot {
     if (res.err) {
       throw new Error(res.err)
     }
+
     this.cfg = res.cfg
     this.mkts[cfg.name] = res.mkts || []
   }
@@ -653,7 +382,7 @@ class MarketMakerBot {
     if (this.st !== undefined) return this.st
     const res = await getJSON('/api/marketmakingstatus')
     if (!app().checkResponse(res)) {
-      throw new Error('failed to fetch market making status')
+      throw new Error(`failed to fetch market making status: ${res.msg ?? String(res)}`)
     }
     const status = {} as MarketMakingStatus
     status.running = !!res.running
@@ -664,6 +393,14 @@ class MarketMakerBot {
 
   cexConfigured (cexName: string) {
     return (this.cfg.cexConfigs || []).some((cfg: CEXConfig) => cfg.name === cexName)
+  }
+
+  async cexBalance (cexName: string, assetID: number): Promise<ExchangeBalance> {
+    const res = await postJSON('/api/cexbalance', { cexName, assetID })
+    if (!app().checkResponse(res)) {
+      throw new Error(`failed to fetch cexBalance status: ${res.msg ?? String(res)}`)
+    }
+    return res.cexBalance
   }
 }
 

@@ -5364,29 +5364,32 @@ func TestSegregatedCEXWithdraw(t *testing.T) {
 		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]libxc.CEX{cexName: cex})
 		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseID, tt.cfg.QuoteID)
 		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
-		// mm.doNotKillWhenBotsStop = true
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		_, err := mm.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", tt.name, err)
+		}
 
 		cexCM := dex.NewConnectionMaster(cex)
 		if err := cexCM.Connect(ctx); err != nil {
 			t.Fatalf("error connecting tCEX: %v", err)
 		}
+
+		mm.UpdateBotConfig(tt.cfg)
 		cexConfig := &CEXConfig{
 			Name: libxc.Binance,
 		}
-		mm.UpdateBotConfig(tt.cfg)
-		mm.UpdateCEXConfig(cexConfig)
 		mm.cexes[libxc.Binance] = &centralizedExchange{
 			CEX:       cex,
 			CEXConfig: cexConfig,
 			cm:        cexCM,
 			mkts:      []*libxc.Market{},
 		}
-		_, err := mm.Connect(ctx)
-		if err != nil {
-			t.Fatalf("%s: Connect error: %v", tt.name, err)
-		}
+
+		mm.cfg.CexConfigs = append(mm.cfg.CexConfigs, cexConfig)
+
 		if err := mm.Start([]byte{}, nil); err != nil {
 			t.Fatalf("%s: Start error: %v", tt.name, err)
 		}
