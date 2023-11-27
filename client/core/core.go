@@ -5508,12 +5508,7 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 
 	c.updateAssetBalance(assetID)
 
-	txCoin, is := coin.(asset.TxCoin)
-	if !is {
-		return "", nil, fmt.Errorf("Send successful, but returned coin is not a TxCoin")
-	}
-
-	return txCoin.TxID(), coin, nil
+	return coin.TxID(), coin, nil
 }
 
 // TransactionConfirmations returns the number of confirmations of

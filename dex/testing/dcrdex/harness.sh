@@ -144,8 +144,8 @@ if [ $ETH_ON -eq 0 ]; then
             "parcelSize": 4
         },
         {
-            "base": "BTC_simnet",
-            "quote": "ETH_simnet",
+            "base": "ETH_simnet",
+            "quote": "BTC_simnet",
             "lotSize": 1000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},

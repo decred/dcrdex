@@ -526,8 +526,9 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
-	// TransactionConfirmations gets the number of confirmations for the specified
-	// transaction.
+	// TransactionConfirmations gets the number of confirmations for the
+	// specified transaction. If the wallet does not know about the
+	// transaction, asset.CoinNotFoundError is returned.
 	TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error)
 	// Send sends the exact value to the specified address. This is different
 	// from Withdraw, which subtracts the tx fees from the amount sent.
@@ -1220,9 +1221,7 @@ type Coin interface {
 	String() string
 	// Value is the available quantity, in atoms/satoshi.
 	Value() uint64
-}
-
-type TxCoin interface {
+	// TxID is the ID of the transaction that created the coin.
 	TxID() string
 }
 

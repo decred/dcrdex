@@ -27,7 +27,7 @@ type CEXConfig struct {
 	APISecret string `json:"apiSecret"`
 }
 
-// BotCEXCfg is the specifies the CEX that a bot uses and the initial balances
+// BotCEXCfg specifies the CEX that a bot uses and the initial balances
 // that should be allocated to the bot on that CEX.
 type BotCEXCfg struct {
 	Name             string      `json:"name"`

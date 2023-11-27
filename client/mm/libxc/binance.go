@@ -446,12 +446,12 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
-		return "", fmt.Errorf("error getting asset cfg for %d", baseID)
+		return "", fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
 	}
 
 	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
-		return "", fmt.Errorf("error getting asset cfg for %d", quoteID)
+		return "", fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
 	}
 
 	slug := baseCfg.coin + quoteCfg.coin
@@ -511,6 +511,9 @@ func (bnc *binance) assetPrecision(coin string) (int, error) {
 	return 0, fmt.Errorf("asset %s not found", coin)
 }
 
+// Withdraw withdraws funds from the CEX to a certain address. onComplete
+// is called with the actual amount withdrawn (amt - fees) and the
+// transaction ID of the withdrawal.
 func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(uint64, string)) error {
 	assetCfg, err := bncAssetCfg(assetID)
 	if err != nil {
@@ -559,6 +562,7 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 			for _, s := range withdrawHistoryResponse {
 				if s.ID == withdrawResp.ID {
 					status = s
+					break
 				}
 			}
 			if status == nil {
@@ -591,6 +595,7 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 	return nil
 }
 
+// GetDepositAddress returns a deposit address for an asset.
 func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (string, error) {
 	assetCfg, err := bncAssetCfg(assetID)
 	if err != nil {
@@ -612,6 +617,8 @@ func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (stri
 	return resp.Address, nil
 }
 
+// ConfirmDeposit is an async function that calls onConfirm when the status of
+// a deposit has been confirmed.
 func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(bool, uint64)) {
 	const (
 		pendingStatus            = 0
@@ -714,12 +721,12 @@ func (bnc *binance) SubscribeTradeUpdates() (<-chan *TradeUpdate, func(), int) {
 func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error {
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d", baseID)
+		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
 	}
 
 	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d", quoteID)
+		return fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
 	}
 
 	slug := baseCfg.coin + quoteCfg.coin
@@ -1331,12 +1338,12 @@ func (bnc *binance) startMarketDataStream(ctx context.Context, baseSymbol, quote
 func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d", baseID)
+		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
 	}
 
 	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d", quoteID)
+		return fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
 	}
 
 	bnc.stopMarketDataStream(strings.ToLower(baseCfg.coin + quoteCfg.coin))
@@ -1348,12 +1355,12 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 func (bnc *binance) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d", baseID)
+		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
 	}
 
 	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d", quoteID)
+		return fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
 	}
 
 	return bnc.startMarketDataStream(ctx, baseCfg.coin, quoteCfg.coin)
@@ -1368,12 +1375,12 @@ func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPric
 
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
-		return fail(fmt.Errorf("error getting asset cfg for %d", baseID))
+		return fail(fmt.Errorf("error getting asset cfg for %d: %w", baseID, err))
 	}
 
 	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
-		return fail(fmt.Errorf("error getting asset cfg for %d", quoteID))
+		return fail(fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err))
 	}
 
 	slug := strings.ToLower(baseCfg.coin + quoteCfg.coin)

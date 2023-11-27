@@ -56,12 +56,15 @@ type wrappedCEX struct {
 
 var _ cex = (*wrappedCEX)(nil)
 
+// Balance returns the balance of the bot on the CEX.
 func (w *wrappedCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
 	return &libxc.ExchangeBalance{
 		Available: w.mm.botCEXBalance(w.botID, assetID),
 	}, nil
 }
 
+// Deposit deposits funds to the CEX. The deposited funds will be removed from
+// the bot's wallet balance and allocated to the bot's CEX balance.
 func (w *wrappedCEX) Deposit(ctx context.Context, assetID uint32, amount uint64, onConfirm func()) error {
 	balance := w.mm.botBalance(w.botID, assetID)
 	if balance < amount {
@@ -94,6 +97,8 @@ func (w *wrappedCEX) Deposit(ctx context.Context, assetID uint32, amount uint64,
 	return nil
 }
 
+// Withdraw withdraws funds from the CEX. The withdrawn funds will be removed
+// from the bot's CEX balance and added to the bot's wallet balance.
 func (w *wrappedCEX) Withdraw(ctx context.Context, assetID uint32, amount uint64, onConfirm func()) error {
 	symbol := dex.BipIDSymbol(assetID)
 
@@ -110,16 +115,17 @@ func (w *wrappedCEX) Withdraw(ctx context.Context, assetID uint32, amount uint64
 	conf := func(withdrawnAmt uint64, txID string) {
 		go func() {
 			checkTransaction := func() bool {
-				_, err := w.mm.core.TransactionConfirmations(assetID, txID)
-				if err == nil {
-					// Assign to balance to the bot as long as the wallet
-					// knows about the transaction.
+				confs, err := w.mm.core.TransactionConfirmations(assetID, txID)
+				if err != nil {
+					if !errors.Is(err, asset.CoinNotFoundError) {
+						w.log.Errorf("error checking transaction confirmations: %v", err)
+					}
+					return false
+				}
+				if confs > 0 {
 					w.mm.modifyBotBalance(w.botID, []*balanceMod{{balanceModIncrease, assetID, balTypeAvailable, withdrawnAmt}})
 					onConfirm()
 					return true
-				}
-				if !errors.Is(err, asset.CoinNotFoundError) {
-					w.log.Errorf("error checking transaction confirmations: %v", err)
 				}
 				return false
 			}
@@ -128,8 +134,8 @@ func (w *wrappedCEX) Withdraw(ctx context.Context, assetID uint32, amount uint64
 				return
 			}
 
-			ticker := time.NewTicker(time.Second * 20)
-			giveUp := time.NewTimer(time.Minute * 10)
+			ticker := time.NewTicker(time.Minute * 1)
+			giveUp := time.NewTimer(2 * time.Hour)
 			defer ticker.Stop()
 			defer giveUp.Stop()
 			for {
@@ -198,6 +204,8 @@ func (w *wrappedCEX) handleTradeUpdate(update *libxc.TradeUpdate) {
 	delete(w.trades, update.TradeID)
 }
 
+// SubscibeTradeUpdates subscribes to trade updates for the bot's trades on the
+// CEX. This should be called before making any trades, and only once.
 func (w *wrappedCEX) SubscribeTradeUpdates() (<-chan *libxc.TradeUpdate, func()) {
 	w.subscriptionIDMtx.Lock()
 	defer w.subscriptionIDMtx.Unlock()
@@ -230,6 +238,8 @@ func (w *wrappedCEX) SubscribeTradeUpdates() (<-chan *libxc.TradeUpdate, func())
 	return forwardUpdates, forwardUnsubscribe
 }
 
+// Trade executes a trade on the CEX. The trade will be executed using the
+// bot's CEX balance.
 func (w *wrappedCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64) (string, error) {
 	var fromAssetID, toAssetID uint32
 	var fromAssetQty uint64

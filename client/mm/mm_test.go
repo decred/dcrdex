@@ -5328,6 +5328,7 @@ func TestSegregatedCEXWithdraw(t *testing.T) {
 	runTest := func(tt test) {
 		tCore := newTCore()
 		tCore.setAssetBalances(tt.dexBalances)
+		tCore.txConfs = 1
 		tCore.newDepositAddress = hex.EncodeToString(encode.RandomBytes(32))
 
 		cex := newTCEX()

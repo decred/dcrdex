@@ -836,6 +836,9 @@ func (tCoin) ID() dex.Bytes {
 func (tCoin) String() string {
 	return ""
 }
+func (tCoin) TxID() string {
+	return ""
+}
 func (tCoin) Value() uint64 {
 	return 0
 }

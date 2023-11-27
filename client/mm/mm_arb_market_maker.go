@@ -72,7 +72,6 @@ type ArbMarketMakingPlacement struct {
 // placement. This rate is .007 BTC/DCR. Therefore it will place a sell order
 // at .00707 BTC/DCR (.007 BTC/DCR * 1.01).
 type ArbMarketMakerConfig struct {
-	CEXName            string                      `json:"cexName"`
 	BuyPlacements      []*ArbMarketMakingPlacement `json:"buyPlacements"`
 	SellPlacements     []*ArbMarketMakingPlacement `json:"sellPlacements"`
 	Profit             float64                     `json:"profit"`
@@ -570,7 +569,11 @@ func (a *arbMarketMaker) run() {
 	}
 	a.book = book
 
-	a.updateFeeRates()
+	err = a.updateFeeRates()
+	if err != nil {
+		a.log.Errorf("Failed to get fees: %v", err)
+		return
+	}
 
 	err = a.cex.SubscribeMarket(a.ctx, a.base, a.quote)
 	if err != nil {

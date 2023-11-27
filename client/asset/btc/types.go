@@ -69,6 +69,11 @@ func (op *Output) String() string {
 	return op.Pt.String()
 }
 
+// TxID is the ID of the transaction used to create the coin.
+func (op *Output) TxID() string {
+	return op.txHash().String()
+}
+
 // txHash returns the pointer of the wire.OutPoint's Hash.
 func (op *Output) txHash() *chainhash.Hash {
 	return &op.Pt.TxHash

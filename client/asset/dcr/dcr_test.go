@@ -1065,6 +1065,7 @@ func (c *tCoin) ID() dex.Bytes {
 func (c *tCoin) String() string                                    { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64                                     { return 100 }
 func (c *tCoin) Confirmations(ctx context.Context) (uint32, error) { return 2, nil }
+func (c *tCoin) TxID() string                                      { return hex.EncodeToString(c.id) }
 
 func TestReturnCoins(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()

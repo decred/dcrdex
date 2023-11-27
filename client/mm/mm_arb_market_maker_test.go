@@ -118,7 +118,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 		rebalancer  *tArbMMRebalancer
 		cfg         *ArbMarketMakerConfig
 		dexBalances map[uint32]uint64
-		cexBalances map[string]*libxc.ExchangeBalance
+		cexBalances map[uint32]*libxc.ExchangeBalance
 
 		expectedCancels []dex.Bytes
 		expectedBuys    []*rateLots
@@ -158,9 +158,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedBuys: []*rateLots{{
 				rate: 1.881e6,
@@ -205,9 +205,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 		},
 		// "existing orders outside drift tolerance"
@@ -246,9 +246,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedCancels: []dex.Bytes{
 				orderIDs[0][:],
@@ -293,9 +293,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedCancels: []dex.Bytes{
 				orderIDs[1][:],
@@ -331,9 +331,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 2*(lotSize+sellFees.swap) + sellFees.funding,
 				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding,
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedBuys: []*rateLots{
 				{
@@ -388,9 +388,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 2*(lotSize+sellFees.swap) + sellFees.funding - 1,
 				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding - 1,
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: 1e19},
-				"dcr": {Available: 1e19},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: 1e19},
+				42: {Available: 1e19},
 			},
 			expectedBuys: []*rateLots{
 				{
@@ -435,9 +435,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
-				"dcr": {Available: 2 * mkt.LotSize},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
+				42: {Available: 2 * mkt.LotSize},
 			},
 			expectedBuys: []*rateLots{
 				{
@@ -492,9 +492,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
-				"dcr": {Available: 2*mkt.LotSize - 1},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
+				42: {Available: 2*mkt.LotSize - 1},
 			},
 			expectedBuys: []*rateLots{
 				{
@@ -551,9 +551,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
-				"dcr": {Available: 2 * mkt.LotSize},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
+				42: {Available: 2 * mkt.LotSize},
 			},
 			expectedBuys: []*rateLots{
 				{
@@ -612,9 +612,9 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[string]*libxc.ExchangeBalance{
-				"btc": {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
-				"dcr": {Available: 2*mkt.LotSize - 1},
+			cexBalances: map[uint32]*libxc.ExchangeBalance{
+				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
+				42: {Available: 2*mkt.LotSize - 1},
 			},
 		},
 	}
@@ -773,18 +773,18 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 			},
 			expectedCEXTrades: []*cexOrder{
 				{
-					baseSymbol:  "dcr",
-					quoteSymbol: "btc",
-					qty:         lotSize,
-					rate:        divideRate(8e5, 1+profit),
-					sell:        false,
+					baseID:  42,
+					quoteID: 0,
+					qty:     lotSize,
+					rate:    divideRate(8e5, 1+profit),
+					sell:    false,
 				},
 				{
-					baseSymbol:  "dcr",
-					quoteSymbol: "btc",
-					qty:         lotSize,
-					rate:        multiplyRate(6e5, 1+profit),
-					sell:        true,
+					baseID:  42,
+					quoteID: 0,
+					qty:     lotSize,
+					rate:    multiplyRate(6e5, 1+profit),
+					sell:    true,
 				},
 				nil,
 				nil,
@@ -856,18 +856,18 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 			},
 			expectedCEXTrades: []*cexOrder{
 				{
-					baseSymbol:  "dcr",
-					quoteSymbol: "btc",
-					qty:         lotSize,
-					rate:        divideRate(8e5, 1+profit),
-					sell:        false,
+					baseID:  42,
+					quoteID: 0,
+					qty:     lotSize,
+					rate:    divideRate(8e5, 1+profit),
+					sell:    false,
 				},
 				{
-					baseSymbol:  "dcr",
-					quoteSymbol: "btc",
-					qty:         lotSize,
-					rate:        multiplyRate(6e5, 1+profit),
-					sell:        true,
+					baseID:  42,
+					quoteID: 0,
+					qty:     lotSize,
+					rate:    multiplyRate(6e5, 1+profit),
+					sell:    true,
 				},
 				nil,
 				nil,

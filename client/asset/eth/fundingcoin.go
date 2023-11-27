@@ -93,6 +93,10 @@ func (c *tokenFundingCoin) ID() dex.Bytes {
 	return []byte(c.addr.String())
 }
 
+func (c *tokenFundingCoin) TxID() string {
+	return ""
+}
+
 // ID creates a byte slice that can be decoded with DecodeCoinID.
 func (c *tokenFundingCoin) RecoveryID() dex.Bytes {
 	b := make([]byte, tokenFundingCoinIDSize)
