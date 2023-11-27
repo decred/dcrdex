@@ -1,0 +1,16 @@
+:: This script builds the dexc-desktop MSI installer.
+
+@echo off
+
+:: Run build
+call pkg\build-windows.cmd
+
+:: Check the error level after the first command
+if %errorlevel% equ 0 (
+    echo Build completed successfully.
+    echo Building MSI 
+    dotnet build --property:Platform=x64 --configuration Release --output build\msi -noWarn:WIX1076 pkg\windows-msi\DCRDEX_Installer.wixproj
+    echo MSI built in build\msi
+) else (
+    echo Error occurred during build.
+)
