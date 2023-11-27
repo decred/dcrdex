@@ -67,16 +67,16 @@ func (s *WebServer) commonArgs(r *http.Request, title string) *CommonArguments {
 }
 
 // handleHome is the handler for the '/' page request. It redirects the
-// requester to the markets page.
+// requester to the wallets page.
 func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, marketsRoute, http.StatusSeeOther)
+	http.Redirect(w, r, walletsRoute, http.StatusSeeOther)
 }
 
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	cArgs := s.commonArgs(r, "Login | Decred DEX")
 	if cArgs.UserInfo.Authed {
-		http.Redirect(w, r, marketsRoute, http.StatusSeeOther)
+		http.Redirect(w, r, walletsRoute, http.StatusSeeOther)
 		return
 	}
 	s.sendTemplate(w, "login", cArgs)
