@@ -440,17 +440,14 @@ func New(cfg *Config) (*WebServer, error) {
 
 			// Handlers requiring a DEX connection.
 			webInit.Group(func(webDC chi.Router) {
-				webDC.Use(s.requireDEXConnection)
-				webDC.Group(func(webAuth chi.Router) {
-					webAuth.Use(s.requireLogin)
-					webAuth.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
-					webAuth.Get(ordersRoute, s.handleOrders)
-					webAuth.Get(exportOrderRoute, s.handleExportOrders)
-					webAuth.Get(marketsRoute, s.handleMarkets)
-					webAuth.Get(mmSettingsRoute, s.handleMMSettings)
-					webAuth.Get(marketMakerRoute, s.handleMarketMaking)
-					webAuth.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
-				})
+				webDC.Use(s.requireDEXConnection, s.requireLogin)
+				webDC.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
+				webDC.Get(ordersRoute, s.handleOrders)
+				webDC.Get(exportOrderRoute, s.handleExportOrders)
+				webDC.Get(marketsRoute, s.handleMarkets)
+				webDC.Get(mmSettingsRoute, s.handleMMSettings)
+				webDC.Get(marketMakerRoute, s.handleMarketMaking)
+				webDC.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
 			})
 
 		})
