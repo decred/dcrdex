@@ -501,8 +501,7 @@ export default class Application {
       return
     }
     page.profileBox.classList.add('authed')
-    Doc.show(page.noteBell, page.walletsMenuEntry)
-    Doc.setVis(Object.keys(user.exchanges).length > 0, page.marketsMenuEntry)
+    Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */
