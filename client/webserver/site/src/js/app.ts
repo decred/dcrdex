@@ -211,9 +211,6 @@ export default class Application {
     this.updateMenuItemsDisplay()
     // initialize desktop notifications
     ntfn.fetchDesktopNtfnSettings()
-    // Load recent notifications from Window.localStorage.
-    const notes = State.fetchLocal(State.notificationsLK)
-    this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
     ws.registerRoute(notificationRoute, (note: CoreNote) => {
@@ -508,6 +505,10 @@ export default class Application {
     }
     page.profileBox.classList.add('authed')
     Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
+
+    // Load recent notifications from Window.localStorage.
+    const notes = State.fetchLocal(State.notificationsLK)
+    this.setNotes(notes || [])
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */
@@ -730,7 +731,7 @@ export default class Application {
     const { popupTmpl, popupNotes, showPopups } = this
     if (showPopups) {
       const span = popupTmpl.cloneNode(true) as HTMLElement
-      Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`
+      Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${ntfn.plainNote(note.details)}`
       const indicator = Doc.tmplElement(span, 'indicator')
       if (note.severity === ntfn.POKE) {
         Doc.hide(indicator)
@@ -798,6 +799,7 @@ export default class Application {
     while (this.notes.length > noteCacheSize) this.notes.shift()
     const noteList = this.page.noteList
     this.prependListElement(noteList, note, el)
+    this.bindUrlHandlers(el)
     if (!skipSave) this.storeNotes()
     // Set the indicator color.
     if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(noteList))) return
@@ -834,14 +836,15 @@ export default class Application {
     }
 
     Doc.safeSelector(el, 'div.note-subject').textContent = note.subject
-    Doc.safeSelector(el, 'div.note-details').textContent = note.details
+    ntfn.insertRichNote(Doc.safeSelector(el, 'div.note-details'), note.details)
     const np: CoreNotePlus = { el, ...note }
     return [el, np]
   }
 
   makePoke (note: CoreNote): [NoteElement, CoreNotePlus] {
     const el = this.page.pokeTmpl.cloneNode(true) as NoteElement
-    Doc.tmplElement(el, 'details').textContent = `${note.subject}: ${note.details}`
+    Doc.tmplElement(el, 'subject').textContent = `${note.subject}:`
+    ntfn.insertRichNote(Doc.tmplElement(el, 'details'), note.details)
     const np: CoreNotePlus = { el, ...note }
     return [el, np]
   }

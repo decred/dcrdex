@@ -44,7 +44,7 @@ import {
   WalletTransaction,
   FundsMixingStats
 } from './registry'
-import { CoinExplorers } from './order'
+import { CoinExplorers } from './coinexplorers'
 
 interface DecredTicketTipUpdate {
   ticketPrice: number
