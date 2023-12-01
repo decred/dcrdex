@@ -119,7 +119,7 @@ type clientCore interface {
 	AddDEX(dexAddr string, certI any) error
 	DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
-	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (string, asset.Coin, error)
+	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	TradeAsync(pw []byte, form *core.TradeForm) (*core.InFlightOrder, error)
 	Cancel(oid dex.Bytes) error

@@ -227,10 +227,11 @@ type basicMarketMaker struct {
 
 // groupedOrder is a subset of an *core.Order.
 type groupedOrder struct {
-	id    order.OrderID
-	rate  uint64
-	lots  uint64
-	epoch uint64
+	id        order.OrderID
+	rate      uint64
+	lots      uint64
+	epoch     uint64
+	lockedAmt uint64
 }
 
 func groupOrders(orders map[order.OrderID]*core.Order, oidToPlacement map[order.OrderID]int, lotSize uint64) (buys, sells map[int][]*groupedOrder) {
@@ -238,10 +239,11 @@ func groupOrders(orders map[order.OrderID]*core.Order, oidToPlacement map[order.
 		var oid order.OrderID
 		copy(oid[:], o.ID)
 		return &groupedOrder{
-			id:    oid,
-			rate:  o.Rate,
-			lots:  (o.Qty - o.Filled) / lotSize,
-			epoch: o.Epoch,
+			id:        oid,
+			rate:      o.Rate,
+			lots:      (o.Qty - o.Filled) / lotSize,
+			epoch:     o.Epoch,
+			lockedAmt: o.LockedAmt,
 		}
 	}
 

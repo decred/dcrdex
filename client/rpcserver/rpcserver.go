@@ -77,7 +77,7 @@ type clientCore interface {
 	Wallets() (walletsStates []*core.WalletState)
 	WalletState(assetID uint32) *core.WalletState
 	RescanWallet(assetID uint32, force bool) error
-	Send(appPass []byte, assetID uint32, value uint64, addr string, subtract bool) (string, asset.Coin, error)
+	Send(appPass []byte, assetID uint32, value uint64, addr string, subtract bool) (asset.Coin, error)
 	ExportSeed(pw []byte) ([]byte, error)
 	DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) (int, error)
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)

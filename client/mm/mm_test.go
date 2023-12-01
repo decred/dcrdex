@@ -169,7 +169,6 @@ type tCore struct {
 	book              *orderbook.OrderBook
 	bookFeed          *tBookFeed
 	lastSendArgs      *sendArgs
-	sendTxID          string
 	txConfs           uint32
 	txConfsErr        error
 	txConfsTxID       string
@@ -284,14 +283,34 @@ func (c *tCore) Broadcast(core.Notification) {}
 func (c *tCore) FiatConversionRates() map[uint32]float64 {
 	return nil
 }
-func (c *tCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (string, asset.Coin, error) {
+
+type tCoin struct {
+	txID []byte
+}
+
+var _ asset.Coin = (*tCoin)(nil)
+
+func (c *tCoin) ID() dex.Bytes {
+	return c.txID
+}
+func (c *tCoin) String() string {
+	return hex.EncodeToString(c.txID)
+}
+func (c *tCoin) Value() uint64 {
+	return 0
+}
+func (c *tCoin) TxID() string {
+	return hex.EncodeToString(c.txID)
+}
+
+func (c *tCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	c.lastSendArgs = &sendArgs{
 		assetID:  assetID,
 		value:    value,
 		address:  address,
 		subtract: subtract,
 	}
-	return c.sendTxID, nil, nil
+	return &tCoin{}, nil
 }
 func (c *tCore) NewDepositAddress(assetID uint32) (string, error) {
 	return c.newDepositAddress, nil

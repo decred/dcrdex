@@ -36,18 +36,10 @@ type SimpleArbConfig struct {
 	BaseOptions map[string]string `json:"baseOptions"`
 	// QuoteOptions are the multi-order options for the quote asset wallet.
 	QuoteOptions map[string]string `json:"quoteOptions"`
-	// AutoRebalance set to true means that if the base or quote asset balance
-	// dips below MinBaseAmt or MinQuoteAmt respectively, the bot will deposit
-	// or withdraw funds from the CEX to have an equal amount on both the DEX
-	// and the CEX. If it is not possible to bring both the DEX and CEX balances
-	// above the minimum amount, no action will be taken. Also, if the amount
-	// required to bring the balances to equal is less than MinBaseTransfer or
-	// MinQuoteTransfer, no action will be taken.
-	AutoRebalance    bool   `json:"autoRebalance"`
-	MinBaseAmt       uint64 `json:"minBaseAmt"`
-	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
-	MinQuoteAmt      uint64 `json:"minQuoteAmt"`
-	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
+	// AutoRebalance determines how the bot will handle rebalancing of the
+	// assets between the dex and the cex. If nil, no rebalancing will take
+	// place.
+	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance"`
 }
 
 func (c *SimpleArbConfig) Validate() error {
@@ -115,12 +107,12 @@ func (a *simpleArbMarketMaker) rebalanceAsset(base bool) {
 	var minTransferAmount uint64
 	if base {
 		assetID = a.baseID
-		minAmount = a.cfg.MinBaseAmt
-		minTransferAmount = a.cfg.MinBaseTransfer
+		minAmount = a.cfg.AutoRebalance.MinBaseAmt
+		minTransferAmount = a.cfg.AutoRebalance.MinBaseTransfer
 	} else {
 		assetID = a.quoteID
-		minAmount = a.cfg.MinQuoteAmt
-		minTransferAmount = a.cfg.MinQuoteTransfer
+		minAmount = a.cfg.AutoRebalance.MinQuoteAmt
+		minTransferAmount = a.cfg.AutoRebalance.MinQuoteTransfer
 	}
 	symbol := dex.BipIDSymbol(assetID)
 
@@ -219,7 +211,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 		}
 	}
 
-	if a.cfg.AutoRebalance && len(remainingArbs) == 0 {
+	if a.cfg.AutoRebalance != nil && len(remainingArbs) == 0 {
 		if !a.pendingBaseRebalance.Load() {
 			a.rebalanceAsset(true)
 		}

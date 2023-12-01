@@ -263,12 +263,6 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 
 	tokenIDs := make(map[string][]uint32)
 	for _, nfo := range coins {
-		if nfo.Coin == "WBTC" {
-			bnc.log.Infof("WBTC INFO: %+v", nfo)
-			for _, netInfo := range nfo.NetworkList {
-				bnc.log.Infof("%+v", netInfo)
-			}
-		}
 		tokenSymbol := strings.ToLower(nfo.Coin)
 		chainIDs, isToken := dex.TokenChains[tokenSymbol]
 		if !isToken {
@@ -649,7 +643,7 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 					dexSymbol := binanceCoinNetworkToDexSymbol(status.Coin, status.Network)
 					assetID, found := dex.BipSymbolID(dexSymbol)
 					if !found {
-						bnc.log.Errorf("Failed to find DEX asset ID for Coin: %s, Network %s", status.Coin, status.Network)
+						bnc.log.Errorf("Failed to find DEX asset ID for Coin: %s, Network: %s", status.Coin, status.Network)
 						return false, true, 0
 					}
 					ui, err := asset.UnitInfo(assetID)

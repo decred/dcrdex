@@ -26,6 +26,13 @@ type cexTrade struct {
 	quoteFilled uint64
 }
 
+// cex is an interface implemented by wrappedCEX. It is an interface used
+// to interact with a centralized exchange. It assumes there is only one
+// caller. It is generally similar to libxc.CEX, but with some notable
+// differences:
+//   - A Deposit function is added, which takes funds from the bot's dex wallet
+//     and sends it to the cex.
+//   - SubscribeTradeUpdates/Trade do not return/take a subscription ID.
 type cex interface {
 	Balance(assetID uint32) (*libxc.ExchangeBalance, error)
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
@@ -37,9 +44,9 @@ type cex interface {
 	Withdraw(ctx context.Context, assetID uint32, amount uint64, onConfirm func()) error
 }
 
-// wrappedCEX implements the CEX interface. A separate instance should be
+// wrappedCEX implements the cex interface. A separate instance should be
 // created for each arbitrage bot, and it will behave as if the entire balance
-// on the CEX is the amount that was allocated to the bot.
+// on the cex is the amount that was allocated to the bot.
 type wrappedCEX struct {
 	libxc.CEX
 
@@ -76,12 +83,11 @@ func (w *wrappedCEX) Deposit(ctx context.Context, assetID uint32, amount uint64,
 		return err
 	}
 
-	txID, _, err := w.mm.core.Send([]byte{}, assetID, amount, addr, w.mm.isWithdrawer(assetID))
+	coin, err := w.mm.core.Send([]byte{}, assetID, amount, addr, w.mm.isWithdrawer(assetID))
 	if err != nil {
 		return err
 	}
 
-	// TODO: special handling for wallets that do not support withdrawing.
 	w.mm.modifyBotBalance(w.botID, []*balanceMod{{balanceModDecrease, assetID, balTypeAvailable, amount}})
 
 	go func() {
@@ -91,7 +97,7 @@ func (w *wrappedCEX) Deposit(ctx context.Context, assetID uint32, amount uint64,
 			}
 			onConfirm()
 		}
-		w.CEX.ConfirmDeposit(ctx, txID, conf)
+		w.CEX.ConfirmDeposit(ctx, coin.TxID(), conf)
 	}()
 
 	return nil
@@ -123,6 +129,9 @@ func (w *wrappedCEX) Withdraw(ctx context.Context, assetID uint32, amount uint64
 					return false
 				}
 				if confs > 0 {
+					// TODO: get the amount withdrawn from the wallet instead of
+					// trusting the CEX. TxHistory could be used if it is
+					// implemented for all wallets.
 					w.mm.modifyBotBalance(w.botID, []*balanceMod{{balanceModIncrease, assetID, balTypeAvailable, withdrawnAmt}})
 					onConfirm()
 					return true

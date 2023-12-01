@@ -384,11 +384,8 @@ func TestArbRebalance(t *testing.T) {
 		existingArbs          []*arbSequence
 		pendingBaseRebalance  bool
 		pendingQuoteRebalance bool
-		autoRebalance         bool
-		minBaseAmt            uint64
-		minBaseTransfer       uint64
-		minQuoteAmt           uint64
-		minQuoteTransfer      uint64
+
+		autoRebalance *AutoRebalanceConfig
 
 		expectedDexOrder   *dexOrder
 		expectedCexOrder   *cexOrder
@@ -983,9 +980,10 @@ func TestArbRebalance(t *testing.T) {
 				42: {Available: 1e19},
 				0:  {Available: 1e10},
 			},
-			autoRebalance: true,
-			minBaseAmt:    1e16,
-			minQuoteAmt:   1e12,
+			autoRebalance: &AutoRebalanceConfig{
+				MinBaseAmt:  1e16,
+				MinQuoteAmt: 1e12,
+			},
 			expectedWithdrawal: &assetAmt{
 				assetID: 42,
 				amt:     4.99995e18,
@@ -1017,11 +1015,12 @@ func TestArbRebalance(t *testing.T) {
 				42: {Available: 1.1e16},
 				0:  {Available: 9.5e11},
 			},
-			autoRebalance:    true,
-			minBaseAmt:       1e16,
-			minQuoteAmt:      1e12,
-			minBaseTransfer:  (1.1e16+9.5e15)/2 - 9.5e15,
-			minQuoteTransfer: (1.1e12+9.5e11)/2 - 9.5e11,
+			autoRebalance: &AutoRebalanceConfig{
+				MinBaseAmt:       1e16,
+				MinQuoteAmt:      1e12,
+				MinBaseTransfer:  (1.1e16+9.5e15)/2 - 9.5e15,
+				MinQuoteTransfer: (1.1e12+9.5e11)/2 - 9.5e11,
+			},
 			expectedWithdrawal: &assetAmt{
 				assetID: 42,
 				amt:     (1.1e16+9.5e15)/2 - 9.5e15,
@@ -1053,11 +1052,12 @@ func TestArbRebalance(t *testing.T) {
 				42: {Available: 1.1e16},
 				0:  {Available: 9.5e11},
 			},
-			autoRebalance:    true,
-			minBaseAmt:       1e16,
-			minQuoteAmt:      1e12,
-			minBaseTransfer:  (1.1e16+9.5e15)/2 - 9.5e15 + 1,
-			minQuoteTransfer: (1.1e12+9.5e11)/2 - 9.5e11 + 1,
+			autoRebalance: &AutoRebalanceConfig{
+				MinBaseAmt:       1e16,
+				MinQuoteAmt:      1e12,
+				MinBaseTransfer:  (1.1e16+9.5e15)/2 - 9.5e15 + 1,
+				MinQuoteTransfer: (1.1e12+9.5e11)/2 - 9.5e11 + 1,
+			},
 		},
 		// "no arb, quote needs withdrawal, base needs deposit"
 		{
@@ -1081,9 +1081,10 @@ func TestArbRebalance(t *testing.T) {
 				42: {Available: 1e14},
 				0:  {Available: 1e17},
 			},
-			autoRebalance: true,
-			minBaseAmt:    1e16,
-			minQuoteAmt:   1e12,
+			autoRebalance: &AutoRebalanceConfig{
+				MinBaseAmt:  1e16,
+				MinQuoteAmt: 1e12,
+			},
 			expectedWithdrawal: &assetAmt{
 				assetID: 0,
 				amt:     4.9999995e16,
@@ -1115,9 +1116,10 @@ func TestArbRebalance(t *testing.T) {
 				42: {Available: 1e14},
 				0:  {Available: 1e17},
 			},
-			autoRebalance:         true,
-			minBaseAmt:            1e16,
-			minQuoteAmt:           1e12,
+			autoRebalance: &AutoRebalanceConfig{
+				MinBaseAmt:  1e16,
+				MinQuoteAmt: 1e12,
+			},
 			pendingBaseRebalance:  true,
 			pendingQuoteRebalance: true,
 		},
@@ -1178,10 +1180,6 @@ func TestArbRebalance(t *testing.T) {
 				MaxActiveArbs:      maxActiveArbs,
 				NumEpochsLeaveOpen: numEpochsLeaveOpen,
 				AutoRebalance:      test.autoRebalance,
-				MinBaseAmt:         test.minBaseAmt,
-				MinQuoteAmt:        test.minQuoteAmt,
-				MinBaseTransfer:    test.minBaseTransfer,
-				MinQuoteTransfer:   test.minQuoteTransfer,
 			},
 		}
 
@@ -1226,7 +1224,6 @@ func TestArbRebalance(t *testing.T) {
 			}
 
 			if !test.expectedDexOrder.sell {
-				fmt.Printf("multi trades placed: %v\n", tCore.multiTradesPlaced)
 				if len(tCore.multiTradesPlaced[0].Placements) != 1 {
 					t.Fatalf("%s: expected 1 buy order but got %d", test.name, len(tCore.buysPlaced))
 				}

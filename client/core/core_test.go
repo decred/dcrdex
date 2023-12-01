@@ -2740,7 +2740,7 @@ func TestSend(t *testing.T) {
 	address := "addr"
 
 	// Successful
-	_, coin, err := tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
+	coin, err := tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
 	if err != nil {
 		t.Fatalf("Send error: %v", err)
 	}
@@ -2749,13 +2749,13 @@ func TestSend(t *testing.T) {
 	}
 
 	// 0 value
-	_, _, err = tCore.Send(tPW, tUTXOAssetA.ID, 0, address, false)
+	_, err = tCore.Send(tPW, tUTXOAssetA.ID, 0, address, false)
 	if err == nil {
 		t.Fatalf("no error for zero value send")
 	}
 
 	// no wallet
-	_, _, err = tCore.Send(tPW, 12345, 1e8, address, false)
+	_, err = tCore.Send(tPW, 12345, 1e8, address, false)
 	if err == nil {
 		t.Fatalf("no error for unknown wallet")
 	}
@@ -2763,7 +2763,7 @@ func TestSend(t *testing.T) {
 	// connect error
 	wallet.hookedUp = false
 	tWallet.connectErr = tErr
-	_, _, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
+	_, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
 	if err == nil {
 		t.Fatalf("no error for wallet connect error")
 	}
@@ -2771,7 +2771,7 @@ func TestSend(t *testing.T) {
 
 	// Send error
 	tWallet.sendErr = tErr
-	_, _, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
+	_, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
 	if err == nil {
 		t.Fatalf("no error for wallet send error")
 	}
@@ -2779,7 +2779,7 @@ func TestSend(t *testing.T) {
 
 	// Check the coin.
 	tWallet.sendCoin = &tCoin{id: []byte{'a'}}
-	_, coin, err = tCore.Send(tPW, tUTXOAssetA.ID, 3e8, address, false)
+	coin, err = tCore.Send(tPW, tUTXOAssetA.ID, 3e8, address, false)
 	if err != nil {
 		t.Fatalf("coin check error: %v", err)
 	}
@@ -2805,7 +2805,7 @@ func TestSend(t *testing.T) {
 
 	wallet.Wallet = feeRater
 
-	_, coin, err = tCore.Send(tPW, tUTXOAssetA.ID, 2e8, address, false)
+	coin, err = tCore.Send(tPW, tUTXOAssetA.ID, 2e8, address, false)
 	if err != nil {
 		t.Fatalf("FeeRater Withdraw/send error: %v", err)
 	}
@@ -2819,7 +2819,7 @@ func TestSend(t *testing.T) {
 
 	// wallet is not synced
 	wallet.synced = false
-	_, _, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
+	_, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
 	if err == nil {
 		t.Fatalf("Expected error for a non-synchronized wallet")
 	}

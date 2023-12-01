@@ -43,7 +43,7 @@ type clientCore interface {
 	OpenWallet(assetID uint32, appPW []byte) error
 	Broadcast(core.Notification)
 	FiatConversionRates() map[uint32]float64
-	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (string, asset.Coin, error)
+	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	NewDepositAddress(assetID uint32) (string, error)
 	TransactionConfirmations(assetID uint32, txid string) (uint32, error)
 }
@@ -501,8 +501,14 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]libxc.CE
 			}
 			quoteAssetSymbol := dex.TokenSymbol(quoteSymbol)
 
-			trackAssetOnCEX(baseAssetSymbol, cfg.BaseAsset, cfg.CEXCfg.Name)
-			trackAssetOnCEX(quoteAssetSymbol, cfg.QuoteAsset, cfg.CEXCfg.Name)
+			err = trackAssetOnCEX(baseAssetSymbol, cfg.BaseAsset, cfg.CEXCfg.Name)
+			if err != nil {
+				return err
+			}
+			err = trackAssetOnCEX(quoteAssetSymbol, cfg.QuoteAsset, cfg.CEXCfg.Name)
+			if err != nil {
+				return err
+			}
 			baseCEXBalance := cexBalanceTracker[cfg.CEXCfg.Name][baseAssetSymbol]
 			quoteCEXBalance := cexBalanceTracker[cfg.CEXCfg.Name][quoteAssetSymbol]
 			cexBaseRequired := calcBalance(cfg.CEXCfg.BaseBalanceType, cfg.CEXCfg.BaseBalance, baseCEXBalance.available)
@@ -1140,7 +1146,7 @@ func (m *MarketMaker) Run(ctx context.Context, pw []byte, alternateConfigPath *s
 				defer func() {
 					m.markBotAsRunning(mkt, false)
 				}()
-				RunArbMarketMaker(m.ctx, cfg, m.core, cex, logger)
+				RunArbMarketMaker(m.ctx, cfg, m.core, m.wrappedCEXForBot(mktID, cex), logger)
 			}(cfg)
 		default:
 			m.log.Errorf("No bot config provided. Skipping %s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)

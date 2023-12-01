@@ -175,8 +175,8 @@ func (c *TCore) User() *core.User { return nil }
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return make(map[uint32]*core.SupportedAsset)
 }
-func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (string, asset.Coin, error) {
-	return "", &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
+func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
+	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
 }
 func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
 	return c.validAddr, nil
