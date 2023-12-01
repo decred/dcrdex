@@ -10907,3 +10907,42 @@ func TestFindBond(t *testing.T) {
 		})
 	}
 }
+
+func TestNetworkFeeRate(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+
+	assetID := tUTXOAssetA.ID
+	wallet, tWallet := newTWallet(assetID)
+	rig.core.wallets[assetID] = wallet
+
+	const feeRaterRate = 50
+	dumbWallet := wallet.Wallet
+	wallet.Wallet = &TFeeRater{
+		TXCWallet: tWallet,
+		feeRate:   feeRaterRate,
+	}
+	if r := rig.core.NetworkFeeRate(assetID); r != feeRaterRate {
+		t.Fatalf("FeeRater not working. %d != %d", r, feeRaterRate)
+	}
+	wallet.Wallet = dumbWallet
+
+	const bookFeedFeeRate = 60
+	book := newBookie(rig.dc, assetID, tUTXOAssetB.ID, nil, tLogger)
+	rig.dc.books[tDcrBtcMktName] = book
+	book.logEpochReport(&msgjson.EpochReportNote{BaseFeeRate: bookFeedFeeRate})
+	if r := rig.core.NetworkFeeRate(assetID); r != bookFeedFeeRate {
+		t.Fatalf("Book feed fee rate not working. %d != %d", r, bookFeedFeeRate)
+	}
+	delete(rig.dc.books, tDcrBtcMktName)
+
+	const serverFeeRate = 70
+	rig.ws.queueResponse(msgjson.FeeRateRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, serverFeeRate, nil)
+		f(resp)
+		return nil
+	})
+	if r := rig.core.NetworkFeeRate(assetID); r != serverFeeRate {
+		t.Fatalf("Server fee rate not working. %d != %d", r, serverFeeRate)
+	}
+}
