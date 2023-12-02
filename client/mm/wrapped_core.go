@@ -441,6 +441,7 @@ func (c *wrappedCore) AssetBalance(assetID uint32) (*core.WalletBalance, error) 
 		Balance: &db.Balance{
 			Balance: asset.Balance{
 				Available: bal,
+				// TODO: handle locked funds
 			},
 		},
 	}, nil

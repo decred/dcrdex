@@ -48,6 +48,10 @@ func (c *tCoin) String() string {
 	return hex.EncodeToString(c.id)
 }
 
+func (c *tCoin) TxID() string {
+	return hex.EncodeToString(c.id)
+}
+
 func (c *tCoin) Value() uint64 {
 	return 0
 }

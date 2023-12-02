@@ -1483,6 +1483,9 @@ func (*badCoin) ID() dex.Bytes {
 func (*badCoin) String() string {
 	return "abc"
 }
+func (*badCoin) TxID() string {
+	return "abc"
+}
 func (b *badCoin) Value() uint64 {
 	return uint64(*b)
 }

@@ -2489,6 +2489,7 @@ func (c *tCoin) ID() dex.Bytes {
 	return make([]byte, 36)
 }
 func (c *tCoin) String() string { return hex.EncodeToString(c.id) }
+func (c *tCoin) TxID() string   { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64  { return 100 }
 
 func TestReturnCoins(t *testing.T) {

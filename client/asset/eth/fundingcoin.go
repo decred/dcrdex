@@ -32,6 +32,10 @@ func (c *fundingCoin) ID() dex.Bytes {
 	return []byte(c.addr.String())
 }
 
+func (c *fundingCoin) TxID() string {
+	return ""
+}
+
 // Value returns the value reserved in the funding coin.
 func (c *fundingCoin) Value() uint64 {
 	return c.amt
@@ -87,6 +91,10 @@ func (c *tokenFundingCoin) String() string {
 // part of the an order.
 func (c *tokenFundingCoin) ID() dex.Bytes {
 	return []byte(c.addr.String())
+}
+
+func (c *tokenFundingCoin) TxID() string {
+	return ""
 }
 
 // ID creates a byte slice that can be decoded with DecodeCoinID.

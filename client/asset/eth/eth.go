@@ -1408,6 +1408,10 @@ func (c *coin) ID() dex.Bytes {
 	return c.id[:]
 }
 
+func (c *coin) TxID() string {
+	return c.String()
+}
+
 // String is a string representation of the coin.
 func (c *coin) String() string {
 	return c.id.String()
@@ -3344,6 +3348,13 @@ func (eth *baseWallet) swapOrRedemptionFeesPaid(ctx context.Context, coinID, con
 		return 0, nil, fmt.Errorf("secret hash %x not found in transaction", secretHash)
 	}
 	return dexeth.WeiToGwei(bigFees), secretHashes, nil
+}
+
+// TransactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (eth *baseWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	txHash := common.HexToHash(txID)
+	return eth.node.transactionConfirmations(ctx, txHash)
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified

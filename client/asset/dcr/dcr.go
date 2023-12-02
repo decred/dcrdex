@@ -357,6 +357,10 @@ func (op *output) ID() dex.Bytes {
 	return toCoinID(op.txHash(), op.vout())
 }
 
+func (op *output) TxID() string {
+	return op.txHash().String()
+}
+
 // String is a string representation of the coin.
 func (op *output) String() string {
 	return op.pt.String()
@@ -4351,6 +4355,20 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 		err = nil
 	}
 	return confs, spent, err
+}
+
+// TransactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (dcr *ExchangeWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding txid %s: %w", txID, err)
+	}
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(tx.Confirmations), nil
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified

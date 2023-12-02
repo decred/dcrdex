@@ -606,6 +606,10 @@ func (c *tCoin) ID() dex.Bytes {
 	return c.id
 }
 
+func (c *tCoin) TxID() string {
+	return ""
+}
+
 func (c *tCoin) String() string {
 	return hex.EncodeToString(c.id)
 }
@@ -730,6 +734,7 @@ type TXCWallet struct {
 }
 
 var _ asset.Accelerator = (*TXCWallet)(nil)
+var _ asset.Withdrawer = (*TXCWallet)(nil)
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := &TXCWallet{
@@ -1111,6 +1116,10 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 		Amount:  amt,
 		CoinID:  w.bondTxCoinID,
 	}, func() {}, nil
+}
+
+func (w *TXCWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	return 0, nil
 }
 
 type TAccountLocker struct {
@@ -10419,12 +10428,16 @@ func TestEstimateSendTxFee(t *testing.T) {
 			tWallet.estFeeErr = tErr
 		}
 		estimate, _, err := tCore.EstimateSendTxFee("addr", test.asset, test.value, test.subtract)
-		if test.wantErr && err == nil {
+		if test.wantErr {
 			if err != nil {
 				continue
 			}
 			t.Fatalf("%s: expected error", test.name)
 		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+
 		if estimate != test.estFee {
 			t.Fatalf("%s: expected fee %v, got %v", test.name, test.estFee, estimate)
 		}

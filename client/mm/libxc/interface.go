@@ -17,8 +17,10 @@ type ExchangeBalance struct {
 // TradeUpdate is a notification sent when the status of a trade on the CEX
 // has been updated.
 type TradeUpdate struct {
-	TradeID  string
-	Complete bool // cancelled or filled
+	TradeID     string
+	Complete    bool // cancelled or filled
+	BaseFilled  uint64
+	QuoteFilled uint64
 }
 
 // Market is the base and quote assets of a market on a CEX.
@@ -34,12 +36,9 @@ type Market struct {
 type CEX interface {
 	dex.Connector
 	// Balance returns the balance of an asset at the CEX.
-	Balance(symbol string) (*ExchangeBalance, error)
-	// Balances returns a list of all asset balances at the CEX. Only assets that are
-	// registered in the DEX client will be returned.
-	Balances() (map[uint32]*ExchangeBalance, error)
+	Balance(assetID uint32) (*ExchangeBalance, error)
 	// CancelTrade cancels a trade on the CEX.
-	CancelTrade(ctx context.Context, baseSymbol, quoteSymbol, tradeID string) error
+	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
 	// Markets returns the list of markets at the CEX.
 	Markets() ([]*Market, error)
 	// SubscribeCEXUpdates returns a channel which sends an empty struct when
@@ -47,7 +46,7 @@ type CEX interface {
 	SubscribeCEXUpdates() (updates <-chan interface{}, unsubscribe func())
 	// SubscribeMarket subscribes to order book updates on a market. This must
 	// be called before calling VWAP.
-	SubscribeMarket(ctx context.Context, baseSymbol, quoteSymbol string) error
+	SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error
 	// SubscribeTradeUpdates returns a channel that the caller can use to
 	// listen for updates to a trade's status. When the subscription ID
 	// returned from this function is passed as the updaterID argument to
@@ -56,12 +55,21 @@ type CEX interface {
 	SubscribeTradeUpdates() (updates <-chan *TradeUpdate, unsubscribe func(), subscriptionID int)
 	// Trade executes a trade on the CEX. updaterID takes a subscriptionID
 	// returned from SubscribeTradeUpdates.
-	Trade(ctx context.Context, baseSymbol, quoteSymbol string, sell bool, rate, qty uint64, subscriptionID int) (string, error)
+	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (string, error)
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
-	UnsubscribeMarket(baseSymbol, quoteSymbol string)
-	// VWAP returns the volume weighted average price for a certain quantity
+	UnsubscribeMarket(baseID, quoteID uint32) error
+	// VWAP returns the volume weighted average price for a certainWithdraw(address string, value, feeRate uint64)  quantity
 	// of the base asset on a market.
-	VWAP(baseSymbol, quoteSymbol string, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
+	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
+	// GetDepositAddress returns a deposit address for an asset.
+	GetDepositAddress(ctx context.Context, assetID uint32) (string, error)
+	// ConfirmDeposit is an async function that calls onConfirm when the status
+	// of a deposit has been confirmed.
+	ConfirmDeposit(ctx context.Context, txID string, onConfirm func(success bool, amount uint64))
+	// Withdraw withdraws funds from the CEX to a certain address. onComplete
+	// is called with the actual amount withdrawn (amt - fees) and the
+	// transaction ID of the withdrawal.
+	Withdraw(ctx context.Context, assetID uint32, amt uint64, address string, onComplete func(amt uint64, txID string)) error
 }
 
 const (

@@ -21,8 +21,6 @@ import (
 // SimpleArbConfig is the configuration for an arbitrage bot that only places
 // orders when there is a profitable arbitrage opportunity.
 type SimpleArbConfig struct {
-	// CEXName is the name of the cex that the bot will arbitrage.
-	CEXName string `json:"cexName"`
 	// ProfitTrigger is the minimum profit before a cross-exchange trade
 	// sequence is initiated. Range: 0 < ProfitTrigger << 1. For example, if
 	// the ProfitTrigger is 0.01 and a trade sequence would produce a 1% profit
@@ -38,6 +36,10 @@ type SimpleArbConfig struct {
 	BaseOptions map[string]string `json:"baseOptions"`
 	// QuoteOptions are the multi-order options for the quote asset wallet.
 	QuoteOptions map[string]string `json:"quoteOptions"`
+	// AutoRebalance determines how the bot will handle rebalancing of the
+	// assets between the dex and the cex. If nil, no rebalancing will take
+	// place.
+	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance"`
 }
 
 func (c *SimpleArbConfig) Validate() error {
@@ -73,20 +75,111 @@ type simpleArbMarketMaker struct {
 	host    string
 	baseID  uint32
 	quoteID uint32
-	cex     libxc.CEX
+	cex     cex
 	// cexTradeUpdatesID is passed to the Trade function of the cex
 	// so that the cex knows to send update notifications for the
 	// trade back to this bot.
-	cexTradeUpdatesID int
-	core              clientCore
-	log               dex.Logger
-	cfg               *SimpleArbConfig
-	mkt               *core.Market
-	book              dexOrderBook
-	rebalanceRunning  atomic.Bool
+	core             clientCore
+	log              dex.Logger
+	cfg              *SimpleArbConfig
+	mkt              *core.Market
+	book             dexOrderBook
+	rebalanceRunning atomic.Bool
 
 	activeArbsMtx sync.RWMutex
 	activeArbs    []*arbSequence
+
+	// If pendingBaseRebalance/pendingQuoteRebalance are true, it means
+	// there is a pending deposit/withdrawal of the base/quote asset,
+	// and no other deposits/withdrawals of that asset should happen
+	// until it is complete.
+	pendingBaseRebalance  atomic.Bool
+	pendingQuoteRebalance atomic.Bool
+}
+
+// rebalanceAsset checks if the balance of an asset on the dex and cex are
+// below the minimum amount, and if so, deposits or withdraws funds from the
+// CEX to make the balances equal. If it is not possible to bring both the DEX
+// and CEX balances above the minimum amount, no action will be taken.
+func (a *simpleArbMarketMaker) rebalanceAsset(base bool) {
+	var assetID uint32
+	var minAmount uint64
+	var minTransferAmount uint64
+	if base {
+		assetID = a.baseID
+		minAmount = a.cfg.AutoRebalance.MinBaseAmt
+		minTransferAmount = a.cfg.AutoRebalance.MinBaseTransfer
+	} else {
+		assetID = a.quoteID
+		minAmount = a.cfg.AutoRebalance.MinQuoteAmt
+		minTransferAmount = a.cfg.AutoRebalance.MinQuoteTransfer
+	}
+	symbol := dex.BipIDSymbol(assetID)
+
+	dexBalance, err := a.core.AssetBalance(assetID)
+	if err != nil {
+		a.log.Errorf("Error getting %s balance: %v", symbol, err)
+		return
+	}
+
+	cexBalance, err := a.cex.Balance(assetID)
+	if err != nil {
+		a.log.Errorf("Error getting %s balance on cex: %v", symbol, err)
+		return
+	}
+
+	if (dexBalance.Available+cexBalance.Available)/2 < minAmount {
+		a.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX", symbol)
+		return
+	}
+
+	var requireDeposit bool
+	if cexBalance.Available < minAmount {
+		requireDeposit = true
+	} else if dexBalance.Available >= minAmount {
+		// No need for withdrawal or deposit.
+		return
+	}
+
+	onConfirm := func() {
+		if base {
+			a.pendingBaseRebalance.Store(false)
+		} else {
+			a.pendingQuoteRebalance.Store(false)
+		}
+	}
+
+	if requireDeposit {
+		amt := (dexBalance.Available+cexBalance.Available)/2 - cexBalance.Available
+		if amt < minTransferAmount {
+			a.log.Warnf("Amount required to rebalance %s (%d) is less than the min transfer amount %v",
+				symbol, amt, minTransferAmount)
+			return
+		}
+		err = a.cex.Deposit(a.ctx, assetID, amt, onConfirm)
+		if err != nil {
+			a.log.Errorf("Error depositing %d to cex: %v", assetID, err)
+			return
+		}
+	} else {
+		amt := (dexBalance.Available+cexBalance.Available)/2 - dexBalance.Available
+		if amt < minTransferAmount {
+			a.log.Warnf("Amount required to rebalance %s (%d) is less than the min transfer amount %v",
+				symbol, amt, minTransferAmount)
+			return
+		}
+		err = a.cex.Withdraw(a.ctx, assetID, amt, onConfirm)
+		if err != nil {
+			a.log.Errorf("Error withdrawing %d from cex: %v", assetID, err)
+			return
+		}
+	}
+
+	if base {
+		a.pendingBaseRebalance.Store(true)
+	} else {
+		a.pendingQuoteRebalance.Store(true)
+	}
 }
 
 // rebalance checks if there is an arbitrage opportunity between the dex and cex,
@@ -118,20 +211,29 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 		}
 	}
 
+	if a.cfg.AutoRebalance != nil && len(remainingArbs) == 0 {
+		if !a.pendingBaseRebalance.Load() {
+			a.rebalanceAsset(true)
+		}
+		if !a.pendingQuoteRebalance.Load() {
+			a.rebalanceAsset(false)
+		}
+	}
+
 	a.activeArbs = remainingArbs
 }
 
 // arbExists checks if an arbitrage opportunity exists.
 func (a *simpleArbMarketMaker) arbExists() (exists, sellOnDex bool, lotsToArb, dexRate, cexRate uint64) {
-	cexBaseBalance, err := a.cex.Balance(dex.BipIDSymbol(a.baseID))
+	cexBaseBalance, err := a.cex.Balance(a.baseID)
 	if err != nil {
-		a.log.Errorf("failed to get cex balance for %v: %v", dex.BipIDSymbol(a.baseID), err)
+		a.log.Errorf("failed to get cex balance for %v: %v", a.baseID, err)
 		return false, false, 0, 0, 0
 	}
 
-	cexQuoteBalance, err := a.cex.Balance(dex.BipIDSymbol(a.quoteID))
+	cexQuoteBalance, err := a.cex.Balance(a.quoteID)
 	if err != nil {
-		a.log.Errorf("failed to get cex balance for %v: %v", dex.BipIDSymbol(a.quoteID), err)
+		a.log.Errorf("failed to get cex balance for %v: %v", a.quoteID, err)
 		return false, false, 0, 0, 0
 	}
 
@@ -193,7 +295,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool, cexBaseBalance, c
 			}
 		}
 
-		cexAvg, cexExtrema, cexFilled, err := a.cex.VWAP(dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), sellOnDEX, numLots*lotSize)
+		cexAvg, cexExtrema, cexFilled, err := a.cex.VWAP(a.baseID, a.quoteID, sellOnDEX, numLots*lotSize)
 		if err != nil {
 			a.log.Errorf("error calculating cex VWAP: %v", err)
 			return
@@ -269,7 +371,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTradeID, err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize, a.cexTradeUpdatesID)
+	cexTradeID, err := a.cex.Trade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -303,7 +405,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 			a.log.Errorf("expected 1 dex order, got %v", len(dexOrders))
 		}
 
-		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), cexTradeID)
+		err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, cexTradeID)
 		if err != nil {
 			a.log.Errorf("error canceling cex order: %v", err)
 			// TODO: keep retrying failed cancel
@@ -360,7 +462,7 @@ func (a *simpleArbMarketMaker) selfMatch(sell bool, rate uint64) bool {
 // if they have not yet been filled.
 func (a *simpleArbMarketMaker) cancelArbSequence(arb *arbSequence) {
 	if !arb.cexOrderFilled {
-		err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID), arb.cexOrderID)
+		err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, arb.cexOrderID)
 		if err != nil {
 			a.log.Errorf("failed to cancel cex trade ID %s: %v", arb.cexOrderID, err)
 		}
@@ -445,15 +547,14 @@ func (a *simpleArbMarketMaker) run() {
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(a.ctx, dex.BipIDSymbol(a.baseID), dex.BipIDSymbol(a.quoteID))
+	err = a.cex.SubscribeMarket(a.ctx, a.baseID, a.quoteID)
 	if err != nil {
 		a.log.Errorf("Failed to subscribe to cex market: %v", err)
 		return
 	}
 
-	tradeUpdates, unsubscribe, tradeUpdatesID := a.cex.SubscribeTradeUpdates()
+	tradeUpdates, unsubscribe := a.cex.SubscribeTradeUpdates()
 	defer unsubscribe()
-	a.cexTradeUpdatesID = tradeUpdatesID
 
 	wg := &sync.WaitGroup{}
 
@@ -516,7 +617,7 @@ func (a *simpleArbMarketMaker) cancelAllOrders() {
 	}
 }
 
-func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex libxc.CEX, log dex.Logger) {
+func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex cex, log dex.Logger) {
 	if cfg.SimpleArbConfig == nil {
 		// implies bug in caller
 		log.Errorf("No arb config provided. Exiting.")

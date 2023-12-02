@@ -6,6 +6,7 @@ package mm
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -72,7 +73,6 @@ type ArbMarketMakingPlacement struct {
 // placement. This rate is .007 BTC/DCR. Therefore it will place a sell order
 // at .00707 BTC/DCR (.007 BTC/DCR * 1.01).
 type ArbMarketMakerConfig struct {
-	CEXName            string                      `json:"cexName"`
 	BuyPlacements      []*ArbMarketMakingPlacement `json:"buyPlacements"`
 	SellPlacements     []*ArbMarketMakingPlacement `json:"sellPlacements"`
 	Profit             float64                     `json:"profit"`
@@ -80,25 +80,71 @@ type ArbMarketMakerConfig struct {
 	NumEpochsLeaveOpen uint64                      `json:"numEpochsLeaveOpen"`
 	BaseOptions        map[string]string           `json:"baseOptions"`
 	QuoteOptions       map[string]string           `json:"quoteOptions"`
+	// AutoRebalance determines how the bot will handle rebalancing of the
+	// assets between the dex and the cex. If nil, no rebalancing will take
+	// place.
+	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance"`
+}
+
+// autoRebalanceReserves keeps track of the amount of the balances that are
+// reserved for an upcoming rebalance. These will be deducted from the
+// available balance when placing new orders.
+type autoRebalanceReserves struct {
+	baseDexReserves  uint64
+	baseCexReserves  uint64
+	quoteDexReserves uint64
+	quoteCexReserves uint64
+}
+
+func (r *autoRebalanceReserves) get(base, cex bool) uint64 {
+	if base {
+		if cex {
+			return r.baseCexReserves
+		}
+		return r.baseDexReserves
+	}
+	if cex {
+		return r.quoteCexReserves
+	}
+	return r.quoteDexReserves
+}
+
+func (r *autoRebalanceReserves) set(base, cex bool, amt uint64) {
+	if base {
+		if cex {
+			r.baseCexReserves = amt
+		} else {
+			r.baseDexReserves = amt
+		}
+	} else {
+		if cex {
+			r.quoteCexReserves = amt
+		} else {
+			r.quoteDexReserves = amt
+		}
+	}
+}
+
+func (r *autoRebalanceReserves) zero() {
+	r.baseDexReserves = 0
+	r.baseCexReserves = 0
+	r.quoteDexReserves = 0
+	r.quoteCexReserves = 0
 }
 
 type arbMarketMaker struct {
-	ctx   context.Context
-	host  string
-	base  uint32
-	quote uint32
-	cex   libxc.CEX
-	// cexTradeUpdatesID is passed to the Trade function of the cex
-	// so that the cex knows to send update notifications for the
-	// trade back to this bot.
-	cexTradeUpdatesID int
-	core              clientCore
-	log               dex.Logger
-	cfg               *ArbMarketMakerConfig
-	mkt               *core.Market
-	book              dexOrderBook
-	rebalanceRunning  atomic.Bool
-	currEpoch         atomic.Uint64
+	ctx              context.Context
+	host             string
+	baseID           uint32
+	quoteID          uint32
+	cex              cex
+	core             clientCore
+	log              dex.Logger
+	cfg              *ArbMarketMakerConfig
+	mkt              *core.Market
+	book             dexOrderBook
+	rebalanceRunning atomic.Bool
+	currEpoch        atomic.Uint64
 
 	ordMtx         sync.RWMutex
 	ords           map[order.OrderID]*core.Order
@@ -113,6 +159,11 @@ type arbMarketMaker struct {
 	feesMtx  sync.RWMutex
 	buyFees  *orderFees
 	sellFees *orderFees
+
+	reserves autoRebalanceReserves
+
+	pendingBaseRebalance  atomic.Bool
+	pendingQuoteRebalance atomic.Bool
 }
 
 // groupedOrders returns the buy and sell orders grouped by placement index.
@@ -158,7 +209,7 @@ func (a *arbMarketMaker) processDEXMatch(o *core.Order, match *core.Match) {
 	a.cexTradesMtx.Lock()
 	defer a.cexTradesMtx.Unlock()
 
-	tradeID, err := a.cex.Trade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), !o.Sell, cexRate, match.Qty, a.cexTradeUpdatesID)
+	tradeID, err := a.cex.Trade(a.ctx, a.baseID, a.quoteID, !o.Sell, cexRate, match.Qty)
 	if err != nil {
 		a.log.Errorf("Error sending trade to CEX: %v", err)
 		return
@@ -218,7 +269,7 @@ func (a *arbMarketMaker) processDEXOrderNote(note *core.OrderNote) {
 }
 
 func (a *arbMarketMaker) vwap(sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
-	return a.cex.VWAP(dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), sell, qty)
+	return a.cex.VWAP(a.baseID, a.quoteID, sell, qty)
 }
 
 type arbMMRebalancer interface {
@@ -245,8 +296,8 @@ func (a *arbMarketMaker) placeMultiTrade(placements []*rateLots, sell bool) {
 	orders, err := a.core.MultiTrade(nil, &core.MultiTradeForm{
 		Host:       a.host,
 		Sell:       sell,
-		Base:       a.base,
-		Quote:      a.quote,
+		Base:       a.baseID,
+		Quote:      a.quoteID,
 		Placements: qtyRates,
 		Options:    options,
 	})
@@ -265,7 +316,9 @@ func (a *arbMarketMaker) placeMultiTrade(placements []*rateLots, sell bool) {
 	a.ordMtx.Unlock()
 }
 
-func (a *arbMarketMaker) cancelCEXTrades() {
+// cancelExpiredCEXTrades cancels any trades on the CEX that have been open for
+// more than the number of epochs specified in the config.
+func (a *arbMarketMaker) cancelExpiredCEXTrades() {
 	currEpoch := a.currEpoch.Load()
 
 	a.cexTradesMtx.RLock()
@@ -273,7 +326,7 @@ func (a *arbMarketMaker) cancelCEXTrades() {
 
 	for tradeID, epoch := range a.cexTrades {
 		if currEpoch-epoch >= a.cfg.NumEpochsLeaveOpen {
-			err := a.cex.CancelTrade(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote), tradeID)
+			err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, tradeID)
 			if err != nil {
 				a.log.Errorf("Error canceling CEX trade %s: %v", tradeID, err)
 			}
@@ -281,8 +334,8 @@ func (a *arbMarketMaker) cancelCEXTrades() {
 	}
 }
 
-func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, cex libxc.CEX, cfg *ArbMarketMakerConfig, mkt *core.Market, buyFees,
-	sellFees *orderFees, log dex.Logger) (cancels []dex.Bytes, buyOrders, sellOrders []*rateLots) {
+func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, cex cex, cfg *ArbMarketMakerConfig, mkt *core.Market, buyFees,
+	sellFees *orderFees, reserves *autoRebalanceReserves, log dex.Logger) (cancels []dex.Bytes, buyOrders, sellOrders []*rateLots) {
 
 	existingBuys, existingSells := a.groupedOrders()
 
@@ -314,13 +367,13 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, c
 		return
 	}
 
-	baseCEXBalance, err := cex.Balance(mkt.BaseSymbol)
+	baseCEXBalance, err := cex.Balance(mkt.BaseID)
 	if err != nil {
 		log.Errorf("error getting base CEX balance: %v", err)
 		return
 	}
 
-	quoteCEXBalance, err := cex.Balance(mkt.QuoteSymbol)
+	quoteCEXBalance, err := cex.Balance(mkt.QuoteID)
 	if err != nil {
 		log.Errorf("error getting quote CEX balance: %v", err)
 		return
@@ -343,6 +396,20 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, c
 			remainingCEXBalance = baseCEXBalance.Available
 			fundingFees = buyFees.funding
 		}
+
+		cexReserves := reserves.get(!sell, true)
+		if cexReserves > remainingCEXBalance {
+			log.Debugf("rebalance: not enough CEX balance to cover reserves")
+			return nil
+		}
+		remainingCEXBalance -= cexReserves
+
+		dexReserves := reserves.get(sell, false)
+		if dexReserves > remainingDEXBalance {
+			log.Debugf("rebalance: not enough DEX balance to cover reserves")
+			return nil
+		}
+		remainingDEXBalance -= dexReserves
 
 		// Enough balance on the CEX needs to be maintained for counter-trades
 		// for each existing trade on the DEX. Here, we reduce the available
@@ -455,6 +522,248 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, c
 	return cancels, buys, sells
 }
 
+// fundsLockedInOrders returns the total amount of the asset that is
+// currently locked in a booked order on the DEX.
+func (a *arbMarketMaker) fundsLockedInOrders(base bool) uint64 {
+	buys, sells := a.groupedOrders()
+	var locked uint64
+
+	var orders map[int][]*groupedOrder
+	if base {
+		orders = sells
+	} else {
+		orders = buys
+	}
+
+	for _, ordersForPlacement := range orders {
+		for _, o := range ordersForPlacement {
+			locked += o.lockedAmt
+		}
+	}
+
+	return locked
+}
+
+// dexToCexQty returns the amount of backing asset on the CEX that is required
+// for a DEX order of the specified quantity and rate. dexSell indicates that
+// we are selling on the DEX, and therefore buying on the CEX.
+func (a *arbMarketMaker) dexToCexQty(qty, rate uint64, dexSell bool) uint64 {
+	if dexSell {
+		cexRate := uint64(float64(rate) * (1 + a.cfg.Profit))
+		return calc.BaseToQuote(cexRate, qty)
+	}
+	return qty
+}
+
+// cexBalanceBackingDexOrders returns the amount of the asset on the CEX that
+// is required so that if all the orders on the DEX were filled, counter
+// trades could be made on the CEX.
+func (a *arbMarketMaker) cexBalanceBackingDexOrders(base bool) uint64 {
+	buys, sells := a.groupedOrders()
+	var orders map[int][]*groupedOrder
+	if base {
+		orders = buys
+	} else {
+		orders = sells
+	}
+
+	var locked uint64
+	for _, ordersForPlacement := range orders {
+		for _, o := range ordersForPlacement {
+			locked += a.dexToCexQty(o.lots*a.mkt.LotSize, o.rate, !base)
+		}
+	}
+
+	return locked
+}
+
+// freeUpFunds cancels active orders to free up the specified amount of funds
+// for a rebalance between the dex and the cex. The orders are cancelled in
+// reverse order of priority.
+func (a *arbMarketMaker) freeUpFunds(base, cex bool, amt uint64) {
+	buys, sells := a.groupedOrders()
+	var orders map[int][]*groupedOrder
+	if base && !cex || !base && cex {
+		orders = sells
+	} else {
+		orders = buys
+	}
+
+	highToLowIndexes := make([]int, 0, len(orders))
+	for i := range orders {
+		highToLowIndexes = append(highToLowIndexes, i)
+	}
+	sort.Slice(highToLowIndexes, func(i, j int) bool {
+		return highToLowIndexes[i] > highToLowIndexes[j]
+	})
+
+	currEpoch := a.currEpoch.Load()
+
+	for _, index := range highToLowIndexes {
+		ordersForPlacement := orders[index]
+		for _, o := range ordersForPlacement {
+			// If the order is too recent, just wait for the next epoch to
+			// cancel. We still count this order towards the freedAmt in
+			// order to not cancel a higher priority trade.
+			if currEpoch-o.epoch >= 2 {
+				err := a.core.Cancel(o.id[:])
+				if err != nil {
+					a.log.Errorf("error cancelling order: %v", err)
+					continue
+				}
+			}
+			var freedAmt uint64
+			if cex {
+				freedAmt = a.dexToCexQty(o.lots*a.mkt.LotSize, o.rate, !base)
+			} else {
+				freedAmt = o.lockedAmt
+			}
+			if freedAmt >= amt {
+				return
+			}
+			amt -= freedAmt
+		}
+	}
+}
+
+// rebalanceAssets checks if funds on either the CEX or the DEX are below the
+// minimum amount, and if so, initiates either withdrawal or deposit to bring
+// them to equal. If some funds that need to be transferred are either locked
+// in an order on the DEX, or backing a potential order on the CEX, some orders
+// are cancelled to free up funds, and the transfer happens in the next epoch.
+func (a *arbMarketMaker) rebalanceAssets() {
+	rebalanceAsset := func(base bool) {
+		var assetID uint32
+		var minAmount uint64
+		var minTransferAmount uint64
+		if base {
+			assetID = a.baseID
+			minAmount = a.cfg.AutoRebalance.MinBaseAmt
+			minTransferAmount = a.cfg.AutoRebalance.MinBaseTransfer
+		} else {
+			assetID = a.quoteID
+			minAmount = a.cfg.AutoRebalance.MinQuoteAmt
+			minTransferAmount = a.cfg.AutoRebalance.MinQuoteTransfer
+		}
+		symbol := dex.BipIDSymbol(assetID)
+
+		dexAvailableBalance, err := a.core.AssetBalance(assetID)
+		if err != nil {
+			a.log.Errorf("Error getting %s balance: %v", symbol, err)
+			return
+		}
+
+		totalDexBalance := dexAvailableBalance.Available + a.fundsLockedInOrders(base)
+
+		cexBalance, err := a.cex.Balance(assetID)
+		if err != nil {
+			a.log.Errorf("Error getting %s balance on cex: %v", symbol, err)
+			return
+		}
+
+		if (totalDexBalance+cexBalance.Available)/2 < minAmount {
+			a.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX", symbol)
+			return
+		}
+
+		var requireDeposit bool
+		if cexBalance.Available < minAmount {
+			requireDeposit = true
+		} else if totalDexBalance >= minAmount {
+			// No need for withdrawal or deposit.
+			return
+		}
+
+		onConfirm := func() {
+			if base {
+				a.pendingBaseRebalance.Store(false)
+			} else {
+				a.pendingQuoteRebalance.Store(false)
+			}
+		}
+
+		if requireDeposit {
+			amt := (totalDexBalance+cexBalance.Available)/2 - cexBalance.Available
+			if amt < minTransferAmount {
+				a.log.Warnf("Amount required to rebalance %s (%d) is less than the min transfer amount %v",
+					symbol, amt, minTransferAmount)
+				return
+			}
+
+			// If we need to cancel some orders to send the required amount to
+			// the CEX, cancel some orders, and then try again on the next
+			// epoch.
+			if amt > dexAvailableBalance.Available {
+				a.reserves.set(base, false, amt)
+				a.freeUpFunds(base, false, amt-dexAvailableBalance.Available)
+				return
+			}
+
+			err = a.cex.Deposit(a.ctx, assetID, amt, onConfirm)
+			if err != nil {
+				a.log.Errorf("Error depositing %d to cex: %v", assetID, err)
+				return
+			}
+		} else {
+			amt := (totalDexBalance+cexBalance.Available)/2 - totalDexBalance
+			if amt < minTransferAmount {
+				a.log.Warnf("Amount required to rebalance %s (%d) is less than the min transfer amount %v",
+					symbol, amt, minTransferAmount)
+				return
+			}
+
+			cexBalanceBackingDexOrders := a.cexBalanceBackingDexOrders(base)
+			if cexBalance.Available < cexBalanceBackingDexOrders {
+				a.log.Errorf("cex reported balance %d is less than amount required to back dex orders %d",
+					cexBalance.Available, cexBalanceBackingDexOrders)
+				// this is a bug, how to recover?
+				return
+			}
+
+			if amt > cexBalance.Available-cexBalanceBackingDexOrders {
+				a.reserves.set(base, true, amt)
+				a.freeUpFunds(base, true, amt-(cexBalance.Available-cexBalanceBackingDexOrders))
+				return
+			}
+
+			err = a.cex.Withdraw(a.ctx, assetID, amt, onConfirm)
+			if err != nil {
+				a.log.Errorf("Error withdrawing %d from cex: %v", assetID, err)
+				return
+			}
+		}
+
+		if base {
+			a.pendingBaseRebalance.Store(true)
+		} else {
+			a.pendingQuoteRebalance.Store(true)
+		}
+	}
+
+	if a.cfg.AutoRebalance == nil {
+		return
+	}
+
+	a.cexTradesMtx.Lock()
+	if len(a.cexTrades) > 0 {
+		a.cexTradesMtx.Unlock()
+		return
+	}
+	a.cexTradesMtx.Unlock()
+
+	a.reserves.zero()
+
+	if !a.pendingBaseRebalance.Load() {
+		rebalanceAsset(true)
+	}
+	if !a.pendingQuoteRebalance.Load() {
+		rebalanceAsset(false)
+	}
+}
+
+// rebalance is called on each new epoch. It determines what orders need to be
+// placed, cancelled, and what funds need to be transferred between the DEX and
+// the CEX.
 func (a *arbMarketMaker) rebalance(epoch uint64) {
 	if !a.rebalanceRunning.CompareAndSwap(false, true) {
 		return
@@ -467,7 +776,8 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 	}
 	a.currEpoch.Store(epoch)
 
-	cancels, buyOrders, sellOrders := arbMarketMakerRebalance(epoch, a, a.core, a.cex, a.cfg, a.mkt, a.buyFees, a.sellFees, a.log)
+	cancels, buyOrders, sellOrders := arbMarketMakerRebalance(epoch, a, a.core,
+		a.cex, a.cfg, a.mkt, a.buyFees, a.sellFees, &a.reserves, a.log)
 
 	for _, cancel := range cancels {
 		err := a.core.Cancel(cancel)
@@ -483,7 +793,8 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 		a.placeMultiTrade(sellOrders, true)
 	}
 
-	a.cancelCEXTrades()
+	a.cancelExpiredCEXTrades()
+	a.rebalanceAssets()
 }
 
 func (a *arbMarketMaker) handleNotification(note core.Notification) {
@@ -512,8 +823,8 @@ func (a *arbMarketMaker) cancelAllOrders() {
 func (a *arbMarketMaker) updateFeeRates() error {
 	buySwapFees, buyRedeemFees, buyRefundFees, err := a.core.SingleLotFees(&core.SingleLotFeesForm{
 		Host:          a.host,
-		Base:          a.base,
-		Quote:         a.quote,
+		Base:          a.baseID,
+		Quote:         a.quoteID,
 		UseMaxFeeRate: true,
 		UseSafeTxSize: true,
 	})
@@ -523,8 +834,8 @@ func (a *arbMarketMaker) updateFeeRates() error {
 
 	sellSwapFees, sellRedeemFees, sellRefundFees, err := a.core.SingleLotFees(&core.SingleLotFeesForm{
 		Host:          a.host,
-		Base:          a.base,
-		Quote:         a.quote,
+		Base:          a.baseID,
+		Quote:         a.quoteID,
 		UseMaxFeeRate: true,
 		UseSafeTxSize: true,
 		Sell:          true,
@@ -533,12 +844,12 @@ func (a *arbMarketMaker) updateFeeRates() error {
 		return fmt.Errorf("failed to get fees: %v", err)
 	}
 
-	buyFundingFees, err := a.core.MaxFundingFees(a.quote, a.host, uint32(len(a.cfg.BuyPlacements)), a.cfg.QuoteOptions)
+	buyFundingFees, err := a.core.MaxFundingFees(a.quoteID, a.host, uint32(len(a.cfg.BuyPlacements)), a.cfg.QuoteOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get funding fees: %v", err)
 	}
 
-	sellFundingFees, err := a.core.MaxFundingFees(a.base, a.host, uint32(len(a.cfg.SellPlacements)), a.cfg.BaseOptions)
+	sellFundingFees, err := a.core.MaxFundingFees(a.baseID, a.host, uint32(len(a.cfg.SellPlacements)), a.cfg.BaseOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get funding fees: %v", err)
 	}
@@ -563,24 +874,27 @@ func (a *arbMarketMaker) updateFeeRates() error {
 }
 
 func (a *arbMarketMaker) run() {
-	book, bookFeed, err := a.core.SyncBook(a.host, a.base, a.quote)
+	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
 	if err != nil {
 		a.log.Errorf("Failed to sync book: %v", err)
 		return
 	}
 	a.book = book
 
-	a.updateFeeRates()
+	err = a.updateFeeRates()
+	if err != nil {
+		a.log.Errorf("Failed to get fees: %v", err)
+		return
+	}
 
-	err = a.cex.SubscribeMarket(a.ctx, dex.BipIDSymbol(a.base), dex.BipIDSymbol(a.quote))
+	err = a.cex.SubscribeMarket(a.ctx, a.baseID, a.quoteID)
 	if err != nil {
 		a.log.Errorf("Failed to subscribe to cex market: %v", err)
 		return
 	}
 
-	tradeUpdates, unsubscribe, tradeUpdatesID := a.cex.SubscribeTradeUpdates()
+	tradeUpdates, unsubscribe := a.cex.SubscribeTradeUpdates()
 	defer unsubscribe()
-	a.cexTradeUpdatesID = tradeUpdatesID
 
 	wg := &sync.WaitGroup{}
 
@@ -630,7 +944,7 @@ func (a *arbMarketMaker) run() {
 	a.cancelAllOrders()
 }
 
-func RunArbMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, cex libxc.CEX, log dex.Logger) {
+func RunArbMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, cex cex, log dex.Logger) {
 	if cfg.ArbMarketMakerConfig == nil {
 		// implies bug in caller
 		log.Errorf("No arb market maker config provided. Exiting.")
@@ -646,8 +960,8 @@ func RunArbMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, cex li
 	(&arbMarketMaker{
 		ctx:            ctx,
 		host:           cfg.Host,
-		base:           cfg.BaseAsset,
-		quote:          cfg.QuoteAsset,
+		baseID:         cfg.BaseAsset,
+		quoteID:        cfg.QuoteAsset,
 		cex:            cex,
 		core:           c,
 		log:            log,

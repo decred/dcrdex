@@ -4339,6 +4339,17 @@ func (btc *baseWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contra
 	return btc.node.swapConfirmations(txHash, vout, pkScript, startTime)
 }
 
+// TransactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (btc *baseWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding txid %q: %w", txID, err)
+	}
+	_, confs, err = btc.rawWalletTx(txHash)
+	return
+}
+
 // RegFeeConfirmations gets the number of confirmations for the specified output
 // by first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.

@@ -2123,6 +2123,21 @@ func (w *zecWallet) Send(address string, value, feeRate uint64) (asset.Coin, err
 	return btc.NewOutput(txHash, vout, sent), nil
 }
 
+// TransactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (w *zecWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding txid %q: %w", txID, err)
+	}
+	res, err := getWalletTransaction(w, txHash)
+	if err != nil {
+		return 0, err
+	}
+
+	return uint32(res.Confirmations), nil
+}
+
 // send the value to the address, with the given fee rate. If subtract is true,
 // the fees will be subtracted from the value. If false, the fees are in
 // addition to the value. feeRate is in units of sats/byte.

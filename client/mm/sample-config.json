@@ -8,6 +8,13 @@
             "quoteBalanceType": 0,
             "baseBalance": 100,
             "quoteBalance": 100,
+            "cexCfg": {
+                "name": "Binance",
+                "baseBalanceType": 0,
+                "quoteBalanceType": 0,
+                "baseBalance": 100,
+                "quoteBalance": 100
+            },
             "arbMarketMakerConfig": {
                 "cexName": "Binance",
                 "buyPlacements": [
@@ -55,6 +62,12 @@
                 "quoteOptions": {
                     "multisplit": "true",
                     "multisplitbuffer": "5"
+                },
+                "autoRebalance": {
+                    "minBaseAmt": 3000000000,
+                    "minBaseTransfer" : 1000000000,
+                    "minQuoteAmt": 20000000,
+                    "minQuoteTransfer": 10000000
                 }
             }
         }

@@ -38,3 +38,22 @@ func TestSubscribeTradeUpdates(t *testing.T) {
 		t.Fatalf("id2 not found")
 	}
 }
+
+func TestBinanceToDexSymbol(t *testing.T) {
+	tests := map[[2]string]string{
+		{"ETH", "ETH"}:     "eth",
+		{"ETH", "MATIC"}:   "weth.polygon",
+		{"MATIC", "MATIC"}: "polygon",
+		{"USDC", "ETH"}:    "usdc.eth",
+		{"USDC", "MATIC"}:  "usdc.polygon",
+		{"BTC", "BTC"}:     "btc",
+		{"WBTC", "ETH"}:    "wbtc.eth",
+	}
+
+	for test, expected := range tests {
+		dexSymbol := binanceCoinNetworkToDexSymbol(test[0], test[1])
+		if expected != dexSymbol {
+			t.Fatalf("expected %s but got %v", expected, dexSymbol)
+		}
+	}
+}

@@ -1361,6 +1361,10 @@ func (s *WebServer) send(w http.ResponseWriter, r *http.Request, form *sendOrWit
 		s.writeAPIError(w, fmt.Errorf("no wallet found for %s", unbip(form.AssetID)))
 		return
 	}
+	if len(form.Pass) == 0 {
+		s.writeAPIError(w, fmt.Errorf("empty password"))
+		return
+	}
 	coin, err := s.core.Send(form.Pass, form.AssetID, form.Value, form.Address, form.Subtract)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("send/withdraw error: %w", err))

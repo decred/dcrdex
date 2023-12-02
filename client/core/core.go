@@ -3741,25 +3741,31 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 }
 
 // NewDepositAddress retrieves a new deposit address from the specified asset's
-// wallet, saves it to the database, and emits a notification.
+// wallet, saves it to the database, and emits a notification. If the wallet
+// does not support generating new addresses, the current address will be
+// returned.
 func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 	w, exists := c.wallet(assetID)
 	if !exists {
 		return "", newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 
-	// Retrieve a fresh deposit address.
-	addr, err := w.refreshDepositAddress()
-	if err != nil {
-		return "", err
+	var addr string
+	if _, ok := w.Wallet.(asset.NewAddresser); ok {
+		// Retrieve a fresh deposit address.
+		var err error
+		addr, err = w.refreshDepositAddress()
+		if err != nil {
+			return "", err
+		}
+		if err = c.storeDepositAddress(w.dbID, addr); err != nil {
+			return "", err
+		}
+		// Update wallet state in the User data struct and emit a WalletStateNote.
+		c.notify(newWalletStateNote(w.state()))
+	} else {
+		addr = w.address
 	}
-
-	if err = c.storeDepositAddress(w.dbID, addr); err != nil {
-		return "", err
-	}
-
-	// Update wallet state in the User data struct and emit a WalletStateNote.
-	c.notify(newWalletStateNote(w.state()))
 
 	return addr, nil
 }
@@ -5452,23 +5458,23 @@ func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32) (feeSuggestion u
 	return dc.fetchFeeRate(assetID)
 }
 
-// Withdraw initiates a withdraw from an exchange wallet. The client password
-// must be provided as an additional verification. This method is DEPRECATED. Use
-// Send with the subtract option instead.
-func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
-	return c.Send(pw, assetID, value, address, true)
-}
-
 // Send initiates either send or withdraw from an exchange wallet. if subtract
 // is true, fees are subtracted from the value else fees are taken from the
-// exchange wallet. The client password must be provided as an additional
-// verification.
+// exchange wallet.
 func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
-	crypter, err := c.encryptionKey(pw)
-	if err != nil {
-		return nil, fmt.Errorf("password error: %w", err)
+	var crypter encrypt.Crypter
+	// Empty password can be provided if wallet is already unlocked. Webserver
+	// and RPCServer should not allow empty password, but this is used for
+	// bots.
+	if len(pw) > 0 {
+		var err error
+		crypter, err = c.encryptionKey(pw)
+		if err != nil {
+			return nil, fmt.Errorf("Trade password error: %w", err)
+		}
+		defer crypter.Close()
 	}
-	defer crypter.Close()
+
 	if value == 0 {
 		return nil, fmt.Errorf("cannot send/withdraw zero %s", unbip(assetID))
 	}
@@ -5476,7 +5482,7 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	if !found {
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
-	err = c.connectAndUnlock(crypter, wallet)
+	err := c.connectAndUnlock(crypter, wallet)
 	if err != nil {
 		return nil, err
 	}
@@ -5507,7 +5513,19 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
 
 	c.updateAssetBalance(assetID)
+
 	return coin, nil
+}
+
+// TransactionConfirmations returns the number of confirmations of a
+// transaction.
+func (c *Core) TransactionConfirmations(assetID uint32, txid string) (confirmations uint32, err error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, err
+	}
+
+	return wallet.TransactionConfirmations(c.ctx, txid)
 }
 
 // ValidateAddress checks that the provided address is valid.
