@@ -32,6 +32,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v3/wallet"
 	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
@@ -5003,14 +5004,19 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 			TreasurySpends: tSpends,
 			TreasuryKeys:   treasuryPolicy,
 		},
-		Stats: asset.TicketStats{
-			TotalRewards: uint64(sinfo.TotalSubsidy),
-			TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
-			Votes:        sinfo.Voted,
-			Revokes:      sinfo.Revoked,
-			Queued:       uint32(dcr.ticketBuyer.remaining.Load()),
-		},
+		Stats: dcr.ticketStatsFromStakeInfo(sinfo),
 	}, nil
+}
+
+func (dcr *ExchangeWallet) ticketStatsFromStakeInfo(sinfo *wallet.StakeInfoData) asset.TicketStats {
+	return asset.TicketStats{
+		TotalRewards: uint64(sinfo.TotalSubsidy),
+		TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
+		Votes:        sinfo.Voted,
+		Revokes:      sinfo.Revoked,
+		Mempool:      sinfo.OwnMempoolTix,
+		Queued:       uint32(dcr.ticketBuyer.remaining.Load()),
+	}
 }
 
 func (dcr *ExchangeWallet) voteSubsidy(tipHeight int64) uint64 {
@@ -5152,9 +5158,10 @@ const ticketDataRoute = "ticketPurchaseUpdate"
 // TicketPurchaseUpdate is an update from the asynchronous ticket purchasing
 // loop.
 type TicketPurchaseUpdate struct {
-	Err       string          `json:"err,omitempty"`
-	Remaining uint32          `json:"remaining"`
-	Tickets   []*asset.Ticket `json:"tickets"`
+	Err       string             `json:"err,omitempty"`
+	Remaining uint32             `json:"remaining"`
+	Tickets   []*asset.Ticket    `json:"tickets"`
+	Stats     *asset.TicketStats `json:"stats,omitempty"`
 }
 
 // runTicketBuyer attempts to buy requested tickets. Because of a dcrwallet bug,
@@ -5246,9 +5253,13 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 		remain = 0
 		tb.remaining.Store(remain)
 	}
+	stats := dcr.ticketStatsFromStakeInfo(sinfo)
+	stats.Mempool += uint32(len(tickets))
+	stats.Queued = uint32(remain)
 	dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{
 		Tickets:   tickets,
 		Remaining: uint32(remain),
+		Stats:     &stats,
 	})
 	for _, ticket := range tickets {
 		txHash, err := chainhash.NewHashFromStr(ticket.Tx.Hash)
@@ -5447,14 +5458,8 @@ func (dcr *ExchangeWallet) emitTipChange(height int64) {
 			VotingSubsidy uint64            `json:"votingSubsidy"`
 			Stats         asset.TicketStats `json:"stats"`
 		}{
-			TicketPrice: uint64(sinfo.Sdiff),
-			Stats: asset.TicketStats{
-				TotalRewards: uint64(sinfo.TotalSubsidy),
-				TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
-				Votes:        sinfo.Voted,
-				Revokes:      sinfo.Revoked,
-				Queued:       uint32(dcr.ticketBuyer.remaining.Load()),
-			},
+			TicketPrice:   uint64(sinfo.Sdiff),
+			Stats:         dcr.ticketStatsFromStakeInfo(sinfo),
 			VotingSubsidy: dcr.voteSubsidy(height),
 		}
 	}

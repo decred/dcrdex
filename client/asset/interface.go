@@ -1018,6 +1018,7 @@ type TicketStats struct {
 	Votes        uint32 `json:"votes"`
 	Revokes      uint32 `json:"revokes"`
 	Queued       uint32 `json:"queued"`
+	Mempool      uint32 `json:"mempool"`
 }
 
 // TicketStakingStatus holds various stake information from the wallet.

@@ -52,6 +52,7 @@ interface TicketPurchaseUpdate extends BaseWalletNote {
   err?: string
   remaining:number
   tickets?: Ticket[]
+  stats?: TicketStats
 }
 
 const animationLength = 300
@@ -946,9 +947,8 @@ export default class WalletsPage extends BasePage {
     if (votingSubsidy) stakeStatus.votingSubsidy = votingSubsidy
     const liveTicketCount = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status <= ticketStatusLive && tkt.status >= ticketStatusUnmined).length
     page.stakingTicketCount.textContent = String(liveTicketCount)
-    const immatureTicketCount = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status === ticketStatusUnmined).length
-    page.immatureTicketCount.textContent = String(immatureTicketCount)
-    Doc.setVis(immatureTicketCount > 0, page.immatureTicketCountBox)
+    page.immatureTicketCount.textContent = String(stats.mempool)
+    Doc.setVis(stats.mempool > 0, page.immatureTicketCountBox)
     page.queuedTicketCount.textContent = String(stats.queued)
     page.formQueuedTix.textContent = String(stats.queued)
     Doc.setVis(stats.queued > 0, page.formQueueTixBox, page.queuedTicketCountBox)
@@ -1032,23 +1032,19 @@ export default class WalletsPage extends BasePage {
   processTicketPurchaseUpdate (walletNote: CustomWalletNote) {
     const { stakeStatus, selectedAssetID, page } = this
     const { assetID } = walletNote
-    const { err, remaining, tickets } = walletNote.payload as TicketPurchaseUpdate
+    const { err, remaining, tickets, stats } = walletNote.payload as TicketPurchaseUpdate
     if (assetID !== selectedAssetID) return
-    if (tickets) {
-      stakeStatus.stats.ticketCount += tickets.length
-      stakeStatus.tickets = tickets.concat(stakeStatus.tickets)
+    if (err) {
+      Doc.show(page.purchaseTicketsErrBox)
+      page.purchaseTicketsErr.textContent = err
+      return
     }
+    if (tickets) stakeStatus.tickets = tickets.concat(stakeStatus.tickets)
+    if (stats) this.updateTicketStats(stats, app().assets[assetID].unitInfo)
     stakeStatus.stats.queued = remaining
     page.queuedTicketCount.textContent = String(remaining)
     page.formQueuedTix.textContent = String(remaining)
     Doc.setVis(remaining > 0, page.queuedTicketCountBox)
-    const immature = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status === ticketStatusUnmined).length
-    page.immatureTicketCount.textContent = String(immature)
-    Doc.setVis(immature > 0, page.immatureTicketCountBox)
-    if (err) {
-      Doc.show(page.purchaseTicketsErrBox)
-      page.purchaseTicketsErr.textContent = err
-    }
   }
 
   async setVSP (assetID: number, vsp: VotingServiceProvider) {

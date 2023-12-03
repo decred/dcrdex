@@ -782,6 +782,7 @@ export interface TicketStats {
   ticketCount: number
   votes: number
   revokes: number
+  mempool: number
   queued: number
 }
 
