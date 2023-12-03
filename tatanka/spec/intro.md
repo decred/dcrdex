@@ -25,7 +25,7 @@ even when those clients are connected to different mesh nodes. Client messaging
 is end-to-end encrypted, so the mesh network itself cannot read the contents.
 The encrypted messaging primitive is called a "tankagram". Clients connected
 to the same subscription channel might send one another tankagrams to, for
-instance, communicate detaila about an ongoing atomic swap.
+instance, communicate details about an ongoing atomic swap.
 
 1) Oracle services. The mesh will coordinate distribution of network transaction
 fee rates that might be used as part of validation for app actions. The mesh
@@ -66,10 +66,10 @@ P2P model. Tatanka Mesh does not even know what a market is.
 
 ### Outstanding Questions<a name="oustanding_questions">
 
-- Client will self-report successes and counter-party failures, but who is in charge of
-auditing these reports before inclusion into reputation? For example, the mesh
-does not know what an atomic swap is, so how can a mesh node validate a reported
-swap failure? Two possiblities are...
+- Clients will self-report successes and counter-party failures, but who is in
+charge of auditing these reports before inclusion into reputation? For example,
+the mesh does not know what an atomic swap is, so how can a mesh node validate a
+reported swap failure? Two possiblities are...
     1) The server could audit the reports, but do so in terms of blockchain
     primitives that exist outside of the context of particular applications. For
     example, the server could audit reports in terms of "HTLC pairs". The

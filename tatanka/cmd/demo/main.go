@@ -64,7 +64,6 @@ func mainErr() (err error) {
 		return fmt.Errorf("failed to create custom logger: %w", err)
 	}
 
-	// log := logMaker.NewLogger("MAIN", dex.LevelTrace)
 	comms.UseLogger(logMaker.NewLogger("COMMS", dex.LevelTrace))
 
 	addrs, err := findOpenAddrs(2)
@@ -366,7 +365,7 @@ func newClient(ctx context.Context, addr string, peerID tanka.PeerID, i int) (*c
 		return nil, fmt.Errorf("ConnectOnce error: %w", err)
 	}
 
-	if err := tc.AddTatankaNode(peerID, "ws://"+addr, nil); err != nil {
+	if err := tc.AddTatankaNode(ctx, peerID, "ws://"+addr, nil); err != nil {
 		cm.Disconnect()
 		return nil, fmt.Errorf("error adding server %q", addr)
 	}

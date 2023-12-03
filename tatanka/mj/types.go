@@ -80,7 +80,7 @@ type TatankaConfig struct {
 	ID      tanka.PeerID `json:"id"`
 	Version uint32       `json:"version"`
 	Chains  []uint32     `json:"chains"`
-	// BondTier is be the senders current view of the receivers tier.
+	// BondTier is the senders current view of the receiver's tier.
 	BondTier uint64 `json:"bondTier"`
 }
 
@@ -205,7 +205,7 @@ func MustNotification(route string, payload any) *msgjson.Message {
 func MustResponse(id uint64, payload any, rpcErr *msgjson.Error) *msgjson.Message {
 	msg, err := msgjson.NewResponse(id, payload, rpcErr)
 	if err != nil {
-		panic("MustNotification error: " + err.Error())
+		panic("MustResponse error: " + err.Error())
 	}
 	return msg
 }

@@ -19,6 +19,10 @@ func (t *Tatanka) handleInboundTatankaConnect(cl tanka.Sender, msg *msgjson.Mess
 		return msgjson.NewError(mj.ErrBadRequest, "unmarshal error: %v", err)
 	}
 
+	if _, found := t.whitelist[cfg.ID]; !found {
+		return msgjson.NewError(mj.ErrAuth, "not whitelisted")
+	}
+
 	p, rrs, err := t.loadPeer(cfg.ID)
 	if err != nil {
 		return msgjson.NewError(mj.ErrInternal, "error finding peer: %v", err)

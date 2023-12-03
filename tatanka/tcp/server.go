@@ -85,7 +85,6 @@ func (cl *wsConnWrapper) PeerID() tanka.PeerID {
 // Server handles HTTP, HTTPS, WebSockets, and Tor communications protocols.
 type Server struct {
 	t   TankaCore
-	ctx context.Context
 	wg  *sync.WaitGroup
 	srv *comms.Server
 	log dex.Logger
@@ -119,7 +118,6 @@ func NewServer(cfg *comms.RPCConfig, t TankaCore, log dex.Logger) (*Server, erro
 }
 
 func (s *Server) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	s.ctx = ctx
 	var wg sync.WaitGroup
 	s.wg = &wg
 

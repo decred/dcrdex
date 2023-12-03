@@ -195,7 +195,6 @@ type Config struct {
 }
 
 type TankaClient struct {
-	ctx                  context.Context
 	wg                   *sync.WaitGroup
 	peerID               tanka.PeerID
 	priv                 *secp256k1.PrivateKey
@@ -278,17 +277,8 @@ func (c *TankaClient) handleTankagram(tt *tatanka, tankagram *msgjson.Message) *
 			pub:           pub,
 			decryptionKey: priv,
 		}
-	}
 
-	// The only unencrypted tankagram we'll look for is the encryption key.
-	if !peerExisted {
 		msg := gram.Message
-		if msg.Route != mj.RouteEncryptionKey {
-			// if err := c.handlePeerMessage(p, msg); err != nil {
-			// 	return msgjson.NewError(mj.ErrBadRequest, "bad raw message")
-			// }
-			return msgjson.NewError(mj.ErrBadRequest, "where's your key?")
-		}
 		if err := mj.CheckSig(msg, p.pub); err != nil {
 			c.log.Errorf("%s sent a unencrypted message with a bad signature: %w", p.id, err)
 			return msgjson.NewError(mj.ErrBadRequest, "bad gram sig")
@@ -300,7 +290,6 @@ func (c *TankaClient) handleTankagram(tt *tatanka, tankagram *msgjson.Message) *
 			return msgjson.NewError(mj.ErrBadRequest, "unmarshal key error")
 		}
 
-		var err error
 		p.encryptionKey, err = decodePubkeyRSA(b)
 		if err != nil {
 			c.log.Errorf("error decoding RSA pub key from %s: %v", p.id, err)
@@ -363,7 +352,7 @@ func (c *TankaClient) handleBroadcast(tt *tatanka, msg *msgjson.Message) {
 	var bcast mj.Broadcast
 	if err := msg.Unmarshal(&bcast); err != nil {
 		c.log.Errorf("%s broadcast unmarshal error: %w", err)
-		return // msgjson.NewError(mj.ErrBadRequest, "bad payload")
+		return
 	}
 	switch bcast.Topic {
 	case mj.TopicMarket:
@@ -461,7 +450,6 @@ func (c *TankaClient) Broadcast(topic tanka.Topic, subject tanka.Subject, msgTyp
 }
 
 func (c *TankaClient) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	c.ctx = ctx
 	var wg sync.WaitGroup
 	c.wg = &wg
 
@@ -482,7 +470,7 @@ func (c *TankaClient) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return c.wg, nil
 }
 
-func (c *TankaClient) AddTatankaNode(peerID tanka.PeerID, uri string, cert []byte) error {
+func (c *TankaClient) AddTatankaNode(ctx context.Context, peerID tanka.PeerID, uri string, cert []byte) error {
 	pub, err := secp256k1.ParsePubKey(peerID[:])
 	if err != nil {
 		return fmt.Errorf("error parsing pubkey from peer ID: %w", err)
@@ -503,7 +491,7 @@ func (c *TankaClient) AddTatankaNode(peerID tanka.PeerID, uri string, cert []byt
 	}
 
 	cm := dex.NewConnectionMaster(cl)
-	if err := cm.ConnectOnce(c.ctx); err != nil {
+	if err := cm.ConnectOnce(ctx); err != nil {
 		return fmt.Errorf("error connecting: %w", err)
 	}
 
@@ -625,27 +613,22 @@ func (c *TankaClient) tankaNodes() []*tatanka {
 
 func (c *TankaClient) PostBond(bond *tanka.Bond) error {
 	msg := mj.MustRequest(mj.RoutePostBond, []*tanka.Bond{bond})
+	var success bool
 	for _, tt := range c.tankaNodes() {
 		var res bool
 		if err := c.request(tt, msg, &res); err != nil {
 			c.log.Errorf("error sending bond to tatanka node %s", tt.peerID)
-			continue
+		} else {
+			success = true
 		}
+	}
+	if success {
 		return nil
 	}
 	return errors.New("failed to report bond to any tatanka nodes")
 }
 
 func (c *TankaClient) SubscribeMarket(baseID, quoteID uint32) error {
-	// params := &tanka.MarketParameters{
-	// 	BaseID:  baseID,
-	// 	QuoteID: quoteID,
-	// }
-	// paramsB, err := json.Marshal(params)
-	// if err != nil {
-	// 	return fmt.Errorf("marshal error: %w", err)
-	// }
-
 	mktName, err := dex.MarketName(baseID, quoteID)
 	if err != nil {
 		return fmt.Errorf("error constructing market name: %w", err)
@@ -654,7 +637,6 @@ func (c *TankaClient) SubscribeMarket(baseID, quoteID uint32) error {
 	msg := mj.MustRequest(mj.RouteSubscribe, &mj.Subscription{
 		Topic:   mj.TopicMarket,
 		Subject: tanka.Subject(mktName),
-		// ChannelParameters: paramsB,
 	})
 
 	c.marketsMtx.Lock()
@@ -722,10 +704,9 @@ func (c *TankaClient) ConnectPeer(peerID tanka.PeerID, hosts ...tanka.PeerID) (*
 			return nil, fmt.Errorf("error parsing remote pubkey: %v", err)
 		}
 		p = &peer{
-			id:            peerID,    //            tanka.PeerID
-			pub:           remotePub, //           *secp256k1.PublicKey
-			decryptionKey: priv,      // *rsa.PrivateKey // ours
-			// encryptionKey: , // atomic.Value    // *rsa.PublicKey, from remote peer
+			id:            peerID,
+			pub:           remotePub,
+			decryptionKey: priv,
 		}
 	}
 
@@ -819,8 +800,6 @@ func (c *TankaClient) SendTankagram(peerID tanka.PeerID, msg *msgjson.Message) (
 
 	}
 	return nil, nil, fmt.Errorf("no path")
-	// var res bool // only possible non-error result is `true`
-	// return c.request(tt, wrappedMsg, res)
 }
 
 func (c *TankaClient) signAndEncryptTankagram(p *peer, msg *msgjson.Message) ([]byte, error) {

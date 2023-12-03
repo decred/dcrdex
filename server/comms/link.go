@@ -261,25 +261,6 @@ func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message), exp
 // is equal to the response Message.ID passed to the handler (see the
 // msgjson.Response case in handleMessage).
 func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Message), expireTime time.Duration, expire func()) error {
-	// // log.Tracef("Registering '%s' request ID %d (wsLink)", msg.Route, msg.ID)
-	// c.logReq(msg.ID, f, expireTime, expire)
-	// // Send errors are (1) connection is already down or (2) json marshal
-	// // failure. Any connection write errors just cause the link to quit as the
-	// // goroutine that actually does the write does not relay any errors back to
-	// // the caller. The request will eventually expire when no response comes.
-	// // This is not ideal - we may consider an error callback, or different
-	// // Send/SendNow/QueueSend functions.
-	// err := c.Send(msg)
-	// if err != nil {
-	// 	// Neither expire nor the handler should run. Stop the expire timer
-	// 	// created by logReq and delete the response handler it added. The
-	// 	// caller receives a non-nil error to deal with it.
-	// 	log.Debugf("(*wsLink).Request(route '%s') Send error, unregistering msg ID %d handler: %v",
-	// 		msg.Route, msg.ID, err)
-	// 	c.respHandler(msg.ID) // drop the removed responseHandler
-	// }
-	// return err
-
 	rawMsg, err := json.Marshal(msg)
 	if err != nil {
 		log.Errorf("Failed to marshal message: %v", err)

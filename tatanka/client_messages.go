@@ -34,7 +34,7 @@ type clientJobNewRemote struct {
 type clientJobRemoteDisconnect clientJobNewRemote
 
 // clientJobFindRemotes is a clientJob that produces a list of remote tatanka
-// nodes to which the client it thought to be connected.
+// nodes to which the client is thought to be connected.
 type clientJobFindRemotes struct {
 	clientID tanka.PeerID
 }
@@ -204,7 +204,7 @@ func (t *Tatanka) handlePostBond(cl tanka.Sender, msg *msgjson.Message) *msgjson
 	}
 
 	if len(bonds) == 0 {
-		t.log.Errorf("Bond-posting client sent zero bondsl")
+		t.log.Errorf("Bond-posting client sent zero bonds")
 		return msgjson.NewError(mj.ErrBadRequest, "no bonds sent")
 	}
 
@@ -512,7 +512,7 @@ func (t *Tatanka) relayBroadcast(bcast *mj.Broadcast, from tanka.PeerID) {
 	}
 }
 
-// findPath finds an remote tatankas that are hosting the specified peer.
+// findPath finds remote tatankas that are hosting the specified peer.
 func (t *Tatanka) findPath(peerID tanka.PeerID) []*remoteTatanka {
 	job := &clientJob{
 		task: &clientJobFindRemotes{
@@ -532,75 +532,6 @@ func (t *Tatanka) findPath(peerID tanka.PeerID) []*remoteTatanka {
 	}
 	t.tatankasMtx.RUnlock()
 	return nodes
-	// 	// Attempt to locate the remote client.
-	// 	req := mj.MustRequest(mj.RoutePathInquiry, &mj.PathInquiry{ID: peerID})
-	// 	mj.SignMessage(t.priv, req)
-	// 	peers := t.tatankaNodes()
-	// 	n := len(peers)
-	// 	type result struct {
-	// 		tt    *remoteTatanka
-	// 		err   error
-	// 		found bool
-	// 	}
-	// 	resC := make(chan *result)
-	// 	sendReq := func(tt *remoteTatanka) {
-	// 		var found bool
-	// 		if err := tt.Request(req, func(msg *msgjson.Message) {
-	// 			if err := msg.UnmarshalResult(&found); err != nil {
-	// 				resC <- &result{err: err, tt: tt}
-	// 			} else {
-	// 				resC <- &result{found: found, tt: tt}
-	// 			}
-	// 		}); err != nil {
-	// 			resC <- &result{err: err, tt: tt}
-	// 		}
-	// 	}
-	// 	for _, tt := range peers {
-	// 		sendReq(tt)
-	// 	}
-	// 	timeout := time.After(time.Second * 5)
-	// 	rcvd := make([]*result, 0, n)
-	// 	var nFound int
-	// out:
-	// 	for {
-	// 		select {
-	// 		case r := <-resC:
-	// 			rcvd = append(rcvd, r)
-	// 			if r.found {
-	// 				nFound++
-	// 			}
-	// 			if len(rcvd) == n {
-	// 				break out
-	// 			}
-	// 		case <-timeout:
-	// 			t.log.Error("timed out waiting for results for path inquiry")
-	// 			break out
-	// 		case <-t.ctx.Done():
-	// 			return nil
-	// 		}
-	// 	}
-
-	// 	nodes := make([]*remoteTatanka, 0, nFound)
-	// 	t.remoteClientMtx.Lock()
-	// 	for _, r := range rcvd {
-	// 		if r.err != nil {
-	// 			t.log.Errorf("Path inquiry error from %s: %v", r.tt.ID, r.err)
-	// 			continue
-	// 		}
-	// 		if !r.found {
-	// 			continue
-	// 		}
-	// 		nodes = append(nodes, r.tt)
-	// 		srvs := t.remoteClients[peerID]
-	// 		if srvs == nil {
-	// 			srvs = make(map[tanka.PeerID]struct{})
-	// 			t.remoteClients[peerID] = srvs
-	// 		}
-	// 		srvs[r.tt.ID] = struct{}{}
-	// 	}
-	// 	t.remoteClientMtx.Unlock()
-
-	// return nodes
 }
 
 // handleTankagram forwards a tankagram from a locally connected client, sending
@@ -672,6 +603,7 @@ func (t *Tatanka) handleTankagram(c *client, msg *msgjson.Message) *msgjson.Erro
 		if errors.Is(err, ErrNoPath) {
 			sendTankagramResult(&mj.TankagramResult{Result: mj.TRTNoPath})
 		} else {
+			t.log.Errorf("Error relaying tankagram: %v", err)
 			sendTankagramResult(&mj.TankagramResult{Result: mj.TRTErrFromTanka})
 		}
 	}

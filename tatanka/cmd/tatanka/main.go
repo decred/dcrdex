@@ -248,8 +248,6 @@ func parseAndSetDebugLevels(debugLevel string, UTC bool) (*dex.LoggerMaker, erro
 	// Set main's Logger.
 	log = subsystemLoggers["MAIN"]
 
-	// db.UseLogger(subsystemLoggers["DB"])
-
 	return lm, nil
 }
 

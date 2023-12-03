@@ -18,12 +18,11 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/tatanka/chain"
 	"decred.org/dcrdex/tatanka/tanka"
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrjson/v4"
-	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/rpcclient/v8"
-	"github.com/gcash/bchd/btcjson"
 )
 
 const (
@@ -182,7 +181,7 @@ func (c *bitcoinChain) monitorFees(ctx context.Context) {
 			c.log.Errorf("estimatesmartfee error: %w", err)
 			continue
 		}
-		atomsPerKB, err := dcrutil.NewAmount(estimateFeeResult.FeeRate)
+		atomsPerKB, err := btcutil.NewAmount(estimateFeeResult.FeeRate)
 		if err != nil {
 			c.log.Errorf("NewAmount error: %w", err)
 			continue
@@ -330,7 +329,7 @@ func (c *bitcoinChain) AuditHTLC(*tanka.HTLCAudit) (bool, error) {
 // containing "method not found".
 func isMethodNotFoundErr(err error) bool {
 	var errRPCMethodNotFound = int(btcjson.ErrRPCMethodNotFound.Code)
-	var rpcErr *dcrjson.RPCError
+	var rpcErr *btcjson.RPCError
 	return errors.As(err, &rpcErr) &&
 		(int(rpcErr.Code) == errRPCMethodNotFound ||
 			strings.Contains(strings.ToLower(rpcErr.Message), "method not found"))

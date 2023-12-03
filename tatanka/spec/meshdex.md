@@ -38,11 +38,11 @@ This means we need to eliminate most market configuration.
     network, so there is still a barrier to such malicious behavior, though this
     is not as strong a filter as funding validation would provide. It's
     important to remember that the global worst-case scenario for
-    atomic-swap-based exchange is a refund, not lost funds, so a malicious
-    actor's only incentive to spam would be to grief the network. On the other
-    hand, the server could still provide funding validation services without
-    participating in the market. Either way, we're going to do away with the
-    necessity of split funding transactions. More on this later.
+    atomic-swap-based exchange is a refund and fees, not lost funds, so a
+    malicious actor's only incentive to spam would be to grief the network. On
+    the other hand, the server could still provide funding validation services
+    without participating in the market. Either way, we're going to do away with
+    the necessity of split funding transactions. More on this later.
 
 
 1) Markets are user-policed. Successes and counterparty failures are
