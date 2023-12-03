@@ -103,6 +103,9 @@ const (
 
 	defaultCSPPMainnet  = "mix.decred.org:5760"
 	defaultCSPPTestnet3 = "mix.decred.org:15760"
+
+	ticketSize               = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2SHOutputSize /* stakesubmission and sstxchanges */ + 32 /* see e.g. RewardCommitmentScript */
+	minVSPTicketPurchaseSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + dexdcr.P2PKHOutputSize + ticketSize
 )
 
 var (
@@ -5113,11 +5116,28 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) error {
 	if !dcr.connected.Load() {
 		return errors.New("not connected, login first")
 	}
+	bal, err := dcr.Balance()
+	if err != nil {
+		return fmt.Errorf("error getting balance: %v", err)
+	}
+	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
+	if err != nil {
+		return fmt.Errorf("stakeinfo error: %v", err)
+	}
 	// I think we need to set this, otherwise we probably end up with default
 	// of DefaultRelayFeePerKb = 1e4 => 10 atoms/byte.
 	feePerKB := dcrutil.Amount(dcr.feeRateWithFallback(feeSuggestion) * 1000)
 	if err := dcr.wallet.SetTxFee(dcr.ctx, feePerKB); err != nil {
 		return fmt.Errorf("error setting wallet tx fee: %w", err)
+	}
+
+	// Get a minimum size assuming a single-input split tx.
+	fees := feePerKB * minVSPTicketPurchaseSize / 1000
+	ticketPrice := sinfo.Sdiff + fees
+	total := uint64(n) * uint64(ticketPrice)
+	if bal.Available < total {
+		return fmt.Errorf("available balance %s is lower than project cost %s for %d tickets",
+			dcrutil.Amount(bal.Available), dcrutil.Amount(total), n)
 	}
 
 	remain := dcr.ticketBuyer.remaining.Add(int32(n))
@@ -5165,7 +5185,6 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 		return
 	}
 
-	var unconf int
 	for txHash := range tb.unconfirmedTickets {
 		tx, err := dcr.wallet.GetTransaction(dcr.ctx, &txHash)
 		if err != nil {
@@ -5175,13 +5194,12 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 		}
 		if tx.Confirmations > 0 {
 			delete(tb.unconfirmedTickets, txHash)
-		} else {
-			unconf++
 		}
 	}
-	if unconf > 0 {
+	if len(tb.unconfirmedTickets) > 0 {
 		ok = true
-		dcr.log.Tracef("Skipping ticket purchase attempt because there are still %d unconfirmed tickets", unconf)
+		dcr.log.Tracef("Skipping ticket purchase attempt because there are still %d unconfirmed tickets", len(tb.unconfirmedTickets))
+		return
 	}
 
 	dcr.log.Tracef("Attempting to purchase %d tickets", remain)
@@ -5199,7 +5217,7 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 		return
 	}
 	if dcrutil.Amount(bal.Available) < sinfo.Sdiff*dcrutil.Amount(remain) {
-		dcr.log.Errorf("Insufficient balance %s to purches %d ticket at price %s: %v", dcrutil.Amount(bal.Available), remain, sinfo.Sdiff)
+		dcr.log.Errorf("Insufficient balance %s to purchase %d ticket at price %s: %v", dcrutil.Amount(bal.Available), remain, sinfo.Sdiff, err)
 		dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Err: "insufficient balance"})
 		return
 	}
@@ -5442,7 +5460,7 @@ func (dcr *ExchangeWallet) emitTipChange(height int64) {
 	}
 
 	dcr.emit.TipChange(uint64(height), data)
-	dcr.runTicketBuyer()
+	go dcr.runTicketBuyer()
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function

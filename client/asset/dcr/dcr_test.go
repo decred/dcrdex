@@ -4396,13 +4396,17 @@ func TestConfirmRedemption(t *testing.T) {
 }
 
 func TestPurchaseTickets(t *testing.T) {
+	const feeSuggestion = 100
+	const sdiff = 1
+
 	wallet, cl, shutdown := tNewWalletMonitorBlocks(false)
 	defer shutdown()
 	wallet.connected.Store(true)
-	cl.stakeInfo.Difficulty = dcrutil.Amount(1).ToCoin()
+	cl.stakeInfo.Difficulty = dcrutil.Amount(sdiff).ToCoin()
 	cl.balanceResult = &walletjson.GetBalanceResult{Balances: []walletjson.GetAccountBalanceResult{{AccountName: tAcctName}}}
-	setBalance := func(avail uint64, reserves uint64) {
-		cl.balanceResult.Balances[0].Spendable = dcrutil.Amount(avail).ToCoin()
+	setBalance := func(n, reserves uint64) {
+		ticketCost := n * (sdiff + feeSuggestion*minVSPTicketPurchaseSize)
+		cl.balanceResult.Balances[0].Spendable = dcrutil.Amount(ticketCost).ToCoin()
 		wallet.bondReserves.Store(reserves)
 	}
 
@@ -4448,7 +4452,7 @@ func TestPurchaseTickets(t *testing.T) {
 	buyTickets := func(n int, wantErr bool) {
 		defer waitForTicketLoopToExit()
 		remains = make([]uint32, 0)
-		if err := wallet.PurchaseTickets(n, 100); err != nil {
+		if err := wallet.PurchaseTickets(n, feeSuggestion); err != nil {
 			t.Fatalf("initial PurchaseTickets error: %v", err)
 		}
 

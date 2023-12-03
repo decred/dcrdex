@@ -1042,8 +1042,7 @@ export default class WalletsPage extends BasePage {
     page.queuedTicketCount.textContent = String(remaining)
     page.formQueuedTix.textContent = String(remaining)
     Doc.setVis(remaining > 0, page.queuedTicketCountBox)
-    let immature = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status === ticketStatusUnmined).length
-    immature += tickets?.length ?? 0
+    const immature = stakeStatus.tickets.filter((tkt: Ticket) => tkt.status === ticketStatusUnmined).length
     page.immatureTicketCount.textContent = String(immature)
     Doc.setVis(immature > 0, page.immatureTicketCountBox)
     if (err) {
