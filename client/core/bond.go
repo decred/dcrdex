@@ -416,6 +416,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	state.WeakStrength = sumBondStrengths(weakBonds, bondCfg.bondAssets)
 	state.LiveStrength = sumBondStrengths(dc.acct.bonds, bondCfg.bondAssets) // for max bonded check
 	state.PendingBonds = dc.pendingBonds()
+	state.ExpiredBondsPendingRefund = int64(len(dc.acct.expiredBonds))
 	// Extract the expired bonds.
 	state.expiredBonds = make([]*db.Bond, len(dc.acct.expiredBonds))
 	copy(state.expiredBonds, dc.acct.expiredBonds)
