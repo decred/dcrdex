@@ -514,6 +514,8 @@ var EnUS = map[string]string{
 	"timestamp":                   "Timestamp",
 	"nonce":                       "Nonce",
 	"Enable Privacy":              "Enable Privacy",
+	"Privacy":                     "Privacy",
+	"Enable":                      "Enable",
 	"Disable Privacy":             "Disable Privacy",
 	"Configure Privacy":           "Configure Privacy",
 	"Privacy active":              "Privacy active",

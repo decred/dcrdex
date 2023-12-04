@@ -235,9 +235,12 @@
             {{- /* MIXING */ -}}
             <div id="mixingBox" class="position-relative w-100 my-3 d-flex align-items-stretch flex-column brdrtop brdrbottom">
               <div id="enableMixing" class="w-100 d-flex align-items-stretch">
-                <div id="enablePrivacyButton" class="flex-center flex-grow-1 hoverbg pointer">
-                  <span class="fs35 ico-secretagent me-2"></span>
-                  <span class="fs24">[[[Enable Privacy]]]</span>
+                <div class="flex-grow-1 d-flex justify-content-between align-items-stretch">
+                  <div class="flex-center p-2">
+                    <span class="fs35 ico-secretagent me-2"></span>
+                    <span class="fs24">[[[Privacy]]]</span>
+                  </div>
+                  <button id="enablePrivacyButton" class="feature brdr rounded3 m-2 p-2 px-4">[[[Enable]]]</button>
                 </div>
                 <div id="privacyInfoBttn" class="flex-center p-3 fs24 ico-info brdrleft hoverbg pointer"></div>
                 <div id="configureMixer" class="flex-center p-3 fs24 ico-settings brdrleft hoverbg pointer"></div>
@@ -1040,7 +1043,7 @@
           </div>
         </div>
         <div id="mixerPWErr" class="p-2 flex-center errcolor fs16 d-hide"></div>
-        <div id="mixerPWSubmit" class="flex-center mt-3 w-100 p-3 brdrtop hoverbg pointer">
+        <div id="mixerPWSubmit" class="feature flex-center m-2 p-3 rounded3">
           <span class="ico-arrowright me-1"></span>
           Start
         </div>
@@ -1065,8 +1068,8 @@
         {{template "certPicker"}}
       </div>
       <div id="mixConfigErr" class="flex-center fs16 errcolor p-2"></div>
-      <div id="mixConfigSubmit" class="flex-center p-3 brdrtop hoverbg pointer">[[[Submit]]]</div>
-      <div id="mixerDisable" class="flex-center p-3 brdrtop errcolor hoverbg pointer">[[[Disable Privacy]]]</div>
+      <div id="mixConfigSubmit" class="feature flex-center m-2 p-3 rounded3 hoverbg pointer">[[[Submit]]]</div>
+      <div id="mixerDisable" class="flex-center mx-2 mb-2 p-3 brdr rounded3 errcolor hoverbg pointer">[[[Disable Privacy]]]</div>
     </form>
 
     {{- /* CSPP INFO */ -}}
@@ -1086,6 +1089,20 @@
           [[[privacy_optional]]]
         </li>
       </ul>
+    </form>
+
+    {{- /* CSPP INFO */ -}}
+    <form id="mixingOffConfirmationForm" class="p-0 mw-425">
+      <div class="form-closer hoverbg p-2 mt-2"><span class="ico-cross"></span></div>
+      <div class="flex-center fs20 w-100 px-3">
+        Are you sure that you want to turn off the privacy engine?
+      </div>
+      <div class="flex-center fs16 w-100 px-3 mt-2">
+        Newly received funds will not become available for
+        use until privacy is turned back on.
+      </div>
+      <div id="mixingOffGo" class="flex-center m-2 p-3 brdr rounded3 hoverbg pointer errcolor">Turn it off</div>
+      <div id="mixingOffNo" class="feature flex-center m-2 p-3 rounded3">Nevermind</div>
     </form>
   </div>
 </div>

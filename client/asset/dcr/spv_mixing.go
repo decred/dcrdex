@@ -10,7 +10,7 @@ const (
 	smalletCSPPSplitPoint = 1 << 18 // 262144
 	mixedAccountName      = "mixed"
 	mixedAccountBranch    = udb.InternalBranch
-	tradingAccount        = "dextrading"
+	tradingAccountName    = "dextrading"
 )
 
 func (w *spvWallet) mix(ctx context.Context, cfg *mixingConfig) {

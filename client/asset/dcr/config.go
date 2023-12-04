@@ -77,7 +77,7 @@ func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig,
 	}
 
 	if cfg.PrimaryAccount == "" {
-		cfg.PrimaryAccount = defaultAcctName
+		cfg.PrimaryAccount = defaultAccountName
 	}
 
 	// Both UnmixedAccount and TradingAccount must be provided if primary

@@ -13,6 +13,15 @@ button {
   background-color: transparent;
   border: 1px solid #7777;
   outline: none;
+
+  &.selected {
+    background-color: #38cfb0;
+    border: none;
+  }
+
+  &:focus {
+    outline: none;
+  }
 }
 
 body {
@@ -105,13 +114,13 @@ div.clear {
   opacity: 0; // Set by animation upon initial loading.
 }
 
-button.selected {
-  background-color: #38cfb0;
-  border: none;
-}
+div.feature,
+button.feature {
+  background-color: #6bc5ff;
 
-button:focus {
-  outline: none;
+  &:hover {
+    background-color: #a3dbff;
+  }
 }
 
 .dynamicopts {
@@ -578,7 +587,7 @@ div[data-handler=wallets] {
   border-radius: 8px;
 
   &.on {
-    background-color: $buycolor_light;
+    background-color: $buycolor_dark;
   }
 
   &.off {

@@ -27,6 +27,8 @@ const (
 	csppConfigFileName = "cspp_config.json"
 )
 
+var nativeAccounts = []string{defaultAccountName, mixedAccountName, tradingAccountName}
+
 // mixingConfigFile is the structure for saving cspp server configuration to
 // file.
 type mixingConfigFile struct {
@@ -75,7 +77,7 @@ func (m *mixer) closeAndClear() {
 func (m *mixer) isOn() bool {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
-	return m.cancel == nil
+	return m.ctx != nil
 }
 
 // NativeWallet implements optional interfaces that are only provided by the
@@ -256,6 +258,18 @@ func (w *NativeWallet) StartFundsMixer(ctx context.Context) error {
 	return nil
 }
 
+// Lock locks all the native wallet accounts.
+func (w *NativeWallet) Lock() (err error) {
+	w.mixer.closeAndClear()
+	w.mixer.wg.Wait()
+	for _, acct := range nativeAccounts {
+		if err = w.wallet.LockAccount(w.ctx, acct); err != nil {
+			return fmt.Errorf("error locking native wallet account %q: %w", acct, err)
+		}
+	}
+	return nil
+}
+
 // mixFunds checks the status of mixing operations and starts a mix cycle.
 // mixFunds must be called with the mixer.mtx >= RLock'd.
 func (w *NativeWallet) mixFunds() {
@@ -285,7 +299,7 @@ func (w *NativeWallet) mixFunds() {
 // runSimnetMixer just sends all funds from the mixed account to the default
 // account, after a short delay.
 func (w *NativeWallet) runSimnetMixer(ctx context.Context) {
-	if err := w.transferAccount(w.ctx, mixedAccountName, defaultAcctName); err != nil {
+	if err := w.transferAccount(w.ctx, mixedAccountName, defaultAccountName); err != nil {
 		w.log.Errorf("error transferring funds while disabling mixing: %w", err)
 	}
 
@@ -312,7 +326,7 @@ func (w *NativeWallet) DisableFundsMixer() error {
 	w.mixer.closeAndClear()
 	w.mixer.wg.Wait()
 
-	if err := w.transferAccount(w.ctx, defaultAcctName, mixedAccountName, tradingAccount); err != nil {
+	if err := w.transferAccount(w.ctx, defaultAccountName, mixedAccountName, tradingAccountName); err != nil {
 		return fmt.Errorf("error transferring funds while disabling mixing: %w", err)
 	}
 

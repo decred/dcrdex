@@ -3949,17 +3949,24 @@ func (dcr *ExchangeWallet) NewAddress() (string, error) {
 // Unlock unlocks the exchange wallet.
 func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 	// Older SPV wallet potentially need an upgrade while we have a password.
+	acctsToUnlock := dcr.allAccounts()
 	if upgrader, is := dcr.wallet.(interface {
 		upgradeAccounts(ctx context.Context, pw []byte) error
 	}); is {
 		if err := upgrader.upgradeAccounts(dcr.ctx, pw); err != nil {
 			return fmt.Errorf("error upgrading accounts: %w", err)
 		}
+		// For the native wallet, we unlock all accounts regardless. Otherwise,
+		// the accounts won't be properly unlocked after ConfigureFundsMixer
+		// is called. We could consider taking a password for
+		// ConfigureFundsMixer OR have Core take the password and call Unlock
+		// after ConfigureFundsMixer.
+		acctsToUnlock = nativeAccounts
 	}
 
 	// We must unlock all accounts, including any unmixed account, which is used
 	// to supply keys to the refund path of the swap contract script.
-	for _, acct := range dcr.allAccounts() {
+	for _, acct := range acctsToUnlock {
 		unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, acct)
 		if err != nil {
 			return err
@@ -3980,7 +3987,7 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 func (dcr *ExchangeWallet) Lock() error {
 	accts := dcr.wallet.Accounts()
 	if accts.UnmixedAccount != "" {
-		return nil // don't lock if mixing is enabled
+		return fmt.Errorf("cannot lock RPC mixing wallet") // don't lock if mixing is enabled
 	}
 	return dcr.wallet.LockAccount(dcr.ctx, accts.PrimaryAccount)
 }

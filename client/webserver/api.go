@@ -1834,6 +1834,7 @@ func (s *WebServer) apiStartMixer(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, errors.New("no wallet state retrieved"))
 		return
 	}
+
 	var appPW []byte
 	defer encode.ClearBytes(appPW)
 	if !walletState.Open {

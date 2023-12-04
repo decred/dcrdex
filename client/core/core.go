@@ -3200,6 +3200,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 
 	c.notify(newWalletStateNote(state))
 
+	c.resumeMixing(crypter, []*xcWallet{wallet})
 	return nil
 }
 
@@ -4742,6 +4743,7 @@ func (c *Core) Login(pw []byte) error {
 		c.connectWallets() // initialize reserves
 		c.notify(newLoginNote("Resuming active trades..."))
 		c.resolveActiveTrades(crypter)
+		c.resumeMixing(crypter, c.xcWallets())
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
 
@@ -5309,7 +5311,6 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) {
 	// resumeTrades will be a no-op if there are no trades in any
 	// dexConnection's trades map that is not ready to tick.
 	c.resumeTrades(crypter)
-	c.resumeMixing(crypter)
 }
 
 func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error), action func(error)) {
@@ -7617,15 +7618,15 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 }
 
 // resumeMixing unlocks and starts mixing on any FundsMixer that is enabled.
-func (c *Core) resumeMixing(crypter encrypt.Crypter) {
-	for _, w := range c.xcWallets() {
+func (c *Core) resumeMixing(crypter encrypt.Crypter, wallets []*xcWallet) {
+	for _, w := range wallets {
 		if mixer, is := w.Wallet.(asset.FundsMixer); is {
 			stats, err := mixer.FundsMixingStats()
 			if err != nil {
 				c.log.Errorf("FundsMixingStats error during login: %v", err)
 				continue
 			}
-			if !stats.Enabled {
+			if !stats.Enabled || stats.IsMixing {
 				continue
 			}
 			if !w.unlocked() {

@@ -67,6 +67,15 @@ body.dark {
     text-decoration: underline;
   }
 
+  div.feature,
+  button.feature {
+    background-color: #0a4972;
+
+    &:hover {
+      background-color: #176699;
+    }
+  }
+
   button {
     color: $font-color-dark;
     background-color: transparent;

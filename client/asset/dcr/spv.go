@@ -54,12 +54,12 @@ const (
 	defaultManualTickets   = false
 	defaultMixSplitLimit   = 10
 
-	defaultAcct     = 0
-	defaultAcctName = "default"
-	walletDbName    = "wallet.db"
-	dbDriver        = "bdb"
-	logDirName      = "spvlogs"
-	logFileName     = "neutrino.log"
+	defaultAcct        = 0
+	defaultAccountName = "default"
+	walletDbName       = "wallet.db"
+	dbDriver           = "bdb"
+	logDirName         = "spvlogs"
+	logFileName        = "neutrino.log"
 )
 
 type dcrWallet interface {
@@ -303,7 +303,7 @@ func (w *spvWallet) initializeSimnetTspends(ctx context.Context) {
 // accounts that does not yet exist. The wallet should be unlocked before
 // calling this function.
 func setupMixingAccounts(ctx context.Context, w *wallet.Wallet, pw []byte) error {
-	requiredAccts := []string{mixedAccountName, tradingAccount} // unmixed (default) acct already exists
+	requiredAccts := []string{mixedAccountName, tradingAccountName} // unmixed (default) acct already exists
 	for _, acct := range requiredAccts {
 		_, err := w.AccountNumber(ctx, acct)
 		if err == nil {
@@ -330,13 +330,13 @@ func (w *spvWallet) setAccounts(mixingEnabled bool) {
 	if mixingEnabled {
 		w.accts.Store(XCWalletAccounts{
 			PrimaryAccount: mixedAccountName,
-			UnmixedAccount: defaultAcctName,
-			TradingAccount: tradingAccount,
+			UnmixedAccount: defaultAccountName,
+			TradingAccount: tradingAccountName,
 		})
 		return
 	}
 	w.accts.Store(XCWalletAccounts{
-		PrimaryAccount: defaultAcctName,
+		PrimaryAccount: defaultAccountName,
 	})
 }
 

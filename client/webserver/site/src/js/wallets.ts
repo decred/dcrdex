@@ -69,6 +69,7 @@ const traitTxFeeEstimator = 1 << 9
 const traitPeerManager = 1 << 10
 const traitTokenApprover = 1 << 13
 const traitTicketBuyer = 1 << 15
+const traitFundsMixer = 1 << 17
 
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
 
@@ -329,6 +330,8 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.reconfigureMixer, 'click', () => { this.showPrivacyConfiguration(true) })
     Doc.bind(page.mixerDisable, 'click', () => { this.disableMixer() })
     Doc.bind(page.privacyInfoBttn, 'click', () => { this.showForm(page.mixingInfo) })
+    Doc.bind(page.mixingOffGo, 'click', () => { this.turnPrivacyOff() })
+    Doc.bind(page.mixingOffNo, 'click', () => { this.closePopups() })
 
     this.mixCertPicker = new CertificatePicker(page.mixAddrInputBox)
 
@@ -1350,12 +1353,14 @@ export default class WalletsPage extends BasePage {
   }
 
   async updatePrivacy (assetID: number) {
-    const disablePrivacy = app().extensionWallet(this.selectedAssetID)?.disablePrivacy
+    const disablePrivacy = app().extensionWallet(assetID)?.disablePrivacy
     this.mixerStatus = null
     const { wallet } = app().assets[assetID]
     const page = this.page
     Doc.hide(page.mixingBox, page.enableMixing, page.mixerOff, page.mixerOn)
-    if (disablePrivacy || !wallet?.running || (wallet.traits & traitTicketBuyer) === 0) return
+    // TODO: Show special messaging if the asset supports mixing but not this
+    // wallet type.
+    if (disablePrivacy || !wallet?.running || (wallet.traits & traitFundsMixer) === 0) return
     Doc.show(page.mixingBox, page.mixerSettings, page.mixerLoading)
     const res = await this.safePost('/api/mixingstats', { assetID })
     Doc.hide(page.mixerLoading)
@@ -1391,6 +1396,7 @@ export default class WalletsPage extends BasePage {
     Doc.hide(page.enableMixing)
     Doc.show(page.mixerSettings)
     mixerStatus.enabled = true
+    this.updateMixerState(true)
   }
 
   showPrivacyConfiguration (showDisable: boolean) {
@@ -1437,21 +1443,14 @@ export default class WalletsPage extends BasePage {
     Doc.show(page.mixerSettings)
     Doc.hide(page.enableMixing)
     this.closePopups()
+    this.updateMixerState(true)
   }
 
   async updateMixerState (on: boolean) {
     const page = this.page
     Doc.hide(page.mixingErr)
     if (!on) {
-      const loaded = app().loading(page.mixingBox)
-      const res = await postJSON('/api/stopmixer', { assetID: this.selectedAssetID })
-      loaded()
-      if (!app().checkResponse(res)) {
-        page.mixingErr.textContent = res.msg
-        Doc.show(page.mixingErr)
-        return
-      }
-      this.setMixerStateDisplay(false)
+      this.showForm(page.mixingOffConfirmationForm)
       return
     }
     const { wallet } = app().assets[this.selectedAssetID]
@@ -1473,6 +1472,20 @@ export default class WalletsPage extends BasePage {
     page.mixerPWInput.value = ''
     await this.showForm(this.page.mixerPWForm)
     this.page.mixerPWInput.focus()
+  }
+
+  async turnPrivacyOff () {
+    this.closePopups()
+    const page = this.page
+    const loaded = app().loading(page.mixingBox)
+    const res = await postJSON('/api/stopmixer', { assetID: this.selectedAssetID })
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.mixingErr.textContent = res.msg
+      Doc.show(page.mixingErr)
+      return
+    }
+    this.setMixerStateDisplay(false)
   }
 
   setMixerStateDisplay (on: boolean) {
@@ -1989,6 +2002,7 @@ export default class WalletsPage extends BasePage {
       const res = await postJSON('/api/openwallet', open)
       if (app().checkResponse(res)) {
         this.openWalletSuccess(assetID)
+        this.updatePrivacy(assetID)
       } else {
         this.showOpen(assetID, intl.prep(intl.ID_OPEN_WALLET_ERR_MSG, { msg: res.msg }))
       }
@@ -2313,6 +2327,7 @@ export default class WalletsPage extends BasePage {
     loaded()
     if (!app().checkResponse(res)) return
     this.updateDisplayedAsset(assetID)
+    this.updatePrivacy(assetID)
   }
 
   async downloadLogs (): Promise<void> {
