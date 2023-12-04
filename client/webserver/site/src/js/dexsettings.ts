@@ -269,7 +269,7 @@ export default class DexSettingsPage extends BasePage {
     page.targetTier.textContent = String(targetTier)
     page.effectiveTier.textContent = String(displayTier)
     page.penalties.textContent = String(penalties)
-    page.expiredBondsPendingRefund.textContent = `${expiredBondsPendingRefund}`
+    page.bondsPendingRefund.textContent = `${expiredBondsPendingRefund}`
     this.reputationMeter.update()
   }
 
