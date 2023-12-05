@@ -8519,7 +8519,7 @@ func (c *Core) handleReconnect(host string) {
 			auto = baseCfg == nil || !trade.wallets.baseWallet.supportsVer(baseCfg.Version)
 		}
 		if !auto {
-			quoteCfg := dc.assetConfig(trade.Base())
+			quoteCfg := dc.assetConfig(trade.Quote())
 			auto = quoteCfg == nil || !trade.wallets.quoteWallet.supportsVer(quoteCfg.Version)
 		}
 
