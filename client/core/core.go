@@ -5994,6 +5994,7 @@ type tradeRequest struct {
 	wallets      *walletSet
 	errCloser    *dex.ErrorCloser
 	tempID       uint64
+	commitSig    chan struct{}
 }
 
 func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host string, sell bool) (wallets *walletSet, assetConfig *assetSet, dc *dexConnection, mktConf *msgjson.Market, err error) {
@@ -6214,7 +6215,6 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 	}
 
 	commitSig := make(chan struct{})
-	defer close(commitSig) // signals on both success and failure, unlike syncOrderPlaced/piSyncers
 	c.sentCommitsMtx.Lock()
 	c.sentCommits[prefix.Commit] = commitSig
 	c.sentCommitsMtx.Unlock()
@@ -6251,6 +6251,7 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 		wallets:      wallets,
 		errCloser:    errCloser.Copy(),
 		preImg:       preImg,
+		commitSig:    commitSig,
 	}, nil
 }
 
@@ -6496,6 +6497,7 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 	dc, dbOrder, wallets, form, route := tr.dc, tr.dbOrder, tr.wallets, tr.form, tr.route
 	mktID, msgOrder, preImg, recoveryCoin, coins := tr.mktID, tr.msgOrder, tr.preImg, tr.recoveryCoin, tr.coins
 	defer tr.errCloser.Done(c.log)
+	defer close(tr.commitSig) // signals on both success and failure
 
 	// Send and get the result.
 	result := new(msgjson.OrderResult)
