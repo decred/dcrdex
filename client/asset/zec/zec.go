@@ -943,18 +943,23 @@ func (w *zecWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos [
 
 	avail += bals.orchard.avail
 
-	// Start by attempting max lots with a basic fee.
-	lots := avail / lotSize
-	for lots > 0 {
-		est, _, _, err := w.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, bals.orchard, true)
-		// The only failure mode of estimateSwap -> zec.fund is when there is
-		// not enough funds, so if an error is encountered, count down the lots
-		// and repeat until we have enough.
-		if err != nil {
-			lots--
-			continue
+	// Find the max lots we can fund.
+	maxLots := avail / lotSize
+	var minLots uint64
+	for minLots <= maxLots {
+		midLots := (minLots + maxLots) / 2
+		if _, _, _, err = w.estimateSwap(midLots, lotSize, feeSuggestion, maxFeeRate, utxos, bals.orchard, true); err != nil {
+			// The only failure mode of estimateSwap -> zec.fund is when there is
+			// not enough funds.
+			maxLots = midLots - 1
+		} else {
+			minLots = midLots + 1
 		}
-		return utxos, bals, est, nil
+	}
+
+	if maxLots > 0 {
+		est, _, _, err = w.estimateSwap(maxLots, lotSize, feeSuggestion, maxFeeRate, utxos, bals.orchard, true)
+		return utxos, bals, est, err
 	}
 
 	return utxos, bals, &asset.SwapEstimate{}, nil
