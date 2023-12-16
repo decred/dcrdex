@@ -67,8 +67,8 @@ func newOrderBook() *orderbook {
 }
 
 func (ob *orderbook) String() string {
-	ob.mtx.Lock()
-	defer ob.mtx.Unlock()
+	ob.mtx.RLock()
+	defer ob.mtx.RUnlock()
 
 	bids := make([]obEntry, 0, ob.bids.Len())
 	for curr := ob.bids.Front(); curr != nil; curr = curr.Next() {
@@ -127,8 +127,7 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 
 	remaining := qty
 	var weightedSum uint64
-	curr := list.Front()
-	for {
+	for curr := list.Front(); curr != nil; curr = curr.Next() {
 		if curr == nil {
 			break
 		}
@@ -141,7 +140,6 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 		}
 		remaining -= entry.qty
 		weightedSum += entry.qty * extrema
-		curr = curr.Next()
 	}
 	if !filled {
 		return 0, 0, false

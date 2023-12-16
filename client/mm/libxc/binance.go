@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -74,7 +75,7 @@ func newBinanceOrderBook(baseConversionFactor, quoteConversionFactor uint64, mkt
 	}
 }
 
-// convertBinanceBook converts bids an asks in the binance format,
+// convertBinanceBook converts bids and asks in the binance format,
 // with the conventional quantity and rate, to the DEX message format which
 // can be used to update the orderbook.
 func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json.Number) (bids, asks []*obEntry, err error) {
@@ -117,8 +118,8 @@ func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json
 // sync does an initial sync of the orderbook. When the first update is
 // received, it grabs a snapshot of the orderbook, and only processes updates
 // that come after the state of the snapshot. A goroutine is started that keeps
-// that keeps the orderbook in sync by repeating the sync process if an update
-// is ever missed.
+// the orderbook in sync by repeating the sync process if an update is ever
+// missed.
 //
 // This function runs until the context is canceled. It must be started as
 // a new goroutine.
@@ -129,31 +130,34 @@ func (b *binanceOrderBook) sync(ctx context.Context, getSnapshot func() (*binanc
 		const maxTries = 5
 		for i := 0; i < maxTries; i++ {
 			if i > 0 {
-				time.Sleep(2 * time.Second)
+				select {
+				case <-time.After(2 * time.Second):
+				case <-ctx.Done():
+					return 0, false
+				}
 			}
 
 			snapshot, err := getSnapshot()
 			if err != nil {
 				b.log.Errorf("Error getting orderbook snapshot: %v", err)
-				time.Sleep(time.Second)
+				continue
+			}
+			if snapshot.LastUpdateID < minUpdateID {
+				b.log.Infof("Snapshot last update ID %d is less than first update ID %d. Getting new snapshot...", snapshot.LastUpdateID, minUpdateID)
 				continue
 			}
 
-			if snapshot.LastUpdateID >= minUpdateID {
-				bids, asks, err := b.convertBinanceBook(snapshot.Bids, snapshot.Asks)
-				if err != nil {
-					b.log.Errorf("Error parsing binance book: %v", err)
-					return 0, false
-				}
-
-				b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
-
-				b.book.clear()
-				b.book.update(bids, asks)
-				return snapshot.LastUpdateID, true
-			} else {
-				b.log.Infof("Snapshot last update ID %d is less than first update ID %d. Getting new snapshot...", snapshot.LastUpdateID, minUpdateID)
+			bids, asks, err := b.convertBinanceBook(snapshot.Bids, snapshot.Asks)
+			if err != nil {
+				b.log.Errorf("Error parsing binance book: %v", err)
+				return 0, false
 			}
+
+			b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
+
+			b.book.clear()
+			b.book.update(bids, asks)
+			return snapshot.LastUpdateID, true
 		}
 
 		return 0, false
@@ -165,7 +169,13 @@ func (b *binanceOrderBook) sync(ctx context.Context, getSnapshot func() (*binanc
 		b.mtx.Unlock()
 	}
 
-	firstUpdate := <-b.updateQueue
+	var firstUpdate *binanceBookUpdate
+	select {
+	case <-ctx.Done():
+		return
+	case firstUpdate = <-b.updateQueue:
+	}
+
 	latestUpdate, success := syncOrderbook(firstUpdate.FirstUpdateID)
 	if !success {
 		b.log.Errorf("Failed to sync %s orderbook", b.mktID)
@@ -173,6 +183,8 @@ func (b *binanceOrderBook) sync(ctx context.Context, getSnapshot func() (*binanc
 	}
 
 	setSynced(true)
+
+	b.log.Infof("Successfully synced %s orderbook", b.mktID)
 
 	for {
 		select {
@@ -182,7 +194,7 @@ func (b *binanceOrderBook) sync(ctx context.Context, getSnapshot func() (*binanc
 			}
 
 			if update.FirstUpdateID > latestUpdate+1 {
-				b.log.Errorf("Missed %d updates for %s orderbook. Re-syncing...", update.FirstUpdateID-latestUpdate, b.mktID)
+				b.log.Warnf("Missed %d updates for %s orderbook. Re-syncing...", update.FirstUpdateID-latestUpdate, b.mktID)
 
 				setSynced(false)
 
@@ -201,6 +213,7 @@ func (b *binanceOrderBook) sync(ctx context.Context, getSnapshot func() (*binanc
 				b.log.Errorf("Error parsing binance book: %v", err)
 				continue
 			}
+
 			b.book.update(bids, asks)
 			latestUpdate = update.LastUpdateID
 		case <-ctx.Done():
@@ -216,7 +229,7 @@ func (b *binanceOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, fi
 	defer b.mtx.RUnlock()
 
 	if !b.synced {
-		return 0, 0, filled, fmt.Errorf("orderbook not synced")
+		return 0, 0, filled, errors.New("orderbook not synced")
 	}
 
 	vwap, extrema, filled = b.book.vwap(bids, qty)
@@ -447,9 +460,6 @@ func (bnc *binance) setTokenIDs(coins []*binanceCoinInfo) {
 			return 0, false
 		}
 		for _, netInfo := range nfo.NetworkList {
-			if tokenSymbol == "weth" {
-				bnc.log.Infof("NetInfo %+v", netInfo)
-			}
 			chainSymbol := strings.ToLower(netInfo.Network)
 			chainID, found := dex.BipSymbolID(chainSymbol)
 			if !found {
@@ -473,7 +483,7 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 	coins := make([]*binanceCoinInfo, 0)
 	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
 	if err != nil {
-		return fmt.Errorf("error getting binance coin info: %v", err)
+		return fmt.Errorf("error getting binance coin info: %w", err)
 	}
 
 	bnc.setBalances(coins)
@@ -1129,8 +1139,7 @@ func (bnc *binance) handleUserDataStreamUpdate(b []byte) {
 
 	var msg *binanceStreamUpdate
 	if err := json.Unmarshal(b, &msg); err != nil {
-		bnc.log.Errorf("Error unmarshaling user data stream update: %v", err)
-		bnc.log.Errorf("Raw message: %s", string(b))
+		bnc.log.Errorf("Error unmarshaling user data stream update: %v\nRaw message: %s", err, string(b))
 		return
 	}
 
@@ -1298,6 +1307,8 @@ func (bnc *binance) handleMarketDataNote(b []byte) {
 	slug := parts[0] // will be lower-case
 	mktID := strings.ToUpper(slug)
 
+	bnc.log.Infof("Received book update for %q", mktID)
+
 	bnc.booksMtx.Lock()
 	defer bnc.booksMtx.Unlock()
 
@@ -1320,7 +1331,7 @@ func (bnc *binance) getOrderbookSnapshot(ctx context.Context, mktSymbol string) 
 // subscribeToAdditionalMarketDataStream is called when a new market is
 // subscribed to after the market data stream connection has already been
 // established.
-func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, baseID, quoteID uint32) (err error) {
+func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, baseID, quoteID uint32) error {
 	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
 		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
@@ -1333,24 +1344,23 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 	defer bnc.booksMtx.Unlock()
 
 	book, found := bnc.books[mktID]
-	if !found {
-		bnc.books[mktID] = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, bnc.log)
-		book = bnc.books[mktID]
-	} else {
+	if found {
 		book.mtx.Lock()
 		book.numSubscribers++
 		book.mtx.Unlock()
-		return
+		return nil
 	}
+
+	bnc.books[mktID] = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, bnc.log)
+	book = bnc.books[mktID]
 
 	if err := bnc.subUnsubDepth(true, streamID); err != nil {
 		return fmt.Errorf("error subscribing to %s: %v", streamID, err)
 	}
 
-	getSnapshot := func() (*binanceOrderbookSnapshot, error) {
+	go book.sync(ctx, func() (*binanceOrderbookSnapshot, error) {
 		return bnc.getOrderbookSnapshot(ctx, mktID)
-	}
-	go book.sync(ctx, getSnapshot)
+	})
 
 	return nil
 }
@@ -1360,7 +1370,7 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 // to reconnect every 12 hours, as Binance will close the stream every 24
 // hours. Additional markets are subscribed to by calling
 // subscribeToAdditionalMarketDataStream.
-func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quoteID uint32) (err error) {
+func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quoteID uint32) error {
 	newConnection := func() (comms.WsConn, *dex.ConnectionMaster, error) {
 		bnc.booksMtx.Lock()
 		streamNames := make([]string, 0, len(bnc.books))
@@ -1414,12 +1424,12 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 	if err != nil {
 		return fmt.Errorf("error connecting to market data stream : %v", err)
 	}
+
 	bnc.marketStream = conn
 
-	getSnapshot := func() (*binanceOrderbookSnapshot, error) {
+	go book.sync(ctx, func() (*binanceOrderbookSnapshot, error) {
 		return bnc.getOrderbookSnapshot(ctx, mktID)
-	}
-	go book.sync(ctx, getSnapshot)
+	})
 
 	// Start a goroutine to reconnect every 12 hours
 	go func() {
@@ -1531,13 +1541,9 @@ func (bnc *binance) SubscribeMarket(ctx context.Context, baseID, quoteID uint32)
 // of the base asset on a market. SubscribeMarket must be called, and the
 // market must be synced before results can be expected.
 func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
-	fail := func(err error) (uint64, uint64, bool, error) {
-		return 0, 0, false, err
-	}
-
 	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
-		return fail(err)
+		return 0, 0, false, err
 	}
 	mktID := binanceMktID(baseCfg, quoteCfg)
 
@@ -1545,7 +1551,7 @@ func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPric
 	book, found := bnc.books[mktID]
 	bnc.booksMtx.RUnlock()
 	if !found {
-		return fail(fmt.Errorf("no book for market %s", mktID))
+		return 0, 0, false, fmt.Errorf("no book for market %s", mktID)
 	}
 
 	return book.vwap(!sell, qty)
