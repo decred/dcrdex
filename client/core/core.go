@@ -4740,10 +4740,10 @@ func (c *Core) Login(pw []byte) error {
 		// and the balance updated there.
 		c.notify(newLoginNote("Connecting wallets..."))
 		c.connectWallets() // initialize reserves
-		c.notify(newLoginNote("Resuming active trades..."))
-		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
+		c.notify(newLoginNote("Resuming active trades..."))
+		c.resolveActiveTrades(crypter)
 
 		c.loggedIn = true
 	}
