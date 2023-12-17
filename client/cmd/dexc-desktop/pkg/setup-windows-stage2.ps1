@@ -95,6 +95,9 @@ Write-Host "Installing Node.js..." -ForegroundColor Cyan
 Invoke-WebRequest -Uri https://nodejs.org/dist/v21.4.0/node-v$NodeVersion-x86.msi -OutFile $NodeInstaller
 Start-Process msiexec.exe -ArgumentList "/i $NodeInstaller /quiet" -Wait
 
+# Allow PowerShell to be run by unprivileged users
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope MachinePolicy -Force
+
 # Change back to the repo clone
 Set-Location -Path $workDir
 
