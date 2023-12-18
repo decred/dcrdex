@@ -43,6 +43,7 @@ export interface ExchangeAuth {
   maxBondedAmt: number
   penaltyComps: number
   pendingBonds: PendingBondState[]
+  expiredBondsPendingRefund: number
   compensation: number
 }
 
@@ -648,8 +649,8 @@ export interface OrderFilter {
 }
 
 export interface OrderPlacement {
-  lots : number
-  gapFactor : number
+  lots: number
+  gapFactor: number
 }
 
 export interface BasicMarketMakingCfg {
@@ -768,7 +769,7 @@ export interface Stances {
   treasuryKeys: TKeyPolicyResult[]
 }
 
-export interface TicketStats{
+export interface TicketStats {
   totalRewards: number
   ticketCount: number
   votes: number
@@ -813,7 +814,7 @@ export interface Application {
   fiatRatesMap: Record<number, number>
   showPopups: boolean
   commitHash: string
-  authed(): boolean
+  authed (): boolean
   start (): Promise<void>
   reconnected (): void
   fetchUser (): Promise<User | void>

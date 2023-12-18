@@ -497,4 +497,5 @@ var EnUS = map[string]string{
 	"No":                          "No",
 	"Yes":                         "Yes",
 	"Treasury Keys":               "Treasury Keys",
+	"bonds_pending_refund":        "Bonds Pending Refund",
 }

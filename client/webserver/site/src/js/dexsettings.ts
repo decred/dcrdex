@@ -264,11 +264,12 @@ export default class DexSettingsPage extends BasePage {
   updateReputation () {
     const page = this.page
     const auth = app().exchanges[this.host].auth
-    const { rep: { penalties }, targetTier } = auth
+    const { rep: { penalties }, targetTier, expiredBondsPendingRefund } = auth
     const displayTier = strongTier(auth)
     page.targetTier.textContent = String(targetTier)
     page.effectiveTier.textContent = String(displayTier)
     page.penalties.textContent = String(penalties)
+    page.bondsPendingRefund.textContent = `${expiredBondsPendingRefund}`
     this.reputationMeter.update()
   }
 
