@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -944,17 +945,17 @@ func (w *zecWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos [
 	avail += bals.orchard.avail
 
 	// Find the max lots we can fund.
-	maxLots := avail / lotSize
-	var minLots uint64
-	for minLots <= maxLots {
-		midLots := (minLots + maxLots) / 2
-		if _, _, _, err = w.estimateSwap(midLots, lotSize, feeSuggestion, maxFeeRate, utxos, bals.orchard, true); err != nil {
-			// The only failure mode of estimateSwap -> zec.fund is when there is
-			// not enough funds.
-			maxLots = midLots - 1
-		} else {
-			minLots = midLots + 1
-		}
+	maxLotsInt := int(avail / lotSize)
+	oneLotTooMany := sort.Search(maxLotsInt+1, func(lots int) bool {
+		_, _, _, err = w.estimateSwap(uint64(lots), lotSize, feeSuggestion, maxFeeRate, utxos, bals.orchard, true)
+		// The only failure mode of estimateSwap -> zec.fund is when there is
+		// not enough funds.
+		return err != nil
+	})
+
+	maxLots := uint64(oneLotTooMany - 1)
+	if oneLotTooMany == 0 {
+		maxLots = 0
 	}
 
 	if maxLots > 0 {

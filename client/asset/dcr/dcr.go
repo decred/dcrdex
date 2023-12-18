@@ -1277,20 +1277,17 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (
 	trySplitTx := true
 
 	// Find the max lots we can fund.
-	maxLots := avail / (lotSize + basicFee)
-	var minLots uint64
-	for minLots <= maxLots {
-		midLots := (minLots + maxLots) / 2
-		if _, _, _, err = dcr.estimateSwap(midLots, lotSize, feeSuggestion, maxFeeRate, utxos, trySplitTx, 1.0); err != nil {
-			// The only failure mode of estimateSwap -> dcr.fund is when there
-			// is
-			// not enough funds, so if an error is encountered,  reduce
-			// maxLots and try again.
-			maxLots = midLots - 1
-		} else {
-			// Okay, we got an estimation, let's increase minLots and try again.
-			minLots = midLots + 1
-		}
+	maxLotsInt := int(avail / (lotSize + basicFee))
+	oneLotTooMany := sort.Search(maxLotsInt+1, func(lots int) bool {
+		_, _, _, err = dcr.estimateSwap(uint64(lots), lotSize, feeSuggestion, maxFeeRate, utxos, trySplitTx, 1.0)
+		// The only failure mode of estimateSwap -> dcr.fund is when there is
+		// not enough funds.
+		return err != nil
+	})
+
+	maxLots := uint64(oneLotTooMany - 1)
+	if oneLotTooMany == 0 {
+		maxLots = 0
 	}
 
 	if maxLots > 0 {
