@@ -2086,7 +2086,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
 func (c *Core) resendPendingRequests(t *trackedTrade) {
-	if t.isSelfGoverned() {
+	if t.isSelfGoverned() || !c.loggedIn /* we can't send `init` or `redeem` if we are not logged in */ {
 		return
 	}
 	for _, match := range t.matches {
