@@ -54,7 +54,7 @@ parts:
   metainfo:
     plugin: nil
     source: .
-    parse-info: [./metainfo/org.decred.dcrdex.metainfo.xml]
+    parse-info: [./src/org.decred.dcrdex.metainfo.xml]
 
   dexc-desktop:
     plugin: dump

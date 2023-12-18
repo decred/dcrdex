@@ -44,6 +44,15 @@ rm -fr "${BUILD_DIR}"
 mkdir -p -m 0755 "${CONTROL_DIR}"
 mkdir -p "${DOT_DESKTOP_BUILDDIR}"
 
+# check if site bundle is built, if not build it
+if [ ! -d ../../webserver/site/dist ]; then
+  CWD=$(pwd)
+  cd ../../webserver/site
+  npm clean-install
+  npm run build
+  cd $CWD
+fi
+
 # Build dexc
 LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
 GOOS=linux GOARCH=${ARCH} go build -o "${BIN_BUILDPATH}" -ldflags "$LDFLAGS"
