@@ -2086,9 +2086,21 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
 func (c *Core) resendPendingRequests(t *trackedTrade) {
-	if t.isSelfGoverned() || !c.loggedIn /* we can't send `init` or `redeem` if we are not logged in */ {
+	if t.isSelfGoverned() {
 		return
 	}
+
+	c.loginMtx.Lock()
+	loggedIn := c.loggedIn
+	c.loginMtx.Unlock()
+	if !loggedIn {
+		// Return early, we can't send `init` or `redeem` if we are not logged
+		// in but it's possible to get here when we receive a tipChange
+		// notification before we connect to dex servers.
+		c.log.Debugf("Resend pending trade request attempted for %s while core is logged out.", t.ID())
+		return
+	}
+
 	for _, match := range t.matches {
 		proof, auth := &match.MetaData.Proof, &match.MetaData.Proof.Auth
 		// Do not resend pending requests for revoked matches.
