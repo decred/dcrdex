@@ -104,7 +104,11 @@ Invoke-WebRequest -Uri https://nodejs.org/dist/v21.4.0/node-v$NodeVersion-x86.ms
 Start-Process msiexec.exe -ArgumentList "/i $NodeInstaller /quiet" -Wait
 
 # Allow PowerShell to be run by unprivileged users
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope MachinePolicy -Force
+$registryPath = "HKLM:\SOFTWARE\Policies\Microsoft\PowerShell"
+if (-not (Test-Path -Path $registryPath)) {
+    New-Item -Path $registryPath -Force
+}
+Set-ItemProperty -Path $registryPath -Name ExecutionPolicy -Value Bypass
 
 # Change back to the repo clone
 Set-Location -Path $workDir
@@ -116,4 +120,6 @@ pkg\build-windows.cmd or
 pkg\pkg-windows.cmd
 "
 
-Write-Host $msg -BackgroundColor Green
+Write-Host $msg -BackgroundColor Green -ForegroundColor Black
+
+
