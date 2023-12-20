@@ -8,12 +8,20 @@ $NodeVersion = "21.4.0"
 $MSysVersion = "2023-10-26"
 $VSBuildToolsVersion = "17"
 
-# Set error action preference to Stop
+# Terminate the script on any error
 $ErrorActionPreference = "Stop"
 
-$workDir = $PWD.Path
+# Check if the script is running with admin privileges
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+# If not running as administrator, exit
+if (-not $isAdmin) {
+    Write-Host "This script requires administrator privileges. Please run the script as an administrator."
+    exit 1
+}
 
 # Initialize temp directory where the installers will be downloaded
+$workDir = $PWD.Path
 $tmpDir = "$env:TEMP\vs_setup"
 if (Test-Path -Path $tmpDir -PathType Container) {
   Remove-Item -Path $tmpDir -Recurse -Force
@@ -100,6 +108,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope MachinePolicy -Force
 
 # Change back to the repo clone
 Set-Location -Path $workDir
+Remove-Item $tmpDir -Recurse -Force
 
 $msg = "Installation complete.  
 Open a new command prompt to apply environment variables and run 
@@ -107,4 +116,4 @@ pkg\build-windows.cmd or
 pkg\pkg-windows.cmd
 "
 
-Write-Host $msg -ForegroundColor Cyan
+Write-Host $msg -BackgroundColor Green

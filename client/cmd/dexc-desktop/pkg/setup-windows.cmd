@@ -25,9 +25,8 @@ if "%2" neq "" (
     set repoUrl=https://github.com/decred/dcrdex
 )
 
-set GitInstaller=Git-%GitVersion%-64-bit.exe
-
 @echo Installing git... 
+set GitInstaller=Git-%GitVersion%-64-bit.exe
 curl -sLO https://github.com/git-for-windows/git/releases/download/v%GitVersion%.windows.1/%GitInstaller%
 
 :: Create a silent install file
@@ -59,15 +58,30 @@ curl -sLO https://github.com/git-for-windows/git/releases/download/v%GitVersion%
 
 start /wait %GitInstaller% /VERYSILENT /NORESTART /NOCANCEL /LOADINF=git_install_options.ini
 
+if %errorlevel% neq 0 (
+    echo Installation failed.
+    exit /b 1
+)
+del %GitInstaller%
+del git_install_options.ini
+
 :: Install PowerShell
 @echo Installing PowerShell...
+set PowerShellInstaller=PowerShell-%PowerShellVersion%-win-x64.msi
 curl -OLs  https://github.com/PowerShell/PowerShell/releases/download/v%PowerShellVersion%/PowerShell-%PowerShellVersion%-win-x64.msi
-PowerShell-%PowerShellVersion%-win-x64.msi /quiet /norestart
+%PowerShellInstaller% /quiet /norestart
+
+if %errorlevel% neq 0 (
+    echo Installation failed.
+    exit /b 1
+)
+del %PowerShellInstaller%
 
 :: Clone the dcrdex repository
 if exist dcrdex rd /s /q dcrdex
 @echo Cloning %repoUrl%@%repoBranch%...
 "c:\Program Files\Git\bin\git.exe" clone -b %repoBranch% %repoUrl%
+
 cd dcrdex\client\cmd\dexc-desktop
 
 :: Install toolchain and SDKs

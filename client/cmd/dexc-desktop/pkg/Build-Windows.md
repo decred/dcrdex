@@ -2,7 +2,7 @@
 
 ### Setting up the build environment
 
- Download and run setup script:
+Download and run setup as Administrator (privileges are required in order to set environment variables).  Open a command prompt as Administrator, and run:
 
  ```batch
  curl -O https://raw.githubusercontent.com/decred/dcrdex/windows-build/client/cmd/dexc-desktop/pkg/setup-windows.cmd
@@ -11,7 +11,7 @@
 
  Both `branch` and `repoUrl` are optional.  If not specified, it will clone the `master` branch in the default [dcrdex repository](https://github.com/decred/dcrdex).
 
- This will download and install `git` and `PowerShell`, clone the repo and install the build toolchain and required SDKs for the build.  Once completed, open a new command prompt in order to effectuate `PATH` and other environment variables configured by the setup script.
+ This will download and install `git` and `PowerShell`, clone the repo and install the build toolchain and required SDKs for the build.  Once completed, close the above command prompt, open a new prompt in order to effectuate `PATH` and other environment variables configured by the setup script.  Administrator privileges are NOT required.
 
  ### Running the build
 
