@@ -669,7 +669,7 @@ var customSPVWalletConstructors = map[string]CustomSPVWalletConstructor{}
 func RegisterCustomSPVWallet(constructor CustomSPVWalletConstructor, def *asset.WalletDefinition) error {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
-			return fmt.Errorf("already support %q wallets", def.Type)
+			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadySupported)
 		}
 	}
 	customSPVWalletConstructors[def.Type] = constructor
