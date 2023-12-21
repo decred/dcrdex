@@ -158,6 +158,27 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
 }
 
+// customSPVWalletConstructors are functions for setting up custom
+// implementations of the btc.BTCWallet interface that may be used by the
+// ExchangeWalletSPV instead of the default spv implementation.
+var customSPVWalletConstructors = map[string]btc.CustomSPVWalletConstructor{}
+
+// RegisterCustomSPVWallet registers a function that should be used in creating
+// a btc.BTCWallet implementation that the ExchangeWalletSPV will use in place
+// of the default spv wallet implementation. External consumers can use this
+// function to provide alternative btc.BTCWallet implementations, and must do so
+// before attempting to create an ExchangeWalletSPV instance of this type.
+func RegisterCustomSPVWallet(constructor btc.CustomSPVWalletConstructor, def *asset.WalletDefinition) error {
+	for _, availableWallets := range WalletInfo.AvailableWallets {
+		if def.Type == availableWallets.Type {
+			return fmt.Errorf("already support %q wallets", def.Type)
+		}
+	}
+	customSPVWalletConstructors[def.Type] = constructor
+	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
+	return nil
+}
+
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
@@ -204,7 +225,22 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		cloneCFG.Ports = dexbtc.NetPorts{} // no default ports
 		return btc.ElectrumWallet(cloneCFG)
 	default:
-		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+		makeCustomWallet, ok := customSPVWalletConstructors[cfg.Type]
+		if !ok {
+			return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+		}
+
+		// Create custom wallet first and return early if we encounter any
+		// error.
+		ltcWallet, err := makeCustomWallet(cfg.Settings, cloneCFG.ChainParams)
+		if err != nil {
+			return nil, fmt.Errorf("custom wallet setup error: %v", err)
+		}
+
+		walletConstructor := func(_ string, _ *btc.WalletConfig, _ *chaincfg.Params, _ dex.Logger) btc.BTCWallet {
+			return ltcWallet
+		}
+		return btc.OpenSPVWallet(cloneCFG, walletConstructor)
 	}
 }
 
