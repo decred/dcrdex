@@ -97,6 +97,11 @@ var originLocale = map[Topic]*translation{
 		subject:  "In-Flight Order Error",
 		template: "In-Flight order with ID %v failed: %v",
 	},
+	// [host]
+	TopicOrderQuantityTooHigh: {
+		subject:  "Trade limit exceeded",
+		template: "Order quantity exceeds current trade limit on %s",
+	},
 	// [error]
 	TopicOrderLoadFailure: {
 		subject:  "Order load failure",

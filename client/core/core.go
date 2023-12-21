@@ -5967,6 +5967,14 @@ func (c *Core) TradeAsync(pw []byte, form *TradeForm) (*InFlightOrder, error) {
 
 		_, err := c.sendTradeRequest(req)
 		if err != nil {
+			// If it's an OrderQuantityTooHigh error, send simplified notification
+			var mErr *msgjson.Error
+			if errors.As(err, &mErr) && mErr.Code == msgjson.OrderQuantityTooHigh {
+				topic := TopicOrderQuantityTooHigh
+				subject, details := c.formatDetails(topic, corder.Host)
+				c.notify(newOrderNoteWithTempID(topic, subject, details, db.ErrorLevel, corder, tempID))
+				return
+			}
 			// Send async order error note.
 			topic := TopicAsyncOrderFailure
 			subject, details := c.formatDetails(topic, tempID, err)
