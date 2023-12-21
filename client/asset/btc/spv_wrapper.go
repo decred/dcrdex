@@ -75,6 +75,13 @@ const (
 	logFileName        = "neutrino.log"
 	defaultAcctNum     = 0
 	defaultAcctName    = "default"
+
+	// WalletAccountNameConfigKey is used by external custom wallet constructors
+	// to specify an account name during wallet creation.
+	WalletAccountNameConfigKey = "walletname"
+	// WalletAccountNumberConfigKey is used by external custom wallet
+	// constructors to specify a wallet account number during wallet creation.
+	WalletAccountNumberConfigKey = "walletaccountnumber"
 )
 
 var wAddrMgrBkt = []byte("waddrmgr")
