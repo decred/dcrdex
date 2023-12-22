@@ -68,14 +68,13 @@ type logger struct {
 // exists in the levels map, use that level, otherwise the parent's log level is
 // used.
 func (lggr *logger) SubLogger(name string) Logger {
-	combinedName := fmt.Sprintf("%s[%s]", lggr.name, name)
-	return lggr.newLoggerWithBackend(lggr.backend, combinedName)
+	return lggr.newLoggerWithBackend(lggr.backend, name)
 }
 
 // FileLogger creates a logger that logs to a file rotator. Subloggers will also
 // log to the file only.
 func (lggr *logger) FileLogger(r *rotator.Rotator) Logger {
-	return lggr.newLoggerWithBackend(slog.NewBackend(r), lggr.name)
+	return lggr.newLoggerWithBackend(slog.NewBackend(r), "F")
 }
 
 func (lggr *logger) newLoggerWithBackend(backend *slog.Backend, name string) *logger {
@@ -85,11 +84,12 @@ func (lggr *logger) newLoggerWithBackend(backend *slog.Backend, name string) *lo
 		level = lvl
 	}
 
-	newLggr := backend.Logger(name)
+	combinedName := fmt.Sprintf("%s[%s]", lggr.name, name)
+	newLggr := backend.Logger(combinedName)
 	newLggr.SetLevel(level)
 	return &logger{
 		Logger:  newLggr,
-		name:    name,
+		name:    combinedName,
 		level:   level,
 		levels:  lggr.levels,
 		backend: backend,

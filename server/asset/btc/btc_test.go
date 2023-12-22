@@ -1,4 +1,4 @@
-//go:build !btclive
+//go:build !btclive && !btcfees && !feefetcher
 
 // These tests will not be run if the btclive build tag is set. In that case,
 // the live_test.go tests will run.

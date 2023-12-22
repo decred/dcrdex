@@ -18,6 +18,7 @@ const defaultResponseSizeLimit = 1 << 20 // 1 MiB = 1,048,576 bytes
 type RequestOption struct {
 	responseSizeLimit int64
 	statusFunc        func(int)
+	header            *[2]string
 }
 
 // WithSizeLimit sets a size limit for a response. See defaultResponseSizeLimit
@@ -30,6 +31,12 @@ func WithSizeLimit(limit int64) *RequestOption {
 // performed.
 func WithStatusFunc(f func(int)) *RequestOption {
 	return &RequestOption{statusFunc: f}
+}
+
+// WithRequestHeader adds a header entry to the request.
+func WithRequestHeader(k, v string) *RequestOption {
+	h := [2]string{k, v}
+	return &RequestOption{header: &h}
 }
 
 // Post peforms an HTTP POST request. If thing is non-nil, the response will
@@ -66,6 +73,10 @@ func Do(req *http.Request, thing interface{}, opts ...*RequestOption) error {
 			sizeLimit = opt.responseSizeLimit
 		case opt.statusFunc != nil:
 			statusFunc = opt.statusFunc
+		case opt.header != nil:
+			h := *opt.header
+			k, v := h[0], h[1]
+			req.Header.Add(k, v)
 		}
 	}
 	resp, err := http.DefaultClient.Do(req)
