@@ -75,13 +75,6 @@ const (
 	logFileName        = "neutrino.log"
 	defaultAcctNum     = 0
 	defaultAcctName    = "default"
-
-	// WalletAccountNameConfigKey is used by external custom wallet constructors
-	// to specify an account name during wallet creation.
-	WalletAccountNameConfigKey = "walletname"
-	// WalletAccountNumberConfigKey is used by external custom wallet
-	// constructors to specify a wallet account number during wallet creation.
-	WalletAccountNumberConfigKey = "walletaccountnumber"
 )
 
 var wAddrMgrBkt = []byte("waddrmgr")
@@ -109,6 +102,9 @@ type BTCWallet interface {
 	WaitForShutdown()
 	ChainSynced() bool // currently unused
 	AccountProperties(scope waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error)
+	// AccountInfo returns the account information of the wallet for use by the
+	// exchange wallet.
+	AccountInfo() XCWalletAccount
 	// The below methods are not implemented by *wallet.Wallet, so must be
 	// implemented by the BTCWallet implementation.
 	WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
@@ -125,6 +121,11 @@ type BTCWallet interface {
 	AddPeer(string) error
 	RemovePeer(string) error
 	ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error)
+}
+
+type XCWalletAccount struct {
+	AccountName   string
+	AccountNumber uint32
 }
 
 // BlockNotification is block hash and height delivered by a BTCWallet when it
@@ -250,8 +251,6 @@ type spvWallet struct {
 	cfg         *WalletConfig
 	wallet      BTCWallet
 	cl          SPVService
-	acctNum     uint32
-	acctName    string
 	dir         string
 	decodeAddr  dexbtc.AddressDecoder
 
@@ -614,7 +613,8 @@ func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.Lis
 // balances retrieves a wallet's balance details.
 func (w *spvWallet) balances() (*GetBalancesResult, error) {
 	// Determine trusted vs untrusted coins with listunspent.
-	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
+	acctInfo := w.wallet.AccountInfo()
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, acctInfo.AccountName)
 	if err != nil {
 		return nil, fmt.Errorf("error listing unspent outputs: %w", err)
 	}
@@ -628,7 +628,7 @@ func (w *spvWallet) balances() (*GetBalancesResult, error) {
 	}
 
 	// listunspent does not include immature coinbase outputs or locked outputs.
-	bals, err := w.wallet.CalculateAccountBalances(w.acctNum, 0 /* confs */)
+	bals, err := w.wallet.CalculateAccountBalances(acctInfo.AccountNumber, 0 /* confs */)
 	if err != nil {
 		return nil, err
 	}
@@ -651,7 +651,7 @@ func (w *spvWallet) balances() (*GetBalancesResult, error) {
 
 // listUnspent retrieves list of the wallet's UTXOs.
 func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
-	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.wallet.AccountInfo().AccountName)
 	if err != nil {
 		return nil, err
 	}
@@ -730,13 +730,13 @@ func (w *spvWallet) listLockUnspent() ([]*RPCOutpoint, error) {
 // changeAddress gets a new internal address from the wallet. The address will
 // be bech32-encoded (P2WPKH).
 func (w *spvWallet) changeAddress() (btcutil.Address, error) {
-	return w.wallet.NewChangeAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
+	return w.wallet.NewChangeAddress(w.wallet.AccountInfo().AccountNumber, waddrmgr.KeyScopeBIP0084)
 }
 
 // externalAddress gets a new bech32-encoded (P2WPKH) external address from the
 // wallet.
 func (w *spvWallet) externalAddress() (btcutil.Address, error) {
-	return w.wallet.NewAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
+	return w.wallet.NewAddress(w.wallet.AccountInfo().AccountNumber, waddrmgr.KeyScopeBIP0084)
 }
 
 // signTx attempts to have the wallet sign the transaction inputs.
@@ -1137,7 +1137,7 @@ func copyDir(src, dst string) error {
 // numDerivedAddresses returns the number of internal and external addresses
 // that the wallet has derived.
 func (w *spvWallet) numDerivedAddresses() (internal, external uint32, err error) {
-	props, err := w.wallet.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
+	props, err := w.wallet.AccountProperties(waddrmgr.KeyScopeBIP0084, w.wallet.AccountInfo().AccountNumber)
 	if err != nil {
 		return 0, 0, err
 	}

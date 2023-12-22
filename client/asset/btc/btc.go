@@ -669,7 +669,7 @@ var customSPVWalletConstructors = map[string]CustomSPVWalletConstructor{}
 func RegisterCustomSPVWallet(constructor CustomSPVWalletConstructor, def *asset.WalletDefinition) error {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
-			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadySupported)
+			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadyRegistered)
 		}
 	}
 	customSPVWalletConstructors[def.Type] = constructor
@@ -1293,27 +1293,9 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	}
 	btc.txHistoryDB.Store(txHistoryDB)
 
-	acctName := defaultAcctName
-	// Check if an account name was provided via wallet settings.
-	if configAcctName := cfg.WalletCFG.Settings[WalletAccountNameConfigKey]; configAcctName != "" {
-		acctName = configAcctName
-	}
-
-	var acctNumber uint32 = defaultAcctNum
-	// Check if an account number was provided via wallet settings.
-	if configAcctNumber := cfg.WalletCFG.Settings[WalletAccountNumberConfigKey]; configAcctNumber != "" {
-		accountNumber, err := strconv.ParseInt(configAcctNumber, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid config account number: %w", err)
-		}
-		acctNumber = uint32(accountNumber)
-	}
-
 	spvw := &spvWallet{
 		chainParams: cfg.ChainParams,
 		cfg:         walletCfg,
-		acctNum:     acctNumber,
-		acctName:    acctName,
 		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name),
 		txBlocks:    make(map[chainhash.Hash]*hashEntry),
 		checkpoints: make(map[OutPoint]*scanCheckpoint),

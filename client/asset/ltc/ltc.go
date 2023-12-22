@@ -171,7 +171,7 @@ var customSPVWalletConstructors = map[string]btc.CustomSPVWalletConstructor{}
 func RegisterCustomSPVWallet(constructor btc.CustomSPVWalletConstructor, def *asset.WalletDefinition) error {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
-			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadySupported)
+			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadyRegistered)
 		}
 	}
 	customSPVWalletConstructors[def.Type] = constructor

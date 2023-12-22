@@ -37,7 +37,7 @@ var customWalletConstructors = map[string]WalletConstructor{}
 func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefinition) error {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
-			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadySupported)
+			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadyRegistered)
 		}
 	}
 	customWalletConstructors[def.Type] = constructor
