@@ -9,9 +9,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -166,6 +169,12 @@ type Backend struct {
 		sync.Mutex
 		fee  uint64
 		hash chainhash.Hash
+	}
+
+	feeRateCache struct {
+		sync.RWMutex
+		feeRate uint64
+		stamp   time.Time
 	}
 }
 
@@ -404,17 +413,59 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("%s transaction index is not enabled. Please enable txindex in the node config and you might need to re-index when you enable txindex", btc.name)
 	}
 
+	var wg sync.WaitGroup
+	if btc.cfg.Name == assetName /* "btc" */ {
+		// Prime the cache.
+		btc.feeRateCache.feeRate = btc.fetchExternalBitcoinFeeRate(ctx)
+		if btc.feeRateCache.feeRate == 0 {
+			btc.shutdown()
+			return nil, errors.New("failed to retrieve external btc fee rate")
+		}
+		btc.feeRateCache.stamp = time.Now()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tick := time.NewTicker(time.Minute * 5)
+			for {
+				select {
+				case <-tick.C:
+					feeRate := btc.fetchExternalBitcoinFeeRate(ctx)
+					if feeRate > 0 {
+						btc.feeRateCache.Lock()
+						btc.feeRateCache.stamp = time.Now()
+						btc.feeRateCache.feeRate = feeRate
+						btc.feeRateCache.Unlock()
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	if _, err = btc.estimateFee(ctx); err != nil {
 		btc.log.Warnf("Backend started without fee estimation available: %v", err)
 	}
 
-	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		btc.run(ctx)
 	}()
 	return &wg, nil
+}
+
+func (btc *Backend) fetchExternalBitcoinFeeRate(ctx context.Context) uint64 {
+	if feeRate := getMempoolDotSpaceFeeRate(ctx, btc.log); feeRate > 0 {
+		btc.log.Tracef("fetched fee rate from mempool.space: %d", feeRate)
+		return feeRate
+	}
+	if feeRate := getBtcDotComFeeRate(ctx, btc.log); feeRate > 0 {
+		btc.log.Tracef("fetched fee rate from btc.com: %d", feeRate)
+		return feeRate
+	}
+	btc.log.Warnf("failed to fetch an external fee rate")
+	return 0
 }
 
 // Net returns the *chaincfg.Params. This is not part of the asset.Backend
@@ -1433,6 +1484,18 @@ out:
 // case, an estimate is calculated from the median fees of the previous
 // block(s).
 func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error) {
+	if btc.cfg.Name == assetName /* "btc" */ {
+		const feeRateExpiry = time.Minute * 10
+		btc.feeRateCache.RLock()
+		stamp, feeRate := btc.feeRateCache.stamp, btc.feeRateCache.feeRate
+		btc.feeRateCache.RUnlock()
+		if time.Since(stamp) < feeRateExpiry {
+			return feeRate, nil
+		} else {
+			btc.log.Warnf("external btc fee rate is expired. falling back to estimatesmartfee")
+		}
+	}
+
 	if btc.cfg.DumbFeeEstimates {
 		satsPerB, err = btc.node.EstimateFee(btc.feeConfs)
 	} else {
@@ -1544,4 +1607,56 @@ func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
 func hashTx(tx *wire.MsgTx) *chainhash.Hash {
 	h := tx.TxHash()
 	return &h
+}
+
+func getMempoolDotSpaceFeeRate(ctx context.Context, log dex.Logger) uint64 {
+	const uri = "https://mempool.space/api/v1/fees/recommended"
+	var res struct {
+		FastestFee uint64 `json:"fastestFee"`
+	}
+	if err := getHTTP(ctx, uri, &res); err != nil {
+		log.Errorf("Error fetching fees from mempool.space: %v", err)
+		return 0
+	}
+	if res.FastestFee == 0 {
+		log.Errorf("Fee rate of zero reported by mempool.space")
+	}
+	return res.FastestFee
+}
+
+func getBtcDotComFeeRate(ctx context.Context, log dex.Logger) uint64 {
+	const uri = "https://btc.com/service/fees/distribution"
+	var res struct {
+		RecommendedFees struct {
+			OneBlockFee uint64 `json:"one_block_fee"`
+		} `json:"fees_recommended"`
+	}
+	if err := getHTTP(ctx, uri, &res); err != nil {
+		log.Errorf("Error fetching fees from btc.com: %v", err)
+		return 0
+	}
+	if res.RecommendedFees.OneBlockFee == 0 {
+		log.Errorf("Fee rate of zero reported by btc.com")
+	}
+	return res.RecommendedFees.OneBlockFee
+}
+
+func getHTTP(ctx context.Context, url string, thing interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected response, got status code %d", resp.StatusCode)
+	}
+
+	reader := io.LimitReader(resp.Body, 1<<20)
+	return json.NewDecoder(reader).Decode(thing)
 }
