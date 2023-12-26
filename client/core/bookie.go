@@ -548,36 +548,45 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 		return nil, fmt.Errorf("no DEX %s", dex)
 	}
 
-	mkt := marketName(base, quote)
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock() // hold it locked until any transient sub/unsub is completed
-	book, found := dc.books[mkt]
-	var ob *orderbook.OrderBook
-	// If not found, attempt to make a temporary subscription and return the
-	// initial book.
-	if !found {
-		snap, err := dc.subscribe(base, quote)
-		if err != nil {
-			return nil, fmt.Errorf("unable to subscribe to book: %w", err)
+	orderBookFn := func(book *bookie) *OrderBook {
+		buys, sells, epoch := book.OrderBook.Orders()
+		return &OrderBook{
+			Buys:  book.translateBookSide(buys),
+			Sells: book.translateBookSide(sells),
+			Epoch: book.translateBookSide(epoch),
 		}
-		err = dc.unsubscribe(base, quote)
-		if err != nil {
-			c.log.Errorf("Failed to unsubscribe to %q book: %v", mkt, err)
-		}
-		ob = orderbook.NewOrderBook(c.log.SubLogger(mkt))
-		if err = ob.Sync(snap); err != nil {
-			return nil, fmt.Errorf("unable to sync book: %w", err)
-		}
-	} else {
-		ob = book.OrderBook
 	}
 
-	buys, sells, epoch := ob.Orders()
-	return &OrderBook{
-		Buys:  book.translateBookSide(buys),
-		Sells: book.translateBookSide(sells),
-		Epoch: book.translateBookSide(epoch),
-	}, nil
+	mkt := marketName(base, quote)
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+	book, found := dc.books[mkt]
+	if found {
+		return orderBookFn(book), nil
+	}
+
+	// If not found, attempt to make a temporary subscription and return the
+	// initial book.
+	snap, err := dc.subscribe(base, quote)
+	if err != nil {
+		return nil, fmt.Errorf("unable to subscribe to book: %w", err)
+	}
+	err = dc.unsubscribe(base, quote)
+	if err != nil {
+		c.log.Errorf("Failed to unsubscribe to %q book: %v", mkt, err)
+	}
+	ob := orderbook.NewOrderBook(c.log.SubLogger(mkt))
+	if err = ob.Sync(snap); err != nil {
+		return nil, fmt.Errorf("unable to sync book: %w", err)
+	}
+
+	dc.cfgMtx.RLock()
+	cfg := dc.cfg
+	dc.cfgMtx.RUnlock()
+
+	newBook := newBookie(dc, base, quote, cfg.BinSizes, dc.log.SubLogger(mkt))
+	newBook.OrderBook = ob
+	return orderBookFn(newBook), nil
 }
 
 // translateBookSide translates from []*orderbook.Order to []*MiniOrder.
