@@ -2,11 +2,23 @@
 
 export SHELL=$(which bash)
 SESSION="walletpair"
-PAIR_ROOT=~/dextest/walletpair
+if [ "$SIMNET" ] ; then
+  PAIR_ROOT=~/dextest/simnet-walletpair/
+  CLIENT_1_ADDR="127.0.0.6:5760"
+  CLIENT_1_RPC_ADDR="127.0.0.6:5761"
+  CLIENT_2_ADDR="127.0.0.7:5762"
+  CLIENT_2_RPC_ADDR="127.0.0.7:5763"
+else
+  PAIR_ROOT=~/dextest/walletpair/
+  CLIENT_1_ADDR="127.0.0.4:5760"
+  CLIENT_1_RPC_ADDR="127.0.0.4:5761"
+  CLIENT_2_ADDR="127.0.0.5:5762"
+  CLIENT_2_RPC_ADDR="127.0.0.5:5763"
+  SIMNET="0"
+fi
+
 CLIENT_1_DIR="${PAIR_ROOT}/dexc1"
-CLIENT_1_ADDR="127.0.0.4:5760"
 CLIENT_2_DIR="${PAIR_ROOT}/dexc2"
-CLIENT_2_ADDR="127.0.0.5:5761"
 HARNESS_DIR="${PAIR_ROOT}/harness-ctl"
 DEXC_DIR=$(realpath ../../../client/cmd/dexc)
 DEXC="${DEXC_DIR}/dexc"
@@ -24,6 +36,21 @@ rm -f "${CLIENT_1_CONF}"
 cat > "${CLIENT_1_CONF}" <<EOF
 webaddr=${CLIENT_1_ADDR}
 experimental=true
+rpc=1
+rpcuser=user
+rpcpass=pass
+rpcaddr=${CLIENT_1_RPC_ADDR}
+simnet=${SIMNET}
+EOF
+
+CLIENT_1_CTL_CONF="${CLIENT_1_DIR}/dexcctl.conf"
+rm -f "$CLIENT_1_CTL_CONF"
+cat > "$CLIENT_1_CTL_CONF" <<EOF
+rpcuser=user
+rpcpass=pass
+rpccert=${CLIENT_1_DIR}/rpc.cert
+rpcaddr=${CLIENT_1_RPC_ADDR}
+simnet=${SIMNET}
 EOF
 
 CLIENT_2_CONF="${CLIENT_2_DIR}/dexc.conf"
@@ -31,6 +58,21 @@ rm -f "$CLIENT_2_CONF"
 cat > "$CLIENT_2_CONF" <<EOF
 webaddr=${CLIENT_2_ADDR}
 experimental=true
+rpc=1
+rpcuser=user
+rpcpass=pass
+rpcaddr=${CLIENT_2_RPC_ADDR}
+simnet=${SIMNET}
+EOF
+
+CLIENT_2_CTL_CONF="${CLIENT_2_DIR}/dexcctl.conf"
+rm -f "$CLIENT_2_CTL_CONF"
+cat > "$CLIENT_2_CTL_CONF" <<EOF
+rpcuser=user
+rpcpass=pass
+rpccert=${CLIENT_2_DIR}/rpc.cert
+rpcaddr=${CLIENT_2_RPC_ADDR}
+simnet=${SIMNET}
 EOF
 
 QUIT_FILE="${HARNESS_DIR}/quit"
@@ -47,8 +89,14 @@ chmod +x "${QUIT_FILE}"
 echo "xdg-open http://${CLIENT_1_ADDR} > /dev/null 2>&1" > "${HARNESS_DIR}/dexc1"
 chmod +x "${HARNESS_DIR}/dexc1"
 
+echo "dexcctl -C ${CLIENT_1_CTL_CONF} \$1" > "${HARNESS_DIR}/dexc1ctl"
+chmod +x "${HARNESS_DIR}/dexc1ctl"
+
 echo "xdg-open http://${CLIENT_2_ADDR} > /dev/null 2>&1" > "${HARNESS_DIR}/dexc2"
 chmod +x "${HARNESS_DIR}/dexc2"
+
+echo "dexcctl -C ${CLIENT_2_CTL_CONF} \$1" > "${HARNESS_DIR}/dexc2ctl"
+chmod +x "${HARNESS_DIR}/dexc2ctl"
 
 tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'harness-ctl'
