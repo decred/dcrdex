@@ -5352,7 +5352,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 
 		newTip, err := dcr.getBestBlock(ctxInternal)
 		if err != nil {
-			dcr.log.Errorf("failed to get best block: %w", err)
+			dcr.log.Errorf("failed to get best block: %v", err)
 			return
 		}
 
