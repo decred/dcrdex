@@ -136,7 +136,7 @@ export function fetchDesktopNtfnSettings (): DesktopNtfnSetting {
   return desktopNtfnSettings
 }
 
-export async function updateNtfnSetting (noteType: string, enabled: boolean) {
+export function updateNtfnSetting (noteType: string, enabled: boolean) {
   fetchDesktopNtfnSettings()
   desktopNtfnSettings[noteType] = enabled
   State.storeLocal(desktopNtfnSettingsKey(), desktopNtfnSettings)
