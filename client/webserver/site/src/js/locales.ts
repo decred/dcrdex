@@ -204,7 +204,6 @@ export const enUS: Locale = {
   [ID_WAITING_FOR_CONFS]: 'Waiting for confirmations...',
   [ID_NONE_SELECTED]: 'none selected',
   [ID_REGISTRATION_FEE_SUCCESS]: 'Fidelity bond accepted!',
-  [ID_API_ERROR]: 'API error',
   [ID_ADD]: 'Add',
   [ID_CREATE]: 'Create',
   [ID_WALLET_READY]: 'Ready',
@@ -360,7 +359,7 @@ export const ptBR: Locale = {
   [ID_WAITING_FOR_CONFS]: 'Esperando confirmações...',
   [ID_NONE_SELECTED]: 'nenhuma selecionado',
   [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!', // TODO: reword from fee => bond
-  [ID_API_ERROR]: 'Erro de API',
+  [ID_API_ERROR]: 'erro de API: {{ msg }}',
   [ID_ADD]: 'Adicionar',
   [ID_CREATE]: 'Criar',
   [ID_WALLET_READY]: 'Escolher',
@@ -406,7 +405,7 @@ export const zhCN: Locale = {
   [ID_LOT]: '批处理',
   [ID_LOTS]: '批', // alt. 很多
   [ID_EPOCH]: '时间',
-  [ID_API_ERROR]: '接口错误',
+  [ID_API_ERROR]: '接口错误: {{ msg }}',
   [ID_ADD]: '添加',
   [ID_CREATE]: '创建',
   [ID_AVAILABLE]: '可用',
@@ -454,7 +453,7 @@ export const plPL: Locale = {
   [ID_WAITING_FOR_CONFS]: 'Oczekiwanie na potwierdzenia...',
   [ID_NONE_SELECTED]: 'brak zaznaczenia',
   [ID_REGISTRATION_FEE_SUCCESS]: 'Płatność rejestracyjna powiodła się!', // TODO: reword from fee => bond
-  [ID_API_ERROR]: 'błąd API',
+  [ID_API_ERROR]: 'błąd API: {{ msg }}',
   [ID_ADD]: 'Dodaj',
   [ID_CREATE]: 'Utwórz',
   [ID_WALLET_READY]: 'Gotowy',
@@ -508,7 +507,7 @@ export const deDE: Locale = {
   [ID_WAITING_FOR_CONFS]: 'Warten auf Bestätigungen...',
   [ID_NONE_SELECTED]: 'keine ausgewählt',
   [ID_REGISTRATION_FEE_SUCCESS]: 'Zahlung der Registrierungsgebühr erfolgreich!', // TODO: reword from fee => bond
-  [ID_API_ERROR]: 'API Fehler',
+  [ID_API_ERROR]: 'API Fehler: {{ msg }}',
   [ID_ADD]: 'Hinzufügen',
   [ID_CREATE]: 'Erstellen',
   [ID_WALLET_READY]: 'Bereit',
@@ -566,7 +565,7 @@ export const ar: Locale = {
   [ID_WAITING_FOR_CONFS]: 'في انتظار التأكيدات ...',
   [ID_NONE_SELECTED]: 'لم يتم تحديد أي شيء',
   [ID_REGISTRATION_FEE_SUCCESS]: 'تم دفع رسوم التسجيل بنجاح!', // TODO: reword from fee => bond
-  [ID_API_ERROR]: 'خطأ في واجهة برمجة التطبيقات',
+  [ID_API_ERROR]: 'خطأ في واجهة برمجة التطبيقات :{{ msg }}',
   [ID_ADD]: 'إضافة',
   [ID_CREATE]: 'إنشاء',
   [ID_WALLET_READY]: 'جاهزة',
