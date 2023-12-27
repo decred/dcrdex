@@ -112,17 +112,21 @@ class OSDesktopNotifier {
     return Promise.resolve()
   }
 
-  static sendDesktopNotification (title: string, body?: string): void {
+  static async sendDesktopNotification (title: string, body?: string): Promise<void> {
     if (!desktopNtfnSettings.browserNtfnEnabled) return
-    // this calls a function exported via webview.Bind()
-    const w = (window as any)
-    w.sendOSNotification(title, body)
+    if (window.webkit) await window.webkit.messageHandlers.dexcHandler.postMessage(['sendOSNotification', title, body]) // See: client/cmd/dexc-desktop/app_darwin.go#L673-#L697.
+    else await (window as any).sendOSNotification(title, body) // this calls a function exported via webview.Bind()
   }
+}
+
+// isWebview checks if we are running in webview or webkit (MacOS).
+function isWebview (): boolean {
+  return window.isWebview !== undefined || window.webkit !== undefined // MacOS
 }
 
 // determine whether we're running in a webview or in browser, and export
 // the appropriate notifier accordingly.
-export const Notifier = window.isWebview ? OSDesktopNotifier : BrowserNotifier
+export const Notifier = isWebview() ? OSDesktopNotifier : BrowserNotifier
 
 export const ntfnPermissionGranted = Notifier.ntfnPermissionGranted
 export const ntfnPermissionDenied = Notifier.ntfnPermissionDenied

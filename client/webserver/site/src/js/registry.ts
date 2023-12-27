@@ -1,5 +1,6 @@
 declare global {
   interface Window {
+    webkit: any | undefined
     log: (...args: any) => void
     enableLogger: (loggerID: string, enable: boolean) => void
     recordLogger: (loggerID: string, enable: boolean) => void
