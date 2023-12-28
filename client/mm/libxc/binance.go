@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -47,38 +48,192 @@ const (
 	fakeBinanceURL = "http://localhost:37346"
 )
 
-type bookBin struct {
-	Price float64
-	Qty   float64
-}
-
-type bncBook struct {
-	bids           []*bookBin
-	asks           []*bookBin
-	latestUpdate   int64
+// binanceOrderBook manages an orderbook for a single market. It keeps
+// the orderbook synced and allows querying of vwap.
+type binanceOrderBook struct {
+	mtx            sync.RWMutex
+	synced         bool
 	numSubscribers uint32
+
+	book                  *orderbook
+	updateQueue           chan *binanceBookUpdate
+	mktID                 string
+	baseConversionFactor  uint64
+	quoteConversionFactor uint64
+	log                   dex.Logger
 }
 
-func newBNCBook() *bncBook {
-	return &bncBook{
-		bids:           make([]*bookBin, 0),
-		asks:           make([]*bookBin, 0),
-		numSubscribers: 1,
+func newBinanceOrderBook(baseConversionFactor, quoteConversionFactor uint64, mktID string, log dex.Logger) *binanceOrderBook {
+	return &binanceOrderBook{
+		book:                  newOrderBook(),
+		mktID:                 mktID,
+		updateQueue:           make(chan *binanceBookUpdate, 1024),
+		numSubscribers:        1,
+		baseConversionFactor:  baseConversionFactor,
+		quoteConversionFactor: quoteConversionFactor,
+		log:                   log,
 	}
 }
 
-type bncAssetConfig struct {
-	// symbol is the DEX asset symbol, always lower case
-	symbol string
-	// coin is the asset symbol on binance, always upper case.
-	// For a token like USDC, the coin field will be USDC, but
-	// symbol field will be usdc.eth.
-	coin string
-	// chain will be the same as coin for the base assets of
-	// a blockchain, but for tokens it will be the chain
-	// that the token is hosted such as "ETH".
-	chain            string
-	conversionFactor uint64
+// convertBinanceBook converts bids and asks in the binance format,
+// with the conventional quantity and rate, to the DEX message format which
+// can be used to update the orderbook.
+func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json.Number) (bids, asks []*obEntry, err error) {
+	convert := func(updates [][2]json.Number) ([]*obEntry, error) {
+		convertedUpdates := make([]*obEntry, 0, len(updates))
+
+		for _, update := range updates {
+			price, err := update[0].Float64()
+			if err != nil {
+				return nil, fmt.Errorf("error parsing price: %v", err)
+			}
+
+			qty, err := update[1].Float64()
+			if err != nil {
+				return nil, fmt.Errorf("error parsing qty: %v", err)
+			}
+
+			convertedUpdates = append(convertedUpdates, &obEntry{
+				rate: calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor),
+				qty:  uint64(qty * float64(b.baseConversionFactor)),
+			})
+		}
+
+		return convertedUpdates, nil
+	}
+
+	bids, err = convert(binanceBids)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	asks, err = convert(binanceAsks)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return bids, asks, nil
+}
+
+// sync does an initial sync of the orderbook. When the first update is
+// received, it grabs a snapshot of the orderbook, and only processes updates
+// that come after the state of the snapshot. A goroutine is started that keeps
+// the orderbook in sync by repeating the sync process if an update is ever
+// missed.
+//
+// This function runs until the context is canceled. It must be started as
+// a new goroutine.
+func (b *binanceOrderBook) sync(ctx context.Context, getSnapshot func() (*binanceOrderbookSnapshot, error)) {
+	syncOrderbook := func(minUpdateID uint64) (uint64, bool) {
+		b.log.Debugf("Syncing %s orderbook. First update ID: %d", b.mktID, minUpdateID)
+
+		const maxTries = 5
+		for i := 0; i < maxTries; i++ {
+			if i > 0 {
+				select {
+				case <-time.After(2 * time.Second):
+				case <-ctx.Done():
+					return 0, false
+				}
+			}
+
+			snapshot, err := getSnapshot()
+			if err != nil {
+				b.log.Errorf("Error getting orderbook snapshot: %v", err)
+				continue
+			}
+			if snapshot.LastUpdateID < minUpdateID {
+				b.log.Infof("Snapshot last update ID %d is less than first update ID %d. Getting new snapshot...", snapshot.LastUpdateID, minUpdateID)
+				continue
+			}
+
+			bids, asks, err := b.convertBinanceBook(snapshot.Bids, snapshot.Asks)
+			if err != nil {
+				b.log.Errorf("Error parsing binance book: %v", err)
+				return 0, false
+			}
+
+			b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
+
+			b.book.clear()
+			b.book.update(bids, asks)
+			return snapshot.LastUpdateID, true
+		}
+
+		return 0, false
+	}
+
+	setSynced := func(synced bool) {
+		b.mtx.Lock()
+		b.synced = synced
+		b.mtx.Unlock()
+	}
+
+	var firstUpdate *binanceBookUpdate
+	select {
+	case <-ctx.Done():
+		return
+	case firstUpdate = <-b.updateQueue:
+	}
+
+	latestUpdate, success := syncOrderbook(firstUpdate.FirstUpdateID)
+	if !success {
+		b.log.Errorf("Failed to sync %s orderbook", b.mktID)
+		return
+	}
+
+	setSynced(true)
+
+	b.log.Infof("Successfully synced %s orderbook", b.mktID)
+
+	for {
+		select {
+		case update := <-b.updateQueue:
+			if update.LastUpdateID <= latestUpdate {
+				continue
+			}
+
+			if update.FirstUpdateID > latestUpdate+1 {
+				b.log.Warnf("Missed %d updates for %s orderbook. Re-syncing...", update.FirstUpdateID-latestUpdate, b.mktID)
+
+				setSynced(false)
+
+				latestUpdate, success = syncOrderbook(update.LastUpdateID)
+				if !success {
+					b.log.Errorf("Failed to re-sync %s orderbook.", b.mktID)
+					return
+				}
+
+				setSynced(true)
+				continue
+			}
+
+			bids, asks, err := b.convertBinanceBook(update.Bids, update.Asks)
+			if err != nil {
+				b.log.Errorf("Error parsing binance book: %v", err)
+				continue
+			}
+
+			b.book.update(bids, asks)
+			latestUpdate = update.LastUpdateID
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// vwap returns the volume weighted average price for a certain quantity of the
+// base asset. It returns an error if the orderbook is not synced.
+func (b *binanceOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+
+	if !b.synced {
+		return 0, 0, filled, errors.New("orderbook not synced")
+	}
+
+	vwap, extrema, filled = b.book.vwap(bids, qty)
+	return
 }
 
 // TODO: check all symbols
@@ -102,6 +257,8 @@ func mapDexToBinanceSymbol(symbol string) string {
 	return symbol
 }
 
+// binanceCoinNetworkToDexSymbol takes the coin name and its network name as
+// returned by the binance API and returns the DEX symbol.
 func binanceCoinNetworkToDexSymbol(coin, network string) string {
 	if coin == "ETH" && network == "ETH" {
 		return "eth"
@@ -125,6 +282,20 @@ func binanceCoinNetworkToDexSymbol(coin, network string) string {
 	}
 
 	return fmt.Sprintf("%s.%s", dexSymbol, dexNetwork)
+}
+
+type bncAssetConfig struct {
+	// symbol is the DEX asset symbol, always lower case
+	symbol string
+	// coin is the asset symbol on binance, always upper case.
+	// For a token like USDC, the coin field will be USDC, but
+	// symbol field will be usdc.eth.
+	coin string
+	// chain will be the same as coin for the base assets of
+	// a blockchain, but for tokens it will be the chain
+	// that the token is hosted such as "ETH".
+	chain            string
+	conversionFactor uint64
 }
 
 func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
@@ -153,6 +324,20 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 	}, nil
 }
 
+func bncAssetCfgs(baseAsset, quoteAsset uint32) (*bncAssetConfig, *bncAssetConfig, error) {
+	baseCfg, err := bncAssetCfg(baseAsset)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	quoteCfg, err := bncAssetCfg(quoteAsset)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return baseCfg, quoteCfg, nil
+}
+
 // bncBalance is the balance of an asset in conventional units. This must be
 // converted before returning.
 type bncBalance struct {
@@ -177,7 +362,7 @@ type binance struct {
 	tradeIDNonce       atomic.Uint32
 	tradeIDNoncePrefix dex.Bytes
 
-	markets atomic.Value // map[string]*bnMarket
+	markets atomic.Value // map[string]*binanceMarket
 	// tokenIDs maps the token's symbol to the list of bip ids of the token
 	// for each chain for which deposits and withdrawals are enabled on
 	// binance.
@@ -190,7 +375,7 @@ type binance struct {
 	marketStream    comms.WsConn
 
 	booksMtx sync.RWMutex
-	books    map[string]*bncBook
+	books    map[string]*binanceOrderBook
 
 	tradeUpdaterMtx    sync.RWMutex
 	tradeInfo          map[string]*tradeInfo
@@ -226,7 +411,7 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 		secretKey:          secretKey,
 		knownAssets:        knownAssets,
 		balances:           make(map[string]*bncBalance),
-		books:              make(map[string]*bncBook),
+		books:              make(map[string]*binanceOrderBook),
 		net:                net,
 		tradeInfo:          make(map[string]*tradeInfo),
 		tradeUpdaters:      make(map[int]chan *TradeUpdate),
@@ -234,13 +419,14 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 	}
 
-	bnc.markets.Store(make(map[string]*bnMarket))
+	bnc.markets.Store(make(map[string]*binanceMarket))
 	bnc.tokenIDs.Store(make(map[string][]uint32))
 
 	return bnc
 }
 
-func (bnc *binance) updateBalances(coinsData []*binanceCoinInfo) {
+// setBalances stores the balances of the user.
+func (bnc *binance) setBalances(coinsData []*binanceCoinInfo) {
 	bnc.balanceMtx.Lock()
 	defer bnc.balanceMtx.Unlock()
 
@@ -252,18 +438,15 @@ func (bnc *binance) updateBalances(coinsData []*binanceCoinInfo) {
 	}
 }
 
-func (bnc *binance) getCoinInfo(ctx context.Context) error {
-	coins := make([]*binanceCoinInfo, 0)
-	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
-	if err != nil {
-		return fmt.Errorf("error getting binance coin info: %v", err)
-	}
-
-	bnc.updateBalances(coins)
-
+// setTokenIDs stores the token IDs for which deposits and withdrawals are
+// enabled on binance.
+func (bnc *binance) setTokenIDs(coins []*binanceCoinInfo) {
 	tokenIDs := make(map[string][]uint32)
 	for _, nfo := range coins {
 		tokenSymbol := strings.ToLower(nfo.Coin)
+		if convertedSymbol, found := binanceToDexSymbol[nfo.Coin]; found {
+			tokenSymbol = strings.ToLower(convertedSymbol)
+		}
 		chainIDs, isToken := dex.TokenChains[tokenSymbol]
 		if !isToken {
 			continue
@@ -292,6 +475,19 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 		}
 	}
 	bnc.tokenIDs.Store(tokenIDs)
+}
+
+// getCoinInfo retrieves binance configs then updates the user balances and
+// the tokenIDs.
+func (bnc *binance) getCoinInfo(ctx context.Context) error {
+	coins := make([]*binanceCoinInfo, 0)
+	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
+	if err != nil {
+		return fmt.Errorf("error getting binance coin info: %w", err)
+	}
+
+	bnc.setBalances(coins)
+	bnc.setTokenIDs(coins)
 
 	return nil
 }
@@ -306,14 +502,14 @@ func (bnc *binance) getMarkets(ctx context.Context) error {
 			IntervalNum   int64  `json:"intervalNum"`
 			Limit         int64  `json:"limit"`
 		} `json:"rateLimits"`
-		Symbols []*bnMarket `json:"symbols"`
+		Symbols []*binanceMarket `json:"symbols"`
 	}
 	err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &exchangeInfo)
 	if err != nil {
 		return fmt.Errorf("error getting markets from Binance: %w", err)
 	}
 
-	marketsMap := make(map[string]*bnMarket, len(exchangeInfo.Symbols))
+	marketsMap := make(map[string]*binanceMarket, len(exchangeInfo.Symbols))
 	for _, market := range exchangeInfo.Symbols {
 		marketsMap[market.Symbol] = market
 	}
@@ -450,7 +646,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 
 	slug := baseCfg.coin + quoteCfg.coin
 
-	marketsMap := bnc.markets.Load().(map[string]*bnMarket)
+	marketsMap := bnc.markets.Load().(map[string]*binanceMarket)
 	market, found := marketsMap[slug]
 	if !found {
 		return "", fmt.Errorf("market not found: %v", slug)
@@ -494,7 +690,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 }
 
 func (bnc *binance) assetPrecision(coin string) (int, error) {
-	for _, market := range bnc.markets.Load().(map[string]*bnMarket) {
+	for _, market := range bnc.markets.Load().(map[string]*binanceMarket) {
 		if market.BaseAsset == coin {
 			return market.BaseAssetPrecision, nil
 		}
@@ -711,7 +907,7 @@ func (bnc *binance) SubscribeTradeUpdates() (<-chan *TradeUpdate, func(), int) {
 	return updater, unsubscribe, updaterID
 }
 
-// CancelTrade cancels a trade on the CEX.
+// CancelTrade cancels a trade.
 func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error {
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
@@ -738,13 +934,13 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 }
 
 func (bnc *binance) Markets() ([]*Market, error) {
-	bnMarkets := bnc.markets.Load().(map[string]*bnMarket)
+	binanceMarkets := bnc.markets.Load().(map[string]*binanceMarket)
 	markets := make([]*Market, 0, 16)
 	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
-	for _, mkt := range bnMarkets {
-		markets = append(markets, mkt.dexMarkets(tokenIDs)...)
+	for _, mkt := range binanceMarkets {
+		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs)
+		markets = append(markets, dexMarkets...)
 	}
-
 	return markets, nil
 }
 
@@ -847,42 +1043,6 @@ func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string
 	return req, nil
 }
 
-func (bnc *binance) getListenID(ctx context.Context) (string, error) {
-	var resp struct {
-		ListenKey string `json:"listenKey"`
-	}
-	return resp.ListenKey, bnc.postAPI(ctx, "/api/v3/userDataStream", nil, nil, true, false, &resp)
-}
-
-type wsBalance struct {
-	Asset  string  `json:"a"`
-	Free   float64 `json:"f,string"`
-	Locked float64 `json:"l,string"`
-}
-
-type bncStreamUpdate struct {
-	Asset              string          `json:"a"`
-	EventType          string          `json:"e"`
-	ClientOrderID      string          `json:"c"`
-	CurrentOrderStatus string          `json:"X"`
-	Balances           []*wsBalance    `json:"B"`
-	BalanceDelta       float64         `json:"d,string"`
-	Filled             float64         `json:"z,string"`
-	QuoteFilled        float64         `json:"Z,string"`
-	OrderQty           float64         `json:"q,string"`
-	QuoteOrderQty      float64         `json:"Q,string"`
-	CancelledOrderID   string          `json:"C"`
-	E                  json.RawMessage `json:"E"`
-}
-
-func decodeStreamUpdate(b []byte) (*bncStreamUpdate, error) {
-	var msg *bncStreamUpdate
-	if err := json.Unmarshal(b, &msg); err != nil {
-		return nil, err
-	}
-	return msg, nil
-}
-
 func (bnc *binance) sendCexUpdateNotes() {
 	bnc.cexUpdatersMtx.RLock()
 	defer bnc.cexUpdatersMtx.RUnlock()
@@ -891,7 +1051,7 @@ func (bnc *binance) sendCexUpdateNotes() {
 	}
 }
 
-func (bnc *binance) handleOutboundAccountPosition(update *bncStreamUpdate) {
+func (bnc *binance) handleOutboundAccountPosition(update *binanceStreamUpdate) {
 	bnc.log.Tracef("Received outboundAccountPosition: %+v", update)
 	for _, bal := range update.Balances {
 		bnc.log.Tracef("balance: %+v", bal)
@@ -931,7 +1091,7 @@ func (bnc *binance) removeTradeUpdater(tradeID string) {
 	delete(bnc.tradeInfo, tradeID)
 }
 
-func (bnc *binance) handleExecutionReport(update *bncStreamUpdate) {
+func (bnc *binance) handleExecutionReport(update *binanceStreamUpdate) {
 	bnc.log.Tracef("Received executionReport: %+v", update)
 
 	status := update.CurrentOrderStatus
@@ -974,26 +1134,33 @@ func (bnc *binance) handleExecutionReport(update *bncStreamUpdate) {
 	}
 }
 
-func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
-	streamHandler := func(b []byte) {
-		u, err := decodeStreamUpdate(b)
-		if err != nil {
-			bnc.log.Errorf("Error unmarshaling user stream update: %v", err)
-			bnc.log.Errorf("Raw message: %s", string(b))
-			return
-		}
-		switch u.EventType {
-		case "outboundAccountPosition":
-			bnc.handleOutboundAccountPosition(u)
-		case "executionReport":
-			bnc.handleExecutionReport(u)
-		case "balanceUpdate":
-			// TODO: check if we need this.. is outbound account position enough?
-			bnc.log.Tracef("Received balanceUpdate: %s", string(b))
-		}
+func (bnc *binance) handleUserDataStreamUpdate(b []byte) {
+	bnc.log.Tracef("Received user data stream update: %s", string(b))
+
+	var msg *binanceStreamUpdate
+	if err := json.Unmarshal(b, &msg); err != nil {
+		bnc.log.Errorf("Error unmarshaling user data stream update: %v\nRaw message: %s", err, string(b))
+		return
 	}
 
+	switch msg.EventType {
+	case "outboundAccountPosition":
+		bnc.handleOutboundAccountPosition(msg)
+	case "executionReport":
+		bnc.handleExecutionReport(msg)
+	}
+}
+
+func (bnc *binance) getListenID(ctx context.Context) (string, error) {
+	var resp struct {
+		ListenKey string `json:"listenKey"`
+	}
+	return resp.ListenKey, bnc.postAPI(ctx, "/api/v3/userDataStream", nil, nil, true, false, &resp)
+}
+
+func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 	var listenKey string
+
 	newConn := func() (*dex.ConnectionMaster, error) {
 		listenKey, err = bnc.getListenID(ctx)
 		if err != nil {
@@ -1003,18 +1170,14 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 		hdr := make(http.Header)
 		hdr.Set("X-MBX-APIKEY", bnc.apiKey)
 		conn, err := comms.NewWsConn(&comms.WsCfg{
-			URL: bnc.wsURL + "/ws/" + listenKey,
-
-			// Is this necessary for user data stream??
+			URL:      bnc.wsURL + "/ws/" + listenKey,
 			PingWait: time.Minute * 4,
-
 			ReconnectSync: func() {
 				bnc.log.Debugf("Binance reconnected")
 			},
-			ConnectEventFunc: func(cs comms.ConnectionStatus) {},
-			Logger:           bnc.log.SubLogger("BNCWS"),
-			RawHandler:       streamHandler,
-			ConnectHeaders:   hdr,
+			Logger:         bnc.log.SubLogger("BNCWS"),
+			RawHandler:     bnc.handleUserDataStreamUpdate,
+			ConnectHeaders: hdr,
 		})
 		if err != nil {
 			return nil, err
@@ -1079,58 +1242,37 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 			}
 		}
 	}()
+
 	return nil
 }
 
 var subscribeID uint64
 
-type bncBookBinUpdate struct {
-	LastUpdateID uint64           `json:"lastUpdateId"`
-	Bids         [][2]json.Number `json:"bids"`
-	Asks         [][2]json.Number `json:"asks"`
+func binanceMktID(baseCfg, quoteCfg *bncAssetConfig) string {
+	return baseCfg.coin + quoteCfg.coin
 }
 
-type bncBookNote struct {
-	StreamName string            `json:"stream"`
-	Data       *bncBookBinUpdate `json:"data"`
+func marketDataStreamID(mktID string) string {
+	return strings.ToLower(mktID) + "@depth"
 }
 
-func bncParseBookUpdates(pts [][2]json.Number) ([]*bookBin, error) {
-	bins := make([]*bookBin, 0, len(pts))
-	for _, nums := range pts {
-		price, err := nums[0].Float64()
-		if err != nil {
-			return nil, fmt.Errorf("error parsing price: %v", err)
-		}
-		qty, err := nums[1].Float64()
-		if err != nil {
-			return nil, fmt.Errorf("error quantity qty: %v", err)
-		}
-		bins = append(bins, &bookBin{
-			Price: price,
-			Qty:   qty,
-		})
+// subUnsubDepth sends a subscription or unsubscription request to the market
+// data stream.
+// The marketStreamMtx MUST be held when calling this function.
+func (bnc *binance) subUnsubDepth(subscribe bool, mktStreamID string) error {
+	method := "SUBSCRIBE"
+	if !subscribe {
+		method = "UNSUBSCRIBE"
 	}
-	return bins, nil
-}
 
-func (bnc *binance) storeMarketStream(conn comms.WsConn) {
-	bnc.marketStreamMtx.Lock()
-	bnc.marketStream = conn
-	bnc.marketStreamMtx.Unlock()
-}
-
-func (bnc *binance) subUnsubDepth(conn comms.WsConn, method, slug string) error {
 	req := &struct {
 		Method string   `json:"method"`
 		Params []string `json:"params"`
 		ID     uint64   `json:"id"`
 	}{
 		Method: method,
-		Params: []string{
-			slug + "@depth20",
-		},
-		ID: atomic.AddUint64(&subscribeID, 1),
+		Params: []string{mktStreamID},
+		ID:     atomic.AddUint64(&subscribeID, 1),
 	}
 
 	b, err := json.Marshal(req)
@@ -1138,150 +1280,126 @@ func (bnc *binance) subUnsubDepth(conn comms.WsConn, method, slug string) error 
 		return fmt.Errorf("error marshaling subscription stream request: %w", err)
 	}
 
-	bnc.log.Debugf("Sending %v for market %v", method, slug)
-	if err := conn.SendRaw(b); err != nil {
+	bnc.log.Debugf("Sending %v for market %v", method, mktStreamID)
+	if err := bnc.marketStream.SendRaw(b); err != nil {
 		return fmt.Errorf("error sending subscription stream request: %w", err)
 	}
 
 	return nil
 }
 
-func (bnc *binance) stopMarketDataStream(slug string) (err error) {
-	bnc.marketStreamMtx.RLock()
-	conn := bnc.marketStream
-	bnc.marketStreamMtx.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("can't unsubscribe. no stream - %p", bnc)
+func (bnc *binance) handleMarketDataNote(b []byte) {
+	var note *binanceBookNote
+	if err := json.Unmarshal(b, &note); err != nil {
+		bnc.log.Errorf("Error unmarshaling book note: %v", err)
+		return
+	}
+	if note == nil || note.Data == nil {
+		bnc.log.Debugf("No data in market data update: %s", string(b))
+		return
 	}
 
-	var unsubscribe bool
+	parts := strings.Split(note.StreamName, "@")
+	if len(parts) != 2 || parts[1] != "depth" {
+		bnc.log.Errorf("Unknown stream name %q", note.StreamName)
+		return
+	}
+	slug := parts[0] // will be lower-case
+	mktID := strings.ToUpper(slug)
+
+	bnc.log.Infof("Received book update for %q", mktID)
 
 	bnc.booksMtx.Lock()
-	defer func() {
-		bnc.booksMtx.Unlock()
-		if unsubscribe {
-			if err := bnc.subUnsubDepth(conn, "UNSUBSCRIBE", slug); err != nil {
-				bnc.log.Errorf("subUnsubDepth(UNSUBSCRIBE): %v", err)
-			}
-		}
-	}()
+	defer bnc.booksMtx.Unlock()
 
-	book, found := bnc.books[slug]
-	if !found {
-		unsubscribe = true
+	book := bnc.books[mktID]
+	if book == nil {
+		bnc.log.Errorf("No book for stream %q", note.StreamName)
+		return
+	}
+	book.updateQueue <- note.Data
+}
+
+func (bnc *binance) getOrderbookSnapshot(ctx context.Context, mktSymbol string) (*binanceOrderbookSnapshot, error) {
+	v := make(url.Values)
+	v.Add("symbol", strings.ToUpper(mktSymbol))
+	v.Add("limit", "1000")
+	resp := &binanceOrderbookSnapshot{}
+	return resp, bnc.getAPI(ctx, "/api/v3/depth", v, false, false, resp)
+}
+
+// subscribeToAdditionalMarketDataStream is called when a new market is
+// subscribed to after the market data stream connection has already been
+// established.
+func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, baseID, quoteID uint32) error {
+	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
+	}
+
+	mktID := binanceMktID(baseCfg, quoteCfg)
+	streamID := marketDataStreamID(mktID)
+
+	bnc.booksMtx.Lock()
+	defer bnc.booksMtx.Unlock()
+
+	book, found := bnc.books[mktID]
+	if found {
+		book.mtx.Lock()
+		book.numSubscribers++
+		book.mtx.Unlock()
 		return nil
 	}
 
-	book.numSubscribers--
-	if book.numSubscribers == 0 {
-		unsubscribe = true
-		delete(bnc.books, slug)
+	bnc.books[mktID] = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, bnc.log)
+	book = bnc.books[mktID]
+
+	if err := bnc.subUnsubDepth(true, streamID); err != nil {
+		return fmt.Errorf("error subscribing to %s: %v", streamID, err)
 	}
+
+	go book.sync(ctx, func() (*binanceOrderbookSnapshot, error) {
+		return bnc.getOrderbookSnapshot(ctx, mktID)
+	})
 
 	return nil
 }
 
-func (bnc *binance) startMarketDataStream(ctx context.Context, baseSymbol, quoteSymbol string) (err error) {
-	slug := strings.ToLower(baseSymbol + quoteSymbol)
-
-	bnc.marketStreamMtx.Lock()
-	defer bnc.marketStreamMtx.Unlock()
-
-	// If a market stream already exists, just subscribe to this market.
-	if bnc.marketStream != nil {
+// connectToMarketDataStream is called when the first market is subscribed to.
+// It creates a connection to the market data stream and starts a goroutine
+// to reconnect every 12 hours, as Binance will close the stream every 24
+// hours. Additional markets are subscribed to by calling
+// subscribeToAdditionalMarketDataStream.
+func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quoteID uint32) error {
+	newConnection := func() (comms.WsConn, *dex.ConnectionMaster, error) {
 		bnc.booksMtx.Lock()
-		_, exists := bnc.books[slug]
-		if !exists {
-			bnc.books[slug] = newBNCBook()
-		} else {
-			bnc.books[slug].numSubscribers++
+		streamNames := make([]string, 0, len(bnc.books))
+		for mktID := range bnc.books {
+			streamNames = append(streamNames, marketDataStreamID(mktID))
 		}
 		bnc.booksMtx.Unlock()
 
-		if err := bnc.subUnsubDepth(bnc.marketStream, "SUBSCRIBE", slug); err != nil {
-			return fmt.Errorf("subUnsubDepth(SUBSCRIBE): %v", err)
-		}
-		return nil
-	}
-
-	streamHandler := func(b []byte) {
-		var note *bncBookNote
-		if err := json.Unmarshal(b, &note); err != nil {
-			bnc.log.Errorf("Error unmarshaling book note: %v", err)
-			return
-		}
-
-		if note == nil || note.Data == nil {
-			bnc.log.Debugf("No data in %q update: %+v", slug, note)
-			return
-		}
-
-		parts := strings.Split(note.StreamName, "@")
-		if len(parts) != 2 || parts[1] != "depth20" {
-			bnc.log.Errorf("Unknown stream name %q", note.StreamName)
-			return
-		}
-		slug = parts[0] // will be lower-case
-
-		bnc.log.Tracef("Received %d bids and %d asks in a book update for %s", len(note.Data.Bids), len(note.Data.Asks), slug)
-
-		bids, err := bncParseBookUpdates(note.Data.Bids)
-		if err != nil {
-			bnc.log.Errorf("Error parsing bid updates: %v", err)
-			return
-		}
-
-		asks, err := bncParseBookUpdates(note.Data.Asks)
-		if err != nil {
-			bnc.log.Errorf("Error parsing ask updates: %v", err)
-			return
-		}
-
-		bnc.booksMtx.Lock()
-		defer bnc.booksMtx.Unlock()
-		book := bnc.books[slug]
-		if book == nil {
-			bnc.log.Errorf("No book for stream %q", slug)
-			return
-		}
-
-		book.latestUpdate = time.Now().Unix()
-		book.asks = asks
-		book.bids = bids
-	}
-
-	newConn := func() (comms.WsConn, *dex.ConnectionMaster, error) {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, err
-		}
-		bnc.log.Debugf("Creating a new Binance market stream handler")
-		// Get a list of current subscriptions so we can restart them all.
-		bnc.booksMtx.Lock()
-		bnc.books[slug] = newBNCBook()
-		bnc.booksMtx.Unlock()
-
-		streamName := slug + "@depth20"
-		addr := fmt.Sprintf("%s/stream?streams=%s", bnc.wsURL, streamName)
-
+		addr := fmt.Sprintf("%s/stream?streams=%s", bnc.wsURL, strings.Join(streamNames, "/"))
 		// Need to send key but not signature
 		conn, err := comms.NewWsConn(&comms.WsCfg{
 			URL: addr,
-			// The websocket server will send a ping frame every 3 minutes. If the
-			// websocket server does not receive a pong frame back from the
-			// connection within a 10 minute period, the connection will be
-			// disconnected. Unsolicited pong frames are allowed.
+			// Binance Docs: The websocket server will send a ping frame every 3
+			// minutes. If the websocket server does not receive a pong frame
+			// back from the connection within a 10 minute period, the connection
+			// will be disconnected. Unsolicited pong frames are allowed.
 			PingWait: time.Minute * 4,
 			ReconnectSync: func() {
 				bnc.log.Debugf("Binance reconnected")
 			},
 			ConnectEventFunc: func(cs comms.ConnectionStatus) {},
 			Logger:           bnc.log.SubLogger("BNCBOOK"),
-			RawHandler:       streamHandler,
+			RawHandler:       bnc.handleMarketDataNote,
 		})
 		if err != nil {
 			return nil, nil, err
 		}
 
+		bnc.marketStream = conn
 		cm := dex.NewConnectionMaster(conn)
 		if err = cm.ConnectOnce(ctx); err != nil {
 			return nil, nil, fmt.Errorf("websocketHandler remote connect: %v", err)
@@ -1290,36 +1408,67 @@ func (bnc *binance) startMarketDataStream(ctx context.Context, baseSymbol, quote
 		return conn, cm, nil
 	}
 
-	conn, cm, err := newConn()
+	// Add the initial book to the books map
+	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
-		return fmt.Errorf("error initializing connection: %v", err)
+		return err
 	}
+	mktID := binanceMktID(baseCfg, quoteCfg)
+	bnc.booksMtx.Lock()
+	book := newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, bnc.log)
+	bnc.books[mktID] = book
+	bnc.booksMtx.Unlock()
+
+	// Create initial connection to the market data stream
+	conn, cm, err := newConnection()
+	if err != nil {
+		return fmt.Errorf("error connecting to market data stream : %v", err)
+	}
+
 	bnc.marketStream = conn
 
-	go func() {
-		defer func() {
-			bnc.storeMarketStream(nil)
-			if cm != nil {
-				cm.Disconnect()
-			}
-		}()
+	go book.sync(ctx, func() (*binanceOrderbookSnapshot, error) {
+		return bnc.getOrderbookSnapshot(ctx, mktID)
+	})
 
-		reconnect := time.After(time.Hour * 12)
+	// Start a goroutine to reconnect every 12 hours
+	go func() {
+		reconnect := func() error {
+			bnc.marketStreamMtx.Lock()
+			defer bnc.marketStreamMtx.Unlock()
+
+			oldCm := cm
+			conn, cm, err = newConnection()
+			if err != nil {
+				return err
+			}
+
+			if oldCm != nil {
+				oldCm.Disconnect()
+			}
+
+			bnc.marketStream = conn
+			return nil
+		}
+
+		reconnectTimer := time.After(time.Hour * 12)
 		for {
 			select {
-			case <-reconnect:
+			case <-reconnectTimer:
+				err = reconnect()
+				if err != nil {
+					bnc.log.Errorf("Error reconnecting: %v", err)
+					reconnectTimer = time.After(time.Second * 30)
+					continue
+				}
+				reconnectTimer = time.After(time.Hour * 12)
+			case <-ctx.Done():
+				bnc.marketStreamMtx.Lock()
+				bnc.marketStream = nil
+				bnc.marketStreamMtx.Unlock()
 				if cm != nil {
 					cm.Disconnect()
 				}
-				conn, cm, err = newConn()
-				if err != nil {
-					bnc.log.Errorf("Error reconnecting: %v", err)
-					reconnect = time.After(time.Second * 30)
-				} else {
-					bnc.storeMarketStream(conn)
-					reconnect = time.After(time.Hour * 12)
-				}
-			case <-ctx.Done():
 				return
 			}
 		}
@@ -1330,174 +1479,121 @@ func (bnc *binance) startMarketDataStream(ctx context.Context, baseSymbol, quote
 
 // UnsubscribeMarket unsubscribes from order book updates on a market.
 func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
-	baseCfg, err := bncAssetCfg(baseID)
+	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
+		return err
+	}
+	mktID := binanceMktID(baseCfg, quoteCfg)
+	streamID := marketDataStreamID(mktID)
+
+	bnc.marketStreamMtx.Lock()
+	defer bnc.marketStreamMtx.Unlock()
+
+	conn := bnc.marketStream
+	if conn == nil {
+		return fmt.Errorf("can't unsubscribe. no stream - %p", bnc)
 	}
 
-	quoteCfg, err := bncAssetCfg(quoteID)
-	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
+	var unsubscribe bool
+
+	bnc.booksMtx.Lock()
+	defer func() {
+		bnc.booksMtx.Unlock()
+
+		if unsubscribe {
+			if err := bnc.subUnsubDepth(false, streamID); err != nil {
+				bnc.log.Errorf("error unsubscribing from market data stream", err)
+			}
+		}
+	}()
+
+	book, found := bnc.books[mktID]
+	if !found {
+		unsubscribe = true
+		return nil
 	}
 
-	bnc.stopMarketDataStream(strings.ToLower(baseCfg.coin + quoteCfg.coin))
+	book.mtx.Lock()
+	defer book.mtx.Unlock()
+	book.numSubscribers--
+	if book.numSubscribers == 0 {
+		unsubscribe = true
+		delete(bnc.books, mktID)
+	}
+
 	return nil
 }
 
 // SubscribeMarket subscribes to order book updates on a market. This must
 // be called before calling VWAP.
 func (bnc *binance) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
-	baseCfg, err := bncAssetCfg(baseID)
-	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
+	bnc.marketStreamMtx.Lock()
+	defer bnc.marketStreamMtx.Unlock()
+
+	if bnc.marketStream == nil {
+		bnc.connectToMarketDataStream(ctx, baseID, quoteID)
 	}
 
-	quoteCfg, err := bncAssetCfg(quoteID)
-	if err != nil {
-		return fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
-	}
-
-	return bnc.startMarketDataStream(ctx, baseCfg.coin, quoteCfg.coin)
+	return bnc.subscribeToAdditionalMarketDataStream(ctx, baseID, quoteID)
 }
 
 // VWAP returns the volume weighted average price for a certain quantity
-// of the base asset on a market.
+// of the base asset on a market. SubscribeMarket must be called, and the
+// market must be synced before results can be expected.
 func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
-	fail := func(err error) (uint64, uint64, bool, error) {
+	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
+	if err != nil {
 		return 0, 0, false, err
 	}
+	mktID := binanceMktID(baseCfg, quoteCfg)
 
-	baseCfg, err := bncAssetCfg(baseID)
-	if err != nil {
-		return fail(fmt.Errorf("error getting asset cfg for %d: %w", baseID, err))
-	}
-
-	quoteCfg, err := bncAssetCfg(quoteID)
-	if err != nil {
-		return fail(fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err))
-	}
-
-	slug := strings.ToLower(baseCfg.coin + quoteCfg.coin)
-	var side []*bookBin
-	var latestUpdate int64
 	bnc.booksMtx.RLock()
-	book, found := bnc.books[slug]
-	if found {
-		latestUpdate = book.latestUpdate
-		if sell {
-			side = book.asks
-		} else {
-			side = book.bids
-		}
-	}
+	book, found := bnc.books[mktID]
 	bnc.booksMtx.RUnlock()
-	if side == nil {
-		return fail(fmt.Errorf("no book found for %s", slug))
+	if !found {
+		return 0, 0, false, fmt.Errorf("no book for market %s", mktID)
 	}
 
-	if latestUpdate < time.Now().Unix()-60 {
-		return fail(fmt.Errorf("book for %s is stale", slug))
-	}
-
-	remaining := qty
-	var weightedSum uint64
-	for _, bin := range side {
-		extrema = calc.MessageRateAlt(bin.Price, baseCfg.conversionFactor, quoteCfg.conversionFactor)
-		binQty := uint64(bin.Qty * float64(baseCfg.conversionFactor))
-		if binQty >= remaining {
-			filled = true
-			weightedSum += remaining * extrema
-			break
-		}
-		remaining -= binQty
-		weightedSum += binQty * extrema
-	}
-
-	if !filled {
-		return 0, 0, false, nil
-	}
-
-	return weightedSum / qty, extrema, true, nil
-}
-
-type binanceNetworkInfo struct {
-	AddressRegex            string  `json:"addressRegex"`
-	Coin                    string  `json:"coin"`
-	DepositEnable           bool    `json:"depositEnable"`
-	IsDefault               bool    `json:"isDefault"`
-	MemoRegex               string  `json:"memoRegex"`
-	MinConfirm              int     `json:"minConfirm"`
-	Name                    string  `json:"name"`
-	Network                 string  `json:"network"`
-	ResetAddressStatus      bool    `json:"resetAddressStatus"`
-	SpecialTips             string  `json:"specialTips"`
-	UnLockConfirm           int     `json:"unLockConfirm"`
-	WithdrawEnable          bool    `json:"withdrawEnable"`
-	WithdrawFee             float64 `json:"withdrawFee,string"`
-	WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
-	WithdrawMax             float64 `json:"withdrawMax,string"`
-	WithdrawMin             float64 `json:"withdrawMin,string"`
-	SameAddress             bool    `json:"sameAddress"`
-	EstimatedArrivalTime    int     `json:"estimatedArrivalTime"`
-	Busy                    bool    `json:"busy"`
-}
-
-type binanceCoinInfo struct {
-	Coin              string                `json:"coin"`
-	DepositAllEnable  bool                  `json:"depositAllEnable"`
-	Free              float64               `json:"free,string"`
-	Freeze            float64               `json:"freeze,string"`
-	Ipoable           float64               `json:"ipoable,string"`
-	Ipoing            float64               `json:"ipoing,string"`
-	IsLegalMoney      bool                  `json:"isLegalMoney"`
-	Locked            float64               `json:"locked,string"`
-	Name              string                `json:"name"`
-	Storage           float64               `json:"storage,string"`
-	Trading           bool                  `json:"trading"`
-	WithdrawAllEnable bool                  `json:"withdrawAllEnable"`
-	Withdrawing       float64               `json:"withdrawing,string"`
-	NetworkList       []*binanceNetworkInfo `json:"networkList"`
-}
-
-type bnMarket struct {
-	Symbol              string   `json:"symbol"`
-	Status              string   `json:"status"`
-	BaseAsset           string   `json:"baseAsset"`
-	BaseAssetPrecision  int      `json:"baseAssetPrecision"`
-	QuoteAsset          string   `json:"quoteAsset"`
-	QuoteAssetPrecision int      `json:"quoteAssetPrecision"`
-	OrderTypes          []string `json:"orderTypes"`
+	return book.vwap(!sell, qty)
 }
 
 // dexMarkets returns all the possible dex markets for this binance market.
 // A symbol represents a single market on the CEX, but tokens on the DEX
 // have a different assetID for each network they are on, therefore they will
 // match multiple markets as defined using assetID.
-func (s *bnMarket) dexMarkets(tokenIDs map[string][]uint32) []*Market {
+func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32) []*Market {
 	var baseAssetIDs, quoteAssetIDs []uint32
 
-	getAssetIDs := func(coin string) []uint32 {
-		symbol := strings.ToLower(coin)
-		assetIDs := make([]uint32, 0, 1)
+	getAssetIDs := func(binanceSymbol string) []uint32 {
+		dexSymbol := strings.ToLower(binanceSymbol)
+		if convertedDEXSymbol, found := binanceToDexSymbol[binanceSymbol]; found {
+			dexSymbol = strings.ToLower(convertedDEXSymbol)
+		}
 
-		// In some cases a token may also be a base asset. For example btc
-		// should return the btc ID as well as the ID of all wbtc tokens.
-		if assetID, found := dex.BipSymbolID(symbol); found {
+		// Binance does not differentiate between eth and weth like we do.
+		dexNonTokenSymbol := dexSymbol
+		if dexNonTokenSymbol == "weth" {
+			dexNonTokenSymbol = "eth"
+		}
+
+		assetIDs := make([]uint32, 0, 1)
+		if assetID, found := dex.BipSymbolID(dexNonTokenSymbol); found {
 			assetIDs = append(assetIDs, assetID)
 		}
-		if tokenIDs, found := tokenIDs[symbol]; found {
+
+		if tokenIDs, found := tokenIDs[dexSymbol]; found {
 			assetIDs = append(assetIDs, tokenIDs...)
 		}
 
 		return assetIDs
 	}
 
-	baseAssetIDs = getAssetIDs(s.BaseAsset)
+	baseAssetIDs = getAssetIDs(binanceBaseSymbol)
 	if len(baseAssetIDs) == 0 {
 		return nil
 	}
 
-	quoteAssetIDs = getAssetIDs(s.QuoteAsset)
+	quoteAssetIDs = getAssetIDs(binanceQuoteSymbol)
 	if len(quoteAssetIDs) == 0 {
 		return nil
 	}
@@ -1511,5 +1607,6 @@ func (s *bnMarket) dexMarkets(tokenIDs map[string][]uint32) []*Market {
 			})
 		}
 	}
+
 	return markets
 }

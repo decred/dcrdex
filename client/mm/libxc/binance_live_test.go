@@ -21,12 +21,12 @@ import (
 	_ "decred.org/dcrdex/client/asset/dcr"     // register dcr asset
 	_ "decred.org/dcrdex/client/asset/dgb"     // register dgb asset
 	_ "decred.org/dcrdex/client/asset/doge"    // register doge asset
+	_ "decred.org/dcrdex/client/asset/eth"     // register eth asset
 	_ "decred.org/dcrdex/client/asset/firo"    // register firo asset
 	_ "decred.org/dcrdex/client/asset/ltc"     // register ltc asset
+	_ "decred.org/dcrdex/client/asset/polygon" // register polygon asset
 	_ "decred.org/dcrdex/client/asset/zcl"     // register zcl asset
 	_ "decred.org/dcrdex/client/asset/zec"     // register zec asse
-	_ "decred.org/dcrdex/server/asset/eth"     // register eth asset
-	_ "decred.org/dcrdex/server/asset/polygon" // register polygon asset
 )
 
 var (
@@ -183,7 +183,7 @@ func TestMarkets(t *testing.T) {
 }
 
 func TestVWAP(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance(t, dex.Mainnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -191,31 +191,41 @@ func TestVWAP(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
+	err = bnc.SubscribeMarket(ctx, 60, 60001)
+	if err != nil {
+		t.Fatalf("failed to subscribe to market: %v", err)
+	}
+
 	err = bnc.SubscribeMarket(ctx, 60, 0)
 	if err != nil {
 		t.Fatalf("failed to subscribe to market: %v", err)
 	}
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
+
 	avg, extrema, filled, err := bnc.VWAP(60, 0, true, 2e9)
 	if err != nil {
 		t.Fatalf("VWAP failed: %v", err)
 	}
+	t.Logf("ethbtc - avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
 
-	t.Logf("avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
+	avg, extrema, filled, err = bnc.VWAP(60, 60001, true, 2e9)
+	if err != nil {
+		t.Fatalf("VWAP failed: %v", err)
+	}
+	t.Logf("ethusdc - avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
 
 	err = bnc.SubscribeMarket(ctx, 60, 0)
 	if err != nil {
 		t.Fatalf("failed to subscribe to market: %v", err)
 	}
-	time.Sleep(2 * time.Second)
 
 	avg, extrema, filled, err = bnc.VWAP(60, 0, true, 2e9)
 	if err != nil {
 		t.Fatalf("VWAP failed: %v", err)
 	}
 
-	t.Logf("avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
+	t.Logf("ethbtc - avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
 
 	bnc.UnsubscribeMarket(60, 0)
 
@@ -226,9 +236,14 @@ func TestVWAP(t *testing.T) {
 
 	t.Logf("avg: %v, extrema: %v, filled: %v", avg, extrema, filled)
 
-	bnc.UnsubscribeMarket(60, 0)
+	err = bnc.UnsubscribeMarket(60, 0)
 	if err != nil {
 		t.Fatalf("error unsubscribing market")
+	}
+
+	_, _, _, err = bnc.VWAP(60, 0, true, 2e9)
+	if err == nil {
+		t.Fatalf("error should be returned since all subscribers have unsubscribed")
 	}
 }
 
