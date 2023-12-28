@@ -72,9 +72,6 @@ cat > "${NODE_DIR}/eth.conf" <<EOF
 NetworkId = 42
 SyncMode = "${SYNC_MODE}"
 
-[Eth.Ethash]
-DatasetDir = "${NODE_DIR}/.ethash"
-
 [Node]
 DataDir = "${NODE_DIR}"
 AuthPort = ${AUTHRPC_PORT}
@@ -132,7 +129,7 @@ echo "Starting simnet ${NAME} node"
 if [ "${SYNC_MODE}" = "snap" ]; then
   # Start the eth node with the chain account unlocked, listening restricted to
   # localhost, and our custom configuration file.
-  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
+  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} " \
 	  "--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS} " \
 	  "--password ${GROUP_DIR}/password --light.serve 25 --datadir.ancient " \
 	  "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug --http --http.port " \
@@ -143,7 +140,7 @@ if [ "${SYNC_MODE}" = "snap" ]; then
 else
   # Start the eth node listening restricted to localhost and our custom
   # configuration file.
-  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover --allow-insecure-unlock --rpc.enabledeprecatedpersonal " \
+  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --allow-insecure-unlock --rpc.enabledeprecatedpersonal " \
 	  "--config ${NODE_DIR}/eth.conf --verbosity 5 ${HTTP_OPT} 2>&1 | tee " \
 	  "${NODE_DIR}/${NAME}.log" C-m
 fi
