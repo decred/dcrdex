@@ -85,7 +85,7 @@ class BrowserNotifier {
     }
   }
 
-  static sendDesktopNotification (title: string, body?: string) {
+  static async sendDesktopNotification (title: string, body?: string) {
     if (!BrowserNotifier.ntfnPermissionGranted()) return
     const ntfn = new window.Notification(title, {
       body: body,
@@ -108,14 +108,17 @@ class OSDesktopNotifier {
   }
 
   static async requestNtfnPermission (): Promise<void> {
-    OSDesktopNotifier.sendDesktopNotification(intl.prep(intl.ID_BROWSER_NTFN_ENABLED))
+    await OSDesktopNotifier.sendDesktopNotification(intl.prep(intl.ID_BROWSER_NTFN_ENABLED))
     return Promise.resolve()
   }
 
   static async sendDesktopNotification (title: string, body?: string): Promise<void> {
-    if (!desktopNtfnSettings.browserNtfnEnabled) return
-    if (window.webkit) await window.webkit.messageHandlers.dexcHandler.postMessage(['sendOSNotification', title, body]) // See: client/cmd/dexc-desktop/app_darwin.go#L673-#L697.
-    else await window.sendOSNotification(title, body) // this calls a function exported via webview.Bind()
+    // webview/linux or webview/windows
+    if (window.isWebview) await window.sendOSNotification(title, body)
+    // webkit/darwin
+    // See: client/cmd/dexc-desktop/app_darwin.go#L673-#L697
+    else if (window.webkit) await window.webkit.messageHandlers.dexcHandler.postMessage(['sendOSNotification', title, body])
+    else console.error('sendDesktopNotification: unknown environment')
   }
 }
 
@@ -128,9 +131,9 @@ function isWebview (): boolean {
 // the appropriate notifier accordingly.
 export const Notifier = isWebview() ? OSDesktopNotifier : BrowserNotifier
 
-export function desktopNotify (note: CoreNote) {
+export async function desktopNotify (note: CoreNote) {
   if (!desktopNtfnSettings.browserNtfnEnabled || !desktopNtfnSettings[note.type]) return
-  Notifier.sendDesktopNotification(note.subject, note.details)
+  await Notifier.sendDesktopNotification(note.subject, note.details)
 }
 
 export function fetchDesktopNtfnSettings (): DesktopNtfnSetting {
