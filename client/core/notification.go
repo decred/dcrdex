@@ -388,6 +388,7 @@ const (
 	TopicOrderRetired         Topic = "OrderRetired"
 	TopicAsyncOrderFailure    Topic = "AsyncOrderFailure"
 	TopicAsyncOrderSubmitted  Topic = "AsyncOrderSubmitted"
+	TopicOrderQuantityTooHigh Topic = "OrderQuantityTooHigh"
 )
 
 func newOrderNote(topic Topic, subject, details string, severity db.Severity, corder *Order) *OrderNote {
