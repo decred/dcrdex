@@ -309,8 +309,8 @@ func walletConfig(maxLots, maxActiveOrds int, sell bool, midGap uint64) (baseCoi
 	minBaseQty = maxOrders * lotSize
 	minQuoteQty = calc.BaseToQuote(midGap, minBaseQty)
 	// Ensure enough for registration fees.
-	minBaseQty += 2e8
-	minQuoteQty += 2e8
+	minBaseQty += 50e8
+	minQuoteQty += 50e8
 	quoteCoins, baseCoins = 1, 1
 	if sell {
 		baseCoins = numCoins

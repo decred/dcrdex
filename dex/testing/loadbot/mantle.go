@@ -734,10 +734,11 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 			Type:    "dogecoindRPC",
 			AssetID: dogeID,
 			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
+				"walletname":   name,
+				"rpcuser":      "user",
+				"rpcpassword":  "pass",
+				"rpcport":      port,
+				"feeratelimit": "40000",
 			},
 		}
 	case dgb:

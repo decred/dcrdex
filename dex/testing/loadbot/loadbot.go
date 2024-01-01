@@ -735,8 +735,8 @@ func symmetricWalletConfig(numCoins int, midGap uint64) (
 	minBaseQty = uint64(maxOrderLots) * uint64(numCoins) * lotSize
 	minQuoteQty = calc.BaseToQuote(midGap, minBaseQty)
 	// Ensure enough for registration fees.
-	minBaseQty += 2e8
-	minQuoteQty += 2e8
+	minBaseQty += 50e8
+	minQuoteQty += 50e8
 	// eth fee estimation calls for more reserves.
 	// TODO: polygon and tokens
 	if quoteSymbol == eth {
