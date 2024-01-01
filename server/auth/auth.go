@@ -153,22 +153,29 @@ func (client *clientInfo) pruneBonds(lockTimeThresh int64) (pruned []*db.Bond, b
 		return
 	}
 
-	var n int
+	pruned = make([]*db.Bond, 0, len(client.bonds))
+	expiredBondsInfo := make([]string, 0) // for logging
+	activeCount := 0
+
 	for _, bond := range client.bonds {
-		if bond.LockTime >= lockTimeThresh { // not expired
-			if len(pruned) > 0 /* n < i */ { // a prior bond was removed, must move this element up in the slice
-				client.bonds[n] = bond
-			}
-			n++
-			bondTier += int64(bond.Strength)
+		if bond.LockTime < lockTimeThresh { // bond is expired
+			expiredBondsInfo = append(expiredBondsInfo, fmt.Sprintf("Expiring user %v bond %v (%s)", client.acct.ID, coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID)))
+			pruned = append(pruned, bond)
 			continue
 		}
-		log.Infof("Expiring user %v bond %v (%s)", client.acct.ID,
-			coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID))
-		pruned = append(pruned, bond)
-		// n not incremented, next live bond shifts up
+
+		client.bonds[activeCount] = bond
+		bondTier += int64(bond.Strength)
+		activeCount++
+
 	}
-	client.bonds = client.bonds[:n] // no-op if none expired
+
+	// Trim client.bonds to only active bonds
+	client.bonds = client.bonds[:activeCount]
+
+	for _, info := range expiredBondsInfo {
+		log.Infof(info)
+	}
 
 	return
 }
