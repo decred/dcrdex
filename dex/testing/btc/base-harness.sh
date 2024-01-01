@@ -33,6 +33,16 @@ WAIT="wait-for ${SYMBOL}"
 
 SESSION="${SYMBOL}-harness"
 
+deprecateddbd () {
+        if [ $1 = false ] && [ "$VERSION_26_TEMP_DEPRICATED_DBD" ]; then
+                descs="-deprecatedrpc=create_bdb"
+        else
+                descs=""
+        fi
+
+        echo "$descs"
+}
+
 export SHELL=$(which bash)
 
 ################################################################################
@@ -101,7 +111,7 @@ tmux send-keys -t $SESSION:0 "set +o history" C-m
 tmux send-keys -t $SESSION:0 "cd ${ALPHA_DIR}" C-m
 echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
-  -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
+  -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} $(deprecateddbd $ALPHA_DESCRIPTOR_WALLET) \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
   -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
@@ -117,7 +127,7 @@ tmux send-keys -t $SESSION:1 "set +o history" C-m
 tmux send-keys -t $SESSION:1 "cd ${BETA_DIR}" C-m
 
 echo "Starting simnet beta node"
-tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
+tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass $(deprecateddbd $BETA_DESCRIPTOR_WALLET)\
   -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
