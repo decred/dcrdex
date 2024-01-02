@@ -21,6 +21,8 @@ export DELTA_WALLET_SEED="cURsyTZ8icuTHwWxSfTC2Geu2F6dMRtnzt1gvSaxHdc9Zf6eviJN"
 export DELTA_ADDRESS="bcrt1q4clywna5re22qh9mexqty8u8mqvhjh8cwhp5ms"
 export EXTRA_ARGS="--blockfilterindex --peerblockfilters --rpcbind=0.0.0.0 --rpcallowip=0.0.0.0/0"
 export CREATE_DEFAULT_WALLET="1"
+export VERSION_26_TEMP_DEPRICATED_DBD="1"
+
 
 # The new-wallet script creates a new wallet with keys (not blank), and no
 # passphrase. $1 is the node to create the wallet on, $2 is the wallet

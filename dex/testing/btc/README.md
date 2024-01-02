@@ -1,7 +1,4 @@
 # BTC Simnet Test Harness
-
-You must have `bitcoind` and `bitcoin-cli` in `PATH` to use the harness.
-
 The harness script will create three connected regnet nodes and wallets, and
 then mine some blocks and send some BTC around. The result is a set of wallets
 named **alpha**, **beta**, and **gamma**, each with slightly different
@@ -18,6 +15,13 @@ confirmations.
 unlocking for sensitive operations. Gamma has no coinbase-spending outputs,
 but has a number of UTXOs of varying size and confirmation count.
 **The gamma wallet password is "abc"**.
+
+## Dependencies
+
+You must have [bitcoind and bitcoin-cli](https://github.com/bitcoin/bitcoin/releases)
+in `PATH` to use the harness. bitcoin v26.0.0+ is recommended.
+
+It also requires tmux.
 
 ## Harness control scripts
 
