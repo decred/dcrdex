@@ -167,16 +167,16 @@ var customSPVWalletConstructors = map[string]btc.CustomSPVWalletConstructor{}
 // a btc.BTCWallet implementation that the ExchangeWalletSPV will use in place
 // of the default spv wallet implementation. External consumers can use this
 // function to provide alternative btc.BTCWallet implementations, and must do so
-// before attempting to create an ExchangeWalletSPV instance of this type.
-func RegisterCustomSPVWallet(constructor btc.CustomSPVWalletConstructor, def *asset.WalletDefinition) error {
+// before attempting to create an ExchangeWalletSPV instance of this type. It'll
+// panic if callers try to register a wallet twice.
+func RegisterCustomSPVWallet(constructor btc.CustomSPVWalletConstructor, def *asset.WalletDefinition) {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
-			return fmt.Errorf("(%q): %w", def.Type, asset.ErrWalletTypeAlreadyRegistered)
+			panic(fmt.Sprintf("wallet type (%q) is already registered", def.Type))
 		}
 	}
 	customSPVWalletConstructors[def.Type] = constructor
 	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
-	return nil
 }
 
 // NewWallet is the exported constructor by which the DEX will import the

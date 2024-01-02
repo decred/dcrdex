@@ -212,13 +212,12 @@ const (
 	// ErrSwapNotInitiated most likely means that a swap using a contract has
 	// not yet been mined. There is no guarantee that the swap will be mined
 	// in the future.
-	ErrSwapNotInitiated            = dex.ErrorKind("swap not yet initiated")
-	CoinNotFoundError              = dex.ErrorKind("coin not found")
-	ErrRequestTimeout              = dex.ErrorKind("request timeout")
-	ErrConnectionDown              = dex.ErrorKind("wallet not connected")
-	ErrNotImplemented              = dex.ErrorKind("not implemented")
-	ErrUnsupported                 = dex.ErrorKind("unsupported")
-	ErrWalletTypeAlreadyRegistered = dex.ErrorKind("wallet type already registered")
+	ErrSwapNotInitiated = dex.ErrorKind("swap not yet initiated")
+	CoinNotFoundError   = dex.ErrorKind("coin not found")
+	ErrRequestTimeout   = dex.ErrorKind("request timeout")
+	ErrConnectionDown   = dex.ErrorKind("wallet not connected")
+	ErrNotImplemented   = dex.ErrorKind("not implemented")
+	ErrUnsupported      = dex.ErrorKind("unsupported")
 	// ErrSwapRefunded is returned from ConfirmRedemption when the swap has
 	// been refunded before the user could redeem.
 	ErrSwapRefunded = dex.ErrorKind("swap refunded")
