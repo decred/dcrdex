@@ -235,6 +235,7 @@ type AuthManager struct {
 	checkBond      BondCoinChecker // fidelity bond amount, lockTime, acct, and confs
 	miaUserTimeout time.Duration
 	unbookFun      func(account.AccountID)
+	route          func(route string, handler comms.MsgHandler)
 
 	bondExpiry time.Duration // a bond is expired when time.Until(lockTime) < bondExpiry
 	bondAssets map[uint32]*msgjson.BondAsset
@@ -374,6 +375,8 @@ type Config struct {
 	// satisfied by a secp256k1.PrivateKey.
 	Signer Signer
 
+	Route func(route string, handler comms.MsgHandler)
+
 	// BondExpiry is the time in seconds left until a bond's LockTime is reached
 	// that defines when a bond is considered expired.
 	BondExpiry uint64
@@ -443,6 +446,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		checkBond:        cfg.BondChecker,  // e.g. dcr's BondCoin
 		miaUserTimeout:   cfg.MiaUserTimeout,
 		unbookFun:        cfg.UserUnbooker,
+		route:            cfg.Route,
 		feeAddress:       cfg.FeeAddress,
 		feeAssets:        feeAssets,
 		freeCancels:      cfg.FreeCancels,
@@ -460,13 +464,14 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		txDataSources:    cfg.TxDataSources,
 	}
 
-	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
-	comms.Route(msgjson.RegisterRoute, auth.handleRegister)   // DEPRECATED (V0PURGE)
-	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee) // DEPRECATED (V0PURGE)
-	comms.Route(msgjson.PostBondRoute, auth.handlePostBond)
-	comms.Route(msgjson.PreValidateBondRoute, auth.handlePreValidateBond)
-	comms.Route(msgjson.MatchStatusRoute, auth.handleMatchStatus)
-	comms.Route(msgjson.OrderStatusRoute, auth.handleOrderStatus)
+	// Unauthenticated
+	cfg.Route(msgjson.ConnectRoute, auth.handleConnect)
+	cfg.Route(msgjson.RegisterRoute, auth.handleRegister)   // DEPRECATED (V0PURGE)
+	cfg.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee) // DEPRECATED (V0PURGE)
+	cfg.Route(msgjson.PostBondRoute, auth.handlePostBond)
+	cfg.Route(msgjson.PreValidateBondRoute, auth.handlePreValidateBond)
+	cfg.Route(msgjson.MatchStatusRoute, auth.handleMatchStatus)
+	cfg.Route(msgjson.OrderStatusRoute, auth.handleOrderStatus)
 	return auth
 }
 
@@ -615,7 +620,7 @@ func (auth *AuthManager) Run(ctx context.Context) {
 // associated clientInfo, and sending the message on the current comms.Link for
 // the client.
 func (auth *AuthManager) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
-	comms.Route(route, func(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	auth.route(route, func(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 		client := auth.conn(conn)
 		if client == nil {
 			return &msgjson.Error{

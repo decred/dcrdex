@@ -8,3 +8,11 @@ func ReverseSlice[T any](s []T) {
 		s[i], s[j] = s[j], s[i]
 	}
 }
+
+func CopyMap[K comparable, V any](m map[K]V) map[K]V {
+	r := make(map[K]V, len(m))
+	for k, v := range m {
+		r[k] = v
+	}
+	return r
+}

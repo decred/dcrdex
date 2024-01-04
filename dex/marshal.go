@@ -59,6 +59,10 @@ func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {
 	return err
 }
 
+func (b Bytes) MarshalBinary() (data []byte, err error) {
+	return b, nil
+}
+
 // Equal is true if otherB has identical []byte contents to the Bytes.
 func (b Bytes) Equal(otherB []byte) bool {
 	return bytes.Equal(b, otherB)

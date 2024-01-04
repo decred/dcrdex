@@ -11,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 )
 
@@ -57,7 +58,7 @@ func newTestRig() *testRig {
 	db := new(TDBSource)
 	return &testRig{
 		db:  db,
-		api: NewDataAPI(db),
+		api: NewDataAPI(db, func(route string, handler comms.HTTPHandler) {}),
 	}
 }
 

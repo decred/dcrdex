@@ -157,7 +157,7 @@ func (c *WSLink) send(msg *msgjson.Message, writeErr chan<- error) error {
 func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	msg, err := msgjson.NewResponse(id, nil, rpcErr)
 	if err != nil {
-		c.log.Errorf("SendError: failed to create message: %v", err)
+		c.log.Errorf("SendError: failed to create error message %q: %v", rpcErr.Message, err)
 	}
 	err = c.Send(msg)
 	if err != nil {
@@ -234,6 +234,7 @@ func (c *WSLink) handleMessage(msg *msgjson.Message) {
 			}
 		}
 	}()
+
 	rpcErr := c.handler(msg)
 	if rpcErr != nil {
 		// TODO: figure out how to fix this not making sense when the msg is
@@ -287,8 +288,8 @@ out:
 			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "failed to parse message"))
 			continue
 		}
-		if msg.ID == 0 { // also covers msgBytes []byte("null")
-			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero"))
+		if (msg.Type == msgjson.Request || msg.Type == msgjson.Response) && msg.ID == 0 { // also covers msgBytes []byte("null")
+			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "request and response ids cannot be zero"))
 			continue
 		}
 		c.handleMessage(msg)
@@ -408,7 +409,6 @@ func (c *WSLink) outHandler(ctx context.Context) {
 				// len(outQueue) may be longer when we get back here, but only
 				// this loop reduces it.
 				mtx.Unlock()
-
 				write(sd)
 			}
 		}

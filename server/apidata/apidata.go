@@ -64,7 +64,7 @@ type DataAPI struct {
 }
 
 // NewDataAPI is the constructor for a new DataAPI.
-func NewDataAPI(dbSrc DBSource) *DataAPI {
+func NewDataAPI(dbSrc DBSource, registerHTTP func(route string, handler comms.HTTPHandler)) *DataAPI {
 	s := &DataAPI{
 		db:             dbSrc,
 		epochDurations: make(map[string]uint64),
@@ -73,9 +73,9 @@ func NewDataAPI(dbSrc DBSource) *DataAPI {
 	}
 
 	if atomic.CompareAndSwapUint32(&started, 0, 1) {
-		comms.RegisterHTTP(msgjson.SpotsRoute, s.handleSpots)
-		comms.RegisterHTTP(msgjson.CandlesRoute, s.handleCandles)
-		comms.RegisterHTTP(msgjson.OrderBookRoute, s.handleOrderBook)
+		registerHTTP(msgjson.SpotsRoute, s.handleSpots)
+		registerHTTP(msgjson.CandlesRoute, s.handleCandles)
+		registerHTTP(msgjson.OrderBookRoute, s.handleOrderBook)
 	}
 	return s
 }

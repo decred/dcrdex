@@ -4,7 +4,9 @@
 package comms
 
 import (
+	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex/msgjson"
@@ -40,6 +42,7 @@ type Link interface {
 	// Request sends the Request-type msgjson.Message to the client and registers
 	// a handler for the response.
 	Request(msg *msgjson.Message, f func(Link, *msgjson.Message), expireTime time.Duration, expire func()) error
+	RequestRaw(msgID uint64, rawMsg []byte, f func(Link, *msgjson.Message), expireTime time.Duration, expire func()) error
 	// Banish closes the link and quarantines the client.
 	Banish()
 	// Disconnect closes the link.
@@ -48,6 +51,10 @@ type Link interface {
 	// becomes authorized. Request handlers must be run synchronous with other
 	// reads or it will be a data race with the link's input loop.
 	Authorized()
+	// SetCustomID
+	SetCustomID(string)
+	// CustomID
+	CustomID() string
 }
 
 // When the DEX sends a request to the client, a responseHandler is created
@@ -61,7 +68,8 @@ type responseHandler struct {
 type wsLink struct {
 	*ws.WSLink
 	// The id is the unique identifier assigned to this client.
-	id uint64
+	id       uint64
+	customID atomic.Value
 	// For DEX-originating requests, the response handler is mapped to the
 	// resquest ID.
 	reqMtx       sync.Mutex
@@ -78,11 +86,11 @@ type wsLink struct {
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(addr string, conn ws.Connection, wsLimiter *routeLimiter, limitData func() (int, error)) *wsLink {
+func (s *Server) newWSLink(addr string, conn ws.Connection, wsLimiter *routeLimiter, limitData func() (int, error)) *wsLink {
 	var c *wsLink
 	c = &wsLink{
 		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
-			return handleMessage(c, msg)
+			return s.handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
 		dataMeter:    limitData,
@@ -102,6 +110,17 @@ func (c *wsLink) ID() uint64 {
 	return c.id
 }
 
+func (c *wsLink) SetCustomID(id string) {
+	c.customID.Store(id)
+}
+
+func (c *wsLink) CustomID() string {
+	if s := c.customID.Load(); s != nil {
+		return s.(string)
+	}
+	return ""
+}
+
 // Addr returns the string-encoded IP address.
 func (c *wsLink) Addr() string {
 	return c.WSLink.Addr()
@@ -117,7 +136,7 @@ func (c *wsLink) Authorized() {
 }
 
 // The WSLink.handler for WSLink.inHandler
-func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
+func (s *Server) handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 	switch msg.Type {
 	case msgjson.Request:
 		if msg.ID == 0 {
@@ -125,7 +144,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 		// Look for a registered WebSocket route handler. This excludes the data
 		// API routes, which are part of the httpHandler map.
-		handler := RouteHandler(msg.Route)
+		handler := s.rpcRoutes[msg.Route]
 		if handler != nil {
 			if !c.wsLimiter.allow(msg.Route) {
 				return msgjson.NewError(msgjson.TooManyRequestsError, "too many requests to "+msg.Route)
@@ -135,7 +154,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 
 		// Look for an HTTP handler.
-		httpHandler := httpRoutes[msg.Route]
+		httpHandler := s.httpRoutes[msg.Route]
 		if httpHandler == nil {
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
 		}
@@ -181,6 +200,17 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 		return nil
 
+	case msgjson.Notification:
+		// Look for a registered WebSocket route handler. This excludes the data
+		// API routes, which are part of the httpHandler map.
+		handler := s.rpcRoutes[msg.Route]
+		if handler != nil {
+			if !c.wsLimiter.allow(msg.Route) {
+				return msgjson.NewError(msgjson.TooManyRequestsError, "too many requests to "+msg.Route)
+			}
+			// Handle the request.
+			return handler(c, msg)
+		}
 	case msgjson.Response:
 		// NOTE: In the event of an error, we respond to a response, which makes
 		// no sense. A new mechanism is needed with appropriate client handling.
@@ -231,22 +261,36 @@ func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message), exp
 // is equal to the response Message.ID passed to the handler (see the
 // msgjson.Response case in handleMessage).
 func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Message), expireTime time.Duration, expire func()) error {
+	rawMsg, err := json.Marshal(msg)
+	if err != nil {
+		log.Errorf("Failed to marshal message: %v", err)
+		return err
+	}
+
+	err = c.RequestRaw(msg.ID, rawMsg, f, expireTime, expire)
+	if err != nil {
+		log.Debugf("(*wsLink).Request(route '%s') Send error, unregistering msg ID %d handler: %v",
+			msg.Route, msg.ID, err)
+	}
+	return err
+}
+
+func (c *wsLink) RequestRaw(msgID uint64, rawMsg []byte, f func(conn Link, msg *msgjson.Message), expireTime time.Duration, expire func()) error {
 	// log.Tracef("Registering '%s' request ID %d (wsLink)", msg.Route, msg.ID)
-	c.logReq(msg.ID, f, expireTime, expire)
+	c.logReq(msgID, f, expireTime, expire)
 	// Send errors are (1) connection is already down or (2) json marshal
 	// failure. Any connection write errors just cause the link to quit as the
 	// goroutine that actually does the write does not relay any errors back to
 	// the caller. The request will eventually expire when no response comes.
 	// This is not ideal - we may consider an error callback, or different
 	// Send/SendNow/QueueSend functions.
-	err := c.Send(msg)
+	err := c.SendRaw(rawMsg)
 	if err != nil {
 		// Neither expire nor the handler should run. Stop the expire timer
 		// created by logReq and delete the response handler it added. The
 		// caller receives a non-nil error to deal with it.
-		log.Debugf("(*wsLink).Request(route '%s') Send error, unregistering msg ID %d handler: %v",
-			msg.Route, msg.ID, err)
-		c.respHandler(msg.ID) // drop the removed responseHandler
+
+		c.respHandler(msgID) // drop the removed responseHandler
 	}
 	return err
 }

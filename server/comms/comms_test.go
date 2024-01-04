@@ -32,13 +32,19 @@ var (
 )
 
 func newServer() *Server {
-	return &Server{
+	s := &Server{
 		clients:     make(map[uint64]*wsLink),
 		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
 		v6Prefixes:  make(map[dex.IPKey]int),
 		quarantine:  make(map[dex.IPKey]time.Time),
 		dataEnabled: 1,
+		rpcRoutes:   make(map[string]MsgHandler),
+		httpRoutes:  make(map[string]HTTPHandler),
 	}
+	for _, route := range []string{msgjson.ConfigRoute, msgjson.SpotsRoute, msgjson.CandlesRoute, msgjson.OrderBookRoute} {
+		s.RegisterHTTP(route, func(any) (any, error) { return nil, nil })
+	}
+	return s
 }
 
 func giveItASecond(f func() bool) bool {
@@ -261,18 +267,10 @@ func newTestDEXClient(addr string, rootCAs *x509.CertPool) (*websocket.Conn, err
 	return conn, nil
 }
 
-func resetRPCRoutes() {
-	rpcRoutes = make(map[string]MsgHandler)
-}
-
 func TestMain(m *testing.M) {
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
-	// Register dummy handlers for the HTTP routes.
-	for _, route := range []string{msgjson.ConfigRoute, msgjson.SpotsRoute, msgjson.CandlesRoute, msgjson.OrderBookRoute} {
-		RegisterHTTP(route, func(any) (any, error) { return nil, nil })
-	}
 	UseLogger(tLogger)
 	os.Exit(m.Run())
 }
@@ -284,8 +282,8 @@ func TestRoute_PanicsEmptyString(t *testing.T) {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
-	defer resetRPCRoutes()
-	Route("", dummyRPCHandler)
+	s := newServer()
+	s.Route("", dummyRPCHandler)
 }
 
 // methods cannot be registered more than once.
@@ -295,15 +293,13 @@ func TestRoute_PanicsDoubleRegistry(t *testing.T) {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
-	defer resetRPCRoutes()
-	Route("somemethod", dummyRPCHandler)
-	Route("somemethod", dummyRPCHandler)
+	s := newServer()
+	s.Route("somemethod", dummyRPCHandler)
+	s.Route("somemethod", dummyRPCHandler)
 }
 
 // Test the server with a stub for the client connections.
 func TestClientRequests(t *testing.T) {
-	defer resetRPCRoutes()
-
 	server := newServer()
 	var wg sync.WaitGroup
 	defer func() {
@@ -329,7 +325,7 @@ func TestClientRequests(t *testing.T) {
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
 	srvChan := make(chan any)
-	Route("getclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
+	server.Route("getclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
 		client, ok := c.(*wsLink)
 		if !ok {
 			t.Fatalf("failed to assert client type")
@@ -344,7 +340,7 @@ func TestClientRequests(t *testing.T) {
 	}
 
 	// Check request parses the request to a map of strings.
-	Route("checkrequest", func(c Link, msg *msgjson.Message) *msgjson.Error {
+	server.Route("checkrequest", func(c Link, msg *msgjson.Message) *msgjson.Error {
 		if string(msg.Payload) != `{"key":"value"}` {
 			t.Fatalf("wrong request: %s", string(msg.Payload))
 		}
@@ -357,16 +353,16 @@ func TestClientRequests(t *testing.T) {
 	// 'checkinvalid' should never be run, since the request has invalid
 	// formatting.
 	var passed bool
-	Route("checkinvalid", func(_ Link, _ *msgjson.Message) *msgjson.Error {
+	server.Route("checkinvalid", func(_ Link, _ *msgjson.Message) *msgjson.Error {
 		passed = true
 		return nil
 	})
 	// 'error' returns an Error.
-	Route("error", func(_ Link, _ *msgjson.Message) *msgjson.Error {
+	server.Route("error", func(_ Link, _ *msgjson.Message) *msgjson.Error {
 		return msgjson.NewError(550, "somemessage")
 	})
 	// 'ban' quarantines the user using the RPCQuarantineClient error code.
-	Route("ban", func(c Link, req *msgjson.Message) *msgjson.Error {
+	server.Route("ban", func(c Link, req *msgjson.Message) *msgjson.Error {
 		rpcErr := msgjson.NewError(msgjson.RPCQuarantineClient, "user quarantined")
 		errMsg, _ := msgjson.NewResponse(req.ID, nil, rpcErr)
 		err := c.Send(errMsg)
@@ -377,7 +373,7 @@ func TestClientRequests(t *testing.T) {
 		return nil
 	})
 	var httpSeen uint32
-	RegisterHTTP("httproute", func(thing any) (any, error) {
+	server.RegisterHTTP("httproute", func(thing any) (any, error) {
 		atomic.StoreUint32(&httpSeen, 1)
 		srvChan <- nil
 		return struct{}{}, nil
@@ -536,8 +532,6 @@ func TestClientRequests(t *testing.T) {
 }
 
 func TestClientResponses(t *testing.T) {
-	defer resetRPCRoutes()
-
 	server := newServer()
 	var client *wsLink
 	var conn *wsConnStub
@@ -547,7 +541,7 @@ func TestClientResponses(t *testing.T) {
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
 	srvChan := make(chan any)
-	Route("grabclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
+	server.Route("grabclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
 		client, ok := c.(*wsLink)
 		if !ok {
 			t.Fatalf("failed to assert client type")
@@ -629,6 +623,7 @@ func TestClientResponses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("error decoding last message (%s): %v", tag, err)
 		}
+
 		resp, err := msg.Response()
 		if err != nil {
 			t.Fatalf("error decoding response (%s): %v", tag, err)
@@ -638,8 +633,9 @@ func TestClientResponses(t *testing.T) {
 		}
 	}
 
-	// Test an invalid id type.
+	// Test an invalid id.
 	sendReplace(t, conn, makeResp(1, `{}`), `:1`, `:0`)
+
 	checkParseError("invalid id")
 
 	// Send an invalid payload.
@@ -677,8 +673,6 @@ func TestClientResponses(t *testing.T) {
 }
 
 func TestOnline(t *testing.T) {
-	defer resetRPCRoutes()
-
 	tempDir := t.TempDir()
 
 	keyPath := filepath.Join(tempDir, "rpc.key")
@@ -700,7 +694,7 @@ func TestOnline(t *testing.T) {
 	type okresult struct {
 		OK bool `json:"ok"`
 	}
-	Route("ok", func(c Link, msg *msgjson.Message) *msgjson.Error {
+	server.Route("ok", func(c Link, msg *msgjson.Message) *msgjson.Error {
 		resp, err := msgjson.NewResponse(msg.ID, &okresult{OK: true}, nil)
 		if err != nil {
 			return msgjson.NewError(500, err.Error())
@@ -713,7 +707,7 @@ func TestOnline(t *testing.T) {
 	})
 	// The 'banuser' route quarantines the user.
 	banChan := make(chan any)
-	Route("banuser", func(c Link, req *msgjson.Message) *msgjson.Error {
+	server.Route("banuser", func(c Link, req *msgjson.Message) *msgjson.Error {
 		rpcErr := msgjson.NewError(msgjson.RPCQuarantineClient, "test quarantine")
 		msg, _ := msgjson.NewResponse(req.ID, nil, rpcErr)
 		err := c.Send(msg)
@@ -914,7 +908,7 @@ func TestHTTPRateLimiter(t *testing.T) {
 	tHandler := &tHTTPHandler{}
 	s := Server{dataEnabled: 1}
 
-	f := s.limitRate(tHandler)
+	f := s.LimitRate(tHandler)
 	ip := "ip"
 	req := &http.Request{RemoteAddr: ip}
 	recorder := httptest.NewRecorder()
@@ -934,8 +928,6 @@ func TestHTTPRateLimiter(t *testing.T) {
 }
 
 func TestWSRateLimiter(t *testing.T) {
-	defer resetRPCRoutes()
-
 	server := newServer()
 	var wg sync.WaitGroup
 	defer func() {
@@ -944,17 +936,17 @@ func TestWSRateLimiter(t *testing.T) {
 	}()
 
 	handled := make(chan struct{}, 1)
-	Route(msgjson.RegisterRoute, func(Link, *msgjson.Message) *msgjson.Error {
+	server.Route(msgjson.RegisterRoute, func(Link, *msgjson.Message) *msgjson.Error {
 		handled <- struct{}{}
 		return nil
 	})
 
-	Route(msgjson.FeeRateRoute, func(Link, *msgjson.Message) *msgjson.Error {
+	server.Route(msgjson.FeeRateRoute, func(Link, *msgjson.Message) *msgjson.Error {
 		handled <- struct{}{}
 		return nil
 	})
 
-	Route(msgjson.OrderBookRoute, func(Link, *msgjson.Message) *msgjson.Error {
+	server.Route(msgjson.OrderBookRoute, func(Link, *msgjson.Message) *msgjson.Error {
 		handled <- struct{}{}
 		return nil
 	})

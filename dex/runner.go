@@ -120,7 +120,7 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 	// Attempt to start the Connector.
 	ctx, cancel := context.WithCancel(ctx)
 	wg, err := c.connector.Connect(ctx)
-	if wg == nil {
+	if err != nil {
 		cancel() // no context leak
 		return fmt.Errorf("connect failure: %w", err)
 	}

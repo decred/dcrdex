@@ -190,6 +190,10 @@ func (c *TRPCClient) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.M
 	})
 	return c.requestErr
 }
+func (c *TRPCClient) RequestRaw(msgID uint64, rawMsg []byte, f func(comms.Link, *msgjson.Message), expireTime time.Duration, expire func()) error {
+	return nil
+}
+
 func (c *TRPCClient) Done() <-chan struct{} {
 	return c.closed
 }
@@ -215,6 +219,12 @@ func (c *TRPCClient) getSend() *msgjson.Message {
 	c.sends = c.sends[1:]
 	return msg
 }
+
+func (c *TRPCClient) CustomID() string {
+	return ""
+}
+
+func (c *TRPCClient) SetCustomID(string) {}
 
 var tClientID uint64
 
@@ -421,6 +431,8 @@ func resetStorage() {
 	}
 }
 
+var tRoutes = make(map[string]comms.MsgHandler)
+
 func TestMain(m *testing.M) {
 	doIt := func() int {
 		UseLogger(dex.StdOutLogger("AUTH_TEST", dex.LevelTrace))
@@ -459,6 +471,9 @@ func TestMain(m *testing.M) {
 			MiaUserTimeout:  90 * time.Second, // TODO: test
 			CancelThreshold: 0.9,
 			TxDataSources:   make(map[uint32]TxDataSource),
+			Route: func(route string, handler comms.MsgHandler) {
+				tRoutes[route] = handler
+			},
 		})
 		go authMgr.Run(ctx)
 		rig = &testRig{
@@ -1084,7 +1099,7 @@ func TestRoute(t *testing.T) {
 		translated = id
 		return nil
 	})
-	f := comms.RouteHandler("testroute")
+	f := tRoutes["testroute"]
 	if f == nil {
 		t.Fatalf("'testroute' not registered")
 	}
