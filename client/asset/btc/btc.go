@@ -1307,6 +1307,9 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 	btc.setNode(spvw)
 
+	// Set account number for easy reference.
+	spvw.acctNum = spvw.wallet.AccountInfo().AccountNumber
+
 	w := &ExchangeWalletSPV{
 		intermediaryWallet: &intermediaryWallet{
 			baseWallet:     btc,
