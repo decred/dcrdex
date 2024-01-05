@@ -28,11 +28,11 @@ func (w *spvWallet) mix(ctx context.Context, cfg *mixingConfig) {
 	// Don't perform any actions while transactions are not synced
 	// through the tip block.
 	if !w.spv.Synced() {
-		w.log.Debugf("Skipping autobuyer actions: transactions are not synced")
+		w.log.Tracef("Skipping account mixing: transactions are not synced")
 		return
 	}
 
 	if err = w.MixAccount(ctx, cfg.dialer, cfg.server, unmixedAccount, mixedAccount, mixedAccountBranch); err != nil {
-		w.log.Error(err)
+		w.log.Errorf("Error mixing account: %v", err)
 	}
 }

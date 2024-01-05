@@ -10950,7 +10950,8 @@ func (c *Core) StopFundsMixer(assetID uint32) error {
 	if err != nil {
 		return err
 	}
-	return mw.StopFundsMixer()
+	mw.StopFundsMixer()
+	return nil
 }
 
 // DisableFundsMixer disables the funds mixer and moves all funds to the

@@ -709,21 +709,9 @@ type FundsMixingStats struct {
 	Server string `json:"server"`
 	// IsMixing is true if the wallet is currently mixing funds.
 	IsMixing bool `json:"isMixing"`
-
-	// DRAFT NOTE: Umixed balance is reported in the wallet's Balance.
-	// MixedBalance could be confusing because it didn't account for locked
-	// and reserved balance on the mixed account.
-
-	// // MixedBalance is the amount of funds that have been successfully mixed and
-	// // may be withdrawn or used to fund trades.
-	// MixedBalance uint64 `json:"mixedBalance"`
-	// // UnmixedBalance is the amount of funds that are available and ready for
-	// // mixing. If the wallet is not configured for mixing, this balance may be
-	// // withdrawn or used to fund trades.
-	// UnmixedBalance uint64 `json:"unmixedBalance"`
-	// // UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
-	// // be in the wallet for mixing to happen.
-	// UnmixedBalanceThreshold uint64 `json:"unmixedBalanceThreshold"`
+	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
+	// be in the wallet for mixing to happen.
+	UnmixedBalanceThreshold uint64 `json:"unmixedBalanceThreshold"`
 }
 
 // FundsMixer defines methods for mixing funds in a wallet.
@@ -739,7 +727,7 @@ type FundsMixer interface {
 	// StopFundsMixer stops the funds mixer. This will error if the wallet does
 	// not allow starting or stopping the mixer or if the mixer was not already
 	// running.
-	StopFundsMixer() error
+	StopFundsMixer()
 	// DisableFundsMixer disables the funds mixer and moves all funds to the
 	// default account. The wallet will need to be re-configured to re-enable
 	// mixing.

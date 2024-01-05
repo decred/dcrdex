@@ -59,6 +59,7 @@ func (m *mixer) config() *mixingConfig {
 	return m.cfg
 }
 
+// turnOn should be called with the mtx locked.
 func (m *mixer) turnOn(ctx context.Context) {
 	if m.cancel != nil {
 		m.cancel()
@@ -235,12 +236,10 @@ func (w *NativeWallet) FundsMixingStats() (*asset.FundsMixingStats, error) {
 	}
 
 	return &asset.FundsMixingStats{
-		Enabled:  mixCfg.enabled,
-		IsMixing: w.mixer.isOn(),
-		Server:   srv,
-		// MixedBalance:            toAtoms(mixedBalance.Total),
-		// UnmixedBalance:          toAtoms(unmixedBalance.Total),
-		// UnmixedBalanceThreshold: smalletCSPPSplitPoint,
+		Enabled:                 mixCfg.enabled,
+		IsMixing:                w.mixer.isOn(),
+		Server:                  srv,
+		UnmixedBalanceThreshold: smalletCSPPSplitPoint,
 	}, nil
 }
 
@@ -260,7 +259,9 @@ func (w *NativeWallet) StartFundsMixer(ctx context.Context) error {
 
 // Lock locks all the native wallet accounts.
 func (w *NativeWallet) Lock() (err error) {
+	w.mixer.mtx.Lock()
 	w.mixer.closeAndClear()
+	w.mixer.mtx.Unlock()
 	w.mixer.wg.Wait()
 	for _, acct := range nativeAccounts {
 		if err = w.wallet.LockAccount(w.ctx, acct); err != nil {
@@ -305,15 +306,12 @@ func (w *NativeWallet) runSimnetMixer(ctx context.Context) {
 
 }
 
-// StopFundsMixer stops the funds mixer. This will error if the wallet does not
-// allow starting or stopping the mixer or if the mixer is not already running.
-// Part of the asset.FundsMixer interface.
-func (w *NativeWallet) StopFundsMixer() error {
+// StopFundsMixer stops the funds mixer.
+func (w *NativeWallet) StopFundsMixer() {
 	w.mixer.mtx.Lock()
 	w.mixer.closeAndClear()
 	w.mixer.mtx.Unlock()
 	w.mixer.wg.Wait()
-	return nil
 }
 
 // DisableFundsMixer disables the funds mixer and moves all funds to the default
@@ -354,25 +352,26 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 		}
 		unspents = append(unspents, uns...)
 	}
-	if len(unspents) > 0 {
-		var coinsToTransfer asset.Coins
-		for _, unspent := range unspents {
-			txHash, err := chainhash.NewHashFromStr(unspent.TxID)
-			if err != nil {
-				return fmt.Errorf("error decoding txid: %w", err)
-			}
-			v := toAtoms(unspent.Amount)
-			op := newOutput(txHash, unspent.Vout, v, unspent.Tree)
-			coinsToTransfer = append(coinsToTransfer, op)
-		}
-
-		tx, totalSent, err := w.sendAll(coinsToTransfer, toAcct)
+	if len(unspents) == 0 {
+		return nil
+	}
+	var coinsToTransfer asset.Coins
+	for _, unspent := range unspents {
+		txHash, err := chainhash.NewHashFromStr(unspent.TxID)
 		if err != nil {
-			return fmt.Errorf("unable to transfer all funds from %+v accounts: %v", fromAccts, err)
-		} else {
-			w.log.Infof("Transferred %s from %+v accounts to %s account in tx %s.",
-				dcrutil.Amount(totalSent), fromAccts, toAcct, tx.TxHash())
+			return fmt.Errorf("error decoding txid: %w", err)
 		}
+		v := toAtoms(unspent.Amount)
+		op := newOutput(txHash, unspent.Vout, v, unspent.Tree)
+		coinsToTransfer = append(coinsToTransfer, op)
+	}
+
+	tx, totalSent, err := w.sendAll(coinsToTransfer, toAcct)
+	if err != nil {
+		return fmt.Errorf("unable to transfer all funds from %+v accounts: %v", fromAccts, err)
+	} else {
+		w.log.Infof("Transferred %s from %+v accounts to %s account in tx %s.",
+			dcrutil.Amount(totalSent), fromAccts, toAcct, tx.TxHash())
 	}
 	return nil
 }
