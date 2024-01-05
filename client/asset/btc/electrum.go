@@ -331,7 +331,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			if err != nil {
 				// NOTE: often says "height X out of range", then succeeds on next tick
 				if !strings.Contains(err.Error(), "out of range") {
-					btc.log.Errorf("failed to get best block from %s electrum server: %w", btc.symbol, err)
+					btc.log.Errorf("failed to get best block from %s electrum server: %v", btc.symbol, err)
 				}
 				continue
 			}
