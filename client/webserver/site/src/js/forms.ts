@@ -31,6 +31,7 @@ import {
   WalletCreationNote,
   CoreNote
 } from './registry'
+import * as ntfn from './notifications'
 import { XYRangeHandler } from './opts'
 
 interface ConfigOptionInput extends HTMLInputElement {
@@ -1934,8 +1935,9 @@ export class LoginForm {
       return
     }
     if (res.notes) {
-      res.notes.reverse()
-      app().setNotes(res.notes)
+      const notes = res.notes as CoreNote[]
+      notes.filter(n => n.severity !== ntfn.POKE).reverse()
+      app().setNotes(notes)
     }
     if (this.pwCache) this.pwCache.pw = pw
     this.success()

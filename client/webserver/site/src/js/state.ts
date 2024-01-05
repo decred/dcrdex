@@ -17,6 +17,7 @@ export default class State {
   static leftMarketDockLK = 'leftmarketdock'
   static selectedAssetLK = 'selectedasset'
   static notificationsLK = 'notifications'
+  static pokesLK = 'pokes'
   static orderDisclaimerAckedLK = 'ordAck'
   static lastCandleDurationLK = 'lastCandleDuration'
 

@@ -208,6 +208,9 @@ export default class Application {
     // Load recent notifications from Window.localStorage.
     const notes = State.fetchLocal(State.notificationsLK)
     this.setNotes(notes || [])
+    // Load recent pokes from Window.localStorage.
+    const pokes = State.fetchLocal(State.pokesLK)
+    this.setPokes(pokes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
     ws.registerRoute(notificationRoute, (note: CoreNote) => {
@@ -484,6 +487,21 @@ export default class Application {
   }
 
   /*
+   * storePokes stores the list of pokes in Window.localStorage. The
+   * actual stored list is stripped of information not necessary for display.
+   */
+  storePokes () {
+    State.storeLocal(State.pokesLK, this.pokes.map(n => {
+      return {
+        subject: n.subject,
+        details: n.details,
+        stamp: n.stamp,
+        id: n.id
+      }
+    }))
+  }
+
+  /*
    * updateMenuItemsDisplay should be called when the user has signed in or out,
    * and when the user registers a DEX.
    */
@@ -555,6 +573,20 @@ export default class Application {
       this.prependNoteElement(notes[i], true)
     }
     this.storeNotes()
+  }
+
+  /*
+   * setPokes sets the current poke cache and populates the poke
+   * display.
+   */
+  setPokes (pokes: CoreNote[]) {
+    this.log('pokes', 'setPokes', pokes)
+    this.pokes = []
+    Doc.empty(this.page.pokeList)
+    for (let i = 0; i < pokes.length; i++) {
+      this.prependPokeElement(pokes[i], true)
+    }
+    this.storePokes()
   }
 
   updateUser (note: CoreNote) {
@@ -750,11 +782,12 @@ export default class Application {
     }
   }
 
-  prependPokeElement (cn: CoreNote) {
+  prependPokeElement (cn: CoreNote, skipSave?: boolean) {
     const [el, note] = this.makePoke(cn)
     this.pokes.push(note)
     while (this.pokes.length > noteCacheSize) this.pokes.shift()
     this.prependListElement(this.page.pokeList, note, el)
+    if (!skipSave) this.storePokes()
   }
 
   prependNoteElement (cn: CoreNote, skipSave?: boolean) {

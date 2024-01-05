@@ -120,6 +120,7 @@ class AppInitForm {
     // browser-cached notifications in place after registering even if the
     // client db is wiped.
     app().setNotes([])
+    app().setPokes([])
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app().loading(this.form)

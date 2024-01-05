@@ -843,9 +843,10 @@ export interface Application {
   updateBondConfs (dexAddr: string, coinID: string, confs: number, assetID: number): void
   handleBondNote (note: BondNote): void
   setNotes (notes: CoreNote[]): void
+  setPokes (notes: CoreNote[]): void
   notify (note: CoreNote): void
   log (loggerID: string, ...msg: any): void
-  prependPokeElement (note: CoreNote): void
+  prependPokeElement (note: CoreNote, skipSave?: boolean): void
   prependNoteElement (note: CoreNote, skipSave?: boolean): void
   prependListElement (noteList: HTMLElement, note: CoreNote, el: NoteElement): void
   loading (el: HTMLElement): () => void
