@@ -148,6 +148,14 @@
                       <div class="flex-center grey">[[[Active tickets]]]</div>
                       <div id="stakingTicketCount" class="flex-center demi"></div>
                     </div>
+                    <div id="immatureTicketCountBox" class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center grey">[[[Immature tickets]]]</div>
+                      <div id="immatureTicketCount" class="flex-center demi"></div>
+                    </div>
+                    <div id="queuedTicketCountBox" class="d-flex justify-content-between align-items-stretch">
+                      <div class="flex-center grey">[[[Queued tickets]]]</div>
+                      <div id="queuedTicketCount" class="flex-center demi"></div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-stretch">
                       <div class="flex-center grey">[[[Tickets bought]]]</div>
                       <div id="totalTicketCount" class="flex-center demi"></div>
@@ -213,6 +221,10 @@
                     </span>
                   </div>
                 </div>
+              </div>
+              <div id="purchaseTicketsErrBox" class="fill-abs d-flex align-items-stretch flex-column d-hide pb-3">
+                <div id="purchaseTicketsErrCloser" class="p-2 hoverbg pointer"><span class="ico-cross fs20"></span></div>
+                <div id="purchaseTicketsErr" class="p-2 flex-grow-1 flex-center errcolor"></div>
               </div>
             </div>
           </div>{{- /* END STAKING */ -}}
@@ -740,16 +752,21 @@
     <form id="purchaseTicketsForm" class="flex-center flex-column p-2 m-4 mw-425">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="flex-center fs22 sans-light">[[[Purchase Tickets]]]</div>
-      <div class="d-flex pt-2">
-        <div class="flex-center flex-column col-50 p-4">
+      <div class="d-flex pt-2 flex-wrap">
+        <div class="flex-center flex-column col-12 p-4">
           <span>[[[Current Price]]]</span>
           <hr class="dotted my-1 w-100">
           <span id="purchaserCurrentPrice">a</span>
         </div>
-        <div class="flex-center flex-column  col-50 p-4">
+        <div class="flex-center flex-column col-12 p-4">
           <span>[[[Available Balance]]]</span>
           <hr class="dotted my-1 w-100">
           <span id="purchaserBal">a</span>
+        </div>
+        <div id="formQueueTixBox" class="flex-center flex-column col-12 p-4">
+          <span>[[[Currently Queued]]]</span>
+          <hr class="dotted my-1 w-100">
+          <span id="formQueuedTix">a</span>
         </div>
       </div>
       <hr class="dotted w-100">

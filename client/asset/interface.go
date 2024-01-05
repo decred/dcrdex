@@ -1017,6 +1017,8 @@ type TicketStats struct {
 	TicketCount  uint32 `json:"ticketCount"`
 	Votes        uint32 `json:"votes"`
 	Revokes      uint32 `json:"revokes"`
+	Queued       uint32 `json:"queued"`
+	Mempool      uint32 `json:"mempool"`
 }
 
 // TicketStakingStatus holds various stake information from the wallet.
@@ -1050,9 +1052,9 @@ type TicketBuyer interface {
 	StakeStatus() (*TicketStakingStatus, error)
 	// SetVSP sets the VSP provider.
 	SetVSP(addr string) error
-	// PurchaseTickets purchases n amount of tickets. Returns the purchased
-	// ticket hashes if successful.
-	PurchaseTickets(n int, feeSuggestion uint64) ([]*Ticket, error)
+	// PurchaseTickets starts an aysnchronous process to purchase n tickets.
+	// Look for TicketPurchaseUpdate notifications to track the process.
+	PurchaseTickets(n int, feeSuggestion uint64) error
 	// SetVotingPreferences sets default voting settings for all active
 	// tickets and future tickets. Nil maps can be provided for no change.
 	SetVotingPreferences(choices, tSpendPolicy, treasuryPolicy map[string]string) error
@@ -1415,27 +1417,32 @@ type MultiOrder struct {
 // to convey.
 type WalletNotification any
 
+type baseWalletNotification struct {
+	AssetID uint32 `json:"assetID"`
+	Route   string `json:"route"`
+}
+
 // TipChangeNote is the only required wallet notification. All wallets should
 // emit a TipChangeNote when a state change occurs that might necessitate swap
 // progression or new balance checks.
 type TipChangeNote struct {
-	AssetID uint32 `json:"assetID"`
-	Tip     uint64 `json:"tip"`
-	Data    any    `json:"data"`
+	baseWalletNotification
+	Tip  uint64 `json:"tip"`
+	Data any    `json:"data"`
 }
 
 // BalanceChangeNote can be sent when the wallet detects a balance change
 // between tip changes.
 type BalanceChangeNote struct {
-	AssetID uint32
+	baseWalletNotification
 	Balance *Balance
 }
 
 // CustomWalletNote is any other information the wallet wishes to convey to
 // the user.
 type CustomWalletNote struct {
-	AssetID uint32 `json:"assetID"`
-	Payload any    `json:"payload"`
+	baseWalletNotification
+	Payload any `json:"payload"`
 }
 
 // WalletEmitter handles a channel for wallet notifications and provides methods
@@ -1464,8 +1471,13 @@ func (e *WalletEmitter) emit(note WalletNotification) {
 }
 
 // Data sends a CustomWalletNote with the specified data payload.
-func (e *WalletEmitter) Data(payload any) {
-	e.emit(&CustomWalletNote{AssetID: e.assetID, Payload: payload})
+func (e *WalletEmitter) Data(route string, payload any) {
+	e.emit(&CustomWalletNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   route,
+		}, Payload: payload,
+	})
 }
 
 // TipChange sends a TipChangeNote with optional extra data.
@@ -1474,10 +1486,22 @@ func (e *WalletEmitter) TipChange(tip uint64, datas ...any) {
 	if len(datas) > 0 {
 		data = datas[0]
 	}
-	e.emit(&TipChangeNote{AssetID: e.assetID, Tip: tip, Data: data})
+	e.emit(&TipChangeNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "tipChange",
+		},
+		Tip: tip, Data: data,
+	})
 }
 
 // BalanceChange sends a BalanceChangeNote.
 func (e *WalletEmitter) BalanceChange(bal *Balance) {
-	e.emit(&BalanceChangeNote{AssetID: e.assetID, Balance: bal})
+	e.emit(&BalanceChangeNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "balanceChange",
+		},
+		Balance: bal,
+	})
 }

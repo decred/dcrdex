@@ -1031,56 +1031,12 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 		return nil, err
 	}
 
-	// TODO: When purchasing N tickets with a VSP, if the wallet doesn't find a
-	// suitable already-existing output for each ticket + vsp fee = 2*N outputs
-	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1439-L1471
-	// it will end up in the lowBalance loop, where the requested ticket count
-	// (req.Count) is reduced
-	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1499-L1501
-	// before ultimately ending with a errVSPFeeRequiresUTXOSplit
-	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/createtx.go#L1537C17-L1537C43
-	// which leads us into the special handling in (*Wallet).PurchaseTickets,
-	// where the requested ticket count is, unceremoniously, forced to 1.
-	// https://github.com/decred/dcrwallet/blob/a87fa843495ec57c1d3b478c2ceb3876c3749af5/wallet/wallet.go#L1725C15-L1725C15
-	//
-	// tldr; The wallet will apparently not generate split outputs for vsp fees,
-	//       so unless we have existing outputs of suitable size, will
-	//       automatically reduce the requested ticket count to 1.
-	//
-	// How do we handle that? Is that a bug?
-
 	req := &wallet.PurchaseTicketsRequest{
 		Count:                n,
 		VSPFeePaymentProcess: vspClient.Process,
 		VSPFeeProcess:        vspClient.FeePercentage,
 		// TODO: CSPP/mixing
 	}
-
-	// This loop (+ minconf=0) doesn't work. Results in double spend errors when
-	// split tx outputs already spent in a previous loops tickets are somehow
-	// selected again for the next loop's split tx.
-	//
-	// ticketHashes := make([]*chainhash.Hash, 0, n)
-	// remain := n
-	// for remain > 0 {
-	// 	req.Count = remain
-	// 	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
-	// 	if err != nil {
-	// 		if len(ticketHashes) > 0 {
-	// 			w.log.Errorf("ticket loop error: %v", err)
-	// 			break
-	// 		}
-	// 		return nil, err
-	// 	}
-	// 	for _, tx := range res.Tickets {
-	// 		for _, txIn := range tx.TxIn {
-	// 			w.dcrWallet.LockOutpoint(&txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index)
-	// 		}
-	// 	}
-	// 	w.log.Tracef("Purchased %d tickets. %d tickets requested. %d tickets left for this request.", len(res.TicketHashes), n, remain)
-	// 	ticketHashes = append(ticketHashes, res.TicketHashes...)
-	// 	remain -= len(res.TicketHashes)
-	// }
 
 	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
 	if err != nil {

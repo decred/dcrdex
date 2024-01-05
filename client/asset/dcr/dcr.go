@@ -32,6 +32,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v3/wallet"
 	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
@@ -103,6 +104,9 @@ const (
 
 	defaultCSPPMainnet  = "mix.decred.org:5760"
 	defaultCSPPTestnet3 = "mix.decred.org:15760"
+
+	ticketSize               = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2SHOutputSize /* stakesubmission and sstxchanges */ + 32 /* see e.g. RewardCommitmentScript */
+	minVSPTicketPurchaseSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + dexdcr.P2PKHOutputSize + ticketSize
 )
 
 var (
@@ -658,6 +662,12 @@ type ExchangeWallet struct {
 	connected atomic.Bool
 
 	subsidyCache *blockchain.SubsidyCache
+
+	ticketBuyer struct {
+		running            atomic.Bool
+		remaining          atomic.Int32
+		unconfirmedTickets map[chainhash.Hash]struct{}
+	}
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -4995,13 +5005,19 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 			TreasurySpends: tSpends,
 			TreasuryKeys:   treasuryPolicy,
 		},
-		Stats: asset.TicketStats{
-			TotalRewards: uint64(sinfo.TotalSubsidy),
-			TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
-			Votes:        sinfo.Voted,
-			Revokes:      sinfo.Revoked,
-		},
+		Stats: dcr.ticketStatsFromStakeInfo(sinfo),
 	}, nil
+}
+
+func (dcr *ExchangeWallet) ticketStatsFromStakeInfo(sinfo *wallet.StakeInfoData) asset.TicketStats {
+	return asset.TicketStats{
+		TotalRewards: uint64(sinfo.TotalSubsidy),
+		TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
+		Votes:        sinfo.Voted,
+		Revokes:      sinfo.Revoked,
+		Mempool:      sinfo.OwnMempoolTix,
+		Queued:       uint32(dcr.ticketBuyer.remaining.Load()),
+	}
 }
 
 func (dcr *ExchangeWallet) voteSubsidy(tipHeight int64) uint64 {
@@ -5100,28 +5116,162 @@ func (dcr *ExchangeWallet) SetVSP(url string) error {
 
 // PurchaseTickets purchases n number of tickets. Part of the asset.TicketBuyer
 // interface.
-func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) ([]*asset.Ticket, error) {
+func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) error {
 	if n < 1 {
-		return nil, nil
+		return nil
 	}
 	if !dcr.connected.Load() {
-		return nil, errors.New("not connected, login first")
+		return errors.New("not connected, login first")
+	}
+	bal, err := dcr.Balance()
+	if err != nil {
+		return fmt.Errorf("error getting balance: %v", err)
+	}
+	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
+	if err != nil {
+		return fmt.Errorf("stakeinfo error: %v", err)
 	}
 	// I think we need to set this, otherwise we probably end up with default
 	// of DefaultRelayFeePerKb = 1e4 => 10 atoms/byte.
 	feePerKB := dcrutil.Amount(dcr.feeRateWithFallback(feeSuggestion) * 1000)
 	if err := dcr.wallet.SetTxFee(dcr.ctx, feePerKB); err != nil {
-		return nil, fmt.Errorf("error setting wallet tx fee: %w", err)
+		return fmt.Errorf("error setting wallet tx fee: %w", err)
 	}
+
+	// Get a minimum size assuming a single-input split tx.
+	fees := feePerKB * minVSPTicketPurchaseSize / 1000
+	ticketPrice := sinfo.Sdiff + fees
+	total := uint64(n) * uint64(ticketPrice)
+	if bal.Available < total {
+		return fmt.Errorf("available balance %s is lower than project cost %s for %d tickets",
+			dcrutil.Amount(bal.Available), dcrutil.Amount(total), n)
+	}
+
+	remain := dcr.ticketBuyer.remaining.Add(int32(n))
+	dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Remaining: uint32(remain)})
+	go dcr.runTicketBuyer()
+
+	return nil
+}
+
+const ticketDataRoute = "ticketPurchaseUpdate"
+
+// TicketPurchaseUpdate is an update from the asynchronous ticket purchasing
+// loop.
+type TicketPurchaseUpdate struct {
+	Err       string             `json:"err,omitempty"`
+	Remaining uint32             `json:"remaining"`
+	Tickets   []*asset.Ticket    `json:"tickets"`
+	Stats     *asset.TicketStats `json:"stats,omitempty"`
+}
+
+// runTicketBuyer attempts to buy requested tickets. Because of a dcrwallet bug,
+// its possible that (Wallet).PurchaseTickets will purchase fewer tickets than
+// requested, without error. To work around this bug, we add requested tickets
+// to ExchangeWallet.ticketBuyer.remaining, and re-run runTicketBuyer every
+// block.
+func (dcr *ExchangeWallet) runTicketBuyer() {
+	tb := &dcr.ticketBuyer
+	if !tb.running.CompareAndSwap(false, true) {
+		// already running
+		return
+	}
+	defer tb.running.Store(false)
+	var ok bool
+	defer func() {
+		if !ok {
+			tb.remaining.Store(0)
+		}
+	}()
+
+	if tb.unconfirmedTickets == nil {
+		tb.unconfirmedTickets = make(map[chainhash.Hash]struct{})
+	}
+
+	remain := tb.remaining.Load()
+	if remain < 1 {
+		return
+	}
+
+	for txHash := range tb.unconfirmedTickets {
+		tx, err := dcr.wallet.GetTransaction(dcr.ctx, &txHash)
+		if err != nil {
+			dcr.log.Errorf("GetTransaction error ticket tx %s: %v", txHash, err)
+			dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Err: err.Error()})
+			return
+		}
+		if tx.Confirmations > 0 {
+			delete(tb.unconfirmedTickets, txHash)
+		}
+	}
+	if len(tb.unconfirmedTickets) > 0 {
+		ok = true
+		dcr.log.Tracef("Skipping ticket purchase attempt because there are still %d unconfirmed tickets", len(tb.unconfirmedTickets))
+		return
+	}
+
+	dcr.log.Tracef("Attempting to purchase %d tickets", remain)
+
+	bal, err := dcr.Balance()
+	if err != nil {
+		dcr.log.Errorf("GetBalance error: %v", err)
+		dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Err: err.Error()})
+		return
+	}
+	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
+	if err != nil {
+		dcr.log.Errorf("StakeInfo error: %v", err)
+		dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Err: err.Error()})
+		return
+	}
+	if dcrutil.Amount(bal.Available) < sinfo.Sdiff*dcrutil.Amount(remain) {
+		dcr.log.Errorf("Insufficient balance %s to purchase %d ticket at price %s: %v", dcrutil.Amount(bal.Available), remain, sinfo.Sdiff, err)
+		dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Err: "insufficient balance"})
+		return
+	}
+
+	var tickets []*asset.Ticket
 	if !dcr.isNative() {
-		return dcr.wallet.PurchaseTickets(dcr.ctx, n, "", "")
+		tickets, err = dcr.wallet.PurchaseTickets(dcr.ctx, int(remain), "", "")
+	} else {
+		v := dcr.vspV.Load()
+		if v == nil {
+			err = errors.New("no vsp set")
+		} else {
+			vInfo := v.(*vsp)
+			tickets, err = dcr.wallet.PurchaseTickets(dcr.ctx, int(remain), vInfo.URL, vInfo.PubKey)
+		}
 	}
-	v := dcr.vspV.Load()
-	if v == nil {
-		return nil, errors.New("no vsp set")
+	if err != nil {
+		dcr.log.Errorf("PurchaseTickets error: %v", err)
+		dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Err: err.Error()})
+		return
 	}
-	vInfo := v.(*vsp)
-	return dcr.wallet.PurchaseTickets(dcr.ctx, n, vInfo.URL, vInfo.PubKey)
+	purchased := int32(len(tickets))
+	remain = tb.remaining.Add(-purchased)
+	// sanity check
+	if remain < 0 {
+		remain = 0
+		tb.remaining.Store(remain)
+	}
+	stats := dcr.ticketStatsFromStakeInfo(sinfo)
+	stats.Mempool += uint32(len(tickets))
+	stats.Queued = uint32(remain)
+	dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{
+		Tickets:   tickets,
+		Remaining: uint32(remain),
+		Stats:     &stats,
+	})
+	for _, ticket := range tickets {
+		txHash, err := chainhash.NewHashFromStr(ticket.Tx.Hash)
+		if err != nil {
+			dcr.log.Errorf("NewHashFromStr error for ticket hash %s: %v", ticket.Tx.Hash, err)
+			dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Err: err.Error()})
+			return
+		}
+		tb.unconfirmedTickets[*txHash] = struct{}{}
+	}
+	ok = true
 }
 
 // SetVotingPreferences sets the vote choices for all active tickets and future
@@ -5309,17 +5459,14 @@ func (dcr *ExchangeWallet) emitTipChange(height int64) {
 			VotingSubsidy uint64            `json:"votingSubsidy"`
 			Stats         asset.TicketStats `json:"stats"`
 		}{
-			TicketPrice: uint64(sinfo.Sdiff),
-			Stats: asset.TicketStats{
-				TotalRewards: uint64(sinfo.TotalSubsidy),
-				TicketCount:  sinfo.OwnMempoolTix + sinfo.Unspent + sinfo.Immature + sinfo.Voted + sinfo.Revoked,
-				Votes:        sinfo.Voted,
-				Revokes:      sinfo.Revoked,
-			},
+			TicketPrice:   uint64(sinfo.Sdiff),
+			Stats:         dcr.ticketStatsFromStakeInfo(sinfo),
 			VotingSubsidy: dcr.voteSubsidy(height),
 		}
 	}
+
 	dcr.emit.TipChange(uint64(height), data)
+	go dcr.runTicketBuyer()
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function

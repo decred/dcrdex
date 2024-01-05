@@ -1715,18 +1715,11 @@ func (s *WebServer) apiPurchaseTickets(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	tickets, err := s.core.PurchaseTickets(req.AssetID, appPW, req.N)
-	if err != nil {
+	if err = s.core.PurchaseTickets(req.AssetID, appPW, req.N); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error purchasing tickets for asset ID %d: %w", req.AssetID, err))
 		return
 	}
-	writeJSON(w, &struct {
-		OK      bool            `json:"ok"`
-		Tickets []*asset.Ticket `json:"tickets"`
-	}{
-		OK:      true,
-		Tickets: tickets,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 func (s *WebServer) apiSetVotingPreferences(w http.ResponseWriter, r *http.Request) {

@@ -979,19 +979,13 @@ func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePay
 	}
 	defer form.appPass.Clear()
 
-	tickets, err := s.core.PurchaseTickets(form.assetID, form.appPass, form.num)
-	if err != nil {
+	if err = s.core.PurchaseTickets(form.assetID, form.appPass, form.num); err != nil {
 		errMsg := fmt.Sprintf("unable to purchase tickets: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, errMsg)
 		return createResponse(purchaseTicketsRoute, nil, resErr)
 	}
 
-	hashes := make([]string, len(tickets))
-	for i, tkt := range tickets {
-		hashes[i] = tkt.Tx.Hash
-	}
-
-	return createResponse(purchaseTicketsRoute, hashes, nil)
+	return createResponse(purchaseTicketsRoute, true, nil)
 }
 
 func handleStakeStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -1741,14 +1735,14 @@ an spv wallet and enables options to view and set the vsp.
 	purchaseTicketsRoute: {
 		pwArgsShort: `"appPass"`,
 		argsShort:   `assetID num`,
-		cmdSummary:  `Purchase some tickets.`,
+		cmdSummary:  `Starts a asyncrhonous ticket purchasing process. Check stakestatus for number of tickets remaining to be purchased.`,
 		pwArgsLong: `Password Args:
   appPass (string): The DEX client password.`,
 		argsLong: `Args:
   assetID (int): The asset's BIP-44 registered coin index.
   num (int): The number of tickets to purchase`,
 		returns: `Returns:
-  array: An array of ticket hashes.`,
+  	bool: true is the only non-error return value`,
 	},
 	setVotingPreferencesRoute: {
 		argsShort:  `assetID (choicesMap) (tSpendPolicyMap) (treasuryPolicyMap)`,

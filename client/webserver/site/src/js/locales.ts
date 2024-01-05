@@ -293,7 +293,7 @@ export const enUS: Locale = {
   [ID_CREATING_WALLETS]: 'Creating wallets',
   [ID_ADDING_SERVERS]: 'Connecting to servers',
   [ID_WALLET_RECOVERY_SUPPORT_MSG]: 'Native {{ walletSymbol }} wallet failed to load properly. Try clicking the "Recover" button below to fix it',
-  [ID_TICKETS_PURCHASED]: 'Purchased {{ n }} Tickets!',
+  [ID_TICKETS_PURCHASED]: 'Purchasing {{ n }} Tickets!',
   [ID_TICKET_STATUS_UNKNOWN]: 'unknown',
   [ID_TICKET_STATUS_UNMINED]: 'unmined',
   [ID_TICKET_STATUS_IMMATURE]: 'immature',
