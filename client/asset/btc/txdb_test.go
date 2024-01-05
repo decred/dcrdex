@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"encoding/hex"
 	"errors"
 	"reflect"
 	"testing"
@@ -33,35 +34,35 @@ func TestTxDB(t *testing.T) {
 
 	tx1 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         asset.Send,
-			ID:           encode.RandomBytes(32),
-			BalanceDelta: -1e8,
-			Fees:         1e5,
-			BlockNumber:  0,
+			Type:        asset.Send,
+			ID:          hex.EncodeToString(encode.RandomBytes(32)),
+			Amount:      1e8,
+			Fees:        1e5,
+			BlockNumber: 0,
 		},
 	}
 
 	tx2 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         asset.Receive,
-			ID:           encode.RandomBytes(32),
-			BalanceDelta: 1e8,
-			Fees:         3e5,
-			BlockNumber:  0,
+			Type:        asset.Receive,
+			ID:          hex.EncodeToString(encode.RandomBytes(32)),
+			Amount:      1e8,
+			Fees:        3e5,
+			BlockNumber: 0,
 		},
 	}
 
 	tx3 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         asset.Swap,
-			ID:           encode.RandomBytes(32),
-			BalanceDelta: -1e8,
-			Fees:         2e5,
-			BlockNumber:  0,
+			Type:        asset.Swap,
+			ID:          hex.EncodeToString(encode.RandomBytes(32)),
+			Amount:      1e8,
+			Fees:        2e5,
+			BlockNumber: 0,
 		},
 	}
 
-	getTxsAndCheck := func(n int, refID *dex.Bytes, past bool, expected []*asset.WalletTransaction) {
+	getTxsAndCheck := func(n int, refID *string, past bool, expected []*asset.WalletTransaction) {
 		t.Helper()
 
 		txs, err = txHistoryStore.getTxs(n, refID, past)

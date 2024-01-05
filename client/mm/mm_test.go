@@ -1599,9 +1599,6 @@ func TestSegregatedCoreMaxBuy(t *testing.T) {
 
 	tempDir := t.TempDir()
 	for _, test := range tests {
-		if test.name != "1 lot with refund fees, account locker" {
-			continue
-		}
 		tCore.setAssetBalances(test.assetBalances)
 		tCore.market = test.market
 		tCore.buySwapFees = test.swapFees

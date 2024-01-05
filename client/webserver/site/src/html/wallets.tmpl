@@ -23,9 +23,9 @@
     </div>
 
     <div class="flex-grow-1 position-relative">
-      <div class="fill-abs d-flex flex-column flex-lg-row flex-wrap-lg flex-nowrap-xxl stylish-overflow no-overflow-xxl">
+      <div class="fill-abs d-flex flex-column flex-lg-row flex-wrap-lg flex-nowrap-xxxl stylish-overflow no-overflow-xxxl">
         {{- /* WALLET DETAILS */ -}}
-        <div class="col-24 col-lg-12 col-xxl-8 d-flex stylish-overflow-lg invisible" id="walletDetailsBox">
+        <div class="col-24 col-lg-12 col-xxxl-6 d-flex  invisible" id="walletDetailsBox">
           <div class="my-auto w-100 flex-center flex-column py-3">
             <div class="flex-center">
               <img id="assetLogo">
@@ -230,8 +230,55 @@
           </div>{{- /* END STAKING */ -}}
         </div>{{/* END WALLET DETAILS */}}
 
+        {{- /* TRANSACTION HISTORY */ -}}
+        <div class="col-24 col-lg-12 col-xxxl-6 d-flex stylish-overflow-lg" id="txHistoryBox">
+          <div class="m-auto flex-center flex-column w-100 p-3">
+            <div class="d-flex align-items-start flex-column mw-90p">
+              <span class="fs28 sans-light mb-2">[[[asset_name tx_history]]]</span>
+              <div id="txHistoryTableContainer" class="stylish-overflow">
+                <table id="txHistoryTable" class="w-100" d-hide>
+                  <thead>
+                    <tr>
+                      <th>[[[Time]]]</th>
+                      <th>[[[Type]]]</th>
+                      <th>[[[ID]]]</th>
+                      <th>[[[Amount]]]</th>
+                    </tr>
+                  </thead>
+                  <tbody id="txHistoryTableBody" class="fs17">
+                    <tr id="txHistoryRow" class="hoverbg pointer">
+                      <td>
+                        <span data-tmpl="time"></span>
+                        <div data-tmpl="pending" class="d-hide"><span>Pending</span><div class="px-2 ico-spinner spinner fs-14 d-inline-block"></div></div>
+                      </td>
+                      <td>
+                        <span data-tmpl="type"></span>
+                      </td>
+                      <td>
+                        <span data-tmpl="id"></span>
+                      </td>
+                      <td>
+                        <span data-tmpl="amount"></span>
+                      </td>
+                    </tr>
+                    <tr id="txHistoryDateRow">
+                      <td colspan="4" class="text-center grey">
+                        <span class="fs18" data-tmpl="date"></span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <span id="earlierTxs">Load earlier transactions...</span>
+              </div>
+              <div class="m-auto flex-center flex-column w-100 py-3 d-hide" id="noTxHistory">
+                [[[no_tx_history]]]
+              </div>
+            </div>
+          </div>
+        </div> {{/* END TRANSACTION HISTORY */}}
+
         {{- /* MARKETS OVERVIEW */ -}}
-        <div class="col-24 col-lg-12 col-xxl-8 d-flex stylish-overflow-lg invisible" id="marketsOverviewBox">
+        <div class="col-24 col-lg-12 col-xxxl-6 d-flex  invisible" id="marketsOverviewBox">
           <div class="m-auto flex-center flex-column w-100 p-3">
             <div class="d-flex align-items-start flex-column mw-90p">
               <span class="fs28 sans-light mb-2">[[[asset_name Markets]]]</span>
@@ -272,7 +319,7 @@
         </div>{{/* END MARKETS OVERVIEW */}}
 
         {{- /* RECENT ORDERS */ -}}
-        <div class="col-24 col-xxl-8 d-flex stylish-overflow-lg invisible" id="orderActivityBox">
+        <div class="col-24 col-lg-12 col-xxxl-6 d-flex  invisible" id="orderActivityBox">
           <div class="my-auto flex-center w-100 p-3" id="orderActivity">
             <div class="d-flex align-items-start flex-column mw-90p">
               <span class="fs28 sans-light mb-2">[[[Recent asset_name Activity]]]</span>
@@ -885,6 +932,61 @@
 
       <div id="votingFormErr" class="fs14 errcolor d-hide"></div>
     </form>
+
+    {{- /* TX DETAILS */ -}}
+    <form id="txDetails" class="position-relative flex-center flex-column fs20 d-hide">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+        [[[tx_details]]]
+      </div>
+      <a target="_blank" id="txViewBlockExplorer"><span>View in block explorer</span><span class="mx-2 ico-open"></span></a>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Type]]]</span>
+        <span id="txDetailsType"></span>
+      </span>
+      <span id="txDetailsAmtSection" class="d-flex justify-content-between w-100">
+        <span>[[[Amount]]]</span>
+        <span id="txDetailsAmount"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[fee]]]</span>
+        <span id="txDetailsFee"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[block]]]</span>
+        <div><span id="txDetailsBlockNumber"></span><div class="ico-spinner spinner d-hide fs-14 px-2 d-inline-block" id="blockNumberPending"></div></div>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[timestamp]]]</span>
+        <div><span id="txDetailsTimestamp"></span><div class="ico-spinner spinner d-hide fs-14 px-2 d-inline-block" id="timestampPending"></div></div>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[tx_id]]]</span>
+        <div><span id="txDetailsID" class="ease-color"></span><span id="copyTxIDBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
+      </span>
+      <span id="txDetailsRecipientSection" class="d-flex justify-content-between w-100">
+        <span>[[[recipient]]]</span>
+        <div><span id="txDetailsRecipient" class="ease-color"></span><span id="copyRecipientBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
+      </span>
+      <div id="txDetailsBondSection" class="w-100"> 
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[bond_id]]]</span>
+          <div><span id="txDetailsBondID" class="ease-color"></span><span id="copyBondIDBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[locktime]]]</span>
+          <span id="txDetailsBondLocktime" class="ease-color"></span>
+        </span>
+        <span id="txDetailsBondAccountIDSection" class="d-flex justify-content-between w-100">
+          <span>[[[Account ID]]]</span>
+          <div><span id="txDetailsBondAccountID" class="ease-color"></span><span id="copyBondAccountIDBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
+        </span>
+      </div>
+      <span id="txDetailsNonceSection" class="d-flex justify-content-between w-100">
+        <span>[[[nonce]]]</span><span id="txDetailsNonce"></span>
+      </span>
+    </form>
+
   </div>
 </div>
 {{template "bottom"}}

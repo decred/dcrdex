@@ -334,6 +334,10 @@ func (c *TCore) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*as
 	return nil, nil
 }
 
+func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
+
 type TWriter struct {
 	b []byte
 }

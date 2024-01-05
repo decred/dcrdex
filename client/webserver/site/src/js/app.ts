@@ -45,7 +45,11 @@ import {
   BotConfig,
   MMStartStopNote,
   MarketMakingStatus,
-  MarketMakingConfig
+  MarketMakingConfig,
+  WalletTransaction,
+  TxHistoryResult,
+  WalletNote,
+  TransactionNote
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -107,6 +111,7 @@ export default class Application {
   noteReceivers: Record<string, (n: CoreNote) => void>[]
   marketMakingCfg: MarketMakingConfig
   marketMakingStatus: MarketMakingStatus | undefined
+  txHistoryMap: Record<number, TxHistoryResult>
 
   constructor () {
     this.notes = []
@@ -116,6 +121,7 @@ export default class Application {
     this.noteReceivers = []
     this.fiatRatesMap = {}
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
+    this.txHistoryMap = {}
 
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
@@ -544,6 +550,27 @@ export default class Application {
   }
 
   /*
+   * handleTransaction either adds a new transaction to the transaction history
+   * or updates an existing transaction.
+   */
+  handleTransactionNote (assetID: number, note: TransactionNote) {
+    const txHistory = this.txHistoryMap[assetID]
+    if (!txHistory) return
+
+    if (note.new) {
+      txHistory.txs.unshift(note.transaction)
+      return
+    }
+
+    for (let i = 0; i < txHistory.txs.length; i++) {
+      if (txHistory.txs[i].id === note.transaction.id) {
+        txHistory.txs[i] = note.transaction
+        break
+      }
+    }
+  }
+
+  /*
    * setNotes sets the current notification cache and populates the notification
    * display.
    */
@@ -665,6 +692,14 @@ export default class Application {
         const n = note as MMStartStopNote
         if (!this.marketMakingStatus) return
         this.marketMakingStatus.running = n.running
+        break
+      }
+      case 'walletnote': {
+        const n = note as WalletNote
+        if (n.payload.route === 'transaction') {
+          const txNote = n.payload as TransactionNote
+          this.handleTransactionNote(n.payload.assetID, txNote)
+        }
       }
     }
   }
@@ -1028,6 +1063,88 @@ export default class Application {
     status.running = !!res.running
     status.runningBots = res.runningBots
     return status
+  }
+
+  /*
+   * txHistory loads the tx history for an asset. If the results are not
+   * already cached, they are cached. If we have reached the oldest tx,
+   * this fact is also cached. If the exact amount of transactions as have been
+   * made are requested, we will not know if we have reached the last tx until
+   * a subsequent call.
+  */
+  async txHistory (assetID: number, n: number, after?: string): Promise<TxHistoryResult> {
+    const url = '/api/txhistory'
+    const cachedTxHistory = this.txHistoryMap[assetID]
+    if (!cachedTxHistory) {
+      const res = await postJSON(url, {
+        n: n,
+        assetID: assetID
+      })
+      if (!this.checkResponse(res)) {
+        throw new Error(res.msg)
+      }
+      let txs : WalletTransaction[] | null | undefined = res.txs
+      if (!txs) {
+        txs = []
+      }
+      this.txHistoryMap[assetID] = {
+        txs: txs,
+        lastTx: txs.length < n
+      }
+      return this.txHistoryMap[assetID]
+    }
+    const txs : WalletTransaction[] = []
+    let lastTx = false
+    const startIndex = after ? cachedTxHistory.txs.findIndex(tx => tx.id === after) + 1 : 0
+    if (after && startIndex === -1) {
+      throw new Error('invalid after tx ' + after)
+    }
+    let lastIndex = startIndex
+    for (let i = startIndex; i < cachedTxHistory.txs.length && txs.length < n; i++) {
+      txs.push(cachedTxHistory.txs[i])
+      lastIndex = i
+    }
+    if (cachedTxHistory.lastTx && lastIndex === cachedTxHistory.txs.length - 1) {
+      lastTx = true
+    }
+    if (txs.length < n && !cachedTxHistory.lastTx) {
+      const res = await postJSON(url, {
+        n: n - txs.length + 1, // + 1 because first result will be refID
+        assetID: assetID,
+        refID: after,
+        past: true
+      })
+      if (!this.checkResponse(res)) {
+        throw new Error(res.msg)
+      }
+      let resTxs : WalletTransaction[] | null | undefined = res.txs
+      if (!resTxs) {
+        resTxs = []
+      }
+      if (resTxs.length > 0 && after) {
+        if (resTxs[0].id === after) {
+          resTxs.shift()
+        } else {
+          // Implies a bug in the client
+          console.error('First tx history element != refID')
+        }
+      }
+      cachedTxHistory.lastTx = resTxs.length < n - txs.length
+      lastTx = cachedTxHistory.lastTx
+      txs.push(...resTxs)
+      cachedTxHistory.txs.push(...resTxs)
+    }
+    return { txs, lastTx }
+  }
+
+  getWalletTx (assetID: number, txID: string): WalletTransaction | undefined {
+    const cachedTxHistory = this.txHistoryMap[assetID]
+    if (!cachedTxHistory) return undefined
+    return cachedTxHistory.txs.find(tx => tx.id === txID)
+  }
+
+  clearTxHistory (assetID: number) {
+    delete this.txHistoryMap[assetID]
   }
 }
 

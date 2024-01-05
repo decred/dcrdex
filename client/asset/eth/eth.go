@@ -1968,7 +1968,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	txHash := tx.Hash()
-	w.addToTxHistory(tx.Nonce(), -int64(swapVal), swaps.FeeRate*gasLimit, 0, w.assetID, txHash[:], asset.Swap)
+	w.addToTxHistory(tx.Nonce(), swapVal, swaps.FeeRate*gasLimit, w.assetID, txHash, asset.Swap, nil)
 
 	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
@@ -2059,7 +2059,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	contractAddr := w.netToken.SwapContracts[swaps.Version].Address.String()
 
 	txHash := tx.Hash()
-	w.addToTxHistory(tx.Nonce(), -int64(swapVal), swaps.FeeRate*gasLimit, 0, w.assetID, txHash[:], asset.Swap)
+	w.addToTxHistory(tx.Nonce(), swapVal, swaps.FeeRate*gasLimit, w.assetID, txHash, asset.Swap, nil)
 
 	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
@@ -2232,7 +2232,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	}
 
 	txHash := tx.Hash()
-	w.addToTxHistory(tx.Nonce(), int64(redeemedValue), gasFeeCap*gasLimit, 0, w.assetID, txHash[:], asset.Redeem)
+	w.addToTxHistory(tx.Nonce(), redeemedValue, gasFeeCap*gasLimit, w.assetID, txHash, asset.Redeem, nil)
 
 	txs := make([]dex.Bytes, len(form.Redemptions))
 	for i := range txs {
@@ -2309,7 +2309,11 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate, gasLimit uint64,
 			dex.BipIDSymbol(w.assetID), c.tokenAddress(), txOpts.Nonce, tx.Hash().Hex())
 
 		txHash := tx.Hash()
-		w.addToTxHistory(tx.Nonce(), 0, maxFeeRate*gasLimit, 0, w.assetID, txHash[:], asset.ApproveToken)
+		txType := asset.ApproveToken
+		if amount.Cmp(big.NewInt(0)) == 0 {
+			txType = asset.RevokeTokenApproval
+		}
+		w.addToTxHistory(tx.Nonce(), 0, maxFeeRate*gasLimit, w.assetID, txHash, txType, nil)
 
 		return nil
 	})
@@ -2892,7 +2896,7 @@ func (w *assetWallet) Refund(_, contract dex.Bytes, feeRate uint64) (dex.Bytes, 
 
 	txHash := tx.Hash()
 	refundValue := dexeth.WeiToGwei(swap.Value)
-	w.addToTxHistory(tx.Nonce(), int64(refundValue), fees, 0, w.assetID, txHash[:], asset.Refund)
+	w.addToTxHistory(tx.Nonce(), refundValue, fees, w.assetID, txHash, asset.Refund, nil)
 
 	return txHash[:], nil
 }
@@ -3168,7 +3172,12 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	}
 
 	txHash := tx.Hash()
-	w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
+	txType := asset.Send
+	if strings.EqualFold(addr, w.addr.String()) {
+		txType = asset.SelfSend
+	}
+
+	w.addToTxHistory(tx.Nonce(), value, maxFee, w.assetID, txHash, txType, &addr)
 
 	return &coin{id: txHash, value: value}, nil
 }
@@ -3192,7 +3201,7 @@ func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	}
 
 	txHash := tx.Hash()
-	w.addToTxHistory(tx.Nonce(), -int64(value), maxFee, 0, w.assetID, txHash[:], asset.Send)
+	w.addToTxHistory(tx.Nonce(), value, maxFee, w.assetID, txHash, asset.Send, &addr)
 
 	return &coin{id: txHash, value: value}, nil
 }
@@ -4058,10 +4067,10 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 
 	addPendingTx := func(txAssetID uint32, pt *extendedWalletTx) {
 		if txAssetID == w.assetID {
-			if pt.BalanceDelta > 0 {
-				in += uint64(pt.BalanceDelta)
+			if asset.IncomingTxType(pt.Type) {
+				in += pt.Amount
 			} else {
-				out += uint64(-1 * pt.BalanceDelta)
+				out += pt.Amount
 			}
 		}
 		if !isToken {
@@ -4565,10 +4574,31 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 	return nil
 }
 
-// checkPendingTx checks the confirmation status of a transaction. The BlockNumber
-// and Fees fields of the extendedWalletTx are updated if the transaction is confirmed,
-// and if the transaction has reached the required number of confirmations, it is removed
-// from w.pendingTxs.
+// emitTransactionNote sends a TransactionNote to the base asset wallet and
+// also the wallet, if applicable.
+func (w *baseWallet) emitTransactionNote(tx *asset.WalletTransaction, new bool) {
+	w.walletsMtx.RLock()
+	baseWallet, found := w.wallets[w.baseChainID]
+	var tokenWallet *assetWallet
+	if tx.TokenID != nil {
+		tokenWallet = w.wallets[*tx.TokenID]
+	}
+	w.walletsMtx.RUnlock()
+
+	if found {
+		baseWallet.emit.TransactionNote(tx, new)
+	} else {
+		w.log.Error("emitTransactionNote: base asset wallet not found")
+	}
+	if tokenWallet != nil {
+		tokenWallet.emit.TransactionNote(tx, new)
+	}
+}
+
+// checkPendingTx checks the confirmation status of a transaction. The
+// BlockNumber, Fees, and Timestamp fields of the extendedWalletTx are updated
+// if the transaction is confirmed, and if the transaction has reached the
+// required number of confirmations, it is removed from w.pendingTxs.
 // True is returned from this function if we have given up on the transaction, and it
 // should not be considered in the pending tx calculation.
 //
@@ -4607,6 +4637,8 @@ func (w *baseWallet) checkPendingTx(nonce uint64, pendingTx *extendedWalletTx) (
 				delete(w.pendingTxs, nonce)
 				w.pendingTxsMtx.Unlock()
 			}
+
+			w.emitTransactionNote(pendingTx.WalletTransaction, false)
 		}
 	}()
 
@@ -4615,19 +4647,24 @@ func (w *baseWallet) checkPendingTx(nonce uint64, pendingTx *extendedWalletTx) (
 	}
 	pendingTx.lastCheck = tip
 
-	var txHash common.Hash
-	copy(txHash[:], pendingTx.ID)
+	h, err := common.ParseHexOrString(pendingTx.ID)
+	if err != nil {
+		w.log.Errorf("error parsing tx hash %s: %v", pendingTx.ID, err)
+		return
+	}
+	txHash := common.BytesToHash(h)
 	receipt, tx, err := w.node.transactionReceipt(w.ctx, txHash)
 	if err != nil {
 		if errors.Is(err, asset.CoinNotFoundError) && pendingTx.BlockNumber > 0 {
 			w.log.Warnf("TxID %v was previously confirmed but now cannot be found", pendingTx.ID)
 			pendingTx.BlockNumber = 0
+			pendingTx.Timestamp = 0
 			updated = true
 		}
 		if !errors.Is(err, asset.CoinNotFoundError) {
 			w.log.Errorf("Error getting confirmations for pending tx %s: %v", txHash, err)
 		}
-		if time.Since(time.Unix(int64(pendingTx.TimeStamp), 0)) > time.Minute*6 {
+		if time.Since(time.Unix(int64(pendingTx.SubmissionTime), 0)) > time.Minute*6 {
 			givenUp = true
 		}
 
@@ -4638,6 +4675,7 @@ func (w *baseWallet) checkPendingTx(nonce uint64, pendingTx *extendedWalletTx) (
 		if pendingTx.BlockNumber > 0 {
 			w.log.Warnf("TxID %v was previously confirmed but now is not confirmed", pendingTx.ID)
 			pendingTx.BlockNumber = 0
+			pendingTx.Timestamp = 0
 			updated = true
 		}
 		return
@@ -4654,12 +4692,12 @@ func (w *baseWallet) checkPendingTx(nonce uint64, pendingTx *extendedWalletTx) (
 
 	effectiveGasPrice := new(big.Int).Add(hdr.BaseFee, tx.EffectiveGasTipValue(hdr.BaseFee))
 	bigFees := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-
 	fees := dexeth.WeiToGwei(bigFees)
 	blockNumber := receipt.BlockNumber.Uint64()
-	if pendingTx.BlockNumber != blockNumber || pendingTx.Fees != fees {
+	if pendingTx.BlockNumber != blockNumber || pendingTx.Fees != fees || pendingTx.Timestamp != hdr.Time {
 		pendingTx.Fees = dexeth.WeiToGwei(bigFees)
 		pendingTx.BlockNumber = blockNumber
+		pendingTx.Timestamp = hdr.Time
 		updated = true
 	}
 
@@ -4695,16 +4733,7 @@ func (w *baseWallet) checkPendingTxs() {
 
 const txHistoryNonceKey = "Nonce"
 
-func (w *baseWallet) addToTxHistory(nonce uint64, balanceDelta int64, fees, blockNumber uint64,
-	assetID uint32, id dex.Bytes, typ asset.TransactionType) {
-	w.tipMtx.RLock()
-	tip := w.currentTip.Number.Uint64()
-	w.tipMtx.RUnlock()
-	var confs uint64
-	if blockNumber > 0 && tip >= blockNumber {
-		confs = tip - blockNumber + 1
-	}
-
+func (w *baseWallet) addToTxHistory(nonce, amount, fees uint64, assetID uint32, txHash common.Hash, typ asset.TransactionType, recipient *string) {
 	var tokenAssetID *uint32
 	if assetID != w.baseChainID {
 		tokenAssetID = &assetID
@@ -4712,37 +4741,31 @@ func (w *baseWallet) addToTxHistory(nonce uint64, balanceDelta int64, fees, bloc
 
 	wt := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         typ,
-			ID:           id,
-			BalanceDelta: balanceDelta,
-			Fees:         fees,
-			BlockNumber:  blockNumber,
-			TokenID:      tokenAssetID,
+			Type:      typ,
+			ID:        txHash.String(),
+			Amount:    amount,
+			Fees:      fees,
+			TokenID:   tokenAssetID,
+			Recipient: recipient,
 			AdditionalData: map[string]string{
 				txHistoryNonceKey: strconv.FormatUint(nonce, 10),
 			},
 		},
-		TimeStamp: uint64(time.Now().Unix()),
-		Confirmed: confs >= txConfsNeededToConfirm,
-	}
-
-	if !wt.Confirmed {
-		w.pendingTxsMtx.Lock()
-		w.pendingTxs[nonce] = wt
-		w.pendingTxsMtx.Unlock()
+		SubmissionTime: uint64(time.Now().Unix()),
+		savedToDB:      true,
 	}
 
 	err := w.txDB.storeTx(nonce, wt)
 	if err != nil {
-		if wt.Confirmed {
-			// If it's confirmed but we failed to store it in the db, add
-			// it to the map so we can retry.
-			w.pendingTxsMtx.Lock()
-			w.pendingTxs[nonce] = wt
-			w.pendingTxsMtx.Unlock()
-		}
 		w.log.Errorf("error storing tx in db: %v", err)
+		wt.savedToDB = false
 	}
+
+	w.pendingTxsMtx.Lock()
+	w.pendingTxs[nonce] = wt
+	w.pendingTxsMtx.Unlock()
+
+	w.emitTransactionNote(wt.WalletTransaction, true)
 }
 
 // TxHistory returns all the transactions the wallet has made. This
@@ -4751,13 +4774,28 @@ func (w *baseWallet) addToTxHistory(nonce uint64, balanceDelta int64, fees, bloc
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (w *baseWallet) TxHistory(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+func (w *ETHWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	baseChainWallet := w.wallet(w.baseChainID)
 	if baseChainWallet == nil || !baseChainWallet.connected.Load() {
 		return nil, fmt.Errorf("wallet not connected")
 	}
 
-	return w.txDB.getTxs(n, refID, past)
+	return w.txDB.getTxs(n, refID, past, nil)
+}
+
+// TxHistory returns all the transactions the token wallet has made. If refID
+// is nil, then transactions starting from the most recent are returned (past
+// is ignored). If past is true, the transactions prior to the refID are
+// returned, otherwise the transactions after the refID are returned. n is the
+// number of transactions to return. If n is <= 0, all the transactions will be
+// returned.
+func (w *TokenWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	baseChainWallet := w.wallet(w.baseChainID)
+	if baseChainWallet == nil || !baseChainWallet.connected.Load() {
+		return nil, fmt.Errorf("wallet not connected")
+	}
+
+	return w.txDB.getTxs(n, refID, past, &w.assetID)
 }
 
 // providersFile reads a file located at ~/dextest/credentials.json.

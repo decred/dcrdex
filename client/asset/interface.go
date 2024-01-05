@@ -1083,21 +1083,45 @@ const (
 	RedeemBond
 	ApproveToken
 	Acceleration
+	SelfSend
+	RevokeTokenApproval
 )
+
+// IncomingTxType returns true if the wallet's balance increases due to a
+// transaction.
+func IncomingTxType(typ TransactionType) bool {
+	return typ == Receive || typ == Redeem || typ == Refund || typ == RedeemBond
+}
+
+// BondTxInfo contains information about a CreateBond or RedeemBond
+// transaction.
+type BondTxInfo struct {
+	// AccountID is the account is the account ID that the bond is applied to.
+	AccountID dex.Bytes `json:"accountID"`
+	// LockTime is the time until which the bond is locked.
+	LockTime uint64 `json:"lockTime"`
+	// BondID is the ID of the bond.
+	BondID dex.Bytes `json:"bondID"`
+}
 
 // WalletTransaction represents a transaction that was made by a wallet.
 type WalletTransaction struct {
-	Type TransactionType `json:"type"`
-	ID   dex.Bytes       `json:"id"`
-	// BalanceDelta is the amount the wallet balance changed as a result of
-	// the transaction, excluding fees.
-	BalanceDelta int64  `json:"balanceDelta"`
-	Fees         uint64 `json:"fees"`
+	Type   TransactionType `json:"type"`
+	ID     string          `json:"id"`
+	Amount uint64          `json:"amount"`
+	Fees   uint64          `json:"fees"`
 	// BlockNumber is 0 for txs in the mempool.
 	BlockNumber uint64 `json:"blockNumber"`
+	// Timestamp is the time the transaction was mined.
+	Timestamp uint64 `json:"timestamp"`
 	// TokenID will be non-nil if the BalanceDelta applies to the balance
 	// of a token.
 	TokenID *uint32 `json:"tokenID,omitempty"`
+	// Recipient wil be non-nil for Send transactions, and specifies the
+	// recipient of the send.
+	Recipient *string `json:"recipient,omitempty"`
+	// BondInfo will be non-nil for CreateBond and RedeemBond transactions.
+	BondInfo *BondTxInfo `json:"bondInfo,omitempty"`
 	// AdditionalData contains asset specific information, i.e. nonce
 	// for ETH.
 	AdditionalData map[string]string `json:"additionalData"`
@@ -1112,7 +1136,7 @@ type WalletHistorian interface {
 	// refID are returned, otherwise the transactions after the refID are
 	// returned. n is the number of transactions to return. If n is <= 0,
 	// all the transactions will be returned.
-	TxHistory(n int, refID *dex.Bytes, past bool) ([]*WalletTransaction, error)
+	TxHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,
@@ -1438,6 +1462,13 @@ type BalanceChangeNote struct {
 	Balance *Balance
 }
 
+// TransactionNote is sent when a transaction is made, seen, or updated.
+type TransactionNote struct {
+	baseWalletNotification
+	Transaction *WalletTransaction `json:"transaction"`
+	New         bool               `json:"new"`
+}
+
 // CustomWalletNote is any other information the wallet wishes to convey to
 // the user.
 type CustomWalletNote struct {
@@ -1503,5 +1534,17 @@ func (e *WalletEmitter) BalanceChange(bal *Balance) {
 			Route:   "balanceChange",
 		},
 		Balance: bal,
+	})
+}
+
+// TransactionNote sends a TransactionNote.
+func (e *WalletEmitter) TransactionNote(tx *WalletTransaction, new bool) {
+	e.emit(&TransactionNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "transaction",
+		},
+		Transaction: tx,
+		New:         new,
 	})
 }

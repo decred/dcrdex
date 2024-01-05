@@ -85,7 +85,7 @@ type clientCore interface {
 	RemoveWalletPeer(assetID uint32, host string) error
 	Notifications(int) ([]*db.Notification, error)
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
-	TxHistory(assetID uint32, n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error)
+	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 
 	// These are core's ticket buying interface.
 	StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error)

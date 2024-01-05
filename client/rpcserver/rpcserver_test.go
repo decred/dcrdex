@@ -192,7 +192,7 @@ func (c *TCore) StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error) 
 func (c *TCore) SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error {
 	return c.setVotingPrefErr
 }
-func (c *TCore) TxHistory(assetID uint32, n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	return nil, nil
 }
 

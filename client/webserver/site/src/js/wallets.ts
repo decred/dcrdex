@@ -38,7 +38,10 @@ import {
   TicketStakingStatus,
   VotingServiceProvider,
   Ticket,
-  TicketStats
+  TicketStats,
+  TxHistoryResult,
+  TransactionNote,
+  WalletTransaction
 } from './registry'
 import { CoinExplorers } from './order'
 
@@ -88,6 +91,62 @@ export const ticketStatusTranslationKeys = [
   intl.ID_TICKET_STATUS_EXPIRED,
   intl.ID_TICKET_STATUS_UNSPENT,
   intl.ID_TICKET_STATUS_REVOKED
+]
+
+// const txTypeUnknown = 0
+const txTypeSend = 1
+const txTypeReceive = 2
+const txTypeSwap = 3
+const txTypeRedeem = 4
+const txTypeRefund = 5
+const txTypeSplit = 6
+const txTypeCreateBond = 7
+const txTypeRedeemBond = 8
+const txTypeApproveToken = 9
+const txTypeAcceleration = 10
+// const txTypeSelfSend = 11
+const txTypeRevokeTokenApproval = 12
+
+const positiveTxTypes : number[] = [
+  txTypeReceive,
+  txTypeRedeem,
+  txTypeRefund,
+  txTypeRedeemBond
+]
+
+const negativeTxTypes : number[] = [
+  txTypeSend,
+  txTypeSwap,
+  txTypeCreateBond
+]
+
+const noAmtTxTypes : number[] = [
+  txTypeSplit,
+  txTypeApproveToken,
+  txTypeAcceleration,
+  txTypeRevokeTokenApproval
+]
+
+function txTypeSignAndClass (txType: number): [string, string] {
+  if (positiveTxTypes.includes(txType)) return ['+', 'positive-tx']
+  if (negativeTxTypes.includes(txType)) return ['-', 'negative-tx']
+  return ['', '']
+}
+
+const txTypeTranslationKeys = [
+  intl.ID_TX_TYPE_UNKNOWN,
+  intl.ID_TX_TYPE_SEND,
+  intl.ID_TX_TYPE_RECEIVE,
+  intl.ID_TX_TYPE_SWAP,
+  intl.ID_TX_TYPE_REDEEM,
+  intl.ID_TX_TYPE_REFUND,
+  intl.ID_TX_TYPE_SPLIT,
+  intl.ID_TX_TYPE_CREATE_BOND,
+  intl.ID_TX_TYPE_REDEEM_BOND,
+  intl.ID_TX_TYPE_APPROVE_TOKEN,
+  intl.ID_TX_TYPE_ACCELERATION,
+  intl.ID_TX_TYPE_SELF_SEND,
+  intl.ID_TX_TYPE_REVOKE_TOKEN_APPROVAL
 ]
 
 const ticketPageSize = 10
@@ -150,6 +209,8 @@ export default class WalletsPage extends BasePage {
   maxSend: number
   unapprovingTokenVersion: number
   ticketPage: TicketPagination
+  oldestTx: WalletTransaction | undefined
+  currTx: WalletTransaction | undefined
 
   constructor (body: HTMLElement) {
     super()
@@ -171,7 +232,7 @@ export default class WalletsPage extends BasePage {
     Doc.cleanTemplates(
       page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl,
       page.ticketHistoryRowTmpl, page.votingChoiceTmpl, page.votingAgendaTmpl, page.tspendTmpl,
-      page.tkeyTmpl
+      page.tkeyTmpl, page.txHistoryRow, page.txHistoryDateRow
     )
 
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
@@ -182,6 +243,12 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.lockBttn, 'click', () => this.lock(this.selectedAssetID))
     Doc.bind(page.reconfigureBttn, 'click', () => this.showReconfig(this.selectedAssetID))
     Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedAssetID))
+    Doc.bind(page.earlierTxs, 'click', () => this.loadEarlierTxs())
+
+    Doc.bind(page.copyTxIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.id || '', page.txDetailsID, page.copyTxIDBtn) })
+    Doc.bind(page.copyRecipientBtn, 'click', () => { this.copyTxDetail(this.currTx?.recipient || '', page.txDetailsRecipient, page.copyRecipientBtn) })
+    Doc.bind(page.copyBondIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.bondID || '', page.txDetailsBondID, page.copyBondIDBtn) })
+    Doc.bind(page.copyBondAccountIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.accountID || '', page.txDetailsBondAccountID, page.copyBondAccountIDBtn) })
 
     // Bind the new wallet form.
     this.newWalletForm = new NewWalletForm(page.newWalletForm, (assetID: number) => {
@@ -314,6 +381,7 @@ export default class WalletsPage extends BasePage {
 
   closePopups () {
     Doc.hide(this.page.forms)
+    this.currTx = undefined
     if (this.animation) this.animation.stop()
   }
 
@@ -843,6 +911,7 @@ export default class WalletsPage extends BasePage {
     this.updateDisplayedAsset(assetID)
     this.showAvailableMarkets(assetID)
     this.showRecentActivity(assetID)
+    this.showTxHistory(assetID)
     this.updateTicketBuyer(assetID)
   }
 
@@ -1418,6 +1487,262 @@ export default class WalletsPage extends BasePage {
     page.orderActivityBox.classList.remove('invisible')
   }
 
+  updateTxHistoryRow (row: PageElement, tx: WalletTransaction, assetID: number) {
+    const tmpl = Doc.parseTemplate(row)
+    const date = new Date(tx.timestamp * 1000)
+    tmpl.time.textContent = date.toLocaleTimeString()
+    Doc.setVis(tx.timestamp === 0, tmpl.pending)
+    Doc.setVis(tx.timestamp !== 0, tmpl.time)
+    let txType = intl.prep(txTypeTranslationKeys[tx.type])
+    if (tx.tokenID && tx.tokenID !== assetID) {
+      const tokenSymbol = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
+      txType = `${tokenSymbol} ${txType}`
+    }
+    tmpl.type.textContent = txType
+    tmpl.id.textContent = trimStringWithEllipsis(tx.id, 12)
+    if (noAmtTxTypes.includes(tx.type)) {
+      tmpl.amount.textContent = '-'
+    } else {
+      const [u, c] = txTypeSignAndClass(tx.type)
+      const amt = Doc.formatCoinValue(tx.amount, app().unitInfo(assetID))
+      tmpl.amount.textContent = `${u}${amt}`
+      if (c !== '') tmpl.amount.classList.add(c)
+    }
+  }
+
+  txHistoryRow (tx: WalletTransaction, assetID: number) : PageElement {
+    const row = this.page.txHistoryRow.cloneNode(true) as PageElement
+    row.dataset.txid = tx.id
+    Doc.bind(row, 'click', () => this.showTxDetailsPopup(tx.id))
+    this.updateTxHistoryRow(row, tx, assetID)
+    return row
+  }
+
+  txHistoryDateRow (date: string) : PageElement {
+    const row = this.page.txHistoryDateRow.cloneNode(true) as PageElement
+    const tmpl = Doc.parseTemplate(row)
+    tmpl.date.textContent = date
+    return row
+  }
+
+  async copyTxDetail (detail: string, textEl: PageElement, btnEl: PageElement) {
+    try {
+      await navigator.clipboard.writeText(detail)
+    } catch (err) {
+      console.error('Unable to copy: ', err)
+    }
+    const originalColor = textEl.style.color
+    textEl.style.color = '#1e7d11'
+    btnEl.style.color = '#1e7d11'
+    setTimeout(() => {
+      textEl.style.color = originalColor
+      btnEl.style.color = originalColor
+    }, 350)
+  }
+
+  setTxDetailsPopupElements (tx: WalletTransaction) {
+    const page = this.page
+
+    // Block explorer
+    const assetExplorer = CoinExplorers[this.selectedAssetID]
+    if (assetExplorer && assetExplorer[net]) {
+      page.txViewBlockExplorer.href = assetExplorer[net](tx.id)
+    }
+
+    // Tx type
+    let txType = intl.prep(txTypeTranslationKeys[tx.type])
+    if (tx.tokenID && tx.tokenID !== this.selectedAssetID) {
+      const tokenSymbol = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
+      txType = `${tokenSymbol} ${txType}`
+    }
+    page.txDetailsType.textContent = txType
+
+    // Amount
+    if (noAmtTxTypes.includes(tx.type)) {
+      Doc.hide(page.txDetailsAmtSection)
+    } else {
+      Doc.show(page.txDetailsAmtSection)
+      const amt = Doc.formatCoinValue(tx.amount, app().unitInfo(this.selectedAssetID))
+      let amtUnit : string
+      if (tx.tokenID) {
+        amtUnit = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
+      } else {
+        amtUnit = app().assets[this.selectedAssetID].symbol.split('.')[0].toUpperCase()
+      }
+
+      const [s, c] = txTypeSignAndClass(tx.type)
+      page.txDetailsAmount.textContent = `${s}${amt} ${amtUnit}`
+      if (c !== '') page.txDetailsAmount.classList.add(c)
+    }
+
+    // Fee
+    let feeAsset = this.selectedAssetID
+    if (tx.tokenID !== undefined) {
+      const asset = app().assets[tx.tokenID]
+      if (asset.token) {
+        feeAsset = asset.token.parentID
+      } else {
+        console.error(`wallet transaction ${tx.id} is supposed to be a token tx, but asset ${tx.tokenID} is not a token`)
+      }
+    }
+    const fee = Doc.formatCoinValue(tx.fees, app().unitInfo(feeAsset))
+    page.txDetailsFee.textContent = `${fee} ${app().assets[feeAsset].symbol.toUpperCase()}`
+
+    // Time / block number
+    page.txDetailsBlockNumber.textContent = `${tx.blockNumber}`
+    const date = new Date(tx.timestamp * 1000)
+    const dateStr = date.toLocaleDateString()
+    const timeStr = date.toLocaleTimeString()
+    page.txDetailsTimestamp.textContent = `${dateStr} ${timeStr}`
+    Doc.setVis(tx.blockNumber === 0, page.timestampPending, page.blockNumberPending)
+    Doc.setVis(tx.blockNumber !== 0, page.txDetailsBlockNumber, page.txDetailsTimestamp)
+
+    // Tx ID
+    page.txDetailsID.textContent = trimStringWithEllipsis(tx.id, 20)
+
+    // Recipient
+    if (tx.recipient) {
+      Doc.show(page.txDetailsRecipientSection)
+      page.txDetailsRecipient.textContent = trimStringWithEllipsis(tx.recipient, 20)
+    } else {
+      Doc.hide(page.txDetailsRecipientSection)
+    }
+
+    // Bond Info
+    if (tx.bondInfo) {
+      Doc.show(page.txDetailsBondSection)
+      page.txDetailsBondID.textContent = trimStringWithEllipsis(tx.bondInfo.bondID, 20)
+      const date = new Date(tx.bondInfo.lockTime * 1000)
+      const dateStr = date.toLocaleDateString()
+      const timeStr = date.toLocaleTimeString()
+      page.txDetailsBondLocktime.textContent = `${dateStr} ${timeStr}`
+      Doc.setVis(tx.bondInfo.accountID !== '', page.txDetailsBondAccountIDSection)
+      page.txDetailsBondAccountID.textContent = trimStringWithEllipsis(tx.bondInfo.accountID, 20)
+    } else {
+      Doc.hide(page.txDetailsBondSection)
+    }
+
+    // Nonce
+    if (tx.additionalData && tx.additionalData.Nonce) {
+      Doc.show(page.txDetailsNonceSection)
+      page.txDetailsNonce.textContent = `${tx.additionalData.Nonce}`
+    } else {
+      Doc.hide(page.txDetailsNonceSection)
+    }
+  }
+
+  showTxDetailsPopup (id: string) {
+    const tx = app().getWalletTx(this.selectedAssetID, id)
+    if (!tx) {
+      console.error(`wallet transaction ${id} not found`)
+      return
+    }
+    this.currTx = tx
+    this.setTxDetailsPopupElements(tx)
+    this.showForm(this.page.txDetails)
+  }
+
+  txHistoryTableNewestDate () : string {
+    if (this.page.txHistoryTableBody.firstChild) {
+      const tmpl = Doc.parseTemplate(this.page.txHistoryTableBody.firstChild as PageElement)
+      return tmpl.date.textContent || ''
+    }
+    return ''
+  }
+
+  txDate (tx: WalletTransaction) : string {
+    if (tx.timestamp === 0) {
+      return (new Date()).toLocaleDateString()
+    }
+    return (new Date(tx.timestamp * 1000)).toLocaleDateString()
+  }
+
+  handleTxNote (tx: WalletTransaction, newTx: boolean) {
+    if (newTx) {
+      if (!this.oldestTx) {
+        Doc.show(this.page.txHistoryTable)
+        Doc.hide(this.page.noTxHistory)
+        this.page.txHistoryTableBody.appendChild(this.txHistoryDateRow(this.txDate(tx)))
+        this.page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, this.selectedAssetID))
+        this.oldestTx = tx
+      } else if (this.txDate(tx) !== this.txHistoryTableNewestDate()) {
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.firstChild)
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryDateRow(this.txDate(tx)), this.page.txHistoryTableBody.firstChild)
+      } else {
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.children[1])
+      }
+      return
+    }
+    for (const row of this.page.txHistoryTableBody.children) {
+      const peRow = row as PageElement
+      if (peRow.dataset.txid === tx.id) {
+        this.updateTxHistoryRow(peRow, tx, this.selectedAssetID)
+        break
+      }
+    }
+    if (tx.id === this.currTx?.id) {
+      this.setTxDetailsPopupElements(tx)
+    }
+  }
+
+  async showTxHistory (assetID: number) {
+    const page = this.page
+    let txRes : TxHistoryResult
+    Doc.hide(page.txHistoryTable, page.noTxHistory, page.earlierTxs)
+    if (!app().assets[assetID].wallet) return
+    try {
+      txRes = await app().txHistory(assetID, 10)
+    } catch (err) {
+      return
+    }
+    if (txRes.txs.length === 0) {
+      Doc.show(page.noTxHistory)
+      return
+    }
+    Doc.empty(page.txHistoryTableBody)
+
+    let oldestDate = this.txDate(txRes.txs[0])
+    page.txHistoryTableBody.appendChild(this.txHistoryDateRow(oldestDate))
+    for (const tx of txRes.txs) {
+      const date = this.txDate(tx)
+      if (date !== oldestDate) {
+        oldestDate = date
+        page.txHistoryTableBody.appendChild(this.txHistoryDateRow(date))
+      }
+      const row = this.txHistoryRow(tx, assetID)
+      page.txHistoryTableBody.appendChild(row)
+    }
+    this.oldestTx = txRes.txs[txRes.txs.length - 1]
+    Doc.show(page.txHistoryTable)
+    Doc.setVis(!txRes.lastTx, page.earlierTxs)
+  }
+
+  async loadEarlierTxs () {
+    if (!this.oldestTx) return
+    const page = this.page
+    let txRes : TxHistoryResult
+    try {
+      txRes = await app().txHistory(this.selectedAssetID, 10, this.oldestTx.id)
+    } catch (err) {
+      console.error(err)
+      return
+    }
+    let oldestDate = this.txDate(this.oldestTx)
+    for (const tx of txRes.txs) {
+      const date = this.txDate(tx)
+      if (date !== oldestDate) {
+        oldestDate = date
+        page.txHistoryTableBody.appendChild(this.txHistoryDateRow(date))
+      }
+      const row = this.txHistoryRow(tx, this.selectedAssetID)
+      page.txHistoryTableBody.appendChild(row)
+    }
+    Doc.setVis(!txRes.lastTx, page.earlierTxs)
+    if (txRes.txs.length > 0) {
+      this.oldestTx = txRes.txs[txRes.txs.length - 1]
+    }
+  }
+
   async rescanWallet (assetID: number) {
     const page = this.page
     Doc.hide(page.reconfigErr)
@@ -1775,6 +2100,8 @@ export default class WalletsPage extends BasePage {
     }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RECONFIG_SUCCESS))
     this.updateTicketBuyer(assetID)
+    app().clearTxHistory(assetID)
+    this.showTxHistory(assetID)
   }
 
   /* lock instructs the API to lock the wallet. */
@@ -1920,6 +2247,7 @@ export default class WalletsPage extends BasePage {
   handleCreateWalletNote (note: WalletCreationNote) {
     this.updateAssetButton(note.assetID)
     this.assetUpdated(note.assetID)
+    this.showTxHistory(note.assetID)
   }
 
   handleCustomWalletNote (note: WalletNote) {
@@ -1942,6 +2270,12 @@ export default class WalletsPage extends BasePage {
       }
       case 'ticketPurchaseUpdate': {
         this.processTicketPurchaseUpdate(walletNote as CustomWalletNote)
+        break
+      }
+      case 'transaction': {
+        const n = walletNote as TransactionNote
+        if (n.assetID === this.selectedAssetID) this.handleTxNote(n.transaction, n.new)
+        break
       }
     }
   }
@@ -1953,6 +2287,11 @@ export default class WalletsPage extends BasePage {
   unload (): void {
     Doc.unbind(document, 'keyup', this.keyup)
   }
+}
+
+function trimStringWithEllipsis (str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str
+  return `${str.substring(0, maxLen / 2)}...${str.substring(str.length - maxLen / 2)}`
 }
 
 /*

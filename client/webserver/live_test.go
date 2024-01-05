@@ -863,6 +863,9 @@ func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 func (c *TCore) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
 	return nil, nil
 }
+func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
 
 func coreCoin() *core.Coin {
 	b := make([]byte, 36)
