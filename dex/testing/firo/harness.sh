@@ -3,6 +3,8 @@
 # This simnet harness sets up 4 Firo nodes and a set of harness controls
 # Each node has a prepared, encrypted, empty wallet
 
+# Wallets updated to new protocol for spark 2024-01-08
+
 SYMBOL="firo"
 DAEMON="firod"
 CLI="firo-cli"
@@ -17,11 +19,11 @@ BETA_RPC_PORT="53769"
 DELTA_RPC_PORT="53770"
 GAMMA_RPC_PORT="53771"
 WALLET_PASSWORD="abc"
-ALPHA_MINING_ADDR="TLwcS5McL6wCkxRoH3poku4kr2D5yjCKqf"
-BETA_MINING_ADDR="TLyJDBg2UK5Jy7WT73DFEmLcEJVL7RZHQ9"
-BETA_ADDR="TVncMftCQstJFzPNzbAPjcrvgbaKSf4XVt"
-DELTA_ADDR="TNqeqdnSipcVwMv1EyGo6NtrJUTsYB8ebx"
-GAMMA_ADDR="TCzKuJ1kJ5A9u8FNPJqYf35KNbW23n7TSu"
+ALPHA_MINING_ADDR="TDEWAEjLGfBcoqnn68nWE1UJgD8hqEbfAY"
+BETA_MINING_ADDR="TUs8akNdhzH3fdcTd1zrNDc2MkWSKrjBjb"
+BETA_ADDR="TP6n48AWtUYNjMmXJbMiPT2MooS7nH7ToX"
+DELTA_ADDR="TBcK9DEcQTL1EMmXNWYhD2FFXgUGQWv7Eh"
+GAMMA_ADDR="TW1XKEEkHY2CVwcoDkgweLs71DLEL3dzcQ"
 
 # Background watch mining in window 5 by default:  
 # 'export NOMINER="1"' or uncomment this line to disable
@@ -258,23 +260,23 @@ ${CLI} ${GAMMA_CLI_CFG} "\$@"
 EOF
 chmod +x "./gamma"
 
-cat > "./reorg" <<EOF
-#!/usr/bin/env bash
-set -x
-echo "Disconnecting beta from alpha"
-sleep 1
-./beta disconnectnode 127.0.0.1:${ALPHA_LISTEN_PORT}
-echo "Mining a block on alpha"
-sleep 1
-./mine-alpha 1
-echo "Mining 3 blocks on beta"
-./mine-beta 3
-sleep 2
-echo "Reconnecting beta to alpha"
-./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
-sleep 2
-EOF
-chmod +x "./reorg"
+# cat > "./reorg" <<EOF
+# #!/usr/bin/env bash
+# set -x
+# echo "Disconnecting beta from alpha"
+# sleep 1
+# ./beta disconnectnode 127.0.0.1:${ALPHA_LISTEN_PORT}
+# echo "Mining a block on alpha"
+# sleep 1
+# ./mine-alpha 1
+# echo "Mining 3 blocks on beta"
+# ./mine-beta 3
+# sleep 2
+# echo "Reconnecting beta to alpha"
+# ./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
+# sleep 2
+# EOF
+# chmod +x "./reorg"
 
 cat > "${HARNESS_DIR}/quit" <<EOF
 #!/usr/bin/env bash
@@ -335,9 +337,9 @@ if [ -z "$NOMINER" ] ; then
   tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
 fi
 
-# Live stop/start
-#tmux send-keys -t $SESSION:5 C-c C-m
-#tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
+# Live stop/start - experimental
+# tmux send-keys -t $SESSION:5 C-c C-m
+# tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
 
 ######################################################################################
 # Reenable history select the harness control window & attach to the control session #
