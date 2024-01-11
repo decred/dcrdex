@@ -496,6 +496,7 @@ export default class Application {
   async fetchNotes () {
     const res = await getJSON('/api/notes')
     if (!this.checkResponse(res)) return console.error('failed to fetch notes:', res?.msg || String(res))
+    res.notes.reverse()
     this.setNotes(res.notes)
   }
 
