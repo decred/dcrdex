@@ -4577,6 +4577,7 @@ func TestTradeTracking(t *testing.T) {
 	defer rig.shutdown()
 	dc := rig.dc
 	tCore := rig.core
+	tCore.loggedIn = true
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
