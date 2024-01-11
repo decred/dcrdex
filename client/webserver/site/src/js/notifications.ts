@@ -114,22 +114,28 @@ class OSDesktopNotifier {
 
   static async sendDesktopNotification (title: string, body?: string): Promise<void> {
     // webview/linux or webview/windows
-    if (window.isWebview) await window.sendOSNotification(title, body)
+    if (isDesktopWebview()) await window.sendOSNotification(title, body)
     // webkit/darwin
     // See: client/cmd/dexc-desktop/app_darwin.go#L673-#L697
-    else if (window.webkit) await window.webkit.messageHandlers.dexcHandler.postMessage(['sendOSNotification', title, body])
+    else if (isDesktopWebkit()) await window.webkit.messageHandlers.dexcHandler.postMessage(['sendOSNotification', title, body])
     else console.error('sendDesktopNotification: unknown environment')
   }
 }
 
-// isWebview checks if we are running in webview or webkit (MacOS).
-function isWebview (): boolean {
-  return window.isWebview !== undefined || window.webkit !== undefined // MacOS
+// isDesktopWebview checks if we are running in webview
+function isDesktopWebview (): boolean {
+  return window.isWebview !== undefined
+}
+
+// isDesktopDarwin returns true if we are running in a webview on darwin
+// It tests for the existence of the dexcHandler webkit message handler.
+function isDesktopWebkit (): boolean {
+  return window.webkit?.messageHandlers?.dexcHandler !== undefined
 }
 
 // determine whether we're running in a webview or in browser, and export
 // the appropriate notifier accordingly.
-export const Notifier = isWebview() ? OSDesktopNotifier : BrowserNotifier
+export const Notifier = isDesktopWebview() || isDesktopWebkit() ? OSDesktopNotifier : BrowserNotifier
 
 export async function desktopNotify (note: CoreNote) {
   if (!desktopNtfnSettings.browserNtfnEnabled || !desktopNtfnSettings[note.type]) return
