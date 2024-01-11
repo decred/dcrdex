@@ -27,6 +27,8 @@ const (
 	defaultMainnetHost = "127.0.0.1"
 	defaultTestnetHost = "127.0.0.2"
 	defaultSimnetHost  = "127.0.0.3"
+	walletPairOneHost  = "127.0.0.6"
+	walletPairTwoHost  = "127.0.0.7"
 	defaultRPCPort     = "5757"
 	defaultWebPort     = "5758"
 	defaultLogLevel    = "debug"
@@ -83,7 +85,10 @@ func (cfg *RPCConfig) RPC(c *core.Core, marketMaker *mm.MarketMaker, log dex.Log
 		Cert:        cfg.RPCCert,
 		Key:         cfg.RPCKey,
 		DexcVersion: dexcVersion,
-		CertHosts:   []string{defaultTestnetHost, defaultSimnetHost, defaultMainnetHost},
+		CertHosts: []string{
+			defaultTestnetHost, defaultSimnetHost, defaultMainnetHost,
+			walletPairOneHost, walletPairTwoHost,
+		},
 	}
 }
 
