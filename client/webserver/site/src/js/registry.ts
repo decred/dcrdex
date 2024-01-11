@@ -877,7 +877,6 @@ export interface Application {
   ackNotes (): void
   setNoteTimes (noteList: HTMLElement): void
   bindInternalNavigation (ancestor: HTMLElement): void
-  storeNotes (): void
   updateMenuItemsDisplay (): void
   attachCommon (node: HTMLElement): void
   updateBondConfs (dexAddr: string, coinID: string, confs: number, assetID: number): void
