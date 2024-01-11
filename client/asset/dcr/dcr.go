@@ -1281,21 +1281,28 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (
 
 	// Start by attempting max lots with a basic fee.
 	basicFee := dexdcr.InitTxSize * maxFeeRate
-	lots := avail / (lotSize + basicFee)
 	// NOTE: Split tx is an order-time option. The max order is generally
 	// attainable when split is used, regardless of whether they choose it on
 	// the order form. Allow the split for max order purposes.
 	trySplitTx := true
-	for lots > 0 {
-		est, _, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, trySplitTx, 1.0)
+
+	// Find the max lots we can fund.
+	maxLotsInt := int(avail / (lotSize + basicFee))
+	oneLotTooMany := sort.Search(maxLotsInt+1, func(lots int) bool {
+		_, _, _, err = dcr.estimateSwap(uint64(lots), lotSize, feeSuggestion, maxFeeRate, utxos, trySplitTx, 1.0)
 		// The only failure mode of estimateSwap -> dcr.fund is when there is
-		// not enough funds, so if an error is encountered, count down the lots
-		// and repeat until we have enough.
-		if err != nil {
-			lots--
-			continue
-		}
-		return utxos, est, nil
+		// not enough funds.
+		return err != nil
+	})
+
+	maxLots := uint64(oneLotTooMany - 1)
+	if oneLotTooMany == 0 {
+		maxLots = 0
+	}
+
+	if maxLots > 0 {
+		est, _, _, err = dcr.estimateSwap(maxLots, lotSize, feeSuggestion, maxFeeRate, utxos, trySplitTx, 1.0)
+		return utxos, est, err
 	}
 
 	return nil, &asset.SwapEstimate{}, nil

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1782,21 +1783,27 @@ func (btc *baseWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxo
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
+
 	// Start by attempting max lots with a basic fee.
 	basicFee := btc.initTxSize * maxFeeRate
-	lots := avail / (lotSize + basicFee)
-	for lots > 0 {
-		est, _, _, err := btc.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate,
-			utxos, true, 1.0)
+	maxLotsInt := int(avail / (lotSize + basicFee))
+	oneLotTooMany := sort.Search(maxLotsInt+1, func(lots int) bool {
+		_, _, _, err = btc.estimateSwap(uint64(lots), lotSize, feeSuggestion, maxFeeRate, utxos, true, 1.0)
 		// The only failure mode of estimateSwap -> btc.fund is when there is
-		// not enough funds, so if an error is encountered, count down the lots
-		// and repeat until we have enough.
-		if err != nil {
-			lots--
-			continue
-		}
-		return utxos, est, nil
+		// not enough funds.
+		return err != nil
+	})
+
+	maxLots := uint64(oneLotTooMany - 1)
+	if oneLotTooMany == 0 {
+		maxLots = 0
 	}
+
+	if maxLots > 0 {
+		est, _, _, err = btc.estimateSwap(maxLots, lotSize, feeSuggestion, maxFeeRate, utxos, true, 1.0)
+		return utxos, est, err
+	}
+
 	return utxos, &asset.SwapEstimate{}, nil
 }
 
