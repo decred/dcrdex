@@ -4733,7 +4733,7 @@ func (w *baseWallet) checkPendingTxs() {
 
 const txHistoryNonceKey = "Nonce"
 
-func (w *baseWallet) addToTxHistory(nonce, amount, fees uint64, assetID uint32, txHash common.Hash, typ asset.TransactionType, recipient *string) {
+func (w *baseWallet) addToTxHistory(nonce, amount, fees uint64, assetID uint32, txHash common.Hash, txType asset.TransactionType, recipient *string) {
 	var tokenAssetID *uint32
 	if assetID != w.baseChainID {
 		tokenAssetID = &assetID
@@ -4741,7 +4741,7 @@ func (w *baseWallet) addToTxHistory(nonce, amount, fees uint64, assetID uint32, 
 
 	wt := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:      typ,
+			Type:      txType,
 			ID:        txHash.String(),
 			Amount:    amount,
 			Fees:      fees,

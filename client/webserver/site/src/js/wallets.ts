@@ -145,7 +145,7 @@ const txTypeTranslationKeys = [
   intl.ID_TX_TYPE_REDEEM_BOND,
   intl.ID_TX_TYPE_APPROVE_TOKEN,
   intl.ID_TX_TYPE_ACCELERATION,
-  intl.ID_TX_TYPE_SELF_SEND,
+  intl.ID_TX_TYPE_SELF_TRANSFER,
   intl.ID_TX_TYPE_REVOKE_TOKEN_APPROVAL
 ]
 
@@ -1643,8 +1643,8 @@ export default class WalletsPage extends BasePage {
   }
 
   txHistoryTableNewestDate () : string {
-    if (this.page.txHistoryTableBody.firstChild) {
-      const tmpl = Doc.parseTemplate(this.page.txHistoryTableBody.firstChild as PageElement)
+    if (this.page.txHistoryTableBody.children.length >= 1) {
+      const tmpl = Doc.parseTemplate(this.page.txHistoryTableBody.children[0] as PageElement)
       return tmpl.date.textContent || ''
     }
     return ''
@@ -1666,8 +1666,8 @@ export default class WalletsPage extends BasePage {
         this.page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, this.selectedAssetID))
         this.oldestTx = tx
       } else if (this.txDate(tx) !== this.txHistoryTableNewestDate()) {
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.firstChild)
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryDateRow(this.txDate(tx)), this.page.txHistoryTableBody.firstChild)
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.children[0])
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryDateRow(this.txDate(tx)), this.page.txHistoryTableBody.children[0])
       } else {
         this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.children[1])
       }
@@ -1689,6 +1689,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     let txRes : TxHistoryResult
     Doc.hide(page.txHistoryTable, page.noTxHistory, page.earlierTxs)
+    Doc.empty(page.txHistoryTableBody)
     if (!app().assets[assetID].wallet) return
     try {
       txRes = await app().txHistory(assetID, 10)
@@ -1699,8 +1700,6 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.noTxHistory)
       return
     }
-    Doc.empty(page.txHistoryTableBody)
-
     let oldestDate = this.txDate(txRes.txs[0])
     page.txHistoryTableBody.appendChild(this.txHistoryDateRow(oldestDate))
     for (const tx of txRes.txs) {

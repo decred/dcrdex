@@ -168,7 +168,7 @@ export const ID_TX_TYPE_CREATE_BOND = 'TX_TYPE_CREATE_BOND'
 export const ID_TX_TYPE_REDEEM_BOND = 'TX_TYPE_REDEEM_BOND'
 export const ID_TX_TYPE_APPROVE_TOKEN = 'TX_TYPE_APPROVE_TOKEN'
 export const ID_TX_TYPE_ACCELERATION = 'TX_TYPE_ACCELERATION'
-export const ID_TX_TYPE_SELF_SEND = 'TX_TYPE_SELF_SEND'
+export const ID_TX_TYPE_SELF_TRANSFER = 'TX_TYPE_SELF_TRANSFER'
 export const ID_TX_TYPE_REVOKE_TOKEN_APPROVAL = 'TX_TYPE_REVOKE_TOKEN_APPROVAL'
 
 export const enUS: Locale = {
@@ -336,12 +336,12 @@ export const enUS: Locale = {
   [ID_TX_TYPE_REDEEM]: 'Redeem',
   [ID_TX_TYPE_REFUND]: 'Refund',
   [ID_TX_TYPE_SPLIT]: 'Split',
-  [ID_TX_TYPE_CREATE_BOND]: 'Create Bond',
-  [ID_TX_TYPE_REDEEM_BOND]: 'Redeem Bond',
-  [ID_TX_TYPE_APPROVE_TOKEN]: 'Approve Token',
+  [ID_TX_TYPE_CREATE_BOND]: 'Create bond',
+  [ID_TX_TYPE_REDEEM_BOND]: 'Redeem bond',
+  [ID_TX_TYPE_APPROVE_TOKEN]: 'Approve token',
   [ID_TX_TYPE_ACCELERATION]: 'Acceleration',
-  [ID_TX_TYPE_SELF_SEND]: 'Self Send',
-  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke Token Approval'
+  [ID_TX_TYPE_SELF_TRANSFER]: 'Self transfer',
+  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval'
 }
 
 export const ptBR: Locale = {

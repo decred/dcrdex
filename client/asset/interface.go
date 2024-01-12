@@ -1089,8 +1089,8 @@ const (
 
 // IncomingTxType returns true if the wallet's balance increases due to a
 // transaction.
-func IncomingTxType(typ TransactionType) bool {
-	return typ == Receive || typ == Redeem || typ == Refund || typ == RedeemBond
+func IncomingTxType(txType TransactionType) bool {
+	return txType == Receive || txType == Redeem || txType == Refund || txType == RedeemBond
 }
 
 // BondTxInfo contains information about a CreateBond or RedeemBond
