@@ -655,6 +655,29 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+type CustomSPVWalletConstructor func(settings map[string]string, params *chaincfg.Params) (BTCWallet, error)
+
+// customSPVWalletConstructors are functions for setting up custom
+// implementations of the BTCWallet interface that may be used by the
+// ExchangeWalletSPV instead of the default spv implementation.
+var customSPVWalletConstructors = map[string]CustomSPVWalletConstructor{}
+
+// RegisterCustomSPVWallet registers a function that should be used in creating
+// a BTCWallet implementation that the ExchangeWalletSPV will use in place of
+// the default spv wallet implementation. External consumers can use this
+// function to provide alternative BTCWallet implementations, and must do so
+// before attempting to create an ExchangeWalletSPV instance of this type. It'll
+// panic if callers try to register a wallet twice.
+func RegisterCustomSPVWallet(constructor CustomSPVWalletConstructor, def *asset.WalletDefinition) {
+	for _, availableWallets := range WalletInfo.AvailableWallets {
+		if def.Type == availableWallets.Type {
+			panic(fmt.Sprintf("wallet type (%q) is already registered", def.Type))
+		}
+	}
+	customSPVWalletConstructors[def.Type] = constructor
+	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
+}
+
 // swapOptions captures the available Swap options. Tagged to be used with
 // config.Unmapify to decode e.g. asset.Order.Options.
 type swapOptions struct {
@@ -1002,7 +1025,22 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		cloneCFG.Ports = dexbtc.NetPorts{} // no default ports
 		return ElectrumWallet(cloneCFG)
 	default:
-		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+		makeCustomWallet, ok := customSPVWalletConstructors[cfg.Type]
+		if !ok {
+			return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+		}
+
+		// Create custom wallet first and return early if we encounter any
+		// error.
+		btcWallet, err := makeCustomWallet(cfg.Settings, cloneCFG.ChainParams)
+		if err != nil {
+			return nil, fmt.Errorf("btc custom wallet setup error: %v", err)
+		}
+
+		walletConstructor := func(_ string, _ *WalletConfig, _ *chaincfg.Params, _ dex.Logger) BTCWallet {
+			return btcWallet
+		}
+		return OpenSPVWallet(cloneCFG, walletConstructor)
 	}
 }
 
@@ -1259,8 +1297,6 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	spvw := &spvWallet{
 		chainParams: cfg.ChainParams,
 		cfg:         walletCfg,
-		acctNum:     defaultAcctNum,
-		acctName:    defaultAcctName,
 		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name),
 		txBlocks:    make(map[chainhash.Hash]*hashEntry),
 		checkpoints: make(map[OutPoint]*scanCheckpoint),
@@ -1271,6 +1307,9 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 
 	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 	btc.setNode(spvw)
+
+	// Set account number for easy reference.
+	spvw.acctNum = spvw.wallet.AccountInfo().AccountNumber
 
 	w := &ExchangeWalletSPV{
 		intermediaryWallet: &intermediaryWallet{

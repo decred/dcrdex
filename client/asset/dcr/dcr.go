@@ -744,13 +744,15 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 			return nil, err
 		}
 	default:
-		if makeCustomWallet, ok := customWalletConstructors[cfg.Type]; ok {
-			dcr.wallet, err = makeCustomWallet(cfg.Settings, chainParams, logger)
-			if err != nil {
-				return nil, fmt.Errorf("custom wallet setup error: %v", err)
-			}
-		} else {
+		makeCustomWallet, ok := customWalletConstructors[cfg.Type]
+		if !ok {
 			return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+		}
+
+		// Create custom wallet and return early if we encounter any error.
+		dcr.wallet, err = makeCustomWallet(cfg.Settings, chainParams, logger)
+		if err != nil {
+			return nil, fmt.Errorf("custom wallet setup error: %v", err)
 		}
 	}
 

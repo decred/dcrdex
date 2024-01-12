@@ -378,7 +378,7 @@ type WalletConfig struct {
 	// wallet/node peers changes, or the wallet fails to get the count. This
 	// should not be called prior to Connect of the constructed wallet.
 	PeersChange func(uint32, error)
-	// DataDir is a filesystem directory the the wallet may use for persistent
+	// DataDir is a filesystem directory the wallet may use for persistent
 	// storage.
 	DataDir string
 }

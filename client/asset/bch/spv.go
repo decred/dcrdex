@@ -52,10 +52,11 @@ import (
 )
 
 const (
-	DefaultM       uint64 = 784931 // From bchutil. Used for gcs filters.
-	logDirName            = "logs"
-	neutrinoDBName        = "neutrino.db"
-	defaultAcctNum        = 0
+	DefaultM        uint64 = 784931 // From bchutil. Used for gcs filters.
+	logDirName             = "logs"
+	neutrinoDBName         = "neutrino.db"
+	defaultAcctNum         = 0
+	defaultAcctName        = "default"
 )
 
 var (
@@ -269,6 +270,15 @@ func (w *bchSPVWallet) txDetails(txHash *bchchainhash.Hash) (*bchwtxmgr.TxDetail
 }
 
 var _ btc.BTCWallet = (*bchSPVWallet)(nil)
+
+// AccountInfo returns the account information of the wallet for use by the
+// exchange wallet.
+func (w *bchSPVWallet) AccountInfo() btc.XCWalletAccount {
+	return btc.XCWalletAccount{
+		AccountName:   defaultAcctName,
+		AccountNumber: defaultAcctNum,
+	}
+}
 
 func (w *bchSPVWallet) PublishTransaction(btcTx *wire.MsgTx, label string) error {
 	bchTx, err := convertMsgTxToBCH(btcTx)

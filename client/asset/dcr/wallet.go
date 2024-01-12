@@ -33,16 +33,16 @@ var customWalletConstructors = map[string]WalletConstructor{}
 // Wallet implementation that the ExchangeWallet of the specified type will use
 // in place of the default rpcWallet implementation. External consumers can use
 // this function to provide alternative Wallet implementations, and must do so
-// before attempting to create an ExchangeWallet instance of this type.
-func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefinition) error {
+// before attempting to create an ExchangeWallet instance of this type. It'll
+// panic if callers try to register a wallet twice.
+func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefinition) {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
-			return fmt.Errorf("already support %q wallets", def.Type)
+			panic(fmt.Sprintf("wallet type (%q) already registered", def.Type))
 		}
 	}
 	customWalletConstructors[def.Type] = constructor
 	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
-	return nil
 }
 
 type TipChangeCallback func(context.Context, *chainhash.Hash, int64, error)

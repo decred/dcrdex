@@ -102,6 +102,9 @@ type BTCWallet interface {
 	WaitForShutdown()
 	ChainSynced() bool // currently unused
 	AccountProperties(scope waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error)
+	// AccountInfo returns the account information of the wallet for use by the
+	// exchange wallet.
+	AccountInfo() XCWalletAccount
 	// The below methods are not implemented by *wallet.Wallet, so must be
 	// implemented by the BTCWallet implementation.
 	WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
@@ -118,6 +121,11 @@ type BTCWallet interface {
 	AddPeer(string) error
 	RemovePeer(string) error
 	ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error)
+}
+
+type XCWalletAccount struct {
+	AccountName   string
+	AccountNumber uint32
 }
 
 // BlockNotification is block hash and height delivered by a BTCWallet when it
@@ -244,7 +252,6 @@ type spvWallet struct {
 	wallet      BTCWallet
 	cl          SPVService
 	acctNum     uint32
-	acctName    string
 	dir         string
 	decodeAddr  dexbtc.AddressDecoder
 
@@ -607,7 +614,7 @@ func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.Lis
 // balances retrieves a wallet's balance details.
 func (w *spvWallet) balances() (*GetBalancesResult, error) {
 	// Determine trusted vs untrusted coins with listunspent.
-	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.wallet.AccountInfo().AccountName)
 	if err != nil {
 		return nil, fmt.Errorf("error listing unspent outputs: %w", err)
 	}
@@ -644,7 +651,7 @@ func (w *spvWallet) balances() (*GetBalancesResult, error) {
 
 // listUnspent retrieves list of the wallet's UTXOs.
 func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
-	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.wallet.AccountInfo().AccountName)
 	if err != nil {
 		return nil, err
 	}
