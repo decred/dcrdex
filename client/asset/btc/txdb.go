@@ -234,18 +234,18 @@ func (db *badgerTxDB) markTxAsSubmitted(txID string) error {
 			return err
 		}
 
-		var wt *extendedWalletTx
-		if err := json.Unmarshal(wtB, wt); err != nil {
+		var wt extendedWalletTx
+		if err := json.Unmarshal(wtB, &wt); err != nil {
 			return err
 		}
 
 		wt.Submitted = true
-		wtB, err = json.Marshal(wt)
+		submittedWt, err := json.Marshal(wt)
 		if err != nil {
 			return err
 		}
 
-		return txn.Set(blockKey, wtB)
+		return txn.Set(blockKey, submittedWt)
 	})
 }
 
@@ -255,6 +255,7 @@ func (db *badgerTxDB) markTxAsSubmitted(txID string) error {
 // on the value of past. If refID is nil, the most recent n transactions
 // are returned, and the value of past is ignored. If the transaction with
 // ID refID is not in the database, asset.CoinNotFoundError is returned.
+// Unsubmitted transactions are not returned.
 func (db *badgerTxDB) getTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	var txs []*asset.WalletTransaction
 	err := db.View(func(txn *badger.Txn) error {
@@ -295,6 +296,9 @@ func (db *badgerTxDB) getTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 			var wt extendedWalletTx
 			if err := json.Unmarshal(wtB, &wt); err != nil {
 				return err
+			}
+			if !wt.Submitted {
+				continue
 			}
 			if past {
 				txs = append(txs, wt.WalletTransaction)

@@ -40,6 +40,7 @@ func TestTxDB(t *testing.T) {
 			Fees:        1e5,
 			BlockNumber: 0,
 		},
+		Submitted: false,
 	}
 
 	tx2 := &extendedWalletTx{
@@ -50,6 +51,7 @@ func TestTxDB(t *testing.T) {
 			Fees:        3e5,
 			BlockNumber: 0,
 		},
+		Submitted: true,
 	}
 
 	tx3 := &extendedWalletTx{
@@ -60,6 +62,7 @@ func TestTxDB(t *testing.T) {
 			Fees:        2e5,
 			BlockNumber: 0,
 		},
+		Submitted: true,
 	}
 
 	getTxsAndCheck := func(n int, refID *string, past bool, expected []*asset.WalletTransaction) {
@@ -102,6 +105,14 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to store tx: %v", err)
 	}
+	getTxsAndCheck(0, nil, true, []*asset.WalletTransaction{})
+	getPendingTxsAndCheck([]*extendedWalletTx{tx1})
+
+	err = txHistoryStore.markTxAsSubmitted(tx1.ID)
+	if err != nil {
+		t.Fatalf("failed to mark tx as submitted: %v", err)
+	}
+	tx1.Submitted = true
 	getTxsAndCheck(0, nil, true, []*asset.WalletTransaction{tx1.WalletTransaction})
 	getPendingTxsAndCheck([]*extendedWalletTx{tx1})
 
