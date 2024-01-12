@@ -734,6 +734,11 @@ function formatSigFigsWithFormatters (intFormatter: Intl.NumberFormat, sigFigFor
   return fullPrecisionFormatter(maxDecimals, locales).format(n)
 }
 
+export function trimStringWithEllipsis (str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str
+  return `${str.substring(0, maxLen / 2)}...${str.substring(str.length - maxLen / 2)}`
+}
+
 if (process.env.NODE_ENV === 'development') {
   // Code will only appear in dev build.
   // https://webpack.js.org/guides/production/

@@ -143,11 +143,30 @@
     <span id="depositTokenParentName"></span>
   </div>
 </div>
-<img class="mb-3" id="qrcode" />
-<div class="mono deposit-address select-all">
-  <span id="depositAddress"></span>
-  <span id="copyAddressBtn" class="copy-btn ico-copy mt-2 ml-2 fs18"></span>
-  <span id="copyAlert" class="d-hide">[[[copied]]]</span>
+<div id="depositAddressContainer" class="text-center">
+  <img class="mb-3" id="qrcode" />
+  <div class="mono deposit-address select-all">
+    <span id="depositAddress"></span>
+    <span id="copyAddressBtn" class="copy-btn ico-copy mt-2 ml-2 fs18"></span>
+    <span id="copyAlert" class="d-hide">[[[copied]]]</span>
+  </div>
+</div>
+<div id="depositTxContainer" class="d-hide">
+  <div class="position-relative flex-center flex-column mb-4">
+    <div class="px-2 py-1 text-center position-relative fs18 sans-light mt-2">[[[deposit_tx_received]]]</div>
+    <span class="d-flex justify-content-between w-100 fs16">
+      <span>[[[Status]]]</span>
+      <div><span id="depositTxStatus"></span></div>
+    </span>
+    <span class="d-flex justify-content-between w-100 fs16">
+      <span>[[[Amount]]]</span>
+      <div><span id="depositTxAmount"></span></div>
+    </span>
+    <span class="d-flex justify-content-between w-100 fs16">
+      <span class="pe-3">[[[tx_id]]]</span>
+      <div><a id="depositTxID" class="subtlelink" target="_blank"></a></div>
+    </span>
+  </div>
 </div>
 <div class="my-3">
   <button id="newDepAddrBttn" type="button" class=" px-2 justify-content-center fs15 bg2 selected">[[[New Deposit Address]]]</button>

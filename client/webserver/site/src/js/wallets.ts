@@ -1,4 +1,4 @@
-import Doc, { Animation, AniToggle } from './doc'
+import Doc, { Animation, AniToggle, trimStringWithEllipsis } from './doc'
 import BasePage from './basepage'
 import { postJSON, Errors } from './http'
 import {
@@ -401,6 +401,7 @@ export default class WalletsPage extends BasePage {
 
   closePopups () {
     Doc.hide(this.page.forms)
+    if (Doc.isDisplayed(this.depositAddrForm.form)) this.depositAddrForm.resetForm()
     this.currTx = undefined
     if (this.animation) this.animation.stop()
   }
@@ -1873,6 +1874,7 @@ export default class WalletsPage extends BasePage {
 
   handleTxNote (tx: WalletTransaction, newTx: boolean) {
     if (newTx) {
+      this.handleDepositTx(tx)
       if (!this.oldestTx) {
         Doc.show(this.page.txHistoryTable)
         Doc.hide(this.page.noTxHistory)
@@ -1897,6 +1899,10 @@ export default class WalletsPage extends BasePage {
     if (tx.id === this.currTx?.id) {
       this.setTxDetailsPopupElements(tx)
     }
+  }
+
+  handleDepositTx (tx: WalletTransaction) {
+    this.depositAddrForm.handleIncomingTx(this.selectedAssetID, tx)
   }
 
   async showTxHistory (assetID: number) {
@@ -2503,11 +2509,6 @@ export default class WalletsPage extends BasePage {
   unload (): void {
     Doc.unbind(document, 'keyup', this.keyup)
   }
-}
-
-function trimStringWithEllipsis (str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str
-  return `${str.substring(0, maxLen / 2)}...${str.substring(str.length - maxLen / 2)}`
 }
 
 /*

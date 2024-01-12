@@ -505,6 +505,7 @@ var EnUS = map[string]string{
 	"ID":                          "ID",
 	"no_tx_history":               "No transactions to show",
 	"tx_details":                  "Transaction Details",
+	"deposit_tx_received":         "Transaction Received",
 	"fee":                         "Fee",
 	"tx_id":                       "Transaction ID",
 	"bond_id":                     "Bond ID",
