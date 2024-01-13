@@ -18,7 +18,7 @@ import (
 const (
 	version                 = 0
 	BipID                   = 5
-	minNetworkVersion       = 190200 // Dash v19.2.0, proto: 70228. Breaking change
+	minNetworkVersion       = 200000 // Dash v20.0.0, proto: 70230. Breaking change from 190200
 	walletTypeRPC           = "dashdRPC"
 	defaultRedeemConfTarget = 2
 )
