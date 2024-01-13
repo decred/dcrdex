@@ -42,3 +42,4 @@ client/cmd/dexc-desktop/pkg/installers
 client/cmd/testbinance/testbinance
 server/noderelay/cmd/sourcenode/sourcenode
 tatanka/cmd/demo/demo
+server/cmd/validatemarkets

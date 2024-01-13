@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/fiatrates"
 )
 
 const (
@@ -34,21 +34,6 @@ const (
 
 var (
 	dcrDataURL = "https://explorer.dcrdata.org/api/exchangerate"
-	// coinpaprika has two options. /tickers is for the top 2500 assets all in
-	// one request. /tickers/[slug] is for a single ticker. From testing
-	//    Single ticker request took 274.626125ms
-	//    Size of single ticker response: 0.733 kB
-	//    All tickers request took 47.651851ms
-	//    Size of all tickers response: 1828.863 kB
-	// Single ticker requests were < 1 kB, while all tickers were 1.8 MB, but
-	// the larger request was faster (without json decoding). Coinpaprika's,
-	// free tier allows up to 25k requests per month. For a
-	// fiatRateRequestInterval of 12 minutes, that 3600 requests per
-	// month for the all tickers request, and 3600 * N requests for N assets.
-	// So any more than 25000 / 3600 = 6.9 assets, and we can expect to run into
-	// rate limits. But the bandwidth of the full tickers request is kinda
-	// ridiculous too. Solution needed.
-	coinpaprikaURL = "https://api.coinpaprika.com/v1/tickers"
 	// The best info I can find on Messari says
 	//    Without an API key requests are rate limited to 20 requests per minute
 	//    and 1000 requests per day.
@@ -141,55 +126,15 @@ func newCommonRateSource(fetcher rateFetcher) *commonRateSource {
 // Coinpaprika API. See https://api.coinpaprika.com/#operation/getTickersById
 // for sample request and response information.
 func FetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
-	fiatRates := make(map[uint32]float64)
-	slugAssets := make(map[string]uint32)
-	for _, sa := range assets {
-		symbol := dex.TokenSymbol(sa.Symbol)
-		if symbol == "dextt" {
-			continue
-		}
-		name := sa.Name
-		// TODO: Store these within the *SupportedAsset.
-		switch symbol {
-		case "usdc":
-			name = "usd-coin"
-		case "polygon":
-			symbol = "matic"
-			name = "polygon"
-		}
-		slug := coinpapSlug(symbol, name)
-		slugAssets[slug] = sa.ID
+	coinpapAssets := make([]*fiatrates.CoinpaprikaAsset, 0, len(assets) /* too small cuz tokens*/)
+	for assetID, a := range assets {
+		coinpapAssets = append(coinpapAssets, &fiatrates.CoinpaprikaAsset{
+			AssetID: assetID,
+			Name:    a.Name,
+			Symbol:  a.Symbol,
+		})
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, fiatRequestTimeout)
-	defer cancel()
-
-	var res []*struct {
-		ID     string `json:"id"`
-		Quotes struct {
-			USD struct {
-				Price float64 `json:"price"`
-			} `json:"USD"`
-		} `json:"quotes"`
-	}
-
-	if err := getRates(ctx, coinpaprikaURL, &res); err != nil {
-		log.Errorf("Error getting fiat exchange rates from coinpaprika: %v", err)
-		return fiatRates
-	}
-	for _, coinInfo := range res {
-		assetID, found := slugAssets[coinInfo.ID]
-		if !found {
-			continue
-		}
-		price := coinInfo.Quotes.USD.Price
-		if price == 0 {
-			log.Errorf("zero-price returned from coinpaprika for slug %s", coinInfo.ID)
-			continue
-		}
-		fiatRates[assetID] = price
-	}
-	return fiatRates
+	return fiatrates.FetchCoinpaprikaRates(ctx, coinpapAssets, log)
 }
 
 // FetchDcrdataRates retrieves and parses fiat rate data from dcrdata
@@ -266,12 +211,6 @@ func FetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 		fetchRate(sa)
 	}
 	return fiatRates
-}
-
-func coinpapSlug(symbol, name string) string {
-	slug := fmt.Sprintf("%s-%s", symbol, name)
-	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
-	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
 }
 
 func getRates(ctx context.Context, url string, thing any) error {

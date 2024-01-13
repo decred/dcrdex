@@ -63,6 +63,20 @@ func (d *Driver) UnitInfo() dex.UnitInfo {
 	return dexbtc.UnitInfo
 }
 
+// MinBondSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the bond and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinBondSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinBondSize(maxFeeRate, true)
+}
+
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinLotSize(maxFeeRate, true)
+}
+
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
 // extended public key. The KeyIndexer will be used for discovering the current
 // child index, and storing the index as new addresses are generated with the
@@ -74,6 +88,11 @@ func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network 
 	}
 
 	return NewAddressDeriver(xPub, keyIndexer, params)
+}
+
+// Name is the asset's name.
+func (d *Driver) Name() string {
+	return "Bitcoin"
 }
 
 func init() {

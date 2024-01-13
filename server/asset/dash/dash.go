@@ -38,6 +38,25 @@ func (d *Driver) UnitInfo() dex.UnitInfo {
 	return dexdash.UnitInfo
 }
 
+// Name is the asset's name.
+func (d *Driver) Name() string {
+	return "Dash"
+}
+
+// MinBondSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the bond and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinBondSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinBondSize(maxFeeRate, false)
+}
+
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinLotSize(maxFeeRate, false)
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
 }

@@ -263,6 +263,66 @@ const (
 	BondPushDataSize = 2 + account.HashSize + 4 + 20
 )
 
+// redeemP2SHTxSize calculates the size of the redeeming transaction for a
+// P2SH transaction with the given sigScipt (or witness data) size.
+func redeemP2SHTxSize(segwit bool, redeemSigScriptSize uint64) uint64 {
+	if segwit {
+		witnessVBytes := (redeemSigScriptSize + 2 + 3) / 4
+		return MinimumTxOverhead + TxInOverhead + witnessVBytes + P2WPKHOutputSize
+	}
+	inputSize := TxInOverhead + redeemSigScriptSize
+	return MinimumTxOverhead + inputSize + P2PKHOutputSize
+}
+
+// RefundSwapTxSize returns the size of a swap refund tx.
+func RefundSwapTxSize(segwit bool) uint64 {
+	return redeemP2SHTxSize(segwit, RefundSigScriptSize)
+}
+
+// RefundBondTxSize returns the size of a bond refund tx.
+func RefundBondTxSize(segwit bool) uint64 {
+	return redeemP2SHTxSize(segwit, RedeemBondSigScriptSize)
+}
+
+// minHTLCValue calculates the minimum value for the output of a chained
+// P2SH -> P2WPKH transaction pair where the spending tx size is known.
+func minHTLCValue(maxFeeRate, redeemTxSize uint64, segwit bool) uint64 {
+	// Reversing IsDustVal.
+	// totalSize adds some buffer for the spending transaction.
+	var outputSize uint64 = P2PKHOutputSize // larger of p2sh output and p2pkh output.
+	if segwit {
+		outputSize = P2WSHOutputSize // larger of p2wsh output and p2wpkh output
+	}
+	totalSize := outputSize + 41
+	if segwit {
+		totalSize += (107 / witnessWeight) // + 26
+	} else {
+		totalSize += 107
+	}
+	minInitTxValue := maxFeeRate * totalSize * 3
+
+	// The minInitTxValue would get the pssh tx accepted, but when we go to
+	// redemption, we need that output to pass too, so we need to add the fees
+	// for the redemption tx itself.
+	redeemFees := redeemTxSize * maxFeeRate
+
+	return minInitTxValue + redeemFees
+}
+
+// MinBondSize is the minimum bond size that avoids dust for a given max network
+// fee rate.
+func MinBondSize(maxFeeRate uint64, segwit bool) uint64 {
+	refundTxSize := RefundBondTxSize(segwit)
+	return minHTLCValue(maxFeeRate, refundTxSize, segwit)
+}
+
+// MinLotSize is the minimum lot size that avoids dust for a given max network
+// fee rate.
+func MinLotSize(maxFeeRate uint64, segwit bool) uint64 {
+	refundSize := RefundSwapTxSize(segwit)
+	return minHTLCValue(maxFeeRate, refundSize, segwit)
+}
+
 // BTCScriptType holds details about a pubkey script and possibly it's redeem
 // script.
 type BTCScriptType uint8

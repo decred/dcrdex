@@ -32,17 +32,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
-	_ "decred.org/dcrdex/client/asset/bch"
-	_ "decred.org/dcrdex/client/asset/btc"
-	_ "decred.org/dcrdex/client/asset/dash"
-	_ "decred.org/dcrdex/client/asset/dcr"
-	_ "decred.org/dcrdex/client/asset/dgb"
-	_ "decred.org/dcrdex/client/asset/doge"
-	_ "decred.org/dcrdex/client/asset/eth"
-	_ "decred.org/dcrdex/client/asset/firo"
-	_ "decred.org/dcrdex/client/asset/ltc"
-	_ "decred.org/dcrdex/client/asset/zcl"
-	_ "decred.org/dcrdex/client/asset/zec"
+	_ "decred.org/dcrdex/client/asset/importall"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -112,7 +102,7 @@ var (
 	alphaCfgBase, betaCfgBase,
 	alphaCfgQuote, betaCfgQuote map[string]string
 
-	baseAssetCfg, quoteAssetCfg                           *dexsrv.AssetConf
+	baseAssetCfg, quoteAssetCfg                           *dexsrv.Asset
 	orderCounter, matchCounter, baseID, quoteID, regAsset uint32
 	epochDuration                                         uint64
 	lotSize                                               uint64
@@ -719,7 +709,7 @@ type marketsDotJSON struct {
 		Duration uint64  `json:"epochDuration"`
 		MBBuffer float64 `json:"marketBuyBuffer"`
 	} `json:"markets"`
-	Assets map[string]*dexsrv.AssetConf `json:"assets"`
+	Assets map[string]*dexsrv.Asset `json:"assets"`
 }
 
 // loadNodeConfig loads the INI configuration for the specified node into a

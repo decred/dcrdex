@@ -44,6 +44,44 @@ func (d *Driver) UnitInfo() dex.UnitInfo {
 	return dexzec.UnitInfo
 }
 
+// Name is the asset's name.
+func (d *Driver) Name() string {
+	return "Zcash"
+}
+
+func minHTLCSize(redeemTxFees uint64) uint64 {
+	var outputSize uint64 = dexbtc.P2PKHOutputSize
+	sz := outputSize + 148                        // 148 accounts for an input on spending tx
+	const oneThirdDustThresholdRate = 100         // zats / kB
+	nFee := oneThirdDustThresholdRate * sz / 1000 // This is different from BTC
+	if nFee == 0 {
+		nFee = oneThirdDustThresholdRate
+	}
+	htlcOutputDustMin := 3 * nFee
+
+	return htlcOutputDustMin + redeemTxFees
+}
+
+// MinBondSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the bond and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinBondSize(maxFeeRate uint64) uint64 {
+	var inputsSize uint64 = dexbtc.TxInOverhead + dexbtc.RedeemBondSigScriptSize + 1
+	var outputsSize uint64 = dexbtc.P2PKHOutputSize + 1
+	refundBondTxFees := dexzec.TxFeesZIP317(inputsSize, outputsSize, 0, 0, 0, 0)
+	return minHTLCSize(refundBondTxFees)
+}
+
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	var inputsSize uint64 = dexbtc.TxInOverhead + dexbtc.RefundSigScriptSize + 1
+	var outputsSize uint64 = dexbtc.P2PKHOutputSize + 1
+	refundBondTxFees := dexzec.TxFeesZIP317(inputsSize, outputsSize, 0, 0, 0, 0)
+	return minHTLCSize(refundBondTxFees)
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
 }

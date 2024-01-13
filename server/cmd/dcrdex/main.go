@@ -18,16 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/admin"
-	_ "decred.org/dcrdex/server/asset/bch"  // register bch asset
-	_ "decred.org/dcrdex/server/asset/btc"  // register btc asset
-	_ "decred.org/dcrdex/server/asset/dash" // register dash asset
-	_ "decred.org/dcrdex/server/asset/dcr"  // register dcr asset
-	_ "decred.org/dcrdex/server/asset/dgb"  // register dgb asset
-	_ "decred.org/dcrdex/server/asset/doge" // register doge asset
-	_ "decred.org/dcrdex/server/asset/firo" // register firo asset
-	_ "decred.org/dcrdex/server/asset/ltc"  // register ltc asset
-	_ "decred.org/dcrdex/server/asset/zcl"  // register zcl asset
-	_ "decred.org/dcrdex/server/asset/zec"  // register zec asset
+	_ "decred.org/dcrdex/server/asset/importall"
 	dexsrv "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -44,6 +35,10 @@ func mainCore(ctx context.Context) error {
 			logRotator.Close()
 		}
 	}()
+
+	if cfg.ValidateMarkets {
+		return dexsrv.ValidateConfigFile(cfg.MarketsConfPath, cfg.Network, log.SubLogger("V"))
+	}
 
 	// Request admin server password if admin server is enabled and
 	// server password is not set in config.
@@ -92,7 +87,7 @@ func mainCore(ctx context.Context) error {
 		dex.LockTimeMaker(cfg.Network), dex.LockTimeTaker(cfg.Network))
 
 	// Load the market and asset configurations for the given network.
-	markets, assets, err := loadMarketConfFile(cfg.Network, cfg.MarketsConfPath)
+	markets, assets, err := dexsrv.LoadConfig(cfg.Network, cfg.MarketsConfPath)
 	if err != nil {
 		return fmt.Errorf("failed to load market and asset config %q: %v",
 			cfg.MarketsConfPath, err)

@@ -24,6 +24,7 @@ func registerToken(assetID uint32, ver uint32) {
 		DriverBase: eth.DriverBase{
 			Ver: ver,
 			UI:  token.UnitInfo,
+			Nam: token.Name,
 		},
 		Token: token.Token,
 	})
@@ -38,6 +39,7 @@ func init() {
 		DriverBase: eth.DriverBase{
 			Ver: version,
 			UI:  dexpolygon.UnitInfo,
+			Nam: "Polygon",
 		},
 	}})
 

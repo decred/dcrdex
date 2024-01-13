@@ -133,6 +133,53 @@ const (
 	BondPushDataSize = 2 + account.HashSize + 4 + 20
 )
 
+// redeemP2SHTxSize calculates the size of the redeeming transaction for a
+// P2SH transaction with the given sigScipt (or witness data) size.
+func redeemP2SHTxSize(redeemSigScriptSize uint64) uint64 {
+	inputSize := TxInOverhead + redeemSigScriptSize
+	return MsgTxOverhead + inputSize + P2PKHOutputSize
+}
+
+// refundSwapTxSize returns the size of a swap refund tx.
+func refundSwapTxSize() uint64 {
+	return redeemP2SHTxSize(RefundSigScriptSize)
+}
+
+// refundBondTxSize returns the size of a bond refund tx.
+func refundBondTxSize() uint64 {
+	return redeemP2SHTxSize(RedeemBondSigScriptSize)
+}
+
+// minHTLCValue calculates the minimum value for the output of a chained
+// P2SH -> P2WPKH transaction pair where the spending tx size is known.
+func minHTLCValue(maxFeeRate, redeemTxSize uint64) uint64 {
+	// Reversing IsDustVal.
+	// totalSize adds some buffer for the spending transaction.
+	var outputSize uint64 = P2PKHOutputSize // larger of bonds p2sh output and refund's p2pkh output.
+	totalSize := outputSize + 165
+	minInitTxValue := maxFeeRate * totalSize * 3
+
+	// The minInitTxValue would get the bond tx accepted, but when we go to
+	// refund, we need that output to pass too, So let's add the fees for the
+	// refund transaction.
+	redeemFees := redeemTxSize * maxFeeRate
+	return minInitTxValue + redeemFees
+}
+
+// MinBondSize is the minimum bond size that avoids dust for a given max network
+// fee rate.
+func MinBondSize(maxFeeRate uint64) uint64 {
+	refundTxSize := refundBondTxSize()
+	return minHTLCValue(maxFeeRate, refundTxSize)
+}
+
+// MinLotSize is the minimum lot size that avoids dust for a given max network
+// fee rate.
+func MinLotSize(maxFeeRate uint64) uint64 {
+	refundSize := refundSwapTxSize()
+	return minHTLCValue(maxFeeRate, refundSize)
+}
+
 // ScriptType is a bitmask with information about a pubkey script and
 // possibly its redeem script.
 type ScriptType uint8
