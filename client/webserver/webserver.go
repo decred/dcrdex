@@ -153,7 +153,7 @@ type clientCore interface {
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
-	Notifications(n int) ([]*db.Notification, error)
+	Notifications(n int) (notes, pokes []*db.Notification, _ error)
 	ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error)
 	NewShieldedAddress(assetID uint32) (string, error)
 	ShieldFunds(assetID uint32, amt uint64) ([]byte, error)

@@ -84,6 +84,10 @@ const (
 
 	// seedLen is the length of the generated app seed used for app protection.
 	seedLen = 64
+
+	// pokesCapacity is the maximum number of poke notifications that
+	// can will be cached.
+	pokesCapacity = 100
 )
 
 var (
@@ -1482,6 +1486,12 @@ type Core struct {
 	pendingWallets    map[uint32]bool
 
 	notes chan asset.WalletNotification
+
+	pokesCache struct {
+		sync.RWMutex
+		pokes  []*db.Notification
+		cursor int
+	}
 }
 
 // New is the constructor for a new Core.
@@ -1726,6 +1736,10 @@ fetchers:
 			}
 		}
 		wallet.Disconnect()
+	}
+
+	if err := c.db.SavePokes(c.pokes()); err != nil {
+		c.log.Errorf("Error saving pokes: %v", err)
 	}
 
 	c.log.Infof("DEX client core off")
@@ -4872,12 +4886,32 @@ func (c *Core) connectWallets() {
 }
 
 // Notifications loads the latest notifications from the db.
-func (c *Core) Notifications(n int) ([]*db.Notification, error) {
+func (c *Core) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
 	notes, err := c.db.NotificationsN(n)
 	if err != nil {
-		return nil, fmt.Errorf("error getting notifications: %w", err)
+		return nil, nil, fmt.Errorf("error getting notifications: %w", err)
 	}
-	return notes, nil
+	return notes, c.pokes(), nil
+}
+
+// pokes returns a time-ordered copy of the pokes cache.
+func (c *Core) pokes() []*db.Notification {
+	pc := &c.pokesCache
+	pc.RLock()
+	defer pc.RUnlock()
+	pokes := make([]*db.Notification, len(pc.pokes))
+	nPokes := len(pc.pokes)
+	if nPokes > 0 {
+		if pc.cursor == 0 {
+			copy(pokes, pc.pokes)
+		} else {
+			tail := nPokes - pc.cursor
+			copy(pokes[:tail], pc.pokes[nPokes-tail:])
+			copy(pokes[tail:], pc.pokes[:nPokes-tail])
+		}
+
+	}
+	return pokes
 }
 
 func (c *Core) recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) error {
@@ -7458,6 +7492,18 @@ func (c *Core) initialize() error {
 				n, pluralize(n), host)
 		}
 	}
+
+	pokes, err := c.db.LoadPokes()
+	if err != nil {
+		c.log.Errorf("Error loading pokes from db: %v", err)
+	}
+	if len(pokes) > pokesCapacity {
+		pokes = pokes[:len(pokes)-pokesCapacity]
+	}
+	c.pokesCache.Lock()
+	c.pokesCache.pokes = pokes
+	c.pokesCache.cursor = len(pokes) % pokesCapacity
+	c.pokesCache.Unlock()
 
 	return nil
 }

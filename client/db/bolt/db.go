@@ -6,6 +6,7 @@ package bolt
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -66,6 +67,7 @@ var (
 	botProgramsBucket      = []byte("botPrograms")
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
+	pokesBucket            = []byte("pokes")
 	credentialsBucket      = []byte("credentials")
 
 	// value keys
@@ -92,6 +94,7 @@ var (
 	walletKey             = []byte("wallet")
 	changeKey             = []byte("change")
 	noteKey               = []byte("note")
+	pokesKey              = []byte("pokesKey")
 	stampKey              = []byte("stamp")
 	severityKey           = []byte("severity")
 	ackKey                = []byte("ack")
@@ -178,7 +181,7 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 		activeOrdersBucket, archivedOrdersBucket,
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
-		botProgramsBucket,
+		botProgramsBucket, pokesBucket,
 	}); err != nil {
 		return nil, err
 	}
@@ -1928,6 +1931,34 @@ func (db *BoltDB) notesView(f bucketFunc) error {
 // notesUpdate is a convenience function for updating the notifications bucket.
 func (db *BoltDB) notesUpdate(f bucketFunc) error {
 	return db.withBucket(notesBucket, db.Update, f)
+}
+
+// SavePokes saves a slice of notifications, overwriting any previously saved
+// slice.
+func (db *BoltDB) SavePokes(pokes []*dexdb.Notification) error {
+	// Just save it as JSON.
+	b, err := json.Marshal(pokes)
+	if err != nil {
+		return fmt.Errorf("JSON marshal error: %w", err)
+	}
+	return db.withBucket(pokesBucket, db.Update, func(bkt *bbolt.Bucket) error {
+		return bkt.Put(pokesKey, b)
+	})
+}
+
+// LoadPokes loads the slice of notifications last saved with SavePokes. The
+// loaded pokes are deleted from the database.
+func (db *BoltDB) LoadPokes() (pokes []*dexdb.Notification, _ error) {
+	return pokes, db.withBucket(pokesBucket, db.Update, func(bkt *bbolt.Bucket) error {
+		b := bkt.Get(pokesKey)
+		if len(b) == 0 { // None saved
+			return nil
+		}
+		if err := json.Unmarshal(b, &pokes); err != nil {
+			return err
+		}
+		return bkt.Delete(pokesKey)
+	})
 }
 
 // newest buckets gets the nested buckets with the hightest timestamp from the

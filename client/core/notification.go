@@ -81,6 +81,16 @@ func (c *Core) Broadcast(n Notification) {
 func (c *Core) notify(n Notification) {
 	if n.Severity() >= db.Success {
 		c.db.SaveNotification(n.DBNote())
+	} else if n.Severity() == db.Poke {
+		pc := &c.pokesCache
+		pc.Lock()
+		if len(pc.pokes) >= pokesCapacity {
+			pc.pokes[pc.cursor] = n.DBNote()
+		} else {
+			pc.pokes = append(pc.pokes, n.DBNote())
+		}
+		pc.cursor = (pc.cursor + 1) % pokesCapacity
+		c.pokesCache.Unlock()
 	}
 
 	c.logNote(n)

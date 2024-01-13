@@ -963,7 +963,7 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notes, err := s.core.Notifications(100)
+	notes, pokes, err := s.core.Notifications(100)
 	if err != nil {
 		log.Errorf("failed to get notifications: %v", err)
 	}
@@ -971,9 +971,11 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, &struct {
 		OK    bool               `json:"ok"`
 		Notes []*db.Notification `json:"notes"`
+		Pokes []*db.Notification `json:"pokes"`
 	}{
 		OK:    true,
 		Notes: notes,
+		Pokes: pokes,
 	}, s.indent)
 }
 

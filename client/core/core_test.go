@@ -551,6 +551,8 @@ func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
 func (tdb *TDB) BackupTo(dst string, overwrite, compact bool) error { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error)     { return nil, nil }
+func (tdb *TDB) SavePokes([]*db.Notification) error                 { return nil }
+func (tdb *TDB) LoadPokes() ([]*db.Notification, error)             { return nil, nil }
 
 func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
 	if tdb.setCredsErr != nil {

@@ -282,8 +282,8 @@ func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
 func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 	return nil
 }
-func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
-	return c.notes, c.notesErr
+func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
+	return c.notes, []*db.Notification{}, c.notesErr
 }
 
 func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
@@ -566,6 +566,7 @@ func TestAPILogin(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
+		t.Helper()
 		ensureResponse(t, s.apiLogin, want, reader, writer, body, nil)
 	}
 
@@ -573,16 +574,16 @@ func TestAPILogin(t *testing.T) {
 		Pass: encode.PassBytes("def"),
 	}
 	body = goodBody
-	ensure(`{"ok":true,"notes":null}`)
+	ensure(`{"ok":true,"notes":null,"pokes":[]}`)
 
 	tCore.notes = []*db.Notification{{
 		TopicID: core.TopicAccountUnlockError,
 	}}
-	ensure(`{"ok":true,"notes":[{"type":"","topic":"AccountUnlockError","subject":"","details":"","severity":0,"stamp":0,"acked":false,"id":""}]}`)
+	ensure(`{"ok":true,"notes":[{"type":"","topic":"AccountUnlockError","subject":"","details":"","severity":0,"stamp":0,"acked":false,"id":""}],"pokes":[]}`)
 
 	tCore.notes = nil
 	tCore.notesErr = errors.New("")
-	ensure(`{"ok":true,"notes":null}`)
+	ensure(`{"ok":true,"notes":null,"pokes":[]}`)
 
 	// Login error
 	tCore.loginErr = tErr

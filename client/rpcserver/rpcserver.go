@@ -83,7 +83,7 @@ type clientCore interface {
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, host string) error
 	RemoveWalletPeer(assetID uint32, host string) error
-	Notifications(int) ([]*db.Notification, error)
+	Notifications(int) (notes, pokes []*db.Notification, _ error)
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error)
