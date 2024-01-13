@@ -574,7 +574,7 @@ func (w *zecWallet) watchBlocks(ctx context.Context) {
 		case <-ticker.C:
 			newTipHdr, err := getBestBlockHeader(w)
 			if err != nil {
-				w.log.Errorf("failed to get best block header from node: %w", err)
+				w.log.Errorf("failed to get best block header from node: %v", err)
 				continue
 			}
 			newTipHash, err := chainhash.NewHashFromStr(newTipHdr.Hash)
