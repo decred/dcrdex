@@ -260,23 +260,23 @@ ${CLI} ${GAMMA_CLI_CFG} "\$@"
 EOF
 chmod +x "./gamma"
 
-# cat > "./reorg" <<EOF
-# #!/usr/bin/env bash
-# set -x
-# echo "Disconnecting beta from alpha"
-# sleep 1
-# ./beta disconnectnode 127.0.0.1:${ALPHA_LISTEN_PORT}
-# echo "Mining a block on alpha"
-# sleep 1
-# ./mine-alpha 1
-# echo "Mining 3 blocks on beta"
-# ./mine-beta 3
-# sleep 2
-# echo "Reconnecting beta to alpha"
-# ./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
-# sleep 2
-# EOF
-# chmod +x "./reorg"
+cat > "./reorg" <<EOF
+#!/usr/bin/env bash
+set -x
+echo "Disconnecting beta from alpha"
+sleep 1
+./beta disconnectnode 127.0.0.1:${ALPHA_LISTEN_PORT}
+echo "Mining a block on alpha"
+sleep 1
+./mine-alpha 1
+echo "Mining 3 blocks on beta"
+./mine-beta 3
+sleep 2
+echo "Reconnecting beta to alpha"
+./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
+sleep 2
+EOF
+chmod +x "./reorg"
 
 cat > "${HARNESS_DIR}/quit" <<EOF
 #!/usr/bin/env bash
@@ -336,10 +336,6 @@ if [ -z "$NOMINER" ] ; then
   tmux send-keys -t $SESSION:5 "cd ${HARNESS_DIR}" C-m
   tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
 fi
-
-# Live stop/start - experimental
-# tmux send-keys -t $SESSION:5 C-c C-m
-# tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
 
 ######################################################################################
 # Reenable history select the harness control window & attach to the control session #
