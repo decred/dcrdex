@@ -69,6 +69,7 @@ const traitTxFeeEstimator = 1 << 9
 const traitPeerManager = 1 << 10
 const traitTokenApprover = 1 << 13
 const traitTicketBuyer = 1 << 15
+const traitHistorian = 1 << 16
 const traitFundsMixer = 1 << 17
 
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
@@ -1712,23 +1713,25 @@ export default class WalletsPage extends BasePage {
 
   updateTxHistoryRow (row: PageElement, tx: WalletTransaction, assetID: number) {
     const tmpl = Doc.parseTemplate(row)
-    const date = new Date(tx.timestamp * 1000)
-    tmpl.time.textContent = date.toLocaleTimeString()
+    const ui = app().unitInfo(assetID)
+    // const date = new Date(tx.timestamp * 1000)
+    tmpl.age.textContent = Doc.timeSince(tx.timestamp * 1000)
     Doc.setVis(tx.timestamp === 0, tmpl.pending)
-    Doc.setVis(tx.timestamp !== 0, tmpl.time)
+    Doc.setVis(tx.timestamp !== 0, tmpl.age)
     let txType = intl.prep(txTypeTranslationKeys[tx.type])
     if (tx.tokenID && tx.tokenID !== assetID) {
-      const tokenSymbol = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
+      const tokenSymbol = ui.conventional.unit
       txType = `${tokenSymbol} ${txType}`
     }
     tmpl.type.textContent = txType
     tmpl.id.textContent = trimStringWithEllipsis(tx.id, 12)
     tmpl.id.setAttribute('title', tx.id)
+    tmpl.fees.textContent = Doc.formatCoinValue(tx.fees, ui)
     if (noAmtTxTypes.includes(tx.type)) {
       tmpl.amount.textContent = '-'
     } else {
       const [u, c] = txTypeSignAndClass(tx.type)
-      const amt = Doc.formatCoinValue(tx.amount, app().unitInfo(assetID))
+      const amt = Doc.formatCoinValue(tx.amount, ui)
       tmpl.amount.textContent = `${u}${amt}`
       if (c !== '') tmpl.amount.classList.add(c)
     }
@@ -1916,12 +1919,18 @@ export default class WalletsPage extends BasePage {
   async showTxHistory (assetID: number) {
     const page = this.page
     let txRes : TxHistoryResult
-    Doc.hide(page.txHistoryTable, page.noTxHistory, page.earlierTxs)
+    Doc.hide(page.txHistoryTable, page.txHistoryBox, page.noTxHistory, page.earlierTxs, page.txHistoryNotAvailable)
     Doc.empty(page.txHistoryTableBody)
-    if (!app().assets[assetID].wallet) return
+    const w = app().assets[assetID].wallet
+    if (!w || (w.traits & traitHistorian) === 0) {
+      Doc.show(page.txHistoryNotAvailable)
+      return
+    }
+    Doc.show(page.txHistoryBox)
     try {
       txRes = await app().txHistory(assetID, 10)
     } catch (err) {
+      Doc.show(page.noTxHistory)
       return
     }
     if (txRes.txs.length === 0) {

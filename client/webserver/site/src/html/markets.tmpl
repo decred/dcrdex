@@ -13,7 +13,7 @@
 <div id="main" data-handler="markets" class="main m-0 flex-nowrap v1">
   {{- /* MARKET LIST */ -}}
   <div id="leftMarketDock" class="flex-column align-items-end v1 default">
-    <div class="h-100 d-flex flex-column align-items-stretch">
+    <div class="h-100 flex-stretch-column">
 
       <div class="d-flex align-items-stretch" id="searchBoxV1">
         <div class="flex-grow-1 p-1 position-relative">
@@ -58,7 +58,7 @@
 
   {{- /* MAIN CONTENT */ -}}
   <div class="flex-grow-1 position-relative v1">
-    <div class="stylish-overflow h-100 w-100 overflow-x-hidden d-flex flex-column align-items-stretch">
+    <div class="stylish-overflow h-100 w-100 overflow-x-hidden flex-stretch-column">
 
       {{- /* MARKET STATS - SMALL SCREENS */ -}}
       <div id="marketStatsV1" class="market-stats-v1 align-items-center justify-content-center p-2 flex-wrap">
@@ -154,7 +154,7 @@
 
           {{- /* CHARTS */ -}}
           <div class="flex-grow-1 position-relative">
-            <div class="fill-abs d-flex flex-column align-items-stretch">
+            <div class="fill-abs flex-stretch-column">
               <div id="candlesChart" class="market-chart">
                 <div id="durBttnBox"><button class="candle-dur-bttn" id="durBttnTemplate"></button></div>
               </div>
@@ -193,7 +193,7 @@
 
           {{- /* ORDER FORM */ -}}
           <div class="order-panel pb-3 position-relative">
-            <div id="orderScroller" class="d-flex flex-column align-items-stretch brdrleft">
+            <div id="orderScroller" class="flex-stretch-column brdrleft">
 
               {{- /* TOKEN APPROVAL */ -}}
               <div class="fs15 pt-1 pb-3 text-center brdrbottom d-hide" id="tokenApproval">
@@ -391,7 +391,7 @@
 
               {{- /* BALANCES */ -}}
               <div id="noWallet" class="p-3 brdrbottom flex-center fs16 grey d-hide"></div>
-              <div id="walletInfoTmpl" class="brdrtop mb-3 d-flex flex-column align-items-stretch min-fit">
+              <div id="walletInfoTmpl" class="brdrtop mb-3 flex-stretch-column min-fit">
                 <div class="d-flex align-items-center px-3 py-1 brdrbottom" data-tmpl="walletIcons">
                   <img data-tmpl="logo" class="micro-icon me-1">
                   <span data-tmpl="symbol"></span>
@@ -413,7 +413,7 @@
                 <div data-tmpl="spinner" class="flex-center position-relative py-2">
                   <div class="ico-spinner spinner fs15"></div>
                 </div>
-                <div data-tmpl="balanceRows" class="d-flex flex-column align-items-stretch brdrbottom lh1">
+                <div data-tmpl="balanceRows" class="flex-stretch-column brdrbottom lh1">
                   <div class="d-flex justify-content-between align-items-center px-3 py-1 fs15" data-tmpl="balanceRowTmpl">
                     <span data-tmpl="title"></span>
                     <div data-tmpl="bal" class="flex-center"></div>
@@ -538,7 +538,7 @@
               <a href="/orders" class="flex-center py-1 plainlink hoverbg">[[[view order history]]]</a>
 
               {{- /* RECENT MATCHES */ -}}
-              <div id=recentMatchesBox  class="d-flex flex-column align-items-stretch px-3 pb-4 brdrtop">
+              <div id=recentMatchesBox  class="flex-stretch-column px-3 pb-4 brdrtop">
                 <div class="text-center fs20 sans-light my-3">[[[Recent Matches]]]</div>
                 <table id="recentMatchesTable" class="ordertable">
                   <thead>

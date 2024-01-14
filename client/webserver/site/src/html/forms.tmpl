@@ -173,7 +173,7 @@
   <hr class="dashed my-2">
   [[[Pick a server]]]
 </div>
-<div class="d-flex flex-column align-items-stretch mt-1" data-tmpl="knownXCs">
+<div class="flex-stretch-column mt-1" data-tmpl="knownXCs">
   {{range .KnownExchanges}}
     <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
   {{end}}
@@ -392,11 +392,11 @@
 {{end}}
 
 {{define "confirmRegistrationForm"}}
-<div class="w-100 d-flex flex-column align-items-stretch">
+<div class="w-100 flex-stretch-column">
   <span class="hoverbg pointer grey" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
   <div class="flex-center pt-3 fs24 sans-light">[[[Confirm Bond Options]]]</div>
   <div class="d-flex align-items-stretch pt-3">
-    <div class="flex-grow-1 d-flex flex-column align-items-stretch pe-3">
+    <div class="flex-grow-1 flex-stretch-column pe-3">
       <div class="d-flex justify-content-between">
         <span>[[[Host]]]</span>
         <span data-tmpl="host"></span>
@@ -751,7 +751,7 @@
 {{end}}
 
 {{define "reputationMeter"}}
-<div class="d-flex flex-column align-items-stretch py-2">
+<div class="flex-stretch-column py-2">
   <div class="d-flex justify-content-between align-items-center pb-1">
     <span data-tmpl="scoreMin"></span>
     <span class="fs15">
