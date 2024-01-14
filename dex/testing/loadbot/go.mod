@@ -45,7 +45,8 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dchest/blake2b v1.0.0 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
-	github.com/dcrlabs/neutrino-bch v0.0.0-20221031001408-f296bfa9bd1c // indirect
+	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be // indirect
+	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095 // indirect
 	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead // indirect
 	github.com/deckarep/golang-set/v2 v2.1.0 // indirect
 	github.com/decred/base58 v1.0.5 // indirect
@@ -87,9 +88,6 @@ require (
 	github.com/gcash/bchd v0.19.0 // indirect
 	github.com/gcash/bchlog v0.0.0-20180913005452-b4f036f92fa6 // indirect
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000 // indirect
-	github.com/gcash/bchwallet v0.10.0 // indirect
-	github.com/gcash/bchwallet/walletdb v0.0.0-20210524114850-4837f9798568 // indirect
-	github.com/gcash/neutrino v0.0.0-20210524114821-3b1878290cf9 // indirect
 	github.com/getsentry/sentry-go v0.18.0 // indirect
 	github.com/go-chi/chi/v5 v5.0.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
