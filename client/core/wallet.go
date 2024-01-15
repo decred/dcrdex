@@ -539,7 +539,7 @@ func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contrac
 // refID are returned, otherwise the transactions after the refID are
 // returned. n is the number of transactions to return. If n is <= 0,
 // all the transactions will be returned.
-func (w *xcWallet) TxHistory(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+func (w *xcWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	if !w.connected() {
 		return nil, errWalletNotConnected
 	}

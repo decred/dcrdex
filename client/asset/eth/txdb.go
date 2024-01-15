@@ -30,7 +30,7 @@ type extendedWalletTx struct {
 	// Confirmed will be set to true once the transaction has 3 confirmations.
 	Confirmed      bool   `json:"confirmed"`
 	BlockSubmitted uint64 `json:"blockSubmitted"`
-	TimeStamp      uint64 `json:"timeStamp"`
+	SubmissionTime uint64 `json:"timeStamp"`
 
 	lastCheck uint64
 	savedToDB bool
@@ -138,10 +138,10 @@ func nonceFromKey(nk []byte) (uint64, error) {
 	return binary.BigEndian.Uint64(nk[len(noncePrefix):]), nil
 }
 
-func txHashKey(txHash dex.Bytes) []byte {
-	key := make([]byte, len(txHashPrefix)+len(txHash))
+func txIDKey(txID string) []byte {
+	key := make([]byte, len(txHashPrefix)+len([]byte(txID)))
 	copy(key, txHashPrefix)
-	copy(key[len(txHashPrefix):], txHash)
+	copy(key[len(txHashPrefix):], []byte(txID))
 	return key
 }
 
@@ -176,8 +176,8 @@ const txDBVersion = prefixDBVersion
 
 type txDB interface {
 	storeTx(nonce uint64, wt *extendedWalletTx) error
-	removeTx(id dex.Bytes) error
-	getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error)
+	removeTx(id string) error
+	getTxs(n int, refID *string, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error)
 	getPendingTxs() (map[uint64]*extendedWalletTx, error)
 	storeMonitoredTx(txHash common.Hash, tx *monitoredTx) error
 	getMonitoredTxs() (map[common.Hash]*monitoredTx, error)
@@ -332,7 +332,7 @@ func (s *badgerTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
 		return err
 	}
 	nk := nonceKey(nonce)
-	tk := txHashKey(wt.ID)
+	tk := txIDKey(wt.ID)
 
 	return s.Update(func(txn *badger.Txn) error {
 		oldWtItem, err := txn.Get(nk)
@@ -351,10 +351,10 @@ func (s *badgerTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
 				}
 				return err
 			})
-			if err == nil && !bytes.Equal(oldWt.ID, wt.ID) {
-				err = txn.Delete(txHashKey(oldWt.ID))
+			if err == nil && oldWt.ID != wt.ID {
+				err = txn.Delete(txIDKey(oldWt.ID))
 				if err != nil {
-					s.log.Errorf("failed to delete old tx id: %s: %v", oldWt.ID.String(), err)
+					s.log.Errorf("failed to delete old tx id: %s: %v", oldWt.ID, err)
 				}
 			}
 		}
@@ -370,8 +370,8 @@ func (s *badgerTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
 }
 
 // removeTx removes a tx from the db.
-func (s *badgerTxDB) removeTx(id dex.Bytes) error {
-	tk := txHashKey(id)
+func (s *badgerTxDB) removeTx(id string) error {
+	tk := txIDKey(id)
 
 	return s.Update(func(txn *badger.Txn) error {
 		txIDEntry, err := txn.Get(tk)
@@ -394,15 +394,15 @@ func (s *badgerTxDB) removeTx(id dex.Bytes) error {
 
 // getTxs returns the n more recent transaction if refID is nil, or the
 // n transactions before/after refID depending on the value of past. The
-// transactions are returned in chronological order.
-func (s *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+// transactions are returned in reverse chronological order.
+func (s *badgerTxDB) getTxs(n int, refID *string, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
 	var txs []*asset.WalletTransaction
 
 	err := s.View(func(txn *badger.Txn) error {
 		var startNonceKey []byte
 		if refID != nil {
 			// Get the nonce for the provided tx hash.
-			tk := txHashKey(*refID)
+			tk := txIDKey(*refID)
 			item, err := txn.Get(tk)
 			if err != nil {
 				return err
@@ -423,7 +423,7 @@ func (s *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Wallet
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		for it.Seek(startNonceKey); it.Valid() && n <= 0 || len(txs) < n; it.Next() {
+		for it.Seek(startNonceKey); it.Valid() && (n <= 0 || len(txs) < n); it.Next() {
 			item := it.Item()
 			err := item.Value(func(wtB []byte) error {
 				wt := new(asset.WalletTransaction)
@@ -432,13 +432,16 @@ func (s *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Wallet
 					s.log.Errorf("unable to unmarhsal wallet transaction: %s: %v", string(wtB), err)
 					return err
 				}
-				if refID != nil && bytes.Equal(wt.ID, *refID) {
+				if refID != nil && wt.ID == *refID {
+					return nil
+				}
+				if tokenID != nil && (wt.TokenID == nil || *tokenID != *wt.TokenID) {
 					return nil
 				}
 				if past {
-					txs = append([]*asset.WalletTransaction{wt}, txs...)
-				} else {
 					txs = append(txs, wt)
+				} else {
+					txs = append([]*asset.WalletTransaction{wt}, txs...)
 				}
 				return nil
 			})

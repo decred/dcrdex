@@ -399,6 +399,11 @@ export interface CustomWalletNote extends BaseWalletNote {
   payload: any
 }
 
+export interface TransactionNote extends BaseWalletNote {
+  transaction: WalletTransaction
+  new: boolean
+}
+
 export interface WalletNote extends CoreNote {
   payload: BaseWalletNote
 }
@@ -813,6 +818,30 @@ export interface VotingServiceProvider {
   netShare: number
 }
 
+export interface BondTxInfo {
+  bondID: string
+  lockTime: number
+  accountID: string
+}
+
+export interface WalletTransaction {
+  type: number
+  id: string
+  amount: number
+  fees: number
+  timestamp: number
+  blockNumber: number
+  tokenID?: number
+  recipient?: string
+  bondInfo?: BondTxInfo
+  additionalData: Record<string, string>
+}
+
+export interface TxHistoryResult {
+  txs : WalletTransaction[]
+  lastTx: boolean
+}
+
 export interface Application {
   assets: Record<number, SupportedAsset>
   seedGenTime: number
@@ -867,6 +896,9 @@ export interface Application {
   updateMarketMakingConfig (cfg: BotConfig): Promise<void>
   removeMarketMakingConfig (cfg: BotConfig): Promise<void>
   setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean): void
+  txHistory(assetID: number, n: number, after?: string): Promise<TxHistoryResult>
+  getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
+  clearTxHistory(assetID: number): void
 }
 
 // TODO: Define an interface for Application?

@@ -157,6 +157,19 @@ export const ID_NO_WALLET_MSG = 'ID_NO_WALLET_MSG'
 export const ID_TRADING_TIER_UPDATED = 'TRADING_TIER_UPDATED'
 export const ID_INVALID_TIER_VALUE = 'INVALID_TIER_VALUE'
 export const ID_INVALID_COMPS_VALUE = 'INVALID_COMPS_VALUE'
+export const ID_TX_TYPE_UNKNOWN = 'TX_TYPE_UNKNOWN'
+export const ID_TX_TYPE_SEND = 'TX_TYPE_SEND'
+export const ID_TX_TYPE_RECEIVE = 'TX_TYPE_RECEIVE'
+export const ID_TX_TYPE_SWAP = 'TX_TYPE_SWAP'
+export const ID_TX_TYPE_REDEEM = 'TX_TYPE_REDEEM'
+export const ID_TX_TYPE_REFUND = 'TX_TYPE_REFUND'
+export const ID_TX_TYPE_SPLIT = 'TX_TYPE_SPLIT'
+export const ID_TX_TYPE_CREATE_BOND = 'TX_TYPE_CREATE_BOND'
+export const ID_TX_TYPE_REDEEM_BOND = 'TX_TYPE_REDEEM_BOND'
+export const ID_TX_TYPE_APPROVE_TOKEN = 'TX_TYPE_APPROVE_TOKEN'
+export const ID_TX_TYPE_ACCELERATION = 'TX_TYPE_ACCELERATION'
+export const ID_TX_TYPE_SELF_TRANSFER = 'TX_TYPE_SELF_TRANSFER'
+export const ID_TX_TYPE_REVOKE_TOKEN_APPROVAL = 'TX_TYPE_REVOKE_TOKEN_APPROVAL'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -315,7 +328,20 @@ export const enUS: Locale = {
   [ID_TRADING_TIER_UPDATED]: 'Trading Tier Updated',
   [ID_INVALID_TIER_VALUE]: 'Invalid tier value',
   [ID_INVALID_COMPS_VALUE]: 'Invalid comps value',
-  [ID_API_ERROR]: 'api error: {{ msg }}'
+  [ID_API_ERROR]: 'api error: {{ msg }}',
+  [ID_TX_TYPE_UNKNOWN]: 'Unknown',
+  [ID_TX_TYPE_SEND]: 'Send',
+  [ID_TX_TYPE_RECEIVE]: 'Receive',
+  [ID_TX_TYPE_SWAP]: 'Swap',
+  [ID_TX_TYPE_REDEEM]: 'Redeem',
+  [ID_TX_TYPE_REFUND]: 'Refund',
+  [ID_TX_TYPE_SPLIT]: 'Split',
+  [ID_TX_TYPE_CREATE_BOND]: 'Create bond',
+  [ID_TX_TYPE_REDEEM_BOND]: 'Redeem bond',
+  [ID_TX_TYPE_APPROVE_TOKEN]: 'Approve token',
+  [ID_TX_TYPE_ACCELERATION]: 'Acceleration',
+  [ID_TX_TYPE_SELF_TRANSFER]: 'Self transfer',
+  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval'
 }
 
 export const ptBR: Locale = {

@@ -1,6 +1,7 @@
 package eth
 
 import (
+	"encoding/hex"
 	"reflect"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("error creating tx history store: %v", err)
 	}
 
-	txs, err := txHistoryStore.getTxs(0, nil, true)
+	txs, err := txHistoryStore.getTxs(0, nil, true, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
@@ -31,11 +32,11 @@ func TestTxDB(t *testing.T) {
 
 	wt1 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         asset.Send,
-			ID:           encode.RandomBytes(32),
-			BalanceDelta: -100,
-			Fees:         300,
-			BlockNumber:  123,
+			Type:        asset.Send,
+			ID:          hex.EncodeToString(encode.RandomBytes(32)),
+			Amount:      100,
+			Fees:        300,
+			BlockNumber: 123,
 			AdditionalData: map[string]string{
 				"Nonce": "1",
 			},
@@ -46,11 +47,11 @@ func TestTxDB(t *testing.T) {
 
 	wt2 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         asset.Swap,
-			ID:           encode.RandomBytes(32),
-			BalanceDelta: -200,
-			Fees:         100,
-			BlockNumber:  124,
+			Type:        asset.Swap,
+			ID:          hex.EncodeToString(encode.RandomBytes(32)),
+			Amount:      200,
+			Fees:        100,
+			BlockNumber: 124,
 			AdditionalData: map[string]string{
 				"Nonce": "2",
 			},
@@ -59,11 +60,11 @@ func TestTxDB(t *testing.T) {
 
 	wt3 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         asset.Redeem,
-			ID:           encode.RandomBytes(32),
-			BalanceDelta: 200,
-			Fees:         200,
-			BlockNumber:  125,
+			Type:        asset.Redeem,
+			ID:          hex.EncodeToString(encode.RandomBytes(32)),
+			Amount:      200,
+			Fees:        200,
+			BlockNumber: 125,
 			AdditionalData: map[string]string{
 				"Nonce": "3",
 			},
@@ -72,11 +73,11 @@ func TestTxDB(t *testing.T) {
 
 	wt4 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			Type:         asset.Redeem,
-			ID:           encode.RandomBytes(32),
-			BalanceDelta: 200,
-			Fees:         300,
-			BlockNumber:  125,
+			Type:        asset.Redeem,
+			ID:          hex.EncodeToString(encode.RandomBytes(32)),
+			Amount:      200,
+			Fees:        300,
+			BlockNumber: 125,
 			AdditionalData: map[string]string{
 				"Nonce": "3",
 			},
@@ -87,7 +88,7 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(0, nil, true)
+	txs, err = txHistoryStore.getTxs(0, nil, true, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
@@ -100,11 +101,11 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(0, nil, true)
+	txs, err = txHistoryStore.getTxs(0, nil, true, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction, wt2.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt2.WalletTransaction, wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
@@ -113,16 +114,16 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(2, nil, true)
+	txs, err = txHistoryStore.getTxs(2, nil, true, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedTxs = []*asset.WalletTransaction{wt2.WalletTransaction, wt3.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt3.WalletTransaction, wt2.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, &wt2.ID, true)
+	txs, err = txHistoryStore.getTxs(0, &wt2.ID, true, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, &wt2.ID, false)
+	txs, err = txHistoryStore.getTxs(0, &wt2.ID, false, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
@@ -145,14 +146,14 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(0, nil, false)
+	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	if len(txs) != 3 {
 		t.Fatalf("expected 3 txs but got %d", len(txs))
 	}
-	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction, wt2.WalletTransaction, wt4.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt4.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
@@ -163,11 +164,11 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(0, nil, false)
+	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction, wt2.WalletTransaction, wt4.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt4.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
@@ -180,11 +181,11 @@ func TestTxDB(t *testing.T) {
 	}
 	defer txHistoryStore.close()
 
-	txs, err = txHistoryStore.getTxs(0, nil, false)
+	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction, wt2.WalletTransaction, wt4.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt4.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
@@ -206,19 +207,28 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("error removing tx: %v", err)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, nil, false)
+	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction, wt4.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt4.WalletTransaction, wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
+
+	txs, err = txHistoryStore.getTxs(0, nil, false, &simnetTokenID)
+	if err != nil {
+		t.Fatalf("error retrieving txs: %v", err)
+	}
+	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction}
+	if !reflect.DeepEqual(expectedTxs, txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	}
+
 	txHashes := make([]common.Hash, 3)
 	for i := range txHashes {
 		txHashes[i] = common.BytesToHash(encode.RandomBytes(32))
 	}
-
 	monitoredTx1 := &monitoredTx{
 		tx:             types.NewTx(&types.LegacyTx{Data: []byte{1}}),
 		replacementTx:  &txHashes[1],

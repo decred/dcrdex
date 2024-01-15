@@ -217,7 +217,7 @@ type setVotingPreferencesForm struct {
 type txHistoryForm struct {
 	assetID uint32
 	num     int
-	refID   *dex.Bytes
+	refID   *string
 	past    bool
 }
 
@@ -984,19 +984,14 @@ func parseTxHistoryArgs(params *RawParams) (*txHistoryForm, error) {
 		}
 	}
 
-	var refID *dex.Bytes
+	var refID *string
 	var past bool
 	if len(params.Args) > 2 {
 		if len(params.Args) != 4 {
 			return nil, fmt.Errorf("refID provided without past")
 		}
 
-		id, err := hex.DecodeString(params.Args[2])
-		if err != nil {
-			return nil, fmt.Errorf("invalid refID: %v", err)
-		}
-		idDB := dex.Bytes(id)
-		refID = &idDB
+		refID = &params.Args[2]
 
 		past, err = checkBoolArg(params.Args[3], "past")
 		if err != nil {

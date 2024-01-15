@@ -5914,7 +5914,7 @@ func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) ([]*Order, error) {
 // refID are returned, otherwise the transactions after the refID are
 // returned. n is the number of transactions to return. If n is <= 0,
 // all the transactions will be returned
-func (c *Core) TxHistory(assetID uint32, n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+func (c *Core) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	wallet, found := c.wallet(assetID)
 	if !found {
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))

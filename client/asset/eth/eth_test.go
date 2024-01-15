@@ -431,11 +431,11 @@ func (db *tTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
 	db.storeTxCalled = true
 	return db.storeTxErr
 }
-func (db *tTxDB) removeTx(id dex.Bytes) error {
+func (db *tTxDB) removeTx(id string) error {
 	db.removeTxCalled = true
 	return db.removeTxErr
 }
-func (db *tTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+func (db *tTxDB) getTxs(n int, refID *string, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
 	return nil, nil
 }
 func (db *tTxDB) getPendingTxs() (map[uint64]*extendedWalletTx, error) {
@@ -481,8 +481,8 @@ func TestCheckUnconfirmedTxs(t *testing.T) {
 					TokenID:     tokenID,
 					Fees:        maxFees,
 				},
-				TimeStamp: uint64(timeStamp),
-				savedToDB: savedToDB,
+				SubmissionTime: uint64(timeStamp),
+				savedToDB:      savedToDB,
 			},
 			confs:        txReceiptConfs,
 			gasUsed:      txReceiptGasUsed,
@@ -519,12 +519,12 @@ func TestCheckUnconfirmedTxs(t *testing.T) {
 			},
 		},
 		{
-			name:    "tx was nonce replaced",
+			name:    "not nonce replaced, but still cannot find after 7 mins",
 			assetID: BipID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(5*60+1), true),
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(7*60+1), true),
 			},
-			confirmedNonce:    1,
+			confirmedNonce:    0,
 			expTxsAfter:       map[uint64]*extendedWalletTx{},
 			expRemoveTxCalled: true,
 		},
@@ -532,23 +532,13 @@ func TestCheckUnconfirmedTxs(t *testing.T) {
 			name:    "leave in unconfirmed txs if txDB.removeTx fails",
 			assetID: BipID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(5*60+1), true),
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(7*60+1), true),
 			},
 			confirmedNonce: 1,
 			expTxsAfter: map[uint64]*extendedWalletTx{
-				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(5*60+1), true).wt,
+				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(7*60+1), true).wt,
 			},
 			removeTxErr:       errors.New(""),
-			expRemoveTxCalled: true,
-		},
-		{
-			name:    "not nonce replaced, but still cannot find after 10 mins",
-			assetID: BipID,
-			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				1: newExtendedWalletTx(BipID, 1e7, 0, 0, 0, asset.CoinNotFoundError, now-(10*60+1), true),
-			},
-			confirmedNonce:    0,
-			expTxsAfter:       map[uint64]*extendedWalletTx{},
 			expRemoveTxCalled: true,
 		},
 		{
@@ -607,9 +597,6 @@ func TestCheckUnconfirmedTxs(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if tt.name != "1 confirmation" {
-			continue
-		}
 		t.Run(tt.name, func(t *testing.T) {
 			_, eth, node, shutdown := tassetWallet(tt.assetID)
 			defer shutdown()
@@ -635,7 +622,7 @@ func TestCheckUnconfirmedTxs(t *testing.T) {
 
 			for nonce, pt := range tt.unconfirmedTxs {
 				txHash := common.BytesToHash(encode.RandomBytes(32))
-				pt.wt.ID = txHash[:]
+				pt.wt.ID = txHash.String()
 				eth.pendingTxs[nonce] = pt.wt
 				var blockNumber *big.Int
 				if pt.confs > 0 {
@@ -881,6 +868,17 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		}
 	}
 
+	emitChan := make(chan asset.WalletNotification, 8)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-emitChan:
+			}
+		}
+	}()
+
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
 			baseChainID:  BipID,
@@ -910,7 +908,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		pendingApprovals:   make(map[uint32]*pendingApproval),
 		approvalCache:      make(map[uint32]bool),
 		// move up after review
-		wi: WalletInfo,
+		wi:   WalletInfo,
+		emit: asset.NewWalletEmitter(emitChan, BipID, tLogger),
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
@@ -931,6 +930,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			atomize:          dexeth.WeiToGwei,
 			pendingApprovals: make(map[uint32]*pendingApproval),
 			approvalCache:    make(map[uint32]bool),
+			emit:             asset.NewWalletEmitter(emitChan, BipID, tLogger),
 		}
 		w = &TokenWallet{
 			assetWallet: aw,
@@ -1109,7 +1109,7 @@ func TestBalanceNoMempool(t *testing.T) {
 		confs uint32
 	}
 
-	newExtendedWalletTx := func(assetID uint32, out, in, maxFees uint64, currBlockNumber uint64, txReceiptConfs uint32) *tExtendedWalletTx {
+	newExtendedWalletTx := func(assetID uint32, amt, maxFees uint64, currBlockNumber uint64, txReceiptConfs uint32, txType asset.TransactionType) *tExtendedWalletTx {
 		var tokenID *uint32
 		if assetID != BipID {
 			tokenID = &assetID
@@ -1118,10 +1118,11 @@ func TestBalanceNoMempool(t *testing.T) {
 		return &tExtendedWalletTx{
 			wt: &extendedWalletTx{
 				WalletTransaction: &asset.WalletTransaction{
-					BalanceDelta: int64(in) - int64(out),
-					BlockNumber:  0,
-					TokenID:      tokenID,
-					Fees:         maxFees,
+					Type:        txType,
+					Amount:      amt,
+					BlockNumber: 0,
+					TokenID:     tokenID,
+					Fees:        maxFees,
 				},
 				lastCheck: lastCheck,
 			},
@@ -1141,7 +1142,7 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "single eth tx",
 			assetID: BipID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(BipID, 1, 0, 2, 0, 0),
+				0: newExtendedWalletTx(BipID, 1, 2, 0, 0, asset.Send),
 			},
 			expPendingOut: 3,
 			expCountAfter: 1,
@@ -1150,7 +1151,7 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "single tx expired",
 			assetID: BipID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(BipID, 1, 0, 1, 0, 1),
+				0: newExtendedWalletTx(BipID, 1, 1, 0, 1, asset.Send),
 			},
 			expCountAfter: 1,
 		},
@@ -1158,14 +1159,14 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "single tx expired, txConfsNeededToConfirm confs",
 			assetID: BipID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(BipID, 1, 0, 1, 0, txConfsNeededToConfirm),
+				0: newExtendedWalletTx(BipID, 1, 1, 0, txConfsNeededToConfirm, asset.Send),
 			},
 		},
 		{
 			name:    "eth with token fees",
 			assetID: BipID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(simnetTokenID, 4, 0, 5, 0, 0),
+				0: newExtendedWalletTx(simnetTokenID, 4, 5, 0, 0, asset.Send),
 			},
 			expPendingOut: 5,
 			expCountAfter: 1,
@@ -1174,8 +1175,8 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "token with 1 tx and other ignored assets",
 			assetID: simnetTokenID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(simnetTokenID, 4, 0, 5, 0, 0),
-				1: newExtendedWalletTx(simnetTokenID+1, 8, 0, 9, 0, 0),
+				0: newExtendedWalletTx(simnetTokenID, 4, 5, 0, 0, asset.Send),
+				1: newExtendedWalletTx(simnetTokenID+1, 8, 9, 0, 0, asset.Send),
 			},
 			expPendingOut: 4,
 			expCountAfter: 2,
@@ -1184,7 +1185,7 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "token with 1 tx incoming",
 			assetID: simnetTokenID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(simnetTokenID, 0, 15, 5, 0, 0),
+				0: newExtendedWalletTx(simnetTokenID, 15, 5, 0, 0, asset.Redeem),
 			},
 			expPendingIn:  15,
 			expCountAfter: 1,
@@ -1193,10 +1194,10 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "eth mixed txs",
 			assetID: BipID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(BipID, 1, 0, 2, 0, 0),                              // 3 eth out
-				1: newExtendedWalletTx(simnetTokenID, 3, 0, 4, 0, txConfsNeededToConfirm), // confirmed
-				2: newExtendedWalletTx(simnetTokenID, 5, 0, 6, 0, 0),                      // 6 eth out
-				3: newExtendedWalletTx(BipID, 0, 7, 1, 0, 0),                              // 1 eth out, 7 eth in
+				0: newExtendedWalletTx(BipID, 1, 2, 0, 0, asset.Swap),                              // 3 eth out
+				1: newExtendedWalletTx(simnetTokenID, 3, 4, 0, txConfsNeededToConfirm, asset.Send), // confirmed
+				2: newExtendedWalletTx(simnetTokenID, 5, 6, 0, 0, asset.Swap),                      // 6 eth out
+				3: newExtendedWalletTx(BipID, 7, 1, 0, 0, asset.Refund),                            // 1 eth out, 7 eth in
 			},
 			expPendingOut: 10,
 			expPendingIn:  7,
@@ -1206,7 +1207,7 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "already confirmed, but still waiting for txConfsNeededToConfirm",
 			assetID: simnetTokenID,
 			unconfirmedTxs: map[uint64]*tExtendedWalletTx{
-				0: newExtendedWalletTx(simnetTokenID, 0, 15, 5, tipHeight, 1),
+				0: newExtendedWalletTx(simnetTokenID, 15, 5, tipHeight, 1, asset.Redeem),
 			},
 			expCountAfter: 1,
 		},
@@ -1231,7 +1232,7 @@ func TestBalanceNoMempool(t *testing.T) {
 
 			for nonce, pt := range tt.unconfirmedTxs {
 				txHash := common.BytesToHash(encode.RandomBytes(32))
-				pt.wt.ID = txHash[:]
+				pt.wt.ID = txHash.String()
 				eth.pendingTxs[nonce] = pt.wt
 				var blockNumber *big.Int
 				if pt.confs > 0 {

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -20,7 +19,6 @@ import (
 )
 
 type extendedWalletTx struct {
-	mtx sync.Mutex
 	*asset.WalletTransaction
 	Confirmed bool `json:"confirmed"`
 	// Create bond transactions are added to the store before
@@ -63,26 +61,26 @@ func parseBlockKey(key []byte) (blockHeight, index uint64) {
 }
 
 // txKey maps a txid to a blockKey or pendingKey.
-func txKey(txid []byte) []byte {
-	key := make([]byte, len(txPrefix)+len(txid))
+func txKey(txid string) []byte {
+	key := make([]byte, len(txPrefix)+len([]byte(txid)))
 	copy(key, txPrefix)
-	copy(key[len(txPrefix):], txid)
+	copy(key[len(txPrefix):], []byte(txid))
 	return key
 }
 
 type txDB interface {
 	storeTx(tx *extendedWalletTx) error
-	markTxAsSubmitted(txID dex.Bytes) error
+	markTxAsSubmitted(txID string) error
 	// getTxs retrieves n transactions from the database. refID optionally
 	// takes a transaction ID, and returns that transaction and the at most
 	// (n - 1) transactions that were made either before or after it, depending
 	// on the value of past. If refID is nil, the most recent n transactions
 	// are returned, and the value of past is ignored. If the transaction with
 	// ID refID is not in the database, asset.CoinNotFoundError is returned.
-	getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error)
-	getTx(txID dex.Bytes) (*asset.WalletTransaction, error)
+	getTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
+	getTx(txID string) (*asset.WalletTransaction, error)
 	getPendingTxs() ([]*extendedWalletTx, error)
-	removeTx(hash dex.Bytes) error
+	removeTx(txID string) error
 	// setLastReceiveTxQuery stores the last time the wallet was queried for
 	// receive transactions. This is required to know how far back to query
 	// for incoming transactions that were received while the wallet is
@@ -213,7 +211,7 @@ func (db *badgerTxDB) storeTx(tx *extendedWalletTx) error {
 	})
 }
 
-func (db *badgerTxDB) markTxAsSubmitted(txID dex.Bytes) error {
+func (db *badgerTxDB) markTxAsSubmitted(txID string) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(txID)
 		txKeyItem, err := txn.Get(txKey)
@@ -236,18 +234,18 @@ func (db *badgerTxDB) markTxAsSubmitted(txID dex.Bytes) error {
 			return err
 		}
 
-		var wt *extendedWalletTx
-		if err := json.Unmarshal(wtB, wt); err != nil {
+		var wt extendedWalletTx
+		if err := json.Unmarshal(wtB, &wt); err != nil {
 			return err
 		}
 
 		wt.Submitted = true
-		wtB, err = json.Marshal(wt)
+		submittedWt, err := json.Marshal(wt)
 		if err != nil {
 			return err
 		}
 
-		return txn.Set(blockKey, wtB)
+		return txn.Set(blockKey, submittedWt)
 	})
 }
 
@@ -257,7 +255,8 @@ func (db *badgerTxDB) markTxAsSubmitted(txID dex.Bytes) error {
 // on the value of past. If refID is nil, the most recent n transactions
 // are returned, and the value of past is ignored. If the transaction with
 // ID refID is not in the database, asset.CoinNotFoundError is returned.
-func (db *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.WalletTransaction, error) {
+// Unsubmitted transactions are not returned.
+func (db *badgerTxDB) getTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	var txs []*asset.WalletTransaction
 	err := db.View(func(txn *badger.Txn) error {
 		var startKey []byte
@@ -298,6 +297,9 @@ func (db *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Walle
 			if err := json.Unmarshal(wtB, &wt); err != nil {
 				return err
 			}
+			if !wt.Submitted {
+				continue
+			}
 			if past {
 				txs = append(txs, wt.WalletTransaction)
 			} else {
@@ -310,7 +312,7 @@ func (db *badgerTxDB) getTxs(n int, refID *dex.Bytes, past bool) ([]*asset.Walle
 	return txs, err
 }
 
-func (db *badgerTxDB) getTx(txID dex.Bytes) (*asset.WalletTransaction, error) {
+func (db *badgerTxDB) getTx(txID string) (*asset.WalletTransaction, error) {
 	txs, err := db.getTxs(1, &txID, false)
 	if err != nil {
 		return nil, err
@@ -352,12 +354,12 @@ func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
 	return txs, err
 }
 
-func (db *badgerTxDB) removeTx(txID dex.Bytes) error {
+func (db *badgerTxDB) removeTx(txID string) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(txID)
 		txKeyItem, err := txn.Get(txKey)
 		if err != nil {
-			return err
+			return asset.CoinNotFoundError
 		}
 
 		blockKey, err := txKeyItem.ValueCopy(nil)

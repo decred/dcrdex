@@ -1,10 +1,5 @@
 body.dark {
   .walletspage {
-    #marketsOverviewBox {
-      border-left: 1px solid $dark_border_color;
-      border-bottom: 1px solid $dark_border_color;
-    }
-
     #walletDetailsBox {
       border-bottom: $dark_border_color;
     }
@@ -57,11 +52,7 @@ body.dark {
     }
   }
 
-  @include media-breakpoint-up(lg) {
-    .walletspage {
-      #marketsOverviewBox {
-        border-color: $dark-border-color;
-      }
-    }
+  #marketsOverviewBox, #orderActivityBox, #txHistoryBox {
+    border-color: $dark-border-color;
   }
 }

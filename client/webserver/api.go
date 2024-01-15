@@ -1886,6 +1886,36 @@ func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request
 	}, s.indent)
 }
 
+func (s *WebServer) apiTxHistory(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID uint32 `json:"assetID"`
+		N       int    `json:"n"`
+		RefID   string `json:"refID"`
+		Past    bool   `json:"past"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+
+	var refID *string
+	if len(form.RefID) > 0 {
+		refID = &form.RefID
+	}
+
+	txs, err := s.core.TxHistory(form.AssetID, form.N, refID, form.Past)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting transaction history: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK  bool                       `json:"ok"`
+		Txs []*asset.WalletTransaction `json:"txs"`
+	}{
+		OK:  true,
+		Txs: txs,
+	}, s.indent)
+}
+
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
 func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {

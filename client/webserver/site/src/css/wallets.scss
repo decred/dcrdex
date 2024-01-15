@@ -29,7 +29,7 @@
     width: 400px;
   }
 
-  #copyAddressBtn:hover {
+  .copy-btn:hover {
     cursor: pointer;
     color: #a8a8a8;
   }
@@ -149,7 +149,7 @@
     }
   }
 
-  table#ordersTable {
+  table#ordersTable, #txHistoryTable {
     th {
       font-size: 15px;
     }
@@ -165,15 +165,19 @@
 
     tbody {
       font-size: 15px;
-
-      // tr:nth-child(even) {
-      //   background-color: #7772;
-      // }
-
-      tr:hover {
-        background-color: #7774;
-      }
     }
+  }
+
+  #txHistoryTableContainer {
+    max-height: 350px;
+    overflow-y: auto;
+    width: 100%;
+    text-align: center;
+  }
+
+  #earlierTxs, #txViewBlockExplorer {
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   #checkmarkBox {
@@ -181,9 +185,10 @@
     height: 100px;
   }
 
-  #marketsOverviewBox {
-    border-left: 1px solid $light_border_color;
-    border-bottom: 1px solid $light_border_color;
+  @include media-breakpoint-up(lg) {
+    #txHistoryBox, #orderActivityBox {
+      border-left: 1px solid $light_border_color;
+    }
   }
 
   #walletDetailsBox {
@@ -257,13 +262,17 @@
   }
 }
 
-@include media-breakpoint-up(xxl) {
-  .no-overflow-xxl {
+@include media-breakpoint-up(xxxl) {
+  .no-overflow-xxxl {
     overflow: hidden;
   }
 
+  #marketsOverviewBox {
+    border-left: 1px solid $light_border_color;
+  }
+
   .walletspage {
-    .flex-nowrap-xxl {
+    .flex-nowrap-xxxl {
       flex-wrap: nowrap;
     }
 
@@ -288,8 +297,8 @@
     }
 
     #marketsOverviewBox {
-      border-right: 1px solid $light-border-color;
-      border-bottom: none;
+      border-top: 1px solid $light-border-color;
+      border-bottom: 1px solid $light_border_color;
     }
 
     #walletDetailsBox {
@@ -332,6 +341,11 @@
   width: 450px;
 }
 
+#txDetails {
+  width: 450px;
+  font-size: 17px;
+}
+
 .warning-text {
   text-decoration: underline;
   text-decoration-color: #d11414;
@@ -346,4 +360,22 @@
 
 #submitReconfig[disabled] {
   cursor: not-allowed;
+}
+
+.ease-color {
+  transition: color 1s ease;
+}
+
+#txDetailsBondSection, #txDetailsRecipientSection, #txDetailsNonceSection {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #777;
+}
+
+.positive-tx {
+  color: #1e7d11;
+}
+
+.negative-tx {
+  color: #d11414;
 }
