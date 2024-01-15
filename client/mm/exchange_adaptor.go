@@ -32,8 +32,8 @@ type botBalance struct {
 
 // botCoreAdaptor is an interface used by bots to access functionality
 // implemented by client.Core. There are slight differences with the methods
-// of client.Core. One example is AssetBalance returns a botBalance instead of
-// a *core.WalletBalance.
+// of client.Core. One example is AssetBalance is renamed to DEXBalance and
+// returns a a botBalance instead of a *core.WalletBalance.
 type botCoreAdaptor interface {
 	NotificationFeed() *core.NoteFeed
 	SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error)
@@ -41,7 +41,7 @@ type botCoreAdaptor interface {
 	Cancel(oidB dex.Bytes) error
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
-	AssetBalance(assetID uint32) (*botBalance, error)
+	DEXBalance(assetID uint32) (*botBalance, error)
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	MaxFundingFees(fromAsset uint32, host string, numTrades uint32, fromSettings map[string]string) (uint64, error)
 	FiatConversionRates() map[uint32]float64
@@ -56,7 +56,7 @@ type botCoreAdaptor interface {
 // on libxc.CEX as it involves sending funds from the DEX wallet, but it is
 // exposed here.
 type botCexAdaptor interface {
-	Balance(assetID uint32) (*botBalance, error)
+	CEXBalance(assetID uint32) (*botBalance, error)
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
 	SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error
 	SubscribeTradeUpdates() (updates <-chan *libxc.Trade, unsubscribe func())
@@ -78,9 +78,10 @@ type pendingWithdrawal struct {
 // pendingDeposit represents a deposit to a CEX that has not yet been
 // confirmed.
 type pendingDeposit struct {
+	assetID uint32
+	amtSent uint64
+
 	mtx         sync.RWMutex
-	assetID     uint32
-	amtSent     uint64
 	fee         uint64
 	amtCredited uint64
 	// feeConfirmed is relevant assets with dynamic fees where the fee is
@@ -191,11 +192,11 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 }
 
 func (u *unifiedExchangeAdaptor) maxBuyQty(host string, baseID, quoteID uint32, rate uint64, options map[string]string) (uint64, error) {
-	baseBalance, err := u.AssetBalance(baseID)
+	baseBalance, err := u.DEXBalance(baseID)
 	if err != nil {
 		return 0, err
 	}
-	quoteBalance, err := u.AssetBalance(quoteID)
+	quoteBalance, err := u.DEXBalance(quoteID)
 	if err != nil {
 		return 0, err
 	}
@@ -246,11 +247,11 @@ func (u *unifiedExchangeAdaptor) maxBuyQty(host string, baseID, quoteID uint32, 
 }
 
 func (u *unifiedExchangeAdaptor) maxSellQty(host string, baseID, quoteID, numTrades uint32, options map[string]string) (uint64, error) {
-	baseBalance, err := u.AssetBalance(baseID)
+	baseBalance, err := u.DEXBalance(baseID)
 	if err != nil {
 		return 0, err
 	}
-	quoteBalance, err := u.AssetBalance(quoteID)
+	quoteBalance, err := u.DEXBalance(quoteID)
 	if err != nil {
 		return 0, err
 	}
@@ -312,11 +313,11 @@ func (c *unifiedExchangeAdaptor) sufficientBalanceForMultiSell(host string, base
 }
 
 func (u *unifiedExchangeAdaptor) sufficientBalanceForMultiBuy(host string, baseID, quoteID uint32, placements []*core.QtyRate, options map[string]string) (bool, error) {
-	baseBalance, err := u.AssetBalance(baseID)
+	baseBalance, err := u.DEXBalance(baseID)
 	if err != nil {
 		return false, err
 	}
-	quoteBalance, err := u.AssetBalance(quoteID)
+	quoteBalance, err := u.DEXBalance(quoteID)
 	if err != nil {
 		return false, err
 	}
@@ -411,7 +412,7 @@ func (u *unifiedExchangeAdaptor) addPendingDexOrders(orders []*core.Order) {
 }
 
 // MultiTrade is used to place multiple standing limit orders on the same
-// side of the same market simultaneously.
+// side of the same DEX market simultaneously.
 func (u *unifiedExchangeAdaptor) MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error) {
 	enough, err := u.sufficientBalanceForMultiTrade(form.Host, form.Base, form.Quote, form.Sell, form.Placements, form.Options)
 	if err != nil {
@@ -425,7 +426,7 @@ func (u *unifiedExchangeAdaptor) MultiTrade(pw []byte, form *core.MultiTradeForm
 	if form.Sell {
 		fromAsset = form.Base
 	}
-	fromBalance, err := u.AssetBalance(fromAsset)
+	fromBalance, err := u.DEXBalance(fromAsset)
 	if err != nil {
 		return nil, err
 	}
@@ -500,8 +501,8 @@ func (u *unifiedExchangeAdaptor) MaxSell(host string, base, quote uint32) (*core
 	}, nil
 }
 
-// AssetBalance returns the bot's balance for a specific asset.
-func (u *unifiedExchangeAdaptor) AssetBalance(assetID uint32) (*botBalance, error) {
+// DEXBalance returns the bot's balance for a specific asset on the DEX.
+func (u *unifiedExchangeAdaptor) DEXBalance(assetID uint32) (*botBalance, error) {
 	u.balancesMtx.RLock()
 	defer u.balancesMtx.RUnlock()
 
@@ -581,8 +582,8 @@ func incompleteCexTradeBalanceEffects(trade *libxc.Trade) (availableDiff map[uin
 	return
 }
 
-// Balance returns the balance of the bot on the CEX.
-func (u *unifiedExchangeAdaptor) Balance(assetID uint32) (*botBalance, error) {
+// CEXBalance returns the balance of the bot on the CEX.
+func (u *unifiedExchangeAdaptor) CEXBalance(assetID uint32) (*botBalance, error) {
 	u.balancesMtx.RLock()
 	defer u.balancesMtx.RUnlock()
 
@@ -694,12 +695,35 @@ func (u *unifiedExchangeAdaptor) updatePendingDeposit(txID string, deposit *pend
 	u.logBalanceAdjustments(dexDiffs, cexDiffs, msg)
 }
 
+func (u *unifiedExchangeAdaptor) confirmWalletTransaction(ctx context.Context, assetID uint32, coinID dex.Bytes, confirmedTx func(*asset.WalletTransaction)) {
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			tx, err := u.clientCore.WalletTransaction(assetID, coinID)
+			if errors.Is(err, asset.CoinNotFoundError) {
+				u.log.Warnf("%s wallet does not know about deposit tx: %s", dex.BipIDSymbol(assetID), coinID)
+			} else if err != nil {
+				u.log.Errorf("Error getting wallet transaction: %v", err)
+			} else if tx.Confirmed {
+				confirmedTx(tx)
+				return
+			}
+
+			timer.Reset(10 * time.Minute)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // Deposit deposits funds to the CEX. The deposited funds will be removed from
 // the bot's wallet balance and allocated to the bot's CEX balance. After both
 // the fees of the deposit transaction are confirmed by the wallet and the
 // CEX confirms the amount they received, the onConfirm callback is called.
 func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, amount uint64, onConfirm func()) error {
-	balance, err := u.AssetBalance(assetID)
+	balance, err := u.DEXBalance(assetID)
 	if err != nil {
 		return err
 	}
@@ -756,10 +780,7 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 			}
 		}
 
-		err = u.clientCore.ConfirmedWalletTransaction(assetID, coin.ID(), confirmedTx)
-		if err != nil {
-			u.log.Errorf("Error confirming deposit transaction: %v", err)
-		}
+		go u.confirmWalletTransaction(ctx, assetID, coin.ID(), confirmedTx)
 	}
 
 	cexConfirmedDeposit := func(success bool, creditedAmt uint64) {
@@ -824,7 +845,7 @@ func (u *unifiedExchangeAdaptor) pendingWithdrawalComplete(id string, amtReceive
 func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, amount uint64, onConfirm func()) error {
 	symbol := dex.BipIDSymbol(assetID)
 
-	balance, err := u.Balance(assetID)
+	balance, err := u.CEXBalance(assetID)
 	if err != nil {
 		return err
 	}
@@ -869,7 +890,7 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 					return
 				}
 
-				timer = time.NewTimer(1 * time.Minute)
+				timer = time.NewTimer(time.Minute)
 			case <-ctx.Done():
 				return
 			}
@@ -992,7 +1013,7 @@ func (u *unifiedExchangeAdaptor) Trade(ctx context.Context, baseID, quoteID uint
 		fromAssetQty = calc.BaseToQuote(rate, qty)
 	}
 
-	fromAssetBal, err := u.Balance(fromAssetID)
+	fromAssetBal, err := u.CEXBalance(fromAssetID)
 	if err != nil {
 		return nil, err
 	}
@@ -1003,7 +1024,7 @@ func (u *unifiedExchangeAdaptor) Trade(ctx context.Context, baseID, quoteID uint
 	u.subscriptionIDMtx.RLock()
 	subscriptionID := u.subscriptionID
 	u.subscriptionIDMtx.RUnlock()
-	if u.subscriptionID == nil {
+	if subscriptionID == nil {
 		return nil, fmt.Errorf("Trade called before SubscribeTradeUpdates")
 	}
 

@@ -1147,7 +1147,7 @@ type WalletHistorian interface {
 	TxHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
 	// WalletTransaction returns a single transaction that either a wallet
 	// has made or in which the wallet has received funds. This function may
-	// support more transactions that is returned by TxHistory. For example,
+	// support more transactions than are returned by TxHistory. For example,
 	// ETH/token wallets do not return receiving transactions in TxHistory,
 	// but WalletTransaction will return them.
 	WalletTransaction(ctx context.Context, coinID dex.Bytes) (*WalletTransaction, error)
@@ -1266,7 +1266,7 @@ type Coin interface {
 	TxID() string
 }
 
-// TokenCoin is extends to Coin interface to include the amount locked
+// TokenCoin extends the Coin interface to include the amount locked
 // of the parent asset to be used for fees.
 type TokenCoin interface {
 	Coin

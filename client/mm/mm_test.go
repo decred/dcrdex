@@ -153,23 +153,23 @@ func (t *tBookFeed) Candles(dur string) error      { return nil }
 var _ core.BookFeed = (*tBookFeed)(nil)
 
 type tCoin struct {
-	txID  []byte
-	value uint64
+	coinID []byte
+	value  uint64
 }
 
 var _ asset.Coin = (*tCoin)(nil)
 
 func (c *tCoin) ID() dex.Bytes {
-	return c.txID
+	return c.coinID
 }
 func (c *tCoin) String() string {
-	return hex.EncodeToString(c.txID)
+	return hex.EncodeToString(c.coinID)
 }
 func (c *tCoin) Value() uint64 {
 	return c.value
 }
 func (c *tCoin) TxID() string {
-	return hex.EncodeToString(c.txID)
+	return hex.EncodeToString(c.coinID)
 }
 
 type sendArgs struct {
@@ -180,42 +180,41 @@ type sendArgs struct {
 }
 
 type tCore struct {
-	assetBalances           map[uint32]*core.WalletBalance
-	assetBalanceErr         error
-	market                  *core.Market
-	orderEstimate           *core.OrderEstimate
-	sellSwapFees            uint64
-	sellRedeemFees          uint64
-	sellRefundFees          uint64
-	buySwapFees             uint64
-	buyRedeemFees           uint64
-	buyRefundFees           uint64
-	singleLotFeesErr        error
-	preOrderParam           *core.TradeForm
-	tradeResult             *core.Order
-	multiTradeResult        []*core.Order
-	noteFeed                chan core.Notification
-	isAccountLocker         map[uint32]bool
-	isWithdrawer            map[uint32]bool
-	isDynamicSwapper        map[uint32]bool
-	maxBuyEstimate          *core.MaxOrderEstimate
-	maxBuyErr               error
-	maxSellEstimate         *core.MaxOrderEstimate
-	maxSellErr              error
-	cancelsPlaced           []dex.Bytes
-	buysPlaced              []*core.TradeForm
-	sellsPlaced             []*core.TradeForm
-	multiTradesPlaced       []*core.MultiTradeForm
-	maxFundingFees          uint64
-	book                    *orderbook.OrderBook
-	bookFeed                *tBookFeed
-	lastSendArgs            *sendArgs
-	sendCoin                *tCoin
-	newDepositAddress       string
-	orders                  map[order.OrderID]*core.Order
-	walletTxs               map[string]*asset.WalletTransaction
-	confirmWalletTx         chan bool
-	confirmWalletTxComplete chan bool
+	assetBalances     map[uint32]*core.WalletBalance
+	assetBalanceErr   error
+	market            *core.Market
+	orderEstimate     *core.OrderEstimate
+	sellSwapFees      uint64
+	sellRedeemFees    uint64
+	sellRefundFees    uint64
+	buySwapFees       uint64
+	buyRedeemFees     uint64
+	buyRefundFees     uint64
+	singleLotFeesErr  error
+	preOrderParam     *core.TradeForm
+	tradeResult       *core.Order
+	multiTradeResult  []*core.Order
+	noteFeed          chan core.Notification
+	isAccountLocker   map[uint32]bool
+	isWithdrawer      map[uint32]bool
+	isDynamicSwapper  map[uint32]bool
+	maxBuyEstimate    *core.MaxOrderEstimate
+	maxBuyErr         error
+	maxSellEstimate   *core.MaxOrderEstimate
+	maxSellErr        error
+	cancelsPlaced     []dex.Bytes
+	buysPlaced        []*core.TradeForm
+	sellsPlaced       []*core.TradeForm
+	multiTradesPlaced []*core.MultiTradeForm
+	maxFundingFees    uint64
+	book              *orderbook.OrderBook
+	bookFeed          *tBookFeed
+	lastSendArgs      *sendArgs
+	sendCoin          *tCoin
+	newDepositAddress string
+	orders            map[order.OrderID]*core.Order
+	walletTxsMtx      sync.Mutex
+	walletTxs         map[string]*asset.WalletTransaction
 }
 
 func newTCore() *tCore {
@@ -231,9 +230,7 @@ func newTCore() *tCore {
 		bookFeed: &tBookFeed{
 			c: make(chan *core.BookUpdate, 1),
 		},
-		walletTxs:               make(map[string]*asset.WalletTransaction),
-		confirmWalletTx:         make(chan bool),
-		confirmWalletTxComplete: make(chan bool),
+		walletTxs: make(map[string]*asset.WalletTransaction),
 	}
 }
 
@@ -321,16 +318,9 @@ func (c *tCore) User() *core.User {
 	return nil
 }
 func (c *tCore) WalletTransaction(assetID uint32, id dex.Bytes) (*asset.WalletTransaction, error) {
+	c.walletTxsMtx.Lock()
+	defer c.walletTxsMtx.Unlock()
 	return c.walletTxs[hex.EncodeToString(id)], nil
-}
-func (c *tCore) ConfirmedWalletTransaction(assetID uint32, id dex.Bytes, onConfirm func(*asset.WalletTransaction)) error {
-	go func() {
-		<-c.confirmWalletTx
-		onConfirm(c.walletTxs[hex.EncodeToString(id)])
-		c.confirmWalletTxComplete <- true
-	}()
-
-	return nil
 }
 
 func (c *tCore) Network() dex.Network {
@@ -383,7 +373,7 @@ type tBotCoreAdaptor struct {
 	tCore *tCore
 }
 
-func (c *tBotCoreAdaptor) AssetBalance(assetID uint32) (*botBalance, error) {
+func (c *tBotCoreAdaptor) DEXBalance(assetID uint32) (*botBalance, error) {
 	if c.tCore.assetBalanceErr != nil {
 		return nil, c.tCore.assetBalanceErr
 	}
@@ -1461,7 +1451,7 @@ var _ botCexAdaptor = (*tBotCexAdaptor)(nil)
 
 var tLogger = dex.StdOutLogger("mm_TEST", dex.LevelTrace)
 
-func (c *tBotCexAdaptor) Balance(assetID uint32) (*botBalance, error) {
+func (c *tBotCexAdaptor) CEXBalance(assetID uint32) (*botBalance, error) {
 	return c.balances[assetID], c.balanceErr
 }
 func (c *tBotCexAdaptor) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error {

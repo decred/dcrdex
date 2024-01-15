@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -506,42 +508,114 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 		copy(id[:], encode.RandomBytes(order.OrderIDSize))
 		orderIDs[i] = id
 	}
-
 	matchIDs := make([]order.MatchID, 5)
 	for i := range matchIDs {
 		var id order.MatchID
 		copy(id[:], encode.RandomBytes(order.MatchIDSize))
 		matchIDs[i] = id
 	}
-
-	walletTxIDs := make([][32]byte, 6)
-	for i := range walletTxIDs {
-		var id [32]byte
-		copy(id[:], encode.RandomBytes(32))
-		walletTxIDs[i] = id
+	coinIDs := make([]string, 6)
+	for i := range coinIDs {
+		coinIDs[i] = hex.EncodeToString(encode.RandomBytes(32))
 	}
 
-	type updateAndBalances struct {
-		walletTxUpdates []*asset.WalletTransaction
-		note            core.Notification
-		balances        map[uint32]*botBalance
+	type matchUpdate struct {
+		swapCoin   *dex.Bytes
+		redeemCoin *dex.Bytes
+		refundCoin *dex.Bytes
+	}
+	newMatchUpdate := func(swapCoin, redeemCoin, refundCoin *string) *matchUpdate {
+		stringToBytes := func(s *string) *dex.Bytes {
+			if s == nil {
+				return nil
+			}
+			b, _ := hex.DecodeString(*s)
+			d := dex.Bytes(b)
+			return &d
+		}
+
+		return &matchUpdate{
+			swapCoin:   stringToBytes(swapCoin),
+			redeemCoin: stringToBytes(redeemCoin),
+			refundCoin: stringToBytes(refundCoin),
+		}
+	}
+
+	type orderUpdate struct {
+		id                   order.OrderID
+		lockedAmt            uint64
+		parentAssetLockedAmt uint64
+		redeemLockedAmt      uint64
+		refundLockedAmt      uint64
+		status               order.OrderStatus
+		matches              []*matchUpdate
+		allFeesConfirmed     bool
+	}
+	newOrderUpdate := func(id order.OrderID, lockedAmt, parentAssetLockedAmt, redeemLockedAmt, refundLockedAmt uint64, status order.OrderStatus, allFeesConfirmed bool, matches ...*matchUpdate) *orderUpdate {
+		return &orderUpdate{
+			id:                   id,
+			lockedAmt:            lockedAmt,
+			parentAssetLockedAmt: parentAssetLockedAmt,
+			redeemLockedAmt:      redeemLockedAmt,
+			refundLockedAmt:      refundLockedAmt,
+			status:               status,
+			matches:              matches,
+			allFeesConfirmed:     allFeesConfirmed,
+		}
+	}
+
+	type orderLockedFunds struct {
+		id                   order.OrderID
+		lockedAmt            uint64
+		parentAssetLockedAmt uint64
+		redeemLockedAmt      uint64
+		refundLockedAmt      uint64
+	}
+	newOrderLockedFunds := func(id order.OrderID, lockedAmt, parentAssetLockedAmt, redeemLockedAmt, refundLockedAmt uint64) *orderLockedFunds {
+		return &orderLockedFunds{
+			id:                   id,
+			lockedAmt:            lockedAmt,
+			parentAssetLockedAmt: parentAssetLockedAmt,
+			redeemLockedAmt:      redeemLockedAmt,
+			refundLockedAmt:      refundLockedAmt,
+		}
+	}
+
+	newWalletTx := func(id string, txType asset.TransactionType, amount, fees uint64, confirmed bool) *asset.WalletTransaction {
+		return &asset.WalletTransaction{
+			ID:        id,
+			Amount:    amount,
+			Fees:      fees,
+			Confirmed: confirmed,
+			Type:      txType,
+		}
+	}
+
+	b2q := calc.BaseToQuote
+
+	type updatesAndBalances struct {
+		orderUpdate      *orderUpdate
+		txUpdates        []*asset.WalletTransaction
+		balances         map[uint32]*botBalance
+		numPendingTrades int
 	}
 
 	type test struct {
 		name               string
 		isDynamicSwapper   map[uint32]bool
-		balances           map[uint32]uint64
+		initialBalances    map[uint32]uint64
 		multiTrade         *core.MultiTradeForm
-		multiTradeResponse []*core.Order
+		initialLockedFunds []*orderLockedFunds
+
 		wantErr            bool
 		postTradeBalances  map[uint32]*botBalance
-		updatesAndBalances []*updateAndBalances
+		updatesAndBalances []*updatesAndBalances
 	}
 
 	tests := []*test{
 		{
 			name: "non dynamic swapper, sell",
-			balances: map[uint32]uint64{
+			initialBalances: map[uint32]uint64{
 				42: 1e8,
 				0:  1e8,
 			},
@@ -551,372 +625,109 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 				Base:  42,
 				Quote: 0,
 				Placements: []*core.QtyRate{
-					{
-						Qty:  5e6,
-						Rate: 5e7,
-					},
-					{
-						Qty:  5e6,
-						Rate: 6e7,
-					},
+					{Qty: 5e6, Rate: 5e7},
+					{Qty: 5e6, Rate: 6e7},
 				},
 			},
-			multiTradeResponse: []*core.Order{
-				{
-					Host:      host,
-					BaseID:    42,
-					QuoteID:   0,
-					Sell:      true,
-					LockedAmt: 5e6 + 2000,
-					Status:    order.OrderStatusBooked,
-					ID:        orderIDs[0][:],
-				},
-				{
-					Host:      host,
-					BaseID:    42,
-					QuoteID:   0,
-					Sell:      true,
-					LockedAmt: 5e6 + 2000,
-					Status:    order.OrderStatusBooked,
-					ID:        orderIDs[1][:],
-				},
+			initialLockedFunds: []*orderLockedFunds{
+				newOrderLockedFunds(orderIDs[0], 5e6+2000, 0, 0, 0),
+				newOrderLockedFunds(orderIDs[1], 5e6+2000, 0, 0, 0),
 			},
 			postTradeBalances: map[uint32]*botBalance{
-				42: {
-					Available: 1e8 - (5e6+2000)*2,
-					Locked:    (5e6 + 2000) * 2,
-				},
-				0: {
-					Available: 1e8,
-				},
+				42: {1e8 - (5e6+2000)*2, (5e6 + 2000) * 2, 0},
+				0:  {1e8, 0, 0},
 			},
-			updatesAndBalances: []*updateAndBalances{
+			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[0][:],
-							BalanceDelta: -2e6,
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, 2e6, 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      true,
-							LockedAmt: 3e6 + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], nil, nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 - (5e6+2000)*2,
-							Locked:    5e6 + 2000 + 3e6 + 1000,
-						},
-						0: {
-							Available: 1e8,
-						},
+						42: {1e8 - (5e6+2000)*2, 5e6 + 2000 + 3e6 + 1000, 0},
+						0:  {1e8, 0, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// Second order has a match and sends swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[1][:],
-							BalanceDelta: -3e6,
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      true,
-							LockedAmt: 2e6 + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 2e6+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[1], nil, nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 - (5e6+2000)*2,
-							Locked:    2e6 + 1000 + 3e6 + 1000,
-						},
-						0: {
-							Available: 1e8,
-						},
+						42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0},
+						0:  {1e8, 0, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[0][:],
-							BalanceDelta:        -2e6,
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Redeem,
-							ID:           walletTxIDs[2][:],
-							BalanceDelta: int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, 2e6, 1000, true),
+						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      true,
-							LockedAmt: 3e6 + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 - (5e6+2000)*2,
-							Locked:    2e6 + 1000 + 3e6 + 1000,
-						},
-						0: {
-							Available: 1e8,
-							Pending:   calc.BaseToQuote(5e7, 2e6) - 1000,
-						},
+						42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0},
+						0:  {1e8, 0, b2q(5e7, 2e6) - 1000},
 					},
+					numPendingTrades: 2,
 				},
 				// First order redemption confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[2][:],
-							BalanceDelta:        int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 1000, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      true,
-							LockedAmt: 3e6 + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 - (5e6+2000)*2,
-							Locked:    2e6 + 1000 + 3e6 + 1000,
-						},
-						0: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6) - 1000,
-						},
+						42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0},
+						0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order cancelled
 				{
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:             host,
-							BaseID:           42,
-							QuoteID:          0,
-							Sell:             true,
-							Status:           order.OrderStatusCanceled,
-							ID:               orderIDs[0][:],
-							AllFeesConfirmed: true,
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-									Status: order.MatchConfirmed,
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 - (7e6 + 2000 + 1000),
-							Locked:    2e6 + 1000,
-						},
-						0: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6) - 1000,
-						},
+						42: {1e8 - (7e6 + 2000 + 1000), 2e6 + 1000, 0},
+						0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[1][:],
-							BalanceDelta:        -3e6,
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Refund,
-							ID:           walletTxIDs[3][:],
-							BalanceDelta: 3e6,
-							Fees:         1200,
-						},
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[4][:],
-							BalanceDelta: -2e6,
-							Fees:         800,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1200, false),
+						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  42,
-							QuoteID: 0,
-							Sell:    true,
-							Status:  order.OrderStatusExecuted,
-							ID:      orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, false, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], nil, nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 - (7e6 + 1800 + 1000),
-							Pending:   3e6 - 1200,
-						},
-						0: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6) - 1000,
-						},
+						42: {1e8 - (7e6 + 1800 + 1000), 0, 3e6 - 1200},
+						0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Refund,
-							ID:                  walletTxIDs[3][:],
-							BalanceDelta:        3e6,
-							Fees:                1200,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[4][:],
-							BalanceDelta:        -2e6,
-							Fees:                800,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[5][:],
-							BalanceDelta:        int64(calc.BaseToQuote(6e7, 2e6)),
-							Fees:                700,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1200, true),
+						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, true),
+						newWalletTx(coinIDs[5], asset.Redeem, b2q(6e7, 2e6), 700, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  42,
-							QuoteID: 0,
-							Sell:    true,
-							Status:  order.OrderStatusExecuted,
-							ID:      orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[5][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], &coinIDs[5], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 - (4e6 + 1800 + 1000 + 1200),
-						},
-						0: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6) - 1700,
-						},
+						42: {1e8 - (4e6 + 1800 + 1000 + 1200), 0, 0},
+						0:  {1e8 + b2q(5e7, 2e6) + b2q(6e7, 2e6) - 1700, 0, 0},
 					},
 				},
 			},
 		},
 		{
 			name: "non dynamic swapper, buy",
-			balances: map[uint32]uint64{
+			initialBalances: map[uint32]uint64{
 				42: 1e8,
 				0:  1e8,
 			},
@@ -926,380 +737,117 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 				Base:  42,
 				Quote: 0,
 				Placements: []*core.QtyRate{
-					{
-						Qty:  5e6,
-						Rate: 5e7,
-					},
-					{
-						Qty:  5e6,
-						Rate: 6e7,
-					},
+					{Qty: 5e6, Rate: 5e7},
+					{Qty: 5e6, Rate: 6e7},
 				},
 			},
-			multiTradeResponse: []*core.Order{
-				{
-					Host:      host,
-					BaseID:    42,
-					QuoteID:   0,
-					Sell:      false,
-					LockedAmt: calc.BaseToQuote(5e7, 5e6) + 2000,
-					Status:    order.OrderStatusBooked,
-					ID:        orderIDs[0][:],
-				},
-				{
-					Host:      host,
-					BaseID:    42,
-					QuoteID:   0,
-					Sell:      false,
-					LockedAmt: calc.BaseToQuote(6e7, 5e6) + 2000,
-					Status:    order.OrderStatusBooked,
-					ID:        orderIDs[1][:],
-				},
+			initialLockedFunds: []*orderLockedFunds{
+				newOrderLockedFunds(orderIDs[0], b2q(5e7, 5e6)+2000, 0, 0, 0),
+				newOrderLockedFunds(orderIDs[1], b2q(6e7, 5e6)+2000, 0, 0, 0),
 			},
 			postTradeBalances: map[uint32]*botBalance{
-				42: {
-					Available: 1e8,
-				},
-				0: {
-					Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6) + 4000),
-					Locked:    calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6) + 4000,
-				},
+				42: {1e8, 0, 0},
+				0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000, 0},
 			},
-			updatesAndBalances: []*updateAndBalances{
+			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[0][:],
-							BalanceDelta: -int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, b2q(5e7, 2e6), 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      false,
-							LockedAmt: calc.BaseToQuote(5e7, 3e6) + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], nil, nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8,
-						},
-						0: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6) + 4000),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 5e6) + 3000,
-						},
+						42: {1e8, 0, 0},
+						0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 5e6) + 3000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// Second order has a match and sends swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[1][:],
-							BalanceDelta: -int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, b2q(6e7, 3e6), 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      false,
-							LockedAmt: calc.BaseToQuote(6e7, 2e6) + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], b2q(6e7, 2e6)+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[1], nil, nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8,
-						},
-						0: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6) + 4000),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6) + 2000,
-						},
+						42: {1e8, 0, 0},
+						0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[0][:],
-							BalanceDelta:        -int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Redeem,
-							ID:           walletTxIDs[2][:],
-							BalanceDelta: 2e6,
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, b2q(5e7, 2e6), 1000, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      false,
-							LockedAmt: calc.BaseToQuote(5e7, 3e6) + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8,
-							Pending:   2e6 - 1000,
-						},
-						0: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6) + 4000),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6) + 2000,
-						},
+						42: {1e8, 0, 2e6 - 1000},
+						0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order redemption confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[2][:],
-							BalanceDelta:        2e6,
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 1000, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:      host,
-							BaseID:    42,
-							QuoteID:   0,
-							Sell:      false,
-							LockedAmt: calc.BaseToQuote(5e7, 3e6) + 1000,
-							Status:    order.OrderStatusBooked,
-							ID:        orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 + 2e6 - 1000,
-						},
-						0: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6) + 4000),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6) + 2000,
-						},
+						42: {1e8 + 2e6 - 1000, 0, 0},
+						0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order cancelled
 				{
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  42,
-							QuoteID: 0,
-							Sell:    false,
-							Status:  order.OrderStatusCanceled,
-							ID:      orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-									Status: order.MatchConfirmed,
-								},
-							},
-							AllFeesConfirmed: true,
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 + 2e6 - 1000,
-						},
-						0: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6) + 3000),
-							Locked:    calc.BaseToQuote(6e7, 2e6) + 1000,
-						},
+						42: {1e8 + 2e6 - 1000, 0, 0},
+						0:  {1e8 - (b2q(5e7, 2e6) + b2q(6e7, 5e6) + 3000), b2q(6e7, 2e6) + 1000, 0},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[1][:],
-							BalanceDelta:        -int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Refund,
-							ID:           walletTxIDs[3][:],
-							BalanceDelta: int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:         1200,
-						},
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[4][:],
-							BalanceDelta: -int64(calc.BaseToQuote(6e7, 2e6)),
-							Fees:         800,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, b2q(6e7, 3e6), 1000, true),
+						newWalletTx(coinIDs[3], asset.Refund, b2q(6e7, 3e6), 1200, false),
+						newWalletTx(coinIDs[4], asset.Swap, b2q(6e7, 2e6), 800, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  42,
-							QuoteID: 0,
-							Sell:    false,
-							Status:  order.OrderStatusExecuted,
-							ID:      orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, false, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], nil, nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 + 2e6 - 1000,
-						},
-						0: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6) + 2800),
-							Pending:   calc.BaseToQuote(6e7, 3e6) - 1200,
-						},
+						42: {1e8 + 2e6 - 1000, 0, 0},
+						0:  {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6) + 2800), 0, calc.BaseToQuote(6e7, 3e6) - 1200},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Refund,
-							ID:                  walletTxIDs[3][:],
-							BalanceDelta:        int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:                1200,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[4][:],
-							BalanceDelta:        -int64(calc.BaseToQuote(6e7, 2e6)),
-							Fees:                800,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[5][:],
-							BalanceDelta:        2e6,
-							Fees:                700,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[3], asset.Refund, b2q(6e7, 3e6), 1200, true),
+						newWalletTx(coinIDs[4], asset.Swap, b2q(6e7, 2e6), 800, true),
+						newWalletTx(coinIDs[5], asset.Redeem, 2e6, 700, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  42,
-							QuoteID: 0,
-							Sell:    false,
-							Status:  order.OrderStatusExecuted,
-							ID:      orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[5][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], &coinIDs[5], nil)),
 					balances: map[uint32]*botBalance{
-						42: {
-							Available: 1e8 + 4e6 - 1700,
-						},
-						0: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6) + 2800 + 1200),
-						},
+						42: {1e8 + 4e6 - 1700, 0, 0},
+						0:  {1e8 - (b2q(5e7, 2e6) + b2q(6e7, 2e6) + 2800 + 1200), 0, 0},
 					},
 				},
 			},
 		},
 		{
 			name: "dynamic swapper, token, sell",
+			initialBalances: map[uint32]uint64{
+				966001: 1e8,
+				966:    1e8,
+				60:     1e8,
+			},
 			isDynamicSwapper: map[uint32]bool{
 				966001: true,
 				966:    true,
 				60:     true,
-			},
-			balances: map[uint32]uint64{
-				966001: 1e8,
-				966:    1e8,
-				60:     1e8,
 			},
 			multiTrade: &core.MultiTradeForm{
 				Host:  host,
@@ -1307,426 +855,125 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 				Base:  60,
 				Quote: 966001,
 				Placements: []*core.QtyRate{
-					{
-						Qty:  5e6,
-						Rate: 5e7,
-					},
-					{
-						Qty:  5e6,
-						Rate: 6e7,
-					},
+					{Qty: 5e6, Rate: 5e7},
+					{Qty: 5e6, Rate: 6e7},
 				},
 			},
-			multiTradeResponse: []*core.Order{
-				{
-					Host:            host,
-					BaseID:          60,
-					QuoteID:         966001,
-					Sell:            true,
-					LockedAmt:       5e6 + 2000,
-					RefundLockedAmt: 3000,
-					RedeemLockedAmt: 4000,
-					Status:          order.OrderStatusBooked,
-					ID:              orderIDs[0][:],
-				},
-				{
-					Host:            host,
-					BaseID:          60,
-					QuoteID:         966001,
-					Sell:            true,
-					LockedAmt:       5e6 + 2000,
-					RefundLockedAmt: 3000,
-					RedeemLockedAmt: 4000,
-					Status:          order.OrderStatusBooked,
-					ID:              orderIDs[1][:],
-				},
+			initialLockedFunds: []*orderLockedFunds{
+				newOrderLockedFunds(orderIDs[0], 5e6+2000, 0, 4000, 3000),
+				newOrderLockedFunds(orderIDs[1], 5e6+2000, 0, 4000, 3000),
 			},
 			postTradeBalances: map[uint32]*botBalance{
-				966001: {
-					Available: 1e8,
-				},
-				966: {
-					Available: 1e8 - 8000,
-					Locked:    8000,
-				},
-				60: {
-					Available: 1e8 - (5e6+2000+3000)*2,
-					Locked:    (5e6 + 2000 + 3000) * 2,
-				},
+				966001: {1e8, 0, 0},
+				966:    {1e8 - 8000, 8000, 0},
+				60:     {1e8 - (5e6+2000+3000)*2, (5e6 + 2000 + 3000) * 2, 0},
 			},
-			updatesAndBalances: []*updateAndBalances{
+			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[0][:],
-							BalanceDelta: -2e6,
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, 2e6, 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:            host,
-							BaseID:          60,
-							QuoteID:         966001,
-							Sell:            true,
-							LockedAmt:       3e6 + 1000,
-							RefundLockedAmt: 3000,
-							RedeemLockedAmt: 4000,
-							Status:          order.OrderStatusBooked,
-							ID:              orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 4000, 3000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], nil, nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8,
-						},
-						966: {
-							Available: 1e8 - 8000,
-							Locked:    8000,
-						},
-						60: {
-							Available: 1e8 - (5e6+2000+3000)*2,
-							Locked:    3e6 + 1000 + 5e6 + 2000 + 3000 + 3000,
-						},
+						966001: {1e8, 0, 0},
+						966:    {1e8 - 8000, 8000, 0},
+						60:     {1e8 - (5e6+2000+3000)*2, 3e6 + 1000 + 5e6 + 2000 + 3000 + 3000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// Second order has a match and sends swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[1][:],
-							BalanceDelta: -3e6,
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:            host,
-							BaseID:          60,
-							QuoteID:         966001,
-							Sell:            true,
-							LockedAmt:       2e6 + 1000,
-							RefundLockedAmt: 3000,
-							RedeemLockedAmt: 4000,
-							Status:          order.OrderStatusBooked,
-							ID:              orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 2e6+1000, 0, 4000, 3000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[1], nil, nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8,
-						},
-						966: {
-							Available: 1e8 - 8000,
-							Locked:    8000,
-						},
-						60: {
-							Available: 1e8 - (5e6+2000+3000)*2,
-							Locked:    3e6 + 1000 + 2e6 + 1000 + 3000 + 3000,
-						},
+						966001: {1e8, 0, 0},
+						966:    {1e8 - 8000, 8000, 0},
+						60:     {1e8 - (5e6+2000+3000)*2, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[0][:],
-							BalanceDelta:        -2e6,
-							Fees:                900,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Redeem,
-							ID:           walletTxIDs[2][:],
-							BalanceDelta: int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, 2e6, 900, true),
+						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:            host,
-							BaseID:          60,
-							QuoteID:         966001,
-							Sell:            true,
-							LockedAmt:       3e6 + 1000,
-							RefundLockedAmt: 3000,
-							RedeemLockedAmt: 3000,
-							Status:          order.OrderStatusBooked,
-							ID:              orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 3000, 3000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8,
-							Pending:   calc.BaseToQuote(5e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 8000,
-							Locked:    7000,
-						},
-						60: {
-							Available: 1e8 - (5e6+2000+3000)*2 + 100,
-							Locked:    3e6 + 1000 + 2e6 + 1000 + 3000 + 3000,
-						},
+						966001: {1e8, 0, b2q(5e7, 2e6)},
+						966:    {1e8 - 8000, 7000, 0},
+						60:     {1e8 - (5e6+2000+3000)*2 + 100, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order redemption confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[2][:],
-							BalanceDelta:        int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:                800,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 800, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:            host,
-							BaseID:          60,
-							QuoteID:         966001,
-							Sell:            true,
-							LockedAmt:       3e6 + 1000,
-							RefundLockedAmt: 3000,
-							RedeemLockedAmt: 3000,
-							Status:          order.OrderStatusBooked,
-							ID:              orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 3000, 3000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 7800,
-							Locked:    7000,
-						},
-						60: {
-							Available: 1e8 - (5e6+2000+3000)*2 + 100,
-							Locked:    3e6 + 1000 + 2e6 + 1000 + 3000 + 3000,
-						},
+						966001: {1e8 + b2q(5e7, 2e6), 0, 0},
+						966:    {1e8 - 7000 - 800, 7000, 0},
+						60:     {1e8 - (5e6+2000+3000)*2 + 100, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order cancelled
 				{
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:             host,
-							BaseID:           60,
-							QuoteID:          966001,
-							Sell:             true,
-							Status:           order.OrderStatusCanceled,
-							ID:               orderIDs[0][:],
-							AllFeesConfirmed: true,
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-									Status: order.MatchConfirmed,
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 4800,
-							Locked:    4000,
-						},
-						60: {
-							Available: 1e8 - (7e6 + 900 + 2000 + 3000),
-							Locked:    2e6 + 1000 + 3000,
-						},
+						966001: {1e8 + b2q(5e7, 2e6), 0, 0},
+						966:    {1e8 - 4000 - 800, 4000, 0},
+						60:     {1e8 - (7e6 + 900 + 2000 + 3000), 2e6 + 1000 + 3000, 0},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[1][:],
-							BalanceDelta:        -3e6,
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Refund,
-							ID:           walletTxIDs[3][:],
-							BalanceDelta: 3e6,
-							Fees:         1200,
-						},
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[4][:],
-							BalanceDelta: -2e6,
-							Fees:         800,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1200, false),
+						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:            host,
-							BaseID:          60,
-							QuoteID:         966001,
-							Sell:            true,
-							Status:          order.OrderStatusExecuted,
-							ID:              orderIDs[1][:],
-							RefundLockedAmt: 1800,
-							RedeemLockedAmt: 4000,
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 4000, 1800, order.OrderStatusExecuted, false, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], nil, nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 4800,
-							Locked:    4000,
-						},
-						60: {
-							Available: 1e8 - (7e6 + 900 + 2000 + 3000) + 200,
-							Pending:   3e6,
-							Locked:    1800,
-						},
+						966001: {1e8 + b2q(5e7, 2e6), 0, 0},
+						966:    {1e8 - 4000 - 800, 4000, 0},
+						60:     {1e8 - (7e6 + 900 + 2000 + 3000) + 200, 1800, 3e6},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Refund,
-							ID:                  walletTxIDs[3][:],
-							BalanceDelta:        3e6,
-							Fees:                1100,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[4][:],
-							BalanceDelta:        -2e6,
-							Fees:                800,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[5][:],
-							BalanceDelta:        int64(calc.BaseToQuote(6e7, 2e6)),
-							Fees:                700,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1100, true),
+						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, true),
+						newWalletTx(coinIDs[5], asset.Redeem, calc.BaseToQuote(6e7, 2e6), 700, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  60,
-							QuoteID: 966001,
-							Sell:    true,
-							Status:  order.OrderStatusExecuted,
-							ID:      orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[5][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], &coinIDs[5], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 + calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 1500,
-						},
-						60: {
-							Available: 1e8 - (4e6 + 3800),
-						},
+						966001: {1e8 + calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6), 0, 0},
+						966:    {1e8 - 1500, 0, 0},
+						60:     {1e8 - (4e6 + 3800), 0, 0},
 					},
 				},
 			},
 		},
 		{
 			name: "dynamic swapper, token, buy",
+			initialBalances: map[uint32]uint64{
+				966001: 1e8,
+				966:    1e8,
+				60:     1e8,
+			},
 			isDynamicSwapper: map[uint32]bool{
 				966001: true,
 				966:    true,
 				60:     true,
-			},
-			balances: map[uint32]uint64{
-				966001: 1e8,
-				966:    1e8,
-				60:     1e8,
 			},
 			multiTrade: &core.MultiTradeForm{
 				Host:  host,
@@ -1734,423 +981,110 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 				Base:  60,
 				Quote: 966001,
 				Placements: []*core.QtyRate{
-					{
-						Qty:  5e6,
-						Rate: 5e7,
-					},
-					{
-						Qty:  5e6,
-						Rate: 6e7,
-					},
+					{Qty: 5e6, Rate: 5e7},
+					{Qty: 5e6, Rate: 6e7},
 				},
 			},
-			multiTradeResponse: []*core.Order{
-				{
-					Host:                 host,
-					BaseID:               60,
-					QuoteID:              966001,
-					Sell:                 false,
-					LockedAmt:            calc.BaseToQuote(5e7, 5e6),
-					ParentAssetLockedAmt: 2000,
-					RedeemLockedAmt:      3000,
-					RefundLockedAmt:      4000,
-					Status:               order.OrderStatusBooked,
-					ID:                   orderIDs[0][:],
-				},
-				{
-					Host:                 host,
-					BaseID:               60,
-					QuoteID:              966001,
-					Sell:                 false,
-					LockedAmt:            calc.BaseToQuote(6e7, 5e6),
-					ParentAssetLockedAmt: 2000,
-					RedeemLockedAmt:      3000,
-					RefundLockedAmt:      4000,
-					Status:               order.OrderStatusBooked,
-					ID:                   orderIDs[1][:],
-				},
+			initialLockedFunds: []*orderLockedFunds{
+				newOrderLockedFunds(orderIDs[0], b2q(5e7, 5e6), 2000, 3000, 4000),
+				newOrderLockedFunds(orderIDs[1], b2q(6e7, 5e6), 2000, 3000, 4000),
 			},
 			postTradeBalances: map[uint32]*botBalance{
-				966001: {
-					Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)),
-					Locked:    calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6),
-				},
-				966: {
-					Available: 1e8 - 12000,
-					Locked:    12000,
-				},
-				60: {
-					Available: 1e8 - 6000,
-					Locked:    6000,
-				},
+				966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6), 0},
+				966:    {1e8 - 12000, 12000, 0},
+				60:     {1e8 - 6000, 6000, 0},
 			},
-			updatesAndBalances: []*updateAndBalances{
+			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[0][:],
-							BalanceDelta: -int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, calc.BaseToQuote(5e7, 2e6), 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:                 host,
-							BaseID:               60,
-							QuoteID:              966001,
-							Sell:                 false,
-							LockedAmt:            calc.BaseToQuote(5e7, 3e6),
-							ParentAssetLockedAmt: 1000,
-							RedeemLockedAmt:      3000,
-							RefundLockedAmt:      4000,
-							Status:               order.OrderStatusBooked,
-							ID:                   orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 3000, 4000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], nil, nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 5e6),
-						},
-						966: {
-							Available: 1e8 - 12000,
-							Locked:    11000,
-						},
-						60: {
-							Available: 1e8 - 6000,
-							Locked:    6000,
-						},
+						966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 5e6), 0},
+						966:    {1e8 - 12000, 11000, 0},
+						60:     {1e8 - 6000, 6000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// Second order has a match and sends swap tx
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[1][:],
-							BalanceDelta: -int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, calc.BaseToQuote(6e7, 3e6), 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:                 host,
-							BaseID:               60,
-							QuoteID:              966001,
-							Sell:                 false,
-							LockedAmt:            calc.BaseToQuote(6e7, 2e6),
-							ParentAssetLockedAmt: 1000,
-							RedeemLockedAmt:      3000,
-							RefundLockedAmt:      4000,
-							Status:               order.OrderStatusBooked,
-							ID:                   orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], calc.BaseToQuote(6e7, 2e6), 1000, 3000, 4000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[1], nil, nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 12000,
-							Locked:    10000,
-						},
-						60: {
-							Available: 1e8 - 6000,
-							Locked:    6000,
-						},
+						966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0},
+						966:    {1e8 - 12000, 10000, 0},
+						60:     {1e8 - 6000, 6000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[0][:],
-							BalanceDelta:        -int64(calc.BaseToQuote(5e7, 2e6)),
-							Fees:                900,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Redeem,
-							ID:           walletTxIDs[2][:],
-							BalanceDelta: 2e6,
-							Fees:         1000,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[0], asset.Swap, calc.BaseToQuote(5e7, 2e6), 900, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 1000, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:                 host,
-							BaseID:               60,
-							QuoteID:              966001,
-							Sell:                 false,
-							LockedAmt:            calc.BaseToQuote(5e7, 3e6),
-							ParentAssetLockedAmt: 1000,
-							RedeemLockedAmt:      2000,
-							RefundLockedAmt:      4000,
-							Status:               order.OrderStatusBooked,
-							ID:                   orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 2000, 4000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 12000 + 100,
-							Locked:    10000,
-						},
-						60: {
-							Available: 1e8 - 6000,
-							Pending:   2e6,
-							Locked:    5000,
-						},
+						966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0},
+						966:    {1e8 - 12000 + 100, 10000, 0},
+						60:     {1e8 - 6000, 5000, 2e6},
 					},
+					numPendingTrades: 2,
 				},
 				// First order redemption confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[2][:],
-							BalanceDelta:        2e6,
-							Fees:                800,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 800, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:                 host,
-							BaseID:               60,
-							QuoteID:              966001,
-							Sell:                 false,
-							LockedAmt:            calc.BaseToQuote(5e7, 3e6),
-							ParentAssetLockedAmt: 1000,
-							RedeemLockedAmt:      2000,
-							RefundLockedAmt:      4000,
-							Status:               order.OrderStatusBooked,
-							ID:                   orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 2000, 4000, order.OrderStatusBooked, false, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)),
-							Locked:    calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 12000 + 100,
-							Locked:    10000,
-						},
-						60: {
-							Available: 1e8 - 5800 + 2e6,
-							Locked:    5000,
-						},
+						966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0},
+						966:    {1e8 - 12000 + 100, 10000, 0},
+						60:     {1e8 - 5800 + 2e6, 5000, 0},
 					},
+					numPendingTrades: 2,
 				},
 				// First order cancelled
 				{
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  60,
-							QuoteID: 966001,
-							Sell:    false,
-							Status:  order.OrderStatusCanceled,
-							ID:      orderIDs[0][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[0][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[2][:],
-									},
-									Status: order.MatchConfirmed,
-								},
-							},
-							AllFeesConfirmed: true,
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true, newMatchUpdate(&coinIDs[0], &coinIDs[2], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)),
-							Locked:    calc.BaseToQuote(6e7, 2e6),
-						},
-						966: {
-							Available: 1e8 - 7000 + 100,
-							Locked:    5000,
-						},
-						60: {
-							Available: 1e8 + 2e6 - 3800,
-							Locked:    3000,
-						},
+						966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(6e7, 2e6), 0},
+						966:    {1e8 - 7000 + 100, 5000, 0},
+						60:     {1e8 + 2e6 - 3800, 3000, 0},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[1][:],
-							BalanceDelta:        -int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:                1000,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:         asset.Refund,
-							ID:           walletTxIDs[3][:],
-							BalanceDelta: int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:         1200,
-						},
-						{
-							Type:         asset.Swap,
-							ID:           walletTxIDs[4][:],
-							BalanceDelta: -int64(calc.BaseToQuote(6e7, 2e6)),
-							Fees:         800,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[1], asset.Swap, calc.BaseToQuote(6e7, 3e6), 1000, true),
+						newWalletTx(coinIDs[3], asset.Refund, calc.BaseToQuote(6e7, 3e6), 1200, false),
+						newWalletTx(coinIDs[4], asset.Swap, calc.BaseToQuote(6e7, 2e6), 800, false),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:            host,
-							BaseID:          60,
-							QuoteID:         966001,
-							Sell:            false,
-							Status:          order.OrderStatusExecuted,
-							RedeemLockedAmt: 3000,
-							RefundLockedAmt: 2000,
-							ID:              orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 3000, 2000, order.OrderStatusExecuted, false, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], nil, nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)),
-							Pending:   calc.BaseToQuote(6e7, 3e6),
-						},
-						966: {
-							Available: 1e8 - 6000 + 100,
-							Locked:    2000,
-						},
-						60: {
-							Available: 1e8 + 2e6 - 3800,
-							Locked:    3000,
-						},
+						966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)), 0, calc.BaseToQuote(6e7, 3e6)},
+						966:    {1e8 - 6000 + 100, 2000, 0},
+						60:     {1e8 + 2e6 - 3800, 3000, 0},
 					},
+					numPendingTrades: 1,
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					walletTxUpdates: []*asset.WalletTransaction{
-						{
-							Type:                asset.Refund,
-							ID:                  walletTxIDs[3][:],
-							BalanceDelta:        int64(calc.BaseToQuote(6e7, 3e6)),
-							Fees:                1200,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Swap,
-							ID:                  walletTxIDs[4][:],
-							BalanceDelta:        -int64(calc.BaseToQuote(6e7, 2e6)),
-							Fees:                800,
-							PartOfActiveBalance: true,
-						},
-						{
-							Type:                asset.Redeem,
-							ID:                  walletTxIDs[5][:],
-							BalanceDelta:        2e6,
-							Fees:                700,
-							PartOfActiveBalance: true,
-						},
+					txUpdates: []*asset.WalletTransaction{
+						newWalletTx(coinIDs[3], asset.Refund, calc.BaseToQuote(6e7, 3e6), 1200, true),
+						newWalletTx(coinIDs[4], asset.Swap, calc.BaseToQuote(6e7, 2e6), 800, true),
+						newWalletTx(coinIDs[5], asset.Redeem, 2e6, 700, true),
 					},
-					note: &core.OrderNote{
-						Order: &core.Order{
-							Host:    host,
-							BaseID:  60,
-							QuoteID: 966001,
-							Sell:    false,
-							Status:  order.OrderStatusExecuted,
-							ID:      orderIDs[1][:],
-							Matches: []*core.Match{
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[1][:],
-									},
-									Refund: &core.Coin{
-										ID: walletTxIDs[3][:],
-									},
-								},
-								{
-									Swap: &core.Coin{
-										ID: walletTxIDs[4][:],
-									},
-									Redeem: &core.Coin{
-										ID: walletTxIDs[5][:],
-									},
-								},
-							},
-						},
-					},
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3]), newMatchUpdate(&coinIDs[4], &coinIDs[5], nil)),
 					balances: map[uint32]*botBalance{
-						966001: {
-							Available: 1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6)),
-						},
-						966: {
-							Available: 1e8 - 3900,
-						},
-						60: {
-							Available: 1e8 + 4e6 - 1500,
-						},
+						966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6)), 0, 0},
+						966:    {1e8 - 3900, 0, 0},
+						60:     {1e8 + 4e6 - 1500, 0, 0},
 					},
 				},
 			},
@@ -2163,15 +1097,30 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 
 	runTest := func(test *test) {
 		tCore := newTCore()
-		tCore.multiTradeResult = test.multiTradeResponse
 		tCore.market = mkt
 		tCore.isDynamicSwapper = test.isDynamicSwapper
+
+		multiTradeResult := make([]*core.Order, 0, len(test.initialLockedFunds))
+		for _, o := range test.initialLockedFunds {
+			multiTradeResult = append(multiTradeResult, &core.Order{
+				Host:                 test.multiTrade.Host,
+				BaseID:               test.multiTrade.Base,
+				QuoteID:              test.multiTrade.Quote,
+				Sell:                 test.multiTrade.Sell,
+				LockedAmt:            o.lockedAmt,
+				ID:                   o.id[:],
+				ParentAssetLockedAmt: o.parentAssetLockedAmt,
+				RedeemLockedAmt:      o.redeemLockedAmt,
+				RefundLockedAmt:      o.refundLockedAmt,
+			})
+		}
+		tCore.multiTradeResult = multiTradeResult
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		botID := dexMarketID(test.multiTrade.Host, test.multiTrade.Base, test.multiTrade.Quote)
-		adaptor := unifiedExchangeAdaptorForBot(botID, test.balances, nil, tCore, nil, tLogger)
+		adaptor := unifiedExchangeAdaptorForBot(botID, test.initialBalances, nil, tCore, nil, tLogger)
 		adaptor.run(ctx)
 		_, err := adaptor.MultiTrade([]byte{}, test.multiTrade)
 		if test.wantErr {
@@ -2187,7 +1136,7 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 		checkBalances := func(expected map[uint32]*botBalance, updateNum int) {
 			t.Helper()
 			for assetID, expectedBal := range expected {
-				bal, err := adaptor.AssetBalance(assetID)
+				bal, err := adaptor.DEXBalance(assetID)
 				if err != nil {
 					t.Fatalf("%s: unexpected error: %v", test.name, err)
 				}
@@ -2207,12 +1156,56 @@ func TestExchangeAdaptorDEXTrade(t *testing.T) {
 		checkBalances(test.postTradeBalances, 0)
 
 		for i, update := range test.updatesAndBalances {
-			for _, txUpdate := range update.walletTxUpdates {
-				tCore.walletTxs[hex.EncodeToString(txUpdate.ID)] = txUpdate
+			tCore.walletTxsMtx.Lock()
+			for _, txUpdate := range update.txUpdates {
+				tCore.walletTxs[txUpdate.ID] = txUpdate
 			}
-			tCore.noteFeed <- update.note
+			tCore.walletTxsMtx.Unlock()
+
+			o := &core.Order{
+				Host:                 test.multiTrade.Host,
+				BaseID:               test.multiTrade.Base,
+				QuoteID:              test.multiTrade.Quote,
+				Sell:                 test.multiTrade.Sell,
+				LockedAmt:            update.orderUpdate.lockedAmt,
+				ID:                   update.orderUpdate.id[:],
+				ParentAssetLockedAmt: update.orderUpdate.parentAssetLockedAmt,
+				RedeemLockedAmt:      update.orderUpdate.redeemLockedAmt,
+				RefundLockedAmt:      update.orderUpdate.refundLockedAmt,
+				Status:               update.orderUpdate.status,
+				Matches:              make([]*core.Match, len(update.orderUpdate.matches)),
+				AllFeesConfirmed:     update.orderUpdate.allFeesConfirmed,
+			}
+
+			for i, matchUpdate := range update.orderUpdate.matches {
+				o.Matches[i] = &core.Match{}
+				if matchUpdate.swapCoin != nil {
+					o.Matches[i].Swap = &core.Coin{
+						ID: *matchUpdate.swapCoin,
+					}
+				}
+				if matchUpdate.redeemCoin != nil {
+					o.Matches[i].Redeem = &core.Coin{
+						ID: *matchUpdate.redeemCoin,
+					}
+				}
+				if matchUpdate.refundCoin != nil {
+					o.Matches[i].Refund = &core.Coin{
+						ID: *matchUpdate.refundCoin,
+					}
+				}
+			}
+
+			note := core.OrderNote{
+				Order: o,
+			}
+			tCore.noteFeed <- &note
 			tCore.noteFeed <- &core.BondPostNote{} // dummy note
 			checkBalances(update.balances, i+1)
+
+			if len(adaptor.pendingDEXOrders) != update.numPendingTrades {
+				t.Fatalf("%s: update #%d, expected %d pending trades, got %d", test.name, i+1, update.numPendingTrades, len(adaptor.pendingDEXOrders))
+			}
 		}
 	}
 
@@ -2241,7 +1234,8 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 		postConfirmCEXBalance *botBalance
 	}
 
-	id := encode.RandomBytes(32)
+	coinID := encode.RandomBytes(32)
+	txID := hex.EncodeToString(coinID)
 
 	tests := []test{
 		{
@@ -2250,20 +1244,20 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 			isWithdrawer: true,
 			depositAmt:   1e6,
 			sendCoin: &tCoin{
-				txID:  id,
-				value: 1e6 - 2000,
+				coinID: coinID,
+				value:  1e6 - 2000,
 			},
 			unconfirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -(1e6 - 2000),
-				Fees:                2000,
-				PartOfActiveBalance: false,
+				ID:        txID,
+				Amount:    1e6 - 2000,
+				Fees:      2000,
+				Confirmed: false,
 			},
 			confirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -(1e6 - 2000),
-				Fees:                2000,
-				PartOfActiveBalance: true,
+				ID:        txID,
+				Amount:    1e6 - 2000,
+				Fees:      2000,
+				Confirmed: true,
 			},
 			receivedAmt:       1e6 - 2000,
 			initialDEXBalance: 3e6,
@@ -2287,20 +1281,20 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 			assetID:    42,
 			depositAmt: 1e6,
 			sendCoin: &tCoin{
-				txID:  id,
-				value: 1e6,
+				coinID: coinID,
+				value:  1e6,
 			},
 			unconfirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -1e6,
-				Fees:                2000,
-				PartOfActiveBalance: false,
+				ID:        txID,
+				Amount:    1e6,
+				Fees:      2000,
+				Confirmed: false,
 			},
 			confirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -1e6,
-				Fees:                2000,
-				PartOfActiveBalance: true,
+				ID:        txID,
+				Amount:    1e6,
+				Fees:      2000,
+				Confirmed: true,
 			},
 			receivedAmt:       1e6,
 			initialDEXBalance: 3e6,
@@ -2325,20 +1319,20 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 			isDynamicSwapper: true,
 			depositAmt:       1e6,
 			sendCoin: &tCoin{
-				txID:  id,
-				value: 1e6,
+				coinID: coinID,
+				value:  1e6,
 			},
 			unconfirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -1e6,
-				Fees:                4000,
-				PartOfActiveBalance: false,
+				ID:        txID,
+				Amount:    1e6,
+				Fees:      4000,
+				Confirmed: false,
 			},
 			confirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -1e6,
-				Fees:                2000,
-				PartOfActiveBalance: true,
+				ID:        txID,
+				Amount:    1e6,
+				Fees:      2000,
+				Confirmed: true,
 			},
 			receivedAmt:       1e6,
 			initialDEXBalance: 3e6,
@@ -2363,20 +1357,20 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 			isDynamicSwapper: true,
 			depositAmt:       1e6,
 			sendCoin: &tCoin{
-				txID:  id,
-				value: 1e6,
+				coinID: coinID,
+				value:  1e6,
 			},
 			unconfirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -1e6,
-				Fees:                4000,
-				PartOfActiveBalance: false,
+				ID:        txID,
+				Amount:    1e6,
+				Fees:      4000,
+				Confirmed: false,
 			},
 			confirmedTx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        -1e6,
-				Fees:                2000,
-				PartOfActiveBalance: true,
+				ID:        txID,
+				Amount:    1e6,
+				Fees:      2000,
+				Confirmed: true,
 			},
 			receivedAmt:       1e6,
 			initialDEXBalance: 3e6,
@@ -2398,11 +1392,14 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 	}
 
 	runTest := func(test *test) {
+		fmt.Println("running test ", test.name)
 		tCore := newTCore()
 		tCore.isWithdrawer[test.assetID] = test.isWithdrawer
 		tCore.isDynamicSwapper[test.assetID] = test.isDynamicSwapper
 		tCore.setAssetBalances(map[uint32]uint64{test.assetID: test.initialDEXBalance, 0: 2e6, 966: 2e6})
-		tCore.walletTxs[hex.EncodeToString(test.unconfirmedTx.ID)] = test.unconfirmedTx
+		tCore.walletTxsMtx.Lock()
+		tCore.walletTxs[test.unconfirmedTx.ID] = test.unconfirmedTx
+		tCore.walletTxsMtx.Unlock()
 		tCore.sendCoin = test.sendCoin
 
 		tCEX := newTCEX()
@@ -2438,7 +1435,7 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		preConfirmBal, err := adaptor.AssetBalance(test.assetID)
+		preConfirmBal, err := adaptor.DEXBalance(test.assetID)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -2447,7 +1444,7 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 		}
 
 		if test.assetID == 966001 {
-			preConfirmParentBal, err := adaptor.AssetBalance(966)
+			preConfirmParentBal, err := adaptor.DEXBalance(966)
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", test.name, err)
 			}
@@ -2456,25 +1453,28 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 			}
 		}
 
-		tCore.walletTxs[hex.EncodeToString(test.unconfirmedTx.ID)] = test.confirmedTx
+		tCore.walletTxsMtx.Lock()
+		tCore.walletTxs[test.unconfirmedTx.ID] = test.confirmedTx
+		tCore.walletTxsMtx.Unlock()
+
 		tCEX.confirmDeposit <- test.receivedAmt
 		<-tCEX.confirmDepositComplete
 
 		if test.isDynamicSwapper {
-			tCore.confirmWalletTx <- true
-			<-tCore.confirmWalletTxComplete
+			time.Sleep(time.Millisecond * 100) // let the tx confirmation routine call WalletTransaction
 		}
 
-		postConfirmBal, err := adaptor.AssetBalance(test.assetID)
+		postConfirmBal, err := adaptor.DEXBalance(test.assetID)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
+
 		if *postConfirmBal != *test.postConfirmDEXBalance {
 			t.Fatalf("%s: unexpected post confirm dex balance. want %d, got %d", test.name, test.postConfirmDEXBalance, postConfirmBal)
 		}
 
 		if test.assetID == 966001 {
-			postConfirmParentBal, err := adaptor.AssetBalance(966)
+			postConfirmParentBal, err := adaptor.DEXBalance(966)
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", test.name, err)
 			}
@@ -2491,7 +1491,8 @@ func TestExchangeAdaptorDeposit(t *testing.T) {
 
 func TestExchangeAdaptorWithdraw(t *testing.T) {
 	assetID := uint32(42)
-	id := encode.RandomBytes(32)
+	coinID := encode.RandomBytes(32)
+	txID := hex.EncodeToString(coinID)
 
 	type test struct {
 		name              string
@@ -2511,10 +1512,10 @@ func TestExchangeAdaptorWithdraw(t *testing.T) {
 			name:        "ok",
 			withdrawAmt: 1e6,
 			tx: &asset.WalletTransaction{
-				ID:                  id,
-				BalanceDelta:        1e6 - 2000,
-				Fees:                2000,
-				PartOfActiveBalance: true,
+				ID:        txID,
+				Amount:    1e6 - 2000,
+				Fees:      2000,
+				Confirmed: true,
 			},
 			initialCEXBalance: 3e6,
 			initialDEXBalance: 1e6,
@@ -2536,7 +1537,10 @@ func TestExchangeAdaptorWithdraw(t *testing.T) {
 
 	runTest := func(test *test) {
 		tCore := newTCore()
-		tCore.walletTxs[hex.EncodeToString(test.tx.ID)] = test.tx
+
+		tCore.walletTxsMtx.Lock()
+		tCore.walletTxs[test.tx.ID] = test.tx
+		tCore.walletTxsMtx.Unlock()
 
 		tCEX := newTCEX()
 
@@ -2561,7 +1565,7 @@ func TestExchangeAdaptorWithdraw(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		preConfirmBal, err := adaptor.AssetBalance(assetID)
+		preConfirmBal, err := adaptor.DEXBalance(assetID)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -2572,12 +1576,12 @@ func TestExchangeAdaptorWithdraw(t *testing.T) {
 		tCEX.confirmWithdrawal <- &withdrawArgs{
 			assetID: assetID,
 			amt:     test.withdrawAmt,
-			txID:    hex.EncodeToString(test.tx.ID),
+			txID:    test.tx.ID,
 		}
 
 		<-tCEX.confirmWithdrawalComplete
 
-		postConfirmBal, err := adaptor.AssetBalance(assetID)
+		postConfirmBal, err := adaptor.DEXBalance(assetID)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -2635,10 +1639,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 			updatesAndBalances: []*updateAndBalance{
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        true,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  3e6,
@@ -2656,10 +1656,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 				},
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        true,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  5e6,
@@ -2677,10 +1673,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 				},
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        true,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  5e6,
@@ -2719,10 +1711,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 			updatesAndBalances: []*updateAndBalance{
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        true,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  3e6,
@@ -2761,10 +1749,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 			updatesAndBalances: []*updateAndBalance{
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        false,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  3e6,
@@ -2782,10 +1766,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 				},
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        false,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  5.1e6,
@@ -2803,10 +1783,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 				},
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        false,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  5.1e6,
@@ -2845,10 +1821,6 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 			updatesAndBalances: []*updateAndBalance{
 				{
 					update: &libxc.Trade{
-						ID:          tradeID,
-						Sell:        false,
-						BaseID:      baseID,
-						QuoteID:     quoteID,
 						Rate:        5e7,
 						Qty:         5e6,
 						BaseFilled:  3e6,
@@ -2913,7 +1885,7 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 		checkBalances := func(expected map[uint32]*botBalance, i int) {
 			t.Helper()
 			for assetID, expectedBal := range expected {
-				bal, err := adaptor.Balance(assetID)
+				bal, err := adaptor.CEXBalance(assetID)
 				if err != nil {
 					t.Fatalf("%s: unexpected error: %v", test.name, err)
 				}
@@ -2931,6 +1903,11 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 		checkBalances(test.postTradeBalances, 0)
 
 		for i, updateAndBalance := range test.updatesAndBalances {
+			update := updateAndBalance.update
+			update.ID = tradeID
+			update.BaseID = baseID
+			update.QuoteID = quoteID
+			update.Sell = test.sell
 			tCEX.tradeUpdates <- updateAndBalance.update
 			tCEX.tradeUpdates <- &libxc.Trade{} // dummy update
 			checkBalances(updateAndBalance.balances, i+1)

@@ -355,25 +355,25 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c botCoreAdapto
 		cancels = append(cancels, o.id[:])
 	}
 
-	baseDEXBalance, err := c.AssetBalance(mkt.BaseID)
+	baseDEXBalance, err := c.DEXBalance(mkt.BaseID)
 	if err != nil {
 		log.Errorf("error getting base DEX balance: %v", err)
 		return
 	}
 
-	quoteDEXBalance, err := c.AssetBalance(mkt.QuoteID)
+	quoteDEXBalance, err := c.DEXBalance(mkt.QuoteID)
 	if err != nil {
 		log.Errorf("error getting quote DEX balance: %v", err)
 		return
 	}
 
-	baseCEXBalance, err := cex.Balance(mkt.BaseID)
+	baseCEXBalance, err := cex.CEXBalance(mkt.BaseID)
 	if err != nil {
 		log.Errorf("error getting base CEX balance: %v", err)
 		return
 	}
 
-	quoteCEXBalance, err := cex.Balance(mkt.QuoteID)
+	quoteCEXBalance, err := cex.CEXBalance(mkt.QuoteID)
 	if err != nil {
 		log.Errorf("error getting quote CEX balance: %v", err)
 		return
@@ -648,7 +648,7 @@ func (a *arbMarketMaker) rebalanceAssets() {
 		}
 		symbol := dex.BipIDSymbol(assetID)
 
-		dexAvailableBalance, err := a.core.AssetBalance(assetID)
+		dexAvailableBalance, err := a.core.DEXBalance(assetID)
 		if err != nil {
 			a.log.Errorf("Error getting %s balance: %v", symbol, err)
 			return
@@ -656,7 +656,7 @@ func (a *arbMarketMaker) rebalanceAssets() {
 
 		totalDexBalance := dexAvailableBalance.Available + a.fundsLockedInOrders(base)
 
-		cexBalance, err := a.cex.Balance(assetID)
+		cexBalance, err := a.cex.CEXBalance(assetID)
 		if err != nil {
 			a.log.Errorf("Error getting %s balance on cex: %v", symbol, err)
 			return

@@ -569,12 +569,12 @@ func basicMMRebalance(newEpoch uint64, m rebalancer, c botCoreAdaptor, cfg *Basi
 		return rate >= lowerBound && rate <= upperBound
 	}
 
-	baseBalance, err := c.AssetBalance(mkt.BaseID)
+	baseBalance, err := c.DEXBalance(mkt.BaseID)
 	if err != nil {
 		log.Errorf("Error getting base balance: %v", err)
 		return
 	}
-	quoteBalance, err := c.AssetBalance(mkt.QuoteID)
+	quoteBalance, err := c.DEXBalance(mkt.QuoteID)
 	if err != nil {
 		log.Errorf("Error getting quote balance: %v", err)
 		return

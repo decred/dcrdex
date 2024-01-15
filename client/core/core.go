@@ -5980,18 +5980,6 @@ func (c *Core) WalletTransaction(assetID uint32, id dex.Bytes) (*asset.WalletTra
 	return wallet.WalletTransaction(c.ctx, id)
 }
 
-// ConfirmedWalletTransaction is similar to WalletTransaction, but calls
-// the onConfirm callback when the PartOfActiveBalance is true on
-// the WalletTransaction.
-func (c *Core) ConfirmedWalletTransaction(assetID uint32, id dex.Bytes, onConfirm func(*asset.WalletTransaction)) error {
-	wallet, found := c.wallet(assetID)
-	if !found {
-		return newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
-	}
-
-	return wallet.ConfirmedWalletTransaction(c.ctx, id, c.log, onConfirm)
-}
-
 // Trade is used to place a market or limit order.
 func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	req, err := c.prepareTradeRequest(pw, form)

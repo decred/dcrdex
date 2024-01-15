@@ -46,7 +46,6 @@ type clientCore interface {
 	Network() dex.Network
 	Order(oidB dex.Bytes) (*core.Order, error)
 	WalletTransaction(uint32, dex.Bytes) (*asset.WalletTransaction, error)
-	ConfirmedWalletTransaction(uint32, dex.Bytes, func(*asset.WalletTransaction)) error
 }
 
 var _ clientCore = (*core.Core)(nil)

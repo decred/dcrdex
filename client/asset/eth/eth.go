@@ -4843,21 +4843,7 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*a
 		return nil, asset.CoinNotFoundError
 	}
 
-	tx := txs[0]
-	nonceStr, found := tx.AdditionalData[txHistoryNonceKey]
-	if !found {
-		return nil, fmt.Errorf("nonce not found in additional data")
-	}
-
-	nonce, err := strconv.ParseUint(nonceStr, 10, 64)
-
-	w.pendingTxsMtx.Lock()
-	_, txIsPending := w.pendingTxs[nonce]
-	w.pendingTxsMtx.Unlock()
-
-	tx.Confirmed = !txIsPending
-
-	return tx, err
+	return txs[0], err
 }
 
 func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common.Hash) (*asset.WalletTransaction, error) {
@@ -4923,21 +4909,7 @@ func (w *TokenWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (
 		return nil, asset.CoinNotFoundError
 	}
 
-	tx := txs[0]
-	nonceStr, found := tx.AdditionalData[txHistoryNonceKey]
-	if !found {
-		return nil, fmt.Errorf("nonce not found in additional data")
-	}
-
-	nonce, err := strconv.ParseUint(nonceStr, 10, 64)
-
-	w.pendingTxsMtx.Lock()
-	_, txIsPending := w.pendingTxs[nonce]
-	w.pendingTxsMtx.Unlock()
-
-	tx.Confirmed = !txIsPending
-
-	return tx, err
+	return txs[0], err
 }
 
 // providersFile reads a file located at ~/dextest/credentials.json.

@@ -113,13 +113,13 @@ func (a *simpleArbMarketMaker) rebalanceAsset(base bool) {
 	}
 	symbol := dex.BipIDSymbol(assetID)
 
-	dexBalance, err := a.core.AssetBalance(assetID)
+	dexBalance, err := a.core.DEXBalance(assetID)
 	if err != nil {
 		a.log.Errorf("Error getting %s balance: %v", symbol, err)
 		return
 	}
 
-	cexBalance, err := a.cex.Balance(assetID)
+	cexBalance, err := a.cex.CEXBalance(assetID)
 	if err != nil {
 		a.log.Errorf("Error getting %s balance on cex: %v", symbol, err)
 		return
@@ -224,13 +224,13 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 
 // arbExists checks if an arbitrage opportunity exists.
 func (a *simpleArbMarketMaker) arbExists() (exists, sellOnDex bool, lotsToArb, dexRate, cexRate uint64) {
-	cexBaseBalance, err := a.cex.Balance(a.baseID)
+	cexBaseBalance, err := a.cex.CEXBalance(a.baseID)
 	if err != nil {
 		a.log.Errorf("failed to get cex balance for %v: %v", a.baseID, err)
 		return false, false, 0, 0, 0
 	}
 
-	cexQuoteBalance, err := a.cex.Balance(a.quoteID)
+	cexQuoteBalance, err := a.cex.CEXBalance(a.quoteID)
 	if err != nil {
 		a.log.Errorf("failed to get cex balance for %v: %v", a.quoteID, err)
 		return false, false, 0, 0, 0
