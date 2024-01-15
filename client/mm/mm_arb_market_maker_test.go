@@ -119,7 +119,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 		rebalancer  *tArbMMRebalancer
 		cfg         *ArbMarketMakerConfig
 		dexBalances map[uint32]uint64
-		cexBalances map[uint32]*libxc.ExchangeBalance
+		cexBalances map[uint32]*botBalance
 		reserves    autoRebalanceReserves
 
 		expectedCancels []dex.Bytes
@@ -160,7 +160,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -207,7 +207,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -248,7 +248,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -295,7 +295,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: lotSize * 3,
 				0:  calc.BaseToQuote(1e6, 3*lotSize),
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -333,7 +333,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 2*(lotSize+sellFees.swap) + sellFees.funding,
 				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -390,7 +390,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 2*(lotSize+sellFees.swap) + sellFees.funding - 1,
 				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding - 1,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -437,7 +437,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
 				42: {Available: 2 * mkt.LotSize},
 			},
@@ -494,7 +494,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
 				42: {Available: 2*mkt.LotSize - 1},
 			},
@@ -553,7 +553,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
 				42: {Available: 2 * mkt.LotSize},
 			},
@@ -614,7 +614,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
 				42: {Available: 2*mkt.LotSize - 1},
 			},
@@ -652,7 +652,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 2*(lotSize+sellFees.swap) + sellFees.funding + 2*lotSize,
 				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -712,7 +712,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 2*(lotSize+sellFees.swap) + sellFees.funding + 2*lotSize - 1,
 				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: 1e19},
 				42: {Available: 1e19},
 			},
@@ -767,7 +767,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) + lotSize},
 				42: {Available: 2 * mkt.LotSize},
 			},
@@ -827,7 +827,7 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 				42: 1e19,
 				0:  1e19,
 			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
+			cexBalances: map[uint32]*botBalance{
 				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) + lotSize - 1},
 				42: {Available: 2 * mkt.LotSize},
 			},
@@ -854,11 +854,11 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 	for _, test := range tests {
 		tCore := newTCore()
 		tCore.setAssetBalances(test.dexBalances)
-		cex := newTWrappedCEX()
+		cex := newTBotCEXAdaptor()
 		cex.balances = test.cexBalances
 
 		cancels, buys, sells := arbMarketMakerRebalance(newEpoch, test.rebalancer,
-			tCore, cex, test.cfg, mkt, buyFees, sellFees, &test.reserves, tLogger)
+			newTBotCoreAdaptor(tCore), cex, test.cfg, mkt, buyFees, sellFees, &test.reserves, tLogger)
 
 		if len(cancels) != len(test.expectedCancels) {
 			t.Fatalf("%s: expected %d cancels, got %d", test.name, len(test.expectedCancels), len(cancels))
@@ -936,7 +936,7 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 		name              string
 		orders            []*core.Order
 		notes             []core.Notification
-		expectedCEXTrades []*cexOrder
+		expectedCEXTrades []*libxc.Trade
 	}
 
 	tests := []*test{
@@ -1004,20 +1004,20 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 					},
 				},
 			},
-			expectedCEXTrades: []*cexOrder{
+			expectedCEXTrades: []*libxc.Trade{
 				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    divideRate(8e5, 1+profit),
-					sell:    false,
+					BaseID:  42,
+					QuoteID: 0,
+					Qty:     lotSize,
+					Rate:    divideRate(8e5, 1+profit),
+					Sell:    false,
 				},
 				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    multiplyRate(6e5, 1+profit),
-					sell:    true,
+					BaseID:  42,
+					QuoteID: 0,
+					Qty:     lotSize,
+					Rate:    multiplyRate(6e5, 1+profit),
+					Sell:    true,
 				},
 				nil,
 				nil,
@@ -1087,20 +1087,20 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 					},
 				},
 			},
-			expectedCEXTrades: []*cexOrder{
+			expectedCEXTrades: []*libxc.Trade{
 				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    divideRate(8e5, 1+profit),
-					sell:    false,
+					BaseID:  42,
+					QuoteID: 0,
+					Qty:     lotSize,
+					Rate:    divideRate(8e5, 1+profit),
+					Sell:    false,
 				},
 				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    multiplyRate(6e5, 1+profit),
-					sell:    true,
+					BaseID:  42,
+					QuoteID: 0,
+					Qty:     lotSize,
+					Rate:    multiplyRate(6e5, 1+profit),
+					Sell:    true,
 				},
 				nil,
 				nil,
@@ -1109,7 +1109,7 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 	}
 
 	runTest := func(test *test) {
-		cex := newTWrappedCEX()
+		cex := newTBotCEXAdaptor()
 		tCore := newTCore()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -1124,7 +1124,7 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 
 		arbMM := &arbMarketMaker{
 			cex:            cex,
-			core:           tCore,
+			core:           newTBotCoreAdaptor(tCore),
 			ctx:            ctx,
 			ords:           ords,
 			baseID:         42,
@@ -1624,8 +1624,8 @@ func TestArbMarketMakerAutoRebalance(t *testing.T) {
 	}
 
 	runTest := func(test *test) {
-		cex := newTWrappedCEX()
-		cex.balances = map[uint32]*libxc.ExchangeBalance{
+		cex := newTBotCEXAdaptor()
+		cex.balances = map[uint32]*botBalance{
 			baseID:  {Available: test.cexBaseBalance},
 			quoteID: {Available: test.cexQuoteBalance},
 		}
@@ -1641,7 +1641,7 @@ func TestArbMarketMakerAutoRebalance(t *testing.T) {
 		mm := &arbMarketMaker{
 			ctx:            ctx,
 			cex:            cex,
-			core:           tCore,
+			core:           newTBotCoreAdaptor(tCore),
 			baseID:         baseID,
 			quoteID:        quoteID,
 			oidToPlacement: test.oidToPlacement,

@@ -71,15 +71,12 @@ type arbSequence struct {
 }
 
 type simpleArbMarketMaker struct {
-	ctx     context.Context
-	host    string
-	baseID  uint32
-	quoteID uint32
-	cex     cex
-	// cexTradeUpdatesID is passed to the Trade function of the cex
-	// so that the cex knows to send update notifications for the
-	// trade back to this bot.
-	core             clientCore
+	ctx              context.Context
+	host             string
+	baseID           uint32
+	quoteID          uint32
+	cex              botCexAdaptor
+	core             botCoreAdaptor
 	log              dex.Logger
 	cfg              *SimpleArbConfig
 	mkt              *core.Market
@@ -129,7 +126,8 @@ func (a *simpleArbMarketMaker) rebalanceAsset(base bool) {
 	}
 
 	if (dexBalance.Available+cexBalance.Available)/2 < minAmount {
-		a.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX", symbol)
+		a.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX. Min amount: %v, CEX balance: %v, DEX Balance: %v",
+			symbol, minAmount, dexBalance.Available, cexBalance.Available)
 		return
 	}
 
@@ -189,6 +187,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 		return
 	}
 	defer a.rebalanceRunning.Store(false)
+	a.log.Tracef("rebalance: epoch %d", newEpoch)
 
 	exists, sellOnDex, lotsToArb, dexRate, cexRate := a.arbExists()
 	if exists {
@@ -371,7 +370,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTradeID, err := a.cex.Trade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize)
+	cexTrade, err := a.cex.Trade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -405,7 +404,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 			a.log.Errorf("expected 1 dex order, got %v", len(dexOrders))
 		}
 
-		err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, cexTradeID)
+		err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, cexTrade.ID)
 		if err != nil {
 			a.log.Errorf("error canceling cex order: %v", err)
 			// TODO: keep retrying failed cancel
@@ -416,7 +415,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	a.activeArbs = append(a.activeArbs, &arbSequence{
 		dexOrder:   dexOrders[0],
 		dexRate:    dexRate,
-		cexOrderID: cexTradeID,
+		cexOrderID: cexTrade.ID,
 		cexRate:    cexRate,
 		sellOnDEX:  sellOnDex,
 		startEpoch: epoch,
@@ -488,7 +487,7 @@ func (a *simpleArbMarketMaker) removeActiveArb(i int) {
 
 // handleCEXTradeUpdate is called when the CEX sends a notification that the
 // status of a trade has changed.
-func (a *simpleArbMarketMaker) handleCEXTradeUpdate(update *libxc.TradeUpdate) {
+func (a *simpleArbMarketMaker) handleCEXTradeUpdate(update *libxc.Trade) {
 	if !update.Complete {
 		return
 	}
@@ -497,7 +496,7 @@ func (a *simpleArbMarketMaker) handleCEXTradeUpdate(update *libxc.TradeUpdate) {
 	defer a.activeArbsMtx.Unlock()
 
 	for i, arb := range a.activeArbs {
-		if arb.cexOrderID == update.TradeID {
+		if arb.cexOrderID == update.ID {
 			arb.cexOrderFilled = true
 			if arb.dexOrderFilled {
 				a.removeActiveArb(i)
@@ -617,7 +616,7 @@ func (a *simpleArbMarketMaker) cancelAllOrders() {
 	}
 }
 
-func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c clientCore, cex cex, log dex.Logger) {
+func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, cex botCexAdaptor, log dex.Logger) {
 	if cfg.SimpleArbConfig == nil {
 		// implies bug in caller
 		log.Errorf("No arb config provided. Exiting.")

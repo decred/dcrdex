@@ -14,13 +14,17 @@ type ExchangeBalance struct {
 	Locked    uint64 `json:"locked"`
 }
 
-// TradeUpdate is a notification sent when the status of a trade on the CEX
-// has been updated.
-type TradeUpdate struct {
-	TradeID     string
-	Complete    bool // cancelled or filled
+// Trade represents a trade made on a CEX.
+type Trade struct {
+	ID          string
+	Sell        bool
+	Qty         uint64
+	Rate        uint64
+	BaseID      uint32
+	QuoteID     uint32
 	BaseFilled  uint64
 	QuoteFilled uint64
+	Complete    bool // cancelled or filled
 }
 
 // Market is the base and quote assets of a market on a CEX.
@@ -52,10 +56,10 @@ type CEX interface {
 	// returned from this function is passed as the updaterID argument to
 	// Trade, then updates to the trade will be sent on the updated channel
 	// returned from this function.
-	SubscribeTradeUpdates() (updates <-chan *TradeUpdate, unsubscribe func(), subscriptionID int)
+	SubscribeTradeUpdates() (updates <-chan *Trade, unsubscribe func(), subscriptionID int)
 	// Trade executes a trade on the CEX. updaterID takes a subscriptionID
 	// returned from SubscribeTradeUpdates.
-	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (string, error)
+	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error)
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseID, quoteID uint32) error
 	// VWAP returns the volume weighted average price for a certainWithdraw(address string, value, feeRate uint64)  quantity

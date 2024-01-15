@@ -22,7 +22,7 @@ func TestSubscribeCEXUpdates(t *testing.T) {
 
 func TestSubscribeTradeUpdates(t *testing.T) {
 	bn := &binance{
-		tradeUpdaters: make(map[int]chan *TradeUpdate),
+		tradeUpdaters: make(map[int]chan *Trade),
 	}
 	_, unsub0, _ := bn.SubscribeTradeUpdates()
 	_, _, id1 := bn.SubscribeTradeUpdates()

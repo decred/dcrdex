@@ -1051,7 +1051,7 @@ func TestRebalance(t *testing.T) {
 			epoch = newEpoch
 		}
 
-		cancels, buys, sells := basicMMRebalance(epoch, tt.rebalancer, tCore, tt.cfg, mkt, buyFees, sellFees, log)
+		cancels, buys, sells := basicMMRebalance(epoch, tt.rebalancer, newTBotCoreAdaptor(tCore), tt.cfg, mkt, buyFees, sellFees, log)
 
 		if len(cancels) != len(tt.expectedCancels) {
 			t.Fatalf("%s: cancel count mismatch. expected %d, got %d", tt.name, len(tt.expectedCancels), len(cancels))
@@ -1246,7 +1246,7 @@ func TestBreakEvenHalfSpread(t *testing.T) {
 		tCore.singleLotFeesErr = tt.singleLotFeesErr
 
 		basicMM := &basicMarketMaker{
-			core: tCore,
+			core: newTBotCoreAdaptor(tCore),
 			mkt:  mkt,
 			log:  log,
 		}

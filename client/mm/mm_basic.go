@@ -208,7 +208,7 @@ type basicMarketMaker struct {
 	cfg    *BasicMarketMakingConfig
 	book   dexOrderBook
 	log    dex.Logger
-	core   clientCore
+	core   botCoreAdaptor
 	oracle oracle
 	mkt    *core.Market
 	// the fiat rate is the rate determined by comparing the fiat rates
@@ -510,7 +510,7 @@ type rateLots struct {
 	placementIndex int
 }
 
-func basicMMRebalance(newEpoch uint64, m rebalancer, c clientCore, cfg *BasicMarketMakingConfig, mkt *core.Market, buyFees,
+func basicMMRebalance(newEpoch uint64, m rebalancer, c botCoreAdaptor, cfg *BasicMarketMakingConfig, mkt *core.Market, buyFees,
 	sellFees *orderFees, log dex.Logger) (cancels []dex.Bytes, buyOrders, sellOrders []*rateLots) {
 	basisPrice := m.basisPrice()
 	if basisPrice == 0 {
@@ -692,6 +692,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		return
 	}
 	defer m.rebalanceRunning.Store(false)
+	m.log.Tracef("rebalance: epoch %d", newEpoch)
 
 	m.feesMtx.RLock()
 	buyFees, sellFees := m.buyFees, m.sellFees
@@ -860,7 +861,7 @@ func (m *basicMarketMaker) run() {
 }
 
 // RunBasicMarketMaker starts a basic market maker bot.
-func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, oracle oracle, baseFiatRate, quoteFiatRate float64, log dex.Logger) {
+func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, oracle oracle, baseFiatRate, quoteFiatRate float64, log dex.Logger) {
 	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
 		log.Errorf("No market making config provided. Exiting.")
@@ -869,7 +870,7 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, orac
 
 	err := cfg.BasicMMConfig.Validate()
 	if err != nil {
-		c.Broadcast(newValidationErrorNote(cfg.Host, cfg.BaseID, cfg.QuoteID, fmt.Sprintf("invalid market making config: %v", err)))
+		log.Errorf("invalid market making config: %v", err)
 		return
 	}
 

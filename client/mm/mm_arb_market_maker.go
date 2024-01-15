@@ -137,8 +137,8 @@ type arbMarketMaker struct {
 	host             string
 	baseID           uint32
 	quoteID          uint32
-	cex              cex
-	core             clientCore
+	cex              botCexAdaptor
+	core             botCoreAdaptor
 	log              dex.Logger
 	cfg              *ArbMarketMakerConfig
 	mkt              *core.Market
@@ -173,12 +173,12 @@ func (m *arbMarketMaker) groupedOrders() (buys, sells map[int][]*groupedOrder) {
 	return groupOrders(m.ords, m.oidToPlacement, m.mkt.LotSize)
 }
 
-func (a *arbMarketMaker) handleCEXTradeUpdate(update *libxc.TradeUpdate) {
+func (a *arbMarketMaker) handleCEXTradeUpdate(update *libxc.Trade) {
 	a.log.Debugf("CEX trade update: %+v", update)
 
 	if update.Complete {
 		a.cexTradesMtx.Lock()
-		delete(a.cexTrades, update.TradeID)
+		delete(a.cexTrades, update.ID)
 		a.cexTradesMtx.Unlock()
 		return
 	}
@@ -209,7 +209,7 @@ func (a *arbMarketMaker) processDEXMatch(o *core.Order, match *core.Match) {
 	a.cexTradesMtx.Lock()
 	defer a.cexTradesMtx.Unlock()
 
-	tradeID, err := a.cex.Trade(a.ctx, a.baseID, a.quoteID, !o.Sell, cexRate, match.Qty)
+	cexTrade, err := a.cex.Trade(a.ctx, a.baseID, a.quoteID, !o.Sell, cexRate, match.Qty)
 	if err != nil {
 		a.log.Errorf("Error sending trade to CEX: %v", err)
 		return
@@ -218,7 +218,7 @@ func (a *arbMarketMaker) processDEXMatch(o *core.Order, match *core.Match) {
 	// Keep track of the epoch in which the trade was sent to the CEX. This way
 	// the bot can cancel the trade if it is not filled after a certain number
 	// of epochs.
-	a.cexTrades[tradeID] = a.currEpoch.Load()
+	a.cexTrades[cexTrade.ID] = a.currEpoch.Load()
 }
 
 func (a *arbMarketMaker) processDEXMatchNote(note *core.MatchNote) {
@@ -334,7 +334,7 @@ func (a *arbMarketMaker) cancelExpiredCEXTrades() {
 	}
 }
 
-func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, cex cex, cfg *ArbMarketMakerConfig, mkt *core.Market, buyFees,
+func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c botCoreAdaptor, cex botCexAdaptor, cfg *ArbMarketMakerConfig, mkt *core.Market, buyFees,
 	sellFees *orderFees, reserves *autoRebalanceReserves, log dex.Logger) (cancels []dex.Bytes, buyOrders, sellOrders []*rateLots) {
 
 	existingBuys, existingSells := a.groupedOrders()
@@ -456,7 +456,8 @@ func arbMarketMakerRebalance(newEpoch uint64, a arbMMRebalancer, c clientCore, c
 			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*mkt.LotSize) * cfgPlacement.Multiplier)
 			_, extrema, filled, err := a.vwap(sell, cumulativeCEXDepth)
 			if err != nil {
-				log.Errorf("error calculating vwap: %v", err)
+				log.Errorf("Error calculating vwap: %v", err)
+				break
 			}
 			if !filled {
 				log.Infof("CEX %s side has < %d %s on the orderbook.", map[bool]string{true: "sell", false: "buy"}[sell], cumulativeCEXDepth, mkt.BaseSymbol)
@@ -662,7 +663,8 @@ func (a *arbMarketMaker) rebalanceAssets() {
 		}
 
 		if (totalDexBalance+cexBalance.Available)/2 < minAmount {
-			a.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX", symbol)
+			a.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX. Min amount: %v, CEX balance: %v, DEX Balance: %v",
+				symbol, minAmount, cexBalance.Available, totalDexBalance)
 			return
 		}
 
@@ -769,6 +771,7 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 		return
 	}
 	defer a.rebalanceRunning.Store(false)
+	a.log.Tracef("rebalance: epoch %d", epoch)
 
 	currEpoch := a.currEpoch.Load()
 	if epoch <= currEpoch {
@@ -944,7 +947,7 @@ func (a *arbMarketMaker) run() {
 	a.cancelAllOrders()
 }
 
-func RunArbMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, cex cex, log dex.Logger) {
+func RunArbMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, cex botCexAdaptor, log dex.Logger) {
 	if cfg.ArbMarketMakerConfig == nil {
 		// implies bug in caller
 		log.Errorf("No arb market maker config provided. Exiting.")
