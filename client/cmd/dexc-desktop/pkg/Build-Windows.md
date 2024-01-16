@@ -7,6 +7,7 @@ This build setup is expected to be run on a freshly installed system (e.g. in a 
 Download and run setup as Administrator (privileges are required in order to set environment variables).  Open a command prompt as Administrator, and run:
 
  ```batch
+ cd %UserProfile%
  curl -O https://raw.githubusercontent.com/decred/dcrdex/master/client/cmd/dexc-desktop/pkg/setup-windows.cmd
  setup-windows.cmd <branch> <repoUrl>
  ```
