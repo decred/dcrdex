@@ -317,10 +317,10 @@ func (c *tCore) OpenWallet(assetID uint32, pw []byte) error {
 func (c *tCore) User() *core.User {
 	return nil
 }
-func (c *tCore) WalletTransaction(assetID uint32, id dex.Bytes) (*asset.WalletTransaction, error) {
+func (c *tCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
 	c.walletTxsMtx.Lock()
 	defer c.walletTxsMtx.Unlock()
-	return c.walletTxs[hex.EncodeToString(id)], nil
+	return c.walletTxs[txID], nil
 }
 
 func (c *tCore) Network() dex.Network {

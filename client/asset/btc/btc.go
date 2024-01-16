@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -5349,13 +5350,17 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 }
 
 // WalletTransaction returns a transaction that either the wallet has made or
-// one in which the wallet has received funds.
-func (btc *ExchangeWalletSPV) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*asset.WalletTransaction, error) {
-	txHash, _, err := decodeCoinID(coinID)
-	if err != nil {
-		return nil, err
+// one in which the wallet has received funds. The txID can be either a byte
+// reversed tx hash or a hex encoded coin ID.
+func (btc *ExchangeWalletSPV) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	coinID, err := hex.DecodeString(txID)
+	if err == nil {
+		txHash, _, err := decodeCoinID(coinID)
+		if err == nil {
+			txID = txHash.String()
+		}
 	}
-	txID := txHash.String()
+
 	txs, err := btc.TxHistory(1, &txID, false)
 	if err != nil {
 		return nil, err

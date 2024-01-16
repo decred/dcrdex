@@ -4790,7 +4790,8 @@ func (w *TokenWallet) TxHistory(n int, refID *string, past bool) ([]*asset.Walle
 	return w.txDB.getTxs(n, refID, past, &w.assetID)
 }
 
-func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txHash common.Hash) (*asset.WalletTransaction, error) {
+func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txHash := common.HexToHash(txID)
 	tx, blockHeight, err := w.node.getTransaction(ctx, txHash)
 	if err != nil {
 		return nil, err
@@ -4826,15 +4827,11 @@ func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txHash common.H
 
 // WalletTransaction returns a transaction that either the wallet has made or
 // one in which the wallet has received funds.
-func (w *ETHWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*asset.WalletTransaction, error) {
-	txHash, err := dexeth.DecodeCoinID(coinID)
-	if err != nil {
-		return nil, err
-	}
-	txID := txHash.String()
+func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txID = common.HexToHash(txID).String()
 	txs, err := w.TxHistory(1, &txID, false)
 	if errors.Is(err, asset.CoinNotFoundError) {
-		return w.getReceivingTransaction(ctx, txHash)
+		return w.getReceivingTransaction(ctx, txID)
 	}
 	if err != nil {
 		return nil, err
@@ -4846,7 +4843,8 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*a
 	return txs[0], err
 }
 
-func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common.Hash) (*asset.WalletTransaction, error) {
+func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txHash := common.HexToHash(txID)
 	tx, blockHeight, err := w.node.getTransaction(ctx, txHash)
 	if err != nil {
 		w.log.Infof("tx not found")
@@ -4882,7 +4880,7 @@ func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common
 
 	return &asset.WalletTransaction{
 		Type:        asset.Receive,
-		ID:          txHash.String(),
+		ID:          txID,
 		Amount:      w.atomize(value),
 		BlockNumber: uint64(blockHeight),
 		Confirmed:   confirmed,
@@ -4892,15 +4890,11 @@ func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common
 	}, nil
 }
 
-func (w *TokenWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*asset.WalletTransaction, error) {
-	txHash, err := dexeth.DecodeCoinID(coinID)
-	if err != nil {
-		return nil, err
-	}
-	txID := txHash.String()
+func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txID = common.HexToHash(txID).String()
 	txs, err := w.TxHistory(1, &txID, false)
 	if errors.Is(err, asset.CoinNotFoundError) {
-		return w.getReceivingTransaction(ctx, txHash)
+		return w.getReceivingTransaction(ctx, txID)
 	}
 	if err != nil {
 		return nil, err

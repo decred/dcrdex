@@ -1009,7 +1009,7 @@ func parseTxHistoryArgs(params *RawParams) (*txHistoryForm, error) {
 
 type walletTxForm struct {
 	assetID uint32
-	txID    dex.Bytes
+	txID    string
 }
 
 func parseWalletTxArgs(params *RawParams) (*walletTxForm, error) {
@@ -1023,13 +1023,8 @@ func parseWalletTxArgs(params *RawParams) (*walletTxForm, error) {
 		return nil, fmt.Errorf("invalid assetID: %v", err)
 	}
 
-	id, err := hex.DecodeString(params.Args[1])
-	if err != nil {
-		return nil, fmt.Errorf("invalid refID: %v", err)
-	}
-
 	return &walletTxForm{
 		assetID: uint32(assetID),
-		txID:    id,
+		txID:    params.Args[1],
 	}, nil
 }

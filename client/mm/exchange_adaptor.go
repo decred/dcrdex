@@ -5,7 +5,6 @@ package mm
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -695,15 +694,15 @@ func (u *unifiedExchangeAdaptor) updatePendingDeposit(txID string, deposit *pend
 	u.logBalanceAdjustments(dexDiffs, cexDiffs, msg)
 }
 
-func (u *unifiedExchangeAdaptor) confirmWalletTransaction(ctx context.Context, assetID uint32, coinID dex.Bytes, confirmedTx func(*asset.WalletTransaction)) {
+func (u *unifiedExchangeAdaptor) confirmWalletTransaction(ctx context.Context, assetID uint32, txID string, confirmedTx func(*asset.WalletTransaction)) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
 		select {
 		case <-timer.C:
-			tx, err := u.clientCore.WalletTransaction(assetID, coinID)
+			tx, err := u.clientCore.WalletTransaction(assetID, txID)
 			if errors.Is(err, asset.CoinNotFoundError) {
-				u.log.Warnf("%s wallet does not know about deposit tx: %s", dex.BipIDSymbol(assetID), coinID)
+				u.log.Warnf("%s wallet does not know about deposit tx: %s", dex.BipIDSymbol(assetID), txID)
 			} else if err != nil {
 				u.log.Errorf("Error getting wallet transaction: %v", err)
 			} else if tx.Confirmed {
@@ -742,7 +741,7 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 	}
 
 	getAmtAndFee := func() (uint64, uint64, bool) {
-		tx, err := u.clientCore.WalletTransaction(assetID, coin.ID())
+		tx, err := u.clientCore.WalletTransaction(assetID, coin.TxID())
 		if err != nil {
 			u.log.Errorf("Error getting wallet transaction: %v", err)
 			return amount, 0, false
@@ -780,7 +779,7 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 			}
 		}
 
-		go u.confirmWalletTransaction(ctx, assetID, coin.ID(), confirmedTx)
+		go u.confirmWalletTransaction(ctx, assetID, coin.TxID(), confirmedTx)
 	}
 
 	cexConfirmedDeposit := func(success bool, creditedAmt uint64) {
@@ -861,23 +860,12 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 	withdrawalID := fmt.Sprintf("%s%d", u.withdrawalNoncePrefix, u.withdrawalNonce.Add(1))
 
 	confirmWithdrawal := func(amt uint64, txID string) {
-		if strings.HasPrefix(txID, "0x") {
-			txID, _ = strings.CutPrefix(txID, "0x")
-		}
-
-		var err error
-		id, err := hex.DecodeString(txID)
-		if err != nil {
-			u.log.Errorf("Could not decode tx ID %s, unable to process withdrawal.", txID)
-			return
-		}
-
 		timer := time.NewTimer(0)
 		defer timer.Stop()
 		for {
 			select {
 			case <-timer.C:
-				tx, err := u.clientCore.WalletTransaction(assetID, id)
+				tx, err := u.clientCore.WalletTransaction(assetID, txID)
 				if errors.Is(err, asset.CoinNotFoundError) {
 					u.log.Warnf("%s wallet does not know about withdrawal tx: %s", dex.BipIDSymbol(assetID), txID)
 					continue
@@ -885,7 +873,7 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 				if err != nil {
 					u.log.Errorf("Error getting wallet transaction: %v", err)
 				} else if tx.Confirmed {
-					u.pendingWithdrawalComplete(withdrawalID, uint64(tx.Amount))
+					u.pendingWithdrawalComplete(withdrawalID, tx.Amount)
 					onConfirm()
 					return
 				}
@@ -1162,58 +1150,55 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 
 	// Add new txs to tx cache
 	swaps, redeems, refunds := orderTransactions(o)
-	for id := range swaps {
-		if _, found := pendingOrder.swaps[id]; !found {
-			pendingOrder.swaps[id] = &asset.WalletTransaction{}
+	for txID := range swaps {
+		if _, found := pendingOrder.swaps[txID]; !found {
+			pendingOrder.swaps[txID] = &asset.WalletTransaction{}
 		}
 	}
-	for id := range redeems {
-		if _, found := pendingOrder.redeems[id]; !found {
-			pendingOrder.redeems[id] = &asset.WalletTransaction{}
+	for txID := range redeems {
+		if _, found := pendingOrder.redeems[txID]; !found {
+			pendingOrder.redeems[txID] = &asset.WalletTransaction{}
 		}
 	}
-	for id := range refunds {
-		if _, found := pendingOrder.refunds[id]; !found {
-			pendingOrder.refunds[id] = &asset.WalletTransaction{}
+	for txID := range refunds {
+		if _, found := pendingOrder.refunds[txID]; !found {
+			pendingOrder.refunds[txID] = &asset.WalletTransaction{}
 		}
 	}
 
 	// Query the wallet regarding all unconfirmed transactions
-	for id, oldTx := range pendingOrder.swaps {
+	for txID, oldTx := range pendingOrder.swaps {
 		if oldTx.Confirmed {
 			continue
 		}
-		idB, _ := hex.DecodeString(id)
-		tx, err := u.clientCore.WalletTransaction(fromAsset, idB)
+		tx, err := u.clientCore.WalletTransaction(fromAsset, txID)
 		if err != nil {
-			u.log.Errorf("Error getting swap tx %s: %v", id, err)
+			u.log.Errorf("Error getting swap tx %s: %v", txID, err)
 			continue
 		}
-		pendingOrder.swaps[id] = tx
+		pendingOrder.swaps[txID] = tx
 	}
-	for id, oldTx := range pendingOrder.redeems {
+	for txID, oldTx := range pendingOrder.redeems {
 		if oldTx.Confirmed {
 			continue
 		}
-		idB, _ := hex.DecodeString(id)
-		tx, err := u.clientCore.WalletTransaction(toAsset, idB)
+		tx, err := u.clientCore.WalletTransaction(toAsset, txID)
 		if err != nil {
-			u.log.Errorf("Error getting redeem tx %s: %v", id, err)
+			u.log.Errorf("Error getting redeem tx %s: %v", txID, err)
 			continue
 		}
-		pendingOrder.redeems[id] = tx
+		pendingOrder.redeems[txID] = tx
 	}
-	for id, oldTx := range pendingOrder.refunds {
+	for txID, oldTx := range pendingOrder.refunds {
 		if oldTx.Confirmed {
 			continue
 		}
-		idB, _ := hex.DecodeString(id)
-		tx, err := u.clientCore.WalletTransaction(fromAsset, idB)
+		tx, err := u.clientCore.WalletTransaction(fromAsset, txID)
 		if err != nil {
-			u.log.Errorf("Error getting refund tx %s: %v", id, err)
+			u.log.Errorf("Error getting refund tx %s: %v", txID, err)
 			continue
 		}
-		pendingOrder.refunds[id] = tx
+		pendingOrder.refunds[txID] = tx
 	}
 
 	// Calculate balance effects based on current state of the order.

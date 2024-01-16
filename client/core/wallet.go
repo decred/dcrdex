@@ -554,7 +554,7 @@ func (w *xcWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTr
 
 // WalletTransaction returns information about a transaction that the wallet
 // has made or one in which that wallet received funds.
-func (w *xcWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*asset.WalletTransaction, error) {
+func (w *xcWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
 	if !w.connected() {
 		return nil, errWalletNotConnected
 	}
@@ -564,7 +564,7 @@ func (w *xcWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*as
 		return nil, fmt.Errorf("wallet does not support transaction history")
 	}
 
-	return historian.WalletTransaction(ctx, coinID)
+	return historian.WalletTransaction(ctx, txID)
 }
 
 // MakeBondTx authors a DEX time-locked fidelity bond transaction if the

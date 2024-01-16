@@ -5971,13 +5971,13 @@ func (c *Core) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*as
 // WalletTransaction returns information about a transaction that the wallet
 // has made or one in which that wallet received funds. This function supports
 // both transaction ID and coin ID.
-func (c *Core) WalletTransaction(assetID uint32, id dex.Bytes) (*asset.WalletTransaction, error) {
+func (c *Core) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
 	wallet, found := c.wallet(assetID)
 	if !found {
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 
-	return wallet.WalletTransaction(c.ctx, id)
+	return wallet.WalletTransaction(c.ctx, txID)
 }
 
 // Trade is used to place a market or limit order.

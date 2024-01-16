@@ -1150,7 +1150,7 @@ type WalletHistorian interface {
 	// support more transactions than are returned by TxHistory. For example,
 	// ETH/token wallets do not return receiving transactions in TxHistory,
 	// but WalletTransaction will return them.
-	WalletTransaction(ctx context.Context, coinID dex.Bytes) (*WalletTransaction, error)
+	WalletTransaction(ctx context.Context, txID string) (*WalletTransaction, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,
