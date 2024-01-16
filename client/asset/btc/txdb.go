@@ -18,9 +18,8 @@ import (
 	"github.com/dgraph-io/badger"
 )
 
-type extendedWalletTx struct {
+type ExtendedWalletTx struct {
 	*asset.WalletTransaction
-	Confirmed bool `json:"confirmed"`
 	// Create bond transactions are added to the store before
 	// they are submitted.
 	Submitted bool `json:"submitted"`
@@ -68,35 +67,10 @@ func txKey(txid string) []byte {
 	return key
 }
 
-type txDB interface {
-	storeTx(tx *extendedWalletTx) error
-	markTxAsSubmitted(txID string) error
-	// getTxs retrieves n transactions from the database. refID optionally
-	// takes a transaction ID, and returns that transaction and the at most
-	// (n - 1) transactions that were made either before or after it, depending
-	// on the value of past. If refID is nil, the most recent n transactions
-	// are returned, and the value of past is ignored. If the transaction with
-	// ID refID is not in the database, asset.CoinNotFoundError is returned.
-	getTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
-	getTx(txID string) (*asset.WalletTransaction, error)
-	getPendingTxs() ([]*extendedWalletTx, error)
-	removeTx(txID string) error
-	// setLastReceiveTxQuery stores the last time the wallet was queried for
-	// receive transactions. This is required to know how far back to query
-	// for incoming transactions that were received while the wallet is
-	// offline.
-	setLastReceiveTxQuery(block uint64) error
-	getLastReceiveTxQuery() (uint64, error)
-	close() error
-	run(context.Context)
-}
-
-type badgerTxDB struct {
+type BadgerTxDB struct {
 	*badger.DB
 	log dex.Logger
 }
-
-var _ txDB = (*badgerTxDB)(nil)
 
 // badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
 // satisfy badger.Logger.
@@ -111,7 +85,7 @@ func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
 	log.Warnf(s, a...)
 }
 
-func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
+func NewBadgerTxDB(filePath string, log dex.Logger) (*BadgerTxDB, error) {
 	// If memory use is a concern, could try
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
@@ -131,12 +105,12 @@ func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
 		return nil, err
 	}
 
-	return &badgerTxDB{
+	return &BadgerTxDB{
 		DB:  db,
 		log: log}, nil
 }
 
-func (db *badgerTxDB) findFreeBlockKey(txn *badger.Txn, blockNumber uint64) ([]byte, error) {
+func (db *BadgerTxDB) findFreeBlockKey(txn *badger.Txn, blockNumber uint64) ([]byte, error) {
 	getKey := func(i uint64) []byte {
 		if blockNumber == 0 {
 			return pendingKey(i)
@@ -163,7 +137,8 @@ func hasPrefix(b, prefix []byte) bool {
 	return bytes.Equal(b[:len(prefix)], prefix)
 }
 
-func (db *badgerTxDB) storeTx(tx *extendedWalletTx) error {
+// StoreTx stores a transaction in the database.
+func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(tx.ID)
 		txKeyItem, getErr := txn.Get(txKey)
@@ -211,12 +186,16 @@ func (db *badgerTxDB) storeTx(tx *extendedWalletTx) error {
 	})
 }
 
-func (db *badgerTxDB) markTxAsSubmitted(txID string) error {
+// MarkTxAsSubmitted should be called when a previously stored transaction
+// that had not yet been sent to the network is sent to the network.
+// asset.CoinNotFoundError is returned if the transaction is not in the
+// database.
+func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(txID)
 		txKeyItem, err := txn.Get(txKey)
 		if err != nil {
-			return err
+			return asset.CoinNotFoundError
 		}
 
 		blockKey, err := txKeyItem.ValueCopy(nil)
@@ -234,7 +213,7 @@ func (db *badgerTxDB) markTxAsSubmitted(txID string) error {
 			return err
 		}
 
-		var wt extendedWalletTx
+		var wt ExtendedWalletTx
 		if err := json.Unmarshal(wtB, &wt); err != nil {
 			return err
 		}
@@ -249,14 +228,14 @@ func (db *badgerTxDB) markTxAsSubmitted(txID string) error {
 	})
 }
 
-// getTxs retrieves n transactions from the database. refID optionally
+// GetTxs retrieves n transactions from the database. refID optionally
 // takes a transaction ID, and returns that transaction and the at most
 // (n - 1) transactions that were made either before or after it, depending
 // on the value of past. If refID is nil, the most recent n transactions
 // are returned, and the value of past is ignored. If the transaction with
 // ID refID is not in the database, asset.CoinNotFoundError is returned.
 // Unsubmitted transactions are not returned.
-func (db *badgerTxDB) getTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	var txs []*asset.WalletTransaction
 	err := db.View(func(txn *badger.Txn) error {
 		var startKey []byte
@@ -293,7 +272,7 @@ func (db *badgerTxDB) getTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 			if err != nil {
 				return err
 			}
-			var wt extendedWalletTx
+			var wt ExtendedWalletTx
 			if err := json.Unmarshal(wtB, &wt); err != nil {
 				return err
 			}
@@ -312,8 +291,10 @@ func (db *badgerTxDB) getTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 	return txs, err
 }
 
-func (db *badgerTxDB) getTx(txID string) (*asset.WalletTransaction, error) {
-	txs, err := db.getTxs(1, &txID, false)
+// GetTx retrieves a transaction by its ID. If the transaction is not in
+// the database, asset.CoinNotFoundError is returned.
+func (db *BadgerTxDB) GetTx(txID string) (*asset.WalletTransaction, error) {
+	txs, err := db.GetTxs(1, &txID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -324,8 +305,9 @@ func (db *badgerTxDB) getTx(txID string) (*asset.WalletTransaction, error) {
 	return txs[0], nil
 }
 
-func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
-	var txs []*extendedWalletTx
+// GetPendingTxs returns all transactions that have not yet been confirmed.
+func (db *BadgerTxDB) GetPendingTxs() ([]*ExtendedWalletTx, error) {
+	var txs []*ExtendedWalletTx
 	err := db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.Reverse = true
@@ -338,7 +320,7 @@ func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
 			if err != nil {
 				return err
 			}
-			var wt extendedWalletTx
+			var wt ExtendedWalletTx
 			if err := json.Unmarshal(wtB, &wt); err != nil {
 				return err
 			}
@@ -354,7 +336,9 @@ func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
 	return txs, err
 }
 
-func (db *badgerTxDB) removeTx(txID string) error {
+// RemoveTx removes a transaction from the database. If the transaction is
+// not in the database, asset.CoinNotFoundError is returned.
+func (db *BadgerTxDB) RemoveTx(txID string) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(txID)
 		txKeyItem, err := txn.Get(txKey)
@@ -375,7 +359,11 @@ func (db *badgerTxDB) removeTx(txID string) error {
 	})
 }
 
-func (db *badgerTxDB) setLastReceiveTxQuery(block uint64) error {
+// SetLastReceiveTxQuery stores the last time the wallet was queried for
+// receive transactions. This is required to know how far back to query
+// for incoming transactions that were received while the wallet is
+// offline.
+func (db *BadgerTxDB) SetLastReceiveTxQuery(block uint64) error {
 	return db.Update(func(txn *badger.Txn) error {
 		// use binary big endian
 		b := make([]byte, 8)
@@ -384,14 +372,16 @@ func (db *badgerTxDB) setLastReceiveTxQuery(block uint64) error {
 	})
 }
 
-const errNeverQueried = dex.ErrorKind("never queried")
+const ErrNeverQueried = dex.ErrorKind("never queried")
 
-func (db *badgerTxDB) getLastReceiveTxQuery() (uint64, error) {
+// GetLastReceiveTxQuery retrieves the last time the wallet was queried for
+// receive transactions.
+func (db *BadgerTxDB) GetLastReceiveTxQuery() (uint64, error) {
 	var block uint64
 	err := db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(lastQueryKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return errNeverQueried
+			return ErrNeverQueried
 		}
 		if err != nil {
 			return err
@@ -406,7 +396,8 @@ func (db *badgerTxDB) getLastReceiveTxQuery() (uint64, error) {
 	return block, err
 }
 
-func (db *badgerTxDB) run(ctx context.Context) {
+// Run runs the garbage collector in a loop.
+func (db *BadgerTxDB) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -417,11 +408,16 @@ func (db *badgerTxDB) run(ctx context.Context) {
 				db.log.Errorf("garbage collection error: %v", err)
 			}
 		case <-ctx.Done():
+			err := db.Close()
+			if err != nil {
+				db.log.Errorf("error closing BadgerTxDB: %v", err)
+			}
 			return
 		}
 	}
 }
 
-func (db *badgerTxDB) close() error {
+// Close closes the database.
+func (db *BadgerTxDB) Close() error {
 	return db.DB.Close()
 }

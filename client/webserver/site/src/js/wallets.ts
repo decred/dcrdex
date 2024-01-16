@@ -108,18 +108,24 @@ const txTypeApproveToken = 9
 const txTypeAcceleration = 10
 // const txTypeSelfSend = 11
 const txTypeRevokeTokenApproval = 12
+const txTypeTicketPurchase = 13
+const txTypeTicketVote = 14
+const txTypeTicketRevocation = 15
 
 const positiveTxTypes : number[] = [
   txTypeReceive,
   txTypeRedeem,
   txTypeRefund,
-  txTypeRedeemBond
+  txTypeRedeemBond,
+  txTypeTicketVote,
+  txTypeTicketRevocation
 ]
 
 const negativeTxTypes : number[] = [
   txTypeSend,
   txTypeSwap,
-  txTypeCreateBond
+  txTypeCreateBond,
+  txTypeTicketPurchase
 ]
 
 const noAmtTxTypes : number[] = [
@@ -237,7 +243,7 @@ export default class WalletsPage extends BasePage {
     Doc.cleanTemplates(
       page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl,
       page.ticketHistoryRowTmpl, page.votingChoiceTmpl, page.votingAgendaTmpl, page.tspendTmpl,
-      page.tkeyTmpl, page.txHistoryRow, page.txHistoryDateRow
+      page.tkeyTmpl, page.txHistoryRowTmpl, page.txHistoryDateRowTmpl
     )
 
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
@@ -1725,7 +1731,7 @@ export default class WalletsPage extends BasePage {
   }
 
   txHistoryRow (tx: WalletTransaction, assetID: number) : PageElement {
-    const row = this.page.txHistoryRow.cloneNode(true) as PageElement
+    const row = this.page.txHistoryRowTmpl.cloneNode(true) as PageElement
     row.dataset.txid = tx.id
     Doc.bind(row, 'click', () => this.showTxDetailsPopup(tx.id))
     this.updateTxHistoryRow(row, tx, assetID)
@@ -1733,7 +1739,7 @@ export default class WalletsPage extends BasePage {
   }
 
   txHistoryDateRow (date: string) : PageElement {
-    const row = this.page.txHistoryDateRow.cloneNode(true) as PageElement
+    const row = this.page.txHistoryDateRowTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(row)
     tmpl.date.textContent = date
     return row

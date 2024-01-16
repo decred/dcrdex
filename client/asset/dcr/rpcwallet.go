@@ -148,6 +148,7 @@ type rpcClient interface {
 	GetVoteChoices(ctx context.Context) (*walletjson.GetVoteChoicesResult, error)
 	SetVoteChoice(ctx context.Context, agendaID, choiceID string) error
 	SetTxFee(ctx context.Context, fee dcrutil.Amount) error
+	ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error)
 }
 
 // newRPCWallet creates an rpcClient and uses it to construct a new instance
@@ -747,6 +748,10 @@ func (w *rpcWallet) GetRawTransaction(ctx context.Context, txHash *chainhash.Has
 		return nil, err
 	}
 	return utilTx.MsgTx(), nil
+}
+
+func (w *rpcWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error) {
+	return nil, fmt.Errorf("ListSinceBlock not implemented for RPC wallet")
 }
 
 // GetRawMempool returns hashes for all txs of the specified type in the node's

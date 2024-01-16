@@ -805,14 +805,14 @@ type baseWallet struct {
 	bondReserves atomic.Uint64
 
 	pendingTxsMtx sync.RWMutex
-	pendingTxs    map[chainhash.Hash]extendedWalletTx
+	pendingTxs    map[chainhash.Hash]ExtendedWalletTx
 
 	// receiveTxLastQuery stores the last block height at which the wallet
 	// was queried for recieve transactions. This is also stored in the
 	// txHistoryDB.
 	receiveTxLastQuery atomic.Uint64
 
-	txHistoryDB     atomic.Value // txDB
+	txHistoryDB     atomic.Value // *BadgerTxDB
 	txHistoryDBPath string
 
 	ar *AddressRecycler
@@ -1245,7 +1245,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		calcTxSize:        txSizeCalculator,
 		txVersion:         txVersion,
 		Network:           cfg.Network,
-		pendingTxs:        make(map[chainhash.Hash]extendedWalletTx),
+		pendingTxs:        make(map[chainhash.Hash]ExtendedWalletTx),
 		txHistoryDBPath:   filepath.Join(walletDir, "txhistory.db"),
 		ar:                addressRecyler,
 	}
@@ -1288,7 +1288,7 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 		return nil, err
 	}
 
-	txHistoryDB, err := newBadgerTxDB(btc.txHistoryDBPath, btc.log.SubLogger("TXHISTORYDB"))
+	txHistoryDB, err := NewBadgerTxDB(btc.txHistoryDBPath, btc.log.SubLogger("TXHISTORYDB"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tx history db: %v", err)
 	}
@@ -1419,7 +1419,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.Height)
 
 	if txHistoryDB := btc.txDB(); txHistoryDB != nil {
-		pendingTxs, err := txHistoryDB.getPendingTxs()
+		pendingTxs, err := txHistoryDB.GetPendingTxs()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
 		}
@@ -1435,8 +1435,8 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 		btc.pendingTxsMtx.Unlock()
 
-		lastQuery, err := txHistoryDB.getLastReceiveTxQuery()
-		if errors.Is(err, errNeverQueried) {
+		lastQuery, err := txHistoryDB.GetLastReceiveTxQuery()
+		if errors.Is(err, ErrNeverQueried) {
 			lastQuery = 0
 		} else if err != nil {
 			return nil, fmt.Errorf("failed to load last query time: %v", err)
@@ -1447,8 +1447,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			txHistoryDB.run(ctx)
-			txHistoryDB.close()
+			txHistoryDB.Run(ctx)
 		}()
 	}
 
@@ -3454,12 +3453,12 @@ func preAccelerate(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, ch
 	return currentEffectiveRate, &suggestedRange, earlyAcceleration, nil
 }
 
-func (btc *baseWallet) txDB() txDB {
+func (btc *baseWallet) txDB() *BadgerTxDB {
 	dbi := btc.txHistoryDB.Load()
 	if dbi == nil {
 		return nil
 	}
-	return dbi.(txDB)
+	return dbi.(*BadgerTxDB)
 }
 
 func (btc *baseWallet) markTxAsSubmitted(txHash *chainhash.Hash) {
@@ -3468,7 +3467,7 @@ func (btc *baseWallet) markTxAsSubmitted(txHash *chainhash.Hash) {
 		return
 	}
 
-	err := txHistoryDB.markTxAsSubmitted(txHash.String())
+	err := txHistoryDB.MarkTxAsSubmitted(txHash.String())
 	if err != nil {
 		btc.log.Errorf("failed to mark tx as submitted in tx history db: %v", err)
 	}
@@ -3497,7 +3496,7 @@ func (btc *baseWallet) removeTxFromHistory(txHash *chainhash.Hash) {
 		return
 	}
 
-	err := txHistoryDB.removeTx(txHash.String())
+	err := txHistoryDB.RemoveTx(txHash.String())
 	if err != nil {
 		btc.log.Errorf("failed to remove tx from tx history db: %v", err)
 	}
@@ -3514,7 +3513,7 @@ func (btc *baseWallet) addTxToHistory(txType asset.TransactionType, txHash *chai
 		return
 	}
 
-	wt := &extendedWalletTx{
+	wt := &ExtendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
 			Type:      txType,
 			ID:        txHash.String(),
@@ -3530,7 +3529,7 @@ func (btc *baseWallet) addTxToHistory(txType asset.TransactionType, txHash *chai
 	btc.pendingTxs[*txHash] = *wt
 	btc.pendingTxsMtx.Unlock()
 
-	err := txHistoryDB.storeTx(wt)
+	err := txHistoryDB.StoreTx(wt)
 	if err != nil {
 		btc.log.Errorf("failed to store tx in tx history db: %v", err)
 	}
@@ -5239,7 +5238,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 			recentTxs = nil
 		} else {
 			btc.receiveTxLastQuery.Store(tip)
-			err = txHistoryDB.setLastReceiveTxQuery(tip)
+			err = txHistoryDB.SetLastReceiveTxQuery(tip)
 			if err != nil {
 				btc.log.Errorf("Error setting last query to %d: %v", tip, err)
 			}
@@ -5252,7 +5251,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 					btc.log.Errorf("Error decoding txid %s: %v", tx.TxID, err)
 					continue
 				}
-				_, err = txHistoryDB.getTx(txHash.String())
+				_, err = txHistoryDB.GetTx(txHash.String())
 				if err == nil {
 					continue
 				}
@@ -5277,21 +5276,21 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		}
 	}
 
-	pendingTxsCopy := make(map[chainhash.Hash]extendedWalletTx, len(btc.pendingTxs))
+	pendingTxsCopy := make(map[chainhash.Hash]ExtendedWalletTx, len(btc.pendingTxs))
 	btc.pendingTxsMtx.RLock()
 	for hash, tx := range btc.pendingTxs {
 		pendingTxsCopy[hash] = tx
 	}
 	btc.pendingTxsMtx.RUnlock()
 
-	handlePendingTx := func(txHash chainhash.Hash, tx *extendedWalletTx) {
+	handlePendingTx := func(txHash chainhash.Hash, tx *ExtendedWalletTx) {
 		if !tx.Submitted {
 			return
 		}
 
 		gtr, err := btc.node.getWalletTransaction(&txHash)
 		if errors.Is(err, asset.CoinNotFoundError) {
-			err = txHistoryDB.removeTx(txHash.String())
+			err = txHistoryDB.RemoveTx(txHash.String())
 			if err == nil || errors.Is(err, asset.CoinNotFoundError) {
 				btc.pendingTxsMtx.Lock()
 				delete(btc.pendingTxs, txHash)
@@ -5341,7 +5340,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		}
 
 		if updated {
-			err = txHistoryDB.storeTx(tx)
+			err = txHistoryDB.StoreTx(tx)
 			if err != nil {
 				btc.log.Errorf("Error updating tx %s: %v", txHash, err)
 				return
@@ -5371,7 +5370,7 @@ func (btc *ExchangeWalletSPV) TxHistory(n int, refID *string, past bool) ([]*ass
 		return nil, fmt.Errorf("tx database not initialized")
 	}
 
-	return txHistoryDB.getTxs(n, refID, past)
+	return txHistoryDB.GetTxs(n, refID, past)
 }
 
 // lockedSats is the total value of locked outputs, as locked with LockUnspent.

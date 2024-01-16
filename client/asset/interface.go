@@ -1080,6 +1080,9 @@ const (
 	Acceleration
 	SelfSend
 	RevokeTokenApproval
+	TicketPurchase
+	TicketVote
+	TicketRevokation
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a
@@ -1120,6 +1123,7 @@ type WalletTransaction struct {
 	// AdditionalData contains asset specific information, i.e. nonce
 	// for ETH.
 	AdditionalData map[string]string `json:"additionalData"`
+	Confirmed      bool              `json:"confirmed"`
 }
 
 // WalletHistorian is a wallet that is able to retrieve the history of all

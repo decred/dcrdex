@@ -40,9 +40,9 @@ func TestTxDB(t *testing.T) {
 			AdditionalData: map[string]string{
 				"Nonce": "1",
 			},
-			TokenID: &simnetTokenID,
+			TokenID:   &simnetTokenID,
+			Confirmed: true,
 		},
-		Confirmed: true,
 	}
 
 	wt2 := &extendedWalletTx{

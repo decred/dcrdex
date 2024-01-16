@@ -99,6 +99,7 @@ type dcrWallet interface {
 	SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetRelayFee(relayFee dcrutil.Amount)
 	GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*wallet.TicketSummary, *wire.BlockHeader, error)
+	ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error)
 	vspclient.Wallet
 	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
