@@ -841,8 +841,6 @@ export default class Application {
 
   makePoke (note: CoreNote): [NoteElement, CoreNotePlus] {
     const el = this.page.pokeTmpl.cloneNode(true) as NoteElement
-    const d = new Date(note.stamp)
-    Doc.tmplElement(el, 'dateTime').textContent = `${d.toLocaleDateString()}, ${d.toLocaleTimeString()}`
     Doc.tmplElement(el, 'details').textContent = `${note.subject}: ${note.details}`
     const np: CoreNotePlus = { el, ...note }
     return [el, np]
