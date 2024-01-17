@@ -255,10 +255,15 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		}
 	}()
 
+	currentAccts := w.accountsV.Load().(XCWalletAccounts)
+
 	if rpcCfg.RPCUser == w.rpcCfg.User &&
 		rpcCfg.RPCPass == w.rpcCfg.Pass &&
 		bytes.Equal(certs, w.rpcCfg.Certificates) &&
-		rpcCfg.RPCListen == w.rpcCfg.Host {
+		rpcCfg.RPCListen == w.rpcCfg.Host &&
+		rpcCfg.PrimaryAccount == currentAccts.PrimaryAccount &&
+		rpcCfg.UnmixedAccount == currentAccts.UnmixedAccount &&
+		rpcCfg.TradingAccount == currentAccts.TradingAccount {
 		allOk = true
 		return false, nil
 	}
@@ -271,6 +276,15 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 	err = newWallet.Connect(ctx)
 	if err != nil {
 		return false, fmt.Errorf("error connecting new wallet")
+	}
+
+	for _, acctName := range []string{rpcCfg.PrimaryAccount, rpcCfg.TradingAccount, rpcCfg.UnmixedAccount} {
+		if acctName == "" {
+			continue
+		}
+		if _, err := newWallet.AccountUnlocked(ctx, acctName); err != nil {
+			return false, fmt.Errorf("error checking lock status on account %q: %v", acctName, err)
+		}
 	}
 
 	if walletCfg.ActivelyUsed {

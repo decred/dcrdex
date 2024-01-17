@@ -668,6 +668,10 @@ type ExchangeWallet struct {
 		remaining          atomic.Int32
 		unconfirmedTickets map[chainhash.Hash]struct{}
 	}
+
+	// Embedding wallets can set cycleMixer, which will be triggered after
+	// new block are seen.
+	cycleMixer func()
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -858,7 +862,7 @@ func openSPVWallet(dataDir string, chainParams *chaincfg.Params, log dex.Logger)
 		blockCache: blockCache{
 			blocks: make(map[chainhash.Hash]*cachedBlock),
 		},
-		tipChan: make(chan *block, 1),
+		tipChan: make(chan *block, 16),
 	}, nil
 }
 
@@ -1048,6 +1052,11 @@ func (dcr *ExchangeWallet) balance() (*asset.Balance, error) {
 	bal.Available += toAtoms(tradingAcctBal.Spendable) - tradingAcctLocked
 	bal.Immature += toAtoms(unmixedAcctBal.Total)
 	bal.Locked += tradingAcctLocked
+
+	bal.Other[asset.BalanceCategoryUnmixed] = asset.CustomBalance{
+		Amount: toAtoms(unmixedAcctBal.Total),
+	}
+
 	return bal, nil
 }
 
@@ -3939,9 +3948,25 @@ func (dcr *ExchangeWallet) NewAddress() (string, error) {
 
 // Unlock unlocks the exchange wallet.
 func (dcr *ExchangeWallet) Unlock(pw []byte) error {
+	// Older SPV wallet potentially need an upgrade while we have a password.
+	acctsToUnlock := dcr.allAccounts()
+	if upgrader, is := dcr.wallet.(interface {
+		upgradeAccounts(ctx context.Context, pw []byte) error
+	}); is {
+		if err := upgrader.upgradeAccounts(dcr.ctx, pw); err != nil {
+			return fmt.Errorf("error upgrading accounts: %w", err)
+		}
+		// For the native wallet, we unlock all accounts regardless. Otherwise,
+		// the accounts won't be properly unlocked after ConfigureFundsMixer
+		// is called. We could consider taking a password for
+		// ConfigureFundsMixer OR have Core take the password and call Unlock
+		// after ConfigureFundsMixer.
+		acctsToUnlock = nativeAccounts
+	}
+
 	// We must unlock all accounts, including any unmixed account, which is used
 	// to supply keys to the refund path of the swap contract script.
-	for _, acct := range dcr.allAccounts() {
+	for _, acct := range acctsToUnlock {
 		unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, acct)
 		if err != nil {
 			return err
@@ -3949,6 +3974,7 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 		if unlocked {
 			continue // attempt to unlock the other account
 		}
+
 		err = dcr.wallet.UnlockAccount(dcr.ctx, pw, acct)
 		if err != nil {
 			return err
@@ -3961,7 +3987,7 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 func (dcr *ExchangeWallet) Lock() error {
 	accts := dcr.wallet.Accounts()
 	if accts.UnmixedAccount != "" {
-		return nil // don't lock if mixing is enabled
+		return fmt.Errorf("cannot lock RPC mixing wallet") // don't lock if mixing is enabled
 	}
 	return dcr.wallet.LockAccount(dcr.ctx, accts.PrimaryAccount)
 }
@@ -5478,6 +5504,14 @@ func (dcr *ExchangeWallet) emitTipChange(height int64) {
 	go dcr.runTicketBuyer()
 }
 
+func (dcr *ExchangeWallet) emitBalance() {
+	if bal, err := dcr.Balance(); err != nil {
+		dcr.log.Errorf("Error getting balance after mempool tx notification: %v", err)
+	} else {
+		dcr.emit.BalanceChange(bal)
+	}
+}
+
 // monitorBlocks pings for new blocks and runs the tipChange callback function
 // when the block changes. New blocks are also scanned for potential contract
 // redeems.
@@ -5561,11 +5595,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 		case walletTip := <-walletBlock:
 			if walletTip == nil {
 				// Mempool tx seen.
-				if bal, err := dcr.Balance(); err != nil {
-					dcr.log.Errorf("Error getting balance after mempool tx notification: %v", err)
-				} else {
-					dcr.emit.BalanceChange(bal)
-				}
+				dcr.emitBalance()
 				continue
 			}
 			if queuedBlock != nil && walletTip.height >= queuedBlock.height {
@@ -5603,6 +5633,10 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
 
 	dcr.emitTipChange(newTipHeight)
+
+	if dcr.cycleMixer != nil {
+		dcr.cycleMixer()
+	}
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.

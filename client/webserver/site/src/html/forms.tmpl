@@ -155,6 +155,16 @@
 <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="depositErr"></div>
 {{end}}
 
+{{define "certPicker"}}
+<div class="ps-1 mb-1 mt-3 pointer">[[[TLS Certificate]]]</div>
+<input type="file" class="form-control select d-none" data-tmpl="certFile">
+<div class="ps-1 mt-2 fs15">
+  <span data-tmpl="selectedCert"></span>
+  <span class="underline ms-3 pointer d-hide" data-tmpl="removeCert">[[[remove]]]</span>
+  <span class="underline ms-3 pointer" data-tmpl="addCert">[[[add a file]]]</span>
+</div>
+{{end}}
+
 {{define "dexAddrForm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div data-tmpl="addDexHdr" class="flex-center fs24 sans-light"><span class="ico-plus fs12 me-2"></span> [[[Add a DEX]]]</div>
@@ -191,13 +201,7 @@
   <div class="px-1 mt-3 mb-2 fs14 d-hide" data-tmpl="needCert">
     [[[reg_ssl_needed]]]
   </div>
-  <div class="ps-1 mb-1 mt-3 pointer">[[[TLS Certificate]]]</div>
-  <input type="file" class="form-control select d-none" data-tmpl="certFile">
-  <div class="ps-1 mt-2 fs15">
-    <span data-tmpl="selectedCert"></span>
-    <span class="underline ms-3 pointer d-hide" data-tmpl="removeCert">[[[remove]]]</span>
-    <span class="underline ms-3 pointer" data-tmpl="addCert">[[[add a file]]]</span>
-  </div>
+  {{template "certPicker"}}
 </div>
 <div class="d-flex mt-3 d-hide" data-tmpl="auth">
   <div class="col-12 p-0">

@@ -323,9 +323,12 @@ export interface ExtensionConfiguredWallet {
   hiddenFields: string[]
   disableWalletType: boolean
   disablePassword: boolean
+  disableStaking: boolean
+  disablePrivacy: boolean
 }
 
 export interface ExtensionModeConfig {
+  name: string
   restrictedWallets: Record<string, ExtensionConfiguredWallet>
 }
 
@@ -793,6 +796,12 @@ export interface TicketStats {
   queued: number
 }
 
+export interface FundsMixingStats {
+  enabled: boolean
+  server: string
+  isMixing: boolean
+}
+
 export interface TicketStakingStatus {
   ticketPrice: number
   votingSubsidy: number
@@ -885,6 +894,8 @@ export interface Application {
   order (oid: string): Order | null
   canAccelerateOrder(order: Order): boolean
   unitInfo (assetID: number, xc?: Exchange): UnitInfo
+  baseChainSymbol (assetID: number): string
+  extensionWallet (assetID: number): ExtensionConfiguredWallet | undefined
   conventionalRate (baseID: number, quoteID: number, encRate: number, xc?: Exchange): number
   walletDefinition (assetID: number, walletType: string): WalletDefinition
   currentWalletDefinition (assetID: number): WalletDefinition

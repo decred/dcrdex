@@ -1782,6 +1782,104 @@ func (s *WebServer) apiTicketPage(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiMixingStats(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	stats, err := s.core.FundsMixingStats(req.AssetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error reteiving mixing stats for %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK    bool                    `json:"ok"`
+		Stats *asset.FundsMixingStats `json:"stats"`
+	}{
+		OK:    true,
+		Stats: stats,
+	}, s.indent)
+}
+
+func (s *WebServer) apiConfigureMixer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID    uint32 `json:"assetID"`
+		ServerAddr string `json:"serverAddr"`
+		Cert       string `json:"cert"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	if err := s.core.ConfigureFundsMixer(req.AssetID, req.ServerAddr, []byte(req.Cert)); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error configuring mixing for %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiStartMixer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID uint32           `json:"assetID"`
+		AppPW   encode.PassBytes `json:"appPW"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	defer req.AppPW.Clear()
+	// We only need a password if the wallet is locked.
+	walletState := s.core.WalletState(req.AssetID)
+	if walletState == nil {
+		s.writeAPIError(w, errors.New("no wallet state retrieved"))
+		return
+	}
+
+	var appPW []byte
+	defer encode.ClearBytes(appPW)
+	if !walletState.Open {
+		var err error
+		appPW, err = s.resolvePass(req.AppPW, r)
+		if err != nil {
+			s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+			return
+		}
+	}
+	if err := s.core.StartFundsMixer(appPW, req.AssetID); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error starting mixing for %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiStopMixer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	if err := s.core.StopFundsMixer(req.AssetID); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error stopping mixing for %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiDisableMixer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	if err := s.core.DisableFundsMixer(req.AssetID); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error disabling mixing for %d: %w", req.AssetID, err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 func (s *WebServer) apiStartMarketMaking(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		AppPW encode.PassBytes `json:"appPW"`

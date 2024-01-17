@@ -483,4 +483,22 @@ div[data-handler=init] {
   &.on > div {
     left: 0.7rem;
   }
+
+  &.big {
+    width: 2.2rem;
+    height: 1.25rem;
+    border-radius: 0.65rem;
+  }
+
+  &.big > div {
+    top: 0.15rem;
+    left: 0.15rem;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 0.5rem;
+  }
+
+  &.big.on > div {
+    left: 1.05rem;
+  }
 }

@@ -542,7 +542,7 @@ export class WalletConfigForm {
       })
       if (!skipRepeatN) for (let i = 0; i < (opt.repeatN ? opt.repeatN - 1 : 0); i++) this.addOpt(box, opt, insertAfter, true)
     } else el = this.textInputTmpl.cloneNode(true) as HTMLElement
-    const hiddenFields = app().user.extensionModeConfig?.restrictedWallets[baseChainSymbol(this.assetID)]?.hiddenFields || []
+    const hiddenFields = app().extensionWallet(this.assetID)?.hiddenFields || []
     if (hiddenFields.indexOf(opt.key) !== -1) Doc.hide(el)
     this.configElements.push([opt, el])
     const input = el.querySelector('input') as ConfigOptionInput
@@ -1634,6 +1634,7 @@ export class DEXAddressForm {
   page: Record<string, PageElement>
   knownExchanges: HTMLElement[]
   dexToUpdate?: string
+  certPicker: CertificatePicker
 
   constructor (form: HTMLElement, success: (xc: Exchange, cert: string) => void, pwCache?: PasswordCache, dexToUpdate?: string) {
     this.form = form
@@ -1642,12 +1643,9 @@ export class DEXAddressForm {
 
     const page = this.page = Doc.parseTemplate(form)
 
-    page.selectedCert.textContent = intl.prep(intl.ID_NONE_SELECTED)
+    this.certPicker = new CertificatePicker(form)
 
     Doc.bind(page.skipRegistration, 'change', () => this.showOrHidePWBox())
-    Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
-    Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
-    Doc.bind(page.addCert, 'click', () => page.certFile.click())
     Doc.bind(page.showCustom, 'click', () => {
       Doc.hide(page.showCustom)
       Doc.show(page.customBox, page.auth)
@@ -1686,7 +1684,7 @@ export class DEXAddressForm {
     const page = this.page
     page.addr.value = ''
     page.appPW.value = ''
-    this.clearCertFile()
+    this.certPicker.clearCertFile()
     Doc.hide(page.err)
     if (this.knownExchanges.length === 0 || this.dexToUpdate) {
       Doc.show(page.customBox, page.auth)
@@ -1737,13 +1735,7 @@ export class DEXAddressForm {
       Doc.show(page.err)
       return
     }
-    let cert = ''
-    if (page.certFile.value) {
-      const files = page.certFile.files
-      if (files && files.length) {
-        cert = await files[0].text()
-      }
-    }
+    const cert = await this.certPicker.file()
     const skipRegistration = this.skipRegistration()
     let pw = ''
     if (!skipRegistration && !State.passwordIsCached()) {
@@ -1785,28 +1777,6 @@ export class DEXAddressForm {
     }
     if (this.pwCache) this.pwCache.pw = pw
     this.success(res.xc, cert)
-  }
-
-  /**
-   * onCertFileChange when the input certFile changed, read the file
-   * and setting cert name into text of selectedCert to display on the view
-   */
-  async onCertFileChange () {
-    const page = this.page
-    const files = page.certFile.files
-    if (!files || !files.length) return
-    page.selectedCert.textContent = files[0].name
-    Doc.show(page.removeCert)
-    Doc.hide(page.addCert)
-  }
-
-  /* clearCertFile cleanup certFile value and selectedCert text */
-  clearCertFile () {
-    const page = this.page
-    page.certFile.value = ''
-    page.selectedCert.textContent = intl.prep(intl.ID_NONE_SELECTED)
-    Doc.hide(page.removeCert)
-    Doc.show(page.addCert)
   }
 }
 
@@ -2083,6 +2053,51 @@ export class AppPassResetForm {
   }
 }
 
+export class CertificatePicker {
+  page: Record<string, PageElement>
+
+  constructor (parent: PageElement) {
+    const page = this.page = Doc.parseTemplate(parent)
+    page.selectedCert.textContent = intl.prep(intl.ID_NONE_SELECTED)
+    Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
+    Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
+    Doc.bind(page.addCert, 'click', () => page.certFile.click())
+  }
+
+  /**
+   * onCertFileChange when the input certFile changed, read the file
+   * and setting cert name into text of selectedCert to display on the view
+   */
+  async onCertFileChange () {
+    const page = this.page
+    const files = page.certFile.files
+    if (!files || !files.length) return
+    page.selectedCert.textContent = files[0].name
+    Doc.show(page.removeCert)
+    Doc.hide(page.addCert)
+  }
+
+  /* clearCertFile cleanup certFile value and selectedCert text */
+  clearCertFile () {
+    const page = this.page
+    page.certFile.value = ''
+    page.selectedCert.textContent = intl.prep(intl.ID_NONE_SELECTED)
+    Doc.hide(page.removeCert)
+    Doc.show(page.addCert)
+  }
+
+  async file (): Promise<string> {
+    const page = this.page
+    if (page.certFile.value) {
+      const files = page.certFile.files
+      if (files && files.length) {
+        return await files[0].text()
+      }
+    }
+    return ''
+  }
+}
+
 const animationLength = 300
 
 /* Swap form1 for form2 with an animation. */
@@ -2162,13 +2177,4 @@ function dateToString (date: Date) {
   return dateApplyOffset(date).toISOString().split('T')[0]
   // Another common hack:
   // date.toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit" })
-}
-
-/*
- * baseChainSymbol returns the symbol for the asset's parent if the asset is a
- * token, otherwise the symbol for the asset itself.
- */
-export function baseChainSymbol (assetID: number) {
-  const asset = app().user.assets[assetID]
-  return asset.token ? app().user.assets[asset.token.parentID].symbol : asset.symbol
 }

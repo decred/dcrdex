@@ -18,6 +18,10 @@ body.dark {
     color: #777;
   }
 
+  .errcolor {
+    color: #fa7664;
+  }
+
   div.mainlinks > div,
   div.mainlinks > a {
     color: #a8a8a8;
@@ -61,6 +65,15 @@ body.dark {
     color: #d1d1ff;
     cursor: pointer;
     text-decoration: underline;
+  }
+
+  div.feature,
+  button.feature {
+    background-color: #0a4972;
+
+    &:hover {
+      background-color: #176699;
+    }
   }
 
   button {
@@ -167,5 +180,9 @@ body.dark {
       background-color: $dark_panel;
       box-shadow: 0 3px 6px #00000029, 0 2px 10px #00000049;
     }
+  }
+
+  .bodybg {
+    background-color: $dark_body_bg;
   }
 }

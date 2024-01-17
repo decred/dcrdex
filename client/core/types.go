@@ -141,6 +141,8 @@ type WalletState struct {
 // ExtensionModeConfig is configuration for running core in extension mode,
 // primarily for restricting certain wallet reconfiguration options.
 type ExtensionModeConfig struct {
+	// Name of embedding application. Used for messaging with disable features.
+	Name string `json:"name"`
 	// RestrictedWallets are wallets that need restrictions on reconfiguration
 	// options.
 	RestrictedWallets map[string] /*symbol*/ struct {
@@ -153,6 +155,10 @@ type ExtensionModeConfig struct {
 		// DisablePassword indicates that we should not offer the user an option
 		// to change the wallet password.
 		DisablePassword bool `json:"disablePassword"`
+		// DisableStaking disables vsp configuration and ticket purchasing.
+		DisableStaking bool `json:"disableStaking"`
+		// DisablePrivacy disables mixing configuration and control.
+		DisablePrivacy bool `json:"disablePrivacy"`
 	} `json:"restrictedWallets"`
 }
 
