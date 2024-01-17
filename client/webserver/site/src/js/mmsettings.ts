@@ -15,7 +15,10 @@ import {
   ArbMarketMakingPlacement,
   BotCEXCfg,
   AutoRebalanceConfig,
-  ExchangeBalance
+  ExchangeBalance,
+  MarketMakingStatus,
+  MMBotStatus,
+  MMCEXStatus
 } from './registry'
 import Doc from './doc'
 import State from './state'
@@ -289,6 +292,9 @@ export default class MarketMakerSettingsPage extends BasePage {
   updatedConfig: ConfigState
   creatingNewBot: boolean
   botType: string
+  mmStatus: MarketMakingStatus
+  cexConfigs: CEXConfig[]
+  botConfigs: BotConfig[]
   oracleBias: RangeOption
   oracleWeighting: RangeOption
   driftTolerance: RangeOption
@@ -368,8 +374,14 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.forms.exit()
   }
 
+  async refreshStatus () {
+    this.mmStatus = await MM.status()
+    this.botConfigs = this.mmStatus.bots.map((s: MMBotStatus) => s.config)
+    this.cexConfigs = Object.values(this.mmStatus.cexes).map((s: MMCEXStatus) => s.config)
+  }
+
   async initialize (specs?: BotSpecs) {
-    await MM.config()
+    await this.refreshStatus()
 
     this.setupCEXes()
 
@@ -427,8 +439,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     State.storeLocal(specLK, this.specs)
 
-    const viewOnly = await isViewOnly(this.specs)
-    const botCfg = await botConfig(this.specs)
+    const viewOnly = isViewOnly(this.specs, this.mmStatus)
+    const botCfg = botConfig(this.specs, this.mmStatus)
     const dmm = defaultMarketMakingConfig
 
     const oldCfg = this.originalConfig = Object.assign({}, defaultMarketMakingConfig, {
@@ -530,11 +542,11 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   async showBotTypeForm (host: string, baseID: number, quoteID: number, botType?: string, configuredCEX?: string) {
-    const { page } = this
+    const { page, cexConfigs } = this
     this.formSpecs = { host, baseID, quoteID, botType: '' }
-    const viewOnly = await isViewOnly(this.formSpecs)
+    const viewOnly = isViewOnly(this.formSpecs, this.mmStatus)
     if (viewOnly) {
-      const botCfg = await botConfig(this.formSpecs)
+      const botCfg = botConfig(this.formSpecs, this.mmStatus)
       const specs = this.specs = this.formSpecs
       switch (true) {
         case Boolean(botCfg?.simpleArbConfig):
@@ -563,12 +575,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     for (const { div } of Object.values(this.formCexes)) div.classList.remove('selected')
     this.setCEXAvailability(baseID, quoteID)
     Doc.hide(page.noCexesConfigured, page.noCexMarket, page.noCexMarketConfigureMore, page.botTypeErr)
-    const configuredCexes = (MM.cfg.cexConfigs ?? [])
     const cexHasMarket = this.cexMarketSupportFilter(baseID, quoteID)
-    const supportingCexes = configuredCexes.filter((cex: CEXConfig) => cexHasMarket(cex.name))
+    const supportingCexes = cexConfigs.filter((cex: CEXConfig) => cexHasMarket(cex.name))
     const arbEnabled = supportingCexes.length > 0
     for (const div of this.botTypeSelectors) div.classList.toggle('disabled', div.dataset.botType !== botTypeBasicMM && !arbEnabled)
-    if (configuredCexes.length === 0) Doc.show(page.noCexesConfigured)
+    if (cexConfigs.length === 0) Doc.show(page.noCexesConfigured)
     else {
       const lastBots = (State.fetchLocal(lastBotsLK) || {}) as Record<string, BotSpecs>
       const lastBot = lastBots[`${baseID}_${quoteID}_${host}`]
@@ -609,7 +620,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         this.setBotTypeSelected(botTypeBasicMM)
         // If there are unconfigured cexes, show configureMore message.
         const unconfigured = Object.keys(CEXDisplayInfos).filter((cexName: string) => {
-          return configuredCexes.some((cexCfg: CEXConfig) => cexCfg.name === cexName)
+          return cexConfigs.some((cexCfg: CEXConfig) => cexCfg.name === cexName)
         })
         const allConfigured = unconfigured.length === 0 || (unconfigured.length === 1 && (unconfigured[0] === 'Binance' || unconfigured[0] === 'BinanceUS'))
         if (!allConfigured) Doc.show(page.noCexMarketConfigureMore)
@@ -621,19 +632,18 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.forms.show(page.botTypeForm)
   }
 
-  async reshowBotTypeForm () {
-    if (await isViewOnly(this.specs)) this.showMarketSelectForm()
+  reshowBotTypeForm () {
+    if (isViewOnly(this.specs, this.mmStatus)) this.showMarketSelectForm()
     const { baseID, quoteID, host, cexName, botType } = this.specs
     this.showBotTypeForm(host, baseID, quoteID, botType, cexName)
   }
 
   setBotTypeSelected (selectedType: string) {
-    const { formSpecs: { baseID, quoteID, host }, botTypeSelectors, formCexes } = this
+    const { formSpecs: { baseID, quoteID, host }, botTypeSelectors, formCexes, cexConfigs } = this
     for (const { classList, dataset: { botType } } of botTypeSelectors) classList.toggle('selected', botType === selectedType)
     // If we don't have a cex selected, attempt to select one
     if (selectedType === botTypeBasicMM) return
-    const configuredCexes = (MM.cfg.cexConfigs ?? [])
-    if (configuredCexes.length === 0) return
+    if (cexConfigs.length === 0) return
     const cexHasMarket = this.cexMarketSupportFilter(baseID, quoteID)
     // If there is one currently selected and it supports this market, leave it.
     const selecteds = Object.values(formCexes).filter((cex: cexButton) => cex.div.classList.contains('selected'))
@@ -642,7 +652,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const lastBots = (State.fetchLocal(lastBotsLK) || {}) as Record<string, BotSpecs>
     const lastBot = lastBots[`${baseID}_${quoteID}_${host}`]
     if (lastBot) {
-      const cexes = configuredCexes.filter((cexCfg: CEXConfig) => cexCfg.name === lastBot.cexName)
+      const cexes = cexConfigs.filter((cexCfg: CEXConfig) => cexCfg.name === lastBot.cexName)
       if (cexes.length && cexHasMarket(cexes[0].name)) {
         this.selectFormCEX(cexes[0].name)
         return
@@ -651,14 +661,14 @@ export default class MarketMakerSettingsPage extends BasePage {
     // 2. The last exchange that the user selected.
     const lastCEX = State.fetchLocal(lastArbExchangeLK)
     if (lastCEX) {
-      const cexes = configuredCexes.filter((cexCfg: CEXConfig) => cexCfg.name === lastCEX)
+      const cexes = cexConfigs.filter((cexCfg: CEXConfig) => cexCfg.name === lastCEX)
       if (cexes.length && cexHasMarket(cexes[0].name)) {
         this.selectFormCEX(cexes[0].name)
         return
       }
     }
     // 3. Any supporting cex.
-    const cexes = configuredCexes.filter((cexCfg: CEXConfig) => cexHasMarket(cexCfg.name))
+    const cexes = cexConfigs.filter((cexCfg: CEXConfig) => cexHasMarket(cexCfg.name))
     if (cexes.length) this.selectFormCEX(cexes[0].name)
   }
 
@@ -1309,7 +1319,7 @@ export default class MarketMakerSettingsPage extends BasePage {
    */
   setOriginalValues (viewOnly: boolean) {
     const {
-      page, originalConfig: oldCfg, updatedConfig: cfg,
+      page, originalConfig: oldCfg, updatedConfig: cfg, cexConfigs,
       oracleBias, oracleWeighting, driftTolerance, orderPersistence,
       cexBaseBalanceRange, cexBaseMinBalanceRange, cexQuoteBalanceRange, cexQuoteMinBalanceRange,
       baseBalance, quoteBalance, specs: { baseID, quoteID, cexName, botType }
@@ -1362,15 +1372,15 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setGapFactorLabels(cfg.gapStrategy)
 
     if (botType !== botTypeBasicMM) {
-      for (const cexCfg of (MM.cfg.cexConfigs || [])) {
+      for (const cexCfg of cexConfigs) {
         if (cexCfg.name !== cexName) continue
         Doc.hide(page.gapStrategyBox, page.oraclesSettingBox)
-        Doc.show(page.profitSelectorBox)
+        Doc.show(page.profitSelectorBox, page.orderPersistenceBox)
         this.setArbMMLabels()
       }
     } else {
-      Doc.show(page.gapStrategyBox, page.oraclesSettingBox, page.baseBalanceBox, page.quoteBalanceBox)
-      Doc.hide(page.profitSelectorBox)
+      Doc.show(page.gapStrategyBox, page.oraclesSettingBox)
+      Doc.hide(page.profitSelectorBox, page.orderPersistenceBox)
       this.setGapFactorLabels(page.gapStrategySelect.value || '')
     }
 
@@ -1406,7 +1416,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     let ok = true
     const {
       page, specs: { botType },
-      updatedConfig: { sellPlacements, buyPlacements, profit, useEmptyMarketRate, emptyMarketRate, baseBalance, quoteBalance }
+      updatedConfig: { sellPlacements, buyPlacements, profit, useEmptyMarketRate, emptyMarketRate }
     } = this
     const setError = (errEl: PageElement, errID: string) => {
       ok = false
@@ -1420,9 +1430,9 @@ export default class MarketMakerSettingsPage extends BasePage {
         page.emptyMarketRateErr, page.baseBalanceErr, page.quoteBalanceErr
       )
     }
-    if (botType !== botTypeBasicArb) {
-      if (buyPlacements.length === 0) setError(page.buyPlacementsErr, intl.ID_NO_PLACEMENTS)
-      if (sellPlacements.length === 0) setError(page.sellPlacementsErr, intl.ID_NO_PLACEMENTS)
+    if (botType !== botTypeBasicArb && buyPlacements.length + sellPlacements.length === 0) {
+      setError(page.buyPlacementsErr, intl.ID_NO_PLACEMENTS)
+      setError(page.sellPlacementsErr, intl.ID_NO_PLACEMENTS)
     }
     if (botType !== botTypeBasicMM) {
       if (isNaN(profit)) setError(page.profitInputErr, intl.ID_INVALID_VALUE)
@@ -1431,8 +1441,6 @@ export default class MarketMakerSettingsPage extends BasePage {
       // TODO: Should we enforce an empty market rate if there are no
       // oracles?
       if (useEmptyMarketRate && emptyMarketRate === 0) setError(page.emptyMarketRateErr, intl.ID_NO_ZERO)
-      if (baseBalance === 0) setError(page.baseBalanceErr, intl.ID_NO_ZERO)
-      if (quoteBalance === 0) setError(page.quoteBalanceErr, intl.ID_NO_ZERO)
     }
     return ok
   }
@@ -1569,13 +1577,13 @@ export default class MarketMakerSettingsPage extends BasePage {
    * balance, a message communicating this is displayed.
    */
   setupBalanceSelectors (viewOnly: boolean) {
-    const { page, updatedConfig: cfg, specs: { host, baseID, quoteID } } = this
+    const { page, updatedConfig: cfg, specs: { host, baseID, quoteID }, botConfigs } = this
     const { wallet: { balance: { available: bAvail } }, unitInfo: bui } = app().assets[baseID]
     const { wallet: { balance: { available: qAvail } }, unitInfo: qui } = app().assets[quoteID]
 
     let baseReservedByOtherBots = 0
     let quoteReservedByOtherBots = 0
-    for (const botCfg of (MM.cfg.botConfigs || [])) {
+    for (const botCfg of botConfigs) {
       if (botCfg.baseID === baseID && botCfg.quoteID === quoteID && botCfg.host === host) {
         continue
       }
@@ -1646,7 +1654,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   setupCEXSelectors (viewOnly: boolean) {
     const {
-      page, updatedConfig: cfg, originalConfig: oldCfg, specs: { host, baseID, quoteID, botType, cexName }
+      page, updatedConfig: cfg, originalConfig: oldCfg, specs: { host, baseID, quoteID, botType, cexName },
+      botConfigs
     } = this
     Doc.hide(
       page.cexRebalanceSettings, page.cexBaseBalanceBox, page.cexBaseRebalanceOpts, page.noBaseCEXBalance,
@@ -1692,7 +1701,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       }
     }
 
-    for (const botCfg of (MM.cfg.botConfigs || [])) {
+    for (const botCfg of botConfigs) {
       if (botCfg.baseID === baseID && botCfg.quoteID === quoteID && botCfg.host === host) {
         continue
       }
@@ -1986,11 +1995,13 @@ export default class MarketMakerSettingsPage extends BasePage {
         apiKey: apiKey,
         apiSecret: apiSecret
       })
+      await this.refreshStatus()
     } catch (e) {
       Doc.show(page.cexFormErr)
       page.cexFormErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg ?? String(e) })
       return
     }
+
     const dinfo = CEXDisplayInfos[cexName]
     for (const { baseID, quoteID, tmpl, arbs } of this.marketRows) {
       if (arbs.indexOf(cexName) !== -1) continue
@@ -2024,12 +2035,14 @@ export default class MarketMakerSettingsPage extends BasePage {
     const cexHasMarket = this.cexMarketSupportFilter(baseID, quoteID)
     for (const { name, div, tmpl } of Object.values(this.formCexes)) {
       const has = cexHasMarket(name)
-      const configured = MM.cexConfigured(name)
-      Doc.hide(tmpl.unavailable, tmpl.needsconfig)
+      const cexStatus = this.mmStatus.cexes[name]
+      Doc.hide(tmpl.unavailable, tmpl.needsconfig, tmpl.disconnected)
       tmpl.logo.classList.remove('off')
-      div.classList.toggle('configured', configured)
-      if (!configured) {
+      div.classList.toggle('configured', Boolean(cexStatus) && !cexStatus.connectErr)
+      if (!cexStatus) {
         Doc.show(tmpl.needsconfig)
+      } else if (cexStatus.connectErr) {
+        Doc.show(tmpl.disconnected)
       } else if (!has) {
         Doc.show(tmpl.unavailable)
         tmpl.logo.classList.add('off')
@@ -2060,12 +2073,12 @@ export default class MarketMakerSettingsPage extends BasePage {
       const cex = this.formCexes[cexName]
       if (cex.div.classList.contains('selected')) { // unselect
         for (const cex of Object.values(this.formCexes)) cex.div.classList.remove('selected')
-        const { baseID, quoteID } = this.specs
+        const { baseID, quoteID } = this.formSpecs
         this.setCEXAvailability(baseID, quoteID)
         return
       }
-      // Is this cex configured?
-      if ((MM.cfg.cexConfigs ?? []).filter((cfg: CEXConfig) => cfg.name === cexName).length === 0) {
+      const cexStatus = this.mmStatus.cexes[cexName]
+      if (!cexStatus || cexStatus.connectErr) {
         this.showCEXConfigForm(cexName)
         return
       }
@@ -2075,12 +2088,23 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   showCEXConfigForm (cexName: string) {
     const page = this.page
+    Doc.hide(page.cexConfigPrompt, page.cexConnectErrBox, page.cexFormErr)
     const dinfo = CEXDisplayInfos[cexName]
     page.cexConfigLogo.src = '/img/' + dinfo.logo
     page.cexConfigName.textContent = dinfo.name
     page.cexConfigForm.dataset.cexName = cexName
     page.cexApiKeyInput.value = ''
     page.cexSecretInput.value = ''
+    const cexStatus = this.mmStatus.cexes[cexName]
+    const connectErr = cexStatus?.connectErr
+    if (connectErr) {
+      Doc.show(page.cexConnectErrBox)
+      page.cexConnectErr.textContent = connectErr
+      page.cexApiKeyInput.value = cexStatus.config.apiKey
+      page.cexSecretInput.value = cexStatus.config.apiSecret
+    } else {
+      Doc.show(page.cexConfigPrompt)
+    }
     this.forms.show(page.cexConfigForm)
   }
 
@@ -2090,8 +2114,8 @@ export default class MarketMakerSettingsPage extends BasePage {
    */
   cexMarketSupportFilter (baseID: number, quoteID: number) {
     const cexes: Record<string, boolean> = {}
-    for (const [cexName, mkts] of Object.entries(MM.mkts)) {
-      for (const { baseID: b, quoteID: q } of mkts) {
+    for (const [cexName, cexStatus] of Object.entries(this.mmStatus.cexes)) {
+      for (const { baseID: b, quoteID: q } of (cexStatus.markets ?? [])) {
         if (b === baseID && q === quoteID) {
           cexes[cexName] = true
           break
@@ -2126,13 +2150,15 @@ function calculateQuoteLot (lotSize: number, baseID:number, quoteID: number, spo
   return qFactor
 }
 
-async function isViewOnly (specs: BotSpecs) {
-  return Boolean(await botConfig(specs)) && (await MM.status()).running
+function isViewOnly (specs: BotSpecs, mmStatus: MarketMakingStatus) {
+  return Boolean(botConfig(specs, mmStatus)) && mmStatus.running
 }
 
-async function botConfig (specs: BotSpecs) {
+function botConfig (specs: BotSpecs, mmStatus: MarketMakingStatus) {
   const { baseID, quoteID, host } = specs
-  const cfgs = ((await MM.config()).botConfigs || []).filter((cfg: BotConfig) => cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host)
+  const cfgs = (mmStatus.bots || []).map((s: MMBotStatus) => s.config).filter((cfg: BotConfig) => {
+    return cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host
+  })
   if (cfgs.length) return cfgs[0]
   return null
 }

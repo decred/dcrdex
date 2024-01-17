@@ -68,6 +68,7 @@ var (
 	doubleCreateAsyncErr  = false
 	randomizeOrdersCount  = false
 	initErrors            = false
+	mmConnectErrors       = false
 
 	rand   = mrand.New(mrand.NewSource(time.Now().UnixNano()))
 	titler = cases.Title(language.AmericanEnglish)
@@ -2136,11 +2137,7 @@ func (m *TMarketMaker) Stop() {
 	}
 }
 
-func (m *TMarketMaker) GetMarketMakingConfig() (*mm.MarketMakingConfig, map[string][]*libxc.Market, error) {
-	return m.cfg, m.mkts, nil
-}
-
-func (m *TMarketMaker) UpdateCEXConfig(updatedCfg *mm.CEXConfig) (*mm.MarketMakingConfig, []*libxc.Market, error) {
+func (m *TMarketMaker) UpdateCEXConfig(updatedCfg *mm.CEXConfig) error {
 	switch updatedCfg.Name {
 	case libxc.Binance, libxc.BinanceUS:
 		m.mkts[updatedCfg.Name] = binanceMarkets
@@ -2149,26 +2146,26 @@ func (m *TMarketMaker) UpdateCEXConfig(updatedCfg *mm.CEXConfig) (*mm.MarketMaki
 		cfg := m.cfg.CexConfigs[i]
 		if cfg.Name == updatedCfg.Name {
 			m.cfg.CexConfigs[i] = updatedCfg
-			return m.cfg, m.mkts[updatedCfg.Name], nil
+			return nil
 		}
 	}
 	m.cfg.CexConfigs = append(m.cfg.CexConfigs, updatedCfg)
-	return m.cfg, m.mkts[updatedCfg.Name], nil
+	return nil
 }
 
-func (m *TMarketMaker) UpdateBotConfig(updatedCfg *mm.BotConfig) (*mm.MarketMakingConfig, error) {
+func (m *TMarketMaker) UpdateBotConfig(updatedCfg *mm.BotConfig) error {
 	for i := 0; i < len(m.cfg.BotConfigs); i++ {
 		botCfg := m.cfg.BotConfigs[i]
 		if botCfg.Host == updatedCfg.Host && botCfg.BaseID == updatedCfg.BaseID && botCfg.QuoteID == updatedCfg.QuoteID {
 			m.cfg.BotConfigs[i] = updatedCfg
-			return m.cfg, nil
+			return nil
 		}
 	}
 	m.cfg.BotConfigs = append(m.cfg.BotConfigs, updatedCfg)
-	return m.cfg, nil
+	return nil
 }
 
-func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) (*mm.MarketMakingConfig, error) {
+func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) error {
 	for i := 0; i < len(m.cfg.BotConfigs); i++ {
 		botCfg := m.cfg.BotConfigs[i]
 		if botCfg.Host == host && botCfg.BaseID == baseID && botCfg.QuoteID == quoteID {
@@ -2176,7 +2173,7 @@ func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) (*mm
 			m.cfg.BotConfigs = m.cfg.BotConfigs[:len(m.cfg.BotConfigs)-1]
 		}
 	}
-	return m.cfg, nil
+	return nil
 }
 
 func (m *TMarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error) {
@@ -2191,19 +2188,28 @@ func (m *TMarketMaker) Running() bool {
 	return m.running.Load()
 }
 
-func (m *TMarketMaker) RunningBots() []mm.MarketWithHost {
-	if !m.running.Load() {
-		return []mm.MarketWithHost{}
+func (m *TMarketMaker) Status() *mm.Status {
+	running := m.running.Load()
+	status := &mm.Status{
+		Running: running,
+		CEXes:   make(map[string]*mm.CEXStatus, len(m.cfg.CexConfigs)),
+		Bots:    make([]*mm.BotStatus, 0, len(m.cfg.BotConfigs)),
 	}
-	ms := make([]mm.MarketWithHost, 0)
 	for _, botCfg := range m.cfg.BotConfigs {
-		ms = append(ms, mm.MarketWithHost{
-			Host:    botCfg.Host,
-			BaseID:  botCfg.BaseID,
-			QuoteID: botCfg.QuoteID,
+		status.Bots = append(status.Bots, &mm.BotStatus{
+			Config:  botCfg,
+			Running: running,
 		})
 	}
-	return ms
+	for _, cexCfg := range m.cfg.CexConfigs {
+		status.CEXes[cexCfg.Name] = &mm.CEXStatus{
+			Config:    cexCfg,
+			Connected: rand.Float32() < 0.5,
+			// ConnectionError: "test connection error",
+			Markets: binanceMarkets,
+		}
+	}
+	return status
 }
 
 func TestServer(t *testing.T) {
@@ -2230,7 +2236,6 @@ func TestServer(t *testing.T) {
 	delayBalance = true
 	doubleCreateAsyncErr = false
 	randomizeOrdersCount = true
-	initErrors = false
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -2258,7 +2263,7 @@ func TestServer(t *testing.T) {
 			mkts: make(map[string][]*libxc.Market),
 		},
 		Experimental: true,
-		Addr:         "127.0.0.1:54321",
+		Addr:         "127.0.0.3:54321",
 		Logger:       logger,
 		NoEmbed:      true, // use files on disk, and reload on each page load
 		HttpProf:     true,

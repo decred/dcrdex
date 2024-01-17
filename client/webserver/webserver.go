@@ -180,13 +180,11 @@ type mmCore interface {
 	MarketReport(base, quote uint32) (*mm.MarketReport, error)
 	Start(pw []byte, alternateConfigPath *string) (err error)
 	Stop()
-	GetMarketMakingConfig() (*mm.MarketMakingConfig, map[string][]*libxc.Market, error)
-	UpdateCEXConfig(updatedCfg *mm.CEXConfig) (*mm.MarketMakingConfig, []*libxc.Market, error)
+	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error
 	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
-	UpdateBotConfig(updatedCfg *mm.BotConfig) (*mm.MarketMakingConfig, error)
-	RemoveBotConfig(host string, baseID, quoteID uint32) (*mm.MarketMakingConfig, error)
-	Running() bool
-	RunningBots() []mm.MarketWithHost
+	UpdateBotConfig(updatedCfg *mm.BotConfig) error
+	RemoveBotConfig(host string, baseID, quoteID uint32) error
+	Status() *mm.Status
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -566,10 +564,9 @@ func New(cfg *Config) (*WebServer, error) {
 			if cfg.Experimental {
 				apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)
 				apiAuth.Post("/stopmarketmaking", s.apiStopMarketMaking)
-				apiAuth.Get("/marketmakingconfig", s.apiMarketMakingConfig)
 				apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
 				apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
-				apiAuth.Post("/removemarketmakingconfig", s.apiRemoveMarketMakingConfig)
+				apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)
 				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
 				apiAuth.Post("/marketreport", s.apiMarketReport)
 				apiAuth.Post("/cexbalance", s.apiCEXBalance)

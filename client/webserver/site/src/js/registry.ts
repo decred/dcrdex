@@ -750,20 +750,28 @@ export interface CEXConfig {
   apiSecret: string
 }
 
-export interface MarketMakingConfig {
-  botConfigs?: BotConfig[]
-  cexConfigs?: CEXConfig[]
-}
-
 export interface MarketWithHost {
   host: string
   base: number
   quote: number
 }
 
+export interface MMCEXStatus {
+  config: CEXConfig
+  connected: boolean
+  connectErr: string
+  markets?: CEXMarket[]
+}
+
+export interface MMBotStatus {
+  config: BotConfig
+  running: boolean
+}
+
 export interface MarketMakingStatus {
   running: boolean
-  runningBots: MarketWithHost[]
+  cexes: Record<string, MMCEXStatus>
+  bots: MMBotStatus[]
 }
 
 export interface CEXMarket {

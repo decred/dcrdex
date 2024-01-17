@@ -124,16 +124,6 @@ button.feature {
   }
 }
 
-button.selected {
-  background-color: #38cfb0;
-  border: none;
-}
-
-  &:hover {
-    background-color: #a3dbff;
-  }
-}
-
 .dynamicopts {
   display: flex;
   align-items: stretch;

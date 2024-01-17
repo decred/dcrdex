@@ -284,6 +284,10 @@ func (c *tCore) FiatConversionRates() map[uint32]float64 {
 	return nil
 }
 
+func (c *tCore) Network() dex.Network {
+	return dex.Simnet
+}
+
 type tCoin struct {
 	txID []byte
 }
@@ -5393,10 +5397,6 @@ func TestSegregatedCEXWithdraw(t *testing.T) {
 		if err := mm.Start([]byte{}, nil); err != nil {
 			t.Fatalf("%s: Start error: %v", tt.name, err)
 		}
-
-		// segregatedCore := mm.wrappedCoreForBot(mktID)
-
-		// if testMultiTrade {
 
 		wg := sync.WaitGroup{}
 		wg.Add(1)

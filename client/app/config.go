@@ -33,7 +33,6 @@ const (
 	defaultWebPort     = "5758"
 	defaultLogLevel    = "debug"
 	configFilename     = "dexc.conf"
-	mmConfigFilename   = "mm.conf"
 )
 
 var (

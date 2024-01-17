@@ -944,11 +944,6 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 	return bnc.requestInto(req, &struct{}{})
 }
 
-// func (bnc *binance) Markets() ([]*Market, error) {
-// 	binanceMarkets := bnc.markets.Load().(map[string]*binanceMarket)
-// 	markets := make([]*Market, 0, 16)
-// }
-
 func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
 	bnc.balanceMtx.RLock()
 	defer bnc.balanceMtx.RUnlock()
@@ -972,6 +967,12 @@ func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
 
 func (bnc *binance) Markets(ctx context.Context) (_ []*Market, err error) {
 	bnMarkets := bnc.markets.Load().(map[string]*binanceMarket)
+	if len(bnMarkets) == 0 {
+		bnMarkets, err = bnc.getMarkets(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error getting markets: %v", err)
+		}
+	}
 	markets := make([]*Market, 0, len(bnMarkets))
 	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
 	for _, mkt := range bnMarkets {
@@ -1096,11 +1097,7 @@ func (bnc *binance) handleOutboundAccountPosition(update *binanceStreamUpdate) {
 
 	supportedTokens := bnc.tokenIDs.Load().(map[string][]uint32)
 
-	bnc.balanceMtx.Lock()
-	for _, bal := range update.Balances {
-		symbol := strings.ToLower(bal.Asset)
-		// DRAFT TODO: Need to convert with binanceToDexSymbol or something, but
-		// with consideration for how binance combines assets.
+	processSymbol := func(symbol string, bal *binanceWSBalance) {
 		if parentIDs := dex.TokenChains[symbol]; parentIDs != nil {
 			supported := supportedTokens[symbol]
 			for _, tokenID := range supported {
@@ -1109,15 +1106,24 @@ func (bnc *binance) handleOutboundAccountPosition(update *binanceStreamUpdate) {
 					locked:    bal.Locked,
 				}
 			}
-			continue
+			return
 		}
 		assetID, found := dex.BipSymbolID(symbol)
 		if !found {
-			continue
+			return
 		}
 		bnc.balances[assetID] = &bncBalance{
 			available: bal.Free,
 			locked:    bal.Locked,
+		}
+	}
+
+	bnc.balanceMtx.Lock()
+	for _, bal := range update.Balances {
+		symbol := strings.ToLower(bal.Asset)
+		processSymbol(symbol, bal)
+		if symbol == "eth" {
+			processSymbol("weth", bal)
 		}
 	}
 	bnc.balanceMtx.Unlock()

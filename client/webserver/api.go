@@ -1945,24 +1945,6 @@ func (s *WebServer) apiStopMarketMaking(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, mkts, err := s.mm.GetMarketMakingConfig()
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("error getting market making config: %v", err))
-		return
-	}
-
-	writeJSON(w, &struct {
-		OK   bool                       `json:"ok"`
-		Cfg  *mm.MarketMakingConfig     `json:"cfg"`
-		Mkts map[string][]*libxc.Market `json:"mkts"`
-	}{
-		OK:   true,
-		Cfg:  cfg,
-		Mkts: mkts,
-	}, s.indent)
-}
-
 func (s *WebServer) apiUpdateCEXConfig(w http.ResponseWriter, r *http.Request) {
 	var updatedCfg *mm.CEXConfig
 	if !readPost(w, r, &updatedCfg) {
@@ -1970,21 +1952,12 @@ func (s *WebServer) apiUpdateCEXConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, mkts, err := s.mm.UpdateCEXConfig(updatedCfg)
-	if err != nil {
+	if err := s.mm.UpdateCEXConfig(updatedCfg); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK   bool                   `json:"ok"`
-		Cfg  *mm.MarketMakingConfig `json:"cfg"`
-		Mkts []*libxc.Market        `json:"mkts"`
-	}{
-		OK:   true,
-		Cfg:  cfg,
-		Mkts: mkts,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
@@ -1994,22 +1967,15 @@ func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.mm.UpdateBotConfig(updatedCfg)
-	if err != nil {
+	if err := s.mm.UpdateBotConfig(updatedCfg); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiRemoveMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiRemoveBotConfig(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		Host       string `json:"host"`
 		BaseAsset  uint32 `json:"baseAsset"`
@@ -2020,32 +1986,21 @@ func (s *WebServer) apiRemoveMarketMakingConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	cfg, err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset)
-	if err != nil {
+	if err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request) {
-	running := s.mm.Running()
-	runningBots := s.mm.RunningBots()
 	writeJSON(w, &struct {
-		OK          bool                `json:"ok"`
-		Running     bool                `json:"running"`
-		RunningBots []mm.MarketWithHost `json:"runningBots"`
+		OK     bool       `json:"ok"`
+		Status *mm.Status `json:"status"`
 	}{
-		OK:          true,
-		Running:     running,
-		RunningBots: runningBots,
+		OK:     true,
+		Status: s.mm.Status(),
 	}, s.indent)
 }
 

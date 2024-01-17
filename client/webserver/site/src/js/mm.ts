@@ -3,13 +3,11 @@ import {
   PageElement,
   BotConfig,
   CEXConfig,
-  MarketWithHost,
+  MMBotStatus,
   BotStartStopNote,
   MMStartStopNote,
   BalanceNote,
-  MarketMakingConfig,
   MarketMakingStatus,
-  CEXMarket,
   ExchangeBalance
 } from './registry'
 import { getJSON, postJSON } from './http'
@@ -78,9 +76,8 @@ export default class MarketMakerPage extends BasePage {
 
     const status = await MM.status()
     const running = status.running
-    const marketMakingCfg = await MM.config()
 
-    const botConfigs = this.botConfigs = marketMakingCfg.botConfigs || []
+    const botConfigs = this.botConfigs = status.bots.map((s: MMBotStatus) => s.config)
     app().registerNoteFeeder({
       botstartstop: (note: BotStartStopNote) => { this.handleBotStartStopNote(note) },
       mmstartstop: (note: MMStartStopNote) => { this.handleMMStartStopNote(note) },
@@ -96,7 +93,7 @@ export default class MarketMakerPage extends BasePage {
     page.onIndicator.classList.remove(running ? 'off' : 'on')
     Doc.setVis(running, page.stopBotsBtn, page.onMsg)
     Doc.setVis(!running, page.startBotsBtn, page.offMsg)
-    this.setupBotTable(botConfigs, running, status.runningBots)
+    this.setupBotTable(botConfigs, running, status.bots)
   }
 
   handleBotStartStopNote (note: BotStartStopNote) {
@@ -188,7 +185,7 @@ export default class MarketMakerPage extends BasePage {
   /*
    * setupBotTable populates the table of market maker bots.
    */
-  setupBotTable (botConfigs: BotConfig[], running: boolean, runningBots: MarketWithHost[]) {
+  setupBotTable (botConfigs: BotConfig[], running: boolean, bots: MMBotStatus[]) {
     const page = this.page
     Doc.empty(page.botTableBody)
 
@@ -199,10 +196,10 @@ export default class MarketMakerPage extends BasePage {
       const row = page.botTableRowTmpl.cloneNode(true) as PageElement
       row.id = marketStr(botCfg.host, botCfg.baseID, botCfg.quoteID)
       const rowTmpl = Doc.parseTemplate(row)
-      const thisBotRunning = runningBots.some((bot) => {
-        return bot.host === botCfg.host &&
-          bot.base === botCfg.baseID &&
-          bot.quote === botCfg.quoteID
+      const thisBotRunning = bots.some(({ config: cfg }) => {
+        return cfg.host === botCfg.host &&
+          cfg.baseID === botCfg.baseID &&
+          cfg.quoteID === botCfg.quoteID
       })
       this.setTableRowRunning(rowTmpl, running, thisBotRunning)
 
@@ -236,10 +233,9 @@ export default class MarketMakerPage extends BasePage {
       }
 
       Doc.bind(rowTmpl.removeTd, 'click', async () => {
-        await MM.removeMarketMakingConfig(botCfg)
+        await MM.removeBotConfig(botCfg)
         row.remove()
-        const mmCfg = await MM.config()
-        const noBots = !mmCfg || !mmCfg.botConfigs || mmCfg.botConfigs.length === 0
+        const noBots = (await MM.status()).bots.length === 0
         Doc.setVis(noBots, page.noBots)
         Doc.setVis(!noBots, page.botTable, page.onOff)
       })
@@ -281,77 +277,30 @@ export default class MarketMakerPage extends BasePage {
 }
 
 /*
- * MarketMakerBot is the front end representaion of the server's mm.MarketMaker.
- * MarketMakerBot is a singleton assigned to MM below.
+ * MarketMakerBot is the front end representation of the server's
+ * mm.MarketMaker. MarketMakerBot is a singleton assigned to MM below.
  */
 class MarketMakerBot {
-  cfg: MarketMakingConfig
-  st: MarketMakingStatus | undefined
-  mkts: Record<string, CEXMarket[]>
-
-  constructor () {
-    this.mkts = {}
-  }
-
-  handleStartStopNote (n: MMStartStopNote) {
-    if (!this.st) return
-    this.st.running = n.running
-  }
-
   /*
-   * config returns the curret MarketMakingConfig. config will fetch the
-   * MarketMakingConfig once. Future updates occur in updateCEXConfig and
-   * updateBotConfig. after a page handler calls config during intitialization,
-   * the the config can be accessed directly thr MM.cfg to avoid the async
-   * function.
-   */
-  async config () : Promise<MarketMakingConfig> {
-    if (this.cfg) return this.cfg
-    const res = await getJSON('/api/marketmakingconfig')
-    if (!app().checkResponse(res)) {
-      throw new Error('failed to fetch market making config')
-    }
-    this.cfg = res.cfg
-    this.mkts = res.mkts
-    return this.cfg
-  }
-
-  /*
-   * updateBotConfig appends or updates the specified BotConfig, then updates
-   * the cached MarketMakingConfig,
+   * updateBotConfig appends or updates the specified BotConfig.
    */
   async updateBotConfig (cfg: BotConfig) : Promise<void> {
-    const res = await postJSON('/api/updatebotconfig', cfg)
-    if (!app().checkResponse(res)) {
-      throw res.msg || Error(res)
-    }
-    this.cfg = res.cfg
+    return postJSON('/api/updatebotconfig', cfg)
   }
 
   /*
-   * updateCEXConfig appends or updates the specified CEXConfig, then updates
-   * the cached MarketMakingConfig,
+   * updateCEXConfig appends or updates the specified CEXConfig.
    */
   async updateCEXConfig (cfg: CEXConfig) : Promise<void> {
-    const res = await postJSON('/api/updatecexconfig', cfg)
-    if (res.err) {
-      throw new Error(res.err)
-    }
-
-    this.cfg = res.cfg
-    this.mkts[cfg.name] = res.mkts || []
+    return postJSON('/api/updatecexconfig', cfg)
   }
 
-  async removeMarketMakingConfig (cfg: BotConfig) : Promise<void> {
-    const res = await postJSON('/api/removemarketmakingconfig', {
+  async removeBotConfig (cfg: BotConfig) : Promise<void> {
+    return postJSON('/api/removebotconfig', {
       host: cfg.host,
       baseAsset: cfg.baseID,
       quoteAsset: cfg.quoteID
     })
-    if (res.err) {
-      throw new Error(res.err)
-    }
-    this.cfg = res.cfg
   }
 
   async report (baseID: number, quoteID: number) {
@@ -359,15 +308,10 @@ class MarketMakerBot {
   }
 
   async setEnabled (host: string, baseID: number, quoteID: number, enabled: boolean) : Promise<void> {
-    const botCfgs = this.cfg.botConfigs || []
-    const mktCfg = botCfgs.find((cfg : BotConfig) => {
-      return cfg.host === host && cfg.baseID === baseID && cfg.quoteID === quoteID
-    })
-    if (!mktCfg) {
-      throw new Error('market making config not found')
-    }
-    mktCfg.disabled = !enabled
-    await this.updateBotConfig(mktCfg)
+    const bots = (await this.status()).bots
+    const botStatus = bots.filter((s: MMBotStatus) => s.config.host === host && s.config.baseID === baseID && s.config.quoteID === quoteID)[0]
+    botStatus.config.disabled = !enabled
+    await this.updateBotConfig(botStatus.config)
   }
 
   async start (appPW: string) {
@@ -379,28 +323,11 @@ class MarketMakerBot {
   }
 
   async status () : Promise<MarketMakingStatus> {
-    if (this.st !== undefined) return this.st
-    const res = await getJSON('/api/marketmakingstatus')
-    if (!app().checkResponse(res)) {
-      throw new Error(`failed to fetch market making status: ${res.msg ?? String(res)}`)
-    }
-    const status = {} as MarketMakingStatus
-    status.running = !!res.running
-    status.runningBots = res.runningBots
-    this.st = status
-    return status
-  }
-
-  cexConfigured (cexName: string) {
-    return (this.cfg.cexConfigs || []).some((cfg: CEXConfig) => cfg.name === cexName)
+    return (await getJSON('/api/marketmakingstatus')).status
   }
 
   async cexBalance (cexName: string, assetID: number): Promise<ExchangeBalance> {
-    const res = await postJSON('/api/cexbalance', { cexName, assetID })
-    if (!app().checkResponse(res)) {
-      throw new Error(`failed to fetch cexBalance status: ${res.msg ?? String(res)}`)
-    }
-    return res.cexBalance
+    return (await postJSON('/api/cexbalance', { cexName, assetID })).cexBalance
   }
 }
 

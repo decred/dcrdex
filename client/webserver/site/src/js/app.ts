@@ -7,7 +7,7 @@ import SettingsPage from './settings'
 import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
-import MarketMakerPage, { MM } from './mm'
+import MarketMakerPage from './mm'
 import MarketMakerSettingsPage from './mmsettings'
 import DexSettingsPage from './dexsettings'
 import InitPage from './init'
@@ -42,7 +42,6 @@ import {
   APIResponse,
   RateNote,
   InFlightOrder,
-  MMStartStopNote,
   WalletTransaction,
   TxHistoryResult,
   WalletNote,
@@ -671,10 +670,6 @@ export default class Application {
       }
       case 'fiatrateupdate': {
         this.fiatRatesMap = (note as RateNote).fiatRates
-        break
-      }
-      case 'mmstartstop': {
-        MM.handleStartStopNote(note as MMStartStopNote)
         break
       }
       case 'walletnote': {

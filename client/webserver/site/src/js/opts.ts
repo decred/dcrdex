@@ -305,15 +305,15 @@ export class XYRangeHandler {
       const w = slider.clientWidth - handle.offsetWidth
       const startLeft = normalizeX(this.scrollingX) * w
       const left = (ee: MouseEvent) => Math.max(Math.min(startLeft + (ee.pageX - startX), w), 0)
-      const trackMouse = (ee: MouseEvent) => {
+      const trackMouse = (ee: MouseEvent, emit?: boolean) => {
         ee.preventDefault()
         this.r = left(ee) / w
         this.scrollingX = this.r * rangeX + cfg.start.x
         this.y = this.r * rangeY + cfg.start.y
-        this.accept(this.scrollingX, true)
+        this.accept(this.scrollingX, !emit)
       }
       const mouseUp = (ee: MouseEvent) => {
-        trackMouse(ee)
+        trackMouse(ee, true)
         Doc.unbind(document, 'mousemove', trackMouse)
         Doc.unbind(document, 'mouseup', mouseUp)
         this.changed()
