@@ -66,6 +66,7 @@ import (
 	"runtime/debug"
 	"runtime/pprof"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -122,6 +123,10 @@ func init() {
 	// "main" thread.
 	runtime.LockOSThread()
 
+	// Set the user controller. This object coordinates interactions the app’s
+	// native code and the webpage’s scripts and other content. See:
+	// https://developer.apple.com/documentation/webkit/wkwebviewconfiguration/1395668-usercontentcontroller?language=objc.
+	webviewConfig.Set("userContentController:", objc.Get("WKUserContentController").Alloc().Init())
 	// Set "developerExtrasEnabled" to true to allow viewing the developer
 	// console.
 	webviewConfig.Preferences().SetValueForKey(mdCore.True, mdCore.String("developerExtrasEnabled"))
@@ -336,6 +341,9 @@ func mainCore() error {
 			sendDesktopNotification("DEX client still running", "DEX client is still resolving active DEX orders")
 		}
 	})
+
+	// Bind JS callback function handler.
+	bindJSFunctionHandler()
 
 	app := cocoa.NSApp()
 	// Set the "ActivationPolicy" to "NSApplicationActivationPolicyRegular" in
@@ -662,12 +670,103 @@ func windowWidthAndHeight() (width, height int) {
 	return limitedWindowWidthAndHeight(int(math.Round(frame.Size.Width)), int(math.Round(frame.Size.Height)))
 }
 
+// bindJSFunctionHandler exports a function handler callable in the frontend.
+// The exported function will appear under the given name as a global JavaScript
+// function window.webkit.messageHandlers.dexcHandler.postMessage([fnName,
+// args...]).
+// Expected arguments is an array of:
+// 1. jsFunctionName as first argument
+// 2. jsFunction arguments
+func bindJSFunctionHandler() {
+	const fnName = "dexcHandler"
+
+	// Create and register a new objc class for the function handler.
+	fnClass := objc.NewClass(fnName, "NSObject")
+	objc.RegisterClass(fnClass)
+
+	// JS function handler must implement the WKScriptMessageHandler protocol.
+	// See:
+	// https://developer.apple.com/documentation/webkit/wkscriptmessagehandler?language=objc
+	fnClass.AddMethod("userContentController:didReceiveScriptMessage:", handleJSFunctionsCallback)
+
+	// The name of this function in the browser window is
+	// window.webkit.messageHandlers.<name>.postMessage(<messageBody>), where
+	// <name> corresponds to the value of this parameter. See:
+	// https://developer.apple.com/documentation/webkit/wkusercontentcontroller/1537172-addscriptmessagehandler?language=objc
+	webviewConfig.Get("userContentController").Send("addScriptMessageHandler:name:", objc.Get(fnName).Alloc().Init(), mdCore.String(fnName))
+}
+
+// handleJSFunctionsCallback handles function calls from a javascript
+// environment.
+func handleJSFunctionsCallback(f_ objc.Object /* functionHandler */, ct objc.Object /* WKUserContentController */, msg objc.Object, wv objc.Object /* webview */) {
+	// Arguments must be provided as an array(NSSingleObjectArrayI or NSArrayI).
+	msgBody := msg.Get("body")
+	msgClass := msgBody.Class().String()
+	if !strings.Contains(msgClass, "Array") {
+		log.Errorf("Received unexpected argument type %s (content: %s)", msgClass, msgBody.String())
+		return // do nothing
+	}
+
+	// Parse all argument to an array of strings. Individual function callers
+	// can handle expected arguments parsed as string. For example, an object
+	// parsed as a string will be returned as an objc stringified object { name
+	// = "myName"; }.
+	args := parseJSCallbackArgsString(msgBody)
+	if len(args) == 0 {
+		log.Errorf("Received unexpected argument type %s (content: %s)", msgClass, msgBody.String())
+		return // do nothing
+	}
+
+	// minArg is the minimum number of args expected which is the function name.
+	const minArg = 1
+	fnName := args[0]
+	nArgs := len(args)
+	switch {
+	case fnName == "openURL" && nArgs > minArg:
+		openURL(args[1])
+	case fnName == "sendOSNotification" && nArgs > minArg:
+		sendDesktopNotificationJSCallback(args[1:])
+	default:
+		log.Errorf("Received unexpected JS function type %s (message content: %s)", fnName, msgBody.String())
+	}
+}
+
+// sendDesktopNotificationJSCallback sends a desktop notification as request
+// from a webpage script. Expected message content: [title, body].
+func sendDesktopNotificationJSCallback(msg []string) {
+	const expectedArgs = 2
+	const defaultTitle = "DCRDEX Notification"
+	if len(msg) == 1 {
+		sendDesktopNotification(defaultTitle, msg[0])
+	} else if len(msg) >= expectedArgs {
+		sendDesktopNotification(msg[0], msg[1])
+	}
+}
+
 // openURL opens the provided path using macOS's native APIs. This will ensure
 // the "path" is opened with the appropriate app (e.g a valid HTTP URL will be
 // opened in the user's default browser)
 func openURL(path string) {
 	// See: https://developer.apple.com/documentation/appkit/nsworkspace?language=objc
 	cocoa.NSWorkspace_sharedWorkspace().Send("openURL:", mdCore.NSURL_Init(path))
+}
+
+func parseJSCallbackArgsString(msg objc.Object) []string {
+	args := mdCore.NSArray_fromRef(msg)
+	count := args.Count()
+	if count == 0 {
+		return nil
+	}
+
+	var argsAsStr []string
+	for i := 0; i < int(count); i++ {
+		ob := args.ObjectAtIndex(uint64(i))
+		if ob.Class().String() == "NSNull" /* this is the string representation of the null type in objc. */ {
+			continue // ignore
+		}
+		argsAsStr = append(argsAsStr, ob.String())
+	}
+	return argsAsStr
 }
 
 // createDexcDesktopStateFile writes the id of the current process to the file

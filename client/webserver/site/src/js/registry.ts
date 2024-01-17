@@ -9,7 +9,9 @@ declare global {
     testFormatRateFullPrecision: () => void
     user: () => User
     isWebview?: () => boolean
+    webkit: any | undefined
     openUrl: (url: string) => void
+    sendOSNotification (title: string, body?: string): void
   }
 }
 
