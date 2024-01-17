@@ -862,7 +862,7 @@ func openSPVWallet(dataDir string, chainParams *chaincfg.Params, log dex.Logger)
 		blockCache: blockCache{
 			blocks: make(map[chainhash.Hash]*cachedBlock),
 		},
-		tipChan: make(chan *block, 1),
+		tipChan: make(chan *block, 16),
 	}, nil
 }
 
