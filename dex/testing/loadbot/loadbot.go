@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"os"
@@ -68,6 +69,8 @@ const (
 	// TODO: Consider returning a separate msgjson error from server for
 	// this case.
 	missedCancelErrStr = "target order not known:"
+
+	tradingTier = 100 // ~ 50 DCR
 )
 
 var (
@@ -106,6 +109,7 @@ var (
 	orderCounter, matchCounter, baseID, quoteID, regAsset uint32
 	epochDuration                                         uint64
 	lotSize                                               uint64
+	parcelSize                                            uint64
 	rateStep                                              uint64
 	rateShift, rateIncrease                               int64
 	conversionFactors                                     = make(map[string]uint64)
@@ -450,6 +454,7 @@ func run() error {
 		rateStep = mkt.RateStep
 		epochDuration = mkt.Duration
 		marketBuyBuffer = mkt.MBBuffer
+		parcelSize = uint64(mkt.ParcelSize)
 		break
 	}
 
@@ -702,12 +707,13 @@ func run() error {
 // marketsDotJSON models the server's markets.json configuration file.
 type marketsDotJSON struct {
 	Markets []*struct {
-		Base     string  `json:"base"`
-		Quote    string  `json:"quote"`
-		LotSize  uint64  `json:"lotSize"`
-		RateStep uint64  `json:"rateStep"`
-		Duration uint64  `json:"epochDuration"`
-		MBBuffer float64 `json:"marketBuyBuffer"`
+		Base       string  `json:"base"`
+		Quote      string  `json:"quote"`
+		LotSize    uint64  `json:"lotSize"`
+		ParcelSize uint32  `json:"parcelSize"`
+		RateStep   uint64  `json:"rateStep"`
+		Duration   uint64  `json:"epochDuration"`
+		MBBuffer   float64 `json:"marketBuyBuffer"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.Asset `json:"assets"`
 }
@@ -729,24 +735,49 @@ func loadNodeConfig(symbol, node string) map[string]string {
 	return cfg
 }
 
+var xcRates = map[string]float64{
+	"bch":           244,
+	"btc":           42_000,
+	"dash":          29,
+	"dcr":           17,
+	"dgb":           0.0083,
+	"doge":          0.081,
+	"eth":           2_500,
+	"dextt.eth":     1,
+	"usdc.eth":      1,
+	"firo":          1.75,
+	"ltc":           69.1,
+	"polygon":       0.85,
+	"dextt.polygon": 1,
+	"usdc.polygon":  1,
+	"weth.polygon":  2_500,
+	"wbtc.polygon":  42_000,
+	"zcl":           0.086,
+	"zec":           22.92,
+}
+
+func getXCRate(symbol string) float64 {
+	if r, found := xcRates[symbol]; found {
+		return r
+	}
+	return 1
+}
+
 func symmetricWalletConfig(numCoins int, midGap uint64) (
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
 
-	minBaseQty = uint64(maxOrderLots) * uint64(numCoins) * lotSize
-	minQuoteQty = calc.BaseToQuote(midGap, minBaseQty)
-	// Ensure enough for registration fees.
-	minBaseQty += 50e8
-	minQuoteQty += 50e8
-	// eth fee estimation calls for more reserves.
-	// TODO: polygon and tokens
-	if quoteSymbol == eth {
-		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
-		minQuoteQty += add
-	}
-	if baseSymbol == eth {
-		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
-		minBaseQty += add
-	}
+	bui, _ := asset.UnitInfo(baseID)
+	qui, _ := asset.UnitInfo(quoteID)
+	minBaseQty = lotSize * parcelSize * tradingTier * 5 / 4
+	minBaseConventional := float64(minBaseQty) / float64(bui.Conventional.ConversionFactor)
+	xcB, xcQ := getXCRate(baseSymbol), getXCRate(quoteSymbol)
+	minQuoteConventional := minBaseConventional * xcQ / xcB
+	minQuoteQty = uint64(math.Round(minQuoteConventional * float64(qui.Conventional.ConversionFactor)))
+
+	// Add registration fees.
+	minBaseQty += tradingTier * baseAssetCfg.BondAmt
+	minQuoteQty += tradingTier * quoteAssetCfg.BondAmt
+
 	maxBaseQty, maxQuoteQty = minBaseQty*2, minQuoteQty*2
 	return
 }

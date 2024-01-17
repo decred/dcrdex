@@ -69,7 +69,6 @@ func runTrader(t Trader, name string) {
 		return
 	}
 
-	const tradingTier = 100 // ~ 50 DCR
 	maintain := true
 	_, err = m.PostBond(&core.PostBondForm{
 		Addr:         hostAddr,
