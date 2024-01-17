@@ -26,9 +26,11 @@ import (
 )
 
 const (
-	version            = 0
-	BipID              = 136    // Zcoin XZC
-	minNetworkVersion  = 141201 // bitcoin 0.14 base
+	version = 0
+	// Zcoin XZC
+	BipID = 136
+	// Spark. Net proto 90031. Wallet version 130000
+	minNetworkVersion  = 141301
 	walletTypeRPC      = "firodRPC"
 	walletTypeElectrum = "electrumRPC"
 	estimateFeeConfs   = 2 // 2 blocks should be enough
