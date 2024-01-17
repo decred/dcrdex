@@ -57,6 +57,10 @@ var originLocale = map[Topic]*translation{
 		subject:  "Wallet connection warning",
 		template: "Incomplete registration detected for %s, but failed to connect to the Decred wallet",
 	},
+	TopicBondWalletNotConnected: {
+		subject:  "Bond wallet not connected",
+		template: "Wallet for selected bond asset %s is not connected",
+	},
 	// [host, error]
 	TopicWalletUnlockError: {
 		subject:  "Wallet unlock error",

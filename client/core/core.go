@@ -5231,13 +5231,12 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 				unbip(bondAssetID), targetTier, dc.acct.host, maxBondedAmt)
 			wallet, exists := c.wallet(bondAssetID)
 			if !exists || !wallet.connected() { // connectWallets already run, just fail
-				details := fmt.Sprintf("bond asset wallet %s not configured or connected", unbip(bondAssetID))
+				subject, details := c.formatDetails(TopicBondWalletNotConnected, unbip(bondAssetID))
+				var w *WalletState
 				if exists {
-					subject, _ := c.formatDetails(TopicWalletConnectionWarning)
-					c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject, details, db.ErrorLevel, wallet.state()))
-				} else {
-					c.log.Debug(details)
+					w = wallet.state()
 				}
+				c.notify(newWalletConfigNote(TopicBondWalletNotConnected, subject, details, db.ErrorLevel, w))
 			} else if !wallet.unlocked() {
 				err = wallet.Unlock(crypter)
 				if err != nil {

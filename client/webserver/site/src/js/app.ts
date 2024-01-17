@@ -657,7 +657,8 @@ export default class Application {
       case 'walletconfig': {
         // assets can be null if failed to connect to dex server.
         if (!assets) return
-        const wallet = (note as WalletConfigNote).wallet
+        const wallet = (note as WalletConfigNote)?.wallet
+        if (!wallet) return
         const asset = assets[wallet.assetID]
         asset.wallet = wallet
         walletMap[wallet.assetID] = wallet
