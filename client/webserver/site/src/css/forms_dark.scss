@@ -65,4 +65,8 @@ body.dark {
   .deposit-address {
     border-color: $dark_border_color;
   }
+
+  .selectable.selected {
+    border: 2px solid green;
+  }
 }

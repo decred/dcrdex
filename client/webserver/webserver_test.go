@@ -285,22 +285,6 @@ func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
 	return c.notes, c.notesErr
 }
-
-func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
-	return nil, nil
-}
-func (c *TCore) NewShieldedAddress(assetID uint32) (string, error) {
-	return "", nil
-}
-func (c *TCore) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	return nil, nil
-}
-func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	return nil, nil
-}
-func (c *TCore) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
-	return nil, nil
-}
 func (c *TCore) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConfirm func()) (string, error) {
 	return "", nil
 }

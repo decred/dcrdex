@@ -142,17 +142,22 @@
     <img id="depositTokenParentLogo" class="ms-1 micro-icon">
     <span id="depositTokenParentName"></span>
   </div>
+  <div class="mb-3 flex-center">
+    <img class="mb-3 mx-auto" id="qrcode" />
+  </div>
+  <div class="mono deposit-address select-all">
+    <span id="depositAddress" class="text-break"></span>
+    <span id="copyAddressBtn" class="copy-btn ico-copy mt-2 ml-2 fs18"></span>
+    <span id="copyAlert" class="d-hide">[[[copied]]]</span>
+  </div>
+  <div id="unifiedReceivers" class="d-flex align-items-stretch mb-3 mt-1">
+    <div id="unifiedReceiverTmpl" class="p-1 me-2 hoverbg lh1 fs15 pointer brdr selectable"></div>
+  </div>
+  <div class="my-3">
+    <button id="newDepAddrBttn" type="button" class=" px-2 justify-content-center fs15 bg2 selected">[[[New Deposit Address]]]</button>
+  </div>
+  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="depositErr"></div>
 </div>
-<img class="mb-3" id="qrcode" />
-<div class="mono deposit-address select-all">
-  <span id="depositAddress"></span>
-  <span id="copyAddressBtn" class="copy-btn ico-copy mt-2 ml-2 fs18"></span>
-  <span id="copyAlert" class="d-hide">[[[copied]]]</span>
-</div>
-<div class="my-3">
-  <button id="newDepAddrBttn" type="button" class=" px-2 justify-content-center fs15 bg2 selected">[[[New Deposit Address]]]</button>
-</div>
-<div class="fs15 pt-3 text-center d-hide errcolor text-break" id="depositErr"></div>
 {{end}}
 
 {{define "certPicker"}}

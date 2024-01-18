@@ -18,6 +18,7 @@ const (
 	methodZValidateAddress      = "z_validateaddress"
 	methodZGetOperationResult   = "z_getoperationresult"
 	methodZGetNotesCount        = "z_getnotescount"
+	methodZListUnspent          = "z_listunspent"
 )
 
 type zListAccountsResult struct {
@@ -59,7 +60,7 @@ func zGetAddressForAccount(c rpcCaller, acctNumber uint32, addrTypes []string) (
 type unifiedReceivers struct {
 	Transparent string `json:"p2pkh"`
 	Orchard     string `json:"orchard"`
-	Sapling     string `json:"sapling"`
+	Sapling     string `json:"sapling,omitempty"`
 }
 
 // z_listunifiedreceivers unified_address
@@ -147,6 +148,7 @@ const (
 	AllowRevealedAmounts         privacyPolicy = "AllowRevealedAmounts"
 	AllowRevealedSenders         privacyPolicy = "AllowRevealedSenders"
 	AllowLinkingAccountAddresses privacyPolicy = "AllowLinkingAccountAddresses"
+	NoPrivacy                    privacyPolicy = "NoPrivacy"
 )
 
 // z_sendmany "fromaddress" [{"address":... ,"amount":...},...] ( minconf ) ( fee ) ( privacyPolicy )
@@ -196,4 +198,26 @@ func zGetOperationResult(c rpcCaller, operationID string) (s *operationStatus, e
 		return nil, ErrEmptyOpResults
 	}
 	return res[0], nil
+}
+
+type zListUnspentResult struct {
+	TxID          string  `json:"txid"`
+	Pool          string  `json:"pool"`
+	JSIndex       uint32  `json:"jsindex"`
+	JSOutindex    uint32  `json:"jsoutindex"`
+	Outindex      uint32  `json:"outindex"`
+	Confirmations uint64  `json:"confirmations"`
+	Spendable     bool    `json:"spendable"`
+	Account       uint32  `json:"account"`
+	Address       string  `json:"address"`
+	Amount        float64 `json:"amount"`
+	Memo          string  `json:"memo"`
+	MemoStr       string  `json:"memoStr"`
+	Change        bool    `json:"change"`
+}
+
+// z_listunspent ( minconf maxconf includeWatchonly ["zaddr",...] asOfHeight )
+func zListUnspent(c rpcCaller) ([]*zListUnspentResult, error) {
+	var res []*zListUnspentResult
+	return res, c.CallRPC(methodZListUnspent, []any{minOrchardConfs}, &res)
 }

@@ -40,13 +40,7 @@ const (
 )
 
 var (
-	tCtx context.Context
-	tZEC = &dex.Asset{
-		ID:       0,
-		Symbol:   "zec",
-		Version:  version,
-		SwapConf: 1,
-	}
+	tCtx     context.Context
 	tLogger  = dex.StdOutLogger("T", dex.LevelError)
 	tTxID    = "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
 	tTxHash  *chainhash.Hash
@@ -58,11 +52,6 @@ var (
 type msgBlockWithHeight struct {
 	msgBlock *dexzec.Block
 	height   int64
-}
-
-type hashEntry struct {
-	hash       chainhash.Hash
-	lastAccess time.Time
 }
 
 const testBlocksPerBlockTimeOffset = 4
@@ -139,9 +128,7 @@ type tRPCClient struct {
 
 	blockchainMtx       sync.RWMutex
 	verboseBlocks       map[string]*msgBlockWithHeight
-	dbBlockForTx        map[chainhash.Hash]*hashEntry
 	mainchain           map[int64]*chainhash.Hash
-	getBlockchainInfo   *btc.GetBlockchainInfoResult
 	getBestBlockHashErr error
 }
 
@@ -153,7 +140,6 @@ func newRPCClient() *tRPCClient {
 		verboseBlocks: map[string]*msgBlockWithHeight{
 			genesisHash.String(): {msgBlock: &dexzec.Block{}},
 		},
-		dbBlockForTx: make(map[chainhash.Hash]*hashEntry),
 		mainchain: map[int64]*chainhash.Hash{
 			0: genesisHash,
 		},
@@ -1121,55 +1107,30 @@ func TestSend(t *testing.T) {
 	defer shutdown()
 	defer cl.checkEmptiness(t)
 
-	const txBlockHeight = 3
-	const vout = 0
 	const sendAmt uint64 = 1e8
-	btcAddr, _ := dexzec.DecodeAddress(tAddr, w.addrParams, w.btcParams)
-	pkScript, _ := txscript.PayToAddrScript(btcAddr)
-	tx := makeRawTx([]dex.Bytes{encode.RandomBytes(5), pkScript}, []*wire.TxIn{dummyInput()})
-	txHash := tx.TxHash()
-	// _, _ = cl.addRawTx(txBlockHeight, tx)
-	// coinID := btc.ToCoinID(&txHash, vout)
-	// Make spendable (confs > 0)
-	// cl.addRawTx(txBlockHeight+1, dummyTx())
+	w.lastAddress.Store(tUnifiedAddr)
 
-	fees := dexzec.TxFeesZIP317(dexbtc.RedeemP2PKHInputSize+1, 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, 0)
-	// Do it with on input:
-	unspent := &btc.ListUnspentResult{
-		TxID:         txHash.String(),
-		Vout:         vout,
-		ScriptPubKey: tP2PKH,
-		Spendable:    true,
-		Solvable:     true,
-		SafePtr:      boolPtr(true),
-		Amount:       float64(sendAmt+fees) / 1e8,
-	}
+	successOp := []*operationStatus{{
+		Status: "success",
+		Result: &opResult{TxID: tTxID},
+	}}
 
-	unspents := []*btc.ListUnspentResult{unspent}
-	// coinIDs := []dex.Bytes{coinID0, coinID1}
-	// locked := []*btc.RPCOutpoint{}
-
-	queueSuccess := func() {
-		cl.queueResponse("listunspent", unspents)
-		cl.queueResponse(methodZGetAddressForAccount, &zGetAddressForAccountResult{Address: tAddr}) // split output
-		cl.queueResponse(methodZListUnifiedReceivers, &unifiedReceivers{Transparent: tAddr})
-		cl.queueResponse("sendrawtransaction", func(args []json.RawMessage) (json.RawMessage, error) {
-			tx, _ := signRawJSONTx(args[0])
-			return json.Marshal(tx.TxHash().String())
-		})
-	}
-
-	queueSuccess()
-	if _, err := w.Send(tAddr, sendAmt, 0); err != nil {
+	// Unified address.
+	cl.queueResponse(methodZValidateAddress, &zValidateAddressResult{IsValid: true, AddressType: unifiedAddressType})
+	cl.queueResponse(methodZListUnifiedReceivers, &unifiedReceivers{Transparent: tAddr})
+	cl.queueResponse(methodZSendMany, "operationid123")
+	cl.queueResponse(methodZGetOperationResult, successOp)
+	if _, err := w.Send(tUnifiedAddr, sendAmt, 0); err != nil {
 		t.Fatalf("Send error: %v", err)
 	}
 
-	unspent.Amount -= 1e-8
-	cl.queueResponse("listunspent", unspents)
-	if _, err := w.Send(tAddr, sendAmt, 0); !errorHasCode(err, errFunding) {
-		t.Fatalf("Wrong error for insufficient funds: %v", err)
+	// Transparent address.
+	cl.queueResponse(methodZValidateAddress, &zValidateAddressResult{IsValid: true, AddressType: transparentAddressType})
+	cl.queueResponse(methodZSendMany, "operationid123")
+	cl.queueResponse(methodZGetOperationResult, successOp)
+	if _, err := w.Send(tAddr, sendAmt, 0); err != nil {
+		t.Fatalf("Send error: %v", err)
 	}
-	unspent.Amount += 1e-8
 }
 
 func TestSwapConfirmations(t *testing.T) {
