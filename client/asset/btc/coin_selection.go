@@ -13,7 +13,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
-// sendEnough generates a function that can be used as the enough argument to
+// SendEnough generates a function that can be used as the enough argument to
 // the fund method when creating transactions to send funds. If fees are to be
 // subtracted from the inputs, set subtract so that the required amount excludes
 // the transaction fee. If change from the transaction should be considered
@@ -21,7 +21,7 @@ import (
 // enough func will return a non-zero excess value. Otherwise, the enough func
 // will always return 0, leaving only unselected UTXOs to cover any required
 // reserves.
-func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, reportChange bool) EnoughFunc {
+func SendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, reportChange bool) EnoughFunc {
 	return func(_, inputSize, sum uint64) (bool, uint64) {
 		txFee := (baseTxSize + inputSize) * feeRate
 		req := amt
