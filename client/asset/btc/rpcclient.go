@@ -1141,7 +1141,7 @@ func FindRedemptionsInMempool(
 			logAbandon(fmt.Sprintf("getrawtransaction error for tx hash %v: %v", txHash, err))
 			return
 		}
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, segwit, reqs, tx, chainParams, hashTx)
+		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, segwit, reqs, tx, chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -1173,7 +1173,7 @@ func SearchBlockForRedemptions(
 	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
 
 	for _, msgTx := range msgBlock.Transactions {
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, segwit, reqs, msgTx, chainParams, hashTx)
+		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, segwit, reqs, msgTx, chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}

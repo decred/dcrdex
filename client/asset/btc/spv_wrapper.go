@@ -708,12 +708,12 @@ func (w *spvWallet) EstimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract b
 		return 0, fmt.Errorf("error listing unspent outputs: %w", err)
 	}
 
-	utxos, _, _, err := convertUnspent(0, unspents, w.chainParams)
+	utxos, _, _, err := ConvertUnspent(0, unspents, w.chainParams)
 	if err != nil {
 		return 0, fmt.Errorf("error converting unspent outputs: %w", err)
 	}
 
-	enough := sendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
+	enough := SendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
 	sum, _, inputsSize, _, _, _, _, err := TryFund(utxos, enough)
 	if err != nil {
 		return 0, err
@@ -1200,7 +1200,7 @@ func (w *spvWallet) SearchBlockForRedemptions(ctx context.Context, reqs map[OutP
 	}
 
 	for _, msgTx := range block.MsgBlock().Transactions {
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, true, reqs, msgTx, w.chainParams, hashTx)
+		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, true, reqs, msgTx, w.chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
