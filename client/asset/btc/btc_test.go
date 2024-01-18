@@ -719,7 +719,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 		panic(err.Error())
 	}
 	// Initialize the best block.
-	bestHash, err := wallet.node.getBestBlockHash()
+	bestHash, err := wallet.node.GetBestBlockHash()
 	if err != nil {
 		shutdown()
 		os.RemoveAll(dataDir)
@@ -5745,7 +5745,7 @@ type tReconfigurer struct {
 	err     error
 }
 
-func (r *tReconfigurer) reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+func (r *tReconfigurer) Reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	return r.restart, r.err
 }
 
