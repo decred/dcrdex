@@ -456,6 +456,9 @@ div[data-handler=init] {
   }
 }
 
+.selectable.selected {
+  border: 2px solid green;
+}
 
 .dynamicopts {
   display: flex;

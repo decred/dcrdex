@@ -73,10 +73,6 @@ var originLocale = map[Topic]*translation{
 		subject:  intl.Translation{T: "Send successful"},
 		template: intl.Translation{Version: 1, T: "Sending %s %s to %s has completed successfully. Tx ID = %s", Notes: "args: [value string, ticker, destination address, coin ID]"},
 	},
-	TopicShieldedSendSuccess: {
-		subject:  intl.Translation{T: "Shielded send successful"},
-		template: intl.Translation{T: "Sent %s %s to %s: %s", Notes: "args: [value string, ticker, destination address, coin ID]"},
-	},
 	TopicAsyncOrderFailure: {
 		subject:  intl.Translation{T: "In-Flight Order Error"},
 		template: intl.Translation{T: "In-Flight order with ID %v failed: %v", Notes: "args: order ID, error]"},
