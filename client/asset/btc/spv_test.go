@@ -39,14 +39,7 @@ type tBtcWallet struct {
 	*testData
 }
 
-func (c *tBtcWallet) AccountInfo() XCWalletAccount {
-	return XCWalletAccount{
-		AccountName:   defaultAcctName,
-		AccountNumber: defaultAcctNum,
-	}
-}
-
-func (c *tBtcWallet) GetTransactions(startBlock, endBlock int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error) {
+func (c *tBtcWallet) ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error) {
 	return nil, nil
 }
 

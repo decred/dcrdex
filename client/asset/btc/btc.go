@@ -1421,6 +1421,8 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	spvw := &spvWallet{
 		chainParams: cfg.ChainParams,
 		cfg:         walletCfg,
+		acctNum:     defaultAcctNum,
+		acctName:    defaultAcctName,
 		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name),
 		log:         cfg.Logger.SubLogger("SPV"),
 		tipChan:     make(chan *BlockVector, 8),
@@ -1430,9 +1432,6 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	spvw.BlockFiltersScanner = NewBlockFiltersScanner(spvw, spvw.log)
 	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 	btc.setNode(spvw)
-
-	// Set account number for easy reference.
-	spvw.acctNum = spvw.wallet.AccountInfo().AccountNumber
 
 	w := &ExchangeWalletSPV{
 		intermediaryWallet: &intermediaryWallet{
