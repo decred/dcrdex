@@ -47,12 +47,11 @@ import (
 )
 
 const (
-	DefaultM        uint64 = 784931 // From ltcutil. Used for gcs filters.
-	logDirName             = "logs"
-	neutrinoDBName         = "neutrino.db"
-	defaultAcctNum         = 0
-	defaultAcctName        = "default"
-	dbTimeout              = 20 * time.Second
+	DefaultM       uint64 = 784931 // From ltcutil. Used for gcs filters.
+	logDirName            = "logs"
+	neutrinoDBName        = "neutrino.db"
+	defaultAcctNum        = 0
+	dbTimeout             = 20 * time.Second
 )
 
 var (
@@ -158,15 +157,6 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, walletDir str
 
 	errCloser.Success()
 	return nil
-}
-
-// AccountInfo returns the account information of the wallet for use by the
-// exchange wallet.
-func (w *ltcSPVWallet) AccountInfo() btc.XCWalletAccount {
-	return btc.XCWalletAccount{
-		AccountName:   defaultAcctName,
-		AccountNumber: defaultAcctNum,
-	}
 }
 
 // walletParams works around a bug in ltcwallet that doesn't recognize
