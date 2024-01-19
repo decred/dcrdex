@@ -1714,6 +1714,7 @@ export default class WalletsPage extends BasePage {
     }
     tmpl.type.textContent = txType
     tmpl.id.textContent = trimStringWithEllipsis(tx.id, 12)
+    tmpl.id.setAttribute('title', tx.id)
     if (noAmtTxTypes.includes(tx.type)) {
       tmpl.amount.textContent = '-'
     } else {
@@ -1813,11 +1814,13 @@ export default class WalletsPage extends BasePage {
 
     // Tx ID
     page.txDetailsID.textContent = trimStringWithEllipsis(tx.id, 20)
+    page.txDetailsID.setAttribute('title', tx.id)
 
     // Recipient
     if (tx.recipient) {
       Doc.show(page.txDetailsRecipientSection)
       page.txDetailsRecipient.textContent = trimStringWithEllipsis(tx.recipient, 20)
+      page.txDetailsRecipient.setAttribute('title', tx.recipient)
     } else {
       Doc.hide(page.txDetailsRecipientSection)
     }
@@ -1826,12 +1829,14 @@ export default class WalletsPage extends BasePage {
     if (tx.bondInfo) {
       Doc.show(page.txDetailsBondSection)
       page.txDetailsBondID.textContent = trimStringWithEllipsis(tx.bondInfo.bondID, 20)
+      page.txDetailsBondID.setAttribute('title', tx.bondInfo.bondID)
       const date = new Date(tx.bondInfo.lockTime * 1000)
       const dateStr = date.toLocaleDateString()
       const timeStr = date.toLocaleTimeString()
       page.txDetailsBondLocktime.textContent = `${dateStr} ${timeStr}`
       Doc.setVis(tx.bondInfo.accountID !== '', page.txDetailsBondAccountIDSection)
       page.txDetailsBondAccountID.textContent = trimStringWithEllipsis(tx.bondInfo.accountID, 20)
+      page.txDetailsBondAccountID.setAttribute('title', tx.bondInfo.accountID)
     } else {
       Doc.hide(page.txDetailsBondSection)
     }
