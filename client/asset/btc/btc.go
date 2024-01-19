@@ -653,14 +653,12 @@ type CustomWallet interface {
 type CustomWalletConstructor func(settings map[string]string, params *chaincfg.Params) (CustomWallet, error)
 
 // customWalletConstructors are functions for setting up CustomWallet
-// implementations that may be used by the ExchangeWalletCustom instead of the
-// default spv implementation.
+// implementations used by ExchangeWalletCustom.
 var customWalletConstructors = map[string]CustomWalletConstructor{}
 
 // RegisterCustomWallet registers a function that should be used in creating a
-// CustomWallet implementation that ExchangeWalletCustom will use in place of
-// the default spv wallet implementation. External consumers can use this
-// function to provide alternative CustomWallet implementations, and must do so
+// CustomWallet implementation for ExchangeWalletCustom. External consumers can
+// use this function to provide CustomWallet implementation, and must do so
 // before attempting to create an ExchangeWalletCustom instance of this type.
 // It'll panic if callers try to register a wallet twice.
 func RegisterCustomWallet(constructor CustomWalletConstructor, def *asset.WalletDefinition) {
@@ -1383,8 +1381,8 @@ func OpenCustomWallet(cfg *BTCCloneCFG, walletConstructor CustomWalletConstructo
 		return nil, err
 	}
 
-	// SPV wallets without a FeeEstimator will default to any enabled external
-	// fee estimator.
+	// Custom wallets without without a FeeEstimator will default to any enabled
+	// external fee estimator.
 	if cfg.FeeEstimator == nil {
 		cfg.FeeEstimator = noLocalFeeRate
 	}
