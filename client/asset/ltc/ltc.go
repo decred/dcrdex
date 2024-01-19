@@ -171,16 +171,14 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 }
 
 // customWalletConstructors are functions for setting up btc.CustomWallet
-// implementations that may be used by the btc.ExchangeWalletCustom instead of
-// the default spv implementation.
+// implementations used by btc.ExchangeWalletCustom.
 var customWalletConstructors = map[string]btc.CustomWalletConstructor{}
 
 // RegisterCustomWallet registers a function that should be used in creating a
-// btc.CustomWallet implementation that btc.ExchangeWalletCustom will use in
-// place of the default spv wallet implementation. External consumers can use
-// this function to provide alternative btc.CustomWallet implementations, and
-// must do so before attempting to create an btc.ExchangeWalletCustom instance
-// of this type. It'll panic if callers try to register a wallet twice.
+// btc.CustomWallet implementation for btc.ExchangeWalletCustom. External
+// consumers can use this function to provide btc.CustomWallet implementation,
+// and must do so before attempting to create an btc.ExchangeWalletCustom
+// instance of this type. It'll panic if callers try to register a wallet twice.
 func RegisterCustomWallet(constructor btc.CustomWalletConstructor, def *asset.WalletDefinition) {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
