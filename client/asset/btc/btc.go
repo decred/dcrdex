@@ -1381,7 +1381,7 @@ func OpenCustomWallet(cfg *BTCCloneCFG, walletConstructor CustomWalletConstructo
 		return nil, err
 	}
 
-	// Custom wallets without without a FeeEstimator will default to any enabled
+	// Custom wallets without a FeeEstimator will default to any enabled
 	// external fee estimator.
 	if cfg.FeeEstimator == nil {
 		cfg.FeeEstimator = noLocalFeeRate
