@@ -33,6 +33,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/wallet"
 )
 
 var (
@@ -184,7 +185,7 @@ type testData struct {
 	// spv
 	fetchInputInfoTx  *wire.MsgTx
 	getCFilterScripts map[chainhash.Hash][][]byte
-	checkpoints       map[OutPoint]*scanCheckpoint
+	checkpoints       map[OutPoint]*ScanCheckpoint
 	confs             uint32
 	confsSpent        bool
 	confsErr          error
@@ -211,10 +212,14 @@ func newTestData() *testData {
 		fetchInputInfoTx:  dummyTx(),
 		getCFilterScripts: make(map[chainhash.Hash][][]byte),
 		confsErr:          WalletTransactionNotFound,
-		checkpoints:       make(map[OutPoint]*scanCheckpoint),
+		checkpoints:       make(map[OutPoint]*ScanCheckpoint),
 		tipChanged:        make(chan asset.WalletNotification, 1),
 		getTransactionMap: make(map[string]*GetTransactionResult),
 	}
+}
+
+func (c *testData) GetTransactions(startHeight, endHeight int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (c *testData) getBlock(blockHash chainhash.Hash) *msgBlockWithHeight {
