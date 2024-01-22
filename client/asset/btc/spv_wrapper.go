@@ -28,7 +28,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -307,6 +306,10 @@ func (w *spvWallet) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 	return &txHash, nil
 }
 
+func (w *spvWallet) GetBlockHeaderVerbose(blockHash *chainhash.Hash) (*wire.BlockHeader, error) {
+	return w.cl.GetBlockHeader(blockHash)
+}
+
 func (w *spvWallet) GetBlock(blockHash chainhash.Hash) (*wire.MsgBlock, error) {
 	block, err := w.cl.GetBlock(blockHash)
 	if err != nil {
@@ -318,12 +321,6 @@ func (w *spvWallet) GetBlock(blockHash chainhash.Hash) (*wire.MsgBlock, error) {
 
 func (w *spvWallet) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return w.cl.GetBlockHash(blockHeight)
-}
-
-// getBlockHeight gets the mainchain height for the specified block. Returns
-// error for orphaned blocks.
-func (w *spvWallet) getBlockHeight(h *chainhash.Hash) (int32, error) {
-	return w.cl.GetBlockHeight(h)
 }
 
 func (w *spvWallet) GetBlockHeight(h *chainhash.Hash) (int32, error) {
@@ -797,7 +794,7 @@ func (w *spvWallet) SwapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	// status, but it will allow us to short circuit a longer scan if we already
 	// know the output is spent.
 	if blockHash == nil {
-		blockHash, _ = w.mainchainBlockForStoredTx(txHash)
+		blockHash, _ = w.MainchainBlockForStoredTx(txHash)
 	}
 
 	// Our last option is neutrino.
@@ -810,7 +807,7 @@ func (w *spvWallet) SwapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 		return 0, false, err
 	}
 
-	if utxo.spend == nil && utxo.blockHash == nil {
+	if utxo.Spend == nil && utxo.BlockHash == nil {
 		if assumedMempool {
 			w.log.Tracef("swapConfirmations - scanFilters did not find %v:%d, assuming in mempool.",
 				txHash, vout)
@@ -822,15 +819,15 @@ func (w *spvWallet) SwapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 			txHash, vout, startTime, pkScript)
 	}
 
-	if utxo.blockHash != nil {
+	if utxo.BlockHash != nil {
 		bestHeight, err := w.GetChainHeight()
 		if err != nil {
 			return 0, false, fmt.Errorf("getBestBlockHeight error: %v", err)
 		}
-		confs = uint32(bestHeight) - utxo.blockHeight + 1
+		confs = uint32(bestHeight) - utxo.BlockHeight + 1
 	}
 
-	if utxo.spend != nil {
+	if utxo.Spend != nil {
 		// In the off-chance that a spend was found but not the output itself,
 		// confs will be incorrect here.
 		// In situations where we're looking for the counter-party's swap, we
@@ -882,7 +879,7 @@ func (w *spvWallet) GetBlockHeader(blockHash *chainhash.Hash) (header *BlockHead
 	}
 
 	confirmations := int64(-1)
-	mainchain = w.blockIsMainchain(blockHash, blockHeight)
+	mainchain = w.BlockIsMainchain(blockHash, blockHeight)
 	if mainchain {
 		confirmations = int64(confirms(blockHeight, tip.Height))
 	}
@@ -1087,87 +1084,6 @@ func (w *spvWallet) Fingerprint() (string, error) {
 	return hex.EncodeToString(btcutil.Hash160(pk.SerializeCompressed())), nil
 }
 
-// mainchainBlockForStoredTx gets the block hash and height for the transaction
-// IFF an entry has been stored in the txBlocks index.
-func (w *spvWallet) mainchainBlockForStoredTx(txHash *chainhash.Hash) (*chainhash.Hash, int32) {
-	// Check that the block is still mainchain.
-	blockHash, blockHeight, err := w.blockForStoredTx(txHash)
-	if err != nil {
-		w.log.Errorf("Error retrieving mainchain block height for hash %s", blockHash)
-		return nil, 0
-	}
-	if blockHash == nil {
-		return nil, 0
-	}
-	if !w.blockIsMainchain(blockHash, blockHeight) {
-		return nil, 0
-	}
-	return blockHash, blockHeight
-}
-
-// findBlockForTime locates a good start block so that a search beginning at the
-// returned block has a very low likelihood of missing any blocks that have time
-// > matchTime. This is done by performing a binary search (sort.Search) to find
-// a block with a block time maxFutureBlockTime before matchTime. To ensure
-// we also accommodate the median-block time rule and aren't missing anything
-// due to out of sequence block times we use an unsophisticated algorithm of
-// choosing the first block in an 11 block window with no times >= matchTime.
-func (w *spvWallet) findBlockForTime(matchTime time.Time) (int32, error) {
-	offsetTime := matchTime.Add(-maxFutureBlockTime)
-
-	bestHeight, err := w.GetChainHeight()
-	if err != nil {
-		return 0, fmt.Errorf("getChainHeight error: %v", err)
-	}
-
-	getBlockTimeForHeight := func(height int32) (time.Time, error) {
-		hash, err := w.cl.GetBlockHash(int64(height))
-		if err != nil {
-			return time.Time{}, err
-		}
-		header, err := w.cl.GetBlockHeader(hash)
-		if err != nil {
-			return time.Time{}, err
-		}
-		return header.Timestamp, nil
-	}
-
-	iHeight := sort.Search(int(bestHeight), func(h int) bool {
-		var iTime time.Time
-		iTime, err = getBlockTimeForHeight(int32(h))
-		if err != nil {
-			return true
-		}
-		return iTime.After(offsetTime)
-	})
-	if err != nil {
-		return 0, fmt.Errorf("binary search error finding best block for time %q: %w", matchTime, err)
-	}
-
-	// We're actually breaking an assumption of sort.Search here because block
-	// times aren't always monotonically increasing. This won't matter though as
-	// long as there are not > medianTimeBlocks blocks with inverted time order.
-	var count int
-	var iTime time.Time
-	for iHeight > 0 {
-		iTime, err = getBlockTimeForHeight(int32(iHeight))
-		if err != nil {
-			return 0, fmt.Errorf("getBlockTimeForHeight error: %w", err)
-		}
-		if iTime.Before(offsetTime) {
-			count++
-			if count == medianTimeBlocks {
-				return int32(iHeight), nil
-			}
-		} else {
-			count = 0
-		}
-		iHeight--
-	}
-	return 0, nil
-
-}
-
 // GetTxOut finds an unspent transaction output and its number of confirmations.
 // To match the behavior of the RPC method, even if an output is found, if it's
 // known to be spent, no *wire.TxOut and no error will be returned.
@@ -1217,7 +1133,7 @@ func (w *spvWallet) GetTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 		return nil, 0, err
 	}
 
-	if utxo == nil || utxo.spend != nil || utxo.blockHash == nil {
+	if utxo == nil || utxo.Spend != nil || utxo.BlockHash == nil {
 		return nil, 0, nil
 	}
 
@@ -1226,14 +1142,14 @@ func (w *spvWallet) GetTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 		return nil, 0, fmt.Errorf("BestBlock error: %v", err)
 	}
 
-	confs := uint32(confirms(int32(utxo.blockHeight), tip.Height))
+	confs := uint32(confirms(int32(utxo.BlockHeight), tip.Height))
 
-	return utxo.txOut, confs, nil
+	return utxo.TxOut, confs, nil
 }
 
 // matchPkScript pulls the filter for the block and attempts to match the
 // supplied scripts.
-func (w *spvWallet) matchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
+func (w *spvWallet) MatchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
 	filter, err := w.cl.GetCFilter(*blockHash, wire.GCSFilterRegular)
 	if err != nil {
 		return false, fmt.Errorf("GetCFilter error: %w", err)
@@ -1266,7 +1182,7 @@ func (w *spvWallet) SearchBlockForRedemptions(ctx context.Context, reqs map[OutP
 
 	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
 
-	matchFound, err := w.matchPkScript(&blockHash, scripts)
+	matchFound, err := w.MatchPkScript(&blockHash, scripts)
 	if err != nil {
 		w.log.Errorf("matchPkScript error: %v", err)
 		return
