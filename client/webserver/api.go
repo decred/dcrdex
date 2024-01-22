@@ -979,7 +979,8 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiNotes(w http.ResponseWriter, r *http.Request) {
 	notes, err := s.core.Notifications(100)
 	if err != nil {
-		log.Errorf("failed to get notifications: %v", err)
+		s.writeAPIError(w, fmt.Errorf("failed to get notifications: %w", err))
+		return
 	}
 
 	writeJSON(w, &struct {
