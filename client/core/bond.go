@@ -268,7 +268,7 @@ func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
 	}
 	// Keep a list of tuples of [weakTime, bondStrength]. Later, we'll check
 	// these against expired bonds, to see how many tiers we can expect to have
-	// refunded funds avilable for.
+	// refunded funds available for.
 	activeTiers := make([][2]uint64, 0)
 	dexCfg := dc.config()
 	bondExpiry := dexCfg.BondExpiry
@@ -1688,4 +1688,16 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, not
 	}
 
 	return nil
+}
+
+// ExpiredBonds returns a map of dex server host to a slice of expired bonds for
+// each dex server.
+func (c *Core) ExpiredBonds() map[string][]*db.Bond {
+	expiredBonds := make(map[string][]*db.Bond)
+	for _, dc := range c.dexConnections() {
+		bondCfg := c.dexBondConfig(dc, time.Now().Unix())
+		bondState := c.bondStateOfDEX(dc, bondCfg)
+		expiredBonds[dc.acct.host] = append(expiredBonds[dc.acct.host], bondState.expiredBonds...)
+	}
+	return expiredBonds
 }
