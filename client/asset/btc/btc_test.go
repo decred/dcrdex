@@ -672,11 +672,12 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 				cl:          neutrinoClient,
 				tipChan:     make(chan *BlockVector, 1),
 				acctNum:     0,
-				txBlocks:    data.dbBlockForTx,
-				checkpoints: data.checkpoints,
 				log:         cfg.Logger.SubLogger("SPV"),
 				decodeAddr:  btcutil.DecodeAddress,
 			}
+			spvw.BlockFiltersScanner = NewBlockFiltersScanner(spvw, spvw.log)
+			spvw.txBlocks = data.dbBlockForTx
+			spvw.checkpoints = data.checkpoints
 			w.setNode(spvw)
 			wallet = &intermediaryWallet{
 				baseWallet:     w,

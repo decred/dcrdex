@@ -577,7 +577,7 @@ func TestFindBlockForTime(t *testing.T) {
 	matchTime := generateTestBlockTime(searchBlock)
 	const offsetBlock = searchBlock - testBlocksPerBlockTimeOffset
 	const startBlock = offsetBlock - medianTimeBlocks
-	_, height, err := spv.findBlockForTime(matchTime)
+	height, err := spv.findBlockForTime(matchTime)
 	if err != nil {
 		t.Fatalf("findBlockForTime error: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestFindBlockForTime(t *testing.T) {
 	// will continue down 11 more.
 	_, blk := node.getBlockAtHeight(startBlock)
 	blk.msgBlock.Header.Timestamp = generateTestBlockTime(offsetBlock)
-	_, height, err = spv.findBlockForTime(matchTime)
+	height, err = spv.findBlockForTime(matchTime)
 	if err != nil {
 		t.Fatalf("findBlockForTime error for shifted start block: %v", err)
 	}
@@ -598,16 +598,16 @@ func TestFindBlockForTime(t *testing.T) {
 	}
 
 	// And doing an early enough block just returns genesis
-	blockHash, height, err := spv.findBlockForTime(generateTestBlockTime(10))
+	height, err = spv.findBlockForTime(generateTestBlockTime(10))
 	if err != nil {
 		t.Fatalf("findBlockForTime error for genesis test: %v", err)
 	}
-	if *blockHash != *chaincfg.MainNetParams.GenesisHash {
+	if height != 0 {
 		t.Fatalf("not genesis: height = %d", height)
 	}
 
 	// A time way in the future still returns at least the last 11 blocks.
-	_, height, err = spv.findBlockForTime(generateTestBlockTime(100))
+	height, err = spv.findBlockForTime(generateTestBlockTime(100))
 	if err != nil {
 		t.Fatalf("findBlockForTime error for future test: %v", err)
 	}
