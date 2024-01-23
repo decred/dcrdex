@@ -502,6 +502,7 @@ var EnUS = map[string]string{
 	"Treasury Keys":               "Treasury Keys",
 	"bonds_pending_refund":        "Bonds Pending Refund",
 	"asset_name tx_history":       "<span data-asset-name=1></span> Transaction History",
+	"load_earlier_transactions":   "Load earlier transactions...",
 	"ID":                          "ID",
 	"no_tx_history":               "No transactions to show",
 	"tx_details":                  "Transaction Details",
