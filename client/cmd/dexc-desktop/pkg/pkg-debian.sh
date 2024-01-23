@@ -44,14 +44,12 @@ rm -fr "${BUILD_DIR}"
 mkdir -p -m 0755 "${CONTROL_DIR}"
 mkdir -p "${DOT_DESKTOP_BUILDDIR}"
 
-# check if site bundle is built, if not build it
-if [ ! -d ../../webserver/site/dist ]; then
-  CWD=$(pwd)
-  cd ../../webserver/site
-  npm clean-install
-  npm run build
-  cd $CWD
-fi
+# Build site bundle
+CWD=$(pwd)
+cd ../../webserver/site
+npm clean-install
+npm run build
+cd $CWD
 
 # Build dexc
 LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
@@ -92,7 +90,7 @@ chmod 775 "${POSTINST_PATH}"
 # https://specifications.freedesktop.org/desktop-entry-spec/latest/apa.html
 cat > "${DOT_DESKTOP_BUILDPATH}" <<EOF
 [Desktop Entry]
-Version=1.0
+Version=1.5
 Name=Decred DEX Client
 Comment=Multi-wallet backed by Decred DEX
 Exec=${BIN_FILENAME}

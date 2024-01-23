@@ -33,9 +33,9 @@ apps:
     extensions: [gnome]
     environment:
       GTK_USE_PORTAL: "1"
-      #TMPDIR: $XDG_RUNTIME_DIR
-      #XDG_CURRENT_DESKTOP: Unity
-      #DISABLE_WAYLAND: 1
+
+    # required snap interfaces:
+    # https://snapcraft.io/docs/interface-management
     plugs: 
       - home
       - opengl
@@ -65,6 +65,7 @@ parts:
       # Point icon to the correct location
       sed -i -e 's|Icon=.*$|Icon=usr/share/icons/hicolor/scalable/apps/dexc.svg|' $SNAPCRAFT_PART_INSTALL/usr/share/applications/dexc.desktop
   
+    # prune unused libs added by .deb dependencies from the .snap
     prime:
       - -usr/lib/x86_64-linux-gnu/libEGL_mesa*
       - -usr/lib/x86_64-linux-gnu/libGLX_mesa*
