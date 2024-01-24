@@ -589,14 +589,14 @@ func (dc *dexConnection) hasActiveOrders() bool {
 }
 
 // activeOrders returns a slice of active orders and inflight orders.
-func (dc *dexConnection) activeOrders() ([]order.Order, []*InFlightOrder) {
+func (dc *dexConnection) activeOrders() ([]*Order, []*InFlightOrder) {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 
-	var activeOrders []order.Order
+	var activeOrders []*Order
 	for _, trade := range dc.trades {
 		if trade.isActive() {
-			activeOrders = append(activeOrders, trade.Order)
+			activeOrders = append(activeOrders, trade.coreOrder())
 		}
 	}
 
@@ -4936,13 +4936,13 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 // ActiveOrders returns a map of host to all of their active orders from db if
 // core is not yet logged in or from loaded trades map if core is logged in.
 // Inflight orders are also returned for all dex servers if any.
-func (c *Core) ActiveOrders() (map[string][]order.Order, map[string][]*InFlightOrder, error) {
+func (c *Core) ActiveOrders() (map[string][]*Order, map[string][]*InFlightOrder, error) {
 	c.loginMtx.Lock()
 	loggedIn := c.loggedIn
 	c.loginMtx.Unlock()
 
 	dexInflightOrders := make(map[string][]*InFlightOrder)
-	dexActiveOrders := make(map[string][]order.Order)
+	dexActiveOrders := make(map[string][]*Order)
 	for _, dc := range c.dexConnections() {
 		if loggedIn {
 			orders, inflight := dc.activeOrders()
@@ -4958,7 +4958,7 @@ func (c *Core) ActiveOrders() (map[string][]order.Order, map[string][]*InFlightO
 		}
 
 		for _, ord := range ords {
-			dexActiveOrders[dc.acct.host] = append(dexActiveOrders[dc.acct.host], ord.Order)
+			dexActiveOrders[dc.acct.host] = append(dexActiveOrders[dc.acct.host], coreOrderFromTrade(ord.Order, ord.MetaData))
 		}
 	}
 
