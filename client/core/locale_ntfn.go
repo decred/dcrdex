@@ -381,6 +381,46 @@ var originLocale = map[Topic]*translation{
 		subject:  "Resume order failure",
 		template: "Failed to resume processing of trade: %v",
 	},
+	// [reqConfs, bondCoinStr, assetID, acct.host]
+	TopicBondConfirming: {
+		subject:  "Confirming bond",
+		template: "Waiting for %d confirmations to post bond %v (%s) to %s",
+	},
+	// [effectiveTier, targetTier]
+	TopicBondConfirmed: {
+		subject:  "Bond confirmed",
+		template: "New tier = %d (target = %d).",
+	},
+	// [effectiveTier, targetTier]
+	TopicBondExpired: {
+		subject:  "Bond expired",
+		template: "New tier = %d (target = %d).",
+	},
+	// [bondIDStr, acct.host, refundCoinStr, refundVal, Amount]
+	TopicBondRefunded: {
+		subject:  "Bond refunded",
+		template: "Bond %v for %v refunded in %v, reclaiming %v of %v after tx fees",
+	},
+	// [err, err]
+	TopicBondPostError: {
+		subject:  "Bond post error",
+		template: "postbond request error (will retry): %v (%T)",
+	},
+	// []
+	TopicBondPostErrorConfirm: {
+		subject:  "Bond post error",
+		template: "Error encountered while waiting for bond confirms for %s: %v",
+	},
+	// [err]
+	TopicDexAuthErrorBond: {
+		subject:  "Authentication error",
+		template: "Bond confirmed, but failed to authenticate connection: %v",
+	},
+	// [effectiveTier]
+	TopicAccountRegTier: {
+		subject:  "Account registered",
+		template: "New tier = %d",
+	},
 }
 
 var ptBR = map[Topic]*translation{

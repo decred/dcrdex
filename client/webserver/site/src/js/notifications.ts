@@ -1,6 +1,8 @@
-import { CoreNote } from './registry'
+import { CoreNote, PageElement } from './registry'
 import * as intl from './locales'
 import State from './state'
+import { setCoinHref } from './coinexplorers'
+import Doc from './doc'
 
 export const IGNORE = 0
 export const DATA = 1
@@ -139,7 +141,7 @@ export const Notifier = isDesktopWebview() || isDesktopWebkit() ? OSDesktopNotif
 
 export async function desktopNotify (note: CoreNote) {
   if (!desktopNtfnSettings.browserNtfnEnabled || !desktopNtfnSettings[note.type]) return
-  await Notifier.sendDesktopNotification(note.subject, note.details)
+  await Notifier.sendDesktopNotification(note.subject, plainNote(note.details))
 }
 
 export function fetchDesktopNtfnSettings (): DesktopNtfnSetting {
@@ -155,4 +157,42 @@ export function updateNtfnSetting (noteType: string, enabled: boolean) {
   fetchDesktopNtfnSettings()
   desktopNtfnSettings[noteType] = enabled
   State.storeLocal(desktopNtfnSettingsKey(), desktopNtfnSettings)
+}
+
+const coinExplorerTokenRe = /\{\{\{([^|]+)\|([^}]+)\}\}\}/g
+const orderTokenRe = /\{\{\{order\|([^}]+)\}\}\}/g
+
+/*
+ * insertRichNote replaces tx and order hash tokens in the input string with
+ * <a> elements that link to the asset's chain explorer and order details
+ * view, and inserts the resulting HTML into the supplied parent element.
+ */
+export function insertRichNote (parent: PageElement, inputString: string) {
+  const s = inputString.replace(orderTokenRe, (_match, orderToken) => {
+    const link = document.createElement('a')
+    link.setAttribute('href', '/order/' + orderToken)
+    link.setAttribute('class', 'subtlelink')
+    link.textContent = orderToken.slice(0, 8)
+    return link.outerHTML
+  }).replace(coinExplorerTokenRe, (_match, assetID, hash) => {
+    const link = document.createElement('a')
+    link.setAttribute('data-explorer-coin', hash)
+    link.setAttribute('target', '_blank')
+    link.textContent = hash.slice(0, 8)
+    setCoinHref(assetID, link)
+    return link.outerHTML
+  })
+  const els = Doc.noderize(s).body
+  while (els.firstChild) parent.appendChild(els.firstChild)
+}
+
+/*
+ * plainNote replaces tx and order hash tokens tokens in the input string with
+ * shortened hashes, for rendering in browser notifications and popups.
+ */
+export function plainNote (inputString: string): string {
+  const replacedString = inputString.replace(coinExplorerTokenRe, (_match, _assetID, hash) => {
+    return hash.slice(0, 8)
+  })
+  return replacedString
 }

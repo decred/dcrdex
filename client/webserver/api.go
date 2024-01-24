@@ -976,6 +976,22 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiNotes(w http.ResponseWriter, r *http.Request) {
+	notes, err := s.core.Notifications(100)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("failed to get notifications: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK    bool               `json:"ok"`
+		Notes []*db.Notification `json:"notes"`
+	}{
+		OK:    true,
+		Notes: notes,
+	}, s.indent)
+}
+
 // apiLogout handles the 'logout' API request.
 func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 	err := s.core.Logout()

@@ -64,7 +64,7 @@ import {
   OrderFilter
 } from './registry'
 import { setOptionTemplates } from './opts'
-import { CoinExplorers } from './order'
+import { CoinExplorers } from './coinexplorers'
 
 const bind = Doc.bind
 

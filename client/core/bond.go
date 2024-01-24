@@ -566,12 +566,9 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 			c.log.Warnf("Bond output not found, possibly already spent or never mined! "+
 				"Marking refunded. Backup refund transaction: %x", bond.RefundTx)
 		} else {
-			// TODO: subject, detail := c.formatDetails(...)
-			details := fmt.Sprintf("Bond %v for %v refunded in %v, reclaiming %v of %v after tx fees",
-				bondIDStr, acct.host, refundCoinStr, wallet.amtString(refundVal),
-				wallet.amtString(bond.Amount))
-			c.notify(newBondRefundNote(TopicBondRefunded, string(TopicBondRefunded),
-				details, db.Success))
+			subject, details := c.formatDetails(TopicBondRefunded, makeCoinIDToken(bond.CoinID.String(), bond.AssetID), acct.host,
+				makeCoinIDToken(refundCoinStr, bond.AssetID), wallet.amtString(refundVal), wallet.amtString(bond.Amount))
+			c.notify(newBondRefundNote(TopicBondRefunded, subject, details, db.Success))
 		}
 
 		err = c.db.BondRefunded(acct.host, assetID, bond.CoinID)
@@ -840,10 +837,8 @@ func (c *Core) postAndConfirmBond(dc *dexConnection, bond *asset.Bond) {
 	// the bond (in DB and dc.acct.{bond,pendingBonds}).
 	pbr, err := c.postBond(dc, bond) // can be long while server searches
 	if err != nil {
-		// TODO: subject, detail := c.formatDetails(...)
-		details := fmt.Sprintf("postbond request error (will retry): %v (%T)", err, err)
-		c.notify(newBondPostNote(TopicBondPostError, string(TopicBondPostError),
-			details, db.ErrorLevel, dc.acct.host))
+		subject, details := c.formatDetails(TopicBondPostError, err, err)
+		c.notify(newBondPostNote(TopicBondPostError, subject, details, db.ErrorLevel, dc.acct.host))
 		return
 	}
 
@@ -920,10 +915,9 @@ func (c *Core) monitorBondConfs(dc *dexConnection, bond *asset.Bond, reqConfs ui
 	}
 
 	c.wait(coinID, assetID, trigger, func(err error) {
-		if err != nil { // TODO: subject, detail := c.formatDetails(...)
-			details := fmt.Sprintf("Error encountered while waiting for bond confirms for %s: %v", host, err)
-			c.notify(newBondPostNote(TopicBondPostError, string(TopicBondPostError),
-				details, db.ErrorLevel, host))
+		if err != nil {
+			subject, details := c.formatDetails(TopicBondPostErrorConfirm, host, err)
+			c.notify(newBondPostNote(TopicBondPostError, subject, details, db.ErrorLevel, host))
 			return
 		}
 
@@ -1541,9 +1535,8 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	c.updateAssetBalance(bond.AssetID)
 
 	// Start waiting for reqConfs.
-	details := fmt.Sprintf("Waiting for %d confirmations to post bond %v (%s) to %s",
-		reqConfs, bondCoinStr, unbip(bond.AssetID), dc.acct.host) // TODO: subject, detail := c.formatDetails(...)
-	c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, string(TopicBondConfirming),
+	subject, details := c.formatDetails(TopicBondConfirming, reqConfs, makeCoinIDToken(bondCoinStr, bond.AssetID), unbip(bond.AssetID), dc.acct.host)
+	c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, subject,
 		details, db.Success, bond.AssetID, bondCoinStr, 0, dc.acct.host, c.exchangeAuth(dc)))
 	// Set up the coin waiter, which watches confirmations so the user knows
 	// when to expect their account to be marked paid by the server.
@@ -1604,9 +1597,8 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 			return fmt.Errorf("db.ConfirmBond failure: %w", err)
 		}
 		c.log.Infof("Bond %s (%s) confirmed.", bondIDStr, unbip(assetID))
-		details := fmt.Sprintf("New tier = %d (target = %d).", effectiveTier, targetTier) // TODO: format to subject,details
-
-		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, string(TopicBondConfirmed), details, db.Success, dc.acct.host, bondedTier, c.exchangeAuth(dc)))
+		subject, details := c.formatDetails(TopicBondConfirmed, effectiveTier, targetTier)
+		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, subject, details, db.Success, dc.acct.host, bondedTier, c.exchangeAuth(dc)))
 	} else if !foundConfirmed {
 		c.log.Errorf("bondConfirmed: Bond %s (%s) not found", bondIDStr, unbip(assetID))
 		// just try to authenticate...
@@ -1625,13 +1617,13 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 
 	err := c.authDEX(dc)
 	if err != nil {
-		details := fmt.Sprintf("Bond confirmed, but failed to authenticate connection: %v", err) // TODO: format to subject,details
-		c.notify(newDEXAuthNote(TopicDexAuthError, string(TopicDexAuthError), dc.acct.host, false, details, db.ErrorLevel))
+		subject, details := c.formatDetails(TopicDexAuthErrorBond, err)
+		c.notify(newDEXAuthNote(TopicDexAuthError, subject, dc.acct.host, false, details, db.ErrorLevel))
 		return err
 	}
 
-	details := fmt.Sprintf("New tier = %d", effectiveTier) // TODO: format to subject,details
-	c.notify(newBondPostNoteWithTier(TopicAccountRegistered, string(TopicAccountRegistered),
+	subject, details := c.formatDetails(TopicAccountRegTier, effectiveTier)
+	c.notify(newBondPostNoteWithTier(TopicAccountRegistered, subject,
 		details, db.Success, dc.acct.host, bondedTier, c.exchangeAuth(dc))) // possibly redundant with SubjectBondConfirmed
 
 	return nil
@@ -1682,8 +1674,8 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, not
 	}
 
 	if int64(targetTier) > effectiveTier {
-		details := fmt.Sprintf("New tier = %d (target = %d).", effectiveTier, targetTier)
-		c.notify(newBondPostNoteWithTier(TopicBondExpired, string(TopicBondExpired),
+		subject, details := c.formatDetails(TopicBondExpired, effectiveTier, targetTier)
+		c.notify(newBondPostNoteWithTier(TopicBondExpired, subject,
 			details, db.WarningLevel, dc.acct.host, bondedTier, c.exchangeAuth(dc)))
 	}
 

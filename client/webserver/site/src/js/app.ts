@@ -208,12 +208,12 @@ export default class Application {
     this.attachHeader()
     this.attachCommon(this.header)
     this.attach({})
+    // If we are authed, populate notes, otherwise get we'll them from the login
+    // response.
+    if (this.user && this.user.authed) await this.fetchNotes()
     this.updateMenuItemsDisplay()
     // initialize desktop notifications
     ntfn.fetchDesktopNtfnSettings()
-    // Load recent notifications from Window.localStorage.
-    const notes = State.fetchLocal(State.notificationsLK)
-    this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
     ws.registerRoute(notificationRoute, (note: CoreNote) => {
@@ -372,7 +372,6 @@ export default class Application {
       }
       this.setNoteTimes(page.noteList)
       this.setNoteTimes(page.pokeList)
-      this.storeNotes()
     })
 
     bind(page.burgerIcon, 'click', () => {
@@ -473,23 +472,6 @@ export default class Application {
   }
 
   /*
-   * storeNotes stores the list of notifications in Window.localStorage. The
-   * actual stored list is stripped of information not necessary for display.
-   */
-  storeNotes () {
-    State.storeLocal(State.notificationsLK, this.notes.map(n => {
-      return {
-        subject: n.subject,
-        details: n.details,
-        severity: n.severity,
-        stamp: n.stamp,
-        id: n.id,
-        acked: n.acked
-      }
-    }))
-  }
-
-  /*
    * updateMenuItemsDisplay should be called when the user has signed in or out,
    * and when the user registers a DEX.
    */
@@ -506,8 +488,16 @@ export default class Application {
       Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
       return
     }
+
     page.profileBox.classList.add('authed')
     Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
+  }
+
+  async fetchNotes () {
+    const res = await getJSON('/api/notes')
+    if (!this.checkResponse(res)) return console.error('failed to fetch notes:', res?.msg || String(res))
+    res.notes.reverse()
+    this.setNotes(res.notes)
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */
@@ -579,9 +569,8 @@ export default class Application {
     this.notes = []
     Doc.empty(this.page.noteList)
     for (let i = 0; i < notes.length; i++) {
-      this.prependNoteElement(notes[i], true)
+      this.prependNoteElement(notes[i])
     }
-    this.storeNotes()
   }
 
   updateUser (note: CoreNote) {
@@ -730,7 +719,7 @@ export default class Application {
     const { popupTmpl, popupNotes, showPopups } = this
     if (showPopups) {
       const span = popupTmpl.cloneNode(true) as HTMLElement
-      Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`
+      Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${ntfn.plainNote(note.details)}`
       const indicator = Doc.tmplElement(span, 'indicator')
       if (note.severity === ntfn.POKE) {
         Doc.hide(indicator)
@@ -792,13 +781,13 @@ export default class Application {
     this.prependListElement(this.page.pokeList, note, el)
   }
 
-  prependNoteElement (cn: CoreNote, skipSave?: boolean) {
+  prependNoteElement (cn: CoreNote) {
     const [el, note] = this.makeNote(cn)
     this.notes.push(note)
     while (this.notes.length > noteCacheSize) this.notes.shift()
     const noteList = this.page.noteList
     this.prependListElement(noteList, note, el)
-    if (!skipSave) this.storeNotes()
+    this.bindUrlHandlers(el)
     // Set the indicator color.
     if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(noteList))) return
     let unacked = 0
@@ -834,14 +823,15 @@ export default class Application {
     }
 
     Doc.safeSelector(el, 'div.note-subject').textContent = note.subject
-    Doc.safeSelector(el, 'div.note-details').textContent = note.details
+    ntfn.insertRichNote(Doc.safeSelector(el, 'div.note-details'), note.details)
     const np: CoreNotePlus = { el, ...note }
     return [el, np]
   }
 
   makePoke (note: CoreNote): [NoteElement, CoreNotePlus] {
     const el = this.page.pokeTmpl.cloneNode(true) as NoteElement
-    Doc.tmplElement(el, 'details').textContent = `${note.subject}: ${note.details}`
+    Doc.tmplElement(el, 'subject').textContent = `${note.subject}:`
+    ntfn.insertRichNote(Doc.tmplElement(el, 'details'), note.details)
     const np: CoreNotePlus = { el, ...note }
     return [el, np]
   }
@@ -1018,7 +1008,7 @@ export default class Application {
     }
     State.removeCookie(State.authCK)
     State.removeCookie(State.pwKeyCK)
-    State.removeLocal(State.notificationsLK)
+    State.removeLocal(State.notificationsLK) // Notification storage was DEPRECATED pre-v1.
     window.location.href = '/login'
   }
 

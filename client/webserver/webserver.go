@@ -479,6 +479,7 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Group(func(apiAuth chi.Router) {
 			apiAuth.Use(s.rejectUnauthed)
 			apiAuth.Get("/user", s.apiUser)
+			apiAuth.Get("/notes", s.apiNotes)
 			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/register", s.apiRegister)
 			apiAuth.Post("/postbond", s.apiPostBond)

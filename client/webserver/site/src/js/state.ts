@@ -16,7 +16,7 @@ export default class State {
   static optionsExpansionLK = 'mmOptsExpand'
   static leftMarketDockLK = 'leftmarketdock'
   static selectedAssetLK = 'selectedasset'
-  static notificationsLK = 'notifications'
+  static notificationsLK = 'notifications' // DEPRECATED before v1
   static orderDisclaimerAckedLK = 'ordAck'
   static lastCandleDurationLK = 'lastCandleDuration'
 

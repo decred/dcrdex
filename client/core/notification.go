@@ -157,6 +157,14 @@ func (c *Core) formatDetails(topic Topic, args ...any) (translatedSubject, detai
 	return trans.subject, c.localePrinter.Sprintf(string(topic), args...)
 }
 
+func makeCoinIDToken(txHash string, assetID uint32) string {
+	return fmt.Sprintf("{{{%d|%s}}}", assetID, txHash)
+}
+
+func makeOrderToken(orderToken string) string {
+	return fmt.Sprintf("{{{order|%s}}}", orderToken)
+}
+
 // Notification is an interface for a user notification. Notification is
 // satisfied by db.Notification, so concrete types can embed the db type.
 type Notification interface {
@@ -222,6 +230,7 @@ const (
 	TopicBondConfirming          Topic = "BondConfirming"
 	TopicBondRefunded            Topic = "BondRefunded"
 	TopicBondPostError           Topic = "BondPostError"
+	TopicBondPostErrorConfirm    Topic = "BondPostErrorConfirm"
 	TopicBondCoinError           Topic = "BondCoinError"
 	TopicAccountRegistered       Topic = "AccountRegistered"
 	TopicAccountUnlockError      Topic = "AccountUnlockError"
@@ -555,10 +564,12 @@ type DEXAuthNote struct {
 
 const (
 	TopicDexAuthError     Topic = "DexAuthError"
+	TopicDexAuthErrorBond Topic = "DexAuthErrorBond"
 	TopicUnknownOrders    Topic = "UnknownOrders"
 	TopicOrdersReconciled Topic = "OrdersReconciled"
 	TopicBondConfirmed    Topic = "BondConfirmed"
 	TopicBondExpired      Topic = "BondExpired"
+	TopicAccountRegTier   Topic = "AccountRegTier"
 )
 
 func newDEXAuthNote(topic Topic, subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
