@@ -370,11 +370,10 @@ func (c *Core) dexBondConfig(dc *dexConnection, now int64) *dexBondCfg {
 
 type dexAcctBondState struct {
 	ExchangeAuth
-	expiredBonds []*db.Bond
-	repost       []*asset.Bond
-	mustPost     int64 // includes toComp
-	toComp       int64
-	inBonds      uint64
+	repost   []*asset.Bond
+	mustPost int64 // includes toComp
+	toComp   int64
+	inBonds  uint64
 }
 
 // bondStateOfDEX collects all the information needed to determine what
@@ -418,8 +417,8 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	state.PendingBonds = dc.pendingBonds()
 	state.ExpiredBondsPendingRefund = int64(len(dc.acct.expiredBonds))
 	// Extract the expired bonds.
-	state.expiredBonds = make([]*db.Bond, len(dc.acct.expiredBonds))
-	copy(state.expiredBonds, dc.acct.expiredBonds)
+	state.ExpiredBonds = make([]*db.Bond, len(dc.acct.expiredBonds))
+	copy(state.ExpiredBonds, dc.acct.expiredBonds)
 	// Retry postbond for pending bonds that may have failed during
 	// submission after their block waiters triggered.
 	state.repost = make([]*asset.Bond, 0, len(dc.acct.pendingBonds))
@@ -471,10 +470,10 @@ type bondID struct {
 // refundExpiredBonds refunds expired bonds and returns the list of bonds that
 // have been refunded and their assetIDs.
 func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *dexBondCfg, state *dexAcctBondState, now int64) (map[uint32]struct{}, int64, error) {
-	spentBonds := make([]*bondID, 0, len(state.expiredBonds))
+	spentBonds := make([]*bondID, 0, len(state.ExpiredBonds))
 	assetIDs := make(map[uint32]struct{})
 
-	for _, bond := range state.expiredBonds {
+	for _, bond := range state.ExpiredBonds {
 		bondIDStr := fmt.Sprintf("%v (%s)", coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 		if now < int64(bond.LockTime) {
 			ttr := time.Duration(int64(bond.LockTime)-now) * time.Second
@@ -1688,16 +1687,4 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, not
 	}
 
 	return nil
-}
-
-// ExpiredBonds returns a map of dex server host to a slice of expired bonds for
-// each dex server.
-func (c *Core) ExpiredBonds() map[string][]*db.Bond {
-	expiredBonds := make(map[string][]*db.Bond)
-	for _, dc := range c.dexConnections() {
-		bondCfg := c.dexBondConfig(dc, time.Now().Unix())
-		bondState := c.bondStateOfDEX(dc, bondCfg)
-		expiredBonds[dc.acct.host] = append(expiredBonds[dc.acct.host], bondState.expiredBonds...)
-	}
-	return expiredBonds
 }
