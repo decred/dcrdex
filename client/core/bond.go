@@ -268,7 +268,7 @@ func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
 	}
 	// Keep a list of tuples of [weakTime, bondStrength]. Later, we'll check
 	// these against expired bonds, to see how many tiers we can expect to have
-	// refunded funds avilable for.
+	// refunded funds available for.
 	activeTiers := make([][2]uint64, 0)
 	dexCfg := dc.config()
 	bondExpiry := dexCfg.BondExpiry
@@ -370,11 +370,10 @@ func (c *Core) dexBondConfig(dc *dexConnection, now int64) *dexBondCfg {
 
 type dexAcctBondState struct {
 	ExchangeAuth
-	expiredBonds []*db.Bond
-	repost       []*asset.Bond
-	mustPost     int64 // includes toComp
-	toComp       int64
-	inBonds      uint64
+	repost   []*asset.Bond
+	mustPost int64 // includes toComp
+	toComp   int64
+	inBonds  uint64
 }
 
 // bondStateOfDEX collects all the information needed to determine what
@@ -416,10 +415,9 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	state.WeakStrength = sumBondStrengths(weakBonds, bondCfg.bondAssets)
 	state.LiveStrength = sumBondStrengths(dc.acct.bonds, bondCfg.bondAssets) // for max bonded check
 	state.PendingBonds = dc.pendingBonds()
-	state.ExpiredBondsPendingRefund = int64(len(dc.acct.expiredBonds))
 	// Extract the expired bonds.
-	state.expiredBonds = make([]*db.Bond, len(dc.acct.expiredBonds))
-	copy(state.expiredBonds, dc.acct.expiredBonds)
+	state.ExpiredBonds = make([]*db.Bond, len(dc.acct.expiredBonds))
+	copy(state.ExpiredBonds, dc.acct.expiredBonds)
 	// Retry postbond for pending bonds that may have failed during
 	// submission after their block waiters triggered.
 	state.repost = make([]*asset.Bond, 0, len(dc.acct.pendingBonds))
@@ -471,10 +469,10 @@ type bondID struct {
 // refundExpiredBonds refunds expired bonds and returns the list of bonds that
 // have been refunded and their assetIDs.
 func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *dexBondCfg, state *dexAcctBondState, now int64) (map[uint32]struct{}, int64, error) {
-	spentBonds := make([]*bondID, 0, len(state.expiredBonds))
+	spentBonds := make([]*bondID, 0, len(state.ExpiredBonds))
 	assetIDs := make(map[uint32]struct{})
 
-	for _, bond := range state.expiredBonds {
+	for _, bond := range state.ExpiredBonds {
 		bondIDStr := fmt.Sprintf("%v (%s)", coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 		if now < int64(bond.LockTime) {
 			ttr := time.Duration(int64(bond.LockTime)-now) * time.Second

@@ -682,8 +682,9 @@ type ExchangeAuth struct {
 	PenaltyComps uint16 `json:"penaltyComps"`
 	// PendingBonds are currently pending bonds and their confirmation count.
 	PendingBonds []*PendingBondState `json:"pendingBonds"`
-	// ExpiredBondsPendingRefund is the number of expired but unrefunded bonds.
-	ExpiredBondsPendingRefund int64 `json:"expiredBondsPendingRefund"`
+	// ExpiredBonds are bonds that have expired but have not yet reached their
+	// lock time for refunding.
+	ExpiredBonds []*db.Bond `json:"expiredBonds"`
 	// Compensation is the amount we have locked in bonds greater than what
 	// is needed to maintain our target tier. This could be from penalty
 	// compensation, or it could be due to the user lowering their target tier.

@@ -45,7 +45,7 @@ export interface ExchangeAuth {
   maxBondedAmt: number
   penaltyComps: number
   pendingBonds: PendingBondState[]
-  expiredBondsPendingRefund: number
+  expiredBonds: any[]
   compensation: number
 }
 
