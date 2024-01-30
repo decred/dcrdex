@@ -165,7 +165,7 @@ func (f *fakeBinance) handleWalletCoinsReq(w http.ResponseWriter, r *http.Reques
 	// Returning configs for eth, btc, ltc, bch, zec, usdc, matic.
 	// Balances do not use a sapi endpoint, so they do not need to be handled
 	// here.
-	resp := `[
+	resp := []byte(`[
 		{
 			"coin": "MATIC",
 			"depositAllEnable": true,
@@ -869,9 +869,9 @@ func (f *fakeBinance) handleWalletCoinsReq(w http.ResponseWriter, r *http.Reques
 				}
 			]
 		}
-	]`
+	]`)
 
-	writeBytesWithStatus(w, []byte(resp), http.StatusOK)
+	writeBytesWithStatus(w, resp, http.StatusOK)
 }
 
 func (f *fakeBinance) handleConfirmDeposit(w http.ResponseWriter, r *http.Request) {

@@ -736,6 +736,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		OrigQuoteQty       float64 `json:"origQuoteOrderQty,string"`
 		ExecutedQty        float64 `json:"executedQty,string"`
 		CumulativeQuoteQty float64 `json:"cummulativeQuoteQty,string"`
+		Status             string  `json:"status"`
 	}
 	err = bnc.postAPI(ctx, "/api/v3/order", v, nil, true, true, &orderResponse)
 	if err != nil {
@@ -753,6 +754,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		QuoteID:     quoteID,
 		BaseFilled:  uint64(orderResponse.ExecutedQty * float64(baseCfg.conversionFactor)),
 		QuoteFilled: uint64(orderResponse.CumulativeQuoteQty * float64(quoteCfg.conversionFactor)),
+		Complete:    orderResponse.Status != "NEW" && orderResponse.Status != "PARTIALLY_FILLED",
 	}, err
 }
 

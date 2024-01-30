@@ -113,7 +113,7 @@ func (c *tokenFundingCoin) Value() uint64 {
 	return c.amt
 }
 
-func (c *tokenFundingCoin) ParentValue() uint64 {
+func (c *tokenFundingCoin) Fees() uint64 {
 	return c.fees
 }
 

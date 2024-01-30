@@ -706,12 +706,12 @@ func (t *trackedTrade) parentLockedAmt() (locked uint64) {
 		// fill and still booked) since restarting loads into coins/coinsLocked.
 		for _, coin := range t.coins {
 			if tokenCoin, is := coin.(asset.TokenCoin); is {
-				locked += tokenCoin.ParentValue()
+				locked += tokenCoin.Fees()
 			}
 		}
 	} else if t.changeLocked && t.change != nil { // change may be returned but unlocked if the last swap has been sent
 		if tokenCoin, is := t.change.(asset.TokenCoin); is {
-			locked += tokenCoin.ParentValue()
+			locked += tokenCoin.Fees()
 		}
 	}
 	return

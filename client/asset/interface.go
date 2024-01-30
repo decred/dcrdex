@@ -1270,7 +1270,7 @@ type Coin interface {
 // of the parent asset to be used for fees.
 type TokenCoin interface {
 	Coin
-	ParentValue() uint64
+	Fees() uint64
 }
 
 type RecoveryCoin interface {

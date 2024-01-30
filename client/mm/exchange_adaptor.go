@@ -522,18 +522,19 @@ func (u *unifiedExchangeAdaptor) DEXBalance(assetID uint32) (*botBalance, error)
 	}
 
 	for _, pendingDeposit := range u.pendingDeposits {
-		pendingDeposit.mtx.RLock()
 		if pendingDeposit.assetID == assetID {
 			totalAvailableDiff -= int64(pendingDeposit.amtSent)
 		}
 
+		pendingDeposit.mtx.RLock()
+		fee := int64(pendingDeposit.fee)
+		pendingDeposit.mtx.RUnlock()
 		token := asset.TokenInfo(pendingDeposit.assetID)
 		if token != nil && token.ParentID == assetID {
-			totalAvailableDiff -= int64(pendingDeposit.fee)
+			totalAvailableDiff -= fee
 		} else if token == nil && pendingDeposit.assetID == assetID {
-			totalAvailableDiff -= int64(pendingDeposit.fee)
+			totalAvailableDiff -= fee
 		}
-		pendingDeposit.mtx.RUnlock()
 	}
 
 	for _, pendingWithdrawal := range u.pendingWithdrawals {
@@ -562,7 +563,7 @@ func (u *unifiedExchangeAdaptor) DEXBalance(assetID uint32) (*botBalance, error)
 }
 
 // incompleteCexTradeBalanceEffects returns the balance effects of an
-// incomplete CEX traade. As soon as a CEX trade is complete, it is removed
+// incomplete CEX trade. As soon as a CEX trade is complete, it is removed
 // from the pending map, so completed trades do not need to be calculated.
 func incompleteCexTradeBalanceEffects(trade *libxc.Trade) (availableDiff map[uint32]int64, locked map[uint32]uint64) {
 	availableDiff = make(map[uint32]int64)
@@ -1138,11 +1139,10 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 
 	u.balancesMtx.RLock()
 	pendingOrder, found := u.pendingDEXOrders[orderID]
+	u.balancesMtx.RUnlock()
 	if !found {
-		u.balancesMtx.RUnlock()
 		return
 	}
-	u.balancesMtx.RUnlock()
 
 	fromAsset, fromFeeAsset, toAsset, toFeeAsset := orderAssets(o)
 
@@ -1150,56 +1150,31 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 
 	// Add new txs to tx cache
 	swaps, redeems, refunds := orderTransactions(o)
-	for txID := range swaps {
-		if _, found := pendingOrder.swaps[txID]; !found {
-			pendingOrder.swaps[txID] = &asset.WalletTransaction{}
+
+	processTxs := func(assetID uint32, m map[string]*asset.WalletTransaction, txs map[string]bool) {
+		// Add new txs to tx cache
+		for txID := range txs {
+			if _, found := m[txID]; !found {
+				m[txID] = &asset.WalletTransaction{}
+			}
 		}
-	}
-	for txID := range redeems {
-		if _, found := pendingOrder.redeems[txID]; !found {
-			pendingOrder.redeems[txID] = &asset.WalletTransaction{}
-		}
-	}
-	for txID := range refunds {
-		if _, found := pendingOrder.refunds[txID]; !found {
-			pendingOrder.refunds[txID] = &asset.WalletTransaction{}
+		// Query the wallet regarding all unconfirmed transactions
+		for txID, oldTx := range m {
+			if oldTx.Confirmed {
+				continue
+			}
+			tx, err := u.clientCore.WalletTransaction(assetID, txID)
+			if err != nil {
+				u.log.Errorf("Error getting tx %s: %v", txID, err)
+				continue
+			}
+			m[txID] = tx
 		}
 	}
 
-	// Query the wallet regarding all unconfirmed transactions
-	for txID, oldTx := range pendingOrder.swaps {
-		if oldTx.Confirmed {
-			continue
-		}
-		tx, err := u.clientCore.WalletTransaction(fromAsset, txID)
-		if err != nil {
-			u.log.Errorf("Error getting swap tx %s: %v", txID, err)
-			continue
-		}
-		pendingOrder.swaps[txID] = tx
-	}
-	for txID, oldTx := range pendingOrder.redeems {
-		if oldTx.Confirmed {
-			continue
-		}
-		tx, err := u.clientCore.WalletTransaction(toAsset, txID)
-		if err != nil {
-			u.log.Errorf("Error getting redeem tx %s: %v", txID, err)
-			continue
-		}
-		pendingOrder.redeems[txID] = tx
-	}
-	for txID, oldTx := range pendingOrder.refunds {
-		if oldTx.Confirmed {
-			continue
-		}
-		tx, err := u.clientCore.WalletTransaction(fromAsset, txID)
-		if err != nil {
-			u.log.Errorf("Error getting refund tx %s: %v", txID, err)
-			continue
-		}
-		pendingOrder.refunds[txID] = tx
-	}
+	processTxs(fromAsset, pendingOrder.swaps, swaps)
+	processTxs(toAsset, pendingOrder.redeems, redeems)
+	processTxs(fromAsset, pendingOrder.refunds, refunds)
 
 	// Calculate balance effects based on current state of the order.
 	availableDiff := make(map[uint32]int64)

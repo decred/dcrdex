@@ -4847,22 +4847,18 @@ func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txID string) 
 	txHash := common.HexToHash(txID)
 	tx, blockHeight, err := w.node.getTransaction(ctx, txHash)
 	if err != nil {
-		w.log.Infof("tx not found")
 		return nil, err
 	}
 	if *tx.To() != w.netToken.Address {
-		w.log.Infof("from token address")
 		return nil, asset.CoinNotFoundError
 	}
 
 	receivingAddr, value, err := erc20.ParseTransferData(tx.Data())
 	if err != nil {
-		w.log.Infof("unable to parse transfer")
 		return nil, asset.CoinNotFoundError
 	}
 
 	if receivingAddr != w.addr {
-		w.log.Infof("not to our address")
 		return nil, asset.CoinNotFoundError
 	}
 
