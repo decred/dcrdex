@@ -602,8 +602,7 @@ func (dc *dexConnection) activeOrders() ([]*Order, []*InFlightOrder) {
 
 	var inflightOrders []*InFlightOrder
 	for _, ord := range dc.inFlightOrders {
-		activeOrder := *ord // copy inflight orders
-		inflightOrders = append(inflightOrders, &activeOrder)
+		inflightOrders = append(inflightOrders, ord)
 	}
 
 	return activeOrders, inflightOrders
