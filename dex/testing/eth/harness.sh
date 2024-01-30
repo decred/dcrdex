@@ -35,21 +35,7 @@ BETA_HTTP_PORT="38558"
 BETA_WS_PORT="38559"
 BETA_WS_MODULES="eth,txpool"
 
-GAMMA_ADDRESS="41293c2032bac60aa747374e966f79f575d42379"
-GAMMA_ADDRESS_JSON_FILE_NAME="UTC--2021-03-01T02-12-42.714340074Z--41293c2032bac60aa747374e966f79f575d42379"
-GAMMA_ADDRESS_JSON='{"address":"41293c2032bac60aa747374e966f79f575d42379","crypto":{"cipher":"aes-128-ctr","ciphertext":"5191719067513511b07d959de1a86cd37c3f7011dce75f62c791114c3a62b15b","cipherparams":{"iv":"cdfcd9e475f2af7df08a8a36cc0de976"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"5630591da82b8517f1b8f61719fbb552e41f25861cc20bc4671a11a47b427d31"},"mac":"d13259851d78deb70d1273ab151d4a12583b94f5cbdf31d86f02bb549d241d36"},"id":"235ba177-e32c-4d23-8d94-a57bc04b97ca","version":3}'
-GAMMA_NODE_KEY="9e102b8ba8cad4c6b9db6c881915d3f1bb206e76113266bf48266de0474844fd"
-GAMMA_ENODE="b1c14deee09b9d5549c90b7b30a35c812a56bf6afea5873b05d7a1bcd79c7b0848bcfa982faf80cc9e758a3a0d9b470f0a002840d365050fd5bf45052a6ec313"
-GAMMA_NODE_PORT="30306"
-GAMMA_AUTHRPC_PORT="8554"
-
-DELTA_ADDRESS="d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
-DELTA_ADDRESS_JSON_FILE_NAME="UTC--2021-03-01T02-31-13.365402148Z--d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
-DELTA_ADDRESS_JSON='{"address":"d12ab7cf72ccf1f3882ec99ddc53cd415635c3be","crypto":{"cipher":"aes-128-ctr","ciphertext":"a0e9a3da5d0c88c922b5d7e817693552fe17dfd4c598e2a8b08ee53a706a8ffc","cipherparams":{"iv":"28b0a443403b7a02001f07a35724f6e6"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"f790f584bf396cacc06f28201aa697825011e84f570759d6108e20c5ee4fffce"},"mac":"529318e5eec2474221912d01e5a534a0b1dbfb19499ffaf942be6375611caa83"},"id":"d8670e33-8094-45b7-9386-d936e6bf4c1b","version":3}'
-DELTA_NODE_KEY="725394672587b34bbf15580c59e5199c75c2c7e998ba8df3cb38cc4347d46e2b"
-DELTA_ENODE="ca414c361d1a38716170923e4900d9dc9203dbaf8fdcaee73e1f861df9fdf20a1453b76fd218c18bc6f3c7e13cbca0b3416af02a53b8e31188faa45aab398d1c"
-DELTA_NODE_PORT="30307"
-DELTA_AUTHRPC_PORT="8555"
+# TODO: Light nodes broken as of geth 1.13.4-stable. Enable them when possible.
 
 # TESTING_ADDRESS is used by the client's internal node.
 TESTING_ADDRESS="946dfaB1AD7caCFeF77dE70ea68819a30acD4577"
@@ -227,6 +213,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/reorg"
 # Shutdown script
 cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
 #!/usr/bin/env bash
+tmux send-keys -t $SESSION:5 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
 tmux kill-session
@@ -261,16 +248,6 @@ echo "Starting simnet beta node"
 	"$BETA_NODE_KEY" "snap" "$BETA_AUTHRPC_PORT" "$BETA_HTTP_PORT" "$BETA_WS_PORT" \
 	"$BETA_WS_MODULES"
 
-echo "Starting simnet gamma node"
-"${HARNESS_DIR}/create-node.sh" "$SESSION:3" "gamma" "$GAMMA_NODE_PORT" \
-	"_" "_" "_" "_" "$GAMMA_ADDRESS_JSON" "$GAMMA_ADDRESS_JSON_FILE_NAME" \
-	"$GAMMA_NODE_KEY" "light" "$GAMMA_AUTHRPC_PORT" "_" "_" "_"
-
-echo "Starting simnet delta node"
-"${HARNESS_DIR}/create-node.sh" "$SESSION:4" "delta" "$DELTA_NODE_PORT" \
-	"_" "_" "_" "_" "$DELTA_ADDRESS_JSON" "$DELTA_ADDRESS_JSON_FILE_NAME" \
-	"$DELTA_NODE_KEY" "light" "$DELTA_AUTHRPC_PORT" "_" "_" "_"
-
 # Miner
 tmux new-window -t $SESSION:5 -n "miner" $SHELL
 tmux send-keys -t $SESSION:5 "cd ${NODES_ROOT}/harness-ctl" C-m
@@ -282,11 +259,6 @@ sleep 1
 # set up. They will show 0 peers for some amount of time even after adding here.
 echo "Connecting nodes"
 "${NODES_ROOT}/harness-ctl/alpha" "attach --exec admin.addPeer('enode://${BETA_ENODE}@127.0.0.1:$BETA_NODE_PORT')"
-"${NODES_ROOT}/harness-ctl/alpha" "attach --exec admin.addPeer('enode://${GAMMA_ENODE}@127.0.0.1:$GAMMA_NODE_PORT')"
-"${NODES_ROOT}/harness-ctl/alpha" "attach --exec admin.addPeer('enode://${DELTA_ENODE}@127.0.0.1:$DELTA_NODE_PORT')"
-"${NODES_ROOT}/harness-ctl/beta" "attach --exec admin.addPeer('enode://${GAMMA_ENODE}@127.0.0.1:$GAMMA_NODE_PORT')"
-"${NODES_ROOT}/harness-ctl/beta" "attach --exec admin.addPeer('enode://${DELTA_ENODE}@127.0.0.1:$DELTA_NODE_PORT')"
-"${NODES_ROOT}/harness-ctl/gamma" "attach --exec admin.addPeer('enode://${DELTA_ENODE}@127.0.0.1:$DELTA_NODE_PORT')"
 
 echo "Mining some blocks"
 # NOTE: These first couple of blocks will cause a reorg on one node or the
@@ -296,10 +268,8 @@ echo "Mining some blocks"
 "${NODES_ROOT}/harness-ctl/mine-alpha" "2"
 
 SEND_AMT=5000000000000000000000
-echo "Sending 5000 eth to beta, delta, gamma and testing."
+echo "Sending 5000 eth to beta and testing."
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${BETA_ADDRESS}\",${SEND_AMT})"
-"${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${GAMMA_ADDRESS}\",${SEND_AMT})"
-"${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${DELTA_ADDRESS}\",${SEND_AMT})"
 TEST_TX_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${TESTING_ADDRESS}\",${SEND_AMT})" | sed 's/"//g')
 echo "ETH transaction to use in tests is ${TEST_TX_HASH}. Saving to ${NODES_ROOT}/test_tx_hash.txt"
 cat > "${NODES_ROOT}/test_tx_hash.txt" <<EOF
@@ -314,20 +284,6 @@ TEST_TOKEN_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload $
 
 echo "Deploying MultiBalance contract."
 MULTIBALANCE_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ALPHA_ADDRESS}\",\"${MULTIBALANCE_BIN}\")" | sed 's/"//g')
-
-# Initial sync for light nodes takes quite a while. Wait for them to show
-# blocks on the network.
-while true
-do
-  N=$("${NODES_ROOT}/harness-ctl/gamma" "attach --exec eth.blockNumber")
-  if [ "$N" -gt 0 ]; then
-    break
-  fi
-  echo "Waiting for light nodes to sync."
-  # Although not necessary here, mine while waiting so that transactions are
-  # mined if not mined yet.
-  "${NODES_ROOT}/harness-ctl/mine-beta" "5"
-done
 
 mine_pending_txs() {
   while true
