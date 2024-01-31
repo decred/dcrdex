@@ -11,4 +11,4 @@ them. Wallet data is persisted through restarts, so you can send mainnet funds
 without risk of loss. That said, this is for testing, so only send what you can
 lose in case of massive catastrophe.
 
-Use `--testnet` flag to run on testnet.
+Use `--testnet` and `--simnet` flags to use respective testing networks.
