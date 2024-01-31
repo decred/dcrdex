@@ -757,7 +757,6 @@ func (w *ltcSPVWallet) SyncedTo() waddrmgr.BlockStamp {
 		Hash:      chainhash.Hash(bs.Hash),
 		Timestamp: bs.Timestamp,
 	}
-
 }
 
 func (w *ltcSPVWallet) SignTx(btcTx *wire.MsgTx) error {
