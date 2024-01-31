@@ -17,7 +17,8 @@ require (
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
-	github.com/dcrlabs/neutrino-bch v0.0.0-20221031001408-f296bfa9bd1c
+	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be
+	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095
 	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead
 	github.com/decred/base58 v1.0.5
 	github.com/decred/dcrd/addrmgr/v2 v2.0.2
@@ -49,8 +50,6 @@ require (
 	github.com/gcash/bchd v0.19.0
 	github.com/gcash/bchlog v0.0.0-20180913005452-b4f036f92fa6
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
-	github.com/gcash/bchwallet v0.10.0
-	github.com/gcash/bchwallet/walletdb v0.0.0-20210524114850-4837f9798568
 	github.com/go-chi/chi/v5 v5.0.1
 	github.com/gorilla/websocket v1.5.0
 	github.com/huandu/skiplist v1.2.0
@@ -111,7 +110,6 @@ require (
 	github.com/fjl/memsize v0.0.0-20190710130421-bcb5799ab5e5 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff // indirect
-	github.com/gcash/neutrino v0.0.0-20210524114821-3b1878290cf9 // indirect
 	github.com/getsentry/sentry-go v0.18.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
