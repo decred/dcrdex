@@ -170,6 +170,8 @@ export const ID_TX_TYPE_APPROVE_TOKEN = 'TX_TYPE_APPROVE_TOKEN'
 export const ID_TX_TYPE_ACCELERATION = 'TX_TYPE_ACCELERATION'
 export const ID_TX_TYPE_SELF_TRANSFER = 'TX_TYPE_SELF_TRANSFER'
 export const ID_TX_TYPE_REVOKE_TOKEN_APPROVAL = 'TX_TYPE_REVOKE_TOKEN_APPROVAL'
+export const ID_TX_STATUS_CONFIRMED = 'TX_STATUS_CONFIRMED'
+export const ID_TX_STATUS_PENDING = 'TX_STATUS_PENDING'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -341,7 +343,9 @@ export const enUS: Locale = {
   [ID_TX_TYPE_APPROVE_TOKEN]: 'Approve token',
   [ID_TX_TYPE_ACCELERATION]: 'Acceleration',
   [ID_TX_TYPE_SELF_TRANSFER]: 'Self transfer',
-  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval'
+  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval',
+  [ID_TX_STATUS_CONFIRMED]: 'Confirmed',
+  [ID_TX_STATUS_PENDING]: 'Pending'
 }
 
 export const ptBR: Locale = {

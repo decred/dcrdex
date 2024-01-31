@@ -1,4 +1,4 @@
-import Doc, { Animation } from './doc'
+import Doc, { Animation, trimStringWithEllipsis } from './doc'
 import { postJSON } from './http'
 import State from './state'
 import * as intl from './locales'
@@ -29,9 +29,11 @@ import {
   WalletInfo,
   Token,
   WalletCreationNote,
-  CoreNote
+  CoreNote,
+  WalletTransaction
 } from './registry'
 import { XYRangeHandler } from './opts'
+import { CoinExplorers } from './order'
 
 interface ConfigOptionInput extends HTMLInputElement {
   configOpt: ConfigOption
@@ -1931,6 +1933,7 @@ export class DepositAddress {
   form: PageElement
   page: Record<string, PageElement>
   assetID: number
+  hasIncomingTx: boolean
 
   constructor (form: PageElement) {
     this.form = form
@@ -1947,6 +1950,7 @@ export class DepositAddress {
     const asset = app().assets[assetID]
     page.depositLogo.src = Doc.logoPath(asset.symbol)
     const wallet = app().walletMap[assetID]
+    this.hasIncomingTx = false
     page.depositName.textContent = asset.unitInfo.conventional.unit
     page.depositAddress.textContent = wallet.address
     page.qrcode.src = `/generateqrcode?address=${wallet.address}`
@@ -1960,22 +1964,38 @@ export class DepositAddress {
     else Doc.hide(page.newDepAddrBttn)
   }
 
-  /* Fetch a new address from the wallet. */
+  // Fetch and display a new deposit address.
   async newDepositAddress () {
     const page = this.page
     Doc.hide(page.depositErr)
+    Doc.hide(page.depositTxContainer)
+    Doc.show(page.depositAddressContainer)
+    // If we have a deposit transaction, a new address was already generated.
+    if (this.hasIncomingTx) {
+      this.hasIncomingTx = false
+      return
+    }
     const loaded = app().loading(this.form)
+    const err = await this.fetchDepositAddress()
+    loaded()
+    if (err !== null) {
+      page.depositErr.textContent = err
+      Doc.show(page.depositErr)
+    }
+  }
+
+  /* Fetch a new address from the wallet. */
+  async fetchDepositAddress () {
     const res = await postJSON('/api/depositaddress', {
       assetID: this.assetID
     })
-    loaded()
     if (!app().checkResponse(res)) {
-      page.depositErr.textContent = res.msg
-      Doc.show(page.depositErr)
-      return
+      return res.msg
     }
+    const page = this.page
     page.depositAddress.textContent = res.address
     page.qrcode.src = `/generateqrcode?address=${res.address}`
+    return null
   }
 
   async copyAddress () {
@@ -1990,6 +2010,37 @@ export class DepositAddress {
       .catch((reason) => {
         console.error('Unable to copy: ', reason)
       })
+  }
+
+  handleIncomingTx (assetID: number, tx: WalletTransaction) {
+    if (assetID !== this.assetID) return
+    if (tx.recipient !== this.page.depositAddress.textContent) return
+    this.hasIncomingTx = true
+    this.showIncomingTx(tx)
+    this.fetchDepositAddress()
+  }
+
+  showIncomingTx (tx: WalletTransaction) {
+    const page = this.page
+    const net = app().user.net
+    const assetExplorer = CoinExplorers[this.assetID]
+    if (assetExplorer && assetExplorer[net]) {
+      page.depositTxID.href = assetExplorer[net](tx.id)
+    }
+    page.depositTxID.textContent = trimStringWithEllipsis(tx.id, 24)
+    page.depositTxID.setAttribute('title', tx.id)
+    page.depositTxAmount.textContent = `${Doc.formatCoinValue(tx.amount, app().unitInfo(this.assetID))} ${app().assets[this.assetID].symbol.toUpperCase()}`
+    page.depositTxStatus.textContent = tx.blockNumber > 0 ? intl.prep(intl.ID_TX_STATUS_CONFIRMED) : intl.prep(intl.ID_TX_STATUS_PENDING)
+    Doc.show(page.depositTxContainer)
+    Doc.hide(page.depositAddressContainer)
+  }
+
+  resetForm () {
+    if (this.hasIncomingTx) {
+      const page = this.page
+      Doc.hide(page.depositTxContainer)
+      Doc.show(page.depositAddressContainer)
+    }
   }
 }
 
