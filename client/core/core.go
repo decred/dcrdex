@@ -6396,8 +6396,13 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 	mktID := marketName(form.Base, form.Quote)
 
 	rate, qty := form.Rate, form.Qty
-	if form.IsLimit && rate == 0 {
-		return nil, newError(orderParamsErr, "zero-rate order not allowed")
+	if form.IsLimit {
+		if rate == 0 {
+			return nil, newError(orderParamsErr, "zero-rate order not allowed")
+		}
+		if rate < mktConf.MinimumRate {
+			return nil, newError(orderParamsErr, "order's rate is lower than market's minimum rate. %d < %d", rate, mktConf.MinimumRate)
+		}
 	}
 
 	// Get an address for the swap contract.

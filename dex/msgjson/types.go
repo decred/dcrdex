@@ -1265,6 +1265,7 @@ type Market struct {
 	MarketBuyBuffer float64 `json:"buybuffer"`
 	ParcelSize      uint32  `json:"parcelSize"`
 	MarketStatus    `json:"status"`
+	MinimumRate     uint64 `json:"minimumRate"`
 }
 
 // Running indicates if the market should be running given the known StartEpoch,

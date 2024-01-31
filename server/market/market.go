@@ -40,6 +40,7 @@ func (e Error) Error() string {
 const (
 	ErrMarketNotRunning       = Error("market not running")
 	ErrInvalidOrder           = Error("order failed validation")
+	ErrInvalidRate            = Error("limit order rate too low")
 	ErrInvalidCommitment      = Error("order commitment invalid")
 	ErrEpochMissed            = Error("order unexpectedly missed its intended epoch")
 	ErrDuplicateOrder         = Error("order already in epoch") // maybe remove since this is ill defined
@@ -96,6 +97,7 @@ type Config struct {
 	DataCollector    DataCollector
 	Balancer         Balancer
 	CheckParcelLimit func(user account.AccountID, calcParcels MarketParcelCalculator) bool
+	MinimumRate      uint64
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -170,6 +172,8 @@ type Market struct {
 	lastRate      uint64
 
 	checkParcelLimit func(user account.AccountID, calcParcels MarketParcelCalculator) bool
+
+	minimumRate uint64
 }
 
 // Storage is the DB interface required by Market.
@@ -501,6 +505,7 @@ ordersLoop:
 		dataCollector:    cfg.DataCollector,
 		lastRate:         lastEpochEndRate,
 		checkParcelLimit: cfg.CheckParcelLimit,
+		minimumRate:      cfg.MinimumRate,
 	}, nil
 }
 
@@ -682,6 +687,10 @@ func (m *Market) Base() uint32 {
 // Quote is the quote asset ID.
 func (m *Market) Quote() uint32 {
 	return m.marketInfo.Quote
+}
+
+func (m *Market) MinimumRate() uint64 {
+	return m.minimumRate
 }
 
 // OrderFeed provides a new order book update channel. Channels provided before
@@ -2684,6 +2693,11 @@ func (m *Market) validateOrder(ord order.Order) error {
 	if !db.ValidateOrder(ord, order.OrderStatusEpoch, m.marketInfo) {
 		return ErrInvalidOrder // non-specific
 	}
+
+	if lo, is := ord.(*order.LimitOrder); is && lo.Rate < m.minimumRate {
+		return ErrInvalidRate
+	}
+
 	return nil
 }
 
