@@ -32,8 +32,8 @@ func newSniper(maxOrdsPerEpoch int) *sniper {
 func (s *sniper) SetupWallets(m *Mantle) {
 	numCoins := 3 * s.maxOrdsPerEpoch
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, uint64(defaultMidGap*rateEncFactor))
-	m.createWallet(baseSymbol, alpha, minBaseQty, maxBaseQty, numCoins)
-	m.createWallet(quoteSymbol, alpha, minQuoteQty, maxQuoteQty, numCoins)
+	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
+	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
 
 	m.log.Infof("Sniper has been initialized with %d max orders per epoch"+
 		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial funding coins",

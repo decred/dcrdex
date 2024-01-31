@@ -2182,6 +2182,7 @@ export default class WalletsPage extends BasePage {
       const feeReq = {
         assetID: assetID,
         subtract: isWithdrawer,
+        maxWithdraw: true,
         value: wallet.balance.available
       }
 
@@ -2194,6 +2195,7 @@ export default class WalletsPage extends BasePage {
           canSend -= res.txfee
           if (canSend < 0) canSend = 0
         }
+
         this.maxSend = canSend
         page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)
         Doc.showFiatValue(page.maxSendFiat, canSend, xcRate, ui)
