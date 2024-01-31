@@ -251,8 +251,6 @@ type DBConf struct {
 // ValidateConfigFile prints information to stdout. An error is returned for any
 // configuration errors.
 func ValidateConfigFile(cfgPath string, net dex.Network, log dex.Logger) error {
-	const minQuoteLotFactor = 1.5
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -276,13 +274,22 @@ func ValidateConfigFile(cfgPath string, net dex.Network, log dex.Logger) error {
 
 	log.Debugf("Loaded %d markets and %d assets from configuration", len(markets), len(assets))
 
-	minLotSizes := make(map[string]uint64)
-	minBondSizes := make(map[string]uint64)
+	var failures []string
 
-	var successes, failures []string
+	type parsedAsset struct {
+		*Asset
+		unit        string
+		minLotSize  uint64
+		minBondSize uint64
+		fiatRate    float64
+		cFactor     float64
+		ui          *dex.UnitInfo
+	}
+	parsedAssets := make(map[uint32]*parsedAsset, len(assets))
 
-	// Some initial validation.
-	// var undisabledAssets
+	printSuccess := func(s string, a ...interface{}) {
+		fmt.Printf(s+"\n", a...)
+	}
 
 	for _, a := range assets {
 		if dex.TokenSymbol(a.Symbol) == "dextt" {
@@ -298,7 +305,6 @@ func ValidateConfigFile(cfgPath string, net dex.Network, log dex.Logger) error {
 		if !found {
 			return fmt.Errorf("no asset registered for %s (%d)", a.Symbol, assetID)
 		}
-		minBondSizes[a.Symbol] = minBondSize
 
 		ui, err := asset.UnitInfo(assetID)
 		if err != nil {
@@ -313,89 +319,56 @@ func ValidateConfigFile(cfgPath string, net dex.Network, log dex.Logger) error {
 		unit := ui.Conventional.Unit
 		minLotSizeUSD := float64(minLotSize) / float64(ui.Conventional.ConversionFactor) * fiatRate
 		minBondSizeUSD := float64(minLotSize) / float64(ui.Conventional.ConversionFactor) * fiatRate
-		successes = append(successes, fmt.Sprintf(
+		parsedAssets[assetID] = &parsedAsset{
+			Asset:       a,
+			unit:        unit,
+			minLotSize:  minLotSize,
+			minBondSize: minBondSize,
+			fiatRate:    fiatRate,
+			cFactor:     float64(ui.Conventional.ConversionFactor),
+			ui:          &ui,
+		}
+		printSuccess(
 			"Calculated for %s: min lot size = %s %s (%d %s) (~ %.4f USD), min bond size = %s %s (%d %s) (%.4f USD)",
 			a.Symbol, ui.ConventionalString(minLotSize), unit, minLotSize, ui.AtomicUnit, minLotSizeUSD,
 			ui.ConventionalString(minBondSize), unit, minBondSize, ui.AtomicUnit, minBondSizeUSD,
-		))
-
-		for _, m := range markets {
-			if m.Base == assetID {
-				if minLotSizes[m.Name] < minLotSize {
-					minLotSizes[m.Name] = minLotSize
-				}
-				log.Debugf("market %s base asset %s: lot size = %d, minLotSize = %d. Current usage = %.2f %%",
-					m.Name, a.Symbol, m.LotSize, minLotSize, float64(minLotSize)/float64(m.LotSize))
-			}
-			if m.Quote == assetID {
-				if dex.TokenSymbol(dex.BipIDSymbol(m.Base)) == "dextt" {
-					continue
-				}
-
-				qui := ui
-				quoteRate := fiatRate
-				baseRate, found := fiatRates[m.Base]
-				if !found {
-					return fmt.Errorf("no fiat exchange rate found for asset %s (%d)", dex.BipIDSymbol(m.Base), m.Base)
-				}
-				xcRate := baseRate / quoteRate
-				bui, err := asset.UnitInfo(m.Base)
-				if err != nil {
-					return fmt.Errorf("no unit info found for base asset %s (%d)", dex.BipIDSymbol(m.Base), m.Base)
-				}
-				baseLotConventional := float64(m.LotSize) / float64(bui.Conventional.ConversionFactor)
-				quoteLotConventional := baseLotConventional * xcRate
-				quoteLot := uint64(math.Round(quoteLotConventional * float64(qui.Conventional.ConversionFactor)))
-				minQuoteLotConventional := float64(minLotSize) / float64(qui.Conventional.ConversionFactor)
-				minBaseLotConventional := minQuoteLotConventional / xcRate
-				minBaseLotSize := uint64(math.Round(minBaseLotConventional * float64(bui.Conventional.ConversionFactor)))
-				bufferedMinBaseConvertedLotSize := uint64(math.Round(float64(minBaseLotSize) * minQuoteLotFactor))
-				if minLotSizes[m.Name] < minLotSize {
-					minLotSizes[m.Name] = bufferedMinBaseConvertedLotSize
-				}
-				r := float64(quoteLot) / float64(minLotSize)
-				if r < minQuoteLotFactor {
-					log.Debugf("the lot size for market %s, %s %s (%d %s) is too low to accomodate the quote asset. "+
-						"The current exchange rate is %.8f. Minimum recommended lot size (1.5x buffer) = %s %s, Recommended lot size with buffer of 2x = %s %s (%d %s)",
-						m.Name, bui.ConventionalString(m.LotSize), bui.Conventional.Unit, m.LotSize, bui.AtomicUnit,
-						xcRate, bui.ConventionalString(bufferedMinBaseConvertedLotSize), bui.Conventional.Unit,
-						bui.ConventionalString(minBaseLotSize*2), bui.Conventional.Unit, minBaseLotSize*2, bui.AtomicUnit,
-					)
-				}
-				log.Debugf("market %s quote asset %s: min quote lot size = %d, market base lot size = %d, quote-converted market lot size = %d, "+
-					"exchange rate = %.8f, base-converted min lot size = %d, Current usage = %.2f %%",
-					m.Name, a.Symbol, minLotSize, m.LotSize, quoteLot,
-					xcRate, minBaseLotSize, float64(minLotSize)/float64(bufferedMinBaseConvertedLotSize))
-			}
-		}
+		)
 	}
 
-	for _, a := range assets {
+	for _, a := range parsedAssets {
 		if a.BondAmt == 0 {
 			continue
 		}
-		minBondSize := minBondSizes[a.Symbol]
-		if a.BondAmt < minBondSize {
-			failures = append(failures, fmt.Sprintf("Bond amount for %s is too small. %d < %d", a.Symbol, a.BondAmt, minBondSize))
+		if a.BondAmt < a.minBondSize {
+			failures = append(failures, fmt.Sprintf("Bond amount for %s is too small. %d < %d", a.Symbol, a.BondAmt, a.minBondSize))
 		} else {
-			successes = append(successes, fmt.Sprintf("Bond size for %s passes: %d >= %d", a.Symbol, a.BondAmt, minBondSize))
+			printSuccess("Bond size for %s passes: %d >= %d", a.Symbol, a.BondAmt, a.minBondSize)
 		}
 	}
 
 	for _, m := range markets {
-		minLotSize, found := minLotSizes[m.Name]
-		if !found {
+		// Check lot size.
+		b, q := parsedAssets[m.Base], parsedAssets[m.Quote]
+		if b == nil || q == nil {
 			continue // should be dextt pair
 		}
-		if m.LotSize < minLotSize {
-			failures = append(failures, fmt.Sprintf("Lot size for %s is too low. %d < %d", m.Name, m.LotSize, minLotSize))
+		const quoteConversionBuffer = 1.5 // Buffer for accomodating rate changes.
+		minFromQuote := uint64(math.Round(float64(q.minLotSize) / q.cFactor * q.fiatRate / b.fiatRate * b.cFactor * quoteConversionBuffer))
+		// Slightly different messaging if we're limited by the conversion from
+		// the quote asset minimums.
+		if minFromQuote > b.minLotSize {
+			if m.LotSize < minFromQuote {
+				failures = append(failures, fmt.Sprintf("Lot size for %s (converted from quote asset %s) is too low. %d < %d", m.Name, q.unit, m.LotSize, minFromQuote))
+			} else {
+				printSuccess("Market %s lot size (converted from quote asset %s) passes: %d >= %d", m.Name, q.unit, m.LotSize, minFromQuote)
+			}
 		} else {
-			successes = append(successes, fmt.Sprintf("Market %s lot size passes: %d >= %d", m.Name, m.LotSize, minLotSize))
+			if m.LotSize < b.minLotSize {
+				failures = append(failures, fmt.Sprintf("Lot size for %s is too low. %d < %d", m.Name, m.LotSize, b.minLotSize))
+			} else {
+				printSuccess("Market %s lot size passes: %d >= %d", m.Name, m.LotSize, b.minLotSize)
+			}
 		}
-	}
-
-	for _, s := range successes {
-		fmt.Println("SUCCESS:", s)
 	}
 
 	for _, s := range failures {

@@ -274,9 +274,9 @@ func redeemP2SHTxSize(segwit bool, redeemSigScriptSize uint64) uint64 {
 	return MinimumTxOverhead + inputSize + P2PKHOutputSize
 }
 
-// RefundSwapTxSize returns the size of a swap refund tx.
-func RefundSwapTxSize(segwit bool) uint64 {
-	return redeemP2SHTxSize(segwit, RefundSigScriptSize)
+// RedeemSwapTxSize returns the size of a swap refund tx.
+func RedeemSwapTxSize(segwit bool) uint64 {
+	return redeemP2SHTxSize(segwit, RedeemSwapSigScriptSize)
 }
 
 // RefundBondTxSize returns the size of a bond refund tx.
@@ -319,8 +319,8 @@ func MinBondSize(maxFeeRate uint64, segwit bool) uint64 {
 // MinLotSize is the minimum lot size that avoids dust for a given max network
 // fee rate.
 func MinLotSize(maxFeeRate uint64, segwit bool) uint64 {
-	refundSize := RefundSwapTxSize(segwit)
-	return minHTLCValue(maxFeeRate, refundSize, segwit)
+	redeemSize := RedeemSwapTxSize(segwit)
+	return minHTLCValue(maxFeeRate, redeemSize, segwit)
 }
 
 // BTCScriptType holds details about a pubkey script and possibly it's redeem

@@ -189,7 +189,7 @@ func Tokens(assetID uint32) map[uint32]*dex.Token {
 	return m
 }
 
-// Minimum returns the minimimum lot size and bond size for a registered asset.
+// Minimums returns the minimimum lot size and bond size for a registered asset.
 func Minimums(assetID uint32, maxFeeRate uint64) (minLotSize, minBondSize uint64, found bool) {
 	baseChainID := assetID
 	if token, is := tokens[assetID]; is {

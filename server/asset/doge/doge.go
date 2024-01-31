@@ -54,7 +54,7 @@ func (d *Driver) MinBondSize(maxFeeRate uint64) uint64 {
 // dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
 // change.
 func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
-	return dustLimit + dexbtc.RefundSwapTxSize(false)*maxFeeRate
+	return dustLimit + dexbtc.RedeemSwapTxSize(false)*maxFeeRate
 }
 
 // Name is the asset's name.
