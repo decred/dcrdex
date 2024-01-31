@@ -67,6 +67,8 @@ const (
 	// needs before the trade is considered confirmed. The redeem is
 	// monitored until this number of confirms is reached.
 	requiredRedeemConfirms = 1
+
+	depositAddrPrefix = "unified:"
 )
 
 var (
@@ -319,7 +321,7 @@ type zecWallet struct {
 var _ asset.FeeRater = (*zecWallet)(nil)
 var _ asset.Wallet = (*zecWallet)(nil)
 
-// DRAFT TODO: Implement LiveReconfigurer
+// TODO: Implement LiveReconfigurer
 // var _ asset.LiveReconfigurer = (*zecWallet)(nil)
 
 func (w *zecWallet) CallRPC(method string, args []any, thing any) error {
@@ -1583,6 +1585,13 @@ func (w *zecWallet) ContractLockTimeExpired(ctx context.Context, contract dex.By
 	return expired, contractExpiry, nil
 }
 
+type depositAddressJSON struct {
+	Unified     string `json:"unified"`
+	Transparent string `json:"transparent"`
+	Orchard     string `json:"orchard"`
+	Sapling     string `json:"sapling,omitempty"`
+}
+
 func (w *zecWallet) DepositAddress() (string, error) {
 	addrRes, err := zGetAddressForAccount(w, shieldedAcctNumber, []string{transparentAddressType, orchardAddressType})
 	if err != nil {
@@ -1592,12 +1601,7 @@ func (w *zecWallet) DepositAddress() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, err := json.Marshal(&struct {
-		Unified     string `json:"unified"`
-		Transparent string `json:"transparent"`
-		Orchard     string `json:"orchard"`
-		Sapling     string `json:"sapling,omitempty"`
-	}{
+	b, err := json.Marshal(&depositAddressJSON{
 		Unified:     addrRes.Address,
 		Transparent: receivers.Transparent,
 		Orchard:     receivers.Orchard,
@@ -1606,7 +1610,7 @@ func (w *zecWallet) DepositAddress() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error encoding address JSON: %w", err)
 	}
-	return "unified:" + string(b), nil
+	return depositAddrPrefix + string(b), nil
 
 }
 
@@ -1971,6 +1975,13 @@ func (w *zecWallet) MaxFundingFees(numTrades uint32, feeRate uint64, settings ma
 }
 
 func (w *zecWallet) OwnsDepositAddress(addrStr string) (bool, error) {
+	if strings.HasPrefix(addrStr, depositAddrPrefix) {
+		var addrs depositAddressJSON
+		if err := json.Unmarshal([]byte(addrStr[len(depositAddrPrefix):]), &addrs); err != nil {
+			return false, fmt.Errorf("error decoding unified address info: %w", err)
+		}
+		addrStr = addrs.Unified
+	}
 	res, err := zValidateAddress(w, addrStr)
 	if err != nil {
 		return false, fmt.Errorf("error validating address: %w", err)
@@ -2169,11 +2180,22 @@ func (w *zecWallet) fundOrchard(amt uint64) (sum, fees uint64, n int, funded boo
 }
 
 func (w *zecWallet) EstimateSendTxFee(
-	addrStr string, amt, _ /* feeRate*/ uint64, _ /* subtract */ bool,
+	addrStr string, amt, _ /* feeRate*/ uint64, _ /* subtract */, maxWithdraw bool,
 ) (
-	fee uint64, isValidAddress bool, err error,
+	fees uint64, isValidAddress bool, err error,
 ) {
-	isValidAddress = w.ValidateAddress(addrStr)
+
+	res, err := zValidateAddress(w, addrStr)
+	isValidAddress = err == nil && res.IsValid
+
+	if maxWithdraw {
+		addrType := transparentAddressType
+		if isValidAddress {
+			addrType = res.AddressType
+		}
+		fees, err = w.maxWithdrawFees(addrType)
+		return
+	}
 
 	orchardSum, orchardFees, orchardN, orchardFunded, err := w.fundOrchard(amt)
 	if err != nil {
@@ -2197,8 +2219,34 @@ func (w *zecWallet) EstimateSendTxFee(
 			amt, bal.Transparent, orchardSum, err)
 	}
 
-	fee = dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(uint64(len(spents)))), 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, uint64(orchardN))
+	fees = dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(uint64(len(spents)))), 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, uint64(orchardN))
 	return
+}
+
+func (w *zecWallet) maxWithdrawFees(addrType string) (uint64, error) {
+	unfiltered, err := listUnspent(w)
+	if err != nil {
+		return 0, fmt.Errorf("listunspent error: %w", err)
+	}
+	numInputs := uint64(len(unfiltered))
+	noteCounts, err := zGetNotesCount(w)
+	if err != nil {
+		return 0, fmt.Errorf("balances error: %w", err)
+	}
+
+	txInsSize := numInputs*dexbtc.RedeemP2PKHInputSize + uint64(wire.VarIntSerializeSize(numInputs))
+	nActionsOrchard := uint64(noteCounts.Orchard)
+	var txOutsSize, nOutputsSapling uint64
+	switch addrType {
+	case unifiedAddressType, orchardAddressType:
+		nActionsOrchard++
+	case saplingAddressType:
+		nOutputsSapling = 1
+	default: // transparent
+		txOutsSize = dexbtc.P2PKHOutputSize + 1
+	}
+	// TODO: Do we get nJoinSplit from noteCounts.Sprout somehow?
+	return dexzec.TxFeesZIP317(txInsSize, txOutsSize, uint64(noteCounts.Sapling), nOutputsSapling, 0, nActionsOrchard), nil
 }
 
 type txCoin struct {
@@ -2375,7 +2423,7 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	// Add the contract outputs.
 	// TODO: Make P2WSH contract and P2WPKH change outputs instead of
 	// legacy/non-segwit swap contracts pkScripts.
-	var txOutsSize uint64
+	var swapOutsSize uint64
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
 		// revokeAddr is the address belonging to the key that may be used to
@@ -2416,7 +2464,7 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 
 		// Add the transaction output.
 		txOut := wire.NewTxOut(int64(contract.Value), pkScript)
-		txOutsSize += uint64(txOut.SerializeSize())
+		swapOutsSize += uint64(txOut.SerializeSize())
 		baseTx.AddTxOut(txOut)
 	}
 	if totalIn < totalOut {
@@ -2436,6 +2484,7 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	txInsSize := uint64(len(coins))*dexbtc.RedeemP2PKHInputSize + 1
+	txOutsSize := swapOutsSize + dexbtc.P2PKHOutputSize
 	fees := dexzec.TxFeesZIP317(txInsSize, txOutsSize, 0, 0, 0, 0)
 
 	// Sign, add change, but don't send the transaction yet until

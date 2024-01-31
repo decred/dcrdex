@@ -717,7 +717,7 @@ func (c *TCore) BondsFeeBuffer(assetID uint32) (uint64, error) {
 func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
 	return len(address) > 10, nil
 }
-func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
 	return uint64(float64(value) * 0.01), len(addr) > 10, nil
 }
 func (c *TCore) Login([]byte) error  { return nil }

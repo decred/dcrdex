@@ -77,7 +77,7 @@ fi
 
 if [ $ZEC_ON -eq 0 ]; then
 	echo configuring Zcash wallet
-	./bwctl -p abc -p "" --simnet newwallet 133 zcashdRPC ~/dextest/zec/alpha/alpha.conf
+	./bwctl -p abc -p "" --simnet newwallet 133 zcashdRPC ~/dextest/zec/beta/alpha.conf
 fi
 
 if [ $DGB_ON -eq 0 ]; then

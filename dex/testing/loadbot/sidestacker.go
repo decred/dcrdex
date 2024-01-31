@@ -26,7 +26,6 @@ const stackerSpread = 50.0
 // randomness to the rates and quantities of the sideStacker's orders.
 type sideStacker struct {
 	log     dex.Logger
-	node    string
 	seller  bool
 	metered bool
 	// numStanding is the targeted number of standing limit orders. If there
@@ -52,11 +51,11 @@ type sideStacker struct {
 
 var _ Trader = (*sideStacker)(nil)
 
-func newSideStacker(numStanding, ordsPerEpoch int, node string, seller, metered, oscillatorWrite bool,
+func newSideStacker(numStanding, ordsPerEpoch int, seller, metered, oscillatorWrite bool,
 	oscillator *uint64, log dex.Logger) *sideStacker {
+
 	return &sideStacker{
 		log:             log,
-		node:            node,
 		seller:          seller,
 		metered:         metered,
 		numStanding:     numStanding,
@@ -67,6 +66,12 @@ func newSideStacker(numStanding, ordsPerEpoch int, node string, seller, metered,
 }
 
 func runSideStacker(numStanding, ordsPerEpoch int) {
+	if numStanding == 0 {
+		numStanding = 10
+	}
+	if ordsPerEpoch == 0 {
+		ordsPerEpoch = 5
+	}
 	if numStanding < ordsPerEpoch {
 		panic("numStanding must be >= minPerEpoch")
 	}
@@ -76,13 +81,13 @@ func runSideStacker(numStanding, ordsPerEpoch int) {
 	go func() {
 		defer wg.Done()
 		seller, metered, oscillatorWrite := true, false, true
-		runTrader(newSideStacker(numStanding, ordsPerEpoch, alpha, seller, metered, oscillatorWrite,
+		runTrader(newSideStacker(numStanding, ordsPerEpoch, seller, metered, oscillatorWrite,
 			&oscillator, log.SubLogger("STACKER:0")), "STACKER:0")
 	}()
 	go func() {
 		defer wg.Done()
 		seller, metered, oscillatorWrite := false, false, false
-		runTrader(newSideStacker(numStanding, ordsPerEpoch, alpha, seller, metered, oscillatorWrite,
+		runTrader(newSideStacker(numStanding, ordsPerEpoch, seller, metered, oscillatorWrite,
 			&oscillator, log.SubLogger("STACKER:1")), "STACKER:1")
 	}()
 	wg.Wait()
@@ -99,8 +104,8 @@ func (s *sideStacker) SetupWallets(m *Mantle) {
 	defer setupWalletsMtx.Unlock()
 	maxActiveOrders := 2 * (s.numStanding + s.ordsPerEpoch)
 	baseCoins, quoteCoins, minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := walletConfig(maxOrderLots, maxActiveOrders, s.seller, uint64(defaultMidGap*rateEncFactor))
-	m.createWallet(baseSymbol, s.node, minBaseQty, maxBaseQty, baseCoins)
-	m.createWallet(quoteSymbol, s.node, minQuoteQty, maxQuoteQty, quoteCoins)
+	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, baseCoins)
+	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, quoteCoins)
 	s.log.Infof("Side Stacker has been initialized with %d target standing orders, %d orders "+
 		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial %s coins, %d initial %s coins",
 		s.numStanding, s.ordsPerEpoch, valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
@@ -121,6 +126,8 @@ func (s *sideStacker) HandleNotification(m *Mantle, note core.Notification) {
 			// updates associated with the previous epoch's match cycle.
 			go func() {
 				select {
+				// TODO: This delay is a little arbitrary. Maybe we shouldn't
+				// delay at all or the delay should be randomized.
 				case <-time.After(time.Duration(epochDuration/4) * time.Millisecond):
 				case <-ctx.Done():
 					return

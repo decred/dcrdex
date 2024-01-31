@@ -149,13 +149,13 @@ type clientCore interface {
 	WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error)
 	ToggleRateSourceStatus(src string, disable bool) error
 	FiatRateSources() map[string]bool
-	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
+	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error)
 	ValidateAddress(address string, assetID uint32) (bool, error)
 	DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error)
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
-	Notifications(n int) ([]*db.Notification, error)
+	Notifications(n int) (notes, pokes []*db.Notification, _ error)
 	ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConrim func()) (string, error)
 	UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error)
 	ApproveTokenFee(assetID uint32, version uint32, approval bool) (uint64, error)

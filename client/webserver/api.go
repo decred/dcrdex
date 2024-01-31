@@ -137,7 +137,7 @@ func (s *WebServer) apiEstimateSendTxFee(w http.ResponseWriter, r *http.Request)
 		s.writeAPIError(w, errors.New("missing asset ID"))
 		return
 	}
-	txFee, validAddress, err := s.core.EstimateSendTxFee(form.Addr, *form.AssetID, form.Value, form.Subtract)
+	txFee, validAddress, err := s.core.EstimateSendTxFee(form.Addr, *form.AssetID, form.Value, form.Subtract, form.MaxWithdraw)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return

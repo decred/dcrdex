@@ -192,6 +192,7 @@ const (
 	pendingID                        = "PENDING"
 	completeID                       = "COMPLETE"
 	archivedSettingsID               = "ARCHIVED_SETTINGS"
+	idTransparent                    = "TRANSPARENT"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -383,6 +384,7 @@ var enUS = map[string]*intl.Translation{
 	pendingID:                        {T: "Pending"},
 	completeID:                       {T: "Complete"},
 	archivedSettingsID:               {T: "Archived Settings"},
+	idTransparent:                    {T: "Transparent"},
 }
 
 var ptBR = map[string]*intl.Translation{

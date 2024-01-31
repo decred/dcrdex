@@ -5946,7 +5946,7 @@ func (c *Core) ApproveTokenFee(assetID uint32, version uint32, approval bool) (u
 
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
 // withdraw the specified amount.
-func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
 	if amount == 0 {
 		return 0, false, fmt.Errorf("cannot check fee for zero %s", unbip(assetID))
 	}
@@ -5968,7 +5968,7 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 		return 0, false, fmt.Errorf("wallet does not support fee estimation")
 	}
 
-	return estimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
+	return estimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract, maxWithdraw)
 }
 
 // SingleLotFees returns the estimated swap, refund, and redeem fees for a single lot

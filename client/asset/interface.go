@@ -587,7 +587,7 @@ type TxFeeEstimator interface {
 	// the provided amount using the provided feeRate. This uses actual utxos to
 	// calculate the tx fee where possible and ensures the wallet has enough to
 	// cover send value and minimum fees.
-	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
+	EstimateSendTxFee(address string, value, feeRate uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error)
 }
 
 // Broadcaster is a wallet that can send a raw transaction on the asset network.

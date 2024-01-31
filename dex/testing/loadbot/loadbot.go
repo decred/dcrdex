@@ -63,7 +63,7 @@ const (
 	zcl              = "zcl"
 	usdc             = "usdc.eth"
 	usdcp            = "usdc.polygon"
-	maxOrderLots     = 10
+	maxOrderLots     = 5
 	ethFeeRate       = 200 // gwei
 	// missedCancelErrStr is part of an error found in dcrdex/server/market/orderrouter.go
 	// that a cancel order may hit with bad timing but is not a problem.
@@ -102,8 +102,8 @@ var (
 
 	ctx, quit = context.WithCancel(context.Background())
 
-	supportedAssets                                                                             = assetMap()
-	alphaAddrBase, betaAddrBase, alphaAddrQuote, betaAddrQuote, market, baseSymbol, quoteSymbol string
+	supportedAssets                                                = assetMap()
+	alphaAddrBase, alphaAddrQuote, market, baseSymbol, quoteSymbol string
 	alphaCfgBase, betaCfgBase,
 	alphaCfgQuote, betaCfgQuote map[string]string
 
@@ -168,7 +168,7 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 // with the "singular wallet" assets like zec and doge, this port may not be for
 // fresh nodes created with the start-wallet script, just the alpha and beta
 // nodes' wallets.
-func rpcAddr(symbol, node string) string {
+func rpcAddr(symbol string) string {
 	var key string
 
 	switch symbol {
@@ -183,30 +183,18 @@ func rpcAddr(symbol, node string) string {
 	}
 
 	if symbol == baseSymbol {
-		if node == alpha {
-			return alphaCfgBase[key]
-		}
-		return betaCfgBase[key]
+		return alphaCfgBase[key]
 	}
-	if node == alpha {
-		return alphaCfgQuote[key]
-	}
-	return betaCfgQuote[key]
+	return alphaCfgQuote[key]
 }
 
 // returnAddress is an address for the specified node's wallet. returnAddress
 // is used when a wallet accumulates more than the max allowed for some asset.
-func returnAddress(symbol, node string) string {
+func returnAddress(symbol string) string {
 	if symbol == baseSymbol {
-		if node == alpha {
-			return alphaAddrBase
-		}
-		return betaAddrBase
+		return alphaAddrBase
 	}
-	if node == alpha {
-		return alphaAddrQuote
-	}
-	return betaAddrQuote
+	return alphaAddrQuote
 }
 
 // mine will mine a single block on the node and asset indicated.
@@ -506,37 +494,33 @@ func run() error {
 
 	log.Infof("Running program %s", programName)
 
-	getAddress := func(symbol, node string) (string, error) {
+	alphaAddress := func(symbol string) (string, error) {
 		var args []string
 		switch symbol {
 		case btc, ltc, dgb:
 			args = []string{"getnewaddress", "''", "bech32"}
-		case dash, doge, bch, firo, zec, zcl:
+		case dash, doge, bch, firo, zcl:
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
 		case eth, usdc, polygon, usdcp:
 			args = []string{"attach", `--exec eth.accounts[1]`}
+		case zec:
+			return "tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD", nil // ALPHA_ADDR in the zcash harness.sh
 		default:
 			return "", fmt.Errorf("getAddress: unknown symbol %q", symbol)
 		}
-		res := <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), args...)
+		res := <-harnessCtl(ctx, symbol, "./alpha", args...)
 		if res.err != nil {
 			return "", fmt.Errorf("error getting %s address: %v", symbol, res.err)
 		}
 		return strings.Trim(res.output, `"`), nil
 	}
 
-	if alphaAddrBase, err = getAddress(baseSymbol, alpha); err != nil {
+	if alphaAddrBase, err = alphaAddress(baseSymbol); err != nil {
 		return err
 	}
-	if betaAddrBase, err = getAddress(baseSymbol, beta); err != nil {
-		return err
-	}
-	if alphaAddrQuote, err = getAddress(quoteSymbol, alpha); err != nil {
-		return err
-	}
-	if betaAddrQuote, err = getAddress(quoteSymbol, beta); err != nil {
+	if alphaAddrQuote, err = alphaAddress(quoteSymbol); err != nil {
 		return err
 	}
 
@@ -691,11 +675,9 @@ func run() error {
 	case "pingpong4":
 		runPingPong(4)
 	case "sidestacker":
-		runSideStacker(20, 3)
+		runSideStacker(m, n)
 	case "compound":
-		runCompound()
-	case "heavy":
-		runHeavy()
+		runCompound(m, n)
 	case "whale":
 		runWhale()
 	default:
