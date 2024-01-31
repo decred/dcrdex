@@ -218,7 +218,7 @@ if [ $ZCL_ON -eq 0 ]; then
         {
             "base": "ZCL_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 10000000000,
+            "lotSize": 50000000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
