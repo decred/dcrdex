@@ -1375,6 +1375,53 @@ func (dc *dexConnection) bestBookFeeSuggestion(assetID uint32) uint64 {
 	return 0
 }
 
+type pokesCache struct {
+	sync.RWMutex
+	cache  []*db.Notification
+	cursor int
+}
+
+func (c *pokesCache) add(poke *db.Notification) {
+	c.Lock()
+	defer c.Unlock()
+
+	if len(c.cache) >= pokesCapacity {
+		c.cache[c.cursor] = poke
+	} else {
+		c.cache = append(c.cache, poke)
+	}
+	c.cursor = (c.cursor + 1) % pokesCapacity
+}
+
+func (c *pokesCache) pokes() []*db.Notification {
+	c.RLock()
+	defer c.RUnlock()
+
+	pokes := make([]*db.Notification, len(c.cache))
+	nPokes := len(c.cache)
+	if nPokes > 0 {
+		if c.cursor == 0 {
+			copy(pokes, c.cache)
+		} else {
+			tail := nPokes - c.cursor
+			copy(pokes[:tail], c.cache[nPokes-tail:])
+			copy(pokes[tail:], c.cache[:nPokes-tail])
+		}
+	}
+	return pokes
+}
+
+func (c *pokesCache) init(pokes []*db.Notification) {
+	c.Lock()
+	defer c.Unlock()
+
+	if len(pokes) > pokesCapacity {
+		pokes = pokes[:len(pokes)-pokesCapacity]
+	}
+	c.cache = pokes
+	c.cursor = len(pokes) % pokesCapacity
+}
+
 // blockWaiter is a message waiting to be stamped, signed, and sent once a
 // specified coin has the requisite confirmations. The blockWaiter is similar to
 // dcrdex/server/blockWaiter.Waiter, but is different enough to warrant a
@@ -1487,11 +1534,7 @@ type Core struct {
 
 	notes chan asset.WalletNotification
 
-	pokesCache struct {
-		sync.RWMutex
-		pokes  []*db.Notification
-		cursor int
-	}
+	pokesCache *pokesCache
 }
 
 // New is the constructor for a new Core.
@@ -4896,22 +4939,7 @@ func (c *Core) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
 
 // pokes returns a time-ordered copy of the pokes cache.
 func (c *Core) pokes() []*db.Notification {
-	pc := &c.pokesCache
-	pc.RLock()
-	defer pc.RUnlock()
-	pokes := make([]*db.Notification, len(pc.pokes))
-	nPokes := len(pc.pokes)
-	if nPokes > 0 {
-		if pc.cursor == 0 {
-			copy(pokes, pc.pokes)
-		} else {
-			tail := nPokes - pc.cursor
-			copy(pokes[:tail], pc.pokes[nPokes-tail:])
-			copy(pokes[tail:], pc.pokes[:nPokes-tail])
-		}
-
-	}
-	return pokes
+	return c.pokesCache.pokes()
 }
 
 func (c *Core) recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) error {
@@ -7445,14 +7473,9 @@ func (c *Core) initialize() error {
 	pokes, err := c.db.LoadPokes()
 	if err != nil {
 		c.log.Errorf("Error loading pokes from db: %v", err)
+	} else {
+		c.pokesCache.init(pokes)
 	}
-	if len(pokes) > pokesCapacity {
-		pokes = pokes[:len(pokes)-pokesCapacity]
-	}
-	c.pokesCache.Lock()
-	c.pokesCache.pokes = pokes
-	c.pokesCache.cursor = len(pokes) % pokesCapacity
-	c.pokesCache.Unlock()
 
 	// Start connecting to DEX servers.
 	var liveConns uint32
