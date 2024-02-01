@@ -151,6 +151,18 @@ export default class SettingsPage extends BasePage {
       this.appPassResetForm.focus()
     })
 
+    Doc.bind(page.companionAppBtn, 'click', () => {
+      if (app().onionUrl !== '') {
+        Doc.show(page.companionAppTorEnabled)
+        Doc.hide(page.companionAppTorDisabled)
+        page.companionAppQrcode.src = '/generatecompanionappqrcode'
+      } else {
+        Doc.hide(page.companionAppTorEnabled)
+        Doc.show(page.companionAppTorDisabled)
+      }
+      this.showForm(page.companionAppForm)
+    })
+
     Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
     Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
     Doc.bind(page.addAccount, 'click', () => page.accountFile.click())

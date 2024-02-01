@@ -1,0 +1,28 @@
+[submodule "external/tor"]
+	path = external/tor
+	url = https://github.com/guardianproject/tor.git
+	ignore = dirty
+[submodule "external/libevent"]
+	path = external/libevent
+	url = https://github.com/libevent/libevent.git
+	ignore = dirty
+[submodule "external/openssl"]
+	path = external/openssl
+	url = https://github.com/openssl/openssl.git
+	ignore = dirty
+[submodule "external/zstd"]
+	path = external/zstd
+	url = https://github.com/facebook/zstd.git
+	ignore = dirty
+[submodule "external/xz"]
+	path = external/xz
+	url = https://git.tukaani.org/xz.git
+	ignore = dirty
+[submodule "external/zlib"]
+	path = external/zlib
+	url = https://github.com/madler/zlib
+	ignore = dirty
+[submodule "external/elf-cleaner"]
+	path = external/elf-cleaner
+	url = https://github.com/termux/termux-elf-cleaner
+	ignore = dirty

@@ -496,9 +496,8 @@ func TestConnectBindError(t *testing.T) {
 
 	tAddr := s0.addr
 	s, err := New(&Config{
-		Core:   &TCore{},
-		Addr:   tAddr,
-		Logger: tLogger,
+		Core: &TCore{},
+		Addr: tAddr,
 	})
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)

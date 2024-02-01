@@ -100,7 +100,7 @@ class MessageSocket {
       const timeout = setTimeout(() => {
         // readyState is still WebSocket.CONNECTING. Cancel and trigger onclose.
         if (conn) conn.close()
-      }, 500)
+      }, 2500)
 
       // unmarshal message, and forward the message to registered handlers
       conn.onmessage = (evt: MessageEvent) => {
