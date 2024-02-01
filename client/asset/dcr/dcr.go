@@ -5591,7 +5591,6 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 		return
 	}
 	if !synced {
-		dcr.log.Infof("not synced")
 		return
 	}
 
@@ -5621,7 +5620,6 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 		}
 
 		addToHistoryIfNew := func(tx *walletjson.ListTransactionsResult, txType asset.TransactionType) {
-			fmt.Printf("~~~~~~~ tx cat %v type %+v\n", tx.Category, *tx.TxType)
 			txHash, err := chainhash.NewHashFromStr(tx.TxID)
 			if err != nil {
 				dcr.log.Errorf("Error decoding txid %s: %v", tx.TxID, err)
@@ -5656,7 +5654,7 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 			} else if *tx.TxType == walletjson.LTTTVote {
 				addToHistoryIfNew(&tx, asset.TicketVote)
 			} else if *tx.TxType == walletjson.LTTTRevocation {
-				addToHistoryIfNew(&tx, asset.TicketRevokation)
+				addToHistoryIfNew(&tx, asset.TicketRevocation)
 			}
 		}
 	}

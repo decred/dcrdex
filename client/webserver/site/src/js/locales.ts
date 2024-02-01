@@ -344,7 +344,10 @@ export const enUS: Locale = {
   [ID_TX_TYPE_APPROVE_TOKEN]: 'Approve token',
   [ID_TX_TYPE_ACCELERATION]: 'Acceleration',
   [ID_TX_TYPE_SELF_TRANSFER]: 'Self transfer',
-  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval'
+  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval',
+  [ID_TX_TYPE_TICKET_PURCHASE]: 'Ticket purchase',
+  [ID_TX_TYPE_TICKET_VOTE]: 'Ticket vote',
+  [ID_TX_TYPE_TICKET_REVOCATION]: 'Ticket revocation'
 }
 
 export const ptBR: Locale = {

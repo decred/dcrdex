@@ -1082,7 +1082,7 @@ const (
 	RevokeTokenApproval
 	TicketPurchase
 	TicketVote
-	TicketRevokation
+	TicketRevocation
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a
