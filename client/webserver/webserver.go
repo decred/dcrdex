@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/client/tor"
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
@@ -221,6 +222,7 @@ type cachedPassword struct {
 }
 
 type Config struct {
+	DataDir       string
 	Core          clientCore // *core.Core
 	MarketMaker   MMCore     // *mm.MarketMaker
 	MMCfgPath     string
@@ -240,6 +242,7 @@ type Config struct {
 	NoEmbed      bool
 	HttpProf     bool
 	Experimental bool
+	Tor          bool
 }
 
 type valStamp struct {
@@ -251,6 +254,7 @@ type valStamp struct {
 // interface to Bison Wallet.
 type WebServer struct {
 	ctx          context.Context
+	dataDir      string
 	wsServer     *websocket.Server
 	mux          *chi.Mux
 	siteDir      string
@@ -263,6 +267,8 @@ type WebServer struct {
 	csp          string
 	srv          *http.Server
 	html         atomic.Value // *templates
+	tor          bool
+	onion        string
 	experimental bool
 
 	authMtx         sync.RWMutex
@@ -383,9 +389,11 @@ func New(cfg *Config) (*WebServer, error) {
 		mux:             mux,
 		srv:             httpServer,
 		addr:            cfg.Addr,
+		dataDir:         cfg.DataDir,
 		wsServer:        websocket.New(cfg.Core, log.SubLogger("WS")),
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
+		tor:             cfg.Tor,
 		experimental:    cfg.Experimental,
 		bondBuf:         map[uint32]valStamp{},
 	}
@@ -652,6 +660,43 @@ func (s *WebServer) Addr() string {
 
 // Connect starts the web server. Satisfies the dex.Connector interface.
 func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	var wg sync.WaitGroup
+	listeners := make([]net.Listener, 0)
+	var success bool
+
+	if s.tor {
+		if s.dataDir == "" {
+			return nil, errors.New("tor enabled but no data directory was specified")
+		}
+		dataDir := filepath.Join(s.dataDir, "tor")
+		svc, err := tor.New(dataDir, log.SubLogger("TOR"))
+		if err != nil {
+			return nil, fmt.Errorf("error intializing hidden service: %w", err)
+		}
+		cm := dex.NewConnectionMaster(svc)
+		if err := cm.ConnectOnce(ctx); err != nil {
+			return nil, fmt.Errorf("error connecting hidden service: %w", err)
+		}
+		defer func() {
+			if !success {
+				cm.Disconnect()
+			}
+		}()
+		wg.Add(1)
+		go func() {
+			cm.Wait()
+			wg.Done()
+		}()
+		s.onion = svc.OnionAddress()
+		log.Infof("Hidden service address: %s", s.onion)
+
+		listener, err := net.Listen("tcp4", svc.ServerAddress())
+		if err != nil {
+			return nil, fmt.Errorf("error generating listener for tor relay: %w", err)
+		}
+		listeners = append(listeners, listener)
+	}
+
 	// Start serving.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -661,7 +706,7 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if https {
 		listener = tls.NewListener(listener, s.srv.TLSConfig)
 	}
-
+	listeners = append(listeners, listener)
 	s.ctx = ctx
 
 	addr, allowInCSP := prepareAddr(listener.Addr())
@@ -678,7 +723,6 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	s.addr = addr
 
 	// Shutdown the server on context cancellation.
-	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -687,6 +731,8 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		if err != nil {
 			log.Errorf("Problem shutting down rpc: %v", err)
 		}
+		s.wsServer.Shutdown()
+		log.Infof("Web server off")
 	}()
 
 	// Configure the websocket handler before starting the server.
@@ -694,18 +740,18 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		s.wsServer.HandleConnect(ctx, w, r)
 	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err = s.srv.Serve(listener) // will modify srv.TLSConfig for http/2 even when !https
-		if !errors.Is(err, http.ErrServerClosed) {
-			log.Warnf("unexpected (http.Server).Serve error: %v", err)
-		}
-		// Disconnect the websocket clients since http.(*Server).Shutdown does
-		// not deal with hijacked websocket connections.
-		s.wsServer.Shutdown()
-		log.Infof("Web server off")
-	}()
+	for _, listener := range listeners {
+		wg.Add(1)
+		go func(listener net.Listener) {
+			log.Infof("Server listening on %s", listener.Addr())
+			err := s.srv.Serve(listener)
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Warnf("unexpected (http.Server).Serve error: %v", err)
+			}
+			log.Debugf("RPC listener done for %s", listener.Addr())
+			wg.Done()
+		}(listener)
+	}
 
 	wg.Add(1)
 	go func() {
@@ -720,6 +766,8 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	fmt.Printf("\n\t****  OPEN IN YOUR BROWSER TO LOGIN AND TRADE  --->  %s://%s  ****\n\n",
 		scheme, s.addr)
+
+	success = true
 	return &wg, nil
 }
 
