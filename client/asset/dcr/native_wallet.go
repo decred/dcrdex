@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -379,12 +380,15 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 
 // WalletTransaction returns a transaction that either the wallet has made or
 // one in which the wallet has received funds.
-func (dcr *NativeWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*asset.WalletTransaction, error) {
-	txHash, _, err := decodeCoinID(coinID)
-	if err != nil {
-		return nil, err
+func (dcr *NativeWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	coinID, err := hex.DecodeString(txID)
+	if err == nil {
+		txHash, _, err := decodeCoinID(coinID)
+		if err == nil {
+			txID = txHash.String()
+		}
 	}
-	txID := txHash.String()
+
 	txs, err := dcr.TxHistory(1, &txID, false)
 	if err != nil {
 		return nil, err

@@ -5324,7 +5324,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
 			confs = tip - tx.BlockNumber + 1
 		}
-		if confs >= defaultRedeemConfTarget {
+		if confs >= requiredRedeemConfirms {
 			tx.Confirmed = true
 			updated = true
 		}
