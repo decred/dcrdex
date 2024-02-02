@@ -19,6 +19,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -643,6 +644,7 @@ type ExchangeWallet struct {
 	peersChange   func(uint32, error)
 	vspFilepath   string
 	walletType    string
+	walletDir     string
 
 	oracleFeesMtx sync.Mutex
 	oracleFees    map[uint64]feeStamped // conf target => fee rate
@@ -850,6 +852,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		walletType:          cfg.Type,
 		subsidyCache:        blockchain.NewSubsidyCache(chainParams),
 		pendingTxs:          make(map[chainhash.Hash]*btc.ExtendedWalletTx),
+		walletDir:           dir,
 	}
 
 	if b, err := os.ReadFile(vspFilepath); err == nil {
@@ -901,6 +904,87 @@ func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 // 	}
 // }
 
+func (dcr *ExchangeWallet) connectTxHistoryDB() error {
+	dir, err := os.Open(dcr.walletDir)
+	if err != nil {
+		return fmt.Errorf("error opening wallet directory: %w", err)
+	}
+	defer dir.Close()
+
+	entries, err := dir.Readdir(0)
+	if err != nil {
+		return fmt.Errorf("error reading wallet directory: %w", err)
+	}
+
+	pattern := regexp.MustCompile(`^txhistory-(.+)\.db$`)
+
+	var dbPath string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		match := pattern.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+
+		address := match[1]
+		owns, err := dcr.OwnsDepositAddress(address)
+		if err != nil {
+			return fmt.Errorf("error checking if wallet owns deposit address %s: %w", address, err)
+		}
+		if owns {
+			dcr.log.Infof("Using tx history db %s", entry.Name())
+			dbPath = filepath.Join(dcr.walletDir, entry.Name())
+			break
+		}
+	}
+
+	if dbPath == "" {
+		depositAddr, err := dcr.DepositAddress()
+		if err != nil {
+			return fmt.Errorf("error getting deposit address: %w", err)
+		}
+		dcr.log.Infof("Creating tx history db txhistory-%s.db", depositAddr)
+		dbPath = filepath.Join(dcr.walletDir, fmt.Sprintf("txhistory-%s.db", depositAddr))
+	}
+
+	db, err := btc.NewBadgerTxDB(dbPath, dcr.log)
+	if err != nil {
+		return fmt.Errorf("error opening tx history db: %w", err)
+	}
+
+	dcr.txHistoryDB.Store(db)
+
+	pendingTxs, err := db.GetPendingTxs()
+	if err != nil {
+		return fmt.Errorf("failed to load unconfirmed txs: %v", err)
+	}
+
+	dcr.pendingTxsMtx.Lock()
+	for _, tx := range pendingTxs {
+		txHash, err := chainhash.NewHashFromStr(tx.ID)
+		if err != nil {
+			dcr.log.Errorf("Invalid txid %v from tx history db: %v", tx.ID, err)
+			continue
+		}
+		dcr.pendingTxs[*txHash] = tx
+	}
+	dcr.pendingTxsMtx.Unlock()
+
+	lastQuery, err := db.GetLastReceiveTxQuery()
+	if errors.Is(err, btc.ErrNeverQueried) {
+		lastQuery = 0
+	} else if err != nil {
+		return fmt.Errorf("failed to load last query time: %v", err)
+	}
+
+	dcr.receiveTxLastQuery.Store(lastQuery)
+
+	return nil
+}
+
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
 func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
@@ -945,6 +1029,11 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
 
+	err = dcr.connectTxHistoryDB()
+	if err != nil {
+		return nil, err
+	}
+
 	success = true // All good, don't disconnect the wallet when this method returns.
 	dcr.connected.Store(true)
 
@@ -954,38 +1043,11 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 
 	var wg sync.WaitGroup
 
-	if txHistoryDB := dcr.txDB(); txHistoryDB != nil {
-		pendingTxs, err := txHistoryDB.GetPendingTxs()
-		if err != nil {
-			return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
-		}
-
-		dcr.pendingTxsMtx.Lock()
-		for _, tx := range pendingTxs {
-			txHash, err := chainhash.NewHashFromStr(tx.ID)
-			if err != nil {
-				dcr.log.Errorf("Invalid txid %v from tx history db: %v", tx.ID, err)
-				continue
-			}
-			dcr.pendingTxs[*txHash] = tx
-		}
-		dcr.pendingTxsMtx.Unlock()
-
-		lastQuery, err := txHistoryDB.GetLastReceiveTxQuery()
-		if errors.Is(err, btc.ErrNeverQueried) {
-			lastQuery = 0
-		} else if err != nil {
-			return nil, fmt.Errorf("failed to load last query time: %v", err)
-		}
-
-		dcr.receiveTxLastQuery.Store(lastQuery)
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			txHistoryDB.Run(ctx)
-		}()
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dcr.txDB().Run(ctx)
+	}()
 
 	wg.Add(1)
 	go func() {
@@ -6316,6 +6378,20 @@ func float64PtrStr(v *float64) string {
 		return "nil"
 	}
 	return strconv.FormatFloat(*v, 'f', 8, 64)
+}
+
+// TxHistory returns all the transactions the wallet has made. If refID is nil,
+// then transactions starting from the most recent are returned (past is ignored).
+// If past is true, the transactions prior to the refID are returned, otherwise
+// the transactions after the refID are returned. n is the number of
+// transactions to return. If n is <= 0, all the transactions will be returned.
+func (dcr *ExchangeWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	txHistoryDB := dcr.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
+	}
+
+	return txHistoryDB.GetTxs(n, refID, past)
 }
 
 // ConfirmRedemption returns how many confirmations a redemption has. Normally
