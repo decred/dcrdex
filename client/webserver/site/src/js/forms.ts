@@ -1903,6 +1903,7 @@ export class LoginForm {
       Doc.showFormError(page.errMsg, res.msg)
       return
     }
+    await app().fetchUser()
     if (res.notes) {
       res.notes.reverse()
       app().setNotes(res.notes)
