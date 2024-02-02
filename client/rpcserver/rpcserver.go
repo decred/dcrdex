@@ -86,6 +86,7 @@ type clientCore interface {
 	Notifications(int) ([]*db.Notification, error)
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
+	WalletTransaction(assetID uint32, coinID dex.Bytes) (*asset.WalletTransaction, error)
 
 	// These are core's ticket buying interface.
 	StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error)

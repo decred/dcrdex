@@ -552,6 +552,62 @@ func (w *xcWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTr
 	return historian.TxHistory(n, refID, past)
 }
 
+// WalletTransaction returns information about a transaction that the wallet
+// has made or one in which that wallet received funds. This function supports
+// both transaction ID and coin ID.
+func (w *xcWallet) WalletTransaction(ctx context.Context, id dex.Bytes) (*asset.WalletTransaction, error) {
+	if !w.connected() {
+		return nil, errWalletNotConnected
+	}
+
+	historian, ok := w.Wallet.(asset.WalletHistorian)
+	if !ok {
+		return nil, fmt.Errorf("wallet does not support transaction history")
+	}
+
+	return historian.WalletTransaction(ctx, id)
+}
+
+// ConfirmedWalletTransaction is similar to WalletTransaction, but calls
+// the onConfirm callback when the PartOfActiveBalance is true on
+// the WalletTransaction.
+func (w *xcWallet) ConfirmedWalletTransaction(ctx context.Context, id dex.Bytes, log dex.Logger, onConfirm func(*asset.WalletTransaction)) error {
+	if !w.connected() {
+		return errWalletNotConnected
+	}
+
+	historian, ok := w.Wallet.(asset.WalletHistorian)
+	if !ok {
+		return fmt.Errorf("wallet does not support transaction history")
+	}
+
+	go func() {
+		timer := time.NewTimer(0)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				tx, err := historian.WalletTransaction(ctx, id)
+				if err == nil && tx.Confirmed {
+					onConfirm(tx)
+					return
+				}
+
+				if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
+					log.Errorf("WalletTransaction error: %v", err)
+				}
+
+				timer = time.NewTimer(time.Minute)
+			}
+		}
+	}()
+
+	return nil
+}
+
 // MakeBondTx authors a DEX time-locked fidelity bond transaction if the
 // asset.Wallet implementation is a Bonder.
 func (w *xcWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, priv *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {

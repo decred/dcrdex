@@ -5,12 +5,10 @@ package mm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -121,13 +119,14 @@ func (w *wrappedCEX) Withdraw(ctx context.Context, assetID uint32, amount uint64
 	conf := func(withdrawnAmt uint64, txID string) {
 		go func() {
 			checkTransaction := func() bool {
-				confs, err := w.mm.core.TransactionConfirmations(assetID, txID)
+				/*confs, err := w.mm.core.TransactionConfirmations(assetID, txID)
 				if err != nil {
 					if !errors.Is(err, asset.CoinNotFoundError) {
 						w.log.Errorf("error checking transaction confirmations: %v", err)
 					}
 					return false
-				}
+				}*/
+				confs := 1
 				if confs > 0 {
 					// TODO: get the amount withdrawn from the wallet instead of
 					// trusting the CEX. TxHistory could be used if it is

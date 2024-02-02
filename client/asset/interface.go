@@ -35,6 +35,7 @@ const (
 	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
 	WalletTraitHistorian                              // This wallet can return its transaction history
 	WalletTraitFundsMixer                             // The wallet can mix funds.
+	WalletTraitDynamicSwapper                         // The wallet has dynamic fees.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -145,6 +146,15 @@ func (wt WalletTrait) IsFundsMixer() bool {
 	return wt&WalletTraitFundsMixer != 0
 }
 
+// IsDynamicSwapper tests if a wallet has the WalletTraitDynamicSwapper bit set,
+// which indicates the wallet implements the DynamicSwapper interface. This also
+// indicates that the wallet will initially report a higher estimated fee for
+// transactions then when a transaction is confirmed, the actual fee will be
+// known.
+func (wt WalletTrait) IsDynamicSwapper() bool {
+	return wt&WalletTraitDynamicSwapper != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -200,6 +210,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(FundsMixer); is {
 		t |= WalletTraitFundsMixer
+	}
+	if _, is := w.(DynamicSwapper); is {
+		t |= WalletTraitDynamicSwapper
 	}
 	return t
 }
@@ -526,10 +539,6 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
-	// TransactionConfirmations gets the number of confirmations for the
-	// specified transaction. If the wallet does not know about the
-	// transaction, asset.CoinNotFoundError is returned.
-	TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error)
 	// Send sends the exact value to the specified address. This is different
 	// from Withdraw, which subtracts the tx fees from the amount sent.
 	Send(address string, value, feeRate uint64) (Coin, error)
@@ -1136,6 +1145,12 @@ type WalletHistorian interface {
 	// returned. n is the number of transactions to return. If n is <= 0,
 	// all the transactions will be returned.
 	TxHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
+	// WalletTransaction returns a single transaction that either a wallet
+	// has made or in which the wallet has received funds. This function may
+	// support more transactions that is returned by TxHistory. For example,
+	// ETH/token wallets do not return receiving transactions in TxHistory,
+	// but WalletTransaction will return them.
+	WalletTransaction(ctx context.Context, coinID dex.Bytes) (*WalletTransaction, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,
@@ -1249,6 +1264,13 @@ type Coin interface {
 	Value() uint64
 	// TxID is the ID of the transaction that created the coin.
 	TxID() string
+}
+
+// TokenCoin is extends to Coin interface to include the amount locked
+// of the parent asset to be used for fees.
+type TokenCoin interface {
+	Coin
+	ParentValue() uint64
 }
 
 type RecoveryCoin interface {

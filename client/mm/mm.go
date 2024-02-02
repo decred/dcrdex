@@ -45,7 +45,6 @@ type clientCore interface {
 	FiatConversionRates() map[uint32]float64
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	NewDepositAddress(assetID uint32) (string, error)
-	TransactionConfirmations(assetID uint32, txid string) (uint32, error)
 	Network() dex.Network
 }
 

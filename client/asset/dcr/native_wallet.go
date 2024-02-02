@@ -377,6 +377,25 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 	return nil
 }
 
+// WalletTransaction returns a transaction that either the wallet has made or
+// one in which the wallet has received funds.
+func (dcr *NativeWallet) WalletTransaction(ctx context.Context, coinID dex.Bytes) (*asset.WalletTransaction, error) {
+	txHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+	txID := txHash.String()
+	txs, err := dcr.TxHistory(1, &txID, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 {
+		return nil, asset.CoinNotFoundError
+	}
+
+	return txs[0], nil
+}
+
 // TxHistory returns all the transactions the wallet has made. If refID is nil,
 // then transactions starting from the most recent are returned (past is ignored).
 // If past is true, the transactions prior to the refID are returned, otherwise

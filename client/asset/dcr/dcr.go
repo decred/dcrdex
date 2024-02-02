@@ -4510,20 +4510,6 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	return confs, spent, err
 }
 
-// TransactionConfirmations gets the number of confirmations for the specified
-// transaction.
-func (dcr *ExchangeWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
-	txHash, err := chainhash.NewHashFromStr(txID)
-	if err != nil {
-		return 0, fmt.Errorf("error decoding txid %s: %w", txID, err)
-	}
-	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
-	if err != nil {
-		return 0, err
-	}
-	return uint32(tx.Confirmations), nil
-}
-
 // RegFeeConfirmations gets the number of confirmations for the specified
 // output.
 func (dcr *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {

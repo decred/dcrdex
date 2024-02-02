@@ -644,6 +644,7 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 
 	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
 	corder.LockedAmt = t.lockedAmount()
+	corder.ParentAssetLockedAmt = t.parentLockedAmt()
 	corder.ReadyToTick = t.readyToTick
 	corder.RedeemLockedAmt = t.redemptionLocked
 	corder.RefundLockedAmt = t.refundLocked
@@ -687,6 +688,31 @@ func (t *trackedTrade) lockedAmount() (locked uint64) {
 		}
 	} else if t.changeLocked && t.change != nil { // change may be returned but unlocked if the last swap has been sent
 		locked = t.change.Value()
+	}
+	return
+}
+
+// parentLockedAmt returns the total amount of the parent asset locked for
+// funding swaps in this order.
+//
+// NOTE: This amount only applies to the wallet from which swaps are sent. This
+// is the BASE asset wallet for a SELL order and the QUOTE asset wallet for a
+// BUY order.
+// parentLockedAmt should be called with the mtx >= RLocked.
+func (t *trackedTrade) parentLockedAmt() (locked uint64) {
+	if t.coinsLocked {
+		// This implies either no swap has been sent, or the trade has been
+		// resumed on restart after a swap that produced locked change (partial
+		// fill and still booked) since restarting loads into coins/coinsLocked.
+		for _, coin := range t.coins {
+			if tokenCoin, is := coin.(asset.TokenCoin); is {
+				locked += tokenCoin.ParentValue()
+			}
+		}
+	} else if t.changeLocked && t.change != nil { // change may be returned but unlocked if the last swap has been sent
+		if tokenCoin, is := t.change.(asset.TokenCoin); is {
+			locked += tokenCoin.ParentValue()
+		}
 	}
 	return
 }
