@@ -370,6 +370,10 @@ func (w *tDcrWallet) GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*
 	return nil, nil, nil
 }
 
+func (w *tDcrWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error) {
+	return nil, nil
+}
+
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 	dcrw := &tDcrWallet{
 		blockHeader:    make(map[chainhash.Hash]*wire.BlockHeader),

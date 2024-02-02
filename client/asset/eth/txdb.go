@@ -27,8 +27,6 @@ import (
 type extendedWalletTx struct {
 	mtx sync.RWMutex
 	*asset.WalletTransaction
-	// Confirmed will be set to true once the transaction has 3 confirmations.
-	Confirmed      bool   `json:"confirmed"`
 	BlockSubmitted uint64 `json:"blockSubmitted"`
 	SubmissionTime uint64 `json:"timeStamp"`
 

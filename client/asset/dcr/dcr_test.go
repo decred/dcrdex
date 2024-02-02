@@ -714,6 +714,10 @@ func (c *tRPCClient) SetTxFee(ctx context.Context, fee dcrutil.Amount) error {
 	return nil
 }
 
+func (c *tRPCClient) ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error) {
+	return nil, nil
+}
+
 func TestMain(m *testing.M) {
 	tChainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = stdaddr.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)
@@ -3561,7 +3565,7 @@ func Test_sendToAddress(t *testing.T) {
 	}
 
 	// This should return an error, not enough funds to send.
-	_, _, err = wallet.sendToAddress(addr, unspentVal, optimalFeeRate)
+	_, _, _, err = wallet.sendToAddress(addr, unspentVal, optimalFeeRate)
 	if err == nil {
 		t.Fatal("Expected error, not enough funds to send.")
 	}
@@ -3569,7 +3573,7 @@ func Test_sendToAddress(t *testing.T) {
 	// With a lower send value, send should be successful.
 	var sendVal uint64 = 10e8
 	node.unspent[0].Amount = float64(unspentVal)
-	msgTx, val, err := wallet.sendToAddress(addr, sendVal, optimalFeeRate)
+	msgTx, val, _, err := wallet.sendToAddress(addr, sendVal, optimalFeeRate)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -170,6 +170,9 @@ export const ID_TX_TYPE_APPROVE_TOKEN = 'TX_TYPE_APPROVE_TOKEN'
 export const ID_TX_TYPE_ACCELERATION = 'TX_TYPE_ACCELERATION'
 export const ID_TX_TYPE_SELF_TRANSFER = 'TX_TYPE_SELF_TRANSFER'
 export const ID_TX_TYPE_REVOKE_TOKEN_APPROVAL = 'TX_TYPE_REVOKE_TOKEN_APPROVAL'
+export const ID_TX_TYPE_TICKET_PURCHASE = 'TX_TYPE_TICKET_PURCHASE'
+export const ID_TX_TYPE_TICKET_VOTE = 'TX_TYPE_TICKET_VOTE'
+export const ID_TX_TYPE_TICKET_REVOCATION = 'TX_TYPE_TICKET_REVOCATION'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -341,7 +344,10 @@ export const enUS: Locale = {
   [ID_TX_TYPE_APPROVE_TOKEN]: 'Approve token',
   [ID_TX_TYPE_ACCELERATION]: 'Acceleration',
   [ID_TX_TYPE_SELF_TRANSFER]: 'Self transfer',
-  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval'
+  [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval',
+  [ID_TX_TYPE_TICKET_PURCHASE]: 'Ticket purchase',
+  [ID_TX_TYPE_TICKET_VOTE]: 'Ticket vote',
+  [ID_TX_TYPE_TICKET_REVOCATION]: 'Ticket revocation'
 }
 
 export const ptBR: Locale = {
