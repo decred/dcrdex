@@ -3,7 +3,10 @@
 
 package btc
 
-import "decred.org/dcrdex/dex"
+import (
+	"decred.org/dcrdex/dex"
+	"github.com/btcsuite/btcd/btcjson"
+)
 
 // GetBalancesResult models a successful response from the getbalances request.
 type GetBalancesResult struct {
@@ -148,4 +151,8 @@ type listDescriptorsResult struct {
 		Range    []int64 `json:"range"`    // set for ranged descriptors, pertains to gap limit and current index
 		Next     int64   `json:"next"`     // next index to addresses generation; only set for ranged descriptors
 	} `json:"descriptors"`
+}
+
+type listTransactionsResult struct {
+	Transactions []btcjson.ListTransactionsResult `json:"transactions"`
 }

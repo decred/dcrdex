@@ -60,6 +60,7 @@ const (
 	methodGetNetworkInfo     = "getnetworkinfo"
 	methodGetBlockchainInfo  = "getblockchaininfo"
 	methodFundRawTransaction = "fundrawtransaction"
+	methodListSinceBlock     = "listsinceblock"
 )
 
 // IsTxNotFoundErr will return true if the error indicates that the requested
@@ -636,6 +637,16 @@ func (wc *rpcClient) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 func (wc *rpcClient) listDescriptors(private bool) (*listDescriptorsResult, error) {
 	descriptors := new(listDescriptorsResult)
 	return descriptors, wc.call(methodListDescriptors, anylist{private}, descriptors)
+}
+
+func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error) {
+	blockHash, err := wc.getBlockHash(int64(blockHeight))
+	if err != nil {
+		return nil, fmt.Errorf("getBlockHash error: %w", err)
+	}
+
+	result := new(listTransactionsResult)
+	return result.Transactions, wc.call(methodListSinceBlock, anylist{blockHash.String()}, result)
 }
 
 // privKeyForAddress retrieves the private key associated with the specified

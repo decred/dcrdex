@@ -751,7 +751,17 @@ func (w *rpcWallet) GetRawTransaction(ctx context.Context, txHash *chainhash.Has
 }
 
 func (w *rpcWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error) {
-	return nil, fmt.Errorf("ListSinceBlock not implemented for RPC wallet")
+	hash, err := w.GetBlockHash(ctx, int64(start))
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := w.client().ListSinceBlock(ctx, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return res.Transactions, nil
 }
 
 // GetRawMempool returns hashes for all txs of the specified type in the node's
