@@ -47,7 +47,6 @@ export default class RegistrationPage extends BasePage {
     }
 
     this.loginForm = new LoginForm(page.loginForm, async () => {
-      await app().fetchUser()
       if (this.discoverAcctForm) {
         this.discoverAcctForm.refresh()
         slideSwap(page.loginForm, page.discoverAcctForm)
