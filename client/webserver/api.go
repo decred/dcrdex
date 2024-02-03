@@ -619,7 +619,7 @@ func (s *WebServer) apiNewDepositAddress(w http.ResponseWriter, r *http.Request)
 	}, s.indent)
 }
 
-// apiAddressUsed gets a new deposit address from a wallet.
+// apiAddressUsed checks whether an address has been used.
 func (s *WebServer) apiAddressUsed(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID *uint32 `json:"assetID"`
