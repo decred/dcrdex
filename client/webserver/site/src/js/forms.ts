@@ -1953,6 +1953,8 @@ export class DepositAddress {
 
   handleTx (assetID: number, tx: WalletTransaction) {
     if (assetID !== this.assetID) return
+    const wallet = app().walletMap[assetID]
+    if ((wallet.traits & traitNewAddresser) === 0) return
     const { page, addr } = this
     if (tx.amount > 0 && tx.recipient === addr) Doc.show(page.addrUsed)
   }
