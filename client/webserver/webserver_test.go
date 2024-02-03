@@ -61,6 +61,7 @@ func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 }
 
 type TCore struct {
+	clientCore       // This is here so we don't have to implement core methods we're not testing
 	balanceErr       error
 	syncFeed         core.BookFeed
 	syncErr          error

@@ -114,6 +114,7 @@ type clientCore interface {
 	ChangeAppPass([]byte, []byte) error
 	ResetAppPass(newPass []byte, seed []byte) error
 	NewDepositAddress(assetID uint32) (string, error)
+	AddressUsed(assetID uint32, addr string) (bool, error)
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
 	GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error)
@@ -499,6 +500,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
 			apiAuth.Post("/depositaddress", s.apiNewDepositAddress)
+			apiAuth.Post("/addressused", s.apiAddressUsed)
 			apiAuth.Post("/closewallet", s.apiCloseWallet)
 			apiAuth.Post("/connectwallet", s.apiConnectWallet)
 			apiAuth.Post("/rescanwallet", s.apiRescanWallet)

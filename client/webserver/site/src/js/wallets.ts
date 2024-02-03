@@ -1901,26 +1901,28 @@ export default class WalletsPage extends BasePage {
     return (new Date(tx.timestamp * 1000)).toLocaleDateString()
   }
 
-  handleTxNote (tx: WalletTransaction, newTx: boolean) {
+  handleTxNote (assetID: number, tx: WalletTransaction, newTx: boolean) {
+    if (assetID !== this.selectedAssetID) return
+    this.depositAddrForm.handleTx(assetID, tx)
     if (newTx) {
       if (!this.oldestTx) {
         Doc.show(this.page.txHistoryTable)
         Doc.hide(this.page.noTxHistory)
         this.page.txHistoryTableBody.appendChild(this.txHistoryDateRow(this.txDate(tx)))
-        this.page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, this.selectedAssetID))
+        this.page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, assetID))
         this.oldestTx = tx
       } else if (this.txDate(tx) !== this.txHistoryTableNewestDate()) {
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.children[0])
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, assetID), this.page.txHistoryTableBody.children[0])
         this.page.txHistoryTableBody.insertBefore(this.txHistoryDateRow(this.txDate(tx)), this.page.txHistoryTableBody.children[0])
       } else {
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.children[1])
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, assetID), this.page.txHistoryTableBody.children[1])
       }
       return
     }
     for (const row of this.page.txHistoryTableBody.children) {
       const peRow = row as PageElement
       if (peRow.dataset.txid === tx.id) {
-        this.updateTxHistoryRow(peRow, tx, this.selectedAssetID)
+        this.updateTxHistoryRow(peRow, tx, assetID)
         break
       }
     }
@@ -2526,7 +2528,7 @@ export default class WalletsPage extends BasePage {
       }
       case 'transaction': {
         const n = walletNote as TransactionNote
-        if (n.assetID === this.selectedAssetID) this.handleTxNote(n.transaction, n.new)
+        if (n.assetID === this.selectedAssetID) this.handleTxNote(n.assetID, n.transaction, n.new)
         break
       }
     }

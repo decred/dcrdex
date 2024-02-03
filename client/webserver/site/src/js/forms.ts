@@ -29,7 +29,8 @@ import {
   WalletInfo,
   Token,
   WalletCreationNote,
-  CoreNote
+  CoreNote,
+  WalletTransaction
 } from './registry'
 import { XYRangeHandler } from './opts'
 
@@ -1981,6 +1982,7 @@ export class DepositAddress {
   form: PageElement
   page: Record<string, PageElement>
   assetID: number
+  addr: string
 
   constructor (form: PageElement) {
     this.form = form
@@ -1993,13 +1995,21 @@ export class DepositAddress {
   async setAsset (assetID: number) {
     this.assetID = assetID
     const page = this.page
-    Doc.hide(page.depositErr, page.depositTokenMsgBox)
+    Doc.hide(page.depositErr, page.depositTokenMsgBox, page.addrUsed)
     const asset = app().assets[assetID]
     page.depositLogo.src = Doc.logoPath(asset.symbol)
     const wallet = app().walletMap[assetID]
     page.depositName.textContent = asset.unitInfo.conventional.unit
-    page.depositAddress.textContent = wallet.address
-    page.qrcode.src = `/generateqrcode?address=${wallet.address}`
+    const addr = this.addr = wallet.address
+    page.depositAddress.textContent = addr
+
+    if ((wallet.traits & traitNewAddresser) !== 0) {
+      const res = await postJSON('/api/addressused', { assetID, addr })
+      const used = app().checkResponse(res) && res.used
+      Doc.setVis(used, page.addrUsed)
+    }
+
+    page.qrcode.src = `/generateqrcode?address=${addr}`
     if (asset.token) {
       const parentAsset = app().assets[asset.token.parentID]
       page.depositTokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
@@ -2024,13 +2034,20 @@ export class DepositAddress {
       Doc.show(page.depositErr)
       return
     }
-    page.depositAddress.textContent = res.address
+    Doc.hide(page.addrUsed)
+    this.addr = page.depositAddress.textContent = res.address
     page.qrcode.src = `/generateqrcode?address=${res.address}`
   }
 
+  handleTx (assetID: number, tx: WalletTransaction) {
+    if (assetID !== this.assetID) return
+    const { page, addr } = this
+    if (tx.amount > 0 && tx.recipient === addr) Doc.show(page.addrUsed)
+  }
+
   async copyAddress () {
-    const page = this.page
-    navigator.clipboard.writeText(page.depositAddress.textContent || '')
+    const { page, addr } = this
+    navigator.clipboard.writeText(addr)
       .then(() => {
         Doc.show(page.copyAlert)
         setTimeout(() => {

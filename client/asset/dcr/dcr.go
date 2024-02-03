@@ -695,6 +695,7 @@ var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 var _ asset.Bonder = (*ExchangeWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWallet)(nil)
 var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
+var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -4006,6 +4007,11 @@ func (dcr *ExchangeWallet) RedemptionAddress() (string, error) {
 // NewAddresser interface.
 func (dcr *ExchangeWallet) NewAddress() (string, error) {
 	return dcr.DepositAddress()
+}
+
+// AddressUsed checks if a wallet address has been used.
+func (dcr *ExchangeWallet) AddressUsed(addrStr string) (bool, error) {
+	return dcr.wallet.AddressUsed(dcr.ctx, addrStr)
 }
 
 // Unlock unlocks the exchange wallet.
