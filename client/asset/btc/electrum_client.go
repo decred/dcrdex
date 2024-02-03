@@ -1211,3 +1211,11 @@ func (ew *electrumWallet) findOutputSpender(ctx context.Context, txHash *chainha
 
 	return nil, 0, nil // caller should check msgTx (internal method)
 }
+
+func (ew *electrumWallet) addressUsed(addrStr string) (bool, error) {
+	txs, err := ew.wallet.GetAddressHistory(ew.ctx, addrStr)
+	if err != nil {
+		return false, fmt.Errorf("error getting address history: %w", err)
+	}
+	return len(txs) > 0, nil
+}

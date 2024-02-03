@@ -703,6 +703,7 @@ type Sweeper interface {
 // NewAddresser is a wallet that can generate new deposit addresses.
 type NewAddresser interface {
 	NewAddress() (string, error)
+	AddressUsed(string) (bool, error)
 }
 
 // AddressReturner is a wallet that allows recycling of unused redemption or refund

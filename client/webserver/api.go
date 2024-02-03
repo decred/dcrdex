@@ -600,6 +600,36 @@ func (s *WebServer) apiNewDepositAddress(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// apiAddressUsed gets a new deposit address from a wallet.
+func (s *WebServer) apiAddressUsed(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID *uint32 `json:"assetID"`
+		Addr    string  `json:"addr"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	if form.AssetID == nil {
+		s.writeAPIError(w, errors.New("missing asset ID"))
+		return
+	}
+	assetID := *form.AssetID
+
+	used, err := s.core.AddressUsed(assetID, form.Addr)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool `json:"ok"`
+		Used bool `json:"used"`
+	}{
+		OK:   true,
+		Used: used,
+	}, s.indent)
+}
+
 // apiConnectWallet is the handler for the '/connectwallet' API request.
 // Connects to a specified wallet, but does not unlock it.
 func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {

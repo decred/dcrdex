@@ -29,38 +29,39 @@ import (
 )
 
 const (
-	methodGetBalances        = "getbalances"
-	methodGetBalance         = "getbalance"
-	methodListUnspent        = "listunspent"
-	methodLockUnspent        = "lockunspent"
-	methodListLockUnspent    = "listlockunspent"
-	methodChangeAddress      = "getrawchangeaddress"
-	methodNewAddress         = "getnewaddress"
-	methodSignTx             = "signrawtransactionwithwallet"
-	methodSignTxLegacy       = "signrawtransaction"
-	methodUnlock             = "walletpassphrase"
-	methodLock               = "walletlock"
-	methodPrivKeyForAddress  = "dumpprivkey"
-	methodGetTransaction     = "gettransaction"
-	methodSendToAddress      = "sendtoaddress"
-	methodSetTxFee           = "settxfee"
-	methodGetWalletInfo      = "getwalletinfo"
-	methodGetAddressInfo     = "getaddressinfo"
-	methodListDescriptors    = "listdescriptors"
-	methodValidateAddress    = "validateaddress"
-	methodEstimateSmartFee   = "estimatesmartfee"
-	methodSendRawTransaction = "sendrawtransaction"
-	methodGetTxOut           = "gettxout"
-	methodGetBlock           = "getblock"
-	methodGetBlockHash       = "getblockhash"
-	methodGetBestBlockHash   = "getbestblockhash"
-	methodGetRawMempool      = "getrawmempool"
-	methodGetRawTransaction  = "getrawtransaction"
-	methodGetBlockHeader     = "getblockheader"
-	methodGetNetworkInfo     = "getnetworkinfo"
-	methodGetBlockchainInfo  = "getblockchaininfo"
-	methodFundRawTransaction = "fundrawtransaction"
-	methodListSinceBlock     = "listsinceblock"
+	methodGetBalances          = "getbalances"
+	methodGetBalance           = "getbalance"
+	methodListUnspent          = "listunspent"
+	methodLockUnspent          = "lockunspent"
+	methodListLockUnspent      = "listlockunspent"
+	methodChangeAddress        = "getrawchangeaddress"
+	methodNewAddress           = "getnewaddress"
+	methodSignTx               = "signrawtransactionwithwallet"
+	methodSignTxLegacy         = "signrawtransaction"
+	methodUnlock               = "walletpassphrase"
+	methodLock                 = "walletlock"
+	methodPrivKeyForAddress    = "dumpprivkey"
+	methodGetTransaction       = "gettransaction"
+	methodSendToAddress        = "sendtoaddress"
+	methodSetTxFee             = "settxfee"
+	methodGetWalletInfo        = "getwalletinfo"
+	methodGetAddressInfo       = "getaddressinfo"
+	methodListDescriptors      = "listdescriptors"
+	methodValidateAddress      = "validateaddress"
+	methodEstimateSmartFee     = "estimatesmartfee"
+	methodSendRawTransaction   = "sendrawtransaction"
+	methodGetTxOut             = "gettxout"
+	methodGetBlock             = "getblock"
+	methodGetBlockHash         = "getblockhash"
+	methodGetBestBlockHash     = "getbestblockhash"
+	methodGetRawMempool        = "getrawmempool"
+	methodGetRawTransaction    = "getrawtransaction"
+	methodGetBlockHeader       = "getblockheader"
+	methodGetNetworkInfo       = "getnetworkinfo"
+	methodGetBlockchainInfo    = "getblockchaininfo"
+	methodFundRawTransaction   = "fundrawtransaction"
+	methodListSinceBlock       = "listsinceblock"
+	methodGetReceivedByAddress = "getreceivedbyaddress"
 )
 
 // IsTxNotFoundErr will return true if the error indicates that the requested
@@ -1178,6 +1179,15 @@ func SearchBlockForRedemptions(
 		}
 	}
 	return
+}
+
+func (wc *rpcClient) addressUsed(addr string) (bool, error) {
+	var recv float64
+	const minConf = 0
+	if err := wc.call(methodGetReceivedByAddress, []any{addr, minConf}, &recv); err != nil {
+		return false, err
+	}
+	return recv != 0, nil
 }
 
 // call is used internally to marshal parameters and send requests to the RPC

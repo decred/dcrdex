@@ -115,6 +115,13 @@ type BTCWallet interface {
 	AddPeer(string) error
 	RemovePeer(string) error
 	GetTransactions(startHeight, endHeight int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error)
+	ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error)
+	TotalReceivedForAddr(addr btcutil.Address, minConf int32) (btcutil.Amount, error)
+}
+
+type XCWalletAccount struct {
+	AccountName   string
+	AccountNumber uint32
 }
 
 // BlockNotification is block hash and height delivered by a BTCWallet when it
@@ -1307,6 +1314,20 @@ func (w *spvWallet) GetWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 		ret.Amount = creditTotal.ToBTC()
 		return ret, nil
 	*/
+}
+
+func (w *spvWallet) addressUsed(addrStr string) (bool, error) {
+	addr, err := w.decodeAddr(addrStr, w.chainParams)
+	if err != nil {
+		return false, fmt.Errorf("error decoding address: %w", err)
+	}
+
+	const minConfs = 0
+	amt, err := w.wallet.TotalReceivedForAddr(addr, minConfs)
+	if err != nil {
+		return false, fmt.Errorf("error getting address received: %v", err)
+	}
+	return amt != 0, nil
 }
 
 func confirms(txHeight, curHeight int32) int32 {

@@ -105,6 +105,7 @@ type dcrWallet interface {
 	NewVSPTicket(ctx context.Context, hash *chainhash.Hash) (*wallet.VSPTicket, error)
 	RescanProgressFromHeight(ctx context.Context, n wallet.NetworkBackend, startHeight int32, p chan<- wallet.RescanProgress)
 	RescanPoint(ctx context.Context) (*chainhash.Hash, error)
+	TotalReceivedForAddr(ctx context.Context, addr stdaddr.Address, minConf int32) (dcrutil.Amount, error)
 }
 
 // Interface for *spv.Syncer so that we can test with a stub.
@@ -1408,6 +1409,19 @@ func (w *spvWallet) ListSinceBlock(ctx context.Context, start int32) ([]ListTran
 func (w *spvWallet) SetTxFee(_ context.Context, feePerKB dcrutil.Amount) error {
 	w.dcrWallet.SetRelayFee(feePerKB)
 	return nil
+}
+
+func (w *spvWallet) AddressUsed(ctx context.Context, addrStr string) (bool, error) {
+	addr, err := stdaddr.DecodeAddress(addrStr, w.chainParams)
+	if err != nil {
+		return false, err
+	}
+	const minConf = 0
+	recv, err := w.TotalReceivedForAddr(ctx, addr, minConf)
+	if err != nil {
+		return false, err
+	}
+	return recv != 0, nil
 }
 
 // cacheBlock caches a block for future use. The block has a lastAccess stamp
