@@ -1530,15 +1530,16 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 			coinIDString(bond.AssetID, bondCoinCast), bondCoinStr)
 	}
 
+	// Set up the coin waiter, which watches confirmations so the user knows
+	// when to expect their account to be marked paid by the server.
+	c.monitorBondConfs(dc, bond, reqConfs)
+
 	c.updateAssetBalance(bond.AssetID)
 
 	// Start waiting for reqConfs.
 	subject, details := c.formatDetails(TopicBondConfirming, reqConfs, makeCoinIDToken(bondCoinStr, bond.AssetID), unbip(bond.AssetID), dc.acct.host)
 	c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, subject,
 		details, db.Success, bond.AssetID, bondCoinStr, 0, dc.acct.host, c.exchangeAuth(dc)))
-	// Set up the coin waiter, which watches confirmations so the user knows
-	// when to expect their account to be marked paid by the server.
-	c.monitorBondConfs(dc, bond, reqConfs)
 
 	return bond.CoinID, nil
 }
