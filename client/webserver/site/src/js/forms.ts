@@ -1954,6 +1954,9 @@ export class LoginForm {
       res.notes.reverse()
       app().setNotes(res.notes)
     }
+    if (res.pokes) {
+      app().setPokes(res.pokes)
+    }
     if (this.pwCache) this.pwCache.pw = pw
     this.success()
   }

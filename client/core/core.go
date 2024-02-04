@@ -1683,6 +1683,10 @@ fetchers:
 
 	c.wg.Wait() // block here until all goroutines except DB complete
 
+	if err := c.db.SavePokes(c.pokes()); err != nil {
+		c.log.Errorf("Error saving pokes: %v", err)
+	}
+
 	// Stop the DB after dexConnections and other goroutines are done.
 	stopDB()
 	dbWG.Wait()
@@ -1736,10 +1740,6 @@ fetchers:
 			}
 		}
 		wallet.Disconnect()
-	}
-
-	if err := c.db.SavePokes(c.pokes()); err != nil {
-		c.log.Errorf("Error saving pokes: %v", err)
 	}
 
 	c.log.Infof("DEX client core off")
@@ -7442,6 +7442,18 @@ func (c *Core) initialize() error {
 		return fmt.Errorf("failed to retrieve accounts from database: %w", err)
 	}
 
+	pokes, err := c.db.LoadPokes()
+	if err != nil {
+		c.log.Errorf("Error loading pokes from db: %v", err)
+	}
+	if len(pokes) > pokesCapacity {
+		pokes = pokes[:len(pokes)-pokesCapacity]
+	}
+	c.pokesCache.Lock()
+	c.pokesCache.pokes = pokes
+	c.pokesCache.cursor = len(pokes) % pokesCapacity
+	c.pokesCache.Unlock()
+
 	// Start connecting to DEX servers.
 	var liveConns uint32
 	var wg sync.WaitGroup
@@ -7492,18 +7504,6 @@ func (c *Core) initialize() error {
 				n, pluralize(n), host)
 		}
 	}
-
-	pokes, err := c.db.LoadPokes()
-	if err != nil {
-		c.log.Errorf("Error loading pokes from db: %v", err)
-	}
-	if len(pokes) > pokesCapacity {
-		pokes = pokes[:len(pokes)-pokesCapacity]
-	}
-	c.pokesCache.Lock()
-	c.pokesCache.pokes = pokes
-	c.pokesCache.cursor = len(pokes) % pokesCapacity
-	c.pokesCache.Unlock()
 
 	return nil
 }
