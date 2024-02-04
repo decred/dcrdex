@@ -1989,17 +1989,21 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.cexFormErr.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
       return
     }
+    const loaded = app().loading(page.cexConfigForm)
     try {
-      await MM.updateCEXConfig({
+      const res = await MM.updateCEXConfig({
         name: cexName,
         apiKey: apiKey,
         apiSecret: apiSecret
       })
-      await this.refreshStatus()
+      if (!app().checkResponse(res)) throw res
     } catch (e) {
       Doc.show(page.cexFormErr)
       page.cexFormErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg ?? String(e) })
       return
+    } finally {
+      loaded()
+      await this.refreshStatus()
     }
 
     const dinfo = CEXDisplayInfos[cexName]
@@ -2037,6 +2041,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       const has = cexHasMarket(name)
       const cexStatus = this.mmStatus.cexes[name]
       Doc.hide(tmpl.unavailable, tmpl.needsconfig, tmpl.disconnected)
+      Doc.setVis(Boolean(cexStatus), tmpl.reconfig)
       tmpl.logo.classList.remove('off')
       div.classList.toggle('configured', Boolean(cexStatus) && !cexStatus.connectErr)
       if (!cexStatus) {
@@ -2056,20 +2061,20 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
   }
 
-  makeCEXButton (cexName: string): [PageElement, Record<string, PageElement>] {
+  addCEX (cexName: string) {
     const dinfo = CEXDisplayInfos[cexName]
     const div = this.page.cexOptTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(div)
     tmpl.name.textContent = dinfo.name
     tmpl.logo.src = '/img/' + dinfo.logo
-    return [div, tmpl]
-  }
-
-  addCEX (cexName: string) {
-    const [div, tmpl] = this.makeCEXButton(cexName)
     this.page.cexSelection.appendChild(div)
     this.formCexes[cexName] = { name: cexName, div, tmpl }
     Doc.bind(div, 'click', () => {
+      const cexStatus = this.mmStatus.cexes[cexName]
+      if (!cexStatus || cexStatus.connectErr) {
+        this.showCEXConfigForm(cexName)
+        return
+      }
       const cex = this.formCexes[cexName]
       if (cex.div.classList.contains('selected')) { // unselect
         for (const cex of Object.values(this.formCexes)) cex.div.classList.remove('selected')
@@ -2077,12 +2082,11 @@ export default class MarketMakerSettingsPage extends BasePage {
         this.setCEXAvailability(baseID, quoteID)
         return
       }
-      const cexStatus = this.mmStatus.cexes[cexName]
-      if (!cexStatus || cexStatus.connectErr) {
-        this.showCEXConfigForm(cexName)
-        return
-      }
       for (const cex of Object.values(this.formCexes)) cex.div.classList.toggle('selected', cex.name === cexName)
+    })
+    Doc.bind(tmpl.reconfig, 'click', (e: MouseEvent) => {
+      e.stopPropagation()
+      this.showCEXConfigForm(cexName)
     })
   }
 

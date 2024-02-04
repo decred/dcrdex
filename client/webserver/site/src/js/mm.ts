@@ -284,18 +284,18 @@ class MarketMakerBot {
   /*
    * updateBotConfig appends or updates the specified BotConfig.
    */
-  async updateBotConfig (cfg: BotConfig) : Promise<void> {
+  async updateBotConfig (cfg: BotConfig) {
     return postJSON('/api/updatebotconfig', cfg)
   }
 
   /*
    * updateCEXConfig appends or updates the specified CEXConfig.
    */
-  async updateCEXConfig (cfg: CEXConfig) : Promise<void> {
+  async updateCEXConfig (cfg: CEXConfig) {
     return postJSON('/api/updatecexconfig', cfg)
   }
 
-  async removeBotConfig (cfg: BotConfig) : Promise<void> {
+  async removeBotConfig (cfg: BotConfig) {
     return postJSON('/api/removebotconfig', {
       host: cfg.host,
       baseAsset: cfg.baseID,

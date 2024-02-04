@@ -1001,10 +1001,10 @@ func TestSetupBalances(t *testing.T) {
 		mm, done := tNewMarketMaker(t, tCore)
 		defer done()
 
-		cexes := make(map[string]libxc.CEX)
+		cexes := make(map[string]*centralizedExchange)
 		for cexName, balances := range test.cexBalances {
 			cex := newTCEX()
-			cexes[cexName] = cex
+			cexes[cexName] = &centralizedExchange{CEX: cex}
 			cex.balances = make(map[uint32]*libxc.ExchangeBalance)
 			for assetID, balance := range balances {
 				cex.balances[assetID] = &libxc.ExchangeBalance{
@@ -5008,8 +5008,8 @@ func TestSegregatedCEXTrade(t *testing.T) {
 		}
 
 		botCfgs := []*BotConfig{tt.cfg}
-		cexes := map[string]libxc.CEX{
-			tt.cfg.CEXCfg.Name: cex,
+		cexes := map[string]*centralizedExchange{
+			tt.cfg.CEXCfg.Name: {CEX: cex},
 		}
 
 		mm.setupBalances(botCfgs, cexes)
@@ -5211,7 +5211,7 @@ func TestSegregatedCEXDeposit(t *testing.T) {
 
 		mm, done := tNewMarketMaker(t, tCore)
 		defer done()
-		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]libxc.CEX{cexName: cex})
+		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]*centralizedExchange{cexName: {CEX: cex}})
 		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseID, tt.cfg.QuoteID)
 		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
 
@@ -5365,7 +5365,7 @@ func TestSegregatedCEXWithdraw(t *testing.T) {
 
 		mm, done := tNewMarketMaker(t, tCore)
 		defer done()
-		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]libxc.CEX{cexName: cex})
+		mm.setupBalances([]*BotConfig{tt.cfg}, map[string]*centralizedExchange{cexName: {CEX: cex}})
 		mktID := dexMarketID(tt.cfg.Host, tt.cfg.BaseID, tt.cfg.QuoteID)
 		wrappedCEX := mm.wrappedCEXForBot(mktID, cex)
 		ctx, cancel := context.WithCancel(context.Background())

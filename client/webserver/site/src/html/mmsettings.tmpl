@@ -1,6 +1,6 @@
 {{define "mmsettings"}}
 {{template "top" .}}
-<div id="main" data-handler="mmsettings" class="flex-grow-1 d-flex flex-column align-items-stretch">
+<div id="main" data-handler="mmsettings" class="flex-grow-1 d-flex flex-column align-items-stretch stylish-overflow">
   <div class="w-100 flex-center p-2 fs28 d-flex d-md-none brdrbottom">[[[Market Maker Settings]]]</div>
   <div class="d-flex brdrbottom align-items-stretch">
     <div id="backButton" class="fs18 p-2 hoverbg pointer flex-center brdrright">
@@ -338,7 +338,7 @@
           </div>
           <div class="fs18 mt-2 pt-1 brdrtop">
             [[[Minimum Balance]]]
-            <span class="ico-info fs12 me-1" data-tooltip="arb_minbal_tooltip"></span>
+            <span class="ico-info fs12 me-1" data-tooltip="[[[arb_minbal_tooltip]]]"></span>
           </div>
           <div id="cexQuoteMinBalanceContainer" class="slider-container"></div>
           <label for="" class="fs18 mt-2 pt-1 brdrtop">
@@ -429,7 +429,7 @@
       <div id="cexConnectErrBox" class="fs16 mb-3 mx-3 p-3 flex-center flex-column brdr rounded3">
         <span class="ico-disconnected fs24 errcolor"></span>
         <span>There was an error encountered connecting with these credentials</span>
-        <span id="cexConnectErr" class="fs14 errcolor mt-2"></span>
+        <span id="cexConnectErr" class="fs14 errcolor mt-2 text-break"></span>
       </div>
       <div class="d-flex flex-column mb-3 px-3">
         <label for="cexApiKeyInput">[[[API Key]]]</label>
@@ -439,7 +439,7 @@
         <label for="cexSecretInput">[[[API Secret]]]</label>
         <input type="text" id="cexSecretInput" class="p-2 mt-1">
       </div>
-      <div id="cexFormErr" class="flex-center p-2 fs16 errcolor d-hide"></div>
+      <div id="cexFormErr" class="flex-center px-3 mb-2 fs16 errcolor text-break d-hide"></div>
       <div id="cexSubmit" class="feature flex-center fs18 p-3 mx-3 mb-3">[[[Submit]]]</div>
     </form>
 
@@ -503,7 +503,8 @@
       </div>
 
       <div id="cexSelection" class="d-flex flex-wrap px-3 justify-content-between">
-        <div id="cexOptTmpl" class="p-2 col-11 flex-center flex-column brdr rounded3 cex-selector">
+        <div id="cexOptTmpl" class="position-relative p-2 col-11 flex-center flex-column brdr rounded3 cex-selector">
+          <div data-tmpl="reconfig" class="fs14 ico-settings p-2 hoverbg pointer reconfig"></div>
           <div class="flex-center lh1">
             <img data-tmpl="logo" class="mini-icon me-1 xclogo medium">
             <span data-tmpl="name" class="me-1 fs20 text-nowrap"></span>
