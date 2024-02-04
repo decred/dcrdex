@@ -276,7 +276,7 @@
   </div>
   <div data-tmpl="assetSelection">
     <div class="w-100 flex-center fs20 mt-3">[[[Select your bond asset]]]</div>
-    <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2 mb-2">What's a bond?</div>
+    <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2 mb-2">[[[what_s_a_bond]]]</div>
     <table class="reg-asset-table w-100">
       <thead>
         <tr class="fs16">
@@ -646,13 +646,11 @@
       <span class="fs16 grey unit">XYZ</span>
     </div>
     <div class="mb-1 flex-center flex-row">
-      <span class="fs16 me-1">Bond Lock:</span>
+      <span class="fs16 me-1">[[[bond_lock]]]</span>
       <span class="fs20 me-1" data-tmpl="fee"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
-    <div data-tmpl="bondCostBreakdown" class="mb-1">
-      Includes <span data-tmpl="bondLockNoFees"></span> for your bond and <span data-tmpl="bondLockFees"></span> for transaction fees.
-    </div>
+    <div data-tmpl="bondCostBreakdown" class="mb-1">[[[bond_cost_breakdown]]]</div>
     <span data-tmpl="sendEnoughWithEst">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes totalForBond */}}
     <span data-tmpl="sendEnoughForToken">[[[Send funds for token]]]</span>
     <div class="mb-1 flex-center flex-row d-hide" data-tmpl="txFeeBox">
