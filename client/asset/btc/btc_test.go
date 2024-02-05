@@ -485,7 +485,9 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	case methodGetWalletInfo:
 		return json.Marshal(&GetWalletInfoResult{UnlockedUntil: nil /* unencrypted -> unlocked */})
 	case methodGetAddressInfo:
-		return json.Marshal(&btcjson.GetAddressInfoResult{})
+		return json.Marshal(&btcjson.GetAddressInfoResult{
+			IsMine: c.ownsAddress,
+		})
 	}
 	panic("method not registered: " + method)
 }
@@ -6004,4 +6006,100 @@ func TestAddressRecycling(t *testing.T) {
 		t.Fatalf("newly opened wallet didn't load recycled addrs")
 	}
 
+}
+
+func TestStoreUnknownTx(t *testing.T) {
+	testStoreUnknownTx(t, true)
+}
+
+func testStoreUnknownTx(t *testing.T, segwit bool) {
+	wallet, node, shutdown := tNewWallet(segwit, walletTypeRPC)
+	defer shutdown()
+
+	rpcTx := &btcjson.ListTransactionsResult{}
+
+	checkStore := func(name string, msgTx *wire.MsgTx, expType asset.TransactionType) {
+		txB, _ := serializeMsgTx(msgTx)
+		txID := msgTx.TxHash().String()
+		rpcTx.TxID = txID
+		node.getTransactionMap[txID] = &GetTransactionResult{Bytes: txB}
+		if txType := wallet.storeUnknownRPCTx(rpcTx, true); txType != expType {
+			t.Fatalf("expected %s tx type %d, got %d", name, expType, txType)
+		}
+	}
+
+	// Bond creation transaction
+	bondContract, _ := dexbtc.MakeBondScript(0, 1, randBytes(20))
+	bondPkScript, _ := wallet.scriptHashScript(bondContract)
+	bondOutput := wire.NewTxOut(2, bondPkScript)
+	bondCommitPkScript, _ := bondPushDataScript(0, randBytes(32), 3, randBytes(20))
+	bondCommitmentOutput := wire.NewTxOut(0, bondCommitPkScript)
+	bondTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{{}},
+		TxOut: []*wire.TxOut{bondOutput, bondCommitmentOutput},
+	}
+	checkStore("bond", bondTx, asset.CreateBond)
+
+	// Swap is any tx with p2sh outputs that is not a bond.
+	swapTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{{}},
+		TxOut: []*wire.TxOut{bondOutput, wire.NewTxOut(5, tP2PKH)},
+	}
+	checkStore("swap", swapTx, asset.Swap)
+
+	// Swap redemption.
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+	addr, _ := decodeAddress(addrStr, wallet.chainParams)
+	swapContract, _ := dexbtc.MakeContract(addr, addr, randBytes(32), time.Now().Unix(), segwit, wallet.chainParams)
+	txIn := wire.NewTxIn(&wire.OutPoint{}, nil, nil)
+	if segwit {
+		txIn.Witness = dexbtc.RedeemP2WSHContract(swapContract, randBytes(73), randBytes(33), randBytes(32))
+	} else {
+		txIn.SignatureScript, _ = dexbtc.RedeemP2SHContract(swapContract, randBytes(73), randBytes(33), randBytes(32))
+	}
+	redemptionTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(5, tP2PKH)},
+	}
+	checkStore("swap redemption", redemptionTx, asset.Redeem)
+
+	refundTx := redemptionTx
+	if segwit {
+		txIn.Witness = dexbtc.RefundP2WSHContract(swapContract, randBytes(73), randBytes(33))
+	} else {
+		txIn.SignatureScript, _ = dexbtc.RefundP2SHContract(swapContract, randBytes(73), randBytes(33))
+	}
+	checkStore("swap refund", refundTx, asset.Refund)
+
+	txIn = wire.NewTxIn(&wire.OutPoint{}, nil, nil)
+	bondRedeemTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(5, tP2PKH)},
+	}
+	if segwit {
+		txIn.Witness = dexbtc.RefundBondScriptSegwit(bondContract, randBytes(73), randBytes(33))
+	} else {
+		txIn.SignatureScript, _ = dexbtc.RefundBondScript(bondContract, randBytes(73), randBytes(33))
+	}
+	checkStore("bond refund", bondRedeemTx, asset.RedeemBond)
+
+	// Split tx
+	msgTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, randBytes(50), nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(5, tP2PKH), wire.NewTxOut(5, tP2WPKH)},
+	}
+	node.ownsAddress = true
+	checkStore("split tx", msgTx, asset.Split)
+	node.ownsAddress = false
+
+	// Receive
+	rpcTx.Category = "receive"
+	checkStore("receive tx", msgTx, asset.Receive)
+
+	// Send
+	rpcTx.Category = "send"
+	checkStore("receive tx", msgTx, asset.Send)
 }

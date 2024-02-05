@@ -50,6 +50,10 @@ type txLister interface {
 	listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error)
 }
 
+type reverseTxSyncer interface {
+	scanHistory(beforeStampSecs int64) (chan *btcjson.ListTransactionsResult, error)
+}
+
 type tipRedemptionWallet interface {
 	Wallet
 	getBlockHeight(*chainhash.Hash) (int32, error)

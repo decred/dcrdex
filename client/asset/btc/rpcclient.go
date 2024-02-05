@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1041,6 +1042,91 @@ func (wc *rpcClient) getVersion() (uint64, uint64, error) {
 	// which is something like "/Satoshi:24.0.1/".
 	wc.log.Debugf("Node at %v reports subversion \"%v\"", wc.rpcConfig.RPCBind, r.SubVersion)
 	return r.Version, r.ProtocolVersion, nil
+}
+
+func (wc *rpcClient) listTransactions(skipN, count uint32) (res []btcjson.ListTransactionsResult, _ error) {
+	return res, wc.call("listtransactions", []any{"*", count, skipN}, &res)
+}
+
+func (wc *rpcClient) findSkipCount(stampSecs int64) (uint32, error) {
+	wi, err := wc.GetWalletInfo()
+	if err != nil {
+		return 0, fmt.Errorf("GetWalletInfo error: %w", err)
+	}
+	var errsEncountered bool
+	skipN := sort.Search(int(wi.TxCount), func(skipI int) bool {
+		const count = 1
+		txs, err := wc.listTransactions(uint32(skipI), count)
+		if err != nil {
+			errsEncountered = true
+			wc.log.Errorf("listTransactions error while searching for skip count: %v", err)
+			return false
+		}
+		if len(txs) == 0 {
+			return true
+		}
+		return txs[0].Time < stampSecs
+	})
+	if errsEncountered {
+		return 0, fmt.Errorf("listtransaction errors encountered: %w", err)
+	}
+	return uint32(skipN), nil
+}
+
+func (wc *rpcClient) scanHistory(beforeStampSecs int64) (chan *btcjson.ListTransactionsResult, error) {
+	skipN, err := wc.findSkipCount(beforeStampSecs)
+	if err != nil {
+		return nil, err
+	}
+
+	resC := make(chan *btcjson.ListTransactionsResult)
+	go func() {
+		defer close(resC)
+		for {
+			if wc.ctx.Err() != nil {
+				return
+			}
+			const count = 100
+			txs, err := wc.listTransactions(skipN, count)
+			if err != nil {
+				wc.log.Errorf("listTransactions error while scanning tx history: %v", err)
+				return
+			}
+			for i := range txs {
+				resC <- &txs[i]
+			}
+			if len(txs) < count {
+				return
+			}
+			skipN += count
+		}
+	}()
+
+	return resC, nil
+}
+
+func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) (res []btcjson.ListTransactionsResult, _ error) {
+	var skipN uint32
+	const count = 10
+
+out:
+	for {
+		txs, err := wc.listTransactions(skipN, count)
+		if err != nil {
+			return nil, err
+		}
+		for _, tx := range txs {
+			if tx.BlockHeight == nil || *tx.BlockHeight > blockHeight {
+				res = append(res, tx)
+			} else {
+				break out
+			}
+		}
+		if len(txs) < count {
+			break
+		}
+	}
+	return
 }
 
 // findRedemptionsInMempool attempts to find spending info for the specified
