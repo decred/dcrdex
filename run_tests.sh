@@ -43,7 +43,7 @@ go run ./client/core/localetest/main.go
 export CGO_ENABLED=0
 go build ./...
 go build -tags harness -o /dev/null ./client/cmd/simnet-trade-tests
-go build -tags systray -o /dev/null ./client/cmd/dexc
+go build -tags systray -o /dev/null ./client/cmd/dexc-desktop
 
 go test -c -o /dev/null -tags live ./client/webserver
 go test -c -o /dev/null -tags harness ./client/asset/dcr
