@@ -25,7 +25,7 @@
     <div class="flex-grow-1 position-relative">
       <div class="scrollsmall fill-abs d-flex flex-wrap align-items-stretch">
         {{- /* WALLET DETAILS */ -}}
-        <div class="position-relative col-24 col-xl-13 col-xxl-9 flex-stretch-column invisible" id="walletDetailsBox">
+        <div class="position-relative col-24 col-xl-12 col-xxl-9 flex-stretch-column invisible" id="walletDetailsBox">
           <div class="column flex-stretch-column px-3">
             <div class="d-flex justify-content-between align-items-center py-3">
               <div class="flex-center lh1">
@@ -55,33 +55,33 @@
             </div>
 
             <div class="flex-stretch-column flex-md-row brdr rounded3 mb-3" id="walletDetails">
-              <div class="flex-stretch-column flex-grow-1 p-3" id="balanceBreakdownBox">
-                <div>
+              <div class="flex-stretch-column flex-grow-1 pt-3" id="balanceBreakdownBox">
+                <div class="px-3">
                   <table id="balanceTable" class="fs16 w-100">
                     <tbody id="balanceDetailBox">
                       <tr id="balanceDetailRow">
-                        <td data-tmpl="category" class="grey pb-2 fs17">
+                        <td data-tmpl="category" class="grey">
                          <span data-tmpl="name"></span>
-                         <span data-tmpl="tooltipMsg" data-tooltip="" class="ico-info ms-1 fs15 d-hide"></span>
+                         <span data-tmpl="tooltipMsg" data-tooltip="" class="ico-info ms-1 d-hide"></span>
                         </td>
-                        <td data-tmpl="subBalance" class="mono pb-2 fs17"></td>
+                        <td data-tmpl="balance" class="mono"></td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
-                <div id="sendReceive" class="flex-grow-1 d-flex flex-column justify-content-end align-items-stretch fs22 mt-3">
+                <div id="sendReceive" class="flex-grow-1 d-flex flex-column justify-content-end align-items-stretch fs22 mt-3 brdrbottom">
                   <div class="d-flex align-items-stretch">
-                    <div class="col-12 d-flex align-items-stretch pe-2">
-                      <button id="receive" class="flex-grow-1 flex-center p-2 lh1 hoverbg pointer">
+                    <div class="col-12 d-flex align-items-stretch">
+                      <div id="receive" class="flex-grow-1 flex-center p-2 lh1 hoverbg pointer brdrtop brdrright">
                         <span class="ico-qrcode fs14 me-2"></span>
                         <span class="fs18">[[[Receive]]]</span>
-                      </button>
+                      </div>
                     </div>
-                    <div class="col-12 d-flex align-items-stretch ps-2">
-                      <button id="send" class="flex-grow-1 flex-center p-2 lh1 hoverbg pointer">
+                    <div class="col-12 d-flex align-items-stretch">
+                      <div id="send" class="flex-grow-1 flex-center p-2 lh1 hoverbg pointer brdrtop">
                         <span class="ico-send fs14 me-2"></span>
                         <span class="fs18">[[[Send]]]</span>
-                      </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -280,13 +280,13 @@
         </div>{{/* END WALLET DETAILS */}}
 
         {{- /* SECOND COLUMN */ -}}
-        <div id="secondColumn" class="position-relative col-24 col-xl-11 col-xxl-15 flex-stretch-column stylish-overflow-lg brdrleft">
+        <div id="secondColumn" class="position-relative col-24 col-xl-12 col-xxl-15 flex-stretch-column stylish-overflow-lg brdrleft">
           <div class="column flex-stretch-column">
             {{- /* TRANSACTION HISTORY */ -}}
             <div id="txHistoryBox" class="flex-stretch-column">
               <span class="fs24 p-3">[[[asset_name tx_history]]]</span>
               <div id="txHistoryTableContainer" class="flex-stretch-column px-3 pb-3">
-                <table id="txHistoryTable" class="brdr rounded3" d-hide>
+                <table id="txHistoryTable" class="brdr rounded3">
                   <thead>
                     <tr>
                       <th>[[[Type]]]</th>
@@ -322,7 +322,7 @@
                     </tr>
                   </tbody>
                 </table>
-                <span id="earlierTxs">[[[load_earlier_transactions]]]</span>
+                <span id="earlierTxs" class="pt-2">[[[load_earlier_transactions]]]</span>
               </div>
               <div class="flex-center p-2 mb-3 mx-3 b-3 fs18 brdr rounded3 d-hide" id="noTxHistory">
                 [[[no_tx_history]]]
