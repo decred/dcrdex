@@ -22,7 +22,7 @@
     <button id="noMarketBttn" class="large">[[[Select a Market]]]</button>
   </div>
   <div id="botSettingsContainer" class="flex-grow-1 d-flex flex-wrap d-hide p-2">
-    <div class="col-24 col-xl-8 col-xxl-6 px-3">
+    <div id="advancedConfig" class="col-24 col-xl-8 col-xxl-6 px-3 d-hide">
       {{- /* VIEW-ONLY MODE */ -}}
       <div id="viewOnlyRunning" class="w-100 d-flex flex-center pb-2 mb-3 fs18 border-bottom">
         <span id="onIndicator" class="on-indicator on me-2"></span> [[[bots_running_view_only]]]
@@ -173,6 +173,96 @@
             </tbody>
           </table>
           <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide text-danger text-break"></span>
+        </div>
+      </div>
+    </div>
+
+    {{- /* QUICK CONFIG */ -}}
+    <div id="quickConfig" class="col-24 col-xl-8 col-xxl-6 px-3">
+      {{- /* LEVELS PER SIDE */ -}}
+      <span class="fs22">Price levels per side</span>
+      <div class="d-flex align-items-stretch brdr rounded3">
+        <div class="p-3 flex-center">
+          <div class="d-flex align-items-stretch">
+            <div>
+              <input id="levelsPerSide" type="number" class="fs22 text-center p-2" step="1">
+            </div>
+            <div class="d-flex flex-column align-items-stretch">
+              <div id="levelsPerSideUp" class="flex-grow-1 px-3 hoverbg pointer">
+                <span class="ico-arrowup"></span>
+              </div>
+              <div id="levelsPerSideDown" class="flex-grow-1 px-3 hoverbg pointer">
+                <span class="ico-arrowdown"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex-grow-1 ps-2 flex-center brdrleft">
+          Limit orders will be placed and maintained at this many price level on each side of
+          the market.
+        </div>
+      </div>
+
+      {{- /* LOTS PER LEVEL */ -}}
+      <span class="fs24">Amount per level</span>
+      <div class="brdr rounded3 d-flex flex-column align-items-stretch">
+        <div class="d-flex align-items-stretch">
+          <div class="py-3 ps-3 d-flex flex-column align-items-stretch">
+            <div class="d-flex align-items-stretch">
+              <div>
+                <input id="lotsPerLevel" type="number" class="fs22 text-center p-2" step="1">
+              </div>
+              <div class="d-flex flex-column align-items-stretch">
+                <div id="lotsPerLevelUp" class="flex-grow-1 px-3 hoverbg pointer">
+                  <span class="ico-arrowup"></span>
+                </div>
+                <div id="lotsPerLevelDown" class="flex-grow-1 px-3 hoverbg pointer">
+                  <span class="ico-arrowdown"></span>
+                </div>
+              </div>
+            </div>
+            <label for="qcTaper" class="fs16 d-flex align-items-center justify-content-start mt-1">
+              <input type="checkbox" id="qcTaper" class="form-check-input me-2 mt-0">
+              <span>Taper</span>
+            </label>
+          </div>
+          <div id="qcNoTaperInfo" class="p-2 flex-center brdrleft">
+            Number of lots per price level.
+          </div>
+          <div id="qcTaperInfo" class="p-2 flex-center brdrleft d-hide">
+            Number of lots for the first price level, tapering off for subsequent
+            levels.
+          </div>
+        </div>
+        <div class="d-flex brdrtop">
+          <div class="col-12 px-2">
+            <div class="d-flex align-items-center justify-content-between">
+              <span>Lot Size</span>
+              <span>
+                <span id="qcLotSizeDisplay">10</span> <span id="qcLotSizeUnit">XYZ</span>
+              </span>
+            </div>
+            <div class="d-flex align-items-center justify-content-between">
+              <span>Lot Size USD</span>
+              <span>
+                <span id="qcLotSizeUSDDisplay">125.45</span> USD
+              </span>
+            </div>
+          </div>
+          <div class="col-12 px-2 brdrleft">
+            <div class="d-flex align-items-center justify-content-between">
+              <span>Total</span>
+              <span>
+                <span id="qcCommitDisplay">15</span> <span id="qcCommitUnit">XYZ</span>
+              </span>
+            </div>
+            <div class="d-flex align-items-center justify-content-between">
+              <span>Total USD</span>
+              <span>
+                <span id="qcCommitUSDDisplay">1245.50</span> USD
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

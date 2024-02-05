@@ -125,6 +125,11 @@ div[data-handler=mm] {
     }
   }
 
+  #lotsPerLevel,
+  #levelsPerSide {
+    width: 75px;
+  }
+
   .ico-rocket {
     color: $success;
   }

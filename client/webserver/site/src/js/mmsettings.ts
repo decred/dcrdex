@@ -292,7 +292,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   originalConfig: ConfigState
   updatedConfig: ConfigState
   creatingNewBot: boolean
-  botType: string
+  marketReport: MarketReport
   mmStatus: MarketMakingStatus
   cexConfigs: CEXConfig[]
   botConfigs: BotConfig[]
@@ -547,7 +547,72 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setupCEXSelectors(viewOnly)
     this.setOriginalValues(viewOnly)
     Doc.show(page.botSettingsContainer, page.marketHeader)
-    this.fetchOracles()
+    await this.fetchOracles()
+
+    // If this is a new bot, show the quick config form
+    if (!botCfg && this.marketReport.baseFiatRate > 0 && this.marketReport.quoteFiatRate > 0) this.showQuickConfig()
+    else this.showAdvancedConfig()
+  }
+
+  showQuickConfig () {
+    const {
+      page, updatedConfig: cfg, specs: { host, quoteID, baseID },
+      marketReport: { baseFiatRate, quoteFiatRate },
+    } = this
+    const { symbol: baseSymbol, unitInfo: bui } = app().assets[baseID]
+    const { symbol: quoteSymbol, unitInfo: qui } = app().assets[quoteID]
+    const { markets } = app().exchanges[host]
+    const { lotsize: lotSize } = markets[`${baseSymbol}_${quoteSymbol}`]
+
+    page.qcLotSizeDisplay.textContent = Doc.formatCoinValue(lotSize, bui)
+    page.qcLotSizeUnit.textContent = bui.conventional.unit
+    const lotSizeUSD = lotSize / bui.conventional.conversionFactor * baseFiatRate
+    page.qcLotSizeUSDDisplay.textContent = Doc.formatFourSigFigs(lotSizeUSD)
+
+    page.levelsPerSide.value = '1'
+
+    const commitIncrement = Math.round(Math.max(1, 100 / lotSizeUSD))
+    page.lotsPerLevel.value = String(commitIncrement)
+    
+    this.quickConfigUpdated()
+
+    Doc.hide(this.page.advancedConfig)
+    Doc.show(this.page.quickConfig)
+  }
+
+  quickConfigUpdated () {
+    const { page, specs: { host, baseID, quoteID }, marketReport: { baseFiatRate }, } = this
+    const { symbol: baseSymbol, unitInfo: bui } = app().assets[baseID]
+    const { symbol: quoteSymbol, unitInfo: qui } = app().assets[quoteID]
+    const { markets } = app().exchanges[host]
+    const { lotsize: lotSize } = markets[`${baseSymbol}_${quoteSymbol}`]
+
+    const levelsPerSide = parseInt(page.levelsPerSide.value ?? '')
+    if (isNaN(levelsPerSide)) {
+      page.qcError.textContent = 'invalid value for levels per side'
+    }
+    const lotsPerLevel = parseInt(page.lotsPerLevel.value ?? '')
+    if (isNaN(lotsPerLevel)) {
+      page.qcError.textContent = 'invalid value for lots per level'
+    }
+
+    const lotSizeUSD = lotSize / bui.conventional.conversionFactor * baseFiatRate
+
+    const taper = page.qcTaper.checked
+    const levels: OrderPlacement[] = []
+    if (taper) {
+
+    } else {
+
+    }
+
+
+
+  }
+
+  showAdvancedConfig () {
+    Doc.show(this.page.advancedConfig)
+    Doc.hide(this.page.quickConfig)
   }
 
   async showBotTypeForm (host: string, baseID: number, quoteID: number, botType?: string, configuredCEX?: string) {
@@ -1942,7 +2007,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       return
     }
 
-    const r = res.report as MarketReport
+    const r = this.marketReport = res.report as MarketReport
     if (!r.oracles || r.oracles.length === 0) {
       Doc.show(page.noOracles)
     } else {
