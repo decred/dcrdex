@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,7 +87,7 @@ const (
 	seedLen = 64
 
 	// pokesCapacity is the maximum number of poke notifications that
-	// can will be cached.
+	// will be cached.
 	pokesCapacity = 100
 )
 
@@ -1377,20 +1378,27 @@ func (dc *dexConnection) bestBookFeeSuggestion(assetID uint32) uint64 {
 
 type pokesCache struct {
 	sync.RWMutex
-	cache  []*db.Notification
-	cursor int
+	cache         []*db.Notification
+	cursor        int
+	pokesCapacity int
+}
+
+func newPokesCache(pokesCapacity int) *pokesCache {
+	return &pokesCache{
+		pokesCapacity: pokesCapacity,
+	}
 }
 
 func (c *pokesCache) add(poke *db.Notification) {
 	c.Lock()
 	defer c.Unlock()
 
-	if len(c.cache) >= pokesCapacity {
+	if len(c.cache) >= c.pokesCapacity {
 		c.cache[c.cursor] = poke
 	} else {
 		c.cache = append(c.cache, poke)
 	}
-	c.cursor = (c.cursor + 1) % pokesCapacity
+	c.cursor = (c.cursor + 1) % c.pokesCapacity
 }
 
 func (c *pokesCache) pokes() []*db.Notification {
@@ -1398,16 +1406,10 @@ func (c *pokesCache) pokes() []*db.Notification {
 	defer c.RUnlock()
 
 	pokes := make([]*db.Notification, len(c.cache))
-	nPokes := len(c.cache)
-	if nPokes > 0 {
-		if c.cursor == 0 {
-			copy(pokes, c.cache)
-		} else {
-			tail := nPokes - c.cursor
-			copy(pokes[:tail], c.cache[nPokes-tail:])
-			copy(pokes[tail:], c.cache[:nPokes-tail])
-		}
-	}
+	copy(pokes, c.cache)
+	sort.Slice(pokes, func(i, j int) bool {
+		return pokes[i].TimeStamp < pokes[j].TimeStamp
+	})
 	return pokes
 }
 
@@ -1415,11 +1417,11 @@ func (c *pokesCache) init(pokes []*db.Notification) {
 	c.Lock()
 	defer c.Unlock()
 
-	if len(pokes) > pokesCapacity {
-		pokes = pokes[:len(pokes)-pokesCapacity]
+	if len(pokes) > c.pokesCapacity {
+		pokes = pokes[:len(pokes)-c.pokesCapacity]
 	}
 	c.cache = pokes
-	c.cursor = len(pokes) % pokesCapacity
+	c.cursor = len(pokes) % c.pokesCapacity
 }
 
 // blockWaiter is a message waiting to be stamped, signed, and sent once a
@@ -7471,6 +7473,7 @@ func (c *Core) initialize() error {
 	}
 
 	pokes, err := c.db.LoadPokes()
+	c.pokesCache = newPokesCache(pokesCapacity)
 	if err != nil {
 		c.log.Errorf("Error loading pokes from db: %v", err)
 	} else {
