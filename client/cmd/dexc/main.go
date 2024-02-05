@@ -101,7 +101,7 @@ func runCore(cfg *app.Config) error {
 	if cfg.Experimental {
 		// TODO: on shutdown, stop market making and wait for trades to be
 		// canceled.
-		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MarketMakerConfigPath(), logMaker.Logger("MM"))
+		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MMConfig.BotConfigPath, logMaker.Logger("MM"))
 		if err != nil {
 			return fmt.Errorf("error creating market maker: %w", err)
 		}
@@ -131,11 +131,22 @@ func runCore(cfg *app.Config) error {
 
 	<-clientCore.Ready()
 
+	var mmCM *dex.ConnectionMaster
 	defer func() {
 		log.Info("Exiting dexc main.")
 		cancel()  // no-op with clean rpc/web server setup
 		wg.Wait() // no-op with clean setup and shutdown
+		if mmCM != nil {
+			mmCM.Wait()
+		}
 	}()
+
+	if marketMaker != nil {
+		mmCM = dex.NewConnectionMaster(marketMaker)
+		if err := mmCM.ConnectOnce(appCtx); err != nil {
+			return fmt.Errorf("Error connecting market maker")
+		}
+	}
 
 	if cfg.RPCOn {
 		rpcSrv, err := rpcserver.New(cfg.RPC(clientCore, marketMaker, logMaker.Logger("RPC")))

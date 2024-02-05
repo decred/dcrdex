@@ -191,7 +191,7 @@ export class Chart {
 
     // Scrolling by wheel is smoother when the rate is slightly limited.
     this.wheelLimiter = null
-    bind(this.canvas, 'wheel', (e: WheelEvent) => { this.wheel(e) })
+    bind(this.canvas, 'wheel', (e: WheelEvent) => { this.wheel(e) }, { passive: true })
     bind(this.canvas, 'click', (e: MouseEvent) => { this.click(e) })
     const setVis = () => {
       this.visible = document.visibilityState !== 'hidden'
@@ -226,7 +226,6 @@ export class Chart {
   /* wheel is a mousewheel event handler. */
   wheel (e: WheelEvent) {
     this.zoom(e.deltaY < 0)
-    e.preventDefault()
   }
 
   /*

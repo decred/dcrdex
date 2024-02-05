@@ -5,6 +5,7 @@ export const ID_NO_APP_PASS_ERROR_MSG = 'ID_NO_APP_PASS_ERROR_MSG'
 export const ID_SET_BUTTON_BUY = 'ID_SET_BUTTON_BUY'
 export const ID_SET_BUTTON_SELL = 'ID_SET_BUTTON_SELL'
 export const ID_OFF = 'ID_OFF'
+export const ID_MAX = 'ID_MAX'
 export const ID_READY = 'ID_READY'
 export const ID_NO_WALLET = 'ID_NO_WALLET'
 export const ID_DISABLED_MSG = 'ID_DISABLED_MSG'
@@ -173,6 +174,17 @@ export const ID_TX_TYPE_REVOKE_TOKEN_APPROVAL = 'TX_TYPE_REVOKE_TOKEN_APPROVAL'
 export const ID_TX_TYPE_TICKET_PURCHASE = 'TX_TYPE_TICKET_PURCHASE'
 export const ID_TX_TYPE_TICKET_VOTE = 'TX_TYPE_TICKET_VOTE'
 export const ID_TX_TYPE_TICKET_REVOCATION = 'TX_TYPE_TICKET_REVOCATION'
+export const ID_MISSING_CEX_CREDS = 'MISSING_CEX_CREDS'
+export const ID_MULTIPLIER = 'MULTIPLIER'
+export const ID_NO_PLACEMENTS = 'NO_PLACEMENTS'
+export const ID_INVALID_VALUE = 'INVALID_VALUE'
+export const ID_NO_ZERO = 'NO_ZERO'
+export const ID_BOTTYPE_BASIC_MM = 'BOTTYPE_BASIC_MM'
+export const ID_BOTTYPE_ARB_MM = 'BOTTYPE_ARB_MM'
+export const ID_BOTTYPE_SIMPLE_ARB = 'BOTTYPE_SIMPLE_ARB'
+export const ID_NO_BOTTYPE = 'NO_BOTTYPE'
+export const ID_NO_CEX = 'NO_CEX'
+export const ID_CEXBALANCE_ERR = 'CEXBALANCE_ERR'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -347,7 +359,18 @@ export const enUS: Locale = {
   [ID_TX_TYPE_REVOKE_TOKEN_APPROVAL]: 'Revoke token approval',
   [ID_TX_TYPE_TICKET_PURCHASE]: 'Ticket purchase',
   [ID_TX_TYPE_TICKET_VOTE]: 'Ticket vote',
-  [ID_TX_TYPE_TICKET_REVOCATION]: 'Ticket revocation'
+  [ID_TX_TYPE_TICKET_REVOCATION]: 'Ticket revocation',
+  [ID_MISSING_CEX_CREDS]: 'specify both key and secret',
+  [ID_MULTIPLIER]: 'Multiplier',
+  [ID_NO_PLACEMENTS]: 'must specify 1 or more placements',
+  [ID_INVALID_VALUE]: 'invalid value',
+  [ID_NO_ZERO]: 'zero not allowed',
+  [ID_BOTTYPE_BASIC_MM]: 'Market Maker',
+  [ID_BOTTYPE_ARB_MM]: 'Market Maker + Arbitrage',
+  [ID_BOTTYPE_SIMPLE_ARB]: 'Simple Arbitrage',
+  [ID_NO_BOTTYPE]: 'choose a bot type',
+  [ID_NO_CEX]: 'choose an exchange for arbitrage',
+  [ID_CEXBALANCE_ERR]: 'error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}'
 }
 
 export const ptBR: Locale = {
@@ -401,7 +424,8 @@ export const ptBR: Locale = {
   [WALLET_READY]: 'Carteira Pronta',
   [SETUP_NEEDED]: 'Configuração Necessária',
   [ID_AVAILABLE]: 'disponível',
-  [ID_IMMATURE]: 'imaturo'
+  [ID_IMMATURE]: 'imaturo',
+  [ID_MAX]: 'max'
 }
 
 export const zhCN: Locale = {

@@ -31,6 +31,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/mm"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
@@ -175,6 +176,17 @@ type clientCore interface {
 	DisableFundsMixer(assetID uint32) error
 }
 
+type mmCore interface {
+	MarketReport(base, quote uint32) (*mm.MarketReport, error)
+	Start(pw []byte, alternateConfigPath *string) (err error)
+	Stop()
+	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error
+	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
+	UpdateBotConfig(updatedCfg *mm.BotConfig) error
+	RemoveBotConfig(host string, baseID, quoteID uint32) error
+	Status() *mm.Status
+}
+
 // genCertPair generates a key/cert pair to the paths provided.
 func genCertPair(certFile, keyFile string, altDNSNames []string) error {
 	log.Infof("Generating TLS certificates...")
@@ -210,8 +222,8 @@ type cachedPassword struct {
 }
 
 type Config struct {
-	Core          clientCore
-	MarketMaker   *mm.MarketMaker
+	Core          clientCore // *core.Core
+	MarketMaker   mmCore     // *mm.MarketMaker
 	MMCfgPath     string
 	Addr          string
 	CustomSiteDir string
@@ -243,7 +255,7 @@ type WebServer struct {
 	wsServer     *websocket.Server
 	mux          *chi.Mux
 	core         clientCore
-	mm           *mm.MarketMaker
+	mm           mmCore
 	mmCfgPath    string
 	addr         string
 	csp          string
@@ -552,11 +564,12 @@ func New(cfg *Config) (*WebServer, error) {
 			if cfg.Experimental {
 				apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)
 				apiAuth.Post("/stopmarketmaking", s.apiStopMarketMaking)
-				apiAuth.Get("/marketmakingconfig", s.apiMarketMakingConfig)
-				apiAuth.Post("/updatemarketmakingconfig", s.apiUpdateMarketMakingConfig)
-				apiAuth.Post("/removemarketmakingconfig", s.apiRemoveMarketMakingConfig)
+				apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
+				apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
+				apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)
 				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
 				apiAuth.Post("/marketreport", s.apiMarketReport)
+				apiAuth.Post("/cexbalance", s.apiCEXBalance)
 			}
 		})
 	})

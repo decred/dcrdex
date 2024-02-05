@@ -76,12 +76,12 @@ func newTCEX() *tCEX {
 var _ libxc.CEX = (*tCEX)(nil)
 
 func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	return nil, nil
+	return &sync.WaitGroup{}, nil
 }
 func (c *tCEX) Balances() (map[uint32]*libxc.ExchangeBalance, error) {
 	return nil, nil
 }
-func (c *tCEX) Markets() ([]*libxc.Market, error) {
+func (c *tCEX) Markets(ctx context.Context) ([]*libxc.Market, error) {
 	return nil, nil
 }
 func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {

@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/mm"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -1591,6 +1592,28 @@ func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiCEXBalance(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CEXName string `json:"cexName"`
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	bal, err := s.mm.CEXBalance(req.CEXName, req.AssetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting cex balance: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK         bool                   `json:"ok"`
+		CEXBalance *libxc.ExchangeBalance `json:"cexBalance"`
+	}{
+		OK:         true,
+		CEXBalance: bal,
+	}, s.indent)
+}
+
 func (s *WebServer) apiShieldedStatus(w http.ResponseWriter, r *http.Request) {
 	var assetID uint32
 	if !readPost(w, r, &assetID) {
@@ -1909,7 +1932,7 @@ func (s *WebServer) apiStartMarketMaking(w http.ResponseWriter, r *http.Request)
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	if err = s.mm.Run(s.ctx, appPW, nil); err != nil {
+	if err = s.mm.Start(appPW, nil); err != nil {
 		s.writeAPIError(w, fmt.Errorf("Error starting market making: %v", err))
 		return
 	}
@@ -1922,45 +1945,37 @@ func (s *WebServer) apiStopMarketMaking(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.mm.GetMarketMakingConfig()
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("error getting market making config: %v", err))
+func (s *WebServer) apiUpdateCEXConfig(w http.ResponseWriter, r *http.Request) {
+	var updatedCfg *mm.CEXConfig
+	if !readPost(w, r, &updatedCfg) {
+		s.writeAPIError(w, fmt.Errorf("failed to read config"))
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	if err := s.mm.UpdateCEXConfig(updatedCfg); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiUpdateMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 	var updatedCfg *mm.BotConfig
 	if !readPost(w, r, &updatedCfg) {
 		s.writeAPIError(w, fmt.Errorf("failed to read config"))
 		return
 	}
 
-	cfg, err := s.mm.UpdateBotConfig(updatedCfg)
-	if err != nil {
+	if err := s.mm.UpdateBotConfig(updatedCfg); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiRemoveMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiRemoveBotConfig(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		Host       string `json:"host"`
 		BaseAsset  uint32 `json:"baseAsset"`
@@ -1971,32 +1986,21 @@ func (s *WebServer) apiRemoveMarketMakingConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	cfg, err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset)
-	if err != nil {
+	if err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request) {
-	running := s.mm.Running()
-	runningBots := s.mm.RunningBots()
 	writeJSON(w, &struct {
-		OK          bool                `json:"ok"`
-		Running     bool                `json:"running"`
-		RunningBots []mm.MarketWithHost `json:"runningBots"`
+		OK     bool       `json:"ok"`
+		Status *mm.Status `json:"status"`
 	}{
-		OK:          true,
-		Running:     running,
-		RunningBots: runningBots,
+		OK:     true,
+		Status: s.mm.Status(),
 	}, s.indent)
 }
 

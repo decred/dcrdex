@@ -869,11 +869,11 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, orac
 
 	err := cfg.BasicMMConfig.Validate()
 	if err != nil {
-		c.Broadcast(newValidationErrorNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, fmt.Sprintf("invalid market making config: %v", err)))
+		c.Broadcast(newValidationErrorNote(cfg.Host, cfg.BaseID, cfg.QuoteID, fmt.Sprintf("invalid market making config: %v", err)))
 		return
 	}
 
-	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	if err != nil {
 		log.Errorf("Failed to get market: %v. Not starting market maker.", err)
 		return
@@ -885,8 +885,8 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, orac
 		log:            log,
 		cfg:            cfg.BasicMMConfig,
 		host:           cfg.Host,
-		base:           cfg.BaseAsset,
-		quote:          cfg.QuoteAsset,
+		base:           cfg.BaseID,
+		quote:          cfg.QuoteID,
 		oracle:         oracle,
 		mkt:            mkt,
 		ords:           make(map[order.OrderID]*core.Order),

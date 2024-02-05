@@ -68,7 +68,14 @@
                 <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
               </div>
             </td>
-            <td data-tmpl="botType"></td>
+            <td>
+              <span data-tmpl="botType" class="me-1"></span>
+              <span data-tmpl="cexLink" class="d-hide">
+                <span class="fs16 ico-exchange me-1"></span>
+                <img data-tmpl="cexLogo" class="micro-icon">
+                <span data-tmpl="cexName"></span>
+              </span>
+            </td>
             <td data-tmpl="baseBalanceTd"><span data-tmpl="baseBalance"></span><img class="mx-1 micro-icon" data-tmpl="baseBalanceLogo"></td>
             <td data-tmpl="quoteBalanceTd"><span data-tmpl="quoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="quoteBalanceLogo"></td>
             <td class="text-end hoverbg pointer" data-tmpl="removeTd"><span class="ico-cross fs20 p-2 red"></span></td>
@@ -96,53 +103,13 @@
 
     {{- /* APP PASSWORD */ -}}
     <form id="pwForm" class="d-flex flex-column align-items-stretch">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="form-closer"><span class="ico-cross"></span></div>
       <div>
         <label for="pwInput" class="form-label pt-3 ps-1 mb-1">[[[App Password]]]</label>
         <input type="password" class="form-control select" id="pwInput" autocomplete="off">
       </div>
       <div class="text-end  mt-3">
         <button id="pwSubmit" class="selected fs16">[[[Submit]]]</button>
-      </div>
-    </form>
-
-    {{- /* NEW WALLET */ -}}
-    <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
-      {{template "newWalletForm"}}
-    </form>
-
-    {{- /* ADD BOT FORM */ -}}
-    <form class="position-relative d-hide" id="addBotForm" autocomplete="off">
-
-      {{- /* ABSOLUTELY-POSITIONED CUSTOM ASSET SELECT */ -}}
-      <div id="assetDropdown" class="position-absolute d-flex flex-column align-items-stretch d-hide"></div>
-
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="bordertop py-2 text-center fs22 sans-light position-relative" data-tmpl="header">
-        [[[add_new_bot_market]]]
-      </div>
-
-      <div class="flex-center">
-        <span class="fs14" id="marketOneChoice"></span>
-        <select id="hostSelect" class="fs14"></select>
-      </div>
-      <div class="flex-center">
-        <div class="flex-center flex-grow-1">
-          <div id="baseSelect" class="asset-select">
-            <div id="assetRowTmpl" class="d-flex align-items-stretch lh1 asset-row hoverbg pointer p-2">
-              <div class="flex-center"><img data-tmpl="logo"></div>
-              <div class="flex-center"><span data-tmpl="symbol" class="fs28 demi ms-2"></span></div>
-              <div class="d-flex align-items-end"><span data-tmpl="arrow" class="ico-arrowdown fs11 mr-1"></span></div>
-            </div>
-          </div>
-        </div>
-        <span class="ico-exchange fs22 mx-1 grey"></span>
-        <div class="flex-center flex-grow-1">
-          <div id="quoteSelect" class="asset-select"></div>
-        </div>
-      </div>
-      <div class="text-end mt-3">
-        <button id="addBotSubmit" class="selected fs16">[[[add_new_bot]]]</button>
       </div>
     </form>
   </div>  {{- /* END FORMS */ -}}

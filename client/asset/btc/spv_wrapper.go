@@ -395,8 +395,10 @@ func (w *spvWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 			res <- err
 			return
 		}
-		defer w.log.Tracef("PublishTransaction(%v) completed in %v", tx.TxHash(),
-			time.Since(tStart)) // after outpoint unlocking and signalling
+		defer func() {
+			w.log.Tracef("PublishTransaction(%v) completed in %v", tx.TxHash(),
+				time.Since(tStart)) // after outpoint unlocking and signalling
+		}()
 		res <- nil
 	}()
 

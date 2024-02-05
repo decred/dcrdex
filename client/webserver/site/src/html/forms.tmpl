@@ -51,7 +51,7 @@
 {{end}}
 
 {{define "newWalletForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="wallet-tabs" data-tmpl="walletTypeTabs">
   <div class="wtab" data-tmpl="walletTabTmpl"></div>
 </div>
@@ -109,7 +109,7 @@
 {{end}}
 
 {{define "unlockWalletForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center fs22 text-nowrap sans-light position-relative">
   [[[Unlock]]]
   <img id="uwAssetLogo" class="micro-icon mx-1">
@@ -132,7 +132,7 @@
 {{end}}
 
 {{define "depositAddress"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 mb-2 text-center position-relative fs24 sans-light">
   [[[Deposit]]]
   <img id="depositLogo" class="mini-icon mx-1">
@@ -166,7 +166,7 @@
 {{end}}
 
 {{define "dexAddrForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div data-tmpl="addDexHdr" class="flex-center fs24 sans-light"><span class="ico-plus fs12 me-2"></span> [[[Add a DEX]]]</div>
 <div data-tmpl="updateDexHdr" class="flex-center fs24 sans-light d-hide"></span> [[[update dex host]]]</div>
 <div class="fs20 sans-light" data-tmpl="pickServerMsg">
@@ -441,7 +441,7 @@
 {{end}}
 
 {{define "authorizeAccountExportForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Authorize Export]]]
 </div>
@@ -460,7 +460,7 @@
 {{end}}
 
 {{define "disableAccountForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Disable Account]]]
 </div>
@@ -484,7 +484,7 @@
 
 {{define "authorizeAccountImportForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Authorize Import]]]
 </div>
@@ -512,7 +512,7 @@
 {{end}}
 
 {{define "changeAppPWForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Change Application Password]]]
 </div>
@@ -536,7 +536,7 @@
 
 {{define "cancelOrderForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="text-center fs22 sans-light position-relative">
   [[[:title:cancel_order]]]
 </div>
@@ -557,7 +557,7 @@
 
 {{define "accelerateForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="text-center fs22 sans-light position-relative">
   [[[:title:accelerate_order]]]
 </div>
@@ -692,7 +692,7 @@
   <span data-tmpl="reason"></span>
 </div>
 <div id="rangeOptTmpl">
-  <div class="d-flex flex-nowrap fs12">
+  <div data-tmpl="sliderBox" class="d-flex flex-nowrap fs12 pointer">
     <span data-tmpl="rangeLblStart"></span>
     <div data-tmpl="slider" class="slider flex-grow-1">
       <div data-tmpl="handle" class="slider-handle"></div>
@@ -713,7 +713,7 @@
 {{end}}
 
 {{define "toggleWalletStatusConfirm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
    <span id="walletStatusDisable" class="d-hide">[[[disable_wallet]]]</span>
     <span id="walletStatusEnable" class="d-hide">[[[enable_wallet]]]</span>
@@ -729,7 +729,7 @@
 {{end}}
 
 {{define "appPassResetForm"}}
- <div class="form-closer hoverbg" id="resetPassFormCloser"><span class="ico-cross"></span></div>
+ <div class="form-closer" id="resetPassFormCloser"><span class="ico-cross"></span></div>
  <div class="px-2 py-1 text-center fs28 sans-light">[[[Reset App Password]]]</div>
  <div class="fs18 mt-2 sans-light">[[[reset_app_pw_msg]]]</div>
  <hr class="dashed my-4">

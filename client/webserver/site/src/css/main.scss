@@ -116,6 +116,7 @@ div.clear {
 
 div.feature,
 button.feature {
+  cursor: pointer;
   background-color: #6bc5ff;
 
   &:hover {
@@ -489,12 +490,13 @@ hr.dashed {
 }
 
 div.form-closer {
-  display: flex;
-  width: 30px;
+  @extend .flex-center;
+  @extend .hoverbg;
+
+  width: 40px;
   margin-left: auto;
-  padding: 10px;
-  font-size: 11px;
   cursor: pointer;
+  padding: 10px 0;
 
   span {
     opacity: 0.8;
@@ -569,6 +571,7 @@ div[data-handler=init],
 div[data-handler=login],
 div[data-handler=markets],
 div[data-handler=mm],
+div[data-handler=mmsettings],
 div[data-handler=order],
 div[data-handler=orders],
 div[data-handler=register],

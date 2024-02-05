@@ -2,8 +2,8 @@
     "botConfigs": [
         {
             "host": "127.0.0.1:17273",
-            "baseAsset": 60,
-            "quoteAsset": 0,
+            "baseID": 60,
+            "quoteID": 0,
             "baseBalanceType": 0,
             "quoteBalanceType": 0,
             "baseBalance": 100,
@@ -15,7 +15,7 @@
                 "baseBalance": 100,
                 "quoteBalance": 100
             },
-            "arbMarketMakerConfig": {
+            "arbMarketMakingConfig": {
                 "cexName": "Binance",
                 "buyPlacements": [
                     {
@@ -55,7 +55,7 @@
                 ],
                 "profit": 0.01,
                 "driftTolerance" : 0.001,
-                "numEpochsLeaveOpen": 10,
+                "orderPersistence": 10,
                 "baseOptions": {
                     "multisplit": "true"
                 },

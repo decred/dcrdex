@@ -1,90 +1,4 @@
-#main.mm {
-  .asset-select {
-    .asset-row .ico-arrowdown {
-      display: inline;
-    }
-  }
-
-  .order-opt {
-    margin-top: 10px;
-  }
-
-  .asset-row {
-    img {
-      width: 30px;
-      height: 30px;
-    }
-
-    &.ghost {
-      opacity: 0.4;
-    }
-
-    &.ghost:hover {
-      opacity: 1;
-    }
-
-    &:hover .ico-arrowdown {
-      color: inherit;
-    }
-
-    .ico-arrowdown {
-      @extend .grey;
-
-      display: none;
-    }
-  }
-
-  .asset-logo {
-    width: 15px;
-    height: 15px;
-  }
-
-  #botCreator {
-    width: 350px;
-
-    ul {
-      max-width: 350px;
-    }
-
-    #lotBullets {
-      border: 2px solid #7777;
-    }
-  }
-
-  #assetDropdown {
-    @extend .stylish-overflow;
-
-    background-color: $light_body_bg;
-    z-index: 99;
-    max-height: 350px;
-  }
-
-  #marketOneChoice {
-    max-width: 90%;
-    text-overflow: ellipsis;
-  }
-
-  #marketSelect {
-    max-width: 90%;
-    background-color: transparent;
-
-    option {
-      text-overflow: ellipsis;
-      background-color: $light_body_bg;
-    }
-  }
-
-  #lotsInput {
-    width: 100px;
-    font-size: 22px;
-    padding: 10px 20px;
-  }
-
-  #absInput {
-    font-size: 18px;
-    padding: 7px 14px;
-  }
-
+div[data-handler=mm] {
   #runningPrograms {
     .running-program {
       border: 2px solid #7777;
@@ -123,49 +37,6 @@
         }
       }
     }
-  }
-
-  #createBox,
-  #programsBox {
-    .edit-show {
-      display: none;
-    }
-
-    .edit-hide {
-      display: block;
-    }
-
-    .edit-hide-flex {
-      display: flex;
-    }
-
-    .orange {
-      color: orange;
-    }
-
-    &.edit {
-      .edit-show {
-        display: block;
-      }
-
-      .edit-hide,
-      .edit-hide-flex {
-        display: none !important;
-      }
-
-      #botCreator {
-        border: 1px solid orange;
-      }
-
-      .running-program {
-        outline: solid 2px orange;
-      }
-    }
-  }
-
-  #startErr,
-  #createErr {
-    max-width: 300px;
   }
 
   #botTable {
@@ -216,6 +87,23 @@
     .ico-robot {
       font-size: 100px;
       opacity: 0.7;
+    }
+  }
+}
+
+div[data-handler=mm],
+div[data-handler=mmsettings] {
+  .on-indicator {
+    width: 15px;
+    height: 15px;
+    border-radius: 8px;
+
+    &.on {
+      background-color: $buycolor_light;
+    }
+
+    &.off {
+      background-color: #777;
     }
   }
 }

@@ -184,10 +184,18 @@ func mainCore() error {
 	if cfg.Experimental {
 		// TODO: on shutdown, stop market making and wait for trades to be
 		// canceled.
-		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MarketMakerConfigPath(), logMaker.Logger("MM"))
+		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.BotConfigPath, logMaker.Logger("MM"))
 		if err != nil {
 			return fmt.Errorf("error creating market maker: %w", err)
 		}
+		cm := dex.NewConnectionMaster(marketMaker)
+		if err := cm.ConnectOnce(appCtx); err != nil {
+			return fmt.Errorf("error connecting market maker")
+		}
+		defer func() {
+			cancel()
+			cm.Wait()
+		}()
 	}
 
 	if cfg.RPCOn {

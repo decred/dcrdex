@@ -534,6 +534,7 @@ export interface PageElement extends HTMLElement {
   name?: string
   options?: HTMLOptionElement[]
   selectedIndex?: number
+  disabled?: boolean
 }
 
 export interface BooleanConfig {
@@ -671,7 +672,14 @@ export interface OrderPlacement {
   gapFactor: number
 }
 
-export interface BasicMarketMakingCfg {
+export interface AutoRebalanceConfig {
+  minBaseAmt: number
+  minBaseTransfer: number
+  minQuoteAmt: number
+  minQuoteTransfer: number
+}
+
+export interface BasicMarketMakingConfig {
   gapStrategy: string
   sellPlacements: OrderPlacement[]
   buyPlacements: OrderPlacement[]
@@ -683,20 +691,56 @@ export interface BasicMarketMakingCfg {
   quoteOptions?: Record<string, string>
 }
 
+export interface ArbMarketMakingPlacement {
+  lots: number
+  multiplier: number
+}
+
+export interface ArbMarketMakingConfig {
+  buyPlacements: ArbMarketMakingPlacement[]
+  sellPlacements: ArbMarketMakingPlacement[]
+  profit: number
+  driftTolerance: number
+  orderPersistence: number
+  baseOptions?: Record<string, string>
+  quoteOptions?: Record<string, string>
+  autoRebalance?: AutoRebalanceConfig
+}
+
+export interface SimpleArbConfig {
+  profitTrigger: number
+  maxActiveArbs: number
+  numEpochsLeaveOpen: number
+  baseOptions?: Record<string, string>
+  quoteOptions?: Record<string, string>
+  autoRebalance?: AutoRebalanceConfig
+}
+
 export enum BalanceType {
   Percentage,
   Amount
 }
 
-export interface BotConfig {
-  host: string
-  baseAsset: number
-  quoteAsset: number
+export interface BotCEXCfg {
+  name: string
   baseBalanceType: BalanceType
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
-  basicMarketMakingConfig: BasicMarketMakingCfg
+}
+
+export interface BotConfig {
+  host: string
+  baseID: number
+  quoteID: number
+  baseBalanceType: BalanceType
+  baseBalance: number
+  quoteBalanceType: BalanceType
+  quoteBalance: number
+  cexCfg?: BotCEXCfg
+  basicMarketMakingConfig?: BasicMarketMakingConfig
+  arbMarketMakingConfig?: ArbMarketMakingConfig
+  simpleArbConfig?: SimpleArbConfig
   disabled: boolean
 }
 
@@ -706,20 +750,33 @@ export interface CEXConfig {
   apiSecret: string
 }
 
-export interface MarketMakingConfig {
-  botConfigs?: BotConfig[]
-  cexConfigs?: CEXConfig[]
-}
-
 export interface MarketWithHost {
   host: string
   base: number
   quote: number
 }
 
+export interface MMCEXStatus {
+  config: CEXConfig
+  connected: boolean
+  connectErr: string
+  markets?: CEXMarket[]
+}
+
+export interface MMBotStatus {
+  config: BotConfig
+  running: boolean
+}
+
 export interface MarketMakingStatus {
   running: boolean
-  runningBots: MarketWithHost[]
+  cexes: Record<string, MMCEXStatus>
+  bots: MMBotStatus[]
+}
+
+export interface CEXMarket {
+  baseID: number
+  quoteID: number
 }
 
 export interface OracleReport {
@@ -727,6 +784,11 @@ export interface OracleReport {
   usdVol: number
   bestBuy: number
   bestSell: number
+}
+
+export interface ExchangeBalance {
+  available: number
+  locked: number
 }
 
 // changing the order of the elements in this enum will affect
@@ -902,12 +964,6 @@ export interface Application {
   checkResponse (resp: APIResponse): boolean
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
-  getMarketMakingStatus (): Promise<MarketMakingStatus>
-  stopMarketMaking (): Promise<void>
-  getMarketMakingConfig (): Promise<MarketMakingConfig>
-  updateMarketMakingConfig (cfg: BotConfig): Promise<void>
-  removeMarketMakingConfig (cfg: BotConfig): Promise<void>
-  setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean): void
   txHistory(assetID: number, n: number, after?: string): Promise<TxHistoryResult>
   getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
   clearTxHistory(assetID: number): void

@@ -65,6 +65,7 @@ import {
 } from './registry'
 import { setOptionTemplates } from './opts'
 import { CoinExplorers } from './coinexplorers'
+import { MM } from './mm'
 
 const bind = Doc.bind
 
@@ -418,18 +419,15 @@ export default class MarketsPage extends BasePage {
     })
 
     // Event listeners for interactions with the various input fields.
-    bind(page.lotField, 'change', () => { this.lotChanged() })
-    bind(page.lotField, 'keyup', () => { this.lotChanged() })
+    bind(page.lotField, ['change', 'keyup'], () => { this.lotChanged() })
     bind(page.qtyField, 'change', () => { this.quantityChanged(true) })
     bind(page.qtyField, 'keyup', () => { this.quantityChanged(false) })
-    bind(page.mktBuyField, 'change', () => { this.marketBuyChanged() })
-    bind(page.mktBuyField, 'keyup', () => { this.marketBuyChanged() })
+    bind(page.mktBuyField, ['change', 'keyup'], () => { this.marketBuyChanged() })
     bind(page.rateField, 'change', () => { this.rateFieldChanged() })
     bind(page.rateField, 'keyup', () => { this.previewQuoteAmt(true) })
 
     // Market search input bindings.
-    bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
-    bind(page.marketSearchV1, 'keyup', () => { this.filterMarkets() })
+    bind(page.marketSearchV1, ['change', 'keyup'], () => { this.filterMarkets() })
 
     // Acknowledge the order disclaimer.
     const setDisclaimerAckViz = (acked: boolean) => {
@@ -766,7 +764,7 @@ export default class MarketsPage extends BasePage {
     }
 
     if (app().user.experimental && this.mmRunning === undefined) {
-      const marketMakingStatus = await app().getMarketMakingStatus()
+      const marketMakingStatus = await MM.status()
       this.mmRunning = marketMakingStatus.running
     }
 

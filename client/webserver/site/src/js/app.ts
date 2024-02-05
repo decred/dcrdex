@@ -42,10 +42,6 @@ import {
   APIResponse,
   RateNote,
   InFlightOrder,
-  BotConfig,
-  MMStartStopNote,
-  MarketMakingStatus,
-  MarketMakingConfig,
   WalletTransaction,
   TxHistoryResult,
   WalletNote,
@@ -109,8 +105,6 @@ export default class Application {
   popupNotes: HTMLElement
   popupTmpl: HTMLElement
   noteReceivers: Record<string, (n: CoreNote) => void>[]
-  marketMakingCfg: MarketMakingConfig
-  marketMakingStatus: MarketMakingStatus | undefined
   txHistoryMap: Record<number, TxHistoryResult>
 
   constructor () {
@@ -678,12 +672,6 @@ export default class Application {
         this.fiatRatesMap = (note as RateNote).fiatRates
         break
       }
-      case 'mmstartstop': {
-        const n = note as MMStartStopNote
-        if (!this.marketMakingStatus) return
-        this.marketMakingStatus.running = n.running
-        break
-      }
       case 'walletnote': {
         const n = note as WalletNote
         if (n.payload.route === 'transaction') {
@@ -1011,64 +999,6 @@ export default class Application {
     State.removeCookie(State.pwKeyCK)
     State.removeLocal(State.notificationsLK) // Notification storage was DEPRECATED pre-v1.
     window.location.href = '/login'
-  }
-
-  async getMarketMakingConfig () : Promise<MarketMakingConfig> {
-    if (this.marketMakingCfg) return this.marketMakingCfg
-    const res = await getJSON('/api/marketmakingconfig')
-    if (!this.checkResponse(res)) {
-      throw new Error('failed to fetch market making config')
-    }
-    this.marketMakingCfg = res.cfg
-    return this.marketMakingCfg
-  }
-
-  async updateMarketMakingConfig (cfg: BotConfig) : Promise<void> {
-    const res = await postJSON('/api/updatemarketmakingconfig', cfg)
-    if (res.err) {
-      throw new Error(res.err)
-    }
-    this.marketMakingCfg = res.cfg
-  }
-
-  async removeMarketMakingConfig (cfg: BotConfig) : Promise<void> {
-    const res = await postJSON('/api/removemarketmakingconfig', {
-      host: cfg.host,
-      baseAsset: cfg.baseAsset,
-      quoteAsset: cfg.quoteAsset
-    })
-    if (res.err) {
-      throw new Error(res.err)
-    }
-    this.marketMakingCfg = res.cfg
-  }
-
-  async setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean) : Promise<void> {
-    const botCfgs = this.marketMakingCfg.botConfigs || []
-    const mktCfg = botCfgs.find((cfg : BotConfig) => {
-      return cfg.host === host && cfg.baseAsset === baseAsset && cfg.quoteAsset === quoteAsset
-    })
-    if (!mktCfg) {
-      throw new Error('market making config not found')
-    }
-    mktCfg.disabled = !enabled
-    await this.updateMarketMakingConfig(mktCfg)
-  }
-
-  async stopMarketMaking () : Promise<void> {
-    await postJSON('/api/stopmarketmaking')
-  }
-
-  async getMarketMakingStatus () : Promise<MarketMakingStatus> {
-    if (this.marketMakingStatus !== undefined) return this.marketMakingStatus
-    const res = await getJSON('/api/marketmakingstatus')
-    if (!this.checkResponse(res)) {
-      throw new Error('failed to fetch market making status')
-    }
-    const status = {} as MarketMakingStatus
-    status.running = !!res.running
-    status.runningBots = res.runningBots
-    return status
   }
 
   /*

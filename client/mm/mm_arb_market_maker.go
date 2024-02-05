@@ -77,7 +77,7 @@ type ArbMarketMakerConfig struct {
 	SellPlacements     []*ArbMarketMakingPlacement `json:"sellPlacements"`
 	Profit             float64                     `json:"profit"`
 	DriftTolerance     float64                     `json:"driftTolerance"`
-	NumEpochsLeaveOpen uint64                      `json:"numEpochsLeaveOpen"`
+	NumEpochsLeaveOpen uint64                      `json:"orderPersistence"`
 	BaseOptions        map[string]string           `json:"baseOptions"`
 	QuoteOptions       map[string]string           `json:"quoteOptions"`
 	// AutoRebalance determines how the bot will handle rebalancing of the
@@ -951,7 +951,7 @@ func RunArbMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, cex ce
 		return
 	}
 
-	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	if err != nil {
 		log.Errorf("Failed to get market: %v", err)
 		return
@@ -960,8 +960,8 @@ func RunArbMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, cex ce
 	(&arbMarketMaker{
 		ctx:            ctx,
 		host:           cfg.Host,
-		baseID:         cfg.BaseAsset,
-		quoteID:        cfg.QuoteAsset,
+		baseID:         cfg.BaseID,
+		quoteID:        cfg.QuoteID,
 		cex:            cex,
 		core:           c,
 		log:            log,
