@@ -185,6 +185,11 @@ div[data-handler=mmsettings] {
       right: 0;
     }
   }
+
+  #lotsPerLevel,
+  #levelsPerSide {
+    width: 75px;
+  }
 }
 
 body.dark div[data-handler=mmsettings] {
