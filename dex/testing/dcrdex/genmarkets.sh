@@ -334,7 +334,9 @@ cat << EOF >> "${FILEPATH}"
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2,
-            "configPath": "$ETH_CONFIG_PATH"
+            "configPath": "$ETH_CONFIG_PATH",
+            "bondAmt": 1000000000,
+            "bondConfs": 1
         },
         "DEXTT_simnet": {
             "bip44symbol": "dextt.eth",

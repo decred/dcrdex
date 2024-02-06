@@ -1,0 +1,36 @@
+{
+    "compilerOptions": {
+      "target": "ES2018",
+      "module": "commonjs",
+      "strict": true,
+      "esModuleInterop": true,
+      "moduleResolution": "node",
+      "resolveJsonModule": true,
+      "forceConsistentCasingInFileNames": true,
+      "composite": true,
+      "skipLibCheck": true,
+      "typeRoots": ["node_modules/@types", "node_modules", "types"],
+      "types": ["mocha", "node", "hardhat-deploy"],
+      "lib": ["ES2018", "DOM"],
+      "baseUrl": ".",
+      "paths": {
+        "@app/*": ["./app/*"],
+        "@test/*": ["./test/*"],
+        "@types/*": ["./types/*"]
+      }
+    },
+    "include": ["./test/**/*.ts", "./app/**/*.ts", "./types/**/*.ts"],
+    "exclude": ["node_modules", "coverage"],
+    "references": [
+      {
+        "path": "./app"
+      },
+      {
+        "path": "./test"
+      },
+      {
+        "path": "./types"
+      }
+    ]
+  }
+  
