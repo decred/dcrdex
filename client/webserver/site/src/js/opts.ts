@@ -162,6 +162,11 @@ export class XYRangeOption extends Option {
   }
 }
 
+interface AcceptOpts {
+  skipChange?: boolean
+  skipUpdate?: boolean // Implies skipChange
+}
+
 /*
  * XYRangeHandler is the handler for an *XYRange from client/asset. XYRange
  * has a slider which allows adjusting the x and y, linearly between two limits.
@@ -231,7 +236,7 @@ export class XYRangeHandler {
     this.r = normalizeX(initVal)
     this.scrollingX = this.x = initVal
     this.y = this.r * rangeY + cfg.start.y
-    this.accept(this.scrollingX, true)
+    this.accept(this.scrollingX, { skipUpdate: true })
     if (disabled) {
       return
     }
@@ -310,7 +315,7 @@ export class XYRangeHandler {
         this.r = left(ee) / w
         this.scrollingX = this.r * rangeX + cfg.start.x
         this.y = this.r * rangeY + cfg.start.y
-        this.accept(this.scrollingX, !emit)
+        this.accept(this.scrollingX, { skipChange: !emit })
       }
       const mouseUp = (ee: MouseEvent) => {
         trackMouse(ee, true)
@@ -341,19 +346,21 @@ export class XYRangeHandler {
     this.tmpl.y.textContent = s
   }
 
-  accept (x: number, skipUpdate?: boolean): void {
+  accept (x: number, cfg?: AcceptOpts): void {
     const tmpl = this.tmpl
     if (this.roundX) x = Math.round(x)
     if (this.roundY) this.y = Math.round(this.y)
     tmpl.x.textContent = threeSigFigs.format(x)
     tmpl.y.textContent = threeSigFigs.format(this.y)
     if (this.roundY) tmpl.y.textContent = `${this.y}`
-    tmpl.handle.style.left = `calc(${this.r * 100}% - ${this.r * 14}px)`
+    const rEffective = clamp(this.r, 0, 1)
+    tmpl.handle.style.left = `calc(${rEffective * 100}% - ${rEffective * 14}px)`
     this.x = x
     this.scrollingX = x
-    if (!skipUpdate) {
+    cfg = cfg ?? {}
+    if (!cfg.skipUpdate) {
       this.updated(x, this.y)
-      this.changed()
+      if (!cfg.skipChange) this.changed()
     }
   }
 
@@ -361,7 +368,7 @@ export class XYRangeHandler {
     const cfg = this.cfg
     this.r = (x - cfg.start.x) / (cfg.end.x - cfg.start.x)
     this.y = cfg.start.y + this.r * (cfg.end.y - cfg.start.y)
-    this.accept(x, skipUpdate)
+    this.accept(x, { skipUpdate })
   }
 }
 

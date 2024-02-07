@@ -26,6 +26,7 @@ module.exports = {
     'no-eval': 'error',
     'no-implied-eval': 'error',
     'object-shorthand': 'off',
-    'quote-props': ["error", "consistent"]
+    'quote-props': ["error", "consistent"],
+    'object-property-newline': 'off'
   }
 }
