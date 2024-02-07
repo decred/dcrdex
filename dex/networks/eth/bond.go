@@ -41,7 +41,7 @@ func PackCreateBondTx(accountID [32]byte, bondID [32]byte, locktime uint64) ([]b
 	return BondABI.Pack("createBond", accountID, bondID, locktime)
 }
 
-func ParseCreateBondTx(data []byte) (accountID [32]byte, id [32]byte, locktime uint64, err error) {
+func ParseCreateBondTx(data []byte) (accountID, bondID [32]byte, locktime uint64, err error) {
 	decoded, err := ParseCallData(data, BondABI)
 	if err != nil {
 		return [32]byte{}, [32]byte{}, 0, err
@@ -63,9 +63,9 @@ func ParseCreateBondTx(data []byte) (accountID [32]byte, id [32]byte, locktime u
 		return [32]byte{}, [32]byte{}, 0, fmt.Errorf("expected [32]byte for accountID, got %T", args[0].value)
 	}
 
-	id, ok = args[1].value.([32]byte)
+	bondID, ok = args[1].value.([32]byte)
 	if !ok {
-		return [32]byte{}, [32]byte{}, 0, fmt.Errorf("expected [32]byte for id, got %T", args[1].value)
+		return [32]byte{}, [32]byte{}, 0, fmt.Errorf("expected [32]byte for bondID, got %T", args[1].value)
 	}
 
 	locktime, ok = args[2].value.(uint64)
@@ -73,14 +73,14 @@ func ParseCreateBondTx(data []byte) (accountID [32]byte, id [32]byte, locktime u
 		return [32]byte{}, [32]byte{}, 0, fmt.Errorf("expected uint64 for locktime, got %T", args[2].value)
 	}
 
-	return accountID, id, locktime, nil
+	return accountID, bondID, locktime, nil
 }
 
 func PackUpdateBondsTx(accountID [32]byte, bondsToUpdate [][32]byte, newBondIDs [][32]byte, value *big.Int, locktime uint64) ([]byte, error) {
 	return BondABI.Pack("updateBonds", accountID, bondsToUpdate, newBondIDs, value, locktime)
 }
 
-func ParseUpdateBondsTx(data []byte) (accountID [32]byte, bondsToUpdate [][32]byte, newBondIDs [][32]byte, value *big.Int, locktime uint64, err error) {
+func ParseUpdateBondsTx(data []byte) (accountID [32]byte, bondsToUpdate, newBondIDs [][32]byte, value *big.Int, locktime uint64, err error) {
 	decoded, err := ParseCallData(data, BondABI)
 	if err != nil {
 		return [32]byte{}, nil, nil, nil, 0, err

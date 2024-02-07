@@ -34,15 +34,27 @@ type extendedWalletTx struct {
 	savedToDB bool
 }
 
-// monitoredTx is used to keep track of redemption transactions that have not
-// yet been confirmed. If a transaction has to be replaced due to the fee
-// being too low or another transaction being mined with the same nonce,
-// the replacement transaction's ID is recorded in the replacementTx field.
-// replacedTx is used to maintain a doubly linked list, which allows deletion
-// of transactions that were replaced after a transaction is confirmed.
+// monitoredTx is used to keep track of redemption and bond creation/update
+// transactions that have not yet been confirmed.
+//
+// If a redemption transaction has to be resubmitted, the replacement
+// transaction's ID is recorded in the replacementTx field. replacedTx is used
+// to maintain a doubly linked list, which allows the most recently submitted
+// transaction to be looked up in case an older one's ID is requested.
+//
+// For bond creation/update transactions this is not needed, since BondConfirmations
+// is called using the BondID instead of with the transaction ID.
 type monitoredTx struct {
 	tx             *types.Transaction
 	blockSubmitted uint64
+	// There is a goroutine that runs on each new block that checks the
+	// number of confirmations for all monitoredTxs with removeAfterConfirms > 0.
+	// If the number of confirmations is greater than or equal to
+	// removeAfterConfirms, the transaction is removed. This is done for
+	// bond transactions. redemption transactions are removed separately
+	// from this process.
+	removeAfterConfirms uint64
+	timeSubmitted       time.Time
 
 	// This mutex must be held during the entire process of confirming
 	// a transaction. This is to avoid confirmations of the same
@@ -60,7 +72,7 @@ type monitoredTx struct {
 // MarshalBinary marshals a monitoredTx into a byte array.
 // It satisfies the encoding.BinaryMarshaler interface for monitoredTx.
 func (m *monitoredTx) MarshalBinary() (data []byte, err error) {
-	b := encode.BuildyBytes{0}
+	b := encode.BuildyBytes{1}
 	txB, err := m.tx.MarshalBinary()
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling tx: %v", err)
@@ -71,24 +83,26 @@ func (m *monitoredTx) MarshalBinary() (data []byte, err error) {
 	binary.BigEndian.PutUint64(blockB, m.blockSubmitted)
 	b = b.AddData(blockB)
 
-	if m.replacementTx != nil {
-		replacementTxHash := m.replacementTx[:]
-		b = b.AddData(replacementTxHash)
+	removeAfterConfirmsB := make([]byte, 8)
+	binary.BigEndian.PutUint64(removeAfterConfirmsB, m.removeAfterConfirms)
+	b = b.AddData(removeAfterConfirmsB)
+
+	if m.replacementTx == nil {
+		b = b.AddData([]byte{})
+	} else {
+		b = b.AddData(m.replacementTx[:])
+	}
+
+	if m.replacedTx == nil {
+		b = b.AddData([]byte{})
+	} else {
+		b = b.AddData(m.replacedTx[:])
 	}
 
 	return b, nil
 }
 
-// UnmarshalBinary loads a data from a marshalled byte array into a
-// monitoredTx.
-func (m *monitoredTx) UnmarshalBinary(data []byte) error {
-	ver, pushes, err := encode.DecodeBlob(data)
-	if err != nil {
-		return err
-	}
-	if ver != 0 {
-		return fmt.Errorf("unknown version %d", ver)
-	}
+func (m *monitoredTx) unmarshalV0(pushes [][]byte) error {
 	if len(pushes) != 2 && len(pushes) != 3 {
 		return fmt.Errorf("wrong number of pushes %d", len(pushes))
 	}
@@ -106,6 +120,54 @@ func (m *monitoredTx) UnmarshalBinary(data []byte) error {
 	}
 
 	return nil
+}
+
+// v1 added the removeAfterConfirms and the replacedTx fields.
+func (m *monitoredTx) unmarshalV1(pushes [][]byte) error {
+	if len(pushes) != 5 {
+		return fmt.Errorf("wrong number of pushes %d", len(pushes))
+	}
+
+	m.tx = &types.Transaction{}
+	if err := m.tx.UnmarshalBinary(pushes[0]); err != nil {
+		return fmt.Errorf("error reading tx: %w", err)
+	}
+
+	m.blockSubmitted = binary.BigEndian.Uint64(pushes[1])
+	m.removeAfterConfirms = binary.BigEndian.Uint64(pushes[2])
+
+	if len(pushes[3]) > 0 {
+		var replacementTxHash common.Hash
+		copy(replacementTxHash[:], pushes[3])
+		m.replacementTx = &replacementTxHash
+	}
+
+	if len(pushes[4]) > 0 {
+		var replacedTxHash common.Hash
+		copy(replacedTxHash[:], pushes[4])
+		m.replacedTx = &replacedTxHash
+	}
+
+	return nil
+}
+
+// UnmarshalBinary loads a data from a marshalled byte array into a
+// monitoredTx.
+func (m *monitoredTx) UnmarshalBinary(data []byte) error {
+	ver, pushes, err := encode.DecodeBlob(data)
+	if err != nil {
+		return err
+	}
+
+	if ver > 1 {
+		return fmt.Errorf("unknown version %d", ver)
+	}
+
+	if ver == 0 {
+		return m.unmarshalV0(pushes)
+	}
+
+	return m.unmarshalV1(pushes)
 }
 
 var (

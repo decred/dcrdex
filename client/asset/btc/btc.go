@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4421,6 +4422,11 @@ func (btc *baseWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) (con
 	return
 }
 
+// BondConfirmations gets the numer of confirmations since the creation of a bond.
+func (btc *baseWallet) BondConfirmations(_ context.Context, id dex.Bytes) (confs uint32, err error) {
+	return btc.RegFeeConfirmations(context.Background(), id)
+}
+
 func (btc *baseWallet) checkPeers() {
 	numPeers, err := btc.node.peerCount()
 	if err != nil {
@@ -4972,8 +4978,11 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 
 	bondInfo := &asset.BondTxInfo{
 		AccountID: acctID,
-		LockTime:  uint64(lockTimeSec),
-		BondID:    pkh,
+		Bond: &asset.BondInfo{
+			ID:       hex.EncodeToString(pkh),
+			Amount:   amt,
+			LockTime: uint64(lockTimeSec),
+		},
 	}
 
 	btc.addTxToHistory(asset.CreateBond, txid, amt, fee, bondInfo, nil, false)
@@ -5091,9 +5100,13 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 		fees = amt - uint64(msgTx.TxOut[0].Value)
 	}
 	bondInfo := &asset.BondTxInfo{
-		LockTime: uint64(lockTime),
-		BondID:   pkhPush,
+		Bond: &asset.BondInfo{
+			ID:       hex.EncodeToString(pkhPush),
+			Amount:   amt,
+			LockTime: uint64(lockTime),
+		},
 	}
+
 	btc.addTxToHistory(asset.RedeemBond, txID, amt, fees, bondInfo, nil, true)
 	return NewOutput(txHash, 0, uint64(msgTx.TxOut[0].Value)), nil
 }

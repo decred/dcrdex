@@ -1097,6 +1097,10 @@ func (*TXCWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) (coins [
 
 var _ asset.Bonder = (*TXCWallet)(nil)
 
+func (*TXCWallet) BondConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, err error) {
+	return 0, nil
+}
+
 func (*TXCWallet) BondsFeeBuffer(feeRate uint64) uint64 {
 	return 4 * 1000 * feeRate * 2
 }

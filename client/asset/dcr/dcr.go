@@ -4237,9 +4237,11 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	success = true
 
 	bondInfo := &asset.BondTxInfo{
-		AccountID: acctID,
-		LockTime:  uint64(lockTimeSec),
-		BondID:    pkh,
+		Bond: &asset.BondInfo{
+			ID:       hex.EncodeToString(pkh),
+			Amount:   amt,
+			LockTime: uint64(lockTimeSec),
+		},
 	}
 	dcr.addTxToHistory(asset.CreateBond, txHash, amt, fee, bondInfo, nil, false)
 	txIDToRemoveFromHistory = txHash
@@ -4332,13 +4334,16 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 		return nil, translateRPCCancelErr(err)
 	}
 
-	refundAmt := msgTx.TxOut[0].Value
+	fees := amt - uint64(msgTx.TxOut[0].Value)
 	bondInfo := &asset.BondTxInfo{
-		LockTime: uint64(lockTime),
-		BondID:   pkhPush,
+		Bond: &asset.BondInfo{
+			ID:       hex.EncodeToString(pkhPush),
+			Amount:   amt,
+			LockTime: uint64(lockTime),
+		},
 	}
-	dcr.addTxToHistory(asset.RedeemBond, txHash, amt, amt-uint64(refundAmt), bondInfo, nil, true)
-	return newOutput(redeemHash, 0, uint64(refundAmt), wire.TxTreeRegular), nil
+	dcr.addTxToHistory(asset.RedeemBond, txHash, amt, fees, bondInfo, nil, true)
+	return newOutput(redeemHash, 0, uint64(msgTx.TxOut[0].Value), wire.TxTreeRegular), nil
 
 	/* If we need to find the actual unspent bond transaction for any of:
 	   (1) the output amount, (2) the commitment output data, or (3) to ensure
@@ -4519,6 +4524,11 @@ func (dcr *ExchangeWallet) TransactionConfirmations(ctx context.Context, txID st
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
+}
+
+// BondConfirmations gets the numer of confirmations since the creation of a bond.
+func (dcr *ExchangeWallet) BondConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
+	return dcr.RegFeeConfirmations(ctx, coinID)
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified

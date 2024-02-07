@@ -291,20 +291,7 @@ MULTIBALANCE_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload
 
 echo "Deploying Bond contract."
 BOND_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ALPHA_ADDRESS}\",\"${BOND_V0}\")" | sed 's/"//g')
-
-# Initial sync for light nodes takes quite a while. Wait for them to show
-# blocks on the network.
-while true
-do
-  N=$("${NODES_ROOT}/harness-ctl/gamma" "attach --exec eth.blockNumber")
-  if [ "$N" -gt 0 ]; then
-    break
-  fi
-  echo "Waiting for light nodes to sync."
-  # Although not necessary here, mine while waiting so that transactions are
-  # mined if not mined yet.
-  "${NODES_ROOT}/harness-ctl/mine-beta" "5"
-done
+echo "Bond contract hash is ${BOND_CONTRACT_HASH}. Saving to ${NODES_ROOT}/bond_contract_hash.txt"
 
 mine_pending_txs() {
   while true

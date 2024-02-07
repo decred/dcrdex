@@ -35,6 +35,7 @@ const (
 	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
 	WalletTraitHistorian                              // This wallet can return its transaction history
 	WalletTraitFundsMixer                             // The wallet can mix funds.
+	WalletTraitBondUpdater                            // The wallet can update bonds.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -145,6 +146,12 @@ func (wt WalletTrait) IsFundsMixer() bool {
 	return wt&WalletTraitFundsMixer != 0
 }
 
+// IsBondUpdater tests if the WalletTrait has the WalletTraitBondUpdater bit set,
+// which indicates the wallet implements the BondUpdater interface.
+func (wt WalletTrait) IsBondUpdater() bool {
+	return wt&WalletTraitBondUpdater != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -200,6 +207,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(FundsMixer); is {
 		t |= WalletTraitFundsMixer
+	}
+	if _, is := w.(BondUpdater); is {
+		t |= WalletTraitBondUpdater
 	}
 	return t
 }
@@ -614,6 +624,8 @@ type Bonder interface {
 	// RefundBond will refund the bond given the full bond output details and
 	// private key to spend it. The bond is broadcasted.
 	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (Coin, error)
+	// BondConfirmations gets the numer of confirmations since the creation of a bond.
+	BondConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
 
 	// A RefundBondByCoinID may be created in the future to attempt to refund a
 	// bond by locating it on chain, i.e. without providing the amount or
@@ -622,6 +634,32 @@ type Bonder interface {
 	// known values. Further, methods for (1) locking coins for future bonds,
 	// and (2) renewing bonds by spending a bond directly into a new one, may be
 	// required for efficient client bond management.
+}
+
+// BondUpdater is a wallet that can use the values of existing bonds to create
+// new bonds with a longer lockTime. Wallets that support this do not need to
+// reserve funds in order to maintain a certain tier, because bonds can be
+// extended before they expire.
+type BondUpdater interface {
+	Bonder
+
+	// UpdateBondTx creates an unsigned transaction that uses the funds locked
+	// in one or more bonds to create a new bond with a longer lockTime. If the
+	// total value of the bonds is greater than the new bond, a "change" bond
+	// will be created with the remaining funds and the same lockTime as the
+	// earliest expiring bond. If two bonds are being created, the "change"
+	// bond will be the first in the returned []*asset.Bond slice.
+	//
+	// Requirements:
+	//   - The correct amount of privKeys must be passed, depending on whether
+	//     or not a change bond is needed. The first will be used for the
+	//     change bond.
+	//   - The lockTime must be later than the latest lockTime of the
+	//     bondsToUpdate.
+	//   - The value of the earliest expiring bond must be greater than the
+	//     "change" bond value.
+	//   - The bondsToUpdate must all be from the same account.
+	UpdateBondTx(ver uint16, bondsToUpdate []dex.Bytes, privKeys []*secp256k1.PrivateKey, amt uint64, lockTime time.Time) ([]*Bond, error)
 }
 
 // Rescanner is a wallet implementation with rescan functionality.
@@ -1083,6 +1121,7 @@ const (
 	TicketPurchase
 	TicketVote
 	TicketRevocation
+	UpdateBond
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a
@@ -1091,15 +1130,20 @@ func IncomingTxType(txType TransactionType) bool {
 	return txType == Receive || txType == Redeem || txType == Refund || txType == RedeemBond
 }
 
-// BondTxInfo contains information about a CreateBond or RedeemBond
-// transaction.
+type BondInfo struct {
+	ID       string `json:"id"`
+	Amount   uint64 `json:"amount"`
+	LockTime uint64 `json:"lockTime"`
+}
+
+// BondTxInfo contains information about a CreateBond, RedeemBond, or
+// UpdateBond transaction.
 type BondTxInfo struct {
 	// AccountID is the account is the account ID that the bond is applied to.
-	AccountID dex.Bytes `json:"accountID"`
-	// LockTime is the time until which the bond is locked.
-	LockTime uint64 `json:"lockTime"`
-	// BondID is the ID of the bond.
-	BondID dex.Bytes `json:"bondID"`
+	AccountID     dex.Bytes   `json:"accountID"`
+	Bond          *BondInfo   `json:"bond"`
+	ChangeBond    *BondInfo   `json:"changeBond"`
+	ReplacedBonds []*BondInfo `json:"replacedBond"`
 }
 
 // WalletTransaction represents a transaction that was made by a wallet.
@@ -1144,11 +1188,12 @@ type WalletHistorian interface {
 // the corresponding signed transaction, and a final request is made once the
 // bond is fully confirmed. The caller should manage the private key.
 type Bond struct {
-	Version uint16
-	AssetID uint32
-	Amount  uint64
-	CoinID  []byte
-	Data    []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
+	Version  uint16
+	AssetID  uint32
+	Amount   uint64
+	CoinID   []byte
+	LockTime uint64
+	Data     []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
 	// SignedTx and UnsignedTx are the opaque (raw bytes) signed and unsigned
 	// bond creation transactions, in whatever encoding and funding scheme for
 	// this asset and wallet. The unsigned one is used to pre-validate this bond
@@ -1159,6 +1204,10 @@ type Bond struct {
 	// RedeemTx is a backup transaction that spends the bond output. Normally
 	// the a key index will be used to derive the key when the bond expires.
 	RedeemTx []byte
+
+	// ReplacedBy is set to the CoinID of the bond that has replaced this bond,
+	// if any.
+	ReplacedBy dex.Bytes
 }
 
 // ShieldedStatus is the balance and address associated with the shielded

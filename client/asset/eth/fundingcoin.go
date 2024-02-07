@@ -7,12 +7,14 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"github.com/ethereum/go-ethereum/common"
 )
 
 const fundingCoinIDSize = 28      // address (20) + amount (8) = 28
 const tokenFundingCoinIDSize = 36 // address (20) + amount (8) + amount (8) = 36
+const bondCoinSize = 64           // accountID (32) + bondID (32)
 
 // fundingCoin is an identifier for a coin which has not yet been sent to the
 // swap contract.
@@ -133,5 +135,53 @@ func createTokenFundingCoin(address common.Address, tokenValue, fees uint64) *to
 		addr: address,
 		amt:  tokenValue,
 		fees: fees,
+	}
+}
+
+type bondCoin struct {
+	accountID [32]byte
+	bondID    [32]byte
+	value     uint64
+}
+
+var _ asset.Coin = (*bondCoin)(nil)
+
+func decodeBondCoin(coinID []byte) (*bondCoin, error) {
+	if len(coinID) != bondCoinSize {
+		return nil, fmt.Errorf("decodeBondRefundCoin: length expected %v, got %v",
+			bondCoinSize, len(coinID))
+	}
+
+	var bondID, accountID [32]byte
+	copy(accountID[:], coinID[0:32])
+	copy(bondID[:], coinID[32:64])
+
+	return &bondCoin{
+		bondID:    bondID,
+		accountID: accountID,
+	}, nil
+}
+
+func (c *bondCoin) ID() dex.Bytes {
+	return append(c.accountID[:], c.bondID[:]...)
+}
+
+func (c *bondCoin) String() string {
+	return fmt.Sprintf("accountID: %x, bondID: %x", c.accountID, c.bondID)
+}
+
+func (c *bondCoin) Value() uint64 {
+	return c.value
+}
+
+func (c *bondCoin) TxID() string {
+	return ""
+}
+
+func createBondCoin(accountID, bondID [32]byte, value uint64) *bondCoin {
+	return &bondCoin{
+		accountID: accountID,
+		bondID:    bondID,
+		value:     value,
 	}
 }

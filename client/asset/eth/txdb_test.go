@@ -268,10 +268,16 @@ func TestTxDB(t *testing.T) {
 		if a.tx.Hash() != b.tx.Hash() {
 			return false
 		}
-		if a.replacementTx != nil && b.replacementTx != nil && *a.replacementTx != *b.replacementTx {
+		if (a.replacementTx == nil) != (b.replacementTx == nil) {
 			return false
 		}
-		if a.replacedTx != nil && b.replacedTx != nil && *a.replacedTx != *b.replacedTx {
+		if a.replacementTx != nil && *a.replacementTx != *b.replacementTx {
+			return false
+		}
+		if (a.replacedTx == nil) != (b.replacedTx == nil) {
+			return false
+		}
+		if a.replacedTx != nil && *a.replacedTx != *b.replacedTx {
 			return false
 		}
 		if a.blockSubmitted != b.blockSubmitted {
