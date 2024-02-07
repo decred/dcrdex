@@ -1994,13 +1994,14 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 	}
 
 	w.mtx.RLock()
-	defer w.mtx.RUnlock()
 	depositAddr = w.address
+	synced := w.synced
+	w.mtx.RUnlock()
 
 	// If the wallet is synced, update the bond reserves, logging any balance
 	// insufficiencies, otherwise start a loop to check the sync status until it
 	// is.
-	if w.synced {
+	if synced {
 		c.updateBondReserves(w.AssetID)
 	} else {
 		c.startWalletSyncMonitor(w)
