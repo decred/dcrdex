@@ -126,8 +126,19 @@ div[data-handler=mm] {
   }
 
   #lotsPerLevel,
-  #levelsPerSide {
-    width: 75px;
+  #levelsPerSide,
+  #qcProfit,
+  #qcLevelSpacing,
+  #qcMatchBuffer {
+    width: 100px;
+  }
+
+  #levelSpacingBox.disabled {
+    opacity: 0.5;
+  }
+
+  #placementsChart {
+    height: 100px;
   }
 
   .ico-rocket {

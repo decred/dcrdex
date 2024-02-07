@@ -21,220 +21,209 @@
   <div id="noMarket" class="flex-grow-1 flex-center">
     <button id="noMarketBttn" class="large">[[[Select a Market]]]</button>
   </div>
+  <div id="marketLoading" class="flex-grow-1 flex-center d-hide">
+    <div class="flex-center position-relative me-2 fs16">
+      <div class="ico-spinner spinner"></div>
+    </div>
+    <span class="fs18">Loading market data</span>
+  </div>
   <div id="botSettingsContainer" class="flex-grow-1 d-flex flex-wrap d-hide p-2">
-    <div id="advancedConfig" class="col-24 col-xl-8 col-xxl-6 px-3 d-hide">
-      {{- /* VIEW-ONLY MODE */ -}}
-      <div id="viewOnlyRunning" class="w-100 d-flex flex-center pb-2 mb-3 fs18 border-bottom">
-        <span id="onIndicator" class="on-indicator on me-2"></span> [[[bots_running_view_only]]]
-      </div>
-      <div id="viewOnlyArchived" class="w-100 d-flex flex-center pb-2 mb-2 fs18 brdrbottom">
-        <span id="viewOnlyArchivedMsg"></span>
-      </div>
-      {{- /* STRATEGY SELECTION */ -}}
-      <div id="gapStrategyBox" class="w-100 mb-3">
-        <div class="flex-stretch-column pb-2">
-          <label>[[[gap_strategy]]]</label>
-          <select id="gapStrategySelect" class="form-select fs18">
-            <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
-            <option value="percent">[[[gap_strategy_percent]]]</option>
-            <option value="absolute-plus">
-              [[[gap_strategy_absolute_plus]]]
-            </option>
-            <option value="absolute">[[[gap_strategy_absolute]]]</option>
-            <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
-          </select>
+
+    {{- /* LEFT COLUMN */ -}}
+    <div class="col-24 col-xl-8 col-xxl-6 px-3">
+      {{- /* MANUAL CONFIG */ -}}
+      <div id="advancedConfig" class="d-hide">
+        {{- /* VIEW-ONLY MODE */ -}}
+        <div id="viewOnlyRunning" class="w-100 d-flex flex-center pb-2 mb-3 fs18 border-bottom">
+          <span id="onIndicator" class="on-indicator on me-2"></span> [[[bots_running_view_only]]]
         </div>
-        {{- /* STRATEGY DESCRIPTIONS */ -}}
-        <div class="mb-3 w-100 border-bottom pb-3">
-          <div id="percentPlusInfo" class="">
+        <div id="viewOnlyArchived" class="w-100 d-flex flex-center pb-2 mb-2 fs18 brdrbottom">
+          <span id="viewOnlyArchivedMsg"></span>
+        </div>
+        {{- /* STRATEGY SELECTION */ -}}
+        <div id="gapStrategyBox" class="w-100">
+          <div class="d-flex flex-column align-items-stretch pb-2">
+            <label class="text-nowrap me-2 mb-1 fs18 demi">[[[gap_strategy]]]</label>
+            <select id="gapStrategySelect" class="form-select fs18">
+              <option value="percent-plus">[[[gap_strategy_percent_plus]]]</option>
+              <option value="percent">[[[gap_strategy_percent]]]</option>
+              <option value="absolute-plus">
+                [[[gap_strategy_absolute_plus]]]
+              </option>
+              <option value="absolute">[[[gap_strategy_absolute]]]</option>
+              <option value="multiplier">[[[gap_strategy_multiplier]]]</option>
+            </select>
+          </div>
+          {{- /* STRATEGY DESCRIPTIONS */ -}}
+          <div id="percentPlusInfo" class="w-100 pb-2 border-bottom fs16 text-justify">
             [[[strategy_percent_plus]]]
           </div>
-          <div id="percentInfo" class="d-hide">
+          <div id="percentInfo" class="w-100 pb-2 border-bottom fs16 text-justify d-hide">
             [[[strategy_percent]]]
           </div>
-          <div id="absolutePlusInfo" class="d-hide">
+          <div id="absolutePlusInfo" class="w-100 pb-2 border-bottom fs16 text-justify d-hide">
             [[[strategy_absolute_plus]]]
           </div>
-          <div id="absoluteInfo" class="d-hide">
+          <div id="absoluteInfo" class="w-100 pb-2 border-bottom fs16 text-justify d-hide">
             [[[strategy_absolute]]]
           </div>
-          <div id="multiplierInfo" class="d-hide">
+          <div id="multiplierInfo" class="w-100 pb-2 border-bottom fs16 text-justify d-hide">
             [[[strategy_multiplier]]]
           </div>
         </div>
-      </div>
-      <div class="d-flex justify-content-end mb-4">
-        <button id="resetButton" class="me-auto ms-0">[[[reset_settings]]]</button>
-        <button id="updateButton" class="go">[[[update_settings]]]</button>
-        <button id="createButton" class="go d-hide">[[[create_bot]]]</button>
-      </div>
-
-      <div id="profitSelectorBox" class="d-flex align-items-stretch py-2 my-2 border-top border-bottom d-hide">
-        <div class="flex-grow-1 d-flex flex-column pe-2">
-          <span id="profitPrompt" class="fs18">[[[bot_profit_title]]]</span>
-          <span class="fs14 mt-1">
-            [[[bot_profit_explainer]]]
-          </span>
+        <div id="buttonsBox">
+          <button id="updateButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg border pointer">[[[update_settings]]]</button>
+          <button id="createButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg border pointer d-hide">[[[create_bot]]]</button>
+          <button id="resetButton" class="d-block selected w-100 flex-center fs20 mt-2 p-2 hoverbg border pointer">[[[reset_settings]]]</button>
         </div>
-        <div class="w-100 d-flex flex-column align-items-stretch">
-          <div class="flex-center p-3 border-start">
-            <input type="number" id="profitInput" class="p-2 text-center fs24 me-1">
-            <span class="fs24">%</span>
+
+        <div id="profitSelectorBox" class="d-flex align-items-stretch py-2 my-2 border-top border-bottom d-hide">
+          <div class="flex-grow-1 d-flex flex-column pe-2">
+            <span id="profitPrompt" class="fs18">[[[bot_profit_title]]]</span>
+            <span class="fs14 mt-1">
+              [[[bot_profit_explainer]]]
+            </span>
           </div>
-          <div id="profitInputErr" class="flex-center fs16 text-danger"></div>
-        </div>
-      </div>
-
-      <div id="buyPlacementsBox" class="mb-3">
-        <div class="d-flex align-items-center fs18 mt-3 demi">
-          [[[buy_placements]]]
-          <span class="ico-info fs12 ms-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
-        </div>
-        <div class="d-flex flex-column" id="buyPlacementsTableWrapper">
-          <table class="row-border border-top">
-            <thead>
-              <th scope="col">[[[priority]]]</th>
-              <th scope="col">[[[Lots]]]</th>
-              <th scope="col" id="buyGapFactorHdr"></th>
-              <th></th>
-              <th></th>
-              <th></th>
-              <th></th>
-              <th></th>
-            </thead>
-            <tbody id="buyPlacementsTableBody">
-              <tr id="placementRowTmpl">
-                <td data-tmpl="priority"></td>
-                <td data-tmpl="lots"></td>
-                <td data-tmpl="gapFactor"></td>
-                <td></td>
-                <td></td>
-                <td class="text-end">
-                  <span data-tmpl="removeBtn" class="ico-cross fs15 pointer text-danger"></span>
-                </td>
-                <td>
-                  <span data-tmpl="upBtn" class="ico-arrowup fs15 pointer grey"></span>
-                </td>
-                <td class="text-end">
-                  <span
-                    class="ico-arrowdown fs15 pointer grey"
-                    data-tmpl="downBtn"
-                  ></span>
-                </td>
-              </tr>
-              <tr id="addBuyPlacementRow">
-                <td></td>
-                <td><input id="addBuyPlacementLots" class="lots-input" step="1" type="number"></td>
-                <td><input id="addBuyPlacementGapFactor" class="gap-factor-input" type="number"></td>
-                <td></td>
-                <td></td>
-                <td class="text-end">
-                  <span id="addBuyPlacementBtn" class="ico-plus fs15 pointer text-success"></span>
-                </td>
-                <td></td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
-          <span id="buyPlacementsErr" class="fs15 pt-3 text-center d-hide text-danger text-break"></span>
-        </div>
-      </div>
-
-      <div id="sellPlacementsBox">
-        <div class="d-flex align-items-center fs18 mt-3 demi">
-          [[[sell_placements]]]
-          <span class="ico-info fs12 ms-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
-        </div>
-        <div class="d-flex flex-column" id="sellPlacementsTableWrapper">
-          <table class="row-border border-top">
-            <thead>
-              <th scope="col">[[[priority]]]</th>
-              <th scope="col">[[[Lots]]]</th>
-              <th scope="col" id="sellGapFactorHdr"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-              <th scope="col"></th>
-            </thead>
-            <tbody id="sellPlacementsTableBody">
-              <tr id="addSellPlacementRow">
-                <td></td>
-                <td><input id="addSellPlacementLots" class="lots-input" step="1" type="number"></td>
-                <td><input id="addSellPlacementGapFactor" class="gap-factor-input" type="number"></td>
-                <td></td>
-                <td></td>
-                <td class="text-end">
-                  <span id="addSellPlacementBtn" class="ico-plus fs15 pointer text-success"></span>
-                </td>
-                <td></td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
-          <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide text-danger text-break"></span>
-        </div>
-      </div>
-    </div>
-
-    {{- /* QUICK CONFIG */ -}}
-    <div id="quickConfig" class="col-24 col-xl-8 col-xxl-6 px-3">
-      {{- /* LEVELS PER SIDE */ -}}
-      <span class="fs22">Price levels per side</span>
-      <div class="d-flex align-items-stretch brdr rounded3">
-        <div class="p-3 flex-center">
-          <div class="d-flex align-items-stretch">
-            <div>
-              <input id="levelsPerSide" type="number" class="fs22 text-center p-2" step="1">
+          <div class="w-100 d-flex flex-column align-items-stretch">
+            <div class="flex-center p-3 brdrleft">
+              <input type="number" id="profitInput" class="p-2 text-center fs24 me-1">
+              <span class="fs24">%</span>
             </div>
-            <div class="d-flex flex-column align-items-stretch">
-              <div id="levelsPerSideUp" class="flex-grow-1 px-3 hoverbg pointer">
-                <span class="ico-arrowup"></span>
-              </div>
-              <div id="levelsPerSideDown" class="flex-grow-1 px-3 hoverbg pointer">
-                <span class="ico-arrowdown"></span>
-              </div>
-            </div>
+            <div id="profitInputErr" class="flex-center fs16 errcolor"></div>
           </div>
         </div>
-        <div class="flex-grow-1 ps-2 flex-center brdrleft">
-          Limit orders will be placed and maintained at this many price level on each side of
-          the market.
+
+        <div id="buyPlacementsBox">
+          <div class="d-flex align-items-center fs18 mt-3 demi">
+            [[[buy_placements]]]
+            <span class="ico-info fs12 ms-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
+          </div>
+          <div class="d-flex flex-column" id="buyPlacementsTableWrapper">
+            <table>
+              <thead>
+                <th scope="col">[[[priority]]]</th>
+                <th scope="col">[[[Lots]]]</th>
+                <th scope="col" id="buyGapFactorHdr"></th>
+              </thead>
+              <tbody id="buyPlacementsTableBody">
+                <tr id="placementRowTmpl">
+                  <td data-tmpl="priority"></td>
+                  <td data-tmpl="lots"></td>
+                  <td data-tmpl="gapFactor"></td>
+                  <td>
+                    <span data-tmpl="removeBtn" class="ico-cross fs15 pointer"></span>
+                  </td>
+                  <td>
+                    <span data-tmpl="upBtn" class="ico-arrowup fs15 pointer"></span>
+                  </td>
+                  <td>
+                    <span
+                      class="ico-arrowdown fs15 pointer"
+                      data-tmpl="downBtn"
+                    ></span>
+                  </td>
+                </tr>
+                <tr id="addBuyPlacementRow">
+                  <td></td>
+                  <td><input id="addBuyPlacementLots" class="lots-input p-2" step="1" type="number"></td>
+                  <td><input id="addBuyPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
+                  <td></td>
+                  <td></td>
+                  <td class="text-right">
+                    <span id="addBuyPlacementBtn" class="ico-plus fs15 pointer"></span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <span id="buyPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+          </div>
+        </div>
+
+        <div id="sellPlacementsBox">
+          <div class="d-flex align-items-center fs18 mt-3 demi">
+            [[[sell_placements]]]
+            <span class="ico-info fs12 ms-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
+          </div>
+          <div class="d-flex flex-column" id="sellPlacementsTableWrapper">
+            <table>
+              <thead>
+                <th scope="col">[[[priority]]]</th>
+                <th scope="col">[[[Lots]]]</th>
+                <th scope="col" id="sellGapFactorHdr"></th>
+                <th scope="col"></th>
+                <th scope="col"></th>
+                <th scope="col"></th>
+              </thead>
+              <tbody id="sellPlacementsTableBody">
+                <tr id="addSellPlacementRow">
+                  <td></td>
+                  <td><input id="addSellPlacementLots" class="lots-input p-2" step="1" type="number"></td>
+                  <td><input id="addSellPlacementGapFactor" class="gap-factor-input p-2" type="number"></td>
+                  <td></td>
+                  <td></td>
+                  <td class="text-right">
+                    <span id="addSellPlacementBtn" class="ico-plus fs15 pointer"></span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+          </div>
+        </div>
+        <div id="switchToQuickConfig" class="flex-center p-2 hoverbg pointer border rounded3 mt-3">
+          <span class="ico-settings fs14 me-1"></span>
+          <span class="fs15">Quick Configuration</span>
         </div>
       </div>
 
-      {{- /* LOTS PER LEVEL */ -}}
-      <span class="fs24">Amount per level</span>
-      <div class="brdr rounded3 d-flex flex-column align-items-stretch">
-        <div class="d-flex align-items-stretch">
-          <div class="py-3 ps-3 d-flex flex-column align-items-stretch">
+      {{- /* QUICK CONFIG */ -}}
+      <div id="quickConfig">
+        <div class="d-flex justify-content-between lh1 py-3 border-bottom">
+          <span class="fs22">Quick Configuration</span>
+          <div id="switchToAdvanced" class="p-1 flex-center hoverbg pointer">
+            <span class="ico-settings fs14 me-1"></span>
+            <span class="fs15">Configure manually</span>
+          </div>
+        </div>
+
+        <div id="qcLevelSettingsBox" class="d-flex align-items-stretch mt-3">
+
+          {{- /* LEVELS PER SIDE */ -}}
+          <div class="col-12 d-flex flex-column align-items-stretch mt-1">
+            <div class="fs17 pb-1">Price levels per side</div>
             <div class="d-flex align-items-stretch">
-              <div>
-                <input id="lotsPerLevel" type="number" class="fs22 text-center p-2" step="1">
-              </div>
+              <input id="levelsPerSide" type="number" class="fs18 text-center p-2 fs20" step="1">
               <div class="d-flex flex-column align-items-stretch">
-                <div id="lotsPerLevelUp" class="flex-grow-1 px-3 hoverbg pointer">
+                <div id="levelsPerSideUp" class="flex-grow-1 flex-center px-2 hoverbg pointer lh1">
                   <span class="ico-arrowup"></span>
                 </div>
-                <div id="lotsPerLevelDown" class="flex-grow-1 px-3 hoverbg pointer">
+                <div id="levelsPerSideDown" class="flex-grow-1 flex-center px-2 hoverbg pointer lh1">
                   <span class="ico-arrowdown"></span>
                 </div>
               </div>
             </div>
-            <label for="qcTaper" class="fs16 d-flex align-items-center justify-content-start mt-1">
-              <input type="checkbox" id="qcTaper" class="form-check-input me-2 mt-0">
-              <span>Taper</span>
-            </label>
           </div>
-          <div id="qcNoTaperInfo" class="p-2 flex-center brdrleft">
-            Number of lots per price level.
-          </div>
-          <div id="qcTaperInfo" class="p-2 flex-center brdrleft d-hide">
-            Number of lots for the first price level, tapering off for subsequent
-            levels.
+
+          {{- /* LOTS PER LEVEL */ -}}
+          <div id="qcLotsBox" class="col-12 d-flex flex-column align-items-stretch mt-1">
+            <div id="lotsPerLevelLabel" class="fs17 pb-1">Lots per level</div>
+            <div id="arbLotsLabel" class="fs17 pb-1 d-hide">Lots per side</div>
+            <div class="d-flex align-items-stretch">
+              <input id="lotsPerLevel" type="number" class="fs18 text-center p-2 fs20" step="1">
+              <div class="d-flex flex-column align-items-stretch">
+                <div id="lotsPerLevelUp" class="flex-grow-1 flex-center px-2 hoverbg pointer lh1">
+                  <span class="ico-arrowup"></span>
+                </div>
+                <div id="lotsPerLevelDown" class="flex-grow-1 flex-center px-2 hoverbg pointer lh1">
+                  <span class="ico-arrowdown"></span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="d-flex brdrtop">
+
+        {{- /* LOT SIZE AND COMMITMENT SUMS */ -}}
+        <div id="qcCommitDisplay" class="d-flex brdr rounded3 mt-3">
           <div class="col-12 px-2">
             <div class="d-flex align-items-center justify-content-between">
               <span>Lot Size</span>
@@ -251,9 +240,9 @@
           </div>
           <div class="col-12 px-2 brdrleft">
             <div class="d-flex align-items-center justify-content-between">
-              <span>Total</span>
+              <span>[[[Lots]]]</span>
               <span>
-                <span id="qcCommitDisplay">15</span> <span id="qcCommitUnit">XYZ</span>
+                <span id="qcLotsDisplay">15</span>
               </span>
             </div>
             <div class="d-flex align-items-center justify-content-between">
@@ -262,6 +251,109 @@
                 <span id="qcCommitUSDDisplay">1245.50</span> USD
               </span>
             </div>
+          </div>
+        </div>
+
+        <div id="qcProfitBox" class="d-flex align-items-stretch mt-3">
+
+          {{- /* PROFIT */ -}}
+          <div class="col-12 d-flex flex-column align-items-stretch mt-1">
+            <div class="fs17 pb-1">Profit threshold</div>
+            <div class="d-flex align-items-center">
+              <input id="qcProfit" type="number" class="fs18 text-center p-2 fs20" step="1">
+              <span class="fs28 ms-1">%</span>
+              <!-- <div class="d-flex flex-column align-items-stretch">
+                <div id="levelsPerSideUp" class="flex-grow-1 flex-center px-2 hoverbg pointer lh1">
+                  <span class="ico-arrowup"></span>
+                </div>
+                <div id="levelsPerSideDown" class="flex-grow-1 flex-center px-2 hoverbg pointer lh1">
+                  <span class="ico-arrowdown"></span>
+                </div>
+              </div> -->
+            </div>
+            <div class="pe-3">
+              <div id="qcProfitSliderContainer" class="slider-container"></div>
+            </div>
+          </div>
+
+          {{- /* RATE INCREMENT */ -}}
+          <div id="levelSpacingBox" class="col-12 d-flex flex-column align-items-stretch mt-1">
+            <div class="fs17 pb-1">Price increment</div>
+            <div class="d-flex align-items-center">
+              <input id="qcLevelSpacing" type="number" class="fs18 text-center p-2 fs20" step="1">
+              <span class="fs28 ms-1">%</span>
+            </div>
+            <div id="qcLevelSpacingContainer" class="slider-container"></div>
+          </div>
+
+          {{- /* MATCH MULTIPLIER */ -}}
+          <div id="matchMultiplierBox" class="col-12 d-flex flex-column align-items-stretch mt-1">
+            <div class="fs17 pb-1">Match buffer</div>
+            <div class="d-flex align-items-center">
+              <input id="qcMatchBuffer" type="number" class="fs18 text-center p-2 fs20">
+              <span class="fs28 ms-1">%</span>
+            </div>
+            <div id="qcMatchBufferContainer" class="slider-container"></div>
+          </div>
+        </div>
+        <div id="qcError" class="pt-2 errcolor"></div>
+      </div>
+
+      <div id="placementsChartBox">
+        <div id="placementsChart" class="brdr mt-3"></div>
+        <span id="placementChartLegend" class="fs16 grey mt-1">δ = remote exchange gap</span>
+      </div>
+
+      <div class="d-flex align-items-stretch mt-3 brdr rounded3">
+        {{- /* BASE BALANCE CHECK */ -}}
+        <div class="col-12 d-flex flex-column align-items-stretch">
+          <div class="d-flex align-items-center justify-content-between p-2 brdrbottom">
+            <div class="flex-center">
+              <img class="mini-icon me-2" data-base-logo>
+              <span class="fs18" data-base-name></span>
+            </div>
+            <div id="baseBalOK" class="flex-center fs16">
+              <div class="ico-check me-1"></div>
+              <span>OK</span>
+            </div>
+            <div id="baseBalNotOK" class="flex-center ico-cross fs14 errcolor me-1"></div>
+          </div>
+          <div id="baseBalOKBals" class="d-flex align-items-start flex-column p-2">
+            <span>Commited: <span id="baseBalanceCommit" class="fs17 demi"></span> <span class="fs15 grey" data-base-ticker></span></span>
+            <span class="lh1">├─ dex: <span id="baseBalanceDEXCommit" class="fs17 demi"></span></span>
+            <span class="lh1">└─ cex: <span id="baseBalanceCEXCommit" class="fs17 demi"></span></span>
+          </div>
+          <div id="baseBalNotOKBals" class="d-flex flex-column align-items-start p-2 d-hide">
+            <span>Required: <span id="baseBalanceRequired" class="fs17 demi"></span> <span class="fs15 grey" data-base-ticker></span></span>
+            <span>Available: <span id="baseBalanceAvail" class="fs17 demi"></span> <span class="fs15 grey" data-base-ticker></span></span>
+            <span class="lh1">├─ dex: <span id="baseBalanceDEXAvail" class="fs17 demi"></span></span>
+            <span class="lh1">└─ cex: <span id="baseBalanceCEXAvail" class="fs17 demi"></span></span>
+          </div>
+        </div>
+
+        {{- /* QUOTE BALANCE CHECK */ -}}
+        <div class="col-12 d-flex flex-column align-items-stretch brdrleft">
+          <div class="d-flex align-items-center justify-content-between p-2 brdrbottom">
+            <div class="flex-center">
+              <img class="mini-icon me-2" data-quote-logo>
+              <span class="fs18" data-quote-name></span>
+            </div>
+            <div id="quoteBalOK" class="flex-center fs16">
+              <div class="ico-check me-1"></div>
+              <span>OK</span>
+            </div>
+            <div id="quoteBalNotOK" class="flex-center ico-cross fs14 errcolor me-1"></div>
+          </div>
+          <div id="quoteBalOKBals" class="d-flex align-items-start flex-column p-2">
+            <span>Commited: <span id="quoteBalanceCommit" class="fs17 demi"></span> <span class="fs15 grey" data-quote-ticker></span></span>
+            <span class="lh1">├─ dex: <span id="quoteBalanceDEXCommit" class="fs17 demi"></span></span>
+            <span class="lh1">└─ cex: <span id="quoteBalanceCEXCommit" class="fs17 demi"></span></span>
+          </div>
+          <div id="quoteBalNotOKBals" class="d-flex flex-column align-items-start p-2 d-hide">
+            <span>Required: <span id="quoteBalanceRequired" class="fs17 demi"></span> <span class="fs15 grey" data-quote-ticker></span></span>
+            <span>Available: <span id="quoteBalanceAvail" class="fs17 demi"></span> <span data-quote-ticker></span></span>
+            <span class="lh1">├─ dex: <span id="quoteBalanceDEXAvail" class="fs17 demi"></span></span>
+            <span class="lh1">└─ cex: <span id="quoteBalanceCEXAvail" class="fs17 demi"></span></span>
           </div>
         </div>
       </div>
