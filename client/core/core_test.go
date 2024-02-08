@@ -365,6 +365,7 @@ type TDB struct {
 	acctErr                  error
 	createAccountErr         error
 	addBondErr               error
+	addBondsErr              error
 	storeAccountProofErr     error
 	updateOrderErr           error
 	activeDEXOrders          []*db.MetaOrder
@@ -427,6 +428,10 @@ func (tdb *TDB) NextBondKeyIndex(assetID uint32) (uint32, error) {
 
 func (tdb *TDB) AddBond(host string, bond *db.Bond) error {
 	return tdb.addBondErr
+}
+
+func (tdb *TDB) AddBonds(host string, bonds []*db.Bond) error {
+	return tdb.addBondsErr
 }
 
 func (tdb *TDB) ConfirmBond(host string, assetID uint32, bondCoinID []byte) error {
@@ -648,6 +653,7 @@ func (r *tReceipt) SignedRefund() dex.Bytes {
 }
 
 type TXCWallet struct {
+	assetID             uint32
 	swapSize            uint64
 	sendFeeSuggestion   uint64
 	sendCoin            *tCoin
@@ -700,6 +706,7 @@ type TXCWallet struct {
 	feeCoin             []byte
 	makeRegFeeTxErr     error
 	feeCoinSent         []byte
+	sentRawTransaction  []byte
 	sendTxnErr          error
 	contractExpired     bool
 	contractLockTime    time.Time
@@ -721,9 +728,11 @@ type TXCWallet struct {
 	bondTxCoinID                []byte
 	refundBondCoin              asset.Coin
 	refundBondErr               error
+	makeBondTxRes               *asset.Bond
 	makeBondTxErr               error
 	reserves                    atomic.Uint64
 
+	refundBondCoinParam     dex.Bytes
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
 	confirmRedemptionCalled bool
@@ -754,6 +763,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 			SupportedVersions: []uint32{0},
 		},
 		bondTxCoinID: encode.RandomBytes(32),
+		assetID:      assetID,
 	}
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
@@ -946,6 +956,7 @@ func (w *TXCWallet) Send(address string, value, feeSuggestion uint64) (asset.Coi
 }
 
 func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	w.sentRawTransaction = rawTx
 	return w.feeCoinSent, w.sendTxnErr
 }
 
@@ -1097,8 +1108,8 @@ func (*TXCWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) (coins [
 
 var _ asset.Bonder = (*TXCWallet)(nil)
 
-func (*TXCWallet) BondConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, err error) {
-	return 0, nil
+func (w *TXCWallet) BondConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, err error) {
+	return w.tConfirmations(ctx, id)
 }
 
 func (*TXCWallet) BondsFeeBuffer(feeRate uint64) uint64 {
@@ -1117,6 +1128,9 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 	if w.makeBondTxErr != nil {
 		return nil, nil, w.makeBondTxErr
 	}
+	if w.makeBondTxRes != nil {
+		return w.makeBondTxRes, func() {}, nil
+	}
 	return &asset.Bond{
 		Version: ver,
 		AssetID: dcrBondAsset.ID,
@@ -1128,6 +1142,8 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 func (w *TXCWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
 	return 0, nil
 }
+
+var _ asset.Bonder = (*TXCWallet)(nil)
 
 type TAccountLocker struct {
 	*TXCWallet
@@ -1151,6 +1167,46 @@ func newTAccountLocker(assetID uint32) (*xcWallet, *TAccountLocker) {
 	accountLocker := &TAccountLocker{TXCWallet: tWallet}
 	xcWallet.Wallet = accountLocker
 	return xcWallet, accountLocker
+}
+
+type TUpdateBonder struct {
+	*TXCWallet
+	lastUpdateBondTxParams *updateBondParams
+	updateBondTxRes        []*asset.Bond
+	updateBondTxErr        error
+}
+
+var _ asset.BondUpdater = (*TUpdateBonder)(nil)
+
+func newTUpdateBonder(assetID uint32) (*xcWallet, *TUpdateBonder) {
+	xcWallet, tWallet := newTWallet(assetID)
+	updateBonder := &TUpdateBonder{TXCWallet: tWallet}
+	xcWallet.Wallet = updateBonder
+	return xcWallet, updateBonder
+}
+
+type updateBondParams struct {
+	ver      uint16
+	bonds    []dex.Bytes
+	privKeys []*secp256k1.PrivateKey
+	amt      uint64
+	lockTime time.Time
+}
+
+func (w *TUpdateBonder) UpdateBondTx(ver uint16, bondsToUpdate []dex.Bytes, privKeys []*secp256k1.PrivateKey, amt uint64, lockTime time.Time) ([]*asset.Bond, error) {
+	if w.updateBondTxErr != nil {
+		return nil, w.updateBondTxErr
+	}
+
+	w.lastUpdateBondTxParams = &updateBondParams{
+		ver:      ver,
+		bonds:    bondsToUpdate,
+		privKeys: privKeys,
+		amt:      amt,
+		lockTime: lockTime,
+	}
+
+	return w.updateBondTxRes, nil
 }
 
 func (w *TAccountLocker) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
@@ -1416,19 +1472,21 @@ func (rig *testRig) queueRegister(regRes *msgjson.RegisterResult) {
 	})
 }
 
-func (rig *testRig) queuePrevalidateBond() {
+func (rig *testRig) queuePrevalidateBond(res *msgjson.PreValidateBondResult) {
 	rig.ws.queueResponse(msgjson.PreValidateBondRoute, func(msg *msgjson.Message, f msgFunc) error {
 		preEval := new(msgjson.PreValidateBond)
 		msg.Unmarshal(preEval)
 
-		preEvalResult := &msgjson.PreValidateBondResult{
-			AccountID: rig.dc.acct.id[:],
-			AssetID:   preEval.AssetID,
-			Amount:    dcrBondAsset.Amt,
-			// Expiry: ,
+		if res == nil {
+			res = &msgjson.PreValidateBondResult{
+				AccountID: rig.dc.acct.id[:],
+				AssetID:   preEval.AssetID,
+				Amount:    dcrBondAsset.Amt,
+				// Expiry: ,
+			}
 		}
-		sign(tDexPriv, preEvalResult)
-		resp, _ := msgjson.NewResponse(msg.ID, preEvalResult, nil)
+		sign(tDexPriv, res)
+		resp, _ := msgjson.NewResponse(msg.ID, res, nil)
 		f(resp)
 		return nil
 	})
@@ -2114,7 +2172,7 @@ func TestPostBond(t *testing.T) {
 	}
 
 	queuePostBondSequence := func() {
-		rig.queuePrevalidateBond()
+		rig.queuePrevalidateBond(nil)
 		rig.queuePostBond(postBondResult)
 		queueTipChange()
 		rig.queueNotifyFee()
@@ -10759,14 +10817,14 @@ func TestRotateBonds(t *testing.T) {
 	acct.maxBondedAmt = maxBondedPerTier * targetTier
 	acct.bondAsset = bondAsset.ID
 	tDcrWallet.bal = &asset.Balance{Available: bondAsset.Amt*targetTier + bondFeeBuffer}
-	rig.queuePrevalidateBond()
+	rig.queuePrevalidateBond(nil)
 	run(1, 0, bondAsset.Amt+bondFeeBuffer)
 
 	// Post and then expire the bond. This first bond should move to expired and we
 	// should create another bond.
 	acct.bonds, acct.pendingBonds = acct.pendingBonds, nil
 	acct.bonds[0].LockTime = locktimeExpired
-	rig.queuePrevalidateBond()
+	rig.queuePrevalidateBond(nil)
 	// The newly expired bond will be refunded in time to fund our next round,
 	// so we only need fees reserved.
 	run(1, 1, bondFeeBuffer)
@@ -10780,7 +10838,7 @@ func TestRotateBonds(t *testing.T) {
 	// Make the live bond weak. Should get a pending bond. Only fees reserves,
 	// because we still have an expired bond.
 	acct.bonds[0].LockTime = weakTimeThresh - 1
-	rig.queuePrevalidateBond()
+	rig.queuePrevalidateBond(nil)
 	run(1, 1, bondFeeBuffer)
 
 	// Refund the expired bond
@@ -10791,7 +10849,7 @@ func TestRotateBonds(t *testing.T) {
 
 	acct.targetTier = 2
 	acct.bonds = nil
-	rig.queuePrevalidateBond()
+	rig.queuePrevalidateBond(nil)
 	run(2, 0, bondAsset.Amt*2+bondFeeBuffer)
 
 	// Check that a new bond will be scheduled for merge with an existing bond
@@ -10799,7 +10857,7 @@ func TestRotateBonds(t *testing.T) {
 	acct.bonds = append(acct.bonds, acct.pendingBonds[0])
 	acct.pendingBonds = nil
 	acct.bonds[0].LockTime = mergeableLocktimeThresh + 5
-	rig.queuePrevalidateBond()
+	rig.queuePrevalidateBond(nil)
 	run(1, 0, 2*bondAsset.Amt+bondFeeBuffer)
 	mergingBond := acct.pendingBonds[0]
 	if mergingBond.LockTime != acct.bonds[0].LockTime {
@@ -10809,10 +10867,294 @@ func TestRotateBonds(t *testing.T) {
 	// Same thing, but without the merge, just to check our threshold calc.
 	acct.pendingBonds = nil
 	acct.bonds[0].LockTime = mergeableLocktimeThresh - 1
-	rig.queuePrevalidateBond()
+	rig.queuePrevalidateBond(nil)
 	run(1, 0, 2*bondAsset.Amt+bondFeeBuffer)
 	unmergingBond := acct.pendingBonds[0]
 	if unmergingBond.LockTime == acct.bonds[0].LockTime {
 		t.Fatalf("Unmergeable bond was scheduled for merged")
+	}
+}
+
+func TestRotateBondsUpdater(t *testing.T) {
+	bondAmt := uint64(1e7)
+
+	bondAssets := map[string]*msgjson.BondAsset{
+		tUTXOAssetA.Symbol: {
+			Version: 0,
+			ID:      tUTXOAssetA.ID,
+			Confs:   2,
+			Amt:     bondAmt,
+		},
+		tUTXOAssetB.Symbol: {
+			Version: 0,
+			ID:      tUTXOAssetB.ID,
+			Confs:   2,
+			Amt:     bondAmt / 2,
+		},
+	}
+
+	bondIDs := make([]dex.Bytes, 0, 6)
+	for i := 0; i < 6; i++ {
+		bondIDs = append(bondIDs, encode.RandomBytes(32))
+	}
+
+	newBond := func(assetID uint32, coinID dex.Bytes, lockTime uint64, amt uint64) *db.Bond {
+		return &db.Bond{
+			AssetID:  assetID,
+			CoinID:   coinID,
+			LockTime: lockTime,
+			Amount:   amt,
+		}
+	}
+
+	now := uint64(time.Now().Unix())
+	bondExpiry := uint64(60 * 60)
+	lockDur := minBondLifetime(dex.Mainnet, int64(bondExpiry))
+	lockTime := time.Now().Add(lockDur).Truncate(time.Second)
+	weakBondThreshold := uint64(time.Now().Unix() + int64(bondExpiry) + pendingBuffer(dex.Mainnet))
+
+	pk := func() *secp256k1.PrivateKey {
+		pk, _ := secp256k1.GeneratePrivateKey()
+		return pk
+	}
+
+	tests := []struct {
+		name string
+
+		bonds           []*db.Bond
+		pendingBonds    []*db.Bond
+		expiredBonds    []*db.Bond
+		targetTier      uint64
+		makeBondTxRes   *asset.Bond
+		updateBondTxRes []*asset.Bond
+		maxBondedAmt    uint64
+
+		expUpdateBondParams *updateBondParams
+		expExpiredBonds     []*db.Bond
+		expPendingBonds     []*db.Bond
+		expBonds            []*db.Bond
+	}{
+		{
+			name:       "no bonds to update",
+			targetTier: 4,
+			bonds:      []*db.Bond{},
+			makeBondTxRes: &asset.Bond{
+				CoinID:  bondIDs[0],
+				AssetID: tUTXOAssetA.ID,
+				Amount:  4 * bondAmt,
+			},
+			expPendingBonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[0], 0, 4*bondAmt),
+			},
+		},
+		{
+			name:       "1 strong, 1 weak, need additional",
+			targetTier: 4,
+			bonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[0], weakBondThreshold+1, 2*bondAmt), // strong
+				newBond(tUTXOAssetA.ID, bondIDs[1], weakBondThreshold, 1*bondAmt),   // weak
+			},
+			updateBondTxRes: []*asset.Bond{{
+				CoinID:  bondIDs[2],
+				AssetID: tUTXOAssetA.ID,
+				Amount:  4 * bondAmt,
+			}},
+			expUpdateBondParams: &updateBondParams{
+				bonds: []dex.Bytes{
+					bondIDs[0], bondIDs[1],
+				},
+				lockTime: lockTime,
+				privKeys: []*secp256k1.PrivateKey{pk()},
+				amt:      4 * bondAmt,
+			},
+			expPendingBonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[2], 0, 4*bondAmt),
+			},
+		},
+		{
+			name:       "1 strong, 1 weak, 1 expired, need change",
+			targetTier: 4,
+			bonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[0], weakBondThreshold+1, 2*bondAmt), // strong
+				newBond(tUTXOAssetA.ID, bondIDs[1], weakBondThreshold, bondAmt),     // weak
+			},
+			expiredBonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[2], now, 2*bondAmt),
+			},
+			updateBondTxRes: []*asset.Bond{{
+				CoinID:  bondIDs[3],
+				AssetID: tUTXOAssetA.ID,
+				Amount:  4 * bondAmt,
+			}},
+			expUpdateBondParams: &updateBondParams{
+				bonds: []dex.Bytes{
+					bondIDs[0], bondIDs[1], bondIDs[2],
+				},
+				lockTime: lockTime,
+				privKeys: []*secp256k1.PrivateKey{pk(), pk()},
+				amt:      4 * bondAmt,
+			},
+			expPendingBonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[3], 0, 4*bondAmt),
+			},
+		},
+		{
+			name:       "1 strong, 1 weak, 1 expired, no additional, no change",
+			targetTier: 4,
+			bonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[0], weakBondThreshold+1, 2*bondAmt), // strong
+				newBond(tUTXOAssetA.ID, bondIDs[1], weakBondThreshold, bondAmt),     // weak
+			},
+			expiredBonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[2], now, 1*bondAmt),
+			},
+			updateBondTxRes: []*asset.Bond{{
+				CoinID:  bondIDs[3],
+				AssetID: tUTXOAssetA.ID,
+				Amount:  4 * bondAmt,
+			}},
+			expUpdateBondParams: &updateBondParams{
+				bonds: []dex.Bytes{
+					bondIDs[0], bondIDs[1], bondIDs[2],
+				},
+				lockTime: lockTime,
+				privKeys: []*secp256k1.PrivateKey{pk()},
+				amt:      4 * bondAmt,
+			},
+			expPendingBonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[3], 0, 4*bondAmt),
+			},
+		},
+		{
+			name:         "ensure max bonded amt is respected",
+			maxBondedAmt: 4 * bondAmt,
+			targetTier:   5,
+			bonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[0], weakBondThreshold+1, 2*bondAmt), // strong
+				newBond(tUTXOAssetA.ID, bondIDs[1], weakBondThreshold, 1*bondAmt),   // weak
+			},
+			updateBondTxRes: []*asset.Bond{{
+				CoinID:  bondIDs[2],
+				AssetID: tUTXOAssetA.ID,
+				Amount:  4 * bondAmt,
+			}},
+			expUpdateBondParams: &updateBondParams{
+				bonds: []dex.Bytes{
+					bondIDs[0], bondIDs[1],
+				},
+				lockTime: lockTime,
+				privKeys: []*secp256k1.PrivateKey{pk()},
+				amt:      4 * bondAmt,
+			},
+			expPendingBonds: []*db.Bond{
+				newBond(tUTXOAssetA.ID, bondIDs[2], 0, 4*bondAmt),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newTestRig()
+			defer rig.shutdown()
+			tCore := rig.core
+
+			dcrWallet, tDCRWallet := newTUpdateBonder(tUTXOAssetA.ID)
+			tCore.wallets[tUTXOAssetA.ID] = dcrWallet
+			tDCRWallet.contractExpired = true
+			tDCRWallet.refundBondCoin = &tCoin{id: encode.RandomBytes(32), val: 1e11}
+			tDCRWallet.updateBondTxRes = test.updateBondTxRes
+			tDCRWallet.makeBondTxRes = test.makeBondTxRes
+
+			err := rig.core.Login(tPW)
+			if err != nil {
+				t.Fatalf("initial Login error: %v", err)
+			}
+
+			dc := rig.core.conns[tDexHost]
+			dc.cfg = &msgjson.ConfigResult{
+				BondAssets: bondAssets,
+				BondExpiry: bondExpiry,
+			}
+			acct := rig.dc.acct
+			acct.isAuthed = true
+			acct.targetTier = test.targetTier
+			acct.expiredBonds = test.expiredBonds
+			acct.pendingBonds = test.pendingBonds
+			acct.bonds = test.bonds
+			acct.maxBondedAmt = test.maxBondedAmt
+			dc.acct.bondAsset = tUTXOAssetA.ID
+
+			var bondAmt uint64
+			if test.makeBondTxRes != nil {
+				bondAmt = test.makeBondTxRes.Amount
+			} else {
+				bondAmt = test.updateBondTxRes[len(test.updateBondTxRes)-1].Amount
+			}
+			rig.queuePrevalidateBond(&msgjson.PreValidateBondResult{
+				Amount: bondAmt,
+			})
+
+			rig.core.rotateBonds(rig.core.ctx)
+
+			exp := test.expUpdateBondParams
+			got := tDCRWallet.lastUpdateBondTxParams
+			if (exp == nil) != (got == nil) {
+				t.Fatalf("%s: expected %v, got %v", test.name, exp, got)
+			}
+			if test.expUpdateBondParams != nil {
+				if !reflect.DeepEqual(exp.bonds, got.bonds) {
+					t.Fatalf("expected %v, got %v", exp.bonds, got.bonds)
+				}
+				if got.lockTime.Before(exp.lockTime) || got.lockTime.After(exp.lockTime.Add(20*time.Second)) {
+					t.Fatalf("expected %v, got %v", exp.lockTime, got.lockTime)
+				}
+				if exp.amt != got.amt {
+					t.Fatalf("expected %v, got %v", exp.amt, got.amt)
+				}
+				if len(exp.privKeys) != len(got.privKeys) {
+					t.Fatalf("expected %v, got %v", len(exp.privKeys), len(got.privKeys))
+				}
+			}
+
+			bondsEqual := func(b1, b2 *db.Bond) bool {
+				if b1.Amount != b2.Amount {
+					return false
+				}
+				if b1.AssetID != b2.AssetID {
+					return false
+				}
+				if !bytes.Equal(b1.CoinID, b2.CoinID) {
+					return false
+				}
+				return true
+			}
+
+			if len(test.expExpiredBonds) != len(dc.acct.expiredBonds) {
+				t.Fatalf("expected %d expired bonds, got %d", len(test.expExpiredBonds), len(dc.acct.expiredBonds))
+			}
+			for i, bond := range test.expExpiredBonds {
+				if !bondsEqual(bond, dc.acct.expiredBonds[i]) {
+					t.Fatalf("expected expired bond %v, got %v", bond, dc.acct.expiredBonds[i])
+				}
+			}
+
+			if len(test.expPendingBonds) != len(dc.acct.pendingBonds) {
+				t.Fatalf("expected %d pending bonds, got %d", len(test.expPendingBonds), len(dc.acct.pendingBonds))
+			}
+			for i, bond := range test.expPendingBonds {
+				if !bondsEqual(bond, dc.acct.pendingBonds[i]) {
+					t.Fatalf("expected pending bond %v, got %v", bond, dc.acct.pendingBonds[i])
+				}
+			}
+
+			if len(test.expBonds) != len(dc.acct.bonds) {
+				t.Fatalf("expected %d bonds, got %d", len(test.expBonds), len(dc.acct.bonds))
+			}
+			for i, bond := range test.expBonds {
+				if !bondsEqual(bond, dc.acct.bonds[i]) {
+					t.Fatalf("expected bond %v, got %v", bond, dc.acct.bonds[i])
+				}
+			}
+		})
 	}
 }

@@ -106,6 +106,7 @@ type Bond struct {
 	LockTime   uint64    `json:"lockTime"`
 	KeyIndex   uint32    `json:"keyIndex"` // child key index for HD path: m / hdKeyPurposeBonds / assetID' / bondIndex
 	RefundTx   dex.Bytes `json:"refundTx"` // pays to wallet that created it - only a backup for emergency!
+	ReplacedBy dex.Bytes `json:"replacedBy"`
 
 	Confirmed bool `json:"confirmed"` // if reached required confs according to server, not in serialization
 	Refunded  bool `json:"refunded"`  // not in serialization
@@ -120,7 +121,7 @@ func (b *Bond) UniqueID() []byte {
 
 // Encode serialized the Bond. Confirmed and Refund are not included.
 func (b *Bond) Encode() []byte {
-	return versionedBytes(2).
+	return versionedBytes(3).
 		AddData(uint16Bytes(b.Version)).
 		AddData(uint32Bytes(b.AssetID)).
 		AddData(b.CoinID).
@@ -131,7 +132,8 @@ func (b *Bond) Encode() []byte {
 		AddData(uint64Bytes(b.LockTime)).
 		AddData(uint32Bytes(b.KeyIndex)).
 		AddData(b.RefundTx).
-		AddData(uint32Bytes(b.Strength))
+		AddData(uint32Bytes(b.Strength)).
+		AddData(b.ReplacedBy)
 	// Confirmed and Refunded are not part of the encoding.
 }
 
@@ -148,6 +150,8 @@ func DecodeBond(b []byte) (*Bond, error) {
 		return decodeBond_v1(pushes)
 	case 2:
 		return decodeBond_v2(pushes)
+	case 3:
+		return decodeBond_v3(pushes)
 	}
 	return nil, fmt.Errorf("unknown Bond version %d", ver)
 }
@@ -181,19 +185,26 @@ func decodeBond_v0(pushes [][]byte) (*Bond, error) {
 
 func decodeBond_v1(pushes [][]byte) (*Bond, error) {
 	if len(pushes) != 10 {
-		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
+		return nil, fmt.Errorf("decodeBond_v1: expected 10 data pushes, got %d", len(pushes))
 	}
 	return decodeBond_v2(append(pushes, []byte{0, 0, 0, 0} /* uint32 strength */))
 }
 
 func decodeBond_v2(pushes [][]byte) (*Bond, error) {
 	if len(pushes) != 11 {
-		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
+		return nil, fmt.Errorf("decodeBond_v2: expected 11 data pushes, got %d", len(pushes))
+	}
+	return decodeBond_v3(append(pushes, nil /* replacedBy */))
+}
+func decodeBond_v3(pushes [][]byte) (*Bond, error) {
+	if len(pushes) != 12 {
+		return nil, fmt.Errorf("decodeBond_v3: expected 12 data pushes, got %d", len(pushes))
 	}
 	ver, assetIDB, coinID := pushes[0], pushes[1], pushes[2]
 	utx, stx := pushes[3], pushes[4]
 	data, amtB, lockTimeB := pushes[5], pushes[6], pushes[7]
 	keyIndex, refundTx, strength := pushes[8], pushes[9], pushes[10]
+	replacedBy := pushes[11]
 	return &Bond{
 		Version:    intCoder.Uint16(ver),
 		AssetID:    intCoder.Uint32(assetIDB),
@@ -206,6 +217,7 @@ func decodeBond_v2(pushes [][]byte) (*Bond, error) {
 		KeyIndex:   intCoder.Uint32(keyIndex),
 		RefundTx:   refundTx,
 		Strength:   intCoder.Uint32(strength),
+		ReplacedBy: replacedBy,
 	}, nil
 }
 

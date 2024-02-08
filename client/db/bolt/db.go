@@ -85,6 +85,7 @@ var (
 	confirmedKey          = []byte("confirmed")
 	refundedKey           = []byte("refunded")
 	lockTimeKey           = []byte("lockTime")
+	replacedByKey         = []byte("replacedBy")
 	dexKey                = []byte("dex")
 	updateTimeKey         = []byte("utime")
 	accountKey            = []byte("account")
@@ -839,6 +840,11 @@ func (db *BoltDB) storeBond(bondBkt *bbolt.Bucket, bond *db.Bond) error {
 		return fmt.Errorf("lockTimeKey put error: %w", err)
 	}
 
+	err = bondBkt.Put(replacedByKey, bond.ReplacedBy)
+	if err != nil {
+		return fmt.Errorf("replacedByKey put error: %w", err)
+	}
+
 	return nil
 }
 
@@ -864,6 +870,37 @@ func (db *BoltDB) AddBond(host string, bond *db.Bond) error {
 		}
 
 		return db.storeBond(bondBkt, bond)
+	})
+}
+
+// AddBonds saves a slice of new Bonds or updates existing bonds for an existing
+// DEX account.
+func (db *BoltDB) AddBonds(host string, bondsSlice []*db.Bond) error {
+	acctKey := []byte(host)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", host)
+		}
+
+		bonds, err := acct.CreateBucketIfNotExists(bondsSubBucket)
+		if err != nil {
+			return fmt.Errorf("unable to access bonds sub-bucket for account for %s: %w", host, err)
+		}
+
+		for _, bond := range bondsSlice {
+			bondUID := bond.UniqueID()
+			bondBkt, err := bonds.CreateBucketIfNotExists(bondUID)
+			if err != nil {
+				return fmt.Errorf("failed to create bond %x bucket: %w", bondUID, err)
+			}
+
+			if err := db.storeBond(bondBkt, bond); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 }
 

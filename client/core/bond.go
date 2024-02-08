@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -235,6 +237,7 @@ func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 		// asset.
 		n := uint64(len(bondValues))
 		feeReserves := n * bonder.BondsFeeBuffer(c.feeSuggestionAny(w.AssetID))
+
 		// Even if reserves are 0, we may still want to reserve fees for
 		// renewing bonds.
 		paddedReserves := nominalReserves + feeReserves
@@ -254,6 +257,7 @@ func (c *Core) updateBondReserves(balanceCheckID ...uint32) {
 					paddedReserves, unbip(w.AssetID), avail)
 			}
 		}
+
 		bonder.SetBondReserves(paddedReserves)
 	}
 }
@@ -370,20 +374,21 @@ func (c *Core) dexBondConfig(dc *dexConnection, now int64) *dexBondCfg {
 
 type dexAcctBondState struct {
 	ExchangeAuth
-	repost   []*asset.Bond
-	mustPost int64 // includes toComp
-	toComp   int64
-	inBonds  uint64
+	repost                 []*asset.Bond
+	mustPost               int64 // includes toComp
+	toComp                 int64
+	inBonds                uint64
+	weakBonds, strongBonds []*db.Bond
 }
 
-// bondStateOfDEX collects all the information needed to determine what
-// bonds need to be refunded and how much new bonds should be posted.
 func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBondState {
 	dc.acct.authMtx.Lock()
 	defer dc.acct.authMtx.Unlock()
 
 	state := new(dexAcctBondState)
-	weakBonds := make([]*db.Bond, 0, len(dc.acct.bonds))
+
+	state.weakBonds = make([]*db.Bond, 0, len(dc.acct.bonds))
+	state.strongBonds = make([]*db.Bond, 0, len(dc.acct.bonds))
 
 	filterExpiredBonds := func(bonds []*db.Bond) (liveBonds []*db.Bond) {
 		for _, bond := range bonds {
@@ -395,9 +400,11 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 				c.log.Infof("Newly expired bond found: %v (%s)", coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 			} else {
 				if int64(bond.LockTime) <= bondCfg.replaceThresh {
-					weakBonds = append(weakBonds, bond) // but not yet expired (still live or pending)
+					state.weakBonds = append(state.weakBonds, bond) // but not yet expired (still live or pending)
 					c.log.Infof("Soon to expire bond found: %v (%s)",
 						coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
+				} else {
+					state.strongBonds = append(state.strongBonds, bond)
 				}
 				liveBonds = append(liveBonds, bond)
 			}
@@ -412,7 +419,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	dc.acct.bonds = filterExpiredBonds(dc.acct.bonds)
 	dc.acct.pendingBonds = filterExpiredBonds(dc.acct.pendingBonds) // possibly expired before confirmed
 	state.PendingStrength = sumBondStrengths(dc.acct.pendingBonds, bondCfg.bondAssets)
-	state.WeakStrength = sumBondStrengths(weakBonds, bondCfg.bondAssets)
+	state.WeakStrength = sumBondStrengths(state.weakBonds, bondCfg.bondAssets)
 	state.LiveStrength = sumBondStrengths(dc.acct.bonds, bondCfg.bondAssets) // for max bonded check
 	state.PendingBonds = dc.pendingBonds()
 	// Extract the expired bonds.
@@ -473,6 +480,10 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 	assetIDs := make(map[uint32]struct{})
 
 	for _, bond := range state.ExpiredBonds {
+		if bond.ReplacedBy != nil {
+			continue
+		}
+
 		bondIDStr := fmt.Sprintf("%v (%s)", coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 		if now < int64(bond.LockTime) {
 			ttr := time.Duration(int64(bond.LockTime)-now) * time.Second
@@ -617,6 +628,216 @@ func (c *Core) repostPendingBonds(dc *dexConnection, cfg *dexBondCfg, state *dex
 	}
 }
 
+func bondsForAsset(state *dexAcctBondState, assetID uint32) (weakAndExpired []*db.Bond, strong []*db.Bond) {
+	weakAndExpired = make([]*db.Bond, 0, len(state.weakBonds)+len(state.ExpiredBonds))
+	strong = make([]*db.Bond, 0, len(state.strongBonds))
+
+	for _, b := range state.weakBonds {
+		if b.AssetID == assetID {
+			weakAndExpired = append(weakAndExpired, b)
+		}
+	}
+	for _, b := range state.ExpiredBonds {
+		if b.AssetID == assetID {
+			weakAndExpired = append(weakAndExpired, b)
+		}
+	}
+	for _, b := range state.strongBonds {
+		if b.AssetID == assetID {
+			strong = append(strong, b)
+		}
+	}
+
+	return
+}
+
+func (c *Core) updateBonds(dc *dexConnection, cfg *dexBondCfg, state *dexAcctBondState, wallet *xcWallet, unlocked bool) (bool, error) {
+	if state.TargetTier == 0 || state.mustPost <= 0 || cfg.bondExpiry <= 0 {
+		return false, nil
+	}
+
+	bondAsset := cfg.bondAssets[state.BondAssetID]
+	if bondAsset == nil {
+		return false, nil
+	}
+
+	weakAndExpired, strong := bondsForAsset(state, state.BondAssetID)
+	bondsToUpdate := make([]*db.Bond, 0, len(state.strongBonds)+len(state.weakBonds)+len(state.ExpiredBonds))
+	lockDur := minBondLifetime(c.net, cfg.bondExpiry)
+	lockTime := time.Now().Add(lockDur).Truncate(time.Second)
+
+	// Always include strong bonds that expire prior to the lockTime.
+	var strongBondAmt uint64
+	for _, bond := range strong {
+		if bond.LockTime < uint64(lockTime.Unix()) {
+			bondsToUpdate = append(bondsToUpdate, bond)
+			strongBondAmt += bond.Amount
+		}
+	}
+
+	mustPostAmt := uint64(state.mustPost) * bondAsset.Amt
+
+	// Include weak/expired bonds until the mustPost amount is reached.
+	// Prefer bonds that expire later.
+	sort.Slice(weakAndExpired, func(i, j int) bool {
+		return weakAndExpired[i].LockTime > weakAndExpired[j].LockTime
+	})
+	var reusedBondedAmt uint64
+	for _, bond := range weakAndExpired {
+		bondsToUpdate = append(bondsToUpdate, bond)
+		reusedBondedAmt += bond.Amount
+		if reusedBondedAmt >= mustPostAmt {
+			break
+		}
+	}
+
+	// If there are no bonds to update, then a new bond must be created.
+	if len(bondsToUpdate) == 0 {
+		return false, nil
+	}
+
+	var additionalAmtRequired uint64
+	if reusedBondedAmt < mustPostAmt {
+		additionalAmtRequired = mustPostAmt - reusedBondedAmt
+	}
+
+	amtToPost := additionalAmtRequired
+
+	// Make sure we're not posting more than MaxBondedAmt
+	if state.MaxBondedAmt > 0 {
+		expiredStrength := sumBondStrengths(state.ExpiredBonds, cfg.bondAssets)
+		currentlyBondedAmt := uint64(state.PendingStrength+state.LiveStrength+expiredStrength) * bondAsset.Amt
+		if currentlyBondedAmt >= state.MaxBondedAmt {
+			// If greater then something went wrong...
+			amtToPost = 0
+		} else if currentlyBondedAmt+amtToPost > state.MaxBondedAmt {
+			amtToPost = state.MaxBondedAmt - currentlyBondedAmt
+		}
+	}
+	amtToPost = amtToPost / bondAsset.Amt * bondAsset.Amt // round down to nearest bond size
+
+	// Make sure the new bond is not larger than we need
+	newBondSize := reusedBondedAmt + strongBondAmt + amtToPost
+	totalRequired := strongBondAmt + uint64(state.mustPost)*bondAsset.Amt
+	if totalRequired < newBondSize {
+		newBondSize = totalRequired
+	}
+
+	bondKeys := make([]*secp256k1.PrivateKey, 0, 2)
+	keyIndexes := make([]uint32, 0, 2)
+
+	// Will always create at least one new bond.
+	bondKey, keyIndex, err := c.nextBondKey(bondAsset.ID)
+	defer bondKey.Zero()
+	if err != nil {
+		return false, err
+	}
+	bondKeys = append(bondKeys, bondKey)
+	keyIndexes = append(keyIndexes, keyIndex)
+
+	// If we reusing more than the size of the new bond, we need
+	// a "change" bond.
+	if reusedBondedAmt+strongBondAmt > newBondSize {
+		bondKey, keyIndex, err := c.nextBondKey(bondAsset.ID)
+		defer bondKey.Zero()
+		if err != nil {
+			return false, err
+		}
+		bondKeys = append(bondKeys, bondKey)
+		keyIndexes = append(keyIndexes, keyIndex)
+	}
+
+	bondIDsToUpdate := make([]dex.Bytes, 0, len(bondsToUpdate))
+	for _, bond := range bondsToUpdate {
+		bondIDsToUpdate = append(bondIDsToUpdate, bond.CoinID)
+	}
+
+	newBonds, err := wallet.UpdateBondTx(bondAsset.Version, bondIDsToUpdate, bondKeys, newBondSize, lockTime)
+	if err != nil {
+		return false, codedError(bondPostErr, err)
+	}
+
+	nonChangeBond := newBonds[0]
+	if len(newBonds) == 2 {
+		nonChangeBond = newBonds[1]
+	}
+	err = c.preValidateBond(dc, nonChangeBond)
+	if err != nil {
+		return false, err
+	}
+
+	newDBBonds := make([]*db.Bond, 0, len(newBonds)+len(bondsToUpdate))
+	var replacementBondID dex.Bytes
+	for i, bond := range newBonds {
+		newDBBonds = append(newDBBonds, &db.Bond{
+			Version:    bond.Version,
+			AssetID:    bond.AssetID,
+			CoinID:     bond.CoinID,
+			UnsignedTx: bond.UnsignedTx,
+			SignedTx:   bond.SignedTx,
+			Data:       bond.Data,
+			Amount:     bond.Amount,
+			LockTime:   bond.LockTime,
+			KeyIndex:   keyIndexes[i],
+			RefundTx:   bond.RedeemTx,
+		})
+		replacementBondID = bond.CoinID
+	}
+	for _, updatedBond := range bondsToUpdate {
+		updatedBond.ReplacedBy = replacementBondID
+		newDBBonds = append(newDBBonds, updatedBond)
+	}
+
+	err = c.db.AddBonds(dc.acct.host, newDBBonds)
+	if err != nil {
+		return false, err
+	}
+
+	removeBond := func(bondsList *[]*db.Bond, coinID dex.Bytes) bool {
+		list := *bondsList
+		for i, bond := range list {
+			if bytes.Equal(bond.CoinID, coinID) {
+				newList := append(list[:i], list[i+1:]...)
+				*bondsList = newList
+				return true
+			}
+		}
+		return false
+	}
+
+	// Add the newly created bond(s) to pendingBonds, and remove the replaced bonds.
+	dc.acct.authMtx.Lock()
+	for i, bond := range newDBBonds {
+		if i < len(newBonds) {
+			dc.acct.pendingBonds = append(dc.acct.pendingBonds, bond)
+		} else {
+			if !(removeBond(&dc.acct.bonds, bond.CoinID) || removeBond(&dc.acct.pendingBonds, bond.CoinID) || removeBond(&dc.acct.expiredBonds, bond.CoinID)) {
+				c.log.Warnf("Failed to remove replaced bond %s from account", bond.CoinID)
+			}
+		}
+	}
+	dc.acct.authMtx.Unlock()
+
+	if txCast, err := wallet.SendTransaction(newBonds[0].SignedTx); err != nil {
+		c.log.Warnf("Failed to broadcast update bond tx (%v). Tx bytes: %x", err, newBonds[0].SignedTx)
+	} else {
+		c.log.Infof("Broadcasted update bond tx %v", txCast)
+	}
+
+	c.updateAssetBalance(state.BondAssetID)
+
+	for _, bond := range newBonds {
+		bondCoinStr := coinIDString(bond.AssetID, bond.CoinID)
+		details := fmt.Sprintf("Waiting for %d confirmations to post bond %v (%s) to %s",
+			bondAsset.Confs, bondCoinStr, unbip(bond.AssetID), dc.acct.host) // TODO: subject, detail := c.formatDetails(...)
+		c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, string(TopicBondConfirming),
+			details, db.Success, bond.AssetID, bondCoinStr, 0, dc.acct.host, &state.ExchangeAuth))
+		c.monitorBondConfs(dc, bond, bondAsset.Confs)
+	}
+
+	return true, nil
+}
+
 // postRequiredBonds posts any required bond increments for a dexConnection.
 func (c *Core) postRequiredBonds(
 	dc *dexConnection,
@@ -708,8 +929,23 @@ func (c *Core) rotateBonds(ctx context.Context) {
 
 		bondCfg := c.dexBondConfig(dc, now)
 		acctBondState := c.bondStateOfDEX(dc, bondCfg)
-
 		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
+
+		wallet, err := c.connectedWallet(acctBondState.BondAssetID)
+		if err != nil {
+			if acctBondState.TargetTier > 0 {
+				c.log.Errorf("%v wallet not available for bonds: %v", unbip(acctBondState.BondAssetID), err)
+			}
+			continue
+		}
+
+		var updatePerformed bool
+		if _, isUpdater := wallet.Wallet.(asset.BondUpdater); isUpdater {
+			updatePerformed, err = c.updateBonds(dc, bondCfg, acctBondState, wallet, unlocked)
+			if err != nil {
+				c.log.Errorf("Error while trying to update bonds for %v: %v", dc.acct.host, err)
+			}
+		}
 
 		refundedAssets, expiredStrength, err := c.refundExpiredBonds(ctx, dc.acct, bondCfg, acctBondState, now)
 		if err != nil {
@@ -728,15 +964,9 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			continue
 		}
 
-		wallet, err := c.connectedWallet(acctBondState.BondAssetID)
-		if err != nil {
-			if acctBondState.TargetTier > 0 {
-				c.log.Errorf("%v wallet not available for bonds: %v", unbip(acctBondState.BondAssetID), err)
-			}
-			continue
+		if !updatePerformed {
+			c.postRequiredBonds(dc, bondCfg, acctBondState, bondAsset, wallet, expiredStrength, unlocked)
 		}
-
-		c.postRequiredBonds(dc, bondCfg, acctBondState, bondAsset, wallet, expiredStrength, unlocked)
 	}
 
 	c.updateBondReserves()
@@ -780,6 +1010,8 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 	return nil
 }
 
+var errAlreadyConfirming = fmt.Errorf("bond already confirming")
+
 func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondResult, error) {
 	if len(dc.acct.encKey) == 0 {
 		return nil, fmt.Errorf("uninitialized account")
@@ -804,6 +1036,9 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 	postBondRes := new(msgjson.PostBondResult)
 	err := dc.signAndRequest(postBond, msgjson.PostBondRoute, postBondRes, DefaultResponseTimeout)
 	if err != nil {
+		if strings.Contains(err.Error(), strconv.Itoa(msgjson.BondAlreadyConfirmingError)) {
+			return nil, errAlreadyConfirming
+		}
 		return nil, codedError(registerErr, err)
 	}
 
@@ -834,6 +1069,11 @@ func (c *Core) postAndConfirmBond(dc *dexConnection, bond *asset.Bond) {
 	// bond will be active (and account created if new) and we should confirm
 	// the bond (in DB and dc.acct.{bond,pendingBonds}).
 	pbr, err := c.postBond(dc, bond) // can be long while server searches
+	if errors.Is(err, errAlreadyConfirming) {
+		// No need for error notification if is server still confirming.
+		c.log.Warnf("Still waiting for server to confirm bond: %s", coinIDStr)
+		return
+	}
 	if err != nil {
 		subject, details := c.formatDetails(TopicBondPostError, err, err)
 		c.notify(newBondPostNote(TopicBondPostError, subject, details, db.ErrorLevel, dc.acct.host))
@@ -861,7 +1101,8 @@ func (c *Core) monitorBondConfs(dc *dexConnection, bond *asset.Bond, reqConfs ui
 		c.log.Errorf("No connected wallet for asset %v: %v", unbip(assetID), err)
 		return
 	}
-	lastConfs, err := wallet.RegFeeConfirmations(c.ctx, coinID)
+
+	lastConfs, err := wallet.BondConfirmations(c.ctx, coinID)
 	coinNotFound := errors.Is(err, asset.CoinNotFoundError)
 	if err != nil && !coinNotFound {
 		c.log.Errorf("Error getting confirmations for %s: %w", coinIDStr, err)
@@ -892,7 +1133,7 @@ func (c *Core) monitorBondConfs(dc *dexConnection, bond *asset.Bond, reqConfs ui
 	trigger := func() (bool, error) {
 		// Retrieve the current wallet in case it was reconfigured.
 		wallet, _ := c.wallet(assetID) // We already know the wallet is there by now.
-		confs, err := wallet.RegFeeConfirmations(c.ctx, coinID)
+		confs, err := wallet.BondConfirmations(c.ctx, coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %w", coinIDStr, err)
 		}
@@ -1530,16 +1771,15 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 			coinIDString(bond.AssetID, bondCoinCast), bondCoinStr)
 	}
 
-	// Set up the coin waiter, which watches confirmations so the user knows
-	// when to expect their account to be marked paid by the server.
-	c.monitorBondConfs(dc, bond, reqConfs)
-
 	c.updateAssetBalance(bond.AssetID)
 
 	// Start waiting for reqConfs.
 	subject, details := c.formatDetails(TopicBondConfirming, reqConfs, makeCoinIDToken(bondCoinStr, bond.AssetID), unbip(bond.AssetID), dc.acct.host)
 	c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, subject,
 		details, db.Success, bond.AssetID, bondCoinStr, 0, dc.acct.host, c.exchangeAuth(dc)))
+	// Set up the coin waiter, which watches confirmations so the user knows
+	// when to expect their account to be marked paid by the server.
+	c.monitorBondConfs(dc, bond, reqConfs)
 
 	return bond.CoinID, nil
 }
