@@ -825,6 +825,10 @@ type baseWallet struct {
 	txHistoryDB atomic.Value // *BadgerTxDB
 
 	ar *AddressRecycler
+
+	// subprocessWg must be incremented every time the wallet starts a
+	// goroutine that will use node or the tx history DB.
+	subprocessWg *sync.WaitGroup
 }
 
 func (w *baseWallet) fallbackFeeRate() uint64 {
@@ -1259,6 +1263,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		pendingTxs:        make(map[chainhash.Hash]ExtendedWalletTx),
 		walletDir:         walletDir,
 		ar:                addressRecyler,
+		subprocessWg:      new(sync.WaitGroup),
 	}
 	w.cfgV.Store(baseCfg)
 
@@ -1389,7 +1394,7 @@ func (btc *baseWallet) Info() *asset.WalletInfo {
 	return btc.walletInfo
 }
 
-func (btc *baseWallet) connectTxHistoryDB() error {
+func (btc *baseWallet) startTxHistoryDB() error {
 	dir, err := os.Open(btc.walletDir)
 	if err != nil {
 		return fmt.Errorf("error opening wallet directory: %w", err)
@@ -1417,7 +1422,8 @@ func (btc *baseWallet) connectTxHistoryDB() error {
 		address := match[1]
 		owns, err := btc.OwnsDepositAddress(address)
 		if err != nil {
-			return fmt.Errorf("error checking if wallet owns deposit address %s: %w", address, err)
+			btc.log.Errorf("Error checking if wallet owns deposit address %s: %w", address, err)
+			continue
 		}
 		if owns {
 			btc.log.Infof("Using tx history db %s", entry.Name())
@@ -1439,6 +1445,13 @@ func (btc *baseWallet) connectTxHistoryDB() error {
 	if err != nil {
 		return fmt.Errorf("error opening tx history db: %w", err)
 	}
+
+	var success bool
+	defer func() {
+		if !success {
+			db.Close()
+		}
+	}()
 
 	btc.txHistoryDB.Store(db)
 
@@ -1467,6 +1480,7 @@ func (btc *baseWallet) connectTxHistoryDB() error {
 
 	btc.receiveTxLastQuery.Store(lastQuery)
 
+	success = true
 	return nil
 }
 
@@ -1481,6 +1495,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err := btc.node.connect(ctx, &wg); err != nil {
 		return nil, err
 	}
+
 	// Initialize the best block.
 	bestBlockHdr, err := btc.node.getBestBlockHeader()
 	if err != nil {
@@ -1516,34 +1531,55 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 // Connect connects the wallet to the btc.Wallet backend and starts monitoring
 // blocks and peers. Satisfies the dex.Connector interface.
 func (btc *intermediaryWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	wg, err := btc.connect(ctx)
-	if err != nil {
-		return nil, err
-	}
+	// A separate baseCtx is used to ensure that all subprocesses are complete
+	// before the node is shut down.
+	baseCtx, killBase := context.WithCancel(context.Background())
 
-	err = btc.connectTxHistoryDB()
-	if err != nil {
-		return nil, err
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		btc.txDB().Run(ctx)
+	var success bool
+	defer func() {
+		if !success {
+			killBase()
+		}
 	}()
 
-	wg.Add(1)
+	baseWg, err := btc.connect(baseCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	err = btc.startTxHistoryDB()
+	if err != nil {
+		return nil, err
+	}
+
+	success = true
+
+	btc.subprocessWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer btc.subprocessWg.Done()
 		btc.watchBlocks(ctx)
 		btc.rf.CancelRedemptionSearches()
 	}()
-	wg.Add(1)
+
+	btc.subprocessWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer btc.subprocessWg.Done()
 		btc.monitorPeers(ctx)
 	}()
-	return wg, nil
+
+	baseWg.Add(1)
+	go func() {
+		defer baseWg.Done()
+		<-ctx.Done()
+		btc.subprocessWg.Wait()
+		killBase()
+		db := btc.txDB()
+		if db != nil {
+			db.Close()
+		}
+	}()
+
+	return baseWg, nil
 }
 
 // Reconfigure attempts to reconfigure the wallet.
@@ -4041,7 +4077,9 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 	// Broadcast the transaction, but do not block because this is not required
 	// and does not affect the audit result.
 	if rebroadcast && tx != nil {
+		btc.subprocessWg.Add(1)
 		go func() {
+			defer btc.subprocessWg.Done()
 			if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
 				btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			} else if !hashSent.IsEqual(txHash) {
@@ -4619,7 +4657,11 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	btc.emit.TipChange(uint64(newTip.Height))
 
-	go btc.checkPendingTxs(uint64(newTip.Height))
+	btc.subprocessWg.Add(1)
+	go func() {
+		defer btc.subprocessWg.Done()
+		btc.checkPendingTxs(uint64(newTip.Height))
+	}()
 
 	btc.rf.ReportNewTip(ctx, prevTip, newTip)
 }
@@ -5421,6 +5463,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		} else {
 			blockToQuery = tip - blockQueryBuffer
 		}
+
 		recentTxs, err := btc.txLister.listTransactionsSinceBlock(int32(blockToQuery))
 		if err != nil {
 			btc.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)

@@ -693,12 +693,13 @@ func TestCheckForNewBlocks(t *testing.T) {
 		w := &ETHWallet{
 			assetWallet: &assetWallet{
 				baseWallet: &baseWallet{
-					node:       node,
-					addr:       node.address(),
-					ctx:        ctx,
-					log:        tLogger,
-					currentTip: header0,
-					txDB:       &tTxDB{},
+					node:         node,
+					addr:         node.address(),
+					ctx:          ctx,
+					log:          tLogger,
+					currentTip:   header0,
+					txDB:         &tTxDB{},
+					subprocessWg: &sync.WaitGroup{},
 				},
 				log:     tLogger.SubLogger("ETH"),
 				emit:    emit,
@@ -784,10 +785,11 @@ func TestSyncStatus(t *testing.T) {
 			syncProgErr: test.syncProgErr,
 		}
 		eth := &baseWallet{
-			node: node,
-			addr: node.address(),
-			ctx:  ctx,
-			log:  tLogger,
+			node:         node,
+			addr:         node.address(),
+			ctx:          ctx,
+			log:          tLogger,
+			subprocessWg: &sync.WaitGroup{},
 		}
 		synced, ratio, err := eth.SyncStatus()
 		cancel()
@@ -895,6 +897,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			pendingTxs:   make(map[uint64]*extendedWalletTx),
 			txDB:         &tTxDB{},
 			currentTip:   &types.Header{Number: new(big.Int)},
+			subprocessWg: &sync.WaitGroup{},
 		},
 		versionedGases:     versionedGases,
 		maxSwapGas:         versionedGases[0].Swap,
