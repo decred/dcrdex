@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -159,6 +160,26 @@ func monitoredTxHashFromKey(mtk []byte) (common.Hash, error) {
 	return txHash, nil
 }
 
+// badgerDB returns ErrConflict when a read happening in a update (read/write)
+// transaction is stale. This function retries updates multiple times in
+// case of conflicts.
+func handleConflictWithBackoff(update func() error) error {
+	maxRetries := 10
+	sleepTime := 5 * time.Millisecond
+
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		sleepTime *= 2
+		err = update()
+		if err != badger.ErrConflict {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return err
+}
+
 var maxNonceKey = nonceKey(math.MaxUint64)
 
 // initialDBVersion only contained mappings from txHash -> monitoredTx.
@@ -181,12 +202,14 @@ type txDB interface {
 	getMonitoredTxs() (map[common.Hash]*monitoredTx, error)
 	removeMonitoredTxs([]common.Hash) error
 	close() error
-	run(context.Context)
 }
 
 type badgerTxDB struct {
 	*badger.DB
-	log dex.Logger
+	log     dex.Logger
+	running atomic.Bool
+	wg      *sync.WaitGroup
+	die     context.CancelFunc
 }
 
 var _ txDB = (*badgerTxDB)(nil)
@@ -235,15 +258,41 @@ func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
 		return nil, err
 	}
 
+	wg := new(sync.WaitGroup)
+	ctx, die := context.WithCancel(context.Background())
+
 	txDB := &badgerTxDB{
 		DB:  db,
 		log: log,
+		wg:  wg,
+		die: die,
 	}
 
 	err = txDB.updateVersion()
 	if err != nil {
 		return nil, fmt.Errorf("failed to update db: %w", err)
 	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				err := db.RunValueLogGC(0.5)
+				if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
+					log.Errorf("garbage collection error: %v", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	txDB.running.Store(true)
 
 	return txDB, nil
 }
@@ -313,29 +362,13 @@ func (s *badgerTxDB) updateVersion() error {
 }
 
 func (s *badgerTxDB) close() error {
+	s.running.Store(false)
+	s.die()
+	s.wg.Wait()
 	return s.Close()
 }
 
-func (s *badgerTxDB) run(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			err := s.RunValueLogGC(0.5)
-			if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
-				s.log.Errorf("garbage collection error: %v", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// storeTx stores a mapping from nonce to extendedWalletTx and a mapping from
-// transaction hash to nonce so transactions can be looked up by hash. If a
-// nonce already exists, the extendedWalletTx is overwritten.
-func (s *badgerTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
+func (s *badgerTxDB) storeTxImpl(nonce uint64, wt *extendedWalletTx) error {
 	wtB, err := json.Marshal(wt)
 	if err != nil {
 		return err
@@ -378,8 +411,20 @@ func (s *badgerTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
 	})
 }
 
-// removeTx removes a tx from the db.
-func (s *badgerTxDB) removeTx(id string) error {
+// storeTx stores a mapping from nonce to extendedWalletTx and a mapping from
+// transaction hash to nonce so transactions can be looked up by hash. If a
+// nonce already exists, the extendedWalletTx is overwritten.
+func (s *badgerTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	if !s.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return handleConflictWithBackoff(func() error { return s.storeTxImpl(nonce, wt) })
+}
+
+func (s *badgerTxDB) removeTxImpl(id string) error {
 	tk := txIDKey(id)
 
 	return s.Update(func(txn *badger.Txn) error {
@@ -401,11 +446,28 @@ func (s *badgerTxDB) removeTx(id string) error {
 	})
 }
 
+// removeTx removes a tx from the db.
+func (s *badgerTxDB) removeTx(id string) error {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	if !s.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return handleConflictWithBackoff(func() error { return s.removeTxImpl(id) })
+}
+
 // getTxs returns the n more recent transaction if refID is nil, or the
 // n transactions before/after refID depending on the value of past. The
 // transactions are returned in reverse chronological order.
 // If a non-nil refID is not found, asset.CoinNotFoundError is returned.
 func (s *badgerTxDB) getTxs(n int, refID *string, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	if !s.running.Load() {
+		return nil, fmt.Errorf("database is not running")
+	}
+
 	var txs []*asset.WalletTransaction
 
 	err := s.View(func(txn *badger.Txn) error {
@@ -465,6 +527,12 @@ func (s *badgerTxDB) getTxs(n int, refID *string, past bool, tokenID *uint32) ([
 // getPendingTxs returns a map of nonce to extendedWalletTx for all
 // pending transactions.
 func (s *badgerTxDB) getPendingTxs() (map[uint64]*extendedWalletTx, error) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	if !s.running.Load() {
+		return nil, fmt.Errorf("database is not running")
+	}
+
 	// We will be iterating backwards from the most recent nonce.
 	// If we find numConfirmedTxsToCheck consecutive confirmed transactions,
 	// we can stop iterating.
@@ -514,21 +582,38 @@ func (s *badgerTxDB) getPendingTxs() (map[uint64]*extendedWalletTx, error) {
 	return txs, err
 }
 
-// storeMonitoredTx stores a monitoredTx in the database.
-func (s *badgerTxDB) storeMonitoredTx(txHash common.Hash, tx *monitoredTx) error {
+func (s *badgerTxDB) storeMonitoredTxImpl(txHash common.Hash, tx *monitoredTx) error {
 	txKey := monitoredTxKey(txHash.Bytes())
 	txBytes, err := tx.MarshalBinary()
 	if err != nil {
 		return err
 	}
+
 	return s.Update(func(txn *badger.Txn) error {
 		return txn.Set(txKey, txBytes)
 	})
 }
 
+// storeMonitoredTx stores a monitoredTx in the database.
+func (s *badgerTxDB) storeMonitoredTx(txHash common.Hash, tx *monitoredTx) error {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	if !s.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return handleConflictWithBackoff(func() error { return s.storeMonitoredTxImpl(txHash, tx) })
+}
+
 // getMonitoredTxs returns a map of transaction hash to monitoredTx for all
 // monitored transactions.
 func (s *badgerTxDB) getMonitoredTxs() (map[common.Hash]*monitoredTx, error) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	if !s.running.Load() {
+		return nil, fmt.Errorf("database is not running")
+	}
+
 	monitoredTxs := make(map[common.Hash]*monitoredTx)
 
 	err := s.View(func(txn *badger.Txn) error {
@@ -562,9 +647,7 @@ func (s *badgerTxDB) getMonitoredTxs() (map[common.Hash]*monitoredTx, error) {
 	return monitoredTxs, err
 }
 
-// removeMonitoredTxs removes the monitored transactions with the provided
-// hashes from the database.
-func (s *badgerTxDB) removeMonitoredTxs(txHashes []common.Hash) error {
+func (s *badgerTxDB) removeMonitoredTxsImpl(txHashes []common.Hash) error {
 	return s.Update(func(txn *badger.Txn) error {
 		for _, txHash := range txHashes {
 			txKey := monitoredTxKey(txHash.Bytes())
@@ -575,4 +658,16 @@ func (s *badgerTxDB) removeMonitoredTxs(txHashes []common.Hash) error {
 		}
 		return nil
 	})
+}
+
+// removeMonitoredTxs removes the monitored transactions with the provided
+// hashes from the database.
+func (s *badgerTxDB) removeMonitoredTxs(txHashes []common.Hash) error {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	if !s.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return handleConflictWithBackoff(func() error { return s.removeMonitoredTxsImpl(txHashes) })
 }

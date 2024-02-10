@@ -428,9 +428,10 @@ type baseWallet struct {
 	}
 
 	txDB txDB
-	// All processes which may write to txDB must add an entry to this
-	// WaitGroup, and they must all complete before the db is closed.
-	txDbWg sync.WaitGroup
+
+	// subprocessWg must be incremented every time the wallet starts a
+	// goroutine that will use node or the tx history DB.
+	subprocessWg *sync.WaitGroup
 }
 
 // assetWallet is a wallet backend for Ethereum and Eth tokens. The backend is
@@ -730,6 +731,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		pendingTxs:   make(map[uint64]*extendedWalletTx),
 		// Can be empty
 		multiBalanceAddress: cfg.MultiBalAddress,
+		subprocessWg:        new(sync.WaitGroup),
 	}
 
 	var maxSwapGas, maxRedeemGas uint64
@@ -791,14 +793,6 @@ func getWalletDir(dataDir string, network dex.Network) string {
 	return filepath.Join(dataDir, network.String())
 }
 
-func (w *ETHWallet) shutdown() {
-	w.node.shutdown()
-	w.txDbWg.Wait()
-	if err := w.txDB.close(); err != nil {
-		w.log.Errorf("error closing tx history db: %v", err)
-	}
-}
-
 // Connect connects to the node RPC server. Satisfies dex.Connector.
 func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 	var cl ethFetcher
@@ -827,7 +821,17 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.node = cl
 	w.addr = cl.address()
 	w.ctx = ctx // TokenWallet will re-use this ctx.
-	err = w.node.connect(ctx)
+
+	nodeCtx, killNode := context.WithCancel(context.Background())
+
+	var success bool
+	defer func() {
+		if !success {
+			killNode()
+		}
+	}()
+
+	err = w.node.connect(nodeCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -855,7 +859,11 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	if err != nil {
 		return nil, err
 	}
-	w.txDbWg = sync.WaitGroup{}
+	defer func() {
+		if !success {
+			w.txDB.close()
+		}
+	}()
 
 	w.monitoredTxs, err = w.txDB.getMonitoredTxs()
 	if err != nil {
@@ -872,6 +880,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block hash: %w", err)
 	}
+
 	w.tipMtx.Lock()
 	w.currentTip = bestHdr
 	w.tipMtx.Unlock()
@@ -881,36 +890,32 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.log.Infof("Connected to eth (%s), at height %d", w.walletType, height)
 
 	w.connected.Store(true)
+	success = true
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	w.txDbWg.Add(1)
+	w.subprocessWg.Add(1)
 	go func() {
-		defer wg.Done()
-		defer w.txDbWg.Done()
-		w.txDB.run(ctx)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+		defer w.subprocessWg.Done()
 		w.monitorBlocks(ctx)
-		w.shutdown()
 	}()
 
-	wg.Add(1)
+	w.subprocessWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer w.subprocessWg.Done()
 		w.monitorPeers(ctx)
 	}()
 
+	wg := new(sync.WaitGroup)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		<-ctx.Done()
+		w.subprocessWg.Wait()
+		killNode()
+		w.txDB.close()
 		w.connected.Store(false)
 	}()
 
-	return &wg, nil
+	return wg, nil
 }
 
 // Connect waits for context cancellation and closes the WaitGroup. Satisfies
@@ -2704,7 +2709,9 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 	// just in case to ensure that the tx is sent to the network. Do not block
 	// because this is not required and does not affect the audit result.
 	if rebroadcast {
+		w.subprocessWg.Add(1)
 		go func() {
+			defer w.subprocessWg.Done()
 			if err := w.node.sendSignedTransaction(w.ctx, tx); err != nil {
 				w.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			}
@@ -3519,22 +3526,25 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 		}
 	}()
 
-	eth.txDbWg.Add(1)
+	eth.subprocessWg.Add(1)
 	go func() {
-		defer eth.txDbWg.Done()
+		defer eth.subprocessWg.Done()
 		for _, w := range connectedWallets {
 			w.checkFindRedemptions()
 		}
 	}()
+
+	eth.subprocessWg.Add(1)
 	go func() {
+		defer eth.subprocessWg.Done()
 		for _, w := range connectedWallets {
 			w.checkPendingApprovals()
 		}
 	}()
 
-	eth.txDbWg.Add(1)
+	eth.subprocessWg.Add(1)
 	go func() {
-		defer eth.txDbWg.Done()
+		defer eth.subprocessWg.Done()
 		eth.checkPendingTxs()
 	}()
 }
@@ -3642,7 +3652,11 @@ func (w *assetWallet) clearMonitoredTx(tx *monitoredTx) {
 	// message stating that the monitored tx is missing, but no other issue.
 	go func() {
 		timer := time.NewTimer(3 * time.Minute)
-		<-timer.C
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-timer.C:
+		}
 		w.monitoredTxsMtx.Lock()
 		defer w.monitoredTxsMtx.Unlock()
 		for _, hash := range txsToDelete {
