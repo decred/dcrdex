@@ -244,7 +244,6 @@ func mainCore() error {
 	<-clientCore.Ready()
 
 	var marketMaker *mm.MarketMaker
-	var mmCM *dex.ConnectionMaster
 	if cfg.Experimental {
 		// TODO: on shutdown, stop market making and wait for trades to be
 		// canceled.
