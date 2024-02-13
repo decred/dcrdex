@@ -32,6 +32,7 @@ import {
   CoreNote
 } from './registry'
 import { XYRangeHandler } from './opts'
+import { traitNewAddresser, traitBondUpdater } from './wallets'
 
 interface ConfigOptionInput extends HTMLInputElement {
   configOpt: ConfigOption
@@ -838,7 +839,9 @@ export class ConfirmRegistrationForm {
     const page = this.page
     const xc = this.xc
     const bondAsset = xc.bondAssets[asset.symbol]
-    const bondLock = bondAsset.amount * tier * bondReserveMultiplier
+    let multiplier = bondReserveMultiplier
+    if (asset.wallet && (asset.wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+    const bondLock = bondAsset.amount * tier * multiplier
     const bondLockConventional = bondLock / conversionFactor
     page.tradingTier.textContent = String(tier)
     page.logo.src = Doc.logoPath(asset.symbol)
@@ -1109,7 +1112,9 @@ export class FeeAssetSelectionForm {
           return
         }
         setReadyMessage(tmpl.ready, asset)
-        const bondLock = bondAsset.amount * bondReserveMultiplier * tier
+        let multiplier = bondReserveMultiplier
+        if (asset.wallet && (asset.wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+        const bondLock = bondAsset.amount * multiplier * tier
         const fee = Doc.formatCoinValue(bondLock, unitInfo)
         tmpl.feeAmt.textContent = String(fee)
         if (r) tmpl.fiatBondAmount.textContent = Doc.formatFiatConversion(bondLock, r, asset.unitInfo)
@@ -1290,7 +1295,9 @@ export class WalletWaitForm {
     Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox, page.bondCostBreakdown)
     Doc.show(page.balanceBox)
 
-    let bondLock = 2 * bondAsset.amount * tier
+    let multiplier = bondReserveMultiplier
+    if ((asset.wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+    let bondLock = multiplier * bondAsset.amount * tier
     if (bondFeeBuffer > 0) {
       Doc.show(page.bondCostBreakdown)
       page.bondLockNoFees.textContent = Doc.formatCoinValue(bondLock, ui)
@@ -1321,7 +1328,7 @@ export class WalletWaitForm {
     }
 
     Doc.show(synced ? page.syncCheck : syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
-    Doc.show(bal.available >= 2 * bondAsset.amount + bondFeeBuffer ? page.balCheck : page.balUncheck)
+    Doc.show(bal.available >= multiplier * bondAsset.amount + bondFeeBuffer ? page.balCheck : page.balUncheck)
 
     page.progress.textContent = (syncProgress * 100).toFixed(1)
 
@@ -1364,7 +1371,9 @@ export class WalletWaitForm {
     // NOTE: when/if we allow one-time bond post (no maintenance) from the UI we
     // may allow to proceed as long as they have enough for tx fees. For now,
     // the balance check box will remain unchecked and we will not proceed.
-    if (avail < 2 * this.bondAsset.amount + this.bondFeeBuffer) return
+    let multiplier = bondReserveMultiplier
+    if ((asset.wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+    if (avail < multiplier * this.bondAsset.amount + this.bondFeeBuffer) return
 
     Doc.show(page.balCheck)
     Doc.hide(page.balUncheck, page.balanceBox, page.sendEnough)
@@ -1967,8 +1976,6 @@ export class LoginForm {
     }, 'easeOut')
   }
 }
-
-const traitNewAddresser = 1 << 1
 
 /*
  * DepositAddress displays a deposit address, a QR code, and a button to

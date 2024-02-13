@@ -4,7 +4,7 @@ import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
 import * as intl from './locales'
-import { ReputationMeter, strongTier } from './account'
+import { ReputationMeter, strongTier, bondReserveMultiplier } from './account'
 import {
   app,
   PageElement,
@@ -13,6 +13,7 @@ import {
   PasswordCache,
   WalletState
 } from './registry'
+import { traitBondUpdater } from './wallets'
 
 interface Animator {
   animate: (() => Promise<void>)
@@ -229,11 +230,21 @@ export default class DexSettingsPage extends BasePage {
         return
       }
     }
-    if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + fees) {
-      // If we are raising our tier, we'll show a confirmation form
+
+    const isBondUpdater = (wallet.traits & traitBondUpdater) !== 0
+
+    let multiplier = bondReserveMultiplier
+    if (isBondUpdater) multiplier = 1
+    const walletFunded = wallet.balance.available >= multiplier * bondAsset.amount + fees
+
+    const loweringTier = this.confirmRegisterForm.tier < xc.auth.targetTier
+    const stillSameUpdater = isBondUpdater && (xc.auth.bondAssetID === assetID)
+
+    if (wallet.synced && (walletFunded || loweringTier || stillSameUpdater)) {
       this.progressTierFormWithSyncedFundedWallet(assetID)
       return
     }
+
     this.walletWaitForm.setWallet(assetID, fees, this.confirmRegisterForm.tier)
     this.showForm(page.walletWait)
   }
@@ -477,7 +488,9 @@ export default class DexSettingsPage extends BasePage {
     const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
     this.confirmRegisterForm.setFees(assetID, bondsFeeBuffer)
 
-    if (wallet.synced && wallet.balance.available >= 2 * bondAmt + bondsFeeBuffer) {
+    let multiplier = bondReserveMultiplier
+    if ((wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+    if (wallet.synced && wallet.balance.available >= multiplier * bondAmt + bondsFeeBuffer) {
       this.progressTierFormWithSyncedFundedWallet(assetID)
       return
     }

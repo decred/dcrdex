@@ -174,6 +174,7 @@ export const ID_TX_TYPE_REVOKE_TOKEN_APPROVAL = 'TX_TYPE_REVOKE_TOKEN_APPROVAL'
 export const ID_TX_TYPE_TICKET_PURCHASE = 'TX_TYPE_TICKET_PURCHASE'
 export const ID_TX_TYPE_TICKET_VOTE = 'TX_TYPE_TICKET_VOTE'
 export const ID_TX_TYPE_TICKET_REVOCATION = 'TX_TYPE_TICKET_REVOCATION'
+export const ID_TX_TYPE_UPDATE_BOND = 'TX_TYPE_UPDATE_BOND'
 export const ID_MISSING_CEX_CREDS = 'MISSING_CEX_CREDS'
 export const ID_MULTIPLIER = 'MULTIPLIER'
 export const ID_NO_PLACEMENTS = 'NO_PLACEMENTS'
@@ -360,6 +361,7 @@ export const enUS: Locale = {
   [ID_TX_TYPE_TICKET_PURCHASE]: 'Ticket purchase',
   [ID_TX_TYPE_TICKET_VOTE]: 'Ticket vote',
   [ID_TX_TYPE_TICKET_REVOCATION]: 'Ticket revocation',
+  [ID_TX_TYPE_UPDATE_BOND]: 'Update bond',
   [ID_MISSING_CEX_CREDS]: 'specify both key and secret',
   [ID_MULTIPLIER]: 'Multiplier',
   [ID_NO_PLACEMENTS]: 'must specify 1 or more placements',

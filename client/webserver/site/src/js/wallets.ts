@@ -60,16 +60,18 @@ interface TicketPurchaseUpdate extends BaseWalletNote {
 }
 
 const animationLength = 300
-const traitRescanner = 1
-const traitLogFiler = 1 << 2
-const traitRecoverer = 1 << 5
-const traitWithdrawer = 1 << 6
-const traitRestorer = 1 << 8
-const traitTxFeeEstimator = 1 << 9
-const traitPeerManager = 1 << 10
-const traitTokenApprover = 1 << 13
-const traitTicketBuyer = 1 << 15
-const traitFundsMixer = 1 << 17
+export const traitRescanner = 1
+export const traitNewAddresser = 1 << 1
+export const traitLogFiler = 1 << 2
+export const traitRecoverer = 1 << 5
+export const traitWithdrawer = 1 << 6
+export const traitRestorer = 1 << 8
+export const traitTxFeeEstimator = 1 << 9
+export const traitPeerManager = 1 << 10
+export const traitTokenApprover = 1 << 13
+export const traitTicketBuyer = 1 << 15
+export const traitFundsMixer = 1 << 17
+export const traitBondUpdater = 1 << 18
 
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
 
@@ -111,6 +113,7 @@ const txTypeRevokeTokenApproval = 12
 const txTypeTicketPurchase = 13
 const txTypeTicketVote = 14
 const txTypeTicketRevocation = 15
+const txTypeUpdateBond = 16
 
 const positiveTxTypes : number[] = [
   txTypeReceive,
@@ -125,7 +128,8 @@ const negativeTxTypes : number[] = [
   txTypeSend,
   txTypeSwap,
   txTypeCreateBond,
-  txTypeTicketPurchase
+  txTypeTicketPurchase,
+  txTypeUpdateBond
 ]
 
 const noAmtTxTypes : number[] = [
@@ -157,7 +161,8 @@ const txTypeTranslationKeys = [
   intl.ID_TX_TYPE_REVOKE_TOKEN_APPROVAL,
   intl.ID_TX_TYPE_TICKET_PURCHASE,
   intl.ID_TX_TYPE_TICKET_VOTE,
-  intl.ID_TX_TYPE_TICKET_REVOCATION
+  intl.ID_TX_TYPE_TICKET_REVOCATION,
+  intl.ID_TX_TYPE_UPDATE_BOND
 ]
 
 const ticketPageSize = 10
@@ -232,7 +237,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page = Doc.idDescendants(body)
     net = app().user.net
 
-    Doc.cleanTemplates(page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
+    Doc.cleanTemplates(page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl, page.replacedBondTmpl)
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
     Doc.show(page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
 
@@ -261,7 +266,8 @@ export default class WalletsPage extends BasePage {
 
     Doc.bind(page.copyTxIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.id || '', page.txDetailsID, page.copyTxIDBtn) })
     Doc.bind(page.copyRecipientBtn, 'click', () => { this.copyTxDetail(this.currTx?.recipient || '', page.txDetailsRecipient, page.copyRecipientBtn) })
-    Doc.bind(page.copyBondIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.bondID || '', page.txDetailsBondID, page.copyBondIDBtn) })
+    Doc.bind(page.copyBondIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.bond.id || '', page.txDetailsBondID, page.copyBondIDBtn) })
+    Doc.bind(page.copyChangeBondIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.changeBond?.id || '', page.txDetailsChangeBondID, page.copyChangeBondIDBtn) })
     Doc.bind(page.copyBondAccountIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.accountID || '', page.txDetailsBondAccountID, page.copyBondAccountIDBtn) })
 
     // Bind the new wallet form.
@@ -1837,17 +1843,54 @@ export default class WalletsPage extends BasePage {
     // Bond Info
     if (tx.bondInfo) {
       Doc.show(page.txDetailsBondSection)
-      page.txDetailsBondID.textContent = trimStringWithEllipsis(tx.bondInfo.bondID, 20)
-      page.txDetailsBondID.setAttribute('title', tx.bondInfo.bondID)
-      const date = new Date(tx.bondInfo.lockTime * 1000)
+      page.txDetailsBondID.textContent = trimStringWithEllipsis(tx.bondInfo.bond.id, 20)
+      page.txDetailsBondID.setAttribute('title', tx.bondInfo.bond.id)
+      const date = new Date(tx.bondInfo.bond.lockTime * 1000)
       const dateStr = date.toLocaleDateString()
       const timeStr = date.toLocaleTimeString()
       page.txDetailsBondLocktime.textContent = `${dateStr} ${timeStr}`
       Doc.setVis(tx.bondInfo.accountID !== '', page.txDetailsBondAccountIDSection)
       page.txDetailsBondAccountID.textContent = trimStringWithEllipsis(tx.bondInfo.accountID, 20)
       page.txDetailsBondAccountID.setAttribute('title', tx.bondInfo.accountID)
+      const value = Doc.formatCoinValue(tx.bondInfo.bond.amount, app().unitInfo(this.selectedAssetID))
+      const unit = app().assets[this.selectedAssetID].symbol.split('.')[0].toUpperCase()
+      page.txDetailsBondValue.textContent = `${value} ${unit}`
     } else {
       Doc.hide(page.txDetailsBondSection)
+    }
+
+    // Change Bond
+    if (tx.bondInfo && tx.bondInfo.changeBond) {
+      Doc.show(page.txDetailsChangeBondSection)
+      page.txDetailsChangeBondID.textContent = trimStringWithEllipsis(tx.bondInfo.changeBond.id, 20)
+      page.txDetailsChangeBondID.setAttribute('title', tx.bondInfo.changeBond.id)
+      const date = new Date(tx.bondInfo.changeBond.lockTime * 1000)
+      const dateStr = date.toLocaleDateString()
+      const timeStr = date.toLocaleTimeString()
+      page.txDetailsChangeBondLocktime.textContent = `${dateStr} ${timeStr}`
+      const value = Doc.formatCoinValue(tx.bondInfo.changeBond.amount, app().unitInfo(this.selectedAssetID))
+      const unit = app().assets[this.selectedAssetID].symbol.split('.')[0].toUpperCase()
+      page.txDetailsChangeBondValue.textContent = `${value} ${unit}`
+    } else {
+      Doc.hide(page.txDetailsChangeBondSection)
+    }
+
+    // Replaced bonds
+    if (tx.bondInfo?.replacedBond && tx.bondInfo.replacedBond.length > 0) {
+      Doc.show(page.txDetailsReplacedBondsSection)
+      Doc.empty(page.replacedBonds)
+      const unit = app().assets[this.selectedAssetID].symbol.split('.')[0].toUpperCase()
+      for (const bond of tx.bondInfo.replacedBond) {
+        console.log(bond)
+        const row = page.replacedBondTmpl.cloneNode(true) as PageElement
+        page.replacedBonds.appendChild(row)
+        const tmpl = Doc.parseTemplate(row)
+        const amt = Doc.formatCoinValue(bond.amount, app().unitInfo(this.selectedAssetID))
+        tmpl.info.textContent = `${trimStringWithEllipsis(bond.id, 20)} (${amt} ${unit})`
+        tmpl.info.setAttribute('title', bond.id)
+      }
+    } else {
+      Doc.hide(page.txDetailsReplacedBondsSection)
     }
 
     // Nonce

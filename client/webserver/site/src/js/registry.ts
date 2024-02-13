@@ -891,10 +891,17 @@ export interface VotingServiceProvider {
   netShare: number
 }
 
-export interface BondTxInfo {
-  bondID: string
+export interface BondInfo {
+  id : string
+  amount: number
   lockTime: number
+}
+
+export interface BondTxInfo {
   accountID: string
+  bond: BondInfo
+  changeBond?: BondInfo
+  replacedBond?: BondInfo[]
 }
 
 export interface WalletTransaction {

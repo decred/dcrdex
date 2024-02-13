@@ -19,6 +19,8 @@ import {
   PageElement
 } from './registry'
 import State from './state'
+import { bondReserveMultiplier } from './account'
+import { traitBondUpdater } from './wallets'
 
 export default class RegistrationPage extends BasePage {
   body: HTMLElement
@@ -101,7 +103,9 @@ export default class RegistrationPage extends BasePage {
         const bondAsset = this.currentDEX.bondAssets[asset.symbol]
         const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
         this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
-        if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
+        let multiplier = bondReserveMultiplier
+        if ((wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+        if (wallet.synced && wallet.balance.available >= multiplier * bondAsset.amount + bondsFeeBuffer) {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
@@ -216,7 +220,9 @@ export default class RegistrationPage extends BasePage {
     const bondAmt = this.currentDEX.bondAssets[asset.symbol].amount
 
     const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
-    if (wallet.synced && wallet.balance.available >= 2 * bondAmt + bondsFeeBuffer) {
+    let multiplier = bondReserveMultiplier
+    if ((wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+    if (wallet.synced && wallet.balance.available >= multiplier * bondAmt + bondsFeeBuffer) {
       await this.animateConfirmForm(page.newWalletForm)
       return
     }

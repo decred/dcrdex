@@ -370,7 +370,11 @@
   transition: color 1s ease;
 }
 
-#txDetailsBondSection, #txDetailsRecipientSection, #txDetailsNonceSection {
+#txDetailsBondSection,
+#txDetailsRecipientSection,
+#txDetailsNonceSection,
+#txDetailsChangeBondSection,
+#txDetailsReplacedBondsSection {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid #777;

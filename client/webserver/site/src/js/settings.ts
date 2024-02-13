@@ -17,6 +17,8 @@ import {
   PageElement,
   PasswordCache
 } from './registry'
+import { bondReserveMultiplier } from './account'
+import { traitBondUpdater } from './wallets'
 
 const animationLength = 300
 
@@ -89,7 +91,9 @@ export default class SettingsPage extends BasePage {
         const bondAsset = this.currentDEX.bondAssets[asset.symbol]
         const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
         this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
-        if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
+        let multiplier = bondReserveMultiplier
+        if ((wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+        if (wallet.synced && wallet.balance.available >= multiplier * bondAsset.amount + bondsFeeBuffer) {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
@@ -269,7 +273,9 @@ export default class SettingsPage extends BasePage {
 
     const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
     this.confirmRegisterForm.setFees(assetID, bondsFeeBuffer)
-    if (wallet.synced && wallet.balance.available >= 2 * bondAmt + bondsFeeBuffer) {
+    let multiplier = bondReserveMultiplier
+    if ((wallet.traits & traitBondUpdater) !== 0) multiplier = 1
+    if (wallet.synced && wallet.balance.available >= multiplier * bondAmt + bondsFeeBuffer) {
       await this.animateConfirmForm(page.newWalletForm)
       return
     }

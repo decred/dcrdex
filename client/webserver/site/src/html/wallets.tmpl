@@ -1011,18 +1011,46 @@
         <div><span id="txDetailsRecipient" class="ease-color"></span><span id="copyRecipientBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
       </span>
       <div id="txDetailsBondSection" class="w-100"> 
+        <span id="txDetailsBondAccountIDSection" class="d-flex justify-content-between w-100">
+          <span>[[[Account ID]]]</span>
+          <div><span id="txDetailsBondAccountID" class="ease-color"></span><span id="copyBondAccountIDBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
+        </span>
         <span class="d-flex justify-content-between w-100">
           <span>[[[bond_id]]]</span>
           <div><span id="txDetailsBondID" class="ease-color"></span><span id="copyBondIDBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
         </span>
         <span class="d-flex justify-content-between w-100">
+          <span>[[[value]]]</span>
+          <div><span id="txDetailsBondValue" class="ease-color"></span></div>
+        </span>
+        <span class="d-flex justify-content-between w-100">
           <span>[[[locktime]]]</span>
           <span id="txDetailsBondLocktime" class="ease-color"></span>
         </span>
-        <span id="txDetailsBondAccountIDSection" class="d-flex justify-content-between w-100">
-          <span>[[[Account ID]]]</span>
-          <div><span id="txDetailsBondAccountID" class="ease-color"></span><span id="copyBondAccountIDBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
+      </div>
+      <div id="txDetailsChangeBondSection" class="w-100">
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[change_bond_id]]] <span class="ico-info fs12 me-1" data-tooltip="[[[change_bond_tooltip]]]"></span></span>
+          <div><span id="txDetailsChangeBondID" class="ease-color"></span><span id="copyChangeBondIDBtn" class="copy-btn ico-copy mx-2 fs18 ease-color"></span></div>
         </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[value]]]</span>
+          <div><span id="txDetailsChangeBondValue" class="ease-color"></span></div>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[locktime]]]</span>
+          <span id="txDetailsChangeBondLocktime" class="ease-color"></span>
+        </span>
+      </div>
+      <div id="txDetailsReplacedBondsSection" class="w-100">
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[replaced_bonds]]] <span class="ico-info fs12 me-1" data-tooltip="[[[replaced_bonds_tooptip]]]"></span></span><span><span>
+        </span>
+        <div id="replacedBonds">
+          <span id="replacedBondTmpl" class="d-flex justify-content-between w-100">
+            <span></span><span data-tmpl="info"></span>
+          </span>
+        </div>
       </div>
       <span id="txDetailsNonceSection" class="d-flex justify-content-between w-100">
         <span>[[[nonce]]]</span><span id="txDetailsNonce"></span>
