@@ -1842,8 +1842,8 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 
 	botCfg := &BotConfig{
 		Host:             "host1",
-		BaseAsset:        baseID,
-		QuoteAsset:       quoteID,
+		BaseID:           baseID,
+		QuoteID:          quoteID,
 		BaseBalanceType:  Percentage,
 		BaseBalance:      100,
 		QuoteBalanceType: Percentage,
@@ -1865,7 +1865,7 @@ func TestExchangeAdaptorTrade(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		botID := dexMarketID(botCfg.Host, botCfg.BaseAsset, botCfg.QuoteAsset)
+		botID := dexMarketID(botCfg.Host, botCfg.BaseID, botCfg.QuoteID)
 		adaptor := unifiedExchangeAdaptorForBot(botID, test.balances, test.balances, tCore, tCEX, tLogger)
 		adaptor.run(ctx)
 
