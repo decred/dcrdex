@@ -955,9 +955,12 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 
 		dcr.pendingTxsMtx.Lock()
 		for _, tx := range pendingTxs {
-			var txHash chainhash.Hash
-			copy(txHash[:], tx.ID)
-			dcr.pendingTxs[txHash] = tx
+			txHash, err := chainhash.NewHashFromStr(tx.ID)
+			if err != nil {
+				dcr.log.Errorf("Invalid txid %v from tx history db: %v", tx.ID, err)
+				continue
+			}
+			dcr.pendingTxs[*txHash] = tx
 		}
 		dcr.pendingTxsMtx.Unlock()
 
@@ -5683,7 +5686,7 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 			} else {
 				// Leave it in the pendingPendingTxs and attempt to remove it
 				// again next time.
-				dcr.log.Errorf("Error removing tx %s from the history store: %v", txHash, err)
+				dcr.log.Errorf("Error removing tx %s from the history store: %v", txHash.String(), err)
 			}
 			return
 		}
@@ -5755,17 +5758,21 @@ func (dcr *ExchangeWallet) markTxAsSubmitted(txHash *chainhash.Hash) {
 		return
 	}
 
-	dcr.pendingTxsMtx.Lock()
-	wt, found := dcr.pendingTxs[*txHash]
-	if found {
-		wt.Submitted = true
-	}
-	dcr.pendingTxsMtx.Unlock()
-
 	err := txHistoryDB.MarkTxAsSubmitted(txHash.String())
 	if err != nil {
 		dcr.log.Errorf("failed to mark tx as submitted in tx history db: %v", err)
 	}
+
+	dcr.pendingTxsMtx.Lock()
+	wt, found := dcr.pendingTxs[*txHash]
+	dcr.pendingTxsMtx.Unlock()
+
+	if !found {
+		dcr.log.Errorf("Transaction %s not found in pending txs", txHash)
+		return
+	}
+
+	wt.Submitted = true
 
 	dcr.emit.TransactionNote(wt.WalletTransaction, true)
 }
