@@ -483,19 +483,19 @@ export default class MarketMakerSettingsPage extends BasePage {
         oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
         oldCfg.sellPlacements = Array.from(sellPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
         oldCfg.profit = arbMMCfg.profit
-        rebalanceCfg = arbMMCfg.autoRebalance
       } else if (arbCfg) {
         // DRAFT TODO
         // maxActiveArbs
         oldCfg.profit = arbCfg.profitTrigger
-        rebalanceCfg = arbCfg.autoRebalance
       }
       if (cexCfg) {
         oldCfg.cexBaseBalance = cexCfg.baseBalance
         oldCfg.cexBaseBalanceType = cexCfg.baseBalanceType
         oldCfg.cexQuoteBalance = cexCfg.quoteBalance
         oldCfg.cexQuoteBalanceType = cexCfg.quoteBalanceType
+        rebalanceCfg = cexCfg.autoRebalance
       }
+
       if (rebalanceCfg) {
         oldCfg.cexRebalance = true
         oldCfg.cexBaseMinBalance = rebalanceCfg.minBaseAmt
@@ -1462,7 +1462,9 @@ export default class MarketMakerSettingsPage extends BasePage {
       baseBalance: cfg.baseBalance,
       quoteBalanceType: cfg.quoteBalanceType,
       quoteBalance: cfg.quoteBalance,
-      disabled: cfg.disabled
+      disabled: cfg.disabled,
+      baseWalletOptions: cfg.baseOptions,
+      quoteWalletOptions: cfg.quoteOptions
     }
     switch (botType) {
       case botTypeBasicMM:
@@ -1494,35 +1496,25 @@ export default class MarketMakerSettingsPage extends BasePage {
    * selected a CEX or not.
    */
   arbMMConfig (): ArbMarketMakingConfig {
-    const { page, updatedConfig: cfg } = this
+    const { updatedConfig: cfg } = this
     const arbCfg: ArbMarketMakingConfig = {
       buyPlacements: [],
       sellPlacements: [],
       profit: cfg.profit,
       driftTolerance: cfg.driftTolerance,
-      orderPersistence: cfg.orderPersistence,
-      baseOptions: cfg.baseOptions,
-      quoteOptions: cfg.quoteOptions
+      orderPersistence: cfg.orderPersistence
     }
     for (const p of cfg.buyPlacements) arbCfg.buyPlacements.push({ lots: p.lots, multiplier: p.gapFactor })
     for (const p of cfg.sellPlacements) arbCfg.sellPlacements.push({ lots: p.lots, multiplier: p.gapFactor })
-    if (page.cexRebalanceCheckbox.checked) {
-      arbCfg.autoRebalance = this.autoRebalanceConfig()
-    }
     return arbCfg
   }
 
   basicArbConfig (): SimpleArbConfig {
-    const { page, updatedConfig: cfg } = this
+    const { updatedConfig: cfg } = this
     const arbCfg: SimpleArbConfig = {
       profitTrigger: cfg.profit,
       maxActiveArbs: 100, // TODO
-      numEpochsLeaveOpen: cfg.orderPersistence,
-      baseOptions: cfg.baseOptions,
-      quoteOptions: cfg.quoteOptions
-    }
-    if (page.cexRebalanceCheckbox.checked) {
-      arbCfg.autoRebalance = this.autoRebalanceConfig()
+      numEpochsLeaveOpen: cfg.orderPersistence
     }
     return arbCfg
   }
@@ -1541,13 +1533,17 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   cexConfig (): BotCEXCfg {
     const { updatedConfig: cfg } = this
-    return {
+    const cexCfg : BotCEXCfg = {
       name: this.specs.cexName || '',
       baseBalanceType: BalanceType.Percentage,
       baseBalance: cfg.cexBaseBalance,
       quoteBalanceType: BalanceType.Percentage,
       quoteBalance: cfg.cexQuoteBalance
     }
+    if (this.page.cexRebalanceCheckbox.checked) {
+      cexCfg.autoRebalance = this.autoRebalanceConfig()
+    }
+    return cexCfg
   }
 
   /*
@@ -1564,9 +1560,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       driftTolerance: cfg.driftTolerance,
       oracleWeighting: cfg.useOracles ? cfg.oracleWeighting : 0,
       oracleBias: cfg.useOracles ? cfg.oracleBias : 0,
-      emptyMarketRate: cfg.useEmptyMarketRate ? cfg.emptyMarketRate : 0,
-      baseOptions: cfg.baseOptions,
-      quoteOptions: cfg.quoteOptions
+      emptyMarketRate: cfg.useEmptyMarketRate ? cfg.emptyMarketRate : 0
     }
     return mmCfg
   }

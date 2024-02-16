@@ -37,14 +37,28 @@ type CEXConfig struct {
 	APISecret string `json:"apiSecret"`
 }
 
-// BotCEXCfg specifies the CEX that a bot uses and the initial balances
-// that should be allocated to the bot on that CEX.
+// AutoRebalanceConfig determines how the bot will automatically rebalance its
+// assets between the CEX and DEX. If the base or quote asset dips below the
+// minimum amount, a transfer will take place, but only if both balances can be
+// brought above the minimum amount and the transfer amount would be above the
+// minimum transfer amount.
+type AutoRebalanceConfig struct {
+	MinBaseAmt       uint64 `json:"minBaseAmt"`
+	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
+	MinQuoteAmt      uint64 `json:"minQuoteAmt"`
+	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
+}
+
+// BotCEXCfg specifies the CEX that a bot uses, the initial balances
+// that should be allocated to the bot on that CEX, and the configuration
+// for automatically rebalancing between the CEX and DEX.
 type BotCEXCfg struct {
-	Name             string      `json:"name"`
-	BaseBalanceType  BalanceType `json:"baseBalanceType"`
-	BaseBalance      uint64      `json:"baseBalance"`
-	QuoteBalanceType BalanceType `json:"quoteBalanceType"`
-	QuoteBalance     uint64      `json:"quoteBalance"`
+	Name             string               `json:"name"`
+	BaseBalanceType  BalanceType          `json:"baseBalanceType"`
+	BaseBalance      uint64               `json:"baseBalance"`
+	QuoteBalanceType BalanceType          `json:"quoteBalanceType"`
+	QuoteBalance     uint64               `json:"quoteBalance"`
+	AutoRebalance    *AutoRebalanceConfig `json:"autoRebalance"`
 }
 
 // BotConfig is the configuration for a market making bot.
@@ -65,6 +79,9 @@ type BotConfig struct {
 	BaseFeeAssetBalance      uint64      `json:"baseFeeAssetBalance"`
 	QuoteFeeAssetBalanceType BalanceType `json:"quoteFeeAssetBalanceType"`
 	QuoteFeeAssetBalance     uint64      `json:"quoteFeeAssetBalance"`
+
+	BaseWalletOptions  map[string]string `json:"baseWalletOptions"`
+	QuoteWalletOptions map[string]string `json:"quoteWalletOptions"`
 
 	// Only applicable for arb bots.
 	CEXCfg *BotCEXCfg `json:"cexCfg"`
@@ -90,16 +107,4 @@ func (c *BotConfig) requiresCEX() bool {
 
 func dexMarketID(host string, base, quote uint32) string {
 	return fmt.Sprintf("%s-%d-%d", host, base, quote)
-}
-
-// AutoRebalanceConfig determines how the bot will automatically rebalance its
-// assets between the CEX and DEX. If the base or quote asset dips below the
-// minimum amount, a transfer will take place, but only if both balances can be
-// brought above the minimum amount and the transfer amount would be above the
-// minimum transfer amount.
-type AutoRebalanceConfig struct {
-	MinBaseAmt       uint64 `json:"minBaseAmt"`
-	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
-	MinQuoteAmt      uint64 `json:"minQuoteAmt"`
-	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
 }

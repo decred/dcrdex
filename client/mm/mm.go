@@ -29,10 +29,7 @@ type clientCore interface {
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uint64, error)
 	Cancel(oidB dex.Bytes) error
-	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
-	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
-	PreOrder(form *core.TradeForm) (*core.OrderEstimate, error)
 	WalletState(assetID uint32) *core.WalletState
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	MaxFundingFees(fromAsset uint32, host string, numTrades uint32, fromSettings map[string]string) (uint64, error)
@@ -64,10 +61,6 @@ type MarketWithHost struct {
 	Host    string `json:"host"`
 	BaseID  uint32 `json:"base"`
 	QuoteID uint32 `json:"quote"`
-}
-
-func (m *MarketWithHost) String() string {
-	return fmt.Sprintf("%s-%d-%d", m.Host, m.BaseID, m.QuoteID)
 }
 
 // centralizedExchange is used to manage an exchange API connection.
@@ -786,7 +779,6 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 	}
 	m.logInitialBotBalances(dexBaseBalances, cexBaseBalances)
 
-	fiatRates := m.core.FiatConversionRates()
 	startedMarketMaking = true
 	m.core.Broadcast(newMMStartStopNote(true))
 
@@ -806,6 +798,7 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
+
 				mkt := MarketWithHost{cfg.Host, cfg.BaseID, cfg.QuoteID}
 				m.markBotAsRunning(mkt, true)
 				defer func() {
@@ -816,20 +809,34 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				defer func() {
 					m.core.Broadcast(newBotStartStopNote(cfg.Host, cfg.BaseID, cfg.QuoteID, false))
 				}()
-				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID))
+
 				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
-				baseFiatRate := fiatRates[cfg.BaseID]
-				quoteFiatRate := fiatRates[cfg.QuoteID]
-				exchangeAdaptor := unifiedExchangeAdaptorForBot(mktID, dexBaseBalances[mktID], cexBaseBalances[mktID], m.core, nil, logger)
+				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s", mktID))
+				exchangeAdaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+					botID:              mktID,
+					market:             &mkt,
+					baseDexBalances:    dexBaseBalances[mktID],
+					baseCexBalances:    cexBaseBalances[mktID],
+					core:               m.core,
+					cex:                nil,
+					maxBuyPlacements:   uint32(len(cfg.BasicMMConfig.BuyPlacements)),
+					maxSellPlacements:  uint32(len(cfg.BasicMMConfig.SellPlacements)),
+					baseWalletOptions:  cfg.BaseWalletOptions,
+					quoteWalletOptions: cfg.QuoteWalletOptions,
+					log:                logger,
+				})
 				exchangeAdaptor.run(ctx)
-				RunBasicMarketMaker(m.ctx, cfg, exchangeAdaptor, oracle, baseFiatRate, quoteFiatRate, logger)
+
+				RunBasicMarketMaker(m.ctx, cfg, exchangeAdaptor, oracle, logger)
 			}(cfg)
 		case cfg.SimpleArbConfig != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
-				logger := m.log.SubLogger(fmt.Sprintf("SimpleArbitrage-%s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID))
+
 				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
+				logger := m.log.SubLogger(fmt.Sprintf("SimpleArbitrage-%s", mktID))
+
 				cex, found := cexes[cfg.CEXCfg.Name]
 				if !found {
 					logger.Errorf("Cannot start %s bot due to CEX not starting", mktID)
@@ -840,17 +847,34 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				defer func() {
 					m.markBotAsRunning(mkt, false)
 				}()
-				exchangeAdaptor := unifiedExchangeAdaptorForBot(mktID, dexBaseBalances[mktID], cexBaseBalances[mktID], m.core, cex, logger)
+
+				exchangeAdaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+					botID:              mktID,
+					market:             &mkt,
+					baseDexBalances:    dexBaseBalances[mktID],
+					baseCexBalances:    cexBaseBalances[mktID],
+					core:               m.core,
+					cex:                cex,
+					maxBuyPlacements:   1,
+					maxSellPlacements:  1,
+					baseWalletOptions:  cfg.BaseWalletOptions,
+					quoteWalletOptions: cfg.QuoteWalletOptions,
+					rebalanceCfg:       cfg.CEXCfg.AutoRebalance,
+					log:                logger,
+				})
 				exchangeAdaptor.run(ctx)
+
 				RunSimpleArbBot(m.ctx, cfg, exchangeAdaptor, exchangeAdaptor, logger)
 			}(cfg)
 		case cfg.ArbMarketMakerConfig != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				defer wg.Done()
-				logger := m.log.SubLogger(fmt.Sprintf("ArbMarketMaker-%s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID))
-				cex, found := cexes[cfg.CEXCfg.Name]
+
 				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
+				logger := m.log.SubLogger(fmt.Sprintf("ArbMarketMaker-%s", mktID))
+
+				cex, found := cexes[cfg.CEXCfg.Name]
 				if !found {
 					logger.Errorf("Cannot start %s bot due to CEX not starting", mktID)
 					return
@@ -860,8 +884,23 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				defer func() {
 					m.markBotAsRunning(mkt, false)
 				}()
-				exchangeAdaptor := unifiedExchangeAdaptorForBot(mktID, dexBaseBalances[mktID], cexBaseBalances[mktID], m.core, cex, logger)
+
+				exchangeAdaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+					botID:              mktID,
+					market:             &mkt,
+					baseDexBalances:    dexBaseBalances[mktID],
+					baseCexBalances:    cexBaseBalances[mktID],
+					core:               m.core,
+					cex:                cex,
+					maxBuyPlacements:   uint32(len(cfg.ArbMarketMakerConfig.BuyPlacements)),
+					maxSellPlacements:  uint32(len(cfg.ArbMarketMakerConfig.SellPlacements)),
+					baseWalletOptions:  cfg.BaseWalletOptions,
+					quoteWalletOptions: cfg.QuoteWalletOptions,
+					rebalanceCfg:       cfg.CEXCfg.AutoRebalance,
+					log:                logger,
+				})
 				exchangeAdaptor.run(ctx)
+
 				RunArbMarketMaker(m.ctx, cfg, exchangeAdaptor, exchangeAdaptor, logger)
 			}(cfg)
 		default:
