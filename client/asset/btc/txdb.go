@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -86,6 +88,9 @@ func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
 }
 
 func NewBadgerTxDB(filePath string, log dex.Logger) (*BadgerTxDB, error) {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
+		return nil, fmt.Errorf("error creating db directory: %w", err)
+	}
 	// If memory use is a concern, could try
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
@@ -228,6 +233,8 @@ func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
 	})
 }
 
+var firstTxRefID = "firstTxRefID"
+
 // GetTxs retrieves n transactions from the database. refID optionally
 // takes a transaction ID, and returns that transaction and the at most
 // (n - 1) transactions that were made either before or after it, depending
@@ -240,15 +247,19 @@ func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 	err := db.View(func(txn *badger.Txn) error {
 		var startKey []byte
 		if refID != nil {
-			txKey := txKey(*refID)
-			txKeyItem, err := txn.Get(txKey)
-			if err != nil {
-				return asset.CoinNotFoundError
-			}
-
-			startKey, err = txKeyItem.ValueCopy(nil)
-			if err != nil {
-				return err
+			switch ref := *refID; ref {
+			case firstTxRefID:
+				startKey = make([]byte, 0)
+			default:
+				txKey := txKey(ref)
+				txKeyItem, err := txn.Get(txKey)
+				if err != nil {
+					return asset.CoinNotFoundError
+				}
+				startKey, err = txKeyItem.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if startKey == nil {
@@ -301,6 +312,19 @@ func (db *BadgerTxDB) GetTx(txID string) (*asset.WalletTransaction, error) {
 	if len(txs) == 0 {
 		// This should never happen.
 		return nil, fmt.Errorf("no results returned from getTxs")
+	}
+	return txs[0], nil
+}
+
+// OldestTx returns the oldest transaction in the database, which is the last
+// tx that would be returned by GetTxs with past = true.
+func (db *BadgerTxDB) OldestTx() (*asset.WalletTransaction, error) {
+	txs, err := db.GetTxs(1, &firstTxRefID, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 {
+		return nil, nil
 	}
 	return txs[0], nil
 }

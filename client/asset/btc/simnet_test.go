@@ -59,15 +59,17 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)
 	}
+	dataDir, _ := os.MkdirTemp("", "") // deleted in rig.close
+
 	// settings["account"] = "default"
 	walletCfg := &asset.WalletConfig{
+		Type:     walletTypeRPC,
 		Settings: settings,
-		TipChange: func(err error) {
-			blkFunc(name, err)
-		},
+		Emit:     asset.NewWalletEmitter(make(chan<- asset.WalletNotification, 1024), 0, tLogger),
 		PeersChange: func(num uint32, err error) {
 			t.Logf("peer count = %d, err = %v", num, err)
 		},
+		DataDir: dataDir,
 	}
 	var backend asset.Wallet
 	backend, err = NewWallet(walletCfg, tLogger, dex.Simnet)
@@ -117,6 +119,9 @@ func (rig *testRig) close(t *testing.T) {
 		case <-time.NewTimer(time.Second).C:
 			t.Fatalf("failed to disconnect from %s", name)
 		}
+	}
+	for _, w := range rig.backends {
+		os.RemoveAll(w.cloneParams.WalletCFG.DataDir)
 	}
 }
 
@@ -235,4 +240,60 @@ func TestMakeBondTx(t *testing.T) {
 		t.Fatalf("RefundBond: %v", err)
 	}
 	t.Logf("refundCoin: %v\n", refundCoin)
+}
+
+func TestSyncTransactions(t *testing.T) {
+	rig := newTestRig(t, func(name string, err error) {
+		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+	})
+	defer rig.close(t)
+
+	w := rig.beta()
+	txDB := w.txDB()
+	if txDB == nil {
+		t.Fatal("beta RPC node not initialized with database")
+	}
+	cl := w.node.(*rpcClient)
+	w.syncTransactions(txDB)
+	wi, err := cl.GetWalletInfo()
+	if err != nil {
+		t.Fatalf("GetWalletInfo error: %v", err)
+	}
+
+	var n uint32
+	const chunk = 100
+	var refID *string
+	for {
+		txs, err := w.TxHistory(chunk, refID, true)
+		if err != nil {
+			t.Fatalf("TxHistory error: %v", err)
+		}
+		n += uint32(len(txs))
+		if len(txs) < chunk {
+			break
+		}
+		refID = &txs[len(txs)-1].ID
+	}
+	if n < wi.TxCount {
+		t.Fatalf("expected at least %d transactions, but found %d", wi.TxCount, n)
+	}
+
+	oldestTx, err := txDB.OldestTx()
+	if err != nil {
+		t.Fatalf("OldestTx error: %v", err)
+	}
+	if oldestTx == nil {
+		t.Fatalf("No oldest tx")
+	}
+	txC, err := cl.scanHistory(int64(oldestTx.Timestamp))
+	if err != nil {
+		t.Fatalf("scanHistory error: %v", err)
+	}
+	n = 0
+	for range txC {
+		n++
+	}
+	if n > 0 {
+		t.Fatalf("%d transactions reported after initial sync", n)
+	}
 }
