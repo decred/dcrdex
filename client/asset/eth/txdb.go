@@ -393,6 +393,7 @@ func (s *badgerTxDB) removeTx(id string) error {
 // getTxs returns the n more recent transaction if refID is nil, or the
 // n transactions before/after refID depending on the value of past. The
 // transactions are returned in reverse chronological order.
+// If a non-nil refID is not found, asset.CoinNotFoundError is returned.
 func (s *badgerTxDB) getTxs(n int, refID *string, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
 	var txs []*asset.WalletTransaction
 
@@ -403,7 +404,7 @@ func (s *badgerTxDB) getTxs(n int, refID *string, past bool, tokenID *uint32) ([
 			tk := txIDKey(*refID)
 			item, err := txn.Get(tk)
 			if err != nil {
-				return err
+				return asset.CoinNotFoundError
 			}
 			if startNonceKey, err = item.ValueCopy(nil); err != nil {
 				return err
@@ -429,9 +430,6 @@ func (s *badgerTxDB) getTxs(n int, refID *string, past bool, tokenID *uint32) ([
 				if err != nil {
 					s.log.Errorf("unable to unmarhsal wallet transaction: %s: %v", string(wtB), err)
 					return err
-				}
-				if refID != nil && wt.ID == *refID {
-					return nil
 				}
 				if tokenID != nil && (wt.TokenID == nil || *tokenID != *wt.TokenID) {
 					return nil

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4398,17 +4399,6 @@ func (btc *baseWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contra
 	return btc.node.swapConfirmations(txHash, vout, pkScript, startTime)
 }
 
-// TransactionConfirmations gets the number of confirmations for the specified
-// transaction.
-func (btc *baseWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
-	txHash, err := chainhash.NewHashFromStr(txID)
-	if err != nil {
-		return 0, fmt.Errorf("error decoding txid %q: %w", txID, err)
-	}
-	_, confs, err = btc.rawWalletTx(txHash)
-	return
-}
-
 // RegFeeConfirmations gets the number of confirmations for the specified output
 // by first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
@@ -5471,7 +5461,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
 			confs = tip - tx.BlockNumber + 1
 		}
-		if confs >= defaultRedeemConfTarget {
+		if confs >= requiredRedeemConfirms {
 			tx.Confirmed = true
 			updated = true
 		}
@@ -5496,6 +5486,29 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 	}
 }
 
+// WalletTransaction returns a transaction that either the wallet has made or
+// one in which the wallet has received funds. The txID can be either a byte
+// reversed tx hash or a hex encoded coin ID.
+func (btc *ExchangeWalletSPV) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	coinID, err := hex.DecodeString(txID)
+	if err == nil {
+		txHash, _, err := decodeCoinID(coinID)
+		if err == nil {
+			txID = txHash.String()
+		}
+	}
+
+	txs, err := btc.TxHistory(1, &txID, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 {
+		return nil, asset.CoinNotFoundError
+	}
+
+	return txs[0], nil
+}
+
 // TxHistory returns all the transactions the wallet has made. If refID is nil,
 // then transactions starting from the most recent are returned (past is ignored).
 // If past is true, the transactions prior to the refID are returned, otherwise
@@ -5506,7 +5519,6 @@ func (btc *ExchangeWalletSPV) TxHistory(n int, refID *string, past bool) ([]*ass
 	if txHistoryDB == nil {
 		return nil, fmt.Errorf("tx database not initialized")
 	}
-
 	return txHistoryDB.GetTxs(n, refID, past)
 }
 

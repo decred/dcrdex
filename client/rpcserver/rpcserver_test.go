@@ -195,6 +195,9 @@ func (c *TCore) SetVotingPreferences(assetID uint32, choices, tSpendPolicy, trea
 func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	return nil, nil
 }
+func (c *TCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
+	return nil, nil
+}
 
 type tBookFeed struct{}
 

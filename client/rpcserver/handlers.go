@@ -58,6 +58,7 @@ const (
 	purchaseTicketsRoute       = "purchasetickets"
 	setVotingPreferencesRoute  = "setvotingprefs"
 	txHistoryRoute             = "txhistory"
+	walletTxRoute              = "wallettx"
 )
 
 const (
@@ -130,6 +131,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	purchaseTicketsRoute:       handlePurchaseTickets,
 	setVotingPreferencesRoute:  handleSetVotingPreferences,
 	txHistoryRoute:             handleTxHistory,
+	walletTxRoute:              handleWalletTx,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -1035,6 +1037,22 @@ func handleTxHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(txHistoryRoute, txs, nil)
 }
 
+func handleWalletTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseWalletTxArgs(params)
+	if err != nil {
+		return usage(walletTxRoute, err)
+	}
+
+	tx, err := s.core.WalletTransaction(form.assetID, form.txID)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get wallet tx: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, errMsg)
+		return createResponse(walletTxRoute, nil, resErr)
+	}
+
+	return createResponse(walletTxRoute, tx, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1765,5 +1783,12 @@ an spv wallet and enables options to view and set the vsp.
 		  will be returned.
 		  past (bool): If true, the transactions before the reference tx will be returned. If false, the
 		  transactions after the reference tx will be returned.`,
+	},
+	walletTxRoute: {
+		argsShort:  `assetID txID`,
+		cmdSummary: `Get a wallet transaction`,
+		argsLong: `Args:
+		  assetID (int): The asset's BIP-44 registered coin index.
+		  txID (string): The transaction ID.`,
 	},
 }

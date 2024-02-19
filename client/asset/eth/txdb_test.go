@@ -127,7 +127,7 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt2.WalletTransaction, wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
@@ -136,7 +136,7 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedTxs = []*asset.WalletTransaction{wt3.WalletTransaction}
+	expectedTxs = []*asset.WalletTransaction{wt3.WalletTransaction, wt2.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}

@@ -5,11 +5,11 @@ package mm
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -18,7 +18,6 @@ import (
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -30,7 +29,6 @@ type clientCore interface {
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uint64, error)
 	Cancel(oidB dex.Bytes) error
-	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
@@ -45,8 +43,9 @@ type clientCore interface {
 	FiatConversionRates() map[uint32]float64
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	NewDepositAddress(assetID uint32) (string, error)
-	TransactionConfirmations(assetID uint32, txid string) (uint32, error)
 	Network() dex.Network
+	Order(oidB dex.Bytes) (*core.Order, error)
+	WalletTransaction(uint32, string) (*asset.WalletTransaction, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -59,106 +58,6 @@ type dexOrderBook interface {
 }
 
 var _ dexOrderBook = (*orderbook.OrderBook)(nil)
-
-// botBalance keeps track of the amount of funds available for a
-// bot's use, and the amount that is currently locked/pending redemption. Only
-// the Available balance matters for the behavior of the bots. The others are
-// just tracked to inform the user.
-type botBalance struct {
-	Available     uint64 `json:"available"`
-	FundingOrder  uint64 `json:"fundingOrder"`
-	PendingRedeem uint64 `json:"pendingRedeem"`
-}
-
-// botBalance keeps track of the bot balances.
-// When the MarketMaker is created, it will allocate the proper amount of
-// funds for each bot. Then, as the bot makes trades, each bot's balances
-// will be increased and decreased as needed.
-// Below is of how the balances are adjusted during trading. This only
-// outlines the changes to the Available balance.
-//
-// 1. A trade is made:
-//
-//   - FromAsset:
-//     DECREASE: LockedFunds + FundingFees
-//     if isAccountLocker, RefundFeesLockedFunds
-//
-//   - ToAsset:
-//     DECREASE: if isAccountLocker, RedeemFeesLockedFunds
-//
-// 2a. MatchConfirmed, Redeemed:
-//   - ToAsset:
-//     INCREASE: if isAccountLocker, RedeemedAmount
-//     else RedeemedAmount - MaxRedeemFeesForLotsRedeemed
-//     (the redeemed amount is tracked on the core.Order, so we
-//     do not know the exact amount used for this match. The
-//     difference is handled later.)
-//
-// 2b. MatchConfirmed, Refunded:
-//   - FromAsset:
-//     INCREASE: RefundedAmount - RefundFees
-//     if isAccountLocker, RefundFeesLockedFunds
-//
-// 4. order.LockedAmount == 0: (This means no more swap tx will be made, over lock can be returned)
-//
-//   - FromAsset:
-//     INCREASE: OverLockedAmount (LockedFunds - SwappedAmount - MaxSwapFees)
-//
-// 5. All Fees Confirmed:
-//
-//   - FromAsset:
-//     INCREASE: ExcessSwapFees (MaxSwapFees - ActualSwapFees)
-//     if isAccountLocker, ExcessRefundFees (RefundFeesLockedFunds - ActualRefundFees)
-//     else ExcessRefundFees (MaxRefundFees - ActualRefundFees)
-//
-//   - ToAsset:
-//     INCREASE: if isAccountLocker, ExcessRedeemFees (RedeemFeesLockedFunds - ActualRedeemFees)
-//     else ExcessRedeemFees (MaxRedeemFeesForLotsRedeemed - ActualRedeemFees)
-type botBalances struct {
-	mtx      sync.RWMutex
-	balances map[uint32]*botBalance
-	// It is assumed that a bot only interacts with one CEX.
-	cexBalances map[uint32]uint64
-}
-
-// orderInfo stores the necessary information the MarketMaker needs for a
-// particular order.
-type orderInfo struct {
-	bot                string
-	order              *core.Order
-	initialFundsLocked uint64
-	lotSize            uint64
-	// initialRedeemFeesLocked will be > 0 for assets that are account lockers
-	// (ETH). This means that the redeem fees will be initially locked, then
-	// the complete redeemed amount will be sent on redemption.
-	initialRedeemFeesLocked   uint64
-	initialRefundFeesLocked   uint64
-	singleLotSwapFees         uint64
-	singleLotRedeemFees       uint64
-	singleLotRefundFees       uint64
-	unusedLockedFundsReturned bool
-	excessFeesReturned        bool
-	matchesSeen               map[order.MatchID]struct{}
-	matchesSettled            map[order.MatchID]struct{}
-}
-
-// finishedProcessing returns true when the MarketMaker no longer needs to
-// track an order.
-func (o *orderInfo) finishedProcessing() bool {
-	if !o.unusedLockedFundsReturned || !o.excessFeesReturned {
-		return false
-	}
-
-	for _, match := range o.order.Matches {
-		var matchID order.MatchID
-		copy(matchID[:], match.MatchID)
-		if _, found := o.matchesSettled[matchID]; !found {
-			return false
-		}
-	}
-
-	return true
-}
 
 // MarketWithHost represents a market on a specific dex server.
 type MarketWithHost struct {
@@ -185,14 +84,12 @@ type centralizedExchange struct {
 // MarketMaker handles the market making process. It supports running different
 // strategies on different markets.
 type MarketMaker struct {
-	ctx                   context.Context
-	die                   atomic.Value // context.CancelFunc
-	running               atomic.Bool
-	log                   dex.Logger
-	core                  clientCore
-	doNotKillWhenBotsStop bool // used for testing
-	botBalances           map[string]*botBalances
-	cfgPath               string
+	ctx     context.Context
+	die     atomic.Value // context.CancelFunc
+	running atomic.Bool
+	log     dex.Logger
+	core    clientCore
+	cfgPath string
 
 	cfgMtx sync.RWMutex
 	cfg    *MarketMakingConfig
@@ -211,8 +108,8 @@ type MarketMaker struct {
 	runningBotsMtx sync.RWMutex
 	runningBots    map[MarketWithHost]interface{}
 
-	ordersMtx sync.RWMutex
-	orders    map[order.OrderID]*orderInfo
+	ordersMtx  sync.RWMutex
+	orderToBot map[order.OrderID]string
 
 	cexMtx sync.RWMutex
 	cexes  map[string]*centralizedExchange
@@ -235,7 +132,7 @@ func NewMarketMaker(c clientCore, cfgPath string, log dex.Logger) (*MarketMaker,
 		cfgPath:        cfgPath,
 		cfg:            &cfg,
 		running:        atomic.Bool{},
-		orders:         make(map[order.OrderID]*orderInfo),
+		orderToBot:     make(map[order.OrderID]string),
 		runningBots:    make(map[MarketWithHost]interface{}),
 		unsyncedOracle: newUnsyncedPriceOracle(log),
 		cexes:          make(map[string]*centralizedExchange),
@@ -464,10 +361,10 @@ func validateAndFilterEnabledConfigs(cfgs []*BotConfig) ([]*BotConfig, error) {
 	return enabledCfgs, nil
 }
 
-// setupBalances makes sure there is sufficient balance in both the dex
-// client wallets and on the CEXes, and populates m.botBalances.
-func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]*centralizedExchange) error {
-	m.botBalances = make(map[string]*botBalances, len(cfgs))
+// botInitialBaseBalances returns the initial base balances for each bot.
+func botInitialBaseBalances(cfgs []*BotConfig, core clientCore, cexes map[string]*centralizedExchange) (dexBalances, cexBalances map[string]map[uint32]uint64, err error) {
+	dexBalances = make(map[string]map[uint32]uint64, len(cfgs))
+	cexBalances = make(map[string]map[uint32]uint64, len(cfgs))
 
 	type trackedBalance struct {
 		available uint64
@@ -481,7 +378,7 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]*central
 		if _, found := dexBalanceTracker[assetID]; found {
 			return nil
 		}
-		bal, err := m.core.AssetBalance(assetID)
+		bal, err := core.AssetBalance(assetID)
 		if err != nil {
 			return fmt.Errorf("failed to get balance for asset %d: %v", assetID, err)
 		}
@@ -529,11 +426,11 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]*central
 	for _, cfg := range cfgs {
 		err := trackAssetOnDEX(cfg.BaseID)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		err = trackAssetOnDEX(cfg.QuoteID)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 
 		mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
@@ -545,518 +442,108 @@ func (m *MarketMaker) setupBalances(cfgs []*BotConfig, cexes map[string]*central
 		quoteRequired := calcBalance(cfg.QuoteBalanceType, cfg.QuoteBalance, quoteBalance.available)
 
 		if baseRequired == 0 && quoteRequired == 0 {
-			return fmt.Errorf("both base and quote balance are zero for market %s", mktID)
+			return nil, nil, fmt.Errorf("both base and quote balance are zero for market %s", mktID)
 		}
 		if baseRequired > baseBalance.available-baseBalance.reserved {
-			return fmt.Errorf("insufficient balance for asset %d", cfg.BaseID)
+			return nil, nil, fmt.Errorf("insufficient balance for asset %d", cfg.BaseID)
 		}
 		if quoteRequired > quoteBalance.available-quoteBalance.reserved {
-			return fmt.Errorf("insufficient balance for asset %d", cfg.QuoteID)
+			return nil, nil, fmt.Errorf("insufficient balance for asset %d", cfg.QuoteID)
 		}
 		baseBalance.reserved += baseRequired
 		quoteBalance.reserved += quoteRequired
 
-		m.botBalances[mktID] = &botBalances{
-			balances: map[uint32]*botBalance{
-				cfg.BaseID: {
-					Available: baseRequired,
-				},
-				cfg.QuoteID: {
-					Available: quoteRequired,
-				},
-			},
+		dexBalances[mktID] = map[uint32]uint64{
+			cfg.BaseID:  baseRequired,
+			cfg.QuoteID: quoteRequired,
+		}
+
+		trackTokenFeeAsset := func(base bool) error {
+			assetID := cfg.QuoteID
+			balType := cfg.QuoteFeeAssetBalanceType
+			balAmount := cfg.QuoteFeeAssetBalance
+			baseOrQuote := "quote"
+			if base {
+				assetID = cfg.BaseID
+				balType = cfg.BaseFeeAssetBalanceType
+				balAmount = cfg.BaseFeeAssetBalance
+				baseOrQuote = "base"
+			}
+			token := asset.TokenInfo(assetID)
+			if token == nil {
+				return nil
+			}
+			err := trackAssetOnDEX(token.ParentID)
+			if err != nil {
+				return err
+			}
+			tokenFeeAsset := dexBalanceTracker[token.ParentID]
+			tokenFeeAssetRequired := calcBalance(balType, balAmount, tokenFeeAsset.available)
+			if tokenFeeAssetRequired == 0 {
+				return fmt.Errorf("%s fee asset balance is zero for market %s", baseOrQuote, mktID)
+			}
+			if tokenFeeAssetRequired > tokenFeeAsset.available-tokenFeeAsset.reserved {
+				return fmt.Errorf("insufficient balance for asset %d", token.ParentID)
+			}
+			tokenFeeAsset.reserved += tokenFeeAssetRequired
+			dexBalances[mktID][token.ParentID] += tokenFeeAssetRequired
+			return nil
+		}
+		err = trackTokenFeeAsset(true)
+		if err != nil {
+			return nil, nil, err
+		}
+		err = trackTokenFeeAsset(false)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Calculate CEX balances
 		if cfg.CEXCfg != nil {
 			baseSymbol := dex.BipIDSymbol(cfg.BaseID)
 			if baseSymbol == "" {
-				return fmt.Errorf("unknown asset ID %d", cfg.BaseID)
+				return nil, nil, fmt.Errorf("unknown asset ID %d", cfg.BaseID)
 			}
 			baseAssetSymbol := dex.TokenSymbol(baseSymbol)
 
 			quoteSymbol := dex.BipIDSymbol(cfg.QuoteID)
 			if quoteSymbol == "" {
-				return fmt.Errorf("unknown asset ID %d", cfg.QuoteID)
+				return nil, nil, fmt.Errorf("unknown asset ID %d", cfg.QuoteID)
 			}
 			quoteAssetSymbol := dex.TokenSymbol(quoteSymbol)
 
 			err = trackAssetOnCEX(baseAssetSymbol, cfg.BaseID, cfg.CEXCfg.Name)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			err = trackAssetOnCEX(quoteAssetSymbol, cfg.QuoteID, cfg.CEXCfg.Name)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			baseCEXBalance := cexBalanceTracker[cfg.CEXCfg.Name][baseAssetSymbol]
 			quoteCEXBalance := cexBalanceTracker[cfg.CEXCfg.Name][quoteAssetSymbol]
 			cexBaseRequired := calcBalance(cfg.CEXCfg.BaseBalanceType, cfg.CEXCfg.BaseBalance, baseCEXBalance.available)
 			cexQuoteRequired := calcBalance(cfg.QuoteBalanceType, cfg.QuoteBalance, quoteCEXBalance.available)
 			if cexBaseRequired == 0 && cexQuoteRequired == 0 {
-				return fmt.Errorf("both base and quote CEX balances are zero for market %s", mktID)
+				return nil, nil, fmt.Errorf("both base and quote CEX balances are zero for market %s", mktID)
 			}
 			if cexBaseRequired > baseCEXBalance.available-baseCEXBalance.reserved {
-				return fmt.Errorf("insufficient CEX base balance for asset %d", cfg.BaseID)
+				return nil, nil, fmt.Errorf("insufficient CEX base balance for asset %d", cfg.BaseID)
 			}
 			if cexQuoteRequired > quoteCEXBalance.available-quoteCEXBalance.reserved {
-				return fmt.Errorf("insufficient CEX quote balance for asset %d", cfg.QuoteID)
+				return nil, nil, fmt.Errorf("insufficient CEX quote balance for asset %d", cfg.QuoteID)
 			}
 			baseCEXBalance.reserved += cexBaseRequired
 			quoteCEXBalance.reserved += cexQuoteRequired
-			m.botBalances[mktID].cexBalances = map[uint32]uint64{
+
+			cexBalances[mktID] = map[uint32]uint64{
 				cfg.BaseID:  cexBaseRequired,
 				cfg.QuoteID: cexQuoteRequired,
 			}
 		}
 	}
 
-	return nil
-}
-
-// isAccountLocker returns if the asset's wallet is an asset.AccountLocker.
-func (m *MarketMaker) isAccountLocker(assetID uint32) bool {
-	walletState := m.core.WalletState(assetID)
-	if walletState == nil {
-		m.log.Errorf("isAccountLocker: wallet state not found for asset %d", assetID)
-		return false
-	}
-
-	return walletState.Traits.IsAccountLocker()
-}
-
-// isWithdrawer returns if the asset's wallet is an asset.Withdrawer.
-func (m *MarketMaker) isWithdrawer(assetID uint32) bool {
-	walletState := m.core.WalletState(assetID)
-	if walletState == nil {
-		m.log.Errorf("isAccountLocker: wallet state not found for asset %d", assetID)
-		return false
-	}
-
-	return walletState.Traits.IsWithdrawer()
-}
-
-type botBalanceType uint8
-
-const (
-	balTypeAvailable botBalanceType = iota
-	balTypeFundingOrder
-	balTypePendingRedeem
-)
-
-const (
-	balanceModIncrease = true
-	balanceModDecrease = false
-)
-
-// balanceMod is passed to modifyBotBalance to increase or decrease one
-// of the bot's balances for an asset.
-type balanceMod struct {
-	increase bool
-	assetID  uint32
-	typ      botBalanceType
-	amount   uint64
-}
-
-// modifyBotBalance does modifications to the various bot balances.
-func (m *MarketMaker) modifyBotBalance(botID string, mods []*balanceMod) {
-	bb := m.botBalances[botID]
-	if bb == nil {
-		m.log.Errorf("increaseBotBalance: bot %s not found", botID)
-		return
-	}
-
-	bb.mtx.Lock()
-	defer bb.mtx.Unlock()
-
-	for _, mod := range mods {
-		assetBalance, found := bb.balances[mod.assetID]
-		if !found {
-			m.log.Errorf("modifyBotBalance: asset %d not found for bot %s", mod.assetID, botID)
-			continue
-		}
-
-		newFieldValue := func(balanceType string, initialValue uint64) uint64 {
-			if mod.increase {
-				return initialValue + mod.amount
-			} else {
-				if initialValue < mod.amount {
-					m.log.Errorf("modifyBotBalance: bot %s has insufficient %s for asset %d. "+
-						"balance: %d, amount: %d", botID, balanceType, mod.assetID, initialValue, mod.amount)
-					return 0
-				}
-				return initialValue - mod.amount
-			}
-		}
-
-		switch mod.typ {
-		case balTypeAvailable:
-			assetBalance.Available = newFieldValue("available balance", assetBalance.Available)
-		case balTypeFundingOrder:
-			assetBalance.FundingOrder = newFieldValue("funding order", assetBalance.FundingOrder)
-		case balTypePendingRedeem:
-			assetBalance.PendingRedeem = newFieldValue("pending redeem", assetBalance.PendingRedeem)
-		}
-	}
-}
-
-// botBalance returns a bot's balance of an asset.
-func (m *MarketMaker) botBalance(botID string, assetID uint32) uint64 {
-	bb := m.botBalances[botID]
-	if bb == nil {
-		m.log.Errorf("balance: bot %s not found", botID)
-		return 0
-	}
-
-	bb.mtx.RLock()
-	defer bb.mtx.RUnlock()
-
-	if _, found := bb.balances[assetID]; found {
-		return bb.balances[assetID].Available
-	}
-
-	m.log.Errorf("balance: asset %d not found for bot %s", assetID, botID)
-	return 0
-}
-
-func (m *MarketMaker) modifyBotCEXBalance(botID string, assetID uint32, amount uint64, increase bool) {
-	bb := m.botBalances[botID]
-	if bb == nil {
-		m.log.Errorf("modifyBotCEXBalance: bot %s not found", botID)
-		return
-	}
-
-	bb.mtx.RLock()
-	defer bb.mtx.RUnlock()
-
-	if _, found := bb.cexBalances[assetID]; !found {
-		// Even if the balance is 0, it should have been defined in
-		// setupBalances.
-		m.log.Errorf("modifyBotCEXBalance: bot %s does not have balance for asset %d", botID, assetID)
-		return
-	}
-
-	if increase {
-		bb.cexBalances[assetID] += amount
-		return
-	}
-
-	if bb.cexBalances[assetID] < amount {
-		m.log.Errorf("modifyBotCEXBalance: bot %s: decreasing asset %d balance by %d but only have %d",
-			botID, assetID, amount, bb.cexBalances[assetID])
-		bb.cexBalances[assetID] = 0
-		return
-	}
-
-	bb.cexBalances[assetID] -= amount
-}
-
-func (m *MarketMaker) botCEXBalance(botID string, assetID uint32) uint64 {
-	bb := m.botBalances[botID]
-	if bb == nil {
-		m.log.Errorf("balance: bot %s not found", botID)
-		return 0
-	}
-
-	bb.mtx.RLock()
-	defer bb.mtx.RUnlock()
-
-	if _, found := bb.cexBalances[assetID]; found {
-		return bb.cexBalances[assetID]
-	}
-
-	m.log.Errorf("botCEXBalance: asset %d not found for bot %s", assetID, botID)
-	return 0
-}
-
-func (m *MarketMaker) getOrderInfo(id dex.Bytes) *orderInfo {
-	var oid order.OrderID
-	copy(oid[:], id)
-
-	m.ordersMtx.RLock()
-	defer m.ordersMtx.RUnlock()
-	return m.orders[oid]
-}
-
-func (m *MarketMaker) removeOrderInfo(id dex.Bytes) {
-	m.log.Tracef("Removing oid %s from tracked orders", id)
-
-	var oid order.OrderID
-	copy(oid[:], id[:])
-
-	m.ordersMtx.Lock()
-	defer m.ordersMtx.Unlock()
-	delete(m.orders, oid)
-}
-
-// handleMatchUpdate updates the bots balances based on a match's status.
-// Balances are updated due to a match two times, once when the match is
-// first seen, and once when the match is settled.
-//
-//   - When a match is seen, it is assumed that the match will eventually be
-//     redeemed, so funding balance is decreased and pending redeem balance
-//     is increased.
-//   - When a match is settles, the balances are updated differently depending
-//     on whether the match was refunded or redeemed.
-func (m *MarketMaker) handleMatchUpdate(match *core.Match, oid dex.Bytes) {
-	orderInfo := m.getOrderInfo(oid)
-	if orderInfo == nil {
-		m.log.Debugf("did not find order info for order %s", oid)
-		return
-	}
-
-	var maxRedeemFees uint64
-	if orderInfo.initialRedeemFeesLocked == 0 {
-		numLots := match.Qty / orderInfo.lotSize
-		maxRedeemFees = numLots * orderInfo.singleLotRedeemFees
-	}
-
-	var matchID order.MatchID
-	copy(matchID[:], match.MatchID)
-
-	if _, seen := orderInfo.matchesSeen[matchID]; !seen {
-		orderInfo.matchesSeen[matchID] = struct{}{}
-		var balanceMods []*balanceMod
-		if orderInfo.order.Sell {
-			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.BaseID, balTypeFundingOrder, match.Qty},
-				{balanceModIncrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
-			}
-		} else {
-			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.QuoteID, balTypeFundingOrder, calc.BaseToQuote(match.Rate, match.Qty)},
-				{balanceModIncrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
-			}
-		}
-		m.modifyBotBalance(orderInfo.bot, balanceMods)
-	}
-
-	unconfirmed := match.Status != order.MatchConfirmed
-	notRefunded := match.Refund == nil
-	revokedPreSwap := match.Revoked && match.Swap == nil
-	if unconfirmed && notRefunded && !revokedPreSwap {
-		return
-	}
-
-	if _, settled := orderInfo.matchesSettled[matchID]; settled {
-		return
-	}
-	orderInfo.matchesSettled[matchID] = struct{}{}
-
-	if match.Refund != nil {
-		var singleLotRefundFees uint64
-		if orderInfo.initialRefundFeesLocked == 0 {
-			singleLotRefundFees = orderInfo.singleLotRefundFees
-		}
-		var balanceMods []*balanceMod
-		if orderInfo.order.Sell {
-			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
-				{balanceModIncrease, orderInfo.order.BaseID, balTypeAvailable, match.Qty - singleLotRefundFees},
-			}
-		} else {
-			balanceMods = []*balanceMod{
-				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
-				{balanceModIncrease, orderInfo.order.QuoteID, balTypeAvailable, calc.BaseToQuote(match.Rate, match.Qty) - singleLotRefundFees},
-			}
-		}
-		m.modifyBotBalance(orderInfo.bot, balanceMods)
-	} else if match.Redeem != nil {
-		redeemAsset := orderInfo.order.BaseID
-		redeemQty := match.Qty
-		if orderInfo.order.Sell {
-			redeemAsset = orderInfo.order.QuoteID
-			redeemQty = calc.BaseToQuote(match.Rate, redeemQty)
-		}
-		balanceMods := []*balanceMod{
-			{balanceModDecrease, redeemAsset, balTypePendingRedeem, redeemQty - maxRedeemFees},
-			{balanceModIncrease, redeemAsset, balTypeAvailable, redeemQty - maxRedeemFees},
-		}
-		m.modifyBotBalance(orderInfo.bot, balanceMods)
-	} else if match.Swap != nil {
-		// Something went wrong.. we made a swap tx, but did not get a refund or redeem.
-		m.log.Errorf("oid: %s, match %s is in confirmed state, but no refund or redeem", oid, matchID)
-		redeemAsset := orderInfo.order.BaseID
-		redeemQty := match.Qty
-		if orderInfo.order.Sell {
-			redeemAsset = orderInfo.order.QuoteID
-			redeemQty = calc.BaseToQuote(match.Rate, redeemQty)
-		}
-		balanceMods := []*balanceMod{
-			{balanceModDecrease, redeemAsset, balTypePendingRedeem, redeemQty - maxRedeemFees},
-		}
-		m.modifyBotBalance(orderInfo.bot, balanceMods)
-	} else {
-		// We did not even make a swap tx. The modifications here are the
-		// opposite of what happened when the match was first seen.
-		var balanceMods []*balanceMod
-		if orderInfo.order.Sell {
-			balanceMods = []*balanceMod{
-				{balanceModIncrease, orderInfo.order.BaseID, balTypeFundingOrder, match.Qty},
-				{balanceModDecrease, orderInfo.order.QuoteID, balTypePendingRedeem, calc.BaseToQuote(match.Rate, match.Qty) - maxRedeemFees},
-			}
-		} else {
-			balanceMods = []*balanceMod{
-				{balanceModIncrease, orderInfo.order.QuoteID, balTypeFundingOrder, calc.BaseToQuote(match.Rate, match.Qty)},
-				{balanceModDecrease, orderInfo.order.BaseID, balTypePendingRedeem, match.Qty - maxRedeemFees},
-			}
-		}
-		m.modifyBotBalance(orderInfo.bot, balanceMods)
-	}
-
-	if orderInfo.finishedProcessing() {
-		m.removeOrderInfo(oid)
-	}
-}
-
-// handleOrderNotification checks if any funds are ready to be made available
-// for use by a bot depending on the order's state.
-//   - First, any updates to the balances based on the state of the matches
-//     are made.
-//   - If the order is no longer booked, the difference between the order's
-//     quantity and the amount that was matched can be returned to the bot.
-//   - If all fees have been confirmed, the rest of the difference between
-//     the amount that was either initially locked or max possible to be used
-//     and the amount that was actually used can be returned.
-func (m *MarketMaker) handleOrderUpdate(o *core.Order) {
-	orderInfo := m.getOrderInfo(o.ID)
-	if orderInfo == nil {
-		return
-	}
-
-	orderInfo.order = o
-
-	for _, match := range o.Matches {
-		m.handleMatchUpdate(match, o.ID)
-	}
-
-	notReadyToReturnOverLock := o.LockedAmt > 0
-	returnedOverLockButNotReadyToReturnExcessFees := orderInfo.unusedLockedFundsReturned && !orderInfo.excessFeesReturned && !o.AllFeesConfirmed
-	complete := orderInfo.unusedLockedFundsReturned && orderInfo.excessFeesReturned
-	if notReadyToReturnOverLock || returnedOverLockButNotReadyToReturnExcessFees || complete {
-		return
-	}
-
-	fromAsset, toAsset := o.BaseID, o.QuoteID
-	if !o.Sell {
-		fromAsset, toAsset = toAsset, fromAsset
-	}
-
-	var swappedLots, swappedMatches, swappedQty, redeemedLots, refundedMatches uint64
-	for _, match := range o.Matches {
-		if match.IsCancel {
-			continue
-		}
-		numLots := match.Qty / orderInfo.lotSize
-		fromAssetQty := match.Qty
-		if fromAsset == o.QuoteID {
-			fromAssetQty = calc.BaseToQuote(match.Rate, fromAssetQty)
-		}
-		if match.Swap != nil {
-			swappedLots += numLots
-			swappedMatches++
-			swappedQty += fromAssetQty
-		}
-		if match.Refund != nil {
-			refundedMatches++
-		}
-		if match.Redeem != nil {
-			redeemedLots += numLots
-		}
-	}
-
-	if !orderInfo.unusedLockedFundsReturned {
-		maxSwapFees := swappedMatches * orderInfo.singleLotSwapFees
-		usedFunds := swappedQty + maxSwapFees
-		if usedFunds < orderInfo.initialFundsLocked {
-			overLock := orderInfo.initialFundsLocked - usedFunds
-			balanceMods := []*balanceMod{
-				{balanceModIncrease, fromAsset, balTypeAvailable, overLock},
-				{balanceModDecrease, fromAsset, balTypeFundingOrder, overLock},
-			}
-			m.modifyBotBalance(orderInfo.bot, balanceMods)
-		} else {
-			m.log.Errorf("oid: %s - usedFunds %d >= initialFundsLocked %d",
-				o.ID, orderInfo.initialFundsLocked)
-		}
-		orderInfo.unusedLockedFundsReturned = true
-	}
-
-	if !orderInfo.excessFeesReturned && o.AllFeesConfirmed {
-		// Return excess swap fees
-		maxSwapFees := swappedMatches * orderInfo.singleLotSwapFees
-		if maxSwapFees > o.FeesPaid.Swap {
-			balanceMods := []*balanceMod{
-				{balanceModIncrease, fromAsset, balTypeAvailable, maxSwapFees - o.FeesPaid.Swap},
-				{balanceModDecrease, fromAsset, balTypeFundingOrder, maxSwapFees},
-			}
-			m.modifyBotBalance(orderInfo.bot, balanceMods)
-		} else if maxSwapFees < o.FeesPaid.Swap {
-			m.log.Errorf("oid: %s - maxSwapFees %d < swap fees %d", o.ID, maxSwapFees, o.FeesPaid.Swap)
-		}
-
-		// Return excess redeem fees
-		if orderInfo.initialRedeemFeesLocked > 0 { // AccountLocker
-			if orderInfo.initialRedeemFeesLocked > o.FeesPaid.Redemption {
-				balanceMods := []*balanceMod{
-					{balanceModIncrease, toAsset, balTypeAvailable, orderInfo.initialRedeemFeesLocked - o.FeesPaid.Redemption},
-					{balanceModDecrease, toAsset, balTypeFundingOrder, orderInfo.initialRedeemFeesLocked},
-				}
-				m.modifyBotBalance(orderInfo.bot, balanceMods)
-			} else {
-				m.log.Errorf("oid: %s - initialRedeemFeesLocked %d > redemption fees %d",
-					o.ID, orderInfo.initialRedeemFeesLocked, o.FeesPaid.Redemption)
-			}
-		} else {
-			maxRedeemFees := redeemedLots * orderInfo.singleLotRedeemFees
-			if maxRedeemFees > o.FeesPaid.Redemption {
-				balanceMods := []*balanceMod{
-					{balanceModIncrease, toAsset, balTypeAvailable, maxRedeemFees - o.FeesPaid.Redemption},
-				}
-				m.modifyBotBalance(orderInfo.bot, balanceMods)
-			} else if maxRedeemFees < o.FeesPaid.Redemption {
-				m.log.Errorf("oid: %v - maxRedeemFees %d < redemption fees %d",
-					hex.EncodeToString(o.ID), maxRedeemFees, o.FeesPaid.Redemption)
-			}
-		}
-
-		// Return excess refund fees
-		if orderInfo.initialRefundFeesLocked > 0 { // AccountLocker
-			if orderInfo.initialRefundFeesLocked > o.FeesPaid.Refund {
-				balanceMods := []*balanceMod{
-					{balanceModIncrease, fromAsset, balTypeAvailable, orderInfo.initialRefundFeesLocked - o.FeesPaid.Refund},
-					{balanceModDecrease, fromAsset, balTypeFundingOrder, orderInfo.initialRefundFeesLocked},
-				}
-				m.modifyBotBalance(orderInfo.bot, balanceMods)
-			}
-		} else {
-			maxRefundFees := refundedMatches * orderInfo.singleLotRefundFees
-			if maxRefundFees > o.FeesPaid.Refund {
-				balanceMods := []*balanceMod{
-					{balanceModIncrease, fromAsset, balTypeAvailable, maxRefundFees - o.FeesPaid.Refund},
-				}
-				m.modifyBotBalance(orderInfo.bot, balanceMods)
-			} else if maxRefundFees < o.FeesPaid.Refund {
-				m.log.Errorf("oid: %s - max refund fees %d < refund fees %d",
-					o.ID, maxRefundFees, o.FeesPaid.Refund)
-			}
-		}
-
-		orderInfo.excessFeesReturned = true
-	}
-
-	if orderInfo.finishedProcessing() {
-		m.removeOrderInfo(o.ID)
-	}
-}
-
-func (m *MarketMaker) handleNotification(n core.Notification) {
-	switch note := n.(type) {
-	case *core.OrderNote:
-		m.handleOrderUpdate(note.Order)
-	case *core.MatchNote:
-		m.handleMatchUpdate(note.Match, note.OrderID)
-	}
+	return dexBalances, cexBalances, nil
 }
 
 // loadAndConnectCEX initializes the centralizedExchange if required, and
@@ -1117,6 +604,38 @@ func (m *MarketMaker) initCEXConnections(ctx context.Context, cfgs []*CEXConfig)
 	}
 
 	return cexes
+}
+
+func (m *MarketMaker) logInitialBotBalances(dexBalances, cexBalances map[string]map[uint32]uint64) {
+	var msg strings.Builder
+	msg.WriteString("Initial market making balances:\n")
+	for mkt, botDexBals := range dexBalances {
+		msg.WriteString(fmt.Sprintf("-- %s:\n", mkt))
+
+		i := 0
+		msg.WriteString("  DEX: ")
+		for assetID, amount := range botDexBals {
+			msg.WriteString(fmt.Sprintf("%s: %d", dex.BipIDSymbol(assetID), amount))
+			if i <= len(botDexBals)-1 {
+				msg.WriteString(", ")
+			}
+			i++
+		}
+
+		i = 0
+		if botCexBals, found := cexBalances[mkt]; found {
+			msg.WriteString("\n  CEX: ")
+			for assetID, amount := range botCexBals {
+				msg.WriteString(fmt.Sprintf("%s: %d", dex.BipIDSymbol(assetID), amount))
+				if i <= len(botCexBals)-1 {
+					msg.WriteString(", ")
+				}
+				i++
+			}
+		}
+	}
+
+	m.log.Info(msg.String())
 }
 
 // loadCEX initializes the cex if required and returns the centralizedExchange.
@@ -1219,6 +738,13 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 		return errors.New("market making is already running")
 	}
 
+	var startedMarketMaking bool
+	defer func() {
+		if !startedMarketMaking {
+			m.running.Store(false)
+		}
+	}()
+
 	cfg := m.config()
 	if alternateConfigPath != nil {
 		cfg, err = getMarketMakingConfig(*alternateConfigPath)
@@ -1226,13 +752,6 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 			return fmt.Errorf("error loading custom market making config: %v", err)
 		}
 	}
-
-	var startedMarketMaking bool
-	defer func() {
-		if !startedMarketMaking {
-			m.running.Store(false)
-		}
-	}()
 
 	ctx, die := context.WithCancel(m.ctx)
 	m.die.Store(die)
@@ -1260,32 +779,18 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 	}()
 
 	cexes := m.initCEXConnections(ctx, cfg.CexConfigs)
-	if err := m.setupBalances(enabledBots, cexes); err != nil {
+
+	dexBaseBalances, cexBaseBalances, err := botInitialBaseBalances(enabledBots, m.core, cexes)
+	if err != nil {
 		return err
 	}
+	m.logInitialBotBalances(dexBaseBalances, cexBaseBalances)
 
 	fiatRates := m.core.FiatConversionRates()
 	startedMarketMaking = true
 	m.core.Broadcast(newMMStartStopNote(true))
 
 	wg := new(sync.WaitGroup)
-
-	// Listen for core notifications.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		feed := m.core.NotificationFeed()
-		defer feed.ReturnFeed()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case n := <-feed.C:
-				m.handleNotification(n)
-			}
-		}
-	}()
 
 	var cexCfgMap map[string]*CEXConfig
 	if len(cfg.CexConfigs) > 0 {
@@ -1315,7 +820,9 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 				baseFiatRate := fiatRates[cfg.BaseID]
 				quoteFiatRate := fiatRates[cfg.QuoteID]
-				RunBasicMarketMaker(ctx, cfg, m.wrappedCoreForBot(mktID), oracle, baseFiatRate, quoteFiatRate, logger)
+				exchangeAdaptor := unifiedExchangeAdaptorForBot(mktID, dexBaseBalances[mktID], cexBaseBalances[mktID], m.core, nil, logger)
+				exchangeAdaptor.run(ctx)
+				RunBasicMarketMaker(m.ctx, cfg, exchangeAdaptor, oracle, baseFiatRate, quoteFiatRate, logger)
 			}(cfg)
 		case cfg.SimpleArbConfig != nil:
 			wg.Add(1)
@@ -1333,7 +840,9 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				defer func() {
 					m.markBotAsRunning(mkt, false)
 				}()
-				RunSimpleArbBot(ctx, cfg, m.wrappedCoreForBot(mktID), m.wrappedCEXForBot(mktID, cex), logger)
+				exchangeAdaptor := unifiedExchangeAdaptorForBot(mktID, dexBaseBalances[mktID], cexBaseBalances[mktID], m.core, cex, logger)
+				exchangeAdaptor.run(ctx)
+				RunSimpleArbBot(m.ctx, cfg, exchangeAdaptor, exchangeAdaptor, logger)
 			}(cfg)
 		case cfg.ArbMarketMakerConfig != nil:
 			wg.Add(1)
@@ -1351,7 +860,9 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				defer func() {
 					m.markBotAsRunning(mkt, false)
 				}()
-				RunArbMarketMaker(ctx, cfg, m.core, m.wrappedCEXForBot(mktID, cex), logger)
+				exchangeAdaptor := unifiedExchangeAdaptorForBot(mktID, dexBaseBalances[mktID], cexBaseBalances[mktID], m.core, cex, logger)
+				exchangeAdaptor.run(ctx)
+				RunArbMarketMaker(m.ctx, cfg, exchangeAdaptor, exchangeAdaptor, logger)
 			}(cfg)
 		default:
 			m.log.Errorf("No bot config provided. Skipping %s-%d-%d", cfg.Host, cfg.BaseID, cfg.QuoteID)

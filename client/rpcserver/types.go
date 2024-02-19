@@ -1006,3 +1006,25 @@ func parseTxHistoryArgs(params *RawParams) (*txHistoryForm, error) {
 		past:    past,
 	}, nil
 }
+
+type walletTxForm struct {
+	assetID uint32
+	txID    string
+}
+
+func parseWalletTxArgs(params *RawParams) (*walletTxForm, error) {
+	err := checkNArgs(params, []int{0}, []int{2})
+	if err != nil {
+		return nil, err
+	}
+
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid assetID: %v", err)
+	}
+
+	return &walletTxForm{
+		assetID: uint32(assetID),
+		txID:    params.Args[1],
+	}, nil
+}

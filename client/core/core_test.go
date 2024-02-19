@@ -1127,8 +1127,8 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 	}, func() {}, nil
 }
 
-func (w *TXCWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
-	return 0, nil
+func (w *TXCWallet) WalletTransaction(context.Context, dex.Bytes) (*asset.WalletTransaction, error) {
+	return nil, nil
 }
 
 type TAccountLocker struct {

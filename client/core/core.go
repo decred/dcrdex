@@ -5574,17 +5574,6 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	return coin, nil
 }
 
-// TransactionConfirmations returns the number of confirmations of a
-// transaction.
-func (c *Core) TransactionConfirmations(assetID uint32, txid string) (confirmations uint32, err error) {
-	wallet, err := c.connectedWallet(assetID)
-	if err != nil {
-		return 0, err
-	}
-
-	return wallet.TransactionConfirmations(c.ctx, txid)
-}
-
 // ValidateAddress checks that the provided address is valid.
 func (c *Core) ValidateAddress(address string, assetID uint32) (bool, error) {
 	if address == "" {
@@ -5978,6 +5967,18 @@ func (c *Core) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*as
 	}
 
 	return wallet.TxHistory(n, refID, past)
+}
+
+// WalletTransaction returns information about a transaction that the wallet
+// has made or one in which that wallet received funds. This function supports
+// both transaction ID and coin ID.
+func (c *Core) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	return wallet.WalletTransaction(c.ctx, txID)
 }
 
 // Trade is used to place a market or limit order.

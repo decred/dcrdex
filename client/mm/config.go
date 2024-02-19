@@ -61,6 +61,11 @@ type BotConfig struct {
 	QuoteBalanceType BalanceType `json:"quoteBalanceType"`
 	QuoteBalance     uint64      `json:"quoteBalance"`
 
+	BaseFeeAssetBalanceType  BalanceType `json:"baseFeeAssetBalanceType"`
+	BaseFeeAssetBalance      uint64      `json:"baseFeeAssetBalance"`
+	QuoteFeeAssetBalanceType BalanceType `json:"quoteFeeAssetBalanceType"`
+	QuoteFeeAssetBalance     uint64      `json:"quoteFeeAssetBalance"`
+
 	// Only applicable for arb bots.
 	CEXCfg *BotCEXCfg `json:"cexCfg"`
 
