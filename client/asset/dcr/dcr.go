@@ -4389,6 +4389,114 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 	*/
 }
 
+// FindBond finds the bond with coinID and returns the values used to create it.
+func (dcr *ExchangeWallet) FindBond(ctx context.Context, coinID []byte, searchUntil time.Time) (bond *asset.BondDetails, err error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	decodeV0BondTx := func(msgTx *wire.MsgTx) (*asset.BondDetails, error) {
+		if len(msgTx.TxOut) < 2 {
+			return nil, fmt.Errorf("tx %s is not a v0 bond transaction: too few outputs", txHash)
+		}
+		_, lockTime, pkh, err := dexdcr.ExtractBondCommitDataV0(0, msgTx.TxOut[1].PkScript)
+		if err != nil {
+			return nil, fmt.Errorf("unable to extract bond commitment details from output 1 of %s: %v", txHash, err)
+		}
+		// Sanity check.
+		bondScript, err := dexdcr.MakeBondScript(0, lockTime, pkh[:])
+		if err != nil {
+			return nil, fmt.Errorf("failed to build bond output redeem script: %w", err)
+		}
+		bondAddr, err := stdaddr.NewAddressScriptHash(0, bondScript, dcr.chainParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build bond output payment script: %w", err)
+		}
+		_, bondScriptWOpcodes := bondAddr.PaymentScript()
+		if !bytes.Equal(bondScriptWOpcodes, msgTx.TxOut[0].PkScript) {
+			return nil, fmt.Errorf("bond script does not match commit data for %s: %x != %x",
+				txHash, bondScript, msgTx.TxOut[0].PkScript)
+		}
+		return &asset.BondDetails{
+			Bond: &asset.Bond{
+				Version: 0,
+				AssetID: BipID,
+				Amount:  uint64(msgTx.TxOut[0].Value),
+				CoinID:  coinID,
+				Data:    bondScript,
+				//
+				// SignedTx and UnsignedTx not populated because this is
+				// an already posted bond and these fields are no longer used.
+				// SignedTx, UnsignedTx []byte
+				//
+				// RedeemTx cannot be populated because we do not have
+				// the private key that only core knows. Core will need
+				// the BondPKH to determine what the private key was.
+				// RedeemTx []byte
+			},
+			LockTime: time.Unix(int64(lockTime), 0),
+			CheckPrivKey: func(bondKey *secp256k1.PrivateKey) bool {
+				pk := bondKey.PubKey().SerializeCompressed()
+				pkhB := stdaddr.Hash160(pk)
+				return bytes.Equal(pkh[:], pkhB)
+			},
+		}, nil
+	}
+
+	// If the bond was funded by this wallet or had a change output paying
+	// to this wallet, it should be found here.
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err == nil {
+		msgTx, err := msgTxFromHex(tx.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
+		}
+		return decodeV0BondTx(msgTx)
+	}
+	if !errors.Is(err, asset.CoinNotFoundError) {
+		dcr.log.Warnf("Unexpected error looking up bond output %v:%d", txHash, vout)
+	}
+
+	// The bond was not funded by this wallet or had no change output when
+	// restored from seed. This is not a problem. However, we are unable to
+	// use filters because we don't know any output scripts. Brute force
+	// finding the transaction.
+	blockHash, _, err := dcr.wallet.GetBestBlock(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get best hash: %v", err)
+	}
+	var (
+		blk   *wire.MsgBlock
+		msgTx *wire.MsgTx
+	)
+out:
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("bond search stopped: %w", err)
+		}
+		blk, err = dcr.wallet.GetBlock(ctx, blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
+		}
+		if blk.Header.Timestamp.Before(searchUntil) {
+			return nil, fmt.Errorf("searched blocks until %v but did not find the bond tx %s", searchUntil, txHash)
+		}
+		for _, tx := range blk.Transactions {
+			if tx.TxHash() == *txHash {
+				dcr.log.Debugf("Found mined tx %s in block %s.", txHash, blk.BlockHash())
+				msgTx = tx
+				break out
+			}
+		}
+		blockHash = &blk.Header.PrevBlock
+		if blockHash == nil {
+			return nil, fmt.Errorf("did not find the bond tx %s", txHash)
+		}
+	}
+	return decodeV0BondTx(msgTx)
+}
+
 // SendTransaction broadcasts a valid fully-signed transaction.
 func (dcr *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 	msgTx, err := msgTxFromBytes(rawTx)

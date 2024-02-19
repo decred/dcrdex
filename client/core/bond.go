@@ -518,7 +518,7 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 		var refundCoinStr string
 		var refundVal uint64
 		var bondAlreadySpent bool
-		if bond.KeyIndex == math.MaxUint32 { // invalid/unknown key index fallback (v0 db.Bond, which was never released), also will skirt reserves :/
+		if bond.KeyIndex == math.MaxUint32 { // invalid/unknown key index fallback (v0 db.Bond, which was never released, or unknown bond from server), also will skirt reserves :/
 			if len(bond.RefundTx) > 0 {
 				refundCoinID, err := wallet.SendTransaction(bond.RefundTx)
 				if err != nil {
@@ -529,7 +529,7 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 			} else { // else "Unknown bond reported by server", see result.ActiveBonds in authDEX
 				bondAlreadySpent = true
 			}
-		} else { // expected case -- TODO: remove the math.MaxUint32 sometime after 0.6 release
+		} else { // expected case -- TODO: remove the math.MaxUint32 sometime after bonds V1
 			priv, err := c.bondKeyIdx(bond.AssetID, bond.KeyIndex)
 			if err != nil {
 				c.log.Errorf("Failed to derive bond private key: %v", err)

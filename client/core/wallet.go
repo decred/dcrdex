@@ -582,6 +582,16 @@ func (w *xcWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []
 	return bonder.RefundBond(ctx, ver, coinID, script, amt, priv)
 }
 
+// FindBond finds the bond with coinID and returns the values used to create it.
+// The output should be unspent with the lockTime set to some time in the future.
+func (w *xcWallet) FindBond(ctx context.Context, coinID []byte, searchUntil time.Time) (*asset.BondDetails, error) {
+	bonder, ok := w.Wallet.(asset.Bonder)
+	if !ok {
+		return nil, errors.New("wallet does not support making bond transactions")
+	}
+	return bonder.FindBond(ctx, coinID, searchUntil)
+}
+
 // SendTransaction broadcasts a raw transaction if the wallet is a Broadcaster.
 func (w *xcWallet) SendTransaction(tx []byte) ([]byte, error) {
 	bonder, ok := w.Wallet.(asset.Broadcaster)

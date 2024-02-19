@@ -247,7 +247,7 @@ func (c *tBtcWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 	tx, _ := msgTxFromBytes(txData.Bytes)
 	blockHash, _ := chainhash.NewHashFromStr(txData.BlockHash)
 
-	blk := c.getBlock(txData.BlockHash)
+	blk := c.getBlock(*blockHash)
 	var blockHeight int32
 	if blk != nil {
 		blockHeight = int32(blk.height)
@@ -313,7 +313,7 @@ func (c *tBtcWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResu
 
 func (c *tBtcWallet) SyncedTo() waddrmgr.BlockStamp {
 	bestHash, bestHeight := c.bestBlock() // NOTE: in reality this may be lower than the chain service's best block
-	blk := c.getBlock(bestHash.String())
+	blk := c.getBlock(*bestHash)
 	return waddrmgr.BlockStamp{
 		Height:    int32(bestHeight),
 		Hash:      *bestHash,
@@ -387,7 +387,7 @@ func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 	}
 	c.blockchainMtx.RUnlock()
 	bestHash, bestHeight := c.bestBlock()
-	blk := c.getBlock(bestHash.String())
+	blk := c.getBlock(*bestHash)
 	return &headerfs.BlockStamp{
 		Height:    int32(bestHeight),
 		Hash:      *bestHash,
@@ -410,7 +410,7 @@ func (c *tNeutrinoClient) AddPeer(string) error {
 }
 
 func (c *tNeutrinoClient) GetBlockHeight(hash *chainhash.Hash) (int32, error) {
-	block := c.getBlock(hash.String())
+	block := c.getBlock(*hash)
 	if block == nil {
 		return 0, fmt.Errorf("(test) block not found for block hash %s", hash)
 	}
@@ -418,7 +418,7 @@ func (c *tNeutrinoClient) GetBlockHeight(hash *chainhash.Hash) (int32, error) {
 }
 
 func (c *tNeutrinoClient) GetBlockHeader(blkHash *chainhash.Hash) (*wire.BlockHeader, error) {
-	block := c.getBlock(blkHash.String())
+	block := c.getBlock(*blkHash)
 	if block == nil {
 		return nil, errors.New("no block verbose found")
 	}
@@ -434,7 +434,7 @@ func (c *tNeutrinoClient) GetCFilter(blockHash chainhash.Hash, filterType wire.F
 }
 
 func (c *tNeutrinoClient) GetBlock(blockHash chainhash.Hash, options ...neutrino.QueryOption) (*btcutil.Block, error) {
-	blk := c.getBlock(blockHash.String())
+	blk := c.getBlock(blockHash)
 	if blk == nil {
 		return nil, fmt.Errorf("no (test) block %s", blockHash)
 	}
@@ -860,7 +860,7 @@ func TestGetBlockHeader(t *testing.T) {
 			blockHash = h
 		}
 
-		node.verboseBlocks[h.String()] = hdr
+		node.verboseBlocks[h] = hdr
 		hh := h // just because we are storing pointers in mainchain
 		node.mainchain[int64(height)] = &hh
 	}
@@ -902,11 +902,11 @@ func TestGetBlockHeader(t *testing.T) {
 	node.mainchain[int64(blockHeight)] = &blockHash // clean up
 
 	// Can't fetch header error.
-	delete(node.verboseBlocks, blockHash.String()) // can't find block by hash
+	delete(node.verboseBlocks, blockHash) // can't find block by hash
 	if _, _, err := wallet.tipRedeemer.getBlockHeader(&blockHash); err == nil {
 		t.Fatalf("Can't fetch header error not propagated")
 	}
-	node.verboseBlocks[blockHash.String()] = &blockHdr // clean up
+	node.verboseBlocks[blockHash] = &blockHdr // clean up
 
 	// Main chain is shorter than requested block.
 	prevMainchain := node.mainchain
