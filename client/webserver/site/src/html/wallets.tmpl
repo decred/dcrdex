@@ -55,8 +55,8 @@
             </div>
 
             <div class="flex-stretch-column flex-md-row brdr rounded3 mb-3" id="walletDetails">
-              <div class="flex-stretch-column flex-grow-1 pt-3" id="balanceBreakdownBox">
-                <div class="px-3">
+              <div class="flex-stretch-column flex-grow-1 pt-2" id="balanceBreakdownBox">
+                <div class="px-2">
                   <table id="balanceTable" class="fs16 w-100">
                     <tbody id="balanceDetailBox">
                       <tr id="balanceDetailRow">
@@ -69,16 +69,16 @@
                     </tbody>
                   </table>
                 </div>
-                <div id="sendReceive" class="flex-grow-1 d-flex flex-column justify-content-end align-items-stretch fs22 mt-3 brdrbottom">
+                <div id="sendReceive" class="flex-grow-1 d-flex flex-column justify-content-end align-items-stretch fs22 mt-2 brdrbottom">
                   <div class="d-flex align-items-stretch">
-                    <div class="col-12 d-flex align-items-stretch">
-                      <div id="receive" class="flex-grow-1 flex-center p-2 lh1 hoverbg pointer brdrtop brdrright">
+                    <div class="col-12 d-flex align-items-stretch py-2 ps-2 pe-1">
+                      <div id="receive" class="flex-grow-1 flex-center p-2 lh1 hoverbg pointer rounded3 brdr">
                         <span class="ico-qrcode fs14 me-2"></span>
                         <span class="fs18">[[[Receive]]]</span>
                       </div>
                     </div>
-                    <div class="col-12 d-flex align-items-stretch">
-                      <div id="send" class="flex-grow-1 flex-center p-2 lh1 hoverbg pointer brdrtop">
+                    <div class="col-12 d-flex align-items-stretch py-2 ps-1 pe-2">
+                      <div id="send" class="flex-grow-1 flex-center p-2 lh1 feature pointer rounded3 brdr">
                         <span class="ico-send fs14 me-2"></span>
                         <span class="fs18">[[[Send]]]</span>
                       </div>
@@ -87,7 +87,7 @@
                 </div>
               </div>
 
-              <div class="d-flex justify-content-start align-items-stretch flex-column flex-grow-1 p-3" id="walletInfo">
+              <div class="d-flex justify-content-start align-items-stretch flex-column flex-grow-1 p-2" id="walletInfo">
                 <table id="walletInfoTable" class="fs14 w-100">
                   <tbody>
                     <tr id="statusLocked">
@@ -152,7 +152,7 @@
                   <span class="fs24">[[[Staking]]]</span>
                 </div>
                 <div id="stakingSummary" class="d-flex align-items-stretch flex-grow-1">
-                  <div class="flex-stretch-column justify-content-center fs14 flex-grow-1 p-3">
+                  <div class="flex-stretch-column justify-content-center fs14 flex-grow-1 p-2">
                     <div class="d-flex justify-content-between align-items-stretch">
                       <div class="flex-center grey">[[[Active tickets]]]</div>
                       <div id="stakingTicketCount" class="flex-center demi"></div>
@@ -205,11 +205,11 @@
                   <span class="ico-info fs12 me-2"></span>[[[staking_unavailable_for_rpc]]]
                 </div>
                 {{- /* PURCHASE TICKETS */ -}}
-                <div id="purchaseTicketsBox" class="w-100 d-flex align-items-stretch brdrtop fs18 p-3">
-                  <div id="purchaseTicketsBttn" class="hoverbg pointer flex-center flex-grow-1 brdrright brdr rounded3 p-2 me-2">
+                <div id="purchaseTicketsBox" class="w-100 d-flex align-items-stretch brdrtop fs18 p-2">
+                  <div id="purchaseTicketsBttn" class="feature pointer flex-center flex-grow-1 brdr rounded3 p-2 me-1">
                     <span><span class="ico-ticket me-1"></span> [[[Purchase Tickets]]]</span>
                   </div>
-                  <div id="ticketHistory" class="hoverbg pointer flex-center flex-grow-1 brdr rounded3 p-2 ms-2">
+                  <div id="ticketHistory" class="hoverbg pointer flex-center flex-grow-1 brdr rounded3 p-2 ms-1">
                     <span><span class="ico-textfile me-1"></span> [[[Tickets]]]</span>
                   </div>
                 </div>
