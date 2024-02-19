@@ -11133,3 +11133,12 @@ func (c *Core) DisableFundsMixer(assetID uint32) error {
 	}
 	return mw.DisableFundsMixer()
 }
+
+// NetworkFeeRate generates a network tx fee rate for the specified asset.
+// If the wallet implements FeeRater, the wallet will be queried for the
+// fee rate. If the wallet is not a FeeRater, local book feed caches are
+// checked. If no relevant books are synced, connected DCRDEX servers will be
+// queried.
+func (c *Core) NetworkFeeRate(assetID uint32) uint64 {
+	return c.feeSuggestionAny(assetID)
+}
