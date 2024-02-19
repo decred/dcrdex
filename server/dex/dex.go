@@ -7,8 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
+	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +20,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/candles"
+	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -44,10 +49,8 @@ const (
 	APIVersion = PreAPIVersion // only advance server to BondAPIVersion with the V0PURGE
 )
 
-// AssetConf is like dex.Asset except it lacks the BIP44 integer ID and
-// implementation version, has Network and ConfigPath strings, and has JSON
-// tags.
-type AssetConf struct {
+// Asset represents an asset in the Config file.
+type Asset struct {
 	Symbol      string `json:"bip44symbol"`
 	Network     string `json:"network"`
 	LotSizeOLD  uint64 `json:"lotSize,omitempty"`
@@ -64,6 +67,176 @@ type AssetConf struct {
 	NodeRelayID string `json:"nodeRelayID,omitempty"`
 }
 
+// Market represents the markets specified in the Config file.
+type Market struct {
+	Base       string  `json:"base"`
+	Quote      string  `json:"quote"`
+	LotSize    uint64  `json:"lotSize"`
+	ParcelSize uint32  `json:"parcelSize"`
+	RateStep   uint64  `json:"rateStep"`
+	Duration   uint64  `json:"epochDuration"`
+	MBBuffer   float64 `json:"marketBuyBuffer"`
+	Disabled   bool    `json:"disabled"`
+}
+
+// Config is a market and asset configuration file.
+type Config struct {
+	Markets []*Market         `json:"markets"`
+	Assets  map[string]*Asset `json:"assets"`
+}
+
+// LoadConfig loads the Config from the specified file.
+func LoadConfig(net dex.Network, filePath string) ([]*dex.MarketInfo, []*Asset, error) {
+	src, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer src.Close()
+	return loadMarketConf(net, src)
+}
+
+func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset, error) {
+	settings, err := io.ReadAll(src)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var conf Config
+	err = json.Unmarshal(settings, &conf)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	log.Debug("-------------------- BEGIN parsed markets.json --------------------")
+	log.Debug("MARKETS")
+	log.Debug("                  Base         Quote    LotSize     EpochDur")
+	for i, mktConf := range conf.Markets {
+		if mktConf.LotSize == 0 {
+			return nil, nil, fmt.Errorf("market (%s, %s) has NO lot size specified (was an asset setting)",
+				mktConf.Base, mktConf.Quote)
+		}
+		if mktConf.RateStep == 0 {
+			return nil, nil, fmt.Errorf("market (%s, %s) has NO rate step specified (was an asset setting)",
+				mktConf.Base, mktConf.Quote)
+		}
+		log.Debugf("Market %d: % 12s  % 12s   %6de8  % 8d ms",
+			i, mktConf.Base, mktConf.Quote, mktConf.LotSize/1e8, mktConf.Duration)
+	}
+	log.Debug("")
+
+	log.Debug("ASSETS")
+	log.Debug("             MaxFeeRate   SwapConf   Network")
+	for asset, assetConf := range conf.Assets {
+		if assetConf.LotSizeOLD > 0 {
+			return nil, nil, fmt.Errorf("asset %s has a lot size (%d) specified, "+
+				"but this is now a market setting", asset, assetConf.LotSizeOLD)
+		}
+		if assetConf.RateStepOLD > 0 {
+			return nil, nil, fmt.Errorf("asset %s has a rate step (%d) specified, "+
+				"but this is now a market setting", asset, assetConf.RateStepOLD)
+		}
+		log.Debugf("%-12s % 10d  % 9d % 9s", asset, assetConf.MaxFeeRate, assetConf.SwapConf, assetConf.Network)
+	}
+	log.Debug("--------------------- END parsed markets.json ---------------------")
+
+	// Normalize the asset names to lower case.
+	var assets []*Asset
+	unused := make(map[string]struct{})
+	for assetName, assetConf := range conf.Assets {
+		if assetConf.Disabled {
+			continue
+		}
+		network, err := dex.NetFromString(assetConf.Network)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unrecognized network %s for asset %s",
+				assetConf.Network, assetName)
+		}
+		if net != network {
+			continue
+		}
+		unused[assetName] = struct{}{}
+
+		symbol := strings.ToLower(assetConf.Symbol)
+		_, found := dex.BipSymbolID(symbol)
+		if !found {
+			return nil, nil, fmt.Errorf("asset %q symbol %q unrecognized", assetName, assetConf.Symbol)
+		}
+
+		if assetConf.MaxFeeRate == 0 {
+			return nil, nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", assetConf.Symbol)
+		}
+
+		assets = append(assets, assetConf)
+	}
+
+	sort.Slice(assets, func(i, j int) bool {
+		return assets[i].Symbol < assets[j].Symbol
+	})
+
+	var markets []*dex.MarketInfo
+	for _, mktConf := range conf.Markets {
+		if mktConf.Disabled {
+			continue
+		}
+		baseConf, ok := conf.Assets[mktConf.Base]
+		if !ok {
+			return nil, nil, fmt.Errorf("missing configuration for asset %s", mktConf.Base)
+		}
+		if baseConf.Disabled {
+			return nil, nil, fmt.Errorf("required base asset %s is disabled", mktConf.Base)
+		}
+		quoteConf, ok := conf.Assets[mktConf.Quote]
+		if !ok {
+			return nil, nil, fmt.Errorf("missing configuration for asset %s", mktConf.Quote)
+		}
+		if quoteConf.Disabled {
+			return nil, nil, fmt.Errorf("required quote asset %s is disabled", mktConf.Base)
+		}
+
+		delete(unused, mktConf.Base)
+		delete(unused, mktConf.Quote)
+
+		baseNet, err := dex.NetFromString(baseConf.Network)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unrecognized network %s", baseConf.Network)
+		}
+		quoteNet, err := dex.NetFromString(quoteConf.Network)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unrecognized network %s", quoteConf.Network)
+		}
+
+		if baseNet != quoteNet {
+			return nil, nil, fmt.Errorf("assets are for different networks (%s and %s)",
+				baseConf.Network, quoteConf.Network)
+		}
+
+		if baseNet != net {
+			continue
+		}
+
+		if mktConf.ParcelSize == 0 {
+			return nil, nil, fmt.Errorf("parcel size cannot be zero")
+		}
+
+		mkt, err := dex.NewMarketInfoFromSymbols(baseConf.Symbol, quoteConf.Symbol,
+			mktConf.LotSize, mktConf.RateStep, mktConf.Duration, mktConf.ParcelSize, mktConf.MBBuffer)
+		if err != nil {
+			return nil, nil, err
+		}
+		markets = append(markets, mkt)
+	}
+
+	if len(unused) > 0 {
+		assetKeys := make([]string, 0, len(unused))
+		for k := range unused {
+			assetKeys = append(assetKeys, k)
+		}
+		return nil, nil, fmt.Errorf("unused assets %+v", assetKeys)
+	}
+
+	return markets, assets, nil
+}
+
 // DBConf groups the database configuration parameters.
 type DBConf struct {
 	DBName       string
@@ -74,6 +247,141 @@ type DBConf struct {
 	ShowPGConfig bool
 }
 
+// ValidateConfigFile validates the market+assets configuration file.
+// ValidateConfigFile prints information to stdout. An error is returned for any
+// configuration errors.
+func ValidateConfigFile(cfgPath string, net dex.Network, log dex.Logger) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	registeredAssets := asset.Assets()
+	coinpapAssets := make([]*fiatrates.CoinpaprikaAsset, 0, len(registeredAssets))
+	for _, a := range registeredAssets {
+		coinpapAssets = append(coinpapAssets, &fiatrates.CoinpaprikaAsset{
+			AssetID: a.AssetID,
+			Name:    a.Name,
+			Symbol:  a.Symbol,
+		})
+	}
+	fiatRates := fiatrates.FetchCoinpaprikaRates(ctx, coinpapAssets, dex.StdOutLogger("CPAP", dex.LevelInfo))
+
+	log.Debugf("Loaded %d fiat rates from coinpaprika", len(fiatRates))
+
+	markets, assets, err := LoadConfig(net, cfgPath)
+	if err != nil {
+		return fmt.Errorf("error loading config file at %q: %w", cfgPath, err)
+	}
+
+	log.Debugf("Loaded %d markets and %d assets from configuration", len(markets), len(assets))
+
+	var failures []string
+
+	type parsedAsset struct {
+		*Asset
+		unit        string
+		minLotSize  uint64
+		minBondSize uint64
+		fiatRate    float64
+		cFactor     float64
+		ui          *dex.UnitInfo
+	}
+	parsedAssets := make(map[uint32]*parsedAsset, len(assets))
+
+	printSuccess := func(s string, a ...interface{}) {
+		fmt.Printf(s+"\n", a...)
+	}
+
+	for _, a := range assets {
+		if dex.TokenSymbol(a.Symbol) == "dextt" {
+			continue
+		}
+
+		assetID, ok := dex.BipSymbolID(a.Symbol)
+		if !ok {
+			return fmt.Errorf("no asset ID found for symbol %q", a.Symbol)
+		}
+
+		minLotSize, minBondSize, found := asset.Minimums(assetID, a.MaxFeeRate)
+		if !found {
+			return fmt.Errorf("no asset registered for %s (%d)", a.Symbol, assetID)
+		}
+
+		ui, err := asset.UnitInfo(assetID)
+		if err != nil {
+			return fmt.Errorf("error getting unit info for %s: %w", a.Symbol, err)
+		}
+
+		fiatRate, found := fiatRates[assetID]
+		if !found {
+			return fmt.Errorf("no fiat exchange rate found for asset %s (%d)", dex.BipIDSymbol(assetID), assetID)
+		}
+
+		unit := ui.Conventional.Unit
+		minLotSizeUSD := float64(minLotSize) / float64(ui.Conventional.ConversionFactor) * fiatRate
+		minBondSizeUSD := float64(minLotSize) / float64(ui.Conventional.ConversionFactor) * fiatRate
+		parsedAssets[assetID] = &parsedAsset{
+			Asset:       a,
+			unit:        unit,
+			minLotSize:  minLotSize,
+			minBondSize: minBondSize,
+			fiatRate:    fiatRate,
+			cFactor:     float64(ui.Conventional.ConversionFactor),
+			ui:          &ui,
+		}
+		printSuccess(
+			"Calculated for %s: min lot size = %s %s (%d %s) (~ %.4f USD), min bond size = %s %s (%d %s) (%.4f USD)",
+			a.Symbol, ui.ConventionalString(minLotSize), unit, minLotSize, ui.AtomicUnit, minLotSizeUSD,
+			ui.ConventionalString(minBondSize), unit, minBondSize, ui.AtomicUnit, minBondSizeUSD,
+		)
+	}
+
+	for _, a := range parsedAssets {
+		if a.BondAmt == 0 {
+			continue
+		}
+		if a.BondAmt < a.minBondSize {
+			failures = append(failures, fmt.Sprintf("Bond amount for %s is too small. %d < %d", a.Symbol, a.BondAmt, a.minBondSize))
+		} else {
+			printSuccess("Bond size for %s passes: %d >= %d", a.Symbol, a.BondAmt, a.minBondSize)
+		}
+	}
+
+	for _, m := range markets {
+		// Check lot size.
+		b, q := parsedAssets[m.Base], parsedAssets[m.Quote]
+		if b == nil || q == nil {
+			continue // should be dextt pair
+		}
+		const quoteConversionBuffer = 1.5 // Buffer for accomodating rate changes.
+		minFromQuote := uint64(math.Round(float64(q.minLotSize) / q.cFactor * q.fiatRate / b.fiatRate * b.cFactor * quoteConversionBuffer))
+		// Slightly different messaging if we're limited by the conversion from
+		// the quote asset minimums.
+		if minFromQuote > b.minLotSize {
+			if m.LotSize < minFromQuote {
+				failures = append(failures, fmt.Sprintf("Lot size for %s (converted from quote asset %s) is too low. %d < %d", m.Name, q.unit, m.LotSize, minFromQuote))
+			} else {
+				printSuccess("Market %s lot size (converted from quote asset %s) passes: %d >= %d", m.Name, q.unit, m.LotSize, minFromQuote)
+			}
+		} else {
+			if m.LotSize < b.minLotSize {
+				failures = append(failures, fmt.Sprintf("Lot size for %s is too low. %d < %d", m.Name, m.LotSize, b.minLotSize))
+			} else {
+				printSuccess("Market %s lot size passes: %d >= %d", m.Name, m.LotSize, b.minLotSize)
+			}
+		}
+	}
+
+	for _, s := range failures {
+		fmt.Println("FAIL:", s)
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("%d market or asset configuration problems need fixing", len(failures))
+	}
+
+	return nil
+}
+
 // RPCConfig is an alias for the comms Server's RPC config struct.
 type RPCConfig = comms.RPCConfig
 
@@ -82,7 +390,7 @@ type DexConf struct {
 	DataDir          string
 	LogBackend       *dex.LoggerMaker
 	Markets          []*dex.MarketInfo
-	Assets           []*AssetConf
+	Assets           []*Asset
 	Network          dex.Network
 	DBConf           *DBConf
 	BroadcastTimeout time.Duration
@@ -409,7 +717,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			ExternalAddr: cfg.NodeRelayAddr,
 			Dir:          relayDir,
 			Port:         nexusPort,
-			Logger:       dex.StdOutLogger("T", dex.LevelDebug),
+			Logger:       cfg.LogBackend.NewLogger("NR", log.Level()),
 			RelayIDs:     nodeRelayIDs,
 		})
 		if err != nil {
@@ -448,7 +756,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	assetLogger := cfg.LogBackend.Logger("ASSET")
 	txDataSources := make(map[uint32]auth.TxDataSource)
 	feeMgr := NewFeeManager()
-	addAsset := func(assetID uint32, assetConf *AssetConf) error {
+	addAsset := func(assetID uint32, assetConf *Asset) error {
 		symbol := strings.ToLower(assetConf.Symbol)
 
 		assetVer, err := asset.Version(assetID)
@@ -597,7 +905,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	// Add base chain assets before tokens.
-	tokens := make(map[uint32]*AssetConf)
+	tokens := make(map[uint32]*Asset)
 
 	for i, assetConf := range cfg.Assets {
 		assetID := assetIDs[i]

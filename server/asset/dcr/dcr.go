@@ -73,6 +73,25 @@ func (d *Driver) Version() uint32 {
 	return version
 }
 
+// MinBondSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the bond and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinBondSize(maxFeeRate uint64) uint64 {
+	return dexdcr.MinBondSize(maxFeeRate)
+}
+
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexdcr.MinLotSize(maxFeeRate)
+}
+
+// Name is the asset's name.
+func (d *Driver) Name() string {
+	return "Decred"
+}
+
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
 // extended public key. The KeyIndexer will be used for discovering the current
 // child index, and storing the index as new addresses are generated with the

@@ -19,19 +19,9 @@ import (
 
 	"decred.org/dcrdex/client/app"
 	"decred.org/dcrdex/client/asset"
-	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
-	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
-	_ "decred.org/dcrdex/client/asset/dash" // register dash asset
-	_ "decred.org/dcrdex/client/asset/dcr"  // register dcr asset
-	_ "decred.org/dcrdex/client/asset/dgb"  // register dgb asset
-	_ "decred.org/dcrdex/client/asset/doge" // register doge asset
-	_ "decred.org/dcrdex/client/asset/firo" // register firo asset
-	_ "decred.org/dcrdex/client/asset/ltc"  // register ltc asset
-	_ "decred.org/dcrdex/client/asset/zcl"  // register zcl asset
-	_ "decred.org/dcrdex/client/asset/zec"  // register zec asset
-	"decred.org/dcrdex/client/mm"
-
+	_ "decred.org/dcrdex/client/asset/importall"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"

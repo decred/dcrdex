@@ -127,7 +127,7 @@ chmod +x "${DCRDEX_DATA_DIR}/quit"
 cat > "${DCRDEX_DATA_DIR}/run" <<EOF
 #!/usr/bin/env bash
 ${HARNESS_DIR}/genmarkets.sh
-${DCRDEX_DATA_DIR}/dcrdex --appdata=$(pwd) $*; tmux wait-for -S donedex
+${DCRDEX_DATA_DIR}/dcrdex --appdata=$(pwd) \$*; tmux wait-for -S donedex
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/run"
 
