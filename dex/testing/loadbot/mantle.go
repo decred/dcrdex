@@ -69,7 +69,6 @@ func runTrader(t Trader, name string) {
 		return
 	}
 
-	const tradingTier = 100 // ~ 50 DCR
 	maintain := true
 	_, err = m.PostBond(&core.PostBondForm{
 		Addr:         hostAddr,
@@ -734,10 +733,11 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 			Type:    "dogecoindRPC",
 			AssetID: dogeID,
 			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
+				"walletname":   name,
+				"rpcuser":      "user",
+				"rpcpassword":  "pass",
+				"rpcport":      port,
+				"feeratelimit": "40000",
 			},
 		}
 	case dgb:

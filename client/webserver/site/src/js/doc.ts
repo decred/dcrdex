@@ -293,6 +293,7 @@ export default class Doc {
     const convRate = encRate * r / RateEncodingFactor
     const rateStepDigits = log10RateEncodingFactor - Math.floor(Math.log10(rateStepEnc)) -
       Math.floor(Math.log10(bui.conventional.conversionFactor) - Math.log10(qui.conventional.conversionFactor))
+    if (rateStepDigits <= 0) return intFormatter.format(convRate)
     return fullPrecisionFormatter(rateStepDigits).format(convRate)
   }
 
