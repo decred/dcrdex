@@ -14,6 +14,7 @@ import (
 
 	"runtime/debug"
 
+	"decred.org/dcrdex/client/intl"
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/dex/encode"
 	"golang.org/x/text/cases"
@@ -32,7 +33,7 @@ type templates struct {
 	templates    map[string]pageTemplate
 	fs           fs.FS // must contain tmpl files at root
 	reloadOnExec bool
-	dict         map[string]string
+	dict         map[string]*intl.Translation
 	titler       cases.Caser
 
 	addErr error
@@ -81,7 +82,7 @@ func (t *templates) translate(name string) (string, error) {
 
 		var toTitle bool
 		var found bool
-		var replacement string
+		var replacement *intl.Translation
 		if titleKey := strings.TrimPrefix(key, ":title:"); titleKey != key {
 			// Check if there's a value for :title:key. Especially for languages
 			// that do not work well with cases.Caser, e.g zh-cn.
@@ -100,10 +101,10 @@ func (t *templates) translate(name string) (string, error) {
 		}
 
 		if toTitle {
-			replacement = t.titler.String(replacement)
+			replacement.T = t.titler.String(replacement.T)
 		}
 
-		rawTmpl = bytes.ReplaceAll(rawTmpl, token, []byte(replacement))
+		rawTmpl = bytes.ReplaceAll(rawTmpl, token, []byte(replacement.T))
 	}
 
 	return string(rawTmpl), nil

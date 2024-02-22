@@ -949,6 +949,47 @@ func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiLocale(w http.ResponseWriter, r *http.Request) {
+	var lang string
+	if !readPost(w, r, &lang) {
+		return
+	}
+	m, found := localesMap[lang]
+	if !found {
+		s.writeAPIError(w, fmt.Errorf("no locale for language %q", lang))
+		return
+	}
+	resp := make(map[string]string)
+	for translationID, defaultTranslation := range enUS {
+		t, found := m[translationID]
+		if !found {
+			t = defaultTranslation
+		}
+		resp[translationID] = t.T
+	}
+
+	writeJSON(w, resp, s.indent)
+}
+
+func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
+	var lang string
+	if !readPost(w, r, &lang) {
+		return
+	}
+	if err := s.core.SetLanguage(lang); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	s.lang.Store(lang)
+	if err := s.buildTemplates(lang); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiLogin handles the 'login' API request.
 func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
@@ -1512,14 +1553,23 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 
 // apiUser handles the 'user' API request.
 func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
+	var u *core.User
+	if s.isAuthed(r) {
+		u = s.core.User()
+	}
+
 	response := struct {
-		*core.User
-		Authed       bool `json:"authed"`
-		OK           bool `json:"ok"`
-		Experimental bool `json:"experimental"`
+		User         *core.User `json:"user"`
+		Lang         string     `json:"lang"`
+		Langs        []string   `json:"langs"`
+		Inited       bool       `json:"inited"`
+		OK           bool       `json:"ok"`
+		Experimental bool       `json:"experimental"`
 	}{
-		User:         s.core.User(),
-		Authed:       s.isAuthed(r),
+		User:         u,
+		Lang:         s.lang.Load().(string),
+		Langs:        s.langs,
+		Inited:       s.core.IsInitialized(),
 		OK:           true,
 		Experimental: s.experimental,
 	}

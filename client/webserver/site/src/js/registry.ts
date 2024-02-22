@@ -4,7 +4,6 @@ declare global {
     enableLogger: (loggerID: string, enable: boolean) => void
     recordLogger: (loggerID: string, enable: boolean) => void
     dumpLogger: (loggerID: string) => void
-    localeDiscrepancies: () => void
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
     user: () => User
@@ -12,6 +11,7 @@ declare global {
     webkit: any | undefined
     openUrl: (url: string) => void
     sendOSNotification (title: string, body?: string): void
+    clearLocale (): void
   }
 }
 
@@ -338,8 +338,6 @@ export interface User {
   seedgentime: number
   assets: Record<number, SupportedAsset>
   fiatRates: Record<number, number>
-  authed: boolean // added by webserver
-  ok: boolean // added by webserver
   bots: BotReport[]
   net: number
   extensionModeConfig: ExtensionModeConfig
@@ -921,7 +919,7 @@ export interface Application {
   fiatRatesMap: Record<number, number>
   showPopups: boolean
   commitHash: string
-  authed (): boolean
+  authed: boolean
   start (): Promise<void>
   reconnected (): void
   fetchUser (): Promise<User | void>

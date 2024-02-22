@@ -1212,9 +1212,9 @@ export class FeeAssetSelectionForm {
  * setReadyMessage sets an asset's status message on the FeeAssetSelectionForm.
  */
 function setReadyMessage (el: PageElement, asset: SupportedAsset) {
-  if (asset.wallet) el.textContent = intl.prep(intl.WALLET_READY)
-  else if (asset.walletCreationPending) el.textContent = intl.prep(intl.WALLET_PENDING)
-  else el.textContent = intl.prep(intl.SETUP_NEEDED)
+  if (asset.wallet) el.textContent = intl.prep(intl.ID_WALLET_READY)
+  else if (asset.walletCreationPending) el.textContent = intl.prep(intl.ID_WALLET_PENDING)
+  else el.textContent = intl.prep(intl.ID_SETUP_NEEDED)
   el.classList.remove('readygreen', 'setuporange')
   el.classList.add(asset.wallet ? 'readygreen' : 'setuporange')
 }

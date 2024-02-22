@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"decred.org/dcrdex/client/intl"
 	"decred.org/dcrdex/client/webserver/locales"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -83,7 +84,7 @@ func main() {
 
 				var toTitle bool
 				var found bool
-				var replacement string
+				var replacement *intl.Translation
 				if titleKey := strings.TrimPrefix(key, ":title:"); titleKey != key {
 					// Check if there's a value for :title:key. Especially for languages
 					// that do not work well with cases.Caser, e.g zh-cn.
@@ -102,10 +103,10 @@ func main() {
 				}
 
 				if toTitle {
-					replacement = titler.String(replacement)
+					replacement.T = titler.String(replacement.T)
 				}
 
-				localizedTemplates[lang] = bytes.Replace(tmpl, token, []byte(replacement), -1) // Could just do 1
+				localizedTemplates[lang] = bytes.Replace(tmpl, token, []byte(replacement.T), -1) // Could just do 1
 			}
 		}
 

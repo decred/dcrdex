@@ -155,4 +155,8 @@ type DB interface {
 	// SaveDisabledRateSources saves disabled fiat rate sources in the database.
 	// A source name must not contain a comma.
 	SaveDisabledRateSources(disabledSources []string) error
+	// SetLanguage stores the user's chosen language.
+	SetLanguage(lang string) error
+	// Language gets the language stored with SetLanguage.
+	Language() (string, error)
 }
