@@ -126,6 +126,7 @@ export const ID_RESERVES_DEFICIT_MSG = 'RESERVES_DEFICIT_MSG'
 export const ID_BOND_RESERVES = 'BOND_RESERVES'
 export const ID_BOND_RESERVES_MSG = 'BOND_RESERVES_MSG'
 export const ID_SHIELDED = 'SHIELDED'
+export const ID_TRANSPARENT = 'TRANSPARENT'
 export const ID_SHIELDED_MSG = 'SHIELDED_MSG'
 export const ID_ORDER = 'ORDER'
 export const ID_LOCKED_ORDER_BAL_MSG = 'LOCKED_ORDER_BAL_MSG'
@@ -315,6 +316,7 @@ export const enUS: Locale = {
   [ID_BOND_RESERVES]: 'Bond Reserves',
   [ID_BOND_RESERVES_MSG]: 'Funds reserved to cover the expenses associated with bond maintenance',
   [ID_SHIELDED]: 'Shielded',
+  [ID_TRANSPARENT]: 'Transparent',
   [ID_SHIELDED_MSG]: 'Total funds kept shielded',
   [ID_ORDER]: 'Order',
   [ID_LOCKED_ORDER_BAL_MSG]: 'Funds locked in unmatched orders',

@@ -15,10 +15,6 @@ body.dark {
       }
     }
 
-    #stakingBox {
-      border-color: $dark_border_color;
-    }
-
     table#vspPickerTable,
     table#ticketHistoryTable {
       border: 1px solid $dark_border_color;
@@ -36,23 +32,36 @@ body.dark {
     #purchaseTicketsErrBox {
       background-color: $dark_body_bg;
     }
-  }
 
-  #assetSelect {
-    .icon-select {
-      img[data-tmpl=parentImg] {
-        background-color: $dark_body_bg;
-        border-color: $dark_body_bg;
-      }
+    #assetSelect {
+      .icon-select {
+        img[data-tmpl=parentImg] {
+          background-color: $dark_body_bg;
+          border-color: $dark_body_bg;
+        }
 
-      &.selected,
-      &:hover {
-        background-color: $dark_body_bg;
+        &.selected,
+        &:hover {
+          background-color: $dark_body_bg;
+        }
       }
     }
-  }
 
-  #marketsOverviewBox, #orderActivityBox, #txHistoryBox {
-    border-color: $dark-border-color;
+    .positive-tx {
+      color: lime;
+    }
+
+    #secondColumn {
+      & > .column > div {
+        border-bottom: 1px solid $dark-border-color;
+      }
+
+      table {
+        tbody > tr:not(:last-child),
+        thead > tr {
+          border-bottom: 1px solid $dark-border-color;
+        }
+      }
+    }
   }
 }
