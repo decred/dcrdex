@@ -187,11 +187,6 @@ func getBlockchainInfo(c rpcCaller) (*btc.GetBlockchainInfoResult, error) {
 	return chainInfo, nil
 }
 
-func getWalletInfo(c rpcCaller) (*btc.GetWalletInfoResult, error) {
-	wi := new(btc.GetWalletInfoResult)
-	return wi, c.CallRPC("getwalletinfo", nil, wi)
-}
-
 func getBestBlockHeader(c rpcCaller) (*btc.BlockHeader, error) {
 	tipHash, err := getBestBlockHash(c)
 	if err != nil {
@@ -322,19 +317,6 @@ func getZecTransaction(c rpcCaller, txHash *chainhash.Hash) (*dexzec.Tx, error) 
 	}
 
 	return dexzec.DeserializeTx(txB)
-}
-
-func getAddressInfo(c rpcCaller, addrStr string, method string) (*btc.GetAddressInfoResult, error) {
-	ai := new(btc.GetAddressInfoResult)
-	return ai, c.CallRPC(method, []any{addrStr}, ai)
-}
-
-func ownsAddress(c rpcCaller, addrStr string) (bool, error) {
-	ai, err := getAddressInfo(c, addrStr, "validateaddress")
-	if err != nil {
-		return false, err
-	}
-	return ai.IsMine, nil
 }
 
 func translateRPCCancelErr(err error) error {

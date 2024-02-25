@@ -76,10 +76,11 @@ type registrationTxFeeForm struct {
 }
 
 type sendTxFeeForm struct {
-	Addr     string  `json:"addr"`
-	Value    uint64  `json:"value"`
-	Subtract bool    `json:"subtract"`
-	AssetID  *uint32 `json:"assetID,omitempty"`
+	Addr        string  `json:"addr"`
+	Value       uint64  `json:"value"`
+	Subtract    bool    `json:"subtract"`
+	MaxWithdraw bool    `json:"maxWithdraw"`
+	AssetID     *uint32 `json:"assetID,omitempty"`
 }
 
 type walletConfig struct {

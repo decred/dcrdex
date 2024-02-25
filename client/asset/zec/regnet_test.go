@@ -26,6 +26,13 @@ const (
 	testnetOverwinterActivationHeight = 207500
 )
 
+var tZEC = &dex.Asset{
+	ID:       0,
+	Symbol:   "zec",
+	Version:  version,
+	SwapConf: 1,
+}
+
 func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
 		NewWallet: NewWallet,

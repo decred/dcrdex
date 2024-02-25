@@ -321,8 +321,8 @@ tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/betawallet ${D
 tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
 
-echo "Generating 400 blocks for alpha"
-tmux send-keys -t $SESSION:4 "./alpha generate 400${DONE}" C-m\; ${WAIT}
+echo "Generating 600 blocks for alpha"
+tmux send-keys -t $SESSION:4 "./alpha generate 600${DONE}" C-m\; ${WAIT}
 
 ################################################################################
 # Send gamma and delta some coin
@@ -349,8 +349,8 @@ echo "delta address ${DELTA_ADDR}"
 echo "gamma address ${GAMMA_ADDR}"
 
 # Send the lazy wallets some dough.
-echo "Sending 174 ZEC to beta in 8 blocks"
-for i in 100 18 5 7 1 15 3 25
+echo "Sending 74 ZEC to beta in 8 blocks"
+for i in 18 5 7 1 15 3 25
 do
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
