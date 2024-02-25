@@ -4,20 +4,16 @@
 :: 
 :: See Build-Windows.md for more information.
 
+call pkg\env-windows.cmd
 
-set buildDir=%cd%\build
-set libDir=%buildDir%\libs\webview2
 if not exist "%libDir%" (
     mkdir %libDir%
 )
 
-set outputDir=%buildDir%\windows
 if exist "%outputDir%" (
     rd /s /q %outputDir%
 )
 mkdir %outputDir%
-
-set exeFile=%outputDir%\dexc-desktop.exe
 
 set sitePath=..\..\webserver\site
 set workDir=%cd%
@@ -48,8 +44,7 @@ if %ERRORLEVEL% NEQ 0 goto ERROR
 echo Build completed
 copy /Y %libDir%\build\native\x64\WebView2Loader.dll %outputDir%
 
-echo Signing %exeFile%
-call pkg\sign-windows.cmd %exeFile%
+
 
 echo The WebView2Loader.dll file should be included with dexc-desktop.exe
 exit /b 0
