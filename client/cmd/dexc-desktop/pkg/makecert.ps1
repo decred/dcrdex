@@ -1,6 +1,9 @@
 # This script creates a self signed certificate to sign the DCRDEX executable
 # and installer, suitable for testing.
 
+# If the default PowerShell Execution Policy is set to Restricted, run this using:
+# powershell -ExecutionPolicy Bypass -File pkg\makecert.ps1
+
 # Set variables
 $certSubject = "CN=DCRDEXCodeSigningCertificate"
 $certPassword = "YourPassword"

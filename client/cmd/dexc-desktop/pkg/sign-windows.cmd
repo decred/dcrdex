@@ -4,7 +4,7 @@
 :: Usage:
 :: sign-windows.cmd <file>
 
-if not "%1"=="" (
+if "%1"=="" (
     echo Usage: sign-windows.cmd ^<file^>
     exit /b 1
 )

@@ -2,6 +2,8 @@
 
 @echo off
 
+call pkg\env-windows.cmd
+
 :: Run build
 call pkg\build-windows.cmd
 
@@ -14,3 +16,6 @@ if %errorlevel% equ 0 (
 ) else (
     echo Error occurred during build.
 )
+
+echo Signing %exeFile%
+call pkg\sign-windows.cmd %exeFile%
