@@ -1631,7 +1631,7 @@ func TestPokes(t *testing.T) {
 	}
 
 	if err := boltdb.SavePokes(pokes); err != nil {
-		t.Fatalf("Save3Pokes error: %v", err)
+		t.Fatalf("SavePokes error: %v", err)
 	}
 
 	rePokes, err := boltdb.LoadPokes()
