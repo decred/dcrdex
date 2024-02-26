@@ -81,6 +81,8 @@ func (c *Core) Broadcast(n Notification) {
 func (c *Core) notify(n Notification) {
 	if n.Severity() >= db.Success {
 		c.db.SaveNotification(n.DBNote())
+	} else if n.Severity() == db.Poke {
+		c.pokesCache.add(n.DBNote())
 	}
 
 	c.logNote(n)

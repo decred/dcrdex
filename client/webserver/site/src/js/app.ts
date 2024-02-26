@@ -492,6 +492,7 @@ export default class Application {
     if (!this.checkResponse(res)) return console.error('failed to fetch notes:', res?.msg || String(res))
     res.notes.reverse()
     this.setNotes(res.notes)
+    this.setPokes(res.pokes)
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */
@@ -564,6 +565,18 @@ export default class Application {
     Doc.empty(this.page.noteList)
     for (let i = 0; i < notes.length; i++) {
       this.prependNoteElement(notes[i])
+    }
+  }
+
+  /*
+   * setPokes sets the current poke cache and populates the pokes display.
+   */
+  setPokes (pokes: CoreNote[]) {
+    this.log('pokes', 'setPokes', pokes)
+    this.pokes = []
+    Doc.empty(this.page.pokeList)
+    for (let i = 0; i < pokes.length; i++) {
+      this.prependPokeElement(pokes[i])
     }
   }
 

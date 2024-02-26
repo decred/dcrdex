@@ -551,6 +551,8 @@ func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
 func (tdb *TDB) BackupTo(dst string, overwrite, compact bool) error { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error)     { return nil, nil }
+func (tdb *TDB) SavePokes([]*db.Notification) error                 { return nil }
+func (tdb *TDB) LoadPokes() ([]*db.Notification, error)             { return nil, nil }
 
 func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
 	if tdb.setCredsErr != nil {
@@ -1359,6 +1361,7 @@ func newTestRig() *testRig {
 
 			fiatRateSources: make(map[string]*commonRateSource),
 			notes:           make(chan asset.WalletNotification, 128),
+			pokesCache:      newPokesCache(pokesCapacity),
 		},
 		db:      tdb,
 		queue:   queue,
@@ -10944,5 +10947,170 @@ func TestNetworkFeeRate(t *testing.T) {
 	})
 	if r := rig.core.NetworkFeeRate(assetID); r != serverFeeRate {
 		t.Fatalf("Server fee rate not working. %d != %d", r, serverFeeRate)
+	}
+}
+
+func TestPokesCacheInit(t *testing.T) {
+	tPokes := []*db.Notification{
+		{DetailText: "poke 1"},
+		{DetailText: "poke 2"},
+		{DetailText: "poke 3"},
+		{DetailText: "poke 4"},
+		{DetailText: "poke 5"},
+	}
+	{
+		pokesCapacity := 6
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+
+		// Check if the cache is initialized correctly
+		if len(c.cache) != 5 {
+			t.Errorf("Expected cache length %d, got %d", len(tPokes), len(c.cache))
+		}
+
+		if c.cursor != 5 {
+			t.Errorf("Expected cursor %d, got %d", len(tPokes)%pokesCapacity, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		for i, poke := range tPokes {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+	{
+		pokesCapacity := 4
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+
+		// Check if the cache is initialized correctly
+		if len(c.cache) != 1 {
+			t.Errorf("Expected cache length %d, got %d", 1, len(c.cache))
+		}
+
+		if c.cursor != 1 {
+			t.Errorf("Expected cursor %d, got %d", 1, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		for i, poke := range tPokes[:len(tPokes)-pokesCapacity] {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+}
+
+func TestPokesAdd(t *testing.T) {
+	tPokes := []*db.Notification{
+		{DetailText: "poke 1"},
+		{DetailText: "poke 2"},
+		{DetailText: "poke 3"},
+		{DetailText: "poke 4"},
+		{DetailText: "poke 5"},
+	}
+	tNewPoke := &db.Notification{
+		DetailText: "poke 6",
+	}
+	{
+		pokesCapacity := 6
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		c.add(tNewPoke)
+
+		// Check if the cache is updated correctly
+		if len(c.cache) != 6 {
+			t.Errorf("Expected cache length %d, got %d", len(tPokes), len(c.cache))
+		}
+
+		if c.cursor != 0 {
+			t.Errorf("Expected cursor %d, got %d", 0, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		tAllPokes := append(tPokes, tNewPoke)
+		for i, poke := range tAllPokes {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+	{
+		pokesCapacity := 5
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		c.add(tNewPoke)
+
+		// Check if the cache is updated correctly
+		if len(c.cache) != pokesCapacity {
+			t.Errorf("Expected cache length %d, got %d", pokesCapacity, len(c.cache))
+		}
+
+		if c.cursor != 1 {
+			t.Errorf("Expected cursor %d, got %d", 1, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		tAllPokes := make([]*db.Notification, 0)
+		tAllPokes = append(tAllPokes, tNewPoke)
+		tAllPokes = append(tAllPokes, tPokes[1:]...)
+		for i, poke := range tAllPokes {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+}
+
+func TestPokesCachePokes(t *testing.T) {
+	tPokes := []*db.Notification{
+		{TimeStamp: 1, DetailText: "poke 1"},
+		{TimeStamp: 2, DetailText: "poke 2"},
+		{TimeStamp: 3, DetailText: "poke 3"},
+		{TimeStamp: 4, DetailText: "poke 4"},
+		{TimeStamp: 5, DetailText: "poke 5"},
+	}
+	{
+		pokesCapacity := 6
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		pokes := c.pokes()
+
+		// Check if the result length is correct
+		if len(pokes) != len(tPokes) {
+			t.Errorf("Expected pokes length %d, got %d", len(tPokes), len(pokes))
+		}
+
+		// Check if the result contains the correct pokes
+		for i, poke := range tPokes {
+			if pokes[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, pokes[i])
+			}
+		}
+	}
+	{
+		pokesCapacity := 5
+		tNewPoke := &db.Notification{
+			TimeStamp:  6,
+			DetailText: "poke 6",
+		}
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		c.add(tNewPoke)
+		pokes := c.pokes()
+
+		// Check if the result length is correct
+		if len(pokes) != pokesCapacity {
+			t.Errorf("Expected cache length %d, got %d", 1, len(pokes))
+		}
+
+		tAllPokes := append(tPokes[1:], tNewPoke)
+		// Check if the result contains the correct pokes
+		for i, poke := range tAllPokes {
+			if pokes[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, pokes[i])
+			}
+		}
 	}
 }

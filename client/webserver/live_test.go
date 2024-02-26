@@ -699,8 +699,8 @@ func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, sub
 func (c *TCore) Login([]byte) error  { return nil }
 func (c *TCore) IsInitialized() bool { return c.inited }
 func (c *TCore) Logout() error       { return nil }
-func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
-	return nil, nil
+func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
+	return nil, nil, nil
 }
 
 var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "dextt.eth"}

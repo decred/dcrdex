@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,6 +85,10 @@ const (
 
 	// seedLen is the length of the generated app seed used for app protection.
 	seedLen = 64
+
+	// pokesCapacity is the maximum number of poke notifications that
+	// will be cached.
+	pokesCapacity = 100
 )
 
 var (
@@ -1371,6 +1376,54 @@ func (dc *dexConnection) bestBookFeeSuggestion(assetID uint32) uint64 {
 	return 0
 }
 
+type pokesCache struct {
+	sync.RWMutex
+	cache         []*db.Notification
+	cursor        int
+	pokesCapacity int
+}
+
+func newPokesCache(pokesCapacity int) *pokesCache {
+	return &pokesCache{
+		pokesCapacity: pokesCapacity,
+	}
+}
+
+func (c *pokesCache) add(poke *db.Notification) {
+	c.Lock()
+	defer c.Unlock()
+
+	if len(c.cache) >= c.pokesCapacity {
+		c.cache[c.cursor] = poke
+	} else {
+		c.cache = append(c.cache, poke)
+	}
+	c.cursor = (c.cursor + 1) % c.pokesCapacity
+}
+
+func (c *pokesCache) pokes() []*db.Notification {
+	c.RLock()
+	defer c.RUnlock()
+
+	pokes := make([]*db.Notification, len(c.cache))
+	copy(pokes, c.cache)
+	sort.Slice(pokes, func(i, j int) bool {
+		return pokes[i].TimeStamp < pokes[j].TimeStamp
+	})
+	return pokes
+}
+
+func (c *pokesCache) init(pokes []*db.Notification) {
+	c.Lock()
+	defer c.Unlock()
+
+	if len(pokes) > c.pokesCapacity {
+		pokes = pokes[:len(pokes)-c.pokesCapacity]
+	}
+	c.cache = pokes
+	c.cursor = len(pokes) % c.pokesCapacity
+}
+
 // blockWaiter is a message waiting to be stamped, signed, and sent once a
 // specified coin has the requisite confirmations. The blockWaiter is similar to
 // dcrdex/server/blockWaiter.Waiter, but is different enough to warrant a
@@ -1482,6 +1535,8 @@ type Core struct {
 	pendingWallets    map[uint32]bool
 
 	notes chan asset.WalletNotification
+
+	pokesCache *pokesCache
 }
 
 // New is the constructor for a new Core.
@@ -1672,6 +1727,10 @@ fetchers:
 	}()
 
 	c.wg.Wait() // block here until all goroutines except DB complete
+
+	if err := c.db.SavePokes(c.pokes()); err != nil {
+		c.log.Errorf("Error saving pokes: %v", err)
+	}
 
 	// Stop the DB after dexConnections and other goroutines are done.
 	stopDB()
@@ -4872,12 +4931,17 @@ func (c *Core) connectWallets() {
 }
 
 // Notifications loads the latest notifications from the db.
-func (c *Core) Notifications(n int) ([]*db.Notification, error) {
+func (c *Core) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
 	notes, err := c.db.NotificationsN(n)
 	if err != nil {
-		return nil, fmt.Errorf("error getting notifications: %w", err)
+		return nil, nil, fmt.Errorf("error getting notifications: %w", err)
 	}
-	return notes, nil
+	return notes, c.pokes(), nil
+}
+
+// pokes returns a time-ordered copy of the pokes cache.
+func (c *Core) pokes() []*db.Notification {
+	return c.pokesCache.pokes()
 }
 
 func (c *Core) recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) error {
@@ -7406,6 +7470,14 @@ func (c *Core) initialize() error {
 	accts, err := c.db.Accounts()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve accounts from database: %w", err)
+	}
+
+	pokes, err := c.db.LoadPokes()
+	c.pokesCache = newPokesCache(pokesCapacity)
+	if err != nil {
+		c.log.Errorf("Error loading pokes from db: %v", err)
+	} else {
+		c.pokesCache.init(pokes)
 	}
 
 	// Start connecting to DEX servers.

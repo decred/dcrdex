@@ -910,7 +910,7 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 		return usage(notificationsRoute, err)
 	}
 
-	notes, err := s.core.Notifications(numNotes)
+	notes, _, err := s.core.Notifications(numNotes)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to handle notification: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCNotificationsError, errMsg)

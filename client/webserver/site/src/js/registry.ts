@@ -944,6 +944,7 @@ export interface Application {
   updateBondConfs (dexAddr: string, coinID: string, confs: number, assetID: number): void
   handleBondNote (note: BondNote): void
   setNotes (notes: CoreNote[]): void
+  setPokes(pokes: CoreNote[]): void
   notify (note: CoreNote): void
   log (loggerID: string, ...msg: any): void
   prependPokeElement (note: CoreNote): void
