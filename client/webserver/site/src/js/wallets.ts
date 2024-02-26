@@ -1593,7 +1593,7 @@ export default class WalletsPage extends BasePage {
     }
 
     addPrimaryBalance(intl.prep(intl.ID_AVAILABLE_TITLE), bal.available, '')
-    if (bal.other.Shielded !== undefined) {
+    if (bal.other?.Shielded !== undefined) {
       const transparent = bal.available - bal.other.Shielded.amt
       addSubBalance(intl.prep(intl.ID_TRANSPARENT), transparent)
       addSubBalance(intl.prep(intl.ID_SHIELDED), bal.other.Shielded.amt)
