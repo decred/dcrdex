@@ -656,6 +656,13 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinLotSize(maxFeeRate, true)
+}
+
 type CustomSPVWalletConstructor func(settings map[string]string, params *chaincfg.Params) (BTCWallet, error)
 
 // customSPVWalletConstructors are functions for setting up custom

@@ -554,6 +554,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		recoveryCfg.NumInternalAddresses, chainParams)
 }
 
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexdcr.MinLotSize(maxFeeRate)
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
 }

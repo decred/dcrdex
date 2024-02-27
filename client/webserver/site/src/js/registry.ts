@@ -96,6 +96,7 @@ export interface Market {
   spot: Spot | undefined
   atomToConv: number
   inflight: InFlightOrder[]
+  minimumRate: number
 }
 
 export interface InFlightOrder extends Order {

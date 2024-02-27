@@ -109,6 +109,13 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinLotSize(maxFeeRate, true)
+}
+
 // Exists checks the existence of the wallet. Part of the Creator interface, so
 // only used for wallets with WalletDefinition.Seeded = true.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {

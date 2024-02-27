@@ -689,10 +689,6 @@ func (m *Market) Quote() uint32 {
 	return m.marketInfo.Quote
 }
 
-func (m *Market) MinimumRate() uint64 {
-	return m.minimumRate
-}
-
 // OrderFeed provides a new order book update channel. Channels provided before
 // the market starts and while a market is running are both valid. When the
 // market stops, channels are closed (invalidated), and new channels should be

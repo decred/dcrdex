@@ -296,3 +296,22 @@ func WalletDef(assetID uint32, walletType string) (*WalletDefinition, error) {
 	}
 	return wd, nil
 }
+
+// MinimumLotSize returns the minimimum lot size for a registered asset.
+func MinimumLotSize(assetID uint32, maxFeeRate uint64) (minLotSize uint64, found bool) {
+	baseChainID := assetID
+	if token, is := tokens[assetID]; is {
+		baseChainID = token.ParentID
+	}
+	drv, found := drivers[baseChainID]
+	if !found {
+		return 0, false
+	}
+	m, is := drv.(interface {
+		MinLotSize(maxFeeRate uint64) uint64
+	})
+	if !is {
+		return 1, true
+	}
+	return m.MinLotSize(maxFeeRate), true
+}

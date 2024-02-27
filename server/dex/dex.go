@@ -1101,7 +1101,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		// quote_dust = base_lot * min_rate / rate_encoding_factor
 		// => min_rate = quote_dust * rate_encoding_factor * base_lot
 		quoteMinLotSize, _, _ := asset.Minimums(mktInf.Quote, q.Asset.MaxFeeRate)
-		minRate := uint64(math.Ceil(float64(quoteMinLotSize) * calc.RateEncodingFactor / float64(mktInf.LotSize)))
+		minRate := calc.MinimumMarketRate(mktInf.LotSize, quoteMinLotSize)
 
 		mkt, err := market.NewMarket(&market.Config{
 			MarketInfo:      mktInf,
@@ -1172,7 +1172,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			MarketStatus: msgjson.MarketStatus{
 				StartEpoch: uint64(startEpochIdx),
 			},
-			MinimumRate: mkt.MinimumRate(),
 		})
 	}
 
