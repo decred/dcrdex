@@ -549,6 +549,10 @@ func (dm *DEX) handleDEXConfig(any) (any, error) {
 	return dm.configResp.configEnc, nil
 }
 
+func (dm *DEX) handleHealthFlag(any) (any, error) {
+	return dm.Healthy(), nil
+}
+
 // FeeCoiner describes a type that can check a transaction output, namely a fee
 // payment, for a particular asset.
 type FeeCoiner interface {
@@ -1212,6 +1216,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	server.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+	server.RegisterHTTP(msgjson.HealthRoute, dexMgr.handleHealthFlag)
 
 	mux := server.Mux()
 
@@ -1222,6 +1227,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 		rr.Use(server.LimitRate)
 		rr.Get("/config", server.NewRouteHandler(msgjson.ConfigRoute))
+		rr.Get("/healthy", server.NewRouteHandler(msgjson.HealthRoute))
 		rr.Get("/spots", server.NewRouteHandler(msgjson.SpotsRoute))
 		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}", server.NewRouteHandler(msgjson.CandlesRoute))
 		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}/{count}", server.NewRouteHandler(msgjson.CandlesRoute))
@@ -1461,6 +1467,20 @@ func (dm *DEX) BookOrders(base, quote uint32) ([]*order.LimitOrder, error) {
 // EpochOrders returns epoch orders for market with base and quote.
 func (dm *DEX) EpochOrders(base, quote uint32) ([]order.Order, error) {
 	return dm.storage.EpochOrders(base, quote)
+}
+
+// Healthy returns the health status of the DEX.  This is true if
+// the storage does not report an error and the BTC backend is synced.
+func (dm *DEX) Healthy() bool {
+	if dm.storage.LastErr() != nil {
+		return false
+	}
+	if assetID, found := dex.BipSymbolID("btc"); found {
+		if synced, err := dm.assets[assetID].Backend.Synced(); err != nil || !synced {
+			return false
+		}
+	}
+	return true
 }
 
 // MatchData embeds db.MatchData with decoded swap transaction coin IDs.
