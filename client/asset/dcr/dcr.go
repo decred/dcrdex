@@ -5710,7 +5710,8 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 			blockToQuery = tip - blockQueryBuffer
 		}
 
-		recentTxs, err := dcr.wallet.ListSinceBlock(ctx, int32(blockToQuery), int32(tip), int32(tip))
+		const rangeEndMempool = -1
+		recentTxs, err := dcr.wallet.ListSinceBlock(ctx, int32(blockToQuery), rangeEndMempool, int32(tip))
 		if err != nil {
 			dcr.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
 			recentTxs = nil
@@ -5748,7 +5749,12 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 				}
 			}
 
-			dcr.addTxToHistory(txType, txHash, toAtoms(tx.Amount), fee, nil, nil, true)
+			var addr *string
+			if txType == asset.Receive {
+				addr = &tx.Address
+			}
+
+			dcr.addTxToHistory(txType, txHash, toAtoms(tx.Amount), fee, nil, addr, true)
 		}
 
 		for _, tx := range recentTxs {
@@ -6071,6 +6077,10 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			if walletTip == nil {
 				// Mempool tx seen.
 				dcr.emitBalance()
+				dcr.tipMtx.RLock()
+				tipHeight := uint64(dcr.currentTip.height)
+				dcr.tipMtx.RUnlock()
+				go dcr.checkPendingTxs(ctx, tipHeight)
 				continue
 			}
 			if queuedBlock != nil && walletTip.height >= queuedBlock.height {
