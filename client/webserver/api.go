@@ -627,7 +627,7 @@ func (s *WebServer) apiAddressUsed(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:   true,
 		Used: used,
-	}, s.indent)
+	})
 }
 
 // apiConnectWallet is the handler for the '/connectwallet' API request.

@@ -4497,7 +4497,7 @@ func (btc *baseWallet) NewAddress() (string, error) {
 
 // AddressUsed checks if a wallet address has been used.
 func (btc *baseWallet) AddressUsed(addrStr string) (bool, error) {
-	return btc.node.addressUsed(addrStr)
+	return btc.node.AddressUsed(addrStr)
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from

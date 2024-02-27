@@ -1181,7 +1181,7 @@ func SearchBlockForRedemptions(
 	return
 }
 
-func (wc *rpcClient) addressUsed(addr string) (bool, error) {
+func (wc *rpcClient) AddressUsed(addr string) (bool, error) {
 	var recv float64
 	const minConf = 0
 	if err := wc.call(methodGetReceivedByAddress, []any{addr, minConf}, &recv); err != nil {

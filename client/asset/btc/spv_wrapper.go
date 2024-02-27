@@ -1316,7 +1316,7 @@ func (w *spvWallet) GetWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 	*/
 }
 
-func (w *spvWallet) addressUsed(addrStr string) (bool, error) {
+func (w *spvWallet) AddressUsed(addrStr string) (bool, error) {
 	addr, err := w.decodeAddr(addrStr, w.chainParams)
 	if err != nil {
 		return false, fmt.Errorf("error decoding address: %w", err)
