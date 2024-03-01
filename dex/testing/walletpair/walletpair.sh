@@ -5,8 +5,8 @@ SESSION="walletpair"
 
 
 DEXC_ARGS=${@}
-SIMNET="0"
-TESTNET="0"
+SIMNET=""
+TESTNET=""
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --simnet)
