@@ -301,7 +301,7 @@ func (s *simulationTest) startClients() error {
 		<-c.core.Ready()
 
 		// init app
-		err = c.core.InitializeClient(c.appPass, nil)
+		_, err = c.core.InitializeClient(c.appPass, nil)
 		if err != nil {
 			return err
 		}

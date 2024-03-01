@@ -31,6 +31,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/client/mnemonic"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -617,10 +618,14 @@ func (c *TCore) Exchange(host string) (*core.Exchange, error) {
 	return exchange, nil
 }
 
-func (c *TCore) InitializeClient(pw, seed []byte) error {
+func (c *TCore) InitializeClient(pw []byte, seed *string) (string, error) {
 	randomDelay()
 	c.inited = true
-	return nil
+	var mnemonicSeed string
+	if seed == nil {
+		_, mnemonicSeed = mnemonic.New()
+	}
+	return mnemonicSeed, nil
 }
 func (c *TCore) GetDEXConfig(host string, certI any) (*core.Exchange, error) {
 	if xc := tExchanges[host]; xc != nil {
@@ -1722,7 +1727,7 @@ func (c *TCore) ChangeAppPass(appPW, newAppPW []byte) error {
 	return nil
 }
 
-func (c *TCore) ResetAppPass(newAppPW, seed []byte) error {
+func (c *TCore) ResetAppPass(newAppPW []byte, seed string) error {
 	return nil
 }
 
@@ -1957,9 +1962,8 @@ func (c *TCore) runRandomNotes() {
 	}
 }
 
-func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
-	b, _ := hex.DecodeString("ea9790d6b4ced3069b9fba7562904d7cfa68cb210600a76ede6f86dac1c3d18d5089e4c53543ef433f5ba4886465ab927b0231c30e8baa13f6d9c8dec1668821")
-	return b, nil
+func (c *TCore) ExportSeed(pw []byte) (string, error) {
+	return "copper life simple hello fit manage dune curve argue gadget erosion fork theme chase broccoli", nil
 }
 func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
@@ -2226,8 +2230,8 @@ func TestServer(t *testing.T) {
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
-	initialize := true
-	register := true
+	initialize := false
+	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = false

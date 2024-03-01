@@ -14,8 +14,14 @@ import {
   User,
   WalletInfo,
   WalletDefinition,
-  ConfigOption
+  ConfigOption,
+  APIResponse
 } from './registry'
+
+interface InitResponse extends APIResponse {
+  hosts: string[]
+  mnemonic?: string
+}
 
 /*
  * InitPage is the page handler for the /init view. InitPage is essentially a
@@ -42,27 +48,27 @@ export default class InitPage extends BasePage {
   initForm: AppInitForm
   quickConfigForm: QuickConfigForm
   seedBackupForm: SeedBackupForm
-  seedProvided: boolean
+  mnemonic?: string
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
     const page = this.page = Doc.idDescendants(body)
-    this.initForm = new AppInitForm(page.appPWForm, (pw: string, hosts: string[], seedProvided: boolean) => { this.appInited(pw, hosts, seedProvided) })
+    this.initForm = new AppInitForm(page.appPWForm, (pw: string, hosts: string[], mnemonic?: string) => { this.appInited(pw, hosts, mnemonic) })
     this.quickConfigForm = new QuickConfigForm(page.quickConfigForm, () => this.quickConfigDone())
     this.seedBackupForm = new SeedBackupForm(page.seedBackupForm, () => this.seedBackedUp())
   }
 
-  async appInited (pw: string, hosts: string[], seedProvided: boolean) {
-    this.seedProvided = seedProvided
+  async appInited (pw: string, hosts: string[], mnemonic?: string) {
+    this.mnemonic = mnemonic
     const page = this.page
     await this.quickConfigForm.update(pw, hosts)
-    this.seedBackupForm.update(pw)
+    if (mnemonic) this.seedBackupForm.update(mnemonic)
     slideSwap(page.appPWForm, page.quickConfigForm)
   }
 
   quickConfigDone () {
-    if (this.seedProvided) app().loadPage('wallets')
+    if (!this.mnemonic) app().loadPage('wallets')
     else slideSwap(this.page.quickConfigForm, this.page.seedBackupForm)
   }
 
@@ -78,9 +84,9 @@ export default class InitPage extends BasePage {
 class AppInitForm {
   form: PageElement
   page: Record<string, PageElement>
-  success: (pw: string, hosts: string[], seedProvided: boolean) => void
+  success: (pw: string, hosts: string[], mnemonic?: string) => void
 
-  constructor (form: PageElement, success: (pw: string, hosts: string[], seedProvided: boolean) => void) {
+  constructor (form: PageElement, success: (pw: string, hosts: string[], mnemonic?: string) => void) {
     this.form = form
     this.success = success
     const page = this.page = Doc.idDescendants(form)
@@ -123,11 +129,12 @@ class AppInitForm {
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app().loading(this.form)
-    const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
+    // const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
+    const seed = page.seedInput.value ?? ''
     const rememberPass = page.rememberPass.checked
-    const res = await postJSON('/api/init', {
+    const res: InitResponse = await postJSON('/api/init', {
       pass: pw,
-      seed,
+      seed: seed,
       rememberPass
     })
     loaded()
@@ -136,7 +143,7 @@ class AppInitForm {
       Doc.show(page.appPWErrMsg)
       return
     }
-    this.success(pw, res.hosts, Boolean(seed))
+    this.success(pw, res.hosts, res.mnemonic)
   }
 }
 
@@ -283,7 +290,7 @@ class QuickConfigForm {
 class SeedBackupForm {
   form: PageElement
   page: Record<string, PageElement>
-  pw: string
+  mnemonic: string
 
   constructor (form: PageElement, success: () => void) {
     this.form = form
@@ -292,21 +299,13 @@ class SeedBackupForm {
     bindForm(form, page.showSeed, () => this.showSeed())
   }
 
-  update (pw: string) {
-    this.pw = pw
+  update (mnemonic: string) {
+    this.mnemonic = mnemonic
   }
 
-  async showSeed () {
-    const loaded = app().loading(this.form)
-    const res = await postJSON('/api/exportseed', { pass: this.pw })
-    loaded()
-    if (!app().checkResponse(res)) {
-      console.error('error exporting seed:', res.msg)
-      return
-    }
+  showSeed () {
     const page = this.page
-    // 64 bytes, 128 hex characters. Format nicely.
-    page.seedDiv.textContent = res.seed.match(/.{1,32}/g).map((chunk: string) => chunk.match(/.{1,8}/g)?.join(' ')).join('\n')
+    page.mnemonic.textContent = this.mnemonic // `${words.slice(0, 5).join(' ')}\n${words.slice(5, 10).join(' ')}\n${words.slice(10,15).join(' ')}`
     Doc.hide(page.sbWanna)
     Doc.show(page.sbSeed)
   }

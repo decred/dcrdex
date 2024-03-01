@@ -13,7 +13,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
@@ -165,11 +164,8 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(initRoute, err)
 	}
-	defer func() {
-		appPass.Clear()
-		seed.Clear()
-	}()
-	if err := s.core.InitializeClient(appPass, seed); err != nil {
+	defer appPass.Clear()
+	if _, err := s.core.InitializeClient(appPass, seed); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCInitError, errMsg)
 		return createResponse(initRoute, nil, resErr)
@@ -824,16 +820,13 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	defer appPass.Clear()
 	seed, err := s.core.ExportSeed(appPass)
-	defer encode.ClearBytes(seed)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to retrieve app seed: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCExportSeedError, errMsg)
 		return createResponse(appSeedRoute, nil, resErr)
 	}
-	// Zero seed and hex representation after use.
-	seedHex := fmt.Sprintf("%x", seed[:])
 
-	return createResponse(appSeedRoute, seedHex, nil)
+	return createResponse(appSeedRoute, seed, nil)
 }
 
 // handleDeleteArchivedRecords handles requests for deleting archived records.

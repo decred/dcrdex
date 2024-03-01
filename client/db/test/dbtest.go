@@ -68,6 +68,7 @@ func RandomPrimaryCredentials() *db.PrimaryCredentials {
 		EncInnerKey:    randBytes(10),
 		InnerKeyParams: randBytes(10),
 		OuterKeyParams: randBytes(10),
+		Birthday:       time.Unix(rand.Int63(), 0),
 		Version:        1,
 	}
 }

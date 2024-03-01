@@ -98,7 +98,7 @@ type clientCore interface {
 	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
 	UpdateBondOptions(form *core.BondOptionsForm) error
 	Login(pw []byte) error
-	InitializeClient(pw, seed []byte) error
+	InitializeClient(pw []byte, seed *string) (string, error)
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
@@ -112,7 +112,7 @@ type clientCore interface {
 	ReconfigureWallet([]byte, []byte, *core.WalletForm) error
 	ToggleWalletStatus(assetID uint32, disable bool) error
 	ChangeAppPass([]byte, []byte) error
-	ResetAppPass(newPass []byte, seed []byte) error
+	ResetAppPass(newPass []byte, seed string) error
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
@@ -134,7 +134,7 @@ type clientCore interface {
 	AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() bool
-	ExportSeed(pw []byte) ([]byte, error)
+	ExportSeed(pw []byte) (string, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
 	EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error)

@@ -24,13 +24,6 @@ func simpleAck() *standardResponse {
 	}
 }
 
-// The initForm is sent by the client to initialize the DEX.
-type initForm struct {
-	Pass         encode.PassBytes `json:"pass"`
-	Seed         dex.Bytes        `json:"seed,omitempty"`
-	RememberPass bool             `json:"rememberPass"`
-}
-
 // The loginForm is sent by the client to log in to a DEX.
 type loginForm struct {
 	Pass         encode.PassBytes `json:"pass"`

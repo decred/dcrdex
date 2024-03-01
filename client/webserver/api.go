@@ -747,10 +747,9 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error exporting seed: %w", err))
 		return
 	}
-	defer zero(seed)
 	writeJSON(w, &struct {
-		OK   bool      `json:"ok"`
-		Seed dex.Bytes `json:"seed"`
+		OK   bool   `json:"ok"`
+		Seed string `json:"seed"`
 	}{
 		OK:   true,
 		Seed: seed,
@@ -912,13 +911,20 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 
 // apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
-	init := new(initForm)
+	var init struct {
+		Pass         encode.PassBytes `json:"pass"`
+		Seed         string           `json:"seed,omitempty"`
+		RememberPass bool             `json:"rememberPass"`
+	}
 	defer init.Pass.Clear()
-	defer zero(init.Seed)
-	if !readPost(w, r, init) {
+	if !readPost(w, r, &init) {
 		return
 	}
-	err := s.core.InitializeClient(init.Pass, init.Seed)
+	var seed *string
+	if len(init.Seed) > 0 {
+		seed = &init.Seed
+	}
+	mnemonicSeed, err := s.core.InitializeClient(init.Pass, seed)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
@@ -930,11 +936,13 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, struct {
-		OK    bool     `json:"ok"`
-		Hosts []string `json:"hosts"`
+		OK           bool     `json:"ok"`
+		Hosts        []string `json:"hosts"`
+		MnemonicSeed string   `json:"mnemonic"`
 	}{
-		OK:    true,
-		Hosts: s.knownUnregisteredExchanges(map[string]*core.Exchange{}),
+		OK:           true,
+		Hosts:        s.knownUnregisteredExchanges(map[string]*core.Exchange{}),
+		MnemonicSeed: mnemonicSeed,
 	}, s.indent)
 }
 
@@ -1300,10 +1308,9 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiResetAppPassword(w http.ResponseWriter, r *http.Request) {
 	form := new(struct {
 		NewPass encode.PassBytes `json:"newPass"`
-		Seed    dex.Bytes        `json:"seed"`
+		Seed    string           `json:"seed"`
 	})
 	defer form.NewPass.Clear()
-	defer zero(form.Seed)
 	if !readPost(w, r, form) {
 		return
 	}
