@@ -1,0 +1,43 @@
+// Bootstrap
+@import "~bootstrap/scss/functions";
+
+// Locally customized BS variables
+@import "variables.scss";
+
+// Bootstrap modules
+@import "~bootstrap/scss/maps";
+@import "~bootstrap/scss/mixins";
+@import "~bootstrap/scss/root";
+@import "~bootstrap/scss/reboot";
+@import "~bootstrap/scss/type";
+// @import "~bootstrap/scss/_images.scss";
+// @import "~bootstrap/scss/_code.scss";
+@import "~bootstrap/scss/grid";
+@import "~bootstrap/scss/tables";
+@import "~bootstrap/scss/forms";
+@import "~bootstrap/scss/buttons";
+// @import "~bootstrap/scss/_transitions.scss";
+@import "~bootstrap/scss/_dropdown.scss";
+@import "~bootstrap/scss/button-group";
+// @import "~bootstrap/scss/_input-group.scss";
+// @import "~bootstrap/scss/_custom-forms.scss";
+@import "~bootstrap/scss/nav";
+
+// @import "~bootstrap/scss/_navbar.scss";
+// @import "~bootstrap/scss/_card.scss";
+// @import "~bootstrap/scss/_breadcrumb.scss";
+// @import "~bootstrap/scss/_pagination.scss";
+// @import "~bootstrap/scss/_badge.scss";
+// @import "~bootstrap/scss/_jumbotron.scss";
+// @import "~bootstrap/scss/_alert.scss";
+// @import "~bootstrap/scss/_progress.scss";
+// @import "~bootstrap/scss/_media.scss";
+// @import "~bootstrap/scss/_list-group.scss";
+// @import "~bootstrap/scss/_close.scss";
+// @import "~bootstrap/scss/_modal.scss";
+@import "~bootstrap/scss/tooltip";
+// @import "~bootstrap/scss/_popover.scss";
+// @import "~bootstrap/scss/_carousel.scss";
+@import "~bootstrap/scss/utilities";
+// @import "~bootstrap/scss/_print.scss";
+@import "~bootstrap/scss/utilities/api";

@@ -1,0 +1,154 @@
+// Reusable components and styles 
+@import "~bootstrap/scss/mixins";
+@import "mixins";
+
+// tables
+.table {
+  @extend .table;
+
+  --#{$prefix}table-bg: transparent;
+
+  .table-group-divider {
+    border-color: var(--bs-border-color)
+  }
+}
+
+.table-bordered {
+  @include border;
+}
+
+// buttons
+.btn-xs {
+  padding: .10rem .5rem;
+  font-size: .75rem;
+}
+
+.btn-outline-secondary {
+  color: var(--bs-body-color);
+  border-color: var(--bs-border-color);
+}
+
+// form components
+div.form-closer {
+  @extend .flex-center;
+  @extend .hoverbg;
+
+  width: 3rem;
+  margin-left: auto;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1rem;
+
+  @include padding(3, 0, 3, 0);
+
+  position: absolute;
+  top: 0;
+  right: 0;
+
+  span {
+    opacity: 0.8;
+  }
+}
+
+.form-check-label {
+  cursor: pointer;
+}
+
+input.form-control {
+  background-color: var(--form-input-bg);
+  border: 1px solid var(--form-input-border);
+}
+
+.form-check-input[type=checkbox] {
+  border: 1px solid var(--form-input-border);
+  cursor: pointer;
+
+  &:checked {
+    background-color: var(--form-input-bg-active);
+  }
+}
+
+select {
+  font-family: inherit;
+
+  @include padding(1, 2, 1, 2);
+}
+
+// Hide number arrows.
+// Chrome, Safari, Edge, Opera
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+// Firefox
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+form.card button:hover {
+  color: black;
+}
+
+// Remove red background for firefox on empty number input fields.
+input:invalid {
+  box-shadow: none;
+}
+
+.micro-icon {
+  position: relative;
+}
+
+#tooltip {
+  position: absolute;
+  left: -10000px;
+  z-index: 1000;
+  padding: 3px 6px;
+  max-width: 300px;
+  font-size: 15px;
+  border-radius: 4px;
+  color: var(--bs-body-bg);
+  background-color: var(--bs-body-color);
+
+  @include border;
+}
+
+.panel {
+  background-color: var(--bs-secondary-bg);
+}
+
+.on-indicator {
+  width: 15px;
+  height: 15px;
+  border-radius: 8px;
+
+  &.on {
+    background-color: var(--indicator-good);
+  }
+
+  &.off {
+    background-color: #777;
+  }
+}
+
+div[data-handler=dexsettings],
+div[data-handler=init],
+div[data-handler=login],
+div[data-handler=markets],
+div[data-handler=mm],
+div[data-handler=mmsettings],
+div[data-handler=order],
+div[data-handler=orders],
+div[data-handler=register],
+div[data-handler=settings],
+div[data-handler=wallets] {
+  #forms>form:not(.plain) {
+    border-radius: 5px;
+
+    @include border;
+
+    background-color: var(--bs-secondary-bg);
+    box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
+  }
+}

@@ -4,38 +4,42 @@ div.order-datum {
   align-items: stretch;
   justify-content: start;
   text-align: center;
-  border: 1px solid #777a;
   font-size: 15px;
-  margin: 5px 10px 5px 0;
+
+  @include border;
+  @include margin(1, 2, 1, 0);
 
   div:first-child {
-    padding: 2px 15px;
-    border-bottom: 1px solid #777a;
+    @include padding(1, 3, 1, 3);
+    @include border-bottom;
+
     font-family: $demi-sans;
-    background-color: #7772;
+    background-color: var(--bs-tertiary-bg);
   }
 
   div:last-child,
   a:last-child {
-    padding: 4px 15px;
+    @include padding(1, 3, 1, 3);
   }
 }
 
 div.match-header {
-  padding: 10px 0;
-  background-color: #7772;
+  @include padding(2, 0, 2, 0);
+
+  background-color: var(--bs-tertiary-bg);
 }
 
 div.match-card {
   display: flex;
   flex-direction: column;
-  margin: 10px 20px 10px 0;
   align-items: stretch;
-  border: 1px solid #777a;
   font-size: 14px;
+  
+  @include margin(0, 4, 2, 0);
+  @include border;
 
   .red {
-    color: #bd4646;
+    color: var(--bs-danger);
   }
 }
 

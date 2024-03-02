@@ -5,22 +5,22 @@
 <span data-state="syncing" class="ico-sync fs12 d-hide" data-tooltip="placeholder text"></span>
 <span data-state="nopeers" class="ico-disconnected fs12 d-hide" data-tooltip="no peers!"></span>
 <span data-state="nowallet"></span> {{/* not showing ico-cross */}}
-<span data-state="disabled" class="ico-cross errcolor d-hide" data-tooltip="placeholder text"></span>
+<span data-state="disabled" class="ico-cross text-danger d-hide" data-tooltip="placeholder text"></span>
 {{end}}
 
 {{define "markets"}}
 {{template "top" .}}
 <div id="main" data-handler="markets" class="main m-0 flex-nowrap v1">
   {{- /* MARKET LIST */ -}}
-  <div id="leftMarketDock" class="flex-column align-items-end v1 default">
+  <div id="leftMarketDock" class="flex-column align-items-end v1 border-end default">
     <div class="h-100 flex-stretch-column">
 
-      <div class="d-flex align-items-stretch" id="searchBoxV1">
+      <div class="d-flex align-items-stretch border-bottom" id="searchBoxV1">
         <div class="flex-grow-1 p-1 position-relative">
           <input type="text" id="marketSearchV1"  placeholder=" " spellcheck="false" class="my-1">
           <div class="ico-search fs22"></div>
         </div>
-        <div id="leftHider" class="flex-center pointer hoverbg">
+        <div id="leftHider" class="flex-center pointer hoverbg border-start px-2">
           <span class="ico-arrowback d-inline-block fs24">
         </div>
       </div>
@@ -32,7 +32,7 @@
               <div class="d-flex align-items-start justify-content-start flex-grow-1">
                 <img class="market-tmpl-pair-img" data-tmpl="baseIcon">
                 <img class="market-tmpl-pair-img" data-tmpl="quoteIcon" class="ms-1">
-                <span class="errcolor ico-disconnected d-hide ps-1" data-tmpl="disconnectedIco"></span>
+                <span class="text-danger ico-disconnected d-hide ps-1" data-tmpl="disconnectedIco"></span>
               </div>
               <div class="fs10 demi text-start text-nowrap dexname" data-tmpl="host"></div>
             </div>
@@ -61,7 +61,7 @@
     <div class="stylish-overflow h-100 w-100 overflow-x-hidden flex-stretch-column">
 
       {{- /* MARKET STATS - SMALL SCREENS */ -}}
-      <div id="marketStatsV1" class="market-stats-v1 align-items-center justify-content-center p-2 flex-wrap">
+      <div id="marketStatsV1" class="market-stats-v1 align-items-center justify-content-center p-2 flex-wrap border-bottom">
         <div class="flex-center p-2 pointer hoverbg" data-tmpl="marketSelect">
           <div class="flex-center">
             <img class="market-stats-pair-img" data-tmpl="baseIcon"><img class="market-stats-pair-img" data-tmpl="quoteIcon" class="ms-1">
@@ -113,7 +113,7 @@
         <div id="mainContent">
 
           {{- /* ORDER BOOK */ -}}
-          <div class="d-flex flex-column orderbook">
+          <div class="d-flex flex-column orderbook border-end border-start">
             <div class="stylish-overflow hoveronly overflow-x-hidden flex-grow-1 ordertable-wrap reversible">
 
               {{- /* SELL ORDER LIST */ -}}
@@ -141,7 +141,7 @@
                     <td class="ps-2">
                       <div class="d-flex justify-content-start align-items-center">
                         <div data-tmpl="qty">-</div>
-                        <div class="numorders text-center ms-2" data-tmpl="numorders">-</div>
+                        <small class="numorders text-center ms-2" data-tmpl="numorders">-</small>
                       </div>
                     </td>
                     <td class="text-end pe-2" data-tmpl="rate">-</td>
@@ -156,11 +156,11 @@
           <div class="flex-grow-1 position-relative">
             <div class="fill-abs flex-stretch-column">
               <div id="candlesChart" class="market-chart">
-                <div id="durBttnBox"><button class="candle-dur-bttn" id="durBttnTemplate"></button></div>
+                <div id="durBttnBox"><button class="btn candle-dur-bttn" id="durBttnTemplate"></button></div>
               </div>
 
-              <div class="chart-legend">
-                <div id="chartErrMsg" class="p-2 flex-center errcolor w-100"></div>
+              <div class="chart-legend text-muted">
+                <div id="chartErrMsg" class="p-2 flex-center text-danger w-100"></div>
                 <div class="flex-grow-1">
                   <div id="hoverData" class="d-flex align-items-center d-hide">
                     <span class="ico-target fs11 me-1"></span>
@@ -193,18 +193,18 @@
 
           {{- /* ORDER FORM */ -}}
           <div class="order-panel pb-3 position-relative">
-            <div id="orderScroller" class="flex-stretch-column brdrleft">
+            <div id="orderScroller" class="flex-stretch-column">
 
               {{- /* TOKEN APPROVAL */ -}}
-              <div class="fs15 pt-1 pb-3 text-center brdrbottom d-hide" id="tokenApproval">
+              <div class="fs15 pt-1 pb-3 text-center border-bottom d-hide" id="tokenApproval">
                 <span class="p-3 flex-center fs16 grey d-hide" id="approvalRequiredBuy">[[[approval_required_buy]]]</span>
                 <span class="p-3 flex-center fs16 grey d-hide" id="approvalRequiredSell">[[[approval_required_sell]]]</span>
                 <span class="p-3 flex-center fs16 grey d-hide" id="approvalRequiredBoth">[[[approval_required_both]]]</span>
-                <button id="approveBaseBttn" type="button" class="pointer hoverbg text-center p-2 text-nowrap">[[[Approve]]] <span id="baseTokenAsset"></span></button>
+                <button id="approveBaseBttn" type="button" class="btn btn-success">[[[Approve]]] <span id="baseTokenAsset"></span></button>
                 <div id="approvalPendingBase" class="d-hide flex-center position-relative py-2">
                   <span class="px-1" id="approvalPendingBaseSymbol"></span> [[[approval_change_pending]]] <div class="px-2 ico-spinner spinner fs15"></div>
                 </div>
-                <button id="approveQuoteBttn" type="button" class="pointer hoverbg text-center p-2 text-nowrap">[[[Approve]]] <span id="quoteTokenAsset"></span></button>
+                <button id="approveQuoteBttn" type="button" class="btn btn-success">[[[Approve]]] <span id="quoteTokenAsset"></span></button>
                 <div id="approvalPendingQuote" class="d-hide flex-center position-relative py-2">
                   <span class="px-1" id="approvalPendingQuoteSymbol"></span> [[[approval_change_pending]]] <div class="px-2 ico-spinner spinner fs15"></div>
                 </div>
@@ -212,8 +212,8 @@
 
               {{- /* ORDER TYPE BUTTONS */ -}}
               <div id="orderTypeBttns" class="fs14 d-hide d-flex justify-content-start align-items-stretch d-hide min-fit">
-                <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrbottom selected">[[[Limit Order]]]</button>
-                <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrbottom brdrleft brdrright">[[[Market Order]]]</button>
+                <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab border-bottom selected">[[[Limit Order]]]</button>
+                <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab border-bottom border-start border-end">[[[Market Order]]]</button>
               </div>
 
               <div class="fs15 pt-3 text-center d-hide" id="loaderMsg"></div>
@@ -221,9 +221,9 @@
               {{- /* CREATE ACCOUNT TO TRADE */ -}}
               <div id="notRegistered" class="d-hide">
                 <div class="p-3 flex-center fs16 grey">[[[create_account_to_trade]]]</div>
-                <div class="brdrtop brdrbottom flex-center p-2">
+                <div class="border-top border-bottom flex-center p-2">
                   <p class="text-center fs14 p-2 m-0">[[[need_to_register_msg]]]</p>
-                  <button data-tmpl="registerBttn" type="button" class="pointer hoverbg text-center p-2 text-nowrap">[[[Create Account]]]</button>
+                  <button data-tmpl="registerBttn" type="button" class="btn btn-outline-secondary text-nowrap">[[[Create Account]]]</button>
                 </div>
               </div>
 
@@ -254,8 +254,8 @@
               {{- /* BOND REQUIRED TO TRADE */ -}}
               <div class="d-hide p-2 mt-2" id="bondRequired">
                 <div class="p-3 flex-center fs16 grey">[[[action_required_to_trade]]]</div>
-                <div class="brdrtop brdrbottom flex-center p-2">
-                  <p class="text-center fs14 sans-light p-2 m-0">
+                <div class="border-top border-bottom flex-center p-2">
+                  <p class="text-center fs14 p-2 m-0">
                   [[[acct_tier_post_bond]]]
                   <a id="dexSettingsLink" class="fs15 hoverbg subtlelink">[[[enable_bond_maintenance]]]</a>
                   </p>
@@ -263,7 +263,7 @@
               </div>
 
               {{- /* MM RUNNING */ -}}
-              <div class="d-hide fs15 pt-1 pb-3 text-center brdrbottom" id="mmRunning">
+              <div class="d-hide fs15 pt-1 pb-3 text-center border-bottom" id="mmRunning">
                 <div class="p-0 w-100">
                   <div class="d-flex flex-column justify-content-center align-items-center">
                     <span class="p-3 flex-center fs16 grey">[[[market_making_running]]]</span>
@@ -324,19 +324,19 @@
                   <div class="d-flex mt-3" id="priceBox">
                     <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
                     <div class="col-18 p-0 position-relative">
-                      <input type="number" class="form-control select bg1" id="rateField">
+                      <input type="number" class="form-control select" id="rateField">
                       <span class="unitbox"><span class="unit" data-unit="quote" data-unit-format="noparent"></span>/<span class="unit" data-unit="base" data-unit-format="noparent"></span></span>
                     </div>
                   </div>
                   <div class="d-flex mt-4" id="qtyBox">
                     <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
                     <div class="col-6 p-0 position-relative">
-                      <input type="number" class="form-control select bg1" id="lotField">
+                      <input type="number" class="form-control select" id="lotField">
                       <span class="unit unitbox">[[[:title:lots]]]</span>
                     </div>
                     <div class="col-1 p-0"></div> {{/* spacer */}}
                     <div class="col-11 p-0 position-relative">
-                      <input type="number" class="form-control select bg1" id="qtyField">
+                      <input type="number" class="form-control select" id="qtyField">
                       <span class="unit unitbox" data-unit="base" data-unit-format="noparent"></span>
                     </div>
                   </div>
@@ -349,7 +349,7 @@
                     <div class="d-flex justify-content-center mt-2">
                       <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
                       <div class="col-12 p-0 position-relative">
-                        <input type="number" class="form-control select bg1" id="mktBuyField">
+                        <input type="number" class="form-control select" id="mktBuyField">
                         <span class="unit unitbox" data-unit="quote" data-unit-format="noparent"></span>
                       </div>
                     </div>
@@ -376,23 +376,23 @@
 
                   {{- /* SUBMIT ORDER BUTTON */ -}}
                   <div class="text-end">
-                    <button id="submitBttn" type="button" class="my-1 fs14 submit text-center buygreen-bg" disabled></button> {{/* textContent set by script */}}
+                    <button id="submitBttn" type="button" class="btn fs14 submit text-center buygreen-bg" disabled></button> {{/* textContent set by script */}}
                   </div>
 
                   {{- /* ORDER LIMITS */ -}}
-                  <div class="mt-2 p-2 text-center brdr fs17">
+                  <div class="mt-2 p-2 text-center border fs17">
                     [[[order_form_remaining_limit]]]
                   </div>
 
 
                 </div>
-                <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="orderErr"></div>
+                <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="orderErr"></div>
               </form>
 
               {{- /* BALANCES */ -}}
-              <div id="noWallet" class="p-3 brdrbottom flex-center fs16 grey d-hide"></div>
-              <div id="walletInfoTmpl" class="brdrtop mb-3 flex-stretch-column min-fit">
-                <div class="d-flex align-items-center px-3 py-1 brdrbottom" data-tmpl="walletIcons">
+              <div id="noWallet" class="p-3 border-bottom flex-center fs16 grey d-hide"></div>
+              <div id="walletInfoTmpl" class="border-top mb-2 flex-stretch-column min-fit">
+                <div class="d-flex align-items-center px-3 py-1 border-bottom" data-tmpl="walletIcons">
                   <img data-tmpl="logo" class="micro-icon me-1">
                   <span data-tmpl="symbol"></span>
                   <div class="flex-grow-1"></div>
@@ -413,8 +413,8 @@
                 <div data-tmpl="spinner" class="flex-center position-relative py-2">
                   <div class="ico-spinner spinner fs15"></div>
                 </div>
-                <div data-tmpl="balanceRows" class="flex-stretch-column brdrbottom lh1">
-                  <div class="d-flex justify-content-between align-items-center px-3 py-1 fs15" data-tmpl="balanceRowTmpl">
+                <div data-tmpl="balanceRows" class="flex-stretch-column border-bottom lh1 pt-2 px-3">
+                  <div class="d-flex justify-content-between align-items-center mb-2 fs15" data-tmpl="balanceRowTmpl">
                     <span data-tmpl="title"></span>
                     <div data-tmpl="bal" class="flex-center"></div>
                   </div>
@@ -422,8 +422,8 @@
               </div>
 
               {{- /* REPUTATION */ -}}
-              <div id="tradingLimits" class="d-flex align-items-stretch fs15 mx-2 brdr">
-                <div class="d-flex flex-column flex-grow-1 align-items-stretch px-2">
+              <div id="tradingLimits" class="d-flex align-items-stretch fs15 mx-2 mb-2 border">
+                <div class="d-flex flex-column flex-grow-1 align-items-stretch p-2">
 
                   <div class="d-flex justify-content-between align-items-center">
                     <span>[[[Parcel Size]]]</span>
@@ -447,7 +447,7 @@
                   </div>
 
                 </div>
-                <div class="d-flex flex-column flex-grow-1 align-items-stretch px-2 brdrleft">
+                <div class="d-flex flex-column flex-grow-1 align-items-stretch p-2 border-start">
 
                   <div class="d-flex justify-content-between align-items-center">
                     <span>[[[Trading Tier]]]</span>
@@ -466,18 +466,18 @@
                   
                 </div>
               </div>
-              <div id="reputationMeter" class="px-2 mt-2 brdrbottom">
+              <div id="reputationMeter" class="px-3 mb-3 border-bottom">
                 {{template "reputationMeter"}}
               </div>
 
               {{- /* USER ORDERS */ -}}
-              <div class="text-center fs20 sans-light my-1">
+              <div class="text-center fs20 mb-2">
                 [[[Your Orders]]]
               </div>
               <div id="unreadyOrdersMsg" class="d-hide px-3 py-1 flex-center fs16 red">[[[unready_wallets_msg]]]</div>
               <div id="userNoOrders" class="p-3 flex-center fs16 grey">no active orders</div>
-              <div id="userOrders">
-                <div id="userOrderTmpl" class="user-order">
+              <div id="userOrders" class="border-bottom">
+                <div id="userOrderTmpl" class="user-order border-top">
                   <div data-tmpl="header" class="user-order-header pointer">
                     <div data-tmpl="sideLight" class="side-indicator"></div>
                     <span data-tmpl="side"></span>
@@ -494,7 +494,7 @@
                     <!-- <span class="fs11 ico-open ms-2"></span> -->
                   </div>
                   <div data-tmpl="details" class="order-details d-hide">
-                    <div class="user-order-datum full-span d-flex flex-row justify-content-start align-items-center brdrbottom fs14">
+                    <div class="user-order-datum full-span d-flex flex-row justify-content-start align-items-center border-bottom fs14">
                       <span data-tmpl="accelerateBttn" class="ico-rocket pointer hoverbg d-hide py-2 px-3 me-1" data-tooltip="[[[accelerate_order]]]"></span>
                       <span data-tmpl="cancelBttn" class="ico-cross pointer hoverbg fs11 d-hide py-2 px-3 mx-1" data-tooltip="[[[cancel_order]]]"></span>
                       <a data-tmpl="link" class="ico-open pointer hoverbg fs13 plainlink py-2 px-3 ms-1" data-tooltip="[[[order details]]]"></a>
@@ -538,8 +538,8 @@
               <a href="/orders" class="flex-center py-1 plainlink hoverbg">[[[view order history]]]</a>
 
               {{- /* RECENT MATCHES */ -}}
-              <div id=recentMatchesBox  class="flex-stretch-column px-3 pb-4 brdrtop">
-                <div class="text-center fs20 sans-light my-3">[[[Recent Matches]]]</div>
+              <div id=recentMatchesBox  class="flex-stretch-column px-3 pb-4 border-top">
+                <div class="text-center fs20 my-3">[[[Recent Matches]]]</div>
                 <table id="recentMatchesTable" class="ordertable">
                   <thead>
                     <tr class="pointer">
@@ -589,9 +589,9 @@
     </form>
 
     {{- /* VERIFY FORM */ -}}
-      <form class="position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
+      <form class="position-relative d-hide" id="verifyForm" autocomplete="off">
         <div class="form-closer"><span class="ico-cross"></span></div>
-        <div class="py-1 text-center fs18 position-relative header buygreen-bg" id="vHeader">
+        <div class="text-center fs18 position-relative header buygreen-bg mt-3 py-1" id="vHeader">
           <span id="vBuySell"></span> <span data-unit="base"></span>
         </div>
         <div class="d-flex justify-content-between align-items-center py-2 fs13">
@@ -599,7 +599,7 @@
           <span id="vOrderHost" class="grey"></span>
         </div>
 
-        <hr class="dashed mt-0 mb-2">
+        <hr class="dashed mt-0 mb-3">
 
         {{- /* Price, Quantity, Total Section */ -}}
         <div id="verifyLimit">
@@ -657,7 +657,7 @@
             <input type="password" class="form-control select" id="vPass">
           </div>
           <div class="col-12 p-0 d-flex justify-content-end">
-            <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 selected">
+            <button id="vSubmit" class="btn w-75 mt-1 justify-content-center fs15 selected sellred-bg">
               <span id="vSideSubmit"></span>
               <span data-unit="base"></span>
             </button>
@@ -666,7 +666,7 @@
             </div>
           </div>
         </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="vErr"></div>{{- /* End Auth Section */ -}}
+        <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="vErr"></div>{{- /* End Auth Section */ -}}
 
         <div id="vPreorder">
           <div id="vPreorderEstimates">
@@ -733,7 +733,7 @@
                 <input type="password" class="form-control select w-100" id="vUnlockPass">
               </div>
               <div class="col-12 p-0 d-flex align-items-end justify-content-end">
-                <button type="button" id="vUnlockSubmit" class="selected buygreen-bg">[[[Unlock]]]</button>
+                <button type="button" id="vUnlockSubmit" class="btn selected buygreen-bg">[[[Unlock]]]</button>
               </div>
             </div>
           </div>
@@ -757,18 +757,16 @@
       </form>
 
       {{- /* FEE DETAIL BREAKDOWN */ -}}
-      <form id="vDetailPane" class="d-hide fs16 pb-2">
-        <div class="d-flex justify-content-between align-items-center py-1 px-3">
-          <span>[[[Fee Details]]]</span>
-          <span class="ico-cross fs12 pointer" id="closeDetailPane"></span>
-        </div>
-        <div class="px-3">
-          <div class="m-1">
+      <form id="vDetailPane" class="d-hide">
+        <div class="d-flex flex-center justify-content-end"><span id="closeDetailPane" class="ico-cross pointer hoverbg p-2"></span></div>
+        <h3>[[[Fee Details]]]</h3>
+        <div>
+          <div class="mb-3">
             [[[estimate_market_conditions]]]
           </div>
 
-          <div class="fs18 mt-2 demi">[[[Best Case Fees]]]</div>
-          <div class="px-3 indent">
+          <div class="fs18 demi">[[[Best Case Fees]]]</div>
+          <div class="ps-3 mb-3 indent">
             <div>
               [[[best_case_conditions]]]
             </div>
@@ -786,8 +784,8 @@
             </div>
           </div>
 
-          <div class="fs18 mt-2 demi">[[[Worst Case Fees]]]</div>
-          <div class="px-3 indent">
+          <div class="fs18 demi">[[[Worst Case Fees]]]</div>
+          <div class="ps-3 mb-3 indent">
             <div>
               [[[worst_case_conditions]]]
             </div>
@@ -805,8 +803,8 @@
             </div>
           </div>
 
-          <div class="fs18 mt-2 demi">[[[Maximum Possible Swap Fees]]]</div>
-          <div class="px-3 indent">
+          <div class="fs18 demi">[[[Maximum Possible Swap Fees]]]</div>
+          <div class="ps-3 indent">
             <div>
               [[[max_fee_conditions]]]
             </div>
@@ -821,7 +819,7 @@
 
       <form id="approveTokenForm" class="position-relative flex-center flex-column fs20 d-hide">
         <div class="form-closer"><span class="ico-cross"></span></div>
-        <div class="px-2 py-1 text-center fs22 text-nowrap sans-light position-relative">
+        <div class="px-2 py-1 text-center fs22 text-nowrap position-relative">
           [[[:title:Approve]]] <span id="approveTokenSymbol"></span>
         </div>
         <div id="tokenApprovalSubmissionElements">
@@ -836,13 +834,13 @@
             </div>
             <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
             <div class="d-grid align-items-end col-10 p-0">
-              <button id="approveTokenButton" type="button" class="fs15 bg2 selected">[[[Approve]]]</button>
+              <button id="approveTokenButton" type="button" class="btn fs15 bg2 selected">[[[Approve]]]</button>
             </div>
           </div>
         </div>
-        <span id="tokenApprovalTxMsg" class="text-center fs17 sans-light d-hide">[[[token_approval_tx_msg]]]</span>
+        <span id="tokenApprovalTxMsg" class="text-center fs17 d-hide">[[[token_approval_tx_msg]]]</span>
         <a target="_blank" class="subtlelink" id="tokenApprovalTxID"></a>
-        <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="approveTokenErr"></div>
+        <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="approveTokenErr"></div>
       </form>
 
       {{- /* CANCEL ORDER FORM */ -}}

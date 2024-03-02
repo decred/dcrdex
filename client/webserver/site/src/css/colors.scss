@@ -1,0 +1,72 @@
+// This file defines the color scheme used in the light and dark themes.
+
+[data-bs-theme="light"] {
+  // links
+  --subtle-link-color: #05053b;
+  --subtle-link-hover: #07075e;
+
+  // popup notes
+  --popup-notes-bg: black;
+  --popup-notes-color: #dfe2e1;
+
+  // forms
+  --form-bg: #fafafae4;
+  --form-input-bg: #fff;
+  --form-input-border: #999;
+  --form-input-bg-active: #3095db;
+  --form-opt-selected-bg: #0001;
+  --form-selected-tab-bg: white;
+
+  // market view
+  --indicator-good: #179717;
+  --buy-color: #207a46;
+  --sell-color: #99302b;
+  --market-buygreen-bg: #207a4699;
+  --market-buy-color: #207a46;
+  --market-sellred-bg: #99302b99;
+  --market-sell-color: #99302b;
+  --market-btn-color: #555;
+  --market-btn-selected-color: black;
+  --market-markettab-selected-bg: #7773;
+  --market-orderopt-bg: #fff1;
+  --market-numorders-bg: #c5c5e6;
+
+  // loader
+  --loader-bg: #e0e0e077;
+}
+
+
+[data-bs-theme="dark"] {
+  // links
+  --subtle-link-color: #e6e6ff;
+  --subtle-link-hover: #d1d1ff;
+
+  // popup notes
+  --popup-notes-bg: white;
+  --popup-notes-color: #333;
+
+  // forms
+  --form-bg: #091a28e4;
+  --form-input-bg: black;
+  --form-input-border: #555;
+  --form-input-bg-active: #27278d;
+  --form-opt-selected-bg: #fff1;
+  --form-selected-tab-bg: #263846;
+
+  // market view
+  --indicator-good: #179717;
+  --buy-color: #29bb77;
+  --sell-color: #e95e5e;
+  --market-buygreen-bg: #29bb7799;
+  --market-buy-color: #29bb77;
+  --market-sellred-bg: #e95e5e99;
+  --market-sell-color: #e95e5e;
+  --market-btn-color: #aaa;
+  --market-btn-selected-color: #eee;
+  --market-markettab-selected-bg: #fff1;
+  --market-orderopt-bg: #0001;
+  --market-numorders-bg: #141488;
+
+  // loader
+  --loader-bg: #13202b77;
+}

@@ -1,10 +1,6 @@
 .walletspage {
-  #content {
-    flex-direction: column;
-  }
-
   .ico-unlocked {
-    color: #1e7d11;
+    color: var(--indicator-good);
   }
 
   .market-select-logo {
@@ -13,18 +9,12 @@
   }
 
   .short-host {
-    overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
     max-width: 175px;
   }
 
   .mw-90p {
     min-width: 90%;
-  }
-
-  #depositAddress {
-    user-select: all;
   }
 
   #recoverWalletConfirm,
@@ -33,18 +23,8 @@
     width: 400px;
   }
 
-  .copy-btn:hover {
-    cursor: pointer;
-    color: #a8a8a8;
-  }
-
   #assetSelect {
-    border-right: 1px solid $dark-border-color;
-    flex-direction: row;
-    overflow-y: hidden;
-
     .icon-select {
-      padding: 5px;
       cursor: pointer;
       min-height: fit-content;
 
@@ -60,8 +40,7 @@
         width: 20px;
         height: 20px;
         border-radius: 10px;
-        background-color: $light_body_bg;
-        border: 3px solid $light_body_bg;
+        border: 3px solid var(--bs-body-bg);
       }
     }
 
@@ -76,19 +55,10 @@
     .icon-select:hover,
     .icon-select.selected {
       opacity: 1;
-      background-color: #fff;
     }
   }
 
   table#balanceTable {
-    td {
-      line-height: 1;
-    }
-
-    td:last-child {
-      text-align: right;
-    }
-
     tr.itemized > td {
       padding-bottom: 0.25rem;
     }
@@ -97,16 +67,8 @@
       padding-top: 0.5rem;
     }
 
-    tr:not(.sub) {
-      font-size: 17px;
-
-      .ico-info {
-        font-size: 14px;
-      }
-    }
-
     tr.sub {
-      font-size: 14px;
+      font-size: 0.875rem;
 
       &.last > td:first-child::before {
         content: '└─ ',
@@ -117,21 +79,15 @@
       }
 
       & > td:last-child {
-        @extend .brdrright;
+        @include border-right;
 
         padding-right: 0.5rem;
-      }
-
-      .ico-info {
-        font-size: 12px;
       }
     }
   }
 
   #walletInfo {
     table#walletInfoTable {
-      width: 100%;
-
       td {
         padding: 2px 5px 2px 0;
         line-height: 1;
@@ -146,30 +102,11 @@
 
   #secondColumn {
     & > .column > div {
-      border-bottom: 1px solid $light-border-color;
+      @include border-bottom;
     }
 
-    table {
-      & > button {
-        border-radius: 3px;
-      }
-
-      th ,
-      td {
-        font-size: 15px;
-        padding: 5px 10px;
-        white-space: nowrap;
-      }
-
-      th:last-child ,
-      td:last-child {
-        text-align: right;
-      }
-
-      tbody > tr:not(:last-child),
-      thead > tr {
-        border-bottom: 1px solid $light-border-color;
-      }
+    & > .column h4 {
+      @include margin(3, 3, 3, 3);
     }
   }
 
@@ -184,7 +121,7 @@
   }
 
   #walletDetailsBox {
-    border-bottom: $light_border_color;
+    @include border-bottom;
 
     // Asset name and balance sizes for mobile. Redefined for > sm below.
     #assetLogo {
@@ -222,38 +159,6 @@
     padding-left: 30%;
   }
 
-  #peersTable,
-  #tokenVersionTable {
-    @extend .table;
-    @extend .table-striped;
-  }
-
-  table#vspPickerTable,
-  table#ticketHistoryTable {
-    border: 1px solid $light_border_color;
-
-    th,
-    tr:not(:last-child) {
-      border-bottom: 1px solid $light_border_color;
-    }
-
-    th,
-    td {
-      padding: 5px 15px 5px 10px;
-    }
-
-    td:not(:first-child) {
-      text-align: right;
-      border-left: solid;
-      border-left-width: 1px;
-      border-color: $light_border_color;
-    }
-  }
-
-  #purchaserInput {
-    width: 4em;
-  }
-
   #vspDisplay {
     #vspEditIcon {
       display: none;
@@ -269,11 +174,11 @@
   }
 
   .positive-tx {
-    color: #00a200;
+    color: var(--indicator-good);
   }
 
   .negative-tx {
-    // color: #d11414;
+    color: var(--bs-danger);
   }
 }
 
@@ -312,14 +217,14 @@
   }
 
   #purchaseTicketsErrBox {
-    background-color: $light_body_bg;
+    background-color: var(--bs-body-bg);
   }
 }
 
 @include media-breakpoint-up(sm) {
   .walletspage {
     #walletDetailsBox {
-      border-bottom: $light_border_color;
+      @include border-bottom;
 
       #assetLogo {
         width: 40px;
@@ -366,6 +271,11 @@
           height: 28px;
           border-radius: 15px;
         }
+
+        &.selected,
+        &:hover {
+          background-color: var(--bs-body-bg);
+        }
       }
     }
   }
@@ -374,7 +284,7 @@
 @include media-breakpoint-up(md) {
   .walletspage {
     #walletInfo {
-      border-left: 1px solid $light-border-color;
+      @include border-left;
 
       table#walletInfoTable {
         width: auto;
@@ -386,9 +296,6 @@
     }
   }
 
-  body.dark .walletspage #walletInfo {
-    border-color: $dark-border-color;
-  }
 }
 
 #restoreWalletInfo,
@@ -399,31 +306,10 @@
 
 #txDetails {
   width: 450px;
-  font-size: 17px;
-}
-
-.warning-text {
-  text-decoration: underline;
-  text-decoration-color: #d11414;
-  color: #d11414;
-  font-size: bold;
-}
-
-#sendAddr.invalid {
-  border-color: #ee1a1a;
-  box-shadow: 0 0 2px 2px #ee1a1a;
 }
 
 #submitReconfig[disabled] {
   cursor: not-allowed;
 }
 
-.ease-color {
-  transition: color 1s ease;
-}
 
-#txDetailsBondSection, #txDetailsRecipientSection, #txDetailsNonceSection {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #777;
-}

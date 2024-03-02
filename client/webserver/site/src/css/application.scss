@@ -1,89 +1,24 @@
-// Variables
-$grid-columns: 24;
-$font-color-dark: #dfe2e1;
-$font-color-light: #333;
-$buycolor_dark: #29bb77;
-$sellcolor_dark: #e95e5e;
-$buycolor_light: #207a46;
-$sellcolor_light: #99302b;
-$light_body_bg: #fafafa;
-$dark_body_bg: #091a28;
-$light_form_bg: #fafafae4;
-$dark_form_bg: #091a28e4;
-$light_panel: #f0f0f0;
-$dark_panel: #122739;
-$light_border_color: #ddd;
-$dark_border_color: #383f4b;
-$light_input_border: #999;
-$dark_input_border: #555;
-$sans: "source-sans", sans-serif;
-$demi-sans: "demi-sans", sans-serif;
-$mono: "mono", monospace;
-$sans-light: "source-sans-light", sans-serif;
-$grid-breakpoints: (
-  xs: 0,
-  sm: 576px,
-  md: 768px,
-  lg: 992px,
-  xl: 1200px,
-  xxl: 1750px,
-  xxxl: 2150px
-);
-
-// Bootstrap
 @import "~bootstrap/scss/functions";
-@import "~bootstrap/scss/variables";
-@import "~bootstrap/scss/maps";
-@import "~bootstrap/scss/mixins";
-@import "~bootstrap/scss/root";
-@import "~bootstrap/scss/reboot";
-@import "~bootstrap/scss/type";
-// @import "~bootstrap/scss/_images.scss";
-// @import "~bootstrap/scss/_code.scss";
-@import "~bootstrap/scss/grid";
-@import "~bootstrap/scss/tables";
-@import "~bootstrap/scss/forms";
-@import "~bootstrap/scss/buttons";
-// @import "~bootstrap/scss/_transitions.scss";
-@import "~bootstrap/scss/_dropdown.scss";
-@import "~bootstrap/scss/button-group";
-// @import "~bootstrap/scss/_input-group.scss";
-// @import "~bootstrap/scss/_custom-forms.scss";
-@import "~bootstrap/scss/nav";
 
-// @import "~bootstrap/scss/_navbar.scss";
-// @import "~bootstrap/scss/_card.scss";
-// @import "~bootstrap/scss/_breadcrumb.scss";
-// @import "~bootstrap/scss/_pagination.scss";
-// @import "~bootstrap/scss/_badge.scss";
-// @import "~bootstrap/scss/_jumbotron.scss";
-// @import "~bootstrap/scss/_alert.scss";
-// @import "~bootstrap/scss/_progress.scss";
-// @import "~bootstrap/scss/_media.scss";
-// @import "~bootstrap/scss/_list-group.scss";
-// @import "~bootstrap/scss/_close.scss";
-// @import "~bootstrap/scss/_modal.scss";
-@import "~bootstrap/scss/tooltip";
-// @import "~bootstrap/scss/_popover.scss";
-// @import "~bootstrap/scss/_carousel.scss";
-@import "~bootstrap/scss/utilities";
-// @import "~bootstrap/scss/_print.scss";
-@import "~bootstrap/scss/utilities/api";
+// variable customizations
+@import "colors.scss";
+@import "variables.scss";
 
-// Application
-@import "./typography.scss";
-@import "./icons.scss";
-@import "./main.scss";
-@import "./main_dark.scss";
-@import "./market.scss";
-@import "./market_dark.scss";
-@import "./wallets.scss";
-@import "./wallets_dark.scss";
-@import "./orders.scss";
-@import "./order.scss";
-@import "./settings.scss";
-@import "./forms.scss";
-@import "./forms_dark.scss";
-@import "./dex_settings.scss";
-@import "./mm.scss";
-@import "./mmsettings.scss";
+// Custom mixins
+@import "mixins.scss";
+
+// Utilities, reusable components
+@import "typography.scss";
+@import "utilities.scss";
+@import "icons.scss";
+@import "components.scss";
+
+// Ui views
+@import "main.scss";
+@import "forms.scss";
+@import "market.scss";
+@import "wallets.scss";
+@import "orders.scss";
+@import "order.scss";
+@import "settings.scss";
+@import "mm.scss";

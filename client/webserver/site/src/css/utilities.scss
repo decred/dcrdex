@@ -1,0 +1,173 @@
+.flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.flex-stretch-column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.hoverbg:hover {
+  background-color: var(--bs-tertiary-bg);
+}
+
+.stylish-overflow {
+  @include stylish-overflow;
+
+  &.hoveronly:not(:hover) {
+    scrollbar-color: transparent transparent;
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background-color: transparent;
+      border-radius: 4px;
+    }
+  }
+
+  &.overflow-x-hidden {
+    overflow-x: hidden;
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.ease-color {
+  transition: color 1s ease;
+}
+
+.mw-425 {
+  max-width: 425px;
+}
+
+.max-h-100 {
+  max-height: 100%;
+}
+
+.d-hide {
+  display: none !important;
+}
+
+.buycolor {
+  color: var(--buy-color);
+}
+
+.sellcolor {
+  color: var(--sell-color);
+}
+
+.grey {
+  color: #999;
+}
+
+.rounded3 {
+  border-radius: 3px;
+}
+
+hr.dashed {
+  @include border-top(2px, dashed);
+}
+
+
+img.token-parent {
+  width: 0.7em;
+  height: 0.7em;
+  position: relative;
+  top: -0.4em;
+}
+
+sup.token-parent {
+  font-size: 0.6em;
+  position: relative;
+  top: -0.6em;
+}
+
+.preline {
+  white-space: pre-line;
+}
+
+.vscroll {
+  @extend .stylish-overflow;
+
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.pointer {
+  cursor: pointer !important;
+}
+
+.underline {
+  text-decoration: underline;
+}
+
+.plainlink {
+  color: inherit;
+}
+
+.ico-info {
+  margin-left: 0.25rem;
+}
+
+.subtlelink,
+.subtlelink:visited {
+  text-decoration: none;
+
+  // TODO this color is almost identical to the default body color, with text-decoration: none
+  // the link isn't visible.  Consider using a different shade.
+  // color: var(--subtle-link-color);
+  &:hover {
+    text-decoration: underline !important;
+    // color: var(--subtle-link-hover-color);
+    cursor: pointer;
+  }
+}
+
+
+// .hashwrap {
+//   word-break: break-all;
+//   user-select: all;
+// }
+
+.lh1 {
+  line-height: 1;
+}
+
+.fill-abs {
+  @include fill-abs;
+}
+
+.min-fit {
+  min-height: fit-content;
+}
+
+div.clear {
+  opacity: 0; // Set by animation upon initial loading.
+}
+
+
+.overflow-y-auto {
+  overflow-y: auto;
+}
+
+.overflow-y-hidden {
+  overflow-y: hidden;
+}
+
+.overflow-x-hidden,
+.stylish-overflow.overflow-x-hidden {
+  overflow-x: hidden;
+}

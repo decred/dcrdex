@@ -366,12 +366,12 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.sendAddr, 'input', async () => {
       const asset = app().assets[this.selectedAssetID]
       Doc.hide(page.validAddr)
-      page.sendAddr.classList.remove('invalid')
+      page.sendAddr.classList.remove('is-invalid')
       const addr = page.sendAddr.value || ''
       if (!asset || addr === '') return
       const valid = await this.validateSendAddress(addr, asset.id)
       if (valid) Doc.show(page.validAddr)
-      else page.sendAddr.classList.add('invalid')
+      else page.sendAddr.classList.add('is-invalid')
     })
 
     // A link on the wallet reconfiguration form to show/hide the password field.

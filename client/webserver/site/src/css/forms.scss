@@ -11,7 +11,7 @@
         linear-gradient(
           to bottom,
           #e0e0e000,
-          $light_panel
+          #f0f0f0
           90%
         );
     }
@@ -73,24 +73,6 @@
     }
   }
 
-  #regAssets {
-    color: #c7c3cc;
-  }
-
-  .reg-asset-table {
-    thead > tr > th {
-      border-top: 1px solid;
-    }
-
-    th,
-    td {
-      border-color: $light_border_color;
-      border-width: 1px;
-      border-style: none solid solid;
-      padding: 5px;
-      text-align: left;
-    }
-  }
 
   input[data-tmpl=regAssetTier] {
     width: 3em;
@@ -120,7 +102,6 @@
   }
 
   input.app-pass {
-    // margin: 0 auto;
     display: inline-block;
     max-width: 250px;
   }
@@ -146,17 +127,24 @@
     display: flex;
     justify-content: flex-start;
     align-items: stretch;
+    
+    @include margin-bottom(3);
 
     .wtab {
+      background-color: var(--bs-secondary-bg);
       padding: 8px 20px;
       font-size: 15px;
       border-style: solid solid none;
       border-radius: 5px 5px 0 0;
       border-width: 1px;
-      border-color: #555;
+      border-color: var(--bs-border-color);
       opacity: 0.8;
       position: relative;
       z-index: 150;
+
+      &:hover {
+        cursor: pointer;
+      }
     }
 
     .wtab:not(:first-child) {
@@ -167,7 +155,7 @@
       opacity: 1;
       top: 1px;
       cursor: default;
-      background-color: white;
+      background-color: var(--form-selected-tab-bg);
     }
 
     .wtab:not(.selected) {
@@ -180,7 +168,8 @@
   }
 
   .bordertop {
-    border-top: solid 1px #555;
+    @include border-top;
+
     border-radius: 0 10px 0 0;
   }
 
@@ -191,7 +180,7 @@
     background-color: #0b5831;
     border-radius: 5px;
     animation: glow 1.5s infinite alternate;
-    color: $font-color-dark;
+    color: var(--bs-body-color);
   }
 
   .one-bttn:hover {
@@ -227,6 +216,10 @@ button.form-button {
   }
 }
 
+.form-check-label {
+  user-select: none;
+}
+
 #forms {
   @extend .stylish-overflow;
   @extend .flex-center;
@@ -237,7 +230,7 @@ button.form-button {
   left: 0;
   right: 0;
   padding: 25px 0;
-  background-color: $light_form_bg;
+  background-color: var(--form-bg);
   z-index: 101;
 
   & > form {
@@ -249,6 +242,14 @@ button.form-button {
 
     button {
       @extend .form-button;
+    }
+
+    h3 {
+      text-align: center;
+
+      @include margin-bottom(3);
+
+      position: relative;
     }
   }
 }
@@ -352,25 +353,10 @@ a[data-tmpl=walletCfgGuide] {
 .deposit-address {
   font-size: 15px;
   padding: 5px 10px;
-  border: 1px solid $light_border_color;
+
+  @include border;
 }
 
-.order-opt {
-  opacity: 0.7;
-
-  &:not(.selected) {
-    cursor: pointer;
-  }
-
-  &.selected {
-    opacity: 1;
-    background-color: #e8ebed;
-
-    div.opt-check {
-      background-color: #2cce9c;
-    }
-  }
-}
 
 .slider-container,
 .order-opt {
@@ -415,13 +401,13 @@ a[data-tmpl=walletCfgGuide] {
 }
 
 div[data-tmpl=scoreTray] {
-  background-color: $buycolor_dark;
+  background-color: var(--buy-color);
   height: 12px;
   border-radius: 100px;
   overflow: hidden;
 
   div[data-tmpl=scoreWarn] {
-    background-color: $sellcolor_dark;
+    background-color: var(--sell-color);
     position: absolute;
     top: 0;
     bottom: 0;
@@ -471,7 +457,7 @@ div[data-handler=init] {
   cursor: pointer;
 
   &.on {
-    background-color: $buycolor_dark;
+    background-color: var(--indicator-good);
   }
 
   & > div {
@@ -482,7 +468,7 @@ div[data-handler=init] {
     height: 0.7rem;
     border-radius: 0.35rem;
     transition: left 0.5s;
-    background-color: $dark_body_bg;
+    background-color: var(--bs-body-bg);
   }
 
   &.on > div {
@@ -505,5 +491,55 @@ div[data-handler=init] {
 
   &.big.on > div {
     left: 1.05rem;
+  }
+}
+
+
+.dynamicopts {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  flex-wrap: wrap;
+
+  & > div {
+    min-height: 55px;
+
+    @include margin-top(3);
+  }
+
+  & > div:not(.repeatable) {
+    width: 47%;
+  }
+}
+
+[data-bs-theme="dark"] body {
+  ::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+
+  #regAssetForm {
+    div.reg-asset {
+      .fader {
+        background-image:
+          linear-gradient(
+            to bottom,
+            #13202b00,
+            #122739
+            90%
+          );
+      }
+
+      &:not(.nohover):hover {
+        .fader {
+          background-image:
+            linear-gradient(
+              to bottom,
+              #202c3500,
+              #202c35
+              90%
+            );
+        }
+      }
+    }
   }
 }

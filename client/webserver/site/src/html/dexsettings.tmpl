@@ -6,11 +6,11 @@
     <div class="d-flex justify-content-start align-items-center pointer py-2">
       <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 lh1"></span>
     </div>
-    <div class="flex-center"><span class="settings-gear ico-settings"></span></div>
+    <h1 class="text-center"><span class="ico-settings"></span></h1>
     <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
     <div class="flex-center fs16 mb-2">
-      <span class="me-2 connection ico-connection d-hide" id="connectedIcon"></span>
-      <span class="me-2 errcolor ico-disconnected d-hide" id="disconnectedIcon"></span>
+      <span class="me-2 ico-connection d-hide text-success" id="connectedIcon"></span>
+      <span class="me-2 text-danger ico-disconnected d-hide" id="disconnectedIcon"></span>
       <span id="connectionStatus"></span>
     </div>
     <hr>
@@ -36,12 +36,12 @@
             </div>
           </div>
         </div>
-        <div class="flex-center p-4 brdrleft">
-          <button id="changeTier" class="p-2 fs15 hoverbg pointer">[[[Change Tier]]]</button>
+        <div class="flex-center p-4 border-start">
+          <button id="changeTier" class="btn btn-outline-secondary">[[[Change Tier]]]</button>
         </div>
       </div>
       <hr class="mb-1">
-      <div id="otherBondSettings" class="d-flex align-items-stretch brdrbottom pb-1">
+      <div id="otherBondSettings" class="d-flex align-items-stretch border-bottom pb-1">
         <div class="col-12 pe-2">
           <div id="autoRenewBox" class="d-flex justify-content-between align-items-center hoverbg pointer">
             <span>Auto Renew</span>
@@ -49,41 +49,42 @@
               <div id="toggleAutoRenew" class="anitoggle"></div>
             </div>
           </div>
-          <div id="renewErr" class="d-hide flex-center errcolor fs15"></div>
+          <div id="renewErr" class="d-hide flex-center text-danger fs15"></div>
         </div>
-        <div class="col-12 ps-2 brdrleft">
-          <div id="penaltyCompBox" class="d-flex justify-content-between align-items-center hoverbg pointer">
-            <div>
-              <span>Penalty Comps</span>
-              <span class="ico-info fs14" data-tooltip="[[[compensation_tooltip]]]"></span>
+        <div class="col-12 ps-2 border-start hoverbg">
+          <div id="penaltyCompBox" class="row">
+            <div class="col-18">
+              <label for="penaltyCompInput">Penalty Comps
+                <span class="ico-info fs14" data-tooltip="[[[compensation_tooltip]]]"></span>
+              </label>
             </div>
-            <div>
+            <div class="col-6 text-end">
               <span id="penaltyComps"></span>
-              <input id="penaltyCompInput" type="number" step="1" class="d-hide fs14 text-center">
+              <input id="penaltyCompInput" type="number" step="1" class="w-100 text-center d-hide fs14">
             </div>
           </div>
-          <div id="penaltyCompsErr" class="d-hide flex-center errcolor fs15"></div>
+          <div id="penaltyCompsErr" class="d-hide flex-center text-danger fs15"></div>
         </div>
       </div>
       <div id="repMeter" class="w-100">
         {{template "reputationMeter"}}
       </div>
     </div>
-    <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="errMsg"></div>
+    <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="errMsg"></div>
     <div class="settings">
       <div{{if .Exchange.ViewOnly}} class="d-hide"{{end}}>
-        <button id="exportDexBtn" class="bg2 selected">[[[Export Account]]]</button>
+        <button id="exportDexBtn" class="btn btn-outline-secondary">[[[Export Account]]]</button>
       </div>
       <div>
-        <button id="disableAcctBtn" class="bg2 selected">[[[Disable Account]]]</button>
+        <button id="disableAcctBtn" class="btn btn-outline-secondary">[[[Disable Account]]]</button>
       </div>
       <div>
         <input type="file" class="form-control select d-none" id="certFileInput">
-        <button id="updateCertBtn" class="bg2 selected">[[[Update TLS Certificate]]]</button>
-        <span class="update-cert-msg mx-2 d-hide" id="updateCertMsg">[[[successful_cert_update]]]</span>
+        <button id="updateCertBtn" class="btn btn-outline-secondary">[[[Update TLS Certificate]]]</button>
+        <span class="mx-2 d-hide text-success" id="updateCertMsg">[[[successful_cert_update]]]</span>
       </div>
       <div>
-        <button id="updateHostBtn" class="bg2 selected">[[[update dex host]]]</button>
+        <button id="updateHostBtn" class="btn btn-outline-secondary">[[[update dex host]]]</button>
       </div>
     </div>
   </div>

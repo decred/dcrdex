@@ -2,9 +2,9 @@
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{$authed := .UserInfo.Authed}}
-<div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
+<div id="main" data-handler="settings" class="py-5 overflow-y-auto">
   <div class="mw-425 flex-stretch-column mx-auto">
-    <span class="settings-gear ico-settings"></span><br>
+    <h1 class="text-center"><span class="ico-settings"></span></h1>
     <div class="settings">
       <div class="form-check">
         <input class="form-check-input" type="checkbox" value="" id="darkMode">
@@ -16,12 +16,12 @@
       <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
       </div>
       <div id="fiatRateSources" {{if not $authed}} class="d-hide"{{end}}>
-      <span class="mb-2" data-tooltip="[[[fiat_exchange_rate_msg]]]">
-      [[[fiat_exchange_rate_sources]]]:
-      <span class="ico-info"></span>
-      </span>
+      <div class="mb-1" data-tooltip="[[[fiat_exchange_rate_msg]]]">
+        [[[fiat_exchange_rate_sources]]]:
+        <span class="ico-info"></span>
+      </div>
       {{range $source, $enabled := .FiatRateSources}}
-      <div class="form-check">
+      <div class="form-check ms-3">
         <input class="form-check-input" type="checkbox" value="{{$source}}" id="{{$source}}" {{if $enabled}} checked {{end}}>
         <label class="form-check-label" for="{{$source}}">{{$source}}</label>
       </div>
@@ -31,21 +31,21 @@
         <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
           <h5>[[[registered dexes]]]</h5>
           {{range $host, $xc := .Exchanges}}
-            <a href="/dexsettings/{{$host}}"><button class="bg2 selected"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings"></span></div></button></a>
+            <a href="/dexsettings/{{$host}}"><button class="btn btn-outline-secondary"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings ms-2"></span></div></button></a>
           {{end}}
         </div>
         <br>
         <div>
-          <p>
+          <p class="text-muted">
           [[[simultaneous_servers_msg]]]
           </p>
-          <button id="addADex" class="bg2 selected">[[[Add a DEX]]]</button>
-          <button id="importAccount" class="bg2 selected ms-2">[[[Import Account]]]</button>
+          <button id="addADex" class="btn btn-outline-secondary">[[[Add a DEX]]]</button>
+          <button id="importAccount" class="btn btn-outline-secondary ms-2">[[[Import Account]]]</button>
         </div>
       </div>
       <div {{if not .IsInitialized}}class="d-hide"{{end}}>
-          <button id="changeAppPW" class="bg2 selected my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
-          <button id="resetAppPW" class="bg2 selected my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
+          <button id="changeAppPW" class="btn btn-outline-secondary my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
+          <button id="resetAppPW" class="btn btn-outline-secondary my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
       </div>
       <div class="form-check">
         <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
@@ -63,8 +63,8 @@
             </label>
           </div>
           <div id="browserNtfnBlockedMsg" class="d-hide">[[[browser_ntfn_blocked]]]</div>
-          <div id="browserNtfnCheckboxContainer" class="d-hide checkbox-container">
-            <div class="form-check" id="browserNtfnCheckboxTemplate">
+          <div id="browserNtfnCheckboxContainer" class="d-hide">
+            <div class="form-check ms-3" id="browserNtfnCheckboxTemplate">
               <label class="form-check-label" >
               <span data-tmpl="label"></span>
                 <input class="form-check-input" type="checkbox" value="1" data-tmpl="checkbox">
@@ -73,11 +73,11 @@
           </div>
         </form>
       </div>
-      <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-        [[[seed_implore_msg]]]<br>
-        <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>
+      <div class="mb-3 {{if not .UserInfo.Authed}}d-hide{{end}}">
+        <p class="text-muted">[[[seed_implore_msg]]]</p>
+        <button id="exportSeed" class="fs15 btn btn-outline-secondary">[[[View Application Seed]]]</button>
       </div>
-      <div>[[[Build ID]]]: <span id="commitHash" class="mono"></span></div>
+      <p class="text-muted">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
     </div>
   </div>
 
@@ -121,29 +121,29 @@
     {{- /* EXPORT SEED AUTHORIZATION */ -}}
     <form class="d-hide" id="exportSeedAuth">
       <div class="form-closer"><span class="ico-cross"></span></div>
-      <div class="py-1 text-center position-relative fs22 sans-light">
+      <h3>
         [[[Export Seed]]]
-      </div>
+      </h3>
       <div class="fs15 text-start mt-2">
         [[[pw_for_seed]]]
       </div>
       <div class="text-start mt-2">
-        <label for="exportSeedPW" class="ps-1 mb-1">[[[Password]]]</label>
+        <label for="exportSeedPW" class="form-label">[[[Password]]]</label>
         <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end mt-4">
-        <button id="exportSeedSubmit" type="button" class="justify-content-center fs15 bg2 selected">[[[Show Me]]]</button>
+        <button id="exportSeedSubmit" type="button" class="btn btn-success">[[[Show Me]]]</button>
       </div>
-      <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="exportSeedErr"></div>
+      <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="exportSeedErr"></div>
     </form>
 
     {{- /* SEED DISPLAY */ -}}
     <form class="d-hide" id="authorizeSeedDisplay">
       <div class="form-closer"><span class="ico-cross"></span></div>
-      <div class="fs18 sans-light text-center mb-2">[[[dont_share]]]</div>
-      <div class="my-2 p-2 flex-center">
-        <pre class="fs18 mono mx-auto select-all" id="legacySeed"></pre>
-        <div class="fs18 mono mx-auto select-all" id="mnemonic"></div>
+      <h3>[[[dont_share]]]</h3>
+      <div class="mt-3 p-2 flex-center">
+        <div class="fs18 mono mx-auto user-select-all text-break" id="legacySeed"></div>
+        <div class="fs18 mono mx-auto user-select-all text-break" id="mnemonic"></div>
       </div>
     </form>
 
