@@ -1476,7 +1476,7 @@ func (dm *DEX) Healthy() bool {
 		return false
 	}
 	if assetID, found := dex.BipSymbolID("btc"); found {
-		if synced, err := dm.assets[assetID].Backend.Synced(); err != nil || !synced {
+		if synced, _ := dm.assets[assetID].Backend.Synced(); !synced {
 			return false
 		}
 	}
