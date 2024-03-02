@@ -1,7 +1,6 @@
 const path = require('path')
 const webpack = require('webpack')
 const { CleanWebpackPlugin } = require('clean-webpack-plugin')
-const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const StyleLintPlugin = require('stylelint-webpack-plugin')
 const ESLintPlugin = require('eslint-webpack-plugin')
 
@@ -12,39 +11,11 @@ function git(command) {
 
 module.exports = {
   target: "web",
-  module: {
-    rules: [
-      {
-        test: /\.s?[ac]ss$/,
-        use: [
-          MiniCssExtractPlugin.loader,
-          {
-            loader: 'css-loader',
-            options: {
-              modules: false,
-              url: false,
-              sourceMap: true
-            }
-          },
-          {
-            loader: 'sass-loader',
-            options: {
-              implementation: require("sass"), // dart-sass
-              sourceMap: true
-            }
-          }
-        ]
-      }
-    ]
-  },
   plugins: [
     new webpack.EnvironmentPlugin({
       COMMITHASH: git('rev-parse HEAD'),
     }),
     new CleanWebpackPlugin(),
-    new MiniCssExtractPlugin({
-      filename: '../dist/style.css'
-    }),
     new StyleLintPlugin({
       threads: true,
     }),
@@ -60,10 +31,5 @@ module.exports = {
   },
   resolve: {
     extensions: ['.ts', ".js"],
-  },
-  // Fixes weird issue with watch script. See
-  // https://github.com/webpack/webpack/issues/2297#issuecomment-289291324
-  watchOptions: {
-    poll: true
   }
 }

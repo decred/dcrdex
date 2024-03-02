@@ -6,6 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "watch": "webpack --watch --config webpack/dev.js",
+    "dev": "webpack serve --config webpack/dev.js",
     "analyze": "webpack --config webpack/analyze.js",
     "build": "npm exec tsc && webpack --config webpack/prod.js --progress --color",
     "build_dev": "npm exec tsc && webpack --config webpack/dev.js --progress --color",
@@ -21,12 +22,13 @@
     "@babel/preset-env": "^7.21.5",
     "@babel/preset-typescript": "^7.21.5",
     "@babel/runtime": "^7.21.5",
+    "@types/webpack-env": "^1.18.4",
     "@typescript-eslint/eslint-plugin": "^5.59.2",
     "@typescript-eslint/parser": "^5.59.2",
     "babel-loader": "^9.1.2",
     "bootstrap": "^5.2.3",
     "clean-webpack-plugin": "^4.0.0",
-    "css-loader": "^6.7.3",
+    "css-loader": "^6.10.0",
     "css-minimizer-webpack-plugin": "^5.0.0",
     "eslint": "^8.39.0",
     "eslint-config-standard": "^17.0.0",
@@ -37,6 +39,7 @@
     "mini-css-extract-plugin": "^2.7.5",
     "sass": "^1.62.1",
     "sass-loader": "^13.2.2",
+    "style-loader": "^3.3.4",
     "stylelint": "^15.6.1",
     "stylelint-config-standard": "^33.0.0",
     "stylelint-config-standard-scss": "^9.0.0",
@@ -46,6 +49,7 @@
     "webpack": "^5.82.0",
     "webpack-bundle-analyzer": "^4.8.0",
     "webpack-cli": "^5.0.2",
+    "webpack-dev-server": "^5.0.2",
     "webpack-merge": "^5.8.0"
   }
 }

@@ -10,5 +10,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "strictNullChecks": true
-  }
+  },
+  "types": [ "webpack-env" ]
 }
