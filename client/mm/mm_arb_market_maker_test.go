@@ -81,8 +81,8 @@ func TestArbMMRebalance(t *testing.T) {
 		BaseID:     baseID,
 		QuoteID:    quoteID,
 	}
-	buyFeesInQuoteUnits := uint64(2e4)
-	sellFeesInQuoteUnits := uint64(3e4)
+	buyFeesInQuoteUnits := uint64(2e5)
+	sellFeesInQuoteUnits := uint64(3e5)
 
 	coreAdaptor := newTBotCoreAdaptor(newTCore())
 	coreAdaptor.buyFeesInQuote = buyFeesInQuoteUnits
@@ -184,7 +184,7 @@ func TestArbMMRebalance(t *testing.T) {
 		t.Fatal(spew.Sprintf("expected sell placements:\n%#+v\ngot:\n%#+v", expSellPlacements, coreAdaptor.lastMultiTradeSells))
 	}
 
-	// Make sure GroupeMultiTrade was called with the correct reserve arguments.
+	// Make sure MultiTrade was called with the correct reserve arguments.
 	expectedDEXReserves := map[uint32]uint64{baseID: 0, quoteID: quoteDexReserves}
 	expectedCEXReserves := map[uint32]uint64{baseID: baseCexReserves, quoteID: 0}
 	if !reflect.DeepEqual(coreAdaptor.buysCEXReserves, expectedCEXReserves) {

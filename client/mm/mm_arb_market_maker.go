@@ -229,17 +229,12 @@ func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *core.M
 // logic is in the dexPlacementRate function, so that it can be separately
 // tested.
 func (a *arbMarketMaker) dexPlacementRate(cexRate uint64, sell bool) (uint64, error) {
-	sellFeesInQuoteUnits, err := a.core.OrderFeesInUnits(true, false, cexRate)
+	feesInQuoteUnits, err := a.core.OrderFeesInUnits(sell, false, cexRate)
 	if err != nil {
-		return 0, fmt.Errorf("error getting sell fees in quote units: %w", err)
+		return 0, fmt.Errorf("error getting fees in quote units: %w", err)
 	}
 
-	buyFeesInQuoteUnits, err := a.core.OrderFeesInUnits(false, false, cexRate)
-	if err != nil {
-		return 0, fmt.Errorf("error getting buy fees in quote units: %w", err)
-	}
-
-	return dexPlacementRate(cexRate, sell, a.cfg.Profit, a.mkt, sellFeesInQuoteUnits+buyFeesInQuoteUnits)
+	return dexPlacementRate(cexRate, sell, a.cfg.Profit, a.mkt, feesInQuoteUnits)
 }
 
 func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {

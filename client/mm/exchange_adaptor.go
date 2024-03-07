@@ -1598,19 +1598,36 @@ func (u *unifiedExchangeAdaptor) fiatRate(assetID uint32) float64 {
 
 // ExchangeRateFromFiatSources returns market's exchange rate using fiat sources.
 func (u *unifiedExchangeAdaptor) ExchangeRateFromFiatSources() uint64 {
-	baseRate := u.fiatRate(u.market.BaseID)
-	quoteRate := u.fiatRate(u.market.QuoteID)
-	if baseRate == 0 || quoteRate == 0 {
-		return 0
-	}
-
-	market, err := u.ExchangeMarket(u.market.Host, u.market.BaseID, u.market.QuoteID)
+	atomicCFactor, err := u.atomicConversionRateFromFiat(u.market.BaseID, u.market.QuoteID)
 	if err != nil {
-		u.log.Errorf("Error getting market: %v", err)
+		u.log.Errorf("Error genrating atomic conversion rate: %v", err)
 		return 0
 	}
+	return uint64(math.Round(atomicCFactor * calc.RateEncodingFactor))
+}
 
-	return market.ConventionalRateToMsg(baseRate / quoteRate)
+// atomicConversionRateFromFiat generates a conversion rate suitable for
+// converting from atomic units of one asset to atomic units of another.
+// This is the same as a message-rate, but without the RateEncodingFactor,
+// hence a float.
+func (u *unifiedExchangeAdaptor) atomicConversionRateFromFiat(fromID, toID uint32) (float64, error) {
+	fromRate := u.fiatRate(fromID)
+	toRate := u.fiatRate(toID)
+	if fromRate == 0 || toRate == 0 {
+		return 0, fmt.Errorf("missing fiat rate. rate for %d = %f, rate for %d = %f", fromID, fromRate, toID, toRate)
+	}
+
+	fromUI, err := asset.UnitInfo(fromID)
+	if err != nil {
+		return 0, fmt.Errorf("exchangeRates from asset %d not found", fromID)
+	}
+	toUI, err := asset.UnitInfo(toID)
+	if err != nil {
+		return 0, fmt.Errorf("exchangeRates to asset %d not found", toID)
+	}
+
+	// v_to_atomic = v_from_atomic / from_conv_factor * convConversionRate / to_conv_factor
+	return 1 / float64(fromUI.Conventional.ConversionFactor) * fromRate / toRate * float64(toUI.Conventional.ConversionFactor), nil
 }
 
 // OrderFees returns the fees for a buy and sell order. The order fees are for
@@ -1632,55 +1649,32 @@ func (u *unifiedExchangeAdaptor) orderFees() (buyFees, sellFees *orderFees, err 
 // or quote asset is a token, the fees are converted using fiat rates.
 // Otherwise, the rate parameter is used for the conversion.
 func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) (uint64, error) {
-	convertTokenAssetFees := func(fees uint64, token *asset.Token) (uint64, error) {
-		var unitsAsset uint32
-		if base {
-			unitsAsset = u.market.BaseID
-		} else {
-			unitsAsset = u.market.QuoteID
-		}
-
-		parentFiatRate := u.fiatRate(token.ParentID)
-		if parentFiatRate == 0 {
-			return 0, fmt.Errorf("no fiat rate available for asset %d", token.ParentID)
-		}
-		fiatRate := u.fiatRate(unitsAsset)
-		if fiatRate == 0 {
-			return 0, fmt.Errorf("no fiat rate available for asset %d", unitsAsset)
-		}
-		baseParentUnitInfo, err := asset.UnitInfo(token.ParentID)
-		if err != nil {
-			return 0, fmt.Errorf("error getting unit info: %v", err)
-		}
-		unitInfo, err := asset.UnitInfo(unitsAsset)
-		if err != nil {
-			return 0, fmt.Errorf("error getting unit info: %v", err)
-		}
-
-		feeConv := float64(fees) / float64(baseParentUnitInfo.Conventional.ConversionFactor)
-		receivingAssetConv := feeConv * parentFiatRate / fiatRate
-		return uint64(receivingAssetConv * float64(unitInfo.Conventional.ConversionFactor)), nil
-	}
-
 	buyFees, sellFees, err := u.orderFees()
 	if err != nil {
 		return 0, fmt.Errorf("error getting order fees: %v", err)
 	}
-
-	var baseFees, quoteFees uint64
+	baseFees, quoteFees := buyFees.redemption, buyFees.swap
 	if sell {
-		baseFees += sellFees.swap
-		quoteFees += sellFees.redemption
-	} else {
-		baseFees += buyFees.redemption
-		quoteFees += buyFees.swap
+		baseFees, quoteFees = sellFees.swap, sellFees.redemption
+	}
+	toID := u.market.QuoteID
+	if base {
+		toID = u.market.BaseID
+	}
+
+	convertViaFiat := func(fees uint64, fromID uint32) (uint64, error) {
+		atomicCFactor, err := u.atomicConversionRateFromFiat(fromID, toID)
+		if err != nil {
+			return 0, err
+		}
+		return uint64(math.Round(float64(fees) * atomicCFactor)), nil
 	}
 
 	var baseFeesInUnits, quoteFeesInUnits uint64
 
 	baseToken := asset.TokenInfo(u.market.BaseID)
 	if baseToken != nil {
-		baseFeesInUnits, err = convertTokenAssetFees(baseFees, baseToken)
+		baseFeesInUnits, err = convertViaFiat(baseFees, baseToken.ParentID)
 		if err != nil {
 			return 0, err
 		}
@@ -1694,7 +1688,7 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 
 	quoteToken := asset.TokenInfo(u.market.QuoteID)
 	if quoteToken != nil {
-		quoteFeesInUnits, err = convertTokenAssetFees(quoteFees, quoteToken)
+		quoteFeesInUnits, err = convertViaFiat(quoteFees, quoteToken.ParentID)
 		if err != nil {
 			return 0, err
 		}
