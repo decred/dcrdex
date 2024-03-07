@@ -431,7 +431,7 @@ type baseWallet struct {
 
 	// subprocessWg must be incremented every time the wallet starts a
 	// goroutine that will use node or the tx history DB.
-	subprocessWg *sync.WaitGroup
+	subprocessWg sync.WaitGroup
 }
 
 // assetWallet is a wallet backend for Ethereum and Eth tokens. The backend is
@@ -731,7 +731,6 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		pendingTxs:   make(map[uint64]*extendedWalletTx),
 		// Can be empty
 		multiBalanceAddress: cfg.MultiBalAddress,
-		subprocessWg:        new(sync.WaitGroup),
 	}
 
 	var maxSwapGas, maxRedeemGas uint64

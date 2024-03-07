@@ -828,7 +828,7 @@ type baseWallet struct {
 
 	// subprocessWg must be incremented every time the wallet starts a
 	// goroutine that will use node or the tx history DB.
-	subprocessWg *sync.WaitGroup
+	subprocessWg sync.WaitGroup
 }
 
 func (w *baseWallet) fallbackFeeRate() uint64 {
@@ -1263,7 +1263,6 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		pendingTxs:        make(map[chainhash.Hash]ExtendedWalletTx),
 		walletDir:         walletDir,
 		ar:                addressRecyler,
-		subprocessWg:      new(sync.WaitGroup),
 	}
 	w.cfgV.Store(baseCfg)
 

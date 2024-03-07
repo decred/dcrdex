@@ -692,7 +692,7 @@ type ExchangeWallet struct {
 
 	// subprocessWg must be incremented every time the wallet starts a
 	// goroutine that will use node or the tx history DB.
-	subprocessWg *sync.WaitGroup
+	subprocessWg sync.WaitGroup
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -768,12 +768,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		if err != nil {
 			return nil, err
 		}
-		path := filepath.Join(cfg.DataDir, chainParams.Name, "txhistory.db")
-		txHistoryDB, err := btc.NewBadgerTxDB(path, dcr.log.SubLogger("TXHISTORYDB"))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create tx history db: %v", err)
-		}
-		dcr.txHistoryDB.Store(txHistoryDB)
 	default:
 		makeCustomWallet, ok := customWalletConstructors[cfg.Type]
 		if !ok {
@@ -857,7 +851,6 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		subsidyCache:        blockchain.NewSubsidyCache(chainParams),
 		pendingTxs:          make(map[chainhash.Hash]*btc.ExtendedWalletTx),
 		walletDir:           dir,
-		subprocessWg:        new(sync.WaitGroup),
 	}
 
 	if b, err := os.ReadFile(vspFilepath); err == nil {
