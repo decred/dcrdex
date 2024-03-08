@@ -687,8 +687,6 @@ export interface BasicMarketMakingConfig {
   oracleWeighting: number
   oracleBias: number
   emptyMarketRate: number
-  baseOptions?: Record<string, string>
-  quoteOptions?: Record<string, string>
 }
 
 export interface ArbMarketMakingPlacement {
@@ -702,18 +700,12 @@ export interface ArbMarketMakingConfig {
   profit: number
   driftTolerance: number
   orderPersistence: number
-  baseOptions?: Record<string, string>
-  quoteOptions?: Record<string, string>
-  autoRebalance?: AutoRebalanceConfig
 }
 
 export interface SimpleArbConfig {
   profitTrigger: number
   maxActiveArbs: number
   numEpochsLeaveOpen: number
-  baseOptions?: Record<string, string>
-  quoteOptions?: Record<string, string>
-  autoRebalance?: AutoRebalanceConfig
 }
 
 export enum BalanceType {
@@ -727,6 +719,7 @@ export interface BotCEXCfg {
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
+  autoRebalance?: AutoRebalanceConfig
 }
 
 export interface BotConfig {
@@ -738,6 +731,8 @@ export interface BotConfig {
   quoteBalanceType: BalanceType
   quoteBalance: number
   cexCfg?: BotCEXCfg
+  baseWalletOptions?: Record<string, string>
+  quoteWalletOptions?: Record<string, string>
   basicMarketMakingConfig?: BasicMarketMakingConfig
   arbMarketMakingConfig?: ArbMarketMakingConfig
   simpleArbConfig?: SimpleArbConfig

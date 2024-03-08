@@ -13,7 +13,20 @@
                 "baseBalanceType": 0,
                 "quoteBalanceType": 0,
                 "baseBalance": 100,
-                "quoteBalance": 100
+                "quoteBalance": 100,
+                "autoRebalance": {
+                    "minBaseAmt": 3000000000,
+                    "minBaseTransfer" : 1000000000,
+                    "minQuoteAmt": 20000000,
+                    "minQuoteTransfer": 10000000
+                }
+            },
+            "baseWalletOptions": {
+                "multisplit": "true"
+            },
+            "quoteWalletOptions": {
+                "multisplit": "true",
+                "multisplitbuffer": "5"
             },
             "arbMarketMakingConfig": {
                 "cexName": "Binance",
@@ -55,20 +68,7 @@
                 ],
                 "profit": 0.01,
                 "driftTolerance" : 0.001,
-                "orderPersistence": 10,
-                "baseOptions": {
-                    "multisplit": "true"
-                },
-                "quoteOptions": {
-                    "multisplit": "true",
-                    "multisplitbuffer": "5"
-                },
-                "autoRebalance": {
-                    "minBaseAmt": 3000000000,
-                    "minBaseTransfer" : 1000000000,
-                    "minQuoteAmt": 20000000,
-                    "minQuoteTransfer": 10000000
-                }
+                "orderPersistence": 10
             }
         }
     ],

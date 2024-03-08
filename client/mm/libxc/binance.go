@@ -1418,8 +1418,6 @@ func (bnc *binance) handleMarketDataNote(b []byte) {
 	slug := parts[0] // will be lower-case
 	mktID := strings.ToUpper(slug)
 
-	bnc.log.Infof("Received book update for %q", mktID)
-
 	bnc.booksMtx.Lock()
 	defer bnc.booksMtx.Unlock()
 
