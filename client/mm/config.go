@@ -61,6 +61,11 @@ type BotCEXCfg struct {
 	AutoRebalance    *AutoRebalanceConfig `json:"autoRebalance"`
 }
 
+// #### IMPORTANT ###
+// If non-backwards compatible changes are made to the BotConfig, a new version
+// should be created and the event log db should be updated to support both
+// versions.
+
 // BotConfig is the configuration for a market making bot.
 // The balance fields are the initial amounts that will be reserved to use for
 // this bot. As the bot trades, the amounts reserved for it will be updated.

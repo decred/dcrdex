@@ -352,6 +352,8 @@ type tradeInfo struct {
 	baseID    uint32
 	quoteID   uint32
 	sell      bool
+	rate      uint64
+	qty       uint64
 }
 
 type binance struct {
@@ -717,6 +719,8 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		baseID:    baseID,
 		quoteID:   quoteID,
 		sell:      sell,
+		rate:      rate,
+		qty:       qty,
 	}
 	bnc.tradeUpdaterMtx.Unlock()
 
@@ -773,15 +777,15 @@ func (bnc *binance) assetPrecision(coin string) (int, error) {
 // Withdraw withdraws funds from the CEX to a certain address. onComplete
 // is called with the actual amount withdrawn (amt - fees) and the
 // transaction ID of the withdrawal.
-func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(uint64, string)) error {
+func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(string)) (string, error) {
 	assetCfg, err := bncAssetCfg(assetID)
 	if err != nil {
-		return fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
+		return "", fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
 	}
 
 	precision, err := bnc.assetPrecision(assetCfg.coin)
 	if err != nil {
-		return fmt.Errorf("error getting precision for %s: %w", assetCfg.coin, err)
+		return "", fmt.Errorf("error getting precision for %s: %w", assetCfg.coin, err)
 	}
 
 	amt := float64(qty) / float64(assetCfg.conversionFactor)
@@ -796,11 +800,11 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 	}{}
 	err = bnc.postAPI(ctx, "/sapi/v1/capital/withdraw/apply", nil, v, true, true, &withdrawResp)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	go func() {
-		getWithdrawalStatus := func() (complete bool, amount uint64, txID string) {
+		getWithdrawalStatus := func() (complete bool, txID string) {
 			type withdrawalHistoryStatus struct {
 				ID     string  `json:"id"`
 				Amount float64 `json:"amount,string"`
@@ -814,7 +818,7 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 			err = bnc.getAPI(ctx, "/sapi/v1/capital/withdraw/history", v, true, true, &withdrawHistoryResponse)
 			if err != nil {
 				bnc.log.Errorf("Error getting withdrawal status: %v", err)
-				return false, 0, ""
+				return false, ""
 			}
 
 			var status *withdrawalHistoryStatus
@@ -826,13 +830,12 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 			}
 			if status == nil {
 				bnc.log.Errorf("Withdrawal status not found for %s", withdrawResp.ID)
-				return false, 0, ""
+				return false, ""
 			}
 
 			bnc.log.Tracef("Withdrawal status: %+v", status)
 
-			amt := status.Amount * float64(assetCfg.conversionFactor)
-			return status.Status == 6, uint64(amt), status.TxID
+			return status.Status == 6, status.TxID
 		}
 
 		for {
@@ -843,15 +846,15 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if complete, amt, txID := getWithdrawalStatus(); complete {
-					onComplete(amt, txID)
+				if complete, txID := getWithdrawalStatus(); complete {
+					onComplete(txID)
 					return
 				}
 			}
 		}
 	}()
 
-	return nil
+	return withdrawResp.ID, nil
 }
 
 // GetDepositAddress returns a deposit address for an asset.
@@ -878,7 +881,7 @@ func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (stri
 
 // ConfirmDeposit is an async function that calls onConfirm when the status of
 // a deposit has been confirmed.
-func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(bool, uint64)) {
+func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(uint64)) {
 	const (
 		pendingStatus            = 0
 		successStatus            = 1
@@ -887,7 +890,7 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 		waitingUserConfirmStatus = 8
 	)
 
-	checkDepositStatus := func() (success, done bool, amt uint64) {
+	checkDepositStatus := func() (done bool, amt uint64) {
 		var resp []struct {
 			Amount  float64 `json:"amount,string"`
 			Coin    string  `json:"coin"`
@@ -898,7 +901,7 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", nil, true, true, &resp)
 		if err != nil {
 			bnc.log.Errorf("error getting deposit status: %v", err)
-			return false, false, 0
+			return false, 0
 		}
 
 		for _, status := range resp {
@@ -909,30 +912,30 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 					assetID, found := dex.BipSymbolID(dexSymbol)
 					if !found {
 						bnc.log.Errorf("Failed to find DEX asset ID for Coin: %s, Network: %s", status.Coin, status.Network)
-						return false, true, 0
+						return true, 0
 					}
 					ui, err := asset.UnitInfo(assetID)
 					if err != nil {
 						bnc.log.Errorf("Failed to find unit info for asset ID %d", assetID)
-						return false, true, 0
+						return true, 0
 					}
 					amount := uint64(status.Amount * float64(ui.Conventional.ConversionFactor))
-					return true, true, amount
+					return true, amount
 				case pendingStatus:
-					return false, false, 0
+					return false, 0
 				case waitingUserConfirmStatus:
 					// This shouldn't ever happen.
 					bnc.log.Errorf("Deposit %s to binance requires user confirmation!")
-					return false, true, 0
+					return true, 0
 				case wrongDepositStatus:
-					return false, true, 0
+					return true, 0
 				default:
 					bnc.log.Errorf("Deposit %s to binance has an unknown status %d", status.Status)
 				}
 			}
 		}
 
-		return false, false, 0
+		return false, 0
 	}
 
 	go func() {
@@ -944,9 +947,9 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				success, done, amt := checkDepositStatus()
+				done, amt := checkDepositStatus()
 				if done {
-					onConfirm(success, amt)
+					onConfirm(amt)
 					return
 				}
 			}
@@ -1233,6 +1236,8 @@ func (bnc *binance) handleExecutionReport(update *binanceStreamUpdate) {
 	updater <- &Trade{
 		ID:          id,
 		Complete:    complete,
+		Rate:        tradeInfo.rate,
+		Qty:         tradeInfo.qty,
 		BaseFilled:  uint64(update.Filled * float64(baseCfg.conversionFactor)),
 		QuoteFilled: uint64(update.QuoteFilled * float64(quoteCfg.conversionFactor)),
 		BaseID:      tradeInfo.baseID,
