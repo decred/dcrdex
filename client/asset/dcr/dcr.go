@@ -695,6 +695,7 @@ var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 var _ asset.Bonder = (*ExchangeWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWallet)(nil)
 var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
+var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -4008,6 +4009,11 @@ func (dcr *ExchangeWallet) NewAddress() (string, error) {
 	return dcr.DepositAddress()
 }
 
+// AddressUsed checks if a wallet address has been used.
+func (dcr *ExchangeWallet) AddressUsed(addrStr string) (bool, error) {
+	return dcr.wallet.AddressUsed(dcr.ctx, addrStr)
+}
+
 // Unlock unlocks the exchange wallet.
 func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 	// Older SPV wallet potentially need an upgrade while we have a password.
@@ -5704,7 +5710,8 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 			blockToQuery = tip - blockQueryBuffer
 		}
 
-		recentTxs, err := dcr.wallet.ListSinceBlock(ctx, int32(blockToQuery), int32(tip), int32(tip))
+		const rangeEndMempool = -1
+		recentTxs, err := dcr.wallet.ListSinceBlock(ctx, int32(blockToQuery), rangeEndMempool, int32(tip))
 		if err != nil {
 			dcr.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
 			recentTxs = nil
@@ -5742,7 +5749,12 @@ func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
 				}
 			}
 
-			dcr.addTxToHistory(txType, txHash, toAtoms(tx.Amount), fee, nil, nil, true)
+			var addr *string
+			if txType == asset.Receive {
+				addr = &tx.Address
+			}
+
+			dcr.addTxToHistory(txType, txHash, toAtoms(tx.Amount), fee, nil, addr, true)
 		}
 
 		for _, tx := range recentTxs {
@@ -6065,6 +6077,10 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			if walletTip == nil {
 				// Mempool tx seen.
 				dcr.emitBalance()
+				dcr.tipMtx.RLock()
+				tipHeight := uint64(dcr.currentTip.height)
+				dcr.tipMtx.RUnlock()
+				go dcr.checkPendingTxs(ctx, tipHeight)
 				continue
 			}
 			if queuedBlock != nil && walletTip.height >= queuedBlock.height {

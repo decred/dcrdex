@@ -365,3 +365,9 @@ func syncStatus(c rpcCaller) (*btc.SyncStatus, error) {
 		Syncing: chainInfo.Syncing(),
 	}, nil
 }
+
+func getReceivedByAddress(c rpcCaller, addrStr string) (recv uint64, _ error) {
+	const minConf = 0
+	const inZats = true
+	return recv, c.CallRPC("getreceivedbyaddress", []any{addrStr, minConf, inZats}, &recv)
+}

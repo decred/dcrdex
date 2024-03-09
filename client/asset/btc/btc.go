@@ -892,6 +892,7 @@ var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
 var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
 var _ asset.AddressReturner = (*baseWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWalletSPV)(nil)
+var _ asset.NewAddresser = (*baseWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -4257,6 +4258,11 @@ func (btc *baseWallet) NewAddress() (string, error) {
 	return btc.DepositAddress()
 }
 
+// AddressUsed checks if a wallet address has been used.
+func (btc *baseWallet) AddressUsed(addrStr string) (bool, error) {
+	return btc.node.addressUsed(addrStr)
+}
+
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 // pay the registration fee using the provided feeRate.
 func (btc *baseWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
@@ -5398,7 +5404,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 					}
 				}
 
-				btc.addTxToHistory(asset.Receive, txHash, toSatoshi(tx.Amount), fee, nil, nil, true)
+				btc.addTxToHistory(asset.Receive, txHash, toSatoshi(tx.Amount), fee, nil, &tx.Address, true)
 			}
 		}
 	}

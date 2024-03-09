@@ -552,4 +552,5 @@ var EnUS = map[string]string{
 	"configure_cex_prompt":        "Configure your exchange API to enable arbitrage features.",
 	"API Key":                     "API Key",
 	"API Secret":                  "API Secret",
+	"address has been used":       "address has been used",
 }
