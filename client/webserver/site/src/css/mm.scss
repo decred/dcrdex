@@ -108,6 +108,19 @@ div[data-handler=mmsettings] {
   }
 }
 
+.balance-layover {
+  background-color: #777;
+  z-index: 99;
+  position: absolute;
+  padding: 4px;
+  border-radius: 3px;
+  border-color: #242424;
+}
+
+.dark-logo {
+  display: none;
+}
+
 body.dark #main.mm {
   #marketSelect option {
     background-color: $dark_body_bg;
@@ -119,5 +132,13 @@ body.dark #main.mm {
 
   #botTable {
     @extend .table-dark;
+  }
+
+  .dark-logo {
+    display: inline;
+  }
+
+  .light-logo {
+    display: none;
   }
 }

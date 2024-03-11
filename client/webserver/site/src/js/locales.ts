@@ -186,6 +186,9 @@ export const ID_BOTTYPE_SIMPLE_ARB = 'BOTTYPE_SIMPLE_ARB'
 export const ID_NO_BOTTYPE = 'NO_BOTTYPE'
 export const ID_NO_CEX = 'NO_CEX'
 export const ID_CEXBALANCE_ERR = 'CEXBALANCE_ERR'
+export const ID_PENDING = 'PENDING'
+export const ID_COMPLETE = 'COMPLETE'
+export const ID_ARCHIVED_SETTINGS = 'ARCHIVED_SETTINGS'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -372,7 +375,10 @@ export const enUS: Locale = {
   [ID_BOTTYPE_SIMPLE_ARB]: 'Simple Arbitrage',
   [ID_NO_BOTTYPE]: 'choose a bot type',
   [ID_NO_CEX]: 'choose an exchange for arbitrage',
-  [ID_CEXBALANCE_ERR]: 'error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}'
+  [ID_CEXBALANCE_ERR]: 'error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}',
+  [ID_PENDING]: 'Pending',
+  [ID_COMPLETE]: 'Complete',
+  [ID_ARCHIVED_SETTINGS]: 'These were the settings of the run started at {{ startTime }}'
 }
 
 export const ptBR: Locale = {

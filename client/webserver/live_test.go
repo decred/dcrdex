@@ -2190,6 +2190,10 @@ func (m *TMarketMaker) Running() bool {
 
 func (m *TMarketMaker) Status() *mm.Status {
 	running := m.running.Load()
+	var stats *mm.RunStats
+	if running {
+		stats = &mm.RunStats{}
+	}
 	status := &mm.Status{
 		Running: running,
 		CEXes:   make(map[string]*mm.CEXStatus, len(m.cfg.CexConfigs)),
@@ -2197,8 +2201,8 @@ func (m *TMarketMaker) Status() *mm.Status {
 	}
 	for _, botCfg := range m.cfg.BotConfigs {
 		status.Bots = append(status.Bots, &mm.BotStatus{
-			Config:  botCfg,
-			Running: running,
+			Config:   botCfg,
+			RunStats: stats,
 		})
 	}
 	for _, cexCfg := range m.cfg.CexConfigs {
@@ -2210,6 +2214,18 @@ func (m *TMarketMaker) Status() *mm.Status {
 		}
 	}
 	return status
+}
+
+func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error) {
+	return &mm.MarketMakingRunOverview{}, nil
+}
+
+func (m *TMarketMaker) ArchivedRuns() ([]*mm.MarketMakingRun, error) {
+	return []*mm.MarketMakingRun{}, nil
+}
+
+func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, error) {
+	return []*mm.MarketMakingEvent{}, nil
 }
 
 func TestServer(t *testing.T) {

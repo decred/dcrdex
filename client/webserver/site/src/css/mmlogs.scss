@@ -1,0 +1,24 @@
+div[data-handler=mmlogs] {
+    #eventsTable, #dexOrderTxsTable {
+        @extend .table; 
+        @extend .table-striped; 
+    }
+
+    img {
+        width: 16px;
+        height: 16px;
+    }  
+}
+
+#dexOrderDetailsForm,
+#cexOrderDetailsForm,
+#depositDetailsForm,
+#withdrawalDetailsForm {
+    min-width: 400px;
+}
+
+body.dark div[data-handler=mmlogs] {
+    #eventsTable, #dexOrderTxsTable {
+      @extend .table-dark;
+    }
+}

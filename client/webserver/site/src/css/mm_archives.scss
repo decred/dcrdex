@@ -1,0 +1,21 @@
+div[data-handler=mmarchives] {
+    #runSelect {
+        width: 20%;
+    }
+
+    #runTable {
+        @extend .table; 
+        @extend .table-striped; 
+    }
+
+    img {
+        width: 16px;
+        height: 16px;
+    }  
+}
+
+body.dark div[data-handler=mmarchives] {
+    #runTable {
+        @extend .table-dark;
+    }
+}

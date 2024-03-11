@@ -270,6 +270,7 @@ interface BotSpecs {
   quoteID: number
   botType: string
   cexName?: string
+  startTime?: number
 }
 
 interface MarketRow {
@@ -337,7 +338,10 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.resetButton, 'click', () => { this.setOriginalValues(false) })
     Doc.bind(page.updateButton, 'click', () => { this.saveSettings() })
     Doc.bind(page.createButton, 'click', async () => { this.saveSettings() })
-    Doc.bind(page.backButton, 'click', () => { app().loadPage('mm') })
+    Doc.bind(page.backButton, 'click', () => {
+      const backPage = this.specs.startTime ? 'mmarchives' : 'mm'
+      app().loadPage(backPage)
+    })
     Doc.bind(page.cexSubmit, 'click', () => { this.handleCEXSubmit() })
     bindForm(page.botTypeForm, page.botTypeSubmit, () => { this.submitBotType() })
     Doc.bind(page.noMarketBttn, 'click', () => { this.showMarketSelectForm() })
@@ -440,7 +444,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     State.storeLocal(specLK, this.specs)
 
     const viewOnly = isViewOnly(this.specs, this.mmStatus)
-    const botCfg = botConfig(this.specs, this.mmStatus)
+    const botCfg = await botConfig(this.specs, this.mmStatus)
     const dmm = defaultMarketMakingConfig
 
     const oldCfg = this.originalConfig = Object.assign({}, defaultMarketMakingConfig, {
@@ -526,7 +530,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     Doc.setVis(!viewOnly, page.profitPrompt)
-    Doc.setVis(viewOnly, page.viewOnly)
+    Doc.setVis(viewOnly && !this.specs.startTime, page.viewOnlyRunning)
+    Doc.setVis(viewOnly && this.specs.startTime, page.viewOnlyArchived)
+    if (this.specs.startTime) {
+      const startTimeStr = (new Date(this.specs.startTime * 1000)).toLocaleString()
+      page.viewOnlyArchivedMsg.textContent = intl.prep(intl.ID_ARCHIVED_SETTINGS, { startTime: startTimeStr })
+    }
     page.profitInput.disabled = viewOnly
 
     // Now that we've updated the originalConfig, we'll copy it.
@@ -546,7 +555,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.formSpecs = { host, baseID, quoteID, botType: '' }
     const viewOnly = isViewOnly(this.formSpecs, this.mmStatus)
     if (viewOnly) {
-      const botCfg = botConfig(this.formSpecs, this.mmStatus)
+      const botCfg = await botConfig(this.formSpecs, this.mmStatus)
       const specs = this.specs = this.formSpecs
       switch (true) {
         case Boolean(botCfg?.simpleArbConfig):
@@ -2148,12 +2157,14 @@ function calculateQuoteLot (lotSize: number, baseID:number, quoteID: number, spo
   return qFactor
 }
 
-function isViewOnly (specs: BotSpecs, mmStatus: MarketMakingStatus) {
-  return Boolean(botConfig(specs, mmStatus)) && mmStatus.running
+function isViewOnly (specs: BotSpecs, mmStatus: MarketMakingStatus) : boolean {
+  return (Boolean(botConfig(specs, mmStatus)) && mmStatus.running) || (specs.startTime !== undefined && specs.startTime > 0)
 }
 
-function botConfig (specs: BotSpecs, mmStatus: MarketMakingStatus) {
-  const { baseID, quoteID, host } = specs
+async function botConfig (specs: BotSpecs, mmStatus: MarketMakingStatus) : Promise<BotConfig | null> {
+  const { baseID, quoteID, host, startTime } = specs
+  if (startTime) return (await MM.mmRunOverview(host, baseID, quoteID, startTime)).cfg
+
   const cfgs = (mmStatus.bots || []).map((s: MMBotStatus) => s.config).filter((cfg: BotConfig) => {
     return cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host
   })
