@@ -89,7 +89,7 @@
               <input type="number" id="profitInput" class="p-2 text-center fs24 me-1">
               <span class="fs24">%</span>
             </div>
-            <div id="profitInputErr" class="flex-center fs16 errcolor"></div>
+            <div id="profitInputErr" class="flex-center fs16 text-danger"></div>
           </div>
         </div>
 
@@ -135,7 +135,7 @@
                 </tr>
               </tbody>
             </table>
-            <span id="buyPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+            <span id="buyPlacementsErr" class="fs15 pt-3 text-center d-hide text-danger text-break"></span>
           </div>
         </div>
 
@@ -167,7 +167,7 @@
                 </tr>
               </tbody>
             </table>
-            <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></span>
+            <span id="sellPlacementsErr" class="fs15 pt-3 text-center d-hide text-danger text-break"></span>
           </div>
         </div>
         <div id="switchToQuickConfig" class="flex-center p-2 hoverbg pointer border rounded3 mt-3">
@@ -296,7 +296,7 @@
             <div id="qcMatchBufferContainer" class="slider-container"></div>
           </div>
         </div>
-        <div id="qcError" class="pt-2 errcolor"></div>
+        <div id="qcError" class="pt-2 text-danger"></div>
       </div>
 
       <div id="placementsChartBox">
@@ -304,7 +304,7 @@
         <span id="placementChartLegend" class="fs16 grey mt-1">δ = remote exchange gap</span>
       </div>
 
-      <div class="d-flex align-items-stretch mt-3 brdr rounded3">
+      <div id="balanceChecks" class="d-flex align-items-stretch mt-3 brdr rounded3">
         {{- /* BASE BALANCE CHECK */ -}}
         <div class="col-12 d-flex flex-column align-items-stretch">
           <div class="d-flex align-items-center justify-content-between p-2 brdrbottom">
@@ -316,18 +316,18 @@
               <div class="ico-check me-1"></div>
               <span>OK</span>
             </div>
-            <div id="baseBalNotOK" class="flex-center ico-cross fs14 errcolor me-1"></div>
+            <div id="baseBalNotOK" class="flex-center ico-cross fs14 text-danger me-1"></div>
           </div>
           <div id="baseBalOKBals" class="d-flex align-items-start flex-column p-2">
             <span>Commited: <span id="baseBalanceCommit" class="fs17 demi"></span> <span class="fs15 grey" data-base-ticker></span></span>
-            <span class="lh1">├─ dex: <span id="baseBalanceDEXCommit" class="fs17 demi"></span></span>
-            <span class="lh1">└─ cex: <span id="baseBalanceCEXCommit" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>├─ dex: <span id="baseBalanceDEXCommit" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>└─ cex: <span id="baseBalanceCEXCommit" class="fs17 demi"></span></span>
           </div>
           <div id="baseBalNotOKBals" class="d-flex flex-column align-items-start p-2 d-hide">
             <span>Required: <span id="baseBalanceRequired" class="fs17 demi"></span> <span class="fs15 grey" data-base-ticker></span></span>
             <span>Available: <span id="baseBalanceAvail" class="fs17 demi"></span> <span class="fs15 grey" data-base-ticker></span></span>
-            <span class="lh1">├─ dex: <span id="baseBalanceDEXAvail" class="fs17 demi"></span></span>
-            <span class="lh1">└─ cex: <span id="baseBalanceCEXAvail" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>├─ dex: <span id="baseBalanceDEXAvail" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>└─ cex: <span id="baseBalanceCEXAvail" class="fs17 demi"></span></span>
           </div>
         </div>
 
@@ -342,18 +342,18 @@
               <div class="ico-check me-1"></div>
               <span>OK</span>
             </div>
-            <div id="quoteBalNotOK" class="flex-center ico-cross fs14 errcolor me-1"></div>
+            <div id="quoteBalNotOK" class="flex-center ico-cross fs14 text-danger me-1"></div>
           </div>
           <div id="quoteBalOKBals" class="d-flex align-items-start flex-column p-2">
             <span>Commited: <span id="quoteBalanceCommit" class="fs17 demi"></span> <span class="fs15 grey" data-quote-ticker></span></span>
-            <span class="lh1">├─ dex: <span id="quoteBalanceDEXCommit" class="fs17 demi"></span></span>
-            <span class="lh1">└─ cex: <span id="quoteBalanceCEXCommit" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>├─ dex: <span id="quoteBalanceDEXCommit" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>└─ cex: <span id="quoteBalanceCEXCommit" class="fs17 demi"></span></span>
           </div>
           <div id="quoteBalNotOKBals" class="d-flex flex-column align-items-start p-2 d-hide">
             <span>Required: <span id="quoteBalanceRequired" class="fs17 demi"></span> <span class="fs15 grey" data-quote-ticker></span></span>
             <span>Available: <span id="quoteBalanceAvail" class="fs17 demi"></span> <span data-quote-ticker></span></span>
-            <span class="lh1">├─ dex: <span id="quoteBalanceDEXAvail" class="fs17 demi"></span></span>
-            <span class="lh1">└─ cex: <span id="quoteBalanceCEXAvail" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>├─ dex: <span id="quoteBalanceDEXAvail" class="fs17 demi"></span></span>
+            <span class="lh1" data-cex-show>└─ cex: <span id="quoteBalanceCEXAvail" class="fs17 demi"></span></span>
           </div>
         </div>
       </div>
@@ -440,6 +440,11 @@
           </div>
           <span class="d-hide text-danger text-break" id="noBaseBalance">[[[no_balance_available]]]</span>
           <div id="baseBalanceContainer" class="slider-container"></div>
+          <div class="d-flex justify-content-end align-items-end mt-2 lh1">
+            <span class="me-1 grey fs15">[[[available]]]: </span>
+            <span id="dexBaseAvail" class="fs15"></span>
+            <span class="fs14 grey ms-1" data-base-ticker></span>
+          </div>
           <div id="baseBalanceErr" class="flex-center pt-2 text-danger"></div>
         </div>
 
@@ -454,6 +459,11 @@
           </div>
           <span class="d-hide text-danger text-break" id="noBaseCEXBalance">[[[no_balance_available]]]</span>
           <div id="cexBaseBalanceContainer" class="slider-container"></div>
+          <div class="d-flex justify-content-end align-items-end mt-2 lh1">
+            <span class="me-1 grey fs15">[[[available]]]: </span>
+            <span id="cexBaseAvail" class="fs15"></span>
+            <span class="fs14 grey ms-1" data-base-ticker></span>
+          </div>
         </div>
 
         <div id="cexBaseRebalanceOpts" class="settings-card">
@@ -516,6 +526,11 @@
           </div>
           <span class="d-hide text-danger text-break" id="noQuoteBalance">[[[no_balance_available]]]</span>
           <div id="quoteBalanceContainer" class="slider-container"></div>
+          <div class="d-flex justify-content-end align-items-end mt-2 lh1">
+            <span class="me-1 grey fs15">[[[available]]]: </span>
+            <span id="dexQuoteAvail" class="fs15"></span>
+            <span class="fs14 grey ms-1" data-quote-ticker></span>
+          </div>
           <div id="quoteBalanceErr" class="flex-center pt-2 text-danger"></div>
         </div>
 
@@ -530,6 +545,11 @@
           </div>
           <span class="d-hide text-danger text-break" id="noQuoteCEXBalance">[[[no_balance_available]]]</span>
           <div id="cexQuoteBalanceContainer" class="slider-container"></div>
+          <div class="d-flex justify-content-end align-items-end mt-2 lh1">
+            <span class="me-1 grey fs15">[[[available]]]: </span>
+            <span id="cexQuoteAvail" class="fs15"></span>
+            <span class="fs14 grey ms-1" data-quote-ticker></span>
+          </div>
         </div>
         
         <div id="cexQuoteRebalanceOpts" class="settings-card">
@@ -635,11 +655,11 @@
       </div>
       <div class="d-flex flex-column mb-3">
         <label for="cexApiKeyInput">[[[API Key]]]</label>
-        <input type="text" id="cexApiKeyInput">
+        <input type="text" id="cexApiKeyInput" autocomplete="off">
       </div>
       <div class="d-flex flex-column mb-3">
         <label for="cexSecretInput">[[[API Secret]]]</label>
-        <input type="text" id="cexSecretInput">
+        <input type="text" id="cexSecretInput" autocomplete="off">
       </div>
       <div id="cexFormErr" class="flex-center px-3 pt-2 text-danger text-break d-hide"></div>
       <div class="d-flex justify-content-end">

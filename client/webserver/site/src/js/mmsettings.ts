@@ -18,7 +18,8 @@ import {
   ExchangeBalance,
   MarketMakingStatus,
   MMBotStatus,
-  MMCEXStatus
+  MMCEXStatus,
+  BalanceNote
 } from './registry'
 import Doc from './doc'
 import State from './state'
@@ -217,92 +218,6 @@ interface ConfigState {
   autoRebalance: AutoRebalanceConfig
 }
 
-/*
- * RangeOption adds some functionality to XYRangeHandler. It will keep the
- * ConfigState up to date, recognizes a modified state, and adds default
- * callbacks for the XYRangeHandler. RangeOption is similar in function to an
- * XYRangeOption. The two types may be able to be merged.
- */
-class RangeOption {
-  // Args
-  cfg: XYRange
-  initVal: number
-  lastVal: number
-  settingsDict: {[key: string]: any}
-  settingsKey: string
-  // Set in constructor
-  div: PageElement
-  xyRange: XYRangeHandler
-  // Set with setters
-  update: (x: number, y: number) => any
-  changed: () => void
-  selected: () => void
-  convert: (x: any) => any
-
-  constructor (cfg: XYRange, initVal: number, roundX: boolean, roundY: boolean, disabled: boolean, settingsDict: {[key:string]: any}, settingsKey: string) {
-    this.cfg = cfg
-    this.initVal = initVal
-    this.lastVal = initVal
-    this.settingsDict = settingsDict
-    this.settingsKey = settingsKey
-    this.convert = (x: any) => x
-
-    this.xyRange = new XYRangeHandler(
-      cfg,
-      initVal,
-      (x: number, y: number) => { this.handleUpdate(x, y) },
-      () => { this.handleChange() },
-      () => { this.handleSelected() },
-      roundX,
-      roundY,
-      disabled
-    )
-    this.div = this.xyRange.control
-  }
-
-  setUpdate (f: (x: number, y: number) => number) {
-    this.update = f
-  }
-
-  setChanged (f: () => void) {
-    this.changed = f
-  }
-
-  setSelected (f: () => void) {
-    this.selected = f
-  }
-
-  stringify () {
-    this.convert = (x: any) => String(x)
-  }
-
-  handleUpdate (x:number, y:number) {
-    this.lastVal = this.update ? this.update(x, y) : x
-    this.settingsDict[this.settingsKey] = this.convert(this.lastVal)
-  }
-
-  handleChange () {
-    if (this.changed) this.changed()
-  }
-
-  handleSelected () {
-    if (this.selected) this.selected()
-  }
-
-  modified (): boolean {
-    return this.lastVal !== this.initVal
-  }
-
-  setValue (x: number, skipUpdate?: boolean) {
-    this.xyRange.setValue(x, skipUpdate)
-  }
-
-  reset () {
-    this.xyRange.setValue(this.initVal, true)
-    this.lastVal = this.initVal
-  }
-}
-
 interface BotSpecs {
   host: string
   baseID: number
@@ -335,20 +250,21 @@ export default class MarketMakerSettingsPage extends BasePage {
   mmStatus: MarketMakingStatus
   cexConfigs: CEXConfig[]
   botConfigs: BotConfig[]
+  qcProfitSlider: XYRangeHandler
   qcLevelSpacingSlider: XYRangeHandler
   qcMatchBufferSlider: XYRangeHandler
-  oracleBias: RangeOption
-  oracleWeighting: RangeOption
-  driftTolerance: RangeOption
-  orderPersistence: RangeOption
-  baseBalance?: RangeOption
-  quoteBalance?: RangeOption
-  cexBaseBalanceRange: RangeOption
-  cexBaseMinBalanceRange: RangeOption
+  oracleBias: XYRangeHandler
+  oracleWeighting: XYRangeHandler
+  driftTolerance: XYRangeHandler
+  orderPersistence: XYRangeHandler
+  baseBalance?: XYRangeHandler
+  quoteBalance?: XYRangeHandler
+  cexBaseBalanceRange: XYRangeHandler
+  cexBaseMinBalanceRange: XYRangeHandler
   cexBaseBalance: ExchangeBalance
   cexBaseAvail: number
-  cexQuoteBalanceRange: RangeOption
-  cexQuoteMinBalanceRange: RangeOption
+  cexQuoteBalanceRange: XYRangeHandler
+  cexQuoteMinBalanceRange: XYRangeHandler
   cexQuoteBalance: ExchangeBalance
   cexQuoteAvail: number
   baseWalletSettingControl: Record<string, walletSettingControl> = {}
@@ -404,7 +320,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.cexQuoteTransferUp, 'click', () => this.incrementTransfer(false, true))
     Doc.bind(page.cexQuoteTransferDown, 'click', () => this.incrementTransfer(false, false))
     Doc.bind(page.cexQuoteTransferInput, 'change', () => { this.quoteTransferChanged() })
-    Doc.bind(page.switchToAdvanced, 'click', () => { this.showAdvancedConfig() })
+    Doc.bind(page.switchToAdvanced, 'click', () => { this.showAdvancedConfig(false) })
     Doc.bind(page.switchToQuickConfig, 'click', () => { this.showQuickConfig() })
     Doc.bind(page.levelsPerSide, 'change', () => { this.levelsPerSideChanged() })
     Doc.bind(page.levelsPerSideUp, 'click', () => { this.incrementLevelsPerSide(true) })
@@ -430,6 +346,10 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.newWalletForm,
       () => { this.submitBotType() }
     )
+
+    app().registerNoteFeeder({
+      balance: (note: BalanceNote) => { this.handleBalanceNote(note) }
+    })
 
     this.initialize(specs)
   }
@@ -619,12 +539,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.show(page.marketLoading)
     await this.fetchOracles()
     Doc.hide(page.marketLoading)
-    const hasFiatRates = this.marketReport.baseFiatRate > 0 && this.marketReport.quoteFiatRate > 0
+    const hasFiatRates = this.marketReport && this.marketReport.baseFiatRate > 0 && this.marketReport.quoteFiatRate > 0
     Doc.setVis(hasFiatRates, page.switchToQuickConfig)
 
     // If this is a new bot, show the quick config form.
     if (!botCfg && hasFiatRates) this.showQuickConfig()
-    else this.showAdvancedConfig()
+    else this.showAdvancedConfig(viewOnly)
 
     Doc.show(page.botSettingsContainer, page.marketHeader)
   }
@@ -666,11 +586,18 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
   }
 
-  showAdvancedConfig () {
+  showAdvancedConfig (viewOnly: boolean) {
     const { page } = this
     Doc.show(page.advancedConfig)
-    Doc.hide(page.quickConfig)
+    Doc.hide(page.quickConfig, page.balanceChecks)
     page.gapStrategyBox.after(page.buttonsBox)
+
+    this.baseBalance?.setDisabled(viewOnly)
+    this.quoteBalance?.setDisabled(viewOnly)
+    this.cexBaseBalanceRange?.setDisabled(viewOnly)
+    this.cexQuoteBalanceRange?.setDisabled(viewOnly)
+    this.cexBaseMinBalanceRange?.setDisabled(viewOnly)
+    this.cexQuoteMinBalanceRange?.setDisabled(viewOnly)
   }
 
   showQuickConfig () {
@@ -693,8 +620,15 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.advancedConfig, page.levelSpacingBox, page.matchMultiplierBox, page.qcLevelSettingsBox,
       page.placementsChartBox, page.placementChartLegend, page.lotsPerLevelLabel, page.arbLotsLabel
     )
-    Doc.show(page.quickConfig)
+    Doc.show(page.quickConfig, page.balanceChecks)
     page.quickConfig.after(page.buttonsBox)
+
+    this.baseBalance?.setDisabled(true)
+    this.quoteBalance?.setDisabled(true)
+    this.cexBaseBalanceRange?.setDisabled(true)
+    this.cexQuoteBalanceRange?.setDisabled(true)
+    this.cexBaseMinBalanceRange?.setDisabled(true)
+    this.cexQuoteMinBalanceRange?.setDisabled(true)
 
     switch (botType) {
       case botTypeArbMM:
@@ -750,7 +684,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       setError('invalid value for level spacing')
     }
 
-    const matchBuffer = botType === botTypeArbMM ? parseFloat(page.qcMatchBuffer.value ?? '') : 0
+    const matchBuffer = botType === botTypeArbMM ? parseFloat(page.qcMatchBuffer.value ?? '') / 100 : 0
     if (isNaN(lotsPerLevel)) {
       setError('invalid value for match buffer')
     }
@@ -796,14 +730,21 @@ export default class MarketMakerSettingsPage extends BasePage {
         dexAlloc = dexAvail
       }
       if (cexAlloc > cexAvail) {
-        deficit = cexAlloc = cexAvail
+        deficit = cexAlloc - cexAvail
         cexAlloc = cexAvail
+        const dexRemain = dexAvail - dexAlloc
+        if (dexRemain > 0) {
+          const dexAdd = Math.min(dexRemain, deficit)
+          deficit -= dexAdd
+          dexAlloc += dexAdd
+        }
       }
       return [dexAlloc, cexAlloc, deficit]
     }
 
-    const [dexBaseAlloc, cexBaseAlloc, baseDeficit] = allocations(baseAllocation, dexBaseAvail, cexBaseAvail)
-    const [dexQuoteAlloc, cexQuoteAlloc, quoteDeficit] = allocations(quoteAllocation, dexQuoteAvail, cexQuoteAvail)
+    const [cexBAvail, cexQAvail] = botType === botTypeBasicMM ? [0, 0] : [cexBaseAvail, cexQuoteAvail]
+    const [dexBaseAlloc, cexBaseAlloc, baseDeficit] = allocations(baseAllocation, dexBaseAvail, cexBAvail)
+    const [dexQuoteAlloc, cexQuoteAlloc, quoteDeficit] = allocations(quoteAllocation, dexQuoteAvail, cexQAvail)
 
     this.baseBalance?.setValue(dexBaseAlloc / baseWallet.balance.available * 100, true)
     this.quoteBalance?.setValue(dexQuoteAlloc / quoteWallet.balance.available * 100, true)
@@ -811,10 +752,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.cexQuoteBalanceRange?.setValue(cexQuoteAlloc / cexTotalQuoteBalance * 100, true)
 
     Doc.hide(page.baseBalNotOK, page.baseBalNotOKBals, page.baseBalOK, page.baseBalOKBals)
+    Doc.setVis(Boolean(cexName), ...Doc.applySelector(page.balanceChecks, '[data-cex-show]'))
     if (baseDeficit > 0) {
       Doc.show(page.baseBalNotOK, page.baseBalNotOKBals)
-      page.baseBalanceAvail.textContent = Doc.formatCoinValue(dexBaseAvail + cexBaseAvail, bui)
-      page.baseBalanceCEXAvail.textContent = Doc.formatCoinValue(cexBaseAvail, bui)
+      page.baseBalanceAvail.textContent = Doc.formatCoinValue(dexBaseAvail + cexBAvail, bui)
+      page.baseBalanceCEXAvail.textContent = Doc.formatCoinValue(cexBAvail, bui)
       page.baseBalanceDEXAvail.textContent = Doc.formatCoinValue(dexBaseAvail, bui)
       page.baseBalanceRequired.textContent = Doc.formatCoinValue(baseAllocation, bui)
     } else {
@@ -827,8 +769,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.hide(page.quoteBalNotOK, page.quoteBalNotOKBals, page.quoteBalOK, page.quoteBalOKBals)
     if (quoteDeficit > 0) {
       Doc.show(page.quoteBalNotOK, page.quoteBalNotOKBals)
-      page.quoteBalanceAvail.textContent = Doc.formatCoinValue(dexQuoteAvail + cexQuoteAvail, qui)
-      page.quoteBalanceCEXAvail.textContent = Doc.formatCoinValue(cexQuoteAvail, qui)
+      page.quoteBalanceAvail.textContent = Doc.formatCoinValue(dexQuoteAvail + cexQAvail, qui)
+      page.quoteBalanceCEXAvail.textContent = Doc.formatCoinValue(cexQAvail, qui)
       page.quoteBalanceDEXAvail.textContent = Doc.formatCoinValue(dexQuoteAvail, qui)
       page.quoteBalanceRequired.textContent = Doc.formatCoinValue(quoteAllocation, qui)
     } else {
@@ -838,9 +780,9 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.quoteBalanceDEXCommit.textContent = Doc.formatCoinValue(dexQuoteAlloc, qui)
     }
 
-    if (!page.cexRebalanceCheckbox.checked) return
-    this.cexBaseMinBalanceRange?.setValue(lotsPerSide * lotSize / cexBaseAvail * 100, true)
-    this.cexQuoteMinBalanceRange?.setValue(lotsPerSide * quoteLot * driftFactor / cexQuoteAvail * 100, true)
+    if (!page.cexRebalanceCheckbox.checked || botType === botTypeBasicMM) return
+    this.cexBaseMinBalanceRange?.setValue(lotsPerSide * lotSize / cexBAvail * 100, true)
+    this.cexQuoteMinBalanceRange?.setValue(lotsPerSide * quoteLot * driftFactor / cexQAvail * 100, true)
   }
 
   levelsPerSideChanged () {
@@ -873,14 +815,18 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   qcProfitChanged () {
     const { page, updatedConfig: cfg } = this
-    cfg.profit = Math.max(qcMinimumProfit, parseFloat(page.qcProfit.value ?? '') || qcDefaultProfitThreshold) * 100
-    page.qcProfit.value = cfg.profit.toFixed(2)
+    const v = Math.max(qcMinimumProfit, parseFloat(page.qcProfit.value ?? '') || qcDefaultProfitThreshold)
+    cfg.profit = v
+    page.qcProfit.value = v.toFixed(2)
+    this.qcProfitSlider.setValue(v / 100, true)
     this.quickConfigUpdated()
   }
 
   levelSpacingChanged () {
     const { page } = this
-    page.qcLevelSpacing.value = Math.max(1, parseFloat(page.qcLevelSpacing.value ?? '') || qcDefaultLevelSpacing * 100).toFixed(2)
+    const v = Math.max(1, parseFloat(page.qcLevelSpacing.value ?? '') || qcDefaultLevelSpacing * 100)
+    page.qcLevelSpacing.value = v.toFixed(2)
+    this.qcLevelSpacingSlider.setValue(v / 100, true)
     this.quickConfigUpdated()
   }
 
@@ -1036,6 +982,13 @@ export default class MarketMakerSettingsPage extends BasePage {
       if (filter && !mr.name.includes(filter)) continue
       page.marketSelect.appendChild(mr.tr)
     }
+  }
+
+  handleBalanceNote (n: BalanceNote) {
+    if (!this.marketReport) return
+    const { page, baseID, quoteID, bui, qui } = this.marketStuff()
+    if (n.assetID === baseID) page.dexBaseAvail.textContent = Doc.formatFourSigFigs(n.balance.available / bui.conventional.conversionFactor)
+    else if (n.assetID === quoteID) page.dexQuoteAvail.textContent = Doc.formatFourSigFigs(n.balance.available / qui.conventional.conversionFactor)
   }
 
   autoRebalanceChanged () {
@@ -1420,6 +1373,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       newRow.remove()
       updateArrowVis()
       this.updateModifiedMarkers()
+      this.placementsChart.render()
     })
     if (running) {
       Doc.hide(newRowTmpl.removeBtn)
@@ -1519,12 +1473,14 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.addBuyPlacementLots.value = ''
       page.addBuyPlacementGapFactor.value = ''
       this.updateModifiedMarkers()
+      this.placementsChart.render()
     })
     Doc.bind(page.addSellPlacementBtn, 'click', () => {
       this.addPlacement(false, null, false)
       page.addSellPlacementLots.value = ''
       page.addSellPlacementGapFactor.value = ''
       this.updateModifiedMarkers()
+      this.placementsChart.render()
     })
     Doc.setVis(!viewOnly, page.addBuyPlacementRow, page.addSellPlacementRow)
 
@@ -1575,20 +1531,24 @@ export default class MarketMakerSettingsPage extends BasePage {
     )
 
     // Drift tolerance
-    this.driftTolerance = new RangeOption(driftToleranceRange, cfg.driftTolerance, false, false, viewOnly, cfg, 'driftTolerance')
-    this.driftTolerance.setChanged(handleChanged)
-    page.driftToleranceContainer.appendChild(this.driftTolerance.div)
+    this.driftTolerance = new XYRangeHandler(driftToleranceRange, cfg.driftTolerance, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'driftTolerance',
+      changed: handleChanged
+    })
+    page.driftToleranceContainer.appendChild(this.driftTolerance.control)
 
     // CEX order persistence
-    this.orderPersistence = new RangeOption(orderPersistenceRange, cfg.orderPersistence, true, true, viewOnly, cfg, 'orderPersistence')
-    this.orderPersistence.setChanged(handleChanged)
-    this.orderPersistence.setUpdate((x: number) => {
-      this.orderPersistence.xyRange.setXLabel('')
-      x = Math.round(x)
-      this.orderPersistence.xyRange.setYLabel(x === 21 ? '∞' : String(x))
-      return x
+    this.orderPersistence = new XYRangeHandler(orderPersistenceRange, cfg.orderPersistence, {
+      roundX: true, roundY: true, disabled: viewOnly, settingsDict: cfg, settingsKey: 'orderPersistence',
+      changed: handleChanged,
+      updated: (x: number) => {
+        this.orderPersistence.setXLabel('')
+        x = Math.round(x)
+        this.orderPersistence.setYLabel(x === 21 ? '∞' : String(x))
+        // return x
+      }
     })
-    page.orderPersistenceContainer.appendChild(this.orderPersistence.div)
+    page.orderPersistenceContainer.appendChild(this.orderPersistence.control)
 
     // Use oracle
     Doc.bind(page.useOracleCheckbox, 'change', () => {
@@ -1600,14 +1560,16 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     // Oracle Bias
-    this.oracleBias = new RangeOption(oracleBiasRange, cfg.oracleBias, false, false, viewOnly, cfg, 'oracleBias')
-    this.oracleBias.setChanged(handleChanged)
-    page.oracleBiasContainer.appendChild(this.oracleBias.div)
+    this.oracleBias = new XYRangeHandler(oracleBiasRange, cfg.oracleBias, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'oracleBias', changed: handleChanged
+    })
+    page.oracleBiasContainer.appendChild(this.oracleBias.control)
 
     // Oracle Weighting
-    this.oracleWeighting = new RangeOption(oracleWeightRange, cfg.oracleWeighting, false, false, viewOnly, cfg, 'oracleWeighting')
-    this.oracleWeighting.setChanged(handleChanged)
-    page.oracleWeightingContainer.appendChild(this.oracleWeighting.div)
+    this.oracleWeighting = new XYRangeHandler(oracleWeightRange, cfg.oracleWeighting, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'oracleWeighting', changed: handleChanged
+    })
+    page.oracleWeightingContainer.appendChild(this.oracleWeighting.control)
 
     // Empty Market Rate
     Doc.bind(page.emptyMarketRateCheckbox, 'change', () => {
@@ -1631,37 +1593,25 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.placementsChart.setMarket()
 
     // Quick Config
-    const qcProfitSlider = new XYRangeHandler(
-      profitSliderRange,
-      qcDefaultProfitThreshold,
-      (x: number /* , y: number */) => { // update
+    this.qcProfitSlider = new XYRangeHandler(profitSliderRange, qcDefaultProfitThreshold, {
+      updated: (x: number /* , y: number */) => {
         cfg.profit = x * 100
         page.qcProfit.value = page.profitInput.value = cfg.profit.toFixed(2)
         this.quickConfigUpdated()
-        return x
       },
-      () => { this.quickConfigUpdated() }, // change
-      () => { /* selected */ },
-      false,
-      false,
-      viewOnly
-    )
-    page.qcProfitSliderContainer.appendChild(qcProfitSlider.control)
+      changed: () => { this.quickConfigUpdated() },
+      disabled: viewOnly
+    })
+    page.qcProfitSliderContainer.appendChild(this.qcProfitSlider.control)
 
-    this.qcLevelSpacingSlider = new XYRangeHandler(
-      levelSpacingRange,
-      qcDefaultLevelSpacing,
-      (x: number /* , y: number */) => { // update
+    this.qcLevelSpacingSlider = new XYRangeHandler(levelSpacingRange, qcDefaultLevelSpacing, {
+      updated: (x: number /* , y: number */) => {
         page.qcLevelSpacing.value = (x * 100).toFixed(2)
         this.quickConfigUpdated()
-        return x
       },
-      () => { this.quickConfigUpdated() }, // change
-      () => { /* selected */ },
-      false,
-      false,
-      viewOnly
-    )
+      changed: () => { this.quickConfigUpdated() },
+      disabled: viewOnly
+    })
     page.qcLevelSpacingContainer.appendChild(this.qcLevelSpacingSlider.control)
 
     const matchBufferRange: XYRange = {
@@ -1679,20 +1629,14 @@ export default class MarketMakerSettingsPage extends BasePage {
       yUnit: '%'
     }
 
-    this.qcMatchBufferSlider = new XYRangeHandler(
-      matchBufferRange,
-      qcDefaultMatchBuffer,
-      (x: number /* , y: number */) => { // update
+    this.qcMatchBufferSlider = new XYRangeHandler(matchBufferRange, qcDefaultMatchBuffer, {
+      updated: (x: number /* , y: number */) => {
         page.qcMatchBuffer.value = (x * 100).toFixed(2)
         this.quickConfigUpdated()
-        return x
       },
-      () => { this.quickConfigUpdated() }, // change
-      () => { /* selected */ },
-      false,
-      false,
-      viewOnly
-    )
+      changed: () => { this.quickConfigUpdated() },
+      disabled: viewOnly
+    })
     page.qcMatchBufferContainer.appendChild(this.qcMatchBufferSlider.control)
   }
 
@@ -1960,9 +1904,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { unitInfo: bui } = app().assets[baseID]
     const { unitInfo: qui } = app().assets[quoteID]
     return {
-      minBaseAmt: Math.round(cexBaseMinBalanceRange.xyRange.y * bui.conventional.conversionFactor),
+      minBaseAmt: Math.round(cexBaseMinBalanceRange.y * bui.conventional.conversionFactor),
       minBaseTransfer: cfg.cexBaseMinTransfer,
-      minQuoteAmt: Math.round(cexQuoteMinBalanceRange.xyRange.y * qui.conventional.conversionFactor),
+      minQuoteAmt: Math.round(cexQuoteMinBalanceRange.y * qui.conventional.conversionFactor),
       minQuoteTransfer: cfg.cexQuoteMinTransfer
     }
   }
@@ -2030,6 +1974,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.dexQuoteAvail = Math.round(qAvail * quoteMaxPercent / 100)
     const quoteMaxAvailable = Doc.conventionalCoinValue(this.dexQuoteAvail, qui)
 
+    page.dexBaseAvail.textContent = Doc.formatFourSigFigs(baseMaxAvailable)
+    page.dexQuoteAvail.textContent = Doc.formatFourSigFigs(quoteMaxAvailable)
+
     const baseXYRange: XYRange = {
       start: {
         label: '0%',
@@ -2064,9 +2011,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.empty(page.baseBalanceContainer, page.quoteBalanceContainer)
 
     if (baseMaxAvailable > 0) {
-      this.baseBalance = new RangeOption(baseXYRange, cfg.baseBalance, false, true, viewOnly, cfg, 'baseBalance')
-      this.baseBalance.setChanged(() => { this.updateModifiedMarkers() })
-      page.baseBalanceContainer.appendChild(this.baseBalance.div)
+      this.baseBalance = new XYRangeHandler(baseXYRange, cfg.baseBalance, {
+        disabled: viewOnly, settingsDict: cfg, settingsKey: 'baseBalance',
+        changed: () => { this.updateModifiedMarkers() }
+      })
+      page.baseBalanceContainer.appendChild(this.baseBalance.control)
       Doc.show(page.baseBalanceContainer)
     } else {
       this.baseBalance = undefined
@@ -2074,9 +2023,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     if (quoteMaxAvailable > 0) {
-      this.quoteBalance = new RangeOption(quoteXYRange, cfg.quoteBalance, false, true, viewOnly, cfg, 'quoteBalance')
-      this.quoteBalance.setChanged(() => { this.updateModifiedMarkers() })
-      page.quoteBalanceContainer.appendChild(this.quoteBalance.div)
+      this.quoteBalance = new XYRangeHandler(quoteXYRange, cfg.quoteBalance, {
+        disabled: viewOnly, settingsDict: cfg, settingsKey: 'quoteBalance',
+        changed: () => { this.updateModifiedMarkers() }
+      })
+      page.quoteBalanceContainer.appendChild(this.quoteBalance.control)
       Doc.show(page.quoteBalanceContainer)
     } else {
       this.quoteBalance = undefined
@@ -2149,6 +2100,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     const baseMaxAvailable = Doc.conventionalCoinValue(bRemain, bui)
     const quoteMaxAvailable = Doc.conventionalCoinValue(qRemain, qui)
 
+    page.cexBaseAvail.textContent = Doc.formatFourSigFigs(baseMaxAvailable)
+    page.cexQuoteAvail.textContent = Doc.formatFourSigFigs(quoteMaxAvailable)
+
     const baseXYRange: XYRange = {
       start: {
         label: '0%',
@@ -2182,31 +2136,39 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.empty(page.cexBaseBalanceContainer, page.cexQuoteBalanceContainer, page.cexBaseMinBalanceContainer, page.cexQuoteMinBalanceContainer)
 
     const [basePct] = calcBalanceReserve(bAvail, cfg.cexBaseBalanceType, cfg.cexBaseBalance)
-    this.cexBaseBalanceRange = new RangeOption(baseXYRange, basePct * 100, false, true, viewOnly, cfg, 'cexBaseBalance')
-    this.cexBaseBalanceRange.setChanged(() => { this.updateModifiedMarkers() })
-    page.cexBaseBalanceContainer.appendChild(this.cexBaseBalanceRange.div)
+    this.cexBaseBalanceRange = new XYRangeHandler(baseXYRange, basePct * 100, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexBaseBalance',
+      changed: () => { this.updateModifiedMarkers() }
+    })
+    page.cexBaseBalanceContainer.appendChild(this.cexBaseBalanceRange.control)
 
     const minBaseBalance = Math.max(cfg.cexBaseMinBalance, lotSize) / bRemain * 100
     if (oldCfg.cexBaseMinBalance === 0) oldCfg.cexBaseMinBalance = minBaseBalance
-    this.cexBaseMinBalanceRange = new RangeOption(baseXYRange, minBaseBalance, false, true, viewOnly, cfg, 'cexBaseMinBalance')
-    this.cexBaseMinBalanceRange.setChanged(() => { this.updateModifiedMarkers() })
-    page.cexBaseMinBalanceContainer.appendChild(this.cexBaseMinBalanceRange.div)
+    this.cexBaseMinBalanceRange = new XYRangeHandler(baseXYRange, minBaseBalance, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexBaseMinBalance',
+      updated: () => { this.updateModifiedMarkers() }
+    })
+    page.cexBaseMinBalanceContainer.appendChild(this.cexBaseMinBalanceRange.control)
 
     cfg.cexBaseMinTransfer = Math.round(Math.max(cfg.cexBaseMinTransfer, lotSize))
     if (oldCfg.cexBaseMinTransfer === 0) oldCfg.cexBaseMinTransfer = cfg.cexBaseMinTransfer
     page.cexBaseTransferInput.value = Doc.formatFourSigFigs(cfg.cexBaseMinTransfer / bui.conventional.conversionFactor)
 
     const [quotePct] = calcBalanceReserve(qAvail, cfg.cexQuoteBalanceType, cfg.cexQuoteBalance)
-    this.cexQuoteBalanceRange = new RangeOption(quoteXYRange, quotePct * 100, false, true, viewOnly, cfg, 'cexQuoteBalance')
-    this.cexQuoteBalanceRange.setChanged(() => { this.updateModifiedMarkers() })
-    page.cexQuoteBalanceContainer.appendChild(this.cexQuoteBalanceRange.div)
+    this.cexQuoteBalanceRange = new XYRangeHandler(quoteXYRange, quotePct * 100, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexQuoteBalance',
+      changed: () => { this.updateModifiedMarkers() }
+    })
+    page.cexQuoteBalanceContainer.appendChild(this.cexQuoteBalanceRange.control)
 
     const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID, spot)
     const minQuoteBalance = Math.max(cfg.cexQuoteMinBalance, quoteLot) / qRemain * 100
     if (oldCfg.cexQuoteMinBalance === 0) oldCfg.cexQuoteMinBalance = minQuoteBalance
-    this.cexQuoteMinBalanceRange = new RangeOption(quoteXYRange, minQuoteBalance, false, true, viewOnly, cfg, 'cexQuoteMinBalance')
-    this.cexQuoteMinBalanceRange.setChanged(() => { this.updateModifiedMarkers() })
-    page.cexQuoteMinBalanceContainer.appendChild(this.cexQuoteMinBalanceRange.div)
+    this.cexQuoteMinBalanceRange = new XYRangeHandler(quoteXYRange, minQuoteBalance, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexQuoteMinBalance',
+      changed: () => { this.updateModifiedMarkers() }
+    })
+    page.cexQuoteMinBalanceContainer.appendChild(this.cexQuoteMinBalanceRange.control)
 
     cfg.cexQuoteMinTransfer = Math.round(Math.max(cfg.cexQuoteMinTransfer, quoteLot))
     if (oldCfg.cexQuoteMinTransfer === 0) oldCfg.cexQuoteMinTransfer = cfg.cexQuoteMinTransfer
@@ -2329,12 +2291,14 @@ export default class MarketMakerSettingsPage extends BasePage {
         const tmpl = Doc.parseTemplate(setting)
         tmpl.name.textContent = opt.displayname
         if (opt.description) tmpl.tooltip.dataset.tooltip = opt.description
-        const handler = new RangeOption(opt.xyRange, parseInt(currVal), Boolean(opt.xyRange.roundX), Boolean(opt.xyRange.roundY), viewOnly, optionsDict, opt.key)
-        handler.stringify()
-        handler.setChanged(() => { this.updateModifiedMarkers() })
+        const handler = new XYRangeHandler(opt.xyRange, parseInt(currVal), {
+          roundX: opt.xyRange.roundX, roundY: opt.xyRange.roundY, disabled: viewOnly,
+          settingsDict: optionsDict, settingsKey: opt.key, dictValueAsString: true,
+          changed: () => { this.updateModifiedMarkers() }
+        })
         const setValue = (x: string) => { handler.setValue(parseInt(x)) }
         storeWalletSettingControl(opt.key, tmpl.sliderContainer, setValue, quote)
-        tmpl.sliderContainer.appendChild(handler.div)
+        tmpl.sliderContainer.appendChild(handler.control)
         container.appendChild(setting)
       }
       if (!setting) return
@@ -2710,6 +2674,7 @@ class PlacementsChart extends Chart {
     }
 
     const plotSide = (isBuy: boolean, placements: OrderPlacement[]) => {
+      if (!placements?.length) return
       const [xMin, xMax] = isBuy ? [0, cexGapL] : [cexGapR, canvas.width]
       const reg = new Region(ctx, new Extents(xMin, xMax, canvas.height * (1 - regionHeight), canvas.height))
       const [l, r] = isBuy ? [-range, 0] : [0, range]

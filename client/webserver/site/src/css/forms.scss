@@ -355,7 +355,18 @@ a[data-tmpl=walletCfgGuide] {
   border-radius: 3px;
   padding: 4px;
   margin-top: 8px;
-  opacity: 0.9;
+
+  & > div.disabled {
+    opacity: 0.8;
+
+    [data-tmpl=sliderBox] {
+      cursor: default;
+
+      .slider .slider-handle {
+        background-color: #777b;
+      }
+    }
+  }
 
   div.opt-check {
     width: 15px;
@@ -372,21 +383,24 @@ a[data-tmpl=walletCfgGuide] {
     height: 16px;
   }
 
-  .slider {
-    margin: 10px 10px 5px;
-    height: 2px;
-    background-color: grey;
-    position: relative;
+  [data-tmpl=sliderBox] {
+    cursor: pointer;
 
-    .slider-handle {
-      position: absolute;
-      height: 20px;
-      width: 14px;
-      top: -9px;
-      border-radius: 7px;
-      background-color: #2cce9c;
-      border: 2px solid #424242;
-      cursor: pointer;
+    .slider {
+      margin: 10px 10px 5px;
+      height: 2px;
+      background-color: grey;
+      position: relative;
+
+      .slider-handle {
+        position: absolute;
+        height: 20px;
+        width: 14px;
+        top: -9px;
+        border-radius: 7px;
+        background-color: #2cce9c;
+        border: 2px solid #424242;
+      }
     }
   }
 }

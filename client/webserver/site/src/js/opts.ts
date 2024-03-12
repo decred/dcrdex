@@ -135,13 +135,8 @@ export class XYRangeOption extends Option {
     } else {
       this.x = opt.default
     }
-    const onUpdate = (x: number) => {
-      this.x = x
-      this.dict[this.opt.key] = x
-    }
-    const onChange = () => { this.changed() }
     const selected = () => { this.node.classList.add('selected') }
-    this.handler = new XYRangeHandler(cfg, this.x, onUpdate, onChange, selected)
+    this.handler = new XYRangeHandler(cfg, this.x, { changed, selected, settingsDict: dict, settingsKey: opt.key })
     this.tmpl.controls.appendChild(this.handler.control)
   }
 
@@ -167,6 +162,19 @@ interface AcceptOpts {
   skipUpdate?: boolean // Implies skipChange
 }
 
+interface RangeHandlerOpts {
+  roundY?: boolean
+  roundX?: boolean
+  updated?: (x:number, y:number) => void, // fires while dragging.
+  changed?: () => void, // does not fire while dragging but does when dragging ends.
+  selected?: () => void,
+  disabled?: boolean
+  settingsDict?: {[key: string]: any}
+  settingsKey?: string
+  dictValueAsString?: boolean
+  convert?: (x: any) => any
+}
+
 /*
  * XYRangeHandler is the handler for an *XYRange from client/asset. XYRange
  * has a slider which allows adjusting the x and y, linearly between two limits.
@@ -174,83 +182,70 @@ interface AcceptOpts {
  */
 export class XYRangeHandler {
   control: HTMLElement
-  cfg: XYRange
+  range: XYRange
   tmpl: Record<string, PageElement>
+  initVal: number
+  settingsDict?: {[key: string]: any}
+  settingsKey: string
   x: number
   scrollingX: number
   y: number
   r: number
   roundX: boolean
   roundY: boolean
+  disabled: boolean
   updated: (x:number, y:number) => void
   changed: () => void
   selected: () => void
-  setConfig: (cfg: XYRange) => void
+  convert: (x: number) => any
 
   constructor (
-    cfg: XYRange,
+    range: XYRange,
     initVal: number,
-    updated: (x:number, y:number) => void,
-    changed: () => void,
-    selected: () => void,
-    roundY?: boolean,
-    roundX?: boolean,
-    disabled?: boolean
+    opts: RangeHandlerOpts
   ) {
     const control = this.control = rangeOptTmpl.cloneNode(true) as HTMLElement
     const tmpl = this.tmpl = Doc.parseTemplate(control)
-    this.roundX = Boolean(roundX)
-    this.roundY = Boolean(roundY)
-    this.cfg = cfg
-    this.changed = changed
-    this.selected = selected
-    this.updated = updated
+    tmpl.rangeLblStart.textContent = range.start.label
+    tmpl.rangeLblEnd.textContent = range.end.label
+    tmpl.xUnit.textContent = range.xUnit
+    tmpl.yUnit.textContent = range.yUnit
+    this.range = range
+    this.initVal = initVal
+    this.settingsDict = opts.settingsDict
+    this.settingsKey = opts.settingsKey ?? ''
+    this.roundX = Boolean(opts.roundX)
+    this.roundY = Boolean(opts.roundY)
+
+    this.setDisabled(Boolean(opts.disabled))
+    this.changed = opts.changed ?? (() => { /* pass */ })
+    this.selected = opts.selected ?? (() => { /* pass */ })
+    this.updated = opts.updated ?? (() => { /* pass */ })
+    this.convert = opts.dictValueAsString ? (x: number) => String(x) : (x: number) => x
 
     const { slider, handle } = tmpl
-
-    let rangeX = cfg.end.x - cfg.start.x
-    let rangeY = cfg.end.y - cfg.start.y
-    const normalizeX = (x: number) => (x - cfg.start.x) / rangeX
-
-    const setConfig = (newCfg: XYRange) => {
-      rangeX = newCfg.end.x - newCfg.start.x
-      rangeY = newCfg.end.y - newCfg.start.y
-      cfg = this.cfg = newCfg
-      tmpl.rangeLblStart.textContent = cfg.start.label
-      tmpl.rangeLblEnd.textContent = cfg.end.label
-      tmpl.xUnit.textContent = cfg.xUnit
-      tmpl.yUnit.textContent = cfg.yUnit
-      this.y = this.r * rangeY + cfg.start.y
-      this.r = (this.y - cfg.start.y) / rangeY
-      this.scrollingX = this.r * rangeX + cfg.start.x
-    }
-    setConfig(cfg)
-
-    this.setConfig = (cfg: XYRange) => {
-      setConfig(cfg)
-      this.accept(this.scrollingX)
-    }
+    const rangeX = range.end.x - range.start.x
+    const rangeY = range.end.y - range.start.y
+    const normalizeX = (x: number) => (x - range.start.x) / rangeX
 
     // r, x, and y will be updated by the various input event handlers. r is
     // x (or y) normalized on its range, e.g. [x_min, x_max] -> [0, 1]
     this.r = normalizeX(initVal)
     this.scrollingX = this.x = initVal
-    this.y = this.r * rangeY + cfg.start.y
+    this.y = this.r * rangeY + range.start.y
     this.accept(this.scrollingX, { skipUpdate: true })
-    if (disabled) {
-      return
-    }
 
     // Set up the handlers for the x and y text input fields.
     const clickOutX = (e: MouseEvent) => {
+      if (this.disabled) return
       if (e.type !== 'change' && e.target === tmpl.xInput) return
       const s = tmpl.xInput.value
       if (s) {
         const xx = parseFloat(s)
         if (!isNaN(xx)) {
-          this.scrollingX = clamp(xx, cfg.start.x, cfg.end.x)
+          this.scrollingX = clamp(xx, range.start.x, range.end.x)
           this.r = normalizeX(this.scrollingX)
-          this.y = this.r * rangeY + cfg.start.y
+          this.y = this.r * rangeY + range.start.y
           this.accept(this.scrollingX)
         }
       }
@@ -261,6 +256,7 @@ export class XYRangeHandler {
     }
 
     Doc.bind(tmpl.x, 'click', e => {
+      if (this.disabled) return
       Doc.hide(tmpl.x)
       Doc.show(tmpl.xInput)
       tmpl.xInput.focus()
@@ -272,14 +268,15 @@ export class XYRangeHandler {
     Doc.bind(tmpl.xInput, 'change', clickOutX)
 
     const clickOutY = (e: MouseEvent) => {
+      if (this.disabled) return
       if (e.type !== 'change' && e.target === tmpl.yInput) return
       const s = tmpl.yInput.value
       if (s) {
         const yy = parseFloat(s)
         if (!isNaN(yy)) {
-          this.y = clamp(yy, cfg.start.y, cfg.end.y)
-          this.r = (this.y - cfg.start.y) / rangeY
-          this.scrollingX = cfg.start.x + this.r * rangeX
+          this.y = clamp(yy, range.start.y, range.end.y)
+          this.r = (this.y - range.start.y) / rangeY
+          this.scrollingX = range.start.x + this.r * rangeX
           this.accept(this.scrollingX)
         }
       }
@@ -290,6 +287,7 @@ export class XYRangeHandler {
     }
 
     Doc.bind(tmpl.y, 'click', e => {
+      if (this.disabled) return
       Doc.hide(tmpl.y)
       Doc.show(tmpl.yInput)
       tmpl.yInput.focus()
@@ -302,6 +300,7 @@ export class XYRangeHandler {
 
     // Read the slider.
     Doc.bind(handle, 'mousedown', (e: MouseEvent) => {
+      if (this.disabled) return
       if (e.button !== 0) return
       e.preventDefault()
       e.stopPropagation()
@@ -313,8 +312,8 @@ export class XYRangeHandler {
       const trackMouse = (ee: MouseEvent, emit?: boolean) => {
         ee.preventDefault()
         this.r = left(ee) / w
-        this.scrollingX = this.r * rangeX + cfg.start.x
-        this.y = this.r * rangeY + cfg.start.y
+        this.scrollingX = this.r * rangeX + range.start.x
+        this.y = this.r * rangeY + range.start.y
         this.accept(this.scrollingX, { skipChange: !emit })
       }
       const mouseUp = (ee: MouseEvent) => {
@@ -328,14 +327,20 @@ export class XYRangeHandler {
     })
 
     Doc.bind(tmpl.sliderBox, 'click', (e: MouseEvent) => {
+      if (this.disabled) return
       if (e.button !== 0) return
       const x = e.pageX
       const m = Doc.layoutMetrics(tmpl.slider)
       this.r = clamp((x - m.bodyLeft) / m.width, 0, 1)
-      this.scrollingX = this.r * rangeX + cfg.start.x
-      this.y = this.r * rangeY + cfg.start.y
+      this.scrollingX = this.r * rangeX + range.start.x
+      this.y = this.r * rangeY + range.start.y
       this.accept(this.scrollingX)
     })
+  }
+
+  setDisabled (disabled: boolean) {
+    this.control.classList.toggle('disabled', disabled)
+    this.disabled = disabled
   }
 
   setXLabel (s: string) {
@@ -358,6 +363,7 @@ export class XYRangeHandler {
     this.x = x
     this.scrollingX = x
     cfg = cfg ?? {}
+    if (this.settingsDict) this.settingsDict[this.settingsKey] = this.convert(this.x)
     if (!cfg.skipUpdate) {
       this.updated(x, this.y)
       if (!cfg.skipChange) this.changed()
@@ -365,10 +371,18 @@ export class XYRangeHandler {
   }
 
   setValue (x: number, skipUpdate?: boolean) {
-    const cfg = this.cfg
-    this.r = (x - cfg.start.x) / (cfg.end.x - cfg.start.x)
-    this.y = cfg.start.y + this.r * (cfg.end.y - cfg.start.y)
+    const range = this.range
+    this.r = (x - range.start.x) / (range.end.x - range.start.x)
+    this.y = range.start.y + this.r * (range.end.y - range.start.y)
     this.accept(x, { skipUpdate })
+  }
+
+  modified (): boolean {
+    return this.x !== this.initVal
+  }
+
+  reset () {
+    this.setValue(this.initVal, true)
   }
 }
 

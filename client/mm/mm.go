@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -439,11 +440,11 @@ func botInitialBaseBalances(cfgs []*BotConfig, core clientCore, cexes map[string
 		return nil
 	}
 
-	calcBalance := func(balType BalanceType, balAmount, availableBal uint64) uint64 {
+	calcBalance := func(balType BalanceType, balAmount float64, availableBal uint64) uint64 {
 		if balType == Percentage {
-			return availableBal * balAmount / 100
+			return uint64(math.Round(float64(availableBal) * balAmount / 100))
 		}
-		return balAmount
+		return uint64(math.Round(balAmount))
 	}
 
 	for _, cfg := range cfgs {
@@ -501,15 +502,15 @@ func botInitialBaseBalances(cfgs []*BotConfig, core clientCore, cexes map[string
 				return err
 			}
 			tokenFeeAsset := dexBalanceTracker[token.ParentID]
-			tokenFeeAssetRequired := calcBalance(balType, balAmount, tokenFeeAsset.available)
+			dexBalances[mktID][token.ParentID] += calcBalance(balType, balAmount, tokenFeeAsset.available)
+			tokenFeeAssetRequired := dexBalances[mktID][token.ParentID]
 			if tokenFeeAssetRequired == 0 {
 				return fmt.Errorf("%s fee asset balance is zero for market %s", baseOrQuote, mktID)
 			}
 			if tokenFeeAssetRequired > tokenFeeAsset.available-tokenFeeAsset.reserved {
-				return fmt.Errorf("insufficient balance for asset %d", token.ParentID)
+				return fmt.Errorf("insufficient balance for fee asset %d", token.ParentID)
 			}
 			tokenFeeAsset.reserved += tokenFeeAssetRequired
-			dexBalances[mktID][token.ParentID] += tokenFeeAssetRequired
 			return nil
 		}
 		err = trackTokenFeeAsset(true)
