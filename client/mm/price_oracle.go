@@ -77,8 +77,8 @@ type oracle interface {
 
 var _ oracle = (*priceOracle)(nil)
 
-func (o *priceOracle) getOracleDataAutoSync(base, quote uint32) (float64, []*OracleReport, error) {
-	mktStr := (&mkt{base, quote}).String()
+func (o *priceOracle) getOracleDataAutoSync(baseID, quoteID uint32) (float64, []*OracleReport, error) {
+	mktStr := (&mkt{baseID, quoteID}).String()
 
 	o.cachedPricesMtx.RLock()
 	price, ok := o.cachedPrices[mktStr]
@@ -98,13 +98,13 @@ func (o *priceOracle) getOracleDataAutoSync(base, quote uint32) (float64, []*Ora
 	return 0, nil, fmt.Errorf("expired price data for %s", mktStr)
 }
 
-func (o *priceOracle) getOracleDataNoAutoSync(base, quote uint32) (float64, []*OracleReport, error) {
-	mktStr := (&mkt{base, quote}).String()
+func (o *priceOracle) getOracleDataNoAutoSync(baseID, quoteID uint32) (float64, []*OracleReport, error) {
+	mktStr := (&mkt{baseID, quoteID}).String()
 
 	o.cachedPricesMtx.Lock()
 	price, ok := o.cachedPrices[mktStr]
 	if !ok {
-		cp, err := newCachedPrice(base, quote, asset.Assets())
+		cp, err := newCachedPrice(baseID, quoteID, asset.Assets())
 		if err != nil {
 			o.cachedPricesMtx.Unlock()
 			return 0, nil, err
@@ -134,16 +134,16 @@ func (o *priceOracle) getOracleDataNoAutoSync(base, quote uint32) (float64, []*O
 // getMarketPrice returns the volume weighted market rate for the specified
 // base/quote pair. This market rate is used as the "oracleRate" in the
 // basic market making strategy.
-func (o *priceOracle) getMarketPrice(base, quote uint32) float64 {
+func (o *priceOracle) getMarketPrice(baseID, quoteID uint32) float64 {
 	var price float64
 	var err error
 	if o.autoSync {
-		price, _, err = o.getOracleDataAutoSync(base, quote)
+		price, _, err = o.getOracleDataAutoSync(baseID, quoteID)
 	} else {
-		price, _, err = o.getOracleDataNoAutoSync(base, quote)
+		price, _, err = o.getOracleDataNoAutoSync(baseID, quoteID)
 	}
 	if err != nil {
-		o.log.Errorf("error fetching market price for %d-%d: %v", base, quote, err)
+		o.log.Errorf("error fetching market price for %d-%d: %v", baseID, quoteID, err)
 		return 0
 	}
 	return price
