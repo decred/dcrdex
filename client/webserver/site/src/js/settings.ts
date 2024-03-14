@@ -160,7 +160,8 @@ export default class SettingsPage extends BasePage {
     const closePopups = () => {
       Doc.hide(page.forms)
       page.exportSeedPW.value = ''
-      page.seedDiv.textContent = ''
+      page.legacySeed.textContent = ''
+      page.mnemonic.textContent = ''
     }
 
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
@@ -358,7 +359,9 @@ export default class SettingsPage extends BasePage {
       return
     }
     page.exportSeedPW.value = ''
-    page.seedDiv.textContent = res.seed.match(/.{1,32}/g).map((chunk: string) => chunk.match(/.{1,8}/g)?.join(' ')).join('\n')
+    if (res.seed.length === 128 && res.seed.split(' ').length === 1) {
+      page.legacySeed.textContent = res.seed.match(/.{1,32}/g).map((chunk: string) => chunk.match(/.{1,8}/g)?.join(' ')).join('\n')
+    } else page.mnemonic.textContent = res.seed
     this.showForm(page.authorizeSeedDisplay)
   }
 

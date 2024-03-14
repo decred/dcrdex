@@ -64,7 +64,7 @@ type clientCore interface {
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
 	DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error)
 	Exchanges() (exchanges map[string]*core.Exchange)
-	InitializeClient(appPass, seed []byte) error
+	InitializeClient(appPass []byte, seed *string) (string, error)
 	Login(appPass []byte) error
 	Logout() error
 	OpenWallet(assetID uint32, appPass []byte) error
@@ -78,7 +78,7 @@ type clientCore interface {
 	WalletState(assetID uint32) *core.WalletState
 	RescanWallet(assetID uint32, force bool) error
 	Send(appPass []byte, assetID uint32, value uint64, addr string, subtract bool) (asset.Coin, error)
-	ExportSeed(pw []byte) ([]byte, error)
+	ExportSeed(pw []byte) (string, error)
 	DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) (int, error)
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, host string) error

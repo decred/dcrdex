@@ -31,6 +31,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/db/bolt"
+	"decred.org/dcrdex/client/mnemonic"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -83,8 +84,8 @@ const (
 	// ConnectResult.
 	defaultPenaltyThreshold = 20
 
-	// seedLen is the length of the generated app seed used for app protection.
-	seedLen = 64
+	// legacySeedLength is the length of the generated app seed used for app protection.
+	legacySeedLength = 64
 
 	// pokesCapacity is the maximum number of poke notifications that
 	// will be cached.
@@ -3437,7 +3438,9 @@ func (c *Core) changeAppPass(newAppPW, innerKey []byte, creds *db.PrimaryCredent
 		EncSeed:        creds.EncSeed,
 		EncInnerKey:    newEncInnerKey,
 		InnerKeyParams: creds.InnerKeyParams,
+		Birthday:       creds.Birthday,
 		OuterKeyParams: newOuterCrypter.Serialize(),
+		Version:        creds.Version,
 	}
 
 	err = c.db.SetPrimaryCredentials(newCreds)
@@ -3451,7 +3454,7 @@ func (c *Core) changeAppPass(newAppPW, innerKey []byte, creds *db.PrimaryCredent
 }
 
 // ResetAppPass resets the application password to the provided new password.
-func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
+func (c *Core) ResetAppPass(newPass []byte, seedStr string) (err error) {
 	if !c.IsInitialized() {
 		return fmt.Errorf("cannot reset password before client is initialized")
 	}
@@ -3460,8 +3463,9 @@ func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
 		return fmt.Errorf("application password cannot be empty")
 	}
 
-	if len(seed) != seedLen {
-		return fmt.Errorf("invalid seed length %d", len(seed))
+	seed, _, err := decodeSeedString(seedStr)
+	if err != nil {
+		return fmt.Errorf("error decoding seed: %w", err)
 	}
 
 	creds := c.creds()
@@ -3470,7 +3474,7 @@ func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
 	}
 
 	innerKey := seedInnerKey(seed)
-	_, err := c.reCrypter(innerKey[:], creds.InnerKeyParams)
+	_, err = c.reCrypter(innerKey[:], creds.InnerKeyParams)
 	if err != nil {
 		c.log.Errorf("Error reseting password with seed: %v", err)
 		return errors.New("incorrect seed")
@@ -4706,27 +4710,27 @@ func (c *Core) IsInitialized() bool {
 
 // InitializeClient sets the initial app-wide password and app seed for the
 // client. The seed argument should be left nil unless restoring from seed.
-func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
+func (c *Core) InitializeClient(pw []byte, restorationSeed *string) (string, error) {
 	if c.IsInitialized() {
-		return fmt.Errorf("already initialized, login instead")
+		return "", fmt.Errorf("already initialized, login instead")
 	}
 
-	_, creds, err := c.generateCredentials(pw, restorationSeed)
+	_, creds, mnemonicSeed, err := c.generateCredentials(pw, restorationSeed)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	err = c.db.SetPrimaryCredentials(creds)
 	if err != nil {
-		return fmt.Errorf("SetPrimaryCredentials error: %w", err)
+		return "", fmt.Errorf("SetPrimaryCredentials error: %w", err)
 	}
 
-	freshSeed := len(restorationSeed) == 0
+	freshSeed := restorationSeed == nil
 	if freshSeed {
 		now := uint64(time.Now().Unix())
 		err = c.db.SetSeedGenerationTime(now)
 		if err != nil {
-			return fmt.Errorf("SetSeedGenerationTime error: %w", err)
+			return "", fmt.Errorf("SetSeedGenerationTime error: %w", err)
 		}
 		c.seedGenerationTime = now
 
@@ -4735,59 +4739,93 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 	}
 
 	c.setCredentials(creds)
-	return nil
+	return mnemonicSeed, nil
 }
 
 // ExportSeed exports the application seed.
-func (c *Core) ExportSeed(pw []byte) ([]byte, error) {
+func (c *Core) ExportSeed(pw []byte) (seedStr string, err error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("ExportSeed password error: %w", err)
+		return "", fmt.Errorf("ExportSeed password error: %w", err)
 	}
 	defer crypter.Close()
 
 	creds := c.creds()
 	if creds == nil {
-		return nil, fmt.Errorf("no v2 credentials stored")
+		return "", fmt.Errorf("no v2 credentials stored")
 	}
 
 	seed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
-		return nil, fmt.Errorf("app seed decryption error: %w", err)
+		return "", fmt.Errorf("app seed decryption error: %w", err)
 	}
 
-	return seed, nil
+	if len(seed) == legacySeedLength {
+		seedStr = hex.EncodeToString(seed)
+	} else {
+		seedStr, err = mnemonic.GenerateMnemonic(seed, creds.Birthday)
+		if err != nil {
+			return "", fmt.Errorf("error generating mnemonic: %w", err)
+		}
+	}
+
+	return seedStr, nil
+}
+
+func decodeSeedString(seedStr string) (seed []byte, bday time.Time, err error) {
+	// See if it decodes as a mnemonic seed first.
+	seed, bday, err = mnemonic.DecodeMnemonic(seedStr)
+	if err != nil {
+		// Is it an old-school hex seed?
+		bday = time.Time{}
+		seed, err = hex.DecodeString(strings.Join(strings.Fields(seedStr), ""))
+		if err != nil {
+			return nil, time.Time{}, errors.New("unabled to decode provided seed")
+		}
+		if len(seed) != legacySeedLength {
+			return nil, time.Time{}, errors.New("decoded seed is wrong length")
+		}
+	}
+	return
 }
 
 // generateCredentials generates a new set of *PrimaryCredentials. The
 // credentials are not stored to the database. A restoration seed can be
 // provided, otherwise should be nil.
-func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.PrimaryCredentials, error) {
+func (c *Core) generateCredentials(pw []byte, optionalSeed *string) (encrypt.Crypter, *db.PrimaryCredentials, string, error) {
 	if len(pw) == 0 {
-		return nil, nil, fmt.Errorf("empty password not allowed")
+		return nil, nil, "", fmt.Errorf("empty password not allowed")
 	}
 
-	// Generate a seed to use as the root for all future key generation.
-	if len(seed) == 0 {
-		seed = encode.RandomBytes(seedLen)
-	} else if len(seed) != seedLen {
-		return nil, nil, fmt.Errorf("invalid seed length %d. expected %d", len(seed), seedLen)
-	}
+	var seed []byte
 	defer encode.ClearBytes(seed)
+	var bday time.Time
+	var mnemonicSeed string
+	if optionalSeed == nil {
+		bday = time.Now()
+		seed, mnemonicSeed = mnemonic.New()
+	} else {
+		var err error
+		// Is it a mnemonic seed?
+		seed, bday, err = decodeSeedString(*optionalSeed)
+		if err != nil {
+			return nil, nil, "", err
+		}
+	}
 
 	// Generate an inner key and it's Crypter.
 	innerKey := seedInnerKey(seed)
 	innerCrypter := c.newCrypter(innerKey[:])
 	encSeed, err := innerCrypter.Encrypt(seed)
 	if err != nil {
-		return nil, nil, fmt.Errorf("client seed encryption error: %w", err)
+		return nil, nil, "", fmt.Errorf("client seed encryption error: %w", err)
 	}
 
 	// Generate the outer key.
 	outerCrypter := c.newCrypter(pw)
 	encInnerKey, err := outerCrypter.Encrypt(innerKey[:])
 	if err != nil {
-		return nil, nil, fmt.Errorf("inner key encryption error: %w", err)
+		return nil, nil, "", fmt.Errorf("inner key encryption error: %w", err)
 	}
 
 	creds := &db.PrimaryCredentials{
@@ -4795,10 +4833,11 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 		EncInnerKey:    encInnerKey,
 		InnerKeyParams: innerCrypter.Serialize(),
 		OuterKeyParams: outerCrypter.Serialize(),
+		Birthday:       bday,
 		Version:        1,
 	}
 
-	return innerCrypter, creds, nil
+	return innerCrypter, creds, mnemonicSeed, nil
 }
 
 func seedInnerKey(seed []byte) []byte {
@@ -5050,7 +5089,7 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 		return fmt.Errorf("legacy encryption key deserialization error: %w", err)
 	}
 
-	newCrypter, creds, err := c.generateCredentials(pw, nil)
+	newCrypter, creds, _, err := c.generateCredentials(pw, nil)
 	if err != nil {
 		return err
 	}

@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/mnemonic"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -62,7 +63,7 @@ type TCore struct {
 	logoutErr                error
 	book                     *core.OrderBook
 	bookErr                  error
-	exportSeed               []byte
+	exportSeed               string
 	exportSeedErr            error
 	discoverAcctErr          error
 	archivedRecords          int
@@ -102,8 +103,12 @@ func (c *TCore) Exchange(host string) (*core.Exchange, error) {
 	}
 	return exchange, nil
 }
-func (c *TCore) InitializeClient(pw, seed []byte) error {
-	return c.initializeClientErr
+func (c *TCore) InitializeClient(pw []byte, seed *string) (string, error) {
+	var mnemonicSeed string
+	if seed == nil {
+		_, mnemonicSeed = mnemonic.New()
+	}
+	return mnemonicSeed, c.initializeClientErr
 }
 func (c *TCore) Login(appPass []byte) error {
 	return c.loginErr
@@ -153,7 +158,7 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 func (c *TCore) Send(pw []byte, assetID uint32, value uint64, addr string, subtract bool) (asset.Coin, error) {
 	return c.coin, c.sendErr
 }
-func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
+func (c *TCore) ExportSeed(pw []byte) (string, error) {
 	return c.exportSeed, c.exportSeedErr
 }
 func (c *TCore) DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error) {

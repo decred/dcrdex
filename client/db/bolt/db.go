@@ -110,6 +110,7 @@ var (
 	encInnerKeyKey        = []byte("encInnerKey")
 	innerKeyParamsKey     = []byte("innerKeyParams")
 	outerKeyParamsKey     = []byte("outerKeyParams")
+	birthdayKey           = []byte("birthday")
 	credsVersionKey       = []byte("credsVersion")
 	legacyKeyParamsKey    = []byte("keyParams")
 	epochDurKey           = []byte("epochDur")
@@ -441,11 +442,18 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 			versionB = []byte{0x00, 0x00}
 		}
 
+		bdayB := getCopy(bkt, birthdayKey)
+		bday := time.Time{}
+		if len(bdayB) > 0 {
+			bday = time.Unix(int64(intCoder.Uint64(bdayB)), 0)
+		}
+
 		creds = &dexdb.PrimaryCredentials{
 			EncSeed:        getCopy(bkt, encSeedKey),
 			EncInnerKey:    getCopy(bkt, encInnerKeyKey),
 			InnerKeyParams: getCopy(bkt, innerKeyParamsKey),
 			OuterKeyParams: getCopy(bkt, outerKeyParamsKey),
+			Birthday:       bday,
 			Version:        intCoder.Uint16(versionB),
 		}
 		return nil
@@ -463,6 +471,7 @@ func (db *BoltDB) setCreds(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials) error 
 		put(encInnerKeyKey, creds.EncInnerKey).
 		put(innerKeyParamsKey, creds.InnerKeyParams).
 		put(outerKeyParamsKey, creds.OuterKeyParams).
+		put(birthdayKey, uint64Bytes(uint64(creds.Birthday.Unix()))).
 		put(credsVersionKey, uint16Bytes(creds.Version)).
 		err()
 }

@@ -139,6 +139,7 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		if outerParams {
 			creds.OuterKeyParams = []byte("OuterKeyParams")
 		}
+		creds.Birthday = time.Now().Truncate(time.Second)
 		return creds
 	}
 
@@ -177,6 +178,9 @@ func TestStorePrimaryCredentials(t *testing.T) {
 	}
 	if !bytes.Equal(reCreds.OuterKeyParams, goodCreds.OuterKeyParams) {
 		t.Fatalf("OuterKeyParams wrong, wanted %x, got %x", goodCreds.OuterKeyParams, reCreds.OuterKeyParams)
+	}
+	if !reCreds.Birthday.Equal(goodCreds.Birthday) {
+		t.Fatalf("Birthday wrong. wanted %s, got %s", goodCreds.Birthday, reCreds.Birthday)
 	}
 }
 

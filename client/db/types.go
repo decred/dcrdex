@@ -81,6 +81,8 @@ type PrimaryCredentials struct {
 	InnerKeyParams []byte
 	// OuterKeyParams are the key parameters for the outer key.
 	OuterKeyParams []byte
+	// Birthday is the time stamp associated with seed creation.
+	Birthday time.Time
 	// Version is the current PrimaryCredentials version.
 	Version uint16
 }

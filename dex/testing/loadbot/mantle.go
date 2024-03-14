@@ -170,7 +170,7 @@ func newMantle(name string) (*Mantle, error) {
 	waiter := dex.NewStartStopWaiter(c)
 	waiter.Start(ctx)
 
-	err = c.InitializeClient(pass, nil)
+	_, err = c.InitializeClient(pass, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize client")
 	}

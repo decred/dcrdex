@@ -2724,7 +2724,7 @@ func TestInitializeClient(t *testing.T) {
 
 	clearCreds()
 
-	err := tCore.InitializeClient(tPW, nil)
+	_, err := tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("InitializeClient error: %v", err)
 	}
@@ -2733,21 +2733,21 @@ func TestInitializeClient(t *testing.T) {
 
 	// Empty password.
 	emptyPass := []byte("")
-	err = tCore.InitializeClient(emptyPass, nil)
+	_, err = tCore.InitializeClient(emptyPass, nil)
 	if err == nil {
 		t.Fatalf("no error for empty password")
 	}
 
 	// Store error. Use a non-empty password to pass empty password check.
 	rig.db.setCredsErr = tErr
-	err = tCore.InitializeClient(tPW, nil)
+	_, err = tCore.InitializeClient(tPW, nil)
 	if err == nil {
 		t.Fatalf("no error for StoreEncryptedKey error")
 	}
 	rig.db.setCredsErr = nil
 
 	// Success again
-	err = tCore.InitializeClient(tPW, nil)
+	_, err = tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("final InitializeClient error: %v", err)
 	}
@@ -7306,6 +7306,9 @@ func TestResetAppPass(t *testing.T) {
 	rig.core.newCrypter = func([]byte) encrypt.Crypter { return crypter }
 	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return rig.crypter, crypter.recryptErr }
 
+	rig.core.credentials = nil
+	rig.core.InitializeClient(tPW, nil)
+
 	tCore := rig.core
 	seed, err := tCore.ExportSeed(tPW)
 	if err != nil {
@@ -7315,7 +7318,7 @@ func TestResetAppPass(t *testing.T) {
 	// Invalid seed error
 	invalidSeed := seed[:24]
 	err = tCore.ResetAppPass(tPW, invalidSeed)
-	if !strings.Contains(err.Error(), "invalid seed length") {
+	if !strings.Contains(err.Error(), "unabled to decode provided seed") {
 		t.Fatalf("wrong error for invalid seed length: %v", err)
 	}
 
@@ -7323,9 +7326,8 @@ func TestResetAppPass(t *testing.T) {
 	rig.crypter.(*tCrypterSmart).recryptErr = tErr
 	// tCrypter is used to encode the orginal seed but we don't need it here, so
 	// we need to add 8 bytes to commplete the expected seed lenght(64).
-	seed = append(seed, randBytes(8)...)
-	err = tCore.ResetAppPass(tPW, seed)
-	if err.Error() != "incorrect seed" {
+	err = tCore.ResetAppPass(tPW, seed+"blah")
+	if !strings.Contains(err.Error(), "unabled to decode provided seed") {
 		t.Fatalf("wrong error for incorrect seed: %v", err)
 	}
 
@@ -9873,7 +9875,7 @@ func TestCredentialHandling(t *testing.T) {
 	tCore.newCrypter = encrypt.NewCrypter
 	tCore.reCrypter = encrypt.Deserialize
 
-	err := tCore.InitializeClient(tPW, nil)
+	_, err := tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("InitializeClient error: %v", err)
 	}
