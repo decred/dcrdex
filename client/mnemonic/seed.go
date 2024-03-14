@@ -50,15 +50,13 @@ func DecodeMnemonic(mnemonic string) ([]byte, time.Time, error) {
 		byteIdx := cursor / 8
 		avail := 8 - (cursor % 8)
 		// Take the last three bits from the first byte, b0.
-		if avail <= 3 {
+		if avail < 3 {
 			buf[byteIdx] |= b0 >> (3 - avail)
 			cursor += avail
 			byteIdx++
-			if avail < 3 {
-				n := 3 - avail
-				buf[byteIdx] = b0 << (8 - n)
-				cursor += n
-			}
+			n := 3 - avail
+			buf[byteIdx] = b0 << (8 - n)
+			cursor += n
 		} else {
 			buf[byteIdx] |= (b0 << (avail - 3))
 			cursor += 3
@@ -118,17 +116,15 @@ func generateMnemonic(entropy []byte, stamp time.Time) string {
 		byteIdx := cursor / 8
 		remain := 8 - (cursor % 8)
 		// We only write three bits to the first byte of the uint16.
-		if remain <= 3 {
+		if remain < 3 {
 			clearN := 8 - remain
 			masked := (buf[byteIdx] << clearN) >> clearN
 			idxB[0] = masked << (3 - remain)
 			cursor += remain
 			byteIdx++
-			if remain < 3 {
-				n := 3 - remain
-				idxB[0] |= buf[byteIdx] >> (8 - n)
-				cursor += n
-			}
+			n := 3 - remain
+			idxB[0] |= buf[byteIdx] >> (8 - n)
+			cursor += n
 		} else {
 			// Bits we want are from index (8 - remain) to (11 - remain).
 			idxB[0] = (buf[byteIdx] << (8 - remain)) >> 5
