@@ -191,11 +191,13 @@ export const ID_CEXBALANCE_ERR = 'CEXBALANCE_ERR'
 
 let locale: Locale
 
-export async function loadLocale (lang: string, commitHash: string) {
-  const specs = State.fetchLocal(State.localeSpecsKey)
-  if (specs && specs.lang === lang && specs.commitHash === commitHash) {
-    locale = State.fetchLocal(State.localeKey)
-    return
+export async function loadLocale (lang: string, commitHash: string, skipCache: boolean) {
+  if (!skipCache) {
+    const specs = State.fetchLocal(State.localeSpecsKey)
+    if (specs && specs.lang === lang && specs.commitHash === commitHash) {
+      locale = State.fetchLocal(State.localeKey)
+      return
+    }
   }
   locale = await postJSON('/api/locale', lang)
   State.storeLocal(State.localeSpecsKey, { lang, commitHash })

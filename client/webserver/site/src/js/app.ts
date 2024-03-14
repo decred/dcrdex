@@ -231,7 +231,8 @@ export default class Application {
     const handler = this.main.dataset.handler
     // Don't fetch the user until we know what page we're on.
     await this.fetchUser()
-    await intl.loadLocale(this.lang, this.commitHash)
+    const ignoreCachedLocale = process.env.NODE_ENV === 'development'
+    await intl.loadLocale(this.lang, this.commitHash, ignoreCachedLocale)
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
