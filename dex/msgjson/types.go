@@ -196,6 +196,9 @@ const (
 	// ConfigRoute is the client-originating request-type message requesting the
 	// DEX configuration information.
 	ConfigRoute = "config"
+	// HealthRoute is the client-originating request-type message requesting the
+	// DEX's health status.
+	HealthRoute = "healthy"
 	// MatchProofRoute is the DEX-originating notification-type message
 	// delivering match cycle results to the client.
 	MatchProofRoute = "match_proof"
