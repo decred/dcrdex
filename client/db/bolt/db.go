@@ -123,6 +123,7 @@ var (
 	disabledRateSourceKey = []byte("disabledRateSources")
 	walletDisabledKey     = []byte("walletDisabled")
 	programKey            = []byte("program")
+	langKey               = []byte("lang")
 
 	// values
 	byteTrue   = encode.ByteTrue
@@ -2455,6 +2456,29 @@ func (db *BoltDB) DisabledRateSources() (disabledSources []string, err error) {
 			if token != "" {
 				disabledSources = append(disabledSources, token)
 			}
+		}
+		return nil
+	})
+}
+
+// SetLanguage stores the language.
+func (db *BoltDB) SetLanguage(lang string) error {
+	return db.Update(func(dbTx *bbolt.Tx) error {
+		bkt := dbTx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("app bucket not found")
+		}
+		return bkt.Put(langKey, []byte(lang))
+	})
+}
+
+// Language retrieves the language stored with SetLanguage. If no language
+// has been stored, an empty string is returned without an error.
+func (db *BoltDB) Language() (lang string, _ error) {
+	return lang, db.View(func(dbTx *bbolt.Tx) error {
+		bkt := dbTx.Bucket(appBucket)
+		if bkt != nil {
+			lang = string(bkt.Get(langKey))
 		}
 		return nil
 	})

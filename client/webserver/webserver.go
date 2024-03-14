@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -174,6 +175,8 @@ type clientCore interface {
 	StartFundsMixer(appPW []byte, assetID uint32) error
 	StopFundsMixer(assetID uint32) error
 	DisableFundsMixer(assetID uint32) error
+	SetLanguage(string) error
+	Language() string
 }
 
 type mmCore interface {
@@ -254,13 +257,16 @@ type WebServer struct {
 	ctx          context.Context
 	wsServer     *websocket.Server
 	mux          *chi.Mux
+	siteDir      string
+	lang         atomic.Value // string
+	langs        []string
 	core         clientCore
 	mm           mmCore
 	mmCfgPath    string
 	addr         string
 	csp          string
 	srv          *http.Server
-	html         *templates
+	html         atomic.Value // *templates
 	indent       bool
 	experimental bool
 
@@ -365,11 +371,20 @@ func New(cfg *Config) (*WebServer, error) {
 		// httpServer.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0)
 	}
 
+	lang := cfg.Core.Language()
+
+	langs := make([]string, 0, len(localesMap))
+	for l := range localesMap {
+		langs = append(langs, l)
+	}
+
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
+		langs:           langs,
 		core:            cfg.Core,
 		mm:              cfg.MarketMaker,
 		mmCfgPath:       cfg.MMCfgPath,
+		siteDir:         siteDir,
 		mux:             mux,
 		srv:             httpServer,
 		addr:            cfg.Addr,
@@ -379,12 +394,9 @@ func New(cfg *Config) (*WebServer, error) {
 		experimental:    cfg.Experimental,
 		bondBuf:         map[uint32]valStamp{},
 	}
+	s.lang.Store(lang)
 
-	lang := cfg.Language
-	if lang == "" {
-		lang = "en-US"
-	}
-	if err := s.buildTemplates(lang, siteDir); err != nil {
+	if err := s.buildTemplates(lang); err != nil {
 		return nil, fmt.Errorf("error loading localized html templates: %v", err)
 	}
 
@@ -477,6 +489,9 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Post("/init", s.apiInit)
 		r.Get("/isinitialized", s.apiIsInitialized)
 		r.Post("/resetapppassword", s.apiResetAppPassword)
+		r.Get("/user", s.apiUser)
+		r.Post("/locale", s.apiLocale)
+		r.Post("/setlocale", s.apiSetLocale)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
@@ -490,7 +505,6 @@ func New(cfg *Config) (*WebServer, error) {
 
 		r.Group(func(apiAuth chi.Router) {
 			apiAuth.Use(s.rejectUnauthed)
-			apiAuth.Get("/user", s.apiUser)
 			apiAuth.Get("/notes", s.apiNotes)
 			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/register", s.apiRegister)
@@ -587,7 +601,7 @@ func New(cfg *Config) (*WebServer, error) {
 // sendTemplate. An empty siteDir indicates that the embedded templates in the
 // htmlTmplSub FS should be used. If siteDir is set, the templates will be
 // loaded from disk.
-func (s *WebServer) buildTemplates(lang, siteDir string) error {
+func (s *WebServer) buildTemplates(lang string) error {
 	// Try to identify language.
 	acceptLang, err := language.Parse(lang)
 	if err != nil {
@@ -612,15 +626,15 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 	}
 
 	var htmlDir string
-	if siteDir == "" {
+	if s.siteDir == "" {
 		log.Infof("Using embedded HTML templates")
 	} else {
-		htmlDir = filepath.Join(siteDir, "src", "html")
+		htmlDir = filepath.Join(s.siteDir, "src", "html")
 		log.Infof("Using HTML templates in %s", htmlDir)
 	}
 
 	bb := "bodybuilder"
-	s.html = newTemplates(htmlDir, localeName).
+	html := newTemplates(htmlDir, localeName).
 		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
@@ -632,8 +646,9 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 		addTemplate("init", bb).
 		addTemplate("mm", bb, "forms").
 		addTemplate("mmsettings", bb, "forms")
+	s.html.Store(html)
 
-	return s.html.buildErr()
+	return html.buildErr()
 }
 
 // Addr gives the address on which WebServer is listening. Use only after

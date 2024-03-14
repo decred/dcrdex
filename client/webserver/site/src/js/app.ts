@@ -45,7 +45,8 @@ import {
   WalletTransaction,
   TxHistoryResult,
   WalletNote,
-  TransactionNote
+  TransactionNote,
+  PageElement
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -67,6 +68,14 @@ interface CoreNotePlus extends CoreNote {
   el: HTMLElement // Added in app
 }
 
+interface UserResponse extends APIResponse {
+  user?: User
+  lang: string
+  langs: string[]
+  inited: boolean
+  experimental: boolean
+}
+
 /* constructors is a map to page constructors. */
 const constructors: Record<string, PageClass> = {
   login: LoginPage,
@@ -82,10 +91,46 @@ const constructors: Record<string, PageClass> = {
   mmsettings: MarketMakerSettingsPage
 }
 
+interface LangData {
+  name: string
+  flag: string
+}
+
+const languageData: Record<string, LangData> = {
+  'en-US': {
+    name: 'English',
+    flag: '🇺🇸' // Not 🇬🇧. MURICA!
+  },
+  'pt-BR': {
+    name: 'Portugese',
+    flag: '🇧🇷'
+  },
+  'zh-CN': {
+    name: 'Chinese',
+    flag: '🇨🇳'
+  },
+  'pl-PL': {
+    name: 'Polish',
+    flag: '🇵🇱'
+  },
+  'de-DE': {
+    name: 'German',
+    flag: '🇩🇪'
+  },
+  'ar': {
+    name: 'Arabic',
+    flag: '🇪🇬' // Egypt I guess
+  }
+}
+
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
   notes: CoreNotePlus[]
   pokes: CoreNotePlus[]
+  langs: string[]
+  lang: string
+  inited: boolean
+  authed: boolean
   user: User
   seedGenTime: number
   commitHash: string
@@ -166,9 +211,6 @@ export default class Application {
     if (process.env.NODE_ENV === 'development') {
       window.user = () => this.user
     }
-
-    // use user current locale set by backend
-    intl.setLocale()
   }
 
   /**
@@ -189,6 +231,8 @@ export default class Application {
     const handler = this.main.dataset.handler
     // Don't fetch the user until we know what page we're on.
     await this.fetchUser()
+    const ignoreCachedLocale = process.env.NODE_ENV === 'development'
+    await intl.loadLocale(this.lang, this.commitHash, ignoreCachedLocale)
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
@@ -204,7 +248,7 @@ export default class Application {
     this.attach({})
     // If we are authed, populate notes, otherwise get we'll them from the login
     // response.
-    if (this.user && this.user.authed) await this.fetchNotes()
+    if (this.authed) await this.fetchNotes()
     this.updateMenuItemsDisplay()
     // initialize desktop notifications
     ntfn.fetchDesktopNtfnSettings()
@@ -228,9 +272,14 @@ export default class Application {
    * maintained by the Application.
    */
   async fetchUser (): Promise<User | void> {
-    const resp: APIResponse = await getJSON('/api/user')
+    const resp: UserResponse = await getJSON('/api/user')
     if (!this.checkResponse(resp)) return
-    const user = (resp as any) as User
+    this.inited = resp.inited
+    this.authed = Boolean(resp.user)
+    this.lang = resp.lang
+    this.langs = resp.langs
+    if (!resp.user) return
+    const user = resp.user
     this.seedGenTime = user.seedgentime
     this.user = user
     this.assets = user.assets
@@ -245,10 +294,6 @@ export default class Application {
 
     this.updateMenuItemsDisplay()
     return user
-  }
-
-  authed () {
-    return this.user && this.user.authed
   }
 
   /* Load the page from the server. Insert and bind the DOM. */
@@ -395,6 +440,26 @@ export default class Application {
       Doc.show(page.noteList)
       this.ackNotes()
     })
+
+    Doc.cleanTemplates(page.langBttnTmpl)
+    const { name, flag } = languageData[this.lang]
+    page.langFlag.textContent = flag
+    page.langName.textContent = name
+
+    for (const lang of this.langs) {
+      if (lang === this.lang) continue
+      const div = page.langBttnTmpl.cloneNode(true) as PageElement
+      const { name, flag } = languageData[lang]
+      div.textContent = flag
+      div.title = name
+      Doc.bind(div, 'click', () => this.setLanguage(lang))
+      page.langBttns.appendChild(div)
+    }
+  }
+
+  async setLanguage (lang: string) {
+    await postJSON('/api/setlocale', lang)
+    window.location.reload()
   }
 
   /*
@@ -470,13 +535,12 @@ export default class Application {
    * and when the user registers a DEX.
    */
   updateMenuItemsDisplay () {
-    const { page, user } = this
+    const { page, authed } = this
     if (!page) {
       // initial page load, header elements not yet attached but menu items
       // would already be hidden/displayed as appropriate.
       return
     }
-    const authed = user && user.authed
     if (!authed) {
       page.profileBox.classList.remove('authed')
       Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)

@@ -38,7 +38,8 @@ const (
 
 // sendTemplate processes the template and sends the result.
 func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data any) {
-	page, err := s.html.exec(tmplID, data)
+	html := s.html.Load().(*templates)
+	page, err := html.exec(tmplID, data)
 	if err != nil {
 		log.Errorf("template exec error for %s: %v", tmplID, err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)

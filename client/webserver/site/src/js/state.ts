@@ -19,6 +19,8 @@ export default class State {
   static notificationsLK = 'notifications' // DEPRECATED before v1
   static orderDisclaimerAckedLK = 'ordAck'
   static lastCandleDurationLK = 'lastCandleDuration'
+  static localeSpecsKey = 'localeSpecsLK'
+  static localeKey = 'localeLK'
 
   static setCookie (cname: string, cvalue: string) {
     const d = new Date()

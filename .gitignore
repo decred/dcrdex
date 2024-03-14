@@ -43,3 +43,5 @@ client/cmd/testbinance/testbinance
 server/noderelay/cmd/sourcenode/sourcenode
 tatanka/cmd/demo/demo
 server/cmd/validatemarkets
+client/cmd/translationsreport/translationsreport
+client/cmd/translationsreport/worksheets

@@ -1474,6 +1474,13 @@ type Config struct {
 	ExtensionModeFile string
 }
 
+// locale is data associated with the currently selected language.
+type locale struct {
+	lang    language.Tag
+	m       map[Topic]*translation
+	printer *message.Printer
+}
+
 // Core is the core client application. Core manages DEX connections, wallets,
 // database access, match negotiation and more.
 type Core struct {
@@ -1487,9 +1494,7 @@ type Core struct {
 	net           dex.Network
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
-
-	locale        map[Topic]*translation
-	localePrinter *message.Printer
+	intl          atomic.Value // *locale
 
 	extensionModeConfig *ExtensionModeConfig
 
@@ -1563,17 +1568,17 @@ func New(cfg *Config) (*Core, error) {
 	} else { // default to torproxy if onion not set explicitly
 		cfg.Onion = cfg.TorProxy
 	}
-	lang := language.AmericanEnglish
-	if cfg.Language != "" {
-		acceptLang, err := language.Parse(cfg.Language)
+
+	parseLanguage := func(langStr string) (language.Tag, error) {
+		acceptLang, err := language.Parse(langStr)
 		if err != nil {
-			return nil, fmt.Errorf("unable to parse requested language: %w", err)
+			return language.Und, fmt.Errorf("unable to parse requested language: %w", err)
 		}
 		var langs []language.Tag
 		for locale := range locales {
 			tag, err := language.Parse(locale)
 			if err != nil {
-				return nil, fmt.Errorf("bad %v: %w", locale, err)
+				return language.Und, fmt.Errorf("bad %v: %w", locale, err)
 			}
 			langs = append(langs, tag)
 		}
@@ -1585,13 +1590,38 @@ func New(cfg *Config) (*Core, error) {
 		case language.High, language.Low:
 			cfg.Logger.Infof("Using language %v", tag)
 		case language.No:
-			return nil, fmt.Errorf("no match for %q in recognized languages %v", cfg.Language, langs)
+			return language.Und, fmt.Errorf("no match for %q in recognized languages %v", cfg.Language, langs)
 		}
-		lang = tag
+		return tag, nil
 	}
+
+	lang := language.Und
+
+	// Check if the user has set a language with SetLanguage.
+	if langStr, err := boltDB.Language(); err != nil {
+		cfg.Logger.Errorf("Error loading language from database: %v", err)
+	} else if len(langStr) > 0 {
+		if lang, err = parseLanguage(langStr); err != nil {
+			cfg.Logger.Errorf("Error parsing language retrieved from database %q: %w", langStr, err)
+		}
+	}
+
+	// If they haven't changed the language through the UI, perhaps its set in
+	// configuration.
+	if lang.IsRoot() && cfg.Language != "" {
+		if lang, err = parseLanguage(cfg.Language); err != nil {
+			return nil, err
+		}
+	}
+
+	// Default language is English.
+	if lang.IsRoot() {
+		lang = language.AmericanEnglish
+	}
+
 	cfg.Logger.Debugf("Using locale printer for %q", lang)
 
-	locale, found := locales[lang.String()]
+	translations, found := locales[lang.String()]
 	if !found {
 		return nil, fmt.Errorf("no translations for language %s", lang)
 	}
@@ -1641,8 +1671,6 @@ func New(cfg *Config) (*Core, error) {
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		noteChans:     make(map[uint64]chan Notification),
 
-		locale:              locale,
-		localePrinter:       message.NewPrinter(lang),
 		extensionModeConfig: xCfg,
 		seedGenerationTime:  seedGenerationTime,
 
@@ -1652,6 +1680,12 @@ func New(cfg *Config) (*Core, error) {
 
 		notes: make(chan asset.WalletNotification, 128),
 	}
+
+	c.intl.Store(&locale{
+		lang:    lang,
+		m:       translations,
+		printer: message.NewPrinter(lang),
+	})
 
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
@@ -1794,6 +1828,38 @@ fetchers:
 // tasks and Core becomes ready for use.
 func (c *Core) Ready() <-chan struct{} {
 	return c.ready
+}
+
+func (c *Core) locale() *locale {
+	return c.intl.Load().(*locale)
+}
+
+// SetLanguage sets the langauge used for notifications. The language set with
+// SetLanguage persists through restarts and will override any language set in
+// configuration.
+func (c *Core) SetLanguage(lang string) error {
+	tag, err := language.Parse(lang)
+	if err != nil {
+		return fmt.Errorf("error parsing language %q: %w", lang, err)
+	}
+
+	translations, found := locales[lang]
+	if !found {
+		return fmt.Errorf("no translations for language %s", lang)
+	}
+	if err := c.db.SetLanguage(lang); err != nil {
+		return fmt.Errorf("error storing language: %w", err)
+	}
+	c.intl.Store(&locale{
+		m:       translations,
+		printer: message.NewPrinter(tag),
+	})
+	return nil
+}
+
+// Language is the currently configured language.
+func (c *Core) Language() string {
+	return c.locale().lang.String()
 }
 
 // BackupDB makes a backup of the database at the specified location, optionally

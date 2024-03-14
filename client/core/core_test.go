@@ -601,6 +601,13 @@ func (tdb *TDB) Backup() error {
 
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
+func (tdb *TDB) SetLanguage(lang string) error {
+	return nil
+}
+func (tdb *TDB) Language() (string, error) {
+	return "en-US", nil
+}
+
 type tCoin struct {
 	id []byte
 
@@ -1356,9 +1363,6 @@ func newTestRig() *testRig {
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 			noteChans:  make(map[uint64]chan Notification),
 
-			locale:        originLocale,
-			localePrinter: message.NewPrinter(language.AmericanEnglish),
-
 			fiatRateSources: make(map[string]*commonRateSource),
 			notes:           make(chan asset.WalletNotification, 128),
 			pokesCache:      newPokesCache(pokesCapacity),
@@ -1370,6 +1374,11 @@ func newTestRig() *testRig {
 		acct:    acct,
 		crypter: crypter,
 	}
+
+	rig.core.intl.Store(&locale{
+		m:       originLocale,
+		printer: message.NewPrinter(language.AmericanEnglish),
+	})
 
 	rig.core.InitializeClient(tPW, nil)
 

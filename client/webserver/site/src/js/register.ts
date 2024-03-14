@@ -145,7 +145,7 @@ export default class RegistrationPage extends BasePage {
       this.discoverAcctForm.page.submit.click()
     }
 
-    if (app().authed()) this.auth()
+    if (app().authed) this.auth()
   }
 
   unload () {
