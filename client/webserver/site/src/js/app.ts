@@ -166,7 +166,7 @@ export default class Application {
 
     // Set Bootstrap dark theme attribute if dark mode is enabled.
     if (State.isDark()) {
-      document.documentElement.setAttribute('data-bs-theme', 'dark')
+      document.body.classList.add('dark')
     }
 
     // Loggers can be enabled by setting a truthy value to the loggerID using

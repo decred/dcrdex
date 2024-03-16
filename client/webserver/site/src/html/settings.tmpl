@@ -31,7 +31,7 @@
         <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
           <h5>[[[registered dexes]]]</h5>
           {{range $host, $xc := .Exchanges}}
-            <a href="/dexsettings/{{$host}}"><button class="btn btn-outline-secondary"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings ms-2"></span></div></button></a>
+            <a href="/dexsettings/{{$host}}"><button><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings ms-2"></span></div></button></a>
           {{end}}
         </div>
         <br>
@@ -39,13 +39,13 @@
           <p class="text-muted">
           [[[simultaneous_servers_msg]]]
           </p>
-          <button id="addADex" class="btn btn-outline-secondary">[[[Add a DEX]]]</button>
-          <button id="importAccount" class="btn btn-outline-secondary ms-2">[[[Import Account]]]</button>
+          <button id="addADex">[[[Add a DEX]]]</button>
+          <button id="importAccount" class="ms-2">[[[Import Account]]]</button>
         </div>
       </div>
       <div {{if not .IsInitialized}}class="d-hide"{{end}}>
-          <button id="changeAppPW" class="btn btn-outline-secondary my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
-          <button id="resetAppPW" class="btn btn-outline-secondary my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
+          <button id="changeAppPW" class="my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
+          <button id="resetAppPW" class="my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
       </div>
       <div class="form-check">
         <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
@@ -75,7 +75,7 @@
       </div>
       <div class="mb-3 {{if not .UserInfo.Authed}}d-hide{{end}}">
         <p class="text-muted">[[[seed_implore_msg]]]</p>
-        <button id="exportSeed" class="fs15 btn btn-outline-secondary">[[[View Application Seed]]]</button>
+        <button id="exportSeed" class="fs15">[[[View Application Seed]]]</button>
       </div>
       <p class="text-muted">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
     </div>
@@ -132,7 +132,7 @@
         <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end mt-4">
-        <button id="exportSeedSubmit" type="button" class="btn btn-success">[[[Show Me]]]</button>
+        <button id="exportSeedSubmit" type="button" class="go">[[[Show Me]]]</button>
       </div>
       <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="exportSeedErr"></div>
     </form>

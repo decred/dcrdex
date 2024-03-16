@@ -131,13 +131,13 @@
     @include margin-bottom(3);
 
     .wtab {
-      background-color: var(--bs-secondary-bg);
+      background-color: var(--body-bg-secondary);
       padding: 8px 20px;
       font-size: 15px;
       border-style: solid solid none;
       border-radius: 5px 5px 0 0;
       border-width: 1px;
-      border-color: var(--bs-border-color);
+      border-color: var(--border-color);
       opacity: 0.8;
       position: relative;
       z-index: 150;
@@ -180,7 +180,6 @@
     background-color: #0b5831;
     border-radius: 5px;
     animation: glow 1.5s infinite alternate;
-    color: var(--bs-body-color);
   }
 
   .one-bttn:hover {
@@ -468,7 +467,7 @@ div[data-handler=init] {
     height: 0.7rem;
     border-radius: 0.35rem;
     transition: left 0.5s;
-    background-color: var(--bs-body-bg);
+    background-color: var(--body-bg);
   }
 
   &.on > div {
@@ -512,7 +511,7 @@ div[data-handler=init] {
   }
 }
 
-[data-bs-theme="dark"] body {
+body.dark {
   ::-webkit-calendar-picker-indicator {
     filter: invert(1);
   }

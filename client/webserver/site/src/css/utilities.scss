@@ -1,3 +1,11 @@
+.flex-column {
+  flex-direction: column;
+}
+
+.flex-grow-1 {
+  flex-grow: 1;
+}
+
 .flex-center {
   display: flex;
   justify-content: center;
@@ -10,8 +18,12 @@
   align-items: stretch;
 }
 
+.position-relative {
+  position: relative;
+}
+
 .hoverbg:hover {
-  background-color: var(--bs-tertiary-bg);
+  background-color: var(--body-bg-tertiary);
 }
 
 .stylish-overflow {

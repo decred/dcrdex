@@ -12,11 +12,11 @@
         </div>
       </div>
       <div class="flex-center p-3 border-start">
-        <button class="btn btn-success btn-lg px-4" id="startBotsBtn">
+        <button class="go large px-4" id="startBotsBtn">
           <span class="ico-arrowright me-1"></span>
           [[[start_market_making]]]
         </button>
-        <button class="btn btn-danger btn-lg px-4 d-hide" id="stopBotsBtn">
+        <button class="danger large px-4 d-hide" id="stopBotsBtn">
           <span class="ico-pause me-1"></span>
           [[[stop_market_making]]]
         </button>
@@ -33,7 +33,7 @@
         </div>
         <div class="col-12 flex-center flex-column mw-425 p-3 border-start">
           <span class="ico-robot mb-3"></span>
-          <button id="addBotBtnNoExisting" class="btn btn-success btn-lg">[[[Add a Market Maker Bot]]]</button>
+          <button id="addBotBtnNoExisting" class="large go">[[[Add a Market Maker Bot]]]</button>
         </div>
       </div>
     </div>
@@ -41,7 +41,7 @@
     <div id="mmErr"  class="flex-center text-danger d-hide"></div>
 
     <div class="px-5 py-3 w-100">
-      <table id="botTable" class="table d-hide mb-3">
+      <table id="botTable" class="d-hide mb-3">
         <thead>
           <th id="enabledHeader">[[[enabled]]]</th>
           <th id="runningHeader" class="d-hide">[[[running]]]</th>
@@ -86,7 +86,7 @@
           <tr>
             <td colspan="9">
               <div class="flex-center">
-                <button class="btn btn-outline-secondary btn-lg" id="addBotBtnWithExisting">
+                <button class="large" id="addBotBtnWithExisting">
                   <span class="ico-plus me-2"></span>
                   [[[Add another bot]]]
                 </button>
@@ -111,7 +111,7 @@
         <input type="password" class="form-control select" id="pwInput" autocomplete="off">
       </div>
       <div class="text-end">
-        <button id="pwSubmit" class="btn btn-success">[[[Submit]]]</button>
+        <button id="pwSubmit" class="go">[[[Submit]]]</button>
       </div>
     </form>
   </div>  {{- /* END FORMS */ -}}

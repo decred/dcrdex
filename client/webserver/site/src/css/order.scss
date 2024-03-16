@@ -14,7 +14,7 @@ div.order-datum {
     @include border-bottom;
 
     font-family: $demi-sans;
-    background-color: var(--bs-tertiary-bg);
+    background-color: var(--body-bg-tertiary);
   }
 
   div:last-child,
@@ -26,7 +26,7 @@ div.order-datum {
 div.match-header {
   @include padding(2, 0, 2, 0);
 
-  background-color: var(--bs-tertiary-bg);
+  background-color: var(--body-bg-tertiary);
 }
 
 div.match-card {
@@ -39,7 +39,7 @@ div.match-card {
   @include border;
 
   .red {
-    color: var(--bs-danger);
+    color: $danger;
   }
 }
 

@@ -1,6 +1,14 @@
 // This file defines the color scheme used in the light and dark themes.
 
-[data-bs-theme="light"] {
+body:not(.dark) {
+  // body & text
+  --text-color: #333;
+  --body-bg: #fafafa;
+  --body-bg-secondary: #f0f0f0;
+  --text-color-secondary: #4a4949;
+  --body-bg-tertiary: #7772;
+  --border-color: #ddd;
+
   // links
   --subtle-link-color: #05053b;
   --subtle-link-hover: #07075e;
@@ -8,6 +16,19 @@
   // popup notes
   --popup-notes-bg: black;
   --popup-notes-color: #dfe2e1;
+
+  // buttons
+  --btn-feature-bg: #6bc5ff;
+  --btn-feature-hover-bg: #a3dbff;
+  --btn-feature-border-color: #759cb5;
+  --btn-featur-hover-border-color: #9bc3dd;
+  --btn-danger: #d22;
+  --btn-danger-hover-color: white;
+  --btn-border-color: #ddd;
+  --btn-hover-border-color: #ddd;
+  --btn-go-bg: #0b5831;
+  --btn-go-hover-bg: #0b5831;
+  --btn-go-color: #fff;
 
   // forms
   --form-bg: #fafafae4;
@@ -33,10 +54,21 @@
 
   // loader
   --loader-bg: #e0e0e077;
+
+  // logo
+  --logo-path: url("/img/softened-icon.png");
 }
 
 
-[data-bs-theme="dark"] {
+body.dark {
+  // body & text
+  --body-bg: #091a28;
+  --text-color: #dfe2e1;
+  --body-bg-secondary: #122739;
+  --text-color-secondary: #a1a1a1;
+  --body-bg-tertiary: #78787822;
+  --border-color: #383f4b;
+
   // links
   --subtle-link-color: #e6e6ff;
   --subtle-link-hover: #d1d1ff;
@@ -44,6 +76,19 @@
   // popup notes
   --popup-notes-bg: white;
   --popup-notes-color: #333;
+
+  // buttons
+  --btn-border-color: #7777;
+  --btn-hover-border-color: #777;
+  --btn-feature-bg: #0a4972;
+  --btn-feature-hover-bg: #176699;
+  --btn-feature-border-color: #1e618d;
+  --btn-featur-hover-border-color: #85a5ba;
+  --btn-danger: #e42c2c;
+  --btn-danger-hover-color: white;
+  --btn-go-bg: #0b5831;
+  --btn-go-hover-bg: #0b5831;
+  --btn-go-color: #fff;
 
   // forms
   --form-bg: #091a28e4;
@@ -69,4 +114,7 @@
 
   // loader
   --loader-bg: #13202b77;
+
+  // logo
+  --logo-path: url("/img/softened-icon-dark.png");
 }

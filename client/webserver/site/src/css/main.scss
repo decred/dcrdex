@@ -15,6 +15,8 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  background-color: var(--body-bg);
+  color: var(--text-color);
 }
 
 header.maintop {
@@ -28,7 +30,7 @@ header.maintop {
   
   @include border-bottom;
 
-  background-color: var(--bs-secondary-bg);
+  background-color: var(--body-bg-secondary);
 }
 
 a.logo-icon {
@@ -40,11 +42,7 @@ a.logo-icon {
   cursor: pointer;
   height: 40px;
   width: 40px;
-  background-image: url("/img/softened-icon.png");
-
-  [data-bs-theme="dark"] & {
-    background-image: url("/img/softened-icon-dark.png");
-  }
+  background-image: var(--logo-path);
 }
 
 div.main {
@@ -57,7 +55,7 @@ div.main {
 div.mainlinks {
   &>div,
   &>a {
-    color: var(--bs-secondary-color);
+    color: var(--text-color-secondary);
 
     @include padding(1, 2, 1, 2);
   }
@@ -98,11 +96,11 @@ div.note-indicator {
   }
 
   &.bad {
-    background-color: var(--bs-danger);
+    background-color: $danger;
   }
 
   &.warn {
-    background-color: var(--bs-warning);
+    background-color: $warning;
   }
 }
 
@@ -164,7 +162,7 @@ z-index: 1000;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  background-color: var(--bs-body-bg);
+  background-color: var(--body-bg);
 
   @include border;
 
@@ -201,7 +199,7 @@ z-index: 1000;
   width: 425px;
 
   div.note.firstview {
-    background-color: var(--bs-tertiary-bg);
+    background-color: var(--body-bg-tertiary);
   }
 
   div.note:not(:last-child) {

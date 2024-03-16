@@ -7,13 +7,6 @@ $warning: #f82e;
 $danger: #d22e;
 $green: #0b5831;
 
-// Body colors
-$body-color: #333;
-$body-bg: #fafafa;
-$body-secondary-color: #4a4949;
-$body-secondary-bg: #f0f0f0;
-$body-tertiary-bg: #7772;
-
 // Link colors
 $link-decoration: none;
 $link-hover-decoration: underline;
@@ -33,23 +26,12 @@ $grid-breakpoints: (
 // Set the number of columns and specify the width of the gutters.
 $grid-columns: 24;
 
-// Borders
-$border-color: #ddd;
-$border-color-translucent: #999;
-
 // Typography
 // stylelint-disable value-keyword-case
 $font-family-sans-serif: "source-sans", "sans-serif";
 $font-family-monospace: "mono", "monospace";
 // stylelint-enable value-keyword-case
 
-
-// Dark colors
-$body-color-dark: #dfe2e1;
-$body-bg-dark: #091a28;
-$body-secondary-color-dark: #a1a1a1;
-$body-secondary-bg-dark: #122739;
-$body-tertiary-bg-dark: #78787822;
-$border-color-dark: #383f4b;
-
 @import "~bootstrap/scss/variables";
+
+$enable-dark-mode: false;

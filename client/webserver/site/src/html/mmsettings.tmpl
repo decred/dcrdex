@@ -19,7 +19,7 @@
     </div>
   </div>
   <div id="noMarket" class="flex-grow-1 flex-center">
-    <button id="noMarketBttn" class="btn btn-outline-secondary btn-lg">[[[Select a Market]]]</button>
+    <button id="noMarketBttn" class="large">[[[Select a Market]]]</button>
   </div>
   <div id="botSettingsContainer" class="flex-grow-1 d-flex flex-wrap d-hide p-2">
     <div class="col-24 col-xl-8 col-xxl-6 px-3">
@@ -61,9 +61,9 @@
         </div>
       </div>
       <div class="d-flex justify-content-end mb-4">
-        <button id="resetButton" class="btn btn-outline-secondary me-auto ms-0">[[[reset_settings]]]</button>
-        <button id="updateButton" class="btn btn-success">[[[update_settings]]]</button>
-        <button id="createButton" class="btn btn-success d-hide">[[[create_bot]]]</button>
+        <button id="resetButton" class="me-auto ms-0">[[[reset_settings]]]</button>
+        <button id="updateButton" class="go">[[[update_settings]]]</button>
+        <button id="createButton" class="go d-hide">[[[create_bot]]]</button>
       </div>
 
       <div id="profitSelectorBox" class="d-flex align-items-stretch py-2 my-2 border-top border-bottom d-hide">
@@ -88,7 +88,7 @@
           <span class="ico-info fs12 ms-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
         </div>
         <div class="d-flex flex-column" id="buyPlacementsTableWrapper">
-          <table class="table">
+          <table>
             <thead>
               <th scope="col">[[[priority]]]</th>
               <th scope="col">[[[Lots]]]</th>
@@ -143,7 +143,7 @@
           <span class="ico-info fs12 ms-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
         </label>
         <div class="d-flex flex-column" id="sellPlacementsTableWrapper">
-          <table class="table">
+          <table>
             <thead>
               <th scope="col">[[[priority]]]</th>
               <th scope="col">[[[Lots]]]</th>
@@ -397,7 +397,7 @@
         [[[no_oracles]]]
       </div>
 
-      <table id="oraclesTable" class="table mb-3 d-hide border-top">
+      <table id="oraclesTable" class="mb-3 d-hide border-top">
         <thead>
           <tr>
             <td>[[[Oracles]]]</td>
@@ -413,7 +413,7 @@
         </tbody>
       </table>
 
-      <table id="fiatRates" class="table mb-3 d-hide border-top">
+      <table id="fiatRates" class="mb-3 d-hide border-top">
         <thead>
           <tr>
             <td colspan="2">[[[fiat_rates]]]</td>
@@ -458,7 +458,7 @@
       </div>
       <div id="cexFormErr" class="flex-center px-3 pt-2 text-danger text-break d-hide"></div>
       <div class="d-flex justify-content-end">
-        <div id="cexSubmit" class="btn btn-success">[[[Submit]]]</div>
+        <div id="cexSubmit" class="go">[[[Submit]]]</div>
       </div>
     </form>
 
@@ -543,7 +543,7 @@
       <div id="botTypeErr" class="flex-center pt-3 text-danger d-hide"></div>
 
       <div class="d-flex justify-content-center">
-        <div id="botTypeSubmit" class="btn btn-primary btn-lg">[[[Submit]]]</div>
+        <div id="botTypeSubmit" class="feature large">[[[Submit]]]</div>
       </div>
     </form>
 
@@ -558,7 +558,7 @@
         </div>
       </div>
 
-      <table id="marketSelectionTable" class="table">
+      <table id="marketSelectionTable">
         <thead>
           <tr>
             <th>Market</th>

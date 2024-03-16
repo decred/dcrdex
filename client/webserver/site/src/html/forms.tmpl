@@ -90,7 +90,7 @@
     </div>
     <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
     <div class="d-grid align-items-end col-10 p-0">
-      <button data-tmpl="submitAdd" type="submit" class="btn btn-success">[[[Add]]]</button>
+      <button data-tmpl="submitAdd" type="submit" class="go">[[[Add]]]</button>
     </div>
   </div>
 
@@ -128,7 +128,7 @@
   <div class="mb-3 form-text">[[[app_password_reminder]]]</div>
 </div>
 <div id="submitUnlockDiv" class="d-flex justify-content-end">
-  <button id="submitUnlock" type="submit" class="btn btn-success">[[[Unlock]]]</button>
+  <button id="submitUnlock" type="submit" class="go">[[[Unlock]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="unlockErr"></div>
 {{end}}
@@ -148,11 +148,11 @@
 <img class="mb-4" id="qrcode" />
 <div class="mono deposit-address mb-4">
   <span id="depositAddress" class="user-select-all"></span>
-  <span id="copyAddressBtn" class="copy-btn ico-copy mt-2 ml-2 fs18"></span>
+  <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18"></span>
   <span id="copyAlert" class="d-hide">[[[copied]]]</span>
 </div>
 <div class="d-flex">
-  <button id="newDepAddrBttn" type="button" class="btn btn-success justify-content-center">[[[New Deposit Address]]]</button>
+  <button id="newDepAddrBttn" type="button" class="go justify-content-center">[[[New Deposit Address]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="depositErr"></div>
 {{end}}
@@ -213,7 +213,7 @@
     </div>
   </div>
   <div class="col-12 d-flex justify-content-end align-items-end p-0">
-    <button data-tmpl="submit" type="button" class="btn btn-success">[[[Submit]]]</button>
+    <button data-tmpl="submit" type="button" class="go">[[[Submit]]]</button>
   </div>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="err"></div>
@@ -227,14 +227,14 @@
   <input type="password" class="form-control select" id="discoverAcctAppPW" data-tmpl="appPW">
 </div>
 <div class="d-flex justify-content-center">
-  <button data-tmpl="submit" type="button" class="btn btn-success">[[[Create Account]]]</button>
+  <button data-tmpl="submit" type="button" class="go">[[[Create Account]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="err"></div>
 {{end}}
 
 {{define "regAssetForm"}}
 <div data-tmpl="whatsABondPanel" class="d-hide">
-  <div data-tmpl="whatsABondBack" class="btn btn-sm">
+  <div data-tmpl="whatsABondBack" class="small">
     <span class="ico-wide-headed-left-arrow fs24"></span>
   </div>
   <h4 class="flex-center fs22 mb-3">[[[What is a fidelity bond]]]</h4>
@@ -256,7 +256,7 @@
     </li>
   </ul>
   <div class="flex-center p-3">
-    <div data-tmpl="bondGotIt" class="btn btn-outline-secondary">[[[Got it]]]</div>
+    <div data-tmpl="bondGotIt">[[[Got it]]]</div>
   </div>
 </div>
 <div data-tmpl="mainBondingForm">
@@ -279,7 +279,7 @@
   <div data-tmpl="assetSelection">
     <h5 class="text-center">[[[Select your bond asset]]]</h5>
     <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2 mb-2">[[[what_s_a_bond]]]</div>
-    <table class="table table-bordered w-100 mb-3">
+    <table class="mb-3">
       <thead>
         <tr class="fs16">
           <th>[[[Asset]]]</th>
@@ -331,7 +331,7 @@
       </tbody>
     </table>
     <h5 class="text-center">[[[Other Trading Limits]]]</h5>
-    <table class="table table-bordered w-100">
+    <table>
       <tbody data-tmpl="otherAssets">
       </tbody>
     </table>
@@ -385,7 +385,7 @@
     </div>
 </div>
 <div class="d-flex justify-content-center mb-3">
-  <button data-tmpl="submit" type="button" class="btn btn-success px-5" id="loginSubmit">[[[Submit]]]</button>
+  <button data-tmpl="submit" type="button" class="go px-5" id="loginSubmit">[[[Submit]]]</button>
 </div>
 <div class="d-flex justify-content-center">
   <strong id="forgotPassBtn" class="text-muted pointer">[[[Forgot Password]]]</strong>
@@ -430,7 +430,7 @@
         <input type="password" class="form-control select app-pass mt-3" data-tmpl="appPass" autocomplete="current-password">
       </div>
       <div class="flex-center p-3 mt-1">
-        <button data-tmpl="submit" class="btn btn-success selected">[[[Submit]]]</button>
+        <button data-tmpl="submit" class="go selected">[[[Submit]]]</button>
       </div>
     </div>
   </div>
@@ -456,7 +456,7 @@
   <input type="password" class="form-control select" id="exportAccountAppPass" autocomplete="current-password">
 </div>
 <div class="d-flex justify-content-end">
-  <button id="authorizeExportAccountConfirm" type="button" class="btn btn-success">[[[Authorize Export]]]</button>
+  <button id="authorizeExportAccountConfirm" type="button" class="go">[[[Authorize Export]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="exportAccountErr"></div>
 {{end}}
@@ -479,7 +479,7 @@
   <input type="password" class="form-control" id="disableAccountAppPW" autocomplete="current-password">
 </div>
 <div class="d-flex justify-content-end">
-  <button id="disableAccountConfirm" type="button" class="btn btn-success">[[[Disable Account]]]</button>
+  <button id="disableAccountConfirm" type="button" class="go">[[[Disable Account]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="disableAccountErr"></div>
 {{end}}
@@ -506,7 +506,7 @@
   <div class="form-text">[[[app_pw_import_msg]]]</div>
 </div>
 <div class="d-flex justify-content-end">
-  <button id="authorizeImportAccountConfirm" type="button" class="btn btn-success">[[[Authorize Import]]]</button>
+  <button id="authorizeImportAccountConfirm" type="button" class="go">[[[Authorize Import]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="importAccountErr"></div>
 {{end}}
@@ -529,7 +529,7 @@
   <input type="password" class="form-control" id="confirmNewPW" autocomplete="new-password">
 </div>
 <div class="d-flex justify-content-end">
-  <button id="submitNewPW" type="submit" class="btn btn-success">[[[Submit]]]</button>
+  <button id="submitNewPW" type="submit" class="go">[[[Submit]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="changePWErrMsg"></div>
 {{end}}
@@ -548,7 +548,7 @@
 </div>
 <hr class="dashed mb-3">
 <div class="d-flex justify-content-end">
-  <button id="cancelSubmit" type="button" class="btn btn-success selected px-4">[[[Submit]]]</button>
+  <button id="cancelSubmit" type="button" class="go selected px-4">[[[Submit]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger" id="cancelErr"></div>
 {{end}}
@@ -579,7 +579,7 @@
         <input type="password" class="form-control select" id="acceleratePass" autocomplete="off">
       </div>
       <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
-        <button id="accelerateSubmit" type="button" class="btn btn-success">[[[Submit]]]</button>
+        <button id="accelerateSubmit" type="button" class="go">[[[Submit]]]</button>
       </div>
     </div>
   </div>
@@ -590,7 +590,7 @@
     [[[early_acceleration_help_msg]]]
     <div class="d-flex flex-row align-items-end justify-content-end pb-4">
       <div class="col-12 pt-2">
-        <button id="submitEarlyConfirm" type="button" class="btn btn-success">[[[Submit]]]</button>
+        <button id="submitEarlyConfirm" type="button" class="go">[[[Submit]]]</button>
       </div>
     </div>
   </div>
@@ -718,7 +718,7 @@
  <span id="enableWalletMsg" class="hide">[[[enable_wallet_message]]]</span>
 </div>
 <div class="d-flex justify-content-end">
-  <button id="toggleWalletStatusSubmit" type="button" class="btn btn-success">[[[Submit]]]</button>
+  <button id="toggleWalletStatusSubmit" type="button" class="go">[[[Submit]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger" id="toggleWalletStatusErr"></div>
 {{end}}
@@ -741,7 +741,7 @@
    <textarea class="form-control select mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
  </div>
  <div class="d-flex justify-content-end">
-    <button id="resetAppPWSubmitBtn" type="button" class="btn btn-success">[[[Submit]]]</button>
+    <button id="resetAppPWSubmitBtn" type="button" class="go">[[[Submit]]]</button>
  </div>
  <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="appPWResetErrMsg"></div>
  <div id="appPWResetSuccessMsg" class="d-hide text-break text-center pt-3 fs15"></div> 

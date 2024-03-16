@@ -1,7 +1,7 @@
 div[data-handler=mmsettings],
 div[data-handler=mm] {
   .modified {
-    border: 1px solid var(--bs-warn) !important;
+    border: 1px solid $warning !important;
   }
 
   #gapStrategySelect {
@@ -16,7 +16,7 @@ div[data-handler=mm] {
   .settings-card {
     @include border;
 
-    background-color: var(--bs-body-bg);
+    background-color: var(--body-bg);
     margin: 0 1rem 2rem;
     padding: 0.5rem;
   }
@@ -65,7 +65,7 @@ div[data-handler=mm] {
       cursor: pointer;
 
       &.selected {
-        outline: 2px solid var(--bs-success);
+        outline: 2px solid $success;
         background-color: #7772;
       }
     }
@@ -109,7 +109,7 @@ div[data-handler=mm] {
         cursor: pointer;
 
         &.selected {
-          border-color: var(--bs-success);
+          border-color: $success;
           border-width: 2px;
           background-color: #7772;
         }
@@ -124,7 +124,7 @@ div[data-handler=mm] {
   }
 
   .ico-rocket {
-    color: var(--bs-success);
+    color: $success;
   }
 
   .ico-sleeping {
@@ -133,7 +133,7 @@ div[data-handler=mm] {
 
   #buyPlacementsBox {
     .ico-cross {
-      color: var(--bs-danger);
+      color: $danger;
     }
   }
 
@@ -150,7 +150,7 @@ div[data-handler=mm] {
     border-radius: 8px;
 
     &.on {
-      background-color: var(--bs-success);
+      background-color: $warning;
     }
 
     &.off {

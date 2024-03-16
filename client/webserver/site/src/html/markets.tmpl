@@ -156,7 +156,7 @@
           <div class="flex-grow-1 position-relative">
             <div class="fill-abs flex-stretch-column">
               <div id="candlesChart" class="market-chart">
-                <div id="durBttnBox"><button class="btn candle-dur-bttn" id="durBttnTemplate"></button></div>
+                <div id="durBttnBox"><button class="candle-dur-bttn" id="durBttnTemplate"></button></div>
               </div>
 
               <div class="chart-legend text-muted">
@@ -200,11 +200,11 @@
                 <span class="p-3 flex-center fs16 grey d-hide" id="approvalRequiredBuy">[[[approval_required_buy]]]</span>
                 <span class="p-3 flex-center fs16 grey d-hide" id="approvalRequiredSell">[[[approval_required_sell]]]</span>
                 <span class="p-3 flex-center fs16 grey d-hide" id="approvalRequiredBoth">[[[approval_required_both]]]</span>
-                <button id="approveBaseBttn" type="button" class="btn btn-success">[[[Approve]]] <span id="baseTokenAsset"></span></button>
+                <button id="approveBaseBttn" type="button" class="go">[[[Approve]]] <span id="baseTokenAsset"></span></button>
                 <div id="approvalPendingBase" class="d-hide flex-center position-relative py-2">
                   <span class="px-1" id="approvalPendingBaseSymbol"></span> [[[approval_change_pending]]] <div class="px-2 ico-spinner spinner fs15"></div>
                 </div>
-                <button id="approveQuoteBttn" type="button" class="btn btn-success">[[[Approve]]] <span id="quoteTokenAsset"></span></button>
+                <button id="approveQuoteBttn" type="button" class="go">[[[Approve]]] <span id="quoteTokenAsset"></span></button>
                 <div id="approvalPendingQuote" class="d-hide flex-center position-relative py-2">
                   <span class="px-1" id="approvalPendingQuoteSymbol"></span> [[[approval_change_pending]]] <div class="px-2 ico-spinner spinner fs15"></div>
                 </div>
@@ -223,7 +223,7 @@
                 <div class="p-3 flex-center fs16 grey">[[[create_account_to_trade]]]</div>
                 <div class="border-top border-bottom flex-center p-2">
                   <p class="text-center fs14 p-2 m-0">[[[need_to_register_msg]]]</p>
-                  <button data-tmpl="registerBttn" type="button" class="btn btn-outline-secondary text-nowrap">[[[Create Account]]]</button>
+                  <button data-tmpl="registerBttn" type="button" class="text-nowrap">[[[Create Account]]]</button>
                 </div>
               </div>
 
@@ -376,7 +376,7 @@
 
                   {{- /* SUBMIT ORDER BUTTON */ -}}
                   <div class="text-end">
-                    <button id="submitBttn" type="button" class="btn fs14 submit text-center buygreen-bg" disabled></button> {{/* textContent set by script */}}
+                    <button id="submitBttn" type="button" class="fs14 submit text-center buygreen-bg" disabled></button> {{/* textContent set by script */}}
                   </div>
 
                   {{- /* ORDER LIMITS */ -}}
@@ -657,7 +657,7 @@
             <input type="password" class="form-control select" id="vPass">
           </div>
           <div class="col-12 p-0 d-flex justify-content-end">
-            <button id="vSubmit" class="btn w-75 mt-1 justify-content-center fs15 selected sellred-bg">
+            <button id="vSubmit" class="w-75 mt-1 justify-content-center fs15 selected sellred-bg">
               <span id="vSideSubmit"></span>
               <span data-unit="base"></span>
             </button>
@@ -733,7 +733,7 @@
                 <input type="password" class="form-control select w-100" id="vUnlockPass">
               </div>
               <div class="col-12 p-0 d-flex align-items-end justify-content-end">
-                <button type="button" id="vUnlockSubmit" class="btn selected buygreen-bg">[[[Unlock]]]</button>
+                <button type="button" id="vUnlockSubmit" class="buygreen-bg">[[[Unlock]]]</button>
               </div>
             </div>
           </div>
@@ -834,7 +834,7 @@
             </div>
             <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
             <div class="d-grid align-items-end col-10 p-0">
-              <button id="approveTokenButton" type="button" class="btn fs15 bg2 selected">[[[Approve]]]</button>
+              <button id="approveTokenButton" type="button" class="fs15 bg2 selected">[[[Approve]]]</button>
             </div>
           </div>
         </div>

@@ -12,11 +12,11 @@
   }
 
   &::-webkit-scrollbar-track {
-    background-color: var(--bs-tertiary-bg);
+    background-color: var(--body-bg-tertiary);
   }
 
   &::-webkit-scrollbar-thumb {
-    background-color: var(--bs-tertiary-bg);
+    background-color: var(--body-bg-tertiary);
     border-radius: 4px;
   }
 }
@@ -29,23 +29,23 @@
   right: 0;
 }
 
-@mixin border($width: 1px, $style: solid, $color: var(--bs-border-color)) {
+@mixin border($width: 1px, $style: solid, $color: var(--border-color)) {
   border: $width $style $color;
 }
 
-@mixin border-top($width: 1px, $style: solid, $color: var(--bs-border-color)) {
+@mixin border-top($width: 1px, $style: solid, $color: var(--border-color)) {
   border-top: $width $style $color;
 }
 
-@mixin border-bottom($width: 1px, $style: solid, $color: var(--bs-border-color)) {
+@mixin border-bottom($width: 1px, $style: solid, $color: var(--border-color)) {
   border-bottom: $width $style $color;
 }
 
-@mixin border-left($width: 1px, $style: solid, $color: var(--bs-border-color)) {
+@mixin border-left($width: 1px, $style: solid, $color: var(--border-color)) {
   border-left: $width $style $color;
 }
 
-@mixin border-right($width: 1px, $style: solid, $color: var(--bs-border-color)) {
+@mixin border-right($width: 1px, $style: solid, $color: var(--border-color)) {
   border-right: $width $style $color;
 }
 

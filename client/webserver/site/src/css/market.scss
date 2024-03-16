@@ -72,7 +72,7 @@ div[data-handler=markets] {
         padding: 5px 25px;
         border: 1px solid #78787877;
         border-radius: 3px;
-        background-color: var(--bs-body-bg);
+        background-color: var(--body-bg);
         color: var(--market-btn-color);
 
         &:disabled {
@@ -107,11 +107,11 @@ div[data-handler=markets] {
     }
 
     .ico-unlocked {
-      color: var(--bs-success);
+      color: $success;
     }
 
     .ico-disconnected {
-      color: var(--bs-warning);
+      color: $warning;
     }
   }
 
@@ -131,7 +131,7 @@ div[data-handler=markets] {
   }
 
   #unreadyOrdersMsg {
-    color: var(--bs-danger);
+    color: $danger;
   }
 
   .unready-user-order {
@@ -225,7 +225,7 @@ div[data-handler=markets] {
   }
 
   table.ordertable {
-    color: var(--bs-secondary-color);
+    color: var(--text-color-secondary);
     border-collapse: collapse;
     border: none;
     width: 100%;
@@ -246,7 +246,7 @@ div[data-handler=markets] {
 
     tbody > tr:hover,
     tbody > tr.hover {
-      background-color: var(--bs-tertiary-bg);
+      background-color: var(--body-bg-tertiary);
     }
 
     .ico-check {
@@ -257,7 +257,7 @@ div[data-handler=markets] {
   .markettab {
     height: 30px;
     border-style: none;
-    background-color: var(--bs-body-bg);
+    background-color: var(--body-bg);
 
     &.selected {
       background-color: var(--market-markettab-selected-bg);
@@ -279,7 +279,7 @@ div[data-handler=markets] {
     left: 0;
     z-index: 2;
     min-height: -webkit-fill-available; // for webkit browsers
-    background-color: var(--bs-body-bg);
+    background-color: var(--body-bg);
 
     &.default,
     &.stashed {
@@ -392,7 +392,7 @@ div[data-handler=markets] {
     position: absolute;
     left: 50px;
     top: 5px;
-    background-color: var(--bs-body-bg);
+    background-color: var(--body-bg);
     z-index: 1;
     display: none; // shown on hover
   }
@@ -401,7 +401,7 @@ div[data-handler=markets] {
     .candle-dur-bttn {
       @include border;
 
-      background-color: var(--bs-body-bg);
+      background-color: var(--body-bg);
       padding: 2px 4px;
       font-size: 14px;
       border-radius: 3px;
@@ -414,8 +414,8 @@ div[data-handler=markets] {
 
       &:hover,
       &.selected {
-        border-color: var(--bs-warning);
-        color: var(--bs-warning);
+        border-color: $warning;
+        color: $warning;
       }
     }
   }
@@ -475,7 +475,7 @@ div[data-handler=markets] {
 
     &.completed {
       .title {
-        color: var(--bs-success);
+        color: $success;
       }
 
       #regStatusMessage {
@@ -485,7 +485,7 @@ div[data-handler=markets] {
 
     &.error {
       .title {
-        color: var(--bs-danger);
+        color: $danger;
       }
     }
   }
@@ -500,7 +500,7 @@ div[data-handler=markets] {
     }
 
     .red {
-      color: var(--bs-danger);
+      color: $danger;
     }
 
     .disclaimer {
@@ -543,7 +543,7 @@ div[data-handler=markets] {
         background-color: var(--form-opt-selected-bg);
 
         div.opt-check {
-          background-color: var(--bs-success);
+          background-color: $success;
         }
       }
     }
@@ -559,7 +559,7 @@ div[data-handler=markets] {
     max-width: 425px;
 
     .indent {
-      border-left: 2px solid var(--bs-border-color);
+      border-left: 2px solid var(--border-color);
     }
 
     table.fee-breakout {
@@ -584,7 +584,7 @@ div[data-handler=markets] {
     position: absolute;
     top: 0;
     left: 0;
-    background-color: var(--bs-body-bg);
+    background-color: var(--body-bg);
     z-index: 10;
   }
 
@@ -863,8 +863,8 @@ div[data-handler=markets] {
   z-index: 5;
   border-style: none solid solid;
   border-width: 0 2px 2px 1px;
-  border-color: var(--bs-border-color);
-  background-color: var(--bs-body-bg);
+  border-color: var(--border-color);
+  background-color: var(--body-bg);
   cursor: pointer;
   overflow: hidden;
 

@@ -9,19 +9,23 @@
 @import "~bootstrap/scss/mixins";
 @import "~bootstrap/scss/root";
 @import "~bootstrap/scss/reboot";
-@import "~bootstrap/scss/type";
+// @import "~bootstrap/scss/type";
 // @import "~bootstrap/scss/_images.scss";
 // @import "~bootstrap/scss/_code.scss";
 @import "~bootstrap/scss/grid";
-@import "~bootstrap/scss/tables";
-@import "~bootstrap/scss/forms";
+// @import "~bootstrap/scss/tables";
+@import "~bootstrap/scss/forms/labels";
+@import "~bootstrap/scss/forms/form-text";
+@import "~bootstrap/scss/forms/form-control";
+@import "~bootstrap/scss/forms/form-select";
+@import "~bootstrap/scss/forms/form-check";
 @import "~bootstrap/scss/buttons";
 // @import "~bootstrap/scss/_transitions.scss";
-@import "~bootstrap/scss/_dropdown.scss";
-@import "~bootstrap/scss/button-group";
+// @import "~bootstrap/scss/_dropdown.scss";
+// @import "~bootstrap/scss/button-group";
 // @import "~bootstrap/scss/_input-group.scss";
 // @import "~bootstrap/scss/_custom-forms.scss";
-@import "~bootstrap/scss/nav";
+// @import "~bootstrap/scss/nav";
 
 // @import "~bootstrap/scss/_navbar.scss";
 // @import "~bootstrap/scss/_card.scss";
@@ -35,9 +39,185 @@
 // @import "~bootstrap/scss/_list-group.scss";
 // @import "~bootstrap/scss/_close.scss";
 // @import "~bootstrap/scss/_modal.scss";
-@import "~bootstrap/scss/tooltip";
+// @import "~bootstrap/scss/tooltip";
 // @import "~bootstrap/scss/_popover.scss";
 // @import "~bootstrap/scss/_carousel.scss";
 @import "~bootstrap/scss/utilities";
+
+$utilities: (
+  "display": (
+    responsive: true,
+    print: true,
+    property: display,
+    class: d,
+    values: inline inline-block block grid inline-grid table table-row table-cell flex inline-flex none
+  ),
+  "flex": (
+    responsive: true,
+    property: flex,
+    values: (fill: 1 1 auto)
+  ),
+  "flex-direction": ( // probably don't need all of these.
+    responsive: true,
+    property: flex-direction,
+    class: flex,
+    values: row column row-reverse column-reverse
+  ),
+  "align-items": (
+    property: align-items,
+    values: (
+      start: flex-start,
+      end: flex-end,
+      center: center,
+      baseline: baseline,
+      stretch: stretch,
+    )
+  ),
+  "justify-content": (
+    property: justify-content,
+    values: (
+      start: flex-start,
+      end: flex-end,
+      center: center,
+      between: space-between,
+      around: space-around,
+      evenly: space-evenly,
+    )
+  ),
+  "padding": (
+    property: padding,
+    class: p,
+    values: $spacers
+  ),
+  "padding-x": (
+    property: padding-right padding-left,
+    class: px,
+    values: $spacers
+  ),
+  "padding-y": (
+    property: padding-top padding-bottom,
+    class: py,
+    values: $spacers
+  ),
+  "padding-top": (
+    property: padding-top,
+    class: pt,
+    values: $spacers
+  ),
+  "padding-end": (
+    property: padding-right,
+    class: pe,
+    values: $spacers
+  ),
+  "padding-bottom": (
+    property: padding-bottom,
+    class: pb,
+    values: $spacers
+  ),
+  "padding-start": (
+    property: padding-left,
+    class: ps,
+    values: $spacers
+  ),
+  "margin": (
+    property: margin,
+    class: m,
+    values: map-merge($spacers, (auto: auto))
+  ),
+  "margin-x": (
+    property: margin-right margin-left,
+    class: mx,
+    values: map-merge($spacers, (auto: auto))
+  ),
+  "margin-y": (
+    property: margin-top margin-bottom,
+    class: my,
+    values: map-merge($spacers, (auto: auto))
+  ),
+  "margin-top": (
+    property: margin-top,
+    class: mt,
+    values: map-merge($spacers, (auto: auto))
+  ),
+  "margin-end": (
+    property: margin-right,
+    class: me,
+    values: map-merge($spacers, (auto: auto))
+  ),
+  "margin-bottom": (
+    property: margin-bottom,
+    class: mb,
+    values: map-merge($spacers, (auto: auto))
+  ),
+  "margin-start": (
+    property: margin-left,
+    class: ms,
+    values: map-merge($spacers, (auto: auto))
+  ),
+  "border": (
+    property: border,
+    values: (
+      null: 1px solid var(--border-color),
+      0: 0,
+    )
+  ),
+  "border-top": (
+    property: border-top,
+    values: (
+      null: 1px solid var(--border-color),
+      0: 0,
+    )
+  ),
+  "border-end": (
+    property: border-right,
+    class: border-end,
+    values: (
+      null: 1px solid var(--border-color),
+      0: 0,
+    )
+  ),
+  "border-bottom": (
+    property: border-bottom,
+    values: (
+      null: 1px solid var(--border-color),
+      0: 0,
+    )
+  ),
+  "border-start": (
+    property: border-left,
+    class: border-start,
+    values: (
+      null: 1px solid var(--border-color),
+      0: 0,
+    )
+  ),
+  "width": (
+    property: width,
+    class: w,
+    values: (
+      25: 25%,
+      50: 50%,
+      75: 75%,
+      100: 100%,
+      auto: auto
+    )
+  ),
+  "height": (
+    property: height,
+    class: h,
+    values: (
+      100: 100%
+    )
+  ),
+  "text-align": (
+    property: text-align,
+    class: text,
+    values: (
+      start: left,
+      end: right,
+      center: center,
+    )
+  ),
+);
 // @import "~bootstrap/scss/_print.scss";
 @import "~bootstrap/scss/utilities/api";

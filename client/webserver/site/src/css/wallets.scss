@@ -40,7 +40,7 @@
         width: 20px;
         height: 20px;
         border-radius: 10px;
-        border: 3px solid var(--bs-body-bg);
+        border: 3px solid var(--body-bg);
       }
     }
 
@@ -59,6 +59,10 @@
   }
 
   table#balanceTable {
+    td {
+      line-height: 1;
+    }
+
     tr.itemized > td {
       padding-bottom: 0.25rem;
     }
@@ -178,7 +182,7 @@
   }
 
   .negative-tx {
-    color: var(--bs-danger);
+    color: $danger;
   }
 }
 
@@ -217,7 +221,7 @@
   }
 
   #purchaseTicketsErrBox {
-    background-color: var(--bs-body-bg);
+    background-color: var(--body-bg);
   }
 }
 
@@ -274,7 +278,7 @@
 
         &.selected,
         &:hover {
-          background-color: var(--bs-body-bg);
+          background-color: var(--body-bg);
         }
       }
     }

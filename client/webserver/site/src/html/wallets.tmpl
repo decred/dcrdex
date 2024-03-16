@@ -51,7 +51,7 @@
               <div id="contractAddress" class="fs14 mt-2"></div>
             </div>
             <div id="createWalletBox" class="mb-3 p-3 flex-center border rounded3">
-              <button id="createWallet" class="btn btn-outline-secondary btn-lg">[[[create_a_x_wallet]]]</button>
+              <button id="createWallet" class="large">[[[create_a_x_wallet]]]</button>
             </div>
 
             <div class="flex-stretch-column flex-md-row border rounded3 mb-3" id="walletDetails">
@@ -71,11 +71,11 @@
                 </div>
                 <div id="sendReceive" class="flex-grow-1 d-flex flex-column justify-content-end align-items-stretch fs22 mt-2 border-bottom">
                   <div class="d-flex d-grid justify-content-stretch gap-2 p-2">
-                    <button id="receive" class="btn btn-outline-secondary flex-grow-1" type="button">
+                    <button id="receive" class="flex-grow-1 me-1" type="button">
                       <small class="ico-qrcode me-1"></small>
                       [[[Receive]]]
                     </button>
-                    <button id="send" class="btn btn-primary flex-grow-1" type="button">
+                    <button id="send" class="feature flex-grow-1 ms-1" type="button">
                       <small class="ico-send me-1"></small>
                       [[[Send]]]
                     </button>
@@ -104,12 +104,12 @@
                     </tr>
                     <tr id="unlockBttnBox">
                       <td colspan="2" class="pb-2">
-                        <button id="unlockBttn" class="btn btn-sm btn-outline-secondary">[[[Unlock]]]</button>
+                        <button id="unlockBttn" class="small">[[[Unlock]]]</button>
                       </td>
                     </tr>
                     <tr id="lockBttnBox">
                       <td colspan="2" class="pb-2">
-                        <button id="lockBttn" class="btn btn-xs btn-outline-secondary">[[[Lock]]]</button>
+                        <button id="lockBttn" class="small">[[[Lock]]]</button>
                       </td>
                     </tr>
                     <tr id="connectBttnBox">
@@ -132,7 +132,7 @@
                   </tbody>
                 </table>
                 <div class="flex-grow-1 d-flex flex-column justify-content-end align-items-end">
-                  <button id="reconfigureBttn" class="btn btn-outline-secondary mt-2">
+                  <button id="reconfigureBttn" class="mt-2">
                     <span class="ico-settings"></span>
                     [[[Settings]]]
                   </button>
@@ -181,7 +181,7 @@
                       </div>
                     </div>
                     <div id="pickVSP" class="mt-3 flex-stretch-column justify-content-end">
-                      <button id="showVSPs" class="btn btn-outline-secondary">[[[select_vsp_from_list]]]</button>
+                      <button id="showVSPs">[[[select_vsp_from_list]]]</button>
                     </div>
                   </div>
                   <div id="setVotes" class="flex-center p-3 flex-column border-start hoverbg pointer">
@@ -202,10 +202,10 @@
                 </div>
                 {{- /* PURCHASE TICKETS */ -}}
                 <div id="purchaseTicketsBox" class="w-100 d-flex align-items-stretch justify-content-stretch border-top p-2">
-                  <div id="purchaseTicketsBttn" class="btn btn-primary flex-grow-1 me-2">
+                  <div id="purchaseTicketsBttn" class="feature flex-grow-1 me-2">
                     <span><span class="ico-ticket me-1"></span> [[[Purchase Tickets]]]</span>
                   </div>
-                  <div id="ticketHistory" class="btn btn-outline-secondary flex-grow-1 ">
+                  <div id="ticketHistory" class="flex-grow-1 ">
                     <span><span class="ico-textfile me-1"></span> [[[Tickets]]]</span>
                   </div>
                 </div>
@@ -235,14 +235,14 @@
             {{- /* END STAKING */ -}}
 
             {{- /* MIXING */ -}}
-            <div id="mixingBox" class="position-relative w-100 my-3 d-flex align-items-stretch flex-column border-top border-bottom">
+            <div id="mixingBox" class="position-relative w-100 my-3 d-flex align-items-stretch flex-column border">
               <div id="enableMixing" class="w-100 d-flex align-items-stretch">
                 <div class="flex-grow-1 d-flex justify-content-between align-items-stretch">
                   <div class="flex-center p-2">
                     <span class="fs35 ico-secretagent me-2"></span>
                     <span class="fs24">[[[Privacy]]]</span>
                   </div>
-                  <button id="enablePrivacyButton" class="btn btn-primary m-2">[[[Enable]]]</button>
+                  <button id="enablePrivacyButton" class="feature m-2">[[[Enable]]]</button>
                 </div>
                 <div id="privacyInfoBttn" class="flex-center p-3 fs24 ico-info border-start hoverbg pointer"></div>
                 <div id="configureMixer" class="flex-center p-3 fs24 ico-settings border-start hoverbg pointer"></div>
@@ -481,7 +481,7 @@
       </div>
       <hr class="dashed mb-3">
       <div class="d-flex justify-content-end">
-          <button id="submitSendForm" type="button" class="btn btn-success px-4">[[[Send]]]</button>
+          <button id="submitSendForm" type="button" class="go px-4">[[[Send]]]</button>
       </div>
       <div class="fs15 pt-3 text-center text-danger text-break" id="sendErr"></div>
     </form>
@@ -529,17 +529,17 @@
       </div>
       <hr class="dashed mb-3">
       <div class="px-4 text-center mb-3">[[[Authorize the transfer with your app password.]]]</div>
-      <div class="input-group mb-3">
+      <div class="mb-3">
         <label for="vSendPw" class="form-label m-2">[[[Password]]]: </label>
         <input type="password" class="form-control" id="vSendPw" autocomplete="off" autofocus>
       </div>
       <div class="d-flex justify-content-between align-items-stretch flex-wrap">
         <div class="col-12 p-0">
-          <button id="vCancelSend" type="button" class="btn btn-outline-secondary px-4">[[[cancel]]]</button>
+          <button id="vCancelSend" type="button" class="px-4">[[[cancel]]]</button>
         </div>
         <div class="col-12 p-0 text-end">
           <button id="vSend" type="button"
-           class="btn btn-success px-3">[[[confirm]]]</button>
+           class="go px-3">[[[confirm]]]</button>
         </div>
       </div>
       <div class="fs15 pt-3 text-center text-danger text-break" id="vSendErr"></div>
@@ -602,7 +602,7 @@
         </div>
         <div class="col-12 p-0 text-end">
           <div>&nbsp;</div>
-          <button id="submitReconfig" type="button" class="btn btn-success w-75 mb-1 justify-content-center">[[[Submit]]]</button>
+          <button id="submitReconfig" type="button" class="go w-75 mb-1 justify-content-center">[[[Submit]]]</button>
         </div>
       </div>
       <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="reconfigErr"></div>
@@ -610,14 +610,14 @@
       <hr class="dashed my-2">
       <div class="fs18" id="otherActionsLabel">[[[other_actions]]]</div>
       <div class="d-flex flex-row fs15 pt-1">
-        <button id="unapproveTokenAllowance" type="button" class="btn btn-outline-secondary btn-xs me-2 ">[[[disallow_token]]]</button>
-        <button id="managePeers" type="button" class="btn btn-outline-secondary btn-xs me-2">[[[manage_peers]]]</button>
-        <button id="downloadLogs" type="button" class="btn btn-outline-secondary btn-xs me-2">[[[wallet_logs]]]</button>
-        <button id="exportWallet" type="button" class="btn btn-outline-secondary btn-xs me-2">[[[export_wallet]]]</button>
-        <button id="recoverWallet" type="button" class="btn btn-outline-danger btn-xs me-2">[[[recover]]]</button>
-        <button id="rescanWallet" type="button" class="btn btn-outline-danger btn-xs  me-2">[[[Rescan]]]</button>
-        <button id="disableWallet" type="button" class="btn btn-outline-danger btn-xs me-2">[[[disable_wallet]]]</button>
-        <button id="enableWallet" type="button" class="btn btn-outline-success btn-xs me-2">[[[enable_wallet]]]</button>
+        <button id="unapproveTokenAllowance" type="button" class="small me-2 ">[[[disallow_token]]]</button>
+        <button id="managePeers" type="button" class="small me-2">[[[manage_peers]]]</button>
+        <button id="downloadLogs" type="button" class="small me-2">[[[wallet_logs]]]</button>
+        <button id="exportWallet" type="button" class="small me-2">[[[export_wallet]]]</button>
+        <button id="recoverWallet" type="button" class="danger small me-2">[[[recover]]]</button>
+        <button id="rescanWallet" type="button" class="danger small  me-2">[[[Rescan]]]</button>
+        <button id="disableWallet" type="button" class="danger small me-2">[[[disable_wallet]]]</button>
+        <button id="enableWallet" type="button" class="small me-2">[[[enable_wallet]]]</button>
       </div>
     </form>
 
@@ -652,7 +652,7 @@
       </table>
       <div class="d-flex justify-content-end">
         <input class="form-control" id="addPeerInput">
-        <button id="addPeerSubmit" type="button" class="btn btn-success ms-2">[[[add_peer]]]</button>
+        <button id="addPeerSubmit" type="button" class="go ms-2">[[[add_peer]]]</button>
       </div>
       <div id="peerSpinner" class="flex-center position-relative py-2 d-hide">
         <div class="ico-spinner spinner fs15"></div>
@@ -744,7 +744,7 @@
         <input type="password" class="form-control select" id="recoverWalletPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end">
-        <button id="recoverWalletSubmit" type="button" class="btn btn-success">[[[Submit]]]</button>
+        <button id="recoverWalletSubmit" type="button" class="go">[[[Submit]]]</button>
       </div>
       <div class="pt-3 text-center d-hide text-danger" id="recoverWalletErr"></div>
     </form>
@@ -766,7 +766,7 @@
         <input type="password" class="form-control select" id="exportWalletPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end">
-        <button id="exportWalletAuthSubmit" type="button" class="btn btn-success">[[[Show Me]]]</button>
+        <button id="exportWalletAuthSubmit" type="button" class="go">[[[Show Me]]]</button>
       </div>
       <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="exportWalletErr"></div>
     </form>
@@ -839,7 +839,7 @@
               placeholder="https://"
               aria-label="[[[Custom VSP URL]]]"
             >
-            <button id="customVspSubmit" class="btn btn-success ms-2 px-3" type="button">[[[Add]]]</button>
+            <button id="customVspSubmit" class="go ms-2 px-3" type="button">[[[Add]]]</button>
           </div>
         </div>
       </div>
@@ -880,7 +880,7 @@
         </div>
       </div>
       <div class="flex-center flex-column">
-        <button id="purchaserSubmit" class="btn btn-success px-4">[[[Buy]]]</button>
+        <button id="purchaserSubmit" class="go px-4">[[[Buy]]]</button>
       </div>
       <div id="purchaserErr" class="text-danger d-hide py-2 d-hide"></div>
   </form>
@@ -1015,15 +1015,15 @@
         </tr>
         <tr>
           <td class="text-muted">[[[tx_id]]]</td>
-          <td><span id="txDetailsID" class="ease-color"></span><span id="copyTxIDBtn" class="btn ico-copy pt-0"></span></td>
+          <td><span id="txDetailsID" class="ease-color"></span><span id="copyTxIDBtn" class="ico-copy pt-0"></span></td>
         </tr>
         <tr id="txDetailsRecipientSection" class="border-top">
           <td class="text-muted">[[[recipient]]]</td>
-          <td><span id="txDetailsRecipient" class="ease-color"></span><span id="copyRecipientBtn" class="btn ico-copy pt-0"></span></td>
+          <td><span id="txDetailsRecipient" class="ease-color"></span><span id="copyRecipientBtn" class="ico-copy pt-0"></span></td>
         </tr>
         <tr id="txDetailsBondSection" class="border-top">
           <td class="text-muted">[[[bond_id]]]</td>
-          <td><span id="txDetailsBondID" class="ease-color"></span><span id="copyBondIDBtn" class="btn ico-copy pt-0"></span></td>
+          <td><span id="txDetailsBondID" class="ease-color"></span><span id="copyBondIDBtn" class="ico-copy pt-0"></span></td>
         </tr>
         <tr>
           <td class="text-muted">[[[locktime]]]</td>
@@ -1031,7 +1031,7 @@
         </tr>
         <tr id="txDetailsBondAccountIDSection">
           <td class="text-muted">[[[Account ID]]]</td>
-          <td><span id="txDetailsBondAccountID" class="ease-color"></span><span id="copyBondAccountIDBtn" class="btn ico-copy pt-0"></span></td>
+          <td><span id="txDetailsBondAccountID" class="ease-color"></span><span id="copyBondAccountIDBtn" class="ico-copy pt-0"></span></td>
         </tr>
         <tr id="txDetailsNonceSection" class="border-top">
           <td class="text-muted">[[[nonce]]]</td>
@@ -1083,8 +1083,8 @@
         </div>
       </div>
       <div class="d-flex justify-content-between w-100">
-        <div id="mixerDisable" class="btn btn-outline-danger me-4">[[[Disable Privacy]]]</div>
-        <div id="mixConfigSubmit" class="btn btn-success">[[[Submit]]]</div>
+        <div id="mixerDisable" class="danger me-4">[[[Disable Privacy]]]</div>
+        <div id="mixConfigSubmit" class="go">[[[Submit]]]</div>
       </div>
       <div id="mixConfigErr" class="pt-3 flex-center text-danger d-hide"></div>
     </form>
@@ -1119,8 +1119,8 @@
         use until privacy is turned back on.
       </div>
       <div class="d-flex justify-content-between mt-4">
-        <div id="mixingOffNo" class="btn btn-outline-secondary">Nevermind</div>
-        <div id="mixingOffGo" class="btn btn-outline-danger">Turn it off</div>
+        <button id="mixingOffNo">Nevermind</button>
+        <button id="mixingOffGo" class="danger">Turn it off</button>
       </div>
     </form>
   </div>

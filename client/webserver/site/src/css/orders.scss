@@ -8,7 +8,7 @@
 .orders-left-side {
   @include border-right;
   
-  background-color: var(--bs-secondary-bg);
+  background-color: var(--body-bg-secondary);
 }
 
 .filter-opts {
@@ -25,4 +25,10 @@
   @include margin-right(2);
 
   text-align: right;
+}
+
+#ordersTable {
+  tr:nth-of-type(even) {
+    background-color: #7772;
+  }
 }
