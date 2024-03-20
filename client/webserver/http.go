@@ -244,6 +244,33 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// handleGenerateQRCode is the handler for the '/generateqrcode' page request
+func (s *WebServer) handleGenerateCompanionAppQRCode(w http.ResponseWriter, r *http.Request) {
+
+	url := ""
+
+	if s.onion != "" {
+		url = s.onion
+	} else {
+		url = fmt.Sprintf("http://%s", s.addr)
+	}
+	png, err := qrcode.Encode(url, qrcode.Medium, 200)
+	if err != nil {
+		log.Error("error generating qr code: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Length", strconv.Itoa(len(png)))
+	w.WriteHeader(http.StatusOK)
+
+	_, err = w.Write(png)
+	if err != nil {
+		log.Errorf("error writing qr code image: %v", err)
+	}
+}
+
 // handleInit is the handler for the '/init' page request
 func (s *WebServer) handleInit(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "init", s.commonArgs(r, "Welcome | Decred DEX"))

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -151,7 +152,7 @@ out:
 					return nil, fmt.Errorf("error attemtpting to read hostname file: %w", err)
 				}
 			} else {
-				s.onionAddr = string(b)
+				s.onionAddr = strings.TrimSpace(string(b))
 				break out
 			}
 		case <-timeout:

@@ -1160,6 +1160,7 @@ export interface Application {
   showPopups: boolean
   commitHash: string
   authed: boolean
+  onionUrl: string
   start (): Promise<void>
   reconnected (): void
   fetchUser (): Promise<User | void>

@@ -86,6 +86,7 @@ interface UserResponse extends APIResponse {
   langs: string[]
   inited: boolean
   experimental: boolean
+  onionUrl: string
   mmStatus: MarketMakingStatus
 }
 
@@ -177,6 +178,7 @@ export default class Application {
   noteReceivers: Record<string, (n: CoreNote) => void>[]
   txHistoryMap: Record<number, TxHistoryResult>
   requiredActions: Record<string, requiredAction>
+  onionUrl: string
 
   constructor () {
     this.notes = []
@@ -307,6 +309,7 @@ export default class Application {
     if (!this.checkResponse(resp)) return
     this.inited = resp.inited
     this.authed = Boolean(resp.user)
+    this.onionUrl = resp.onionUrl
     this.lang = resp.lang
     this.langs = resp.langs
     this.experimental = resp.experimental
