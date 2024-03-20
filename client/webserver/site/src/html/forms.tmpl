@@ -619,6 +619,20 @@
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="changePWErrMsg"></div>
 {{end}}
 
+{{define "companionAppForm"}}
+<div class="form-closer"><span class="ico-cross"></span></div>
+<div class="px-2 py-1 text-center position-relative fs22 sans-light mb-3">
+  [[[Companion App]]]
+</div>
+<div id="companionAppTorEnabled" class="d-hide">
+  <p>[[[companion_app_info]]]</p>
+  <img class="mb-3" id="companionAppQrcode" />
+</div>
+<div id="companionAppTorDisabled">
+  <p>Tor must be enabled for this.</p>
+</div>
+{{end}}
+
 {{define "cancelOrderForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer"><span class="ico-cross"></span></div>
