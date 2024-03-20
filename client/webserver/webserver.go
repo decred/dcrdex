@@ -447,6 +447,7 @@ func New(cfg *Config) (*WebServer, error) {
 		web.Get(settingsRoute, s.handleSettings)
 
 		web.Get("/generateqrcode", s.handleGenerateQRCode)
+		web.Get("/generatecompanionappqrcode", s.handleGenerateCompanionAppQRCode)
 
 		web.Group(func(notInit chi.Router) {
 			notInit.Use(s.requireNotInit)
