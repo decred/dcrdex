@@ -33,6 +33,7 @@ contract ETHSwap {
     }
 
     bytes32 constant RefundRecord = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+    bytes32 constant RefundRecordHash = 0xAF9613760F72635FBDB44A5A0A63C39F12AF30F950A6EE5C971BE188E89C4051;
 
     // swaps is a map of contract hashes to the "swap record". The swap record
     // has the following interpretation.
@@ -127,6 +128,7 @@ contract ETHSwap {
 
             require(v.value > 0, "0 val");
             require(v.refundTimestamp > 0, "0 refundTimestamp");
+            require(v.secretHash != RefundRecordHash, "illegal secret hash (refund record hash)");
 
             bytes32 k = contractKey(v);
             bytes32 record = swaps[k];
@@ -143,7 +145,7 @@ contract ETHSwap {
         require(initVal == msg.value, "bad val");
     }
 
-    // isRedeemable returns whether or not a swap identified by secretHash
+    // isRedeemable returns whether or not a swap identified by vector
     // can be redeemed using secret. isRedeemable DOES NOT check if the caller
     // is the participant in the vector.
     function isRedeemable(Vector calldata v)
@@ -156,7 +158,7 @@ contract ETHSwap {
     }
 
     // redeem redeems a Vector. It checks that the sender is not a contract,
-    // and that the secret hash hashes to secretHash. msg.value is tranfered
+    // and that the secret hashes to secretHash. msg.value is tranfered
     // from ETHSwap to the sender.
     //
     // To prevent reentry attack, it is very important to check the state of the
@@ -187,10 +189,6 @@ contract ETHSwap {
             require(secretValidates(r.secret, r.v.secretHash), "invalid secret");
 
             swaps[k] = r.secret;
-
-
-            // DRAFT TODO: NOOOOOO! This doesn't account for decimals. This is
-            // WRONG for e.g. USDC.
             amountToRedeem += r.v.value;
         }
 
@@ -215,13 +213,13 @@ contract ETHSwap {
         (bytes32 k, bytes32 record, uint256 blockNum) = retrieveStatus(v);
 
         // Is this swap initialized?
+        // This check also guarantees that the swap has not already been
+        // refunded i.e. record != RefundRecord, since RefundRecord is certainly
+        // greater than block.number.
         require(blockNum > 0 && blockNum <= block.number, "swap not active");
 
         // Is it already redeemed?
         require(!secretValidates(record, v.secretHash), "swap already redeemed");
-
-        // Is it already refunded?
-        require(record != RefundRecord, "swap already refunded");
 
         swaps[k] = RefundRecord;
 

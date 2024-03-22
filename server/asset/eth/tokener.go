@@ -82,7 +82,7 @@ func newTokener(
 		return nil, err
 	}
 
-	boundAddr, err := tokenAddresser.TokenAddress(readOnlyCallOpts(ctx, false))
+	boundAddr, err := tokenAddresser.TokenAddress(readOnlyCallOpts(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving bound address for %s version %d contract: %w",
 			vToken.Name, vToken.ContractVersion, err)
@@ -129,7 +129,7 @@ func (t *tokener) swapped(txData []byte) *big.Int {
 
 // balanceOf checks the account's token balance.
 func (t *tokener) balanceOf(ctx context.Context, addr common.Address) (*big.Int, error) {
-	return t.BalanceOf(readOnlyCallOpts(ctx, false), addr)
+	return t.BalanceOf(readOnlyCallOpts(ctx), addr)
 }
 
 // swapContractV0 represents a version 0 swap contract for ETH or a token.
@@ -143,9 +143,9 @@ type swapSourceV0 struct {
 	contract swapContractV0 // *swapv0.ETHSwap or *erc20v0.ERCSwap
 }
 
-// swap get the swap state for the secretHash on the version 0 contract.
+// swap gets the swap state for the secretHash on the version 0 contract.
 func (s *swapSourceV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
-	state, err := s.contract.Swap(readOnlyCallOpts(ctx, true), secretHash)
+	state, err := s.contract.Swap(readOnlyCallOpts(ctx), secretHash)
 	if err != nil {
 		return nil, fmt.Errorf("swap error: %w", err)
 	}
@@ -183,8 +183,8 @@ func (s *swapSourceV0) vector(ctx context.Context, locator []byte) (*dexeth.Swap
 		return nil, err
 	}
 	vector := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
+		From:       swap.Initiator,
+		To:         swap.Participant,
 		Value:      swap.Value,
 		SecretHash: secretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),
@@ -205,8 +205,8 @@ func (s *swapSourceV0) statusAndVector(ctx context.Context, locator []byte) (*de
 		return nil, nil, err
 	}
 	vector := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
+		From:       swap.Initiator,
+		To:         swap.Participant,
 		Value:      swap.Value,
 		SecretHash: secretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),
@@ -232,7 +232,7 @@ func (s *swapSourceV1) status(ctx context.Context, locator []byte) (*dexeth.Swap
 	if err != nil {
 		return nil, err
 	}
-	rec, err := s.contract.Status(readOnlyCallOpts(ctx, true), dexeth.SwapVectorToAbigen(v))
+	rec, err := s.contract.Status(readOnlyCallOpts(ctx), dexeth.SwapVectorToAbigen(v))
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (s *swapSourceV1) statusAndVector(ctx context.Context, locator []byte) (*de
 		return nil, nil, err
 	}
 
-	rec, err := s.contract.Status(readOnlyCallOpts(ctx, true), dexeth.SwapVectorToAbigen(v))
+	rec, err := s.contract.Status(readOnlyCallOpts(ctx), dexeth.SwapVectorToAbigen(v))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -270,7 +270,7 @@ func (s *swapSourceV1) Status(ctx context.Context, locator []byte) (*dexeth.Swap
 		return nil, err
 	}
 
-	status, err := s.contract.Status(readOnlyCallOpts(ctx, true), dexeth.SwapVectorToAbigen(vec))
+	status, err := s.contract.Status(readOnlyCallOpts(ctx), dexeth.SwapVectorToAbigen(vec))
 	if err != nil {
 		return nil, err
 	}
@@ -283,9 +283,8 @@ func (s *swapSourceV1) Status(ctx context.Context, locator []byte) (*dexeth.Swap
 }
 
 // readOnlyCallOpts is the CallOpts used for read-only contract method calls.
-func readOnlyCallOpts(ctx context.Context, includePending bool) *bind.CallOpts {
+func readOnlyCallOpts(ctx context.Context) *bind.CallOpts {
 	return &bind.CallOpts{
-		Pending: includePending,
 		Context: ctx,
 	}
 }

@@ -221,8 +221,8 @@ func (c *contractorV0) vector(ctx context.Context, locator []byte) (*dexeth.Swap
 		return nil, err
 	}
 	vector := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
+		From:       swap.Initiator,
+		To:         swap.Participant,
 		Value:      swap.Value,
 		SecretHash: secretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),
@@ -243,8 +243,8 @@ func (c *contractorV0) statusAndVector(ctx context.Context, locator []byte) (*de
 		return nil, nil, err
 	}
 	vector := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
+		From:       swap.Initiator,
+		To:         swap.Participant,
 		Value:      swap.Value,
 		SecretHash: secretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),
@@ -452,7 +452,6 @@ func (c *erc20Contractor) balance(ctx context.Context) (*big.Int, error) {
 // allowance exposes the read-only allowance method of the erc20 token contract.
 func (c *erc20Contractor) allowance(ctx context.Context) (*big.Int, error) {
 	callOpts := &bind.CallOpts{
-		// Pending: true, // Seeing errors on even simnet that say "backend does not support pending state"
 		From:    c.acct,
 		Context: ctx,
 	}
@@ -946,14 +945,6 @@ func (c *tokenContractorV1) tokenAddress() common.Address {
 
 var _ contractor = (*tokenContractorV1)(nil)
 var _ tokenContractor = (*tokenContractorV1)(nil)
-
-// readOnlyCallOpts is the CallOpts used for read-only contract method calls.
-func readOnlyCallOpts(ctx context.Context) *bind.CallOpts {
-	return &bind.CallOpts{
-		Pending: true,
-		Context: ctx,
-	}
-}
 
 func estimateGas(ctx context.Context, from, to common.Address, abi *abi.ABI, cb bind.ContractBackend, value *big.Int, method string, args ...interface{}) (uint64, error) {
 	data, err := abi.Pack(method, args...)

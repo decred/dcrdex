@@ -449,6 +449,8 @@ func (v ProtocolVersion) ContractVersion() uint32 {
 }
 
 var (
+	// ContractVersionERC20 is passed as the contract version when calling
+	// ERC20 contract methods.
 	ContractVersionERC20   = ^uint32(0)
 	ContractVersionUnknown = ContractVersionERC20 - 1
 )

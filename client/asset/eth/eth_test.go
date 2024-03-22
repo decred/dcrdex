@@ -377,8 +377,8 @@ func (c *tContractor) vector(ctx context.Context, locator []byte) (*dexeth.SwapV
 		return nil, errors.New("swap not in map")
 	}
 	v := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
+		From:       swap.Initiator,
+		To:         swap.Participant,
 		Value:      swap.Value,
 		SecretHash: secretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),
@@ -399,8 +399,8 @@ func (c *tContractor) statusAndVector(ctx context.Context, locator []byte) (*dex
 		return nil, nil, errors.New("swap not in map")
 	}
 	v := &dexeth.SwapVector{
-		From:       swap.Participant,
-		To:         swap.Initiator,
+		From:       swap.Initiator,
+		To:         swap.Participant,
 		Value:      swap.Value,
 		SecretHash: vector.SecretHash,
 		LockTime:   uint64(swap.LockTime.Unix()),

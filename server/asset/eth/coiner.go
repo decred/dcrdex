@@ -82,16 +82,6 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 			SecretHash: secretHash,
 			LockTime:   uint64(init.LockTime.Unix()),
 		}
-
-		// if value < bc.vector.Value {
-		// 	return nil, fmt.Errorf("tx data value is too low. %d < %d", value, bc.vector.Value)
-		// }
-		// if init.Participant != bc.vector.To {
-		// 	return nil, fmt.Errorf("wrong participant in tx data. wanted %s, got %s", bc.vector.To, init.Participant)
-		// }
-		// if init.LockTime.UnixMilli() != int64(bc.vector.LockTime) {
-		// 	return nil, fmt.Errorf("wrong locktime in tx data. wanted %s, got %s", time.UnixMilli(int64(bc.vector.LockTime)), init.LockTime)
-		// }
 	case 1:
 		contractVector, err := dexeth.ParseV1Locator(bc.locator)
 		if err != nil {
@@ -109,6 +99,9 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 			return nil, fmt.Errorf("contract and transaction vectors do not match. %+v != %+v", contractVector, txVector)
 		}
 		vector = txVector
+		if vector.SecretHash == refundRecordHash {
+			return nil, errors.New("illegal secret hash (refund record hash)")
+		}
 		for _, v := range txVectors {
 			sum += be.atomize(v.Value)
 		}
@@ -171,8 +164,10 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 	var secret [32]byte
 	switch bc.contractVer {
 	case 0:
-		var secretHash [32]byte
-		copy(secretHash[:], bc.locator)
+		secretHash, err := dexeth.ParseV0Locator(bc.locator)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing vector from v0 locator '%x': %w", bc.locator, err)
+		}
 		redemptions, err := dexeth.ParseRedeemDataV0(bc.txData)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse v0 redemption call data: %v", err)
@@ -414,5 +409,5 @@ func (c *baseCoin) FeeRate() uint64 {
 
 // Value returns the value of one swap in order to validate during processing.
 func (c *swapCoin) Value() uint64 {
-	return c.value
+	return c.backend.atomize(c.vector.Value)
 }

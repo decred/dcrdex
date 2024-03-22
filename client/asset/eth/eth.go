@@ -1497,7 +1497,7 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), contractVer,
 		ord.RedeemVersion, ord.RedeemAssetID)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %vlaptop apart comic equip remove adult system tuna office discover toddler can keep fury aware amazing injury typical", err)
+		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
 
 	ethToLock := ord.MaxFeeRate * g.Swap * ord.MaxSwapCount
@@ -3446,7 +3446,7 @@ func parseSecretHashes(tx *types.Transaction, contractVer uint32, isInit bool) (
 			}
 			locators = make([][]byte, 0, len(inits))
 			for k := range inits {
-				copyK := k // TODO: Is this really necessary?
+				copyK := k
 				locators = append(locators, copyK[:])
 			}
 		} else {
@@ -4628,7 +4628,7 @@ func (w *assetWallet) loadContractors() error {
 // withContractor runs the provided function with the versioned contractor.
 func (w *assetWallet) withContractor(contractVer uint32, f func(contractor) error) error {
 	if contractVer == dexeth.ContractVersionERC20 {
-		// For ERC02 methods, use the most recent contractor version.
+		// For ERC20 methods, use the most recent contractor version.
 		var bestVer uint32
 		var bestContractor contractor
 		for ver, c := range w.contractors {

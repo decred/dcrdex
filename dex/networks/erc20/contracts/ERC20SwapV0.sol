@@ -120,7 +120,7 @@ contract ERC20Swap {
     }
 
     // redeem redeems an array of swaps contract. It checks that the sender is
-    // not a contract, and that the secret hash hashes to secretHash. The ERC20
+    // not a contract, and that the secret hashes to secretHash. The ERC20
     // tokens are transferred from the contract to the sender.
     function redeem(Redemption[] calldata redemptions)
         public
