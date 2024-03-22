@@ -1299,13 +1299,12 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 		chainParams: cfg.ChainParams,
 		cfg:         walletCfg,
 		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name),
-		txBlocks:    make(map[chainhash.Hash]*hashEntry),
-		checkpoints: make(map[OutPoint]*scanCheckpoint),
 		log:         cfg.Logger.SubLogger("SPV"),
 		tipChan:     make(chan *BlockVector, 8),
 		decodeAddr:  btc.decodeAddr,
 	}
 
+	spvw.BlockFiltersScanner = NewBlockFiltersScanner(spvw, spvw.log)
 	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 	btc.setNode(spvw)
 
