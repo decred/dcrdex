@@ -21,6 +21,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/mnemonic"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
@@ -124,9 +125,15 @@ func (c *TCore) FiatRateSources() map[string]bool {
 	return nil
 }
 
-func (c *TCore) InitializeClient(pw, seed []byte) error { return c.initErr }
-func (c *TCore) Login(pw []byte) error                  { return c.loginErr }
-func (c *TCore) IsInitialized() bool                    { return c.isInited }
+func (c *TCore) InitializeClient(pw []byte, seed *string) (string, error) {
+	var mnemonicSeed string
+	if seed == nil {
+		_, mnemonicSeed = mnemonic.New()
+	}
+	return mnemonicSeed, c.initErr
+}
+func (c *TCore) Login(pw []byte) error { return c.loginErr }
+func (c *TCore) IsInitialized() bool   { return c.isInited }
 func (c *TCore) SyncBook(dex string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
 	return nil, c.syncFeed, c.syncErr
 }
@@ -165,7 +172,7 @@ func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool) error {
 	return c.walletStatusErr
 }
 func (c *TCore) ChangeAppPass(appPW, newAppPW []byte) error                         { return nil }
-func (c *TCore) ResetAppPass(newAppPW, seed []byte) error                           { return nil }
+func (c *TCore) ResetAppPass(newAppPW []byte, seed string) error                    { return nil }
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
 func (c *TCore) NewDepositAddress(assetID uint32) (string, error)                   { return "", nil }
 func (c *TCore) AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error) {
@@ -243,8 +250,8 @@ func (c *TCore) AccountImport(pw []byte, account *core.Account, bonds []*db.Bond
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
 
-func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
-	return []byte("ab"), nil
+func (c *TCore) ExportSeed(pw []byte) (string, error) {
+	return "seed words here", nil
 }
 func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
@@ -282,8 +289,8 @@ func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
 func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 	return nil
 }
-func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
-	return c.notes, c.notesErr
+func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
+	return c.notes, []*db.Notification{}, c.notesErr
 }
 
 func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
@@ -357,6 +364,9 @@ func (c *TCore) StopFundsMixer(assetID uint32) error {
 func (c *TCore) DisableFundsMixer(assetID uint32) error {
 	return nil
 }
+
+func (*TCore) SetLanguage(string) error { return nil }
+func (*TCore) Language() string         { return "en-US" }
 
 type TWriter struct {
 	b []byte
@@ -566,6 +576,7 @@ func TestAPILogin(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
+		t.Helper()
 		ensureResponse(t, s.apiLogin, want, reader, writer, body, nil)
 	}
 
@@ -573,16 +584,16 @@ func TestAPILogin(t *testing.T) {
 		Pass: encode.PassBytes("def"),
 	}
 	body = goodBody
-	ensure(`{"ok":true,"notes":null}`)
+	ensure(`{"ok":true,"notes":null,"pokes":[]}`)
 
 	tCore.notes = []*db.Notification{{
 		TopicID: core.TopicAccountUnlockError,
 	}}
-	ensure(`{"ok":true,"notes":[{"type":"","topic":"AccountUnlockError","subject":"","details":"","severity":0,"stamp":0,"acked":false,"id":""}]}`)
+	ensure(`{"ok":true,"notes":[{"type":"","topic":"AccountUnlockError","subject":"","details":"","severity":0,"stamp":0,"acked":false,"id":""}],"pokes":[]}`)
 
 	tCore.notes = nil
 	tCore.notesErr = errors.New("")
-	ensure(`{"ok":true,"notes":null}`)
+	ensure(`{"ok":true,"notes":null,"pokes":[]}`)
 
 	// Login error
 	tCore.loginErr = tErr
@@ -673,12 +684,6 @@ func TestAPIInit(t *testing.T) {
 	// Now initialized
 	tCore.isInited = true
 	ensure(s.apiIsInitialized, `{"ok":true,"initialized":true}`)
-
-	goodBody := &loginForm{
-		Pass: encode.PassBytes("def"),
-	}
-	body = goodBody
-	ensure(s.apiInit, `{"ok":true,"hosts":["dex.decred.org:7232"]}`)
 
 	// Initialization error
 	tCore.initErr = tErr

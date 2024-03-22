@@ -44,6 +44,7 @@ func registerToken(assetID uint32, ver uint32) {
 		DriverBase: DriverBase{
 			Ver: ver,
 			UI:  token.UnitInfo,
+			Nam: token.Name,
 		},
 		Token: token.Token,
 	})
@@ -58,6 +59,7 @@ func init() {
 		DriverBase: DriverBase{
 			Ver: version,
 			UI:  dexeth.UnitInfo,
+			Nam: "Ethereum",
 		},
 	})
 
@@ -98,6 +100,7 @@ func networkToken(vToken *VersionedToken, net dex.Network) (netToken *dexeth.Net
 type DriverBase struct {
 	UI  dex.UnitInfo
 	Ver uint32
+	Nam string
 }
 
 // Version returns the Backend implementation's version number.
@@ -118,6 +121,11 @@ func (d *DriverBase) DecodeCoinID(coinID []byte) (string, error) {
 // UnitInfo returns the dex.UnitInfo for the asset.
 func (d *DriverBase) UnitInfo() dex.UnitInfo {
 	return d.UI
+}
+
+// Name is the asset's name.
+func (d *DriverBase) Name() string {
+	return d.Nam
 }
 
 // Driver implements asset.Driver.

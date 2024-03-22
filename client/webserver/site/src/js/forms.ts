@@ -61,6 +61,52 @@ interface WalletConfig {
   walletType: string
 }
 
+export class Forms {
+  formsDiv: PageElement
+  currentForm: PageElement
+  keyup: (e: KeyboardEvent) => void
+
+  constructor (formsDiv: PageElement) {
+    this.formsDiv = formsDiv
+
+    formsDiv.querySelectorAll('.form-closer').forEach(el => {
+      Doc.bind(el, 'click', () => { this.close() })
+    })
+
+    Doc.bind(formsDiv, 'mousedown', (e: MouseEvent) => {
+      if (!Doc.mouseInElement(e, this.currentForm)) { this.close() }
+    })
+
+    this.keyup = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        this.close()
+      }
+    }
+    Doc.bind(document, 'keyup', this.keyup)
+  }
+
+  /* showForm shows a modal form with a little animation. */
+  async show (form: HTMLElement): Promise<void> {
+    this.currentForm = form
+    Doc.hide(...Array.from(this.formsDiv.children))
+    form.style.right = '10000px'
+    Doc.show(this.formsDiv, form)
+    const shift = (this.formsDiv.offsetWidth + form.offsetWidth) / 2
+    await Doc.animate(animationLength, progress => {
+      form.style.right = `${(1 - progress) * shift}px`
+    }, 'easeOutHard')
+    form.style.right = '0'
+  }
+
+  close (): void {
+    Doc.hide(this.formsDiv)
+  }
+
+  exit () {
+    Doc.unbind(document, 'keyup', this.keyup)
+  }
+}
+
 /*
  * NewWalletForm should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the first argument of the constructor.
@@ -1166,9 +1212,9 @@ export class FeeAssetSelectionForm {
  * setReadyMessage sets an asset's status message on the FeeAssetSelectionForm.
  */
 function setReadyMessage (el: PageElement, asset: SupportedAsset) {
-  if (asset.wallet) el.textContent = intl.prep(intl.WALLET_READY)
-  else if (asset.walletCreationPending) el.textContent = intl.prep(intl.WALLET_PENDING)
-  else el.textContent = intl.prep(intl.SETUP_NEEDED)
+  if (asset.wallet) el.textContent = intl.prep(intl.ID_WALLET_READY)
+  else if (asset.walletCreationPending) el.textContent = intl.prep(intl.ID_WALLET_PENDING)
+  else el.textContent = intl.prep(intl.ID_SETUP_NEEDED)
   el.classList.remove('readygreen', 'setuporange')
   el.classList.add(asset.wallet ? 'readygreen' : 'setuporange')
 }
@@ -1903,9 +1949,13 @@ export class LoginForm {
       Doc.showFormError(page.errMsg, res.msg)
       return
     }
+    await app().fetchUser()
     if (res.notes) {
       res.notes.reverse()
       app().setNotes(res.notes)
+    }
+    if (res.pokes) {
+      app().setPokes(res.pokes)
     }
     if (this.pwCache) this.pwCache.pw = pw
     this.success()

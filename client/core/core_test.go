@@ -551,6 +551,8 @@ func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
 func (tdb *TDB) BackupTo(dst string, overwrite, compact bool) error { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error)     { return nil, nil }
+func (tdb *TDB) SavePokes([]*db.Notification) error                 { return nil }
+func (tdb *TDB) LoadPokes() ([]*db.Notification, error)             { return nil, nil }
 
 func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
 	if tdb.setCredsErr != nil {
@@ -598,6 +600,13 @@ func (tdb *TDB) Backup() error {
 }
 
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
+
+func (tdb *TDB) SetLanguage(lang string) error {
+	return nil
+}
+func (tdb *TDB) Language() (string, error) {
+	return "en-US", nil
+}
 
 type tCoin struct {
 	id []byte
@@ -723,6 +732,8 @@ type TXCWallet struct {
 	refundBondErr               error
 	makeBondTxErr               error
 	reserves                    atomic.Uint64
+	findBond                    *asset.BondDetails
+	findBondErr                 error
 
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
@@ -1109,6 +1120,10 @@ func (w *TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script [
 	return w.refundBondCoin, w.refundBondErr
 }
 
+func (w *TXCWallet) FindBond(ctx context.Context, coinID []byte, searchUntil time.Time) (bond *asset.BondDetails, err error) {
+	return w.findBond, w.findBondErr
+}
+
 func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
 	if w.makeBondTxErr != nil {
 		return nil, nil, w.makeBondTxErr
@@ -1121,8 +1136,8 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 	}, func() {}, nil
 }
 
-func (w *TXCWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
-	return 0, nil
+func (w *TXCWallet) WalletTransaction(context.Context, dex.Bytes) (*asset.WalletTransaction, error) {
+	return nil, nil
 }
 
 type TAccountLocker struct {
@@ -1348,11 +1363,9 @@ func newTestRig() *testRig {
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 			noteChans:  make(map[uint64]chan Notification),
 
-			locale:        originLocale,
-			localePrinter: message.NewPrinter(language.AmericanEnglish),
-
 			fiatRateSources: make(map[string]*commonRateSource),
 			notes:           make(chan asset.WalletNotification, 128),
+			pokesCache:      newPokesCache(pokesCapacity),
 		},
 		db:      tdb,
 		queue:   queue,
@@ -1361,6 +1374,11 @@ func newTestRig() *testRig {
 		acct:    acct,
 		crypter: crypter,
 	}
+
+	rig.core.intl.Store(&locale{
+		m:       originLocale,
+		printer: message.NewPrinter(language.AmericanEnglish),
+	})
 
 	rig.core.InitializeClient(tPW, nil)
 
@@ -2141,6 +2159,8 @@ func TestPostBond(t *testing.T) {
 		clearConn()
 
 		tWallet.setConfs(tWallet.bondTxCoinID, 0, nil)
+		// Skip finding bonds.
+		tWallet.findBondErr = errors.New("purposeful error")
 		_, err = tCore.PostBond(form)
 	}
 
@@ -2704,7 +2724,7 @@ func TestInitializeClient(t *testing.T) {
 
 	clearCreds()
 
-	err := tCore.InitializeClient(tPW, nil)
+	_, err := tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("InitializeClient error: %v", err)
 	}
@@ -2713,21 +2733,21 @@ func TestInitializeClient(t *testing.T) {
 
 	// Empty password.
 	emptyPass := []byte("")
-	err = tCore.InitializeClient(emptyPass, nil)
+	_, err = tCore.InitializeClient(emptyPass, nil)
 	if err == nil {
 		t.Fatalf("no error for empty password")
 	}
 
 	// Store error. Use a non-empty password to pass empty password check.
 	rig.db.setCredsErr = tErr
-	err = tCore.InitializeClient(tPW, nil)
+	_, err = tCore.InitializeClient(tPW, nil)
 	if err == nil {
 		t.Fatalf("no error for StoreEncryptedKey error")
 	}
 	rig.db.setCredsErr = nil
 
 	// Success again
-	err = tCore.InitializeClient(tPW, nil)
+	_, err = tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("final InitializeClient error: %v", err)
 	}
@@ -7286,6 +7306,9 @@ func TestResetAppPass(t *testing.T) {
 	rig.core.newCrypter = func([]byte) encrypt.Crypter { return crypter }
 	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return rig.crypter, crypter.recryptErr }
 
+	rig.core.credentials = nil
+	rig.core.InitializeClient(tPW, nil)
+
 	tCore := rig.core
 	seed, err := tCore.ExportSeed(tPW)
 	if err != nil {
@@ -7295,7 +7318,7 @@ func TestResetAppPass(t *testing.T) {
 	// Invalid seed error
 	invalidSeed := seed[:24]
 	err = tCore.ResetAppPass(tPW, invalidSeed)
-	if !strings.Contains(err.Error(), "invalid seed length") {
+	if !strings.Contains(err.Error(), "unabled to decode provided seed") {
 		t.Fatalf("wrong error for invalid seed length: %v", err)
 	}
 
@@ -7303,9 +7326,8 @@ func TestResetAppPass(t *testing.T) {
 	rig.crypter.(*tCrypterSmart).recryptErr = tErr
 	// tCrypter is used to encode the orginal seed but we don't need it here, so
 	// we need to add 8 bytes to commplete the expected seed lenght(64).
-	seed = append(seed, randBytes(8)...)
-	err = tCore.ResetAppPass(tPW, seed)
-	if err.Error() != "incorrect seed" {
+	err = tCore.ResetAppPass(tPW, seed+"blah")
+	if !strings.Contains(err.Error(), "unabled to decode provided seed") {
 		t.Fatalf("wrong error for incorrect seed: %v", err)
 	}
 
@@ -9853,7 +9875,7 @@ func TestCredentialHandling(t *testing.T) {
 	tCore.newCrypter = encrypt.NewCrypter
 	tCore.reCrypter = encrypt.Deserialize
 
-	err := tCore.InitializeClient(tPW, nil)
+	_, err := tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("InitializeClient error: %v", err)
 	}
@@ -10810,5 +10832,296 @@ func TestRotateBonds(t *testing.T) {
 	unmergingBond := acct.pendingBonds[0]
 	if unmergingBond.LockTime == acct.bonds[0].LockTime {
 		t.Fatalf("Unmergeable bond was scheduled for merged")
+	}
+}
+
+func TestFindBondKeyIdx(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	rig.core.Login(tPW)
+
+	pkhEqualFnFn := func(find bool) func(bondKey *secp256k1.PrivateKey) bool {
+		return func(bondKey *secp256k1.PrivateKey) bool {
+			return find
+		}
+	}
+	tests := []struct {
+		name       string
+		pkhEqualFn func(bondKey *secp256k1.PrivateKey) bool
+		wantErr    bool
+	}{{
+		name:       "ok",
+		pkhEqualFn: pkhEqualFnFn(true),
+	}, {
+		name:       "cant find",
+		pkhEqualFn: pkhEqualFnFn(false),
+		wantErr:    true,
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := rig.core.findBondKeyIdx(test.pkhEqualFn, 0)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestFindBond(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	rig.core.wallets[tUTXOAssetA.ID] = dcrWallet
+	rig.core.Login(tPW)
+
+	bd := &asset.BondDetails{
+		Bond: &asset.Bond{
+			Amount:  tFee,
+			AssetID: tUTXOAssetA.ID,
+		},
+		LockTime: time.Now(),
+		CheckPrivKey: func(bondKey *secp256k1.PrivateKey) bool {
+			return true
+		},
+	}
+	msgBond := &msgjson.Bond{
+		Version: 0,
+		AssetID: tUTXOAssetA.ID,
+	}
+
+	tests := []struct {
+		name        string
+		findBond    *asset.BondDetails
+		findBondErr error
+		wantStr     uint32
+	}{{
+		name:     "ok",
+		findBond: bd,
+		wantStr:  1,
+	}, {
+		name:        "find bond error",
+		findBondErr: errors.New("some error"),
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tDcrWallet.findBond = test.findBond
+			tDcrWallet.findBondErr = test.findBondErr
+			str, _ := rig.core.findBond(rig.dc, msgBond)
+			if str != test.wantStr {
+				t.Fatalf("wanted str %d but got %d", test.wantStr, str)
+			}
+		})
+	}
+}
+
+func TestNetworkFeeRate(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+
+	assetID := tUTXOAssetA.ID
+	wallet, tWallet := newTWallet(assetID)
+	rig.core.wallets[assetID] = wallet
+
+	const feeRaterRate = 50
+	dumbWallet := wallet.Wallet
+	wallet.Wallet = &TFeeRater{
+		TXCWallet: tWallet,
+		feeRate:   feeRaterRate,
+	}
+	if r := rig.core.NetworkFeeRate(assetID); r != feeRaterRate {
+		t.Fatalf("FeeRater not working. %d != %d", r, feeRaterRate)
+	}
+	wallet.Wallet = dumbWallet
+
+	const bookFeedFeeRate = 60
+	book := newBookie(rig.dc, assetID, tUTXOAssetB.ID, nil, tLogger)
+	rig.dc.books[tDcrBtcMktName] = book
+	book.logEpochReport(&msgjson.EpochReportNote{BaseFeeRate: bookFeedFeeRate})
+	if r := rig.core.NetworkFeeRate(assetID); r != bookFeedFeeRate {
+		t.Fatalf("Book feed fee rate not working. %d != %d", r, bookFeedFeeRate)
+	}
+	delete(rig.dc.books, tDcrBtcMktName)
+
+	const serverFeeRate = 70
+	rig.ws.queueResponse(msgjson.FeeRateRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, serverFeeRate, nil)
+		f(resp)
+		return nil
+	})
+	if r := rig.core.NetworkFeeRate(assetID); r != serverFeeRate {
+		t.Fatalf("Server fee rate not working. %d != %d", r, serverFeeRate)
+	}
+}
+
+func TestPokesCacheInit(t *testing.T) {
+	tPokes := []*db.Notification{
+		{DetailText: "poke 1"},
+		{DetailText: "poke 2"},
+		{DetailText: "poke 3"},
+		{DetailText: "poke 4"},
+		{DetailText: "poke 5"},
+	}
+	{
+		pokesCapacity := 6
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+
+		// Check if the cache is initialized correctly
+		if len(c.cache) != 5 {
+			t.Errorf("Expected cache length %d, got %d", len(tPokes), len(c.cache))
+		}
+
+		if c.cursor != 5 {
+			t.Errorf("Expected cursor %d, got %d", len(tPokes)%pokesCapacity, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		for i, poke := range tPokes {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+	{
+		pokesCapacity := 4
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+
+		// Check if the cache is initialized correctly
+		if len(c.cache) != 1 {
+			t.Errorf("Expected cache length %d, got %d", 1, len(c.cache))
+		}
+
+		if c.cursor != 1 {
+			t.Errorf("Expected cursor %d, got %d", 1, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		for i, poke := range tPokes[:len(tPokes)-pokesCapacity] {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+}
+
+func TestPokesAdd(t *testing.T) {
+	tPokes := []*db.Notification{
+		{DetailText: "poke 1"},
+		{DetailText: "poke 2"},
+		{DetailText: "poke 3"},
+		{DetailText: "poke 4"},
+		{DetailText: "poke 5"},
+	}
+	tNewPoke := &db.Notification{
+		DetailText: "poke 6",
+	}
+	{
+		pokesCapacity := 6
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		c.add(tNewPoke)
+
+		// Check if the cache is updated correctly
+		if len(c.cache) != 6 {
+			t.Errorf("Expected cache length %d, got %d", len(tPokes), len(c.cache))
+		}
+
+		if c.cursor != 0 {
+			t.Errorf("Expected cursor %d, got %d", 0, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		tAllPokes := append(tPokes, tNewPoke)
+		for i, poke := range tAllPokes {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+	{
+		pokesCapacity := 5
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		c.add(tNewPoke)
+
+		// Check if the cache is updated correctly
+		if len(c.cache) != pokesCapacity {
+			t.Errorf("Expected cache length %d, got %d", pokesCapacity, len(c.cache))
+		}
+
+		if c.cursor != 1 {
+			t.Errorf("Expected cursor %d, got %d", 1, c.cursor)
+		}
+
+		// Check if the cache contains the correct pokes
+		tAllPokes := make([]*db.Notification, 0)
+		tAllPokes = append(tAllPokes, tNewPoke)
+		tAllPokes = append(tAllPokes, tPokes[1:]...)
+		for i, poke := range tAllPokes {
+			if c.cache[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, c.cache[i])
+			}
+		}
+	}
+}
+
+func TestPokesCachePokes(t *testing.T) {
+	tPokes := []*db.Notification{
+		{TimeStamp: 1, DetailText: "poke 1"},
+		{TimeStamp: 2, DetailText: "poke 2"},
+		{TimeStamp: 3, DetailText: "poke 3"},
+		{TimeStamp: 4, DetailText: "poke 4"},
+		{TimeStamp: 5, DetailText: "poke 5"},
+	}
+	{
+		pokesCapacity := 6
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		pokes := c.pokes()
+
+		// Check if the result length is correct
+		if len(pokes) != len(tPokes) {
+			t.Errorf("Expected pokes length %d, got %d", len(tPokes), len(pokes))
+		}
+
+		// Check if the result contains the correct pokes
+		for i, poke := range tPokes {
+			if pokes[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, pokes[i])
+			}
+		}
+	}
+	{
+		pokesCapacity := 5
+		tNewPoke := &db.Notification{
+			TimeStamp:  6,
+			DetailText: "poke 6",
+		}
+		c := newPokesCache(pokesCapacity)
+		c.init(tPokes)
+		c.add(tNewPoke)
+		pokes := c.pokes()
+
+		// Check if the result length is correct
+		if len(pokes) != pokesCapacity {
+			t.Errorf("Expected cache length %d, got %d", 1, len(pokes))
+		}
+
+		tAllPokes := append(tPokes[1:], tNewPoke)
+		// Check if the result contains the correct pokes
+		for i, poke := range tAllPokes {
+			if pokes[i] != poke {
+				t.Errorf("Expected poke %v at index %d, got %v", poke, i, pokes[i])
+			}
+		}
 	}
 }

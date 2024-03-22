@@ -2,7 +2,7 @@
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="py-5 overflow-y-auto">
-  <div class="d-flex align-items-stretch flex-column mw-425 mx-auto">
+  <div class="flex-stretch-column mw-425 mx-auto">
     <div class="d-flex justify-content-start align-items-center pointer py-2">
       <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 lh1"></span>
     </div>
@@ -14,10 +14,10 @@
       <span id="connectionStatus"></span>
     </div>
     <hr>
-    <div class="d-flex flex-column align-items-stretch">
+    <div class="flex-stretch-column">
       <div class="d-flex align-items-stretch">
         <div class="flex-center flex-grow-1 pe-3">
-          <div class="d-flex flex-column align-items-stretch w-100">
+          <div class="flex-stretch-column w-100">
             <div class="d-flex justify-content-between align-items-center">
               <span>[[[target_tier]]] <span class="fs14 ico-info me-1" data-tooltip="[[[target_tier_tooltip]]]"></span></span>
               <span id="targetTier"></span>

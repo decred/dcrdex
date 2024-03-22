@@ -714,6 +714,10 @@ func (c *tRPCClient) SetTxFee(ctx context.Context, fee dcrutil.Amount) error {
 	return nil
 }
 
+func (c *tRPCClient) ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error) {
+	return nil, nil
+}
+
 func TestMain(m *testing.M) {
 	tChainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = stdaddr.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)
@@ -3561,7 +3565,7 @@ func Test_sendToAddress(t *testing.T) {
 	}
 
 	// This should return an error, not enough funds to send.
-	_, _, err = wallet.sendToAddress(addr, unspentVal, optimalFeeRate)
+	_, _, _, err = wallet.sendToAddress(addr, unspentVal, optimalFeeRate)
 	if err == nil {
 		t.Fatal("Expected error, not enough funds to send.")
 	}
@@ -3569,7 +3573,7 @@ func Test_sendToAddress(t *testing.T) {
 	// With a lower send value, send should be successful.
 	var sendVal uint64 = 10e8
 	node.unspent[0].Amount = float64(unspentVal)
-	msgTx, val, err := wallet.sendToAddress(addr, sendVal, optimalFeeRate)
+	msgTx, val, _, err := wallet.sendToAddress(addr, sendVal, optimalFeeRate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4532,4 +4536,155 @@ func TestPurchaseTickets(t *testing.T) {
 	setBalance(1, 1) // reserves make our available balance 0
 	buyTickets(1, true)
 	checkRemains(1, 0)
+}
+
+func TestFindBond(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
+	bondKey := secp256k1.PrivKeyFromBytes(privBytes)
+
+	amt := uint64(50_000)
+	acctID := [32]byte{}
+	lockTime := time.Now().Add(time.Hour * 12)
+	utxo := walletjson.ListUnspentResult{
+		TxID:          tTxID,
+		Address:       tPKHAddr.String(),
+		Account:       tAcctName,
+		Amount:        1.0,
+		Confirmations: 1,
+		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+		Spendable:     true,
+	}
+	node.unspent = []walletjson.ListUnspentResult{utxo}
+	node.changeAddr = tPKHAddr
+
+	bond, _, err := wallet.MakeBondTx(0, amt, 200, lockTime, bondKey, acctID[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txFn := func(err error, tx []byte) func() (*walletjson.GetTransactionResult, error) {
+		return func() (*walletjson.GetTransactionResult, error) {
+			if err != nil {
+				return nil, err
+			}
+			h := hex.EncodeToString(tx)
+			return &walletjson.GetTransactionResult{
+				BlockHash: hex.EncodeToString(randBytes(32)),
+				Hex:       h,
+			}, nil
+		}
+	}
+
+	newBondTx := func() *wire.MsgTx {
+		msgTx := wire.NewMsgTx()
+		if err := msgTx.FromBytes(bond.SignedTx); err != nil {
+			t.Fatal(err)
+		}
+		return msgTx
+	}
+	tooFewOutputs := newBondTx()
+	tooFewOutputs.TxOut = tooFewOutputs.TxOut[2:]
+	tooFewOutputsBytes, err := tooFewOutputs.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	badBondScript := newBondTx()
+	badBondScript.TxOut[1].PkScript = badBondScript.TxOut[1].PkScript[1:]
+	badBondScriptBytes, err := badBondScript.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	noBondMatch := newBondTx()
+	noBondMatch.TxOut[0].PkScript = noBondMatch.TxOut[0].PkScript[1:]
+	noBondMatchBytes, err := noBondMatch.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node.blockchain.addRawTx(1, newBondTx())
+	verboseBlocks := node.blockchain.verboseBlocks
+
+	tests := []struct {
+		name          string
+		coinID        []byte
+		txRes         func() (*walletjson.GetTransactionResult, error)
+		bestBlockErr  error
+		verboseBlocks map[chainhash.Hash]*wire.MsgBlock
+		searchUntil   time.Time
+		wantErr       bool
+	}{{
+		name:   "ok",
+		coinID: bond.CoinID,
+		txRes:  txFn(nil, bond.SignedTx),
+	}, {
+		name:   "ok with find blocks",
+		coinID: bond.CoinID,
+		txRes:  txFn(asset.CoinNotFoundError, nil),
+	}, {
+		name:    "bad coin id",
+		coinID:  make([]byte, 0),
+		txRes:   txFn(nil, bond.SignedTx),
+		wantErr: true,
+	}, {
+		name:    "missing an output",
+		coinID:  bond.CoinID,
+		txRes:   txFn(nil, tooFewOutputsBytes),
+		wantErr: true,
+	}, {
+		name:    "bad bond commitment script",
+		coinID:  bond.CoinID,
+		txRes:   txFn(nil, badBondScriptBytes),
+		wantErr: true,
+	}, {
+		name:    "bond script does not match commitment",
+		coinID:  bond.CoinID,
+		txRes:   txFn(nil, noBondMatchBytes),
+		wantErr: true,
+	}, {
+		name:    "bad msgtx",
+		coinID:  bond.CoinID,
+		txRes:   txFn(nil, bond.SignedTx[1:]),
+		wantErr: true,
+	}, {
+		name:         "get best block error",
+		coinID:       bond.CoinID,
+		txRes:        txFn(asset.CoinNotFoundError, nil),
+		bestBlockErr: errors.New("some error"),
+		wantErr:      true,
+	}, {
+		name:          "block not found",
+		coinID:        bond.CoinID,
+		txRes:         txFn(asset.CoinNotFoundError, nil),
+		verboseBlocks: map[chainhash.Hash]*wire.MsgBlock{},
+		wantErr:       true,
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			node.walletTxFn = test.txRes
+			node.bestBlockErr = test.bestBlockErr
+			node.blockchain.verboseBlocks = verboseBlocks
+			if test.verboseBlocks != nil {
+				node.blockchain.verboseBlocks = test.verboseBlocks
+			}
+			bd, err := wallet.FindBond(tCtx, test.coinID, test.searchUntil)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !bd.CheckPrivKey(bondKey) {
+				t.Fatal("pkh not equal")
+			}
+		})
+	}
 }

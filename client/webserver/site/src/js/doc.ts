@@ -123,8 +123,8 @@ export default class Doc {
   }
 
   /* bind binds the function to the event for the element. */
-  static bind (el: EventTarget, ev: string, f: EventListenerOrEventListenerObject): void {
-    el.addEventListener(ev, f)
+  static bind (el: EventTarget, ev: string | string[], f: EventListenerOrEventListenerObject, opts?: any /* EventListenerOptions */): void {
+    for (const e of (Array.isArray(ev) ? ev : [ev])) el.addEventListener(e, f, opts)
   }
 
   /* unbind removes the handler for the event from the element. */
@@ -293,6 +293,7 @@ export default class Doc {
     const convRate = encRate * r / RateEncodingFactor
     const rateStepDigits = log10RateEncodingFactor - Math.floor(Math.log10(rateStepEnc)) -
       Math.floor(Math.log10(bui.conventional.conversionFactor) - Math.log10(qui.conventional.conversionFactor))
+    if (rateStepDigits <= 0) return intFormatter.format(convRate)
     return fullPrecisionFormatter(rateStepDigits).format(convRate)
   }
 
@@ -459,9 +460,7 @@ export default class Doc {
    */
   static disableMouseWheel (...inputFields: Element[]) {
     for (const inputField of inputFields) {
-      inputField.addEventListener('wheel', (ev) => {
-        ev.preventDefault()
-      })
+      Doc.bind(inputField, 'wheel', () => { /* pass */ }, { passive: true })
     }
   }
 

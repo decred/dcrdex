@@ -14,6 +14,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
+const dustLimit = 1_000_000 // sats => 0.01 DOGE, the "soft" limit (DEFAULT_DUST_LIMIT)
+
 var maxFeeBlocks = 16
 
 // Driver implements asset.Driver.
@@ -39,6 +41,25 @@ func (d *Driver) Version() uint32 {
 // UnitInfo returns the dex.UnitInfo for the asset.
 func (d *Driver) UnitInfo() dex.UnitInfo {
 	return dexdoge.UnitInfo
+}
+
+// MinBondSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the bond and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinBondSize(maxFeeRate uint64) uint64 {
+	return dustLimit + dexbtc.RefundBondTxSize(false)*maxFeeRate
+}
+
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dustLimit + dexbtc.RedeemSwapTxSize(false)*maxFeeRate
+}
+
+// Name is the asset's name.
+func (d *Driver) Name() string {
+	return "Dogecoin"
 }
 
 func init() {

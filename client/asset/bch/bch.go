@@ -22,11 +22,11 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/dcrlabs/bchwallet/wallet"
 	"github.com/gcash/bchd/bchec"
 	bchchaincfg "github.com/gcash/bchd/chaincfg"
 	bchtxscript "github.com/gcash/bchd/txscript"
 	bchwire "github.com/gcash/bchd/wire"
-	"github.com/gcash/bchwallet/wallet"
 )
 
 const (

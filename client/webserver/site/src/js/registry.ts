@@ -4,7 +4,6 @@ declare global {
     enableLogger: (loggerID: string, enable: boolean) => void
     recordLogger: (loggerID: string, enable: boolean) => void
     dumpLogger: (loggerID: string) => void
-    localeDiscrepancies: () => void
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
     user: () => User
@@ -12,6 +11,7 @@ declare global {
     webkit: any | undefined
     openUrl: (url: string) => void
     sendOSNotification (title: string, body?: string): void
+    clearLocale (): void
   }
 }
 
@@ -45,7 +45,7 @@ export interface ExchangeAuth {
   maxBondedAmt: number
   penaltyComps: number
   pendingBonds: PendingBondState[]
-  expiredBondsPendingRefund: number
+  expiredBonds: any[]
   compensation: number
 }
 
@@ -338,8 +338,6 @@ export interface User {
   seedgentime: number
   assets: Record<number, SupportedAsset>
   fiatRates: Record<number, number>
-  authed: boolean // added by webserver
-  ok: boolean // added by webserver
   bots: BotReport[]
   net: number
   extensionModeConfig: ExtensionModeConfig
@@ -534,6 +532,7 @@ export interface PageElement extends HTMLElement {
   name?: string
   options?: HTMLOptionElement[]
   selectedIndex?: number
+  disabled?: boolean
 }
 
 export interface BooleanConfig {
@@ -671,7 +670,14 @@ export interface OrderPlacement {
   gapFactor: number
 }
 
-export interface BasicMarketMakingCfg {
+export interface AutoRebalanceConfig {
+  minBaseAmt: number
+  minBaseTransfer: number
+  minQuoteAmt: number
+  minQuoteTransfer: number
+}
+
+export interface BasicMarketMakingConfig {
   gapStrategy: string
   sellPlacements: OrderPlacement[]
   buyPlacements: OrderPlacement[]
@@ -679,8 +685,25 @@ export interface BasicMarketMakingCfg {
   oracleWeighting: number
   oracleBias: number
   emptyMarketRate: number
-  baseOptions?: Record<string, string>
-  quoteOptions?: Record<string, string>
+}
+
+export interface ArbMarketMakingPlacement {
+  lots: number
+  multiplier: number
+}
+
+export interface ArbMarketMakingConfig {
+  buyPlacements: ArbMarketMakingPlacement[]
+  sellPlacements: ArbMarketMakingPlacement[]
+  profit: number
+  driftTolerance: number
+  orderPersistence: number
+}
+
+export interface SimpleArbConfig {
+  profitTrigger: number
+  maxActiveArbs: number
+  numEpochsLeaveOpen: number
 }
 
 export enum BalanceType {
@@ -688,15 +711,29 @@ export enum BalanceType {
   Amount
 }
 
-export interface BotConfig {
-  host: string
-  baseAsset: number
-  quoteAsset: number
+export interface BotCEXCfg {
+  name: string
   baseBalanceType: BalanceType
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
-  basicMarketMakingConfig: BasicMarketMakingCfg
+  autoRebalance?: AutoRebalanceConfig
+}
+
+export interface BotConfig {
+  host: string
+  baseID: number
+  quoteID: number
+  baseBalanceType: BalanceType
+  baseBalance: number
+  quoteBalanceType: BalanceType
+  quoteBalance: number
+  cexCfg?: BotCEXCfg
+  baseWalletOptions?: Record<string, string>
+  quoteWalletOptions?: Record<string, string>
+  basicMarketMakingConfig?: BasicMarketMakingConfig
+  arbMarketMakingConfig?: ArbMarketMakingConfig
+  simpleArbConfig?: SimpleArbConfig
   disabled: boolean
 }
 
@@ -706,20 +743,33 @@ export interface CEXConfig {
   apiSecret: string
 }
 
-export interface MarketMakingConfig {
-  botConfigs?: BotConfig[]
-  cexConfigs?: CEXConfig[]
-}
-
 export interface MarketWithHost {
   host: string
   base: number
   quote: number
 }
 
+export interface MMCEXStatus {
+  config: CEXConfig
+  connected: boolean
+  connectErr: string
+  markets?: CEXMarket[]
+}
+
+export interface MMBotStatus {
+  config: BotConfig
+  running: boolean
+}
+
 export interface MarketMakingStatus {
   running: boolean
-  runningBots: MarketWithHost[]
+  cexes: Record<string, MMCEXStatus>
+  bots: MMBotStatus[]
+}
+
+export interface CEXMarket {
+  baseID: number
+  quoteID: number
 }
 
 export interface OracleReport {
@@ -727,6 +777,11 @@ export interface OracleReport {
   usdVol: number
   bestBuy: number
   bestSell: number
+}
+
+export interface ExchangeBalance {
+  available: number
+  locked: number
 }
 
 // changing the order of the elements in this enum will affect
@@ -864,7 +919,7 @@ export interface Application {
   fiatRatesMap: Record<number, number>
   showPopups: boolean
   commitHash: string
-  authed (): boolean
+  authed: boolean
   start (): Promise<void>
   reconnected (): void
   fetchUser (): Promise<User | void>
@@ -877,12 +932,12 @@ export interface Application {
   ackNotes (): void
   setNoteTimes (noteList: HTMLElement): void
   bindInternalNavigation (ancestor: HTMLElement): void
-  storeNotes (): void
   updateMenuItemsDisplay (): void
   attachCommon (node: HTMLElement): void
   updateBondConfs (dexAddr: string, coinID: string, confs: number, assetID: number): void
   handleBondNote (note: BondNote): void
   setNotes (notes: CoreNote[]): void
+  setPokes(pokes: CoreNote[]): void
   notify (note: CoreNote): void
   log (loggerID: string, ...msg: any): void
   prependPokeElement (note: CoreNote): void
@@ -903,12 +958,6 @@ export interface Application {
   checkResponse (resp: APIResponse): boolean
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
-  getMarketMakingStatus (): Promise<MarketMakingStatus>
-  stopMarketMaking (): Promise<void>
-  getMarketMakingConfig (): Promise<MarketMakingConfig>
-  updateMarketMakingConfig (cfg: BotConfig): Promise<void>
-  removeMarketMakingConfig (cfg: BotConfig): Promise<void>
-  setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean): void
   txHistory(assetID: number, n: number, after?: string): Promise<TxHistoryResult>
   getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
   clearTxHistory(assetID: number): void

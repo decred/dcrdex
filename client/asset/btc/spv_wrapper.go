@@ -282,8 +282,7 @@ func (w *spvWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 			return
 		}
 		defer func() {
-			w.log.Tracef("PublishTransaction(%v) completed in %v", tx.TxHash(),
-				time.Since(tStart))
+			w.log.Tracef("PublishTransaction(%v) completed in %v", tx.TxHash(), time.Since(tStart))
 		}() // after outpoint unlocking and signalling
 		res <- nil
 	}()
@@ -414,7 +413,7 @@ func (w *spvWallet) syncStatus() (*SyncStatus, error) {
 	// Chain service headers (block and filter) height.
 	chainBlk, err := w.cl.BestBlock()
 	if err != nil {
-		return nil, err
+		return nil, errhttps://github.com/decred/dcrdex/pull/2681
 	}
 
 	currentHeight := chainBlk.Height

@@ -19,19 +19,9 @@ import (
 
 	"decred.org/dcrdex/client/app"
 	"decred.org/dcrdex/client/asset"
-	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
-	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
-	_ "decred.org/dcrdex/client/asset/dash" // register dash asset
-	_ "decred.org/dcrdex/client/asset/dcr"  // register dcr asset
-	_ "decred.org/dcrdex/client/asset/dgb"  // register dgb asset
-	_ "decred.org/dcrdex/client/asset/doge" // register doge asset
-	_ "decred.org/dcrdex/client/asset/firo" // register firo asset
-	_ "decred.org/dcrdex/client/asset/ltc"  // register ltc asset
-	_ "decred.org/dcrdex/client/asset/zcl"  // register zcl asset
-	_ "decred.org/dcrdex/client/asset/zec"  // register zec asset
-	"decred.org/dcrdex/client/mm"
-
+	_ "decred.org/dcrdex/client/asset/importall"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
@@ -101,7 +91,7 @@ func runCore(cfg *app.Config) error {
 	if cfg.Experimental {
 		// TODO: on shutdown, stop market making and wait for trades to be
 		// canceled.
-		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MarketMakerConfigPath(), logMaker.Logger("MM"))
+		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MMConfig.BotConfigPath, logMaker.Logger("MM"))
 		if err != nil {
 			return fmt.Errorf("error creating market maker: %w", err)
 		}
@@ -131,11 +121,22 @@ func runCore(cfg *app.Config) error {
 
 	<-clientCore.Ready()
 
+	var mmCM *dex.ConnectionMaster
 	defer func() {
 		log.Info("Exiting dexc main.")
 		cancel()  // no-op with clean rpc/web server setup
 		wg.Wait() // no-op with clean setup and shutdown
+		if mmCM != nil {
+			mmCM.Wait()
+		}
 	}()
+
+	if marketMaker != nil {
+		mmCM = dex.NewConnectionMaster(marketMaker)
+		if err := mmCM.ConnectOnce(appCtx); err != nil {
+			return fmt.Errorf("Error connecting market maker")
+		}
+	}
 
 	if cfg.RPCOn {
 		rpcSrv, err := rpcserver.New(cfg.RPC(clientCore, marketMaker, logMaker.Logger("RPC")))

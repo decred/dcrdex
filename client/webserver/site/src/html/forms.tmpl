@@ -51,7 +51,7 @@
 {{end}}
 
 {{define "newWalletForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="wallet-tabs" data-tmpl="walletTypeTabs">
   <div class="wtab" data-tmpl="walletTabTmpl"></div>
 </div>
@@ -109,7 +109,7 @@
 {{end}}
 
 {{define "unlockWalletForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center fs22 text-nowrap sans-light position-relative">
   [[[Unlock]]]
   <img id="uwAssetLogo" class="micro-icon mx-1">
@@ -132,7 +132,7 @@
 {{end}}
 
 {{define "depositAddress"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 mb-2 text-center position-relative fs24 sans-light">
   [[[Deposit]]]
   <img id="depositLogo" class="mini-icon mx-1">
@@ -166,14 +166,14 @@
 {{end}}
 
 {{define "dexAddrForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div data-tmpl="addDexHdr" class="flex-center fs24 sans-light"><span class="ico-plus fs12 me-2"></span> [[[Add a DEX]]]</div>
 <div data-tmpl="updateDexHdr" class="flex-center fs24 sans-light d-hide"></span> [[[update dex host]]]</div>
 <div class="fs20 sans-light" data-tmpl="pickServerMsg">
   <hr class="dashed my-2">
   [[[Pick a server]]]
 </div>
-<div class="d-flex flex-column align-items-stretch mt-1" data-tmpl="knownXCs">
+<div class="flex-stretch-column mt-1" data-tmpl="knownXCs">
   {{range .KnownExchanges}}
     <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
   {{end}}
@@ -276,7 +276,7 @@
   </div>
   <div data-tmpl="assetSelection">
     <div class="w-100 flex-center fs20 mt-3">[[[Select your bond asset]]]</div>
-    <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2 mb-2">What's a bond?</div>
+    <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2 mb-2">[[[what_s_a_bond]]]</div>
     <table class="reg-asset-table w-100">
       <thead>
         <tr class="fs16">
@@ -392,11 +392,11 @@
 {{end}}
 
 {{define "confirmRegistrationForm"}}
-<div class="w-100 d-flex flex-column align-items-stretch">
+<div class="w-100 flex-stretch-column">
   <span class="hoverbg pointer grey" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
   <div class="flex-center pt-3 fs24 sans-light">[[[Confirm Bond Options]]]</div>
   <div class="d-flex align-items-stretch pt-3">
-    <div class="flex-grow-1 d-flex flex-column align-items-stretch pe-3">
+    <div class="flex-grow-1 flex-stretch-column pe-3">
       <div class="d-flex justify-content-between">
         <span>[[[Host]]]</span>
         <span data-tmpl="host"></span>
@@ -441,7 +441,7 @@
 {{end}}
 
 {{define "authorizeAccountExportForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Authorize Export]]]
 </div>
@@ -460,7 +460,7 @@
 {{end}}
 
 {{define "disableAccountForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Disable Account]]]
 </div>
@@ -484,7 +484,7 @@
 
 {{define "authorizeAccountImportForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Authorize Import]]]
 </div>
@@ -512,7 +512,7 @@
 {{end}}
 
 {{define "changeAppPWForm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   [[[Change Application Password]]]
 </div>
@@ -536,7 +536,7 @@
 
 {{define "cancelOrderForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="text-center fs22 sans-light position-relative">
   [[[:title:cancel_order]]]
 </div>
@@ -557,7 +557,7 @@
 
 {{define "accelerateForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="text-center fs22 sans-light position-relative">
   [[[:title:accelerate_order]]]
 </div>
@@ -646,13 +646,11 @@
       <span class="fs16 grey unit">XYZ</span>
     </div>
     <div class="mb-1 flex-center flex-row">
-      <span class="fs16 me-1">Bond Lock:</span>
+      <span class="fs16 me-1">[[[bond_lock]]]</span>
       <span class="fs20 me-1" data-tmpl="fee"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
-    <div data-tmpl="bondCostBreakdown" class="mb-1">
-      Includes <span data-tmpl="bondLockNoFees"></span> for your bond and <span data-tmpl="bondLockFees"></span> for transaction fees.
-    </div>
+    <div data-tmpl="bondCostBreakdown" class="mb-1">[[[bond_cost_breakdown]]]</div>
     <span data-tmpl="sendEnoughWithEst">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes totalForBond */}}
     <span data-tmpl="sendEnoughForToken">[[[Send funds for token]]]</span>
     <div class="mb-1 flex-center flex-row d-hide" data-tmpl="txFeeBox">
@@ -692,7 +690,7 @@
   <span data-tmpl="reason"></span>
 </div>
 <div id="rangeOptTmpl">
-  <div class="d-flex flex-nowrap fs12">
+  <div data-tmpl="sliderBox" class="d-flex flex-nowrap fs12 pointer">
     <span data-tmpl="rangeLblStart"></span>
     <div data-tmpl="slider" class="slider flex-grow-1">
       <div data-tmpl="handle" class="slider-handle"></div>
@@ -713,7 +711,7 @@
 {{end}}
 
 {{define "toggleWalletStatusConfirm"}}
-<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="form-closer"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
    <span id="walletStatusDisable" class="d-hide">[[[disable_wallet]]]</span>
     <span id="walletStatusEnable" class="d-hide">[[[enable_wallet]]]</span>
@@ -729,7 +727,7 @@
 {{end}}
 
 {{define "appPassResetForm"}}
- <div class="form-closer hoverbg" id="resetPassFormCloser"><span class="ico-cross"></span></div>
+ <div class="form-closer" id="resetPassFormCloser"><span class="ico-cross"></span></div>
  <div class="px-2 py-1 text-center fs28 sans-light">[[[Reset App Password]]]</div>
  <div class="fs18 mt-2 sans-light">[[[reset_app_pw_msg]]]</div>
  <hr class="dashed my-4">
@@ -753,7 +751,7 @@
 {{end}}
 
 {{define "reputationMeter"}}
-<div class="d-flex flex-column align-items-stretch py-2">
+<div class="flex-stretch-column py-2">
   <div class="d-flex justify-content-between align-items-center pb-1">
     <span data-tmpl="scoreMin"></span>
     <span class="fs15">

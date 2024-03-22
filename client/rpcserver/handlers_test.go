@@ -1202,7 +1202,7 @@ func TestHandleAppSeed(t *testing.T) {
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
-		tc := &TCore{exportSeed: []byte{255}, exportSeedErr: test.exportSeedErr}
+		tc := &TCore{exportSeed: "seed words here", exportSeedErr: test.exportSeedErr}
 		r := &RPCServer{core: tc}
 		payload := handleAppSeed(r, test.params)
 		res := ""
@@ -1210,7 +1210,7 @@ func TestHandleAppSeed(t *testing.T) {
 			t.Fatal(err)
 		}
 		res = strings.ToLower(res)
-		if test.wantErrCode == -1 && res != "ff" {
+		if test.wantErrCode == -1 && res != "seed words here" {
 			t.Fatalf("expected ff but got %v", res)
 		}
 

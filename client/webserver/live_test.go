@@ -29,6 +29,9 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/mm"
+	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/client/mnemonic"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -66,6 +69,7 @@ var (
 	doubleCreateAsyncErr  = false
 	randomizeOrdersCount  = false
 	initErrors            = false
+	mmConnectErrors       = false
 
 	rand   = mrand.New(mrand.NewSource(time.Now().UnixNano()))
 	titler = cases.Title(language.AmericanEnglish)
@@ -539,6 +543,7 @@ type TCore struct {
 	epochOrders []*core.BookUpdate
 	fiatSources map[string]bool
 	validAddr   bool
+	lang        string
 }
 
 // TDriver implements the interface required of all exchange wallets.
@@ -592,6 +597,7 @@ func newTCore() *TCore {
 			"Messari":     true,
 			"Coinpaprika": true,
 		},
+		lang: "en-US",
 	}
 }
 
@@ -614,10 +620,14 @@ func (c *TCore) Exchange(host string) (*core.Exchange, error) {
 	return exchange, nil
 }
 
-func (c *TCore) InitializeClient(pw, seed []byte) error {
+func (c *TCore) InitializeClient(pw []byte, seed *string) (string, error) {
 	randomDelay()
 	c.inited = true
-	return nil
+	var mnemonicSeed string
+	if seed == nil {
+		_, mnemonicSeed = mnemonic.New()
+	}
+	return mnemonicSeed, nil
 }
 func (c *TCore) GetDEXConfig(host string, certI any) (*core.Exchange, error) {
 	if xc := tExchanges[host]; xc != nil {
@@ -696,8 +706,8 @@ func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, sub
 func (c *TCore) Login([]byte) error  { return nil }
 func (c *TCore) IsInitialized() bool { return c.inited }
 func (c *TCore) Logout() error       { return nil }
-func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
-	return nil, nil
+func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
+	return nil, nil, nil
 }
 
 var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "dextt.eth"}
@@ -1719,7 +1729,7 @@ func (c *TCore) ChangeAppPass(appPW, newAppPW []byte) error {
 	return nil
 }
 
-func (c *TCore) ResetAppPass(newAppPW, seed []byte) error {
+func (c *TCore) ResetAppPass(newAppPW []byte, seed string) error {
 	return nil
 }
 
@@ -1954,9 +1964,8 @@ func (c *TCore) runRandomNotes() {
 	}
 }
 
-func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
-	b, _ := hex.DecodeString("ea9790d6b4ced3069b9fba7562904d7cfa68cb210600a76ede6f86dac1c3d18d5089e4c53543ef433f5ba4886465ab927b0231c30e8baa13f6d9c8dec1668821")
-	return b, nil
+func (c *TCore) ExportSeed(pw []byte) (string, error) {
+	return "copper life simple hello fit manage dune curve argue gadget erosion fork theme chase broccoli", nil
 }
 func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
@@ -2065,6 +2074,159 @@ func (c *TCore) DisableFundsMixer(assetID uint32) error {
 	return nil
 }
 
+func (c *TCore) SetLanguage(lang string) error {
+	c.lang = lang
+	return nil
+}
+
+func (c *TCore) Language() string {
+	return c.lang
+}
+
+var binanceMarkets = []*libxc.Market{
+	{BaseID: 42, QuoteID: 0},
+	{BaseID: 145, QuoteID: 42},
+	{BaseID: 60, QuoteID: 42},
+	{BaseID: 2, QuoteID: 42},
+	// {3, 0},
+	// {3, 42},
+	// {22, 42},
+	// {28, 0},
+	// {60000, 42},
+}
+
+type TMarketMaker struct {
+	core    *TCore
+	running atomic.Bool
+	cfg     *mm.MarketMakingConfig
+	mkts    map[string][]*libxc.Market
+}
+
+func (m *TMarketMaker) MarketReport(baseID, quoteID uint32) (*mm.MarketReport, error) {
+	baseFiatRate := math.Pow10(3 - rand.Intn(6))
+	quoteFiatRate := math.Pow10(3 - rand.Intn(6))
+	price := baseFiatRate / quoteFiatRate
+	mktID := dex.BipIDSymbol(baseID) + "_" + dex.BipIDSymbol(quoteID)
+	midGap, _ := getMarketStats(mktID)
+	return &mm.MarketReport{
+		BaseFiatRate:  baseFiatRate,
+		QuoteFiatRate: quoteFiatRate,
+		Price:         price,
+		Oracles: []*mm.OracleReport{
+			{
+				Host:     "bittrex.com",
+				USDVol:   math.Pow10(rand.Intn(7)),
+				BestBuy:  midGap * 99 / 100,
+				BestSell: midGap * 101 / 100,
+			},
+			{
+				Host:     "bittrex.com",
+				USDVol:   math.Pow10(rand.Intn(7)),
+				BestBuy:  midGap * 98 / 100,
+				BestSell: midGap * 102 / 100,
+			},
+		},
+	}, nil
+}
+
+func (m *TMarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) {
+	m.running.Store(true)
+	m.core.noteFeed <- &struct {
+		db.Notification
+		Running bool `json:"running"`
+	}{
+		Notification: db.NewNotification("mmstartstop", "", "", "", db.Data),
+		Running:      true,
+	}
+	return nil
+}
+
+func (m *TMarketMaker) Stop() {
+	m.running.Store(false)
+	m.core.noteFeed <- &struct {
+		db.Notification
+		Running bool `json:"running"`
+	}{
+		Notification: db.NewNotification("mmstartstop", "", "", "", db.Data),
+		Running:      false,
+	}
+}
+
+func (m *TMarketMaker) UpdateCEXConfig(updatedCfg *mm.CEXConfig) error {
+	switch updatedCfg.Name {
+	case libxc.Binance, libxc.BinanceUS:
+		m.mkts[updatedCfg.Name] = binanceMarkets
+	}
+	for i := 0; i < len(m.cfg.CexConfigs); i++ {
+		cfg := m.cfg.CexConfigs[i]
+		if cfg.Name == updatedCfg.Name {
+			m.cfg.CexConfigs[i] = updatedCfg
+			return nil
+		}
+	}
+	m.cfg.CexConfigs = append(m.cfg.CexConfigs, updatedCfg)
+	return nil
+}
+
+func (m *TMarketMaker) UpdateBotConfig(updatedCfg *mm.BotConfig) error {
+	for i := 0; i < len(m.cfg.BotConfigs); i++ {
+		botCfg := m.cfg.BotConfigs[i]
+		if botCfg.Host == updatedCfg.Host && botCfg.BaseID == updatedCfg.BaseID && botCfg.QuoteID == updatedCfg.QuoteID {
+			m.cfg.BotConfigs[i] = updatedCfg
+			return nil
+		}
+	}
+	m.cfg.BotConfigs = append(m.cfg.BotConfigs, updatedCfg)
+	return nil
+}
+
+func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) error {
+	for i := 0; i < len(m.cfg.BotConfigs); i++ {
+		botCfg := m.cfg.BotConfigs[i]
+		if botCfg.Host == host && botCfg.BaseID == baseID && botCfg.QuoteID == quoteID {
+			copy(m.cfg.BotConfigs[i:], m.cfg.BotConfigs[i+1:])
+			m.cfg.BotConfigs = m.cfg.BotConfigs[:len(m.cfg.BotConfigs)-1]
+		}
+	}
+	return nil
+}
+
+func (m *TMarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error) {
+	bal := randomBalance(assetID)
+	return &libxc.ExchangeBalance{
+		Available: bal.Available,
+		Locked:    bal.Locked,
+	}, nil
+}
+
+func (m *TMarketMaker) Running() bool {
+	return m.running.Load()
+}
+
+func (m *TMarketMaker) Status() *mm.Status {
+	running := m.running.Load()
+	status := &mm.Status{
+		Running: running,
+		CEXes:   make(map[string]*mm.CEXStatus, len(m.cfg.CexConfigs)),
+		Bots:    make([]*mm.BotStatus, 0, len(m.cfg.BotConfigs)),
+	}
+	for _, botCfg := range m.cfg.BotConfigs {
+		status.Bots = append(status.Bots, &mm.BotStatus{
+			Config:  botCfg,
+			Running: running,
+		})
+	}
+	for _, cexCfg := range m.cfg.CexConfigs {
+		status.CEXes[cexCfg.Name] = &mm.CEXStatus{
+			Config:    cexCfg,
+			Connected: rand.Float32() < 0.5,
+			// ConnectionError: "test connection error",
+			Markets: binanceMarkets,
+		}
+	}
+	return status
+}
+
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
 	asset.Register(22, &TDriver{})                 // mona
@@ -2089,7 +2251,6 @@ func TestServer(t *testing.T) {
 	delayBalance = true
 	doubleCreateAsyncErr = false
 	randomizeOrdersCount = true
-	initErrors = false
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -2110,11 +2271,17 @@ func TestServer(t *testing.T) {
 	}
 
 	s, err := New(&Config{
-		Core:     tCore,
-		Addr:     "127.0.0.1:54321",
-		Logger:   logger,
-		NoEmbed:  true, // use files on disk, and reload on each page load
-		HttpProf: true,
+		Core: tCore,
+		MarketMaker: &TMarketMaker{
+			core: tCore,
+			cfg:  &mm.MarketMakingConfig{},
+			mkts: make(map[string][]*libxc.Market),
+		},
+		Experimental: true,
+		Addr:         "127.0.0.3:54321",
+		Logger:       logger,
+		NoEmbed:      true, // use files on disk, and reload on each page load
+		HttpProf:     true,
 	})
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)

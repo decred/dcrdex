@@ -2,19 +2,37 @@
 
 export SHELL=$(which bash)
 SESSION="walletpair"
+
+
+DEXC_ARGS=${@}
+SIMNET=""
+TESTNET=""
+while [ "${1:-}" != "" ]; do
+  case "$1" in
+    --simnet)
+      SIMNET="1"
+      echo "Using simnet"
+      ;;
+    --testnet)
+      TESTNET="1"
+      echo "Using testnet"
+      ;;
+  esac
+  shift
+done
+
 if [ "$SIMNET" ] ; then
-  PAIR_ROOT=~/dextest/simnet-walletpair/
+  PAIR_ROOT=~/dextest/simnet-walletpair
   CLIENT_1_ADDR="127.0.0.6:5760"
   CLIENT_1_RPC_ADDR="127.0.0.6:5761"
   CLIENT_2_ADDR="127.0.0.7:5762"
   CLIENT_2_RPC_ADDR="127.0.0.7:5763"
 else
-  PAIR_ROOT=~/dextest/walletpair/
+  PAIR_ROOT=~/dextest/walletpair
   CLIENT_1_ADDR="127.0.0.4:5760"
   CLIENT_1_RPC_ADDR="127.0.0.4:5761"
   CLIENT_2_ADDR="127.0.0.5:5762"
   CLIENT_2_RPC_ADDR="127.0.0.5:5763"
-  SIMNET="0"
 fi
 
 CLIENT_1_DIR="${PAIR_ROOT}/dexc1"
@@ -33,14 +51,19 @@ mkdir -p "${CLIENT_2_DIR}"
 
 CLIENT_1_CONF="${CLIENT_1_DIR}/dexc.conf"
 rm -f "${CLIENT_1_CONF}"
+CLIENT_1_CTL_KEY="${CLIENT_1_DIR}/ctl.key"
+rm -f "$CLIENT_1_CTL_KEY"
+CLIENT_1_CTL_CERT="${CLIENT_1_DIR}/ctl.cert"
+rm -f "$CLIENT_1_CTL_CERT"
 cat > "${CLIENT_1_CONF}" <<EOF
 webaddr=${CLIENT_1_ADDR}
 experimental=true
 rpc=1
+rpckey=${CLIENT_1_CTL_KEY}
+rpccert=${CLIENT_1_CTL_CERT}
 rpcuser=user
 rpcpass=pass
 rpcaddr=${CLIENT_1_RPC_ADDR}
-simnet=${SIMNET}
 EOF
 
 CLIENT_1_CTL_CONF="${CLIENT_1_DIR}/dexcctl.conf"
@@ -48,31 +71,39 @@ rm -f "$CLIENT_1_CTL_CONF"
 cat > "$CLIENT_1_CTL_CONF" <<EOF
 rpcuser=user
 rpcpass=pass
-rpccert=${CLIENT_1_DIR}/rpc.cert
+rpccert=${CLIENT_1_CTL_CERT}
 rpcaddr=${CLIENT_1_RPC_ADDR}
 simnet=${SIMNET}
+testnet=${TESTNET}
 EOF
 
 CLIENT_2_CONF="${CLIENT_2_DIR}/dexc.conf"
 rm -f "$CLIENT_2_CONF"
+CLIENT_2_CTL_KEY="${CLIENT_2_DIR}/ctl.key"
+rm -f "$CLIENT_2_CTL_KEY"
+CLIENT_2_CTL_CERT="${CLIENT_2_DIR}/ctlcert.conf"
+rm -f "$CLIENT_2_CTL_CERT"
 cat > "$CLIENT_2_CONF" <<EOF
 webaddr=${CLIENT_2_ADDR}
 experimental=true
 rpc=1
+rpckey=${CLIENT_2_CTL_KEY}
+rpccert=${CLIENT_2_CTL_CERT}
 rpcuser=user
 rpcpass=pass
 rpcaddr=${CLIENT_2_RPC_ADDR}
-simnet=${SIMNET}
 EOF
 
 CLIENT_2_CTL_CONF="${CLIENT_2_DIR}/dexcctl.conf"
 rm -f "$CLIENT_2_CTL_CONF"
+
 cat > "$CLIENT_2_CTL_CONF" <<EOF
 rpcuser=user
 rpcpass=pass
-rpccert=${CLIENT_2_DIR}/rpc.cert
+rpccert=${CLIENT_2_CTL_CERT}
 rpcaddr=${CLIENT_2_RPC_ADDR}
 simnet=${SIMNET}
+testnet=${TESTNET}
 EOF
 
 QUIT_FILE="${HARNESS_DIR}/quit"
@@ -103,11 +134,11 @@ tmux rename-window -t $SESSION:0 'harness-ctl'
 
 tmux new-window -t $SESSION:1 -n 'dexc1' $SHELL
 tmux send-keys -t $SESSION:1 "cd ${PAIR_ROOT}/dexc1" C-m
-tmux send-keys -t $SESSION:1 "${DEXC} --appdata=${CLIENT_1_DIR} ${@}" C-m
+tmux send-keys -t $SESSION:1 "${DEXC} --appdata=${CLIENT_1_DIR} ${DEXC_ARGS}" C-m
 
 tmux new-window -t $SESSION:2 -n 'dexc1' $SHELL
 tmux send-keys -t $SESSION:2 "cd ${PAIR_ROOT}/dexc1" C-m
-tmux send-keys -t $SESSION:2 "${DEXC} --appdata=${CLIENT_2_DIR} ${@}" C-m
+tmux send-keys -t $SESSION:2 "${DEXC} --appdata=${CLIENT_2_DIR} ${DEXC_ARGS}" C-m
 
 tmux select-window -t $SESSION:0
 sleep 1

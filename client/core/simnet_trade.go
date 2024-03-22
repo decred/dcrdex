@@ -57,7 +57,6 @@ import (
 	dexdoge "decred.org/dcrdex/dex/networks/doge"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/dex/order"
-	dexsrv "decred.org/dcrdex/server/dex"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"golang.org/x/sync/errgroup"
@@ -302,7 +301,7 @@ func (s *simulationTest) startClients() error {
 		<-c.core.Ready()
 
 		// init app
-		err = c.core.InitializeClient(c.appPass, nil)
+		_, err = c.core.InitializeClient(c.appPass, nil)
 		if err != nil {
 			return err
 		}
@@ -1526,20 +1525,6 @@ func tryUntil(ctx context.Context, tryDuration time.Duration, tryFn func() bool)
 /************************************
 HELPER TYPES, FUNCTIONS AND METHODS
 ************************************/
-
-// marketConfig taken from dcrdex/server/cmd/dcrdex/settings.go
-type marketConfig struct {
-	Markets []*struct {
-		Base       string  `json:"base"`
-		Quote      string  `json:"quote"`
-		LotSize    uint64  `json:"lotSize"`
-		RateStep   uint64  `json:"rateStep"`
-		Duration   uint64  `json:"epochDuration"`
-		MBBuffer   float64 `json:"marketBuyBuffer"`
-		ParcelSize uint32  `json:"parcelSize"`
-	} `json:"markets"`
-	Assets map[string]*dexsrv.AssetConf `json:"assets"`
-}
 
 type harnessCtrl struct {
 	dir, fundCmd, fundStr string

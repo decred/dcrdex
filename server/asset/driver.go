@@ -30,6 +30,16 @@ type driverBase interface {
 	Version() uint32
 	// UnitInfo returns the dex.UnitInfo for the asset.
 	UnitInfo() dex.UnitInfo
+	// Name is the name for the asset.
+	Name() string
+}
+
+// minValuer can be implemented by assets with minimum dust sizes that vary
+// with fee rate. If an asset driver does not implement minValuer, the min
+// value is assumed to be 1 atom for both bond and lot sizes.
+type minValuer interface {
+	MinBondSize(maxFeeRate uint64) uint64
+	MinLotSize(maxFeeRate uint64) uint64
 }
 
 // Driver is the interface required of all base chain assets.
@@ -177,4 +187,51 @@ func Tokens(assetID uint32) map[uint32]*dex.Token {
 		m[k] = v
 	}
 	return m
+}
+
+// Minimums returns the minimimum lot size and bond size for a registered asset.
+func Minimums(assetID uint32, maxFeeRate uint64) (minLotSize, minBondSize uint64, found bool) {
+	baseChainID := assetID
+	if token, is := tokens[assetID]; is {
+		baseChainID = token.TokenInfo().ParentID
+	}
+	drv, found := drivers[baseChainID]
+	if !found {
+		return 0, 0, false
+	}
+	m, is := drv.(minValuer)
+	if !is {
+		return 1, 1, true
+	}
+	return m.MinLotSize(maxFeeRate), m.MinBondSize(maxFeeRate), true
+}
+
+// RegisteredAsset is information about a registered asset.
+type RegisteredAsset struct {
+	AssetID  uint32
+	Symbol   string
+	Name     string
+	UnitInfo dex.UnitInfo
+}
+
+// Assets returns a information about registered assets.
+func Assets() []*RegisteredAsset {
+	assets := make([]*RegisteredAsset, 0, len(drivers)+len(tokens))
+	for assetID, drv := range drivers {
+		assets = append(assets, &RegisteredAsset{
+			AssetID:  assetID,
+			Symbol:   dex.BipIDSymbol(assetID),
+			Name:     drv.Name(),
+			UnitInfo: drv.UnitInfo(),
+		})
+	}
+	for assetID, drv := range tokens {
+		assets = append(assets, &RegisteredAsset{
+			AssetID:  assetID,
+			Symbol:   dex.BipIDSymbol(assetID),
+			Name:     drv.Name(),
+			UnitInfo: drv.UnitInfo(),
+		})
+	}
+	return assets
 }

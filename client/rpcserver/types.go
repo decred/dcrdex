@@ -316,20 +316,16 @@ func parseHelpArgs(params *RawParams) (*helpForm, error) {
 	}, nil
 }
 
-func parseInitArgs(params *RawParams) (encode.PassBytes, encode.PassBytes, error) {
+func parseInitArgs(params *RawParams) (encode.PassBytes, *string, error) {
 	if err := checkNArgs(params, []int{1}, []int{0, 1}); err != nil {
 		return nil, nil, err
 	}
 	if len(params.PWArgs[0]) == 0 {
 		return nil, nil, fmt.Errorf("app password cannot be empty")
 	}
-	var seed encode.PassBytes
+	var seed *string
 	if len(params.Args) == 1 {
-		var err error
-		seed, err = hex.DecodeString(params.Args[0])
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid seed format")
-		}
+		seed = &params.Args[0]
 	}
 	return params.PWArgs[0], seed, nil
 }
@@ -1004,5 +1000,27 @@ func parseTxHistoryArgs(params *RawParams) (*txHistoryForm, error) {
 		num:     int(num),
 		refID:   refID,
 		past:    past,
+	}, nil
+}
+
+type walletTxForm struct {
+	assetID uint32
+	txID    string
+}
+
+func parseWalletTxArgs(params *RawParams) (*walletTxForm, error) {
+	err := checkNArgs(params, []int{0}, []int{2})
+	if err != nil {
+		return nil, err
+	}
+
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid assetID: %v", err)
+	}
+
+	return &walletTxForm{
+		assetID: uint32(assetID),
+		txID:    params.Args[1],
 	}, nil
 }

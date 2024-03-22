@@ -3,7 +3,7 @@
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{$authed := .UserInfo.Authed}}
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
-  <div class="mw-425 d-flex flex-column align-items-stretch mx-auto">
+  <div class="mw-425 flex-stretch-column mx-auto">
     <span class="settings-gear ico-settings"></span><br>
     <div class="settings">
       <div class="form-check">
@@ -120,7 +120,7 @@
 
     {{- /* EXPORT SEED AUTHORIZATION */ -}}
     <form class="d-hide" id="exportSeedAuth">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="form-closer"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
         [[[Export Seed]]]
       </div>
@@ -139,10 +139,11 @@
 
     {{- /* SEED DISPLAY */ -}}
     <form class="d-hide" id="authorizeSeedDisplay">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="form-closer"><span class="ico-cross"></span></div>
       <div class="fs18 sans-light text-center mb-2">[[[dont_share]]]</div>
       <div class="my-2 p-2 flex-center">
-        <pre class="fs18 mono mx-auto select-all" id="seedDiv"></pre>
+        <pre class="fs18 mono mx-auto select-all" id="legacySeed"></pre>
+        <div class="fs18 mono mx-auto select-all" id="mnemonic"></div>
       </div>
     </form>
 

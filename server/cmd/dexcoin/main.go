@@ -11,12 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset"
-	_ "decred.org/dcrdex/server/asset/bch"
-	_ "decred.org/dcrdex/server/asset/btc"
-	_ "decred.org/dcrdex/server/asset/dcr"
-	_ "decred.org/dcrdex/server/asset/doge"
-	_ "decred.org/dcrdex/server/asset/ltc"
-	_ "decred.org/dcrdex/server/asset/zec"
+	_ "decred.org/dcrdex/server/asset/importall"
 )
 
 type coinDecoder func([]byte) (string, error)

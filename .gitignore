@@ -39,5 +39,9 @@ client/asset/btc/electrum/example/wallet/wallet
 client/asset/eth/cmd/getgas/getgas
 client/asset/eth/cmd/deploy/deploy
 client/cmd/dexc-desktop/pkg/installers
+client/cmd/testbinance/testbinance
 server/noderelay/cmd/sourcenode/sourcenode
 tatanka/cmd/demo/demo
+server/cmd/validatemarkets
+client/cmd/translationsreport/translationsreport
+client/cmd/translationsreport/worksheets

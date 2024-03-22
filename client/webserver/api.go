@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/mm"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -746,10 +747,9 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error exporting seed: %w", err))
 		return
 	}
-	defer zero(seed)
 	writeJSON(w, &struct {
-		OK   bool      `json:"ok"`
-		Seed dex.Bytes `json:"seed"`
+		OK   bool   `json:"ok"`
+		Seed string `json:"seed"`
 	}{
 		OK:   true,
 		Seed: seed,
@@ -911,13 +911,20 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 
 // apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
-	init := new(initForm)
+	var init struct {
+		Pass         encode.PassBytes `json:"pass"`
+		Seed         string           `json:"seed,omitempty"`
+		RememberPass bool             `json:"rememberPass"`
+	}
 	defer init.Pass.Clear()
-	defer zero(init.Seed)
-	if !readPost(w, r, init) {
+	if !readPost(w, r, &init) {
 		return
 	}
-	err := s.core.InitializeClient(init.Pass, init.Seed)
+	var seed *string
+	if len(init.Seed) > 0 {
+		seed = &init.Seed
+	}
+	mnemonicSeed, err := s.core.InitializeClient(init.Pass, seed)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
@@ -929,11 +936,13 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, struct {
-		OK    bool     `json:"ok"`
-		Hosts []string `json:"hosts"`
+		OK           bool     `json:"ok"`
+		Hosts        []string `json:"hosts"`
+		MnemonicSeed string   `json:"mnemonic"`
 	}{
-		OK:    true,
-		Hosts: s.knownUnregisteredExchanges(map[string]*core.Exchange{}),
+		OK:           true,
+		Hosts:        s.knownUnregisteredExchanges(map[string]*core.Exchange{}),
+		MnemonicSeed: mnemonicSeed,
 	}, s.indent)
 }
 
@@ -946,6 +955,47 @@ func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
 		OK:          true,
 		Initialized: s.core.IsInitialized(),
 	}, s.indent)
+}
+
+func (s *WebServer) apiLocale(w http.ResponseWriter, r *http.Request) {
+	var lang string
+	if !readPost(w, r, &lang) {
+		return
+	}
+	m, found := localesMap[lang]
+	if !found {
+		s.writeAPIError(w, fmt.Errorf("no locale for language %q", lang))
+		return
+	}
+	resp := make(map[string]string)
+	for translationID, defaultTranslation := range enUS {
+		t, found := m[translationID]
+		if !found {
+			t = defaultTranslation
+		}
+		resp[translationID] = t.T
+	}
+
+	writeJSON(w, resp, s.indent)
+}
+
+func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
+	var lang string
+	if !readPost(w, r, &lang) {
+		return
+	}
+	if err := s.core.SetLanguage(lang); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	s.lang.Store(lang)
+	if err := s.buildTemplates(lang); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 // apiLogin handles the 'login' API request.
@@ -962,7 +1012,7 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notes, err := s.core.Notifications(100)
+	notes, pokes, err := s.core.Notifications(100)
 	if err != nil {
 		log.Errorf("failed to get notifications: %v", err)
 	}
@@ -970,9 +1020,29 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, &struct {
 		OK    bool               `json:"ok"`
 		Notes []*db.Notification `json:"notes"`
+		Pokes []*db.Notification `json:"pokes"`
 	}{
 		OK:    true,
 		Notes: notes,
+		Pokes: pokes,
+	}, s.indent)
+}
+
+func (s *WebServer) apiNotes(w http.ResponseWriter, r *http.Request) {
+	notes, pokes, err := s.core.Notifications(100)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("failed to get notifications: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK    bool               `json:"ok"`
+		Notes []*db.Notification `json:"notes"`
+		Pokes []*db.Notification `json:"pokes"`
+	}{
+		OK:    true,
+		Notes: notes,
+		Pokes: pokes,
 	}, s.indent)
 }
 
@@ -1279,10 +1349,9 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiResetAppPassword(w http.ResponseWriter, r *http.Request) {
 	form := new(struct {
 		NewPass encode.PassBytes `json:"newPass"`
-		Seed    dex.Bytes        `json:"seed"`
+		Seed    string           `json:"seed"`
 	})
 	defer form.NewPass.Clear()
-	defer zero(form.Seed)
 	if !readPost(w, r, form) {
 		return
 	}
@@ -1491,14 +1560,23 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 
 // apiUser handles the 'user' API request.
 func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
+	var u *core.User
+	if s.isAuthed(r) {
+		u = s.core.User()
+	}
+
 	response := struct {
-		*core.User
-		Authed       bool `json:"authed"`
-		OK           bool `json:"ok"`
-		Experimental bool `json:"experimental"`
+		User         *core.User `json:"user"`
+		Lang         string     `json:"lang"`
+		Langs        []string   `json:"langs"`
+		Inited       bool       `json:"inited"`
+		OK           bool       `json:"ok"`
+		Experimental bool       `json:"experimental"`
 	}{
-		User:         s.core.User(),
-		Authed:       s.isAuthed(r),
+		User:         u,
+		Lang:         s.lang.Load().(string),
+		Langs:        s.langs,
+		Inited:       s.core.IsInitialized(),
 		OK:           true,
 		Experimental: s.experimental,
 	}
@@ -1572,6 +1650,28 @@ func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:     true,
 		Report: report,
+	}, s.indent)
+}
+
+func (s *WebServer) apiCEXBalance(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CEXName string `json:"cexName"`
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	bal, err := s.mm.CEXBalance(req.CEXName, req.AssetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting cex balance: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK         bool                   `json:"ok"`
+		CEXBalance *libxc.ExchangeBalance `json:"cexBalance"`
+	}{
+		OK:         true,
+		CEXBalance: bal,
 	}, s.indent)
 }
 
@@ -1893,7 +1993,7 @@ func (s *WebServer) apiStartMarketMaking(w http.ResponseWriter, r *http.Request)
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	if err = s.mm.Run(s.ctx, appPW, nil); err != nil {
+	if err = s.mm.Start(appPW, nil); err != nil {
 		s.writeAPIError(w, fmt.Errorf("Error starting market making: %v", err))
 		return
 	}
@@ -1906,45 +2006,37 @@ func (s *WebServer) apiStopMarketMaking(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.mm.GetMarketMakingConfig()
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("error getting market making config: %v", err))
+func (s *WebServer) apiUpdateCEXConfig(w http.ResponseWriter, r *http.Request) {
+	var updatedCfg *mm.CEXConfig
+	if !readPost(w, r, &updatedCfg) {
+		s.writeAPIError(w, fmt.Errorf("failed to read config"))
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	if err := s.mm.UpdateCEXConfig(updatedCfg); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiUpdateMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 	var updatedCfg *mm.BotConfig
 	if !readPost(w, r, &updatedCfg) {
 		s.writeAPIError(w, fmt.Errorf("failed to read config"))
 		return
 	}
 
-	cfg, err := s.mm.UpdateBotConfig(updatedCfg)
-	if err != nil {
+	if err := s.mm.UpdateBotConfig(updatedCfg); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiRemoveMarketMakingConfig(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiRemoveBotConfig(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		Host       string `json:"host"`
 		BaseAsset  uint32 `json:"baseAsset"`
@@ -1955,32 +2047,21 @@ func (s *WebServer) apiRemoveMarketMakingConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	cfg, err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset)
-	if err != nil {
+	if err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, &struct {
-		OK  bool                   `json:"ok"`
-		Cfg *mm.MarketMakingConfig `json:"cfg"`
-	}{
-		OK:  true,
-		Cfg: cfg,
-	}, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request) {
-	running := s.mm.Running()
-	runningBots := s.mm.RunningBots()
 	writeJSON(w, &struct {
-		OK          bool                `json:"ok"`
-		Running     bool                `json:"running"`
-		RunningBots []mm.MarketWithHost `json:"runningBots"`
+		OK     bool       `json:"ok"`
+		Status *mm.Status `json:"status"`
 	}{
-		OK:          true,
-		Running:     running,
-		RunningBots: runningBots,
+		OK:     true,
+		Status: s.mm.Status(),
 	}, s.indent)
 }
 

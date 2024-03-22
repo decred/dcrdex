@@ -13,7 +13,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
@@ -58,6 +57,7 @@ const (
 	purchaseTicketsRoute       = "purchasetickets"
 	setVotingPreferencesRoute  = "setvotingprefs"
 	txHistoryRoute             = "txhistory"
+	walletTxRoute              = "wallettx"
 )
 
 const (
@@ -130,6 +130,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	purchaseTicketsRoute:       handlePurchaseTickets,
 	setVotingPreferencesRoute:  handleSetVotingPreferences,
 	txHistoryRoute:             handleTxHistory,
+	walletTxRoute:              handleWalletTx,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -163,11 +164,8 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(initRoute, err)
 	}
-	defer func() {
-		appPass.Clear()
-		seed.Clear()
-	}()
-	if err := s.core.InitializeClient(appPass, seed); err != nil {
+	defer appPass.Clear()
+	if _, err := s.core.InitializeClient(appPass, seed); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCInitError, errMsg)
 		return createResponse(initRoute, nil, resErr)
@@ -822,16 +820,13 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	defer appPass.Clear()
 	seed, err := s.core.ExportSeed(appPass)
-	defer encode.ClearBytes(seed)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to retrieve app seed: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCExportSeedError, errMsg)
 		return createResponse(appSeedRoute, nil, resErr)
 	}
-	// Zero seed and hex representation after use.
-	seedHex := fmt.Sprintf("%x", seed[:])
 
-	return createResponse(appSeedRoute, seedHex, nil)
+	return createResponse(appSeedRoute, seed, nil)
 }
 
 // handleDeleteArchivedRecords handles requests for deleting archived records.
@@ -908,7 +903,7 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 		return usage(notificationsRoute, err)
 	}
 
-	notes, err := s.core.Notifications(numNotes)
+	notes, _, err := s.core.Notifications(numNotes)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to handle notification: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCNotificationsError, errMsg)
@@ -930,7 +925,7 @@ func handleStartMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponseP
 		return usage(startMarketMakingRoute, err)
 	}
 
-	err = s.mm.Run(s.ctx, form.appPass, &form.cfgFilePath)
+	err = s.mm.Start(form.appPass, &form.cfgFilePath)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to start market making: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
@@ -1033,6 +1028,22 @@ func handleTxHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 
 	return createResponse(txHistoryRoute, txs, nil)
+}
+
+func handleWalletTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseWalletTxArgs(params)
+	if err != nil {
+		return usage(walletTxRoute, err)
+	}
+
+	tx, err := s.core.WalletTransaction(form.assetID, form.txID)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get wallet tx: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, errMsg)
+		return createResponse(walletTxRoute, nil, resErr)
+	}
+
+	return createResponse(walletTxRoute, tx, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -1765,5 +1776,12 @@ an spv wallet and enables options to view and set the vsp.
 		  will be returned.
 		  past (bool): If true, the transactions before the reference tx will be returned. If false, the
 		  transactions after the reference tx will be returned.`,
+	},
+	walletTxRoute: {
+		argsShort:  `assetID txID`,
+		cmdSummary: `Get a wallet transaction`,
+		argsLong: `Args:
+		  assetID (int): The asset's BIP-44 registered coin index.
+		  txID (string): The transaction ID.`,
 	},
 }

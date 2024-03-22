@@ -13,12 +13,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +31,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/db/bolt"
+	"decred.org/dcrdex/client/mnemonic"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -81,8 +84,12 @@ const (
 	// ConnectResult.
 	defaultPenaltyThreshold = 20
 
-	// seedLen is the length of the generated app seed used for app protection.
-	seedLen = 64
+	// legacySeedLength is the length of the generated app seed used for app protection.
+	legacySeedLength = 64
+
+	// pokesCapacity is the maximum number of poke notifications that
+	// will be cached.
+	pokesCapacity = 100
 )
 
 var (
@@ -588,6 +595,26 @@ func (dc *dexConnection) hasActiveOrders() bool {
 	return false
 }
 
+// activeOrders returns a slice of active orders and inflight orders.
+func (dc *dexConnection) activeOrders() ([]*Order, []*InFlightOrder) {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+
+	var activeOrders []*Order
+	for _, trade := range dc.trades {
+		if trade.isActive() {
+			activeOrders = append(activeOrders, trade.coreOrder())
+		}
+	}
+
+	var inflightOrders []*InFlightOrder
+	for _, ord := range dc.inFlightOrders {
+		inflightOrders = append(inflightOrders, ord)
+	}
+
+	return activeOrders, inflightOrders
+}
+
 // findOrder returns the tracker and preimage for an order ID, and a boolean
 // indicating whether this is a cancel order.
 func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
@@ -729,7 +756,7 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	c.log.Infof("Cancel order %s targeting order %s at %s has been placed",
 		co.ID(), oid, dc.acct.host)
 
-	subject, details := c.formatDetails(TopicCancellingOrder, tracker.token())
+	subject, details := c.formatDetails(TopicCancellingOrder, makeOrderToken(tracker.token()))
 	c.notify(newOrderNote(TopicCancellingOrder, subject, details, db.Poke, tracker.coreOrderInternal()))
 
 	return nil
@@ -1024,7 +1051,7 @@ func (dc *dexConnection) updateOrderStatus(trade *trackedTrade, newStatus order.
 			oid, previousStatus, newStatus, dc.acct.host)
 	}
 
-	subject, details := trade.formatDetails(TopicOrderStatusUpdate, trade.token(), previousStatus, newStatus)
+	subject, details := trade.formatDetails(TopicOrderStatusUpdate, makeOrderToken(trade.token()), previousStatus, newStatus)
 	dc.notify(newOrderNote(TopicOrderStatusUpdate, subject, details, db.WarningLevel, trade.coreOrderInternal()))
 }
 
@@ -1350,6 +1377,54 @@ func (dc *dexConnection) bestBookFeeSuggestion(assetID uint32) uint64 {
 	return 0
 }
 
+type pokesCache struct {
+	sync.RWMutex
+	cache         []*db.Notification
+	cursor        int
+	pokesCapacity int
+}
+
+func newPokesCache(pokesCapacity int) *pokesCache {
+	return &pokesCache{
+		pokesCapacity: pokesCapacity,
+	}
+}
+
+func (c *pokesCache) add(poke *db.Notification) {
+	c.Lock()
+	defer c.Unlock()
+
+	if len(c.cache) >= c.pokesCapacity {
+		c.cache[c.cursor] = poke
+	} else {
+		c.cache = append(c.cache, poke)
+	}
+	c.cursor = (c.cursor + 1) % c.pokesCapacity
+}
+
+func (c *pokesCache) pokes() []*db.Notification {
+	c.RLock()
+	defer c.RUnlock()
+
+	pokes := make([]*db.Notification, len(c.cache))
+	copy(pokes, c.cache)
+	sort.Slice(pokes, func(i, j int) bool {
+		return pokes[i].TimeStamp < pokes[j].TimeStamp
+	})
+	return pokes
+}
+
+func (c *pokesCache) init(pokes []*db.Notification) {
+	c.Lock()
+	defer c.Unlock()
+
+	if len(pokes) > c.pokesCapacity {
+		pokes = pokes[:len(pokes)-c.pokesCapacity]
+	}
+	c.cache = pokes
+	c.cursor = len(pokes) % c.pokesCapacity
+}
+
 // blockWaiter is a message waiting to be stamped, signed, and sent once a
 // specified coin has the requisite confirmations. The blockWaiter is similar to
 // dcrdex/server/blockWaiter.Waiter, but is different enough to warrant a
@@ -1400,6 +1475,13 @@ type Config struct {
 	ExtensionModeFile string
 }
 
+// locale is data associated with the currently selected language.
+type locale struct {
+	lang    language.Tag
+	m       map[Topic]*translation
+	printer *message.Printer
+}
+
 // Core is the core client application. Core manages DEX connections, wallets,
 // database access, match negotiation and more.
 type Core struct {
@@ -1413,9 +1495,7 @@ type Core struct {
 	net           dex.Network
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
-
-	locale        map[Topic]*translation
-	localePrinter *message.Printer
+	intl          atomic.Value // *locale
 
 	extensionModeConfig *ExtensionModeConfig
 
@@ -1461,6 +1541,8 @@ type Core struct {
 	pendingWallets    map[uint32]bool
 
 	notes chan asset.WalletNotification
+
+	pokesCache *pokesCache
 }
 
 // New is the constructor for a new Core.
@@ -1487,17 +1569,17 @@ func New(cfg *Config) (*Core, error) {
 	} else { // default to torproxy if onion not set explicitly
 		cfg.Onion = cfg.TorProxy
 	}
-	lang := language.AmericanEnglish
-	if cfg.Language != "" {
-		acceptLang, err := language.Parse(cfg.Language)
+
+	parseLanguage := func(langStr string) (language.Tag, error) {
+		acceptLang, err := language.Parse(langStr)
 		if err != nil {
-			return nil, fmt.Errorf("unable to parse requested language: %w", err)
+			return language.Und, fmt.Errorf("unable to parse requested language: %w", err)
 		}
 		var langs []language.Tag
 		for locale := range locales {
 			tag, err := language.Parse(locale)
 			if err != nil {
-				return nil, fmt.Errorf("bad %v: %w", locale, err)
+				return language.Und, fmt.Errorf("bad %v: %w", locale, err)
 			}
 			langs = append(langs, tag)
 		}
@@ -1509,13 +1591,38 @@ func New(cfg *Config) (*Core, error) {
 		case language.High, language.Low:
 			cfg.Logger.Infof("Using language %v", tag)
 		case language.No:
-			return nil, fmt.Errorf("no match for %q in recognized languages %v", cfg.Language, langs)
+			return language.Und, fmt.Errorf("no match for %q in recognized languages %v", cfg.Language, langs)
 		}
-		lang = tag
+		return tag, nil
 	}
+
+	lang := language.Und
+
+	// Check if the user has set a language with SetLanguage.
+	if langStr, err := boltDB.Language(); err != nil {
+		cfg.Logger.Errorf("Error loading language from database: %v", err)
+	} else if len(langStr) > 0 {
+		if lang, err = parseLanguage(langStr); err != nil {
+			cfg.Logger.Errorf("Error parsing language retrieved from database %q: %w", langStr, err)
+		}
+	}
+
+	// If they haven't changed the language through the UI, perhaps its set in
+	// configuration.
+	if lang.IsRoot() && cfg.Language != "" {
+		if lang, err = parseLanguage(cfg.Language); err != nil {
+			return nil, err
+		}
+	}
+
+	// Default language is English.
+	if lang.IsRoot() {
+		lang = language.AmericanEnglish
+	}
+
 	cfg.Logger.Debugf("Using locale printer for %q", lang)
 
-	locale, found := locales[lang.String()]
+	translations, found := locales[lang.String()]
 	if !found {
 		return nil, fmt.Errorf("no translations for language %s", lang)
 	}
@@ -1565,8 +1672,6 @@ func New(cfg *Config) (*Core, error) {
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		noteChans:     make(map[uint64]chan Notification),
 
-		locale:              locale,
-		localePrinter:       message.NewPrinter(lang),
 		extensionModeConfig: xCfg,
 		seedGenerationTime:  seedGenerationTime,
 
@@ -1576,6 +1681,12 @@ func New(cfg *Config) (*Core, error) {
 
 		notes: make(chan asset.WalletNotification, 128),
 	}
+
+	c.intl.Store(&locale{
+		lang:    lang,
+		m:       translations,
+		printer: message.NewPrinter(lang),
+	})
 
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
@@ -1652,6 +1763,10 @@ fetchers:
 
 	c.wg.Wait() // block here until all goroutines except DB complete
 
+	if err := c.db.SavePokes(c.pokes()); err != nil {
+		c.log.Errorf("Error saving pokes: %v", err)
+	}
+
 	// Stop the DB after dexConnections and other goroutines are done.
 	stopDB()
 	dbWG.Wait()
@@ -1714,6 +1829,38 @@ fetchers:
 // tasks and Core becomes ready for use.
 func (c *Core) Ready() <-chan struct{} {
 	return c.ready
+}
+
+func (c *Core) locale() *locale {
+	return c.intl.Load().(*locale)
+}
+
+// SetLanguage sets the langauge used for notifications. The language set with
+// SetLanguage persists through restarts and will override any language set in
+// configuration.
+func (c *Core) SetLanguage(lang string) error {
+	tag, err := language.Parse(lang)
+	if err != nil {
+		return fmt.Errorf("error parsing language %q: %w", lang, err)
+	}
+
+	translations, found := locales[lang]
+	if !found {
+		return fmt.Errorf("no translations for language %s", lang)
+	}
+	if err := c.db.SetLanguage(lang); err != nil {
+		return fmt.Errorf("error storing language: %w", err)
+	}
+	c.intl.Store(&locale{
+		m:       translations,
+		printer: message.NewPrinter(tag),
+	})
+	return nil
+}
+
+// Language is the currently configured language.
+func (c *Core) Language() string {
+	return c.locale().lang.String()
 }
 
 // BackupDB makes a backup of the database at the specified location, optionally
@@ -1974,13 +2121,14 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 	}
 
 	w.mtx.RLock()
-	defer w.mtx.RUnlock()
 	depositAddr = w.address
+	synced := w.synced
+	w.mtx.RUnlock()
 
 	// If the wallet is synced, update the bond reserves, logging any balance
 	// insufficiencies, otherwise start a loop to check the sync status until it
 	// is.
-	if w.synced {
+	if synced {
 		c.updateBondReserves(w.AssetID)
 	} else {
 		c.startWalletSyncMonitor(w)
@@ -3290,7 +3438,9 @@ func (c *Core) changeAppPass(newAppPW, innerKey []byte, creds *db.PrimaryCredent
 		EncSeed:        creds.EncSeed,
 		EncInnerKey:    newEncInnerKey,
 		InnerKeyParams: creds.InnerKeyParams,
+		Birthday:       creds.Birthday,
 		OuterKeyParams: newOuterCrypter.Serialize(),
+		Version:        creds.Version,
 	}
 
 	err = c.db.SetPrimaryCredentials(newCreds)
@@ -3304,7 +3454,7 @@ func (c *Core) changeAppPass(newAppPW, innerKey []byte, creds *db.PrimaryCredent
 }
 
 // ResetAppPass resets the application password to the provided new password.
-func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
+func (c *Core) ResetAppPass(newPass []byte, seedStr string) (err error) {
 	if !c.IsInitialized() {
 		return fmt.Errorf("cannot reset password before client is initialized")
 	}
@@ -3313,8 +3463,9 @@ func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
 		return fmt.Errorf("application password cannot be empty")
 	}
 
-	if len(seed) != seedLen {
-		return fmt.Errorf("invalid seed length %d", len(seed))
+	seed, _, err := decodeSeedString(seedStr)
+	if err != nil {
+		return fmt.Errorf("error decoding seed: %w", err)
 	}
 
 	creds := c.creds()
@@ -3323,7 +3474,7 @@ func (c *Core) ResetAppPass(newPass []byte, seed []byte) error {
 	}
 
 	innerKey := seedInnerKey(seed)
-	_, err := c.reCrypter(innerKey[:], creds.InnerKeyParams)
+	_, err = c.reCrypter(innerKey[:], creds.InnerKeyParams)
 	if err != nil {
 		c.log.Errorf("Error reseting password with seed: %v", err)
 		return errors.New("incorrect seed")
@@ -4559,27 +4710,27 @@ func (c *Core) IsInitialized() bool {
 
 // InitializeClient sets the initial app-wide password and app seed for the
 // client. The seed argument should be left nil unless restoring from seed.
-func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
+func (c *Core) InitializeClient(pw []byte, restorationSeed *string) (string, error) {
 	if c.IsInitialized() {
-		return fmt.Errorf("already initialized, login instead")
+		return "", fmt.Errorf("already initialized, login instead")
 	}
 
-	_, creds, err := c.generateCredentials(pw, restorationSeed)
+	_, creds, mnemonicSeed, err := c.generateCredentials(pw, restorationSeed)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	err = c.db.SetPrimaryCredentials(creds)
 	if err != nil {
-		return fmt.Errorf("SetPrimaryCredentials error: %w", err)
+		return "", fmt.Errorf("SetPrimaryCredentials error: %w", err)
 	}
 
-	freshSeed := len(restorationSeed) == 0
+	freshSeed := restorationSeed == nil
 	if freshSeed {
 		now := uint64(time.Now().Unix())
 		err = c.db.SetSeedGenerationTime(now)
 		if err != nil {
-			return fmt.Errorf("SetSeedGenerationTime error: %w", err)
+			return "", fmt.Errorf("SetSeedGenerationTime error: %w", err)
 		}
 		c.seedGenerationTime = now
 
@@ -4588,59 +4739,93 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 	}
 
 	c.setCredentials(creds)
-	return nil
+	return mnemonicSeed, nil
 }
 
 // ExportSeed exports the application seed.
-func (c *Core) ExportSeed(pw []byte) ([]byte, error) {
+func (c *Core) ExportSeed(pw []byte) (seedStr string, err error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("ExportSeed password error: %w", err)
+		return "", fmt.Errorf("ExportSeed password error: %w", err)
 	}
 	defer crypter.Close()
 
 	creds := c.creds()
 	if creds == nil {
-		return nil, fmt.Errorf("no v2 credentials stored")
+		return "", fmt.Errorf("no v2 credentials stored")
 	}
 
 	seed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
-		return nil, fmt.Errorf("app seed decryption error: %w", err)
+		return "", fmt.Errorf("app seed decryption error: %w", err)
 	}
 
-	return seed, nil
+	if len(seed) == legacySeedLength {
+		seedStr = hex.EncodeToString(seed)
+	} else {
+		seedStr, err = mnemonic.GenerateMnemonic(seed, creds.Birthday)
+		if err != nil {
+			return "", fmt.Errorf("error generating mnemonic: %w", err)
+		}
+	}
+
+	return seedStr, nil
+}
+
+func decodeSeedString(seedStr string) (seed []byte, bday time.Time, err error) {
+	// See if it decodes as a mnemonic seed first.
+	seed, bday, err = mnemonic.DecodeMnemonic(seedStr)
+	if err != nil {
+		// Is it an old-school hex seed?
+		bday = time.Time{}
+		seed, err = hex.DecodeString(strings.Join(strings.Fields(seedStr), ""))
+		if err != nil {
+			return nil, time.Time{}, errors.New("unabled to decode provided seed")
+		}
+		if len(seed) != legacySeedLength {
+			return nil, time.Time{}, errors.New("decoded seed is wrong length")
+		}
+	}
+	return
 }
 
 // generateCredentials generates a new set of *PrimaryCredentials. The
 // credentials are not stored to the database. A restoration seed can be
 // provided, otherwise should be nil.
-func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.PrimaryCredentials, error) {
+func (c *Core) generateCredentials(pw []byte, optionalSeed *string) (encrypt.Crypter, *db.PrimaryCredentials, string, error) {
 	if len(pw) == 0 {
-		return nil, nil, fmt.Errorf("empty password not allowed")
+		return nil, nil, "", fmt.Errorf("empty password not allowed")
 	}
 
-	// Generate a seed to use as the root for all future key generation.
-	if len(seed) == 0 {
-		seed = encode.RandomBytes(seedLen)
-	} else if len(seed) != seedLen {
-		return nil, nil, fmt.Errorf("invalid seed length %d. expected %d", len(seed), seedLen)
-	}
+	var seed []byte
 	defer encode.ClearBytes(seed)
+	var bday time.Time
+	var mnemonicSeed string
+	if optionalSeed == nil {
+		bday = time.Now()
+		seed, mnemonicSeed = mnemonic.New()
+	} else {
+		var err error
+		// Is it a mnemonic seed?
+		seed, bday, err = decodeSeedString(*optionalSeed)
+		if err != nil {
+			return nil, nil, "", err
+		}
+	}
 
 	// Generate an inner key and it's Crypter.
 	innerKey := seedInnerKey(seed)
 	innerCrypter := c.newCrypter(innerKey[:])
 	encSeed, err := innerCrypter.Encrypt(seed)
 	if err != nil {
-		return nil, nil, fmt.Errorf("client seed encryption error: %w", err)
+		return nil, nil, "", fmt.Errorf("client seed encryption error: %w", err)
 	}
 
 	// Generate the outer key.
 	outerCrypter := c.newCrypter(pw)
 	encInnerKey, err := outerCrypter.Encrypt(innerKey[:])
 	if err != nil {
-		return nil, nil, fmt.Errorf("inner key encryption error: %w", err)
+		return nil, nil, "", fmt.Errorf("inner key encryption error: %w", err)
 	}
 
 	creds := &db.PrimaryCredentials{
@@ -4648,10 +4833,11 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 		EncInnerKey:    encInnerKey,
 		InnerKeyParams: innerCrypter.Serialize(),
 		OuterKeyParams: outerCrypter.Serialize(),
+		Birthday:       bday,
 		Version:        1,
 	}
 
-	return innerCrypter, creds, nil
+	return innerCrypter, creds, mnemonicSeed, nil
 }
 
 func seedInnerKey(seed []byte) []byte {
@@ -4850,12 +5036,17 @@ func (c *Core) connectWallets() {
 }
 
 // Notifications loads the latest notifications from the db.
-func (c *Core) Notifications(n int) ([]*db.Notification, error) {
+func (c *Core) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
 	notes, err := c.db.NotificationsN(n)
 	if err != nil {
-		return nil, fmt.Errorf("error getting notifications: %w", err)
+		return nil, nil, fmt.Errorf("error getting notifications: %w", err)
 	}
-	return notes, nil
+	return notes, c.pokes(), nil
+}
+
+// pokes returns a time-ordered copy of the pokes cache.
+func (c *Core) pokes() []*db.Notification {
+	return c.pokesCache.pokes()
 }
 
 func (c *Core) recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) error {
@@ -4898,7 +5089,7 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 		return fmt.Errorf("legacy encryption key deserialization error: %w", err)
 	}
 
-	newCrypter, creds, err := c.generateCredentials(pw, nil)
+	newCrypter, creds, _, err := c.generateCredentials(pw, nil)
 	if err != nil {
 		return err
 	}
@@ -4910,6 +5101,38 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 	subject, details := c.formatDetails(TopicUpgradedToSeed)
 	c.notify(newSecurityNote(TopicUpgradedToSeed, subject, details, db.WarningLevel))
 	return nil
+}
+
+// ActiveOrders returns a map of host to all of their active orders from db if
+// core is not yet logged in or from loaded trades map if core is logged in.
+// Inflight orders are also returned for all dex servers if any.
+func (c *Core) ActiveOrders() (map[string][]*Order, map[string][]*InFlightOrder, error) {
+	c.loginMtx.Lock()
+	loggedIn := c.loggedIn
+	c.loginMtx.Unlock()
+
+	dexInflightOrders := make(map[string][]*InFlightOrder)
+	dexActiveOrders := make(map[string][]*Order)
+	for _, dc := range c.dexConnections() {
+		if loggedIn {
+			orders, inflight := dc.activeOrders()
+			dexActiveOrders[dc.acct.host] = append(dexActiveOrders[dc.acct.host], orders...)
+			dexInflightOrders[dc.acct.host] = append(dexInflightOrders[dc.acct.host], inflight...)
+			continue
+		}
+
+		// Not logged in, load from db orders.
+		ords, err := c.dbOrders(dc.acct.host)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		for _, ord := range ords {
+			dexActiveOrders[dc.acct.host] = append(dexActiveOrders[dc.acct.host], coreOrderFromTrade(ord.Order, ord.MetaData))
+		}
+	}
+
+	return dexActiveOrders, dexInflightOrders, nil
 }
 
 // Active indicates if there are any active orders across all configured
@@ -5231,10 +5454,12 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 				unbip(bondAssetID), targetTier, dc.acct.host, maxBondedAmt)
 			wallet, exists := c.wallet(bondAssetID)
 			if !exists || !wallet.connected() { // connectWallets already run, just fail
-				subject, _ := c.formatDetails(TopicWalletConnectionWarning)
-				c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject,
-					fmt.Sprintf("bond asset wallet %s not configured or connected", unbip(bondAssetID)),
-					db.ErrorLevel, wallet.state()))
+				subject, details := c.formatDetails(TopicBondWalletNotConnected, unbip(bondAssetID))
+				var w *WalletState
+				if exists {
+					w = wallet.state()
+				}
+				c.notify(newWalletConfigNote(TopicBondWalletNotConnected, subject, details, db.ErrorLevel, w))
 			} else if !wallet.unlocked() {
 				err = wallet.Unlock(crypter)
 				if err != nil {
@@ -5516,17 +5741,6 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	c.updateAssetBalance(assetID)
 
 	return coin, nil
-}
-
-// TransactionConfirmations returns the number of confirmations of a
-// transaction.
-func (c *Core) TransactionConfirmations(assetID uint32, txid string) (confirmations uint32, err error) {
-	wallet, err := c.connectedWallet(assetID)
-	if err != nil {
-		return 0, err
-	}
-
-	return wallet.TransactionConfirmations(c.ctx, txid)
 }
 
 // ValidateAddress checks that the provided address is valid.
@@ -5922,6 +6136,18 @@ func (c *Core) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*as
 	}
 
 	return wallet.TxHistory(n, refID, past)
+}
+
+// WalletTransaction returns information about a transaction that the wallet
+// has made or one in which that wallet received funds. This function supports
+// both transaction ID and coin ID.
+func (c *Core) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	return wallet.WalletTransaction(c.ctx, txID)
 }
 
 // Trade is used to place a market or limit order.
@@ -6566,7 +6792,7 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 	if !form.IsLimit && !form.Sell {
 		ui := wallets.quoteWallet.Info().UnitInfo
 		subject, details := c.formatDetails(TopicYoloPlaced,
-			ui.ConventionalString(corder.Qty), ui.Conventional.Unit, tracker.token())
+			ui.ConventionalString(corder.Qty), ui.Conventional.Unit, makeOrderToken(tracker.token()))
 		c.notify(newOrderNoteWithTempID(TopicYoloPlaced, subject, details, db.Poke, corder, tr.tempID))
 	} else {
 		rateString := "market"
@@ -6578,7 +6804,7 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 		if corder.Sell {
 			topic = TopicSellOrderPlaced
 		}
-		subject, details := c.formatDetails(topic, ui.ConventionalString(corder.Qty), ui.Conventional.Unit, rateString, tracker.token())
+		subject, details := c.formatDetails(topic, ui.ConventionalString(corder.Qty), ui.Conventional.Unit, rateString, makeOrderToken(tracker.token()))
 		c.notify(newOrderNoteWithTempID(topic, subject, details, db.Poke, corder, tr.tempID))
 	}
 
@@ -6767,6 +6993,99 @@ func (dc *dexConnection) updateReputation(
 		Score:      score,
 	}
 
+}
+
+// findBondKeyIdx will attempt to find the address index whose public key hashes
+// to a specific hash.
+func (c *Core) findBondKeyIdx(pkhEqualFn func(bondKey *secp256k1.PrivateKey) bool, assetID uint32) (idx uint32, err error) {
+	if !c.bondKeysReady() {
+		return 0, errors.New("bond key is not initialized")
+	}
+	nbki, err := c.db.NextBondKeyIndex(assetID)
+	if err != nil {
+		return 0, fmt.Errorf("unable to get next bond key index: %v", err)
+	}
+	maxIdx := nbki + 10_000
+	for i := uint32(0); i < maxIdx; i++ {
+		bondKey, err := c.bondKeyIdx(assetID, i)
+		if err != nil {
+			return 0, fmt.Errorf("error getting bond key at idx %d: %v", i, err)
+		}
+		equal := pkhEqualFn(bondKey)
+		bondKey.Zero()
+		if equal {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("searched until idx %d but did not find a pubkey match", maxIdx)
+}
+
+// findBond will attempt to find an unknown bond and add it to the live bonds
+// slice and db for refunding later. Returns the bond strength if no error.
+func (c *Core) findBond(dc *dexConnection, bond *msgjson.Bond) (strength, bondAssetID uint32) {
+	symb := dex.BipIDSymbol(bond.AssetID)
+	bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
+	c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
+
+	wallet, err := c.connectedWallet(bond.AssetID)
+	if err != nil {
+		c.log.Errorf("%d -> %s wallet error: %w", bond.AssetID, unbip(bond.AssetID), err)
+		return 0, 0
+	}
+
+	// The server will only tell us about active bonds, so we only need
+	// search in the possible active timeframe before that. Server will tell
+	// us when the expiry is, so can subtract from that. Add a day out of
+	// caution.
+	bondExpiry := int64(dc.config().BondExpiry)
+	activeBondTimeframe := minBondLifetime(c.net, bondExpiry) - time.Second*time.Duration(bondExpiry) + time.Second*(60*60*24) // seconds * minutes * hours
+
+	bondDetails, err := wallet.FindBond(c.ctx, bond.CoinID, time.Unix(int64(bond.Expiry), 0).Add(-activeBondTimeframe))
+	if err != nil {
+		c.log.Errorf("Unable to find active bond reported by the server: %v", err)
+		return 0, 0
+	}
+
+	bondAsset, _ := dc.bondAsset(bond.AssetID)
+	if bondAsset == nil {
+		// Probably not possible since the dex told us about it. Keep
+		// going to refund it later.
+		c.log.Warnf("Dex does not support fidelity bonds in asset %s", symb)
+		strength = bond.Strength
+	} else {
+		strength = uint32(bondDetails.Amount / bondAsset.Amt)
+	}
+
+	idx, err := c.findBondKeyIdx(bondDetails.CheckPrivKey, bond.AssetID)
+	if err != nil {
+		c.log.Warnf("Unable to find bond key index for unknown bond %s, will not be able to refund: %v", bondIDStr, err)
+		idx = math.MaxUint32
+	}
+
+	dbBond := &db.Bond{
+		Version:   bondDetails.Version,
+		AssetID:   bondDetails.AssetID,
+		CoinID:    bondDetails.CoinID,
+		Data:      bondDetails.Data,
+		Amount:    bondDetails.Amount,
+		LockTime:  uint64(bondDetails.LockTime.Unix()),
+		KeyIndex:  idx,
+		Strength:  strength,
+		Confirmed: true,
+	}
+
+	err = c.db.AddBond(dc.acct.host, dbBond)
+	if err != nil {
+		c.log.Errorf("Failed to store bond %s (%s) for dex %v: %w",
+			bondIDStr, unbip(bond.AssetID), dc.acct.host, err)
+		return 0, 0
+	}
+
+	dc.acct.authMtx.Lock()
+	dc.acct.bonds = append(dc.acct.bonds, dbBond)
+	dc.acct.authMtx.Unlock()
+	c.log.Infof("Restored unknown bond %s", bondIDStr)
+	return strength, bondDetails.AssetID
 }
 
 func (dc *dexConnection) maxScore() uint32 {
@@ -7012,14 +7331,33 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		localBondMap[bondKey(dbBond.AssetID, dbBond.CoinID)] = struct{}{}
 	}
 
+	var unknownBondStrength uint32
+	unknownBondAssetID := -1
 	for _, bond := range result.ActiveBonds {
 		key := bondKey(bond.AssetID, bond.CoinID)
 		if _, found := localBondMap[key]; found {
 			continue
 		}
-		symb := dex.BipIDSymbol(bond.AssetID)
-		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
-		c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
+		// Server reported a bond we do not know about.
+		ubs, ubaID := c.findBond(dc, bond)
+		unknownBondStrength += ubs
+		if unknownBondAssetID != -1 && ubs != 0 && uint32(unknownBondAssetID) != ubaID {
+			c.log.Warnf("Found unknown bonds for different assets. %s and %s.",
+				unbip(uint32(unknownBondAssetID)), unbip(ubaID))
+		}
+		if ubs != 0 {
+			unknownBondAssetID = int(ubaID)
+		}
+	}
+
+	// If there were unknown bonds and tier is zero, this may be a restored
+	// client and so requires action by the user to set their target bond
+	// tier. Warn the user of this.
+	if unknownBondStrength > 0 && dc.acct.targetTier == 0 {
+		subject, details := c.formatDetails(TopicUnknownBondTierZero, unbip(uint32(unknownBondAssetID)), dc.acct.host)
+		c.notify(newUnknownBondTierZeroNote(subject, details))
+		c.log.Warnf("Unknown bonds for asset %s found for dex %s while target tier is zero.",
+			unbip(uint32(unknownBondAssetID)), dc.acct.host)
 	}
 
 	// Associate the matches with known trades.
@@ -7056,7 +7394,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			}
 
 			subject, details := c.formatDetails(TopicMissingMatches,
-				len(missing), trade.token(), dc.acct.host)
+				len(missing), makeOrderToken(trade.token()), dc.acct.host)
 			c.notify(newOrderNote(TopicMissingMatches, subject, details, db.ErrorLevel, trade.coreOrderInternal()))
 		}
 
@@ -7066,7 +7404,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			if err != nil {
 				c.log.Errorf("Error negotiating one or more previously unknown matches for order %s reported by %s on connect: %v",
 					oid, dc.acct.host, err)
-				subject, details := c.formatDetails(TopicMatchResolutionError, len(extras), dc.acct.host, trade.token())
+				subject, details := c.formatDetails(TopicMatchResolutionError, len(extras), dc.acct.host, makeOrderToken(trade.token()))
 				c.notify(newOrderNote(TopicMatchResolutionError, subject, details, db.ErrorLevel, trade.coreOrderInternal()))
 			} else {
 				// For taker matches in MakerSwapCast, queue up match status
@@ -7237,6 +7575,14 @@ func (c *Core) initialize() error {
 	accts, err := c.db.Accounts()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve accounts from database: %w", err)
+	}
+
+	pokes, err := c.db.LoadPokes()
+	c.pokesCache = newPokesCache(pokesCapacity)
+	if err != nil {
+		c.log.Errorf("Error loading pokes from db: %v", err)
+	} else {
+		c.pokesCache.init(pokes)
 	}
 
 	// Start connecting to DEX servers.
@@ -10963,4 +11309,13 @@ func (c *Core) DisableFundsMixer(assetID uint32) error {
 		return err
 	}
 	return mw.DisableFundsMixer()
+}
+
+// NetworkFeeRate generates a network tx fee rate for the specified asset.
+// If the wallet implements FeeRater, the wallet will be queried for the
+// fee rate. If the wallet is not a FeeRater, local book feed caches are
+// checked. If no relevant books are synced, connected DCRDEX servers will be
+// queried.
+func (c *Core) NetworkFeeRate(assetID uint32) uint64 {
+	return c.feeSuggestionAny(assetID)
 }

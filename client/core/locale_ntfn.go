@@ -3,1957 +3,1624 @@ package core
 import (
 	"fmt"
 
+	"decred.org/dcrdex/client/intl"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
 
 type translation struct {
-	subject  string
-	template string
-
-	// stale is used to indicate that a translation has changed, is only
-	// partially translated, or just needs review, and should be updated. This
-	// is useful when it's better than falling back to english, but it allows
-	// these translations to be identified programmatically.
-	stale bool
+	subject  intl.Translation
+	template intl.Translation
 }
 
 const originLang = "en-US"
 
 // originLocale is the American English translations.
 var originLocale = map[Topic]*translation{
-	// [host]
 	TopicAccountRegistered: {
-		subject:  "Account registered",
-		template: "You may now trade at %s",
+		subject:  intl.Translation{T: "Account registered"},
+		template: intl.Translation{T: "You may now trade at %s", Notes: "args: [host]"},
 	},
-	// [confs, host]
 	TopicFeePaymentInProgress: {
-		subject:  "Fee payment in progress",
-		template: "Waiting for %d confirmations before trading at %s",
+		subject:  intl.Translation{T: "Fee payment in progress"},
+		template: intl.Translation{T: "Waiting for %d confirmations before trading at %s", Notes: "args: [confs, host]"},
 	},
-	// [confs, required confs]
 	TopicRegUpdate: {
-		subject:  "regupdate",
-		template: "Fee payment confirmations %v/%v",
+		subject:  intl.Translation{T: "regupdate"},
+		template: intl.Translation{T: "Fee payment confirmations %v/%v", Notes: "args: [confs, required confs]"},
 	},
-	// [host, error]
 	TopicFeePaymentError: {
-		subject:  "Fee payment error",
-		template: "Error encountered while paying fees to %s: %v",
+		subject:  intl.Translation{T: "Fee payment error"},
+		template: intl.Translation{T: "Error encountered while paying fees to %s: %v", Notes: "args: [host, error]"},
 	},
-	// [host, error]
 	TopicAccountUnlockError: {
-		subject:  "Account unlock error",
-		template: "error unlocking account for %s: %v",
+		subject:  intl.Translation{T: "Account unlock error"},
+		template: intl.Translation{T: "error unlocking account for %s: %v", Notes: "args: [host, error]"},
 	},
-	// [host]
 	TopicFeeCoinError: {
-		subject:  "Fee coin error",
-		template: "Empty fee coin for %s.",
+		subject:  intl.Translation{T: "Fee coin error"},
+		template: intl.Translation{T: "Empty fee coin for %s.", Notes: "args: [host]"},
 	},
-	// [host]
 	TopicWalletConnectionWarning: {
-		subject:  "Wallet connection warning",
-		template: "Incomplete registration detected for %s, but failed to connect to the Decred wallet",
+		subject:  intl.Translation{T: "Wallet connection warning"},
+		template: intl.Translation{T: "Incomplete registration detected for %s, but failed to connect to the Decred wallet", Notes: "args: [host]"},
 	},
-	// [host, error]
+	TopicBondWalletNotConnected: {
+		subject:  intl.Translation{T: "Bond wallet not connected"},
+		template: intl.Translation{T: "Wallet for selected bond asset %s is not connected"},
+	},
 	TopicWalletUnlockError: {
-		subject:  "Wallet unlock error",
-		template: "Connected to wallet to complete registration at %s, but failed to unlock: %v",
+		subject:  intl.Translation{T: "Wallet unlock error"},
+		template: intl.Translation{T: "Connected to wallet to complete registration at %s, but failed to unlock: %v", Notes: "args: [host, error]"},
 	},
-	// [asset name, error message]
 	TopicWalletCommsWarning: {
-		subject:  "Wallet connection issue",
-		template: "Unable to communicate with %v wallet! Reason: %v",
+		subject:  intl.Translation{T: "Wallet connection issue"},
+		template: intl.Translation{T: "Unable to communicate with %v wallet! Reason: %v", Notes: "args: [asset name, error message]"},
 	},
-	// [asset name]
 	TopicWalletPeersWarning: {
-		subject:  "Wallet network issue",
-		template: "%v wallet has no network peers!",
+		subject:  intl.Translation{T: "Wallet network issue"},
+		template: intl.Translation{T: "%v wallet has no network peers!", Notes: "args: [asset name]"},
 	},
-	// [asset name]
 	TopicWalletPeersRestored: {
-		subject:  "Wallet connectivity restored",
-		template: "%v wallet has reestablished connectivity.",
+		subject:  intl.Translation{T: "Wallet connectivity restored"},
+		template: intl.Translation{T: "%v wallet has reestablished connectivity.", Notes: "args: [asset name]"},
 	},
-	// [ticker, error]
 	TopicSendError: {
-		subject:  "Send error",
-		template: "Error encountered while sending %s: %v",
+		subject:  intl.Translation{T: "Send error"},
+		template: intl.Translation{Version: 1, T: "Error encountered while sending %s: %v", Notes: "args: [ticker, error]"},
 	},
-	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
-		subject:  "Send successful",
-		template: "Sending %s %s to %s has completed successfully. Tx ID = %s",
+		subject:  intl.Translation{T: "Send successful"},
+		template: intl.Translation{Version: 1, T: "Sending %s %s to %s has completed successfully. Tx ID = %s", Notes: "args: [value string, ticker, destination address, coin ID]"},
 	},
-	// [value string, ticker, destination address, coin ID]
 	TopicShieldedSendSuccess: {
-		subject:  "Shielded send successful",
-		template: "Sent %s %s to %s: %s",
+		subject:  intl.Translation{T: "Shielded send successful"},
+		template: intl.Translation{T: "Sent %s %s to %s: %s", Notes: "args: [value string, ticker, destination address, coin ID]"},
 	},
-	//[order ID, error]
 	TopicAsyncOrderFailure: {
-		subject:  "In-Flight Order Error",
-		template: "In-Flight order with ID %v failed: %v",
+		subject:  intl.Translation{T: "In-Flight Order Error"},
+		template: intl.Translation{T: "In-Flight order with ID %v failed: %v", Notes: "args: order ID, error]"},
 	},
-	// [host]
 	TopicOrderQuantityTooHigh: {
-		subject:  "Trade limit exceeded",
-		template: "Order quantity exceeds current trade limit on %s",
+		subject:  intl.Translation{T: "Trade limit exceeded"},
+		template: intl.Translation{T: "Order quantity exceeds current trade limit on %s", Notes: "args: [host]"},
 	},
-	// [error]
 	TopicOrderLoadFailure: {
-		subject:  "Order load failure",
-		template: "Some orders failed to load from the database: %v",
+		subject:  intl.Translation{T: "Order load failure"},
+		template: intl.Translation{T: "Some orders failed to load from the database: %v", Notes: "args: [error]"},
 	},
-	// [qty, ticker, token]
 	TopicYoloPlaced: {
-		subject:  "Market order placed",
-		template: "selling %s %s at market rate (%s)",
+		subject:  intl.Translation{T: "Market order placed"},
+		template: intl.Translation{T: "selling %s %s at market rate (%s)", Notes: "args: [qty, ticker, token]"},
 	},
-	// [qty, ticker, rate string, token]
 	TopicBuyOrderPlaced: {
-		subject:  "Order placed",
-		template: "Buying %s %s, rate = %s (%s)",
+		subject:  intl.Translation{T: "Order placed"},
+		template: intl.Translation{Version: 1, T: "Buying %s %s, rate = %s (%s)", Notes: "args: [qty, ticker, rate string, token]"},
 	},
-	// [qty, ticker, rate string, token]
 	TopicSellOrderPlaced: {
-		subject:  "Order placed",
-		template: "Selling %s %s, rate = %s (%s)",
+		subject:  intl.Translation{T: "Order placed"},
+		template: intl.Translation{Version: 1, T: "Selling %s %s, rate = %s (%s)", Notes: "args: [qty, ticker, rate string, token]"},
 	},
-	// [missing count, token, host]
 	TopicMissingMatches: {
-		subject:  "Missing matches",
-		template: "%d matches for order %s were not reported by %q and are considered revoked",
+		subject:  intl.Translation{T: "Missing matches"},
+		template: intl.Translation{T: "%d matches for order %s were not reported by %q and are considered revoked", Notes: "args: [missing count, token, host]"},
 	},
-	// [token, error]
 	TopicWalletMissing: {
-		subject:  "Wallet missing",
-		template: "Wallet retrieval error for active order %s: %v",
+		subject:  intl.Translation{T: "Wallet missing"},
+		template: intl.Translation{T: "Wallet retrieval error for active order %s: %v", Notes: "args: [token, error]"},
 	},
-	// [side, token, match status]
 	TopicMatchErrorCoin: {
-		subject:  "Match coin error",
-		template: "Match %s for order %s is in state %s, but has no maker swap coin.",
+		subject:  intl.Translation{T: "Match coin error"},
+		template: intl.Translation{T: "Match %s for order %s is in state %s, but has no maker swap coin.", Notes: "args: [side, token, match status]"},
 	},
-	// [side, token, match status]
 	TopicMatchErrorContract: {
-		subject:  "Match contract error",
-		template: "Match %s for order %s is in state %s, but has no maker swap contract.",
+		subject:  intl.Translation{T: "Match contract error"},
+		template: intl.Translation{T: "Match %s for order %s is in state %s, but has no maker swap contract.", Notes: "args: [side, token, match status]"},
 	},
-	// [ticker, contract, token, error]
 	TopicMatchRecoveryError: {
-		subject:  "Match recovery error",
-		template: "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
+		subject:  intl.Translation{T: "Match recovery error"},
+		template: intl.Translation{T: "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v", Notes: "args: [ticker, contract, token, error]"},
 	},
-	// [token]
 	TopicOrderCoinError: {
-		subject:  "Order coin error",
-		template: "No funding coins recorded for active order %s",
+		subject:  intl.Translation{T: "Order coin error"},
+		template: intl.Translation{T: "No funding coins recorded for active order %s", Notes: "args: [token]"},
 	},
-	// [token, ticker, error]
 	TopicOrderCoinFetchError: {
-		subject:  "Order coin fetch error",
-		template: "Source coins retrieval error for order %s (%s): %v",
+		subject:  intl.Translation{T: "Order coin fetch error"},
+		template: intl.Translation{T: "Source coins retrieval error for order %s (%s): %v", Notes: "args: [token, ticker, error]"},
 	},
-	// [token]
 	TopicMissedCancel: {
-		subject:  "Missed cancel",
-		template: "Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.",
+		subject:  intl.Translation{T: "Missed cancel"},
+		template: intl.Translation{T: "Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.", Notes: "args: [token]"},
 	},
-	// [base ticker, quote ticker, host, token]
 	TopicBuyOrderCanceled: {
-		subject:  "Order canceled",
-		template: "Buy order on %s-%s at %s has been canceled (%s)",
+		subject:  intl.Translation{T: "Order canceled"},
+		template: intl.Translation{Version: 1, T: "Buy order on %s-%s at %s has been canceled (%s)", Notes: "args: [base ticker, quote ticker, host, token]"},
 	},
 	TopicSellOrderCanceled: {
-		subject:  "Order canceled",
-		template: "Sell order on %s-%s at %s has been canceled (%s)",
+		subject:  intl.Translation{T: "Order canceled"},
+		template: intl.Translation{Version: 1, T: "Sell order on %s-%s at %s has been canceled (%s)"},
 	},
-	// [base ticker, quote ticker, fill percent, token]
 	TopicBuyMatchesMade: {
-		subject:  "Matches made",
-		template: "Buy order on %s-%s %.1f%% filled (%s)",
+		subject:  intl.Translation{T: "Matches made"},
+		template: intl.Translation{Version: 1, T: "Buy order on %s-%s %.1f%% filled (%s)", Notes: "args: [base ticker, quote ticker, fill percent, token]"},
 	},
-	// [base ticker, quote ticker, fill percent, token]
 	TopicSellMatchesMade: {
-		subject:  "Matches made",
-		template: "Sell order on %s-%s %.1f%% filled (%s)",
+		subject:  intl.Translation{T: "Matches made"},
+		template: intl.Translation{Version: 1, T: "Sell order on %s-%s %.1f%% filled (%s)", Notes: "args: [base ticker, quote ticker, fill percent, token]"},
 	},
-	// [qty, ticker, token]
 	TopicSwapSendError: {
-		subject:  "Swap send error",
-		template: "Error encountered sending a swap output(s) worth %s %s on order %s",
+		subject:  intl.Translation{T: "Swap send error"},
+		template: intl.Translation{T: "Error encountered sending a swap output(s) worth %s %s on order %s", Notes: "args: [qty, ticker, token]"},
 	},
-	// [match, error]
 	TopicInitError: {
-		subject:  "Swap reporting error",
-		template: "Error notifying DEX of swap for match %s: %v",
+		subject:  intl.Translation{T: "Swap reporting error"},
+		template: intl.Translation{T: "Error notifying DEX of swap for match %s: %v", Notes: "args: [match, error]"},
 	},
-	// [match, error]
 	TopicReportRedeemError: {
-		subject:  "Redeem reporting error",
-		template: "Error notifying DEX of redemption for match %s: %v",
+		subject:  intl.Translation{T: "Redeem reporting error"},
+		template: intl.Translation{T: "Error notifying DEX of redemption for match %s: %v", Notes: "args: [match, error]"},
 	},
-	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "Swaps initiated",
-		template: "Sent swaps worth %s %s on order %s",
+		subject:  intl.Translation{T: "Swaps initiated"},
+		template: intl.Translation{T: "Sent swaps worth %s %s on order %s", Notes: "args: [qty, ticker, token]"},
 	},
-	// [qty, ticker, token]
 	TopicRedemptionError: {
-		subject:  "Redemption error",
-		template: "Error encountered sending redemptions worth %s %s on order %s",
+		subject:  intl.Translation{T: "Redemption error"},
+		template: intl.Translation{T: "Error encountered sending redemptions worth %s %s on order %s", Notes: "args: [qty, ticker, token]"},
 	},
-	// [qty, ticker, token]
 	TopicMatchComplete: {
-		subject:  "Match complete",
-		template: "Redeemed %s %s on order %s",
+		subject:  intl.Translation{T: "Match complete"},
+		template: intl.Translation{T: "Redeemed %s %s on order %s", Notes: "args: [qty, ticker, token]"},
 	},
-	// [qty, ticker, token]
 	TopicRefundFailure: {
-		subject:  "Refund Failure",
-		template: "Refunded %s %s on order %s, with some errors",
+		subject:  intl.Translation{T: "Refund Failure"},
+		template: intl.Translation{T: "Refunded %s %s on order %s, with some errors", Notes: "args: [qty, ticker, token]"},
 	},
-	// [qty, ticker, token]
 	TopicMatchesRefunded: {
-		subject:  "Matches Refunded",
-		template: "Refunded %s %s on order %s",
+		subject:  intl.Translation{T: "Matches Refunded"},
+		template: intl.Translation{T: "Refunded %s %s on order %s", Notes: "args: [qty, ticker, token]"},
 	},
-	// [match ID token]
 	TopicMatchRevoked: {
-		subject:  "Match revoked",
-		template: "Match %s has been revoked",
+		subject:  intl.Translation{T: "Match revoked"},
+		template: intl.Translation{T: "Match %s has been revoked", Notes: "args: [match ID token]"},
 	},
-	// [token, market name, host]
 	TopicOrderRevoked: {
-		subject:  "Order revoked",
-		template: "Order %s on market %s at %s has been revoked by the server",
+		subject:  intl.Translation{T: "Order revoked"},
+		template: intl.Translation{T: "Order %s on market %s at %s has been revoked by the server", Notes: "args: [token, market name, host]"},
 	},
-	// [token, market name, host]
 	TopicOrderAutoRevoked: {
-		subject:  "Order auto-revoked",
-		template: "Order %s on market %s at %s revoked due to market suspension",
+		subject:  intl.Translation{T: "Order auto-revoked"},
+		template: intl.Translation{T: "Order %s on market %s at %s revoked due to market suspension", Notes: "args: [token, market name, host]"},
 	},
-	// [ticker, coin ID, match]
 	TopicMatchRecovered: {
-		subject:  "Match recovered",
-		template: "Found maker's redemption (%s: %v) and validated secret for match %s",
+		subject:  intl.Translation{T: "Match recovered"},
+		template: intl.Translation{T: "Found maker's redemption (%s: %v) and validated secret for match %s", Notes: "args: [ticker, coin ID, match]"},
 	},
-	// [token]
 	TopicCancellingOrder: {
-		subject:  "Cancelling order",
-		template: "A cancel order has been submitted for order %s",
+		subject:  intl.Translation{T: "Cancelling order"},
+		template: intl.Translation{T: "A cancel order has been submitted for order %s", Notes: "args: [token]"},
 	},
-	// [token, old status, new status]
 	TopicOrderStatusUpdate: {
-		subject:  "Order status update",
-		template: "Status of order %v revised from %v to %v",
+		subject:  intl.Translation{T: "Order status update"},
+		template: intl.Translation{T: "Status of order %v revised from %v to %v", Notes: "args: [token, old status, new status]"},
 	},
-	// [count, host, token]
 	TopicMatchResolutionError: {
-		subject:  "Match resolution error",
-		template: "%d matches reported by %s were not found for %s.",
+		subject:  intl.Translation{T: "Match resolution error"},
+		template: intl.Translation{T: "%d matches reported by %s were not found for %s.", Notes: "args: [count, host, token]"},
 	},
-	// [token]
 	TopicFailedCancel: {
-		subject:  "Failed cancel",
-		template: "Cancel order for order %s failed and is now deleted.",
-		// NOTE: "failed" means we missed the preimage request and either got
-		// the revoke_order message or it stayed in epoch status for too long.
+		subject: intl.Translation{T: "Failed cancel"},
+		template: intl.Translation{
+			Version: 1,
+			T:       "Cancel order for order %s failed and is now deleted.",
+			Notes: `args: [token], "failed" means we missed the preimage request ` +
+				`and either got the revoke_order message or it stayed in epoch status for too long.`,
+		},
 	},
-	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
-		subject:  "Audit trouble",
-		template: "Still searching for counterparty's contract coin %v (%s) for match %s. Are your internet and wallet connections good?",
+		subject:  intl.Translation{T: "Audit trouble"},
+		template: intl.Translation{T: "Still searching for counterparty's contract coin %v (%s) for match %s. Are your internet and wallet connections good?", Notes: "args: [coin ID, ticker, match]"},
 	},
-	// [host, error]
 	TopicDexAuthError: {
-		subject:  "DEX auth error",
-		template: "%s: %v",
+		subject:  intl.Translation{T: "DEX auth error"},
+		template: intl.Translation{T: "%s: %v", Notes: "args: [host, error]"},
 	},
-	// [count, host]
 	TopicUnknownOrders: {
-		subject:  "DEX reported unknown orders",
-		template: "%d active orders reported by DEX %s were not found.",
+		subject:  intl.Translation{T: "DEX reported unknown orders"},
+		template: intl.Translation{T: "%d active orders reported by DEX %s were not found.", Notes: "args: [count, host]"},
 	},
-	// [count]
 	TopicOrdersReconciled: {
-		subject:  "Orders reconciled with DEX",
-		template: "Statuses updated for %d orders.",
+		subject:  intl.Translation{T: "Orders reconciled with DEX"},
+		template: intl.Translation{T: "Statuses updated for %d orders.", Notes: "args: [count]"},
 	},
-	// [ticker, address]
 	TopicWalletConfigurationUpdated: {
-		subject:  "Wallet configuration updated",
-		template: "Configuration for %s wallet has been updated. Deposit address = %s",
+		subject:  intl.Translation{T: "Wallet configuration updated"},
+		template: intl.Translation{T: "Configuration for %s wallet has been updated. Deposit address = %s", Notes: "args: [ticker, address]"},
 	},
-	//  [ticker]
 	TopicWalletPasswordUpdated: {
-		subject:  "Wallet Password Updated",
-		template: "Password for %s wallet has been updated.",
+		subject:  intl.Translation{T: "Wallet Password Updated"},
+		template: intl.Translation{T: "Password for %s wallet has been updated.", Notes: "args:  [ticker]"},
 	},
-	// [market name, host, time]
 	TopicMarketSuspendScheduled: {
-		subject:  "Market suspend scheduled",
-		template: "Market %s at %s is now scheduled for suspension at %v",
+		subject:  intl.Translation{T: "Market suspend scheduled"},
+		template: intl.Translation{T: "Market %s at %s is now scheduled for suspension at %v", Notes: "args: [market name, host, time]"},
 	},
-	// [market name, host]
 	TopicMarketSuspended: {
-		subject:  "Market suspended",
-		template: "Trading for market %s at %s is now suspended.",
+		subject:  intl.Translation{T: "Market suspended"},
+		template: intl.Translation{T: "Trading for market %s at %s is now suspended.", Notes: "args: [market name, host]"},
 	},
-	// [market name, host]
 	TopicMarketSuspendedWithPurge: {
-		subject:  "Market suspended, orders purged",
-		template: "Trading for market %s at %s is now suspended. All booked orders are now PURGED.",
+		subject:  intl.Translation{T: "Market suspended, orders purged"},
+		template: intl.Translation{T: "Trading for market %s at %s is now suspended. All booked orders are now PURGED.", Notes: "args: [market name, host]"},
 	},
-	// [market name, host, time]
 	TopicMarketResumeScheduled: {
-		subject:  "Market resume scheduled",
-		template: "Market %s at %s is now scheduled for resumption at %v",
+		subject:  intl.Translation{T: "Market resume scheduled"},
+		template: intl.Translation{T: "Market %s at %s is now scheduled for resumption at %v", Notes: "args: [market name, host, time]"},
 	},
-	// [market name, host, epoch]
 	TopicMarketResumed: {
-		subject:  "Market resumed",
-		template: "Market %s at %s has resumed trading at epoch %d",
+		subject:  intl.Translation{T: "Market resumed"},
+		template: intl.Translation{T: "Market %s at %s has resumed trading at epoch %d", Notes: "args: [market name, host, epoch]"},
 	},
-	// [host]
 	TopicUpgradeNeeded: {
-		subject:  "Upgrade needed",
-		template: "You may need to update your client to trade at %s.",
+		subject:  intl.Translation{T: "Upgrade needed"},
+		template: intl.Translation{T: "You may need to update your client to trade at %s.", Notes: "args: [host]"},
 	},
-	// [host]
 	TopicDEXConnected: {
-		subject:  "Server connected",
-		template: "%s is connected",
+		subject:  intl.Translation{T: "Server connected"},
+		template: intl.Translation{T: "%s is connected", Notes: "args: [host]"},
 	},
-	// [host]
 	TopicDEXDisconnected: {
-		subject:  "Server disconnect",
-		template: "%s is disconnected",
+		subject:  intl.Translation{T: "Server disconnect"},
+		template: intl.Translation{T: "%s is disconnected", Notes: "args: [host]"},
 	},
-	// [host]
 	TopicDexConnectivity: {
-		subject:  "Internet Connectivity",
-		template: "Your internet connection to %s is unstable, check your internet connection",
+		subject:  intl.Translation{T: "Internet Connectivity"},
+		template: intl.Translation{T: "Your internet connection to %s is unstable, check your internet connection", Notes: "args: [host]"},
 	},
-	// [host, rule, time, details]
 	TopicPenalized: {
-		subject:  "Server has penalized you",
-		template: "Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n",
+		subject:  intl.Translation{T: "Server has penalized you"},
+		template: intl.Translation{T: "Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n", Notes: "args: [host, rule, time, details]"},
 	},
 	TopicSeedNeedsSaving: {
-		subject:  "Don't forget to back up your application seed",
-		template: "A new application seed has been created. Make a back up now in the settings view.",
+		subject:  intl.Translation{T: "Don't forget to back up your application seed"},
+		template: intl.Translation{T: "A new application seed has been created. Make a back up now in the settings view."},
 	},
 	TopicUpgradedToSeed: {
-		subject:  "Back up your new application seed",
-		template: "The client has been upgraded to use an application seed. Back up the seed now in the settings view.",
+		subject:  intl.Translation{T: "Back up your new application seed"},
+		template: intl.Translation{T: "The client has been upgraded to use an application seed. Back up the seed now in the settings view."},
 	},
-	// [host, msg]
 	TopicDEXNotification: {
-		subject:  "Message from DEX",
-		template: "%s: %s",
+		subject:  intl.Translation{T: "Message from DEX"},
+		template: intl.Translation{T: "%s: %s", Notes: "args: [host, msg]"},
 	},
-	// [parentSymbol, tokenSymbol]
 	TopicQueuedCreationFailed: {
-		subject:  "Failed to create token wallet",
-		template: "After creating %s wallet, failed to create the %s wallet",
+		subject:  intl.Translation{T: "Failed to create token wallet"},
+		template: intl.Translation{T: "After creating %s wallet, failed to create the %s wallet", Notes: "args: [parentSymbol, tokenSymbol]"},
 	},
 	TopicRedemptionResubmitted: {
-		subject:  "Redemption Resubmitted",
-		template: "Your redemption for match %s in order %s was resubmitted.",
+		subject:  intl.Translation{T: "Redemption Resubmitted"},
+		template: intl.Translation{T: "Your redemption for match %s in order %s was resubmitted."},
 	},
 	TopicSwapRefunded: {
-		subject:  "Swap Refunded",
-		template: "Match %s in order %s was refunded by the counterparty.",
+		subject:  intl.Translation{T: "Swap Refunded"},
+		template: intl.Translation{T: "Match %s in order %s was refunded by the counterparty."},
 	},
 	TopicRedemptionConfirmed: {
-		subject:  "Redemption Confirmed",
-		template: "Your redemption for match %s in order %s was confirmed",
+		subject:  intl.Translation{T: "Redemption Confirmed"},
+		template: intl.Translation{T: "Your redemption for match %s in order %s was confirmed"},
 	},
 	TopicWalletTypeDeprecated: {
-		subject:  "Wallet Disabled",
-		template: "Your %s wallet type is no longer supported. Create a new wallet.",
+		subject:  intl.Translation{T: "Wallet Disabled"},
+		template: intl.Translation{T: "Your %s wallet type is no longer supported. Create a new wallet."},
 	},
 	TopicOrderResumeFailure: {
-		subject:  "Resume order failure",
-		template: "Failed to resume processing of trade: %v",
+		subject:  intl.Translation{T: "Resume order failure"},
+		template: intl.Translation{T: "Failed to resume processing of trade: %v"},
+	},
+	TopicBondConfirming: {
+		subject:  intl.Translation{T: "Confirming bond"},
+		template: intl.Translation{T: "Waiting for %d confirmations to post bond %v (%s) to %s", Notes: "args: [reqConfs, bondCoinStr, assetID, acct.host]"},
+	},
+	TopicBondConfirmed: {
+		subject:  intl.Translation{T: "Bond confirmed"},
+		template: intl.Translation{T: "New tier = %d (target = %d).", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondExpired: {
+		subject:  intl.Translation{T: "Bond expired"},
+		template: intl.Translation{T: "New tier = %d (target = %d).", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondRefunded: {
+		subject:  intl.Translation{T: "Bond refunded"},
+		template: intl.Translation{T: "Bond %v for %v refunded in %v, reclaiming %v of %v after tx fees", Notes: "args: [bondIDStr, acct.host, refundCoinStr, refundVal, Amount]"},
+	},
+	TopicBondPostError: {
+		subject:  intl.Translation{T: "Bond post error"},
+		template: intl.Translation{T: "postbond request error (will retry): %v (%T)", Notes: "args: [err, err]"},
+	},
+	TopicBondPostErrorConfirm: {
+		subject:  intl.Translation{T: "Bond post error"},
+		template: intl.Translation{T: "Error encountered while waiting for bond confirms for %s: %v"},
+	},
+	TopicDexAuthErrorBond: {
+		subject:  intl.Translation{T: "Authentication error"},
+		template: intl.Translation{T: "Bond confirmed, but failed to authenticate connection: %v", Notes: "args: [err]"},
+	},
+	TopicAccountRegTier: {
+		subject:  intl.Translation{T: "Account registered"},
+		template: intl.Translation{T: "New tier = %d", Notes: "args: [effectiveTier]"},
+	},
+	TopicUnknownBondTierZero: {
+		subject: intl.Translation{T: "Unknown bond found"},
+		template: intl.Translation{
+			T: "Unknown %s bonds were found and added to active bonds " +
+				"but your target tier is zero for the dex at %s. Set your " +
+				"target tier in Settings to stay bonded with auto renewals.",
+			Notes: "args: [bond asset, dex host]",
+		},
 	},
 }
 
 var ptBR = map[Topic]*translation{
-	// [host]
 	TopicAccountRegistered: {
-		subject:  "Conta Registrada",
-		template: "Você agora pode trocar em %s",
+		subject:  intl.Translation{T: "Conta Registrada"},
+		template: intl.Translation{T: "Você agora pode trocar em %s"},
 	},
-	// [confs, host]
 	TopicFeePaymentInProgress: {
-		subject:  "Pagamento da Taxa em andamento",
-		template: "Esperando por %d confirmações antes de trocar em %s",
+		subject:  intl.Translation{T: "Pagamento da Taxa em andamento"},
+		template: intl.Translation{T: "Esperando por %d confirmações antes de trocar em %s"},
 	},
-	// [confs, required confs]
 	TopicRegUpdate: {
-		subject:  "Atualização de registro",
-		template: "Confirmações da taxa %v/%v",
+		subject:  intl.Translation{T: "Atualização de registro"},
+		template: intl.Translation{T: "Confirmações da taxa %v/%v"},
 	},
-	// [host, error]
 	TopicFeePaymentError: {
-		subject:  "Erro no Pagamento da Taxa",
-		template: "Erro enquanto pagando taxa para %s: %v",
+		subject:  intl.Translation{T: "Erro no Pagamento da Taxa"},
+		template: intl.Translation{T: "Erro enquanto pagando taxa para %s: %v"},
 	},
-	// [host, error]
 	TopicAccountUnlockError: {
-		subject:  "Erro ao Destrancar carteira",
-		template: "erro destrancando conta %s: %v",
+		subject:  intl.Translation{T: "Erro ao Destrancar carteira"},
+		template: intl.Translation{T: "erro destrancando conta %s: %v"},
 	},
-	// [host]
 	TopicFeeCoinError: {
-		subject:  "Erro na Taxa",
-		template: "Taxa vazia para %s.",
+		subject:  intl.Translation{T: "Erro na Taxa"},
+		template: intl.Translation{T: "Taxa vazia para %s."},
 	},
-	// [host]
 	TopicWalletConnectionWarning: {
-		subject:  "Aviso de Conexão com a Carteira",
-		template: "Registro incompleto detectado para %s, mas falhou ao conectar com carteira decred",
+		subject:  intl.Translation{T: "Aviso de Conexão com a Carteira"},
+		template: intl.Translation{T: "Registro incompleto detectado para %s, mas falhou ao conectar com carteira decred"},
 	},
-	// [host, error]
 	TopicWalletUnlockError: {
-		subject:  "Erro ao Destravar Carteira",
-		template: "Conectado com carteira para completar o registro em %s, mas falha ao destrancar: %v",
+		subject:  intl.Translation{T: "Erro ao Destravar Carteira"},
+		template: intl.Translation{T: "Conectado com carteira para completar o registro em %s, mas falha ao destrancar: %v"},
 	},
-	// [ticker, error]
 	TopicSendError: {
-		subject:  "Erro Retirada",
-		template: "Erro encontrado durante retirada de %s: %v",
-		stale:    true,
+		subject:  intl.Translation{T: "Erro Retirada"},
+		template: intl.Translation{T: "Erro encontrado durante retirada de %s: %v"},
 	},
-	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
-		template: "Retirada de %s %s (%s) foi completada com sucesso. ID da moeda = %s",
-		subject:  "Retirada Enviada",
-		stale:    true,
+		template: intl.Translation{T: "Retirada de %s %s (%s) foi completada com sucesso. ID da moeda = %s"},
+		subject:  intl.Translation{T: "Retirada Enviada"},
 	},
-	// [error]
 	TopicOrderLoadFailure: {
-		template: "Alguns pedidos falharam ao carregar da base de dados: %v",
-		subject:  "Carregamendo de Pedidos Falhou",
+		template: intl.Translation{T: "Alguns pedidos falharam ao carregar da base de dados: %v"},
+		subject:  intl.Translation{T: "Carregamendo de Pedidos Falhou"},
 	},
-	// [qty, ticker, token]
 	TopicYoloPlaced: {
-		template: "vendendo %s %s a taxa de mercado (%s)",
-		subject:  "Ordem de Mercado Colocada",
+		template: intl.Translation{T: "vendendo %s %s a taxa de mercado (%s)"},
+		subject:  intl.Translation{T: "Ordem de Mercado Colocada"},
 	},
-	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicBuyOrderPlaced: {
-		subject:  "Ordem Colocada",
-		template: "Buying %s %s, valor = %s (%s)",
+		subject:  intl.Translation{T: "Ordem Colocada"},
+		template: intl.Translation{T: "Buying %s %s, valor = %s (%s)"},
 	},
-	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicSellOrderPlaced: {
-		subject:  "Ordem Colocada",
-		template: "Selling %s %s, valor = %s (%s)",
+		subject:  intl.Translation{T: "Ordem Colocada"},
+		template: intl.Translation{T: "Selling %s %s, valor = %s (%s)"},
 	},
-	// [missing count, token, host]
 	TopicMissingMatches: {
-		template: "%d combinações para pedidos %s não foram reportados por %q e foram considerados revocados",
-		subject:  "Pedidos Faltando Combinações",
+		template: intl.Translation{T: "%d combinações para pedidos %s não foram reportados por %q e foram considerados revocados"},
+		subject:  intl.Translation{T: "Pedidos Faltando Combinações"},
 	},
-	// [token, error]
 	TopicWalletMissing: {
-		template: "Erro ao recuperar pedidos ativos por carteira %s: %v",
-		subject:  "Carteira Faltando",
+		template: intl.Translation{T: "Erro ao recuperar pedidos ativos por carteira %s: %v"},
+		subject:  intl.Translation{T: "Carteira Faltando"},
 	},
-	// [side, token, match status]
 	TopicMatchErrorCoin: {
-		subject:  "Erro combinação de Moedas",
-		template: "Combinação %s para pedido %s está no estado %s, mas não há um executador para trocar moedas.",
+		subject:  intl.Translation{T: "Erro combinação de Moedas"},
+		template: intl.Translation{T: "Combinação %s para pedido %s está no estado %s, mas não há um executador para trocar moedas."},
 	},
-	// [side, token, match status]
 	TopicMatchErrorContract: {
-		template: "Combinação %s para pedido %s está no estado %s, mas não há um executador para trocar moedas.",
-		subject:  "Erro na Combinação de Contrato",
+		template: intl.Translation{T: "Combinação %s para pedido %s está no estado %s, mas não há um executador para trocar moedas."},
+		subject:  intl.Translation{T: "Erro na Combinação de Contrato"},
 	},
-	// [ticker, contract, token, error]
 	TopicMatchRecoveryError: {
-		template: "Erro auditando contrato de troca da contraparte (%s %v) durante troca recuperado no pedido %s: %v",
-		subject:  "Erro Recuperando Combinações",
+		template: intl.Translation{T: "Erro auditando contrato de troca da contraparte (%s %v) durante troca recuperado no pedido %s: %v"},
+		subject:  intl.Translation{T: "Erro Recuperando Combinações"},
 	},
-	// [token]
 	TopicOrderCoinError: {
-		template: "Não há Moedas de financiamento registradas para pedidos ativos %s",
-		subject:  "Erro no Pedido da Moeda",
+		template: intl.Translation{T: "Não há Moedas de financiamento registradas para pedidos ativos %s"},
+		subject:  intl.Translation{T: "Erro no Pedido da Moeda"},
 	},
-	// [token, ticker, error]
 	TopicOrderCoinFetchError: {
-		template: "Erro ao recuperar moedas de origem para pedido %s (%s): %v",
-		subject:  "Erro na Recuperação do Pedido de Moedas",
+		template: intl.Translation{T: "Erro ao recuperar moedas de origem para pedido %s (%s): %v"},
+		subject:  intl.Translation{T: "Erro na Recuperação do Pedido de Moedas"},
 	},
-	// [token]
 	TopicMissedCancel: {
-		template: "Pedido de cancelamento não combinou para pedido %s. Isto pode acontecer se o pedido de cancelamento foi enviado no mesmo epoque do que a troca ou se o pedido foi completamente executado antes da ordem de cancelamento ser executada.",
-		subject:  "Cancelamento Perdido",
+		template: intl.Translation{T: "Pedido de cancelamento não combinou para pedido %s. Isto pode acontecer se o pedido de cancelamento foi enviado no mesmo epoque do que a troca ou se o pedido foi completamente executado antes da ordem de cancelamento ser executada."},
+		subject:  intl.Translation{T: "Cancelamento Perdido"},
 	},
-	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicSellOrderCanceled: {
-		template: "Sell pedido sobre %s-%s em %s foi cancelado (%s)",
-		subject:  "Cancelamento de Pedido",
+		template: intl.Translation{T: "Sell pedido sobre %s-%s em %s foi cancelado (%s)"},
+		subject:  intl.Translation{T: "Cancelamento de Pedido"},
 	},
-	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicBuyOrderCanceled: {
-		template: "Buy pedido sobre %s-%s em %s foi cancelado (%s)",
-		subject:  "Cancelamento de Pedido",
+		template: intl.Translation{T: "Buy pedido sobre %s-%s em %s foi cancelado (%s)"},
+		subject:  intl.Translation{T: "Cancelamento de Pedido"},
 	},
-	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicSellMatchesMade: {
-		template: "Sell pedido sobre %s-%s %.1f%% preenchido (%s)",
-		subject:  "Combinações Feitas",
+		template: intl.Translation{T: "Sell pedido sobre %s-%s %.1f%% preenchido (%s)"},
+		subject:  intl.Translation{T: "Combinações Feitas"},
 	},
-	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicBuyMatchesMade: {
-		template: "Buy pedido sobre %s-%s %.1f%% preenchido (%s)",
-		subject:  "Combinações Feitas",
+		template: intl.Translation{T: "Buy pedido sobre %s-%s %.1f%% preenchido (%s)"},
+		subject:  intl.Translation{T: "Combinações Feitas"},
 	},
-	// [qty, ticker, token]
 	TopicSwapSendError: {
-		template: "Erro encontrado ao enviar a troca com output(s) no valor de %s %s no pedido %s",
-		subject:  "Erro ao Enviar Troca",
+		template: intl.Translation{T: "Erro encontrado ao enviar a troca com output(s) no valor de %s %s no pedido %s"},
+		subject:  intl.Translation{T: "Erro ao Enviar Troca"},
 	},
-	// [match, error]
 	TopicInitError: {
-		template: "Erro notificando DEX da troca %s por combinação: %v",
-		subject:  "Erro na Troca",
+		template: intl.Translation{T: "Erro notificando DEX da troca %s por combinação: %v"},
+		subject:  intl.Translation{T: "Erro na Troca"},
 	},
-	// [match, error]
 	TopicReportRedeemError: {
-		template: "Erro notificando DEX da redenção %s por combinação: %v",
-		subject:  "Reportando Erro na redenção",
+		template: intl.Translation{T: "Erro notificando DEX da redenção %s por combinação: %v"},
+		subject:  intl.Translation{T: "Reportando Erro na redenção"},
 	},
-	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		template: "Enviar trocas no valor de %s %s no pedido %s",
-		subject:  "Trocas Iniciadas",
+		template: intl.Translation{T: "Enviar trocas no valor de %s %s no pedido %s"},
+		subject:  intl.Translation{T: "Trocas Iniciadas"},
 	},
-	// [qty, ticker, token]
 	TopicRedemptionError: {
-		template: "Erro encontrado enviado redenção no valor de %s %s no pedido %s",
-		subject:  "Erro na Redenção",
+		template: intl.Translation{T: "Erro encontrado enviado redenção no valor de %s %s no pedido %s"},
+		subject:  intl.Translation{T: "Erro na Redenção"},
 	},
-	// [qty, ticker, token]
 	TopicMatchComplete: {
-		template: "Resgatado %s %s no pedido %s",
-		subject:  "Combinação Completa",
+		template: intl.Translation{T: "Resgatado %s %s no pedido %s"},
+		subject:  intl.Translation{T: "Combinação Completa"},
 	},
-	// [qty, ticker, token]
 	TopicRefundFailure: {
-		template: "Devolvidos %s %s no pedido %s, com algum erro",
-		subject:  "Erro no Reembolso",
+		template: intl.Translation{T: "Devolvidos %s %s no pedido %s, com algum erro"},
+		subject:  intl.Translation{T: "Erro no Reembolso"},
 	},
-	// [qty, ticker, token]
 	TopicMatchesRefunded: {
-		template: "Devolvidos %s %s no pedido %s",
-		subject:  "Reembolso Sucedido",
+		template: intl.Translation{T: "Devolvidos %s %s no pedido %s"},
+		subject:  intl.Translation{T: "Reembolso Sucedido"},
 	},
-	// [match ID token]
 	TopicMatchRevoked: {
-		template: "Combinação %s foi revocada",
-		subject:  "Combinação Revocada",
+		template: intl.Translation{T: "Combinação %s foi revocada"},
+		subject:  intl.Translation{T: "Combinação Revocada"},
 	},
-	// [token, market name, host]
 	TopicOrderRevoked: {
-		template: "Pedido %s no mercado %s em %s foi revocado pelo servidor",
-		subject:  "Pedido Revocado",
+		template: intl.Translation{T: "Pedido %s no mercado %s em %s foi revocado pelo servidor"},
+		subject:  intl.Translation{T: "Pedido Revocado"},
 	},
-	// [token, market name, host]
 	TopicOrderAutoRevoked: {
-		template: "Pedido %s no mercado %s em %s revocado por suspenção do mercado",
-		subject:  "Pedido Revocado Automatiamente",
+		template: intl.Translation{T: "Pedido %s no mercado %s em %s revocado por suspenção do mercado"},
+		subject:  intl.Translation{T: "Pedido Revocado Automatiamente"},
 	},
-	// [ticker, coin ID, match]
 	TopicMatchRecovered: {
-		template: "Encontrado redenção do executador (%s: %v) e validado segredo para pedido %s",
-		subject:  "Pedido Recuperado",
+		template: intl.Translation{T: "Encontrado redenção do executador (%s: %v) e validado segredo para pedido %s"},
+		subject:  intl.Translation{T: "Pedido Recuperado"},
 	},
-	// [token]
 	TopicCancellingOrder: {
-		template: "Uma ordem de cancelamento foi submetida para o pedido %s",
-		subject:  "Cancelando Pedido",
+		template: intl.Translation{T: "Uma ordem de cancelamento foi submetida para o pedido %s"},
+		subject:  intl.Translation{T: "Cancelando Pedido"},
 	},
-	// [token, old status, new status]
 	TopicOrderStatusUpdate: {
-		template: "Status do pedido %v revisado de %v para %v",
-		subject:  "Status do Pedido Atualizado",
+		template: intl.Translation{T: "Status do pedido %v revisado de %v para %v"},
+		subject:  intl.Translation{T: "Status do Pedido Atualizado"},
 	},
-	// [count, host, token]
 	TopicMatchResolutionError: {
-		template: "%d combinações reportada para %s não foram encontradas para %s.",
-		subject:  "Erro na Resolução do Pedido",
+		template: intl.Translation{T: "%d combinações reportada para %s não foram encontradas para %s."},
+		subject:  intl.Translation{T: "Erro na Resolução do Pedido"},
 	},
-	// [token]
 	TopicFailedCancel: {
-		template: "Ordem de cancelamento para pedido %s presa em estado de Epoque por 2 epoques e foi agora deletado.",
-		subject:  "Falhou Cancelamento",
-		stale:    true,
+		template: intl.Translation{T: "Ordem de cancelamento para pedido %s presa em estado de Epoque por 2 epoques e foi agora deletado."},
+		subject:  intl.Translation{T: "Falhou Cancelamento"},
 	},
-	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
-		template: "Continua procurando por contrato de contrapartes para moeda %v (%s) para combinação %s. Sua internet e conexão com a carteira estão ok?",
-		subject:  "Problemas ao Auditar",
+		template: intl.Translation{T: "Continua procurando por contrato de contrapartes para moeda %v (%s) para combinação %s. Sua internet e conexão com a carteira estão ok?"},
+		subject:  intl.Translation{T: "Problemas ao Auditar"},
 	},
-	// [host, error]
 	TopicDexAuthError: {
-		template: "%s: %v",
-		subject:  "Erro na Autenticação",
+		template: intl.Translation{T: "%s: %v"},
+		subject:  intl.Translation{T: "Erro na Autenticação"},
 	},
-	// [count, host]
 	TopicUnknownOrders: {
-		template: "%d pedidos ativos reportados pela DEX %s não foram encontrados.",
-		subject:  "DEX Reportou Pedidos Desconhecidos",
+		template: intl.Translation{T: "%d pedidos ativos reportados pela DEX %s não foram encontrados."},
+		subject:  intl.Translation{T: "DEX Reportou Pedidos Desconhecidos"},
 	},
-	// [count]
 	TopicOrdersReconciled: {
-		template: "Estados atualizados para %d pedidos.",
-		subject:  "Pedidos Reconciliados com DEX",
+		template: intl.Translation{T: "Estados atualizados para %d pedidos."},
+		subject:  intl.Translation{T: "Pedidos Reconciliados com DEX"},
 	},
-	// [ticker, address]
 	TopicWalletConfigurationUpdated: {
-		template: "configuração para carteira %s foi atualizada. Endereço de depósito = %s",
-		subject:  "Configurações da Carteira Atualizada",
+		template: intl.Translation{T: "configuração para carteira %s foi atualizada. Endereço de depósito = %s"},
+		subject:  intl.Translation{T: "Configurações da Carteira Atualizada"},
 	},
-	//  [ticker]
 	TopicWalletPasswordUpdated: {
-		template: "Senha para carteira %s foi atualizada.",
-		subject:  "Senha da Carteira Atualizada",
+		template: intl.Translation{T: "Senha para carteira %s foi atualizada."},
+		subject:  intl.Translation{T: "Senha da Carteira Atualizada"},
 	},
-	// [market name, host, time]
 	TopicMarketSuspendScheduled: {
-		template: "Mercado %s em %s está agora agendado para suspensão em %v",
-		subject:  "Suspensão de Mercado Agendada",
+		template: intl.Translation{T: "Mercado %s em %s está agora agendado para suspensão em %v"},
+		subject:  intl.Translation{T: "Suspensão de Mercado Agendada"},
 	},
-	// [market name, host]
 	TopicMarketSuspended: {
-		template: "Trocas no mercado %s em %s está agora suspenso.",
-		subject:  "Mercado Suspenso",
+		template: intl.Translation{T: "Trocas no mercado %s em %s está agora suspenso."},
+		subject:  intl.Translation{T: "Mercado Suspenso"},
 	},
-	// [market name, host]
 	TopicMarketSuspendedWithPurge: {
-		template: "Trocas no mercado %s em %s está agora suspenso. Todos pedidos no livro de ofertas foram agora EXPURGADOS.",
-		subject:  "Mercado Suspenso, Pedidos Expurgados",
+		template: intl.Translation{T: "Trocas no mercado %s em %s está agora suspenso. Todos pedidos no livro de ofertas foram agora EXPURGADOS."},
+		subject:  intl.Translation{T: "Mercado Suspenso, Pedidos Expurgados"},
 	},
-	// [market name, host, time]
 	TopicMarketResumeScheduled: {
-		template: "Mercado %s em %s está agora agendado para resumir em %v",
-		subject:  "Resumo do Mercado Agendado",
+		template: intl.Translation{T: "Mercado %s em %s está agora agendado para resumir em %v"},
+		subject:  intl.Translation{T: "Resumo do Mercado Agendado"},
 	},
-	// [market name, host, epoch]
 	TopicMarketResumed: {
-		template: "Mercado %s em %s foi resumido para trocas no epoque %d",
-		subject:  "Mercado Resumido",
+		template: intl.Translation{T: "Mercado %s em %s foi resumido para trocas no epoque %d"},
+		subject:  intl.Translation{T: "Mercado Resumido"},
 	},
-	// [host]
 	TopicUpgradeNeeded: {
-		template: "Você pode precisar atualizar seu cliente para trocas em %s.",
-		subject:  "Atualização Necessária",
+		template: intl.Translation{T: "Você pode precisar atualizar seu cliente para trocas em %s."},
+		subject:  intl.Translation{T: "Atualização Necessária"},
 	},
-	// [host]
 	TopicDEXConnected: {
-		subject:  "DEX conectado",
-		template: "%s está conectado",
+		subject:  intl.Translation{T: "DEX conectado"},
+		template: intl.Translation{T: "%s está conectado"},
 	},
-	// [host]
 	TopicDEXDisconnected: {
-		template: "%s está desconectado",
-		subject:  "Server Disconectado",
+		template: intl.Translation{T: "%s está desconectado"},
+		subject:  intl.Translation{T: "Server Disconectado"},
 	},
-	// [host, rule, time, details]
 	TopicPenalized: {
-		template: "Penalidade de DEX em %s\núltima regra quebrada: %s\nhorário: %v\ndetalhes:\n\"%s\"\n",
-		subject:  "Server Penalizou Você",
+		template: intl.Translation{T: "Penalidade de DEX em %s\núltima regra quebrada: %s\nhorário: %v\ndetalhes:\n\"%s\"\n"},
+		subject:  intl.Translation{T: "Server Penalizou Você"},
 	},
 	TopicSeedNeedsSaving: {
-		subject:  "Não se esqueça de guardar a seed do app",
-		template: "Uma nova seed para a aplicação foi criada. Faça um backup agora na página de configurações.",
+		subject:  intl.Translation{T: "Não se esqueça de guardar a seed do app"},
+		template: intl.Translation{T: "Uma nova seed para a aplicação foi criada. Faça um backup agora na página de configurações."},
 	},
 	TopicUpgradedToSeed: {
-		subject:  "Guardar nova seed do app",
-		template: "O cliente foi atualizado para usar uma seed. Faça backup dessa seed na página de configurações.",
+		subject:  intl.Translation{T: "Guardar nova seed do app"},
+		template: intl.Translation{T: "O cliente foi atualizado para usar uma seed. Faça backup dessa seed na página de configurações."},
 	},
-	// [host, msg]
 	TopicDEXNotification: {
-		subject:  "Mensagem da DEX",
-		template: "%s: %s",
+		subject:  intl.Translation{T: "Mensagem da DEX"},
+		template: intl.Translation{T: "%s: %s"},
 	},
 }
 
 // zhCN is the Simplified Chinese (PRC) translations.
 var zhCN = map[Topic]*translation{
-	// [host]
 	TopicAccountRegistered: {
-		subject:  "注册账户",
-		template: "您现在可以在 %s 进行交易", // alt. 您现在可以切换到 %s
+		subject:  intl.Translation{T: "注册账户"},
+		template: intl.Translation{T: "您现在可以在 %s 进行交易"}, // alt. 您现在可以切换到 %s
 	},
-	// [confs, host]
 	TopicFeePaymentInProgress: {
-		subject:  "费用支付中",
-		template: "在切换到 %s 之前等待 %d 次确认", // alt. 在 %s 交易之前等待 %d 确认
+		subject:  intl.Translation{T: "费用支付中"},
+		template: intl.Translation{T: "在切换到 %s 之前等待 %d 次确认"}, // alt. 在 %s 交易之前等待 %d 确认
 	},
-	// [confs, required confs]
 	TopicRegUpdate: {
-		subject:  "费用支付确认", // alt. 记录更新 (but not displayed)
-		template: "%v/%v 费率确认",
+		subject:  intl.Translation{T: "费用支付确认"}, // alt. 记录更新 (but not displayed)
+		template: intl.Translation{T: "%v/%v 费率确认"},
 	},
-	// [host, error]
 	TopicFeePaymentError: {
-		subject:  "费用支付错误",
-		template: "向 %s 支付费用时遇到错误: %v", // alt. 为 %s 支付费率时出错：%v
+		subject:  intl.Translation{T: "费用支付错误"},
+		template: intl.Translation{T: "向 %s 支付费用时遇到错误: %v"}, // alt. 为 %s 支付费率时出错：%v
 	},
-	// [host, error]
 	TopicAccountUnlockError: {
-		subject:  "解锁钱包时出错",
-		template: "解锁帐户 %s 时出错： %v", // alt. 解锁 %s 的帐户时出错: %v
+		subject:  intl.Translation{T: "解锁钱包时出错"},
+		template: intl.Translation{T: "解锁帐户 %s 时出错： %v"}, // alt. 解锁 %s 的帐户时出错: %v
 	},
-	// [host]
 	TopicFeeCoinError: {
-		subject:  "汇率错误",
-		template: "%s 的空置率。", // alt. %s 的费用硬币为空。
+		subject:  intl.Translation{T: "汇率错误"},
+		template: intl.Translation{T: "%s 的空置率。"}, // alt. %s 的费用硬币为空。
 	},
-	// [host]
 	TopicWalletConnectionWarning: {
-		subject:  "钱包连接通知",
-		template: "检测到 %s 的注册不完整，无法连接 decred 钱包", // alt. 检测到 %s 的注册不完整，无法连接到 Decred 钱包
+		subject:  intl.Translation{T: "钱包连接通知"},
+		template: intl.Translation{T: "检测到 %s 的注册不完整，无法连接 decred 钱包"}, // alt. 检测到 %s 的注册不完整，无法连接到 Decred 钱包
 	},
-	// [host, error]
 	TopicWalletUnlockError: {
-		subject:  "解锁钱包时出错",
-		template: "与 decred 钱包连接以在 %s 上完成注册，但无法解锁： %v", // alt. 已连接到 Decred 钱包以在 %s 完成注册，但无法解锁：%v
+		subject:  intl.Translation{T: "解锁钱包时出错"},
+		template: intl.Translation{T: "与 decred 钱包连接以在 %s 上完成注册，但无法解锁： %v"}, // alt. 已连接到 Decred 钱包以在 %s 完成注册，但无法解锁：%v
 	},
-	// [ticker, error]
 	TopicSendError: {
-		subject:  "提款错误",
-		template: "在 %s 提取过程中遇到错误: %v", // alt. 删除 %s 时遇到错误： %v
-		stale:    true,
+		subject:  intl.Translation{T: "提款错误"},
+		template: intl.Translation{T: "在 %s 提取过程中遇到错误: %v"}, // alt. 删除 %s 时遇到错误： %v
 	},
-	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
-		subject:  "提款已发送",
-		template: "%s %s (%s) 的提款已成功完成。硬币 ID = %s",
-		stale:    true,
+		subject:  intl.Translation{T: "提款已发送"},
+		template: intl.Translation{T: "%s %s (%s) 的提款已成功完成。硬币 ID = %s"},
 	},
-	// [error]
 	TopicOrderLoadFailure: {
-		subject:  "请求加载失败",
-		template: "某些订单无法从数据库加载：%v", // alt. 某些请求无法从数据库加载:
+		subject:  intl.Translation{T: "请求加载失败"},
+		template: intl.Translation{T: "某些订单无法从数据库加载：%v"}, // alt. 某些请求无法从数据库加载:
 	},
-	// [qty, ticker, token]
 	TopicYoloPlaced: {
-		subject:  "下达市价单",
-		template: "以市场价格 (%[3]s) 出售 %[1]s %[2]s",
+		subject:  intl.Translation{T: "下达市价单"},
+		template: intl.Translation{T: "以市场价格 (%[3]s) 出售 %[1]s %[2]s"},
 	},
 	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicBuyOrderPlaced: {
-		subject:  "已下订单",
-		template: "Buying %s %s，值 = %s (%s)",
+		subject:  intl.Translation{T: "已下订单"},
+		template: intl.Translation{T: "Buying %s %s，值 = %s (%s)"},
 	},
-	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicSellOrderPlaced: {
-		subject:  "已下订单",
-		template: "Selling %s %s，值 = %s (%s)",
+		subject:  intl.Translation{T: "已下订单"},
+		template: intl.Translation{T: "Selling %s %s，值 = %s (%s)"},
 	},
-	// [missing count, token, host]
 	TopicMissingMatches: {
-		subject:  "订单缺失匹配",
-		template: "%[2]s 订单的 %[1]d 匹配项未被 %[3]q 报告并被视为已撤销", // alt. %d 订单 %s 的匹配没有被 %q 报告并被视为已撤销
+		subject:  intl.Translation{T: "订单缺失匹配"},
+		template: intl.Translation{T: "%[2]s 订单的 %[1]d 匹配项未被 %[3]q 报告并被视为已撤销"}, // alt. %d 订单 %s 的匹配没有被 %q 报告并被视为已撤销
 	},
-	// [token, error]
 	TopicWalletMissing: {
-		subject:  "丢失的钱包",
-		template: "活动订单 %s 的钱包检索错误： %v", // alt. 通过钱包 %s 检索活动订单时出错: %v
+		subject:  intl.Translation{T: "丢失的钱包"},
+		template: intl.Translation{T: "活动订单 %s 的钱包检索错误： %v"}, // alt. 通过钱包 %s 检索活动订单时出错: %v
 	},
-	// [side, token, match status]
 	TopicMatchErrorCoin: {
-		subject:  "货币不匹配错误",
-		template: "订单 %s 的组合 %s 处于状态 %s，但没有用于交换货币的运行程序。", // alt. 订单 %s 的匹配 %s 处于状态 %s，但没有交换硬币服务商。
+		subject:  intl.Translation{T: "货币不匹配错误"},
+		template: intl.Translation{T: "订单 %s 的组合 %s 处于状态 %s，但没有用于交换货币的运行程序。"}, // alt. 订单 %s 的匹配 %s 处于状态 %s，但没有交换硬币服务商。
 	},
-	// [side, token, match status]
 	TopicMatchErrorContract: {
-		subject:  "合约组合错误",
-		template: "订单 %s 的匹配 %s 处于状态 %s，没有服务商交换合约。",
+		subject:  intl.Translation{T: "合约组合错误"},
+		template: intl.Translation{T: "订单 %s 的匹配 %s 处于状态 %s，没有服务商交换合约。"},
 	},
-	// [ticker, contract, token, error]
 	TopicMatchRecoveryError: {
-		subject:  "检索匹配时出错",
-		template: "在检索订单 %s: %v 的交易期间审核交易对手交易合约 (%s %v) 时出错", // ? 在订单 %s: %v 的交易恢复期间审核对方的交易合约 (%s %v) 时出错
+		subject:  intl.Translation{T: "检索匹配时出错"},
+		template: intl.Translation{T: "在检索订单 %s: %v 的交易期间审核交易对手交易合约 (%s %v) 时出错"}, // ? 在订单 %s: %v 的交易恢复期间审核对方的交易合约 (%s %v) 时出错
 	},
-	// [token]
 	TopicOrderCoinError: {
-		subject:  "硬币订单错误",
-		template: "没有为活动订单 %s 记录资金硬币", // alt. 没有为活动订单 %s 注册资金货币
+		subject:  intl.Translation{T: "硬币订单错误"},
+		template: intl.Translation{T: "没有为活动订单 %s 记录资金硬币"}, // alt. 没有为活动订单 %s 注册资金货币
 	},
-	// [token, ticker, error]
 	TopicOrderCoinFetchError: {
-		subject:  "硬币订单恢复错误",
-		template: "检索订单 %s (%s) 的源硬币时出错： %v", // alt. 订单 %s (%s) 的源硬币检索错误: %v
+		subject:  intl.Translation{T: "硬币订单恢复错误"},
+		template: intl.Translation{T: "检索订单 %s (%s) 的源硬币时出错： %v"}, // alt. 订单 %s (%s) 的源硬币检索错误: %v
 	},
-	// [token]
 	TopicMissedCancel: {
-		subject:  "丢失取消",
-		template: "取消订单与订单 %s 不匹配。如果取消订单与交易所同时发送，或者订单在取消订单执行之前已完全执行，则可能发生这种情况。",
+		subject:  intl.Translation{T: "丢失取消"},
+		template: intl.Translation{T: "取消订单与订单 %s 不匹配。如果取消订单与交易所同时发送，或者订单在取消订单执行之前已完全执行，则可能发生这种情况。"},
 	},
-	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicBuyOrderCanceled: {
-		subject:  "订单取消",
-		template: "买入 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		subject:  intl.Translation{T: "订单取消"},
+		template: intl.Translation{T: "买入 %s-%s 的 %s 订单已被取消 (%s)"}, // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
 	},
-	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicSellOrderCanceled: {
-		subject:  "订单取消",
-		template: "卖出 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		subject:  intl.Translation{T: "订单取消"},
+		template: intl.Translation{T: "卖出 %s-%s 的 %s 订单已被取消 (%s)"}, // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
 	},
-	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicBuyMatchesMade: {
-		subject:  "匹配完成",
-		template: "买入 %s-%s %.1f%% 的订单已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		subject:  intl.Translation{T: "匹配完成"},
+		template: intl.Translation{T: "买入 %s-%s %.1f%% 的订单已完成 (%s)"}, // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
-	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicSellMatchesMade: {
-		subject:  "匹配完成",
-		template: "卖出 %s-%s %.1f%% 的订单已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		subject:  intl.Translation{T: "匹配完成"},
+		template: intl.Translation{T: "卖出 %s-%s %.1f%% 的订单已完成 (%s)"}, // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
-	// [qty, ticker, token]
 	TopicSwapSendError: {
-		subject:  "发送交换时出错",
-		template: "在以 %[3]s 的顺序发送价值 %[1]s %[2]s 的输出的交换时遇到错误", // ? 在订单 %s 上发送价值 %.8f %s 的交换输出时遇到错误
+		subject:  intl.Translation{T: "发送交换时出错"},
+		template: intl.Translation{T: "在以 %[3]s 的顺序发送价值 %[1]s %[2]s 的输出的交换时遇到错误"}, // ? 在订单 %s 上发送价值 %.8f %s 的交换输出时遇到错误
 	},
-	// [match, error]
 	TopicInitError: {
-		subject:  "交易错误",
-		template: "通知 DEX 匹配 %s 的交换时出错： %v", // alt. 错误通知 DEX %s 交换组合：%v
+		subject:  intl.Translation{T: "交易错误"},
+		template: intl.Translation{T: "通知 DEX 匹配 %s 的交换时出错： %v"}, // alt. 错误通知 DEX %s 交换组合：%v
 	},
-	// [match, error]
 	TopicReportRedeemError: {
-		subject:  "报销错误",
-		template: "通知 DEX %s 赎回时出错： %v",
+		subject:  intl.Translation{T: "报销错误"},
+		template: intl.Translation{T: "通知 DEX %s 赎回时出错： %v"},
 	},
-	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "发起交易",
-		template: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的交易", // should mention "contract" (TODO) ? 已发送价值 %.8f %s 的交易，订单 %s
+		subject:  intl.Translation{T: "发起交易"},
+		template: intl.Translation{T: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的交易"}, // should mention "contract" (TODO) ? 已发送价值 %.8f %s 的交易，订单 %s
 	},
-	// [qty, ticker, token]
 	TopicRedemptionError: {
-		subject:  "赎回错误",
-		template: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的兑换时遇到错误", // alt. 在订单 %s 上发现发送价值 %.8f %s 的赎回错误
+		subject:  intl.Translation{T: "赎回错误"},
+		template: intl.Translation{T: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的兑换时遇到错误"}, // alt. 在订单 %s 上发现发送价值 %.8f %s 的赎回错误
 	},
-	// [qty, ticker, token]
 	TopicMatchComplete: {
-		subject:  "完全匹配",
-		template: "在订单 %s 上兑换了 %s %s",
+		subject:  intl.Translation{T: "完全匹配"},
+		template: intl.Translation{T: "在订单 %s 上兑换了 %s %s"},
 	},
-	// [qty, ticker, token]
 	TopicRefundFailure: {
-		subject:  "退款错误",
-		template: "按顺序 %[3]s 返回 %[1]s %[2]s，有一些错误", // alt. 退款％.8f％s的订单％S，但出现一些错误
+		subject:  intl.Translation{T: "退款错误"},
+		template: intl.Translation{T: "按顺序 %[3]s 返回 %[1]s %[2]s，有一些错误"}, // alt. 退款％.8f％s的订单％S，但出现一些错误
 	},
-	// [qty, ticker, token]
 	TopicMatchesRefunded: {
-		subject:  "退款成功",
-		template: "在订单 %[3]s 上返回了 %[1]s %[2]s", // 在订单 %s 上返回了 %.8f %s
+		subject:  intl.Translation{T: "退款成功"},
+		template: intl.Translation{T: "在订单 %[3]s 上返回了 %[1]s %[2]s"}, // 在订单 %s 上返回了 %.8f %s
 	},
-	// [match ID token]
 	TopicMatchRevoked: {
-		subject:  "撤销组合",
-		template: "匹配 %s 已被撤销", // alt. 组合 %s 已被撤销
+		subject:  intl.Translation{T: "撤销组合"},
+		template: intl.Translation{T: "匹配 %s 已被撤销"}, // alt. 组合 %s 已被撤销
 	},
-	// [token, market name, host]
 	TopicOrderRevoked: {
-		subject:  "撤销订单",
-		template: "%s 市场 %s 的订单 %s 已被服务器撤销",
+		subject:  intl.Translation{T: "撤销订单"},
+		template: intl.Translation{T: "%s 市场 %s 的订单 %s 已被服务器撤销"},
 	},
-	// [token, market name, host]
 	TopicOrderAutoRevoked: {
-		subject:  "订单自动撤销",
-		template: "%s 市场 %s 上的订单 %s 由于市场暂停而被撤销", // alt. %s 市场 %s 中的订单 %s 被市场暂停撤销
+		subject:  intl.Translation{T: "订单自动撤销"},
+		template: intl.Translation{T: "%s 市场 %s 上的订单 %s 由于市场暂停而被撤销"}, // alt. %s 市场 %s 中的订单 %s 被市场暂停撤销
 	},
-	// [ticker, coin ID, match]
 	TopicMatchRecovered: {
-		subject:  "恢复订单",
-		template: "找到赎回 (%s: %v) 并验证了请求 %s 的秘密",
+		subject:  intl.Translation{T: "恢复订单"},
+		template: intl.Translation{T: "找到赎回 (%s: %v) 并验证了请求 %s 的秘密"},
 	},
-	// [token]
 	TopicCancellingOrder: {
-		subject:  "取消订单",
-		template: "已为订单 %s 提交了取消操作", // alt. 已为订单 %s 提交取消订单
+		subject:  intl.Translation{T: "取消订单"},
+		template: intl.Translation{T: "已为订单 %s 提交了取消操作"}, // alt. 已为订单 %s 提交取消订单
 	},
-	// [token, old status, new status]
 	TopicOrderStatusUpdate: {
-		subject:  "订单状态更新",
-		template: "订单 %v 的状态从 %v 修改为 %v", // alt. 订单状态 %v 从 %v 修改为 %v
+		subject:  intl.Translation{T: "订单状态更新"},
+		template: intl.Translation{T: "订单 %v 的状态从 %v 修改为 %v"}, // alt. 订单状态 %v 从 %v 修改为 %v
 	},
-	// [count, host, token]
 	TopicMatchResolutionError: {
-		subject:  "订单解析错误",
-		template: "没有为 %[3]s 找到为 %[2]s 报告的 %[1]d 个匹配项。请联系Decred社区以解决该问题。", // alt. %s 报告的 %d 个匹配项没有找到 %s。
+		subject:  intl.Translation{T: "订单解析错误"},
+		template: intl.Translation{T: "没有为 %[3]s 找到为 %[2]s 报告的 %[1]d 个匹配项。请联系Decred社区以解决该问题。"}, // alt. %s 报告的 %d 个匹配项没有找到 %s。
 	},
-	// [token]
 	TopicFailedCancel: {
-		subject:  "取消失败",
-		template: "取消订单 %s 的订单 %s 处于 Epoque 状态 2 个 epoques，现在已被删除。",
-		stale:    true,
+		subject:  intl.Translation{T: "取消失败"},
+		template: intl.Translation{T: "取消订单 %s 的订单 %s 处于 Epoque 状态 2 个 epoques，现在已被删除。"},
 	},
-	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
-		subject:  "审计时的问题",
-		template: "继续寻找组合 %[3]s 的货币 %[1]v (%[2]s) 的交易对手合约。您的互联网和钱包连接是否正常？",
+		subject:  intl.Translation{T: "审计时的问题"},
+		template: intl.Translation{T: "继续寻找组合 %[3]s 的货币 %[1]v (%[2]s) 的交易对手合约。您的互联网和钱包连接是否正常？"},
 	},
-	// [host, error]
 	TopicDexAuthError: {
-		subject:  "身份验证错误",
-		template: "%s: %v",
+		subject:  intl.Translation{T: "身份验证错误"},
+		template: intl.Translation{T: "%s: %v"},
 	},
-	// [count, host]
 	TopicUnknownOrders: {
-		subject:  "DEX 报告的未知请求",
-		template: "未找到 DEX %[2]s 报告的 %[1]d 个活动订单。",
+		subject:  intl.Translation{T: "DEX 报告的未知请求"},
+		template: intl.Translation{T: "未找到 DEX %[2]s 报告的 %[1]d 个活动订单。"},
 	},
-	// [count]
 	TopicOrdersReconciled: {
-		subject:  "与 DEX 协调的订单",
-		template: "%d 个订单的更新状态。", // alt. %d 个订单的状态已更新。
+		subject:  intl.Translation{T: "与 DEX 协调的订单"},
+		template: intl.Translation{T: "%d 个订单的更新状态。"}, // alt. %d 个订单的状态已更新。
 	},
-	// [ticker, address]
 	TopicWalletConfigurationUpdated: {
-		subject:  "更新的钱包设置a",
-		template: "钱包 %[1]s 的配置已更新。存款地址 = %[2]s", // alt. %s 钱包的配置已更新。存款地址 = %s
+		subject:  intl.Translation{T: "更新的钱包设置a"},
+		template: intl.Translation{T: "钱包 %[1]s 的配置已更新。存款地址 = %[2]s"}, // alt. %s 钱包的配置已更新。存款地址 = %s
 	},
-	//  [ticker]
 	TopicWalletPasswordUpdated: {
-		subject:  "钱包密码更新",
-		template: "钱包 %s 的密码已更新。", // alt. %s 钱包的密码已更新。
+		subject:  intl.Translation{T: "钱包密码更新"},
+		template: intl.Translation{T: "钱包 %s 的密码已更新。"}, // alt. %s 钱包的密码已更新。
 	},
-	// [market name, host, time]
 	TopicMarketSuspendScheduled: {
-		subject:  "市场暂停预定",
-		template: "%s 上的市场 %s 现在计划在 %v 暂停",
+		subject:  intl.Translation{T: "市场暂停预定"},
+		template: intl.Translation{T: "%s 上的市场 %s 现在计划在 %v 暂停"},
 	},
-	// [market name, host]
 	TopicMarketSuspended: {
-		subject:  "暂停市场",
-		template: "%s 的 %s 市场交易现已暂停。", // alt. %s 市场 %s 的交易现已暂停。
+		subject:  intl.Translation{T: "暂停市场"},
+		template: intl.Translation{T: "%s 的 %s 市场交易现已暂停。"}, // alt. %s 市场 %s 的交易现已暂停。
 	},
-	// [market name, host]
 	TopicMarketSuspendedWithPurge: {
-		subject:  "暂停市场，清除订单",
-		template: "%s 的市场交易 %s 现已暂停。订单簿中的所有订单现已被删除。", // alt. %s 市场 %s 的交易现已暂停。所有预订的订单现在都已清除。
+		subject:  intl.Translation{T: "暂停市场，清除订单"},
+		template: intl.Translation{T: "%s 的市场交易 %s 现已暂停。订单簿中的所有订单现已被删除。"}, // alt. %s 市场 %s 的交易现已暂停。所有预订的订单现在都已清除。
 	},
-	// [market name, host, time]
 	TopicMarketResumeScheduled: {
-		subject:  "预定市场摘要",
-		template: "%s 上的市场 %s 现在计划在 %v 恢",
+		subject:  intl.Translation{T: "预定市场摘要"},
+		template: intl.Translation{T: "%s 上的市场 %s 现在计划在 %v 恢"},
 	},
-	// [market name, host, epoch]
 	TopicMarketResumed: {
-		subject:  "总结市场",
-		template: "%[2]s 上的市场 %[1]s 已汇总用于时代 %[3]d 中的交易", // alt. M%s 的市场 %s 已在epoch %d 恢复交易
+		subject:  intl.Translation{T: "总结市场"},
+		template: intl.Translation{T: "%[2]s 上的市场 %[1]s 已汇总用于时代 %[3]d 中的交易"}, // alt. M%s 的市场 %s 已在epoch %d 恢复交易
 	},
-	// [host]
 	TopicUpgradeNeeded: {
-		subject:  "需要更新",
-		template: "您可能需要更新您的帐户以进行 %s 的交易。", // alt. 您可能需要更新您的客户端以在 %s 进行交易。
+		subject:  intl.Translation{T: "需要更新"},
+		template: intl.Translation{T: "您可能需要更新您的帐户以进行 %s 的交易。"}, // alt. 您可能需要更新您的客户端以在 %s 进行交易。
 	},
-	// [host]
 	TopicDEXConnected: {
-		subject:  "DEX 连接",
-		template: "%s 已连接",
+		subject:  intl.Translation{T: "DEX 连接"},
+		template: intl.Translation{T: "%s 已连接"},
 	},
-	// [host]
 	TopicDEXDisconnected: {
-		subject:  "服务器断开连接",
-		template: "%s 离线", // alt. %s 已断开连接
+		subject:  intl.Translation{T: "服务器断开连接"},
+		template: intl.Translation{T: "%s 离线"}, // alt. %s 已断开连接
 	},
-	// [host, rule, time, details]
 	TopicPenalized: {
-		subject:  "服务器惩罚了你",
-		template: "%s 上的 DEX 惩罚\n最后一条规则被破坏：%s \n时间： %v \n详细信息：\n \" %s \" \n",
+		subject:  intl.Translation{T: "服务器惩罚了你"},
+		template: intl.Translation{T: "%s 上的 DEX 惩罚\n最后一条规则被破坏：%s \n时间： %v \n详细信息：\n \" %s \" \n"},
 	},
 	TopicSeedNeedsSaving: {
-		subject:  "不要忘记备份你的应用程序种子", // alt. 别忘了备份应用程序种子
-		template: "已创建新的应用程序种子。请立刻在设置界面中进行备份。",
+		subject:  intl.Translation{T: "不要忘记备份你的应用程序种子"}, // alt. 别忘了备份应用程序种子
+		template: intl.Translation{T: "已创建新的应用程序种子。请立刻在设置界面中进行备份。"},
 	},
 	TopicUpgradedToSeed: {
-		subject:  "备份您的新应用程序种子",                   // alt. 备份新的应用程序种子
-		template: "客户端已升级为使用应用程序种子。请切换至设置界面备份种子。", // alt. 客户端已升级。请在“设置”界面中备份种子。
+		subject:  intl.Translation{T: "备份您的新应用程序种子"},                   // alt. 备份新的应用程序种子
+		template: intl.Translation{T: "客户端已升级为使用应用程序种子。请切换至设置界面备份种子。"}, // alt. 客户端已升级。请在“设置”界面中备份种子。
 	},
-	// [host, msg]
 	TopicDEXNotification: {
-		subject:  "来自DEX的消息",
-		template: "%s: %s",
+		subject:  intl.Translation{T: "来自DEX的消息"},
+		template: intl.Translation{T: "%s: %s"},
 	},
 }
 
 var plPL = map[Topic]*translation{
-	// [host]
 	TopicAccountRegistered: {
-		subject:  "Konto zarejestrowane",
-		template: "Możesz teraz handlować na %s",
+		subject:  intl.Translation{T: "Konto zarejestrowane"},
+		template: intl.Translation{T: "Możesz teraz handlować na %s"},
 	},
-	// [confs, host]
 	TopicFeePaymentInProgress: {
-		subject:  "Opłata rejestracyjna w drodze",
-		template: "Oczekiwanie na %d potwierdzeń przed rozpoczęciem handlu na %s",
+		subject:  intl.Translation{T: "Opłata rejestracyjna w drodze"},
+		template: intl.Translation{T: "Oczekiwanie na %d potwierdzeń przed rozpoczęciem handlu na %s"},
 	},
-	// [confs, required confs]
 	TopicRegUpdate: {
-		subject:  "Aktualizacja rejestracji",
-		template: "Potwierdzenia opłaty rejestracyjnej %v/%v",
+		subject:  intl.Translation{T: "Aktualizacja rejestracji"},
+		template: intl.Translation{T: "Potwierdzenia opłaty rejestracyjnej %v/%v"},
 	},
-	// [host, error]
 	TopicFeePaymentError: {
-		subject:  "Błąd płatności rejestracyjnej",
-		template: "Wystąpił błąd przy płatności dla %s: %v",
+		subject:  intl.Translation{T: "Błąd płatności rejestracyjnej"},
+		template: intl.Translation{T: "Wystąpił błąd przy płatności dla %s: %v"},
 	},
-	// [host, error]
 	TopicAccountUnlockError: {
-		subject:  "Błąd odblokowywania konta",
-		template: "błąd odblokowywania konta dla %s: %v",
+		subject:  intl.Translation{T: "Błąd odblokowywania konta"},
+		template: intl.Translation{T: "błąd odblokowywania konta dla %s: %v"},
 	},
-	// [host]
 	TopicFeeCoinError: {
-		subject:  "Błąd w płatności rejestracyjnej",
-		template: "Nie znaleziono środków na płatność rejestracyjną dla %s.",
+		subject:  intl.Translation{T: "Błąd w płatności rejestracyjnej"},
+		template: intl.Translation{T: "Nie znaleziono środków na płatność rejestracyjną dla %s."},
 	},
-	// [host]
 	TopicWalletConnectionWarning: {
-		subject:  "Ostrzeżenie połączenia z portfelem",
-		template: "Wykryto niedokończoną rejestrację dla %s, ale nie można połączyć się z portfelem Decred",
+		subject:  intl.Translation{T: "Ostrzeżenie połączenia z portfelem"},
+		template: intl.Translation{T: "Wykryto niedokończoną rejestrację dla %s, ale nie można połączyć się z portfelem Decred"},
 	},
-	// [host, error]
 	TopicWalletUnlockError: {
-		subject:  "Błąd odblokowywania portfela",
-		template: "Połączono z portfelem Decred, aby dokończyć rejestrację na %s, lecz próba odblokowania portfela nie powiodła się: %v",
+		subject:  intl.Translation{T: "Błąd odblokowywania portfela"},
+		template: intl.Translation{T: "Połączono z portfelem Decred, aby dokończyć rejestrację na %s, lecz próba odblokowania portfela nie powiodła się: %v"},
 	},
-	// [ticker, error]
 	TopicSendError: {
-		subject:  "Błąd wypłaty środków",
-		template: "Wystąpił błąd przy wypłacaniu %s: %v",
-		stale:    true,
+		subject:  intl.Translation{T: "Błąd wypłaty środków"},
+		template: intl.Translation{T: "Wystąpił błąd przy wypłacaniu %s: %v"},
 	},
-	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
-		subject:  "Wypłata zrealizowana",
-		template: "Wypłata %s %s (%s) została zrealizowana pomyślnie. ID monety = %s",
-		stale:    true,
+		subject:  intl.Translation{T: "Wypłata zrealizowana"},
+		template: intl.Translation{T: "Wypłata %s %s (%s) została zrealizowana pomyślnie. ID monety = %s"},
 	},
-	// [error]
 	TopicOrderLoadFailure: {
-		subject:  "Błąd wczytywania zleceń",
-		template: "Niektórych zleceń nie udało się wczytać z bazy danych: %v",
+		subject:  intl.Translation{T: "Błąd wczytywania zleceń"},
+		template: intl.Translation{T: "Niektórych zleceń nie udało się wczytać z bazy danych: %v"},
 	},
-	// [qty, ticker, token]
 	TopicYoloPlaced: {
-		subject:  "Złożono zlecenie rynkowe",
-		template: "sprzedaż %s %s po kursie rynkowym (%s)",
+		subject:  intl.Translation{T: "Złożono zlecenie rynkowe"},
+		template: intl.Translation{T: "sprzedaż %s %s po kursie rynkowym (%s)"},
 	},
-	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicBuyOrderPlaced: {
-		subject:  "Złożono zlecenie",
-		template: "Buying %s %s, kurs = %s (%s)",
+		subject:  intl.Translation{T: "Złożono zlecenie"},
+		template: intl.Translation{T: "Buying %s %s, kurs = %s (%s)"},
 	},
-	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicSellOrderPlaced: {
-		subject:  "Złożono zlecenie",
-		template: "Selling %s %s, kurs = %s (%s)",
+		subject:  intl.Translation{T: "Złożono zlecenie"},
+		template: intl.Translation{T: "Selling %s %s, kurs = %s (%s)"},
 	},
-	// [missing count, token, host]
 	TopicMissingMatches: {
-		subject:  "Brak spasowanych zamówień",
-		template: "%d spasowań dla zlecenia %s nie zostało odnotowanych przez %q i są uznane za unieważnione",
+		subject:  intl.Translation{T: "Brak spasowanych zamówień"},
+		template: intl.Translation{T: "%d spasowań dla zlecenia %s nie zostało odnotowanych przez %q i są uznane za unieważnione"},
 	},
-	// [token, error]
 	TopicWalletMissing: {
-		subject:  "Brak portfela",
-		template: "Błąd odczytu z portfela dla aktywnego zlecenia %s: %v",
+		subject:  intl.Translation{T: "Brak portfela"},
+		template: intl.Translation{T: "Błąd odczytu z portfela dla aktywnego zlecenia %s: %v"},
 	},
-	// [side, token, match status]
 	TopicMatchErrorCoin: {
-		subject:  "Błąd spasowanej monety",
-		template: "Spasowanie %s dla zlecenia %s jest w stanie %s, lecz brakuje monety po stronie maker.",
+		subject:  intl.Translation{T: "Błąd spasowanej monety"},
+		template: intl.Translation{T: "Spasowanie %s dla zlecenia %s jest w stanie %s, lecz brakuje monety po stronie maker."},
 	},
-	// [side, token, match status]
 	TopicMatchErrorContract: {
-		subject:  "Błąd kontraktu spasowania",
-		template: "Spasowanie %s dla zlecenia %s jest w stanie %s, lecz brakuje kontraktu zamiany po stronie maker.",
+		subject:  intl.Translation{T: "Błąd kontraktu spasowania"},
+		template: intl.Translation{T: "Spasowanie %s dla zlecenia %s jest w stanie %s, lecz brakuje kontraktu zamiany po stronie maker."},
 	},
-	// [ticker, contract, token, error]
 	TopicMatchRecoveryError: {
-		subject:  "Błąd odzyskiwania spasowania",
-		template: "Błąd przy audycie kontraktu zamiany u kontrahenta (%s %v) podczas odzyskiwania zamiany dla zlecenia %s: %v",
+		subject:  intl.Translation{T: "Błąd odzyskiwania spasowania"},
+		template: intl.Translation{T: "Błąd przy audycie kontraktu zamiany u kontrahenta (%s %v) podczas odzyskiwania zamiany dla zlecenia %s: %v"},
 	},
-	// [token]
 	TopicOrderCoinError: {
-		subject:  "Błąd monety dla zlecenia",
-		template: "Nie znaleziono środków fundujących dla aktywnego zlecenia %s",
+		subject:  intl.Translation{T: "Błąd monety dla zlecenia"},
+		template: intl.Translation{T: "Nie znaleziono środków fundujących dla aktywnego zlecenia %s"},
 	},
-	// [token, ticker, error]
 	TopicOrderCoinFetchError: {
-		subject:  "Błąd pozyskania środków dla zlecenia",
-		template: "Błąd pozyskania środków źródłowych dla zlecenia %s (%s): %v",
+		subject:  intl.Translation{T: "Błąd pozyskania środków dla zlecenia"},
+		template: intl.Translation{T: "Błąd pozyskania środków źródłowych dla zlecenia %s (%s): %v"},
 	},
-	// [token]
 	TopicMissedCancel: {
-		subject:  "Spóźniona anulacja",
-		template: "Zlecenie anulacji nie zostało spasowane dla zlecenia %s. Może to mieć miejsce, gdy zlecenie anulacji wysłane jest w tej samej epoce, co zlecenie handlu, lub gdy zlecenie handlu zostaje w pełni wykonane przed spasowaniem ze zleceniem anulacji.",
+		subject:  intl.Translation{T: "Spóźniona anulacja"},
+		template: intl.Translation{T: "Zlecenie anulacji nie zostało spasowane dla zlecenia %s. Może to mieć miejsce, gdy zlecenie anulacji wysłane jest w tej samej epoce, co zlecenie handlu, lub gdy zlecenie handlu zostaje w pełni wykonane przed spasowaniem ze zleceniem anulacji."},
 	},
-	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicBuyOrderCanceled: {
-		subject:  "Zlecenie anulowane",
-		template: "Zlecenie buy dla %s-%s na %s zostało anulowane (%s)",
+		subject:  intl.Translation{T: "Zlecenie anulowane"},
+		template: intl.Translation{T: "Zlecenie buy dla %s-%s na %s zostało anulowane (%s)"},
 	},
-	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicSellOrderCanceled: {
-		subject:  "Zlecenie anulowane",
-		template: "Zlecenie sell dla %s-%s na %s zostało anulowane (%s)",
+		subject:  intl.Translation{T: "Zlecenie anulowane"},
+		template: intl.Translation{T: "Zlecenie sell dla %s-%s na %s zostało anulowane (%s)"},
 	},
-	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicSellMatchesMade: {
-		subject:  "Dokonano spasowania",
-		template: "Zlecenie sell na %s-%s zrealizowane w %.1f%% (%s)",
+		subject:  intl.Translation{T: "Dokonano spasowania"},
+		template: intl.Translation{T: "Zlecenie sell na %s-%s zrealizowane w %.1f%% (%s)"},
 	},
-	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicBuyMatchesMade: {
-		subject:  "Dokonano spasowania",
-		template: "Zlecenie buy na %s-%s zrealizowane w %.1f%% (%s)",
+		subject:  intl.Translation{T: "Dokonano spasowania"},
+		template: intl.Translation{T: "Zlecenie buy na %s-%s zrealizowane w %.1f%% (%s)"},
 	},
-	// [qty, ticker, token]
 	TopicSwapSendError: {
-		subject:  "Błąd wysyłki środków",
-		template: "Błąd przy wysyłaniu środków wartych %s %s dla zlecenia %s",
+		subject:  intl.Translation{T: "Błąd wysyłki środków"},
+		template: intl.Translation{T: "Błąd przy wysyłaniu środków wartych %s %s dla zlecenia %s"},
 	},
-	// [match, error]
 	TopicInitError: {
-		subject:  "Błąd raportowania zamiany",
-		template: "Błąd powiadomienia DEX o zamianie dla spasowania %s: %v",
+		subject:  intl.Translation{T: "Błąd raportowania zamiany"},
+		template: intl.Translation{T: "Błąd powiadomienia DEX o zamianie dla spasowania %s: %v"},
 	},
-	// [match, error]
 	TopicReportRedeemError: {
-		subject:  "Błąd raportowania wykupienia",
-		template: "Błąd powiadomienia DEX o wykupieniu środków dla spasowania %s: %v",
+		subject:  intl.Translation{T: "Błąd raportowania wykupienia"},
+		template: intl.Translation{T: "Błąd powiadomienia DEX o wykupieniu środków dla spasowania %s: %v"},
 	},
-	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "Zamiana rozpoczęta",
-		template: "Wysłano środki o wartości %s %s dla zlecenia %s",
+		subject:  intl.Translation{T: "Zamiana rozpoczęta"},
+		template: intl.Translation{T: "Wysłano środki o wartości %s %s dla zlecenia %s"},
 	},
-	// [qty, ticker, token]
 	TopicRedemptionError: {
-		subject:  "Błąd wykupienia",
-		template: "Napotkano błąd przy wykupywaniu środków o wartości %s %s dla zlecenia %s",
+		subject:  intl.Translation{T: "Błąd wykupienia"},
+		template: intl.Translation{T: "Napotkano błąd przy wykupywaniu środków o wartości %s %s dla zlecenia %s"},
 	},
-	// [qty, ticker, token]
 	TopicMatchComplete: {
-		subject:  "Spasowanie zakończone",
-		template: "Wykupiono %s %s ze zlecenia %s",
+		subject:  intl.Translation{T: "Spasowanie zakończone"},
+		template: intl.Translation{T: "Wykupiono %s %s ze zlecenia %s"},
 	},
-	// [qty, ticker, token]
 	TopicRefundFailure: {
-		subject:  "Niepowodzenie zwrotu środków",
-		template: "Zwrócono %s %s za zlecenie %s, z pewnymi błędami",
+		subject:  intl.Translation{T: "Niepowodzenie zwrotu środków"},
+		template: intl.Translation{T: "Zwrócono %s %s za zlecenie %s, z pewnymi błędami"},
 	},
-	// [qty, ticker, token]
 	TopicMatchesRefunded: {
-		subject:  "Zwrot środków za spasowanie zleceń",
-		template: "Zwrócono %s %s za zlecenie %s",
+		subject:  intl.Translation{T: "Zwrot środków za spasowanie zleceń"},
+		template: intl.Translation{T: "Zwrócono %s %s za zlecenie %s"},
 	},
-	// [match ID token]
 	TopicMatchRevoked: {
-		subject:  "Spasowanie zleceń unieważnione",
-		template: "Spasowanie %s zostało unieważnione",
+		subject:  intl.Translation{T: "Spasowanie zleceń unieważnione"},
+		template: intl.Translation{T: "Spasowanie %s zostało unieważnione"},
 	},
-	// [token, market name, host]
 	TopicOrderRevoked: {
-		subject:  "Zlecenie unieważnione",
-		template: "Zlecenie %s na rynku %s na %s zostało unieważnione przez serwer",
+		subject:  intl.Translation{T: "Zlecenie unieważnione"},
+		template: intl.Translation{T: "Zlecenie %s na rynku %s na %s zostało unieważnione przez serwer"},
 	},
-	// [token, market name, host]
 	TopicOrderAutoRevoked: {
-		subject:  "Zlecenie unieważnione automatycznie",
-		template: "Zlecenie %s na rynku %s na %s zostało unieważnione z powodu wstrzymania handlu na tym rynku",
+		subject:  intl.Translation{T: "Zlecenie unieważnione automatycznie"},
+		template: intl.Translation{T: "Zlecenie %s na rynku %s na %s zostało unieważnione z powodu wstrzymania handlu na tym rynku"},
 	},
-	// [ticker, coin ID, match]
 	TopicMatchRecovered: {
-		subject:  "Odzyskano spasowanie",
-		template: "Odnaleziono wykup ze strony maker (%s: %v) oraz potwierdzono sekret dla spasowania %s",
+		subject:  intl.Translation{T: "Odzyskano spasowanie"},
+		template: intl.Translation{T: "Odnaleziono wykup ze strony maker (%s: %v) oraz potwierdzono sekret dla spasowania %s"},
 	},
-	// [token]
 	TopicCancellingOrder: {
-		subject:  "Anulowanie zlecenia",
-		template: "Złożono polecenie anulowania dla zlecenia %s",
+		subject:  intl.Translation{T: "Anulowanie zlecenia"},
+		template: intl.Translation{T: "Złożono polecenie anulowania dla zlecenia %s"},
 	},
-	// [token, old status, new status]
 	TopicOrderStatusUpdate: {
-		subject:  "Aktualizacja statusu zlecenia",
-		template: "Status zlecenia %v został zmieniony z %v na %v",
+		subject:  intl.Translation{T: "Aktualizacja statusu zlecenia"},
+		template: intl.Translation{T: "Status zlecenia %v został zmieniony z %v na %v"},
 	},
-	// [count, host, token]
 	TopicMatchResolutionError: {
-		subject:  "Błąd rozstrzygnięcia spasowania",
-		template: "Nie znaleziono %d spasowań odnotowanych przez %s dla %s.",
+		subject:  intl.Translation{T: "Błąd rozstrzygnięcia spasowania"},
+		template: intl.Translation{T: "Nie znaleziono %d spasowań odnotowanych przez %s dla %s."},
 	},
-	// [token]
 	TopicFailedCancel: {
-		subject:  "Niepowodzenie anulowania",
-		template: "Zlecenie anulacji dla zlecenia %s utknęło w statusie epoki przez 2 epoki i zostało usunięte.",
-		stale:    true,
+		subject:  intl.Translation{T: "Niepowodzenie anulowania"},
+		template: intl.Translation{T: "Zlecenie anulacji dla zlecenia %s utknęło w statusie epoki przez 2 epoki i zostało usunięte."},
 	},
-	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
-		subject:  "Problem z audytem",
-		template: "Wciąż szukamy monety kontraktowej kontrahenta %v (%s) dla spasowania %s. Czy Twoje połączenie z Internetem i portfelem jest dobre?",
+		subject:  intl.Translation{T: "Problem z audytem"},
+		template: intl.Translation{T: "Wciąż szukamy monety kontraktowej kontrahenta %v (%s) dla spasowania %s. Czy Twoje połączenie z Internetem i portfelem jest dobre?"},
 	},
-	// [host, error]
 	TopicDexAuthError: {
-		subject:  "Błąd uwierzytelniania DEX",
-		template: "%s: %v",
+		subject:  intl.Translation{T: "Błąd uwierzytelniania DEX"},
+		template: intl.Translation{T: "%s: %v"},
 	},
-	// [count, host]
 	TopicUnknownOrders: {
-		subject:  "DEX odnotował nieznane zlecenia",
-		template: "Nie znaleziono %d aktywnych zleceń odnotowanych przez DEX %s.",
+		subject:  intl.Translation{T: "DEX odnotował nieznane zlecenia"},
+		template: intl.Translation{T: "Nie znaleziono %d aktywnych zleceń odnotowanych przez DEX %s."},
 	},
-	// [count]
 	TopicOrdersReconciled: {
-		subject:  "Pogodzono zlecenia z DEX",
-		template: "Zaktualizowano statusy dla %d zleceń.",
+		subject:  intl.Translation{T: "Pogodzono zlecenia z DEX"},
+		template: intl.Translation{T: "Zaktualizowano statusy dla %d zleceń."},
 	},
-	// [ticker, address]
 	TopicWalletConfigurationUpdated: {
-		subject:  "Zaktualizowano konfigurację portfela",
-		template: "Konfiguracja dla portfela %s została zaktualizowana. Adres do depozytów = %s",
+		subject:  intl.Translation{T: "Zaktualizowano konfigurację portfela"},
+		template: intl.Translation{T: "Konfiguracja dla portfela %s została zaktualizowana. Adres do depozytów = %s"},
 	},
-	//  [ticker]
 	TopicWalletPasswordUpdated: {
-		subject:  "Zaktualizowano hasło portfela",
-		template: "Hasło dla portfela %s zostało zaktualizowane.",
+		subject:  intl.Translation{T: "Zaktualizowano hasło portfela"},
+		template: intl.Translation{T: "Hasło dla portfela %s zostało zaktualizowane."},
 	},
-	// [market name, host, time]
 	TopicMarketSuspendScheduled: {
-		subject:  "Planowane zawieszenie rynku",
-		template: "Rynek %s na %s zostanie wstrzymany o %v",
+		subject:  intl.Translation{T: "Planowane zawieszenie rynku"},
+		template: intl.Translation{T: "Rynek %s na %s zostanie wstrzymany o %v"},
 	},
-	// [market name, host]
 	TopicMarketSuspended: {
-		subject:  "Rynek wstrzymany",
-		template: "Handel na rynku %s na %s jest obecnie wstrzymany.",
+		subject:  intl.Translation{T: "Rynek wstrzymany"},
+		template: intl.Translation{T: "Handel na rynku %s na %s jest obecnie wstrzymany."},
 	},
-	// [market name, host]
 	TopicMarketSuspendedWithPurge: {
-		subject:  "Rynek wstrzymany, księga zamówień wyczyszczona",
-		template: "Handel na rynku %s na %s jest obecnie wstrzymany. Wszystkie złożone zamówienia zostały WYCOFANE.",
+		subject:  intl.Translation{T: "Rynek wstrzymany, księga zamówień wyczyszczona"},
+		template: intl.Translation{T: "Handel na rynku %s na %s jest obecnie wstrzymany. Wszystkie złożone zamówienia zostały WYCOFANE."},
 	},
-	// [market name, host, time]
 	TopicMarketResumeScheduled: {
-		subject:  "Planowane wznowienie rynku",
-		template: "Rynek %s na %s zostanie wznowiony o %v",
+		subject:  intl.Translation{T: "Planowane wznowienie rynku"},
+		template: intl.Translation{T: "Rynek %s na %s zostanie wznowiony o %v"},
 	},
-	// [market name, host, epoch]
 	TopicMarketResumed: {
-		subject:  "Rynek wznowiony",
-		template: "Rynek %s na %s wznowił handel w epoce %d",
+		subject:  intl.Translation{T: "Rynek wznowiony"},
+		template: intl.Translation{T: "Rynek %s na %s wznowił handel w epoce %d"},
 	},
-	// [host]
 	TopicUpgradeNeeded: {
-		subject:  "Wymagana aktualizacja",
-		template: "Aby handlować na %s wymagana jest aktualizacja klienta.",
+		subject:  intl.Translation{T: "Wymagana aktualizacja"},
+		template: intl.Translation{T: "Aby handlować na %s wymagana jest aktualizacja klienta."},
 	},
-	// [host]
 	TopicDEXConnected: {
-		subject:  "Połączono z serwerem",
-		template: "Połączono z %s",
+		subject:  intl.Translation{T: "Połączono z serwerem"},
+		template: intl.Translation{T: "Połączono z %s"},
 	},
-	// [host]
 	TopicDEXDisconnected: {
-		subject:  "Rozłączono z serwerem",
-		template: "Rozłączono z %s",
+		subject:  intl.Translation{T: "Rozłączono z serwerem"},
+		template: intl.Translation{T: "Rozłączono z %s"},
 	},
-	// [host, rule, time, details]
 	TopicPenalized: {
-		subject:  "Serwer ukarał Cię punktami karnymi",
-		template: "Punkty karne od serwera DEX na %s\nostatnia złamana reguła: %s\nczas: %v\nszczegóły:\n\"%s\"\n",
+		subject:  intl.Translation{T: "Serwer ukarał Cię punktami karnymi"},
+		template: intl.Translation{T: "Punkty karne od serwera DEX na %s\nostatnia złamana reguła: %s\nczas: %v\nszczegóły:\n\"%s\"\n"},
 	},
 	TopicSeedNeedsSaving: {
-		subject:  "Nie zapomnij zrobić kopii ziarna aplikacji",
-		template: "Utworzono nowe ziarno aplikacji. Zrób jego kopię w zakładce ustawień.",
+		subject:  intl.Translation{T: "Nie zapomnij zrobić kopii ziarna aplikacji"},
+		template: intl.Translation{T: "Utworzono nowe ziarno aplikacji. Zrób jego kopię w zakładce ustawień."},
 	},
 	TopicUpgradedToSeed: {
-		subject:  "Zrób kopię nowego ziarna aplikacji",
-		template: "Klient został zaktualizowany, by korzystać z ziarna aplikacji. Zrób jego kopię w zakładce ustawień.",
+		subject:  intl.Translation{T: "Zrób kopię nowego ziarna aplikacji"},
+		template: intl.Translation{T: "Klient został zaktualizowany, by korzystać z ziarna aplikacji. Zrób jego kopię w zakładce ustawień."},
 	},
-	// [host, msg]
 	TopicDEXNotification: {
-		subject:  "Wiadomość od DEX",
-		template: "%s: %s",
+		subject:  intl.Translation{T: "Wiadomość od DEX"},
+		template: intl.Translation{T: "%s: %s"},
 	},
 }
 
 // deDE is the German translations.
 var deDE = map[Topic]*translation{
-	// [host]
 	TopicAccountRegistered: {
-		subject:  "Account registeriert",
-		template: "Du kannst nun auf %s handeln",
+		subject:  intl.Translation{T: "Account registeriert"},
+		template: intl.Translation{T: "Du kannst nun auf %s handeln"},
 	},
-	// [confs, host]
 	TopicFeePaymentInProgress: {
-		subject:  "Abwicklung der Registrationsgebühr",
-		template: "Warten auf %d Bestätigungen bevor mit dem Handel bei %s begonnen werden kann",
+		subject:  intl.Translation{T: "Abwicklung der Registrationsgebühr"},
+		template: intl.Translation{T: "Warten auf %d Bestätigungen bevor mit dem Handel bei %s begonnen werden kann"},
 	},
-	// [confs, required confs]
 	TopicRegUpdate: {
-		subject:  "Aktualisierung der Registration",
-		template: "%v/%v Bestätigungen der Registrationsgebühr",
+		subject:  intl.Translation{T: "Aktualisierung der Registration"},
+		template: intl.Translation{T: "%v/%v Bestätigungen der Registrationsgebühr"},
 	},
-	// [host, error]
 	TopicFeePaymentError: {
-		subject:  "Fehler bei der Zahlung der Registrationsgebühr",
-		template: "Bei der Zahlung der Registrationsgebühr für %s trat ein Fehler auf: %v",
+		subject:  intl.Translation{T: "Fehler bei der Zahlung der Registrationsgebühr"},
+		template: intl.Translation{T: "Bei der Zahlung der Registrationsgebühr für %s trat ein Fehler auf: %v"},
 	},
-	// [host, error]
 	TopicAccountUnlockError: {
-		subject:  "Fehler beim Entsperren des Accounts",
-		template: "Fehler beim Entsperren des Accounts für %s: %v",
+		subject:  intl.Translation{T: "Fehler beim Entsperren des Accounts"},
+		template: intl.Translation{T: "Fehler beim Entsperren des Accounts für %s: %v"},
 	},
-	// [host]
 	TopicFeeCoinError: {
-		subject:  "Coin Fehler bei Registrationsgebühr",
-		template: "Fehlende Coin Angabe für Registrationsgebühr bei %s.",
+		subject:  intl.Translation{T: "Coin Fehler bei Registrationsgebühr"},
+		template: intl.Translation{T: "Fehlende Coin Angabe für Registrationsgebühr bei %s."},
 	},
-	// [host]
 	TopicWalletConnectionWarning: {
-		subject:  "Warnung bei Wallet Verbindung",
-		template: "Unvollständige Registration für %s erkannt, konnte keine Verbindung zum Decred Wallet herstellen",
+		subject:  intl.Translation{T: "Warnung bei Wallet Verbindung"},
+		template: intl.Translation{T: "Unvollständige Registration für %s erkannt, konnte keine Verbindung zum Decred Wallet herstellen"},
 	},
-	// [host, error]
 	TopicWalletUnlockError: {
-		subject:  "Fehler beim Entsperren des Wallet",
-		template: "Verbunden zum Wallet um die Registration bei %s abzuschließen, ein Fehler beim entsperren des Wallet ist aufgetreten: %v",
+		subject:  intl.Translation{T: "Fehler beim Entsperren des Wallet"},
+		template: intl.Translation{T: "Verbunden zum Wallet um die Registration bei %s abzuschließen, ein Fehler beim entsperren des Wallet ist aufgetreten: %v"},
 	},
-	// [asset name, error message]
 	TopicWalletCommsWarning: {
-		subject:  "Probleme mit der Verbindung zum Wallet",
-		template: "Kommunikation mit dem %v Wallet nicht möglich! Grund: %q",
+		subject:  intl.Translation{T: "Probleme mit der Verbindung zum Wallet"},
+		template: intl.Translation{T: "Kommunikation mit dem %v Wallet nicht möglich! Grund: %q"},
 	},
-	// [asset name]
 	TopicWalletPeersWarning: {
-		subject:  "Problem mit dem Wallet-Netzwerk",
-		template: "%v Wallet hat keine Netzwerk-Peers!",
+		subject:  intl.Translation{T: "Problem mit dem Wallet-Netzwerk"},
+		template: intl.Translation{T: "%v Wallet hat keine Netzwerk-Peers!"},
 	},
-	// [asset name]
 	TopicWalletPeersRestored: {
-		subject:  "Wallet-Konnektivität wiederhergestellt",
-		template: "Die Verbindung mit dem %v Wallet wurde wiederhergestellt.",
+		subject:  intl.Translation{T: "Wallet-Konnektivität wiederhergestellt"},
+		template: intl.Translation{T: "Die Verbindung mit dem %v Wallet wurde wiederhergestellt."},
 	},
-	// [ticker, error]
 	TopicSendError: {
-		subject:  "Sendefehler",
-		template: "Fehler beim senden von %s aufgetreten: %v",
+		subject:  intl.Translation{T: "Sendefehler"},
+		template: intl.Translation{T: "Fehler beim senden von %s aufgetreten: %v"},
 	},
-	// [ticker, coin ID]
 	TopicSendSuccess: {
-		subject:  "Erfolgreich gesendet",
-		template: "Das Senden von %s wurde erfolgreich abgeschlossen. Coin ID = %s",
+		subject:  intl.Translation{T: "Erfolgreich gesendet"},
+		template: intl.Translation{T: "Das Senden von %s wurde erfolgreich abgeschlossen. Coin ID = %s"},
 	},
-	// [error]
 	TopicOrderLoadFailure: {
-		subject:  "Fehler beim Laden der Aufträge",
-		template: "Einige Aufträge konnten nicht aus der Datenbank geladen werden: %v",
+		subject:  intl.Translation{T: "Fehler beim Laden der Aufträge"},
+		template: intl.Translation{T: "Einige Aufträge konnten nicht aus der Datenbank geladen werden: %v"},
 	},
-	// [qty, ticker, token]
 	TopicYoloPlaced: {
-		subject:  "Marktauftrag platziert",
-		template: "Verkaufe %s %s zum Marktpreis (%s)",
+		subject:  intl.Translation{T: "Marktauftrag platziert"},
+		template: intl.Translation{T: "Verkaufe %s %s zum Marktpreis (%s)"},
 	},
-	// [qty, ticker, rate string, token]
 	TopicBuyOrderPlaced: {
-		subject:  "Auftrag platziert",
-		template: "Buying %s %s, Kurs = %s (%s)",
-		stale:    true,
+		subject:  intl.Translation{T: "Auftrag platziert"},
+		template: intl.Translation{T: "Buying %s %s, Kurs = %s (%s)"},
 	},
-	// [qty, ticker, rate string, token]
 	TopicSellOrderPlaced: {
-		subject:  "Auftrag platziert",
-		template: "Selling %s %s, Kurs = %s (%s)",
-		stale:    true,
+		subject:  intl.Translation{T: "Auftrag platziert"},
+		template: intl.Translation{T: "Selling %s %s, Kurs = %s (%s)"},
 	},
-	// [missing count, token, host]
 	TopicMissingMatches: {
-		subject:  "Fehlende Matches",
-		template: "%d Matches für den Auftrag %s wurden nicht von %q gemeldet und gelten daher als widerrufen",
+		subject:  intl.Translation{T: "Fehlende Matches"},
+		template: intl.Translation{T: "%d Matches für den Auftrag %s wurden nicht von %q gemeldet und gelten daher als widerrufen"},
 	},
-	// [token, error]
 	TopicWalletMissing: {
-		subject:  "Wallet fehlt",
-		template: "Fehler bei der Wallet-Abfrage für den aktiven Auftrag %s: %v",
+		subject:  intl.Translation{T: "Wallet fehlt"},
+		template: intl.Translation{T: "Fehler bei der Wallet-Abfrage für den aktiven Auftrag %s: %v"},
 	},
-	// [side, token, match status]
 	TopicMatchErrorCoin: {
-		subject:  "Fehler beim Coin Match",
-		template: "Match %s für den Auftrag %s hat den Status %s, hat aber keine Coins für den Swap vom Maker gefunden.",
+		subject:  intl.Translation{T: "Fehler beim Coin Match"},
+		template: intl.Translation{T: "Match %s für den Auftrag %s hat den Status %s, hat aber keine Coins für den Swap vom Maker gefunden."},
 	},
-	// [side, token, match status]
 	TopicMatchErrorContract: {
-		subject:  "Fehler beim Match Kontrakt",
-		template: "Match %s für Auftrag %s hat den Status %s, hat aber keinen passenden Maker Swap Kontrakt.",
+		subject:  intl.Translation{T: "Fehler beim Match Kontrakt"},
+		template: intl.Translation{T: "Match %s für Auftrag %s hat den Status %s, hat aber keinen passenden Maker Swap Kontrakt."},
 	},
-	// [ticker, contract, token, error]
 	TopicMatchRecoveryError: {
-		subject:  "Fehler bei Match Wiederherstellung",
-		template: "Fehler bei der Prüfung des Swap-Kontrakts der Gegenpartei (%s %v) während der Wiederherstellung des Auftrags %s: %v",
+		subject:  intl.Translation{T: "Fehler bei Match Wiederherstellung"},
+		template: intl.Translation{T: "Fehler bei der Prüfung des Swap-Kontrakts der Gegenpartei (%s %v) während der Wiederherstellung des Auftrags %s: %v"},
 	},
-	// [token]
 	TopicOrderCoinError: {
-		subject:  "Fehler bei den Coins für einen Auftrag",
-		template: "Keine Coins zur Finanzierung des aktiven Auftrags %s gefunden",
+		subject:  intl.Translation{T: "Fehler bei den Coins für einen Auftrag"},
+		template: intl.Translation{T: "Keine Coins zur Finanzierung des aktiven Auftrags %s gefunden"},
 	},
-	// [token, ticker, error]
 	TopicOrderCoinFetchError: {
-		subject:  "Fehler beim Abruf der Coins für den Auftrag",
-		template: "Beim Abruf der Coins als Quelle für den Auftrag %s (%s) ist ein Fehler aufgetreten: %v",
+		subject:  intl.Translation{T: "Fehler beim Abruf der Coins für den Auftrag"},
+		template: intl.Translation{T: "Beim Abruf der Coins als Quelle für den Auftrag %s (%s) ist ein Fehler aufgetreten: %v"},
 	},
-	// [token]
 	TopicMissedCancel: {
-		subject:  "Abbruch verpasst",
-		template: "Der Abbruch passt nicht zum Auftrag %s. Dies kann passieren wenn der Abbruch in der gleichen Epoche wie der Abschluss übermittelt wird oder wenn der Zielauftrag vollständig ausgeführt wird bevor er mit dem Abbruch gematcht werden konnte.",
+		subject:  intl.Translation{T: "Abbruch verpasst"},
+		template: intl.Translation{T: "Der Abbruch passt nicht zum Auftrag %s. Dies kann passieren wenn der Abbruch in der gleichen Epoche wie der Abschluss übermittelt wird oder wenn der Zielauftrag vollständig ausgeführt wird bevor er mit dem Abbruch gematcht werden konnte."},
 	},
-	// [base ticker, quote ticker, host, token]
 	TopicBuyOrderCanceled: {
-		subject:  "Auftrag abgebrochen",
-		template: "Auftrag für %s-%s bei %s wurde abgebrochen (%s)",
-		stale:    true,
+		subject:  intl.Translation{T: "Auftrag abgebrochen"},
+		template: intl.Translation{T: "Auftrag für %s-%s bei %s wurde abgebrochen (%s)"},
 	},
 	TopicSellOrderCanceled: {
-		subject:  "Auftrag abgebrochen",
-		template: "Auftrag für %s-%s bei %s wurde abgebrochen (%s)",
-		stale:    true,
+		subject:  intl.Translation{T: "Auftrag abgebrochen"},
+		template: intl.Translation{T: "Auftrag für %s-%s bei %s wurde abgebrochen (%s)"},
 	},
-	// [base ticker, quote ticker, fill percent, token]
 	TopicBuyMatchesMade: {
-		subject:  "Matches durchgeführt",
-		template: "Auftrag für %s-%s %.1f%% erfüllt (%s)",
-		stale:    true,
+		subject:  intl.Translation{T: "Matches durchgeführt"},
+		template: intl.Translation{T: "Auftrag für %s-%s %.1f%% erfüllt (%s)"},
 	},
-	// [base ticker, quote ticker, fill percent, token]
 	TopicSellMatchesMade: {
-		subject:  "Matches durchgeführt",
-		template: "Auftrag für %s-%s %.1f%% erfüllt (%s)",
-		stale:    true,
+		subject:  intl.Translation{T: "Matches durchgeführt"},
+		template: intl.Translation{T: "Auftrag für %s-%s %.1f%% erfüllt (%s)"},
 	},
-	// [qty, ticker, token]
 	TopicSwapSendError: {
-		subject:  "Fehler beim Senden des Swaps",
-		template: "Beim Senden des Swap Output(s) im Wert von %s %s für den Auftrag %s",
+		subject:  intl.Translation{T: "Fehler beim Senden des Swaps"},
+		template: intl.Translation{T: "Beim Senden des Swap Output(s) im Wert von %s %s für den Auftrag %s"},
 	},
-	// [match, error]
 	TopicInitError: {
-		subject:  "Fehler beim Swap Reporting",
-		template: "Fehler bei der Benachrichtigung des Swaps an den DEX für den Match %s: %v",
+		subject:  intl.Translation{T: "Fehler beim Swap Reporting"},
+		template: intl.Translation{T: "Fehler bei der Benachrichtigung des Swaps an den DEX für den Match %s: %v"},
 	},
-	// [match, error]
 	TopicReportRedeemError: {
-		subject:  "Fehler beim Redeem Reporting",
-		template: "Fehler bei der Benachrichtigung des DEX für die Redemption des Match %s: %v",
+		subject:  intl.Translation{T: "Fehler beim Redeem Reporting"},
+		template: intl.Translation{T: "Fehler bei der Benachrichtigung des DEX für die Redemption des Match %s: %v"},
 	},
-	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "Swaps initiiert",
-		template: "Swaps im Wert von %s %s für den Auftrag %s gesendet",
+		subject:  intl.Translation{T: "Swaps initiiert"},
+		template: intl.Translation{T: "Swaps im Wert von %s %s für den Auftrag %s gesendet"},
 	},
-	// [qty, ticker, token]
 	TopicRedemptionError: {
-		subject:  "Fehler bei der Redemption",
-		template: "Fehler beim Senden von Redemptions im Wert von %s %s für Auftrag %s",
+		subject:  intl.Translation{T: "Fehler bei der Redemption"},
+		template: intl.Translation{T: "Fehler beim Senden von Redemptions im Wert von %s %s für Auftrag %s"},
 	},
-	// [qty, ticker, token]
 	TopicMatchComplete: {
-		subject:  "Match abgeschlossen",
-		template: "Redeemed %s %s für Auftrag %s",
+		subject:  intl.Translation{T: "Match abgeschlossen"},
+		template: intl.Translation{T: "Redeemed %s %s für Auftrag %s"},
 	},
-	// [qty, ticker, token]
 	TopicRefundFailure: {
-		subject:  "Fehler bei der Erstattung",
-		template: "%s %s für Auftrag %s erstattet, mit einigen Fehlern",
+		subject:  intl.Translation{T: "Fehler bei der Erstattung"},
+		template: intl.Translation{T: "%s %s für Auftrag %s erstattet, mit einigen Fehlern"},
 	},
-	// [qty, ticker, token]
 	TopicMatchesRefunded: {
-		subject:  "Matches Erstattet",
-		template: "%s %s für Auftrag %s erstattet",
+		subject:  intl.Translation{T: "Matches Erstattet"},
+		template: intl.Translation{T: "%s %s für Auftrag %s erstattet"},
 	},
-	// [match ID token]
 	TopicMatchRevoked: {
-		subject:  "Match widerrufen",
-		template: "Match %s wurde widerrufen",
+		subject:  intl.Translation{T: "Match widerrufen"},
+		template: intl.Translation{T: "Match %s wurde widerrufen"},
 	},
-	// [token, market name, host]
 	TopicOrderRevoked: {
-		subject:  "Auftrag widerrufen",
-		template: "Der Auftrag %s für den %s Markt bei %s wurde vom Server widerrufen",
+		subject:  intl.Translation{T: "Auftrag widerrufen"},
+		template: intl.Translation{T: "Der Auftrag %s für den %s Markt bei %s wurde vom Server widerrufen"},
 	},
-	// [token, market name, host]
 	TopicOrderAutoRevoked: {
-		subject:  "Auftrag automatisch widerrufen",
-		template: "Der Auftrag %s für den %s Markt bei %s wurde wegen Aussetzung des Marktes widerrufen",
+		subject:  intl.Translation{T: "Auftrag automatisch widerrufen"},
+		template: intl.Translation{T: "Der Auftrag %s für den %s Markt bei %s wurde wegen Aussetzung des Marktes widerrufen"},
 	},
-	// [ticker, coin ID, match]
 	TopicMatchRecovered: {
-		subject:  "Match wiederhergestellt",
-		template: "Die Redemption (%s: %v) des Anbieters wurde gefunden und das Geheimnis für Match %s verifiziert",
+		subject:  intl.Translation{T: "Match wiederhergestellt"},
+		template: intl.Translation{T: "Die Redemption (%s: %v) des Anbieters wurde gefunden und das Geheimnis für Match %s verifiziert"},
 	},
-	// [token]
 	TopicCancellingOrder: {
-		subject:  "Auftrag abgebrochen",
-		template: "Der Auftrag %s wurde abgebrochen",
+		subject:  intl.Translation{T: "Auftrag abgebrochen"},
+		template: intl.Translation{T: "Der Auftrag %s wurde abgebrochen"},
 	},
-	// [token, old status, new status]
 	TopicOrderStatusUpdate: {
-		subject:  "Aktualisierung des Auftragsstatus",
-		template: "Status des Auftrags %v geändert von %v auf %v",
+		subject:  intl.Translation{T: "Aktualisierung des Auftragsstatus"},
+		template: intl.Translation{T: "Status des Auftrags %v geändert von %v auf %v"},
 	},
-	// [count, host, token]
 	TopicMatchResolutionError: {
-		subject:  "Fehler bei der Auflösung für Match",
-		template: "%d Matches durch %s gemeldet wurden für %s nicht gefunden.",
+		subject:  intl.Translation{T: "Fehler bei der Auflösung für Match"},
+		template: intl.Translation{T: "%d Matches durch %s gemeldet wurden für %s nicht gefunden."},
 	},
-	// [token]
 	TopicFailedCancel: {
-		subject:  "Abbruch fehlgeschlagen",
-		template: "Der Auftrag für den Abbruch des Auftrags %s blieb 2 Epochen lang im Epoche-Status hängen und wird nun gelöscht.",
-		stale:    true,
+		subject:  intl.Translation{T: "Abbruch fehlgeschlagen"},
+		template: intl.Translation{T: "Der Auftrag für den Abbruch des Auftrags %s blieb 2 Epochen lang im Epoche-Status hängen und wird nun gelöscht."},
 	},
-	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
-		subject:  "Audit-Probleme",
-		template: "Immernoch auf der Suche den Coins %v (%s) der Gegenseite für Match %s. Überprüfe deine Internetverbindung und die Verbindungen zum Wallet.",
+		subject:  intl.Translation{T: "Audit-Probleme"},
+		template: intl.Translation{T: "Immernoch auf der Suche den Coins %v (%s) der Gegenseite für Match %s. Überprüfe deine Internetverbindung und die Verbindungen zum Wallet."},
 	},
-	// [host, error]
 	TopicDexAuthError: {
-		subject:  "DEX-Authentifizierungsfehler",
-		template: "%s: %v",
+		subject:  intl.Translation{T: "DEX-Authentifizierungsfehler"},
+		template: intl.Translation{T: "%s: %v"},
 	},
-	// [count, host]
 	TopicUnknownOrders: {
-		subject:  "DEX meldet unbekannte Aufträge",
-		template: "%d aktive Aufträge von DEX %s gemeldet aber konnten nicht gefunden werden.",
+		subject:  intl.Translation{T: "DEX meldet unbekannte Aufträge"},
+		template: intl.Translation{T: "%d aktive Aufträge von DEX %s gemeldet aber konnten nicht gefunden werden."},
 	},
-	// [count]
 	TopicOrdersReconciled: {
-		subject:  "Aufträge mit DEX abgestimmt",
-		template: "Der Status für %d Aufträge wurde aktualisiert.",
+		subject:  intl.Translation{T: "Aufträge mit DEX abgestimmt"},
+		template: intl.Translation{T: "Der Status für %d Aufträge wurde aktualisiert."},
 	},
-	// [ticker, address]
 	TopicWalletConfigurationUpdated: {
-		subject:  "Aktualisierung der Wallet Konfiguration",
-		template: "Konfiguration für Wallet %s wurde aktualisiert. Einzahlungsadresse = %s",
+		subject:  intl.Translation{T: "Aktualisierung der Wallet Konfiguration"},
+		template: intl.Translation{T: "Konfiguration für Wallet %s wurde aktualisiert. Einzahlungsadresse = %s"},
 	},
-	//  [ticker]
 	TopicWalletPasswordUpdated: {
-		subject:  "Wallet-Passwort aktualisiert",
-		template: "Passwort für das %s Wallet wurde aktualisiert.",
+		subject:  intl.Translation{T: "Wallet-Passwort aktualisiert"},
+		template: intl.Translation{T: "Passwort für das %s Wallet wurde aktualisiert."},
 	},
-	// [market name, host, time]
 	TopicMarketSuspendScheduled: {
-		subject:  "Aussetzung des Marktes geplant",
-		template: "%s Markt bei %s ist nun für ab %v zur Aussetzung geplant.",
+		subject:  intl.Translation{T: "Aussetzung des Marktes geplant"},
+		template: intl.Translation{T: "%s Markt bei %s ist nun für ab %v zur Aussetzung geplant."},
 	},
-	// [market name, host]
 	TopicMarketSuspended: {
-		subject:  "Markt ausgesetzt",
-		template: "Der Handel für den %s Markt bei %s ist nun ausgesetzt.",
+		subject:  intl.Translation{T: "Markt ausgesetzt"},
+		template: intl.Translation{T: "Der Handel für den %s Markt bei %s ist nun ausgesetzt."},
 	},
-	// [market name, host]
 	TopicMarketSuspendedWithPurge: {
-		subject:  "Markt ausgesetzt, Aufträge gelöscht",
-		template: "Der Handel für den %s Markt bei %s ist nun ausgesetzt. Alle gebuchten Aufträge werden jetzt ENTFERNT.",
+		subject:  intl.Translation{T: "Markt ausgesetzt, Aufträge gelöscht"},
+		template: intl.Translation{T: "Der Handel für den %s Markt bei %s ist nun ausgesetzt. Alle gebuchten Aufträge werden jetzt ENTFERNT."},
 	},
-	// [market name, host, time]
 	TopicMarketResumeScheduled: {
-		subject:  "Wiederaufnahme des Marktes geplant",
-		template: "Der %s Markt bei %s wird nun zur Wiederaufnahme ab %v geplant",
+		subject:  intl.Translation{T: "Wiederaufnahme des Marktes geplant"},
+		template: intl.Translation{T: "Der %s Markt bei %s wird nun zur Wiederaufnahme ab %v geplant"},
 	},
-	// [market name, host, epoch]
 	TopicMarketResumed: {
-		subject:  "Markt wiederaufgenommen",
-		template: "Der %s Markt bei %s hat den Handel mit der Epoche %d wieder aufgenommen",
+		subject:  intl.Translation{T: "Markt wiederaufgenommen"},
+		template: intl.Translation{T: "Der %s Markt bei %s hat den Handel mit der Epoche %d wieder aufgenommen"},
 	},
-	// [host]
 	TopicUpgradeNeeded: {
-		subject:  "Upgrade notwendig",
-		template: "Du musst deinen Klient aktualisieren um bei %s zu Handeln.",
+		subject:  intl.Translation{T: "Upgrade notwendig"},
+		template: intl.Translation{T: "Du musst deinen Klient aktualisieren um bei %s zu Handeln."},
 	},
-	// [host]
 	TopicDEXConnected: {
-		subject:  "Server verbunden",
-		template: "Erfolgreich verbunden mit %s",
+		subject:  intl.Translation{T: "Server verbunden"},
+		template: intl.Translation{T: "Erfolgreich verbunden mit %s"},
 	},
-	// [host]
 	TopicDEXDisconnected: {
-		subject:  "Verbindung zum Server getrennt",
-		template: "Verbindung zu %s unterbrochen",
+		subject:  intl.Translation{T: "Verbindung zum Server getrennt"},
+		template: intl.Translation{T: "Verbindung zu %s unterbrochen"},
 	},
-	// [host, rule, time, details]
 	TopicPenalized: {
-		subject:  "Bestrafung durch einen Server erhalten",
-		template: "Bestrafung von DEX %s\nletzte gebrochene Regel: %s\nZeitpunkt: %v\nDetails:\n\"%s\"\n",
+		subject:  intl.Translation{T: "Bestrafung durch einen Server erhalten"},
+		template: intl.Translation{T: "Bestrafung von DEX %s\nletzte gebrochene Regel: %s\nZeitpunkt: %v\nDetails:\n\"%s\"\n"},
 	},
 	TopicSeedNeedsSaving: {
-		subject:  "Vergiss nicht deinen App-Seed zu sichern",
-		template: "Es wurde ein neuer App-Seed erstellt. Erstelle jetzt eine Sicherungskopie in den Einstellungen.",
+		subject:  intl.Translation{T: "Vergiss nicht deinen App-Seed zu sichern"},
+		template: intl.Translation{T: "Es wurde ein neuer App-Seed erstellt. Erstelle jetzt eine Sicherungskopie in den Einstellungen."},
 	},
 	TopicUpgradedToSeed: {
-		subject:  "Sichere deinen neuen App-Seed",
-		template: "Dein Klient wurde aktualisiert und nutzt nun einen App-Seed. Erstelle jetzt eine Sicherungskopie in den Einstellungen.",
+		subject:  intl.Translation{T: "Sichere deinen neuen App-Seed"},
+		template: intl.Translation{T: "Dein Klient wurde aktualisiert und nutzt nun einen App-Seed. Erstelle jetzt eine Sicherungskopie in den Einstellungen."},
 	},
-	// [host, msg]
 	TopicDEXNotification: {
-		subject:  "Nachricht von DEX",
-		template: "%s: %s",
+		subject:  intl.Translation{T: "Nachricht von DEX"},
+		template: intl.Translation{T: "%s: %s"},
 	},
-	// [parentSymbol, tokenSymbol]
 	TopicQueuedCreationFailed: {
-		subject:  "Token-Wallet konnte nicht erstellt werden",
-		template: "Nach dem Erstellen des %s-Wallet kam es zu einen Fehler, konnte das %s-Wallet nicht erstellen",
+		subject:  intl.Translation{T: "Token-Wallet konnte nicht erstellt werden"},
+		template: intl.Translation{T: "Nach dem Erstellen des %s-Wallet kam es zu einen Fehler, konnte das %s-Wallet nicht erstellen"},
 	},
 }
 
 // ar is the Arabic translations.
 var ar = map[Topic]*translation{
-	// [host]
 	TopicAccountRegistered: {
-		subject:  "تم تسجيل الحساب",
-		template: "يمكنك الآن التداول عند \u200e%s",
+		subject:  intl.Translation{T: "تم تسجيل الحساب"},
+		template: intl.Translation{T: "يمكنك الآن التداول عند \u200e%s"},
 	},
-	// [confs, host]
 	TopicFeePaymentInProgress: {
-		subject:  "جارٍ دفع الرسوم",
-		template: "في انتظار \u200e%d تأكيدات قبل التداول عند \u200e%s",
+		subject:  intl.Translation{T: "جارٍ دفع الرسوم"},
+		template: intl.Translation{T: "في انتظار \u200e%d تأكيدات قبل التداول عند \u200e%s"},
 	},
-	// [confs, required confs]
 	TopicRegUpdate: {
-		subject:  "تحديث التسجيل",
-		template: "تأكيدات دفع الرسوم \u200e%v/\u200e%v",
+		subject:  intl.Translation{T: "تحديث التسجيل"},
+		template: intl.Translation{T: "تأكيدات دفع الرسوم \u200e%v/\u200e%v"},
 	},
-	// [host, error]
 	TopicFeePaymentError: {
-		subject:  "خطأ في دفع الرسوم",
-		template: "عثر على خطأ أثناء دفع الرسوم إلى \u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "خطأ في دفع الرسوم"},
+		template: intl.Translation{T: "عثر على خطأ أثناء دفع الرسوم إلى \u200e%s: \u200e%v"},
 	},
-	// [host, error]
 	TopicAccountUnlockError: {
-		subject:  "خطأ فتح الحساب",
-		template: "خطأ فتح الحساب لأجل \u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "خطأ فتح الحساب"},
+		template: intl.Translation{T: "خطأ فتح الحساب لأجل \u200e%s: \u200e%v"},
 	},
-	// [host]
 	TopicFeeCoinError: {
-		subject:  "خطأ في رسوم العملة",
-		template: "رسوم العملة \u200e%s فارغة.",
+		subject:  intl.Translation{T: "خطأ في رسوم العملة"},
+		template: intl.Translation{T: "رسوم العملة \u200e%s فارغة."},
 	},
-	// [host]
 	TopicWalletConnectionWarning: {
-		subject:  "تحذير اتصال المحفظة",
-		template: "تم الكشف عن تسجيل غير مكتمل لـ  \u200e%s، لكنه فشل في الاتصال بمحفظة ديكريد",
+		subject:  intl.Translation{T: "تحذير اتصال المحفظة"},
+		template: intl.Translation{T: "تم الكشف عن تسجيل غير مكتمل لـ  \u200e%s، لكنه فشل في الاتصال بمحفظة ديكريد"},
 	},
-	// [host, error]
 	TopicWalletUnlockError: {
-		subject:  "خطأ في فتح المحفظة",
-		template: "متصل بالمحفظة لإكمال التسجيل عند \u200e%s، لكنه فشل في فتح القفل: \u200e%v",
+		subject:  intl.Translation{T: "خطأ في فتح المحفظة"},
+		template: intl.Translation{T: "متصل بالمحفظة لإكمال التسجيل عند \u200e%s، لكنه فشل في فتح القفل: \u200e%v"},
 	},
-	// [asset name, error message]
 	TopicWalletCommsWarning: {
-		subject:  "مشكلة الإتصال بالمحفظة",
-		template: "غير قادر على الاتصال بمحفظة !\u200e%v السبب: \u200e%v",
+		subject:  intl.Translation{T: "مشكلة الإتصال بالمحفظة"},
+		template: intl.Translation{T: "غير قادر على الاتصال بمحفظة !\u200e%v السبب: \u200e%v"},
 	},
-	// [asset name]
 	TopicWalletPeersWarning: {
-		subject:  "مشكلة في شبكة المحفظة",
-		template: "!لا يوجد لدى المحفظة \u200e%v نظراء على الشبكة",
+		subject:  intl.Translation{T: "مشكلة في شبكة المحفظة"},
+		template: intl.Translation{T: "!لا يوجد لدى المحفظة \u200e%v نظراء على الشبكة"},
 	},
-	// [asset name]
 	TopicWalletPeersRestored: {
-		subject:  "تمت استعادة الاتصال بالمحفظة",
-		template: "تمت اعادة الاتصال بالمحفظة \u200e%v.",
+		subject:  intl.Translation{T: "تمت استعادة الاتصال بالمحفظة"},
+		template: intl.Translation{T: "تمت اعادة الاتصال بالمحفظة \u200e%v."},
 	},
-	// [ticker, error]
 	TopicSendError: {
-		subject:  "إرسال الخطأ",
-		template: "تمت مصادفة خطأ أثناء إرسال \u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "إرسال الخطأ"},
+		template: intl.Translation{T: "تمت مصادفة خطأ أثناء إرسال \u200e%s: \u200e%v"},
 	},
-	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
-		subject:  "تم الإرسال بنجاح",
-		template: "تم بنجاح إرسال \u200e%s \u200e%s إلى \u200e%s. معرف العملة = \u200e%s",
+		subject:  intl.Translation{T: "تم الإرسال بنجاح"},
+		template: intl.Translation{T: "تم بنجاح إرسال \u200e%s \u200e%s إلى \u200e%s. معرف العملة = \u200e%s"},
 	},
-	// [error]
 	TopicOrderLoadFailure: {
-		subject:  "فشل تحميل الطلب",
-		template: "فشل تحميل بعض الطلبات من قاعدة البيانات: \u200e%v",
+		subject:  intl.Translation{T: "فشل تحميل الطلب"},
+		template: intl.Translation{T: "فشل تحميل بعض الطلبات من قاعدة البيانات: \u200e%v"},
 	},
-	// [qty, ticker, token]
 	TopicYoloPlaced: {
-		subject:  "تم تقديم طلب السوق",
-		template: "بيع \u200e%s \u200e%s بسعر السوق (\u200e%s)",
+		subject:  intl.Translation{T: "تم تقديم طلب السوق"},
+		template: intl.Translation{T: "بيع \u200e%s \u200e%s بسعر السوق (\u200e%s)"},
 	},
-	// [qty, ticker, rate string, token]
 	TopicBuyOrderPlaced: {
-		subject:  "تم وضع الطلب",
-		template: "الشراء \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)",
+		subject:  intl.Translation{T: "تم وضع الطلب"},
+		template: intl.Translation{T: "الشراء \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)"},
 	},
-	// [qty, ticker, rate string, token]
 	TopicSellOrderPlaced: {
-		subject:  "تم وضع الطلب",
-		template: "بيع \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)",
+		subject:  intl.Translation{T: "تم وضع الطلب"},
+		template: intl.Translation{T: "بيع \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)"},
 	},
-	// [missing count, token, host]
 	TopicMissingMatches: {
-		subject:  "مطابقات مفقودة",
-		template: "لم يتم الإبلاغ عن \u200e%d تطابقات للطلب \u200e%s من قبل \u200e%q وتعتبر باطلة",
+		subject:  intl.Translation{T: "مطابقات مفقودة"},
+		template: intl.Translation{T: "لم يتم الإبلاغ عن \u200e%d تطابقات للطلب \u200e%s من قبل \u200e%q وتعتبر باطلة"},
 	},
-	// [token, error]
 	TopicWalletMissing: {
-		subject:  "المحفظة مفقودة",
-		template: "خطأ في استرداد المحفظة للطلب النشط \u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "المحفظة مفقودة"},
+		template: intl.Translation{T: "خطأ في استرداد المحفظة للطلب النشط \u200e%s: \u200e%v"},
 	},
-	// [side, token, match status]
 	TopicMatchErrorCoin: {
-		subject:  "خطأ في مطابقة العملة",
-		template: "مطابقة \u200e%s للطلب \u200e%s في الحالة \u200e%s، لكن لا توجد عملة مقايضة من الصانع.",
+		subject:  intl.Translation{T: "خطأ في مطابقة العملة"},
+		template: intl.Translation{T: "مطابقة \u200e%s للطلب \u200e%s في الحالة \u200e%s، لكن لا توجد عملة مقايضة من الصانع."},
 	},
-	// [side, token, match status]
 	TopicMatchErrorContract: {
-		subject:  "خطأ في عقد المطابقة",
-		template: "تطابق \u200e%s للطلب \u200e%s في الحالة \u200e%s، لكن لا يوجد عقد مقايضة من الصانع.",
+		subject:  intl.Translation{T: "خطأ في عقد المطابقة"},
+		template: intl.Translation{T: "تطابق \u200e%s للطلب \u200e%s في الحالة \u200e%s، لكن لا يوجد عقد مقايضة من الصانع."},
 	},
-	// [ticker, contract, token, error]
 	TopicMatchRecoveryError: {
-		subject:  "خطأ استعادة المطابقة",
-		template: "خطأ في تدقيق عقد مقايضة الطرف المقابل (\u200e%s \u200e%v) أثناء استرداد المقايضة عند الطلب \u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "خطأ استعادة المطابقة"},
+		template: intl.Translation{T: "خطأ في تدقيق عقد مقايضة الطرف المقابل (\u200e%s \u200e%v) أثناء استرداد المقايضة عند الطلب \u200e%s: \u200e%v"},
 	},
-	// [token]
 	TopicOrderCoinError: {
-		subject:  "خطأ عند طلب العملة",
-		template: "لم يتم تسجيل عملات تمويل للطلب النشط \u200e%s",
+		subject:  intl.Translation{T: "خطأ عند طلب العملة"},
+		template: intl.Translation{T: "لم يتم تسجيل عملات تمويل للطلب النشط \u200e%s"},
 	},
-	// [token, ticker, error]
 	TopicOrderCoinFetchError: {
-		subject:  "خطأ في جلب طلب العملة",
-		template: "خطأ في استرداد عملات المصدر للطلب \u200e%s (\u200e%s): \u200e%v",
+		subject:  intl.Translation{T: "خطأ في جلب طلب العملة"},
+		template: intl.Translation{T: "خطأ في استرداد عملات المصدر للطلب \u200e%s (\u200e%s): \u200e%v"},
 	},
-	// [token]
 	TopicMissedCancel: {
-		subject:  "تفويت الإلغاء",
-		template: "طلب الإلغاء لم يتطابق مع الطلب \u200e%s. يمكن أن يحدث هذا إذا تم تقديم طلب الإلغاء في نفس حقبة التداول أو إذا تم تنفيذ الطلب المستهدف بالكامل قبل المطابقة مع طلب الإلغاء.",
+		subject:  intl.Translation{T: "تفويت الإلغاء"},
+		template: intl.Translation{T: "طلب الإلغاء لم يتطابق مع الطلب \u200e%s. يمكن أن يحدث هذا إذا تم تقديم طلب الإلغاء في نفس حقبة التداول أو إذا تم تنفيذ الطلب المستهدف بالكامل قبل المطابقة مع طلب الإلغاء."},
 	},
-	// [base ticker, quote ticker, host, token]
 	TopicBuyOrderCanceled: {
-		subject:  "تم إلغاء الطلب",
-		template: "تم إلغاء  (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s في \u200e%s",
+		subject:  intl.Translation{T: "تم إلغاء الطلب"},
+		template: intl.Translation{T: "تم إلغاء  (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s في \u200e%s"},
 	},
 	TopicSellOrderCanceled: {
-		subject:  "تم إلغاء الطلب",
-		template: "تم إلغاء  (\u200e%s) طلب البيع عند \u200e%s-\u200e%s في \u200e%s",
+		subject:  intl.Translation{T: "تم إلغاء الطلب"},
+		template: intl.Translation{T: "تم إلغاء  (\u200e%s) طلب البيع عند \u200e%s-\u200e%s في \u200e%s"},
 	},
-	// [base ticker, quote ticker, fill percent, token]
 	TopicBuyMatchesMade: {
-		subject:  "تم وضع المطابقات",
-		template: "تم تنفيذ (\u200e%s) طلب البيع عند \u200e%s-\u200e%s \u200e%.1f%%",
+		subject:  intl.Translation{T: "تم وضع المطابقات"},
+		template: intl.Translation{T: "تم تنفيذ (\u200e%s) طلب البيع عند \u200e%s-\u200e%s \u200e%.1f%%"},
 	},
-	// [base ticker, quote ticker, fill percent, token]
 	TopicSellMatchesMade: {
-		subject:  "تم وضع المطابقات",
-		template: "تم تنفيذ (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s \u200e%.1f%%",
+		subject:  intl.Translation{T: "تم وضع المطابقات"},
+		template: intl.Translation{T: "تم تنفيذ (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s \u200e%.1f%%"},
 	},
-	// [qty, ticker, token]
 	TopicSwapSendError: {
-		subject:  "خطأ في إرسال المقايضة",
-		template: "تمت مصادفة خطأ في إرسال إخراج (مخرجات) مقايضة بقيمة \u200e%s \u200e%s عند الطلب \u200e%s",
+		subject:  intl.Translation{T: "خطأ في إرسال المقايضة"},
+		template: intl.Translation{T: "تمت مصادفة خطأ في إرسال إخراج (مخرجات) مقايضة بقيمة \u200e%s \u200e%s عند الطلب \u200e%s"},
 	},
-	// [match, error]
 	TopicInitError: {
-		subject:  "خطأ إبلاغ مقايضة",
-		template: "خطأ إخطار منصة المبادلات اللامركزية بالمقايضة من أجل المطابقة \u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "خطأ إبلاغ مقايضة"},
+		template: intl.Translation{T: "خطأ إخطار منصة المبادلات اللامركزية بالمقايضة من أجل المطابقة \u200e%s: \u200e%v"},
 	},
-	// [match, error]
 	TopicReportRedeemError: {
-		subject:  "خطأ إبلاغ الإسترداد",
-		template: "خطأ في إعلام منصة المبادلات اللامركزية بالاسترداد من أجل المطابقة \u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "خطأ إبلاغ الإسترداد"},
+		template: intl.Translation{T: "خطأ في إعلام منصة المبادلات اللامركزية بالاسترداد من أجل المطابقة \u200e%s: \u200e%v"},
 	},
-	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "بدأت المقايضات",
-		template: "تم إرسال مقايضات بقيمة \u200e%s \u200e%s عند الطلب \u200e%s",
+		subject:  intl.Translation{T: "بدأت المقايضات"},
+		template: intl.Translation{T: "تم إرسال مقايضات بقيمة \u200e%s \u200e%s عند الطلب \u200e%s"},
 	},
-	// [qty, ticker, token]
 	TopicRedemptionError: {
-		subject:  "خطأ في الاسترداد",
-		template: "حدث خطأ أثناء إرسال عمليات استرداد بقيمة \u200e%s \u200e%s للطلب \u200e%s",
+		subject:  intl.Translation{T: "خطأ في الاسترداد"},
+		template: intl.Translation{T: "حدث خطأ أثناء إرسال عمليات استرداد بقيمة \u200e%s \u200e%s للطلب \u200e%s"},
 	},
-	// [qty, ticker, token]
 	TopicMatchComplete: {
-		subject:  "اكتملت المطابقة",
-		template: "تم استرداد \u200e%s \u200e%s عند الطلب \u200e%s",
+		subject:  intl.Translation{T: "اكتملت المطابقة"},
+		template: intl.Translation{T: "تم استرداد \u200e%s \u200e%s عند الطلب \u200e%s"},
 	},
-	// [qty, ticker, token]
 	TopicRefundFailure: {
-		subject:  "فشل الاسترداد",
-		template: "تم استرداد \u200e%s \u200e%s للطلب \u200e%s، مع وجود بعض الأخطاء",
+		subject:  intl.Translation{T: "فشل الاسترداد"},
+		template: intl.Translation{T: "تم استرداد \u200e%s \u200e%s للطلب \u200e%s، مع وجود بعض الأخطاء"},
 	},
-	// [qty, ticker, token]
 	TopicMatchesRefunded: {
-		subject:  "تم استرداد مبالغ المطابقات",
-		template: "تم استرداد مبلغ \u200e%s \u200e%s للطلب \u200e%s",
+		subject:  intl.Translation{T: "تم استرداد مبالغ المطابقات"},
+		template: intl.Translation{T: "تم استرداد مبلغ \u200e%s \u200e%s للطلب \u200e%s"},
 	},
-	// [match ID token]
 	TopicMatchRevoked: {
-		subject:  "تم إبطال المطابقة",
-		template: "تم إبطال المطابقة \u200e%s",
+		subject:  intl.Translation{T: "تم إبطال المطابقة"},
+		template: intl.Translation{T: "تم إبطال المطابقة \u200e%s"},
 	},
-	// [token, market name, host]
 	TopicOrderRevoked: {
-		subject:  "تم إبطال الطلب",
-		template: "تم إبطال الطلب \u200e%s في السوق \u200e%s عند \u200e%s من قبل الخادم",
+		subject:  intl.Translation{T: "تم إبطال الطلب"},
+		template: intl.Translation{T: "تم إبطال الطلب \u200e%s في السوق \u200e%s عند \u200e%s من قبل الخادم"},
 	},
-	// [token, market name, host]
 	TopicOrderAutoRevoked: {
-		subject:  "تم إبطال الطلب تلقائيًا",
-		template: "تم إبطال الطلب \u200e%s في السوق \u200e%s عند \u200e%s بسبب تعليق عمليات السوق",
+		subject:  intl.Translation{T: "تم إبطال الطلب تلقائيًا"},
+		template: intl.Translation{T: "تم إبطال الطلب \u200e%s في السوق \u200e%s عند \u200e%s بسبب تعليق عمليات السوق"},
 	},
-	// [ticker, coin ID, match]
 	TopicMatchRecovered: {
-		subject:  "تم استرداد المطابقة",
-		template: "تم إيجاد استرداد (\u200e%s: \u200e%v) صانع القيمة وسر المطابقة الذي تم التحقق منه \u200e%s",
+		subject:  intl.Translation{T: "تم استرداد المطابقة"},
+		template: intl.Translation{T: "تم إيجاد استرداد (\u200e%s: \u200e%v) صانع القيمة وسر المطابقة الذي تم التحقق منه \u200e%s"},
 	},
-	// [token]
 	TopicCancellingOrder: {
-		subject:  "إلغاء الطلب",
-		template: "تم إرسال إلغاء طلب للطلب \u200e%s",
+		subject:  intl.Translation{T: "إلغاء الطلب"},
+		template: intl.Translation{T: "تم إرسال إلغاء طلب للطلب \u200e%s"},
 	},
-	// [token, old status, new status]
 	TopicOrderStatusUpdate: {
-		subject:  "تحديث حالة الطلب",
-		template: "تمت مراجعة حالة الطلب \u200e%v من \u200e%v إلى \u200e%v",
+		subject:  intl.Translation{T: "تحديث حالة الطلب"},
+		template: intl.Translation{T: "تمت مراجعة حالة الطلب \u200e%v من \u200e%v إلى \u200e%v"},
 	},
-	// [count, host, token]
 	TopicMatchResolutionError: {
-		subject:  "خطأ في دقة المطابقة",
-		template: "لم يتم العثور على \u200e%d تطابقات تم الإبلاغ عنها بواسطة \u200e%s لـ \u200e%s.",
+		subject:  intl.Translation{T: "خطأ في دقة المطابقة"},
+		template: intl.Translation{T: "لم يتم العثور على \u200e%d تطابقات تم الإبلاغ عنها بواسطة \u200e%s لـ \u200e%s."},
 	},
-	// [token]
 	TopicFailedCancel: {
-		subject:  "فشل الإلغاء",
-		template: "إلغاء الطلب للطلب \u200e%s عالق في حالة الحقبة الزمنية لحقبتين وتم حذفه الآن.",
+		subject:  intl.Translation{T: "فشل الإلغاء"},
+		template: intl.Translation{T: "إلغاء الطلب للطلب \u200e%s عالق في حالة الحقبة الزمنية لحقبتين وتم حذفه الآن."},
 	},
-	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
-		subject:  "مشكلة في التدقيق",
-		template: "لا يزال البحث جارٍ عن عقد عملة \u200e%v (\u200e%s) الطرف الثاني للمطابقة \u200e%s. هل إتصالك بكل من الإنترنت و المحفظة جيد؟",
+		subject:  intl.Translation{T: "مشكلة في التدقيق"},
+		template: intl.Translation{T: "لا يزال البحث جارٍ عن عقد عملة \u200e%v (\u200e%s) الطرف الثاني للمطابقة \u200e%s. هل إتصالك بكل من الإنترنت و المحفظة جيد؟"},
 	},
-	// [host, error]
 	TopicDexAuthError: {
-		subject:  "خطأ في مصادقة منصة المبادلات اللامركزية",
-		template: "\u200e%s: \u200e%v",
+		subject:  intl.Translation{T: "خطأ في مصادقة منصة المبادلات اللامركزية"},
+		template: intl.Translation{T: "\u200e%s: \u200e%v"},
 	},
-	// [count, host]
 	TopicUnknownOrders: {
-		subject:  "أبلغت منصة المبادلات اللامركزية عن طلبات غير معروفة",
-		template: "لم يتم العثور على \u200e%d من الطلبات النشطة التي تم الإبلاغ عنها بواسطة منصة المبادلات اللامركزية \u200e%s.",
+		subject:  intl.Translation{T: "أبلغت منصة المبادلات اللامركزية عن طلبات غير معروفة"},
+		template: intl.Translation{T: "لم يتم العثور على \u200e%d من الطلبات النشطة التي تم الإبلاغ عنها بواسطة منصة المبادلات اللامركزية \u200e%s."},
 	},
-	// [count]
 	TopicOrdersReconciled: {
-		subject:  "تمت تسوية الطلبات مع منصة المبادلات اللامركزية",
-		template: "تم تحديث الحالات لـ \u200e%d من الطلبات.",
+		subject:  intl.Translation{T: "تمت تسوية الطلبات مع منصة المبادلات اللامركزية"},
+		template: intl.Translation{T: "تم تحديث الحالات لـ \u200e%d من الطلبات."},
 	},
-	// [ticker, address]
 	TopicWalletConfigurationUpdated: {
-		subject:  "تم تحديث تهيئة المحفظة",
-		template: "تم تحديث تهيئة المحفظة \u200e%s. عنوان الإيداع = \u200e%s",
+		subject:  intl.Translation{T: "تم تحديث تهيئة المحفظة"},
+		template: intl.Translation{T: "تم تحديث تهيئة المحفظة \u200e%s. عنوان الإيداع = \u200e%s"},
 	},
-	//  [ticker]
 	TopicWalletPasswordUpdated: {
-		subject:  "تم تحديث كلمة مرور المحفظة",
-		template: "تم تحديث كلمة المرور لمحفظة \u200e%s.",
+		subject:  intl.Translation{T: "تم تحديث كلمة مرور المحفظة"},
+		template: intl.Translation{T: "تم تحديث كلمة المرور لمحفظة \u200e%s."},
 	},
-	// [market name, host, time]
 	TopicMarketSuspendScheduled: {
-		subject:  "تمت جدولة تعليق السوق",
-		template: "تمت جدولة تعليق \u200e%v السوق \u200e%s عند \u200e%s",
+		subject:  intl.Translation{T: "تمت جدولة تعليق السوق"},
+		template: intl.Translation{T: "تمت جدولة تعليق \u200e%v السوق \u200e%s عند \u200e%s"},
 	},
-	// [market name, host]
 	TopicMarketSuspended: {
-		subject:  "تعليق السوق",
-		template: "تم تعليق التداول في السوق \u200e%s عند \u200e%s.",
+		subject:  intl.Translation{T: "تعليق السوق"},
+		template: intl.Translation{T: "تم تعليق التداول في السوق \u200e%s عند \u200e%s."},
 	},
-	// [market name, host]
 	TopicMarketSuspendedWithPurge: {
-		subject:  "تم تعليق السوق، وألغيت الطلبات",
-		template: "تم تعليق التداول في السوق \u200e%s عند \u200e%s. كما تمت إزالة جميع الطلبات المحجوزة.",
+		subject:  intl.Translation{T: "تم تعليق السوق، وألغيت الطلبات"},
+		template: intl.Translation{T: "تم تعليق التداول في السوق \u200e%s عند \u200e%s. كما تمت إزالة جميع الطلبات المحجوزة."},
 	},
-	// [market name, host, time]
 	TopicMarketResumeScheduled: {
-		subject:  "تمت جدولة استئناف السوق",
-		template: "تمت جدولة السوق \u200e%s في \u200e%s للاستئناف في \u200e%v",
+		subject:  intl.Translation{T: "تمت جدولة استئناف السوق"},
+		template: intl.Translation{T: "تمت جدولة السوق \u200e%s في \u200e%s للاستئناف في \u200e%v"},
 	},
-	// [market name, host, epoch]
 	TopicMarketResumed: {
-		subject:  "استئناف السوق",
-		template: "استأنف السوق \u200e%s في \u200e%s التداول في الحقبة الزمنية \u200e%d",
+		subject:  intl.Translation{T: "استئناف السوق"},
+		template: intl.Translation{T: "استأنف السوق \u200e%s في \u200e%s التداول في الحقبة الزمنية \u200e%d"},
 	},
-	// [host]
 	TopicUpgradeNeeded: {
-		subject:  "التحديث مطلوب",
-		template: "قد تحتاج إلى تحديث عميلك للتداول في \u200e%s.",
+		subject:  intl.Translation{T: "التحديث مطلوب"},
+		template: intl.Translation{T: "قد تحتاج إلى تحديث عميلك للتداول في \u200e%s."},
 	},
-	// [host]
 	TopicDEXConnected: {
-		subject:  "الخادم متصل",
-		template: "\u200e%s متصل",
+		subject:  intl.Translation{T: "الخادم متصل"},
+		template: intl.Translation{T: "\u200e%s متصل"},
 	},
-	// [host]
 	TopicDEXDisconnected: {
-		subject:  "قطع الاتصال بالخادم",
-		template: "\u200e%s غير متصل",
+		subject:  intl.Translation{T: "قطع الاتصال بالخادم"},
+		template: intl.Translation{T: "\u200e%s غير متصل"},
 	},
-	// [host, rule, time, details]
 	TopicPenalized: {
-		subject:  "لقد عاقبك الخادم",
-		template: "عقوبة من منصة المبادلات اللامركزية في \u200e%s\nآخر قاعدة مكسورة: \u200e%s\nالوقت: \u200e%v\nالتفاصيل:\n\"\u200e%s\"\n",
+		subject:  intl.Translation{T: "لقد عاقبك الخادم"},
+		template: intl.Translation{T: "عقوبة من منصة المبادلات اللامركزية في \u200e%s\nآخر قاعدة مكسورة: \u200e%s\nالوقت: \u200e%v\nالتفاصيل:\n\"\u200e%s\"\n"},
 	},
 	TopicSeedNeedsSaving: {
-		subject:  "لا تنس عمل نسخة احتياطية من بذرة التطبيق",
-		template: "تم إنشاء بذرة تطبيق جديدة. قم بعمل نسخة احتياطية الآن في عرض الإعدادات.",
+		subject:  intl.Translation{T: "لا تنس عمل نسخة احتياطية من بذرة التطبيق"},
+		template: intl.Translation{T: "تم إنشاء بذرة تطبيق جديدة. قم بعمل نسخة احتياطية الآن في عرض الإعدادات."},
 	},
 	TopicUpgradedToSeed: {
-		subject:  "قم بعمل نسخة احتياطية من بذرة التطبيق الجديدة",
-		template: "تم تحديث العميل لاستخدام بذرة التطبيق. قم بعمل نسخة احتياطية من البذرة الآن في عرض الإعدادات.",
+		subject:  intl.Translation{T: "قم بعمل نسخة احتياطية من بذرة التطبيق الجديدة"},
+		template: intl.Translation{T: "تم تحديث العميل لاستخدام بذرة التطبيق. قم بعمل نسخة احتياطية من البذرة الآن في عرض الإعدادات."},
 	},
-	// [host, msg]
 	TopicDEXNotification: {
-		subject:  "رسالة من منصة المبادلات اللامركزية",
-		template: "\u200e%s: \u200e%s",
+		subject:  intl.Translation{T: "رسالة من منصة المبادلات اللامركزية"},
+		template: intl.Translation{T: "\u200e%s: \u200e%s"},
 	},
-	// [parentSymbol, tokenSymbol]
 	TopicQueuedCreationFailed: {
-		subject:  "فشل إنشاء توكن المحفظة",
-		template: "بعد إنشاء محفظة \u200e%s، فشل في إنشاء \u200e%s للمحفظة",
+		subject:  intl.Translation{T: "فشل إنشاء توكن المحفظة"},
+		template: intl.Translation{T: "بعد إنشاء محفظة \u200e%s، فشل في إنشاء \u200e%s للمحفظة"},
 	},
 	TopicRedemptionResubmitted: {
-		subject:  "أعيد تقديم المبلغ المسترد",
-		template: "تمت إعادة إرسال مبلغك المسترد للمطابقة \u200e%s في الطلب .\u200e%s",
+		subject:  intl.Translation{T: "أعيد تقديم المبلغ المسترد"},
+		template: intl.Translation{T: "تمت إعادة إرسال مبلغك المسترد للمطابقة \u200e%s في الطلب .\u200e%s"},
 	},
 	TopicSwapRefunded: {
-		subject:  "مقايضة مستردة",
-		template: "تمت استعادة تطابق \u200e%s للطلب \u200e%s من قبل الطرف الثاني.",
+		subject:  intl.Translation{T: "مقايضة مستردة"},
+		template: intl.Translation{T: "تمت استعادة تطابق \u200e%s للطلب \u200e%s من قبل الطرف الثاني."},
 	},
 	TopicRedemptionConfirmed: {
-		subject:  "تم تأكيد الاسترداد",
-		template: "تم تأكيد استردادك للمطابقة \u200e%s للطلب \u200e%s",
+		subject:  intl.Translation{T: "تم تأكيد الاسترداد"},
+		template: intl.Translation{T: "تم تأكيد استردادك للمطابقة \u200e%s للطلب \u200e%s"},
 	},
 }
 
@@ -1974,10 +1641,24 @@ func init() {
 			panic(err.Error())
 		} // otherwise would fail in core.New parsing the languages
 		for topic, translation := range translations {
-			err := message.SetString(langtag, string(topic), translation.template)
+			err := message.SetString(langtag, string(topic), translation.template.T)
 			if err != nil {
 				panic(fmt.Sprintf("SetString(%s): %v", lang, err))
 			}
+		}
+	}
+}
+
+// RegisterTranslations registers translations with the init package for
+// translator worksheet preparation.
+func RegisterTranslations() {
+	const callerID = "notifications"
+
+	for lang, m := range locales {
+		r := intl.NewRegistrar(callerID, lang, len(m)*2)
+		for topic, t := range m {
+			r.Register(string(topic)+" subject", &t.subject)
+			r.Register(string(topic)+" template", &t.template)
 		}
 	}
 }
@@ -1986,7 +1667,7 @@ func init() {
 func CheckTopicLangs() (missingTranslations int) {
 	for topic := range originLocale {
 		for _, m := range locales {
-			if m[topic] == nil {
+			if _, found := m[topic]; !found {
 				missingTranslations += len(m)
 			}
 		}

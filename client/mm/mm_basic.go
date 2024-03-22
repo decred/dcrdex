@@ -10,13 +10,11 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/order"
 )
 
 const (
@@ -99,12 +97,6 @@ type BasicMarketMakingConfig struct {
 	// EmptyMarketRate can be set if there is no market data available, and is
 	// ignored if there is market data available.
 	EmptyMarketRate float64 `json:"emptyMarketRate"`
-
-	// BaseOptions are the multi-order options for the base asset wallet.
-	BaseOptions map[string]string `json:"baseOptions"`
-
-	// QuoteOptions are the multi-order options for the quote asset wallet.
-	QuoteOptions map[string]string `json:"quoteOptions"`
 }
 
 func needBreakEvenHalfSpread(strat GapStrategy) bool {
@@ -182,97 +174,18 @@ func (c *BasicMarketMakingConfig) Validate() error {
 	return nil
 }
 
-// steppedRate rounds the rate to the nearest integer multiple of the step.
-// The minimum returned value is step.
-func steppedRate(r, step uint64) uint64 {
-	steps := math.Round(float64(r) / float64(step))
-	if steps == 0 {
-		return step
-	}
-	return uint64(math.Round(steps * float64(step)))
+type basicMMCalculator interface {
+	basisPrice() uint64
+	halfSpread(uint64) (uint64, error)
 }
 
-// orderFees are the fees used for calculating the half-spread.
-type orderFees struct {
-	swap       uint64
-	redemption uint64
-	refund     uint64
-	funding    uint64
-}
-
-type basicMarketMaker struct {
-	ctx    context.Context
-	host   string
-	base   uint32
-	quote  uint32
-	cfg    *BasicMarketMakingConfig
+type basicMMCalculatorImpl struct {
 	book   dexOrderBook
-	log    dex.Logger
-	core   clientCore
 	oracle oracle
+	core   botCoreAdaptor
 	mkt    *core.Market
-	// the fiat rate is the rate determined by comparing the fiat rates
-	// of the two assets.
-	fiatRateV        atomic.Uint64
-	rebalanceRunning atomic.Bool
-
-	ordMtx         sync.RWMutex
-	ords           map[order.OrderID]*core.Order
-	oidToPlacement map[order.OrderID]int
-
-	feesMtx  sync.RWMutex
-	buyFees  *orderFees
-	sellFees *orderFees
-}
-
-// groupedOrder is a subset of an *core.Order.
-type groupedOrder struct {
-	id        order.OrderID
-	rate      uint64
-	lots      uint64
-	epoch     uint64
-	lockedAmt uint64
-}
-
-func groupOrders(orders map[order.OrderID]*core.Order, oidToPlacement map[order.OrderID]int, lotSize uint64) (buys, sells map[int][]*groupedOrder) {
-	makeGroupedOrder := func(o *core.Order) *groupedOrder {
-		var oid order.OrderID
-		copy(oid[:], o.ID)
-		return &groupedOrder{
-			id:        oid,
-			rate:      o.Rate,
-			lots:      (o.Qty - o.Filled) / lotSize,
-			epoch:     o.Epoch,
-			lockedAmt: o.LockedAmt,
-		}
-	}
-
-	buys, sells = make(map[int][]*groupedOrder), make(map[int][]*groupedOrder)
-	for _, ord := range orders {
-		var oid order.OrderID
-		copy(oid[:], ord.ID)
-		placementIndex := oidToPlacement[oid]
-		if ord.Sell {
-			if _, found := sells[placementIndex]; !found {
-				sells[placementIndex] = make([]*groupedOrder, 0, 1)
-			}
-			sells[placementIndex] = append(sells[placementIndex], makeGroupedOrder(ord))
-		} else {
-			if _, found := buys[placementIndex]; !found {
-				buys[placementIndex] = make([]*groupedOrder, 0, 1)
-			}
-			buys[placementIndex] = append(buys[placementIndex], makeGroupedOrder(ord))
-		}
-	}
-
-	return buys, sells
-}
-
-// groupedOrders returns the buy and sell orders grouped by placement index.
-func (m *basicMarketMaker) groupedOrders() (buys, sells map[int][]*groupedOrder) {
-	m.ordMtx.RLock()
-	defer m.ordMtx.RUnlock()
-	return groupOrders(m.ords, m.oidToPlacement, m.mkt.LotSize)
+	cfg    *BasicMarketMakingConfig
+	log    dex.Logger
 }
 
 // basisPrice calculates the basis price for the market maker.
@@ -285,207 +198,166 @@ func (m *basicMarketMaker) groupedOrders() (buys, sells map[int][]*groupedOrder)
 // or oracle weighting is 0, the fiat rate is used.
 // If there is no fiat rate available, the empty market rate in the
 // configuration is used.
-func basisPrice(book dexOrderBook, oracle oracle, cfg *BasicMarketMakingConfig, mkt *core.Market, fiatRate uint64, log dex.Logger) uint64 {
-	midGap, err := book.MidGap()
+func (b *basicMMCalculatorImpl) basisPrice() uint64 {
+	midGap, err := b.book.MidGap()
 	if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
-		log.Errorf("MidGap error: %v", err)
+		b.log.Errorf("MidGap error: %v", err)
 		return 0
 	}
 
 	basisPrice := float64(midGap) // float64 message-rate units
 
 	var oracleWeighting, oraclePrice float64
-	if cfg.OracleWeighting != nil && *cfg.OracleWeighting > 0 {
-		oracleWeighting = *cfg.OracleWeighting
-		oraclePrice = oracle.getMarketPrice(mkt.BaseID, mkt.QuoteID)
+	if b.cfg.OracleWeighting != nil && *b.cfg.OracleWeighting > 0 {
+		oracleWeighting = *b.cfg.OracleWeighting
+		oraclePrice = b.oracle.getMarketPrice(b.mkt.BaseID, b.mkt.QuoteID)
 		if oraclePrice == 0 {
-			log.Warnf("no oracle price available for %s bot", mkt.Name)
+			b.log.Warnf("no oracle price available for %s bot", b.mkt.Name)
 		}
 	}
 
 	if oraclePrice > 0 {
-		msgOracleRate := float64(mkt.ConventionalRateToMsg(oraclePrice))
+		msgOracleRate := float64(b.mkt.ConventionalRateToMsg(oraclePrice))
 
 		// Apply the oracle mismatch filter.
 		if basisPrice > 0 {
 			low, high := msgOracleRate*(1-maxOracleMismatch), msgOracleRate*(1+maxOracleMismatch)
 			if basisPrice < low {
-				log.Debug("local mid-gap is below safe range. Using effective mid-gap of %d%% below the oracle rate.", maxOracleMismatch*100)
+				b.log.Debug("local mid-gap is below safe range. Using effective mid-gap of %d%% below the oracle rate.", maxOracleMismatch*100)
 				basisPrice = low
 			} else if basisPrice > high {
-				log.Debug("local mid-gap is above safe range. Using effective mid-gap of %d%% above the oracle rate.", maxOracleMismatch*100)
+				b.log.Debug("local mid-gap is above safe range. Using effective mid-gap of %d%% above the oracle rate.", maxOracleMismatch*100)
 				basisPrice = high
 			}
 		}
 
-		if cfg.OracleBias != 0 {
-			msgOracleRate *= 1 + cfg.OracleBias
+		if b.cfg.OracleBias != 0 {
+			msgOracleRate *= 1 + b.cfg.OracleBias
 		}
 
 		if basisPrice == 0 { // no mid-gap available. Use the oracle price.
 			basisPrice = msgOracleRate
-			log.Tracef("basisPrice: using basis price %.0f from oracle because no mid-gap was found in order book", basisPrice)
+			b.log.Tracef("basisPrice: using basis price %.0f from oracle because no mid-gap was found in order book", basisPrice)
 		} else {
 			basisPrice = msgOracleRate*oracleWeighting + basisPrice*(1-oracleWeighting)
-			log.Tracef("basisPrice: oracle-weighted basis price = %f", basisPrice)
+			b.log.Tracef("basisPrice: oracle-weighted basis price = %f", basisPrice)
 		}
 	}
 
 	if basisPrice > 0 {
-		return steppedRate(uint64(basisPrice), mkt.RateStep)
+		return steppedRate(uint64(basisPrice), b.mkt.RateStep)
 	}
 
 	// TODO: add a configuration to turn off use of fiat rate?
+	fiatRate := b.core.ExchangeRateFromFiatSources()
 	if fiatRate > 0 {
-		return steppedRate(fiatRate, mkt.RateStep)
+		return steppedRate(fiatRate, b.mkt.RateStep)
 	}
 
-	if cfg.EmptyMarketRate > 0 {
-		emptyMsgRate := mkt.ConventionalRateToMsg(cfg.EmptyMarketRate)
-		return steppedRate(emptyMsgRate, mkt.RateStep)
+	if b.cfg.EmptyMarketRate > 0 {
+		emptyMsgRate := b.mkt.ConventionalRateToMsg(b.cfg.EmptyMarketRate)
+		return steppedRate(emptyMsgRate, b.mkt.RateStep)
 	}
 
 	return 0
 }
 
-func (m *basicMarketMaker) basisPrice() uint64 {
-	return basisPrice(m.book, m.oracle, m.cfg, m.mkt, m.fiatRateV.Load(), m.log)
-}
-
-func (m *basicMarketMaker) halfSpread(basisPrice uint64) (uint64, error) {
-	form := &core.SingleLotFeesForm{
-		Host:  m.host,
-		Base:  m.base,
-		Quote: m.quote,
-		Sell:  true,
-	}
-
+// halfSpread calculates the distance from the mid-gap where if you sell a lot
+// at the basis price plus half-gap, then buy a lot at the basis price minus
+// half-gap, you will have one lot of the base asset plus the total fees in
+// base units. Since the fees are in base units, basis price can be used to
+// convert the quote fees to base units. In the case of tokens, the fees are
+// converted using fiat rates.
+func (b *basicMMCalculatorImpl) halfSpread(basisPrice uint64) (uint64, error) {
 	if basisPrice == 0 { // prevent divide by zero later
 		return 0, fmt.Errorf("basis price cannot be zero")
 	}
 
-	baseFees, quoteFees, _, err := m.core.SingleLotFees(form)
+	sellFeesInBaseUnits, err := b.core.OrderFeesInUnits(true, true, basisPrice)
 	if err != nil {
-		return 0, fmt.Errorf("SingleLotFees error: %v", err)
+		return 0, fmt.Errorf("error getting sell fees in base units: %w", err)
 	}
 
-	form.Sell = false
-	newQuoteFees, newBaseFees, _, err := m.core.SingleLotFees(form)
+	buyFeesInBaseUnits, err := b.core.OrderFeesInUnits(false, true, basisPrice)
 	if err != nil {
-		return 0, fmt.Errorf("SingleLotFees error: %v", err)
+		return 0, fmt.Errorf("error getting buy fees in base units: %w", err)
 	}
 
-	baseFees += newBaseFees
-	quoteFees += newQuoteFees
+	sellFeesInQuoteUnits, err := b.core.OrderFeesInUnits(true, false, basisPrice)
+	if err != nil {
+		return 0, fmt.Errorf("error getting sell fees in quote units: %w", err)
+	}
 
-	g := float64(calc.BaseToQuote(basisPrice, baseFees)+quoteFees) /
-		float64(baseFees+2*m.mkt.LotSize) * m.mkt.AtomToConv
+	buyFeesInQuoteUnits, err := b.core.OrderFeesInUnits(false, false, basisPrice)
+	if err != nil {
+		return 0, fmt.Errorf("error getting buy fees in quote units: %w", err)
+	}
+
+	totalFeesInBaseUnits := sellFeesInBaseUnits + buyFeesInBaseUnits
+	totalFeesInQuoteUnits := sellFeesInQuoteUnits + buyFeesInQuoteUnits
+
+	/*
+	 * g = half-gap
+	 * b = basis price
+	 * l = lot size
+	 * f = total fees in base units
+	 * q = f * b = total fees in quote units
+	 *
+	 * We must choose a half-gap such that:
+	 * (b + g) * l / (b - g) = l + f
+	 *
+	 * This means that when you sell a lot at the basis price plus half-gap,
+	 * then buy a lot at the basis price minus half-gap, you will have one
+	 * lot of the base asset plus the total fees in base units.
+	 *
+	 * Solving for g, you get:
+	 * g = q / (f + 2l)
+	 */
+	g := float64(totalFeesInQuoteUnits) /
+		float64(totalFeesInBaseUnits+2*b.mkt.LotSize)
 
 	halfGap := uint64(math.Round(g * calc.RateEncodingFactor))
 
-	m.log.Tracef("halfSpread: base basis price = %d, lot size = %d, base fees = %d, quote fees = %d, half-gap = %d",
-		basisPrice, m.mkt.LotSize, baseFees, quoteFees, halfGap)
+	b.log.Tracef("halfSpread: base basis price = %d, lot size = %d, fees in base units = %d, fees in quote units = %d, half-gap = %d",
+		basisPrice, b.mkt.LotSize, totalFeesInBaseUnits, totalFeesInQuoteUnits, halfGap)
 
 	return halfGap, nil
 }
 
-func (m *basicMarketMaker) placeMultiTrade(placements []*rateLots, sell bool) {
-	qtyRates := make([]*core.QtyRate, 0, len(placements))
-	for _, p := range placements {
-		qtyRates = append(qtyRates, &core.QtyRate{
-			Qty:  p.lots * m.mkt.LotSize,
-			Rate: p.rate,
-		})
-	}
-
-	var options map[string]string
-	if sell {
-		options = m.cfg.BaseOptions
-	} else {
-		options = m.cfg.QuoteOptions
-	}
-
-	orders, err := m.core.MultiTrade(nil, &core.MultiTradeForm{
-		Host:       m.host,
-		Sell:       sell,
-		Base:       m.base,
-		Quote:      m.quote,
-		Placements: qtyRates,
-		Options:    options,
-	})
-	if err != nil {
-		m.log.Errorf("Error placing rebalancing order: %v", err)
-		return
-	}
-
-	m.ordMtx.Lock()
-	for i, ord := range orders {
-		var oid order.OrderID
-		copy(oid[:], ord.ID)
-		m.ords[oid] = ord
-		m.oidToPlacement[oid] = placements[i].placementIndex
-	}
-	m.ordMtx.Unlock()
+type basicMarketMaker struct {
+	ctx              context.Context
+	host             string
+	base             uint32
+	quote            uint32
+	cfg              *BasicMarketMakingConfig
+	log              dex.Logger
+	core             botCoreAdaptor
+	oracle           oracle
+	mkt              *core.Market
+	rebalanceRunning atomic.Bool
+	calculator       basicMMCalculator
 }
 
-func (m *basicMarketMaker) processFiatRates(rates map[uint32]float64) {
-	var fiatRate uint64
-
-	baseRate := rates[m.base]
-	quoteRate := rates[m.quote]
-	if baseRate > 0 && quoteRate > 0 {
-		fiatRate = m.mkt.ConventionalRateToMsg(baseRate / quoteRate)
-	}
-
-	m.fiatRateV.Store(fiatRate)
-}
-
-func (m *basicMarketMaker) processTrade(o *core.Order) {
-	if len(o.ID) == 0 {
-		return
-	}
-
-	var oid order.OrderID
-	copy(oid[:], o.ID)
-
-	m.ordMtx.Lock()
-	defer m.ordMtx.Unlock()
-
-	_, found := m.ords[oid]
-	if !found {
-		return
-	}
-
-	if o.Status > order.OrderStatusBooked {
-		// We stop caring when the order is taken off the book.
-		delete(m.ords, oid)
-		delete(m.oidToPlacement, oid)
-	} else {
-		// Update our reference.
-		m.ords[oid] = o
-	}
-}
-
-func orderPrice(basisPrice, breakEven uint64, strategy GapStrategy, factor float64, sell bool, mkt *core.Market) uint64 {
+func (m *basicMarketMaker) orderPrice(basisPrice, breakEven uint64, sell bool, gapFactor float64) uint64 {
 	var halfSpread uint64
 
 	// Apply the base strategy.
-	switch strategy {
+	switch m.cfg.GapStrategy {
 	case GapStrategyMultiplier:
-		halfSpread = uint64(math.Round(float64(breakEven) * factor))
+		halfSpread = uint64(math.Round(float64(breakEven) * gapFactor))
 	case GapStrategyPercent, GapStrategyPercentPlus:
-		halfSpread = uint64(math.Round(factor * float64(basisPrice)))
+		halfSpread = uint64(math.Round(gapFactor * float64(basisPrice)))
 	case GapStrategyAbsolute, GapStrategyAbsolutePlus:
-		halfSpread = mkt.ConventionalRateToMsg(factor)
+		halfSpread = m.mkt.ConventionalRateToMsg(gapFactor)
 	}
 
 	// Add the break-even to the "-plus" strategies
-	switch strategy {
+	switch m.cfg.GapStrategy {
 	case GapStrategyAbsolutePlus, GapStrategyPercentPlus:
 		halfSpread += breakEven
 	}
 
-	halfSpread = steppedRate(halfSpread, mkt.RateStep)
+	halfSpread = steppedRate(halfSpread, m.mkt.RateStep)
 
 	if sell {
 		return basisPrice + halfSpread
@@ -498,193 +370,42 @@ func orderPrice(basisPrice, breakEven uint64, strategy GapStrategy, factor float
 	return basisPrice - halfSpread
 }
 
-type rebalancer interface {
-	basisPrice() uint64
-	halfSpread(uint64) (uint64, error)
-	groupedOrders() (buys, sells map[int][]*groupedOrder)
-}
-
-type rateLots struct {
-	rate           uint64
-	lots           uint64
-	placementIndex int
-}
-
-func basicMMRebalance(newEpoch uint64, m rebalancer, c clientCore, cfg *BasicMarketMakingConfig, mkt *core.Market, buyFees,
-	sellFees *orderFees, log dex.Logger) (cancels []dex.Bytes, buyOrders, sellOrders []*rateLots) {
-	basisPrice := m.basisPrice()
+func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradePlacement) {
+	basisPrice := m.calculator.basisPrice()
 	if basisPrice == 0 {
-		log.Errorf("No basis price available and no empty-market rate set")
+		m.log.Errorf("No basis price available and no empty-market rate set")
 		return
 	}
-
-	log.Debugf("rebalance (%s): basis price = %d", mkt.Name, basisPrice)
 
 	var breakEven uint64
-	if needBreakEvenHalfSpread(cfg.GapStrategy) {
+	if needBreakEvenHalfSpread(m.cfg.GapStrategy) {
 		var err error
-		breakEven, err = m.halfSpread(basisPrice)
+		breakEven, err = m.calculator.halfSpread(basisPrice)
 		if err != nil {
-			log.Errorf("Could not calculate break-even spread: %v", err)
+			m.log.Errorf("Could not calculate break-even spread: %v", err)
 			return
 		}
 	}
 
-	existingBuys, existingSells := m.groupedOrders()
-	getExistingOrders := func(index int, sell bool) []*groupedOrder {
-		if sell {
-			return existingSells[index]
-		}
-		return existingBuys[index]
-	}
-
-	// Get highest existing buy and lowest existing sell to avoid
-	// self-matches.
-	var highestExistingBuy, lowestExistingSell uint64 = 0, math.MaxUint64
-	for _, placementOrders := range existingBuys {
-		for _, o := range placementOrders {
-			if o.rate > highestExistingBuy {
-				highestExistingBuy = o.rate
+	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
+		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
+		for _, p := range orderPlacements {
+			rate := m.orderPrice(basisPrice, breakEven, sell, p.GapFactor)
+			lots := p.Lots
+			if rate == 0 {
+				lots = 0
 			}
-		}
-	}
-	for _, placementOrders := range existingSells {
-		for _, o := range placementOrders {
-			if o.rate < lowestExistingSell {
-				lowestExistingSell = o.rate
-			}
-		}
-	}
-	rateCausesSelfMatch := func(rate uint64, sell bool) bool {
-		if sell {
-			return rate <= highestExistingBuy
-		}
-		return rate >= lowestExistingSell
-	}
-
-	withinTolerance := func(rate, target uint64) bool {
-		driftTolerance := uint64(float64(target) * cfg.DriftTolerance)
-		lowerBound := target - driftTolerance
-		upperBound := target + driftTolerance
-		return rate >= lowerBound && rate <= upperBound
-	}
-
-	baseBalance, err := c.AssetBalance(mkt.BaseID)
-	if err != nil {
-		log.Errorf("Error getting base balance: %v", err)
-		return
-	}
-	quoteBalance, err := c.AssetBalance(mkt.QuoteID)
-	if err != nil {
-		log.Errorf("Error getting quote balance: %v", err)
-		return
-	}
-
-	cancels = make([]dex.Bytes, 0, len(cfg.SellPlacements)+len(cfg.BuyPlacements))
-	addCancel := func(o *groupedOrder) {
-		if newEpoch-o.epoch < 2 {
-			log.Debugf("rebalance: skipping cancel not past free cancel threshold")
-			return
-		}
-		cancels = append(cancels, o.id[:])
-	}
-
-	processSide := func(sell bool) []*rateLots {
-		log.Debugf("rebalance: processing %s side", map[bool]string{true: "sell", false: "buy"}[sell])
-
-		var cfgPlacements []*OrderPlacement
-		if sell {
-			cfgPlacements = cfg.SellPlacements
-		} else {
-			cfgPlacements = cfg.BuyPlacements
-		}
-		if len(cfgPlacements) == 0 {
-			return nil
-		}
-
-		var remainingBalance uint64
-		if sell {
-			remainingBalance = baseBalance.Available
-			if remainingBalance > sellFees.funding {
-				remainingBalance -= sellFees.funding
-			} else {
-				return nil
-			}
-		} else {
-			remainingBalance = quoteBalance.Available
-			if remainingBalance > buyFees.funding {
-				remainingBalance -= buyFees.funding
-			} else {
-				return nil
-			}
-		}
-
-		rlPlacements := make([]*rateLots, 0, len(cfgPlacements))
-
-		for i, p := range cfgPlacements {
-			placementRate := orderPrice(basisPrice, breakEven, cfg.GapStrategy, p.GapFactor, sell, mkt)
-			log.Debugf("placement %d rate: %d", i, placementRate)
-
-			if placementRate == 0 {
-				log.Warnf("skipping %s placement %d because it would result in a zero rate",
-					map[bool]string{true: "sell", false: "buy"}[sell], i)
-				continue
-			}
-			if rateCausesSelfMatch(placementRate, sell) {
-				log.Warnf("skipping %s placement %d because it would cause a self-match",
-					map[bool]string{true: "sell", false: "buy"}[sell], i)
-				continue
-			}
-
-			existingOrders := getExistingOrders(i, sell)
-			var numLotsOnBooks uint64
-			for _, o := range existingOrders {
-				numLotsOnBooks += o.lots
-				if !withinTolerance(o.rate, placementRate) {
-					addCancel(o)
-				}
-			}
-
-			var lotsToPlace uint64
-			if p.Lots > numLotsOnBooks {
-				lotsToPlace = p.Lots - numLotsOnBooks
-			}
-			if lotsToPlace == 0 {
-				continue
-			}
-
-			log.Debugf("placement %d: placing %d lots", i, lotsToPlace)
-
-			// TODO: handle redeem/refund fees for account lockers
-			var requiredPerLot uint64
-			if sell {
-				requiredPerLot = sellFees.swap + mkt.LotSize
-			} else {
-				requiredPerLot = calc.BaseToQuote(placementRate, mkt.LotSize) + buyFees.swap
-			}
-			if remainingBalance/requiredPerLot < lotsToPlace {
-				log.Debugf("placement %d: not enough balance to place %d lots, placing %d", i, lotsToPlace, remainingBalance/requiredPerLot)
-				lotsToPlace = remainingBalance / requiredPerLot
-			}
-			if lotsToPlace == 0 {
-				continue
-			}
-
-			remainingBalance -= requiredPerLot * lotsToPlace
-			rlPlacements = append(rlPlacements, &rateLots{
-				rate:           placementRate,
-				lots:           lotsToPlace,
-				placementIndex: i,
+			placements = append(placements, &multiTradePlacement{
+				rate: rate,
+				lots: lots,
 			})
 		}
-
-		return rlPlacements
+		return placements
 	}
 
-	buyOrders = processSide(false)
-	sellOrders = processSide(true)
-
-	return cancels, buyOrders, sellOrders
+	buyOrders = orders(m.cfg.BuyPlacements, false)
+	sellOrders = orders(m.cfg.SellPlacements, true)
+	return buyOrders, sellOrders
 }
 
 func (m *basicMarketMaker) rebalance(newEpoch uint64) {
@@ -692,103 +413,11 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		return
 	}
 	defer m.rebalanceRunning.Store(false)
+	m.log.Tracef("rebalance: epoch %d", newEpoch)
 
-	m.feesMtx.RLock()
-	buyFees, sellFees := m.buyFees, m.sellFees
-	m.feesMtx.RUnlock()
-
-	cancels, buyOrders, sellOrders := basicMMRebalance(newEpoch, m, m.core, m.cfg, m.mkt, buyFees, sellFees, m.log)
-
-	for _, cancel := range cancels {
-		err := m.core.Cancel(cancel)
-		if err != nil {
-			m.log.Errorf("Error canceling order %s: %v", cancel, err)
-			return
-		}
-	}
-	if len(buyOrders) > 0 {
-		m.placeMultiTrade(buyOrders, false)
-	}
-	if len(sellOrders) > 0 {
-		m.placeMultiTrade(sellOrders, true)
-	}
-}
-
-func (m *basicMarketMaker) handleNotification(note core.Notification) {
-	switch n := note.(type) {
-	case *core.OrderNote:
-		ord := n.Order
-		if ord == nil {
-			return
-		}
-		m.processTrade(ord)
-	case *core.FiatRatesNote:
-		go m.processFiatRates(n.FiatRates)
-	}
-}
-
-func (m *basicMarketMaker) cancelAllOrders() {
-	m.ordMtx.Lock()
-	defer m.ordMtx.Unlock()
-	for oid := range m.ords {
-		if err := m.core.Cancel(oid[:]); err != nil {
-			m.log.Errorf("error cancelling order: %v", err)
-		}
-	}
-	m.ords = make(map[order.OrderID]*core.Order)
-	m.oidToPlacement = make(map[order.OrderID]int)
-}
-
-func (m *basicMarketMaker) updateFeeRates() error {
-	buySwapFees, buyRedeemFees, buyRefundFees, err := m.core.SingleLotFees(&core.SingleLotFeesForm{
-		Host:          m.host,
-		Base:          m.base,
-		Quote:         m.quote,
-		UseMaxFeeRate: true,
-		UseSafeTxSize: true,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get fees: %v", err)
-	}
-
-	sellSwapFees, sellRedeemFees, sellRefundFees, err := m.core.SingleLotFees(&core.SingleLotFeesForm{
-		Host:          m.host,
-		Base:          m.base,
-		Quote:         m.quote,
-		UseMaxFeeRate: true,
-		UseSafeTxSize: true,
-		Sell:          true,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get fees: %v", err)
-	}
-
-	buyFundingFees, err := m.core.MaxFundingFees(m.quote, m.host, uint32(len(m.cfg.BuyPlacements)), m.cfg.QuoteOptions)
-	if err != nil {
-		return fmt.Errorf("failed to get funding fees: %v", err)
-	}
-
-	sellFundingFees, err := m.core.MaxFundingFees(m.base, m.host, uint32(len(m.cfg.SellPlacements)), m.cfg.BaseOptions)
-	if err != nil {
-		return fmt.Errorf("failed to get funding fees: %v", err)
-	}
-
-	m.feesMtx.Lock()
-	defer m.feesMtx.Unlock()
-	m.buyFees = &orderFees{
-		swap:       buySwapFees,
-		redemption: buyRedeemFees,
-		refund:     buyRefundFees,
-		funding:    buyFundingFees,
-	}
-	m.sellFees = &orderFees{
-		swap:       sellSwapFees,
-		redemption: sellRedeemFees,
-		refund:     sellRefundFees,
-		funding:    sellFundingFees,
-	}
-
-	return nil
+	buyOrders, sellOrders := m.ordersToPlace()
+	m.core.MultiTrade(buyOrders, false, m.cfg.DriftTolerance, newEpoch, nil, nil)
+	m.core.MultiTrade(sellOrders, true, m.cfg.DriftTolerance, newEpoch, nil, nil)
 }
 
 func (m *basicMarketMaker) run() {
@@ -797,7 +426,15 @@ func (m *basicMarketMaker) run() {
 		m.log.Errorf("Failed to sync book: %v", err)
 		return
 	}
-	m.book = book
+
+	m.calculator = &basicMMCalculatorImpl{
+		book:   book,
+		oracle: m.oracle,
+		core:   m.core,
+		mkt:    m.mkt,
+		cfg:    m.cfg,
+		log:    m.log,
+	}
 
 	wg := sync.WaitGroup{}
 
@@ -818,49 +455,13 @@ func (m *basicMarketMaker) run() {
 		}
 	}()
 
-	// Process core notifications
-	noteFeed := m.core.NotificationFeed()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer noteFeed.ReturnFeed()
-		for {
-			select {
-			case n := <-noteFeed.C:
-				m.handleNotification(n)
-			case <-m.ctx.Done():
-				return
-			}
-		}
-	}()
-
-	// Periodically update asset fee rates
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		refreshTime := time.Minute * 10
-		for {
-			select {
-			case <-time.NewTimer(refreshTime).C:
-				err := m.updateFeeRates()
-				if err != nil {
-					m.log.Error(err)
-					refreshTime = time.Minute
-				} else {
-					refreshTime = time.Minute * 10
-				}
-			case <-m.ctx.Done():
-				return
-			}
-		}
-	}()
-
 	wg.Wait()
-	m.cancelAllOrders()
+
+	m.core.CancelAllOrders()
 }
 
 // RunBasicMarketMaker starts a basic market maker bot.
-func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, oracle oracle, baseFiatRate, quoteFiatRate float64, log dex.Logger) {
+func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, oracle oracle, log dex.Logger) {
 	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
 		log.Errorf("No market making config provided. Exiting.")
@@ -869,38 +470,26 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c clientCore, orac
 
 	err := cfg.BasicMMConfig.Validate()
 	if err != nil {
-		c.Broadcast(newValidationErrorNote(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset, fmt.Sprintf("invalid market making config: %v", err)))
+		log.Errorf("Invalid market making config: %v", err)
 		return
 	}
 
-	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	if err != nil {
 		log.Errorf("Failed to get market: %v. Not starting market maker.", err)
 		return
 	}
 
 	mm := &basicMarketMaker{
-		ctx:            ctx,
-		core:           c,
-		log:            log,
-		cfg:            cfg.BasicMMConfig,
-		host:           cfg.Host,
-		base:           cfg.BaseAsset,
-		quote:          cfg.QuoteAsset,
-		oracle:         oracle,
-		mkt:            mkt,
-		ords:           make(map[order.OrderID]*core.Order),
-		oidToPlacement: make(map[order.OrderID]int),
-	}
-
-	err = mm.updateFeeRates()
-	if err != nil {
-		log.Errorf("Not starting market maker: %v", err)
-		return
-	}
-
-	if baseFiatRate > 0 && quoteFiatRate > 0 {
-		mm.fiatRateV.Store(mkt.ConventionalRateToMsg(baseFiatRate / quoteFiatRate))
+		ctx:    ctx,
+		core:   c,
+		log:    log,
+		cfg:    cfg.BasicMMConfig,
+		host:   cfg.Host,
+		base:   cfg.BaseID,
+		quote:  cfg.QuoteID,
+		oracle: oracle,
+		mkt:    mkt,
 	}
 
 	mm.run()

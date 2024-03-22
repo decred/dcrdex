@@ -25,12 +25,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/mm"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
@@ -97,7 +99,7 @@ type clientCore interface {
 	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
 	UpdateBondOptions(form *core.BondOptionsForm) error
 	Login(pw []byte) error
-	InitializeClient(pw, seed []byte) error
+	InitializeClient(pw []byte, seed *string) (string, error)
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
@@ -111,7 +113,7 @@ type clientCore interface {
 	ReconfigureWallet([]byte, []byte, *core.WalletForm) error
 	ToggleWalletStatus(assetID uint32, disable bool) error
 	ChangeAppPass([]byte, []byte) error
-	ResetAppPass(newPass []byte, seed []byte) error
+	ResetAppPass(newPass []byte, seed string) error
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
@@ -133,7 +135,7 @@ type clientCore interface {
 	AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() bool
-	ExportSeed(pw []byte) ([]byte, error)
+	ExportSeed(pw []byte) (string, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
 	EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error)
@@ -152,7 +154,7 @@ type clientCore interface {
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
-	Notifications(n int) ([]*db.Notification, error)
+	Notifications(n int) (notes, pokes []*db.Notification, _ error)
 	ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error)
 	NewShieldedAddress(assetID uint32) (string, error)
 	ShieldFunds(assetID uint32, amt uint64) ([]byte, error)
@@ -173,6 +175,19 @@ type clientCore interface {
 	StartFundsMixer(appPW []byte, assetID uint32) error
 	StopFundsMixer(assetID uint32) error
 	DisableFundsMixer(assetID uint32) error
+	SetLanguage(string) error
+	Language() string
+}
+
+type mmCore interface {
+	MarketReport(base, quote uint32) (*mm.MarketReport, error)
+	Start(pw []byte, alternateConfigPath *string) (err error)
+	Stop()
+	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error
+	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
+	UpdateBotConfig(updatedCfg *mm.BotConfig) error
+	RemoveBotConfig(host string, baseID, quoteID uint32) error
+	Status() *mm.Status
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -210,8 +225,8 @@ type cachedPassword struct {
 }
 
 type Config struct {
-	Core          clientCore
-	MarketMaker   *mm.MarketMaker
+	Core          clientCore // *core.Core
+	MarketMaker   mmCore     // *mm.MarketMaker
 	MMCfgPath     string
 	Addr          string
 	CustomSiteDir string
@@ -242,13 +257,16 @@ type WebServer struct {
 	ctx          context.Context
 	wsServer     *websocket.Server
 	mux          *chi.Mux
+	siteDir      string
+	lang         atomic.Value // string
+	langs        []string
 	core         clientCore
-	mm           *mm.MarketMaker
+	mm           mmCore
 	mmCfgPath    string
 	addr         string
 	csp          string
 	srv          *http.Server
-	html         *templates
+	html         atomic.Value // *templates
 	indent       bool
 	experimental bool
 
@@ -353,11 +371,20 @@ func New(cfg *Config) (*WebServer, error) {
 		// httpServer.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0)
 	}
 
+	lang := cfg.Core.Language()
+
+	langs := make([]string, 0, len(localesMap))
+	for l := range localesMap {
+		langs = append(langs, l)
+	}
+
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
+		langs:           langs,
 		core:            cfg.Core,
 		mm:              cfg.MarketMaker,
 		mmCfgPath:       cfg.MMCfgPath,
+		siteDir:         siteDir,
 		mux:             mux,
 		srv:             httpServer,
 		addr:            cfg.Addr,
@@ -367,12 +394,9 @@ func New(cfg *Config) (*WebServer, error) {
 		experimental:    cfg.Experimental,
 		bondBuf:         map[uint32]valStamp{},
 	}
+	s.lang.Store(lang)
 
-	lang := cfg.Language
-	if lang == "" {
-		lang = "en-US"
-	}
-	if err := s.buildTemplates(lang, siteDir); err != nil {
+	if err := s.buildTemplates(lang); err != nil {
 		return nil, fmt.Errorf("error loading localized html templates: %v", err)
 	}
 
@@ -465,6 +489,9 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Post("/init", s.apiInit)
 		r.Get("/isinitialized", s.apiIsInitialized)
 		r.Post("/resetapppassword", s.apiResetAppPassword)
+		r.Get("/user", s.apiUser)
+		r.Post("/locale", s.apiLocale)
+		r.Post("/setlocale", s.apiSetLocale)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
@@ -478,7 +505,7 @@ func New(cfg *Config) (*WebServer, error) {
 
 		r.Group(func(apiAuth chi.Router) {
 			apiAuth.Use(s.rejectUnauthed)
-			apiAuth.Get("/user", s.apiUser)
+			apiAuth.Get("/notes", s.apiNotes)
 			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/register", s.apiRegister)
 			apiAuth.Post("/postbond", s.apiPostBond)
@@ -551,11 +578,12 @@ func New(cfg *Config) (*WebServer, error) {
 			if cfg.Experimental {
 				apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)
 				apiAuth.Post("/stopmarketmaking", s.apiStopMarketMaking)
-				apiAuth.Get("/marketmakingconfig", s.apiMarketMakingConfig)
-				apiAuth.Post("/updatemarketmakingconfig", s.apiUpdateMarketMakingConfig)
-				apiAuth.Post("/removemarketmakingconfig", s.apiRemoveMarketMakingConfig)
+				apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
+				apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
+				apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)
 				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
 				apiAuth.Post("/marketreport", s.apiMarketReport)
+				apiAuth.Post("/cexbalance", s.apiCEXBalance)
 			}
 		})
 	})
@@ -573,7 +601,7 @@ func New(cfg *Config) (*WebServer, error) {
 // sendTemplate. An empty siteDir indicates that the embedded templates in the
 // htmlTmplSub FS should be used. If siteDir is set, the templates will be
 // loaded from disk.
-func (s *WebServer) buildTemplates(lang, siteDir string) error {
+func (s *WebServer) buildTemplates(lang string) error {
 	// Try to identify language.
 	acceptLang, err := language.Parse(lang)
 	if err != nil {
@@ -598,15 +626,15 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 	}
 
 	var htmlDir string
-	if siteDir == "" {
+	if s.siteDir == "" {
 		log.Infof("Using embedded HTML templates")
 	} else {
-		htmlDir = filepath.Join(siteDir, "src", "html")
+		htmlDir = filepath.Join(s.siteDir, "src", "html")
 		log.Infof("Using HTML templates in %s", htmlDir)
 	}
 
 	bb := "bodybuilder"
-	s.html = newTemplates(htmlDir, localeName).
+	html := newTemplates(htmlDir, localeName).
 		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
@@ -618,8 +646,9 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 		addTemplate("init", bb).
 		addTemplate("mm", bb, "forms").
 		addTemplate("mmsettings", bb, "forms")
+	s.html.Store(html)
 
-	return s.html.buildErr()
+	return html.buildErr()
 }
 
 // Addr gives the address on which WebServer is listening. Use only after

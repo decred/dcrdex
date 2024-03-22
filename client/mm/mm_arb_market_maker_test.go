@@ -5,106 +5,44 @@ package mm
 
 import (
 	"context"
-	"encoding/hex"
+	"reflect"
 	"testing"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	"github.com/davecgh/go-spew/spew"
 )
 
-type tArbMMRebalancer struct {
-	buyVWAP      map[uint64]*vwapResult
-	sellVWAP     map[uint64]*vwapResult
-	groupedBuys  map[int][]*groupedOrder
-	groupedSells map[int][]*groupedOrder
-}
-
-var _ arbMMRebalancer = (*tArbMMRebalancer)(nil)
-
-func (r *tArbMMRebalancer) vwap(sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
-	if sell {
-		if res, found := r.sellVWAP[qty]; found {
-			return res.avg, res.extrema, true, nil
-		}
-		return 0, 0, false, nil
-	}
-	if res, found := r.buyVWAP[qty]; found {
-		return res.avg, res.extrema, true, nil
-	}
-	return 0, 0, false, nil
-}
-
-func (r *tArbMMRebalancer) groupedOrders() (buys, sells map[int][]*groupedOrder) {
-	return r.groupedBuys, r.groupedSells
-}
-
-func TestArbMarketMakerRebalance(t *testing.T) {
-	const rateStep uint64 = 1e3
+func TestArbMMRebalance(t *testing.T) {
 	const lotSize uint64 = 50e8
-	const newEpoch = 123_456_789
-	const driftTolerance = 0.001
-	const profit = 0.01
+	const currEpoch uint64 = 100
+	const baseID = 42
+	const quoteID = 0
 
-	buyFees := &orderFees{
-		swap:       1e4,
-		redemption: 2e4,
-		funding:    3e4,
-	}
-	sellFees := &orderFees{
-		swap:       2e4,
-		redemption: 1e4,
-		funding:    4e4,
-	}
-
-	orderIDs := make([]order.OrderID, 5)
-	for i := range orderIDs {
-		copy(orderIDs[i][:], encode.RandomBytes(32))
-	}
-
-	mkt := &core.Market{
-		RateStep:    rateStep,
-		AtomToConv:  1,
-		LotSize:     lotSize,
-		BaseID:      42,
-		QuoteID:     0,
-		BaseSymbol:  "dcr",
-		QuoteSymbol: "btc",
-	}
-
-	cfg1 := &ArbMarketMakerConfig{
-		DriftTolerance: driftTolerance,
-		Profit:         profit,
-		BuyPlacements: []*ArbMarketMakingPlacement{{
-			Lots:       1,
-			Multiplier: 1.5,
-		}},
-		SellPlacements: []*ArbMarketMakingPlacement{{
-			Lots:       1,
-			Multiplier: 1.5,
-		}},
-	}
-
-	cfg2 := &ArbMarketMakerConfig{
-		DriftTolerance: driftTolerance,
-		Profit:         profit,
+	cfg := &ArbMarketMakerConfig{
+		Profit:             0.01,
+		NumEpochsLeaveOpen: 5,
 		BuyPlacements: []*ArbMarketMakingPlacement{
 			{
-				Lots:       1,
-				Multiplier: 2,
+				Lots:       2,
+				Multiplier: 1.5,
 			},
 			{
 				Lots:       1,
-				Multiplier: 1.5,
+				Multiplier: 2,
 			},
 		},
 		SellPlacements: []*ArbMarketMakingPlacement{
 			{
+				Lots:       2,
+				Multiplier: 2.0,
+			},
+			{
 				Lots:       1,
-				Multiplier: 2,
+				Multiplier: 1.5,
 			},
 			{
 				Lots:       1,
@@ -113,791 +51,179 @@ func TestArbMarketMakerRebalance(t *testing.T) {
 		},
 	}
 
-	type test struct {
-		name string
-
-		rebalancer  *tArbMMRebalancer
-		cfg         *ArbMarketMakerConfig
-		dexBalances map[uint32]uint64
-		cexBalances map[uint32]*libxc.ExchangeBalance
-		reserves    autoRebalanceReserves
-
-		expectedCancels []dex.Bytes
-		expectedBuys    []*rateLots
-		expectedSells   []*rateLots
+	bidsVWAP := map[uint64]*vwapResult{
+		4 * lotSize: {
+			avg:     5e6,
+			extrema: 4.5e6,
+		},
+		11 * lotSize / 2 /* 5.5 lots */ : {
+			avg:     4e6,
+			extrema: 3e6,
+		},
+		// no result for 7 lots. CEX order doesn't have enough liquidity.
 	}
 
-	multiplyRate := func(u uint64, m float64) uint64 {
-		return steppedRate(uint64(float64(u)*m), mkt.RateStep)
-	}
-	divideRate := func(u uint64, d float64) uint64 {
-		return steppedRate(uint64(float64(u)/d), mkt.RateStep)
-	}
-	lotSizeMultiplier := func(m float64) uint64 {
-		return uint64(float64(mkt.LotSize) * m)
-	}
-
-	tests := []*test{
-		//  "no existing orders"
-		{
-			name: "no existing orders",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-				},
-			},
-			cfg: cfg1,
-			dexBalances: map[uint32]uint64{
-				42: lotSize * 3,
-				0:  calc.BaseToQuote(1e6, 3*lotSize),
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-			expectedBuys: []*rateLots{{
-				rate: 1.881e6,
-				lots: 1,
-			}},
-			expectedSells: []*rateLots{{
-				rate: 2.222e6,
-				lots: 1,
-			}},
+	asksVWAP := map[uint64]*vwapResult{
+		3 * lotSize: {
+			avg:     6e6,
+			extrema: 6.5e6,
 		},
-		// "existing orders within drift tolerance"
-		{
-			name: "existing orders within drift tolerance",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-				},
-				groupedBuys: map[int][]*groupedOrder{
-					0: {{
-						rate: 1.882e6,
-						lots: 1,
-					}},
-				},
-				groupedSells: map[int][]*groupedOrder{
-					0: {{
-						rate: 2.223e6,
-						lots: 1,
-					}},
-				},
-			},
-			cfg: cfg1,
-			dexBalances: map[uint32]uint64{
-				42: lotSize * 3,
-				0:  calc.BaseToQuote(1e6, 3*lotSize),
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-		},
-		// "existing orders outside drift tolerance"
-		{
-			name: "existing orders outside drift tolerance",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-				},
-				groupedBuys: map[int][]*groupedOrder{
-					0: {{
-						id:   orderIDs[0],
-						rate: 1.883e6,
-						lots: 1,
-					}},
-				},
-				groupedSells: map[int][]*groupedOrder{
-					0: {{
-						id:   orderIDs[1],
-						rate: 2.225e6,
-						lots: 1,
-					}},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-				},
-			},
-			cfg: cfg1,
-			dexBalances: map[uint32]uint64{
-				42: lotSize * 3,
-				0:  calc.BaseToQuote(1e6, 3*lotSize),
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-			expectedCancels: []dex.Bytes{
-				orderIDs[0][:],
-				orderIDs[1][:],
-			},
-		},
-		// "don't cancel before free cancel"
-		{
-			name: "don't cancel before free cancel",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-				},
-				groupedBuys: map[int][]*groupedOrder{
-					0: {{
-						id:    orderIDs[0],
-						rate:  1.883e6,
-						lots:  1,
-						epoch: newEpoch - 1,
-					}},
-				},
-				groupedSells: map[int][]*groupedOrder{
-					0: {{
-						id:    orderIDs[1],
-						rate:  2.225e6,
-						lots:  1,
-						epoch: newEpoch - 2,
-					}},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(1.5): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-				},
-			},
-			cfg: cfg1,
-			dexBalances: map[uint32]uint64{
-				42: lotSize * 3,
-				0:  calc.BaseToQuote(1e6, 3*lotSize),
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-			expectedCancels: []dex.Bytes{
-				orderIDs[1][:],
-			},
-		},
-		// "no existing orders, two orders each, dex balance edge, enough"
-		{
-			name: "no existing orders, two orders each, dex balance edge, enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			dexBalances: map[uint32]uint64{
-				42: 2*(lotSize+sellFees.swap) + sellFees.funding,
-				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           divideRate(1.7e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           multiplyRate(2.4e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-		},
-		// "no existing orders, two orders each, dex balance edge, not enough"
-		{
-			name: "no existing orders, two orders each, dex balance edge, not enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			dexBalances: map[uint32]uint64{
-				42: 2*(lotSize+sellFees.swap) + sellFees.funding - 1,
-				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding - 1,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-			},
-		},
-		// "no existing orders, two orders each, cex balance edge, enough"
-		{
-			name: "no existing orders, two orders each, cex balance edge, enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			dexBalances: map[uint32]uint64{
-				42: 1e19,
-				0:  1e19,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
-				42: {Available: 2 * mkt.LotSize},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           divideRate(1.7e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           multiplyRate(2.4e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-		},
-		// "no existing orders, two orders each, cex balance edge, not enough"
-		{
-			name: "no existing orders, two orders each, cex balance edge, not enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			dexBalances: map[uint32]uint64{
-				42: 1e19,
-				0:  1e19,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
-				42: {Available: 2*mkt.LotSize - 1},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-			},
-		},
-		// "one existing order, enough cex balance for second"
-		{
-			name: "one existing order, enough cex balance for second",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-				groupedBuys: map[int][]*groupedOrder{
-					0: {{
-						rate: divideRate(1.9e6, 1+profit),
-						lots: 1,
-					}},
-				},
-				groupedSells: map[int][]*groupedOrder{
-					0: {{
-						rate: multiplyRate(2.2e6, 1+profit),
-						lots: 1,
-					}},
-				},
-			},
-			cfg: cfg2,
-			dexBalances: map[uint32]uint64{
-				42: 1e19,
-				0:  1e19,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize)},
-				42: {Available: 2 * mkt.LotSize},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate:           divideRate(1.7e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate:           multiplyRate(2.4e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-		},
-		// "one existing order, not enough cex balance for second"
-		{
-			name: "one existing order, not enough cex balance for second",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-				groupedBuys: map[int][]*groupedOrder{
-					0: {{
-						rate: divideRate(1.9e6, 1+profit),
-						lots: 1,
-					}},
-				},
-				groupedSells: map[int][]*groupedOrder{
-					0: {{
-						rate: multiplyRate(2.2e6, 1+profit),
-						lots: 1,
-					}},
-				},
-			},
-			cfg: cfg2,
-			dexBalances: map[uint32]uint64{
-				42: 1e19,
-				0:  1e19,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) - 1},
-				42: {Available: 2*mkt.LotSize - 1},
-			},
-		},
-		// "no existing orders, two orders each, dex balance edge with reserves, enough"
-		{
-			name: "no existing orders, two orders each, dex balance edge with reserves, enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			reserves: autoRebalanceReserves{
-				baseDexReserves: 2 * lotSize,
-			},
-			dexBalances: map[uint32]uint64{
-				42: 2*(lotSize+sellFees.swap) + sellFees.funding + 2*lotSize,
-				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           divideRate(1.7e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           multiplyRate(2.4e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-		},
-		// "no existing orders, two orders each, dex balance edge with reserves, not enough"
-		{
-			name: "no existing orders, two orders each, dex balance edge with reserves, not enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			reserves: autoRebalanceReserves{
-				baseDexReserves: 2 * lotSize,
-			},
-			dexBalances: map[uint32]uint64{
-				42: 2*(lotSize+sellFees.swap) + sellFees.funding + 2*lotSize - 1,
-				0:  calc.BaseToQuote(divideRate(1.9e6, 1+profit), lotSize) + calc.BaseToQuote(divideRate(1.7e6, 1+profit), lotSize) + 2*buyFees.swap + buyFees.funding,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: 1e19},
-				42: {Available: 1e19},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           divideRate(1.7e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-			},
-		},
-		// "no existing orders, two orders each, cex balance edge with reserves, enough"
-		{
-			name: "no existing orders, two orders each, cex balance edge with reserves, enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			reserves: autoRebalanceReserves{
-				quoteCexReserves: lotSize,
-			},
-			dexBalances: map[uint32]uint64{
-				42: 1e19,
-				0:  1e19,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) + lotSize},
-				42: {Available: 2 * mkt.LotSize},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           divideRate(1.7e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           multiplyRate(2.4e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
-		},
-		// "no existing orders, two orders each, cex balance edge with reserves, enough"
-		{
-			name: "no existing orders, two orders each, cex balance edge with reserves, not enough",
-			rebalancer: &tArbMMRebalancer{
-				buyVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2e6,
-						extrema: 1.9e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     1.8e6,
-						extrema: 1.7e6,
-					},
-				},
-				sellVWAP: map[uint64]*vwapResult{
-					lotSizeMultiplier(2): {
-						avg:     2.1e6,
-						extrema: 2.2e6,
-					},
-					lotSizeMultiplier(3.5): {
-						avg:     2.3e6,
-						extrema: 2.4e6,
-					},
-				},
-			},
-			cfg: cfg2,
-			reserves: autoRebalanceReserves{
-				baseCexReserves: lotSize,
-			},
-			dexBalances: map[uint32]uint64{
-				42: 1e19,
-				0:  1e19,
-			},
-			cexBalances: map[uint32]*libxc.ExchangeBalance{
-				0:  {Available: calc.BaseToQuote(2.2e6, mkt.LotSize) + calc.BaseToQuote(2.4e6, mkt.LotSize) + lotSize - 1},
-				42: {Available: 2 * mkt.LotSize},
-			},
-			expectedBuys: []*rateLots{
-				{
-					rate: divideRate(1.9e6, 1+profit),
-					lots: 1,
-				},
-			},
-			expectedSells: []*rateLots{
-				{
-					rate: multiplyRate(2.2e6, 1+profit),
-					lots: 1,
-				},
-				{
-					rate:           multiplyRate(2.4e6, 1+profit),
-					lots:           1,
-					placementIndex: 1,
-				},
-			},
+		5 * lotSize: {
+			avg:     7e6,
+			extrema: 7.5e6,
 		},
 	}
 
-	for _, test := range tests {
-		tCore := newTCore()
-		tCore.setAssetBalances(test.dexBalances)
-		cex := newTWrappedCEX()
-		cex.balances = test.cexBalances
+	mkt := &core.Market{
+		RateStep:   1e3,
+		AtomToConv: 1,
+		LotSize:    lotSize,
+		BaseID:     baseID,
+		QuoteID:    quoteID,
+	}
+	buyFeesInQuoteUnits := uint64(2e5)
+	sellFeesInQuoteUnits := uint64(3e5)
 
-		cancels, buys, sells := arbMarketMakerRebalance(newEpoch, test.rebalancer,
-			tCore, cex, test.cfg, mkt, buyFees, sellFees, &test.reserves, tLogger)
+	coreAdaptor := newTBotCoreAdaptor(newTCore())
+	coreAdaptor.buyFeesInQuote = buyFeesInQuoteUnits
+	coreAdaptor.sellFeesInQuote = sellFeesInQuoteUnits
 
-		if len(cancels) != len(test.expectedCancels) {
-			t.Fatalf("%s: expected %d cancels, got %d", test.name, len(test.expectedCancels), len(cancels))
-		}
-		for i := range cancels {
-			if !cancels[i].Equal(test.expectedCancels[i]) {
-				t.Fatalf("%s: cancel %d expected %x, got %x", test.name, i, test.expectedCancels[i], cancels[i])
-			}
-		}
+	cexAdaptor := newTBotCEXAdaptor()
+	cexAdaptor.asksVWAP = asksVWAP
+	cexAdaptor.bidsVWAP = bidsVWAP
 
-		if len(buys) != len(test.expectedBuys) {
-			t.Fatalf("%s: expected %d buys, got %d", test.name, len(test.expectedBuys), len(buys))
-		}
-		for i := range buys {
-			if buys[i].rate != test.expectedBuys[i].rate {
-				t.Fatalf("%s: buy %d expected rate %d, got %d", test.name, i, test.expectedBuys[i].rate, buys[i].rate)
-			}
-			if buys[i].lots != test.expectedBuys[i].lots {
-				t.Fatalf("%s: buy %d expected lots %d, got %d", test.name, i, test.expectedBuys[i].lots, buys[i].lots)
-			}
-			if buys[i].placementIndex != test.expectedBuys[i].placementIndex {
-				t.Fatalf("%s: buy %d expected placement index %d, got %d", test.name, i, test.expectedBuys[i].placementIndex, buys[i].placementIndex)
-			}
-		}
+	// In the first call, these values will be returned as reserves,
+	// then in the second call they should returned as the rebalance
+	// amount prompting a withdrawal/deposit.
+	const baseCexReserves uint64 = 2e5
+	const quoteDexReserves uint64 = 3e5
+	cexAdaptor.prepareRebalanceResults[baseID] = &prepareRebalanceResult{
+		cexReserves: baseCexReserves,
+	}
+	cexAdaptor.prepareRebalanceResults[quoteID] = &prepareRebalanceResult{
+		dexReserves: quoteDexReserves,
+	}
 
-		if len(sells) != len(test.expectedSells) {
-			t.Fatalf("%s: expected %d sells, got %d", test.name, len(test.expectedSells), len(sells))
+	arbMM := &arbMarketMaker{
+		baseID:      baseID,
+		quoteID:     quoteID,
+		cex:         cexAdaptor,
+		core:        coreAdaptor,
+		log:         tLogger,
+		mkt:         mkt,
+		cfg:         cfg,
+		dexReserves: make(map[uint32]uint64),
+		cexReserves: make(map[uint32]uint64),
+	}
+
+	arbMM.rebalance(currEpoch)
+
+	dexRate := func(counterTradeRate uint64, sell bool) uint64 {
+		fees := buyFeesInQuoteUnits
+		if sell {
+			fees = sellFeesInQuoteUnits
 		}
-		for i := range sells {
-			if sells[i].rate != test.expectedSells[i].rate {
-				t.Fatalf("%s: sell %d expected rate %d, got %d", test.name, i, test.expectedSells[i].rate, sells[i].rate)
-			}
-			if sells[i].lots != test.expectedSells[i].lots {
-				t.Fatalf("%s: sell %d expected lots %d, got %d", test.name, i, test.expectedSells[i].lots, sells[i].lots)
-			}
-			if sells[i].placementIndex != test.expectedSells[i].placementIndex {
-				t.Fatalf("%s: sell %d expected placement index %d, got %d", test.name, i, test.expectedSells[i].placementIndex, sells[i].placementIndex)
-			}
+		rate, err := dexPlacementRate(counterTradeRate, sell, 0.01, mkt, fees)
+		if err != nil {
+			panic(err)
 		}
+		return rate
+	}
+	expBuyPlacements := []*multiTradePlacement{
+		{
+			lots:             2,
+			rate:             dexRate(6.5e6, false),
+			counterTradeRate: 6.5e6,
+		},
+		{
+			lots:             1,
+			rate:             dexRate(7.5e6, false),
+			counterTradeRate: 7.5e6,
+		},
+	}
+
+	expSellPlacements := []*multiTradePlacement{
+		{
+			lots:             2,
+			rate:             dexRate(4.5e6, true),
+			counterTradeRate: 4.5e6,
+		},
+		{
+			lots:             1,
+			rate:             dexRate(3e6, true),
+			counterTradeRate: 3e6,
+		},
+		{
+			lots: 0,
+			rate: 0,
+		},
+	}
+	if !reflect.DeepEqual(expBuyPlacements, coreAdaptor.lastMultiTradeBuys) {
+		t.Fatal(spew.Sprintf("expected buy placements:\n%#+v\ngot:\n%#+v", expBuyPlacements, coreAdaptor.lastMultiTradeBuys))
+	}
+	if !reflect.DeepEqual(expSellPlacements, coreAdaptor.lastMultiTradeSells) {
+		t.Fatal(spew.Sprintf("expected sell placements:\n%#+v\ngot:\n%#+v", expSellPlacements, coreAdaptor.lastMultiTradeSells))
+	}
+	delete(arbMM.cexTrades, "1")            // this normally will get deleted when an update arrives from the CEX
+	cexAdaptor.cancelledTrades = []string{} // reset
+
+	cexAdaptor.prepareRebalanceResults[baseID] = &prepareRebalanceResult{
+		rebalance: -int64(baseCexReserves),
+	}
+	cexAdaptor.prepareRebalanceResults[quoteID] = &prepareRebalanceResult{
+		rebalance: int64(quoteDexReserves),
+	}
+
+	arbMM.rebalance(currEpoch + 1)
+
+	// The CEX orderbook hasn't changed, so the rates are the same.
+	if !reflect.DeepEqual(expBuyPlacements, coreAdaptor.lastMultiTradeBuys) {
+		t.Fatal(spew.Sprintf("expected buy placements:\n%#+v\ngot:\n%#+v", expBuyPlacements, coreAdaptor.lastMultiTradeBuys))
+	}
+	if !reflect.DeepEqual(expSellPlacements, coreAdaptor.lastMultiTradeSells) {
+		t.Fatal(spew.Sprintf("expected sell placements:\n%#+v\ngot:\n%#+v", expSellPlacements, coreAdaptor.lastMultiTradeSells))
+	}
+
+	// Make sure MultiTrade was called with the correct reserve arguments.
+	expectedDEXReserves := map[uint32]uint64{baseID: 0, quoteID: quoteDexReserves}
+	expectedCEXReserves := map[uint32]uint64{baseID: baseCexReserves, quoteID: 0}
+	if !reflect.DeepEqual(coreAdaptor.buysCEXReserves, expectedCEXReserves) {
+		t.Fatalf("expected cex reserves:\n%+v\ngot:\n%+v", expectedCEXReserves, coreAdaptor.buysCEXReserves)
+	}
+	if !reflect.DeepEqual(coreAdaptor.sellsCEXReserves, expectedCEXReserves) {
+		t.Fatalf("expected cex reserves:\n%+v\ngot:\n%+v", expectedCEXReserves, coreAdaptor.sellsCEXReserves)
+	}
+	if !reflect.DeepEqual(coreAdaptor.buysDEXReserves, expectedDEXReserves) {
+		t.Fatalf("expected dex reserves:\n%+v\ngot:\n%+v", expectedDEXReserves, coreAdaptor.buysDEXReserves)
+	}
+	if !reflect.DeepEqual(coreAdaptor.sellsDEXReserves, expectedDEXReserves) {
+		t.Fatalf("expected dex reserves:\n%+v\ngot:\n%+v", expectedDEXReserves, coreAdaptor.sellsDEXReserves)
+	}
+
+	expectedWithdrawal := &withdrawArgs{
+		assetID: baseID,
+		amt:     baseCexReserves,
+	}
+	if !reflect.DeepEqual(expectedWithdrawal, cexAdaptor.lastWithdrawArgs) {
+		t.Fatalf("expected withdrawal:\n%+v\ngot:\n%+v", expectedWithdrawal, cexAdaptor.lastWithdrawArgs)
+	}
+
+	expectedDeposit := &withdrawArgs{
+		assetID: quoteID,
+		amt:     quoteDexReserves,
+	}
+	if !reflect.DeepEqual(expectedDeposit, cexAdaptor.lastDepositArgs) {
+		t.Fatalf("expected deposit:\n%+v\ngot:\n%+v", expectedDeposit, cexAdaptor.lastDepositArgs)
+	}
+
+	arbMM.cexTrades = make(map[string]uint64)
+	arbMM.cexTrades["1"] = currEpoch + 2 - cfg.NumEpochsLeaveOpen
+	arbMM.cexTrades["2"] = currEpoch + 2 - cfg.NumEpochsLeaveOpen + 1
+	arbMM.rebalance(currEpoch + 2)
+
+	expectedCancels := []string{"1"}
+	if !reflect.DeepEqual(expectedCancels, cexAdaptor.cancelledTrades) {
+		t.Fatalf("expected cancels:\n%+v\ngot:\n%+v", expectedCancels, cexAdaptor.cancelledTrades)
 	}
 }
 
@@ -925,182 +251,88 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 		QuoteSymbol: "btc",
 	}
 
-	multiplyRate := func(u uint64, m float64) uint64 {
-		return steppedRate(uint64(float64(u)*m), mkt.RateStep)
-	}
-	divideRate := func(u uint64, d float64) uint64 {
-		return steppedRate(uint64(float64(u)/d), mkt.RateStep)
-	}
-
 	type test struct {
 		name              string
-		orders            []*core.Order
-		notes             []core.Notification
-		expectedCEXTrades []*cexOrder
+		pendingOrders     map[order.OrderID]uint64
+		orderUpdates      []*core.Order
+		expectedCEXTrades []*libxc.Trade
 	}
 
 	tests := []*test{
 		{
-			name: "one buy and one sell match notifications",
-			orders: []*core.Order{
+			name: "one buy and one sell match, repeated",
+			pendingOrders: map[order.OrderID]uint64{
+				orderIDs[0]: 7.9e5,
+				orderIDs[1]: 6.1e5,
+			},
+			orderUpdates: []*core.Order{
 				{
 					ID:   orderIDs[0][:],
 					Sell: true,
 					Qty:  lotSize,
 					Rate: 8e5,
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[0][:],
+							Qty:     lotSize,
+							Rate:    8e5,
+						},
+					},
 				},
 				{
 					ID:   orderIDs[1][:],
 					Sell: false,
 					Qty:  lotSize,
 					Rate: 6e5,
-				},
-			},
-			notes: []core.Notification{
-				&core.MatchNote{
-					OrderID: orderIDs[0][:],
-					Match: &core.Match{
-						MatchID: matchIDs[0][:],
-						Qty:     lotSize,
-						Rate:    8e5,
-					},
-				},
-				&core.MatchNote{
-					OrderID: orderIDs[1][:],
-					Match: &core.Match{
-						MatchID: matchIDs[1][:],
-						Qty:     lotSize,
-						Rate:    6e5,
-					},
-				},
-				&core.OrderNote{
-					Order: &core.Order{
-						ID:   orderIDs[0][:],
-						Sell: true,
-						Qty:  lotSize,
-						Rate: 8e5,
-						Matches: []*core.Match{
-							{
-								MatchID: matchIDs[0][:],
-								Qty:     lotSize,
-								Rate:    8e5,
-							},
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[1][:],
+							Qty:     lotSize,
+							Rate:    6e5,
 						},
 					},
 				},
-				&core.OrderNote{
-					Order: &core.Order{
-						ID:   orderIDs[1][:],
-						Sell: false,
-						Qty:  lotSize,
-						Rate: 8e5,
-						Matches: []*core.Match{
-							{
-								MatchID: matchIDs[1][:],
-								Qty:     lotSize,
-								Rate:    6e5,
-							},
-						},
-					},
-				},
-			},
-			expectedCEXTrades: []*cexOrder{
-				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    divideRate(8e5, 1+profit),
-					sell:    false,
-				},
-				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    multiplyRate(6e5, 1+profit),
-					sell:    true,
-				},
-				nil,
-				nil,
-			},
-		},
-		{
-			name: "place cex trades due to order note",
-			orders: []*core.Order{
 				{
 					ID:   orderIDs[0][:],
 					Sell: true,
 					Qty:  lotSize,
 					Rate: 8e5,
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[0][:],
+							Qty:     lotSize,
+							Rate:    8e5,
+						},
+					},
 				},
 				{
 					ID:   orderIDs[1][:],
 					Sell: false,
 					Qty:  lotSize,
 					Rate: 6e5,
-				},
-			},
-			notes: []core.Notification{
-				&core.OrderNote{
-					Order: &core.Order{
-						ID:   orderIDs[0][:],
-						Sell: true,
-						Qty:  lotSize,
-						Rate: 8e5,
-						Matches: []*core.Match{
-							{
-								MatchID: matchIDs[0][:],
-								Qty:     lotSize,
-								Rate:    8e5,
-							},
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[1][:],
+							Qty:     lotSize,
+							Rate:    6e5,
 						},
 					},
 				},
-				&core.OrderNote{
-					Order: &core.Order{
-						ID:   orderIDs[1][:],
-						Sell: false,
-						Qty:  lotSize,
-						Rate: 8e5,
-						Matches: []*core.Match{
-							{
-								MatchID: matchIDs[1][:],
-								Qty:     lotSize,
-								Rate:    6e5,
-							},
-						},
-					},
-				},
-				&core.MatchNote{
-					OrderID: orderIDs[0][:],
-					Match: &core.Match{
-						MatchID: matchIDs[0][:],
-						Qty:     lotSize,
-						Rate:    8e5,
-					},
-				},
-				&core.MatchNote{
-					OrderID: orderIDs[1][:],
-					Match: &core.Match{
-						MatchID: matchIDs[1][:],
-						Qty:     lotSize,
-						Rate:    6e5,
-					},
-				},
 			},
-			expectedCEXTrades: []*cexOrder{
+			expectedCEXTrades: []*libxc.Trade{
 				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    divideRate(8e5, 1+profit),
-					sell:    false,
+					BaseID:  42,
+					QuoteID: 0,
+					Qty:     lotSize,
+					Rate:    7.9e5,
+					Sell:    false,
 				},
 				{
-					baseID:  42,
-					quoteID: 0,
-					qty:     lotSize,
-					rate:    multiplyRate(6e5, 1+profit),
-					sell:    true,
+					BaseID:  42,
+					QuoteID: 0,
+					Qty:     lotSize,
+					Rate:    6.1e5,
+					Sell:    true,
 				},
 				nil,
 				nil,
@@ -1109,48 +341,39 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 	}
 
 	runTest := func(test *test) {
-		cex := newTWrappedCEX()
+		cex := newTBotCEXAdaptor()
 		tCore := newTCore()
+		coreAdaptor := newTBotCoreAdaptor(tCore)
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		ords := make(map[order.OrderID]*core.Order)
-
-		for _, o := range test.orders {
-			var oid order.OrderID
-			copy(oid[:], o.ID)
-			ords[oid] = o
-		}
-
 		arbMM := &arbMarketMaker{
-			cex:            cex,
-			core:           tCore,
-			ctx:            ctx,
-			ords:           ords,
-			baseID:         42,
-			quoteID:        0,
-			oidToPlacement: make(map[order.OrderID]int),
-			matchesSeen:    make(map[order.MatchID]bool),
-			cexTrades:      make(map[string]uint64),
-			mkt:            mkt,
+			cex:         cex,
+			core:        coreAdaptor,
+			ctx:         ctx,
+			baseID:      42,
+			quoteID:     0,
+			matchesSeen: make(map[order.MatchID]bool),
+			cexTrades:   make(map[string]uint64),
+			mkt:         mkt,
 			cfg: &ArbMarketMakerConfig{
 				Profit: profit,
 			},
+			pendingOrders: test.pendingOrders,
 		}
 		arbMM.currEpoch.Store(123)
 		go arbMM.run()
 
-		dummyNote := &core.BondRefundNote{}
-
-		for i, note := range test.notes {
+		for i, note := range test.orderUpdates {
 			cex.lastTrade = nil
 
-			tCore.noteFeed <- note
-			tCore.noteFeed <- dummyNote
+			coreAdaptor.orderUpdates <- note
+			coreAdaptor.orderUpdates <- &core.Order{} // Dummy update should have no effect
 
 			expectedCEXTrade := test.expectedCEXTrades[i]
 			if (expectedCEXTrade == nil) != (cex.lastTrade == nil) {
-				t.Fatalf("%s: expected cex order %v but got %v", test.name, (expectedCEXTrade != nil), (cex.lastTrade != nil))
+				t.Fatalf("%s: expected cex order after update %d %v but got %v", test.name, i, (expectedCEXTrade != nil), (cex.lastTrade != nil))
 			}
 
 			if cex.lastTrade != nil &&
@@ -1165,537 +388,82 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 	}
 }
 
-func TestArbMarketMakerAutoRebalance(t *testing.T) {
-	orderIDs := make([]order.OrderID, 5)
-	for i := 0; i < 5; i++ {
-		copy(orderIDs[i][:], encode.RandomBytes(32))
-	}
-
-	matchIDs := make([]order.MatchID, 5)
-	for i := 0; i < 5; i++ {
-		copy(matchIDs[i][:], encode.RandomBytes(32))
-	}
-
-	mkt := &core.Market{
-		LotSize: 4e8,
-	}
-
-	baseID, quoteID := uint32(42), uint32(0)
-
-	profitRate := float64(0.01)
-
+func TestDEXPlacementRate(t *testing.T) {
 	type test struct {
-		name            string
-		cfg             *AutoRebalanceConfig
-		orders          map[order.OrderID]*core.Order
-		oidToPlacement  map[order.OrderID]int
-		cexBaseBalance  uint64
-		cexQuoteBalance uint64
-		dexBaseBalance  uint64
-		dexQuoteBalance uint64
-		activeCEXOrders bool
-
-		expectedDeposit      *withdrawArgs
-		expectedWithdraw     *withdrawArgs
-		expectedCancels      []dex.Bytes
-		expectedReserves     autoRebalanceReserves
-		expectedBasePending  bool
-		expectedQuotePending bool
+		name             string
+		counterTradeRate uint64
+		profit           float64
+		base             uint32
+		quote            uint32
+		fees             uint64
+		mkt              *core.Market
 	}
-
-	currEpoch := uint64(123)
 
 	tests := []*test{
-		// "no orders, no need to rebalance"
 		{
-			name: "no orders, no need to rebalance",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  1e16,
-				MinQuoteAmt: 1e12,
-			},
-			orders:          map[order.OrderID]*core.Order{},
-			oidToPlacement:  map[order.OrderID]int{},
-			cexBaseBalance:  1e16,
-			cexQuoteBalance: 1e12,
-			dexBaseBalance:  1e16,
-			dexQuoteBalance: 1e12,
-		},
-		//  "no action with active cex orders"
-		{
-			name: "no action with active cex orders",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  6 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 4 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      6e7,
-					Sell:      true,
-					LockedAmt: 4 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-			},
-			cexBaseBalance:  3 * mkt.LotSize,
-			dexBaseBalance:  5 * mkt.LotSize,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			activeCEXOrders: true,
-		},
-		// "no orders, need to withdraw base"
-		{
-			name: "no orders, need to withdraw base",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  1e16,
-				MinQuoteAmt: 1e12,
-			},
-			orders:          map[order.OrderID]*core.Order{},
-			oidToPlacement:  map[order.OrderID]int{},
-			cexBaseBalance:  8e16,
-			cexQuoteBalance: 1e12,
-			dexBaseBalance:  9e15,
-			dexQuoteBalance: 1e12,
-			expectedWithdraw: &withdrawArgs{
-				assetID: 42,
-				amt:     (9e15+8e16)/2 - 9e15,
-			},
-			expectedBasePending: true,
-		},
-		//  "need to deposit base, no need to cancel order"
-		{
-			name: "need to deposit base, no need to cancel order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  6 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 4 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      6e7,
-					Sell:      true,
-					LockedAmt: 4 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-			},
-			cexBaseBalance:  3 * mkt.LotSize,
-			dexBaseBalance:  5 * mkt.LotSize,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			expectedDeposit: &withdrawArgs{
-				assetID: 42,
-				amt:     5 * mkt.LotSize,
-			},
-			expectedBasePending: true,
-		},
-		//  "need to deposit base, need to cancel 1 order"
-		{
-			name: "need to deposit base, need to cancel 1 order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  6 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 4 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      6e7,
-					Sell:      true,
-					LockedAmt: 4 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-				orderIDs[1]: 1,
-			},
-			cexBaseBalance:  3 * mkt.LotSize,
-			dexBaseBalance:  5*mkt.LotSize - 2,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			expectedCancels: []dex.Bytes{
-				orderIDs[1][:],
-			},
-			expectedReserves: autoRebalanceReserves{
-				baseDexReserves: (16*mkt.LotSize-2)/2 - 3*mkt.LotSize,
+			name:             "dcr/btc",
+			counterTradeRate: 5e6,
+			profit:           0.03,
+			base:             42,
+			quote:            0,
+			fees:             4e5,
+			mkt: &core.Market{
+				BaseID:   42,
+				QuoteID:  0,
+				LotSize:  40e8,
+				RateStep: 1e2,
 			},
 		},
-		//  "need to deposit base, need to cancel 2 orders"
 		{
-			name: "need to deposit base, need to cancel 2 orders",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  3 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       2 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 2 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       2 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 2 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[2]: {
-					ID:        orderIDs[2][:],
-					Qty:       2 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 2 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-				orderIDs[1]: 1,
-				orderIDs[2]: 2,
-			},
-			cexBaseBalance:  0,
-			dexBaseBalance:  1000,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			expectedCancels: []dex.Bytes{
-				orderIDs[2][:],
-				orderIDs[1][:],
-			},
-			expectedReserves: autoRebalanceReserves{
-				baseDexReserves: (6*mkt.LotSize + 1000) / 2,
+			name:             "btc/usdc.eth",
+			counterTradeRate: calc.MessageRateAlt(43000, 1e8, 1e6),
+			profit:           0.01,
+			base:             0,
+			quote:            60001,
+			fees:             5e5,
+			mkt: &core.Market{
+				BaseID:   0,
+				QuoteID:  60001,
+				LotSize:  5e6,
+				RateStep: 1e4,
 			},
 		},
-		//  "need to withdraw base, no need to cancel order"
 		{
-			name: "need to withdraw base, no need to cancel order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  3 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-				orderIDs[1]: 1,
-				orderIDs[2]: 2,
-			},
-			cexBaseBalance:  6 * mkt.LotSize,
-			dexBaseBalance:  0,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			expectedWithdraw: &withdrawArgs{
-				assetID: baseID,
-				amt:     3 * mkt.LotSize,
-			},
-			expectedBasePending: true,
-		},
-		//  "need to withdraw base, need to cancel 1 order"
-		{
-			name: "need to withdraw base, need to cancel 1 order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  3 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       2 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      false,
-					LockedAmt: 2*mkt.LotSize + 1500,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       2 * mkt.LotSize,
-					Rate:      6e7,
-					Sell:      false,
-					LockedAmt: 2*mkt.LotSize + 1500,
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-				orderIDs[1]: 1,
-			},
-			cexBaseBalance:  8*mkt.LotSize - 2,
-			dexBaseBalance:  0,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			expectedCancels: []dex.Bytes{
-				orderIDs[1][:],
-			},
-			expectedReserves: autoRebalanceReserves{
-				baseCexReserves: 4*mkt.LotSize - 1,
-			},
-		},
-		//  "need to deposit quote, no need to cancel order"
-		{
-			name: "need to deposit quote, no need to cancel order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  6 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       2 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      false,
-					LockedAmt: calc.BaseToQuote(5e7, 2*mkt.LotSize),
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       2 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      false,
-					LockedAmt: calc.BaseToQuote(5e7, 2*mkt.LotSize),
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-			},
-			cexBaseBalance:  10 * mkt.LotSize,
-			dexBaseBalance:  10 * mkt.LotSize,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 4*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 8*mkt.LotSize),
-			expectedDeposit: &withdrawArgs{
-				assetID: 0,
-				amt:     calc.BaseToQuote(5e7, 4*mkt.LotSize),
-			},
-			expectedQuotePending: true,
-		},
-		//  "need to deposit quote, need to cancel 1 order"
-		{
-			name: "need to deposit quote, no need to cancel order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  6 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      false,
-					LockedAmt: calc.BaseToQuote(5e7, 4*mkt.LotSize),
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       4 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      false,
-					LockedAmt: calc.BaseToQuote(5e7, 4*mkt.LotSize),
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-				orderIDs[1]: 1,
-			},
-			cexBaseBalance:  10 * mkt.LotSize,
-			dexBaseBalance:  10 * mkt.LotSize,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 4*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 2*mkt.LotSize),
-			expectedCancels: []dex.Bytes{
-				orderIDs[1][:],
-			},
-			expectedReserves: autoRebalanceReserves{
-				quoteDexReserves: calc.BaseToQuote(5e7, 3*mkt.LotSize),
-			},
-		},
-		//  "need to withdraw quote, no need to cancel order"
-		{
-			name: "need to withdraw quote, no need to cancel order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  6 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       3 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 3 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       3 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 3 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-				orderIDs[1]: 1,
-			},
-			cexBaseBalance:  10 * mkt.LotSize,
-			dexBaseBalance:  10 * mkt.LotSize,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 4*mkt.LotSize) + calc.BaseToQuote(uint64(float64(5e7)*(1+profitRate)), 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 2*mkt.LotSize) + 12e6,
-			expectedWithdraw: &withdrawArgs{
-				assetID: quoteID,
-				amt:     calc.BaseToQuote(5e7, 4*mkt.LotSize),
-			},
-			expectedQuotePending: true,
-		},
-		//  "need to withdraw quote, no need to cancel 1 order"
-		{
-			name: "need to withdraw quote, no need to cancel 1 order",
-			cfg: &AutoRebalanceConfig{
-				MinBaseAmt:  6 * mkt.LotSize,
-				MinQuoteAmt: calc.BaseToQuote(5e7, 6*mkt.LotSize),
-			},
-			orders: map[order.OrderID]*core.Order{
-				orderIDs[0]: {
-					ID:        orderIDs[0][:],
-					Qty:       3 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 3 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-				orderIDs[1]: {
-					ID:        orderIDs[1][:],
-					Qty:       3 * mkt.LotSize,
-					Rate:      5e7,
-					Sell:      true,
-					LockedAmt: 3 * mkt.LotSize,
-					Epoch:     currEpoch - 2,
-				},
-			},
-			oidToPlacement: map[order.OrderID]int{
-				orderIDs[0]: 0,
-				orderIDs[1]: 1,
-			},
-			cexBaseBalance:  10 * mkt.LotSize,
-			dexBaseBalance:  10 * mkt.LotSize,
-			cexQuoteBalance: calc.BaseToQuote(5e7, 4*mkt.LotSize) + calc.BaseToQuote(uint64(float64(5e7)*(1+profitRate)), 6*mkt.LotSize),
-			dexQuoteBalance: calc.BaseToQuote(5e7, 2*mkt.LotSize) + 12e6 - 2,
-			expectedCancels: []dex.Bytes{
-				orderIDs[1][:],
-			},
-			expectedReserves: autoRebalanceReserves{
-				quoteCexReserves: calc.BaseToQuote(5e7, 4*mkt.LotSize) + 1,
+			name:             "wbtc.polygon/usdc.eth",
+			counterTradeRate: calc.MessageRateAlt(43000, 1e8, 1e6),
+			profit:           0.02,
+			base:             966003,
+			quote:            60001,
+			fees:             3e5,
+			mkt: &core.Market{
+				BaseID:   966003,
+				QuoteID:  60001,
+				LotSize:  5e6,
+				RateStep: 1e4,
 			},
 		},
 	}
 
-	runTest := func(test *test) {
-		cex := newTWrappedCEX()
-		cex.balances = map[uint32]*libxc.ExchangeBalance{
-			baseID:  {Available: test.cexBaseBalance},
-			quoteID: {Available: test.cexQuoteBalance},
-		}
-		tCore := newTCore()
-		tCore.setAssetBalances(map[uint32]uint64{
-			baseID:  test.dexBaseBalance,
-			quoteID: test.dexQuoteBalance,
-		})
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		mm := &arbMarketMaker{
-			ctx:            ctx,
-			cex:            cex,
-			core:           tCore,
-			baseID:         baseID,
-			quoteID:        quoteID,
-			oidToPlacement: test.oidToPlacement,
-			ords:           test.orders,
-			log:            tLogger,
-			cfg: &ArbMarketMakerConfig{
-				AutoRebalance: test.cfg,
-				Profit:        profitRate,
-			},
-			mkt: mkt,
+	runTest := func(tt *test) {
+		sellRate, err := dexPlacementRate(tt.counterTradeRate, true, tt.profit, tt.mkt, tt.fees)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tt.name, err)
 		}
 
-		if test.activeCEXOrders {
-			mm.cexTrades = map[string]uint64{"abc": 1234}
+		expectedProfitableSellRate := uint64(float64(tt.counterTradeRate) * (1 + tt.profit))
+		additional := calc.BaseToQuote(sellRate, tt.mkt.LotSize) - calc.BaseToQuote(expectedProfitableSellRate, tt.mkt.LotSize)
+		if additional > tt.fees*101/100 || additional < tt.fees*99/100 {
+			t.Fatalf("%s: expected additional %d but got %d", tt.name, tt.fees, additional)
 		}
 
-		mm.rebalanceAssets()
-
-		if (test.expectedDeposit == nil) != (cex.lastDepositArgs == nil) {
-			t.Fatalf("%s: expected deposit %v but got %v", test.name, (test.expectedDeposit != nil), (cex.lastDepositArgs != nil))
+		buyRate, err := dexPlacementRate(tt.counterTradeRate, false, tt.profit, tt.mkt, tt.fees)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tt.name, err)
 		}
-		if test.expectedDeposit != nil {
-			if *cex.lastDepositArgs != *test.expectedDeposit {
-				t.Fatalf("%s: expected deposit %+v but got %+v", test.name, test.expectedDeposit, cex.lastDepositArgs)
-			}
-		}
-
-		if (test.expectedWithdraw == nil) != (cex.lastWithdrawArgs == nil) {
-			t.Fatalf("%s: expected withdraw %v but got %v", test.name, (test.expectedWithdraw != nil), (cex.lastWithdrawArgs != nil))
-		}
-		if test.expectedWithdraw != nil {
-			if *cex.lastWithdrawArgs != *test.expectedWithdraw {
-				t.Fatalf("%s: expected withdraw %+v but got %+v", test.name, test.expectedWithdraw, cex.lastWithdrawArgs)
-			}
-		}
-
-		if len(tCore.cancelsPlaced) != len(test.expectedCancels) {
-			t.Fatalf("%s: expected %d cancels but got %d", test.name, len(test.expectedCancels), len(tCore.cancelsPlaced))
-		}
-		for i := range test.expectedCancels {
-			if !tCore.cancelsPlaced[i].Equal(test.expectedCancels[i]) {
-				t.Fatalf("%s: expected cancel %d %s but got %s", test.name, i, hex.EncodeToString(test.expectedCancels[i]), hex.EncodeToString(tCore.cancelsPlaced[i]))
-			}
-		}
-
-		if test.expectedReserves != mm.reserves {
-			t.Fatalf("%s: expected reserves %+v but got %+v", test.name, test.expectedReserves, mm.reserves)
-		}
-
-		if test.expectedBasePending != mm.pendingBaseRebalance.Load() {
-			t.Fatalf("%s: expected pending base rebalance %v but got %v", test.name, test.expectedBasePending, mm.pendingBaseRebalance.Load())
-		}
-		if test.expectedQuotePending != mm.pendingQuoteRebalance.Load() {
-			t.Fatalf("%s: expected pending quote rebalance %v but got %v", test.name, test.expectedQuotePending, mm.pendingQuoteRebalance.Load())
+		expectedProfitableBuyRate := uint64(float64(tt.counterTradeRate) / (1 + tt.profit))
+		savings := calc.BaseToQuote(expectedProfitableBuyRate, tt.mkt.LotSize) - calc.BaseToQuote(buyRate, tt.mkt.LotSize)
+		if savings > tt.fees*101/100 || savings < tt.fees*99/100 {
+			t.Fatalf("%s: expected savings %d but got %d", tt.name, tt.fees, savings)
 		}
 	}
 

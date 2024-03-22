@@ -68,6 +68,7 @@ func RandomPrimaryCredentials() *db.PrimaryCredentials {
 		EncInnerKey:    randBytes(10),
 		InnerKeyParams: randBytes(10),
 		OuterKeyParams: randBytes(10),
+		Birthday:       time.Unix(rand.Int63(), 0),
 		Version:        1,
 	}
 }
@@ -161,9 +162,9 @@ func RandomMatchProof(sparsity float64) *db.MatchProof {
 
 func RandomNotification(maxTime uint64) *db.Notification {
 	return &db.Notification{
-		NoteType:    randString(25),
-		SubjectText: randString(255),
-		DetailText:  randString(255),
+		NoteType:    ordertest.RandomAddress(),
+		SubjectText: ordertest.RandomAddress(),
+		DetailText:  ordertest.RandomAddress(),
 		// Since this is for DB tests, only use severity level >= Success.
 		Severeness: db.Severity(rand.Intn(3)) + db.Success,
 		TimeStamp:  uint64(rand.Int63n(int64(maxTime))),

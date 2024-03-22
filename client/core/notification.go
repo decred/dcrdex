@@ -20,6 +20,7 @@ const (
 	NoteTypeFeePayment   = "feepayment"
 	NoteTypeBondPost     = "bondpost"
 	NoteTypeBondRefund   = "bondrefund"
+	NoteTypeUnknownBond  = "unknownbond"
 	NoteTypeSend         = "send"
 	NoteTypeOrder        = "order"
 	NoteTypeMatch        = "match"
@@ -80,6 +81,8 @@ func (c *Core) Broadcast(n Notification) {
 func (c *Core) notify(n Notification) {
 	if n.Severity() >= db.Success {
 		c.db.SaveNotification(n.DBNote())
+	} else if n.Severity() == db.Poke {
+		c.pokesCache.add(n.DBNote())
 	}
 
 	c.logNote(n)
@@ -145,16 +148,25 @@ func (c *Core) AckNotes(ids []dex.Bytes) {
 }
 
 func (c *Core) formatDetails(topic Topic, args ...any) (translatedSubject, details string) {
-	trans, found := c.locale[topic]
+	locale := c.locale()
+	trans, found := locale.m[topic]
 	if !found {
 		c.log.Errorf("No translation found for topic %q", topic)
-		originTrans := originLocale[topic]
-		if originTrans == nil {
+		originTrans, found := originLocale[topic]
+		if !found {
 			return string(topic), "translation error"
 		}
-		return originTrans.subject, fmt.Sprintf(originTrans.template, args...)
+		return originTrans.subject.T, fmt.Sprintf(originTrans.template.T, args...)
 	}
-	return trans.subject, c.localePrinter.Sprintf(string(topic), args...)
+	return trans.subject.T, locale.printer.Sprintf(string(topic), args...)
+}
+
+func makeCoinIDToken(txHash string, assetID uint32) string {
+	return fmt.Sprintf("{{{%d|%s}}}", assetID, txHash)
+}
+
+func makeOrderToken(orderToken string) string {
+	return fmt.Sprintf("{{{order|%s}}}", orderToken)
 }
 
 // Notification is an interface for a user notification. Notification is
@@ -222,6 +234,7 @@ const (
 	TopicBondConfirming          Topic = "BondConfirming"
 	TopicBondRefunded            Topic = "BondRefunded"
 	TopicBondPostError           Topic = "BondPostError"
+	TopicBondPostErrorConfirm    Topic = "BondPostErrorConfirm"
 	TopicBondCoinError           Topic = "BondCoinError"
 	TopicAccountRegistered       Topic = "AccountRegistered"
 	TopicAccountUnlockError      Topic = "AccountUnlockError"
@@ -555,10 +568,12 @@ type DEXAuthNote struct {
 
 const (
 	TopicDexAuthError     Topic = "DexAuthError"
+	TopicDexAuthErrorBond Topic = "DexAuthErrorBond"
 	TopicUnknownOrders    Topic = "UnknownOrders"
 	TopicOrdersReconciled Topic = "OrdersReconciled"
 	TopicBondConfirmed    Topic = "BondConfirmed"
 	TopicBondExpired      Topic = "BondExpired"
+	TopicAccountRegTier   Topic = "AccountRegTier"
 )
 
 func newDEXAuthNote(topic Topic, subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
@@ -582,6 +597,7 @@ const (
 	TopicWalletPeersWarning         Topic = "WalletPeersWarning"
 	TopicWalletTypeDeprecated       Topic = "WalletTypeDeprecated"
 	TopicWalletPeersUpdate          Topic = "WalletPeersUpdate"
+	TopicBondWalletNotConnected     Topic = "BondWalletNotConnected"
 )
 
 func newWalletConfigNote(topic Topic, subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
@@ -710,4 +726,13 @@ func newReputationNote(host string, rep account.Reputation) *ReputationNote {
 		Host:         host,
 		Reputation:   rep,
 	}
+}
+
+const TopicUnknownBondTierZero = "UnknownBondTierZero"
+
+// newUnknownBondTierZeroNote is used when unknown bonds are reported by the
+// server while at target tier zero.
+func newUnknownBondTierZeroNote(subject, details string) *db.Notification {
+	note := db.NewNotification(NoteTypeUnknownBond, TopicUnknownBondTierZero, subject, details, db.WarningLevel)
+	return &note
 }

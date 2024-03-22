@@ -68,7 +68,10 @@
     <div id="pokeList" class="d-hide flex-grow-1 stylish-overflow">
       <div id="pokeTmpl" class="note fs15 p-2">
         <div class="d-flex justify-content-center align-items-start px-1">
-          <div class="fs15 px-1 flex-grow-1" data-tmpl="details"></div>
+          <div class="fs15 px-1 flex-grow-1">
+            <span data-tmpl="subject"></span>
+            <span data-tmpl="details"></span>
+          </div>
           <span class="note-time"></span>
         </div>
       </div>
@@ -76,7 +79,7 @@
   </div>
 
   <div id="profileBox" class="d-hide">
-    <div class="icon fs20 ico-hamburger p-1" id="innerBurgerIcon"></div>
+    <div class="icon fs20 ico-hamburger p-2" id="innerBurgerIcon"></div>
     <span class="errcolor" id="logoutErr"></span>
     <a href="/orders" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
       <span class="ico-settings fs16 me-2"></span>
@@ -92,6 +95,15 @@
       <span class="ico-settings fs16 me-2"></span>
       [[[Settings]]]
     </a>
+    <div class="d-flex flex-column align-items-start">
+      <div class="flex-center">
+        <span id="langFlag" class="fs20"></span>
+        <span id="langName" class="demi fs16 ms-1"></span>
+      </div>
+      <div id="langBttns" class="d-flex align-items-center flex-wrap">
+        <div id="langBttnTmpl" class="pointer fs18 me-2"></div>
+      </div>
+    </div>
     <div class="demi hoverbright pointer d-flex align-items-center py-1 authed-only" id="profileSignout">
       <span class="ico-profile fs16 me-2"></span>
       [[[Sign Out]]]

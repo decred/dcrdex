@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
@@ -672,6 +673,13 @@ type ExchangeWallet struct {
 	// Embedding wallets can set cycleMixer, which will be triggered after
 	// new block are seen.
 	cycleMixer func()
+
+	pendingTxsMtx sync.RWMutex
+	pendingTxs    map[chainhash.Hash]*btc.ExtendedWalletTx
+
+	receiveTxLastQuery atomic.Uint64
+
+	txHistoryDB atomic.Value // *btc.BadgerTxDB
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -747,6 +755,12 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		if err != nil {
 			return nil, err
 		}
+		path := filepath.Join(cfg.DataDir, chainParams.Name, "txhistory.db")
+		txHistoryDB, err := btc.NewBadgerTxDB(path, dcr.log.SubLogger("TXHISTORYDB"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create tx history db: %v", err)
+		}
+		dcr.txHistoryDB.Store(txHistoryDB)
 	default:
 		makeCustomWallet, ok := customWalletConstructors[cfg.Type]
 		if !ok {
@@ -828,6 +842,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		vspFilepath:         vspFilepath,
 		walletType:          cfg.Type,
 		subsidyCache:        blockchain.NewSubsidyCache(chainParams),
+		pendingTxs:          make(map[chainhash.Hash]*btc.ExtendedWalletTx),
 	}
 
 	if b, err := os.ReadFile(vspFilepath); err == nil {
@@ -931,6 +946,40 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	monitoringBlocks := dcr.wallet.NotifyOnTipChange(ctx, dcr.handleTipChange)
 
 	var wg sync.WaitGroup
+
+	if txHistoryDB := dcr.txDB(); txHistoryDB != nil {
+		pendingTxs, err := txHistoryDB.GetPendingTxs()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
+		}
+
+		dcr.pendingTxsMtx.Lock()
+		for _, tx := range pendingTxs {
+			txHash, err := chainhash.NewHashFromStr(tx.ID)
+			if err != nil {
+				dcr.log.Errorf("Invalid txid %v from tx history db: %v", tx.ID, err)
+				continue
+			}
+			dcr.pendingTxs[*txHash] = tx
+		}
+		dcr.pendingTxsMtx.Unlock()
+
+		lastQuery, err := txHistoryDB.GetLastReceiveTxQuery()
+		if errors.Is(err, btc.ErrNeverQueried) {
+			lastQuery = 0
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to load last query time: %v", err)
+		}
+
+		dcr.receiveTxLastQuery.Store(lastQuery)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			txHistoryDB.Run(ctx)
+		}()
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -2113,6 +2162,9 @@ func (dcr *ExchangeWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents [
 		totalIn += txIn.Value()
 	}
 
+	txHash := tx.CachedTxHash()
+	dcr.addTxToHistory(asset.Split, txHash, 0, totalIn-totalOut, nil, nil, true)
+
 	return coins, totalIn - totalOut, nil
 }
 
@@ -2646,6 +2698,9 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		totalOut += uint64(msgTx.TxOut[i].Value)
 	}
 
+	txHash := msgTx.CachedTxHash()
+	dcr.addTxToHistory(asset.Split, txHash, 0, coinSum-totalOut, nil, nil, true)
+
 	dcr.log.Infof("Funding %s DCR order with split output coin %v from original coins %v", valStr, op, coins)
 	dcr.log.Infof("Sent split transaction %s to accommodate swap of size %s + fees = %s DCR",
 		op.txHash(), valStr, amount(reqFunds))
@@ -2993,10 +3048,10 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	receipts := make([]asset.Receipt, 0, swapCount)
-	txHash := msgTx.TxHash()
+	txHash := msgTx.CachedTxHash()
 	for i, contract := range swaps.Contracts {
-		output := newOutput(&txHash, uint32(i), contract.Value, wire.TxTreeRegular)
-		signedRefundTx, err := dcr.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
+		output := newOutput(txHash, uint32(i), contract.Value, wire.TxTreeRegular)
+		signedRefundTx, _, _, err := dcr.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -3017,6 +3072,8 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
+	dcr.addTxToHistory(asset.Swap, txHash, totalOut, fees, nil, nil, true)
 
 	// Return spent outputs.
 	_, err = dcr.returnCoins(swaps.Inputs)
@@ -3135,6 +3192,9 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
+	dcr.addTxToHistory(asset.Redeem, txHash, totalIn, fee, nil, nil, true)
+
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
 	dcr.mempoolRedeemsMtx.Lock()
 	for i := range form.Redemptions {
@@ -3809,7 +3869,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (d
 	if feeRate == 0 {
 		feeRate = dcr.targetFeeRateWithFallback(2, 0)
 	}
-	msgTx, err := dcr.refundTx(coinID, contract, 0, nil, feeRate)
+	msgTx, refundVal, fee, err := dcr.refundTx(coinID, contract, 0, nil, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
@@ -3818,25 +3878,27 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (d
 	if err != nil {
 		return nil, err
 	}
+	dcr.addTxToHistory(asset.Refund, refundHash, refundVal, fee, nil, nil, true)
+
 	return toCoinID(refundHash, 0), nil
 }
 
 // refundTx crates and signs a contract's refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet. If val is not supplied
 // it will be retrieved with gettxout.
-func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (*wire.MsgTx, error) {
+func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (tx *wire.MsgTx, refundVal, txFee uint64, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	// Grab the output, make sure it's unspent and get the value if not supplied.
 	if val == 0 {
 		utxo, _, spent, err := dcr.lookupTxOutput(dcr.ctx, txHash, vout)
 		if err != nil {
-			return nil, fmt.Errorf("error finding unspent contract: %w", err)
+			return nil, 0, 0, fmt.Errorf("error finding unspent contract: %w", err)
 		}
 		if utxo == nil {
-			return nil, asset.CoinNotFoundError
+			return nil, 0, 0, asset.CoinNotFoundError
 		}
 		val = uint64(utxo.Value)
 
@@ -3850,26 +3912,26 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 			// First find the block containing the output itself.
 			scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, dcr.chainParams)
 			if err != nil {
-				return nil, fmt.Errorf("error encoding contract address: %w", err)
+				return nil, 0, 0, fmt.Errorf("error encoding contract address: %w", err)
 			}
 			_, pkScript := scriptAddr.PaymentScript()
 			outFound, _, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(txHash, vout),
 				pkScript, time.Now().Add(-60*24*time.Hour)) // search up to 60 days ago
 			if err != nil {
-				return nil, err // possibly the contract is still in mempool
+				return nil, 0, 0, err // possibly the contract is still in mempool
 			}
 			// Try to find a transaction that spends it.
 			spent, err := dcr.isOutputSpent(dcr.ctx, outFound) // => findTxOutSpender
 			if err != nil {
-				return nil, fmt.Errorf("error checking if contract %v:%d is spent: %w", txHash, vout, err)
+				return nil, 0, 0, fmt.Errorf("error checking if contract %v:%d is spent: %w", txHash, vout, err)
 			}
 			if spent {
 				spendTx := outFound.spenderTx
 				// Refunds are not batched, so input 0 is always the spender.
 				if dexdcr.IsRefundScript(utxo.Version, spendTx.TxIn[0].SignatureScript, contract) {
-					return spendTx, nil
+					return spendTx, 0, 0, nil
 				} // otherwise it must be a redeem
-				return nil, fmt.Errorf("contract %s:%d is spent in %v (%w)",
+				return nil, 0, 0, fmt.Errorf("contract %s:%d is spent in %v (%w)",
 					txHash, vout, spendTx.TxHash(), asset.CoinNotFoundError)
 			}
 		}
@@ -3877,7 +3939,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 
 	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
+		return nil, 0, 0, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 
 	// Create the transaction that spends the contract.
@@ -3894,33 +3956,33 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	size := msgTx.SerializeSize() + dexdcr.RefundSigScriptSize + dexdcr.P2PKHOutputSize
 	fee := feeRate * uint64(size)
 	if fee > val {
-		return nil, fmt.Errorf("refund tx not worth the fees")
+		return nil, 0, 0, fmt.Errorf("refund tx not worth the fees")
 	}
 
 	if refundAddr == nil {
 		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
 		if err != nil {
-			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
+			return nil, 0, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
 	}
 	pkScriptVer, pkScript := refundAddr.PaymentScript()
 	txOut := newTxOut(int64(val-fee), pkScriptVer, pkScript)
 	// One last check for dust.
 	if dexdcr.IsDust(txOut, feeRate) {
-		return nil, fmt.Errorf("refund output is dust")
+		return nil, 0, 0, fmt.Errorf("refund output is dust")
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign it.
 	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, contract, sender)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	redeemSigScript, err := dexdcr.RefundP2SHContract(contract, refundSig, refundPubKey)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	txIn.SignatureScript = redeemSigScript
-	return msgTx, nil
+	return msgTx, val, fee, nil
 }
 
 // DepositAddress returns an address for depositing funds into the exchange
@@ -4116,10 +4178,15 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 			amount(amt), feeRate, err)
 	}
 
+	var txIDToRemoveFromHistory *chainhash.Hash // will be non-nil if tx was added to history
+
 	abandon := func() { // if caller does not broadcast, or we fail in this method
 		_, err := dcr.returnCoins(coins)
 		if err != nil {
 			dcr.log.Errorf("error returning coins for unused bond tx: %v", coins)
+		}
+		if txIDToRemoveFromHistory != nil {
+			dcr.removeTxFromHistory(txIDToRemoveFromHistory)
 		}
 	}
 
@@ -4135,11 +4202,11 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 		return nil, nil, err
 	}
 
-	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, dcr.depositAccount())
+	signedTx, _, _, fee, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, dcr.depositAccount())
 	if err != nil {
 		return nil, nil, err
 	}
-	txid := signedTx.TxHash() // spentAmt := amt + fees
+	txHash := signedTx.CachedTxHash() // spentAmt := amt + fees
 
 	signedTxBytes, err := signedTx.Bytes()
 	if err != nil {
@@ -4151,7 +4218,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	}
 
 	// Prep the redeem / refund tx.
-	redeemMsgTx, err := dcr.makeBondRefundTxV0(&txid, 0, amt, bondScript, bondKey, feeRate)
+	redeemMsgTx, err := dcr.makeBondRefundTxV0(txHash, 0, amt, bondScript, bondKey, feeRate)
 	if err != nil {
 		return nil, nil, fmt.Errorf("unable to create bond redemption tx: %w", err)
 	}
@@ -4164,13 +4231,21 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 		Version:    ver,
 		AssetID:    BipID,
 		Amount:     amt,
-		CoinID:     toCoinID(&txid, 0),
+		CoinID:     toCoinID(txHash, 0),
 		Data:       bondScript,
 		SignedTx:   signedTxBytes,
 		UnsignedTx: unsignedTxBytes,
 		RedeemTx:   redeemTx,
 	}
 	success = true
+
+	bondInfo := &asset.BondTxInfo{
+		AccountID: acctID,
+		LockTime:  uint64(lockTimeSec),
+		BondID:    pkh,
+	}
+	dcr.addTxToHistory(asset.CreateBond, txHash, amt, fee, bondInfo, nil, false)
+	txIDToRemoveFromHistory = txHash
 
 	return bond, abandon, nil
 }
@@ -4239,6 +4314,10 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 	if ver != 0 {
 		return nil, errors.New("only version 0 bonds supported")
 	}
+	lockTime, pkhPush, err := dexdcr.ExtractBondDetailsV0(0, script)
+	if err != nil {
+		return nil, err
+	}
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -4257,6 +4336,11 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 	}
 
 	refundAmt := msgTx.TxOut[0].Value
+	bondInfo := &asset.BondTxInfo{
+		LockTime: uint64(lockTime),
+		BondID:   pkhPush,
+	}
+	dcr.addTxToHistory(asset.RedeemBond, txHash, amt, amt-uint64(refundAmt), bondInfo, nil, true)
 	return newOutput(redeemHash, 0, uint64(refundAmt), wire.TxTreeRegular), nil
 
 	/* If we need to find the actual unspent bond transaction for any of:
@@ -4305,6 +4389,114 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 	*/
 }
 
+// FindBond finds the bond with coinID and returns the values used to create it.
+func (dcr *ExchangeWallet) FindBond(ctx context.Context, coinID []byte, searchUntil time.Time) (bond *asset.BondDetails, err error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	decodeV0BondTx := func(msgTx *wire.MsgTx) (*asset.BondDetails, error) {
+		if len(msgTx.TxOut) < 2 {
+			return nil, fmt.Errorf("tx %s is not a v0 bond transaction: too few outputs", txHash)
+		}
+		_, lockTime, pkh, err := dexdcr.ExtractBondCommitDataV0(0, msgTx.TxOut[1].PkScript)
+		if err != nil {
+			return nil, fmt.Errorf("unable to extract bond commitment details from output 1 of %s: %v", txHash, err)
+		}
+		// Sanity check.
+		bondScript, err := dexdcr.MakeBondScript(0, lockTime, pkh[:])
+		if err != nil {
+			return nil, fmt.Errorf("failed to build bond output redeem script: %w", err)
+		}
+		bondAddr, err := stdaddr.NewAddressScriptHash(0, bondScript, dcr.chainParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build bond output payment script: %w", err)
+		}
+		_, bondScriptWOpcodes := bondAddr.PaymentScript()
+		if !bytes.Equal(bondScriptWOpcodes, msgTx.TxOut[0].PkScript) {
+			return nil, fmt.Errorf("bond script does not match commit data for %s: %x != %x",
+				txHash, bondScript, msgTx.TxOut[0].PkScript)
+		}
+		return &asset.BondDetails{
+			Bond: &asset.Bond{
+				Version: 0,
+				AssetID: BipID,
+				Amount:  uint64(msgTx.TxOut[0].Value),
+				CoinID:  coinID,
+				Data:    bondScript,
+				//
+				// SignedTx and UnsignedTx not populated because this is
+				// an already posted bond and these fields are no longer used.
+				// SignedTx, UnsignedTx []byte
+				//
+				// RedeemTx cannot be populated because we do not have
+				// the private key that only core knows. Core will need
+				// the BondPKH to determine what the private key was.
+				// RedeemTx []byte
+			},
+			LockTime: time.Unix(int64(lockTime), 0),
+			CheckPrivKey: func(bondKey *secp256k1.PrivateKey) bool {
+				pk := bondKey.PubKey().SerializeCompressed()
+				pkhB := stdaddr.Hash160(pk)
+				return bytes.Equal(pkh[:], pkhB)
+			},
+		}, nil
+	}
+
+	// If the bond was funded by this wallet or had a change output paying
+	// to this wallet, it should be found here.
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err == nil {
+		msgTx, err := msgTxFromHex(tx.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
+		}
+		return decodeV0BondTx(msgTx)
+	}
+	if !errors.Is(err, asset.CoinNotFoundError) {
+		dcr.log.Warnf("Unexpected error looking up bond output %v:%d", txHash, vout)
+	}
+
+	// The bond was not funded by this wallet or had no change output when
+	// restored from seed. This is not a problem. However, we are unable to
+	// use filters because we don't know any output scripts. Brute force
+	// finding the transaction.
+	blockHash, _, err := dcr.wallet.GetBestBlock(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get best hash: %v", err)
+	}
+	var (
+		blk   *wire.MsgBlock
+		msgTx *wire.MsgTx
+	)
+out:
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("bond search stopped: %w", err)
+		}
+		blk, err = dcr.wallet.GetBlock(ctx, blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
+		}
+		if blk.Header.Timestamp.Before(searchUntil) {
+			return nil, fmt.Errorf("searched blocks until %v but did not find the bond tx %s", searchUntil, txHash)
+		}
+		for _, tx := range blk.Transactions {
+			if tx.TxHash() == *txHash {
+				dcr.log.Debugf("Found mined tx %s in block %s.", txHash, blk.BlockHash())
+				msgTx = tx
+				break out
+			}
+		}
+		blockHash = &blk.Header.PrevBlock
+		if blockHash == nil {
+			return nil, fmt.Errorf("did not find the bond tx %s", txHash)
+		}
+	}
+	return decodeV0BondTx(msgTx)
+}
+
 // SendTransaction broadcasts a valid fully-signed transaction.
 func (dcr *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 	msgTx, err := msgTxFromBytes(rawTx)
@@ -4315,6 +4507,7 @@ func (dcr *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
+	dcr.markTxAsSubmitted(txHash)
 	return toCoinID(txHash, 0), nil
 }
 
@@ -4330,6 +4523,17 @@ func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asse
 	if err != nil {
 		return nil, err
 	}
+
+	selfSend, err := dcr.OwnsDepositAddress(address)
+	if err != nil {
+		dcr.log.Errorf("error checking if address %q is owned: %v", address, err)
+	}
+	txType := asset.Send
+	if selfSend {
+		txType = asset.SelfSend
+	}
+
+	dcr.addTxToHistory(txType, msgTx.CachedTxHash(), sentVal, value-sentVal, nil, &address, true)
 	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
 }
 
@@ -4341,10 +4545,21 @@ func (dcr *ExchangeWallet) Send(address string, value, feeRate uint64) (asset.Co
 	if err != nil {
 		return nil, fmt.Errorf("invalid address: %s", address)
 	}
-	msgTx, sentVal, err := dcr.sendToAddress(addr, value, dcr.feeRateWithFallback(feeRate))
+	msgTx, sentVal, fee, err := dcr.sendToAddress(addr, value, dcr.feeRateWithFallback(feeRate))
 	if err != nil {
 		return nil, err
 	}
+
+	selfSend, err := dcr.OwnsDepositAddress(address)
+	if err != nil {
+		dcr.log.Errorf("error checking if address %q is owned: %v", address, err)
+	}
+	txType := asset.Send
+	if selfSend {
+		txType = asset.SelfSend
+	}
+
+	dcr.addTxToHistory(txType, msgTx.CachedTxHash(), sentVal, fee, nil, &address, true)
 	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
 }
 
@@ -4401,20 +4616,6 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 		err = nil
 	}
 	return confs, spent, err
-}
-
-// TransactionConfirmations gets the number of confirmations for the specified
-// transaction.
-func (dcr *ExchangeWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
-	txHash, err := chainhash.NewHashFromStr(txID)
-	if err != nil {
-		return 0, fmt.Errorf("error decoding txid %s: %w", txID, err)
-	}
-	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
-	if err != nil {
-		return 0, err
-	}
-	return uint32(tx.Confirmations), nil
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified
@@ -4592,14 +4793,14 @@ func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (
 // sendToAddress sends an exact amount to an address. Transaction fees will be
 // in addition to the sent amount, and the output will be the zeroth output.
 // TODO: Just use the sendtoaddress rpc since dcrwallet respects locked utxos!
-func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint64) (*wire.MsgTx, uint64, error) {
+func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint64) (*wire.MsgTx, uint64, uint64, error) {
 	baseSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2) // may be extra if change gets omitted (see signTxAndAddChange)
 	reportChange := dcr.wallet.Accounts().UnmixedAccount == ""          // otherwise change goes to unmixed account
 	enough := sendEnough(amt, feeRate, false, baseSize, reportChange)
 	reserves := dcr.bondReserves.Load()
 	coins, _, _, _, err := dcr.fund(reserves, enough)
 	if err != nil {
-		return nil, 0, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
+		return nil, 0, 0, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
 			amount(amt), feeRate, err)
 	}
 
@@ -4608,9 +4809,19 @@ func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint
 		if _, retErr := dcr.returnCoins(coins); retErr != nil {
 			dcr.log.Errorf("Failed to unlock coins: %v", retErr)
 		}
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return msgTx, sentVal, nil
+
+	var totalOut uint64
+	for _, txOut := range msgTx.TxOut {
+		totalOut += uint64(txOut.Value)
+	}
+	var totalIn uint64
+	for _, coin := range coins {
+		totalIn += coin.Value()
+	}
+
+	return msgTx, sentVal, totalIn - totalOut, nil
 }
 
 // sendCoins sends the amount to the address as the zeroth output, spending the
@@ -5305,6 +5516,7 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 			return
 		}
 		tb.unconfirmedTickets[*txHash] = struct{}{}
+		dcr.addTxToHistory(asset.TicketPurchase, txHash, ticket.Tx.TicketPrice, ticket.Tx.Fees, nil, nil, true)
 	}
 	ok = true
 }
@@ -5449,6 +5661,263 @@ func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 	}
 
 	return sig, priv.PubKey().SerializeCompressed(), nil
+}
+
+func (dcr *ExchangeWallet) txDB() *btc.BadgerTxDB {
+	db := dcr.txHistoryDB.Load()
+	if db == nil {
+		return nil
+	}
+	return db.(*btc.BadgerTxDB)
+}
+
+// checkPendingTxs checks to see if the wallet has received any incoming
+// transactions that need to be added to the transaction history. It also
+// checks all the pending transactions to see if they have been mined into
+// a block, and if so, updates the transaction history to reflect the
+// block height.
+func (dcr *ExchangeWallet) checkPendingTxs(ctx context.Context, tip uint64) {
+	txHistoryDB := dcr.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	synced, _, err := dcr.SyncStatus()
+	if err != nil {
+		dcr.log.Errorf("Error getting sync status: %v", err)
+		return
+	}
+	if !synced {
+		return
+	}
+
+	// First, check to see if there are any recieving transactions we have not
+	// yet seen.
+	{
+		const blockQueryBuffer = 3
+		var blockToQuery uint64
+		lastQuery := dcr.receiveTxLastQuery.Load()
+
+		if lastQuery != 0 && lastQuery < tip-blockQueryBuffer {
+			blockToQuery = lastQuery - blockQueryBuffer
+		} else if lastQuery >= tip-blockQueryBuffer {
+			blockToQuery = tip - blockQueryBuffer
+		}
+
+		recentTxs, err := dcr.wallet.ListSinceBlock(ctx, int32(blockToQuery), int32(tip), int32(tip))
+		if err != nil {
+			dcr.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
+			recentTxs = nil
+		} else {
+			dcr.receiveTxLastQuery.Store(tip)
+			err = txHistoryDB.SetLastReceiveTxQuery(tip)
+			if err != nil {
+				dcr.log.Errorf("Error setting last query to %d: %v", tip, err)
+			}
+		}
+
+		addToHistoryIfNew := func(tx *walletjson.ListTransactionsResult, txType asset.TransactionType) {
+			txHash, err := chainhash.NewHashFromStr(tx.TxID)
+			if err != nil {
+				dcr.log.Errorf("Error decoding txid %s: %v", tx.TxID, err)
+				return
+			}
+			_, err = txHistoryDB.GetTx(txHash.String())
+			if err == nil {
+				return
+			}
+			if !errors.Is(err, asset.CoinNotFoundError) {
+				dcr.log.Errorf("Error getting tx %s: %v", tx.TxID, err)
+				return
+			}
+
+			var fee uint64
+			if tx.Fee != nil {
+				// Fee always seems to be negative in btcwallet, but just
+				// in case.
+				if *tx.Fee < 0 {
+					fee = toAtoms(-*tx.Fee)
+				} else {
+					fee = toAtoms(*tx.Fee)
+				}
+			}
+
+			dcr.addTxToHistory(txType, txHash, toAtoms(tx.Amount), fee, nil, nil, true)
+		}
+
+		for _, tx := range recentTxs {
+			if *tx.TxType == walletjson.LTTTRegular && tx.Category == "receive" {
+				addToHistoryIfNew(&tx, asset.Receive)
+			} else if *tx.TxType == walletjson.LTTTVote {
+				addToHistoryIfNew(&tx, asset.TicketVote)
+			} else if *tx.TxType == walletjson.LTTTRevocation {
+				addToHistoryIfNew(&tx, asset.TicketRevocation)
+			}
+		}
+	}
+
+	// Not just the map must be copied here, but the ExtendedWalletTx
+	// as well.
+	pendingTxsCopy := make(map[chainhash.Hash]btc.ExtendedWalletTx, len(dcr.pendingTxs))
+	dcr.pendingTxsMtx.RLock()
+	for hash, tx := range dcr.pendingTxs {
+		pendingTxsCopy[hash] = *tx
+	}
+	dcr.pendingTxsMtx.RUnlock()
+
+	handlePendingTx := func(txHash chainhash.Hash, tx *btc.ExtendedWalletTx) {
+		if !tx.Submitted {
+			dcr.log.Errorf("Pending tx %s is not submitted", txHash)
+			return
+		}
+		gtr, err := dcr.wallet.GetTransaction(ctx, &txHash)
+		if errors.Is(err, asset.CoinNotFoundError) {
+			err = txHistoryDB.RemoveTx(txHash.String())
+			if err == nil {
+				dcr.pendingTxsMtx.Lock()
+				delete(dcr.pendingTxs, txHash)
+				dcr.pendingTxsMtx.Unlock()
+			} else {
+				// Leave it in the pendingPendingTxs and attempt to remove it
+				// again next time.
+				dcr.log.Errorf("Error removing tx %s from the history store: %v", txHash.String(), err)
+			}
+			return
+		}
+		if err != nil {
+			dcr.log.Errorf("Error getting transaction %s: %v", txHash, err)
+			return
+		}
+
+		var updated bool
+		if gtr.BlockHash != "" {
+			blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
+			if err != nil {
+				dcr.log.Errorf("Error decoding block hash %s: %v", gtr.BlockHash, err)
+				return
+			}
+			block, err := dcr.wallet.GetBlockHeader(ctx, blockHash)
+			if err != nil {
+				dcr.log.Errorf("Error getting block height for %s: %v", blockHash, err)
+				return
+			}
+			blockHeight := block.Height
+			if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != uint64(block.Timestamp.Unix()) {
+				tx.BlockNumber = uint64(blockHeight)
+				tx.Timestamp = uint64(block.Timestamp.Unix())
+				updated = true
+			}
+		} else if gtr.BlockHash == "" && tx.BlockNumber != 0 {
+			tx.BlockNumber = 0
+			tx.Timestamp = 0
+			updated = true
+		}
+
+		var confs uint64
+		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
+			confs = tip - tx.BlockNumber + 1
+		}
+		if confs >= defaultRedeemConfTarget {
+			tx.Confirmed = true
+			updated = true
+		}
+
+		if updated {
+			err = txHistoryDB.StoreTx(tx)
+			if err != nil {
+				dcr.log.Errorf("Error updating tx %s: %v", txHash, err)
+				return
+			}
+
+			dcr.pendingTxsMtx.Lock()
+			if tx.Confirmed {
+				delete(dcr.pendingTxs, txHash)
+			} else {
+				dcr.pendingTxs[txHash] = tx
+			}
+			dcr.pendingTxsMtx.Unlock()
+
+			dcr.emit.TransactionNote(tx.WalletTransaction, false)
+		}
+	}
+
+	for hash, tx := range pendingTxsCopy {
+		handlePendingTx(hash, &tx)
+	}
+}
+
+func (dcr *ExchangeWallet) markTxAsSubmitted(txHash *chainhash.Hash) {
+	txHistoryDB := dcr.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	err := txHistoryDB.MarkTxAsSubmitted(txHash.String())
+	if err != nil {
+		dcr.log.Errorf("failed to mark tx as submitted in tx history db: %v", err)
+	}
+
+	dcr.pendingTxsMtx.Lock()
+	wt, found := dcr.pendingTxs[*txHash]
+	dcr.pendingTxsMtx.Unlock()
+
+	if !found {
+		dcr.log.Errorf("Transaction %s not found in pending txs", txHash)
+		return
+	}
+
+	wt.Submitted = true
+
+	dcr.emit.TransactionNote(wt.WalletTransaction, true)
+}
+
+func (dcr *ExchangeWallet) removeTxFromHistory(txHash *chainhash.Hash) {
+	txHistoryDB := dcr.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	dcr.pendingTxsMtx.Lock()
+	delete(dcr.pendingTxs, *txHash)
+	dcr.pendingTxsMtx.Unlock()
+
+	err := txHistoryDB.RemoveTx(txHash.String())
+	if err != nil {
+		dcr.log.Errorf("failed to remove tx from tx history db: %v", err)
+	}
+}
+
+func (dcr *ExchangeWallet) addTxToHistory(txType asset.TransactionType, txHash *chainhash.Hash, amount uint64, fees uint64,
+	bondInfo *asset.BondTxInfo, recipient *string, submitted bool) {
+	txHistoryDB := dcr.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	wt := &btc.ExtendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			Type:      txType,
+			ID:        txHash.String(),
+			Amount:    amount,
+			Fees:      fees,
+			BondInfo:  bondInfo,
+			Recipient: recipient,
+		},
+		Submitted: submitted,
+	}
+
+	dcr.pendingTxsMtx.Lock()
+	dcr.pendingTxs[*txHash] = wt
+	dcr.pendingTxsMtx.Unlock()
+
+	err := txHistoryDB.StoreTx(wt)
+	if err != nil {
+		dcr.log.Errorf("failed to store tx in tx history db: %v", err)
+	}
+
+	if submitted {
+		dcr.emit.TransactionNote(wt.WalletTransaction, true)
+	}
 }
 
 func (dcr *ExchangeWallet) checkPeers(ctx context.Context) {
@@ -5637,6 +6106,8 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 	if dcr.cycleMixer != nil {
 		dcr.cycleMixer()
 	}
+
+	go dcr.checkPendingTxs(ctx, uint64(newTipHeight))
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.

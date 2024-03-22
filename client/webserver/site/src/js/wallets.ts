@@ -32,7 +32,6 @@ import {
   PeerSource,
   WalletPeer,
   ApprovalStatus,
-  CustomBalance,
   WalletState,
   UnitInfo,
   TicketStakingStatus,
@@ -44,7 +43,7 @@ import {
   WalletTransaction,
   FundsMixingStats
 } from './registry'
-import { CoinExplorers } from './order'
+import { CoinExplorers } from './coinexplorers'
 
 interface DecredTicketTipUpdate {
   ticketPrice: number
@@ -69,6 +68,7 @@ const traitTxFeeEstimator = 1 << 9
 const traitPeerManager = 1 << 10
 const traitTokenApprover = 1 << 13
 const traitTicketBuyer = 1 << 15
+const traitHistorian = 1 << 16
 const traitFundsMixer = 1 << 17
 
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
@@ -108,18 +108,24 @@ const txTypeApproveToken = 9
 const txTypeAcceleration = 10
 // const txTypeSelfSend = 11
 const txTypeRevokeTokenApproval = 12
+const txTypeTicketPurchase = 13
+const txTypeTicketVote = 14
+const txTypeTicketRevocation = 15
 
 const positiveTxTypes : number[] = [
   txTypeReceive,
   txTypeRedeem,
   txTypeRefund,
-  txTypeRedeemBond
+  txTypeRedeemBond,
+  txTypeTicketVote,
+  txTypeTicketRevocation
 ]
 
 const negativeTxTypes : number[] = [
   txTypeSend,
   txTypeSwap,
-  txTypeCreateBond
+  txTypeCreateBond,
+  txTypeTicketPurchase
 ]
 
 const noAmtTxTypes : number[] = [
@@ -148,7 +154,10 @@ const txTypeTranslationKeys = [
   intl.ID_TX_TYPE_APPROVE_TOKEN,
   intl.ID_TX_TYPE_ACCELERATION,
   intl.ID_TX_TYPE_SELF_TRANSFER,
-  intl.ID_TX_TYPE_REVOKE_TOKEN_APPROVAL
+  intl.ID_TX_TYPE_REVOKE_TOKEN_APPROVAL,
+  intl.ID_TX_TYPE_TICKET_PURCHASE,
+  intl.ID_TX_TYPE_TICKET_VOTE,
+  intl.ID_TX_TYPE_TICKET_REVOCATION
 ]
 
 const ticketPageSize = 10
@@ -237,7 +246,7 @@ export default class WalletsPage extends BasePage {
     Doc.cleanTemplates(
       page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl,
       page.ticketHistoryRowTmpl, page.votingChoiceTmpl, page.votingAgendaTmpl, page.tspendTmpl,
-      page.tkeyTmpl, page.txHistoryRow, page.txHistoryDateRow
+      page.tkeyTmpl, page.txHistoryRowTmpl, page.txHistoryDateRowTmpl
     )
 
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
@@ -1552,43 +1561,57 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.fiatBalanceBox)
       page.fiatBalance.textContent = Doc.formatFiatConversion(totalBalance, rate, ui)
     }
-    let firstOther = false
     Doc.empty(page.balanceDetailBox)
-    const addSubBalance = (category: string, subBalance: number, tooltipMsg: string) => {
+
+    const addBalanceRow = (cat: string, bal: number, tooltipMsg?: string) => {
       const row = page.balanceDetailRow.cloneNode(true) as PageElement
-      if (firstOther) {
-        row.classList.add('first-other')
-        firstOther = false
-      }
       page.balanceDetailBox.appendChild(row)
       const tmpl = Doc.parseTemplate(row)
-      tmpl.name.textContent = category
+      tmpl.name.textContent = cat
       if (tooltipMsg) {
         tmpl.tooltipMsg.dataset.tooltip = tooltipMsg
         Doc.show(tmpl.tooltipMsg)
       }
-      tmpl.subBalance.textContent = Doc.formatCoinValue(subBalance, ui)
+      tmpl.balance.textContent = Doc.formatCoinValue(bal, ui)
+      return row
     }
-    addSubBalance(intl.prep(intl.ID_AVAILABLE_TITLE), bal.available, '')
-    addSubBalance(intl.prep(intl.ID_LOCKED_TITLE), totalLocked, intl.prep(intl.ID_LOCKED_BAL_MSG))
-    addSubBalance(intl.prep(intl.ID_IMMATURE_TITLE), bal.immature, intl.prep(intl.ID_IMMATURE_BAL_MSG))
-    const sortedBalCats = Object.entries(bal.other || {})
-    sortedBalCats.sort((a: [string, CustomBalance], b: [string, any]): number => a[0].localeCompare(b[0]))
-    firstOther = true
-    const lockedBal = (category: string): string => {
-      return category + ' (' + intl.prep(intl.ID_LOCKED) + ') '
-    }
-    if (bal.orderlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_ORDER)), bal.orderlocked, intl.prep(intl.ID_LOCKED_ORDER_BAL_MSG))
-    if (bal.contractlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_SWAPPING)), bal.contractlocked, intl.prep(intl.ID_LOCKED_SWAPPING_BAL_MSG))
-    if (bal.bondlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_BONDED)), bal.bondlocked, intl.prep(intl.ID_LOCKED_BOND_BAL_MSG))
-    if (bal.bondReserves > 0) addSubBalance(lockedBal(intl.prep(intl.ID_BOND_RESERVES)), bal.bondReserves, intl.prep(intl.ID_BOND_RESERVES_MSG))
-    if (bal.reservesDeficit > 0) addSubBalance(intl.prep(intl.ID_RESERVES_DEFICIT), bal.reservesDeficit, intl.prep(intl.ID_RESERVES_DEFICIT_MSG))
 
-    for (const [cat, bal] of sortedBalCats) {
-      let [balCategory, tooltipMsg] = customWalletBalanceCategory(cat)
-      if (bal.locked) balCategory = lockedBal(balCategory)
-      addSubBalance(balCategory, bal.amt, tooltipMsg)
+    let lastSubLockedRow: PageElement | undefined
+    let lastPrimaryRow: PageElement | undefined
+    const addPrimaryBalance = (cat: string, bal: number, tooltipMsg?: string) => {
+      lastSubLockedRow = undefined
+      lastPrimaryRow = addBalanceRow(cat, bal, tooltipMsg)
     }
+    const addSubBalance = (cat: string, bal: number, tooltipMsg?: string) => {
+      lastSubLockedRow = addBalanceRow(cat, bal, tooltipMsg)
+      lastSubLockedRow.classList.add('sub')
+    }
+    const setRowClasses = () => {
+      if (!lastSubLockedRow) return
+      (lastPrimaryRow as PageElement).classList.add('itemized')
+      lastSubLockedRow.classList.add('last')
+    }
+
+    addPrimaryBalance(intl.prep(intl.ID_AVAILABLE_TITLE), bal.available, '')
+    if (bal.other?.Shielded !== undefined) {
+      const transparent = bal.available - bal.other.Shielded.amt
+      addSubBalance(intl.prep(intl.ID_TRANSPARENT), transparent)
+      addSubBalance(intl.prep(intl.ID_SHIELDED), bal.other.Shielded.amt)
+    }
+    setRowClasses()
+
+    addPrimaryBalance(intl.prep(intl.ID_LOCKED_TITLE), totalLocked, intl.prep(intl.ID_LOCKED_BAL_MSG))
+    if (bal.orderlocked > 0) addSubBalance(intl.prep(intl.ID_ORDER), bal.orderlocked, intl.prep(intl.ID_LOCKED_ORDER_BAL_MSG))
+    if (bal.contractlocked > 0) addSubBalance(intl.prep(intl.ID_SWAPPING), bal.contractlocked, intl.prep(intl.ID_LOCKED_SWAPPING_BAL_MSG))
+    if (bal.bondlocked > 0) addSubBalance(intl.prep(intl.ID_BONDED), bal.bondlocked, intl.prep(intl.ID_LOCKED_BOND_BAL_MSG))
+    if (bal.bondReserves > 0) addSubBalance(intl.prep(intl.ID_BOND_RESERVES), bal.bondReserves, intl.prep(intl.ID_BOND_RESERVES_MSG))
+    setRowClasses()
+
+    if (bal.immature) addPrimaryBalance(intl.prep(intl.ID_IMMATURE_TITLE), bal.immature, intl.prep(intl.ID_IMMATURE_BAL_MSG))
+
+    // TODO: handle reserves deficit with a notification.
+    // if (bal.reservesDeficit > 0) addPrimaryBalance(intl.prep(intl.ID_RESERVES_DEFICIT), bal.reservesDeficit, intl.prep(intl.ID_RESERVES_DEFICIT_MSG))
+
     page.purchaserBal.textContent = Doc.formatFourSigFigs(bal.available / ui.conventional.conversionFactor)
     app().bindTooltips(page.balanceDetailBox)
   }
@@ -1703,29 +1726,32 @@ export default class WalletsPage extends BasePage {
 
   updateTxHistoryRow (row: PageElement, tx: WalletTransaction, assetID: number) {
     const tmpl = Doc.parseTemplate(row)
-    const date = new Date(tx.timestamp * 1000)
-    tmpl.time.textContent = date.toLocaleTimeString()
+    const ui = app().unitInfo(assetID)
+    // const date = new Date(tx.timestamp * 1000)
+    tmpl.age.textContent = Doc.timeSince(tx.timestamp * 1000)
     Doc.setVis(tx.timestamp === 0, tmpl.pending)
-    Doc.setVis(tx.timestamp !== 0, tmpl.time)
+    Doc.setVis(tx.timestamp !== 0, tmpl.age)
     let txType = intl.prep(txTypeTranslationKeys[tx.type])
     if (tx.tokenID && tx.tokenID !== assetID) {
-      const tokenSymbol = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
+      const tokenSymbol = ui.conventional.unit
       txType = `${tokenSymbol} ${txType}`
     }
     tmpl.type.textContent = txType
     tmpl.id.textContent = trimStringWithEllipsis(tx.id, 12)
+    tmpl.id.setAttribute('title', tx.id)
+    tmpl.fees.textContent = Doc.formatCoinValue(tx.fees, ui)
     if (noAmtTxTypes.includes(tx.type)) {
       tmpl.amount.textContent = '-'
     } else {
       const [u, c] = txTypeSignAndClass(tx.type)
-      const amt = Doc.formatCoinValue(tx.amount, app().unitInfo(assetID))
+      const amt = Doc.formatCoinValue(tx.amount, ui)
       tmpl.amount.textContent = `${u}${amt}`
       if (c !== '') tmpl.amount.classList.add(c)
     }
   }
 
   txHistoryRow (tx: WalletTransaction, assetID: number) : PageElement {
-    const row = this.page.txHistoryRow.cloneNode(true) as PageElement
+    const row = this.page.txHistoryRowTmpl.cloneNode(true) as PageElement
     row.dataset.txid = tx.id
     Doc.bind(row, 'click', () => this.showTxDetailsPopup(tx.id))
     this.updateTxHistoryRow(row, tx, assetID)
@@ -1733,7 +1759,7 @@ export default class WalletsPage extends BasePage {
   }
 
   txHistoryDateRow (date: string) : PageElement {
-    const row = this.page.txHistoryDateRow.cloneNode(true) as PageElement
+    const row = this.page.txHistoryDateRowTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(row)
     tmpl.date.textContent = date
     return row
@@ -1813,11 +1839,13 @@ export default class WalletsPage extends BasePage {
 
     // Tx ID
     page.txDetailsID.textContent = trimStringWithEllipsis(tx.id, 20)
+    page.txDetailsID.setAttribute('title', tx.id)
 
     // Recipient
     if (tx.recipient) {
       Doc.show(page.txDetailsRecipientSection)
       page.txDetailsRecipient.textContent = trimStringWithEllipsis(tx.recipient, 20)
+      page.txDetailsRecipient.setAttribute('title', tx.recipient)
     } else {
       Doc.hide(page.txDetailsRecipientSection)
     }
@@ -1826,12 +1854,14 @@ export default class WalletsPage extends BasePage {
     if (tx.bondInfo) {
       Doc.show(page.txDetailsBondSection)
       page.txDetailsBondID.textContent = trimStringWithEllipsis(tx.bondInfo.bondID, 20)
+      page.txDetailsBondID.setAttribute('title', tx.bondInfo.bondID)
       const date = new Date(tx.bondInfo.lockTime * 1000)
       const dateStr = date.toLocaleDateString()
       const timeStr = date.toLocaleTimeString()
       page.txDetailsBondLocktime.textContent = `${dateStr} ${timeStr}`
       Doc.setVis(tx.bondInfo.accountID !== '', page.txDetailsBondAccountIDSection)
       page.txDetailsBondAccountID.textContent = trimStringWithEllipsis(tx.bondInfo.accountID, 20)
+      page.txDetailsBondAccountID.setAttribute('title', tx.bondInfo.accountID)
     } else {
       Doc.hide(page.txDetailsBondSection)
     }
@@ -1902,12 +1932,18 @@ export default class WalletsPage extends BasePage {
   async showTxHistory (assetID: number) {
     const page = this.page
     let txRes : TxHistoryResult
-    Doc.hide(page.txHistoryTable, page.noTxHistory, page.earlierTxs)
+    Doc.hide(page.txHistoryTable, page.txHistoryBox, page.noTxHistory, page.earlierTxs, page.txHistoryNotAvailable)
     Doc.empty(page.txHistoryTableBody)
-    if (!app().assets[assetID].wallet) return
+    const w = app().assets[assetID].wallet
+    if (!w || (w.traits & traitHistorian) === 0) {
+      Doc.show(page.txHistoryNotAvailable)
+      return
+    }
+    Doc.show(page.txHistoryBox)
     try {
       txRes = await app().txHistory(assetID, 10)
     } catch (err) {
+      Doc.show(page.noTxHistory)
       return
     }
     if (txRes.txs.length === 0) {
@@ -2524,15 +2560,4 @@ function assetIsConfigurable (assetID: number) {
   const defs = asset.info.availablewallets
   const zerothOpts = defs[0].configopts
   return defs.length > 1 || (zerothOpts && zerothOpts.length > 0)
-}
-
-/*
- * customWalletBalance returns the translated string and a message for the
- * provided balance category.
- */
-function customWalletBalanceCategory (category: string): [string, string] {
-  if (category === 'Shielded') {
-    return [intl.prep(intl.ID_SHIELDED), intl.prep(intl.ID_SHIELDED_MSG)]
-  }
-  return [category, '']
 }

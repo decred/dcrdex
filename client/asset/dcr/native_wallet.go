@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,6 +94,7 @@ type NativeWallet struct {
 
 // NativeWallet must also satisfy the following interface(s).
 var _ asset.FundsMixer = (*NativeWallet)(nil)
+var _ asset.WalletHistorian = (*NativeWallet)(nil)
 
 func initNativeWallet(ew *ExchangeWallet) (*NativeWallet, error) {
 	spvWallet, ok := ew.wallet.(*spvWallet)
@@ -374,4 +376,40 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 			dcrutil.Amount(totalSent), fromAccts, toAcct, tx.TxHash())
 	}
 	return nil
+}
+
+// WalletTransaction returns a transaction that either the wallet has made or
+// one in which the wallet has received funds.
+func (dcr *NativeWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	coinID, err := hex.DecodeString(txID)
+	if err == nil {
+		txHash, _, err := decodeCoinID(coinID)
+		if err == nil {
+			txID = txHash.String()
+		}
+	}
+
+	txs, err := dcr.TxHistory(1, &txID, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 {
+		return nil, asset.CoinNotFoundError
+	}
+
+	return txs[0], nil
+}
+
+// TxHistory returns all the transactions the wallet has made. If refID is nil,
+// then transactions starting from the most recent are returned (past is ignored).
+// If past is true, the transactions prior to the refID are returned, otherwise
+// the transactions after the refID are returned. n is the number of
+// transactions to return. If n is <= 0, all the transactions will be returned.
+func (dcr *NativeWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	txHistoryDB := dcr.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
+	}
+
+	return txHistoryDB.GetTxs(n, refID, past)
 }

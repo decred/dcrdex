@@ -239,13 +239,14 @@ func (n *testNode) sendSignedTransaction(ctx context.Context, tx *types.Transact
 	return nil
 }
 
-func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *types.Transaction {
+func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte, gasLimit uint64) *types.Transaction {
 	return types.NewTx(&types.DynamicFeeTx{
 		GasFeeCap: dexeth.GweiToWei(gasFeeCap),
 		GasTipCap: dexeth.GweiToWei(gasTipCap),
 		To:        to,
 		Value:     dexeth.GweiToWei(value),
 		Data:      data,
+		Gas:       gasLimit,
 	})
 }
 
@@ -3453,7 +3454,7 @@ func testAuditContract(t *testing.T, assetID uint32) {
 			txData = []byte{0}
 		}
 
-		tx := tTx(2, 300, uint64(len(test.initiations)), &testAddressC, txData)
+		tx := tTx(2, 300, uint64(len(test.initiations)), &testAddressC, txData, 21000)
 		txBinary, err := tx.MarshalBinary()
 		if err != nil {
 			t.Fatalf(`"%v": failed to marshal binary: %v`, test.name, err)
@@ -4286,7 +4287,7 @@ func testSend(t *testing.T, assetID uint32) {
 	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
-	tx := tTx(0, 0, 0, &testAddressA, nil)
+	tx := tTx(0, 0, 0, &testAddressA, nil, 21000)
 	txHash := tx.Hash()
 
 	node.sendTxTx = tx
@@ -5178,7 +5179,7 @@ func TestMarshalMonitoredTx(t *testing.T) {
 	copy(replacementTxHash[:], encode.RandomBytes(32))
 
 	original := &monitoredTx{
-		tx:             tTx(100, 200, 300, &testAddressA, []byte{}),
+		tx:             tTx(100, 200, 300, &testAddressA, []byte{}, 21000),
 		blockSubmitted: 123,
 		replacementTx:  &replacementTxHash,
 	}
@@ -5201,7 +5202,7 @@ func TestMarshalMonitoredTx(t *testing.T) {
 	}
 
 	originalNoReplacement := &monitoredTx{
-		tx:             tTx(100, 200, 300, &testAddressA, []byte{}),
+		tx:             tTx(100, 200, 300, &testAddressA, []byte{}, 21000),
 		blockSubmitted: 123,
 	}
 
@@ -5234,7 +5235,7 @@ func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
 	w, _, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
-	tx := tTx(0, 0, 0, &testAddressA, nil)
+	tx := tTx(0, 0, 0, &testAddressA, nil, 21000)
 	node.sendTxTx = tx
 	node.tokenContractor.transferTx = tx
 
@@ -5490,28 +5491,31 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		receiptErr, bestHdrErr error
 		hdrByHash, bestHdr     *types.Header
 		wantSecrets            [][]byte
+		wantEstimatedFee       uint64
 		wantFee                uint64
 	}{{
-		name:         "ok init",
-		coinID:       coinID,
-		contractData: contractDataFn(0, secretHA),
-		isInit:       true,
-		receipt:      rcpt,
-		receiptTx:    tTx(200, 2, 0, nil, initFn(abFn())),
-		hdrByHash:    hdr,
-		bestHdr:      hdrConfirms,
-		wantSecrets:  sortedFn(),
-		wantFee:      400,
+		name:             "ok init",
+		coinID:           coinID,
+		contractData:     contractDataFn(0, secretHA),
+		isInit:           true,
+		receipt:          rcpt,
+		receiptTx:        tTx(200, 2, 0, nil, initFn(abFn()), 200),
+		hdrByHash:        hdr,
+		bestHdr:          hdrConfirms,
+		wantSecrets:      sortedFn(),
+		wantEstimatedFee: 200 * 200,
+		wantFee:          400,
 	}, {
-		name:         "ok redeem",
-		coinID:       coinID,
-		contractData: contractDataFn(0, secretHB),
-		receipt:      rcpt,
-		receiptTx:    tTx(200, 3, 0, nil, redeemFn(abFn())),
-		hdrByHash:    hdr,
-		bestHdr:      hdrConfirms,
-		wantSecrets:  sortedFn(),
-		wantFee:      500,
+		name:             "ok redeem",
+		coinID:           coinID,
+		contractData:     contractDataFn(0, secretHB),
+		receipt:          rcpt,
+		receiptTx:        tTx(200, 3, 0, nil, redeemFn(abFn()), 200),
+		hdrByHash:        hdr,
+		bestHdr:          hdrConfirms,
+		wantSecrets:      sortedFn(),
+		wantEstimatedFee: 200 * 200,
+		wantFee:          500,
 	}, {
 		name:         "bad contract data",
 		coinID:       coinID,
@@ -5528,7 +5532,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		coinID:       coinID,
 		contractData: contractDataFn(0, secretHA),
 		receipt:      rcpt,
-		receiptTx:    tTx(200, 2, 0, nil, initFn(abFn())),
+		receiptTx:    tTx(200, 2, 0, nil, initFn(abFn()), 200),
 		bestHdr:      hdrConfirms,
 		wantErr:      true,
 	}, {
@@ -5553,7 +5557,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		contractData: contractDataFn(0, secretHA),
 		isInit:       true,
 		receipt:      rcpt,
-		receiptTx:    tTx(200, 2, 0, nil, nil),
+		receiptTx:    tTx(200, 2, 0, nil, nil, 200),
 		hdrByHash:    hdr,
 		bestHdr:      hdrConfirms,
 		wantErr:      true,
@@ -5562,7 +5566,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		coinID:       coinID,
 		contractData: contractDataFn(0, secretHA),
 		receipt:      rcpt,
-		receiptTx:    tTx(200, 2, 0, nil, nil),
+		receiptTx:    tTx(200, 2, 0, nil, nil, 200),
 		hdrByHash:    hdr,
 		bestHdr:      hdrConfirms,
 		wantErr:      true,
@@ -5572,7 +5576,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		contractData: contractDataFn(0, secretHB),
 		isInit:       true,
 		receipt:      rcpt,
-		receiptTx:    tTx(200, 2, 0, nil, initFn([][]byte{secretHA})),
+		receiptTx:    tTx(200, 2, 0, nil, initFn([][]byte{secretHA}), 200),
 		hdrByHash:    hdr,
 		bestHdr:      hdrConfirms,
 		wantErr:      true,

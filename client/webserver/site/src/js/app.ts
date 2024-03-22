@@ -42,14 +42,11 @@ import {
   APIResponse,
   RateNote,
   InFlightOrder,
-  BotConfig,
-  MMStartStopNote,
-  MarketMakingStatus,
-  MarketMakingConfig,
   WalletTransaction,
   TxHistoryResult,
   WalletNote,
-  TransactionNote
+  TransactionNote,
+  PageElement
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -71,6 +68,14 @@ interface CoreNotePlus extends CoreNote {
   el: HTMLElement // Added in app
 }
 
+interface UserResponse extends APIResponse {
+  user?: User
+  lang: string
+  langs: string[]
+  inited: boolean
+  experimental: boolean
+}
+
 /* constructors is a map to page constructors. */
 const constructors: Record<string, PageClass> = {
   login: LoginPage,
@@ -86,10 +91,46 @@ const constructors: Record<string, PageClass> = {
   mmsettings: MarketMakerSettingsPage
 }
 
+interface LangData {
+  name: string
+  flag: string
+}
+
+const languageData: Record<string, LangData> = {
+  'en-US': {
+    name: 'English',
+    flag: '🇺🇸' // Not 🇬🇧. MURICA!
+  },
+  'pt-BR': {
+    name: 'Portugese',
+    flag: '🇧🇷'
+  },
+  'zh-CN': {
+    name: 'Chinese',
+    flag: '🇨🇳'
+  },
+  'pl-PL': {
+    name: 'Polish',
+    flag: '🇵🇱'
+  },
+  'de-DE': {
+    name: 'German',
+    flag: '🇩🇪'
+  },
+  'ar': {
+    name: 'Arabic',
+    flag: '🇪🇬' // Egypt I guess
+  }
+}
+
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
   notes: CoreNotePlus[]
   pokes: CoreNotePlus[]
+  langs: string[]
+  lang: string
+  inited: boolean
+  authed: boolean
   user: User
   seedGenTime: number
   commitHash: string
@@ -109,8 +150,6 @@ export default class Application {
   popupNotes: HTMLElement
   popupTmpl: HTMLElement
   noteReceivers: Record<string, (n: CoreNote) => void>[]
-  marketMakingCfg: MarketMakingConfig
-  marketMakingStatus: MarketMakingStatus | undefined
   txHistoryMap: Record<number, TxHistoryResult>
 
   constructor () {
@@ -172,9 +211,6 @@ export default class Application {
     if (process.env.NODE_ENV === 'development') {
       window.user = () => this.user
     }
-
-    // use user current locale set by backend
-    intl.setLocale()
   }
 
   /**
@@ -195,6 +231,8 @@ export default class Application {
     const handler = this.main.dataset.handler
     // Don't fetch the user until we know what page we're on.
     await this.fetchUser()
+    const ignoreCachedLocale = process.env.NODE_ENV === 'development'
+    await intl.loadLocale(this.lang, this.commitHash, ignoreCachedLocale)
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
@@ -208,12 +246,12 @@ export default class Application {
     this.attachHeader()
     this.attachCommon(this.header)
     this.attach({})
+    // If we are authed, populate notes, otherwise get we'll them from the login
+    // response.
+    if (this.authed) await this.fetchNotes()
     this.updateMenuItemsDisplay()
     // initialize desktop notifications
     ntfn.fetchDesktopNtfnSettings()
-    // Load recent notifications from Window.localStorage.
-    const notes = State.fetchLocal(State.notificationsLK)
-    this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
     ws.registerRoute(notificationRoute, (note: CoreNote) => {
@@ -234,9 +272,14 @@ export default class Application {
    * maintained by the Application.
    */
   async fetchUser (): Promise<User | void> {
-    const resp: APIResponse = await getJSON('/api/user')
+    const resp: UserResponse = await getJSON('/api/user')
     if (!this.checkResponse(resp)) return
-    const user = (resp as any) as User
+    this.inited = resp.inited
+    this.authed = Boolean(resp.user)
+    this.lang = resp.lang
+    this.langs = resp.langs
+    if (!resp.user) return
+    const user = resp.user
     this.seedGenTime = user.seedgentime
     this.user = user
     this.assets = user.assets
@@ -251,10 +294,6 @@ export default class Application {
 
     this.updateMenuItemsDisplay()
     return user
-  }
-
-  authed () {
-    return this.user && this.user.authed
   }
 
   /* Load the page from the server. Insert and bind the DOM. */
@@ -372,7 +411,6 @@ export default class Application {
       }
       this.setNoteTimes(page.noteList)
       this.setNoteTimes(page.pokeList)
-      this.storeNotes()
     })
 
     bind(page.burgerIcon, 'click', () => {
@@ -402,6 +440,26 @@ export default class Application {
       Doc.show(page.noteList)
       this.ackNotes()
     })
+
+    Doc.cleanTemplates(page.langBttnTmpl)
+    const { name, flag } = languageData[this.lang]
+    page.langFlag.textContent = flag
+    page.langName.textContent = name
+
+    for (const lang of this.langs) {
+      if (lang === this.lang) continue
+      const div = page.langBttnTmpl.cloneNode(true) as PageElement
+      const { name, flag } = languageData[lang]
+      div.textContent = flag
+      div.title = name
+      Doc.bind(div, 'click', () => this.setLanguage(lang))
+      page.langBttns.appendChild(div)
+    }
+  }
+
+  async setLanguage (lang: string) {
+    await postJSON('/api/setlocale', lang)
+    window.location.reload()
   }
 
   /*
@@ -473,41 +531,32 @@ export default class Application {
   }
 
   /*
-   * storeNotes stores the list of notifications in Window.localStorage. The
-   * actual stored list is stripped of information not necessary for display.
-   */
-  storeNotes () {
-    State.storeLocal(State.notificationsLK, this.notes.map(n => {
-      return {
-        subject: n.subject,
-        details: n.details,
-        severity: n.severity,
-        stamp: n.stamp,
-        id: n.id,
-        acked: n.acked
-      }
-    }))
-  }
-
-  /*
    * updateMenuItemsDisplay should be called when the user has signed in or out,
    * and when the user registers a DEX.
    */
   updateMenuItemsDisplay () {
-    const { page, user } = this
+    const { page, authed } = this
     if (!page) {
       // initial page load, header elements not yet attached but menu items
       // would already be hidden/displayed as appropriate.
       return
     }
-    const authed = user && user.authed
     if (!authed) {
       page.profileBox.classList.remove('authed')
       Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
       return
     }
+
     page.profileBox.classList.add('authed')
     Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
+  }
+
+  async fetchNotes () {
+    const res = await getJSON('/api/notes')
+    if (!this.checkResponse(res)) return console.error('failed to fetch notes:', res?.msg || String(res))
+    res.notes.reverse()
+    this.setNotes(res.notes)
+    this.setPokes(res.pokes)
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */
@@ -579,9 +628,20 @@ export default class Application {
     this.notes = []
     Doc.empty(this.page.noteList)
     for (let i = 0; i < notes.length; i++) {
-      this.prependNoteElement(notes[i], true)
+      this.prependNoteElement(notes[i])
     }
-    this.storeNotes()
+  }
+
+  /*
+   * setPokes sets the current poke cache and populates the pokes display.
+   */
+  setPokes (pokes: CoreNote[]) {
+    this.log('pokes', 'setPokes', pokes)
+    this.pokes = []
+    Doc.empty(this.page.pokeList)
+    for (let i = 0; i < pokes.length; i++) {
+      this.prependPokeElement(pokes[i])
+    }
   }
 
   updateUser (note: CoreNote) {
@@ -657,7 +717,8 @@ export default class Application {
       case 'walletconfig': {
         // assets can be null if failed to connect to dex server.
         if (!assets) return
-        const wallet = (note as WalletConfigNote).wallet
+        const wallet = (note as WalletConfigNote)?.wallet
+        if (!wallet) return
         const asset = assets[wallet.assetID]
         asset.wallet = wallet
         walletMap[wallet.assetID] = wallet
@@ -686,12 +747,6 @@ export default class Application {
       }
       case 'fiatrateupdate': {
         this.fiatRatesMap = (note as RateNote).fiatRates
-        break
-      }
-      case 'mmstartstop': {
-        const n = note as MMStartStopNote
-        if (!this.marketMakingStatus) return
-        this.marketMakingStatus.running = n.running
         break
       }
       case 'walletnote': {
@@ -730,7 +785,7 @@ export default class Application {
     const { popupTmpl, popupNotes, showPopups } = this
     if (showPopups) {
       const span = popupTmpl.cloneNode(true) as HTMLElement
-      Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`
+      Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${ntfn.plainNote(note.details)}`
       const indicator = Doc.tmplElement(span, 'indicator')
       if (note.severity === ntfn.POKE) {
         Doc.hide(indicator)
@@ -792,13 +847,13 @@ export default class Application {
     this.prependListElement(this.page.pokeList, note, el)
   }
 
-  prependNoteElement (cn: CoreNote, skipSave?: boolean) {
+  prependNoteElement (cn: CoreNote) {
     const [el, note] = this.makeNote(cn)
     this.notes.push(note)
     while (this.notes.length > noteCacheSize) this.notes.shift()
     const noteList = this.page.noteList
     this.prependListElement(noteList, note, el)
-    if (!skipSave) this.storeNotes()
+    this.bindUrlHandlers(el)
     // Set the indicator color.
     if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(noteList))) return
     let unacked = 0
@@ -834,14 +889,15 @@ export default class Application {
     }
 
     Doc.safeSelector(el, 'div.note-subject').textContent = note.subject
-    Doc.safeSelector(el, 'div.note-details').textContent = note.details
+    ntfn.insertRichNote(Doc.safeSelector(el, 'div.note-details'), note.details)
     const np: CoreNotePlus = { el, ...note }
     return [el, np]
   }
 
   makePoke (note: CoreNote): [NoteElement, CoreNotePlus] {
     const el = this.page.pokeTmpl.cloneNode(true) as NoteElement
-    Doc.tmplElement(el, 'details').textContent = `${note.subject}: ${note.details}`
+    Doc.tmplElement(el, 'subject').textContent = `${note.subject}:`
+    ntfn.insertRichNote(Doc.tmplElement(el, 'details'), note.details)
     const np: CoreNotePlus = { el, ...note }
     return [el, np]
   }
@@ -1018,66 +1074,8 @@ export default class Application {
     }
     State.removeCookie(State.authCK)
     State.removeCookie(State.pwKeyCK)
-    State.removeLocal(State.notificationsLK)
+    State.removeLocal(State.notificationsLK) // Notification storage was DEPRECATED pre-v1.
     window.location.href = '/login'
-  }
-
-  async getMarketMakingConfig () : Promise<MarketMakingConfig> {
-    if (this.marketMakingCfg) return this.marketMakingCfg
-    const res = await getJSON('/api/marketmakingconfig')
-    if (!this.checkResponse(res)) {
-      throw new Error('failed to fetch market making config')
-    }
-    this.marketMakingCfg = res.cfg
-    return this.marketMakingCfg
-  }
-
-  async updateMarketMakingConfig (cfg: BotConfig) : Promise<void> {
-    const res = await postJSON('/api/updatemarketmakingconfig', cfg)
-    if (res.err) {
-      throw new Error(res.err)
-    }
-    this.marketMakingCfg = res.cfg
-  }
-
-  async removeMarketMakingConfig (cfg: BotConfig) : Promise<void> {
-    const res = await postJSON('/api/removemarketmakingconfig', {
-      host: cfg.host,
-      baseAsset: cfg.baseAsset,
-      quoteAsset: cfg.quoteAsset
-    })
-    if (res.err) {
-      throw new Error(res.err)
-    }
-    this.marketMakingCfg = res.cfg
-  }
-
-  async setMarketMakingEnabled (host: string, baseAsset: number, quoteAsset: number, enabled: boolean) : Promise<void> {
-    const botCfgs = this.marketMakingCfg.botConfigs || []
-    const mktCfg = botCfgs.find((cfg : BotConfig) => {
-      return cfg.host === host && cfg.baseAsset === baseAsset && cfg.quoteAsset === quoteAsset
-    })
-    if (!mktCfg) {
-      throw new Error('market making config not found')
-    }
-    mktCfg.disabled = !enabled
-    await this.updateMarketMakingConfig(mktCfg)
-  }
-
-  async stopMarketMaking () : Promise<void> {
-    await postJSON('/api/stopmarketmaking')
-  }
-
-  async getMarketMakingStatus () : Promise<MarketMakingStatus> {
-    if (this.marketMakingStatus !== undefined) return this.marketMakingStatus
-    const res = await getJSON('/api/marketmakingstatus')
-    if (!this.checkResponse(res)) {
-      throw new Error('failed to fetch market making status')
-    }
-    const status = {} as MarketMakingStatus
-    status.running = !!res.running
-    status.runningBots = res.runningBots
-    return status
   }
 
   /*

@@ -6,6 +6,7 @@ package bolt
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -66,6 +67,7 @@ var (
 	botProgramsBucket      = []byte("botPrograms")
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
+	pokesBucket            = []byte("pokes")
 	credentialsBucket      = []byte("credentials")
 
 	// value keys
@@ -92,6 +94,7 @@ var (
 	walletKey             = []byte("wallet")
 	changeKey             = []byte("change")
 	noteKey               = []byte("note")
+	pokesKey              = []byte("pokesKey")
 	stampKey              = []byte("stamp")
 	severityKey           = []byte("severity")
 	ackKey                = []byte("ack")
@@ -107,6 +110,7 @@ var (
 	encInnerKeyKey        = []byte("encInnerKey")
 	innerKeyParamsKey     = []byte("innerKeyParams")
 	outerKeyParamsKey     = []byte("outerKeyParams")
+	birthdayKey           = []byte("birthday")
 	credsVersionKey       = []byte("credsVersion")
 	legacyKeyParamsKey    = []byte("keyParams")
 	epochDurKey           = []byte("epochDur")
@@ -120,6 +124,7 @@ var (
 	disabledRateSourceKey = []byte("disabledRateSources")
 	walletDisabledKey     = []byte("walletDisabled")
 	programKey            = []byte("program")
+	langKey               = []byte("lang")
 
 	// values
 	byteTrue   = encode.ByteTrue
@@ -178,7 +183,7 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 		activeOrdersBucket, archivedOrdersBucket,
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
-		botProgramsBucket,
+		botProgramsBucket, pokesBucket,
 	}); err != nil {
 		return nil, err
 	}
@@ -437,11 +442,18 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 			versionB = []byte{0x00, 0x00}
 		}
 
+		bdayB := getCopy(bkt, birthdayKey)
+		bday := time.Time{}
+		if len(bdayB) > 0 {
+			bday = time.Unix(int64(intCoder.Uint64(bdayB)), 0)
+		}
+
 		creds = &dexdb.PrimaryCredentials{
 			EncSeed:        getCopy(bkt, encSeedKey),
 			EncInnerKey:    getCopy(bkt, encInnerKeyKey),
 			InnerKeyParams: getCopy(bkt, innerKeyParamsKey),
 			OuterKeyParams: getCopy(bkt, outerKeyParamsKey),
+			Birthday:       bday,
 			Version:        intCoder.Uint16(versionB),
 		}
 		return nil
@@ -459,6 +471,7 @@ func (db *BoltDB) setCreds(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials) error 
 		put(encInnerKeyKey, creds.EncInnerKey).
 		put(innerKeyParamsKey, creds.InnerKeyParams).
 		put(outerKeyParamsKey, creds.OuterKeyParams).
+		put(birthdayKey, uint64Bytes(uint64(creds.Birthday.Unix()))).
 		put(credsVersionKey, uint16Bytes(creds.Version)).
 		err()
 }
@@ -1930,6 +1943,34 @@ func (db *BoltDB) notesUpdate(f bucketFunc) error {
 	return db.withBucket(notesBucket, db.Update, f)
 }
 
+// SavePokes saves a slice of notifications, overwriting any previously saved
+// slice.
+func (db *BoltDB) SavePokes(pokes []*dexdb.Notification) error {
+	// Just save it as JSON.
+	b, err := json.Marshal(pokes)
+	if err != nil {
+		return fmt.Errorf("JSON marshal error: %w", err)
+	}
+	return db.withBucket(pokesBucket, db.Update, func(bkt *bbolt.Bucket) error {
+		return bkt.Put(pokesKey, b)
+	})
+}
+
+// LoadPokes loads the slice of notifications last saved with SavePokes. The
+// loaded pokes are deleted from the database.
+func (db *BoltDB) LoadPokes() (pokes []*dexdb.Notification, _ error) {
+	return pokes, db.withBucket(pokesBucket, db.Update, func(bkt *bbolt.Bucket) error {
+		b := bkt.Get(pokesKey)
+		if len(b) == 0 { // None saved
+			return nil
+		}
+		if err := json.Unmarshal(b, &pokes); err != nil {
+			return err
+		}
+		return bkt.Delete(pokesKey)
+	})
+}
+
 // newest buckets gets the nested buckets with the hightest timestamp from the
 // specified master buckets. The nested bucket should have an encoded uint64 at
 // the timeKey. An optional filter function can be used to reject buckets.
@@ -2424,6 +2465,29 @@ func (db *BoltDB) DisabledRateSources() (disabledSources []string, err error) {
 			if token != "" {
 				disabledSources = append(disabledSources, token)
 			}
+		}
+		return nil
+	})
+}
+
+// SetLanguage stores the language.
+func (db *BoltDB) SetLanguage(lang string) error {
+	return db.Update(func(dbTx *bbolt.Tx) error {
+		bkt := dbTx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("app bucket not found")
+		}
+		return bkt.Put(langKey, []byte(lang))
+	})
+}
+
+// Language retrieves the language stored with SetLanguage. If no language
+// has been stored, an empty string is returned without an error.
+func (db *BoltDB) Language() (lang string, _ error) {
+	return lang, db.View(func(dbTx *bbolt.Tx) error {
+		bkt := dbTx.Bucket(appBucket)
+		if bkt != nil {
+			lang = string(bkt.Get(langKey))
 		}
 		return nil
 	})

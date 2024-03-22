@@ -128,6 +128,12 @@ type DB interface {
 	NotificationsN(int) ([]*Notification, error)
 	// AckNotification sets the acknowledgement for a notification.
 	AckNotification(id []byte) error
+	// SavePokes saves a slice of notifications, overwriting any previously
+	// saved slice.
+	SavePokes([]*Notification) error
+	// LoadPokes loads the slice of notifications last saved with SavePokes.
+	// The loaded pokes are deleted from the database.
+	LoadPokes() ([]*Notification, error)
 	// DeleteInactiveOrders deletes inactive orders from the database that are
 	// older than the supplied time and returns the total number of orders
 	// deleted. If no time is supplied, the current time is used. Accepts an
@@ -149,4 +155,8 @@ type DB interface {
 	// SaveDisabledRateSources saves disabled fiat rate sources in the database.
 	// A source name must not contain a comma.
 	SaveDisabledRateSources(disabledSources []string) error
+	// SetLanguage stores the user's chosen language.
+	SetLanguage(lang string) error
+	// Language gets the language stored with SetLanguage.
+	Language() (string, error)
 }

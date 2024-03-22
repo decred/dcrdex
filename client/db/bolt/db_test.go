@@ -139,6 +139,7 @@ func TestStorePrimaryCredentials(t *testing.T) {
 		if outerParams {
 			creds.OuterKeyParams = []byte("OuterKeyParams")
 		}
+		creds.Birthday = time.Now().Truncate(time.Second)
 		return creds
 	}
 
@@ -177,6 +178,9 @@ func TestStorePrimaryCredentials(t *testing.T) {
 	}
 	if !bytes.Equal(reCreds.OuterKeyParams, goodCreds.OuterKeyParams) {
 		t.Fatalf("OuterKeyParams wrong, wanted %x, got %x", goodCreds.OuterKeyParams, reCreds.OuterKeyParams)
+	}
+	if !reCreds.Birthday.Equal(goodCreds.Birthday) {
+		t.Fatalf("Birthday wrong. wanted %s, got %s", goodCreds.Birthday, reCreds.Birthday)
 	}
 }
 
@@ -1617,5 +1621,41 @@ func TestOrderSide(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPokes(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	pokes := []*db.Notification{
+		dbtest.RandomNotification(1), dbtest.RandomNotification(2), dbtest.RandomNotification(3),
+		dbtest.RandomNotification(6), dbtest.RandomNotification(5), dbtest.RandomNotification(4),
+		dbtest.RandomNotification(7),
+	}
+
+	if err := boltdb.SavePokes(pokes); err != nil {
+		t.Fatalf("SavePokes error: %v", err)
+	}
+
+	rePokes, err := boltdb.LoadPokes()
+	if err != nil {
+		t.Fatalf("LoadPokes error: %v", err)
+	}
+
+	if len(rePokes) != len(pokes) {
+		t.Fatalf("Expected to load %d pokes. Loaded %d instead.", len(pokes), len(rePokes))
+	}
+
+	for i, poke := range pokes {
+		dbtest.MustCompareNotifications(t, poke, rePokes[i])
+	}
+
+	noPokes, err := boltdb.LoadPokes()
+	if err != nil {
+		t.Fatalf("Second LoadPokes error: %v", err)
+	}
+	if len(noPokes) != 0 {
+		t.Fatal("Result from second LoadPokes wasn't empty")
 	}
 }

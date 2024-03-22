@@ -139,6 +139,7 @@ type Wallet interface {
 	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
 	// GetBlockHash returns the hash of the mainchain block at the specified height.
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
+	ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error)
 	// MatchAnyScript looks for any of the provided scripts in the block specified.
 	MatchAnyScript(ctx context.Context, blockHash *chainhash.Hash, scripts [][]byte) (bool, error)
 	// AccountUnlocked returns true if the account is unlocked.

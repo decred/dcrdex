@@ -27,6 +27,8 @@ const (
 	defaultMainnetHost = "127.0.0.1"
 	defaultTestnetHost = "127.0.0.2"
 	defaultSimnetHost  = "127.0.0.3"
+	walletPairOneHost  = "127.0.0.6"
+	walletPairTwoHost  = "127.0.0.7"
 	defaultRPCPort     = "5757"
 	defaultWebPort     = "5758"
 	defaultLogLevel    = "debug"
@@ -83,7 +85,10 @@ func (cfg *RPCConfig) RPC(c *core.Core, marketMaker *mm.MarketMaker, log dex.Log
 		Cert:        cfg.RPCCert,
 		Key:         cfg.RPCKey,
 		DexcVersion: dexcVersion,
-		CertHosts:   []string{defaultTestnetHost, defaultSimnetHost, defaultMainnetHost},
+		CertHosts: []string{
+			defaultTestnetHost, defaultSimnetHost, defaultMainnetHost,
+			walletPairOneHost, walletPairTwoHost,
+		},
 	}
 }
 
@@ -206,15 +211,6 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 	}
 }
 
-// MarketMakerConfigPath returns the path to the market maker config file.
-func (cfg *Config) MarketMakerConfigPath() string {
-	if cfg.MMConfig.BotConfigPath != "" {
-		return cfg.MMConfig.BotConfigPath
-	}
-	_, _, mmCfgPath := setNet(cfg.AppData, cfg.Net.String())
-	return mmCfgPath
-}
-
 var DefaultConfig = Config{
 	AppData:    defaultApplicationDirectory,
 	ConfigPath: defaultConfigPath,
@@ -298,17 +294,17 @@ func ResolveConfig(appData string, cfg *Config) error {
 
 	cfg.AppData = appData
 
-	var defaultDBPath, defaultLogPath string
+	var defaultDBPath, defaultLogPath, defaultMMConfigPath string
 	switch {
 	case cfg.Testnet:
 		cfg.Net = dex.Testnet
-		defaultDBPath, defaultLogPath, _ = setNet(appData, "testnet")
+		defaultDBPath, defaultLogPath, defaultMMConfigPath = setNet(appData, "testnet")
 	case cfg.Simnet:
 		cfg.Net = dex.Simnet
-		defaultDBPath, defaultLogPath, _ = setNet(appData, "simnet")
+		defaultDBPath, defaultLogPath, defaultMMConfigPath = setNet(appData, "simnet")
 	default:
 		cfg.Net = dex.Mainnet
-		defaultDBPath, defaultLogPath, _ = setNet(appData, "mainnet")
+		defaultDBPath, defaultLogPath, defaultMMConfigPath = setNet(appData, "mainnet")
 	}
 	defaultHost := DefaultHostByNetwork(cfg.Net)
 
@@ -335,6 +331,10 @@ func ResolveConfig(appData string, cfg *Config) error {
 
 	if cfg.LogPath == "" {
 		cfg.LogPath = defaultLogPath
+	}
+
+	if cfg.MMConfig.BotConfigPath == "" {
+		cfg.MMConfig.BotConfigPath = defaultMMConfigPath
 	}
 
 	if cfg.ReloadHTML {

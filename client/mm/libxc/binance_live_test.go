@@ -13,20 +13,8 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	_ "decred.org/dcrdex/client/asset/importall"
 	"decred.org/dcrdex/dex"
-
-	_ "decred.org/dcrdex/client/asset/bch"     // register bch asset
-	_ "decred.org/dcrdex/client/asset/btc"     // register btc asset
-	_ "decred.org/dcrdex/client/asset/dash"    // register dash asset
-	_ "decred.org/dcrdex/client/asset/dcr"     // register dcr asset
-	_ "decred.org/dcrdex/client/asset/dgb"     // register dgb asset
-	_ "decred.org/dcrdex/client/asset/doge"    // register doge asset
-	_ "decred.org/dcrdex/client/asset/eth"     // register eth asset
-	_ "decred.org/dcrdex/client/asset/firo"    // register firo asset
-	_ "decred.org/dcrdex/client/asset/ltc"     // register ltc asset
-	_ "decred.org/dcrdex/client/asset/polygon" // register polygon asset
-	_ "decred.org/dcrdex/client/asset/zcl"     // register zcl asset
-	_ "decred.org/dcrdex/client/asset/zec"     // register zec asse
 )
 
 var (
@@ -99,7 +87,7 @@ func TestConnect(t *testing.T) {
 // This may fail due to balance being to low. You can try switching the side
 // of the trade or the qty.
 func TestTrade(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -111,6 +99,7 @@ func TestTrade(t *testing.T) {
 	wg.Add(1)
 	updates, unsubscribe, updaterID := bnc.SubscribeTradeUpdates()
 	defer unsubscribe()
+
 	go func() {
 		defer wg.Done()
 		for {
@@ -129,14 +118,15 @@ func TestTrade(t *testing.T) {
 			}
 		}
 	}()
-	tradeID, err := bnc.Trade(ctx, 60, 0, false, 6000e2, 1e7, updaterID)
+
+	trade, err := bnc.Trade(ctx, 60, 60001, false, 3000e5, 1e7, updaterID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
 	}
 
-	if true { // Cancel the trade
+	if false { // Cancel the trade
 		time.Sleep(1 * time.Second)
-		err = bnc.CancelTrade(ctx, 60, 0, tradeID)
+		err = bnc.CancelTrade(ctx, 60, 0, trade.ID)
 		if err != nil {
 			t.Fatalf("error cancelling trade: %v", err)
 		}
@@ -163,7 +153,7 @@ func TestCancelTrade(t *testing.T) {
 }
 
 func TestMarkets(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -172,7 +162,7 @@ func TestMarkets(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	markets, err := bnc.Markets()
+	markets, err := bnc.Markets(ctx)
 	if err != nil {
 		t.Fatalf("failed to load markets")
 	}
@@ -314,7 +304,7 @@ func TestGetDepositAddress(t *testing.T) {
 }
 
 func TestBalances(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -323,7 +313,7 @@ func TestBalances(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	balance, err := bnc.Balance(966)
+	balance, err := bnc.Balance(0)
 	if err != nil {
 		t.Fatalf("balances error: %v", err)
 	}
@@ -342,6 +332,14 @@ func TestGetCoinInfo(t *testing.T) {
 		t.Fatalf("error getting binance coin info: %v", err)
 	}
 
+	bcoins, err := json.MarshalIndent(coins, "", "    ")
+	if err != nil {
+		t.Fatalf("error marshaling binance coin info: %v", err)
+	}
+
+	t.Logf("binance coin info:\n %v", string(bcoins))
+	return
+
 	for _, c := range coins {
 		if c.Coin == "USDC" {
 			b, _ := json.MarshalIndent(c, "", "    ")
@@ -357,4 +355,17 @@ func TestGetCoinInfo(t *testing.T) {
 		}
 		fmt.Printf("%q networks: %+v \n", c.Coin, networks)
 	}
+}
+
+func TestTradeStatus(t *testing.T) {
+	bnc := tNewBinance(t, dex.Testnet)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
+	defer cancel()
+
+	_, err := bnc.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
+
+	bnc.TradeStatus(ctx, "6a570ce0ad7531f9101300000003", 60, 0)
 }

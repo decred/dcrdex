@@ -3359,13 +3359,6 @@ func (eth *baseWallet) swapOrRedemptionFeesPaid(ctx context.Context, coinID, con
 	return dexeth.WeiToGwei(bigFees), secretHashes, nil
 }
 
-// TransactionConfirmations gets the number of confirmations for the specified
-// transaction.
-func (eth *baseWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
-	txHash := common.HexToHash(txID)
-	return eth.node.transactionConfirmations(ctx, txHash)
-}
-
 // RegFeeConfirmations gets the number of confirmations for the specified
 // transaction.
 func (eth *baseWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
@@ -4120,7 +4113,6 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 }
 
 func (w *assetWallet) getConfirmedBalance() (*big.Int, error) {
-
 	now := time.Now()
 	w.tipMtx.RLock()
 	tipHeight := w.currentTip.Number.Uint64()
@@ -4796,6 +4788,118 @@ func (w *TokenWallet) TxHistory(n int, refID *string, past bool) ([]*asset.Walle
 	}
 
 	return w.txDB.getTxs(n, refID, past, &w.assetID)
+}
+
+func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txHash := common.HexToHash(txID)
+	tx, blockHeight, err := w.node.getTransaction(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+
+	if *tx.To() != w.addr {
+		return nil, asset.CoinNotFoundError
+	}
+
+	w.tipMtx.RLock()
+	tipHeight := w.currentTip.Number.Uint64()
+	w.tipMtx.RUnlock()
+
+	var confirmed bool
+	if blockHeight < 0 {
+		blockHeight = 0
+		// TODO: check when this stops being pending
+	} else if tipHeight-txConfsNeededToConfirm+1 >= uint64(blockHeight) {
+		confirmed = true
+	}
+
+	return &asset.WalletTransaction{
+		Type:        asset.Receive,
+		ID:          txHash.String(),
+		Amount:      dexeth.WeiToGwei(tx.Value()),
+		BlockNumber: uint64(blockHeight),
+		Confirmed:   confirmed,
+		AdditionalData: map[string]string{
+			txHistoryNonceKey: strconv.FormatUint(tx.Nonce(), 10),
+		},
+	}, nil
+}
+
+// WalletTransaction returns a transaction that either the wallet has made or
+// one in which the wallet has received funds.
+func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txID = common.HexToHash(txID).String()
+	txs, err := w.TxHistory(1, &txID, false)
+	if errors.Is(err, asset.CoinNotFoundError) {
+		return w.getReceivingTransaction(ctx, txID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 {
+		return nil, asset.CoinNotFoundError
+	}
+
+	return txs[0], err
+}
+
+func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txHash := common.HexToHash(txID)
+	tx, blockHeight, err := w.node.getTransaction(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	if *tx.To() != w.netToken.Address {
+		return nil, asset.CoinNotFoundError
+	}
+
+	receivingAddr, value, err := erc20.ParseTransferData(tx.Data())
+	if err != nil {
+		return nil, asset.CoinNotFoundError
+	}
+
+	if receivingAddr != w.addr {
+		return nil, asset.CoinNotFoundError
+	}
+
+	w.tipMtx.RLock()
+	tipHeight := w.currentTip.Number.Uint64()
+	w.tipMtx.RUnlock()
+
+	var confirmed bool
+	if blockHeight < 0 {
+		blockHeight = 0
+		// TODO: check when this stops being pending
+	} else if tipHeight-txConfsNeededToConfirm+1 >= uint64(blockHeight) {
+		confirmed = true
+	}
+
+	return &asset.WalletTransaction{
+		Type:        asset.Receive,
+		ID:          txID,
+		Amount:      w.atomize(value),
+		BlockNumber: uint64(blockHeight),
+		Confirmed:   confirmed,
+		AdditionalData: map[string]string{
+			txHistoryNonceKey: strconv.FormatUint(tx.Nonce(), 10),
+		},
+	}, nil
+}
+
+func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	txID = common.HexToHash(txID).String()
+	txs, err := w.TxHistory(1, &txID, false)
+	if errors.Is(err, asset.CoinNotFoundError) {
+		return w.getReceivingTransaction(ctx, txID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 {
+		return nil, asset.CoinNotFoundError
+	}
+
+	return txs[0], err
 }
 
 // providersFile reads a file located at ~/dextest/credentials.json.
