@@ -1172,6 +1172,15 @@ func TestMarket_Run(t *testing.T) {
 		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
 
+	// Rate too low
+	oRecord = newOR()
+	mkt.minimumRate = oRecord.order.(*order.LimitOrder).Rate + 1
+	storMsgPI(oRecord.msgID, pi)
+	if err = mkt.SubmitOrder(oRecord); !errors.Is(err, ErrInvalidRate) {
+		t.Errorf("An invalid rate was accepted, but it should not have been.")
+	}
+	mkt.minimumRate = 0
+
 	// Let the epoch cycle and the fake client respond with its preimage
 	// (handlePreimageResp done)..
 	<-auth.handlePreimageDone

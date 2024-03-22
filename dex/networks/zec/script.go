@@ -54,3 +54,27 @@ func RequiredOrderFunds(swapVal, inputCount, inputsSize, maxSwaps uint64) uint64
 	fees := firstTxFees + (maxSwaps-1)*otherTxsFees
 	return swapVal + fees
 }
+
+// MinHTLCSize calculates the minimum value for the output of a chained
+// P2SH -> P2WPKH transaction pair where the spending tx size is known.
+func MinHTLCSize(redeemTxFees uint64) uint64 {
+	var outputSize uint64 = dexbtc.P2PKHOutputSize
+	sz := outputSize + 148                        // 148 accounts for an input on spending tx
+	const oneThirdDustThresholdRate = 100         // zats / kB
+	nFee := oneThirdDustThresholdRate * sz / 1000 // This is different from BTC
+	if nFee == 0 {
+		nFee = oneThirdDustThresholdRate
+	}
+	htlcOutputDustMin := 3 * nFee
+
+	return htlcOutputDustMin + redeemTxFees
+}
+
+// MinLotSize is the minimum lot size that avoids dust for a given max network
+// fee rate.
+func MinLotSize(maxFeeRate uint64) uint64 {
+	var inputsSize uint64 = dexbtc.TxInOverhead + dexbtc.RefundSigScriptSize + 1
+	var outputsSize uint64 = dexbtc.P2PKHOutputSize + 1
+	refundBondTxFees := TxFeesZIP317(inputsSize, outputsSize, 0, 0, 0, 0)
+	return MinHTLCSize(refundBondTxFees)
+}

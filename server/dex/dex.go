@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
@@ -655,6 +656,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// lots sizes, which will break older clients. In this case, set
 	// msgjson.Asset.LotSize 0 so older clients cannot use the market. Do the
 	// same for rate step.
+	// V0PURGE
 	lotSizes := make(map[uint32]uint64)
 	rateSteps := make(map[uint32]uint64)
 	for _, mktInfo := range cfg.Markets {
@@ -1091,12 +1093,19 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	for _, mktInf := range cfg.Markets {
 		// nilness of the coin locker signals account-based asset.
 		var baseCoinLocker, quoteCoinLocker coinlock.CoinLocker
-		if _, ok := backedAssets[mktInf.Base].Backend.(asset.OutputTracker); ok {
+		b, q := backedAssets[mktInf.Base], backedAssets[mktInf.Quote]
+		if _, ok := b.Backend.(asset.OutputTracker); ok {
 			baseCoinLocker = dexCoinLocker.AssetLocker(mktInf.Base).Book()
 		}
-		if _, ok := backedAssets[mktInf.Quote].Backend.(asset.OutputTracker); ok {
+		if _, ok := q.Backend.(asset.OutputTracker); ok {
 			quoteCoinLocker = dexCoinLocker.AssetLocker(mktInf.Quote).Book()
 		}
+
+		// Calculate a minimum market rate that avoids dust.
+		// quote_dust = base_lot * min_rate / rate_encoding_factor
+		// => min_rate = quote_dust * rate_encoding_factor * base_lot
+		quoteMinLotSize, _, _ := asset.Minimums(mktInf.Quote, q.Asset.MaxFeeRate)
+		minRate := calc.MinimumMarketRate(mktInf.LotSize, quoteMinLotSize)
 
 		mkt, err := market.NewMarket(&market.Config{
 			MarketInfo:      mktInf,
@@ -1112,6 +1121,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			CheckParcelLimit: func(user account.AccountID, calcParcels market.MarketParcelCalculator) bool {
 				return orderRouter.CheckParcelLimit(user, mktInf.Name, calcParcels)
 			},
+			MinimumRate: minRate,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("NewMarket failed: %w", err)

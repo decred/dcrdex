@@ -101,6 +101,13 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinLotSize(maxFeeRate, false)
+}
+
 // newWallet constructs a new client wallet for Dash based on the WalletDefinition.Type
 func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var params *chaincfg.Params

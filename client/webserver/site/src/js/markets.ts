@@ -1509,11 +1509,19 @@ export default class MarketsPage extends BasePage {
    * true if the order appears valid.
    */
   validateOrder (order: TradeForm) {
-    const page = this.page
-    if (order.isLimit && !order.rate) {
-      Doc.show(page.orderErr)
-      page.orderErr.textContent = intl.prep(intl.ID_NO_ZERO_RATE)
-      return false
+    const { page, market: { cfg: { minimumRate }, rateConversionFactor } } = this
+    if (order.isLimit) {
+      if (!order.rate) {
+        Doc.show(page.orderErr)
+        page.orderErr.textContent = intl.prep(intl.ID_NO_ZERO_RATE)
+        return false
+      }
+      if (order.rate < minimumRate) {
+        Doc.show(page.orderErr)
+        const [r, minRate] = [order.rate / rateConversionFactor, minimumRate / rateConversionFactor]
+        page.orderErr.textContent = `rate is lower than the market's minimum rate. ${r} < ${minRate}`
+        return false
+      }
     }
     if (!order.qty) {
       Doc.show(page.orderErr)

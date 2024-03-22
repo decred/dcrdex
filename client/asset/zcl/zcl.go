@@ -135,6 +135,13 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// MinLotSize calculates the minimum bond size for a given fee rate that avoids
+// dust outputs on the swap and refund txs, assuming the maxFeeRate doesn't
+// change.
+func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
+	return dexbtc.MinLotSize(maxFeeRate, false)
+}
+
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet. The wallet will shut down when the provided context is
 // canceled. The configPath can be an empty string, in which case the standard

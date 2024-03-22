@@ -553,6 +553,9 @@ type Market struct {
 	// with a TemporaryID to match with a notification once asynchronous order
 	// submission is complete.
 	InFlightOrders []*InFlightOrder `json:"inflight"`
+	// MinimumRate is the minimum rate allowed for the market, which is the
+	// minimum rate at which 1 lot converts to something greater than dust.
+	MinimumRate uint64 `json:"minimumRate"`
 }
 
 // BaseContractLocked is the amount of base asset locked in un-redeemed

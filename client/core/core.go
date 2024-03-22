@@ -352,6 +352,7 @@ func coreMarketFromMsgMarket(dc *dexConnection, msgMkt *msgjson.Market) *Market 
 		StartEpoch:      msgMkt.StartEpoch,
 		MarketBuyBuffer: msgMkt.MarketBuyBuffer,
 		AtomToConv:      float64(bconv) / float64(qconv),
+		MinimumRate:     dc.minimumMarketRate(quote, msgMkt.LotSize),
 	}
 
 	trades, inFlight := dc.marketTrades(mkt.marketName())
@@ -362,6 +363,15 @@ func coreMarketFromMsgMarket(dc *dexConnection, msgMkt *msgjson.Market) *Market 
 	}
 
 	return mkt
+}
+
+func (dc *dexConnection) minimumMarketRate(q *dex.Asset, lotSize uint64) uint64 {
+	quoteDust, found := asset.MinimumLotSize(q.ID, q.MaxFeeRate)
+	if !found {
+		dc.log.Errorf("couldn't find minimum lot size for %s", q.Symbol)
+		return 0
+	}
+	return calc.MinimumMarketRate(lotSize, quoteDust)
 }
 
 // temporaryOrderIDCounter is used for inflight orders and must never be zero
@@ -6501,8 +6511,13 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 	mktID := marketName(form.Base, form.Quote)
 
 	rate, qty := form.Rate, form.Qty
-	if form.IsLimit && rate == 0 {
-		return nil, newError(orderParamsErr, "zero-rate order not allowed")
+	if form.IsLimit {
+		if rate == 0 {
+			return nil, newError(orderParamsErr, "zero-rate order not allowed")
+		}
+		if minRate := dc.minimumMarketRate(assetConfigs.quoteAsset, mktConf.LotSize); rate < minRate {
+			return nil, newError(orderParamsErr, "order's rate is lower than market's minimum rate. %d < %d", rate, minRate)
+		}
 	}
 
 	// Get an address for the swap contract.
