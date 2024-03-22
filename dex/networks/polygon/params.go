@@ -48,6 +48,7 @@ var (
 			dex.Testnet: common.HexToAddress("0xd45e648D97Beb2ee0045E5e91d1C2C751Cd0Bc00"), // txid: 0xa5f71d47998c175c9d2aba37ad2eff390ce7d20c312cee0472e3a5d606da385d
 			dex.Simnet:  common.HexToAddress(""),                                           // Filled in by MaybeReadSimnetAddrs
 		},
+		1: {},
 	}
 
 	MultiBalanceAddresses = map[dex.Network]common.Address{
@@ -108,6 +109,19 @@ var (
 							// Average of 1 transfers: 49646. Recommended Gases.Transfer = 64539
 							// 	[49646]
 							Transfer: 64_539,
+						},
+					},
+					1: {
+						// DRAFT TODO
+						Address: common.Address{}, // Set in MaybeReadSimnetAddrs
+						Gas: dexeth.Gases{
+							Swap:      223_163,
+							SwapAdd:   146_399,
+							Redeem:    82_121,
+							RedeemAdd: 41_113,
+							Refund:    62_527,
+							Approve:   58_180,
+							Transfer:  64_539,
 						},
 					},
 				},

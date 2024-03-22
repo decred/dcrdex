@@ -23,6 +23,7 @@ then
 fi
 
 mkdir temp
+mkdir -p ${PKG_NAME}
 
 solc --abi --bin --bin-runtime --overwrite --optimize ${SOLIDITY_FILE} -o ./temp/
 BYTECODE=$(<./temp/${CONTRACT_NAME}.bin-runtime)

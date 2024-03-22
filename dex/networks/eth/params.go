@@ -5,6 +5,7 @@ package eth
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 )
@@ -54,13 +56,19 @@ var (
 
 	VersionedGases = map[uint32]*Gases{
 		0: v0Gases,
+		1: v1Gases,
 	}
 
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		0: {
 			dex.Mainnet: common.HexToAddress("0x8C17e4968B6903E1601be82Ca989c5B5E2c7b400"),
-			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 			dex.Testnet: common.HexToAddress("0x198463496037754564e9bea5418Bf4117Db0520C"),
+			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
+		},
+		1: {
+			dex.Mainnet: common.Address{},
+			dex.Testnet: common.Address{},
+			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 		},
 	}
 
@@ -76,6 +84,24 @@ var v0Gases = &Gases{
 	Redeem:    78600,  // 60,456 actual -- https://goerli.etherscan.io/tx/0x5b22c48052df4a8ecd03a31b62e5015e6afe18c9ffb05e6cdd77396dfc3ca917, verified on mainnet
 	RedeemAdd: 41000,  // 31,672 actual (92,083 for 2, 123,724 for 3) -- https://goerli.etherscan.io/tx/0xae424cc9b0d43bf934112245cb74ab9eca9c2611eabcd6257b6ec258b071c1e6, https://goerli.etherscan.io/tx/0x7ba7cb945da108d39a5a0ac580d4841c4017a32cd0e244f26845c6ed501d2475, verified on mainnet
 	Refund:    57000,  // 43,014 actual -- https://goerli.etherscan.io/tx/0x586ed4cb7dab043f98d4cc08930d9eb291b0052d140d949b20232ceb6ad15f25
+}
+
+var v1Gases = &Gases{
+	// First swap used 48340 gas Recommended Gases.Swap = 62842
+	Swap: 62_842,
+	// 	4 additional swaps averaged 26499 gas each. Recommended Gases.SwapAdd = 34448
+	// 	[48340 74837 101338 127836 154338]
+	SwapAdd: 34_448,
+	// First redeem used 39496 gas. Recommended Gases.Redeem = 51344
+	Redeem: 51_344,
+	// 	4 additional redeems averaged 10744 gas each. recommended Gases.RedeemAdd = 13967
+	// 	[39496 50238 60984 71727 82473]
+	RedeemAdd: 13_967,
+	// *** Compare expected Swap + Redeem = 88k with UniSwap v2: 102k, v3: 127k
+	// *** A 1-match order is cheaper than UniSwap.
+	// Average of 5 refunds: 39918. Recommended Gases.Refund = 51893
+	// 	[39918 39918 39918 39918 39918]
+	Refund: 51_893,
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
@@ -94,23 +120,49 @@ func LoadGenesisFile(genesisFile string) (*core.Genesis, error) {
 	return &genesis, nil
 }
 
-// EncodeContractData packs the contract version and the secret hash into a byte
+// EncodeContractData packs the contract version and the locator into a byte
 // slice for communicating a swap's identity.
-func EncodeContractData(contractVersion uint32, swapKey [SecretHashSize]byte) []byte {
-	b := make([]byte, SecretHashSize+4)
+func EncodeContractData(contractVersion uint32, locator []byte) []byte {
+	b := make([]byte, len(locator)+4)
 	binary.BigEndian.PutUint32(b[:4], contractVersion)
-	copy(b[4:], swapKey[:])
+	copy(b[4:], locator[:])
 	return b
 }
 
-// DecodeContractData unpacks the contract version and secret hash.
-func DecodeContractData(data []byte) (contractVersion uint32, swapKey [SecretHashSize]byte, err error) {
-	if len(data) != SecretHashSize+4 {
-		err = errors.New("invalid swap data")
+func DecodeContractDataV0(data []byte) (secretHash [32]byte, err error) {
+	contractVer, secretHashB, err := DecodeContractData(data)
+	if err != nil {
+		return secretHash, err
+	}
+	if contractVer != 0 {
+		return secretHash, errors.New("not contract version 0")
+	}
+	copy(secretHash[:], secretHashB)
+	return
+}
+
+// DecodeContractData unpacks the contract version and the locator.
+func DecodeContractData(data []byte) (contractVersion uint32, locator []byte, err error) {
+	if len(data) < 4 {
+		err = errors.New("invalid short encoding")
 		return
 	}
+	locator = data[4:]
 	contractVersion = binary.BigEndian.Uint32(data[:4])
-	copy(swapKey[:], data[4:])
+	switch contractVersion {
+	case 0:
+		if len(locator) != SecretHashSize {
+			err = fmt.Errorf("v0 locator is too small. expected %d, got %d", SecretHashSize, len(locator))
+			return
+		}
+	case 1:
+		if len(locator) != LocatorV1Length {
+			err = fmt.Errorf("v1 locator is too small. expected %d, got %d", LocatorV1Length, len(locator))
+			return
+		}
+	default:
+		err = fmt.Errorf("unkown contract version %d", contractVersion)
+	}
 	return
 }
 
@@ -216,7 +268,46 @@ func (ss SwapStep) String() string {
 	return "unknown"
 }
 
-// SwapState is the current state of an in-process swap.
+// SwapVector is immutable contract data.
+type SwapVector struct {
+	From       common.Address
+	To         common.Address
+	Value      *big.Int
+	SecretHash [32]byte
+	LockTime   uint64 // seconds
+}
+
+// Locator encodes a version 1 locator for the SwapVector.
+func (v *SwapVector) Locator() []byte {
+	locator := make([]byte, LocatorV1Length)
+	copy(locator[0:20], v.From[:])
+	copy(locator[20:40], v.To[:])
+	v.Value.FillBytes(locator[40:72])
+	copy(locator[72:104], v.SecretHash[:])
+	binary.BigEndian.PutUint64(locator[104:112], v.LockTime)
+	return locator
+}
+
+func (v *SwapVector) String() string {
+	return fmt.Sprintf("{ from = %s, to = %s, value = %d, secret hash = %s, locktime = %s }",
+		v.From, v.To, v.Value, hex.EncodeToString(v.SecretHash[:]), time.UnixMilli(int64(v.LockTime)))
+}
+
+func CompareVectors(v1, v2 *SwapVector) bool {
+	// Check vector equivalence.
+	return v1.Value.Cmp(v2.Value) == 0 && v1.To == v2.To && v1.From == v2.From &&
+		v1.LockTime == v2.LockTime && v1.SecretHash == v2.SecretHash
+}
+
+// SwapStatus is the contract data that specifies the current contract state.
+type SwapStatus struct {
+	BlockHeight uint64
+	Secret      [32]byte
+	Step        SwapStep
+}
+
+// SwapState is the current state of an in-process swap, as stored on-chain by
+// the v0 contract.
 type SwapState struct {
 	BlockHeight uint64
 	LockTime    time.Time
@@ -297,3 +388,69 @@ func (g *Gases) RedeemN(n int) uint64 {
 	}
 	return g.Redeem + g.RedeemAdd*(uint64(n)-1)
 }
+
+func ParseV0Locator(locator []byte) (secretHash [32]byte, err error) {
+	if len(locator) == SecretHashSize {
+		copy(secretHash[:], locator)
+	} else {
+		err = fmt.Errorf("wrong v0 locator length. wanted %d, got %d", SecretHashSize, len(locator))
+	}
+	return
+}
+
+// LocatorV1Length = from 20 + to 20 + value 32 + secretHash 32 +
+// lockTime 8 = 112 bytes
+const LocatorV1Length = 112
+
+func ParseV1Locator(locator []byte) (v *SwapVector, err error) {
+	// from 20 + to 20 + value 8 + secretHash 32 + lockTime 8
+	if len(locator) == LocatorV1Length {
+		v = &SwapVector{
+			From:     common.BytesToAddress(locator[:20]),
+			To:       common.BytesToAddress(locator[20:40]),
+			Value:    new(big.Int).SetBytes(locator[40:72]),
+			LockTime: binary.BigEndian.Uint64(locator[104:112]),
+		}
+		copy(v.SecretHash[:], locator[72:104])
+	} else {
+		err = fmt.Errorf("wrong v1 locator length. wanted %d, got %d", LocatorV1Length, len(locator))
+	}
+	return
+}
+
+func SwapVectorToAbigen(v *SwapVector) swapv1.ETHSwapVector {
+	return swapv1.ETHSwapVector{
+		SecretHash:      v.SecretHash,
+		Initiator:       v.From,
+		RefundTimestamp: v.LockTime,
+		Participant:     v.To,
+		Value:           v.Value,
+	}
+}
+
+// ProtocolVersion assists in mapping the dex.Asset.Version to a contract
+// version.
+type ProtocolVersion uint32
+
+const (
+	ProtocolVersionZero ProtocolVersion = iota
+	ProtocolVersionV1Contracts
+)
+
+func (v ProtocolVersion) ContractVersion() uint32 {
+	switch v {
+	case ProtocolVersionZero:
+		return 0
+	case ProtocolVersionV1Contracts:
+		return 1
+	default:
+		return ContractVersionUnknown
+	}
+}
+
+var (
+	// ContractVersionERC20 is passed as the contract version when calling
+	// ERC20 contract methods.
+	ContractVersionERC20   = ^uint32(0)
+	ContractVersionUnknown = ContractVersionERC20 - 1
+)
