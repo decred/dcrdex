@@ -413,7 +413,7 @@ func (w *spvWallet) syncStatus() (*SyncStatus, error) {
 	// Chain service headers (block and filter) height.
 	chainBlk, err := w.cl.BestBlock()
 	if err != nil {
-		return nil, errhttps://github.com/decred/dcrdex/pull/2681
+		return nil, err
 	}
 
 	currentHeight := chainBlk.Height
