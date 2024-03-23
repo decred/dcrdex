@@ -1,2 +1,4 @@
 build/
-pkg/installers
+certs/
+pkg/windows-msi/bin
+pkg/windows-msi/obj
