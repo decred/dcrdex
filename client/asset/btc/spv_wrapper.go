@@ -1024,6 +1024,26 @@ func (w *spvWallet) numDerivedAddresses() (internal, external uint32, err error)
 	return props.InternalKeyCount, props.ExternalKeyCount, nil
 }
 
+// fingerprint returns an identifier for this wallet. It is the hash of the
+// compressed serialization of the account pub key.
+func (w *spvWallet) fingerprint() (string, error) {
+	props, err := w.wallet.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
+	if err != nil {
+		return "", err
+	}
+
+	if props.AccountPubKey == nil {
+		return "", fmt.Errorf("no account key available")
+	}
+
+	pk, err := props.AccountPubKey.ECPubKey()
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(btcutil.Hash160(pk.SerializeCompressed())), nil
+}
+
 // getTxOut finds an unspent transaction output and its number of confirmations.
 // To match the behavior of the RPC method, even if an output is found, if it's
 // known to be spent, no *wire.TxOut and no error will be returned.

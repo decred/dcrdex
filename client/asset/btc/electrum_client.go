@@ -1030,6 +1030,10 @@ func (ew *electrumWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTran
 	}, nil
 }
 
+func (ew *electrumWallet) fingerprint() (string, error) {
+	return "", fmt.Errorf("fingerprint not implemented")
+}
+
 // part of the walletTxChecker interface
 func (ew *electrumWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error) {
 	// To determine if it is spent, we need the address of the output.

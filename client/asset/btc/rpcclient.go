@@ -921,6 +921,21 @@ func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	return wi, wc.call(methodGetWalletInfo, nil, wi)
 }
 
+// fingerprint returns an identifier for this wallet. Only HD wallets will have
+// an identifier. Descriptor wallets will not.
+func (wc *rpcClient) fingerprint() (string, error) {
+	walletInfo, err := wc.GetWalletInfo()
+	if err != nil {
+		return "", err
+	}
+
+	if walletInfo.HdSeedID == "" {
+		return "", fmt.Errorf("fingerprint not availble")
+	}
+
+	return walletInfo.HdSeedID, nil
+}
+
 // GetAddressInfo gets information about the given address by calling
 // getaddressinfo RPC command.
 func (wc *rpcClient) getAddressInfo(addr btcutil.Address, method string) (*GetAddressInfoResult, error) {
