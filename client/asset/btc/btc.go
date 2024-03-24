@@ -1393,21 +1393,27 @@ func (btc *baseWallet) Info() *asset.WalletInfo {
 	return btc.walletInfo
 }
 
-func (btc *baseWallet) startTxHistoryDB() error {
+func (btc *baseWallet) txHistoryDBPath(walletID string) string {
+	return filepath.Join(btc.walletDir, fmt.Sprintf("txhistory-%s.db", walletID))
+}
+
+// findExistingAddressBasedTxHistoryDB finds the path of a tx history db that
+// was created using an address controlled by the wallet. This should only be
+// used for wallets that are unable to generate a fingerprint.
+func (btc *baseWallet) findExistingAddressBasedTxHistoryDB() (string, error) {
 	dir, err := os.Open(btc.walletDir)
 	if err != nil {
-		return fmt.Errorf("error opening wallet directory: %w", err)
+		return "", fmt.Errorf("error opening wallet directory: %w", err)
 	}
 	defer dir.Close()
 
 	entries, err := dir.Readdir(0)
 	if err != nil {
-		return fmt.Errorf("error reading wallet directory: %w", err)
+		return "", fmt.Errorf("error reading wallet directory: %w", err)
 	}
 
 	pattern := regexp.MustCompile(`^txhistory-(.+)\.db$`)
 
-	var dbPath string
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -1421,13 +1427,30 @@ func (btc *baseWallet) startTxHistoryDB() error {
 		address := match[1]
 		owns, err := btc.OwnsDepositAddress(address)
 		if err != nil {
-			btc.log.Errorf("Error checking if wallet owns deposit address %s: %w", address, err)
 			continue
 		}
 		if owns {
-			btc.log.Infof("Using tx history db %s", entry.Name())
-			dbPath = filepath.Join(btc.walletDir, entry.Name())
-			break
+			return filepath.Join(btc.walletDir, entry.Name()), nil
+		}
+	}
+
+	return "", nil
+}
+
+func (btc *baseWallet) startTxHistoryDB() error {
+	var dbPath string
+	fingerPrint, err := btc.node.fingerprint()
+	if err == nil && fingerPrint != "" {
+		dbPath = btc.txHistoryDBPath(fingerPrint)
+	}
+
+	if dbPath == "" {
+		addressPath, err := btc.findExistingAddressBasedTxHistoryDB()
+		if err != nil {
+			return err
+		}
+		if addressPath != "" {
+			dbPath = addressPath
 		}
 	}
 
@@ -1436,9 +1459,10 @@ func (btc *baseWallet) startTxHistoryDB() error {
 		if err != nil {
 			return fmt.Errorf("error getting deposit address: %w", err)
 		}
-		btc.log.Infof("Creating tx history db txhistory-%s.db", depositAddr)
-		dbPath = filepath.Join(btc.walletDir, fmt.Sprintf("txhistory-%s.db", depositAddr))
+		dbPath = btc.txHistoryDBPath(depositAddr)
 	}
+
+	btc.log.Debugf("Using tx history db at %s", dbPath)
 
 	db, err := NewBadgerTxDB(dbPath, btc.log)
 	if err != nil {
@@ -5593,7 +5617,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 // WalletTransaction returns a transaction that either the wallet has made or
 // one in which the wallet has received funds. The txID can be either a byte
 // reversed tx hash or a hex encoded coin ID.
-func (btc *ExchangeWalletSPV) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+func (btc *intermediaryWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
 	coinID, err := hex.DecodeString(txID)
 	if err == nil {
 		txHash, _, err := decodeCoinID(coinID)
