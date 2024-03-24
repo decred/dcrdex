@@ -121,7 +121,6 @@ var (
 	testnetWalletSeed            string
 	testnetParticipantWalletSeed string
 	usdcID, _                    = dex.BipSymbolID("usdc.eth")
-	testTokenID                  uint32
 	masterToken                  *dexeth.Token
 )
 
@@ -339,7 +338,6 @@ func prepareTestNodeClients(initiatorDir, participantDir string, net dex.Network
 }
 
 func runSimnet(m *testing.M) (int, error) {
-	testTokenID = simnetTokenID
 	// Create dir if none yet exists. This persists for the life of the
 	// testing harness.
 	err := os.MkdirAll(simnetWalletDir, 0755)
@@ -353,10 +351,10 @@ func runSimnet(m *testing.M) (int, error) {
 
 	const contractVer = 0
 
-	tokenGases = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[contractVer].Gas
+	tokenGases = &dexeth.Tokens[usdcID].NetTokens[dex.Simnet].SwapContracts[contractVer].Gas
 
 	// ETH swap contract.
-	masterToken = dexeth.Tokens[testTokenID]
+	masterToken = dexeth.Tokens[usdcID]
 	token := masterToken.NetTokens[dex.Simnet]
 	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[contractVer][dex.Simnet])
 	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[0].Address)
@@ -409,7 +407,7 @@ func runSimnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("participant newV0Contractor error: %w", err)
 	}
 
-	if simnetTokenContractor, err = newV0TokenContractor(dex.Simnet, dexeth.Tokens[testTokenID], simnetAddr, ethClient.contractBackend()); err != nil {
+	if simnetTokenContractor, err = newV0TokenContractor(dex.Simnet, dexeth.Tokens[usdcID], simnetAddr, ethClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("newV0TokenContractor error: %w", err)
 	}
 
@@ -418,7 +416,7 @@ func runSimnet(m *testing.M) (int, error) {
 	// (*BoundContract).Call while calling (*ERC20Swap).TokenAddress.
 	time.Sleep(time.Second)
 
-	if participantTokenContractor, err = newV0TokenContractor(dex.Simnet, dexeth.Tokens[testTokenID], participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantTokenContractor, err = newV0TokenContractor(dex.Simnet, dexeth.Tokens[usdcID], participantAddr, participantEthClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("participant newV0TokenContractor error: %w", err)
 	}
 
@@ -481,8 +479,8 @@ func runSimnet(m *testing.M) (int, error) {
 }
 
 func runTestnet(m *testing.M) (int, error) {
-	testTokenID = usdcID
-	masterToken = dexeth.Tokens[testTokenID]
+	usdcID = usdcID
+	masterToken = dexeth.Tokens[usdcID]
 	tokenGases = &masterToken.NetTokens[dex.Testnet].SwapContracts[0].Gas
 	if testnetWalletSeed == "" || testnetParticipantWalletSeed == "" {
 		return 1, errors.New("testnet seeds not set")
@@ -812,18 +810,18 @@ func TestGas(t *testing.T) {
 }
 
 func TestTokenContract(t *testing.T) {
-	t.Run("testTokenSwap", func(t *testing.T) { testSwap(t, testTokenID) })
-	t.Run("testInitiateToken", func(t *testing.T) { testInitiate(t, testTokenID) })
-	t.Run("testRedeemToken", func(t *testing.T) { testRedeem(t, testTokenID) })
-	t.Run("testRefundToken", func(t *testing.T) { testRefund(t, testTokenID) })
+	t.Run("testTokenSwap", func(t *testing.T) { testSwap(t, usdcID) })
+	t.Run("testInitiateToken", func(t *testing.T) { testInitiate(t, usdcID) })
+	t.Run("testRedeemToken", func(t *testing.T) { testRedeem(t, usdcID) })
+	t.Run("testRefundToken", func(t *testing.T) { testRefund(t, usdcID) })
 }
 
 func TestTokenGas(t *testing.T) {
 	t.Run("testTransferGas", testTransferGas)
 	t.Run("testApproveGas", testApproveGas)
-	t.Run("testInitiateTokenGas", func(t *testing.T) { testInitiateGas(t, testTokenID) })
-	t.Run("testRedeemTokenGas", func(t *testing.T) { testRedeemGas(t, testTokenID) })
-	t.Run("testRefundTokenGas", func(t *testing.T) { testRefundGas(t, testTokenID) })
+	t.Run("testInitiateTokenGas", func(t *testing.T) { testInitiateGas(t, usdcID) })
+	t.Run("testRedeemTokenGas", func(t *testing.T) { testRedeemGas(t, usdcID) })
+	t.Run("testRefundTokenGas", func(t *testing.T) { testRefundGas(t, usdcID) })
 }
 
 func TestTokenAccess(t *testing.T) {
@@ -880,7 +878,7 @@ func testTokenBalance(t *testing.T) {
 func stringifyTokenBalance(t *testing.T, evmBal *big.Int) string {
 	t.Helper()
 	atomicBal := masterToken.EVMToAtomic(evmBal)
-	ui, err := asset.UnitInfo(testTokenID)
+	ui, err := asset.UnitInfo(usdcID)
 	if err != nil {
 		t.Fatalf("cannot get unit info: %v", err)
 	}

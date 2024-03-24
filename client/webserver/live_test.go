@@ -320,7 +320,7 @@ var dexAssets = map[uint32]*dex.Asset{
 	3:                  mkDexAsset("doge"),
 	145:                mkDexAsset("bch"),
 	60:                 mkDexAsset("eth"),
-	60000:              mkDexAsset("dextt.eth"),
+	60001:              mkDexAsset("usdc.eth"),
 }
 
 var tExchanges = map[string]*core.Exchange{
@@ -337,7 +337,7 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(3, 42):     mkMrkt("doge", "dcr"),
 			mkid(22, 42):    mkMrkt("mona", "dcr"),
 			mkid(28, 0):     mkMrkt("vtc", "btc"),
-			mkid(60000, 42): mkMrkt("dextt.eth", "dcr"),
+			mkid(60001, 42): mkMrkt("usdc.eth", "dcr"),
 		},
 		ConnectionStatus: comms.Connected,
 		RegFees: map[string]*core.FeeAsset{
@@ -371,8 +371,8 @@ var tExchanges = map[string]*core.Exchange{
 				Confs: 10,
 				Amt:   1e12,
 			},
-			"dextt.eth": {
-				ID:    60000,
+			"usdc.eth": {
+				ID:    60001,
 				Confs: 10,
 				Amt:   1e11,
 			},
@@ -589,7 +589,7 @@ func newTCore() *TCore {
 			28:    randomBalance(28),
 			60:    randomBalance(60),
 			145:   randomBalance(145),
-			60000: randomBalance(60000),
+			60001: randomBalance(60001),
 		},
 		noteFeed: make(chan core.Notification, 1),
 		fiatSources: map[string]bool{
@@ -710,7 +710,7 @@ func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) 
 	return nil, nil, nil
 }
 
-var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "dextt.eth"}
+var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "usdc.eth"}
 
 func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 	var spacing uint64 = 60 * 60 * 1000 / 2 // half an hour
@@ -1778,7 +1778,7 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 		28:    mkSupportedAsset("vtc", c.walletState(28)),
 		60:    mkSupportedAsset("eth", c.walletState(60)),
 		145:   mkSupportedAsset("bch", c.walletState(145)),
-		60000: mkSupportedAsset("dextt.eth", c.walletState(60000)),
+		60001: mkSupportedAsset("usdc.eth", c.walletState(60001)),
 	}
 }
 
@@ -2235,7 +2235,7 @@ func TestServer(t *testing.T) {
 	asset.Register(3, &TDriver{})                  // doge
 
 	tinfos = map[uint32]*asset.Token{
-		60000: asset.TokenInfo(60000),
+		60001: asset.TokenInfo(60001),
 	}
 
 	numBuys = 10

@@ -27,6 +27,11 @@ then
     echo "${TEST_TOKEN} does not exist" >&2
     exit 1
 fi
+if [ ! -f ${TEST_USDC} ]
+then
+    echo "${TEST_USDC} does not exist" >&2
+    exit 1
+fi
 
 mkdir temp
 

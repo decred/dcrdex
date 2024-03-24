@@ -57,7 +57,7 @@ func NetworkCompatibilityData(net dex.Network) (c eth.CompatibilityData, err err
 	var (
 		tTxHashFile    = filepath.Join(tDir, "test_tx_hash.txt")
 		tBlockHashFile = filepath.Join(tDir, "test_block10_hash.txt")
-		tContractFile  = filepath.Join(tDir, "test_token_contract_address.txt")
+		tContractFile  = filepath.Join(tDir, "test_usdc_contract_address.txt")
 	)
 	readIt := func(path string) string {
 		b, err := os.ReadFile(path)

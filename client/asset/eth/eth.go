@@ -68,8 +68,6 @@ func registerToken(tokenID uint32, desc string) {
 
 func init() {
 	asset.Register(BipID, &Driver{})
-	// Test token
-	registerToken(simnetTokenID, "A token wallet for the DEX test token. Used for testing DEX software.")
 	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.")
 }
 
@@ -107,8 +105,7 @@ const (
 )
 
 var (
-	simnetTokenID, _ = dex.BipSymbolID("dextt.eth")
-	usdcTokenID, _   = dex.BipSymbolID("usdc.eth")
+	usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker     = time.Second
 	peerCountTicker = 5 * time.Second
@@ -5430,7 +5427,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 
 	// Run the miner now, in case we need it for the approval client preload.
 	if net == dex.Simnet {
-		symbolParts := strings.Split(symbol, ".") // e.g. dextt.polygon, dextt.eth
+		symbolParts := strings.Split(symbol, ".") // e.g. usdc.polygon, usdc.eth
 		runSimnetMiner(ctx, symbolParts[len(symbolParts)-1], log)
 	}
 

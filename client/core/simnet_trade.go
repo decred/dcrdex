@@ -70,10 +70,10 @@ var (
 	ethAlphaIPCFile     = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
 	polygonAlphaIPCFile = filepath.Join(dextestDir, "polygon", "alpha", "bor", "bor.ipc")
 
-	tLockTimeTaker    = 30 * time.Second
-	tLockTimeMaker    = 1 * time.Minute
-	ethDexttID, _     = dex.BipSymbolID("dextt.eth")
-	polygonDexttID, _ = dex.BipSymbolID("dextt.polygon")
+	tLockTimeTaker   = 30 * time.Second
+	tLockTimeMaker   = 1 * time.Minute
+	ethUsdcID, _     = dex.BipSymbolID("usdc.eth")
+	polygonUsdcID, _ = dex.BipSymbolID("usdc.polygon")
 )
 
 type SimWalletType int
@@ -1577,7 +1577,7 @@ func newHarnessCtrl(assetID uint32) *harnessCtrl {
 			fundCmd: "./sendtoaddress",
 			fundStr: "%s_%d",
 		}
-	case ethDexttID, polygonDexttID:
+	case ethUsdcID, polygonUsdcID:
 		return &harnessCtrl{
 			dir:     filepath.Join(dextestDir, baseChainSymbol, "harness-ctl"),
 			fundCmd: "./sendTokens",
@@ -1610,10 +1610,10 @@ var cloneTypes = map[uint32]string{
 
 // accountBIPs is a map of account based assets. Used in fee estimation.
 var accountBIPs = map[uint32]bool{
-	eth.BipID:      true,
-	ethDexttID:     true, // dextt test token
-	polygon.BipID:  true,
-	polygonDexttID: true,
+	eth.BipID:     true,
+	ethUsdcID:     true,
+	polygon.BipID: true,
+	polygonUsdcID: true,
 }
 
 func dcrWallet(wt SimWalletType, node string) (*tWallet, error) {
@@ -1672,7 +1672,7 @@ func polygonWallet() (*tWallet, error) {
 	}, nil
 }
 
-func dexttWallet() (*tWallet, error) {
+func usdcWallet() (*tWallet, error) {
 	return &tWallet{
 		fund:       true,
 		walletType: "token",
@@ -1684,7 +1684,7 @@ func dexttWallet() (*tWallet, error) {
 	}, nil
 }
 
-func polyDexttWallet() (*tWallet, error) {
+func polyUsdcWallet() (*tWallet, error) {
 	return &tWallet{
 		fund:       true,
 		walletType: "token",
@@ -1815,12 +1815,12 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = btcWallet(wt, node)
 		case eth.BipID:
 			tw, err = ethWallet()
-		case ethDexttID:
-			tw, err = dexttWallet()
+		case ethUsdcID:
+			tw, err = usdcWallet()
 		case polygon.BipID:
 			tw, err = polygonWallet()
-		case polygonDexttID:
-			tw, err = polyDexttWallet()
+		case polygonUsdcID:
+			tw, err = polyUsdcWallet()
 		case ltc.BipID:
 			tw, err = ltcWallet(wt, node)
 		case bch.BipID:

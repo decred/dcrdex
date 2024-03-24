@@ -255,7 +255,6 @@ type Redemption struct {
 	SecretHash [32]byte
 }
 
-var testTokenID, _ = dex.BipSymbolID("dextt.eth")
 var usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
 
 // Gases lists the expected gas required for various DEX and wallet operations.

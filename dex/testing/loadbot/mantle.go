@@ -303,7 +303,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 	name := randomToken()
 	var rpcPort string
 	switch symbol {
-	case eth, dextt:
+	case eth, usdc:
 		// Nothing to do here for internal wallets.
 	case dcr:
 		cmdOut := <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "createnewaccount", name)
@@ -475,7 +475,7 @@ func send(symbol, node, addr string, val uint64) error {
 		// eth values are always handled as gwei, so multiply by 1e9
 		// here to convert to wei.
 		res = <-harnessCtl(ctx, symbol, "./sendtoaddress", addr, strconv.FormatFloat(float64(val)/1e9, 'f', 9, 64))
-	case dextt:
+	case usdc:
 		res = <-harnessCtl(ctx, symbol, "./sendTokens", addr, strconv.FormatFloat(float64(val)/1e9, 'f', 9, 64))
 	default:
 		return fmt.Errorf("send unknown symbol %q", symbol)
@@ -762,7 +762,7 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 				"rpcport":     port,
 			},
 		}
-	case eth, dextt:
+	case eth, usdc:
 		rpcProvider := alphaIPCFile
 		if node == beta {
 			rpcProvider = betaIPCFile
@@ -774,11 +774,11 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 				"providers": rpcProvider,
 			},
 		}
-		if symbol == dextt {
+		if symbol == usdc {
 			parentForm = form
 			form = &core.WalletForm{
 				Type:       "token",
-				AssetID:    dexttID,
+				AssetID:    usdcID,
 				ParentForm: form,
 			}
 		}
