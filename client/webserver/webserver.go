@@ -418,6 +418,11 @@ func New(cfg *Config) (*WebServer, error) {
 	mux.Use(s.securityMiddleware)
 	mux.Use(middleware.Recoverer)
 
+	// Compress responses if using tor.
+	if cfg.Tor {
+		mux.Use(middleware.Compress(9))
+	}
+
 	// HTTP profiler
 	if cfg.HttpProf {
 		profPath := "/debug/pprof"
