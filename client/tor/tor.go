@@ -21,9 +21,6 @@ import (
 	"github.com/jrick/logrotate/rotator"
 )
 
-//go:embed build/tor
-var torBinary []byte
-
 type HiddenService struct {
 	log     dex.Logger
 	exePath string
