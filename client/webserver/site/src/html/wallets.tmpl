@@ -57,7 +57,7 @@
             <div class="flex-stretch-column flex-md-row border rounded3 mb-3" id="walletDetails">
               <div class="flex-stretch-column col-sm-24 col-md-12 pt-3" id="balanceBreakdownBox">
                 <div class="px-2">
-                  <table id="balanceTable" class="w-100">
+                  <table id="balanceTable" class="nopadding w-100">
                     <tbody id="balanceDetailBox">
                       <tr id="balanceDetailRow">
                         <td data-tmpl="category" class="text-muted lh-1">
@@ -282,7 +282,7 @@
             <div id="txHistoryBox" class="flex-stretch-column border-bottom">
               <h4 class="m-3">[[[asset_name tx_history]]]</h4>
               <div id="txHistoryTableContainer" class="flex-stretch-column px-3 pb-3">
-                <table id="txHistoryTable" class="table table-hover border rounded3">
+                <table id="txHistoryTable" class="row-border border rounded3 mb-3">
                   <thead>
                     <tr>
                       <th>[[[Type]]]</th>
@@ -329,7 +329,7 @@
             <div id="marketsOverviewBox" class="border-bottom">
               <h4 class="m-3">[[[asset_name Markets]]]</h4>
               <div class="px-3">
-                <table class="table table-hover mb-3 border ounded3">
+                <table class="row-border row-hover mb-3 border rounded3">
                   <thead>
                     <tr>
                       <th>[[[Market]]]</th>
@@ -368,7 +368,7 @@
             <div id="orderActivityBox" class="d-flex flex-column w-100 invisible pb-3 border-bottom">
               <h4 class="m-3">[[[Recent asset_name Activity]]]</h4>
               <div id="orderActivity" class="flex-stretch-column px-3">
-                <table id="ordersTable" class="table border rounded3">
+                <table id="ordersTable" class="row-border border rounded3">
                   <thead>
                     <tr>
                       <th>[[[Trade]]]</th>
@@ -632,7 +632,7 @@
       <h3>
         [[[manage_peers]]]
       </h3>
-      <table id="peersTable" class="table mb-3">
+      <table id="peersTable" class="row-border mb-3">
         <thead>
           <tr>
             <th class="text-nowrap">[[[address]]]</th>
@@ -813,7 +813,7 @@
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-3 pb-3">
         <h3>[[[select_vsp_from_list]]]</h3>
-        <table id="vspPickerTable" class="table table-hover border rounded3 mb-3">
+        <table id="vspPickerTable" class="row-border row-hover rounded3 mb-3">
           <thead>
             <tr>
               <th>[[[URL]]]</th>
@@ -889,7 +889,7 @@
     <form id="ticketHistoryForm" class="flex-center flex-column align-items-stretch">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <h3>[[[Ticket History]]]</h3>
-      <table id="ticketHistoryTable" class="table border rounded3">
+      <table id="ticketHistoryTable" class="row-border rounded3">
         <thead>
           <tr>
             <th>[[[Age]]]</th>
@@ -992,7 +992,7 @@
       <div class="flex-center mb-3">
         <small><a target="_blank" id="txViewBlockExplorer"><span>View in block explorer</span><span class="mx-2 ico-open"></span></a></small>
       </div>
-      <table class="table table-borderless table-sm">
+      <table class="compact">
         <tr>
           <td class="text-muted">[[[Type]]]</td>
           <td><span id="txDetailsType"></span></td>

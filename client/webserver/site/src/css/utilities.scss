@@ -18,6 +18,14 @@
   align-items: stretch;
 }
 
+.flex-wrap {
+  flex-wrap: wrap;
+}
+
+.text-nowrap {
+  white-space: nowrap;
+}
+
 .position-relative {
   position: relative;
 }
@@ -186,4 +194,8 @@ div.clear {
 
 .user-select-all {
   user-select: all;
+}
+
+.text-danger {
+  color: var(--bs-danger);
 }

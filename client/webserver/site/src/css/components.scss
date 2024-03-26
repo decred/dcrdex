@@ -70,27 +70,99 @@ button {
 }
 
 // tables
-.table {
+table {
   color: var(--text-color);
   border-collapse: collapse;
   width: 100%;
 
+  .table-group-divider {
+    border-color: var(--border-color)
+  }
+  
   th,
   td {
     padding: 0.5rem;
   }
 
-  tr {
-    border: 1px solid var(--border-color);
+  &.row-border {
+    tbody {
+      border-bottom: 1px solid var(--border-color);
+
+      tr {
+        border-top: 1px solid var(--border-color);
+      }
+    }
   }
 
-  .table-group-divider {
-    border-color: var(--border-color)
+  &.cell-border {
+    th,
+    td {
+      border: 1px solid var(--border-color);
+    }
+  }
+
+  &.nopadding {
+    td {
+      padding: 0;
+    }
+  }
+
+  &.compact {
+    th,
+    td {
+      padding: 0.25rem;
+    }
+  }
+
+  &.row-hover {
+    tr:hover {
+      background-color: var(--body-bg-tertiary);
+    }
+  }
+
+  &.striped {
+    tr:nth-of-type(even) {
+      background-color: #7772;
+    }
   }
 }
 
-.table-bordered {
-  @include border;
+@include media-breakpoint-up(md) {
+  table#walletInfoTable {
+    width: auto;
+  }
+}
+
+table.reg-asset-markets {
+  @extend .stylish-overflow;
+
+  display: block;
+  max-height: 120px;
+  line-height: 1.15;
+  overflow-y: hidden;
+  margin-right: 8px;
+
+  &:hover {
+    overflow-y: auto;
+  }
+
+  tr {
+    border: none;
+  }
+
+  th {
+    font-weight: normal;
+    font-size: 13px;
+  }
+
+  td {
+    font-size: 14px;
+  }
+
+  th,
+  td {
+    padding: 1px 5px;
+  }
 }
 
 // form components

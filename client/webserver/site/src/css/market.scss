@@ -21,7 +21,7 @@ div[data-handler=markets] {
     @include border-top;
 
     height: 30px;
-    padding: 0 45px 0 10px;
+    padding: 0 40px 0 10px;
   }
 
   .orderbook {
@@ -223,9 +223,6 @@ div[data-handler=markets] {
 
   table.ordertable {
     color: var(--text-color-secondary);
-    border-collapse: collapse;
-    border: none;
-    width: 100%;
 
     td,
     th {
@@ -239,11 +236,6 @@ div[data-handler=markets] {
 
     td:last-child {
       min-width: 30px;
-    }
-
-    tbody > tr:hover,
-    tbody > tr.hover {
-      background-color: var(--body-bg-tertiary);
     }
 
     .ico-check {
@@ -560,11 +552,7 @@ div[data-handler=markets] {
     }
 
     table.fee-breakout {
-      margin: 5px 0;
-
       td {
-        @include border;
-
         text-align: center;
         padding: 2px 5px;
       }
@@ -836,10 +824,6 @@ div[data-handler=markets] {
     #leftMarketDock.stashed + #marketReopener {
       display: block;
     }
-  }
-
-  table.ordertable {
-    width: auto;
   }
 
   .ordertable-header {

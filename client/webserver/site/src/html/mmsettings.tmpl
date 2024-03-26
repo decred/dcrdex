@@ -42,7 +42,7 @@
           </select>
         </div>
         {{- /* STRATEGY DESCRIPTIONS */ -}}
-        <div class="mb-3 w-100 border-bottom form-text pb-3">
+        <div class="mb-3 w-100 border-bottom pb-3">
           <div id="percentPlusInfo" class="">
             [[[strategy_percent_plus]]]
           </div>
@@ -83,12 +83,12 @@
       </div>
 
       <div id="buyPlacementsBox" class="mb-3">
-        <div class="form-label">
+        <div class="d-flex align-items-center fs18 mt-3 demi">
           [[[buy_placements]]]
           <span class="ico-info fs12 ms-1" data-tooltip="[[[buy_placements_tooltip]]]"></span>
         </div>
         <div class="d-flex flex-column" id="buyPlacementsTableWrapper">
-          <table>
+          <table class="row-border border-top">
             <thead>
               <th scope="col">[[[priority]]]</th>
               <th scope="col">[[[Lots]]]</th>
@@ -138,12 +138,12 @@
       </div>
 
       <div id="sellPlacementsBox">
-        <label class="form-label">
+        <div class="d-flex align-items-center fs18 mt-3 demi">
           [[[sell_placements]]]
           <span class="ico-info fs12 ms-1" data-tooltip="[[[sell_placements_tooltip]]]"></span>
-        </label>
+        </div>
         <div class="d-flex flex-column" id="sellPlacementsTableWrapper">
-          <table>
+          <table class="row-border border-top">
             <thead>
               <th scope="col">[[[priority]]]</th>
               <th scope="col">[[[Lots]]]</th>
@@ -397,11 +397,11 @@
         [[[no_oracles]]]
       </div>
 
-      <table id="oraclesTable" class="mb-3 d-hide border-top">
+      <table id="oraclesTable" class="mb-4 d-hide row-border">
         <thead>
           <tr>
-            <td>[[[Oracles]]]</td>
-            <td colspan="2" class="text-end">avg: <span id="avgPrice"></span></td>
+            <th>[[[Oracles]]]</th>
+            <th colspan="2" class="text-end">avg: <span id="avgPrice"></span></th>
           </tr>
         </thead>
         <tbody id="oracles">
@@ -413,10 +413,10 @@
         </tbody>
       </table>
 
-      <table id="fiatRates" class="mb-3 d-hide border-top">
+      <table id="fiatRates" class="mb-3 d-hide row-border">
         <thead>
           <tr>
-            <td colspan="2">[[[fiat_rates]]]</td>
+            <th colspan="2">[[[fiat_rates]]]</th>
           </tr>
         </thead>
         <tbody>
@@ -558,7 +558,7 @@
         </div>
       </div>
 
-      <table id="marketSelectionTable">
+      <table id="marketSelectionTable" class="row-border">
         <thead>
           <tr>
             <th>Market</th>

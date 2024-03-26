@@ -275,17 +275,12 @@
   .walletspage {
     #walletInfo {
       @include border-left;
-
-      table#walletInfoTable {
-        width: auto;
-      }
     }
 
     #sendReceive {
       border-bottom: none;
     }
   }
-
 }
 
 #restoreWalletInfo,
