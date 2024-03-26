@@ -128,8 +128,6 @@
     justify-content: flex-start;
     align-items: stretch;
     
-    @include margin-bottom(3);
-
     .wtab {
       background-color: var(--body-bg-secondary);
       padding: 8px 20px;
@@ -245,9 +243,7 @@ button.form-button {
 
     h3 {
       text-align: center;
-
-      @include margin-bottom(3);
-
+      margin-bottom: 1rem;
       position: relative;
     }
   }
@@ -502,8 +498,6 @@ div[data-handler=init] {
 
   & > div {
     min-height: 55px;
-
-    @include margin-top(3);
   }
 
   & > div:not(.repeatable) {

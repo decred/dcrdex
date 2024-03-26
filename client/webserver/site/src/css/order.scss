@@ -6,26 +6,13 @@ div.order-datum {
   text-align: center;
   font-size: 15px;
 
-  @include border;
-  @include margin(1, 2, 1, 0);
-
   div:first-child {
-    @include padding(1, 3, 1, 3);
-    @include border-bottom;
-
     font-family: $demi-sans;
     background-color: var(--body-bg-tertiary);
-  }
-
-  div:last-child,
-  a:last-child {
-    @include padding(1, 3, 1, 3);
   }
 }
 
 div.match-header {
-  @include padding(2, 0, 2, 0);
-
   background-color: var(--body-bg-tertiary);
 }
 
@@ -35,9 +22,6 @@ div.match-card {
   align-items: stretch;
   font-size: 14px;
   
-  @include margin(0, 4, 2, 0);
-  @include border;
-
   .red {
     color: $danger;
   }

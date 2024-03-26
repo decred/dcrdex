@@ -1,16 +1,3 @@
 div.settings {
   min-width: 375px;
-
-  & > div {
-    @include padding(3, 0, 3, 0);
-    @include border-bottom;
-  }
-
-  & > div:first-child {
-    @include border-top;
-  }
-
-  div.form-check {
-    @include padding-left(4);
-  }
 }

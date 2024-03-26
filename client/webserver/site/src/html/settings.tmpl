@@ -6,16 +6,16 @@
   <div class="mw-425 flex-stretch-column mx-auto">
     <h1 class="text-center"><span class="ico-settings"></span></h1>
     <div class="settings">
-      <div class="form-check">
+      <div class="form-check ps-4 py-3 border-top border-bottom">
         <input class="form-check-input" type="checkbox" value="" id="darkMode">
         <label class="form-check-label" for="darkMode">
           [[[Dark Mode]]]
         </label>
       </div>
-      <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <div class="py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
       <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
       </div>
-      <div id="fiatRateSources" {{if not $authed}} class="d-hide"{{end}}>
+      <div id="fiatRateSources"  class="py-3 border-bottom {{if not $authed}}d-hide{{end}}">
       <div class="mb-1" data-tooltip="[[[fiat_exchange_rate_msg]]]">
         [[[fiat_exchange_rate_sources]]]:
         <span class="ico-info"></span>
@@ -27,7 +27,7 @@
       </div>
       {{end}}
       </div>
-      <div {{if not $authed}} class="d-hide"{{end}}>
+      <div class="py-3 border-bottom {{if not $authed}} d-hide{{end}}">
         <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
           <h5>[[[registered dexes]]]</h5>
           {{range $host, $xc := .Exchanges}}
@@ -43,17 +43,17 @@
           <button id="importAccount" class="ms-2">[[[Import Account]]]</button>
         </div>
       </div>
-      <div {{if not .IsInitialized}}class="d-hide"{{end}}>
+      <div class="py-3 border-bottom {{if not .IsInitialized}}d-hide{{end}}">
           <button id="changeAppPW" class="my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
           <button id="resetAppPW" class="my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
       </div>
-      <div class="form-check">
+      <div class="form-check ps-4 py-3 border-bottom">
         <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
         <label class="form-check-label" for="showPokes">
           [[[Show pop-up notifications]]]
         </label>
       </div>
-      <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <div class="py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
         <form id="browserNotificationsForm">
           <div class="form-check">
             <label class="form-check-label">
@@ -73,7 +73,7 @@
           </div>
         </form>
       </div>
-      <div class="mb-3 {{if not .UserInfo.Authed}}d-hide{{end}}">
+      <div class="mb-3 py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
         <p class="text-muted">[[[seed_implore_msg]]]</p>
         <button id="exportSeed" class="fs15">[[[View Application Seed]]]</button>
       </div>

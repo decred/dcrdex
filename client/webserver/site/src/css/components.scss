@@ -103,9 +103,8 @@ div.form-closer {
   cursor: pointer;
   line-height: 1;
   font-size: 1rem;
-
-  @include padding(3, 0, 3, 0);
-
+  padding-top: 1rem;
+  padding-bottom: 1rem;
   position: absolute;
   top: 0;
   right: 0;
@@ -135,8 +134,7 @@ input.form-control {
 
 select {
   font-family: inherit;
-
-  @include padding(1, 2, 1, 2);
+  padding: 0.75rem 1rem;
 }
 
 // Hide number arrows.

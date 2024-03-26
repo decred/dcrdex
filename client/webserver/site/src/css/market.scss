@@ -140,11 +140,11 @@ div[data-handler=markets] {
 
   .user-order {
     &:not(:last-child) {
-      border-bottom-style: none;
+      border-bottom-style: none !important;
     }
 
     &:last-child .order-details {
-      border-bottom-style: none;
+      border-bottom-style: none !important;
       padding-bottom: 0;
     }
 
@@ -189,9 +189,6 @@ div[data-handler=markets] {
     }
 
     .order-details {
-      @include border-top;
-      @include border-bottom;
-
       margin-bottom: 25px;
       padding: 0 10px 10px;
       display: grid;

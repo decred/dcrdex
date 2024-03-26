@@ -72,18 +72,18 @@
     </div>
     <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="errMsg"></div>
     <div class="settings">
-      <div{{if .Exchange.ViewOnly}} class="d-hide"{{end}}>
+      <div class="border-top py-2 {{if .Exchange.ViewOnly}}d-hide{{end}}">
         <button id="exportDexBtn">[[[Export Account]]]</button>
       </div>
-      <div>
+      <div class="border-top py-2">
         <button id="disableAcctBtn">[[[Disable Account]]]</button>
       </div>
-      <div>
+      <div class="border-top py-2">
         <input type="file" class="form-control select d-none" id="certFileInput">
         <button id="updateCertBtn">[[[Update TLS Certificate]]]</button>
         <span class="mx-2 d-hide text-success" id="updateCertMsg">[[[successful_cert_update]]]</span>
       </div>
-      <div>
+      <div class="border-top py-2 border-bottom">
         <button id="updateHostBtn">[[[update dex host]]]</button>
       </div>
     </div>

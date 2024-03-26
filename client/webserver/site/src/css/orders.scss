@@ -12,19 +12,10 @@
 }
 
 .filter-opts {
-  @include margin-bottom(3);
-
   position: relative;
   max-width: 250px;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.apply-bttn {
-  @include margin-top(2);
-  @include margin-right(2);
-
-  text-align: right;
 }
 
 #ordersTable {

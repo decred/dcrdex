@@ -25,7 +25,7 @@
     <div class="flex-grow-1 position-relative">
       <div class="scrollsmall fill-abs d-flex flex-wrap align-items-stretch">
         {{- /* WALLET DETAILS */ -}}
-        <div class="position-relative col-24 col-xl-12 col-xxl-9 flex-stretch-column invisible" id="walletDetailsBox">
+        <div class="position-relative col-24 col-xl-12 col-xxl-9 flex-stretch-column invisible border-bottom" id="walletDetailsBox">
           <div class="column flex-stretch-column px-3">
             <div class="d-flex justify-content-between align-items-center py-3">
               <div class="flex-center lh1">
@@ -279,8 +279,8 @@
         <div id="secondColumn" class="position-relative col-24 col-xl-12 col-xxl-15 flex-stretch-column stylish-overflow-lg border-start">
           <div class="column flex-stretch-column">
             {{- /* TRANSACTION HISTORY */ -}}
-            <div id="txHistoryBox" class="flex-stretch-column">
-              <h4>[[[asset_name tx_history]]]</h4>
+            <div id="txHistoryBox" class="flex-stretch-column border-bottom">
+              <h4 class="m-3">[[[asset_name tx_history]]]</h4>
               <div id="txHistoryTableContainer" class="flex-stretch-column px-3 pb-3">
                 <table id="txHistoryTable" class="table table-hover border rounded3">
                   <thead>
@@ -326,8 +326,8 @@
             </div>
 
             {{/* MARKETS */}}
-            <div id="marketsOverviewBox">
-              <h4>[[[asset_name Markets]]]</h4>
+            <div id="marketsOverviewBox" class="border-bottom">
+              <h4 class="m-3">[[[asset_name Markets]]]</h4>
               <div class="px-3">
                 <table class="table table-hover mb-3 border ounded3">
                   <thead>
@@ -365,8 +365,8 @@
             </div>{{/* END MARKETS */}}
 
             {{- /* RECENT ORDERS */ -}}
-            <div id="orderActivityBox" class="d-flex flex-column w-100 invisible pb-3">
-              <h4>[[[Recent asset_name Activity]]]</h4>
+            <div id="orderActivityBox" class="d-flex flex-column w-100 invisible pb-3 border-bottom">
+              <h4 class="m-3">[[[Recent asset_name Activity]]]</h4>
               <div id="orderActivity" class="flex-stretch-column px-3">
                 <table id="ordersTable" class="table border rounded3">
                   <thead>
@@ -402,7 +402,7 @@
               </div>
             </div>
 
-            <div id="txHistoryNotAvailable" class="text-muted p-3 text-center">
+            <div id="txHistoryNotAvailable" class="text-muted p-3 text-center border-bottom">
               Transaction history not available for this wallet
             </div>
           </div>

@@ -104,16 +104,6 @@
     }
   }
 
-  #secondColumn {
-    & > .column > div {
-      @include border-bottom;
-    }
-
-    & > .column h4 {
-      @include margin(3, 3, 3, 3);
-    }
-  }
-
   #earlierTxs, #txViewBlockExplorer {
     text-decoration: underline;
     cursor: pointer;
@@ -125,8 +115,6 @@
   }
 
   #walletDetailsBox {
-    @include border-bottom;
-
     // Asset name and balance sizes for mobile. Redefined for > sm below.
     #assetLogo {
       width: 30px;
@@ -208,7 +196,7 @@
 
   .walletspage {
     #walletDetailsBox {
-      border-bottom: none;
+      border-bottom: none !important;
     }
 
     #mixerConfigForm {
@@ -228,8 +216,6 @@
 @include media-breakpoint-up(sm) {
   .walletspage {
     #walletDetailsBox {
-      @include border-bottom;
-
       #assetLogo {
         width: 40px;
         height: 40px;

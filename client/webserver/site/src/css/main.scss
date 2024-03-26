@@ -27,17 +27,11 @@ header.maintop {
   justify-content: space-between;
   align-items: center;
   z-index: 100;
-  
-  @include border-bottom;
-
   background-color: var(--body-bg-secondary);
 }
 
 a.logo-icon {
   display: block;
-
-  @include margin(0, 2, 0, 2);
-
   background-size: cover;
   cursor: pointer;
   height: 40px;
@@ -56,15 +50,14 @@ div.mainlinks {
   &>div,
   &>a {
     color: var(--text-color-secondary);
-
-    @include padding(1, 2, 1, 2);
+    padding: 0.5rem 0.75rem;
   }
 }
 
 @include media-breakpoint-up(md) {
   div.mainlinks>div,
   div.mainlinks>a {
-    @include padding(2, 3, 2, 3);
+    padding: 0.75rem 1rem;
   }
 }
 
