@@ -60,6 +60,7 @@ const (
 	methodGetNetworkInfo     = "getnetworkinfo"
 	methodGetBlockchainInfo  = "getblockchaininfo"
 	methodFundRawTransaction = "fundrawtransaction"
+	methodListSinceBlock     = "listsinceblock"
 )
 
 // IsTxNotFoundErr will return true if the error indicates that the requested
@@ -638,6 +639,16 @@ func (wc *rpcClient) listDescriptors(private bool) (*listDescriptorsResult, erro
 	return descriptors, wc.call(methodListDescriptors, anylist{private}, descriptors)
 }
 
+func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error) {
+	blockHash, err := wc.getBlockHash(int64(blockHeight))
+	if err != nil {
+		return nil, fmt.Errorf("getBlockHash error: %w", err)
+	}
+
+	result := new(listTransactionsResult)
+	return result.Transactions, wc.call(methodListSinceBlock, anylist{blockHash.String()}, result)
+}
+
 // privKeyForAddress retrieves the private key associated with the specified
 // address.
 func (wc *rpcClient) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
@@ -908,6 +919,21 @@ func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	wi := new(GetWalletInfoResult)
 	return wi, wc.call(methodGetWalletInfo, nil, wi)
+}
+
+// fingerprint returns an identifier for this wallet. Only HD wallets will have
+// an identifier. Descriptor wallets will not.
+func (wc *rpcClient) fingerprint() (string, error) {
+	walletInfo, err := wc.GetWalletInfo()
+	if err != nil {
+		return "", err
+	}
+
+	if walletInfo.HdSeedID == "" {
+		return "", fmt.Errorf("fingerprint not availble")
+	}
+
+	return walletInfo.HdSeedID, nil
 }
 
 // GetAddressInfo gets information about the given address by calling

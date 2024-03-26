@@ -374,6 +374,10 @@ func (w *tDcrWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight 
 	return nil, nil
 }
 
+func (w *tDcrWallet) AddressAtIdx(ctx context.Context, account, branch, childIdx uint32) (stdaddr.Address, error) {
+	return nil, nil
+}
+
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 	dcrw := &tDcrWallet{
 		blockHeader:    make(map[chainhash.Hash]*wire.BlockHeader),
