@@ -73,6 +73,9 @@
           </div>
         </form>
       </div>
+      <div {{if not .IsInitialized}}class="d-hide"{{end}}>
+        <button id="companionAppBtn" class="bg2 selected my-1 {{if not $authed}} d-hide{{end}}">Pair companion app</button>
+      </div>
       <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
         [[[seed_implore_msg]]]<br>
         <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>
@@ -111,6 +114,11 @@
     {{- /* CHANGE APP PASSWORD */ -}}
     <form class="d-hide" id="changeAppPWForm">
       {{template "changeAppPWForm"}}
+    </form>
+
+    {{- /* COMPANION APP PAIRING */ -}}
+    <form class="d-hide" id="companionAppForm">
+      {{template "companionAppForm"}}
     </form>
 
     {{- /* RESET APP PASSWORD */ -}}

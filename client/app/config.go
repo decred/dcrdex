@@ -116,6 +116,7 @@ type WebConfig struct {
 	NoEmbedSite  bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
 	HTTPProfile  bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
 	Experimental bool   `long:"experimental" description:"Enable experimental features"`
+	Tor          bool   `long:"tor" description:"Enable tor hidden service"`
 }
 
 // LogConfig encapsulates the logging-related settings.
@@ -177,6 +178,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 	}
 
 	return &webserver.Config{
+		DataDir:       filepath.Join(cfg.AppData, "srv"),
 		Core:          c,
 		MarketMaker:   mm,
 		Addr:          cfg.WebAddr,
@@ -189,6 +191,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		HttpProf:      cfg.HTTPProfile,
 		Language:      cfg.Language,
 		Experimental:  cfg.Experimental,
+		Tor:           cfg.Tor,
 	}
 }
 
