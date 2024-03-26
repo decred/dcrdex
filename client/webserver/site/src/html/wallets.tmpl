@@ -202,12 +202,12 @@
                 </div>
                 {{- /* PURCHASE TICKETS */ -}}
                 <div id="purchaseTicketsBox" class="w-100 d-flex align-items-stretch justify-content-stretch border-top p-2">
-                  <div id="purchaseTicketsBttn" class="feature flex-grow-1 me-2">
+                  <button id="purchaseTicketsBttn" class="feature flex-grow-1 me-2">
                     <span><span class="ico-ticket me-1"></span> [[[Purchase Tickets]]]</span>
-                  </div>
-                  <div id="ticketHistory" class="flex-grow-1 ">
+                  </button>
+                  <button id="ticketHistory" class="flex-grow-1 ">
                     <span><span class="ico-textfile me-1"></span> [[[Tickets]]]</span>
-                  </div>
+                  </button>
                 </div>
               </div>
               <div id="ticketPriceBox" class="flex-stretch-column border-start">
@@ -1083,8 +1083,8 @@
         </div>
       </div>
       <div class="d-flex justify-content-between w-100">
-        <div id="mixerDisable" class="danger me-4">[[[Disable Privacy]]]</div>
-        <div id="mixConfigSubmit" class="go">[[[Submit]]]</div>
+        <button id="mixerDisable" type="button" class="danger me-4">[[[Disable Privacy]]]</button>
+        <button id="mixConfigSubmit" type="button" class="go ms-auto">[[[Submit]]]</button>
       </div>
       <div id="mixConfigErr" class="pt-3 flex-center text-danger d-hide"></div>
     </form>
@@ -1119,8 +1119,8 @@
         use until privacy is turned back on.
       </div>
       <div class="d-flex justify-content-between mt-4">
-        <button id="mixingOffNo">Nevermind</button>
-        <button id="mixingOffGo" class="danger">Turn it off</button>
+        <button id="mixingOffNo" type="button">Nevermind</button>
+        <button id="mixingOffGo" type="button" class="danger">Turn it off</button>
       </div>
     </form>
   </div>
