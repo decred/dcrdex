@@ -146,7 +146,7 @@
   </div>
 </h3>
 <img class="mb-4" id="qrcode" />
-<div class="mono deposit-address mb-4">
+<div class="mono deposit-address border mb-4">
   <span id="depositAddress" class="user-select-all"></span>
   <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18"></span>
   <span id="copyAlert" class="d-hide">[[[copied]]]</span>
@@ -279,7 +279,7 @@
   <div data-tmpl="assetSelection">
     <h5 class="text-center">[[[Select your bond asset]]]</h5>
     <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2 mb-2">[[[what_s_a_bond]]]</div>
-    <table class="compact cell-border mb-3">
+    <table class="cell-border mb-3">
       <thead>
         <tr class="fs16">
           <th>[[[Asset]]]</th>
@@ -331,7 +331,7 @@
       </tbody>
     </table>
     <h5 class="text-center">[[[Other Trading Limits]]]</h5>
-    <table class="cell-border compact">
+    <table class="cell-border">
       <tbody data-tmpl="otherAssets">
       </tbody>
     </table>
@@ -661,7 +661,7 @@
     </div>
     <hr class="dashed w-100 mb-3">
     <div class="form-label">[[[Your Deposit Address]]]</div>
-    <div class="mono deposit-address user-select-all" data-tmpl="depoAddr"></div>
+    <div class="mono deposit-address border user-select-all" data-tmpl="depoAddr"></div>
     <span data-tmpl="sendEnough">[[[Send enough for bonds]]]</span> {{- /* generic message if the fee buffer is unknown */}}
   </div>
 </div>

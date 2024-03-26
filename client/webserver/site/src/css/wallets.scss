@@ -91,6 +91,8 @@
   }
 
   #walletInfo {
+    border-left: none;
+
     table#walletInfoTable {
       td {
         padding: 2px 5px 2px 0;
@@ -273,10 +275,6 @@
 
 @include media-breakpoint-up(md) {
   .walletspage {
-    #walletInfo {
-      @include border-left;
-    }
-
     #sendReceive {
       border-bottom: none;
     }

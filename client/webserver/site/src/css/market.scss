@@ -42,8 +42,6 @@ div[data-handler=markets] {
   }
 
   .order-panel {
-    @include border;
-
     min-width: 375px;
     width: 90%;
 
@@ -388,12 +386,9 @@ div[data-handler=markets] {
 
   #durBttnBox {
     .candle-dur-bttn {
-      @include border;
-
       background-color: var(--body-bg);
       padding: 2px 4px;
       font-size: 14px;
-      border-radius: 3px;
       line-height: 1;
       margin: 0 2px;
 
@@ -561,9 +556,6 @@ div[data-handler=markets] {
 
 
   #marketReopener {
-    @include border-right;
-    @include border-bottom;
-
     display: none;
     padding: 10px 0;
     position: absolute;
@@ -608,8 +600,6 @@ div[data-handler=markets] {
   }
 
   .twentyfour {
-    @include border-left;
-
     .data-point {
       margin-left: 0;
 
@@ -619,8 +609,6 @@ div[data-handler=markets] {
 
       span.label {
         width: 100%;
-        
-        @include border-bottom;
       }
 
       &:first-child > span.label {

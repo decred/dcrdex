@@ -137,12 +137,6 @@
     }
   }
 
-  .bordertop {
-    @include border-top;
-
-    border-radius: 0 10px 0 0;
-  }
-
   .one-bttn {
     display: inline-block;
     font-size: 22px;
@@ -320,8 +314,6 @@ a[data-tmpl=walletCfgGuide] {
 .deposit-address {
   font-size: 15px;
   padding: 5px 10px;
-
-  @include border;
 }
 
 
