@@ -84,7 +84,7 @@ case $1 in
     ./simnet-trade-tests --quote1node trading1 --quote2node trading2 --quote dcr --base polygon --regasset dcr ${@:2}
     ;;
 
-  polyusdcdcr)
+  dcrusdcpolygon)
     ./simnet-trade-tests --quote1node trading1 --quote2node trading2 --base usdc.polygon --quote dcr --regasset dcr  ${@:2}
     ;;
 
@@ -118,7 +118,7 @@ dcrfiroelectrum - Decred RPC wallet and Firo Electrum wallet on DCR-FIRO market
 zecbtc - RPC wallets on ZEC-BTC market
 dcrusdc - Decred RPC wallet and Ethereum wallet with usdc.eth test token on market DCR-USDC.ETH
 polygondcr - Decred RPC wallet and Polygon RPC wallet on POLYGON-DCR market
-polyusdcdcr - Decred RPC wallet and Polygon wallet with usdc.polygon test token on market USDC.POLYGON-DCR
+dcrusdcpolygon - Decred RPC wallet and Polygon wallet with usdc.polygon test token on market DCR-USDC.POLYGON
 zclbtc - Zclassic RPC wallet and Bitcoin RPC wallet on ZCL-BTC
 
 ---------------------

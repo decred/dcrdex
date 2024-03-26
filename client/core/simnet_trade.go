@@ -1580,7 +1580,7 @@ func newHarnessCtrl(assetID uint32) *harnessCtrl {
 	case ethUsdcID, polygonUsdcID:
 		return &harnessCtrl{
 			dir:     filepath.Join(dextestDir, baseChainSymbol, "harness-ctl"),
-			fundCmd: "./sendTokens",
+			fundCmd: "./sendUSDC",
 			fundStr: "%s_%d",
 		}
 	}

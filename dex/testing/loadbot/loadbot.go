@@ -53,6 +53,7 @@ const (
 	dash             = "dash"
 	dcr              = "dcr"
 	eth              = "eth"
+	polygon          = "polygon"
 	firo             = "firo"
 	ltc              = "ltc"
 	doge             = "doge"
@@ -61,6 +62,7 @@ const (
 	zec              = "zec"
 	zcl              = "zcl"
 	usdc             = "usdc.eth"
+	usdcp            = "usdc.polygon"
 	maxOrderLots     = 10
 	ethFeeRate       = 200 // gwei
 	// missedCancelErrStr is part of an error found in dcrdex/server/market/orderrouter.go
@@ -74,29 +76,29 @@ const (
 )
 
 var (
-	dcrID, _    = dex.BipSymbolID(dcr)
-	btcID, _    = dex.BipSymbolID(btc)
-	ethID, _    = dex.BipSymbolID(eth)
-	usdcID, _   = dex.BipSymbolID(usdc)
-	ltcID, _    = dex.BipSymbolID(ltc)
-	dashID, _   = dex.BipSymbolID(dash)
-	dogeID, _   = dex.BipSymbolID(doge)
-	dgbID, _    = dex.BipSymbolID(dgb)
-	firoID, _   = dex.BipSymbolID(firo)
-	bchID, _    = dex.BipSymbolID(bch)
-	zecID, _    = dex.BipSymbolID(zec)
-	zclID, _    = dex.BipSymbolID(zcl)
-	loggerMaker *dex.LoggerMaker
-	hostAddr    = "127.0.0.1:17273"
-	pass        = []byte("abc")
-	log         dex.Logger
-	unbip       = dex.BipIDSymbol
+	dcrID, _     = dex.BipSymbolID(dcr)
+	btcID, _     = dex.BipSymbolID(btc)
+	ethID, _     = dex.BipSymbolID(eth)
+	usdcID, _    = dex.BipSymbolID(usdc)
+	polygonID, _ = dex.BipSymbolID(polygon)
+	usdcpID, _   = dex.BipSymbolID(usdcp)
+	ltcID, _     = dex.BipSymbolID(ltc)
+	dashID, _    = dex.BipSymbolID(dash)
+	dogeID, _    = dex.BipSymbolID(doge)
+	dgbID, _     = dex.BipSymbolID(dgb)
+	firoID, _    = dex.BipSymbolID(firo)
+	bchID, _     = dex.BipSymbolID(bch)
+	zecID, _     = dex.BipSymbolID(zec)
+	zclID, _     = dex.BipSymbolID(zcl)
+	loggerMaker  *dex.LoggerMaker
+	hostAddr     = "127.0.0.1:17273"
+	pass         = []byte("abc")
+	log          dex.Logger
+	unbip        = dex.BipIDSymbol
 
-	usr, _       = user.Current()
-	dextestDir   = filepath.Join(usr.HomeDir, "dextest")
-	botDir       = filepath.Join(dextestDir, fmt.Sprintf("loadbot_%d", time.Now().Unix()))
-	alphaIPCFile = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
-	betaIPCFile  = filepath.Join(dextestDir, "eth", "beta", "node", "geth.ipc")
+	usr, _     = user.Current()
+	dextestDir = filepath.Join(usr.HomeDir, "dextest")
+	botDir     = filepath.Join(dextestDir, fmt.Sprintf("loadbot_%d", time.Now().Unix()))
 
 	ctx, quit = context.WithCancel(context.Background())
 
@@ -176,6 +178,8 @@ func rpcAddr(symbol, node string) string {
 		key = "rpcport"
 	case eth, usdc:
 		key = "ListenAddr"
+	case polygon, usdcp:
+		return "" // using IPC files
 	}
 
 	if symbol == baseSymbol {
@@ -243,6 +247,8 @@ func harnessSymbol(symbol string) string {
 	switch symbol {
 	case usdc:
 		return eth
+	case usdcp:
+		return polygon
 	}
 	return symbol
 }
@@ -509,7 +515,7 @@ func run() error {
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
-		case eth, usdc:
+		case eth, usdc, polygon, usdcp:
 			args = []string{"attach", `--exec eth.accounts[1]`}
 		default:
 			return "", fmt.Errorf("getAddress: unknown symbol %q", symbol)
@@ -543,7 +549,7 @@ func run() error {
 			<-harnessCtl(ctx, dcr, "./alpha", "walletpassphrase", "abc", "0")
 			<-harnessCtl(ctx, dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
 			<-harnessCtl(ctx, dcr, "./beta", "unlockaccount", "default", "abc")
-		case eth, zec, zcl, usdc:
+		case eth, zec, zcl, usdc, polygon, usdcp:
 			// eth unlocking for send, so no need to here. Mining
 			// accounts are always unlocked. zec is unlocked already.
 		default:
@@ -645,6 +651,7 @@ func run() error {
 				oldPort := pair.cfg["ListenAddr"]
 				walletAddr = fmt.Sprintf("127.0.0.1%s", oldPort)
 				pair.cfg["ListenAddr"] = fmt.Sprintf(":%s", port)
+			case polygonID, usdcpID:
 			}
 			for _, toxic := range toxics {
 				name := fmt.Sprintf("%s_%d_%s", toxic.Name, pair.assetID, port)
@@ -725,6 +732,8 @@ func loadNodeConfig(symbol, node string) map[string]string {
 	switch symbol {
 	case eth, usdc:
 		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, "node", "eth.conf")
+	case polygon, usdcp:
+		return map[string]string{}
 	default:
 		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, node+".conf")
 	}

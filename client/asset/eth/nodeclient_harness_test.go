@@ -448,8 +448,8 @@ func runSimnet(m *testing.M) (int, error) {
 	}{
 		{"./sendtoaddress", simnetAddr.String(), "10"},
 		{"./sendtoaddress", participantAddr.String(), "10"},
-		{"./sendTokens", simnetAddr.String(), "10"},
-		{"./sendTokens", participantAddr.String(), "10"},
+		{"./sendUSDC", simnetAddr.String(), "10"},
+		{"./sendUSDC", participantAddr.String(), "10"},
 	} {
 		if err := send(s.exe, s.addr, s.amt); err != nil {
 			return 1, err
