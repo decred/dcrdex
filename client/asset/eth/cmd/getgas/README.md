@@ -52,5 +52,5 @@ The credentials file should have the JSON format in the example below. The seed 
 **example usage**
 ```
 go build -tags lgpl
-./getgas --simnet --n 3 --token dextt.eth
+./getgas --simnet --n 3 --token usdc.eth
 ```

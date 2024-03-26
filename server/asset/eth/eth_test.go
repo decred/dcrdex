@@ -186,7 +186,7 @@ func TestMain(m *testing.M) {
 	tCtx, shutdown = context.WithCancel(context.Background())
 	doIt := func() int {
 		defer shutdown()
-		dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Address = common.BytesToAddress(encode.RandomBytes(20))
+		dexeth.Tokens[usdcID].NetTokens[dex.Simnet].SwapContracts[0].Address = common.BytesToAddress(encode.RandomBytes(20))
 		return m.Run()
 	}
 	os.Exit(doIt())
@@ -666,7 +666,7 @@ func TestTxData(t *testing.T) {
 
 func TestValidateContract(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testValidateContract(t, BipID) })
-	t.Run("token", func(t *testing.T) { testValidateContract(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testValidateContract(t, usdcID) })
 }
 
 func testValidateContract(t *testing.T, assetID uint32) {
@@ -702,7 +702,7 @@ func testValidateContract(t *testing.T, assetID uint32) {
 			cv = &TokenBackend{
 				AssetBackend: eth,
 				VersionedToken: &VersionedToken{
-					Token: dexeth.Tokens[testTokenID],
+					Token: dexeth.Tokens[usdcID],
 					Ver:   0,
 				},
 			}

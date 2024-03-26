@@ -31,7 +31,7 @@ var (
 
 	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
 	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
-	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_token_contract_address.txt")
+	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_usdc_contract_address.txt")
 	deltaAddress       = "d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
 	gammaAddress       = "41293c2032bac60aa747374e966f79f575d42379"
 	ethClient          *rpcclient
@@ -61,7 +61,7 @@ func TestMain(m *testing.M) {
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
-		netToken := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
+		netToken := dexeth.Tokens[usdcID].NetTokens[dex.Simnet]
 		netToken.Address = getContractAddrFromFile(tokenErc20AddrFile)
 		netToken.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapAddrFile)
 
@@ -69,7 +69,7 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("Connect error: %w", err)
 		}
 
-		if err := ethClient.loadToken(ctx, testTokenID, registeredTokens[testTokenID]); err != nil {
+		if err := ethClient.loadToken(ctx, usdcID, registeredTokens[usdcID]); err != nil {
 			return 1, fmt.Errorf("loadToken error: %w", err)
 		}
 
@@ -131,7 +131,7 @@ func TestTransaction(t *testing.T) {
 
 func TestAccountBalance(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testAccountBalance(t, BipID) })
-	t.Run("token", func(t *testing.T) { testAccountBalance(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testAccountBalance(t, usdcID) })
 }
 
 func testAccountBalance(t *testing.T, assetID uint32) {
@@ -166,7 +166,7 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 		}
 	}
 
-	if assetID == testTokenID {
+	if assetID == usdcID {
 		diff := new(big.Int).Sub(balBefore, balAfter)
 		if diff.Cmp(dexeth.GweiToWei(vGwei)) != 0 {
 			t.Fatalf("account balance changed by %d. expected > %d", dexeth.WeiToGwei(diff), uint64(vGwei))

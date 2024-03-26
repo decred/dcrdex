@@ -13,6 +13,7 @@ contract TestToken {
 
     string private _name;
     string private _symbol;
+    uint8 private _decimals;
 
     /**
      * @dev Sets the values for {name} and {symbol}.
@@ -23,9 +24,11 @@ contract TestToken {
      * All two of these values are immutable: they can only be set once during
      * construction.
      */
-    constructor() {
+    constructor(uint8 dec) {
         _name = "TestToken";
         _symbol = "TST";
+        _decimals = dec;
+
         _totalSupply = 44000000000000000000000;
         _balances[0x18D65FB8d60c1199bb1Ad381bE47aA692b482605] = 11000000000000000000000; // alpha
         _balances[0x4F8eF3892B65ED7fc356fF473a2eF2aE5EC27A06] = 11000000000000000000000; // beta
@@ -61,7 +64,7 @@ contract TestToken {
      * {IERC20-balanceOf} and {IERC20-transfer}.
      */
     function decimals() public view virtual returns (uint8) {
-        return 18;
+        return _decimals;
     }
 
     /**

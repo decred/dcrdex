@@ -59,10 +59,10 @@ if [ $BCH_ON -eq 0 ]; then
 fi
 
 if [ $ETH_ON -eq 0 ]; then
-	echo configuring Eth and dextt.eth wallets
+	echo configuring Eth and usdc.eth wallets
 	# Connecting to the simnet beta node over WebSocket.
 	./dexcctl -p abc -p "" --simnet newwallet 60 rpc "" "{\"providers\":\"ws://localhost:38559\"}"
-	./dexcctl -p abc -p "" --simnet newwallet 60000 rpc
+	./dexcctl -p abc -p "" --simnet newwallet 60001 rpc
 fi
 
 if [ $DOGE_ON -eq 0 ]; then

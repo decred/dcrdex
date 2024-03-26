@@ -40,7 +40,7 @@ func TestTxDB(t *testing.T) {
 			AdditionalData: map[string]string{
 				"Nonce": "1",
 			},
-			TokenID:   &simnetTokenID,
+			TokenID:   &usdcTokenID,
 			Confirmed: true,
 		},
 	}
@@ -216,7 +216,7 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, nil, false, &simnetTokenID)
+	txs, err = txHistoryStore.getTxs(0, nil, false, &usdcTokenID)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}

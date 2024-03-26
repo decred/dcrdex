@@ -69,81 +69,6 @@ type SwapContract struct {
 }
 
 var Tokens = map[uint32]*Token{
-	// testTokenID = 'dextt.eth' is the ID used for the test token from
-	// dex/networks/erc20/contracts/TestToken.sol that is deployed on the simnet
-	// harness, and possibly other networks too if needed for testing.
-	testTokenID: {
-		Token: &dex.Token{
-			ParentID: EthBipID,
-			Name:     "DCRDEXTestToken",
-			UnitInfo: dex.UnitInfo{
-				AtomicUnit: "Dextoshi",
-				Conventional: dex.Denomination{
-					Unit:             "DEXTT",
-					ConversionFactor: GweiFactor,
-				},
-			},
-		},
-		NetTokens: map[dex.Network]*NetToken{
-			dex.Mainnet: { // no dextt on mainnet
-				Address:       common.Address{},
-				SwapContracts: map[uint32]*SwapContract{},
-			},
-			dex.Testnet: { // no dextt on goerli
-				Address:       common.Address{},
-				SwapContracts: map[uint32]*SwapContract{},
-			},
-			dex.Simnet: {
-				// ERC20 token contract address. The simnet harness writes this
-				// address to file. Live tests must populate this field.
-				Address: common.Address{},
-				SwapContracts: map[uint32]*SwapContract{
-					0: {
-						// Swap contract address. The simnet harness writes this
-						// address to file. Live tests must populate this field.
-						Address: common.Address{},
-						Gas: Gases{
-							// Results from client's GetGasEstimates.
-							//
-							// First swap used 171756 gas
-							//   4 additional swaps averaged 112607 gas each
-							//   [171756 284366 396976 509586 622184]
-							// First redeem used 63214 gas
-							//   4 additional redeems averaged 31641 gas each
-							//   [63214 94858 126502 158135 189779]
-							// Average of 5 refunds: 48127
-							//   [48127 48127 48127 48127 48127]
-							//
-							// Approve is the gas used to call the approve
-							// method of the contract. For Approve transactions,
-							// the very first approval for an account-spender
-							// pair takes more than subsequent approvals. The
-							// results are repeated for a different account's
-							// first approvals on the same contract, so it's not
-							// just the global first.
-							// Average of 5 approvals: 27365
-							//   [44465 27365 27365 27365 27365]
-							//
-							// The first transfer to an address the contract has
-							// not seen before will insert a new key into the
-							// contract's token map. The amount of extra gas
-							// this consumes seems to depend on the size of the
-							// map and is not noticeable on simnet.
-							// Average of 5 transfers: 32540
-							//   [32540 32540 32540 32540 32540]
-							Swap:      174_000,
-							SwapAdd:   115_000,
-							Redeem:    70_000,
-							RedeemAdd: 33_000,
-							Refund:    50_000,
-							Approve:   46_000,
-							Transfer:  35_000,
-						},
-					},
-				},
-			},
-		},
-	},
 	usdcTokenID: {
 		EVMFactor: new(int64),
 		Token: &dex.Token{
@@ -226,9 +151,21 @@ var Tokens = map[uint32]*Token{
 					},
 				},
 			},
-			dex.Simnet: { // no usdc on simnet, dextt instead
-				Address:       common.Address{},
-				SwapContracts: map[uint32]*SwapContract{},
+			dex.Simnet: {
+				Address: common.Address{},
+				SwapContracts: map[uint32]*SwapContract{
+					0: {
+						Address: common.Address{},
+						Gas: Gases{
+							Swap:      242_000,
+							SwapAdd:   146_400,
+							Redeem:    109_000,
+							RedeemAdd: 31_600,
+							Refund:    77_000,
+							Approve:   78_400,
+							Transfer:  85_100,
+						}},
+				},
 			},
 		},
 	},
@@ -238,14 +175,14 @@ var Tokens = map[uint32]*Token{
 // simnet harness to populate swap contract and token addresses in
 // ContractAddresses and Tokens.
 func MaybeReadSimnetAddrs() {
-	MaybeReadSimnetAddrsDir("eth", ContractAddresses, MultiBalanceAddresses, Tokens[testTokenID].NetTokens[dex.Simnet])
+	MaybeReadSimnetAddrsDir("eth", ContractAddresses, MultiBalanceAddresses, Tokens[usdcTokenID].NetTokens[dex.Simnet])
 }
 
 func MaybeReadSimnetAddrsDir(
 	dir string,
 	contractsAddrs map[uint32]map[dex.Network]common.Address,
 	multiBalandAddresses map[dex.Network]common.Address,
-	token *NetToken,
+	usdcToken *NetToken,
 ) {
 
 	usr, err := user.Current()
@@ -263,15 +200,15 @@ func MaybeReadSimnetAddrsDir(
 	}
 
 	ethSwapContractAddrFile := filepath.Join(harnessDir, "eth_swap_contract_address.txt")
-	tokenSwapContractAddrFile := filepath.Join(harnessDir, "erc20_swap_contract_address.txt")
-	testTokenContractAddrFile := filepath.Join(harnessDir, "test_token_contract_address.txt")
+	testUSDCSwapContractAddrFile := filepath.Join(harnessDir, "usdc_swap_contract_address.txt")
+	testUSDCContractAddrFile := filepath.Join(harnessDir, "test_usdc_contract_address.txt")
 	multiBalanceContractAddrFile := filepath.Join(harnessDir, "multibalance_address.txt")
 
 	contractsAddrs[0][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFile)
 	multiBalandAddresses[dex.Simnet] = getContractAddrFromFile(multiBalanceContractAddrFile)
 
-	token.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapContractAddrFile)
-	token.Address = getContractAddrFromFile(testTokenContractAddrFile)
+	usdcToken.SwapContracts[0].Address = getContractAddrFromFile(testUSDCSwapContractAddrFile)
+	usdcToken.Address = getContractAddrFromFile(testUSDCContractAddrFile)
 }
 
 func getContractAddrFromFile(fileName string) (addr common.Address) {

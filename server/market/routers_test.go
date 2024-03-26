@@ -624,12 +624,10 @@ var assetETH = &asset.BackedAsset{
 	},
 }
 
-var testTokenId, _ = dex.BipSymbolID("dextt.eth")
-
 var assetToken = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:           testTokenId,
-		Symbol:       "dextt.eth",
+		ID:           60001,
+		Symbol:       "usdc.eth",
 		MaxFeeRate:   12,
 		SwapSize:     dummySize + 10,
 		SwapSizeBase: dummySize + 10,

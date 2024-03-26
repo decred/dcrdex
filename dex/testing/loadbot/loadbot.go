@@ -60,7 +60,7 @@ const (
 	bch              = "bch"
 	zec              = "zec"
 	zcl              = "zcl"
-	dextt            = "dextt.eth"
+	usdc             = "usdc.eth"
 	maxOrderLots     = 10
 	ethFeeRate       = 200 // gwei
 	// missedCancelErrStr is part of an error found in dcrdex/server/market/orderrouter.go
@@ -77,7 +77,7 @@ var (
 	dcrID, _    = dex.BipSymbolID(dcr)
 	btcID, _    = dex.BipSymbolID(btc)
 	ethID, _    = dex.BipSymbolID(eth)
-	dexttID, _  = dex.BipSymbolID(dextt)
+	usdcID, _   = dex.BipSymbolID(usdc)
 	ltcID, _    = dex.BipSymbolID(ltc)
 	dashID, _   = dex.BipSymbolID(dash)
 	dogeID, _   = dex.BipSymbolID(doge)
@@ -174,7 +174,7 @@ func rpcAddr(symbol, node string) string {
 		key = "rpclisten"
 	case btc, ltc, bch, zec, zcl, doge, firo, dash:
 		key = "rpcport"
-	case eth, dextt:
+	case eth, usdc:
 		key = "ListenAddr"
 	}
 
@@ -241,7 +241,7 @@ func (res *harnessResult) String() string {
 
 func harnessSymbol(symbol string) string {
 	switch symbol {
-	case dextt:
+	case usdc:
 		return eth
 	}
 	return symbol
@@ -509,7 +509,7 @@ func run() error {
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
-		case eth, dextt:
+		case eth, usdc:
 			args = []string{"attach", `--exec eth.accounts[1]`}
 		default:
 			return "", fmt.Errorf("getAddress: unknown symbol %q", symbol)
@@ -543,7 +543,7 @@ func run() error {
 			<-harnessCtl(ctx, dcr, "./alpha", "walletpassphrase", "abc", "0")
 			<-harnessCtl(ctx, dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
 			<-harnessCtl(ctx, dcr, "./beta", "unlockaccount", "default", "abc")
-		case eth, zec, zcl, dextt:
+		case eth, zec, zcl, usdc:
 			// eth unlocking for send, so no need to here. Mining
 			// accounts are always unlocked. zec is unlocked already.
 		default:
@@ -641,7 +641,7 @@ func run() error {
 				oldPort := pair.cfg["rpcport"]
 				walletAddr = "127.0.0.1:" + oldPort
 				pair.cfg["rpcport"] = port
-			case ethID, dexttID:
+			case ethID, usdcID:
 				oldPort := pair.cfg["ListenAddr"]
 				walletAddr = fmt.Sprintf("127.0.0.1%s", oldPort)
 				pair.cfg["ListenAddr"] = fmt.Sprintf(":%s", port)
@@ -723,7 +723,7 @@ type marketsDotJSON struct {
 func loadNodeConfig(symbol, node string) map[string]string {
 	var cfgPath string
 	switch symbol {
-	case eth, dextt:
+	case eth, usdc:
 		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, "node", "eth.conf")
 	default:
 		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, node+".conf")
