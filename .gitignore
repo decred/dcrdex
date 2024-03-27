@@ -41,6 +41,7 @@ client/asset/eth/cmd/deploy/deploy
 client/cmd/dexc-desktop/pkg/installers
 client/cmd/testbinance/testbinance
 server/noderelay/cmd/sourcenode/sourcenode
+client/cmd/dexc-desktop/snap/snapcraft.yaml
 tatanka/cmd/demo/demo
 server/cmd/validatemarkets
 client/cmd/translationsreport/translationsreport
