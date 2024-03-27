@@ -57,40 +57,51 @@ func TestRPC(t *testing.T) {
 
 var freeServers = []string{
 	// https://www.alchemy.com/chain-connect/chain/ethereum
-	// Passing 09-10-2023
-	"https://rpc.builder0x69.io",
-	"https://rpc.ankr.com/eth",
-	"https://eth-mainnet.public.blastapi.io",
-	"https://ethereum.blockpi.network/v1/rpc/public",
-	"https://rpc.flashbots.net",
-	"https://eth.api.onfinality.io/public",
-	"https://eth-mainnet-public.unifra.io",
-	// Not passing 09-10-2023
-	"https://api.securerpc.com/v1",
-	"https://virginia.rpc.blxrbdn.com",
-	"https://eth.rpc.blxrbdn.com",
-	"https://1rpc.io/eth",
-	"https://g.w.lavanet.xyz:443/gateway/eth/rpc-http/f7ee0000000000000000000000000000",
-	"https://api.mycryptoapi.com/eth",
-	"https://rpc.mevblocker.io",
-	"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
-	"https://endpoints.omniatech.io/v1/eth/mainnet/public",
-	"https://uk.rpc.blxrbdn.com",
-	"https://singapore.rpc.blxrbdn.com",
-	"https://eth.llamarpc.com",
-	"https://ethereum.publicnode.com",
-	"https://api.zmok.io/mainnet/oaen6dy8ff6hju9k",
-	"https://ethereumnodelight.app.runonflux.io",
-	"https://eth-rpc.gateway.pokt.network",
-	"https://main-light.eth.linkpool.io",
-	"https://rpc.payload.de",
-	"https://cloudflare-eth.com",
-	"https://main-rpc.linkpool.io/",
-	"https://nodes.mewapi.io/rpc/eth",
+	// Passing 03-26-2024
+	"https://rpc.builder0x69.io",                                          // Limits unknown
+	"https://rpc.ankr.com/eth",                                            // 30 req per second, no WebSockets (premium-only)
+	"https://ethereum.blockpi.network/v1/rpc/public",                      // 10 req per sec, no WebSockets (premium-only)
+	"https://rpc.flashbots.net",                                           // Limits unknown
+	"wss://eth.llamarpc.com",                                              // Limits unknown
+	"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7", // Limits might be 100M compute units at 300 CU/s
+	// Failing 03-26-2024
+	"https://eth-mainnet.gateway.pokt.network/v1/5f3453978e354ab992c4da79", // connect error: failed to connect to even a single provider among: pokt.network
+	"https://ethereum.publicnode.com",                                      // "TransactionReceipt" error: not found
+	"https://nodes.mewapi.io/rpc/eth",                                      // connect error: failed to connect to even a single provider among: mewapi.io
+	"https://eth-mainnet.public.blastapi.io",                               // "TransactionReceipt" error: not found
+	"https://eth.api.onfinality.io/public",                                 // connect error: failed to connect to even a single provider among: onfinality.io
+	"https://eth-mainnet-public.unifra.io",                                 // connect error: failed to connect to even a single provider among: unifra.io
+	"https://cloudflare-eth.com/",                                          // "SuggestGasTipCap" error: Method not found
+
 }
 
 func TestFreeServers(t *testing.T) {
 	mt.TestFreeServers(t, freeServers, dex.Mainnet)
+}
+
+var freeTestnetServers = []string{
+	// Sepolia
+	// "https://rpc.ankr.com/eth_sepolia", // Sepolia
+	// "https://relay-sepolia.flashbots.net",
+	// "https://ethereum-sepolia.blockpi.network/v1/rpc/public",
+	//
+	// Goerli
+	// Passing 03-26-2024
+	"https://goerli.blockpi.network/v1/rpc/public",
+	"https://eth-goerli.public.blastapi.io",
+	"https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
+	// Failing 03-26-2024
+	"https://rpc.ankr.com/eth_goerli",
+	"https://rpc.goerli.eth.gateway.fm",
+	"https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
+	"https://rpc.goerli.mudit.blog",
+	"https://endpoints.omniatech.io/v1/eth/goerli/public",
+	"https://eth-goerli.api.onfinality.io/public",
+	"https://relay-goerli.flashbots.net",
+}
+
+func TestFreeTestnetServers(t *testing.T) {
+	mt.TestFreeServers(t, freeTestnetServers, dex.Testnet)
 }
 
 func TestMainnetCompliance(t *testing.T) {

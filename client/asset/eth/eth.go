@@ -127,9 +127,9 @@ var (
 			Description: "Specify one or more providers. For infrastructure " +
 				"providers, prefer using wss address. Only url-based authentication " +
 				"is supported. For a local node, use the filepath to an IPC file.",
-			Repeatable: providerDelimiter,
-			RepeatN:    2,
-			Required:   true,
+			Repeatable:   providerDelimiter,
+			RepeatN:      2,
+			DefaultValue: "",
 		},
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
@@ -485,7 +485,8 @@ type assetWallet struct {
 type ETHWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	tipAtConnect int64
+	tipAtConnect     int64
+	defaultProviders []string
 
 	*assetWallet
 }
@@ -586,13 +587,6 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 			return err
 		}
 
-		// Check that we can connect to all endpoints.
-		providerDef := createWalletParams.Settings[providersKey]
-		if len(providerDef) == 0 {
-			return errors.New("no providers specified")
-		}
-		endpoints := strings.Split(providerDef, providerDelimiter)
-
 		// TODO: This procedure may actually work for walletTypeGeth too.
 		ks := keystore.NewKeyStore(keystoreDir, keystore.LightScryptN, keystore.LightScryptP)
 
@@ -601,7 +595,10 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 			return err
 		}
 
-		if !skipConnect {
+		// If the user supplied endpoints, check them now.
+		providerDef := createWalletParams.Settings[providersKey]
+		if !skipConnect && len(providerDef) > 0 {
+			endpoints := strings.Split(providerDef, providerDelimiter)
 			if err := createAndCheckProviders(context.Background(), walletDir, endpoints,
 				big.NewInt(chainID), compat, createWalletParams.Net, createWalletParams.Logger); err != nil {
 				return fmt.Errorf("create and check providers: %v", err)
@@ -633,6 +630,28 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		}
 	}
 
+	var defaultProviders []string
+	switch net {
+	case dex.Simnet:
+		u, _ := user.Current()
+		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "eth", "alpha", "node", "geth.ipc")}
+	case dex.Testnet:
+		defaultProviders = []string{
+			"https://goerli.blockpi.network/v1/rpc/public",
+			"https://eth-goerli.public.blastapi.io",
+			"https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
+		}
+	case dex.Mainnet:
+		defaultProviders = []string{
+			"https://rpc.ankr.com/eth",
+			"https://ethereum.blockpi.network/v1/rpc/public",
+			"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
+			"https://rpc.builder0x69.io",
+			"https://rpc.flashbots.net",
+			"wss://eth.llamarpc.com",
+		}
+	}
+
 	return NewEVMWallet(&EVMWalletConfig{
 		BaseChainID:        BipID,
 		ChainCfg:           chainCfg,
@@ -645,6 +664,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		MultiBalAddress:    dexeth.MultiBalanceAddresses[net],
 		WalletInfo:         WalletInfo,
 		Net:                net,
+		DefaultProviders:   defaultProviders,
 	})
 }
 
@@ -658,6 +678,7 @@ type EVMWalletConfig struct {
 	Tokens             map[uint32]*dexeth.Token
 	Logger             dex.Logger
 	BaseChainContracts map[uint32]common.Address
+	DefaultProviders   []string
 	MultiBalAddress    common.Address
 	WalletInfo         asset.WalletInfo
 	Net                dex.Network
@@ -672,7 +693,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 	case walletTypeGeth:
 		return nil, asset.ErrWalletTypeDisabled
 	case walletTypeRPC:
-		if _, found := cfg.AssetCfg.Settings[providersKey]; !found {
+		if providerDef := cfg.AssetCfg.Settings[providersKey]; len(providerDef) == 0 && len(cfg.DefaultProviders) == 0 {
 			return nil, errors.New("no providers specified")
 		}
 	default:
@@ -757,7 +778,8 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 	}
 
 	return &ETHWallet{
-		assetWallet: aw,
+		assetWallet:      aw,
+		defaultProviders: cfg.DefaultProviders,
 	}, nil
 }
 
@@ -786,14 +808,10 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	case walletTypeRPC:
 		w.settingsMtx.RLock()
 		defer w.settingsMtx.RUnlock()
-		endpoints := strings.Split(w.settings[providersKey], " ")
-
-		// Point to a harness node on simnet, if not specified.
-		if w.net == dex.Simnet && len(endpoints) == 0 {
-			u, _ := user.Current()
-			endpoints = append(endpoints, filepath.Join(u.HomeDir, "dextest", "eth", "beta", "node", "geth.ipc"))
+		endpoints := w.defaultProviders
+		if providerDef, found := w.settings[providersKey]; found && len(providerDef) > 0 {
+			endpoints = strings.Split(providerDef, " ")
 		}
-
 		cl, err = newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), w.chainCfg, w.net)
 		if err != nil {
 			return nil, err
