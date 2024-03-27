@@ -5,6 +5,8 @@ package polygon
 
 import (
 	"fmt"
+	"os/user"
+	"path/filepath"
 	"strconv"
 
 	"decred.org/dcrdex/client/asset"
@@ -109,6 +111,33 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 			}
 		}
 	}
+
+	var defaultProviders []string
+	switch net {
+	case dex.Simnet:
+		u, _ := user.Current()
+		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "polygon", "alpha", "bor", "bor.ipc")}
+	case dex.Testnet:
+		defaultProviders = []string{
+			"https://rpc.ankr.com/polygon_mumbai",
+			"https://polygon-testnet.public.blastapi.io",
+			"https://polygon-mumbai.blockpi.network/v1/rpc/public",
+			"https://endpoints.omniatech.io/v1/matic/mumbai/public",
+		}
+	case dex.Mainnet:
+		defaultProviders = []string{
+			"https://1rpc.io/matic",
+			"https://rpc.ankr.com/polygon",
+			"https://polygon-mainnet.public.blastapi.io",
+			"https://polygon.blockpi.network/v1/rpc/public",
+			"https://polygon.llamarpc.com",
+			"https://rpc-mainnet.maticvigil.com",
+			"https://endpoints.omniatech.io/v1/matic/mainnet/public",
+			"https://rpc-mainnet.matic.quiknode.pro",
+			"https://gateway.tenderly.co/public/polygon",
+		}
+	}
+
 	// BipID, chainCfg, cfg, &t, dexpolygon.VersionedGases, dexpolygon.Tokens, logger, net
 	return eth.NewEVMWallet(&eth.EVMWalletConfig{
 		BaseChainID:        BipID,
@@ -122,6 +151,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		MultiBalAddress:    dexpolygon.MultiBalanceAddresses[net],
 		WalletInfo:         WalletInfo,
 		Net:                net,
+		DefaultProviders:   defaultProviders,
 	})
 }
 
