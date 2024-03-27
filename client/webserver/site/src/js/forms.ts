@@ -1631,8 +1631,9 @@ export class AccelerateOrderForm {
     const selected = () => { /* do nothing */ }
     const roundY = true
     const updateRate = (_: number, newY: number) => { this.acceleratedRate = newY }
-    const rangeHandler = new XYRangeHandler(preAccelerate.suggestedRange,
-      preAccelerate.suggestedRange.start.x, updateRate, () => this.updateAccelerationEstimate(), selected, roundY)
+    const rangeHandler = new XYRangeHandler(preAccelerate.suggestedRange, preAccelerate.suggestedRange.start.x, {
+      updated: updateRate, changed: () => this.updateAccelerationEstimate(), selected, roundY
+    })
     Doc.empty(page.sliderContainer)
     page.sliderContainer.appendChild(rangeHandler.control)
     this.updateAccelerationEstimate()

@@ -29,7 +29,7 @@ interface LabelSet {
   lbls: Label[]
 }
 
-interface Translator {
+export interface Translator {
     x: (x: number) => number
     y: (y: number) => number
     unx: (x: number) => number
@@ -374,6 +374,15 @@ export class Chart {
       ctx.stroke()
     })
   }
+
+  line (x0: number, y0: number, x1: number, y1: number, skipStroke?: boolean) {
+    line(this.ctx, x0, y0, x1, y1, skipStroke)
+  }
+
+  /* dot draws a circle with the provided context. */
+  dot (x: number, y: number, color: string, radius: number) {
+    dot(this.ctx, x, y, color, radius)
+  }
 }
 
 /* DepthChart is a javascript Canvas-based depth chart renderer. */
@@ -443,11 +452,6 @@ export class DepthChart extends Chart {
     if (this.zoomOutBttn.contains(x, y)) { this.zoom(false); return }
     const translator = this.plotRegion.translator(this.dataExtents)
     this.reporters.click(translator.unx(x))
-  }
-
-  // clear the canvas.
-  clear () {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
   }
 
   // set sets the current data set and draws.
@@ -1149,7 +1153,7 @@ export class Wave extends Chart {
  * Extents holds a min and max in both the x and y directions, and provides
  * getters for related data.
  */
-class Extents {
+export class Extents {
   x: MinMax
   y: MinMax
 
@@ -1189,7 +1193,7 @@ class Extents {
  * Region applies an Extents to the canvas, providing utilities for coordinate
  * transformations and restricting drawing to a specified region of the canvas.
  */
-class Region {
+export class Region {
   context: CanvasRenderingContext2D
   extents: Extents
 

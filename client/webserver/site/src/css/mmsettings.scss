@@ -185,6 +185,22 @@ div[data-handler=mmsettings] {
       right: 0;
     }
   }
+
+  #lotsPerLevel,
+  #levelsPerSide,
+  #qcProfit,
+  #qcLevelSpacing,
+  #qcMatchBuffer {
+    width: 100px;
+  }
+
+  #levelSpacingBox.disabled {
+    opacity: 0.5;
+  }
+
+  #placementsChart {
+    height: 100px;
+  }
 }
 
 body.dark div[data-handler=mmsettings] {
