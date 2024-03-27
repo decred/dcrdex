@@ -407,6 +407,7 @@ var tExchanges = map[string]*core.Exchange{
 			},
 		},
 		ViewOnly: true,
+		MaxScore: 60,
 	},
 	secondDEX: {
 		Host:   "thisdexwithalongname.com",
@@ -707,7 +708,7 @@ func (c *TCore) Login([]byte) error  { return nil }
 func (c *TCore) IsInitialized() bool { return c.inited }
 func (c *TCore) Logout() error       { return nil }
 func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
-	return nil, nil, nil
+	return []*db.Notification{}, []*db.Notification{}, nil
 }
 
 var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "usdc.eth"}

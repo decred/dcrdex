@@ -48,6 +48,7 @@ export class ReputationMeter {
     const scorePct = 100 - warnPct
     page.scoreWarn.style.width = `${warnPct}%`
     const pos = score >= 0 ? warnPct + (score / maxScore) * scorePct : warnPct - (Math.min(warnPct, score / minScore * warnPct))
+
     page.scorePointer.style.left = `${pos}%`
     page.scoreMin.textContent = String(minScore)
     page.scoreMax.textContent = String(maxScore)

@@ -30,6 +30,10 @@
   position: relative;
 }
 
+.position-absolute {
+  position: absolute;
+}
+
 .hoverbg:hover {
   background-color: var(--body-bg-tertiary);
 }

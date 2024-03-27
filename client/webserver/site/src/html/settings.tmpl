@@ -36,7 +36,7 @@
         </div>
         <br>
         <div>
-          <p class="text-muted">
+          <p class="grey">
           [[[simultaneous_servers_msg]]]
           </p>
           <button id="addADex">[[[Add a DEX]]]</button>
@@ -74,10 +74,10 @@
         </form>
       </div>
       <div class="mb-3 py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
-        <p class="text-muted">[[[seed_implore_msg]]]</p>
+        <p class="grey">[[[seed_implore_msg]]]</p>
         <button id="exportSeed" class="fs15">[[[View Application Seed]]]</button>
       </div>
-      <p class="text-muted">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
+      <p class="grey">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
     </div>
   </div>
 
@@ -128,8 +128,8 @@
         [[[pw_for_seed]]]
       </div>
       <div class="text-start mt-2">
-        <label for="exportSeedPW" class="form-label">[[[Password]]]</label>
-        <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
+        <label for="exportSeedPW">[[[Password]]]</label>
+        <input type="password" id="exportSeedPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end mt-4">
         <button id="exportSeedSubmit" type="button" class="go">[[[Show Me]]]</button>

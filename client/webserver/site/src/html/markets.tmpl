@@ -69,8 +69,8 @@
           <div class="flex-center fs24 demi ms-2">
             <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
           </div>
-          <span class="ico-arrowdown fs8 grey ms-1"></span>
-          <span class="ico-arrowup fs8 grey ms-1"></span>
+          <span class="ico-arrowdown fs18 grey ms-1"></span>
+          <span class="ico-arrowup fs18 grey ms-1"></span>
         </div>
   
         <div class="data-point">
@@ -159,7 +159,7 @@
                 <div id="durBttnBox"><button class="candle-dur-bttn border rounded3" id="durBttnTemplate"></button></div>
               </div>
 
-              <div class="chart-legend text-muted">
+              <div class="chart-legend grey">
                 <div id="chartErrMsg" class="p-2 flex-center text-danger w-100"></div>
                 <div class="flex-grow-1">
                   <div id="hoverData" class="d-flex align-items-center d-hide">
@@ -322,21 +322,21 @@
 
                   {{- /* RATE AND QUANTITY INPUTS */ -}}
                   <div class="d-flex mt-3" id="priceBox">
-                    <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
+                    <label for="rateField" class="col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
                     <div class="col-18 p-0 position-relative">
-                      <input type="number" class="form-control select" id="rateField">
+                      <input type="number" id="rateField">
                       <span class="unitbox"><span class="unit" data-unit="quote" data-unit-format="noparent"></span>/<span class="unit" data-unit="base" data-unit-format="noparent"></span></span>
                     </div>
                   </div>
                   <div class="d-flex mt-4" id="qtyBox">
-                    <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
+                    <label for="qtyField" class="col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
                     <div class="col-6 p-0 position-relative">
-                      <input type="number" class="form-control select" id="lotField">
+                      <input type="number" id="lotField">
                       <span class="unit unitbox">[[[:title:lots]]]</span>
                     </div>
                     <div class="col-1 p-0"></div> {{/* spacer */}}
                     <div class="col-11 p-0 position-relative">
-                      <input type="number" class="form-control select" id="qtyField">
+                      <input type="number" id="qtyField">
                       <span class="unit unitbox" data-unit="base" data-unit-format="noparent"></span>
                     </div>
                   </div>
@@ -349,7 +349,7 @@
                     <div class="d-flex justify-content-center mt-2">
                       <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
                       <div class="col-12 p-0 position-relative">
-                        <input type="number" class="form-control select" id="mktBuyField">
+                        <input type="number" id="mktBuyField">
                         <span class="unit unitbox" data-unit="quote" data-unit-format="noparent"></span>
                       </div>
                     </div>
@@ -653,8 +653,8 @@
         <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">[[[auth_order_app_pw]]]</div>
         <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
           <div class="col-12 p-0 text-start {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="vPass" class="form-label ps-1 mb-1">[[[Password]]]</label>
-            <input type="password" class="form-control select" id="vPass">
+            <label for="vPass" class="ps-1 mb-1">[[[Password]]]</label>
+            <input type="password" id="vPass">
           </div>
           <div class="col-12 p-0 d-flex justify-content-end">
             <button id="vSubmit" class="w-75 mt-1 justify-content-center fs15 selected sellred-bg">
@@ -729,8 +729,8 @@
             <span>[[[unlock_for_details]]]</span>
             <div class="d-flex align-items-stretch w-100">
               <div class="col-12 p-0 text-start">
-                <label for="vUnlockPass" class="form-label ps-1 mb-1">[[[Password]]]</label>
-                <input type="password" class="form-control select w-100" id="vUnlockPass">
+                <label for="vUnlockPass" class="ps-1">[[[Password]]]</label>
+                <input type="password" id="vUnlockPass">
               </div>
               <div class="col-12 p-0 d-flex align-items-end justify-content-end">
                 <button type="button" id="vUnlockSubmit" class="buygreen-bg">[[[Unlock]]]</button>
@@ -829,17 +829,17 @@
           <hr class="dashed my-2">
           <div class="d-flex justify-content-between align-items-stretch flex-wrap">
             <div id="tokenApprovalPWBox" class="col-11 p-0">
-              <label for="tokenApprovalPW" class="form-label pt-3 ps-1 mb-1">[[[App Password]]]</label>
-              <input type="password" class="form-control select" id="tokenApprovalPW" data-tmpl="appPass" autocomplete="off">
+              <label for="tokenApprovalPW" class="pt-3 ps-1">[[[App Password]]]</label>
+              <input type="password" id="tokenApprovalPW" data-tmpl="appPass" autocomplete="off">
             </div>
             <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
             <div class="d-grid align-items-end col-10 p-0">
-              <button id="approveTokenButton" type="button" class="fs15 bg2 selected">[[[Approve]]]</button>
+              <button id="approveTokenButton" type="button" class="fs15 feature">[[[Approve]]]</button>
             </div>
           </div>
         </div>
         <span id="tokenApprovalTxMsg" class="text-center fs17 d-hide">[[[token_approval_tx_msg]]]</span>
-        <a target="_blank" class="subtlelink" id="tokenApprovalTxID"></a>
+        <a target="_blank" class="subtlelink fs14" id="tokenApprovalTxID"></a>
         <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="approveTokenErr"></div>
       </form>
 

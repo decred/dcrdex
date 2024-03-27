@@ -1,3 +1,35 @@
+label {
+  margin-bottom: 0.25rem;
+  cursor: pointer;
+}
+
+input[type=text],
+input[type=date],
+input[type=password],
+input[type=number],
+input[type=url],
+textarea {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--form-input-border);
+  border-radius: 5px;
+  background-color: var(--form-input-bg);
+  color: var(--text-color);
+
+  &:focus {
+    border-color: var(--form-input-border-focus);
+    outline: none;
+  }
+}
+
+.form-select {
+  color: var(--text-color);
+  background-color: var(--form-input-bg);
+  border-color: 1px solid var(--form-input-border);
+  border-radius: 3px;
+}
+
 #regAssetForm {
   div.reg-asset {
     .fader {

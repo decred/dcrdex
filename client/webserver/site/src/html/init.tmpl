@@ -9,12 +9,12 @@
       <div class="fs18 mb-3">[[[reg_set_app_pw_msg]]]</div>
       <hr class="dashed my-3">
       <div class="mb-3">
-        <label for="appPW" class="form-label">[[[Password]]]</label>
-        <input type="password" class="form-control select" id="appPW" autocomplete="new-password">
+        <label for="appPW">[[[Password]]]</label>
+        <input type="password" id="appPW" autocomplete="new-password">
       </div>
       <div class="mb-3">
-        <label for="appPWAgain" class="form-label">[[[Password Again]]]</label>
-        <input type="password" class="form-control select" id="appPWAgain" autocomplete="off">
+        <label for="appPWAgain">[[[Password Again]]]</label>
+        <input type="password" id="appPWAgain" autocomplete="off">
       </div>
       <div class="mb-3">
         <input class="form-check-input" type="checkbox" id="rememberPass">
@@ -22,12 +22,12 @@
       </div>
       <div class="mb-3">
         <div class="py-2 d-flex justify-content-between align-items-center">
-          <label for="seedInput" class="form-label" id="toggleSeedInput">
+          <label for="seedInput" id="toggleSeedInput">
           <span id="toggleSeedInputIcon" class="fs11 ico-plus me-1"></span>
           [[[Restoration Seed]]]
           </label>
         </div>
-        <textarea class="form-control select mono d-hide" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
+        <textarea class="mono d-hide" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
       </div>
       <div class="d-flex justify-content-end">
         <button id="appPWSubmit" type="submit" class="go px-4">[[[Submit]]]</button>
@@ -104,7 +104,7 @@
       <div id="sbSeed" class="d-hide">
         <div class="fs18 mb-3">[[[save_seed_instructions]]]</div>
         <div class="my-3 px-3 flex-center">
-          <pre class="fs18 mono mx-auto user-select-all text-break" id="mnemonic"></pre>
+          <div class="fs18 mono mx-auto user-select-all text-break" id="mnemonic"></div>
         </div>
         <div class="d-flex justify-content-end">
           <button id="seedAck" class="go px-4">[[[Done]]]</button>

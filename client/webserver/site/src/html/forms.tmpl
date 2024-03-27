@@ -4,13 +4,13 @@
 </h6>
 <div>
   <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile me-1"></span> [[[load from file]]]</div>
-  <input data-tmpl="fileInput" type="file" class="form-control select d-none" accept=".conf, .cfg, .cnf, .ini">
+  <input data-tmpl="fileInput" type="file" class="d-none" accept=".conf, .cfg, .cnf, .ini">
 </div>
 <div data-tmpl="allSettings">
   <div data-tmpl="dynamicOpts" class="dynamicopts">
     <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end mt-3">
-      <label class="form-label small"> <span class="ico-info"></span></label>
-      <input type="text" class="form-control select">
+      <label class="small"> <span class="ico-info"></span></label>
+      <input type="text">
     </div>
     <div data-tmpl="checkbox" class="d-flex align-items-center mt-3">
       <div class="form-check">
@@ -19,14 +19,14 @@
       </div>
     </div>
     <div data-tmpl="dateInput" class="px-0 d-flex flex-column justify-content-end mt-3">
-      <label class="form-label small"> <span class="ico-info"></span></label>
-      <input type="date" class="form-control select">
+      <label class="small"> <span class="ico-info"></span></label>
+      <input type="date">
     </div>
   </div>
   <div data-tmpl="repeatableInput" class="w-100 mb-3">
-    <label class="form-label small"> <span class="ico-info"></span></label>
+    <label class="small"> <span class="ico-info"></span></label>
     <div class="d-flex align-items-stretch justify-content-center">
-      <input type="text" class="form-control select flex-grow-1">
+      <input type="text" class="flex-grow-1">
       <div class="ico-plus fs14 p-2 ms-2 pointer hoverbg" data-tmpl="add"></div>
     </div>
   </div>
@@ -69,7 +69,7 @@
   <div class="flex-center py-3" data-tmpl="oneBttnBox">
     <button class="one-bttn w-auto" data-tmpl="oneBttn">[[[Create]]]!</button>
   </div>
-  <div class="py-2 fs14 text-muted">
+  <div class="py-2 fs14 grey">
     <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
   </div>
   <div data-tmpl="walletSettings">
@@ -79,14 +79,14 @@
   <hr class="dashed my-3">
   <div class="d-flex justify-content-between align-items-stretch flex-wrap mb-3" data-tmpl=walletPassAndSubmitBttn>
     <div class="col-11 p-0" data-tmpl="newWalletPassBox">
-      <label for="newWalletPass" class="form-label">[[[Wallet Password]]]
+      <label for="newWalletPass">[[[Wallet Password]]]
         <span class="ico-info" data-tooltip="[[[w_password_tooltip]]]"></span>
       </label>
-      <input type="password" class="form-control select" data-tmpl="newWalletPass" autocomplete="off">
+      <input type="password" data-tmpl="newWalletPass" autocomplete="off">
     </div>
     <div class="hide-pw col-11">
-      <label for="nwAppPass" class="form-label">[[[App Password]]]</label>
-      <input type="password" class="form-control select" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
+      <label for="nwAppPass">[[[App Password]]]</label>
+      <input type="password" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
     </div>
     <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
     <div class="d-grid align-items-end col-10 p-0">
@@ -123,9 +123,9 @@
   <hr class="dashed my-4">
 {{end}}
 <div id="uwAppPassBox" class="mb-3">
-  <label for="uwAppPass" class="form-label">[[[App Password]]]</label>
-  <input type="password" class="form-control" id="uwAppPass" autocomplete="off" autofocus>
-  <div class="mb-3 form-text">[[[app_password_reminder]]]</div>
+  <label for="uwAppPass">[[[App Password]]]</label>
+  <input type="password" id="uwAppPass" autocomplete="off" autofocus>
+  <div class="mb-3 fs14 grey">[[[app_password_reminder]]]</div>
 </div>
 <div id="submitUnlockDiv" class="d-flex justify-content-end">
   <button id="submitUnlock" type="submit" class="go">[[[Unlock]]]</button>
@@ -158,8 +158,8 @@
 {{end}}
 
 {{define "certPicker"}}
-<div class="form-label pointer">[[[TLS Certificate]]]</div>
-<input type="file" class="form-control select d-none" data-tmpl="certFile">
+<label for="certFile" class="pointer">[[[TLS Certificate]]]</label>
+<input type="file" class="d-none" data-tmpl="certFile">
 <div class="ps-1 mt-2 fs15">
   <span data-tmpl="selectedCert"></span>
   <u class="ms-3 pointer d-hide" data-tmpl="removeCert">[[[remove]]]</u>
@@ -197,8 +197,8 @@
   <hr class="dashed my-2">
   <div class="fs20 " data-tmpl="addCustomMsg">[[[Add a custom server]]]</div>
   <div class="mb-3">
-    <label for="dexAddr" class="form-label">[[[DEX Address]]]</label>
-    <input type="text" class="form-control" data-tmpl="addr" id="dexAddr">
+    <label for="dexAddr">[[[DEX Address]]]</label>
+    <input type="text" data-tmpl="addr" id="dexAddr">
   </div>
   <div class="px-1 mt-3 mb-3 fs14 d-hide" data-tmpl="needCert">
     [[[reg_ssl_needed]]]
@@ -208,8 +208,8 @@
 <div class="d-flex d-hide" data-tmpl="auth">
   <div class="col-12 p-0">
     <div data-tmpl="appPWBox" {{if $.UserInfo.PasswordIsCached}}class="d-hide"{{end}}>
-      <label for="dexAddrAppPW" class="form-label">[[[App Password]]]</label>
-      <input type="password" class="form-control select" id="dexAddrAppPW" data-tmpl="appPW" autocomplete="current-password">
+      <label for="dexAddrAppPW">[[[App Password]]]</label>
+      <input type="password" id="dexAddrAppPW" data-tmpl="appPW" autocomplete="current-password">
     </div>
   </div>
   <div class="col-12 d-flex justify-content-end align-items-end p-0">
@@ -223,8 +223,8 @@
 <h3 data-tmpl="header">[[[Create Account]]]</h3>
 <div class="fs16 text-center mb-3"><span data-tmpl="dexHost"></span></div>
 <div data-tmpl="appPWBox" class="mb-3">
-  <label for="discoverAcctAppPW" class="form-label">[[[App Password]]]</label>
-  <input type="password" class="form-control select" id="discoverAcctAppPW" data-tmpl="appPW">
+  <label for="discoverAcctAppPW">[[[App Password]]]</label>
+  <input type="password" id="discoverAcctAppPW" data-tmpl="appPW">
 </div>
 <div class="d-flex justify-content-center">
   <button data-tmpl="submit" type="button" class="go">[[[Create Account]]]</button>
@@ -266,7 +266,7 @@
       <div class="fs15">[[[trading_tier_message]]]</div>
     </div>
     <div class="flex-center flex-grow-1">
-      <input data-tmpl="regAssetTier" type="number" class="text-center form-control form-control-lg" value="1" min="0" step="1">
+      <input data-tmpl="regAssetTier" type="number" class="text-center fs18 p-2" value="1" min="0" step="1">
       <input type="text" class="d-hide"> <!--two inputs to prevent auto form submission-->
     </div>
   </div>
@@ -274,7 +274,7 @@
   <div data-tmpl="regAssetErr" class="fs14 text-danger flex-center"></div>
   <div data-tmpl="assetSelected" class="flex-center flex-column mb-3">
     <h5>[[[current_bonding_asset]]]</h5>
-    <div data-tmpl="chooseDifferentAsset" class="fs16 underline text-muted pointer hoverbg">[[[choose a different asset]]]</div>
+    <div data-tmpl="chooseDifferentAsset" class="fs16 underline grey pointer hoverbg">[[[choose a different asset]]]</div>
   </div>
   <div data-tmpl="assetSelection">
     <h5 class="text-center">[[[Select your bond asset]]]</h5>
@@ -302,12 +302,12 @@
             <div class="d-flex flex-column align-items-start">
               <div class="flex-center">
                 <span data-tmpl="feeAmt" class="fs18"></span>
-                <span class="fs14 text-muted ms-1" data-tmpl="feeSymbol"></span>
+                <span class="fs14 grey ms-1" data-tmpl="feeSymbol"></span>
               </div>
               <div class="flex-center fs14">
                 <span>~</span>
                 <span data-tmpl="fiatBondAmount"></span>
-                <span class="text-muted ms-1">[[[USD]]]</span>
+                <span class="grey ms-1">[[[USD]]]</span>
               </div>
             </div>
           </td>
@@ -316,14 +316,14 @@
               <div class="flex-center">
                 <span class="fs16" data-tmpl="tradeLimits" class="flex-center">
                   <span data-tmpl="tradeLimitLow"></span><span>&ndash;</span><span data-tmpl="tradeLimitHigh"></span>
-                  <span data-tmpl="tradeLimitSymbol" class="ms-1 fs14 text-muted"></span>
+                  <span data-tmpl="tradeLimitSymbol" class="ms-1 fs14 grey"></span>
                 </span>
               </div>
               <div class="flex-center">
                 <span class="fs14" data-tmpl="tradeLimits" class="flex-center">
                   <span>~</span>
                   <span data-tmpl="fiatTradeLimitLow"></span><span>&ndash;</span><span data-tmpl="fiatTradeLimitHigh"></span>
-                  <span class="text-muted ms-1">[[[USD]]]</span>
+                  <span class="grey ms-1">[[[USD]]]</span>
                 </span>
             </div>
           </td>
@@ -344,8 +344,8 @@
         <table class="reg-asset-markets ms-3">
           <thead>
             <tr>
-              <th class="text-muted">[[[Market]]]</th>
-              <th class="text-muted">[[[:title:lot_size]]]</th>
+              <th class="grey">[[[Market]]]</th>
+              <th class="grey">[[[:title:lot_size]]]</th>
             </tr>
           </thead>
           <tbody data-tmpl="allMarkets">
@@ -375,8 +375,8 @@
 {{define "loginForm"}}
 <h3 data-tmpl="header">[[[Log In]]]</h3>
 <div class="mb-2">
-  <label for="pw" class="form-label">[[[Password]]]</label>
-  <input type="password" class="form-control" data-tmpl="pw" autocomplete="current-password">
+  <label for="pw">[[[Password]]]</label>
+  <input type="password" data-tmpl="pw" autocomplete="current-password">
 </div>
 <div class="mb-4">
     <div class="form-check">
@@ -388,14 +388,14 @@
   <button data-tmpl="submit" type="button" class="go px-5" id="loginSubmit">[[[Submit]]]</button>
 </div>
 <div class="d-flex justify-content-center">
-  <strong id="forgotPassBtn" class="text-muted pointer">[[[Forgot Password]]]</strong>
+  <strong id="forgotPassBtn" class="grey pointer">[[[Forgot Password]]]</strong>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="errMsg"></div>
 {{end}}
 
 {{define "confirmRegistrationForm"}}
 <div class="w-100 flex-stretch-column">
-  <span class="hoverbg pointer text-muted mb-3" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
+  <span class="hoverbg pointer grey mb-3" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
   <h3>[[[Confirm Bond Options]]]</h3>
   <div class="d-flex align-items-stretch">
     <div class="flex-grow-1 flex-stretch-column pe-3">
@@ -415,7 +415,7 @@
           <img data-tmpl="logo" class="micro-icon ms-1">
         </span>
       </div>
-      <div data-tmpl="bondLockUSDBox" class="d-flex justify-content-between lh1 fs14 text-muted">
+      <div data-tmpl="bondLockUSDBox" class="d-flex justify-content-between lh1 fs14 grey">
         <span></span>
         <span><span>~</span><span data-tmpl="bondLockUSD"></span> <span>[[[USD]]]</span></span>
       </div>
@@ -427,7 +427,7 @@
     <div class="flex-center flex-column border-start mw50">
       <div data-tmpl="passBox" class="text-center px-3 mt-1">
         <span class="fs14">[[[app_pw_reg]]]</span>
-        <input type="password" class="form-control select app-pass mt-3" data-tmpl="appPass" autocomplete="current-password">
+        <input type="password" class="app-pass mt-3" data-tmpl="appPass" autocomplete="current-password">
       </div>
       <div class="flex-center p-3 mt-1">
         <button data-tmpl="submit" class="go selected">[[[Submit]]]</button>
@@ -452,8 +452,8 @@
 </p>
 <hr class="dashed mb-3">
 <div class="mb-3">
-  <label for="exportAccountAppPass" class="form-label">[[[Password]]]</label>
-  <input type="password" class="form-control select" id="exportAccountAppPass" autocomplete="current-password">
+  <label for="exportAccountAppPass">[[[Password]]]</label>
+  <input type="password" id="exportAccountAppPass" autocomplete="current-password">
 </div>
 <div class="d-flex justify-content-end">
   <button id="authorizeExportAccountConfirm" type="button" class="go">[[[Authorize Export]]]</button>
@@ -475,8 +475,8 @@
 </div>
 <hr class="dashed mb-3">
 <div class="mb-3">
-  <label for="disableAccountAppPW" class="form-label">[[[Password]]]</label>
-  <input type="password" class="form-control" id="disableAccountAppPW" autocomplete="current-password">
+  <label for="disableAccountAppPW">[[[Password]]]</label>
+  <input type="password" id="disableAccountAppPW" autocomplete="current-password">
 </div>
 <div class="d-flex justify-content-end">
   <button id="disableAccountConfirm" type="button" class="go">[[[Disable Account]]]</button>
@@ -491,8 +491,8 @@
   [[[Authorize Import]]]
 </h3>
 <div class="mb-3">
-  <div class="form-label">[[[Account File]]]</div>
-  <input type="file" class="form-control d-none" id="accountFile">
+  <label for="accountFile">[[[Account File]]]</label>
+  <input type="file" class="d-none" id="accountFile">
   <small class="pointer">
     <span id="selectedAccount"></span>
     <u class="ms-3 pointer d-hide" id="removeAccount">[[[remove]]]</u>
@@ -501,9 +501,9 @@
 </div>
 <hr class="dashed mb-3">
 <div class="mb-3 {{if $passwordIsCached}} d-hide{{end}}">
-  <label for="importAccountAppPass" class="form-label">[[[Password]]]</label>
-  <input type="password" class="form-control select" id="importAccountAppPass" autocomplete="current-password">
-  <div class="form-text">[[[app_pw_import_msg]]]</div>
+  <label for="importAccountAppPass">[[[Password]]]</label>
+  <input type="password" id="importAccountAppPass" autocomplete="current-password">
+  <div class="fs14 grey">[[[app_pw_import_msg]]]</div>
 </div>
 <div class="d-flex justify-content-end">
   <button id="authorizeImportAccountConfirm" type="button" class="go">[[[Authorize Import]]]</button>
@@ -517,16 +517,16 @@
   [[[Change Application Password]]]
 </h3>
 <div class="mb-3">
-  <label for="appPW" class="form-label">[[[Current Password]]]</label>
-  <input type="password" class="form-control" id="appPW" autocomplete="current-password">
+  <label for="appPW">[[[Current Password]]]</label>
+  <input type="password" id="appPW" autocomplete="current-password">
 </div>
 <div class="mb-3">
-  <label for="newAppPW" class="form-label">[[[New Password]]]</label>
-  <input type="password" class="form-control" id="newAppPW" autocomplete="new-password">
+  <label for="newAppPW">[[[New Password]]]</label>
+  <input type="password" id="newAppPW" autocomplete="new-password">
 </div>
 <div class="mb-3">
-  <label for="confirmNewPW" class="form-label">[[[Confirm New Password]]]</label>
-  <input type="password" class="form-control" id="confirmNewPW" autocomplete="new-password">
+  <label for="confirmNewPW">[[[Confirm New Password]]]</label>
+  <input type="password" id="confirmNewPW" autocomplete="new-password">
 </div>
 <div class="d-flex justify-content-end">
   <button id="submitNewPW" type="submit" class="go">[[[Submit]]]</button>
@@ -575,8 +575,8 @@
     <hr class="dashed mt-2">
     <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
       <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-        <label for="acceleratePass" class="form-label">[[[Password]]]</label>
-        <input type="password" class="form-control select" id="acceleratePass" autocomplete="off">
+        <label for="acceleratePass">[[[Password]]]</label>
+        <input type="password" id="acceleratePass" autocomplete="off">
       </div>
       <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
         <button id="accelerateSubmit" type="button" class="go">[[[Submit]]]</button>
@@ -619,7 +619,7 @@
   <div class="flex-center mt-1">
     <span class="fs16 me-1">[[[Progress]]]:</span>
     <span class="fs20 mx-1" data-tmpl="progress"></span>
-    <span class="fs16 text-muted">%</span>
+    <span class="fs16 grey">%</span>
   </div>
   <div class="mt-1 flex-center flex-row fs14 d-hide" data-tmpl="syncRemainBox">
     <span data-tmpl="syncRemaining"><span data-tmpl="syncRemain" class="me-1"></span> [[[remaining]]]</span>
@@ -639,34 +639,34 @@
     <div class="flex-center mb-2">
       <span class="me-1">[[[Available Balance]]]:</span>
       <strong class="me-1" data-tmpl="balance"></strong>
-      <span class="text-muted unit">XYZ</span>
+      <span class="grey unit">XYZ</span>
     </div>
     <div class="flex-center flex-row mb-2">
       <span class="me-1">[[[bond_lock]]]</span>
       <strong class="me-1" data-tmpl="fee"></strong>
-      <span class="text-muted unit">XYZ</span>
+      <span class="grey unit">XYZ</span>
     </div>
-    <div data-tmpl="bondCostBreakdown" class="mb-2 text-muted">[[[bond_cost_breakdown]]]</div>
-    <span data-tmpl="sendEnoughWithEst" class="text-muted">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes totalForBond */}}
-    <span data-tmpl="sendEnoughForToken" class="text-muted">[[[Send funds for token]]]</span>
+    <div data-tmpl="bondCostBreakdown" class="mb-2 grey">[[[bond_cost_breakdown]]]</div>
+    <span data-tmpl="sendEnoughWithEst" class="grey">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes totalForBond */}}
+    <span data-tmpl="sendEnoughForToken" class="grey">[[[Send funds for token]]]</span>
     <div class="mb-1 flex-center flex-row d-hide" data-tmpl="txFeeBox">
       <span class="fs16 me-1">[[[Reserves for tx fees]]]</span>
       <span class="fs20 me-1" data-tmpl="txFee"></span>
-      <span class="fs16 text-muted unit" data-tmpl="txFeeUnit">XYZ</span>
+      <span class="fs16 grey unit" data-tmpl="txFeeUnit">XYZ</span>
     </div>
     <div class="mb-3 flex-center flex-row d-hide" data-tmpl="txFeeBalanceBox">
       <span class="fs16 me-1">[[[Tx Fee Balance]]]</span>
       <span class="fs20 me-1" data-tmpl="parentBal">0</span>
-      <span class="fs16 text-muted unit" data-tmpl="parentBalUnit">XYZ</span>
+      <span class="fs16 grey unit" data-tmpl="parentBalUnit">XYZ</span>
     </div>
     <hr class="dashed w-100 mb-3">
-    <div class="form-label">[[[Your Deposit Address]]]</div>
+    <div class="mb-2">[[[Your Deposit Address]]]</div>
     <div class="mono deposit-address border user-select-all" data-tmpl="depoAddr"></div>
     <span data-tmpl="sendEnough">[[[Send enough for bonds]]]</span> {{- /* generic message if the fee buffer is unknown */}}
   </div>
 </div>
 
-<div class="hoverbg pointer text-muted d-inline-block text-center" data-tmpl="goBack">
+<div class="hoverbg pointer grey d-inline-block text-center" data-tmpl="goBack">
   <span class="ico-arrowback fs12 mb-1"></span>
   [[[pick a different asset]]]
 </div>
@@ -729,16 +729,16 @@
  <div class="fs18 mb-3">[[[reset_app_pw_msg]]]</div>
  <hr class="dashed mb-3">
  <div class="mb-3">
-   <label for="newAppPassword" class="form-label">[[[New Password]]]</label>
-   <input type="password" class="form-control select" id="newAppPassword" autocomplete="new-password">
+   <label for="newAppPassword">[[[New Password]]]</label>
+   <input type="password" id="newAppPassword" autocomplete="new-password">
  </div>
  <div class="mb-3">
-   <label for="confirmNewAppPassword" class="form-label">[[[Confirm New Password]]]</label>
-   <input type="password" class="form-control select" id="confirmNewAppPassword" autocomplete="off">
+   <label for="confirmNewAppPassword">[[[Confirm New Password]]]</label>
+   <input type="password" id="confirmNewAppPassword" autocomplete="off">
  </div>
  <div class="mb-3">
-   <label for="seedInput" class="form-label">[[[Restoration Seed]]]</label>
-   <textarea class="form-control select mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
+   <label for="seedInput">[[[Restoration Seed]]]</label>
+   <textarea class="mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
  </div>
  <div class="d-flex justify-content-end">
     <button id="resetAppPWSubmitBtn" type="button" class="go">[[[Submit]]]</button>
@@ -769,7 +769,7 @@
       </span>
     </span>
   </div>
-  <div class="fs14 text-muted">
+  <div class="fs14 grey">
     [[[score_factors]]]
   </div>
 </div>
