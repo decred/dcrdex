@@ -61,39 +61,33 @@ func TestRPCTestnet(t *testing.T) {
 }
 
 func TestFreeServers(t *testing.T) {
-	// https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/
 	// https://www.alchemy.com/chain-connect/chain/polygon-pos
 	// https://chainlist.org/?search=Polygon+Mainnet
 	freeServers := []string{
 		// Passing
-		"https://rpc-mainnet.maticvigil.com",
-		"https://rpc.ankr.com/polygon",
-		"https://polygon.blockpi.network/v1/rpc/public",
 		"https://1rpc.io/matic",
-		"https://polygon.api.onfinality.io/public",
-		"https://rpc-mainnet.matic.quiknode.pro",
-		"https://polygon.drpc.org",
-		// Not passing
-		"https://matic-mainnet-full-rpc.bwarelabs.com",
-		"https://polygon-rpc.com",
-		"https://polygon-mainnet.rpcfast.com?api_key=xbhWBI1Wkguk8SNMu1bvvLurPGLXmgwYeC4S6g2H7WdwFigZSmPWVZRxrskEQwIf",
-		"https://polygon.rpc.blxrbdn.com",
-		"https://rpc-mainnet.matic.network",
-		"https://endpoints.omniatech.io/v1/matic/mainnet/public",
-		"https://matic-mainnet.chainstacklabs.com",
-		"https://polygon-bor.publicnode.com",
-		"https://polygon.llamarpc.com",
+		"https://rpc.ankr.com/polygon",
 		"https://polygon-mainnet.public.blastapi.io",
-		"https://poly-rpc.gateway.pokt.network",
-		"https://polygon-mainnet-public.unifra.io",
-		"https://g.w.lavanet.xyz:443/gateway/polygon1/rpc-http/f7ee0000000000000000000000000000",
-		"https://matic-mainnet-archive-rpc.bwarelabs.com",
-		"https://polygonapi.terminet.io/rpc",
-		"https://polygon.meowrpc.com",
+		"https://polygon.blockpi.network/v1/rpc/public",
+		"https://polygon.llamarpc.com",
+		"https://rpc-mainnet.maticvigil.com",
+		"https://endpoints.omniatech.io/v1/matic/mainnet/public",
+		"https://rpc-mainnet.matic.quiknode.pro",
+		"https://gateway.tenderly.co/public/polygon",
+		// Failing
+		"https://matic-mainnet-full-rpc.bwarelabs.com", // connect error: failed to connect to even a single provider among: bwarelabs.com
+		"https://polygon.api.onfinality.io/public",     // "BalanceAt" error: Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit
+		"https://poly-rpc.gateway.pokt.network",        // connect error: failed to connect to even a single provider among: pokt.network
+		"https://polygon-rpc.com",                      // "TransactionReceipt" error: not found
+		"https://polygon.meowrpc.com",                  // "TransactionReceipt" error: not found
+		"wss://polygon.drpc.org",                       // "TransactionReceipt" error: Unable to perform request
+		"https://polygon.rpc.blxrbdn.com",              // "TransactionReceipt" error: not found
+		"https://g.w.lavanet.xyz:443/gateway/polygon1/rpc-http/f7ee0000000000000000000000000000", // "TransactionReceipt" error: not found
+		"https://rpc-mainnet.matic.network",                     // connect error: failed to connect to even a single provider among: matic.network
+		"wss://polygon-bor-rpc.publicnode.com",                  // "TransactionReceipt" error: not found
+		"https://public.stackup.sh/api/v1/node/polygon-mainnet", // "TransactionReceipt" error: not found
+		"https://matic-mainnet.chainstacklabs.com",              // connect error: failed to connect to even a single provider among: chainstacklabs.com
 
-		// DEPRECATED
-		// "https://matic-mainnet-archive-rpc.bwarelabs.com",
-		// "https://matic-mainnet-full-rpc.bwarelabs.com",
 	}
 	mt.TestFreeServers(t, freeServers, dex.Mainnet)
 }
@@ -107,16 +101,14 @@ func TestFreeTestnetServers(t *testing.T) {
 		"https://rpc.ankr.com/polygon_mumbai",
 		"https://polygon-testnet.public.blastapi.io",
 		"https://polygon-mumbai.blockpi.network/v1/rpc/public",
-		"https://rpc-mumbai.maticvigil.com",
-
-		// Not passing
-		"https://polygon-mumbai-bor.publicnode.com",
 		"https://endpoints.omniatech.io/v1/matic/mumbai/public",
-		"https://polygontestapi.terminet.io/rpc",
-		"https://matic-mumbai.chainstacklabs.com",
-		"https://matic-testnet-archive-rpc.bwarelabs.com",
-		"https://g.w.lavanet.xyz:443/gateway/polygon1t/rpc-http/f7ee0000000000000000000000000000",
-		"https://api.zan.top/node/v1/polygon/mumbai/public",
+		// Failing
+		"https://matic-testnet-archive-rpc.bwarelabs.com",                                         // connect error: failed to connect to even a single provider among: bwarelabs.com
+		"https://matic-mumbai.chainstacklabs.com",                                                 // connect error: failed to connect to even a single provider among: chainstacklabs.com
+		"https://g.w.lavanet.xyz:443/gateway/polygon1t/rpc-http/f7ee0000000000000000000000000000", // "TransactionReceipt" error: not found
+		"https://rpc-mumbai.maticvigil.com",                                                       // connect error: failed to connect to even a single provider among: maticvigil.com
+		"wss://polygon-mumbai-bor-rpc.publicnode.com",                                             // "TransactionReceipt" error: not found
+		"https://polygon-mumbai-pokt.nodies.app",                                                  // "TransactionReceipt" error: not found
 	}
 	mt.TestFreeServers(t, freeServers, dex.Testnet)
 }

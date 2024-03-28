@@ -57,7 +57,7 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
 		}
 
-		ethClient = newRPCClient(BipID, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
+		ethClient = newRPCClient(BipID, 42, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
@@ -203,7 +203,7 @@ func TestHeaderSubscription(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, headerExpirationTime)
 	defer cancel()
 	ept := endpoint{url: wsEndpoint}
-	cl := newRPCClient(BipID, dex.Simnet, []endpoint{ept}, ethClient.ethContractAddr, ethClient.log)
+	cl := newRPCClient(BipID, 42, dex.Simnet, []endpoint{ept}, ethClient.ethContractAddr, ethClient.log)
 	ec, err := cl.connectToEndpoint(ctx, ept)
 	if err != nil {
 		t.Fatalf("connectToEndpoint error: %v", err)

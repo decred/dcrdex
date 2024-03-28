@@ -59,14 +59,14 @@ var (
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		0: {
 			dex.Mainnet: common.HexToAddress("0x8C17e4968B6903E1601be82Ca989c5B5E2c7b400"),
+			dex.Testnet: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"), // tx 0xb24b44beebc0e34fa57bd9f08f9aaf70f40c654f3ddbe0b15dd942ee23ce02f4
 			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
-			dex.Testnet: common.HexToAddress("0x198463496037754564e9bea5418Bf4117Db0520C"),
 		},
 	}
 
 	MultiBalanceAddresses = map[dex.Network]common.Address{
 		dex.Mainnet: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"), // tx 0xaf6cb861578c0ded0750397d7e044a7dd86c94aa47211d02188e146a2424dda4
-		dex.Testnet: common.HexToAddress("0x0F7F7C2979554B89F4Ca974fe0d382008888f699"), // tx 0x540d3e82888b18f89566a988712a7c2ecd45bd2df472f8dd689e319ae9fa4445
+		dex.Testnet: common.HexToAddress("0x8Bd6F6dBe69588D94953EE289Fd3E1db3e8dB43D"), // tx 0x46a416344927a8d1f33865374e9b9e824249980da8d34f6c3214a1ee036ca5fe
 	}
 )
 
