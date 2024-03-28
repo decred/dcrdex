@@ -127,6 +127,14 @@ table {
   }
 }
 
+a {
+  color: var(--link-color);
+
+  &:hover {
+    color: var(--link-color-hover);
+  }
+}
+
 @include media-breakpoint-up(md) {
   table#walletInfoTable {
     width: auto;
@@ -188,11 +196,6 @@ div.form-closer {
 
 .form-check-label {
   cursor: pointer;
-}
-
-input.form-control {
-  background-color: var(--form-input-bg);
-  border: 1px solid var(--form-input-border);
 }
 
 .form-check-input[type=checkbox] {

@@ -10,7 +10,7 @@
     <div class="px-1 py-2">
       <span class="fs22 demi me-2">[[[Order]]]</span>
       <span class="fs18" dir="ltr">{{$ord.ID}}</span>
-      <span class="float-end me-2"><a href="/orders" class="d-inline-block subtlelink fs15"><span class="fs12 ico-textfile"></span> [[[see all orders]]]</a></span>
+      <span class="float-end ms-2"><a href="/orders" class="d-inline-block subtlelink fs15"><span class="fs12 ico-textfile"></span> [[[see all orders]]]</a></span>
     </div>
     {{- /* DATA CARDS */ -}}
     <div class="d-flex flex-wrap">
@@ -89,7 +89,7 @@
     {{- /* ACTIONS */ -}}
     <div class="fs18 demi pt-4 pb-2 d-hide" id="actionsLabel">[[[Actions]]]</div>
     <div class="d-flex align-items-stretch justify-content-start flex-wrap">
-      <button id="accelerateBttn" type="button" class="px-2 py-1 fs15 bg2 selected d-hide">[[[accelerate]]]</button>
+      <button id="accelerateBttn" type="button" class="px-2 py-1 fs15 selected d-hide">[[[accelerate]]]</button>
     </div>
 
     {{- /* MATCHES */ -}}
@@ -97,7 +97,7 @@
     <div class="d-flex align-items-stretch justify-content-start flex-wrap" id="matchBox">
 
       <div class="match-card me-4 mb-2 border" id="matchCardTmpl">
-        <div class="match-header my-2">
+        <div class="match-header mb-2 p-2">
           <div class="d-flex justify-content-between align-items-center">
             <span class="match-data-label ms-3">[[[Match ID]]]</span>
           </div>
@@ -199,9 +199,9 @@
     </div>
 
     {{- /* FUNDING COINS */ -}}
-    <div class="order-datum d-inline-block my-3">
-      <div class="text-start">[[[Funding Coins]]]</div>
-      <div class="fs14 text-start">
+    <div class="order-datum d-inline-block border my-3">
+      <div class="text-start p-2">[[[Funding Coins]]]</div>
+      <div class="fs14 text-start p-2">
         {{range $ord.FundingCoins}}
           <a target="_blank" class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
         {{end}}

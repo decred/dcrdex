@@ -40,12 +40,12 @@
       </div>
       <hr class="dashed mb-3">
       <div class="demi text-center px-4 mb-2">[[[other_actions]]]</div>
-      <div id="deleteArchivedRecords">
+      <div id="deleteArchivedRecords" class="pb-2">
         <button class="small danger">[[[delete_archived_records]]]</button>
       </div>
     </div>
     <div class="flex-grow-1 p-3">
-      <table id="ordersTable" class="striped row-hover compact">
+      <table id="ordersTable" class="striped row-hover compact border row-border">
         <thead id="tableHead">
           <tr>
             <th class="py-2">[[[Trade]]]</th>
@@ -71,15 +71,15 @@
               <img data-tmpl="toLogo" class="micro-icon">
               <span data-tmpl="toSymbol"></span>
             </td>
-            <td data-tmpl="host" class="fs14 text-muted"></td>
+            <td data-tmpl="host" class="grey"></td>
             <td data-tmpl="type"></td>
             <td data-tmpl="status"></td>
             <td data-tmpl="rate" class="text-end"></td>
             <td data-tmpl="filled" class="text-end"></td>
             <td data-tmpl="settled" class="text-end"></td>
-            <td data-tmpl="timeAgo" class="text-end fs14 d-md-none d-lg-table-cell"></td>
-            <td data-tmpl="time" class="text-end fs14"></td>
-            <td><a class="ico-open fs14 pointer plainlink" data-tmpl="link"></a></td>
+            <td data-tmpl="timeAgo" class="text-end d-md-none d-lg-table-cell"></td>
+            <td data-tmpl="time" class="text-end"></td>
+            <td><a class="ico-open pointer plainlink" data-tmpl="link"></a></td>
           </tr>
         </tbody>
       </table>
@@ -100,12 +100,12 @@
         <span class="ico-info"></span>
         </label>
         <div id="archivedDateField" class="mt-2 mb-2 ps-4">
-         <label for="olderThan" class="form-label" data-tooltip="[[[archived_date_tooltip]]]">
+         <label for="olderThan" data-tooltip="[[[archived_date_tooltip]]]">
           [[[date_time]]]
           <span class="ico-info"></span>
         </label>
         <div class="d-flex">
-         <input type="datetime-local" class="form-control col-1 select" id="olderThan">
+         <input type="datetime-local" class="col-1" id="olderThan">
         </div>
        </div>
       </div>

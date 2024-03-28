@@ -10,6 +10,8 @@ body:not(.dark) {
   --border-color: #ddd;
 
   // links
+  --link-color: #2a71d5;
+  --link-color-hover: #144487;
   --subtle-link-color: #05053b;
   --subtle-link-hover: #07075e;
 
@@ -34,6 +36,7 @@ body:not(.dark) {
   --form-bg: #fafafae4;
   --form-input-bg: #fff;
   --form-input-border: #999;
+  --form-input-border-focus: #555;
   --form-input-bg-active: #3095db;
   --form-opt-selected-bg: #0001;
   --form-selected-tab-bg: white;
@@ -70,6 +73,8 @@ body.dark {
   --border-color: #383f4b;
 
   // links
+  --link-color: #388bff;
+  --link-color-hover: #5e9ffa;
   --subtle-link-color: #e6e6ff;
   --subtle-link-hover: #d1d1ff;
 
@@ -94,6 +99,7 @@ body.dark {
   --form-bg: #091a28e4;
   --form-input-bg: black;
   --form-input-border: #555;
+  --form-input-border-focus: #999;
   --form-input-bg-active: #27278d;
   --form-opt-selected-bg: #fff1;
   --form-selected-tab-bg: #263846;
