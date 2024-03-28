@@ -1,3 +1,7 @@
+$sans: "source-sans", sans-serif;
+$demi-sans: "demi-sans", sans-serif;
+$mono: "mono", monospace;
+
 /* fonts */
 @font-face {
   font-family: "source-sans";
@@ -5,15 +9,6 @@
     url("/font/source-sans-pro-v9-latin-regular.woff") format("woff"),
     url("/font/source-sans-pro-v9-latin-regular.svg") format("svg");
   font-weight: normal;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: "source-sans-light";
-  src:
-    url("/font/SourceSansPro-Light.woff") format("woff"),
-    url("/font/SourceSansPro-Light.svg") format("svg");
-  font-weight: 200;
   font-style: normal;
 }
 
@@ -32,17 +27,6 @@
   src:
     url("/font/inconsolata-v15-latin-regular.woff") format("woff"),
     url("/font/inconsolata-v15-latin-regular.svg") format("svg");
-  font-weight: normal;
-  font-style: normal;
-}
-
-/* icons */
-@font-face {
-  font-family: "icomoon";
-  src:
-    url("/font/icomoon.ttf?u8i98qq") format("truetype"),
-    url("/font/icomoon.woff?u8i98qq") format("woff"),
-    url("/font/icomoon.svg?u8i98qq#icomoon") format("svg");
   font-weight: normal;
   font-style: normal;
 }
@@ -107,16 +91,6 @@
   font-size: 35px;
 }
 
-.micro-icon {
-  width: 15px;
-  height: 15px;
-}
-
-.mini-icon {
-  width: 20px;
-  height: 20px;
-}
-
 .demi {
   font-family: $demi-sans;
 }
@@ -127,10 +101,6 @@
 
 .sans {
   font-family: $sans;
-}
-
-.sans-light {
-  font-family: $sans-light;
 }
 
 .bold {

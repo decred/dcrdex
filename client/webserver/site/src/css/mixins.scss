@@ -1,0 +1,51 @@
+@use 'sass:map';
+
+@mixin stylish-overflow {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #7774 #7771;
+
+  /* Works on Chrome/Edge/Safari */
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background-color: var(--body-bg-tertiary);
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--body-bg-tertiary);
+    border-radius: 4px;
+  }
+}
+
+@mixin fill-abs {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+
+@mixin border($width: 1px, $style: solid, $color: var(--border-color)) {
+  border: $width $style $color;
+}
+
+@mixin border-top($width: 1px, $style: solid, $color: var(--border-color)) {
+  border-top: $width $style $color;
+}
+
+@mixin border-bottom($width: 1px, $style: solid, $color: var(--border-color)) {
+  border-bottom: $width $style $color;
+}
+
+@mixin border-left($width: 1px, $style: solid, $color: var(--border-color)) {
+  border-left: $width $style $color;
+}
+
+@mixin border-right($width: 1px, $style: solid, $color: var(--border-color)) {
+  border-right: $width $style $color;
+}
+

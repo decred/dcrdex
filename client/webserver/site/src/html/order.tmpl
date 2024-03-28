@@ -14,75 +14,75 @@
     </div>
     {{- /* DATA CARDS */ -}}
     <div class="d-flex flex-wrap">
-      <div class="order-datum">
-        <div>[[[Exchange]]]</div>
-        <div>{{$ord.Host}}</div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Exchange]]]</div>
+        <div class="py-1 px-3">{{$ord.Host}}</div>
       </div>
-      <div class="order-datum">
-        <div>[[[Market]]]</div>
-        <a href="/markets?host={{$ord.Host}}&base={{$ord.BaseID}}&quote={{$ord.QuoteID}}" class="plainlink hoverbg">
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Market]]]</div>
+        <a href="/markets?host={{$ord.Host}}&base={{$ord.BaseID}}&quote={{$ord.QuoteID}}" class="plainlink hoverbg py-1 px-3">
           {{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}}
           <span id="mktBaseSymbol">{{toUpper $ord.BaseSymbol}}</span>-<span id="mktQuoteSymbol">{{toUpper $ord.QuoteSymbol}}</span>
         </a>
       </div>
-      <div class="order-datum">
-        <div>[[[Type]]]</div>
-        <div>{{ $ord.TypeString }}</div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Type]]]</div>
+        <div class="py-1 px-3">{{ $ord.TypeString }}</div>
       </div>
-      <div class="order-datum">
-        <div>[[[Status]]]</div>
-        <div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Status]]]</div>
+        <div class="py-1 px-3">
           <span id="status">{{$ord.StatusString}}</span>
           {{if $ord.Cancelable}}
             <span id="cancelBttn" class="ico-cross fs12 ms-1 pointer hoverbg" data-tooltip="[[[cancel_order]]]"></span>
           {{end}}
         </div>
       </div>
-      <div class="order-datum">
-        <div>[[[Offering]]]</div>
-        <div>{{$ord.OfferString}} {{$ord.FromTicker}} {{template "microIcon" $ord.FromSymbol}}</div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Offering]]]</div>
+        <div class="py-1 px-3">{{$ord.OfferString}} {{$ord.FromTicker}} {{template "microIcon" $ord.FromSymbol}}</div>
       </div>
-      <div class="order-datum">
-        <div>[[[Asking]]]</div>
-        <div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Asking]]]</div>
+        <div class="py-1 px-3">
           {{if (not $ord.IsMarketOrder)}}
             {{$ord.AskString}}
           {{end}}
           {{$ord.ToSymbol}} {{template "microIcon" $ord.ToSymbol}}
         </div>
       </div>
-      <div class="order-datum">
-        <div>[[[Rate]]]</div>
-        <div>{{$ord.RateString}}</div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Rate]]]</div>
+        <div class="py-1 px-3">{{$ord.RateString}}</div>
       </div>
-      <div class="order-datum">
-        <div>[[[Filled]]]</div>
-        <div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Filled]]]</div>
+        <div class="py-1 px-3">
           {{$ord.FilledPercent}}%
           ({{$ord.FilledFrom}} {{template "microIcon" $ord.FromSymbol}}
           &rarr;
           {{$ord.FilledTo}} {{template "microIcon" $ord.ToSymbol}})
         </div>
       </div>
-      <div class="order-datum">
-        <div>[[[Settled]]]</div>
-        <div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Settled]]]</div>
+        <div class="py-1 px-3">
           {{$ord.SettledPercent}}%
           ({{$ord.SettledFrom}} {{template "microIcon" $ord.FromSymbol}}
           &rarr;
           {{$ord.SettledTo}} {{template "microIcon" $ord.ToSymbol}})
         </div>
       </div>
-      <div class="order-datum">
-        <div>[[[Fees]]] <span class="ico-info fs12" data-tooltip="[[[order_fees_tooltip]]]"></span></div>
-        <div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Fees]]] <span class="ico-info fs12" data-tooltip="[[[order_fees_tooltip]]]"></span></div>
+        <div class="py-1 px-3">
           {{$ord.SwapFeesString}} {{template "microIcon" $ord.FromFeeSymbol}},
           {{$ord.RedemptionFeesString}} {{template "microIcon" $ord.ToFeeSymbol}}
         </div>
       </div>
-      <div class="order-datum">
-        <div>[[[Age]]]</div>
-        <div data-stamp="{{$ord.SubmitTime}}"></div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[Age]]]</div>
+        <div class="py-1 px-3" data-stamp="{{$ord.SubmitTime}}"></div>
       </div>
     </div> {{- /* END DATA CARDS */ -}}
 
@@ -96,8 +96,8 @@
     <div class="fs18 demi pt-4 pb-2{{if eq (len $ord.Matches) 0}} d-hide{{end}}" id="matchesLabel">[[[Matches]]]</div>
     <div class="d-flex align-items-stretch justify-content-start flex-wrap" id="matchBox">
 
-      <div class="match-card" id="matchCardTmpl">
-        <div class="match-header">
+      <div class="match-card me-4 mb-2 border" id="matchCardTmpl">
+        <div class="match-header my-2">
           <div class="d-flex justify-content-between align-items-center">
             <span class="match-data-label ms-3">[[[Match ID]]]</span>
           </div>

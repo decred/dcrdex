@@ -3,65 +3,66 @@
 <div id="main" data-handler="orders" class="main overflow-y-auto">
 
   <div class="w-100 d-flex justify-content-start align-items-stretch">
-    <div class="flex-stretch-column justify-content-start orders-left-side">
-      <div class="demi fs22 text-center py-1 px-4">[[[Order History]]]</div>
-      <div class="filter-display bg1">[[[Exchanges]]]</div>
-      <div id="hostFilter" class="filter-opts">
+    <div class="flex-stretch-column justify-content-start orders-left-side border-end pt-3 px-2">
+      <div class="demi fs22 text-center mb-3">[[[Order History]]]</div>
+      <div class="filter-display">[[[Exchanges]]]</div>
+      <div id="hostFilter" class="filter-opts mb-3">
         {{range .Hosts}}
-        <div class="ps-4 pe-2">
+        <div class="ps-2 pe-2">
           <input class="form-check-input" type="checkbox" value="{{.}}">
           <label class="form-check-label fs14">{{.}}</label>
         </div>
         {{end}}
-        <div class="apply-bttn d-hide"><button class="bg2 demi">[[[apply]]]</button></div>
+        <div class="apply-bttn d-hide mt-2 me-2 text-right"><button class="small">[[[apply]]]</button></div>
       </div>
-      <div class="filter-display bg1">[[[Assets]]]</div>
-      <div id="assetFilter" class="filter-opts">
+      <div class="filter-display">[[[Assets]]]</div>
+      <div id="assetFilter" class="filter-opts mb-3">
         {{range $assetID, $asset := .Assets}}
-        <div class="ps-4 pe-2">
+        <div class="ps-2 pe-2">
           <input class="form-check-input" type="checkbox" value="{{$assetID}}">
           <label class="form-check-label fs14">{{$asset.Symbol}}</label>
         </div>
         {{end}}
-        <div class="apply-bttn d-hide"><button class="bg2 demi">[[[apply]]]</button></div>
+        <div class="apply-bttn d-hide mt-2 me-2 text-right"><button class="small go">[[[apply]]]</button></div>
       </div>
-      <div class="filter-display bg1">[[[Status]]]</div>
-      <div id="statusFilter" class="filter-opts">
+      <div class="filter-display">[[[Status]]]</div>
+      <div id="statusFilter" class="filter-opts mb-3">
         {{range $status, $statusString := .Statuses}}
-        <div class="ps-4 pe-2">
+        <div class="ps-2 pe-2">
           <input class="form-check-input" type="checkbox" value="{{$status}}">
           <label class="form-check-label fs14">{{$statusString}}</label>
         </div>
         {{end}}
-        <div class="apply-bttn d-hide"><button class="bg2 demi">[[[apply]]]</button></div>
+        <div class="apply-bttn d-hide mt-2 me-2 text-right"><button class="small go">[[[apply]]]</button></div>
       </div>
-      <div id="exportOrders" class="export-archived-records-bttn mt-3 pb-2">
-        <button class="bg2 demi">[[[Export Trades]]]</button>
+      <div id="exportOrders" class="text-center">
+        <button class="small">[[[Export Trades]]]</button>
       </div>
-      <hr class="dashed mt-2 mb-2">
-      <div class="demi fs16 text-center py-1 px-4">[[[other_actions]]]</div>
-      <div id="deleteArchivedRecords" class="export-archived-records-bttn mt-2">
-        <button class="bg2 demi">[[[delete_archived_records]]]</button>
+      <hr class="dashed mb-3">
+      <div class="demi text-center px-4 mb-2">[[[other_actions]]]</div>
+      <div id="deleteArchivedRecords">
+        <button class="small danger">[[[delete_archived_records]]]</button>
       </div>
     </div>
-    <div class="flex-grow-1">
-      <table class="orderstable" id="ordersTable">
-        <thead id="tableHead" class="bg1 fs16">
+    <div class="flex-grow-1 p-3">
+      <table id="ordersTable" class="striped row-hover compact">
+        <thead id="tableHead">
           <tr>
-            <th>[[[Trade]]]</th>
-            <th>[[[Market]]]</th>
-            <th>[[[Type]]]</th>
-            <th>[[[Status]]]</th>
-            <th class="text-end">[[[Rate]]]</th>
-            <th class="text-end">[[[Filled]]]</th>
-            <th class="text-end">[[[Settled]]]</th>
-            <th class="text-end">[[[Time]]]</th>
+            <th class="py-2">[[[Trade]]]</th>
+            <th class="py-2">[[[Market]]]</th>
+            <th class="py-2">[[[Type]]]</th>
+            <th class="py-2">[[[Status]]]</th>
+            <th class="text-end py-2">[[[Rate]]]</th>
+            <th class="text-end py-2">[[[Filled]]]</th>
+            <th class="text-end py-2">[[[Settled]]]</th>
+            <th class="d-md-none d-lg-table-cell py-2"></th>
+            <th class="text-end py-2">[[[Time]]]</th>
             <th></th> {{/* Link */}}
           </tr>
         </thead>
-        <tbody id="tableBody">
+        <tbody id="tableBody" class="fs15">
           <tr id="rowTmpl">
-            <td data-tmpl="trade">
+            <td data-tmpl="trade" class="text-nowrap">
               <span data-tmpl="fromQty"></span>
               <img data-tmpl="fromLogo" class="micro-icon">
               <span data-tmpl="fromSymbol"></span>
@@ -70,13 +71,14 @@
               <img data-tmpl="toLogo" class="micro-icon">
               <span data-tmpl="toSymbol"></span>
             </td>
-            <td data-tmpl="host"></td>
+            <td data-tmpl="host" class="fs14 text-muted"></td>
             <td data-tmpl="type"></td>
             <td data-tmpl="status"></td>
             <td data-tmpl="rate" class="text-end"></td>
             <td data-tmpl="filled" class="text-end"></td>
             <td data-tmpl="settled" class="text-end"></td>
-            <td data-tmpl="time" class="text-end"></td>
+            <td data-tmpl="timeAgo" class="text-end fs14 d-md-none d-lg-table-cell"></td>
+            <td data-tmpl="time" class="text-end fs14"></td>
             <td><a class="ico-open fs14 pointer plainlink" data-tmpl="link"></a></td>
           </tr>
         </tbody>
@@ -90,17 +92,15 @@
   <div id="forms" class="d-hide">
     {{- /* DELETE ARCHIVED RECORDS FORM */ -}}
     <form class="d-hide" id="deleteArchivedRecordsForm"><div class="form-closer"><span class="ico-cross"></span></div>
-      <div class="py-1 text-center position-relative fs22 sans-light">
-       [[[delete_archived_records]]]
-      </div>
-      <div class="mt-2 p-0">
+      <h3>[[[delete_archived_records]]]</h3>
+      <div class="mb-3">
         <input id="showArchivedDateField" class="form-check-input" type="checkbox">
-        <label class="form-check-label ps-1 mb-1" for="showArchivedDateField" data-tooltip="[[[delete_all_archived_records]]]">
+        <label class="form-check-label" for="showArchivedDateField" data-tooltip="[[[delete_all_archived_records]]]">
          [[[show_archived_date_msg]]]
         <span class="ico-info"></span>
         </label>
-        <div id="archivedDateField" class="mt-3">
-         <label for="olderThan" class="form-label ps-1 mb-1" data-tooltip="[[[archived_date_tooltip]]]">
+        <div id="archivedDateField" class="mt-2 mb-2 ps-4">
+         <label for="olderThan" class="form-label" data-tooltip="[[[archived_date_tooltip]]]">
           [[[date_time]]]
           <span class="ico-info"></span>
         </label>
@@ -109,29 +109,29 @@
         </div>
        </div>
       </div>
-      <div class="mt-2 p-0">
+      <div class="mb-3">
         <input id="saveOrdersToFile" class="form-check-input" type="checkbox">
-        <label class="form-check-label ps-1 mb-1" for="saveOrdersToFile" data-tooltip="[[[save_orders_to_file_msg]]]">
+        <label class="form-check-label" for="saveOrdersToFile" data-tooltip="[[[save_orders_to_file_msg]]]">
         [[[save_orders_to_file]]]
         <span class="ico-info"></span>
         </label>
       </div>
-      <div class="mt-2 p-0">
+      <div class="mb-3">
         <input id="saveMatchesToFile" class="form-check-input" type="checkbox">
-        <label class="form-check-label ps-1 mb-1" for="saveMatchesToFile" data-tooltip="[[[save_matches_to_file_msg]]]">
+        <label class="form-check-label" for="saveMatchesToFile" data-tooltip="[[[save_matches_to_file_msg]]]">
          [[[save_matches_to_file]]]
         <span class="ico-info"></span>
         </label>
       </div>
       <div id="deleteArchivedResult">
-        <hr class="dashed mt-2 mb-2">
-        <div id="deleteArchivedRecordsMsg" class="fs15 d-hide text-break"></div>
-        <div id="archivedRecordsLocation" class="fs15 d-hide text-break"></div>
+        <hr class="dashed my-3">
+        <div id="deleteArchivedRecordsMsg" class="fs15 d-hide text-break mb-2"></div>
+        <div id="archivedRecordsLocation" class="fs15 d-hide text-break mb-2"></div>
       </div>
-      <div class="d-flex justify-content-end mt-4">
-        <button id="deleteArchivedRecordsSubmit" type="button" class="justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
+      <div class="d-flex justify-content-end">
+        <button id="deleteArchivedRecordsSubmit" type="button" class="danger">[[[Submit]]]</button>
       </div>
-      <div id="deleteArchivedRecordsErr" class="fs15 pt-3 text-center d-hide errcolor text-break"></div>
+      <div id="deleteArchivedRecordsErr" class="fs15 pt-3 text-center d-hide text-danger text-break"></div>
     </form>
   </div>
 

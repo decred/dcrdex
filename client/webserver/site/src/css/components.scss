@@ -1,0 +1,288 @@
+// Reusable components and styles 
+@import "~bootstrap/scss/mixins";
+@import "mixins";
+
+
+button {
+  background-color: transparent;
+  border: 1px solid var(--btn-border-color);
+  border-radius: 5px;
+  outline: none;
+  padding: 0.375rem 0.75rem;
+  user-select: none;
+  font-size: 1rem;
+  color: var(--text-color);
+  white-space: nowrap;
+
+  &.selected {
+    background-color: #38cfb0;
+    border: none;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:hover {
+    text-decoration: none;
+    border-color: var(--btn-hover-border-color);
+    background-color: #7772;
+  }
+
+  &.small {
+    padding: 0.25rem 0.5rem;
+    font-size: .8rem;
+  }
+
+  &.large {
+    padding: 0.5rem 1rem;
+    font-size: 1.25rem;
+  }
+
+  &.feature {
+    background-color: var(--btn-feature-bg);
+    border-color: var(--btn-feature-border-color);
+
+    &:hover {
+      background-color: var(--btn-feature-hover-bg);
+      border-color: var(--btn-featur-hover-border-color);
+    }
+  }
+
+  &.danger {
+    border-color: var(--btn-danger);
+    color: var(--btn-danger);
+
+    &:hover {
+      background-color: var(--btn-danger);
+      color: var(--btn-danger-hover-color);
+    }
+  }
+
+  &.go {
+    background-color: var(--btn-go-bg);
+    color: var(--btn-go-color);
+
+    &:hover {
+      background-color: var(--btn-go-hover-bg);
+    }
+  }
+}
+
+// tables
+table {
+  color: var(--text-color);
+  border-collapse: collapse;
+  width: 100%;
+
+  .table-group-divider {
+    border-color: var(--border-color)
+  }
+  
+  th,
+  td {
+    padding: 0.5rem;
+  }
+
+  &.row-border {
+    tbody {
+      border-bottom: 1px solid var(--border-color);
+
+      tr {
+        border-top: 1px solid var(--border-color);
+      }
+    }
+  }
+
+  &.cell-border {
+    th,
+    td {
+      border: 1px solid var(--border-color);
+    }
+  }
+
+  &.nopadding {
+    td {
+      padding: 0;
+    }
+  }
+
+  &.compact {
+    th,
+    td {
+      padding: 0.25rem;
+    }
+  }
+
+  &.row-hover {
+    tr:hover {
+      background-color: var(--body-bg-tertiary);
+    }
+  }
+
+  &.striped {
+    tr:nth-of-type(even) {
+      background-color: #7772;
+    }
+  }
+}
+
+@include media-breakpoint-up(md) {
+  table#walletInfoTable {
+    width: auto;
+  }
+}
+
+table.reg-asset-markets {
+  @extend .stylish-overflow;
+
+  display: block;
+  max-height: 120px;
+  line-height: 1.15;
+  overflow-y: hidden;
+  margin-right: 8px;
+
+  &:hover {
+    overflow-y: auto;
+  }
+
+  tr {
+    border: none;
+  }
+
+  th {
+    font-weight: normal;
+    font-size: 13px;
+  }
+
+  td {
+    font-size: 14px;
+  }
+
+  th,
+  td {
+    padding: 1px 5px;
+  }
+}
+
+// form components
+div.form-closer {
+  @extend .flex-center;
+  @extend .hoverbg;
+
+  width: 3rem;
+  margin-left: auto;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1rem;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  position: absolute;
+  top: 0;
+  right: 0;
+
+  span {
+    opacity: 0.8;
+  }
+}
+
+.form-check-label {
+  cursor: pointer;
+}
+
+input.form-control {
+  background-color: var(--form-input-bg);
+  border: 1px solid var(--form-input-border);
+}
+
+.form-check-input[type=checkbox] {
+  border: 1px solid var(--form-input-border);
+  cursor: pointer;
+
+  &:checked {
+    background-color: var(--form-input-bg-active);
+  }
+}
+
+select {
+  font-family: inherit;
+  padding: 0.75rem 1rem;
+}
+
+// Hide number arrows.
+// Chrome, Safari, Edge, Opera
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+// Firefox
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+form.card button:hover {
+  color: black;
+}
+
+// Remove red background for firefox on empty number input fields.
+input:invalid {
+  box-shadow: none;
+}
+
+.micro-icon {
+  position: relative;
+}
+
+#tooltip {
+  position: absolute;
+  left: -10000px;
+  z-index: 1000;
+  padding: 3px 6px;
+  max-width: 300px;
+  font-size: 15px;
+  border-radius: 4px;
+  background-color: var(--body-bg);
+
+  @include border;
+}
+
+.panel {
+  background-color: var(--body-bg-secondary);
+}
+
+.on-indicator {
+  width: 15px;
+  height: 15px;
+  border-radius: 8px;
+
+  &.on {
+    background-color: var(--indicator-good);
+  }
+
+  &.off {
+    background-color: #777;
+  }
+}
+
+div[data-handler=dexsettings],
+div[data-handler=init],
+div[data-handler=login],
+div[data-handler=markets],
+div[data-handler=mm],
+div[data-handler=mmsettings],
+div[data-handler=order],
+div[data-handler=orders],
+div[data-handler=register],
+div[data-handler=settings],
+div[data-handler=wallets] {
+  #forms>form:not(.plain) {
+    border-radius: 5px;
+
+    @include border;
+
+    background-color: var(--body-bg-secondary);
+    box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
+  }
+}

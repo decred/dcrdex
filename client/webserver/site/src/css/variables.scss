@@ -1,0 +1,37 @@
+
+// Main colors
+$primary: #0a4972;
+$secondary: #6c757d;
+$success: #0b5831;
+$warning: #f82e;
+$danger: #d22e;
+$green: #0b5831;
+
+// Link colors
+$link-decoration: none;
+$link-hover-decoration: underline;
+
+// scss-docs-start grid-breakpoints
+$grid-breakpoints: (
+  xs: 0,
+  sm: 576px,
+  md: 768px,
+  lg: 992px,
+  xl: 1200px,
+  xxl: 1750px,
+  xxxl: 2150px
+);
+
+// Grid columns
+// Set the number of columns and specify the width of the gutters.
+$grid-columns: 24;
+
+// Typography
+// stylelint-disable value-keyword-case
+$font-family-sans-serif: "source-sans", "sans-serif";
+$font-family-monospace: "mono", "monospace";
+// stylelint-enable value-keyword-case
+
+@import "~bootstrap/scss/variables";
+
+$enable-dark-mode: false;

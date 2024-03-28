@@ -1,27 +1,9 @@
+@import "~bootstrap/scss/mixins";
+@import "mixins";
+
 /* elements */
 html {
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-font-smoothing: antialiased !important;
-  -moz-font-smoothing: antialiased !important;
-  text-rendering: optimizeLegibility !important;
   height: 100%;
-  color: $font-color-light;
-}
-
-button {
-  color: $font-color-light;
-  background-color: transparent;
-  border: 1px solid #7777;
-  outline: none;
-
-  &.selected {
-    background-color: #38cfb0;
-    border: none;
-  }
-
-  &:focus {
-    outline: none;
-  }
 }
 
 body {
@@ -33,53 +15,8 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  background-color: $light_body_bg;
-  font-family: $sans;
-
-  &.preload {
-    display: none;
-  }
-}
-
-select {
-  font-family: inherit;
-  padding: 5px 10px;
-}
-
-// bootstrap override
-thead,
-tbody,
-tfoot,
-tr,
-td,
-th {
-  border-style: none;
-}
-
-// Hide number arrows.
-// Chrome, Safari, Edge, Opera
-input::-webkit-outer-spin-button,
-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-// Remove red background for firefox on empty number input fields.
-input:invalid {
-  box-shadow: none;
-}
-
-.overflow-y-auto {
-  overflow-y: auto;
-}
-
-.overflow-y-hidden {
-  overflow-y: hidden;
-}
-
-.overflow-x-hidden,
-.stylish-overflow.overflow-x-hidden {
-  overflow-x: hidden;
+  background-color: var(--body-bg);
+  color: var(--text-color);
 }
 
 header.maintop {
@@ -90,17 +27,16 @@ header.maintop {
   justify-content: space-between;
   align-items: center;
   z-index: 100;
-  border-bottom: 1px solid $light_border_color;
+  background-color: var(--body-bg-secondary);
 }
 
 a.logo-icon {
   display: block;
-  margin: 0 10px;
   background-size: cover;
   cursor: pointer;
   height: 40px;
   width: 40px;
-  background-image: url("/img/softened-icon.png");
+  background-image: var(--logo-path);
 }
 
 div.main {
@@ -110,51 +46,19 @@ div.main {
   position: relative;
 }
 
-div.clear {
-  opacity: 0; // Set by animation upon initial loading.
-}
-
-div.feature,
-button.feature {
-  cursor: pointer;
-  background-color: #6bc5ff;
-
-  &:hover {
-    background-color: #a3dbff;
-  }
-}
-
-.dynamicopts {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  flex-wrap: wrap;
-
-  & > div {
-    min-height: 55px;
-    margin-top: 10px;
-  }
-
-  & > div:not(.repeatable) {
-    width: 47%;
-  }
-}
-
 div.mainlinks {
-  white-space: nowrap;
-
-  & > div,
-  & > a {
-    color: #4a4949;
-    cursor: pointer;
-    padding-top: 5px;
-    padding-bottom: 5px;
-    padding-left: 10px;
+  &>div,
+  &>a {
+    color: var(--text-color-secondary);
+    padding: 0.5rem 0.75rem;
   }
 }
 
-.plainlink {
-  color: inherit;
+@include media-breakpoint-up(md) {
+  div.mainlinks>div,
+  div.mainlinks>a {
+    padding: 0.75rem 1rem;
+  }
 }
 
 header.maintop a,
@@ -164,118 +68,15 @@ header.maintop a:hover,
 .plainlink:visited,
 .plainlink:hover {
   text-decoration: none;
-  color: inherit;
 }
 
-.subtlelink,
-.subtlelink:visited {
-  text-decoration: none;
-  color: #05053b;
-}
-
-.subtlelink:hover {
-  text-decoration: underline;
-  color: #07075e;
-  cursor: pointer;
-}
-
-.hashwrap {
-  word-break: break-all;
-  user-select: all;
-}
 
 #header .hoverbright:hover {
-  color: #222;
-}
-
-form.card button:hover {
-  color: black;
+  color: var(--subtle-link-hover);
 }
 
 div.spinner {
   animation: spin 2s infinite linear;
-}
-
-// Firefox
-input[type=number] {
-  -moz-appearance: textfield;
-}
-
-select,
-select:focus,
-input:not([type=checkbox]),
-input:focus:not([type=checkbox]) {
-  border: 1px solid $light_input_border;
-}
-
-.flex-center {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.flex-stretch-column {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-
-@mixin fill-abs {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  right: 0;
-}
-
-.fill-abs {
-  @include fill-abs;
-}
-
-.min-fit {
-  min-height: fit-content;
-}
-
-@mixin stylish-overflow {
-  overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #7774 #7771;
-
-  /* Works on Chrome/Edge/Safari */
-  &::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: #7771;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background-color: #7774;
-    border-radius: 4px;
-  }
-}
-
-.stylish-overflow {
-  @include stylish-overflow;
-}
-
-.stylish-overflow.hoveronly:not(:hover) {
-  scrollbar-color: transparent transparent;
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background-color: transparent;
-    border-radius: 4px;
-  }
-}
-
-.max-h-100 {
-  max-height: 100%;
 }
 
 div.note-indicator {
@@ -284,20 +85,16 @@ div.note-indicator {
   border-radius: 3px;
 
   &.good {
-    background-color: #2d2e;
+    background-color: var(--indicator-good);
   }
 
   &.bad {
-    background-color: #d22e;
+    background-color: $danger;
   }
 
   &.warn {
-    background-color: #f82e;
+    background-color: $warning;
   }
-}
-
-span.note-time {
-  white-space: nowrap;
 }
 
 #noteIndicator {
@@ -307,45 +104,44 @@ span.note-time {
   font-size: 16px;
   line-height: 1;
   font-family: $demi-sans;
+  font-weight: bold;
   z-index: 2;
 
   &.good {
-    color: #2d2e;
+    color: var(--indicator-good);
   }
 
   &.bad {
-    color: #d22e;
+    color: $danger;
   }
 
   &.warn {
-    color: #f82e;
+    color: $warning;
   }
 }
 
 div.popup-notes {
-  position: fixed;
-  right: 5px;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  border-radius: 4px;
-  z-index: 1000;
-  max-width: 750px;
+align-items: flex-end;
+border-radius: 4px;
+bottom: 0;
+display: flex;
+flex-direction: column;
+max-width: 750px;
+position: fixed;
+right: 5px;
+z-index: 1000;
 
   & > span {
+    line-height: 1;
+    max-width: 100%;
     display: inline-block;
-    background-color: black;
-    color: $font-color-dark;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 15px;
-    border-bottom: 1px solid #7777;
+    background-color:var(--popup-notes-bg);
+    color: var(--popup-notes-color);
     padding: 4px 10px;
-    line-height: 1;
     margin: 3px 0 0;
-    max-width: 100%;
   }
 
   .note-indicator {
@@ -359,10 +155,11 @@ div.popup-notes {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  background-color: $light_body_bg;
-  border: 1px solid #7777;
+  background-color: var(--body-bg);
+
+  @include border;
+
   z-index: 100;
-  font-family: $sans;
   min-width: 150px;
   line-height: 1.5;
   max-height: 90%;
@@ -374,10 +171,9 @@ div.popup-notes {
   }
 
   .header {
-    border-bottom: 1px solid #7777;
+    @include border-bottom;
 
-    & > div {
-      margin-right: 20px;
+    &>div {
       opacity: 0.5;
       cursor: pointer;
 
@@ -396,215 +192,18 @@ div.popup-notes {
   width: 425px;
 
   div.note.firstview {
-    background-color: #7772;
+    background-color: var(--body-bg-tertiary);
   }
 
   div.note:not(:last-child) {
-    border-bottom-style: solid;
-    border-width: 1px;
-    border-color: #7777;
+    @include border-bottom;
   }
 }
 
 #profileBox {
   min-width: 250px;
-  font-size: 15px;
-  padding: 10px;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.mw-425 {
-  max-width: 425px;
-}
-
-.d-hide {
-  display: none !important;
-}
-
-.buycolor {
-  color: $buycolor_light;
-}
-
-.sellcolor {
-  color: $sellcolor_light;
-}
-
-.errcolor {
-  color: #e61c00;
-}
-
-.grey {
-  color: #999;
-}
-
-.rounded3 {
-  border-radius: 3px;
-}
-
-.brdr {
-  border: 1px solid $light_border_color;
-}
-
-.brdrleft {
-  border-left: 1px solid $light_border_color;
-}
-
-.brdrright {
-  border-right: 1px solid $light_border_color;
-}
-
-.brdrtop {
-  border-top: 1px solid $light_border_color;
-}
-
-.brdrbottom {
-  border-bottom: 1px solid $light_border_color;
-}
-
-hr.dashed {
-  border-top: dashed 2px #777;
-}
-
-.vscroll {
-  @extend .stylish-overflow;
-
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-.pointer {
-  cursor: pointer;
-}
-
-.underline {
-  text-decoration: underline;
-}
-
-.lh1 {
-  line-height: 1;
-}
-
-.select-all {
-  user-select: all;
-}
-
-.hoverbg:hover {
-  background-color: #7775;
-}
-
-div.form-closer {
-  @extend .flex-center;
-  @extend .hoverbg;
-
-  width: 40px;
-  margin-left: auto;
-  cursor: pointer;
-  padding: 10px 0;
-
-  span {
-    opacity: 0.8;
-  }
-}
-
-.micro-icon {
-  position: relative;
-}
-
-#tooltip {
-  position: absolute;
-  left: -10000px;
-  z-index: 1000;
-  padding: 3px 6px;
-  background-color: #040012;
-  border: 1px solid #333;
-  color: white;
-  max-width: 300px;
-  font-size: 15px;
-  border-radius: 4px;
 }
 
 #loader {
-  background-color: #e0e0e077;
-}
-
-.preline {
-  white-space: pre-line;
-}
-
-img.token-parent {
-  width: 0.7em;
-  height: 0.7em;
-  position: relative;
-  top: -0.4em;
-}
-
-sup.token-parent {
-  font-size: 0.6em;
-  position: relative;
-  top: -0.6em;
-}
-
-@include media-breakpoint-up(md) {
-  div.mainlinks > div,
-  div.mainlinks > a {
-    padding: 10px 18px;
-  }
-}
-
-.form-check-input[type=checkbox] {
-  background-color: #ebebeb;
-  border: 1px solid $light_input_border;
-  cursor: pointer;
-
-  &:checked {
-    background-color: #3095db;
-  }
-}
-
-.form-check-label {
-  cursor: pointer;
-}
-
-.panel {
-  background-color: $light_panel;
-}
-
-div[data-handler=dexsettings],
-div[data-handler=init],
-div[data-handler=login],
-div[data-handler=markets],
-div[data-handler=mm],
-div[data-handler=mmsettings],
-div[data-handler=order],
-div[data-handler=orders],
-div[data-handler=register],
-div[data-handler=settings],
-div[data-handler=wallets] {
-  #forms > form:not(.plain) {
-    border-radius: 5px;
-    background-color: #f3f3f3;
-    box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
-  }
-}
-
-.on-indicator {
-  width: 15px;
-  height: 15px;
-  border-radius: 8px;
-
-  &.on {
-    background-color: $buycolor_dark;
-  }
-
-  &.off {
-    background-color: #777;
-  }
-}
-
-.bodybg {
-  background-color: $light_body_bg;
+  background-color: var(--loader-bg);
 }

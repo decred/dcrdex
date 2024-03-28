@@ -11,12 +11,12 @@
           <span id="offMsg">[[[Off]]]</span>
         </div>
       </div>
-      <div class="flex-center p-3 brdrleft">
-        <button type="button" class="fs24 p-2 mt-2" id="startBotsBtn">
+      <div class="flex-center p-3 border-start">
+        <button class="go large px-4" id="startBotsBtn">
           <span class="ico-arrowright me-1"></span>
           [[[start_market_making]]]
         </button>
-        <button type="button" class="fs24 p-2 mt-2 d-hide" id="stopBotsBtn">
+        <button class="danger large px-4 d-hide" id="stopBotsBtn">
           <span class="ico-pause me-1"></span>
           [[[stop_market_making]]]
         </button>
@@ -24,24 +24,24 @@
     </div>
 
     <div id="noBots" class="w-100 flex-center flex-column">
-      <div class="d-flex align-items-stretch brdrleft brdrright">
+      <div class="d-flex align-items-stretch border-start border-end">
         <div class="col-12 flex-stretch-column mw-425 p-2">
-          <div class="fs28 flex-center text-nowrap brdrbottom">[[[Market Making]]]</div>
-          <div class="p-2 text-justify fs15">
+          <h3 class="flex-center text-nowrap border-bottom pb-3">[[[Market Making]]]</h3>
+          <p class="p-2">
             [[[whats_a_market_maker]]]
-          </div>
+          </p>
         </div>
-        <div class="col-12 flex-center flex-column mw-425 p-3 brdrleft">
+        <div class="col-12 flex-center flex-column mw-425 p-3 border-start">
           <span class="ico-robot mb-3"></span>
-          <button id="addBotBtnNoExisting" class="p-2 selected rounded3">[[[Add a Market Maker Bot]]]</button>
+          <button id="addBotBtnNoExisting" class="large go">[[[Add a Market Maker Bot]]]</button>
         </div>
       </div>
     </div>
 
-    <div id="mmErr"  class="flex-center errcolor d-hide"></div>
+    <div id="mmErr"  class="flex-center text-danger d-hide"></div>
 
     <div class="px-5 py-3 w-100">
-      <table id="botTable" class="w-100 d-hide">
+      <table id="botTable" class="row-border d-hide mb-3">
         <thead>
           <th id="enabledHeader">[[[enabled]]]</th>
           <th id="runningHeader" class="d-hide">[[[running]]]</th>
@@ -78,23 +78,25 @@
             </td>
             <td data-tmpl="baseBalanceTd"><span data-tmpl="baseBalance"></span><img class="mx-1 micro-icon" data-tmpl="baseBalanceLogo"></td>
             <td data-tmpl="quoteBalanceTd"><span data-tmpl="quoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="quoteBalanceLogo"></td>
-            <td class="text-end hoverbg pointer" data-tmpl="removeTd"><span class="ico-cross fs20 p-2 red"></span></td>
+            <td class="text-end hoverbg pointer" data-tmpl="removeTd"><span class="ico-cross fs20 p-2 text-danger"></span></td>
             <td class="text-end hoverbg pointer" data-tmpl="settings"><span class="ico-settings fs24 p-2"></span></td>
           </tr>
         </tbody>
         <tbody>
-          <tr id="addBotBtnWithExisting" class="hoverbg pointer">
+          <tr>
             <td colspan="9">
-              <div class="flex-center p-2 fs20">
-                <span class="ico-plus me-2"></span>
-                [[[Add another bot]]]
+              <div class="flex-center">
+                <button class="large" id="addBotBtnWithExisting">
+                  <span class="ico-plus me-2"></span>
+                  [[[Add another bot]]]
+                </button>
               </div>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
-  </div>
+</div>
     
 
   {{- /* FORMS */ -}}
@@ -103,13 +105,13 @@
 
     {{- /* APP PASSWORD */ -}}
     <form id="pwForm" class="flex-stretch-column">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div>
-        <label for="pwInput" class="form-label pt-3 ps-1 mb-1">[[[App Password]]]</label>
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <div class="mb-3">
+        <label for="pwInput" class="form-label">[[[App Password]]]</label>
         <input type="password" class="form-control select" id="pwInput" autocomplete="off">
       </div>
-      <div class="text-end  mt-3">
-        <button id="pwSubmit" class="selected fs16">[[[Submit]]]</button>
+      <div class="text-end">
+        <button id="pwSubmit" class="go">[[[Submit]]]</button>
       </div>
     </form>
   </div>  {{- /* END FORMS */ -}}

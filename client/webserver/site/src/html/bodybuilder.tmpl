@@ -1,7 +1,7 @@
 {{define "top"}}
 <!DOCTYPE html>
 <html lang="[[[Language]]]">
-<head data-turbolinks-eval="false">
+<head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,9 +11,9 @@
   <title>{{.Title}}</title>
   <link href="/css/style.css?v={{commitHash}}" rel="stylesheet">
 </head>
-<body class="preload">
+<body >
   <div class="popup-notes" id="popupNotes">
-    <span data-tmpl="note">
+    <span data-tmpl="note fs15">
       <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>
       <span data-tmpl="text"></span>
     </span>
@@ -23,23 +23,23 @@
 {{end}}
 
 {{define "header"}}
-<header id=header class="maintop panel">
+<header id="header" class="maintop border-bottom">
   {{$authed := .UserInfo.Authed}}
-  <a href="/" class="logo-icon d-none d-md-block"></a>
-  <a href="/" class="logo-icon d-block d-md-none"></a>
+  <a href="/" class="logo-icon d-none d-md-block mx-2"></a>
+  <a href="/" class="logo-icon d-block d-md-none mx-2"></a>
   <div id="headerSpace"></div>
-  <div class="mainlinks fs18 offwhite pe-2">
+  <div class="mainlinks fs18 pe-2 text-nowrap">
 
     <a href="/markets" class="demi hoverbg d-hide" id="marketsMenuEntry">[[[Markets]]]</a>
 
     <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallets]]]</a>
 
-    <div class="d-inline-block position-relative hoverbg{{if not $authed}} d-hide{{end}}" id="noteBell">
+    <div class="d-inline-block position-relative pointer hoverbg{{if not $authed}} d-hide{{end}}" id="noteBell">
       <span class="ico-bell fs20 p-2"></span>
       <div id="noteIndicator" class="d-hide"></div>
     </div>
 
-    <div class="d-inline-block hoverbg position-relative" id="burgerIcon">
+    <div class="d-inline-block hoverbg position-relative pointer" id="burgerIcon">
       <span class="ico-hamburger fs20 p-2"></span>
     </div>
 
@@ -51,8 +51,8 @@
 
   <div id="noteBox" class="d-hide">
     <div class="icon fs20 ico-bell p-1" id="innerNoteIcon"></div>
-    <div class="header d-flex align-items-center justify-content-start fs17 demi hoverbg px-3 py-2 min-fit">
-      <div id="noteCat" class="active">[[[Notifications]]]</div>
+    <div class="header d-flex align-items-center justify-content-start fs17 demi px-3 py-2 min-fit">
+      <div id="noteCat" class="active me-3">[[[Notifications]]]</div>
       <div id="pokeCat">[[[Recent Activity]]]</div>
     </div>
     <div id="noteList" class="flex-grow-1 stylish-overflow">
@@ -60,7 +60,7 @@
         <div class="d-flex justify-content-center align-items-center px-1">
           <div class="note-indicator d-inline-block me-2"></div>
           <div class="note-subject flex-grow-1 d-inline-block fs16 demi"></div>
-          <span class="note-time pe-2"></span>
+          <span class="note-time nowrap pe-2"></span>
         </div>
         <div class="note-details fs15 px-3"></div>
       </div>
@@ -72,15 +72,15 @@
             <span data-tmpl="subject"></span>
             <span data-tmpl="details"></span>
           </div>
-          <span class="note-time"></span>
+          <span class="note-time nowrap"></span>
         </div>
       </div>
     </div>
   </div>
 
-  <div id="profileBox" class="d-hide">
-    <div class="icon fs20 ico-hamburger p-2" id="innerBurgerIcon"></div>
-    <span class="errcolor" id="logoutErr"></span>
+  <div id="profileBox" class="d-hide p-3 fs15">
+    <div class="icon fs20 ico-hamburger p-1" id="innerBurgerIcon"></div>
+    <span class="text-danger" id="logoutErr"></span>
     <a href="/orders" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
       <span class="ico-settings fs16 me-2"></span>
       [[[Order History]]]

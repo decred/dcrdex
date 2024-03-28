@@ -1,86 +1,140 @@
+div[data-handler=mmsettings],
 div[data-handler=mm] {
-  #runningPrograms {
-    .running-program {
-      border: 2px solid #7777;
-      border-radius: 3px;
-
-      .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 5px;
-
-        &.green {
-          background-color: #0b5831; // same as dark selected button bg color
-        }
-
-        &.orange {
-          background-color: orange;
-        }
-      }
-
-      table {
-        font-size: 14px;
-
-        tr {
-          border-style: solid none;
-          border-width: 1px;
-          border-color: #7777;
-        }
-
-        td {
-          white-space: nowrap;
-        }
-
-        td:last-child {
-          text-align: right;
-          padding-left: 10px;
-        }
-      }
-    }
+  .modified {
+    border: 1px solid $warning !important;
   }
 
-  #botTable {
-    td,
-    th {
-      padding: 10px;
-    }
+  #gapStrategySelect {
+    width: 300px;
+  }
 
-    tr {
-      border-top: 1px solid $dark_border_color;
-    }
+  .gap-factor-input,
+  .lots-input {
+    max-width: 75px;
+  }
 
-    tr:last-child {
-      border-bottom: 1px solid $dark_border_color;
-    }
+  .settings-card {
+    @include border;
 
-    .ico-rocket {
-      color: #29bb77;
-    }
-    
-    .ico-sleeping {
-      color: #7777;
+    background-color: var(--body-bg-secondary);
+    margin: 0 1rem 2rem;
+    padding: 0.5rem;
+  }
+
+  .xclogo {
+    &.small {
+      width: 16px;
+      height: 16px;
     }
   
+    &.large {
+      width: 60px;
+      height: 60px;
+    }
+
+    &.medium {
+      width: 30px;
+      height: 30px;
+    }
+
+    &.off {
+      filter: grayscale(1);
+    }
+  }
+
+  #profitInput {
+    width: 70px;
+  }
+
+  .bot-type-selector {
+    @include border;
+    @extend .rounded3;
+
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    user-select: none;
+
+    &.disabled {
+      opacity: 0.5;
+    }
+
+    &:not(.disabled) {
+      @extend .hoverbg;
+
+      cursor: pointer;
+
+      &.selected {
+        outline: 2px solid $success;
+        background-color: #7772;
+      }
+    }
+  }
+ 
+  #marketFilterIcon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.5;
+  }
+
+  #botTypeForm {
+    min-width: 375px;
+  }
+
+  #cexSelection {
+    .cex-selector {
+      user-select: none;
+
+      &.configured:not(.selected) {
+        opacity: 0.8;
+      }
+    }
+
+    &.disabled {
+      .cex-selector.configured {
+        opacity: 0.5;
+      }
+
+      .cex-selector:not(.configured) {
+        cursor: pointer;
+      }
+    }
+
+    &:not(.disabled) {
+      .cex-selector {
+        @extend .hoverbg;
+
+        cursor: pointer;
+
+        &.selected {
+          border-color: $success;
+          border-width: 2px;
+          background-color: #7772;
+        }
+      }
+    }
+
+    .reconfig {
+      position: absolute;
+      top: 0;
+      right: 0;
+    }
+  }
+
+  .ico-rocket {
+    color: $success;
+  }
+
+  .ico-sleeping {
+    color: #7777;
+  }
+
+  #buyPlacementsBox {
     .ico-cross {
-      color: $sellcolor_light;
+      color: $danger;
     }
-  }
-
-  #startBotsBtn,
-  #stopBotsBtn {
-    opacity: 0.9;
-
-    &:hover {
-      opacity: 1;
-    }
-  }
-
-  #startBotsBtn {
-    background-color: $buycolor_light;
-  }
-
-  #stopBotsBtn {
-    background-color: $sellcolor_dark;
   }
 
   #noBots {
@@ -89,35 +143,18 @@ div[data-handler=mm] {
       opacity: 0.7;
     }
   }
-}
 
-div[data-handler=mm],
-div[data-handler=mmsettings] {
   .on-indicator {
     width: 15px;
     height: 15px;
     border-radius: 8px;
 
     &.on {
-      background-color: $buycolor_light;
+      background-color: $warning;
     }
 
     &.off {
       background-color: #777;
     }
-  }
-}
-
-body.dark #main.mm {
-  #marketSelect option {
-    background-color: $dark_body_bg;
-  }
-
-  #assetDropdown {
-    background-color: $dark_body_bg;
-  }
-
-  #botTable {
-    @extend .table-dark;
   }
 }
