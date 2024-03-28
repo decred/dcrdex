@@ -3537,7 +3537,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		Address:     oldDepositAddr,
 	}
 
-	storeWithBalance := func(w *xcWallet) error {
+	storeWithBalance := func(w *xcWallet, dbWallet *db.Wallet) error {
 		balances, err := c.walletBalance(w)
 		if err != nil {
 			c.log.Warnf("Error getting balance for wallet %s: %v", unbip(assetID), err)
@@ -3583,7 +3583,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}
 
 	// See if the wallet offers a quick path.
-	if configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer); is && oldWallet.walletType == walletDef.Type {
+	if configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer); is && oldWallet.walletType == walletDef.Type && oldWallet.connected() {
 		form.Config[asset.SpecialSettingActivelyUsed] = strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
 		defer delete(form.Config, asset.SpecialSettingActivelyUsed)
 
@@ -3607,7 +3607,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 					return newError(walletAuthErr, "failed to update password: %v", err)
 				}
 			}
-			if err = storeWithBalance(oldWallet); err != nil {
+			if err = storeWithBalance(oldWallet, dbWallet); err != nil {
 				return err
 			}
 			clearTickGovernors()
@@ -3681,16 +3681,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		}
 	}()
 
-	// Must connect to ensure settings are good. This comes before
-	// setWalletPassword since it would use connectAndUpdateWallet, which
-	// performs additional deposit address validation and balance updates that
-	// are redundant with the rest of this function.
-	dbWallet.Address, err = c.connectWalletResumeTrades(wallet, false)
-	if err != nil {
-		return fmt.Errorf("connectWallet: %w", err)
-	}
-
-	// If there are active trades, make sure they can be settled by the
+	// Helper funciton to make sure trades can be settled by the
 	// keys held within the new wallet.
 	sameWallet := func() error {
 		if c.walletIsActive(assetID) {
@@ -3704,56 +3695,95 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		}
 		return nil
 	}
-	if err := sameWallet(); err != nil {
-		wallet.Disconnect()
-		return newError(walletErr, "new wallet cannot be used with current active trades: %w", err)
+
+	reloadWallet := func(w *xcWallet, dbWallet *db.Wallet, checkSameness bool) error {
+		// Must connect to ensure settings are good. This comes before
+		// setWalletPassword since it would use connectAndUpdateWallet, which
+		// performs additional deposit address validation and balance updates that
+		// are redundant with the rest of this function.
+		dbWallet.Address, err = c.connectWalletResumeTrades(w, false)
+		if err != nil {
+			return fmt.Errorf("connectWallet: %w", err)
+		}
+
+		if checkSameness {
+			if err := sameWallet(); err != nil {
+				wallet.Disconnect()
+				return newError(walletErr, "new wallet cannot be used with current active trades: %w", err)
+			}
+			// If newWalletPW is non-nil, update the wallet's password.
+			if newWalletPW != nil { // includes empty non-nil slice
+				err = c.setWalletPassword(wallet, newWalletPW, crypter)
+				if err != nil {
+					wallet.Disconnect()
+					return fmt.Errorf("setWalletPassword: %v", err)
+				}
+				// Update dbWallet so db.UpdateWallet below reflects the new password.
+				dbWallet.EncryptedPW = make([]byte, len(wallet.encPass))
+				copy(dbWallet.EncryptedPW, wallet.encPass)
+			} else if oldWallet.locallyUnlocked() {
+				// If the password was not changed, carry over any cached password
+				// regardless of backend lock state. loadWallet already copied encPW, so
+				// this will decrypt pw rather than actually copying it, and it will
+				// ensure the backend is also unlocked.
+				err := wallet.Unlock(crypter) // decrypt encPW if set and unlock the backend
+				if err != nil {
+					wallet.Disconnect()
+					return newError(walletAuthErr, "wallet successfully connected, but failed to unlock. "+
+						"reconfiguration not saved: %w", err)
+				}
+			}
+		}
+
+		if err = storeWithBalance(w, dbWallet); err != nil {
+			w.Disconnect()
+			return err
+		}
+
+		c.updateAssetWalletRefs(w)
+		// reReserveFunding is likely a no-op because of the walletIsActive check
+		// above, and because of the way current LiveReconfigurers are implemented.
+		// For forward compatibility though, if a LiveReconfigurer with active
+		// orders indicates restart and the new wallet still owns the keys, we can
+		// end up here and we need to re-reserve.
+		go c.reReserveFunding(w)
+		return nil
 	}
 
-	// If newWalletPW is non-nil, update the wallet's password.
-	if newWalletPW != nil { // includes empty non-nil slice
-		err = c.setWalletPassword(wallet, newWalletPW, crypter)
-		if err != nil {
-			wallet.Disconnect()
-			return fmt.Errorf("setWalletPassword: %v", err)
-		}
-		// Update dbWallet so db.UpdateWallet below reflects the new password.
-		dbWallet.EncryptedPW = make([]byte, len(wallet.encPass))
-		copy(dbWallet.EncryptedPW, wallet.encPass)
-	} else if oldWallet.locallyUnlocked() {
-		// If the password was not changed, carry over any cached password
-		// regardless of backend lock state. loadWallet already copied encPW, so
-		// this will decrypt pw rather than actually copying it, and it will
-		// ensure the backend is also unlocked.
-		err := wallet.Unlock(crypter) // decrypt encPW if set and unlock the backend
-		if err != nil {
-			wallet.Disconnect()
-			return newError(walletAuthErr, "wallet successfully connected, but failed to unlock. "+
-				"reconfiguration not saved: %w", err)
-		}
-	}
-
-	if err = storeWithBalance(wallet); err != nil {
-		wallet.Disconnect()
+	// Reload the wallet
+	if err := reloadWallet(wallet, dbWallet, true); err != nil {
 		return err
 	}
 
-	c.updateAssetWalletRefs(wallet)
-
 	restartOnFail = false
 	success = true
+
+	// If there are tokens, reload those wallets.
+	for tokenID := range asset.Asset(assetID).Tokens {
+		tokenWallet, found := c.wallet(tokenID)
+		if found {
+			tokenDBWallet, err := c.db.Wallet((&db.Wallet{AssetID: tokenID}).ID())
+			if err != nil {
+				c.log.Errorf("Error getting db wallet for token %s: %w", unbip(tokenID), err)
+				continue
+			}
+			tokenWallet.Disconnect()
+			tokenWallet, err = c.loadWallet(tokenDBWallet)
+			if err != nil {
+				c.log.Errorf("Error loading wallet for token %s: %w", unbip(tokenID), err)
+				continue
+			}
+			if err := reloadWallet(tokenWallet, tokenDBWallet, false); err != nil {
+				c.log.Errorf("Error reloading token wallet %s: %w", unbip(tokenID), err)
+			}
+		}
+	}
 
 	if oldWallet.connected() {
 		// NOTE: Cannot lock the wallet backend because it may be the same as
 		// the one just connected.
 		go oldWallet.Disconnect()
 	}
-
-	// reReserveFunding is likely a no-op because of the walletIsActive check
-	// above, and because of the way current LiveReconfigurers are implemented.
-	// For forward compatibility though, if a LiveReconfigurer with active
-	// orders indicates restart and the new wallet still owns the keys, we can
-	// end up here and we need to re-reserve.
-	go c.reReserveFunding(wallet)
 
 	clearTickGovernors()
 

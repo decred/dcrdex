@@ -79,5 +79,15 @@ type Driver struct {
 
 // Setup creates the ETH backend. Start the backend with its Run method.
 func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
-	return eth.NewEVMBackend(cfg, dexpolygon.ContractAddresses, registeredTokens)
+	var chainID uint64
+	switch cfg.Net {
+	case dex.Mainnet:
+		chainID = dexpolygon.BorMainnetChainConfig.ChainID.Uint64()
+	case dex.Testnet:
+		chainID = dexpolygon.MumbaiChainConfig.ChainID.Uint64()
+	default:
+		chainID = 90001
+	}
+
+	return eth.NewEVMBackend(cfg, chainID, dexpolygon.ContractAddresses, registeredTokens)
 }

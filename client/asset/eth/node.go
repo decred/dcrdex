@@ -152,7 +152,7 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 			"enode://ca414c361d1a38716170923e4900d9dc9203dbaf8fdcaee73e1f861df9fdf20a1453b76fd218c18bc6f3c7e13cbca0b3416af02a53b8e31188faa45aab398d1c@127.0.0.1:30307", // delta
 		}
 	case dex.Testnet:
-		urls = params.GoerliBootnodes
+		urls = params.SepoliaBootnodes
 	case dex.Mainnet:
 		urls = params.MainnetBootnodes
 	default:

@@ -104,7 +104,7 @@ var (
 	// useRPC can be set to true to test the RPC clients.
 	useRPC bool
 
-	// isTestnet can be set to true to perform tests on the goerli testnet.
+	// isTestnet can be set to true to perform tests on the sepolia testnet.
 	// May need some setup including sending testnet coins to the addresses
 	// and a lengthy sync. Wallet addresses are the same as simnet. Tests may
 	// need to be run with a high --timeout=2h for the initial sync.

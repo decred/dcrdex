@@ -19,7 +19,7 @@ The credentials file should have the JSON format in the example below. The seed 
     "providers": {
         "eth": {
             "testnet: [
-                "https://goerli.infura.io/v3/<API key>"
+                "https://sepolia.infura.io/v3/<API key>"
             ],
             "mainnet": [
                 "https://mainnet.infura.io/v3/<API key>"
