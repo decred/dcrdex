@@ -637,9 +637,13 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "eth", "alpha", "node", "geth.ipc")}
 	case dex.Testnet:
 		defaultProviders = []string{
-			"https://goerli.blockpi.network/v1/rpc/public",
-			"https://eth-goerli.public.blastapi.io",
-			"https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
+			"https://rpc.ankr.com/eth_sepolia",
+			"https://ethereum-sepolia.blockpi.network/v1/rpc/public",
+			"https://eth-sepolia.public.blastapi.io",
+			"https://endpoints.omniatech.io/v1/eth/sepolia/public",
+			"https://rpc-sepolia.rockx.com",
+			"https://rpc.sepolia.org",
+			"https://eth-sepolia-public.unifra.io",
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
@@ -3244,7 +3248,7 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 		// Time in the header is in seconds.
 		timeDiff := time.Now().Unix() - int64(tipTime)
 		if timeDiff > dexeth.MaxBlockInterval && eth.net != dex.Simnet {
-			eth.log.Infof("Time since last eth block (%d sec) exceeds %d sec."+
+			eth.log.Infof("Time since block (%d sec) exceeds %d sec. "+
 				"Assuming not in sync. Ensure your computer's system clock "+
 				"is correct.", timeDiff, dexeth.MaxBlockInterval)
 			return false
@@ -3477,7 +3481,7 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 	defer cancel()
 	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
-		eth.log.Errorf("failed to get best hash: %w", err)
+		eth.log.Errorf("failed to get best hash: %v", err)
 		return
 	}
 	bestHash := bestHdr.Hash()

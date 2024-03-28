@@ -21,7 +21,7 @@ package main
 	3) Deploy a token swap contract to Polygon.
 		./deploy --mainnet --chain polygon --tokenaddr 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
 
-	4) Return remaining Goerli testnet ETH balance to specified address.
+	4) Return remaining Sepolia testnet ETH balance to specified address.
 		./deploy --testnet --chain eth --returnaddr 0x18d65fb8d60c1199bb1ad381be47aa692b482605
 
 	IMPORTANT: deploy uses the same wallet configuration as getgas. See getgas

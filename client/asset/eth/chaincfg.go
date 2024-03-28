@@ -38,10 +38,10 @@ var (
 	}
 
 	testnetCompatibilityData = CompatibilityData{
-		Addr:      common.HexToAddress("0x8879F72728C5eaf5fB3C55e6C3245e97601FBa32"),
-		TokenAddr: common.HexToAddress("0x07865c6E87B9F70255377e024ace6630C1Eaa37F"),
-		TxHash:    common.HexToHash("0x4e1d455f7eac7e3a5f7c1e0989b637002755eaee3a262f90b0f3aef1f1c4dcf0"),
-		BlockHash: common.HexToHash("0x8896021c2666303a85b7e4a6a6f2b075bc705d4e793bf374cd44b83bca23ef9a"),
+		Addr:      common.HexToAddress("0x1268ad189526ac0b386faf06effc46779c340ee6"),
+		TokenAddr: common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"), // USDC
+		TxHash:    common.HexToHash("0x854860598c69e9b9e259fe74ca88610752428541e747180e0d40a4409d036f02"),
+		BlockHash: common.HexToHash("0x7f3cd2786bc82872ffb55eface91a0afb927a9868adbb16a8d7939fef7385772"),
 	}
 )
 
@@ -55,7 +55,7 @@ func NetworkCompatibilityData(net dex.Network) (c CompatibilityData, err error) 
 		return testnetCompatibilityData, nil
 	case dex.Simnet:
 	default:
-		return c, fmt.Errorf("No compatibility data for network # %d", net)
+		return c, fmt.Errorf("no compatibility data for network # %d", net)
 	}
 	// simnet
 	tDir, err := simnetDataDir()
@@ -99,10 +99,10 @@ func ETHConfig(net dex.Network) (c ethconfig.Config, err error) {
 	c = ethconfig.Defaults
 	switch net {
 	// Ethereum
-	case dex.Testnet:
-		c.Genesis = core.DefaultGoerliGenesisBlock()
 	case dex.Mainnet:
 		c.Genesis = core.DefaultGenesisBlock()
+	case dex.Testnet:
+		c.Genesis = core.DefaultSepoliaGenesisBlock()
 	case dex.Simnet:
 		c.Genesis, err = readSimnetGenesisFile()
 		if err != nil {

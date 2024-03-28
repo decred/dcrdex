@@ -81,23 +81,31 @@ func TestFreeServers(t *testing.T) {
 
 var freeTestnetServers = []string{
 	// Sepolia
-	// "https://rpc.ankr.com/eth_sepolia", // Sepolia
-	// "https://relay-sepolia.flashbots.net",
-	// "https://ethereum-sepolia.blockpi.network/v1/rpc/public",
+	// Passing 03-27-2024
+	"https://rpc.ankr.com/eth_sepolia",
+	"https://ethereum-sepolia.blockpi.network/v1/rpc/public",
+	"https://eth-sepolia.public.blastapi.io",
+	"https://endpoints.omniatech.io/v1/eth/sepolia/public",
+	"https://rpc-sepolia.rockx.com",
+	"https://rpc.sepolia.org",
+	"https://eth-sepolia-public.unifra.io",
+	// Failing 03-27-2024
+	"https://relay-sepolia.flashbots.net", // connect error: failed to connect to even a single provider among: flashbots.net
+
 	//
 	// Goerli
-	// Passing 03-26-2024
-	"https://goerli.blockpi.network/v1/rpc/public",
-	"https://eth-goerli.public.blastapi.io",
-	"https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
-	// Failing 03-26-2024
-	"https://rpc.ankr.com/eth_goerli",
-	"https://rpc.goerli.eth.gateway.fm",
-	"https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
-	"https://rpc.goerli.mudit.blog",
-	"https://endpoints.omniatech.io/v1/eth/goerli/public",
-	"https://eth-goerli.api.onfinality.io/public",
-	"https://relay-goerli.flashbots.net",
+	// // Passing 03-26-2024
+	// "https://goerli.blockpi.network/v1/rpc/public",
+	// "https://eth-goerli.public.blastapi.io",
+	// "https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
+	// // Failing 03-26-2024
+	// "https://rpc.ankr.com/eth_goerli",
+	// "https://rpc.goerli.eth.gateway.fm",
+	// "https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
+	// "https://rpc.goerli.mudit.blog",
+	// "https://endpoints.omniatech.io/v1/eth/goerli/public",
+	// "https://eth-goerli.api.onfinality.io/public",
+	// "https://relay-goerli.flashbots.net",
 }
 
 func TestFreeTestnetServers(t *testing.T) {

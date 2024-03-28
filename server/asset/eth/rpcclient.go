@@ -144,8 +144,9 @@ type rpcclient struct {
 	net dex.Network
 	log dex.Logger
 
-	baseChainID   uint32
-	baseChainName string
+	baseChainID    uint32
+	genesisChainID uint64
+	baseChainName  string
 
 	// endpoints should only be used during connect to know which endpoints
 	// to attempt to connect. If we were unable to connect to some of the
@@ -163,9 +164,10 @@ type rpcclient struct {
 	clients    []*ethConn
 }
 
-func newRPCClient(baseChainID uint32, net dex.Network, endpoints []endpoint, ethContractAddr common.Address, log dex.Logger) *rpcclient {
+func newRPCClient(baseChainID uint32, chainID uint64, net dex.Network, endpoints []endpoint, ethContractAddr common.Address, log dex.Logger) *rpcclient {
 	return &rpcclient{
 		baseChainID:     baseChainID,
+		genesisChainID:  chainID,
 		baseChainName:   strings.ToUpper(dex.BipIDSymbol(baseChainID)),
 		net:             net,
 		endpoints:       endpoints,
@@ -206,6 +208,14 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 		priority: endpoint.priority,
 		tokens:   make(map[uint32]*tokener),
 		caller:   client,
+	}
+
+	chainID, err := ec.ChainID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error checking chain ID from %q: %w", endpoint.url, err)
+	}
+	if chainID.Uint64() != c.genesisChainID {
+		return nil, fmt.Errorf("wrong chain ID from %q. wanted %d, got %d", endpoint.url, c.genesisChainID, chainID)
 	}
 
 	// ETHBackend will check rpcclient.blockNumber() once per second. For

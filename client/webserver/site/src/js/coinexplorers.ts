@@ -25,7 +25,7 @@ const ethExplorers: Record<number, (cid: string) => string> = {
   },
   [Testnet]: (cid: string) => {
     const [arg, isAddr] = ethBasedExplorerArg(cid)
-    return isAddr ? `https://goerli.etherscan.io/address/${arg}` : `https://goerli.etherscan.io/tx/${arg}`
+    return isAddr ? `https://sepolia.etherscan.io/address/${arg}` : `https://sepolia.etherscan.io/tx/${arg}`
   },
   [Simnet]: (cid: string) => {
     const [arg, isAddr] = ethBasedExplorerArg(cid)
