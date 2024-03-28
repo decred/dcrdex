@@ -39,7 +39,9 @@ func (db *tEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime int6
 func (db *tEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent) {
 	db.storedEvents = append(db.storedEvents, e)
 }
-func (db *tEventLogDB) allRuns() ([]*MarketMakingRun, error) { return nil, nil }
+func (db *tEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWithHost) ([]*MarketMakingRun, error) {
+	return nil, nil
+}
 func (db *tEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*MarketMakingRunOverview, error) {
 	return nil, nil
 }

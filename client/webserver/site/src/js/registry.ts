@@ -827,7 +827,7 @@ export interface WithdrawalEvent {
 
 export interface MarketMakingEvent {
   id: number
-  timeStamp: number
+  timestamp: number
   baseDelta: number
   quoteDelta: number
   baseFees: number

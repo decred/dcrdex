@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -50,7 +49,7 @@ type withdrawalEvent struct {
 // MarketMakingEvent represents an action that a market making bot takes.
 type MarketMakingEvent struct {
 	ID         uint64 `json:"id"`
-	TimeStamp  int64  `json:"timeStamp"`
+	TimeStamp  int64  `json:"timestamp"`
 	BaseDelta  int64  `json:"baseDelta"`
 	QuoteDelta int64  `json:"quoteDelta"`
 	BaseFees   uint64 `json:"baseFees"`
@@ -98,8 +97,11 @@ type eventLogDB interface {
 	// updateFiatRates updates the fiat rates for a run. This should be updated
 	// periodically during a run to have accurate P/L information.
 	updateFiatRates(startTime int64, mkt *MarketWithHost, fiatRates map[uint32]float64) error
-	// allRuns returns all runs in the database.
-	allRuns() ([]*MarketMakingRun, error)
+	// runs returns a list of runs in the database. If n == 0, all of the runs
+	// will be returned. If refStartTime and refMkt are not nil, the runs
+	// including and before the run with the start time and market will be
+	// returned.
+	runs(n uint64, refStartTime *uint64, refMkt *MarketWithHost) ([]*MarketMakingRun, error)
 	// runOverview returns overview information about a run, not including the
 	// events that took place.
 	runOverview(startTime int64, mkt *MarketWithHost) (*MarketMakingRunOverview, error)
@@ -118,8 +120,8 @@ type eventUpdate struct {
 
 type boltEventLogDB struct {
 	*bbolt.DB
-	log         dex.Logger
-	updateEvent chan *eventUpdate
+	log          dex.Logger
+	eventUpdates chan *eventUpdate
 }
 
 var _ eventLogDB = (*boltEventLogDB)(nil)
@@ -177,11 +179,11 @@ func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltE
 		return nil, err
 	}
 
-	updateEvent := make(chan *eventUpdate, 128)
+	eventUpdates := make(chan *eventUpdate, 128)
 	eventLogDB := &boltEventLogDB{
-		DB:          db,
-		log:         log,
-		updateEvent: updateEvent,
+		DB:           db,
+		log:          log,
+		eventUpdates: eventUpdates,
 	}
 
 	go func() {
@@ -192,11 +194,11 @@ func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltE
 	return eventLogDB, nil
 }
 
-// _updateEvent is called for each event that is popped off the updateEvent. If
+// updateEvent is called for each event that is popped off the updateEvent. If
 // the event already exists, it is updated. If it does not exist, it is added.
 // The stats for the run are also updated based on the event.
-func (db *boltEventLogDB) _updateEvent(update *eventUpdate) error {
-	return db.Update(func(tx *bbolt.Tx) error {
+func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
+	err := db.Update(func(tx *bbolt.Tx) error {
 		botRuns := tx.Bucket(botRunsBucket)
 		runBucket := botRuns.Bucket(update.runKey)
 		if runBucket == nil {
@@ -268,25 +270,19 @@ func (db *boltEventLogDB) _updateEvent(update *eventUpdate) error {
 
 		return eventsBkt.Put(eventKey, newEventB)
 	})
+	db.log.Errorf("error storing event: %v", err)
 }
 
-// listedForStoreEvents listens on the updateEvent channel and stores updates
-// the db one at a time.
+// listedForStoreEvents listens on the updateEvent channel and updates the
+// db one at a time.
 func (db *boltEventLogDB) listenForStoreEvents(ctx context.Context) {
-	store := func(e *eventUpdate) {
-		err := db._updateEvent(e)
-		if err != nil {
-			db.log.Errorf("error storing event: %v", err)
-		}
-	}
-
 	for {
 		select {
-		case e := <-db.updateEvent:
-			store(e)
+		case e := <-db.eventUpdates:
+			db.updateEvent(e)
 		case <-ctx.Done():
-			for len(db.updateEvent) > 0 {
-				store(<-db.updateEvent)
+			for len(db.eventUpdates) > 0 {
+				db.updateEvent(<-db.eventUpdates)
 			}
 			return
 		}
@@ -378,12 +374,28 @@ func (db *boltEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg 
 	})
 }
 
-// allRuns returns all runs in the database.
-func (db *boltEventLogDB) allRuns() ([]*MarketMakingRun, error) {
-	runs := make([]*MarketMakingRun, 0, 16)
+// runs returns a list of runs in the database. If n == 0, all of the runs will
+// be returned. If refStartTime and refMkt are not nil, the runs including and
+// before the run with the start time and market will be returned.
+func (db *boltEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWithHost) ([]*MarketMakingRun, error) {
+	if refStartTime == nil != (refMkt == nil) {
+		return nil, fmt.Errorf("both or neither refStartTime and refMkt must be nil")
+	}
+
+	var runs []*MarketMakingRun
 	err := db.View(func(tx *bbolt.Tx) error {
 		botRuns := tx.Bucket(botRunsBucket)
-		return botRuns.ForEach(func(k, v []byte) error {
+		runs = make([]*MarketMakingRun, 0, botRuns.Stats().BucketN)
+		cursor := botRuns.Cursor()
+
+		var k []byte
+		if refStartTime == nil {
+			k, _ = cursor.Last()
+		} else {
+			k, _ = cursor.Seek(runKey(int64(*refStartTime), refMkt))
+		}
+
+		for ; k != nil; k, _ = cursor.Prev() {
 			startTime, mkt, err := parseRunKey(k)
 			if err != nil {
 				return err
@@ -419,16 +431,16 @@ func (db *boltEventLogDB) allRuns() ([]*MarketMakingRun, error) {
 				Cfg:       cfg,
 			})
 
-			return nil
-		})
+			if n > 0 && uint64(len(runs)) >= n {
+				break
+			}
+		}
+
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	sort.Slice(runs, func(i, j int) bool {
-		return runs[i].StartTime > runs[j].StartTime
-	})
 
 	return runs, nil
 }
@@ -512,7 +524,7 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 		quoteFees := bToUint64(runBucket.Get(quoteFeesKey))
 		endTimeB := runBucket.Get(endTimeKey)
 		var endTime *int64
-		if endTimeB != nil {
+		if len(endTimeB) == 8 {
 			endTime = new(int64)
 			*endTime = int64(binary.BigEndian.Uint64(endTimeB))
 		}
@@ -555,7 +567,7 @@ func (db *boltEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime i
 
 // storeEvent stores/updates a market making event.
 func (db *boltEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent) {
-	db.updateEvent <- &eventUpdate{
+	db.eventUpdates <- &eventUpdate{
 		runKey: runKey(startTime, mkt),
 		e:      e,
 	}

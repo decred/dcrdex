@@ -1084,11 +1084,12 @@ func (u *unifiedExchangeAdaptor) CEXBalance(assetID uint32) (*botBalance, error)
 // updatePendingDeposit applies the balance effects of the deposit to the bot's
 // dex and cex base balances after both the fees of the deposit transaction and
 // the amount credited by the CEX are confirmed.
-//
-// The deposit's mtx must be locked before calling this method.
-func (u *unifiedExchangeAdaptor) updatePendingDeposit(assetID uint32, tx *asset.WalletTransaction, amtCredited uint64, complete bool) {
+func (u *unifiedExchangeAdaptor) updatePendingDeposit(assetID uint32, tx *asset.WalletTransaction, amtCredited, eventID uint64, timestamp int64, complete bool) {
 	u.balancesMtx.Lock()
-	defer u.balancesMtx.Unlock()
+	defer func() {
+		u.balancesMtx.Unlock()
+		u.updateDepositEvent(eventID, timestamp, assetID, tx, amtCredited, complete)
+	}()
 
 	if !complete {
 		u.pendingDeposits[tx.ID] = &pendingDeposit{
@@ -1220,10 +1221,9 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 		return err
 	}
 
-	u.updatePendingDeposit(assetID, tx, 0, false)
 	eventID := u.eventLogID.Add(1)
 	depositTime := time.Now().Unix()
-	u.updateDepositEvent(eventID, depositTime, assetID, tx, 0, false)
+	u.updatePendingDeposit(assetID, tx, 0, eventID, depositTime, false)
 
 	go func() {
 		if u.isDynamicSwapper(assetID) {
@@ -1231,13 +1231,11 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 			if tx == nil {
 				return
 			}
-			u.updatePendingDeposit(assetID, tx, 0, false)
-			u.updateDepositEvent(eventID, depositTime, assetID, tx, 0, false)
+			u.updatePendingDeposit(assetID, tx, 0, eventID, depositTime, false)
 		}
 
 		cexConfirmedDeposit := func(creditedAmt uint64) {
-			u.updatePendingDeposit(assetID, tx, creditedAmt, true)
-			u.updateDepositEvent(eventID, depositTime, assetID, tx, creditedAmt, true)
+			u.updatePendingDeposit(assetID, tx, creditedAmt, eventID, depositTime, true)
 			u.sendStatsUpdate()
 		}
 		u.CEX.ConfirmDeposit(ctx, tx.ID, cexConfirmedDeposit)

@@ -1075,7 +1075,7 @@ func (m *MarketMaker) Stop() {
 
 // ArchivedRuns returns all archived market making runs.
 func (m *MarketMaker) ArchivedRuns() ([]*MarketMakingRun, error) {
-	allRuns, err := m.eventLogDB.allRuns()
+	allRuns, err := m.eventLogDB.runs(0, nil, nil)
 	if err != nil {
 		return nil, err
 	}

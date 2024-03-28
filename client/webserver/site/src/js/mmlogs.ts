@@ -138,7 +138,7 @@ export default class MarketMakerLogsPage extends BasePage {
 
   setRowContents (row: HTMLElement, event: MarketMakingEvent) {
     const tmpl = Doc.parseTemplate(row)
-    tmpl.time.textContent = (new Date(event.timeStamp * 1000)).toLocaleString()
+    tmpl.time.textContent = (new Date(event.timestamp * 1000)).toLocaleString()
     tmpl.eventType.textContent = this.eventType(event)
     let id
     if (event.depositEvent) {

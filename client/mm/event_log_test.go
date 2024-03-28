@@ -82,7 +82,7 @@ func TestEventLogDB(t *testing.T) {
 		t.Fatalf("error storing new run: %v", err)
 	}
 
-	runs, err := db.allRuns()
+	runs, err := db.runs(0, nil, nil)
 	if err != nil {
 		t.Fatalf("error getting all runs: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestEventLogDB(t *testing.T) {
 		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event1, runEvents[0])
 	}
 
-	runs, err = db.allRuns()
+	runs, err = db.runs(0, nil, nil)
 	if err != nil {
 		t.Fatalf("error getting all runs: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestEventLogDB(t *testing.T) {
 		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event1, runEvents[1])
 	}
 
-	runs, err = db.allRuns()
+	runs, err = db.runs(0, nil, nil)
 	if err != nil {
 		t.Fatalf("error getting all runs: %v", err)
 	}
@@ -287,5 +287,42 @@ func TestEventLogDB(t *testing.T) {
 	expPL := calcRunProfitLoss(overview.BaseDelta, overview.QuoteDelta, overview.BaseFees, overview.QuoteFees, mkt.BaseID, mkt.QuoteID, getFiatRate)
 	if overview.ProfitLoss != expPL {
 		t.Fatalf("expected profit loss %v, got %v", expPL, overview.ProfitLoss)
+	}
+
+	err = db.storeNewRun(startTime+1, mkt, cfg, fiatRates, dexBals, cexBals)
+	if err != nil {
+		t.Fatalf("error storing new run: %v", err)
+	}
+	err = db.storeNewRun(startTime-1, mkt, cfg, fiatRates, dexBals, cexBals)
+	if err != nil {
+		t.Fatalf("error storing new run: %v", err)
+	}
+	runs, err = db.runs(2, nil, nil)
+	if err != nil {
+		t.Fatalf("error getting all runs: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	if runs[0].StartTime != startTime+1 {
+		t.Fatalf("expected run start time %d, got %d", startTime+1, runs[0].StartTime)
+	}
+	if runs[1].StartTime != startTime {
+		t.Fatalf("expected run start time %d, got %d", startTime, runs[1].StartTime)
+	}
+
+	refStartTime := uint64(startTime)
+	runs, err = db.runs(2, &refStartTime, mkt)
+	if err != nil {
+		t.Fatalf("error getting all runs: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	if runs[0].StartTime != startTime {
+		t.Fatalf("expected run start time %d, got %d", startTime, runs[0].StartTime)
+	}
+	if runs[1].StartTime != startTime-1 {
+		t.Fatalf("expected run start time %d, got %d", startTime-1, runs[1].StartTime)
 	}
 }
