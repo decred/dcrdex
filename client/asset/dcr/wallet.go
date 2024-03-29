@@ -159,7 +159,7 @@ type Wallet interface {
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
 	// PurchaseTickets purchases n tickets. vspHost and vspPubKey only
 	// needed for internal wallets.
-	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]*asset.Ticket, error)
+	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, mixCfg *mixingConfig) ([]*asset.Ticket, error)
 	// Tickets returns current active ticket hashes up until they are voted
 	// or revoked. Includes unconfirmed tickets.
 	Tickets(ctx context.Context) ([]*asset.Ticket, error)

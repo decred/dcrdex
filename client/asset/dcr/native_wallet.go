@@ -147,6 +147,11 @@ func initNativeWallet(ew *ExchangeWallet) (*NativeWallet, error) {
 		defer w.mixer.mtx.RUnlock()
 		w.mixFunds()
 	}
+	ew.mixingConfig = func() *mixingConfig {
+		w.mixer.mtx.RLock()
+		defer w.mixer.mtx.RUnlock()
+		return w.mixer.cfg
+	}
 
 	return w, nil
 }

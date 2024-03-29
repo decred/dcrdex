@@ -1032,7 +1032,7 @@ func newVSPClient(w vspclient.Wallet, vspHost, vspPubKey string, log dex.Logger)
 
 // PurchaseTickets purchases n tickets, tells the provided vspd to monitor the
 // ticket, and pays the vsp fee.
-func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string) ([]*asset.Ticket, error) {
+func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, mixCfg *mixingConfig) ([]*asset.Ticket, error) {
 	vspClient, err := newVSPClient(w.dcrWallet, vspHost, vspPubKey, w.log.SubLogger("VSP"))
 	if err != nil {
 		return nil, err
@@ -1042,7 +1042,28 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 		Count:                n,
 		VSPFeePaymentProcess: vspClient.Process,
 		VSPFeeProcess:        vspClient.FeePercentage,
-		// TODO: CSPP/mixing
+	}
+
+	if mixCfg.enabled {
+		accts := w.Accounts()
+		mixedAccountNum, err := w.AccountNumber(ctx, accts.PrimaryAccount)
+		if err != nil {
+			return nil, fmt.Errorf("error getting mixed account number: %w", err)
+		}
+		req.SourceAccount = mixedAccountNum
+		// For simnet, we just change the source account. Others we need to
+		// mix tickets through the cspp server.
+		if w.chainParams.Net != wire.SimNet {
+			req.CSPPServer = mixCfg.server
+			req.DialCSPPServer = mixCfg.dialer
+			req.MixedAccount = mixedAccountNum
+			req.MixedAccountBranch = mixedAccountBranch
+			req.MixedSplitAccount = req.MixedAccount
+			req.ChangeAccount, err = w.AccountNumber(ctx, accts.UnmixedAccount)
+			if err != nil {
+				return nil, fmt.Errorf("error getting mixed change account number: %w", err)
+			}
+		}
 	}
 
 	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
