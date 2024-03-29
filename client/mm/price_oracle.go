@@ -17,6 +17,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/fiatrates"
 )
 
 const (
@@ -53,8 +54,8 @@ type cachedPrice struct {
 	price   float64
 	oracles []*OracleReport
 
-	base  *asset.RegisteredAsset
-	quote *asset.RegisteredAsset
+	base  *fiatrates.CoinpaprikaAsset
+	quote *fiatrates.CoinpaprikaAsset
 }
 
 // priceOracle periodically fetches market prices from a set of oracles.
@@ -104,7 +105,7 @@ func (o *priceOracle) getOracleDataNoAutoSync(base, quote uint32) (float64, []*O
 	o.cachedPricesMtx.Lock()
 	price, ok := o.cachedPrices[mktStr]
 	if !ok {
-		cp, err := newCachedPrice(base, quote, asset.Assets())
+		cp, err := newCachedPrice(base, quote)
 		if err != nil {
 			o.cachedPricesMtx.Unlock()
 			return 0, nil, err
@@ -177,20 +178,39 @@ func (mkt *mkt) String() string {
 	return fmt.Sprintf("%d-%d", mkt.baseID, mkt.quoteID)
 }
 
-func newCachedPrice(baseID, quoteID uint32, registeredAssets map[uint32]*asset.RegisteredAsset) (*cachedPrice, error) {
-	baseAsset, ok := registeredAssets[baseID]
-	if !ok {
-		return nil, fmt.Errorf("base asset %d (%s) not supported", baseID, dex.BipIDSymbol(baseID))
+func coinpapAsset(assetID uint32) (*fiatrates.CoinpaprikaAsset, error) {
+	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		return &fiatrates.CoinpaprikaAsset{
+			AssetID: assetID,
+			Name:    tkn.Name,
+			Symbol:  dex.BipIDSymbol(assetID),
+		}, nil
+	}
+	a := asset.Asset(assetID)
+	if a == nil {
+		return nil, fmt.Errorf("unknown asset ID %d", assetID)
+	}
+	return &fiatrates.CoinpaprikaAsset{
+		AssetID: assetID,
+		Name:    a.Info.Name,
+		Symbol:  a.Symbol,
+	}, nil
+}
+
+func newCachedPrice(baseID, quoteID uint32) (*cachedPrice, error) {
+	b, err := coinpapAsset(baseID)
+	if err != nil {
+		return nil, err
 	}
 
-	quoteAsset, ok := registeredAssets[quoteID]
-	if !ok {
-		return nil, fmt.Errorf("quote asset %d (%s) not supported", quoteID, dex.BipIDSymbol(quoteID))
+	q, err := coinpapAsset(quoteID)
+	if err != nil {
+		return nil, err
 	}
 
 	return &cachedPrice{
-		base:  baseAsset,
-		quote: quoteAsset,
+		base:  b,
+		quote: q,
 	}, nil
 }
 
@@ -200,14 +220,13 @@ func newCachedPrice(baseID, quoteID uint32, registeredAssets map[uint32]*asset.R
 func newAutoSyncPriceOracle(ctx context.Context, markets []*mkt, log dex.Logger) (*priceOracle, error) {
 	cachedPrices := make(map[string]*cachedPrice)
 
-	registeredAssets := asset.Assets()
 	for _, mkt := range markets {
 		if _, ok := cachedPrices[mkt.String()]; ok {
 			log.Warnf("duplicate market: %s", mkt.String())
 			continue
 		}
 
-		cachedPrice, err := newCachedPrice(mkt.baseID, mkt.quoteID, registeredAssets)
+		cachedPrice, err := newCachedPrice(mkt.baseID, mkt.quoteID)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +321,7 @@ func (o *priceOracle) syncAllMarkets() {
 	wg.Wait()
 }
 
-func fetchMarketPrice(ctx context.Context, b, q *asset.RegisteredAsset, log dex.Logger) (float64, []*OracleReport, error) {
+func fetchMarketPrice(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, log dex.Logger) (float64, []*OracleReport, error) {
 	oracles, err := oracleMarketReport(ctx, b, q, log)
 	if err != nil {
 		return 0, nil, err
@@ -335,6 +354,7 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 }
 
 func coinpapSlug(symbol, name string) string {
+	name, symbol = fiatrates.ParseCoinpapNameSymbol(name, symbol)
 	slug := fmt.Sprintf("%s-%s", symbol, name)
 	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
 	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
@@ -399,11 +419,11 @@ func spread(ctx context.Context, addr string, baseSymbol, quoteSymbol string, lo
 // exchanges for a market. This is done by fetching the market data from
 // coinpaprika, looking for known exchanges in the results, then pulling the
 // data directly from the exchange's public data API.
-func oracleMarketReport(ctx context.Context, b, q *asset.RegisteredAsset, log dex.Logger) (oracles []*OracleReport, err error) {
+func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, log dex.Logger) (oracles []*OracleReport, err error) {
 	// They're going to return the quote prices in terms of USD, which is
 	// sort of nonsense for a non-USD market like DCR-BTC.
-	baseSlug := coinpapSlug(b.Symbol, b.Info.Name)
-	quoteSlug := coinpapSlug(q.Symbol, q.Info.Name)
+	baseSlug := coinpapSlug(b.Symbol, b.Name)
+	quoteSlug := coinpapSlug(q.Symbol, q.Name)
 
 	type coinpapQuote struct {
 		Price  float64 `json:"price"`
