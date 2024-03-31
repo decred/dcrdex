@@ -448,6 +448,12 @@ func (w *btcSPVWallet) Peers() ([]*asset.WalletPeer, error) {
 	return w.peerManager.Peers()
 }
 
+func (w *btcSPVWallet) GetTransactions(startHeight, endHeight int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error) {
+	startID := wallet.NewBlockIdentifierFromHeight(startHeight)
+	endID := wallet.NewBlockIdentifierFromHeight(endHeight)
+	return w.Wallet.GetTransactions(startID, endID, accountName, cancel)
+}
+
 // secretSource is used to locate keys and redemption scripts while signing a
 // transaction. secretSource satisfies the txauthor.SecretsSource interface.
 type secretSource struct {

@@ -841,7 +841,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		}
 	}
 
-	w.txDB = newBadgerTxDB(filepath.Join(w.dir, "tx.db"), w.log.SubLogger("TXDB"))
+	w.txDB = newBadgerTxDB(filepath.Join(w.dir, "txhistorydb"), w.log.SubLogger("TXDB"))
 	wg, err := w.txDB.connect(ctx)
 	if err != nil {
 		return nil, err

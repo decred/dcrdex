@@ -5,7 +5,6 @@ package btc
 
 import (
 	"decred.org/dcrdex/dex"
-	"github.com/btcsuite/btcd/btcjson"
 )
 
 // GetBalancesResult models a successful response from the getbalances request.
@@ -39,6 +38,18 @@ type ListUnspentResult struct {
 
 func (l *ListUnspentResult) Safe() bool {
 	return l.SafePtr == nil || *l.SafePtr
+}
+
+// ListTransactionsResult is similar to the btcjson.ListTransactionsResult, but
+// most fields omitted.
+type ListTransactionsResult struct {
+	BlockHeight uint32   `json:"blockheight"`
+	BlockTime   uint64   `json:"blocktime"`
+	Fee         *float64 `json:"fee,omitempty"`
+	// Send set to true means that the inputs of the transaction were
+	// controlled by the wallet.
+	Send bool   `json:"send"`
+	TxID string `json:"txid"`
 }
 
 // SignTxResult models the data from the signrawtransaction command.
@@ -151,8 +162,4 @@ type listDescriptorsResult struct {
 		Range    []int64 `json:"range"`    // set for ranged descriptors, pertains to gap limit and current index
 		Next     int64   `json:"next"`     // next index to addresses generation; only set for ranged descriptors
 	} `json:"descriptors"`
-}
-
-type listTransactionsResult struct {
-	Transactions []btcjson.ListTransactionsResult `json:"transactions"`
 }

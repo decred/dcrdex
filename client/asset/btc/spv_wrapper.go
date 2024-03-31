@@ -118,7 +118,7 @@ type BTCWallet interface {
 	Peers() ([]*asset.WalletPeer, error)
 	AddPeer(string) error
 	RemovePeer(string) error
-	ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error)
+	GetTransactions(startHeight, endHeight int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error)
 }
 
 type XCWalletAccount struct {
@@ -494,8 +494,45 @@ func (w *spvWallet) ownsInputs(txid string) bool {
 	return true
 }
 
-func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error) {
-	return w.wallet.ListSinceBlock(-1, blockHeight, 0)
+func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
+	acctName := w.wallet.AccountInfo().AccountName
+	tip, err := w.cl.BestBlock()
+	if err != nil {
+		return nil, fmt.Errorf("BestBlock error: %v", err)
+	}
+
+	// We use GetTransactions instead of ListSinceBlock, because ListSinceBlock
+	// does not include transactions that pay to a change address, which
+	// Redeem, Refund, and RedeemBond do.
+	res, err := w.wallet.GetTransactions(blockHeight, tip.Height, acctName, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	txs := make([]*ListTransactionsResult, 0, len(res.MinedTransactions)+len(res.UnminedTransactions))
+
+	toLTR := func(tx *wallet.TransactionSummary, blockHeight uint32, blockTime uint64) *ListTransactionsResult {
+		fee := tx.Fee.ToBTC()
+		return &ListTransactionsResult{
+			TxID:        tx.Hash.String(),
+			BlockHeight: blockHeight,
+			BlockTime:   blockTime,
+			Fee:         &fee,
+			Send:        len(tx.MyInputs) > 0,
+		}
+	}
+
+	for _, block := range res.MinedTransactions {
+		for _, tx := range block.Transactions {
+			txs = append(txs, toLTR(&tx, uint32(block.Height), uint64(block.Timestamp)))
+		}
+	}
+
+	for _, tx := range res.UnminedTransactions {
+		txs = append(txs, toLTR(&tx, 0, 0))
+	}
+
+	return txs, nil
 }
 
 // balances retrieves a wallet's balance details.

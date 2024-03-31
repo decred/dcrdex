@@ -1105,6 +1105,9 @@ const (
 	TicketPurchase
 	TicketVote
 	TicketRevocation
+	// SwapOrSend is used when a wallet scanned its historical transactions,
+	// and was unable to determine if the transaction was a swap or a send.
+	SwapOrSend
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a
@@ -1581,5 +1584,13 @@ func (e *WalletEmitter) TransactionNote(tx *WalletTransaction, new bool) {
 		},
 		Transaction: tx,
 		New:         new,
+	})
+}
+
+// TransactionHistorySyncedNote sends a TransactionHistorySyncedNote.
+func (e *WalletEmitter) TransactionHistorySyncedNote() {
+	e.emit(&baseWalletNotification{
+		AssetID: e.assetID,
+		Route:   "transactionHistorySynced",
 	})
 }

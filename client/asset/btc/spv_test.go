@@ -46,7 +46,7 @@ func (c *tBtcWallet) AccountInfo() XCWalletAccount {
 	}
 }
 
-func (c *tBtcWallet) ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error) {
+func (c *tBtcWallet) GetTransactions(startBlock, endBlock int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error) {
 	return nil, nil
 }
 
@@ -208,6 +208,9 @@ func (c *tBtcWallet) SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeySc
 }
 
 func (c *tBtcWallet) HaveAddress(a btcutil.Address) (bool, error) {
+	if c.ownedAddresses != nil && c.ownedAddresses[a.String()] {
+		return true, nil
+	}
 	return c.ownsAddress, nil
 }
 

@@ -176,6 +176,8 @@ const (
 	txTypeTicketPurchaseID           = "TX_TYPE_TICKET_PURCHASE"
 	txTypeTicketVoteID               = "TX_TYPE_TICKET_VOTE"
 	txTypeTicketRevokeID             = "TX_TYPE_TICKET_REVOCATION"
+	txTypeSwapOrSendID               = "TX_TYPE_SWAP_OR_SEND"
+	swapOrSendTooltipID              = "SWAP_OR_SEND_TOOLTIP"
 	missingCexCredsID                = "MISSING_CEX_CREDS"
 	matchBufferID                    = "MATCH_BUFFER"
 	noPlacementsID                   = "NO_PLACEMENTS"
@@ -365,6 +367,8 @@ var enUS = map[string]*intl.Translation{
 	txTypeTicketPurchaseID:           {T: "Ticket purchase"},
 	txTypeTicketVoteID:               {T: "Ticket vote"},
 	txTypeTicketRevokeID:             {T: "Ticket revocation"},
+	txTypeSwapOrSendID:               {T: "Swap / Send"},
+	swapOrSendTooltipID:              {T: "The wallet was unable to determine if this transaction was a swap or a send."},
 	missingCexCredsID:                {T: "specify both key and secret"},
 	matchBufferID:                    {T: "Match buffer"},
 	noPlacementsID:                   {T: "must specify 1 or more placements"},

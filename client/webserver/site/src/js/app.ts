@@ -625,6 +625,10 @@ export default class Application {
     }
   }
 
+  handleTxHistorySyncedNote (assetID: number) {
+    delete this.txHistoryMap[assetID]
+  }
+
   /*
    * setNotes sets the current notification cache and populates the notification
    * display.
@@ -760,6 +764,9 @@ export default class Application {
         if (n.payload.route === 'transaction') {
           const txNote = n.payload as TransactionNote
           this.handleTransactionNote(n.payload.assetID, txNote)
+        }
+        if (n.payload.route === 'transactionHistorySynced') {
+          this.handleTxHistorySyncedNote(n.payload.assetID)
         }
       }
     }
