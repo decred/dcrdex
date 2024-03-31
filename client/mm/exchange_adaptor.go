@@ -91,6 +91,9 @@ type botCexAdaptor interface {
 // pendingWithdrawal represents a withdrawal from a CEX that has been
 // initiated, but the DEX has not yet received.
 type pendingWithdrawal struct {
+	eventLogID uint64
+	timestamp  int64
+
 	assetID uint32
 	// amtWithdrawn is the amount the CEX balance is decreased by.
 	// It will not be the same as the amount received in the dex wallet.
@@ -101,28 +104,26 @@ type pendingWithdrawal struct {
 // confirmed.
 type pendingDeposit struct {
 	assetID uint32
-	amtSent uint64
-
-	mtx         sync.RWMutex
-	fee         uint64
-	amtCredited uint64
-	// feeConfirmed is relevant assets with dynamic fees where the fee is
-	// not known until the tx is mined.
-	feeConfirmed bool
-	cexConfirmed bool
-	// cexConfirmed == true && success == false means the CEX did not credit the
-	// deposit for some reason.
-	success bool
+	tx      *asset.WalletTransaction
 }
 
 // pendingDEXOrder keeps track of the balance effects of a pending DEX order.
 // The actual order is not stored here, only its effects on the balance.
 type pendingDEXOrder struct {
-	balancesMtx   sync.RWMutex
-	availableDiff map[uint32]int64
-	locked        map[uint32]uint64
-	pending       map[uint32]uint64
-	order         *core.Order
+	eventLogID uint64
+	timestamp  int64
+
+	balancesMtx       sync.RWMutex
+	availableDiff     map[uint32]int64
+	locked            map[uint32]uint64
+	pending           map[uint32]uint64
+	order             *core.Order
+	baseDelta         int64
+	quoteDelta        int64
+	pendingBaseDelta  uint64
+	pendingQuoteDelta uint64
+	baseFees          uint64
+	quoteFees         uint64
 
 	// swaps, redeems, and refunds are caches of transactions. This avoids
 	// having to query the wallet for transactions that are already confirmed.
@@ -135,6 +136,12 @@ type pendingDEXOrder struct {
 	// which orders to place/cancel.
 	placementIndex   uint64
 	counterTradeRate uint64
+}
+
+type pendingCEXOrder struct {
+	eventLogID uint64
+	timestamp  int64
+	trade      *libxc.Trade
 }
 
 // unifiedExchangeAdaptor implements both botCoreAdaptor and botCexAdaptor.
@@ -152,16 +159,18 @@ type unifiedExchangeAdaptor struct {
 	maxBuyPlacements   uint32
 	maxSellPlacements  uint32
 	rebalanceCfg       *AutoRebalanceConfig
+	eventLogDB         eventLogDB
+	botCfg             *BotConfig
 
 	subscriptionIDMtx sync.RWMutex
 	subscriptionID    *int
 
-	withdrawalNoncePrefix string
-	withdrawalNonce       atomic.Uint64
-
 	feesMtx  sync.RWMutex
 	buyFees  *orderFees
 	sellFees *orderFees
+
+	startTime  atomic.Int64
+	eventLogID atomic.Uint64
 
 	balancesMtx sync.RWMutex
 	// baseDEXBalance/baseCEXBalance are the balances the bots have before
@@ -170,7 +179,7 @@ type unifiedExchangeAdaptor struct {
 	baseDexBalances    map[uint32]uint64
 	baseCexBalances    map[uint32]uint64
 	pendingDEXOrders   map[order.OrderID]*pendingDEXOrder
-	pendingCEXOrders   map[string]*libxc.Trade
+	pendingCEXOrders   map[string]*pendingCEXOrder
 	pendingWithdrawals map[string]*pendingWithdrawal
 	pendingDeposits    map[string]*pendingDeposit
 
@@ -180,6 +189,14 @@ type unifiedExchangeAdaptor struct {
 	// until it is complete.
 	pendingBaseRebalance  atomic.Bool
 	pendingQuoteRebalance atomic.Bool
+
+	// The following are updated whenever a pending action is complete.
+	// For accurate run stats, the pending actions must be taken into
+	// account.
+	baseBalanceDelta  int64
+	quoteBalanceDelta int64
+	baseFees          uint64
+	quoteFees         uint64
 }
 
 var _ botCoreAdaptor = (*unifiedExchangeAdaptor)(nil)
@@ -330,44 +347,142 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID ui
 type dexOrderInfo struct {
 	placementIndex   uint64
 	counterTradeRate uint64
+	placement        *core.QtyRate
 }
 
-// addPendingDexOrders adds new orders to the pendingDEXOrders map. balancesMtx
-// must be locked before calling this method. idToInfo maps orders to their
-// placement index and counter trade rate.
-func (u *unifiedExchangeAdaptor) addPendingDexOrders(orders []*core.Order, idToInfo map[order.OrderID]dexOrderInfo) {
-	for _, o := range orders {
-		var orderID order.OrderID
-		copy(orderID[:], o.ID)
-
-		fromAsset, fromFeeAsset, _, toFeeAsset := orderAssets(o.BaseID, o.QuoteID, o.Sell)
-
-		availableDiff := map[uint32]int64{}
-		availableDiff[fromAsset] -= int64(o.LockedAmt)
-		availableDiff[fromFeeAsset] -= int64(o.ParentAssetLockedAmt + o.RefundLockedAmt)
-		availableDiff[toFeeAsset] -= int64(o.RedeemLockedAmt)
-		if o.FeesPaid != nil {
-			availableDiff[fromFeeAsset] -= int64(o.FeesPaid.Funding)
-		}
-
-		locked := map[uint32]uint64{}
-		locked[fromAsset] += o.LockedAmt
-		locked[fromFeeAsset] += o.ParentAssetLockedAmt + o.RefundLockedAmt
-		locked[toFeeAsset] += o.RedeemLockedAmt
-
-		orderInfo := idToInfo[orderID]
-		u.pendingDEXOrders[orderID] = &pendingDEXOrder{
-			swaps:            make(map[string]*asset.WalletTransaction),
-			redeems:          make(map[string]*asset.WalletTransaction),
-			refunds:          make(map[string]*asset.WalletTransaction),
-			availableDiff:    availableDiff,
-			locked:           locked,
-			pending:          map[uint32]uint64{},
-			order:            o,
-			placementIndex:   orderInfo.placementIndex,
-			counterTradeRate: orderInfo.counterTradeRate,
+// updateDEXOrderEvent updates the event log with the current state of a
+// pending DEX order and sends an event notification.
+func (u *unifiedExchangeAdaptor) updateDEXOrderEvent(o *pendingDEXOrder, complete bool) {
+	transactions := make([]*asset.WalletTransaction, 0, len(o.swaps)+len(o.redeems)+len(o.refunds))
+	addTxs := func(txs map[string]*asset.WalletTransaction) {
+		for _, tx := range txs {
+			transactions = append(transactions, tx)
 		}
 	}
+
+	o.txsMtx.RLock()
+	addTxs(o.swaps)
+	addTxs(o.redeems)
+	addTxs(o.refunds)
+	o.txsMtx.RUnlock()
+
+	o.balancesMtx.RLock()
+	e := &MarketMakingEvent{
+		ID:         o.eventLogID,
+		TimeStamp:  o.timestamp,
+		Pending:    !complete,
+		BaseDelta:  o.baseDelta,
+		QuoteDelta: o.quoteDelta,
+		BaseFees:   o.baseFees,
+		QuoteFees:  o.quoteFees,
+		DEXOrderEvent: &dexOrderEvent{
+			ID:           o.order.ID.String(),
+			Rate:         o.order.Rate,
+			Qty:          o.order.Qty,
+			Sell:         o.order.Sell,
+			Transactions: transactions,
+		},
+	}
+	o.balancesMtx.RUnlock()
+
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e)
+	u.notifyEvent(e)
+}
+
+// updateCEXOrderEvent updates the event log with the current state of a
+// pending CEX order and sends an event notification.
+func (u *unifiedExchangeAdaptor) updateCEXOrderEvent(trade *libxc.Trade, eventID uint64, timestamp int64) {
+	var baseDelta, quoteDelta int64
+	if trade.Sell {
+		baseDelta = -int64(trade.BaseFilled)
+		quoteDelta = int64(trade.QuoteFilled)
+	} else {
+		baseDelta = int64(trade.BaseFilled)
+		quoteDelta = -int64(trade.QuoteFilled)
+	}
+
+	e := &MarketMakingEvent{
+		ID:         eventID,
+		TimeStamp:  timestamp,
+		Pending:    !trade.Complete,
+		BaseDelta:  baseDelta,
+		QuoteDelta: quoteDelta,
+		CEXOrderEvent: &cexOrderEvent{
+			ID:          trade.ID,
+			Rate:        trade.Rate,
+			Qty:         trade.Qty,
+			Sell:        trade.Sell,
+			BaseFilled:  trade.BaseFilled,
+			QuoteFilled: trade.QuoteFilled,
+		},
+	}
+
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e)
+	u.notifyEvent(e)
+}
+
+// updateDepositEvent updates the event log with the current state of a
+// pending deposit and sends an event notification.
+func (u *unifiedExchangeAdaptor) updateDepositEvent(eventID uint64, timestamp int64, assetID uint32, tx *asset.WalletTransaction, amtCredited uint64, complete bool) {
+	var baseDelta, quoteDelta, diff int64
+	var baseFees, quoteFees uint64
+	if complete && tx.Amount > amtCredited {
+		diff = int64(tx.Amount - amtCredited)
+	}
+	if assetID == u.market.BaseID {
+		baseDelta = -diff
+		baseFees = tx.Fees
+	} else {
+		quoteDelta = -diff
+		quoteFees = tx.Fees
+	}
+	e := &MarketMakingEvent{
+		ID:         eventID,
+		TimeStamp:  timestamp,
+		BaseDelta:  baseDelta,
+		QuoteDelta: quoteDelta,
+		BaseFees:   baseFees,
+		QuoteFees:  quoteFees,
+		Pending:    !complete,
+		DepositEvent: &depositEvent{
+			AssetID:     assetID,
+			Transaction: tx,
+			CEXCredit:   amtCredited,
+		},
+	}
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e)
+	u.notifyEvent(e)
+}
+
+// updateWithdrawalEvent updates the event log with the current state of a
+// pending withdrawal and sends an event notification.
+func (u *unifiedExchangeAdaptor) updateWithdrawalEvent(withdrawalID string, withdrawal *pendingWithdrawal, tx *asset.WalletTransaction) {
+	var baseFees, quoteFees uint64
+	complete := tx != nil && tx.Confirmed
+	if complete && withdrawal.amtWithdrawn > tx.Amount {
+		if withdrawal.assetID == u.market.BaseID {
+			baseFees = withdrawal.amtWithdrawn - tx.Amount
+		} else {
+			quoteFees = withdrawal.amtWithdrawn - tx.Amount
+		}
+	}
+
+	e := &MarketMakingEvent{
+		ID:        withdrawal.eventLogID,
+		TimeStamp: withdrawal.timestamp,
+		BaseFees:  baseFees,
+		QuoteFees: quoteFees,
+		Pending:   !complete,
+		WithdrawalEvent: &withdrawalEvent{
+			AssetID:     withdrawal.assetID,
+			ID:          withdrawalID,
+			Transaction: tx,
+			CEXDebit:    withdrawal.amtWithdrawn,
+		},
+	}
+
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e)
+	u.notifyEvent(e)
 }
 
 // groupedBookedOrders returns pending dex orders grouped by the placement
@@ -450,6 +565,100 @@ func withinTolerance(rate, target uint64, driftTolerance float64) bool {
 	return rate >= lowerBound && rate <= upperBound
 }
 
+func (u *unifiedExchangeAdaptor) placeMultiTrade(placements []*dexOrderInfo, sell bool) ([]*core.Order, error) {
+	corePlacements := make([]*core.QtyRate, 0, len(placements))
+	for _, p := range placements {
+		corePlacements = append(corePlacements, p.placement)
+	}
+
+	var walletOptions map[string]string
+	if sell {
+		walletOptions = u.baseWalletOptions
+	} else {
+		walletOptions = u.quoteWalletOptions
+	}
+
+	fromAsset, fromFeeAsset, _, toFeeAsset := orderAssets(u.market.BaseID, u.market.QuoteID, sell)
+
+	fromBalance, err := u.DEXBalance(fromAsset)
+	if err != nil {
+		return nil, err
+	}
+
+	multiTradeForm := &core.MultiTradeForm{
+		Host:       u.market.Host,
+		Base:       u.market.BaseID,
+		Quote:      u.market.QuoteID,
+		Sell:       sell,
+		Placements: corePlacements,
+		Options:    walletOptions,
+		MaxLock:    fromBalance.Available,
+	}
+
+	newPendingDEXOrders := make([]*pendingDEXOrder, 0, len(placements))
+	defer func() {
+		// defer until u.balancesMtx is unlocked
+		for _, o := range newPendingDEXOrders {
+			u.updateDEXOrderEvent(o, false)
+		}
+		u.sendStatsUpdate()
+	}()
+
+	u.balancesMtx.Lock()
+	defer u.balancesMtx.Unlock()
+
+	orders, err := u.clientCore.MultiTrade([]byte{}, multiTradeForm)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, o := range orders {
+		var orderID order.OrderID
+		copy(orderID[:], o.ID)
+
+		availableDiff := map[uint32]int64{}
+		availableDiff[fromAsset] -= int64(o.LockedAmt)
+		availableDiff[fromFeeAsset] -= int64(o.ParentAssetLockedAmt + o.RefundLockedAmt)
+		availableDiff[toFeeAsset] -= int64(o.RedeemLockedAmt)
+		if o.FeesPaid != nil {
+			availableDiff[fromFeeAsset] -= int64(o.FeesPaid.Funding)
+		}
+
+		locked := map[uint32]uint64{}
+		locked[fromAsset] += o.LockedAmt
+		locked[fromFeeAsset] += o.ParentAssetLockedAmt + o.RefundLockedAmt
+		locked[toFeeAsset] += o.RedeemLockedAmt
+
+		var baseFees, quoteFees uint64
+		if o.FeesPaid != nil && o.FeesPaid.Funding > 0 {
+			if o.Sell {
+				baseFees = o.FeesPaid.Funding
+			} else {
+				quoteFees = o.FeesPaid.Funding
+			}
+		}
+
+		u.pendingDEXOrders[orderID] = &pendingDEXOrder{
+			eventLogID:       u.eventLogID.Add(1),
+			timestamp:        time.Now().Unix(),
+			swaps:            make(map[string]*asset.WalletTransaction),
+			redeems:          make(map[string]*asset.WalletTransaction),
+			refunds:          make(map[string]*asset.WalletTransaction),
+			availableDiff:    availableDiff,
+			locked:           locked,
+			pending:          map[uint32]uint64{},
+			order:            o,
+			placementIndex:   placements[i].placementIndex,
+			counterTradeRate: placements[i].counterTradeRate,
+			baseFees:         baseFees,
+			quoteFees:        quoteFees,
+		}
+		newPendingDEXOrders = append(newPendingDEXOrders, u.pendingDEXOrders[orderID])
+	}
+
+	return orders, nil
+}
+
 // MultiTrade places multiple orders on the DEX order book. The placements
 // arguments does not represent the trades that should be placed at this time,
 // but rather the amount of lots that the caller expects consistently have on
@@ -483,12 +692,12 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 	}
 	mkt, err := u.ExchangeMarket(u.market.Host, u.market.BaseID, u.market.QuoteID)
 	if err != nil {
-		u.log.Errorf("GroupedMultiTrade: error getting market: %v", err)
+		u.log.Errorf("MultiTrade: error getting market: %v", err)
 		return nil
 	}
 	buyFees, sellFees, err := u.orderFees()
 	if err != nil {
-		u.log.Errorf("GroupedMultiTrade: error getting order fees: %v", err)
+		u.log.Errorf("MultiTrade: error getting order fees: %v", err)
 		return nil
 	}
 	fees := buyFees
@@ -504,13 +713,13 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 		if _, found := remainingBalances[assetID]; !found {
 			bal, err := u.DEXBalance(assetID)
 			if err != nil {
-				u.log.Errorf("GroupedMultiTrade: error getting dex balance: %v", err)
+				u.log.Errorf("MultiTrade: error getting dex balance: %v", err)
 				return nil
 			}
 			availableBalance := bal.Available
 			if dexReserves != nil {
 				if dexReserves[assetID] > availableBalance {
-					u.log.Errorf("GroupedMultiTrade: insufficient dex balance for reserves. required: %d, have: %d", dexReserves[assetID], availableBalance)
+					u.log.Errorf("MultiTrade: insufficient dex balance for reserves. required: %d, have: %d", dexReserves[assetID], availableBalance)
 					return nil
 				}
 				availableBalance -= dexReserves[assetID]
@@ -519,7 +728,7 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 		}
 	}
 	if remainingBalances[fromFeeAsset] < fees.funding {
-		u.log.Debugf("GroupedMultiTrade: insufficient balance for funding fees. required: %d, have: %d", fees.funding, remainingBalances[fromFeeAsset])
+		u.log.Debugf("MultiTrade: insufficient balance for funding fees. required: %d, have: %d", fees.funding, remainingBalances[fromFeeAsset])
 		return nil
 	}
 	remainingBalances[fromFeeAsset] -= fees.funding
@@ -531,13 +740,13 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 	if accountForCEXBal {
 		cexBal, err := u.CEXBalance(toAsset)
 		if err != nil {
-			u.log.Errorf("GroupedMultiTrade: error getting cex balance: %v", err)
+			u.log.Errorf("MultiTrade: error getting cex balance: %v", err)
 			return nil
 		}
 		remainingCEXBal = cexBal.Available
 		reserves := cexReserves[toAsset]
 		if remainingCEXBal < reserves {
-			u.log.Errorf("GroupedMultiTrade: insufficient CEX balance for reserves. required: %d, have: %d", cexReserves, remainingCEXBal)
+			u.log.Errorf("MultiTrade: insufficient CEX balance for reserves. required: %d, have: %d", cexReserves, remainingCEXBal)
 			return nil
 		}
 		remainingCEXBal -= reserves
@@ -548,7 +757,7 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 	cancels := make([]dex.Bytes, 0, len(placements))
 	addCancel := func(o *core.Order) {
 		if currEpoch-o.Epoch < 2 { // TODO: check epoch
-			u.log.Debugf("GroupedMultiTrade: skipping cancel not past free cancel threshold")
+			u.log.Debugf("MultiTrade: skipping cancel not past free cancel threshold")
 			return
 		}
 		cancels = append(cancels, o.ID)
@@ -589,7 +798,7 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 	if accountForCEXBal {
 		reserved := reservedForCounterTrade(pendingOrders)
 		if remainingCEXBal < reserved {
-			u.log.Errorf("GroupedMultiTrade: insufficient CEX balance for counter trades. required: %d, have: %d", reserved, remainingCEXBal)
+			u.log.Errorf("MultiTrade: insufficient CEX balance for counter trades. required: %d, have: %d", reserved, remainingCEXBal)
 			return nil
 		}
 		remainingCEXBal -= reserved
@@ -597,9 +806,6 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 
 	rateCausesSelfMatch := u.rateCausesSelfMatchFunc(sell)
 
-	// corePlacements will be the placements that are passed to core's
-	// MultiTrade function.
-	corePlacements := make([]*core.QtyRate, 0, len(requiredPlacements))
 	orderInfos := make([]*dexOrderInfo, 0, len(requiredPlacements))
 	for i, placement := range requiredPlacements {
 		if placement.lots == 0 {
@@ -607,7 +813,7 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 		}
 
 		if rateCausesSelfMatch(placement.rate) {
-			u.log.Warnf("GroupedMultiTrade: rate %d causes self match. Placements should be farther from mid-gap.", placement.rate)
+			u.log.Warnf("MultiTrade: rate %d causes self match. Placements should be farther from mid-gap.", placement.rate)
 			continue
 		}
 
@@ -656,13 +862,13 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 		}
 
 		if lotsToPlace > 0 {
-			corePlacements = append(corePlacements, &core.QtyRate{
-				Qty:  lotsToPlace * mkt.LotSize,
-				Rate: placement.rate,
-			})
 			orderInfos = append(orderInfos, &dexOrderInfo{
 				placementIndex:   uint64(i),
 				counterTradeRate: placement.counterTradeRate,
+				placement: &core.QtyRate{
+					Qty:  lotsToPlace * mkt.LotSize,
+					Rate: placement.rate,
+				},
 			})
 		}
 
@@ -683,58 +889,25 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 
 	for _, cancel := range cancels {
 		if err := u.Cancel(cancel); err != nil {
-			u.log.Errorf("GroupedMultiTrade: error canceling order %s: %v", cancel, err)
+			u.log.Errorf("MultiTrade: error canceling order %s: %v", cancel, err)
 		}
 	}
 
-	if len(corePlacements) > 0 {
-		var walletOptions map[string]string
-		if sell {
-			walletOptions = u.baseWalletOptions
-		} else {
-			walletOptions = u.quoteWalletOptions
-		}
-
-		fromBalance, err := u.DEXBalance(fromAsset)
+	if len(orderInfos) > 0 {
+		orders, err := u.placeMultiTrade(orderInfos, sell)
 		if err != nil {
-			u.log.Errorf("GroupedMultiTrade: error getting dex balance: %v", err)
+			u.log.Errorf("MultiTrade: error placing orders: %v", err)
 			return nil
 		}
 
-		multiTradeForm := &core.MultiTradeForm{
-			Host:       u.market.Host,
-			Base:       u.market.BaseID,
-			Quote:      u.market.QuoteID,
-			Sell:       sell,
-			Placements: corePlacements,
-			Options:    walletOptions,
-			MaxLock:    fromBalance.Available,
-		}
-
-		u.balancesMtx.Lock()
-		defer u.balancesMtx.Unlock()
-
-		orders, err := u.clientCore.MultiTrade([]byte{}, multiTradeForm)
-		if err != nil {
-			u.log.Errorf("GroupedMultiTrade: error placing orders: %v", err)
-			return nil
-		}
-
-		// The return value contains a nil order ID if no order was made for the placement
-		// at that index.
-		toReturn := make([]*order.OrderID, len(placements))
-		idToInfo := make(map[order.OrderID]dexOrderInfo)
+		orderIDs := make([]*order.OrderID, len(placements))
 		for i, o := range orders {
 			info := orderInfos[i]
 			var orderID order.OrderID
 			copy(orderID[:], o.ID)
-			toReturn[info.placementIndex] = &orderID
-			idToInfo[orderID] = *info
+			orderIDs[info.placementIndex] = &orderID
 		}
-
-		u.addPendingDexOrders(orders, idToInfo)
-
-		return toReturn
+		return orderIDs
 	}
 
 	return nil
@@ -750,60 +923,29 @@ func (u *unifiedExchangeAdaptor) DEXTrade(rate, qty uint64, sell bool) (*core.Or
 		return nil, fmt.Errorf("insufficient balance")
 	}
 
-	fromAsset := u.market.QuoteID
-	if sell {
-		fromAsset = u.market.BaseID
-	}
-	fromBalance, err := u.DEXBalance(fromAsset)
-	if err != nil {
-		return nil, err
-	}
-
-	var walletOptions map[string]string
-	if sell {
-		walletOptions = u.baseWalletOptions
-	} else {
-		walletOptions = u.quoteWalletOptions
-	}
-
-	multiTradeForm := &core.MultiTradeForm{
-		Host:  u.market.Host,
-		Base:  u.market.BaseID,
-		Quote: u.market.QuoteID,
-		Sell:  sell,
-		Placements: []*core.QtyRate{
-			{
-				Qty:  qty,
-				Rate: rate,
-			},
+	placements := []*dexOrderInfo{{
+		placement: &core.QtyRate{
+			Qty:  qty,
+			Rate: rate,
 		},
-		Options: walletOptions,
-		MaxLock: fromBalance.Available,
-	}
-
-	u.balancesMtx.Lock()
-	defer u.balancesMtx.Unlock()
+	}}
 
 	// MultiTrade is used instead of Trade because Trade does not support
 	// maxLock.
-	orders, err := u.clientCore.MultiTrade([]byte{}, multiTradeForm)
+	orders, err := u.placeMultiTrade(placements, sell)
 	if err != nil {
 		return nil, err
 	}
-
-	u.addPendingDexOrders(orders, map[order.OrderID]dexOrderInfo{})
 
 	if len(orders) == 0 {
 		return nil, fmt.Errorf("no orders placed")
 	}
+
 	return orders[0], nil
 }
 
-// DEXBalance returns the bot's balance for a specific asset on the DEX.
-func (u *unifiedExchangeAdaptor) DEXBalance(assetID uint32) (*botBalance, error) {
-	u.balancesMtx.RLock()
-	defer u.balancesMtx.RUnlock()
-
+// dexBalance returns the bot's balance for a specific asset on the DEX.
+func (u *unifiedExchangeAdaptor) dexBalance(assetID uint32) (*botBalance, error) {
 	bal, found := u.baseDexBalances[assetID]
 	if !found {
 		return &botBalance{}, nil
@@ -822,12 +964,9 @@ func (u *unifiedExchangeAdaptor) DEXBalance(assetID uint32) (*botBalance, error)
 
 	for _, pendingDeposit := range u.pendingDeposits {
 		if pendingDeposit.assetID == assetID {
-			totalAvailableDiff -= int64(pendingDeposit.amtSent)
+			totalAvailableDiff -= int64(pendingDeposit.tx.Amount)
 		}
-
-		pendingDeposit.mtx.RLock()
-		fee := int64(pendingDeposit.fee)
-		pendingDeposit.mtx.RUnlock()
+		fee := int64(pendingDeposit.tx.Fees)
 		token := asset.TokenInfo(pendingDeposit.assetID)
 		if token != nil && token.ParentID == assetID {
 			totalAvailableDiff -= fee
@@ -861,6 +1000,14 @@ func (u *unifiedExchangeAdaptor) DEXBalance(assetID uint32) (*botBalance, error)
 	}, nil
 }
 
+// DEXBalance returns the balance of the bot on the DEX.
+func (u *unifiedExchangeAdaptor) DEXBalance(assetID uint32) (*botBalance, error) {
+	u.balancesMtx.RLock()
+	defer u.balancesMtx.RUnlock()
+
+	return u.dexBalance(assetID)
+}
+
 // incompleteCexTradeBalanceEffects returns the balance effects of an
 // incomplete CEX trade. As soon as a CEX trade is complete, it is removed
 // from the pending map, so completed trades do not need to be calculated.
@@ -881,20 +1028,17 @@ func incompleteCexTradeBalanceEffects(trade *libxc.Trade) (availableDiff map[uin
 	return
 }
 
-// CEXBalance returns the balance of the bot on the CEX.
-func (u *unifiedExchangeAdaptor) CEXBalance(assetID uint32) (*botBalance, error) {
-	u.balancesMtx.RLock()
-	defer u.balancesMtx.RUnlock()
-
+func (u *unifiedExchangeAdaptor) cexBalance(assetID uint32) (*botBalance, error) {
 	var available, totalFundingOrder, totalPending uint64
 	var totalAvailableDiff int64
-	for _, tx := range u.pendingCEXOrders {
-		if tx.BaseID == assetID || tx.QuoteID == assetID {
-			if tx.Complete {
-				u.log.Errorf("pending cex order %s is complete", tx.ID)
+	for _, pendingOrder := range u.pendingCEXOrders {
+		trade := pendingOrder.trade
+		if trade.BaseID == assetID || trade.QuoteID == assetID {
+			if trade.Complete {
+				u.log.Errorf("pending cex order %s is complete", trade.ID)
 				continue
 			}
-			availableDiff, fundingOrder := incompleteCexTradeBalanceEffects(tx)
+			availableDiff, fundingOrder := incompleteCexTradeBalanceEffects(trade)
 			totalAvailableDiff += availableDiff[assetID]
 			totalFundingOrder += fundingOrder[assetID]
 		}
@@ -910,11 +1054,9 @@ func (u *unifiedExchangeAdaptor) CEXBalance(assetID uint32) (*botBalance, error)
 	// but just in case the amount was credited before the wallet confirmed the
 	// fee.
 	for _, deposit := range u.pendingDeposits {
-		deposit.mtx.RLock()
 		if deposit.assetID == assetID {
-			totalPending += deposit.amtCredited
+			totalPending += deposit.tx.Amount
 		}
-		deposit.mtx.RUnlock()
 	}
 
 	if totalAvailableDiff < 0 && u.baseCexBalances[assetID] < uint64(-totalAvailableDiff) {
@@ -931,57 +1073,72 @@ func (u *unifiedExchangeAdaptor) CEXBalance(assetID uint32) (*botBalance, error)
 	}, nil
 }
 
+// CEXBalance returns the balance of the bot on the CEX.
+func (u *unifiedExchangeAdaptor) CEXBalance(assetID uint32) (*botBalance, error) {
+	u.balancesMtx.RLock()
+	defer u.balancesMtx.RUnlock()
+
+	return u.cexBalance(assetID)
+}
+
 // updatePendingDeposit applies the balance effects of the deposit to the bot's
 // dex and cex base balances after both the fees of the deposit transaction and
 // the amount credited by the CEX are confirmed.
-func (u *unifiedExchangeAdaptor) updatePendingDeposit(txID string, deposit *pendingDeposit) {
+//
+// The deposit's mtx must be locked before calling this method.
+func (u *unifiedExchangeAdaptor) updatePendingDeposit(assetID uint32, tx *asset.WalletTransaction, amtCredited uint64, complete bool) {
 	u.balancesMtx.Lock()
 	defer u.balancesMtx.Unlock()
 
-	_, found := u.pendingDeposits[txID]
-	if !found {
-		u.log.Errorf("%s not found among pending deposits", txID)
+	if !complete {
+		u.pendingDeposits[tx.ID] = &pendingDeposit{
+			assetID: assetID,
+			tx:      tx,
+		}
 		return
 	}
 
-	deposit.mtx.RLock()
-	defer deposit.mtx.RUnlock()
+	delete(u.pendingDeposits, tx.ID)
 
-	if !deposit.cexConfirmed || !deposit.feeConfirmed {
-		u.pendingDeposits[txID] = deposit
-		return
-	}
-
-	if u.baseDexBalances[deposit.assetID] < deposit.amtSent {
+	if u.baseDexBalances[assetID] < tx.Amount {
 		u.log.Errorf("%s balance on dex %d < deposit amt %d",
-			dex.BipIDSymbol(deposit.assetID), u.baseDexBalances[deposit.assetID], deposit.amtSent)
-		u.baseDexBalances[deposit.assetID] = 0
+			dex.BipIDSymbol(assetID), u.baseDexBalances[assetID], tx.Amount)
+		u.baseDexBalances[assetID] = 0
 	} else {
-		u.baseDexBalances[deposit.assetID] -= deposit.amtSent
+		u.baseDexBalances[assetID] -= tx.Amount
 	}
 
 	var feeAsset uint32
-	token := asset.TokenInfo(deposit.assetID)
+	token := asset.TokenInfo(assetID)
 	if token != nil {
 		feeAsset = token.ParentID
 	} else {
-		feeAsset = deposit.assetID
+		feeAsset = assetID
 	}
-	if u.baseDexBalances[feeAsset] < deposit.fee {
+
+	if u.baseDexBalances[feeAsset] < tx.Fees {
 		u.log.Errorf("%s balance on dex %d < deposit fee %d",
-			dex.BipIDSymbol(feeAsset), u.baseDexBalances[feeAsset], deposit.fee)
+			dex.BipIDSymbol(feeAsset), u.baseDexBalances[feeAsset], tx.Fees)
 		u.baseDexBalances[feeAsset] = 0
 	} else {
-		u.baseDexBalances[feeAsset] -= deposit.fee
+		u.baseDexBalances[feeAsset] -= tx.Fees
 	}
 
-	if deposit.success {
-		u.baseCexBalances[deposit.assetID] += deposit.amtCredited
+	u.baseCexBalances[assetID] += amtCredited
+
+	var diff int64
+	if tx.Amount > amtCredited {
+		diff = int64(tx.Amount - amtCredited)
+	}
+	if assetID == u.market.BaseID {
+		u.baseBalanceDelta -= diff
+		u.baseFees += tx.Fees
+	} else {
+		u.quoteBalanceDelta -= diff
+		u.quoteFees += tx.Fees
 	}
 
-	delete(u.pendingDeposits, txID)
-
-	if deposit.assetID == u.market.BaseID {
+	if assetID == u.market.BaseID {
 		u.pendingBaseRebalance.Store(false)
 	} else {
 		u.pendingQuoteRebalance.Store(false)
@@ -989,18 +1146,23 @@ func (u *unifiedExchangeAdaptor) updatePendingDeposit(txID string, deposit *pend
 
 	dexDiffs := map[uint32]int64{}
 	cexDiffs := map[uint32]int64{}
-	dexDiffs[deposit.assetID] -= int64(deposit.amtSent)
-	dexDiffs[feeAsset] -= int64(deposit.fee)
-	msg := fmt.Sprintf("Deposit %s complete.", txID)
-	if deposit.success {
-		cexDiffs[deposit.assetID] += int64(deposit.amtCredited)
+	dexDiffs[assetID] -= int64(tx.Amount)
+	dexDiffs[feeAsset] -= int64(tx.Fees)
+	cexDiffs[assetID] += int64(amtCredited)
+
+	var msg string
+	if amtCredited > 0 {
+		msg = fmt.Sprintf("Deposit %s complete.", tx.ID)
 	} else {
-		msg = fmt.Sprintf("Deposit %s complete, but not successful.", txID)
+		msg = fmt.Sprintf("Deposit %s complete, but not successful.", tx.ID)
 	}
+
 	u.logBalanceAdjustments(dexDiffs, cexDiffs, msg)
 }
 
-func (u *unifiedExchangeAdaptor) confirmWalletTransaction(ctx context.Context, assetID uint32, txID string, confirmedTx func(*asset.WalletTransaction)) {
+// confirmWalletTransaction is a long running function that waits for the wallet
+// transaction to be confirmed. It only returns nil if the context is done.
+func (u *unifiedExchangeAdaptor) confirmWalletTransaction(ctx context.Context, assetID uint32, txID string) *asset.WalletTransaction {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -1012,13 +1174,11 @@ func (u *unifiedExchangeAdaptor) confirmWalletTransaction(ctx context.Context, a
 			} else if err != nil {
 				u.log.Errorf("Error getting wallet transaction: %v", err)
 			} else if tx.Confirmed {
-				confirmedTx(tx)
-				return
+				return tx
 			}
-
-			timer.Reset(10 * time.Minute)
+			timer.Reset(1 * time.Minute)
 		case <-ctx.Done():
-			return
+			return nil
 		}
 	}
 }
@@ -1052,60 +1212,36 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 		u.pendingQuoteRebalance.Store(true)
 	}
 
-	getAmtAndFee := func() (uint64, uint64, bool) {
-		tx, err := u.clientCore.WalletTransaction(assetID, coin.TxID())
-		if err != nil {
-			u.log.Errorf("Error getting wallet transaction: %v", err)
-			return amount, 0, false
-		}
-		return tx.Amount, tx.Fees, tx.Confirmed
+	tx, err := u.clientCore.WalletTransaction(assetID, coin.TxID())
+	if err != nil {
+		// If the wallet does not know about the transaction it just sent,
+		// this is a serious bug in the wallet. Should Send be updated to
+		// return asset.WalletTransaction?
+		return err
 	}
 
-	amt, fee, _ := getAmtAndFee()
-	isDynamicSwapper := u.isDynamicSwapper(assetID)
-	deposit := &pendingDeposit{
-		assetID:      assetID,
-		amtSent:      amt,
-		fee:          fee,
-		feeConfirmed: !isDynamicSwapper,
-	}
+	u.updatePendingDeposit(assetID, tx, 0, false)
+	eventID := u.eventLogID.Add(1)
+	depositTime := time.Now().Unix()
+	u.updateDepositEvent(eventID, depositTime, assetID, tx, 0, false)
 
-	u.balancesMtx.Lock()
-	u.pendingDeposits[coin.TxID()] = deposit
-	u.balancesMtx.Unlock()
-
-	if u.isDynamicSwapper(assetID) {
-		confirmedTx := func(tx *asset.WalletTransaction) {
-			deposit.mtx.Lock()
-			deposit.amtSent = tx.Amount
-			deposit.fee = tx.Fees
-			deposit.feeConfirmed = true
-			deposit.mtx.Unlock()
-
-			u.updatePendingDeposit(coin.TxID(), deposit)
+	go func() {
+		if u.isDynamicSwapper(assetID) {
+			tx = u.confirmWalletTransaction(ctx, assetID, tx.ID)
+			if tx == nil {
+				return
+			}
+			u.updatePendingDeposit(assetID, tx, 0, false)
+			u.updateDepositEvent(eventID, depositTime, assetID, tx, 0, false)
 		}
 
-		go u.confirmWalletTransaction(ctx, assetID, coin.TxID(), confirmedTx)
-	}
-
-	cexConfirmedDeposit := func(success bool, creditedAmt uint64) {
-		deposit.mtx.Lock()
-		deposit.cexConfirmed = true
-		deposit.success = success
-		deposit.amtCredited = creditedAmt
-
-		if success && deposit.amtCredited != deposit.amtSent {
-			u.log.Warnf("CEX credited less to deposit %s than was sent. sent: %d, credited: %d", coin.TxID(), deposit.amtSent, deposit.amtCredited)
+		cexConfirmedDeposit := func(creditedAmt uint64) {
+			u.updatePendingDeposit(assetID, tx, creditedAmt, true)
+			u.updateDepositEvent(eventID, depositTime, assetID, tx, creditedAmt, true)
+			u.sendStatsUpdate()
 		}
-		if !success {
-			u.log.Warnf("CEX did not credit deposit %s. Check with the CEX about the reason.", coin.TxID())
-		}
-		deposit.mtx.Unlock()
-
-		u.updatePendingDeposit(coin.TxID(), deposit)
-	}
-
-	u.CEX.ConfirmDeposit(ctx, coin.TxID(), cexConfirmedDeposit)
+		u.CEX.ConfirmDeposit(ctx, tx.ID, cexConfirmedDeposit)
+	}()
 
 	return nil
 }
@@ -1113,12 +1249,12 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 // pendingWithdrawalComplete is called after a withdrawal has been confirmed.
 // The amount received is applied to the base balance, and the withdrawal is
 // removed from the pending map.
-func (u *unifiedExchangeAdaptor) pendingWithdrawalComplete(id string, amtReceived uint64) {
+func (u *unifiedExchangeAdaptor) pendingWithdrawalComplete(id string, tx *asset.WalletTransaction) {
 	u.balancesMtx.Lock()
-	defer u.balancesMtx.Unlock()
 
 	withdrawal, found := u.pendingWithdrawals[id]
 	if !found {
+		u.balancesMtx.Unlock()
 		u.log.Errorf("Completed withdrawal not found among pending withdrawals")
 		return
 	}
@@ -1136,11 +1272,21 @@ func (u *unifiedExchangeAdaptor) pendingWithdrawalComplete(id string, amtReceive
 	} else {
 		u.baseCexBalances[withdrawal.assetID] -= withdrawal.amtWithdrawn
 	}
-	u.baseDexBalances[withdrawal.assetID] += amtReceived
+	u.baseDexBalances[withdrawal.assetID] += tx.Amount
 	delete(u.pendingWithdrawals, id)
 
-	dexDiffs := map[uint32]int64{withdrawal.assetID: int64(amtReceived)}
+	dexDiffs := map[uint32]int64{withdrawal.assetID: int64(tx.Amount)}
 	cexDiffs := map[uint32]int64{withdrawal.assetID: -int64(withdrawal.amtWithdrawn)}
+	if withdrawal.assetID == u.market.BaseID {
+		u.baseFees += withdrawal.amtWithdrawn - tx.Amount
+	} else {
+		u.quoteFees += withdrawal.amtWithdrawn - tx.Amount
+	}
+
+	u.balancesMtx.Unlock()
+
+	u.updateWithdrawalEvent(id, withdrawal, tx)
+	u.sendStatsUpdate()
 	u.logBalanceAdjustments(dexDiffs, cexDiffs, fmt.Sprintf("Withdrawal %s complete.", id))
 }
 
@@ -1163,9 +1309,8 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 		return err
 	}
 
-	withdrawalID := fmt.Sprintf("%s%d", u.withdrawalNoncePrefix, u.withdrawalNonce.Add(1))
-
-	confirmWithdrawal := func(amt uint64, txID string) {
+	var withdrawalID string
+	confirmWithdrawal := func(txID string) {
 		timer := time.NewTimer(0)
 		defer timer.Stop()
 		for {
@@ -1179,7 +1324,7 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 				if err != nil {
 					u.log.Errorf("Error getting wallet transaction: %v", err)
 				} else if tx.Confirmed {
-					u.pendingWithdrawalComplete(withdrawalID, tx.Amount)
+					u.pendingWithdrawalComplete(withdrawalID, tx)
 					return
 				}
 
@@ -1191,23 +1336,25 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 	}
 
 	u.balancesMtx.Lock()
-	defer u.balancesMtx.Unlock()
-
-	err = u.CEX.Withdraw(ctx, assetID, amount, addr, confirmWithdrawal)
+	withdrawalID, err = u.CEX.Withdraw(ctx, assetID, amount, addr, confirmWithdrawal)
 	if err != nil {
 		return err
 	}
-
 	if assetID == u.market.BaseID {
 		u.pendingBaseRebalance.Store(true)
 	} else {
 		u.pendingQuoteRebalance.Store(true)
 	}
-
 	u.pendingWithdrawals[withdrawalID] = &pendingWithdrawal{
+		eventLogID:   u.eventLogID.Add(1),
+		timestamp:    time.Now().Unix(),
 		assetID:      assetID,
 		amtWithdrawn: amount,
 	}
+	u.balancesMtx.Unlock()
+
+	u.updateWithdrawalEvent(withdrawalID, u.pendingWithdrawals[withdrawalID], nil)
+	u.sendStatsUpdate()
 
 	return nil
 }
@@ -1456,15 +1603,25 @@ func (u *unifiedExchangeAdaptor) PrepareRebalance(ctx context.Context, assetID u
 // the pending map, it will be updated. If the trade is complete, the base balances
 // will be updated.
 func (u *unifiedExchangeAdaptor) handleCEXTradeUpdate(trade *libxc.Trade) {
+	var currCEXOrder *pendingCEXOrder
+	defer func() {
+		if currCEXOrder != nil {
+			u.updateCEXOrderEvent(trade, currCEXOrder.eventLogID, currCEXOrder.timestamp)
+			u.sendStatsUpdate()
+		}
+	}()
+
 	u.balancesMtx.Lock()
 	defer u.balancesMtx.Unlock()
 
-	if _, found := u.pendingCEXOrders[trade.ID]; !found {
+	var found bool
+	currCEXOrder, found = u.pendingCEXOrders[trade.ID]
+	if !found {
 		return
 	}
 
 	if !trade.Complete {
-		u.pendingCEXOrders[trade.ID] = trade
+		u.pendingCEXOrders[trade.ID].trade = trade
 		return
 	}
 
@@ -1486,6 +1643,8 @@ func (u *unifiedExchangeAdaptor) handleCEXTradeUpdate(trade *libxc.Trade) {
 			u.baseCexBalances[trade.BaseID] = 0
 		}
 		u.baseCexBalances[trade.QuoteID] += trade.QuoteFilled
+		u.baseBalanceDelta -= int64(trade.BaseFilled)
+		u.quoteBalanceDelta += int64(trade.QuoteFilled)
 
 		diffs[trade.BaseID] = -int64(trade.BaseFilled)
 		diffs[trade.QuoteID] = int64(trade.QuoteFilled)
@@ -1498,6 +1657,8 @@ func (u *unifiedExchangeAdaptor) handleCEXTradeUpdate(trade *libxc.Trade) {
 			u.baseCexBalances[trade.QuoteID] = 0
 		}
 		u.baseCexBalances[trade.BaseID] += trade.BaseFilled
+		u.baseBalanceDelta += int64(trade.BaseFilled)
+		u.quoteBalanceDelta -= int64(trade.QuoteFilled)
 
 		diffs[trade.QuoteID] = -int64(trade.QuoteFilled)
 		diffs[trade.BaseID] = int64(trade.BaseFilled)
@@ -1558,10 +1719,20 @@ func (u *unifiedExchangeAdaptor) CEXTrade(ctx context.Context, baseID, quoteID u
 		return nil, fmt.Errorf("trade called before SubscribeTradeUpdates")
 	}
 
+	var trade *libxc.Trade
+	now := time.Now().Unix()
+	eventID := u.eventLogID.Add(1)
+	defer func() {
+		if trade != nil {
+			u.updateCEXOrderEvent(trade, eventID, now)
+			u.sendStatsUpdate()
+		}
+	}()
+
 	u.balancesMtx.Lock()
 	defer u.balancesMtx.Unlock()
 
-	trade, err := u.CEX.Trade(ctx, baseID, quoteID, sell, rate, qty, *subscriptionID)
+	trade, err = u.CEX.Trade(ctx, baseID, quoteID, sell, rate, qty, *subscriptionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1581,7 +1752,11 @@ func (u *unifiedExchangeAdaptor) CEXTrade(ctx context.Context, baseID, quoteID u
 		}
 		u.logBalanceAdjustments(nil, diffs, fmt.Sprintf("CEX trade %s completed.", trade.ID))
 	} else {
-		u.pendingCEXOrders[trade.ID] = trade
+		u.pendingCEXOrders[trade.ID] = &pendingCEXOrder{
+			trade:      trade,
+			eventLogID: eventID,
+			timestamp:  now,
+		}
 	}
 
 	return trade, nil
@@ -1788,6 +1963,13 @@ func orderAssets(baseID, quoteID uint32, sell bool) (fromAsset, fromFeeAsset, to
 	return
 }
 
+func feeAsset(assetID uint32) uint32 {
+	if token := asset.TokenInfo(assetID); token != nil {
+		return token.ParentID
+	}
+	return assetID
+}
+
 func dexOrderComplete(o *core.Order) bool {
 	if o.Status.IsActive() {
 		return false
@@ -1875,11 +2057,58 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 	locked := make(map[uint32]uint64)
 	pending := make(map[uint32]uint64)
 
+	var baseDelta, quoteDelta int64
+	var pendingBaseDelta, pendingQuoteDelta, baseFees, quoteFees uint64
+
+	addFees := func(fromAsset bool, fee uint64) {
+		if fromAsset && o.Sell || !fromAsset && !o.Sell {
+			baseFees += fee
+		} else {
+			quoteFees += fee
+		}
+	}
+	addDelta := func(fromAsset bool, delta int64) {
+		if fromAsset && o.Sell || !fromAsset && !o.Sell {
+			baseDelta += delta
+		} else {
+			quoteDelta += delta
+		}
+	}
+	addPendingDelta := func(fromAsset bool, delta uint64) {
+		if fromAsset && o.Sell || !fromAsset && !o.Sell {
+			pendingBaseDelta += delta
+		} else {
+			pendingQuoteDelta += delta
+		}
+	}
+
+	for _, match := range o.Matches {
+		if match.Swap == nil || match.Redeem != nil || match.Refund != nil {
+			continue
+		}
+
+		if match.Revoked {
+			swapTx, found := pendingOrder.swaps[match.Swap.ID.String()]
+			if found {
+				addPendingDelta(true, swapTx.Amount)
+			}
+		} else {
+			var redeemAmt uint64
+			if o.Sell {
+				redeemAmt = calc.BaseToQuote(match.Rate, match.Qty)
+			} else {
+				redeemAmt = match.Qty
+			}
+			addPendingDelta(false, redeemAmt)
+		}
+	}
+
 	availableDiff[fromAsset] -= int64(o.LockedAmt)
 	availableDiff[fromFeeAsset] -= int64(o.ParentAssetLockedAmt + o.RefundLockedAmt)
 	availableDiff[toFeeAsset] -= int64(o.RedeemLockedAmt)
 	if o.FeesPaid != nil {
 		availableDiff[fromFeeAsset] -= int64(o.FeesPaid.Funding)
+		addFees(true, o.FeesPaid.Funding)
 	}
 
 	locked[fromAsset] += o.LockedAmt
@@ -1889,6 +2118,8 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 	for _, tx := range pendingOrder.swaps {
 		availableDiff[fromAsset] -= int64(tx.Amount)
 		availableDiff[fromFeeAsset] -= int64(tx.Fees)
+		addFees(true, tx.Fees)
+		addDelta(true, -int64(tx.Amount))
 	}
 	for _, tx := range pendingOrder.redeems {
 		isDynamicSwapper := u.isDynamicSwapper(toAsset)
@@ -1900,6 +2131,8 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 		} else {
 			pending[toFeeAsset] -= tx.Fees
 		}
+		addFees(false, tx.Fees)
+		addDelta(false, int64(tx.Amount))
 
 		if tx.Confirmed {
 			availableDiff[toAsset] += int64(tx.Amount)
@@ -1917,6 +2150,8 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 		} else {
 			pending[fromFeeAsset] -= tx.Fees
 		}
+		addFees(true, tx.Fees)
+		addDelta(true, int64(tx.Amount))
 
 		if tx.Confirmed {
 			availableDiff[fromAsset] += int64(tx.Amount)
@@ -1932,6 +2167,12 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 	pendingOrder.locked = locked
 	pendingOrder.pending = pending
 	pendingOrder.order = o
+	pendingOrder.baseDelta = baseDelta
+	pendingOrder.quoteDelta = quoteDelta
+	pendingOrder.pendingBaseDelta = pendingBaseDelta
+	pendingOrder.pendingQuoteDelta = pendingQuoteDelta
+	pendingOrder.baseFees = baseFees
+	pendingOrder.quoteFees = quoteFees
 	pendingOrder.balancesMtx.Unlock()
 
 	orderUpdates := u.orderUpdates.Load()
@@ -1939,9 +2180,11 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 		orderUpdates.(chan *core.Order) <- o
 	}
 
+	complete := dexOrderComplete(o)
 	// If complete, remove the order from the pending list, and update the
 	// bot's balance.
-	if dexOrderComplete(o) {
+
+	if complete { // TODO: complete when all fees are confirmed
 		u.balancesMtx.Lock()
 		defer u.balancesMtx.Unlock()
 
@@ -1962,10 +2205,22 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 			}
 		}
 
+		u.baseBalanceDelta += baseDelta
+		u.quoteBalanceDelta += quoteDelta
+		u.baseFees += baseFees
+		u.quoteFees += quoteFees
+
+		if pendingBaseDelta != 0 || pendingQuoteDelta != 0 {
+			u.log.Errorf("bot %s pending delta not zero after order %s complete. base: %d, quote: %d",
+				u.botID, orderID, pendingBaseDelta, pendingQuoteDelta)
+		}
+
 		if adjustedBals {
 			u.logBalanceAdjustments(availableDiff, nil, fmt.Sprintf("DEX order %s complete.", orderID))
 		}
 	}
+
+	u.updateDEXOrderEvent(pendingOrder, complete)
 }
 
 func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
@@ -1980,6 +2235,7 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 		}
 		u.updatePendingDEXOrder(o)
 	case *core.FiatRatesNote:
+		u.eventLogDB.updateFiatRates(u.startTime.Load(), u.market, note.FiatRates)
 		u.fiatRates.Store(note.FiatRates)
 	}
 }
@@ -2039,13 +2295,30 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() error {
 	return nil
 }
 
-func (u *unifiedExchangeAdaptor) run(ctx context.Context) {
-	u.fiatRates.Store(u.clientCore.FiatConversionRates())
+// run must complete running before calls are made to other methods.
+func (u *unifiedExchangeAdaptor) run(ctx context.Context) error {
+	fiatRates := u.clientCore.FiatConversionRates()
+	u.fiatRates.Store(fiatRates)
 
 	err := u.updateFeeRates()
 	if err != nil {
 		u.log.Errorf("Error updating fee rates: %v", err)
 	}
+
+	startTime := time.Now().Unix()
+	u.startTime.Store(startTime)
+
+	u.balancesMtx.Lock()
+	err = u.eventLogDB.storeNewRun(startTime, u.market, u.botCfg, fiatRates, u.baseDexBalances, u.baseCexBalances)
+	u.balancesMtx.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to store new run in event log db: %v", err)
+	}
+
+	go func() {
+		<-ctx.Done()
+		u.eventLogDB.endRun(startTime, u.market, time.Now().Unix())
+	}()
 
 	// Listen for core notifications
 	go func() {
@@ -2079,6 +2352,152 @@ func (u *unifiedExchangeAdaptor) run(ctx context.Context) {
 			}
 		}
 	}()
+
+	return nil
+}
+
+// RunStats is a snapshot of the bot's balances and performance at a point in
+// time.
+type RunStats struct {
+	DEXBalances       map[uint32]*botBalance `json:"dexBalances"`
+	CEXBalances       map[uint32]*botBalance `json:"cexBalances"`
+	BaseBalanceDelta  int64                  `json:"baseBalanceDelta"`
+	QuoteBalanceDelta int64                  `json:"quoteBalanceDelta"`
+	// PendingBaseBalanceDelta represents the amount of the base asset that
+	// will be received once any pending refund/redemption tx is made. These
+	// should be included in the P/L, because if they are not, the P/L will
+	// appear too low.
+	PendingBaseBalanceDelta uint64 `json:"pendingBaseBalanceDelta"`
+	// PendingQuoteBalanceDelta represents the amount of the quote asset that
+	// will be received once any pending refund/redemption tx is made. These
+	// should be included in the P/L, because if they are not, the P/L will
+	// appear too low.
+	PendingQuoteBalanceDelta uint64  `json:"pendingQuoteBalanceDelta"`
+	BaseFees                 uint64  `json:"baseFees"`
+	QuoteFees                uint64  `json:"quoteFees"`
+	ProfitLoss               float64 `json:"profitLoss"`
+	StartTime                int64   `json:"startTime"`
+}
+
+func calcRunProfitLoss(baseDelta, quoteDelta int64, baseFees, quoteFees uint64, baseID, quoteID uint32, getFiatRate func(uint32) float64) float64 {
+	baseFiatRate := getFiatRate(baseID)
+	quoteFiatRate := getFiatRate(quoteID)
+	baseFeeFiatRate := getFiatRate(feeAsset(baseID))
+	quoteFeeFiatRate := getFiatRate(feeAsset(quoteID))
+	if baseFiatRate == 0 || quoteFiatRate == 0 || baseFeeFiatRate == 0 || quoteFeeFiatRate == 0 {
+		return 0
+	}
+
+	convertToConventional := func(assetID uint32, amount int64) (float64, error) {
+		unitInfo, err := asset.UnitInfo(assetID)
+		if err != nil {
+			return 0, err
+		}
+		return float64(amount) / float64(unitInfo.Conventional.ConversionFactor), nil
+	}
+
+	baseDeltaConv, err1 := convertToConventional(baseID, baseDelta)
+	quoteDeltaConv, err2 := convertToConventional(quoteID, quoteDelta)
+	baseFeesConv, err3 := convertToConventional(feeAsset(baseID), int64(baseFees))
+	quoteFeesConv, err4 := convertToConventional(feeAsset(quoteID), int64(quoteFees))
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		return 0
+	}
+
+	return baseDeltaConv*baseFiatRate +
+		quoteDeltaConv*quoteFiatRate -
+		baseFeesConv*baseFeeFiatRate -
+		quoteFeesConv*quoteFeeFiatRate
+}
+
+func (u *unifiedExchangeAdaptor) stats() (*RunStats, error) {
+	u.balancesMtx.RLock()
+	defer u.balancesMtx.RUnlock()
+
+	dexBalances := make(map[uint32]*botBalance)
+	cexBalances := make(map[uint32]*botBalance)
+
+	for assetID := range u.baseDexBalances {
+		bal, err := u.dexBalance(assetID)
+		if err != nil {
+			return nil, err
+		}
+		dexBalances[assetID] = bal
+	}
+
+	for assetID := range u.baseCexBalances {
+		bal, err := u.cexBalance(assetID)
+		if err != nil {
+			return nil, err
+		}
+		cexBalances[assetID] = bal
+	}
+
+	baseDelta := u.baseBalanceDelta
+	quoteDelta := u.quoteBalanceDelta
+	var pendingBaseDelta, pendingQuoteDelta uint64
+	baseFees := u.baseFees
+	quoteFees := u.quoteFees
+
+	for _, pendingOrder := range u.pendingDEXOrders {
+		pendingOrder.balancesMtx.RLock()
+		baseDelta += pendingOrder.baseDelta
+		quoteDelta += pendingOrder.quoteDelta
+		pendingBaseDelta += pendingOrder.pendingBaseDelta
+		pendingQuoteDelta += pendingOrder.pendingQuoteDelta
+		baseFees += pendingOrder.baseFees
+		quoteFees += pendingOrder.quoteFees
+		pendingOrder.balancesMtx.RUnlock()
+	}
+
+	for _, pendingCEXOrder := range u.pendingCEXOrders {
+		if pendingCEXOrder.trade.Sell {
+			baseDelta -= int64(pendingCEXOrder.trade.BaseFilled)
+			quoteDelta += int64(pendingCEXOrder.trade.QuoteFilled)
+		} else {
+			baseDelta += int64(pendingCEXOrder.trade.BaseFilled)
+			quoteDelta -= int64(pendingCEXOrder.trade.QuoteFilled)
+		}
+	}
+
+	for _, pendingDeposit := range u.pendingDeposits {
+		if pendingDeposit.assetID == u.market.BaseID {
+			baseFees += pendingDeposit.tx.Fees
+		} else {
+			quoteFees += pendingDeposit.tx.Fees
+		}
+	}
+
+	// Effects of pendingWithdrawals are applied when the withdrawal is
+	// complete.
+
+	return &RunStats{
+		DEXBalances:              dexBalances,
+		CEXBalances:              cexBalances,
+		BaseBalanceDelta:         baseDelta,
+		QuoteBalanceDelta:        quoteDelta,
+		PendingBaseBalanceDelta:  pendingBaseDelta,
+		PendingQuoteBalanceDelta: pendingQuoteDelta,
+		BaseFees:                 baseFees,
+		QuoteFees:                quoteFees,
+		ProfitLoss: calcRunProfitLoss(baseDelta+int64(pendingBaseDelta), quoteDelta+int64(pendingQuoteDelta),
+			baseFees, quoteFees, u.market.BaseID, u.market.QuoteID, u.fiatRate),
+		StartTime: u.startTime.Load(),
+	}, nil
+}
+
+func (u *unifiedExchangeAdaptor) sendStatsUpdate() {
+	stats, err := u.stats()
+	if err != nil {
+		u.log.Errorf("Error getting stats: %v", err)
+		return
+	}
+
+	u.clientCore.Broadcast(newRunStatsNote(u.market.Host, u.market.BaseID, u.market.QuoteID, stats))
+}
+
+func (u *unifiedExchangeAdaptor) notifyEvent(e *MarketMakingEvent) {
+	u.clientCore.Broadcast(newRunEventNote(u.market.Host, u.market.BaseID, u.market.QuoteID, u.startTime.Load(), e))
 }
 
 type exchangeAdaptorCfg struct {
@@ -2094,6 +2513,8 @@ type exchangeAdaptorCfg struct {
 	quoteWalletOptions map[string]string
 	rebalanceCfg       *AutoRebalanceConfig
 	log                dex.Logger
+	eventLogDB         eventLogDB
+	botCfg             *BotConfig
 }
 
 // unifiedExchangeAdaptorForBot returns a unifiedExchangeAdaptor for the specified bot.
@@ -2108,11 +2529,13 @@ func unifiedExchangeAdaptorForBot(cfg *exchangeAdaptorCfg) *unifiedExchangeAdapt
 		baseWalletOptions:  cfg.baseWalletOptions,
 		quoteWalletOptions: cfg.quoteWalletOptions,
 		rebalanceCfg:       cfg.rebalanceCfg,
+		eventLogDB:         cfg.eventLogDB,
+		botCfg:             cfg.botCfg,
 
 		baseDexBalances:    cfg.baseDexBalances,
 		baseCexBalances:    cfg.baseCexBalances,
 		pendingDEXOrders:   make(map[order.OrderID]*pendingDEXOrder),
-		pendingCEXOrders:   make(map[string]*libxc.Trade),
+		pendingCEXOrders:   make(map[string]*pendingCEXOrder),
 		pendingDeposits:    make(map[string]*pendingDeposit),
 		pendingWithdrawals: make(map[string]*pendingWithdrawal),
 		market:             cfg.market,

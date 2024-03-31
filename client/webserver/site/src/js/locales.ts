@@ -188,6 +188,9 @@ export const ID_BOTTYPE_SIMPLE_ARB = 'BOTTYPE_SIMPLE_ARB'
 export const ID_NO_BOTTYPE = 'NO_BOTTYPE'
 export const ID_NO_CEX = 'NO_CEX'
 export const ID_CEXBALANCE_ERR = 'CEXBALANCE_ERR'
+export const ID_PENDING = 'PENDING'
+export const ID_COMPLETE = 'COMPLETE'
+export const ID_ARCHIVED_SETTINGS = 'ARCHIVED_SETTINGS'
 
 let locale: Locale
 

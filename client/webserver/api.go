@@ -1675,6 +1675,72 @@ func (s *WebServer) apiCEXBalance(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiArchivedRuns(w http.ResponseWriter, r *http.Request) {
+	runs, err := s.mm.ArchivedRuns()
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting archived runs: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool                  `json:"ok"`
+		Runs []*mm.MarketMakingRun `json:"runs"`
+	}{
+		OK:   true,
+		Runs: runs,
+	}, s.indent)
+}
+
+func (s *WebServer) apiMMRunOverview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		StartTime int64              `json:"startTime"`
+		Market    *mm.MarketWithHost `json:"market"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+
+	overview, err := s.mm.RunOverview(req.StartTime, req.Market)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting run overview: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK       bool                        `json:"ok"`
+		Overview *mm.MarketMakingRunOverview `json:"overview"`
+	}{
+		OK:       true,
+		Overview: overview,
+	}, s.indent)
+}
+
+func (s *WebServer) apiRunLogs(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		StartTime int64              `json:"startTime"`
+		Market    *mm.MarketWithHost `json:"market"`
+		N         uint64             `json:"n"`
+		RefID     *uint64            `json:"refID,omitempty"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+
+	logs, err := s.mm.RunLogs(req.StartTime, req.Market, req.N, req.RefID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting run logs: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool                    `json:"ok"`
+		Logs []*mm.MarketMakingEvent `json:"logs"`
+	}{
+		OK:   true,
+		Logs: logs,
+	}, s.indent)
+}
+
 func (s *WebServer) apiShieldedStatus(w http.ResponseWriter, r *http.Request) {
 	var assetID uint32
 	if !readPost(w, r, &assetID) {

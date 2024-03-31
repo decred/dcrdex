@@ -321,6 +321,10 @@ export default class Doc {
     return fullPrecisionFormatter(prec).format(value)
   }
 
+  static formatFiatValue (value: number): string {
+    return fullPrecisionFormatter(2).format(value)
+  }
+
   static conventionalRateStep (rateStepEnc: number, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {
     const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
     return rateStepEnc / RateEncodingFactor * (bFactor / qFactor)

@@ -417,11 +417,19 @@ export interface SpotPriceNote extends CoreNote {
   spots: Record<string, Spot>
 }
 
-export interface BotStartStopNote extends CoreNote {
+export interface RunStatsNote extends CoreNote {
   host: string
   base: number
   quote: number
-  running: boolean
+  stats?: RunStats
+}
+
+export interface RunEventNote extends CoreNote {
+  host: string
+  base: number
+  quote: number
+  startTime: number
+  event: MarketMakingEvent
 }
 
 export interface MMStartStopNote extends CoreNote {
@@ -757,15 +765,78 @@ export interface MMCEXStatus {
   markets?: CEXMarket[]
 }
 
+export interface BotBalance {
+  available: number
+  locked: number
+  pending: number
+}
+
+export interface RunStats {
+  dexBalances: Record<number, BotBalance>
+  cexBalances: Record<number, BotBalance>
+  baseBalanceDelta: number
+  quoteBalanceDelta: number
+  pendingBaseBalanceDelta: number
+  pendingQuoteBalanceDelta: number
+  baseFees: number
+  quoteFees: number
+  profitLoss: number
+  startTime: number
+}
+
 export interface MMBotStatus {
   config: BotConfig
-  running: boolean
+  runStats?: RunStats
 }
 
 export interface MarketMakingStatus {
   running: boolean
   cexes: Record<string, MMCEXStatus>
   bots: MMBotStatus[]
+}
+
+export interface DEXOrderEvent {
+  id: string
+  rate: number
+  qty: number
+  sell: boolean
+  transactions: WalletTransaction[]
+}
+
+export interface CEXOrderEvent {
+  id: string
+  rate: number
+  qty: number
+  sell: boolean
+  baseFilled: number
+  quoteFilled: number
+}
+
+export interface DepositEvent {
+  assetID: number
+  transaction: WalletTransaction
+  cexCredit: number
+}
+
+export interface WithdrawalEvent {
+  id: string
+  assetID: number
+  transaction: WalletTransaction
+  cexDebit: number
+}
+
+export interface MarketMakingEvent {
+  id: number
+  timeStamp: number
+  baseDelta: number
+  quoteDelta: number
+  baseFees: number
+  quoteFees: number
+  pending: boolean
+  dexOrderEvent?: DEXOrderEvent
+  cexOrderEvent?: CEXOrderEvent
+  depositEvent?: DepositEvent
+  withdrawalEvent?: WithdrawalEvent
 }
 
 export interface CEXMarket {
@@ -791,6 +862,19 @@ export enum PeerSource {
   WalletDefault,
   UserAdded,
   Discovered,
+}
+
+export interface MarketMakingRunOverview {
+  endTime: number
+  cfg: BotConfig
+  fiatRates: Record<number, number>
+  initialDEXBalances: Record<number, number>
+  initialCEXBalances: Record<number, number>
+  baseDelta: number
+  quoteDelta: number
+  baseFees: number
+  quoteFees: number
+  profitLoss: number
 }
 
 export interface WalletPeer {
@@ -962,6 +1046,7 @@ export interface Application {
   txHistory(assetID: number, n: number, after?: string): Promise<TxHistoryResult>
   getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
   clearTxHistory(assetID: number): void
+  parentAsset(assetID: number): SupportedAsset
 }
 
 // TODO: Define an interface for Application?

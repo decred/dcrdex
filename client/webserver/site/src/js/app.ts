@@ -10,6 +10,8 @@ import OrderPage from './order'
 import MarketMakerPage from './mm'
 import MarketMakerSettingsPage from './mmsettings'
 import DexSettingsPage from './dexsettings'
+import MarketMakerArchivesPage from './mmarchives'
+import MarketMakerLogsPage from './mmlogs'
 import InitPage from './init'
 import { RateEncodingFactor, StatusExecuted, hasActiveMatches } from './orderutil'
 import { getJSON, postJSON, Errors } from './http'
@@ -88,7 +90,9 @@ const constructors: Record<string, PageClass> = {
   dexsettings: DexSettingsPage,
   init: InitPage,
   mm: MarketMakerPage,
-  mmsettings: MarketMakerSettingsPage
+  mmsettings: MarketMakerSettingsPage,
+  mmarchives: MarketMakerArchivesPage,
+  mmlogs: MarketMakerLogsPage
 }
 
 interface LangData {
@@ -991,6 +995,12 @@ export default class Application {
       throw Error(intl.prep(intl.ID_UNSUPPORTED_ASSET_INFO_ERR_MSG, { assetID: `${assetID}` }))
     }
     return xc.assets[assetID].unitInfo
+  }
+
+  parentAsset (assetID: number) : SupportedAsset {
+    const asset = this.assets[assetID]
+    if (!asset.token) return asset
+    return this.assets[asset.token.parentID]
   }
 
   /*

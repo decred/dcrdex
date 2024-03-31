@@ -95,22 +95,22 @@ export const ticketStatusTranslationKeys = [
   intl.ID_TICKET_STATUS_REVOKED
 ]
 
-// const txTypeUnknown = 0
-const txTypeSend = 1
-const txTypeReceive = 2
-const txTypeSwap = 3
-const txTypeRedeem = 4
-const txTypeRefund = 5
-const txTypeSplit = 6
-const txTypeCreateBond = 7
-const txTypeRedeemBond = 8
-const txTypeApproveToken = 9
-const txTypeAcceleration = 10
-// const txTypeSelfSend = 11
-const txTypeRevokeTokenApproval = 12
-const txTypeTicketPurchase = 13
-const txTypeTicketVote = 14
-const txTypeTicketRevocation = 15
+export const txTypeUnknown = 0
+export const txTypeSend = 1
+export const txTypeReceive = 2
+export const txTypeSwap = 3
+export const txTypeRedeem = 4
+export const txTypeRefund = 5
+export const txTypeSplit = 6
+export const txTypeCreateBond = 7
+export const txTypeRedeemBond = 8
+export const txTypeApproveToken = 9
+export const txTypeAcceleration = 10
+export const txTypeSelfSend = 11
+export const txTypeRevokeTokenApproval = 12
+export const txTypeTicketPurchase = 13
+export const txTypeTicketVote = 14
+export const txTypeTicketRevocation = 15
 
 const positiveTxTypes : number[] = [
   txTypeReceive,
@@ -159,6 +159,10 @@ const txTypeTranslationKeys = [
   intl.ID_TX_TYPE_TICKET_VOTE,
   intl.ID_TX_TYPE_TICKET_REVOCATION
 ]
+
+export function txTypeString (txType: number) : string {
+  return intl.prep(txTypeTranslationKeys[txType])
+}
 
 const ticketPageSize = 10
 const scanStartMempool = -1
@@ -1731,7 +1735,7 @@ export default class WalletsPage extends BasePage {
     tmpl.age.textContent = Doc.timeSince(tx.timestamp * 1000)
     Doc.setVis(tx.timestamp === 0, tmpl.pending)
     Doc.setVis(tx.timestamp !== 0, tmpl.age)
-    let txType = intl.prep(txTypeTranslationKeys[tx.type])
+    let txType = txTypeString(tx.type)
     if (tx.tokenID && tx.tokenID !== assetID) {
       const tokenSymbol = ui.conventional.unit
       txType = `${tokenSymbol} ${txType}`
@@ -1790,7 +1794,7 @@ export default class WalletsPage extends BasePage {
     }
 
     // Tx type
-    let txType = intl.prep(txTypeTranslationKeys[tx.type])
+    let txType = txTypeString(tx.type)
     if (tx.tokenID && tx.tokenID !== this.selectedAssetID) {
       const tokenSymbol = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
       txType = `${tokenSymbol} ${txType}`

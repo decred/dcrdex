@@ -34,6 +34,8 @@ const (
 	exportOrderRoute = "/orders/export"
 	marketMakerRoute = "/mm"
 	mmSettingsRoute  = "/mmsettings"
+	mmArchivesRoute  = "/mmarchives"
+	mmLogsRoute      = "/mmlogs"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -296,6 +298,18 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) handleMMSettings(w http.ResponseWriter, r *http.Request) {
 	common := *s.commonArgs(r, "Market Making Settings | Decred DEX")
 	s.sendTemplate(w, "mmsettings", common)
+}
+
+// handleMMArchives is the handler for the '/mmarchives' page request.
+func (s *WebServer) handleMMArchives(w http.ResponseWriter, r *http.Request) {
+	common := *s.commonArgs(r, "Market Making Archives | Decred DEX")
+	s.sendTemplate(w, "mmarchives", common)
+}
+
+// handleMMLogs is the handler for the '/mmlogs' page request.
+func (s *WebServer) handleMMLogs(w http.ResponseWriter, r *http.Request) {
+	common := *s.commonArgs(r, "Market Making Logs | Decred DEX")
+	s.sendTemplate(w, "mmlogs", common)
 }
 
 type ordersTmplData struct {

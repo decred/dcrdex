@@ -187,6 +187,9 @@ const (
 	botTypeNoneID                    = "NO_BOTTYPE"
 	noCexID                          = "NO_CEX"
 	cexBalanceErrID                  = "CEXBALANCE_ERR"
+	pendingID                        = "PENDING"
+	completeID                       = "COMPLETE"
+	archivedSettingsID               = "ARCHIVED_SETTINGS"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -373,6 +376,9 @@ var enUS = map[string]*intl.Translation{
 	botTypeNoneID:                    {T: "choose a bot type"},
 	noCexID:                          {T: "choose an exchange for arbitrage"},
 	cexBalanceErrID:                  {T: "error fetching {{ cexName }} balance for {{ assetID }}: {{ err }"},
+	pendingID:                        {T: "Pending"},
+	completeID:                       {T: "Complete"},
+	archivedSettingsID:               {T: "Archived Settings"},
 }
 
 var ptBR = map[string]*intl.Translation{

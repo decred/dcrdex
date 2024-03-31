@@ -1,0 +1,197 @@
+{{define "mmlogs"}}
+{{template "top" .}}
+<div id="main" data-handler="mmlogs" class="flex-grow-1 d-flex flex-column align-items-stretch stylish-overflow">
+  <div class="d-flex brdrbottom align-items-stretch">
+    <div id="backButton" class="fs18 p-2 hoverbg pointer flex-center brdrright">
+      <span class="ico-wide-headed-left-arrow fs28"></span>
+    </div>
+    <div class="flex-center fs24 p-2 flex-grow-1">
+      <span class="px-2">[[[logs_for]]] </span> <img id="baseLogo"><img id="quoteLogo"><span id="baseHeader"></span>-<span id="quoteHeader"></span>  @  <span class="px-2" id="hostHeader"></span>
+    </div>
+  </div>
+  <div class="px-5 py-3 w-100">
+    <div class="d-flex flex-wrap">
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[start_time]]]</div>
+        <div id="startTime" class="border-bottom py-1 px-3"></div>
+      </div>
+      <div class="order-datum border my-1 me-2" id="endTimeBlock">
+        <div class="border-bottom py-1 px-3">[[[end_time]]]</div>
+        <div id="endTime" class="border-bottom py-1 px-3"></div>
+      </div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[base_change]]]</div>
+        <div class="py-1 px-3"><span id="baseChange"></span> <img id="baseChangeLogo"></div>
+      </div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[quote_change]]]</div>
+        <div class="py-1 px-3"><span id="quoteChange"></span> <img id="quoteChangeLogo"></div>
+      </div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[base_fees]]]</div>
+        <div class="py-1 px-3"><span id="baseFees"></span> <img id="baseFeesLogo"></div>
+      </div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[quote_fees]]]</div>
+        <div class="py-1 px-3"><span id="quoteFees"></span> <img id="quoteFeesLogo"></div>
+      </div>
+      <div class="order-datum border my-1 me-2">
+        <div class="border-bottom py-1 px-3">[[[profit_loss]]]</div>
+        <div class="py-1 px-3" id="profitLoss"></div>
+      </div>
+    </div>
+
+    <table id="eventsTable" class="my-3 striped row-hover compact border row-border">
+      <thead>
+        <th scope="col">[[[Time]]]</th>
+        <th scope="col">[[[Type]]]</th>
+        <th scope="col">[[[ID]]]</th>
+        <th scope="col">[[[base_change]]]</th>
+        <th scope="col">[[[quote_change]]]</th>
+        <th scope="col">[[[base_fees]]]</th>
+        <th scope="col">[[[quote_fees]]]</th>
+        <th scope="col">[[[Details]]]</th>
+      </thead>
+      <tbody id="eventsTableBody">
+        <tr id="eventTableRowTmpl">
+          <td data-tmpl="time"></td>
+          <td data-tmpl="eventType"></td>
+          <td data-tmpl="eventID"></td>
+          <td data-tmpl="baseDelta"></td>
+          <td data-tmpl="quoteDelta"></td>
+          <td data-tmpl="baseFees"></td>
+          <td data-tmpl="quoteFees"></td>
+          <td><span class="ico-open fs20 pointer mx-2" data-tmpl="details"></span></td>        
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="forms" class="d-hide">
+    <form id="dexOrderDetailsForm" class="panel position-relative flex-center flex-column fs20 d-hide">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+          [[[dex_order_details]]]
+      </div>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[ID]]]</span>
+        <span id="dexOrderID"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Rate]]]</span>
+        <span id="dexOrderRate"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Quantity]]]</span>
+        <span id="dexOrderQty"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Side]]]</span>
+        <span id="dexOrderSide"></span>
+      </span>
+      <table id="dexOrderTxsTable" class="my-3">
+        <thead>
+          <th scope="col">[[[ID]]]</th>
+          <th scope="col">[[[Type]]]</th>
+          <th scope="col">[[[Amount]]]</th>
+          <th scope="col">[[[Fees]]]</th>
+        </thead>
+        <tbody id="dexOrderTxsTableBody">
+          <tr id="dexOrderTxRowTmpl">
+            <td data-tmpl="id"></td>
+            <td data-tmpl="type"></td>
+            <td data-tmpl="amt"></td>
+            <td data-tmpl="fees"></td>
+          </tr>
+        </tbody>
+      </table>
+    </form>
+
+    <form id="cexOrderDetailsForm" class="panel position-relative flex-center flex-column fs20 d-hide">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+          [[[cex_order_details]]]
+      </div>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[ID]]]</span>
+        <span id="cexOrderID"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Rate]]]</span>
+        <span id="cexOrderRate"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Quantity]]]</span>
+        <span id="cexOrderQty"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Side]]]</span>
+        <span id="cexOrderSide"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[base_filled]]]</span>
+        <span id="cexOrderBaseFilled"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[quote_filled]]]</span>
+        <span id="cexOrderQuoteFilled"></span>
+      </span>
+    </form>
+
+    <form id="depositDetailsForm" class="panel position-relative flex-center flex-column fs20 d-hide">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+          [[[deposit_details]]]
+      </div>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[ID]]]</span>
+        <span id="depositID"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Amount]]]</span>
+        <span id="depositAmt"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Fees]]]</span>
+        <span id="depositFees"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Status]]]</span>
+        <span id="depositStatus"></span>
+      </span>
+      <span id="depositCreditSection" class="d-flex justify-content-between w-100">
+        <span>[[[credited_amt]]]</span>
+        <span id="depositCredit"></span>
+      </span>
+    </form>
+
+    <form id="withdrawalDetailsForm" class="panel position-relative flex-center flex-column fs20 d-hide">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+          [[[withdrawal_details]]]
+      </div>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[ID]]]</span>
+        <span id="withdrawalID"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Amount]]]</span>
+        <span id="withdrawalAmt"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[Status]]]</span>
+        <span id="withdrawalStatus"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[tx_id]]]</span>
+        <span id="withdrawalTxID"></span>
+      </span>
+      <span class="d-flex justify-content-between w-100">
+        <span>[[[amt_received]]]</span>
+        <span id="withdrawalReceived"></span>
+      </span>
+    </form>
+  </div>
+</div>
+{{template "bottom"}}
+{{end}}

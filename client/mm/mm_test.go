@@ -1344,7 +1344,7 @@ func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	return c.depositAddress, nil
 }
 
-func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(uint64, string)) error {
+func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(string)) (string, error) {
 	c.lastWithdrawArgs = &withdrawArgs{
 		address: address,
 		amt:     qty,
@@ -1353,19 +1353,19 @@ func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address
 
 	go func() {
 		withdrawal := <-c.confirmWithdrawal
-		onComplete(withdrawal.amt, withdrawal.txID)
+		onComplete(withdrawal.txID)
 		c.confirmWithdrawalComplete <- true
 	}()
 
-	return nil
+	return "", nil
 }
 
-func (c *tCEX) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(bool, uint64)) {
+func (c *tCEX) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(uint64)) {
 	c.lastConfirmDepositTx = txID
 
 	go func() {
 		confirmDepositAmt := <-c.confirmDeposit
-		onConfirm(confirmDepositAmt > 0, confirmDepositAmt)
+		onConfirm(confirmDepositAmt)
 		c.confirmDepositComplete <- true
 	}()
 }

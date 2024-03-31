@@ -188,6 +188,9 @@ type mmCore interface {
 	UpdateBotConfig(updatedCfg *mm.BotConfig) error
 	RemoveBotConfig(host string, baseID, quoteID uint32) error
 	Status() *mm.Status
+	ArchivedRuns() ([]*mm.MarketMakingRun, error)
+	RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error)
+	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, error)
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -476,6 +479,8 @@ func New(cfg *Config) (*WebServer, error) {
 				webDC.Get(exportOrderRoute, s.handleExportOrders)
 				webDC.Get(marketsRoute, s.handleMarkets)
 				webDC.Get(mmSettingsRoute, s.handleMMSettings)
+				webDC.Get(mmArchivesRoute, s.handleMMArchives)
+				webDC.Get(mmLogsRoute, s.handleMMLogs)
 				webDC.Get(marketMakerRoute, s.handleMarketMaking)
 				webDC.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
 			})
@@ -584,6 +589,9 @@ func New(cfg *Config) (*WebServer, error) {
 				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
 				apiAuth.Post("/marketreport", s.apiMarketReport)
 				apiAuth.Post("/cexbalance", s.apiCEXBalance)
+				apiAuth.Get("/archivedmmruns", s.apiArchivedRuns)
+				apiAuth.Post("/mmrunoverview", s.apiMMRunOverview)
+				apiAuth.Post("/mmrunlogs", s.apiRunLogs)
 			}
 		})
 	})
@@ -645,7 +653,9 @@ func (s *WebServer) buildTemplates(lang string) error {
 		addTemplate("dexsettings", bb, "forms").
 		addTemplate("init", bb).
 		addTemplate("mm", bb, "forms").
-		addTemplate("mmsettings", bb, "forms")
+		addTemplate("mmsettings", bb, "forms").
+		addTemplate("mmarchives", bb).
+		addTemplate("mmlogs", bb)
 	s.html.Store(html)
 
 	return html.buildErr()
