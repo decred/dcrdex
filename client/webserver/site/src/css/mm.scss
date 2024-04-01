@@ -149,9 +149,14 @@ div[data-handler=mm] {
     color: #7777;
   }
 
-  #buyPlacementsBox {
+  #buyPlacementsBox,
+  #sellPlacementsBox {
     .ico-cross {
-      color: $danger;
+      color: var(--text-danger);
+    }
+
+    .ico-plus {
+      color: var(--btn-go-bg);
     }
   }
 
@@ -203,5 +208,14 @@ div[data-handler=mm] {
   #depositDetailsForm,
   #withdrawalDetailsForm {
       min-width: 400px;
+  }
+}
+
+div[data-handler=mmsettings] {
+  .input-unit {
+    position: absolute;
+    right: 0.25rem;
+    top: 50%;
+    transform: translateY(-50%);
   }
 }

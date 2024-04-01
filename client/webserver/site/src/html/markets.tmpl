@@ -657,7 +657,7 @@
             <input type="password" id="vPass">
           </div>
           <div class="col-12 p-0 d-flex justify-content-end">
-            <button id="vSubmit" class="w-75 mt-1 justify-content-center fs15 selected sellred-bg">
+            <button id="vSubmit" class="w-75 mt-1 justify-content-center fs15 go sellred-bg">
               <span id="vSideSubmit"></span>
               <span data-unit="base"></span>
             </button>
@@ -818,29 +818,7 @@
       </form>
 
       <form id="approveTokenForm" class="position-relative flex-center flex-column fs20 d-hide">
-        <div class="form-closer"><span class="ico-cross"></span></div>
-        <div class="px-2 py-1 text-center fs22 text-nowrap position-relative">
-          [[[:title:Approve]]] <span id="approveTokenSymbol"></span>
-        </div>
-        <div id="tokenApprovalSubmissionElements">
-          <div id="approveTokenMainDiv" class="fs15 text-start mt-2">
-            [[[approve_token_text]]]
-          </div>
-          <hr class="dashed my-2">
-          <div class="d-flex justify-content-between align-items-stretch flex-wrap">
-            <div id="tokenApprovalPWBox" class="col-11 p-0">
-              <label for="tokenApprovalPW" class="pt-3 ps-1">[[[App Password]]]</label>
-              <input type="password" id="tokenApprovalPW" data-tmpl="appPass" autocomplete="off">
-            </div>
-            <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
-            <div class="d-grid align-items-end col-10 p-0">
-              <button id="approveTokenButton" type="button" class="fs15 feature">[[[Approve]]]</button>
-            </div>
-          </div>
-        </div>
-        <span id="tokenApprovalTxMsg" class="text-center fs17 d-hide">[[[token_approval_tx_msg]]]</span>
-        <a target="_blank" class="subtlelink fs14" id="tokenApprovalTxID"></a>
-        <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="approveTokenErr"></div>
+        {{template "tokenApprovalForm"}}
       </form>
 
       {{- /* CANCEL ORDER FORM */ -}}

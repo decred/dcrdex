@@ -30,6 +30,10 @@ type CoinpaprikaAsset struct {
 }
 
 func ParseCoinpapNameSymbol(name, symbol string) (string, string) {
+	parts := strings.Split(symbol, ".")
+	if len(parts) == 2 {
+		symbol = parts[0]
+	}
 	switch symbol {
 	case "usdc":
 		name = "usd-coin"
@@ -45,11 +49,11 @@ func ParseCoinpapNameSymbol(name, symbol string) (string, string) {
 // for sample request and response information.
 func FetchCoinpaprikaRates(ctx context.Context, assets []*CoinpaprikaAsset, log dex.Logger) map[uint32]float64 {
 	fiatRates := make(map[uint32]float64)
-	slugAssets := make(map[string]uint32)
+	slugAssets := make(map[string][]uint32)
 	for _, a := range assets {
 		name, symbol := ParseCoinpapNameSymbol(a.Name, a.Symbol)
 		slug := coinpapSlug(symbol, name)
-		slugAssets[slug] = a.AssetID
+		slugAssets[slug] = append(slugAssets[slug], a.AssetID)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, fiatRequestTimeout)
@@ -69,16 +73,19 @@ func FetchCoinpaprikaRates(ctx context.Context, assets []*CoinpaprikaAsset, log 
 		return fiatRates
 	}
 	for _, coinInfo := range res {
-		assetID, found := slugAssets[coinInfo.ID]
+		assetIDs, found := slugAssets[coinInfo.ID]
 		if !found {
 			continue
 		}
+
 		price := coinInfo.Quotes.USD.Price
 		if price == 0 {
 			log.Errorf("zero-price returned from coinpaprika for slug %s", coinInfo.ID)
 			continue
 		}
-		fiatRates[assetID] = price
+		for _, assetID := range assetIDs {
+			fiatRates[assetID] = price
+		}
 	}
 	return fiatRates
 }

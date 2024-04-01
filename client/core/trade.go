@@ -1932,6 +1932,10 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		return ctx.Err()
 	}
 
+	c.loginMtx.Lock()
+	loggedIn := c.loggedIn
+	c.loginMtx.Unlock()
+
 	// Begin checks under read-only lock.
 	t.mtx.RLock()
 
@@ -1944,7 +1948,11 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	// Check all matches for and resend pending requests as necessary.
-	c.resendPendingRequests(t)
+	// It's possible we're not logged in if we receive a tipChange
+	// notification before we connect to dex servers.
+	if loggedIn {
+		c.resendPendingRequests(t)
+	}
 
 	// Check all matches and then swap, redeem, or refund as necessary.
 	var err error
@@ -2112,17 +2120,6 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 // mutex lock held for reads.
 func (c *Core) resendPendingRequests(t *trackedTrade) {
 	if t.isSelfGoverned() {
-		return
-	}
-
-	c.loginMtx.Lock()
-	loggedIn := c.loggedIn
-	c.loginMtx.Unlock()
-	if !loggedIn {
-		// Return early, we can't send `init` or `redeem` if we are not logged
-		// in but it's possible to get here when we receive a tipChange
-		// notification before we connect to dex servers.
-		c.log.Debugf("Resend pending trade request attempted for %s while core is logged out.", t.ID())
 		return
 	}
 

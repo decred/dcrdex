@@ -148,7 +148,7 @@
 <img class="mb-4" id="qrcode" />
 <div class="mono deposit-address border mb-4">
   <span id="depositAddress" class="user-select-all"></span>
-  <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18"></span>
+  <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18 pointer"></span>
   <span id="copyAlert" class="d-hide">[[[copied]]]</span>
 </div>
 <div class="d-flex">
@@ -266,7 +266,7 @@
       <div class="fs15">[[[trading_tier_message]]]</div>
     </div>
     <div class="flex-center flex-grow-1">
-      <input data-tmpl="regAssetTier" type="number" class="text-center fs18 p-2" value="1" min="0" step="1">
+      <input data-tmpl="regAssetTier" type="number" class="text-center fs22 p-2" value="1" min="0" step="1">
       <input type="text" class="d-hide"> <!--two inputs to prevent auto form submission-->
     </div>
   </div>
@@ -307,7 +307,7 @@
               <div class="flex-center fs14">
                 <span>~</span>
                 <span data-tmpl="fiatBondAmount"></span>
-                <span class="grey ms-1">[[[USD]]]</span>
+                <span class="grey ms-1">USD</span>
               </div>
             </div>
           </td>
@@ -323,7 +323,7 @@
                 <span class="fs14" data-tmpl="tradeLimits" class="flex-center">
                   <span>~</span>
                   <span data-tmpl="fiatTradeLimitLow"></span><span>&ndash;</span><span data-tmpl="fiatTradeLimitHigh"></span>
-                  <span class="grey ms-1">[[[USD]]]</span>
+                  <span class="grey ms-1">USD</span>
                 </span>
             </div>
           </td>
@@ -417,7 +417,7 @@
       </div>
       <div data-tmpl="bondLockUSDBox" class="d-flex justify-content-between lh1 fs14 grey">
         <span></span>
-        <span><span>~</span><span data-tmpl="bondLockUSD"></span> <span>[[[USD]]]</span></span>
+        <span><span>~</span><span data-tmpl="bondLockUSD"></span> <span>USD</span></span>
       </div>
       <div class="d-flex justify-content-between">
         <span>[[[Fee Reserves]]]</span>
@@ -430,7 +430,7 @@
         <input type="password" class="app-pass mt-3" data-tmpl="appPass" autocomplete="current-password">
       </div>
       <div class="flex-center p-3 mt-1">
-        <button data-tmpl="submit" class="go selected">[[[Submit]]]</button>
+        <button data-tmpl="submit" class="go">[[[Submit]]]</button>
       </div>
     </div>
   </div>
@@ -548,7 +548,7 @@
 </div>
 <hr class="dashed mb-3">
 <div class="d-flex justify-content-end">
-  <button id="cancelSubmit" type="button" class="go selected px-4">[[[Submit]]]</button>
+  <button id="cancelSubmit" type="button" class="go px-4">[[[Submit]]]</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide text-danger" id="cancelErr"></div>
 {{end}}
@@ -772,5 +772,37 @@
   <div class="fs14 grey">
     [[[score_factors]]]
   </div>
+</div>
+{{end}}
+
+{{define "tokenApprovalForm"}}
+<div class="form-closer"><span class="ico-cross"></span></div>
+<div class="px-2 py-1 text-center fs22 text-nowrap position-relative">
+  [[[:title:Approve]]] <div data-tmpl="tokenSymbol" class="d-inline-block"></div>
+</div>
+<div data-tmpl="submissionElements">
+  <div class="fs15 text-start mt-2">
+    [[[approve_token_text]]]
+  </div>
+  <hr class="dashed my-2">
+  <div class="d-flex justify-content-between align-items-stretch flex-wrap">
+    <div data-tmpl="pwBox" class="col-11 p-0">
+      <label for="tokenApprovalPW" class="pt-3 ps-1">[[[App Password]]]</label>
+      <input type="password" id="tokenApprovalPW" data-tmpl="pw" data-tmpl="appPass" autocomplete="off">
+    </div>
+    <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
+    <div class="d-grid align-items-end col-10 p-0">
+      <button data-tmpl="submit" type="button" class="fs15 feature">[[[Approve]]]</button>
+    </div>
+  </div>
+</div>
+<span data-tmpl="txMsg" class="text-center fs17 d-hide">[[[token_approval_tx_msg]]]</span>
+<a target="_blank" class="subtlelink fs14" data-tmpl="txid"></a>
+<div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="errMsg"></div>
+<div data-tmpl="balanceBox" class="flex-center w-100 mt-3 pt-3 border-top fs15">
+  [[[Available fee balance]]]: <span data-tmpl="balance" class="ms-2"></span> <span data-tmpl="parentTicker" class="grey ms-1"></span>
+</div>
+<div data-tmpl="addressBox" class="flex-center mt-2 fs15 d-hide">
+  [[[approve_token_wallet_addr]]] <span data-tmpl="address" class="ms-2"></span>
 </div>
 {{end}}

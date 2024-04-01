@@ -795,6 +795,7 @@ export default class Application {
         Doc.hide(indicator)
       } else setSeverityClass(indicator, note.severity)
       popupNotes.appendChild(span)
+      Doc.show(popupNotes)
       // These take up screen space. Only show max 5 at a time.
       while (popupNotes.children.length > 5) popupNotes.removeChild(popupNotes.firstChild as Node)
       setTimeout(async () => {
@@ -802,6 +803,7 @@ export default class Application {
           span.style.opacity = String(1 - progress)
         })
         span.remove()
+        if (popupNotes.children.length === 0) Doc.hide(popupNotes)
       }, 6000)
     }
     // Success and higher severity go to the bell dropdown.

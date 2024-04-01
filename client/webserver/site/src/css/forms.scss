@@ -23,11 +23,19 @@ textarea {
   }
 }
 
+select {
+  background-color: var(--form-input-bg) !important;
+}
+
 .form-select {
   color: var(--text-color);
   background-color: var(--form-input-bg);
-  border-color: 1px solid var(--form-input-border);
+  border: 1px solid var(--form-input-border);
   border-radius: 3px;
+
+  &:focus {
+    border-color: var(--form-input-border-focus);
+  }
 }
 
 #regAssetForm {
@@ -251,6 +259,7 @@ div[data-handler=init],
 div[data-handler=login],
 div[data-handler=register] {
  #forms {
+  margin-top: 70px;
   z-index: 99;
  } 
 }

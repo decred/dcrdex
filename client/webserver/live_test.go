@@ -2103,7 +2103,7 @@ type TMarketMaker struct {
 	mkts    map[string][]*libxc.Market
 }
 
-func (m *TMarketMaker) MarketReport(baseID, quoteID uint32) (*mm.MarketReport, error) {
+func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.MarketReport, error) {
 	baseFiatRate := math.Pow10(3 - rand.Intn(6))
 	quoteFiatRate := math.Pow10(3 - rand.Intn(6))
 	price := baseFiatRate / quoteFiatRate

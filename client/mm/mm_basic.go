@@ -327,8 +327,8 @@ func (b *basicMMCalculatorImpl) halfSpread(basisPrice uint64) (uint64, error) {
 type basicMarketMaker struct {
 	ctx              context.Context
 	host             string
-	base             uint32
-	quote            uint32
+	baseID           uint32
+	quoteID          uint32
 	cfg              *BasicMarketMakingConfig
 	log              dex.Logger
 	core             botCoreAdaptor
@@ -421,7 +421,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 }
 
 func (m *basicMarketMaker) run() {
-	book, bookFeed, err := m.core.SyncBook(m.host, m.base, m.quote)
+	book, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
 	if err != nil {
 		m.log.Errorf("Failed to sync book: %v", err)
 		return
@@ -481,15 +481,15 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, 
 	}
 
 	mm := &basicMarketMaker{
-		ctx:    ctx,
-		core:   c,
-		log:    log,
-		cfg:    cfg.BasicMMConfig,
-		host:   cfg.Host,
-		base:   cfg.BaseID,
-		quote:  cfg.QuoteID,
-		oracle: oracle,
-		mkt:    mkt,
+		ctx:     ctx,
+		core:    c,
+		log:     log,
+		cfg:     cfg.BasicMMConfig,
+		host:    cfg.Host,
+		baseID:  cfg.BaseID,
+		quoteID: cfg.QuoteID,
+		oracle:  oracle,
+		mkt:     mkt,
 	}
 
 	mm.run()

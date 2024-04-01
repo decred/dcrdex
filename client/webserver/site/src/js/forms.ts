@@ -32,6 +32,7 @@ import {
   CoreNote
 } from './registry'
 import { XYRangeHandler } from './opts'
+import { CoinExplorers } from './coinexplorers'
 
 interface ConfigOptionInput extends HTMLInputElement {
   configOpt: ConfigOption
@@ -802,7 +803,7 @@ export class ConfirmRegistrationForm {
   form: HTMLElement
   success: () => void
   page: Record<string, PageElement>
-  xc: Exchange
+  host: string
   certFile: string
   bondAssetID: number
   tier: number
@@ -821,7 +822,7 @@ export class ConfirmRegistrationForm {
   }
 
   setExchange (xc: Exchange, certFile: string) {
-    this.xc = xc
+    this.host = xc.host
     this.certFile = certFile
     const page = this.page
     if (State.passwordIsCached() || (this.pwCache && this.pwCache.pw)) Doc.hide(page.passBox)
@@ -836,7 +837,7 @@ export class ConfirmRegistrationForm {
     this.tier = tier
     this.fees = fees
     const page = this.page
-    const xc = this.xc
+    const xc = app().exchanges[this.host]
     const bondAsset = xc.bondAssets[asset.symbol]
     const bondLock = bondAsset.amount * tier * bondReserveMultiplier
     const bondLockConventional = bondLock / conversionFactor
@@ -874,23 +875,19 @@ export class ConfirmRegistrationForm {
    * submitForm is called when the form is submitted.
    */
   async submitForm () {
-    const page = this.page
-    // if button is selected it can be clickable.
-    if (!page.submit.classList.contains('selected')) {
-      return
-    }
-    const asset = app().assets[this.bondAssetID]
+    const { page, bondAssetID, host, certFile, pwCache, tier } = this
+    const asset = app().assets[bondAssetID]
     if (!asset) {
       page.regErr.innerText = intl.prep(intl.ID_SELECT_WALLET_FOR_FEE_PAYMENT)
       Doc.show(page.regErr)
       return
     }
     Doc.hide(page.regErr)
-    const xc = this.xc
+    const xc = app().exchanges[host]
     const bondAsset = xc.bondAssets[asset.wallet.symbol]
-    const cert = await this.certFile
+    const cert = await certFile
     const dexAddr = xc.host
-    const pw = page.appPass.value || (this.pwCache ? this.pwCache.pw : '')
+    const pw = page.appPass.value || (pwCache ? pwCache.pw : '')
     let form: any
     let url: string
 
@@ -899,15 +896,15 @@ export class ConfirmRegistrationForm {
         addr: dexAddr,
         cert: cert,
         pass: pw,
-        bond: bondAsset.amount * this.tier,
+        bond: bondAsset.amount * tier,
         asset: bondAsset.id
       }
       url = '/api/postbond'
     } else {
       form = {
         host: dexAddr,
-        targetTier: this.tier,
-        bondAssetID: this.bondAssetID
+        targetTier: tier,
+        bondAssetID: bondAssetID
       }
       url = '/api/updatebondoptions'
     }
@@ -936,7 +933,7 @@ interface RegAssetTemplate {
 export class FeeAssetSelectionForm {
   form: HTMLElement
   success: (assetID: number, tier: number) => Promise<void>
-  xc: Exchange
+  host: string
   page: Record<string, PageElement>
   assetTmpls: Record<string, RegAssetTemplate>
 
@@ -959,7 +956,7 @@ export class FeeAssetSelectionForm {
 
     Doc.bind(page.regAssetTier, 'keyup', (e: KeyboardEvent) => {
       if (!(e.key === 'Enter')) return
-      const { auth: { targetTier, bondAssetID }, viewOnly } = this.xc
+      const { auth: { targetTier, bondAssetID }, viewOnly } = app().exchanges[this.host]
       if (viewOnly || targetTier === 0) { // They need to select an asset.
         Doc.hide(page.assetSelected) // Probably already showing, but do it anyway.
         Doc.show(page.assetSelection)
@@ -1004,7 +1001,7 @@ export class FeeAssetSelectionForm {
   }
 
   setExchange (xc: Exchange) {
-    this.xc = xc
+    this.host = xc.host
     this.assetTmpls = {}
     const page = this.page
     Doc.empty(page.assets, page.otherAssets, page.allMarkets)
@@ -1170,7 +1167,7 @@ export class FeeAssetSelectionForm {
   }
 
   refresh () {
-    this.setExchange(this.xc)
+    this.setExchange(app().exchanges[this.host])
   }
 
   submit (assetID: number) {
@@ -1230,7 +1227,7 @@ export class WalletWaitForm {
   page: Record<string, PageElement>
   assetID: number
   parentID?: number
-  xc: Exchange
+  host: string
   bondAsset: BondAsset
   progressCache: ProgressPoint[]
   progressed: boolean
@@ -1261,7 +1258,7 @@ export class WalletWaitForm {
 
   /* setExchange sets the exchange for which the fee is being paid. */
   setExchange (xc: Exchange) {
-    this.xc = xc
+    this.host = xc.host
   }
 
   /* setWallet must be called before showing the WalletWaitForm. */
@@ -1274,9 +1271,10 @@ export class WalletWaitForm {
     this.parentAssetSynced = false
     const page = this.page
     const asset = app().assets[assetID]
+    const xc = app().exchanges[this.host]
     const { symbol, unitInfo: ui, wallet: { balance: bal, address, synced, syncProgress }, token } = asset
     this.parentID = token?.parentID
-    const bondAsset = this.bondAsset = this.xc.bondAssets[symbol]
+    const bondAsset = this.bondAsset = xc.bondAssets[symbol]
 
     const symbolize = (el: PageElement, asset: SupportedAsset) => {
       Doc.empty(el)
@@ -2146,6 +2144,100 @@ export class CertificatePicker {
       }
     }
     return ''
+  }
+}
+
+export class TokenApprovalForm {
+  page: Record<string, PageElement>
+  success?: () => void
+  assetID: number
+  parentID: number
+  txFee: number
+  host: string
+
+  constructor (parent: PageElement, success?: () => void) {
+    this.page = Doc.parseTemplate(parent)
+    this.success = success
+    Doc.bind(this.page.submit, 'click', () => { this.approve() })
+  }
+
+  async setAsset (assetID: number, host: string) {
+    this.assetID = assetID
+    this.host = host
+    const tokenAsset = app().assets[assetID]
+    const parentID = this.parentID = tokenAsset.token?.parentID as number
+    const { page } = this
+
+    Doc.show(page.submissionElements)
+    Doc.hide(page.txMsg, page.errMsg, page.addressBox, page.balanceBox, page.addressBox)
+    Doc.setVis(!State.passwordIsCached(), page.pwBox)
+    page.pw.value = ''
+
+    Doc.empty(page.tokenSymbol)
+    page.tokenSymbol.appendChild(Doc.symbolize(tokenAsset, true))
+    const protocolVersion = app().exchanges[host].assets[assetID].version
+    const res = await postJSON('/api/approvetokenfee', {
+      assetID: tokenAsset.id,
+      version: protocolVersion,
+      approving: true
+    })
+    if (!app().checkResponse(res)) {
+      page.errMsg.textContent = res.msg
+      Doc.show(page.errMsg)
+    } else {
+      const { unitInfo: ui, wallet: { address, balance: { available: avail } }, name: parentName } = app().assets[parentID]
+      const txFee = this.txFee = res.txFee as number
+      let feeText = `${Doc.formatCoinValue(txFee, ui)} ${ui.conventional.unit}`
+      const rate = app().fiatRatesMap[parentID]
+      if (rate) {
+        feeText += ` (${Doc.formatFiatConversion(txFee, rate, ui)} USD)`
+      }
+      page.feeEstimate.textContent = feeText
+      Doc.show(page.balanceBox)
+      page.balance.textContent = Doc.formatCoinValue(avail, ui)
+      page.parentTicker.textContent = ui.conventional.unit
+      page.parentName.textContent = parentName
+      if (avail < txFee) {
+        Doc.show(page.addressBox)
+        page.address.textContent = address
+      }
+    }
+  }
+
+  /*
+   * approve calls the /api/approvetoken endpoint.
+   */
+  async approve () {
+    const { page, assetID, host, success } = this
+    const path = '/api/approvetoken'
+    const tokenAsset = app().assets[assetID]
+    const res = await postJSON(path, {
+      assetID: tokenAsset.id,
+      dexAddr: host,
+      pass: page.pw.value
+    })
+    if (!app().checkResponse(res)) {
+      page.errMsg.textContent = res.msg
+      Doc.show(page.errMsg)
+      return
+    }
+    page.txid.innerText = res.txID
+    const assetExplorer = CoinExplorers[tokenAsset.id]
+    if (assetExplorer && assetExplorer[app().user.net]) {
+      page.txid.href = assetExplorer[app().user.net](res.txID)
+    }
+    Doc.hide(page.submissionElements, page.balanceBox, page.addressBox)
+    Doc.show(page.txMsg)
+    if (success) success()
+  }
+
+  handleBalanceNote (n: BalanceNote) {
+    const { page, parentID, txFee } = this
+    if (n.assetID !== parentID) return
+    page.balance.textContent = Doc.formatCoinValue(n.balance.available, app().assets[parentID].unitInfo)
+    if (n.balance.available < txFee) {
+      Doc.hide(page.addressBox)
+    } else Doc.hide(page.errMsg)
   }
 }
 

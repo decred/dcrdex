@@ -37,6 +37,8 @@ type MarketReport struct {
 	Oracles       []*OracleReport `json:"oracles"`
 	BaseFiatRate  float64         `json:"baseFiatRate"`
 	QuoteFiatRate float64         `json:"quoteFiatRate"`
+	BaseFees      *LotFeeRange    `json:"baseFees"`
+	QuoteFees     *LotFeeRange    `json:"quoteFees"`
 }
 
 // OracleReport is a summary of a market on an exchange.
@@ -154,17 +156,17 @@ func (o *priceOracle) getMarketPrice(baseID, quoteID uint32) float64 {
 // and details about the market on each available exchange that was used to determine
 // the market rate. This market rate is used as the "oracleRate" in the basic market
 // making strategy.
-func (o *priceOracle) getOracleInfo(base, quote uint32) (float64, []*OracleReport, error) {
+func (o *priceOracle) getOracleInfo(baseID, quoteID uint32) (float64, []*OracleReport, error) {
 	var price float64
 	var oracles []*OracleReport
 	var err error
 	if o.autoSync {
-		price, oracles, err = o.getOracleDataAutoSync(base, quote)
+		price, oracles, err = o.getOracleDataAutoSync(baseID, quoteID)
 	} else {
-		price, oracles, err = o.getOracleDataNoAutoSync(base, quote)
+		price, oracles, err = o.getOracleDataNoAutoSync(baseID, quoteID)
 	}
 	if err != nil {
-		o.log.Errorf("error fetching market report for %d-%d: %v", base, quote, err)
+		o.log.Errorf("error fetching market report for %d-%d: %v", baseID, quoteID, err)
 		return 0, nil, err
 	}
 	return price, oracles, nil

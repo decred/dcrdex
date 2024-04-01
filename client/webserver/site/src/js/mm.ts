@@ -186,10 +186,9 @@ export default class MarketMakerPage extends BasePage {
   }
 
   runningBalanceStr (assetID: number, amount: number): string {
-    const asset = app().assets[assetID]
-    const unitInfo = asset.unitInfo
+    const { unitInfo } = app().assets[assetID]
     const assetValue = Doc.formatCoinValue(amount, unitInfo)
-    return `${assetValue} ${asset.symbol.toUpperCase()}`
+    return `${assetValue} ${unitInfo.conventional.unit}`
   }
 
   /*
@@ -440,8 +439,8 @@ class MarketMakerBot {
     })
   }
 
-  async report (baseID: number, quoteID: number) {
-    return postJSON('/api/marketreport', { baseID, quoteID })
+  async report (host: string, baseID: number, quoteID: number) {
+    return postJSON('/api/marketreport', { host, baseID, quoteID })
   }
 
   async setEnabled (host: string, baseID: number, quoteID: number, enabled: boolean) : Promise<void> {

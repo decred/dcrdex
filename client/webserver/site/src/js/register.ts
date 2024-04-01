@@ -20,10 +20,16 @@ import {
 } from './registry'
 import State from './state'
 
+interface RegistrationPageData {
+  host: string
+  backTo?: string
+}
+
 export default class RegistrationPage extends BasePage {
   body: HTMLElement
+  data: RegistrationPageData
   pwCache: PasswordCache
-  currentDEX: Exchange // TODO: Just use host and pull xc from app() as needed.
+  host: string
   page: Record<string, PageElement>
   loginForm: LoginForm
   appPassResetForm: AppPassResetForm
@@ -34,9 +40,10 @@ export default class RegistrationPage extends BasePage {
   walletWaitForm: WalletWaitForm
   confirmRegisterForm: ConfirmRegistrationForm
 
-  constructor (body: HTMLElement, data: any) {
+  constructor (body: HTMLElement, data: RegistrationPageData) {
     super()
     this.body = body
+    this.data = data
     this.pwCache = { pw: '' }
     const page = this.page = Doc.idDescendants(body)
 
@@ -96,9 +103,10 @@ export default class RegistrationPage extends BasePage {
     // SELECT REG ASSET
     this.regAssetForm = new FeeAssetSelectionForm(page.regAssetForm, async (assetID: number, tier: number) => {
       const asset = app().assets[assetID]
+      const xc = app().exchanges[this.host]
       const wallet = asset.wallet
       if (wallet) {
-        const bondAsset = this.currentDEX.bondAssets[asset.symbol]
+        const bondAsset = xc.bondAssets[asset.symbol]
         const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
         this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
         if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
@@ -109,6 +117,7 @@ export default class RegistrationPage extends BasePage {
         slideSwap(page.regAssetForm, page.walletWait)
         return
       }
+      this.confirmRegisterForm.tier = tier
       this.newWalletForm.setAsset(assetID)
       slideSwap(page.regAssetForm, page.newWalletForm)
     })
@@ -158,7 +167,7 @@ export default class RegistrationPage extends BasePage {
   }
 
   async requestFeepayment (oldForm: HTMLElement, xc: Exchange, certFile: string) {
-    this.currentDEX = xc
+    this.host = xc.host
     this.confirmRegisterForm.setExchange(xc, certFile)
     this.walletWaitForm.setExchange(xc)
     this.regAssetForm.setExchange(xc)
@@ -203,7 +212,7 @@ export default class RegistrationPage extends BasePage {
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
     await app().fetchUser()
-    await app().loadPage('markets')
+    await app().loadPage(this.data.backTo || 'markets')
   }
 
   async newWalletCreated (assetID: number, tier: number) {
@@ -212,16 +221,18 @@ export default class RegistrationPage extends BasePage {
     if (!user) return
     const page = this.page
     const asset = user.assets[assetID]
+    const xc = app().exchanges[this.host]
     const wallet = asset.wallet
-    const bondAmt = this.currentDEX.bondAssets[asset.symbol].amount
+    const bondAmt = xc.bondAssets[asset.symbol].amount
 
     const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
+    this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
+    this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
     if (wallet.synced && wallet.balance.available >= 2 * bondAmt + bondsFeeBuffer) {
       await this.animateConfirmForm(page.newWalletForm)
       return
     }
 
-    this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
     await slideSwap(page.newWalletForm, page.walletWait)
   }
 }

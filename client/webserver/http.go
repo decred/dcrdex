@@ -113,9 +113,16 @@ func (s *WebServer) knownUnregisteredExchanges(registeredExchanges map[string]*c
 	certs := core.CertStore[s.core.Network()]
 	exchanges := make([]string, 0, len(certs))
 	for host := range certs {
-		if _, alreadyRegistered := registeredExchanges[host]; !alreadyRegistered {
+		xc := registeredExchanges[host]
+		if xc == nil || xc.Auth.TargetTier == 0 {
 			exchanges = append(exchanges, host)
 		}
+	}
+	for host, xc := range registeredExchanges {
+		if certs[host] != nil || xc.Auth.TargetTier > 0 {
+			continue
+		}
+		exchanges = append(exchanges, host)
 	}
 	return exchanges
 }

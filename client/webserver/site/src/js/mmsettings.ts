@@ -19,14 +19,18 @@ import {
   MarketMakingStatus,
   MMBotStatus,
   MMCEXStatus,
-  BalanceNote
+  BalanceNote,
+  UnitInfo,
+  Token,
+  ApprovalStatus,
+  SupportedAsset
 } from './registry'
 import Doc from './doc'
 import State from './state'
 import BasePage from './basepage'
 import { setOptionTemplates, XYRangeHandler } from './opts'
 import { MM, CEXDisplayInfos, botTypeBasicArb, botTypeArbMM, botTypeBasicMM } from './mm'
-import { Forms, bind as bindForm, NewWalletForm } from './forms'
+import { Forms, bind as bindForm, NewWalletForm, TokenApprovalForm, DepositAddress } from './forms'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
 import { Chart, Region, Extents, Translator } from './charts'
@@ -41,6 +45,7 @@ const arbMMRowCacheKey = 'arbmm'
 const specLK = 'lastMMSpecs'
 const lastBotsLK = 'lastBots'
 const lastArbExchangeLK = 'lastArbExchange'
+const tokenFeeMultiplier = 50
 
 const qcDefaultProfitThreshold = 0.02
 const qcDefaultLevelSpacing = 0.005
@@ -154,6 +159,8 @@ const defaultMarketMakingConfig : ConfigState = {
   quoteBalanceType: BalanceType.Percentage,
   baseBalance: 0,
   quoteBalance: 0,
+  baseTokenFees: 0,
+  quoteTokenFees: 0,
   cexBaseBalanceType: BalanceType.Percentage,
   cexBaseBalance: 0,
   cexBaseMinBalance: 0,
@@ -180,6 +187,19 @@ interface cexButton {
   tmpl: Record<string, PageElement>
 }
 
+interface tokenFeeBox {
+  fees: FeeEstimates
+  fiatRate: number // parent asset
+  ui: UnitInfo // parent asset
+  conversionFactor:number
+  booking: PageElement
+  bookingFiat: PageElement
+  swapCount: PageElement
+  reserves: PageElement
+  reservesFiat: PageElement
+  input: PageElement
+}
+
 /*
  * ConfigState is an amalgamation of BotConfig, ArbMarketMakingCfg, and
  * BasicMarketMakingCfg. ConfigState tracks the global state of the options
@@ -201,6 +221,8 @@ interface ConfigState {
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
+  baseTokenFees: number
+  quoteTokenFees: number
   cexBaseBalanceType: BalanceType
   cexBaseBalance: number
   cexBaseMinBalance: number
@@ -238,10 +260,21 @@ interface MarketRow {
   spot: Spot
 }
 
+interface FeeEstimates {
+  bookingFees: number
+  reservesPerSwap: number
+}
+interface FeeOutlook {
+  base: FeeEstimates
+  quote: FeeEstimates
+}
+
 export default class MarketMakerSettingsPage extends BasePage {
   page: Record<string, PageElement>
   forms: Forms
   newWalletForm: NewWalletForm
+  approveTokenForm: TokenApprovalForm
+  walletAddrForm: DepositAddress
   currentMarket: string
   originalConfig: ConfigState
   updatedConfig: ConfigState
@@ -257,8 +290,8 @@ export default class MarketMakerSettingsPage extends BasePage {
   oracleWeighting: XYRangeHandler
   driftTolerance: XYRangeHandler
   orderPersistence: XYRangeHandler
-  baseBalance?: XYRangeHandler
-  quoteBalance?: XYRangeHandler
+  baseBalance: XYRangeHandler
+  quoteBalance: XYRangeHandler
   cexBaseBalanceRange: XYRangeHandler
   cexBaseMinBalanceRange: XYRangeHandler
   cexBaseBalance: ExchangeBalance
@@ -290,6 +323,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.forms = new Forms(page.forms)
 
     this.placementsChart = new PlacementsChart(page.placementsChart, this)
+    this.approveTokenForm = new TokenApprovalForm(page.approveTokenForm, () => { this.submitBotType() })
+    this.walletAddrForm = new DepositAddress(page.walletAddrForm)
 
     app().headerSpace.appendChild(page.mmTitle)
 
@@ -297,7 +332,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.cleanTemplates(
       page.orderOptTmpl, page.booleanOptTmpl, page.rangeOptTmpl, page.placementRowTmpl,
       page.oracleTmpl, page.boolSettingTmpl, page.rangeSettingTmpl, page.cexOptTmpl,
-      page.arbBttnTmpl, page.marketRowTmpl
+      page.arbBttnTmpl, page.marketRowTmpl, page.needRegTmpl
     )
 
     Doc.bind(page.resetButton, 'click', () => { this.setOriginalValues(false) })
@@ -328,9 +363,17 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.lotsPerLevel, 'change', () => { this.lotsPerLevelChanged() })
     Doc.bind(page.lotsPerLevelUp, 'click', () => { this.incrementLotsPerLevel(true) })
     Doc.bind(page.lotsPerLevelDown, 'click', () => { this.incrementLotsPerLevel(false) })
+    Doc.bind(page.quoteTokenFeesUp, 'click', () => { this.incrementTokenFees(true, false) })
+    Doc.bind(page.quoteTokenFeesDown, 'click', () => { this.incrementTokenFees(false, false) })
+    Doc.bind(page.quoteTokenFees, 'change', () => { this.tokenFeesChanged(false) })
+    Doc.bind(page.baseTokenFeesUp, 'click', () => { this.incrementTokenFees(true, true) })
+    Doc.bind(page.baseTokenFeesDown, 'click', () => { this.incrementTokenFees(false, true) })
+    Doc.bind(page.baseTokenFees, 'change', () => { this.tokenFeesChanged(true) })
     Doc.bind(page.qcProfit, 'change', () => { this.qcProfitChanged() })
     Doc.bind(page.qcLevelSpacing, 'change', () => { this.levelSpacingChanged() })
     Doc.bind(page.qcMatchBuffer, 'change', () => { this.matchBufferChanged() })
+    Doc.bind(page.showBaseAddress, 'click', () => { this.showDeposit(this.specs.baseID) })
+    Doc.bind(page.showQuoteAddress, 'click', () => { this.showDeposit(this.specs.quoteID) })
 
     this.botTypeSelectors = Doc.applySelector(page.botTypeForm, '[data-bot-type]')
     for (const div of this.botTypeSelectors) {
@@ -344,7 +387,10 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     this.newWalletForm = new NewWalletForm(
       page.newWalletForm,
-      () => { this.submitBotType() }
+      async () => {
+        await app().fetchUser()
+        this.submitBotType()
+      }
     )
 
     app().registerNoteFeeder({
@@ -370,7 +416,17 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setupCEXes()
 
     this.marketRows = []
-    for (const { host, markets, assets } of Object.values(app().exchanges)) {
+    for (const { host, markets, assets, auth } of Object.values(app().exchanges)) {
+      if (auth.targetTier === 0) {
+        const { needRegTmpl, needRegBox } = this.page
+        const bttn = needRegTmpl.cloneNode(true) as PageElement
+        const tmpl = Doc.parseTemplate(bttn)
+        Doc.bind(bttn, 'click', () => { app().loadPage('register', { host, backTo: 'mmsettings' }) })
+        tmpl.host.textContent = host
+        needRegBox.appendChild(bttn)
+        Doc.show(needRegBox)
+        continue
+      }
       for (const { name, baseid: baseID, quoteid: quoteID, spot, basesymbol: baseSymbol, quotesymbol: quoteSymbol } of Object.values(markets)) {
         if (!app().assets[baseID] || !app().assets[quoteID]) continue
         const tr = this.page.marketRowTmpl.cloneNode(true) as PageElement
@@ -394,6 +450,11 @@ export default class MarketMakerSettingsPage extends BasePage {
         }
         Doc.bind(tr, 'click', () => { this.showBotTypeForm(host, baseID, quoteID) })
       }
+    }
+    if (this.marketRows.length === 0) {
+      const { marketSelectionTable, marketFilterBox, noMarkets } = this.page
+      Doc.hide(marketSelectionTable, marketFilterBox)
+      Doc.show(noMarkets)
     }
     const fiatRates = app().fiatRatesMap
     this.marketRows.sort((a: MarketRow, b: MarketRow) => {
@@ -444,12 +505,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.baseHeader.textContent = app().assets[baseID].symbol.toUpperCase()
     page.quoteHeader.textContent = app().assets[quoteID].symbol.toUpperCase()
     page.hostHeader.textContent = host
-    page.baseBalanceLogo.src = Doc.logoPathFromID(baseID)
-    page.quoteBalanceLogo.src = Doc.logoPathFromID(quoteID)
-    page.baseSettingsLogo.src = Doc.logoPathFromID(baseID)
-    page.quoteSettingsLogo.src = Doc.logoPathFromID(quoteID)
-    page.baseLogo.src = Doc.logoPathFromID(baseID)
-    page.quoteLogo.src = Doc.logoPathFromID(quoteID)
 
     if (botCfg) {
       const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg, cexCfg } = botCfg
@@ -459,6 +514,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       const idx = oldCfg as {[k: string]: any} // typescript
       for (const [k, v] of Object.entries(botCfg)) if (idx[k] !== undefined) idx[k] = v
       let rebalanceCfg
+      oldCfg.baseTokenFees = botCfg.baseFeeAssetBalance ?? 0
+      oldCfg.quoteTokenFees = botCfg.quoteFeeAssetBalance ?? 0
       if (mmCfg) {
         oldCfg.buyPlacements = mmCfg.buyPlacements
         oldCfg.sellPlacements = mmCfg.sellPlacements
@@ -520,6 +577,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     // Now that we've updated the originalConfig, we'll copy it.
     this.updatedConfig = JSON.parse(JSON.stringify(oldCfg))
+    await this.fetchOracles()
 
     this.setupMMConfigSettings(viewOnly)
     this.setupBalanceSelectors(viewOnly)
@@ -527,17 +585,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setupCEXSelectors(viewOnly)
     this.setOriginalValues(viewOnly)
 
-    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = app().assets[baseID]
-    for (const el of Doc.applySelector(document.body, '[data-base-name')) el.textContent = baseName
-    for (const img of Doc.applySelector(document.body, '[data-base-logo]')) img.src = Doc.logoPath(baseSymbol)
-    for (const el of Doc.applySelector(document.body, '[data-base-ticker]')) el.textContent = bui.conventional.unit
-    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = app().assets[quoteID]
-    for (const el of Doc.applySelector(document.body, '[data-quote-name')) el.textContent = quoteName
-    for (const img of Doc.applySelector(document.body, '[data-quote-logo]')) img.src = Doc.logoPath(quoteSymbol)
-    for (const el of Doc.applySelector(document.body, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
+    this.setBaseQuote(document.body, baseID, quoteID)
 
     Doc.show(page.marketLoading)
-    await this.fetchOracles()
     Doc.hide(page.marketLoading)
     const hasFiatRates = this.marketReport && this.marketReport.baseFiatRate > 0 && this.marketReport.quoteFiatRate > 0
     Doc.setVis(hasFiatRates, page.switchToQuickConfig)
@@ -547,6 +597,17 @@ export default class MarketMakerSettingsPage extends BasePage {
     else this.showAdvancedConfig(viewOnly)
 
     Doc.show(page.botSettingsContainer, page.marketHeader)
+  }
+
+  setBaseQuote (ancestor: PageElement, baseID: number, quoteID: number) {
+    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = app().assets[baseID]
+    for (const el of Doc.applySelector(ancestor, '[data-base-name')) el.textContent = baseName
+    for (const img of Doc.applySelector(ancestor, '[data-base-logo]')) img.src = Doc.logoPath(baseSymbol)
+    for (const el of Doc.applySelector(ancestor, '[data-base-ticker]')) el.textContent = bui.conventional.unit
+    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = app().assets[quoteID]
+    for (const el of Doc.applySelector(ancestor, '[data-quote-name')) el.textContent = quoteName
+    for (const img of Doc.applySelector(ancestor, '[data-quote-logo]')) img.src = Doc.logoPath(quoteSymbol)
+    for (const el of Doc.applySelector(ancestor, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
   }
 
   /*
@@ -577,12 +638,13 @@ export default class MarketMakerSettingsPage extends BasePage {
       cexBaseAvail, cexQuoteAvail, dexBaseAvail, dexQuoteAvail
     } = this
     const [baseWallet, quoteWallet] = [app().walletMap[baseID], app().walletMap[quoteID]]
+    const [baseToken, quoteToken] = [app().assets[baseID].token, app().assets[quoteID].token]
     const cexTotalBaseBalance = cexBaseBalance ? cexBaseBalance.available + cexBaseBalance.locked : 0
     const cexTotalQuoteBalance = cexQuoteBalance ? cexQuoteBalance.available + cexQuoteBalance.locked : 0
 
     return {
       baseWallet, quoteWallet, cexTotalBaseBalance, cexTotalQuoteBalance,
-      cexBaseAvail, cexQuoteAvail, dexBaseAvail, dexQuoteAvail
+      cexBaseAvail, cexQuoteAvail, dexBaseAvail, dexQuoteAvail, baseToken, quoteToken
     }
   }
 
@@ -592,8 +654,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.hide(page.quickConfig, page.balanceChecks)
     page.gapStrategyBox.after(page.buttonsBox)
 
-    this.baseBalance?.setDisabled(viewOnly)
-    this.quoteBalance?.setDisabled(viewOnly)
+    this.baseBalance.setDisabled(viewOnly)
+    this.quoteBalance.setDisabled(viewOnly)
     this.cexBaseBalanceRange?.setDisabled(viewOnly)
     this.cexQuoteBalanceRange?.setDisabled(viewOnly)
     this.cexBaseMinBalanceRange?.setDisabled(viewOnly)
@@ -623,8 +685,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.show(page.quickConfig, page.balanceChecks)
     page.quickConfig.after(page.buttonsBox)
 
-    this.baseBalance?.setDisabled(true)
-    this.quoteBalance?.setDisabled(true)
+    this.baseBalance.setDisabled(true)
+    this.quoteBalance.setDisabled(true)
     this.cexBaseBalanceRange?.setDisabled(true)
     this.cexQuoteBalanceRange?.setDisabled(true)
     this.cexBaseMinBalanceRange?.setDisabled(true)
@@ -654,8 +716,8 @@ export default class MarketMakerSettingsPage extends BasePage {
   quickConfigUpdated () {
     const { page, cfg, lotSize, lotSizeUSD, cexName, quoteFiatRate, bui, qui, botType } = this.marketStuff()
     const {
-      cexBaseAvail, cexQuoteAvail, dexBaseAvail, dexQuoteAvail,
-      baseWallet, quoteWallet, cexTotalBaseBalance, cexTotalQuoteBalance
+      cexBaseAvail, cexQuoteAvail, dexBaseAvail, dexQuoteAvail, baseWallet, quoteWallet,
+      baseToken, quoteToken, cexTotalBaseBalance, cexTotalQuoteBalance
     } = this.walletStuff()
 
     Doc.hide(page.qcError)
@@ -714,6 +776,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.placementsChart.render()
     }
 
+    const fees = this.feeOutlook()
+
     // For a recommended balance allocation, we'll use 3x the lot commitment.
     // 2x for standing orders and cex balance on hand, then some buffer to
     // accomodate transfers and ensure operations while waiting for
@@ -723,8 +787,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     const quoteLot = Math.round(lotSizeUSD / quoteFiatRate * qui.conventional.conversionFactor)
     const quoteAllocation = Math.round(lotsPerSide * quoteLot * 3 * driftFactor)
 
-    const allocations = (totalAlloc: number, dexAvail: number, cexAvail: number) => {
-      let [dexAlloc, cexAlloc, deficit] = [totalAlloc / 2, totalAlloc / 2, 0]
+    const allocations = (totalAlloc: number, dexAvail: number, cexAvail: number, bookingFees: number) => {
+      let [dexAlloc, cexAlloc, deficit] = [totalAlloc / 2 + bookingFees, totalAlloc / 2, 0]
       if (dexAlloc > dexAvail) {
         cexAlloc += dexAlloc - dexAvail
         dexAlloc = dexAvail
@@ -743,13 +807,22 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     const [cexBAvail, cexQAvail] = botType === botTypeBasicMM ? [0, 0] : [cexBaseAvail, cexQuoteAvail]
-    const [dexBaseAlloc, cexBaseAlloc, baseDeficit] = allocations(baseAllocation, dexBaseAvail, cexBAvail)
-    const [dexQuoteAlloc, cexQuoteAlloc, quoteDeficit] = allocations(quoteAllocation, dexQuoteAvail, cexQAvail)
+    const [dexBaseAlloc, cexBaseAlloc, baseDeficit] = allocations(baseAllocation, dexBaseAvail, cexBAvail, (baseToken ? 0 : fees.base.bookingFees))
+    const [dexQuoteAlloc, cexQuoteAlloc, quoteDeficit] = allocations(quoteAllocation, dexQuoteAvail, cexQAvail, (quoteToken ? 0 : fees.quote.bookingFees))
 
-    this.baseBalance?.setValue(dexBaseAlloc / baseWallet.balance.available * 100, true)
-    this.quoteBalance?.setValue(dexQuoteAlloc / quoteWallet.balance.available * 100, true)
+    this.baseBalance.setValue(dexBaseAlloc / baseWallet.balance.available * 100, true)
+    this.quoteBalance.setValue(dexQuoteAlloc / quoteWallet.balance.available * 100, true)
     this.cexBaseBalanceRange?.setValue(cexBaseAlloc / cexTotalBaseBalance * 100, true)
     this.cexQuoteBalanceRange?.setValue(cexQuoteAlloc / cexTotalQuoteBalance * 100, true)
+
+    if (baseToken) {
+      const feeReserves = fees.base.bookingFees + tokenFeeMultiplier * fees.base.reservesPerSwap
+      cfg.baseTokenFees = this.setTokenFees(feeReserves, this.baseTokenFeesBox())
+    }
+    if (quoteToken) {
+      const feeReserves = fees.quote.bookingFees + tokenFeeMultiplier * fees.quote.reservesPerSwap
+      cfg.quoteTokenFees = this.setTokenFees(feeReserves, this.quoteTokenFeesBox())
+    }
 
     Doc.hide(page.baseBalNotOK, page.baseBalNotOKBals, page.baseBalOK, page.baseBalOKBals)
     Doc.setVis(Boolean(cexName), ...Doc.applySelector(page.balanceChecks, '[data-cex-show]'))
@@ -813,6 +886,76 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.quickConfigUpdated()
   }
 
+  baseTokenFeesBox (): tokenFeeBox {
+    const { specs: { baseID }, page: { baseTokenBooking, baseTokenBookingFiat, baseTokenSwapCount, baseTokenReserves, baseTokenReservesFiat, baseTokenFees } } = this
+    const fees = this.feeOutlook()
+    const feeAssetID = (app().assets[baseID].token as Token).parentID
+    const ui = app().assets[feeAssetID].unitInfo
+    return {
+      fees: fees.base,
+      fiatRate: app().fiatRatesMap[feeAssetID],
+      ui,
+      conversionFactor: ui.conventional.conversionFactor,
+      booking: baseTokenBooking,
+      bookingFiat: baseTokenBookingFiat,
+      swapCount: baseTokenSwapCount,
+      reserves: baseTokenReserves,
+      reservesFiat: baseTokenReservesFiat,
+      input: baseTokenFees
+    }
+  }
+
+  quoteTokenFeesBox (): tokenFeeBox {
+    const { specs: { quoteID }, page: { quoteTokenBooking, quoteTokenBookingFiat, quoteTokenSwapCount, quoteTokenReserves, quoteTokenReservesFiat, quoteTokenFees } } = this
+    const fees = this.feeOutlook()
+    const feeAssetID = (app().assets[quoteID].token as Token).parentID
+    const ui = app().assets[feeAssetID].unitInfo
+    return {
+      fees: fees.quote,
+      fiatRate: app().fiatRatesMap[feeAssetID],
+      ui,
+      conversionFactor: ui.conventional.conversionFactor,
+      booking: quoteTokenBooking,
+      bookingFiat: quoteTokenBookingFiat,
+      swapCount: quoteTokenSwapCount,
+      reserves: quoteTokenReserves,
+      reservesFiat: quoteTokenReservesFiat,
+      input: quoteTokenFees
+    }
+  }
+
+  incrementTokenFees (up: boolean, isBase: boolean) {
+    const box = isBase ? this.baseTokenFeesBox() : this.quoteTokenFeesBox()
+    const incrementCount = 10
+    const adj = incrementCount * box.fees.reservesPerSwap * (up ? 1 : -1)
+    const inputValue = parseFloat(box.input.value ?? '') * box.conversionFactor
+    const v = Math.max(0, (inputValue + adj) || (box.fees.bookingFees + tokenFeeMultiplier * box.fees.reservesPerSwap))
+    if (isBase) this.updatedConfig.baseTokenFees = this.setTokenFees(v, box)
+    else this.updatedConfig.quoteTokenFees = this.setTokenFees(v, box)
+  }
+
+  setTokenFees (v: number, box: tokenFeeBox) {
+    const { fees, fiatRate, ui, booking, bookingFiat, swapCount, reserves, reservesFiat, input, conversionFactor } = box
+    booking.textContent = Doc.formatCoinValue(fees.bookingFees, ui)
+    bookingFiat.textContent = Doc.formatFourSigFigs(fees.bookingFees / conversionFactor * fiatRate)
+    const r = v - fees.bookingFees
+    const displayReserves = Math.max(0, r)
+    swapCount.textContent = String(Math.floor(displayReserves / fees.reservesPerSwap))
+    reserves.textContent = Doc.formatCoinValue(displayReserves, ui)
+    reservesFiat.textContent = Doc.formatFourSigFigs(displayReserves / conversionFactor)
+    swapCount.classList.toggle('text-danger', r < 0)
+    input.classList.toggle('text-danger', r < 0)
+    input.value = Doc.formatCoinValue(v, ui)
+    return Math.round(v)
+  }
+
+  tokenFeesChanged (isBase: boolean) {
+    const box = isBase ? this.baseTokenFeesBox() : this.quoteTokenFeesBox()
+    const v = parseFloat(box.input.value ?? '') ?? 0
+    if (isBase) this.updatedConfig.baseTokenFees = this.setTokenFees(v, box)
+    else this.updatedConfig.quoteTokenFees = this.setTokenFees(v, box)
+  }
+
   qcProfitChanged () {
     const { page, updatedConfig: cfg } = this
     const v = Math.max(qcMinimumProfit, parseFloat(page.qcProfit.value ?? '') || qcDefaultProfitThreshold)
@@ -834,6 +977,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { page } = this
     page.qcMatchBuffer.value = Math.max(0, parseFloat(page.qcMatchBuffer.value ?? '') || qcDefaultMatchBuffer * 100).toFixed(2)
     this.quickConfigUpdated()
+  }
+
+  showDeposit (assetID: number) {
+    this.walletAddrForm.setAsset(assetID)
+    this.forms.show(this.page.walletAddrForm)
   }
 
   async showBotTypeForm (host: string, baseID: number, quoteID: number, botType?: string, configuredCEX?: string) {
@@ -859,10 +1007,9 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.forms.close()
       return
     }
+    this.setBaseQuote(page.botTypeForm, baseID, quoteID)
     Doc.empty(page.botTypeBaseSymbol, page.botTypeQuoteSymbol)
     const [b, q] = [app().assets[baseID], app().assets[quoteID]]
-    page.botTypeBaseLogo.src = Doc.logoPath(b.symbol)
-    page.botTypeQuoteLogo.src = Doc.logoPath(q.symbol)
     page.botTypeBaseSymbol.appendChild(Doc.symbolize(b, true))
     page.botTypeQuoteSymbol.appendChild(Doc.symbolize(q, true))
 
@@ -985,10 +1132,16 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   handleBalanceNote (n: BalanceNote) {
+    this.approveTokenForm.handleBalanceNote(n)
     if (!this.marketReport) return
     const { page, baseID, quoteID, bui, qui } = this.marketStuff()
-    if (n.assetID === baseID) page.dexBaseAvail.textContent = Doc.formatFourSigFigs(n.balance.available / bui.conventional.conversionFactor)
-    else if (n.assetID === quoteID) page.dexQuoteAvail.textContent = Doc.formatFourSigFigs(n.balance.available / qui.conventional.conversionFactor)
+    if (n.assetID === baseID) {
+      if (n.balance.available > 0 && Doc.isHidden(page.baseBalanceContainer)) this.setupBalanceSelectors(isViewOnly(this.specs, this.mmStatus))
+      page.dexBaseAvail.textContent = Doc.formatFourSigFigs(n.balance.available / bui.conventional.conversionFactor)
+    } else if (n.assetID === quoteID) {
+      if (n.balance.available > 0 && Doc.isHidden(page.quoteBalanceContainer)) this.setupBalanceSelectors(isViewOnly(this.specs, this.mmStatus))
+      page.dexQuoteAvail.textContent = Doc.formatFourSigFigs(n.balance.available / qui.conventional.conversionFactor)
+    }
   }
 
   autoRebalanceChanged () {
@@ -1037,20 +1190,32 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   async submitBotType () {
     // check for wallets
-    const { baseID, quoteID } = this.formSpecs
+    const { page, forms, formSpecs: { baseID, quoteID, host } } = this
 
     if (!app().walletMap[baseID]) {
       this.newWalletForm.setAsset(baseID)
-      this.forms.show(this.page.newWalletForm)
+      forms.show(this.page.newWalletForm)
       return
     }
     if (!app().walletMap[quoteID]) {
       this.newWalletForm.setAsset(quoteID)
-      this.forms.show(this.page.newWalletForm)
+      forms.show(this.page.newWalletForm)
+      return
+    }
+    // Are tokens approved?
+    const [bApproval, qApproval] = tokenAssetApprovalStatuses(host, app().assets[baseID], app().assets[quoteID])
+    if (bApproval === ApprovalStatus.NotApproved) {
+      this.approveTokenForm.setAsset(baseID, host)
+      forms.show(page.approveTokenForm)
+      return
+    }
+    if (qApproval === ApprovalStatus.NotApproved) {
+      this.approveTokenForm.setAsset(quoteID, host)
+      forms.show(page.approveTokenForm)
       return
     }
 
-    const { page, botTypeSelectors } = this
+    const { botTypeSelectors } = this
     const selecteds = botTypeSelectors.filter((div: PageElement) => div.classList.contains('selected'))
     if (selecteds.length < 1) {
       page.botTypeErr.textContent = intl.prep(intl.ID_NO_BOTTYPE)
@@ -1179,8 +1344,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.oracleWeightingContainer.classList.toggle('modified', this.oracleWeighting.modified())
     page.emptyMarketRateInput.classList.toggle('modified', oldCfg.emptyMarketRate !== newCfg.emptyMarketRate)
     page.emptyMarketRateCheckbox.classList.toggle('modified', oldCfg.useEmptyMarketRate !== newCfg.useEmptyMarketRate)
-    page.baseBalanceContainer.classList.toggle('modified', this.baseBalance && this.baseBalance.modified())
-    page.quoteBalanceContainer.classList.toggle('modified', this.quoteBalance && this.quoteBalance.modified())
+    page.baseBalanceContainer.classList.toggle('modified', this.baseBalance.modified())
+    page.quoteBalanceContainer.classList.toggle('modified', this.quoteBalance.modified())
     page.orderPersistenceContainer.classList.toggle('modified', this.orderPersistence.modified())
 
     if (botType !== botTypeBasicMM) {
@@ -1733,6 +1898,16 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.emptyMarketRateCheckbox.checked = cfg.useEmptyMarketRate && cfg.emptyMarketRate > 0
     this.useEmptyMarketRateChanged()
 
+    const [{ token: baseToken }, { token: quoteToken }] = [app().assets[baseID], app().assets[quoteID]]
+    if (baseToken) {
+      const ui = app().assets[baseToken.parentID].unitInfo
+      page.baseTokenFees.value = Doc.formatCoinValue(oldCfg.baseTokenFees, ui)
+    }
+    if (quoteToken) {
+      const ui = app().assets[quoteToken.parentID].unitInfo
+      page.baseTokenFees.value = Doc.formatCoinValue(oldCfg.quoteTokenFees, ui)
+    }
+
     if (cexName) {
       cexBaseBalanceRange.reset()
       cexBaseMinBalanceRange.reset()
@@ -1842,6 +2017,10 @@ export default class MarketMakerSettingsPage extends BasePage {
       baseBalance: cfg.baseBalance,
       quoteBalanceType: cfg.quoteBalanceType,
       quoteBalance: cfg.quoteBalance,
+      baseFeeAssetBalanceType: BalanceType.Amount,
+      baseFeeAssetBalance: cfg.baseTokenFees,
+      quoteFeeAssetBalanceType: BalanceType.Amount,
+      quoteFeeAssetBalance: cfg.quoteTokenFees,
       disabled: cfg.disabled,
       baseWalletOptions: cfg.baseOptions,
       quoteWalletOptions: cfg.quoteOptions
@@ -1952,8 +2131,8 @@ export default class MarketMakerSettingsPage extends BasePage {
    */
   setupBalanceSelectors (viewOnly: boolean) {
     const { page, updatedConfig: cfg, specs: { host, baseID, quoteID }, botConfigs } = this
-    const { wallet: { balance: { available: bAvail } }, unitInfo: bui } = app().assets[baseID]
-    const { wallet: { balance: { available: qAvail } }, unitInfo: qui } = app().assets[quoteID]
+    const { wallet: { balance: { available: bAvail } }, unitInfo: bui, token: bToken } = app().assets[baseID]
+    const { wallet: { balance: { available: qAvail } }, unitInfo: qui, token: qToken } = app().assets[quoteID]
 
     let baseReservedByOtherBots = 0
     let quoteReservedByOtherBots = 0
@@ -2007,31 +2186,72 @@ export default class MarketMakerSettingsPage extends BasePage {
       yUnit: qui.conventional.unit
     }
 
-    Doc.hide(page.noBaseBalance, page.noQuoteBalance, page.baseBalanceContainer, page.quoteBalanceContainer)
+    Doc.hide(
+      page.noBaseBalance, page.noQuoteBalance, page.baseBalanceContainer,
+      page.quoteBalanceContainer, page.baseTokenFeeSettings, page.quoteTokenFeeSettings
+    )
     Doc.empty(page.baseBalanceContainer, page.quoteBalanceContainer)
 
-    if (baseMaxAvailable > 0) {
-      this.baseBalance = new XYRangeHandler(baseXYRange, cfg.baseBalance, {
-        disabled: viewOnly, settingsDict: cfg, settingsKey: 'baseBalance',
-        changed: () => { this.updateModifiedMarkers() }
-      })
-      page.baseBalanceContainer.appendChild(this.baseBalance.control)
-      Doc.show(page.baseBalanceContainer)
-    } else {
-      this.baseBalance = undefined
-      Doc.show(page.noBaseBalance)
+    this.baseBalance = new XYRangeHandler(baseXYRange, cfg.baseBalance, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'baseBalance',
+      changed: () => { this.updateModifiedMarkers() }
+    })
+    page.baseBalanceContainer.appendChild(this.baseBalance.control)
+    if (baseMaxAvailable > 0) Doc.show(page.baseBalanceContainer)
+    else Doc.show(page.noBaseBalance)
+
+    if (bToken) {
+      Doc.show(page.baseTokenFeeSettings)
+      const { symbol, unitInfo: { conventional: { unit } } } = app().assets[bToken.parentID]
+      page.baseTokenParentLogo.src = Doc.logoPath(symbol)
+      for (const el of Doc.applySelector(page.baseTokenFeeSettings, '[data-base-fee-ticker]')) el.textContent = unit
+      const box = this.quoteTokenFeesBox()
+      if (cfg.baseTokenFees) this.setTokenFees(cfg.baseTokenFees, box)
+      else {
+        const defaultFees = box.fees.bookingFees + tokenFeeMultiplier * box.fees.reservesPerSwap
+        cfg.baseTokenFees = this.originalConfig.baseTokenFees = this.setTokenFees(defaultFees, this.quoteTokenFeesBox())
+      }
     }
 
-    if (quoteMaxAvailable > 0) {
-      this.quoteBalance = new XYRangeHandler(quoteXYRange, cfg.quoteBalance, {
-        disabled: viewOnly, settingsDict: cfg, settingsKey: 'quoteBalance',
-        changed: () => { this.updateModifiedMarkers() }
-      })
-      page.quoteBalanceContainer.appendChild(this.quoteBalance.control)
-      Doc.show(page.quoteBalanceContainer)
-    } else {
-      this.quoteBalance = undefined
-      Doc.show(page.noQuoteBalance)
+    this.quoteBalance = new XYRangeHandler(quoteXYRange, cfg.quoteBalance, {
+      disabled: viewOnly, settingsDict: cfg, settingsKey: 'quoteBalance',
+      changed: () => { this.updateModifiedMarkers() }
+    })
+    page.quoteBalanceContainer.appendChild(this.quoteBalance.control)
+    if (quoteMaxAvailable > 0) Doc.show(page.quoteBalanceContainer)
+    else Doc.show(page.noQuoteBalance)
+
+    if (qToken) {
+      Doc.show(page.quoteTokenFeeSettings)
+      const { symbol, unitInfo: { conventional: { unit } } } = app().assets[qToken.parentID]
+      page.quoteTokenParentLogo.src = Doc.logoPath(symbol)
+      for (const el of Doc.applySelector(page.quoteTokenFeeSettings, '[data-quote-fee-ticker]')) el.textContent = unit
+      const box = this.quoteTokenFeesBox()
+      if (cfg.quoteTokenFees) this.setTokenFees(cfg.quoteTokenFees, box)
+      else {
+        const defaultFees = box.fees.bookingFees + tokenFeeMultiplier * box.fees.reservesPerSwap
+        cfg.quoteTokenFees = this.originalConfig.quoteTokenFees = this.setTokenFees(defaultFees, box)
+      }
+    }
+  }
+
+  feeOutlook (): FeeOutlook {
+    const { updatedConfig: cfg, marketReport: { baseFees, quoteFees } } = this
+    const buyLots = cfg.buyPlacements.reduce((sum: number, p: OrderPlacement) => sum + p.lots, 0)
+    const sellLots = cfg.sellPlacements.reduce((sum: number, p: OrderPlacement) => sum + p.lots, 0)
+    const baseBookingFees = sellLots * (baseFees.max.swap + baseFees.max.refund) + buyLots * baseFees.max.redeem
+    const baseFeeReserves = baseFees.estimated.swap + Math.max(baseFees.estimated.redeem, baseFees.estimated.refund)
+    const quoteBookingFees = buyLots * (quoteFees.max.swap + quoteFees.max.refund) + sellLots * quoteFees.max.redeem
+    const quoteFeeReserves = quoteFees.estimated.swap + Math.max(quoteFees.estimated.redeem + quoteFees.estimated.refund)
+    return {
+      base: {
+        bookingFees: baseBookingFees,
+        reservesPerSwap: baseFeeReserves
+      },
+      quote: {
+        bookingFees: quoteBookingFees,
+        reservesPerSwap: quoteFeeReserves
+      }
     }
   }
 
@@ -2055,10 +2275,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { name: qName, symbol: quoteSymbol, unitInfo: qui } = app().assets[quoteID]
     const xc = app().exchanges[host]
     const { lotsize: lotSize, spot } = xc.markets[`${baseSymbol}_${quoteSymbol}`]
-    const dinfo = CEXDisplayInfos[cexName]
-    page.cexBRebalCEXLogo.src = page.cexQRebalCEXLogo.src = page.cexQuoteCEXLogo.src = page.cexBaseCEXLogo.src = '/img/' + dinfo.logo
-    page.cexBRebalAssetLogo.src = page.cexBaseAssetLogo.src = Doc.logoPath(baseSymbol)
-    page.cexQRebalAssetLogo.src = page.cexQuoteAssetLogo.src = Doc.logoPath(quoteSymbol)
+    this.setCexLogo(document.body, cexName)
     page.baseRebalanceName.textContent = page.dexBaseBalName.textContent = bName
     page.baseWalletSettingsName.textContent = page.cexBaseBalName.textContent = bName
     page.quoteRebalanceName.textContent = page.quoteWalletSettingsName.textContent = qName
@@ -2187,6 +2404,13 @@ export default class MarketMakerSettingsPage extends BasePage {
     } else {
       Doc.show(page.noQuoteCEXBalance)
     }
+  }
+
+  setCexLogo (ancestor: PageElement, cexName: string) {
+    if (!cexName) return
+    const dinfo = CEXDisplayInfos[cexName]
+    const cexLogoSrc = '/img/' + dinfo.logo
+    for (const el of Doc.applySelector(ancestor, '[data-cex-logo')) el.src = cexLogoSrc
   }
 
   /*
@@ -2324,9 +2548,9 @@ export default class MarketMakerSettingsPage extends BasePage {
    * them on the screen.
    */
   async fetchOracles (): Promise<void> {
-    const { page, specs: { baseID, quoteID } } = this
+    const { page, specs: { host, baseID, quoteID } } = this
 
-    const res = await MM.report(baseID, quoteID)
+    const res = await MM.report(host, baseID, quoteID)
     Doc.hide(page.oraclesLoading)
 
     if (!app().checkResponse(res)) {
@@ -2354,16 +2578,12 @@ export default class MarketMakerSettingsPage extends BasePage {
       Doc.show(page.oraclesTable)
     }
 
-    page.baseFiatRateSymbol.textContent = app().assets[baseID].symbol.toUpperCase()
-    page.baseFiatRateLogo.src = Doc.logoPathFromID(baseID)
     if (r.baseFiatRate > 0) {
       page.baseFiatRate.textContent = Doc.formatFourSigFigs(r.baseFiatRate)
     } else {
       page.baseFiatRate.textContent = 'N/A'
     }
 
-    page.quoteFiatRateSymbol.textContent = app().assets[quoteID].symbol.toUpperCase()
-    page.quoteFiatRateLogo.src = Doc.logoPathFromID(quoteID)
     if (r.quoteFiatRate > 0) {
       page.quoteFiatRate.textContent = Doc.formatFourSigFigs(r.quoteFiatRate)
     } else {
@@ -2489,9 +2709,9 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   showCEXConfigForm (cexName: string) {
     const page = this.page
+    this.setCexLogo(page.cexConfigForm, cexName)
     Doc.hide(page.cexConfigPrompt, page.cexConnectErrBox, page.cexFormErr)
     const dinfo = CEXDisplayInfos[cexName]
-    page.cexConfigLogo.src = '/img/' + dinfo.logo
     page.cexConfigName.textContent = dinfo.name
     page.cexConfigForm.dataset.cexName = cexName
     page.cexApiKeyInput.value = ''
@@ -2712,4 +2932,29 @@ class PlacementsChart extends Chart {
     plotSide(false, sellPlacements)
     plotSide(true, buyPlacements)
   }
+}
+
+function tokenAssetApprovalStatuses (host: string, b: SupportedAsset, q: SupportedAsset) {
+  let baseAssetApprovalStatus = ApprovalStatus.Approved
+  let quoteAssetApprovalStatus = ApprovalStatus.Approved
+
+  if (b?.token) {
+    const baseAsset = app().assets[b.id]
+    const baseVersion = app().exchanges[host].assets[b.id].version
+    if (baseAsset?.wallet?.approved && baseAsset.wallet.approved[baseVersion] !== undefined) {
+      baseAssetApprovalStatus = baseAsset.wallet.approved[baseVersion]
+    }
+  }
+  if (q?.token) {
+    const quoteAsset = app().assets[q.id]
+    const quoteVersion = app().exchanges[host].assets[q.id].version
+    if (quoteAsset?.wallet?.approved && quoteAsset.wallet.approved[quoteVersion] !== undefined) {
+      quoteAssetApprovalStatus = quoteAsset.wallet.approved[quoteVersion]
+    }
+  }
+
+  return [
+    baseAssetApprovalStatus,
+    quoteAssetApprovalStatus
+  ]
 }

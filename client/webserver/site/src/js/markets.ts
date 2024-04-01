@@ -19,6 +19,7 @@ import {
   UnlockWalletForm,
   AccelerateOrderForm,
   DepositAddress,
+  TokenApprovalForm,
   bind as bindForm
 } from './forms'
 import * as OrderUtil from './orderutil'
@@ -64,7 +65,6 @@ import {
   OrderFilter
 } from './registry'
 import { setOptionTemplates } from './opts'
-import { CoinExplorers } from './coinexplorers'
 import { MM } from './mm'
 
 const bind = Doc.bind
@@ -146,8 +146,6 @@ interface StatsDisplay {
   tmpl: Record<string, PageElement>
 }
 
-let net : number
-
 export default class MarketsPage extends BasePage {
   page: Record<string, PageElement>
   main: HTMLElement
@@ -178,6 +176,7 @@ export default class MarketsPage extends BasePage {
   unlockForm: UnlockWalletForm
   newWalletForm: NewWalletForm
   depositAddrForm: DepositAddress
+  approveTokenForm: TokenApprovalForm
   reputationMeter: ReputationMeter
   keyup: (e: KeyboardEvent) => void
   secondTicker: number
@@ -188,13 +187,11 @@ export default class MarketsPage extends BasePage {
   recentMatchesSortDirection: 1 | -1
   stats: [StatsDisplay, StatsDisplay]
   loadingAnimations: { candles?: Wave, depth?: Wave }
-  approvingBaseToken: boolean
   mmRunning: boolean | undefined
 
   constructor (main: HTMLElement, data: any) {
     super()
 
-    net = app().user.net
     const page = this.page = Doc.idDescendants(main)
     this.main = main
     if (!this.main.parentElement) return // Not gonna happen, but TypeScript cares.
@@ -231,6 +228,8 @@ export default class MarketsPage extends BasePage {
     const success = () => { /* do nothing */ }
     // Do not call cleanTemplates before creating the AccelerateOrderForm
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
+
+    this.approveTokenForm = new TokenApprovalForm(page.approveTokenForm)
 
     // Set user's last known candle duration.
     this.candleDur = State.fetchLocal(State.lastCandleDurationLK) || oneHrBinKey
@@ -285,7 +284,6 @@ export default class MarketsPage extends BasePage {
     // Buttons to show token approval form
     bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalForm(true) })
     bind(page.approveQuoteBttn, 'click', () => { this.showTokenApprovalForm(false) })
-    bind(page.approveTokenButton, 'click', () => { this.sendTokenApproval() })
 
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => { this.setBuy() })
@@ -796,79 +794,10 @@ export default class MarketsPage extends BasePage {
    * showTokenApprovalForm displays the form used to give allowance to the
    * swap contract of a token.
    */
-  async showTokenApprovalForm (base: boolean) {
-    const { page } = this
-
-    Doc.show(page.tokenApprovalSubmissionElements)
-    Doc.hide(page.tokenApprovalTxMsg, page.approveTokenErr)
-    Doc.setVis(!State.passwordIsCached(), page.tokenApprovalPWBox)
-    page.tokenApprovalPW.value = ''
-    let tokenAsset : SupportedAsset
-    if (base) {
-      tokenAsset = this.market.base
-    } else {
-      tokenAsset = this.market.quote
-    }
-    this.approvingBaseToken = base
-    page.approveTokenSymbol.textContent = tokenAsset.symbol.toUpperCase()
-    if (!tokenAsset.token) {
-      console.error(`${tokenAsset.id} should be a token`)
-      return
-    }
-    const parentAsset = app().assets[tokenAsset.token.parentID]
-    if (!parentAsset || !parentAsset.info) {
-      console.error(`${tokenAsset.token.parentID} asset not found`)
-      return
-    }
-    const dexAsset = this.market.dex.assets[tokenAsset.id]
-    if (!dexAsset) {
-      console.error(`${tokenAsset.id} asset not found in dex ${this.market.dex.host}`)
-      return
-    }
-    const path = '/api/approvetokenfee'
-    const res = await postJSON(path, {
-      assetID: tokenAsset.id,
-      version: dexAsset.version,
-      approving: true
-    })
-    if (!app().checkResponse(res)) {
-      page.approveTokenErr.textContent = res.msg
-      Doc.show(page.approveTokenErr)
-    } else {
-      let feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.symbol.toUpperCase()}`
-      const rate = app().fiatRatesMap[parentAsset.id]
-      if (rate) {
-        feeText += ` (${Doc.formatFiatConversion(res.txFee, rate, parentAsset.unitInfo)} USD)`
-      }
-      page.approvalFeeEstimate.textContent = feeText
-    }
-    this.showForm(page.approveTokenForm)
-  }
-
-  /*
-   * sendTokenApproval calls the /api/approvetoken endpoint.
-   */
-  async sendTokenApproval () {
-    const { page } = this
-    const tokenAsset = this.approvingBaseToken ? this.market.base : this.market.quote
-    const path = '/api/approvetoken'
-    const res = await postJSON(path, {
-      assetID: tokenAsset.id,
-      dexAddr: this.market.dex.host,
-      pass: page.tokenApprovalPW.value
-    })
-    if (!app().checkResponse(res)) {
-      page.approveTokenErr.textContent = res.msg
-      Doc.show(page.approveTokenErr)
-      return
-    }
-    page.tokenApprovalTxID.innerText = res.txID
-    const assetExplorer = CoinExplorers[tokenAsset.id]
-    if (assetExplorer && assetExplorer[net]) {
-      page.tokenApprovalTxID.href = assetExplorer[net](res.txID)
-    }
-    Doc.hide(page.tokenApprovalSubmissionElements)
-    Doc.show(page.tokenApprovalTxMsg)
+  async showTokenApprovalForm (isBase: boolean) {
+    const assetID = isBase ? this.market.base.id : this.market.quote.id
+    this.approveTokenForm.setAsset(assetID, this.market.dex.host)
+    this.showForm(this.page.approveTokenForm)
   }
 
   /*
@@ -2680,6 +2609,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note: BalanceNote) {
+    this.approveTokenForm.handleBalanceNote(note)
     this.preorderCache = {} // invalidate previous preorder results
     // if connection to dex server fails, it is not possible to retrieve
     // markets.

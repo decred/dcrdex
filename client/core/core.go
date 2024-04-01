@@ -4916,20 +4916,29 @@ func (c *Core) Login(pw []byte) error {
 		}
 	}
 
-	c.loginMtx.Lock()
-	defer c.loginMtx.Unlock()
+	login := func() (needInit bool, err error) {
+		c.loginMtx.Lock()
+		defer c.loginMtx.Unlock()
+		if !c.loggedIn {
+			// Derive the bond extended key from the seed.
+			seed, err := crypter.Decrypt(creds.EncSeed)
+			if err != nil {
+				return false, fmt.Errorf("seed decryption error: %w", err)
+			}
+			defer encode.ClearBytes(seed)
+			c.bondXPriv, err = deriveBondXPriv(seed)
+			if err != nil {
+				return false, fmt.Errorf("GenDeepChild error: %w", err)
+			}
+			c.loggedIn = true
+			return true, nil
+		}
+		return false, nil
+	}
 
-	if !c.loggedIn {
-		// Derive the bond extended key from the seed.
-		seed, err := crypter.Decrypt(creds.EncSeed)
-		if err != nil {
-			return fmt.Errorf("seed decryption error: %w", err)
-		}
-		defer encode.ClearBytes(seed)
-		c.bondXPriv, err = deriveBondXPriv(seed)
-		if err != nil {
-			return fmt.Errorf("GenDeepChild error: %w", err)
-		}
+	if needsInit, err := login(); err != nil {
+		return err
+	} else if needsInit {
 		// It is not an error if we can't connect, unless we need the wallet
 		// for active trades, but that condition is checked later in
 		// resolveActiveTrades. We won't try to unlock here, but if the wallet
@@ -4943,7 +4952,6 @@ func (c *Core) Login(pw []byte) error {
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
 
-		c.loggedIn = true
 	}
 
 	return nil
@@ -5891,7 +5899,7 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 // SingleLotFees returns the estimated swap, refund, and redeem fees for a single lot
 // trade.
 func (c *Core) SingleLotFees(form *SingleLotFeesForm) (swapFees, redeemFees, refundFees uint64, err error) {
-	dc, err := c.registeredDEX(form.Host)
+	dc, _, err := c.dex(form.Host)
 	if err != nil {
 		return 0, 0, 0, err
 	}

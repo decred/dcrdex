@@ -14,11 +14,6 @@ button {
   color: var(--text-color);
   white-space: nowrap;
 
-  &.selected {
-    background-color: #38cfb0;
-    border: none;
-  }
-
   &:focus {
     outline: none;
   }
@@ -50,11 +45,11 @@ button {
   }
 
   &.danger {
-    border-color: var(--btn-danger);
-    color: var(--btn-danger);
+    border-color: var(--text-danger);
+    color: var(--text-danger);
 
     &:hover {
-      background-color: var(--btn-danger);
+      background-color: var(--text-danger);
       color: var(--btn-danger-hover-color);
     }
   }
@@ -82,6 +77,14 @@ table {
   th,
   td {
     padding: 0.5rem;
+
+    &:last-child:not(:first-child) {
+      text-align: right;
+    }
+
+    &.no-stretch {
+      width: 0;
+    }
   }
 
   &.row-border {
@@ -267,6 +270,14 @@ input:invalid {
   &.off {
     background-color: #777;
   }
+}
+
+.border-left { // alias of .border-start
+  border-left: 1px solid var(--border-color);
+}
+
+.border-right { // alias of .border-end
+  border-right: 1px solid var(--border-color);
 }
 
 div[data-handler=dexsettings],
