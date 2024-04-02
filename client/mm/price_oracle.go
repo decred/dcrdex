@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -355,31 +356,29 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 	return rate, nil
 }
 
-func coinpapSlug(symbol, name string) string {
-	name, symbol = fiatrates.ParseCoinpapNameSymbol(name, symbol)
-	slug := fmt.Sprintf("%s-%s", symbol, name)
-	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
-	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
+func getRates(ctx context.Context, url string, thing any) (err error) {
+	_, err = getHTTPWithCode(ctx, url, thing)
+	return err
 }
 
-func getRates(ctx context.Context, url string, thing any) error {
+func getHTTPWithCode(ctx context.Context, url string, thing any) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response, got status code %d", resp.StatusCode)
+		return resp.StatusCode, fmt.Errorf("HTTP error code %d for request to %q: %s", resp.StatusCode, url, resp.Status)
 	}
 
 	reader := io.LimitReader(resp.Body, 1<<22)
-	return json.NewDecoder(reader).Decode(thing)
+	return 0, json.NewDecoder(reader).Decode(thing)
 }
 
 // Truncates the URL to the domain name and TLD.
@@ -409,7 +408,7 @@ func spread(ctx context.Context, addr string, baseSymbol, quoteSymbol string, lo
 	if s == nil {
 		return 0, 0
 	}
-	sell, buy, err = s(ctx, baseSymbol, quoteSymbol)
+	sell, buy, err = s(ctx, shortSymbol(baseSymbol), shortSymbol(quoteSymbol), log)
 	if err != nil {
 		log.Errorf("Error getting spread from %q: %v", addr, err)
 		return 0, 0
@@ -424,8 +423,8 @@ func spread(ctx context.Context, addr string, baseSymbol, quoteSymbol string, lo
 func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, log dex.Logger) (oracles []*OracleReport, err error) {
 	// They're going to return the quote prices in terms of USD, which is
 	// sort of nonsense for a non-USD market like DCR-BTC.
-	baseSlug := coinpapSlug(b.Symbol, b.Name)
-	quoteSlug := coinpapSlug(q.Symbol, q.Name)
+	baseSlug := fiatrates.CoinpapSlug(b.Name, b.Symbol)
+	quoteSlug := fiatrates.CoinpapSlug(q.Name, q.Symbol)
 
 	type coinpapQuote struct {
 		Price  float64 `json:"price"`
@@ -445,6 +444,18 @@ func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, l
 	url := fmt.Sprintf("https://api.coinpaprika.com/v1/coins/%s/markets", baseSlug)
 	if err := getRates(ctx, url, &rawMarkets); err != nil {
 		return nil, err
+	}
+
+	convertIfNecessary := func(addr, slug string) string {
+		s, _ := shortHost(addr)
+		switch s {
+		case "coinbase.com":
+			switch slug {
+			case "usd-us-dollars":
+				return "usdc-usd-coin"
+			}
+		}
+		return slug
 	}
 
 	// Create filter for desirable matches.
@@ -467,6 +478,8 @@ func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, l
 
 	var filteredResults []*coinpapMarket
 	for _, mkt := range rawMarkets {
+		mkt.BaseCurrencyID = convertIfNecessary(mkt.MarketURL, mkt.BaseCurrencyID)
+		mkt.QuoteCurrencyID = convertIfNecessary(mkt.MarketURL, mkt.QuoteCurrencyID)
 		if marketMatches(mkt) {
 			filteredResults = append(filteredResults, mkt)
 		}
@@ -510,7 +523,7 @@ func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, l
 
 // Spreader is a function that can generate market spread data for a known
 // exchange.
-type Spreader func(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error)
+type Spreader func(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error)
 
 var spreaders = map[string]Spreader{
 	"binance.com":  fetchBinanceSpread,
@@ -520,19 +533,44 @@ var spreaders = map[string]Spreader{
 	"exmo.com":     fetchEXMOSpread,
 }
 
-func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+var binanceGlobalIs451 atomic.Bool
+
+func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
-	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/bookTicker?symbol=%s", slug)
+	var url string
+	var isGlobal bool
+	if binanceGlobalIs451.Load() {
+		url = fmt.Sprintf("https://api.binance.us/api/v3/ticker/bookTicker?symbol=%s", slug)
+	} else {
+		isGlobal = true
+		url = fmt.Sprintf("https://api.binance.com/api/v3/ticker/bookTicker?symbol=%s", slug)
+	}
 
 	var resp struct {
 		BidPrice float64 `json:"bidPrice,string"`
 		AskPrice float64 `json:"askPrice,string"`
 	}
-	return resp.AskPrice, resp.BidPrice, getRates(ctx, url, &resp)
+	code, err := getHTTPWithCode(ctx, url, &resp)
+	if err != nil {
+		if isGlobal && code == http.StatusUnavailableForLegalReasons && binanceGlobalIs451.CompareAndSwap(false, true) {
+			log.Info("Binance Global responded with a 451. Oracle will use Binance U.S.")
+			return fetchBinanceSpread(ctx, baseSymbol, quoteSymbol, log)
+		}
+		return 0, 0, err
+	}
+
+	return resp.AskPrice, resp.BidPrice, nil
 }
 
-func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
-	slug := fmt.Sprintf("%s-%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
+func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
+	slugSymbol := func(symbol string) string {
+		switch symbol {
+		case "usdc":
+			return "USD"
+		}
+		return strings.ToUpper(symbol)
+	}
+	slug := fmt.Sprintf("%s-%s", slugSymbol(baseSymbol), slugSymbol(quoteSymbol))
 	url := fmt.Sprintf("https://api.exchange.coinbase.com/products/%s/ticker", slug)
 
 	var resp struct {
@@ -543,7 +581,7 @@ func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string) (s
 	return resp.Ask, resp.Bid, getRates(ctx, url, &resp)
 }
 
-func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s-%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
 	url := fmt.Sprintf("https://api.bittrex.com/v3/markets/%s/ticker", slug)
 	var resp struct {
@@ -553,7 +591,7 @@ func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string) (se
 	return resp.AskRate, resp.BidRate, getRates(ctx, url, &resp)
 }
 
-func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
 	url := fmt.Sprintf("https://api.hitbtc.com/api/3/public/orderbook/%s?depth=1", slug)
 
@@ -581,7 +619,7 @@ func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sel
 	return ask, bid, nil
 }
 
-func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s_%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
 	url := fmt.Sprintf("https://api.exmo.com/v1.1/order_book?pair=%s&limit=1", slug)
 
@@ -600,4 +638,8 @@ func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell,
 	}
 
 	return mkt.AskTop, mkt.BidTop, nil
+}
+
+func shortSymbol(symbol string) string {
+	return strings.Split(symbol, ".")[0]
 }

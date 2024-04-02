@@ -111,9 +111,9 @@ div[data-handler=mm] {
         cursor: pointer;
 
         &.selected {
-          border-color: $success;
-          border-width: 2px;
-          background-color: #7772;
+          border-color: $success !important;
+          border-width: 2px !important;
+          background-color: #7772 !important;
         }
       }
     }

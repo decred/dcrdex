@@ -17,7 +17,8 @@ const (
 	fiatRequestTimeout = time.Second * 5
 )
 
-func coinpapSlug(symbol, name string) string {
+func CoinpapSlug(name, symbol string) string {
+	name, symbol = parseCoinpapNameSymbol(name, symbol)
 	slug := fmt.Sprintf("%s-%s", symbol, name)
 	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
 	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
@@ -29,7 +30,7 @@ type CoinpaprikaAsset struct {
 	Symbol  string
 }
 
-func ParseCoinpapNameSymbol(name, symbol string) (string, string) {
+func parseCoinpapNameSymbol(name, symbol string) (string, string) {
 	parts := strings.Split(symbol, ".")
 	if len(parts) == 2 {
 		symbol = parts[0]
@@ -51,8 +52,7 @@ func FetchCoinpaprikaRates(ctx context.Context, assets []*CoinpaprikaAsset, log 
 	fiatRates := make(map[uint32]float64)
 	slugAssets := make(map[string][]uint32)
 	for _, a := range assets {
-		name, symbol := ParseCoinpapNameSymbol(a.Name, a.Symbol)
-		slug := coinpapSlug(symbol, name)
+		slug := CoinpapSlug(a.Name, a.Symbol)
 		slugAssets[slug] = append(slugAssets[slug], a.AssetID)
 	}
 

@@ -356,7 +356,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.cexQuoteTransferDown, 'click', () => this.incrementTransfer(false, false))
     Doc.bind(page.cexQuoteTransferInput, 'change', () => { this.quoteTransferChanged() })
     Doc.bind(page.switchToAdvanced, 'click', () => { this.showAdvancedConfig(false) })
-    Doc.bind(page.switchToQuickConfig, 'click', () => { this.showQuickConfig() })
+    Doc.bind(page.switchToQuickConfig, 'click', () => { this.switchToQuickConfig() })
     Doc.bind(page.levelsPerSide, 'change', () => { this.levelsPerSideChanged() })
     Doc.bind(page.levelsPerSideUp, 'click', () => { this.incrementLevelsPerSide(true) })
     Doc.bind(page.levelsPerSideDown, 'click', () => { this.incrementLevelsPerSide(false) })
@@ -480,7 +480,10 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   async configureUI () {
-    const { host, baseID, quoteID, botType, cexName } = this.specs
+    const { page, specs: { host, baseID, quoteID, botType, cexName } } = this
+
+    Doc.show(page.marketLoading)
+    Doc.hide(page.botSettingsContainer, page.marketHeader)
 
     State.storeLocal(specLK, this.specs)
 
@@ -498,12 +501,12 @@ export default class MarketMakerSettingsPage extends BasePage {
       sellPlacements: []
     }) as ConfigState
 
-    const { page } = this
-
     Doc.hide(page.updateButton, page.resetButton, page.createButton, page.cexNameDisplayBox, page.noMarket)
+    Doc.setVis(botType === botTypeBasicMM, page.emptyMarketRateBox)
 
-    page.baseHeader.textContent = app().assets[baseID].symbol.toUpperCase()
-    page.quoteHeader.textContent = app().assets[quoteID].symbol.toUpperCase()
+    Doc.empty(page.baseHeader, page.quoteHeader)
+    page.baseHeader.appendChild(Doc.symbolize(app().assets[baseID], true))
+    page.quoteHeader.appendChild(Doc.symbolize(app().assets[quoteID], true))
     page.hostHeader.textContent = host
 
     if (botCfg) {
@@ -519,15 +522,18 @@ export default class MarketMakerSettingsPage extends BasePage {
       if (mmCfg) {
         oldCfg.buyPlacements = mmCfg.buyPlacements
         oldCfg.sellPlacements = mmCfg.sellPlacements
+        oldCfg.driftTolerance = mmCfg.driftTolerance
       } else if (arbMMCfg) {
         const { buyPlacements, sellPlacements } = arbMMCfg
         oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
         oldCfg.sellPlacements = Array.from(sellPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
         oldCfg.profit = arbMMCfg.profit
+        oldCfg.driftTolerance = arbMMCfg.driftTolerance
+        oldCfg.orderPersistence = arbMMCfg.orderPersistence
       } else if (arbCfg) {
-        // DRAFT TODO
-        // maxActiveArbs
+        // TODO: expose maxActiveArbs
         oldCfg.profit = arbCfg.profitTrigger
+        oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
       }
       if (cexCfg) {
         oldCfg.cexBaseBalance = cexCfg.baseBalance
@@ -577,6 +583,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     // Now that we've updated the originalConfig, we'll copy it.
     this.updatedConfig = JSON.parse(JSON.stringify(oldCfg))
+
     await this.fetchOracles()
 
     this.setupMMConfigSettings(viewOnly)
@@ -587,8 +594,6 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     this.setBaseQuote(document.body, baseID, quoteID)
 
-    Doc.show(page.marketLoading)
-    Doc.hide(page.marketLoading)
     const hasFiatRates = this.marketReport && this.marketReport.baseFiatRate > 0 && this.marketReport.quoteFiatRate > 0
     Doc.setVis(hasFiatRates, page.switchToQuickConfig)
 
@@ -596,6 +601,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (!botCfg && hasFiatRates) this.showQuickConfig()
     else this.showAdvancedConfig(viewOnly)
 
+    Doc.hide(page.marketLoading)
     Doc.show(page.botSettingsContainer, page.marketHeader)
   }
 
@@ -660,6 +666,53 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.cexQuoteBalanceRange?.setDisabled(viewOnly)
     this.cexBaseMinBalanceRange?.setDisabled(viewOnly)
     this.cexQuoteMinBalanceRange?.setDisabled(viewOnly)
+    this.placementsChart.render()
+  }
+
+  switchToQuickConfig () {
+    // const isQuickConfig = (buyPlacements: OrderPlacement[], sellPlacements: OrderPlacement[]) => {
+    //   if (buyPlacements.length === 0 || buyPlacements.length !== sellPlacements.length) return false
+    //   for (let i = 0; i < buyPlacements.length; i++) {
+    //     if (buyPlacements[i].gapFactor !== sellPlacements[i].gapFactor) return false
+    //     if (buyPlacements[i].lots !== sellPlacements[i].lots) return false
+    //   }
+    //   return true
+    // }
+    const { page, updatedConfig: cfg, specs: { botType } } = this
+    const { buyPlacements: buys, sellPlacements: sells } = cfg
+    // If we have both buys and sells, get the best approximation quick config
+    // approximation.
+    if (buys.length > 0 && sells.length > 0) {
+      const bestBuy = buys.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor < prev.gapFactor ? curr : prev)
+      const bestSell = sells.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor < prev.gapFactor ? curr : prev)
+      const placementCount = buys.length + sells.length
+      const levelsPerSide = Math.max(1, Math.floor((placementCount) / 2))
+      page.levelsPerSide.value = String(levelsPerSide)
+      if (botType === botTypeBasicMM) {
+        cfg.profit = (bestBuy.gapFactor + bestSell.gapFactor) / 2
+        page.qcProfit.value = String(cfg.profit * 100)
+        const worstBuy = buys.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor > prev.gapFactor ? curr : prev)
+        const worstSell = sells.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor > prev.gapFactor ? curr : prev)
+        const range = ((worstBuy.gapFactor - bestBuy.gapFactor) + (worstSell.gapFactor - bestSell.gapFactor)) / 2
+        const inc = range / (levelsPerSide - 1)
+        page.qcLevelSpacing.value = String(inc * 100)
+      } else if (botType === botTypeArbMM) {
+        page.qcProfit.value = page.profitInput.value
+        this.qcProfitChanged()
+        const multSum = buys.reduce((v: number, p: OrderPlacement) => v + p.gapFactor, 0) + sells.reduce((v: number, p: OrderPlacement) => v + p.gapFactor, 0)
+        page.qcMatchBuffer.value = String(((multSum / placementCount) - 1) * 100 || String(qcDefaultMatchBuffer * 100))
+      }
+      const lots = buys.reduce((v: number, p: OrderPlacement) => v + p.lots, 0) + sells.reduce((v: number, p: OrderPlacement) => v + p.lots, 0)
+      page.lotsPerLevel.value = String(Math.max(1, Math.round(lots / 2 / levelsPerSide)))
+    } else { // no buys and/or no sells
+      // These will be set by showQuickConfig.
+      page.lotsPerLevel.value = undefined
+      page.levelsPerSide.value = undefined
+      page.qcProfit.value = undefined
+      page.qcLevelSpacing.value = undefined
+      page.qcMatchBuffer.value = undefined
+    }
+    this.showQuickConfig()
   }
 
   showQuickConfig () {
@@ -670,10 +723,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     const lotSizeUSD = lotSize / bui.conventional.conversionFactor * baseFiatRate
     page.qcLotSizeUSDDisplay.textContent = Doc.formatFourSigFigs(lotSizeUSD)
 
-    page.levelsPerSide.value = String(qcDefaultLevelsPerSide)
-
     this.lotsPerLevelIncrement = Math.round(Math.max(1, qcDefaultLotsPerLevelIncrement / lotSizeUSD))
     if (!page.lotsPerLevel.value) page.lotsPerLevel.value = String(this.lotsPerLevelIncrement)
+    if (!page.levelsPerSide.value) page.levelsPerSide.value = String(qcDefaultLevelsPerSide)
     if (!page.qcProfit.value) page.qcProfit.value = String(qcDefaultProfitThreshold * 100)
     if (!page.qcLevelSpacing.value) page.qcLevelSpacing.value = String(qcDefaultLevelSpacing * 100)
     if (!page.qcMatchBuffer.value) page.qcMatchBuffer.value = String(qcDefaultMatchBuffer * 100)
@@ -754,6 +806,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const levelSpacingDisabled = levelsPerSide === 1
     page.levelSpacingBox.classList.toggle('disabled', levelSpacingDisabled)
+    this.qcLevelSpacingSlider.setDisabled(levelSpacingDisabled)
     page.qcLevelSpacing.disabled = levelSpacingDisabled
 
     const lotsPerSide = levelsPerSide * lotsPerLevel
@@ -942,7 +995,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const displayReserves = Math.max(0, r)
     swapCount.textContent = String(Math.floor(displayReserves / fees.reservesPerSwap))
     reserves.textContent = Doc.formatCoinValue(displayReserves, ui)
-    reservesFiat.textContent = Doc.formatFourSigFigs(displayReserves / conversionFactor)
+    reservesFiat.textContent = Doc.formatFourSigFigs(displayReserves / conversionFactor * fiatRate)
     swapCount.classList.toggle('text-danger', r < 0)
     input.classList.toggle('text-danger', r < 0)
     input.value = Doc.formatCoinValue(v, ui)
@@ -1142,6 +1195,9 @@ export default class MarketMakerSettingsPage extends BasePage {
       if (n.balance.available > 0 && Doc.isHidden(page.quoteBalanceContainer)) this.setupBalanceSelectors(isViewOnly(this.specs, this.mmStatus))
       page.dexQuoteAvail.textContent = Doc.formatFourSigFigs(n.balance.available / qui.conventional.conversionFactor)
     }
+    const [{ token: bToken }, { token: qToken }] = [app().assets[baseID], app().assets[quoteID]]
+    if (bToken && bToken.parentID === n.assetID) this.tokenFeesChanged(true)
+    if (qToken && qToken.parentID === n.assetID) this.tokenFeesChanged(false)
   }
 
   autoRebalanceChanged () {
@@ -1153,21 +1209,21 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   quoteTransferChanged () {
     const { page, updatedConfig: cfg, specs: { quoteID } } = this
-    const { unitInfo: { conventional: { conversionFactor } } } = app().assets[quoteID]
-    const v = parseFloat(page.cexQuoteTransferInput.value || '')
+    const { unitInfo: ui } = app().assets[quoteID]
+    const v = parseFloat(page.cexQuoteTransferInput.value || '') * ui.conventional.conversionFactor
     if (isNaN(v)) return
-    cfg.cexQuoteMinTransfer = Math.round(v * conversionFactor)
-    page.cexQuoteTransferInput.value = Doc.formatFourSigFigs(v)
+    cfg.cexQuoteMinTransfer = Math.round(v)
+    page.cexQuoteTransferInput.value = Doc.formatCoinValue(v, ui)
     this.updateModifiedMarkers()
   }
 
   baseTransferChanged () {
     const { page, updatedConfig: cfg, specs: { baseID } } = this
-    const { unitInfo: { conventional: { conversionFactor } } } = app().assets[baseID]
-    const v = parseFloat(page.cexBaseTransferInput.value || '')
+    const { unitInfo: ui } = app().assets[baseID]
+    const v = parseFloat(page.cexBaseTransferInput.value || '') * ui.conventional.conversionFactor
     if (isNaN(v)) return
-    cfg.cexBaseMinTransfer = Math.round(v * conversionFactor)
-    page.cexBaseTransferInput.value = Doc.formatFourSigFigs(v)
+    cfg.cexBaseMinTransfer = Math.round(v)
+    page.cexBaseTransferInput.value = Doc.formatCoinValue(v, ui)
     this.updateModifiedMarkers()
   }
 
@@ -1178,17 +1234,26 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { markets } = app().exchanges[host]
     const { lotsize: baseLotSize, spot } = markets[`${baseSymbol}_${quoteSymbol}`]
     const lotSize = isBase ? baseLotSize : calculateQuoteLot(baseLotSize, baseID, quoteID, spot)
-    const { conventional: { conversionFactor } } = isBase ? bui : qui
+    const ui = isBase ? bui : qui
     const input = isBase ? page.cexBaseTransferInput : page.cexQuoteTransferInput
-    const v = parseFloat(input.value || '') * conversionFactor || lotSize
+    const v = parseFloat(input.value || '') * ui.conventional.conversionFactor || lotSize
     const minIncrement = Math.max(lotSize, Math.round(v * 0.01)) // Minimum increment is 1%
     const newV = Math.round(up ? v + minIncrement : Math.max(lotSize, v - minIncrement))
-    input.value = Doc.formatFourSigFigs(newV / conversionFactor)
+    input.value = Doc.formatCoinValue(newV, ui)
     if (isBase) cfg.cexBaseMinTransfer = newV
     else cfg.cexQuoteMinTransfer = newV
   }
 
   async submitBotType () {
+    const loaded = app().loading(this.page.botTypeForm)
+    try {
+      await this.submitBotWithValidation()
+    } finally {
+      loaded()
+    }
+  }
+
+  async submitBotWithValidation () {
     // check for wallets
     const { page, forms, formSpecs: { baseID, quoteID, host } } = this
 
@@ -1237,8 +1302,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     this.specs = this.formSpecs
 
-    this.forms.close()
     this.configureUI()
+    this.forms.close()
   }
 
   async fetchCEXBalances (specs: BotSpecs) {
@@ -1355,8 +1420,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.cexQuoteMinBalanceContainer.classList.toggle('modified', this.cexQuoteMinBalanceRange.modified())
       const { unitInfo: bui } = app().assets[baseID]
       const { unitInfo: qui } = app().assets[quoteID]
-      page.cexBaseTransferInput.classList.toggle('modified', page.cexBaseTransferInput.value !== Doc.formatFourSigFigs(oldCfg.cexBaseMinTransfer / bui.conventional.conversionFactor))
-      page.cexQuoteTransferInput.classList.toggle('modified', page.cexQuoteTransferInput.value !== Doc.formatFourSigFigs(oldCfg.cexQuoteMinTransfer / qui.conventional.conversionFactor))
+      page.cexBaseTransferInput.classList.toggle('modified', page.cexBaseTransferInput.value !== Doc.formatCoinValue(oldCfg.cexBaseMinTransfer, bui))
+      page.cexQuoteTransferInput.classList.toggle('modified', page.cexQuoteTransferInput.value !== Doc.formatCoinValue(oldCfg.cexQuoteMinTransfer, qui))
     }
 
     // Base wallet settings
@@ -1583,8 +1648,8 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   setArbMMLabels () {
-    this.page.buyGapFactorHdr.textContent = intl.prep(intl.ID_MULTIPLIER)
-    this.page.sellGapFactorHdr.textContent = intl.prep(intl.ID_MULTIPLIER)
+    this.page.buyGapFactorHdr.textContent = intl.prep(intl.ID_MATCH_BUFFER)
+    this.page.sellGapFactorHdr.textContent = intl.prep(intl.ID_MATCH_BUFFER)
   }
 
   /*
@@ -1876,7 +1941,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     // need to preserve those.
     const [bOpts, qOpts] = [cfg.baseOptions, cfg.quoteOptions]
 
-    Object.assign(cfg, oldCfg)
+    Object.assign(cfg, JSON.parse(JSON.stringify(oldCfg)))
 
     // Re-assing the wallet options.
     for (const k of Object.keys(bOpts)) delete bOpts[k]
@@ -1915,8 +1980,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       cexQuoteMinBalanceRange.reset()
       const { unitInfo: bui } = app().assets[baseID]
       const { unitInfo: qui } = app().assets[quoteID]
-      page.cexBaseTransferInput.value = Doc.formatFourSigFigs(cfg.cexBaseMinTransfer / bui.conventional.conversionFactor)
-      page.cexQuoteTransferInput.value = Doc.formatFourSigFigs(cfg.cexQuoteMinTransfer / qui.conventional.conversionFactor)
+      page.cexBaseTransferInput.value = Doc.formatCoinValue(cfg.cexBaseMinTransfer, bui)
+      page.cexQuoteTransferInput.value = Doc.formatCoinValue(cfg.cexQuoteMinTransfer, qui)
       page.cexRebalanceCheckbox.checked = cfg.cexRebalance
       this.autoRebalanceChanged()
     }
@@ -1961,6 +2026,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     this.updateModifiedMarkers()
+    if (Doc.isDisplayed(page.quickConfig)) this.switchToQuickConfig()
   }
 
   /*
@@ -2369,7 +2435,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     cfg.cexBaseMinTransfer = Math.round(Math.max(cfg.cexBaseMinTransfer, lotSize))
     if (oldCfg.cexBaseMinTransfer === 0) oldCfg.cexBaseMinTransfer = cfg.cexBaseMinTransfer
-    page.cexBaseTransferInput.value = Doc.formatFourSigFigs(cfg.cexBaseMinTransfer / bui.conventional.conversionFactor)
+    page.cexBaseTransferInput.value = Doc.formatCoinValue(cfg.cexBaseMinTransfer, bui)
 
     const [quotePct] = calcBalanceReserve(qAvail, cfg.cexQuoteBalanceType, cfg.cexQuoteBalance)
     this.cexQuoteBalanceRange = new XYRangeHandler(quoteXYRange, quotePct * 100, {
@@ -2389,7 +2455,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     cfg.cexQuoteMinTransfer = Math.round(Math.max(cfg.cexQuoteMinTransfer, quoteLot))
     if (oldCfg.cexQuoteMinTransfer === 0) oldCfg.cexQuoteMinTransfer = cfg.cexQuoteMinTransfer
-    page.cexQuoteTransferInput.value = Doc.formatFourSigFigs(cfg.cexQuoteMinTransfer / qui.conventional.conversionFactor)
+    page.cexQuoteTransferInput.value = Doc.formatCoinValue(cfg.cexQuoteMinTransfer, qui)
 
     if (bRemain > 0) {
       Doc.show(page.cexBaseBalanceContainer)
@@ -2551,7 +2617,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { page, specs: { host, baseID, quoteID } } = this
 
     const res = await MM.report(host, baseID, quoteID)
-    Doc.hide(page.oraclesLoading)
+    Doc.hide(page.oraclesLoading, page.oraclesTable, page.noOracles)
 
     if (!app().checkResponse(res)) {
       page.oraclesErrMsg.textContent = res.msg
@@ -2862,7 +2928,7 @@ class PlacementsChart extends Chart {
       // of how the parameters will affect order placement, so we'll fake it.
       // Higher match buffer values will lead to orders with less favorable
       // rates, e.g. the spacing will be larger.
-      fauxSpacer = 0.01 * (1 + (parseFloat(page.qcMatchBuffer.value ?? '0') / 100))
+      fauxSpacer = 0.01 * (1 + (parseFloat(page.qcMatchBuffer.value || '0') / 100))
       widest = Math.min(10, Math.max(buyPlacements.length, sellPlacements.length)) * fauxSpacer // arb-mm
     }
 
