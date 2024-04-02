@@ -1171,6 +1171,22 @@ export default class Application {
   clearTxHistory (assetID: number) {
     delete this.txHistoryMap[assetID]
   }
+
+  async needsCustomProvider (assetID: number): Promise<boolean> {
+    const { token } = this.assets[assetID]
+    const baseChainID = token ? token.parentID : assetID
+    const w = this.walletMap[baseChainID]
+    if (!w) return false
+    const traitAccountLocker = 1 << 14
+    if ((w.traits & traitAccountLocker) === 0) return false
+    const res = await postJSON('/api/walletsettings', { assetID })
+    if (!this.checkResponse(res)) {
+      console.error(res.msg)
+      return false
+    }
+    const settings = res.map as Record<string, string>
+    return !settings.providers
+  }
 }
 
 /* getSocketURI returns the websocket URI for the client. */

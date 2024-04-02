@@ -961,7 +961,15 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 
 	if rpc, is := w.node.(*multiRPCClient); is {
 		walletDir := getWalletDir(w.dir, w.net)
-		if err := rpc.reconfigure(ctx, cfg.Settings, w.compat, walletDir); err != nil {
+		providerDef := cfg.Settings[providersKey]
+		var endpoints []string
+		if len(providerDef) > 0 {
+			endpoints = strings.Split(providerDef, " ")
+		} else {
+			endpoints = w.defaultProviders
+		}
+
+		if err := rpc.reconfigure(ctx, endpoints, w.compat, walletDir); err != nil {
 			return false, err
 		}
 	}

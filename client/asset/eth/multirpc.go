@@ -798,12 +798,7 @@ func failedProviders(succeeded []*provider, tried []string) string {
 	return strings.Join(notOK, " ")
 }
 
-func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]string, compat *CompatibilityData, walletDir string) error {
-	providerDef := settings[providersKey]
-	if len(providerDef) == 0 {
-		return errors.New("no providers specified")
-	}
-	endpoints := strings.Split(providerDef, " ")
+func (m *multiRPCClient) reconfigure(ctx context.Context, endpoints []string, compat *CompatibilityData, walletDir string) error {
 	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
