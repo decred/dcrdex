@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"testing"
@@ -32,11 +33,11 @@ func newTEventLogDB() *tEventLogDB {
 	}
 }
 
-func (db *tEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg *BotConfig, fiatRates map[uint32]float64, dexBals, cexBals map[uint32]uint64) error {
+func (db *tEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg *BotConfig, initialState *BalanceState) error {
 	return nil
 }
 func (db *tEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime int64) error { return nil }
-func (db *tEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent) {
+func (db *tEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent, fs *BalanceState) {
 	db.storedEvents = append(db.storedEvents, e)
 }
 func (db *tEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWithHost) ([]*MarketMakingRun, error) {
@@ -47,9 +48,6 @@ func (db *tEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Marke
 }
 func (db *tEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool) ([]*MarketMakingEvent, error) {
 	return nil, nil
-}
-func (db *tEventLogDB) updateFiatRates(startTime int64, mkt *MarketWithHost, fiatRates map[uint32]float64) error {
-	return nil
 }
 
 func TestSufficientBalanceForDEXTrade(t *testing.T) {
@@ -1557,7 +1555,7 @@ func TestDEXTrade(t *testing.T) {
 		placements         []*multiTradePlacement
 		initialLockedFunds []*orderLockedFunds
 
-		postTradeBalances  map[uint32]*botBalance
+		postTradeBalances  map[uint32]*BotBalance
 		updatesAndBalances []*updatesAndBalances
 	}
 
@@ -1579,7 +1577,7 @@ func TestDEXTrade(t *testing.T) {
 				newOrderLockedFunds(orderIDs[0], 5e6+2000, 0, 0, 0),
 				newOrderLockedFunds(orderIDs[1], 5e6+2000, 0, 0, 0),
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				42: {1e8 - (5e6+2000)*2, (5e6 + 2000) * 2, 0},
 				0:  {1e8, 0, 0},
 			},
@@ -1592,15 +1590,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - (5e6+2000)*2, 5e6 + 2000 + 3e6 + 1000, 0},
 							0:  {1e8, 0, 0},
 						},
-						BaseBalanceDelta:         -2e6,
-						QuoteBalanceDelta:        0,
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(5e7, 2e6),
-						BaseFees:                 1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1612,15 +1605,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[1], 2e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0},
 							0:  {1e8, 0, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        0,
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(5e7, 2e6) + b2q(6e7, 3e6),
-						BaseFees:                 2000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1633,16 +1621,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0},
 							0:  {1e8, 0, b2q(5e7, 2e6) - 1000},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 3e6),
-						BaseFees:                 2000,
-						QuoteFees:                1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1654,16 +1636,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0},
 							0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 3e6),
-						BaseFees:                 2000,
-						QuoteFees:                1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1672,16 +1648,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - (7e6 + 2000 + 1000), 2e6 + 1000, 0},
 							0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 3e6),
-						BaseFees:                 2000,
-						QuoteFees:                1000,
 					},
 					numPendingTrades: 1,
 				},
@@ -1696,16 +1666,10 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - (7e6 + 1800 + 1000), 0, 3e6 - 1200},
 							0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6 - 2e6 + 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 2e6),
-						BaseFees:                 4000,
-						QuoteFees:                1000,
 					},
 					numPendingTrades: 1,
 				},
@@ -1720,16 +1684,10 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - (4e6 + 1800 + 1000 + 1200), 0, 0},
 							0:  {1e8 + b2q(5e7, 2e6) + b2q(6e7, 2e6) - 1700, 0, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6 - 2e6 + 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6) + b2q(6e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 4000,
-						QuoteFees:                1700,
 					},
 				},
 			},
@@ -1750,7 +1708,7 @@ func TestDEXTrade(t *testing.T) {
 				newOrderLockedFunds(orderIDs[0], b2q(5e7, 5e6)+2000, 0, 0, 0),
 				newOrderLockedFunds(orderIDs[1], b2q(6e7, 5e6)+2000, 0, 0, 0),
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				42: {1e8, 0, 0},
 				0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000, 0},
 			},
@@ -1763,16 +1721,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8, 0, 0},
 							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 5e6) + 3000, 0},
 						},
-						BaseBalanceDelta:         0,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  2e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 0,
-						QuoteFees:                1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1784,16 +1736,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[1], b2q(6e7, 2e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8, 0, 0},
 							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0},
 						},
-						BaseBalanceDelta:         0,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  2e6 + 3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 0,
-						QuoteFees:                2000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1806,16 +1752,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8, 0, 2e6 - 1000},
 							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 1000,
-						QuoteFees:                2000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1827,16 +1767,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 + 2e6 - 1000, 0, 0},
 							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 1000,
-						QuoteFees:                2000,
 					},
 					numPendingTrades: 2,
 				},
@@ -1845,16 +1779,10 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 + 2e6 - 1000, 0, 0},
 							0:  {1e8 - (b2q(5e7, 2e6) + b2q(6e7, 5e6) + 3000), b2q(6e7, 2e6) + 1000, 0},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 1000,
-						QuoteFees:                2000,
 					},
 					numPendingTrades: 1,
 				},
@@ -1869,16 +1797,10 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 + 2e6 - 1000, 0, 0},
 							0:  {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6) + 2800), 0, calc.BaseToQuote(6e7, 3e6) - 1200},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6) + b2q(6e7, 2e6) - b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  2e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 1000,
-						QuoteFees:                4000,
 					},
 					numPendingTrades: 1,
 				},
@@ -1893,16 +1815,10 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 + 4e6 - 1700, 0, 0},
 							0:  {1e8 - (b2q(5e7, 2e6) + b2q(6e7, 2e6) + 2800 + 1200), 0, 0},
 						},
-						BaseBalanceDelta:         2e6 + 2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6) + b2q(6e7, 2e6) - b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 1700,
-						QuoteFees:                4000,
 					},
 				},
 			},
@@ -1930,7 +1846,7 @@ func TestDEXTrade(t *testing.T) {
 				newOrderLockedFunds(orderIDs[0], 5e6+2000, 0, 4000, 3000),
 				newOrderLockedFunds(orderIDs[1], 5e6+2000, 0, 4000, 3000),
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				966001: {1e8, 0, 0},
 				966:    {1e8 - 8000, 8000, 0},
 				60:     {1e8 - (5e6+2000+3000)*2, (5e6 + 2000 + 3000) * 2, 0},
@@ -1944,17 +1860,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 4000, 3000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8, 0, 0},
 							966:    {1e8 - 8000, 8000, 0},
 							60:     {1e8 - (5e6+2000+3000)*2, 3e6 + 1000 + 5e6 + 2000 + 3000 + 3000, 0},
 						},
-						BaseBalanceDelta:         -2e6,
-						QuoteBalanceDelta:        0,
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(5e7, 2e6),
-						BaseFees:                 1000,
-						QuoteFees:                0,
 					},
 					numPendingTrades: 2,
 				},
@@ -1966,17 +1876,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[1], 2e6+1000, 0, 4000, 3000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8, 0, 0},
 							966:    {1e8 - 8000, 8000, 0},
 							60:     {1e8 - (5e6+2000+3000)*2, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        0,
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(5e7, 2e6) + b2q(6e7, 3e6),
-						BaseFees:                 1000 + 1000,
-						QuoteFees:                0,
 					},
 					numPendingTrades: 2,
 				},
@@ -1989,17 +1893,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 3000, 3000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8, 0, b2q(5e7, 2e6)},
 							966:    {1e8 - 8000, 7000, 0},
 							60:     {1e8 - (5e6+2000+3000)*2 + 100, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 3e6),
-						BaseFees:                 900 + 1000,
-						QuoteFees:                1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -2011,17 +1909,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 3000, 3000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 + b2q(5e7, 2e6), 0, 0},
 							966:    {1e8 - 7000 - 800, 7000, 0},
 							60:     {1e8 - (5e6+2000+3000)*2 + 100, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 3e6),
-						BaseFees:                 900 + 1000,
-						QuoteFees:                800,
 					},
 					numPendingTrades: 2,
 				},
@@ -2030,17 +1922,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 + b2q(5e7, 2e6), 0, 0},
 							966:    {1e8 - 4000 - 800, 4000, 0},
 							60:     {1e8 - (7e6 + 900 + 2000 + 3000), 2e6 + 1000 + 3000, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 3e6),
-						BaseFees:                 900 + 1000,
-						QuoteFees:                800,
 					},
 					numPendingTrades: 1,
 				},
@@ -2055,17 +1941,11 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 + b2q(5e7, 2e6), 0, 0},
 							966:    {1e8 - 4000 - 800, 4000, 0},
 							60:     {1e8 - (7e6 + 900 + 2000 + 3000) + 200, 1800, 3e6},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6 - 2e6 + 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: b2q(6e7, 2e6),
-						BaseFees:                 900 + 1000 + 1200 + 800,
-						QuoteFees:                800,
 					},
 					numPendingTrades: 1,
 				},
@@ -2078,17 +1958,11 @@ func TestDEXTrade(t *testing.T) {
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 0, 0), newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 0, 0)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 + calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6), 0, 0},
 							966:    {1e8 - 1500, 0, 0},
 							60:     {1e8 - (4e6 + 3800), 0, 0},
 						},
-						BaseBalanceDelta:         -2e6 - 3e6 - 2e6 + 3e6,
-						QuoteBalanceDelta:        int64(b2q(5e7, 2e6) + b2q(6e7, 2e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 900 + 1000 + 1100 + 800,
-						QuoteFees:                800 + 700,
 					},
 				},
 			},
@@ -2115,7 +1989,7 @@ func TestDEXTrade(t *testing.T) {
 				newOrderLockedFunds(orderIDs[0], b2q(5e7, 5e6), 2000, 3000, 4000),
 				newOrderLockedFunds(orderIDs[1], b2q(6e7, 5e6), 2000, 3000, 4000),
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6), 0},
 				966:    {1e8 - 12000, 12000, 0},
 				60:     {1e8 - 6000, 6000, 0},
@@ -2129,17 +2003,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 3000, 4000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 5e6), 0},
 							966:    {1e8 - 12000, 11000, 0},
 							60:     {1e8 - 6000, 6000, 0},
 						},
-						BaseBalanceDelta:         0,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6)),
-						PendingBaseBalanceDelta:  2e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 0,
-						QuoteFees:                1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -2151,17 +2019,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[1], calc.BaseToQuote(6e7, 2e6), 1000, 3000, 4000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0},
 							966:    {1e8 - 12000, 10000, 0},
 							60:     {1e8 - 6000, 6000, 0},
 						},
-						BaseBalanceDelta:         0,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  2e6 + 3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 0,
-						QuoteFees:                2000,
 					},
 					numPendingTrades: 2,
 				},
@@ -2174,17 +2036,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 2000, 4000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0},
 							966:    {1e8 - 12000 + 100, 10000, 0},
 							60:     {1e8 - 6000, 5000, 2e6},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 1000,
-						QuoteFees:                900 + 1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -2196,17 +2052,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 2000, 4000, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0},
 							966:    {1e8 - 12000 + 100, 10000, 0},
 							60:     {1e8 - 5800 + 2e6, 5000, 0},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 800,
-						QuoteFees:                900 + 1000,
 					},
 					numPendingTrades: 2,
 				},
@@ -2215,17 +2065,11 @@ func TestDEXTrade(t *testing.T) {
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(6e7, 2e6), 0},
 							966:    {1e8 - 7000 + 100, 5000, 0},
 							60:     {1e8 + 2e6 - 3800, 3000, 0},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  3e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 800,
-						QuoteFees:                900 + 1000,
 					},
 					numPendingTrades: 1,
 				},
@@ -2240,17 +2084,11 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)), 0, calc.BaseToQuote(6e7, 3e6)},
 							966:    {1e8 - 6000 + 100, 2000, 0},
 							60:     {1e8 + 2e6 - 3800, 3000, 0},
 						},
-						BaseBalanceDelta:         2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6) + b2q(6e7, 2e6) - b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  2e6,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 800,
-						QuoteFees:                900 + 1000 + 1200 + 800,
 					},
 					numPendingTrades: 1,
 				},
@@ -2265,17 +2103,11 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2e6, 6e7)),
 					stats: &RunStats{
-						DEXBalances: map[uint32]*botBalance{
+						DEXBalances: map[uint32]*BotBalance{
 							966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6)), 0, 0},
 							966:    {1e8 - 3900, 0, 0},
 							60:     {1e8 + 4e6 - 1500, 0, 0},
 						},
-						BaseBalanceDelta:         2e6 + 2e6,
-						QuoteBalanceDelta:        -int64(b2q(5e7, 2e6) + b2q(6e7, 3e6) + b2q(6e7, 2e6) - b2q(6e7, 3e6)),
-						PendingBaseBalanceDelta:  0,
-						PendingQuoteBalanceDelta: 0,
-						BaseFees:                 800 + 700,
-						QuoteFees:                900 + 1000 + 1200 + 800,
 					},
 				},
 			},
@@ -2336,7 +2168,7 @@ func TestDEXTrade(t *testing.T) {
 			t.Fatalf("%s: multi trade did not place orders", test.name)
 		}
 
-		checkBalances := func(expected map[uint32]*botBalance, updateNum int) {
+		checkBalances := func(expected map[uint32]*BotBalance, updateNum int) {
 			t.Helper()
 			stats, err := adaptor.stats()
 			if err != nil {
@@ -2344,10 +2176,7 @@ func TestDEXTrade(t *testing.T) {
 			}
 
 			for assetID, expectedBal := range expected {
-				bal, err := adaptor.DEXBalance(assetID)
-				if err != nil {
-					t.Fatalf("%s: unexpected error: %v", test.name, err)
-				}
+				bal := adaptor.DEXBalance(assetID)
 				statsBal := stats.DEXBalances[assetID]
 				if *statsBal != *bal {
 					t.Fatalf("%s: stats bal != bal for asset %d. stats bal: %+v, bal: %+v", test.name, assetID, statsBal, bal)
@@ -2372,7 +2201,7 @@ func TestDEXTrade(t *testing.T) {
 			oidToEventID[o.id] = uint64(i + 1)
 			e := &MarketMakingEvent{
 				ID: uint64(i + 1),
-				DEXOrderEvent: &dexOrderEvent{
+				DEXOrderEvent: &DEXOrderEvent{
 					ID:           o.id.String(),
 					Rate:         trade.rate,
 					Qty:          trade.lots * lotSize,
@@ -2447,7 +2276,7 @@ func TestDEXTrade(t *testing.T) {
 
 			stats.CEXBalances = nil
 			stats.StartTime = 0
-			if !reflect.DeepEqual(stats, update.stats) {
+			if !reflect.DeepEqual(stats.DEXBalances, update.stats.DEXBalances) {
 				t.Fatalf("%s: stats mismatch after update %d.\nwant: %+v\n\ngot: %+v", test.name, i+1, update.stats, stats)
 			}
 
@@ -2478,10 +2307,10 @@ func TestDeposit(t *testing.T) {
 		initialEvent      *MarketMakingEvent
 		postConfirmEvent  *MarketMakingEvent
 
-		preConfirmDEXBalance  *botBalance
-		preConfirmCEXBalance  *botBalance
-		postConfirmDEXBalance *botBalance
-		postConfirmCEXBalance *botBalance
+		preConfirmDEXBalance  *BotBalance
+		preConfirmCEXBalance  *BotBalance
+		postConfirmDEXBalance *BotBalance
+		postConfirmCEXBalance *BotBalance
 	}
 
 	coinID := encode.RandomBytes(32)
@@ -2510,24 +2339,24 @@ func TestDeposit(t *testing.T) {
 			receivedAmt:       1e6 - 2000,
 			initialDEXBalance: 3e6,
 			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &botBalance{
+			preConfirmDEXBalance: &BotBalance{
 				Available: 2e6,
 			},
-			preConfirmCEXBalance: &botBalance{
+			preConfirmCEXBalance: &BotBalance{
 				Available: 1e6,
 				Pending:   1e6 - 2000,
 			},
-			postConfirmDEXBalance: &botBalance{
+			postConfirmDEXBalance: &BotBalance{
 				Available: 2e6,
 			},
-			postConfirmCEXBalance: &botBalance{
+			postConfirmCEXBalance: &BotBalance{
 				Available: 2e6 - 2000,
 			},
 			initialEvent: &MarketMakingEvent{
 				ID:       1,
 				BaseFees: 2000,
 				Pending:  true,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
 						ID:     txID,
@@ -2540,7 +2369,7 @@ func TestDeposit(t *testing.T) {
 				ID:       1,
 				BaseFees: 2000,
 				Pending:  false,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
 						ID:     txID,
@@ -2572,24 +2401,24 @@ func TestDeposit(t *testing.T) {
 			receivedAmt:       1e6,
 			initialDEXBalance: 3e6,
 			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &botBalance{
+			preConfirmDEXBalance: &BotBalance{
 				Available: 2e6 - 2000,
 			},
-			preConfirmCEXBalance: &botBalance{
+			preConfirmCEXBalance: &BotBalance{
 				Available: 1e6,
 				Pending:   1e6,
 			},
-			postConfirmDEXBalance: &botBalance{
+			postConfirmDEXBalance: &BotBalance{
 				Available: 2e6 - 2000,
 			},
-			postConfirmCEXBalance: &botBalance{
+			postConfirmCEXBalance: &BotBalance{
 				Available: 2e6,
 			},
 			initialEvent: &MarketMakingEvent{
 				ID:       1,
 				BaseFees: 2000,
 				Pending:  true,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
 						ID:     txID,
@@ -2602,7 +2431,7 @@ func TestDeposit(t *testing.T) {
 				ID:       1,
 				BaseFees: 2000,
 				Pending:  false,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
 						ID:     txID,
@@ -2637,24 +2466,24 @@ func TestDeposit(t *testing.T) {
 			receivedAmt:       1e6,
 			initialDEXBalance: 3e6,
 			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &botBalance{
+			preConfirmDEXBalance: &BotBalance{
 				Available: 2e6 - 4000,
 			},
-			preConfirmCEXBalance: &botBalance{
+			preConfirmCEXBalance: &BotBalance{
 				Available: 1e6,
 				Pending:   1e6,
 			},
-			postConfirmDEXBalance: &botBalance{
+			postConfirmDEXBalance: &BotBalance{
 				Available: 2e6 - 2000,
 			},
-			postConfirmCEXBalance: &botBalance{
+			postConfirmCEXBalance: &BotBalance{
 				Available: 2e6,
 			},
 			initialEvent: &MarketMakingEvent{
 				ID:       1,
 				BaseFees: 4000,
 				Pending:  true,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
 						ID:     txID,
@@ -2667,7 +2496,7 @@ func TestDeposit(t *testing.T) {
 				ID:       1,
 				BaseFees: 2000,
 				Pending:  false,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
 						ID:        txID,
@@ -2703,24 +2532,24 @@ func TestDeposit(t *testing.T) {
 			receivedAmt:       1e6,
 			initialDEXBalance: 3e6,
 			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &botBalance{
+			preConfirmDEXBalance: &BotBalance{
 				Available: 2e6,
 			},
-			preConfirmCEXBalance: &botBalance{
+			preConfirmCEXBalance: &BotBalance{
 				Available: 1e6,
 				Pending:   1e6,
 			},
-			postConfirmDEXBalance: &botBalance{
+			postConfirmDEXBalance: &BotBalance{
 				Available: 2e6,
 			},
-			postConfirmCEXBalance: &botBalance{
+			postConfirmCEXBalance: &BotBalance{
 				Available: 2e6,
 			},
 			initialEvent: &MarketMakingEvent{
 				ID:       1,
 				BaseFees: 4000,
 				Pending:  true,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 966001,
 					Transaction: &asset.WalletTransaction{
 						ID:     txID,
@@ -2733,7 +2562,7 @@ func TestDeposit(t *testing.T) {
 				ID:       1,
 				BaseFees: 2000,
 				Pending:  false,
-				DepositEvent: &depositEvent{
+				DepositEvent: &DepositEvent{
 					AssetID: 966001,
 					Transaction: &asset.WalletTransaction{
 						ID:        txID,
@@ -2804,19 +2633,13 @@ func TestDeposit(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		preConfirmBal, err := adaptor.DEXBalance(test.assetID)
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", test.name, err)
-		}
+		preConfirmBal := adaptor.DEXBalance(test.assetID)
 		if *preConfirmBal != *test.preConfirmDEXBalance {
 			t.Fatalf("%s: unexpected pre confirm dex balance. want %d, got %d", test.name, test.preConfirmDEXBalance, preConfirmBal.Available)
 		}
 
 		if test.assetID == 966001 {
-			preConfirmParentBal, err := adaptor.DEXBalance(966)
-			if err != nil {
-				t.Fatalf("%s: unexpected error: %v", test.name, err)
-			}
+			preConfirmParentBal := adaptor.DEXBalance(966)
 			if preConfirmParentBal.Available != 2e6-test.unconfirmedTx.Fees {
 				t.Fatalf("%s: unexpected pre confirm dex balance. want %d, got %d", test.name, test.preConfirmDEXBalance, preConfirmBal.Available)
 			}
@@ -2836,20 +2659,13 @@ func TestDeposit(t *testing.T) {
 		<-tCEX.confirmDepositComplete
 
 		checkPostConfirmBalance := func() error {
-			postConfirmBal, err := adaptor.DEXBalance(test.assetID)
-			if err != nil {
-				return err
-			}
-
+			postConfirmBal := adaptor.DEXBalance(test.assetID)
 			if *postConfirmBal != *test.postConfirmDEXBalance {
 				return fmt.Errorf("%s: unexpected post confirm dex balance. want %d, got %d", test.name, test.postConfirmDEXBalance, postConfirmBal.Available)
 			}
 
 			if test.assetID == 966001 {
-				postConfirmParentBal, err := adaptor.DEXBalance(966)
-				if err != nil {
-					return err
-				}
+				postConfirmParentBal := adaptor.DEXBalance(966)
 				if postConfirmParentBal.Available != 2e6-test.confirmedTx.Fees {
 					return fmt.Errorf("%s: unexpected post confirm dex balance. want %d, got %d", test.name, 2e6-test.confirmedTx.Fees, postConfirmParentBal.Available)
 				}
@@ -2879,14 +2695,6 @@ func TestDeposit(t *testing.T) {
 			}
 		}
 
-		stats, err := adaptor.stats()
-		if err != nil {
-			t.Fatalf("%s: stats unexpected error: %v", test.name, err)
-		}
-		if stats.BaseFees != test.confirmedTx.Fees {
-			t.Fatalf("%s: unexpected base fees. want %d, got %d", test.name, test.confirmedTx.Fees, stats.BaseFees)
-		}
-
 		i = len(eventLogDB.storedEvents) - 1
 		eventLogDB.storedEvents[i].TimeStamp = 0 // ignore timestamp
 		if !reflect.DeepEqual(eventLogDB.storedEvents[i], test.postConfirmEvent) {
@@ -2911,10 +2719,10 @@ func TestWithdraw(t *testing.T) {
 		initialDEXBalance uint64
 		initialCEXBalance uint64
 
-		preConfirmDEXBalance  *botBalance
-		preConfirmCEXBalance  *botBalance
-		postConfirmDEXBalance *botBalance
-		postConfirmCEXBalance *botBalance
+		preConfirmDEXBalance  *BotBalance
+		preConfirmCEXBalance  *BotBalance
+		postConfirmDEXBalance *BotBalance
+		postConfirmCEXBalance *BotBalance
 
 		initialEvent     *MarketMakingEvent
 		postConfirmEvent *MarketMakingEvent
@@ -2932,23 +2740,23 @@ func TestWithdraw(t *testing.T) {
 			},
 			initialCEXBalance: 3e6,
 			initialDEXBalance: 1e6,
-			preConfirmDEXBalance: &botBalance{
+			preConfirmDEXBalance: &BotBalance{
 				Available: 1e6,
 				Pending:   1e6,
 			},
-			preConfirmCEXBalance: &botBalance{
+			preConfirmCEXBalance: &BotBalance{
 				Available: 1.9e6,
 			},
-			postConfirmDEXBalance: &botBalance{
+			postConfirmDEXBalance: &BotBalance{
 				Available: 1.9e6 - 2000,
 			},
-			postConfirmCEXBalance: &botBalance{
+			postConfirmCEXBalance: &BotBalance{
 				Available: 2e6,
 			},
 			initialEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
-				WithdrawalEvent: &withdrawalEvent{
+				WithdrawalEvent: &WithdrawalEvent{
 					AssetID:  42,
 					CEXDebit: 1e6,
 				},
@@ -2957,7 +2765,7 @@ func TestWithdraw(t *testing.T) {
 				ID:       1,
 				Pending:  false,
 				BaseFees: 0.1e6 + 2000,
-				WithdrawalEvent: &withdrawalEvent{
+				WithdrawalEvent: &WithdrawalEvent{
 					AssetID:  42,
 					CEXDebit: 1e6,
 					Transaction: &asset.WalletTransaction{
@@ -3021,10 +2829,7 @@ func TestWithdraw(t *testing.T) {
 			t.Fatalf("%s: unexpected event logged. want:\n%+v\ngot:\n%+v", test.name, spew.Sdump(test.initialEvent), spew.Sdump(eventLogDB.storedEvents[i]))
 		}
 
-		preConfirmBal, err := adaptor.DEXBalance(assetID)
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", test.name, err)
-		}
+		preConfirmBal := adaptor.DEXBalance(assetID)
 		if *preConfirmBal != *test.preConfirmDEXBalance {
 			t.Fatalf("%s: unexpected pre confirm dex balance. want %+v, got %+v", test.name, test.preConfirmDEXBalance, preConfirmBal)
 		}
@@ -3037,10 +2842,7 @@ func TestWithdraw(t *testing.T) {
 
 		<-tCEX.confirmWithdrawalComplete
 
-		postConfirmBal, err := adaptor.DEXBalance(assetID)
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", test.name, err)
-		}
+		postConfirmBal := adaptor.DEXBalance(assetID)
 		if *postConfirmBal != *test.postConfirmDEXBalance {
 			t.Fatalf("%s: unexpected post confirm dex balance. want %+v, got %+v", test.name, test.postConfirmDEXBalance, postConfirmBal)
 		}
@@ -3049,14 +2851,6 @@ func TestWithdraw(t *testing.T) {
 		eventLogDB.storedEvents[i].TimeStamp = 0 // ignore timestamp
 		if !reflect.DeepEqual(eventLogDB.storedEvents[i], test.postConfirmEvent) {
 			t.Fatalf("%s: unexpected event logged. want:\n%s\ngot:\n%s", test.name, spew.Sdump(test.postConfirmEvent), spew.Sdump(eventLogDB.storedEvents[i]))
-		}
-
-		stats, err := adaptor.stats()
-		if err != nil {
-			t.Fatalf("%s: stats unexpected error: %v", test.name, err)
-		}
-		if stats.BaseFees != test.withdrawAmt-test.tx.Amount {
-			t.Fatalf("%s: unexpected base fees. want %d, got %d", test.name, test.withdrawAmt-test.tx.Amount, stats.BaseFees)
 		}
 	}
 
@@ -3084,7 +2878,7 @@ func TestCEXTrade(t *testing.T) {
 		balances map[uint32]uint64
 
 		wantErr           bool
-		postTradeBalances map[uint32]*botBalance
+		postTradeBalances map[uint32]*BotBalance
 		postTradeEvent    *MarketMakingEvent
 		updates           []*updateAndStats
 	}
@@ -3101,7 +2895,7 @@ func TestCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				42: {
 					Available: 5e6,
 					Locked:    5e6,
@@ -3113,7 +2907,7 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
-				CEXOrderEvent: &cexOrderEvent{
+				CEXOrderEvent: &CEXOrderEvent{
 					ID:   tradeID,
 					Rate: 5e7,
 					Qty:  5e6,
@@ -3133,7 +2927,7 @@ func TestCEXTrade(t *testing.T) {
 						Pending:    true,
 						BaseDelta:  -3e6,
 						QuoteDelta: 1.6e6,
-						CEXOrderEvent: &cexOrderEvent{
+						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
 							Qty:         5e6,
@@ -3143,12 +2937,10 @@ func TestCEXTrade(t *testing.T) {
 						},
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {5e6, 5e6 - 3e6, 0},
 							0:  {1e7 + 1.6e6, 0, 0},
 						},
-						BaseBalanceDelta:  -3e6,
-						QuoteBalanceDelta: 1.6e6,
 					},
 				},
 				{
@@ -3164,7 +2956,7 @@ func TestCEXTrade(t *testing.T) {
 						Pending:    false,
 						BaseDelta:  -5e6,
 						QuoteDelta: 2.8e6,
-						CEXOrderEvent: &cexOrderEvent{
+						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
 							Qty:         5e6,
@@ -3174,12 +2966,10 @@ func TestCEXTrade(t *testing.T) {
 						},
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {5e6, 0, 0},
 							0:  {1e7 + 2.8e6, 0, 0},
 						},
-						BaseBalanceDelta:  -5e6,
-						QuoteBalanceDelta: 2.8e6,
 					},
 				},
 				{
@@ -3191,12 +2981,10 @@ func TestCEXTrade(t *testing.T) {
 						Complete:    true,
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {5e6, 0, 0},
 							0:  {1e7 + 2.8e6, 0, 0},
 						},
-						BaseBalanceDelta:  -5e6,
-						QuoteBalanceDelta: 2.8e6,
 					},
 				},
 			},
@@ -3210,7 +2998,7 @@ func TestCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				42: {
 					Available: 5e6,
 					Locked:    5e6,
@@ -3222,7 +3010,7 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
-				CEXOrderEvent: &cexOrderEvent{
+				CEXOrderEvent: &CEXOrderEvent{
 					ID:   tradeID,
 					Rate: 5e7,
 					Qty:  5e6,
@@ -3243,7 +3031,7 @@ func TestCEXTrade(t *testing.T) {
 						Pending:    false,
 						BaseDelta:  -3e6,
 						QuoteDelta: 1.6e6,
-						CEXOrderEvent: &cexOrderEvent{
+						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
 							Qty:         5e6,
@@ -3253,12 +3041,10 @@ func TestCEXTrade(t *testing.T) {
 						},
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {7e6, 0, 0},
 							0:  {1e7 + 1.6e6, 0, 0},
 						},
-						BaseBalanceDelta:  -3e6,
-						QuoteBalanceDelta: 1.6e6,
 					},
 				},
 			},
@@ -3272,7 +3058,7 @@ func TestCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				42: {
 					Available: 1e7,
 				},
@@ -3284,7 +3070,7 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
-				CEXOrderEvent: &cexOrderEvent{
+				CEXOrderEvent: &CEXOrderEvent{
 					ID:   tradeID,
 					Rate: 5e7,
 					Qty:  5e6,
@@ -3304,7 +3090,7 @@ func TestCEXTrade(t *testing.T) {
 						Pending:    true,
 						BaseDelta:  3e6,
 						QuoteDelta: -1.6e6,
-						CEXOrderEvent: &cexOrderEvent{
+						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
 							Qty:         5e6,
@@ -3314,12 +3100,10 @@ func TestCEXTrade(t *testing.T) {
 						},
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {1e7 + 3e6, 0, 0},
 							0:  {1e7 - b2q(5e7, 5e6), b2q(5e7, 5e6) - 1.6e6, 0},
 						},
-						BaseBalanceDelta:  3e6,
-						QuoteBalanceDelta: -1.6e6,
 					},
 				},
 				{
@@ -3335,7 +3119,7 @@ func TestCEXTrade(t *testing.T) {
 						Pending:    false,
 						BaseDelta:  5.1e6,
 						QuoteDelta: -int64(b2q(5e7, 5e6)),
-						CEXOrderEvent: &cexOrderEvent{
+						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
 							Qty:         5e6,
@@ -3345,12 +3129,10 @@ func TestCEXTrade(t *testing.T) {
 						},
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {1e7 + 5.1e6, 0, 0},
 							0:  {1e7 - b2q(5e7, 5e6), 0, 0},
 						},
-						BaseBalanceDelta:  5.1e6,
-						QuoteBalanceDelta: -int64(b2q(5e7, 5e6)),
 					},
 				},
 				{
@@ -3362,12 +3144,10 @@ func TestCEXTrade(t *testing.T) {
 						Complete:    true,
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {1e7 + 5.1e6, 0, 0},
 							0:  {1e7 - b2q(5e7, 5e6), 0, 0},
 						},
-						BaseBalanceDelta:  5.1e6,
-						QuoteBalanceDelta: -int64(b2q(5e7, 5e6)),
 					},
 				},
 			},
@@ -3381,7 +3161,7 @@ func TestCEXTrade(t *testing.T) {
 				42: 1e7,
 				0:  1e7,
 			},
-			postTradeBalances: map[uint32]*botBalance{
+			postTradeBalances: map[uint32]*BotBalance{
 				42: {
 					Available: 1e7,
 				},
@@ -3393,7 +3173,7 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
-				CEXOrderEvent: &cexOrderEvent{
+				CEXOrderEvent: &CEXOrderEvent{
 					ID:   tradeID,
 					Rate: 5e7,
 					Qty:  5e6,
@@ -3414,7 +3194,7 @@ func TestCEXTrade(t *testing.T) {
 						Pending:    false,
 						BaseDelta:  3e6,
 						QuoteDelta: -1.6e6,
-						CEXOrderEvent: &cexOrderEvent{
+						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
 							Qty:         5e6,
@@ -3424,12 +3204,10 @@ func TestCEXTrade(t *testing.T) {
 						},
 					},
 					stats: &RunStats{
-						CEXBalances: map[uint32]*botBalance{
+						CEXBalances: map[uint32]*BotBalance{
 							42: {1e7 + 3e6, 0, 0},
 							0:  {1e7 - 1.6e6, 0, 0},
 						},
-						BaseBalanceDelta:  3e6,
-						QuoteBalanceDelta: -1.6e6,
 					},
 				},
 			},
@@ -3492,13 +3270,10 @@ func TestCEXTrade(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		checkBalances := func(expected map[uint32]*botBalance, i int) {
+		checkBalances := func(expected map[uint32]*BotBalance, i int) {
 			t.Helper()
 			for assetID, expectedBal := range expected {
-				bal, err := adaptor.CEXBalance(assetID)
-				if err != nil {
-					t.Fatalf("%s: unexpected error: %v", test.name, err)
-				}
+				bal := adaptor.CEXBalance(assetID)
 				if *bal != *expectedBal {
 					step := "post trade"
 					if i > 0 {
@@ -3554,7 +3329,7 @@ func TestCEXTrade(t *testing.T) {
 
 			stats.DEXBalances = nil
 			stats.StartTime = 0
-			if !reflect.DeepEqual(stats, updateAndStats.stats) {
+			if !reflect.DeepEqual(stats.CEXBalances, updateAndStats.stats.CEXBalances) {
 				t.Fatalf("%s: stats mismatch after update %d.\nwant: %+v\n\ngot: %+v", test.name, i+1, updateAndStats.stats, stats)
 			}
 		}
@@ -3704,5 +3479,25 @@ func TestOrderFeesInUnits(t *testing.T) {
 
 	for _, test := range tests {
 		runTest(test)
+	}
+}
+
+func TestCalcProfitLoss(t *testing.T) {
+	initialBalances := map[uint32]uint64{
+		42: 1e9,
+		0:  1e6,
+	}
+	finalBalances := map[uint32]uint64{
+		42: 0.9e9,
+		0:  1.1e6,
+	}
+	fiatRates := map[uint32]float64{
+		42: 23,
+		0:  65000,
+	}
+	profitLoss := calcRunProfitLoss(initialBalances, finalBalances, fiatRates)
+	expProfitLoss := (9-10)*23 + (0.011-0.01)*65000
+	if math.Abs(profitLoss-expProfitLoss) > 1e-6 {
+		t.Fatalf("unexpected profit loss. want %f, got %f", expProfitLoss, profitLoss)
 	}
 }

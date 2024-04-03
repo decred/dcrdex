@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -16,7 +15,8 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-type dexOrderEvent struct {
+// DEXOrderEvent represents a a dex order that a bot placed.
+type DEXOrderEvent struct {
 	ID           string                     `json:"id"`
 	Rate         uint64                     `json:"rate"`
 	Qty          uint64                     `json:"qty"`
@@ -24,7 +24,8 @@ type dexOrderEvent struct {
 	Transactions []*asset.WalletTransaction `json:"transactions"`
 }
 
-type cexOrderEvent struct {
+// CEXOrderEvent represents a a cex order that a bot placed.
+type CEXOrderEvent struct {
 	ID          string `json:"id"`
 	Rate        uint64 `json:"rate"`
 	Qty         uint64 `json:"qty"`
@@ -33,13 +34,15 @@ type cexOrderEvent struct {
 	QuoteFilled uint64 `json:"quoteFilled"`
 }
 
-type depositEvent struct {
+// DepositEvent represents a deposit that a bot made.
+type DepositEvent struct {
 	Transaction *asset.WalletTransaction `json:"transaction"`
 	AssetID     uint32                   `json:"assetID"`
 	CEXCredit   uint64                   `json:"cexCredit"`
 }
 
-type withdrawalEvent struct {
+// WithdrawalEvent represents a withdrawal that a bot made.
+type WithdrawalEvent struct {
 	ID          string                   `json:"id"`
 	AssetID     uint32                   `json:"assetID"`
 	Transaction *asset.WalletTransaction `json:"transaction"`
@@ -57,10 +60,10 @@ type MarketMakingEvent struct {
 	Pending    bool   `json:"pending"`
 
 	// Only one of the following will be populated.
-	DEXOrderEvent   *dexOrderEvent   `json:"dexOrderEvent,omitempty"`
-	CEXOrderEvent   *cexOrderEvent   `json:"cexOrderEvent,omitempty"`
-	DepositEvent    *depositEvent    `json:"depositEvent,omitempty"`
-	WithdrawalEvent *withdrawalEvent `json:"withdrawalEvent,omitempty"`
+	DEXOrderEvent   *DEXOrderEvent   `json:"dexOrderEvent,omitempty"`
+	CEXOrderEvent   *CEXOrderEvent   `json:"cexOrderEvent,omitempty"`
+	DepositEvent    *DepositEvent    `json:"depositEvent,omitempty"`
+	WithdrawalEvent *WithdrawalEvent `json:"withdrawalEvent,omitempty"`
 }
 
 // MarketMakingRun identifies a market making run.
@@ -70,18 +73,20 @@ type MarketMakingRun struct {
 	Cfg       *BotConfig      `json:"cfg"`
 }
 
+// BalanceState contains the fiat rates and bot balances at the latest point of
+// a run.
+type BalanceState struct {
+	FiatRates map[uint32]float64     `json:"fiatRates"`
+	Balances  map[uint32]*BotBalance `json:"balances"`
+}
+
 // MarketMakingRunOverview contains information about a market making run.
 type MarketMakingRunOverview struct {
-	EndTime            *int64             `json:"endTime,omitempty"`
-	Cfg                *BotConfig         `json:"cfg"`
-	FiatRates          map[uint32]float64 `json:"fiatRates"`
-	InitialDEXBalances map[uint32]uint64  `json:"initialBalances"`
-	InitialCEXBalances map[uint32]uint64  `json:"initialCEXBalances"`
-	BaseDelta          int64              `json:"baseDelta"`
-	QuoteDelta         int64              `json:"quoteDelta"`
-	BaseFees           uint64             `json:"baseFees"`
-	QuoteFees          uint64             `json:"quoteFees"`
-	ProfitLoss         float64            `json:"profitLoss"`
+	EndTime         *int64            `json:"endTime,omitempty"`
+	Cfg             *BotConfig        `json:"cfg"`
+	InitialBalances map[uint32]uint64 `json:"initialBalances"`
+	FinalBalances   map[uint32]uint64 `json:"finalBalances"`
+	ProfitLoss      float64           `json:"profitLoss"`
 }
 
 // eventLogDB is the interface for the event log database.
@@ -89,14 +94,11 @@ type eventLogDB interface {
 	// storeNewRun stores a new run in the database. It should be called
 	// whenever a new run is started. Events cannot be stored for a run
 	// before this is called.
-	storeNewRun(startTime int64, mkt *MarketWithHost, cfg *BotConfig, fiatRates map[uint32]float64, dexBals, cexBals map[uint32]uint64) error
+	storeNewRun(startTime int64, mkt *MarketWithHost, cfg *BotConfig, initialState *BalanceState) error
 	// storeEvent stores/updates a market making event.
-	storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent)
+	storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent, fs *BalanceState)
 	// endRun stores the time that a market making run was ended.
 	endRun(startTime int64, mkt *MarketWithHost, endTime int64) error
-	// updateFiatRates updates the fiat rates for a run. This should be updated
-	// periodically during a run to have accurate P/L information.
-	updateFiatRates(startTime int64, mkt *MarketWithHost, fiatRates map[uint32]float64) error
 	// runs returns a list of runs in the database. If n == 0, all of the runs
 	// will be returned. If refStartTime and refMkt are not nil, the runs
 	// including and before the run with the start time and market will be
@@ -116,6 +118,7 @@ type eventLogDB interface {
 type eventUpdate struct {
 	runKey []byte
 	e      *MarketMakingEvent
+	bs     *BalanceState
 }
 
 type boltEventLogDB struct {
@@ -134,35 +137,21 @@ var _ eventLogDB = (*boltEventLogDB)(nil)
  *     - startTime
  *     - endTime
  *     - cfg
- *     - fiatRates
- *       - <assetID> -> <rate>
- *     - initialDEXBalances
- *       - <assetID> -> <balance>
- *     - initialCEXBalances
- *       - <assetID> -> <balance>
- *     - baseDelta
- *     - quoteDelta
- *     - baseFees
- *     - quoteFees
- *     - pl
+ *     - ib
+ *     - fs
  *     - events
  *       - <eventID> -> <event>
  */
 
 var (
-	botRunsBucket        = []byte("botRuns")
-	eventsBucket         = []byte("events")
-	fiatRatesBucket      = []byte("fiatRates")
-	initialDEXBalsBucket = []byte("initialDEXBalances")
-	initialCEXBalsBucket = []byte("initialCEXBalances")
+	botRunsBucket = []byte("botRuns")
+	eventsBucket  = []byte("events")
 
-	startTimeKey  = []byte("startTime")
-	endTimeKey    = []byte("endTime")
-	cfgKey        = []byte("cfg")
-	baseDeltaKey  = []byte("baseDelta")
-	quoteDeltaKey = []byte("quoteDelta")
-	baseFeesKey   = []byte("baseFees")
-	quoteFeesKey  = []byte("quoteFees")
+	startTimeKey   = []byte("startTime")
+	endTimeKey     = []byte("endTime")
+	cfgKey         = []byte("cfg")
+	initialBalsKey = []byte("ib")
+	finalStateKey  = []byte("fs")
 )
 
 func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltEventLogDB, error) {
@@ -204,71 +193,26 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 		if runBucket == nil {
 			return fmt.Errorf("nil run bucket for key %x", update.runKey)
 		}
-
-		runBaseDelta := bToInt64(runBucket.Get(baseDeltaKey))
-		runQuoteDelta := bToInt64(runBucket.Get(quoteDeltaKey))
-		runBaseFees := bToUint64(runBucket.Get(baseFeesKey))
-		runQuoteFees := bToUint64(runBucket.Get(quoteFeesKey))
-
 		eventsBkt, err := runBucket.CreateBucketIfNotExists(eventsBucket)
 		if err != nil {
 			return err
 		}
-
 		eventKey := encode.Uint64Bytes(update.e.ID)
-		oldEventB := eventsBkt.Get(eventKey)
-		if oldEventB != nil {
-			ver, pushes, err := encode.DecodeBlob(oldEventB)
-			if err != nil {
-				return err
-			}
-			if ver != 0 {
-				return fmt.Errorf("unknown version %d", ver)
-			}
-			if len(pushes) != 1 {
-				return fmt.Errorf("expected 1 push for event, got %d", len(pushes))
-			}
-			var oldEvent MarketMakingEvent
-			err = json.Unmarshal(pushes[0], &oldEvent)
-			if err != nil {
-				return err
-			}
-
-			runBaseDelta -= oldEvent.BaseDelta
-			runQuoteDelta -= oldEvent.QuoteDelta
-			runBaseFees -= oldEvent.BaseFees
-			runQuoteFees -= oldEvent.QuoteFees
-		}
-
-		runBaseDelta += update.e.BaseDelta
-		runQuoteDelta += update.e.QuoteDelta
-		runBaseFees += update.e.BaseFees
-		runQuoteFees += update.e.QuoteFees
-
-		err = runBucket.Put(baseDeltaKey, int64ToB(runBaseDelta))
+		eventJSON, err := json.Marshal(update.e)
 		if err != nil {
 			return err
 		}
-		err = runBucket.Put(quoteDeltaKey, int64ToB(runQuoteDelta))
-		if err != nil {
-			return err
-		}
-		err = runBucket.Put(baseFeesKey, encode.Uint64Bytes(runBaseFees))
-		if err != nil {
-			return err
-		}
-		err = runBucket.Put(quoteFeesKey, encode.Uint64Bytes(runQuoteFees))
-		if err != nil {
+		eventB := versionedBytes(0).AddData(eventJSON)
+		if err := eventsBkt.Put(eventKey, eventB); err != nil {
 			return err
 		}
 
-		newEventB, err := json.Marshal(update.e)
+		// Update the final state.
+		bsJSON, err := json.Marshal(update.bs)
 		if err != nil {
 			return err
 		}
-		newEventB = versionedBytes(0).AddData(newEventB)
-
-		return eventsBkt.Put(eventKey, newEventB)
+		return runBucket.Put(finalStateKey, versionedBytes(0).AddData(bsJSON))
 	})
 	db.log.Errorf("error storing event: %v", err)
 }
@@ -326,7 +270,7 @@ func parseRunKey(key []byte) (startTime int64, mkt *MarketWithHost, err error) {
 // storeNewRun stores a new run in the database. It should be called whenever
 // a new run is started. Events cannot be stored for a run before this is
 // called.
-func (db *boltEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg *BotConfig, fiatRates map[uint32]float64, dexBals, cexBals map[uint32]uint64) error {
+func (db *boltEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg *BotConfig, initialState *BalanceState) error {
 	return db.Update(func(tx *bbolt.Tx) error {
 		botRuns, err := tx.CreateBucketIfNotExists(botRunsBucket)
 		if err != nil {
@@ -346,29 +290,21 @@ func (db *boltEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg 
 		}
 		runBucket.Put(cfgKey, versionedBytes(0).AddData(cfgB))
 
-		fiatRatesBkt, err := runBucket.CreateBucketIfNotExists(fiatRatesBucket)
+		initialBals := make(map[uint32]uint64)
+		for assetID, bal := range initialState.Balances {
+			initialBals[assetID] = bal.Available
+		}
+		initialBalsB, err := json.Marshal(initialBals)
 		if err != nil {
 			return err
 		}
-		for assetID, rate := range fiatRates {
-			fiatRatesBkt.Put(encode.Uint32Bytes(assetID), encode.Uint64Bytes(fiatToUint(rate)))
-		}
+		runBucket.Put(initialBalsKey, versionedBytes(0).AddData(initialBalsB))
 
-		dexBalsBkt, err := runBucket.CreateBucketIfNotExists(initialDEXBalsBucket)
+		fsB, err := json.Marshal(initialState)
 		if err != nil {
 			return err
 		}
-		for assetID, bal := range dexBals {
-			dexBalsBkt.Put(encode.Uint32Bytes(assetID), encode.Uint64Bytes(bal))
-		}
-
-		cexBalsBkt, err := runBucket.CreateBucketIfNotExists(initialCEXBalsBucket)
-		if err != nil {
-			return err
-		}
-		for assetID, bal := range cexBals {
-			cexBalsBkt.Put(encode.Uint32Bytes(assetID), encode.Uint64Bytes(bal))
-		}
+		runBucket.Put(finalStateKey, versionedBytes(0).AddData(fsB))
 
 		return nil
 	})
@@ -476,52 +412,40 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 			}
 		}
 
-		fiatRates := make(map[uint32]float64)
-		fiatRatesBkt := runBucket.Bucket(fiatRatesBucket)
-		if fiatRatesBkt != nil {
-			err := fiatRatesBkt.ForEach(func(k, v []byte) error {
-				assetID := binary.BigEndian.Uint32(k)
-				rate := uintToFiat(binary.BigEndian.Uint64(v))
-				fiatRates[assetID] = rate
-				return nil
-			})
-			if err != nil {
-				return err
-			}
+		initialBalsB := runBucket.Get(initialBalsKey)
+		initialBals := make(map[uint32]uint64)
+		ver, pushes, err := encode.DecodeBlob(initialBalsB)
+		if err != nil {
+			return err
+		}
+		if ver != 0 {
+			return fmt.Errorf("unknown initial bals version %d", ver)
+		}
+		if len(pushes) != 1 {
+			return fmt.Errorf("expected 1 push for initial bals, got %d", len(pushes))
+		}
+		err = json.Unmarshal(pushes[0], &initialBals)
+		if err != nil {
+			return err
 		}
 
-		dexBals := make(map[uint32]uint64)
-		dexBalsBkt := runBucket.Bucket(initialDEXBalsBucket)
-		if dexBalsBkt != nil {
-			err := dexBalsBkt.ForEach(func(k, v []byte) error {
-				assetID := binary.BigEndian.Uint32(k)
-				bal := binary.BigEndian.Uint64(v)
-				dexBals[assetID] = bal
-				return nil
-			})
-			if err != nil {
-				return err
-			}
+		finalStateB := runBucket.Get(finalStateKey)
+		finalState := new(BalanceState)
+		ver, pushes, err = encode.DecodeBlob(finalStateB)
+		if err != nil {
+			return err
+		}
+		if ver != 0 {
+			return fmt.Errorf("unknown final state version %d", ver)
+		}
+		if len(pushes) != 1 {
+			return fmt.Errorf("expected 1 push for final state, got %d", len(pushes))
+		}
+		err = json.Unmarshal(pushes[0], finalState)
+		if err != nil {
+			return err
 		}
 
-		cexBals := make(map[uint32]uint64)
-		cexBalsBkt := runBucket.Bucket(initialCEXBalsBucket)
-		if cexBalsBkt != nil {
-			err := cexBalsBkt.ForEach(func(k, v []byte) error {
-				assetID := binary.BigEndian.Uint32(k)
-				bal := binary.BigEndian.Uint64(v)
-				cexBals[assetID] = bal
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		baseDelta := bToInt64(runBucket.Get(baseDeltaKey))
-		quoteDelta := bToInt64(runBucket.Get(quoteDeltaKey))
-		baseFees := bToUint64(runBucket.Get(baseFeesKey))
-		quoteFees := bToUint64(runBucket.Get(quoteFeesKey))
 		endTimeB := runBucket.Get(endTimeKey)
 		var endTime *int64
 		if len(endTimeB) == 8 {
@@ -529,22 +453,17 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 			*endTime = int64(binary.BigEndian.Uint64(endTimeB))
 		}
 
-		getFiatRate := func(assetID uint32) float64 {
-			return fiatRates[assetID]
+		finalBals := make(map[uint32]uint64)
+		for assetID, bal := range finalState.Balances {
+			finalBals[assetID] = bal.Available + bal.Pending + bal.Locked
 		}
 
 		overview = &MarketMakingRunOverview{
-			EndTime:            endTime,
-			Cfg:                cfg,
-			FiatRates:          fiatRates,
-			InitialDEXBalances: dexBals,
-			InitialCEXBalances: cexBals,
-			BaseDelta:          baseDelta,
-			QuoteDelta:         quoteDelta,
-			BaseFees:           baseFees,
-			QuoteFees:          quoteFees,
-			ProfitLoss: calcRunProfitLoss(baseDelta, quoteDelta, baseFees, quoteFees,
-				cfg.BaseID, cfg.QuoteID, getFiatRate),
+			EndTime:         endTime,
+			Cfg:             cfg,
+			InitialBalances: initialBals,
+			FinalBalances:   finalBals,
+			ProfitLoss:      calcRunProfitLoss(initialBals, finalBals, finalState.FiatRates),
 		}
 
 		return nil
@@ -566,10 +485,11 @@ func (db *boltEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime i
 }
 
 // storeEvent stores/updates a market making event.
-func (db *boltEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent) {
+func (db *boltEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent, bs *BalanceState) {
 	db.eventUpdates <- &eventUpdate{
 		runKey: runKey(startTime, mkt),
 		e:      e,
+		bs:     bs,
 	}
 }
 
@@ -630,55 +550,4 @@ func (db *boltEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint
 
 		return nil
 	})
-}
-
-// updateFiatRates updates the fiat rates for a run. This should be updated
-// periodically during a run to have accurate P/L information.
-func (db *boltEventLogDB) updateFiatRates(startTime int64, mkt *MarketWithHost, fiatRates map[uint32]float64) error {
-	return db.Update(func(tx *bbolt.Tx) error {
-		botRuns := tx.Bucket(botRunsBucket)
-		key := runKey(startTime, mkt)
-		runBucket := botRuns.Bucket(key)
-		if runBucket == nil {
-			return fmt.Errorf("nil run bucket for key %x", key)
-		}
-
-		fiatRatesBkt, err := runBucket.CreateBucketIfNotExists(fiatRatesBucket)
-		if err != nil {
-			return err
-		}
-		for assetID, rate := range fiatRates {
-			fiatRatesBkt.Put(encode.Uint32Bytes(assetID), encode.Uint64Bytes(fiatToUint(rate)))
-		}
-
-		return nil
-	})
-}
-
-func fiatToUint(f float64) uint64 {
-	return uint64(math.Round(f * 100))
-}
-
-func uintToFiat(i uint64) float64 {
-	return float64(i) / 100
-}
-
-func bToUint64(b []byte) uint64 {
-	if b == nil {
-		return 0
-	}
-	return binary.BigEndian.Uint64(b)
-}
-
-func bToInt64(b []byte) int64 {
-	if b == nil {
-		return 0
-	}
-	return int64(binary.BigEndian.Uint64(b))
-}
-
-func int64ToB(i int64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, uint64(i))
-	return b
 }

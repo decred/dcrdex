@@ -47,10 +47,6 @@ export default class MarketMakerLogsPage extends BasePage {
     const quoteLogo = Doc.logoPathFromID(this.quoteID)
     page.baseLogo.src = baseLogo
     page.quoteLogo.src = quoteLogo
-    page.baseChangeLogo.src = baseLogo
-    page.quoteChangeLogo.src = quoteLogo
-    page.baseFeesLogo.src = baseLogo
-    page.quoteFeesLogo.src = quoteLogo
     this.setup()
   }
 
@@ -69,10 +65,10 @@ export default class MarketMakerLogsPage extends BasePage {
     this.quoteUnitInfo = await app().assets[this.quoteID].unitInfo
     const runStats = await MM.botStats(this.baseID, this.quoteID, this.host, this.startTime)
     if (runStats) {
-      this.populateStats(runStats.baseBalanceDelta, runStats.quoteBalanceDelta, runStats.baseFees, runStats.quoteFees, runStats.profitLoss, 0)
+      this.populateStats(runStats.profitLoss, 0)
     } else {
       const overview = await MM.mmRunOverview(this.host, this.baseID, this.quoteID, this.startTime)
-      this.populateStats(overview.baseDelta, overview.quoteDelta, overview.baseFees, overview.quoteFees, overview.profitLoss, overview.endTime)
+      this.populateStats(overview.profitLoss, overview.endTime)
     }
     Doc.bind(this.page.backButton, 'click', () => { app().loadPage(runStats ? 'mm' : 'mmarchives') })
     const events = await this.getRunLogs()
@@ -98,26 +94,15 @@ export default class MarketMakerLogsPage extends BasePage {
     this.newEventRow(event, true)
   }
 
-  setStats (baseDelta: number, quoteDelta: number, baseFees: number, quoteFees: number, profitLoss: number) {
-    const page = this.page
-    const baseSymbol = app().assets[this.baseID].symbol.toUpperCase()
-    const quoteSymbol = app().assets[this.quoteID].symbol.toUpperCase()
-    page.baseChange.textContent = `${Doc.formatCoinValue(baseDelta, this.baseUnitInfo)} ${baseSymbol}`
-    page.quoteChange.textContent = `${Doc.formatCoinValue(quoteDelta, this.quoteUnitInfo)} ${quoteSymbol}`
-    page.baseFees.textContent = `${Doc.formatCoinValue(baseFees, this.baseUnitInfo)} ${baseSymbol}`
-    page.quoteFees.textContent = `${Doc.formatCoinValue(quoteFees, this.quoteUnitInfo)} ${quoteSymbol}`
-    page.profitLoss.textContent = `$${Doc.formatFiatValue(profitLoss)}`
-  }
-
   handleRunStatsNote (note: RunStatsNote) {
     if (note.host !== this.host ||
       note.base !== this.baseID ||
       note.quote !== this.quoteID) return
     if (!note.stats || note.stats.startTime !== this.startTime) return
-    this.setStats(note.stats.baseBalanceDelta, note.stats.quoteBalanceDelta, note.stats.baseFees, note.stats.quoteFees, note.stats.profitLoss)
+    this.page.profitLoss.textContent = `$${Doc.formatFiatValue(note.stats.profitLoss)}`
   }
 
-  populateStats (baseDelta: number, quoteDelta: number, baseFees: number, quoteFees: number, profitLoss: number, endTime: number) {
+  populateStats (profitLoss: number, endTime: number) {
     const page = this.page
     page.startTime.textContent = new Date(this.startTime * 1000).toLocaleString()
     if (endTime === 0) {
@@ -125,7 +110,7 @@ export default class MarketMakerLogsPage extends BasePage {
     } else {
       page.endTime.textContent = new Date(endTime * 1000).toLocaleString()
     }
-    this.setStats(baseDelta, quoteDelta, baseFees, quoteFees, profitLoss)
+    page.profitLoss.textContent = `$${Doc.formatFiatValue(profitLoss)}`
   }
 
   populateTable (events: MarketMakingEvent[]) {

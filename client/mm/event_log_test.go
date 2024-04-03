@@ -67,17 +67,39 @@ func TestEventLogDB(t *testing.T) {
 		},
 	}
 
-	dexBals := map[uint32]uint64{
-		42: 100000000,
-		60: 100000000,
+	initialBals := map[uint32]uint64{
+		42: 3e9,
+		60: 3e9,
 	}
 
-	cexBals := map[uint32]uint64{
-		42: 200000000,
-		60: 200000000,
+	currBals := map[uint32]*BotBalance{
+		42: {
+			Available: initialBals[42],
+		},
+		60: {
+			Available: initialBals[60],
+		},
+	}
+	currBalanceState := func() *BalanceState {
+		balances := make(map[uint32]*BotBalance, len(currBals))
+		for k, v := range currBals {
+			balances[k] = &BotBalance{
+				Available: v.Available,
+				Pending:   v.Pending,
+				Locked:    v.Locked,
+			}
+		}
+		rates := make(map[uint32]float64, len(fiatRates))
+		for k, v := range fiatRates {
+			rates[k] = v
+		}
+		return &BalanceState{
+			Balances:  balances,
+			FiatRates: rates,
+		}
 	}
 
-	err = db.storeNewRun(startTime, mkt, cfg, fiatRates, dexBals, cexBals)
+	err = db.storeNewRun(startTime, mkt, cfg, currBalanceState())
 	if err != nil {
 		t.Fatalf("error storing new run: %v", err)
 	}
@@ -107,7 +129,7 @@ func TestEventLogDB(t *testing.T) {
 		BaseFees:   200,
 		QuoteFees:  100,
 		Pending:    true,
-		DEXOrderEvent: &dexOrderEvent{
+		DEXOrderEvent: &DEXOrderEvent{
 			ID:   "order1",
 			Rate: 5e7,
 			Qty:  5e6,
@@ -129,13 +151,18 @@ func TestEventLogDB(t *testing.T) {
 		},
 	}
 
+	currBals[42].Available += uint64(event1.BaseDelta) - event1.BaseFees
+	currBals[42].Pending += 1e6
+	currBals[60].Available += uint64(event1.QuoteDelta) - event1.QuoteFees
+	db.storeEvent(startTime, mkt, event1, currBalanceState())
+
 	event2 := &MarketMakingEvent{
 		ID:         2,
 		TimeStamp:  startTime + 1,
 		BaseDelta:  1e6,
 		QuoteDelta: -2e6,
 		Pending:    true,
-		CEXOrderEvent: &cexOrderEvent{
+		CEXOrderEvent: &CEXOrderEvent{
 			ID:          "order1",
 			Rate:        5e7,
 			Qty:         5e6,
@@ -144,9 +171,10 @@ func TestEventLogDB(t *testing.T) {
 			QuoteFilled: 2e6,
 		},
 	}
-
-	db.storeEvent(startTime, mkt, event1)
-	db.storeEvent(startTime, mkt, event2)
+	currBals[42].Available += uint64(event2.BaseDelta)
+	currBals[60].Available += uint64(event2.QuoteDelta)
+	currBals[42].Pending += 1e6
+	db.storeEvent(startTime, mkt, event2, currBalanceState())
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -200,13 +228,17 @@ func TestEventLogDB(t *testing.T) {
 		t.Fatalf("expected run:\n%v\n\ngot:\n%v", expectedRun, runs[0])
 	}
 
-	// Update event1
+	// Update event1 and fiat rates
 	event1.BaseDelta += 100
 	event1.QuoteDelta -= 200
 	event1.BaseFees += 20
 	event1.QuoteFees += 10
 	event1.Pending = false
-	db.storeEvent(startTime, mkt, event1)
+	currBals[42].Available += 100 - 20
+	currBals[60].Available -= 200 + 10
+	fiatRates[42] = 25
+	fiatRates[60] = 3000
+	db.storeEvent(startTime, mkt, event1, currBalanceState())
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -248,12 +280,6 @@ func TestEventLogDB(t *testing.T) {
 		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event2, runEvents[0])
 	}
 
-	fiatRates[42] = 25
-	fiatRates[60] = 3000
-	err = db.updateFiatRates(startTime, mkt, fiatRates)
-	if err != nil {
-		t.Fatalf("error updating fiat rates: %v", err)
-	}
 	err = db.endRun(startTime, mkt, startTime+1000)
 	if err != nil {
 		t.Fatalf("error ending run: %v", err)
@@ -263,37 +289,34 @@ func TestEventLogDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error getting run overview: %v", err)
 	}
-	if overview.BaseDelta != event1.BaseDelta+event2.BaseDelta {
-		t.Fatalf("expected base delta %d, got %d", event1.BaseDelta+event2.BaseDelta, overview.BaseDelta)
-	}
-	if overview.QuoteDelta != event1.QuoteDelta+event2.QuoteDelta {
-		t.Fatalf("expected quote delta %d, got %d", event1.QuoteDelta+event2.QuoteDelta, overview.QuoteDelta)
-	}
-	if overview.BaseFees != event1.BaseFees+event2.BaseFees {
-		t.Fatalf("expected base fees %d, got %d", event1.BaseFees+event2.BaseFees, overview.BaseFees)
-	}
-	if overview.QuoteFees != event1.QuoteFees+event2.QuoteFees {
-		t.Fatalf("expected quote fees %d, got %d", event1.QuoteFees+event2.QuoteFees, overview.QuoteFees)
-	}
-	if !reflect.DeepEqual(overview.FiatRates, fiatRates) {
-		t.Fatalf("expected fiat rates:\n%v\n\ngot:\n%v", fiatRates, overview.FiatRates)
-	}
 	if *overview.EndTime != startTime+1000 {
 		t.Fatalf("expected end time %d, got %d", startTime+1000, overview.EndTime)
 	}
-	getFiatRate := func(assetID uint32) float64 {
-		return fiatRates[assetID]
+	bs := currBalanceState()
+	finalBals := map[uint32]uint64{
+		42: bs.Balances[42].Available + bs.Balances[42].Pending + bs.Balances[42].Locked,
+		60: bs.Balances[60].Available + bs.Balances[60].Pending + bs.Balances[60].Locked,
 	}
-	expPL := calcRunProfitLoss(overview.BaseDelta, overview.QuoteDelta, overview.BaseFees, overview.QuoteFees, mkt.BaseID, mkt.QuoteID, getFiatRate)
+	if !reflect.DeepEqual(overview.InitialBalances, initialBals) {
+		t.Fatalf("expected initial balances %v, got %v", initialBals, overview.InitialBalances)
+	}
+	if !reflect.DeepEqual(overview.FinalBalances, finalBals) {
+		t.Fatalf("expected final balances %v, got %v", finalBals, overview.FinalBalances)
+	}
+	expPL := calcRunProfitLoss(initialBals, finalBals, fiatRates)
 	if overview.ProfitLoss != expPL {
 		t.Fatalf("expected profit loss %v, got %v", expPL, overview.ProfitLoss)
 	}
+	if !reflect.DeepEqual(overview.Cfg, cfg) {
+		t.Fatalf("expected cfg %v, got %v", cfg, overview.Cfg)
+	}
 
-	err = db.storeNewRun(startTime+1, mkt, cfg, fiatRates, dexBals, cexBals)
+	// Test sorting / pagination of runs
+	err = db.storeNewRun(startTime+1, mkt, cfg, currBalanceState())
 	if err != nil {
 		t.Fatalf("error storing new run: %v", err)
 	}
-	err = db.storeNewRun(startTime-1, mkt, cfg, fiatRates, dexBals, cexBals)
+	err = db.storeNewRun(startTime-1, mkt, cfg, currBalanceState())
 	if err != nil {
 		t.Fatalf("error storing new run: %v", err)
 	}

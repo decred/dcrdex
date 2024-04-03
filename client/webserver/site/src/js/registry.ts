@@ -772,14 +772,9 @@ export interface BotBalance {
 }
 
 export interface RunStats {
+  initialBalances: Record<number, number>
   dexBalances: Record<number, BotBalance>
   cexBalances: Record<number, BotBalance>
-  baseBalanceDelta: number
-  quoteBalanceDelta: number
-  pendingBaseBalanceDelta: number
-  pendingQuoteBalanceDelta: number
-  baseFees: number
-  quoteFees: number
   profitLoss: number
   startTime: number
 }
@@ -867,13 +862,8 @@ export enum PeerSource {
 export interface MarketMakingRunOverview {
   endTime: number
   cfg: BotConfig
-  fiatRates: Record<number, number>
-  initialDEXBalances: Record<number, number>
-  initialCEXBalances: Record<number, number>
-  baseDelta: number
-  quoteDelta: number
-  baseFees: number
-  quoteFees: number
+  initialBalances: Record<number, number>
+  finalBalances: Record<number, number>
   profitLoss: number
 }
 

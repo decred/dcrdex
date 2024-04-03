@@ -3,7 +3,7 @@
 <div id="main" data-handler="mm" class="main mm w-100 overflow-y-auto">
   <div class="d-flex align-items-stretch justify-content-center flex-column align-items-stretch w-100 p-2">
     <div class="flex-center align-items-stretch py-2">
-      <button type="button" class="fs20 mx-1 px-2 selected" id="archivedLogsBtn">[[[previous_run_logs]]]</button>
+      <button type="button" class="go medium px-4" id="archivedLogsBtn">[[[previous_run_logs]]]</button>
     </div>
 
     <div id="onOff" class="flex-center align-items-stretch py-2">
@@ -132,6 +132,7 @@
                 </span>
               </div>
             </td>
+            <td data-tmpl="profitLossTd"><span data-tmpl="profitLoss"></span></td>
             <td class="text-end hoverbg pointer" data-tmpl="removeTd"><span class="ico-cross fs20 p-2 text-danger"></span></td>
             <td class="text-end hoverbg pointer" data-tmpl="settings"><span class="ico-settings fs24 p-2"></span></td>
             <td class="text-end hoverbg pointer" data-tmpl="logs"><span class="ico-open fs20 p-2"></span></td>

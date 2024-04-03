@@ -211,11 +211,11 @@ export default class MarketMakerPage extends BasePage {
   setTableRowBalances (rowTmpl: Record<string, PageElement>, mmRunning: boolean | undefined, botCfg: BotConfig, stats?: RunStats) {
     if (mmRunning && !stats) {
       Doc.show(rowTmpl.profitLossTd)
-      Doc.hide(rowTmpl.baseBalanceTd, rowTmpl.quoteBalanceTd, rowTmpl.profitLossTdContents)
+      Doc.hide(rowTmpl.baseBalanceTd, rowTmpl.quoteBalanceTd)
       return
     }
 
-    Doc.show(rowTmpl.baseBalanceTd, rowTmpl.quoteBalanceTd, rowTmpl.profitLossTdContents)
+    Doc.show(rowTmpl.baseBalanceTd, rowTmpl.quoteBalanceTd)
 
     const baseAsset = app().assets[botCfg.baseID]
     const quoteAsset = app().assets[botCfg.quoteID]
@@ -231,9 +231,6 @@ export default class MarketMakerPage extends BasePage {
       rowTmpl.cexBaseBalanceLogo.src = baseLogoPath
       rowTmpl.cexQuoteBalanceLogo.src = quoteLogoPath
     }
-
-    const baseFeeAsset = baseAsset.token ? app().assets[baseAsset.token.parentID] : baseAsset
-    const quoteFeeAsset = quoteAsset.token ? app().assets[quoteAsset.token.parentID] : quoteAsset
 
     Doc.setVis(!!botCfg.cexCfg, rowTmpl.cexBaseBalanceContainer, rowTmpl.cexQuoteBalanceContainer)
     Doc.setVis(!!stats, rowTmpl.baseBalanceDetails, rowTmpl.quoteBalanceDetails, rowTmpl.cexBaseBalanceDetails, rowTmpl.cexQuoteBalanceDetails, rowTmpl.profitLossTd)
@@ -252,10 +249,6 @@ export default class MarketMakerPage extends BasePage {
       const quoteBalanceTotal = quoteBalances.available + quoteBalances.locked + quoteBalances.pending
       rowTmpl.quoteBalance.textContent = this.runningBalanceStr(botCfg.quoteID, quoteBalanceTotal)
       rowTmpl.profitLoss.textContent = `$${Doc.formatFiatValue(stats.profitLoss)}`
-      rowTmpl.baseChange.textContent = this.valueWithUnit(botCfg.baseID, stats.baseBalanceDelta)
-      rowTmpl.quoteChange.textContent = this.valueWithUnit(botCfg.quoteID, stats.quoteBalanceDelta)
-      rowTmpl.baseFees.textContent = this.valueWithUnit(baseFeeAsset.id, stats.baseFees)
-      rowTmpl.quoteFees.textContent = this.valueWithUnit(quoteFeeAsset.id, stats.quoteFees)
 
       if (botCfg.cexCfg) {
         const cexBaseBalances = stats.cexBalances[botCfg.baseID]
@@ -331,7 +324,6 @@ export default class MarketMakerPage extends BasePage {
       setupHover(rowTmpl.quoteBalanceDetails, rowTmpl.quoteBalanceHoverContainer)
       setupHover(rowTmpl.cexBaseBalanceDetails, rowTmpl.cexBaseBalanceHoverContainer)
       setupHover(rowTmpl.cexQuoteBalanceDetails, rowTmpl.cexQuoteBalanceHoverContainer)
-      setupHover(rowTmpl.profitLossDetails, rowTmpl.profitLossHoverContainer)
 
       const baseSymbol = app().assets[botCfg.baseID].symbol
       const quoteSymbol = app().assets[botCfg.quoteID].symbol
