@@ -531,12 +531,20 @@
 <div class="px-2 py-1 text-center position-relative fs22 sans-light mb-3">
   [[[Companion App]]]
 </div>
-<div id="companionAppTorEnabled" class="d-hide">
-  <p>[[[companion_app_info]]]</p>
-  <img class="mb-3" id="companionAppQrcode" />
-</div>
-<div id="companionAppTorDisabled">
-  <p>Tor must be enabled for this.</p>
+<p>[[[companion_app_info]]]</p>
+<div class="row">
+  <div class="col-14">
+    <div id="companionAppTorEnabled" class="d-hide">
+      <img class="mb-3" id="companionAppQrcode" />
+    </div>    
+    <div id="companionAppTorDisabled">
+      <p>Tor must be enabled for this.</p>
+    </div>
+  </div>
+  <div class="col-10">
+    <button id="companionAppDownload" type="button" class="go mb-3 w-100" disabled>[[[Download APK]]]</button>
+    <img src="/img/get-it-on-fdroid.png" class="w-100">
+  </div>
 </div>
 {{end}}
 
