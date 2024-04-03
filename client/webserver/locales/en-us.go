@@ -167,6 +167,7 @@ var EnUS = map[string]*intl.Translation{
 	"Save Notifications":        {T: "Save Notifications"},
 	"Companion App":             {T: "Companion App"},
 	"companion_app_info":        {T: "Install the DCRDEX companion app and scan this QR code."},
+	"Download APK":              {T: "Download APK"},
 	"Build ID":                  {T: "Build ID"},
 	"Connect":                   {T: "Connect"},
 	"Send":                      {T: "Send"},
