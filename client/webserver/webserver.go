@@ -283,7 +283,10 @@ type WebServer struct {
 // be left blank, in which case a handful of default locations will be checked.
 // This will work in most cases.
 func New(cfg *Config) (*WebServer, error) {
-	log = cfg.Logger
+
+	if cfg.Logger != nil {
+		log = cfg.Logger
+	}
 
 	// Only look for files on disk if NoEmbed is set. This is necessary since
 	// site files from older distributions may be present.
