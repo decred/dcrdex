@@ -24,8 +24,11 @@
   <div id="botSettingsContainer" class="flex-grow-1 d-flex flex-wrap d-hide p-2">
     <div class="col-24 col-xl-8 col-xxl-6 px-3">
       {{- /* VIEW-ONLY MODE */ -}}
-      <div id="viewOnly" class="w-100 d-flex flex-center pb-2 mb-3 fs18 border-bottom">
+      <div id="viewOnlyRunning" class="w-100 d-flex flex-center pb-2 mb-3 fs18 border-bottom">
         <span id="onIndicator" class="on-indicator on me-2"></span> [[[bots_running_view_only]]]
+      </div>
+      <div id="viewOnlyArchived" class="w-100 d-flex flex-center pb-2 mb-2 fs18 brdrbottom">
+        <span id="viewOnlyArchivedMsg"></span>
       </div>
       {{- /* STRATEGY SELECTION */ -}}
       <div id="gapStrategyBox" class="w-100 mb-3">

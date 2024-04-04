@@ -1,4 +1,6 @@
 div[data-handler=mmsettings],
+div[data-handler=mmarchives],
+div[data-handler=mmlogs],
 div[data-handler=mm] {
   .modified {
     border: 1px solid $warning !important;
@@ -156,5 +158,34 @@ div[data-handler=mm] {
     &.off {
       background-color: #777;
     }
+  }
+
+  .balance-layover {
+    background-color: #777;
+    z-index: 99;
+    position: absolute;
+    padding: 4px;
+    border-radius: 3px;
+    border-color: #242424;
+  }
+  
+  .dark-logo {
+    display: none;
+  }
+
+  #runSelect {
+    width: 20%;
+  }
+
+  img {
+      width: 16px;
+      height: 16px;
+  }
+
+  #dexOrderDetailsForm,
+  #cexOrderDetailsForm,
+  #depositDetailsForm,
+  #withdrawalDetailsForm {
+      min-width: 400px;
   }
 }

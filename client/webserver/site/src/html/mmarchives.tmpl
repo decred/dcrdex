@@ -1,0 +1,46 @@
+{{define "mmarchives"}}
+{{template "top" .}}
+<div id="main" data-handler="mmarchives" class="flex-grow-1 d-flex flex-column align-items-stretch stylish-overflow">
+  <div class="d-flex brdrbottom align-items-stretch">
+    <div id="backButton" class="fs18 p-2 hoverbg pointer flex-center brdrright">
+      <span class="ico-wide-headed-left-arrow fs28"></span>
+    </div>
+    <div class="flex-center fs24 p-2 flex-grow-1">[[[previous_mm_runs]]]</div>
+  </div>
+  <div class="px-5 py-3 w-100">
+    <table id="runTable" class="my-3 striped row-hover compact border row-border">
+      <thead>
+        <th scope="col">[[[start_time]]]</th>
+        <th scope="col">[[[Host]]]</th>
+        <th scope="col">[[[Market]]]</th>
+        <th scope="col">[[[bot_type]]]</th>
+        <th scope="col">[[[logs]]]</th>
+        <th scope="col">[[[Settings]]]</th>
+      </thead>
+      <tbody id="runTableBody">
+        <tr id="runTableRowTmpl">
+          <td data-tmpl="startTime"></td>
+          <td data-tmpl="host"></td>
+          <td>
+            <img data-tmpl="baseMktLogo">
+            <span data-tmpl="baseSymbol"></span> - 
+            <img data-tmpl="quoteMktLogo">
+            <span data-tmpl="quoteSymbol"></span>
+          </td>
+          <td>
+            <span data-tmpl="botType"></span>
+            <span data-tmpl="cexLink" class="d-hide">
+              <span class="fs16 ico-exchange me-1"></span>
+              <img data-tmpl="cexLogo" class="micro-icon">
+              <span data-tmpl="cexName"></span>
+            </span>
+          </td>
+          <td><button data-tmpl="logs">[[[view_logs]]]</button></td>
+          <td><span class="ico-settings fs20 pointer mx-2" data-tmpl="settings"></span></td>        
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{template "bottom"}}
+{{end}}

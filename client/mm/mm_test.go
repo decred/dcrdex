@@ -239,7 +239,7 @@ type tBotCoreAdaptor struct {
 	clientCore
 	tCore *tCore
 
-	balances            map[uint32]*botBalance
+	balances            map[uint32]*BotBalance
 	groupedBuys         map[uint64][]*core.Order
 	groupedSells        map[uint64][]*core.Order
 	orderUpdates        chan *core.Order
@@ -263,7 +263,7 @@ type tBotCoreAdaptor struct {
 	tradeResult         *core.Order
 }
 
-func (c *tBotCoreAdaptor) DEXBalance(assetID uint32) (*botBalance, error) {
+func (c *tBotCoreAdaptor) DEXBalance(assetID uint32) (*BotBalance, error) {
 	if c.tCore.assetBalanceErr != nil {
 		return nil, c.tCore.assetBalanceErr
 	}
@@ -1344,7 +1344,7 @@ func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	return c.depositAddress, nil
 }
 
-func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(uint64, string)) error {
+func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(string)) (string, error) {
 	c.lastWithdrawArgs = &withdrawArgs{
 		address: address,
 		amt:     qty,
@@ -1353,19 +1353,19 @@ func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address
 
 	go func() {
 		withdrawal := <-c.confirmWithdrawal
-		onComplete(withdrawal.amt, withdrawal.txID)
+		onComplete(withdrawal.txID)
 		c.confirmWithdrawalComplete <- true
 	}()
 
-	return nil
+	return "", nil
 }
 
-func (c *tCEX) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(bool, uint64)) {
+func (c *tCEX) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(uint64)) {
 	c.lastConfirmDepositTx = txID
 
 	go func() {
 		confirmDepositAmt := <-c.confirmDeposit
-		onConfirm(confirmDepositAmt > 0, confirmDepositAmt)
+		onConfirm(confirmDepositAmt)
 		c.confirmDepositComplete <- true
 	}()
 }
@@ -1380,7 +1380,7 @@ type tBotCexAdaptor struct {
 	bidsVWAP                map[uint64]*vwapResult
 	asksVWAP                map[uint64]*vwapResult
 	vwapErr                 error
-	balances                map[uint32]*botBalance
+	balances                map[uint32]*BotBalance
 	balanceErr              error
 	tradeID                 string
 	tradeErr                error
@@ -1399,7 +1399,7 @@ func newTBotCEXAdaptor() *tBotCexAdaptor {
 	return &tBotCexAdaptor{
 		bidsVWAP:                make(map[uint64]*vwapResult),
 		asksVWAP:                make(map[uint64]*vwapResult),
-		balances:                make(map[uint32]*botBalance),
+		balances:                make(map[uint32]*BotBalance),
 		cancelledTrades:         make([]string, 0),
 		tradeUpdates:            make(chan *libxc.Trade),
 		prepareRebalanceResults: make(map[uint32]*prepareRebalanceResult),
@@ -1410,7 +1410,7 @@ var _ botCexAdaptor = (*tBotCexAdaptor)(nil)
 
 var tLogger = dex.StdOutLogger("mm_TEST", dex.LevelTrace)
 
-func (c *tBotCexAdaptor) CEXBalance(assetID uint32) (*botBalance, error) {
+func (c *tBotCexAdaptor) CEXBalance(assetID uint32) (*BotBalance, error) {
 	return c.balances[assetID], c.balanceErr
 }
 func (c *tBotCexAdaptor) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error {

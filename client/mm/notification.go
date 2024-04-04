@@ -12,8 +12,9 @@ import (
 
 const (
 	validationNote = "validation"
-	botStartStop   = "botstartstop"
+	runStats       = "runstats"
 	mmStartStop    = "mmstartstop"
+	runEvent       = "runevent"
 )
 
 func newValidationErrorNote(host string, baseID, quoteID uint32, errorMsg string) *db.Notification {
@@ -24,22 +25,44 @@ func newValidationErrorNote(host string, baseID, quoteID uint32, errorMsg string
 	return &note
 }
 
-type botStartStopNote struct {
+type runStatsNote struct {
 	db.Notification
 
-	Host    string `json:"host"`
-	Base    uint32 `json:"base"`
-	Quote   uint32 `json:"quote"`
-	Running bool   `json:"running"`
+	Host      string    `json:"host"`
+	Base      uint32    `json:"base"`
+	Quote     uint32    `json:"quote"`
+	StartTime int64     `json:"startTime"`
+	Stats     *RunStats `json:"stats"`
 }
 
-func newBotStartStopNote(host string, base, quote uint32, running bool) *botStartStopNote {
-	return &botStartStopNote{
-		Notification: db.NewNotification(botStartStop, "", "", "", db.Data),
+func newRunStatsNote(host string, base, quote uint32, stats *RunStats) *runStatsNote {
+	return &runStatsNote{
+		Notification: db.NewNotification(runStats, "", "", "", db.Data),
 		Host:         host,
 		Base:         base,
 		Quote:        quote,
-		Running:      running,
+		Stats:        stats,
+	}
+}
+
+type runEventNote struct {
+	db.Notification
+
+	Host      string             `json:"host"`
+	Base      uint32             `json:"base"`
+	Quote     uint32             `json:"quote"`
+	StartTime int64              `json:"startTime"`
+	Event     *MarketMakingEvent `json:"event"`
+}
+
+func newRunEventNote(host string, base, quote uint32, startTime int64, event *MarketMakingEvent) *runEventNote {
+	return &runEventNote{
+		Notification: db.NewNotification(runEvent, "", "", "", db.Data),
+		Host:         host,
+		Base:         base,
+		Quote:        quote,
+		StartTime:    startTime,
+		Event:        event,
 	}
 }
 

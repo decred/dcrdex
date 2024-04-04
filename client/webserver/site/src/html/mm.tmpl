@@ -2,6 +2,10 @@
 {{template "top" .}}
 <div id="main" data-handler="mm" class="main mm w-100 overflow-y-auto">
   <div class="d-flex align-items-stretch justify-content-center flex-column align-items-stretch w-100 p-2">
+    <div class="flex-center align-items-stretch py-2">
+      <button type="button" class="go medium px-4" id="archivedLogsBtn">[[[previous_run_logs]]]</button>
+    </div>
+
     <div id="onOff" class="flex-center align-items-stretch py-2">
       <div class="flex-center flex-column p-3">
         <div class="fs28 text-nowrap">[[[Market Making]]]</div>
@@ -48,10 +52,12 @@
           <th>[[[Host]]]</th>
           <th>[[[Market]]]</th>
           <th>[[[bot_type]]]</th>
-          <th id="baseBalanceHeader">[[[base_balance]]]</th>
-          <th id="quoteBalanceHeader">[[[quote_balance]]]</th>
+          <th>[[[base_balance]]]</th>
+          <th>[[[quote_balance]]]</th>
+          <th id="profitLossHeader">[[[profit_loss]]]</th>
           <th id="removeHeader" class="text-end">[[[Remove]]]</th>
           <th class="text-end">[[[Settings]]]</th>
+          <th id="logsHeader" class="text-end">[[[run_logs]]]</th>
         </thead>
         <tbody id="botTableBody" class="fs18">
           <tr id="botTableRowTmpl">
@@ -76,10 +82,60 @@
                 <span data-tmpl="cexName"></span>
               </span>
             </td>
-            <td data-tmpl="baseBalanceTd"><span data-tmpl="baseBalance"></span><img class="mx-1 micro-icon" data-tmpl="baseBalanceLogo"></td>
-            <td data-tmpl="quoteBalanceTd"><span data-tmpl="quoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="quoteBalanceLogo"></td>
+            <td data-tmpl="baseBalanceTd">
+              <img src="/img/softened-icon-dark.png" class="micro-icon dark-logo">
+              <img src="/img/softened-icon.png" class="micro-icon light-logo">
+              <span data-tmpl="baseBalance"></span><img class="mx-1 micro-icon" data-tmpl="baseBalanceLogo">
+                <span class="ico-info fs12 ms-1" data-tmpl="baseBalanceDetails"></span>
+                <div data-tmpl="baseBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
+                  <span>[[[Available]]]: <span data-tmpl="runningBaseBalanceAvailable"></span></span>
+                  <span>[[[Locked]]]: <span data-tmpl="runningBaseBalanceLocked"></span></span>
+                  <span>[[[Pending]]]: <span data-tmpl="runningBaseBalancePending"></span></span>
+                </div>
+                </br>
+                <span data-tmpl="cexBaseBalanceContainer">
+                  <img data-tmpl="baseBalanceCexLogo" class="micro-icon">
+                  <span data-tmpl="cexBaseBalanceLoaded">
+                    <span data-tmpl="cexBaseBalance"></span><img class="mx-1 micro-icon" data-tmpl="cexBaseBalanceLogo">
+                    <span class="ico-info fs12 ms-1" data-tmpl="cexBaseBalanceDetails"></span>
+                  </span>
+                  <div class="ico-spinner spinner fs14 d-inline-block d-hide" data-tmpl="cexBaseBalanceSpinner"></div>
+                  <div data-tmpl="cexBaseBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
+                    <span>[[[Available]]]: <span data-tmpl="runningCexBaseBalanceAvailable"></span></span>
+                    <span>[[[Locked]]]: <span data-tmpl="runningCexBaseBalanceLocked"></span></span>
+                  </div>
+                </span>
+              </div>
+            </td>
+            <td data-tmpl="quoteBalanceTd">
+              <img src="/img/softened-icon-dark.png" class="micro-icon dark-logo">
+              <img src="/img/softened-icon.png" class="micro-icon light-logo">
+              <span data-tmpl="quoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="quoteBalanceLogo">
+                <span class="ico-info fs12 ms-1" data-tmpl="quoteBalanceDetails"></span>
+                <div data-tmpl="quoteBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
+                  <span>[[[Available]]]: <span data-tmpl="runningQuoteBalanceAvailable"></span></span>
+                  <span>[[[Locked]]]: <span data-tmpl="runningQuoteBalanceLocked"></span></span>
+                  <span>[[[Pending]]]: <span data-tmpl="runningQuoteBalancePending"></span></span>
+                </div>
+                </br>
+                <span data-tmpl="cexQuoteBalanceContainer">
+                  <img data-tmpl="quoteBalanceCexLogo" class="micro-icon">
+                  <span data-tmpl="cexQuoteBalanceLoaded">
+                    <span data-tmpl="cexQuoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="cexQuoteBalanceLogo">
+                    <span class="ico-info fs12 ms-1" data-tmpl="cexQuoteBalanceDetails"></span>
+                  </span>
+                  <div class="ico-spinner spinner fs14 d-inline-block d-hide" data-tmpl="cexQuoteBalanceSpinner"></div>
+                  <div data-tmpl="cexQuoteBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
+                    <span>[[[Available]]]: <span data-tmpl="runningCexQuoteBalanceAvailable"></span></span>
+                    <span>[[[Locked]]]: <span data-tmpl="runningCexQuoteBalanceLocked"></span></span>
+                  </div>
+                </span>
+              </div>
+            </td>
+            <td data-tmpl="profitLossTd"><span data-tmpl="profitLoss"></span></td>
             <td class="text-end hoverbg pointer" data-tmpl="removeTd"><span class="ico-cross fs20 p-2 text-danger"></span></td>
             <td class="text-end hoverbg pointer" data-tmpl="settings"><span class="ico-settings fs24 p-2"></span></td>
+            <td class="text-end hoverbg pointer" data-tmpl="logs"><span class="ico-open fs20 p-2"></span></td>
           </tr>
         </tbody>
         <tbody>
