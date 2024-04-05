@@ -32,8 +32,9 @@ type loginForm struct {
 
 // addDexForm is used to connect a DEX without creating an account.
 type addDexForm struct {
-	Addr string `json:"addr"`
-	Cert string `json:"cert"`
+	Addr  string           `json:"addr"`
+	Cert  string           `json:"cert"`
+	AppPW encode.PassBytes `json:"appPW"`
 }
 
 // registrationForm is used to register a new DEX account.

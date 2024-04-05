@@ -1012,6 +1012,8 @@ export interface TxHistoryResult {
   lastTx: boolean
 }
 
+export const PrepaidBondID = 2147483647
+
 export interface Application {
   assets: Record<number, SupportedAsset>
   seedGenTime: number

@@ -1134,6 +1134,7 @@ type PostBondResult struct {
 	AssetID    uint32              `json:"assetID"`
 	Amount     uint64              `json:"amount"`
 	Expiry     uint64              `json:"expiry"` // not locktime, but time when bond expires for dex
+	Strength   uint32              `json:"strength"`
 	BondID     Bytes               `json:"bondID"`
 	Tier       int64               `json:"tier"`
 	Reputation *account.Reputation `json:"reputation"`

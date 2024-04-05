@@ -15,7 +15,8 @@ import {
   app,
   Exchange,
   PageElement,
-  PasswordCache
+  PasswordCache,
+  PrepaidBondID
 } from './registry'
 
 const animationLength = 300
@@ -83,6 +84,11 @@ export default class SettingsPage extends BasePage {
 
     // Asset selection
     this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, async (assetID: number, tier: number) => {
+      if (assetID === PrepaidBondID) {
+        await app().fetchUser()
+        window.location.reload()
+        return
+      }
       const asset = app().assets[assetID]
       const wallet = asset.wallet
       if (wallet) {
@@ -101,7 +107,7 @@ export default class SettingsPage extends BasePage {
       this.confirmRegisterForm.setAsset(assetID, tier, 0)
       this.newWalletForm.setAsset(assetID)
       this.slideSwap(page.newWalletForm)
-    })
+    }, this.pwCache)
 
     // Approve fee payment
     this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
@@ -127,7 +133,7 @@ export default class SettingsPage extends BasePage {
       this.currentDEX = xc
       this.confirmRegisterForm.setExchange(xc, certFile)
       this.walletWaitForm.setExchange(xc)
-      this.regAssetForm.setExchange(xc)
+      this.regAssetForm.setExchange(xc, certFile)
       this.animateRegAsset(page.dexAddrForm)
     })
 

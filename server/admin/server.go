@@ -45,6 +45,8 @@ const (
 	scaleKey           = "scale"
 	includeInactiveKey = "includeinactive"
 	nKey               = "n"
+	daysKey            = "days"
+	strengthKey        = "strength"
 )
 
 var (
@@ -71,6 +73,7 @@ type SvrCore interface {
 	EpochOrders(base, quote uint32) (orders []order.Order, err error)
 	MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*dexsrv.MatchData) error) (int, error)
 	EnableDataAPI(yes bool)
+	CreatePrepaidBonds(n int, strength uint32, durSecs int64) ([][]byte, error)
 }
 
 // Server is a multi-client https server.
@@ -161,6 +164,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/suspend", s.apiSuspend)
 			rm.Get("/resume", s.apiResume)
 		})
+		r.Get("/prepaybonds", s.prepayBonds)
 	})
 
 	return s, nil

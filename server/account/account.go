@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -17,9 +18,10 @@ import (
 type PrivateKey = secp256k1.PrivateKey
 
 const (
-	PrivKeySize = secp256k1.PrivKeyBytesLen
-	PubKeySize  = secp256k1.PubKeyBytesLenCompressed
-	HashSize    = blake256.Size
+	PrivKeySize   = secp256k1.PrivKeyBytesLen
+	PubKeySize    = secp256k1.PubKeyBytesLenCompressed
+	HashSize      = blake256.Size
+	PrepaidBondID = math.MaxInt32
 )
 
 // HashFunc is the hash function used to generate account IDs from pubkeys.

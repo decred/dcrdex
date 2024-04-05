@@ -11,7 +11,8 @@ import {
   ConnectionStatus,
   Exchange,
   PasswordCache,
-  WalletState
+  WalletState,
+  PrepaidBondID
 } from './registry'
 
 interface Animator {
@@ -82,6 +83,12 @@ export default class DexSettingsPage extends BasePage {
     }, this.pwCache)
 
     this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, async (assetID: number, tier: number) => {
+      if (assetID === PrepaidBondID) {
+        await app().fetchUser()
+        this.updateReputation()
+        this.showSuccess(intl.prep(intl.ID_TRADING_TIER_UPDATED))
+        return
+      }
       const asset = app().assets[assetID]
       const wallet = asset.wallet
       if (wallet) {
@@ -95,8 +102,8 @@ export default class DexSettingsPage extends BasePage {
       this.confirmRegisterForm.setAsset(assetID, tier, 0)
       this.newWalletForm.setAsset(assetID)
       this.showForm(page.newWalletForm)
-    })
-    this.regAssetForm.setExchange(xc)
+    }, this.pwCache)
+    this.regAssetForm.setExchange(xc, '')
 
     this.reputationMeter = new ReputationMeter(page.repMeter)
     this.reputationMeter.setHost(host)
@@ -109,7 +116,7 @@ export default class DexSettingsPage extends BasePage {
     Doc.bind(page.goBackToSettings, 'click', () => app().loadPage('settings'))
 
     const showTierForm = () => {
-      this.regAssetForm.setExchange(app().exchanges[host]) // reset form
+      this.regAssetForm.setExchange(app().exchanges[host], '') // reset form
       this.showForm(page.regAssetForm)
     }
     Doc.bind(page.changeTier, 'click', () => { showTierForm() })

@@ -637,6 +637,10 @@ var bipIDs = map[uint32]string{
 	91927009: "kusd",
 	99999998: "fluid",
 	99999999: "qkc",
+	// math.MaxInt32 is the highest ID we should gol for v1 non-mesh dcrdex cuz
+	// of db type used for asset ID.
+	// Reserved for pre-paid bonds.
+	2147483647: "reservedforprepaidbonds", // math.MaxInt32
 }
 
 // TokenChains is a map of token symbol to a list of [2]uint32, where the first

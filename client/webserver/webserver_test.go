@@ -99,7 +99,7 @@ func (c *TCore) Exchange(host string) (*core.Exchange, error) { return nil, nil 
 func (c *TCore) GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error) {
 	return nil, c.getDEXConfigErr // TODO along with test for apiUser / Exchanges() / User()
 }
-func (c *TCore) AddDEX(dexAddr string, certI any) error {
+func (c *TCore) AddDEX(appPW []byte, dexAddr string, certI any) error {
 	return nil
 }
 func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI any) (*core.Exchange, bool, error) {
@@ -108,6 +108,9 @@ func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI any) (*core.Exc
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
 func (c *TCore) PostBond(r *core.PostBondForm) (*core.PostBondResult, error) {
 	return nil, c.postBondErr
+}
+func (c *TCore) RedeemPrepaidBond(appPW []byte, code []byte, host string, certI any) (tier uint64, err error) {
+	return 1, nil
 }
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	return c.postBondErr

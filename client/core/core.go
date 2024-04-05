@@ -4033,7 +4033,7 @@ func (c *Core) GetDEXConfig(dexAddr string, certI any) (*Exchange, error) {
 // activity without setting up account keys or communicating account identity
 // with the DEX. DiscoverAccount, Post Bond or Register (deprecated) may be used
 // to set up a trading account for this DEX if required.
-func (c *Core) AddDEX(dexAddr string, certI any) error {
+func (c *Core) AddDEX(appPW []byte, dexAddr string, certI any) error {
 	if !c.IsInitialized() { // TODO: Allow adding view-only DEX without init.
 		return fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
@@ -4096,6 +4096,23 @@ func (c *Core) AddDEX(dexAddr string, certI any) error {
 	c.connMtx.Lock()
 	c.conns[dc.acct.host] = dc
 	c.connMtx.Unlock()
+
+	// If a password was provided, try discoverAccount, but OK if we don't find
+	// it.
+	if len(appPW) > 0 {
+		crypter, err := c.encryptionKey(appPW)
+		if err != nil {
+			return codedError(passwordErr, err)
+		}
+		defer crypter.Close()
+
+		paid, err := c.discoverAccount(dc, crypter)
+		if err != nil {
+			c.log.Errorf("discoverAccount error during AddDEX: %v", err)
+		} else if paid {
+			c.upgradeConnection(dc)
+		}
+	}
 
 	return nil
 }
@@ -7075,6 +7092,10 @@ func (c *Core) findBondKeyIdx(pkhEqualFn func(bondKey *secp256k1.PrivateKey) boo
 // findBond will attempt to find an unknown bond and add it to the live bonds
 // slice and db for refunding later. Returns the bond strength if no error.
 func (c *Core) findBond(dc *dexConnection, bond *msgjson.Bond) (strength, bondAssetID uint32) {
+	if bond.AssetID == account.PrepaidBondID {
+		c.insertPrepaidBond(dc, bond)
+		return bond.Strength, bond.AssetID
+	}
 	symb := dex.BipIDSymbol(bond.AssetID)
 	bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
 	c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
@@ -7138,6 +7159,27 @@ func (c *Core) findBond(dc *dexConnection, bond *msgjson.Bond) (strength, bondAs
 	dc.acct.authMtx.Unlock()
 	c.log.Infof("Restored unknown bond %s", bondIDStr)
 	return strength, bondDetails.AssetID
+}
+
+func (c *Core) insertPrepaidBond(dc *dexConnection, bond *msgjson.Bond) {
+	lockTime := bond.Expiry + dc.config().BondExpiry
+	dbBond := &db.Bond{
+		Version:   bond.Version,
+		AssetID:   bond.AssetID,
+		CoinID:    bond.CoinID,
+		LockTime:  lockTime,
+		Strength:  bond.Strength,
+		Confirmed: true,
+	}
+
+	err := c.db.AddBond(dc.acct.host, dbBond)
+	if err != nil {
+		c.log.Errorf("Failed to store pre-paid bond dex %v: %w", dc.acct.host, err)
+	}
+
+	dc.acct.authMtx.Lock()
+	dc.acct.bonds = append(dc.acct.bonds, dbBond)
+	dc.acct.authMtx.Unlock()
 }
 
 func (dc *dexConnection) maxScore() uint32 {

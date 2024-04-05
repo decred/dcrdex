@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
@@ -52,6 +53,9 @@ type Storage interface {
 	CreateAccountWithBond(acct *account.Account, bond *db.Bond) error
 	AddBond(acct account.AccountID, bond *db.Bond) error
 	DeleteBond(assetID uint32, coinID []byte) error
+	FetchPrepaidBond(bondCoinID []byte) (strength uint32, lockTime int64, err error)
+	DeletePrepaidBond(coinID []byte) error
+	StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime int64) error
 
 	CreateAccount(acct *account.Account, feeAsset uint32, feeAddr string) error // DEPRECATED
 	AccountRegAddr(account.AccountID) (addr string, asset uint32, err error)    // DEPRECATED
@@ -267,6 +271,8 @@ type AuthManager struct {
 	orderOutcomes  map[account.AccountID]*latestOrders // cancel/complete, was in clientInfo.recentOrders
 
 	txDataSources map[uint32]TxDataSource
+
+	prepaidBondMtx sync.Mutex
 }
 
 // violation badness
@@ -1136,6 +1142,20 @@ func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.Matc
 	unbanned = rep.EffectiveTier() > 0
 
 	return
+}
+
+// CreatePrepaidBonds generates pre-paid bonds.
+func (auth *AuthManager) CreatePrepaidBonds(n int, strength uint32, durSecs int64) ([][]byte, error) {
+	coinIDs := make([][]byte, n)
+	const prepaidBondIDLength = 16
+	for i := 0; i < n; i++ {
+		coinIDs[i] = encode.RandomBytes(prepaidBondIDLength)
+	}
+	lockTime := time.Now().Add(auth.bondExpiry).Add(time.Duration(durSecs) * time.Second)
+	if err := auth.storage.StorePrepaidBonds(coinIDs, strength, lockTime.Unix()); err != nil {
+		return nil, err
+	}
+	return coinIDs, nil
 }
 
 // TODO: a way to manipulate/forgive cancellation rate violation.

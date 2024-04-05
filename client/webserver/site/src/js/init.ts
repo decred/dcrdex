@@ -238,7 +238,7 @@ class QuickConfigForm {
       if (!srvRow.checkbox.checked) return
       const req = {
         addr: srvRow.host,
-        pass: this.pw
+        appPW: this.pw
       }
       const res = await postJSON('/api/adddex', req) // DRAFT NOTE: ignore errors ok?
       if (!app().checkResponse(res)) failedHosts.push(srvRow.host)
