@@ -443,6 +443,7 @@ func New(cfg *Config) (*WebServer, error) {
 
 	// Webpages
 	mux.Group(func(web chi.Router) {
+		web.Use(s.tokenAuthMiddleware)
 		// Inject user info for handlers that use extractUserInfo, which
 		// includes most of the page handlers that use commonArgs to
 		// inject the User object for page template execution.
