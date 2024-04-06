@@ -200,6 +200,10 @@ div.clear {
   user-select: all;
 }
 
+.user-select-none {
+  user-select: none;
+}
+
 .text-danger {
   color: var(--text-danger);
 }

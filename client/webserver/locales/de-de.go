@@ -170,8 +170,6 @@ var DeDE = map[string]*intl.Translation{
 	"off":                         {T: "Ausgeschaltet"},
 	"Export Trades":               {T: "Exportiere Trades"},
 	"change the wallet type":      {T: "den Wallet-Typ ändern"},
-	"confirmations":               {T: "Bestätigungen"},
-	"All markets at":              {T: "Alle Märkte bei"},
 	"pick a different asset":      {T: "ein anderes Asset wählen"},
 	"Create":                      {T: "Erstellen"},
 	"1 Sync the Blockchain":       {T: "1: Blockchain synchronisieren"},

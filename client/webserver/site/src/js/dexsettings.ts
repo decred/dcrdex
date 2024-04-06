@@ -218,7 +218,7 @@ export default class DexSettingsPage extends BasePage {
         const res = await postJSON('/api/openwallet', { assetID: assetID })
         loaded()
         if (!app().checkResponse(res)) {
-          this.regAssetForm.setError(`error unlocking wallet: ${res.msg}`)
+          this.regAssetForm.setAssetError(`error unlocking wallet: ${res.msg}`)
           this.runAnimation(this.regAssetForm, page.regAssetForm)
         }
         return
@@ -254,7 +254,7 @@ export default class DexSettingsPage extends BasePage {
       loaded()
     } catch (e) {
       loaded()
-      this.regAssetForm.setError(e.msg)
+      this.regAssetForm.setTierError(e.msg)
       return
     }
     // this.animateConfirmForm(page.regAssetForm)

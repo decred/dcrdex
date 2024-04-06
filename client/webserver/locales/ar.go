@@ -176,7 +176,6 @@ var Ar = map[string]*intl.Translation{
 	"Export Trades":               {T: "تصدير التداولات"},
 	"change the wallet type":      {T: "تغيير نوع المحفظة"},
 	"confirmations":               {T: "التأكيدات"},
-	"All markets at":              {T: "جميع الأسواق في"},
 	"pick a different asset":      {T: "اختر أصلًا مختلفًا"},
 	"Create":                      {T: "انشاء"},
 	"1 Sync the Blockchain":       {T: "1: مزامنة سلسلة الكتل"},

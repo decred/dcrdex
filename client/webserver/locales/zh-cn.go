@@ -170,7 +170,6 @@ var ZhCN = map[string]*intl.Translation{
 	"Export Trades":               {T: "退出交易"},
 	"change the wallet type":      {T: "更改钱包类型"},
 	"confirmations":               {T: "确认"},
-	"All markets at":              {T: "所有市场"},
 	"pick a different asset":      {T: "选择其它的资产"},
 	"Create":                      {T: "创建"},
 	"1 Sync the Blockchain":       {T: "1: 同步区块链"},

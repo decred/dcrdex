@@ -167,7 +167,6 @@ var PlPL = map[string]*intl.Translation{
 	"Export Trades":              {T: "Eksportuj zlecenia wymiany"},
 	"change the wallet type":     {T: "zmień typ portfela"},
 	"confirmations":              {T: "potwierdzenia"},
-	"All markets at":             {T: "Wszystkie rynki na"},
 	"pick a different asset":     {T: "wybierz inne aktywo"},
 	"Create":                     {T: "Utwórz"},
 	"1 Sync the Blockchain":      {T: "1: Zsynchronizuj blockchain"},

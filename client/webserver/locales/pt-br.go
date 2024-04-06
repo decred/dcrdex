@@ -168,7 +168,6 @@ var PtBr = map[string]*intl.Translation{
 	"Export Trades":              {T: "Exportar Trocas"},
 	"change the wallet type":     {T: "trocar tipo de carteira"},
 	"confirmations":              {T: "confirmações"},
-	"All markets at":             {T: "Todos mercados"},
 	"pick a different asset":     {T: "Escolher ativo diferente"},
 	"Create":                     {T: "Criar"},
 	"1 Sync the Blockchain":      {T: "1: Sincronizar a Blockchain"},
