@@ -247,13 +247,18 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 // handleGenerateQRCode is the handler for the '/generateqrcode' page request
 func (s *WebServer) handleGenerateCompanionAppQRCode(w http.ResponseWriter, r *http.Request) {
 
-	url := ""
+	var url string
 
 	if s.onion != "" {
 		url = s.onion
 	} else {
 		url = fmt.Sprintf("http://%s", s.addr)
 	}
+	// Create auth token and append it to the URL for authTokenMiddleware to pick up.
+	authToken := s.authorize()
+	url = fmt.Sprintf("%s?%s=%s", url, authCK, authToken)
+	log.Infof("Companion app QR code URL: %s", url)
+
 	png, err := qrcode.Encode(url, qrcode.Medium, 200)
 	if err != nil {
 		log.Error("error generating qr code: %v", err)
