@@ -197,6 +197,7 @@ export default class Application {
     if (State.isDark()) {
       document.body.classList.add('dark')
     }
+    document.body.classList.add('loaded')
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
