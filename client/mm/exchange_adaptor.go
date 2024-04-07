@@ -66,6 +66,7 @@ type botCoreAdaptor interface {
 	OrderFeesInUnits(sell, base bool, rate uint64) (uint64, error) // estimated fees, not max
 	SubscribeOrderUpdates() (updates <-chan *core.Order)
 	SufficientBalanceForDEXTrade(rate, qty uint64, sell bool) (bool, error)
+	registerFeeGap(*FeeGapStats)
 }
 
 // botCexAdaptor is an interface used by bots to access CEX related
@@ -80,6 +81,7 @@ type botCexAdaptor interface {
 	CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64) (*libxc.Trade, error)
 	SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) (bool, error)
 	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
+	MidGap(baseID, quoteID uint32) uint64
 	PrepareRebalance(ctx context.Context, assetID uint32) (rebalance int64, dexReserves, cexReserves uint64)
 	FreeUpFunds(assetID uint32, cex bool, amt uint64, currEpoch uint64)
 	Deposit(ctx context.Context, assetID uint32, amount uint64) error
@@ -192,10 +194,15 @@ type unifiedExchangeAdaptor struct {
 	// The following are updated whenever a pending action is complete.
 	// For accurate run stats, the pending actions must be taken into
 	// account.
-	baseBalanceDelta  int64
-	quoteBalanceDelta int64
-	baseFees          uint64
-	quoteFees         uint64
+	runStats struct {
+		baseBalanceDelta  atomic.Int64  // unused
+		quoteBalanceDelta atomic.Int64  // unused
+		baseFees          atomic.Uint64 // unused
+		quoteFees         atomic.Uint64 // unused
+		completedMatches  atomic.Uint32
+		tradedUSD         atomic.Uint64
+		feeGapStats       atomic.Value
+	}
 }
 
 var _ botCoreAdaptor = (*unifiedExchangeAdaptor)(nil)
@@ -1153,11 +1160,11 @@ func (u *unifiedExchangeAdaptor) updatePendingDeposit(assetID uint32, tx *asset.
 		diff = int64(tx.Amount - amtCredited)
 	}
 	if assetID == u.market.BaseID {
-		u.baseBalanceDelta -= diff
-		u.baseFees += tx.Fees
+		u.runStats.baseBalanceDelta.Add(-diff)
+		u.runStats.baseFees.Add(tx.Fees)
 	} else {
-		u.quoteBalanceDelta -= diff
-		u.quoteFees += tx.Fees
+		u.runStats.quoteBalanceDelta.Add(-diff)
+		u.runStats.quoteFees.Add(tx.Fees)
 	}
 
 	if assetID == u.market.BaseID {
@@ -1294,9 +1301,9 @@ func (u *unifiedExchangeAdaptor) pendingWithdrawalComplete(id string, tx *asset.
 	dexDiffs := map[uint32]int64{withdrawal.assetID: int64(tx.Amount)}
 	cexDiffs := map[uint32]int64{withdrawal.assetID: -int64(withdrawal.amtWithdrawn)}
 	if withdrawal.assetID == u.market.BaseID {
-		u.baseFees += withdrawal.amtWithdrawn - tx.Amount
+		u.runStats.baseFees.Add(withdrawal.amtWithdrawn - tx.Amount)
 	} else {
-		u.quoteFees += withdrawal.amtWithdrawn - tx.Amount
+		u.runStats.quoteFees.Add(withdrawal.amtWithdrawn - tx.Amount)
 	}
 
 	u.balancesMtx.Unlock()
@@ -1639,8 +1646,8 @@ func (u *unifiedExchangeAdaptor) handleCEXTradeUpdate(trade *libxc.Trade) {
 			u.baseCexBalances[trade.BaseID] = 0
 		}
 		u.baseCexBalances[trade.QuoteID] += trade.QuoteFilled
-		u.baseBalanceDelta -= int64(trade.BaseFilled)
-		u.quoteBalanceDelta += int64(trade.QuoteFilled)
+		u.runStats.baseBalanceDelta.Add(-int64(trade.BaseFilled))
+		u.runStats.quoteBalanceDelta.Add(int64(trade.QuoteFilled))
 
 		diffs[trade.BaseID] = -int64(trade.BaseFilled)
 		diffs[trade.QuoteID] = int64(trade.QuoteFilled)
@@ -1653,8 +1660,8 @@ func (u *unifiedExchangeAdaptor) handleCEXTradeUpdate(trade *libxc.Trade) {
 			u.baseCexBalances[trade.QuoteID] = 0
 		}
 		u.baseCexBalances[trade.BaseID] += trade.BaseFilled
-		u.baseBalanceDelta += int64(trade.BaseFilled)
-		u.quoteBalanceDelta -= int64(trade.QuoteFilled)
+		u.runStats.baseBalanceDelta.Add(int64(trade.BaseFilled))
+		u.runStats.quoteBalanceDelta.Add(-int64(trade.QuoteFilled))
 
 		diffs[trade.QuoteID] = -int64(trade.QuoteFilled)
 		diffs[trade.BaseID] = int64(trade.BaseFilled)
@@ -2200,10 +2207,10 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 			}
 		}
 
-		u.baseBalanceDelta += baseDelta
-		u.quoteBalanceDelta += quoteDelta
-		u.baseFees += baseFees
-		u.quoteFees += quoteFees
+		u.runStats.baseBalanceDelta.Add(baseDelta)
+		u.runStats.quoteBalanceDelta.Add(quoteDelta)
+		u.runStats.baseFees.Add(baseFees)
+		u.runStats.quoteFees.Add(quoteFees)
 
 		if pendingBaseDelta != 0 || pendingQuoteDelta != 0 {
 			u.log.Errorf("bot %s pending delta not zero after order %s complete. base: %d, quote: %d",
@@ -2230,6 +2237,18 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 			return
 		}
 		u.updatePendingDEXOrder(o)
+		if u.botCfg.Host != note.Host || u.market.ID() != note.MarketID {
+			return
+		}
+		if note.Topic() == core.TopicRedemptionConfirmed {
+			u.runStats.completedMatches.Add(1)
+			fiatRates := u.fiatRates.Load().(map[uint32]float64)
+			if r := fiatRates[u.botCfg.BaseID]; r > 0 && note.Match != nil {
+				ui, _ := asset.UnitInfo(u.botCfg.BaseID)
+				tradedUSD := float64(note.Match.Qty) / float64(ui.Conventional.ConversionFactor) * r
+				u.runStats.tradedUSD.Add(math.Float64bits(tradedUSD))
+			}
+		}
 	case *core.FiatRatesNote:
 		u.fiatRates.Store(note.FiatRates)
 	}
@@ -2357,11 +2376,16 @@ func (u *unifiedExchangeAdaptor) run(ctx context.Context) error {
 // RunStats is a snapshot of the bot's balances and performance at a point in
 // time.
 type RunStats struct {
-	InitialBalances map[uint32]uint64      `json:"initialBalances"`
-	DEXBalances     map[uint32]*BotBalance `json:"dexBalances"`
-	CEXBalances     map[uint32]*BotBalance `json:"cexBalances"`
-	ProfitLoss      float64                `json:"profitLoss"`
-	StartTime       int64                  `json:"startTime"`
+	InitialBalances    map[uint32]uint64      `json:"initialBalances"`
+	DEXBalances        map[uint32]*BotBalance `json:"dexBalances"`
+	CEXBalances        map[uint32]*BotBalance `json:"cexBalances"`
+	ProfitLoss         float64                `json:"profitLoss"`
+	StartTime          int64                  `json:"startTime"`
+	PendingDeposits    int                    `json:"pendingDeposits"`
+	PendingWithdrawals int                    `json:"pendingWithdrawals"`
+	CompletedMatches   uint32                 `json:"completedMatches"`
+	TradedUSD          float64                `json:"tradedUSD"`
+	FeeGap             *FeeGapStats           `json:"feeGap"`
 }
 
 func calcRunProfitLoss(initialBalances, finalBalances map[uint32]uint64, fiatRates map[uint32]float64) float64 {
@@ -2424,14 +2448,24 @@ func (u *unifiedExchangeAdaptor) stats() (*RunStats, error) {
 
 	fiatRates := u.fiatRates.Load().(map[uint32]float64)
 
+	var feeGap *FeeGapStats
+	if feeGapI := u.runStats.feeGapStats.Load(); feeGapI != nil {
+		feeGap = feeGapI.(*FeeGapStats)
+	}
+
 	// Effects of pendingWithdrawals are applied when the withdrawal is
 	// complete.
 	return &RunStats{
-		InitialBalances: u.initialBalances,
-		DEXBalances:     dexBalances,
-		CEXBalances:     cexBalances,
-		ProfitLoss:      calcRunProfitLoss(u.initialBalances, totalBalances, fiatRates),
-		StartTime:       u.startTime.Load(),
+		InitialBalances:    u.initialBalances,
+		DEXBalances:        dexBalances,
+		CEXBalances:        cexBalances,
+		ProfitLoss:         calcRunProfitLoss(u.initialBalances, totalBalances, fiatRates),
+		StartTime:          u.startTime.Load(),
+		PendingDeposits:    len(u.pendingDeposits),
+		PendingWithdrawals: len(u.pendingWithdrawals),
+		CompletedMatches:   u.runStats.completedMatches.Load(),
+		TradedUSD:          math.Float64frombits(u.runStats.tradedUSD.Load()),
+		FeeGap:             feeGap,
 	}, nil
 }
 
@@ -2447,6 +2481,10 @@ func (u *unifiedExchangeAdaptor) sendStatsUpdate() {
 
 func (u *unifiedExchangeAdaptor) notifyEvent(e *MarketMakingEvent) {
 	u.clientCore.Broadcast(newRunEventNote(u.market.Host, u.market.BaseID, u.market.QuoteID, u.startTime.Load(), e))
+}
+
+func (u *unifiedExchangeAdaptor) registerFeeGap(s *FeeGapStats) {
+	u.runStats.feeGapStats.Store(s)
 }
 
 type exchangeAdaptorCfg struct {

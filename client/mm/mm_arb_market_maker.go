@@ -6,10 +6,10 @@ package mm
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 
-	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
@@ -189,39 +189,28 @@ func (a *arbMarketMaker) cancelExpiredCEXTrades() {
 // rate is calculated so that the difference in rates between the DEX and the
 // CEX will pay for the network fees and still leave the configured profit.
 func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *core.Market, feesInQuoteUnits uint64) (uint64, error) {
-	var profitableRate uint64
+	var unadjustedRate uint64
 	if sell {
-		profitableRate = uint64(float64(cexRate) * (1 + profitRate))
+		unadjustedRate = uint64(math.Round(float64(cexRate) * (1 + profitRate)))
 	} else {
-		profitableRate = uint64(float64(cexRate) / (1 + profitRate))
+		unadjustedRate = uint64(math.Round(float64(cexRate) / (1 + profitRate)))
 	}
 
-	baseUnitInfo, err := asset.UnitInfo(mkt.BaseID)
-	if err != nil {
-		return 0, fmt.Errorf("error getting base unit info: %w", err)
-	}
-
-	quoteUnitInfo, err := asset.UnitInfo(mkt.QuoteID)
-	if err != nil {
-		return 0, fmt.Errorf("error getting quote unit info: %w", err)
-	}
-
-	feesInQuoteUnitsConv := float64(feesInQuoteUnits) / float64(quoteUnitInfo.Conventional.ConversionFactor)
-	lotSizeConv := float64(mkt.LotSize) / float64(baseUnitInfo.Conventional.ConversionFactor)
-	rateAdjustment := feesInQuoteUnitsConv / lotSizeConv
-	profitableRateConv := calc.ConventionalRate(profitableRate, baseUnitInfo, quoteUnitInfo)
+	rateAdj := rateAdjustment(feesInQuoteUnits, mkt.LotSize)
 
 	if sell {
-		adjustedRate := calc.MessageRate(profitableRateConv+rateAdjustment, baseUnitInfo, quoteUnitInfo)
-		return steppedRate(adjustedRate, mkt.RateStep), nil
+		return steppedRate(unadjustedRate+rateAdj, mkt.RateStep), nil
 	}
 
-	if rateAdjustment > profitableRateConv {
-		return 0, fmt.Errorf("rate adjustment required for fees %v > rate %v", rateAdjustment, profitableRateConv)
+	if rateAdj > unadjustedRate {
+		return 0, fmt.Errorf("rate adjustment required for fees %d > rate %d", rateAdj, unadjustedRate)
 	}
 
-	adjustedRate := calc.MessageRate(profitableRateConv-rateAdjustment, baseUnitInfo, quoteUnitInfo)
-	return steppedRate(adjustedRate, mkt.RateStep), nil
+	return steppedRate(unadjustedRate-rateAdj, mkt.RateStep), nil
+}
+
+func rateAdjustment(feesInQuoteUnits, lotSize uint64) uint64 {
+	return uint64(math.Round(float64(feesInQuoteUnits) / float64(lotSize) * calc.RateEncodingFactor))
 }
 
 // dexPlacementRate calculates the rate at which an order should be placed on
@@ -383,6 +372,50 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 	a.depositWithdrawIfNeeded()
 
 	a.cancelExpiredCEXTrades()
+
+	a.registerFeeGap()
+}
+
+func feeGap(core botCoreAdaptor, cex botCexAdaptor, baseID, quoteID uint32, lotSize uint64) (*FeeGapStats, error) {
+	s := &FeeGapStats{
+		BasisPrice: cex.MidGap(baseID, quoteID),
+	}
+	_, buy, filled, err := cex.VWAP(baseID, quoteID, false, lotSize)
+	if err != nil {
+		return nil, fmt.Errorf("VWAP buy error: %w", err)
+	}
+	if !filled {
+		return s, nil
+	}
+	_, sell, filled, err := cex.VWAP(baseID, quoteID, true, lotSize)
+	if err != nil {
+		return nil, fmt.Errorf("VWAP sell error: %w", err)
+	}
+	if !filled {
+		return s, nil
+	}
+	s.RemoteGap = sell - buy
+	sellFeesInBaseUnits, err := core.OrderFeesInUnits(true, true, sell)
+	if err != nil {
+		return nil, fmt.Errorf("error getting sell fees: %w", err)
+	}
+	buyFeesInBaseUnits, err := core.OrderFeesInUnits(false, true, buy)
+	if err != nil {
+		return nil, fmt.Errorf("error getting buy fees: %w", err)
+	}
+	s.RoundTripFees = sellFeesInBaseUnits + buyFeesInBaseUnits
+	feesInQuoteUnits := calc.BaseToQuote((sell+buy)/2, s.RoundTripFees)
+	s.FeeGap = rateAdjustment(feesInQuoteUnits, lotSize)
+	return s, nil
+}
+
+func (a *arbMarketMaker) registerFeeGap() {
+	feeGap, err := feeGap(a.core, a.cex, a.mkt.BaseID, a.mkt.QuoteID, a.mkt.LotSize)
+	if err != nil {
+		a.log.Warnf("error getting fee-gap stats: %v", err)
+		return
+	}
+	a.core.registerFeeGap(feeGap)
 }
 
 func (a *arbMarketMaker) run() {

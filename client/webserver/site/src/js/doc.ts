@@ -391,6 +391,18 @@ export default class Doc {
   }
 
   /*
+   * setText sets the textContent for all descendant elements that match the
+   * specified CSS selector.
+   */
+  static setText (ancestor: PageElement, selector: string, textContent: string) {
+    for (const el of Doc.applySelector(ancestor, selector)) el.textContent = textContent
+  }
+
+  static setSrc (ancestor: PageElement, selector: string, textContent: string) {
+    for (const img of Doc.applySelector(ancestor, selector)) img.src = textContent
+  }
+
+  /*
   * cleanTemplates removes the elements from the DOM and deletes the id
   * attribute.
   */

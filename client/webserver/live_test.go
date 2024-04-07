@@ -185,6 +185,7 @@ func mkMrkt(base, quote string) *core.Market {
 		QuoteID:         quoteID,
 		QuoteSymbol:     quote,
 		LotSize:         lotSize,
+		ParcelSize:      10,
 		RateStep:        rateStep,
 		MarketBuyBuffer: rand.Float64() + 1,
 		EpochLen:        uint64(epochDuration.Milliseconds()),
@@ -582,15 +583,15 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:     randomBalance(0),
-			2:     randomBalance(2),
-			42:    randomBalance(42),
-			22:    randomBalance(22),
-			3:     randomBalance(3),
-			28:    randomBalance(28),
-			60:    randomBalance(60),
-			145:   randomBalance(145),
-			60001: randomBalance(60001),
+			0:     randomWalletBalance(0),
+			2:     randomWalletBalance(2),
+			42:    randomWalletBalance(42),
+			22:    randomWalletBalance(22),
+			3:     randomWalletBalance(3),
+			28:    randomWalletBalance(28),
+			60:    randomWalletBalance(60),
+			145:   randomWalletBalance(145),
+			60001: randomWalletBalance(60001),
 		},
 		noteFeed: make(chan core.Notification, 1),
 		fiatSources: map[string]bool{
@@ -670,14 +671,23 @@ func (c *TCore) PostBond(form *core.PostBondForm) (*core.PostBondResult, error) 
 	symbol := dex.BipIDSymbol(*form.Asset)
 	ba := xc.BondAssets[symbol]
 	tier := form.Bond / ba.Amt
+	xc.Auth.BondAssetID = *form.Asset
 	xc.Auth.TargetTier = tier
 	xc.Auth.Rep.BondedTier = int64(tier)
+	xc.Auth.EffectiveTier = int64(tier)
+	xc.ViewOnly = false
 	return &core.PostBondResult{
 		BondID:      "abc",
 		ReqConfirms: uint16(ba.Confs),
 	}, nil
 }
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
+	xc := tExchanges[form.Host]
+	xc.ViewOnly = false
+	xc.Auth.TargetTier = *form.TargetTier
+	xc.Auth.BondAssetID = *form.BondAssetID
+	xc.Auth.EffectiveTier = int64(*form.TargetTier)
+	xc.Auth.Rep.BondedTier = int64(*form.TargetTier)
 	return nil
 }
 func (c *TCore) EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error) {
@@ -1053,10 +1063,11 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*orderbook.OrderBo
 	var ctx context.Context
 	ctx, c.killFeed = context.WithCancel(tCtx)
 	go func() {
+		tick := time.NewTicker(feedPeriod)
 	out:
 		for {
 			select {
-			case <-time.NewTicker(feedPeriod).C:
+			case <-tick.C:
 				// Send a random order to the order feed. Slighly biased away from
 				// unbook_order and towards book_order.
 				r := rand.Float32()
@@ -1302,37 +1313,37 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {
 	}
 }
 
-func randomBalance(assetID uint32) *core.WalletBalance {
-	pow := rand.Intn(6) + 6
-
-	if assetID == 42 {
+func randomWalletBalance(assetID uint32) *core.WalletBalance {
+	avail := randomBalance()
+	if assetID == 42 && avail < 20e8 {
 		// Make Decred >= 1e8, to accommodate the registration fee.
-		pow += 2
-	}
-
-	randVal := func() uint64 {
-		return uint64(rand.Float64() * math.Pow10(pow))
+		avail = 20e8
 	}
 
 	return &core.WalletBalance{
 		Balance: &db.Balance{
 			Balance: asset.Balance{
-				Available: randVal(),
-				Immature:  randVal(),
-				Locked:    randVal(),
+				Available: avail,
+				Immature:  randomBalance(),
+				Locked:    randomBalance(),
 			},
 			Stamp: time.Now().Add(-time.Duration(int64(2 * float64(time.Hour) * rand.Float64()))),
 		},
-		ContractLocked: randVal(),
-		BondLocked:     randVal(),
+		ContractLocked: randomBalance(),
+		BondLocked:     randomBalance(),
 	}
+}
+
+func randomBalance() uint64 {
+	return uint64(rand.Float64() * math.Pow10(rand.Intn(4)+8))
+
 }
 
 func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	return &core.BalanceNote{
 		Notification: db.NewNotification(core.NoteTypeBalance, core.TopicBalanceUpdated, "", "", db.Data),
 		AssetID:      assetID,
-		Balance:      randomBalance(assetID),
+		Balance:      randomWalletBalance(assetID),
 	}
 }
 
@@ -1751,15 +1762,17 @@ func (c *TCore) User() *core.User {
 		Initialized: c.inited,
 		Assets:      c.SupportedAssets(),
 		FiatRates: map[uint32]float64{
-			0:   21_208.61, // btc
-			2:   59.08,     // ltc
-			42:  25.46,     // dcr
-			22:  0.5117,    // mona
-			28:  0.1599,    // vtc
-			141: 0.2048,    // kmd
-			3:   0.06769,   // doge
-			145: 114.68,    // bch
-			60:  1_209.51,  // eth
+			0:     64_551.61, // btc
+			2:     59.08,     // ltc
+			42:    25.46,     // dcr
+			22:    0.5117,    // mona
+			28:    0.1599,    // vtc
+			141:   0.2048,    // kmd
+			3:     0.06769,   // doge
+			145:   114.68,    // bch
+			60:    1_209.51,  // eth
+			60001: 0.999,     // usdc.eth
+
 		},
 	}
 	return user
@@ -2214,7 +2227,7 @@ func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) erro
 }
 
 func (m *TMarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error) {
-	bal := randomBalance(assetID)
+	bal := randomWalletBalance(assetID)
 	return &libxc.ExchangeBalance{
 		Available: bal.Available,
 		Locked:    bal.Locked,
@@ -2227,16 +2240,38 @@ func (m *TMarketMaker) Running() bool {
 
 func (m *TMarketMaker) Status() *mm.Status {
 	running := m.running.Load()
-	var stats *mm.RunStats
-	if running {
-		stats = &mm.RunStats{}
-	}
 	status := &mm.Status{
 		Running: running,
 		CEXes:   make(map[string]*mm.CEXStatus, len(m.cfg.CexConfigs)),
 		Bots:    make([]*mm.BotStatus, 0, len(m.cfg.BotConfigs)),
 	}
 	for _, botCfg := range m.cfg.BotConfigs {
+		var stats *mm.RunStats
+		if running {
+			stats = &mm.RunStats{
+				InitialBalances: make(map[uint32]uint64),
+				DEXBalances: map[uint32]*mm.BotBalance{
+					botCfg.BaseID:  &mm.BotBalance{Available: randomBalance()},
+					botCfg.QuoteID: &mm.BotBalance{Available: randomBalance()},
+				},
+				CEXBalances: map[uint32]*mm.BotBalance{
+					botCfg.BaseID:  &mm.BotBalance{Available: randomBalance()},
+					botCfg.QuoteID: &mm.BotBalance{Available: randomBalance()},
+				},
+				ProfitLoss:         rand.Float64() * 0.2,
+				StartTime:          time.Now().Add(-time.Hour).Unix(),
+				PendingDeposits:    rand.Intn(3),
+				PendingWithdrawals: rand.Intn(3),
+				CompletedMatches:   uint32(rand.Intn(200)),
+				TradedUSD:          rand.Float64() * 10_000,
+				FeeGap: &mm.FeeGapStats{
+					BasisPrice:    uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
+					RemoteGap:     uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
+					FeeGap:        uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
+					RoundTripFees: uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
+				},
+			}
+		}
 		status.Bots = append(status.Bots, &mm.BotStatus{
 			Config:   botCfg,
 			RunStats: stats,
@@ -2253,16 +2288,231 @@ func (m *TMarketMaker) Status() *mm.Status {
 	return status
 }
 
+var gapStrategies = []mm.GapStrategy{
+	mm.GapStrategyMultiplier,
+	mm.GapStrategyAbsolute,
+	mm.GapStrategyAbsolutePlus,
+	mm.GapStrategyPercent,
+	mm.GapStrategyPercentPlus,
+}
+
+func randomBotConfig(mkt *mm.MarketWithHost) *mm.BotConfig {
+	cfg := &mm.BotConfig{
+		Host:    mkt.Host,
+		BaseID:  mkt.BaseID,
+		QuoteID: mkt.QuoteID,
+	}
+	newPlacements := func(gapStategy mm.GapStrategy) (lots []uint64, gapFactors []float64) {
+		n := rand.Intn(3)
+		lots, gapFactors = make([]uint64, 0, n), make([]float64, 0, n)
+		maxQty := math.Pow10(rand.Intn(5)+6) * float64(rand.Intn(1e3))
+		for i := 0; i < n; i++ {
+			var gapFactor float64
+			switch gapStategy {
+			case mm.GapStrategyAbsolute, mm.GapStrategyAbsolutePlus:
+				gapFactor = math.Exp(-rand.Float64()*5) * maxQty
+			case mm.GapStrategyPercent, mm.GapStrategyPercentPlus:
+				gapFactor = 0.01 + rand.Float64()*0.09
+			default: // multiplier
+				gapFactor = 1 + rand.Float64()
+			}
+			lots = append(lots, uint64(rand.Intn(100)))
+			gapFactors = append(gapFactors, gapFactor)
+		}
+		return
+	}
+
+	typeRoll := rand.Float32()
+	switch {
+	case typeRoll < 0.33: // basic MM
+		gapStrategy := gapStrategies[rand.Intn(len(gapStrategies))]
+		oracleWeight := rand.Float64()
+		oracleBias := rand.Float64()
+		basicCfg := &mm.BasicMarketMakingConfig{
+			GapStrategy:     gapStrategies[rand.Intn(len(gapStrategies))],
+			DriftTolerance:  rand.Float64() * 0.01,
+			OracleWeighting: &oracleWeight,
+			OracleBias:      oracleBias,
+		}
+		cfg.BasicMMConfig = basicCfg
+		lots, gapFactors := newPlacements(gapStrategy)
+		for i := 0; i < len(lots); i++ {
+			p := &mm.OrderPlacement{Lots: lots[i], GapFactor: gapFactors[i]}
+			basicCfg.BuyPlacements = append(basicCfg.BuyPlacements, p)
+			basicCfg.SellPlacements = append(basicCfg.SellPlacements, p)
+		}
+	case typeRoll < 0.67: // arb-mm
+		arbMMCfg := &mm.ArbMarketMakerConfig{
+			Profit:             rand.Float64()*0.03 + 0.005,
+			DriftTolerance:     rand.Float64() * 0.01,
+			NumEpochsLeaveOpen: uint64(rand.Intn(100)),
+		}
+		cfg.ArbMarketMakerConfig = arbMMCfg
+		lots, gapFactors := newPlacements(mm.GapStrategyMultiplier)
+		for i := 0; i < len(lots); i++ {
+			p := &mm.ArbMarketMakingPlacement{Lots: lots[i], Multiplier: gapFactors[i]}
+			arbMMCfg.BuyPlacements = append(arbMMCfg.BuyPlacements, p)
+			arbMMCfg.SellPlacements = append(arbMMCfg.SellPlacements, p)
+		}
+		cfg.CEXCfg = &mm.BotCEXCfg{Name: "Binance"}
+	default: // simple-arb
+		cfg.SimpleArbConfig = &mm.SimpleArbConfig{
+			ProfitTrigger:      rand.Float64()*0.03 + 0.005,
+			MaxActiveArbs:      1 + uint32(rand.Intn(100)),
+			NumEpochsLeaveOpen: uint32(rand.Intn(100)),
+		}
+		cfg.CEXCfg = &mm.BotCEXCfg{Name: "Binance"}
+	}
+	return cfg
+}
+
 func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error) {
-	return &mm.MarketMakingRunOverview{}, nil
+	endTime := time.Unix(startTime, 0).Add(time.Hour * 5).Unix()
+	run := &mm.MarketMakingRunOverview{
+		EndTime:         &endTime,
+		Cfg:             randomBotConfig(mkt),
+		InitialBalances: make(map[uint32]uint64),
+		FinalBalances:   make(map[uint32]uint64),
+		ProfitLoss:      rand.Float64() * 0.2,
+	}
+
+	for _, assetID := range []uint32{mkt.BaseID, mkt.QuoteID} {
+		run.InitialBalances[assetID] = randomBalance()
+		run.FinalBalances[assetID] = randomBalance()
+		if tkn := asset.TokenInfo(assetID); tkn != nil {
+			run.InitialBalances[tkn.ParentID] = randomBalance()
+			run.FinalBalances[tkn.ParentID] = randomBalance()
+		}
+	}
+
+	return run, nil
 }
 
 func (m *TMarketMaker) ArchivedRuns() ([]*mm.MarketMakingRun, error) {
-	return []*mm.MarketMakingRun{}, nil
+	n := rand.Intn(25)
+	supportedAssets := m.core.SupportedAssets()
+	runs := make([]*mm.MarketMakingRun, 0, n)
+	for i := 0; i < n; i++ {
+		host := firstDEX
+		if rand.Float32() < 0.5 {
+			host = secondDEX
+		}
+		xc := tExchanges[host]
+		mkts := make([]*core.Market, 0, len(xc.Markets))
+		for _, mkt := range xc.Markets {
+			mkts = append(mkts, mkt)
+		}
+		mkt := mkts[rand.Intn(len(mkts))]
+		if supportedAssets[mkt.BaseID] == nil || supportedAssets[mkt.QuoteID] == nil {
+			continue
+		}
+		marketWithHost := &mm.MarketWithHost{
+			Host:    host,
+			BaseID:  mkt.BaseID,
+			QuoteID: mkt.QuoteID,
+		}
+		runs = append(runs, &mm.MarketMakingRun{
+			StartTime: time.Now().Add(-time.Hour * 5 * time.Duration(i)).Unix(),
+			Market:    marketWithHost,
+			Cfg:       randomBotConfig(marketWithHost),
+		})
+	}
+	return runs, nil
+}
+
+func randomWalletTransaction(txType asset.TransactionType, qty uint64) *asset.WalletTransaction {
+	tx := &asset.WalletTransaction{
+		Type:      txType,
+		ID:        ordertest.RandomOrderID().String(),
+		Amount:    qty,
+		Fees:      uint64(float64(qty) * 0.01 * rand.Float64()),
+		Confirmed: rand.Float32() < 0.05,
+	}
+	switch txType {
+	case asset.Redeem, asset.Receive, asset.SelfSend:
+		addr := ordertest.RandomAddress()
+		tx.Recipient = &addr
+	}
+	return tx
 }
 
 func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, error) {
-	return []*mm.MarketMakingEvent{}, nil
+	if n == 0 {
+		n = uint64(rand.Intn(100))
+	}
+	events := make([]*mm.MarketMakingEvent, 0, n)
+	endTime := time.Now().Add(-time.Hour * time.Duration(rand.Intn(1000)))
+	mktID := dex.BipIDSymbol(mkt.BaseID) + "_" + dex.BipIDSymbol(mkt.QuoteID)
+	midGap, maxQty := getMarketStats(mktID)
+	for i := uint64(0); i < n; i++ {
+		ev := &mm.MarketMakingEvent{
+			ID:         i,
+			TimeStamp:  endTime.Add(-time.Hour * time.Duration(i)).Unix(),
+			BaseDelta:  int64(maxQty * (-0.5 + rand.Float64())),
+			QuoteDelta: int64(maxQty * (-0.5 + rand.Float64())),
+			BaseFees:   uint64(maxQty * 0.01 * rand.Float64()),
+			QuoteFees:  uint64(maxQty * 0.01 * rand.Float64()),
+			Pending:    i < 10 && rand.Float32() < 0.3,
+			// DEXOrderEvent   *DEXOrderEvent   `json:"dexOrderEvent,omitempty"`
+			// CEXOrderEvent   *CEXOrderEvent   `json:"cexOrderEvent,omitempty"`
+			// DepositEvent    *DepositEvent    `json:"depositEvent,omitempty"`
+			// WithdrawalEvent *WithdrawalEvent `json:"withdrawalEvent,omitempty"`
+		}
+		typeRoll := rand.Float32()
+		switch {
+		case typeRoll < 0.25: // dex order
+			sell := rand.Intn(2) > 0
+			ord := randomOrder(sell, maxQty, midGap, gapWidthFactor*midGap, false)
+			orderEvent := &mm.DEXOrderEvent{
+				ID:   ordertest.RandomOrderID().String(),
+				Rate: ord.MsgRate,
+				Qty:  ord.QtyAtomic,
+				Sell: sell,
+			}
+			ev.DEXOrderEvent = orderEvent
+			if rand.Float32() < 0.7 {
+				orderEvent.Transactions = append(orderEvent.Transactions, randomWalletTransaction(asset.Swap, ord.QtyAtomic))
+				if rand.Float32() < 0.9 {
+					orderEvent.Transactions = append(orderEvent.Transactions, randomWalletTransaction(asset.Redeem, ord.QtyAtomic))
+				} else {
+					orderEvent.Transactions = append(orderEvent.Transactions, randomWalletTransaction(asset.Refund, ord.QtyAtomic))
+				}
+			}
+		case typeRoll < 0.5: // cex order
+			sell := rand.Intn(2) > 0
+			ord := randomOrder(sell, maxQty, midGap, gapWidthFactor*midGap, false)
+			ev.CEXOrderEvent = &mm.CEXOrderEvent{
+				ID:   ordertest.RandomOrderID().String(),
+				Rate: ord.MsgRate,
+				Qty:  ord.QtyAtomic,
+				Sell: sell,
+			}
+		case typeRoll < 0.75: // deposit
+			assetID := mkt.BaseID
+			if rand.Float32() < 0.5 {
+				assetID = mkt.QuoteID
+			}
+			amt := uint64(maxQty * 0.2 * rand.Float64())
+			ev.DepositEvent = &mm.DepositEvent{
+				Transaction: randomWalletTransaction(asset.Send, amt),
+				AssetID:     assetID,
+				CEXCredit:   amt,
+			}
+		default: // withdrawal
+			assetID := mkt.BaseID
+			if rand.Float32() < 0.5 {
+				assetID = mkt.QuoteID
+			}
+			amt := uint64(maxQty * 0.2 * rand.Float64())
+			ev.WithdrawalEvent = &mm.WithdrawalEvent{
+				Transaction: randomWalletTransaction(asset.Receive, amt),
+				AssetID:     assetID,
+				CEXDebit:    amt,
+			}
+		}
+		events = append(events, ev)
+	}
+	return events, nil
 }
 
 func TestServer(t *testing.T) {

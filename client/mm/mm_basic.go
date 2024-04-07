@@ -177,6 +177,7 @@ func (c *BasicMarketMakingConfig) Validate() error {
 type basicMMCalculator interface {
 	basisPrice() uint64
 	halfSpread(uint64) (uint64, error)
+	feeGapStats(uint64) (*FeeGapStats, error)
 }
 
 type basicMMCalculatorImpl struct {
@@ -269,59 +270,68 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 // convert the quote fees to base units. In the case of tokens, the fees are
 // converted using fiat rates.
 func (b *basicMMCalculatorImpl) halfSpread(basisPrice uint64) (uint64, error) {
+	feeStats, err := b.feeGapStats(basisPrice)
+	if err != nil {
+		return 0, err
+	}
+	return feeStats.FeeGap / 2, nil
+}
+
+type FeeGapStats struct {
+	BasisPrice    uint64 `json:"basisPrice"`
+	RemoteGap     uint64 `json:"remoteGap"`
+	FeeGap        uint64 `json:"feeGap"`
+	RoundTripFees uint64 `json:"roundTripFees"` // base units
+}
+
+func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, error) {
 	if basisPrice == 0 { // prevent divide by zero later
-		return 0, fmt.Errorf("basis price cannot be zero")
+		return nil, fmt.Errorf("basis price cannot be zero")
 	}
 
 	sellFeesInBaseUnits, err := b.core.OrderFeesInUnits(true, true, basisPrice)
 	if err != nil {
-		return 0, fmt.Errorf("error getting sell fees in base units: %w", err)
+		return nil, fmt.Errorf("error getting sell fees in base units: %w", err)
 	}
 
 	buyFeesInBaseUnits, err := b.core.OrderFeesInUnits(false, true, basisPrice)
 	if err != nil {
-		return 0, fmt.Errorf("error getting buy fees in base units: %w", err)
+		return nil, fmt.Errorf("error getting buy fees in base units: %w", err)
 	}
-
-	sellFeesInQuoteUnits, err := b.core.OrderFeesInUnits(true, false, basisPrice)
-	if err != nil {
-		return 0, fmt.Errorf("error getting sell fees in quote units: %w", err)
-	}
-
-	buyFeesInQuoteUnits, err := b.core.OrderFeesInUnits(false, false, basisPrice)
-	if err != nil {
-		return 0, fmt.Errorf("error getting buy fees in quote units: %w", err)
-	}
-
-	totalFeesInBaseUnits := sellFeesInBaseUnits + buyFeesInBaseUnits
-	totalFeesInQuoteUnits := sellFeesInQuoteUnits + buyFeesInQuoteUnits
 
 	/*
 	 * g = half-gap
-	 * b = basis price
+	 * r = basis price (atomic ratio)
 	 * l = lot size
 	 * f = total fees in base units
-	 * q = f * b = total fees in quote units
 	 *
 	 * We must choose a half-gap such that:
-	 * (b + g) * l / (b - g) = l + f
+	 * (r + g) * l / (r - g) = l + f
 	 *
 	 * This means that when you sell a lot at the basis price plus half-gap,
 	 * then buy a lot at the basis price minus half-gap, you will have one
 	 * lot of the base asset plus the total fees in base units.
 	 *
 	 * Solving for g, you get:
-	 * g = q / (f + 2l)
+	 * g = f * r / (f + 2l)
 	 */
-	g := float64(totalFeesInQuoteUnits) /
-		float64(totalFeesInBaseUnits+2*b.mkt.LotSize)
+
+	f := sellFeesInBaseUnits + buyFeesInBaseUnits
+	l := b.mkt.LotSize
+
+	r := float64(basisPrice) / calc.RateEncodingFactor
+	g := float64(f) * r / float64(f+2*l)
 
 	halfGap := uint64(math.Round(g * calc.RateEncodingFactor))
 
-	b.log.Tracef("halfSpread: base basis price = %d, lot size = %d, fees in base units = %d, fees in quote units = %d, half-gap = %d",
-		basisPrice, b.mkt.LotSize, totalFeesInBaseUnits, totalFeesInQuoteUnits, halfGap)
+	b.log.Tracef("halfSpread: base basis price = %d, lot size = %d, fees in base units = %d, half-gap = %d",
+		basisPrice, l, f, halfGap)
 
-	return halfGap, nil
+	return &FeeGapStats{
+		BasisPrice:    basisPrice,
+		FeeGap:        halfGap * 2,
+		RoundTripFees: f,
+	}, nil
 }
 
 type basicMarketMaker struct {
@@ -380,11 +390,13 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 	var breakEven uint64
 	if needBreakEvenHalfSpread(m.cfg.GapStrategy) {
 		var err error
-		breakEven, err = m.calculator.halfSpread(basisPrice)
+		feeGap, err := m.calculator.feeGapStats(basisPrice)
 		if err != nil {
 			m.log.Errorf("Could not calculate break-even spread: %v", err)
 			return
 		}
+		m.core.registerFeeGap(feeGap)
+		breakEven = feeGap.FeeGap
 	}
 
 	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {

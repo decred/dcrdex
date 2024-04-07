@@ -37,12 +37,10 @@ section {
   border-radius: 0.25rem;
 }
 
-a.logo-icon {
+.logo {
   display: block;
   background-size: cover;
   cursor: pointer;
-  height: 40px;
-  width: 40px;
   background-image: var(--logo-path);
 }
 

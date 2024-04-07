@@ -342,7 +342,6 @@ export interface User {
   bots: BotReport[]
   net: number
   extensionModeConfig: ExtensionModeConfig
-  experimental: boolean
 }
 
 export interface CoreNote {
@@ -788,12 +787,24 @@ export interface BotBalance {
   pending: number
 }
 
+export interface FeeGapStats {
+  basisPrice: number
+  feeGap: number
+  remoteGap: number
+  roundTripFees: number
+}
+
 export interface RunStats {
   initialBalances: Record<number, number>
   dexBalances: Record<number, BotBalance>
   cexBalances: Record<number, BotBalance>
   profitLoss: number
   startTime: number
+  pendingDeposits: number
+  pendingWithdrawals: number
+  completedMatches: number
+  tradedUSD: number
+  feeGap: FeeGapStats
 }
 
 export interface MMBotStatus {
@@ -1004,6 +1015,7 @@ export interface Application {
   assets: Record<number, SupportedAsset>
   seedGenTime: number
   user: User
+  experimental: boolean
   header: HTMLElement
   headerSpace: HTMLElement
   walletMap: Record<number, WalletState>

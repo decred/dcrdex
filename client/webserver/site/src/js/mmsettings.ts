@@ -443,7 +443,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         for (const [cexName, dinfo] of Object.entries(CEXDisplayInfos)) {
           if (cexHasMarket(cexName)) {
             const img = this.page.arbBttnTmpl.cloneNode(true) as PageElement
-            img.src = '/img/' + dinfo.logo
+            img.src = dinfo.logo
             tmpl.arbs.appendChild(img)
             mr.arbs.push(cexName)
           }
@@ -2695,7 +2695,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       const cexHasMarket = this.cexMarketSupportFilter(baseID, quoteID)
       if (cexHasMarket(cexName)) {
         const img = page.arbBttnTmpl.cloneNode(true) as PageElement
-        img.src = '/img/' + dinfo.logo
+        img.src = dinfo.logo
         tmpl.arbs.appendChild(img)
         arbs.push(cexName)
       }
@@ -2749,7 +2749,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const div = this.page.cexOptTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(div)
     tmpl.name.textContent = dinfo.name
-    tmpl.logo.src = '/img/' + dinfo.logo
+    tmpl.logo.src = dinfo.logo
     this.page.cexSelection.appendChild(div)
     this.formCexes[cexName] = { name: cexName, div, tmpl }
     Doc.bind(div, 'click', () => {

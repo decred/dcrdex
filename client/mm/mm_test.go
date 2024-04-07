@@ -338,6 +338,8 @@ func (c *tBotCoreAdaptor) DEXTrade(rate, qty uint64, sell bool) (*core.Order, er
 	return c.tradeResult, nil
 }
 
+func (u *tBotCoreAdaptor) registerFeeGap(s *FeeGapStats) {}
+
 func newTBotCoreAdaptor(c *tCore) *tBotCoreAdaptor {
 	return &tBotCoreAdaptor{
 		clientCore:        c,
@@ -1334,6 +1336,7 @@ func (c *tCEX) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 	}
 	return res.avg, res.extrema, true, nil
 }
+func (c *tCEX) MidGap(baseID, quoteID uint32) uint64 { return 0 }
 func (c *tCEX) SubscribeTradeUpdates() (<-chan *libxc.Trade, func(), int) {
 	return c.tradeUpdates, func() {}, c.tradeUpdatesID
 }
@@ -1462,7 +1465,9 @@ func (c *tBotCexAdaptor) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vw
 		return 0, 0, false, nil
 	}
 	return res.avg, res.extrema, true, nil
+
 }
+func (c *tBotCexAdaptor) MidGap(baseID, quoteID uint32) uint64 { return 0 }
 func (c *tBotCexAdaptor) Deposit(ctx context.Context, assetID uint32, amount uint64) error {
 	c.lastDepositArgs = &withdrawArgs{
 		assetID: assetID,

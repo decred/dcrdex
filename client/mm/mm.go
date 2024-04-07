@@ -67,6 +67,11 @@ func (m MarketWithHost) String() string {
 	return fmt.Sprintf("%s-%d-%d", m.Host, m.BaseID, m.QuoteID)
 }
 
+func (m MarketWithHost) ID() string {
+	n, _ := dex.MarketName(m.BaseID, m.QuoteID)
+	return n
+}
+
 // centralizedExchange is used to manage an exchange API connection.
 type centralizedExchange struct {
 	libxc.CEX
