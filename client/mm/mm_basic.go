@@ -277,6 +277,8 @@ func (b *basicMMCalculatorImpl) halfSpread(basisPrice uint64) (uint64, error) {
 	return feeStats.FeeGap / 2, nil
 }
 
+// FeeGapStats is info about market and fee state. The intepretation of the
+// various statistics may vary slightly with bot type.
 type FeeGapStats struct {
 	BasisPrice    uint64 `json:"basisPrice"`
 	RemoteGap     uint64 `json:"remoteGap"`
