@@ -94,7 +94,7 @@ select {
     align-items: stretch;
     
     .wtab {
-      background-color: var(--body-bg-secondary);
+      background-color: var(--form-bg);
       padding: 8px 20px;
       font-size: 15px;
       border-style: solid solid none;
@@ -186,7 +186,7 @@ button.form-button {
   left: 0;
   right: 0;
   padding: 25px 0;
-  background-color: var(--form-bg);
+  background-color: var(--forms-bg);
   z-index: 101;
 
   & > form {
@@ -435,7 +435,7 @@ div[data-handler=init] {
     height: 0.7rem;
     border-radius: 0.35rem;
     transition: left 0.5s;
-    background-color: var(--body-bg);
+    background-color: var(--section-bg);
   }
 
   &.on > div {

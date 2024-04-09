@@ -5,10 +5,10 @@
   <span class="me-2 connection ico-connection d-hide peers-table-icon" id="connectedIconTmpl"></span>
   <span class="me-2 text-danger ico-disconnected d-hide peers-table-icon" id="disconnectedIconTmpl"></span>
   <span class="me-2 text-danger ico-cross d-hide pointer peers-table-icon" id="removeIconTmpl"></span>
-  <div id="content" class="fill-abs d-flex align-items-stretch flex-row">
+  <div id="content" class="fill-abs d-flex">
     {{- /* ASSET SELECT */ -}}
-    <div class="panel d-flex flex-column align-items-stretch overflow-y-hidden border-end stylish-overflow invisible" id="assetSelect">
-      <div id="iconSelectTmpl" class="icon-select d-flex align-items-stretch p-3">
+    <section id="assetSelect" class="w-auto d-flex align-items-stretch overflow-y-hidden stylish-overflow hoveronly invisible">
+      <div id="iconSelectTmpl" class="icon-select d-flex align-items-stretch p-2">
         <div class="position-relative overflow-visible">
           <img data-tmpl="img">
           <img data-tmpl="parentImg" class="d-hide">
@@ -20,13 +20,14 @@
           <span class="fs13 lh1" data-tmpl="noWallet">[[[Create a Wallet]]]</span>
         </div>
       </div>
-    </div>
+    </section>
 
     <div class="flex-grow-1 position-relative">
       <div class="scrollsmall fill-abs d-flex flex-wrap align-items-stretch">
         {{- /* WALLET DETAILS */ -}}
-        <div class="position-relative col-24 col-xl-12 col-xxl-9 flex-stretch-column invisible border-bottom" id="walletDetailsBox">
-          <div class="column flex-stretch-column px-3">
+        <div class="position-relative col-24 col-xl-12 col-xxl-9 flex-stretch-column invisible" id="walletDetailsBox">
+          <div class="column flex-stretch-column">
+          <section class="px-3"> <!-- TODO: Indent this section when there's no other UI work going on -->
             <div class="d-flex justify-content-between align-items-center py-3">
               <div class="flex-center lh1">
                 <img id="assetLogo">
@@ -61,8 +62,8 @@
                     <tbody id="balanceDetailBox">
                       <tr id="balanceDetailRow">
                         <td data-tmpl="category" class="grey lh-1">
-                         <span data-tmpl="name"></span>
-                         <small data-tmpl="tooltipMsg" data-tooltip="" class="ico-info ms-1 d-hide"></small>
+                        <span data-tmpl="name"></span>
+                        <small data-tmpl="tooltipMsg" data-tooltip="" class="ico-info ms-1 d-hide"></small>
                         </td>
                         <td data-tmpl="balance" class="mono text-end lh-1"></td>
                       </tr>
@@ -143,9 +144,10 @@
                 </button>
               </div>
             </div>
+          </section>
 
             {{- /* STAKING */ -}}
-            <div id="stakingBox" class="position-relative d-flex align-items-stretch border mb-3 rounded3">
+            <section id="stakingBox" class="position-relative d-flex align-items-stretch border">
               <div class="flex-stretch-column flex-grow-1">
                 <div class="d-flex align-items-center justify-content-start border-bottom px-3 py-2">
                   <span class="ico-ticket me-2 fs20"></span>
@@ -232,14 +234,14 @@
                 <div id="purchaseTicketsErrCloser" class="p-2 hoverbg pointer"><span class="ico-cross fs20"></span></div>
                 <div id="purchaseTicketsErr" class="p-2 flex-grow-1 flex-center text-danger"></div>
               </div>
-            </div>
-            <div id="ticketsDisabled" class="w-100 p-2 flex-center fs14 grey border-bottom">
+            </section>
+            <section id="ticketsDisabled" class="w-100 p-2 flex-center fs14 grey border-bottom">
               <span>[[[staking_disabled]]]</span>
-            </div>
+            </section>
             {{- /* END STAKING */ -}}
 
             {{- /* MIXING */ -}}
-            <div id="mixingBox" class="position-relative w-100 my-3 d-flex align-items-stretch flex-column border">
+            <section id="mixingBox" class="position-relative d-flex align-items-stretch flex-column border">
               <div id="enableMixing" class="w-100 d-flex align-items-stretch">
                 <div class="flex-grow-1 d-flex justify-content-between align-items-stretch">
                   <div class="flex-center p-2">
@@ -275,15 +277,15 @@
                 </span>
               </div>
               <div id="mixingErr" class="flex-center p-2 text-danger border-top d-hide"></div>
-            </div>{{- /* END MIXING */ -}}
+            </section>{{- /* END MIXING */ -}}
           </div>
         </div>{{/* END WALLET DETAILS */}}
 
         {{- /* SECOND COLUMN */ -}}
-        <div id="secondColumn" class="position-relative col-24 col-xl-12 col-xxl-15 flex-stretch-column stylish-overflow-lg border-start">
+        <div id="secondColumn" class="position-relative col-24 col-xl-12 col-xxl-15 flex-stretch-column stylish-overflow-lg">
           <div class="column flex-stretch-column">
             {{- /* TRANSACTION HISTORY */ -}}
-            <div id="txHistoryBox" class="flex-stretch-column border-bottom">
+            <section id="txHistoryBox" class="flex-stretch-column">
               <h4 class="m-3">[[[asset_name tx_history]]]</h4>
               <div id="txHistoryTableContainer" class="flex-stretch-column px-3 pb-3">
                 <table id="txHistoryTable" class="row-border border rounded3 mb-3">
@@ -327,10 +329,10 @@
               <div class="flex-center p-2 mb-3 mx-3 fs18 border rounded3 d-hide" id="noTxHistory">
                 [[[no_tx_history]]]
               </div>
-            </div>
+            </section>
 
             {{/* MARKETS */}}
-            <div id="marketsOverviewBox" class="border-bottom">
+            <section id="marketsOverviewBox">
               <h4 class="m-3">[[[asset_name Markets]]]</h4>
               <div class="px-3">
                 <table class="row-border row-hover mb-3 border rounded3">
@@ -366,10 +368,10 @@
                   </tbody>
                 </table>
               </div>
-            </div>{{/* END MARKETS */}}
+            </section>{{/* END MARKETS */}}
 
             {{- /* RECENT ORDERS */ -}}
-            <div id="orderActivityBox" class="d-flex flex-column w-100 invisible pb-3 border-bottom">
+            <section id="orderActivityBox" class="d-flex flex-column w-100 invisible pb-3 border-bottom">
               <h4 class="m-3">[[[Recent asset_name Activity]]]</h4>
               <div id="orderActivity" class="flex-stretch-column px-3">
                 <table id="ordersTable" class="row-border border rounded3">
@@ -404,9 +406,9 @@
               <div class="flex-center p-2 mb-3 mx-3 b-3 fs18 border rounded3 d-hide" id="noActivity">
                 [[[No Recent Activity]]]
               </div>
-            </div>
+            </section>
 
-            <div id="txHistoryNotAvailable" class="grey p-3 text-center border-bottom">
+            <div id="txHistoryNotAvailable" class="grey p-3 text-center">
               Transaction history not available for this wallet
             </div>
           </div>

@@ -1453,6 +1453,11 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		return nil
 	}
 
+	traits := asset.WalletTrait(rand.Uint32())
+	if assetID == 42 {
+		traits |= asset.WalletTraitFundsMixer | asset.WalletTraitTicketBuyer
+	}
+
 	syncPct := atomic.LoadUint32(&w.syncProgress)
 	return &core.WalletState{
 		Symbol:       unbip(assetID),
@@ -1467,7 +1472,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		PeerCount:    10,
 		Synced:       syncPct == 100,
 		SyncProgress: float32(syncPct) / 100,
-		Traits:       asset.WalletTrait(rand.Uint32()),
+		Traits:       traits,
 	}
 }
 
@@ -2103,6 +2108,14 @@ type TMarketMaker struct {
 	mkts    map[string][]*libxc.Market
 }
 
+func tLotFees() *mm.LotFees {
+	return &mm.LotFees{
+		Swap:   randomBalance(0).Available / 100,
+		Redeem: randomBalance(0).Available / 100,
+		Refund: randomBalance(0).Available / 100,
+	}
+}
+
 func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.MarketReport, error) {
 	baseFiatRate := math.Pow10(3 - rand.Intn(6))
 	quoteFiatRate := math.Pow10(3 - rand.Intn(6))
@@ -2126,6 +2139,14 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 				BestBuy:  midGap * 98 / 100,
 				BestSell: midGap * 102 / 100,
 			},
+		},
+		BaseFees: &mm.LotFeeRange{
+			Max:       tLotFees(),
+			Estimated: tLotFees(),
+		},
+		QuoteFees: &mm.LotFeeRange{
+			Max:       tLotFees(),
+			Estimated: tLotFees(),
 		},
 	}, nil
 }
@@ -2258,8 +2279,8 @@ func TestServer(t *testing.T) {
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
-	initialize := false
-	register := false
+	initialize := true
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = false

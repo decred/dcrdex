@@ -10,9 +10,9 @@
 
 {{define "markets"}}
 {{template "top" .}}
-<div id="main" data-handler="markets" class="main m-0 flex-nowrap v1">
+<div id="main" data-handler="markets" class="main m-0 flex-nowrap">
   {{- /* MARKET LIST */ -}}
-  <div id="leftMarketDock" class="flex-column align-items-end v1 border-end default">
+  <section id="leftMarketDock" class="section flex-column align-items-end default">
     <div class="h-100 flex-stretch-column">
 
       <div class="d-flex align-items-stretch border-bottom" id="searchBoxV1">
@@ -26,12 +26,13 @@
       </div>
 
       <div class="flex-grow-1 overflow-y-hidden">
-        <div id="marketListV1" class="stylish-overflow hoveronly overflow-x-hidden">
-          <div id="marketTmplV1" class="market-tmpl-v1 d-flex align-items-stretch p-2 my-1 pointer hoverbg">
-            <div class="flex-center flex-column me-1">
+        <div id="marketListV1" class="stylish-overflow hoveronly overflow-x-hidden flex-stretch-column">
+
+          <div id="marketTmplV1" class="d-flex align-items-stretch py-2 px-3 border-bottom lh1 pointer hoverbg">
+            <div class="d-flex flex-column">
               <div class="d-flex align-items-start justify-content-start flex-grow-1">
-                <img class="market-tmpl-pair-img" data-tmpl="baseIcon">
-                <img class="market-tmpl-pair-img" data-tmpl="quoteIcon" class="ms-1">
+                <img data-tmpl="baseIcon" class="mini-icon">
+                <img data-tmpl="quoteIcon" class="mini-icon ms-1">
                 <span class="text-danger ico-disconnected d-hide ps-1" data-tmpl="disconnectedIco"></span>
               </div>
               <div class="fs10 demi text-start text-nowrap dexname" data-tmpl="host"></div>
@@ -47,21 +48,22 @@
               <span data-tmpl="change" class="fs15">-</span>
             </div>
           </div>
+
         </div>
       </div>
     </div>
-  </div>
+  </section>
 
-  <div id="marketReopener" class="flex-center pointer hoverbg border-bottom border-end">
+  <div id="marketReopener" class="flex-center pointer hoverbg border-bottom border-end border-top">
     <span class="ico-arrowright d-inline-block fs24">
   </div>
 
   {{- /* MAIN CONTENT */ -}}
-  <div class="flex-grow-1 position-relative v1">
+  <div class="flex-grow-1 position-relative">
     <div class="stylish-overflow h-100 w-100 overflow-x-hidden flex-stretch-column">
 
       {{- /* MARKET STATS - SMALL SCREENS */ -}}
-      <div id="marketStatsV1" class="market-stats-v1 align-items-center justify-content-center p-2 flex-wrap border-bottom">
+      <div id="marketStats" class="market-stats align-items-center justify-content-center p-2 flex-wrap border-bottom">
         <div class="flex-center p-2 pointer hoverbg" data-tmpl="marketSelect">
           <div class="flex-center">
             <img class="market-stats-pair-img" data-tmpl="baseIcon"><img class="market-stats-pair-img" data-tmpl="quoteIcon" class="ms-1">
@@ -113,16 +115,16 @@
         <div id="mainContent">
 
           {{- /* ORDER BOOK */ -}}
-          <div class="d-flex flex-column orderbook border-end border-start">
+          <section class="d-flex flex-column orderbook">
             <div class="stylish-overflow hoveronly overflow-x-hidden flex-grow-1 ordertable-wrap reversible">
 
               {{- /* SELL ORDER LIST */ -}}
-              <table class="ordertable row-hover">
+              <table class="compact ordertable row-hover">
                 <tbody id="sellRows"></tbody>
               </table>
             </div>
 
-            <div class="ordertable-header flex-center fs15 border-top">
+            <div class="border-top border-bottom p-2 flex-center fs15">
               <span class="flex-grow-1">Order Book</span>
               <span class="flex-center">
                 <span id="obUp" class="ico-arrowup buycolor fs11"></span>
@@ -134,66 +136,69 @@
             <div class="stylish-overflow hoveronly overflow-x-hidden flex-grow-1 ordertable-wrap">
 
               {{- /* BUY ORDER LIST */ -}}
-              <table class="ordertable buys">
+              <table class="compact row-hover ordertable buys">
                 <tbody id="buyRows">
                   {{- /* This row is used by the app as a template. */ -}}
-                  <tr id="rowTemplate">
+                  <tr id="orderRowTmpl" class="px-2">
                     <td class="ps-2">
                       <div class="d-flex justify-content-start align-items-center">
                         <div data-tmpl="qty">-</div>
-                        <small class="numorders text-center ms-2" data-tmpl="numorders">-</small>
+                        <small class="numorders lh1 rounded3 text-center ms-2" data-tmpl="numOrders">-</small>
                       </div>
                     </td>
-                    <td class="text-end pe-2" data-tmpl="rate">-</td>
-                    <td class="text-end pe-3" data-tmpl="epoch"></td>
+                    <td class="text-end text-nowrap ps-2">
+                      <span class="text-end ico-check fs13 px-2 d-hide" data-tmpl="epoch"></span>
+                      <span data-tmpl="rate">-</span>
+                    </td>
                   </tr>
                 </tbody>
               </table> {{- /* END BUY ORDER LIST */ -}}
             </div>
-          </div> {{- /* END ORDER BOOK */ -}}
+          </section> {{- /* END ORDER BOOK */ -}}
 
           {{- /* CHARTS */ -}}
-          <div class="flex-grow-1 position-relative">
+          <div class="d-flex flex-grow-1 position-relative w-100 w-lg-auto">
             <div class="fill-abs flex-stretch-column">
-              <div id="candlesChart" class="market-chart">
-                <div id="durBttnBox"><button class="candle-dur-bttn border rounded3" id="durBttnTemplate"></button></div>
-              </div>
-
-              <div class="chart-legend grey">
-                <div id="chartErrMsg" class="p-2 flex-center text-danger w-100"></div>
-                <div class="flex-grow-1">
-                  <div id="hoverData" class="d-flex align-items-center d-hide">
-                    <span class="ico-target fs11 me-1"></span>
-                    <span id="depthHoverData">
-                      [[[price]]]: <span id="hoverPrice"></span>,
-                      [[[volume]]]: <span id="hoverVolume"></span>
-                    </span>
-                    <span class="d-hide" id="candleHoverData">
-                      S: <span id="candleStart"></span>,
-                      E: <span id="candleEnd"></span>,
-                      L: <span id="candleLow"></span>,
-                      H: <span id="candleHigh"></span>,
-                      V: <span id="candleVol"></span>
-                    </span>
+              <section class="flex-grow-1 flex-stretch-column position-relative">
+                <div id="candlesChart" class="market-chart">
+                  <div id="durBttnBox"><button class="candle-dur-bttn border rounded3" id="durBttnTemplate"></button></div>
+                </div>
+                <div id="chartErrMsg" class="position-absolute w-100 d-inline-flex text-danger p-2 "></div>
+                <div id="candlesLegend" class="grey p-1 d-hide border-bottom border-start">
+                  <div class="flex-grow-1">
+                    <div class="d-flex align-items-center">
+                      <span class="ico-target fs11 me-1"></span>
+                      <span>
+                        S: <span id="candleStart"></span>,
+                        E: <span id="candleEnd"></span>,
+                        L: <span id="candleLow"></span>,
+                        H: <span id="candleHigh"></span>,
+                        V: <span id="candleVol"></span>
+                      </span>
+                    </div>
                   </div>
                 </div>
-
-                <div id="depthSummary" class="d-flex align-items-center d-hide">
-                  <span>[[[sells]]]: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
-                  |
-                  <span class="me-2">[[[buys]]]: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+              </section>
+              <section class="flex-grow-1 flex-stretch-column position-relative">
+                <div id="depthLegend" class="d-inline-flex p-1 align-items-center grey border-bottom border-start d-hide">
+                  <span>
+                    [[[price]]]: <span id="hoverPrice"></span>,
+                    [[[volume]]]: <span id="hoverVolume"></span>
+                  </span>
+                  <span class="d-hide">[[[sells]]]: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
+                  <span class="d-hide">|</span>
+                  <span class="me-2 d-hide">[[[buys]]]: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
                 </div>
-              </div>
-
-              <div id="depthChart" class="market-chart">
-                <div id="epochLine" class="d-hide"><div class="epoch-line"></div> [[[epoch]]]</div>
-              </div>
+                <div id="depthChart" class="market-chart">
+                  <div id="epochLine"><div class="epoch-line"></div> [[[epoch]]]</div>
+                </div>
+              </section>
             </div>
           </div>
 
           {{- /* ORDER FORM */ -}}
-          <div class="order-panel pb-3 border position-relative">
-            <div id="orderScroller" class="flex-stretch-column">
+          <section class="order-panel pb-3 position-relative">
+            <div id="orderScroller" class="flex-stretch-column w-100">
 
               {{- /* TOKEN APPROVAL */ -}}
               <div class="fs15 pt-1 pb-3 text-center border-bottom d-hide" id="tokenApproval">
@@ -546,7 +551,7 @@
               {{- /* RECENT MATCHES */ -}}
               <div id=recentMatchesBox  class="flex-stretch-column px-3 pb-4 border-top">
                 <div class="text-center fs20 my-3">[[[Recent Matches]]]</div>
-                <table id="recentMatchesTable" class="ordertable">
+                <table id="recentMatchesTable" class="row-border row-hover compact">
                   <thead>
                     <tr class="pointer">
                       <th data-ordercol="age" class="text-nowrap">[[[Age]]] <span class="ico-arrowdown"></span></th>
@@ -565,7 +570,7 @@
               </div>{{- /* END RECENT MATCHES */ -}}
 
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </div>

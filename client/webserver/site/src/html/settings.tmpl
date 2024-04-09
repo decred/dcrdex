@@ -2,30 +2,56 @@
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{$authed := .UserInfo.Authed}}
-<div id="main" data-handler="settings" class="py-5 overflow-y-auto">
-  <div class="mw-425 flex-stretch-column mx-auto">
-    <h1 class="text-center"><span class="ico-settings"></span></h1>
-    <div class="settings">
-      <div class="form-check ps-4 py-3 border-top border-bottom">
+<div id="main" data-handler="settings" class="overflow-y-auto">
+  <section class="mw-425 flex-stretch-column mx-auto">
+    <h1 class="text-center px-3 py-2"><span class="ico-settings"></span></h1>
+    <div class="settings px-3">
+      <div class="form-check ps-4 pt-2 border-top">
         <input class="form-check-input" type="checkbox" value="" id="darkMode">
         <label class="form-check-label" for="darkMode">
           [[[Dark Mode]]]
         </label>
       </div>
-      <div class="py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
-      <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
+      <div id="fiatRateSources" class="pt-2 {{if not $authed}}d-hide{{end}}">
+        <div class="mb-1" data-tooltip="[[[fiat_exchange_rate_msg]]]">
+          [[[fiat_exchange_rate_sources]]]:
+          <span class="ico-info"></span>
+        </div>
+        {{range $source, $enabled := .FiatRateSources}}
+        <div class="form-check ms-3">
+          <input class="form-check-input" type="checkbox" value="{{$source}}" id="{{$source}}" {{if $enabled}} checked {{end}}>
+          <label class="form-check-label" for="{{$source}}">{{$source}}</label>
+        </div>
+        {{end}}
       </div>
-      <div id="fiatRateSources"  class="py-3 border-bottom {{if not $authed}}d-hide{{end}}">
-      <div class="mb-1" data-tooltip="[[[fiat_exchange_rate_msg]]]">
-        [[[fiat_exchange_rate_sources]]]:
-        <span class="ico-info"></span>
+      <div class="pt-2 {{if not .UserInfo.Authed}}d-hide{{end}}">
+        <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
       </div>
-      {{range $source, $enabled := .FiatRateSources}}
-      <div class="form-check ms-3">
-        <input class="form-check-input" type="checkbox" value="{{$source}}" id="{{$source}}" {{if $enabled}} checked {{end}}>
-        <label class="form-check-label" for="{{$source}}">{{$source}}</label>
+      <div class="form-check ps-4 pt-2">
+        <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
+        <label class="form-check-label" for="showPokes">
+          [[[Show pop-up notifications]]]
+        </label>
       </div>
-      {{end}}
+      <div class="py-2 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
+        <form id="browserNotificationsForm">
+          <div class="form-check">
+            <label class="form-check-label">
+              <input class="form-check-input" name="browserNtfnEnabled" type="checkbox" value="1" id="browserNtfnEnabled">
+              [[[enable_browser_ntfn]]]
+              <span class="ico-info" data-tooltip="[[[enable_browser_ntfn_info]]]"></span>
+            </label>
+          </div>
+          <div id="browserNtfnBlockedMsg" class="d-hide">[[[browser_ntfn_blocked]]]</div>
+          <div id="browserNtfnCheckboxContainer" class="d-hide">
+            <div class="form-check ms-3" id="browserNtfnCheckboxTemplate">
+              <label class="form-check-label" >
+              <span data-tmpl="label"></span>
+                <input class="form-check-input" type="checkbox" value="1" data-tmpl="checkbox">
+              </label>
+            </div>
+          </div>
+        </form>
       </div>
       <div class="py-3 border-bottom {{if not $authed}} d-hide{{end}}">
         <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
@@ -47,39 +73,13 @@
           <button id="changeAppPW" class="my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
           <button id="resetAppPW" class="my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
       </div>
-      <div class="form-check ps-4 py-3 border-bottom">
-        <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
-        <label class="form-check-label" for="showPokes">
-          [[[Show pop-up notifications]]]
-        </label>
-      </div>
-      <div class="py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
-        <form id="browserNotificationsForm">
-          <div class="form-check">
-            <label class="form-check-label">
-              <input class="form-check-input" name="browserNtfnEnabled" type="checkbox" value="1" id="browserNtfnEnabled">
-              [[[enable_browser_ntfn]]]
-              <span class="ico-info" data-tooltip="[[[enable_browser_ntfn_info]]]"></span>
-            </label>
-          </div>
-          <div id="browserNtfnBlockedMsg" class="d-hide">[[[browser_ntfn_blocked]]]</div>
-          <div id="browserNtfnCheckboxContainer" class="d-hide">
-            <div class="form-check ms-3" id="browserNtfnCheckboxTemplate">
-              <label class="form-check-label" >
-              <span data-tmpl="label"></span>
-                <input class="form-check-input" type="checkbox" value="1" data-tmpl="checkbox">
-              </label>
-            </div>
-          </div>
-        </form>
-      </div>
       <div class="mb-3 py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
         <p class="grey">[[[seed_implore_msg]]]</p>
         <button id="exportSeed" class="fs15">[[[View Application Seed]]]</button>
       </div>
       <p class="grey">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
     </div>
-  </div>
+  </section>
 
   {{- /* POP-UP FORMS */ -}}
   <div id="forms" class="d-hide">

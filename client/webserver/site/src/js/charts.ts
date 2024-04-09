@@ -2,7 +2,7 @@ import Doc, { Animation } from './doc'
 import { RateEncodingFactor } from './orderutil'
 import OrderBook from './orderbook'
 import State from './state'
-import { UnitInfo, Market, Candle, CandlesPayload } from './registry'
+import { UnitInfo, Market, Candle, CandlesPayload, app } from './registry'
 
 const bind = Doc.bind
 const PIPI = 2 * Math.PI
@@ -85,6 +85,7 @@ interface DepthMark extends DepthMarker {
 }
 
 interface Theme {
+  body: string
   axisLabel: string
   gridBorder: string
   gridLines: string
@@ -102,6 +103,7 @@ interface Theme {
 }
 
 const darkTheme: Theme = {
+  body: '#0b2031',
   axisLabel: '#b1b1b1',
   gridBorder: '#383f4b',
   gridLines: '#383f4b',
@@ -119,6 +121,7 @@ const darkTheme: Theme = {
 }
 
 const lightTheme: Theme = {
+  body: '#f4f4f4',
   axisLabel: '#1b1b1b',
   gridBorder: '#ddd',
   gridLines: '#ddd',
@@ -238,10 +241,9 @@ export class Chart {
     this.canvas.height = this.parent.clientHeight
     const xLblHeight = 30
     const yGuess = 40 // y label width guess. Will be adjusted when drawn.
-    const xPaddingRight = 20
-    const plotExtents = new Extents(yGuess, this.canvas.width - xPaddingRight, 10, this.canvas.height - xLblHeight)
-    const xLblExtents = new Extents(yGuess, this.canvas.width - xPaddingRight, this.canvas.height - xLblHeight, this.canvas.height)
-    const yLblExtents = new Extents(0, yGuess, 10, this.canvas.height - xLblHeight)
+    const plotExtents = new Extents(0, this.canvas.width, 0, this.canvas.height - xLblHeight)
+    const xLblExtents = new Extents(0, this.canvas.width, this.canvas.height - xLblHeight, this.canvas.height)
+    const yLblExtents = new Extents(0, yGuess, 0, this.canvas.height - xLblHeight)
     this.plotRegion = new Region(this.ctx, plotExtents)
     this.xRegion = new Region(this.ctx, xLblExtents)
     this.yRegion = new Region(this.ctx, yLblExtents)
@@ -286,8 +288,13 @@ export class Chart {
       const centerX = (maxX + minX) / 2
       let lastX = minX
       let unitCenter = centerX
+      const [leftEdge, rightEdge] = [tools.x(minX), tools.x(maxX)]
+      const centerY = tools.y(0.5)
       labels.lbls.forEach(lbl => {
-        ctx.fillText(lbl.txt, tools.x(lbl.val), tools.y(0.5))
+        const m = ctx.measureText(lbl.txt)
+        const x = tools.x(lbl.val)
+        if (x - m.width / 2 < leftEdge || x + m.width / 2 > rightEdge) return
+        ctx.fillText(lbl.txt, x, centerY)
         if (centerX >= lastX && centerX < lbl.val) {
           unitCenter = (lastX + lbl.val) / 2
         }
@@ -298,9 +305,13 @@ export class Chart {
         ctx.fillText(unitLines[0], tools.x(unitCenter), tools.y(0.63))
         ctx.fillText(unitLines[1], tools.x(unitCenter), tools.y(0.23))
       } else if (unitLines.length === 1) {
-        ctx.fillText(unitLines[0], tools.x(unitCenter), tools.y(0.5))
+        ctx.fillText(unitLines[0], tools.x(unitCenter), centerY)
       }
     }, true)
+  }
+
+  plotXGrid (labels: LabelSet, minX: number, maxX: number) {
+    const extents = new Extents(minX, maxX, 0, 1)
     this.plotRegion.plot(extents, (ctx: CanvasRenderingContext2D, tools: Translator) => {
       ctx.lineWidth = 1
       ctx.strokeStyle = this.theme.gridLines
@@ -314,22 +325,46 @@ export class Chart {
    * plotYLabels applies the y labels based on the provided plot region, and
    * draws the grid.
    */
-  plotYLabels (region: Region, labels: LabelSet, minY: number, maxY: number, unit: string) {
+  plotYLabels (labels: LabelSet, minY: number, maxY: number, unit: string) {
     const extents = new Extents(0, 1, minY, maxY)
+
+    const fillRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
+      ctx.save()
+      ctx.fillStyle = this.theme.body
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, h, r)
+      ctx.fill()
+      ctx.restore()
+    }
+
     this.yRegion.plot(extents, (ctx: CanvasRenderingContext2D, tools: Translator) => {
       this.applyLabelStyle()
+      this.ctx.textAlign = 'left'
       const centerY = maxY / 2
       let lastY = 0
       let unitCenter = centerY
+      const x = tools.x(0)
+      const [xPad, yPad] = [3, 3]
       labels.lbls.forEach(lbl => {
-        ctx.fillText(lbl.txt, tools.x(0.5), tools.y(lbl.val))
+        const y = tools.y(lbl.val)
+        if (y < tools.y(maxY) + yPad + 7 || y > tools.y(minY) - yPad - 7) return
+        const m = ctx.measureText(lbl.txt)
+        fillRect(ctx, x, y - 7 - yPad, m.width + xPad * 2, 14 + yPad * 3, 3)
+        ctx.fillText(lbl.txt, x + xPad, y + 2)
         if (centerY >= lastY && centerY < lbl.val) {
           unitCenter = (lastY + lbl.val) / 2
         }
         lastY = lbl.val
       })
-      ctx.fillText(unit, tools.x(0.5), tools.y(unitCenter))
+      const m = ctx.measureText(unit)
+      const y = tools.y(unitCenter)
+      fillRect(ctx, x, y - yPad - 7, m.width + xPad * 2, 14 + yPad * 2, 3)
+      ctx.fillText(unit, x + xPad, tools.y(unitCenter))
     }, true)
+  }
+
+  plotYGrid (region: Region, labels: LabelSet, minY: number, maxY: number) {
+    const extents = new Extents(0, 1, minY, maxY)
     region.plot(extents, (ctx: CanvasRenderingContext2D, tools: Translator) => {
       ctx.lineWidth = 1
       ctx.strokeStyle = this.theme.gridLines
@@ -343,7 +378,7 @@ export class Chart {
    * doYLabels generates and applies the y-axis labels, based upon the
    * provided plot region.
    */
-  doYLabels (region: Region, step: number, unit: string, valFmt?: (v: number) => string) {
+  makeYLabels (region: Region, step: number, unit: string, valFmt?: (v: number) => string): LabelSet {
     this.applyLabelStyle()
     const yLabels = makeLabels(this.ctx, region.height(), this.dataExtents.y.min,
       this.dataExtents.y.max, 50, step, unit, valFmt)
@@ -353,26 +388,7 @@ export class Chart {
     this.yRegion.extents.x.max = yAxisWidth
     this.yRegion.extents.y.max = region.extents.y.max
 
-    this.plotRegion.extents.x.min = yAxisWidth
-    this.xRegion.extents.x.min = yAxisWidth
-    // Print the y labels.
-    this.plotYLabels(region, yLabels, this.dataExtents.y.min, this.dataExtents.y.max, unit)
     return yLabels
-  }
-
-  // drawFrame draws an outline around the plotRegion.
-  drawFrame () {
-    this.plotRegion.plot(new Extents(0, 1, 0, 1), (ctx: CanvasRenderingContext2D, tools: Translator) => {
-      ctx.lineWidth = 1
-      ctx.strokeStyle = this.theme.gridBorder
-      ctx.beginPath()
-      ctx.moveTo(tools.x(0), tools.y(0))
-      ctx.lineTo(tools.x(0), tools.y(1))
-      ctx.lineTo(tools.x(1), tools.y(1))
-      ctx.lineTo(tools.x(1), tools.y(0))
-      ctx.lineTo(tools.x(0), tools.y(0))
-      ctx.stroke()
-    })
   }
 
   line (x0: number, y0: number, x1: number, y1: number, skipStroke?: boolean) {
@@ -579,25 +595,21 @@ export class DepthChart extends Chart {
 
     // Add ~30px padding to the top of the chart.
     const h = this.xRegion.extents.y.min
-    const growthFactor = (h + 30) / h
+    const growthFactor = (h + 40) / h
     const maxY = (epochSellSum && epochBuySum ? Math.max(epochBuySum, epochSellSum) : epochSellSum || epochBuySum || 1) * growthFactor
 
     const dataExtents = new Extents(low, high, 0, maxY)
     this.dataExtents = dataExtents
 
-    this.doYLabels(this.plotRegion, this.lotSize, this.baseUnit)
-
-    // Print the x labels
-    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
-      dataExtents.x.max, 100, this.conventionalRateStep, '')
-
-    this.plotXLabels(xLabels, low, high, [`${this.quoteUnit}/`, this.baseUnit])
-
     // A function to be run at the end if there is legend data to display.
     let mouseData: MouseReport | null = null
 
     // Draw the grid.
-    this.drawFrame()
+    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100, this.conventionalRateStep, '')
+    this.plotXGrid(xLabels, low, high)
+    const yLabels = this.makeYLabels(this.plotRegion, this.lotSize, this.baseUnit)
+    this.plotYGrid(this.plotRegion, yLabels, this.dataExtents.y.min, this.dataExtents.y.max)
+
     this.plotRegion.plot(dataExtents, (ctx, tools) => {
       ctx.lineWidth = 1
       // first, a square around the plot area.
@@ -679,9 +691,9 @@ export class DepthChart extends Chart {
         ctx.restore()
       }
 
-      for (const line of this.lines || []) {
-        drawLine(line.rate, line.color)
-      }
+      // for (const line of this.lines || []) {
+      //   drawLine(line.rate, line.color)
+      // }
 
       const tolerance = (high - low) * 0.005
       const hoverMarkers = []
@@ -760,6 +772,9 @@ export class DepthChart extends Chart {
     ctx.fillStyle = this.theme.buyFill
     ctx.strokeStyle = this.theme.buyLine
     this.drawDepth(buyDepth)
+
+    this.plotYLabels(yLabels, this.dataExtents.y.min, this.dataExtents.y.max, this.baseUnit)
+    this.plotXLabels(xLabels, low, high, [`${this.quoteUnit}/`, this.baseUnit])
 
     // Display the dot at the intersection of the mouse hover line and the depth
     // line. This should be drawn after the depths.
@@ -913,9 +928,14 @@ export class CandleChart extends Chart {
       if (c.matchVolume > highVol) highVol = c.matchVolume
     }
 
+    high += (high - low) * 0.1 // a little padding
+    const xStart = start(first)
+    let xEnd = end(last)
+    xEnd += (xEnd - xStart) * 0.05 // a little padding
+
     // Calculate data extents and store them. They are used to apply labels.
     const rateStep = this.market.ratestep
-    const dataExtents = new Extents(start(first), end(last), low, high)
+    const dataExtents = new Extents(xStart, xEnd, low, high)
     if (low === high) {
       // If there is no price movement at all in the window, show a little more
       // top and bottom so things render nicely.
@@ -924,17 +944,46 @@ export class CandleChart extends Chart {
     }
     this.dataExtents = dataExtents
 
-    // Apply labels.
+    // Draw the grid
     const rFactor = this.rateConversionFactor
-    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => Doc.formatFourSigFigs(v / rFactor))
-    this.candleRegion.extents.x.min = this.yRegion.extents.x.max
-    this.volumeRegion.extents.x.min = this.yRegion.extents.x.max
-
+    const baseUnit = app().assets[this.market.baseid]?.unitInfo.conventional.unit || this.market.basesymbol.toUpperCase()
     const xLabels = makeCandleTimeLabels(candles, candleWidth, this.plotRegion.width(), 100)
+    this.plotXGrid(xLabels, xStart, xEnd)
+    const yLabels = this.makeYLabels(this.candleRegion, rateStep, baseUnit, v => Doc.formatFourSigFigs(v / rFactor))
+    this.plotYGrid(this.candleRegion, yLabels, this.dataExtents.y.min, this.dataExtents.y.max)
 
-    this.plotXLabels(xLabels, start(first), end(last), [])
+    // Draw the volume bars.
+    const volDataExtents = new Extents(xStart, xEnd, 0, highVol)
+    this.volumeRegion.plot(volDataExtents, (ctx, tools) => {
+      ctx.fillStyle = this.theme.gridBorder
+      for (const c of candles) {
+        ctx.fillRect(tools.x(paddedStart(c)), tools.y(0), tools.w(paddedWidth), tools.h(c.matchVolume))
+      }
+    })
 
-    this.drawFrame()
+    // Draw the candles.
+    this.candleRegion.plot(dataExtents, (ctx, tools) => {
+      ctx.lineWidth = 1
+      for (const c of candles) {
+        const desc = c.startRate > c.endRate
+        const [x, y, w, h] = [tools.x(paddedStart(c)), tools.y(c.startRate), tools.w(paddedWidth), tools.h(c.endRate - c.startRate)]
+        const [high, low, cx] = [tools.y(c.highRate), tools.y(c.lowRate), w / 2 + x]
+        ctx.strokeStyle = desc ? this.theme.sellLine : this.theme.buyLine
+        ctx.fillStyle = desc ? this.theme.sellFill : this.theme.buyFill
+
+        ctx.beginPath()
+        ctx.moveTo(cx, high)
+        ctx.lineTo(cx, low)
+        ctx.stroke()
+
+        ctx.fillRect(x, y, w, h)
+        ctx.strokeRect(x, y, w, h)
+      }
+    })
+
+    // Apply labels.
+    this.plotXLabels(xLabels, xStart, xEnd, [])
+    this.plotYLabels(yLabels, this.dataExtents.y.min, this.dataExtents.y.max, baseUnit)
 
     // Highlight the candle if the user mouse is over the canvas.
     let mouseCandle: Candle | null = null
@@ -976,35 +1025,6 @@ export class CandleChart extends Chart {
         })
       }
     }
-
-    // Draw the volume bars.
-    const volDataExtents = new Extents(start(first), end(last), 0, highVol)
-    this.volumeRegion.plot(volDataExtents, (ctx, tools) => {
-      ctx.fillStyle = this.theme.gridBorder
-      for (const c of candles) {
-        ctx.fillRect(tools.x(paddedStart(c)), tools.y(0), tools.w(paddedWidth), tools.h(c.matchVolume))
-      }
-    })
-
-    // Draw the candles.
-    this.candleRegion.plot(dataExtents, (ctx, tools) => {
-      ctx.lineWidth = 1
-      for (const c of candles) {
-        const desc = c.startRate > c.endRate
-        const [x, y, w, h] = [tools.x(paddedStart(c)), tools.y(c.startRate), tools.w(paddedWidth), tools.h(c.endRate - c.startRate)]
-        const [high, low, cx] = [tools.y(c.highRate), tools.y(c.lowRate), w / 2 + x]
-        ctx.strokeStyle = desc ? this.theme.sellLine : this.theme.buyLine
-        ctx.fillStyle = desc ? this.theme.sellFill : this.theme.buyFill
-
-        ctx.beginPath()
-        ctx.moveTo(cx, high)
-        ctx.lineTo(cx, low)
-        ctx.stroke()
-
-        ctx.fillRect(x, y, w, h)
-        ctx.strokeRect(x, y, w, h)
-      }
-    })
 
     // Report the mouse candle.
     this.reporters.mouse(mouseCandle)
@@ -1111,7 +1131,7 @@ export class Wave extends Chart {
     const { region, msgRegion, canvas: { width: w, height: h }, opts: { backgroundColor: bg, message: msg }, colorShift, ctx } = this
 
     if (bg) {
-      if (bg === true) ctx.fillStyle = State.isDark() ? '#122739' : '#f0f0f0' // $dark_panel or $light_panel
+      if (bg === true) ctx.fillStyle = State.isDark() ? '#122739' : '#333'
       else ctx.fillStyle = bg
       ctx.fillRect(0, 0, w, h)
     }
@@ -1431,7 +1451,7 @@ function dot (ctx: CanvasRenderingContext2D, x: number, y: number, color: string
 }
 
 /* clamp returns v if min <= v <= max, else min or max. */
-function clamp (v: number, min: number, max: number): number {
+export function clamp (v: number, min: number, max: number): number {
   if (v < min) return min
   if (v > max) return max
   return v

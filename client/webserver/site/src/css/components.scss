@@ -119,7 +119,7 @@ table {
 
   &.row-hover {
     tr:hover {
-      background-color: var(--body-bg-tertiary);
+      background-color: var(--tertiary-bg);
     }
   }
 
@@ -249,13 +249,9 @@ input:invalid {
   max-width: 300px;
   font-size: 15px;
   border-radius: 4px;
-  background-color: var(--body-bg);
+  background-color: var(--section-bg);
 
   @include border;
-}
-
-.panel {
-  background-color: var(--body-bg-secondary);
 }
 
 .on-indicator {
@@ -296,7 +292,7 @@ div[data-handler=wallets] {
 
     @include border;
 
-    background-color: var(--body-bg-secondary);
+    background-color: var(--form-bg);
     box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
   }
 }
