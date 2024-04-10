@@ -281,7 +281,7 @@
         <div data-tmpl="fiatBox" class="flex-center lh1">
           <span>~</span>
           <span data-tmpl="fiatBondAmount" class="fs18"></span>
-          <span class="grey ms-1 fs16">[[[USD]]]</span>
+          <span class="grey ms-1 fs16">USD</span>
         </div>
       </div>
     </div>
@@ -349,6 +349,38 @@
     </tbody>
   </table>
   <button type="button" data-tmpl="submitTradingTier" class="w-100 large go mt-3">[[[Submit]]]</button>
+  <div data-tmpl="currentBondBox" class="mt-3">
+    <table class="cell-border lh1">
+      <thead>
+        <tr>
+          <th colspan="2" class="text-center">Current Bond Lock</th>
+        </tr>
+      </thead>
+      <tbody data-tmpl="currentBonds">
+        <tr data-tmpl="currentBondTmpl">
+          <td class="no-stretch">
+            <div class="flex-center">
+              <img data-tmpl="icon" class="mini-icon me-2">
+              <span data-tmpl="name" class="fs20"></span>
+            </div>
+          </td>
+          <td>
+            <div class="flex-stretch-column">
+              <div class="d-flex align-items-center justify-content-end lh1">
+                <span data-tmpl="amt" class="fs18 me-1"></span>
+                <span data-tmpl="ticker" class="fs16 grey"></span>
+              </div>
+              <div data-tmpl="fiatBox" class="d-flex align-items-center justify-content-end lh1">
+                <span>~</span>
+                <span data-tmpl="fiatAmt" class="fs16 me-1"></span>
+                <span class="fs14 grey">USD</span>
+              </div>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
   <div class="text-center fs22 mt-3">Tier <span data-tier></span> Trading Limits</div>
   <table class="cell-border">
     <thead>

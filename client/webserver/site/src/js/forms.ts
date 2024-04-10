@@ -945,7 +945,7 @@ export class FeeAssetSelectionForm {
     this.form = form
     this.success = success
     const page = this.page = Doc.parseTemplate(form)
-    Doc.cleanTemplates(page.bondAssetTmpl, page.marketTmpl)
+    Doc.cleanTemplates(page.currentBondTmpl, page.bondAssetTmpl, page.marketTmpl)
 
     Doc.bind(page.tradingTierInput, 'input', () => { this.setTier() })
     Doc.bind(page.tradingTierInput, 'keyup', (e: KeyboardEvent) => { if (e.key === 'Enter') this.acceptTier() })
@@ -1125,6 +1125,34 @@ export class FeeAssetSelectionForm {
     const fiatRate = app().fiatRatesMap[assetID]
     if (fiatRate) page.fiatLockDisplay.textContent = Doc.formatFourSigFigs(bondLock / conversionFactor * fiatRate)
     for (const m of Object.values(this.marketRows)) m.setTier(tier)
+    const currentBondAmts: Record<number, number> = {}
+    for (const [assetIDStr, { wallet }] of Object.entries(app().assets)) {
+      if (!wallet) continue
+      const { balance: { bondlocked, bondReserves } } = wallet
+      const bonded = bondlocked + bondReserves
+      if (bonded > 0) currentBondAmts[parseInt(assetIDStr)] = bonded
+    }
+    const haveLock = Object.keys(currentBondAmts).length > 0
+    Doc.setVis(haveLock, page.currentBondBox)
+    if (haveLock) {
+      Doc.empty(page.currentBonds)
+      for (const [assetIDStr, bondLocked] of Object.entries(currentBondAmts)) {
+        const assetID = parseInt(assetIDStr)
+        const { unitInfo: ui, symbol, name } = app().assets[assetID]
+        const { conventional: { conversionFactor, unit } } = ui
+        const tr = page.currentBondTmpl.cloneNode(true) as PageElement
+        page.currentBonds.appendChild(tr)
+        const tmpl = Doc.parseTemplate(tr)
+        tmpl.icon.src = Doc.logoPath(symbol)
+        tmpl.name.textContent = name
+        tmpl.amt.textContent = Doc.formatCoinValue(bondLocked, ui)
+        tmpl.ticker.textContent = unit
+        tmpl.name.textContent = name
+        const fiatRate = app().fiatRatesMap[assetID]
+        Doc.setVis(tmpl.fiatBox)
+        if (fiatRate) tmpl.fiatAmt.textContent = Doc.formatFourSigFigs(bondLocked / conversionFactor * fiatRate)
+      }
+    }
     Doc.setVis(fiatRate, page.fiatLockBox)
   }
 

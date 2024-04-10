@@ -2263,8 +2263,7 @@ func (c *Core) storeAndSendWalletBalance(wallet *xcWallet, walletBal *WalletBala
 // Only applies to trades where the specified assetID is the fromAssetID.
 func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked, bondLocked uint64) {
 	for _, dc := range c.dexConnections() {
-		tot, _ := dc.bondTotal(assetID)
-		bondLocked += tot
+		bondLocked, _ = dc.bondTotal(assetID)
 		for _, tracker := range dc.trackedTrades() {
 			if tracker.fromAssetID == assetID {
 				tracker.mtx.RLock()
