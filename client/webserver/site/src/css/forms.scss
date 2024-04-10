@@ -39,54 +39,7 @@ select {
 }
 
 #regAssetForm {
-  div.reg-asset {
-    .fader {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 25px;
-      pointer-events: none;
-      background-image:
-        linear-gradient(
-          to bottom,
-          #e0e0e000,
-          #f0f0f0
-          90%
-        );
-    }
-
-    &:not(.nohover):hover {
-      background-color: #7773;
-
-      .fader {
-        background-image:
-          linear-gradient(
-            to bottom,
-            #c7c7c700,
-            #c7c7c7
-            90%
-          );
-      }
-    }
-  }
-
-  img.reg-market-logo {
-    width: 14px;
-    height: 14px;
-    margin-right: 5px;
-  }
-
-  div.reg-assets-markets-wrap {
-    position: relative;
-
-    &:hover > .fader {
-      display: none;
-    }
-  }
-
-
-  input[data-tmpl=regAssetTier] {
+  input[data-tmpl=tradingTierInput] {
     width: 3em;
   }
 
@@ -521,6 +474,14 @@ div[data-handler=init] {
 
   & > div:not(.repeatable) {
     width: 47%;
+  }
+}
+
+.hoveropaque {
+  opacity: 0.7;
+
+  &:hover {
+    opacity: 1;
   }
 }
 
