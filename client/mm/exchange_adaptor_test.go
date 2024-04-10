@@ -50,18 +50,25 @@ func (db *tEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64,
 	return nil, nil
 }
 
+func tFees(swap, redeem, refund, funding uint64) *orderFees {
+	lotFees := &LotFees{
+		Swap:   swap,
+		Redeem: redeem,
+		Refund: refund,
+	}
+	return &orderFees{
+		LotFeeRange: &LotFeeRange{
+			Max:       lotFees,
+			Estimated: lotFees,
+		},
+		funding: funding,
+	}
+}
+
 func TestSufficientBalanceForDEXTrade(t *testing.T) {
 	lotSize := uint64(1e8)
-	sellFees := &orderFees{
-		swap:       1e5,
-		redemption: 2e5,
-		refund:     3e5,
-	}
-	buyFees := &orderFees{
-		swap:       5e5,
-		redemption: 6e5,
-		refund:     7e5,
-	}
+	sellFees := tFees(1e5, 2e5, 3e5, 0)
+	buyFees := tFees(5e5, 6e5, 7e5, 0)
 
 	fundingFees := uint64(8e5)
 
@@ -85,7 +92,7 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 			rate:    1e7,
 			qty:     3 * lotSize,
 			balances: map[uint32]uint64{
-				42: 3*lotSize + 3*sellFees.swap + fundingFees,
+				42: 3*lotSize + 3*sellFees.Max.Swap + fundingFees,
 				0:  0,
 			},
 		},
@@ -98,7 +105,7 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 			sell:    false,
 			balances: map[uint32]uint64{
 				42: 0,
-				0:  b2q(2e7, 2*lotSize) + 2*buyFees.swap + fundingFees,
+				0:  b2q(2e7, 2*lotSize) + 2*buyFees.Max.Swap + fundingFees,
 			},
 		},
 		{
@@ -115,8 +122,8 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 			},
 			balances: map[uint32]uint64{
 				966001: 3 * lotSize,
-				966:    3*sellFees.swap + 3*sellFees.refund + fundingFees,
-				60:     3 * sellFees.redemption,
+				966:    3*sellFees.Max.Swap + 3*sellFees.Max.Refund + fundingFees,
+				60:     3 * sellFees.Max.Redeem,
 			},
 		},
 		{
@@ -132,8 +139,8 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 				60:     true,
 			},
 			balances: map[uint32]uint64{
-				966: 3 * buyFees.redemption,
-				60:  b2q(2e7, 3*lotSize) + 3*buyFees.swap + 3*buyFees.refund + fundingFees,
+				966: 3 * buyFees.Max.Redeem,
+				60:  b2q(2e7, 3*lotSize) + 3*buyFees.Max.Swap + 3*buyFees.Max.Refund + fundingFees,
 			},
 		},
 	}
@@ -699,18 +706,8 @@ func TestMultiTrade(t *testing.T) {
 	const rateStep uint64 = 1e3
 	const currEpoch = 100
 	const driftTolerance = 0.001
-	sellFees := &orderFees{
-		swap:       1e5,
-		redemption: 2e5,
-		refund:     3e5,
-		funding:    4e5,
-	}
-	buyFees := &orderFees{
-		swap:       5e5,
-		redemption: 6e5,
-		refund:     7e5,
-		funding:    8e5,
-	}
+	sellFees := tFees(1e5, 2e5, 3e5, 4e5)
+	buyFees := tFees(5e5, 6e5, 7e5, 8e5)
 	orderIDs := make([]order.OrderID, 10)
 	for i := range orderIDs {
 		var id order.OrderID
@@ -888,7 +885,7 @@ func TestMultiTrade(t *testing.T) {
 
 			// ---- Sell ----
 			sellDexBalances: map[uint32]uint64{
-				42: 4*lotSize + 4*sellFees.swap + sellFees.funding,
+				42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.funding,
 				0:  0,
 			},
 			sellCexBalances: map[uint32]uint64{
@@ -916,7 +913,7 @@ func TestMultiTrade(t *testing.T) {
 				0: b2q(buyPlacements[1].rate, lotSize) +
 					b2q(buyPlacements[2].rate, 2*lotSize) +
 					b2q(buyPlacements[3].rate, lotSize) +
-					4*buyFees.swap + buyFees.funding,
+					4*buyFees.Max.Swap + buyFees.funding,
 			},
 			buyCexBalances: map[uint32]uint64{
 				42: 8 * lotSize,
@@ -959,7 +956,7 @@ func TestMultiTrade(t *testing.T) {
 
 			// ---- Sell ----
 			sellDexBalances: map[uint32]uint64{
-				42: 3*lotSize + 3*sellFees.swap + sellFees.funding,
+				42: 3*lotSize + 3*sellFees.Max.Swap + sellFees.funding,
 				0:  0,
 			},
 			sellCexBalances: map[uint32]uint64{
@@ -984,7 +981,7 @@ func TestMultiTrade(t *testing.T) {
 				42: 0,
 				0: b2q(buyPlacements[2].rate, 2*lotSize) +
 					b2q(buyPlacements[3].rate, lotSize) +
-					3*buyFees.swap + buyFees.funding,
+					3*buyFees.Max.Swap + buyFees.funding,
 			},
 			buyCexBalances: map[uint32]uint64{
 				42: 7 * lotSize,
@@ -1022,7 +1019,7 @@ func TestMultiTrade(t *testing.T) {
 			quoteID: 0,
 			// ---- Sell ----
 			sellDexBalances: map[uint32]uint64{
-				42: 3*lotSize + 3*sellFees.swap + sellFees.funding,
+				42: 3*lotSize + 3*sellFees.Max.Swap + sellFees.funding,
 				0:  0,
 			},
 			sellCexBalances: map[uint32]uint64{
@@ -1048,7 +1045,7 @@ func TestMultiTrade(t *testing.T) {
 				42: 0,
 				0: b2q(buyPlacements[1].rate, lotSize) +
 					b2q(buyPlacements[2].rate, 2*lotSize) +
-					3*buyFees.swap + buyFees.funding,
+					3*buyFees.Max.Swap + buyFees.funding,
 			},
 			buyCexBalances: map[uint32]uint64{
 				42: 7 * lotSize,
@@ -1088,7 +1085,7 @@ func TestMultiTrade(t *testing.T) {
 			quoteID: 0,
 			// ---- Sell ----
 			sellDexBalances: map[uint32]uint64{
-				42: 2*lotSize + 2*sellFees.swap + sellFees.funding,
+				42: 2*lotSize + 2*sellFees.Max.Swap + sellFees.funding,
 				0:  0,
 			},
 			sellCexBalances: map[uint32]uint64{
@@ -1116,7 +1113,7 @@ func TestMultiTrade(t *testing.T) {
 				42: 0,
 				0: b2q(buyPlacements[1].rate, lotSize) +
 					b2q(buyPlacements[2].rate, lotSize) +
-					2*buyFees.swap + buyFees.funding,
+					2*buyFees.Max.Swap + buyFees.funding,
 			},
 			buyCexBalances: map[uint32]uint64{
 				42: 8 * lotSize,
@@ -1157,7 +1154,7 @@ func TestMultiTrade(t *testing.T) {
 			quoteID: 0,
 			// ---- Sell ----
 			sellDexBalances: map[uint32]uint64{
-				42: 4*lotSize + 2*sellFees.swap + sellFees.funding,
+				42: 4*lotSize + 2*sellFees.Max.Swap + sellFees.funding,
 				0:  0,
 			},
 			sellCexBalances: map[uint32]uint64{
@@ -1185,7 +1182,7 @@ func TestMultiTrade(t *testing.T) {
 				42: 0,
 				0: b2q(buyPlacements[1].rate, 2*lotSize) +
 					b2q(buyPlacements[2].rate, 2*lotSize) +
-					2*buyFees.swap + buyFees.funding,
+					2*buyFees.Max.Swap + buyFees.funding,
 			},
 			buyCexBalances: map[uint32]uint64{
 				42: 6 * lotSize,
@@ -1232,8 +1229,8 @@ func TestMultiTrade(t *testing.T) {
 			// ---- Sell ----
 			sellDexBalances: map[uint32]uint64{
 				966001: 4 * lotSize,
-				966:    4*(sellFees.swap+sellFees.refund) + sellFees.funding,
-				60:     4 * sellFees.redemption,
+				966:    4*(sellFees.Max.Swap+sellFees.Max.Refund) + sellFees.funding,
+				60:     4 * sellFees.Max.Redeem,
 			},
 			sellCexBalances: map[uint32]uint64{
 				96601: 0,
@@ -1256,11 +1253,11 @@ func TestMultiTrade(t *testing.T) {
 
 			// ---- Buy ----
 			buyDexBalances: map[uint32]uint64{
-				966: 4 * buyFees.redemption,
+				966: 4 * buyFees.Max.Redeem,
 				60: b2q(buyPlacements[1].rate, lotSize) +
 					b2q(buyPlacements[2].rate, 2*lotSize) +
 					b2q(buyPlacements[3].rate, lotSize) +
-					4*buyFees.swap + 4*buyFees.refund + buyFees.funding,
+					4*buyFees.Max.Swap + 4*buyFees.Max.Refund + buyFees.funding,
 			},
 			buyCexBalances: map[uint32]uint64{
 				966001: 8 * lotSize,
@@ -2142,8 +2139,8 @@ func TestDEXTrade(t *testing.T) {
 		tCore.multiTradeResult = multiTradeResult
 
 		// These don't effect the test, but need to be non-nil.
-		tCore.singleLotBuyFees = &orderFees{}
-		tCore.singleLotSellFees = &orderFees{}
+		tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
+		tCore.singleLotSellFees = tFees(0, 0, 0, 0)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -3362,14 +3359,8 @@ func TestOrderFeesInUnits(t *testing.T) {
 				BaseID:  42,
 				QuoteID: 0,
 			},
-			buyFees: &orderFees{
-				swap:       5e5,
-				redemption: 1.1e4,
-			},
-			sellFees: &orderFees{
-				swap:       1.085e4,
-				redemption: 4e5,
-			},
+			buyFees:           tFees(5e5, 1.1e4, 0, 0),
+			sellFees:          tFees(1.085e4, 4e5, 0, 0),
 			rate:              5e7,
 			expectedSellBase:  810850,
 			expectedBuyBase:   1011000,
@@ -3382,14 +3373,8 @@ func TestOrderFeesInUnits(t *testing.T) {
 				BaseID:  0,
 				QuoteID: 60001,
 			},
-			buyFees: &orderFees{
-				swap:       1e7,
-				redemption: 4e4,
-			},
-			sellFees: &orderFees{
-				swap:       5e4,
-				redemption: 1.1e7,
-			},
+			buyFees:  tFees(1e7, 4e4, 0, 0),
+			sellFees: tFees(5e4, 1.1e7, 0, 0),
 			fiatRates: map[uint32]float64{
 				60001: 0.99,
 				60:    2300,
@@ -3407,14 +3392,8 @@ func TestOrderFeesInUnits(t *testing.T) {
 				BaseID:  966003,
 				QuoteID: 60001,
 			},
-			buyFees: &orderFees{
-				swap:       1e7,
-				redemption: 2e8,
-			},
-			sellFees: &orderFees{
-				swap:       5e8,
-				redemption: 1.1e7,
-			},
+			buyFees:  tFees(1e7, 2e8, 0, 0),
+			sellFees: tFees(5e8, 1.1e7, 0, 0),
 			fiatRates: map[uint32]float64{
 				60001:  0.99,
 				60:     2300,

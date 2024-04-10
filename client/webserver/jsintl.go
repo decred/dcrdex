@@ -177,7 +177,7 @@ const (
 	txTypeTicketVoteID               = "TX_TYPE_TICKET_VOTE"
 	txTypeTicketRevokeID             = "TX_TYPE_TICKET_REVOCATION"
 	missingCexCredsID                = "MISSING_CEX_CREDS"
-	multiplierID                     = "MULTIPLIER"
+	matchBufferID                    = "MATCH_BUFFER"
 	noPlacementsID                   = "NO_PLACEMENTS"
 	invalidValueID                   = "INVALID_VALUE"
 	noZeroID                         = "NO_ZERO"
@@ -366,7 +366,7 @@ var enUS = map[string]*intl.Translation{
 	txTypeTicketVoteID:               {T: "Ticket vote"},
 	txTypeTicketRevokeID:             {T: "Ticket revocation"},
 	missingCexCredsID:                {T: "specify both key and secret"},
-	multiplierID:                     {T: "Multiplier"},
+	matchBufferID:                    {T: "Match buffer"},
 	noPlacementsID:                   {T: "must specify 1 or more placements"},
 	invalidValueID:                   {T: "invalid value"},
 	noZeroID:                         {T: "zero not allowed"},

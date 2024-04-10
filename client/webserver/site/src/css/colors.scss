@@ -8,6 +8,7 @@ body:not(.dark) {
   --text-color-secondary: #4a4949;
   --body-bg-tertiary: #7772;
   --border-color: #ddd;
+  --text-danger: #d22;
 
   // links
   --link-color: #2a71d5;
@@ -24,7 +25,6 @@ body:not(.dark) {
   --btn-feature-hover-bg: #a3dbff;
   --btn-feature-border-color: #759cb5;
   --btn-featur-hover-border-color: #9bc3dd;
-  --btn-danger: #d22;
   --btn-danger-hover-color: white;
   --btn-border-color: #ddd;
   --btn-hover-border-color: #ddd;
@@ -71,6 +71,7 @@ body.dark {
   --text-color-secondary: #a1a1a1;
   --body-bg-tertiary: #78787822;
   --border-color: #383f4b;
+  --text-danger: #ec6a6a;
 
   // links
   --link-color: #388bff;
@@ -89,7 +90,6 @@ body.dark {
   --btn-feature-hover-bg: #176699;
   --btn-feature-border-color: #1e618d;
   --btn-featur-hover-border-color: #85a5ba;
-  --btn-danger: #e42c2c;
   --btn-danger-hover-color: white;
   --btn-go-bg: #0b5831;
   --btn-go-hover-bg: #0b5831;

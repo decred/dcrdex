@@ -131,9 +131,9 @@ func (c *tCore) SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uin
 	}
 
 	if form.Sell {
-		return c.singleLotSellFees.swap, c.singleLotSellFees.redemption, c.singleLotSellFees.refund, nil
+		return c.singleLotSellFees.Max.Swap, c.singleLotSellFees.Max.Redeem, c.singleLotSellFees.Max.Refund, nil
 	}
-	return c.singleLotBuyFees.swap, c.singleLotBuyFees.redemption, c.singleLotBuyFees.refund, nil
+	return c.singleLotBuyFees.Max.Swap, c.singleLotBuyFees.Max.Redeem, c.singleLotBuyFees.Max.Refund, nil
 }
 func (c *tCore) Cancel(oidB dex.Bytes) error {
 	c.cancelsPlaced = append(c.cancelsPlaced, oidB)

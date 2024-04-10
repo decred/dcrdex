@@ -46,10 +46,8 @@ type multiTradePlacement struct {
 // orderFees represents the fees that will be required for a single lot of a
 // dex order.
 type orderFees struct {
-	swap       uint64
-	redemption uint64
-	refund     uint64
-	funding    uint64
+	*LotFeeRange
+	funding uint64
 }
 
 // botCoreAdaptor is an interface used by bots to access DEX related
@@ -65,7 +63,7 @@ type botCoreAdaptor interface {
 	MultiTrade(placements []*multiTradePlacement, sell bool, driftTolerance float64, currEpoch uint64, dexReserves, cexReserves map[uint32]uint64) []*order.OrderID
 	CancelAllOrders() bool
 	ExchangeRateFromFiatSources() uint64
-	OrderFeesInUnits(sell, base bool, rate uint64) (uint64, error)
+	OrderFeesInUnits(sell, base bool, rate uint64) (uint64, error) // estimated fees, not max
 	SubscribeOrderUpdates() (updates <-chan *core.Order)
 	SufficientBalanceForDEXTrade(rate, qty uint64, sell bool) (bool, error)
 }
@@ -277,15 +275,15 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, 
 	if err != nil {
 		return false, err
 	}
-	fees := buyFees
+	fees, fundingFees := buyFees.Max, buyFees.funding
 	if sell {
-		fees = sellFees
+		fees, fundingFees = sellFees.Max, sellFees.funding
 	}
 
-	if balances[fromFeeAsset] < fees.funding {
+	if balances[fromFeeAsset] < fundingFees {
 		return false, nil
 	}
-	balances[fromFeeAsset] -= fees.funding
+	balances[fromFeeAsset] -= fundingFees
 
 	fromQty := qty
 	if !sell {
@@ -297,23 +295,23 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, 
 	balances[fromAsset] -= fromQty
 
 	numLots := qty / mkt.LotSize
-	if balances[fromFeeAsset] < numLots*fees.swap {
+	if balances[fromFeeAsset] < numLots*fees.Swap {
 		return false, nil
 	}
-	balances[fromFeeAsset] -= numLots * fees.swap
+	balances[fromFeeAsset] -= numLots * fees.Swap
 
 	if u.isAccountLocker(fromAsset) {
-		if balances[fromFeeAsset] < numLots*fees.refund {
+		if balances[fromFeeAsset] < numLots*fees.Refund {
 			return false, nil
 		}
-		balances[fromFeeAsset] -= numLots * fees.refund
+		balances[fromFeeAsset] -= numLots * fees.Refund
 	}
 
 	if u.isAccountLocker(toAsset) {
-		if balances[toFeeAsset] < numLots*fees.redemption {
+		if balances[toFeeAsset] < numLots*fees.Redeem {
 			return false, nil
 		}
-		balances[toFeeAsset] -= numLots * fees.redemption
+		balances[toFeeAsset] -= numLots * fees.Redeem
 	}
 
 	return true, nil
@@ -688,11 +686,11 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 		u.log.Errorf("MultiTrade: error getting order fees: %v", err)
 		return nil
 	}
-	fees := buyFees
-	if sell {
-		fees = sellFees
-	}
 	fromAsset, fromFeeAsset, toAsset, toFeeAsset := orderAssets(mkt.BaseID, mkt.QuoteID, sell)
+	fees, fundingFees := buyFees.Max, buyFees.funding
+	if sell {
+		fees, fundingFees = sellFees.Max, sellFees.funding
+	}
 
 	// First, determine the amount of balances the bot has available to place
 	// DEX trades taking into account dexReserves.
@@ -715,11 +713,11 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 			remainingBalances[assetID] = availableBalance
 		}
 	}
-	if remainingBalances[fromFeeAsset] < fees.funding {
-		u.log.Debugf("MultiTrade: insufficient balance for funding fees. required: %d, have: %d", fees.funding, remainingBalances[fromFeeAsset])
+	if remainingBalances[fromFeeAsset] < fundingFees {
+		u.log.Debugf("MultiTrade: insufficient balance for funding fees. required: %d, have: %d", fundingFees, remainingBalances[fromFeeAsset])
 		return nil
 	}
-	remainingBalances[fromFeeAsset] -= fees.funding
+	remainingBalances[fromFeeAsset] -= fundingFees
 
 	// If the placements include a counterTradeRate, the CEX balance must also
 	// be taken into account to determine how many trades can be placed.
@@ -816,23 +814,23 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 			}
 			remainingBalances[fromAsset] -= qty
 
-			if remainingBalances[fromFeeAsset] < fees.swap {
+			if remainingBalances[fromFeeAsset] < fees.Swap {
 				break
 			}
-			remainingBalances[fromFeeAsset] -= fees.swap
+			remainingBalances[fromFeeAsset] -= fees.Swap
 
 			if u.isAccountLocker(fromAsset) {
-				if remainingBalances[fromFeeAsset] < fees.refund {
+				if remainingBalances[fromFeeAsset] < fees.Refund {
 					break
 				}
-				remainingBalances[fromFeeAsset] -= fees.refund
+				remainingBalances[fromFeeAsset] -= fees.Refund
 			}
 
 			if u.isAccountLocker(toAsset) {
-				if remainingBalances[toFeeAsset] < fees.redemption {
+				if remainingBalances[toFeeAsset] < fees.Redeem {
 					break
 				}
-				remainingBalances[toFeeAsset] -= fees.redemption
+				remainingBalances[toFeeAsset] -= fees.Redeem
 			}
 
 			if accountForCEXBal {
@@ -1817,18 +1815,19 @@ func (u *unifiedExchangeAdaptor) orderFees() (buyFees, sellFees *orderFees, err 
 	return u.buyFees, u.sellFees, nil
 }
 
-// OrderFeesInUnits returns the swap and redemption fees for either a buy or
-// sell order in units of either the base or quote asset. If either the base
-// or quote asset is a token, the fees are converted using fiat rates.
+// OrderFeesInUnits returns the estimated swap and redemption fees for either a
+// buy or sell order in units of either the base or quote asset. If either the
+// base or quote asset is a token, the fees are converted using fiat rates.
 // Otherwise, the rate parameter is used for the conversion.
 func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) (uint64, error) {
-	buyFees, sellFees, err := u.orderFees()
+	buyFeeRange, sellFeeRange, err := u.orderFees()
 	if err != nil {
 		return 0, fmt.Errorf("error getting order fees: %v", err)
 	}
-	baseFees, quoteFees := buyFees.redemption, buyFees.swap
+	buyFees, sellFees := buyFeeRange.Estimated, sellFeeRange.Estimated
+	baseFees, quoteFees := buyFees.Redeem, buyFees.Swap
 	if sell {
-		baseFees, quoteFees = sellFees.swap, sellFees.redemption
+		baseFees, quoteFees = sellFees.Swap, sellFees.Redeem
 	}
 	toID := u.market.QuoteID
 	if base {
@@ -2239,27 +2238,14 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 // updateFeeRates updates the cached fee rates for placing orders on the market
 // specified by the exchangeAdaptorCfg used to create the unifiedExchangeAdaptor.
 func (u *unifiedExchangeAdaptor) updateFeeRates() error {
-	buySwapFees, buyRedeemFees, buyRefundFees, err := u.clientCore.SingleLotFees(&core.SingleLotFeesForm{
-		Host:          u.market.Host,
-		Base:          u.market.BaseID,
-		Quote:         u.market.QuoteID,
-		UseMaxFeeRate: true,
-		UseSafeTxSize: true,
-	})
+	maxBaseFees, maxQuoteFees, err := marketFees(u.clientCore, u.market.Host, u.market.BaseID, u.market.QuoteID, true)
 	if err != nil {
-		return fmt.Errorf("failed to get buy single lot fees: %v", err)
+		return err
 	}
 
-	sellSwapFees, sellRedeemFees, sellRefundFees, err := u.clientCore.SingleLotFees(&core.SingleLotFeesForm{
-		Host:          u.market.Host,
-		Base:          u.market.BaseID,
-		Quote:         u.market.QuoteID,
-		UseMaxFeeRate: true,
-		UseSafeTxSize: true,
-		Sell:          true,
-	})
+	estBaseFees, estQuoteFees, err := marketFees(u.clientCore, u.market.Host, u.market.BaseID, u.market.QuoteID, false)
 	if err != nil {
-		return fmt.Errorf("failed to get sell single lot fees: %v", err)
+		return err
 	}
 
 	buyFundingFees, err := u.clientCore.MaxFundingFees(u.market.QuoteID, u.market.Host, u.maxBuyPlacements, u.baseWalletOptions)
@@ -2276,16 +2262,34 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() error {
 	defer u.feesMtx.Unlock()
 
 	u.buyFees = &orderFees{
-		swap:       buySwapFees,
-		redemption: buyRedeemFees,
-		refund:     buyRefundFees,
-		funding:    buyFundingFees,
+		LotFeeRange: &LotFeeRange{
+			Max: &LotFees{
+				Swap:   maxQuoteFees.Swap,
+				Redeem: maxBaseFees.Redeem,
+				Refund: maxQuoteFees.Refund,
+			},
+			Estimated: &LotFees{
+				Swap:   estQuoteFees.Swap,
+				Redeem: estBaseFees.Redeem,
+				Refund: estQuoteFees.Refund,
+			},
+		},
+		funding: buyFundingFees,
 	}
 	u.sellFees = &orderFees{
-		swap:       sellSwapFees,
-		redemption: sellRedeemFees,
-		refund:     sellRefundFees,
-		funding:    sellFundingFees,
+		LotFeeRange: &LotFeeRange{
+			Max: &LotFees{
+				Swap:   maxBaseFees.Swap,
+				Redeem: maxQuoteFees.Redeem,
+				Refund: maxBaseFees.Refund,
+			},
+			Estimated: &LotFees{
+				Swap:   estBaseFees.Swap,
+				Redeem: estQuoteFees.Redeem,
+				Refund: estBaseFees.Refund,
+			},
+		},
+		funding: sellFundingFees,
 	}
 
 	return nil

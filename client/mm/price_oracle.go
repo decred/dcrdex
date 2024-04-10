@@ -13,10 +13,12 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/fiatrates"
 )
 
 const (
@@ -36,6 +38,8 @@ type MarketReport struct {
 	Oracles       []*OracleReport `json:"oracles"`
 	BaseFiatRate  float64         `json:"baseFiatRate"`
 	QuoteFiatRate float64         `json:"quoteFiatRate"`
+	BaseFees      *LotFeeRange    `json:"baseFees"`
+	QuoteFees     *LotFeeRange    `json:"quoteFees"`
 }
 
 // OracleReport is a summary of a market on an exchange.
@@ -53,8 +57,8 @@ type cachedPrice struct {
 	price   float64
 	oracles []*OracleReport
 
-	base  *asset.RegisteredAsset
-	quote *asset.RegisteredAsset
+	base  *fiatrates.CoinpaprikaAsset
+	quote *fiatrates.CoinpaprikaAsset
 }
 
 // priceOracle periodically fetches market prices from a set of oracles.
@@ -77,8 +81,8 @@ type oracle interface {
 
 var _ oracle = (*priceOracle)(nil)
 
-func (o *priceOracle) getOracleDataAutoSync(base, quote uint32) (float64, []*OracleReport, error) {
-	mktStr := (&mkt{base, quote}).String()
+func (o *priceOracle) getOracleDataAutoSync(baseID, quoteID uint32) (float64, []*OracleReport, error) {
+	mktStr := (&mkt{baseID, quoteID}).String()
 
 	o.cachedPricesMtx.RLock()
 	price, ok := o.cachedPrices[mktStr]
@@ -98,13 +102,13 @@ func (o *priceOracle) getOracleDataAutoSync(base, quote uint32) (float64, []*Ora
 	return 0, nil, fmt.Errorf("expired price data for %s", mktStr)
 }
 
-func (o *priceOracle) getOracleDataNoAutoSync(base, quote uint32) (float64, []*OracleReport, error) {
-	mktStr := (&mkt{base, quote}).String()
+func (o *priceOracle) getOracleDataNoAutoSync(baseID, quoteID uint32) (float64, []*OracleReport, error) {
+	mktStr := (&mkt{baseID, quoteID}).String()
 
 	o.cachedPricesMtx.Lock()
 	price, ok := o.cachedPrices[mktStr]
 	if !ok {
-		cp, err := newCachedPrice(base, quote, asset.Assets())
+		cp, err := newCachedPrice(baseID, quoteID)
 		if err != nil {
 			o.cachedPricesMtx.Unlock()
 			return 0, nil, err
@@ -134,16 +138,16 @@ func (o *priceOracle) getOracleDataNoAutoSync(base, quote uint32) (float64, []*O
 // getMarketPrice returns the volume weighted market rate for the specified
 // base/quote pair. This market rate is used as the "oracleRate" in the
 // basic market making strategy.
-func (o *priceOracle) getMarketPrice(base, quote uint32) float64 {
+func (o *priceOracle) getMarketPrice(baseID, quoteID uint32) float64 {
 	var price float64
 	var err error
 	if o.autoSync {
-		price, _, err = o.getOracleDataAutoSync(base, quote)
+		price, _, err = o.getOracleDataAutoSync(baseID, quoteID)
 	} else {
-		price, _, err = o.getOracleDataNoAutoSync(base, quote)
+		price, _, err = o.getOracleDataNoAutoSync(baseID, quoteID)
 	}
 	if err != nil {
-		o.log.Errorf("error fetching market price for %d-%d: %v", base, quote, err)
+		o.log.Errorf("error fetching market price for %d-%d: %v", baseID, quoteID, err)
 		return 0
 	}
 	return price
@@ -153,17 +157,17 @@ func (o *priceOracle) getMarketPrice(base, quote uint32) float64 {
 // and details about the market on each available exchange that was used to determine
 // the market rate. This market rate is used as the "oracleRate" in the basic market
 // making strategy.
-func (o *priceOracle) getOracleInfo(base, quote uint32) (float64, []*OracleReport, error) {
+func (o *priceOracle) getOracleInfo(baseID, quoteID uint32) (float64, []*OracleReport, error) {
 	var price float64
 	var oracles []*OracleReport
 	var err error
 	if o.autoSync {
-		price, oracles, err = o.getOracleDataAutoSync(base, quote)
+		price, oracles, err = o.getOracleDataAutoSync(baseID, quoteID)
 	} else {
-		price, oracles, err = o.getOracleDataNoAutoSync(base, quote)
+		price, oracles, err = o.getOracleDataNoAutoSync(baseID, quoteID)
 	}
 	if err != nil {
-		o.log.Errorf("error fetching market report for %d-%d: %v", base, quote, err)
+		o.log.Errorf("error fetching market report for %d-%d: %v", baseID, quoteID, err)
 		return 0, nil, err
 	}
 	return price, oracles, nil
@@ -177,20 +181,39 @@ func (mkt *mkt) String() string {
 	return fmt.Sprintf("%d-%d", mkt.baseID, mkt.quoteID)
 }
 
-func newCachedPrice(baseID, quoteID uint32, registeredAssets map[uint32]*asset.RegisteredAsset) (*cachedPrice, error) {
-	baseAsset, ok := registeredAssets[baseID]
-	if !ok {
-		return nil, fmt.Errorf("base asset %d (%s) not supported", baseID, dex.BipIDSymbol(baseID))
+func coinpapAsset(assetID uint32) (*fiatrates.CoinpaprikaAsset, error) {
+	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		return &fiatrates.CoinpaprikaAsset{
+			AssetID: assetID,
+			Name:    tkn.Name,
+			Symbol:  dex.BipIDSymbol(assetID),
+		}, nil
+	}
+	a := asset.Asset(assetID)
+	if a == nil {
+		return nil, fmt.Errorf("unknown asset ID %d", assetID)
+	}
+	return &fiatrates.CoinpaprikaAsset{
+		AssetID: assetID,
+		Name:    a.Info.Name,
+		Symbol:  a.Symbol,
+	}, nil
+}
+
+func newCachedPrice(baseID, quoteID uint32) (*cachedPrice, error) {
+	b, err := coinpapAsset(baseID)
+	if err != nil {
+		return nil, err
 	}
 
-	quoteAsset, ok := registeredAssets[quoteID]
-	if !ok {
-		return nil, fmt.Errorf("quote asset %d (%s) not supported", quoteID, dex.BipIDSymbol(quoteID))
+	q, err := coinpapAsset(quoteID)
+	if err != nil {
+		return nil, err
 	}
 
 	return &cachedPrice{
-		base:  baseAsset,
-		quote: quoteAsset,
+		base:  b,
+		quote: q,
 	}, nil
 }
 
@@ -200,14 +223,13 @@ func newCachedPrice(baseID, quoteID uint32, registeredAssets map[uint32]*asset.R
 func newAutoSyncPriceOracle(ctx context.Context, markets []*mkt, log dex.Logger) (*priceOracle, error) {
 	cachedPrices := make(map[string]*cachedPrice)
 
-	registeredAssets := asset.Assets()
 	for _, mkt := range markets {
 		if _, ok := cachedPrices[mkt.String()]; ok {
 			log.Warnf("duplicate market: %s", mkt.String())
 			continue
 		}
 
-		cachedPrice, err := newCachedPrice(mkt.baseID, mkt.quoteID, registeredAssets)
+		cachedPrice, err := newCachedPrice(mkt.baseID, mkt.quoteID)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +324,7 @@ func (o *priceOracle) syncAllMarkets() {
 	wg.Wait()
 }
 
-func fetchMarketPrice(ctx context.Context, b, q *asset.RegisteredAsset, log dex.Logger) (float64, []*OracleReport, error) {
+func fetchMarketPrice(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, log dex.Logger) (float64, []*OracleReport, error) {
 	oracles, err := oracleMarketReport(ctx, b, q, log)
 	if err != nil {
 		return 0, nil, err
@@ -334,30 +356,29 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 	return rate, nil
 }
 
-func coinpapSlug(symbol, name string) string {
-	slug := fmt.Sprintf("%s-%s", symbol, name)
-	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
-	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
+func getRates(ctx context.Context, url string, thing any) (err error) {
+	_, err = getHTTPWithCode(ctx, url, thing)
+	return err
 }
 
-func getRates(ctx context.Context, url string, thing any) error {
+func getHTTPWithCode(ctx context.Context, url string, thing any) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response, got status code %d", resp.StatusCode)
+		return resp.StatusCode, fmt.Errorf("HTTP error code %d for request to %q: %s", resp.StatusCode, url, resp.Status)
 	}
 
 	reader := io.LimitReader(resp.Body, 1<<22)
-	return json.NewDecoder(reader).Decode(thing)
+	return 0, json.NewDecoder(reader).Decode(thing)
 }
 
 // Truncates the URL to the domain name and TLD.
@@ -387,7 +408,7 @@ func spread(ctx context.Context, addr string, baseSymbol, quoteSymbol string, lo
 	if s == nil {
 		return 0, 0
 	}
-	sell, buy, err = s(ctx, baseSymbol, quoteSymbol)
+	sell, buy, err = s(ctx, shortSymbol(baseSymbol), shortSymbol(quoteSymbol), log)
 	if err != nil {
 		log.Errorf("Error getting spread from %q: %v", addr, err)
 		return 0, 0
@@ -399,11 +420,11 @@ func spread(ctx context.Context, addr string, baseSymbol, quoteSymbol string, lo
 // exchanges for a market. This is done by fetching the market data from
 // coinpaprika, looking for known exchanges in the results, then pulling the
 // data directly from the exchange's public data API.
-func oracleMarketReport(ctx context.Context, b, q *asset.RegisteredAsset, log dex.Logger) (oracles []*OracleReport, err error) {
+func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, log dex.Logger) (oracles []*OracleReport, err error) {
 	// They're going to return the quote prices in terms of USD, which is
 	// sort of nonsense for a non-USD market like DCR-BTC.
-	baseSlug := coinpapSlug(b.Symbol, b.Info.Name)
-	quoteSlug := coinpapSlug(q.Symbol, q.Info.Name)
+	baseSlug := fiatrates.CoinpapSlug(b.Name, b.Symbol)
+	quoteSlug := fiatrates.CoinpapSlug(q.Name, q.Symbol)
 
 	type coinpapQuote struct {
 		Price  float64 `json:"price"`
@@ -423,6 +444,18 @@ func oracleMarketReport(ctx context.Context, b, q *asset.RegisteredAsset, log de
 	url := fmt.Sprintf("https://api.coinpaprika.com/v1/coins/%s/markets", baseSlug)
 	if err := getRates(ctx, url, &rawMarkets); err != nil {
 		return nil, err
+	}
+
+	convertIfNecessary := func(addr, slug string) string {
+		s, _ := shortHost(addr)
+		switch s {
+		case "coinbase.com":
+			switch slug {
+			case "usd-us-dollars":
+				return "usdc-usd-coin"
+			}
+		}
+		return slug
 	}
 
 	// Create filter for desirable matches.
@@ -445,6 +478,8 @@ func oracleMarketReport(ctx context.Context, b, q *asset.RegisteredAsset, log de
 
 	var filteredResults []*coinpapMarket
 	for _, mkt := range rawMarkets {
+		mkt.BaseCurrencyID = convertIfNecessary(mkt.MarketURL, mkt.BaseCurrencyID)
+		mkt.QuoteCurrencyID = convertIfNecessary(mkt.MarketURL, mkt.QuoteCurrencyID)
 		if marketMatches(mkt) {
 			filteredResults = append(filteredResults, mkt)
 		}
@@ -488,7 +523,7 @@ func oracleMarketReport(ctx context.Context, b, q *asset.RegisteredAsset, log de
 
 // Spreader is a function that can generate market spread data for a known
 // exchange.
-type Spreader func(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error)
+type Spreader func(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error)
 
 var spreaders = map[string]Spreader{
 	"binance.com":  fetchBinanceSpread,
@@ -498,19 +533,44 @@ var spreaders = map[string]Spreader{
 	"exmo.com":     fetchEXMOSpread,
 }
 
-func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+var binanceGlobalIs451 atomic.Bool
+
+func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
-	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/bookTicker?symbol=%s", slug)
+	var url string
+	var isGlobal bool
+	if binanceGlobalIs451.Load() {
+		url = fmt.Sprintf("https://api.binance.us/api/v3/ticker/bookTicker?symbol=%s", slug)
+	} else {
+		isGlobal = true
+		url = fmt.Sprintf("https://api.binance.com/api/v3/ticker/bookTicker?symbol=%s", slug)
+	}
 
 	var resp struct {
 		BidPrice float64 `json:"bidPrice,string"`
 		AskPrice float64 `json:"askPrice,string"`
 	}
-	return resp.AskPrice, resp.BidPrice, getRates(ctx, url, &resp)
+	code, err := getHTTPWithCode(ctx, url, &resp)
+	if err != nil {
+		if isGlobal && code == http.StatusUnavailableForLegalReasons && binanceGlobalIs451.CompareAndSwap(false, true) {
+			log.Info("Binance Global responded with a 451. Oracle will use Binance U.S.")
+			return fetchBinanceSpread(ctx, baseSymbol, quoteSymbol, log)
+		}
+		return 0, 0, err
+	}
+
+	return resp.AskPrice, resp.BidPrice, nil
 }
 
-func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
-	slug := fmt.Sprintf("%s-%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
+func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
+	slugSymbol := func(symbol string) string {
+		switch symbol {
+		case "usdc":
+			return "USD"
+		}
+		return strings.ToUpper(symbol)
+	}
+	slug := fmt.Sprintf("%s-%s", slugSymbol(baseSymbol), slugSymbol(quoteSymbol))
 	url := fmt.Sprintf("https://api.exchange.coinbase.com/products/%s/ticker", slug)
 
 	var resp struct {
@@ -521,7 +581,7 @@ func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string) (s
 	return resp.Ask, resp.Bid, getRates(ctx, url, &resp)
 }
 
-func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s-%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
 	url := fmt.Sprintf("https://api.bittrex.com/v3/markets/%s/ticker", slug)
 	var resp struct {
@@ -531,7 +591,7 @@ func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string) (se
 	return resp.AskRate, resp.BidRate, getRates(ctx, url, &resp)
 }
 
-func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
 	url := fmt.Sprintf("https://api.hitbtc.com/api/3/public/orderbook/%s?depth=1", slug)
 
@@ -559,7 +619,7 @@ func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sel
 	return ask, bid, nil
 }
 
-func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
+func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s_%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
 	url := fmt.Sprintf("https://api.exmo.com/v1.1/order_book?pair=%s&limit=1", slug)
 
@@ -578,4 +638,8 @@ func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell,
 	}
 
 	return mkt.AskTop, mkt.BidTop, nil
+}
+
+func shortSymbol(symbol string) string {
+	return strings.Split(symbol, ".")[0]
 }

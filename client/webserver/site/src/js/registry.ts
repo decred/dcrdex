@@ -461,11 +461,24 @@ export interface BotReport {
   orders: BotOrder
 }
 
+export interface LotFees {
+  swap: number
+  redeem: number
+  refund: number
+}
+
+export interface LotFeeRange {
+  max: LotFees
+  estimated: LotFees
+}
+
 export interface MarketReport {
   price: number
   oracles: OracleReport[]
   baseFiatRate: number
   quoteFiatRate: number
+  baseFees: LotFeeRange
+  quoteFees: LotFeeRange
 }
 
 export interface MatchNote extends CoreNote {
@@ -737,6 +750,10 @@ export interface BotConfig {
   baseBalance: number
   quoteBalanceType: BalanceType
   quoteBalance: number
+  baseFeeAssetBalanceType?: BalanceType
+  baseFeeAssetBalance?: number
+  quoteFeeAssetBalanceType?: BalanceType
+  quoteFeeAssetBalance?: number
   cexCfg?: BotCEXCfg
   baseWalletOptions?: Record<string, string>
   quoteWalletOptions?: Record<string, string>

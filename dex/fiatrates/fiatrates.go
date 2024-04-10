@@ -17,7 +17,8 @@ const (
 	fiatRequestTimeout = time.Second * 5
 )
 
-func coinpapSlug(symbol, name string) string {
+func CoinpapSlug(name, symbol string) string {
+	name, symbol = parseCoinpapNameSymbol(name, symbol)
 	slug := fmt.Sprintf("%s-%s", symbol, name)
 	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
 	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
@@ -29,27 +30,30 @@ type CoinpaprikaAsset struct {
 	Symbol  string
 }
 
+func parseCoinpapNameSymbol(name, symbol string) (string, string) {
+	parts := strings.Split(symbol, ".")
+	if len(parts) == 2 {
+		symbol = parts[0]
+	}
+	switch symbol {
+	case "usdc":
+		name = "usd-coin"
+	case "polygon":
+		symbol = "matic"
+		name = "polygon"
+	}
+	return name, symbol
+}
+
 // FetchCoinpaprikaRates retrieves and parses fiat rate data from the
 // Coinpaprika API. See https://api.coinpaprika.com/#operation/getTickersById
 // for sample request and response information.
 func FetchCoinpaprikaRates(ctx context.Context, assets []*CoinpaprikaAsset, log dex.Logger) map[uint32]float64 {
-	parseNameSymbol := func(name, symbol string) (string, string) {
-		switch symbol {
-		case "usdc":
-			name = "usd-coin"
-		case "polygon":
-			symbol = "matic"
-			name = "polygon"
-		}
-		return name, symbol
-	}
-
 	fiatRates := make(map[uint32]float64)
-	slugAssets := make(map[string]uint32)
+	slugAssets := make(map[string][]uint32)
 	for _, a := range assets {
-		name, symbol := parseNameSymbol(a.Name, a.Symbol)
-		slug := coinpapSlug(symbol, name)
-		slugAssets[slug] = a.AssetID
+		slug := CoinpapSlug(a.Name, a.Symbol)
+		slugAssets[slug] = append(slugAssets[slug], a.AssetID)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, fiatRequestTimeout)
@@ -69,16 +73,19 @@ func FetchCoinpaprikaRates(ctx context.Context, assets []*CoinpaprikaAsset, log 
 		return fiatRates
 	}
 	for _, coinInfo := range res {
-		assetID, found := slugAssets[coinInfo.ID]
+		assetIDs, found := slugAssets[coinInfo.ID]
 		if !found {
 			continue
 		}
+
 		price := coinInfo.Quotes.USD.Price
 		if price == 0 {
 			log.Errorf("zero-price returned from coinpaprika for slug %s", coinInfo.ID)
 			continue
 		}
-		fiatRates[assetID] = price
+		for _, assetID := range assetIDs {
+			fiatRates[assetID] = price
+		}
 	}
 	return fiatRates
 }

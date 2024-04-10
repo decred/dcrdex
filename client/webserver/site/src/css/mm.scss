@@ -111,9 +111,9 @@ div[data-handler=mm] {
         cursor: pointer;
 
         &.selected {
-          border-color: $success;
-          border-width: 2px;
-          background-color: #7772;
+          border-color: $success !important;
+          border-width: 2px !important;
+          background-color: #7772 !important;
         }
       }
     }
@@ -125,6 +125,22 @@ div[data-handler=mm] {
     }
   }
 
+  #lotsPerLevel,
+  #levelsPerSide,
+  #qcProfit,
+  #qcLevelSpacing,
+  #qcMatchBuffer {
+    width: 100px;
+  }
+
+  #levelSpacingBox.disabled {
+    opacity: 0.5;
+  }
+
+  #placementsChart {
+    height: 100px;
+  }
+
   .ico-rocket {
     color: $success;
   }
@@ -133,9 +149,14 @@ div[data-handler=mm] {
     color: #7777;
   }
 
-  #buyPlacementsBox {
+  #buyPlacementsBox,
+  #sellPlacementsBox {
     .ico-cross {
-      color: $danger;
+      color: var(--text-danger);
+    }
+
+    .ico-plus {
+      color: var(--btn-go-bg);
     }
   }
 
@@ -187,5 +208,14 @@ div[data-handler=mm] {
   #depositDetailsForm,
   #withdrawalDetailsForm {
       min-width: 400px;
+  }
+}
+
+div[data-handler=mmsettings] {
+  .input-unit {
+    position: absolute;
+    right: 0.25rem;
+    top: 50%;
+    transform: translateY(-50%);
   }
 }

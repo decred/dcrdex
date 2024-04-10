@@ -1639,7 +1639,7 @@ func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	report, err := s.mm.MarketReport(form.BaseID, form.QuoteID)
+	report, err := s.mm.MarketReport(form.Host, form.BaseID, form.QuoteID)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error getting market report: %w", err))
 		return

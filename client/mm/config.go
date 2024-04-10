@@ -55,9 +55,9 @@ type AutoRebalanceConfig struct {
 type BotCEXCfg struct {
 	Name             string               `json:"name"`
 	BaseBalanceType  BalanceType          `json:"baseBalanceType"`
-	BaseBalance      uint64               `json:"baseBalance"`
+	BaseBalance      float64              `json:"baseBalance"`
 	QuoteBalanceType BalanceType          `json:"quoteBalanceType"`
-	QuoteBalance     uint64               `json:"quoteBalance"`
+	QuoteBalance     float64              `json:"quoteBalance"`
 	AutoRebalance    *AutoRebalanceConfig `json:"autoRebalance"`
 }
 
@@ -75,15 +75,15 @@ type BotConfig struct {
 	QuoteID uint32 `json:"quoteID"`
 
 	BaseBalanceType BalanceType `json:"baseBalanceType"`
-	BaseBalance     uint64      `json:"baseBalance"`
+	BaseBalance     float64     `json:"baseBalance"`
 
 	QuoteBalanceType BalanceType `json:"quoteBalanceType"`
-	QuoteBalance     uint64      `json:"quoteBalance"`
+	QuoteBalance     float64     `json:"quoteBalance"`
 
 	BaseFeeAssetBalanceType  BalanceType `json:"baseFeeAssetBalanceType"`
-	BaseFeeAssetBalance      uint64      `json:"baseFeeAssetBalance"`
+	BaseFeeAssetBalance      float64     `json:"baseFeeAssetBalance"`
 	QuoteFeeAssetBalanceType BalanceType `json:"quoteFeeAssetBalanceType"`
-	QuoteFeeAssetBalance     uint64      `json:"quoteFeeAssetBalance"`
+	QuoteFeeAssetBalance     float64     `json:"quoteFeeAssetBalance"`
 
 	BaseWalletOptions  map[string]string `json:"baseWalletOptions"`
 	QuoteWalletOptions map[string]string `json:"quoteWalletOptions"`

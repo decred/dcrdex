@@ -180,7 +180,7 @@ type clientCore interface {
 }
 
 type mmCore interface {
-	MarketReport(base, quote uint32) (*mm.MarketReport, error)
+	MarketReport(host string, base, quote uint32) (*mm.MarketReport, error)
 	Start(pw []byte, alternateConfigPath *string) (err error)
 	Stop()
 	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error

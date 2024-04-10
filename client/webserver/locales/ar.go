@@ -69,7 +69,6 @@ var Ar = map[string]*intl.Translation{
 	"reg_status_msg":                 {T: `من أجل التداول على <span id="regStatusDex" class="text-break"></span>, يجب دفع رسوم التسجيل <span id="confReq"></span> التأكيدات.`},
 	"Buy":                            {T: "شراء"},
 	"Sell":                           {T: "بيع"},
-	"Lot Size":                       {T: "حجم الحصة"},
 	"Rate Step":                      {T: "تدرج السعر"},
 	"Max":                            {T: "الحد الأقصى"},
 	"lot":                            {T: "الحصة"},

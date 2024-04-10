@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -285,16 +286,16 @@ func (m *MarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.Exchang
 
 // MarketReport returns information about the oracle rates on a market
 // pair and the fiat rates of the base and quote assets.
-func (m *MarketMaker) MarketReport(base, quote uint32) (*MarketReport, error) {
+func (m *MarketMaker) MarketReport(host string, baseID, quoteID uint32) (*MarketReport, error) {
 	fiatRates := m.core.FiatConversionRates()
-	baseFiatRate := fiatRates[base]
-	quoteFiatRate := fiatRates[quote]
+	baseFiatRate := fiatRates[baseID]
+	quoteFiatRate := fiatRates[quoteID]
 
 	m.syncedOracleMtx.RLock()
 	if m.syncedOracle != nil {
-		price, oracles, err := m.syncedOracle.getOracleInfo(base, quote)
+		price, oracles, err := m.syncedOracle.getOracleInfo(baseID, quoteID)
 		if err != nil && !errors.Is(err, errUnsyncedMarket) {
-			m.log.Errorf("failed to get oracle info for market %d-%d: %v", base, quote, err)
+			m.log.Errorf("failed to get oracle info for market %d-%d: %v", baseID, quoteID, err)
 		}
 		if err == nil {
 			m.syncedOracleMtx.RUnlock()
@@ -308,7 +309,17 @@ func (m *MarketMaker) MarketReport(base, quote uint32) (*MarketReport, error) {
 	}
 	m.syncedOracleMtx.RUnlock()
 
-	price, oracles, err := m.unsyncedOracle.getOracleInfo(base, quote)
+	price, oracles, err := m.unsyncedOracle.getOracleInfo(baseID, quoteID)
+	if err != nil {
+		return nil, err
+	}
+
+	baseFeesEst, quoteFeesEst, err := marketFees(m.core, host, baseID, quoteID, false)
+	if err != nil {
+		return nil, err
+	}
+
+	baseFeesMax, quoteFeesMax, err := marketFees(m.core, host, baseID, quoteID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -318,6 +329,14 @@ func (m *MarketMaker) MarketReport(base, quote uint32) (*MarketReport, error) {
 		Oracles:       oracles,
 		BaseFiatRate:  baseFiatRate,
 		QuoteFiatRate: quoteFiatRate,
+		BaseFees: &LotFeeRange{
+			Max:       baseFeesMax,
+			Estimated: baseFeesEst,
+		},
+		QuoteFees: &LotFeeRange{
+			Max:       quoteFeesMax,
+			Estimated: quoteFeesEst,
+		},
 	}, nil
 }
 
@@ -439,11 +458,11 @@ func botInitialBaseBalances(cfgs []*BotConfig, core clientCore, cexes map[string
 		return nil
 	}
 
-	calcBalance := func(balType BalanceType, balAmount, availableBal uint64) uint64 {
+	calcBalance := func(balType BalanceType, balAmount float64, availableBal uint64) uint64 {
 		if balType == Percentage {
-			return availableBal * balAmount / 100
+			return uint64(math.Round(float64(availableBal) * balAmount / 100))
 		}
-		return balAmount
+		return uint64(math.Round(balAmount))
 	}
 
 	for _, cfg := range cfgs {
@@ -501,15 +520,15 @@ func botInitialBaseBalances(cfgs []*BotConfig, core clientCore, cexes map[string
 				return err
 			}
 			tokenFeeAsset := dexBalanceTracker[token.ParentID]
-			tokenFeeAssetRequired := calcBalance(balType, balAmount, tokenFeeAsset.available)
+			dexBalances[mktID][token.ParentID] += calcBalance(balType, balAmount, tokenFeeAsset.available)
+			tokenFeeAssetRequired := dexBalances[mktID][token.ParentID]
 			if tokenFeeAssetRequired == 0 {
 				return fmt.Errorf("%s fee asset balance is zero for market %s", baseOrQuote, mktID)
 			}
 			if tokenFeeAssetRequired > tokenFeeAsset.available-tokenFeeAsset.reserved {
-				return fmt.Errorf("insufficient balance for asset %d", token.ParentID)
+				return fmt.Errorf("insufficient balance for fee asset %d", token.ParentID)
 			}
 			tokenFeeAsset.reserved += tokenFeeAssetRequired
-			dexBalances[mktID][token.ParentID] += tokenFeeAssetRequired
 			return nil
 		}
 		err = trackTokenFeeAsset(true)
@@ -1106,4 +1125,53 @@ func (m *MarketMaker) RunOverview(startTime int64, mkt *MarketWithHost) (*Market
 // the events including and after refID are returned.
 func (m *MarketMaker) RunLogs(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64) ([]*MarketMakingEvent, error) {
 	return m.eventLogDB.runEvents(startTime, mkt, n, refID, false)
+}
+
+// LotFees are the fees for trading one lot.
+type LotFees struct {
+	Swap   uint64 `json:"swap"`
+	Redeem uint64 `json:"redeem"`
+	Refund uint64 `json:"refund"`
+}
+
+// LotFeeRange combine the estimated and maximum LotFees.
+type LotFeeRange struct {
+	Max       *LotFees `json:"max"`
+	Estimated *LotFees `json:"estimated"`
+}
+
+// marketFees calculates the LotFees for the base and quote assets.
+func marketFees(c clientCore, host string, baseID, quoteID uint32, useMaxFeeRate bool) (baseFees, quoteFees *LotFees, _ error) {
+	buySwapFees, buyRedeemFees, buyRefundFees, err := c.SingleLotFees(&core.SingleLotFeesForm{
+		Host:          host,
+		Base:          baseID,
+		Quote:         quoteID,
+		UseMaxFeeRate: useMaxFeeRate,
+		UseSafeTxSize: true,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get buy single lot fees: %v", err)
+	}
+
+	sellSwapFees, sellRedeemFees, sellRefundFees, err := c.SingleLotFees(&core.SingleLotFeesForm{
+		Host:          host,
+		Base:          baseID,
+		Quote:         quoteID,
+		UseMaxFeeRate: useMaxFeeRate,
+		UseSafeTxSize: true,
+		Sell:          true,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get sell single lot fees: %v", err)
+	}
+
+	return &LotFees{
+			Swap:   sellSwapFees,
+			Redeem: buyRedeemFees,
+			Refund: sellRefundFees,
+		}, &LotFees{
+			Swap:   buySwapFees,
+			Redeem: sellRedeemFees,
+			Refund: buyRefundFees,
+		}, nil
 }
