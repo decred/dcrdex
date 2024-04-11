@@ -191,9 +191,9 @@ func (p *provider) bestHeader(ctx context.Context, log dex.Logger) (*types.Heade
 	timeDiff := time.Now().Unix() - int64(hdr.Time)
 	if timeDiff > dexeth.MaxBlockInterval && p.net != dex.Simnet {
 		p.setFailed()
-		return nil, fmt.Errorf("time since last eth block (%d sec) exceeds %d sec. "+
+		return nil, fmt.Errorf("time since last block (%d sec) exceeds %d sec. "+
 			"Assuming provider %s is not in sync. Ensure your computer's system clock "+
-			"is correct.", timeDiff, dexeth.MaxBlockInterval, p.host)
+			"is correct", timeDiff, dexeth.MaxBlockInterval, p.host)
 	}
 	p.setTip(hdr, log)
 	return hdr, nil
@@ -798,12 +798,7 @@ func failedProviders(succeeded []*provider, tried []string) string {
 	return strings.Join(notOK, " ")
 }
 
-func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]string, compat *CompatibilityData, walletDir string) error {
-	providerDef := settings[providersKey]
-	if len(providerDef) == 0 {
-		return errors.New("no providers specified")
-	}
-	endpoints := strings.Split(providerDef, " ")
+func (m *multiRPCClient) reconfigure(ctx context.Context, endpoints []string, compat *CompatibilityData, walletDir string) error {
 	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}

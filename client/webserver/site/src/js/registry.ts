@@ -1054,6 +1054,7 @@ export interface Application {
   getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
   clearTxHistory(assetID: number): void
   parentAsset(assetID: number): SupportedAsset
+  needsCustomProvider (assetID: number): Promise<boolean>
 }
 
 // TODO: Define an interface for Application?

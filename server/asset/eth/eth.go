@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 type VersionedToken struct {
@@ -133,7 +134,17 @@ type Driver struct {
 
 // Setup creates the ETH backend. Start the backend with its Run method.
 func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
-	return NewEVMBackend(cfg, dexeth.ContractAddresses, registeredTokens)
+	var chainID uint64
+	switch cfg.Net {
+	case dex.Mainnet:
+		chainID = params.MainnetChainConfig.ChainID.Uint64()
+	case dex.Testnet:
+		chainID = params.SepoliaChainConfig.ChainID.Uint64()
+	default:
+		chainID = 42
+	}
+
+	return NewEVMBackend(cfg, chainID, dexeth.ContractAddresses, registeredTokens)
 }
 
 type TokenDriver struct {
@@ -323,6 +334,7 @@ func parseEndpoints(cfg *asset.BackendConfig) ([]endpoint, error) {
 // Backend.
 func NewEVMBackend(
 	cfg *asset.BackendConfig,
+	chainID uint64,
 	contractAddrs map[uint32]map[dex.Network]common.Address,
 	vTokens map[uint32]*VersionedToken,
 ) (*ETHBackend, error) {
@@ -349,7 +361,7 @@ func NewEVMBackend(
 		return nil, err
 	}
 
-	eth.node = newRPCClient(baseChainID, net, endpoints, contractAddr, log.SubLogger("RPC"))
+	eth.node = newRPCClient(baseChainID, chainID, net, endpoints, contractAddr, log.SubLogger("RPC"))
 	return eth, nil
 }
 

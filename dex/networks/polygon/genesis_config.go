@@ -54,6 +54,25 @@ var (
 		LondonBlock:         big.NewInt(22640000),
 	}
 
+	// Called BorTestChainConfig in maticnetwork/bor/params/config.go
+	AmoyChainConfig = &params.ChainConfig{
+		ChainID:             big.NewInt(80002),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      true,
+		EIP150Hash:          common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+	}
+
 	// BorMainnetChainConfig is the genesis block of the Bor Mainnet network.
 	// This is a copy of the genesis block from
 	// https://github.com/maticnetwork/bor/blob/891ec7fef619cac0a796e3e29d5b2d4c095bdd9b/params/config.go#L395.

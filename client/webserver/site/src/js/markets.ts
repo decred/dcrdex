@@ -264,6 +264,8 @@ export default class MarketsPage extends BasePage {
       bind(wgt.quote.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.quote) })
       bind(wgt.base.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.base.id) })
       bind(wgt.quote.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.quote.id) })
+      bind(wgt.base.tmpl.wantProviders, 'click', () => { this.showCustomProviderDialog(this.market.base.id) })
+      bind(wgt.quote.tmpl.wantProviders, 'click', () => { this.showCustomProviderDialog(this.market.quote.id) })
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
@@ -2402,6 +2404,10 @@ export default class MarketsPage extends BasePage {
     this.showForm(this.page.deposit)
   }
 
+  showCustomProviderDialog (assetID: number) {
+    app().loadPage('wallets', { promptProvider: assetID, goBack: 'markets' })
+  }
+
   /*
    * handlePriceUpdate is the handler for the 'spots' notification.
    */
@@ -3273,8 +3279,9 @@ class BalanceWidget {
     // Just hide everything to start.
     Doc.hide(
       tmpl.newWalletRow, tmpl.expired, tmpl.unsupported, tmpl.connect, tmpl.spinner,
-      tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr
+      tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr, tmpl.wantProvidersBox
     )
+    this.checkNeedsProvider(assetID, tmpl.wantProvidersBox)
     tmpl.logo.src = Doc.logoPath(cfg.symbol)
     tmpl.addWalletSymbol.textContent = cfg.symbol.toUpperCase()
     Doc.empty(tmpl.symbol)
@@ -3344,6 +3351,10 @@ class BalanceWidget {
       Doc.show(tmpl.expired)
       if (wallet.running) app().fetchBalance(assetID)
     } else Doc.hide(tmpl.expired)
+  }
+
+  async checkNeedsProvider (assetID: number, el: PageElement) {
+    Doc.setVis(await app().needsCustomProvider(assetID), el)
   }
 
   /* updateParent updates the side's parent asset balance. */

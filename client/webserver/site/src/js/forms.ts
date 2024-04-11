@@ -2228,7 +2228,7 @@ export class TokenApprovalForm {
     const { page, parentID, txFee } = this
     if (n.assetID !== parentID) return
     page.balance.textContent = Doc.formatCoinValue(n.balance.available, app().assets[parentID].unitInfo)
-    if (n.balance.available < txFee) {
+    if (n.balance.available >= txFee) {
       Doc.hide(page.addressBox)
     } else Doc.hide(page.errMsg)
   }

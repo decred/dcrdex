@@ -104,21 +104,25 @@ var Tokens = map[uint32]*Token{
 				},
 			},
 			dex.Testnet: {
-				Address: common.HexToAddress("0x07865c6e87b9f70255377e024ace6630c1eaa37f"),
+				Address: common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"),
 				SwapContracts: map[uint32]*SwapContract{
 					0: {
-						Address: common.HexToAddress("0xA7Af47DB3296206eA543A82ffBF7Fc312698E6C9"),
+						Address: common.HexToAddress("0xFDEF71277d4518Ca3373CA06562100FDB0050211"), // tx 0x29e0e146e8c956156f61e86b970de97eb8958bf10671018085dd4816c566a2a3
 						Gas: Gases{
 							// Results from client's GetGasEstimates.
 							//
-							// First swap used 170853 gas
-							//   4 additional swaps averaged 112583 gas each
-							//   [170853 283439 396025 508563 621185]
-							// First redeem used 83874 gas
-							//   4 additional redeems averaged 31641 gas each
-							//   [83874 115518 147138 178747 210439]
-							// Average of 5 refunds: 64334
-							//   [64337 64337 64337 64337 64325]
+							// First swap used 184413 gas Recommended Gases.Swap = 239736
+							// 	2 additional swaps averaged 112591 gas each. Recommended Gases.SwapAdd = 146368
+							// 	[184413 297004 409595]
+							// First redeem used 75659 gas. Recommended Gases.Redeem = 98356
+							// 	2 additional redeems averaged 31617 gas each. recommended Gases.RedeemAdd = 41102
+							// 	[75659 107276 138893]
+							// Average of 3 refunds: 61022. Recommended Gases.Refund = 79328
+							// 	[60829 61410 60829]
+							// Average of 2 approvals: 55773. Recommended Gases.Approve = 72504
+							// 	[55773 55773]
+							// Average of 1 transfers: 62135. Recommended Gases.Transfer = 80775
+							// 	[62135]
 							//
 							// Approve is the gas used to call the approve
 							// method of the contract. For Approve transactions,
@@ -143,8 +147,8 @@ var Tokens = map[uint32]*Token{
 							Swap:      242_000, // actual ~187,880 -- https://goerli.etherscan.io/tx/0x352baccafa96bb09d5c118f8dcce26e34267beb8bcda9c026f8d5353abea50fd, verified on mainnet at 188,013 gas
 							SwapAdd:   146_400, // actual ~112,639 (300,519 for 2) -- https://goerli.etherscan.io/tx/0x97f9a1ed69883a6e701f37883ef74d79a709e0edfc4a45987fa659700663f40e
 							Redeem:    109_000, // actual ~83,850 (initial receive, subsequent ~79,012) -- https://goerli.etherscan.io/tx/0x96f007036b01eb2e44615dc67d3e99748bc133496187348b2af26834f46bfdc8, verified on mainnet at 79,113 gas for subsequent
-							RedeemAdd: 31_600,  // actual ~31,641 (110,653 for 2) -- https://goerli.etherscan.io/tx/0xcf717512796868273ed93c37fa139973c9b8305a736c4a3b50ac9f35ae747f99
-							Refund:    77_000,  // actual ~59,152 -- https://goerli.etherscan.io/tx/0xc5692ad0e6d86b721af75ff3b4b7c2e17d939918db030ebf5444ccf840c7a90b
+							RedeemAdd: 41_102,  // actual ~31,641 (110,653 for 2) -- https://goerli.etherscan.io/tx/0xcf717512796868273ed93c37fa139973c9b8305a736c4a3b50ac9f35ae747f99
+							Refund:    79_328,  // actual ~59,152 -- https://goerli.etherscan.io/tx/0xc5692ad0e6d86b721af75ff3b4b7c2e17d939918db030ebf5444ccf840c7a90b
 							Approve:   78_400,  // actual ~60,190 (initial) -- https://goerli.etherscan.io/tx/0xd695fd174dede7bb798488ead7fed5ef33bcd79932b0fa35db0d17c84c97a8a1, verified on mainnet at 60,311
 							Transfer:  85_100,  // actual ~65,524 (initial receive, subsequent 48,424)
 						},

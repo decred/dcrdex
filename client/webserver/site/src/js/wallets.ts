@@ -199,10 +199,21 @@ interface TicketPagination {
   scanned: boolean // Reached the end of history. All tickets cached.
 }
 
+interface WalletsPageData {
+  promptProvider?: number
+  goBack?: string
+}
+
+interface reconfigSettings {
+  skipAnimation?: boolean
+  elevateProviders?: boolean
+}
+
 let net = 0
 
 export default class WalletsPage extends BasePage {
   body: HTMLElement
+  data?: WalletsPageData
   page: Record<string, PageElement>
   assetButtons: Record<number, AssetButton>
   newWalletForm: NewWalletForm
@@ -230,9 +241,10 @@ export default class WalletsPage extends BasePage {
   mixerToggle: AniToggle
   mixCertPicker: CertificatePicker
 
-  constructor (body: HTMLElement) {
+  constructor (body: HTMLElement, data?: WalletsPageData) {
     super()
     this.body = body
+    this.data = data
     const page = this.page = Doc.idDescendants(body)
     net = app().user.net
 
@@ -345,6 +357,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.privacyInfoBttn, 'click', () => { this.showForm(page.mixingInfo) })
     Doc.bind(page.mixingOffGo, 'click', () => { this.turnPrivacyOff() })
     Doc.bind(page.mixingOffNo, 'click', () => { this.closePopups() })
+    Doc.bind(page.needsProviderBttn, 'click', () => { this.promptProvider(this.selectedAssetID) })
 
     this.mixCertPicker = new CertificatePicker(page.mixAddrInputBox)
 
@@ -393,7 +406,7 @@ export default class WalletsPage extends BasePage {
         Doc.show(page.changeWalletType, page.changeTypeHideIcon)
         Doc.hide(page.changeTypeShowIcon)
         page.changeTypeMsg.textContent = intl.prep(intl.ID_KEEP_WALLET_TYPE)
-      } else this.showReconfig(this.selectedAssetID, true)
+      } else this.showReconfig(this.selectedAssetID, { skipAnimation: true })
     })
 
     app().registerNoteFeeder({
@@ -406,6 +419,12 @@ export default class WalletsPage extends BasePage {
     })
 
     const firstAsset = this.sortAssetButtons()
+
+    if (data?.promptProvider) {
+      this.promptProvider(data.promptProvider)
+      return
+    }
+
     let selectedAsset = firstAsset.id
     const assetIDStr = State.fetchLocal(State.selectedAssetLK)
     if (assetIDStr) selectedAsset = Number(assetIDStr)
@@ -936,17 +955,25 @@ export default class WalletsPage extends BasePage {
     } else Doc.show(tmpl.noWallet)
   }
 
-  setSelectedAsset (assetID: number) {
+  async setSelectedAsset (assetID: number) {
     const { assetSelect } = this.page
     for (const b of assetSelect.children) b.classList.remove('selected')
     this.assetButtons[assetID].bttn.classList.add('selected')
     this.selectedAssetID = assetID
     this.updateDisplayedAsset(assetID)
     this.showAvailableMarkets(assetID)
-    this.showRecentActivity(assetID)
-    this.showTxHistory(assetID)
-    this.updateTicketBuyer(assetID)
-    this.updatePrivacy(assetID)
+    const a = this.showRecentActivity(assetID)
+    const b = this.showTxHistory(assetID)
+    const c = this.updateTicketBuyer(assetID)
+    const d = this.updatePrivacy(assetID)
+    for (const p of [a, b, c, d]) await p
+  }
+
+  async promptProvider (assetID: number) {
+    const { token } = app().assets[assetID]
+    assetID = token ? token.parentID : assetID
+    await this.setSelectedAsset(assetID)
+    this.showReconfig(assetID, { elevateProviders: true })
   }
 
   updateDisplayedAsset (assetID: number) {
@@ -959,8 +986,10 @@ export default class WalletsPage extends BasePage {
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox
+      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox,
+      page.needsProviderBttn
     )
+    this.checkNeedsProvider(assetID)
     if (token) {
       const parentAsset = app().assets[token.parentID]
       page.tokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
@@ -989,6 +1018,18 @@ export default class WalletsPage extends BasePage {
     } else Doc.show(page.createWalletBox) // no wallet
 
     page.walletDetailsBox.classList.remove('invisible')
+  }
+
+  async checkNeedsProvider (assetID: number) {
+    const needs = await app().needsCustomProvider(assetID)
+    const bttn = this.page.needsProviderBttn
+    Doc.setVis(needs, bttn)
+    if (!needs) return
+    const [r, g, b] = State.isDark() ? [255, 255, 255] : [0, 0, 0]
+    const cycles = 2
+    Doc.animate(1000, (p: number) => {
+      bttn.style.outline = `2px solid rgba(${r}, ${g}, ${b}, ${(cycles - p * cycles) % 1})`
+    })
   }
 
   async updateTicketBuyer (assetID: number) {
@@ -2059,7 +2100,7 @@ export default class WalletsPage extends BasePage {
   }
 
   /* Show the form used to change wallet configuration settings. */
-  async showReconfig (assetID: number, skipAnimation?: boolean) {
+  async showReconfig (assetID: number, cfg?: reconfigSettings) {
     const page = this.page
     Doc.hide(
       page.changeWalletType, page.changeTypeHideIcon, page.reconfigErr,
@@ -2086,6 +2127,10 @@ export default class WalletsPage extends BasePage {
       }
     }
 
+    if (cfg?.elevateProviders) {
+      for (const opt of (currentDef.configopts)) if (opt.key === 'providers') opt.required = true
+    }
+
     const wallet = app().walletMap[assetID]
     Doc.setVis(wallet.traits & traitLogFiler, page.downloadLogs)
     Doc.setVis(wallet.traits & traitRecoverer, page.recoverWallet)
@@ -2103,7 +2148,7 @@ export default class WalletsPage extends BasePage {
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.name
-    if (!skipAnimation) this.showForm(page.reconfigForm)
+    if (!cfg?.skipAnimation) this.showForm(page.reconfigForm)
     const loaded = app().loading(page.reconfigForm)
     const res = await postJSON('/api/walletsettings', { assetID })
     loaded()
@@ -2352,11 +2397,16 @@ export default class WalletsPage extends BasePage {
       Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
+    if (this.data?.promptProvider && this.data?.goBack) {
+      app().loadPage(this.data.goBack)
+      return
+    }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RECONFIG_SUCCESS))
     this.updateTicketBuyer(assetID)
     app().clearTxHistory(assetID)
     this.showTxHistory(assetID)
     this.updatePrivacy(assetID)
+    this.checkNeedsProvider(assetID)
   }
 
   /* lock instructs the API to lock the wallet. */
