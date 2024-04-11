@@ -1150,10 +1150,6 @@ var plPL = map[Topic]*translation{
 		subject:  intl.Translation{T: "Znaleziono nieznaną kaucję"},
 		template: intl.Translation{T: "Znaleziono nieznane kaucje %s i dodano je do aktywnych, ale Twój poziom handlu dla %s wynosi zero. Ustaw poziom docelowy w menu Ustawień, aby podtrzymać kaucje poprzez autoodnawianie."},
 	},
-	TopicShieldedSendSuccess: {
-		subject:  intl.Translation{T: "Wysyłka osłoniętych środków powiodła się"},
-		template: intl.Translation{T: "Wysłano %s %s na adres %s: %s"},
-	},
 	TopicDexAuthErrorBond: {
 		subject:  intl.Translation{T: "Błąd uwierzytelnienia"},
 		template: intl.Translation{T: "Kaucja została potwierdzona, ale uwierzytelnienie połączenia nie powiodło się: %v"},
@@ -1765,10 +1761,6 @@ var ar = map[Topic]*translation{
 	TopicBondConfirmed: {
 		subject:  intl.Translation{T: "تم تأكيد السند"},
 		template: intl.Translation{T: "الفئة الجديدة = %d (الهدف = %d)."},
-	},
-	TopicShieldedSendSuccess: {
-		subject:  intl.Translation{T: "تم الإرسال المحجوب بنجاح"},
-		template: intl.Translation{T: "تم إرسال %s %s إلى %s: %s"},
 	},
 	TopicAsyncOrderFailure: {
 		subject:  intl.Translation{T: "خطأ في الطلب القيد التنفيذ"},
