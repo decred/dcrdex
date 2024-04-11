@@ -970,6 +970,8 @@ export default class WalletsPage extends BasePage {
   }
 
   async promptProvider (assetID: number) {
+    const { token } = app().assets[assetID]
+    assetID = token ? token.parentID : assetID
     await this.setSelectedAsset(assetID)
     this.showReconfig(assetID, { elevateProviders: true })
   }
@@ -2126,7 +2128,7 @@ export default class WalletsPage extends BasePage {
     }
 
     if (cfg?.elevateProviders) {
-      for (const opt of currentDef.configopts) if (opt.key === 'providers') opt.required = true
+      for (const opt of (currentDef.configopts)) if (opt.key === 'providers') opt.required = true
     }
 
     const wallet = app().walletMap[assetID]
