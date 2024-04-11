@@ -614,4 +614,5 @@ var EnUS = map[string]*intl.Translation{
 	"err_with_cex_creds":          {T: "There was an error encountered connecting with these credentials"},
 	"approve_token_wallet_addr":   {T: `<span data-tmpl="parentName" class="me-1"></span> address:`},
 	"Available fee balance":       {T: "Available fee balance"},
+	"add_provider_tooltip":        {T: "You are using the default set of public API providers. These providers could become outdated or unreliable. Specify your own trusted provider instead."},
 }

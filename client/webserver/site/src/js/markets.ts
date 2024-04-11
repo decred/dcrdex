@@ -3279,9 +3279,9 @@ class BalanceWidget {
     // Just hide everything to start.
     Doc.hide(
       tmpl.newWalletRow, tmpl.expired, tmpl.unsupported, tmpl.connect, tmpl.spinner,
-      tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr, tmpl.wantProviders
+      tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr, tmpl.wantProvidersBox
     )
-    this.checkNeedsProvider(assetID, tmpl.wantProviders)
+    this.checkNeedsProvider(assetID, tmpl.wantProvidersBox)
     tmpl.logo.src = Doc.logoPath(cfg.symbol)
     tmpl.addWalletSymbol.textContent = cfg.symbol.toUpperCase()
     Doc.empty(tmpl.symbol)
