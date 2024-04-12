@@ -22,6 +22,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/db"
 	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/market"
@@ -69,6 +70,7 @@ type SvrCore interface {
 	SuspendMarket(name string, tSusp time.Time, persistBooks bool) (*market.SuspendEpoch, error)
 	ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time, err error)
 	ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error)
+	AccountMatchOutcomesN(user account.AccountID, n int) ([]*auth.MatchOutcome, error)
 	BookOrders(base, quote uint32) (orders []*order.LimitOrder, err error)
 	EpochOrders(base, quote uint32) (orders []order.Order, err error)
 	MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*dexsrv.MatchData) error) (int, error)
@@ -147,6 +149,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/enabledataapi/{"+yesKey+"}", s.apiEnableDataAPI)
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
+			rm.Get("/outcomes", s.apiMatchOutcomes)
 			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
 		})

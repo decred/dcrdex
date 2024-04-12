@@ -574,6 +574,29 @@ func (s *Server) apiForgiveMatchFail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
+func (s *Server) apiMatchOutcomes(w http.ResponseWriter, r *http.Request) {
+	acctIDStr := chi.URLParam(r, accountIDKey)
+	acctID, err := decodeAcctID(acctIDStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var n int = 100
+	if nStr := r.URL.Query().Get("n"); nStr != "" {
+		n, err = strconv.Atoi(nStr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	outcomes, err := s.core.AccountMatchOutcomesN(acctID, n)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, outcomes)
+}
+
 func toNote(r *http.Request) (*msgjson.Message, int, error) {
 	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
