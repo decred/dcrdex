@@ -161,7 +161,7 @@ func New(cfg *Config) (*Tatanka, error) {
 			return nil, fmt.Errorf("GeneratePrivateKey error: %w", err)
 		}
 		keyB = priv.Serialize()
-		if os.WriteFile(keyPath, keyB, 0600); err != nil {
+		if err = os.WriteFile(keyPath, keyB, 0600); err != nil {
 			return nil, fmt.Errorf("error writing newly-generated key to %q: %v", keyPath, err)
 		}
 	}

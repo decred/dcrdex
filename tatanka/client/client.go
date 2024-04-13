@@ -369,7 +369,7 @@ func (c *TankaClient) emit(thing interface{}) {
 	}
 }
 
-func (c *TankaClient) handleMarketBroadcast(tt *tatanka, bcast *mj.Broadcast) {
+func (c *TankaClient) handleMarketBroadcast(_ *tatanka, bcast *mj.Broadcast) {
 	mktName := string(bcast.Subject)
 	c.marketsMtx.RLock()
 	mkt, found := c.markets[mktName]
