@@ -1224,7 +1224,7 @@ export class FeeAssetSelectionForm {
   }
 
   async submitPrepaidBond () {
-    const { page, host } = this
+    const { page, host, pwCache } = this
     Doc.hide(page.prepaidBondErr)
     const code = page.prepaidBondCode.value
     if (!code) {
@@ -1232,7 +1232,7 @@ export class FeeAssetSelectionForm {
       Doc.show(page.prepaidBondErr)
       return
     }
-    const appPW = page.prepaidBondPW.value || ''
+    const appPW = page.prepaidBondPW.value || (pwCache ? pwCache.pw : '')
     const res = await postJSON('/api/redeemprepaidbond', { appPW, host, code, cert: this.certFile })
     if (!app().checkResponse(res)) {
       page.prepaidBondErr.textContent = res.msg
