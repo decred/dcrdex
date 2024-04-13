@@ -322,6 +322,14 @@
                   </table>
                   <div class="flex-stretch-column mt-3 p-2 border">
                     <div class="d-flex justify-content-between align-items-center">
+                      <span>[[[profit_loss]]]</span>
+                      <span>
+                        <span data-tmpl="profitLoss"></span>
+                        <span class="fs14 grey">USD</span>
+                      </span>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center">
                       <span>[[[Booked orders]]]</span>
                       <span data-tmpl="nBookedOrders"></span>
                     </div>
@@ -377,14 +385,20 @@
                     </div>
 
                     <div class="d-flex justify-content-between align-items-center">
-                      <span>[[[Fee gap]]]</span>
+                      <span>
+                        [[[Fee gap]]]
+                        <span class="ico-info" data-tooltip="[[[feegap_tooltip]]]"></span>
+                      </span>
                       <span>
                         <span data-tmpl="feeGap"></span> (<span data-tmpl="feeGapPct"></span>%)
                       </span>
                     </div>
 
                     <div data-tmpl="remoteGapBox" class="d-flex justify-content-between align-items-center">
-                      <span>[[[Remote gap]]]</span>
+                      <span>
+                        [[[Remote gap]]]
+                        <span class="ico-info" data-tooltip="[[[remotegap_tooltip]]]"></span>
+                      </span>
                       <span>
                         <span data-tmpl="remoteGap"></span> (<span data-tmpl="remoteGapPct"></span>%)
                       </span>
@@ -399,7 +413,7 @@
                     </div>
                   </div>
                 </div>
-                
+
                 <span class="fs14 grey mt-3 pt-2 border-top">[[[cannot_manually_trade]]]</span>
               </div>
 

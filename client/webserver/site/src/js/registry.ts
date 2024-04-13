@@ -799,6 +799,7 @@ export interface RunStats {
   dexBalances: Record<number, BotBalance>
   cexBalances: Record<number, BotBalance>
   profitLoss: number
+  profitRatio: number
   startTime: number
   pendingDeposits: number
   pendingWithdrawals: number

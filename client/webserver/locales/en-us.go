@@ -628,4 +628,6 @@ var EnUS = map[string]*intl.Translation{
 	"Fee gap":                     {T: "Fee gap"},
 	"Remote gap":                  {T: "Remote gap"},
 	"Round_trip fees":             {T: "Round-trip fees"},
+	"feegap_tooltip":              {T: "The rate adjustment necessary to account for on-chain tx fees"},
+	"remotegap_tooltip":           {T: "The buy-sell spread on the linked cex market"},
 }

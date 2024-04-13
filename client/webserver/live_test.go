@@ -2123,9 +2123,9 @@ type TMarketMaker struct {
 
 func tLotFees() *mm.LotFees {
 	return &mm.LotFees{
-		Swap:   randomBalance(0).Available / 100,
-		Redeem: randomBalance(0).Available / 100,
-		Refund: randomBalance(0).Available / 100,
+		Swap:   randomBalance() / 100,
+		Redeem: randomBalance() / 100,
+		Refund: randomBalance() / 100,
 	}
 }
 
@@ -2258,7 +2258,8 @@ func (m *TMarketMaker) Status() *mm.Status {
 					botCfg.BaseID:  &mm.BotBalance{Available: randomBalance()},
 					botCfg.QuoteID: &mm.BotBalance{Available: randomBalance()},
 				},
-				ProfitLoss:         rand.Float64() * 0.2,
+				ProfitLoss:         rand.Float64()*1e6 - 5e5,
+				ProfitRatio:        rand.Float64()*0.4 - 0.2,
 				StartTime:          time.Now().Add(-time.Hour).Unix(),
 				PendingDeposits:    rand.Intn(3),
 				PendingWithdrawals: rand.Intn(3),
@@ -2373,7 +2374,8 @@ func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm
 		Cfg:             randomBotConfig(mkt),
 		InitialBalances: make(map[uint32]uint64),
 		FinalBalances:   make(map[uint32]uint64),
-		ProfitLoss:      rand.Float64() * 0.2,
+		ProfitLoss:      rand.Float64()*1e6 - 5e5,
+		ProfitRatio:     rand.Float64()*0.4 - 0.2,
 	}
 
 	for _, assetID := range []uint32{mkt.BaseID, mkt.QuoteID} {

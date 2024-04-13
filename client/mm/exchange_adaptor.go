@@ -200,8 +200,11 @@ type unifiedExchangeAdaptor struct {
 		baseFees          atomic.Uint64 // unused
 		quoteFees         atomic.Uint64 // unused
 		completedMatches  atomic.Uint32
-		tradedUSD         atomic.Uint64
-		feeGapStats       atomic.Value
+		tradedUSD         struct {
+			sync.Mutex
+			v float64
+		}
+		feeGapStats atomic.Value
 	}
 }
 
@@ -2245,8 +2248,9 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 			fiatRates := u.fiatRates.Load().(map[uint32]float64)
 			if r := fiatRates[u.botCfg.BaseID]; r > 0 && note.Match != nil {
 				ui, _ := asset.UnitInfo(u.botCfg.BaseID)
-				tradedUSD := float64(note.Match.Qty) / float64(ui.Conventional.ConversionFactor) * r
-				u.runStats.tradedUSD.Add(math.Float64bits(tradedUSD))
+				u.runStats.tradedUSD.Lock()
+				u.runStats.tradedUSD.v += float64(note.Match.Qty) / float64(ui.Conventional.ConversionFactor) * r
+				u.runStats.tradedUSD.Unlock()
 			}
 		}
 	case *core.FiatRatesNote:
@@ -2380,6 +2384,7 @@ type RunStats struct {
 	DEXBalances        map[uint32]*BotBalance `json:"dexBalances"`
 	CEXBalances        map[uint32]*BotBalance `json:"cexBalances"`
 	ProfitLoss         float64                `json:"profitLoss"`
+	ProfitRatio        float64                `json:"profitRatio"`
 	StartTime          int64                  `json:"startTime"`
 	PendingDeposits    int                    `json:"pendingDeposits"`
 	PendingWithdrawals int                    `json:"pendingWithdrawals"`
@@ -2388,9 +2393,7 @@ type RunStats struct {
 	FeeGap             *FeeGapStats           `json:"feeGap"`
 }
 
-func calcRunProfitLoss(initialBalances, finalBalances map[uint32]uint64, fiatRates map[uint32]float64) float64 {
-	var profitLoss float64
-
+func calcRunProfitLoss(initialBalances, finalBalances map[uint32]uint64, fiatRates map[uint32]float64) (deltaUSD, profitRatio float64) {
 	assetIDs := make(map[uint32]struct{}, len(initialBalances))
 	for assetID := range initialBalances {
 		assetIDs[assetID] = struct{}{}
@@ -2407,6 +2410,8 @@ func calcRunProfitLoss(initialBalances, finalBalances map[uint32]uint64, fiatRat
 		return float64(amount) / float64(unitInfo.Conventional.ConversionFactor), nil
 	}
 
+	var initialBalanceUSD, finalBalanceUSD float64
+
 	for assetID := range assetIDs {
 		initialBalance, err := convertToConventional(assetID, int64(initialBalances[assetID]))
 		if err != nil {
@@ -2422,10 +2427,11 @@ func calcRunProfitLoss(initialBalances, finalBalances map[uint32]uint64, fiatRat
 			continue
 		}
 
-		profitLoss += (finalBalance - initialBalance) * fiatRate
+		initialBalanceUSD += initialBalance * fiatRate
+		finalBalanceUSD += finalBalance * fiatRate
 	}
 
-	return profitLoss
+	return finalBalanceUSD - initialBalanceUSD, (finalBalanceUSD / initialBalanceUSD) - 1
 }
 
 func (u *unifiedExchangeAdaptor) stats() (*RunStats, error) {
@@ -2453,18 +2459,24 @@ func (u *unifiedExchangeAdaptor) stats() (*RunStats, error) {
 		feeGap = feeGapI.(*FeeGapStats)
 	}
 
+	profitLoss, profitRatio := calcRunProfitLoss(u.initialBalances, totalBalances, fiatRates)
+	u.runStats.tradedUSD.Lock()
+	tradedUSD := u.runStats.tradedUSD.v
+	u.runStats.tradedUSD.Unlock()
+
 	// Effects of pendingWithdrawals are applied when the withdrawal is
 	// complete.
 	return &RunStats{
 		InitialBalances:    u.initialBalances,
 		DEXBalances:        dexBalances,
 		CEXBalances:        cexBalances,
-		ProfitLoss:         calcRunProfitLoss(u.initialBalances, totalBalances, fiatRates),
+		ProfitLoss:         profitLoss,
+		ProfitRatio:        profitRatio,
 		StartTime:          u.startTime.Load(),
 		PendingDeposits:    len(u.pendingDeposits),
 		PendingWithdrawals: len(u.pendingWithdrawals),
 		CompletedMatches:   u.runStats.completedMatches.Load(),
-		TradedUSD:          math.Float64frombits(u.runStats.tradedUSD.Load()),
+		TradedUSD:          tradedUSD,
 		FeeGap:             feeGap,
 	}, nil
 }

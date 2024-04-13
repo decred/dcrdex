@@ -3626,8 +3626,8 @@ class MarketMakerDisplay {
   async updateBalances () {
     const { div, page, baseID, quoteID, bui, qui } = this.stuff()
 
-    Doc.hide(page.stats, page.cexRow)
     const status = await this.runningMarketStatus()
+    Doc.hide(page.stats, page.cexRow)
     if (!status || !status.runStats) {
       if (this.ticker) {
         clearInterval(this.ticker)
@@ -3638,7 +3638,8 @@ class MarketMakerDisplay {
     const { botCfg: { cexCfg }, runStats } = status
     Doc.show(page.stats)
 
-    page.profit.textContent = runStats.profitLoss.toFixed(1)
+    page.profit.textContent = runStats.profitRatio.toFixed(1)
+    page.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss)
     this.startTime = runStats.startTime
     if (!this.ticker) {
       this.setTicker()
@@ -3679,9 +3680,9 @@ class MarketMakerDisplay {
 
   updateStats (runStats: RunStats) {
     const { page, baseID, quoteID, bui } = this.stuff()
-    page.pendingDeposits.textContent = String(runStats.pendingDeposits)
-    page.pendingWithdrawals.textContent = String(runStats.pendingWithdrawals)
-    page.completedMatches.textContent = String(runStats.completedMatches)
+    page.pendingDeposits.textContent = String(Math.round(runStats.pendingDeposits))
+    page.pendingWithdrawals.textContent = String(Math.round(runStats.pendingWithdrawals))
+    page.completedMatches.textContent = String(Math.round(runStats.completedMatches))
     Doc.setVis(runStats.tradedUSD, page.tradedUSDBox)
     if (runStats.tradedUSD > 0) page.tradedUSD.textContent = Doc.formatFourSigFigs(runStats.tradedUSD)
     const baseFiatRate = app().fiatRatesMap[baseID]
