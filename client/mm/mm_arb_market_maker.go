@@ -365,14 +365,18 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 	buyIDs := a.core.MultiTrade(buys, false, a.cfg.DriftTolerance, currEpoch, a.dexReserves, a.cexReserves)
 	for i, id := range buyIDs {
 		if id != nil {
+			a.matchesMtx.Lock()
 			a.pendingOrders[*id] = buys[i].counterTradeRate
+			a.matchesMtx.Unlock()
 		}
 	}
 
 	sellIDs := a.core.MultiTrade(sells, true, a.cfg.DriftTolerance, currEpoch, a.dexReserves, a.cexReserves)
 	for i, id := range sellIDs {
 		if id != nil {
+			a.matchesMtx.Lock()
 			a.pendingOrders[*id] = sells[i].counterTradeRate
+			a.matchesMtx.Unlock()
 		}
 	}
 

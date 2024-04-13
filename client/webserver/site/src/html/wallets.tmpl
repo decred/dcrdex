@@ -27,8 +27,8 @@
         {{- /* WALLET DETAILS */ -}}
         <div class="position-relative col-24 col-xl-12 col-xxl-9 flex-stretch-column invisible" id="walletDetailsBox">
           <div class="column flex-stretch-column">
-          <section class="px-3"> <!-- TODO: Indent this section when there's no other UI work going on -->
-            <div class="d-flex justify-content-between align-items-center py-3">
+          <section> <!-- TODO: Indent this section when there's no other UI work going on -->
+            <div class="d-flex justify-content-between align-items-center p-3">
               <div class="flex-center lh1">
                 <img id="assetLogo">
                 <div class="ms-2 demi lh1" id="assetName" data-asset-name="1"></div>
@@ -55,7 +55,7 @@
               <button id="createWallet" class="large">[[[create_a_x_wallet]]]</button>
             </div>
 
-            <div class="flex-stretch-column flex-md-row border rounded3 mb-3" id="walletDetails">
+            <div class="flex-stretch-column flex-md-row" id="walletDetails">
               <div class="flex-stretch-column col-sm-24 col-md-12 pt-3" id="balanceBreakdownBox">
                 <div class="px-2">
                   <table id="balanceTable" class="nopadding w-100">
@@ -287,8 +287,8 @@
             {{- /* TRANSACTION HISTORY */ -}}
             <section id="txHistoryBox" class="flex-stretch-column">
               <h4 class="m-3">[[[asset_name tx_history]]]</h4>
-              <div id="txHistoryTableContainer" class="flex-stretch-column px-3 pb-3">
-                <table id="txHistoryTable" class="row-border border rounded3 mb-3">
+              <div id="txHistoryTableContainer" class="flex-stretch-column pb-3">
+                <table id="txHistoryTable" class="row-border border-top">
                   <thead>
                     <tr>
                       <th>[[[Type]]]</th>
@@ -334,8 +334,8 @@
             {{/* MARKETS */}}
             <section id="marketsOverviewBox">
               <h4 class="m-3">[[[asset_name Markets]]]</h4>
-              <div class="px-3">
-                <table class="row-border row-hover mb-3 border rounded3">
+              <div>
+                <table class="row-border row-hover border-top">
                   <thead>
                     <tr>
                       <th>[[[Market]]]</th>
@@ -373,8 +373,8 @@
             {{- /* RECENT ORDERS */ -}}
             <section id="orderActivityBox" class="d-flex flex-column w-100 invisible pb-3 border-bottom">
               <h4 class="m-3">[[[Recent asset_name Activity]]]</h4>
-              <div id="orderActivity" class="flex-stretch-column px-3">
-                <table id="ordersTable" class="row-border border rounded3">
+              <div id="orderActivity" class="flex-stretch-column">
+                <table id="ordersTable" class="row-border border-top">
                   <thead>
                     <tr>
                       <th>[[[Trade]]]</th>
@@ -638,7 +638,7 @@
       <h3>
         [[[manage_peers]]]
       </h3>
-      <table id="peersTable" class="row-border mb-3">
+      <table id="peersTable" class="row-border">
         <thead>
           <tr>
             <th class="text-nowrap">[[[address]]]</th>

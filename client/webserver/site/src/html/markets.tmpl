@@ -28,7 +28,7 @@
       <div class="flex-grow-1 overflow-y-hidden">
         <div id="marketListV1" class="stylish-overflow hoveronly overflow-x-hidden flex-stretch-column">
 
-          <div id="marketTmplV1" class="d-flex align-items-stretch py-2 px-3 border-bottom lh1 pointer hoverbg">
+          <div id="marketTmplV1" class="d-flex align-items-stretch p-2 border-bottom lh1 pointer hoverbg">
             <div class="d-flex flex-column">
               <div class="d-flex align-items-start justify-content-start flex-grow-1">
                 <img data-tmpl="baseIcon" class="mini-icon">
@@ -119,7 +119,7 @@
             <div class="stylish-overflow hoveronly overflow-x-hidden flex-grow-1 ordertable-wrap reversible">
 
               {{- /* SELL ORDER LIST */ -}}
-              <table class="compact ordertable row-hover">
+              <table class="compact row-hover lh1 fs15">
                 <tbody id="sellRows"></tbody>
               </table>
             </div>
@@ -136,18 +136,18 @@
             <div class="stylish-overflow hoveronly overflow-x-hidden flex-grow-1 ordertable-wrap">
 
               {{- /* BUY ORDER LIST */ -}}
-              <table class="compact row-hover ordertable buys">
+              <table class="compact row-hover buys lh1 fs15">
                 <tbody id="buyRows">
                   {{- /* This row is used by the app as a template. */ -}}
-                  <tr id="orderRowTmpl" class="px-2">
-                    <td class="ps-2">
+                  <tr id="orderRowTmpl" class="px-2 w-100">
+                    <td class="pe-2 w-100">
                       <div class="d-flex justify-content-start align-items-center">
                         <div data-tmpl="qty">-</div>
                         <small class="numorders lh1 rounded3 text-center ms-2" data-tmpl="numOrders">-</small>
                       </div>
                     </td>
                     <td class="text-end text-nowrap ps-2">
-                      <span class="text-end ico-check fs13 px-2 d-hide" data-tmpl="epoch"></span>
+                      <span class="text-end ico-check fs13 pe-1 d-hide" data-tmpl="epoch"></span>
                       <span data-tmpl="rate">-</span>
                     </td>
                   </tr>
@@ -549,9 +549,9 @@
               <a href="/orders" class="flex-center py-1 plainlink hoverbg">[[[view order history]]]</a>
 
               {{- /* RECENT MATCHES */ -}}
-              <div id=recentMatchesBox  class="flex-stretch-column px-3 pb-4 border-top">
+              <div id=recentMatchesBox  class="flex-stretch-column pb-4 border-top">
                 <div class="text-center fs20 my-3">[[[Recent Matches]]]</div>
-                <table id="recentMatchesTable" class="row-border row-hover compact">
+                <table id="recentMatchesTable" class="row-border row-hover lh1">
                   <thead>
                     <tr class="pointer">
                       <th data-ordercol="age" class="text-nowrap">[[[Age]]] <span class="ico-arrowdown"></span></th>

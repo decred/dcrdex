@@ -211,22 +211,6 @@ div[data-handler=markets] {
     }
   }
 
-  table.ordertable {
-    color: var(--text-color-secondary);
-
-    td:first-child {
-      width: 100%;
-    }
-
-    td:last-child {
-      min-width: 30px;
-    }
-
-    .ico-check {
-      color: #9b8c09;
-    }
-  }
-
   .markettab {
     height: 30px;
     border-style: none;
@@ -713,6 +697,7 @@ div[data-handler=markets] {
 
       tbody {
         display: flex;
+        align-items: stretch;
       }
 
       tbody#sellRows {

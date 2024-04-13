@@ -2,9 +2,9 @@
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="py-5 overflow-y-auto">
-  <div class="flex-stretch-column mw-425 mx-auto">
-    <div class="d-flex justify-content-start align-items-center pointer py-2">
-      <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 lh1"></span>
+  <section class="flex-stretch-column mw-425 mx-auto p-2">
+    <div class="d-flex justify-content-start align-items-center">
+      <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 lh1 hoverbg pointer p-2"></span>
     </div>
     <h1 class="text-center"><span class="ico-settings"></span></h1>
     <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
@@ -87,7 +87,7 @@
         <button id="updateHostBtn">[[[update dex host]]]</button>
       </div>
     </div>
-  </div>
+  </section>
 
   <div id="forms" class="d-hide">
     {{- /* DISABLE ACCOUNT */ -}}
