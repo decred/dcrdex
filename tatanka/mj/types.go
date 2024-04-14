@@ -46,6 +46,7 @@ const (
 	RoutePostBond    = "post_bond"
 	RouteSubscribe   = "subscribe"
 	RouteUnsubscribe = "unsubscribe"
+	RouteRates       = "rates"
 
 	// client1 <=> tatankanode <=> client2
 	RouteTankagram     = "tankagram"
@@ -55,7 +56,8 @@ const (
 )
 
 const (
-	TopicMarket = "market"
+	TopicMarket   = "market"
+	TopicFiatRate = "fiat_rate"
 )
 
 type BroadcastMessageType string
@@ -159,6 +161,12 @@ type FundedMessage struct {
 	AssetID uint32          `json:"assetID"`
 	Funding json.RawMessage `json:"funding"`
 	Msg     msgjson.Message `json:"msg"`
+}
+
+type RateMessage struct {
+	Topic   tanka.Topic   `json:"topic"`
+	Subject tanka.Subject `json:"subject"`
+	Value   float64       `json:"value"`
 }
 
 type Troll struct {

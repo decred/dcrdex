@@ -243,7 +243,32 @@ func mainErr() (err error) {
 		return errors.New("timed out waiting for SendTankagram to return")
 	}
 
+	// Fiat rate live test requires internet connection.
+	fmt.Println("Testing fiat rates...")
+
+	assetIDs := []uint32{147, 42, 0, 2, 60, 966001, 145, 5, 20, 3, 136, 966, 133} // supported dex assets
+	for _, assetID := range assetIDs {
+		if err := cl1.SubscribeToFiatRates(assetID); err != nil {
+			return err
+		}
+	}
+
+	// Wait for all rate messages.
+	for i := 0; i < len(assetIDs); i++ {
+		<-cl1.Next()
+	}
+
+	for _, assetID := range assetIDs {
+		// Check if rate has been cached.
+		fiatRate := cl1.FiatRate(assetID)
+		if fiatRate == 0 && assetID != 147 /* zcl */ { // Only CryptoCompare provides rate for zcl.
+			return fmt.Errorf("fiat rates not found for %s", dex.BipIDSymbol(assetID))
+		}
+	}
+
 	fmt.Println("!!!!!!!! Test Success !!!!!!!!")
+
+	cancel()
 
 	wg.Wait()
 

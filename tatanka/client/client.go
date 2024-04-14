@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/tatanka/mj"
 	"decred.org/dcrdex/tatanka/tanka"
@@ -211,6 +212,9 @@ type TankaClient struct {
 
 	marketsMtx sync.RWMutex
 	markets    map[string]*market
+
+	fiatRatesMtx sync.RWMutex
+	fiatRates    map[string]*fiatrates.FiatRateInfo
 }
 
 func New(cfg *Config) *TankaClient {
@@ -218,13 +222,14 @@ func New(cfg *Config) *TankaClient {
 	copy(peerID[:], cfg.PrivateKey.PubKey().SerializeCompressed())
 
 	c := &TankaClient{
-		log:      cfg.Logger,
-		peerID:   peerID,
-		priv:     cfg.PrivateKey,
-		tankas:   make(map[tanka.PeerID]*tatanka),
-		peers:    make(map[tanka.PeerID]*peer),
-		markets:  make(map[string]*market),
-		payloads: make(chan interface{}, 128),
+		log:       cfg.Logger,
+		peerID:    peerID,
+		priv:      cfg.PrivateKey,
+		tankas:    make(map[tanka.PeerID]*tatanka),
+		peers:     make(map[tanka.PeerID]*peer),
+		markets:   make(map[string]*market),
+		payloads:  make(chan interface{}, 128),
+		fiatRates: make(map[string]*fiatrates.FiatRateInfo),
 	}
 	c.prepareHandlers()
 	return c
@@ -241,6 +246,7 @@ func (c *TankaClient) prepareHandlers() {
 
 	c.notificationHandlers = map[string]func(*tatanka, *msgjson.Message){
 		mj.RouteBroadcast: c.handleBroadcast,
+		mj.RouteRates:     c.handleRates,
 	}
 }
 
@@ -359,6 +365,63 @@ func (c *TankaClient) handleBroadcast(tt *tatanka, msg *msgjson.Message) {
 		c.handleMarketBroadcast(tt, &bcast)
 	}
 	c.emit(bcast)
+}
+
+func (c *TankaClient) handleRates(tt *tatanka, msg *msgjson.Message) {
+	var rm mj.RateMessage
+	if err := msg.Unmarshal(&rm); err != nil {
+		c.log.Errorf("%s rate message unmarshal error: %w", err)
+		return
+	}
+	switch rm.Topic {
+	case mj.TopicFiatRate:
+		if rm.Value > 0 {
+			c.fiatRatesMtx.Lock()
+			c.fiatRates[string(rm.Subject)] = &fiatrates.FiatRateInfo{
+				Rate:       rm.Value,
+				LastUpdate: time.Now(),
+			}
+			c.fiatRatesMtx.Unlock()
+		}
+	}
+	c.emit(rm)
+}
+
+func (c *TankaClient) SubscribeToFiatRates(assetID uint32) error {
+	assetSymbol := dex.BipIDSymbol(assetID)
+
+	msg := mj.MustRequest(mj.RouteSubscribe, &mj.Subscription{
+		Topic:   mj.TopicFiatRate,
+		Subject: tanka.Subject(assetSymbol),
+	})
+
+	var nSuccessful int
+	for _, tt := range c.tankaNodes() {
+		var ok bool // true is only possible non-error payload.
+		if err := c.request(tt, msg, &ok); err != nil {
+			c.log.Errorf("Error subscribing to fiat rates for %s with %s: %w", assetSymbol, tt.peerID, err)
+			continue
+		}
+		nSuccessful++
+	}
+
+	if nSuccessful == 0 {
+		return fmt.Errorf("failed to subscribe to fiat rates for %s on any servers", assetSymbol)
+	}
+
+	return nil
+}
+
+func (c *TankaClient) FiatRate(assetID uint32) float64 {
+	c.fiatRatesMtx.RLock()
+	defer c.fiatRatesMtx.RUnlock()
+	sym := dex.BipIDSymbol(assetID)
+	rateInfo := c.fiatRates[sym]
+	if rateInfo != nil && time.Since(rateInfo.LastUpdate) < fiatrates.FiatRateDataExpiry && rateInfo.Rate > 0 {
+		return rateInfo.Rate
+	}
+
+	return 0
 }
 
 func (c *TankaClient) emit(thing interface{}) {

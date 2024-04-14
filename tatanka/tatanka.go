@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka/chain"
@@ -110,6 +111,8 @@ type Tatanka struct {
 
 	tatankasMtx sync.RWMutex
 	tatankas    map[tanka.PeerID]*remoteTatanka
+
+	fiatRateOracle *fiatrates.Oracle
 }
 
 // Config is the configuration of the Tatanka.
@@ -122,6 +125,8 @@ type Config struct {
 
 	// TODO: Change to whitelist
 	WhiteList []BootNode
+
+	FiatOracleCfg fiatrates.Config
 }
 
 func New(cfg *Config) (*Tatanka, error) {
@@ -184,20 +189,21 @@ func New(cfg *Config) (*Tatanka, error) {
 	}
 
 	t := &Tatanka{
-		net:           cfg.Net,
-		dataDir:       cfg.DataDir,
-		log:           cfg.Logger,
-		whitelist:     whitelist,
-		db:            db,
-		priv:          priv,
-		id:            peerID,
-		chains:        chains,
-		tatankas:      make(map[tanka.PeerID]*remoteTatanka),
-		clients:       make(map[tanka.PeerID]*client),
-		remoteClients: make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
-		topics:        make(map[tanka.Topic]*Topic),
-		recentRelays:  make(map[[32]byte]time.Time),
-		clientJobs:    make(chan *clientJob, 128),
+		net:            cfg.Net,
+		dataDir:        cfg.DataDir,
+		log:            cfg.Logger,
+		whitelist:      whitelist,
+		db:             db,
+		priv:           priv,
+		id:             peerID,
+		chains:         chains,
+		tatankas:       make(map[tanka.PeerID]*remoteTatanka),
+		clients:        make(map[tanka.PeerID]*client),
+		remoteClients:  make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
+		topics:         make(map[tanka.Topic]*Topic),
+		recentRelays:   make(map[[32]byte]time.Time),
+		clientJobs:     make(chan *clientJob, 128),
+		fiatRateOracle: fiatrates.NewFiatOracle(cfg.FiatOracleCfg),
 	}
 	t.nets.Store(nets)
 	t.prepareHandlers()
@@ -330,6 +336,17 @@ func (t *Tatanka) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 	go func() {
 		defer wg.Done()
 		t.runWhitelistLoop(ctx)
+	}()
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		t.fiatRateOracle.Run(t.ctx, t.log)
+	}()
+
+	go func() {
+		defer wg.Done()
+		t.broadcastRates()
 	}()
 
 	success = true
@@ -679,5 +696,46 @@ func (t *Tatanka) clientDisconnected(peerID tanka.PeerID) {
 	mj.SignMessage(t.priv, note)
 	for _, tt := range t.tatankaNodes() {
 		tt.Send(note)
+	}
+}
+
+// broadcastRates sends market rates to all fiat rate subscribers every 8
+// minutes. This method blocks and must be called from a goroutine.
+func (t *Tatanka) broadcastRates() {
+	const rateBroadcastInterval = 8 * time.Minute
+	ticker := time.NewTicker(rateBroadcastInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-t.ctx.Done():
+			return
+		case <-ticker.C:
+			t.broadcastFiatRates()
+		}
+	}
+}
+
+// broadcastFiatRates sends fiat rates update to all current subscribers.
+func (t *Tatanka) broadcastFiatRates() {
+	t.clientMtx.RLock()
+	defer t.clientMtx.RUnlock()
+	topic := t.topics[mj.TopicFiatRate]
+	if topic == nil {
+		return // no subscribers yet
+	}
+
+	for subject, subscribers := range topic.subjects {
+		rate := t.fiatRateOracle.Rate(string(subject))
+		if rate == 0 {
+			continue
+		}
+
+		msg := mj.MustNotification(mj.RouteRates, &mj.RateMessage{
+			Topic:   mj.TopicFiatRate,
+			Subject: subject,
+			Value:   rate,
+		})
+		t.batchSend(subscribers, msg)
 	}
 }
