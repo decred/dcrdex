@@ -84,9 +84,6 @@ const animationLength = 500
 const anHour = 60 * 60 * 1000 // milliseconds
 const maxUserOrdersShown = 10
 
-const check = document.createElement('span')
-check.classList.add('ico-check')
-
 const buyBtnClass = 'buygreen-bg'
 const sellBtnClass = 'sellred-bg'
 
@@ -276,7 +273,10 @@ export default class MarketsPage extends BasePage {
 
     // Prepare templates for the buy and sell tables and the user's order table.
     setOptionTemplates(page)
-    Doc.cleanTemplates(page.rowTemplate, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl, page.userOrderTmpl)
+    Doc.cleanTemplates(
+      page.orderRowTmpl, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl,
+      page.orderOptTmpl, page.userOrderTmpl, page.recentMatchesTemplate
+    )
 
     // Store the elements that need their ticker changed when the market
     // changes.
@@ -455,7 +455,7 @@ export default class MarketsPage extends BasePage {
       this.setDepthMarkers()
     })
 
-    const stats0 = page.marketStatsV1
+    const stats0 = page.marketStats
     const stats1 = stats0.cloneNode(true) as PageElement
     stats1.classList.add('listopen')
     Doc.hide(stats0, stats1)
@@ -1194,10 +1194,10 @@ export default class MarketsPage extends BasePage {
     while (this.hovers.length) (this.hovers.shift() as HTMLElement).classList.remove('hover')
     const page = this.page
     if (!r) {
-      Doc.hide(page.hoverData, page.depthHoverData)
+      Doc.hide(page.depthLegend)
       return
     }
-    Doc.show(page.hoverData, page.depthHoverData)
+    Doc.show(page.depthLegend)
 
     // If the user is hovered to within a small percent (based on chart width)
     // of a user order, highlight that order's row.
@@ -1226,10 +1226,10 @@ export default class MarketsPage extends BasePage {
   reportMouseCandle (candle: Candle | null) {
     const page = this.page
     if (!candle) {
-      Doc.hide(page.hoverData, page.candleHoverData)
+      Doc.hide(page.candlesLegend)
       return
     }
-    Doc.show(page.hoverData, page.candleHoverData)
+    Doc.show(page.candlesLegend)
     page.candleStart.textContent = Doc.formatCoinValue(candle.startRate / this.market.rateConversionFactor)
     page.candleEnd.textContent = Doc.formatCoinValue(candle.endRate / this.market.rateConversionFactor)
     page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / this.market.rateConversionFactor)
@@ -2940,7 +2940,7 @@ export default class MarketsPage extends BasePage {
      Takes a bin of orders with the same rate, and displays the total quantity.
    */
   orderTableRow (orderBin: MiniOrder[]): OrderRow {
-    const tr = this.page.rowTemplate.cloneNode(true) as OrderRow
+    const tr = this.page.orderRowTmpl.cloneNode(true) as OrderRow
     const { baseUnitInfo, quoteUnitInfo, rateConversionFactor, cfg: { ratestep: rateStep } } = this.market
     const manager = new OrderTableRowManager(tr, orderBin, baseUnitInfo, quoteUnitInfo, rateStep)
     tr.manager = manager
@@ -3416,6 +3416,7 @@ function wireOrder (order: TradeForm) {
 // are booked or still in the epoch queue are displayed in separate rows.
 class OrderTableRowManager {
   tableRow: HTMLElement
+  page: Record<string, PageElement>
   orderBin: MiniOrder[]
   sell: boolean
   msgRate: number
@@ -3424,51 +3425,38 @@ class OrderTableRowManager {
 
   constructor (tableRow: HTMLElement, orderBin: MiniOrder[], baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo, rateStep: number) {
     this.tableRow = tableRow
+    const page = this.page = Doc.parseTemplate(tableRow)
     this.orderBin = orderBin
     this.sell = orderBin[0].sell
     this.msgRate = orderBin[0].msgRate
     this.epoch = !!orderBin[0].epoch
     this.baseUnitInfo = baseUnitInfo
     const rateText = Doc.formatRateFullPrecision(this.msgRate, baseUnitInfo, quoteUnitInfo, rateStep)
-    this.setRateEl(rateText)
-    this.setEpochEl()
-    this.updateQtyNumOrdersEl()
-  }
-
-  // setEpochEl displays a checkmark in the row if the orders represented by
-  // this row are in the epoch queue.
-  setEpochEl () {
-    const epochEl = Doc.tmplElement(this.tableRow, 'epoch')
-    if (this.isEpoch()) epochEl.appendChild(check.cloneNode())
-  }
-
-  // setRateEl popuplates the rate element in the row.
-  setRateEl (rateText: string) {
-    const rateEl = Doc.tmplElement(this.tableRow, 'rate')
+    Doc.setVis(this.isEpoch(), this.page.epoch)
     if (this.msgRate === 0) {
-      rateEl.innerText = 'market'
+      page.rate.innerText = 'market'
     } else {
       const cssClass = this.isSell() ? 'sellcolor' : 'buycolor'
-      rateEl.innerText = rateText
-      rateEl.classList.add(cssClass)
+      page.rate.innerText = rateText
+      page.rate.classList.add(cssClass)
     }
+    this.updateQtyNumOrdersEl()
   }
 
   // updateQtyNumOrdersEl populates the quantity element in the row, and also
   // displays the number of orders if there is more than one order in the order
   // bin.
   updateQtyNumOrdersEl () {
-    const qty = this.orderBin.reduce((total, curr) => total + curr.qtyAtomic, 0)
-    const numOrders = this.orderBin.length
-    const qtyEl = Doc.tmplElement(this.tableRow, 'qty')
-    const numOrdersEl = Doc.tmplElement(this.tableRow, 'numorders')
-    qtyEl.innerText = Doc.formatFullPrecision(qty, this.baseUnitInfo)
+    const { page, orderBin } = this
+    const qty = orderBin.reduce((total, curr) => total + curr.qtyAtomic, 0)
+    const numOrders = orderBin.length
+    page.qty.innerText = Doc.formatFullPrecision(qty, this.baseUnitInfo)
     if (numOrders > 1) {
-      numOrdersEl.removeAttribute('hidden')
-      numOrdersEl.innerText = String(numOrders)
-      numOrdersEl.title = `quantity is comprised of ${numOrders} orders`
+      page.numOrders.removeAttribute('hidden')
+      page.numOrders.innerText = String(numOrders)
+      page.numOrders.title = `quantity is comprised of ${numOrders} orders`
     } else {
-      numOrdersEl.setAttribute('hidden', 'true')
+      page.numOrders.setAttribute('hidden', 'true')
     }
   }
 

@@ -12,11 +12,11 @@
   }
 
   &::-webkit-scrollbar-track {
-    background-color: var(--body-bg-tertiary);
+    background-color: var(--tertiary-bg);
   }
 
   &::-webkit-scrollbar-thumb {
-    background-color: var(--body-bg-tertiary);
+    background-color: var(--tertiary-bg);
     border-radius: 4px;
   }
 }

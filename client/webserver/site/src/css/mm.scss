@@ -16,10 +16,7 @@ div[data-handler=mm] {
   }
 
   .settings-card {
-    @include border;
-
-    background-color: var(--body-bg-secondary);
-    margin: 0 1rem 2rem;
+    background-color: var(--section-bg);
     padding: 0.5rem;
   }
 

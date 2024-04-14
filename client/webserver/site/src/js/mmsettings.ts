@@ -33,7 +33,7 @@ import { MM, CEXDisplayInfos, botTypeBasicArb, botTypeArbMM, botTypeBasicMM } fr
 import { Forms, bind as bindForm, NewWalletForm, TokenApprovalForm, DepositAddress } from './forms'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
-import { Chart, Region, Extents, Translator } from './charts'
+import { Chart, Region, Extents, Translator, clamp } from './charts'
 
 const GapStrategyMultiplier = 'multiplier'
 const GapStrategyAbsolute = 'absolute'
@@ -2938,9 +2938,9 @@ class PlacementsChart extends Chart {
     const defaultRange = 0.155
     const range = Math.max(minRange * 1.05, defaultRange)
 
-    // Increase height logarithmically from 100 to 1,000,000 USD.
+    // Increase data height logarithmically up to 1,000,000 USD.
     const maxCommitUSD = maxLots * baseFiatRate
-    const regionHeight = Math.max(0.5, Math.min(6, Math.log10(maxCommitUSD)) - 2) * (0.8 / 4)
+    const regionHeight = 0.2 + 0.7 * Math.log(clamp(maxCommitUSD, 0, 1e6)) / Math.log(1e6)
 
     // Draw a region in the middle representing the cex gap.
     const plotRegion = new Region(ctx, new Extents(0, canvas.width, 0, canvas.height))

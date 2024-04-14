@@ -2,13 +2,15 @@
 
 body:not(.dark) {
   // body & text
-  --text-color: #333;
   --body-bg: #fafafa;
-  --body-bg-secondary: #f0f0f0;
+  --section-bg: #f6f6f6;
+  --form-bg: #f0f0f0;
+  --tertiary-bg: #7772;
+  --text-color: #333;
   --text-color-secondary: #4a4949;
-  --body-bg-tertiary: #7772;
-  --border-color: #ddd;
   --text-danger: #d22;
+  --text-grey: #777;
+  --border-color: #ddd;
 
   // links
   --link-color: #2a71d5;
@@ -33,7 +35,7 @@ body:not(.dark) {
   --btn-go-color: #fff;
 
   // forms
-  --form-bg: #fafafae4;
+  --forms-bg: #fafafae4;
   --form-input-bg: #fff;
   --form-input-border: #999;
   --form-input-border-focus: #555;
@@ -65,13 +67,15 @@ body:not(.dark) {
 
 body.dark {
   // body & text
-  --body-bg: #091a28;
+  --body-bg: #001120;
+  --section-bg: #0b2031;
+  --form-bg: #122739;
+  --tertiary-bg: #78787822;
   --text-color: #dfe2e1;
-  --body-bg-secondary: #122739;
   --text-color-secondary: #a1a1a1;
-  --body-bg-tertiary: #78787822;
-  --border-color: #383f4b;
   --text-danger: #ec6a6a;
+  --text-grey: #999;
+  --border-color: #383f4b;
 
   // links
   --link-color: #388bff;
@@ -96,7 +100,7 @@ body.dark {
   --btn-go-color: #fff;
 
   // forms
-  --form-bg: #091a28e4;
+  --forms-bg: #091a28e4;
   --form-input-bg: black;
   --form-input-border: #555;
   --form-input-border-focus: #999;

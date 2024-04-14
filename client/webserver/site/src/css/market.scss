@@ -17,16 +17,8 @@ div[data-handler=markets] {
     }
   }
 
-  .ordertable-header {
-    @include border-top;
-
-    height: 30px;
-    padding: 0 40px 0 10px;
-  }
-
   .orderbook {
-    min-width: 300px;
-    width: 90%;
+    min-width: 225px;
 
     & > div:first-child { // buy orders
       order: 3;
@@ -43,7 +35,6 @@ div[data-handler=markets] {
 
   .order-panel {
     min-width: 375px;
-    width: 90%;
 
     #orderForm {
       input[type=number] {
@@ -70,7 +61,7 @@ div[data-handler=markets] {
         padding: 5px 25px;
         border: 1px solid #78787877;
         border-radius: 3px;
-        background-color: var(--body-bg);
+        background-color: var(--section-bg);
         color: var(--market-btn-color);
 
         &:disabled {
@@ -119,6 +110,7 @@ div[data-handler=markets] {
     flex-grow: 1;
     position: relative;
     min-width: 100px; // Letting it go to zero can be problematic, causing some major cpu during chart calcs
+    min-height: 250px;
 
     canvas {
       position: absolute;
@@ -219,32 +211,10 @@ div[data-handler=markets] {
     }
   }
 
-  table.ordertable {
-    color: var(--text-color-secondary);
-
-    td,
-    th {
-      font-size: 15px;
-      padding: 3px 0;
-    }
-
-    td:first-child {
-      width: 100%;
-    }
-
-    td:last-child {
-      min-width: 30px;
-    }
-
-    .ico-check {
-      color: #9b8c09;
-    }
-  }
-
   .markettab {
     height: 30px;
     border-style: none;
-    background-color: var(--body-bg);
+    background-color: var(--section-bg);
 
     &.selected {
       background-color: var(--market-markettab-selected-bg);
@@ -253,20 +223,17 @@ div[data-handler=markets] {
 
   .numorders {
     background-color: var(--market-numorders-bg);
-    border-radius: 3px;
-    line-height: 1;
     padding: 1px 2px;
   }
 
   #leftMarketDock {
-    height: 100%;
     position: absolute;
     display: flex;
     top: 0;
     left: 0;
     z-index: 2;
     min-height: -webkit-fill-available; // for webkit browsers
-    background-color: var(--body-bg);
+    background-color: var(--section-bg);
 
     &.default,
     &.stashed {
@@ -321,19 +288,8 @@ div[data-handler=markets] {
       height: 100%;
       min-width: 275px;
 
-      .market-tmpl-v1 {
-        line-height: 1;
-        margin-bottom: 10px;
-        width: 100%;
-
-        img.market-tmpl-pair-img {
-          width: 20px;
-          height: 20px;
-          position: relative;
-        }
-
+      & > div {
         .dexname {
-          padding-left: 8px;
           max-width: 60px;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -347,25 +303,22 @@ div[data-handler=markets] {
   }
 
   #mainContent {
-    @extend .fill-abs;
-
     display: flex;
     flex-direction: column;
     align-items: center;
-    row-gap: 30px;
-    padding-top: 20px;
-    padding-bottom: 20px;
 
-    & > div {
+    & > div,
+    & > section {
+      min-height: 500px;
+      display: flex;
+
       &:first-child { // order book
         max-height: 1000px;
         order: 3;
       }
 
       &:nth-child(2) { // charts
-        min-height: 750px;
-        width: 90%;
-        order: 3;
+        order: 1;
       }
 
       &:last-child { // order form, wallets, user orders
@@ -377,16 +330,15 @@ div[data-handler=markets] {
   #epochLine,
   #durBttnBox {
     position: absolute;
-    left: 50px;
+    left: 65px;
     top: 5px;
-    background-color: var(--body-bg);
+    background-color: var(--section-bg);
     z-index: 1;
-    display: none; // shown on hover
   }
 
   #durBttnBox {
     .candle-dur-bttn {
-      background-color: var(--body-bg);
+      background-color: var(--section-bg);
       padding: 2px 4px;
       font-size: 14px;
       line-height: 1;
@@ -407,8 +359,6 @@ div[data-handler=markets] {
   #epochLine {
     @extend .flex-center;
 
-    display: none;
-
     .epoch-line {
       display: inline-block;
       border-top: 3px dotted #626262;
@@ -418,19 +368,6 @@ div[data-handler=markets] {
       position: relative;
       top: 1px;
     }
-  }
-
-  .market-chart:hover > #durBttnBox,
-  .market-chart:hover > #epochLine {
-    display: block;
-  }
-
-  .chart-legend {
-    display: flex;
-    align-items: center;
-    padding: 0 5px;
-    height: 30px;
-    font-size: 14px;
   }
 
   #loaderMsg {
@@ -561,7 +498,7 @@ div[data-handler=markets] {
     position: absolute;
     top: 0;
     left: 0;
-    background-color: var(--body-bg);
+    background-color: var(--section-bg);
     z-index: 10;
   }
 
@@ -580,7 +517,7 @@ div[data-handler=markets] {
   }
 }
 
-.market-stats-v1 {
+.market-stats {
   display: flex;
   margin: 0 5px;
   gap: 15px;
@@ -656,7 +593,7 @@ div[data-handler=markets] {
   }
 }
 
-#headerSpace .market-stats-v1 {
+#headerSpace .market-stats {
   display: none;
 }
 
@@ -699,12 +636,12 @@ div[data-handler=markets] {
 }
 
 @include media-breakpoint-up(xl) {
-  #main .market-stats-v1 {
+  #main .market-stats {
     display: none;
     border-top: none;
   }
 
-  #headerSpace .market-stats-v1 {
+  #headerSpace .market-stats {
     display: flex;
     border-bottom: none !important;
   }
@@ -721,28 +658,32 @@ div[data-handler=markets] {
 @include media-breakpoint-up(lg) {
   div[data-handler=markets] {
     #mainContent {
+      @include fill-abs;
+
       overflow: hidden;
       flex-direction: row;
       align-items: stretch;
-      row-gap: 0;
-      padding-top: 0;
-      padding-bottom: 0;
 
-      & > div:nth-child(n) { // need nth-child for specificity
-        min-height: auto;
-      }
+      & > section,
+      & > div {
+        min-height: none;
+        display: flex;
 
-      & > div:first-child { // order book
-        order: 1;
-      }
+        &:nth-child(n) { // need nth-child for specificity
+          min-height: auto;
+        }
 
-      & > div:nth-child(2) { // charts
-        width: auto;
-        order: 2;
-      }
+        &:first-child { // order book
+          order: 1;
+        }
 
-      & > div:last-child { // order form, wallets, user orders
-        order: 3;
+        &:nth-child(2) { // charts
+          order: 2;
+        }
+
+        &:last-child { // order form, wallets, user orders
+          order: 3;
+        }
       }
     }
 
@@ -754,16 +695,9 @@ div[data-handler=markets] {
         flex-direction: column-reverse;
       }
 
-      &:first-child {
-        @include border-bottom;
-      }
-
-      &:last-child {
-        @include border-top;
-      }
-
       tbody {
         display: flex;
+        align-items: stretch;
       }
 
       tbody#sellRows {
@@ -777,8 +711,6 @@ div[data-handler=markets] {
     }
 
     .orderbook {
-      border-left: none;
-      border-top: none;
       width: auto;
 
       & > div:first-child { // sell orders
@@ -795,11 +727,6 @@ div[data-handler=markets] {
     }
 
     .order-panel {
-      width: 375px;
-      border-right: none;
-      border-top: none;
-      border-bottom: none;
-
       & > div {
         @include fill-abs;
         @include stylish-overflow;
@@ -814,14 +741,19 @@ div[data-handler=markets] {
     }
   }
 
-  .ordertable-header {
-    border-top: none;
-  }
-
   #recentMatchesBox {
     overflow: visible;
     max-height: none;
     border-bottom: none;
+  }
+
+  #candlesLegend,
+  #depthLegend {
+    z-index: 10;
+    position: absolute;
+    top: 0;
+    right: 0;
+    background-color: var(--section-bg);
   }
 }
 
@@ -833,7 +765,7 @@ div[data-handler=markets] {
   border-style: none solid solid;
   border-width: 0 2px 2px 1px;
   border-color: var(--border-color);
-  background-color: var(--body-bg);
+  background-color: var(--section-bg);
   cursor: pointer;
   overflow: hidden;
 

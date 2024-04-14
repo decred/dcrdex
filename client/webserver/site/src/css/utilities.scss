@@ -35,7 +35,7 @@
 }
 
 .hoverbg:hover {
-  background-color: var(--body-bg-tertiary);
+  background-color: var(--tertiary-bg);
 }
 
 .stylish-overflow {
@@ -45,7 +45,7 @@
     scrollbar-color: transparent transparent;
 
     &::-webkit-scrollbar-track {
-      background: transparent;
+      background-color: transparent;
     }
 
     &::-webkit-scrollbar-thumb {
@@ -94,7 +94,7 @@
 }
 
 .grey {
-  color: #999;
+  color: var(--text-grey);
 }
 
 .rounded3 {
