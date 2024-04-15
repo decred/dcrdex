@@ -3627,7 +3627,7 @@ class MarketMakerDisplay {
     const { div, page, baseID, quoteID, bui, qui } = this.stuff()
 
     const status = await this.runningMarketStatus()
-    Doc.hide(page.stats, page.cexRow)
+    Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
     if (!status || !status.runStats) {
       if (this.ticker) {
         clearInterval(this.ticker)
@@ -3656,6 +3656,7 @@ class MarketMakerDisplay {
 
     Doc.setVis(cexCfg, page.cexRow)
     if (cexCfg) {
+      Doc.show(page.pendingDepositBox, page.pendingWithdrawalBox)
       const dinfo = CEXDisplayInfos[cexCfg.name]
       Doc.setSrc(div, '[data-cex-logo]', dinfo.logo)
       page.cexBaseInventory.textContent = summedBalanceText(runStats.cexBalances[baseID], bui)
