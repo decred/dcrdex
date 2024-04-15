@@ -1253,6 +1253,14 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 	depositTime := time.Now().Unix()
 	u.updatePendingDeposit(assetID, tx, 0, eventID, depositTime, false)
 
+	ui, _ := asset.UnitInfo(assetID)
+	deposit := &libxc.DepositData{
+		AssetID:            assetID,
+		TxID:               tx.ID,
+		Amount:             amount,
+		AmountConventional: float64(amount) / float64(ui.Conventional.ConversionFactor),
+	}
+
 	go func() {
 		if u.isDynamicSwapper(assetID) {
 			tx = u.confirmWalletTransaction(ctx, assetID, tx.ID)
@@ -1266,7 +1274,7 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 			u.updatePendingDeposit(assetID, tx, creditedAmt, eventID, depositTime, true)
 			u.sendStatsUpdate()
 		}
-		u.CEX.ConfirmDeposit(ctx, tx.ID, cexConfirmedDeposit)
+		u.CEX.ConfirmDeposit(ctx, deposit, cexConfirmedDeposit)
 	}()
 
 	return nil

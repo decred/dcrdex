@@ -1363,8 +1363,8 @@ func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address
 	return "", nil
 }
 
-func (c *tCEX) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(uint64)) {
-	c.lastConfirmDepositTx = txID
+func (c *tCEX) ConfirmDeposit(ctx context.Context, deposit *libxc.DepositData, onConfirm func(uint64)) {
+	c.lastConfirmDepositTx = deposit.TxID
 
 	go func() {
 		confirmDepositAmt := <-c.confirmDeposit

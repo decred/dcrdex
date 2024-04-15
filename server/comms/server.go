@@ -394,8 +394,6 @@ type onionListener struct{ net.Listener }
 // Run starts the server. Run should be called only after all routes are
 // registered.
 func (s *Server) Run(ctx context.Context) {
-	log.Trace("Starting server")
-
 	mux := s.mux
 	var wg sync.WaitGroup
 
