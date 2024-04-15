@@ -32,11 +32,11 @@ interface CEXDisplayInfo {
 export const CEXDisplayInfos: Record<string, CEXDisplayInfo> = {
   'Binance': {
     name: 'Binance',
-    logo: 'binance.com.png'
+    logo: '/img/binance.com.png'
   },
   'BinanceUS': {
     name: 'Binance U.S.',
-    logo: 'binance.us.png'
+    logo: '/img/binance.us.png'
   }
 }
 
@@ -170,7 +170,7 @@ export default class MarketMakerPage extends BasePage {
     const asset = app().assets[assetID]
     const unitInfo = asset.unitInfo
     const assetValue = Doc.formatCoinValue((balance * percentage) / 100, unitInfo)
-    return `${percentage}% - ${assetValue} ${asset.symbol.toUpperCase()}`
+    return `${Doc.formatFourSigFigs(percentage)}% - ${assetValue} ${asset.symbol.toUpperCase()}`
   }
 
   /*
@@ -179,10 +179,8 @@ export default class MarketMakerPage extends BasePage {
    * and the amount of that asset in the wallet.
    */
   walletBalanceStr (assetID: number, percentage: number): string {
-    const asset = app().assets[assetID]
-    const wallet = asset.wallet
-    const balance = wallet.balance.available
-    return this.percentageBalanceStr(assetID, balance, percentage)
+    const { wallet: { balance: { available } } } = app().assets[assetID]
+    return this.percentageBalanceStr(assetID, available, percentage)
   }
 
   runningBalanceStr (assetID: number, amount: number): string {
@@ -224,7 +222,7 @@ export default class MarketMakerPage extends BasePage {
     rowTmpl.quoteBalanceLogo.src = quoteLogoPath
     if (botCfg.cexCfg) {
       const dinfo = CEXDisplayInfos[botCfg.cexCfg?.name || '']
-      const cexLogoSrc = '/img/' + dinfo.logo
+      const cexLogoSrc = dinfo.logo
       rowTmpl.baseBalanceCexLogo.src = cexLogoSrc
       rowTmpl.quoteBalanceCexLogo.src = cexLogoSrc
       rowTmpl.cexBaseBalanceLogo.src = baseLogoPath
@@ -347,7 +345,7 @@ export default class MarketMakerPage extends BasePage {
         else rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_SIMPLE_ARB)
         Doc.show(rowTmpl.cexLink)
         const dinfo = CEXDisplayInfos[botCfg.cexCfg?.name || '']
-        rowTmpl.cexLogo.src = '/img/' + dinfo.logo
+        rowTmpl.cexLogo.src = dinfo.logo
         rowTmpl.cexName.textContent = dinfo.name
       } else {
         rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_BASIC_MM)

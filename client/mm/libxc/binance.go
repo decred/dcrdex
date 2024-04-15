@@ -236,6 +236,10 @@ func (b *binanceOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, fi
 	return
 }
 
+func (b *binanceOrderBook) midGap() uint64 {
+	return b.book.midGap()
+}
+
 // TODO: check all symbols
 var dexToBinanceSymbol = map[string]string{
 	"POLYGON": "MATIC",
@@ -1651,13 +1655,10 @@ func (bnc *binance) SubscribeMarket(ctx context.Context, baseID, quoteID uint32)
 	return bnc.subscribeToAdditionalMarketDataStream(ctx, baseID, quoteID)
 }
 
-// VWAP returns the volume weighted average price for a certain quantity
-// of the base asset on a market. SubscribeMarket must be called, and the
-// market must be synced before results can be expected.
-func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
+func (bnc *binance) book(baseID, quoteID uint32) (*binanceOrderBook, error) {
 	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
-		return 0, 0, false, err
+		return nil, err
 	}
 	mktID := binanceMktID(baseCfg, quoteCfg)
 
@@ -1665,10 +1666,29 @@ func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPric
 	book, found := bnc.books[mktID]
 	bnc.booksMtx.RUnlock()
 	if !found {
-		return 0, 0, false, fmt.Errorf("no book for market %s", mktID)
+		return nil, fmt.Errorf("no book for market %s", mktID)
 	}
+	return book, nil
+}
 
+// VWAP returns the volume weighted average price for a certain quantity
+// of the base asset on a market. SubscribeMarket must be called, and the
+// market must be synced before results can be expected.
+func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
+	book, err := bnc.book(baseID, quoteID)
+	if err != nil {
+		return 0, 0, false, err
+	}
 	return book.vwap(!sell, qty)
+}
+
+func (bnc *binance) MidGap(baseID, quoteID uint32) uint64 {
+	book, err := bnc.book(baseID, quoteID)
+	if err != nil {
+		bnc.log.Errorf("Error getting order book for (%d, %d): %v", baseID, quoteID, err)
+		return 0
+	}
+	return book.midGap()
 }
 
 func (bnc *binance) TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) {

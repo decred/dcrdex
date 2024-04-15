@@ -416,8 +416,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setupCEXes()
 
     this.marketRows = []
-    for (const { host, markets, assets, auth } of Object.values(app().exchanges)) {
-      if (auth.targetTier === 0) {
+    for (const { host, markets, assets, auth: { effectiveTier, pendingStrength } } of Object.values(app().exchanges)) {
+      if (effectiveTier + pendingStrength === 0) {
         const { needRegTmpl, needRegBox } = this.page
         const bttn = needRegTmpl.cloneNode(true) as PageElement
         const tmpl = Doc.parseTemplate(bttn)
@@ -443,7 +443,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         for (const [cexName, dinfo] of Object.entries(CEXDisplayInfos)) {
           if (cexHasMarket(cexName)) {
             const img = this.page.arbBttnTmpl.cloneNode(true) as PageElement
-            img.src = '/img/' + dinfo.logo
+            img.src = dinfo.logo
             tmpl.arbs.appendChild(img)
             mr.arbs.push(cexName)
           }
@@ -2475,8 +2475,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   setCexLogo (ancestor: PageElement, cexName: string) {
     if (!cexName) return
     const dinfo = CEXDisplayInfos[cexName]
-    const cexLogoSrc = '/img/' + dinfo.logo
-    for (const el of Doc.applySelector(ancestor, '[data-cex-logo')) el.src = cexLogoSrc
+    for (const el of Doc.applySelector(ancestor, '[data-cex-logo')) el.src = dinfo.logo
   }
 
   /*
@@ -2695,7 +2694,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       const cexHasMarket = this.cexMarketSupportFilter(baseID, quoteID)
       if (cexHasMarket(cexName)) {
         const img = page.arbBttnTmpl.cloneNode(true) as PageElement
-        img.src = '/img/' + dinfo.logo
+        img.src = dinfo.logo
         tmpl.arbs.appendChild(img)
         arbs.push(cexName)
       }
@@ -2749,7 +2748,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const div = this.page.cexOptTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(div)
     tmpl.name.textContent = dinfo.name
-    tmpl.logo.src = '/img/' + dinfo.logo
+    tmpl.logo.src = dinfo.logo
     this.page.cexSelection.appendChild(div)
     this.formCexes[cexName] = { name: cexName, div, tmpl }
     Doc.bind(div, 'click', () => {
@@ -2887,7 +2886,7 @@ class PlacementsChart extends Chart {
     this.loadedCEX = cexName
     this.cexLogo = new Image()
     Doc.bind(this.cexLogo, 'load', () => { this.render() })
-    this.cexLogo.src = '/img/' + CEXDisplayInfos[cexName || ''].logo
+    this.cexLogo.src = CEXDisplayInfos[cexName || ''].logo
   }
 
   render () {

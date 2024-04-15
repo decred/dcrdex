@@ -423,6 +423,8 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 			a.log.Errorf("error withdrawing quote asset: %v", err)
 		}
 	}
+
+	a.registerFeeGap()
 }
 
 func (a *simpleArbMarketMaker) run() {
@@ -490,6 +492,15 @@ func (a *simpleArbMarketMaker) run() {
 	wg.Wait()
 
 	a.cancelAllOrders()
+}
+
+func (a *simpleArbMarketMaker) registerFeeGap() {
+	feeGap, err := feeGap(a.core, a.cex, a.mkt.BaseID, a.mkt.QuoteID, a.mkt.LotSize)
+	if err != nil {
+		a.log.Warnf("error getting fee-gap stats: %v", err)
+		return
+	}
+	a.core.registerFeeGap(feeGap)
 }
 
 func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, cex botCexAdaptor, log dex.Logger) {

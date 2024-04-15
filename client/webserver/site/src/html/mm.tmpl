@@ -2,9 +2,6 @@
 {{template "top" .}}
 <div id="main" data-handler="mm" class="main mm w-100 overflow-y-auto">
   <div class="d-flex align-items-stretch justify-content-center flex-column align-items-stretch w-100 p-2">
-    <div class="flex-center align-items-stretch py-2">
-      <button type="button" class="go medium px-4" id="archivedLogsBtn">[[[previous_run_logs]]]</button>
-    </div>
 
     <div id="onOff" class="flex-center align-items-stretch py-2">
       <div class="flex-center flex-column p-3">
@@ -44,7 +41,7 @@
 
     <div id="mmErr"  class="flex-center text-danger d-hide"></div>
 
-    <div class="px-5 py-3 w-100">
+    <div class="px-5 pt-3 w-100">
       <table id="botTable" class="row-border d-hide mb-3">
         <thead>
           <th id="enabledHeader">[[[enabled]]]</th>
@@ -152,6 +149,10 @@
         </tbody>
       </table>
     </div>
+    <div class="flex-center align-items-stretch py-2">
+      <button type="button" class="medium px-4" id="archivedLogsBtn">[[[previous_run_logs]]]</button>
+    </div>
+
 </div>
     
 

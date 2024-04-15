@@ -133,6 +133,7 @@ export default class Application {
   pokes: CoreNotePlus[]
   langs: string[]
   lang: string
+  experimental: boolean
   inited: boolean
   authed: boolean
   user: User
@@ -282,6 +283,7 @@ export default class Application {
     this.authed = Boolean(resp.user)
     this.lang = resp.lang
     this.langs = resp.langs
+    this.experimental = resp.experimental
     if (!resp.user) return
     const user = resp.user
     this.seedGenTime = user.seedgentime

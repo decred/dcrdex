@@ -147,3 +147,16 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 
 	return weightedSum / qty, extrema, filled
 }
+
+func (ob *orderbook) midGap() uint64 {
+	bestBuyI := ob.bids.Front()
+	if bestBuyI == nil {
+		return 0
+	}
+	bestSellI := ob.asks.Front()
+	if bestSellI == nil {
+		return 0
+	}
+	bestBuy, bestSell := bestBuyI.Value.(*obEntry), bestSellI.Value.(*obEntry)
+	return (bestBuy.rate + bestSell.rate) / 2
+}

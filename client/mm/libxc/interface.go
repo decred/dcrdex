@@ -65,6 +65,8 @@ type CEX interface {
 	// VWAP returns the volume weighted average price for a certainWithdraw(address string, value, feeRate uint64)  quantity
 	// of the base asset on a market.
 	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
+	// MidGap returns the mid-gap price for an order book.
+	MidGap(baseID, quoteID uint32) uint64
 	// GetDepositAddress returns a deposit address for an asset.
 	GetDepositAddress(ctx context.Context, assetID uint32) (string, error)
 	// ConfirmDeposit is an async function that calls onConfirm when the status

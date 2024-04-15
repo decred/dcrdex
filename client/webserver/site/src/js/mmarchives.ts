@@ -60,7 +60,7 @@ export default class MarketMakerArchivesPage extends BasePage {
         else tmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_SIMPLE_ARB)
         Doc.show(tmpl.cexLink)
         const dinfo = CEXDisplayInfos[run.cfg.cexCfg?.name || '']
-        tmpl.cexLogo.src = '/img/' + dinfo.logo
+        tmpl.cexLogo.src = dinfo.logo
         tmpl.cexName.textContent = dinfo.name
       } else {
         tmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_BASIC_MM)
