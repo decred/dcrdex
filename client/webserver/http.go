@@ -255,6 +255,7 @@ func (s *WebServer) handleGenerateCompanionAppQRCode(w http.ResponseWriter, r *h
 		url = fmt.Sprintf("http://%s", s.addr)
 	}
 	// Create auth token and append it to the URL for authTokenMiddleware to pick up.
+	// TODO save this token in the DB to make it permanent?
 	authToken := s.authorize()
 	url = fmt.Sprintf("%s?%s=%s", url, authCK, authToken)
 	log.Infof("Companion app QR code URL: %s", url)
