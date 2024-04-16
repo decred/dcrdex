@@ -23,42 +23,42 @@ type Account struct {
 }
 
 type NetworkInfo struct {
-	AddressRegex            string  `json:"addressRegex"`
-	Coin                    string  `json:"coin"`
-	DepositEnable           bool    `json:"depositEnable"`
-	IsDefault               bool    `json:"isDefault"`
-	MemoRegex               string  `json:"memoRegex"`
-	MinConfirm              int     `json:"minConfirm"`
-	Name                    string  `json:"name"`
-	Network                 string  `json:"network"`
-	ResetAddressStatus      bool    `json:"resetAddressStatus"`
-	SpecialTips             string  `json:"specialTips"`
-	UnLockConfirm           int     `json:"unLockConfirm"`
-	WithdrawEnable          bool    `json:"withdrawEnable"`
-	WithdrawFee             float64 `json:"withdrawFee,string"`
-	WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
-	WithdrawMax             float64 `json:"withdrawMax,string"`
-	WithdrawMin             float64 `json:"withdrawMin,string"`
-	SameAddress             bool    `json:"sameAddress"`
-	EstimatedArrivalTime    int     `json:"estimatedArrivalTime"`
-	Busy                    bool    `json:"busy"`
+	// AddressRegex            string  `json:"addressRegex"`
+	Coin          string `json:"coin"`
+	DepositEnable bool   `json:"depositEnable"`
+	// IsDefault               bool    `json:"isDefault"`
+	// MemoRegex               string  `json:"memoRegex"`
+	// MinConfirm              int     `json:"minConfirm"`
+	// Name                    string  `json:"name"`
+	Network string `json:"network"`
+	// ResetAddressStatus      bool    `json:"resetAddressStatus"`
+	// SpecialTips             string  `json:"specialTips"`
+	// UnLockConfirm           int     `json:"unLockConfirm"`
+	WithdrawEnable bool    `json:"withdrawEnable"`
+	WithdrawFee    float64 `json:"withdrawFee,string"`
+	// WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
+	// WithdrawMax             float64 `json:"withdrawMax,string"`
+	// WithdrawMin             float64 `json:"withdrawMin,string"`
+	// SameAddress             bool    `json:"sameAddress"`
+	// EstimatedArrivalTime    int     `json:"estimatedArrivalTime"`
+	// Busy                    bool    `json:"busy"`
 }
 
 type CoinInfo struct {
-	Coin              string         `json:"coin"`
-	DepositAllEnable  bool           `json:"depositAllEnable"`
-	Free              float64        `json:"free,string"`
-	Freeze            float64        `json:"freeze,string"`
-	Ipoable           float64        `json:"ipoable,string"`
-	Ipoing            float64        `json:"ipoing,string"`
-	IsLegalMoney      bool           `json:"isLegalMoney"`
-	Locked            float64        `json:"locked,string"`
-	Name              string         `json:"name"`
-	Storage           float64        `json:"storage,string"`
-	Trading           bool           `json:"trading"`
-	WithdrawAllEnable bool           `json:"withdrawAllEnable"`
-	Withdrawing       float64        `json:"withdrawing,string"`
-	NetworkList       []*NetworkInfo `json:"networkList"`
+	Coin string `json:"coin"`
+	// DepositAllEnable  bool           `json:"depositAllEnable"`
+	// Free              float64        `json:"free,string"`
+	// Freeze            float64        `json:"freeze,string"`
+	// Ipoable           float64        `json:"ipoable,string"`
+	// Ipoing            float64        `json:"ipoing,string"`
+	// IsLegalMoney      bool           `json:"isLegalMoney"`
+	// Locked            float64        `json:"locked,string"`
+	// Name              string         `json:"name"`
+	// Storage           float64        `json:"storage,string"`
+	// Trading           bool           `json:"trading"`
+	// WithdrawAllEnable bool           `json:"withdrawAllEnable"`
+	// Withdrawing       float64        `json:"withdrawing,string"`
+	NetworkList []*NetworkInfo `json:"networkList"`
 }
 
 type OrderbookSnapshot struct {
@@ -105,6 +105,10 @@ type RateLimit struct {
 	Interval      string `json:"interval"`
 	IntervalNum   int64  `json:"intervalNum"`
 	Limit         int64  `json:"limit"`
+}
+
+type DataStreamKey struct {
+	ListenKey string `json:"listenKey"`
 }
 
 type ExchangeInfo struct {

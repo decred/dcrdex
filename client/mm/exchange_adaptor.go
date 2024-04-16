@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -59,7 +60,8 @@ type botCoreAdaptor interface {
 	SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error)
 	Cancel(oidB dex.Bytes) error
 	DEXTrade(rate, qty uint64, sell bool) (*core.Order, error)
-	ExchangeMarket(host string, base, quote uint32) (*core.Market, error)
+	ExchangeMarket(host string, baseID, quoteID uint32) (*core.Market, error)
+	MarketConfig(host string, baseID, quoteID uint32) (*msgjson.Market, error)
 	MultiTrade(placements []*multiTradePlacement, sell bool, driftTolerance float64, currEpoch uint64, dexReserves, cexReserves map[uint32]uint64) []*order.OrderID
 	CancelAllOrders() bool
 	ExchangeRateFromFiatSources() uint64
@@ -276,9 +278,9 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, 
 		}
 	}
 
-	mkt, err := u.ExchangeMarket(u.market.Host, u.market.BaseID, u.market.QuoteID)
+	mkt, err := u.clientCore.MarketConfig(u.market.Host, u.market.BaseID, u.market.QuoteID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("Error getting lot size for market %s: %v", u.market, err)
 	}
 
 	buyFees, sellFees, err := u.orderFees()
@@ -748,8 +750,6 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 		remainingCEXBal -= reserves
 	}
 
-	u.balancesMtx.RLock()
-
 	cancels := make([]dex.Bytes, 0, len(placements))
 	addCancel := func(o *core.Order) {
 		if currEpoch-o.Epoch < 2 { // TODO: check epoch
@@ -778,6 +778,9 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 	for _, groupedOrders := range pendingOrders {
 		for _, o := range groupedOrders {
 			if !withinTolerance(o.order.Rate, placements[o.placementIndex].rate, driftTolerance) {
+				u.log.Tracef("%s cancel candidate with rate = %d, placement rate = %d, drift tolerance = %.4f%%",
+					u.market, o.order.Rate, placements[o.placementIndex].rate, driftTolerance*100,
+				)
 				addCancel(o.order)
 			} else {
 				ordersWithinTolerance = append([]*pendingDEXOrder{o}, ordersWithinTolerance...)
@@ -802,7 +805,42 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 
 	rateCausesSelfMatch := u.rateCausesSelfMatchFunc(sell)
 
+	fundingReq := func(rate, lots, counterTradeRate uint64) (dexReq map[uint32]uint64, cexReq uint64) {
+		qty := mkt.LotSize * lots
+		if !sell {
+			qty = calc.BaseToQuote(rate, qty)
+		}
+		dexReq = make(map[uint32]uint64)
+		dexReq[fromAsset] += qty
+		dexReq[fromFeeAsset] += fees.Swap * lots
+		if u.isAccountLocker(fromAsset) {
+			dexReq[fromFeeAsset] += fees.Refund * lots
+		}
+		if u.isAccountLocker(toAsset) {
+			dexReq[toFeeAsset] += fees.Redeem * lots
+		}
+		if accountForCEXBal {
+			if sell {
+				cexReq = calc.BaseToQuote(counterTradeRate, mkt.LotSize*lots)
+			} else {
+				cexReq = mkt.LotSize * lots
+			}
+		}
+		return
+	}
+
+	canAffordLots := func(rate, lots, counterTradeRate uint64) bool {
+		dexReq, cexReq := fundingReq(rate, lots, counterTradeRate)
+		for assetID, v := range dexReq {
+			if remainingBalances[assetID] < v {
+				return false
+			}
+		}
+		return remainingCEXBal >= cexReq
+	}
+
 	orderInfos := make([]*dexOrderInfo, 0, len(requiredPlacements))
+
 	for i, placement := range requiredPlacements {
 		if placement.lots == 0 {
 			continue
@@ -813,51 +851,19 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 			continue
 		}
 
+		searchN := int(placement.lots) + 1
+		lotsPlus1 := sort.Search(searchN, func(lotsi int) bool {
+			return !canAffordLots(placement.rate, uint64(lotsi), placement.counterTradeRate)
+		})
+
 		var lotsToPlace uint64
-		for l := 0; l < int(placement.lots); l++ {
-			qty := mkt.LotSize
-			if !sell {
-				qty = calc.BaseToQuote(placement.rate, mkt.LotSize)
+		if lotsPlus1 > 1 {
+			lotsToPlace = uint64(lotsPlus1) - 1
+			dexReq, cexReq := fundingReq(placement.rate, lotsToPlace, placement.counterTradeRate)
+			for assetID, v := range dexReq {
+				remainingBalances[assetID] -= v
 			}
-			if remainingBalances[fromAsset] < qty {
-				break
-			}
-			remainingBalances[fromAsset] -= qty
-
-			if remainingBalances[fromFeeAsset] < fees.Swap {
-				break
-			}
-			remainingBalances[fromFeeAsset] -= fees.Swap
-
-			if u.isAccountLocker(fromAsset) {
-				if remainingBalances[fromFeeAsset] < fees.Refund {
-					break
-				}
-				remainingBalances[fromFeeAsset] -= fees.Refund
-			}
-
-			if u.isAccountLocker(toAsset) {
-				if remainingBalances[toFeeAsset] < fees.Redeem {
-					break
-				}
-				remainingBalances[toFeeAsset] -= fees.Redeem
-			}
-
-			if accountForCEXBal {
-				counterTradeQty := mkt.LotSize
-				if sell {
-					counterTradeQty = calc.BaseToQuote(placement.counterTradeRate, mkt.LotSize)
-				}
-				if remainingCEXBal < counterTradeQty {
-					break
-				}
-				remainingCEXBal -= counterTradeQty
-			}
-
-			lotsToPlace = uint64(l + 1)
-		}
-
-		if lotsToPlace > 0 {
+			remainingCEXBal -= cexReq
 			orderInfos = append(orderInfos, &dexOrderInfo{
 				placementIndex:   uint64(i),
 				counterTradeRate: placement.counterTradeRate,
@@ -880,8 +886,6 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 			break
 		}
 	}
-
-	u.balancesMtx.RUnlock()
 
 	for _, cancel := range cancels {
 		if err := u.Cancel(cancel); err != nil {
@@ -1425,9 +1429,6 @@ func (u *unifiedExchangeAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint6
 		}
 		amt -= bal.Available
 	}
-
-	u.balancesMtx.RLock()
-	defer u.balancesMtx.RUnlock()
 
 	sells := base != cex
 	orders := u.groupedBookedOrders(sells)

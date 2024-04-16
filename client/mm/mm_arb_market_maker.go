@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
@@ -188,7 +189,7 @@ func (a *arbMarketMaker) cancelExpiredCEXTrades() {
 // the DEX order book based on the rate of the counter trade on the CEX. The
 // rate is calculated so that the difference in rates between the DEX and the
 // CEX will pay for the network fees and still leave the configured profit.
-func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *core.Market, feesInQuoteUnits uint64) (uint64, error) {
+func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *core.Market, feesInQuoteUnits uint64, log dex.Logger) (uint64, error) {
 	var unadjustedRate uint64
 	if sell {
 		unadjustedRate = uint64(math.Round(float64(cexRate) * (1 + profitRate)))
@@ -197,6 +198,20 @@ func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *core.M
 	}
 
 	rateAdj := rateAdjustment(feesInQuoteUnits, mkt.LotSize)
+
+	if log.Level() <= dex.LevelTrace {
+		if qui, err := asset.UnitInfo(mkt.QuoteID); err != nil {
+			log.Errorf("no unit info for placement rate logging quote asset %d", mkt.QuoteID)
+		} else {
+			cexRateConv := mkt.MsgRateToConventional(cexRate)
+			rateAdjConv := mkt.MsgRateToConventional(rateAdj)
+			feesConv := qui.ConventionalString(feesInQuoteUnits)
+
+			log.Tracef("%s sell = %t placement rate: cexRate = %.8f, profitRate = %.3f, rateAdj = %.8f, fees = %s %s",
+				mkt.Name, sell, cexRateConv, profitRate, rateAdjConv, feesConv, qui.Conventional.Unit,
+			)
+		}
+	}
 
 	if sell {
 		return steppedRate(unadjustedRate+rateAdj, mkt.RateStep), nil
@@ -223,14 +238,14 @@ func (a *arbMarketMaker) dexPlacementRate(cexRate uint64, sell bool) (uint64, er
 		return 0, fmt.Errorf("error getting fees in quote units: %w", err)
 	}
 
-	return dexPlacementRate(cexRate, sell, a.cfg.Profit, a.mkt, feesInQuoteUnits)
+	return dexPlacementRate(cexRate, sell, a.cfg.Profit, a.mkt, feesInQuoteUnits, a.log)
 }
 
 func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 	orders := func(cfgPlacements []*ArbMarketMakingPlacement, sellOnDEX bool) []*multiTradePlacement {
 		newPlacements := make([]*multiTradePlacement, 0, len(cfgPlacements))
 		var cumulativeCEXDepth uint64
-		for _, cfgPlacement := range cfgPlacements {
+		for i, cfgPlacement := range cfgPlacements {
 			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*a.mkt.LotSize) * cfgPlacement.Multiplier)
 			_, extrema, filled, err := a.cex.VWAP(a.mkt.BaseID, a.mkt.QuoteID, !sellOnDEX, cumulativeCEXDepth)
 			if err != nil {
@@ -241,6 +256,10 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 				})
 				continue
 			}
+
+			a.log.Tracef("%s placement orders: sellOnDex = %t placement # %d, lots = %d, extrema = %.8f, filled = %t",
+				a.mkt.Name, sellOnDEX, i, cfgPlacement.Lots, a.mkt.MsgRateToConventional(extrema), filled,
+			)
 
 			if !filled {
 				a.log.Infof("CEX %s side has < %d %s on the orderbook.", map[bool]string{true: "sell", false: "buy"}[!sellOnDEX], cumulativeCEXDepth, a.mkt.BaseSymbol)
@@ -441,9 +460,9 @@ func (a *arbMarketMaker) run() {
 		defer wg.Done()
 		for {
 			select {
-			case n := <-bookFeed.Next():
-				if n.Action == core.EpochMatchSummary {
-					payload := n.Payload.(*core.EpochMatchSummaryPayload)
+			case ni := <-bookFeed.Next():
+				switch payload := ni.Payload.(type) {
+				case *core.EpochMatchSummaryPayload:
 					a.rebalance(payload.Epoch + 1)
 				}
 			case <-a.ctx.Done():

@@ -37,52 +37,45 @@ const (
 	pongWait     = 60 * time.Second
 	pingPeriod   = (pongWait * 9) / 10
 	depositConfs = 3
+
+	// maxWalkingSpeed is that maximum amount the mid-gap can change per shuffle.
+	// Default about 3% of the basis price, but can be scaled by walkingspeed
+	// flag. The actual mid-gap shift during a shuffle is randomized in the
+	// range [0, defaultWalkingSpeed*walkingSpeedAdj].
+	defaultWalkingSpeed = 0.03
 )
 
 var (
 	log dex.Logger
+
+	walkingSpeedAdj float64
 
 	xcInfo = &bntypes.ExchangeInfo{
 		Timezone:   "UTC",
 		ServerTime: time.Now().Unix(),
 		RateLimits: []*bntypes.RateLimit{},
 		Symbols: []*bntypes.Market{
-			makeSymbol("dcr", "btc"),
-			makeSymbol("eth", "btc"),
+			makeMarket("dcr", "btc"),
+			makeMarket("eth", "btc"),
 		},
+	}
+
+	coinInfos = []*bntypes.CoinInfo{
+		makeCoinInfo("BTC", "BTC", true, true, 0.00000610),
+		makeCoinInfo("ETH", "ETH", true, true, 0.00035),
+		makeCoinInfo("DCR", "DCR", true, true, 0.00001000),
 	}
 
 	coinpapAssets = []*fiatrates.CoinpaprikaAsset{
-		{
-			AssetID: 0,
-			Name:    "Bitcoin",
-			Symbol:  "btc",
-		},
-		{
-			AssetID: 42,
-			Name:    "Decred",
-			Symbol:  "dcr",
-		},
-		{
-			AssetID: 60,
-			Name:    "Ethereum",
-			Symbol:  "eth",
-		},
-	}
-
-	orderTypes = []string{
-		"LIMIT",
-		"LIMIT_MAKER",
-		"MARKET",
-		"STOP_LOSS",
-		"STOP_LOSS_LIMIT",
-		"TAKE_PROFIT",
-		"TAKE_PROFIT_LIMIT",
+		makeCoinpapAsset(0, "btc", "Bitcoin"),
+		makeCoinpapAsset(42, "dcr", "Decred"),
+		makeCoinpapAsset(60, "eth", "Ethereum"),
 	}
 
 	initialBalances = []*bntypes.Balance{
 		makeBalance("btc", 0.1),
 		makeBalance("dcr", 100),
+		makeBalance("eth", 5),
 	}
 )
 
@@ -92,7 +85,7 @@ func parseAssetID(s string) uint32 {
 	return assetID
 }
 
-func makeSymbol(baseSymbol, quoteSymbol string) *bntypes.Market {
+func makeMarket(baseSymbol, quoteSymbol string) *bntypes.Market {
 	baseSymbol, quoteSymbol = strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol)
 	return &bntypes.Market{
 		Symbol:              baseSymbol + quoteSymbol,
@@ -101,7 +94,15 @@ func makeSymbol(baseSymbol, quoteSymbol string) *bntypes.Market {
 		BaseAssetPrecision:  8,
 		QuoteAsset:          quoteSymbol,
 		QuoteAssetPrecision: 8,
-		OrderTypes:          orderTypes,
+		OrderTypes: []string{
+			"LIMIT",
+			"LIMIT_MAKER",
+			"MARKET",
+			"STOP_LOSS",
+			"STOP_LOSS_LIMIT",
+			"TAKE_PROFIT",
+			"TAKE_PROFIT_LIMIT",
+		},
 	}
 }
 
@@ -112,21 +113,43 @@ func makeBalance(symbol string, bal float64) *bntypes.Balance {
 	}
 }
 
+func makeCoinInfo(coin, network string, withdrawsEnabled, depositsEnabled bool, withdrawFee float64) *bntypes.CoinInfo {
+	return &bntypes.CoinInfo{
+		Coin: coin,
+		NetworkList: []*bntypes.NetworkInfo{{
+			Coin:           coin,
+			Network:        network,
+			WithdrawEnable: withdrawsEnabled,
+			DepositEnable:  depositsEnabled,
+			WithdrawFee:    withdrawFee,
+		}},
+	}
+}
+
+func makeCoinpapAsset(assetID uint32, symbol, name string) *fiatrates.CoinpaprikaAsset {
+	return &fiatrates.CoinpaprikaAsset{
+		AssetID: assetID,
+		Symbol:  symbol,
+		Name:    name,
+	}
+}
+
 func main() {
 	var logDebug, logTrace bool
+	flag.Float64Var(&walkingSpeedAdj, "walkspeed", 1.0, "scale the maximum walking speed. default of 1.0 is about 3%")
 	flag.BoolVar(&logDebug, "debug", false, "use debug logging")
 	flag.BoolVar(&logTrace, "trace", false, "use trace logging")
 	flag.Parse()
 
 	switch {
 	case logTrace:
-		log = dex.StdOutLogger("T", dex.LevelTrace)
+		log = dex.StdOutLogger("TB", dex.LevelTrace)
 		comms.UseLogger(dex.StdOutLogger("C", dex.LevelTrace))
 	case logDebug:
-		log = dex.StdOutLogger("T", dex.LevelDebug)
+		log = dex.StdOutLogger("TB", dex.LevelDebug)
 		comms.UseLogger(dex.StdOutLogger("C", dex.LevelDebug))
 	default:
-		log = dex.StdOutLogger("T", dex.LevelInfo)
+		log = dex.StdOutLogger("TB", dex.LevelInfo)
 		comms.UseLogger(dex.StdOutLogger("C", dex.LevelInfo))
 	}
 
@@ -138,6 +161,10 @@ func main() {
 }
 
 func mainErr() error {
+	if walkingSpeedAdj < 0.001 || walkingSpeedAdj > 10 {
+		return fmt.Errorf("invalid walkspeed must be in [0.001, 10]")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -252,6 +279,7 @@ func newFakeBinanceServer(ctx context.Context) (*fakeBinance, error) {
 		r.Get("/depth", f.handleDepth)
 		r.Get("/order", f.handleGetOrder)
 		r.Post("/order", f.handlePostOrder)
+		r.Post("/userDataStream", f.handleListenKeyRequest)
 		r.Delete("/order", f.handleDeleteOrder)
 	})
 
@@ -273,10 +301,13 @@ func (f *fakeBinance) run(ctx context.Context) {
 				mkt.bookMtx.Lock()
 				mkt.updateID++
 				buys, sells := mkt.shuffle()
-				update, _ := json.Marshal(&bntypes.BookUpdate{
-					Bids:         buys,
-					Asks:         sells,
-					LastUpdateID: mkt.updateID,
+				update, _ := json.Marshal(&bntypes.BookNote{
+					StreamName: mktID + "@depth",
+					Data: &bntypes.BookUpdate{
+						Bids:         buys,
+						Asks:         sells,
+						LastUpdateID: mkt.updateID,
+					},
 				})
 				updates[mktID] = update
 				mkt.bookMtx.Unlock()
@@ -293,7 +324,7 @@ func (f *fakeBinance) run(ctx context.Context) {
 				}
 			}
 		}
-		const marketMinTick, marketTickRange = time.Second * 2, time.Second * 10
+		const marketMinTick, marketTickRange = time.Second * 5, time.Second * 25
 		for {
 			delay := marketMinTick + time.Duration(rand.Float64()*float64(marketTickRange))
 			select {
@@ -543,34 +574,22 @@ func (f *fakeBinance) handleMarketStream(w http.ResponseWriter, r *http.Request)
 
 // Call with f.marketsMtx locked
 func (f *fakeBinance) cleanMarkets() {
-	mktCount := make(map[string]int)
-	subs := make([]*marketSubscriber, 0, len(f.marketSubscribers))
+	marketSubCount := make(map[string]int)
 	for _, cl := range f.marketSubscribers {
-		subs = append(subs, cl)
-	}
-	for _, cl := range subs {
 		for mktID := range cl.markets {
-			mktCount[mktID]++
+			marketSubCount[mktID]++
 		}
 	}
 	for mktID := range f.markets {
-		if mktCount[mktID] == 0 {
+		if marketSubCount[mktID] == 0 {
 			delete(f.markets, mktID)
 		}
 	}
 }
 
 func (f *fakeBinance) handleWalletCoinsReq(w http.ResponseWriter, r *http.Request) {
-	// Returning configs for eth, btc, ltc, bch, zec, usdc, matic.
-	// Balances do not use a sapi endpoint, so they do not need to be handled
-	// here.
-	resp, err := os.ReadFile("coininfo.json")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading coin info file: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	writeBytesWithStatus(w, resp, http.StatusOK)
+	respB, _ := json.Marshal(coinInfos)
+	writeBytesWithStatus(w, respB, http.StatusOK)
 }
 
 func (f *fakeBinance) sendBalanceUpdates(bals []*bntypes.WSBalance) {
@@ -770,26 +789,26 @@ func (f *fakeBinance) handleAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeBinance) handleDepth(w http.ResponseWriter, r *http.Request) {
-	symbol := r.URL.Query().Get("symbol")
+	slug := r.URL.Query().Get("symbol")
 	var mkt *bntypes.Market
 	for _, m := range xcInfo.Symbols {
-		if m.Symbol == symbol {
+		if m.Symbol == slug {
 			mkt = m
 			break
 		}
 	}
 	if mkt == nil {
-		log.Errorf("No market definition found for market %q", symbol)
-		http.Error(w, "no market "+symbol, http.StatusBadRequest)
+		log.Errorf("No market definition found for market %q", slug)
+		http.Error(w, "no market "+slug, http.StatusBadRequest)
 		return
 	}
 	f.marketsMtx.Lock()
-	m, found := f.markets[symbol]
+	m, found := f.markets[slug]
 	if !found {
 		baseFiatRate := f.fiatRates[parseAssetID(mkt.BaseAsset)]
 		quoteFiatRate := f.fiatRates[parseAssetID(mkt.QuoteAsset)]
-		m = newMarket(symbol, baseFiatRate, quoteFiatRate)
-		f.markets[symbol] = m
+		m = newMarket(slug, baseFiatRate, quoteFiatRate)
+		f.markets[slug] = m
 	}
 	f.marketsMtx.Unlock()
 
@@ -879,6 +898,13 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSONWithStatus(w, &resp, http.StatusOK)
 }
 
+func (f *fakeBinance) handleListenKeyRequest(w http.ResponseWriter, r *http.Request) {
+	resp := &bntypes.DataStreamKey{
+		ListenKey: extractAPIKey(r),
+	}
+	writeJSONWithStatus(w, resp, http.StatusOK)
+}
+
 func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) {
 	tradeID := r.URL.Query().Get("origClientOrderId")
 	apiKey := extractAPIKey(r)
@@ -917,7 +943,7 @@ type rateQty struct {
 }
 
 type market struct {
-	name                                   string
+	slug                                   string
 	baseFiatRate, quoteFiatRate, basisRate float64
 	minRate, maxRate                       float64
 
@@ -928,12 +954,12 @@ type market struct {
 	buys, sells []*rateQty
 }
 
-func newMarket(mktID string, baseFiatRate, quoteFiatRate float64) *market {
+func newMarket(slug string, baseFiatRate, quoteFiatRate float64) *market {
 	const maxVariation = 0.1
 	basisRate := baseFiatRate / quoteFiatRate
 	minRate, maxRate := basisRate*(1/(1+maxVariation)), basisRate*(1+maxVariation)
 	m := &market{
-		name:          mktID,
+		slug:          slug,
 		baseFiatRate:  baseFiatRate,
 		quoteFiatRate: quoteFiatRate,
 		basisRate:     basisRate,
@@ -945,15 +971,15 @@ func newMarket(mktID string, baseFiatRate, quoteFiatRate float64) *market {
 	m.rate.Store(math.Float64bits(basisRate))
 	log.Tracef("Market %s intitialized with base fiat rate = %.4f, quote fiat rate = %.4f "+
 		"basis rate = %.8f. Mid-gap rate will randomly walk between %.8f and %.8f",
-		mktID, baseFiatRate, quoteFiatRate, basisRate, minRate, maxRate)
+		slug, baseFiatRate, quoteFiatRate, basisRate, minRate, maxRate)
 	m.shuffle()
 	return m
 }
 
 // Randomize the order book. booksMtx must be locked.
 func (m *market) shuffle() (buys, sells [][2]json.Number) {
-	const maxChangeRatio = 0.03
-	maxShift := m.basisRate * maxChangeRatio // max shift of 3% per shuffle
+	maxChangeRatio := defaultWalkingSpeed * walkingSpeedAdj
+	maxShift := m.basisRate * maxChangeRatio
 	oldRate := math.Float64frombits(m.rate.Load())
 	if rand.Float64() < 0.5 {
 		maxShift *= -1
@@ -972,7 +998,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	m.rate.Store(math.Float64bits(newRate))
 	log.Tracef("%s: A randomized (max %.1f%%) shift of %.8f (%.3f%%) was applied to the old rate of %.8f, "+
 		"resulting in a new mid-gap of %.8f",
-		m.name, maxChangeRatio*100, shift, shiftRoll*maxChangeRatio*100, oldRate, newRate,
+		m.slug, maxChangeRatio*100, shift, shiftRoll*maxChangeRatio*100, oldRate, newRate,
 	)
 
 	halfGapRoll := rand.Float64()
@@ -986,7 +1012,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 
 	log.Tracef("%s: Half-gap roll of %.4f%% resulted in a half-gap factor of %.4f%%, range %.8f to %0.8f. "+
 		"Level-spacing roll of %.4f%% resulted in a level spacing of %.8f",
-		m.name, halfGapRoll*100, halfGapFactor*100, bestBuy, bestSell, levelSpacingRoll*100, levelSpacing,
+		m.slug, halfGapRoll*100, halfGapFactor*100, bestBuy, bestSell, levelSpacingRoll*100, levelSpacing,
 	)
 
 	zeroBookSide := func(ords []*rateQty) map[string]string {
@@ -999,10 +1025,11 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	jsBuys, jsSells := zeroBookSide(m.buys), zeroBookSide(m.sells)
 
 	makeOrders := func(bestRate, direction float64, jsSide map[string]string) []*rateQty {
-		n := rand.Intn(25)
-		ords := make([]*rateQty, n)
-		for i := 0; i < n; i++ {
+		nLevels := rand.Intn(25)
+		ords := make([]*rateQty, nLevels)
+		for i := 0; i < nLevels; i++ {
 			rate := bestRate + levelSpacing*direction*newRate*float64(i)
+			// Each level has between 1 and 10,001 USD equivalent.
 			const minQtyUSD, qtyUSDRange = 1, 10_000
 			qtyUSD := minQtyUSD + qtyUSDRange*rand.Float64()
 			qty := qtyUSD / m.baseFiatRate
@@ -1017,7 +1044,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	m.buys = makeOrders(bestBuy, -1, jsBuys)
 	m.sells = makeOrders(bestSell, 1, jsSells)
 
-	log.Tracef("%s: Shuffle resulted in %d buy orders and %d sell orders being placed", m.name, len(m.buys), len(m.sells))
+	log.Tracef("%s: Shuffle resulted in %d buy orders and %d sell orders being placed", m.slug, len(m.buys), len(m.sells))
 
 	convertSide := func(side map[string]string) [][2]json.Number {
 		updates := make([][2]json.Number, 0, len(side))

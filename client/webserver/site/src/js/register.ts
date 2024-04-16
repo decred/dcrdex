@@ -108,10 +108,9 @@ export default class RegistrationPage extends BasePage {
         return
       }
       const asset = app().assets[assetID]
-      const xc = app().exchanges[this.host]
       const wallet = asset.wallet
       if (wallet) {
-        const bondAsset = xc.bondAssets[asset.symbol]
+        const bondAsset = this.regAssetForm.xc.bondAssets[asset.symbol]
         const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
         this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
         if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
