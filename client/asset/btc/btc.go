@@ -2523,7 +2523,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 
 	outputAddresses := make([]btcutil.Address, len(orders))
 	for i, req := range requiredForOrders {
-		outputAddr, err := btc.node.changeAddress()
+		outputAddr, err := btc.node.externalAddress()
 		if err != nil {
 			return nil, 0, err
 		}
@@ -2775,8 +2775,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 		return coins, false, 0, nil // err==nil records and locks the provided fundingCoins in defer
 	}
 
-	// Use an internal address for the sized output.
-	addr, err := btc.node.changeAddress()
+	addr, err := btc.node.externalAddress()
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error creating split transaction address: %w", err)
 	}
@@ -3188,12 +3187,12 @@ func (btc *baseWallet) signedAccelerationTx(previousTxs []*GetTransactionResult,
 		return makeError(err)
 	}
 
-	changeAddr, err := btc.node.changeAddress()
+	addr, err := btc.node.externalAddress()
 	if err != nil {
 		return makeError(fmt.Errorf("error creating change address: %w", err))
 	}
 
-	tx, output, txFee, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, additionalFeesRequired, newFeeRate)
+	tx, output, txFee, err := btc.signTxAndAddChange(baseTx, addr, totalIn, additionalFeesRequired, newFeeRate)
 	if err != nil {
 		return makeError(err)
 	}
@@ -3895,7 +3894,7 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	}
 
 	// Send the funds back to the exchange wallet.
-	redeemAddr, err := btc.node.changeAddress()
+	redeemAddr, err := btc.node.externalAddress()
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 	}
@@ -4250,7 +4249,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 	if refundAddr == nil {
-		refundAddr, err = btc.node.changeAddress()
+		refundAddr, err = btc.node.externalAddress()
 		if err != nil {
 			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -5148,7 +5147,7 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 	}
 
 	// Add the refund output.
-	redeemAddr, err := btc.node.changeAddress()
+	redeemAddr, err := btc.node.externalAddress()
 	if err != nil {
 		return nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -5921,11 +5920,15 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 				btc.log.Errorf("Error updating tx %s: %v", txHash, err)
 				return
 			}
+
+			btc.pendingTxsMtx.Lock()
 			if tx.Confirmed {
-				btc.pendingTxsMtx.Lock()
 				delete(btc.pendingTxs, txHash)
-				btc.pendingTxsMtx.Unlock()
+			} else {
+				btc.pendingTxs[txHash] = *tx
 			}
+			btc.pendingTxsMtx.Unlock()
+
 			btc.emit.TransactionNote(tx.WalletTransaction, false)
 		}
 	}
