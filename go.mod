@@ -18,8 +18,8 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
 	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be
+	github.com/dcrlabs/ltcwallet v0.0.0-20240421164041-ef931f280d85
 	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095
-	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead
 	github.com/decred/base58 v1.0.5
 	github.com/decred/dcrd/addrmgr/v2 v2.0.2
 	github.com/decred/dcrd/blockchain/stake/v5 v5.0.0
@@ -57,12 +57,9 @@ require (
 	github.com/jrick/logrotate v1.0.0
 	github.com/lib/pq v1.10.4
 	github.com/lightninglabs/neutrino v0.15.0
-	github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665
-	github.com/ltcsuite/ltcd/ltcutil v1.1.0
-	github.com/ltcsuite/ltcwallet v0.13.1
-	github.com/ltcsuite/ltcwallet/wallet/txauthor v1.1.0
-	github.com/ltcsuite/ltcwallet/walletdb v1.3.5
-	github.com/ltcsuite/ltcwallet/wtxmgr v1.5.0
+	github.com/ltcsuite/ltcd v0.23.6-0.20240131072528-64dfa402637a
+	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2
+	github.com/ltcsuite/ltcd/ltcutil v1.1.4-0.20240131072528-64dfa402637a
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.1.0
@@ -139,13 +136,11 @@ require (
 	github.com/lightningnetwork/lnd/ticker v1.0.0 // indirect
 	github.com/lightningnetwork/lnd/tlv v1.0.2 // indirect
 	github.com/ltcsuite/lnd/clock v0.0.0-20200822020009-1a001cbb895a // indirect
-	github.com/ltcsuite/lnd/queue v1.0.3 // indirect
+	github.com/ltcsuite/lnd/queue v1.1.0 // indirect
 	github.com/ltcsuite/lnd/ticker v1.0.1 // indirect
-	github.com/ltcsuite/ltcd/btcec/v2 v2.1.0 // indirect
-	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.0-1 // indirect
-	github.com/ltcsuite/ltcwallet/wallet/txrules v1.2.0 // indirect
-	github.com/ltcsuite/ltcwallet/wallet/txsizes v1.1.0 // indirect
-	github.com/ltcsuite/neutrino v0.13.2 // indirect
+	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
+	github.com/ltcsuite/ltcd/btcec/v2 v2.3.2 // indirect
+	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.1-0.20240131072528-64dfa402637a // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect
@@ -173,7 +168,9 @@ require (
 	github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 // indirect
 	golang.org/x/exp v0.0.0-20230206171751-46f607a40771 // indirect
 	golang.org/x/net v0.8.0 // indirect
-	golang.org/x/sys v0.6.0 // indirect
+	golang.org/x/sys v0.8.0 // indirect
+	google.golang.org/genproto v0.0.0-20220505152158-f39f71e6c8f3 // indirect
+	google.golang.org/grpc v1.46.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )

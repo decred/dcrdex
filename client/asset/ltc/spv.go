@@ -31,8 +31,15 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	btcwallet "github.com/btcsuite/btcwallet/wallet"
 	"github.com/btcsuite/btcwallet/wtxmgr"
-	neutrino "github.com/dcrlabs/neutrino-ltc"
-	labschain "github.com/dcrlabs/neutrino-ltc/chain"
+	"github.com/dcrlabs/ltcwallet/chain"
+	neutrino "github.com/dcrlabs/ltcwallet/spv"
+	labschain "github.com/dcrlabs/ltcwallet/spv/chain"
+	ltcwaddrmgr "github.com/dcrlabs/ltcwallet/waddrmgr"
+	"github.com/dcrlabs/ltcwallet/wallet"
+	"github.com/dcrlabs/ltcwallet/wallet/txauthor"
+	"github.com/dcrlabs/ltcwallet/walletdb"
+	_ "github.com/dcrlabs/ltcwallet/walletdb/bdb"
+	ltcwtxmgr "github.com/dcrlabs/ltcwallet/wtxmgr"
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 	btcneutrino "github.com/lightninglabs/neutrino"
@@ -42,13 +49,6 @@ import (
 	"github.com/ltcsuite/ltcd/ltcutil"
 	ltctxscript "github.com/ltcsuite/ltcd/txscript"
 	ltcwire "github.com/ltcsuite/ltcd/wire"
-	"github.com/ltcsuite/ltcwallet/chain"
-	ltcwaddrmgr "github.com/ltcsuite/ltcwallet/waddrmgr"
-	"github.com/ltcsuite/ltcwallet/wallet"
-	"github.com/ltcsuite/ltcwallet/wallet/txauthor"
-	"github.com/ltcsuite/ltcwallet/walletdb"
-	_ "github.com/ltcsuite/ltcwallet/walletdb/bdb"
-	ltcwtxmgr "github.com/ltcsuite/ltcwallet/wtxmgr"
 )
 
 const (
@@ -183,7 +183,7 @@ func (w *ltcSPVWallet) walletParams() *ltcchaincfg.Params {
 		return w.chainParams
 	}
 	spoofParams := *w.chainParams
-	spoofParams.Net = ltcwire.TestNet3
+	spoofParams.Net = ltcwire.TestNet4
 	return &spoofParams
 }
 
@@ -540,7 +540,7 @@ func (w *ltcSPVWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, 
 }
 
 func (w *ltcSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, account uint32, minconf int32,
-	satPerKb btcutil.Amount, css btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
+	satPerKb btcutil.Amount, _ btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
 
 	ltcOuts := make([]*ltcwire.TxOut, len(outputs))
 	for i, op := range outputs {
@@ -551,7 +551,7 @@ func (w *ltcSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, 
 	}
 
 	ltcTx, err := w.Wallet.SendOutputs(ltcOuts, &ltcwaddrmgr.KeyScopeBIP0084, account,
-		minconf, ltcutil.Amount(satPerKb), wallet.CoinSelectionStrategy(css), label)
+		minconf, ltcutil.Amount(satPerKb), &wallet.RandomCoinSelector{}, label)
 	if err != nil {
 		return nil, err
 	}
