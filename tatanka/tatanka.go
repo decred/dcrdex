@@ -189,22 +189,27 @@ func New(cfg *Config) (*Tatanka, error) {
 	}
 
 	t := &Tatanka{
-		net:            cfg.Net,
-		dataDir:        cfg.DataDir,
-		log:            cfg.Logger,
-		whitelist:      whitelist,
-		db:             db,
-		priv:           priv,
-		id:             peerID,
-		chains:         chains,
-		tatankas:       make(map[tanka.PeerID]*remoteTatanka),
-		clients:        make(map[tanka.PeerID]*client),
-		remoteClients:  make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
-		topics:         make(map[tanka.Topic]*Topic),
-		recentRelays:   make(map[[32]byte]time.Time),
-		clientJobs:     make(chan *clientJob, 128),
-		fiatRateOracle: fiatrates.NewFiatOracle(cfg.FiatOracleCfg),
+		net:           cfg.Net,
+		dataDir:       cfg.DataDir,
+		log:           cfg.Logger,
+		whitelist:     whitelist,
+		db:            db,
+		priv:          priv,
+		id:            peerID,
+		chains:        chains,
+		tatankas:      make(map[tanka.PeerID]*remoteTatanka),
+		clients:       make(map[tanka.PeerID]*client),
+		remoteClients: make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
+		topics:        make(map[tanka.Topic]*Topic),
+		recentRelays:  make(map[[32]byte]time.Time),
+		clientJobs:    make(chan *clientJob, 128),
 	}
+
+	t.fiatRateOracle, err = fiatrates.NewFiatOracle(cfg.FiatOracleCfg)
+	if err != nil {
+		return nil, fmt.Errorf("error initializing fiat oracle: %w", err)
+	}
+
 	t.nets.Store(nets)
 	t.prepareHandlers()
 	t.tcpSrv, err = tcp.NewServer(&cfg.RPC, &tcpCore{t}, cfg.Logger.SubLogger("TCP"))

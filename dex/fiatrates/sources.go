@@ -208,6 +208,10 @@ func fiatSources(cfg Config) []*source {
 		},
 	}
 
+	for i := range sources {
+		sources[i].canReactivate = !sources[i].disabled
+	}
+
 	return sources
 }
 

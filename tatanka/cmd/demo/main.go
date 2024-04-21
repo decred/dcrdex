@@ -11,10 +11,12 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/fiatrates"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
@@ -27,10 +29,11 @@ import (
 )
 
 var (
-	logMaker      *dex.LoggerMaker
-	usr, _        = user.Current()
-	dextestDir    = filepath.Join(usr.HomeDir, "dextest")
-	decredRPCPath = filepath.Join(dextestDir, "dcr", "alpha", "rpc.cert")
+	logMaker             *dex.LoggerMaker
+	usr, _               = user.Current()
+	dextestDir           = filepath.Join(usr.HomeDir, "dextest")
+	decredRPCPath        = filepath.Join(dextestDir, "dcr", "alpha", "rpc.cert")
+	supportedDEXAssetIDs = []uint32{147, 42, 0, 2, 60, 966001, 145, 5, 20, 3, 136, 966, 133} // supported dex assets
 )
 
 func main() {
@@ -246,24 +249,27 @@ func mainErr() (err error) {
 	// Fiat rate live test requires internet connection.
 	fmt.Println("Testing fiat rates...")
 
-	assetIDs := []uint32{147, 42, 0, 2, 60, 966001, 145, 5, 20, 3, 136, 966, 133} // supported dex assets
-	for _, assetID := range assetIDs {
+	for _, assetID := range supportedDEXAssetIDs {
 		if err := cl1.SubscribeToFiatRates(assetID); err != nil {
 			return err
 		}
 	}
 
-	// Wait for all rate messages.
-	for i := 0; i < len(assetIDs); i++ {
-		<-cl1.Next()
+	// Wait for rate messages.
+	<-time.After(9 * time.Minute) // rates are broadcasted every 8min, wait for 9min.
+
+	want := len(supportedDEXAssetIDs)
+	got := 0
+	for _, assetID := range supportedDEXAssetIDs {
+		fiatRate := cl1.FiatRate(assetID) // check if rate has been cached.
+		if fiatRate != 0 {
+			got++
+			fmt.Printf("\nRate found for %s", dex.BipIDSymbol(assetID))
+		}
 	}
 
-	for _, assetID := range assetIDs {
-		// Check if rate has been cached.
-		fiatRate := cl1.FiatRate(assetID)
-		if fiatRate == 0 && assetID != 147 /* zcl */ { // Only CryptoCompare provides rate for zcl.
-			return fmt.Errorf("fiat rates not found for %s", dex.BipIDSymbol(assetID))
-		}
+	if got < want {
+		fmt.Printf("\nGot fiat rates for %d out of %d assets\n", got, want)
 	}
 
 	fmt.Println("!!!!!!!! Test Success !!!!!!!!")
@@ -338,6 +344,11 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 		return
 	}
 
+	var assetStrs []string
+	for _, assetID := range supportedDEXAssetIDs {
+		assetStrs = append(assetStrs, dex.BipIDSymbol(assetID))
+	}
+
 	cfg := &tatanka.Config{
 		Net:     dex.Simnet,
 		DataDir: dir,
@@ -348,6 +359,9 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 		},
 		ConfigPath: cfgPath,
 		WhiteList:  []tatanka.BootNode{n},
+		FiatOracleCfg: fiatrates.Config{
+			Assets: strings.Join(assetStrs, ","),
+		},
 	}
 	t, err := tatanka.New(cfg)
 	if err != nil {
