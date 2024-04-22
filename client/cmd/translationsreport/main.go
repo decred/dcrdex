@@ -187,15 +187,11 @@ func escapeTemplate(s string) string {
 }
 
 func formatReportEntry(e *WorksheetEntry) string {
-	var v, n string
+	var v string
 	if e.Version > 0 {
 		v = fmt.Sprintf("Version: %d, ", e.Version)
 	}
-	t := escapeTemplate(e.Translation)
-	if e.Notes != "" {
-		n = fmt.Sprintf(", Notes: %s", escapeTemplate(e.Notes))
-	}
-	return fmt.Sprintf("{%sT: %s%s}", v, t, n)
+	return fmt.Sprintf("{%sT: %s}", v, escapeTemplate(e.Translation))
 }
 
 func formatReportWithType(e *WorksheetEntry) string {

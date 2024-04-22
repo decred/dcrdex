@@ -71,7 +71,7 @@ const (
 	feeBalanceID                     = "FEE_BALANCE"
 	candlesLoadingID                 = "CANDLES_LOADING"
 	depthLoadingID                   = "DEPTH_LOADING"
-	invalidAddrressMsgID             = "INVALIDRESS_MSG"
+	invalidAddrressMsgID             = "INVALID_ADDRESS_MSG"
 	txFeeSupportedID                 = "TXFEE_UNSUPPORTED"
 	txFeeErrorMsgID                  = "TXFEE_ERR_MSG"
 	activeOrdersLogoutErrorID        = "ACTIVE_ORDERS_LOGOUT_ERR_MSG"
@@ -544,7 +544,7 @@ var plPL = map[string]*intl.Translation{
 	disabledMsgID:                    {T: "portfel jest wyłączony"},
 	walletRecoverySupportMsgID:       {T: "Błąd wczytywania wbudowanego portfela {{ walletSymbol }}. Kliknij przycisk 'Odtwórz' poniżej, aby to naprawić"},
 	sendSuccessID:                    {T: "Wysłano {{ assetName }}!"},
-	limitOrderImmediateTifID:         {T: "limit (i)", Notes: "i = immediate"},
+	limitOrderImmediateTifID:         {T: "limit (i)"},
 	txTypeSwapID:                     {T: "Swap"},
 	txFeeErrorMsgID:                  {T: "szacowanie opłaty nie powiodło się: {{ err }}"},
 	botTypeBasicMMID:                 {T: "Animacja rynku"},
@@ -812,7 +812,7 @@ var ar = map[string]*intl.Translation{
 	connectedID:                      {T: "متصل"},
 	limitOrderID:                     {T: "حد السعر"},
 	lockedOrderBalMsgID:              {T: "الأموال مقفلة في الطلبات غير المتطابقة"},
-	limitOrderImmediateTifID:         {T: "حد السعر (i)", Notes: "i = immediate"},
+	limitOrderImmediateTifID:         {T: "حد السعر (i)"},
 	swappingID:                       {T: "المقايضة"},
 	refundWillHappenAfterID:          {T: "سيحدث الاسترداد بعد {{ refundAfterTime }}"},
 	takerFoundMakerRedemptionID:      {T: "تم الاسترداد بواسطة {{ makerAddr }}"},
