@@ -1024,18 +1024,7 @@ func (c *Core) RedeemPrepaidBond(appPW []byte, code []byte, host string, certI a
 	dc.acct.bonds = append(dc.acct.bonds, dbBond)
 	dc.acct.authMtx.Unlock()
 
-	defer func() {
-		if success {
-			c.notify(newBondAuthUpdate(dc.acct.host, c.exchangeAuth(dc)))
-		}
-	}()
-
-	if acctExists {
-		err = c.db.AddBond(dc.acct.host, dbBond)
-		if err != nil {
-			return 0, fmt.Errorf("failed to store pre-paid bond for dex %s: %w", host, err)
-		}
-	} else {
+	if !acctExists {
 		dc.acct.keyMtx.RLock()
 		ai := &db.AccountInfo{
 			Host:      dc.acct.host,
@@ -1045,15 +1034,27 @@ func (c *Core) RedeemPrepaidBond(appPW []byte, code []byte, host string, certI a
 			Bonds:     []*db.Bond{dbBond},
 		}
 		dc.acct.keyMtx.RUnlock()
-		err = c.dbCreateOrUpdateAccount(dc, ai)
-		if err != nil {
+
+		if err = c.dbCreateOrUpdateAccount(dc, ai); err != nil {
 			return 0, fmt.Errorf("failed to store pre-paid account for dex %s: %w", host, err)
 		}
+		c.addDexConnection(dc)
+	}
+
+	success = true // Don't disconnect anymore.
+
+	if err = c.db.AddBond(dc.acct.host, dbBond); err != nil {
+		return 0, fmt.Errorf("failed to store pre-paid bond for dex %s: %w", host, err)
+	}
+
+	if err = c.bondConfirmed(dc, account.PrepaidBondID, code, postBondRes); err != nil {
+		return 0, fmt.Errorf("bond redeemed, but failed to auth: %v", err)
 	}
 
 	c.updateBondReserves()
 
-	success = true
+	c.notify(newBondAuthUpdate(dc.acct.host, c.exchangeAuth(dc)))
+
 	return uint64(postBondRes.Strength), nil
 }
 
