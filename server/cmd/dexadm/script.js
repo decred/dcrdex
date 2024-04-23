@@ -6,8 +6,8 @@ async function requestJSON (method, addr, opts) {
     body: opts.reqBody
   }
   const resp = await window.fetch(addr, req)
-  if (resp.status !== 200) { throw new Error(`${resp.status}: ${resp.statusText}`) }
   const body = await resp.text()
+  if (resp.status !== 200) { console.log(resp); throw new Error(`${resp.status}: ${resp.statusText} : ${body}`) }
   if (body.length === 0) return "OK"
   if (opts.raw) return body
   return JSON.parse(body)
@@ -20,7 +20,7 @@ async function requestJSON (method, addr, opts) {
   page.responseTmpl.remove()
   page.responseTmpl.removeAttribute('id')
 
-  const doRequest = async (method, path, opts) => {
+  const writeResult = (path, res, isError) => {
     const div = page.responseTmpl.cloneNode(true)
     const tmpl = Array.from(div.querySelectorAll('[data-tmpl]')).reduce((d, el) => {
       d[el.dataset.tmpl] = el
@@ -29,15 +29,19 @@ async function requestJSON (method, addr, opts) {
     page.responses.prepend(div)
     tmpl.path.textContent = path
     tmpl.close.addEventListener('click', () => div.remove())
+    tmpl.response.textContent = res
+    if (isError) tmpl.response.classList.add('errcolor')
+    while (page.responses.children.length > 20) page.responses.removeChild(page.respones.lastChild)
+    page.responses.scrollTo(0, 0)
+  }
+
+  const doRequest = async (method, path, opts) => {
     try {
       const resp = await requestJSON(method, path, opts)
       if (opts?.raw) tmpl.response.textContent = resp
-      else tmpl.response.textContent = JSON.stringify(resp, null, 4)
+      else writeResult(path, JSON.stringify(resp, null, 4))
     } catch (e) {
-      tmpl.response.textContent = e.toString()
-    } finally {
-      while (page.responses.children.length > 20) page.respones.removeChild(page.respones.lastChild)
-      page.responses.scrollTo(0, 0)
+      writeResult(path, e.toString(), true)
     }
   }
 
@@ -61,8 +65,18 @@ async function requestJSON (method, addr, opts) {
     const uri = `/market/${page.marketIDInput.value}/matches?n=100&includeinactive=${page.includeInactiveMatches.checked ? 'true' : 'false'}`
     get(uri, { raw: true })
   })
-  page.suspendBttn.addEventListener('click', () => get(`/market/${page.marketIDInput.value}/suspend`))
-  page.resumeBttn.addEventListener('click', () => get(`/market/${page.marketIDInput.value}/resume`))
+  page.suspendTimeCheckbox.addEventListener('change', () => page.suspendTimeInput.classList.toggle('d-none', !page.suspendTimeCheckbox.checked))
+  page.unsuspendTimeCheckbox.addEventListener('change', () => page.unsuspendTimeInput.classList.toggle('d-none', !page.unsuspendTimeCheckbox.checked))
+  const susun = (tag, withTime, timeV) => {
+    if (!page.marketIDInput.value) return writeResult('/market', "no market specified", true)
+    if (withTime && timeV === '') return writeResult('/market', "datetime not set", true)
+    const params = new URLSearchParams()
+    if (tag === 'suspend') params.append('persist', `${page.persistBook.checked ? 'true' : 'false'}`)
+    if (withTime && timeV) params.append('t', (new Date(timeV)).getTime())
+    get(`/market/${page.marketIDInput.value}/${tag}?${params.toString()}`)
+  }
+  page.suspendBttn.addEventListener('click', () => susun('suspend', page.suspendTimeCheckbox.checked, page.suspendTimeInput.value))
+  page.resumeBttn.addEventListener('click', () => susun('resume', page.unsuspendTimeCheckbox.checked, page.unsuspendTimeInput.value))
   page.generatePrepaidBondsBttn.addEventListener('click', () => {
     const [n, days, strength] = [page.prepaidBondCountInput.value, page.prepaidBondDaysInput.value, page.prepaidBondStrengthInput.value]
     get(`/prepaybonds?n=${n}&days=${days}&strength=${strength}`)

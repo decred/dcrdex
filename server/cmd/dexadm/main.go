@@ -87,7 +87,7 @@ func mainErr() error {
 	}
 
 	srv, err := comms.NewServer(&comms.RPCConfig{
-		ListenAddrs: []string{":" + cfg.Port},
+		ListenAddrs: []string{"127.0.0.1:" + cfg.Port},
 		NoTLS:       true,
 	})
 	if err != nil {

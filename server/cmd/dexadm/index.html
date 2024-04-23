@@ -7,7 +7,7 @@
   <!-- The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags -->
   <!-- <link rel="icon" href="/img/favicon.png?v=AK4XS4"> -->
   <meta name="description" content="DCRDEX Admin Server UI">
-  <title>DCRDEX Admin Server UI</title>
+  <title>DCRDEX Admin UI</title>
   <style>
     body {
       position: absolute;
@@ -22,6 +22,15 @@
     input {
       padding: 5px 10px;
       font-size: 18px;
+      background-color: black;
+      border: 1px solid #555;
+      margin: 0 0.5rem;
+      color: #dadada;
+    }
+
+    input[type=datetime-local] {
+      background-color: white;
+      color: #222;
     }
 
     input.short {
@@ -43,6 +52,10 @@
       margin: 0 0 0.5rem 0;
     }
 
+    .d-none {
+      display: none;
+    }
+
     .w-50 {
       width: 50%;
     }
@@ -61,6 +74,10 @@
 
     .mono {
       font-family: monospace;
+    }
+
+    .errcolor {
+      color: rgb(202, 90, 90);
     }
 
     .overflow-y-auto {
@@ -165,11 +182,21 @@
           <button id=marketInfoBttn>Info</button>
           <button id=marketBookBttn class="ml-2">Order Book</button>
           <button id=marketEpochBttn class="ml-2">EpochOrders</button>
+        </div>
+        <div class="mb-2">
+          <button id=marketMatchesBttn>Matches</button>
+          <input type=checkbox id="includeInactiveMatches"> <label for=includeInactiveMatches>include inactive matches</label>
+        </div>
+        <div class="mb-2">
           <button id=suspendBttn class="ml-2">Suspend</button>
-          <button id=resumeBttn class="ml-2">Unsuspend</button>
+          <input type="datetime-local" id=suspendTimeInput class="d-none">
+          <input type=checkbox id="suspendTimeCheckbox"> <label for=includeInactiveMatches>set time |</label>
+          <input type=checkbox id="persistBook" checked> <label for=includeInactiveMatches>persist order book</label>
         </div>
         <div>
-          <button id=marketMatchesBttn>Matches</button> <input type=checkbox id="includeInactiveMatches"> <label for=includeInactiveMatches>include inactive matches</label>
+          <button id=resumeBttn class="ml-2">Unsuspend</button>
+          <input type="datetime-local" id=unsuspendTimeInput class="d-none">
+          <input type=checkbox id="unsuspendTimeCheckbox"> <label for=includeInactiveMatches>set time</label>
         </div>
       </div>
     </div>
