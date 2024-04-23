@@ -1181,7 +1181,7 @@ export default class Application {
     if (!w) return false
     const traitAccountLocker = 1 << 14
     if ((w.traits & traitAccountLocker) === 0) return false
-    const res = await postJSON('/api/walletsettings', { assetID })
+    const res = await postJSON('/api/walletsettings', { baseChainID })
     if (!this.checkResponse(res)) {
       console.error(res.msg)
       return false

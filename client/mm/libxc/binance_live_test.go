@@ -14,6 +14,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	_ "decred.org/dcrdex/client/asset/importall"
+	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
 )
 
@@ -237,6 +238,23 @@ func TestVWAP(t *testing.T) {
 	}
 }
 
+func TestSubscribeMarket(t *testing.T) {
+	bnc := tNewBinance(t, dex.Testnet)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
+	defer cancel()
+	wg, err := bnc.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
+
+	err = bnc.SubscribeMarket(ctx, 60, 0)
+	if err != nil {
+		t.Fatalf("failed to subscribe to market: %v", err)
+	}
+
+	wg.Wait()
+}
+
 func TestWithdrawal(t *testing.T) {
 	bnc := tNewBinance(t, dex.Mainnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
@@ -249,12 +267,12 @@ func TestWithdrawal(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	onComplete := func(amt uint64, txID string) {
-		t.Logf("withdrawal complete: %v, %v", amt, txID)
+	onComplete := func(txID string) {
+		t.Logf("withdrawal complete: %v", txID)
 		wg.Done()
 	}
 
-	err = bnc.Withdraw(ctx, 966, 2e10, "", onComplete)
+	_, err = bnc.Withdraw(ctx, 966, 2e10, "", onComplete)
 	if err != nil {
 		fmt.Printf("withdrawal error: %v", err)
 		return
@@ -275,12 +293,14 @@ func TestConfirmDeposit(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	onComplete := func(success bool, amount uint64) {
-		t.Logf("deposit complete: %v, %v", success, amount)
+	onComplete := func(amount uint64) {
+		t.Logf("deposit complete: %v", amount)
 		wg.Done()
 	}
 
-	bnc.ConfirmDeposit(ctx, "", onComplete)
+	bnc.ConfirmDeposit(ctx, &DepositData{
+		TxID: "",
+	}, onComplete)
 
 	wg.Wait()
 }
@@ -326,7 +346,7 @@ func TestGetCoinInfo(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
-	coins := make([]*binanceCoinInfo, 0)
+	coins := make([]*bntypes.CoinInfo, 0)
 	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
 	if err != nil {
 		t.Fatalf("error getting binance coin info: %v", err)

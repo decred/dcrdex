@@ -137,12 +137,8 @@ func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json
 func (b *binanceOrderBook) sync(ctx context.Context) {
 	cm := dex.NewConnectionMaster(b)
 	b.mtx.Lock()
-	oldCM := b.cm
 	b.cm = cm
 	b.mtx.Unlock()
-	if oldCM != nil {
-		oldCM.Disconnect()
-	}
 	if err := cm.ConnectOnce(ctx); err != nil {
 		b.log.Errorf("Error connecting %s order book: %v", b.mktID, err)
 	}
@@ -176,7 +172,7 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 			syncCache = append(syncCache, update)
 			return true
 		}
-		if update.LastUpdateID != updateID+1 {
+		if update.FirstUpdateID != updateID+1 {
 			// Trigger a resync.
 			return false
 		}
@@ -243,6 +239,7 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 			select {
 			case update := <-b.updateQueue:
 				if !processUpdate(update) {
+					b.log.Tracef("Bad %s update with ID %d", b.mktID, update.LastUpdateID)
 					desync()
 				}
 			case <-ctx.Done():
@@ -938,8 +935,6 @@ func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (stri
 func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData, onConfirm func(uint64)) {
 	checkDepositStatus := func() (done bool, amt uint64) {
 		var resp []*bntypes.PendingDeposit
-		// TODO: Use the "startTime" parameter to apply a reasonable limit to
-		// this request.
 		// We'll add info for the fake server.
 		var query url.Values
 		if bnc.accountsURL == fakeBinanceURL {
@@ -956,6 +951,8 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData, on
 				"network": []string{bncAsset.chain},
 			}
 		}
+		// TODO: Use the "startTime" parameter to apply a reasonable limit to
+		// this request.
 		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", query, true, true, &resp)
 		if err != nil {
 			bnc.log.Errorf("error getting deposit status: %v", err)
@@ -1118,7 +1115,7 @@ func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form ur
 }
 
 func (bnc *binance) requestInto(req *http.Request, thing interface{}) error {
-	bnc.log.Tracef("Sending request: %+v", req)
+	// bnc.log.Tracef("Sending request: %+v", req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1524,7 +1521,7 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 	}
 	book = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, bnc.log)
 	bnc.books[mktID] = book
-	go book.sync(ctx)
+	book.sync(ctx)
 
 	return nil
 }
@@ -1594,7 +1591,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 
 	bnc.marketStream = conn
 
-	go book.sync(ctx)
+	book.sync(ctx)
 
 	// Start a goroutine to reconnect every 12 hours
 	go func() {

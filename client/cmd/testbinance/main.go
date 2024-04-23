@@ -203,11 +203,12 @@ type marketSubscriber struct {
 }
 
 type userOrder struct {
-	slug   string
-	sell   bool
-	rate   float64
-	qty    float64
-	apiKey string
+	slug      string
+	sell      bool
+	rate      float64
+	qty       float64
+	apiKey    string
+	cancelled atomic.Bool
 }
 
 type fakeBinance struct {
@@ -299,14 +300,16 @@ func (f *fakeBinance) run(ctx context.Context) {
 			updates := make(map[string]json.RawMessage)
 			for mktID, mkt := range f.markets {
 				mkt.bookMtx.Lock()
-				mkt.updateID++
 				buys, sells := mkt.shuffle()
+				firstUpdateID := mkt.updateID + 1
+				mkt.updateID += uint64(len(buys) + len(sells))
 				update, _ := json.Marshal(&bntypes.BookNote{
 					StreamName: mktID + "@depth",
 					Data: &bntypes.BookUpdate{
-						Bids:         buys,
-						Asks:         sells,
-						LastUpdateID: mkt.updateID,
+						Bids:          buys,
+						Asks:          sells,
+						FirstUpdateID: firstUpdateID,
+						LastUpdateID:  mkt.updateID,
 					},
 				})
 				updates[mktID] = update
@@ -835,6 +838,10 @@ func (f *fakeBinance) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "order not found", http.StatusBadRequest)
 		return
 	}
+	status := "NEW"
+	if ord.cancelled.Load() {
+		status = "CANCELED"
+	}
 	resp := &bntypes.BookedOrder{
 		Symbol: ord.slug,
 		// OrderID:            ,
@@ -843,7 +850,7 @@ func (f *fakeBinance) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 		OrigQty:            strconv.FormatFloat(ord.qty, 'f', 9, 64),
 		ExecutedQty:        "0",
 		CumulativeQuoteQty: "0",
-		Status:             "NEW",
+		Status:             status,
 		TimeInForce:        "GTC",
 	}
 	writeJSONWithStatus(w, &resp, http.StatusOK)
@@ -910,8 +917,13 @@ func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) 
 	apiKey := extractAPIKey(r)
 	f.bookedOrdersMtx.Lock()
 	ord, found := f.bookedOrders[tradeID]
-	delete(f.bookedOrders, tradeID)
 	f.bookedOrdersMtx.Unlock()
+	if found {
+		if !ord.cancelled.CompareAndSwap(false, true) {
+			log.Errorf("Detected cancellation of an already cancelled order %s", tradeID)
+		}
+		ord.cancelled.Store(true)
+	}
 	writeJSONWithStatus(w, &struct{}{}, http.StatusOK)
 	if !found {
 		log.Errorf("DELETE request received from user %s for unknown order %s", apiKey, tradeID)
@@ -928,10 +940,10 @@ func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) 
 	update := &bntypes.StreamUpdate{
 		EventType:          "executionReport",
 		CurrentOrderStatus: "CANCELED",
-		// CancelledOrderID
-		ClientOrderID: tradeID,
-		Filled:        0,
-		QuoteFilled:   0,
+		ClientOrderID:      hex.EncodeToString(encode.RandomBytes(20)),
+		CancelledOrderID:   tradeID,
+		Filled:             0,
+		QuoteFilled:        0,
 	}
 	updateB, _ := json.Marshal(update)
 	sub.SendRaw(updateB)
