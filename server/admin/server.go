@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -92,6 +93,7 @@ type SrvConfig struct {
 	Core            SvrCore
 	Addr, Cert, Key string
 	AuthSHA         [32]byte
+	NoTLS           bool
 }
 
 // UseLogger sets the logger for the admin package.
@@ -106,15 +108,18 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		return nil, fmt.Errorf("missing certificates")
 	}
 
-	keypair, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
-	if err != nil {
-		return nil, err
-	}
+	var tlsConfig *tls.Config
+	if !cfg.NoTLS {
+		keypair, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
+		if err != nil {
+			return nil, err
+		}
 
-	// Prepare the TLS configuration.
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{keypair},
-		MinVersion:   tls.VersionTLS12,
+		// Prepare the TLS configuration.
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{keypair},
+			MinVersion:   tls.VersionTLS12,
+		}
 	}
 
 	// Create an HTTP router.
@@ -176,7 +181,13 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 // Run starts the server.
 func (s *Server) Run(ctx context.Context) {
 	// Create listener.
-	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
+	var listener net.Listener
+	var err error
+	if s.tlsConfig != nil {
+		listener, err = tls.Listen("tcp", s.addr, s.tlsConfig)
+	} else {
+		listener, err = net.Listen("tcp", s.addr)
+	}
 	if err != nil {
 		log.Errorf("can't listen on %s. admin server quitting: %v", s.addr, err)
 		return

@@ -95,6 +95,7 @@ type dexConf struct {
 	AdminSrvOn       bool
 	AdminSrvAddr     string
 	AdminSrvPW       []byte
+	AdminSrvNoTLS    bool
 	NoResumeSwaps    bool
 	DisableDataAPI   bool
 	NodeRelayAddr    string
@@ -144,6 +145,7 @@ type flagsData struct {
 	AdminSrvOn         bool   `long:"adminsrvon" description:"Turn on the admin server."`
 	AdminSrvAddr       string `long:"adminsrvaddr" description:"Administration HTTPS server address (default: 127.0.0.1:6542)."`
 	AdminSrvPassword   string `long:"adminsrvpass" description:"Admin server password. INSECURE. Do not set unless absolutely necessary."`
+	AdminSrvNoTLS      bool   `long:"adminsrvnotls" description:"Run admin server without TLS. Only use this option if you are using a securely configured reverse proxy."`
 
 	NoResumeSwaps bool `long:"noresumeswaps" description:"Do not attempt to resume swaps that are active in the DB."`
 
@@ -555,6 +557,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		AdminSrvAddr:     adminSrvAddr,
 		AdminSrvOn:       cfg.AdminSrvOn,
 		AdminSrvPW:       []byte(cfg.AdminSrvPassword),
+		AdminSrvNoTLS:    cfg.AdminSrvNoTLS,
 		NoResumeSwaps:    cfg.NoResumeSwaps,
 		DisableDataAPI:   cfg.DisableDataAPI,
 		NodeRelayAddr:    cfg.NodeRelayAddr,

@@ -161,6 +161,7 @@ func mainCore(ctx context.Context) error {
 			AuthSHA: adminSrvAuthSHA,
 			Cert:    cfg.RPCCert,
 			Key:     cfg.RPCKey,
+			NoTLS:   cfg.AdminSrvNoTLS,
 		}
 		adminServer, err := admin.NewServer(srvCFG)
 		if err != nil {
