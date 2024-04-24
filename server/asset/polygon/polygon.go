@@ -84,7 +84,7 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 	case dex.Mainnet:
 		chainID = dexpolygon.BorMainnetChainConfig.ChainID.Uint64()
 	case dex.Testnet:
-		chainID = dexpolygon.MumbaiChainConfig.ChainID.Uint64()
+		chainID = dexpolygon.AmoyChainConfig.ChainID.Uint64()
 	default:
 		chainID = 90001
 	}

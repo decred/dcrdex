@@ -45,14 +45,14 @@ var (
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		0: {
 			dex.Mainnet: common.HexToAddress("0xd45e648D97Beb2ee0045E5e91d1C2C751Cd0Bc00"), // txid: 0xbb7d09fb3832b35fbbed641453a90f217a2736cf1419848887dfee2dbb14187e
-			dex.Testnet: common.HexToAddress("0xd45e648D97Beb2ee0045E5e91d1C2C751Cd0Bc00"), // txid: 0xa5f71d47998c175c9d2aba37ad2eff390ce7d20c312cee0472e3a5d606da385d
+			dex.Testnet: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"), // txid: 0x88f656a8e432fdd50f33e67bdc39a66d24f663e33792bfab16b033dd2c609a99
 			dex.Simnet:  common.HexToAddress(""),                                           // Filled in by MaybeReadSimnetAddrs
 		},
 	}
 
 	MultiBalanceAddresses = map[dex.Network]common.Address{
 		dex.Mainnet: common.HexToAddress("0x23d8203d8E3c839F359bcC85BFB71cf0d707EDF0"), // tx: 0xc593222106c700b153977fdf290f8d9656610cd2dd88522724e85b3f7fd600cf
-		dex.Testnet: common.HexToAddress("0xFbF60393F5AB800139F283cc6e090a17db6cC7a1"), // tx 0x1a0c86f80d4d66692072d7ad4246ca6f61b749030b930aad98e5309c16e8adc0
+		dex.Testnet: common.HexToAddress("0xa958d5B8a3a29E3f5f41742Fbb939A0dd93EB418"), // tx 0x692cf15b145cb45c0098bedf8a55d067b1ac994973bb62000c046b8453d8b624
 	}
 
 	usdcTokenID, _ = dex.BipSymbolID("usdc.polygon")
@@ -111,12 +111,12 @@ var (
 				},
 			},
 			dex.Testnet: {
-				Address: common.HexToAddress("0x0fa8781a83e46826621b3bc094ea2a0212e71b23"), // https://polygonscan.com/address/0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+				Address: common.HexToAddress("0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582"), // https://amoy.polygonscan.com/address/0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582#readContract
 				SwapContracts: map[uint32]*dexeth.SwapContract{
 					0: {
-						// deploy tx: https://polygonscan.com/tx/0xfc27a89e5befba05df5ebe64670d5df89f635957f3fbeb2d4240cd3f0e540022
-						// swap contract: https://polygonscan.com/address/0x73bc803A2604b2c58B8680c3CE1b14489842EF16
-						Address: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"),
+						// deploy tx: https://amoy.polygonscan.com/tx/0x61315c5cf90fdf2cd4a89d04cce6496c9ee7a2ecc18dbc5f76e4baacc80bda5e
+						// swap contract: https://amoy.polygonscan.com/address/0xca70D818ffff2Cd235Ab90b4fec3e6394014D294
+						Address: common.HexToAddress("0xca70D818ffff2Cd235Ab90b4fec3e6394014D294"),
 						Gas: dexeth.Gases{
 							// First swap used 187982 gas Recommended Gases.Swap = 244376
 							// 	4 additional swaps averaged 112591 gas each. Recommended Gases.SwapAdd = 146368
@@ -130,7 +130,7 @@ var (
 							RedeemAdd: 41_117,
 							// Average of 5 refunds: 69660. Recommended Gases.Refund = 90558
 							// 	[69663 69663 69651 69663 69663]
-							Refund: 90_558,
+							Refund: 90_558, // On Amaoy recommended was actually 79067
 							// Average of 2 approvals: 58634. Recommended Gases.Approve = 76224
 							// 	[58634 58634]
 							Approve: 76_224,
