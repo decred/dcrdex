@@ -118,8 +118,8 @@ class OSDesktopNotifier {
     // webview/linux or webview/windows
     if (isDesktopWebview()) await window.sendOSNotification(title, body)
     // webkit/darwin
-    // See: client/cmd/dexc-desktop/app_darwin.go#L673-#L697
-    else if (isDesktopWebkit()) await window.webkit.messageHandlers.dexcHandler.postMessage(['sendOSNotification', title, body])
+    // See: client/cmd/bisonw-desktop/app_darwin.go#L673-#L697
+    else if (isDesktopWebkit()) await window.webkit.messageHandlers.bwHandler.postMessage(['sendOSNotification', title, body])
     else console.error('sendDesktopNotification: unknown environment')
   }
 }
@@ -130,9 +130,9 @@ function isDesktopWebview (): boolean {
 }
 
 // isDesktopDarwin returns true if we are running in a webview on darwin
-// It tests for the existence of the dexcHandler webkit message handler.
+// It tests for the existence of the bwHandler webkit message handler.
 function isDesktopWebkit (): boolean {
-  return window.webkit?.messageHandlers?.dexcHandler !== undefined
+  return window.webkit?.messageHandlers?.bwHandler !== undefined
 }
 
 // determine whether we're running in a webview or in browser, and export

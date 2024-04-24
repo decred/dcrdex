@@ -2,16 +2,16 @@
 
 ## Client Quick Start Installation
 
-The DEX client can be installed in one of the following ways. Download the
+Bison Wallet can be installed in one of the following ways. Download the
 application from *just one* of the following locations:
 
-* Download the standalone DEX client for your operating system for the [latest
+* Download standalone Bison Wallet for your operating system for the [latest
   release on GitHub](https://github.com/decred/dcrdex/releases). Extract the
-  "dexc" executable from the archive and run it. Open any web browser to the
-  link shown by the application. You may also put the **dexc** executable's
+  "bw" executable from the archive and run it. Open any web browser to the
+  link shown by the application. You may also put the **bisonw** executable's
   folder on your `PATH`.
 * [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
-  the official graphical Decred wallet, which integrates the DEX client, and go
+  the official graphical Decred wallet, which integrates Bison Wallet, and go
   to the DEX tab.
 * (Legacy users) Use the Decred command line application installer,
   [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/). This
@@ -24,21 +24,21 @@ not `master`.
 ### Important Note on External Wallets
 
 If using external wallet software (e.g. **dcrd**+**dcrwallet**, **bitcoind**,
-Electrum, etc.), they must remain running while the DEX client is running. Do
+Electrum, etc.), they must remain running while Bison Wallet is running. Do
 not shut down, lock, unlock, or otherwise modify your wallet settings while the
 client is running. Also, only send funds from within the DEX application, not
 directly from the external wallet's own controls. Finally, do not manually lock
-or unlock any coins while the DEX client is running.
+or unlock any coins while Bison Wallet is running.
 
 ## Client Configuration
 
-These instructions assume you've obtained the DEX client as described in the
-[Client Quick Start Installation](#client-quick-start-installation) section.
+These instructions assume you've obtained Bison Wallet as described in the
+[Wallet Quick Start Installation](#client-quick-start-installation) section.
 
 ### Prerequisites
 
-If you use the standalone DEX client, you will need a web browser to open the
-DEX client user interface as described in the next section.
+If you use the standalone Bison Wallet, you will need a web browser to open
+Bison Wallett user interface as described in the next section.
 
 Most users will use the native wallets that are already built into the DEX
 client. Depending on the asset, you may be able to choose from: (1) a native
@@ -62,11 +62,11 @@ server is also necessary ([example](images/electrum-rpc-config.png)).
 
 ### Synchronizing Wallets
 
-**If using the native wallets** that are integrated with the DEX client (see
+**If using the native wallets** that are integrated with Bison Wallet (see
 above), you can skip this section.
 
 If you choose to use an external wallet (full node or Electrum), you must start
-and synchronize them with their networks *before* running the DEX client.
+and synchronize them with their networks *before* running Bison Wallet.
 
 Note that Bitcoin Core and most "clones" support block pruning, which can keep
 your blockchain storage down to a few GB, not the size of the full blockchain,
@@ -76,13 +76,13 @@ several blocks.
 
 ### Initial Setup
 
-1. Start the client. For the standalone client (**dexc**), open a command prompt
-   in the folder containing the dexc application and run it. e.g. `./dexc` on
-   Mac and Linux, or `dexc.exe` on Windows. To avoid the command prompt on
-   Windows, `dexc-tray.exe` may be run instead. If using Decrediton instead of
-   **dexc**, just click the "DEX" tab and skip to step 3.
+1. Start the client. For standalone Bison Wallet (**bisonw**), open a command prompt
+   in the folder containing the bisonw application and run it. e.g. `./bisonw` on
+   Mac and Linux, or `bisonw.exe` on Windows. To avoid the command prompt on
+   Windows, `bisonw-tray.exe` may be run instead. If using Decrediton instead of
+   **bisonw**, just click the "DEX" tab and skip to step 3.
 
-   **Note**: You can start dexc with another network via a command line flag:
+   **Note**: You can start bisonw with another network via a command line flag:
    `--testnet` or `--simnet`, the default is `mainnet`.
 
 2. In your web browser, navigate to <http://localhost:5758>. Skip this step if
@@ -127,7 +127,7 @@ several blocks.
 ### Dependencies
 
 1. [Go 1.19 or 1.20](https://golang.org/doc/install)
-2. (optional) [Node 18 or 20](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own JavaScript and css resources. This build step is not required if building from a release branch such as `release-v0.6`.
+2. (optional) [Node 18 or 20](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that Bison Wallet has no external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own JavaScript and css resources. This build step is not required if building from a release branch such as `release-v0.6`.
 3. At least 2 GB of available system memory.
 
 ### Build from Source
@@ -140,18 +140,18 @@ several blocks.
 npm clean-install && npm run build
 ```
 
-**Build and run the client** from *client/cmd/dexc*.
+**Build and run the client** from *client/cmd/bisonw*.
 
 ```sh
 go build
-./dexc
+./bisonw
 ```
 
 Connect to the client from your browser at `localhost:5758`.
 
-While `dexc` may be run from within the git workspace as described above, the
-`dexc` binary executable generated with `go build` can be copied into a
-different folder (e.g. `/opt/dcrdex/dexc`).
+While `bisonw` may be run from within the git workspace as described above, the
+`bisonw` binary executable generated with `go build` can be copied into a
+different folder (e.g. `/opt/dcrdex/bisonw`).
 
 ### Docker
 
@@ -170,5 +170,5 @@ docker volume create --name=dcrdex_data
 #### Run image
 
 ```sh
-docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.dexc user/dcrdex
+docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.bisonw user/dcrdex
 ```

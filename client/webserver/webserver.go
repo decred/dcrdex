@@ -259,7 +259,7 @@ type valStamp struct {
 }
 
 // WebServer is a single-client http and websocket server enabling a browser
-// interface to the DEX client.
+// interface to Bison Wallet.
 type WebServer struct {
 	ctx          context.Context
 	wsServer     *websocket.Server
@@ -296,12 +296,12 @@ func New(cfg *Config) (*WebServer, error) {
 	var siteDir string // empty signals embedded files only
 	if cfg.NoEmbed {
 		// Look for the "site" folder in the executable's path, the working
-		// directory, or relative to [repo root]/client/cmd/dexc.
-		execPath, err := os.Executable() // e.g. /usr/bin/dexc
+		// directory, or relative to [repo root]/client/cmd/bisonw.
+		execPath, err := os.Executable() // e.g. /usr/bin/bisonw
 		if err != nil {
 			return nil, fmt.Errorf("unable to locate executable path: %w", err)
 		}
-		execPath, err = filepath.EvalSymlinks(execPath) // e.g. /opt/decred/dex/dexc
+		execPath, err = filepath.EvalSymlinks(execPath) // e.g. /opt/decred/dex/bisonw
 		if err != nil {
 			return nil, fmt.Errorf("unable to locate executable path: %w", err)
 		}
@@ -327,8 +327,8 @@ func New(cfg *Config) (*WebServer, error) {
 		if siteDir == "" {
 			return nil, fmt.Errorf("no HTML template files found. "+
 				"Place the 'site' folder in the executable's directory %q or the working directory, "+
-				"or run dexc from within the client/cmd/dexc source workspace folder, or specify the"+
-				"'sitedir' configuration directive to dexc.", execPath)
+				"or run bisonw from within the client/cmd/bisonw source workspace folder, or specify the"+
+				"'sitedir' configuration directive to bisonw.", execPath)
 		}
 
 		log.Infof("Located \"site\" folder at %v", siteDir)

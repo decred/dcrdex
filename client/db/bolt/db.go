@@ -144,7 +144,7 @@ var defaultOpts = Opts{
 	BackupOnShutdown: true,
 }
 
-// BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
+// BoltDB is a bbolt-based database backend for Bison Wallet. BoltDB satisfies
 // the db.DB interface defined at decred.org/dcrdex/client/db.
 type BoltDB struct {
 	*bbolt.DB
@@ -268,7 +268,7 @@ func (db *BoltDB) Run(ctx context.Context) {
 		return
 	}
 
-	// TODO: If we never see trouble with the compacted DB files when dexc
+	// TODO: If we never see trouble with the compacted DB files when bisonw
 	// starts up, we can just compact to the backups folder and copy that backup
 	// file back on top of the main DB file after it is closed.  For now, the
 	// backup above is a direct (not compacted) copy.

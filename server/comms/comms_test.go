@@ -244,7 +244,7 @@ func sendReplace(t *testing.T, conn *wsConnStub, thing any, old, new string) {
 	conn.msg <- []byte(s)
 }
 
-func newTestDEXClient(addr string, rootCAs *x509.CertPool) (*websocket.Conn, error) {
+func newTestBisonWallet(addr string, rootCAs *x509.CertPool) (*websocket.Conn, error) {
 	uri, err := url.Parse(addr)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing url: %w", err)
@@ -743,7 +743,7 @@ func TestOnline(t *testing.T) {
 		t.Fatalf("No certs appended, using system certs only")
 	}
 
-	remoteClient, err := newTestDEXClient(address, rootCAs)
+	remoteClient, err := newTestBisonWallet(address, rootCAs)
 	if err != nil {
 		t.Fatalf("remoteClient constructor error: %v", err)
 	}
@@ -811,7 +811,7 @@ func TestOnline(t *testing.T) {
 	}
 
 	// Try connecting, and make sure there is an error.
-	_, err = newTestDEXClient(address, rootCAs)
+	_, err = newTestBisonWallet(address, rootCAs)
 	if err == nil {
 		t.Fatalf("no websocket connection error after ban")
 	}
@@ -825,7 +825,7 @@ func TestOnline(t *testing.T) {
 	}
 	server.banMtx.Unlock()
 	// Now try again. Should connect.
-	conn, err := newTestDEXClient(address, rootCAs)
+	conn, err := newTestBisonWallet(address, rootCAs)
 	if err != nil {
 		t.Fatalf("error connecting on expired ban")
 	}

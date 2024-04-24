@@ -16,9 +16,11 @@ import {
 import { setOptionTemplates } from './opts'
 import { formatCoinID, setCoinHref } from './coinexplorers'
 
-// lockTimeMakerMs must match the value returned from LockTimeMaker func in dexc.
+// lockTimeMakerMs must match the value returned from LockTimeMaker func in
+// bisonw.
 const lockTimeMakerMs = 20 * 60 * 60 * 1000
-// lockTimeTakerMs must match the value returned from LockTimeTaker func in dexc.
+// lockTimeTakerMs must match the value returned from LockTimeTaker func in
+// bisonw.
 const lockTimeTakerMs = 8 * 60 * 60 * 1000
 
 const animationLength = 500

@@ -35,7 +35,7 @@ import (
 const (
 	// rpcSemver is the RPC server's semantic API version. Move major up one for
 	// breaking changes. Move minor for backwards compatible features. Move
-	// patch for bug fixes. Dexcctl requiredRPCSemVer should be kept up to date
+	// patch for bug fixes. bwctl requiredRPCSemVer should be kept up to date
 	// with this version.
 	rpcSemverMajor uint32 = 0
 	rpcSemverMinor uint32 = 4
@@ -96,19 +96,19 @@ type clientCore interface {
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON
-// interface to the DEX client.
+// interface to Bison Wallet.
 type RPCServer struct {
-	core        clientCore
-	mm          *mm.MarketMaker
-	mux         *chi.Mux
-	wsServer    *websocket.Server
-	addr        string
-	tlsConfig   *tls.Config
-	srv         *http.Server
-	authSHA     [32]byte
-	wg          sync.WaitGroup
-	dexcVersion *SemVersion
-	ctx         context.Context
+	core      clientCore
+	mm        *mm.MarketMaker
+	mux       *chi.Mux
+	wsServer  *websocket.Server
+	addr      string
+	tlsConfig *tls.Config
+	srv       *http.Server
+	authSHA   [32]byte
+	wg        sync.WaitGroup
+	bwVersion *SemVersion
+	ctx       context.Context
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -192,7 +192,7 @@ type Config struct {
 	Core                        clientCore
 	MarketMaker                 *mm.MarketMaker
 	Addr, User, Pass, Cert, Key string
-	DexcVersion                 *SemVersion
+	BWVersion                   *SemVersion
 	CertHosts                   []string
 }
 
@@ -241,14 +241,14 @@ func New(cfg *Config) (*RPCServer, error) {
 
 	// Make the server.
 	s := &RPCServer{
-		core:        cfg.Core,
-		mm:          cfg.MarketMaker,
-		mux:         mux,
-		srv:         httpServer,
-		addr:        cfg.Addr,
-		tlsConfig:   tlsConfig,
-		dexcVersion: cfg.DexcVersion,
-		wsServer:    websocket.New(cfg.Core, log.SubLogger("WS")),
+		core:      cfg.Core,
+		mm:        cfg.MarketMaker,
+		mux:       mux,
+		srv:       httpServer,
+		addr:      cfg.Addr,
+		tlsConfig: tlsConfig,
+		bwVersion: cfg.BWVersion,
+		wsServer:  websocket.New(cfg.Core, log.SubLogger("WS")),
 	}
 
 	// Create authSHA to verify requests against.

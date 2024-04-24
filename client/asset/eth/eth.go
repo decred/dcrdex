@@ -433,7 +433,7 @@ type baseWallet struct {
 }
 
 // assetWallet is a wallet backend for Ethereum and Eth tokens. The backend is
-// how the DEX client app communicates with the Ethereum blockchain and wallet.
+// how the Bison Wallet communicates with the Ethereum blockchain and wallet.
 // assetWallet satisfies the dex.Wallet interface.
 type assetWallet struct {
 	*baseWallet

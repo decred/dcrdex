@@ -2217,7 +2217,7 @@ func testApproveGas(t *testing.T) {
 	// data := []byte{}
 	// value := uint64(1)
 
-	walletDir := filepath.Join(dcrutil.AppDataDir("dexc", false), "simnet", "assetdb", dex.BipIDSymbol(60))
+	walletDir := filepath.Join(dcrutil.AppDataDir("bisonw", false), "simnet", "assetdb", dex.BipIDSymbol(60))
 	client, err := newNodeClient(getWalletDir(walletDir, dex.Simnet), dex.Simnet, tLogger.SubLogger("initiator"))
 	if err != nil {
 		t.Fatalf("unable to create node client %v", err)

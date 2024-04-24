@@ -2529,7 +2529,7 @@ export default class MarketsPage extends BasePage {
     const ord = note.order
     const mord = this.metaOrders[ord.id]
     // - If metaOrder doesn't exist for the given order it means it was created
-    //  via dexcctl and the GUI isn't aware of it or it was an inflight order.
+    //  via bwctl and the GUI isn't aware of it or it was an inflight order.
     //  refreshActiveOrders must be called to grab this order.
     // - If an OrderLoaded notification is recieved, it means an order that was
     //   previously not "ready to tick" (due to its wallets not being connected

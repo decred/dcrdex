@@ -28,21 +28,21 @@ build_targets (){
     ARCH=${TARGET##*/}
     echo "Building for ${OS}-${ARCH} with FLAVOR=${FLAVOR}"
 
-    mkdir -p "bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}"
+    mkdir -p "bin/bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}"
 
-    pushd client/cmd/dexc
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_DEXC:+-tags ${TAGS_DEXC}} -o "../../../bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}/${DEXC_EXE}" -ldflags "${LDFLAGS_DEXC:-${LDFLAGS_BASE}}"
+    pushd client/cmd/bisonw
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o "../../../bin/bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
     popd
 
-    pushd client/cmd/dexcctl
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}" -ldflags "${LDFLAGS_BASE}"
+    pushd client/cmd/bwctl
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}" -ldflags "${LDFLAGS_BASE}"
     popd
 
     pushd bin
     if [[ "$OS" == "windows" ]]; then
-      zip -9 -r -q "dexc${FLAVOR}-${OS}-${ARCH}-v${VER}.zip" "dexc${FLAVOR}-${OS}-${ARCH}-v${VER}"
+      zip -9 -r -q "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}.zip" "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}"
     else
-      tar -I 'gzip -9' --owner=0 --group=0 -cf "dexc${FLAVOR}-${OS}-${ARCH}-v${VER}.tar.gz" "dexc${FLAVOR}-${OS}-${ARCH}-v${VER}"
+      tar -I 'gzip -9' --owner=0 --group=0 -cf "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}.tar.gz" "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}"
     fi
     popd
   done
@@ -55,9 +55,9 @@ build_targets
 # Only Windows gets the systray build
 TARGETS="windows/amd64"
 FLAVOR="-tray"
-TAGS_DEXC="systray"
-DEXC_EXE="dexc-tray.exe"
-LDFLAGS_DEXC="${LDFLAGS_BASE} -H=windowsgui"
+TAGS_BISONW="systray"
+BISONW_EXE="bisonw-tray.exe"
+LDFLAGS_BISONW="${LDFLAGS_BASE} -H=windowsgui"
 build_targets
 
 echo "Files embedded in the Go webserver package:"
@@ -65,5 +65,5 @@ go list -f '{{ .EmbedFiles }}' decred.org/dcrdex/client/webserver
 # NOTE: before embedding, we needed to grab: dist, src/font, src/html, src/img.
 
 pushd bin
-sha256sum *.gz *.zip > dexc-v${VER}-manifest.txt
+sha256sum *.gz *.zip > bisonw-v${VER}-manifest.txt
 popd

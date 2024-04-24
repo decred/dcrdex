@@ -1706,7 +1706,7 @@ func New(cfg *Config) (*Core, error) {
 
 // Run runs the core. Satisfies the runner.Runner interface.
 func (c *Core) Run(ctx context.Context) {
-	c.log.Infof("Starting DEX client core")
+	c.log.Infof("Starting Bison Wallet core")
 	// Store the context as a field, since we will need to spawn new DEX threads
 	// when new accounts are registered.
 	c.ctx = ctx
@@ -1832,7 +1832,7 @@ fetchers:
 		wallet.Disconnect()
 	}
 
-	c.log.Infof("DEX client core off")
+	c.log.Infof("Bison Wallet core off")
 }
 
 // Ready returns a channel that is closed when Run completes its initialization
@@ -8358,7 +8358,7 @@ func (c *Core) resumeTrade(tracker *trackedTrade, crypter encrypt.Crypter, faile
 					// longer require funding coins, and (3) cancellation in
 					// authDEX if the order is booked.
 					c.log.Warnf("Check the status of your %s wallet and the coins logged above! "+
-						"Resolve the wallet issue if possible and restart the DEX client.",
+						"Resolve the wallet issue if possible and restart Bison Wallet.",
 						strings.ToUpper(unbip(wallets.fromWallet.AssetID)))
 					c.log.Warnf("Unfunded order %v will be canceled on connect, but %d active matches need funding coins!",
 						tracker.ID(), len(matchesNeedingCoins))
@@ -8563,7 +8563,7 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 					if err != nil || len(coins) == 0 {
 						notifyErr(TopicOrderCoinFetchError, tracker.token(), unbip(fromID), err)
 						c.log.Warnf("(re-reserve) Check the status of your %s wallet and the coins logged above! "+
-							"Resolve the wallet issue if possible and restart the DEX client.",
+							"Resolve the wallet issue if possible and restart Bison Wallet.",
 							strings.ToUpper(unbip(fromID)))
 						c.log.Warnf("(re-reserve) Unfunded order %v will be revoked if %d active matches don't get funding coins!",
 							tracker.ID(), len(matchesNeedingCoins))

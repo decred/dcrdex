@@ -12,7 +12,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 )
 
-// DB is an interface that must be satisfied by a DEX client persistent storage
+// DB is an interface that must be satisfied by Bison Wallet persistent storage
 // manager.
 type DB interface {
 	dex.Runner

@@ -1,0 +1,39 @@
+{
+  "RT_GROUP_ICON": {
+    "#1": {
+      "0000": "./icons/bisonw-256.png"
+    },
+    "#2": {
+      "0000": "./icons/bisonw-dark-256.png"
+    },
+    "#3": {
+      "0000": "./icons/bisonw-light-256.png"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "0.7.0.0",
+          "product_version": "0.7.0.0"
+        },
+        "info": {
+          "0409": {
+            "Comments": "",
+            "CompanyName": "Decred",
+            "FileDescription": "Bison Wallet",
+            "FileVersion": "0.7.0",
+            "InternalName": "bisonw",
+            "LegalCopyright": "© The Decred Developers. Blue Oak Model License 1.0.0",
+            "LegalTrademarks": "",
+            "OriginalFilename": "bisonw.exe",
+            "PrivateBuild": "",
+            "ProductName": "Bison Wallet",
+            "ProductVersion": "0.7.0",
+            "SpecialBuild": ""
+          }
+        }
+      }
+    }
+  }
+}

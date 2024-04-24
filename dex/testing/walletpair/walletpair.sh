@@ -4,7 +4,7 @@ export SHELL=$(which bash)
 SESSION="walletpair"
 
 
-DEXC_ARGS=${@}
+BW_ARGS=${@}
 SIMNET=""
 TESTNET=""
 while [ "${1:-}" != "" ]; do
@@ -38,10 +38,10 @@ fi
 CLIENT_1_DIR="${PAIR_ROOT}/dexc1"
 CLIENT_2_DIR="${PAIR_ROOT}/dexc2"
 HARNESS_DIR="${PAIR_ROOT}/harness-ctl"
-DEXC_DIR=$(realpath ../../../client/cmd/dexc)
-DEXC="${DEXC_DIR}/dexc"
+BW_DIR=$(realpath ../../../client/cmd/bisonw)
+BISONW="${BW_DIR}/bisonw"
 
-cd "${DEXC_DIR}"
+cd "${BW_DIR}"
 go build
 cd -
 
@@ -117,32 +117,32 @@ tmux kill-session
 EOF
 chmod +x "${QUIT_FILE}"
 
-echo "xdg-open http://${CLIENT_1_ADDR} > /dev/null 2>&1" > "${HARNESS_DIR}/dexc1"
-chmod +x "${HARNESS_DIR}/dexc1"
+echo "xdg-open http://${CLIENT_1_ADDR} > /dev/null 2>&1" > "${HARNESS_DIR}/bisonw1"
+chmod +x "${HARNESS_DIR}/bisonw1"
 
-echo "dexcctl -C ${CLIENT_1_CTL_CONF} \$1" > "${HARNESS_DIR}/dexc1ctl"
-chmod +x "${HARNESS_DIR}/dexc1ctl"
+echo "bwctl -C ${CLIENT_1_CTL_CONF} \$1" > "${HARNESS_DIR}/bw1ctl"
+chmod +x "${HARNESS_DIR}/bw1ctl"
 
 echo "xdg-open http://${CLIENT_2_ADDR} > /dev/null 2>&1" > "${HARNESS_DIR}/dexc2"
 chmod +x "${HARNESS_DIR}/dexc2"
 
-echo "dexcctl -C ${CLIENT_2_CTL_CONF} \$1" > "${HARNESS_DIR}/dexc2ctl"
-chmod +x "${HARNESS_DIR}/dexc2ctl"
+echo "bwctl -C ${CLIENT_2_CTL_CONF} \$1" > "${HARNESS_DIR}/bw2ctl"
+chmod +x "${HARNESS_DIR}/bw2ctl"
 
 tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'harness-ctl'
 
-tmux new-window -t $SESSION:1 -n 'dexc1' $SHELL
-tmux send-keys -t $SESSION:1 "cd ${CLIENT_1_DIR}" C-m
-tmux send-keys -t $SESSION:1 "${DEXC} --appdata=${CLIENT_1_DIR} ${DEXC_ARGS}" C-m
+tmux new-window -t $SESSION:1 -n 'bisonw1' $SHELL
+tmux send-keys -t $SESSION:1 "cd ${PAIR_ROOT}/dexc1" C-m
+tmux send-keys -t $SESSION:1 "${BISONW} --appdata=${CLIENT_1_DIR} ${BW_ARGS}" C-m
 
-tmux new-window -t $SESSION:2 -n 'dexc2' $SHELL
-tmux send-keys -t $SESSION:2 "cd ${CLIENT_2_DIR}" C-m
-tmux send-keys -t $SESSION:2 "${DEXC} --appdata=${CLIENT_2_DIR} ${DEXC_ARGS}" C-m
+tmux new-window -t $SESSION:2 -n 'bisonw1' $SHELL
+tmux send-keys -t $SESSION:2 "cd ${PAIR_ROOT}/dexc1" C-m
+tmux send-keys -t $SESSION:2 "${BISONW} --appdata=${CLIENT_2_DIR} ${BW_ARGS}" C-m
 
 tmux select-window -t $SESSION:0
 sleep 1
 tmux send-keys -t $SESSION:0 "cd ${HARNESS_DIR}; tmux wait-for -S walletpair" C-m\; wait-for walletpair
-tmux send-keys -t $SESSION:0 "./dexc1; tmux wait-for -S walletpair" C-m\; wait-for walletpair
-tmux send-keys -t $SESSION:0 "./dexc2" C-m
+tmux send-keys -t $SESSION:0 "./bisonw1; tmux wait-for -S walletpair" C-m\; wait-for walletpair
+tmux send-keys -t $SESSION:0 "./bisonw2" C-m
 tmux attach-session -t $SESSION

@@ -7,17 +7,17 @@
   - [Configure dcrdex markets for simnet](#configure-dcrdex-markets-for-simnet)
   - [Prepare the PostgreSQL DB](#prepare-the-postgresql-db)
   - [Start dcrdex](#start-dcrdex)
-- [Client (`dexc`) Setup](#client-dexc-setup)
-  - [The wallet config files for dexc](#the-wallet-config-files-for-dexc)
-  - [Start `dexc`](#start-dexc)
-  - [Setup the client via the browser interface](#setup-the-client-via-the-browser-interface)
-  - [Setup the client via dexcctl](#setup-the-client-via-dexcctl)
+- [Wallet (`bisonw`) Setup](#wallet-bisonw-setup)
+  - [The wallet config files for bisonw](#the-wallet-config-files-for-bisonw)
+  - [Start `bisonw`](#start-bisonw)
+  - [Setup the wallet via the browser interface](#setup-the-wallet-via-the-browser-interface)
+  - [Setup the wallet via bwctl](#setup-the-wallet-via-bwctl)
 
 ## Simnet Harnesses
 
 ### Start the DCR and BTC simnet harnesses
 
-The harnesses are used by both server (dcrdex) and client (dexc).
+The harnesses are used by both server (dcrdex) and wallet (bisonw).
 
 From the source repository root, run each command in a separate terminal:
 
@@ -135,9 +135,9 @@ Start `dcrdex` for simnet, with trace-level logging, and the `dcrdex_simnet` Pos
 
 Note that the registration fee xpub, amount, and required confirmations are set in markets.json now.
 
-## Client (`dexc`) Setup
+## Wallet (`bisonw`) Setup
 
-### The wallet config files for dexc
+### The wallet config files for bisonw
 
 Bitcoin:
 
@@ -151,25 +151,25 @@ Decred:
 - Account: default
 - Wallet password: "abc"
 
-### Start `dexc`
+### Start `bisonw`
 
-Clear any existing client simnet files from previous setups:
+Clear any existing wallet simnet files from previous setups:
 
 ```sh
 rm -fr ~/.dexc/simnet/
 ```
 
-Start `dexc` with the web UI and RPC server in simnet mode and trace level logging. IMPORTANT: On the `release-0.1` branch you should also specify different HTTP and RPC listen addresses (e.g. To change the RPC port to 6757, and the HTTP IP address to 127.0.0.3: `--rpcaddr=localhost:6757 --webaddr=127.0.0.3:5758`). The following command does not change these, so modify it as necessary:
+Start `bisonw` with the web UI and RPC server in simnet mode and trace level logging. IMPORTANT: On the `release-0.1` branch you should also specify different HTTP and RPC listen addresses (e.g. To change the RPC port to 6757, and the HTTP IP address to 127.0.0.3: `--rpcaddr=localhost:6757 --webaddr=127.0.0.3:5758`). The following command does not change these, so modify it as necessary:
 
 ```sh
-./dexc --simnet --rpc --log=trace
+./bisonw --simnet --rpc --log=trace
 ```
 
-The client can be configured [via the browser interface](#setup-the-client-via-the-browser-interface) or with dexcctl on the command line.
+The wallet can be configured [via the browser interface](#setup-the-wallet-via-the-browser-interface) or with bwctl on the command line.
 
-### Setup the client via the browser interface
+### Setup the wallet via the browser interface
 
-In a browser, navigate to <http://127.0.0.3:5758/> (or whatever dexc was configured to use with `--webaddr`), and be sure JavaScript is
+In a browser, navigate to <http://127.0.0.3:5758/> (or whatever bisonw was configured to use with `--webaddr`), and be sure JavaScript is
 enabled. This should redirect to <http://127.0.0.3:5758/register.>
 
 1. Setup the app pass.
@@ -185,15 +185,15 @@ enabled. This should redirect to <http://127.0.0.3:5758/register.>
 6. Place a couple orders that match.
 7. Mine a few blocks on each chain, alternating chains. How many depends on the `"swapConf"` values in markets.json.
 
-### Setup the client via dexcctl
+### Setup the wallet via bwctl
 
-IMPORTANT: The example `dexcctl` commands in this section use the `--simnet` flag, which is not recognized on the `release-0.1` branch, to change the default dexc ports to which it will attempt to connect.  On the `release-0.1` branch where this is not supported, you will need to specify the `-a, --rpcaddr=` option to match dexc. For example, if dexc was started with `--rpcaddr=localhost:6757`, then `dexcctl` would need to use `--rpcaddr=localhost:6757` as well.
+IMPORTANT: The example `bwctl` commands in this section use the `--simnet` flag to change the default bisonw ports to which it will attempt to connect.  On the `release-0.1` branch where this is not supported, you will need to specify the `-a, --rpcaddr=` option to match bisonw. For example, if bisonw was started with `--rpcaddr=localhost:6757`, then `bwctl` would need to use `--rpcaddr=localhost:6757` as well.
 
-If this is the first time starting `dexc`, the application must be initialized with a new "app password".
+If this is the first time starting `bisonw`, the application must be initialized with a new "app password".
 For example, initializing with the password "asdf":
 
 ```none
-$  ./dexcctl --simnet -u u -P p init
+$  ./bwctl --simnet -u u -P p init
 Set new app password:  <asdf>
 app initialized
 ```
@@ -201,13 +201,13 @@ app initialized
 Setting up a Decred wallet (DCR coin ID is 42):
 
 ```none
-$  ./dexcctl --simnet -u u -P p newwallet 42 ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
+$  ./bwctl --simnet -u u -P p newwallet 42 ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
 App password:       <asdf>
 Wallet password:    <abc>
 dcr wallet created and unlocked
 ```
 
-The `dexc` console should log something similar to the following:
+The `bw` console should log something similar to the following:
 
 ```none
 [INF] CORE: Created dcr wallet. Account "default" balance available = 5227016557638 / locked = 0, Deposit address = SsfWraUBDUtU2dKAhBAYcb8HVTEupAnj9ta
@@ -217,7 +217,7 @@ The `dexc` console should log something similar to the following:
 Setting up a Bitcoin wallet (BT coin ID is 0):
 
 ```none
-$  ./dexcctl --simnet -u u -P p newwallet 0 ~/dextest/btc/alpha/alpha.conf '{"walletname":"gamma"}'
+$  ./bwctl --simnet -u u -P p newwallet 0 ~/dextest/btc/alpha/alpha.conf '{"walletname":"gamma"}'
 App password:      <asdf>
 Wallet password:   <abc>
 btc wallet created and unlocked
@@ -228,7 +228,7 @@ Note that Bitcoin's coin ID is always 0, even on testnet and simnet. Do not use 
 Now both Decred and Bitcoin wallets are available. Query their status with the `wallets` command:
 
 ```none
-$  ./dexcctl --simnet -u u -P p wallets
+$  ./bwctl --simnet -u u -P p wallets
 [
   {
     "symbol": "dcr",
@@ -258,7 +258,7 @@ $  ./dexcctl --simnet -u u -P p wallets
 Now that a Decred wallet is configured, you can register with a DEX server.  First query for the registration fee with the `getfee` command:
 
 ```none
-$  ./dexcctl --simnet -u u -P p getfee "http://127.0.0.1:7232" ~/.dcrdex/rpc.cert 
+$  ./bwctl --simnet -u u -P p getfee "http://127.0.0.1:7232" ~/.dcrdex/rpc.cert 
 {
   "fee": 100000000
 }
@@ -269,13 +269,13 @@ Note that the fee is in atoms, the smallest unit of value in Decred, where 1 DCR
 If the fee is acceptable, use the `register` command to pay the fee:
 
 ```none
-$  ./dexcctl --simnet -u u -P p register "http://127.0.0.1:7232" 100000000 ~/.dcrdex/rpc.cert 
+$  ./bwctl --simnet -u u -P p register "http://127.0.0.1:7232" 100000000 ~/.dcrdex/rpc.cert 
 App password:    <asdf>
 the DEX fee of 100000000 has been paid
 ```
 
 After the required number of confirmations, the newly created account will be able to trade on that DEX server.
-During this process, `dexc` should log messages similar to the following:
+During this process, `bisonw` should log messages similar to the following:
 
 ```none
 [INF] CORE: Connected to DEX http://127.0.0.1:17273 and listening for messages.
@@ -290,12 +290,12 @@ During this process, `dexc` should log messages similar to the following:
 [INF] CORE: notify: |SUCCESS| (fee payment) Account registered - You may now trade at http://127.0.0.1:17273
 ```
 
-For rapid setup, there is a script at `[repo root]/client/cmd/dexcctl/simnet-setup.sh` that has a reasonable default. You may also use this script as a template.
+For rapid setup, there is a script at `[repo root]/client/cmd/bwctl/simnet-setup.sh` that has a reasonable default. You may also use this script as a template.
 
 ### Acquire DCR and BTC Simnet Funds
 
 You can generate a deposit address for your wallet through the wallets view in the
-client app.
+wallet.
 
 Take the generated address to it's respective harness terminal and send funds to it using:
 

@@ -1,7 +1,7 @@
 # Test App Server
 
 The client's GUI app can connect to a test app server. This allows testing of
-the UI without the need to configure **dcrdex**, **dexc** or the wallets
+the UI without the need to configure **dcrdex**, **bisonw** or the wallets
 and server backends.
 
 First, make sure the static web page assets are rebuilt.

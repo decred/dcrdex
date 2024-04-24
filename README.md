@@ -1,10 +1,15 @@
-# <img src="docs/images/logo_wide_v1.svg" alt="DCRDEX" width="250">
+# <img src="docs/images/logo_wide_v2.svg" alt="DCRDEX" width="456">
 
 [![Build Status](https://github.com/decred/dcrdex/workflows/Build%20and%20Test/badge.svg)](https://github.com/decred/dcrdex/actions)
 [![ISC License](https://img.shields.io/badge/license-Blue_Oak-007788.svg)](https://blueoakcouncil.org/license/1.0.0)
 [![GoDoc](https://img.shields.io/badge/go.dev-reference-blue.svg?logo=go&logoColor=lightblue)](https://pkg.go.dev/decred.org/dcrdex)
 
-## What is DEX?
+### Bison Wallet and DCRDEX development
+
+This is the repository for development of Bison Wallet, DCRDEX, and Tatanka
+Mesh.
+
+## What is DCRDEX?
 
 The [Decred Decentralized Exchange (DEX)](https://dex.decred.org/) is a system
 that enables trustless exchange of different types of blockchain assets via a
@@ -29,6 +34,46 @@ but client software must still adhere to a set of policies to ensure orderly
 settlement of matches. The maximum penalty imposable by DEX is loss of trading
 privileges and forfeiture of registration fee.
 
+## What is Bison Wallet
+
+Bison Wallet is a multi-wallet developed in concert with DCRDEX and Tatanka
+Mesh. Bison Wallet leverages state-of-the-art blockchain technology to bring
+more features and more privacy for your favorite assets. DCRDEX is built-in, as
+well as advanced trading features like market-making and arbitrage, directly
+from your wallet.
+
+Our goal is to find a balance of convenience and privacy that works for you,
+while giving you access to advanced features most wallets ignore. For many
+assets, we can cut out the middleman altogether and allow you to interact
+directly with the blockchain network. This type of wallet is highly-resilient to
+data collection and censorship. 
+
+We also focus on bringing advanced, asset-specific features for out wallets.
+With Decred, you can use CoinShuffle++ to further anonymize your funds, or stake
+your DCR and earn some block rewards. The Zcash wallet exposes unified addresses
+and shileded pools, and operates on a shielded-first principle that makes
+privacy effortless. Keep an eye on development here. We are dedicated to
+exposing these technologies to the communities that want them.
+
+## What is Tatanka Mesh
+
+Tatanka Mesh (Tatanka, the mesh) is the evolution of DCRDEX. Where DCRDEX relies
+on a central server for maintaining order books and policing trades, Tatanka is
+a decentralized P2P protocol that enables a network of subscribers to
+collectively perform these tasks. Here are the three critical services that
+Tatanka Mesh provides.
+
+- Enhance the ability for users to connect and to share data both publicly and privately
+- Aggregate reputation data and monitor fidelity bonds. Tatanka can limit
+access to users who earn a bad reputation
+- Oracle services for fiat exchange rates and blockchain transaction fee rates
+
+The mesh collects no fees for its services. Trades are performed using trustless
+atomic swaps that exchange funds directly between wallets.
+
+Going P2P empowers our users to trade directly, enhancing security,
+censorship-resistance, privacy. and self-sovereignty.
+
 ## Contents
 
 - [Getting Started](#getting-started)
@@ -40,19 +85,19 @@ privileges and forfeiture of registration fee.
 
 ## Getting Started
 
-To begin using the DEX to trade, you need the client application. There are a
-few simple *options* for obtaining the software. The standalone DEX client is
-strongly recommended as it is the easiest to setup and generally has the most
-up-to-date downloads. Pick **just one** method:
+To trade on DCRDEX, you can use Bison Wallet. There are a few simple options
+for obtaining Bison Wallet. The standalone wallet is strongly recommended as
+it is the easiest to setup and generally has the most up-to-date downloads. Pick
+**just one** method:
 
-1. Download the standalone DEX client for your operating system for the
+1. From version 1.0, installers are available for all major operating systems
+2. Download standalone Bison Wallet for your operating system for the
    [latest release on GitHub](https://github.com/decred/dcrdex/releases).
-2. Use your operating system's package manager. See [OS Packages](#os-packages)
+3. Use your operating system's package manager. See [OS Packages](#os-packages)
    for more info.
-3. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
-   the official graphical Decred wallet, which integrates the DEX client, and go
+4. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
+   the official graphical Decred wallet, which integrates Bison Wallet, and go
    to the DEX tab.
-4. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/). Not recommended unless you already have this in your workflow.
 5. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
 
 See the [Client Installation and Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration)
@@ -146,8 +191,8 @@ Check out these wiki pages for more information.
 
 - [Getting Started Contributing](../../wiki/Contribution-Guide)
 - [Backend Development](../../wiki/Backend-Development)
-- [Run **dcrdex** and **dexc** on simnet](../../wiki/Simnet-Testing). Recommended for development.
-- [Run **dexc** on testnet](../../wiki/Testnet-Testing). Recommended for poking around.
+- [Run **dcrdex** and **bisonw** on simnet](../../wiki/Simnet-Testing). Recommended for development.
+- [Run **bisonw** on testnet](../../wiki/Testnet-Testing). Recommended for poking around.
 - [Run the test app server](../../wiki/Test-App-Server). Useful for GUI development, or just to try everything out without needing to create wallets or connect to a **dcrdex** server.
 
 ## Source

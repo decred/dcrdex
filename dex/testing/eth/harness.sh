@@ -3,8 +3,8 @@
 # alpha and beta nodes are synced in snap mode. They emulate nodes used by the
 # dcrdex server. Either has the authority to mine blocks. They start with
 # pre-allocated funds. gamma and delta are synced in light mode and emulate
-# nodes used by dexc. They are sent some funds after being created. The harness
-# waits for all nodes to sync before allowing tmux input.
+# nodes used by bisonw. They are sent some funds after being created. The
+# harness waits for all nodes to sync before allowing tmux input.
 set -ex
 
 SESSION="eth-harness"
