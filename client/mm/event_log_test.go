@@ -5,6 +5,7 @@ package mm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"github.com/davecgh/go-spew/spew"
 )
 
 func TestEventLogDB(t *testing.T) {
@@ -73,6 +75,9 @@ func TestEventLogDB(t *testing.T) {
 			Available: initialBals[60],
 		},
 	}
+
+	inventoryMods := map[uint32]int64{}
+
 	currBalanceState := func() *BalanceState {
 		balances := make(map[uint32]*BotBalance, len(currBals))
 		for k, v := range currBals {
@@ -87,8 +92,9 @@ func TestEventLogDB(t *testing.T) {
 			rates[k] = v
 		}
 		return &BalanceState{
-			Balances:  balances,
-			FiatRates: rates,
+			Balances:      balances,
+			FiatRates:     rates,
+			InventoryMods: inventoryMods,
 		}
 	}
 
@@ -108,7 +114,6 @@ func TestEventLogDB(t *testing.T) {
 	expectedRun := &MarketMakingRun{
 		StartTime: startTime,
 		Market:    mkt,
-		Cfg:       cfg,
 	}
 	if !reflect.DeepEqual(runs[0], expectedRun) {
 		t.Fatalf("expected run:\n%v\n\ngot:\n%v", expectedRun, runs[0])
@@ -169,9 +174,8 @@ func TestEventLogDB(t *testing.T) {
 	currBals[42].Pending += 1e6
 	db.storeEvent(startTime, mkt, event2, currBalanceState())
 
-	time.Sleep(200 * time.Millisecond)
-
 	tryWithTimeout := func(f func() error) {
+		t.Helper()
 		var err error
 		for i := 0; i < 20; i++ {
 			time.Sleep(100 * time.Millisecond)
@@ -314,12 +318,12 @@ func TestEventLogDB(t *testing.T) {
 	if !reflect.DeepEqual(overview.FinalBalances, finalBals) {
 		t.Fatalf("expected final balances %v, got %v", finalBals, overview.FinalBalances)
 	}
-	expPL, _ := calcRunProfitLoss(initialBals, finalBals, fiatRates)
+	expPL, _ := calcRunProfitLoss(initialBals, finalBals, nil, fiatRates)
 	if overview.ProfitLoss != expPL {
 		t.Fatalf("expected profit loss %v, got %v", expPL, overview.ProfitLoss)
 	}
-	if !reflect.DeepEqual(overview.Cfg, cfg) {
-		t.Fatalf("expected cfg %v, got %v", cfg, overview.Cfg)
+	if !reflect.DeepEqual(overview.Cfgs[0].Cfg, cfg) {
+		t.Fatalf("expected:\n%s\n\ngot:\n%s", spew.Sdump(cfg), spew.Sdump(overview.Cfgs[0]))
 	}
 
 	// Test sorting / pagination of runs
@@ -359,4 +363,43 @@ func TestEventLogDB(t *testing.T) {
 	if runs[1].StartTime != startTime-1 {
 		t.Fatalf("expected run start time %d, got %d", startTime-1, runs[1].StartTime)
 	}
+
+	// Update config and modify inventory
+	updatedCfgB, _ := json.Marshal(cfg)
+	updatedCfg := new(BotConfig)
+	json.Unmarshal(updatedCfgB, updatedCfg)
+	updatedCfg.ArbMarketMakerConfig.BuyPlacements[0].Lots++
+	inventoryMods[42] = 1e6
+	inventoryMods[60] = -2e6
+	updateCfgEvent := &MarketMakingEvent{
+		ID:        3,
+		TimeStamp: startTime + 2,
+		UpdateConfig: &UpdateConfigEvent{
+			NewCfg: updatedCfg,
+			InventoryMods: map[uint32]int64{
+				42: 1e6,
+				60: -2e6,
+			},
+		},
+	}
+	db.storeEvent(startTime, mkt, updateCfgEvent, currBalanceState())
+
+	check = func() error {
+		runEvents, err := db.runOverview(startTime, mkt)
+		if err != nil {
+			return fmt.Errorf("error getting run events: %v", err)
+		}
+		if len(runEvents.Cfgs) != 2 {
+			return fmt.Errorf("expected 2 cfgs, got %d", len(runEvents.Cfgs))
+		}
+		if !reflect.DeepEqual(runEvents.Cfgs[1].Cfg, updatedCfg) {
+			return fmt.Errorf("expected updated cfg:\n%v\n\ngot:\n%v", spew.Sdump(updatedCfg), spew.Sdump(runEvents.Cfgs[1].Cfg))
+		}
+		if !reflect.DeepEqual(runEvents.Cfgs[0].Cfg, cfg) {
+			return fmt.Errorf("expected original cfg:\n%v\n\ngot:\n%v", spew.Sdump(cfg), spew.Sdump(runEvents.Cfgs[0].Cfg))
+		}
+		return nil
+	}
+
+	tryWithTimeout(check)
 }

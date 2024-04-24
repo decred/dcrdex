@@ -3820,10 +3820,30 @@ func TestCalcProfitLoss(t *testing.T) {
 		42: 23,
 		0:  65000,
 	}
-	profitLoss, _ := calcRunProfitLoss(initialBalances, finalBalances, fiatRates)
+	profitLoss, profitRatio := calcRunProfitLoss(initialBalances, finalBalances, nil, fiatRates)
 	expProfitLoss := (9-10)*23 + (0.011-0.01)*65000
 	if math.Abs(profitLoss-expProfitLoss) > 1e-6 {
 		t.Fatalf("unexpected profit loss. want %f, got %f", expProfitLoss, profitLoss)
+	}
+	initialFiatValue := 10*23 + 0.01*65000
+	expProfitRatio := expProfitLoss / initialFiatValue
+	if math.Abs(profitRatio-expProfitRatio) > 1e-6 {
+		t.Fatalf("unexpected profit ratio. want %f, got %f", expProfitRatio, profitRatio)
+	}
+
+	// Add mods and decrease initial balances by the same amount. P/L should be the same.
+	mods := map[uint32]int64{
+		42: 1e6,
+		0:  2e6,
+	}
+	initialBalances[42] -= 1e6
+	initialBalances[0] -= 2e6
+	profitLoss, profitRatio = calcRunProfitLoss(initialBalances, finalBalances, mods, fiatRates)
+	if math.Abs(profitLoss-expProfitLoss) > 1e-6 {
+		t.Fatalf("unexpected profit loss. want %f, got %f", expProfitLoss, profitLoss)
+	}
+	if math.Abs(profitRatio-expProfitRatio) > 1e-6 {
+		t.Fatalf("unexpected profit ratio. want %f, got %f", expProfitRatio, profitRatio)
 	}
 }
 

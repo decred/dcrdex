@@ -49,6 +49,14 @@ type WithdrawalEvent struct {
 	CEXDebit    uint64                   `json:"cexDebit"`
 }
 
+// UpdateConfigEvent represents a change in the bot's configuration
+// and/or inventory.
+type UpdateConfigEvent struct {
+	// NewCfg may be nil if only the inventory was updated.
+	NewCfg        *BotConfig       `json:"newCfg,omitempty"`
+	InventoryMods map[uint32]int64 `json:"inventoryMods"`
+}
+
 // MarketMakingEvent represents an action that a market making bot takes.
 type MarketMakingEvent struct {
 	ID         uint64 `json:"id"`
@@ -60,30 +68,38 @@ type MarketMakingEvent struct {
 	Pending    bool   `json:"pending"`
 
 	// Only one of the following will be populated.
-	DEXOrderEvent   *DEXOrderEvent   `json:"dexOrderEvent,omitempty"`
-	CEXOrderEvent   *CEXOrderEvent   `json:"cexOrderEvent,omitempty"`
-	DepositEvent    *DepositEvent    `json:"depositEvent,omitempty"`
-	WithdrawalEvent *WithdrawalEvent `json:"withdrawalEvent,omitempty"`
+	DEXOrderEvent   *DEXOrderEvent     `json:"dexOrderEvent,omitempty"`
+	CEXOrderEvent   *CEXOrderEvent     `json:"cexOrderEvent,omitempty"`
+	DepositEvent    *DepositEvent      `json:"depositEvent,omitempty"`
+	WithdrawalEvent *WithdrawalEvent   `json:"withdrawalEvent,omitempty"`
+	UpdateConfig    *UpdateConfigEvent `json:"updateConfig,omitempty"`
 }
 
 // MarketMakingRun identifies a market making run.
 type MarketMakingRun struct {
 	StartTime int64           `json:"startTime"`
 	Market    *MarketWithHost `json:"market"`
-	Cfg       *BotConfig      `json:"cfg"`
 }
 
 // BalanceState contains the fiat rates and bot balances at the latest point of
 // a run.
 type BalanceState struct {
-	FiatRates map[uint32]float64     `json:"fiatRates"`
-	Balances  map[uint32]*BotBalance `json:"balances"`
+	FiatRates     map[uint32]float64     `json:"fiatRates"`
+	Balances      map[uint32]*BotBalance `json:"balances"`
+	InventoryMods map[uint32]int64       `json:"invMods"`
+}
+
+// CfgUpdate contains a BotConfig and the timestamp the bot started to use this
+// configuration.
+type CfgUpdate struct {
+	Timestamp int64      `json:"timestamp"`
+	Cfg       *BotConfig `json:"cfg"`
 }
 
 // MarketMakingRunOverview contains information about a market making run.
 type MarketMakingRunOverview struct {
 	EndTime         *int64            `json:"endTime,omitempty"`
-	Cfg             *BotConfig        `json:"cfg"`
+	Cfgs            []*CfgUpdate      `json:"cfgs"`
 	InitialBalances map[uint32]uint64 `json:"initialBalances"`
 	FinalBalances   map[uint32]uint64 `json:"finalBalances"`
 	ProfitLoss      float64           `json:"profitLoss"`
@@ -140,6 +156,8 @@ var _ eventLogDB = (*boltEventLogDB)(nil)
  *     - cfg
  *     - ib
  *     - fs
+ *     - cfgs
+ *       - <timestamp> -> <cfg>
  *     - events
  *       - <eventID> -> <event>
  */
@@ -147,10 +165,10 @@ var _ eventLogDB = (*boltEventLogDB)(nil)
 var (
 	botRunsBucket = []byte("botRuns")
 	eventsBucket  = []byte("events")
+	cfgsBucket    = []byte("cfgs")
 
 	startTimeKey   = []byte("startTime")
 	endTimeKey     = []byte("endTime")
-	cfgKey         = []byte("cfg")
 	initialBalsKey = []byte("ib")
 	finalStateKey  = []byte("fs")
 )
@@ -204,8 +222,15 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 			return err
 		}
 		eventB := versionedBytes(0).AddData(eventJSON)
+
 		if err := eventsBkt.Put(eventKey, eventB); err != nil {
 			return err
+		}
+
+		if update.e.UpdateConfig != nil && update.e.UpdateConfig.NewCfg != nil {
+			if err := db.storeCfgUpdate(runBucket, update.e.UpdateConfig.NewCfg, update.e.TimeStamp); err != nil {
+				return err
+			}
 		}
 
 		// Update the final state.
@@ -269,6 +294,57 @@ func parseRunKey(key []byte) (startTime int64, mkt *MarketWithHost, err error) {
 	return
 }
 
+func (db *boltEventLogDB) Close() error {
+	close(db.eventUpdates)
+	return db.DB.Close()
+}
+
+func (db *boltEventLogDB) storeCfgUpdate(runBucket *bbolt.Bucket, newCfg *BotConfig, timestamp int64) error {
+	cfgsBucket, err := runBucket.CreateBucketIfNotExists(cfgsBucket)
+	if err != nil {
+		return err
+	}
+	cfgB, err := json.Marshal(newCfg)
+	if err != nil {
+		return err
+	}
+	return cfgsBucket.Put(encode.Uint64Bytes(uint64(timestamp)), versionedBytes(0).AddData(cfgB))
+}
+
+func (db *boltEventLogDB) cfgUpdates(runBucket *bbolt.Bucket) ([]*CfgUpdate, error) {
+	cfgsBucket := runBucket.Bucket(cfgsBucket)
+	if cfgsBucket == nil {
+		return nil, nil
+	}
+
+	cfgs := make([]*CfgUpdate, 0, cfgsBucket.Stats().KeyN)
+	cursor := cfgsBucket.Cursor()
+	for k, v := cursor.First(); k != nil; k, v = cursor.Next() {
+		timestamp := int64(binary.BigEndian.Uint64(k))
+		cfg := new(BotConfig)
+		ver, pushes, err := encode.DecodeBlob(v)
+		if err != nil {
+			return nil, err
+		}
+		if ver != 0 {
+			return nil, fmt.Errorf("unknown version %d", ver)
+		}
+		if len(pushes) != 1 {
+			return nil, fmt.Errorf("expected 1 push for cfg, got %d", len(pushes))
+		}
+		err = json.Unmarshal(pushes[0], cfg)
+		if err != nil {
+			return nil, err
+		}
+		cfgs = append(cfgs, &CfgUpdate{
+			Timestamp: timestamp,
+			Cfg:       cfg,
+		})
+	}
+
+	return cfgs, nil
+}
+
 // storeNewRun stores a new run in the database. It should be called whenever
 // a new run is started. Events cannot be stored for a run before this is
 // called.
@@ -286,11 +362,9 @@ func (db *boltEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg 
 
 		runBucket.Put(startTimeKey, encode.Uint64Bytes(uint64(startTime)))
 
-		cfgB, err := json.Marshal(cfg)
-		if err != nil {
+		if err := db.storeCfgUpdate(runBucket, cfg, startTime); err != nil {
 			return err
 		}
-		runBucket.Put(cfgKey, versionedBytes(0).AddData(cfgB))
 
 		initialBals := make(map[uint32]uint64)
 		for assetID, bal := range initialState.Balances {
@@ -344,29 +418,9 @@ func (db *boltEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWit
 				return fmt.Errorf("nil run bucket for key %x", k)
 			}
 
-			cfg := new(BotConfig)
-			cfgB := runBucket.Get(cfgKey)
-			if cfgB != nil {
-				ver, pushes, err := encode.DecodeBlob(cfgB)
-				if err != nil {
-					return err
-				}
-				if ver != 0 {
-					return fmt.Errorf("unknown version %d", ver)
-				}
-				if len(pushes) != 1 {
-					return fmt.Errorf("expected 1 push for cfg, got %d", len(pushes))
-				}
-				err = json.Unmarshal(pushes[0], cfg)
-				if err != nil {
-					return err
-				}
-			}
-
 			runs = append(runs, &MarketMakingRun{
 				StartTime: startTime,
 				Market:    mkt,
-				Cfg:       cfg,
 			})
 
 			if n > 0 && uint64(len(runs)) >= n {
@@ -393,25 +447,6 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 		runBucket := botRuns.Bucket(key)
 		if runBucket == nil {
 			return fmt.Errorf("nil run bucket for key %x", key)
-		}
-
-		cfg := new(BotConfig)
-		cfgB := runBucket.Get(cfgKey)
-		if cfgB != nil {
-			ver, pushes, err := encode.DecodeBlob(cfgB)
-			if err != nil {
-				return err
-			}
-			if ver != 0 {
-				return fmt.Errorf("unknown version %d", ver)
-			}
-			if len(pushes) != 1 {
-				return fmt.Errorf("expected 1 push for cfg, got %d", len(pushes))
-			}
-			err = json.Unmarshal(pushes[0], cfg)
-			if err != nil {
-				return err
-			}
 		}
 
 		initialBalsB := runBucket.Get(initialBalsKey)
@@ -448,6 +483,11 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 			return err
 		}
 
+		cfgs, err := db.cfgUpdates(runBucket)
+		if err != nil {
+			return err
+		}
+
 		endTimeB := runBucket.Get(endTimeKey)
 		var endTime *int64
 		if len(endTimeB) == 8 {
@@ -460,11 +500,11 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 			finalBals[assetID] = bal.Available + bal.Pending + bal.Locked
 		}
 
-		profitLoss, profitRatio := calcRunProfitLoss(initialBals, finalBals, finalState.FiatRates)
+		profitLoss, profitRatio := calcRunProfitLoss(initialBals, finalBals, finalState.InventoryMods, finalState.FiatRates)
 
 		overview = &MarketMakingRunOverview{
 			EndTime:         endTime,
-			Cfg:             cfg,
+			Cfgs:            cfgs,
 			InitialBalances: initialBals,
 			FinalBalances:   finalBals,
 			ProfitLoss:      profitLoss,

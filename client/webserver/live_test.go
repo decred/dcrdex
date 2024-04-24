@@ -2409,8 +2409,13 @@ func randomBotConfig(mkt *mm.MarketWithHost) *mm.BotConfig {
 func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error) {
 	endTime := time.Unix(startTime, 0).Add(time.Hour * 5).Unix()
 	run := &mm.MarketMakingRunOverview{
-		EndTime:         &endTime,
-		Cfg:             randomBotConfig(mkt),
+		EndTime: &endTime,
+		Cfgs: []*mm.CfgUpdate{
+			{
+				Cfg:       randomBotConfig(mkt),
+				Timestamp: startTime,
+			},
+		},
 		InitialBalances: make(map[uint32]uint64),
 		FinalBalances:   make(map[uint32]uint64),
 		ProfitLoss:      rand.Float64()*1e6 - 5e5,
@@ -2455,7 +2460,6 @@ func (m *TMarketMaker) ArchivedRuns() ([]*mm.MarketMakingRun, error) {
 		runs = append(runs, &mm.MarketMakingRun{
 			StartTime: time.Now().Add(-time.Hour * 5 * time.Duration(i)).Unix(),
 			Market:    marketWithHost,
-			Cfg:       randomBotConfig(marketWithHost),
 		})
 	}
 	return runs, nil
