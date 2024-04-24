@@ -142,7 +142,8 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 
 	// Normalize the asset names to lower case.
 	var assets []*Asset
-	unused := make(map[string]struct{})
+	assetMap := make(map[uint32]struct{})
+	unused := make(map[uint32]string)
 	for assetName, assetConf := range conf.Assets {
 		if assetConf.Disabled {
 			continue
@@ -155,10 +156,9 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 		if net != network {
 			continue
 		}
-		unused[assetName] = struct{}{}
 
 		symbol := strings.ToLower(assetConf.Symbol)
-		_, found := dex.BipSymbolID(symbol)
+		assetID, found := dex.BipSymbolID(symbol)
 		if !found {
 			return nil, nil, fmt.Errorf("asset %q symbol %q unrecognized", assetName, assetConf.Symbol)
 		}
@@ -167,6 +167,8 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 			return nil, nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", assetConf.Symbol)
 		}
 
+		unused[assetID] = assetConf.Symbol
+		assetMap[assetID] = struct{}{}
 		assets = append(assets, assetConf)
 	}
 
@@ -194,8 +196,25 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 			return nil, nil, fmt.Errorf("required quote asset %s is disabled", mktConf.Base)
 		}
 
-		delete(unused, mktConf.Base)
-		delete(unused, mktConf.Quote)
+		baseID, _ := dex.BipSymbolID(baseConf.Symbol)
+		quoteID, _ := dex.BipSymbolID(quoteConf.Symbol)
+
+		delete(unused, baseID)
+		delete(unused, quoteID)
+
+		if is, parentID := asset.IsToken(baseID); is {
+			if _, found := assetMap[parentID]; !found {
+				return nil, nil, fmt.Errorf("parent asset %s not enabled for token %s", dex.BipIDSymbol(parentID), baseConf.Symbol)
+			}
+			delete(unused, parentID)
+		}
+
+		if is, parentID := asset.IsToken(quoteID); is {
+			if _, found := assetMap[parentID]; !found {
+				return nil, nil, fmt.Errorf("parent asset %s not enabled for token %s", dex.BipIDSymbol(parentID), quoteConf.Symbol)
+			}
+			delete(unused, parentID)
+		}
 
 		baseNet, err := dex.NetFromString(baseConf.Network)
 		if err != nil {
@@ -228,11 +247,11 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 	}
 
 	if len(unused) > 0 {
-		assetKeys := make([]string, 0, len(unused))
-		for k := range unused {
-			assetKeys = append(assetKeys, k)
+		symbols := make([]string, 0, len(unused))
+		for _, symbol := range unused {
+			symbols = append(symbols, symbol)
 		}
-		return nil, nil, fmt.Errorf("unused assets %+v", assetKeys)
+		return nil, nil, fmt.Errorf("unused assets %+v", symbols)
 	}
 
 	return markets, assets, nil
