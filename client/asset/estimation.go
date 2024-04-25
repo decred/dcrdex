@@ -20,6 +20,9 @@ type SwapEstimate struct {
 	// RealisticBestCase is an estimation of the fees that might be assessed in
 	// a best-case scenario of 1 tx and 1 output for the entire order.
 	RealisticBestCase uint64 `json:"realisticBestCase"`
+	// FeeReservesPerLot is the amount that must be reserved per lot to cover
+	// fees for swap transactions.
+	FeeReservesPerLot uint64 `json:"feeReservesPerLot"`
 }
 
 // RedeemEstimate is an estimate of the range of fees that might realistically

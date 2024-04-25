@@ -1944,7 +1944,9 @@ func (btc *baseWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxo
 		return utxos, est, err
 	}
 
-	return utxos, &asset.SwapEstimate{}, nil
+	return utxos, &asset.SwapEstimate{
+		FeeReservesPerLot: basicFee,
+	}, nil
 }
 
 // sizeUnit returns the short form of the unit used to measure size, either
@@ -2170,6 +2172,8 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 		bumpedNetRate = uint64(math.Ceil(float64(bumpedNetRate) * feeBump))
 	}
 
+	feeReservesPerLot := bumpedMaxRate * btc.initTxSize
+
 	val := lots * lotSize
 	// The orderEnough func does not account for a split transaction at the start,
 	// so it is possible that funding for trySplit would actually choose more
@@ -2211,6 +2215,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 				MaxFees:            maxFees + splitMaxFees,
 				RealisticBestCase:  estLowFees + splitFees,
 				RealisticWorstCase: estHighFees + splitFees,
+				FeeReservesPerLot:  feeReservesPerLot,
 			}, true, reqFunds, nil // requires reqTotal, but locks reqFunds in the split output
 		}
 	}
@@ -2234,6 +2239,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 		MaxFees:            maxFees,
 		RealisticBestCase:  estLowFees,
 		RealisticWorstCase: estHighFees,
+		FeeReservesPerLot:  feeReservesPerLot,
 	}, false, sum, nil
 }
 

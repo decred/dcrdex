@@ -463,6 +463,12 @@
                         <span id="maxToAmt"></span>
                         <span id="maxToTicker"></span> -->
                       </span>
+                      <span id="maxZeroNoFees">
+                        , [[[max_zero_no_fees]]]
+                      </span>
+                      <span id="maxZeroNoBal">
+                        , [[[max_zero_no_bal]]]
+                      </span>
                     </div>
                   </div>
 
@@ -626,7 +632,7 @@
               <div class="text-center fs20 mb-2">
                 [[[Your Orders]]]
               </div>
-              <div id="unreadyOrdersMsg" class="d-hide px-3 py-1 flex-center fs16 red">[[[unready_wallets_msg]]]</div>
+              <div id="unreadyOrdersMsg" class="d-hide px-3 py-1 flex-center fs16 text-danger">[[[unready_wallets_msg]]]</div>
               <div id="userNoOrders" class="p-3 flex-center fs16 grey">no active orders</div>
               <div id="userOrders" class="border-bottom">
                 <div id="userOrderTmpl" class="user-order border-top">
@@ -893,7 +899,7 @@
 
         <div id="vPreorderErr" class="mt-2">
           [[[estimate_unavailable]]]
-          <span class="ico-info red fs12" id="vPreorderErrTip" data-tooltip=" "></span>
+          <span class="ico-info text-danger fs12" id="vPreorderErrTip" data-tooltip=" "></span>
         </div>
 
         <hr class="dashed mt-2 mb-0">

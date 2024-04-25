@@ -393,8 +393,16 @@ func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transa
 
 // newTxOpts is a constructor for a TransactOpts.
 func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, maxFeeRate, gasTipCap *big.Int) *bind.TransactOpts {
+	// We'll enforce dexeth.MinGasTipCap since the server does, but this isn't
+	// necessarily a constant for all networks or under all conditions.
+	minGasWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
+	if gasTipCap.Cmp(minGasWei) < 0 {
+		gasTipCap.Set(minGasWei)
+	}
+	// This is enforced by concensus. We shouldn't be able to get here with a
+	// swap tx.
 	if gasTipCap.Cmp(maxFeeRate) > 0 {
-		gasTipCap = maxFeeRate
+		gasTipCap.Set(maxFeeRate)
 	}
 	return &bind.TransactOpts{
 		Context:   ctx,

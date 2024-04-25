@@ -585,6 +585,7 @@ export interface SwapEstimate {
   maxFees: number
   realisticWorstCase: number
   realisticBestCase: number
+  feeReservesPerLot: number
 }
 
 export interface RedeemEstimate {

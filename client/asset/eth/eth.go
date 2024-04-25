@@ -103,6 +103,8 @@ const (
 	// TODO: Find a way to ask the host about their config set max fee and
 	// gas values.
 	maxTxFeeGwei = 1_000_000_000
+
+	LiveEstimateFailedError = dex.ErrorKind("live gas estimate failed")
 )
 
 var (
@@ -1251,27 +1253,30 @@ func (w *assetWallet) maxOrder(lotSize uint64, maxFeeRate uint64, ver uint32,
 	if err != nil {
 		return nil, err
 	}
-	if balance.Available == 0 {
-		return &asset.SwapEstimate{}, nil
+	// Get the refund gas.
+	if g := w.gases(ver); g == nil {
+		return nil, fmt.Errorf("no gas table")
 	}
 
 	g, err := w.initGasEstimate(1, ver, redeemVer, redeemAssetID)
-	if err != nil {
+	liveEstimateFailed := errors.Is(err, LiveEstimateFailedError)
+	if err != nil && !liveEstimateFailed {
 		return nil, fmt.Errorf("gasEstimate error: %w", err)
 	}
 
 	refundCost := g.Refund * maxFeeRate
 	oneFee := g.oneGas * maxFeeRate
+	feeReservesPerLot := oneFee + refundCost
 	var lots uint64
 	if feeWallet == nil {
-		lots = balance.Available / (lotSize + oneFee + refundCost)
+		lots = balance.Available / (lotSize + feeReservesPerLot)
 	} else { // token
 		lots = balance.Available / lotSize
 		parentBal, err := feeWallet.Balance()
 		if err != nil {
 			return nil, fmt.Errorf("error getting base chain balance: %w", err)
 		}
-		feeLots := parentBal.Available / (oneFee + refundCost)
+		feeLots := parentBal.Available / feeReservesPerLot
 		if feeLots < lots {
 			w.log.Infof("MaxOrder reducing lots because of low fee reserves: %d -> %d", lots, feeLots)
 			lots = feeLots
@@ -1279,9 +1284,11 @@ func (w *assetWallet) maxOrder(lotSize uint64, maxFeeRate uint64, ver uint32,
 	}
 
 	if lots < 1 {
-		return &asset.SwapEstimate{}, nil
+		return &asset.SwapEstimate{
+			FeeReservesPerLot: feeReservesPerLot,
+		}, nil
 	}
-	return w.estimateSwap(lots, lotSize, maxFeeRate, ver, redeemVer, redeemAssetID)
+	return w.estimateSwap(lots, lotSize, maxFeeRate, ver, feeReservesPerLot)
 }
 
 // PreSwap gets order estimates based on the available funds and the wallet
@@ -1308,7 +1315,7 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 	}
 
 	est, err := w.estimateSwap(req.Lots, req.LotSize, req.MaxFeeRate,
-		req.Version, req.RedeemVersion, req.RedeemAssetID)
+		req.Version, maxEst.FeeReservesPerLot)
 	if err != nil {
 		return nil, err
 	}
@@ -1334,10 +1341,14 @@ func (w *assetWallet) SingleLotSwapRefundFees(version uint32, feeSuggestion uint
 
 // estimateSwap prepares an *asset.SwapEstimate. The estimate does not include
 // funds that might be locked for refunds.
-func (w *assetWallet) estimateSwap(lots, lotSize uint64, maxFeeRate uint64, ver uint32,
-	redeemVer, redeemAssetID uint32) (*asset.SwapEstimate, error) {
+func (w *assetWallet) estimateSwap(
+	lots, lotSize uint64, maxFeeRate uint64, ver uint32, feeReservesPerLot uint64,
+) (*asset.SwapEstimate, error) {
+
 	if lots == 0 {
-		return &asset.SwapEstimate{}, nil
+		return &asset.SwapEstimate{
+			FeeReservesPerLot: feeReservesPerLot,
+		}, nil
 	}
 
 	rateNow, err := w.currentFeeRate(w.ctx)
@@ -1368,6 +1379,7 @@ func (w *assetWallet) estimateSwap(lots, lotSize uint64, maxFeeRate uint64, ver 
 		MaxFees:            maxFees,
 		RealisticWorstCase: oneGasMax * rate,
 		RealisticBestCase:  oneSwap * rate, // not even batch, just perfect match
+		FeeReservesPerLot:  feeReservesPerLot,
 	}, nil
 }
 
@@ -1444,6 +1456,11 @@ func (eth *TokenWallet) createTokenFundingCoin(amount, fees uint64) *tokenFundin
 
 // FundOrder locks value for use in an order.
 func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint64, error) {
+	if ord.MaxFeeRate < dexeth.MinGasTipCap {
+		return nil, nil, 0, fmt.Errorf("%v: server's max fee rate is lower than our min gas tip cap. %d < %d",
+			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, dexeth.MinGasTipCap)
+	}
+
 	if w.gasFeeLimit() < ord.MaxFeeRate {
 		return nil, nil, 0, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
@@ -1477,6 +1494,11 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 
 // FundOrder locks value for use in an order.
 func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint64, error) {
+	if ord.MaxFeeRate < dexeth.MinGasTipCap {
+		return nil, nil, 0, fmt.Errorf("%v: server's max fee rate is lower than our min gas tip cap. %d < %d",
+			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, dexeth.MinGasTipCap)
+	}
+
 	if w.gasFeeLimit() < ord.MaxFeeRate {
 		return nil, nil, 0, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
@@ -1642,17 +1664,19 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 	}
 
 	est.Swap, est.nSwap, err = w.swapGas(n, initVer)
-	if err != nil {
-		return nil, fmt.Errorf("error calculating swap gas: %w", err)
+	if err != nil && !errors.Is(err, LiveEstimateFailedError) {
+		return nil, err
 	}
-
+	// Could be LiveEstimateFailedError. Still populate static estimates if we
+	// couldn't get live. Error is still propagated.
 	est.oneGas = est.Swap
 	est.nGas = est.nSwap
 
 	if redeemW := w.wallet(redeemAssetID); redeemW != nil {
-		est.Redeem, est.nRedeem, err = redeemW.redeemGas(n, redeemVer)
+		var er error
+		est.Redeem, est.nRedeem, er = redeemW.redeemGas(n, redeemVer)
 		if err != nil {
-			return nil, fmt.Errorf("error calculating fee-family redeem gas: %w", err)
+			return nil, fmt.Errorf("error calculating fee-family redeem gas: %w", er)
 		}
 		est.oneGas += est.Redeem
 		est.nGas += est.nRedeem
@@ -1699,7 +1723,8 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, err err
 	// use the live estimate with a warning.
 	gasEst, err := w.estimateInitGas(w.ctx, nMax, ver)
 	if err != nil {
-		return 0, 0, err
+		err = errors.Join(err, LiveEstimateFailedError)
+		return
 		// Or we could go with what we know? But this estimate error could be a
 		// hint that the transaction would fail, and we don't have a way to
 		// recover from that. Play it safe and allow caller to retry assuming
@@ -3417,6 +3442,10 @@ func (eth *baseWallet) FeeRate() uint64 {
 		return 0
 	}
 
+	if feeRateGwei == 0 {
+		feeRateGwei = 1 // Amoy has fees of 14 wei/gas => 0 gwei/gas
+	}
+
 	return feeRateGwei
 }
 
@@ -4366,6 +4395,7 @@ func (w *assetWallet) initiate(ctx context.Context, assetID uint32, contracts []
 	if err != nil {
 		return nil, err
 	}
+
 	return tx, w.withContractor(contractVer, func(c contractor) error {
 		tx, err = c.initiate(txOpts, contracts)
 		if err != nil {

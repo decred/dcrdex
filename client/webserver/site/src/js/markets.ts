@@ -1386,7 +1386,7 @@ export default class MarketsPage extends BasePage {
     if (this.maxEstimateTimer) window.clearTimeout(this.maxEstimateTimer)
 
     Doc.show(page.maxOrd, page.maxLotBox)
-    Doc.hide(page.maxAboveZero)
+    Doc.hide(page.maxAboveZero, page.maxZeroNoFees, page.maxZeroNoBal)
     page.maxFromLots.textContent = intl.prep(intl.ID_CALCULATING)
     page.maxFromLotsLbl.textContent = ''
     this.maxOrderUpdateCounter++
@@ -1421,7 +1421,7 @@ export default class MarketsPage extends BasePage {
       this.maxLoaded()
       this.maxLoaded = null
     }
-    Doc.show(page.maxOrd, page.maxLotBox, page.maxAboveZero)
+    Doc.show(page.maxOrd, page.maxLotBox)
     const sell = this.isSell()
 
     let lots = 0
@@ -1430,16 +1430,43 @@ export default class MarketsPage extends BasePage {
     page.maxFromLots.textContent = lots.toString()
     // XXX add plural into format details, so we don't need this
     page.maxFromLotsLbl.textContent = intl.prep(lots === 1 ? intl.ID_LOT : intl.ID_LOTS)
-    if (!maxOrder) {
-      Doc.hide(page.maxAboveZero)
+    if (!maxOrder) return
+
+    const fromAsset = sell ? this.market.base : this.market.quote
+
+    if (lots === 0) {
+      // If we have a maxOrder, see if we can guess why we have no lots.
+      let lotSize = this.market.cfg.lotsize
+      if (!sell) {
+        const conversionRate = this.anyRate()[1]
+        if (conversionRate === 0) return
+        lotSize = lotSize * conversionRate
+      }
+      const haveQty = fromAsset.wallet.balance.available / lotSize > 0
+      if (haveQty) {
+        if (fromAsset.token) {
+          const { wallet: { balance: { available: feeAvail } }, unitInfo } = app().assets[fromAsset.token.parentID]
+          if (feeAvail < maxOrder.feeReservesPerLot) {
+            Doc.show(page.maxZeroNoFees)
+            page.maxZeroNoFeesTicker.textContent = unitInfo.conventional.unit
+            page.maxZeroMinFees.textContent = Doc.formatCoinValue(maxOrder.feeReservesPerLot, unitInfo)
+          }
+          // It looks like we should be able to afford it, but maybe some fees we're not seeing.
+          // Show nothing.
+          return
+        }
+        // Not a token. Maybe we have enough for the swap but not for fees.
+        const fundedLots = fromAsset.wallet.balance.available / (lotSize + maxOrder.feeReservesPerLot)
+        if (fundedLots > 0) return // Not sure why. Could be split txs or utxos. Just show nothing.
+      }
+      Doc.show(page.maxZeroNoBal)
+      page.maxZeroNoBalTicker.textContent = fromAsset.unitInfo.conventional.unit
       return
     }
-    // Could add the estimatedFees here, but that might also be
-    // confusing.
-    const fromAsset = sell ? this.market.base : this.market.quote
-    // DRAFT NOTE: Maybe just use base qty from lots.
+    Doc.show(page.maxAboveZero)
+
     page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value || 0, fromAsset.unitInfo)
-    page.maxFromTicker.textContent = fromAsset.symbol.toUpperCase()
+    page.maxFromTicker.textContent = fromAsset.unitInfo.conventional.unit
     // Could subtract the maxOrder.redemptionFees here.
     // The qty conversion doesn't fit well with the new design.
     // TODO: Make this work somehow?

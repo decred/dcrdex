@@ -545,11 +545,17 @@ func (eth *baseBackend) ValidateFeeRate(coin asset.Coin, reqFeeRate uint64) bool
 
 	// Legacy transactions are also supported. In a legacy transaction, the
 	// gas tip cap will be equal to the gas price.
-	if sc.gasTipCap < dexeth.MinGasTipCap {
+	if dexeth.WeiToGwei(sc.gasTipCap) < dexeth.MinGasTipCap {
+		sc.backend.log.Errorf("Transaction %s tip cap %d < %d", dexeth.WeiToGwei(sc.gasTipCap), dexeth.MinGasTipCap)
 		return false
 	}
 
-	return sc.FeeRate() >= reqFeeRate
+	if sc.gasFeeCap.Cmp(dexeth.GweiToWei(reqFeeRate)) < 0 {
+		sc.backend.log.Errorf("Transaction %s gas fee cap too low. %s wei / gas < %s gwei / gas", sc.gasFeeCap, reqFeeRate)
+		return false
+	}
+
+	return true
 }
 
 // BlockChannel creates and returns a new channel on which to receive block

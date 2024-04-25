@@ -495,8 +495,9 @@ func TestContract(t *testing.T) {
 func TestValidateFeeRate(t *testing.T) {
 	swapCoin := swapCoin{
 		baseCoin: &baseCoin{
-			gasFeeCap: 100,
-			gasTipCap: 2,
+			backend:   &AssetBackend{log: tLogger},
+			gasFeeCap: dexeth.GweiToWei(100),
+			gasTipCap: dexeth.GweiToWei(2),
 		},
 	}
 
@@ -514,7 +515,7 @@ func TestValidateFeeRate(t *testing.T) {
 		t.Fatalf("expected invalid fee rate, but was valid")
 	}
 
-	swapCoin.gasTipCap = dexeth.MinGasTipCap - 1
+	swapCoin.gasTipCap = dexeth.GweiToWei(dexeth.MinGasTipCap - 1)
 	if eth.ValidateFeeRate(contract.Coin, 100) {
 		t.Fatalf("expected invalid fee rate, but was valid")
 	}

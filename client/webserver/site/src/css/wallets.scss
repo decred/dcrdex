@@ -53,7 +53,7 @@
       &.selected,
       &:hover {
         background-color: var(--body-bg);
-        border: 1px solid var(--border-color);
+        // border: 1px solid var(--border-color);
         opacity: 1;
 
         img[data-tmpl=parentImg] {
@@ -196,7 +196,7 @@
   }
 
   .column {
-    @include stylish-overflow;
+    @include hidden-overflow;
     @include fill-abs;
   }
 }

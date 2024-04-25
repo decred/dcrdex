@@ -104,7 +104,7 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
     },
     [Testnet]: (cid: string) => {
       const [arg, isAddr] = ethBasedExplorerArg(cid)
-      return isAddr ? `https://mumbai.polygonscan.com/address/${arg}` : `https://mumbai.polygonscan.com/tx/${arg}`
+      return isAddr ? `https://amoy.polygonscan.com/address/${arg}` : `https://amoy.polygonscan.com/tx/${arg}`
     },
     [Simnet]: (cid: string) => {
       const [arg, isAddr] = ethBasedExplorerArg(cid)

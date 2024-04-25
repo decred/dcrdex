@@ -110,8 +110,8 @@ func TestNewRedeemCoin(t *testing.T) {
 		if test.txErr == nil && (rc.secretHash != secretHash ||
 			rc.secret != secret ||
 			rc.value.Uint64() != 0 ||
-			rc.gasFeeCap != wantGas ||
-			rc.gasTipCap != wantGasTipCap) {
+			dexeth.WeiToGwei(rc.gasFeeCap) != wantGas ||
+			dexeth.WeiToGwei(rc.gasTipCap) != wantGasTipCap) {
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, rc)
 		}
 	}
@@ -236,8 +236,8 @@ func TestNewSwapCoin(t *testing.T) {
 		if sc.init.Participant != initParticipantAddr ||
 			sc.secretHash != secretHash ||
 			dexeth.WeiToGwei(sc.value) != wantVal ||
-			sc.gasFeeCap != wantGas ||
-			sc.gasTipCap != wantGasTipCap ||
+			dexeth.WeiToGwei(sc.gasFeeCap) != wantGas ||
+			dexeth.WeiToGwei(sc.gasTipCap) != wantGasTipCap ||
 			sc.init.LockTime.Unix() != initLocktime {
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, sc)
 		}
