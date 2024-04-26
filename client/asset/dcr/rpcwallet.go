@@ -288,24 +288,25 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		}
 	}
 
-	if walletCfg.ActivelyUsed {
-		a, err := stdaddr.DecodeAddress(currentAddress, w.chainParams)
-		if err != nil {
-			return false, err
-		}
-		var depositAccount string
-		if rpcCfg.UnmixedAccount != "" {
-			depositAccount = rpcCfg.UnmixedAccount
-		} else {
-			depositAccount = rpcCfg.PrimaryAccount
-		}
-		owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
-		if err != nil {
-			return false, err
-		}
-		if !owns {
+	a, err := stdaddr.DecodeAddress(currentAddress, w.chainParams)
+	if err != nil {
+		return false, err
+	}
+	var depositAccount string
+	if rpcCfg.UnmixedAccount != "" {
+		depositAccount = rpcCfg.UnmixedAccount
+	} else {
+		depositAccount = rpcCfg.PrimaryAccount
+	}
+	owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
+	if err != nil {
+		return false, err
+	}
+	if !owns {
+		if walletCfg.ActivelyUsed {
 			return false, errors.New("cannot reconfigure to different wallet while there are active trades")
 		}
+		return true, nil
 	}
 
 	w.rpcMtx.Lock()
