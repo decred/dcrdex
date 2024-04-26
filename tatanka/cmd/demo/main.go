@@ -92,7 +92,7 @@ func mainErr() (err error) {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed())
+		runServer(ctx, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed(), true)
 	}()
 
 	time.Sleep(time.Second)
@@ -102,7 +102,7 @@ func mainErr() (err error) {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed())
+		runServer(ctx, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed(), false)
 	}()
 
 	time.Sleep(time.Second)
@@ -256,7 +256,9 @@ func mainErr() (err error) {
 	}
 
 	// Wait for rate messages.
-	<-time.After(9 * time.Minute) // rates are broadcasted every 8min, wait for 9min.
+	for i := 0; i < len(supportedDEXAssetIDs); i++ {
+		<-cl1.Next()
+	}
 
 	want := len(supportedDEXAssetIDs)
 	got := 0
@@ -308,7 +310,7 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 	return addrs, nil
 }
 
-func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID []byte) {
+func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID []byte, startFiatRateOracle bool) {
 	n := newBootNode(peerAddr.String(), peerID)
 
 	log := logMaker.Logger(fmt.Sprintf("SRV[%s]", addr))
@@ -359,10 +361,18 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 		},
 		ConfigPath: cfgPath,
 		WhiteList:  []tatanka.BootNode{n},
-		FiatOracleCfg: fiatrates.Config{
-			Assets: strings.Join(assetStrs, ","),
+		FiatOracleConfig: tatanka.FiatOracleConfig{
+			Config: fiatrates.Config{
+				Assets: strings.Join(assetStrs, ","),
+			},
+			FiatRateBroadcastInterval: 1,
 		},
 	}
+
+	if !startFiatRateOracle {
+		cfg.FiatRateBroadcastInterval = 0
+	}
+
 	t, err := tatanka.New(cfg)
 	if err != nil {
 		log.Errorf("error creating Tatanka node: %v", err)

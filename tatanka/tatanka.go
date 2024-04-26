@@ -112,7 +112,8 @@ type Tatanka struct {
 	tatankasMtx sync.RWMutex
 	tatankas    map[tanka.PeerID]*remoteTatanka
 
-	fiatRateOracle *fiatrates.Oracle
+	fiatRateOracle            *fiatrates.Oracle
+	fiatRateBroadcastInterval int64 // minutes
 }
 
 // Config is the configuration of the Tatanka.
@@ -126,7 +127,12 @@ type Config struct {
 	// TODO: Change to whitelist
 	WhiteList []BootNode
 
-	FiatOracleCfg fiatrates.Config
+	FiatOracleConfig
+}
+
+type FiatOracleConfig struct {
+	fiatrates.Config
+	FiatRateBroadcastInterval int64 `long:"fiatratebroadcastinterval" description:"Specify the minutes it'll take before the server notifies all subscribed clients with fiat rates (max allowed = 10). Set to zero to disable the fiat rate oracle."`
 }
 
 func New(cfg *Config) (*Tatanka, error) {
@@ -188,26 +194,34 @@ func New(cfg *Config) (*Tatanka, error) {
 		}
 	}
 
-	t := &Tatanka{
-		net:           cfg.Net,
-		dataDir:       cfg.DataDir,
-		log:           cfg.Logger,
-		whitelist:     whitelist,
-		db:            db,
-		priv:          priv,
-		id:            peerID,
-		chains:        chains,
-		tatankas:      make(map[tanka.PeerID]*remoteTatanka),
-		clients:       make(map[tanka.PeerID]*client),
-		remoteClients: make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
-		topics:        make(map[tanka.Topic]*Topic),
-		recentRelays:  make(map[[32]byte]time.Time),
-		clientJobs:    make(chan *clientJob, 128),
+	const maxFiatRateBroadcastIntervalInMinutes = 10
+	if cfg.FiatRateBroadcastInterval > maxFiatRateBroadcastIntervalInMinutes {
+		cfg.FiatRateBroadcastInterval = maxFiatRateBroadcastIntervalInMinutes
 	}
 
-	t.fiatRateOracle, err = fiatrates.NewFiatOracle(cfg.FiatOracleCfg)
-	if err != nil {
-		return nil, fmt.Errorf("error initializing fiat oracle: %w", err)
+	t := &Tatanka{
+		net:                       cfg.Net,
+		dataDir:                   cfg.DataDir,
+		log:                       cfg.Logger,
+		whitelist:                 whitelist,
+		db:                        db,
+		priv:                      priv,
+		id:                        peerID,
+		chains:                    chains,
+		tatankas:                  make(map[tanka.PeerID]*remoteTatanka),
+		clients:                   make(map[tanka.PeerID]*client),
+		remoteClients:             make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
+		topics:                    make(map[tanka.Topic]*Topic),
+		recentRelays:              make(map[[32]byte]time.Time),
+		clientJobs:                make(chan *clientJob, 128),
+		fiatRateBroadcastInterval: cfg.FiatOracleConfig.FiatRateBroadcastInterval,
+	}
+
+	if t.fiatOracleEnabled() {
+		t.fiatRateOracle, err = fiatrates.NewFiatOracle(cfg.FiatOracleConfig.Config)
+		if err != nil {
+			return nil, fmt.Errorf("error initializing fiat oracle: %w", err)
+		}
 	}
 
 	t.nets.Store(nets)
@@ -245,6 +259,10 @@ func (t *Tatanka) prepareHandlers() {
 
 func (t *Tatanka) assets() []uint32 {
 	return t.nets.Load().([]uint32)
+}
+
+func (t *Tatanka) fiatOracleEnabled() bool {
+	return t.fiatRateBroadcastInterval > 0
 }
 
 func (t *Tatanka) tatankaNodes() []*remoteTatanka {
@@ -343,16 +361,18 @@ func (t *Tatanka) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 		t.runWhitelistLoop(ctx)
 	}()
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		t.fiatRateOracle.Run(t.ctx, t.log)
-	}()
+	if t.fiatOracleEnabled() {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			t.fiatRateOracle.Run(t.ctx, t.log)
+		}()
 
-	go func() {
-		defer wg.Done()
-		t.broadcastRates()
-	}()
+		go func() {
+			defer wg.Done()
+			t.broadcastRates()
+		}()
+	}
 
 	success = true
 	return &wg, nil
@@ -704,11 +724,16 @@ func (t *Tatanka) clientDisconnected(peerID tanka.PeerID) {
 	}
 }
 
-// broadcastRates sends market rates to all fiat rate subscribers every 8
-// minutes. This method blocks and must be called from a goroutine.
+// broadcastRates sends market rates to all fiat rate subscribers every
+// t.fiatRateBroadcastInterval. This method blocks and must be called from a
+// goroutine.
 func (t *Tatanka) broadcastRates() {
-	const rateBroadcastInterval = 8 * time.Minute
-	ticker := time.NewTicker(rateBroadcastInterval)
+	if !t.fiatOracleEnabled() {
+		return
+	}
+
+	broadcastInterval := time.Duration(t.fiatRateBroadcastInterval) * time.Minute
+	ticker := time.NewTicker(broadcastInterval)
 	defer ticker.Stop()
 
 	for {
@@ -723,6 +748,10 @@ func (t *Tatanka) broadcastRates() {
 
 // broadcastFiatRates sends fiat rates update to all current subscribers.
 func (t *Tatanka) broadcastFiatRates() {
+	if !t.fiatOracleEnabled() {
+		return // nothing to do
+	}
+
 	t.clientMtx.RLock()
 	defer t.clientMtx.RUnlock()
 	topic := t.topics[mj.TopicFiatRate]

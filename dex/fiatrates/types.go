@@ -16,7 +16,7 @@ type Config struct {
 	CryptoCompareAPIKey string `long:"ccdataapikey" description:"This is your free API Key from cryptocompare.com."`
 	EnableBinanceUS     bool   `long:"enablebinanceus" description:"Set to true, if running the tatanka mesh from a US based server."`
 	DisabledFiatSources string `long:"disabledfiatsources" description:"A list of disabled sources separated by comma. See fiatrate/sources.go."`
-	Assets              string `long:"assets" description:"A list of comma separated assets to fetch rates for when the oracle if activated."`
+	Assets              string `long:"assets" description:"A list of comma separated assets to fetch rates for when the oracle is activated."`
 }
 
 type source struct {

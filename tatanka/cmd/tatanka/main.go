@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
 	"github.com/jessevdk/go-flags"
@@ -115,7 +114,7 @@ type Config struct {
 
 	WebAddr string `long:"webaddr" description:"The public facing address by which peers should connect."`
 
-	FiatRateOracleCfg fiatrates.Config `group:"Fiat Oracle Config"`
+	tatanka.FiatOracleConfig `group:"Fiat Oracle Config"`
 }
 
 func config() (*dex.LoggerMaker, *Config) {
