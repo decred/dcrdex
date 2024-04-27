@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	mrand "math/rand"
@@ -70,6 +71,8 @@ var (
 	randomizeOrdersCount  = false
 	initErrors            = false
 	mmConnectErrors       = false
+	enableActions         = true
+	actions               []*asset.ActionRequiredNote
 
 	rand   = mrand.New(mrand.NewSource(time.Now().UnixNano()))
 	titler = cases.Title(language.AmericanEnglish)
@@ -1775,8 +1778,8 @@ func (c *TCore) User() *core.User {
 			145:   114.68,    // bch
 			60:    1_209.51,  // eth
 			60001: 0.999,     // usdc.eth
-
 		},
+		Actions: actions,
 	}
 	return user
 }
@@ -1928,6 +1931,14 @@ out:
 			}
 			c.epochOrders = nil
 			c.orderMtx.Unlock()
+
+			// Small chance of randomly generating a required action
+			if enableActions && rand.Float32() < 0.05 {
+				c.noteFeed <- &core.WalletNote{
+					Notification: db.NewNotification(core.NoteTypeWalletNote, core.TopicWalletNotification, "", "", db.Data),
+					Payload:      makeRequiredAction(baseID, "lostTx"),
+				}
+			}
 		case <-tCtx.Done():
 			break out
 		}
@@ -2103,6 +2114,24 @@ func (c *TCore) SetLanguage(lang string) error {
 
 func (c *TCore) Language() string {
 	return c.lang
+}
+
+func (c *TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error {
+	if rand.Float32() < 0.25 {
+		return fmt.Errorf("it didn't work")
+	}
+	for i, req := range actions {
+		if req.ActionID == actionID && req.AssetID == assetID {
+			copy(actions[i:], actions[i+1:])
+			actions = actions[:len(actions)-1]
+			c.noteFeed <- &core.WalletNote{
+				Notification: db.NewNotification(core.NoteTypeWalletNote, core.TopicWalletNotification, "", "", db.Data),
+				Payload:      makeActionResolved(assetID, req.UniqueID),
+			}
+			break
+		}
+	}
+	return nil
 }
 
 var binanceMarkets = []*libxc.Market{
@@ -2588,6 +2617,31 @@ func (m *TMarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells
 	return book.Buys, book.Sells, nil
 }
 
+func makeRequiredAction(assetID uint32, actionID string) *asset.ActionRequiredNote {
+	txID := dex.Bytes(encode.RandomBytes(32)).String()
+	n := &asset.ActionRequiredNote{
+		ActionID: actionID,
+		UniqueID: txID,
+		Payload: &eth.TransactionActionNote{
+			Tx:      randomWalletTransaction(asset.TransactionType(1+rand.Intn(15)), randomBalance()/10), // 1 to 15
+			Nonce:   uint64(rand.Float64() * 500),
+			NewFees: uint64(rand.Float64() * math.Pow10(rand.Intn(8))),
+		},
+	}
+	n.AssetID = assetID
+	n.Route = "actionRequired"
+	return n
+}
+
+func makeActionResolved(assetID uint32, uniqueID string) *asset.ActionResolvedNote {
+	n := &asset.ActionResolvedNote{
+		UniqueID: uniqueID,
+	}
+	n.AssetID = assetID
+	n.Route = "actionResolved"
+	return n
+}
+
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
 	asset.Register(22, &TDriver{})                 // mona
@@ -2612,6 +2666,14 @@ func TestServer(t *testing.T) {
 	delayBalance = true
 	doubleCreateAsyncErr = false
 	randomizeOrdersCount = true
+
+	if enableActions {
+		actions = []*asset.ActionRequiredNote{
+			makeRequiredAction(0, "lostTx"),
+			makeRequiredAction(42, "lostNonce"),
+			makeRequiredAction(60, "tooCheap"),
+		}
+	}
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())

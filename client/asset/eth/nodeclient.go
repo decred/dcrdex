@@ -171,8 +171,12 @@ func (n *nodeClient) locked() bool {
 	return status != "Unlocked"
 }
 
+func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, err error) {
+	return nil, fmt.Errorf("unimplemented")
+}
+
 // transactionReceipt retrieves the transaction's receipt.
-func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
+func (n *nodeClient) transactionAndReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
 	tx, blockHash, _, index, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
@@ -195,6 +199,10 @@ func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash)
 		return nil, nil, fmt.Errorf("nil receipt at index %d in block %s for tx %s", index, blockHash, txHash)
 	}
 	return receipt, tx, nil
+}
+
+func (n *nodeClient) nextNonce(ctx context.Context) (*big.Int, error) {
+	return nil, errors.New("unimplemented")
 }
 
 // pendingTransactions returns pending transactions.

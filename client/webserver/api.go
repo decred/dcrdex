@@ -5,6 +5,7 @@ package webserver
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -2266,6 +2267,22 @@ func (s *WebServer) apiTxHistory(w http.ResponseWriter, r *http.Request) {
 		OK:  true,
 		Txs: txs,
 	}, s.indent)
+}
+
+func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AssetID  uint32          `json:"assetID"`
+		ActionID string          `json:"actionID"`
+		Action   json.RawMessage `json:"action"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	if err := s.core.TakeAction(req.AssetID, req.ActionID, req.Action); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error taking action: %w", err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 // writeAPIError logs the formatted error and sends a standardResponse with the

@@ -2,7 +2,7 @@ import Doc from './doc'
 import State from './state'
 import RegistrationPage from './register'
 import LoginPage from './login'
-import WalletsPage from './wallets'
+import WalletsPage, { txTypeString } from './wallets'
 import SettingsPage from './settings'
 import MarketsPage from './markets'
 import OrdersPage from './orders'
@@ -48,8 +48,12 @@ import {
   TxHistoryResult,
   WalletNote,
   TransactionNote,
-  PageElement
+  PageElement,
+  ActionRequiredNote,
+  ActionResolvedNote,
+  TransactionActionNote
 } from './registry'
+import { setCoinHref } from './coinexplorers'
 
 const idel = Doc.idel // = element by id
 const bind = Doc.bind
@@ -127,6 +131,14 @@ const languageData: Record<string, LangData> = {
   }
 }
 
+interface requiredAction {
+  div: PageElement
+  stamp: number
+  uniqueID: string
+  actionID: string
+  selected: boolean
+}
+
 // Application is the main javascript web application for Bison Wallet.
 export default class Application {
   notes: CoreNotePlus[]
@@ -156,6 +168,7 @@ export default class Application {
   popupTmpl: HTMLElement
   noteReceivers: Record<string, (n: CoreNote) => void>[]
   txHistoryMap: Record<number, TxHistoryResult>
+  requiredActions: Record<string, requiredAction>
 
   constructor () {
     this.notes = []
@@ -166,6 +179,7 @@ export default class Application {
     this.fiatRatesMap = {}
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
     this.txHistoryMap = {}
+    this.requiredActions = {}
 
     console.log('Bison Wallet, Build', this.commitHash.substring(0, 7))
 
@@ -249,6 +263,7 @@ export default class Application {
     }
     // Attach stuff.
     this.attachHeader()
+    this.attachActions()
     this.attachCommon(this.header)
     this.attach({})
     // If we are authed, populate notes, otherwise get we'll them from the login
@@ -463,6 +478,237 @@ export default class Application {
     }
   }
 
+  attachActions () {
+    const { page } = this
+    Object.assign(page, Doc.idDescendants(Doc.idel(document.body, 'requiredActions')))
+    Doc.cleanTemplates(page.lostTxTmpl, page.actionTxTableTmpl)
+    Doc.bind(page.actionsCollapse, 'click', () => {
+      Doc.hide(page.actionDialog)
+      Doc.show(page.actionDialogCollapsed)
+    })
+    Doc.bind(page.actionDialogCollapsed, 'click', () => {
+      Doc.hide(page.actionDialogCollapsed)
+      Doc.show(page.actionDialog)
+      if (page.actionDialogContent.children.length === 0) this.showOldestAction()
+    })
+    const showAdjacentAction = (dir: number) => {
+      const selected = Object.values(this.requiredActions).filter((r: requiredAction) => r.selected)[0]
+      const actions = this.sortedActions()
+      const idx = actions.indexOf(selected)
+      this.showRequestedAction(actions[idx + dir].uniqueID)
+    }
+    Doc.bind(page.prevAction, 'click', () => showAdjacentAction(-1))
+    Doc.bind(page.nextAction, 'click', () => showAdjacentAction(1))
+  }
+
+  setRequiredActions () {
+    const { user: { actions }, requiredActions } = this
+    if (!actions) return
+    for (const a of actions) this.addAction(a)
+    if (Object.keys(requiredActions).length) {
+      this.showOldestAction()
+      this.blinkAction()
+    }
+  }
+
+  sortedActions () {
+    const actions = Object.values(this.requiredActions)
+    actions.sort((a: requiredAction, b: requiredAction) => a.stamp - b.stamp)
+    return actions
+  }
+
+  showOldestAction () {
+    this.showRequestedAction(this.sortedActions()[0].uniqueID)
+  }
+
+  addAction (req: ActionRequiredNote) {
+    const { page, requiredActions } = this
+    const existingAction = requiredActions[req.uniqueID]
+    if (existingAction && existingAction.actionID === req.actionID) return
+    const div = this.actionForm(req)
+    page.actionDialogContent.appendChild(div)
+    if (existingAction) {
+      if (existingAction.selected) existingAction.div.replaceWith(div)
+      existingAction.div = div
+    } else {
+      requiredActions[req.uniqueID] = {
+        div,
+        stamp: (new Date()).getTime(),
+        uniqueID: req.uniqueID,
+        actionID: req.actionID,
+        selected: false
+      }
+      page.actionDialogCount.textContent = String(Object.keys(requiredActions).length)
+      if (Doc.isHidden(page.actionDialog) && Doc.isHidden(page.actionDialogCollapsed)) {
+        this.showRequestedAction(req.uniqueID)
+      }
+    }
+  }
+
+  blinkAction () {
+    Doc.blink(this.page.actionDialog)
+    Doc.blink(this.page.actionDialogCollapsed)
+  }
+
+  resolveAction (req: ActionResolvedNote) {
+    this.resolveActionWithID(req.uniqueID)
+  }
+
+  resolveActionWithID (uniqueID: string) {
+    const { page, requiredActions } = this
+    const existingAction = requiredActions[uniqueID]
+    if (!existingAction) return
+    delete requiredActions[uniqueID]
+    const rem = Object.keys(requiredActions).length
+    existingAction.div.remove()
+    if (existingAction.selected && rem > 0) {
+      this.showOldestAction()
+      return
+    }
+    if (rem === 0) Doc.hide(page.actionDialog, page.actionDialogCollapsed)
+    else page.actionDialogCount.textContent = String(rem)
+  }
+
+  actionForm (req: ActionRequiredNote) {
+    switch (req.actionID) {
+      case 'tooCheap':
+        return this.tooCheapAction(req)
+      case 'lostTx':
+        return this.lostTxAction(req)
+      case 'lostNonce':
+        return this.lostNonceAction(req)
+    }
+    throw Error('unknown required action ID ' + req.actionID)
+  }
+
+  actionTxTable (req: ActionRequiredNote) {
+    const { assetID, payload } = req
+    const n = payload as TransactionActionNote
+    const { unitInfo: ui, token } = this.assets[assetID]
+    const table = this.page.actionTxTableTmpl.cloneNode(true) as PageElement
+    const tmpl = Doc.parseTemplate(table)
+    tmpl.lostTxID.textContent = n.tx.id
+    tmpl.lostTxID.dataset.explorerCoin = n.tx.id
+    setCoinHref(token ? token.parentID : assetID, tmpl.lostTxID)
+    tmpl.txAmt.textContent = Doc.formatCoinValue(n.tx.amount, ui)
+    tmpl.amtUnit.textContent = ui.conventional.unit
+    const parentUI = token ? this.unitInfo(token.parentID) : ui
+    tmpl.type.textContent = txTypeString(n.tx.type)
+    tmpl.feeAmount.textContent = Doc.formatCoinValue(n.tx.fees, parentUI)
+    tmpl.feeUnit.textContent = parentUI.conventional.unit
+    switch (req.actionID) {
+      case 'tooCheap': {
+        Doc.show(tmpl.newFeesRow)
+        tmpl.newFees.textContent = Doc.formatCoinValue(n.tx.fees, parentUI)
+        tmpl.newFeesUnit.textContent = parentUI.conventional.unit
+        break
+      }
+    }
+    return table
+  }
+
+  async submitAction (req: ActionRequiredNote, action: any, errMsg: PageElement) {
+    Doc.hide(errMsg)
+    const loading = this.loading(this.page.actionDialog)
+    const res = await postJSON('/api/takeaction', {
+      assetID: req.assetID,
+      actionID: req.actionID,
+      action
+    })
+    loading()
+    if (!this.checkResponse(res)) {
+      errMsg.textContent = res.msg
+      Doc.show(errMsg)
+      return
+    }
+    this.resolveActionWithID(req.uniqueID)
+  }
+
+  lostTxAction (req: ActionRequiredNote) {
+    const { assetID, payload } = req
+    const n = payload as TransactionActionNote
+    const div = this.page.lostTxTmpl.cloneNode(true) as PageElement
+    const tmpl = Doc.parseTemplate(div)
+    const { name } = this.assets[assetID]
+    tmpl.assetName.textContent = name
+    tmpl.txTable.appendChild(this.actionTxTable(req))
+    const act = (abandon: boolean) => {
+      this.submitAction(req, {
+        txID: n.tx.id,
+        abandon
+      }, tmpl.errMsg)
+    }
+    Doc.bind(tmpl.lostAbandonBttn, 'click', () => act(true))
+    Doc.bind(tmpl.lostWaitBttn, 'click', () => act(false))
+    return div
+  }
+
+  tooCheapAction (req: ActionRequiredNote) {
+    const { assetID, payload } = req
+    const n = payload as TransactionActionNote
+    const div = this.page.tooCheapTmpl.cloneNode(true) as PageElement
+    const tmpl = Doc.parseTemplate(div)
+    const { name } = this.assets[assetID]
+    tmpl.assetName.textContent = name
+    tmpl.txTable.appendChild(this.actionTxTable(req))
+    const act = (bump: boolean) => {
+      this.submitAction(req, {
+        txID: n.tx.id,
+        bump
+      }, tmpl.errMsg)
+    }
+    Doc.bind(tmpl.keepWaitingBttn, 'click', () => act(false))
+    Doc.bind(tmpl.addFeesBttn, 'click', () => act(true))
+    return div
+  }
+
+  lostNonceAction (req: ActionRequiredNote) {
+    const { assetID, payload } = req
+    const n = payload as TransactionActionNote
+    const div = this.page.lostNonceTmpl.cloneNode(true) as PageElement
+    const tmpl = Doc.parseTemplate(div)
+    const { name } = this.assets[assetID]
+    tmpl.assetName.textContent = name
+    tmpl.nonce.textContent = String(n.nonce)
+    tmpl.txTable.appendChild(this.actionTxTable(req))
+    Doc.bind(tmpl.abandonBttn, 'click', () => {
+      this.submitAction(req, { txID: n.tx.id, abandon: true }, tmpl.errMsg)
+    })
+    Doc.bind(tmpl.keepWaitingBttn, 'click', () => {
+      this.submitAction(req, { txID: n.tx.id, abandon: false }, tmpl.errMsg)
+    })
+    Doc.bind(tmpl.replaceBttn, 'click', () => {
+      const replacementID = tmpl.idInput.value
+      if (!replacementID) {
+        tmpl.idInput.focus()
+        Doc.blink(tmpl.idInput)
+        return
+      }
+      this.submitAction(req, { txID: n.tx.id, abandon: false, replacementID }, tmpl.errMsg)
+    })
+    return div
+  }
+
+  showRequestedAction (uniqueID: string) {
+    const { page, requiredActions } = this
+    Doc.hide(page.actionDialogCollapsed)
+    for (const r of Object.values(requiredActions)) r.selected = r.uniqueID === uniqueID
+    Doc.empty(page.actionDialogContent)
+    const action = requiredActions[uniqueID]
+    page.actionDialogContent.appendChild(action.div)
+    Doc.show(page.actionDialog)
+    const actions = this.sortedActions()
+    if (actions.length === 1) {
+      Doc.hide(page.actionsNavigator)
+      return
+    }
+    Doc.show(page.actionsNavigator)
+    const idx = actions.indexOf(action)
+    page.currentAction.textContent = String(idx + 1)
+    page.prevAction.classList.toggle('invisible', idx === 0)
+    page.nextAction.classList.toggle('invisible', idx === actions.length - 1)
+  }
+
   async setLanguage (lang: string) {
     await postJSON('/api/setlocale', lang)
     window.location.reload()
@@ -563,6 +809,7 @@ export default class Application {
     res.notes.reverse()
     this.setNotes(res.notes)
     this.setPokes(res.pokes)
+    this.setRequiredActions()
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */
@@ -627,6 +874,12 @@ export default class Application {
 
   handleTxHistorySyncedNote (assetID: number) {
     delete this.txHistoryMap[assetID]
+  }
+
+  loggedIn (notes: CoreNote[], pokes: CoreNote[]) {
+    this.setNotes(notes)
+    this.setPokes(pokes)
+    this.setRequiredActions()
   }
 
   /*
@@ -761,9 +1014,21 @@ export default class Application {
       }
       case 'walletnote': {
         const n = note as WalletNote
-        if (n.payload.route === 'transaction') {
-          const txNote = n.payload as TransactionNote
-          this.handleTransactionNote(n.payload.assetID, txNote)
+        switch (n.payload.route) {
+          case 'transaction': {
+            const txNote = n.payload as TransactionNote
+            this.handleTransactionNote(n.payload.assetID, txNote)
+            break
+          }
+          case 'actionRequired': {
+            const req = n.payload as ActionRequiredNote
+            this.addAction(req)
+            this.blinkAction()
+            break
+          }
+          case 'actionResolved': {
+            this.resolveAction(n.payload as ActionResolvedNote)
+          }
         }
         if (n.payload.route === 'transactionHistorySynced') {
           this.handleTxHistorySyncedNote(n.payload.assetID)
@@ -1188,7 +1453,7 @@ export default class Application {
     if (!w) return false
     const traitAccountLocker = 1 << 14
     if ((w.traits & traitAccountLocker) === 0) return false
-    const res = await postJSON('/api/walletsettings', { baseChainID })
+    const res = await postJSON('/api/walletsettings', { assetID: baseChainID })
     if (!this.checkResponse(res)) {
       console.error(res.msg)
       return false

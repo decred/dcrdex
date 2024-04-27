@@ -153,7 +153,7 @@ func waitForReceipt(nc ethFetcher, tx *types.Transaction) (*types.Receipt, error
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(time.Second):
-			receipt, _, err := nc.transactionReceipt(ctx, hash)
+			receipt, err := nc.transactionReceipt(ctx, hash)
 			if err != nil {
 				if errors.Is(err, asset.CoinNotFoundError) {
 					continue
@@ -1014,10 +1014,11 @@ func testSendSignedTransaction(t *testing.T) {
 		ks = c.creds.ks
 		chainID = c.chainID
 	case *multiRPCClient:
-		nonce, err = c.nextNonce(ctx)
+		n, err := c.nextNonce(ctx)
 		if err != nil {
 			t.Fatalf("error getting nonce: %v", err)
 		}
+		nonce = n.Uint64()
 		ks = c.creds.ks
 		chainID = c.chainID
 	}
@@ -1382,7 +1383,6 @@ func testInitiate(t *testing.T, assetID uint32) {
 		}
 		if err != nil {
 			if test.swapErr {
-				sc.voidUnusedNonce()
 				continue
 			}
 			t.Fatalf("%s: initiate error: %v", test.name, err)
@@ -1764,7 +1764,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 		tx, err = test.redeemerContractor.redeem(txOpts, test.redemptions)
 		if test.expectRedeemErr {
-			test.redeemerContractor.voidUnusedNonce()
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
 			}

@@ -115,3 +115,7 @@ func TestFreeTestnetServers(t *testing.T) {
 func TestMainnetCompliance(t *testing.T) {
 	mt.TestMainnetCompliance(t)
 }
+
+func TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
+	mt.TestReceiptsHaveEffectiveGasPrice(t)
+}

@@ -118,6 +118,119 @@
 {{end}}
 
 {{define "bottom"}}
+<div id="requiredActions">
+  <div id="actionDialogCollapsed" class="d-inline-block text-center p-2 m-1 pointer hoverbg d-hide">
+    <span class="text-warning fs20">
+      <span class="ico-info ms-0 me-1"></span>
+      <span id="actionDialogCount">4</span>
+    </span>
+  </div>
+  <div id="actionDialog" class="mw-375 rounded3 m-3 p-3 d-hide">
+    <div class="d-flex justify-content-between">
+      <div class="fs22">
+        <span class="ico-info text-warning me-2"></span>
+        Action Required
+      </div>
+      <div id="actionsCollapse" class="fs16 p-2 ico-arrowdown hoverbg pointer"></div>
+    </div>
+    <div id="actionDialogContent">
+
+      <table id="actionTxTableTmpl" class="compact border cell-border mt-2">
+        <thead>
+          <tr>
+            <th colspan="2">
+              <a data-tmpl="lostTxID" class="break-all"></a>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>[[[Amount]]]</td>
+            <td>
+              <span data-tmpl="txAmt"></span>
+              <span data-tmpl="amtUnit" class="fs15 grey"></span>
+            </td>
+          </tr>
+          <tr>
+            <td>[[[Fees]]]</td>
+            <td>
+              <span data-tmpl="feeAmount"></span>
+              <span data-tmpl="feeUnit" class="fs15 grey"></span>
+            </td>
+          </tr>
+          <tr data-tmpl="newFeesRow" class="d-hide">
+            <td>New Fees</td>
+            <td>
+              <span data-tmpl="newFees"></span>
+              <span data-tmpl="newFeesUnit" class="fs15 grey"></span>
+            </td>
+          </tr>
+          <tr>
+            <td>Tx Type</td>
+            <td data-tmpl="type"></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div id="lostTxTmpl" class="flex-stretch-column mt-2">
+        <div class="text-justify">
+          A <span data-tmpl="assetName"></span>
+          transaction appears to be lost, and all attempts to re-broadcast it
+          have failed. Do you want to abandon it?
+        </div>
+        <div data-tmpl="txTable"></div>
+        <div class="d-flex align-items-stretch mt-3">
+          <button data-tmpl="lostAbandonBttn" class="flex-grow-1 me-2 danger">Abandon</button>
+          <button data-tmpl="lostWaitBttn" class="flex-grow-1 ms-2">Keep Trying</button>
+        </div>
+        <div data-tmpl="errMsg" class="p-2 errcolor d-hide"></div>
+      </div>
+
+      <div id="tooCheapTmpl" class="flex-stretch-column mt-2">
+        <div class="text-justify">
+          A <span data-tmpl="assetName"></span>
+          transaction is stuck and has low fees. Should we replace it with a new
+          transaction?
+        </div>
+        <div data-tmpl="txTable"></div>
+        <div class="d-flex align-items-stretch mt-3">
+          <button data-tmpl="keepWaitingBttn" class="flex-grow-1 me-2">Keep Waiting</button>
+          <button data-tmpl="addFeesBttn" class="flex-grow-1 ms-2">Add Fees</button>
+        </div>
+        <div data-tmpl="errMsg" class="p-2 errcolor d-hide"></div>
+      </div>
+
+      <div id="lostNonceTmpl" class="flex-stretch-column mt-2">
+        <div class="text-justify">
+          A <span data-tmpl="assetName"></span>
+          transaction might be lost. A transaction with a higher nonce was
+          confirmed first. You can abandon the transaction
+        </div>
+        <div data-tmpl="txTable"></div>
+        <div class="d-flex mt-2">
+          <button data-tmpl="keepWaitingBttn" class="flex-grow-1 me-1">Keep Waiting</button>
+          <button data-tmpl="abandonBttn" class="danger flex-grow-1 ms-1">Abandon</button>
+        </div>
+        <hr>
+        <div class="mt-2">
+          or you can tell us which transaction has nonce <span data-tmpl="nonce"></span>
+        </div>
+        <div class="d-flex align-items-stretch mt-2">
+          <input type="text" data-tmpl="idInput" class="flex-grow-1">
+          <button data-tmpl="replaceBttn" class="ms-2">Submit</button>
+        </div>
+        <div data-tmpl="errMsg" class="p-2 errcolor d-hide"></div>
+      </div>
+
+    </div>
+    <div id="actionsNavigator" class="flex-center mt-2 lh1 fs16 user-select-none">
+      <span id="prevAction" class="p-1 ico-arrowback pointer hoverbg"></span>
+      <span id="currentAction" class="mx-1"></span>
+      <span id="nextAction" class="p-1 ico-arrowright pointer hoverbg"></span>
+    </div>
+  </div>
+</div>
+
 <script src="/js/entry.js?v={{commitHash}}"></script>
 </body>
 </html>

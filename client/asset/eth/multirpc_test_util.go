@@ -293,6 +293,44 @@ func (m *MRPCTest) TestMainnetCompliance(t *testing.T) {
 	}
 }
 
+func (m *MRPCTest) TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
+	m.withClient(t, dex.Mainnet, func(ctx context.Context, cl *multiRPCClient) {
+		if err := cl.withAny(ctx, func(ctx context.Context, p *provider) error {
+			blk, err := p.ec.BlockByNumber(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("BlockByNumber error: %v", err)
+			}
+			h := blk.Number()
+			const m = 20 // how many txs
+			var n int
+			for n < m {
+				txs := blk.Transactions()
+				fmt.Printf("##### Block %d has %d transactions", h, len(txs))
+				for _, tx := range txs {
+					n++
+					r, err := cl.transactionReceipt(ctx, tx.Hash())
+					if err != nil {
+						return fmt.Errorf("transactionReceipt error: %v", err)
+					}
+					if r.EffectiveGasPrice != nil {
+						fmt.Printf("##### Effective gas price: %s \n", r.EffectiveGasPrice)
+					} else {
+						fmt.Printf("##### No effective gas price for tx %s \n", tx.Hash())
+					}
+				}
+				h.Add(h, big.NewInt(-1))
+				blk, err = p.ec.BlockByNumber(ctx, h)
+				if err != nil {
+					return fmt.Errorf("error getting block %d: %w", h, err)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func (m *MRPCTest) withClient(t *testing.T, net dex.Network, f func(context.Context, *multiRPCClient)) {
 	seed, providers := m.readProviderFile(t, net)
 	dir, _ := os.MkdirTemp("", "")

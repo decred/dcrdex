@@ -41,7 +41,7 @@ type contractor interface {
 	// case will always be zero.
 	value(context.Context, *types.Transaction) (incoming, outgoing uint64, err error)
 	isRefundable(secretHash [32]byte) (bool, error)
-	voidUnusedNonce()
+	// voidUnusedNonce()
 }
 
 // tokenContractor interacts with an ERC20 token contract and a token swap
@@ -305,15 +305,6 @@ func (c *contractorV0) outgoingValue(tx *types.Transaction) (swapped uint64) {
 		}
 	}
 	return
-}
-
-// voidUnusedNonce allows the next nonce received from a provider to be the same
-// as a recent nonce. Use when we fetch a nonce but error before or while
-// sending a transaction.
-func (c *contractorV0) voidUnusedNonce() {
-	if mRPC, is := c.cb.(*multiRPCClient); is {
-		mRPC.voidUnusedNonce()
-	}
 }
 
 // tokenContractorV0 is a contractor that implements the tokenContractor

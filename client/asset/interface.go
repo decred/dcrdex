@@ -249,6 +249,8 @@ const (
 	// ErrUnapprovedToken is returned when trying to fund an order using a token
 	// that has not been approved.
 	ErrUnapprovedToken = dex.ErrorKind("token not approved")
+	// ErrTxRejected is returned when a transaction was rejected.
+	ErrTxRejected = dex.ErrorKind("transaction was rejected")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
@@ -1147,7 +1149,10 @@ type WalletTransaction struct {
 	// AdditionalData contains asset specific information, i.e. nonce
 	// for ETH.
 	AdditionalData map[string]string `json:"additionalData"`
-	Confirmed      bool              `json:"confirmed"`
+	// Confirmed is true when the transaction is considered finalized.
+	// Confirmed transactions are no longer updated and will be considered
+	// finalized forever.
+	Confirmed bool `json:"confirmed"`
 }
 
 // WalletHistorian is a wallet that is able to retrieve the history of all
@@ -1513,12 +1518,33 @@ type CustomWalletNote struct {
 	Payload any `json:"payload"`
 }
 
+type ActionTaker interface {
+	// TakeAction processes a response to an ActionRequired wallet notification.
+	TakeAction(actionID string, payload []byte) error
+}
+
 // WalletEmitter handles a channel for wallet notifications and provides methods
 // that generates notifications.
 type WalletEmitter struct {
 	c       chan<- WalletNotification
 	assetID uint32
 	log     dex.Logger
+}
+
+type ActionRequiredNote struct {
+	baseWalletNotification
+	Payload  any    `json:"payload"`
+	UniqueID string `json:"uniqueID"`
+	ActionID string `json:"actionID"`
+}
+
+// ActionResolved is sent by wallets when action is no longer required for a
+// unique ID.
+const ActionResolved = "actionResolved"
+
+type ActionResolvedNote struct {
+	baseWalletNotification
+	UniqueID string `json:"uniqueID"`
 }
 
 // NewWalletEmitter constructs a WalletEmitter for an asset.
@@ -1591,5 +1617,29 @@ func (e *WalletEmitter) TransactionHistorySyncedNote() {
 	e.emit(&baseWalletNotification{
 		AssetID: e.assetID,
 		Route:   "transactionHistorySynced",
+	})
+}
+
+// ActionRequired is a route that will end up as a special dialogue seeking
+// user input via (ActionTaker).TakeAction.
+func (e *WalletEmitter) ActionRequired(uniqueID, actionID string, payload any) {
+	e.emit(&ActionRequiredNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "actionRequired",
+		},
+		UniqueID: uniqueID,
+		ActionID: actionID,
+		Payload:  payload,
+	})
+}
+
+func (e *WalletEmitter) ActionResolved(uniqueID string) {
+	e.emit(&ActionResolvedNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "actionResolved",
+		},
+		UniqueID: uniqueID,
 	})
 }

@@ -125,7 +125,7 @@ class AppInitForm {
     // the Application will only clear them on login, which would leave old
     // browser-cached notifications in place after registering even if the
     // client db is wiped.
-    app().setNotes([])
+    app().loggedIn([], [])
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app().loading(this.form)

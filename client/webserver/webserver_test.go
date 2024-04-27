@@ -371,6 +371,8 @@ func (c *TCore) DisableFundsMixer(assetID uint32) error {
 func (*TCore) SetLanguage(string) error { return nil }
 func (*TCore) Language() string         { return "en-US" }
 
+func (*TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error { return nil }
+
 type TWriter struct {
 	b []byte
 }

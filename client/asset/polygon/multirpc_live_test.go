@@ -114,3 +114,7 @@ func TestTestnetFees(t *testing.T) {
 func TestTestnetTipCaps(t *testing.T) {
 	mt.TipCaps(t, dex.Testnet)
 }
+
+func TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
+	mt.TestReceiptsHaveEffectiveGasPrice(t)
+}

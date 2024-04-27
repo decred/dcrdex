@@ -208,6 +208,18 @@ z-index: 1000;
   background-color: var(--loader-bg);
 }
 
+#requiredActions {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  z-index: 98;
+
+  & > div {
+    background-color: var(--body-bg);
+    border: 3px solid var(--border-color);
+  }
+}
+
 @include media-breakpoint-up(sm) {
   section {
     margin: 0.5rem;

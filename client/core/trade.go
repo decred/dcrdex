@@ -126,6 +126,10 @@ type matchTracker struct {
 	// authDEX) that the match is not revoked. This should be set on reconnect
 	// for all taker matches in MakerSwapCast. Guarded by exceptionMtx.
 	checkServerRevoke bool
+	// redemptionAbandoned is set to true if the redemption transaction for this
+	// match was rejected by the network. In that case, we'll skip confirmation
+	// checks and rebroadcasts until the user takes action.
+	redemptionAbandoned bool
 }
 
 // matchTime returns the match's match time as a time.Time.
@@ -1439,7 +1443,7 @@ func (t *trackedTrade) checkSwapFeeConfirms(match *matchTracker) bool {
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
 func (t *trackedTrade) checkRedemptionFeeConfirms(match *matchTracker) bool {
-	if match.MetaData.Proof.RedemptionFeeConfirmed {
+	if match.MetaData.Proof.RedemptionFeeConfirmed || match.redemptionAbandoned {
 		return false
 	}
 	_, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapper)
@@ -2972,7 +2976,9 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 		Spends: match.counterSwap,
 		Secret: proof.Secret,
 	}, t.redeemFee())
-	if errors.Is(asset.ErrSwapRefunded, err) {
+	switch {
+	case err == nil:
+	case errors.Is(err, asset.ErrSwapRefunded):
 		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), makeOrderToken(t.token()))
 		note := newMatchNote(TopicSwapRefunded, subject, details, db.ErrorLevel, t, match)
 		t.notify(note)
@@ -2982,7 +2988,18 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 			t.dc.log.Errorf("Failed to update match in db %v", err)
 		}
 		return false, errors.New("swap was already refunded by the counterparty")
-	} else if err != nil {
+
+	case errors.Is(err, asset.ErrTxRejected):
+		var oldID []byte
+		if match.Side == order.Maker {
+			oldID = match.MetaData.Proof.MakerRedeem
+			match.MetaData.Proof.MakerRedeem = nil
+		} else {
+			oldID = match.MetaData.Proof.TakerRedeem
+			match.MetaData.Proof.TakerRedeem = nil
+		}
+		return false, fmt.Errorf("%s transaction %s was rejected. Will try to redeem again", unbip(toWallet.AssetID), coinIDString(toWallet.AssetID, oldID))
+	default:
 		match.delayTicks(time.Minute * 15)
 		return false, fmt.Errorf("error confirming redemption for coin %v. already tried %d times, will retry later: %v",
 			redeemCoinID, match.confirmRedemptionNumTries, err)

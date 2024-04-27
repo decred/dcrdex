@@ -1045,11 +1045,7 @@ export default class WalletsPage extends BasePage {
     const { page: { needsProviderBox: box, needsProviderBttn: bttn } } = this
     Doc.setVis(needs, box)
     if (!needs) return
-    const [r, g, b] = State.isDark() ? [255, 255, 255] : [0, 0, 0]
-    const cycles = 2
-    Doc.animate(1000, (p: number) => {
-      bttn.style.outline = `2px solid rgba(${r}, ${g}, ${b}, ${(cycles - p * cycles) % 1})`
-    })
+    Doc.blink(bttn)
   }
 
   async updateTicketBuyer (assetID: number) {

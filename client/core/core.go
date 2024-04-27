@@ -1553,6 +1553,9 @@ type Core struct {
 	notes chan asset.WalletNotification
 
 	pokesCache *pokesCache
+
+	requestedActionMtx sync.RWMutex
+	requestedActions   map[string]*asset.ActionRequiredNote
 }
 
 // New is the constructor for a new Core.
@@ -1689,7 +1692,8 @@ func New(cfg *Config) (*Core, error) {
 		reFiat:          make(chan struct{}, 1),
 		pendingWallets:  make(map[uint32]bool),
 
-		notes: make(chan asset.WalletNotification, 128),
+		notes:            make(chan asset.WalletNotification, 128),
+		requestedActions: make(map[string]*asset.ActionRequiredNote),
 	}
 
 	c.intl.Store(&locale{
@@ -2550,7 +2554,18 @@ func (c *Core) User() *User {
 		FiatRates:          c.fiatConversions(),
 		Net:                c.net,
 		ExtensionConfig:    c.extensionModeConfig,
+		Actions:            c.requestedActionsList(),
 	}
+}
+
+func (c *Core) requestedActionsList() []*asset.ActionRequiredNote {
+	c.requestedActionMtx.RLock()
+	defer c.requestedActionMtx.RUnlock()
+	actions := make([]*asset.ActionRequiredNote, 0, len(c.requestedActions))
+	for _, a := range c.requestedActions {
+		actions = append(actions, a)
+	}
+	return actions
 }
 
 // CreateWallet creates a new exchange wallet.
@@ -10100,6 +10115,14 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 			c.log.Errorf("Error storing and sending emitted balance: %v", err)
 		}
 		return // Notification sent already.
+	case *asset.ActionRequiredNote:
+		c.requestedActionMtx.Lock()
+		c.requestedActions[n.UniqueID] = n
+		c.requestedActionMtx.Unlock()
+	case *asset.ActionResolvedNote:
+		c.requestedActionMtx.Lock()
+		delete(c.requestedActions, n.UniqueID)
+		c.requestedActionMtx.Unlock()
 	}
 	c.notify(newWalletNote(ni))
 }
@@ -11428,4 +11451,16 @@ func (c *Core) DisableFundsMixer(assetID uint32) error {
 // queried.
 func (c *Core) NetworkFeeRate(assetID uint32) uint64 {
 	return c.feeSuggestionAny(assetID)
+}
+
+func (c *Core) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error {
+	w, err := c.connectedWallet(assetID)
+	if err != nil {
+		return err
+	}
+	goGetter, is := w.Wallet.(asset.ActionTaker)
+	if !is {
+		return fmt.Errorf("wallet for %s cannot handle user actions", w.Symbol)
+	}
+	return goGetter.TakeAction(actionID, actionB)
 }

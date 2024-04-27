@@ -164,13 +164,14 @@ type ExtensionModeConfig struct {
 
 // User is information about the user's wallets and DEX accounts.
 type User struct {
-	Exchanges          map[string]*Exchange       `json:"exchanges"`
-	Initialized        bool                       `json:"inited"`
-	SeedGenerationTime uint64                     `json:"seedgentime"`
-	Assets             map[uint32]*SupportedAsset `json:"assets"`
-	FiatRates          map[uint32]float64         `json:"fiatRates"`
-	Net                dex.Network                `json:"net"`
-	ExtensionConfig    *ExtensionModeConfig       `json:"extensionModeConfig,omitempty"`
+	Exchanges          map[string]*Exchange        `json:"exchanges"`
+	Initialized        bool                        `json:"inited"`
+	SeedGenerationTime uint64                      `json:"seedgentime"`
+	Assets             map[uint32]*SupportedAsset  `json:"assets"`
+	FiatRates          map[uint32]float64          `json:"fiatRates"`
+	Net                dex.Network                 `json:"net"`
+	ExtensionConfig    *ExtensionModeConfig        `json:"extensionModeConfig,omitempty"`
+	Actions            []*asset.ActionRequiredNote `json:"actions,omitempty"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated

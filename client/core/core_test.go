@@ -1363,9 +1363,10 @@ func newTestRig() *testRig {
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 			noteChans:  make(map[uint64]chan Notification),
 
-			fiatRateSources: make(map[string]*commonRateSource),
-			notes:           make(chan asset.WalletNotification, 128),
-			pokesCache:      newPokesCache(pokesCapacity),
+			fiatRateSources:  make(map[string]*commonRateSource),
+			notes:            make(chan asset.WalletNotification, 128),
+			pokesCache:       newPokesCache(pokesCapacity),
+			requestedActions: make(map[string]*asset.ActionRequiredNote),
 		},
 		db:      tdb,
 		queue:   queue,
