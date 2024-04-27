@@ -119,10 +119,9 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "polygon", "alpha", "bor", "bor.ipc")}
 	case dex.Testnet:
 		defaultProviders = []string{
-			"https://rpc.ankr.com/polygon_mumbai",
-			"https://polygon-testnet.public.blastapi.io",
-			"https://polygon-mumbai.blockpi.network/v1/rpc/public",
-			"https://endpoints.omniatech.io/v1/matic/mumbai/public",
+			"https://rpc-amoy.polygon.technology",
+			"wss://polygon-amoy-bor-rpc.publicnode.com",
+			"https://polygon-amoy.blockpi.network/v1/rpc/public",
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{

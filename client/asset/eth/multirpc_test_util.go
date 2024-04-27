@@ -1,4 +1,4 @@
-// //go:build rpclive
+//go:build rpclive
 
 package eth
 

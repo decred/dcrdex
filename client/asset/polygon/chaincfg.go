@@ -28,10 +28,10 @@ var (
 	}
 
 	testnetCompatibilityData = eth.CompatibilityData{
-		Addr:      common.HexToAddress("C26880A0AF2EA0c7E8130e6EC47Af756465452E8"),
-		TokenAddr: common.HexToAddress("0x734aeF51d427b2f745210Ec4BF1062ABd48Eceb6"), // weth
-		TxHash:    common.HexToHash("0xc592ac8975a58bc7ad48381f9a05c07a53a67b2a4448ad821ed7ef2dcd1a878a"),
-		BlockHash: common.HexToHash("0x5a2d26b5bd9d1995c25e211379671bce893befa31cf2a9704ff89f8682b3c6cf"),
+		Addr:      common.HexToAddress("0x248528f5A2C3731fb598E8cc1dc5dB5f997E74BC"),
+		TokenAddr: common.HexToAddress("0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582"), // usdc
+		TxHash:    common.HexToHash("0x4097fc20d8566702f40323f19e351d5e2feb70dc2c99b90ababdb660351b5247"),
+		BlockHash: common.HexToHash("0x813a2898f25530a634fdaff7c3ceda786c934f476e6cd5556c32025ac103a90f"),
 	}
 )
 
@@ -90,7 +90,7 @@ func ChainConfig(net dex.Network) (c *params.ChainConfig, err error) {
 	case dex.Mainnet:
 		return dexpolygon.BorMainnetChainConfig, nil
 	case dex.Testnet:
-		return dexpolygon.MumbaiChainConfig, nil
+		return dexpolygon.AmoyChainConfig, nil
 	case dex.Simnet:
 	default:
 		return c, fmt.Errorf("unknown network %d", net)

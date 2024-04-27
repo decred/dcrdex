@@ -93,22 +93,12 @@ func TestFreeServers(t *testing.T) {
 }
 
 func TestFreeTestnetServers(t *testing.T) {
-	// https://wiki.polygon.technology/docs/pos/reference/rpc-endpoints/
-	// https://www.alchemy.com/chain-connect/chain/mumbai
-	// https://chainlist.org/chain/80001
+	// https://chainlist.org/chain/80002
+	// PASSING 24 April 2024
 	freeServers := []string{
-		// Passing
-		"https://rpc.ankr.com/polygon_mumbai",
-		"https://polygon-testnet.public.blastapi.io",
-		"https://polygon-mumbai.blockpi.network/v1/rpc/public",
-		"https://endpoints.omniatech.io/v1/matic/mumbai/public",
-		// Failing
-		"https://matic-testnet-archive-rpc.bwarelabs.com",                                         // connect error: failed to connect to even a single provider among: bwarelabs.com
-		"https://matic-mumbai.chainstacklabs.com",                                                 // connect error: failed to connect to even a single provider among: chainstacklabs.com
-		"https://g.w.lavanet.xyz:443/gateway/polygon1t/rpc-http/f7ee0000000000000000000000000000", // "TransactionReceipt" error: not found
-		"https://rpc-mumbai.maticvigil.com",                                                       // connect error: failed to connect to even a single provider among: maticvigil.com
-		"wss://polygon-mumbai-bor-rpc.publicnode.com",                                             // "TransactionReceipt" error: not found
-		"https://polygon-mumbai-pokt.nodies.app",                                                  // "TransactionReceipt" error: not found
+		"https://rpc-amoy.polygon.technology",
+		"wss://polygon-amoy-bor-rpc.publicnode.com",
+		"https://polygon-amoy.blockpi.network/v1/rpc/public",
 	}
 	mt.TestFreeServers(t, freeServers, dex.Testnet)
 }
