@@ -285,10 +285,10 @@ func TestFeeRate(t *testing.T) {
 		suggGasTipCap: new(big.Int),
 		wantFee:       0,
 	}, {
-		name:          "ok rounded down",
+		name:          "ok rounded up",
 		hdrBaseFee:    big.NewInt(dexeth.GweiFactor - 1),
 		suggGasTipCap: new(big.Int),
-		wantFee:       1,
+		wantFee:       2,
 	}, {
 		name:          "ok 100, 2",
 		hdrBaseFee:    big.NewInt(dexeth.GweiFactor * 100),

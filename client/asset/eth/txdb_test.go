@@ -18,7 +18,7 @@ func TestTxDB(t *testing.T) {
 
 	// Grab these for the tx generation utilities
 	_, eth, node, shutdown := tassetWallet(BipID)
-	defer shutdown()
+	shutdown()
 
 	txHistoryStore := newBadgerTxDB(tempDir, tLogger)
 

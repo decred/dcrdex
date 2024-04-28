@@ -520,7 +520,7 @@ func (eth *baseBackend) FeeRate(ctx context.Context) (uint64, error) {
 		suggestedGasTipCap,
 		new(big.Int).Mul(hdr.BaseFee, big.NewInt(2)))
 
-	feeRateGwei, err := dexeth.WeiToGweiUint64(feeRate)
+	feeRateGwei, err := dexeth.WeiToGweiSafe(feeRate)
 	if err != nil {
 		return 0, fmt.Errorf("failed to convert wei to gwei: %w", err)
 	}

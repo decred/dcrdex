@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -1077,8 +1076,6 @@ func (m *multiRPCClient) withAll(
 		if discarded {
 			atLeastOne = true
 		} else {
-			errs = append(errs, err)
-			debug.PrintStack()
 			m.log.Warnf("Failed request from %q: %v", p, err)
 		}
 	}
@@ -1561,7 +1558,7 @@ func newCompatibilityTests(cb bind.ContractBackend, compat *CompatibilityData, l
 				if err != nil {
 					return err
 				}
-				log.Debugf("#### Retrieved tip cap: %d gwei", dexeth.WeiToGwei(tipCap))
+				log.Debugf("#### Retrieved tip cap: %d gwei", dexeth.WeiToGweiCeil(tipCap))
 				return nil
 			},
 		},
@@ -1572,7 +1569,7 @@ func newCompatibilityTests(cb bind.ContractBackend, compat *CompatibilityData, l
 				if err != nil {
 					return err
 				}
-				log.Debugf("#### Balance retrieved: %.9f", float64(dexeth.WeiToGwei(bal))/1e9)
+				log.Debugf("#### Balance retrieved: %.9f", float64(dexeth.WeiToGweiCeil(bal))/1e9)
 				return nil
 			},
 		},

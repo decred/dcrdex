@@ -305,7 +305,7 @@ func (c *baseCoin) String() string {
 // FeeRate returns the gas rate, in gwei/gas. It is set in initialization of
 // the swapCoin.
 func (c *baseCoin) FeeRate() uint64 {
-	return dexeth.WeiToGwei(c.gasFeeCap)
+	return dexeth.WeiToGweiCeil(c.gasFeeCap)
 }
 
 // Value returns the value of one swap in order to validate during processing.

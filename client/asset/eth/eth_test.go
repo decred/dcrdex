@@ -2389,6 +2389,7 @@ func TestPreSwap(t *testing.T) {
 	}
 
 	runTest := func(t *testing.T, test testData) {
+		fmt.Printf("--\n\n%s\n\n", test.name)
 		var assetID uint32 = BipID
 		assetCfg := tETH
 		if test.token {
@@ -4761,7 +4762,7 @@ func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
 	if assetID == BipID {
 		node.bal = dexeth.GweiToWei(11e9)
 		canSend := new(big.Int).Sub(node.bal, dexeth.GweiToWei(fee))
-		canSendGwei, err := dexeth.WeiToGweiUint64(canSend)
+		canSendGwei, err := dexeth.WeiToGweiSafe(canSend)
 		if err != nil {
 			t.Fatalf("error converting canSend to gwei: %v", err)
 		}
@@ -4932,25 +4933,35 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node := &testNode{}
-	bw := &baseWallet{
-		node:          node,
-		finalizeConfs: txConfsNeededToConfirm,
-	}
-	coinID, secretHA, secretHB := encode.RandomBytes(32), encode.RandomBytes(32), encode.RandomBytes(32)
+	_, bw, node, shutdown := tassetWallet(BipID)
+	defer shutdown()
+
+	secretHA, secretHB := encode.RandomBytes(32), encode.RandomBytes(32)
 	contractDataFn := func(ver uint32, secretH []byte) []byte {
 		s := [32]byte{}
 		copy(s[:], secretH)
 		return dexeth.EncodeContractData(ver, s)
 	}
-	rcpt := &types.Receipt{
-		GasUsed: 100,
-	}
-	hdr := &types.Header{
+	const tip = 100
+	const feeRate = 2 // gwei / gas
+	const gasUsed = 100
+	const fees = feeRate * gasUsed
+
+	bw.currentTip = &types.Header{
 		BaseFee: dexeth.GweiToWei(2),
-		Number:  big.NewInt(1),
+		Number:  big.NewInt(tip),
 	}
-	hdrConfirms := &types.Header{Number: big.NewInt(11)}
+
+	confirmedReceipt := &types.Receipt{
+		GasUsed:           gasUsed,
+		EffectiveGasPrice: dexeth.GweiToWei(feeRate),
+		BlockNumber:       big.NewInt(tip - txConfsNeededToConfirm + 1),
+	}
+
+	unconfirmedReceipt := &types.Receipt{
+		BlockNumber: big.NewInt(tip - txConfsNeededToConfirm + 2),
+	}
+
 	initFn := func(secretHs [][]byte) []byte {
 		inits := make([]*dexeth.Initiation, 0, len(secretHs))
 		for i := range secretHs {
@@ -4992,115 +5003,100 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		sort.Slice(ab, func(i, j int) bool { return bytes.Compare(ab[i], ab[j]) < 0 })
 		return ab
 	}
+	initTx := tTx(200, 2, 0, nil, initFn(abFn()), 200)
+	redeemTx := tTx(200, 3, 0, nil, redeemFn(abFn()), 200)
 	tests := []struct {
-		name                   string
-		coinID, contractData   []byte
-		isInit, wantErr        bool
-		receipt                *types.Receipt
-		receiptTx              *types.Transaction
-		receiptErr, bestHdrErr error
-		hdrByHash, bestHdr     *types.Header
-		wantSecrets            [][]byte
-		wantEstimatedFee       uint64
-		wantFee                uint64
+		name            string
+		contractData    []byte
+		isInit, wantErr bool
+		receipt         *types.Receipt
+		receiptTx       *types.Transaction
+		receiptErr      error
+		wantSecrets     [][]byte
+		pendingTx       *types.Transaction
+		pendingTxBlock  uint64
 	}{{
-		name:             "ok init",
-		coinID:           coinID,
-		contractData:     contractDataFn(0, secretHA),
-		isInit:           true,
-		receipt:          rcpt,
-		receiptTx:        tTx(200, 2, 0, nil, initFn(abFn()), 200),
-		hdrByHash:        hdr,
-		bestHdr:          hdrConfirms,
-		wantSecrets:      sortedFn(),
-		wantEstimatedFee: 200 * 200,
-		wantFee:          400,
+		name:         "ok init",
+		contractData: contractDataFn(0, secretHA),
+		isInit:       true,
+		receipt:      confirmedReceipt,
+		receiptTx:    initTx,
+		wantSecrets:  sortedFn(),
 	}, {
-		name:             "ok redeem",
-		coinID:           coinID,
-		contractData:     contractDataFn(0, secretHB),
-		receipt:          rcpt,
-		receiptTx:        tTx(200, 3, 0, nil, redeemFn(abFn()), 200),
-		hdrByHash:        hdr,
-		bestHdr:          hdrConfirms,
-		wantSecrets:      sortedFn(),
-		wantEstimatedFee: 200 * 200,
-		wantFee:          500,
+		name:         "ok redeem",
+		contractData: contractDataFn(0, secretHB),
+		receipt:      confirmedReceipt,
+		receiptTx:    redeemTx,
+		wantSecrets:  sortedFn(),
+	}, {
+		name:           "ok init from pending txs",
+		contractData:   contractDataFn(0, secretHA),
+		isInit:         true,
+		pendingTx:      initTx,
+		pendingTxBlock: confirmedReceipt.BlockNumber.Uint64(),
+		wantSecrets:    sortedFn(),
+	}, {
+		name:           "ok redeem from pending txs",
+		contractData:   contractDataFn(0, secretHB),
+		pendingTx:      redeemTx,
+		pendingTxBlock: confirmedReceipt.BlockNumber.Uint64(),
+		wantSecrets:    sortedFn(),
 	}, {
 		name:         "bad contract data",
-		coinID:       coinID,
 		contractData: nil,
 		wantErr:      true,
 	}, {
 		name:         "receipt error",
-		coinID:       coinID,
 		contractData: contractDataFn(0, secretHA),
 		receiptErr:   errors.New("test error"),
 		wantErr:      true,
 	}, {
-		name:         "nil header",
-		coinID:       coinID,
-		contractData: contractDataFn(0, secretHA),
-		receipt:      rcpt,
-		receiptTx:    tTx(200, 2, 0, nil, initFn(abFn()), 200),
-		bestHdr:      hdrConfirms,
-		wantErr:      true,
-	}, {
-		name:         "best header error",
-		coinID:       coinID,
-		contractData: contractDataFn(0, secretHA),
-		receipt:      rcpt,
-		hdrByHash:    hdr,
-		bestHdrErr:   errors.New("test error"),
-		wantErr:      true,
-	}, {
 		name:         "not enough confirms",
-		coinID:       coinID,
 		contractData: contractDataFn(0, secretHA),
-		receipt:      rcpt,
-		hdrByHash:    hdr,
-		bestHdr:      hdr,
+		receipt:      unconfirmedReceipt,
 		wantErr:      true,
+	}, {
+		name:           "not enough confs, pending tx",
+		contractData:   contractDataFn(0, secretHA),
+		isInit:         true,
+		pendingTx:      initTx,
+		pendingTxBlock: confirmedReceipt.BlockNumber.Uint64() + 1,
+		wantSecrets:    sortedFn(),
+		wantErr:        true,
 	}, {
 		name:         "bad init data",
-		coinID:       coinID,
 		contractData: contractDataFn(0, secretHA),
 		isInit:       true,
-		receipt:      rcpt,
+		receipt:      confirmedReceipt,
 		receiptTx:    tTx(200, 2, 0, nil, nil, 200),
-		hdrByHash:    hdr,
-		bestHdr:      hdrConfirms,
 		wantErr:      true,
 	}, {
 		name:         "bad redeem data",
-		coinID:       coinID,
 		contractData: contractDataFn(0, secretHA),
-		receipt:      rcpt,
+		receipt:      confirmedReceipt,
 		receiptTx:    tTx(200, 2, 0, nil, nil, 200),
-		hdrByHash:    hdr,
-		bestHdr:      hdrConfirms,
 		wantErr:      true,
 	}, {
 		name:         "secret hash not found",
-		coinID:       coinID,
 		contractData: contractDataFn(0, secretHB),
 		isInit:       true,
-		receipt:      rcpt,
+		receipt:      confirmedReceipt,
 		receiptTx:    tTx(200, 2, 0, nil, initFn([][]byte{secretHA}), 200),
-		hdrByHash:    hdr,
-		bestHdr:      hdrConfirms,
 		wantErr:      true,
 	}}
 	for _, test := range tests {
 		var txHash common.Hash
-		copy(txHash[:], test.coinID)
+		if test.pendingTx != nil {
+			wt := bw.extendedTx(test.pendingTx, asset.Unknown, 1)
+			wt.BlockNumber = test.pendingTxBlock
+			wt.Fees = fees
+			bw.pendingTxs = []*extendedWalletTx{wt}
+			txHash = test.pendingTx.Hash()
+		}
 		node.receiptTx = test.receiptTx
 		node.receipt = test.receipt
 		node.receiptErr = test.receiptErr
-		node.hdrByHash = test.hdrByHash
-		node.bestHdr = test.bestHdr
-		node.bestHdrErr = test.bestHdrErr
-		fee, secretHs, err := bw.swapOrRedemptionFeesPaid(ctx, test.coinID, test.contractData, test.isInit)
+		feesPaid, secretHs, err := bw.swapOrRedemptionFeesPaid(ctx, txHash[:], test.contractData, test.isInit)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%q: expected error", test.name)
@@ -5110,8 +5106,8 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%q: unexpected error: %v", test.name, err)
 		}
-		if test.wantFee != fee {
-			t.Fatalf("%q: wanted fee %d but got %d", test.name, test.wantFee, fee)
+		if feesPaid != fees {
+			t.Fatalf("%q: wanted fee %d but got %d", test.name, fees, feesPaid)
 		}
 		if len(test.wantSecrets) != len(secretHs) {
 			t.Fatalf("%q: wanted %d secrets but got %d", test.name, len(test.wantSecrets), len(secretHs))

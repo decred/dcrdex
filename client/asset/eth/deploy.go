@@ -368,7 +368,7 @@ func (contractDeployer) nodeAndRate(
 		return nil, 0, fmt.Errorf("Error estimating fee rate: %v", err)
 	}
 
-	feeRate := dexeth.WeiToGwei(new(big.Int).Add(tip, new(big.Int).Mul(base, big.NewInt(2))))
+	feeRate := dexeth.WeiToGweiCeil(new(big.Int).Add(tip, new(big.Int).Mul(base, big.NewInt(2))))
 	return cl, feeRate, nil
 }
 

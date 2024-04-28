@@ -226,11 +226,23 @@ const (
 	// not yet been mined. There is no guarantee that the swap will be mined
 	// in the future.
 	ErrSwapNotInitiated = dex.ErrorKind("swap not yet initiated")
-	CoinNotFoundError   = dex.ErrorKind("coin not found")
-	ErrRequestTimeout   = dex.ErrorKind("request timeout")
-	ErrConnectionDown   = dex.ErrorKind("wallet not connected")
-	ErrNotImplemented   = dex.ErrorKind("not implemented")
-	ErrUnsupported      = dex.ErrorKind("unsupported")
+
+	CoinNotFoundError = dex.ErrorKind("coin not found")
+	// ErrTxRejected is returned when a transaction was rejected. This
+	// generally would indicate either an internal wallet error, or potentially
+	// a user using multiple instances of the wallet simultaneously. As such
+	// it may or may not be advisable to try the tx again without seeking
+	// further investigation.
+	ErrTxRejected = dex.ErrorKind("transaction was rejected")
+	// ErrTxLost is returned when the tx is irreparably lost, as would be the
+	// case if it's inputs were spent by another tx first or if it is not the
+	// accepted tx for a given nonce. These txs have incurred no fee losses, so
+	// the caller should feel free to re-issue the tx.
+	ErrTxLost         = dex.ErrorKind("tx lost")
+	ErrRequestTimeout = dex.ErrorKind("request timeout")
+	ErrConnectionDown = dex.ErrorKind("wallet not connected")
+	ErrNotImplemented = dex.ErrorKind("not implemented")
+	ErrUnsupported    = dex.ErrorKind("unsupported")
 	// ErrSwapRefunded is returned from ConfirmRedemption when the swap has
 	// been refunded before the user could redeem.
 	ErrSwapRefunded = dex.ErrorKind("swap refunded")
@@ -249,8 +261,6 @@ const (
 	// ErrUnapprovedToken is returned when trying to fund an order using a token
 	// that has not been approved.
 	ErrUnapprovedToken = dex.ErrorKind("token not approved")
-	// ErrTxRejected is returned when a transaction was rejected.
-	ErrTxRejected = dex.ErrorKind("transaction was rejected")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
