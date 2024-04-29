@@ -82,6 +82,8 @@ var (
 		SwapConf:     1,
 	}
 
+	signer = types.LatestSigner(params.AllEthashProtocolChanges)
+
 	// simBackend = backends.NewSimulatedBackend(core.GenesisAlloc{
 	// 	testAddressA: core.GenesisAccount{Balance: dexeth.GweiToWei(5e10)},
 	// }, 1e9)
@@ -146,13 +148,13 @@ func newBalance(current, in, out uint64) *Balance {
 }
 
 func (n *testNode) newTransaction(nonce uint64, value *big.Int) *types.Transaction {
-	signer := types.LatestSignerForChainID(n.chainConfig().ChainID)
 	to := common.BytesToAddress(encode.RandomBytes(20))
 	tx, err := types.SignTx(types.NewTx(&types.DynamicFeeTx{
-		Nonce: nonce,
-		Value: value,
-		Gas:   50_000,
-		To:    &to,
+		Nonce:   nonce,
+		Value:   value,
+		Gas:     50_000,
+		To:      &to,
+		ChainID: n.chainConfig().ChainID,
 	}), signer, n.privKey)
 	if err != nil {
 		panic("tx signing error")
@@ -833,12 +835,13 @@ func TestTakeAction(t *testing.T) {
 
 	feeCap := new(big.Int).Mul(aGwei, big.NewInt(5))
 	tipCap := new(big.Int).Mul(aGwei, big.NewInt(2))
-	replacementTx := types.NewTx(&types.DynamicFeeTx{
+	replacementTx, _ := types.SignTx(types.NewTx(&types.DynamicFeeTx{
 		Nonce:     1,
 		GasTipCap: tipCap,
 		GasFeeCap: feeCap,
 		Gas:       50_000,
-	})
+		ChainID:   node.chainConfig().ChainID,
+	}), signer, node.privKey)
 	node.sendTxTx = replacementTx
 
 	tooCheapAction := []byte(fmt.Sprintf(`{"txID":"%s","bump":true}`, pendingTx.ID))
@@ -2389,7 +2392,6 @@ func TestPreSwap(t *testing.T) {
 	}
 
 	runTest := func(t *testing.T, test testData) {
-		fmt.Printf("--\n\n%s\n\n", test.name)
 		var assetID uint32 = BipID
 		assetCfg := tETH
 		if test.token {

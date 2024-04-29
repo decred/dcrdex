@@ -10120,9 +10120,7 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 		c.requestedActions[n.UniqueID] = n
 		c.requestedActionMtx.Unlock()
 	case *asset.ActionResolvedNote:
-		c.requestedActionMtx.Lock()
-		delete(c.requestedActions, n.UniqueID)
-		c.requestedActionMtx.Unlock()
+		c.deleteRequestedAction(n.UniqueID)
 	}
 	c.notify(newWalletNote(ni))
 }
@@ -11453,7 +11451,87 @@ func (c *Core) NetworkFeeRate(assetID uint32) uint64 {
 	return c.feeSuggestionAny(assetID)
 }
 
-func (c *Core) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error {
+func (c *Core) deleteRequestedAction(uniqueID string) {
+	c.requestedActionMtx.Lock()
+	delete(c.requestedActions, uniqueID)
+	c.requestedActionMtx.Unlock()
+}
+
+// handleRetryRedemptionAction handles a response to a user response to an
+// ActionRequiredNote for a rejected redemption transaction.
+func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
+	var req struct {
+		OrderID dex.Bytes `json:"orderID"`
+		CoinID  dex.Bytes `json:"coinID"`
+		Retry   bool      `json:"retry"`
+	}
+	if err := json.Unmarshal(actionB, &req); err != nil {
+		return fmt.Errorf("error decoding request: %w", err)
+	}
+	c.deleteRequestedAction(req.CoinID.String())
+
+	if !req.Retry {
+		// Do nothing
+		return nil
+	}
+	var oid order.OrderID
+	copy(oid[:], req.OrderID)
+	var tracker *trackedTrade
+	for _, dc := range c.dexConnections() {
+		tracker, _, _ = dc.findOrder(oid)
+		if tracker != nil {
+			break
+		}
+	}
+	if tracker == nil {
+		return fmt.Errorf("order %s not known", oid)
+	}
+	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
+	for _, match := range tracker.matches {
+		coinID := match.MetaData.Proof.TakerRedeem
+		if bytes.Equal(coinID, req.CoinID) {
+			if match.Side == order.Taker && match.Status == order.MatchComplete {
+				// Try to redeem again.
+				match.redemptionRejected = false
+				match.MetaData.Proof.TakerRedeem = nil
+				match.Status = order.MakerRedeemed
+				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+					c.log.Errorf("Failed to update match in DB: %v", err)
+				}
+			} else {
+				c.log.Errorf("Redemption retry attempted for order side %s status %s", match.Side, match.Status)
+			}
+		}
+	}
+	return nil
+}
+
+// handleCoreAction checks if the actionID is a known core action, and if so
+// attempts to take the action requested.
+func (c *Core) handleCoreAction(actionID string, actionB json.RawMessage) ( /* handled */ bool, error) {
+	switch actionID {
+	case ActionIDRedeemRejected:
+		return true, c.handleRetryRedemptionAction(actionB)
+	}
+	return false, nil
+}
+
+// TakeAction is called in response to a ActionRequiredNote. The note may have
+// come from core or from a wallet.
+func (c *Core) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) (err error) {
+	defer func() {
+		if err != nil {
+			c.log.Errorf("Error while attempting user action %q with parameters %q, asset ID %d: %v",
+				actionID, string(actionB), assetID, err)
+		} else {
+			c.log.Infof("User completed action %q with parameters %q, asset ID %d",
+				actionID, string(actionB), assetID)
+		}
+	}()
+	if handled, err := c.handleCoreAction(actionID, actionB); handled {
+		return err
+	}
 	w, err := c.connectedWallet(assetID)
 	if err != nil {
 		return err

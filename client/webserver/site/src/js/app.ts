@@ -51,7 +51,9 @@ import {
   PageElement,
   ActionRequiredNote,
   ActionResolvedNote,
-  TransactionActionNote
+  TransactionActionNote,
+  CoreActionRequiredNote,
+  RejectedRedemptionData
 } from './registry'
 import { setCoinHref } from './coinexplorers'
 
@@ -538,7 +540,9 @@ export default class Application {
         actionID: req.actionID,
         selected: false
       }
-      page.actionDialogCount.textContent = String(Object.keys(requiredActions).length)
+      const n = Object.keys(requiredActions).length
+      page.actionDialogCount.textContent = String(n)
+      page.actionCount.textContent = String(n)
       if (Doc.isHidden(page.actionDialog) && Doc.isHidden(page.actionDialogCollapsed)) {
         this.showRequestedAction(req.uniqueID)
       }
@@ -561,12 +565,13 @@ export default class Application {
     delete requiredActions[uniqueID]
     const rem = Object.keys(requiredActions).length
     existingAction.div.remove()
-    if (existingAction.selected && rem > 0) {
-      this.showOldestAction()
+    if (rem === 0) {
+      Doc.hide(page.actionDialog, page.actionDialogCollapsed)
       return
     }
-    if (rem === 0) Doc.hide(page.actionDialog, page.actionDialogCollapsed)
-    else page.actionDialogCount.textContent = String(rem)
+    page.actionDialogCount.textContent = String(rem)
+    page.actionCount.textContent = String(rem)
+    if (existingAction.selected) this.showOldestAction()
   }
 
   actionForm (req: ActionRequiredNote) {
@@ -577,6 +582,8 @@ export default class Application {
         return this.lostTxAction(req)
       case 'lostNonce':
         return this.lostNonceAction(req)
+      case 'redeemRejected':
+        return this.redeemRejectedAction(req)
     }
     throw Error('unknown required action ID ' + req.actionID)
   }
@@ -685,6 +692,24 @@ export default class Application {
         return
       }
       this.submitAction(req, { txID: n.tx.id, abandon: false, replacementID }, tmpl.errMsg)
+    })
+    return div
+  }
+
+  redeemRejectedAction (req: ActionRequiredNote) {
+    const { orderID, coinID, coinFmt, assetID } = req.payload as RejectedRedemptionData
+    const div = this.page.rejectedRedemptionTmpl.cloneNode(true) as PageElement
+    const tmpl = Doc.parseTemplate(div)
+    const { name, token } = this.assets[assetID]
+    tmpl.assetName.textContent = name
+    tmpl.txid.textContent = coinFmt
+    tmpl.txid.dataset.explorerCoin = coinID
+    setCoinHref(token ? token.parentID : assetID, tmpl.txid)
+    Doc.bind(tmpl.doNothingBttn, 'click', () => {
+      this.submitAction(req, { orderID, coinID, retry: false }, tmpl.errMsg)
+    })
+    Doc.bind(tmpl.tryAgainBttn, 'click', () => {
+      this.submitAction(req, { orderID, coinID, retry: true }, tmpl.errMsg)
     })
     return div
   }
@@ -1010,6 +1035,11 @@ export default class Application {
       }
       case 'fiatrateupdate': {
         this.fiatRatesMap = (note as RateNote).fiatRates
+        break
+      }
+      case 'actionrequired': {
+        const n = note as CoreActionRequiredNote
+        this.addAction(n.payload)
         break
       }
       case 'walletnote': {

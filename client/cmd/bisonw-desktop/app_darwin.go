@@ -152,7 +152,7 @@ func mainCore() error {
 
 	// Return early if unsupported flags are provided.
 	if cfg.Webview != "" {
-		return errors.New("--webview flag is not supported. Other OS use it for a specific reason (to support multiple windows)")
+		return errors.New("the --webview flag is not supported. Other OS use it for a specific reason (to support multiple windows)")
 	}
 
 	// The --kill flag is a backup measure to end a background process (that

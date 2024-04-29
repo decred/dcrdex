@@ -9084,6 +9084,20 @@ func TestConfirmRedemption(t *testing.T) {
 			expectConfirmRedemptionCalled: true,
 		},
 		{
+			name:                 "taker, takerRedeemed, redemption tx rejected error",
+			matchStatus:          order.MatchComplete,
+			matchSide:            order.Taker,
+			confirmRedemptionErr: asset.ErrTxRejected,
+			expectedStatus:       order.MatchComplete,
+			expectedNotifications: []*note{
+				{
+					severity: db.Data,
+					topic:    TopicRedeemRejected,
+				},
+			},
+			expectConfirmRedemptionCalled: true,
+		},
+		{
 			name:                          "maker, matchConfirmed",
 			matchStatus:                   order.MatchConfirmed,
 			matchSide:                     order.Maker,
@@ -9100,7 +9114,7 @@ func TestConfirmRedemption(t *testing.T) {
 			expectConfirmRedemptionCalled: false,
 		},
 		{
-			name:                          "taler, TakerSwapCast",
+			name:                          "taker, TakerSwapCast",
 			matchStatus:                   order.TakerSwapCast,
 			matchSide:                     order.Taker,
 			expectedStatus:                order.TakerSwapCast,
@@ -9128,31 +9142,22 @@ func TestConfirmRedemption(t *testing.T) {
 		}
 
 		for _, expectedNotification := range test.expectedNotifications {
-			var note *Notification
+			var n Notification
+		out:
 			for {
 				select {
-				case n := <-notificationFeed.C:
-					if n.Topic() == TopicRedemptionConfirmed ||
-						n.Topic() == TopicRedemptionResubmitted ||
-						n.Topic() == TopicSwapRefunded ||
-						n.Topic() == TopicConfirms {
-						note = &n
+				case n = <-notificationFeed.C:
+					if n.Topic() == expectedNotification.topic {
+						break out
 					}
 				case <-time.After(60 * time.Second):
 					t.Fatalf("%s: did not receive expected notification", test.name)
 				}
-				if note != nil {
-					break
-				}
 			}
 
-			if (*note).Severity() != expectedNotification.severity {
+			if n.Severity() != expectedNotification.severity {
 				t.Fatalf("%s: expected severity %v, got %v",
-					test.name, expectedNotification.severity, (*note).Severity())
-			}
-			if (*note).Topic() != expectedNotification.topic {
-				t.Fatalf("%s:, expected topic %v, got %v",
-					test.name, expectedNotification.topic, (*note).Topic())
+					test.name, expectedNotification.severity, n.Severity())
 			}
 		}
 
@@ -11121,5 +11126,77 @@ func TestPokesCachePokes(t *testing.T) {
 				t.Errorf("Expected poke %v at index %d, got %v", poke, i, pokes[i])
 			}
 		}
+	}
+}
+
+func TestTakeAction(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+
+	coinID := encode.RandomBytes(32)
+	uniqueID := dex.Bytes(coinID).String()
+
+	newMatch := func() *matchTracker {
+		var matchID order.MatchID
+		copy(matchID[:], encode.RandomBytes(32))
+		return &matchTracker{
+			MetaMatch: db.MetaMatch{
+				UserMatch: &order.UserMatch{
+					Status:  order.MatchComplete,
+					MatchID: matchID,
+					Side:    order.Taker,
+				},
+				MetaData: &db.MatchMetaData{},
+			},
+		}
+	}
+	rightMatch := newMatch()
+	rightMatch.MetaData.Proof.TakerRedeem = coinID
+	rightMatch.redemptionRejected = true
+
+	wrongMatch := newMatch()
+	wrongMatch.MetaData.Proof.TakerRedeem = encode.RandomBytes(31)
+
+	tracker := &trackedTrade{
+		matches: map[order.MatchID]*matchTracker{
+			rightMatch.MatchID: rightMatch,
+			wrongMatch.MatchID: wrongMatch,
+		},
+	}
+
+	var oid order.OrderID
+	copy(oid[:], encode.RandomBytes(32))
+
+	rig.dc.trades[oid] = tracker
+
+	requestData := []byte(fmt.Sprintf(`{"orderID":"abcd","coinID":"%s","retry":true}`, dex.Bytes(coinID)))
+
+	err := rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
+	if err == nil {
+		t.Fatalf("expected error for wrong order ID but got nothing")
+	}
+
+	rig.core.requestedActions[uniqueID] = nil
+	requestData = []byte(fmt.Sprintf(`{"orderID":"%s","coinID":"%s","retry":false}`, oid, dex.Bytes(coinID)))
+
+	err = rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
+	if err != nil {
+		t.Fatalf("error for retry=false: %v", err)
+	}
+	if len(rig.core.requestedActions) != 0 {
+		t.Fatal("requested action not removed")
+	}
+
+	requestData = []byte(fmt.Sprintf(`{"orderID":"%s","coinID":"%s","retry":true}`, oid, dex.Bytes(coinID)))
+	err = rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
+	if err != nil {
+		t.Fatalf("error for retry=true: %v", err)
+	}
+
+	if len(rightMatch.MetaData.Proof.TakerRedeem) != 0 {
+		t.Fatalf("taker redemption not cleared")
+	}
+	if len(wrongMatch.MetaData.Proof.TakerRedeem) == 0 {
+		t.Fatalf("wrong taker redemption cleared")
 	}
 }

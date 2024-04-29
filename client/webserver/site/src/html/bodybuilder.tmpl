@@ -222,10 +222,32 @@
         <div data-tmpl="errMsg" class="p-2 errcolor d-hide"></div>
       </div>
 
+      <div id="rejectedRedemptionTmpl" class="flex-stretch-column mt-2">
+        <div class="text-justify">
+          A <span data-tmpl="assetName"></span> trade redemption was rejected
+          by the network. Network transaction fees were incurred. You
+          can try to redeem again, but it will likely incur more fees and
+          it may be rejected again.
+        </div>
+        <a data-tmpl="txid" class="d-block fs12 mono break-all border p-2 mt-2"></a>
+        <div class="d-flex align-items-stretch mt-3">
+          <button data-tmpl="doNothingBttn" class="flex-grow-1 me-2">Do Nothing</button>
+          <button data-tmpl="tryAgainBttn" class="flex-grow-1 ms-2">Try Again</button>
+        </div>
+        <div class="flex-center fs14 mt-2">
+          <a href="https://docs.decred.org/getting-started/joining-matrix-channels/" target="_blank">
+            Find technical support
+          </a>
+        </div>
+        <div data-tmpl="errMsg" class="p-2 errcolor mt-2 d-hide"></div>
+      </div>
+
     </div>
     <div id="actionsNavigator" class="flex-center mt-2 lh1 fs16 user-select-none">
       <span id="prevAction" class="p-1 ico-arrowback pointer hoverbg"></span>
       <span id="currentAction" class="mx-1"></span>
+      <span>/</span>
+      <span id="actionCount" class="mx-1"></span>
       <span id="nextAction" class="p-1 ico-arrowright pointer hoverbg"></span>
     </div>
   </div>

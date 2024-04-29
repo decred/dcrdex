@@ -1089,8 +1089,8 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 		et := w.extendedTx(tx, txType, amt)
 		w.pendingTxs = append(w.pendingTxs, et)
 		w.emitTransactionNote(et.WalletTransaction, true)
-		w.log.Tracef("Transaction generated. New best nonce is %s", n)
 		w.nextNonce = new(big.Int).Add(big.NewInt(1), n)
+		w.log.Tracef("Transaction generated. New best nonce is %s", w.nextNonce)
 	}
 	return err
 }
@@ -3299,7 +3299,7 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, c
 	if tip >= swapData.BlockHeight {
 		confs = uint32(hdr.Number.Uint64() - swapData.BlockHeight + 1)
 	} else {
-		w.log.Debug("Swap tx's block height %d is higher than best block %d", swapData.BlockHeight, tip)
+		w.log.Debugf("Swap tx's block height %d is higher than best block %d", swapData.BlockHeight, tip)
 	}
 	return
 }
@@ -3753,8 +3753,13 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 
 	// If we have local information, use that.
 	if found, s := w.localTxStatus(txHash); found {
-		if s.assumedLost || len(s.replacementID) > 0 {
-			return nil, asset.ErrTxLost
+		if s.assumedLost || len(s.nonceReplacement) > 0 {
+			if s.nonceReplacement == s.feeReplacement {
+				// Tell core to update it's coin ID.
+				txHash = common.HexToHash(s.feeReplacement)
+			} else {
+				return nil, asset.ErrTxLost
+			}
 		}
 		if s.receipt != nil && s.receipt.Status != types.ReceiptStatusSuccessful {
 			return nil, asset.ErrTxRejected
@@ -3831,7 +3836,9 @@ func (w *baseWallet) withLocalTxRead(txHash common.Hash, f func(*extendedWalletT
 		return true
 	}
 	// Could be finalized and in the database.
-	if confirmedTx, _ := w.txDB.getTx(txHash); confirmedTx != nil {
+	if confirmedTx, err := w.txDB.getTx(txHash); err != nil {
+		w.log.Errorf("Error getting DB transaction: %v", err)
+	} else if confirmedTx != nil {
 		if !confirmedTx.Confirmed && confirmedTx.Receipt == nil && !confirmedTx.AssumedLost && confirmedTx.NonceReplacement == "" {
 			// If it's in the db but not in pendingTxs, and we know nothing
 			// about the tx, don't use it.
@@ -3845,11 +3852,12 @@ func (w *baseWallet) withLocalTxRead(txHash common.Hash, f func(*extendedWalletT
 
 // walletTxStatus is data copied from an extendedWalletTx.
 type walletTxStatus struct {
-	confirmed     bool
-	blockNum      uint64
-	replacementID string
-	receipt       *types.Receipt
-	assumedLost   bool
+	confirmed        bool
+	blockNum         uint64
+	nonceReplacement string
+	feeReplacement   string
+	receipt          *types.Receipt
+	assumedLost      bool
 }
 
 // localTxStatus looks for an extendedWalletTx and copies critical values to
@@ -3857,11 +3865,11 @@ type walletTxStatus struct {
 func (w *baseWallet) localTxStatus(txHash common.Hash) (_ bool, s *walletTxStatus) {
 	return w.withLocalTxRead(txHash, func(wt *extendedWalletTx) {
 		s = &walletTxStatus{
-			confirmed:     wt.Confirmed,
-			blockNum:      wt.BlockNumber,
-			replacementID: wt.NonceReplacement,
-			receipt:       wt.Receipt,
-			assumedLost:   wt.AssumedLost,
+			confirmed:        wt.Confirmed,
+			blockNum:         wt.BlockNumber,
+			nonceReplacement: wt.NonceReplacement,
+			receipt:          wt.Receipt,
+			assumedLost:      wt.AssumedLost,
 		}
 	}), s
 }
@@ -4306,6 +4314,10 @@ func (w *assetWallet) estimateTransferGas(val uint64) (gas uint64, err error) {
 	})
 }
 
+// Can uncomment here and in redeem to test rejected redemption
+// reauthorization.
+// var firstRedemptionBorked atomic.Bool
+
 // redeem redeems a swap contract. Any on-chain failure, such as this secret not
 // matching the hash, will not cause this to error.
 func (w *assetWallet) redeem(
@@ -4321,6 +4333,10 @@ func (w *assetWallet) redeem(
 		for _, r := range redemptions {
 			amt += r.Spends.Coin.Value()
 		}
+		// Uncomment here and above to test rejected redemption reauthorization.
+		// if firstRedemptionBorked.CompareAndSwap(false, true) {
+		// 	gasLimit /= 4
+		// }
 		txOpts, err := w.node.txOpts(ctx, 0, gasLimit, dexeth.GweiToWei(maxFeeRate), nonce)
 		if err != nil {
 			return nil, 0, 0, err
@@ -4744,6 +4760,7 @@ func (w *assetWallet) userActionBumpFees(actionB []byte) error {
 		newPendingTx := w.extendedTx(newTx, pendingTx.Type, pendingTx.Amount)
 
 		pendingTx.NonceReplacement = newPendingTx.ID
+		pendingTx.FeeReplacement = newPendingTx.ID
 
 		w.tryStoreDBTx(pendingTx)
 		w.tryStoreDBTx(newPendingTx)
@@ -4832,12 +4849,30 @@ func (w *assetWallet) userActionNonceReplacement(actionB []byte) error {
 	if err != nil {
 		return fmt.Errorf("error fetching nonce replacement tx: %v", err)
 	}
-	return w.amendPendingTx(action.TxID, func(txHash common.Hash, _ *types.Transaction, pendingTx *extendedWalletTx, idx int) error {
+
+	from, err := types.LatestSigner(w.node.chainConfig()).Sender(replacementTx)
+	if err != nil {
+		return fmt.Errorf("error parsing originator address from specified replacement tx %s: %w", from, err)
+	}
+	if from != w.addr {
+		return fmt.Errorf("specified replacement tx originator %s is not you", from)
+	}
+	return w.amendPendingTx(action.TxID, func(txHash common.Hash, oldTx *types.Transaction, pendingTx *extendedWalletTx, idx int) error {
 		if replacementTx.Nonce() != pendingTx.Nonce.Uint64() {
 			return fmt.Errorf("nonce replacement doesn't have the right nonce. %d != %s", replacementTx.Nonce(), pendingTx.Nonce)
 		}
 		newPendingTx := w.extendedTx(replacementTx, asset.Unknown, 0)
 		pendingTx.NonceReplacement = newPendingTx.ID
+		var oldTo, newTo common.Address
+		if oldAddr := oldTx.To(); oldAddr != nil {
+			oldTo = *oldAddr
+		}
+		if newAddr := replacementTx.To(); newAddr != nil {
+			newTo = *newAddr
+		}
+		if bytes.Equal(oldTx.Data(), replacementTx.Data()) && oldTo == newTo {
+			pendingTx.FeeReplacement = newPendingTx.ID
+		}
 		w.tryStoreDBTx(pendingTx)
 		w.tryStoreDBTx(newPendingTx)
 		w.pendingTxs[idx] = newPendingTx

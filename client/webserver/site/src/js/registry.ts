@@ -429,6 +429,17 @@ export interface WalletNote extends CoreNote {
   payload: BaseWalletNote
 }
 
+export interface CoreActionRequiredNote extends CoreNote {
+  payload: ActionRequiredNote
+}
+
+export interface RejectedRedemptionData {
+  assetID: number
+  orderID: string
+  coinID: string
+  coinFmt: string
+}
+
 export interface SpotPriceNote extends CoreNote {
   host: string
   spots: Record<string, Spot>

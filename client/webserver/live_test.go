@@ -2619,14 +2619,24 @@ func (m *TMarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells
 
 func makeRequiredAction(assetID uint32, actionID string) *asset.ActionRequiredNote {
 	txID := dex.Bytes(encode.RandomBytes(32)).String()
-	n := &asset.ActionRequiredNote{
-		ActionID: actionID,
-		UniqueID: txID,
-		Payload: &eth.TransactionActionNote{
+	var payload any
+	if actionID == core.ActionIDRedeemRejected {
+		payload = core.RejectedRedemptionData{
+			AssetID: assetID,
+			CoinID:  encode.RandomBytes(32),
+			CoinFmt: "0x8909ec4aa707df569e62e2f8e2040094e2c88fe192b3b3e2dadfa383a41aa645",
+		}
+	} else {
+		payload = &eth.TransactionActionNote{
 			Tx:      randomWalletTransaction(asset.TransactionType(1+rand.Intn(15)), randomBalance()/10), // 1 to 15
 			Nonce:   uint64(rand.Float64() * 500),
 			NewFees: uint64(rand.Float64() * math.Pow10(rand.Intn(8))),
-		},
+		}
+	}
+	n := &asset.ActionRequiredNote{
+		ActionID: actionID,
+		UniqueID: txID,
+		Payload:  payload,
 	}
 	n.AssetID = assetID
 	n.Route = "actionRequired"
@@ -2672,6 +2682,7 @@ func TestServer(t *testing.T) {
 			makeRequiredAction(0, "lostTx"),
 			makeRequiredAction(42, "lostNonce"),
 			makeRequiredAction(60, "tooCheap"),
+			makeRequiredAction(60, "redeemRejected"),
 		}
 	}
 

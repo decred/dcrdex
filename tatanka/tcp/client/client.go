@@ -59,7 +59,7 @@ func (c *Client) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 		PingWait: 20 * time.Second,
 		Cert:     c.cert,
 		ReconnectSync: func() {
-			fmt.Println("--RECONNECTED RECONNECTED RECONNECTED RECONNECTED ")
+			fmt.Println("## RECONNECTED RECONNECTED RECONNECTED RECONNECTED ")
 		},
 		ConnectEventFunc: func(status comms.ConnectionStatus) {
 			if status == comms.Disconnected {
