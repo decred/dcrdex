@@ -48,11 +48,8 @@ type extendedWalletTx struct {
 	lastCheck       uint64
 	savedToDB       bool
 	lastBroadcast   time.Time
+	lastFeeCheck    time.Time
 	actionRequested bool
-	// indexed will be true if the network seems to know about the tx one way
-	// or another, even if we can't get a receipt. which might be the case for
-	// providers that return information about mempool transactions.
-	indexed bool
 }
 
 func (t *extendedWalletTx) age() time.Duration {

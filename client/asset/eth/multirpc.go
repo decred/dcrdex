@@ -1347,17 +1347,23 @@ func (m *multiRPCClient) transactionConfirmations(ctx context.Context, txHash co
 
 // txOpts creates transaction options and sets the passed nonce if supplied. If
 // nonce is nil the next nonce will be fetched and the passed argument altered.
-func (m *multiRPCClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error) {
-	baseFees, gasTipCap, err := m.currentFees(ctx)
-	if err != nil {
-		return nil, err
+// txOpts can be called with either one or both of maxFeeRate or tipRate, but
+// if either is nil, as many as two RPC calls may be made to establish the
+// missing values. If the maxFeeRate is not specified, the standard 2*base+tip
+// formula is used.
+func (m *multiRPCClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, tipRate, nonce *big.Int) (_ *bind.TransactOpts, err error) {
+	if maxFeeRate == nil || tipRate == nil {
+		baseRate, newTipRate, err := m.currentFees(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if tipRate == nil {
+			tipRate = newTipRate
+		}
+		maxFeeRate = new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
 	}
 
-	if maxFeeRate == nil {
-		maxFeeRate = new(big.Int).Mul(baseFees, big.NewInt(2))
-	}
-
-	txOpts := newTxOpts(ctx, m.creds.addr, val, maxGas, maxFeeRate, gasTipCap)
+	txOpts := newTxOpts(ctx, m.creds.addr, val, maxGas, maxFeeRate, tipRate)
 
 	// If nonce is not nil, this indicates that we are trying to re-send an
 	// old transaction with higher fee in order to ensure it is mined.

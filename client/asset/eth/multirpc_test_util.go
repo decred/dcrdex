@@ -153,7 +153,7 @@ func (m *MRPCTest) TestSimnetMultiRPCClient(t *testing.T, wsPort, httpPort strin
 		for i := 0; i < 10; i++ {
 			// Send two in a row. They should use each provider, preferred first.
 			for j := 0; j < 2; j++ {
-				txOpts, err := cl.txOpts(ctx, amt, defaultSendGasLimit, nil, nil)
+				txOpts, err := cl.txOpts(ctx, amt, defaultSendGasLimit, nil, nil, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

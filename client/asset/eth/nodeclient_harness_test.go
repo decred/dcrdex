@@ -695,7 +695,7 @@ func prepareTokenClients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initiator unlock error; %v", err)
 	}
-	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -708,7 +708,7 @@ func prepareTokenClients(t *testing.T) {
 		t.Fatalf("participant unlock error; %v", err)
 	}
 
-	txOpts, err = participantEthClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil)
+	txOpts, err = participantEthClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -932,7 +932,7 @@ func testSendTransaction(t *testing.T) {
 		t.Fatalf("no CoinNotFoundError")
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -1069,7 +1069,7 @@ func testSendSignedTransaction(t *testing.T) {
 }
 
 func testTransactionReceipt(t *testing.T) {
-	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -1366,7 +1366,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		}
 
 		expGas := gases.SwapN(len(test.swaps))
-		txOpts, err := ethClient.txOpts(ctx, optsVal, expGas, dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err := ethClient.txOpts(ctx, optsVal, expGas, dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -1498,7 +1498,7 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 		pc = participantTokenContractor
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(len(swaps)), dexeth.GweiToWei(maxFeeRate), nil)
+	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(len(swaps)), dexeth.GweiToWei(maxFeeRate), nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -1708,7 +1708,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			}
 		}
 
-		txOpts, err := test.redeemerClient.txOpts(ctx, optsVal, gases.SwapN(len(test.swaps)), dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err := test.redeemerClient.txOpts(ctx, optsVal, gases.SwapN(len(test.swaps)), dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -1758,7 +1758,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		expGas := gases.RedeemN(len(test.redemptions))
-		txOpts, err = test.redeemerClient.txOpts(ctx, 0, expGas, dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err = test.redeemerClient.txOpts(ctx, 0, expGas, dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -1876,7 +1876,7 @@ func testRefundGas(t *testing.T, assetID uint32) {
 
 	lockTime := uint64(time.Now().Unix())
 
-	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -2005,7 +2005,7 @@ func testRefund(t *testing.T, assetID uint32) {
 
 		inLocktime := uint64(time.Now().Add(test.addTime).Unix())
 
-		txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil)
+		txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -2019,7 +2019,7 @@ func testRefund(t *testing.T, assetID uint32) {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
 
-			txOpts, err = participantEthClient.txOpts(ctx, 0, gases.RedeemN(1), nil, nil)
+			txOpts, err = participantEthClient.txOpts(ctx, 0, gases.RedeemN(1), nil, nil, nil)
 			if err != nil {
 				t.Fatalf("%s: txOpts error: %v", test.name, err)
 			}
@@ -2056,7 +2056,7 @@ func testRefund(t *testing.T, assetID uint32) {
 				test.name, test.isRefundable, isRefundable)
 		}
 
-		txOpts, err = test.refunderClient.txOpts(ctx, 0, gases.Refund, dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err = test.refunderClient.txOpts(ctx, 0, gases.Refund, dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -2151,7 +2151,7 @@ func testApproveAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}

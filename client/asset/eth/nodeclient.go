@@ -317,7 +317,7 @@ func (n *nodeClient) getCodeAt(ctx context.Context, contractAddr common.Address)
 //
 // NOTE: The nonce included in the txOpts must be sent before txOpts is used
 // again. The caller should ensure that txOpts -> send sequence is synchronized.
-func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error) {
+func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, tipRate, nonce *big.Int) (*bind.TransactOpts, error) {
 	baseFee, gasTipCap, err := n.currentFees(ctx)
 	if err != nil {
 		return nil, err
