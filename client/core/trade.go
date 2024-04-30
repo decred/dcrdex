@@ -2983,8 +2983,6 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		redeemCoinID = proof.TakerRedeem
 	}
 
-	var redemptionCleared bool
-
 	match.confirmRedemptionNumTries++
 
 	redemptionStatus, err := toWallet.Wallet.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
@@ -3025,12 +3023,16 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		// The transaction was nonce-replaced or otherwise lost without
 		// rejection or with user acknowlegement. Try again if we're the taker.
 		// If we're the maker we'll give up and try to refund.
+		c.log.Infof("Redemption %s (%s) has been noted as lost.", match.MetaData.Proof.TakerRedeem, unbip(toWallet.AssetID))
 		if match.Side == order.Taker {
-			redemptionCleared = true
 			match.MetaData.Proof.TakerRedeem = nil
 			match.Status = order.MakerRedeemed
 		}
-		c.log.Infof("Redemption %s (%s) has been noted as lost.")
+
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)
+		}
+		return false, nil
 	default:
 		match.delayTicks(time.Minute * 15)
 		return false, fmt.Errorf("error confirming redemption for coin %v. already tried %d times, will retry later: %v",
@@ -3055,7 +3057,7 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		match.Status = order.MatchConfirmed
 	}
 
-	if redemptionResubmitted || redemptionConfirmed || redemptionCleared {
+	if redemptionResubmitted || redemptionConfirmed {
 		err := t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			t.dc.log.Errorf("failed to update match in db: %v", err)
