@@ -263,7 +263,7 @@
 <div data-tmpl="assetForm">
   <h3 class="text-center">[[[Select your bond asset]]]</h3>
   <div data-tmpl="regAssetErr" class="fs14 text-danger flex-center"></div>
-  <div data-tmpl="bondAssets" class="mt-2">
+  <div data-tmpl="bondAssets">
 
     <div data-tmpl="bondAssetTmpl" class="border rounded3 d-flex align-items-stretch p-2 hoverbg pointer mt-3">
       <div class="flex-center pe-4">
@@ -287,6 +287,10 @@
     </div>
 
   </div>
+  <button type="button" data-tmpl="usePrepaidBond" class="w-100 mt-3">
+    <span class="ico-ticket fs22 me-2"></span>
+    <span class="fs22">Use a pre-paid bond</span>
+  </button>
   <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline pt-2 pb-1 mt-1">[[[what_s_a_bond]]]</div>
 </div>
 
@@ -430,6 +434,22 @@
 
     </tbody>
   </table>
+</div>
+<div data-tmpl="prepaidBonds" class="d-hide">
+  <div class="py-2 fs14 grey">
+    <span class="hoverbg pointer" data-tmpl="ppbGoBack"><span class="ico-arrowback fs12 me-1"></span> go back</span>
+  </div>
+  <h3>Redeem Pre-paid Bond</h3>
+  <label for="prepaidBondCode">Code</label>
+  <input type="text" data-tmpl="prepaidBondCode" autocomplete="off">
+  <div data-tmpl="prepaidBondPWBox">
+    <label for="ppbAppPW">[[[Password]]]</label>
+    <input type="password" data-tmpl="prepaidBondPW" autocomplete="off">
+  </div>
+  <div data-tmpl="prepaidBondErr" class="pt-2 px-2 text-danger d-hide"></div>
+  <div class="text-left mt-2">
+    <button data-tmpl="submitPrepaidBond" type="button" class="go">[[[Submit]]]</button>
+  </div>
 </div>
 {{end}}
 

@@ -1116,6 +1116,9 @@ func token(id []byte) string {
 // coinIDString converts a coin ID to a human-readable string. If an error is
 // encountered the value starting with "<invalid coin>:" prefix is returned.
 func coinIDString(assetID uint32, coinID []byte) string {
+	if assetID == account.PrepaidBondID {
+		return "prepaid-bond:" + hex.EncodeToString(coinID)
+	}
 	coinStr, err := asset.DecodeCoinID(assetID, coinID)
 	if err != nil {
 		// Logging error here with fmt.Printf is better than dropping it. It's not

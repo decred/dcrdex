@@ -210,6 +210,9 @@ func (c *TCore) Unban(_ account.AccountID) error {
 func (c *TCore) ForgiveMatchFail(_ account.AccountID, _ order.MatchID) (bool, bool, error) {
 	return false, false, nil // TODO: tests
 }
+func (c *TCore) CreatePrepaidBonds(n int, strength uint32, durSecs int64) ([][]byte, error) {
+	return nil, nil
+}
 func (c *TCore) Notify(_ account.AccountID, _ *msgjson.Message) {}
 func (c *TCore) NotifyAll(_ *msgjson.Message)                   {}
 

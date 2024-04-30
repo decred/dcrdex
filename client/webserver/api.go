@@ -28,9 +28,15 @@ func (s *WebServer) apiAddDEX(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	cert := []byte(form.Cert)
-	err := s.core.AddDEX(form.Addr, cert)
+	defer form.AppPW.Clear()
+	appPW, err := s.resolvePass(form.AppPW, r)
 	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	cert := []byte(form.Cert)
+
+	if err = s.core.AddDEX(appPW, form.Addr, cert); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
@@ -467,6 +473,37 @@ func (s *WebServer) apiUpdateBondOptions(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiRedeemPrepaidBond(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Host  string           `json:"host"`
+		Code  dex.Bytes        `json:"code"`
+		AppPW encode.PassBytes `json:"appPW"`
+		Cert  string           `json:"cert"`
+	}
+	defer req.AppPW.Clear()
+	if !readPost(w, r, &req) {
+		return
+	}
+	appPW, err := s.resolvePass(req.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	tier, err := s.core.RedeemPrepaidBond(appPW, req.Code, req.Host, req.Cert)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := &struct {
+		OK   bool   `json:"ok"`
+		Tier uint64 `json:"tier"`
+	}{
+		OK:   true,
+		Tier: tier,
+	}
+	writeJSON(w, resp, s.indent)
 }
 
 // apiNewWallet is the handler for the '/newwallet' API request.

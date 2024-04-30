@@ -149,6 +149,7 @@ func (auth *AuthManager) handlePreValidateBond(conn comms.Link, msg *msgjson.Mes
 // broadcasted and reaches the required number of confirmations.
 func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	postBond := new(msgjson.PostBond)
+
 	err := msg.Unmarshal(&postBond)
 	if err != nil || postBond == nil {
 		return msgjson.NewError(msgjson.BondError, "error parsing postbond request")
@@ -156,7 +157,7 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 
 	assetID := postBond.AssetID
 	bondAsset, ok := auth.bondAssets[assetID]
-	if !ok {
+	if !ok && assetID != account.PrepaidBondID {
 		return msgjson.NewError(msgjson.BondError, "%s does not support bonds", dex.BipIDSymbol(assetID))
 	}
 
@@ -175,6 +176,10 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 			Code:    msgjson.SignatureError,
 			Message: "signature error: " + err.Error(),
 		}
+	}
+
+	if assetID == account.PrepaidBondID {
+		return auth.processPrepaidBond(conn, msg, acct, postBond.CoinID)
 	}
 
 	// A bond's lockTime must be after bondExpiry from now.
@@ -199,6 +204,8 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 		return msgjson.NewError(msgjson.BondError, "invalid bond transaction - account commitment does not match pubkey")
 	}
 
+	strength := uint32(uint64(amt) / bondAsset.Amt)
+
 	// All good. The client gets a PostBondResult (no error) unless the confirms
 	// check has an unexpected error or times out.
 	expireTime := time.Unix(lockTime, 0).Add(-auth.bondExpiry)
@@ -207,6 +214,7 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 		AssetID:    assetID,
 		Amount:     uint64(amt),
 		Expiry:     uint64(expireTime.Unix()),
+		Strength:   strength,
 		BondID:     bondCoinID,
 		Reputation: auth.ComputeUserReputation(acctID),
 	}
@@ -250,7 +258,7 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 		AssetID:  assetID,
 		CoinID:   bondCoinID,
 		Amount:   amt,
-		Strength: uint32(uint64(amt) / bondAsset.Amt),
+		Strength: strength,
 		LockTime: lockTime,
 	}
 
@@ -344,7 +352,7 @@ func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acc
 	}
 	err = conn.Send(resp)
 	if err != nil {
-		log.Warnf("Error sending postbond result to user %v: %v", acctID, err)
+		log.Warnf("Error sending prepaid bond result to user %v: %v", acctID, err)
 		if err = auth.Send(acctID, resp); err != nil {
 			log.Warnf("Error sending feepaid notification to account %v: %v", acctID, err)
 			// The user will need to either 'connect' to see confirmed status,
@@ -353,6 +361,85 @@ func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acc
 			// with their new account.
 		}
 	}
+}
+
+func (auth *AuthManager) processPrepaidBond(conn comms.Link, msg *msgjson.Message, acct *account.Account, coinID []byte) *msgjson.Error {
+	auth.prepaidBondMtx.Lock()
+	defer auth.prepaidBondMtx.Unlock()
+	strength, lockTimeI, err := auth.storage.FetchPrepaidBond(coinID)
+	if err != nil {
+		return msgjson.NewError(msgjson.BondError, "unknown or already spent pre-paid bond: %v", err)
+	}
+
+	lockTime := time.Unix(lockTimeI, 0)
+	expireTime := lockTime.Add(-auth.bondExpiry)
+	if time.Until(expireTime) < time.Hour*24 {
+		return msgjson.NewError(msgjson.BondError, "pre-paid bond is too old")
+	}
+
+	postBondRes := &msgjson.PostBondResult{
+		AccountID:  acct.ID[:],
+		AssetID:    account.PrepaidBondID,
+		Amount:     0,
+		Strength:   strength,
+		Expiry:     uint64(expireTime.Unix()),
+		BondID:     coinID,
+		Reputation: auth.ComputeUserReputation(acct.ID),
+	}
+	auth.Sign(postBondRes)
+
+	lockTimeThresh := time.Now().Add(auth.bondExpiry)
+	dbAcct, _, _, _ := auth.storage.Account(acct.ID, lockTimeThresh)
+
+	dbBond := &db.Bond{
+		AssetID:  account.PrepaidBondID,
+		CoinID:   coinID,
+		Strength: strength,
+		LockTime: lockTimeI,
+	}
+
+	newAcct := dbAcct == nil
+	if newAcct {
+		log.Infof("Creating new user account %s from pre-paid bond. addr = %s", acct.ID, conn.Addr())
+		err = auth.storage.CreateAccountWithBond(acct, dbBond)
+	} else {
+		log.Infof("Adding pre-bond for existing user account %v, addr = %s", acct.ID, conn.Addr())
+		err = auth.storage.AddBond(acct.ID, dbBond)
+	}
+	if err != nil {
+		log.Errorf("Failure while storing pre-paid bond for acct %v (new = %v): %v", acct.ID, newAcct, err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "failed to store pre-paid bond",
+		}
+	}
+
+	if err := auth.storage.DeletePrepaidBond(coinID); err != nil {
+		log.Errorf("Error deleting pre-paid bond id = %s from database: %v", dex.Bytes(coinID), err)
+	}
+
+	rep := auth.addBond(acct.ID, dbBond)
+	if rep == nil { // user not authenticated, use DB
+		rep = auth.ComputeUserReputation(acct.ID)
+	}
+	postBondRes.Tier = rep.EffectiveTier()
+	postBondRes.Reputation = rep
+
+	log.Infof("Pre-paid bond accepted: acct %v from %v. Bonded tier %d, effective tier %d",
+		acct.ID, conn.Addr(), rep.BondedTier, rep.EffectiveTier())
+
+	resp, err := msgjson.NewResponse(msg.ID, postBondRes, nil)
+	if err != nil { // shouldn't be possible
+		return nil
+	}
+	err = conn.Send(resp)
+	if err != nil {
+		log.Warnf("Error sending pre-paid bond result to user %v: %v", acct.ID, err)
+		if err = auth.Send(acct.ID, resp); err != nil {
+			log.Warnf("Error sending pre-paid notification to account %v: %v", acct.ID, err)
+		}
+	}
+	return nil
 }
 
 // waitBondConfs is a coin waiter that should be started after validating a bond

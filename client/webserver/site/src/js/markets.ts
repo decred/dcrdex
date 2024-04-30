@@ -775,7 +775,7 @@ export default class MarketsPage extends BasePage {
     }
 
     Doc.setVis(this.mmRunning, page.mmRunning)
-    Doc.setVis(!this.mmRunning, page.orderForm, page.orderTypeBttns)
+    if (this.mmRunning) Doc.hide(page.orderForm, page.orderTypeBttns)
   }
 
   /* setLoaderMsgVisibility displays a message in case a dex asset is not

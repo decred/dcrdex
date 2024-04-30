@@ -638,7 +638,7 @@ func (c *TCore) GetDEXConfig(host string, certI any) (*core.Exchange, error) {
 	return tExchanges[firstDEX], nil
 }
 
-func (c *TCore) AddDEX(dexAddr string, certI any) error {
+func (c *TCore) AddDEX(appPW []byte, dexAddr string, certI any) error {
 	randomDelay()
 	if initErrors {
 		return fmt.Errorf("forced init error")
@@ -680,6 +680,9 @@ func (c *TCore) PostBond(form *core.PostBondForm) (*core.PostBondResult, error) 
 		BondID:      "abc",
 		ReqConfirms: uint16(ba.Confs),
 	}, nil
+}
+func (c *TCore) RedeemPrepaidBond(appPW []byte, code []byte, host string, certI any) (tier uint64, err error) {
+	return 1, nil
 }
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	xc := tExchanges[form.Host]

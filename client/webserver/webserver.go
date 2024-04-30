@@ -97,6 +97,7 @@ type clientCore interface {
 	Exchange(host string) (*core.Exchange, error)
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
+	RedeemPrepaidBond(appPW []byte, code []byte, host string, certI any) (tier uint64, err error)
 	UpdateBondOptions(form *core.BondOptionsForm) error
 	Login(pw []byte) error
 	InitializeClient(pw []byte, seed *string) (string, error)
@@ -118,7 +119,7 @@ type clientCore interface {
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
 	GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error)
-	AddDEX(dexAddr string, certI any) error
+	AddDEX(appPW []byte, dexAddr string, certI any) error
 	DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
@@ -515,6 +516,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/register", s.apiRegister)
 			apiAuth.Post("/postbond", s.apiPostBond)
 			apiAuth.Post("/updatebondoptions", s.apiUpdateBondOptions)
+			apiAuth.Post("/redeemprepaidbond", s.apiRedeemPrepaidBond)
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
 			apiAuth.Post("/depositaddress", s.apiNewDepositAddress)
@@ -920,6 +922,7 @@ func readPost(w http.ResponseWriter, r *http.Request, thing any) bool {
 	err = json.Unmarshal(body, thing)
 	if err != nil {
 		log.Debugf("failed to unmarshal JSON request: %v", err)
+		log.Debugf("raw request: %s", string(body))
 		http.Error(w, "failed to unmarshal JSON request", http.StatusBadRequest)
 		return false
 	}

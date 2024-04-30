@@ -95,4 +95,17 @@ const (
 	SetRegOutput = `UPDATE %s SET
 		fee_coin = $1
 		WHERE account_id = $2;`
+
+	CreatePrepaidBondsTable = `CREATE TABLE IF NOT EXISTS %s (
+		coin_id BYTEA PRIMARY KEY,
+		version INT2 DEFAULT 0,
+		strength int4,
+		lock_time INT8
+	);`
+
+	SelectPrepaidBond = `SELECT strength, lock_time FROM %s WHERE coin_id = $1;`
+
+	DeletePrepaidBond = `DELETE FROM %s WHERE coin_id = $1;`
+
+	InsertPrepaidBond = `INSERT INTO %s (coin_id, strength, lock_time) VALUES ($1, $2, $3);`
 )

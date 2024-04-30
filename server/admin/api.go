@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -480,6 +481,56 @@ func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, acctInfo)
+}
+
+func (s *Server) prepayBonds(w http.ResponseWriter, r *http.Request) {
+	var n int = 1
+	if nStr := r.URL.Query().Get(nKey); nStr != "" {
+		n64, err := strconv.ParseUint(nStr, 10, 16)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error parsing n: %v", err), http.StatusBadRequest)
+			return
+		}
+		n = int(n64)
+	}
+	if n < 0 || n > 100 {
+		http.Error(w, "requested too many prepaid bonds. max 100", http.StatusBadRequest)
+		return
+	}
+	daysStr := r.URL.Query().Get(daysKey)
+	if daysStr == "" {
+		http.Error(w, "no days duration specified", http.StatusBadRequest)
+		return
+	}
+	days, err := strconv.ParseUint(daysStr, 10, 64)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error parsing days: %v", err), http.StatusBadRequest)
+		return
+	}
+	if days == 0 {
+		http.Error(w, "days parsed to zero", http.StatusBadRequest)
+		return
+	}
+	dur := time.Duration(days) * time.Hour * 24
+	var strength uint32 = 1
+	if strengthStr := r.URL.Query().Get(strengthKey); strengthStr != "" {
+		n64, err := strconv.ParseUint(strengthStr, 10, 32)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error parsing strength: %v", err), http.StatusBadRequest)
+			return
+		}
+		strength = uint32(n64)
+	}
+	coinIDs, err := s.core.CreatePrepaidBonds(n, strength, int64(math.Round(dur.Seconds())))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error creating bonds: %v", err), http.StatusInternalServerError)
+		return
+	}
+	res := make([]dex.Bytes, len(coinIDs))
+	for i := range coinIDs {
+		res[i] = coinIDs[i]
+	}
+	writeJSON(w, res)
 }
 
 // decodeAcctID checks a string as being both hex and the right length and

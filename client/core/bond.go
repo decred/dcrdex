@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/keygen"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 )
@@ -807,19 +808,20 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 		return nil, codedError(registerErr, err)
 	}
 
-	dc.acct.authMtx.Lock()
-	dc.updateReputation(postBondRes.Reputation, postBondRes.Tier, nil, nil)
-	dc.acct.authMtx.Unlock()
-
 	// Check the response signature.
 	err = dc.acct.checkSig(postBondRes.Serialize(), postBondRes.Sig)
 	if err != nil {
 		c.log.Warnf("postbond: DEX signature validation error: %v", err)
 	}
+
 	if !bytes.Equal(postBondRes.BondID, bondCoin) {
 		return nil, fmt.Errorf("server reported bond coin ID %v, expected %v", coinIDString(assetID, postBondRes.BondID),
 			bondCoinStr)
 	}
+
+	dc.acct.authMtx.Lock()
+	dc.updateReputation(postBondRes.Reputation, postBondRes.Tier, nil, nil)
+	dc.acct.authMtx.Unlock()
 
 	return postBondRes, nil
 }
@@ -924,6 +926,136 @@ func (c *Core) monitorBondConfs(dc *dexConnection, bond *asset.Bond, reqConfs ui
 
 		c.postAndConfirmBond(dc, bond) // if it fails (e.g. timeout), retry in rotateBonds
 	})
+}
+
+// RedeemPrepaidBond redeems a pre-paid bond for a dcrdex host server.
+func (c *Core) RedeemPrepaidBond(appPW []byte, code []byte, host string, certI any) (tier uint64, err error) {
+	// Make sure the app has been initialized.
+	if !c.IsInitialized() {
+		return 0, fmt.Errorf("app not initialized")
+	}
+
+	// Check the app password.
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return 0, codedError(passwordErr, err)
+	}
+	defer crypter.Close()
+
+	var success, acctExists bool
+
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if found {
+		acctExists = !dc.acct.isViewOnly()
+		if acctExists {
+			if dc.acct.locked() { // require authDEX first to reconcile any existing bond statuses
+				return 0, newError(acctKeyErr, "acct locked %s (login first)", host)
+			}
+		}
+	} else {
+		// New DEX connection.
+		cert, err := parseCert(host, certI, c.net)
+		if err != nil {
+			return 0, newError(fileReadErr, "failed to read certificate file from %s: %v", cert, err)
+		}
+		dc, err = c.connectDEX(&db.AccountInfo{
+			Host: host,
+			Cert: cert,
+			// bond maintenance options set below.
+		})
+		if err != nil {
+			return 0, codedError(connectionErr, err)
+		}
+
+		// Close the connection to the dex server if the registration fails.
+		defer func() {
+			if !success {
+				dc.connMaster.Disconnect()
+			}
+		}()
+	}
+
+	if !acctExists { // new dex connection or pre-existing view-only connection
+		_, err := c.discoverAccount(dc, crypter)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	pkBytes := dc.acct.pubKey()
+	if len(pkBytes) == 0 {
+		return 0, fmt.Errorf("account keys not decrypted")
+	}
+
+	// Do a postbond request with the raw bytes of the unsigned tx, the bond
+	// script, and our account pubkey.
+	postBond := &msgjson.PostBond{
+		AcctPubKey: pkBytes,
+		AssetID:    account.PrepaidBondID,
+		// Version:    0,
+		CoinID: code,
+	}
+	postBondRes := new(msgjson.PostBondResult)
+	if err = dc.signAndRequest(postBond, msgjson.PostBondRoute, postBondRes, DefaultResponseTimeout); err != nil {
+		return 0, codedError(registerErr, err)
+	}
+
+	// Check the response signature.
+	err = dc.acct.checkSig(postBondRes.Serialize(), postBondRes.Sig)
+	if err != nil {
+		c.log.Warnf("postbond: DEX signature validation error: %v", err)
+	}
+
+	lockTime := postBondRes.Expiry + dc.config().BondExpiry
+
+	dbBond := &db.Bond{
+		// Version:    0,
+		AssetID:   account.PrepaidBondID,
+		CoinID:    code,
+		LockTime:  lockTime,
+		Strength:  postBondRes.Strength,
+		Confirmed: true,
+	}
+
+	dc.acct.authMtx.Lock()
+	dc.updateReputation(postBondRes.Reputation, postBondRes.Tier, nil, nil)
+	dc.acct.bonds = append(dc.acct.bonds, dbBond)
+	dc.acct.authMtx.Unlock()
+
+	if !acctExists {
+		dc.acct.keyMtx.RLock()
+		ai := &db.AccountInfo{
+			Host:      dc.acct.host,
+			Cert:      dc.acct.cert,
+			DEXPubKey: dc.acct.dexPubKey,
+			EncKeyV2:  dc.acct.encKey,
+			Bonds:     []*db.Bond{dbBond},
+		}
+		dc.acct.keyMtx.RUnlock()
+
+		if err = c.dbCreateOrUpdateAccount(dc, ai); err != nil {
+			return 0, fmt.Errorf("failed to store pre-paid account for dex %s: %w", host, err)
+		}
+		c.addDexConnection(dc)
+	}
+
+	success = true // Don't disconnect anymore.
+
+	if err = c.db.AddBond(dc.acct.host, dbBond); err != nil {
+		return 0, fmt.Errorf("failed to store pre-paid bond for dex %s: %w", host, err)
+	}
+
+	if err = c.bondConfirmed(dc, account.PrepaidBondID, code, postBondRes); err != nil {
+		return 0, fmt.Errorf("bond redeemed, but failed to auth: %v", err)
+	}
+
+	c.updateBondReserves()
+
+	c.notify(newBondAuthUpdate(dc.acct.host, c.exchangeAuth(dc)))
+
+	return uint64(postBondRes.Strength), nil
 }
 
 func deriveBondKey(bondXPriv *hdkeychain.ExtendedKey, assetID, bondIndex uint32) (*secp256k1.PrivateKey, error) {

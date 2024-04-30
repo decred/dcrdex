@@ -14,11 +14,12 @@ import (
 )
 
 const (
-	marketsTableName  = "markets"
-	metaTableName     = "meta"
-	feeKeysTableName  = "fee_keys"
-	accountsTableName = "accounts"
-	bondsTableName    = "bonds"
+	marketsTableName      = "markets"
+	metaTableName         = "meta"
+	feeKeysTableName      = "fee_keys"
+	accountsTableName     = "accounts"
+	bondsTableName        = "bonds"
+	prepaidBondsTableName = "prepaid_bonds"
 
 	indexBondsOnAccountName  = "idx_bonds_on_acct"
 	indexBondsOnLockTimeName = "idx_bonds_on_locktime"
@@ -49,6 +50,7 @@ var createAccountTableStatements = []tableStmt{
 	{feeKeysTableName, internal.CreateFeeKeysTable},
 	{accountsTableName, internal.CreateAccountsTable},
 	{bondsTableName, internal.CreateBondsTable},
+	{prepaidBondsTableName, internal.CreatePrepaidBondsTable},
 }
 
 type indexStmt struct {
@@ -182,13 +184,12 @@ func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo)
 			return nil, fmt.Errorf("failed to set db version in meta table: %w", err)
 		}
 		log.Infof("Created new meta table at version %d", dbVersion)
-
-		// Prepare the account and registration key counter tables.
-		err = createAccountTables(db)
-		if err != nil {
-			return nil, err
-		}
-	} else {
+	}
+	// Prepare the account and registration key counter tables.
+	if err = createAccountTables(db); err != nil {
+		return nil, err
+	}
+	if !created {
 		// Attempt upgrade.
 		if err = upgradeDB(ctx, db); err != nil {
 			// If the context is canceled, it will either be context.Canceled

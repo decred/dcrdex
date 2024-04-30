@@ -27,7 +27,8 @@ import {
   WalletInfo,
   Token,
   WalletCreationNote,
-  CoreNote
+  CoreNote,
+  PrepaidBondID
 } from './registry'
 import { XYRangeHandler } from './opts'
 import { CoinExplorers } from './coinexplorers'
@@ -883,7 +884,6 @@ export class ConfirmRegistrationForm {
     Doc.hide(page.regErr)
     const xc = app().exchanges[host]
     const bondAsset = xc.bondAssets[asset.wallet.symbol]
-    const cert = await certFile
     const dexAddr = xc.host
     const pw = page.appPass.value || (pwCache ? pwCache.pw : '')
     let form: any
@@ -892,7 +892,7 @@ export class ConfirmRegistrationForm {
     if (xc.viewOnly || !app().exchanges[xc.host]) {
       form = {
         addr: dexAddr,
-        cert: cert,
+        cert: certFile,
         pass: pw,
         bond: bondAsset.amount * tier,
         asset: bondAsset.id
@@ -937,12 +937,16 @@ export class FeeAssetSelectionForm {
   success: (assetID: number, tier: number) => Promise<void>
   host: string
   selectedAssetID: number
+  certFile: string
   page: Record<string, PageElement>
   assetRows: Record<string, RegAssetRow>
   marketRows: MarketLimitsRow[]
+  pwCache: PasswordCache
 
-  constructor (form: HTMLElement, success: (assetID: number, tier: number) => Promise<void>) {
+  constructor (form: HTMLElement, success: (assetID: number, tier: number) => Promise<void>, pwCache: PasswordCache) {
     this.form = form
+    this.pwCache = pwCache
+    this.certFile = ''
     this.success = success
     const page = this.page = Doc.parseTemplate(form)
     Doc.cleanTemplates(page.currentBondTmpl, page.bondAssetTmpl, page.marketTmpl)
@@ -973,6 +977,10 @@ export class FeeAssetSelectionForm {
 
     Doc.bind(page.whatsABondBack, 'click', () => { hideWhatsABond() })
 
+    Doc.bind(page.usePrepaidBond, 'click', () => { this.showPrepaidBondForm() })
+    Doc.bind(page.ppbGoBack, 'click', () => { this.hidePrepaidBondForm() })
+    Doc.bind(page.submitPrepaidBond, 'click', () => { this.submitPrepaidBond() })
+
     app().registerNoteFeeder({
       createwallet: (note: WalletCreationNote) => {
         if (note.topic === 'QueuedCreationSuccess') this.walletCreated(note.assetID)
@@ -994,12 +1002,13 @@ export class FeeAssetSelectionForm {
     Doc.hide(this.page.regAssetErr, this.page.tradingTierErr)
   }
 
-  setExchange (xc: Exchange) {
+  setExchange (xc: Exchange, certFile: string) {
     this.host = xc.host
+    this.certFile = certFile
     this.assetRows = {}
     this.marketRows = []
     const page = this.page
-    Doc.hide(page.assetForm, page.tradingTierForm, page.whatsABondPanel)
+    Doc.hide(page.assetForm, page.tradingTierForm, page.whatsABondPanel, page.prepaidBonds)
     Doc.empty(page.bondAssets, page.markets)
     this.clearErrors()
 
@@ -1092,15 +1101,16 @@ export class FeeAssetSelectionForm {
   }
 
   refresh () {
-    this.setExchange(app().exchanges[this.host])
+    this.setExchange(app().exchanges[this.host], this.certFile)
   }
 
   assetSelected (assetID: number) {
     this.selectedAssetID = assetID
     this.setTier()
-    Doc.hide(this.page.assetForm)
-    Doc.show(this.page.tradingTierForm)
-    this.page.tradingTierInput.focus()
+    const { page: { assetForm, tradingTierForm, tradingTierInput } } = this
+    Doc.hide(assetForm)
+    Doc.show(tradingTierForm)
+    tradingTierInput.focus()
   }
 
   setTier () {
@@ -1195,6 +1205,42 @@ export class FeeAssetSelectionForm {
       form.style.opacity = Math.pow(prog, 4).toFixed(1)
       form.style.top = `${(1 - prog) * extraTop}px`
     }, 'easeOut')
+  }
+
+  showPrepaidBondForm () {
+    const { page, pwCache } = this
+    Doc.hide(page.assetForm, page.prepaidBondErr)
+    page.prepaidBondCode.value = ''
+    page.prepaidBondPW.value = ''
+    const hidePWBox = State.passwordIsCached() || (pwCache && pwCache.pw)
+    Doc.setVis(!hidePWBox, page.prepaidBondPWBox)
+    Doc.show(page.prepaidBonds)
+  }
+
+  hidePrepaidBondForm () {
+    const { page } = this
+    Doc.hide(page.prepaidBonds)
+    Doc.show(page.assetForm)
+  }
+
+  async submitPrepaidBond () {
+    const { page, host, pwCache } = this
+    Doc.hide(page.prepaidBondErr)
+    const code = page.prepaidBondCode.value
+    if (!code) {
+      page.prepaidBondErr.textContent = intl.prep(intl.ID_INVALID_VALUE)
+      Doc.show(page.prepaidBondErr)
+      return
+    }
+    const appPW = page.prepaidBondPW.value || (pwCache ? pwCache.pw : '')
+    const res = await postJSON('/api/redeemprepaidbond', { appPW, host, code, cert: this.certFile })
+    if (!app().checkResponse(res)) {
+      page.prepaidBondErr.textContent = res.msg
+      Doc.show(page.prepaidBondErr)
+      return
+    }
+    if (appPW && this.pwCache) this.pwCache.pw = appPW
+    this.success(PrepaidBondID, res.tier)
   }
 }
 

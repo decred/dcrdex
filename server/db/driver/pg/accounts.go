@@ -155,6 +155,28 @@ func (a *Archiver) DeleteBond(assetID uint32, coinID []byte) error {
 	return deleteBond(a.db, a.tables.bonds, assetID, coinID)
 }
 
+func (a *Archiver) FetchPrepaidBond(coinID []byte) (strength uint32, lockTime int64, err error) {
+	stmt := fmt.Sprintf(internal.SelectPrepaidBond, prepaidBondsTableName)
+	err = a.db.QueryRow(stmt, coinID).Scan(&strength, &lockTime)
+	return
+}
+
+func (a *Archiver) DeletePrepaidBond(coinID []byte) (err error) {
+	stmt := fmt.Sprintf(internal.DeletePrepaidBond, prepaidBondsTableName)
+	_, err = a.db.ExecContext(a.ctx, stmt, coinID)
+	return
+}
+
+func (a *Archiver) StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime int64) error {
+	stmt := fmt.Sprintf(internal.InsertPrepaidBond, prepaidBondsTableName)
+	for i := range coinIDs {
+		if _, err := a.db.ExecContext(a.ctx, stmt, coinIDs[i], strength, lockTime); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AccountRegAddr retrieves the registration fee address and the corresponding
 // asset ID created for the the specified account.
 func (a *Archiver) AccountRegAddr(aid account.AccountID) (string, uint32, error) {

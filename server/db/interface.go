@@ -272,6 +272,10 @@ type AccountArchiver interface {
 	// DeleteBond deletes a bond which should generally be expired.
 	DeleteBond(assetID uint32, coinID []byte) error
 
+	FetchPrepaidBond(bondCoinID []byte) (strength uint32, lockTime int64, err error)
+	DeletePrepaidBond(coinID []byte) error
+	StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime int64) error
+
 	// AccountRegAddr gets any legacy registration fee address and the
 	// corresponding asset ID for the account. (V0PURGE)
 	AccountRegAddr(account.AccountID) (string, uint32, error)
