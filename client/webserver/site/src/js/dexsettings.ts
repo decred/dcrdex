@@ -215,10 +215,10 @@ export default class DexSettingsPage extends BasePage {
   }
 
   async progressTierFormsWithWallet (assetID: number, wallet: WalletState) {
-    const { page, host, confirmRegisterForm: { fees } } = this
+    const { page, confirmRegisterForm: { fees } } = this
     const asset = app().assets[assetID]
-    const xc = app().exchanges[host]
-    const bondAsset = xc.bondAssets[asset.symbol]
+    const { bondAssets } = this.regAssetForm.xc
+    const bondAsset = bondAssets[asset.symbol]
     if (!wallet.open) {
       if (State.passwordIsCached()) {
         const loaded = app().loading(page.forms)

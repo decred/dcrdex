@@ -24,6 +24,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
+	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
@@ -45,33 +46,43 @@ const (
 	// sapi endpoints are not implemented by binance's test network. This url
 	// connects to the process at client/cmd/testbinance, which responds to the
 	// /sapi/v1/capital/config/getall endpoint.
-	fakeBinanceURL = "http://localhost:37346"
+	fakeBinanceURL   = "http://localhost:37346"
+	fakeBinanceWsURL = "ws://localhost:37346"
 )
 
 // binanceOrderBook manages an orderbook for a single market. It keeps
 // the orderbook synced and allows querying of vwap.
 type binanceOrderBook struct {
 	mtx            sync.RWMutex
-	synced         bool
+	synced         atomic.Bool
 	numSubscribers uint32
+	cm             *dex.ConnectionMaster
+
+	getSnapshot func() (*bntypes.OrderbookSnapshot, error)
 
 	book                  *orderbook
-	updateQueue           chan *binanceBookUpdate
+	updateQueue           chan *bntypes.BookUpdate
 	mktID                 string
 	baseConversionFactor  uint64
 	quoteConversionFactor uint64
 	log                   dex.Logger
 }
 
-func newBinanceOrderBook(baseConversionFactor, quoteConversionFactor uint64, mktID string, log dex.Logger) *binanceOrderBook {
+func newBinanceOrderBook(
+	baseConversionFactor, quoteConversionFactor uint64,
+	mktID string,
+	getSnapshot func() (*bntypes.OrderbookSnapshot, error),
+	log dex.Logger,
+) *binanceOrderBook {
 	return &binanceOrderBook{
 		book:                  newOrderBook(),
 		mktID:                 mktID,
-		updateQueue:           make(chan *binanceBookUpdate, 1024),
+		updateQueue:           make(chan *bntypes.BookUpdate, 1024),
 		numSubscribers:        1,
 		baseConversionFactor:  baseConversionFactor,
 		quoteConversionFactor: quoteConversionFactor,
 		log:                   log,
+		getSnapshot:           getSnapshot,
 	}
 }
 
@@ -123,103 +134,151 @@ func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json
 //
 // This function runs until the context is canceled. It must be started as
 // a new goroutine.
-func (b *binanceOrderBook) sync(ctx context.Context, getSnapshot func() (*binanceOrderbookSnapshot, error)) {
-	syncOrderbook := func(minUpdateID uint64) (uint64, bool) {
-		b.log.Debugf("Syncing %s orderbook. First update ID: %d", b.mktID, minUpdateID)
-
-		const maxTries = 5
-		for i := 0; i < maxTries; i++ {
-			if i > 0 {
-				select {
-				case <-time.After(2 * time.Second):
-				case <-ctx.Done():
-					return 0, false
-				}
-			}
-
-			snapshot, err := getSnapshot()
-			if err != nil {
-				b.log.Errorf("Error getting orderbook snapshot: %v", err)
-				continue
-			}
-			if snapshot.LastUpdateID < minUpdateID {
-				b.log.Infof("Snapshot last update ID %d is less than first update ID %d. Getting new snapshot...", snapshot.LastUpdateID, minUpdateID)
-				continue
-			}
-
-			bids, asks, err := b.convertBinanceBook(snapshot.Bids, snapshot.Asks)
-			if err != nil {
-				b.log.Errorf("Error parsing binance book: %v", err)
-				return 0, false
-			}
-
-			b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
-
-			b.book.clear()
-			b.book.update(bids, asks)
-			return snapshot.LastUpdateID, true
-		}
-
-		return 0, false
+func (b *binanceOrderBook) sync(ctx context.Context) {
+	cm := dex.NewConnectionMaster(b)
+	b.mtx.Lock()
+	b.cm = cm
+	b.mtx.Unlock()
+	if err := cm.ConnectOnce(ctx); err != nil {
+		b.log.Errorf("Error connecting %s order book: %v", b.mktID, err)
 	}
+}
 
-	setSynced := func(synced bool) {
-		b.mtx.Lock()
-		b.synced = synced
-		b.mtx.Unlock()
-	}
+func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no errors */) {
+	const updateIDUnsynced = math.MaxUint64
 
-	var firstUpdate *binanceBookUpdate
-	select {
-	case <-ctx.Done():
-		return
-	case firstUpdate = <-b.updateQueue:
-	}
+	// We'll run two goroutines and sychronize two local vars.
+	var syncMtx sync.Mutex
+	var syncCache []*bntypes.BookUpdate
+	var updateID uint64 = updateIDUnsynced
 
-	latestUpdate, success := syncOrderbook(firstUpdate.FirstUpdateID)
-	if !success {
-		b.log.Errorf("Failed to sync %s orderbook", b.mktID)
-		return
-	}
+	resyncChan := make(chan struct{}, 1)
 
-	setSynced(true)
-
-	b.log.Infof("Successfully synced %s orderbook", b.mktID)
-
-	for {
-		select {
-		case update := <-b.updateQueue:
-			if update.LastUpdateID <= latestUpdate {
-				continue
-			}
-
-			if update.FirstUpdateID > latestUpdate+1 {
-				b.log.Warnf("Missed %d updates for %s orderbook. Re-syncing...", update.FirstUpdateID-latestUpdate, b.mktID)
-
-				setSynced(false)
-
-				latestUpdate, success = syncOrderbook(update.LastUpdateID)
-				if !success {
-					b.log.Errorf("Failed to re-sync %s orderbook.", b.mktID)
-					return
-				}
-
-				setSynced(true)
-				continue
-			}
-
-			bids, asks, err := b.convertBinanceBook(update.Bids, update.Asks)
-			if err != nil {
-				b.log.Errorf("Error parsing binance book: %v", err)
-				continue
-			}
-
-			b.book.update(bids, asks)
-			latestUpdate = update.LastUpdateID
-		case <-ctx.Done():
-			return
+	desync := func() {
+		// clear the sync cache, set the special ID, trigger a book refresh.
+		syncMtx.Lock()
+		defer syncMtx.Unlock()
+		syncCache = make([]*bntypes.BookUpdate, 0)
+		if updateID != updateIDUnsynced {
+			b.synced.Store(false)
+			updateID = updateIDUnsynced
+			resyncChan <- struct{}{}
 		}
 	}
+
+	acceptUpdate := func(update *bntypes.BookUpdate) bool {
+		if updateID == updateIDUnsynced {
+			// Book is still syncing. Add it to the sync cache.
+			syncCache = append(syncCache, update)
+			return true
+		}
+		if update.FirstUpdateID != updateID+1 {
+			// Trigger a resync.
+			return false
+		}
+		// Properly sequenced.
+		updateID = update.LastUpdateID
+		bids, asks, err := b.convertBinanceBook(update.Bids, update.Asks)
+		if err != nil {
+			b.log.Errorf("Error parsing binance book: %v", err)
+			// Data is compromised. Trigger a resync.
+			return false
+		}
+		b.book.update(bids, asks)
+		return true
+	}
+
+	processSyncCache := func(snapshotID uint64) bool {
+		syncMtx.Lock()
+		defer syncMtx.Unlock()
+		updateID = snapshotID
+		for _, update := range syncCache {
+			if update.LastUpdateID <= snapshotID {
+				continue
+			}
+			if !acceptUpdate(update) {
+				return false
+			}
+		}
+		b.synced.Store(true)
+		return true
+	}
+
+	syncOrderbook := func() bool {
+		snapshot, err := b.getSnapshot()
+		if err != nil {
+			b.log.Errorf("Error getting orderbook snapshot: %v", err)
+			return false
+		}
+
+		bids, asks, err := b.convertBinanceBook(snapshot.Bids, snapshot.Asks)
+		if err != nil {
+			b.log.Errorf("Error parsing binance book: %v", err)
+			return false
+		}
+
+		b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
+
+		b.book.clear()
+		b.book.update(bids, asks)
+
+		return processSyncCache(snapshot.LastUpdateID)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		processUpdate := func(update *bntypes.BookUpdate) bool {
+			syncMtx.Lock()
+			defer syncMtx.Unlock()
+			return acceptUpdate(update)
+		}
+
+		defer wg.Done()
+		for {
+			select {
+			case update := <-b.updateQueue:
+				if !processUpdate(update) {
+					b.log.Tracef("Bad %s update with ID %d", b.mktID, update.LastUpdateID)
+					desync()
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		const retryFrequency = time.Second * 30
+
+		retry := time.After(0)
+
+		for {
+			select {
+			case <-retry:
+			case <-resyncChan:
+				if retry != nil { // don't hammer
+					continue
+				}
+			case <-ctx.Done():
+				return
+			}
+
+			if syncOrderbook() {
+				b.log.Infof("Synced %s orderbook", b.mktID)
+				retry = nil
+			} else {
+				b.log.Infof("Failed  to sync %s orderbook. Trying again in %s", b.mktID, retryFrequency)
+				desync() // Clears the syncCache
+				retry = time.After(retryFrequency)
+			}
+		}
+	}()
+
+	return &wg, nil
 }
 
 // vwap returns the volume weighted average price for a certain quantity of the
@@ -228,7 +287,7 @@ func (b *binanceOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, fi
 	b.mtx.RLock()
 	defer b.mtx.RUnlock()
 
-	if !b.synced {
+	if !b.synced.Load() {
 		return 0, 0, filled, errors.New("orderbook not synced")
 	}
 
@@ -362,7 +421,8 @@ type tradeInfo struct {
 
 type binance struct {
 	log                dex.Logger
-	url                string
+	marketsURL         string
+	accountsURL        string
 	wsURL              string
 	apiKey             string
 	secretKey          string
@@ -397,13 +457,23 @@ type binance struct {
 
 var _ CEX = (*binance)(nil)
 
+// TODO: Investigate stablecoin auto-conversion.
+// https://developers.binance.com/docs/wallet/endpoints/switch-busd-stable-coins-convertion
+
 func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binanceUS bool) *binance {
-	url, wsURL := httpURL, websocketURL
-	if binanceUS {
-		url, wsURL = usHttpURL, usWebsocketURL
-	}
-	if net == dex.Testnet || net == dex.Simnet {
-		url, wsURL = testnetHttpURL, testnetWebsocketURL
+	var marketsURL, accountsURL, wsURL string
+
+	switch net {
+	case dex.Testnet:
+		marketsURL, accountsURL, wsURL = testnetHttpURL, fakeBinanceURL, testnetWebsocketURL
+	case dex.Simnet:
+		marketsURL, accountsURL, wsURL = fakeBinanceURL, fakeBinanceURL, fakeBinanceWsURL
+	default: //mainnet
+		if binanceUS {
+			marketsURL, accountsURL, wsURL = usHttpURL, usHttpURL, usWebsocketURL
+		} else {
+			marketsURL, accountsURL, wsURL = httpURL, httpURL, websocketURL
+		}
 	}
 
 	registeredAssets := asset.Assets()
@@ -414,7 +484,8 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 
 	bnc := &binance{
 		log:                log,
-		url:                url,
+		marketsURL:         marketsURL,
+		accountsURL:        accountsURL,
 		wsURL:              wsURL,
 		apiKey:             apiKey,
 		secretKey:          secretKey,
@@ -428,7 +499,7 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 	}
 
-	bnc.markets.Store(make(map[string]*binanceMarket))
+	bnc.markets.Store(make(map[string]*bntypes.Market))
 	bnc.tokenIDs.Store(make(map[string][]uint32))
 
 	return bnc
@@ -437,16 +508,10 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 // setBalances queries binance for the user's balances and stores them in the
 // balances map.
 func (bnc *binance) setBalances(ctx context.Context) error {
-	var resp struct {
-		Balances []struct {
-			Asset  string  `json:"asset"`
-			Free   float64 `json:"free,string"`
-			Locked float64 `json:"locked,string"`
-		} `json:"balances"`
-	}
+	var resp bntypes.Account
 	err := bnc.getAPI(ctx, "/api/v3/account", nil, true, true, &resp)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting balances: %w", err)
 	}
 
 	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
@@ -478,7 +543,7 @@ func (bnc *binance) setBalances(ctx context.Context) error {
 
 // setTokenIDs stores the token IDs for which deposits and withdrawals are
 // enabled on binance.
-func (bnc *binance) setTokenIDs(coins []*binanceCoinInfo) {
+func (bnc *binance) setTokenIDs(coins []*bntypes.CoinInfo) {
 	tokenIDs := make(map[string][]uint32)
 	for _, nfo := range coins {
 		tokenSymbol := strings.ToLower(nfo.Coin)
@@ -505,7 +570,7 @@ func (bnc *binance) setTokenIDs(coins []*binanceCoinInfo) {
 // getCoinInfo retrieves binance configs then updates the user balances and
 // the tokenIDs.
 func (bnc *binance) getCoinInfo(ctx context.Context) error {
-	coins := make([]*binanceCoinInfo, 0)
+	coins := make([]*bntypes.CoinInfo, 0)
 	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
 	if err != nil {
 		return fmt.Errorf("error getting binance coin info: %w", err)
@@ -515,24 +580,14 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 	return nil
 }
 
-func (bnc *binance) getMarkets(ctx context.Context) (map[string]*binanceMarket, error) {
-	var exchangeInfo struct {
-		Timezone   string `json:"timezone"`
-		ServerTime int64  `json:"serverTime"`
-		RateLimits []struct {
-			RateLimitType string `json:"rateLimitType"`
-			Interval      string `json:"interval"`
-			IntervalNum   int64  `json:"intervalNum"`
-			Limit         int64  `json:"limit"`
-		} `json:"rateLimits"`
-		Symbols []*binanceMarket `json:"symbols"`
-	}
+func (bnc *binance) getMarkets(ctx context.Context) (map[string]*bntypes.Market, error) {
+	var exchangeInfo bntypes.ExchangeInfo
 	err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &exchangeInfo)
 	if err != nil {
 		return nil, fmt.Errorf("error getting markets from Binance: %w", err)
 	}
 
-	marketsMap := make(map[string]*binanceMarket, len(exchangeInfo.Symbols))
+	marketsMap := make(map[string]*bntypes.Market, len(exchangeInfo.Symbols))
 	for _, market := range exchangeInfo.Symbols {
 		marketsMap[market.Symbol] = market
 	}
@@ -693,7 +748,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 
 	slug := baseCfg.coin + quoteCfg.coin
 
-	marketsMap := bnc.markets.Load().(map[string]*binanceMarket)
+	marketsMap := bnc.markets.Load().(map[string]*bntypes.Market)
 	market, found := marketsMap[slug]
 	if !found {
 		return nil, fmt.Errorf("market not found: %v", slug)
@@ -737,15 +792,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		}
 	}()
 
-	var orderResponse struct {
-		Symbol             string  `json:"symbol"`
-		Price              float64 `json:"price,string"`
-		OrigQty            float64 `json:"origQty,string"`
-		OrigQuoteQty       float64 `json:"origQuoteOrderQty,string"`
-		ExecutedQty        float64 `json:"executedQty,string"`
-		CumulativeQuoteQty float64 `json:"cummulativeQuoteQty,string"`
-		Status             string  `json:"status"`
-	}
+	var orderResponse bntypes.OrderResponse
 	err = bnc.postAPI(ctx, "/api/v3/order", v, nil, true, true, &orderResponse)
 	if err != nil {
 		return nil, err
@@ -767,7 +814,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 }
 
 func (bnc *binance) assetPrecision(coin string) (int, error) {
-	for _, market := range bnc.markets.Load().(map[string]*binanceMarket) {
+	for _, market := range bnc.markets.Load().(map[string]*bntypes.Market) {
 		if market.BaseAsset == coin {
 			return market.BaseAssetPrecision, nil
 		}
@@ -885,33 +932,37 @@ func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (stri
 
 // ConfirmDeposit is an async function that calls onConfirm when the status of
 // a deposit has been confirmed.
-func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(uint64)) {
-	const (
-		pendingStatus            = 0
-		successStatus            = 1
-		creditedStatus           = 6
-		wrongDepositStatus       = 7
-		waitingUserConfirmStatus = 8
-	)
-
+func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData, onConfirm func(uint64)) {
 	checkDepositStatus := func() (done bool, amt uint64) {
-		var resp []struct {
-			Amount  float64 `json:"amount,string"`
-			Coin    string  `json:"coin"`
-			Network string  `json:"network"`
-			Status  int     `json:"status"`
-			TxID    string  `json:"txId"`
+		var resp []*bntypes.PendingDeposit
+		// We'll add info for the fake server.
+		var query url.Values
+		if bnc.accountsURL == fakeBinanceURL {
+			bncAsset, err := bncAssetCfg(deposit.AssetID)
+			if err != nil {
+				bnc.log.Errorf("Error getting asset cfg for %d: %v", deposit.AssetID, err)
+				return
+			}
+
+			query = url.Values{
+				"txid":    []string{deposit.TxID},
+				"amt":     []string{strconv.FormatFloat(deposit.AmountConventional, 'f', 9, 64)},
+				"coin":    []string{bncAsset.coin},
+				"network": []string{bncAsset.chain},
+			}
 		}
-		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", nil, true, true, &resp)
+		// TODO: Use the "startTime" parameter to apply a reasonable limit to
+		// this request.
+		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", query, true, true, &resp)
 		if err != nil {
 			bnc.log.Errorf("error getting deposit status: %v", err)
 			return false, 0
 		}
 
 		for _, status := range resp {
-			if status.TxID == txID {
+			if status.TxID == deposit.TxID {
 				switch status.Status {
-				case successStatus, creditedStatus:
+				case bntypes.DepositStatusSuccess, bntypes.DepositStatusCredited:
 					dexSymbol := binanceCoinNetworkToDexSymbol(status.Coin, status.Network)
 					assetID, found := dex.BipSymbolID(dexSymbol)
 					if !found {
@@ -925,13 +976,13 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, txID string, onConfirm f
 					}
 					amount := uint64(status.Amount * float64(ui.Conventional.ConversionFactor))
 					return true, amount
-				case pendingStatus:
+				case bntypes.DepositStatusPending:
 					return false, 0
-				case waitingUserConfirmStatus:
+				case bntypes.DepositStatusWaitingUserConfirm:
 					// This shouldn't ever happen.
 					bnc.log.Errorf("Deposit %s to binance requires user confirmation!")
 					return true, 0
-				case wrongDepositStatus:
+				case bntypes.DepositStatusWrongDeposit:
 					return true, 0
 				default:
 					bnc.log.Errorf("Deposit %s to binance has an unknown status %d", status.Status)
@@ -1031,7 +1082,7 @@ func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
 }
 
 func (bnc *binance) Markets(ctx context.Context) (_ []*Market, err error) {
-	bnMarkets := bnc.markets.Load().(map[string]*binanceMarket)
+	bnMarkets := bnc.markets.Load().(map[string]*bntypes.Market)
 	if len(bnMarkets) == 0 {
 		bnMarkets, err = bnc.getMarkets(ctx)
 		if err != nil {
@@ -1064,7 +1115,7 @@ func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form ur
 }
 
 func (bnc *binance) requestInto(req *http.Request, thing interface{}) error {
-	bnc.log.Tracef("Sending request: %+v", req)
+	// bnc.log.Tracef("Sending request: %+v", req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1094,10 +1145,10 @@ func (bnc *binance) requestInto(req *http.Request, thing interface{}) error {
 
 func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool) (*http.Request, error) {
 	var fullURL string
-	if (bnc.net == dex.Simnet || bnc.net == dex.Testnet) && strings.Contains(endpoint, "sapi") {
-		fullURL = fakeBinanceURL + endpoint
+	if strings.Contains(endpoint, "sapi") {
+		fullURL = bnc.accountsURL + endpoint
 	} else {
-		fullURL = bnc.url + endpoint
+		fullURL = bnc.marketsURL + endpoint
 	}
 
 	if query == nil {
@@ -1154,7 +1205,7 @@ func (bnc *binance) sendCexUpdateNotes() {
 	}
 }
 
-func (bnc *binance) handleOutboundAccountPosition(update *binanceStreamUpdate) {
+func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) {
 	bnc.log.Debugf("Received outboundAccountPosition: %+v", update)
 	for _, bal := range update.Balances {
 		bnc.log.Debugf("outboundAccountPosition balance: %+v", bal)
@@ -1162,7 +1213,7 @@ func (bnc *binance) handleOutboundAccountPosition(update *binanceStreamUpdate) {
 
 	supportedTokens := bnc.tokenIDs.Load().(map[string][]uint32)
 
-	processSymbol := func(symbol string, bal *binanceWSBalance) {
+	processSymbol := func(symbol string, bal *bntypes.WSBalance) {
 		for _, assetID := range getDEXAssetIDs(symbol, supportedTokens) {
 			bnc.balances[assetID] = &bncBalance{
 				available: bal.Free,
@@ -1206,7 +1257,7 @@ func (bnc *binance) removeTradeUpdater(tradeID string) {
 	delete(bnc.tradeInfo, tradeID)
 }
 
-func (bnc *binance) handleExecutionReport(update *binanceStreamUpdate) {
+func (bnc *binance) handleExecutionReport(update *bntypes.StreamUpdate) {
 	bnc.log.Debugf("Received executionReport: %+v", update)
 
 	status := update.CurrentOrderStatus
@@ -1257,7 +1308,7 @@ func (bnc *binance) handleExecutionReport(update *binanceStreamUpdate) {
 func (bnc *binance) handleUserDataStreamUpdate(b []byte) {
 	bnc.log.Tracef("Received user data stream update: %s", string(b))
 
-	var msg *binanceStreamUpdate
+	var msg *bntypes.StreamUpdate
 	if err := json.Unmarshal(b, &msg); err != nil {
 		bnc.log.Errorf("Error unmarshaling user data stream update: %v\nRaw message: %s", err, string(b))
 		return
@@ -1272,9 +1323,7 @@ func (bnc *binance) handleUserDataStreamUpdate(b []byte) {
 }
 
 func (bnc *binance) getListenID(ctx context.Context) (string, error) {
-	var resp struct {
-		ListenKey string `json:"listenKey"`
-	}
+	var resp *bntypes.DataStreamKey
 	return resp.ListenKey, bnc.postAPI(ctx, "/api/v3/userDataStream", nil, nil, true, false, &resp)
 }
 
@@ -1287,8 +1336,6 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 			return nil, err
 		}
 
-		hdr := make(http.Header)
-		hdr.Set("X-MBX-APIKEY", bnc.apiKey)
 		conn, err := comms.NewWsConn(&comms.WsCfg{
 			URL:      bnc.wsURL + "/ws/" + listenKey,
 			PingWait: time.Minute * 4,
@@ -1297,10 +1344,10 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 			},
 			Logger:         bnc.log.SubLogger("BNCWS"),
 			RawHandler:     bnc.handleUserDataStreamUpdate,
-			ConnectHeaders: hdr,
+			ConnectHeaders: http.Header{"X-MBX-APIKEY": []string{bnc.apiKey}},
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("NewWsConn error: %w", err)
 		}
 
 		cm := dex.NewConnectionMaster(conn)
@@ -1385,11 +1432,7 @@ func (bnc *binance) subUnsubDepth(subscribe bool, mktStreamID string) error {
 		method = "UNSUBSCRIBE"
 	}
 
-	req := &struct {
-		Method string   `json:"method"`
-		Params []string `json:"params"`
-		ID     uint64   `json:"id"`
-	}{
+	req := &bntypes.StreamSubscription{
 		Method: method,
 		Params: []string{mktStreamID},
 		ID:     atomic.AddUint64(&subscribeID, 1),
@@ -1409,7 +1452,7 @@ func (bnc *binance) subUnsubDepth(subscribe bool, mktStreamID string) error {
 }
 
 func (bnc *binance) handleMarketDataNote(b []byte) {
-	var note *binanceBookNote
+	var note *bntypes.BookNote
 	if err := json.Unmarshal(b, &note); err != nil {
 		bnc.log.Errorf("Error unmarshaling book note: %v", err)
 		return
@@ -1438,12 +1481,12 @@ func (bnc *binance) handleMarketDataNote(b []byte) {
 	book.updateQueue <- note.Data
 }
 
-func (bnc *binance) getOrderbookSnapshot(ctx context.Context, mktSymbol string) (*binanceOrderbookSnapshot, error) {
+func (bnc *binance) getOrderbookSnapshot(ctx context.Context, mktSymbol string) (*bntypes.OrderbookSnapshot, error) {
 	v := make(url.Values)
 	v.Add("symbol", strings.ToUpper(mktSymbol))
 	v.Add("limit", "1000")
-	resp := &binanceOrderbookSnapshot{}
-	return resp, bnc.getAPI(ctx, "/api/v3/depth", v, false, false, resp)
+	var resp bntypes.OrderbookSnapshot
+	return &resp, bnc.getAPI(ctx, "/api/v3/depth", v, false, false, &resp)
 }
 
 // subscribeToAdditionalMarketDataStream is called when a new market is
@@ -1469,16 +1512,16 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 		return nil
 	}
 
-	bnc.books[mktID] = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, bnc.log)
-	book = bnc.books[mktID]
-
 	if err := bnc.subUnsubDepth(true, streamID); err != nil {
 		return fmt.Errorf("error subscribing to %s: %v", streamID, err)
 	}
 
-	go book.sync(ctx, func() (*binanceOrderbookSnapshot, error) {
+	getSnapshot := func() (*bntypes.OrderbookSnapshot, error) {
 		return bnc.getOrderbookSnapshot(ctx, mktID)
-	})
+	}
+	book = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, bnc.log)
+	bnc.books[mktID] = book
+	book.sync(ctx)
 
 	return nil
 }
@@ -1533,7 +1576,10 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 	}
 	mktID := binanceMktID(baseCfg, quoteCfg)
 	bnc.booksMtx.Lock()
-	book := newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, bnc.log)
+	getSnapshot := func() (*bntypes.OrderbookSnapshot, error) {
+		return bnc.getOrderbookSnapshot(ctx, mktID)
+	}
+	book := newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, bnc.log)
 	bnc.books[mktID] = book
 	bnc.booksMtx.Unlock()
 
@@ -1545,9 +1591,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 
 	bnc.marketStream = conn
 
-	go book.sync(ctx, func() (*binanceOrderbookSnapshot, error) {
-		return bnc.getOrderbookSnapshot(ctx, mktID)
-	})
+	book.sync(ctx)
 
 	// Start a goroutine to reconnect every 12 hours
 	go func() {
@@ -1613,10 +1657,15 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 	}
 
 	var unsubscribe bool
+	var closer *dex.ConnectionMaster
 
 	bnc.booksMtx.Lock()
 	defer func() {
 		bnc.booksMtx.Unlock()
+
+		if closer != nil {
+			closer.Disconnect()
+		}
 
 		if unsubscribe {
 			if err := bnc.subUnsubDepth(false, streamID); err != nil {
@@ -1632,12 +1681,13 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 	}
 
 	book.mtx.Lock()
-	defer book.mtx.Unlock()
 	book.numSubscribers--
 	if book.numSubscribers == 0 {
 		unsubscribe = true
 		delete(bnc.books, mktID)
+		closer = book.cm
 	}
+	book.mtx.Unlock()
 
 	return nil
 }
@@ -1691,19 +1741,7 @@ func (bnc *binance) MidGap(baseID, quoteID uint32) uint64 {
 	return book.midGap()
 }
 
-func (bnc *binance) TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) {
-	var resp struct {
-		Symbol             string `json:"symbol"`
-		OrderID            int64  `json:"orderId"`
-		ClientOrderID      string `json:"clientOrderId"`
-		Price              string `json:"price"`
-		OrigQty            string `json:"origQty"`
-		ExecutedQty        string `json:"executedQty"`
-		CumulativeQuoteQty string `json:"cumulativeQuoteQty"`
-		Status             string `json:"status"`
-		TimeInForce        string `json:"timeInForce"`
-	}
-
+func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quoteID uint32) {
 	baseAsset, err := bncAssetCfg(baseID)
 	if err != nil {
 		bnc.log.Errorf("Error getting asset cfg for %d: %v", baseID, err)
@@ -1718,8 +1756,9 @@ func (bnc *binance) TradeStatus(ctx context.Context, id string, baseID, quoteID 
 
 	v := make(url.Values)
 	v.Add("symbol", baseAsset.coin+quoteAsset.coin)
-	v.Add("origClientOrderId", id)
+	v.Add("origClientOrderId", tradeID)
 
+	var resp bntypes.BookedOrder
 	err = bnc.getAPI(ctx, "/api/v3/order", v, true, true, &resp)
 	if err != nil {
 		bnc.log.Errorf("Error getting trade status: %v", err)

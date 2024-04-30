@@ -19,13 +19,15 @@ import (
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 )
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	NotificationFeed() *core.NoteFeed
-	ExchangeMarket(host string, base, quote uint32) (*core.Market, error)
-	SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error)
+	ExchangeMarket(host string, baseID, quoteID uint32) (*core.Market, error)
+	MarketConfig(host string, baseID, quoteID uint32) (*msgjson.Market, error)
+	SyncBook(host string, baseID, quoteID uint32) (*orderbook.OrderBook, core.BookFeed, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uint64, error)
 	Cancel(oidB dex.Bytes) error
@@ -856,7 +858,7 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 
 				mkt := MarketWithHost{cfg.Host, cfg.BaseID, cfg.QuoteID}
 				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
-				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s", mktID))
+				logger := m.log.SubLogger(fmt.Sprintf("MM-%s", mktID))
 				exchangeAdaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
 					botID:              mktID,
 					market:             &mkt,
@@ -891,7 +893,7 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				defer m.log.Infof("Simple arbitrage bot for %s-%d-%d stopped", cfg.Host, cfg.BaseID, cfg.QuoteID)
 
 				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
-				logger := m.log.SubLogger(fmt.Sprintf("SimpleArbitrage-%s", mktID))
+				logger := m.log.SubLogger(fmt.Sprintf("ARB-%s", mktID))
 
 				cex, found := cexes[cfg.CEXCfg.Name]
 				if !found {
@@ -934,7 +936,7 @@ func (m *MarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) 
 				defer m.log.Infof("ArbMarketMaker for %s-%d-%d stopped", cfg.Host, cfg.BaseID, cfg.QuoteID)
 
 				mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
-				logger := m.log.SubLogger(fmt.Sprintf("ArbMarketMaker-%s", mktID))
+				logger := m.log.SubLogger(fmt.Sprintf("AMM-%s", mktID))
 
 				cex, found := cexes[cfg.CEXCfg.Name]
 				if !found {

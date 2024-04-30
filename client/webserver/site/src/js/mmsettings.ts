@@ -153,7 +153,7 @@ const defaultMarketMakingConfig : ConfigState = {
   oracleWeighting: 0.1,
   oracleBias: 0,
   emptyMarketRate: 0,
-  profit: 3,
+  profit: 0.02,
   orderPersistence: 20,
   baseBalanceType: BalanceType.Percentage,
   quoteBalanceType: BalanceType.Percentage,
@@ -412,9 +412,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   async initialize (specs?: BotSpecs) {
     await this.refreshStatus()
-
     this.setupCEXes()
-
     this.marketRows = []
     for (const { host, markets, assets, auth: { effectiveTier, pendingStrength } } of Object.values(app().exchanges)) {
       if (effectiveTier + pendingStrength === 0) {
@@ -1011,8 +1009,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   qcProfitChanged () {
     const { page, updatedConfig: cfg } = this
-    const v = Math.max(qcMinimumProfit, parseFloat(page.qcProfit.value ?? '') || qcDefaultProfitThreshold)
-    cfg.profit = v
+    const v = Math.max(qcMinimumProfit, parseFloat(page.qcProfit.value ?? '') || qcDefaultProfitThreshold * 100)
+    cfg.profit = v / 100
     page.qcProfit.value = v.toFixed(2)
     this.qcProfitSlider.setValue(v / 100, true)
     this.quickConfigUpdated()
@@ -1741,16 +1739,17 @@ export default class MarketMakerSettingsPage extends BasePage {
     const handleChanged = () => { this.updateModifiedMarkers() }
 
     // Profit
-    page.profitInput.value = String(cfg.profit)
+    page.profitInput.value = String(cfg.profit * 100)
     Doc.bind(page.profitInput, 'change', () => {
       Doc.hide(page.profitInputErr)
       const showError = (errID: string) => {
         Doc.show(page.profitInputErr)
         page.profitInputErr.textContent = intl.prep(errID)
       }
-      cfg.profit = parseFloat(page.profitInput.value || '')
-      if (isNaN(cfg.profit)) return showError(intl.ID_INVALID_VALUE)
-      if (cfg.profit === 0) return showError(intl.ID_NO_ZERO)
+      const profit = parseFloat(page.profitInput.value || '') / 100
+      if (isNaN(profit)) return showError(intl.ID_INVALID_VALUE)
+      if (profit === 0) return showError(intl.ID_NO_ZERO)
+      cfg.profit = profit
       this.updateModifiedMarkers()
     })
 
@@ -1825,8 +1824,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     // Quick Config
     this.qcProfitSlider = new XYRangeHandler(profitSliderRange, qcDefaultProfitThreshold, {
       updated: (x: number /* , y: number */) => {
-        cfg.profit = x * 100
-        page.qcProfit.value = page.profitInput.value = cfg.profit.toFixed(2)
+        cfg.profit = x
+        page.qcProfit.value = page.profitInput.value = (cfg.profit * 100).toFixed(2)
         this.quickConfigUpdated()
       },
       changed: () => { this.quickConfigUpdated() },
@@ -1957,7 +1956,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     orderPersistence.reset()
     if (baseBalance) baseBalance.reset()
     if (quoteBalance) quoteBalance.reset()
-    page.profitInput.value = String(cfg.profit)
+    page.profitInput.value = String(cfg.profit * 100)
     page.useOracleCheckbox.checked = cfg.useOracles && oldCfg.oracleWeighting > 0
     this.useOraclesChanged()
     page.emptyMarketRateCheckbox.checked = cfg.useEmptyMarketRate && cfg.emptyMarketRate > 0
@@ -2892,7 +2891,7 @@ class PlacementsChart extends Chart {
   render () {
     const { ctx, canvas, theme, settingsPage } = this
     if (canvas.width === 0) return
-    const { page, cfg: { buyPlacements, sellPlacements, profit: profitPercent }, baseFiatRate, botType } = settingsPage.marketStuff()
+    const { page, cfg: { buyPlacements, sellPlacements, profit }, baseFiatRate, botType } = settingsPage.marketStuff()
     if (botType === botTypeBasicArb) return
 
     this.clear()
@@ -2909,7 +2908,6 @@ class PlacementsChart extends Chart {
     const isBasicMM = botType === botTypeBasicMM
     const cx = canvas.width / 2
     const [cexGapL, cexGapR] = isBasicMM ? [cx, cx] : [0.48 * canvas.width, 0.52 * canvas.width]
-    const profit = profitPercent / 100
 
     const buyLots = buyPlacements.reduce((v: number, p: OrderPlacement) => v + p.lots, 0)
     const sellLots = sellPlacements.reduce((v: number, p: OrderPlacement) => v + p.lots, 0)

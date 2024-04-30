@@ -133,11 +133,11 @@ tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'harness-ctl'
 
 tmux new-window -t $SESSION:1 -n 'dexc1' $SHELL
-tmux send-keys -t $SESSION:1 "cd ${PAIR_ROOT}/dexc1" C-m
+tmux send-keys -t $SESSION:1 "cd ${CLIENT_1_DIR}" C-m
 tmux send-keys -t $SESSION:1 "${DEXC} --appdata=${CLIENT_1_DIR} ${DEXC_ARGS}" C-m
 
-tmux new-window -t $SESSION:2 -n 'dexc1' $SHELL
-tmux send-keys -t $SESSION:2 "cd ${PAIR_ROOT}/dexc1" C-m
+tmux new-window -t $SESSION:2 -n 'dexc2' $SHELL
+tmux send-keys -t $SESSION:2 "cd ${CLIENT_2_DIR}" C-m
 tmux send-keys -t $SESSION:2 "${DEXC} --appdata=${CLIENT_2_DIR} ${DEXC_ARGS}" C-m
 
 tmux select-window -t $SESSION:0

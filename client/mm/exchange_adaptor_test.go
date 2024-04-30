@@ -1319,6 +1319,7 @@ func TestMultiTrade(t *testing.T) {
 						dexBalances = test.buyDexBalances
 						cexBalances = test.buyCexBalances
 					}
+
 					adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
 						core:            tCore,
 						baseDexBalances: dexBalances,

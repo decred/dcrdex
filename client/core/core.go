@@ -1973,18 +1973,32 @@ func (c *Core) Exchange(host string) (*Exchange, error) {
 
 // ExchangeMarket returns the market with the given base and quote assets at the
 // given host. It returns an error if no market exists at that host.
-func (c *Core) ExchangeMarket(host string, base, quote uint32) (*Market, error) {
+func (c *Core) ExchangeMarket(host string, baseID, quoteID uint32) (*Market, error) {
 	dc, _, err := c.dex(host)
 	if err != nil {
 		return nil, err
 	}
 
-	mkt := dc.coreMarket(marketName(base, quote))
+	mkt := dc.coreMarket(marketName(baseID, quoteID))
 	if mkt == nil {
-		return nil, fmt.Errorf("no market found for %s-%s at %s", unbip(base), unbip(quote), host)
+		return nil, fmt.Errorf("no market found for %s-%s at %s", unbip(baseID), unbip(quoteID), host)
 	}
 
 	return mkt, nil
+}
+
+// MarketConfig gets the configuration for the market.
+func (c *Core) MarketConfig(host string, baseID, quoteID uint32) (*msgjson.Market, error) {
+	dc, _, err := c.dex(host)
+	if err != nil {
+		return nil, err
+	}
+	for _, mkt := range dc.config().Markets {
+		if mkt.Base == baseID && mkt.Quote == quoteID {
+			return mkt, nil
+		}
+	}
+	return nil, fmt.Errorf("market (%d, %d) not found for host %s", baseID, quoteID, host)
 }
 
 // dexConnections creates a slice of the *dexConnection in c.conns.
@@ -7309,7 +7323,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		bondAsset := bondAssets[bond.AssetID]
 		if bondAsset == nil {
-			c.log.Warnf("Server no longer supports %v as a bond asset!", symb)
+			c.log.Warnf("Server no longer supports %d as a bond asset!", bond.AssetID)
 			continue
 		}
 

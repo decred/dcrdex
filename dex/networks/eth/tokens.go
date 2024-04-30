@@ -208,16 +208,19 @@ func MaybeReadSimnetAddrsDir(
 	testUSDCContractAddrFile := filepath.Join(harnessDir, "test_usdc_contract_address.txt")
 	multiBalanceContractAddrFile := filepath.Join(harnessDir, "multibalance_address.txt")
 
-	contractsAddrs[0][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFile)
-	multiBalandAddresses[dex.Simnet] = getContractAddrFromFile(multiBalanceContractAddrFile)
+	contractsAddrs[0][dex.Simnet] = maybeGetContractAddrFromFile(ethSwapContractAddrFile)
+	multiBalandAddresses[dex.Simnet] = maybeGetContractAddrFromFile(multiBalanceContractAddrFile)
 
-	usdcToken.SwapContracts[0].Address = getContractAddrFromFile(testUSDCSwapContractAddrFile)
-	usdcToken.Address = getContractAddrFromFile(testUSDCContractAddrFile)
+	usdcToken.SwapContracts[0].Address = maybeGetContractAddrFromFile(testUSDCSwapContractAddrFile)
+	usdcToken.Address = maybeGetContractAddrFromFile(testUSDCContractAddrFile)
 }
 
-func getContractAddrFromFile(fileName string) (addr common.Address) {
+func maybeGetContractAddrFromFile(fileName string) (addr common.Address) {
 	addrBytes, err := os.ReadFile(fileName)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
 		fmt.Printf("error reading contract address: %v \n", err)
 		return
 	}

@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 
 	_ "decred.org/dcrdex/client/asset/btc"     // register btc asset
@@ -114,6 +115,16 @@ func (c *tCore) NotificationFeed() *core.NoteFeed {
 }
 func (c *tCore) ExchangeMarket(host string, base, quote uint32) (*core.Market, error) {
 	return c.market, nil
+}
+
+func (c *tCore) MarketConfig(host string, base, quote uint32) (*msgjson.Market, error) {
+	return &msgjson.Market{
+		Name:     c.market.Name,
+		Base:     c.market.BaseID,
+		Quote:    c.market.QuoteID,
+		LotSize:  c.market.LotSize,
+		RateStep: c.market.RateStep,
+	}, nil
 }
 
 func (t *tCore) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
@@ -1363,8 +1374,8 @@ func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address
 	return "", nil
 }
 
-func (c *tCEX) ConfirmDeposit(ctx context.Context, txID string, onConfirm func(uint64)) {
-	c.lastConfirmDepositTx = txID
+func (c *tCEX) ConfirmDeposit(ctx context.Context, deposit *libxc.DepositData, onConfirm func(uint64)) {
+	c.lastConfirmDepositTx = deposit.TxID
 
 	go func() {
 		confirmDepositAmt := <-c.confirmDeposit

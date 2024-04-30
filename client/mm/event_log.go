@@ -188,7 +188,7 @@ func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltE
 // the event already exists, it is updated. If it does not exist, it is added.
 // The stats for the run are also updated based on the event.
 func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
-	err := db.Update(func(tx *bbolt.Tx) error {
+	if err := db.Update(func(tx *bbolt.Tx) error {
 		botRuns := tx.Bucket(botRunsBucket)
 		runBucket := botRuns.Bucket(update.runKey)
 		if runBucket == nil {
@@ -214,8 +214,9 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 			return err
 		}
 		return runBucket.Put(finalStateKey, versionedBytes(0).AddData(bsJSON))
-	})
-	db.log.Errorf("error storing event: %v", err)
+	}); err != nil {
+		db.log.Errorf("error storing event: %v", err)
+	}
 }
 
 // listedForStoreEvents listens on the updateEvent channel and updates the

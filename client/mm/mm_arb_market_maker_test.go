@@ -123,7 +123,7 @@ func TestArbMMRebalance(t *testing.T) {
 		if sell {
 			fees = sellFeesInQuoteUnits
 		}
-		rate, err := dexPlacementRate(counterTradeRate, sell, 0.01, mkt, fees)
+		rate, err := dexPlacementRate(counterTradeRate, sell, 0.01, mkt, fees, tLogger)
 		if err != nil {
 			panic(err)
 		}
@@ -445,7 +445,7 @@ func TestDEXPlacementRate(t *testing.T) {
 	}
 
 	runTest := func(tt *test) {
-		sellRate, err := dexPlacementRate(tt.counterTradeRate, true, tt.profit, tt.mkt, tt.fees)
+		sellRate, err := dexPlacementRate(tt.counterTradeRate, true, tt.profit, tt.mkt, tt.fees, tLogger)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", tt.name, err)
 		}
@@ -456,7 +456,7 @@ func TestDEXPlacementRate(t *testing.T) {
 			t.Fatalf("%s: expected additional %d but got %d", tt.name, tt.fees, additional)
 		}
 
-		buyRate, err := dexPlacementRate(tt.counterTradeRate, false, tt.profit, tt.mkt, tt.fees)
+		buyRate, err := dexPlacementRate(tt.counterTradeRate, false, tt.profit, tt.mkt, tt.fees, tLogger)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", tt.name, err)
 		}

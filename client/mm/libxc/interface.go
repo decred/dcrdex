@@ -33,6 +33,13 @@ type Market struct {
 	QuoteID uint32 `json:"quoteID"`
 }
 
+type DepositData struct {
+	AssetID            uint32
+	Amount             uint64
+	AmountConventional float64
+	TxID               string
+}
+
 // CEX implements a set of functions that can be used to interact with a
 // centralized exchange's spot trading API. All rates and quantities
 // when interacting with the CEX interface will adhere to the standard
@@ -71,7 +78,7 @@ type CEX interface {
 	GetDepositAddress(ctx context.Context, assetID uint32) (string, error)
 	// ConfirmDeposit is an async function that calls onConfirm when the status
 	// of a deposit has been confirmed.
-	ConfirmDeposit(ctx context.Context, txID string, onConfirm func(amount uint64))
+	ConfirmDeposit(ctx context.Context, deposit *DepositData, onConfirm func(amount uint64))
 	// Withdraw withdraws funds from the CEX to a certain address. onComplete
 	// is called with the actual amount withdrawn (amt - fees) and the
 	// transaction ID of the withdrawal.
