@@ -15,8 +15,8 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/dcrlabs/ltcwallet/wallet"
 	ltcchaincfg "github.com/ltcsuite/ltcd/chaincfg"
-	"github.com/ltcsuite/ltcwallet/wallet"
 )
 
 const (

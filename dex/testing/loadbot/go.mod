@@ -10,6 +10,12 @@ require (
 )
 
 require (
+	github.com/dcrlabs/ltcwallet v0.0.0-20240421164041-ef931f280d85 // indirect
+	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
+	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2 // indirect
+)
+
+require (
 	decred.org/cspp/v2 v2.1.0 // indirect
 	decred.org/dcrwallet/v3 v3.0.1 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
@@ -47,7 +53,6 @@ require (
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be // indirect
 	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095 // indirect
-	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead // indirect
 	github.com/deckarep/golang-set/v2 v2.1.0 // indirect
 	github.com/decred/base58 v1.0.5 // indirect
 	github.com/decred/dcrd/addrmgr/v2 v2.0.2 // indirect
@@ -121,19 +126,12 @@ require (
 	github.com/lightningnetwork/lnd/ticker v1.0.0 // indirect
 	github.com/lightningnetwork/lnd/tlv v1.0.2 // indirect
 	github.com/ltcsuite/lnd/clock v0.0.0-20200822020009-1a001cbb895a // indirect
-	github.com/ltcsuite/lnd/queue v1.0.3 // indirect
+	github.com/ltcsuite/lnd/queue v1.1.0 // indirect
 	github.com/ltcsuite/lnd/ticker v1.0.1 // indirect
-	github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665 // indirect
-	github.com/ltcsuite/ltcd/btcec/v2 v2.1.0 // indirect
-	github.com/ltcsuite/ltcd/ltcutil v1.1.0 // indirect
-	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.0-1 // indirect
-	github.com/ltcsuite/ltcwallet v0.13.1 // indirect
-	github.com/ltcsuite/ltcwallet/wallet/txauthor v1.1.0 // indirect
-	github.com/ltcsuite/ltcwallet/wallet/txrules v1.2.0 // indirect
-	github.com/ltcsuite/ltcwallet/wallet/txsizes v1.1.0 // indirect
-	github.com/ltcsuite/ltcwallet/walletdb v1.3.5 // indirect
-	github.com/ltcsuite/ltcwallet/wtxmgr v1.5.0 // indirect
-	github.com/ltcsuite/neutrino v0.13.2 // indirect
+	github.com/ltcsuite/ltcd v0.23.6-0.20240131072528-64dfa402637a // indirect
+	github.com/ltcsuite/ltcd/btcec/v2 v2.3.2 // indirect
+	github.com/ltcsuite/ltcd/ltcutil v1.1.4-0.20240131072528-64dfa402637a // indirect
+	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.1-0.20240131072528-64dfa402637a // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect
@@ -164,7 +162,7 @@ require (
 	golang.org/x/exp v0.0.0-20230206171751-46f607a40771 // indirect
 	golang.org/x/net v0.8.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.6.0 // indirect
+	golang.org/x/sys v0.8.0 // indirect
 	golang.org/x/term v0.6.0 // indirect
 	golang.org/x/text v0.8.0 // indirect
 	golang.org/x/time v0.3.0 // indirect

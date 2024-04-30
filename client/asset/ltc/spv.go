@@ -31,8 +31,15 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	btcwallet "github.com/btcsuite/btcwallet/wallet"
 	"github.com/btcsuite/btcwallet/wtxmgr"
-	neutrino "github.com/dcrlabs/neutrino-ltc"
-	labschain "github.com/dcrlabs/neutrino-ltc/chain"
+	"github.com/dcrlabs/ltcwallet/chain"
+	neutrino "github.com/dcrlabs/ltcwallet/spv"
+	labschain "github.com/dcrlabs/ltcwallet/spv/chain"
+	ltcwaddrmgr "github.com/dcrlabs/ltcwallet/waddrmgr"
+	"github.com/dcrlabs/ltcwallet/wallet"
+	"github.com/dcrlabs/ltcwallet/wallet/txauthor"
+	"github.com/dcrlabs/ltcwallet/walletdb"
+	_ "github.com/dcrlabs/ltcwallet/walletdb/bdb"
+	ltcwtxmgr "github.com/dcrlabs/ltcwallet/wtxmgr"
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 	btcneutrino "github.com/lightninglabs/neutrino"
@@ -42,13 +49,6 @@ import (
 	"github.com/ltcsuite/ltcd/ltcutil"
 	ltctxscript "github.com/ltcsuite/ltcd/txscript"
 	ltcwire "github.com/ltcsuite/ltcd/wire"
-	"github.com/ltcsuite/ltcwallet/chain"
-	ltcwaddrmgr "github.com/ltcsuite/ltcwallet/waddrmgr"
-	"github.com/ltcsuite/ltcwallet/wallet"
-	"github.com/ltcsuite/ltcwallet/wallet/txauthor"
-	"github.com/ltcsuite/ltcwallet/walletdb"
-	_ "github.com/ltcsuite/ltcwallet/walletdb/bdb"
-	ltcwtxmgr "github.com/ltcsuite/ltcwallet/wtxmgr"
 )
 
 const (
@@ -183,7 +183,7 @@ func (w *ltcSPVWallet) walletParams() *ltcchaincfg.Params {
 		return w.chainParams
 	}
 	spoofParams := *w.chainParams
-	spoofParams.Net = ltcwire.TestNet3
+	spoofParams.Net = ltcwire.TestNet4
 	return &spoofParams
 }
 
@@ -509,7 +509,7 @@ func (w *ltcSPVWallet) LockedOutpoints() []btcjson.TransactionInput {
 }
 
 func (w *ltcSPVWallet) NewChangeAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
-	ltcAddr, err := w.Wallet.NewChangeAddress(account, ltcwaddrmgr.KeyScopeBIP0084)
+	ltcAddr, err := w.Wallet.NewChangeAddress(account, ltcwaddrmgr.KeyScopeBIP0084WithBitcoinCoinID)
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +517,7 @@ func (w *ltcSPVWallet) NewChangeAddress(account uint32, _ waddrmgr.KeyScope) (bt
 }
 
 func (w *ltcSPVWallet) NewAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
-	ltcAddr, err := w.Wallet.NewAddress(account, ltcwaddrmgr.KeyScopeBIP0084)
+	ltcAddr, err := w.Wallet.NewAddress(account, ltcwaddrmgr.KeyScopeBIP0084WithBitcoinCoinID)
 	if err != nil {
 		return nil, err
 	}
@@ -540,7 +540,7 @@ func (w *ltcSPVWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, 
 }
 
 func (w *ltcSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, account uint32, minconf int32,
-	satPerKb btcutil.Amount, css btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
+	satPerKb btcutil.Amount, _ btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
 
 	ltcOuts := make([]*ltcwire.TxOut, len(outputs))
 	for i, op := range outputs {
@@ -550,8 +550,8 @@ func (w *ltcSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, 
 		}
 	}
 
-	ltcTx, err := w.Wallet.SendOutputs(ltcOuts, &ltcwaddrmgr.KeyScopeBIP0084, account,
-		minconf, ltcutil.Amount(satPerKb), wallet.CoinSelectionStrategy(css), label)
+	ltcTx, err := w.Wallet.SendOutputs(ltcOuts, &ltcwaddrmgr.KeyScopeBIP0084WithBitcoinCoinID, account,
+		minconf, ltcutil.Amount(satPerKb), &wallet.RandomCoinSelector{}, label)
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +596,8 @@ func (w *ltcSPVWallet) Stop() {
 }
 
 func (w *ltcSPVWallet) AccountProperties(_ waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error) {
-	props, err := w.Wallet.AccountProperties(ltcwaddrmgr.KeyScopeBIP0084, acct)
+	scope := ltcwaddrmgr.KeyScopeBIP0084WithBitcoinCoinID
+	props, err := w.Wallet.AccountProperties(scope, acct)
 	if err != nil {
 		return nil, err
 	}
@@ -607,8 +608,11 @@ func (w *ltcSPVWallet) AccountProperties(_ waddrmgr.KeyScope, acct uint32) (*wad
 		InternalKeyCount:     props.InternalKeyCount,
 		ImportedKeyCount:     props.ImportedKeyCount,
 		MasterKeyFingerprint: props.MasterKeyFingerprint,
-		KeyScope:             waddrmgr.KeyScopeBIP0084,
-		IsWatchOnly:          props.IsWatchOnly,
+		KeyScope: waddrmgr.KeyScope{
+			Purpose: scope.Purpose,
+			Coin:    scope.Coin,
+		},
+		IsWatchOnly: props.IsWatchOnly,
 		// The last two would need conversion but aren't currently used.
 		// AccountPubKey:        props.AccountPubKey,
 		// AddrSchema:           props.AddrSchema,
@@ -1006,7 +1010,7 @@ func convertMsgTxToLTC(tx *wire.MsgTx) (*ltcwire.MsgTx, error) {
 }
 
 func extendAddresses(extIdx, intIdx uint32, ltcw *wallet.Wallet) error {
-	scopedKeyManager, err := ltcw.Manager.FetchScopedKeyManager(ltcwaddrmgr.KeyScopeBIP0084)
+	scopedKeyManager, err := ltcw.Manager.FetchScopedKeyManager(ltcwaddrmgr.KeyScopeBIP0084WithBitcoinCoinID)
 	if err != nil {
 		return err
 	}
