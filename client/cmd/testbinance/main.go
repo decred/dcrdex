@@ -281,6 +281,7 @@ func newFakeBinanceServer(ctx context.Context) (*fakeBinance, error) {
 		r.Get("/order", f.handleGetOrder)
 		r.Post("/order", f.handlePostOrder)
 		r.Post("/userDataStream", f.handleListenKeyRequest)
+		r.Put("/userDataStream", f.streamExtend)
 		r.Delete("/order", f.handleDeleteOrder)
 	})
 
@@ -903,6 +904,10 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONWithStatus(w, &resp, http.StatusOK)
+}
+
+func (f *fakeBinance) streamExtend(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
 }
 
 func (f *fakeBinance) handleListenKeyRequest(w http.ResponseWriter, r *http.Request) {
