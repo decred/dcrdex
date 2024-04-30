@@ -370,7 +370,7 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 	}
 
 	if !startFiatRateOracle {
-		cfg.FiatRateBroadcastInterval = 0
+		cfg.FiatRateBroadcastInterval = -1
 	}
 
 	t, err := tatanka.New(cfg)

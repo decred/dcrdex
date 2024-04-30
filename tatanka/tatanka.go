@@ -132,7 +132,7 @@ type Config struct {
 
 type FiatOracleConfig struct {
 	fiatrates.Config
-	FiatRateBroadcastInterval int64 `long:"fiatratebroadcastinterval" description:"Specify the minutes it'll take before the server notifies all subscribed clients with fiat rates (max allowed = 10). Set to zero to disable the fiat rate oracle."`
+	FiatRateBroadcastInterval int64 `long:"fiatratebroadcastinterval" description:"Specify the minutes it'll take before the server notifies all subscribed clients with fiat rates(max allowed = 8). Set to -1 to disable the fiat rate oracle. A default of 8 minutes will be used if set to zero."`
 }
 
 func New(cfg *Config) (*Tatanka, error) {
@@ -194,8 +194,8 @@ func New(cfg *Config) (*Tatanka, error) {
 		}
 	}
 
-	const maxFiatRateBroadcastIntervalInMinutes = 10
-	if cfg.FiatRateBroadcastInterval > maxFiatRateBroadcastIntervalInMinutes {
+	const maxFiatRateBroadcastIntervalInMinutes = 8
+	if cfg.FiatRateBroadcastInterval > maxFiatRateBroadcastIntervalInMinutes || cfg.FiatRateBroadcastInterval == 0 {
 		cfg.FiatRateBroadcastInterval = maxFiatRateBroadcastIntervalInMinutes
 	}
 
@@ -760,7 +760,7 @@ func (t *Tatanka) broadcastFiatRates() {
 	}
 
 	for subject, subscribers := range topic.subjects {
-		rate := t.fiatRateOracle.Rate(string(subject))
+		rate := t.fiatRateOracle.Rate(t.ctx, string(subject))
 		if rate == 0 {
 			continue
 		}

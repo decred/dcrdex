@@ -23,7 +23,6 @@ const (
 // Oracle manages and retrieves fiat rate information from all enabled rate
 // sources.
 type Oracle struct {
-	ctx      context.Context
 	log      dex.Logger
 	sources  []*source
 	ratesMtx sync.RWMutex
@@ -52,7 +51,7 @@ func NewFiatOracle(cfg Config) (*Oracle, error) {
 
 // Rate returns the current fiat rate information for the provided symbol.
 // Returns zero if there are no rates for the provided symbol yet.
-func (o *Oracle) Rate(symbol string) float64 {
+func (o *Oracle) Rate(ctx context.Context, symbol string) float64 {
 	o.ratesMtx.Lock()
 	defer o.ratesMtx.Unlock()
 
@@ -64,7 +63,7 @@ func (o *Oracle) Rate(symbol string) float64 {
 	}
 
 	if !hasRateInfo {
-		o.fetchFiatRateNow(symbol)
+		o.fetchFiatRateNow(ctx, symbol)
 	}
 
 	return 0
@@ -74,7 +73,7 @@ func (o *Oracle) Rate(symbol string) float64 {
 // creates an entry for the provided asset. It'll try until one source returns a
 // non-zero value for the provided symbol. symbol must have been parsed by
 // parseSymbol function. Must be called with a write lock held on o.ratesMtx.
-func (o *Oracle) fetchFiatRateNow(symbol string) {
+func (o *Oracle) fetchFiatRateNow(ctx context.Context, symbol string) {
 	var fiatRate float64
 	defer func() {
 		// Initiate an entry for this asset. Even if fiatRate is still zero when
@@ -91,7 +90,7 @@ func (o *Oracle) fetchFiatRateNow(symbol string) {
 			continue
 		}
 
-		newRate, err := s.getRates(o.ctx, []string{symbol}, o.log)
+		newRate, err := s.getRates(ctx, []string{symbol}, o.log)
 		if err != nil {
 			o.log.Errorf("%s.getRates error: %v", s.name, err)
 			continue
@@ -118,7 +117,6 @@ func (o *Oracle) assets() []string {
 // Run starts goroutines that refresh fiat rates every source.refreshInterval.
 // This should be called in a goroutine as it's blocking.
 func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
-	o.ctx = ctx
 	o.log = log
 
 	var wg sync.WaitGroup
@@ -131,7 +129,7 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 			continue
 		}
 
-		o.fetchFromSource(fiatSource, &wg)
+		o.fetchFromSource(ctx, fiatSource, &wg)
 		sourcesEnabled++
 
 		if !initializedWithAssets {
@@ -139,7 +137,7 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 		}
 
 		// Fetch rates now.
-		newRates, err := fiatSource.getRates(o.ctx, o.assets(), o.log)
+		newRates, err := fiatSource.getRates(ctx, o.assets(), o.log)
 		if err != nil {
 			o.log.Errorf("failed to retrieve rate from %s: %v", fiatSource.name, err)
 			continue
@@ -153,7 +151,7 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 
 	if initializedWithAssets {
 		// Calculate average fiat rate now.
-		o.calculateAverageRate(&wg)
+		o.calculateAverageRate(ctx, &wg)
 	}
 
 	if sourcesEnabled > 0 {
@@ -168,14 +166,14 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 
 			for {
 				select {
-				case <-o.ctx.Done():
+				case <-ctx.Done():
 					return
 				case <-ticker.C:
 					if !o.hasAssets() {
 						continue // nothing to do
 					}
 
-					o.calculateAverageRate(&wg)
+					o.calculateAverageRate(ctx, &wg)
 				}
 			}
 		}()
@@ -186,14 +184,14 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 
 // calculateAverageRate is a shared function to support fiat average rate
 // calculations before and after averageRateRefreshInterval.
-func (o *Oracle) calculateAverageRate(wg *sync.WaitGroup) {
+func (o *Oracle) calculateAverageRate(ctx context.Context, wg *sync.WaitGroup) {
 	newRatesInfo := make(map[string]*fiatRateAndSourceCount)
 	for i := range o.sources {
 		s := o.sources[i]
 		if s.isDisabled() {
 			if s.checkIfSourceCanReactivate() {
 				// Start a new goroutine for this source.
-				o.fetchFromSource(s, wg)
+				o.fetchFromSource(ctx, s, wg)
 			}
 			continue
 		}
@@ -238,7 +236,7 @@ func (o *Oracle) hasAssets() bool {
 
 // fetchFromSource starts a goroutine that retrieves fiat rate from the provided
 // source.
-func (o *Oracle) fetchFromSource(s *source, wg *sync.WaitGroup) {
+func (o *Oracle) fetchFromSource(ctx context.Context, s *source, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func(s *source) {
 		defer wg.Done()
@@ -247,7 +245,7 @@ func (o *Oracle) fetchFromSource(s *source, wg *sync.WaitGroup) {
 
 		for {
 			select {
-			case <-o.ctx.Done():
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				if !o.hasAssets() || s.isDisabled() { // nothing to fetch.
@@ -260,7 +258,7 @@ func (o *Oracle) fetchFromSource(s *source, wg *sync.WaitGroup) {
 					return
 				}
 
-				newRates, err := s.getRates(o.ctx, o.assets(), o.log)
+				newRates, err := s.getRates(ctx, o.assets(), o.log)
 				if err != nil {
 					o.log.Errorf("%s.getRates error: %v", s.name, err)
 					continue
