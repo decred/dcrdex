@@ -884,11 +884,11 @@ var plPL = map[Topic]*translation{
 	},
 	TopicSendError: {
 		subject:  intl.Translation{T: "Błąd wypłaty środków"},
-		template: intl.Translation{T: "Wystąpił błąd przy wypłacaniu %s: %v"},
+		template: intl.Translation{Version: 1, T: "Napotkano błąd przy wysyłaniu %s: %v"},
 	},
 	TopicSendSuccess: {
 		subject:  intl.Translation{T: "Wypłata zrealizowana"},
-		template: intl.Translation{T: "Wypłata %s %s (%s) została zrealizowana pomyślnie. ID monety = %s"},
+		template: intl.Translation{Version: 1, T: "Wysyłka %s %s na adres %s została zakończona. Tx ID = %s"},
 	},
 	TopicOrderLoadFailure: {
 		subject:  intl.Translation{T: "Błąd wczytywania zleceń"},
@@ -900,11 +900,11 @@ var plPL = map[Topic]*translation{
 	},
 	TopicBuyOrderPlaced: {
 		subject:  intl.Translation{T: "Złożono zlecenie"},
-		template: intl.Translation{T: "Buying %s %s, kurs = %s (%s)"},
+		template: intl.Translation{Version: 1, T: "Kupno %s %s, kurs = %s (%s)"},
 	},
 	TopicSellOrderPlaced: {
 		subject:  intl.Translation{T: "Złożono zlecenie"},
-		template: intl.Translation{T: "Selling %s %s, kurs = %s (%s)"},
+		template: intl.Translation{Version: 1, T: "Sprzedaż %s %s, kurs = %s (%s)"},
 	},
 	TopicMissingMatches: {
 		subject:  intl.Translation{T: "Brak spasowanych zamówień"},
@@ -940,19 +940,19 @@ var plPL = map[Topic]*translation{
 	},
 	TopicBuyOrderCanceled: {
 		subject:  intl.Translation{T: "Zlecenie anulowane"},
-		template: intl.Translation{T: "Zlecenie buy dla %s-%s na %s zostało anulowane (%s)"},
+		template: intl.Translation{Version: 1, T: "Zlecenie kupna na parze %s-%s po kursie %s zostało anulowane (%s)"},
 	},
 	TopicSellOrderCanceled: {
 		subject:  intl.Translation{T: "Zlecenie anulowane"},
-		template: intl.Translation{T: "Zlecenie sell dla %s-%s na %s zostało anulowane (%s)"},
+		template: intl.Translation{Version: 1, T: "Zlecenie sprzedaży na parze %s-%s po kursie %s zostało anulowane (%s)"},
 	},
 	TopicSellMatchesMade: {
 		subject:  intl.Translation{T: "Dokonano spasowania"},
-		template: intl.Translation{T: "Zlecenie sell na %s-%s zrealizowane w %.1f%% (%s)"},
+		template: intl.Translation{Version: 1, T: "Zlecenie sprzedaży na parze %s-%s wypełnione w %.1f%% (%s)"},
 	},
 	TopicBuyMatchesMade: {
 		subject:  intl.Translation{T: "Dokonano spasowania"},
-		template: intl.Translation{T: "Zlecenie buy na %s-%s zrealizowane w %.1f%% (%s)"},
+		template: intl.Translation{Version: 1, T: "Zlecenie kupna na parze %s-%s wypełnione w %.1f%% (%s)"},
 	},
 	TopicSwapSendError: {
 		subject:  intl.Translation{T: "Błąd wysyłki środków"},
@@ -1016,7 +1016,7 @@ var plPL = map[Topic]*translation{
 	},
 	TopicFailedCancel: {
 		subject:  intl.Translation{T: "Niepowodzenie anulowania"},
-		template: intl.Translation{T: "Zlecenie anulacji dla zlecenia %s utknęło w statusie epoki przez 2 epoki i zostało usunięte."},
+		template: intl.Translation{Version: 1, T: "Polecenie anulacji dla zamówienia %s nie powiodło się i zostało usunięte."},
 	},
 	TopicAuditTrouble: {
 		subject:  intl.Translation{T: "Problem z audytem"},
@@ -1089,6 +1089,98 @@ var plPL = map[Topic]*translation{
 	TopicDEXNotification: {
 		subject:  intl.Translation{T: "Wiadomość od DEX"},
 		template: intl.Translation{T: "%s: %s"},
+	},
+	TopicBondExpired: {
+		subject:  intl.Translation{T: "Kaucja wygasła"},
+		template: intl.Translation{T: "Nowy poziom = %d (docelowy = %d)."},
+	},
+	TopicRedemptionConfirmed: {
+		subject:  intl.Translation{T: "Wykup potwierdzony"},
+		template: intl.Translation{T: "Twój wykup środków dla sparowania %s w zamówieniu %s został potwierdzony"},
+	},
+	TopicWalletCommsWarning: {
+		subject:  intl.Translation{T: "Problem z połączeniem portfela"},
+		template: intl.Translation{T: "Nie można połączyć się z portfelem %v! Powód: %v"},
+	},
+	TopicAccountRegTier: {
+		subject:  intl.Translation{T: "Konto zarejestrowane"},
+		template: intl.Translation{T: "Nowy poziom = %d"},
+	},
+	TopicBondPostError: {
+		subject:  intl.Translation{T: "Błąd wpłaty kaucji"},
+		template: intl.Translation{T: "błąd wpłaty kaucji (zostanie wykonana ponowna próba): %v (%T)"},
+	},
+	TopicBondConfirming: {
+		subject:  intl.Translation{T: "Potwierdzanie kaucji"},
+		template: intl.Translation{T: "Oczekiwanie na %d potwierdzeń do wpłaty kaucji %v (%s) na rzecz %s"},
+	},
+	TopicQueuedCreationFailed: {
+		subject:  intl.Translation{T: "Tworzenie portfela tokenu nie powiodło się"},
+		template: intl.Translation{T: "Po utworzeniu portfela %s, utworzenie portfela %s nie powiodło się"},
+	},
+	TopicWalletPeersRestored: {
+		subject:  intl.Translation{T: "Przywrócono łączność z portfelem"},
+		template: intl.Translation{T: "Portfel %v odzyskał połączenie."},
+	},
+	TopicWalletTypeDeprecated: {
+		subject:  intl.Translation{T: "Portfel wyłączony"},
+		template: intl.Translation{T: "Twój portfel %s nie jest już wspierany. Utwórz nowy portfel."},
+	},
+	TopicRedemptionResubmitted: {
+		subject:  intl.Translation{T: "Wykup środków wysłany ponownie"},
+		template: intl.Translation{T: "Twój wykup środków dla sparowania %s został wysłany ponownie."},
+	},
+	TopicBondRefunded: {
+		subject:  intl.Translation{T: "Kaucja zwrócona"},
+		template: intl.Translation{T: "Kaucja %v dla %v zrefundowana w %v, zwraca %v z %v po opłatach transakcyjnych"},
+	},
+	TopicOrderResumeFailure: {
+		subject:  intl.Translation{T: "Zlecenie wznowienia nie powiodło się"},
+		template: intl.Translation{T: "Wznowienie przetwarzania wymiany nie powiodło się: %"},
+	},
+	TopicWalletPeersWarning: {
+		subject:  intl.Translation{T: "Problem z siecią portfela"},
+		template: intl.Translation{T: "Portfel %v nie ma połączeń z resztą sieci (peer)!"},
+	},
+	TopicDexConnectivity: {
+		subject:  intl.Translation{T: "Łączność z Internetem"},
+		template: intl.Translation{T: "Twoje połączenie z %s jest niestabilne. Sprawdź połączenie z Internetem"},
+	},
+	TopicAsyncOrderFailure: {
+		subject:  intl.Translation{T: "Błąd składania zamówienia"},
+		template: intl.Translation{T: "Składanie zamówienia o ID %v nie powiodło się: %v"},
+	},
+	TopicUnknownBondTierZero: {
+		subject:  intl.Translation{T: "Znaleziono nieznaną kaucję"},
+		template: intl.Translation{T: "Znaleziono nieznane kaucje %s i dodano je do aktywnych, ale Twój poziom handlu dla %s wynosi zero. Ustaw poziom docelowy w menu Ustawień, aby podtrzymać kaucje poprzez autoodnawianie."},
+	},
+	TopicShieldedSendSuccess: {
+		subject:  intl.Translation{T: "Wysyłka osłoniętych środków powiodła się"},
+		template: intl.Translation{T: "Wysłano %s %s na adres %s: %s"},
+	},
+	TopicDexAuthErrorBond: {
+		subject:  intl.Translation{T: "Błąd uwierzytelnienia"},
+		template: intl.Translation{T: "Kaucja została potwierdzona, ale uwierzytelnienie połączenia nie powiodło się: %v"},
+	},
+	TopicBondConfirmed: {
+		subject:  intl.Translation{T: "Kaucja potwierdzona"},
+		template: intl.Translation{T: "Nowy poziom = %d (docelowy = %d)."},
+	},
+	TopicBondPostErrorConfirm: {
+		subject:  intl.Translation{T: "Błąd wpłaty kaucji"},
+		template: intl.Translation{T: "Napotkano błąd podczas oczekiwania na potwierdzenia kaucji dla %s: %v"},
+	},
+	TopicBondWalletNotConnected: {
+		subject:  intl.Translation{T: "Brak połączenia z portfelem kaucji"},
+		template: intl.Translation{T: "Portfel dla wybranej waluty kaucji %s nie jest połączony"},
+	},
+	TopicOrderQuantityTooHigh: {
+		subject:  intl.Translation{T: "Przekroczono limit handlu"},
+		template: intl.Translation{T: "Kwota zamówienia przekracza aktualny limit handlowy na %s"},
+	},
+	TopicSwapRefunded: {
+		subject:  intl.Translation{T: "Swap zrefundowany"},
+		template: intl.Translation{T: "Sparowanie %s w zamówieniu %s zostało zwrócone przez kontrahenta."},
 	},
 }
 
@@ -1400,11 +1492,11 @@ var ar = map[Topic]*translation{
 	},
 	TopicSendError: {
 		subject:  intl.Translation{T: "إرسال الخطأ"},
-		template: intl.Translation{T: "تمت مصادفة خطأ أثناء إرسال \u200e%s: \u200e%v"},
+		template: intl.Translation{Version: 1, T: "حدث خطأ أثناء إرسال %s: %v"},
 	},
 	TopicSendSuccess: {
 		subject:  intl.Translation{T: "تم الإرسال بنجاح"},
-		template: intl.Translation{T: "تم بنجاح إرسال \u200e%s \u200e%s إلى \u200e%s. معرف العملة = \u200e%s"},
+		template: intl.Translation{Version: 1, T: "تم إرسال %s %s إلى %s بنجاح. معرف المعاملة Tx ID = %s"},
 	},
 	TopicOrderLoadFailure: {
 		subject:  intl.Translation{T: "فشل تحميل الطلب"},
@@ -1416,11 +1508,11 @@ var ar = map[Topic]*translation{
 	},
 	TopicBuyOrderPlaced: {
 		subject:  intl.Translation{T: "تم وضع الطلب"},
-		template: intl.Translation{T: "الشراء \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)"},
+		template: intl.Translation{Version: 1, T: "شراء %s %s، السعر = %s (%s)"},
 	},
 	TopicSellOrderPlaced: {
 		subject:  intl.Translation{T: "تم وضع الطلب"},
-		template: intl.Translation{T: "بيع \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)"},
+		template: intl.Translation{Version: 1, T: "بيع %s %s، بمعدل = %s (%s)"},
 	},
 	TopicMissingMatches: {
 		subject:  intl.Translation{T: "مطابقات مفقودة"},
@@ -1456,19 +1548,19 @@ var ar = map[Topic]*translation{
 	},
 	TopicBuyOrderCanceled: {
 		subject:  intl.Translation{T: "تم إلغاء الطلب"},
-		template: intl.Translation{T: "تم إلغاء  (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s في \u200e%s"},
+		template: intl.Translation{Version: 1, T: "تم إلغاء (%s) طلب الشراء على %s-%s بسعر %s"},
 	},
 	TopicSellOrderCanceled: {
 		subject:  intl.Translation{T: "تم إلغاء الطلب"},
-		template: intl.Translation{T: "تم إلغاء  (\u200e%s) طلب البيع عند \u200e%s-\u200e%s في \u200e%s"},
+		template: intl.Translation{Version: 1, T: "تم إلغاء (%s) طلب البيع على %s-%s بسعر %s"},
 	},
 	TopicBuyMatchesMade: {
 		subject:  intl.Translation{T: "تم وضع المطابقات"},
-		template: intl.Translation{T: "تم تنفيذ (\u200e%s) طلب البيع عند \u200e%s-\u200e%s \u200e%.1f%%"},
+		template: intl.Translation{Version: 1, T: "طلب شراء على %s-%s %.1f%% مُنفّذ بنسبة (%s) "},
 	},
 	TopicSellMatchesMade: {
 		subject:  intl.Translation{T: "تم وضع المطابقات"},
-		template: intl.Translation{T: "تم تنفيذ (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s \u200e%.1f%%"},
+		template: intl.Translation{Version: 1, T: "طلب بيع على %s-%s مُنفّذ بنسبة (%s) "},
 	},
 	TopicSwapSendError: {
 		subject:  intl.Translation{T: "خطأ في إرسال المقايضة"},
@@ -1532,7 +1624,7 @@ var ar = map[Topic]*translation{
 	},
 	TopicFailedCancel: {
 		subject:  intl.Translation{T: "فشل الإلغاء"},
-		template: intl.Translation{T: "إلغاء الطلب للطلب \u200e%s عالق في حالة الحقبة الزمنية لحقبتين وتم حذفه الآن."},
+		template: intl.Translation{Version: 1, T: "فشل إلغاء الطلب للطلب %s وتم حذفه الآن."},
 	},
 	TopicAuditTrouble: {
 		subject:  intl.Translation{T: "مشكلة في التدقيق"},
@@ -1621,6 +1713,70 @@ var ar = map[Topic]*translation{
 	TopicRedemptionConfirmed: {
 		subject:  intl.Translation{T: "تم تأكيد الاسترداد"},
 		template: intl.Translation{T: "تم تأكيد استردادك للمطابقة \u200e%s للطلب \u200e%s"},
+	},
+	TopicBondPostErrorConfirm: {
+		subject:  intl.Translation{T: "خطأ في وظيفة السندات"},
+		template: intl.Translation{T: "تم مواجهة خطأ أثناء انتظار تأكيدات السند لـ %s: %v"},
+	},
+	TopicBondConfirming: {
+		subject:  intl.Translation{T: "تأكيد السند"},
+		template: intl.Translation{T: "في انتظار %d تأكيدات لنشر السند %v (%s) إلى %s"},
+	},
+	TopicDexConnectivity: {
+		subject:  intl.Translation{T: "الاتصال بالإنترنت"},
+		template: intl.Translation{T: "اتصالك بالإنترنت إلى %s غير مستقر، تحقق من اتصالك بالإنترنت"},
+	},
+	TopicOrderQuantityTooHigh: {
+		subject:  intl.Translation{T: "تم تجاوز حدود التداول"},
+		template: intl.Translation{T: "كمية الطلب تتجاوز حد التداول الحالي على %s"},
+	},
+	TopicBondWalletNotConnected: {
+		subject:  intl.Translation{T: "محفظة السندات غير متصلة"},
+		template: intl.Translation{T: "المحفظة الخاصة بأصل السندات المحدد %s غير متصلة"},
+	},
+	TopicAccountRegTier: {
+		subject:  intl.Translation{T: "حساب مسجل"},
+		template: intl.Translation{T: "المستوى الجديد = %d"},
+	},
+	TopicDexAuthErrorBond: {
+		subject:  intl.Translation{T: "خطأ في المصادقة"},
+		template: intl.Translation{T: "تم تأكيد السند، ولكن فشل في التحقق من صحة الاتصال: %v"},
+	},
+	TopicBondPostError: {
+		subject:  intl.Translation{T: "خطأ في وظيفة السندات"},
+		template: intl.Translation{T: "خطأ في طلب السند (سيتم إعادة المحاولة): %v (%T)"},
+	},
+	TopicWalletTypeDeprecated: {
+		subject:  intl.Translation{T: "المحفظة معطلة"},
+		template: intl.Translation{T: "لم يعد نوع محفظتك %s مدعوماً. قم بإنشاء محفظة جديدة."},
+	},
+	TopicOrderResumeFailure: {
+		subject:  intl.Translation{T: "استئناف فشل الطلب"},
+		template: intl.Translation{T: "فشل في استئناف معالجة عملية التداول: %v"},
+	},
+	TopicBondRefunded: {
+		subject:  intl.Translation{T: "استرداد السندات"},
+		template: intl.Translation{T: "تم استرداد السند %v لـ %v بـ %v، واستعادة %v من %v بعد رسوم المعاملات"},
+	},
+	TopicBondExpired: {
+		subject:  intl.Translation{T: "انتهت صلاحية السند"},
+		template: intl.Translation{T: "المستوى الجديد = %d (الهدف = %d)."},
+	},
+	TopicUnknownBondTierZero: {
+		subject:  intl.Translation{T: "تم العثور على سند غير معروف"},
+		template: intl.Translation{T: "تم العثور على سندات %s مجهولة وأضيفت إلى السندات النشطة ولكن الفئة المستهدفة الخاصة بك هي صفر لمنصة المبادلات اللامركزية dex في %s. قم بتعيين الفئة المستهدفة في الإعدادات للبقاء مرتبطًا بتجديدات تلقائية."},
+	},
+	TopicBondConfirmed: {
+		subject:  intl.Translation{T: "تم تأكيد السند"},
+		template: intl.Translation{T: "الفئة الجديدة = %d (الهدف = %d)."},
+	},
+	TopicShieldedSendSuccess: {
+		subject:  intl.Translation{T: "تم الإرسال المحجوب بنجاح"},
+		template: intl.Translation{T: "تم إرسال %s %s إلى %s: %s"},
+	},
+	TopicAsyncOrderFailure: {
+		subject:  intl.Translation{T: "خطأ في الطلب القيد التنفيذ"},
+		template: intl.Translation{T: "فشل: %v الطلب قيد التنفيذ بالمعرف %v"},
 	},
 }
 
