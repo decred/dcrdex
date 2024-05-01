@@ -159,10 +159,10 @@ if [ $ETH_ON -eq 0 ]; then
             "parcelSize": 4
         },
         {
-            "base": "DCR_simnet",
+            "base": "USDC_simnet",
             "quote": "USDT_simnet",
-            "lotSize": 100000000,
-            "rateStep": 100000,
+            "lotSize": 10000000,
+            "rateStep": 10000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
             "parcelSize": 4

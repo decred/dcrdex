@@ -177,7 +177,7 @@ var Tokens = map[uint32]*Token{
 		EVMFactor: new(int64),
 		Token: &dex.Token{
 			ParentID: EthBipID,
-			Name:     "USDT",
+			Name:     "Tether",
 			UnitInfo: dex.UnitInfo{
 				AtomicUnit: "microUSD",
 				Conventional: dex.Denomination{

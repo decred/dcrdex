@@ -167,7 +167,7 @@ var (
 		EVMFactor: new(int64),
 		Token: &dex.Token{
 			ParentID: PolygonBipID,
-			Name:     "USDT",
+			Name:     "Tether",
 			UnitInfo: dex.UnitInfo{
 				AtomicUnit: "microUSD",
 				Conventional: dex.Denomination{
