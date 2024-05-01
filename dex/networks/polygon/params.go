@@ -56,11 +56,13 @@ var (
 	}
 
 	usdcTokenID, _ = dex.BipSymbolID("usdc.polygon")
+	usdtTokenID, _ = dex.BipSymbolID("usdt.polygon")
 	wethTokenID, _ = dex.BipSymbolID("weth.polygon")
 	wbtcTokenID, _ = dex.BipSymbolID("wbtc.polygon")
 
 	Tokens = map[uint32]*dexeth.Token{
 		usdcTokenID: TokenUSDC,
+		usdtTokenID: TokenUSDT,
 		wethTokenID: TokenWETH,
 		wbtcTokenID: TokenWBTC,
 	}
@@ -137,6 +139,72 @@ var (
 							// Average of 1 transfers: 63705. Recommended Gases.Transfer = 82816
 							// 	[63705]
 							Transfer: 82_816,
+						},
+					},
+				},
+			},
+			dex.Simnet: {
+				Address: common.Address{},
+				SwapContracts: map[uint32]*dexeth.SwapContract{
+					0: {
+						Address: common.Address{}, // Set in MaybeReadSimnetAddrs
+						Gas: dexeth.Gases{
+							Swap:      223_163,
+							SwapAdd:   146_399,
+							Redeem:    82_121,
+							RedeemAdd: 41_113,
+							Refund:    62_527,
+							Approve:   58_180,
+							Transfer:  64_539,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	TokenUSDT = &dexeth.Token{
+		EVMFactor: new(int64),
+		Token: &dex.Token{
+			ParentID: PolygonBipID,
+			Name:     "USDT",
+			UnitInfo: dex.UnitInfo{
+				AtomicUnit: "microUSD",
+				Conventional: dex.Denomination{
+					Unit:             "USDT",
+					ConversionFactor: 1e6,
+				},
+			},
+		},
+		NetTokens: map[dex.Network]*dexeth.NetToken{
+			dex.Mainnet: {
+				Address: common.HexToAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F"), // https://polygonscan.com/address/0xc2132D05D31c914a87C6611C10748AEb04B58e8F
+				SwapContracts: map[uint32]*dexeth.SwapContract{
+					0: {
+						// swap contract: https://polygonscan.com/address/0x97a53fEF7854f4CB846F2eaCCf847229F1E10e4f
+						Address: common.HexToAddress("0x97a53fEF7854f4CB846F2eaCCf847229F1E10e4f"),
+						// Results from client's GetGasEstimates.
+						//
+						// First swap used 181278 gas Recommended Gases.Swap = 235661
+						//   4 additional swaps averaged 112591 gas each. Recommended Gases.SwapAdd = 146368
+						//   [181278 293869 406448 519051 631642]
+						// First redeem used 70794 gas. Recommended Gases.Redeem = 92032
+						//   4 additional redeems averaged 31629 gas each. recommended Gases.RedeemAdd = 41117
+						//   [70794 102411 134028 165670 197311]
+						// Average of 5 refunds: 63123. Recommended Gases.Refund = 82059
+						//   [63126 63126 63114 63126 63126]
+						// Average of 2 approvals: 52072. Recommended Gases.Approve = 67693
+						//   [52072 52072]
+						// Average of 1 transfers: 57270. Recommended Gases.Transfer = 74451
+						//   [57270]
+						Gas: dexeth.Gases{
+							Swap:      235_661,
+							SwapAdd:   146_368,
+							Redeem:    92_032,
+							RedeemAdd: 41_117,
+							Refund:    82_059,
+							Approve:   67_693,
+							Transfer:  74_451,
 						},
 					},
 				},
@@ -267,5 +335,5 @@ var (
 // simnet harness to populate swap contract and token addresses in
 // ContractAddresses and Tokens.
 func MaybeReadSimnetAddrs() {
-	dexeth.MaybeReadSimnetAddrsDir("polygon", ContractAddresses, MultiBalanceAddresses, Tokens[usdcTokenID].NetTokens[dex.Simnet])
+	dexeth.MaybeReadSimnetAddrsDir("polygon", ContractAddresses, MultiBalanceAddresses, Tokens[usdcTokenID].NetTokens[dex.Simnet], Tokens[usdtTokenID].NetTokens[dex.Simnet])
 }

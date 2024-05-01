@@ -65,6 +65,7 @@ func init() {
 	})
 
 	registerToken(usdcID, 0)
+	registerToken(usdtID, 0)
 }
 
 const (
@@ -82,6 +83,7 @@ var (
 	}
 
 	usdcID, _ = dex.BipSymbolID("usdc.eth")
+	usdtID, _ = dex.BipSymbolID("usdt.eth")
 )
 
 func networkToken(vToken *VersionedToken, net dex.Network) (netToken *dexeth.NetToken, contract *dexeth.SwapContract, err error) {

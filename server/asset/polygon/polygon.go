@@ -44,6 +44,7 @@ func init() {
 	}})
 
 	registerToken(usdcID, 0)
+	registerToken(usdtID, 0)
 	registerToken(wethTokenID, 0)
 	registerToken(wbtcTokenID, 0)
 
@@ -63,6 +64,7 @@ const (
 
 var (
 	usdcID, _      = dex.BipSymbolID("usdc.polygon")
+	usdtID, _      = dex.BipSymbolID("usdt.polygon")
 	wethTokenID, _ = dex.BipSymbolID("weth.polygon")
 	wbtcTokenID, _ = dex.BipSymbolID("wbtc.polygon")
 

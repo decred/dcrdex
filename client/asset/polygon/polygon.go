@@ -39,6 +39,7 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 func init() {
 	asset.Register(BipID, &Driver{})
 	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.", dex.Mainnet, dex.Testnet, dex.Simnet)
+	registerToken(usdtTokenID, "The USDT Ethereum ERC20 token.", dex.Mainnet, dex.Testnet, dex.Simnet)
 	registerToken(wbtcTokenID, "Wrapped BTC.", dex.Mainnet)
 	registerToken(wethTokenID, "Wrapped ETH.", dex.Mainnet)
 }
@@ -53,6 +54,7 @@ const (
 
 var (
 	usdcTokenID, _ = dex.BipSymbolID("usdc.polygon")
+	usdtTokenID, _ = dex.BipSymbolID("usdt.polygon")
 	wethTokenID, _ = dex.BipSymbolID("weth.polygon")
 	wbtcTokenID, _ = dex.BipSymbolID("wbtc.polygon")
 	// WalletInfo defines some general information about a Polygon Wallet(EVM
