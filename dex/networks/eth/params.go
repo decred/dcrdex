@@ -50,6 +50,7 @@ var (
 			Unit:             "ETH",
 			ConversionFactor: 1e9,
 		},
+		FeeRateUnit: "gwei/gas",
 	}
 
 	VersionedGases = map[uint32]*Gases{
@@ -147,7 +148,11 @@ func RefundGas(contractVer uint32) uint64 {
 	return g.Refund
 }
 
-var gweiFactorBig = big.NewInt(GweiFactor)
+var (
+	// add before diving by gweiFactorBig to take the ceiling.
+	gweiCeilAddend = big.NewInt(GweiFactor - 1)
+	gweiFactorBig  = big.NewInt(GweiFactor)
+)
 
 // GweiToWei converts uint64 Gwei to *big.Int Wei.
 func GweiToWei(v uint64) *big.Int {
@@ -158,15 +163,12 @@ func GweiToWei(v uint64) *big.Int {
 // unsuitable for a uint64, zero is returned. For values that are not even
 // multiples of 1 gwei, this function returns the floor.
 func WeiToGwei(v *big.Int) uint64 {
-	vGwei := new(big.Int).Div(v, big.NewInt(GweiFactor))
+	vGwei := new(big.Int).Div(v, gweiFactorBig)
 	if vGwei.IsUint64() {
 		return vGwei.Uint64()
 	}
 	return 0
 }
-
-// add before diving by gweiFactorBig to take the ceiling.
-var gweiCeilAddend = big.NewInt(GweiFactor - 1)
 
 // WeiToGweiCeil converts *big.Int Wei to uint64 Gwei. If v is determined to be
 // unsuitable for a uint64, zero is returned. For values that are not even

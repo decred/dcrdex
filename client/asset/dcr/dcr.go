@@ -5272,6 +5272,11 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 	return finalFee, isValidAddress, nil
 }
 
+func (dcr *ExchangeWallet) StandardSendFee(feeRate uint64) uint64 {
+	var baseSize uint64 = dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + dexdcr.P2PKHInputSize
+	return feeRate * baseSize
+}
+
 func (dcr *ExchangeWallet) isNative() bool {
 	return dcr.walletType == walletTypeSPV
 }

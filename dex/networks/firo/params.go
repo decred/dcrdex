@@ -32,11 +32,12 @@ func mustHash(hash string) *chainhash.Hash {
 
 var (
 	UnitInfo = dex.UnitInfo{
-		AtomicUnit: "satoshi",
+		AtomicUnit: "Sats",
 		Conventional: dex.Denomination{
 			Unit:             "FIRO",
 			ConversionFactor: 1e8,
 		},
+		FeeRateUnit: "Sats/B",
 	}
 
 	// MainNetParams are the clone parameters for mainnet.

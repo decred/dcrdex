@@ -80,6 +80,7 @@ var Tokens = map[uint32]*Token{
 					Unit:             "USDC",
 					ConversionFactor: 1e6,
 				},
+				FeeRateUnit: "gwei/gas",
 			},
 		},
 		NetTokens: map[dex.Network]*NetToken{

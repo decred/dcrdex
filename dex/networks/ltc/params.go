@@ -25,6 +25,7 @@ var (
 			Unit:             "LTC",
 			ConversionFactor: 1e8,
 		},
+		FeeRateUnit: "Sats/vB",
 	}
 	// MainNetParams are the clone parameters for mainnet.
 	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{

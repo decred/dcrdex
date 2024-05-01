@@ -4926,6 +4926,16 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 	return fee, isValidAddress, nil
 }
 
+func (btc *baseWallet) StandardSendFee(feeRate uint64) uint64 {
+	baseSize := dexbtc.MinimumTxOverhead
+	if btc.segwit {
+		baseSize += dexbtc.P2WPKHOutputSize * 2
+	} else {
+		baseSize += dexbtc.P2PKHOutputSize * 2
+	}
+	return feeRate * (dexbtc.RedeemP2PKHInputSize + uint64(baseSize))
+}
+
 func (btc *baseWallet) SetBondReserves(reserves uint64) {
 	btc.bondReserves.Store(reserves)
 }

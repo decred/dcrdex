@@ -1754,6 +1754,25 @@ fetchers:
 	}
 	c.fetchFiatExchangeRates(ctx)
 
+	// Start a goroutine to keep the FeeState updated.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for {
+			tick := time.NewTicker(time.Minute * 5)
+			select {
+			case <-tick.C:
+				for _, w := range c.xcWallets() {
+					if w.connected() {
+						w.feeRate() // updates the fee state internally.
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// Start bond supervisor.
 	c.wg.Add(1)
 	go func() {
@@ -3150,6 +3169,7 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 		c.notify(newWalletStateNote(w.state()))
 	}
 	if synced && !wasSynced {
+		w.feeRate() // prime the feeState
 		c.updateWalletBalance(w)
 		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
 		c.updateBondReserves(w.AssetID)
@@ -5714,12 +5734,11 @@ func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection
 	// See if the wallet supports fee rates.
 	w, found := c.wallet(assetID)
 	if found && w.connected() {
-		if rater, is := w.feeRater(); is {
-			if r := rater.FeeRate(); r != 0 {
-				return r
-			}
+		if r := w.feeRate(); r != 0 {
+			return r
 		}
 	}
+
 	// Look for cached rates from epoch_report messages.
 	conns := append(preferredConns, c.dexConnections()...)
 	for _, dc := range conns {

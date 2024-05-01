@@ -386,9 +386,9 @@ func (t *trackedTrade) cacheRedemptionFeeSuggestion() {
 	// to an external fee oracle if an internal estimate is not available and
 	// the wallet settings permit external API requests.
 	toWallet := t.wallets.toWallet
-	if rater, is := toWallet.feeRater(); is && t.readyToTick && toWallet.connected() {
-		if feeRate := rater.FeeRate(); feeRate != 0 {
-			set(feeRate)
+	if t.readyToTick && toWallet.connected() {
+		if r := toWallet.feeRate(); r != 0 {
+			set(r)
 			return
 		}
 	}
@@ -2374,10 +2374,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	// Use a higher swap fee rate if a local estimate is higher than the
 	// prescribed rate, but not higher than the funded (max) rate.
 	if highestFeeRate < t.metaData.MaxFeeRate {
-		var freshRate uint64
-		if r, ok := fromWallet.feeRater(); ok {
-			freshRate = r.FeeRate()
-		}
+		freshRate := fromWallet.feeRate()
 		if freshRate == 0 { // either not a FeeRater, or FeeRate failed
 			freshRate = t.dc.bestBookFeeSuggestion(fromWallet.AssetID)
 		}

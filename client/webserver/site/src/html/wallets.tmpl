@@ -51,7 +51,7 @@
                 </div>
               </div>
             </div>
-            <div id="tokenInfoBox" class="d-hide d-flex flex-column align-items-center border rounded3 mb-3 p-3 fs18">
+            <div id="tokenInfoBox" class="d-hide d-flex flex-column align-items-center border-top border-bottom mb-3 p-3 fs18">
               <div class="flex-center">
                 <span>[[[Token on]]]</span>
                 <img id="tokenParentLogo" class="ms-1">
@@ -156,6 +156,56 @@
               </div>
             </div>
           </section>
+
+            {{- /* FEE INFO */ -}}
+            <section id="feeStateBox" class="d-flex align-items-stretch d-hide">
+              <div class="flex-grow-1 flex-stretch-column">
+                <div class="d-flex flex-column align-items-center py-3">
+                  <span class="grey demi">Network Fee Rate</span>
+                  <span>
+                    <span id="feeStateNetRate" class="fs20"></span>
+                    <span class="fs17 grey" data-fee-rate-unit></span>
+                  </span>
+                </div>
+                <div class="d-flex flex-column align-items-center py-3 border-top">
+                  <span class="grey demi">Send Fees</span>
+                  <span>
+                    <span id="feeStateSendFees" class="fs20"></span>
+                    <span class="grey fs17">
+                      <span data-fee-ticker></span>
+                      and up
+                    </span>
+                  </span>
+                  <span class="grey fs15">
+                    ~ <span id="feeStateSendFiat"></span>
+                    <span>USD</span>
+                  </span>
+                </div>
+              </div>
+              <div class="flex-grow-1">
+                <div class="d-flex flex-column align-items-center py-3">
+                  <span class="grey demi">Exchange Rate</span>
+                  <span>
+                    <span id="feeStateXcRate" class="fs20"></span>
+                    <span class="fs17 grey">USD/<span data-ticker></span></span>
+                  </span>
+                </div>
+                <div class="d-flex flex-column align-items-center py-3 border-top">
+                  <span class="grey demi">Swap Fees</span>
+                  <span>
+                    <span id="feeStateSwapFees" class="fs20"></span>
+                    <span class="grey fs17">
+                      <span data-fee-ticker></span>
+                      and up
+                    </span>
+                  </span>
+                  <span class="fs15 grey">
+                    ~ <span id="feeStateSwapFiat"></span>
+                    <span>USD</span>
+                  </span>
+                </div>
+              </div>
+            </section>
 
             {{- /* STAKING */ -}}
             <section id="stakingBox" class="position-relative d-flex align-items-stretch border">

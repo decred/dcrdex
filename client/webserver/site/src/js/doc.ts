@@ -310,6 +310,10 @@ export default class Doc {
     return formatSigFigsWithFormatters(intFormatter, fourSigFigs, n)
   }
 
+  static formatInt (i: number): string {
+    return intFormatter.format(i)
+  }
+
   /*
    * formatFullPrecision formats the value in atomic units into a string
    * representation in conventional units using the full decimal precision

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -52,6 +53,7 @@ type xcWallet struct {
 	walletType        string
 	traits            asset.WalletTrait
 	parent            *xcWallet
+	feeState          atomic.Value // *FeeState
 
 	mtx          sync.RWMutex
 	encPass      []byte // empty means wallet not password protected
@@ -279,6 +281,10 @@ func (w *xcWallet) state() *WalletState {
 	if w.connector.On() {
 		tokenApprovals = w.ApprovalStatus()
 	}
+	var feeState *FeeState
+	if feeStateI := w.feeState.Load(); feeStateI != nil {
+		feeState = feeStateI.(*FeeState)
+	}
 
 	state := &WalletState{
 		Symbol:       unbip(w.AssetID),
@@ -297,6 +303,7 @@ func (w *xcWallet) state() *WalletState {
 		Traits:       w.traits,
 		Disabled:     w.disabled,
 		Approved:     tokenApprovals,
+		FeeState:     feeState,
 	}
 	w.mtx.RUnlock()
 
@@ -655,8 +662,25 @@ func (w *xcWallet) ApprovalStatus() map[uint32]asset.ApprovalStatus {
 	return approver.ApprovalStatus()
 }
 
-// feeRater is identical to calling w.Wallet.(asset.FeeRater).
-func (w *xcWallet) feeRater() (asset.FeeRater, bool) {
-	rater, is := w.Wallet.(asset.FeeRater)
-	return rater, is
+func (w *xcWallet) setFeeState(feeRate uint64) {
+	swapFees, _, _ := w.SingleLotSwapRefundFees(asset.VersionNewest, feeRate, false)
+	sendFees := w.StandardSendFee(feeRate)
+	w.feeState.Store(&FeeState{
+		Rate:    feeRate,
+		Send:    sendFees,
+		Swap:    swapFees,
+		StampMS: time.Now().UnixMilli(),
+	})
+}
+
+// feeRate returns a fee rate for a FeeRater is available and generates a
+// non-zero rate.
+func (w *xcWallet) feeRate() uint64 {
+	if rater, is := w.Wallet.(asset.FeeRater); !is {
+		return 0
+	} else if r := rater.FeeRate(); r != 0 {
+		w.setFeeState(r)
+		return r
+	}
+	return 0
 }

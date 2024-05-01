@@ -1304,11 +1304,11 @@ export default class MarketsPage extends BasePage {
       this.drawChartLines()
       return
     }
-    const quoteAsset = app().assets[order.quote]
+    const { unitInfo: { conventional: { unit } } } = app().assets[order.quote]
     const quoteQty = order.qty * order.rate / OrderUtil.RateEncodingFactor
     const total = Doc.formatCoinValue(quoteQty, this.market.quoteUnitInfo)
 
-    page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
+    page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: unit })
     if (this.isSell()) this.preSell()
     else this.preBuy()
   }

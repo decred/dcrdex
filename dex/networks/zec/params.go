@@ -38,11 +38,12 @@ const (
 
 var (
 	UnitInfo = dex.UnitInfo{
-		AtomicUnit: "Zats",
+		AtomicUnit: "zats",
 		Conventional: dex.Denomination{
 			Unit:             "ZEC",
 			ConversionFactor: 1e8,
 		},
+		FeeRateUnit: "zats/action",
 	}
 
 	// MainNetParams are the clone parameters for mainnet. Zcash,
