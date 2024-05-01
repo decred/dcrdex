@@ -62,14 +62,37 @@ MINE=1
 # Bump sleep up to 3 if we have to mine a lot of blocks, because dcrwallet
 # doesn't always keep up.
 MINE_SLEEP=3
-if [ -f ./harnesschain.tar.gz ]; then
+
+HARNESS_DIR=$(dirname $0)
+export HARNESS_DIR
+
+if [ ! -f ./addblock ]; then
+  echo "Creating add blocks hacked exe"
+  ################################################################################
+  # Add blocks hacked exe
+  ################################################################################
+
+  git clone https://github.com/decred/dcrd.git
+  cd dcrd
+  git checkout 63d36ddc2dcb92b59acecea252e5490809b930ff
+  git apply ../addblock.patch
+  cd cmd/addblock/
+  go build
+  mv addblock ../../../
+  cd ../../../
+  rm -fr dcrd
+fi
+
+if [ -f ./rawblocks.tar.gz ]; then
   echo "Seeding blockchain from compressed file"
   MINE=0
   MINE_SLEEP=0.5
   mkdir -p "${NODES_ROOT}/alpha/data"
   mkdir -p "${NODES_ROOT}/beta/data"
-  tar -xzf ./harnesschain.tar.gz -C ${NODES_ROOT}/alpha/data
+  tar -xzf ./rawblocks.tar.gz
+  ./addblock -b ${NODES_ROOT}/alpha/data --simnet --txindex -i rawblocks
   cp -r ${NODES_ROOT}/alpha/data/simnet ${NODES_ROOT}/beta/data/simnet
+  rm rawblocks
 fi
 
 # Background watch mining in window 8 by default:  
@@ -82,8 +105,6 @@ echo "Writing ctl scripts"
 ################################################################################
 
 # Add wallet script
-HARNESS_DIR=$(dirname $0)
-export HARNESS_DIR
 cp "${HARNESS_DIR}/create-wallet.sh" "${NODES_ROOT}/harness-ctl/create-wallet"
 
 # Script to send funds from alpha to address

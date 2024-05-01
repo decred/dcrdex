@@ -29,6 +29,7 @@ client/cmd/simnet-trade-tests/simnet-trade-tests
 client/cmd/mmbot/mmbot
 docs/examples/rpcclient/rpcclient
 dex/testing/loadbot/loadbot
+dex/testing/dcr/addblock
 bin/
 bin-v*/
 client/webserver/site/template-builder/template-builder

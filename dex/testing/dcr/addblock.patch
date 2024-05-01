@@ -1,0 +1,86 @@
+diff --git a/cmd/addblock/import.go b/cmd/addblock/import.go
+index a8a051cb..5963b6c8 100644
+--- a/cmd/addblock/import.go
++++ b/cmd/addblock/import.go
+@@ -11,6 +11,7 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"io"
++	"math/big"
+ 	"sync"
+ 	"time"
+ 
+@@ -58,8 +59,12 @@ type blockImporter struct {
+ 	cancel          context.CancelFunc
+ }
+ 
++const maxDiff = "7fffff0000000000000000000000000000000000000000000000000000000000"
++
++var bigMaxDiff, _ = new(big.Int).SetString(maxDiff, 16)
++
+ // readBlock reads the next block from the input file.
+-func (bi *blockImporter) readBlock() ([]byte, error) {
++func (bi *blockImporter) readBlock(lastBlock bool) ([]byte, error) {
+ 	// The block file format is:
+ 	//  <network> <block length> <serialized block>
+ 	var net uint32
+@@ -93,6 +98,35 @@ func (bi *blockImporter) readBlock() ([]byte, error) {
+ 		return nil, err
+ 	}
+ 
++	// DCRDEX NOTE: Update the last blocks block time and search for a pow
++	// hash that is less than max.
++	if lastBlock {
++		msgBlk := new(wire.MsgBlock)
++		err := msgBlk.FromBytes(serializedBlock)
++		if err != nil {
++			return nil, err
++		}
++		msgBlk604 := new(wire.MsgBlock)
++		err = msgBlk604.FromBytes(serializedBlock)
++		if err != nil {
++			return nil, err
++		}
++		msgBlk.Header.Timestamp = time.Now().Truncate(time.Second)
++		i := 0
++		for {
++			bigDiff, _ := new(big.Int).SetString(msgBlk.Header.PowHashV2().String(), 16)
++			if bigMaxDiff.Cmp(bigDiff) > 0 {
++				break
++			}
++			msgBlk.Header.ExtraData[8] = byte(i)
++			i++
++		}
++		serializedBlock, err = msgBlk.Bytes()
++		if err != nil {
++			return nil, err
++		}
++	}
++
+ 	return serializedBlock, nil
+ }
+ 
+@@ -153,11 +187,14 @@ func (bi *blockImporter) processBlock(serializedBlock []byte) (bool, error) {
+ // This allows block processing to take place in parallel with block reads.
+ // It must be run as a goroutine.
+ func (bi *blockImporter) readHandler() {
++	i := 0
+ out:
+ 	for {
+ 		// Read the next block from the file and if anything goes wrong
+ 		// notify the status handler with the error and bail.
+-		serializedBlock, err := bi.readBlock()
++		//
++		// DCRDEX NOTE: Special case for the current last block, 605.
++		serializedBlock, err := bi.readBlock(i == 605)
+ 		if err != nil {
+ 			bi.errChan <- fmt.Errorf("error reading from input "+
+ 				"file: %v", err.Error())
+@@ -176,6 +213,7 @@ out:
+ 		case <-bi.quit:
+ 			break out
+ 		}
++		i++
+ 	}
+ 
+ 	// Close the processing channel to signal no more blocks are coming.
