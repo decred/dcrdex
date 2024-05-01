@@ -428,6 +428,10 @@ type tTxDB struct {
 
 var _ txDB = (*tTxDB)(nil)
 
+func (db *tTxDB) connect(ctx context.Context) (*sync.WaitGroup, error) {
+	return &sync.WaitGroup{}, nil
+}
+
 func (db *tTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
 	db.storeTxCalled = true
 	return db.storeTxErr
@@ -693,13 +697,12 @@ func TestCheckForNewBlocks(t *testing.T) {
 		w := &ETHWallet{
 			assetWallet: &assetWallet{
 				baseWallet: &baseWallet{
-					node:         node,
-					addr:         node.address(),
-					ctx:          ctx,
-					log:          tLogger,
-					currentTip:   header0,
-					txDB:         &tTxDB{},
-					subprocessWg: sync.WaitGroup{},
+					node:       node,
+					addr:       node.address(),
+					ctx:        ctx,
+					log:        tLogger,
+					currentTip: header0,
+					txDB:       &tTxDB{},
 				},
 				log:     tLogger.SubLogger("ETH"),
 				emit:    emit,
@@ -785,11 +788,10 @@ func TestSyncStatus(t *testing.T) {
 			syncProgErr: test.syncProgErr,
 		}
 		eth := &baseWallet{
-			node:         node,
-			addr:         node.address(),
-			ctx:          ctx,
-			log:          tLogger,
-			subprocessWg: sync.WaitGroup{},
+			node: node,
+			addr: node.address(),
+			ctx:  ctx,
+			log:  tLogger,
 		}
 		synced, ratio, err := eth.SyncStatus()
 		cancel()
@@ -897,7 +899,6 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			pendingTxs:   make(map[uint64]*extendedWalletTx),
 			txDB:         &tTxDB{},
 			currentTip:   &types.Header{Number: new(big.Int)},
-			subprocessWg: sync.WaitGroup{},
 		},
 		versionedGases:     versionedGases,
 		maxSwapGas:         versionedGases[0].Swap,
@@ -4443,11 +4444,21 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 	}
 
 	tempDir := t.TempDir()
-	txDB, err := newBadgerTxDB(filepath.Join(tempDir, "tx.db"), tLogger)
+
+	txDB := newBadgerTxDB(filepath.Join(tempDir, "tx.db"), tLogger)
 	if err != nil {
 		t.Fatalf("error creating tx db: %v", err)
 	}
-	defer eth.txDB.close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg, err := txDB.connect(ctx)
+	if err != nil {
+		t.Fatalf("error connecting to tx db: %v", err)
+	}
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	type test struct {
 		name string

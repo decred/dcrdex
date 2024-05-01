@@ -428,10 +428,6 @@ type baseWallet struct {
 	}
 
 	txDB txDB
-
-	// subprocessWg must be incremented every time the wallet starts a
-	// goroutine that will use node or the tx history DB.
-	subprocessWg sync.WaitGroup
 }
 
 // assetWallet is a wallet backend for Ethereum and Eth tokens. The backend is
@@ -821,16 +817,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.addr = cl.address()
 	w.ctx = ctx // TokenWallet will re-use this ctx.
 
-	nodeCtx, killNode := context.WithCancel(context.Background())
-
-	var success bool
-	defer func() {
-		if !success {
-			killNode()
-		}
-	}()
-
-	err = w.node.connect(nodeCtx)
+	err = w.node.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -854,15 +841,11 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		}
 	}
 
-	w.txDB, err = newBadgerTxDB(filepath.Join(w.dir, "tx.db"), w.log.SubLogger("TXDB"))
+	w.txDB = newBadgerTxDB(filepath.Join(w.dir, "tx.db"), w.log.SubLogger("TXDB"))
+	wg, err := w.txDB.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if !success {
-			w.txDB.close()
-		}
-	}()
 
 	w.monitoredTxs, err = w.txDB.getMonitoredTxs()
 	if err != nil {
@@ -889,28 +872,22 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.log.Infof("Connected to eth (%s), at height %d", w.walletType, height)
 
 	w.connected.Store(true)
-	success = true
 
-	w.subprocessWg.Add(1)
-	go func() {
-		defer w.subprocessWg.Done()
-		w.monitorBlocks(ctx)
-	}()
-
-	w.subprocessWg.Add(1)
-	go func() {
-		defer w.subprocessWg.Done()
-		w.monitorPeers(ctx)
-	}()
-
-	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		w.monitorBlocks(ctx)
+		w.node.shutdown()
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w.monitorPeers(ctx)
+	}()
+
+	go func() {
 		<-ctx.Done()
-		w.subprocessWg.Wait()
-		killNode()
-		w.txDB.close()
 		w.connected.Store(false)
 	}()
 
@@ -2708,9 +2685,7 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 	// just in case to ensure that the tx is sent to the network. Do not block
 	// because this is not required and does not affect the audit result.
 	if rebroadcast {
-		w.subprocessWg.Add(1)
 		go func() {
-			defer w.subprocessWg.Done()
 			if err := w.node.sendSignedTransaction(w.ctx, tx); err != nil {
 				w.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			}
@@ -3525,27 +3500,19 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 		}
 	}()
 
-	eth.subprocessWg.Add(1)
 	go func() {
-		defer eth.subprocessWg.Done()
 		for _, w := range connectedWallets {
 			w.checkFindRedemptions()
 		}
 	}()
 
-	eth.subprocessWg.Add(1)
 	go func() {
-		defer eth.subprocessWg.Done()
 		for _, w := range connectedWallets {
 			w.checkPendingApprovals()
 		}
 	}()
 
-	eth.subprocessWg.Add(1)
-	go func() {
-		defer eth.subprocessWg.Done()
-		eth.checkPendingTxs()
-	}()
+	go eth.checkPendingTxs()
 }
 
 // getLatestMonitoredTx looks up a txHash in the monitoredTxs map. If the

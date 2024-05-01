@@ -689,10 +689,6 @@ type ExchangeWallet struct {
 	receiveTxLastQuery atomic.Uint64
 
 	txHistoryDB atomic.Value // *btc.BadgerTxDB
-
-	// subprocessWg must be incremented every time the wallet starts a
-	// goroutine that will use node or the tx history DB.
-	subprocessWg sync.WaitGroup
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -903,7 +899,7 @@ func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 // }
 
 func (dcr *ExchangeWallet) txHistoryDBPath(walletID string) string {
-	return filepath.Join(dcr.walletDir, fmt.Sprintf("txhistory-%s.db", walletID))
+	return filepath.Join(dcr.walletDir, fmt.Sprintf("txhistorydb-%s", walletID))
 }
 
 // findExistingAddressBasedTxHistoryDB finds the path of a tx history db that
@@ -922,7 +918,7 @@ func (dcr *ExchangeWallet) findExistingAddressBasedTxHistoryDB() (string, error)
 		return "", fmt.Errorf("error reading wallet directory: %w", err)
 	}
 
-	pattern := regexp.MustCompile(`^txhistory-(.+)\.db$`)
+	pattern := regexp.MustCompile(`^txhistorydb-(.+)$`)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -947,12 +943,12 @@ func (dcr *ExchangeWallet) findExistingAddressBasedTxHistoryDB() (string, error)
 	return "", nil
 }
 
-func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) error {
+func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, error) {
 	var dbPath string
 	if spvWallet, ok := dcr.wallet.(*spvWallet); ok {
 		initialAddress, err := spvWallet.InitialAddress(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		dbPath = dcr.txHistoryDBPath(initialAddress)
@@ -961,7 +957,7 @@ func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) error {
 	if dbPath == "" {
 		addressPath, err := dcr.findExistingAddressBasedTxHistoryDB()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if addressPath != "" {
 			dbPath = addressPath
@@ -971,30 +967,24 @@ func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) error {
 	if dbPath == "" {
 		depositAddr, err := dcr.DepositAddress()
 		if err != nil {
-			return fmt.Errorf("error getting deposit address: %w", err)
+			return nil, fmt.Errorf("error getting deposit address: %w", err)
 		}
 		dbPath = dcr.txHistoryDBPath(depositAddr)
 	}
 
 	dcr.log.Debugf("Using tx history db at %s", dbPath)
 
-	db, err := btc.NewBadgerTxDB(dbPath, dcr.log)
-	if err != nil {
-		return fmt.Errorf("error opening tx history db: %w", err)
-	}
-
-	var success bool
-	defer func() {
-		if !success {
-			db.Close()
-		}
-	}()
-
+	db := btc.NewBadgerTxDB(dbPath, dcr.log)
 	dcr.txHistoryDB.Store(db)
+
+	wg, err := db.Connect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting to tx history db: %w", err)
+	}
 
 	pendingTxs, err := db.GetPendingTxs()
 	if err != nil {
-		return fmt.Errorf("failed to load unconfirmed txs: %v", err)
+		return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
 	}
 
 	dcr.pendingTxsMtx.Lock()
@@ -1012,13 +1002,12 @@ func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) error {
 	if errors.Is(err, btc.ErrNeverQueried) {
 		lastQuery = 0
 	} else if err != nil {
-		return fmt.Errorf("failed to load last query time: %v", err)
+		return nil, fmt.Errorf("failed to load last query time: %v", err)
 	}
 
 	dcr.receiveTxLastQuery.Store(lastQuery)
 
-	success = true
-	return nil
+	return wg, nil
 }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
@@ -1065,7 +1054,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
 
-	err = dcr.startTxHistoryDB(ctx)
+	wg, err := dcr.startTxHistoryDB(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1077,32 +1066,24 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	// tip change notification. We'll use dcr.monitorBlocks below if so.
 	monitoringBlocks := dcr.wallet.NotifyOnTipChange(ctx, dcr.handleTipChange)
 
-	dcr.subprocessWg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer dcr.subprocessWg.Done()
+		defer wg.Done()
 		if !monitoringBlocks {
 			dcr.monitorBlocks(ctx)
 		} else {
 			<-ctx.Done() // just wait for shutdown signal
 		}
+		dcr.shutdown()
 	}()
 
-	dcr.subprocessWg.Add(1)
-	go func() {
-		defer dcr.subprocessWg.Done()
-		dcr.monitorPeers(ctx)
-	}()
-
-	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dcr.subprocessWg.Wait()
-		dcr.wallet.Disconnect()
-		dcr.txHistoryDB.Load().(*btc.BadgerTxDB).Close()
+		dcr.monitorPeers(ctx)
 	}()
 
-	return &wg, nil
+	return wg, nil
 }
 
 // Reconfigure attempts to reconfigure the wallet.
@@ -3468,9 +3449,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 	// just in case to ensure that the tx is sent to the network. Do not block
 	// because this is not required and does not affect the audit result.
 	if rebroadcast && contractTx != nil {
-		dcr.subprocessWg.Add(1)
 		go func() {
-			defer dcr.subprocessWg.Done()
 			if hashSent, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, true); err != nil {
 				dcr.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			} else if !hashSent.IsEqual(txHash) {
@@ -5504,12 +5483,7 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) error {
 
 	remain := dcr.ticketBuyer.remaining.Add(int32(n))
 	dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Remaining: uint32(remain)})
-
-	dcr.subprocessWg.Add(1)
-	go func() {
-		defer dcr.subprocessWg.Done()
-		dcr.runTicketBuyer()
-	}()
+	go dcr.runTicketBuyer()
 
 	return nil
 }
@@ -6084,12 +6058,7 @@ func (dcr *ExchangeWallet) emitTipChange(height int64) {
 	}
 
 	dcr.emit.TipChange(uint64(height), data)
-
-	dcr.subprocessWg.Add(1)
-	go func() {
-		defer dcr.subprocessWg.Done()
-		dcr.runTicketBuyer()
-	}()
+	go dcr.runTicketBuyer()
 }
 
 func (dcr *ExchangeWallet) emitBalance() {
@@ -6226,11 +6195,7 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 		dcr.cycleMixer()
 	}
 
-	dcr.subprocessWg.Add(1)
-	go func() {
-		defer dcr.subprocessWg.Done()
-		dcr.checkPendingTxs(ctx, uint64(newTipHeight))
-	}()
+	go dcr.checkPendingTxs(ctx, uint64(newTipHeight))
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.
@@ -6285,11 +6250,7 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 
 	// Run the redemption search from the startHeight determined above up
 	// till the current tip height.
-	dcr.subprocessWg.Add(1)
-	go func() {
-		defer dcr.subprocessWg.Done()
-		dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
-	}()
+	go dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
 
 }
 

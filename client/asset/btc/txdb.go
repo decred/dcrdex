@@ -71,13 +71,12 @@ func txKey(txid string) []byte {
 
 type BadgerTxDB struct {
 	*badger.DB
-	log dex.Logger
-	seq *badger.Sequence
-
-	running atomic.Bool
-	wg      *sync.WaitGroup
-	ctx     context.Context
-	die     context.CancelFunc
+	filePath string
+	log      dex.Logger
+	seq      *badger.Sequence
+	running  atomic.Bool
+	wg       *sync.WaitGroup
+	ctx      context.Context
 }
 
 // badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
@@ -104,45 +103,48 @@ func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
 	log.Warnf(s, a...)
 }
 
-func NewBadgerTxDB(filePath string, log dex.Logger) (*BadgerTxDB, error) {
+func NewBadgerTxDB(filePath string, log dex.Logger) *BadgerTxDB {
+	return &BadgerTxDB{
+		filePath: filePath,
+		log:      log,
+		wg:       new(sync.WaitGroup),
+	}
+}
+
+func (db *BadgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// If memory use is a concern, could try
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
 	//   .WithValueLogFileSize(sz int64), bytes, default 1 GB, must be 1MB <= sz <= 1GB
-	opts := badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log})
-	db, err := badger.Open(opts)
+	opts := badger.DefaultOptions(db.filePath).WithLogger(&badgerLoggerWrapper{db.log})
+	var err error
+	db.DB, err = badger.Open(opts)
 	if err == badger.ErrTruncateNeeded {
 		// Probably a Windows thing.
 		// https://github.com/dgraph-io/badger/issues/744
-		log.Warnf("newTxHistoryStore badger db: %v", err)
+		db.log.Warnf("newTxHistoryStore badger db: %v", err)
 		// Try again with value log truncation enabled.
 		opts.Truncate = true
-		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
-		db, err = badger.Open(opts)
+		db.log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
+		db.DB, err = badger.Open(opts)
 	}
 	if err != nil {
 		return nil, err
 	}
-
-	seq, err := db.GetSequence([]byte("seq"), 10)
+	db.ctx = ctx
+	db.seq, err = db.GetSequence([]byte("seq"), 10)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, die := context.WithCancel(context.Background())
+	db.running.Store(true)
 
-	badgerDB := &BadgerTxDB{
-		DB:  db,
-		log: log,
-		seq: seq,
-		wg:  new(sync.WaitGroup),
-		die: die,
-	}
-	badgerDB.running.Store(true)
+	var wg sync.WaitGroup
 
-	badgerDB.wg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer badgerDB.wg.Done()
+		defer wg.Done()
+
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {
@@ -150,21 +152,24 @@ func NewBadgerTxDB(filePath string, log dex.Logger) (*BadgerTxDB, error) {
 			case <-ticker.C:
 				err := db.RunValueLogGC(0.5)
 				if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
-					log.Errorf("garbage collection error: %v", err)
+					db.log.Errorf("garbage collection error: %v", err)
 				}
 			case <-ctx.Done():
+				db.running.Store(false)
+				db.wg.Wait()
+				db.Close()
 				return
 			}
 		}
 	}()
 
-	return badgerDB, nil
+	return &wg, nil
 }
 
 // badgerDB returns ErrConflict when a read happening in a update (read/write)
 // transaction is stale. This function retries updates multiple times in
 // case of conflicts.
-func handleConflictWithBackoff(update func() error) error {
+func (db *BadgerTxDB) handleConflictWithBackoff(update func() error) error {
 	maxRetries := 10
 	sleepTime := 5 * time.Millisecond
 
@@ -175,24 +180,21 @@ func handleConflictWithBackoff(update func() error) error {
 		if err != badger.ErrConflict {
 			return err
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(sleepTime)
 	}
 
 	return err
 }
 
-func (db *BadgerTxDB) newBlockKey(txn *badger.Txn, blockNumber uint64) ([]byte, error) {
-	getKey := func(i uint64) []byte {
-		if blockNumber == 0 {
-			return pendingKey(i)
-		}
-		return blockKey(blockNumber, i)
-	}
+func (db *BadgerTxDB) newBlockKey(blockNumber uint64) ([]byte, error) {
 	seq, err := db.seq.Next()
 	if err != nil {
 		return nil, err
 	}
-	return getKey(seq), nil
+	if blockNumber == 0 {
+		return pendingKey(seq), nil
+	}
+	return blockKey(blockNumber, seq), nil
 }
 
 func hasPrefix(b, prefix []byte) bool {
@@ -233,7 +235,7 @@ func (db *BadgerTxDB) storeTx(tx *ExtendedWalletTx) error {
 		}
 
 		if key == nil {
-			key, err = db.newBlockKey(txn, tx.BlockNumber)
+			key, err = db.newBlockKey(tx.BlockNumber)
 			if err != nil {
 				return err
 			}
@@ -261,7 +263,7 @@ func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
 		return fmt.Errorf("database is not running")
 	}
 
-	return handleConflictWithBackoff(func() error { return db.storeTx(tx) })
+	return db.handleConflictWithBackoff(func() error { return db.storeTx(tx) })
 }
 
 func (db *BadgerTxDB) markTxAsSubmitted(txID string) error {
@@ -313,7 +315,7 @@ func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
 		return fmt.Errorf("database is not running")
 	}
 
-	return handleConflictWithBackoff(func() error { return db.markTxAsSubmitted(txID) })
+	return db.handleConflictWithBackoff(func() error { return db.markTxAsSubmitted(txID) })
 }
 
 // GetTxs retrieves n transactions from the database. refID optionally
@@ -472,7 +474,7 @@ func (db *BadgerTxDB) RemoveTx(txID string) error {
 		return fmt.Errorf("database is not running")
 	}
 
-	return handleConflictWithBackoff(func() error { return db.removeTx(txID) })
+	return db.handleConflictWithBackoff(func() error { return db.removeTx(txID) })
 }
 
 func (db *BadgerTxDB) setLastReceiveTxQuery(block uint64) error {
@@ -495,7 +497,7 @@ func (db *BadgerTxDB) SetLastReceiveTxQuery(block uint64) error {
 		return fmt.Errorf("database is not running")
 	}
 
-	return handleConflictWithBackoff(func() error { return db.setLastReceiveTxQuery(block) })
+	return db.handleConflictWithBackoff(func() error { return db.setLastReceiveTxQuery(block) })
 }
 
 const ErrNeverQueried = dex.ErrorKind("never queried")
@@ -526,12 +528,4 @@ func (db *BadgerTxDB) GetLastReceiveTxQuery() (uint64, error) {
 		return nil
 	})
 	return block, err
-}
-
-// Close closes the database.
-func (db *BadgerTxDB) Close() error {
-	db.running.Store(false)
-	db.die()
-	db.wg.Wait()
-	return db.DB.Close()
 }

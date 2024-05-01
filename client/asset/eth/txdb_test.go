@@ -1,6 +1,7 @@
 package eth
 
 import (
+	"context"
 	"encoding/hex"
 	"reflect"
 	"testing"
@@ -17,9 +18,12 @@ func TestTxDB(t *testing.T) {
 	tempDir := t.TempDir()
 	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
 
-	txHistoryStore, err := newBadgerTxDB(tempDir, tLogger)
+	txHistoryStore := newBadgerTxDB(tempDir, tLogger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg, err := txHistoryStore.connect(ctx)
 	if err != nil {
-		t.Fatalf("error creating tx history store: %v", err)
+		t.Fatalf("error connecting to tx history store: %v", err)
 	}
 
 	txs, err := txHistoryStore.getTxs(0, nil, true, nil)
@@ -173,13 +177,15 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
 
-	txHistoryStore.close()
+	cancel()
+	wg.Wait()
 
-	txHistoryStore, err = newBadgerTxDB(tempDir, dex.StdOutLogger("TXDB", dex.LevelTrace))
+	ctx, cancel = context.WithCancel(context.Background())
+	txHistoryStore = newBadgerTxDB(tempDir, dex.StdOutLogger("TXDB", dex.LevelTrace))
+	wg, err = txHistoryStore.connect(ctx)
 	if err != nil {
-		t.Fatalf("error creating tx history store: %v", err)
+		t.Fatalf("error connecting to tx history store: %v", err)
 	}
-	defer txHistoryStore.close()
 
 	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
 	if err != nil {
@@ -326,6 +332,9 @@ func TestTxDB(t *testing.T) {
 	if len(monitoredTxs) != 0 {
 		t.Fatalf("expected 0 monitored txs but got %d", len(monitoredTxs))
 	}
+
+	cancel()
+	wg.Wait()
 }
 
 func TestTxDBUpgrade(t *testing.T) {
@@ -390,15 +399,18 @@ func TestTxDBUpgrade(t *testing.T) {
 		t.Fatalf("error storing monitored txs: %v", err)
 	}
 
-	err = db.Close()
-	if err != nil {
-		t.Fatalf("error closing badger db: %v", err)
-	}
+	db.Close()
 
-	txHistoryStore, err := newBadgerTxDB(dir, tLogger)
+	ctx, cancel := context.WithCancel(context.Background())
+	txHistoryStore := newBadgerTxDB(dir, tLogger)
+	wg, err := txHistoryStore.connect(ctx)
 	if err != nil {
-		t.Fatalf("error creating tx history store: %v", err)
+		t.Fatalf("error connecting to tx history store: %v", err)
 	}
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	retrievedMonitoredTxs, err := txHistoryStore.getMonitoredTxs()
 	if err != nil {

@@ -279,6 +279,12 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		return false, fmt.Errorf("error connecting new wallet")
 	}
 
+	defer func() {
+		if !allOk {
+			newWallet.Disconnect()
+		}
+	}()
+
 	for _, acctName := range []string{rpcCfg.PrimaryAccount, rpcCfg.TradingAccount, rpcCfg.UnmixedAccount} {
 		if acctName == "" {
 			continue

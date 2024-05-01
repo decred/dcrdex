@@ -825,10 +825,6 @@ type baseWallet struct {
 	txHistoryDB atomic.Value // *BadgerTxDB
 
 	ar *AddressRecycler
-
-	// subprocessWg must be incremented every time the wallet starts a
-	// goroutine that will use node or the tx history DB.
-	subprocessWg sync.WaitGroup
 }
 
 func (w *baseWallet) fallbackFeeRate() uint64 {
@@ -1394,7 +1390,7 @@ func (btc *baseWallet) Info() *asset.WalletInfo {
 }
 
 func (btc *baseWallet) txHistoryDBPath(walletID string) string {
-	return filepath.Join(btc.walletDir, fmt.Sprintf("txhistory-%s.db", walletID))
+	return filepath.Join(btc.walletDir, fmt.Sprintf("txhistorydb-%s", walletID))
 }
 
 // findExistingAddressBasedTxHistoryDB finds the path of a tx history db that
@@ -1412,7 +1408,7 @@ func (btc *baseWallet) findExistingAddressBasedTxHistoryDB() (string, error) {
 		return "", fmt.Errorf("error reading wallet directory: %w", err)
 	}
 
-	pattern := regexp.MustCompile(`^txhistory-(.+)\.db$`)
+	pattern := regexp.MustCompile(`^txhistorydb-(.+)$`)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -1437,7 +1433,7 @@ func (btc *baseWallet) findExistingAddressBasedTxHistoryDB() (string, error) {
 	return "", nil
 }
 
-func (btc *baseWallet) startTxHistoryDB() error {
+func (btc *baseWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, error) {
 	var dbPath string
 	fingerPrint, err := btc.node.fingerprint()
 	if err == nil && fingerPrint != "" {
@@ -1447,7 +1443,7 @@ func (btc *baseWallet) startTxHistoryDB() error {
 	if dbPath == "" {
 		addressPath, err := btc.findExistingAddressBasedTxHistoryDB()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if addressPath != "" {
 			dbPath = addressPath
@@ -1457,30 +1453,24 @@ func (btc *baseWallet) startTxHistoryDB() error {
 	if dbPath == "" {
 		depositAddr, err := btc.DepositAddress()
 		if err != nil {
-			return fmt.Errorf("error getting deposit address: %w", err)
+			return nil, fmt.Errorf("error getting deposit address: %w", err)
 		}
 		dbPath = btc.txHistoryDBPath(depositAddr)
 	}
 
 	btc.log.Debugf("Using tx history db at %s", dbPath)
 
-	db, err := NewBadgerTxDB(dbPath, btc.log)
-	if err != nil {
-		return fmt.Errorf("error opening tx history db: %w", err)
-	}
-
-	var success bool
-	defer func() {
-		if !success {
-			db.Close()
-		}
-	}()
-
+	db := NewBadgerTxDB(dbPath, btc.log)
 	btc.txHistoryDB.Store(db)
+
+	wg, err := db.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	pendingTxs, err := db.GetPendingTxs()
 	if err != nil {
-		return fmt.Errorf("failed to load unconfirmed txs: %v", err)
+		return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
 	}
 
 	btc.pendingTxsMtx.Lock()
@@ -1498,13 +1488,12 @@ func (btc *baseWallet) startTxHistoryDB() error {
 	if errors.Is(err, ErrNeverQueried) {
 		lastQuery = 0
 	} else if err != nil {
-		return fmt.Errorf("failed to load last query time: %v", err)
+		return nil, fmt.Errorf("failed to load last query time: %v", err)
 	}
 
 	btc.receiveTxLastQuery.Store(lastQuery)
 
-	success = true
-	return nil
+	return wg, nil
 }
 
 // connect is shared between Wallet implementations that may have different
@@ -1554,55 +1543,36 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 // Connect connects the wallet to the btc.Wallet backend and starts monitoring
 // blocks and peers. Satisfies the dex.Connector interface.
 func (btc *intermediaryWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	// A separate baseCtx is used to ensure that all subprocesses are complete
-	// before the node is shut down.
-	baseCtx, killBase := context.WithCancel(context.Background())
+	wg, err := btc.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	var success bool
-	defer func() {
-		if !success {
-			killBase()
-		}
+	dbWG, err := btc.startTxHistoryDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dbWG.Wait()
 	}()
 
-	baseWg, err := btc.connect(baseCtx)
-	if err != nil {
-		return nil, err
-	}
-
-	err = btc.startTxHistoryDB()
-	if err != nil {
-		return nil, err
-	}
-
-	success = true
-
-	btc.subprocessWg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer btc.subprocessWg.Done()
+		defer wg.Done()
 		btc.watchBlocks(ctx)
 		btc.rf.CancelRedemptionSearches()
 	}()
 
-	btc.subprocessWg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer btc.subprocessWg.Done()
+		defer wg.Done()
 		btc.monitorPeers(ctx)
 	}()
 
-	baseWg.Add(1)
-	go func() {
-		defer baseWg.Done()
-		<-ctx.Done()
-		btc.subprocessWg.Wait()
-		killBase()
-		db := btc.txDB()
-		if db != nil {
-			db.Close()
-		}
-	}()
-
-	return baseWg, nil
+	return wg, nil
 }
 
 // Reconfigure attempts to reconfigure the wallet.
@@ -4100,9 +4070,7 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 	// Broadcast the transaction, but do not block because this is not required
 	// and does not affect the audit result.
 	if rebroadcast && tx != nil {
-		btc.subprocessWg.Add(1)
 		go func() {
-			defer btc.subprocessWg.Done()
 			if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
 				btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			} else if !hashSent.IsEqual(txHash) {
@@ -4680,11 +4648,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	btc.emit.TipChange(uint64(newTip.Height))
 
-	btc.subprocessWg.Add(1)
-	go func() {
-		defer btc.subprocessWg.Done()
-		btc.checkPendingTxs(uint64(newTip.Height))
-	}()
+	go btc.checkPendingTxs(uint64(newTip.Height))
 
 	btc.rf.ReportNewTip(ctx, prevTip, newTip)
 }
