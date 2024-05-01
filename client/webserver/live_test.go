@@ -1936,7 +1936,7 @@ out:
 			if enableActions && rand.Float32() < 0.05 {
 				c.noteFeed <- &core.WalletNote{
 					Notification: db.NewNotification(core.NoteTypeWalletNote, core.TopicWalletNotification, "", "", db.Data),
-					Payload:      makeRequiredAction(baseID, "lostTx"),
+					Payload:      makeRequiredAction(baseID, "missingNonces"),
 				}
 			}
 		case <-tCtx.Done():
@@ -2679,7 +2679,7 @@ func TestServer(t *testing.T) {
 
 	if enableActions {
 		actions = []*asset.ActionRequiredNote{
-			makeRequiredAction(0, "lostTx"),
+			makeRequiredAction(0, "missingNonces"),
 			makeRequiredAction(42, "lostNonce"),
 			makeRequiredAction(60, "tooCheap"),
 			makeRequiredAction(60, "redeemRejected"),

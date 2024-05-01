@@ -483,7 +483,7 @@ export default class Application {
   attachActions () {
     const { page } = this
     Object.assign(page, Doc.idDescendants(Doc.idel(document.body, 'requiredActions')))
-    Doc.cleanTemplates(page.lostTxTmpl, page.actionTxTableTmpl)
+    Doc.cleanTemplates(page.missingNoncesTmpl, page.actionTxTableTmpl, page.tooCheapTmpl, page.lostNonceTmpl)
     Doc.bind(page.actionsCollapse, 'click', () => {
       Doc.hide(page.actionDialog)
       Doc.show(page.actionDialogCollapsed)
@@ -528,7 +528,6 @@ export default class Application {
     const existingAction = requiredActions[req.uniqueID]
     if (existingAction && existingAction.actionID === req.actionID) return
     const div = this.actionForm(req)
-    page.actionDialogContent.appendChild(div)
     if (existingAction) {
       if (existingAction.selected) existingAction.div.replaceWith(div)
       existingAction.div = div
@@ -543,7 +542,7 @@ export default class Application {
       const n = Object.keys(requiredActions).length
       page.actionDialogCount.textContent = String(n)
       page.actionCount.textContent = String(n)
-      if (Doc.isHidden(page.actionDialog) && Doc.isHidden(page.actionDialogCollapsed)) {
+      if (Doc.isHidden(page.actionDialog)) {
         this.showRequestedAction(req.uniqueID)
       }
     }
@@ -578,8 +577,8 @@ export default class Application {
     switch (req.actionID) {
       case 'tooCheap':
         return this.tooCheapAction(req)
-      case 'lostTx':
-        return this.lostTxAction(req)
+      case 'missingNonces':
+        return this.missingNoncesAction(req)
       case 'lostNonce':
         return this.lostNonceAction(req)
       case 'redeemRejected':
@@ -631,22 +630,18 @@ export default class Application {
     this.resolveActionWithID(req.uniqueID)
   }
 
-  lostTxAction (req: ActionRequiredNote) {
-    const { assetID, payload } = req
-    const n = payload as TransactionActionNote
-    const div = this.page.lostTxTmpl.cloneNode(true) as PageElement
+  missingNoncesAction (req: ActionRequiredNote) {
+    const { assetID } = req
+    const div = this.page.missingNoncesTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(div)
     const { name } = this.assets[assetID]
     tmpl.assetName.textContent = name
-    tmpl.txTable.appendChild(this.actionTxTable(req))
-    const act = (abandon: boolean) => {
-      this.submitAction(req, {
-        txID: n.tx.id,
-        abandon
-      }, tmpl.errMsg)
-    }
-    Doc.bind(tmpl.lostAbandonBttn, 'click', () => act(true))
-    Doc.bind(tmpl.lostWaitBttn, 'click', () => act(false))
+    Doc.bind(tmpl.doNothingBttn, 'click', () => {
+      this.submitAction(req, { recover: false }, tmpl.errMsg)
+    })
+    Doc.bind(tmpl.recoverBttn, 'click', () => {
+      this.submitAction(req, { recover: true }, tmpl.errMsg)
+    })
     return div
   }
 

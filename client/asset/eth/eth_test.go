@@ -127,6 +127,7 @@ type testNode struct {
 	receiptErrs     map[common.Hash]error
 	hdrByHash       *types.Header
 	lastSignedTx    *types.Transaction
+	sentTxs         int
 	sendTxTx        *types.Transaction
 	sendTxErr       error
 	simBackend      bind.ContractBackend
@@ -251,10 +252,11 @@ func (n *testNode) signData(data []byte) (sig, pubKey []byte, err error) {
 
 	return sig, crypto.FromECDSAPub(&n.privKey.PublicKey), nil
 }
-func (n *testNode) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte) (*types.Transaction, error) {
+func (n *testNode) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
+	n.sentTxs++
 	return n.sendTxTx, n.sendTxErr
 }
-func (n *testNode) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+func (n *testNode) sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error {
 	n.lastSignedTx = tx
 	return nil
 }
@@ -303,8 +305,8 @@ func (n *testNode) transactionAndReceipt(ctx context.Context, txHash common.Hash
 	return n.receipts[txHash], n.receiptTxs[txHash], n.receiptErrs[txHash]
 }
 
-func (n *testNode) nextNonce(ctx context.Context) (*big.Int, error) {
-	return big.NewInt(1), nil
+func (n *testNode) nonce(ctx context.Context) (*big.Int, *big.Int, error) {
+	return big.NewInt(0), big.NewInt(1), nil
 }
 
 func (n *testNode) setBalanceError(w *assetWallet, err error) {
@@ -684,6 +686,7 @@ func TestCheckPendingTxs(t *testing.T) {
 	const finalized = tip - txConfsNeededToConfirm + 1
 	now := uint64(time.Now().Unix())
 	finalizedStamp := now - txConfsNeededToConfirm*10
+	rebroadcastable := now - 300
 	mature := now - 600 // able to send actions
 	agedOut := now - uint64(txAgeOut.Seconds()) - 1
 
@@ -731,6 +734,7 @@ func TestCheckPendingTxs(t *testing.T) {
 		pendingTxs  []*extendedWalletTx
 		receipts    []*types.Receipt
 		receiptErrs []error
+		txs         []bool
 		noncesAfter []uint64
 		actionID    string
 		recast      bool
@@ -744,16 +748,16 @@ func TestCheckPendingTxs(t *testing.T) {
 			noncesAfter: []uint64{1},
 		},
 		{
-			name: "second one is confirmed first. should see notification",
+			name: "second one is confirmed first",
 			pendingTxs: []*extendedWalletTx{
-				extendedTx(2, 0, 0, mature),
+				extendedTx(2, 0, 0, rebroadcastable),
 				extendedTx(3, finalized, finalizedStamp, finalizedStamp),
 			},
 			noncesAfter: []uint64{2, 3},
-			actionID:    actionTypeLostNonce,
 			receipts:    []*types.Receipt{nil, nil},
+			txs:         []bool{false, true},
 			receiptErrs: []error{asset.CoinNotFoundError, nil},
-			recast:      true,
+			actionID:    actionTypeLostNonce,
 		},
 		{
 			name: "confirm one with receipt",
@@ -770,7 +774,8 @@ func TestCheckPendingTxs(t *testing.T) {
 			noncesAfter: []uint64{5},
 			receipts:    []*types.Receipt{nil},
 			receiptErrs: []error{asset.CoinNotFoundError},
-			actionID:    actionTypeLostTx,
+			txs:         []bool{false},
+			actionID:    actionTypeLostNonce,
 		},
 		{
 			name: "mature and indexed, low fees",
@@ -780,10 +785,20 @@ func TestCheckPendingTxs(t *testing.T) {
 			noncesAfter: []uint64{6},
 			receipts:    []*types.Receipt{newReceipt(0)},
 			actionID:    actionTypeTooCheap,
-			recast:      true,
+		}, {
+			name: "missing nonces",
+			pendingTxs: []*extendedWalletTx{
+				extendedTx(8, finalized, finalizedStamp, finalizedStamp),
+				extendedTx(11, finalized+1, finalizedStamp, finalizedStamp),
+			},
+			noncesAfter: []uint64{11},
+			actionID:    actionTypeMissingNonces,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			eth.confirmedNonceAt = new(big.Int).Add(tt.pendingTxs[0].Nonce, big.NewInt(1))
+			eth.pendingNonceAt = new(big.Int).Add(tt.pendingTxs[len(tt.pendingTxs)-1].Nonce, big.NewInt(1))
+
 			node.lastSignedTx = nil
 			eth.currentTip = &types.Header{Number: new(big.Int).SetUint64(tip)}
 			eth.pendingTxs = tt.pendingTxs
@@ -796,8 +811,9 @@ func TestCheckPendingTxs(t *testing.T) {
 					continue
 				}
 				node.receipts[pendingTx.txHash] = r
-				node.receiptTxs[pendingTx.txHash], _ = pendingTx.tx()
-
+				if len(tt.txs) < i+1 || tt.txs[i] {
+					node.receiptTxs[pendingTx.txHash], _ = pendingTx.tx()
+				}
 				if pendingTx.Timestamp == 0 && r.BlockNumber != nil && r.BlockNumber.Uint64() != 0 {
 					node.hdrByHash = &types.Header{
 						Number: r.BlockNumber,
@@ -878,30 +894,11 @@ func TestTakeAction(t *testing.T) {
 	if tx.GasTipCap().Uint64() != 0 {
 		t.Fatal("The fee was bumped. The fee shouldn't have been bumped.")
 	}
-	if pendingTx.SubmissionTime == 0 {
-		t.Fatalf("The submission time wasn't reset")
+	if pendingTx.actionIgnored.IsZero() {
+		t.Fatalf("The ignore time wasn't reset")
 	}
 	if len(eth.pendingTxs) != 1 {
 		t.Fatalf("Tx was removed")
-	}
-
-	// neglecting to abandon a lost transaction should reset the submission
-	// time.
-	pendingTx.SubmissionTime = 0
-	lostTxAction := []byte(fmt.Sprintf(`{"txID":"%s","abandon":false}`, pendingTx.ID))
-	if err := eth.TakeAction(actionTypeLostTx, lostTxAction); err != nil {
-		t.Fatalf("TakeAction abandon=false error: %v", err)
-	}
-	if pendingTx.SubmissionTime == 0 {
-		t.Fatalf("The submission time wasn't reset")
-	}
-	// Abandon it.
-	lostTxAction = []byte(fmt.Sprintf(`{"txID":"%s","abandon":true}`, pendingTx.ID))
-	if err := eth.TakeAction(actionTypeLostTx, lostTxAction); err != nil {
-		t.Fatalf("TakeAction abandon=true error: %v", err)
-	}
-	if len(eth.pendingTxs) != 0 {
-		t.Fatalf("Tx wasn't abandoned")
 	}
 
 	// Nonce-replaced tx
@@ -930,6 +927,21 @@ func TestTakeAction(t *testing.T) {
 	if err := eth.TakeAction(actionTypeLostNonce, lostNonceAction); err == nil {
 		t.Fatalf("no error for wrong nonce")
 	}
+
+	// Missing nonces
+	tx5 := eth.extendedTx(node.newTransaction(5, aGwei), asset.Send, 1)
+	eth.pendingTxs = []*extendedWalletTx{tx5}
+	eth.confirmedNonceAt = big.NewInt(2)
+	eth.pendingNonceAt = big.NewInt(6)
+	nonceRecoveryAction := []byte(`{"recover":true}`)
+	node.sentTxs = 0
+	if err := eth.TakeAction(actionTypeMissingNonces, nonceRecoveryAction); err != nil {
+		t.Fatalf("error for nonce recover: %v", err)
+	}
+	if node.sentTxs != 3 {
+		t.Fatalf("expected 2 new txs. saw %d", node.sentTxs)
+	}
+
 }
 
 func TestCheckForNewBlocks(t *testing.T) {
@@ -960,13 +972,15 @@ func TestCheckForNewBlocks(t *testing.T) {
 		w := &ETHWallet{
 			assetWallet: &assetWallet{
 				baseWallet: &baseWallet{
-					node:          node,
-					addr:          node.address(),
-					ctx:           ctx,
-					log:           tLogger,
-					currentTip:    header0,
-					txDB:          &tTxDB{},
-					finalizeConfs: txConfsNeededToConfirm,
+					node:             node,
+					addr:             node.address(),
+					ctx:              ctx,
+					log:              tLogger,
+					currentTip:       header0,
+					confirmedNonceAt: new(big.Int),
+					pendingNonceAt:   new(big.Int),
+					txDB:             &tTxDB{},
+					finalizeConfs:    txConfsNeededToConfirm,
 				},
 				log:     tLogger.SubLogger("ETH"),
 				emit:    emit,
@@ -1156,20 +1170,21 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
-			baseChainID:   BipID,
-			chainID:       dexeth.ChainIDs[dex.Simnet],
-			tokens:        dexeth.Tokens,
-			addr:          node.addr,
-			net:           dex.Simnet,
-			node:          node,
-			ctx:           ctx,
-			log:           tLogger,
-			gasFeeLimitV:  defaultGasFeeLimit,
-			nextNonce:     new(big.Int),
-			pendingTxs:    make([]*extendedWalletTx, 0),
-			txDB:          &tTxDB{},
-			currentTip:    &types.Header{Number: new(big.Int)},
-			finalizeConfs: txConfsNeededToConfirm,
+			baseChainID:      BipID,
+			chainID:          dexeth.ChainIDs[dex.Simnet],
+			tokens:           dexeth.Tokens,
+			addr:             node.addr,
+			net:              dex.Simnet,
+			node:             node,
+			ctx:              ctx,
+			log:              tLogger,
+			gasFeeLimitV:     defaultGasFeeLimit,
+			pendingNonceAt:   new(big.Int),
+			confirmedNonceAt: new(big.Int),
+			pendingTxs:       make([]*extendedWalletTx, 0),
+			txDB:             &tTxDB{},
+			currentTip:       &types.Header{Number: new(big.Int)},
+			finalizeConfs:    txConfsNeededToConfirm,
 		},
 		versionedGases:     versionedGases,
 		maxSwapGas:         versionedGases[0].Swap,

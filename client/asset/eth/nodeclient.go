@@ -201,8 +201,8 @@ func (n *nodeClient) transactionAndReceipt(ctx context.Context, txHash common.Ha
 	return receipt, tx, nil
 }
 
-func (n *nodeClient) nextNonce(ctx context.Context) (*big.Int, error) {
-	return nil, errors.New("unimplemented")
+func (n *nodeClient) nonce(ctx context.Context) (*big.Int, *big.Int, error) {
+	return nil, nil, errors.New("unimplemented")
 }
 
 // pendingTransactions returns pending transactions.
@@ -232,7 +232,7 @@ func (n *nodeClient) getConfirmedNonce(ctx context.Context) (uint64, error) {
 
 // sendTransaction sends a tx. The nonce should be set in txOpts.
 func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts,
-	to common.Address, data []byte) (*types.Transaction, error) {
+	to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 
 	tx, err := n.creds.ks.SignTx(*n.creds.acct, types.NewTx(&types.DynamicFeeTx{
 		To:        &to,
@@ -395,7 +395,7 @@ func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common
 }
 
 // sendSignedTransaction injects a signed transaction into the pending pool for execution.
-func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error {
 	return n.leth.ApiBackend.SendTx(ctx, tx)
 }
 

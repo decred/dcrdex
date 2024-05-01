@@ -107,10 +107,11 @@ type provider struct {
 	// tip tracks the best known header as well as any error encountered
 	tip struct {
 		sync.RWMutex
-		header      *types.Header
-		headerStamp time.Time
-		failStamp   time.Time
-		failCount   int
+		header       *types.Header
+		headerStamp  time.Time
+		failStamp    time.Time
+		failCount    int
+		wsHeaderSeen atomic.Bool
 	}
 }
 
@@ -140,7 +141,7 @@ func (p *provider) setTip(header *types.Header, log dex.Logger) {
 // cachedTip retrieves the last known best header.
 func (p *provider) cachedTip() *types.Header {
 	stale := time.Second * 10
-	if p.ws {
+	if p.tip.wsHeaderSeen.Load() {
 		// We want to avoid requests, and we expect that our notification feed
 		// is working. Setting this too low would result in unnecessary requests
 		// when notifications are working right. Setting this too high will
@@ -318,6 +319,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 		case hdr := <-h:
 			log.Tracef("%q reported new tip at height %s (%s)", p.host, hdr.Number, hdr.Hash())
 			p.setTip(hdr, log)
+			p.tip.wsHeaderSeen.Store(true)
 		case err, ok := <-sub.Err():
 			if !ok {
 				// Subscription cancelled
@@ -859,13 +861,17 @@ func (m *multiRPCClient) transactionAndReceipt(ctx context.Context, txHash commo
 	return r, tx, err
 }
 
-// nextNonce gets the best next nonce for the account.
-func (m *multiRPCClient) nextNonce(ctx context.Context) (*big.Int, error) {
-	n := new(big.Int)
-	return n, m.withAll(ctx, func(ctx context.Context, p *provider) error {
-		nonce, err := p.ec.PendingNonceAt(ctx, m.creds.addr)
-		if err == nil && n.Uint64() < nonce {
-			n.SetUint64(nonce)
+// nonce gets the best next nonce for the account.
+func (m *multiRPCClient) nonce(ctx context.Context) (confirmed, pending *big.Int, _ error) {
+	confirmed, pending = new(big.Int), new(big.Int)
+	return confirmed, pending, m.withAll(ctx, func(ctx context.Context, p *provider) error {
+		confirmedAt, err := p.ec.NonceAt(ctx, m.creds.addr, nil)
+		if err == nil && confirmed.Uint64() < confirmedAt {
+			confirmed.SetUint64(confirmedAt)
+		}
+		pendingAt, err := p.ec.PendingNonceAt(ctx, m.creds.addr)
+		if err == nil && pending.Uint64() < pendingAt {
+			pending.SetUint64(pendingAt)
 		}
 		return err
 	})
@@ -1251,20 +1257,21 @@ func (m *multiRPCClient) shutdown() {
 	for _, p := range m.providerList() {
 		p.shutdown()
 	}
-
 }
 
-func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+func allowAlreadyKnownFilter(err error) (discard, propagate, fail bool) {
+	// NOTE: err never hits errors.Is(err, txpool.ErrAlreadyKnown) because
+	// err is a *rpc.jsonError, but it does have a Message that matches.
+	return errorFilter(err, txpool.ErrAlreadyKnown, "known transaction"), false, false
+}
+
+func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error {
 	var lastProvider *provider
 	if err := m.withAll(ctx, func(ctx context.Context, p *provider) error {
 		lastProvider = p
 		m.log.Tracef("Sending signed tx via %q", p.host)
 		return p.ec.SendTransaction(ctx, tx)
-	}, func(err error) (discard, propagate, fail bool) {
-		// NOTE: err never hits errors.Is(err, txpool.ErrAlreadyKnown) because
-		// err is a *rpc.jsonError, but it does have a Message that matches.
-		return errorFilter(err, txpool.ErrAlreadyKnown, "known transaction"), false, false
-	}); err != nil {
+	}, filts...); err != nil {
 		return err
 	}
 	m.lastProvider.Lock()
@@ -1274,7 +1281,7 @@ func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Tr
 	return nil
 }
 
-func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte) (*types.Transaction, error) {
+func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 	tx, err := m.creds.ks.SignTx(*m.creds.acct, types.NewTx(&types.DynamicFeeTx{
 		To:        &to,
 		ChainID:   m.chainID,
@@ -1290,7 +1297,7 @@ func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.Trans
 		return nil, fmt.Errorf("signing error: %v", err)
 	}
 
-	return tx, m.sendSignedTransaction(ctx, tx)
+	return tx, m.sendSignedTransaction(ctx, tx, filts...)
 }
 
 func (m *multiRPCClient) signData(data []byte) (sig, pubKey []byte, err error) {
@@ -1368,7 +1375,7 @@ func (m *multiRPCClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeR
 	// If nonce is not nil, this indicates that we are trying to re-send an
 	// old transaction with higher fee in order to ensure it is mined.
 	if nonce == nil {
-		nonce, err = m.nextNonce(ctx)
+		_, nonce, err = m.nonce(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("error getting nonce: %v", err)
 		}

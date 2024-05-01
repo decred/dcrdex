@@ -50,6 +50,8 @@ type extendedWalletTx struct {
 	lastBroadcast   time.Time
 	lastFeeCheck    time.Time
 	actionRequested bool
+	actionIgnored   time.Time
+	indexed         bool
 }
 
 func (t *extendedWalletTx) age() time.Duration {
@@ -93,8 +95,8 @@ func (db *badgerTxDB) Update(f func(txn *badger.Txn) error) (err error) {
 	if err = db.ctx.Err(); err != nil {
 		return err
 	}
-	db.wg.Add(1)
-	defer db.wg.Done()
+	db.updateWG.Add(1)
+	defer db.updateWG.Done()
 
 	const maxRetries = 10
 	sleepTime := 5 * time.Millisecond
@@ -151,7 +153,7 @@ type badgerTxDB struct {
 	ctx      context.Context
 	filePath string
 	log      dex.Logger
-	wg       sync.WaitGroup
+	updateWG sync.WaitGroup
 }
 
 var _ txDB = (*badgerTxDB)(nil)
@@ -205,7 +207,7 @@ func (db *badgerTxDB) connect(ctx context.Context) (*sync.WaitGroup, error) {
 					db.log.Errorf("garbage collection error: %v", err)
 				}
 			case <-ctx.Done():
-				db.wg.Wait()
+				db.updateWG.Wait()
 				err = db.Close()
 				if err != nil {
 					db.log.Errorf("error closing db: %v", err)
@@ -445,6 +447,9 @@ func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
 					if err != nil {
 						db.log.Errorf("unable to unmarhsal wallet transaction: %s: %v", string(wtB), err)
 						return err
+					}
+					if wt.AssumedLost {
+						return nil
 					}
 					if !wt.Confirmed {
 						numConfirmedTxs = 0

@@ -172,16 +172,14 @@
         </tbody>
       </table>
 
-      <div id="lostTxTmpl" class="flex-stretch-column mt-2">
+      <div id="missingNoncesTmpl" class="flex-stretch-column mt-2">
         <div class="text-justify">
-          A <span data-tmpl="assetName"></span>
-          transaction appears to be lost, and all attempts to re-broadcast it
-          have failed. Do you want to abandon it?
+          <span data-tmpl="assetName"></span> nonces are missing. Would you like
+           to attempt recovery?
         </div>
-        <div data-tmpl="txTable"></div>
         <div class="d-flex align-items-stretch mt-3">
-          <button data-tmpl="lostAbandonBttn" class="flex-grow-1 me-2 danger">Abandon</button>
-          <button data-tmpl="lostWaitBttn" class="flex-grow-1 ms-2">Keep Trying</button>
+          <button data-tmpl="doNothingBttn" class="flex-grow-1 me-2 danger">Do Nothing</button>
+          <button data-tmpl="recoverBttn" class="flex-grow-1 ms-2">Attempt Recovery</button>
         </div>
         <div data-tmpl="errMsg" class="p-2 errcolor d-hide"></div>
       </div>
