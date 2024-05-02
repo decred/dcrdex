@@ -5366,9 +5366,13 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
-	// Try to get tickets first, because this will error for RPC + SPV wallets.
+	// Try to get tickets first, because this will error for older RPC + SPV
+	// wallets.
 	tickets, err := dcr.tickets(dcr.ctx)
 	if err != nil {
+		if errors.Is(err, oldSPVWalletErr) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("error retrieving tickets: %w", err)
 	}
 	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
@@ -5382,6 +5386,16 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 		if v := dcr.vspV.Load(); v != nil {
 			vspURL = v.(*vsp).URL
 		}
+	} else {
+		rpcW, ok := dcr.wallet.(*rpcWallet)
+		if !ok {
+			return nil, errors.New("wallet not an *rpcWallet")
+		}
+		walletInfo, err := rpcW.walletInfo(dcr.ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving wallet info: %w", err)
+		}
+		vspURL = walletInfo.VSP
 	}
 	voteChoices, tSpends, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
 	if err != nil {
@@ -5517,6 +5531,20 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) error {
 	bal, err := dcr.Balance()
 	if err != nil {
 		return fmt.Errorf("error getting balance: %v", err)
+	}
+	isRPC := !dcr.isNative()
+	if isRPC {
+		rpcW, ok := dcr.wallet.(*rpcWallet)
+		if !ok {
+			return errors.New("wallet not an *rpcWallet")
+		}
+		walletInfo, err := rpcW.walletInfo(dcr.ctx)
+		if err != nil {
+			return fmt.Errorf("error retrieving wallet info: %w", err)
+		}
+		if walletInfo.SPV && walletInfo.VSP == "" {
+			return errors.New("a vsp must best set to purchase tickets with an spv wallet")
+		}
 	}
 	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
 	if err != nil {

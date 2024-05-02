@@ -5,7 +5,7 @@ sandboxed environment for testing dex swap transactions.
 
 ## Dependencies
 
-The harness depends on [dcrd](https://github.com/decred/dcrd), [dcrwallet](https://github.com/decred/dcrwallet) and [dcrctl](https://github.com/decred/dcrd/tree/master/cmd/dcrctl) to run.
+The harness depends on [dcrd](https://github.com/decred/dcrd), [dcrwallet](https://github.com/decred/dcrwallet) and [dcrctl](https://github.com/decred/dcrd/tree/master/cmd/dcrctl) to run. Also requires curl and jq.
 
 ## Using
 

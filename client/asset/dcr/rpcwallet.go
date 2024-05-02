@@ -43,6 +43,10 @@ var (
 		{Major: 8, Minor: 0, Patch: 0}, // 1.8-pre, just dropped unused ticket RPCs
 		{Major: 7, Minor: 0, Patch: 0}, // 1.7 release, new gettxout args
 	}
+	// From vspWithSPVWalletRPCVersion and later the wallet's current "vsp"
+	// is included in the walletinfo response and the wallet will no longer
+	// error on GetTickets with an spv wallet.
+	vspWithSPVWalletRPCVersion = dex.Semver{Major: 9, Minor: 2, Patch: 0}
 )
 
 // RawRequest RPC methods
@@ -53,6 +57,7 @@ const (
 	methodSignRawTransaction = "signrawtransaction"
 	methodSyncStatus         = "syncstatus"
 	methodGetPeerInfo        = "getpeerinfo"
+	methodWalletInfo         = "walletinfo"
 )
 
 // rpcWallet implements Wallet functionality using an rpc client to communicate
@@ -62,6 +67,8 @@ type rpcWallet struct {
 	log         dex.Logger
 	rpcCfg      *rpcclient.ConnConfig
 	accountsV   atomic.Value // XCWalletAccounts
+
+	hasSPVTicketFunctions bool
 
 	rpcMtx  sync.RWMutex
 	spvMode bool
@@ -338,56 +345,60 @@ func (w *rpcWallet) handleRPCClientReconnection(ctx context.Context) {
 	w.log.Debugf("dcrwallet reconnected (%d)", connectCount-1)
 	w.rpcMtx.RLock()
 	defer w.rpcMtx.RUnlock()
-	spv, err := checkRPCConnection(ctx, w.rpcConnector, w.rpcClient, w.log)
+	spv, hasSPVTicketFunctions, err := checkRPCConnection(ctx, w.rpcConnector, w.rpcClient, w.log)
 	if err != nil {
 		w.log.Errorf("dcrwallet reconnect handler error: %v", err)
 	}
 	w.spvMode = spv
+	w.hasSPVTicketFunctions = hasSPVTicketFunctions
 }
 
 // checkRPCConnection verifies the dcrwallet connection with the walletinfo RPC
 // and sets the spvMode flag accordingly. The spvMode flag is only set after a
 // successful check. This method is not safe for concurrent access, and the
 // rpcMtx must be at least read locked.
-func checkRPCConnection(ctx context.Context, connector rpcConnector, client rpcClient, log dex.Logger) (bool, error) {
+func checkRPCConnection(ctx context.Context, connector rpcConnector, client rpcClient, log dex.Logger) (bool, bool, error) {
 	// Check the required API versions.
 	versions, err := connector.Version(ctx)
 	if err != nil {
-		return false, fmt.Errorf("dcrwallet version fetch error: %w", err)
+		return false, false, fmt.Errorf("dcrwallet version fetch error: %w", err)
 	}
 
 	ver, exists := versions["dcrwalletjsonrpcapi"]
 	if !exists {
-		return false, fmt.Errorf("dcrwallet.Version response missing 'dcrwalletjsonrpcapi'")
+		return false, false, fmt.Errorf("dcrwallet.Version response missing 'dcrwalletjsonrpcapi'")
 	}
 	walletSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
 	if !dex.SemverCompatibleAny(compatibleWalletRPCVersions, walletSemver) {
-		return false, fmt.Errorf("advertised dcrwallet JSON-RPC version %v incompatible with %v",
+		return false, false, fmt.Errorf("advertised dcrwallet JSON-RPC version %v incompatible with %v",
 			walletSemver, compatibleWalletRPCVersions)
 	}
+
+	hasSPVTicketFunctions := walletSemver.Major >= vspWithSPVWalletRPCVersion.Major &&
+		walletSemver.Minor >= vspWithSPVWalletRPCVersion.Minor
 
 	ver, exists = versions["dcrdjsonrpcapi"]
 	if exists {
 		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
 		if !dex.SemverCompatibleAny(compatibleNodeRPCVersions, nodeSemver) {
-			return false, fmt.Errorf("advertised dcrd JSON-RPC version %v incompatible with %v",
+			return false, false, fmt.Errorf("advertised dcrd JSON-RPC version %v incompatible with %v",
 				nodeSemver, compatibleNodeRPCVersions)
 		}
 		log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s)",
 			walletSemver, nodeSemver)
-		return false, nil
+		return false, false, nil
 	}
 
 	// SPV maybe?
 	walletInfo, err := client.WalletInfo(ctx)
 	if err != nil {
-		return false, fmt.Errorf("walletinfo rpc error: %w", translateRPCCancelErr(err))
+		return false, false, fmt.Errorf("walletinfo rpc error: %w", translateRPCCancelErr(err))
 	}
 	if !walletInfo.SPV {
-		return false, fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi' for non-spv wallet")
+		return false, false, fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi' for non-spv wallet")
 	}
 	log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
-	return true, nil
+	return true, hasSPVTicketFunctions, nil
 }
 
 // Connect establishes a connection to the previously created rpc client. The
@@ -433,7 +444,7 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 	// fails and we return with a non-nil error, we must shutdown the
 	// rpc client otherwise subsequent reconnect attempts will be met
 	// with "websocket client has already connected".
-	spv, err := checkRPCConnection(ctx, w.rpcConnector, w.rpcClient, w.log)
+	spv, hasSPVTicketFunctions, err := checkRPCConnection(ctx, w.rpcConnector, w.rpcClient, w.log)
 	if err != nil {
 		// The client should still be connected, but if not, do not try to
 		// shutdown and wait as it could hang.
@@ -446,6 +457,7 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 	}
 
 	w.spvMode = spv
+	w.hasSPVTicketFunctions = hasSPVTicketFunctions
 
 	return nil
 }
@@ -1050,10 +1062,18 @@ func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string, _ *
 	return tickets, nil
 }
 
+var oldSPVWalletErr = errors.New("wallet is an older spv wallet")
+
 // Tickets returns active tickets.
 func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
-	const includeImmature = true
-	// GetTickets only works for clients with a dcrd backend.
+	return w.tickets(ctx, true)
+}
+
+func (w *rpcWallet) tickets(ctx context.Context, includeImmature bool) ([]*asset.Ticket, error) {
+	// GetTickets only works for spv clients after version 9.2.0
+	if w.spvMode && !w.hasSPVTicketFunctions {
+		return nil, oldSPVWalletErr
+	}
 	hashes, err := w.rpcClient.GetTickets(ctx, includeImmature)
 	if err != nil {
 		return nil, err
@@ -1110,7 +1130,6 @@ func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
 			// Spender: ?,
 		})
 	}
-
 	return tickets, nil
 }
 
@@ -1235,4 +1254,24 @@ func isAccountLockedErr(err error) bool {
 	var rpcErr *dcrjson.RPCError
 	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCWalletUnlockNeeded &&
 		strings.Contains(rpcErr.Message, "account is already locked")
+}
+
+// newWalletInfo is walletinfo with a new field found in version 9.2.0+.
+//
+// TODO: Just use *walletjson.WalletInfoResult after we update to dcrwallet/v4.
+type newWalletInfo struct {
+	*walletjson.WalletInfoResult
+	VSP string `json:"vsp"`
+}
+
+func (w *rpcWallet) walletInfo(ctx context.Context) (*newWalletInfo, error) {
+	var walletInfo newWalletInfo
+	err := w.rpcClientRawRequest(ctx, methodWalletInfo, nil, &walletInfo)
+	return &walletInfo, translateRPCCancelErr(err)
+}
+
+var _ ticketPager = (*rpcWallet)(nil)
+
+func (w *rpcWallet) TicketPage(ctx context.Context, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
+	return make([]*asset.Ticket, 0), nil
 }

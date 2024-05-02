@@ -715,6 +715,9 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 			Complete: complete,
 		}
 		return json.Marshal(&res)
+
+	case methodWalletInfo:
+		return json.Marshal(new(walletjson.WalletInfoResult))
 	}
 
 	return nil, fmt.Errorf("method %v not implemented by (*tRPCClient).RawRequest", method)
