@@ -428,9 +428,6 @@ type baseWallet struct {
 	}
 
 	txDB txDB
-	// All processes which may write to txDB must add an entry to this
-	// WaitGroup, and they must all complete before the db is closed.
-	txDbWg sync.WaitGroup
 }
 
 // assetWallet is a wallet backend for Ethereum and Eth tokens. The backend is
@@ -791,14 +788,6 @@ func getWalletDir(dataDir string, network dex.Network) string {
 	return filepath.Join(dataDir, network.String())
 }
 
-func (w *ETHWallet) shutdown() {
-	w.node.shutdown()
-	w.txDbWg.Wait()
-	if err := w.txDB.close(); err != nil {
-		w.log.Errorf("error closing tx history db: %v", err)
-	}
-}
-
 // Connect connects to the node RPC server. Satisfies dex.Connector.
 func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 	var cl ethFetcher
@@ -827,6 +816,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.node = cl
 	w.addr = cl.address()
 	w.ctx = ctx // TokenWallet will re-use this ctx.
+
 	err = w.node.connect(ctx)
 	if err != nil {
 		return nil, err
@@ -851,11 +841,11 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		}
 	}
 
-	w.txDB, err = newBadgerTxDB(filepath.Join(w.dir, "tx.db"), w.log.SubLogger("TXDB"))
+	w.txDB = newBadgerTxDB(filepath.Join(w.dir, "tx.db"), w.log.SubLogger("TXDB"))
+	wg, err := w.txDB.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	w.txDbWg = sync.WaitGroup{}
 
 	w.monitoredTxs, err = w.txDB.getMonitoredTxs()
 	if err != nil {
@@ -872,6 +862,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block hash: %w", err)
 	}
+
 	w.tipMtx.Lock()
 	w.currentTip = bestHdr
 	w.tipMtx.Unlock()
@@ -882,21 +873,11 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 
 	w.connected.Store(true)
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	w.txDbWg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer w.txDbWg.Done()
-		w.txDB.run(ctx)
-	}()
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		w.monitorBlocks(ctx)
-		w.shutdown()
+		w.node.shutdown()
 	}()
 
 	wg.Add(1)
@@ -910,7 +891,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		w.connected.Store(false)
 	}()
 
-	return &wg, nil
+	return wg, nil
 }
 
 // Connect waits for context cancellation and closes the WaitGroup. Satisfies
@@ -3519,24 +3500,19 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 		}
 	}()
 
-	eth.txDbWg.Add(1)
 	go func() {
-		defer eth.txDbWg.Done()
 		for _, w := range connectedWallets {
 			w.checkFindRedemptions()
 		}
 	}()
+
 	go func() {
 		for _, w := range connectedWallets {
 			w.checkPendingApprovals()
 		}
 	}()
 
-	eth.txDbWg.Add(1)
-	go func() {
-		defer eth.txDbWg.Done()
-		eth.checkPendingTxs()
-	}()
+	go eth.checkPendingTxs()
 }
 
 // getLatestMonitoredTx looks up a txHash in the monitoredTxs map. If the
@@ -3642,7 +3618,11 @@ func (w *assetWallet) clearMonitoredTx(tx *monitoredTx) {
 	// message stating that the monitored tx is missing, but no other issue.
 	go func() {
 		timer := time.NewTimer(3 * time.Minute)
-		<-timer.C
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-timer.C:
+		}
 		w.monitoredTxsMtx.Lock()
 		defer w.monitoredTxsMtx.Unlock()
 		for _, hash := range txsToDelete {

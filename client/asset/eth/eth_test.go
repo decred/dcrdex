@@ -428,6 +428,10 @@ type tTxDB struct {
 
 var _ txDB = (*tTxDB)(nil)
 
+func (db *tTxDB) connect(ctx context.Context) (*sync.WaitGroup, error) {
+	return &sync.WaitGroup{}, nil
+}
+
 func (db *tTxDB) storeTx(nonce uint64, wt *extendedWalletTx) error {
 	db.storeTxCalled = true
 	return db.storeTxErr
@@ -4440,11 +4444,21 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 	}
 
 	tempDir := t.TempDir()
-	txDB, err := newBadgerTxDB(filepath.Join(tempDir, "tx.db"), tLogger)
+
+	txDB := newBadgerTxDB(filepath.Join(tempDir, "tx.db"), tLogger)
 	if err != nil {
 		t.Fatalf("error creating tx db: %v", err)
 	}
-	defer eth.txDB.close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg, err := txDB.connect(ctx)
+	if err != nil {
+		t.Fatalf("error connecting to tx db: %v", err)
+	}
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	type test struct {
 		name string

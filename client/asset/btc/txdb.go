@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -69,7 +71,12 @@ func txKey(txid string) []byte {
 
 type BadgerTxDB struct {
 	*badger.DB
-	log dex.Logger
+	filePath string
+	log      dex.Logger
+	seq      *badger.Sequence
+	running  atomic.Bool
+	wg       *sync.WaitGroup
+	ctx      context.Context
 }
 
 // badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
@@ -96,49 +103,98 @@ func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
 	log.Warnf(s, a...)
 }
 
-func NewBadgerTxDB(filePath string, log dex.Logger) (*BadgerTxDB, error) {
+func NewBadgerTxDB(filePath string, log dex.Logger) *BadgerTxDB {
+	return &BadgerTxDB{
+		filePath: filePath,
+		log:      log,
+		wg:       new(sync.WaitGroup),
+	}
+}
+
+func (db *BadgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// If memory use is a concern, could try
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
 	//   .WithValueLogFileSize(sz int64), bytes, default 1 GB, must be 1MB <= sz <= 1GB
-	opts := badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log})
-	db, err := badger.Open(opts)
+	opts := badger.DefaultOptions(db.filePath).WithLogger(&badgerLoggerWrapper{db.log})
+	var err error
+	db.DB, err = badger.Open(opts)
 	if err == badger.ErrTruncateNeeded {
 		// Probably a Windows thing.
 		// https://github.com/dgraph-io/badger/issues/744
-		log.Warnf("newTxHistoryStore badger db: %v", err)
+		db.log.Warnf("newTxHistoryStore badger db: %v", err)
 		// Try again with value log truncation enabled.
 		opts.Truncate = true
-		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
-		db, err = badger.Open(opts)
+		db.log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
+		db.DB, err = badger.Open(opts)
 	}
 	if err != nil {
 		return nil, err
 	}
+	db.ctx = ctx
+	db.seq, err = db.GetSequence([]byte("seq"), 10)
+	if err != nil {
+		return nil, err
+	}
 
-	return &BadgerTxDB{
-		DB:  db,
-		log: log}, nil
+	db.running.Store(true)
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				err := db.RunValueLogGC(0.5)
+				if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
+					db.log.Errorf("garbage collection error: %v", err)
+				}
+			case <-ctx.Done():
+				db.running.Store(false)
+				db.wg.Wait()
+				db.Close()
+				return
+			}
+		}
+	}()
+
+	return &wg, nil
 }
 
-func (db *BadgerTxDB) findFreeBlockKey(txn *badger.Txn, blockNumber uint64) ([]byte, error) {
-	getKey := func(i uint64) []byte {
-		if blockNumber == 0 {
-			return pendingKey(i)
+// badgerDB returns ErrConflict when a read happening in a update (read/write)
+// transaction is stale. This function retries updates multiple times in
+// case of conflicts.
+func (db *BadgerTxDB) handleConflictWithBackoff(update func() error) error {
+	maxRetries := 10
+	sleepTime := 5 * time.Millisecond
+
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		sleepTime *= 2
+		err = update()
+		if err != badger.ErrConflict {
+			return err
 		}
-		return blockKey(blockNumber, i)
+		time.Sleep(sleepTime)
 	}
 
-	for i := uint64(0); ; i++ {
-		key := getKey(i)
-		_, err := txn.Get(key)
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return key, nil
-		}
-		if err != nil {
-			return nil, err
-		}
+	return err
+}
+
+func (db *BadgerTxDB) newBlockKey(blockNumber uint64) ([]byte, error) {
+	seq, err := db.seq.Next()
+	if err != nil {
+		return nil, err
 	}
+	if blockNumber == 0 {
+		return pendingKey(seq), nil
+	}
+	return blockKey(blockNumber, seq), nil
 }
 
 func hasPrefix(b, prefix []byte) bool {
@@ -148,21 +204,16 @@ func hasPrefix(b, prefix []byte) bool {
 	return bytes.Equal(b[:len(prefix)], prefix)
 }
 
-// StoreTx stores a transaction in the database.
-func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
+func (db *BadgerTxDB) storeTx(tx *ExtendedWalletTx) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(tx.ID)
-		txKeyItem, getErr := txn.Get(txKey)
-		if getErr != nil && !errors.Is(getErr, badger.ErrKeyNotFound) {
-			return getErr
-		}
-
-		key, err := db.findFreeBlockKey(txn, tx.BlockNumber)
-		if err != nil {
+		txKeyItem, err := txn.Get(txKey)
+		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
 
-		if getErr == nil { // already stored
+		var key []byte
+		if err == nil { // already stored
 			currBlockKey, err := txKeyItem.ValueCopy(nil)
 			if err != nil {
 				return err
@@ -171,7 +222,7 @@ func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
 			if err != nil {
 				return err
 			}
-			// Only update the key if it is a pending tx that has been confirmed,
+			// Keep the same key unless a pending tx that has been confirmed,
 			// or if the block number has changed indicating a reorg.
 			if hasPrefix(currBlockKey, pendingPrefix) && tx.BlockNumber == 0 {
 				key = currBlockKey
@@ -180,6 +231,13 @@ func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
 				if blockHeight == tx.BlockNumber {
 					key = currBlockKey
 				}
+			}
+		}
+
+		if key == nil {
+			key, err = db.newBlockKey(tx.BlockNumber)
+			if err != nil {
+				return err
 			}
 		}
 
@@ -197,11 +255,18 @@ func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
 	})
 }
 
-// MarkTxAsSubmitted should be called when a previously stored transaction
-// that had not yet been sent to the network is sent to the network.
-// asset.CoinNotFoundError is returned if the transaction is not in the
-// database.
-func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
+// StoreTx stores a transaction in the database.
+func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return db.handleConflictWithBackoff(func() error { return db.storeTx(tx) })
+}
+
+func (db *BadgerTxDB) markTxAsSubmitted(txID string) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(txID)
 		txKeyItem, err := txn.Get(txKey)
@@ -239,6 +304,20 @@ func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
 	})
 }
 
+// MarkTxAsSubmitted should be called when a previously stored transaction
+// that had not yet been sent to the network is sent to the network.
+// asset.CoinNotFoundError is returned if the transaction is not in the
+// database.
+func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return db.handleConflictWithBackoff(func() error { return db.markTxAsSubmitted(txID) })
+}
+
 // GetTxs retrieves n transactions from the database. refID optionally
 // takes a transaction ID, and returns that transaction and the at most
 // (n - 1) transactions that were made either before or after it, depending
@@ -247,6 +326,12 @@ func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
 // ID refID is not in the database, asset.CoinNotFoundError is returned.
 // Unsubmitted transactions are not returned.
 func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return nil, fmt.Errorf("database is not running")
+	}
+
 	var txs []*asset.WalletTransaction
 	err := db.View(func(txn *badger.Txn) error {
 		var startKey []byte
@@ -305,6 +390,12 @@ func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 // GetTx retrieves a transaction by its ID. If the transaction is not in
 // the database, asset.CoinNotFoundError is returned.
 func (db *BadgerTxDB) GetTx(txID string) (*asset.WalletTransaction, error) {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return nil, fmt.Errorf("database is not running")
+	}
+
 	txs, err := db.GetTxs(1, &txID, false)
 	if err != nil {
 		return nil, err
@@ -318,6 +409,12 @@ func (db *BadgerTxDB) GetTx(txID string) (*asset.WalletTransaction, error) {
 
 // GetPendingTxs returns all transactions that have not yet been confirmed.
 func (db *BadgerTxDB) GetPendingTxs() ([]*ExtendedWalletTx, error) {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return nil, fmt.Errorf("database is not running")
+	}
+
 	var txs []*ExtendedWalletTx
 	err := db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -347,9 +444,7 @@ func (db *BadgerTxDB) GetPendingTxs() ([]*ExtendedWalletTx, error) {
 	return txs, err
 }
 
-// RemoveTx removes a transaction from the database. If the transaction is
-// not in the database, asset.CoinNotFoundError is returned.
-func (db *BadgerTxDB) RemoveTx(txID string) error {
+func (db *BadgerTxDB) removeTx(txID string) error {
 	return db.Update(func(txn *badger.Txn) error {
 		txKey := txKey(txID)
 		txKeyItem, err := txn.Get(txKey)
@@ -370,11 +465,19 @@ func (db *BadgerTxDB) RemoveTx(txID string) error {
 	})
 }
 
-// SetLastReceiveTxQuery stores the last time the wallet was queried for
-// receive transactions. This is required to know how far back to query
-// for incoming transactions that were received while the wallet is
-// offline.
-func (db *BadgerTxDB) SetLastReceiveTxQuery(block uint64) error {
+// RemoveTx removes a transaction from the database. If the transaction is
+// not in the database, asset.CoinNotFoundError is returned.
+func (db *BadgerTxDB) RemoveTx(txID string) error {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return db.handleConflictWithBackoff(func() error { return db.removeTx(txID) })
+}
+
+func (db *BadgerTxDB) setLastReceiveTxQuery(block uint64) error {
 	return db.Update(func(txn *badger.Txn) error {
 		// use binary big endian
 		b := make([]byte, 8)
@@ -383,11 +486,31 @@ func (db *BadgerTxDB) SetLastReceiveTxQuery(block uint64) error {
 	})
 }
 
+// SetLastReceiveTxQuery stores the last time the wallet was queried for
+// receive transactions. This is required to know how far back to query
+// for incoming transactions that were received while the wallet is
+// offline.
+func (db *BadgerTxDB) SetLastReceiveTxQuery(block uint64) error {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return db.handleConflictWithBackoff(func() error { return db.setLastReceiveTxQuery(block) })
+}
+
 const ErrNeverQueried = dex.ErrorKind("never queried")
 
 // GetLastReceiveTxQuery retrieves the last time the wallet was queried for
 // receive transactions.
 func (db *BadgerTxDB) GetLastReceiveTxQuery() (uint64, error) {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return 0, fmt.Errorf("database is not running")
+	}
+
 	var block uint64
 	err := db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(lastQueryKey)
@@ -405,30 +528,4 @@ func (db *BadgerTxDB) GetLastReceiveTxQuery() (uint64, error) {
 		return nil
 	})
 	return block, err
-}
-
-// Run runs the garbage collector in a loop.
-func (db *BadgerTxDB) Run(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			err := db.RunValueLogGC(0.5)
-			if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
-				db.log.Errorf("garbage collection error: %v", err)
-			}
-		case <-ctx.Done():
-			err := db.Close()
-			if err != nil {
-				db.log.Errorf("error closing BadgerTxDB: %v", err)
-			}
-			return
-		}
-	}
-}
-
-// Close closes the database.
-func (db *BadgerTxDB) Close() error {
-	return db.DB.Close()
 }

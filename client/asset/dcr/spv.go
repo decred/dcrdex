@@ -65,6 +65,7 @@ const (
 type dcrWallet interface {
 	KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error)
 	AccountNumber(ctx context.Context, accountName string) (uint32, error)
+	AddressAtIdx(ctx context.Context, account, branch, childIdx uint32) (stdaddr.Address, error)
 	AccountBalance(ctx context.Context, account uint32, confirms int32) (wallet.Balances, error)
 	LockedOutpoints(ctx context.Context, accountName string) ([]chainjson.TransactionInput, error)
 	ListUnspent(ctx context.Context, minconf, maxconf int32, addresses map[string]struct{}, accountName string) ([]*walletjson.ListUnspentResult, error)
@@ -348,6 +349,22 @@ func (w *spvWallet) Accounts() XCWalletAccounts {
 
 func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error) {
 	return cfg.Type != walletTypeSPV, nil
+}
+
+// InitialAddress returns the branch 0, child 0 address of the default
+// account.
+func (w *spvWallet) InitialAddress(ctx context.Context) (string, error) {
+	acctNum, err := w.dcrWallet.AccountNumber(ctx, defaultAccountName)
+	if err != nil {
+		return "", err
+	}
+
+	addr, err := w.dcrWallet.AddressAtIdx(ctx, acctNum, 0, 0)
+	if err != nil {
+		return "", err
+	}
+
+	return addr.String(), nil
 }
 
 func (w *spvWallet) startWallet(ctx context.Context) error {

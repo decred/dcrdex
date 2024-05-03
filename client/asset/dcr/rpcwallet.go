@@ -279,6 +279,12 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		return false, fmt.Errorf("error connecting new wallet")
 	}
 
+	defer func() {
+		if !allOk {
+			newWallet.Disconnect()
+		}
+	}()
+
 	for _, acctName := range []string{rpcCfg.PrimaryAccount, rpcCfg.TradingAccount, rpcCfg.UnmixedAccount} {
 		if acctName == "" {
 			continue
@@ -288,24 +294,25 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		}
 	}
 
-	if walletCfg.ActivelyUsed {
-		a, err := stdaddr.DecodeAddress(currentAddress, w.chainParams)
-		if err != nil {
-			return false, err
-		}
-		var depositAccount string
-		if rpcCfg.UnmixedAccount != "" {
-			depositAccount = rpcCfg.UnmixedAccount
-		} else {
-			depositAccount = rpcCfg.PrimaryAccount
-		}
-		owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
-		if err != nil {
-			return false, err
-		}
-		if !owns {
+	a, err := stdaddr.DecodeAddress(currentAddress, w.chainParams)
+	if err != nil {
+		return false, err
+	}
+	var depositAccount string
+	if rpcCfg.UnmixedAccount != "" {
+		depositAccount = rpcCfg.UnmixedAccount
+	} else {
+		depositAccount = rpcCfg.PrimaryAccount
+	}
+	owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
+	if err != nil {
+		return false, err
+	}
+	if !owns {
+		if walletCfg.ActivelyUsed {
 			return false, errors.New("cannot reconfigure to different wallet while there are active trades")
 		}
+		return true, nil
 	}
 
 	w.rpcMtx.Lock()
@@ -751,7 +758,17 @@ func (w *rpcWallet) GetRawTransaction(ctx context.Context, txHash *chainhash.Has
 }
 
 func (w *rpcWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error) {
-	return nil, fmt.Errorf("ListSinceBlock not implemented for RPC wallet")
+	hash, err := w.GetBlockHash(ctx, int64(start))
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := w.client().ListSinceBlock(ctx, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return res.Transactions, nil
 }
 
 // GetRawMempool returns hashes for all txs of the specified type in the node's

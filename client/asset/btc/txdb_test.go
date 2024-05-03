@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"reflect"
@@ -18,11 +19,19 @@ func TestTxDB(t *testing.T) {
 	tempDir := t.TempDir()
 	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
 
-	txHistoryStore, err := NewBadgerTxDB(tempDir, tLogger)
+	txHistoryStore := NewBadgerTxDB(tempDir, tLogger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wg, err := txHistoryStore.Connect(ctx)
 	if err != nil {
-		t.Fatalf("error creating tx history store: %v", err)
+		t.Fatalf("error connecting to tx history store: %v", err)
 	}
-	defer txHistoryStore.Close()
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	txs, err := txHistoryStore.GetTxs(0, nil, true)
 	if err != nil {
@@ -185,11 +194,18 @@ func TestSetAndGetLastQuery(t *testing.T) {
 	tempDir := t.TempDir()
 	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
 
-	txHistoryStore, err := NewBadgerTxDB(tempDir, tLogger)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	txHistoryStore := NewBadgerTxDB(tempDir, tLogger)
+	wg, err := txHistoryStore.Connect(ctx)
 	if err != nil {
-		t.Fatalf("error creating tx history store: %v", err)
+		t.Fatalf("error connecting to tx history store: %v", err)
 	}
-	defer txHistoryStore.Close()
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	_, err = txHistoryStore.GetLastReceiveTxQuery()
 	if !errors.Is(err, ErrNeverQueried) {
