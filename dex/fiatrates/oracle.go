@@ -191,7 +191,7 @@ func (o *Oracle) calculateAverageRate(ctx context.Context, wg *sync.WaitGroup) {
 		}
 	}
 	o.ratesMtx.Unlock()
-	
+
 	if len(broadcastRates) > 0 {
 		o.rateBroadcastChan <- broadcastRates
 	}
