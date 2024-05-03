@@ -16,7 +16,7 @@ type Config struct {
 	CryptoCompareAPIKey string `long:"ccdataapikey" description:"This is your free API Key from cryptocompare.com."`
 	EnableBinanceUS     bool   `long:"enablebinanceus" description:"Set to true, if running the tatanka mesh from a US based server."`
 	DisabledFiatSources string `long:"disabledfiatsources" description:"A list of disabled sources separated by comma. See fiatrate/sources.go."`
-	Assets              string `long:"assets" description:"A list of comma separated assets to fetch rates for when the oracle is activated."`
+	Tickers             string `long:"tickers" description:"A list of comma separated tickers to fetch rates for when the oracle is activated. At least one ticker must be specified to activate fiat oracle."`
 }
 
 type source struct {
@@ -28,7 +28,7 @@ type source struct {
 	canReactivate   bool
 	lastRefresh     time.Time
 	requestInterval time.Duration
-	getRates        func(ctx context.Context, assets []string, log dex.Logger) (map[string]float64, error)
+	getRates        func(ctx context.Context, tickers []string, log dex.Logger) (map[string]float64, error)
 }
 
 func (s *source) isDisabled() bool {
@@ -37,7 +37,7 @@ func (s *source) isDisabled() bool {
 	return s.disabled
 }
 
-func (s *source) hasAssets() bool {
+func (s *source) hasTicker() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return len(s.rates) != 0
@@ -77,6 +77,6 @@ type fiatRateAndSourceCount struct {
 // FiatRateInfo holds the fiat rate and the last update time for an
 // asset.
 type FiatRateInfo struct {
-	Rate       float64
+	Value      float64
 	LastUpdate time.Time
 }

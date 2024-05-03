@@ -2,6 +2,7 @@ package fiatrates
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -23,105 +24,61 @@ const (
 // Oracle manages and retrieves fiat rate information from all enabled rate
 // sources.
 type Oracle struct {
-	log      dex.Logger
-	sources  []*source
-	ratesMtx sync.RWMutex
-	rates    map[string]*FiatRateInfo
+	log               dex.Logger
+	sources           []*source
+	ratesMtx          sync.RWMutex
+	rates             map[string]*FiatRateInfo
+	rateBroadcastChan chan map[string]*FiatRateInfo
 }
 
-func NewFiatOracle(cfg Config) (*Oracle, error) {
+func NewFiatOracle(cfg Config, log dex.Logger) (*Oracle, error) {
 	fiatOracle := &Oracle{
-		rates:   make(map[string]*FiatRateInfo),
-		sources: fiatSources(cfg),
+		log:               log,
+		rates:             make(map[string]*FiatRateInfo),
+		sources:           fiatSources(cfg),
+		rateBroadcastChan: make(chan map[string]*FiatRateInfo),
 	}
 
-	assets := strings.Split(cfg.Assets, ",")
-	for _, asset := range assets {
-		_, ok := dex.BipSymbolID(strings.ToLower(asset))
+	tickers := strings.Split(cfg.Tickers, ",")
+	for _, ticker := range tickers {
+		_, ok := dex.BipSymbolID(strings.ToLower(ticker))
 		if !ok {
-			return nil, fmt.Errorf("unknown asset %s", asset)
+			return nil, fmt.Errorf("unknown asset %s", ticker)
 		}
 
 		// Initialize entry for this asset.
-		fiatOracle.rates[parseSymbol(asset)] = new(FiatRateInfo)
+		fiatOracle.rates[parseTicker(ticker)] = new(FiatRateInfo)
+	}
+
+	if len(fiatOracle.rates) == 0 {
+		return nil, errors.New("a minimum of one ticker is expected to configure fiat oracle")
 	}
 
 	return fiatOracle, nil
 }
 
-// Rate returns the current fiat rate information for the provided symbol.
-// Returns zero if there are no rates for the provided symbol yet.
-func (o *Oracle) Rate(ctx context.Context, symbol string) float64 {
-	o.ratesMtx.Lock()
-	defer o.ratesMtx.Unlock()
-
-	symbol = parseSymbol(symbol)
-	rateInfo := o.rates[symbol]
-	hasRateInfo := rateInfo != nil
-	if hasRateInfo && time.Since(rateInfo.LastUpdate) < FiatRateDataExpiry && rateInfo.Rate > 0 {
-		return rateInfo.Rate
-	}
-
-	if !hasRateInfo {
-		o.fetchFiatRateNow(ctx, symbol)
-	}
-
-	return 0
+// BroadcastChan returns a read only channel to listen for latest rates.
+func (o *Oracle) BroadcastChan() <-chan map[string]*FiatRateInfo {
+	return o.rateBroadcastChan
 }
 
-// fetchFiatRateNow attempts to retrieve fiat rate from enabled sources and
-// creates an entry for the provided asset. It'll try until one source returns a
-// non-zero value for the provided symbol. symbol must have been parsed by
-// parseSymbol function. Must be called with a write lock held on o.ratesMtx.
-func (o *Oracle) fetchFiatRateNow(ctx context.Context, symbol string) {
-	var fiatRate float64
-	defer func() {
-		// Initiate an entry for this asset. Even if fiatRate is still zero when
-		// we get here, data for this asset will be fetched in the next refresh
-		// cycle.
-		o.rates[symbol] = &FiatRateInfo{
-			Rate:       fiatRate,
-			LastUpdate: time.Now(),
-		}
-	}()
-
-	for _, s := range o.sources {
-		if s.isDisabled() {
-			continue
-		}
-
-		newRate, err := s.getRates(ctx, []string{symbol}, o.log)
-		if err != nil {
-			o.log.Errorf("%s.getRates error: %v", s.name, err)
-			continue
-		}
-
-		fiatRate = newRate[symbol]
-		if fiatRate > 0 {
-			break
-		}
-	}
-}
-
-// assets retrieves all assets that data can be fetched for.
-func (o *Oracle) assets() []string {
+// tickers retrieves all tickers that data can be fetched for.
+func (o *Oracle) tickers() []string {
 	o.ratesMtx.RLock()
 	defer o.ratesMtx.RUnlock()
-	var assets []string
-	for sym := range o.rates {
-		assets = append(assets, sym)
+	var tickers []string
+	for ticker := range o.rates {
+		tickers = append(tickers, ticker)
 	}
-	return assets
+	return tickers
 }
 
 // Run starts goroutines that refresh fiat rates every source.refreshInterval.
 // This should be called in a goroutine as it's blocking.
-func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
-	o.log = log
-
+func (o *Oracle) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	var sourcesEnabled int
-	initializedWithAssets := o.hasAssets()
+	initializedWithTicker := o.hasTicker()
 	for i := range o.sources {
 		fiatSource := o.sources[i]
 		if fiatSource.isDisabled() {
@@ -132,12 +89,12 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 		o.fetchFromSource(ctx, fiatSource, &wg)
 		sourcesEnabled++
 
-		if !initializedWithAssets {
+		if !initializedWithTicker {
 			continue
 		}
 
 		// Fetch rates now.
-		newRates, err := fiatSource.getRates(ctx, o.assets(), o.log)
+		newRates, err := fiatSource.getRates(ctx, o.tickers(), o.log)
 		if err != nil {
 			o.log.Errorf("failed to retrieve rate from %s: %v", fiatSource.name, err)
 			continue
@@ -149,7 +106,7 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 		fiatSource.mtx.Unlock()
 	}
 
-	if initializedWithAssets {
+	if initializedWithTicker {
 		// Calculate average fiat rate now.
 		o.calculateAverageRate(ctx, &wg)
 	}
@@ -169,7 +126,7 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					if !o.hasAssets() {
+					if !o.hasTicker() {
 						continue // nothing to do
 					}
 
@@ -180,6 +137,7 @@ func (o *Oracle) Run(ctx context.Context, log dex.Logger) {
 	}
 
 	wg.Wait()
+	close(o.rateBroadcastChan)
 }
 
 // calculateAverageRate is a shared function to support fiat average rate
@@ -200,15 +158,15 @@ func (o *Oracle) calculateAverageRate(ctx context.Context, wg *sync.WaitGroup) {
 		sourceRates := s.rates
 		s.mtx.RUnlock()
 
-		for sym, rate := range sourceRates {
+		for ticker, rate := range sourceRates {
 			if rate == 0 {
 				continue
 			}
 
-			info, ok := newRatesInfo[sym]
+			info, ok := newRatesInfo[ticker]
 			if !ok {
 				info = new(fiatRateAndSourceCount)
-				newRatesInfo[sym] = info
+				newRatesInfo[ticker] = info
 			}
 
 			info.sources++
@@ -217,18 +175,29 @@ func (o *Oracle) calculateAverageRate(ctx context.Context, wg *sync.WaitGroup) {
 	}
 
 	now := time.Now()
+	broadcastRates := make(map[string]*FiatRateInfo)
 	o.ratesMtx.Lock()
-	for sym := range o.rates {
-		rateInfo := newRatesInfo[sym]
+	for ticker := range o.rates {
+		oldRate := o.rates[ticker].Value
+		rateInfo := newRatesInfo[ticker]
 		if rateInfo != nil {
-			o.rates[sym].Rate = rateInfo.totalFiatRate / float64(rateInfo.sources)
-			o.rates[sym].LastUpdate = now
+			newRate := rateInfo.totalFiatRate / float64(rateInfo.sources)
+			if oldRate != newRate && newRate > 0 {
+				o.rates[ticker].Value = newRate
+				o.rates[ticker].LastUpdate = now
+				rate := *o.rates[ticker] // copy
+				broadcastRates[ticker] = &rate
+			}
 		}
 	}
 	o.ratesMtx.Unlock()
+	
+	if len(broadcastRates) > 0 {
+		o.rateBroadcastChan <- broadcastRates
+	}
 }
 
-func (o *Oracle) hasAssets() bool {
+func (o *Oracle) hasTicker() bool {
 	o.ratesMtx.RLock()
 	defer o.ratesMtx.RUnlock()
 	return len(o.rates) != 0
@@ -248,17 +217,17 @@ func (o *Oracle) fetchFromSource(ctx context.Context, s *source, wg *sync.WaitGr
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if !o.hasAssets() || s.isDisabled() { // nothing to fetch.
+				if !o.hasTicker() || s.isDisabled() { // nothing to fetch.
 					continue
 				}
 
-				if s.hasAssets() && s.isExpired() {
+				if s.hasTicker() && s.isExpired() {
 					s.deactivate()
 					o.log.Errorf("Fiat rate source %q has been disabled due to lack of fresh data. It will be re-enabled after %d hours.", s.name, reactivateDuration.Hours())
 					return
 				}
 
-				newRates, err := s.getRates(ctx, o.assets(), o.log)
+				newRates, err := s.getRates(ctx, o.tickers(), o.log)
 				if err != nil {
 					o.log.Errorf("%s.getRates error: %v", s.name, err)
 					continue

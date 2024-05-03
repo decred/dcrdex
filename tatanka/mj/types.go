@@ -11,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/tatanka/tanka"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
@@ -164,9 +165,8 @@ type FundedMessage struct {
 }
 
 type RateMessage struct {
-	Topic   tanka.Topic   `json:"topic"`
-	Subject tanka.Subject `json:"subject"`
-	Value   float64       `json:"value"`
+	Topic tanka.Topic                        `json:"topic"`
+	Rates map[string]*fiatrates.FiatRateInfo `json:"rates"`
 }
 
 type Troll struct {

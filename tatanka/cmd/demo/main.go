@@ -248,17 +248,12 @@ func mainErr() (err error) {
 
 	// Fiat rate live test requires internet connection.
 	fmt.Println("Testing fiat rates...")
-
-	for _, assetID := range supportedDEXAssetIDs {
-		if err := cl1.SubscribeToFiatRates(assetID); err != nil {
-			return err
-		}
+	if err := cl1.SubscribeToFiatRates(); err != nil {
+		return err
 	}
 
-	// Wait for rate messages.
-	for i := 0; i < len(supportedDEXAssetIDs); i++ {
-		<-cl1.Next()
-	}
+	// Wait for rate message.
+	<-cl1.Next()
 
 	want := len(supportedDEXAssetIDs)
 	got := 0
@@ -361,16 +356,13 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 		},
 		ConfigPath: cfgPath,
 		WhiteList:  []tatanka.BootNode{n},
-		FiatOracleConfig: tatanka.FiatOracleConfig{
-			Config: fiatrates.Config{
-				Assets: strings.Join(assetStrs, ","),
-			},
-			FiatRateBroadcastInterval: 1,
+		FiatOracleConfig: fiatrates.Config{
+			Tickers: strings.Join(assetStrs, ","),
 		},
 	}
 
 	if !startFiatRateOracle {
-		cfg.FiatRateBroadcastInterval = -1
+		cfg.FiatOracleConfig.Tickers = ""
 	}
 
 	t, err := tatanka.New(cfg)

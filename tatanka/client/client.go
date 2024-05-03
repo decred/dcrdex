@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -375,38 +376,35 @@ func (c *TankaClient) handleRates(tt *tatanka, msg *msgjson.Message) {
 	}
 	switch rm.Topic {
 	case mj.TopicFiatRate:
-		if rm.Value > 0 {
-			c.fiatRatesMtx.Lock()
-			c.fiatRates[string(rm.Subject)] = &fiatrates.FiatRateInfo{
-				Rate:       rm.Value,
+		c.fiatRatesMtx.Lock()
+		for ticker, rateInfo := range rm.Rates {
+			c.fiatRates[strings.ToLower(ticker)] = &fiatrates.FiatRateInfo{
+				Value:      rateInfo.Value,
 				LastUpdate: time.Now(),
 			}
-			c.fiatRatesMtx.Unlock()
 		}
+		c.fiatRatesMtx.Unlock()
 	}
 	c.emit(rm)
 }
 
-func (c *TankaClient) SubscribeToFiatRates(assetID uint32) error {
-	assetSymbol := dex.BipIDSymbol(assetID)
-
+func (c *TankaClient) SubscribeToFiatRates() error {
 	msg := mj.MustRequest(mj.RouteSubscribe, &mj.Subscription{
-		Topic:   mj.TopicFiatRate,
-		Subject: tanka.Subject(assetSymbol),
+		Topic: mj.TopicFiatRate,
 	})
 
 	var nSuccessful int
 	for _, tt := range c.tankaNodes() {
 		var ok bool // true is only possible non-error payload.
 		if err := c.request(tt, msg, &ok); err != nil {
-			c.log.Errorf("Error subscribing to fiat rates for %s with %s: %w", assetSymbol, tt.peerID, err)
+			c.log.Errorf("Error subscribing to fiat rates with %s: %w", tt.peerID, err)
 			continue
 		}
 		nSuccessful++
 	}
 
 	if nSuccessful == 0 {
-		return fmt.Errorf("failed to subscribe to fiat rates for %s on any servers", assetSymbol)
+		return errors.New("failed to subscribe to fiat rates on any servers")
 	}
 
 	return nil
@@ -417,8 +415,8 @@ func (c *TankaClient) FiatRate(assetID uint32) float64 {
 	defer c.fiatRatesMtx.RUnlock()
 	sym := dex.BipIDSymbol(assetID)
 	rateInfo := c.fiatRates[sym]
-	if rateInfo != nil && time.Since(rateInfo.LastUpdate) < fiatrates.FiatRateDataExpiry && rateInfo.Rate > 0 {
-		return rateInfo.Rate
+	if rateInfo != nil && time.Since(rateInfo.LastUpdate) < fiatrates.FiatRateDataExpiry && rateInfo.Value > 0 {
+		return rateInfo.Value
 	}
 
 	return 0
