@@ -397,7 +397,7 @@ func (c *TankaClient) SubscribeToFiatRates() error {
 	for _, tt := range c.tankaNodes() {
 		var ok bool // true is only possible non-error payload.
 		if err := c.request(tt, msg, &ok); err != nil {
-			c.log.Errorf("Error subscribing to fiat rates with %s: %w", tt.peerID, err)
+			c.log.Errorf("Error subscribing to fiat rates with %s: %v", tt.peerID, err)
 			continue
 		}
 		nSuccessful++

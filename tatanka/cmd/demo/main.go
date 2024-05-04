@@ -11,12 +11,10 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/fiatrates"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
@@ -29,11 +27,32 @@ import (
 )
 
 var (
-	logMaker             *dex.LoggerMaker
-	usr, _               = user.Current()
-	dextestDir           = filepath.Join(usr.HomeDir, "dextest")
-	decredRPCPath        = filepath.Join(dextestDir, "dcr", "alpha", "rpc.cert")
-	supportedDEXAssetIDs = []uint32{147, 42, 0, 2, 60, 966001, 145, 5, 20, 3, 136, 966, 133} // supported dex assets
+	logMaker      *dex.LoggerMaker
+	usr, _        = user.Current()
+	dextestDir    = filepath.Join(usr.HomeDir, "dextest")
+	decredRPCPath = filepath.Join(dextestDir, "dcr", "alpha", "rpc.cert")
+	chains        = []tatanka.ChainConfig{
+		{
+			Symbol: "dcr",
+			Config: mustEncode(&utxo.DecredConfigFile{
+				RPCUser:   "user",
+				RPCPass:   "pass",
+				RPCListen: "127.0.0.1:19561",
+				RPCCert:   decredRPCPath,
+			}),
+		},
+		{
+			Symbol: "btc",
+			Config: mustEncode(&utxo.BitcoinConfigFile{
+				RPCConfig: dexbtc.RPCConfig{
+					RPCUser: "user",
+					RPCPass: "pass",
+					RPCBind: "127.0.0.1",
+					RPCPort: 20556,
+				},
+			}),
+		},
+	}
 )
 
 func main() {
@@ -102,7 +121,7 @@ func mainErr() (err error) {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed(), false)
+		runServer(ctx, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed(), true)
 	}()
 
 	time.Sleep(time.Second)
@@ -255,13 +274,14 @@ func mainErr() (err error) {
 	// Wait for rate message.
 	<-cl1.Next()
 
-	want := len(supportedDEXAssetIDs)
+	want := len(chains)
 	got := 0
-	for _, assetID := range supportedDEXAssetIDs {
+	for _, c := range chains {
+		assetID, _ := dex.BipSymbolID(c.Symbol)
 		fiatRate := cl1.FiatRate(assetID) // check if rate has been cached.
 		if fiatRate != 0 {
 			got++
-			fmt.Printf("\nRate found for %s", dex.BipIDSymbol(assetID))
+			fmt.Printf("\nRate found for %s\n", dex.BipIDSymbol(assetID))
 		}
 	}
 
@@ -305,45 +325,19 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 	return addrs, nil
 }
 
-func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID []byte, startFiatRateOracle bool) {
+func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID []byte, disableMessariFiatRateSource bool) {
 	n := newBootNode(peerAddr.String(), peerID)
 
 	log := logMaker.Logger(fmt.Sprintf("SRV[%s]", addr))
 
 	os.MkdirAll(dir, 0755)
 
-	ttCfg := &tatanka.ConfigFile{Chains: []tatanka.ChainConfig{
-		{
-			Symbol: "dcr",
-			Config: mustEncode(&utxo.DecredConfigFile{
-				RPCUser:   "user",
-				RPCPass:   "pass",
-				RPCListen: "127.0.0.1:19561",
-				RPCCert:   decredRPCPath,
-			}),
-		},
-		{
-			Symbol: "btc",
-			Config: mustEncode(&utxo.BitcoinConfigFile{
-				RPCConfig: dexbtc.RPCConfig{
-					RPCUser: "user",
-					RPCPass: "pass",
-					RPCBind: "127.0.0.1",
-					RPCPort: 20556,
-				},
-			}),
-		},
-	}}
+	ttCfg := &tatanka.ConfigFile{Chains: chains}
 	rawCfg, _ := json.Marshal(ttCfg)
 	cfgPath := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(cfgPath, rawCfg, 0644); err != nil {
 		log.Errorf("WriteFile error: %v", err)
 		return
-	}
-
-	var assetStrs []string
-	for _, assetID := range supportedDEXAssetIDs {
-		assetStrs = append(assetStrs, dex.BipIDSymbol(assetID))
 	}
 
 	cfg := &tatanka.Config{
@@ -356,13 +350,12 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 		},
 		ConfigPath: cfgPath,
 		WhiteList:  []tatanka.BootNode{n},
-		FiatOracleConfig: fiatrates.Config{
-			Tickers: strings.Join(assetStrs, ","),
-		},
 	}
 
-	if !startFiatRateOracle {
-		cfg.FiatOracleConfig.Tickers = ""
+	if disableMessariFiatRateSource {
+		// Requesting multiple rates from the same IP can trigger a 429 HTTP
+		// error.
+		cfg.FiatOracleConfig.DisabledFiatSources = "Messari"
 	}
 
 	t, err := tatanka.New(cfg)

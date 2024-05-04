@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"decred.org/dcrdex/tatanka/tanka"
 	"decred.org/dcrdex/tatanka/tcp"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 const version = 0
@@ -205,8 +208,15 @@ func New(cfg *Config) (*Tatanka, error) {
 		clientJobs:    make(chan *clientJob, 128),
 	}
 
-	if cfg.FiatOracleConfig.Tickers != "" {
-		t.fiatRateOracle, err = fiatrates.NewFiatOracle(cfg.FiatOracleConfig, t.log)
+	if !cfg.FiatOracleConfig.AllFiatSourceDisabled() {
+		var tickers string
+		upperCaser := cases.Upper(language.AmericanEnglish)
+		for _, c := range chainCfg.Chains {
+			tickers += upperCaser.String(c.Symbol) + ","
+		}
+		tickers = strings.Trim(tickers, ",")
+
+		t.fiatRateOracle, err = fiatrates.NewFiatOracle(cfg.FiatOracleConfig, tickers, t.log)
 		if err != nil {
 			return nil, fmt.Errorf("error initializing fiat oracle: %w", err)
 		}

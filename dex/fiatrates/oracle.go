@@ -31,7 +31,7 @@ type Oracle struct {
 	rateBroadcastChan chan map[string]*FiatRateInfo
 }
 
-func NewFiatOracle(cfg Config, log dex.Logger) (*Oracle, error) {
+func NewFiatOracle(cfg Config, tickerSymbols string, log dex.Logger) (*Oracle, error) {
 	fiatOracle := &Oracle{
 		log:               log,
 		rates:             make(map[string]*FiatRateInfo),
@@ -39,7 +39,7 @@ func NewFiatOracle(cfg Config, log dex.Logger) (*Oracle, error) {
 		rateBroadcastChan: make(chan map[string]*FiatRateInfo),
 	}
 
-	tickers := strings.Split(cfg.Tickers, ",")
+	tickers := strings.Split(tickerSymbols, ",")
 	for _, ticker := range tickers {
 		_, ok := dex.BipSymbolID(strings.ToLower(ticker))
 		if !ok {

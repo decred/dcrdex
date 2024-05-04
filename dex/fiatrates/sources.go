@@ -18,19 +18,55 @@ const (
 	defaultRefreshInterval = 5 * time.Minute
 	messariRefreshInterval = 10 * time.Minute
 
+	// cryptoCompare API request limits: 100,000 per month, capped at 250,000
+	// lifetime calls. Multiple tickers can be requested in a single call. We
+	// only exhaust 8928 calls per month if we ask every 5min, and a single API
+	// Key should last ~28 months or 2 years 4months.
 	cryptoCompare              = "CryptoCompare"
 	cryptoComparePriceEndpoint = "https://min-api.cryptocompare.com/data/pricemulti?fsyms=%s&tsyms=USD"
 
+	// According to the docs (See:
+	// https://www.binance.com/en/support/faq/frequently-asked-questions-on-api-360004492232),
+	// there's a 6,000 request weight per minute (keep in mind that this is not
+	// necessarily the same as 6,000 requests) limit for API requests. Multiple
+	// tickers are quested in a single call every 5min. We can never get in
+	// trouble for this. An HTTP 403 is returned for those that violates this
+	// hard rule. More information on limits can be found here:
+	// https://binance-docs.github.io/apidocs/spot/en/#limits
 	binance                = "Binance"
 	binancePriceEndpoint   = "https://api3.binance.com/api/v3/ticker/price?symbols=[%s]"
 	binanceUSPriceEndpoint = "https://api.binance.us/api/v3/ticker/price?symbols=[%s]"
 
+	// According to the docs (See:
+	// https://api.coinpaprika.com/#section/Rate-limit), the free version is
+	// eligible to 20,000 calls per month. All tickers are fetched in one call,
+	// that means we only exhaust 288 calls per day and 8928 calls per month if
+	// we request rate every 5min. Max of 2000 asset data returned and API is
+	// updated every 5min.
 	coinpaprika              = "Coinparika"
 	coinpaprikaPriceEndpoint = "https://api.coinpaprika.com/v1/tickers"
 
+	// According to the x-ratelimit-limit header, we can make 4000 requests
+	// every 24hours. The x-ratelimit-reset header tells when the next reset
+	// will be. See: Header values for
+	// https://data.messari.io/api/v1/assets/DCR/metrics/market-data. From a
+	// previous research by buck, say "Without an API key requests are rate
+	// limited to 20 requests per minute". That means we are limited to 20
+	// requests for tickers per minute but with with a 10min refresh interval,
+	// we'd only exhaust 2880 call assuming we are fetching data for 20 tickers
+	// (assets supported by dex are still below 20, revisit if we implement up
+	// to 20 assets).
 	messari              = "Messari"
 	messariPriceEndpoint = "https://data.messari.io/api/v1/assets/%s/metrics/market-data"
 
+	// According to the gw-ratelimit-limit header, we can make 2000 requests
+	// every 24hours(I think there's only a gw-ratelimit-reset header set to
+	// 30000 but can't decipher if it's in seconds or minutes). Multiple tickers
+	// can be requested in a single call (Firo and ZCL not supported). See
+	// Header values for
+	// https://api.kucoin.com/api/v1/prices?currencies=BTC,DCR. Requesting for
+	// ticker data every 5min gives us 288 calls per day, with the remaining
+	// 1712 calls left unused.
 	kuCoin              = "KuCoin"
 	kuCoinPriceEndpoint = "https://api.kucoin.com/api/v1/prices?currencies=%s"
 )

@@ -2,6 +2,7 @@ package fiatrates
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,16 +17,31 @@ type Config struct {
 	CryptoCompareAPIKey string `long:"ccdataapikey" description:"This is your free API Key from cryptocompare.com."`
 	EnableBinanceUS     bool   `long:"enablebinanceus" description:"Set to true, if running the tatanka mesh from a US based server."`
 	DisabledFiatSources string `long:"disabledfiatsources" description:"A list of disabled sources separated by comma. See fiatrate/sources.go."`
-	Tickers             string `long:"tickers" description:"A list of comma separated tickers to fetch rates for when the oracle is activated. At least one ticker must be specified to activate fiat oracle."`
+}
+
+// AllFiatSourceDisabled checks if all currently supported fiat rate sources
+// are disabled.
+func (cfg Config) AllFiatSourceDisabled() bool {
+	disabledSources := strings.ToLower(cfg.DisabledFiatSources)
+	return strings.Contains(disabledSources, strings.ToLower(cryptoCompare)) && strings.Contains(disabledSources, strings.ToLower(binance)) &&
+		strings.Contains(disabledSources, strings.ToLower(coinpaprika)) && strings.Contains(disabledSources, strings.ToLower(messari)) &&
+		strings.Contains(disabledSources, strings.ToLower(kuCoin))
 }
 
 type source struct {
-	name     string
-	mtx      sync.RWMutex
-	rates    map[string]float64
+	name string
+	mtx  sync.RWMutex
+	// rates is a map of ticker to their fiat value. It will be empty if this
+	// source is auto-deactivated.
+	rates map[string]float64
+	// disabled is set to true if this source is deactivated automatically or by
+	// admin. Rates from this source would no longer be requested once it
+	// disabled.
 	disabled bool
 	// canReactivate is set to false if source was disabled by admin.
-	canReactivate   bool
+	canReactivate bool
+	// lastRefresh is the last time this source made a successful request for
+	// ticker rates.
 	lastRefresh     time.Time
 	requestInterval time.Duration
 	getRates        func(ctx context.Context, tickers []string, log dex.Logger) (map[string]float64, error)
