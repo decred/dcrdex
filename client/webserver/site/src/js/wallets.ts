@@ -1002,10 +1002,7 @@ export default class WalletsPage extends BasePage {
     const { symbol, wallet, name, token, unitInfo } = app().assets[assetID]
     const { page, body } = this
     Doc.setText(body, '[data-asset-name]', name)
-    Doc.setText(body, '[data-fee-rate-unit]', unitInfo.feeRateUnit)
     Doc.setText(body, '[data-ticker]', unitInfo.conventional.unit)
-    const feeUI = token ? app().assets[token.parentID].unitInfo : unitInfo
-    Doc.setText(body, '[data-fee-ticker]', feeUI.conventional.unit)
     page.assetLogo.src = Doc.logoPath(symbol)
     Doc.hide(
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
@@ -1057,12 +1054,12 @@ export default class WalletsPage extends BasePage {
     if (token && !feeFiatRate) return
     Doc.show(page.feeStateBox)
     const feeUI = token ? app().assets[token.parentID].unitInfo : ui
-    page.feeStateNetRate.textContent = Doc.formatInt(feeState.rate)
+    Doc.formatBestRateElement(page.feeStateNetRate, feeState.rate, feeUI)
+    Doc.formatBestValueElement(page.feeStateSendFees, feeState.send, feeUI)
+    Doc.formatBestValueElement(page.feeStateSwapFees, feeState.swap, feeUI)
     page.feeStateXcRate.textContent = Doc.formatFourSigFigs(fiatRate)
-    page.feeStateSendFees.textContent = Doc.formatFourSigFigs(feeState.send / feeUI.conventional.conversionFactor)
     const sendFiat = feeState.send / feeUI.conventional.conversionFactor * feeFiatRate
     page.feeStateSendFiat.textContent = Doc.formatFourSigFigs(sendFiat)
-    page.feeStateSwapFees.textContent = Doc.formatFourSigFigs(feeState.swap / feeUI.conventional.conversionFactor)
     const swapFiat = feeState.swap / feeUI.conventional.conversionFactor * feeFiatRate
     page.feeStateSwapFiat.textContent = Doc.formatFourSigFigs(swapFiat)
     Doc.show(page.feeStateBox)

@@ -2070,7 +2070,7 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 
 // SingleLotSwapRefundFees returns the fees for a swap and refund transaction
 // for a single lot.
-func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (swapFees uint64, redeemFees uint64, err error) {
+func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (swapFees uint64, refundFees uint64, err error) {
 	var numInputs uint64
 	if useSafeTxSize {
 		numInputs = 12
@@ -2083,7 +2083,8 @@ func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, u
 
 	var swapTxSize uint64
 	if btc.segwit {
-		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2WPKHInputSize) + dexbtc.P2WSHOutputSize + dexbtc.P2WPKHOutputSize
+		inputSize := dexbtc.RedeemP2WPKHInputSize + uint64((dexbtc.RedeemP2PKSigScriptSize+2+3)/4)
+		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * inputSize) + dexbtc.P2WSHOutputSize + dexbtc.P2WPKHOutputSize
 	} else {
 		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2PKHInputSize) + dexbtc.P2SHOutputSize + dexbtc.P2PKHOutputSize
 	}
@@ -4926,14 +4927,17 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 	return fee, isValidAddress, nil
 }
 
+// StandardSendFees returns the fees for a simple send tx with one input and two
+// outputs.
 func (btc *baseWallet) StandardSendFee(feeRate uint64) uint64 {
-	baseSize := dexbtc.MinimumTxOverhead
+	var sz uint64 = dexbtc.MinimumTxOverhead
 	if btc.segwit {
-		baseSize += dexbtc.P2WPKHOutputSize * 2
+		inputSize := dexbtc.RedeemP2WPKHInputSize + uint64((dexbtc.RedeemP2PKSigScriptSize+2+3)/4)
+		sz += inputSize + dexbtc.P2WPKHOutputSize*2
 	} else {
-		baseSize += dexbtc.P2PKHOutputSize * 2
+		sz += dexbtc.RedeemP2PKHInputSize + dexbtc.P2PKHOutputSize*2
 	}
-	return feeRate * (dexbtc.RedeemP2PKHInputSize + uint64(baseSize))
+	return feeRate * sz
 }
 
 func (btc *baseWallet) SetBondReserves(reserves uint64) {

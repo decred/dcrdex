@@ -172,8 +172,6 @@ export default class MarketsPage extends BasePage {
   balanceWgt: BalanceWidget
   mm: MarketMakerDisplay
   marketList: MarketList
-  quoteUnits: NodeListOf<HTMLElement>
-  baseUnits: NodeListOf<HTMLElement>
   unlockForm: UnlockWalletForm
   newWalletForm: NewWalletForm
   depositAddrForm: DepositAddress
@@ -283,11 +281,6 @@ export default class MarketsPage extends BasePage {
       page.orderRowTmpl, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl,
       page.orderOptTmpl, page.userOrderTmpl, page.recentMatchesTemplate
     )
-
-    // Store the elements that need their ticker changed when the market
-    // changes.
-    this.quoteUnits = main.querySelectorAll('[data-unit=quote]')
-    this.baseUnits = main.querySelectorAll('[data-unit=base]')
 
     // Buttons to show token approval form
     bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalForm(true) })
@@ -1841,18 +1834,6 @@ export default class MarketsPage extends BasePage {
     if (mktBook.base !== b.id || mktBook.quote !== q.id) return // user already changed markets
     this.handleBook(mktBook)
     this.updateTitle()
-    this.baseUnits.forEach(el => {
-      Doc.empty(el)
-      if (el.dataset.unitFormat === 'noparent') {
-        el.textContent = b.unitInfo.conventional.unit
-      } else el.appendChild(Doc.symbolize(b))
-    })
-    this.quoteUnits.forEach(el => {
-      Doc.empty(el)
-      if (el.dataset.unitFormat === 'noparent') {
-        el.textContent = q.unitInfo.conventional.unit
-      } else el.appendChild(Doc.symbolize(q))
-    })
     this.setMarketBuyOrderEstimate()
   }
 
@@ -3607,11 +3588,8 @@ class MarketMakerDisplay {
       return
     }
     this.market = market
-    const { page, div, bui, qui, baseSymbol, quoteSymbol, baseID, quoteID } = this.stuff()
-    Doc.setText(div, '[data-base-ticker]', bui.conventional.unit)
-    Doc.setText(div, '[data-quote-ticker]', qui.conventional.unit)
-    Doc.setSrc(div, '[data-base-logo]', Doc.logoPath(baseSymbol))
-    Doc.setSrc(div, '[data-quote-logo]', Doc.logoPath(quoteSymbol))
+    const { page, div, baseID, quoteID } = this.stuff()
+    app().updateMarketElements(div, baseID, quoteID)
     const baseToken = app().assets[baseID].token
     const quoteToken = app().assets[quoteID].token
     Doc.setVis(baseToken, page.baseFeeReservesBox)

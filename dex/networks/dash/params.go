@@ -36,7 +36,7 @@ var (
 				ConversionFactor: 1e5,
 			},
 		},
-		FeeRateUnit: "Sats/B",
+		FeeRateDenom: "B",
 	}
 
 	// MainNetParams are the clone parameters for mainnet.

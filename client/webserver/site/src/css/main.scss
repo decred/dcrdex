@@ -147,6 +147,11 @@ z-index: 1000;
   }
 }
 
+[data-unit] {
+  cursor: default;
+  color: var(--hint-color);
+}
+
 #profileBox,
 #noteBox {
   position: fixed;

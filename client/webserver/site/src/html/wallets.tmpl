@@ -162,17 +162,21 @@
               <div class="flex-grow-1 flex-stretch-column">
                 <div class="d-flex flex-column align-items-center py-3">
                   <span class="grey demi">Network Fee Rate</span>
-                  <span>
-                    <span id="feeStateNetRate" class="fs20"></span>
-                    <span class="fs17 grey" data-fee-rate-unit></span>
+                  <span id="feeStateNetRate">
+                    <span class="fs20" data-value></span>
+                    <span class="fs17 grey">
+                      <span data-tmpl="feeRateUnit" data-unit></span>
+                      /
+                      <span data-denom></span>
+                    </span>
                   </span>
                 </div>
                 <div class="d-flex flex-column align-items-center py-3 border-top">
                   <span class="grey demi">Send Fees</span>
-                  <span>
-                    <span id="feeStateSendFees" class="fs20"></span>
+                  <span id="feeStateSendFees">
+                    <span class="fs20" data-value></span>
                     <span class="grey fs17">
-                      <span data-fee-ticker></span>
+                      <span data-unit></span>
                       and up
                     </span>
                   </span>
@@ -192,10 +196,10 @@
                 </div>
                 <div class="d-flex flex-column align-items-center py-3 border-top">
                   <span class="grey demi">Swap Fees</span>
-                  <span>
-                    <span id="feeStateSwapFees" class="fs20"></span>
+                  <span id="feeStateSwapFees">
+                    <span class="fs20" data-value></span>
                     <span class="grey fs17">
-                      <span data-fee-ticker></span>
+                      <span data-unit></span>
                       and up
                     </span>
                   </span>

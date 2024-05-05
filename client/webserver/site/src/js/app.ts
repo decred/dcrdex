@@ -729,6 +729,21 @@ export default class Application {
     page.nextAction.classList.toggle('invisible', idx === actions.length - 1)
   }
 
+  /*
+   * updateMarketElements sets the textContent for any ticker or asset name
+   * elements or any asset logo src attributes for descendents of ancestor.
+   */
+  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number) {
+    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = this.assets[baseID]
+    for (const el of Doc.applySelector(ancestor, '[data-base-name')) el.textContent = baseName
+    for (const img of Doc.applySelector(ancestor, '[data-base-logo]')) img.src = Doc.logoPath(baseSymbol)
+    for (const el of Doc.applySelector(ancestor, '[data-base-ticker]')) el.textContent = bui.conventional.unit
+    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = this.assets[quoteID]
+    for (const el of Doc.applySelector(ancestor, '[data-quote-name')) el.textContent = quoteName
+    for (const img of Doc.applySelector(ancestor, '[data-quote-logo]')) img.src = Doc.logoPath(quoteSymbol)
+    for (const el of Doc.applySelector(ancestor, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
+  }
+
   async setLanguage (lang: string) {
     await postJSON('/api/setlocale', lang)
     window.location.reload()

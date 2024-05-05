@@ -50,7 +50,7 @@ var (
 			Unit:             "ETH",
 			ConversionFactor: 1e9,
 		},
-		FeeRateUnit: "gwei/gas",
+		FeeRateDenom: "gas",
 	}
 
 	VersionedGases = map[uint32]*Gases{

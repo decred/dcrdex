@@ -432,6 +432,7 @@ func (w *xcWallet) Connect() error {
 			return fmt.Errorf("DepositAddress error: %w", err)
 		}
 	}
+	w.feeRate() // prime the feeState
 	w.hookedUp = true
 	w.synced = synced
 	w.syncProgress = progress // updated in walletCheckAndNotify

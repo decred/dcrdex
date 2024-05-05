@@ -1039,8 +1039,8 @@ export class FeeAssetSelectionForm {
       page.markets.appendChild(tr)
       const { symbol: baseSymbol, unitInfo: bui } = xc.assets[baseID]
       const { symbol: quoteSymbol, unitInfo: qui } = xc.assets[quoteID]
-      for (const el of Doc.applySelector(tr, '[data-base-ticker')) el.textContent = bui.conventional.unit
-      for (const el of Doc.applySelector(tr, '[data-quote-ticker')) el.textContent = qui.conventional.unit
+      for (const el of Doc.applySelector(tr, '[data-base-ticker]')) el.textContent = bui.conventional.unit
+      for (const el of Doc.applySelector(tr, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
 
       const tmpl = Doc.parseTemplate(tr)
       tmpl.baseLogo.src = Doc.logoPath(baseSymbol)

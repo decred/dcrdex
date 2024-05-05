@@ -53,7 +53,7 @@ const BipSymbols = Object.values(BipIDs)
 
 const log10RateEncodingFactor = Math.round(Math.log10(RateEncodingFactor))
 
-const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
+const intFormatter = new Intl.NumberFormat((navigator.languages as string[]), { maximumFractionDigits: 0 })
 
 const fourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
   minimumSignificantDigits: 4,
@@ -111,6 +111,35 @@ function convertToConventional (v: number, unitInfo?: UnitInfo) {
     prec = Math.round(Math.log10(f))
   }
   return [v, prec]
+}
+
+/*
+ * bestDisplayOrder is used in bestConversion, and is the order of magnitude
+ * that is considered the best for display. For example, if bestDisplayOrder is
+ * 1, and the choices for display are 1,000 BTC or 0.00001 Sats, the algorithm
+ * will look at the orders of the conversions, 1000 => 10^3 => order 3, and
+ * 0.00001 => 10^-5 => order 5, and see which is closest to bestDisplayOrder and
+ * choose that conversion. In the example, 3 - bestDisplayOrder = 2 and
+ * 1 - (-5) = 6, so the conversion that has the order closest to
+ * bestDisplayOrder is the first one, 1,000 BTC.
+ */
+const bestDisplayOrder = 1 // 10^1 => 1
+
+/*
+ * resolveUnitConversions creates a lookup object mapping unit -> conversion
+ * factor. By default, resolveUnitConversions only maps the atomic and
+ * conventional units. If a prefs dict is provided, additional units can be
+ * included.
+ */
+function resolveUnitConversions (ui: UnitInfo, prefs?: Record<string, boolean>): Record<string, number> {
+  const unitFactors: Record<string, number> = {
+    [ui.atomicUnit]: 1,
+    [ui.conventional.unit]: ui.conventional.conversionFactor
+  }
+  if (ui.denominations && prefs) {
+    for (const alt of ui.denominations) if (prefs[alt.unit]) unitFactors[alt.unit] = alt.conversionFactor
+  }
+  return unitFactors
 }
 
 // Helpers for working with the DOM.
@@ -306,8 +335,8 @@ export default class Doc {
     return fullPrecisionFormatter(rateStepDigits).format(convRate)
   }
 
-  static formatFourSigFigs (n: number): string {
-    return formatSigFigsWithFormatters(intFormatter, fourSigFigs, n)
+  static formatFourSigFigs (n: number, maxDecimals?: number): string {
+    return formatSigFigsWithFormatters(intFormatter, fourSigFigs, n, maxDecimals)
   }
 
   static formatInt (i: number): string {
@@ -338,6 +367,94 @@ export default class Doc {
 
   static formatFiatValue (value: number): string {
     return fullPrecisionFormatter(2).format(value)
+  }
+
+  /*
+   * bestConversion picks the best conversion factor for the atomic value. The
+   * best is the one in which log10(converted_value) is closest to
+   * bestDisplayOrder. Return: [converted_value, precision, unit].
+   */
+  static bestConversion (atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>): [number, number, string] {
+    const unitFactors = resolveUnitConversions(ui, prefs)
+    const logDiffs: [string, number][] = []
+    const entryDiff = (entry: [string, number]) => Math.abs(Math.log10(atoms / entry[1]) - bestDisplayOrder)
+    for (const entry of Object.entries(unitFactors)) logDiffs.push([entry[0], entryDiff(entry)])
+    const best = logDiffs.reduce((best: [string, number], entry: [string, number]) => entry[1] < best[1] ? entry : best)
+    const unit = best[0]
+    const cFactor = unitFactors[unit]
+    const v = atoms / cFactor
+    return [v, Math.round(Math.log10(cFactor)), unit]
+  }
+
+  /*
+   * formatBestUnitsFullPrecision formats the value with the best choice of
+   * units, at full precision.
+   */
+  static formatBestUnitsFullPrecision (atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>): [string, string] {
+    const [v, prec, unit] = this.bestConversion(atoms, ui, prefs)
+    if (Number.isInteger(v)) return [intFormatter.format(v), unit]
+    return [fullPrecisionFormatter(prec).format(v), unit]
+  }
+
+  /*
+   * formatBestUnitsFourSigFigs formats the value with the best choice of
+   * units and rounded to four significant figures.
+   */
+  static formatBestUnitsFourSigFigs (atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>): [string, string] {
+    const [v, prec, unit] = this.bestConversion(atoms, ui, prefs)
+    return [Doc.formatFourSigFigs(v, prec), unit]
+  }
+
+  /*
+   * formatBestRateElement formats a rate using the best available units and
+   * updates the UI element. The ancestor should have descendents with data
+   * attributes [best-value, data-unit, data-denom].
+   */
+  static formatBestRateElement (ancestor: PageElement, atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>) {
+    Doc.formatBestValueElement(ancestor, atoms, ui, prefs)
+    Doc.setText(ancestor, '[data-denom]', ui.feeRateDenom)
+  }
+
+  /*
+   * formatBestRateElement formats a value using the best available units and
+   * updates the UI element. The ancestor should have descendents with data
+   * attributes [best-value, data-unit]. This method binds a hovering unit
+   * selection menu to the data-unit element that allows the user to select
+   * whatever units they prefer.
+   */
+  static formatBestValueElement (ancestor: PageElement, atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>) {
+    const [v, unit] = this.formatBestUnitsFourSigFigs(atoms, ui, prefs)
+    Doc.setText(ancestor, '[data-value]', v)
+    Doc.setText(ancestor, '[data-unit]', unit)
+    for (const el of Doc.applySelector(ancestor, '[data-unit]')) {
+      let div: PageElement
+      Doc.bind(el, 'mouseenter', () => {
+        const lyt = Doc.layoutMetrics(el)
+        div = document.createElement('div') as PageElement
+        document.body.appendChild(div)
+        div.classList.add('position-absolute', 'body-bg', 'border')
+        const addRow = (unit: string, cFactor: number) => {
+          const row = document.createElement('div')
+          row.textContent = unit;
+          (div as PageElement).appendChild(row)
+          row.classList.add('p-2', 'hoverbg', 'pointer')
+          Doc.bind(row, 'click', () => {
+            Doc.setText(ancestor, '[data-value]', Doc.formatFourSigFigs(atoms / cFactor, Math.round(Math.log10(cFactor))))
+            Doc.setText(ancestor, '[data-unit]', unit)
+          })
+        }
+        addRow(ui.atomicUnit, 1)
+        for (const { unit, conversionFactor } of ui.denominations) addRow(unit, conversionFactor)
+        addRow(ui.conventional.unit, ui.conventional.conversionFactor)
+        if (lyt.bodyTop > div.offsetHeight) div.style.top = `${lyt.bodyTop - div.offsetHeight + 1}px`
+        else div.style.top = `${lyt.bodyTop + lyt.height - 1}px`
+        div.style.left = `${lyt.bodyLeft - 10}px`
+        Doc.bind(div, 'mouseleave', () => div.remove())
+      })
+      Doc.bind(el, 'mouseleave', (e: MouseEvent) => {
+        if (!Doc.mouseInElement(e, div)) div.remove()
+      })
+    }
   }
 
   static conventionalRateStep (rateStepEnc: number, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {

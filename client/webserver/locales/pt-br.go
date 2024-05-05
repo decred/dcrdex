@@ -98,7 +98,7 @@ var PtBr = map[string]*intl.Translation{
 	"lots":                           {T: "lotes"},
 	"provied_markets":                {T: "Essa DEX provê os seguintes mercados:"},
 	"order_disclaimer": {T: `<span class="red">IMPORTANTE</span>: Trocas levam tempo para serem concluídas, e vc não pode desligar o cliente e software DEX,
-		ou o <span data-unit="quote"></span> ou <span data-unit="base"></span> blockchain e/ou software da carteira, até os pedidos serem completamente concluídos.
+		ou o <span data-quote-ticker></span> ou <span data-base-ticker></span> blockchain e/ou software da carteira, até os pedidos serem completamente concluídos.
 		A troca pode completar em alguns minutos ou levar até mesmo horas.`}, //revisar
 	"Order":                      {T: "Ordem"},
 	"see all orders":             {T: "ver todas as ordens"},

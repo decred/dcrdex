@@ -591,7 +591,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setupCEXSelectors(viewOnly)
     this.setOriginalValues(viewOnly)
 
-    this.setBaseQuote(document.body, baseID, quoteID)
+    app().updateMarketElements(document.body, baseID, quoteID)
 
     const hasFiatRates = this.marketReport && this.marketReport.baseFiatRate > 0 && this.marketReport.quoteFiatRate > 0
     Doc.setVis(hasFiatRates, page.switchToQuickConfig)
@@ -602,17 +602,6 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     Doc.hide(page.marketLoading)
     Doc.show(page.botSettingsContainer, page.marketHeader)
-  }
-
-  setBaseQuote (ancestor: PageElement, baseID: number, quoteID: number) {
-    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = app().assets[baseID]
-    for (const el of Doc.applySelector(ancestor, '[data-base-name')) el.textContent = baseName
-    for (const img of Doc.applySelector(ancestor, '[data-base-logo]')) img.src = Doc.logoPath(baseSymbol)
-    for (const el of Doc.applySelector(ancestor, '[data-base-ticker]')) el.textContent = bui.conventional.unit
-    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = app().assets[quoteID]
-    for (const el of Doc.applySelector(ancestor, '[data-quote-name')) el.textContent = quoteName
-    for (const img of Doc.applySelector(ancestor, '[data-quote-logo]')) img.src = Doc.logoPath(quoteSymbol)
-    for (const el of Doc.applySelector(ancestor, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
   }
 
   /*
@@ -1060,7 +1049,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.forms.close()
       return
     }
-    this.setBaseQuote(page.botTypeForm, baseID, quoteID)
+    app().updateMarketElements(page.botTypeForm, baseID, quoteID)
     Doc.empty(page.botTypeBaseSymbol, page.botTypeQuoteSymbol)
     const [b, q] = [app().assets[baseID], app().assets[quoteID]]
     page.botTypeBaseSymbol.appendChild(Doc.symbolize(b, true))

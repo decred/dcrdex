@@ -3169,7 +3169,6 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 		c.notify(newWalletStateNote(w.state()))
 	}
 	if synced && !wasSynced {
-		w.feeRate() // prime the feeState
 		c.updateWalletBalance(w)
 		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
 		c.updateBondReserves(w.AssetID)

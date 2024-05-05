@@ -11,5 +11,5 @@ var UnitInfo = dex.UnitInfo{
 		Unit:             "DCR",
 		ConversionFactor: 1e8,
 	},
-	FeeRateUnit: "atoms/B",
+	FeeRateDenom: "B",
 }

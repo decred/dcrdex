@@ -41,7 +41,7 @@ var (
 			Unit:             "DGB",
 			ConversionFactor: 1e8,
 		},
-		FeeRateUnit: "Sats/vB",
+		FeeRateDenom: "vB",
 	}
 
 	// MainNetParams are the clone parameters for mainnet.

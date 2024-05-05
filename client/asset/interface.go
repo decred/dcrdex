@@ -566,8 +566,7 @@ type Wallet interface {
 	SingleLotSwapRefundFees(version uint32, feeRate uint64, useSafeTxSize bool) (uint64, uint64, error)
 	// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
 	SingleLotRedeemFees(version uint32, feeRate uint64) (uint64, error)
-	// StandardSendFee returns the send fee for a "standard" tx fee. For UTXO
-	// asssets, this is a tx with one input and two outputs.
+	// StandardSendFee returns the send fee for a "standard" tx fee.
 	StandardSendFee(feeRate uint64) uint64
 	// FundMultiOrder funds multiple orders at once. The return values will
 	// be in the same order as the passed orders. If less values are returned

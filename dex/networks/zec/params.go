@@ -43,7 +43,7 @@ var (
 			Unit:             "ZEC",
 			ConversionFactor: 1e8,
 		},
-		FeeRateUnit: "zats/action",
+		FeeRateDenom: "action",
 	}
 
 	// MainNetParams are the clone parameters for mainnet. Zcash,

@@ -174,7 +174,7 @@ var (
 				"This is useful as a fallback for SPV wallets and RPC wallets " +
 				"that have recently been started.",
 			IsBoolean:    true,
-			DefaultValue: false,
+			DefaultValue: true,
 		},
 	}
 
@@ -5272,6 +5272,8 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 	return finalFee, isValidAddress, nil
 }
 
+// StandardSendFees returns the fees for a simple send tx with one input and two
+// outputs.
 func (dcr *ExchangeWallet) StandardSendFee(feeRate uint64) uint64 {
 	var baseSize uint64 = dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + dexdcr.P2PKHInputSize
 	return feeRate * baseSize

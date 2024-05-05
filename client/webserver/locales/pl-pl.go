@@ -98,7 +98,7 @@ var PlPL = map[string]*intl.Translation{
 	"auth_order_app_pw":              {T: "Potwierdź to zlecenie swoim hasłem aplikacji."},
 	"lots":                           {T: "loty(ów)"},
 	"order_disclaimer": {T: `<span class="red">UWAGA</span>: Wymiany potrzebują czasu, aby zostać rozliczone. NIE WYŁĄCZAJ swojego klienta DEX, ani oprogramowania, czy portfela blockchaina dla
-		<span data-unit="quote"></span> lub <span data-unit="base"></span>, dopóki
+		<span data-quote-ticker></span> lub <span data-base-ticker></span>, dopóki
 		rozliczenie nie zostanie dokonane. Rozliczenie może trwać od kilku minut, aż do kilku godzin.`},
 	"Order":                         {T: "Zlecenie"},
 	"see all orders":                {T: "wyświetl wszystkie zlecenia"},

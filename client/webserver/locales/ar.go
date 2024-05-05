@@ -78,8 +78,8 @@ var Ar = map[string]*intl.Translation{
 	"outdated_tooltip":               {T: "قد تكون صلاحية رصيد الحساب قد انتهت. يرجى الاتصال بالمحفظة للتحديث."},
 	"available":                      {T: "متوفر"},
 	"connect_refresh_tooltip":        {T: "انقر من أجل الاتصال والتحديث"},
-	"add_a_base_wallet":              {T: `أضف<br><span data-unit="base"></span><br>محفظة`},
-	"add_a_quote_wallet":             {T: `أضف<br><span data-unit="quote"></span><br>محفظة`},
+	"add_a_base_wallet":              {T: `أضف<br><span data-base-ticker></span><br>محفظة`},
+	"add_a_quote_wallet":             {T: `أضف<br><span data-quote-ticker></span><br>محفظة`},
 	"locked":                         {T: "مقفلة"},
 	"immature":                       {T: "غير ناضجة"},
 	"Sell Orders":                    {T: "طلبات البيع"},
@@ -101,7 +101,7 @@ var Ar = map[string]*intl.Translation{
 	"auth_order_app_pw":              {T: "إسمح بهذا الطلب باستخدام كلمة مرور التطبيق الخاصة بك."},
 	"lots":                           {T: "الحصص"},
 	"order_disclaimer": {T: `<span class="red">IMPORTANT</span>: تستغرق التداولات وقتًا لتسويتها، ولا يمكنك إيقاف تشغيل برنامج عميل DEX،
-		أو <span data-unit="quote"></span> or <span data-unit="base"></span> البلوكتشين و/أو برنامج المحفظة، حتى
+		أو <span data-quote-ticker></span> or <span data-base-ticker></span> البلوكتشين و/أو برنامج المحفظة، حتى
 		تتم التسوية. يمكن أن تكتمل التسوية بسرعة تصل إلى بضع دقائق أو تستغرق عدة ساعات.`},
 	"Order":                     {T: "الطلب"},
 	"see all orders":            {T: "عرض جميع الطلبات"},

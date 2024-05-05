@@ -186,9 +186,9 @@
                     [[[price]]]: <span id="hoverPrice"></span>,
                     [[[volume]]]: <span id="hoverVolume"></span>
                   </span>
-                  <span class="d-hide">[[[sells]]]: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
+                  <span class="d-hide">[[[sells]]]: <span id="sellBookedBase"></span> <span data-base-ticker></span>, <span id="sellBookedQuote"></span> <span data-quote-ticker></span></span>
                   <span class="d-hide">|</span>
-                  <span class="me-2 d-hide">[[[buys]]]: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+                  <span class="me-2 d-hide">[[[buys]]]: <span id="buyBookedBase"></span> <span data-base-ticker></span>, <span id="buyBookedQuote"></span> <span data-quote-ticker></span></span>
                 </div>
                 <div id="depthChart" class="market-chart">
                   <div id="epochLine"><div class="epoch-line"></div> [[[epoch]]]</div>
@@ -426,11 +426,11 @@
                   <div class="d-flex justify-content-start pb-2 fs14">
                     <button id="buyBttn" type="button" class="buygreen-bg selected">
                       [[[Buy]]]
-                      <span data-unit="base" data-unit-format="noparent"></span>
+                      <span data-base-ticker></span>
                     </button>
                     <button id="sellBttn" type="button" class="sellred-bg ms-2">
                       [[[Sell]]]
-                      <span data-unit="base" data-unit-format="noparent"></span>
+                      <span data-base-ticker></span>
                     </button>
                     <span></span>
                   </div>
@@ -440,12 +440,12 @@
                     <div>
                       [[[:title:lot_size]]]:
                       <span id="lotSize"></span>
-                      <span data-unit="base" data-unit-format="noparent"></span>
+                      <span data-base-ticker></span>
                     </div>
                     <div>
                       [[[Rate Step]]]:
                       <span id="rateStep"></span>
-                      <span data-unit="quote" data-unit-format="noparent"></span>
+                      <span data-quote-ticker></span>
                     </div>
                   </div>
                   <div class="my-2 fs14 h21" id="maxBox">
@@ -477,7 +477,7 @@
                     <label for="rateField" class="col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
                     <div class="col-18 p-0 position-relative">
                       <input type="number" id="rateField">
-                      <span class="unitbox"><span class="unit" data-unit="quote" data-unit-format="noparent"></span>/<span class="unit" data-unit="base" data-unit-format="noparent"></span></span>
+                      <span class="unitbox"><span class="unit" data-quote-ticker></span>/<span class="unit" data-base-ticker></span></span>
                     </div>
                   </div>
                   <div class="d-flex mt-4" id="qtyBox">
@@ -489,25 +489,25 @@
                     <div class="col-1 p-0"></div> {{/* spacer */}}
                     <div class="col-11 p-0 position-relative">
                       <input type="number" id="qtyField">
-                      <span class="unit unitbox" data-unit="base" data-unit-format="noparent"></span>
+                      <span class="unit unitbox" data-base-ticker></span>
                     </div>
                   </div>
 
                   {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
                   <div id="mktBuyBox" class="d-hide">
                     <div class="text-center mt-2 fs15">
-                      [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote" data-unit-format="noparent"></span>
+                      [[[min trade is about]]] <span id="minMktBuy"></span> <span data-quote-ticker></span>
                     </div>
                     <div class="d-flex justify-content-center mt-2">
                       <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
                       <div class="col-12 p-0 position-relative">
                         <input type="number" id="mktBuyField">
-                        <span class="unit unitbox" data-unit="quote" data-unit-format="noparent"></span>
+                        <span class="unit unitbox" data-quote-ticker></span>
                       </div>
                     </div>
                     <div class="p-0 fs14 flex-center mt-1">
                       <span>
-                        ~ <span id="mktBuyScore">0</span> <span data-unit="base" data-unit-format="noparent"></span>
+                        ~ <span id="mktBuyScore">0</span> <span data-base-ticker></span>
                         @ <span id="mktBuyLots">0</span> <span >[[[:title:lots]]]</span><br>
 
                       </span>
@@ -750,7 +750,7 @@
       <form class="position-relative d-hide" id="verifyForm" autocomplete="off">
         <div class="form-closer"><span class="ico-cross"></span></div>
         <div class="text-center fs18 position-relative header buygreen-bg mt-3 py-1" id="vHeader">
-          <span id="vBuySell"></span> <span data-unit="base"></span>
+          <span id="vBuySell"></span> <span data-base-ticker></span>
         </div>
         <div class="d-flex justify-content-between align-items-center py-2 fs13">
           <span id="vOrderType" class="grey"></span>
@@ -765,18 +765,18 @@
             <span class="grey fs17 flex-grow-1 text-start">[[[:title:price]]]</span>
             <span id="vRate" class="fs18 demi"></span>
             <span class="grey fs14 ms-2">
-              <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
+              <sup data-quote-ticker></sup>/<sub data-base-ticker></sub>
             </span>
           </div>
           <div class="d-flex align-items-center mt-1">
             <span class="grey fs17 flex-grow-1 text-start">[[[Quantity]]]</span>
             <span id="vQty" class="fs18 demi"></span>
-            <span data-unit="base" class="grey fs14 ms-2"></span>
+            <span data-base-ticker class="grey fs14 ms-2"></span>
           </div>
           <div class="d-flex align-items-center mt-1">
             <span class="grey fs17 flex-grow-1 text-start">[[[Total]]]</span>
             <span id="vTotal" class="fs18 demi"></span>
-            <span data-unit="quote" class="grey fs14 ms-2"></span>
+            <span data-quote-ticker class="grey fs14 ms-2"></span>
           </div>
           <span class="d-flex d-hide justify-content-end grey fs14">
           ~<span id="vFiatTotal" class="mx-1"></span>USD
@@ -817,7 +817,7 @@
           <div class="col-12 p-0 d-flex justify-content-end">
             <button id="vSubmit" class="w-75 mt-1 justify-content-center fs15 go sellred-bg">
               <span id="vSideSubmit"></span>
-              <span data-unit="base"></span>
+              <span data-base-ticker></span>
             </button>
             <div id="vLoader" class="loader flex-center d-hide">
               <div class="ico-spinner spinner"></div>
