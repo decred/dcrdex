@@ -3,7 +3,6 @@
 package eth
 
 import (
-	"context"
 	"math/big"
 	"reflect"
 	"testing"
@@ -20,10 +19,7 @@ func TestTxDB(t *testing.T) {
 	_, eth, node, shutdown := tassetWallet(BipID)
 	shutdown()
 
-	txHistoryStore := newBadgerTxDB(tempDir, tLogger)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	wg, err := txHistoryStore.connect(ctx)
+	txHistoryStore, err := newBadgerTxDB(tempDir, tLogger)
 	if err != nil {
 		t.Fatalf("error connecting to tx history store: %v", err)
 	}
@@ -120,17 +116,13 @@ func TestTxDB(t *testing.T) {
 	if !reflect.DeepEqual(allTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
+	txHistoryStore.Close()
 
-	cancel()
-	wg.Wait()
-
-	ctx, cancel = context.WithCancel(context.Background())
-	defer cancel()
-	txHistoryStore = newBadgerTxDB(tempDir, dex.StdOutLogger("TXDB", dex.LevelTrace))
-	_, err = txHistoryStore.connect(ctx)
+	txHistoryStore, err = newBadgerTxDB(tempDir, dex.StdOutLogger("TXDB", dex.LevelTrace))
 	if err != nil {
 		t.Fatalf("error connecting to tx history store: %v", err)
 	}
+	defer txHistoryStore.Close()
 
 	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
 	if err != nil {

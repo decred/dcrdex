@@ -92,9 +92,6 @@ func txKey(txHash common.Hash) []byte {
 // transaction is stale. This function retries updates multiple times in
 // case of conflicts.
 func (db *badgerTxDB) Update(f func(txn *badger.Txn) error) (err error) {
-	if err = db.ctx.Err(); err != nil {
-		return err
-	}
 	db.updateWG.Add(1)
 	defer db.updateWG.Done()
 
@@ -106,11 +103,7 @@ func (db *badgerTxDB) Update(f func(txn *badger.Txn) error) (err error) {
 			return err
 		}
 		sleepTime *= 2
-		select {
-		case <-time.After(sleepTime):
-		case <-db.ctx.Done():
-			return db.ctx.Err()
-		}
+		time.Sleep(sleepTime)
 	}
 
 	return err
@@ -137,7 +130,7 @@ const txMappingVersion = 2
 const txDBVersion = txMappingVersion
 
 type txDB interface {
-	connect(ctx context.Context) (*sync.WaitGroup, error)
+	run(ctx context.Context)
 	storeTx(wt *extendedWalletTx) error
 	getTxs(n int, refID *common.Hash, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error)
 	// getTx gets a single transaction. It is not an error if the tx is not known.
@@ -150,7 +143,6 @@ type txDB interface {
 
 type badgerTxDB struct {
 	*badger.DB
-	ctx      context.Context
 	filePath string
 	log      dex.Logger
 	updateWG sync.WaitGroup
@@ -158,66 +150,58 @@ type badgerTxDB struct {
 
 var _ txDB = (*badgerTxDB)(nil)
 
-func newBadgerTxDB(filePath string, log dex.Logger) *badgerTxDB {
-	return &badgerTxDB{
-		filePath: filePath,
-		log:      log,
-	}
-}
-
-func (db *badgerTxDB) connect(ctx context.Context) (*sync.WaitGroup, error) {
+func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
 	// If memory use is a concern, could try
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
 	//   .WithValueLogFileSize(sz int64), bytes, default 1 GB, must be 1MB <= sz <= 1GB
-	opts := badger.DefaultOptions(db.filePath).WithLogger(&badgerLoggerWrapper{db.log})
+	opts := badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log})
 	var err error
-	db.DB, err = badger.Open(opts)
+	bdb, err := badger.Open(opts)
 	if err == badger.ErrTruncateNeeded {
 		// Probably a Windows thing.
 		// https://github.com/dgraph-io/badger/issues/744
-		db.log.Warnf("error opening badger db: %v", err)
+		log.Warnf("error opening badger db: %v", err)
 		// Try again with value log truncation enabled.
 		opts.Truncate = true
-		db.log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
-		db.DB, err = badger.Open(opts)
+		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
+		bdb, err = badger.Open(opts)
 	}
 	if err != nil {
 		return nil, err
 	}
-	db.ctx = ctx
+
+	db := &badgerTxDB{
+		DB:       bdb,
+		filePath: filePath,
+		log:      log,
+	}
 
 	err = db.updateVersion()
 	if err != nil {
 		return nil, fmt.Errorf("failed to update db: %w", err)
 	}
+	return db, nil
+}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				err := db.RunValueLogGC(0.5)
-				if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
-					db.log.Errorf("garbage collection error: %v", err)
-				}
-			case <-ctx.Done():
-				db.updateWG.Wait()
-				err = db.Close()
-				if err != nil {
-					db.log.Errorf("error closing db: %v", err)
-				}
-				return
-			}
-		}
+func (db *badgerTxDB) run(ctx context.Context) {
+	defer func() {
+		db.updateWG.Wait()
+		db.Close()
 	}()
-
-	return &wg, nil
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			err := db.RunValueLogGC(0.5)
+			if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
+				db.log.Errorf("garbage collection error: %v", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // txForNonce gets the registered for the given nonce.
