@@ -108,11 +108,7 @@ func makeTxHex(inputs []*wire.TxIn, pkScripts []dex.Bytes) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	txHex, err := txBuf.Bytes(), nil
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(txHex), nil
+	return hex.EncodeToString(txBuf.Bytes()), nil
 }
 
 func makeRPCVin(txHash *chainhash.Hash, vout uint32, sigScript []byte) *wire.TxIn {
