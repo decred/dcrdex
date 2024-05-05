@@ -32,8 +32,12 @@ var (
 		},
 		Alternatives: []dex.Denomination{
 			{
-				Unit:             "mDASH", // Casino usage
+				Unit:             "mDASH",
 				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µDASH",
+				ConversionFactor: 1e2,
 			},
 		},
 		FeeRateDenom: "B",

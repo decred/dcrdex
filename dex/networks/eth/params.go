@@ -50,6 +50,16 @@ var (
 			Unit:             "ETH",
 			ConversionFactor: 1e9,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "Szabos",
+				ConversionFactor: 1e6,
+			},
+			{
+				Unit:             "Finneys",
+				ConversionFactor: 1e3,
+			},
+		},
 		FeeRateDenom: "gas",
 	}
 

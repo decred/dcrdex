@@ -41,6 +41,16 @@ var (
 			Unit:             "DGB",
 			ConversionFactor: 1e8,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "mDGB",
+				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µDGB",
+				ConversionFactor: 1e2,
+			},
+		},
 		FeeRateDenom: "vB",
 	}
 

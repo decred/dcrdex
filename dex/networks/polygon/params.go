@@ -20,6 +20,16 @@ var (
 			Unit:             "MATIC",
 			ConversionFactor: 1e9,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "Szabos",
+				ConversionFactor: 1e6,
+			},
+			{
+				Unit:             "Finneys",
+				ConversionFactor: 1e3,
+			},
+		},
 		FeeRateDenom: "gas",
 	}
 
@@ -74,10 +84,16 @@ var (
 			ParentID: PolygonBipID,
 			Name:     "USDC",
 			UnitInfo: dex.UnitInfo{
-				AtomicUnit: "microUSD",
+				AtomicUnit: "µUSD",
 				Conventional: dex.Denomination{
 					Unit:             "USDC",
 					ConversionFactor: 1e6,
+				},
+				Alternatives: []dex.Denomination{
+					{
+						Unit:             "cents",
+						ConversionFactor: 1e2,
+					},
 				},
 				FeeRateDenom: "gas",
 			},
@@ -242,6 +258,16 @@ var (
 					Unit:             "WETH",
 					ConversionFactor: 1e9,
 				},
+				Alternatives: []dex.Denomination{
+					{
+						Unit:             "Szabos",
+						ConversionFactor: 1e6,
+					},
+					{
+						Unit:             "Finneys",
+						ConversionFactor: 1e3,
+					},
+				},
 				FeeRateDenom: "gas",
 			},
 		},
@@ -292,6 +318,16 @@ var (
 				Conventional: dex.Denomination{
 					Unit:             "WBTC",
 					ConversionFactor: 1e8,
+				},
+				Alternatives: []dex.Denomination{
+					{
+						Unit:             "mWBTC",
+						ConversionFactor: 1e5,
+					},
+					{
+						Unit:             "µWBTC",
+						ConversionFactor: 1e2,
+					},
 				},
 				FeeRateDenom: "gas",
 			},

@@ -38,6 +38,16 @@ var (
 			Unit:             "DOGE",
 			ConversionFactor: 1e8,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "mDOGE",
+				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µDOGE",
+				ConversionFactor: 1e2,
+			},
+		},
 		FeeRateDenom: "vB",
 	}
 

@@ -25,6 +25,16 @@ var (
 			Unit:             "BCH",
 			ConversionFactor: 1e8,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "mBCH",
+				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µBCH",
+				ConversionFactor: 1e2,
+			},
+		},
 		FeeRateDenom: "B",
 	}
 	// MainNetParams are the clone parameters for mainnet.

@@ -37,6 +37,16 @@ var (
 			Unit:             "FIRO",
 			ConversionFactor: 1e8,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "mFIRO",
+				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µFIRO",
+				ConversionFactor: 1e2,
+			},
+		},
 		FeeRateDenom: "B",
 	}
 

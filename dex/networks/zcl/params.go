@@ -16,6 +16,16 @@ var (
 			Unit:             "ZCL",
 			ConversionFactor: 1e8,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "mZCL",
+				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µZCL",
+				ConversionFactor: 1e2,
+			},
+		},
 		FeeRateDenom: "B",
 	}
 
