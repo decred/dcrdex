@@ -431,24 +431,27 @@ export default class Doc {
       Doc.bind(el, 'mouseenter', () => {
         const lyt = Doc.layoutMetrics(el)
         div = document.createElement('div') as PageElement
+        div.classList.add('position-absolute', 'p-2')
         document.body.appendChild(div)
-        div.classList.add('position-absolute', 'body-bg', 'border')
+        const innerDiv = document.createElement('div') as PageElement
+        div.appendChild(innerDiv)
+        innerDiv.classList.add('body-bg', 'border')
         const addRow = (unit: string, cFactor: number) => {
           const row = document.createElement('div')
-          row.textContent = unit;
-          (div as PageElement).appendChild(row)
+          row.textContent = unit
+          innerDiv.appendChild(row)
           row.classList.add('p-2', 'hoverbg', 'pointer')
           Doc.bind(row, 'click', () => {
             Doc.setText(ancestor, '[data-value]', Doc.formatFourSigFigs(atoms / cFactor, Math.round(Math.log10(cFactor))))
             Doc.setText(ancestor, '[data-unit]', unit)
           })
         }
-        addRow(ui.atomicUnit, 1)
-        for (const { unit, conversionFactor } of ui.denominations) addRow(unit, conversionFactor)
         addRow(ui.conventional.unit, ui.conventional.conversionFactor)
+        for (const { unit, conversionFactor } of ui.denominations) addRow(unit, conversionFactor)
+        addRow(ui.atomicUnit, 1)
         if (lyt.bodyTop > div.offsetHeight) div.style.top = `${lyt.bodyTop - div.offsetHeight + 1}px`
-        else div.style.top = `${lyt.bodyTop + lyt.height - 1}px`
-        div.style.left = `${lyt.bodyLeft - 10}px`
+        else div.style.top = `${lyt.bodyTop + lyt.height - 10}px`
+        div.style.left = `${lyt.bodyLeft - 20}px`
         Doc.bind(div, 'mouseleave', () => div.remove())
       })
       Doc.bind(el, 'mouseleave', (e: MouseEvent) => {
