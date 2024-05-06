@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -28,6 +27,7 @@ import (
 	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 )
 
@@ -1031,7 +1031,7 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 		return err
 	}
 
-	return bnc.requestInto(req, &struct{}{})
+	return requestInto(req, &struct{}{})
 }
 
 func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
@@ -1077,7 +1077,7 @@ func (bnc *binance) getAPI(ctx context.Context, endpoint string, query url.Value
 	if err != nil {
 		return fmt.Errorf("generateRequest error: %w", err)
 	}
-	return bnc.requestInto(req, thing)
+	return requestInto(req, thing)
 }
 
 func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
@@ -1085,36 +1085,7 @@ func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form ur
 	if err != nil {
 		return fmt.Errorf("generateRequest error: %w", err)
 	}
-	return bnc.requestInto(req, thing)
-}
-
-func (bnc *binance) requestInto(req *http.Request, thing interface{}) error {
-	// bnc.log.Tracef("Sending request: %+v", req)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("httpClient.Do error: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("http error (%d) %s", resp.StatusCode, resp.Status)
-	}
-
-	if thing == nil {
-		return nil
-	}
-	// TODO: use buffered reader
-	reader := io.LimitReader(resp.Body, 1<<22)
-	r, err := io.ReadAll(reader)
-	if err != nil {
-		return err
-	}
-
-	if err := json.Unmarshal(r, thing); err != nil {
-		return fmt.Errorf("json Decode error: %w", err)
-	}
-	return nil
+	return requestInto(req, thing)
 }
 
 func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool) (*http.Request, error) {
@@ -1375,7 +1346,7 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 					bnc.log.Errorf("Error generating keep-alive request: %v", err)
 					continue
 				}
-				if err := bnc.requestInto(req, nil); err != nil {
+				if err := requestInto(req, nil); err != nil {
 					bnc.log.Errorf("Error sending keep-alive request: %v", err)
 				}
 			case <-ctx.Done():
@@ -1827,4 +1798,9 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 	}
 
 	return markets
+}
+
+func requestInto(req *http.Request, thing interface{}) error {
+	// bnc.log.Tracef("Sending request: %+v", req)
+	return dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<22))
 }

@@ -1315,7 +1315,7 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 		}
 		vspClient, have := clientCache[vspHost]
 		if !have {
-			info, err := vspInfo(vspHost)
+			info, err := vspInfo(ctx, vspHost)
 			if err != nil {
 				w.log.Warnf("unable to get info from vsp at %s for ticket %s: %v", vspHost, hash, err)
 				return nil

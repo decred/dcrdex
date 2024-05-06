@@ -4,14 +4,17 @@
 package ltc
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/dexnet"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -204,23 +207,24 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
 	cloneCFG := &btc.BTCCloneCFG{
-		WalletCFG:           cfg,
-		MinNetworkVersion:   minNetworkVersion,
-		WalletInfo:          WalletInfo,
-		Symbol:              "ltc",
-		Logger:              logger,
-		Network:             network,
-		ChainParams:         cloneParams,
-		Ports:               NetPorts,
-		DefaultFallbackFee:  defaultFee,
-		DefaultFeeRateLimit: defaultFeeRateLimit,
-		LegacyBalance:       false,
-		LegacyRawFeeLimit:   false,
-		Segwit:              true,
-		InitTxSize:          dexbtc.InitTxSizeSegwit,
-		InitTxSizeBase:      dexbtc.InitTxSizeBaseSegwit,
-		BlockDeserializer:   dexltc.DeserializeBlockBytes,
-		AssetID:             BipID,
+		WalletCFG:            cfg,
+		MinNetworkVersion:    minNetworkVersion,
+		WalletInfo:           WalletInfo,
+		Symbol:               "ltc",
+		Logger:               logger,
+		Network:              network,
+		ChainParams:          cloneParams,
+		Ports:                NetPorts,
+		DefaultFallbackFee:   defaultFee,
+		DefaultFeeRateLimit:  defaultFeeRateLimit,
+		LegacyBalance:        false,
+		LegacyRawFeeLimit:    false,
+		Segwit:               true,
+		InitTxSize:           dexbtc.InitTxSizeSegwit,
+		InitTxSizeBase:       dexbtc.InitTxSizeBaseSegwit,
+		BlockDeserializer:    dexltc.DeserializeBlockBytes,
+		ExternalFeeEstimator: externalFeeRate,
+		AssetID:              BipID,
 	}
 
 	switch cfg.Type {
@@ -261,4 +265,34 @@ func parseChainParams(net dex.Network) (*ltcchaincfg.Params, error) {
 		return &ltcchaincfg.RegressionNetParams, nil
 	}
 	return nil, fmt.Errorf("unknown network ID %v", net)
+}
+
+func externalFeeRate(ctx context.Context, net dex.Network) (uint64, error) {
+	switch net {
+	case dex.Mainnet, dex.Simnet:
+		return fetchBlockCypherFees(ctx)
+	}
+	return bitcoreFeeRate(ctx, net)
+}
+
+var bitcoreFeeRate = btc.BitcoreRateFetcher("LTC")
+
+func fetchBlockCypherFees(ctx context.Context) (uint64, error) {
+	// Posted rate limits for blockcypher are 3/sec, 100/hr, 1000/day. 1000/day
+	// is once per 86.4 seconds, but I've seen unexpected metering before.
+	// Once per 5 minutes is a good rate, and that's the default.
+	// Can't find a source for testnet. Just using mainnet rate for everything.
+	const uri = "https://api.blockcypher.com/v1/ltc/main"
+	var res struct {
+		Low    float64 `json:"low_fee_per_kb"`
+		Medium float64 `json:"medium_fee_per_kb"`
+		High   float64 `json:"high_fee_per_kb"`
+	}
+	if err := dexnet.Get(ctx, uri, &res); err != nil {
+		return 0, err
+	}
+	if res.Low == 0 {
+		return 0, errors.New("no fee rate in result")
+	}
+	return uint64(math.Round(res.Low / 1000)), nil
 }

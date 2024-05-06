@@ -62,9 +62,7 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 	// settings["account"] = "default"
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
-		TipChange: func(err error) {
-			blkFunc(name, err)
-		},
+		Emit:     asset.NewWalletEmitter(make(chan asset.WalletNotification, 128), 0, tLogger),
 		PeersChange: func(num uint32, err error) {
 			t.Logf("peer count = %d, err = %v", num, err)
 		},
@@ -235,4 +233,19 @@ func TestMakeBondTx(t *testing.T) {
 		t.Fatalf("RefundBond: %v", err)
 	}
 	t.Logf("refundCoin: %v\n", refundCoin)
+}
+
+func TestExternalFeeRate(t *testing.T) {
+	fetchRateWithTimeout(t, dex.Mainnet)
+	fetchRateWithTimeout(t, dex.Testnet)
+}
+
+func fetchRateWithTimeout(t *testing.T, net dex.Network) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	feeRate, err := externalFeeRate(ctx, net)
+	if err != nil {
+		t.Fatalf("error fetching %s fees: %v", net, err)
+	}
+	fmt.Printf("##### Fee rate fetched for %s! %d Sats/vB \n", net, feeRate)
 }

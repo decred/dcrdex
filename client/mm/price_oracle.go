@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,6 +17,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/fiatrates"
 )
 
@@ -286,28 +286,12 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 }
 
 func getRates(ctx context.Context, url string, thing any) (err error) {
-	_, err = getHTTPWithCode(ctx, url, thing)
-	return err
+	return dexnet.Get(ctx, url, thing, dexnet.WithSizeLimit(1<<22))
 }
 
 func getHTTPWithCode(ctx context.Context, url string, thing any) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode, fmt.Errorf("HTTP error code %d for request to %q: %s", resp.StatusCode, url, resp.Status)
-	}
-
-	reader := io.LimitReader(resp.Body, 1<<22)
-	return 0, json.NewDecoder(reader).Decode(thing)
+	var code int
+	return code, dexnet.Get(ctx, url, thing, dexnet.WithSizeLimit(1<<22), dexnet.WithStatusFunc(func(c int) { code = c }))
 }
 
 // Truncates the URL to the domain name and TLD.

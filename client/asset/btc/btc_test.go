@@ -6449,3 +6449,86 @@ func testIDUnknownTx(t *testing.T, segwit bool) {
 		runTest(tt)
 	}
 }
+
+func TestFeeRateCache(t *testing.T) {
+	const okRate = 1
+	var n int
+	feeRateOK := func(context.Context, dex.Network) (uint64, error) {
+		n++
+		return okRate, nil
+	}
+	err1 := errors.New("test error 1")
+	feeRateBad := func(context.Context, dex.Network) (uint64, error) {
+		n++
+		return 0, err1
+	}
+	c := &feeRateCache{f: feeRateOK}
+	r, err := c.rate(context.Background(), dex.Mainnet)
+	if err != nil {
+		t.Fatalf("rate error: %v", err)
+	}
+	if r != okRate {
+		t.Fatalf("expected rate %d, got %d", okRate, r)
+	}
+	if n != 1 {
+		t.Fatal("counter not incremented")
+	}
+
+	// Again should hit cache
+	r, err = c.rate(context.Background(), dex.Mainnet)
+	if err != nil {
+		t.Fatalf("cached rate error: %v", err)
+	}
+	if r != okRate {
+		t.Fatalf("expected cached rate %d, got %d", okRate, r)
+	}
+	if n != 1 {
+		t.Fatal("counter incremented")
+	}
+
+	// Expire cache
+	c.fetchStamp = time.Now().Add(-time.Minute * 5) // const defaultShelfLife
+	r, err = c.rate(context.Background(), dex.Mainnet)
+	if err != nil {
+		t.Fatalf("fresh rate error: %v", err)
+	}
+	if r != okRate {
+		t.Fatalf("expected fresh rate %d, got %d", okRate, r)
+	}
+	if n != 2 {
+		t.Fatal("counter not incremented for fresh rate")
+	}
+
+	c.fetchStamp = time.Time{}
+	c.f = feeRateBad
+	_, err = c.rate(context.Background(), dex.Mainnet)
+	if err == nil {
+		t.Fatal("error not propagated")
+	}
+	if n != 3 {
+		t.Fatal("counter not incremented for error")
+	}
+
+	// Again should hit error cache.
+	c.f = feeRateOK
+	_, err = c.rate(context.Background(), dex.Mainnet)
+	if err == nil {
+		t.Fatal("error not cached")
+	}
+	if n != 3 {
+		t.Fatal("counter incremented for cached error")
+	}
+
+	// expire error
+	c.errorStamp = time.Now().Add(-time.Minute) // const errorDelay
+	r, err = c.rate(context.Background(), dex.Mainnet)
+	if err != nil {
+		t.Fatalf("recovered rate error: %v", err)
+	}
+	if r != okRate {
+		t.Fatalf("expected recovered rate %d, got %d", okRate, r)
+	}
+	if n != 4 {
+		t.Fatal("counter not incremented for recovered rate")
+	}
+}

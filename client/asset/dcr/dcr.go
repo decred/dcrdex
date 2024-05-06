@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	neturl "net/url"
@@ -32,6 +31,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/dexnet"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
 	"decred.org/dcrwallet/v3/wallet"
@@ -85,12 +85,6 @@ const (
 	// hierarchical deterministic key derivation for the internal branch of an
 	// account.
 	acctInternalBranch uint32 = 1
-
-	// externalApiUrl is the URL of the external API in case of fallback.
-	externalApiUrl = "https://explorer.dcrdata.org/insight/api"
-	// testnetExternalApiUrl is the URL of the testnet external API in case of
-	// fallback.
-	testnetExternalApiUrl = "https://testnet.dcrdata.org/insight/api"
 
 	// freshFeeAge is the expiry age for cached fee rates of external origin,
 	// past which fetchFeeFromOracle should be used to refresh the rate.
@@ -1337,31 +1331,22 @@ func dcrPerKBToAtomsPerByte(dcrPerkB float64) (uint64, error) {
 
 // fetchFeeFromOracle gets the fee rate from the external API.
 func fetchFeeFromOracle(ctx context.Context, net dex.Network, nb uint64) (float64, error) {
-	var url string
+	var uri string
 	if net == dex.Testnet {
-		url = testnetExternalApiUrl
+		uri = fmt.Sprintf("https://testnet.dcrdata.org/insight/api/utils/estimatefee?nbBlocks=%d", nb)
 	} else { // mainnet and simnet
-		url = externalApiUrl
+		uri = fmt.Sprintf("https://explorer.dcrdata.org/insight/api/utils/estimatefee?nbBlocks=%d", nb)
 	}
-	url += "/utils/estimatefee?nbBlocks=" + strconv.FormatUint(nb, 10)
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
+	var resp map[uint64]float64
+	if err := dexnet.Get(ctx, uri, &resp); err != nil {
 		return 0, err
 	}
-	httpResponse, err := client.Do(r)
-	if err != nil {
-		return 0, err
+	if resp == nil {
+		return 0, errors.New("null response")
 	}
-	c := make(map[uint64]float64)
-	reader := io.LimitReader(httpResponse.Body, 1<<14)
-	err = json.NewDecoder(reader).Decode(&c)
-	httpResponse.Body.Close()
-	if err != nil {
-		return 0, err
-	}
-	dcrPerKB, ok := c[nb]
+	dcrPerKB, ok := resp[nb]
 	if !ok {
 		return 0, errors.New("no fee rate for requested number of blocks")
 	}
@@ -5415,26 +5400,14 @@ func (dcr *ExchangeWallet) tickets(ctx context.Context) ([]*asset.Ticket, error)
 	return tickets, nil
 }
 
-func vspInfo(url string) (*vspdjson.VspInfoResponse, error) {
+func vspInfo(ctx context.Context, uri string) (*vspdjson.VspInfoResponse, error) {
 	suffix := "/api/v3/vspinfo"
-	path, err := neturl.JoinPath(url, suffix)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.Get(path)
-	if err != nil {
-		return nil, fmt.Errorf("http get error: %v", err)
-	}
-	b, err := io.ReadAll(resp.Body)
+	path, err := neturl.JoinPath(uri, suffix)
 	if err != nil {
 		return nil, err
 	}
 	var info vspdjson.VspInfoResponse
-	err = json.Unmarshal(b, &info)
-	if err != nil {
-		return nil, err
-	}
-	return &info, nil
+	return &info, dexnet.Get(ctx, path, &info)
 }
 
 // SetVSP sets the VSP provider. Ability to set can be checked with StakeStatus
@@ -5444,7 +5417,7 @@ func (dcr *ExchangeWallet) SetVSP(url string) error {
 	if !dcr.isNative() {
 		return errors.New("cannot set vsp for external wallet")
 	}
-	info, err := vspInfo(url)
+	info, err := vspInfo(dcr.ctx, url)
 	if err != nil {
 		return err
 	}
@@ -5639,7 +5612,7 @@ func (dcr *ExchangeWallet) SetVotingPreferences(choices map[string]string, tspen
 func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 	if dcr.network == dex.Simnet {
 		const simnetVSPUrl = "http://127.0.0.1:19591"
-		vspi, err := vspInfo(simnetVSPUrl)
+		vspi, err := vspInfo(dcr.ctx, simnetVSPUrl)
 		if err != nil {
 			dcr.log.Warnf("Error getting simnet VSP info: %v", err)
 			return []*asset.VotingServiceProvider{}, nil
@@ -5660,14 +5633,6 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 			NetShare:      vspi.NetworkProportion,
 		}}, nil
 	}
-	resp, err := http.Get("https://api.decred.org/?c=vsp")
-	if err != nil {
-		return nil, fmt.Errorf("http get error: %v", err)
-	}
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
 
 	// This struct is not quite compatible with vspdjson.VspInfoResponse.
 	var res map[string]*struct {
@@ -5684,10 +5649,9 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 		BlockHeight   uint32  `json:"blockheight"`
 		NetShare      float32 `json:"estimatednetworkproportion"`
 	}
-	if err = json.Unmarshal(b, &res); err != nil {
+	if err := dexnet.Get(dcr.ctx, "https://api.decred.org/?c=vsp", &res); err != nil {
 		return nil, err
 	}
-
 	vspds := make([]*asset.VotingServiceProvider, 0)
 	for host, v := range res {
 		net, err := dex.NetFromString(v.Network)
