@@ -2195,7 +2195,7 @@ func (dcr *ExchangeWallet) fundMultiSplitTx(orders []*asset.MultiOrderValue, utx
 
 // submitMultiSplitTx creates a multi-split transaction using fundingCoins with
 // one output for each order, and submits it to the network.
-func (dcr *ExchangeWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*fundingCoin, orders []*asset.MultiOrderValue,
+func (dcr *ExchangeWallet) submitMultiSplitTx(fundingCoins asset.Coins, _ /* spents */ []*fundingCoin, orders []*asset.MultiOrderValue,
 	maxFeeRate, splitTxFeeRate, splitBuffer uint64) ([]asset.Coins, uint64, error) {
 	baseTx := wire.NewMsgTx()
 	_, err := dcr.addInputCoins(baseTx, fundingCoins)
@@ -4577,10 +4577,12 @@ out:
 				break out
 			}
 		}
-		blockHash = &blk.Header.PrevBlock
-		if blockHash == nil {
+
+		if string(blk.Header.PrevBlock[:]) == "" {
 			return nil, fmt.Errorf("did not find the bond tx %s", txHash)
 		}
+
+		blockHash = &blk.Header.PrevBlock
 	}
 	return decodeV0BondTx(msgTx)
 }
