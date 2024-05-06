@@ -244,9 +244,21 @@ class QuickConfigForm {
     const createWallet = async (walletRow: WalletConfigRow) => {
       const { asset: a, type, checkbox } = walletRow
       if (!checkbox.checked) return
+      const config: Record<string, string> = {}
+      const walletDef = app().walletDefinition(a.id, type)
+      for (const opt of walletDef.configopts) {
+        if (!opt.default) continue
+        if (opt.isboolean) {
+          config[opt.key] = opt.default ? '1' : '0'
+          continue
+        }
+        if (opt.repeatable && config[opt.key]) config[opt.key] += opt.repeatable + opt.default
+        else config[opt.key] = String(opt.default)
+      }
       const createForm = {
         assetID: a.id,
         appPass: this.pw,
+        config: config,
         walletType: type
       }
       const res = await postJSON('/api/newwallet', createForm)

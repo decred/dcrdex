@@ -1050,13 +1050,14 @@ export default class WalletsPage extends BasePage {
     const { unitInfo: ui, token } = app().assets[assetID]
     const fiatRate = app().fiatRatesMap[assetID]
     if (!fiatRate) return
-    const feeFiatRate = token ? app().fiatRatesMap[token.parentID] : fiatRate
+    const feeAssetID = token ? token.parentID : assetID
+    const feeFiatRate = app().fiatRatesMap[feeAssetID]
     if (token && !feeFiatRate) return
     Doc.show(page.feeStateBox)
     const feeUI = token ? app().assets[token.parentID].unitInfo : ui
-    Doc.formatBestRateElement(page.feeStateNetRate, feeState.rate, feeUI)
-    Doc.formatBestValueElement(page.feeStateSendFees, feeState.send, feeUI)
-    Doc.formatBestValueElement(page.feeStateSwapFees, feeState.swap, feeUI)
+    Doc.formatBestRateElement(page.feeStateNetRate, feeAssetID, feeState.rate, feeUI)
+    Doc.formatBestValueElement(page.feeStateSendFees, feeAssetID, feeState.send, feeUI)
+    Doc.formatBestValueElement(page.feeStateSwapFees, feeAssetID, feeState.swap, feeUI)
     page.feeStateXcRate.textContent = Doc.formatFourSigFigs(fiatRate)
     const sendFiat = feeState.send / feeUI.conventional.conversionFactor * feeFiatRate
     page.feeStateSendFiat.textContent = Doc.formatFourSigFigs(sendFiat)
@@ -2594,7 +2595,7 @@ export default class WalletsPage extends BasePage {
         Doc.isDisplayed(this.page.managePeersForm)) {
       this.updateWalletPeersTable()
     }
-    if (feeState) this.updateFeeState(feeState)
+    if (feeState && assetID === this.selectedAssetID) this.updateFeeState(feeState)
   }
 
   /*

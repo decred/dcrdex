@@ -55,20 +55,20 @@ var (
 		Tab:               "Litecoin Core (external)",
 		Description:       "Connect to litecoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
-		ConfigOpts:        append(btc.RPCConfigOpts("Litecoin", "9332"), btc.CommonConfigOpts("LTC", false)...),
+		ConfigOpts:        append(btc.RPCConfigOpts("Litecoin", "9332"), btc.CommonConfigOpts("LTC", true)...),
 	}
 	electrumWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeElectrum,
 		Tab:         "Electrum-LTC (external)",
 		Description: "Use an external Electrum-LTC Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum-ltc", false), "config"), // e.g. ~/.electrum-ltc/config		ConfigOpts:        append(rpcOpts, commonOpts...),
-		ConfigOpts: append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("LTC", false)...),
+		ConfigOpts: append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("LTC", true)...),
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  append(btc.SPVConfigOpts("LTC"), btc.CommonConfigOpts("LTC", false)...),
+		ConfigOpts:  append(btc.SPVConfigOpts("LTC"), btc.CommonConfigOpts("LTC", true)...),
 		Seeded:      true,
 	}
 	// WalletInfo defines some general information about a Litecoin wallet.

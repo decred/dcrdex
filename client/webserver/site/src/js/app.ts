@@ -369,6 +369,8 @@ export default class Application {
       // Bind webview URL handlers
       this.bindUrlHandlers(this.main)
     }
+
+    this.bindUnits(this.main)
   }
 
   bindTooltips (ancestor: HTMLElement) {
@@ -388,6 +390,53 @@ export default class Application {
         this.tooltip.style.left = '-10000px'
       })
     })
+  }
+
+  /*
+   * bindUnits binds a hovering unit selection menu to the value or rate
+   * display elements. The menu gives users an option to convert the value
+   * to their preferred units.
+   */
+  bindUnits (main: PageElement) {
+    const div = document.createElement('div') as PageElement
+    div.classList.add('position-absolute', 'p-3')
+    // div.style.backgroundColor = 'yellow'
+    const rows = document.createElement('div') as PageElement
+    div.appendChild(rows)
+    rows.classList.add('body-bg', 'border')
+    const addRow = (el: PageElement, unit: string, cFactor: number) => {
+      const box = Doc.safeSelector(el, '[data-unit-box]')
+      const atoms = parseInt(box.dataset.atoms as string)
+      const row = document.createElement('div')
+      row.textContent = unit
+      rows.appendChild(row)
+      row.classList.add('p-2', 'hoverbg', 'pointer')
+      Doc.bind(row, 'click', () => {
+        Doc.setText(el, '[data-value]', Doc.formatFourSigFigs(atoms / cFactor, Math.round(Math.log10(cFactor))))
+        Doc.setText(el, '[data-unit]', unit)
+      })
+    }
+    for (const el of Doc.applySelector(main, '[data-conversion-value]')) {
+      const box = Doc.safeSelector(el, '[data-unit-box]')
+      Doc.bind(box, 'mouseenter', () => {
+        Doc.empty(rows)
+        box.appendChild(div)
+        const lyt = Doc.layoutMetrics(box)
+        const assetID = parseInt(box.dataset.assetID as string)
+        const { unitInfo: ui } = this.assets[assetID]
+        addRow(el, ui.conventional.unit, ui.conventional.conversionFactor)
+        for (const { unit, conversionFactor } of ui.denominations) addRow(el, unit, conversionFactor)
+        addRow(el, ui.atomicUnit, 1)
+        if (lyt.bodyTop > (div.offsetHeight + this.header.offsetHeight)) {
+          div.style.bottom = 'calc(100% - 1rem)'
+          div.style.top = 'auto'
+        } else {
+          div.style.top = 'calc(100% - 1rem)'
+          div.style.bottom = 'auto'
+        }
+      })
+      Doc.bind(box, 'mouseleave', () => div.remove())
+    }
   }
 
   bindUrlHandlers (ancestor: HTMLElement) {

@@ -408,56 +408,25 @@ export default class Doc {
   /*
    * formatBestRateElement formats a rate using the best available units and
    * updates the UI element. The ancestor should have descendents with data
-   * attributes [best-value, data-unit, data-denom].
+   * attributes [best-value, data-unit, data-unit-box, data-denom].
    */
-  static formatBestRateElement (ancestor: PageElement, atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>) {
-    Doc.formatBestValueElement(ancestor, atoms, ui, prefs)
+  static formatBestRateElement (ancestor: PageElement, assetID: number, atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>) {
+    Doc.formatBestValueElement(ancestor, assetID, atoms, ui, prefs)
     Doc.setText(ancestor, '[data-denom]', ui.feeRateDenom)
   }
 
   /*
    * formatBestRateElement formats a value using the best available units and
    * updates the UI element. The ancestor should have descendents with data
-   * attributes [best-value, data-unit]. This method binds a hovering unit
-   * selection menu to the data-unit element that allows the user to select
-   * whatever units they prefer.
+   * attributes [best-value, data-unit, data-unit-box].
    */
-  static formatBestValueElement (ancestor: PageElement, atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>) {
+  static formatBestValueElement (ancestor: PageElement, assetID: number, atoms: number, ui: UnitInfo, prefs?: Record<string, boolean>) {
     const [v, unit] = this.formatBestUnitsFourSigFigs(atoms, ui, prefs)
     Doc.setText(ancestor, '[data-value]', v)
     Doc.setText(ancestor, '[data-unit]', unit)
-    for (const el of Doc.applySelector(ancestor, '[data-unit]')) {
-      let div: PageElement
-      Doc.bind(el, 'mouseenter', () => {
-        const lyt = Doc.layoutMetrics(el)
-        div = document.createElement('div') as PageElement
-        div.classList.add('position-absolute', 'p-2')
-        document.body.appendChild(div)
-        const innerDiv = document.createElement('div') as PageElement
-        div.appendChild(innerDiv)
-        innerDiv.classList.add('body-bg', 'border')
-        const addRow = (unit: string, cFactor: number) => {
-          const row = document.createElement('div')
-          row.textContent = unit
-          innerDiv.appendChild(row)
-          row.classList.add('p-2', 'hoverbg', 'pointer')
-          Doc.bind(row, 'click', () => {
-            Doc.setText(ancestor, '[data-value]', Doc.formatFourSigFigs(atoms / cFactor, Math.round(Math.log10(cFactor))))
-            Doc.setText(ancestor, '[data-unit]', unit)
-          })
-        }
-        addRow(ui.conventional.unit, ui.conventional.conversionFactor)
-        for (const { unit, conversionFactor } of ui.denominations) addRow(unit, conversionFactor)
-        addRow(ui.atomicUnit, 1)
-        if (lyt.bodyTop > div.offsetHeight) div.style.top = `${lyt.bodyTop - div.offsetHeight + 1}px`
-        else div.style.top = `${lyt.bodyTop + lyt.height - 10}px`
-        div.style.left = `${lyt.bodyLeft - 20}px`
-        Doc.bind(div, 'mouseleave', () => div.remove())
-      })
-      Doc.bind(el, 'mouseleave', (e: MouseEvent) => {
-        if (!Doc.mouseInElement(e, div)) div.remove()
-      })
-    }
+    const span = Doc.safeSelector(ancestor, '[data-unit-box]')
+    span.dataset.atoms = String(atoms)
+    span.dataset.assetID = String(assetID)
   }
 
   static conventionalRateStep (rateStepEnc: number, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {

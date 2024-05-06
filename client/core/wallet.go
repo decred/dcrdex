@@ -281,6 +281,7 @@ func (w *xcWallet) state() *WalletState {
 	if w.connector.On() {
 		tokenApprovals = w.ApprovalStatus()
 	}
+
 	var feeState *FeeState
 	if feeStateI := w.feeState.Load(); feeStateI != nil {
 		feeState = feeStateI.(*FeeState)

@@ -765,7 +765,7 @@ export class WalletConfigForm {
         let date = input.value ? toUnixDate(new Date(input.value + 'T00:00')) : 0
         if (date < minDate) date = minDate
         else if (date > maxDate) date = maxDate
-        config[opt.key] = '' + date
+        config[opt.key] = String(date)
       } else if (input.value) {
         if (opt.repeatable && config[opt.key]) config[opt.key] += opt.repeatable + input.value
         else config[opt.key] = input.value

@@ -81,7 +81,7 @@ var (
 				Type:        walletTypeElectrum,
 				Tab:         "Electrum-Firo (external)",
 				Description: "Use an external Electrum-Firo Wallet",
-				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", false)...),
+				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", true)...),
 			},
 		},
 	}

@@ -387,8 +387,8 @@ func (t *trackedTrade) cacheRedemptionFeeSuggestion() {
 	// the wallet settings permit external API requests.
 	toWallet := t.wallets.toWallet
 	if t.readyToTick && toWallet.connected() {
-		if r := toWallet.feeRate(); r != 0 {
-			set(r)
+		if feeRate := toWallet.feeRate(); feeRate != 0 {
+			set(feeRate)
 			return
 		}
 	}
