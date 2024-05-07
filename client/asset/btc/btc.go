@@ -1841,10 +1841,8 @@ func (btc *baseWallet) feeRate(confTarget uint64) (uint64, error) {
 	// may use btc.fallbackFeeRate(), as in targetFeeRateWithFallback.
 	feeRate, err = btc.feeCache.rate(btc.ctx, btc.Network) // e.g. externalFeeRate
 	if err != nil {
-		if btc.cloneParams.Network != dex.Simnet {
-			btc.log.Errorf("Failed to get fee rate from external API: %v", err)
-		}
-		return 0, err
+		btc.log.Meter("feeRate.rate.fail", time.Hour).Errorf("Failed to get fee rate from external API: %v", err)
+		return 0, nil
 	}
 	if feeRate <= 0 || feeRate > btc.feeRateLimit() { // but fetcher shouldn't return <= 0 without error
 		return 0, fmt.Errorf("external fee rate %v exceeds configured limit", feeRate)

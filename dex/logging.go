@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
@@ -39,6 +41,7 @@ type Logger interface {
 	slog.Logger
 	SubLogger(name string) Logger
 	FileLogger(r *rotator.Rotator) Logger
+	Meter(callerID string, delay time.Duration) Logger
 }
 
 // LoggerMaker allows creation of new log subsystems with predefined levels.
@@ -56,6 +59,9 @@ type logger struct {
 	level   slog.Level
 	levels  map[string]slog.Level
 	backend *slog.Backend
+
+	meterMtx sync.Mutex
+	meters   map[string]time.Time
 }
 
 // SubLogger creates a new Logger for the subsystem with the given name. If name
@@ -88,6 +94,22 @@ func (lggr *logger) newLoggerWithBackend(backend *slog.Backend, name string) *lo
 		levels:  lggr.levels,
 		backend: backend,
 	}
+}
+
+// Meter enforces a time delay on logging. The first call to a metered logger
+// always logs. Subsequent calls for the same callerID are ignored until the
+// delay is surpassed.
+func (log *logger) Meter(callerID string, delay time.Duration) Logger {
+	log.meterMtx.Lock()
+	defer log.meterMtx.Unlock()
+	if log.meters == nil {
+		log.meters = make(map[string]time.Time)
+	}
+	if lastLog, exists := log.meters[callerID]; exists && time.Since(lastLog) < delay {
+		return Disabled
+	}
+	log.meters[callerID] = time.Now()
+	return log
 }
 
 // LogRotator creates a file logger that rotates up to 8 files of 32 MiB each.

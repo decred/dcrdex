@@ -1288,6 +1288,9 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	dcr.log.Debugf("Retrieving fee rate from external fee oracle for %d target blocks", confTarget)
 	dcrPerKB, err := fetchFeeFromOracle(dcr.ctx, dcr.network, confTarget)
 	if err != nil {
+		// Just log it and return zero. If we return an error, it's just logged
+		// anyway, and we want to meter these logs.
+		dcr.log.Meter("feeRate.fetch.fail", time.Hour).Errorf("external fee rate API failure: %v", err)
 		// Flag the oracle as failing so subsequent requests don't also try and
 		// fail after the request timeout. Remove the flag after a bit.
 		dcr.oracleFailing = true
@@ -1296,7 +1299,7 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 			dcr.oracleFailing = false
 			dcr.oracleFeesMtx.Unlock()
 		})
-		return 0, fmt.Errorf("external fee rate API failure: %v", err)
+		return 0, nil
 	}
 	if dcrPerKB <= 0 {
 		return 0, fmt.Errorf("invalid fee rate %f from fee oracle", dcrPerKB)
