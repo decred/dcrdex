@@ -211,7 +211,7 @@ type AssetBackend struct {
 	*baseBackend
 	assetID uint32
 	log     dex.Logger
-	atomize func(*big.Int) uint64
+	atomize func(*big.Int) uint64 // atomize takes floor. use for values, not fee rates
 
 	// The backend provides block notification channels through the BlockChannel
 	// method.

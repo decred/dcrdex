@@ -3592,7 +3592,7 @@ func (w *baseWallet) swapOrRedemptionFeesPaid(
 	if !found {
 		return 0, nil, fmt.Errorf("secret hash %x not found in transaction", secretHash)
 	}
-	return
+	return dexeth.WeiToGweiCeil(bigFees), secretHashes, nil
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified
