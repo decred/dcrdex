@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/decred/slog"
+	"github.com/jrick/logrotate/rotator"
 )
 
 // Disabled is a Logger that will never output anything.
@@ -36,6 +38,7 @@ const (
 type Logger interface {
 	slog.Logger
 	SubLogger(name string) Logger
+	FileLogger(r *rotator.Rotator) Logger
 }
 
 // LoggerMaker allows creation of new log subsystems with predefined levels.
@@ -60,20 +63,42 @@ type logger struct {
 // used.
 func (lggr *logger) SubLogger(name string) Logger {
 	combinedName := fmt.Sprintf("%s[%s]", lggr.name, name)
-	newLggr := lggr.backend.Logger(combinedName)
+	return lggr.newLoggerWithBackend(lggr.backend, combinedName)
+}
+
+// FileLogger creates a logger that logs to a file rotator. Subloggers will also
+// log to the file only.
+func (lggr *logger) FileLogger(r *rotator.Rotator) Logger {
+	return lggr.newLoggerWithBackend(slog.NewBackend(r), lggr.name)
+}
+
+func (lggr *logger) newLoggerWithBackend(backend *slog.Backend, name string) *logger {
 	level := lggr.level
 	// If name is in the levels map, use that level.
 	if lvl, ok := lggr.levels[name]; ok {
 		level = lvl
 	}
+
+	newLggr := backend.Logger(name)
 	newLggr.SetLevel(level)
 	return &logger{
 		Logger:  newLggr,
-		name:    combinedName,
+		name:    name,
 		level:   level,
 		levels:  lggr.levels,
-		backend: lggr.backend,
+		backend: backend,
 	}
+}
+
+// LogRotator creates a file logger that rotates up to 8 files of 32 MiB each.
+func LogRotator(dir, name string) (*rotator.Rotator, error) {
+	const maxLogRolls = 8
+	if err := os.MkdirAll(dir, 0744); err != nil {
+		return nil, fmt.Errorf("error creating log directory: %w", err)
+	}
+
+	logFilename := filepath.Join(dir, name)
+	return rotator.New(logFilename, 32*1024, false, maxLogRolls)
 }
 
 func inUTC() slog.BackendOption {

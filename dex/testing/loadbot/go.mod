@@ -4,6 +4,8 @@ go 1.19
 
 replace decred.org/dcrdex => ../../../
 
+replace github.com/dcrlabs/ltcwallet => github.com/buck54321/btcwallet v0.12.1-0.20240508072722-6f80168cdfef
+
 require (
 	decred.org/dcrdex v0.0.0-20230206134810-8a482dd7caf1
 	github.com/Shopify/toxiproxy/v2 v2.4.0

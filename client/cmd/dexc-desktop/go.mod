@@ -4,6 +4,8 @@ go 1.19
 
 replace decred.org/dcrdex => ../../..
 
+replace github.com/dcrlabs/ltcwallet => github.com/buck54321/btcwallet v0.12.1-0.20240508072722-6f80168cdfef
+
 require (
 	decred.org/dcrdex v0.6.3
 	fyne.io/systray v1.10.1-0.20230403195833-7dc3c09283d6

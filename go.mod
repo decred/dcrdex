@@ -2,6 +2,8 @@ module decred.org/dcrdex
 
 go 1.19
 
+replace github.com/dcrlabs/ltcwallet => github.com/buck54321/btcwallet v0.12.1-0.20240508072722-6f80168cdfef
+
 require (
 	decred.org/dcrwallet/v3 v3.0.1
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
