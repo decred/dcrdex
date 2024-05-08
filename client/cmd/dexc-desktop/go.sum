@@ -173,8 +173,6 @@ github.com/btcsuite/snappy-go v1.0.0/go.mod h1:8woku9dyThutzjeg+3xrA5iCpBRH8XEEg
 github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792 h1:R8vQdOQdZ9Y3SkEwmHoWBmX1DNXhXZqlTpq6s4tyJGc=
 github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792/go.mod h1:ghJtEyQwv5/p4Mg4C0fgbePVuGr935/5ddU9Z3TmDRY=
 github.com/btcsuite/winsvc v1.0.0/go.mod h1:jsenWakMcC0zFBFurPLEAyrnc/teJEM1O46fmI40EZs=
-github.com/buck54321/btcwallet v0.12.1-0.20240508072722-6f80168cdfef h1:UzAQwG+j8lexzso1vp6CrJTrIzeQ7+0L/KwcOBHZ3Vw=
-github.com/buck54321/btcwallet v0.12.1-0.20240508072722-6f80168cdfef/go.mod h1:UwMkslDKQGQx7UCGjolqPKulzX3YQxMhDvVZ0KukIQk=
 github.com/bufbuild/buf v0.37.0/go.mod h1:lQ1m2HkIaGOFba6w/aC3KYBHhKEOESP3gaAEpS3dAFM=
 github.com/casbin/casbin/v2 v2.1.2/go.mod h1:YcPU1XXisHhLzuxH9coDNf2FbKpjGlbCg3n9yuLkIJQ=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
@@ -253,6 +251,8 @@ github.com/dchest/siphash v1.2.3/go.mod h1:0NvQU092bT0ipiFN++/rXm69QG9tVxLAlQHIX
 github.com/dcrlabs/bchwallet v0.0.0-20240114115928-2a995d024eed/go.mod h1:dX7SZgs+dmGL56e6KHn+MktfriF/aM2qI4yYK56ySEQ=
 github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be h1:F61HTz77YatFuMgleG4Hp4QpXWJgjSG+S72YlXD4jPA=
 github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be/go.mod h1:Km7vMslEkg88jIFE2TA/XX7kAvXvnsoGTXN9ktYSi98=
+github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a h1:KJtx5FcK8oXCiXGoBpzQvGtRnhC1Q3UFKh7UVQ8YKSI=
+github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a/go.mod h1:UwMkslDKQGQx7UCGjolqPKulzX3YQxMhDvVZ0KukIQk=
 github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095 h1:oGXgq+wZ2FvBzBTqXnOJ+ZP6f79zhfJNd46nDkJaUdU=
 github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095/go.mod h1:aymH7e5PUsdsLagAIIMbpyJIff0Kv8/BJg7nolIVJbU=
 github.com/deckarep/golang-set/v2 v2.1.0 h1:g47V4Or+DUdzbs8FxCCmgb6VYd+ptPAngjM6dtGktsI=

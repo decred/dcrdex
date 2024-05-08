@@ -4,15 +4,13 @@ go 1.19
 
 replace decred.org/dcrdex => ../../../
 
-replace github.com/dcrlabs/ltcwallet => github.com/buck54321/btcwallet v0.12.1-0.20240508072722-6f80168cdfef
-
 require (
 	decred.org/dcrdex v0.0.0-20230206134810-8a482dd7caf1
 	github.com/Shopify/toxiproxy/v2 v2.4.0
 )
 
 require (
-	github.com/dcrlabs/ltcwallet v0.0.0-20240510140852-5b5906621822 // indirect
+	github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a // indirect
 	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
 	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2 // indirect
 )

@@ -2,8 +2,6 @@ module decred.org/dcrdex
 
 go 1.19
 
-replace github.com/dcrlabs/ltcwallet => github.com/buck54321/btcwallet v0.12.1-0.20240508072722-6f80168cdfef
-
 require (
 	decred.org/dcrwallet/v3 v3.0.1
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
@@ -20,7 +18,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
 	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be
-	github.com/dcrlabs/ltcwallet v0.0.0-20240510140852-5b5906621822
+	github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a
 	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095
 	github.com/decred/base58 v1.0.5
 	github.com/decred/dcrd/addrmgr/v2 v2.0.2
