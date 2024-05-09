@@ -361,10 +361,15 @@ func (t *Tatanka) replySubscription(cl tanka.Sender, topic tanka.Topic) {
 				return
 			}
 
-			t.send(cl, mj.MustNotification(mj.RouteRates, &mj.RateMessage{
+			reply := mj.MustNotification(mj.RouteRates, &mj.RateMessage{
 				Topic: mj.TopicFiatRate,
 				Rates: rates,
-			}))
+			})
+
+			if err := t.send(cl, reply); err != nil {
+				peerID := cl.PeerID()
+				t.log.Errorf("error sending result to %q: %v", dex.Bytes(peerID[:]), err)
+			}
 		}
 	}
 }
