@@ -24,19 +24,21 @@ const (
 // Oracle manages and retrieves fiat rate information from all enabled rate
 // sources.
 type Oracle struct {
-	log               dex.Logger
-	sources           []*source
-	ratesMtx          sync.RWMutex
-	rates             map[string]*FiatRateInfo
-	rateBroadcastChan chan map[string]*FiatRateInfo
+	log      dex.Logger
+	sources  []*source
+	ratesMtx sync.RWMutex
+	rates    map[string]*FiatRateInfo
+
+	listenersMtx sync.RWMutex
+	listeners    map[string]chan<- map[string]*FiatRateInfo
 }
 
 func NewFiatOracle(cfg Config, tickerSymbols string, log dex.Logger) (*Oracle, error) {
 	fiatOracle := &Oracle{
-		log:               log,
-		rates:             make(map[string]*FiatRateInfo),
-		sources:           fiatSources(cfg),
-		rateBroadcastChan: make(chan map[string]*FiatRateInfo),
+		log:       log,
+		rates:     make(map[string]*FiatRateInfo),
+		sources:   fiatSources(cfg),
+		listeners: make(map[string]chan<- map[string]*FiatRateInfo),
 	}
 
 	tickers := strings.Split(tickerSymbols, ",")
@@ -57,11 +59,6 @@ func NewFiatOracle(cfg Config, tickerSymbols string, log dex.Logger) (*Oracle, e
 	return fiatOracle, nil
 }
 
-// BroadcastChan returns a read only channel to listen for latest rates.
-func (o *Oracle) BroadcastChan() <-chan map[string]*FiatRateInfo {
-	return o.rateBroadcastChan
-}
-
 // tickers retrieves all tickers that data can be fetched for.
 func (o *Oracle) tickers() []string {
 	o.ratesMtx.RLock()
@@ -73,12 +70,26 @@ func (o *Oracle) tickers() []string {
 	return tickers
 }
 
+// Rates returns the current fiat rates. Returns an empty map if there are no
+// valid rates.
+func (o *Oracle) Rates() map[string]*FiatRateInfo {
+	o.ratesMtx.Lock()
+	defer o.ratesMtx.Unlock()
+	rates := make(map[string]*FiatRateInfo, len(o.rates))
+	for ticker, rate := range o.rates {
+		if rate.Value > 0 && !rate.IsExpired() {
+			r := *rate
+			rates[ticker] = &r
+		}
+	}
+	return rates
+}
+
 // Run starts goroutines that refresh fiat rates every source.refreshInterval.
 // This should be called in a goroutine as it's blocking.
 func (o *Oracle) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	var sourcesEnabled int
-	initializedWithTicker := o.hasTicker()
 	for i := range o.sources {
 		fiatSource := o.sources[i]
 		if fiatSource.isDisabled() {
@@ -88,10 +99,6 @@ func (o *Oracle) Run(ctx context.Context) {
 
 		o.fetchFromSource(ctx, fiatSource, &wg)
 		sourcesEnabled++
-
-		if !initializedWithTicker {
-			continue
-		}
 
 		// Fetch rates now.
 		newRates, err := fiatSource.getRates(ctx, o.tickers(), o.log)
@@ -106,10 +113,8 @@ func (o *Oracle) Run(ctx context.Context) {
 		fiatSource.mtx.Unlock()
 	}
 
-	if initializedWithTicker {
-		// Calculate average fiat rate now.
-		o.calculateAverageRate(ctx, &wg)
-	}
+	// Calculate average fiat rate now.
+	o.calculateAverageRate()
 
 	if sourcesEnabled > 0 {
 		// Start a goroutine to generate an average fiat rate based on fresh
@@ -126,30 +131,69 @@ func (o *Oracle) Run(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					if !o.hasTicker() {
-						continue // nothing to do
+					reActivatedSources := o.calculateAverageRate()
+					for _, index := range reActivatedSources {
+						s := o.sources[index]
+						// Start a new goroutine for this source.
+						o.fetchFromSource(ctx, s, &wg)
 					}
-
-					o.calculateAverageRate(ctx, &wg)
 				}
 			}
 		}()
 	}
 
 	wg.Wait()
-	close(o.rateBroadcastChan)
+
+	o.listenersMtx.Lock()
+	for id, rateChan := range o.listeners {
+		close(rateChan) // we are done sending fiat rates
+		delete(o.listeners, id)
+	}
+	o.listenersMtx.Unlock()
+}
+
+// AddFiatRateListener adds a new fiat rate listener for the provided uniqueID.
+// Overrides existing rateChan if uniqueID already exists.
+func (o *Oracle) AddFiatRateListener(uniqueID string, ratesChan chan<- map[string]*FiatRateInfo) {
+	o.listenersMtx.Lock()
+	defer o.listenersMtx.Unlock()
+	o.listeners[uniqueID] = ratesChan
+}
+
+// RemoveFiatRateListener removes a fiat rate listener. no-op if there's no
+// listener for the provided uniqueID. The fiat rate chan will be closed to
+// signal to readers that we are done sending.
+func (o *Oracle) RemoveFiatRateListener(uniqueID string) {
+	o.listenersMtx.Lock()
+	defer o.listenersMtx.Unlock()
+	rateChan, ok := o.listeners[uniqueID]
+	if !ok {
+		return
+	}
+
+	delete(o.listeners, uniqueID)
+	close(rateChan) // we are done sending.
+}
+
+// notifyListeners sends the provided rates to all listener.
+func (o *Oracle) notifyListeners(rates map[string]*FiatRateInfo) {
+	o.listenersMtx.RLock()
+	defer o.listenersMtx.RUnlock()
+	for _, rateChan := range o.listeners {
+		rateChan <- rates
+	}
 }
 
 // calculateAverageRate is a shared function to support fiat average rate
 // calculations before and after averageRateRefreshInterval.
-func (o *Oracle) calculateAverageRate(ctx context.Context, wg *sync.WaitGroup) {
+func (o *Oracle) calculateAverageRate() []int {
+	var reActivatedSourceIndexes []int
 	newRatesInfo := make(map[string]*fiatRateAndSourceCount)
 	for i := range o.sources {
 		s := o.sources[i]
 		if s.isDisabled() {
 			if s.checkIfSourceCanReactivate() {
-				// Start a new goroutine for this source.
-				o.fetchFromSource(ctx, s, wg)
+				reActivatedSourceIndexes = append(reActivatedSourceIndexes, i)
 			}
 			continue
 		}
@@ -178,11 +222,10 @@ func (o *Oracle) calculateAverageRate(ctx context.Context, wg *sync.WaitGroup) {
 	broadcastRates := make(map[string]*FiatRateInfo)
 	o.ratesMtx.Lock()
 	for ticker := range o.rates {
-		oldRate := o.rates[ticker].Value
 		rateInfo := newRatesInfo[ticker]
 		if rateInfo != nil {
 			newRate := rateInfo.totalFiatRate / float64(rateInfo.sources)
-			if oldRate != newRate && newRate > 0 {
+			if newRate > 0 {
 				o.rates[ticker].Value = newRate
 				o.rates[ticker].LastUpdate = now
 				rate := *o.rates[ticker] // copy
@@ -193,14 +236,10 @@ func (o *Oracle) calculateAverageRate(ctx context.Context, wg *sync.WaitGroup) {
 	o.ratesMtx.Unlock()
 
 	if len(broadcastRates) > 0 {
-		o.rateBroadcastChan <- broadcastRates
+		o.notifyListeners(broadcastRates)
 	}
-}
 
-func (o *Oracle) hasTicker() bool {
-	o.ratesMtx.RLock()
-	defer o.ratesMtx.RUnlock()
-	return len(o.rates) != 0
+	return reActivatedSourceIndexes
 }
 
 // fetchFromSource starts a goroutine that retrieves fiat rate from the provided
@@ -217,7 +256,7 @@ func (o *Oracle) fetchFromSource(ctx context.Context, s *source, wg *sync.WaitGr
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if !o.hasTicker() || s.isDisabled() { // nothing to fetch.
+				if s.isDisabled() { // nothing to fetch.
 					continue
 				}
 

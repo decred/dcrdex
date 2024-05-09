@@ -29,7 +29,13 @@ import (
 	"golang.org/x/text/language"
 )
 
-const version = 0
+const (
+	version = 0
+
+	// tatankaUniqueID is the unique ID used to register a Tatanka as a fiat
+	// rate listener.
+	tatankaUniqueID = "Tatanka"
+)
 
 // remoteTatanka is a remote tatanka node. A remote tatanka node can either
 // be outgoing (whitelist loop) or incoming via handleInboundTatankaConnect.
@@ -116,6 +122,7 @@ type Tatanka struct {
 	tatankas    map[tanka.PeerID]*remoteTatanka
 
 	fiatRateOracle *fiatrates.Oracle
+	fiatRateChan   chan map[string]*fiatrates.FiatRateInfo
 }
 
 // Config is the configuration of the Tatanka.
@@ -220,6 +227,10 @@ func New(cfg *Config) (*Tatanka, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error initializing fiat oracle: %w", err)
 		}
+
+		// Register tatanka as a listener
+		t.fiatRateChan = make(chan map[string]*fiatrates.FiatRateInfo)
+		t.fiatRateOracle.AddFiatRateListener(tatankaUniqueID, t.fiatRateChan)
 	}
 
 	t.nets.Store(nets)
@@ -722,19 +733,24 @@ func (t *Tatanka) clientDisconnected(peerID tanka.PeerID) {
 	}
 }
 
-// broadcastRates sends market rates to all fiat rate subscribers every
-// t.fiatRateBroadcastInterval. This method blocks and must be called from a
-// goroutine.
+// broadcastRates sends market rates to all fiat rate subscribers once new rates
+// are received from the fiat oracle.
 func (t *Tatanka) broadcastRates() {
-	broadcastChan := t.fiatRateOracle.BroadcastChan()
 	for {
 		select {
 		case <-t.ctx.Done():
 			return
-		case rates := <-broadcastChan:
+		case rates, ok := <-t.fiatRateChan:
+			if !ok {
+				t.log.Debug("Tatanka stopped listening for fiat rates.")
+				return
+			}
+
 			t.clientMtx.RLock()
-			defer t.clientMtx.RUnlock()
-			if topic := t.topics[mj.TopicFiatRate]; topic != nil && len(topic.subscribers) > 0 {
+			topic := t.topics[mj.TopicFiatRate]
+			t.clientMtx.RUnlock()
+
+			if topic != nil && len(topic.subscribers) > 0 {
 				t.batchSend(topic.subscribers, mj.MustNotification(mj.RouteRates, &mj.RateMessage{
 					Topic: mj.TopicFiatRate,
 					Rates: rates,

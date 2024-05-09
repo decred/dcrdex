@@ -96,3 +96,7 @@ type FiatRateInfo struct {
 	Value      float64
 	LastUpdate time.Time
 }
+
+func (f *FiatRateInfo) IsExpired() bool {
+	return time.Since(f.LastUpdate) > FiatRateDataExpiry
+}
