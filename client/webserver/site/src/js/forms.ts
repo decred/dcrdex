@@ -887,7 +887,7 @@ export class ConfirmRegistrationForm {
     let form: any
     let url: string
 
-    if (xc.viewOnly || !app().exchanges[xc.host]) {
+    if (!app().exchanges[xc.host] || app().exchanges[xc.host].viewOnly) {
       form = {
         addr: dexAddr,
         cert: certFile,
@@ -1264,7 +1264,7 @@ export class WalletWaitForm {
   page: Record<string, PageElement>
   assetID: number
   parentID?: number
-  host: string
+  xc: Exchange
   bondAsset: BondAsset
   progressCache: ProgressPoint[]
   progressed: boolean
@@ -1295,7 +1295,7 @@ export class WalletWaitForm {
 
   /* setExchange sets the exchange for which the fee is being paid. */
   setExchange (xc: Exchange) {
-    this.host = xc.host
+    this.xc = xc
   }
 
   /* setWallet must be called before showing the WalletWaitForm. */
@@ -1308,10 +1308,9 @@ export class WalletWaitForm {
     this.parentAssetSynced = false
     const page = this.page
     const asset = app().assets[assetID]
-    const xc = app().exchanges[this.host]
     const { symbol, unitInfo: ui, wallet: { balance: bal, address, synced, syncProgress }, token } = asset
     this.parentID = token?.parentID
-    const bondAsset = this.bondAsset = xc.bondAssets[symbol]
+    const bondAsset = this.bondAsset = this.xc.bondAssets[symbol]
 
     const symbolize = (el: PageElement, asset: SupportedAsset) => {
       Doc.empty(el)

@@ -30,7 +30,7 @@ export default class RegistrationPage extends BasePage {
   body: HTMLElement
   data: RegistrationPageData
   pwCache: PasswordCache
-  host: string
+  xc: Exchange
   page: Record<string, PageElement>
   loginForm: LoginForm
   appPassResetForm: AppPassResetForm
@@ -110,7 +110,7 @@ export default class RegistrationPage extends BasePage {
       const asset = app().assets[assetID]
       const wallet = asset.wallet
       if (wallet) {
-        const bondAsset = this.regAssetForm.xc.bondAssets[asset.symbol]
+        const bondAsset = this.xc.bondAssets[asset.symbol]
         const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
         this.confirmRegisterForm.setAsset(assetID, tier, bondsFeeBuffer)
         if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
@@ -171,7 +171,7 @@ export default class RegistrationPage extends BasePage {
   }
 
   async requestFeepayment (oldForm: HTMLElement, xc: Exchange, certFile: string) {
-    this.host = xc.host
+    this.xc = xc
     this.confirmRegisterForm.setExchange(xc, certFile)
     this.walletWaitForm.setExchange(xc)
     this.regAssetForm.setExchange(xc, certFile)
@@ -225,9 +225,8 @@ export default class RegistrationPage extends BasePage {
     if (!user) return
     const page = this.page
     const asset = user.assets[assetID]
-    const xc = app().exchanges[this.host]
     const wallet = asset.wallet
-    const bondAmt = xc.bondAssets[asset.symbol].amount
+    const bondAmt = this.xc.bondAssets[asset.symbol].amount
 
     const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
     this.walletWaitForm.setWallet(assetID, bondsFeeBuffer, tier)
