@@ -1,0 +1,6 @@
+<resources>
+    <!-- Base application theme. -->
+    <style name="Base.Theme.BisonWallet" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/topBarBlue</item>
+    </style>
+</resources>
