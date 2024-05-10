@@ -38,7 +38,7 @@ func mainErr() error {
 	flag.BoolVar(&simnet, "simnet", false, "use simnet")
 	flag.BoolVar(&harness, "harness", false, "use filepath for for simnet harness")
 	flag.BoolVar(&debug, "debug", false, "extra logging")
-	flag.StringVar(&cfgPath, "path to the dex configuration file", defaultConfigPath, "path to configuration file")
+	flag.StringVar(&cfgPath, "path", defaultConfigPath, "path to configuration file")
 	flag.Parse()
 
 	net := dex.Mainnet
