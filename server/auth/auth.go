@@ -1459,6 +1459,38 @@ func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (*latestMatchO
 	return latestMatches, latestPreimageResults, orderOutcomes, nil
 }
 
+// MatchOutcome is a JSON-friendly version of db.MatchOutcome.
+type MatchOutcome struct {
+	ID     dex.Bytes `json:"matchID"`
+	Status string    `json:"status"`
+	Fail   bool      `json:"failed"`
+	Stamp  int64     `json:"stamp"`
+	Value  uint64    `json:"value"`
+	BaseID uint32    `json:"baseID"`
+	Quote  uint32    `json:"quoteID"`
+}
+
+// AccountMatchOutcomesN generates a list of recent match outcomes for a user.
+func (auth *AuthManager) AccountMatchOutcomesN(user account.AccountID, n int) ([]*MatchOutcome, error) {
+	dbOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, n)
+	if err != nil {
+		return nil, err
+	}
+	outcomes := make([]*MatchOutcome, len(dbOutcomes))
+	for i, o := range dbOutcomes {
+		outcomes[i] = &MatchOutcome{
+			ID:     o.ID[:],
+			Status: o.Status.String(),
+			Fail:   o.Fail,
+			Stamp:  o.Time,
+			Value:  o.Value,
+			BaseID: o.Base,
+			Quote:  o.Quote,
+		}
+	}
+	return outcomes, nil
+}
+
 // loadUserScore computes the user's current score from order and swap data
 // retrieved from the DB. Use this instead of userScore if the user is offline.
 func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/db"
 	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/market"
@@ -69,6 +71,7 @@ type SvrCore interface {
 	SuspendMarket(name string, tSusp time.Time, persistBooks bool) (*market.SuspendEpoch, error)
 	ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time, err error)
 	ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error)
+	AccountMatchOutcomesN(user account.AccountID, n int) ([]*auth.MatchOutcome, error)
 	BookOrders(base, quote uint32) (orders []*order.LimitOrder, err error)
 	EpochOrders(base, quote uint32) (orders []order.Order, err error)
 	MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*dexsrv.MatchData) error) (int, error)
@@ -90,6 +93,7 @@ type SrvConfig struct {
 	Core            SvrCore
 	Addr, Cert, Key string
 	AuthSHA         [32]byte
+	NoTLS           bool
 }
 
 // UseLogger sets the logger for the admin package.
@@ -104,15 +108,18 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		return nil, fmt.Errorf("missing certificates")
 	}
 
-	keypair, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
-	if err != nil {
-		return nil, err
-	}
+	var tlsConfig *tls.Config
+	if !cfg.NoTLS {
+		keypair, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
+		if err != nil {
+			return nil, err
+		}
 
-	// Prepare the TLS configuration.
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{keypair},
-		MinVersion:   tls.VersionTLS12,
+		// Prepare the TLS configuration.
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{keypair},
+			MinVersion:   tls.VersionTLS12,
+		}
 	}
 
 	// Create an HTTP router.
@@ -147,6 +154,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/enabledataapi/{"+yesKey+"}", s.apiEnableDataAPI)
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
+			rm.Get("/outcomes", s.apiMatchOutcomes)
 			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
 		})
@@ -173,7 +181,13 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 // Run starts the server.
 func (s *Server) Run(ctx context.Context) {
 	// Create listener.
-	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
+	var listener net.Listener
+	var err error
+	if s.tlsConfig != nil {
+		listener, err = tls.Listen("tcp", s.addr, s.tlsConfig)
+	} else {
+		listener, err = net.Listen("tcp", s.addr)
+	}
 	if err != nil {
 		log.Errorf("can't listen on %s. admin server quitting: %v", s.addr, err)
 		return

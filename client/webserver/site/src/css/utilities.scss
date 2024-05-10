@@ -200,6 +200,11 @@ div.clear {
   user-select: all;
 }
 
+.overflow-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .user-select-none {
   user-select: none;
 }

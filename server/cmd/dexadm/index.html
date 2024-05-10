@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+  <!-- <link rel="icon" href="/img/favicon.png?v=AK4XS4"> -->
+  <meta name="description" content="DCRDEX Admin Server UI">
+  <title>DCRDEX Admin UI</title>
+  <style>
+    body {
+      position: absolute;
+      inset: 0 0 0 0;
+      background-color: rgb(19, 26, 37);
+      display: flex;
+      justify-content: stretch;
+      color: #dadada;
+      font-size: 16px;
+    }
+
+    input {
+      padding: 5px 10px;
+      font-size: 18px;
+      background-color: black;
+      border: 1px solid #555;
+      margin: 0 0.5rem;
+      color: #dadada;
+    }
+
+    input[type=datetime-local] {
+      background-color: white;
+      color: #222;
+    }
+
+    input.short {
+      width: 4rem;
+    }
+
+    input.long {
+      width: 34rem;
+    }
+
+    button {
+      padding: 0.25rem 0.5rem;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    h3 {
+      font-size: 22px;
+      margin: 0 0 0.5rem 0;
+    }
+
+    .d-none {
+      display: none;
+    }
+
+    .w-50 {
+      width: 50%;
+    }
+
+    .border {
+      border: 1px solid #dadada;
+    }
+
+    .border-bottom {
+      border-bottom: 1px solid #dadada;
+    }
+
+    .border-left {
+      border-left: 1px solid #dadada;
+    }
+
+    .mono {
+      font-family: monospace;
+    }
+
+    .errcolor {
+      color: rgb(202, 90, 90);
+    }
+
+    .overflow-y-auto {
+      overflow-y: auto;
+    }
+
+    .overflow-auto {
+      overflow: auto;
+    }
+
+    .flex-between {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .bold {
+      font-weight: bold;
+    }
+
+    .p-1 {
+      padding: 0.25rem;
+    }
+
+    .p-2 {
+      padding: 0.5rem;
+    }
+
+    .p-3 {
+      padding: 1rem;
+    }
+
+    .mb-2 {
+      margin-bottom: 0.5rem;
+    }
+
+    .ml-2 {
+      margin-left: 0.5rem;
+    }
+
+    .pointer {
+      cursor: pointer;
+    }
+
+    .hoverbg:hover {
+      background-color: #444;
+    }
+
+    .fs16 {
+      font-size: 16px;
+    }
+
+    .fs18 {
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="w-50 fs18 overflow-y-auto">
+    <div class="p-3 border-bottom">
+      <h3>⚙️ View Config</h3>
+      <button id=configBttn>View</button>
+    </div>
+    <div class="p-3 border-bottom">
+      <h3>🪙 Assets</h3>
+      <div class="mb-2">Symbol: <input type="text" id=assetInput class="short"></div>
+      <button id=assetBttn class="mb-2">Describe</button>
+      <div>Set fee scale: <input type=number id=feeScaleInput> <button id=feeScaleBttn>Set</button></div>
+    </div>
+    <div class="p-3 border-bottom">
+      <h3>📋 List Accounts</h3>
+      <button id=listAccountsBttn>List</button>
+    </div>
+    <div class="p-3 border-bottom">
+      <h3>👨‍🌾 Account</h3>
+      <div class="mb-2">Account ID <input type=text id=accountIDInput class="long"></div>
+      <div class="mb-2">
+        <button id=accountInfoBttn>Info</button> <button id=accountOutcomesBttn class="ml-2">Recent Outcomes</button>
+      </div>
+      <div class="mb-2">
+        Forgive match:
+        <input type=text id=forgiveMatchIDInput class=long>
+        <button id=forgiveMatchBttn>Forgive</button>
+      </div>
+      <div>
+        Send message:
+        <input type=text id=notifyAccountInput class="long">
+        <button id=notifyAccountBttn>Notify</button>
+      </div>
+    </div>
+    <div class="p-3 border-bottom">
+      <h3>🎙️ Broadcast Message</h3>
+      <div class="mb-2">Message: <input type=text id=broadcastInput class="long"> <button id=broadcastBttn class="ml-2">Broadcast</button></div>
+    </div>
+    <div class="p-3 border-bottom">
+      <h3>⚖️ Markets</h3>
+      <button id=viewMarketsBttn class="mb-2">View All</button>
+      <div class="mb-3">
+        Market ID:
+        <input type=text id=marketIDInput class="short mb-2">
+        <div class="mb-2">
+          <button id=marketInfoBttn>Info</button>
+          <button id=marketBookBttn class="ml-2">Order Book</button>
+          <button id=marketEpochBttn class="ml-2">EpochOrders</button>
+        </div>
+        <div class="mb-2">
+          <button id=marketMatchesBttn>Matches</button>
+          <input type=checkbox id="includeInactiveMatches"> <label for=includeInactiveMatches>include inactive matches</label>
+        </div>
+        <div class="mb-2">
+          <button id=suspendBttn class="ml-2">Suspend</button>
+          <input type="datetime-local" id=suspendTimeInput class="d-none">
+          <input type=checkbox id="suspendTimeCheckbox"> <label for=includeInactiveMatches>set time |</label>
+          <input type=checkbox id="persistBook" checked> <label for=includeInactiveMatches>persist order book</label>
+        </div>
+        <div>
+          <button id=resumeBttn class="ml-2">Unsuspend</button>
+          <input type="datetime-local" id=unsuspendTimeInput class="d-none">
+          <input type=checkbox id="unsuspendTimeCheckbox"> <label for=includeInactiveMatches>set time</label>
+        </div>
+      </div>
+    </div>
+    <div class="p-3 border-bottom">
+      <h3>🎟️ Generate Pre-paid Bonds</h3>
+      <div class="mb-2">Number: <input type=number id=prepaidBondCountInput class="short" step=1 value=1></div>
+      <div class="mb-2">Strength: <input type=number id=prepaidBondStrengthInput class="short" step=1 value=1></div>
+      <div class="mb-2">Days: <input type=number id=prepaidBondDaysInput class="short" step=1 value=180></div>
+      <div><button id=generatePrepaidBondsBttn class="ml-2">Generate</button></div>
+    </div>
+  </div>
+
+  <div id=responses class="overflow-auto border-left w-50 fs16">
+    <div id=responseTmpl class="p-2 border-bottom">
+      <div class="flex-between fs18">
+        <div data-tmpl=path></div>
+        <div data-tmpl=close class="bold p-1 pointer hoverbg">X</div>
+      </div>
+      <pre data-tmpl=response class="mono"></pre>
+    </div>
+  </div>
+
+<script src="/script.js"></script>
+</body>
+</html>
