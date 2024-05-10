@@ -9590,12 +9590,9 @@ func TestParseCert(t *testing.T) {
 	if !bytes.Equal(cert, byteCert) {
 		t.Fatalf("byte cert note returned unmodified. expected %x, got %x", byteCert, cert)
 	}
-	cert, err = parseCert("dex-test.ssgen.io:7232", []byte(nil), dex.Testnet)
+	_, err = parseCert("bison.exchange:17232", []byte(nil), dex.Testnet)
 	if err != nil {
 		t.Fatalf("CertStore cert error: %v", err)
-	}
-	if len(cert) == 0 {
-		t.Fatalf("no cert returned from cert store")
 	}
 }
 

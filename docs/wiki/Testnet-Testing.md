@@ -136,9 +136,8 @@ specified, the certificate is typically located at `~/.dcrwallet/rpc.cert`.
 
 ## Get the Testnet Server TLS Certificate
 
-There is a Decred testnet server at dex-test.ssgen.io:7232. As part of
-the registration process, you'll need to supply the TLS certificate to the client.
-The certificate can be found [here](files/dex-test.ssgen.io.cert).
+There is a Decred testnet server at bison.exchange:17232. You do not need to
+provide a certificate.
 
 ## Start the Client
 

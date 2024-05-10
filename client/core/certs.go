@@ -23,24 +23,6 @@ wtXxBmKZLaFsxKCm7w==
 -----END CERTIFICATE-----
 `)
 
-var dexTestSSGenCert = []byte(`-----BEGIN CERTIFICATE-----
-MIICjDCCAe2gAwIBAgIRALNN7hzFBw++oKHvHANfaC4wCgYIKoZIzj0EAwQwNjEi
-MCAGA1UEChMZZGNyZGV4IGF1dG9nZW5lcmF0ZWQgY2VydDEQMA4GA1UEAxMHZGV4
-dGVzdDAeFw0yMDAyMjAyMjExNDFaFw0zMDAyMTgyMjExNDFaMDYxIjAgBgNVBAoT
-GWRjcmRleCBhdXRvZ2VuZXJhdGVkIGNlcnQxEDAOBgNVBAMTB2RleHRlc3QwgZsw
-EAYHKoZIzj0CAQYFK4EEACMDgYYABAFjDfiRKlJxn2BQdyec7bJ2OMR1ZmDI9T1v
-fZjAhtA380Rbe/OqW03saDtq59NzndD39eYU7aUXA7se7sNmpA3LbQBWvZLwnLUD
-/sfEJ+2gaVMIIa9GDpptSIsdjbDhyTt9HQr9f/UKmJe41bQvxJ+9XgF61iFrLA0k
-2PMdTX3gO9IrAaOBmDCBlTAOBgNVHQ8BAf8EBAMCAqQwDwYDVR0TAQH/BAUwAwEB
-/zByBgNVHREEazBpggdkZXh0ZXN0gglsb2NhbGhvc3SCEWRleC10ZXN0LnNzZ2Vu
-LmlvhwR/AAABhxAAAAAAAAAAAAAAAAAAAAABhwTPlAO7hxAgARnwZAEBYlQAAv/+
-fHulhxD+gAAAAAAAAFQAAv/+fHulMAoGCCqGSM49BAMEA4GMADCBiAJCAbTYNRcB
-vDd4ZIVzDcDa0nwIAcLYYm8o2bArCRrE1VUj8n0+xWaKAlxLkc/O9WHZGyOk47lG
-fp6a0cB1lLU+F1+YAkIAmOCFzEfV7H+F0tixVs1Q0Lrpuz8axo/cuLW3hH2UkEGY
-WrbgsxarNSiBz+Cb+eG+im5x4ENFrh2o/0Iu3lebiXI=
------END CERTIFICATE-----
-`)
-
 var simnetHarnessCert = []byte(`-----BEGIN CERTIFICATE-----
 MIICpTCCAgagAwIBAgIQZMfxMkSi24xMr4CClCODrzAKBggqhkjOPQQDBDBJMSIw
 IAYDVQQKExlkY3JkZXggYXV0b2dlbmVyYXRlZCBjZXJ0MSMwIQYDVQQDExp1YnVu
@@ -65,7 +47,7 @@ var CertStore = map[dex.Network]map[string][]byte{
 		"dex.decred.org:7232": dexDotDecredCert,
 	},
 	dex.Testnet: {
-		"dex-test.ssgen.io:7232": dexTestSSGenCert,
+		"bison.exchange:17232": nil, // Uses certificate authority
 	},
 	dex.Simnet: {
 		"127.0.0.1:17273": simnetHarnessCert,
