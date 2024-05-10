@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -63,14 +62,15 @@ var (
 	waddrmgrNamespace = []byte("waddrmgr")
 	wtxmgrNamespace   = []byte("wtxmgr")
 
-	testnet4Seeds = [][]byte{
-		{0x0d, 0xc8, 0x42, 0xd8, 0x87, 0x4b},
-		{0xd0, 0x5b, 0x6f, 0x96, 0x9d, 0x47},
-		{0x5c, 0xf4, 0x6f, 0xa7, 0x87, 0x4b},
-		{0xa4, 0x5c, 0xab, 0x5f, 0x8d, 0x20},
-		{0xcc, 0x10, 0xf4, 0x72, 0x9d, 0x47},
-		{0x22, 0xe3, 0x0d, 0xc3, 0x87, 0x4b},
-		{0x12, 0xc0, 0x38, 0x95, 0x9d, 0x47},
+	// Snapshot of valid peers. 10 May 2024
+	testnet4Seeds = []string{
+		"13.200.66.216:19335",
+		"208.91.111.150:18333",
+		"92.244.111.167:19335",
+		"164.92.171.95:8333",
+		"204.16.244.114:18333",
+		"34.227.13.195:19335",
+		"18.192.56.149:18333",
 	}
 )
 
@@ -269,12 +269,7 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	var defaultPeers []string
 	switch w.chainParams.Net {
 	case ltcwire.TestNet4:
-		defaultPeers = []string{"127.0.0.1:19335"}
-		for _, host := range testnet4Seeds {
-			var addr netip.AddrPort
-			addr.UnmarshalBinary(host)
-			defaultPeers = append(defaultPeers, addr.String())
-		}
+		defaultPeers = append([]string{"127.0.0.1:19335"}, testnet4Seeds...)
 	case ltcwire.TestNet, ltcwire.SimNet: // plain "wire.TestNet" is regnet!
 		defaultPeers = []string{"127.0.0.1:20585"}
 	}
