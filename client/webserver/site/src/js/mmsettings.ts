@@ -1002,7 +1002,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   tokenFeesChanged (isBase: boolean) {
     const box = isBase ? this.baseTokenFeesBox() : this.quoteTokenFeesBox()
-    const v = parseFloat(box.input.value ?? '') ?? 0
+    const inputValue = parseFloat(box.input.value ?? '') * box.conversionFactor
+    const v = Math.max(0, inputValue || (box.fees.bookingFees + tokenFeeMultiplier * box.fees.reservesPerSwap))
     if (isBase) this.updatedConfig.baseTokenFees = this.setTokenFees(v, box)
     else this.updatedConfig.quoteTokenFees = this.setTokenFees(v, box)
   }
