@@ -33,7 +33,6 @@ import (
 	"github.com/btcsuite/btcwallet/wtxmgr"
 	"github.com/dcrlabs/ltcwallet/chain"
 	neutrino "github.com/dcrlabs/ltcwallet/spv"
-	labschain "github.com/dcrlabs/ltcwallet/spv/chain"
 	ltcwaddrmgr "github.com/dcrlabs/ltcwallet/waddrmgr"
 	"github.com/dcrlabs/ltcwallet/wallet"
 	"github.com/dcrlabs/ltcwallet/wallet/txauthor"
@@ -91,7 +90,7 @@ type ltcSPVWallet struct {
 
 	// This section is populated in Start.
 	*wallet.Wallet
-	chainClient *labschain.NeutrinoClient
+	chainClient *chain.NeutrinoClient
 	cl          *neutrino.ChainService
 	loader      *wallet.Loader
 	neutrinoDB  walletdb.DB
@@ -242,7 +241,7 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	}
 	errCloser.Add(w.cl.Stop)
 
-	w.chainClient = labschain.NewNeutrinoClient(w.chainParams, w.cl, &logAdapter{w.log})
+	w.chainClient = chain.NewNeutrinoClient(w.chainParams, w.cl)
 
 	oldBday := w.Manager.Birthday()
 	wdb := w.Database()

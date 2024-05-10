@@ -58,3 +58,13 @@ func TestAddressTranslationRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// func TestFormatAddrIPs(t *testing.T) {
+//  addrs := []string{}
+// 	for _, addr := range addrs {
+// 		addrPort := netip.MustParseAddrPort(addr)
+// 		b, _ := addrPort.MarshalBinary()
+// 		fmt.Printf("{0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x}, // %s \n", b[0], b[1], b[2], b[3], b[4], b[5], addr)
+// 	}
+// 	t.Fatal() // So it'll show in my VS Code output
+// }
