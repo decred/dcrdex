@@ -415,7 +415,7 @@ func (c *TankaClient) FiatRate(assetID uint32) float64 {
 	defer c.fiatRatesMtx.RUnlock()
 	sym := dex.BipIDSymbol(assetID)
 	rateInfo := c.fiatRates[sym]
-	if rateInfo != nil && !rateInfo.IsExpired() && rateInfo.Value > 0 {
+	if rateInfo != nil && time.Since(rateInfo.LastUpdate) < fiatrates.FiatRateDataExpiry && rateInfo.Value > 0 {
 		return rateInfo.Value
 	}
 	return 0

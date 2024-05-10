@@ -73,11 +73,11 @@ func (o *Oracle) tickers() []string {
 // Rates returns the current fiat rates. Returns an empty map if there are no
 // valid rates.
 func (o *Oracle) Rates() map[string]*FiatRateInfo {
-	o.ratesMtx.Lock()
-	defer o.ratesMtx.Unlock()
+	o.ratesMtx.RLock()
+	defer o.ratesMtx.RUnlock()
 	rates := make(map[string]*FiatRateInfo, len(o.rates))
 	for ticker, rate := range o.rates {
-		if rate.Value > 0 && !rate.IsExpired() {
+		if rate.Value > 0 && time.Since(rate.LastUpdate) < FiatRateDataExpiry {
 			r := *rate
 			rates[ticker] = &r
 		}
