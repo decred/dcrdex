@@ -1,0 +1,71 @@
+plugins {
+    alias(libs.plugins.androidApplication)
+}
+
+ext {
+    geckoviewChannel = "beta"
+    geckoviewVersion = "124.0.20240308091626"
+}
+
+android {
+    namespace 'org.decred.dex.dexandroid'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "org.decred.dex.dexandroid"
+        minSdk 27
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs{
+        release{
+            storeFile file("../keystore.jks")
+            storePassword System.getenv("RELEASE_KEYSTORE_PASSWORD")
+            keyAlias System.getenv("RELEASE_KEYSTORE_ALIAS")
+            keyPassword System.getenv("RELEASE_KEY_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation libs.appcompat
+    implementation libs.material
+    implementation libs.activity
+    implementation libs.constraintlayout
+    implementation libs.gson
+    implementation libs.core
+    implementation libs.swiperefreshlayout
+    implementation libs.barcode.scanning
+    implementation libs.camera.core
+    implementation libs.camera.camera2
+    implementation libs.camera.lifecycle
+    implementation libs.camera.view
+    testImplementation libs.junit
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+    implementation libs.recyclerview
+    implementation libs.material.v140
+
+    implementation libs.tor.android
+//    implementation (name:'tor-android-binary-release',ext:'aar') //use this if you want to test your local AAR build
+    implementation libs.jtorctl
+    implementation libs.localbroadcastmanager
+    implementation "org.mozilla.geckoview:geckoview-${geckoviewChannel}:${geckoviewVersion}"
+}

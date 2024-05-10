@@ -1,0 +1,48 @@
+[versions]
+agp = "8.3.1"
+jtorctl = "0.4.5.7"
+junit = "4.13.2"
+junitVersion = "1.1.5"
+espressoCore = "3.5.1"
+appcompat = "1.6.1"
+localbroadcastmanager = "1.1.0"
+material = "1.11.0"
+activity = "1.8.2"
+constraintlayout = "2.1.4"
+materialVersion = "1.11.0"
+recyclerview = "1.3.2"
+gson = "2.10.1"
+torAndroid = "0.4.7.14"
+core = "3.5.3"
+swiperefreshlayout = "1.1.0"
+barcodeScanning = "17.2.0"
+cameraCore = "1.4.0-alpha04"
+cameraCamera2 = "1.4.0-alpha04"
+cameraLifecycle = "1.4.0-alpha04"
+cameraView = "1.4.0-alpha04"
+
+[libraries]
+jtorctl = { module = "info.guardianproject:jtorctl", version.ref = "jtorctl" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+localbroadcastmanager = { module = "androidx.localbroadcastmanager:localbroadcastmanager", version.ref = "localbroadcastmanager" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
+constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+material-v140 = { module = "com.google.android.material:material", version.ref = "materialVersion" }
+recyclerview = { module = "androidx.recyclerview:recyclerview", version.ref = "recyclerview" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+tor-android = { module = "info.guardianproject:tor-android", version.ref = "torAndroid" }
+core = { group = "com.google.zxing", name = "core", version.ref = "core" }
+swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "swiperefreshlayout" }
+barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "barcodeScanning" }
+camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "cameraCore" }
+camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "cameraCamera2" }
+camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "cameraLifecycle" }
+camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "cameraView" }
+
+[plugins]
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+
