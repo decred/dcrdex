@@ -388,7 +388,15 @@ type multiRPCClient struct {
 
 var _ ethFetcher = (*multiRPCClient)(nil)
 
-func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *params.ChainConfig, net dex.Network) (*multiRPCClient, error) {
+func newMultiRPCClient(
+	dir string,
+	endpoints []string,
+	log dex.Logger,
+	cfg *params.ChainConfig,
+	finalizeConfs uint64,
+	net dex.Network,
+) (*multiRPCClient, error) {
+
 	walletDir := getWalletDir(dir, net)
 	creds, err := pathCredentials(filepath.Join(walletDir, "keystore"))
 	if err != nil {
@@ -396,14 +404,13 @@ func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *para
 	}
 
 	m := &multiRPCClient{
-		net:       net,
-		cfg:       cfg,
-		log:       log,
-		creds:     creds,
-		chainID:   cfg.ChainID,
-		endpoints: endpoints,
-		// Set this low. If the user needs higher, they can update it.
-		finalizeConfs: 3,
+		net:           net,
+		cfg:           cfg,
+		log:           log,
+		creds:         creds,
+		chainID:       cfg.ChainID,
+		endpoints:     endpoints,
+		finalizeConfs: finalizeConfs,
 	}
 	m.receipts.cache = make(map[common.Hash]*receiptRecord)
 	m.receipts.lastClean = time.Now()

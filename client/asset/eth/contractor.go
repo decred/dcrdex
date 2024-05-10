@@ -41,7 +41,6 @@ type contractor interface {
 	// case will always be zero.
 	value(context.Context, *types.Transaction) (incoming, outgoing uint64, err error)
 	isRefundable(secretHash [32]byte) (bool, error)
-	// voidUnusedNonce()
 }
 
 // tokenContractor interacts with an ERC20 token contract and a token swap

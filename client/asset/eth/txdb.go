@@ -346,11 +346,11 @@ func unmarshalTx(wtB []byte) (wt *extendedWalletTx, err error) {
 
 // getTxs fetches n transactions. If no refID is provided, getTxs returns the
 // n most recent txs in reverse-nonce order. If no refID is provided, the past
-// argument is ignored. If a refID is provided, getTxs will return 10 txs
+// argument is ignored. If a refID is provided, getTxs will return n txs
 // starting with the nonce of the tx referenced. When refID is provided, and
 // past is false, the results will be in increasing order starting at and
 // including the nonce of the referenced tx. If refID is provided and past
-// is false, the results will be in decreasing nonce order starting at and
+// is true, the results will be in decreasing nonce order starting at and
 // including the referenced tx. No orphans will be included in the results.
 // If a non-nil refID is not found, asset.CoinNotFoundError is returned.
 func (db *badgerTxDB) getTxs(n int, refID *common.Hash, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {

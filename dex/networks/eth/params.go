@@ -172,7 +172,7 @@ var gweiCeilAddend = big.NewInt(GweiFactor - 1)
 // unsuitable for a uint64, zero is returned. For values that are not even
 // multiples of 1 gwei, this function returns the ceiling.
 func WeiToGweiCeil(v *big.Int) uint64 {
-	vGwei := new(big.Int).Div(v.Add(v, gweiCeilAddend), big.NewInt(GweiFactor))
+	vGwei := new(big.Int).Div(new(big.Int).Add(v, gweiCeilAddend), big.NewInt(GweiFactor))
 	if vGwei.IsUint64() {
 		return vGwei.Uint64()
 	}
@@ -187,7 +187,7 @@ func WeiToGweiSafe(wei *big.Int) (uint64, error) {
 	if wei.Cmp(new(big.Int)) == -1 {
 		return 0, fmt.Errorf("wei must be non-negative")
 	}
-	gwei := new(big.Int).Div(wei.Add(wei, gweiCeilAddend), gweiFactorBig)
+	gwei := new(big.Int).Div(new(big.Int).Add(wei, gweiCeilAddend), gweiFactorBig)
 	if !gwei.IsUint64() {
 		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
 	}

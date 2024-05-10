@@ -111,6 +111,11 @@ const (
 	// stateUpdateTick is the minimum amount of time between checks for
 	// new block and updating of pending txs, counter-party redemptions and
 	// approval txs.
+	// HTTP RPC clients meter tip header calls to minimum 10 seconds.
+	// WebSockets will stay up-to-date, so can expect new blocks often.
+	// A shorter blockTicker would be too much for e.g. Polygon where the block
+	// time is 2 or 3 seconds. We'd be doing a ton of calls for pending tx
+	// updates.
 	stateUpdateTick = time.Second * 5
 	// maxUnindexedTxs is the number of pending txs we will allow to be
 	// unverified on-chain before we halt broadcasting of new txs.
@@ -121,14 +126,7 @@ const (
 var (
 	usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
 	usdtTokenID, _ = dex.BipSymbolID("usdt.eth")
-	// blockTicker is the delay between calls to check for new blocks and
-	// checking of pending txs.
-	// HTTP RPC clients meter tip header calls to minimum 10 seconds.
-	// WebSockets will stay up-to-date, so can expect new blocks often.
-	// A shorter blockTicker would be too much for e.g. Polygon where the block
-	// time is 2 or 3 seconds. We'd be doing a ton of calls for pending tx
-	// updates.
-	walletOpts = []*asset.ConfigOption{
+	walletOpts     = []*asset.ConfigOption{
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -730,7 +728,7 @@ type EVMWalletConfig struct {
 	Logger             dex.Logger
 	BaseChainContracts map[uint32]common.Address
 	DefaultProviders   []string
-	MultiBalAddress    common.Address
+	MultiBalAddress    common.Address // If empty, separate calls for N tokens + 1
 	WalletInfo         asset.WalletInfo
 	Net                dex.Network
 }
@@ -761,21 +759,19 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		gasFeeLimit = defaultGasFeeLimit
 	}
 	eth := &baseWallet{
-		net:           cfg.Net,
-		baseChainID:   cfg.BaseChainID,
-		chainCfg:      cfg.ChainCfg,
-		chainID:       chainID,
-		compat:        cfg.CompatData,
-		tokens:        cfg.Tokens,
-		log:           cfg.Logger,
-		dir:           cfg.AssetCfg.DataDir,
-		walletType:    cfg.AssetCfg.Type,
-		finalizeConfs: cfg.FinalizeConfs,
-		settings:      cfg.AssetCfg.Settings,
-		gasFeeLimitV:  gasFeeLimit,
-		wallets:       make(map[uint32]*assetWallet),
-		// pendingTxs:   make(map[uint64]*extendedWalletTx),
-		// Can be empty
+		net:                 cfg.Net,
+		baseChainID:         cfg.BaseChainID,
+		chainCfg:            cfg.ChainCfg,
+		chainID:             chainID,
+		compat:              cfg.CompatData,
+		tokens:              cfg.Tokens,
+		log:                 cfg.Logger,
+		dir:                 cfg.AssetCfg.DataDir,
+		walletType:          cfg.AssetCfg.Type,
+		finalizeConfs:       cfg.FinalizeConfs,
+		settings:            cfg.AssetCfg.Settings,
+		gasFeeLimitV:        gasFeeLimit,
+		wallets:             make(map[uint32]*assetWallet),
 		multiBalanceAddress: cfg.MultiBalAddress,
 	}
 
@@ -855,7 +851,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		if providerDef, found := w.settings[providersKey]; found && len(providerDef) > 0 {
 			endpoints = strings.Split(providerDef, " ")
 		}
-		rpcCl, err := newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), w.chainCfg, w.net)
+		rpcCl, err := newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), w.chainCfg, w.finalizeConfs, w.net)
 		if err != nil {
 			return nil, err
 		}
@@ -1083,8 +1079,8 @@ func (eth *baseWallet) gasFeeLimit() uint64 {
 	return atomic.LoadUint64(&eth.gasFeeLimitV)
 }
 
-// transactionGenerator is an action that uses a nonce and returns a tx and
-// it's type specifier.
+// transactionGenerator is an action that uses a nonce and returns a tx, it's
+// type specifier, and its value.
 type transactionGenerator func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error)
 
 // withNonce is called with a function intended to generate a new transaction
@@ -2893,17 +2889,6 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 		value: w.atomize(initiation.Value),
 	}
 
-	// // The counter-party should have broadcasted the contract tx but rebroadcast
-	// // just in case to ensure that the tx is sent to the network. Do not block
-	// // because this is not required and does not affect the audit result.
-	// if rebroadcast {
-	// 	go func() {
-	// 		if err := w.node.sendSignedTransaction(w.ctx, tx, allowAlreadyKnownFilter); err != nil {
-	// 			w.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
-	// 		}
-	// 	}()
-	// }
-
 	return &asset.AuditInfo{
 		Recipient:  initiation.Participant.Hex(),
 		Expiration: initiation.LockTime,
@@ -3589,7 +3574,7 @@ func (w *baseWallet) swapOrRedemptionFeesPaid(
 		}
 	}
 	if !found {
-		return 0, nil, fmt.Errorf("secret hash %x not found in transactinilon", secretHash)
+		return 0, nil, fmt.Errorf("secret hash %x not found in transaction", secretHash)
 	}
 	return
 }
@@ -3751,45 +3736,22 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 		w.checkPendingApprovals()
 		w.emit.TipChange(bestHdr.Number.Uint64())
 	}
-
-	// eth.txDbWg.Add(1)
-	// go func() {
-	// 	defer eth.txDbWg.Done()
-	// 	for _, w := range connectedWallets {
-	// 		w.checkFindRedemptions()
-	// 	}
-	// }()
-	// eth.txDbWg.Add(1)
-	// go func() {
-	// 	defer eth.txDbWg.Done()
-	// 	for _, w := range connectedWallets {
-	// 		w.checkPendingApprovals()
-	// 	}
-	// }()
-
-	// eth.txDbWg.Add(1)
-	// go func() {
-	// 	defer eth.txDbWg.Done()
-	// 	eth.checkPendingTxs()
-	// }()
 }
 
-// ConfirmRedemption checks the status of a redemption. If it is determined
-// that a transaction will not be mined, this function will submit a new
-// transaction to replace the old one. The caller is notified of this by having
-// a different coinID in the returned asset.ConfirmRedemptionStatus as was used
-// to call the function. Fee argument is ignored since it is calculated from
-// the best header.
+// ConfirmRedemption checks the status of a redemption. If a transaction has
+// been fee-replaced, the caller is notified of this by having a different
+// coinID in the returned asset.ConfirmRedemptionStatus as was used to call the
+// function. Fee argument is ignored since it is calculated from the best
+// header.
 func (w *ETHWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, _ uint64) (*asset.ConfirmRedemptionStatus, error) {
 	return w.confirmRedemption(coinID, redemption)
 }
 
-// ConfirmRedemption checks the status of a redemption. If it is determined
-// that a transaction will not be mined, this function will submit a new
-// transaction to replace the old one. The caller is notified of this by having
-// a different coinID in the returned asset.ConfirmRedemptionStatus as was used
-// to call the function. Fee argument is ignored since it is calculated from
-// the best header.
+// ConfirmRedemption checks the status of a redemption. If a transaction has
+// been fee-replaced, the caller is notified of this by having a different
+// coinID in the returned asset.ConfirmRedemptionStatus as was used to call the
+// function. Fee argument is ignored since it is calculated from the best
+// header.
 func (w *TokenWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, _ uint64) (*asset.ConfirmRedemptionStatus, error) {
 	return w.confirmRedemption(coinID, redemption)
 }
@@ -3803,8 +3765,6 @@ func confStatus(confs, req uint64, txHash common.Hash) *asset.ConfirmRedemptionS
 }
 
 // confirmRedemption checks the confirmation status of a redemption transaction.
-// It will resubmit transactions if it has been determined that the transaction
-// cannot be mined.
 func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
 	if len(coinID) != common.HashLength {
 		return nil, fmt.Errorf("expected coin ID to be a transaction hash, but it has a length of %d",
@@ -3830,6 +3790,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 				return nil, asset.ErrTxLost
 			}
 		}
+		// Should we require > 1 confirmation on rejected txs before reporting?
 		if s.receipt != nil && s.receipt.Status != types.ReceiptStatusSuccessful {
 			return nil, asset.ErrTxRejected
 		}
@@ -3846,7 +3807,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 	if err != nil {
 		if errors.Is(err, asset.CoinNotFoundError) {
 			// We don't know it ourselves and we can't see it on-chain. This
-			// used to be an CoinNotFoundError, but since we have local tx
+			// used to be a CoinNotFoundError, but since we have local tx
 			// storage, we'll assume it's lost to space and time now.
 			return nil, asset.ErrTxLost
 		}
@@ -4010,8 +3971,8 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 		}
 	}
 
-	w.nonceMtx.Lock()
-	defer w.nonceMtx.Unlock()
+	w.nonceMtx.RLock()
+	defer w.nonceMtx.RUnlock()
 
 	for _, pendingTx := range w.pendingTxs {
 		sumPendingTx(pendingTx)
@@ -4405,7 +4366,7 @@ func (w *assetWallet) redeem(
 		for _, r := range redemptions {
 			amt += r.Spends.Coin.Value()
 		}
-		// Uncomment here and above to test rejected redemption reauthorization.
+		// Uncomment here and above to test rejected redemption handling.
 		// if firstRedemptionBorked.CompareAndSwap(false, true) {
 		// 	gasLimit /= 4
 		// }
@@ -4564,7 +4525,7 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 
 	if receipt.BlockNumber == nil || receipt.BlockNumber.Cmp(new(big.Int)) == 0 {
 		if pendingTx.BlockNumber > 0 {
-			w.log.Warnf("Transaction %s was previously mined but is now uconfirmed", pendingTx.txHash)
+			w.log.Warnf("Transaction %s was previously mined but is now unconfirmed", pendingTx.txHash)
 			pendingTx.Timestamp = 0
 			pendingTx.BlockNumber = 0
 		}
@@ -4614,10 +4575,10 @@ func (w *baseWallet) checkPendingTxs() {
 	}
 
 	// keepFromIndex will be the index of the first un-finalized tx.
-	// disorderedConfsIndex, if non-zero, will the index of the last confirmed
-	// tx after the first unconfirmed tx, if one exists. It is used to detect
-	// an abnormal condition where the tx was nonce-replaced and we don't know
-	// the replacement tx.
+	// disorderedConfsIndex, if non-zero, will be the index of the last
+	// confirmed tx after the first unconfirmed tx, if one exists. It is used to
+	// detect an abnormal condition where the tx was nonce-replaced and we don't
+	// know the replacement tx.
 	var keepFromIndex, lastConfirmed int
 	for i, pendingTx := range w.pendingTxs {
 		if w.ctx.Err() != nil {
@@ -4659,7 +4620,7 @@ func (w *baseWallet) checkPendingTxs() {
 			continue
 		}
 		if time.Since(pendingTx.actionIgnored) < txAgeOut {
-			// The asked us to keep waiting.
+			// They asked us to keep waiting.
 			continue
 		}
 		age := pendingTx.age()
@@ -4691,7 +4652,7 @@ func (w *baseWallet) checkPendingTxs() {
 		if txCap.Cmp(baseRate) < 0 {
 			maxFees := new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
 			maxFees.Mul(maxFees, new(big.Int).SetUint64(tx.Gas()))
-			req := newLowFeeeNote(*pendingTx.WalletTransaction, dexeth.WeiToGweiCeil(maxFees))
+			req := newLowFeeNote(*pendingTx.WalletTransaction, dexeth.WeiToGweiCeil(maxFees))
 			pendingTx.actionRequested = true
 			w.requestAction(actionTypeTooCheap, pendingTx.ID, req, pendingTx.TokenID)
 			continue
@@ -4756,7 +4717,7 @@ func newLostNonceNote(tx asset.WalletTransaction, nonce uint64) *TransactionActi
 }
 
 // newLowFeeNote is data about a tx that is stuck in mempool with too-low fees.
-func newLowFeeeNote(tx asset.WalletTransaction, newFees uint64) *TransactionActionNote {
+func newLowFeeNote(tx asset.WalletTransaction, newFees uint64) *TransactionActionNote {
 	return &TransactionActionNote{
 		Tx:      &tx,
 		NewFees: newFees,
@@ -4944,15 +4905,15 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 		// they reboot.
 		return nil
 	}
+	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return fmt.Errorf("error getting max fee rate for nonce resolution: %v", err)
+	}
 	w.nonceMtx.Lock()
 	defer w.nonceMtx.Unlock()
 	missingNonces := findMissingNonces(w.confirmedNonceAt, w.pendingNonceAt, w.pendingTxs)
 	if len(missingNonces) == 0 {
 		return nil
-	}
-	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(w.ctx)
-	if err != nil {
-		return fmt.Errorf("error getting max fee rate for nonce resolution: %v", err)
 	}
 	for _, n := range missingNonces {
 		nonce := new(big.Int).SetUint64(n)
@@ -4969,9 +4930,6 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 			return false, false, true
 		})
 		if err != nil {
-			if errorFilter(err, "replacement transaction underpriced") {
-				continue
-			}
 			return fmt.Errorf("error sending tx %d for nonce resolution: %v", nonce, err)
 		}
 		if skip {
@@ -5139,11 +5097,11 @@ func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txHash common.H
 // one in which the wallet has received funds.
 func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
 	txHash := common.HexToHash(txID)
-	var localTx *extendedWalletTx
+	var localTx asset.WalletTransaction
 	if w.withLocalTxRead(txHash, func(wt *extendedWalletTx) {
-		localTx = wt
+		localTx = *wt.WalletTransaction
 	}) {
-		return localTx.WalletTransaction, nil
+		return &localTx, nil
 	}
 	return w.getReceivingTransaction(ctx, txHash)
 }
@@ -5244,7 +5202,7 @@ func quickNode(ctx context.Context, walletDir string, contractVer uint32,
 		return nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
 
-	cl, err := newMultiRPCClient(walletDir, providers, log, wParams.ChainCfg, net)
+	cl, err := newMultiRPCClient(walletDir, providers, log, wParams.ChainCfg, 3, net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error opening initiator rpc client: %v", err)
 	}
