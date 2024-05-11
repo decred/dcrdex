@@ -634,6 +634,7 @@ type ExchangeWallet struct {
 	cfgV         atomic.Value // *exchangeWalletConfig
 
 	ctx           context.Context // the asset subsystem starts with Connect(ctx)
+	wg            sync.WaitGroup
 	wallet        Wallet
 	chainParams   *chaincfg.Params
 	log           dex.Logger
@@ -950,7 +951,7 @@ func (dcr *ExchangeWallet) findExistingAddressBasedTxHistoryDB() (string, error)
 	return "", nil
 }
 
-func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, error) {
+func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*dex.ConnectionMaster, error) {
 	var dbPath string
 	if spvWallet, ok := dcr.wallet.(*spvWallet); ok {
 		initialAddress, err := spvWallet.InitialAddress(ctx)
@@ -984,10 +985,17 @@ func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGrou
 	db := btc.NewBadgerTxDB(dbPath, dcr.log)
 	dcr.txHistoryDB.Store(db)
 
-	wg, err := db.Connect(ctx)
-	if err != nil {
+	cm := dex.NewConnectionMaster(db)
+	if err := cm.ConnectOnce(ctx); err != nil {
 		return nil, fmt.Errorf("error connecting to tx history db: %w", err)
 	}
+
+	var success bool
+	defer func() {
+		if !success {
+			cm.Disconnect()
+		}
+	}()
 
 	pendingTxs, err := db.GetPendingTxs()
 	if err != nil {
@@ -1014,7 +1022,8 @@ func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGrou
 
 	dcr.receiveTxLastQuery.Store(lastQuery)
 
-	return wg, nil
+	success = true
+	return cm, nil
 }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
@@ -1062,7 +1071,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
 
-	wg, err := dcr.startTxHistoryDB(ctx)
+	dbCM, err := dcr.startTxHistoryDB(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1070,26 +1079,26 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	success = true // All good, don't disconnect the wallet when this method returns.
 	dcr.connected.Store(true)
 
-	wg.Add(1)
+	dcr.wg.Add(1)
 	go func() {
 		defer wg.Done()
 		dcr.monitorBlocks(ctx)
 		dcr.shutdown()
 	}()
 
-	wg.Add(1)
+	dcr.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer dcr.wg.Done()
 		dcr.monitorPeers(ctx)
 	}()
 
-	wg.Add(1)
+	dcr.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer dcr.wg.Done()
 		dcr.syncTxHistory(ctx, uint64(tip.height))
 	}()
 
-	return wg, nil
+	return &dcr.wg, nil
 }
 
 // Reconfigure attempts to reconfigure the wallet.

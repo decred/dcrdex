@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -81,7 +80,6 @@ type tDcrWallet struct {
 	unlockedOutpoint *wire.OutPoint
 	lockedOutpoint   *wire.OutPoint
 	stakeInfo        wallet.StakeInfoData
-	rescanMtx        sync.Mutex
 	rescanUpdates    []wallet.RescanProgress
 }
 
@@ -395,9 +393,7 @@ func (w *tDcrWallet) GetTransactions(ctx context.Context, f func(*wallet.Block) 
 }
 
 func (w *tDcrWallet) RescanProgressFromHeight(ctx context.Context, n wallet.NetworkBackend, startHeight int32, p chan<- wallet.RescanProgress) {
-	w.rescanMtx.Lock()
 	go func() {
-		defer w.rescanMtx.Unlock()
 		defer close(p)
 		for _, u := range w.rescanUpdates {
 			p <- u
@@ -979,6 +975,8 @@ func TestRescan(t *testing.T) {
 	defer cancel()
 
 	ensureErr := func(errStr string, us []wallet.RescanProgress) {
+		t.Helper()
+		defer w.wg.Wait()
 		dcrw.rescanUpdates = us
 		err := w.Rescan(ctx)
 		if err == nil {

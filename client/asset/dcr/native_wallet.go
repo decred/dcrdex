@@ -388,9 +388,12 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 // first 2000 blocks are scanned.
 func (w *NativeWallet) Rescan(ctx context.Context) error {
 	// Make sure we don't already have one running.
-	w.rescan.RLock()
+	w.rescan.Lock()
 	rescanInProgress := w.rescan.progress != nil
-	w.rescan.RUnlock()
+	if !rescanInProgress {
+		w.rescan.progress = &rescanProgress{}
+	}
+	w.rescan.Unlock()
 	if rescanInProgress {
 		return errors.New("rescan already in progress")
 	}
@@ -400,9 +403,6 @@ func (w *NativeWallet) Rescan(ctx context.Context) error {
 		w.rescan.progress = &rescanProgress{scannedThrough: int64(height)}
 		w.rescan.Unlock()
 	}
-
-	// Set progress to indicate rescan is running.
-	setProgress(0)
 
 	c := make(chan wallet.RescanProgress)
 	go w.spvw.Rescan(ctx, c) // RescanProgressWithHeight will defer close(c)
@@ -420,6 +420,7 @@ func (w *NativeWallet) Rescan(ctx context.Context) error {
 		}
 	}
 
+	w.wg.Add(1)
 	go func() {
 		defer func() {
 			w.rescan.Lock()
@@ -429,6 +430,7 @@ func (w *NativeWallet) Rescan(ctx context.Context) error {
 			if lastUpdate != nil && lastUpdate.scannedThrough > 0 {
 				w.log.Infof("Completed rescan of %d blocks", lastUpdate.scannedThrough)
 			}
+			w.wg.Done()
 		}()
 		// Rescans are quick. Timeouts > a second are probably too high, but
 		// we'll give ample buffer.
