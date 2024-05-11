@@ -621,6 +621,11 @@ type vsp struct {
 	PubKey        string  `json:"pubkey"`
 }
 
+// rescanProgress is the progress of an asynchronous rescan.
+type rescanProgress struct {
+	scannedThrough int64
+}
+
 // ExchangeWallet is a wallet backend for Decred. The backend is how the DEX
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
@@ -685,6 +690,11 @@ type ExchangeWallet struct {
 
 	txHistoryDB      atomic.Value // *btc.BadgerTxDB
 	syncingTxHistory atomic.Bool
+
+	rescan struct {
+		sync.RWMutex
+		progress *rescanProgress // nil = no rescan in progress
+	}
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -4823,6 +4833,18 @@ func (dcr *ExchangeWallet) shutdown() {
 
 // SyncStatus is information about the blockchain sync status.
 func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
+	// If we have a rescan running, do different math.
+	dcr.rescan.RLock()
+	rescanProgress := dcr.rescan.progress
+	dcr.rescan.RUnlock()
+	if rescanProgress != nil {
+		height := dcr.cachedBestBlock().height
+		if height < rescanProgress.scannedThrough {
+			height = rescanProgress.scannedThrough
+		}
+		return false, float32(rescanProgress.scannedThrough) / float32(height), nil
+	}
+	// No rescan in progress. Ask wallet.
 	return dcr.wallet.SyncStatus(dcr.ctx)
 }
 
@@ -5562,10 +5584,9 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) error {
 	ticketPrice := sinfo.Sdiff + fees
 	total := uint64(n) * uint64(ticketPrice)
 	if bal.Available < total {
-		return fmt.Errorf("available balance %s is lower than project cost %s for %d tickets",
+		return fmt.Errorf("available balance %s is lower than projected cost %s for %d tickets",
 			dcrutil.Amount(bal.Available), dcrutil.Amount(total), n)
 	}
-
 	remain := dcr.ticketBuyer.remaining.Add(int32(n))
 	dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Remaining: uint32(remain)})
 	go dcr.runTicketBuyer()

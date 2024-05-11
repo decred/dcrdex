@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,6 +81,8 @@ type tDcrWallet struct {
 	unlockedOutpoint *wire.OutPoint
 	lockedOutpoint   *wire.OutPoint
 	stakeInfo        wallet.StakeInfoData
+	rescanMtx        sync.Mutex
+	rescanUpdates    []wallet.RescanProgress
 }
 
 func (w *tDcrWallet) KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error) {
@@ -388,6 +392,17 @@ func (w *tDcrWallet) NewVSPTicket(ctx context.Context, hash *chainhash.Hash) (*w
 
 func (w *tDcrWallet) GetTransactions(ctx context.Context, f func(*wallet.Block) (bool, error), startBlock, endBlock *wallet.BlockIdentifier) error {
 	return nil
+}
+
+func (w *tDcrWallet) RescanProgressFromHeight(ctx context.Context, n wallet.NetworkBackend, startHeight int32, p chan<- wallet.RescanProgress) {
+	w.rescanMtx.Lock()
+	go func() {
+		defer w.rescanMtx.Unlock()
+		defer close(p)
+		for _, u := range w.rescanUpdates {
+			p <- u
+		}
+	}()
 }
 
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
@@ -948,4 +963,48 @@ func TestGetRawTransaction(t *testing.T) {
 		t.Fatalf("expected TxDetail generic error to propagate")
 	}
 	dcrw.txsByHashErr = nil
+}
+
+func TestRescan(t *testing.T) {
+	spvw, dcrw := tNewSpvWallet()
+	w := &NativeWallet{
+		ExchangeWallet: &ExchangeWallet{
+			wallet: spvw,
+			log:    dex.StdOutLogger("T", dex.LevelInfo),
+		},
+		spvw: spvw,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ensureErr := func(errStr string, us []wallet.RescanProgress) {
+		dcrw.rescanUpdates = us
+		err := w.Rescan(ctx)
+		if err == nil {
+			if errStr == "" {
+				return
+			}
+			t.Fatalf("No error. Expected %q", errStr)
+		}
+		if !strings.Contains(err.Error(), errStr) {
+			t.Fatalf("Wrong error %q. Expected %q", err, errStr)
+		}
+	}
+
+	// No updates is an error.
+	ensureErr("rescan finished without a progress update", nil)
+
+	// Initial error comes straight through.
+	tErr := errors.New("test error")
+	ensureErr("test error", []wallet.RescanProgress{{Err: tErr}})
+
+	// Any progress update = no error.
+	ensureErr("", []wallet.RescanProgress{{}, {Err: tErr}})
+
+	// Rescan in progress error
+	w.rescan.Lock()
+	w.rescan.progress = &rescanProgress{}
+	w.rescan.Unlock()
+	ensureErr("rescan already in progress", []wallet.RescanProgress{{}})
 }

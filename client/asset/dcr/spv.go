@@ -106,7 +106,7 @@ type dcrWallet interface {
 		additionalKeysByAddress map[string]*dcrutil.WIF, p2shRedeemScriptsByAddress map[string][]byte) ([]wallet.SignatureError, error)
 	AgendaChoices(ctx context.Context, ticketHash *chainhash.Hash) (choices map[string]string, voteBits uint16, err error)
 	NewVSPTicket(ctx context.Context, hash *chainhash.Hash) (*wallet.VSPTicket, error)
-	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
+	RescanProgressFromHeight(ctx context.Context, n wallet.NetworkBackend, startHeight int32, p chan<- wallet.RescanProgress)
 }
 
 // Interface for *spv.Syncer so that we can test with a stub.
@@ -1029,6 +1029,11 @@ func (w *spvWallet) newVSPClient(vspHost, vspPubKey string, log dex.Logger) (*vs
 		},
 		Params: w.chainParams,
 	}, log)
+}
+
+// Rescan performs a blocking rescan, sending updates on the channel.
+func (w *spvWallet) Rescan(ctx context.Context, c chan wallet.RescanProgress) {
+	w.dcrWallet.RescanProgressFromHeight(ctx, w.spv, 0, c)
 }
 
 // PurchaseTickets purchases n tickets, tells the provided vspd to monitor the

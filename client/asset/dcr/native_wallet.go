@@ -14,11 +14,13 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrwallet/v4/p2p"
 	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v4/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v4"
 )
@@ -93,6 +95,7 @@ type NativeWallet struct {
 
 // NativeWallet must also satisfy the following interface(s).
 var _ asset.FundsMixer = (*NativeWallet)(nil)
+var _ asset.Rescanner = (*NativeWallet)(nil)
 
 func initNativeWallet(ew *ExchangeWallet) (*NativeWallet, error) {
 	spvWallet, ok := ew.wallet.(*spvWallet)
@@ -378,4 +381,83 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 			dcrutil.Amount(totalSent), fromAccts, toAcct, tx.TxHash())
 	}
 	return nil
+}
+
+// Rescan initiates a rescan of the wallet from height 0. Rescan only blocks
+// long enough for the first asynchronous update, either an error or after the
+// first 2000 blocks are scanned.
+func (w *NativeWallet) Rescan(ctx context.Context) error {
+	// Make sure we don't already have one running.
+	w.rescan.RLock()
+	rescanInProgress := w.rescan.progress != nil
+	w.rescan.RUnlock()
+	if rescanInProgress {
+		return errors.New("rescan already in progress")
+	}
+
+	setProgress := func(height int32) {
+		w.rescan.Lock()
+		w.rescan.progress = &rescanProgress{scannedThrough: int64(height)}
+		w.rescan.Unlock()
+	}
+
+	// Set progress to indicate rescan is running.
+	setProgress(0)
+
+	c := make(chan wallet.RescanProgress)
+	go w.spvw.Rescan(ctx, c) // RescanProgressWithHeight will defer close(c)
+
+	// First update will either be an error or a report of the first 2000
+	// blocks. We can block until we get one.
+	errC := make(chan error, 1)
+	sendErr := func(err error) {
+		select {
+		case errC <- err:
+		default:
+		}
+		if err != nil {
+			w.log.Errorf("Error encountered in rescan: %v", err)
+		}
+	}
+
+	go func() {
+		defer func() {
+			w.rescan.Lock()
+			lastUpdate := w.rescan.progress
+			w.rescan.progress = nil
+			w.rescan.Unlock()
+			if lastUpdate != nil && lastUpdate.scannedThrough > 0 {
+				w.log.Infof("Completed rescan of %d blocks", lastUpdate.scannedThrough)
+			}
+		}()
+		// Rescans are quick. Timeouts > a second are probably too high, but
+		// we'll give ample buffer.
+		timeout := time.After(time.Minute)
+		for {
+			select {
+			case u, open := <-c:
+				if !open { // channel was closed. rescan is finished.
+					if timeout == nil {
+						// We never saw an update.
+						sendErr(nil)
+					} else {
+						sendErr(errors.New("rescan finished without a progress update"))
+					}
+					return
+				}
+				sendErr(u.Err) // Hopefully nil, causing Rescan to return nil.
+				timeout = nil  // Any update cancels timeout.
+				if u.Err == nil {
+					setProgress(u.ScannedThrough)
+				}
+			case <-timeout:
+				sendErr(errors.New("rescan never sent progress updates"))
+				return
+			case <-ctx.Done():
+				sendErr(ctx.Err())
+				return
+			}
+		}
+	}()
+	return <-errC
 }
