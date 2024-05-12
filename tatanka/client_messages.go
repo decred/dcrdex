@@ -376,6 +376,24 @@ func (t *Tatanka) replySubscription(cl tanka.Sender, topic tanka.Topic) {
 				t.log.Errorf("error sending result to %q: %v", dex.Bytes(peerID[:]), err)
 			}
 		}
+
+	case mj.TopicFeeEstimate:
+		if t.hasTxFeeOracle() {
+			estimates := t.txFeeOracle.FeeEstimates()
+			if len(estimates) == 0 { // no data to send
+				return
+			}
+
+			reply := mj.MustNotification(mj.RouteFeeEstimate, &mj.FeeEstimateMessage{
+				Topic:        mj.TopicFeeEstimate,
+				FeeEstimates: estimates,
+			})
+
+			if err := t.send(cl, reply); err != nil {
+				peerID := cl.PeerID()
+				t.log.Errorf("error sending result to %q: %v", dex.Bytes(peerID[:]), err)
+			}
+		}
 	}
 }
 

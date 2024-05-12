@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/txfee"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka/chain"
 	"decred.org/dcrdex/tatanka/db"
@@ -124,6 +125,9 @@ type Tatanka struct {
 
 	fiatRateOracle *fiatrates.Oracle
 	fiatRateChan   chan map[string]*fiatrates.FiatRateInfo
+
+	txFeeOracle       *txfee.Oracle
+	txFeeEstimateChan chan map[uint32]*txfee.Estimate
 }
 
 // Config is the configuration of the Tatanka.
@@ -133,6 +137,8 @@ type Config struct {
 	Logger     dex.Logger
 	RPC        comms.RPCConfig
 	ConfigPath string
+
+	TxFeeOracleCfg txfee.Config
 
 	// TODO: Change to whitelist
 	WhiteList []BootNode
@@ -243,7 +249,20 @@ func New(cfg *Config) (*Tatanka, error) {
 		return nil, fmt.Errorf("error starting TPC server:: %v", err)
 	}
 
+	if t.net == dex.Mainnet || t.net == dex.Testnet {
+		t.txFeeOracle, err = txfee.NewOracle(t.net, cfg.TxFeeOracleCfg, nets)
+		if err != nil {
+			return nil, fmt.Errorf("txfee.NewOracle error: %w", err)
+		}
+		t.txFeeEstimateChan = make(chan map[uint32]*txfee.Estimate)
+		t.txFeeOracle.AddFeeListener(tatankaUniqueID, t.txFeeEstimateChan)
+	}
+
 	return t, nil
+}
+
+func (t *Tatanka) hasTxFeeOracle() bool {
+	return t.txFeeOracle != nil
 }
 
 func (t *Tatanka) prepareHandlers() {
@@ -417,6 +436,20 @@ func (t *Tatanka) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 		go func() {
 			defer wg.Done()
 			t.broadcastRates()
+		}()
+	}
+
+	if t.hasTxFeeOracle() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t.txFeeOracle.Run(t.ctx, t.log)
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t.broadcastFeeEstimate()
 		}()
 	}
 
@@ -698,6 +731,35 @@ func (t *Tatanka) broadcastRates() {
 					Rates: rates,
 				}))
 			}
+		}
+	}
+}
+
+// broadcastFeeEstimate broadcasts fee estimates to all subscribed clients once
+// we receive data from t.txFeeEstimateChan.
+func (t *Tatanka) broadcastFeeEstimate() {
+	for {
+		select {
+		case <-t.ctx.Done():
+			return
+		case feeEstimate, ok := <-t.txFeeEstimateChan:
+			if !ok {
+				t.log.Trace("Tantanka stopped listening for tx fee estimates")
+				return
+			}
+
+			t.clientMtx.RLock()
+			topic := t.topics[mj.TopicFeeEstimate]
+			t.clientMtx.RUnlock()
+			if topic == nil || len(topic.subscribers) == 0 {
+				continue
+			}
+
+			note := mj.MustNotification(mj.RouteFeeEstimate, &mj.FeeEstimateMessage{
+				Topic:        mj.TopicFeeEstimate,
+				FeeEstimates: feeEstimate,
+			})
+			t.batchSend(topic.subscribers, note)
 		}
 	}
 }
