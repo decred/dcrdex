@@ -4,10 +4,10 @@
 package electrum
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strconv"
 )
 
 type positional []any
@@ -87,13 +87,12 @@ type floatString float64
 
 func (fs *floatString) UnmarshalJSON(b []byte) error {
 	// Try to strip the string contents out of quotes.
-	var str string
-	if err := json.Unmarshal(b, &str); err != nil {
-		return err // wasn't a string
+	if bytes.HasPrefix(b, []byte(`"`)) && bytes.HasSuffix(b, []byte(`"`)) {
+		b = bytes.Trim(b, `"`)
 	}
-	fl, err := strconv.ParseFloat(str, 64)
-	if err != nil {
-		return err // The string didn't contain a float.
+	var fl float64
+	if err := json.Unmarshal(b, &fl); err != nil {
+		return err
 	}
 	*fs = floatString(fl)
 	return nil
