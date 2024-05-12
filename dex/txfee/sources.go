@@ -87,8 +87,7 @@ var (
 	}
 
 	// blockchairChainsSupported is a map of bipIDs to string value used in
-	// identifying fee estimate data retrieved from the blockchair API. We
-	// removed support for ethereum.
+	// identifying fee estimate data retrieved from the blockchair API.
 	blockchairChainsSupported = map[uint32]string{
 		btc.BipID:  "bitcoin",
 		zec.BipID:  "zcash",
