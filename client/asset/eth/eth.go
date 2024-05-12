@@ -2351,9 +2351,9 @@ func (w *TokenWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, u
 }
 
 // Redeem sends the redemption transaction, which may contain more than one
-// redemption. The nonceOverride paramater is used to specify a specific nonce
-// to be used for the redemption transaction. It is needed when resubmitting
-// a redemption with a fee too low to be mined.
+// redemption. The nonceOverride parameter is used to specify a specific nonce
+// to be used for the redemption transaction. It is needed when resubmitting a
+// redemption with a fee too low to be mined.
 func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, nonceOverride *uint64) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
