@@ -328,13 +328,13 @@ func binanceCoinNetworkToDexSymbol(coin, network string) string {
 	}
 
 	var dexSymbol, dexNetwork string
-	if symbol, found := binanceToDexSymbol[coin]; found {
+	if symbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
 		dexSymbol = strings.ToLower(symbol)
 	} else {
 		dexSymbol = strings.ToLower(coin)
 	}
 
-	if symbol, found := binanceToDexSymbol[network]; found && network != "ETH" {
+	if symbol, found := binanceToDexSymbol[strings.ToUpper(network)]; found && network != "ETH" {
 		dexNetwork = strings.ToLower(symbol)
 	} else {
 		dexNetwork = strings.ToLower(network)
@@ -547,7 +547,7 @@ func (bnc *binance) setTokenIDs(coins []*bntypes.CoinInfo) {
 	tokenIDs := make(map[string][]uint32)
 	for _, nfo := range coins {
 		tokenSymbol := strings.ToLower(nfo.Coin)
-		if convertedSymbol, found := binanceToDexSymbol[nfo.Coin]; found {
+		if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(nfo.Coin)]; found {
 			tokenSymbol = strings.ToLower(convertedSymbol)
 		}
 		for _, netInfo := range nfo.NetworkList {
@@ -1770,7 +1770,7 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 
 func getDEXAssetIDs(binanceSymbol string, tokenIDs map[string][]uint32) []uint32 {
 	dexSymbol := strings.ToLower(binanceSymbol)
-	if convertedDEXSymbol, found := binanceToDexSymbol[binanceSymbol]; found {
+	if convertedDEXSymbol, found := binanceToDexSymbol[strings.ToUpper(binanceSymbol)]; found {
 		dexSymbol = strings.ToLower(convertedDEXSymbol)
 	}
 
