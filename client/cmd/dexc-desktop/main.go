@@ -52,6 +52,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
 	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
@@ -77,14 +78,35 @@ const (
 var (
 	log     dex.Logger
 	exePath = findExePath()
-	srcDir  = filepath.Join(filepath.Dir(exePath), "src")
 
-	//go:embed src/dexc.png
-	FavIcon []byte
-
-	//go:embed src/symbol-bw-round.png
-	SymbolBWIcon []byte
+	// tmpLogoPath is set to a temp file path on startup for the logo on desktop
+	// notifications. Do not use sendDesktopNotification until it is set.
+	tmpLogoPath string
 )
+
+//go:embed src/symbol-positive-gradient-256.png
+var symbolAlphaPNG []byte
+
+//go:embed src/symbol-negative-solid-256.png
+var symbolSolidPNG []byte
+
+func storeTmpLogo() (tempDir string) {
+	// For desktop notifications, Windows seems to be fine with a PNG file,
+	// unlike the window and system tray icons.
+	var err error
+	if tempDir, err = os.MkdirTemp("", "dexc"); err != nil {
+		fmt.Printf("Failed to make temp folder for image resources: %v\n", err)
+	} else if tempDir != "/" {
+		srcImg := FavIcon
+		if runtime.GOOS == "windows" {
+			srcImg = symbolSolidPNG // png ok, but Windows can be quirky with transparency
+		}
+		tmpLogoPath = filepath.Join(tempDir, "dexc.png")
+		_ = os.WriteFile(tmpLogoPath, srcImg, 0644)
+		// sendDesktopNotification will work now.
+	}
+	return
+}
 
 func main() {
 	// Wrap the actual main so defers run in it.
@@ -119,7 +141,7 @@ func limitedWindowWidthAndHeight(width int, height int) (int, int) {
 }
 
 func sendDesktopNotification(title, msg string) {
-	err := beeep.Notify(title, msg, filepath.Join(srcDir, "dexc.png"))
+	err := beeep.Notify(title, msg, tmpLogoPath)
 	if err != nil {
 		log.Errorf("error sending desktop notification: %v", err)
 		return
