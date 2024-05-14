@@ -31,6 +31,28 @@ var (
 	usr, _        = user.Current()
 	dextestDir    = filepath.Join(usr.HomeDir, "dextest")
 	decredRPCPath = filepath.Join(dextestDir, "dcr", "alpha", "rpc.cert")
+	chains        = []tatanka.ChainConfig{
+		{
+			Symbol: "dcr",
+			Config: mustEncode(&utxo.DecredConfigFile{
+				RPCUser:   "user",
+				RPCPass:   "pass",
+				RPCListen: "127.0.0.1:19561",
+				RPCCert:   decredRPCPath,
+			}),
+		},
+		{
+			Symbol: "btc",
+			Config: mustEncode(&utxo.BitcoinConfigFile{
+				RPCConfig: dexbtc.RPCConfig{
+					RPCUser: "user",
+					RPCPass: "pass",
+					RPCBind: "127.0.0.1",
+					RPCPort: 20556,
+				},
+			}),
+		},
+	}
 )
 
 func main() {
@@ -89,7 +111,7 @@ func mainErr() (err error) {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed())
+		runServer(ctx, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed(), true)
 	}()
 
 	time.Sleep(time.Second)
@@ -99,7 +121,7 @@ func mainErr() (err error) {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed())
+		runServer(ctx, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed(), true)
 	}()
 
 	time.Sleep(time.Second)
@@ -243,7 +265,33 @@ func mainErr() (err error) {
 		return errors.New("timed out waiting for SendTankagram to return")
 	}
 
+	// Fiat rate live test requires internet connection.
+	fmt.Println("Testing fiat rates...")
+	if err := cl1.SubscribeToFiatRates(); err != nil {
+		return err
+	}
+
+	// Wait for rate message.
+	<-cl1.Next()
+
+	want := len(chains)
+	got := 0
+	for _, c := range chains {
+		assetID, _ := dex.BipSymbolID(c.Symbol)
+		fiatRate := cl1.FiatRate(assetID) // check if rate has been cached.
+		if fiatRate != 0 {
+			got++
+			fmt.Printf("\nRate found for %s\n", dex.BipIDSymbol(assetID))
+		}
+	}
+
+	if got < want {
+		fmt.Printf("\nGot fiat rates for %d out of %d assets\n", got, want)
+	}
+
 	fmt.Println("!!!!!!!! Test Success !!!!!!!!")
+
+	cancel()
 
 	wg.Wait()
 
@@ -277,35 +325,14 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 	return addrs, nil
 }
 
-func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID []byte) {
+func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID []byte, disableMessariFiatRateSource bool) {
 	n := newBootNode(peerAddr.String(), peerID)
 
 	log := logMaker.Logger(fmt.Sprintf("SRV[%s]", addr))
 
 	os.MkdirAll(dir, 0755)
 
-	ttCfg := &tatanka.ConfigFile{Chains: []tatanka.ChainConfig{
-		{
-			Symbol: "dcr",
-			Config: mustEncode(&utxo.DecredConfigFile{
-				RPCUser:   "user",
-				RPCPass:   "pass",
-				RPCListen: "127.0.0.1:19561",
-				RPCCert:   decredRPCPath,
-			}),
-		},
-		{
-			Symbol: "btc",
-			Config: mustEncode(&utxo.BitcoinConfigFile{
-				RPCConfig: dexbtc.RPCConfig{
-					RPCUser: "user",
-					RPCPass: "pass",
-					RPCBind: "127.0.0.1",
-					RPCPort: 20556,
-				},
-			}),
-		},
-	}}
+	ttCfg := &tatanka.ConfigFile{Chains: chains}
 	rawCfg, _ := json.Marshal(ttCfg)
 	cfgPath := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(cfgPath, rawCfg, 0644); err != nil {
@@ -324,6 +351,13 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 		ConfigPath: cfgPath,
 		WhiteList:  []tatanka.BootNode{n},
 	}
+
+	if disableMessariFiatRateSource {
+		// Requesting multiple rates from the same IP can trigger a 429 HTTP
+		// error.
+		cfg.FiatOracleConfig.DisabledFiatSources = "Messari"
+	}
+
 	t, err := tatanka.New(cfg)
 	if err != nil {
 		log.Errorf("error creating Tatanka node: %v", err)

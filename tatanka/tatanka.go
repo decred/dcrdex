@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka/chain"
@@ -23,9 +25,17 @@ import (
 	"decred.org/dcrdex/tatanka/tanka"
 	"decred.org/dcrdex/tatanka/tcp"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
-const version = 0
+const (
+	version = 0
+
+	// tatankaUniqueID is the unique ID used to register a Tatanka as a fiat
+	// rate listener.
+	tatankaUniqueID = "Tatanka"
+)
 
 // remoteTatanka is a remote tatanka node. A remote tatanka node can either
 // be outgoing (whitelist loop) or incoming via handleInboundTatankaConnect.
@@ -110,6 +120,9 @@ type Tatanka struct {
 
 	tatankasMtx sync.RWMutex
 	tatankas    map[tanka.PeerID]*remoteTatanka
+
+	fiatRateOracle *fiatrates.Oracle
+	fiatRateChan   chan map[string]*fiatrates.FiatRateInfo
 }
 
 // Config is the configuration of the Tatanka.
@@ -122,6 +135,8 @@ type Config struct {
 
 	// TODO: Change to whitelist
 	WhiteList []BootNode
+
+	FiatOracleConfig fiatrates.Config
 }
 
 func New(cfg *Config) (*Tatanka, error) {
@@ -199,6 +214,25 @@ func New(cfg *Config) (*Tatanka, error) {
 		recentRelays:  make(map[[32]byte]time.Time),
 		clientJobs:    make(chan *clientJob, 128),
 	}
+
+	if !cfg.FiatOracleConfig.AllFiatSourceDisabled() {
+		var tickers string
+		upperCaser := cases.Upper(language.AmericanEnglish)
+		for _, c := range chainCfg.Chains {
+			tickers += upperCaser.String(c.Symbol) + ","
+		}
+		tickers = strings.Trim(tickers, ",")
+
+		t.fiatRateOracle, err = fiatrates.NewFiatOracle(cfg.FiatOracleConfig, tickers, t.log)
+		if err != nil {
+			return nil, fmt.Errorf("error initializing fiat oracle: %w", err)
+		}
+
+		// Register tatanka as a listener
+		t.fiatRateChan = make(chan map[string]*fiatrates.FiatRateInfo)
+		t.fiatRateOracle.AddFiatRateListener(tatankaUniqueID, t.fiatRateChan)
+	}
+
 	t.nets.Store(nets)
 	t.prepareHandlers()
 	t.tcpSrv, err = tcp.NewServer(&cfg.RPC, &tcpCore{t}, cfg.Logger.SubLogger("TCP"))
@@ -234,6 +268,10 @@ func (t *Tatanka) prepareHandlers() {
 
 func (t *Tatanka) assets() []uint32 {
 	return t.nets.Load().([]uint32)
+}
+
+func (t *Tatanka) fiatOracleEnabled() bool {
+	return t.fiatRateOracle != nil
 }
 
 func (t *Tatanka) tatankaNodes() []*remoteTatanka {
@@ -331,6 +369,19 @@ func (t *Tatanka) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 		defer wg.Done()
 		t.runWhitelistLoop(ctx)
 	}()
+
+	if t.fiatOracleEnabled() {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			t.fiatRateOracle.Run(t.ctx)
+		}()
+
+		go func() {
+			defer wg.Done()
+			t.broadcastRates()
+		}()
+	}
 
 	success = true
 	return &wg, nil
@@ -679,5 +730,32 @@ func (t *Tatanka) clientDisconnected(peerID tanka.PeerID) {
 	mj.SignMessage(t.priv, note)
 	for _, tt := range t.tatankaNodes() {
 		tt.Send(note)
+	}
+}
+
+// broadcastRates sends market rates to all fiat rate subscribers once new rates
+// are received from the fiat oracle.
+func (t *Tatanka) broadcastRates() {
+	for {
+		select {
+		case <-t.ctx.Done():
+			return
+		case rates, ok := <-t.fiatRateChan:
+			if !ok {
+				t.log.Debug("Tatanka stopped listening for fiat rates.")
+				return
+			}
+
+			t.clientMtx.RLock()
+			topic := t.topics[mj.TopicFiatRate]
+			t.clientMtx.RUnlock()
+
+			if topic != nil && len(topic.subscribers) > 0 {
+				t.batchSend(topic.subscribers, mj.MustNotification(mj.RouteRates, &mj.RateMessage{
+					Topic: mj.TopicFiatRate,
+					Rates: rates,
+				}))
+			}
+		}
 	}
 }

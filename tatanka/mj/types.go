@@ -11,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/tatanka/tanka"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
@@ -46,6 +47,7 @@ const (
 	RoutePostBond    = "post_bond"
 	RouteSubscribe   = "subscribe"
 	RouteUnsubscribe = "unsubscribe"
+	RouteRates       = "rates"
 
 	// client1 <=> tatankanode <=> client2
 	RouteTankagram     = "tankagram"
@@ -55,7 +57,8 @@ const (
 )
 
 const (
-	TopicMarket = "market"
+	TopicMarket   = "market"
+	TopicFiatRate = "fiat_rate"
 )
 
 type BroadcastMessageType string
@@ -159,6 +162,11 @@ type FundedMessage struct {
 	AssetID uint32          `json:"assetID"`
 	Funding json.RawMessage `json:"funding"`
 	Msg     msgjson.Message `json:"msg"`
+}
+
+type RateMessage struct {
+	Topic tanka.Topic                        `json:"topic"`
+	Rates map[string]*fiatrates.FiatRateInfo `json:"rates"`
 }
 
 type Troll struct {

@@ -310,8 +310,8 @@ func (t *Tatanka) handleSubscription(c *client, msg *msgjson.Message) *msgjson.E
 	// Send it to all other remote tatankas.
 	t.relayBroadcast(bcast, c.ID)
 
-	// Find it and broadcaast to locally-connected clients, or add the subject
-	// if it doesn't exist.
+	// Find it and broadcast to locally-connected clients, or add the subject if
+	// it doesn't exist.
 	t.clientMtx.Lock()
 	defer t.clientMtx.Unlock()
 	topic, exists := t.topics[sub.Topic]
@@ -346,7 +346,32 @@ func (t *Tatanka) handleSubscription(c *client, msg *msgjson.Message) *msgjson.E
 	}
 
 	t.sendResult(c, msg.ID, true)
+	t.replySubscription(c, sub.Topic)
 	return nil
+}
+
+// replySubscription sends a follow up reply to a sender's subscription after
+// their message has been processed successfully.
+func (t *Tatanka) replySubscription(cl tanka.Sender, topic tanka.Topic) {
+	switch topic {
+	case mj.TopicFiatRate:
+		if t.fiatOracleEnabled() {
+			rates := t.fiatRateOracle.Rates()
+			if len(rates) == 0 { // no data to send
+				return
+			}
+
+			reply := mj.MustNotification(mj.RouteRates, &mj.RateMessage{
+				Topic: mj.TopicFiatRate,
+				Rates: rates,
+			})
+
+			if err := t.send(cl, reply); err != nil {
+				peerID := cl.PeerID()
+				t.log.Errorf("error sending result to %q: %v", dex.Bytes(peerID[:]), err)
+			}
+		}
+	}
 }
 
 func (t *Tatanka) unsub(peerID tanka.PeerID, topicID tanka.Topic, subjectID tanka.Subject) *msgjson.Error {

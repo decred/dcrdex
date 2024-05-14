@@ -91,9 +91,20 @@ func FetchCoinpaprikaRates(ctx context.Context, assets []*CoinpaprikaAsset, log 
 }
 
 func getRates(ctx context.Context, url string, thing any) error {
+	return getRatesWithHeader(ctx, url, thing, nil)
+}
+
+func getRatesWithHeader(ctx context.Context, url string, thing any, header map[string]string) error {
+	ctx, cancel := context.WithTimeout(ctx, fiatRequestTimeout)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
+	}
+
+	for key, value := range header {
+		req.Header.Add(key, value)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
