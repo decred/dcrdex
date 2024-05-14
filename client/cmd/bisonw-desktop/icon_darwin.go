@@ -18,5 +18,4 @@ var FavIcon []byte // darwin doesn't use these
 //go:embed src/favicon-bw-32.png
 var FavIconBW []byte // darwin doesn't use these
 
-// On Darwin, we instead use macdriver (not webview) and
-// obj.Button().SetImage(cocoa.NSImage_InitWithData.
+// On Darwin, we instead use macdriver (not webview)

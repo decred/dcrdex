@@ -67,7 +67,6 @@ import (
 	// Ethereum loaded in client/app/importlgpl.go
 
 	"decred.org/dcrdex/dex"
-	"github.com/gen2brain/beeep"
 )
 
 const (
@@ -135,12 +134,4 @@ func limitedWindowWidthAndHeight(width int, height int) (int, int) {
 		height = 1080
 	}
 	return width, height
-}
-
-func sendDesktopNotification(title, msg string) {
-	err := beeep.Notify(title, msg, tmpLogoPath)
-	if err != nil {
-		log.Errorf("error sending desktop notification: %v", err)
-		return
-	}
 }

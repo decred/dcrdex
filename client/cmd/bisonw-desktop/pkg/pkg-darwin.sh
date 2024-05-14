@@ -74,7 +74,8 @@ function prepare() {
 		  <key>NSHighResolutionCapable</key><true/>
 		  <key>NSRequiresAquaSystemAppearance</key><false/>
 		  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
-		  <key>NSUserNotificationAlertStyle</key><string>banner</string>
+		  <key>CFBundlePackageType</key><string>APPL</string>
+		  <key>NSUserNotificationAlertStyle</key><string>alert</string>
 		  </dict></plist>" > "${CONTENTS_DIR}/Info.plist"
 }
 
