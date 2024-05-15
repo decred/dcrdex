@@ -4,13 +4,6 @@ import (
 	"fmt"
 )
 
-type BalanceType uint8
-
-const (
-	Percentage BalanceType = iota
-	Amount
-)
-
 // MarketMakingConfig is the overall configuration of the market maker.
 type MarketMakingConfig struct {
 	BotConfigs []*BotConfig `json:"botConfigs"`
@@ -110,6 +103,10 @@ type BotConfig struct {
 
 	// Only applicable for arb bots.
 	CEXCfg *BotCEXCfg `json:"cexCfg"`
+
+	// Alloc will be the initial balance allocation used when the bot is
+	// started.
+	Alloc *BotBalanceAllocation `json:"alloc"`
 
 	// Only one of the following configs should be set
 	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`

@@ -59,6 +59,7 @@ type exchangeAdaptor interface {
 	refreshAllPendingEvents(context.Context)
 	DEXBalance(assetID uint32) *BotBalance
 	CEXBalance(assetID uint32) *BotBalance
+	balances() map[uint32]*BotBalances
 	stats() *RunStats
 	updateConfig(cfg *BotConfig)
 	updateInventory(balanceDiffs *BotInventoryDiffs)
@@ -1016,6 +1017,34 @@ func (u *unifiedExchangeAdaptor) DEXTrade(rate, qty uint64, sell bool) (*core.Or
 	}
 
 	return orders[0], nil
+}
+
+type BotBalances struct {
+	DEX *BotBalance `json:"dex"`
+	CEX *BotBalance `json:"cex"`
+}
+
+func (u *unifiedExchangeAdaptor) balances() map[uint32]*BotBalances {
+	u.balancesMtx.RLock()
+	defer u.balancesMtx.RUnlock()
+
+	funds := make(map[uint32]*BotBalances, len(u.baseDexBalances))
+	for assetID := range u.baseDexBalances {
+		funds[assetID] = &BotBalances{
+			DEX: u.dexBalance(assetID),
+			CEX: u.cexBalance(assetID),
+		}
+	}
+	for assetID := range u.baseCexBalances {
+		if _, found := funds[assetID]; found { // already did it
+			continue
+		}
+		funds[assetID] = &BotBalances{
+			DEX: u.dexBalance(assetID),
+			CEX: u.cexBalance(assetID),
+		}
+	}
+	return funds
 }
 
 // dexBalance must be called with the balancesMtx locked.

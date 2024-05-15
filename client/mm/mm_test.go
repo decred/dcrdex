@@ -691,6 +691,9 @@ type tExchangeAdaptor struct {
 var _ exchangeAdaptor = (*tExchangeAdaptor)(nil)
 
 func (t *tExchangeAdaptor) refreshAllPendingEvents(context.Context) {}
+func (t *tExchangeAdaptor) balances() map[uint32]*BotBalances {
+	return nil
+}
 func (t *tExchangeAdaptor) DEXBalance(assetID uint32) *BotBalance {
 	if t.dexBalances[assetID] == nil {
 		return &BotBalance{}

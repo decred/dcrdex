@@ -203,7 +203,6 @@ type startBotForm struct {
 	appPass     encode.PassBytes
 	cfgFilePath string
 	mkt         *mm.MarketWithHost
-	balances    *mm.BotBalanceAllocation
 }
 
 type updateRunningBotForm struct {
@@ -957,24 +956,6 @@ func parseStartBotArgs(params *RawParams) (*startBotForm, error) {
 		return nil, err
 	}
 	form.mkt = mkt
-
-	dexBals, err := parseBotBalances(params.Args[4])
-	if err != nil {
-		return nil, err
-	}
-
-	cexBals := make(map[uint32]uint64)
-	if len(params.Args) > 5 {
-		cexBals, err = parseBotBalances(params.Args[5])
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	form.balances = &mm.BotBalanceAllocation{
-		DEX: dexBals,
-		CEX: cexBals,
-	}
 
 	return form, nil
 }

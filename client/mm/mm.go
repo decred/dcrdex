@@ -327,9 +327,12 @@ type CEXStatus struct {
 
 // BotStatus is state information about a configured bot.
 type BotStatus struct {
-	Config *BotConfig `json:"config"`
+	Config  *BotConfig `json:"config"`
+	Running bool       `json:"running"`
 	// RunStats being non-nil means the bot is running.
 	RunStats *RunStats `json:"runStats"`
+	// Balances is the current state of balance allocation.
+	Balances map[uint32]*BotBalances `json:"balances"`
 }
 
 // Status generates a Status for the MarketMaker. This returns the status of
@@ -345,12 +348,16 @@ func (m *MarketMaker) Status() *Status {
 		mkt := MarketWithHost{botCfg.Host, botCfg.BaseID, botCfg.QuoteID}
 		rb := runningBots[mkt]
 		var stats *RunStats
+		var balances map[uint32]*BotBalances
 		if rb != nil {
 			stats = rb.adaptor.stats()
+			balances = rb.adaptor.balances()
 		}
 		status.Bots = append(status.Bots, &BotStatus{
 			Config:   botCfg,
+			Running:  rb != nil,
 			RunStats: stats,
+			Balances: balances,
 		})
 	}
 	for _, cex := range m.cexList() {
@@ -385,7 +392,9 @@ func (m *MarketMaker) RunningBotsStatus() *Status {
 
 		status.Bots = append(status.Bots, &BotStatus{
 			Config:   cfg,
+			Running:  true,
 			RunStats: stats,
+			Balances: rb.adaptor.balances(),
 		})
 	}
 	return status
@@ -395,9 +404,9 @@ func (m *MarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.Exchang
 	cfg := m.defaultConfig()
 
 	var cexCfg *CEXConfig
-	for _, cex := range cfg.CexConfigs {
-		if cexCfg.Name == cexName {
-			cexCfg = cex
+	for _, cfg := range cfg.CexConfigs {
+		if cfg.Name == cexName {
+			cexCfg = cfg
 			break
 		}
 	}
@@ -423,6 +432,9 @@ func (m *MarketMaker) MarketReport(host string, baseID, quoteID uint32) (*Market
 	price, oracles, err := m.oracle.getOracleInfo(baseID, quoteID)
 	if err != nil {
 		return nil, err
+	}
+	if price == 0 && baseFiatRate > 0 && quoteFiatRate > 0 {
+		price = baseFiatRate / quoteFiatRate
 	}
 
 	baseFeesEst, quoteFeesEst, err := marketFees(m.core, host, baseID, quoteID, false)
@@ -697,8 +709,46 @@ func (m *MarketMaker) newBot(cfg *BotConfig, adaptor *unifiedExchangeAdaptor, or
 	}
 }
 
+// StartAllBots starts all of the bots in configuration.
+func (m *MarketMaker) StartAllBots(alternateConfigPath *string, appPW []byte) (err error) {
+	m.startUpdateMtx.Lock()
+	defer m.startUpdateMtx.Unlock()
+
+	mmCfg := m.defaultConfig()
+	if alternateConfigPath != nil {
+		mmCfg, err = getMarketMakingConfig(*alternateConfigPath)
+		if err != nil {
+			return fmt.Errorf("error loading custom market making config: %v", err)
+		}
+	}
+
+	cexMap := make(map[string]*CEXConfig)
+	for _, cexCfg := range mmCfg.CexConfigs {
+		cexMap[cexCfg.Name] = cexCfg
+	}
+
+	for _, botCfg := range mmCfg.BotConfigs {
+		mkt := &MarketWithHost{
+			Host:    botCfg.Host,
+			BaseID:  botCfg.BaseID,
+			QuoteID: botCfg.QuoteID,
+		}
+		var cexCfg *CEXConfig
+		if botCfg.CEXCfg != nil {
+			cexCfg = cexMap[botCfg.CEXCfg.Name]
+			if cexCfg == nil {
+				return fmt.Errorf("configuration error for %s. no configuration found for cex %q", mkt, botCfg.CEXCfg.Name)
+			}
+		}
+		if err = m.startBot(mkt, botCfg, cexCfg, appPW); err != nil {
+			return fmt.Errorf("error starting %s: %w", mkt, err)
+		}
+	}
+	return nil
+}
+
 // StartBot starts a market making bot.
-func (m *MarketMaker) StartBot(mkt *MarketWithHost, allocation *BotBalanceAllocation, alternateConfigPath *string, pw []byte) (err error) {
+func (m *MarketMaker) StartBot(mkt *MarketWithHost, alternateConfigPath *string, appPW []byte) (err error) {
 	m.startUpdateMtx.Lock()
 	defer m.startUpdateMtx.Unlock()
 
@@ -714,11 +764,15 @@ func (m *MarketMaker) StartBot(mkt *MarketWithHost, allocation *BotBalanceAlloca
 		return err
 	}
 
-	if err := m.balancesSufficient(allocation, mkt, cexCfg); err != nil {
+	return m.startBot(mkt, botCfg, cexCfg, appPW)
+}
+
+func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *CEXConfig, appPW []byte) (err error) {
+	if err := m.balancesSufficient(botCfg.Alloc, mkt, cexCfg); err != nil {
 		return err
 	}
 
-	if err := m.loginAndUnlockWallets(pw, botCfg); err != nil {
+	if err := m.loginAndUnlockWallets(appPW, botCfg); err != nil {
 		return err
 	}
 
@@ -750,8 +804,8 @@ func (m *MarketMaker) StartBot(mkt *MarketWithHost, allocation *BotBalanceAlloca
 	exchangeAdaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
 		botID:           mktID,
 		market:          mkt,
-		baseDexBalances: allocation.DEX,
-		baseCexBalances: allocation.CEX,
+		baseDexBalances: botCfg.Alloc.DEX,
+		baseCexBalances: botCfg.Alloc.CEX,
 		core:            m.core,
 		cex:             cex,
 		log:             logger,
@@ -803,6 +857,14 @@ func (m *MarketMaker) StartBot(mkt *MarketWithHost, allocation *BotBalanceAlloca
 	m.runningBotsMtx.Unlock()
 	exchangeAdaptor.sendStatsUpdate()
 
+	return nil
+}
+
+// StopAllBots stops all running bots.
+func (m *MarketMaker) StopAllBots() error {
+	for _, bot := range m.runningBotsLookup() {
+		bot.botCm.disconnect()
+	}
 	return nil
 }
 

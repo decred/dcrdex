@@ -221,8 +221,8 @@ func (o *priceOracle) syncMarket(baseID, quoteID uint32) (float64, []*OracleRepo
 
 	o.cachedPrices[mkt] = &cachedPrice{
 		stamp:   time.Now(),
-		price:   price,
-		oracles: oracles,
+		price:   price,   // Might be zero
+		oracles: oracles, // might be empty
 	}
 
 	return price, oracles, nil
@@ -276,7 +276,7 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 		usdVolume += mkt.USDVol
 	}
 	if usdVolume == 0 {
-		return 0, fmt.Errorf("no markets to fetch oracle price")
+		return 0, nil // No markets have data. OK.
 	}
 
 	rate := weightedSum / usdVolume

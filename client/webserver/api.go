@@ -2083,12 +2083,11 @@ func (s *WebServer) apiDisableMixer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiStartAllMarketMakingBots(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		Market   *mm.MarketWithHost       `json:"market"`
-		Balances *mm.BotBalanceAllocation `json:"balances"`
-		AppPW    encode.PassBytes         `json:"appPW"`
+		AppPW encode.PassBytes `json:"appPW"`
 	}
+	defer form.AppPW.Clear()
 	if !readPost(w, r, &form) {
 		s.writeAPIError(w, fmt.Errorf("failed to read form"))
 		return
@@ -2098,11 +2097,42 @@ func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Reque
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	if err = s.mm.StartBot(form.Market, form.Balances, nil, appPW); err != nil {
-		s.writeAPIError(w, fmt.Errorf("Error starting market making: %v", err))
+	if err = s.mm.StartAllBots(nil, appPW); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error starting mm bots: %v", err))
 		return
 	}
 
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		Market *mm.MarketWithHost `json:"market"`
+		AppPW  encode.PassBytes   `json:"appPW"`
+	}
+	defer form.AppPW.Clear()
+	if !readPost(w, r, &form) {
+		s.writeAPIError(w, fmt.Errorf("failed to read form"))
+		return
+	}
+	appPW, err := s.resolvePass(form.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	if err = s.mm.StartBot(form.Market, nil, appPW); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error starting market making: %v", err))
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiStopAllMarketMakingBots(w http.ResponseWriter, _ *http.Request) {
+	if err := s.mm.StopAllBots(); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error stopping mm bots: %v", err))
+		return
+	}
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -2114,7 +2144,10 @@ func (s *WebServer) apiStopMarketMakingBot(w http.ResponseWriter, r *http.Reques
 		s.writeAPIError(w, fmt.Errorf("failed to read form"))
 		return
 	}
-	s.mm.StopBot(form.Market)
+	if err := s.mm.StopBot(form.Market); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error stopping mm bot %q: %v", form.Market, err))
+		return
+	}
 	writeJSON(w, simpleAck(), s.indent)
 }
 

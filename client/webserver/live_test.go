@@ -2169,15 +2169,30 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 	}, nil
 }
 
-func (m *TMarketMaker) StartBot(mkt *mm.MarketWithHost, allocation *mm.BotBalanceAllocation, alternateConfigPath *string, pw []byte) (err error) {
+func (m *TMarketMaker) StartAllBots(alternateConfigPath *string, appPW []byte) (err error) {
 	m.runningBotsMtx.Lock()
+	defer m.runningBotsMtx.Unlock()
+	for mkt := range m.runningBots {
+		if err := m.startBot(&mkt, nil, appPW); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *TMarketMaker) StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, appPW []byte) (err error) {
+	m.runningBotsMtx.Lock()
+	defer m.runningBotsMtx.Unlock()
+	return m.startBot(mkt, alternateConfigPath, appPW)
+}
+
+func (m *TMarketMaker) startBot(mkt *mm.MarketWithHost, alternateConfigPath *string, pappPWw []byte) (err error) {
 	_, running := m.runningBots[*mkt]
 	if running {
 		return fmt.Errorf("bot already running for %s", mkt.String())
 	}
 	startTime := time.Now().Unix()
 	m.runningBots[*mkt] = startTime
-	m.runningBotsMtx.Unlock()
 
 	m.core.noteFeed <- &struct {
 		db.Notification
@@ -2194,6 +2209,13 @@ func (m *TMarketMaker) StartBot(mkt *mm.MarketWithHost, allocation *mm.BotBalanc
 		StartTime:    startTime,
 		Stats:        &mm.RunStats{},
 	}
+	return nil
+}
+
+func (m *TMarketMaker) StopAllBots() error {
+	m.runningBotsMtx.Lock()
+	m.runningBots = make(map[mm.MarketWithHost]int64)
+	m.runningBotsMtx.Unlock()
 	return nil
 }
 

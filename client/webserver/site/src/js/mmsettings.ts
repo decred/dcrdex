@@ -3,7 +3,6 @@ import {
   BotConfig,
   XYRange,
   OrderPlacement,
-  BalanceType,
   app,
   Spot,
   MarketReport,
@@ -155,18 +154,14 @@ const defaultMarketMakingConfig : ConfigState = {
   emptyMarketRate: 0,
   profit: 0.02,
   orderPersistence: 20,
-  baseBalanceType: BalanceType.Percentage,
-  quoteBalanceType: BalanceType.Percentage,
   baseBalance: 0,
   quoteBalance: 0,
   baseTokenFees: 0,
   quoteTokenFees: 0,
-  cexBaseBalanceType: BalanceType.Percentage,
   cexBaseBalance: 0,
   cexBaseMinBalance: 0,
   cexBaseMinTransfer: 0,
   cexQuoteBalance: 0,
-  cexQuoteBalanceType: BalanceType.Percentage,
   cexQuoteMinBalance: 0,
   cexQuoteMinTransfer: 0,
   cexRebalance: true
@@ -217,17 +212,13 @@ interface ConfigState {
   orderPersistence: number // epochs
   oracleWeighting: number
   oracleBias: number
-  baseBalanceType: BalanceType
   baseBalance: number
-  quoteBalanceType: BalanceType
   quoteBalance: number
   baseTokenFees: number
   quoteTokenFees: number
-  cexBaseBalanceType: BalanceType
   cexBaseBalance: number
   cexBaseMinBalance: number
   cexBaseMinTransfer: number
-  cexQuoteBalanceType: BalanceType
   cexQuoteBalance: number
   cexQuoteMinBalance: number
   cexQuoteMinTransfer: number
@@ -456,7 +447,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
     const fiatRates = app().fiatRatesMap
     this.marketRows.sort((a: MarketRow, b: MarketRow) => {
-      let [volA, volB] = [a.spot.vol24, b.spot.vol24]
+      let [volA, volB] = [a.spot?.vol24 ?? 0, b.spot?.vol24 ?? 0]
       if (fiatRates[a.baseID] && fiatRates[b.baseID]) {
         volA *= fiatRates[a.baseID]
         volB *= fiatRates[b.baseID]
@@ -514,9 +505,34 @@ export default class MarketMakerSettingsPage extends BasePage {
       // old config into the originalConfig.
       const idx = oldCfg as {[k: string]: any} // typescript
       for (const [k, v] of Object.entries(botCfg)) if (idx[k] !== undefined) idx[k] = v
-      let rebalanceCfg
-      oldCfg.baseTokenFees = botCfg.baseFeeAssetBalance ?? 0
-      oldCfg.quoteTokenFees = botCfg.quoteFeeAssetBalance ?? 0
+
+      // Balance allocations. Use initial allocations.
+      oldCfg.baseBalance = botCfg.alloc.dex[baseID]
+      oldCfg.quoteBalance = botCfg.alloc.dex[quoteID]
+      const [baseToken, quoteToken] = [app().assets[baseID].token, app().assets[quoteID].token]
+      if (baseToken) {
+        // We'll only show the control if the quote asset isn't the parent.
+        if (baseToken.parentID !== quoteID) {
+          if (quoteToken && quoteToken.parentID === baseToken.parentID) {
+            oldCfg.quoteTokenFees = botCfg.alloc.dex[baseToken.parentID] / 2
+            oldCfg.baseTokenFees = botCfg.alloc.dex[baseToken.parentID] / 2
+          } else oldCfg.baseTokenFees = botCfg.alloc.dex[baseToken.parentID]
+        }
+      } else if (quoteToken && quoteToken.parentID !== baseID) {
+        oldCfg.quoteTokenFees = botCfg.alloc.dex[quoteToken.parentID]
+      }
+      if (cexCfg) {
+        oldCfg.cexBaseBalance = botCfg.alloc.cex[baseID]
+        oldCfg.cexQuoteBalance = botCfg.alloc.cex[quoteID]
+        if (cexCfg.autoRebalance) {
+          oldCfg.cexRebalance = true
+          oldCfg.cexBaseMinBalance = cexCfg.autoRebalance.minBaseAmt
+          oldCfg.cexBaseMinTransfer = cexCfg.autoRebalance.minBaseTransfer
+          oldCfg.cexQuoteMinBalance = cexCfg.autoRebalance.minQuoteAmt
+          oldCfg.cexQuoteMinTransfer = cexCfg.autoRebalance.minQuoteTransfer
+        }
+      }
+
       if (mmCfg) {
         oldCfg.buyPlacements = mmCfg.buyPlacements
         oldCfg.sellPlacements = mmCfg.sellPlacements
@@ -532,21 +548,6 @@ export default class MarketMakerSettingsPage extends BasePage {
         // TODO: expose maxActiveArbs
         oldCfg.profit = arbCfg.profitTrigger
         oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
-      }
-      if (cexCfg) {
-        oldCfg.cexBaseBalance = cexCfg.baseBalance
-        oldCfg.cexBaseBalanceType = cexCfg.baseBalanceType
-        oldCfg.cexQuoteBalance = cexCfg.quoteBalance
-        oldCfg.cexQuoteBalanceType = cexCfg.quoteBalanceType
-        rebalanceCfg = cexCfg.autoRebalance
-      }
-
-      if (rebalanceCfg) {
-        oldCfg.cexRebalance = true
-        oldCfg.cexBaseMinBalance = rebalanceCfg.minBaseAmt
-        oldCfg.cexBaseMinTransfer = rebalanceCfg.minBaseTransfer
-        oldCfg.cexQuoteMinBalance = rebalanceCfg.minQuoteAmt
-        oldCfg.cexQuoteMinTransfer = rebalanceCfg.minQuoteTransfer
       }
 
       Doc.setVis(!viewOnly, page.updateButton, page.resetButton)
@@ -1310,13 +1311,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { host, baseID, quoteID, cexName, botType } = specs
     if (botType === botTypeBasicMM || !cexName) return
 
-    const reserved = (assetID: number, totalBalance: number) => {
+    const reserved = (assetID: number) => {
       let v = 0
-      for (const { cexCfg, baseID: bID, quoteID: qID, host: hostess } of this.botConfigs) {
+      for (const { cexCfg, baseID: bID, quoteID: qID, host: hostess, alloc } of this.botConfigs) {
         if (!cexCfg) continue
         if (baseID === bID && quoteID === qID && host === hostess) continue
-        if (baseID === assetID) v += calcBalanceReserve(totalBalance, cexCfg.baseBalanceType, cexCfg.baseBalance)[1]
-        else if (quoteID === assetID) v += calcBalanceReserve(totalBalance, cexCfg.quoteBalanceType, cexCfg.quoteBalance)[1]
+        v += alloc.cex[assetID]
       }
       return v
     }
@@ -1325,7 +1325,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       // This won't work if we implement live reconfiguration, because locked
       // funds would need to be considered.
       const { available } = this.cexBaseBalance = await MM.cexBalance(cexName, baseID)
-      this.cexBaseAvail = Math.max(0, available - reserved(baseID, available))
+      this.cexBaseAvail = Math.max(0, available - reserved(baseID))
     } catch (e) {
       page.botTypeErr.textContent = intl.prep(intl.ID_CEXBALANCE_ERR, { cexName, assetID: String(baseID), err: String(e) })
       Doc.show(page.botTypeErr)
@@ -1334,7 +1334,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     try {
       const { available } = this.cexQuoteBalance = await MM.cexBalance(cexName, quoteID)
-      this.cexQuoteAvail = Math.max(0, available - reserved(quoteID, available))
+      this.cexQuoteAvail = Math.max(0, available - reserved(quoteID))
     } catch (e) {
       page.botTypeErr.textContent = intl.prep(intl.ID_CEXBALANCE_ERR, { cexName, assetID: String(quoteID), err: String(e) })
       Doc.show(page.botTypeErr)
@@ -2074,20 +2074,23 @@ export default class MarketMakerSettingsPage extends BasePage {
     // Make a copy and delete either the basic mm config or the arb-mm config,
     // depending on whether a cex is selected.
     if (!this.validateFields(true)) return
-    const { updatedConfig: cfg, specs: { baseID, quoteID, host, botType, cexName } } = this
+    const { cfg, baseID, quoteID, host, botType, cexName } = this.marketStuff()
+    const { baseToken, quoteToken } = this.walletStuff()
+    const dexAlloc: Record<number, number> = {
+      [baseID]: cfg.baseBalance,
+      [quoteID]: cfg.quoteBalance
+    }
+    if (baseToken) dexAlloc[baseToken.parentID] = cfg.baseTokenFees + (dexAlloc[baseToken.parentID] || 0)
+    if (quoteToken) dexAlloc[quoteToken.parentID] = cfg.quoteTokenFees + (dexAlloc[quoteToken.parentID] || 0)
+
     const botCfg: BotConfig = {
       host: host,
       baseID: baseID,
       quoteID: quoteID,
-      baseBalanceType: cfg.baseBalanceType,
-      baseBalance: cfg.baseBalance,
-      quoteBalanceType: cfg.quoteBalanceType,
-      quoteBalance: cfg.quoteBalance,
-      baseFeeAssetBalanceType: BalanceType.Amount,
-      baseFeeAssetBalance: cfg.baseTokenFees,
-      quoteFeeAssetBalanceType: BalanceType.Amount,
-      quoteFeeAssetBalance: cfg.quoteTokenFees,
-      disabled: cfg.disabled,
+      alloc: {
+        dex: dexAlloc,
+        cex: {}
+      },
       baseWalletOptions: cfg.baseOptions,
       quoteWalletOptions: cfg.quoteOptions
     }
@@ -2098,10 +2101,12 @@ export default class MarketMakerSettingsPage extends BasePage {
       case botTypeArbMM:
         botCfg.arbMarketMakingConfig = this.arbMMConfig()
         botCfg.cexCfg = this.cexConfig()
+        botCfg.alloc.cex = { [baseID]: cfg.cexBaseBalance, [quoteID]: cfg.cexQuoteBalance }
         break
       case botTypeBasicArb:
         botCfg.simpleArbConfig = this.basicArbConfig()
         botCfg.cexCfg = this.cexConfig()
+        botCfg.alloc.cex = { [baseID]: cfg.cexBaseBalance, [quoteID]: cfg.cexQuoteBalance }
     }
 
     await MM.updateBotConfig(botCfg)
@@ -2157,13 +2162,8 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   cexConfig (): BotCEXCfg {
-    const { updatedConfig: cfg } = this
     const cexCfg : BotCEXCfg = {
-      name: this.specs.cexName || '',
-      baseBalanceType: BalanceType.Percentage,
-      baseBalance: cfg.cexBaseBalance,
-      quoteBalanceType: BalanceType.Percentage,
-      quoteBalance: cfg.cexQuoteBalance
+      name: this.specs.cexName as string
     }
     if (this.page.cexRebalanceCheckbox.checked) {
       cexCfg.autoRebalance = this.autoRebalanceConfig()
@@ -2196,20 +2196,22 @@ export default class MarketMakerSettingsPage extends BasePage {
    * balance, a message communicating this is displayed.
    */
   setupBalanceSelectors (viewOnly: boolean) {
-    const { page, updatedConfig: cfg, specs: { host, baseID, quoteID }, botConfigs } = this
+    const { page, updatedConfig: cfg, specs: { baseID, quoteID }, mmStatus } = this
     const { wallet: { balance: { available: bAvail } }, unitInfo: bui, token: bToken } = app().assets[baseID]
     const { wallet: { balance: { available: qAvail } }, unitInfo: qui, token: qToken } = app().assets[quoteID]
 
     let baseReservedByOtherBots = 0
     let quoteReservedByOtherBots = 0
-    for (const botCfg of botConfigs) {
-      if (botCfg.baseID === baseID && botCfg.quoteID === quoteID && botCfg.host === host) {
-        continue
+
+    // Subtract any balance allocations for currently running bots. Pretty
+    // soon, core account for this in their reported available balance.
+    for (const botStatus of mmStatus.bots) {
+      if (botStatus.running) {
+        const baseBal = botStatus.balances[baseID].dex
+        if (baseBal) baseReservedByOtherBots += baseBal.available + baseBal.locked
+        const quoteBal = botStatus.balances[quoteID].dex
+        if (quoteBal) quoteReservedByOtherBots += quoteBal.available + quoteBal.locked
       }
-      if (botCfg.baseID === baseID) baseReservedByOtherBots += botCfg.baseBalance
-      if (botCfg.quoteID === baseID) baseReservedByOtherBots += botCfg.quoteBalance
-      if (botCfg.baseID === quoteID) quoteReservedByOtherBots += botCfg.baseBalance
-      if (botCfg.quoteID === quoteID) quoteReservedByOtherBots += botCfg.quoteBalance
     }
 
     const baseMaxPercent = baseReservedByOtherBots < 100 ? 100 - baseReservedByOtherBots : 0
@@ -2260,7 +2262,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     this.baseBalance = new XYRangeHandler(baseXYRange, cfg.baseBalance, {
       disabled: viewOnly, settingsDict: cfg, settingsKey: 'baseBalance',
-      changed: () => { this.updateModifiedMarkers() }
+      changed: () => { this.updateModifiedMarkers() },
+      convert: (_: number, y: number) => Math.round(y * bui.conventional.conversionFactor)
     })
     page.baseBalanceContainer.appendChild(this.baseBalance.control)
     if (baseMaxAvailable > 0) Doc.show(page.baseBalanceContainer)
@@ -2281,7 +2284,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     this.quoteBalance = new XYRangeHandler(quoteXYRange, cfg.quoteBalance, {
       disabled: viewOnly, settingsDict: cfg, settingsKey: 'quoteBalance',
-      changed: () => { this.updateModifiedMarkers() }
+      changed: () => { this.updateModifiedMarkers() },
+      convert: (_: number, y: number) => Math.round(y * qui.conventional.conversionFactor)
     })
     page.quoteBalanceContainer.appendChild(this.quoteBalance.control)
     if (quoteMaxAvailable > 0) Doc.show(page.quoteBalanceContainer)
@@ -2324,7 +2328,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   setupCEXSelectors (viewOnly: boolean) {
     const {
       page, updatedConfig: cfg, originalConfig: oldCfg, specs: { host, baseID, quoteID, botType, cexName },
-      botConfigs
+      mmStatus
     } = this
     Doc.hide(
       page.cexRebalanceSettings, page.cexBaseBalanceBox, page.cexBaseRebalanceOpts, page.noBaseCEXBalance,
@@ -2348,36 +2352,19 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.dexQuoteBalName.textContent = page.cexQuoteBalName.textContent = qName
 
     let baseReservedByOtherBots = 0
-    let basePercentReservedByOtherBots = 0
     let quoteReservedByOtherBots = 0
-    let quotePercentReservedByOtherBots = 0
-    const processAssetBalance = (assetID: number, balanceType: BalanceType, balanceFactor: number) => {
-      switch (assetID) {
-        case baseID: {
-          const [pct, bal] = calcBalanceReserve(bAvail, balanceType, balanceFactor)
-          baseReservedByOtherBots += bal
-          basePercentReservedByOtherBots += pct
-          break
-        }
-        case quoteID: {
-          const [pct, bal] = calcBalanceReserve(qAvail, balanceType, balanceFactor)
-          quoteReservedByOtherBots += bal
-          quotePercentReservedByOtherBots += pct
-        }
+
+    for (const botStatus of mmStatus.bots) {
+      if (botStatus.running) {
+        const baseBal = botStatus.balances[baseID].cex
+        if (baseBal) baseReservedByOtherBots += baseBal.available + baseBal.locked
+        const quoteBal = botStatus.balances[quoteID].cex
+        if (quoteBal) quoteReservedByOtherBots += quoteBal.available + quoteBal.locked
       }
     }
 
-    for (const botCfg of botConfigs) {
-      if (botCfg.baseID === baseID && botCfg.quoteID === quoteID && botCfg.host === host) {
-        continue
-      }
-      if (!botCfg.cexCfg) continue
-      processAssetBalance(botCfg.baseID, botCfg.cexCfg.baseBalanceType, botCfg.cexCfg.baseBalance)
-      processAssetBalance(botCfg.quoteID, botCfg.cexCfg.quoteBalanceType, botCfg.cexCfg.quoteBalance)
-    }
-
-    const baseMaxPercent = basePercentReservedByOtherBots < 100 ? 100 - basePercentReservedByOtherBots : 0
-    const quoteMaxPercent = quotePercentReservedByOtherBots < 100 ? 100 - quotePercentReservedByOtherBots : 0
+    const baseMaxPercent = Math.max(0, (1 - (baseReservedByOtherBots / bAvail)) * 100)
+    const quoteMaxPercent = Math.max(0, (1 - (quoteReservedByOtherBots / qAvail)) * 100)
     const bRemain = baseReservedByOtherBots <= bAvail ? bAvail - baseReservedByOtherBots : 0
     const qRemain = quoteReservedByOtherBots <= qAvail ? qAvail - quoteReservedByOtherBots : 0
     const baseMaxAvailable = Doc.conventionalCoinValue(bRemain, bui)
@@ -2418,10 +2405,11 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     Doc.empty(page.cexBaseBalanceContainer, page.cexQuoteBalanceContainer, page.cexBaseMinBalanceContainer, page.cexQuoteMinBalanceContainer)
 
-    const [basePct] = calcBalanceReserve(bAvail, cfg.cexBaseBalanceType, cfg.cexBaseBalance)
+    const basePct = cfg.cexBaseBalance / bAvail * 100
     this.cexBaseBalanceRange = new XYRangeHandler(baseXYRange, basePct * 100, {
       disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexBaseBalance',
-      changed: () => { this.updateModifiedMarkers() }
+      changed: () => { this.updateModifiedMarkers() },
+      convert: (_: number, y: number) => Math.round(y * bui.conventional.conversionFactor)
     })
     page.cexBaseBalanceContainer.appendChild(this.cexBaseBalanceRange.control)
 
@@ -2429,7 +2417,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (oldCfg.cexBaseMinBalance === 0) oldCfg.cexBaseMinBalance = minBaseBalance
     this.cexBaseMinBalanceRange = new XYRangeHandler(baseXYRange, minBaseBalance, {
       disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexBaseMinBalance',
-      updated: () => { this.updateModifiedMarkers() }
+      updated: () => { this.updateModifiedMarkers() },
+      convert: (_: number, y: number) => Math.round(y * bui.conventional.conversionFactor)
     })
     page.cexBaseMinBalanceContainer.appendChild(this.cexBaseMinBalanceRange.control)
 
@@ -2437,10 +2426,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (oldCfg.cexBaseMinTransfer === 0) oldCfg.cexBaseMinTransfer = cfg.cexBaseMinTransfer
     page.cexBaseTransferInput.value = Doc.formatCoinValue(cfg.cexBaseMinTransfer, bui)
 
-    const [quotePct] = calcBalanceReserve(qAvail, cfg.cexQuoteBalanceType, cfg.cexQuoteBalance)
+    const quotePct = cfg.cexQuoteBalance / qAvail * 100
     this.cexQuoteBalanceRange = new XYRangeHandler(quoteXYRange, quotePct * 100, {
       disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexQuoteBalance',
-      changed: () => { this.updateModifiedMarkers() }
+      changed: () => { this.updateModifiedMarkers() },
+      convert: (_: number, y: number) => Math.round(y * qui.conventional.conversionFactor)
     })
     page.cexQuoteBalanceContainer.appendChild(this.cexQuoteBalanceRange.control)
 
@@ -2449,7 +2439,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (oldCfg.cexQuoteMinBalance === 0) oldCfg.cexQuoteMinBalance = minQuoteBalance
     this.cexQuoteMinBalanceRange = new XYRangeHandler(quoteXYRange, minQuoteBalance, {
       disabled: viewOnly, settingsDict: cfg, settingsKey: 'cexQuoteMinBalance',
-      changed: () => { this.updateModifiedMarkers() }
+      changed: () => { this.updateModifiedMarkers() },
+      convert: (_: number, y: number) => Math.round(y * qui.conventional.conversionFactor)
     })
     page.cexQuoteMinBalanceContainer.appendChild(this.cexQuoteMinBalanceRange.control)
 
@@ -2582,8 +2573,9 @@ export default class MarketMakerSettingsPage extends BasePage {
         if (opt.description) tmpl.tooltip.dataset.tooltip = opt.description
         const handler = new XYRangeHandler(opt.xyRange, parseInt(currVal), {
           roundX: opt.xyRange.roundX, roundY: opt.xyRange.roundY, disabled: viewOnly,
-          settingsDict: optionsDict, settingsKey: opt.key, dictValueAsString: true,
-          changed: () => { this.updateModifiedMarkers() }
+          settingsDict: optionsDict, settingsKey: opt.key,
+          changed: () => { this.updateModifiedMarkers() },
+          convert: (x: number) => String(x)
         })
         const setValue = (x: string) => { handler.setValue(parseInt(x)) }
         storeWalletSettingControl(opt.key, tmpl.sliderContainer, setValue, quote)
@@ -2812,17 +2804,6 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 }
 
-function calcBalanceReserve (totalBalance: number, balanceType: BalanceType, balanceFactor: number): [number, number] {
-  switch (balanceType) {
-    case BalanceType.Amount:
-      return [balanceFactor / totalBalance, balanceFactor]
-    case BalanceType.Percentage:
-      return [balanceFactor / 100, Math.round(balanceFactor / 100 * totalBalance)]
-    default: // Throw error
-  }
-  throw Error(`unknown balance type ${balanceType}`)
-}
-
 function calculateQuoteLot (lotSize: number, baseID:number, quoteID: number, spot?: Spot) {
   const baseRate = app().fiatRatesMap[baseID]
   const quoteRate = app().fiatRatesMap[quoteID]
@@ -2837,7 +2818,8 @@ function calculateQuoteLot (lotSize: number, baseID:number, quoteID: number, spo
 }
 
 function isViewOnly (specs: BotSpecs, mmStatus: MarketMakingStatus) : boolean {
-  return (Boolean(botConfig(specs, mmStatus)) && mmStatus.running) || (specs.startTime !== undefined && specs.startTime > 0)
+  const botStatus = mmStatus.bots.find(({ config: cfg }) => cfg.host === specs.host && cfg.baseID === specs.baseID && cfg.quoteID === specs.quoteID)
+  return (botStatus && botStatus.running) || (specs.startTime !== undefined && specs.startTime > 0)
 }
 
 async function botConfig (specs: BotSpecs, mmStatus: MarketMakingStatus) : Promise<BotConfig | null> {
@@ -2891,7 +2873,7 @@ class PlacementsChart extends Chart {
 
   render () {
     const { ctx, canvas, theme, settingsPage } = this
-    if (canvas.width === 0) return
+    if (canvas.width === 0 || !settingsPage.marketReport) return
     const { page, cfg: { buyPlacements, sellPlacements, profit }, baseFiatRate, botType } = settingsPage.marketStuff()
     if (botType === botTypeBasicArb) return
 

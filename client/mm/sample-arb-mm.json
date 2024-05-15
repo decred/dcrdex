@@ -14,6 +14,16 @@
                 "multisplit": "true",
                 "multisplitbuffer": "5"
             },
+            "alloc": {
+                "dex": {
+                    "60": 1000000000,
+                    "0": 10000000
+                },
+                "cex": {
+                    "60": 1000000000,
+                    "0": 10000000
+                }
+            },
             "arbMarketMakingConfig": {
                 "cexName": "Binance",
                 "buyPlacements": [

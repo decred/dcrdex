@@ -1816,7 +1816,7 @@ func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64) (
 		return 0, err
 	}
 
-	dcr.log.Infof("SingleLotRedeemFees: worst case = %d, feeSuggestion = %d", preRedeem.Estimate.RealisticWorstCase, feeSuggestion)
+	dcr.log.Tracef("SingleLotRedeemFees: worst case = %d, feeSuggestion = %d", preRedeem.Estimate.RealisticWorstCase, feeSuggestion)
 
 	return preRedeem.Estimate.RealisticWorstCase, nil
 }
