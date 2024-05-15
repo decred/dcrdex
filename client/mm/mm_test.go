@@ -845,7 +845,7 @@ func TestAvailableBalances(t *testing.T) {
 	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 7e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{0: 8e5, 60001: 6e5})
 	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
 
-	mm.runningBots[*btcUsdc] = &runningBot{
+	rb := &runningBot{
 		adaptor: &tExchangeAdaptor{
 			dexBalances: map[uint32]*BotBalance{
 				60:    {Available: 1e5},
@@ -857,8 +857,9 @@ func TestAvailableBalances(t *testing.T) {
 				0:     {Available: 3e5},
 			},
 		},
-		botCfg: cfg.BotConfigs[1],
 	}
+	rb.botCfgV.Store(cfg.BotConfigs[1])
+	mm.runningBots[*btcUsdc] = rb
 
 	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 3e5}, map[uint32]uint64{})
 	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 7e5, 0: 3e5}, map[uint32]uint64{60: 9e5, 0: 5e5})

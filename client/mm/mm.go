@@ -6,10 +6,10 @@ package mm
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
@@ -82,168 +82,36 @@ type centralizedExchange struct {
 	connectErr string
 }
 
-type bot interface {
-	dex.Connector
-	updateConfig(cfg *BotConfig) error
-}
-
-// botConnectionMaster is an extension of dex.ConnectionMaster that allows
-// pausing and resuming of the bot in order to update the configuration.
-type botConnectionMaster struct {
-	ctx         context.Context
-	done        chan struct{}
-	closeDone   func()
-	donePausing chan struct{}
-
-	// mtx is locked for the entire duration of each operation.
-	mtx    sync.Mutex
-	bot    bot
-	botCM  *dex.ConnectionMaster
-	paused bool
-}
-
-// newBotConnectionMaster creates a new botConnectionMaster, and starts the
-// bot. Unlike the dex.ConnectionMaster, the bot can only be started once.
-func newBotConnectionMaster(ctx context.Context, bot bot) (*botConnectionMaster, error) {
-	cm := dex.NewConnectionMaster(bot)
-	err := cm.ConnectOnce(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	done := make(chan struct{})
-
-	closeDoneCtx, closeDone := context.WithCancel(context.Background())
-	go func() {
-		<-closeDoneCtx.Done()
-		close(done)
-	}()
-
-	bcm := &botConnectionMaster{
-		bot:   bot,
-		botCM: cm,
-		ctx:   ctx,
-		done:  done,
-		closeDone: func() {
-			closeDone()
-		},
-		donePausing: make(chan struct{}, 16),
-	}
-
-	bcm.closeDoneWhenBotDone()
-
-	return bcm, nil
-}
-
-func (b *botConnectionMaster) closeDoneWhenBotDone() {
-	go func() {
-		<-b.botCM.Done()
-		b.mtx.Lock()
-		defer b.mtx.Unlock()
-
-		if !b.paused {
-			b.closeDone()
-		} else {
-			select {
-			case b.donePausing <- struct{}{}:
-			default:
-			}
-		}
-	}()
-}
-
-func (b *botConnectionMaster) disconnect() {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-
-	b.botCM.Disconnect()
-	b.closeDone()
-}
-
-func (b *botConnectionMaster) pause() error {
-	pause := func() error {
-		b.mtx.Lock()
-		defer b.mtx.Unlock()
-
-		if b.paused {
-			return errors.New("already paused")
-		}
-		if !b.botCM.On() {
-			return errors.New("bot not running")
-		}
-		b.paused = true
-		b.botCM.Disconnect()
-		return nil
-	}
-
-	if err := pause(); err != nil {
-		return err
-	}
-
-	<-b.donePausing
-	return nil
-}
-
-func (b *botConnectionMaster) resume() error {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-
-	if !b.paused {
-		return errors.New("bot not paused")
-	}
-	if b.botCM.On() {
-		return errors.New("bot running")
-	}
-
-	err := b.botCM.ConnectOnce(b.ctx)
-	if err != nil {
-		b.paused = false
-		b.closeDone()
-		return err
-	}
-
-	b.paused = false
-	b.closeDoneWhenBotDone()
-	return nil
-}
-
-func (b *botConnectionMaster) updateConfig(cfg *BotConfig) error {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-
-	if b.botCM.On() || !b.paused {
-		return errors.New("bot must be paused to update config")
-	}
-
-	return b.bot.updateConfig(cfg)
-}
-
 type runningBot struct {
 	adaptor exchangeAdaptor
-	botCm   *botConnectionMaster
+	botCM   *dex.ConnectionMaster
+	paused  atomic.Bool
 	cexCfg  *CEXConfig
 
-	botCfgMtx sync.RWMutex
-	botCfg    *BotConfig
+	botCfgV atomic.Value // *BotConfig
+}
+
+func (rb *runningBot) botCfg() *BotConfig {
+	if cfg := rb.botCfgV.Load(); cfg != nil {
+		return cfg.(*BotConfig)
+	}
+	return nil
 }
 
 func (rb *runningBot) assets() map[uint32]interface{} {
 	assets := make(map[uint32]interface{})
-
-	rb.botCfgMtx.RLock()
-	defer rb.botCfgMtx.RUnlock()
-
-	assets[rb.botCfg.BaseID] = struct{}{}
-	assets[rb.botCfg.QuoteID] = struct{}{}
-	assets[feeAsset(rb.botCfg.BaseID)] = struct{}{}
-	assets[feeAsset(rb.botCfg.QuoteID)] = struct{}{}
+	cfg := rb.botCfg()
+	assets[cfg.BaseID] = struct{}{}
+	assets[cfg.QuoteID] = struct{}{}
+	assets[feeAsset(cfg.BaseID)] = struct{}{}
+	assets[feeAsset(cfg.QuoteID)] = struct{}{}
 
 	return assets
 }
 
 func (rb *runningBot) cexName() string {
-	if rb.botCfg.CEXCfg != nil {
-		return rb.botCfg.CEXCfg.Name
+	if cfg := rb.botCfg(); cfg.CEXCfg != nil {
+		return cfg.CEXCfg.Name
 	}
 	return ""
 }
@@ -386,12 +254,8 @@ func (m *MarketMaker) RunningBotsStatus() *Status {
 	for _, rb := range runningBots {
 		stats := rb.adaptor.stats()
 
-		rb.botCfgMtx.RLock()
-		cfg := rb.botCfg
-		rb.botCfgMtx.RUnlock()
-
 		status.Bots = append(status.Bots, &BotStatus{
-			Config:   cfg,
+			Config:   rb.botCfg(),
 			Running:  true,
 			RunStats: stats,
 			Balances: rb.adaptor.balances(),
@@ -695,7 +559,7 @@ func (m *MarketMaker) cexInUse(cexName string) bool {
 	return false
 }
 
-func (m *MarketMaker) newBot(cfg *BotConfig, adaptor *unifiedExchangeAdaptor, oracle oracle, log dex.Logger) (bot, error) {
+func (m *MarketMaker) newBot(cfg *BotConfig, adaptor *unifiedExchangeAdaptor, oracle oracle, log dex.Logger) (dex.Connector, error) {
 	mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	switch {
 	case cfg.ArbMarketMakerConfig != nil:
@@ -824,21 +688,16 @@ func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *C
 		return err
 	}
 
-	botCm, err := newBotConnectionMaster(m.ctx, bot)
-	if err != nil {
-		return err
-	}
+	botCM := dex.NewConnectionMaster(bot)
 
 	go func() {
-		<-botCm.done
+		botCM.Wait()
 		adaptorCm.Disconnect()
 		m.runningBotsMtx.Lock()
 		if bot, found := m.runningBots[*mkt]; found {
-			bot.botCfgMtx.RLock()
-			if bot.botCfg.requiresPriceOracle() {
+			if bot.botCfg().requiresPriceOracle() {
 				m.oracle.stopAutoSyncingMarket(mkt.BaseID, mkt.QuoteID)
 			}
-			bot.botCfgMtx.RUnlock()
 			delete(m.runningBots, *mkt)
 		}
 		m.runningBotsMtx.Unlock()
@@ -847,13 +706,15 @@ func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *C
 
 	startedBot = true
 
-	m.runningBotsMtx.Lock()
-	m.runningBots[*mkt] = &runningBot{
+	rb := &runningBot{
 		adaptor: exchangeAdaptor,
-		botCm:   botCm,
-		botCfg:  botCfg,
+		botCM:   botCM,
 		cexCfg:  cexCfg,
 	}
+	rb.botCfgV.Store(botCfg)
+
+	m.runningBotsMtx.Lock()
+	m.runningBots[*mkt] = rb
 	m.runningBotsMtx.Unlock()
 	exchangeAdaptor.sendStatsUpdate()
 
@@ -863,7 +724,7 @@ func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *C
 // StopAllBots stops all running bots.
 func (m *MarketMaker) StopAllBots() error {
 	for _, bot := range m.runningBotsLookup() {
-		bot.botCm.disconnect()
+		bot.botCM.Disconnect()
 	}
 	return nil
 }
@@ -875,7 +736,7 @@ func (m *MarketMaker) StopBot(mkt *MarketWithHost) error {
 	if !found {
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
-	bot.botCm.disconnect()
+	bot.botCM.Disconnect()
 	return nil
 }
 
@@ -1036,14 +897,17 @@ func (m *MarketMaker) UpdateRunningBotInventory(mkt *MarketWithHost, balanceDiff
 		return err
 	}
 
-	if err := runningBot.botCm.pause(); err != nil {
-		return err
+	if !runningBot.paused.CompareAndSwap(false, true) {
+		return fmt.Errorf("bot already paused")
 	}
+	defer runningBot.paused.Store(false)
+
+	runningBot.botCM.Disconnect()
 
 	runningBot.adaptor.updateInventory(balanceDiffs)
 
-	if err := runningBot.botCm.resume(); err != nil {
-		return err
+	if err := runningBot.botCM.ConnectOnce(m.ctx); err != nil {
+		return fmt.Errorf("Error restarting bot after inventory update: %v", err)
 	}
 
 	return nil
@@ -1068,9 +932,12 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
 
-	runningBot.botCfgMtx.RLock()
-	oldCfg := runningBot.botCfg
-	runningBot.botCfgMtx.RUnlock()
+	if !runningBot.paused.CompareAndSwap(false, true) {
+		return fmt.Errorf("bot already paused")
+	}
+	defer runningBot.paused.Store(false)
+
+	oldCfg := runningBot.botCfg()
 	if err := validRunningBotCfgUpdate(oldCfg, cfg); err != nil {
 		return err
 	}
@@ -1107,29 +974,24 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 		stoppedOracle = true
 	}
 
-	if err := runningBot.botCm.pause(); err != nil {
-		return err
+	if !runningBot.paused.CompareAndSwap(false, true) {
+		return fmt.Errorf("bot already paused")
 	}
+	defer runningBot.paused.Store(false)
 
-	if updateErr := runningBot.botCm.updateConfig(cfg); updateErr != nil {
-		if resumeErr := runningBot.botCm.resume(); resumeErr != nil {
-			m.log.Errorf("Error resuming bot after failed config update: %v", resumeErr)
-		}
-		return updateErr
-	}
+	runningBot.botCM.Disconnect()
 
 	runningBot.adaptor.updateConfig(cfg)
+
 	if balanceDiffs != nil {
 		runningBot.adaptor.updateInventory(balanceDiffs)
 	}
 
-	if err := runningBot.botCm.resume(); err != nil {
-		return err
+	if err := runningBot.botCM.ConnectOnce(m.ctx); err != nil {
+		return fmt.Errorf("error restarting bot after config update: %v", err)
 	}
 
-	runningBot.botCfgMtx.Lock()
-	runningBot.botCfg = cfg
-	runningBot.botCfgMtx.Unlock()
+	runningBot.botCfgV.Store(cfg)
 
 	updateSuccess = true
 
