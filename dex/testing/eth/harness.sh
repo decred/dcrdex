@@ -289,6 +289,9 @@ ETH_SWAP_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${N
 echo "Deploying USDC contract."
 TEST_USDC_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20(\"${ALPHA_ADDRESS}\",\"${TEST_TOKEN}\",6)" | sed 's/"//g')
 
+echo "Deploying USDT contract."
+TEST_USDT_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20(\"${ALPHA_ADDRESS}\",\"${TEST_TOKEN}\",6)" | sed 's/"//g')
+
 echo "Deploying MultiBalance contract."
 MULTIBALANCE_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ALPHA_ADDRESS}\",\"${MULTIBALANCE_BIN}\")" | sed 's/"//g')
 
@@ -320,6 +323,15 @@ EOF
 
 echo "Deploying ERC20SwapV0 contract for USDC."
 USDC_SWAP_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20Swap(\"${ALPHA_ADDRESS}\",\"${ERC20_SWAP_V0}\",\"${TEST_USDC_CONTRACT_ADDR}\")" | sed 's/"//g')
+
+TEST_USDT_CONTRACT_ADDR=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${TEST_USDT_CONTRACT_HASH}\")" | sed 's/"//g')
+echo "Test USDT contract address is ${TEST_USDT_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/test_usdt_contract_address.txt"
+cat > "${NODES_ROOT}/test_usdt_contract_address.txt" <<EOF
+${TEST_USDT_CONTRACT_ADDR}
+EOF
+
+echo "Deploying ERC20SwapV0 contract for USDT."
+USDT_SWAP_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20Swap(\"${ALPHA_ADDRESS}\",\"${ERC20_SWAP_V0}\",\"${TEST_USDT_CONTRACT_ADDR}\")" | sed 's/"//g')
 
 mine_pending_txs
 
@@ -357,10 +369,22 @@ cat > "${NODES_ROOT}/harness-ctl/sendUSDC" <<EOF
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/sendUSDC"
 
+cat > "${NODES_ROOT}/harness-ctl/sendUSDT" <<EOF
+#!/usr/bin/env bash
+./alpha attach --preload loadTestToken.js --exec "transfer(\"${TEST_USDT_CONTRACT_ADDR}\",6,\"\$1\",\$2)"
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/sendUSDT"
+
 USDC_SWAP_CONTRACT_ADDR=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${USDC_SWAP_CONTRACT_HASH}\")" | sed 's/"//g')
 echo "ERC20 SWAP contract address is ${USDC_SWAP_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/usdc_swap_contract_address.txt"
 cat > "${NODES_ROOT}/usdc_swap_contract_address.txt" <<EOF
 ${USDC_SWAP_CONTRACT_ADDR}
+EOF
+
+USDT_SWAP_CONTRACT_ADDR=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${USDT_SWAP_CONTRACT_HASH}\")" | sed 's/"//g')
+echo "ERC20 SWAP contract address is ${USDT_SWAP_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/usdt_swap_contract_address.txt"
+cat > "${NODES_ROOT}/usdt_swap_contract_address.txt" <<EOF
+${USDT_SWAP_CONTRACT_ADDR}
 EOF
 
 MULTIBALANCE_CONTRACT_ADDR=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${MULTIBALANCE_CONTRACT_HASH}\")" | sed 's/"//g')

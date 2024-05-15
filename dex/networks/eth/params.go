@@ -256,6 +256,7 @@ type Redemption struct {
 }
 
 var usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
+var usdtTokenID, _ = dex.BipSymbolID("usdt.eth")
 
 // Gases lists the expected gas required for various DEX and wallet operations.
 type Gases struct {

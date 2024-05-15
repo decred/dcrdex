@@ -606,6 +606,7 @@ var bipIDs = map[uint32]string{
 	49344: "stash",
 	// Ethereum reserved token range 60000-60999
 	60001: "usdc.eth",
+	60002: "usdt.eth",
 	// END Ethereum reserved token range
 	65536:  "keth",
 	88888:  "ryo[c0ban]",
@@ -619,6 +620,7 @@ var bipIDs = map[uint32]string{
 	966001: "usdc.polygon",
 	966002: "weth.polygon",
 	966003: "wbtc.polygon",
+	966004: "usdt.polygon",
 	// END Polygon reserved token range
 	1171337:  "ilt",
 	1313114:  "etho",

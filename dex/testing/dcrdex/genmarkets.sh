@@ -148,6 +148,24 @@ if [ $ETH_ON -eq 0 ]; then
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
             "parcelSize": 4
+        },
+        {
+            "base": "BTC_simnet",
+            "quote": "USDT_simnet",
+            "lotSize": 1000000,
+            "rateStep": 10000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+        },
+        {
+            "base": "USDC_simnet",
+            "quote": "USDT_simnet",
+            "lotSize": 10000000,
+            "rateStep": 10000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
 EOF
 else echo "Ethereum is not running. Configuring dcrdex markets without ETH."
 fi
@@ -167,6 +185,15 @@ if [ $POLYGON_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "USDC_POLYGON_simnet",
+            "lotSize": 1000000,
+            "rateStep": 10000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "USDT_POLYGON_simnet",
             "lotSize": 1000000,
             "rateStep": 10000,
             "epochDuration": ${EPOCH_DURATION},
@@ -350,6 +377,12 @@ cat << EOF >> "${FILEPATH}"
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2
+        },
+        "USDT_simnet": {
+            "bip44symbol": "usdt.eth",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2
 EOF
 fi # end if ETH_ON
 
@@ -375,6 +408,12 @@ cat << EOF >> "${FILEPATH}"
         },
         "USDC_POLYGON_simnet": {
             "bip44symbol": "usdc.polygon",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2
+        },
+        "USDT_POLYGON_simnet": {
+            "bip44symbol": "usdt.polygon",
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2
