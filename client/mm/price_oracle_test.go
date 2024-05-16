@@ -11,6 +11,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/btc"
 	_ "decred.org/dcrdex/client/asset/dcr"
 	_ "decred.org/dcrdex/client/asset/eth"
+	"github.com/davecgh/go-spew/spew"
 
 	"decred.org/dcrdex/dex"
 )
@@ -21,19 +22,67 @@ func TestPriceOracle(t *testing.T) {
 
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 
-	markets := []*mkt{
-		{base: 42, quote: 0},
-		{base: 60, quote: 0},
-	}
+	oracle := newPriceOracle(ctx, logger)
 
-	oracle, err := newPriceOracle(ctx, markets, logger)
-	if err != nil {
-		t.Fatalf("error creating price oracle: %v", err)
+	markets := []*marketPair{
+		{baseID: 42, quoteID: 0},
+		{baseID: 60, quoteID: 0},
 	}
-
 	for _, mkt := range markets {
-		price := oracle.getMarketPrice(mkt.base, mkt.quote)
-		fmt.Printf("market %d - %d, price: %v\n", mkt.base, mkt.quote, price)
+		price, oracleReport, err := oracle.getOracleInfo(mkt.baseID, mkt.quoteID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Println("~~~~~ Get oracle info result:", mkt)
+		fmt.Printf("Price: %f, OracleReport: %s \n", price, spew.Sdump(oracleReport))
+
+		// Should be the same because cached
+		priceOnly := oracle.getMarketPrice(mkt.baseID, mkt.quoteID)
+		if priceOnly != price {
+			t.Fatalf("Expected price %f, got %f", price, priceOnly)
+		}
+	}
+}
+
+func TestAutoSyncPriceOracle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
+
+	oracle := newPriceOracle(ctx, logger)
+
+	markets := []*marketPair{
+		{baseID: 42, quoteID: 0},
+		{baseID: 60, quoteID: 0},
+	}
+	for _, mkt := range markets {
+		err := oracle.startAutoSyncingMarket(mkt.baseID, mkt.quoteID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = oracle.startAutoSyncingMarket(mkt.baseID, mkt.quoteID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		price, oracleReport, err := oracle.getOracleInfo(mkt.baseID, mkt.quoteID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		fmt.Println("~~~~~ Get oracle info result:", mkt)
+		fmt.Printf("Price: %f, OracleReport: %s \n", price, spew.Sdump(oracleReport))
+
+		oracle.stopAutoSyncingMarket(mkt.baseID, mkt.quoteID)
+		if !oracle.marketIsAutoSyncing(mkt.baseID, mkt.quoteID) {
+			t.Fatalf("Expected market to be auto-syncing")
+		}
+		oracle.stopAutoSyncingMarket(mkt.baseID, mkt.quoteID)
+		if oracle.marketIsAutoSyncing(mkt.baseID, mkt.quoteID) {
+			t.Fatalf("Expected market to not be auto-syncing")
+		}
 	}
 }
 

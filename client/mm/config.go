@@ -4,13 +4,6 @@ import (
 	"fmt"
 )
 
-type BalanceType uint8
-
-const (
-	Percentage BalanceType = iota
-	Amount
-)
-
 // MarketMakingConfig is the overall configuration of the market maker.
 type MarketMakingConfig struct {
 	BotConfigs []*BotConfig `json:"botConfigs"`
@@ -53,12 +46,43 @@ type AutoRebalanceConfig struct {
 // that should be allocated to the bot on that CEX, and the configuration
 // for automatically rebalancing between the CEX and DEX.
 type BotCEXCfg struct {
-	Name             string               `json:"name"`
-	BaseBalanceType  BalanceType          `json:"baseBalanceType"`
-	BaseBalance      float64              `json:"baseBalance"`
-	QuoteBalanceType BalanceType          `json:"quoteBalanceType"`
-	QuoteBalance     float64              `json:"quoteBalance"`
-	AutoRebalance    *AutoRebalanceConfig `json:"autoRebalance"`
+	Name          string               `json:"name"`
+	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance"`
+}
+
+// BotBalanceAllocation is the initial allocation of funds for a bot.
+type BotBalanceAllocation struct {
+	DEX map[uint32]uint64 `json:"dex"`
+	CEX map[uint32]uint64 `json:"cex"`
+}
+
+// BotInventoryDiffs is the amount of funds to add or remove from a bot's
+// allocation.
+type BotInventoryDiffs struct {
+	DEX map[uint32]int64 `json:"dex"`
+	CEX map[uint32]int64 `json:"cex"`
+}
+
+// balanceDiffsToAllocations converts a BotInventoryDiffs to a
+// BotBalanceAllocation by removing all negative diffs.
+func balanceDiffsToAllocation(diffs *BotInventoryDiffs) *BotBalanceAllocation {
+	allocations := &BotBalanceAllocation{
+		DEX: make(map[uint32]uint64, len(diffs.DEX)),
+		CEX: make(map[uint32]uint64, len(diffs.CEX)),
+	}
+
+	for assetID, diff := range diffs.DEX {
+		if diff > 0 {
+			allocations.DEX[assetID] += uint64(diff)
+		}
+	}
+	for assetID, diff := range diffs.CEX {
+		if diff > 0 {
+			allocations.CEX[assetID] += uint64(diff)
+		}
+	}
+
+	return allocations
 }
 
 // #### IMPORTANT ###
@@ -74,29 +98,20 @@ type BotConfig struct {
 	BaseID  uint32 `json:"baseID"`
 	QuoteID uint32 `json:"quoteID"`
 
-	BaseBalanceType BalanceType `json:"baseBalanceType"`
-	BaseBalance     float64     `json:"baseBalance"`
-
-	QuoteBalanceType BalanceType `json:"quoteBalanceType"`
-	QuoteBalance     float64     `json:"quoteBalance"`
-
-	BaseFeeAssetBalanceType  BalanceType `json:"baseFeeAssetBalanceType"`
-	BaseFeeAssetBalance      float64     `json:"baseFeeAssetBalance"`
-	QuoteFeeAssetBalanceType BalanceType `json:"quoteFeeAssetBalanceType"`
-	QuoteFeeAssetBalance     float64     `json:"quoteFeeAssetBalance"`
-
 	BaseWalletOptions  map[string]string `json:"baseWalletOptions"`
 	QuoteWalletOptions map[string]string `json:"quoteWalletOptions"`
 
 	// Only applicable for arb bots.
 	CEXCfg *BotCEXCfg `json:"cexCfg"`
 
+	// Alloc will be the initial balance allocation used when the bot is
+	// started.
+	Alloc *BotBalanceAllocation `json:"alloc"`
+
 	// Only one of the following configs should be set
 	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`
 	SimpleArbConfig      *SimpleArbConfig         `json:"simpleArbConfig,omitempty"`
 	ArbMarketMakerConfig *ArbMarketMakerConfig    `json:"arbMarketMakingConfig,omitempty"`
-
-	Disabled bool `json:"disabled"`
 }
 
 func (c *BotConfig) requiresPriceOracle() bool {
@@ -108,6 +123,21 @@ func (c *BotConfig) requiresPriceOracle() bool {
 
 func (c *BotConfig) requiresCEX() bool {
 	return c.SimpleArbConfig != nil || c.ArbMarketMakerConfig != nil
+}
+
+// maxPlacements returns the max amount of placements this bot will place on
+// either side of the market in an epoch.
+func (c *BotConfig) maxPlacements() (buy, sell uint32) {
+	switch {
+	case c.SimpleArbConfig != nil:
+		return 1, 1
+	case c.ArbMarketMakerConfig != nil:
+		return uint32(len(c.ArbMarketMakerConfig.BuyPlacements)), uint32(len(c.ArbMarketMakerConfig.SellPlacements))
+	case c.BasicMMConfig != nil:
+		return uint32(len(c.BasicMMConfig.BuyPlacements)), uint32(len(c.BasicMMConfig.SellPlacements))
+	default:
+		return 1, 1
+	}
 }
 
 func dexMarketID(host string, base, quote uint32) string {

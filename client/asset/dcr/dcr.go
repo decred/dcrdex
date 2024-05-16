@@ -1816,7 +1816,7 @@ func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64) (
 		return 0, err
 	}
 
-	dcr.log.Infof("SingleLotRedeemFees: worst case = %d, feeSuggestion = %d", preRedeem.Estimate.RealisticWorstCase, feeSuggestion)
+	dcr.log.Tracef("SingleLotRedeemFees: worst case = %d, feeSuggestion = %d", preRedeem.Estimate.RealisticWorstCase, feeSuggestion)
 
 	return preRedeem.Estimate.RealisticWorstCase, nil
 }
@@ -6420,6 +6420,10 @@ func (dcr *ExchangeWallet) WalletTransaction(ctx context.Context, txID string) (
 	if len(txs) == 0 {
 		return nil, asset.CoinNotFoundError
 	}
+
+	// If the wallet knows about the transaction, it will be part of the
+	// available balance, so we always return Confirmed = true.
+	txs[0].Confirmed = true
 
 	return txs[0], nil
 }

@@ -518,14 +518,16 @@ func TestArbRebalance(t *testing.T) {
 			quoteID:    quoteID,
 			core:       coreAdaptor,
 			activeArbs: test.existingArbs,
-			cfg: &SimpleArbConfig{
-				ProfitTrigger:      profitTrigger,
-				MaxActiveArbs:      maxActiveArbs,
-				NumEpochsLeaveOpen: numEpochsLeaveOpen,
-			},
 		}
-
-		go arbEngine.run()
+		arbEngine.cfgV.Store(&SimpleArbConfig{
+			ProfitTrigger:      profitTrigger,
+			MaxActiveArbs:      maxActiveArbs,
+			NumEpochsLeaveOpen: numEpochsLeaveOpen,
+		})
+		_, err := arbEngine.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", test.name, err)
+		}
 
 		dummyNote := &core.BookUpdate{}
 		tCore.bookFeed.c <- dummyNote
@@ -680,14 +682,16 @@ func TestArbDexTradeUpdates(t *testing.T) {
 			quoteID:    0,
 			core:       coreAdaptor,
 			activeArbs: test.activeArbs,
-			cfg: &SimpleArbConfig{
-				ProfitTrigger:      0.01,
-				MaxActiveArbs:      5,
-				NumEpochsLeaveOpen: 10,
-			},
 		}
-
-		go arbEngine.run()
+		arbEngine.cfgV.Store(&SimpleArbConfig{
+			ProfitTrigger:      0.01,
+			MaxActiveArbs:      5,
+			NumEpochsLeaveOpen: 10,
+		})
+		_, err := arbEngine.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", test.name, err)
+		}
 
 		coreAdaptor.orderUpdates <- &core.Order{
 			Status: test.updatedOrderStatus,
@@ -797,14 +801,17 @@ func TestCexTradeUpdates(t *testing.T) {
 			quoteID:    0,
 			core:       newTBotCoreAdaptor(newTCore()),
 			activeArbs: test.activeArbs,
-			cfg: &SimpleArbConfig{
-				ProfitTrigger:      0.01,
-				MaxActiveArbs:      5,
-				NumEpochsLeaveOpen: 10,
-			},
 		}
+		arbEngine.cfgV.Store(&SimpleArbConfig{
+			ProfitTrigger:      0.01,
+			MaxActiveArbs:      5,
+			NumEpochsLeaveOpen: 10,
+		})
 
-		go arbEngine.run()
+		_, err := arbEngine.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", test.name, err)
+		}
 
 		cex.tradeUpdates <- &libxc.Trade{
 			ID:       test.updatedOrderID,

@@ -2118,10 +2118,12 @@ var binanceMarkets = []*libxc.Market{
 }
 
 type TMarketMaker struct {
-	core    *TCore
-	running atomic.Bool
-	cfg     *mm.MarketMakingConfig
-	mkts    map[string][]*libxc.Market
+	core *TCore
+	cfg  *mm.MarketMakingConfig
+	mkts map[string][]*libxc.Market
+
+	runningBotsMtx sync.RWMutex
+	runningBots    map[mm.MarketWithHost]int64 // mkt -> startTime
 }
 
 func tLotFees() *mm.LotFees {
@@ -2167,27 +2169,82 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 	}, nil
 }
 
-func (m *TMarketMaker) Start(pw []byte, alternateConfigPath *string) (err error) {
-	m.running.Store(true)
-	m.core.noteFeed <- &struct {
-		db.Notification
-		Running bool `json:"running"`
-	}{
-		Notification: db.NewNotification("mmstartstop", "", "", "", db.Data),
-		Running:      true,
+func (m *TMarketMaker) StartAllBots(alternateConfigPath *string, appPW []byte) (err error) {
+	m.runningBotsMtx.Lock()
+	defer m.runningBotsMtx.Unlock()
+	for mkt := range m.runningBots {
+		if err := m.startBot(&mkt, nil, appPW); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (m *TMarketMaker) Stop() {
-	m.running.Store(false)
+func (m *TMarketMaker) StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, appPW []byte) (err error) {
+	m.runningBotsMtx.Lock()
+	defer m.runningBotsMtx.Unlock()
+	return m.startBot(mkt, alternateConfigPath, appPW)
+}
+
+func (m *TMarketMaker) startBot(mkt *mm.MarketWithHost, alternateConfigPath *string, pappPWw []byte) (err error) {
+	_, running := m.runningBots[*mkt]
+	if running {
+		return fmt.Errorf("bot already running for %s", mkt.String())
+	}
+	startTime := time.Now().Unix()
+	m.runningBots[*mkt] = startTime
+
 	m.core.noteFeed <- &struct {
 		db.Notification
-		Running bool `json:"running"`
+		Host      string       `json:"host"`
+		Base      uint32       `json:"base"`
+		Quote     uint32       `json:"quote"`
+		StartTime int64        `json:"startTime"`
+		Stats     *mm.RunStats `json:"stats"`
 	}{
-		Notification: db.NewNotification("mmstartstop", "", "", "", db.Data),
-		Running:      false,
+		Notification: db.NewNotification("runstats", "", "", "", db.Data),
+		Host:         mkt.Host,
+		Base:         mkt.BaseID,
+		Quote:        mkt.QuoteID,
+		StartTime:    startTime,
+		Stats:        &mm.RunStats{},
 	}
+	return nil
+}
+
+func (m *TMarketMaker) StopAllBots() error {
+	m.runningBotsMtx.Lock()
+	m.runningBots = make(map[mm.MarketWithHost]int64)
+	m.runningBotsMtx.Unlock()
+	return nil
+}
+
+func (m *TMarketMaker) StopBot(mkt *mm.MarketWithHost) error {
+	m.runningBotsMtx.Lock()
+	startTime, running := m.runningBots[*mkt]
+	if !running {
+		m.runningBotsMtx.Unlock()
+		return fmt.Errorf("bot not running for %s", mkt.String())
+	}
+	delete(m.runningBots, *mkt)
+	m.runningBotsMtx.Unlock()
+
+	m.core.noteFeed <- &struct {
+		db.Notification
+		Host      string       `json:"host"`
+		Base      uint32       `json:"base"`
+		Quote     uint32       `json:"quote"`
+		StartTime int64        `json:"startTime"`
+		Stats     *mm.RunStats `json:"stats"`
+	}{
+		Notification: db.NewNotification("runstats", "", "", "", db.Data),
+		Host:         mkt.Host,
+		Base:         mkt.BaseID,
+		Quote:        mkt.QuoteID,
+		StartTime:    startTime,
+		Stats:        nil,
+	}
+	return nil
 }
 
 func (m *TMarketMaker) UpdateCEXConfig(updatedCfg *mm.CEXConfig) error {
@@ -2218,6 +2275,10 @@ func (m *TMarketMaker) UpdateBotConfig(updatedCfg *mm.BotConfig) error {
 	return nil
 }
 
+func (m *TMarketMaker) UpdateRunningBot(updatedCfg *mm.BotConfig, balanceDiffs *mm.BotInventoryDiffs, saveUpdate bool) error {
+	return m.UpdateBotConfig(updatedCfg)
+}
+
 func (m *TMarketMaker) RemoveBotConfig(host string, baseID, quoteID uint32) error {
 	for i := 0; i < len(m.cfg.BotConfigs); i++ {
 		botCfg := m.cfg.BotConfigs[i]
@@ -2237,18 +2298,15 @@ func (m *TMarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.Exchan
 	}, nil
 }
 
-func (m *TMarketMaker) Running() bool {
-	return m.running.Load()
-}
-
 func (m *TMarketMaker) Status() *mm.Status {
-	running := m.running.Load()
 	status := &mm.Status{
-		Running: running,
-		CEXes:   make(map[string]*mm.CEXStatus, len(m.cfg.CexConfigs)),
-		Bots:    make([]*mm.BotStatus, 0, len(m.cfg.BotConfigs)),
+		CEXes: make(map[string]*mm.CEXStatus, len(m.cfg.CexConfigs)),
+		Bots:  make([]*mm.BotStatus, 0, len(m.cfg.BotConfigs)),
 	}
 	for _, botCfg := range m.cfg.BotConfigs {
+		m.runningBotsMtx.RLock()
+		_, running := m.runningBots[mm.MarketWithHost{Host: botCfg.Host, BaseID: botCfg.BaseID, QuoteID: botCfg.QuoteID}]
+		m.runningBotsMtx.RUnlock()
 		var stats *mm.RunStats
 		if running {
 			stats = &mm.RunStats{
@@ -2373,8 +2431,13 @@ func randomBotConfig(mkt *mm.MarketWithHost) *mm.BotConfig {
 func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error) {
 	endTime := time.Unix(startTime, 0).Add(time.Hour * 5).Unix()
 	run := &mm.MarketMakingRunOverview{
-		EndTime:         &endTime,
-		Cfg:             randomBotConfig(mkt),
+		EndTime: &endTime,
+		Cfgs: []*mm.CfgUpdate{
+			{
+				Cfg:       randomBotConfig(mkt),
+				Timestamp: startTime,
+			},
+		},
 		InitialBalances: make(map[uint32]uint64),
 		FinalBalances:   make(map[uint32]uint64),
 		ProfitLoss:      rand.Float64()*1e6 - 5e5,
@@ -2419,7 +2482,6 @@ func (m *TMarketMaker) ArchivedRuns() ([]*mm.MarketMakingRun, error) {
 		runs = append(runs, &mm.MarketMakingRun{
 			StartTime: time.Now().Add(-time.Hour * 5 * time.Duration(i)).Unix(),
 			Market:    marketWithHost,
-			Cfg:       randomBotConfig(marketWithHost),
 		})
 	}
 	return runs, nil

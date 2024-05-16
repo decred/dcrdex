@@ -111,10 +111,10 @@ func TestArbMMRebalance(t *testing.T) {
 		core:        coreAdaptor,
 		log:         tLogger,
 		mkt:         mkt,
-		cfg:         cfg,
 		dexReserves: make(map[uint32]uint64),
 		cexReserves: make(map[uint32]uint64),
 	}
+	arbMM.cfgV.Store(cfg)
 
 	arbMM.rebalance(currEpoch)
 
@@ -349,21 +349,24 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 		defer cancel()
 
 		arbMM := &arbMarketMaker{
-			cex:         cex,
-			core:        coreAdaptor,
-			ctx:         ctx,
-			baseID:      42,
-			quoteID:     0,
-			matchesSeen: make(map[order.MatchID]bool),
-			cexTrades:   make(map[string]uint64),
-			mkt:         mkt,
-			cfg: &ArbMarketMakerConfig{
-				Profit: profit,
-			},
+			cex:           cex,
+			core:          coreAdaptor,
+			ctx:           ctx,
+			baseID:        42,
+			quoteID:       0,
+			matchesSeen:   make(map[order.MatchID]bool),
+			cexTrades:     make(map[string]uint64),
+			mkt:           mkt,
 			pendingOrders: test.pendingOrders,
 		}
+		arbMM.cfgV.Store(&ArbMarketMakerConfig{
+			Profit: profit,
+		})
 		arbMM.currEpoch.Store(123)
-		go arbMM.run()
+		_, err := arbMM.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
 
 		for i, note := range test.orderUpdates {
 			cex.lastTrade = nil

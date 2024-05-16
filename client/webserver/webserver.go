@@ -182,8 +182,10 @@ type clientCore interface {
 
 type mmCore interface {
 	MarketReport(host string, base, quote uint32) (*mm.MarketReport, error)
-	Start(pw []byte, alternateConfigPath *string) (err error)
-	Stop()
+	StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, pw []byte) (err error)
+	StartAllBots(alternateConfigPath *string, appPW []byte) (err error)
+	StopBot(mkt *mm.MarketWithHost) error
+	StopAllBots() error
 	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error
 	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
 	UpdateBotConfig(updatedCfg *mm.BotConfig) error
@@ -583,8 +585,10 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/disablemixer", s.apiDisableMixer)
 
 			if cfg.Experimental {
-				apiAuth.Post("/startmarketmaking", s.apiStartMarketMaking)
-				apiAuth.Post("/stopmarketmaking", s.apiStopMarketMaking)
+				apiAuth.Post("/startallmmbots", s.apiStartAllMarketMakingBots)
+				apiAuth.Post("/stopallmmbots", s.apiStopAllMarketMakingBots)
+				apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)
+				apiAuth.Post("/stopmarketmakingbot", s.apiStopMarketMakingBot)
 				apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
 				apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
 				apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)

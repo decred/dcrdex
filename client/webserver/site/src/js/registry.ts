@@ -431,10 +431,6 @@ export interface RunEventNote extends CoreNote {
   event: MarketMakingEvent
 }
 
-export interface MMStartStopNote extends CoreNote {
-  running: boolean
-}
-
 export interface MakerProgram {
   host: string
   baseID: number
@@ -727,39 +723,27 @@ export interface SimpleArbConfig {
   numEpochsLeaveOpen: number
 }
 
-export enum BalanceType {
-  Percentage,
-  Amount
-}
-
 export interface BotCEXCfg {
   name: string
-  baseBalanceType: BalanceType
-  baseBalance: number
-  quoteBalanceType: BalanceType
-  quoteBalance: number
   autoRebalance?: AutoRebalanceConfig
+}
+
+export interface BotBalanceAllocation {
+  dex: Record<number, number>
+  cex: Record<number, number>
 }
 
 export interface BotConfig {
   host: string
   baseID: number
   quoteID: number
-  baseBalanceType: BalanceType
-  baseBalance: number
-  quoteBalanceType: BalanceType
-  quoteBalance: number
-  baseFeeAssetBalanceType?: BalanceType
-  baseFeeAssetBalance?: number
-  quoteFeeAssetBalanceType?: BalanceType
-  quoteFeeAssetBalance?: number
-  cexCfg?: BotCEXCfg
   baseWalletOptions?: Record<string, string>
   quoteWalletOptions?: Record<string, string>
+  cexCfg?: BotCEXCfg
+  alloc: BotBalanceAllocation
   basicMarketMakingConfig?: BasicMarketMakingConfig
   arbMarketMakingConfig?: ArbMarketMakingConfig
   simpleArbConfig?: SimpleArbConfig
-  disabled: boolean
 }
 
 export interface CEXConfig {
@@ -787,6 +771,11 @@ export interface BotBalance {
   pending: number
 }
 
+export interface BotBalances {
+  dex: BotBalance
+  cex: BotBalance
+}
+
 export interface FeeGapStats {
   basisPrice: number
   feeGap: number
@@ -810,11 +799,12 @@ export interface RunStats {
 
 export interface MMBotStatus {
   config: BotConfig
+  running: boolean
   runStats?: RunStats
+  balances: Record<number, BotBalances>
 }
 
 export interface MarketMakingStatus {
-  running: boolean
   cexes: Record<string, MMCEXStatus>
   bots: MMBotStatus[]
 }

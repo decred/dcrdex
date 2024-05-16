@@ -171,8 +171,7 @@ interface RangeHandlerOpts {
   disabled?: boolean
   settingsDict?: {[key: string]: any}
   settingsKey?: string
-  dictValueAsString?: boolean
-  convert?: (x: any) => any
+  convert?: (x: number, y: number) => any
 }
 
 /*
@@ -194,10 +193,10 @@ export class XYRangeHandler {
   roundX: boolean
   roundY: boolean
   disabled: boolean
-  updated: (x:number, y:number) => void
-  changed: () => void
+  updated: (x:number, y:number) => void // called while dragging
+  changed: () => void // not called while dragging, but called when done dragging
   selected: () => void
-  convert: (x: number) => any
+  convert: (x: number, y: number) => any
 
   constructor (
     range: XYRange,
@@ -221,7 +220,7 @@ export class XYRangeHandler {
     this.changed = opts.changed ?? (() => { /* pass */ })
     this.selected = opts.selected ?? (() => { /* pass */ })
     this.updated = opts.updated ?? (() => { /* pass */ })
-    this.convert = opts.dictValueAsString ? (x: number) => String(x) : (x: number) => x
+    this.convert = opts.convert || ((x: number) => x)
 
     const { slider, handle } = tmpl
     const rangeX = range.end.x - range.start.x
@@ -363,7 +362,7 @@ export class XYRangeHandler {
     this.x = x
     this.scrollingX = x
     cfg = cfg ?? {}
-    if (this.settingsDict) this.settingsDict[this.settingsKey] = this.convert(this.x)
+    if (this.settingsDict) this.settingsDict[this.settingsKey] = this.convert(this.x, this.y)
     if (!cfg.skipUpdate) {
       this.updated(x, this.y)
       if (!cfg.skipChange) this.changed()

@@ -5,8 +5,6 @@ import {
   CEXConfig,
   MMBotStatus,
   RunStatsNote,
-  MMStartStopNote,
-  BalanceNote,
   MarketMakingStatus,
   ExchangeBalance,
   RunStats,
@@ -51,6 +49,7 @@ export default class MarketMakerPage extends BasePage {
   keyup: (e: KeyboardEvent) => void
   newWalletForm: NewWalletForm
   botConfigs: BotConfig[]
+  mmStatus: MarketMakingStatus
 
   constructor (main: HTMLElement) {
     super()
@@ -62,7 +61,11 @@ export default class MarketMakerPage extends BasePage {
     Doc.bind(page.addBotBtnNoExisting, 'click', () => { this.newBot() })
     Doc.bind(page.addBotBtnWithExisting, 'click', () => { this.newBot() })
     Doc.bind(page.startBotsBtn, 'click', () => { this.start() })
-    Doc.bind(page.stopBotsBtn, 'click', () => { MM.stop() })
+    Doc.bind(page.stopBotsBtn, 'click', () => {
+      MM.stop()
+      Doc.hide(page.stopBotsBtn, page.onMsg)
+      Doc.show(page.startBotsBtn, page.offMsg)
+    })
     Doc.bind(page.archivedLogsBtn, 'click', () => { app().loadPage('mmarchives') })
     bindForm(page.pwForm, page.pwSubmit, () => this.startBots())
 
@@ -76,15 +79,14 @@ export default class MarketMakerPage extends BasePage {
 
   async setup () {
     const page = this.page
+    const mmStatus = this.mmStatus = await MM.status()
 
-    const status = await MM.status()
-    const running = status.running
+    const running = mmStatus.bots.some((botStatus: MMBotStatus) => botStatus.running)
 
-    const botConfigs = this.botConfigs = status.bots.map((s: MMBotStatus) => s.config)
+    const botConfigs = this.botConfigs = mmStatus.bots.map((s: MMBotStatus) => s.config)
     app().registerNoteFeeder({
-      runstats: (note: RunStatsNote) => { this.handleRunStatsNote(note) },
-      mmstartstop: (note: MMStartStopNote) => { this.handleMMStartStopNote(note) },
-      balance: (note: BalanceNote) => { this.handleBalanceNote(note) }
+      runstats: (note: RunStatsNote) => { this.handleRunStatsNote(note) }
+      // TODO bot start-stop notification
     })
 
     const noBots = !botConfigs || botConfigs.length === 0
@@ -96,57 +98,24 @@ export default class MarketMakerPage extends BasePage {
     page.onIndicator.classList.remove(running ? 'off' : 'on')
     Doc.setVis(running, page.stopBotsBtn, page.onMsg)
     Doc.setVis(!running, page.startBotsBtn, page.offMsg)
-    await this.setupBotTable(botConfigs, running, status.bots)
+    await this.setupBotTable(botConfigs, mmStatus)
   }
 
-  handleRunStatsNote (note: RunStatsNote) {
-    const tableRows = this.page.botTableBody.children
+  async handleRunStatsNote (note: RunStatsNote) {
+    // something's running
+    const { page } = this
+    Doc.show(page.stopBotsBtn, page.onMsg)
+    Doc.hide(page.startBotsBtn, page.offMsg)
+    const tableRows = page.botTableBody.children
     const rowID = marketStr(note.host, note.base, note.quote)
     for (let i = 0; i < tableRows.length; i++) {
       const row = tableRows[i] as PageElement
       if (row.id === rowID) {
         const rowTmpl = Doc.parseTemplate(row)
-        this.setTableRowRunning(rowTmpl, true, !!note.stats)
-        this.setTableRowBalances(rowTmpl, true, this.botConfigs[i], note.stats)
+        this.setTableRowRunning(rowTmpl, true)
+        const botCfg = this.botConfigs[i]
+        this.setTableRowBalances(rowTmpl, botCfg, await this.botStatusForConfig(botCfg))
         return
-      }
-    }
-  }
-
-  handleMMStartStopNote (note: MMStartStopNote) {
-    const page = this.page
-    page.onIndicator.classList.add(note.running ? 'on' : 'off')
-    page.onIndicator.classList.remove(note.running ? 'off' : 'on')
-    Doc.setVis(note.running, page.stopBotsBtn, page.runningHeader, page.onMsg, page.profitLossHeader, page.logsHeader)
-    Doc.setVis(!note.running, page.startBotsBtn, page.addBotBtnNoExisting, page.enabledHeader,
-      page.removeHeader, page.offMsg)
-    const tableRows = page.botTableBody.children
-    for (let i = 0; i < tableRows.length; i++) {
-      const row = tableRows[i] as PageElement
-      const rowTmpl = Doc.parseTemplate(row)
-      this.setTableRowRunning(rowTmpl, note.running, undefined)
-      this.setTableRowBalances(rowTmpl, note.running, this.botConfigs[i], undefined)
-    }
-  }
-
-  async handleBalanceNote (note: BalanceNote) {
-    if ((await MM.status()).running) return
-
-    const getBotConfig = (mktID: string): BotConfig | undefined => {
-      for (const cfg of this.botConfigs) {
-        if (marketStr(cfg.host, cfg.baseID, cfg.quoteID) === mktID) return cfg
-      }
-    }
-    const tableRows = this.page.botTableBody.children
-    for (let i = 0; i < tableRows.length; i++) {
-      const row = tableRows[i] as PageElement
-      const rowTmpl = Doc.parseTemplate(row)
-      const cfg = getBotConfig(row.id)
-      if (!cfg) continue
-      if (cfg.baseID === note.assetID) {
-        rowTmpl.baseBalance.textContent = this.walletBalanceStr(note.assetID, cfg.baseBalance)
-      } else if (cfg.quoteID === note.assetID) {
-        rowTmpl.quoteBalance.textContent = this.walletBalanceStr(note.assetID, cfg.quoteBalance)
       }
     }
   }
@@ -194,19 +163,13 @@ export default class MarketMakerPage extends BasePage {
    * on whether the entire market maker is running, and specifically whether the
    * the current bot is running.
    */
-  setTableRowRunning (rowTmpl: Record<string, PageElement>, mmRunning: boolean | undefined, thisBotRunning: boolean | undefined) {
-    if (mmRunning !== undefined) {
-      Doc.setVis(mmRunning, rowTmpl.running, rowTmpl.logs)
-      Doc.setVis(!mmRunning, rowTmpl.enabled, rowTmpl.removeTd)
-    }
-    if (thisBotRunning !== undefined) {
-      Doc.setVis(thisBotRunning, rowTmpl.runningIcon, rowTmpl.logs)
-      Doc.setVis(!thisBotRunning, rowTmpl.notRunningIcon)
-    }
+  setTableRowRunning (rowTmpl: Record<string, PageElement>, running: boolean | undefined) {
+    Doc.setVis(running, rowTmpl.running, rowTmpl.logs, rowTmpl.runningIcon)
+    Doc.setVis(!running, rowTmpl.removeTd, rowTmpl.notRunningIcon)
   }
 
-  setTableRowBalances (rowTmpl: Record<string, PageElement>, mmRunning: boolean | undefined, botCfg: BotConfig, stats?: RunStats) {
-    if (mmRunning && !stats) {
+  setTableRowBalances (rowTmpl: Record<string, PageElement>, botCfg: BotConfig, botStatus: MMBotStatus) {
+    if (botStatus.running) {
       Doc.show(rowTmpl.profitLossTd)
       Doc.hide(rowTmpl.baseBalanceTd, rowTmpl.quoteBalanceTd)
       return
@@ -230,49 +193,49 @@ export default class MarketMakerPage extends BasePage {
     }
 
     Doc.setVis(!!botCfg.cexCfg, rowTmpl.cexBaseBalanceContainer, rowTmpl.cexQuoteBalanceContainer)
-    Doc.setVis(!!stats, rowTmpl.baseBalanceDetails, rowTmpl.quoteBalanceDetails, rowTmpl.cexBaseBalanceDetails, rowTmpl.cexQuoteBalanceDetails, rowTmpl.profitLossTd)
+    Doc.setVis(botStatus.running, rowTmpl.baseBalanceDetails, rowTmpl.quoteBalanceDetails, rowTmpl.cexBaseBalanceDetails, rowTmpl.cexQuoteBalanceDetails, rowTmpl.profitLossTd)
 
-    if (stats) {
-      const baseBalances = stats.dexBalances[botCfg.baseID]
+    if (botStatus.running) {
+      const baseBalances = botStatus.balances[botCfg.baseID].dex
       rowTmpl.runningBaseBalanceAvailable.textContent = this.runningBalanceStr(botCfg.baseID, baseBalances.available)
       rowTmpl.runningBaseBalanceLocked.textContent = this.runningBalanceStr(botCfg.baseID, baseBalances.locked)
       rowTmpl.runningBaseBalancePending.textContent = this.runningBalanceStr(botCfg.baseID, baseBalances.pending)
       const baseBalanceTotal = baseBalances.available + baseBalances.locked + baseBalances.pending
       rowTmpl.baseBalance.textContent = this.runningBalanceStr(botCfg.baseID, baseBalanceTotal)
-      const quoteBalances = stats.dexBalances[botCfg.quoteID]
+      const quoteBalances = botStatus.balances[botCfg.quoteID].dex
       rowTmpl.runningQuoteBalanceAvailable.textContent = this.runningBalanceStr(botCfg.quoteID, quoteBalances.available)
       rowTmpl.runningQuoteBalanceLocked.textContent = this.runningBalanceStr(botCfg.quoteID, quoteBalances.locked)
       rowTmpl.runningQuoteBalancePending.textContent = this.runningBalanceStr(botCfg.quoteID, quoteBalances.pending)
       const quoteBalanceTotal = quoteBalances.available + quoteBalances.locked + quoteBalances.pending
       rowTmpl.quoteBalance.textContent = this.runningBalanceStr(botCfg.quoteID, quoteBalanceTotal)
-      rowTmpl.profitLoss.textContent = `$${Doc.formatFiatValue(stats.profitLoss)}`
+      rowTmpl.profitLoss.textContent = `$${Doc.formatFiatValue((botStatus.runStats as RunStats).profitLoss)}`
 
       if (botCfg.cexCfg) {
-        const cexBaseBalances = stats.cexBalances[botCfg.baseID]
+        const cexBaseBalances = botStatus.balances[botCfg.baseID].cex
         rowTmpl.runningCexBaseBalanceAvailable.textContent = this.runningBalanceStr(botCfg.baseID, cexBaseBalances.available)
         rowTmpl.runningCexBaseBalanceLocked.textContent = this.runningBalanceStr(botCfg.baseID, cexBaseBalances.locked)
         const cexBaseBalanceTotal = cexBaseBalances.available + cexBaseBalances.locked + cexBaseBalances.pending
         rowTmpl.cexBaseBalance.textContent = this.runningBalanceStr(botCfg.baseID, cexBaseBalanceTotal)
-        const cexQuoteBalances = stats.cexBalances[botCfg.quoteID]
+        const cexQuoteBalances = botStatus.balances[botCfg.quoteID].cex
         rowTmpl.runningCexQuoteBalanceAvailable.textContent = this.runningBalanceStr(botCfg.quoteID, cexQuoteBalances.available)
         rowTmpl.runningCexQuoteBalanceLocked.textContent = this.runningBalanceStr(botCfg.quoteID, cexQuoteBalances.locked)
         const cexQuoteBalanceTotal = cexQuoteBalances.available + cexQuoteBalances.locked + cexQuoteBalances.pending
         rowTmpl.cexQuoteBalance.textContent = this.runningBalanceStr(botCfg.quoteID, cexQuoteBalanceTotal)
       }
     } else {
-      rowTmpl.baseBalance.textContent = this.walletBalanceStr(botCfg.baseID, botCfg.baseBalance)
-      rowTmpl.quoteBalance.textContent = this.walletBalanceStr(botCfg.quoteID, botCfg.quoteBalance)
+      rowTmpl.baseBalance.textContent = this.walletBalanceStr(botCfg.baseID, botCfg.alloc.dex[botCfg.baseID])
+      rowTmpl.quoteBalance.textContent = this.walletBalanceStr(botCfg.quoteID, botCfg.alloc.dex[botCfg.quoteID])
 
       if (botCfg.cexCfg) {
         const cachedBaseBalance = MM.cachedCexBalance(botCfg.cexCfg.name, botCfg.baseID)
         Doc.setVis(!cachedBaseBalance, rowTmpl.cexBaseBalanceSpinner)
         Doc.setVis(!!cachedBaseBalance, rowTmpl.cexBaseBalanceLoaded)
         if (cachedBaseBalance) {
-          rowTmpl.cexBaseBalance.textContent = this.percentageBalanceStr(botCfg.baseID, cachedBaseBalance.available, botCfg.cexCfg.baseBalance)
+          rowTmpl.cexBaseBalance.textContent = this.percentageBalanceStr(botCfg.baseID, cachedBaseBalance.available, botCfg.alloc.cex[botCfg.baseID])
         } else {
           MM.cexBalance(botCfg.cexCfg.name, botCfg.baseID).then((cexBalance) => {
             if (!botCfg.cexCfg) return // typescript check above doesn't apply due to async
-            rowTmpl.cexBaseBalance.textContent = this.percentageBalanceStr(botCfg.baseID, cexBalance.available, botCfg.cexCfg.baseBalance)
+            rowTmpl.cexBaseBalance.textContent = this.percentageBalanceStr(botCfg.baseID, cexBalance.available, botCfg.alloc.cex[botCfg.baseID])
             Doc.hide(rowTmpl.cexBaseBalanceSpinner)
             Doc.show(rowTmpl.cexBaseBalanceLoaded)
           })
@@ -282,11 +245,11 @@ export default class MarketMakerPage extends BasePage {
         Doc.setVis(!cachedQuoteBalance, rowTmpl.cexQuoteBalanceSpinner)
         Doc.setVis(!!cachedQuoteBalance, rowTmpl.cexQuoteBalanceLoaded)
         if (cachedQuoteBalance) {
-          rowTmpl.cexQuoteBalance.textContent = this.percentageBalanceStr(botCfg.quoteID, cachedQuoteBalance.available, botCfg.cexCfg.quoteBalance)
+          rowTmpl.cexQuoteBalance.textContent = this.percentageBalanceStr(botCfg.quoteID, cachedQuoteBalance.available, botCfg.alloc.cex[botCfg.quoteID])
         } else {
           MM.cexBalance(botCfg.cexCfg.name, botCfg.quoteID).then((cexBalance) => {
             if (!botCfg.cexCfg) return // typescript check above doesn't apply due to async
-            rowTmpl.cexQuoteBalance.textContent = this.percentageBalanceStr(botCfg.quoteID, cexBalance.available, botCfg.cexCfg.quoteBalance)
+            rowTmpl.cexQuoteBalance.textContent = this.percentageBalanceStr(botCfg.quoteID, cexBalance.available, botCfg.alloc.cex[botCfg.quoteID])
             Doc.hide(rowTmpl.cexQuoteBalanceSpinner)
             Doc.show(rowTmpl.cexQuoteBalanceLoaded)
           })
@@ -295,12 +258,17 @@ export default class MarketMakerPage extends BasePage {
     }
   }
 
+  botStatusForConfig (botCfg: BotConfig): MMBotStatus {
+    return this.mmStatus.bots.find(({ config: cfg }) => cfg.host === botCfg.host && cfg.baseID === botCfg.baseID && cfg.quoteID === botCfg.quoteID) as MMBotStatus
+  }
+
   /*
    * setupBotTable populates the table of market maker bots.
    */
-  async setupBotTable (botConfigs: BotConfig[], running: boolean, bots: MMBotStatus[]) {
+  async setupBotTable (botConfigs: BotConfig[], mmStatus: MarketMakingStatus) {
     const page = this.page
     Doc.empty(page.botTableBody)
+    const running = mmStatus.bots.some((botStatus: MMBotStatus) => botStatus.running)
 
     Doc.setVis(running, page.runningHeader, page.profitLossHeader, page.logsHeader)
     Doc.setVis(!running, page.enabledHeader, page.removeHeader)
@@ -309,9 +277,8 @@ export default class MarketMakerPage extends BasePage {
       const row = page.botTableRowTmpl.cloneNode(true) as PageElement
       row.id = marketStr(botCfg.host, botCfg.baseID, botCfg.quoteID)
       const rowTmpl = Doc.parseTemplate(row)
-      const thisBot = bots.find(({ config: cfg }) => cfg.host === botCfg.host && cfg.baseID === botCfg.baseID && cfg.quoteID === botCfg.quoteID)
-      const thisBotRunning = thisBot && !!thisBot.runStats
-      this.setTableRowRunning(rowTmpl, running, thisBotRunning)
+      const botStatus = this.botStatusForConfig(botCfg)
+      this.setTableRowRunning(rowTmpl, botStatus.running)
 
       const setupHover = (hoverEl: PageElement, hoverContent: PageElement) => {
         Doc.bind(hoverEl, 'mouseover', () => { Doc.show(hoverContent) })
@@ -327,18 +294,13 @@ export default class MarketMakerPage extends BasePage {
       const baseLogoPath = Doc.logoPath(baseSymbol)
       const quoteLogoPath = Doc.logoPath(quoteSymbol)
 
-      rowTmpl.enabledCheckbox.checked = !botCfg.disabled
-      Doc.bind(rowTmpl.enabledCheckbox, 'click', async () => {
-        MM.setEnabled(botCfg.host, botCfg.baseID, botCfg.quoteID, !!rowTmpl.enabledCheckbox.checked)
-      })
-
       rowTmpl.host.textContent = botCfg.host
       rowTmpl.baseMktLogo.src = baseLogoPath
       rowTmpl.quoteMktLogo.src = quoteLogoPath
       rowTmpl.baseSymbol.textContent = baseSymbol.toUpperCase()
       rowTmpl.quoteSymbol.textContent = quoteSymbol.toUpperCase()
 
-      this.setTableRowBalances(rowTmpl, running, botCfg, thisBot?.runStats)
+      this.setTableRowBalances(rowTmpl, botCfg, botStatus)
 
       if (botCfg.arbMarketMakingConfig || botCfg.simpleArbConfig) {
         if (botCfg.arbMarketMakingConfig) rowTmpl.botType.textContent = intl.prep(intl.ID_BOTTYPE_ARB_MM)
@@ -441,19 +403,12 @@ class MarketMakerBot {
     return postJSON('/api/marketreport', { host, baseID, quoteID })
   }
 
-  async setEnabled (host: string, baseID: number, quoteID: number, enabled: boolean) : Promise<void> {
-    const bots = (await this.status()).bots
-    const botStatus = bots.filter((s: MMBotStatus) => s.config.host === host && s.config.baseID === baseID && s.config.quoteID === quoteID)[0]
-    botStatus.config.disabled = !enabled
-    await this.updateBotConfig(botStatus.config)
-  }
-
   async start (appPW: string) {
-    return await postJSON('/api/startmarketmaking', { appPW })
+    return await postJSON('/api/startallmmbots', { appPW })
   }
 
   async stop () : Promise<void> {
-    await postJSON('/api/stopmarketmaking')
+    await postJSON('/api/stopallmmbots')
   }
 
   async status () : Promise<MarketMakingStatus> {

@@ -50,7 +50,7 @@ var (
 	// Check that core.Core satisfies clientCore.
 	_   clientCore = (*core.Core)(nil)
 	log dex.Logger
-	// errUnknownCmd is wrapped when the command is not know.
+	// errUnknownCmd is wrapped when the command is not known.
 	errUnknownCmd = errors.New("unknown command")
 )
 

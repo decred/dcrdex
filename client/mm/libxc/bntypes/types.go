@@ -151,13 +151,15 @@ type OrderResponse struct {
 }
 
 type BookedOrder struct {
-	Symbol             string `json:"symbol"`
-	OrderID            int64  `json:"orderId"`
-	ClientOrderID      string `json:"clientOrderId"`
-	Price              string `json:"price"`
-	OrigQty            string `json:"origQty"`
-	ExecutedQty        string `json:"executedQty"`
-	CumulativeQuoteQty string `json:"cumulativeQuoteQty"`
-	Status             string `json:"status"`
-	TimeInForce        string `json:"timeInForce"`
+	Symbol             string  `json:"symbol"`
+	OrderID            int64   `json:"orderId"`
+	ClientOrderID      string  `json:"clientOrderId"`
+	Price              float64 `json:"price,string"`
+	OrigQty            float64 `json:"origQty,string"`
+	OrigQuoteQty       float64 `json:"origQuoteOrderQty,string"`
+	ExecutedQty        float64 `json:"executedQty,string"`
+	CumulativeQuoteQty float64 `json:"cummulativeQuoteQty,string"`
+	Status             string  `json:"status"`
+	TimeInForce        string  `json:"timeInForce"`
+	Side               string  `json:"side"`
 }

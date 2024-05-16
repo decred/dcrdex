@@ -770,8 +770,10 @@ export default class MarketsPage extends BasePage {
     }
 
     if (app().experimental && this.mmRunning === undefined) {
-      const marketMakingStatus = await MM.status()
-      this.mmRunning = marketMakingStatus.running
+      const mmStatus = await MM.status()
+      const { base: { id: baseID }, quote: { id: quoteID }, dex: { host } } = this.market
+      const botStatus = mmStatus.bots.find(({ config: cfg }) => cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host)
+      this.mmRunning = Boolean(botStatus?.running)
     }
 
     Doc.setVis(this.mmRunning, page.mmRunning)
@@ -1114,6 +1116,7 @@ export default class MarketsPage extends BasePage {
 
     this.market = mkt
     this.mm.setMarket(mkt)
+    this.mmRunning = undefined
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
 
