@@ -133,7 +133,7 @@ if [ $ETH_ON -eq 0 ]; then
         },
         {
             "base": "BTC_simnet",
-            "quote": "USDC_simnet",
+            "quote": "USDC.ETH_simnet",
             "lotSize": 1000000,
             "rateStep": 10000,
             "epochDuration": ${EPOCH_DURATION},
@@ -142,7 +142,7 @@ if [ $ETH_ON -eq 0 ]; then
         },
         {
             "base": "DCR_simnet",
-            "quote": "USDC_simnet",
+            "quote": "USDC.ETH_simnet",
             "lotSize": 100000000,
             "rateStep": 100000,
             "epochDuration": ${EPOCH_DURATION},
@@ -151,7 +151,7 @@ if [ $ETH_ON -eq 0 ]; then
         },
         {
             "base": "BTC_simnet",
-            "quote": "USDT_simnet",
+            "quote": "USDT.ETH_simnet",
             "lotSize": 1000000,
             "rateStep": 10000,
             "epochDuration": ${EPOCH_DURATION},
@@ -159,8 +159,8 @@ if [ $ETH_ON -eq 0 ]; then
             "parcelSize": 4
         },
         {
-            "base": "USDC_simnet",
-            "quote": "USDT_simnet",
+            "base": "USDC.ETH_simnet",
+            "quote": "USDT.ETH_simnet",
             "lotSize": 10000000,
             "rateStep": 10000,
             "epochDuration": ${EPOCH_DURATION},
@@ -184,16 +184,16 @@ if [ $POLYGON_ON -eq 0 ]; then
         },
         {
             "base": "DCR_simnet",
-            "quote": "USDC_POLYGON_simnet",
-            "lotSize": 1000000,
-            "rateStep": 10000,
+            "quote": "USDC.POLYGON_simnet",
+            "lotSize": 10000000,
+            "rateStep": 100,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
-            "parcelSize": 4
+            "parcelSize": 500
         },
         {
             "base": "DCR_simnet",
-            "quote": "USDT_POLYGON_simnet",
+            "quote": "USDT.POLYGON_simnet",
             "lotSize": 1000000,
             "rateStep": 10000,
             "epochDuration": ${EPOCH_DURATION},
@@ -372,13 +372,13 @@ cat << EOF >> "${FILEPATH}"
             "swapConf": 2,
             "configPath": "$ETH_CONFIG_PATH"
         },
-        "USDC_simnet": {
+        "USDC.ETH_simnet": {
             "bip44symbol": "usdc.eth",
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2
         },
-        "USDT_simnet": {
+        "USDT.ETH_simnet": {
             "bip44symbol": "usdt.eth",
             "network": "simnet",
             "maxFeeRate": 200,
@@ -406,13 +406,13 @@ cat << EOF >> "${FILEPATH}"
             "swapConf": 2,
             "configPath": "$POLYGON_CONFIG_PATH"
         },
-        "USDC_POLYGON_simnet": {
+        "USDC.POLYGON_simnet": {
             "bip44symbol": "usdc.polygon",
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2
         },
-        "USDT_POLYGON_simnet": {
+        "USDT.POLYGON_simnet": {
             "bip44symbol": "usdt.polygon",
             "network": "simnet",
             "maxFeeRate": 200,

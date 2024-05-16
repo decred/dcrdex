@@ -49,6 +49,7 @@ var (
 	log dex.Logger
 
 	walkingSpeedAdj float64
+	gapRange        float64
 
 	xcInfo = &bntypes.ExchangeInfo{
 		Timezone:   "UTC",
@@ -57,6 +58,7 @@ var (
 		Symbols: []*bntypes.Market{
 			makeMarket("dcr", "btc"),
 			makeMarket("eth", "btc"),
+			makeMarket("dcr", "usdc"),
 		},
 	}
 
@@ -64,24 +66,31 @@ var (
 		makeCoinInfo("BTC", "BTC", true, true, 0.00000610),
 		makeCoinInfo("ETH", "ETH", true, true, 0.00035),
 		makeCoinInfo("DCR", "DCR", true, true, 0.00001000),
+		makeCoinInfo("USDC", "MATIC", true, true, 0.01000),
 	}
 
 	coinpapAssets = []*fiatrates.CoinpaprikaAsset{
 		makeCoinpapAsset(0, "btc", "Bitcoin"),
 		makeCoinpapAsset(42, "dcr", "Decred"),
 		makeCoinpapAsset(60, "eth", "Ethereum"),
+		makeCoinpapAsset(966001, "usdc.polygon", "USDC"),
 	}
 
 	initialBalances = []*bntypes.Balance{
 		makeBalance("btc", 0.1),
 		makeBalance("dcr", 100),
 		makeBalance("eth", 5),
+		makeBalance("usdc", 1152),
 	}
 )
 
-func parseAssetID(s string) uint32 {
-	s = strings.ToLower(s)
-	assetID, _ := dex.BipSymbolID(s)
+func parseAssetID(asset string) uint32 {
+	symbol := strings.ToLower(asset)
+	switch symbol {
+	case "usdc":
+		symbol = "usdc.polygon"
+	}
+	assetID, _ := dex.BipSymbolID(symbol)
 	return assetID
 }
 
@@ -136,7 +145,8 @@ func makeCoinpapAsset(assetID uint32, symbol, name string) *fiatrates.Coinpaprik
 
 func main() {
 	var logDebug, logTrace bool
-	flag.Float64Var(&walkingSpeedAdj, "walkspeed", 1.0, "scale the maximum walking speed. default of 1.0 is about 3%")
+	flag.Float64Var(&walkingSpeedAdj, "walkspeed", 1.0, "scale the maximum walking speed. default scale of 1.0 is about 3%")
+	flag.Float64Var(&gapRange, "gaprange", 0.04, "a ratio of how much the gap can vary. default is 0.04 => 4%")
 	flag.BoolVar(&logDebug, "debug", false, "use debug logging")
 	flag.BoolVar(&logTrace, "trace", false, "use trace logging")
 	flag.Parse()
@@ -161,8 +171,8 @@ func main() {
 }
 
 func mainErr() error {
-	if walkingSpeedAdj < 0.001 || walkingSpeedAdj > 10 {
-		return fmt.Errorf("invalid walkspeed must be in [0.001, 10]")
+	if walkingSpeedAdj > 10 {
+		return fmt.Errorf("invalid walkspeed must be in < 10")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -396,13 +406,13 @@ func (f *fakeBinance) run(ctx context.Context) {
 				if withdraw.txID.Load() != nil {
 					continue
 				}
-				wallet, err := f.getWallet(withdraw.coin)
+				wallet, err := f.getWallet(withdraw.network)
 				if err != nil {
 					log.Errorf("No wallet for withdraw coin %s", withdraw.coin)
 					delete(f.withdrawalHistory, transferID)
 					continue
 				}
-				txID, err := wallet.Send(ctx, withdraw.address, withdraw.amt)
+				txID, err := wallet.Send(ctx, withdraw.address, withdraw.coin, withdraw.amt)
 				if err != nil {
 					log.Errorf("Error sending %s: %v", withdraw.coin, err)
 					delete(f.withdrawalHistory, transferID)
@@ -624,7 +634,7 @@ func (f *fakeBinance) handleConfirmDeposit(w http.ResponseWriter, r *http.Reques
 	}
 	coin := q.Get("coin")
 	network := q.Get("network")
-	wallet, err := f.getWallet(coin)
+	wallet, err := f.getWallet(network)
 	if err != nil {
 		log.Errorf("Error creating deposit wallet for %s: %v", coin, err)
 		http.Error(w, "error creating wallet", http.StatusBadRequest)
@@ -667,8 +677,8 @@ func (f *fakeBinance) handleConfirmDeposit(w http.ResponseWriter, r *http.Reques
 	writeJSONWithStatus(w, resp, http.StatusOK)
 }
 
-func (f *fakeBinance) getWallet(coin string) (Wallet, error) {
-	symbol := strings.ToLower(coin)
+func (f *fakeBinance) getWallet(network string) (Wallet, error) {
+	symbol := strings.ToLower(network)
 	f.walletMtx.Lock()
 	defer f.walletMtx.Unlock()
 	wallet, exists := f.wallets[symbol]
@@ -685,8 +695,9 @@ func (f *fakeBinance) getWallet(coin string) (Wallet, error) {
 
 func (f *fakeBinance) handleGetDepositAddress(w http.ResponseWriter, r *http.Request) {
 	coin := r.URL.Query().Get("coin")
+	network := r.URL.Query().Get("network")
 
-	wallet, err := f.getWallet(coin)
+	wallet, err := f.getWallet(network)
 	if err != nil {
 		log.Errorf("Error creating wallet for %s: %v", coin, err)
 		http.Error(w, "error creating wallet", http.StatusBadRequest)
@@ -1019,7 +1030,8 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	)
 
 	halfGapRoll := rand.Float64()
-	const minHalfGap, halfGapRange = 0.002, 0.02
+	const minHalfGap = 0.002 // 0.2%
+	halfGapRange := gapRange / 2
 	halfGapFactor := minHalfGap + halfGapRoll*halfGapRange
 	bestBuy, bestSell := newRate/(1+halfGapFactor), newRate*(1+halfGapFactor)
 
@@ -1042,10 +1054,10 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	jsBuys, jsSells := zeroBookSide(m.buys), zeroBookSide(m.sells)
 
 	makeOrders := func(bestRate, direction float64, jsSide map[string]string) []*rateQty {
-		nLevels := rand.Intn(25)
+		nLevels := rand.Intn(20) + 5
 		ords := make([]*rateQty, nLevels)
 		for i := 0; i < nLevels; i++ {
-			rate := bestRate + levelSpacing*direction*newRate*float64(i)
+			rate := bestRate + levelSpacing*direction*float64(i)
 			// Each level has between 1 and 10,001 USD equivalent.
 			const minQtyUSD, qtyUSDRange = 1, 10_000
 			qtyUSD := minQtyUSD + qtyUSDRange*rand.Float64()
