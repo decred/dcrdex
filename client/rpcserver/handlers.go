@@ -6,12 +6,14 @@ package rpcserver
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -49,8 +51,11 @@ const (
 	addWalletPeerRoute         = "addwalletpeer"
 	removeWalletPeerRoute      = "removewalletpeer"
 	notificationsRoute         = "notifications"
-	startMarketMakingRoute     = "startmarketmaking"
-	stopMarketMakingRoute      = "stopmarketmaking"
+	startBotRoute              = "startmmbot"
+	stopBotRoute               = "stopmmbot"
+	updateRunningBotRoute      = "updaterunningbot"
+	mmAvailableBalancesRoute   = "mmavailablebalances"
+	mmStatusRoute              = "mmstatus"
 	multiTradeRoute            = "multitrade"
 	stakeStatusRoute           = "stakestatus"
 	setVSPRoute                = "setvsp"
@@ -122,8 +127,11 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	addWalletPeerRoute:         handleAddWalletPeer,
 	removeWalletPeerRoute:      handleRemoveWalletPeer,
 	notificationsRoute:         handleNotifications,
-	startMarketMakingRoute:     handleStartMarketMaking,
-	stopMarketMakingRoute:      handleStopMarketMaking,
+	startBotRoute:              handleStartBot,
+	stopBotRoute:               handleStopBot,
+	mmAvailableBalancesRoute:   handleMMAvailableBalances,
+	mmStatusRoute:              handleMMStatus,
+	updateRunningBotRoute:      handleUpdateRunningBot,
 	multiTradeRoute:            handleMultiTrade,
 	stakeStatusRoute:           handleStakeStatus,
 	setVSPRoute:                handleSetVSP,
@@ -913,42 +921,141 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(notificationsRoute, notes, nil)
 }
 
-func handleStartMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if s.mm == nil {
 		errMsg := "experimental flag must be set to use market making"
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
-		return createResponse(startMarketMakingRoute, nil, resErr)
+		return createResponse(mmAvailableBalancesRoute, nil, resErr)
 	}
 
-	form, err := parseStartMarketMakingArgs(params)
+	form, err := parseMMAvailableBalancesArgs(params)
 	if err != nil {
-		return usage(startMarketMakingRoute, err)
+		return usage(mmAvailableBalancesRoute, err)
 	}
 
-	err = s.mm.Start(form.appPass, &form.cfgFilePath)
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, &form.cfgFilePath)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get available balances: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, errMsg)
+		return createResponse(mmAvailableBalancesRoute, nil, resErr)
+	}
+
+	res := struct {
+		DEXBalances map[uint32]uint64 `json:"dexBalances"`
+		CEXBalances map[uint32]uint64 `json:"cexBalances"`
+	}{
+		DEXBalances: dexBalances,
+		CEXBalances: cexBalances,
+	}
+
+	return createResponse(mmAvailableBalancesRoute, res, nil)
+}
+
+func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if s.mm == nil {
+		errMsg := "experimental flag must be set to use market making"
+		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
+		return createResponse(startBotRoute, nil, resErr)
+	}
+
+	form, err := parseStartBotArgs(params)
+	if err != nil {
+		return usage(startBotRoute, err)
+	}
+
+	err = s.mm.StartBot(form.mkt, form.balances, &form.cfgFilePath, form.appPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to start market making: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
-		return createResponse(startMarketMakingRoute, nil, resErr)
+		return createResponse(startBotRoute, nil, resErr)
 	}
 
-	return createResponse(startMarketMakingRoute, "started market making", nil)
+	return createResponse(startBotRoute, "started bot", nil)
 }
 
-func handleStopMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if s.mm == nil {
 		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
-		return createResponse(startMarketMakingRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)
+		return createResponse(stopBotRoute, nil, resErr)
 	}
 
-	if !s.mm.Running() {
-		errMsg := "market making is not running"
-		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)
-		return createResponse(stopMarketMakingRoute, nil, resErr)
+	mkt, err := parseStopBotArgs(params)
+	if err != nil {
+		return usage(startBotRoute, err)
 	}
-	s.mm.Stop()
-	return createResponse(stopMarketMakingRoute, "stopped market making", nil)
+
+	err = s.mm.StopBot(mkt)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to stop market making: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)
+		return createResponse(stopBotRoute, nil, resErr)
+	}
+
+	return createResponse(stopBotRoute, "stopped bot", nil)
+}
+
+func handleUpdateRunningBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if s.mm == nil {
+		errMsg := "experimental flag must be set to use market making"
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
+		return createResponse(updateRunningBotRoute, nil, resErr)
+	}
+
+	form, err := parseUpdateRunningBotArgs(params)
+	if err != nil {
+		return usage(updateRunningBotRoute, err)
+	}
+
+	data, err := os.ReadFile(form.cfgFilePath)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to read config file: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
+		return createResponse(updateRunningBotRoute, nil, resErr)
+	}
+
+	cfg := &mm.MarketMakingConfig{}
+	err = json.Unmarshal(data, cfg)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to unmarshal config: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
+		return createResponse(updateRunningBotRoute, nil, resErr)
+	}
+
+	var botCfg *mm.BotConfig
+	for _, bot := range cfg.BotConfigs {
+		if bot.Host == form.mkt.Host && bot.BaseID == form.mkt.BaseID && bot.QuoteID == form.mkt.QuoteID {
+			botCfg = bot
+			break
+		}
+	}
+
+	if botCfg == nil {
+		errMsg := fmt.Sprintf("bot config not found for market %s", form.mkt.String())
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
+		return createResponse(updateRunningBotRoute, nil, resErr)
+	}
+
+	err = s.mm.UpdateRunningBot(botCfg, form.balances, false)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to update running bot: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
+		return createResponse(updateRunningBotRoute, nil, resErr)
+	}
+
+	return createResponse(updateRunningBotRoute, "updated running bot", nil)
+}
+
+func handleMMStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if s.mm == nil {
+		errMsg := "experimental flag must be set to use market making"
+		resErr := msgjson.NewError(msgjson.RPCMMStatusError, errMsg)
+		return createResponse(mmStatusRoute, nil, resErr)
+	}
+
+	status := s.mm.RunningBotsStatus()
+	return createResponse(mmStatusRoute, status, nil)
+
 }
 
 func handleSetVSP(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -1668,14 +1775,47 @@ needed to complete a swap.`,
 		argsLong: `Args:
 		num (int): The number of notifications to load.`,
 	},
-	startMarketMakingRoute: {
+	startBotRoute: {
 		cmdSummary: `Start market making.`,
-		argsShort:  `(cfgPath)`,
+		argsShort:  `(cfgPath) (host) (baseID) (quoteID) (dexBals) (dexBals)`,
 		argsLong: `Args:
-		cfgPath (string): The path to the market maker config file.`,
+		cfgPath (string): The path to the market maker config file.
+		host (string): The DEX address.
+		baseID (int): The base asset's BIP-44 registered coin index.
+		quoteID (int): The quote asset's BIP-44 registered coin index.
+		dexBalances (array): The DEX balances i.e. [[60,1000000],[42,10000000]].
+		cexBalances (array): The CEX balances i.e. [[60,1000000],[42,10000000]].`,
 	},
-	stopMarketMakingRoute: {
+	stopBotRoute: {
 		cmdSummary: `Stop market making.`,
+		argsShort:  `(host) (baseID) (quoteID)`,
+		argsLong: `Args:
+		host (string): The DEX address.
+		baseID (int): The base asset's BIP-44 registered coin index.
+		quoteID (int): The quote asset's BIP-44 registered coin index.`,
+	},
+	mmAvailableBalancesRoute: {
+		cmdSummary: `Get available balances for starting a bot or adding additional balance to a running bot.`,
+		argsShort:  `(cfgPath) (host) (baseID) (quoteID)`,
+		argsLong: `Args:
+		cfgPath (string): The path to the market maker config file.
+		host (string): The DEX address.
+		baseID (int): The base asset's BIP-44 registered coin index.
+		quoteID (int): The quote asset's BIP-44 registered coin index.`,
+	},
+	mmStatusRoute: {
+		cmdSummary: `Get market making status.`,
+	},
+	updateRunningBotRoute: {
+		cmdSummary: `Update config and balances of running bot`,
+		argsShort:  `(cfgPath) (host) (baseID) (quoteID) (dexBalances) (cexBalances)`,
+		argsLong: `Args:
+		cfgPath (string): The path to the market maker config file.
+		host (string): The DEX address.
+		baseID (int): The base asset's BIP-44 registered coin index.
+		quoteID (int): The quote asset's BIP-44 registered coin index.
+		dexBalances (obj): (optional) The DEX balances adjustments i.e. [[60,-1000000],[42,10000000]].
+		cexBalances (obj): (optional) The CEX balances adjustments i.e. [[60,-1000000],[42,10000000]].`,
 	},
 	stakeStatusRoute: {
 		cmdSummary: `Get stake status. `,

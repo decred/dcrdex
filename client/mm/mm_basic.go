@@ -434,7 +434,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	m.core.MultiTrade(sellOrders, true, m.cfg.DriftTolerance, newEpoch, nil, nil)
 }
 
-func (m *basicMarketMaker) run() {
+func (m *basicMarketMaker) run(cfgUpdateManager *botCfgUpdateManager) {
 	book, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
 	if err != nil {
 		m.log.Errorf("Failed to sync book: %v", err)
@@ -463,7 +463,20 @@ func (m *basicMarketMaker) run() {
 					payload := n.Payload.(*core.EpochMatchSummaryPayload)
 					m.rebalance(payload.Epoch + 1)
 				}
+			case cfg := <-cfgUpdateManager.updateBot:
+				cfgUpdateManager.botPaused <- struct{}{}
+				m.cfg = cfg.BasicMMConfig
+				m.calculator = &basicMMCalculatorImpl{
+					book:   book,
+					oracle: m.oracle,
+					core:   m.core,
+					mkt:    m.mkt,
+					cfg:    m.cfg,
+					log:    m.log,
+				}
+				<-cfgUpdateManager.resumeBot
 			case <-m.ctx.Done():
+				m.log.Info("Basic MM context done. Exiting.")
 				return
 			}
 		}
@@ -475,7 +488,7 @@ func (m *basicMarketMaker) run() {
 }
 
 // RunBasicMarketMaker starts a basic market maker bot.
-func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, oracle oracle, log dex.Logger) {
+func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, oracle oracle, cfgUpdateManager *botCfgUpdateManager, log dex.Logger) {
 	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
 		log.Errorf("No market making config provided. Exiting.")
@@ -494,7 +507,7 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, 
 		return
 	}
 
-	mm := &basicMarketMaker{
+	(&basicMarketMaker{
 		ctx:     ctx,
 		core:    c,
 		log:     log,
@@ -504,7 +517,5 @@ func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, 
 		quoteID: cfg.QuoteID,
 		oracle:  oracle,
 		mkt:     mkt,
-	}
-
-	mm.run()
+	}).run(cfgUpdateManager)
 }

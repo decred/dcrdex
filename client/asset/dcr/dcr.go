@@ -6421,6 +6421,10 @@ func (dcr *ExchangeWallet) WalletTransaction(ctx context.Context, txID string) (
 		return nil, asset.CoinNotFoundError
 	}
 
+	// If the wallet knows about the transaction, it will be part of the
+	// available balance, so we always return Confirmed = true.
+	txs[0].Confirmed = true
+
 	return txs[0], nil
 }
 

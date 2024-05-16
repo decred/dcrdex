@@ -524,8 +524,7 @@ func TestArbRebalance(t *testing.T) {
 				NumEpochsLeaveOpen: numEpochsLeaveOpen,
 			},
 		}
-
-		go arbEngine.run()
+		go arbEngine.run(&botCfgUpdateManager{})
 
 		dummyNote := &core.BookUpdate{}
 		tCore.bookFeed.c <- dummyNote
@@ -686,8 +685,7 @@ func TestArbDexTradeUpdates(t *testing.T) {
 				NumEpochsLeaveOpen: 10,
 			},
 		}
-
-		go arbEngine.run()
+		go arbEngine.run(&botCfgUpdateManager{})
 
 		coreAdaptor.orderUpdates <- &core.Order{
 			Status: test.updatedOrderStatus,
@@ -803,8 +801,7 @@ func TestCexTradeUpdates(t *testing.T) {
 				NumEpochsLeaveOpen: 10,
 			},
 		}
-
-		go arbEngine.run()
+		go arbEngine.run(&botCfgUpdateManager{})
 
 		cex.tradeUpdates <- &libxc.Trade{
 			ID:       test.updatedOrderID,

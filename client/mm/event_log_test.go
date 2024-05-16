@@ -5,6 +5,7 @@ package mm
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -37,19 +38,11 @@ func TestEventLogDB(t *testing.T) {
 	}
 
 	cfg := &BotConfig{
-		Host:             "dex.com",
-		BaseID:           42,
-		QuoteID:          60,
-		BaseBalanceType:  Percentage,
-		BaseBalance:      50,
-		QuoteBalanceType: Percentage,
-		QuoteBalance:     50,
+		Host:    "dex.com",
+		BaseID:  42,
+		QuoteID: 60,
 		CEXCfg: &BotCEXCfg{
-			Name:             "Binance",
-			BaseBalanceType:  Percentage,
-			BaseBalance:      50,
-			QuoteBalanceType: Percentage,
-			QuoteBalance:     50,
+			Name: "Binance",
 		},
 		ArbMarketMakerConfig: &ArbMarketMakerConfig{
 			BuyPlacements: []*ArbMarketMakingPlacement{
@@ -178,23 +171,39 @@ func TestEventLogDB(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	// Get all run events
-	runEvents, err := db.runEvents(startTime, mkt, 0, nil, false)
-	if err != nil {
-		t.Fatalf("error getting run events: %v", err)
-	}
-	if len(runEvents) != 2 {
-		t.Fatalf("expected 1 run event, got %d", len(runEvents))
-	}
-	if !reflect.DeepEqual(runEvents[0], event2) {
-		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event2, runEvents[0])
-	}
-	if !reflect.DeepEqual(runEvents[1], event1) {
-		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event1, runEvents[1])
+	tryWithTimeout := func(f func() error) {
+		var err error
+		for i := 0; i < 20; i++ {
+			time.Sleep(100 * time.Millisecond)
+			err = f()
+			if err == nil {
+				return
+			}
+		}
+		t.Fatal(err)
 	}
 
+	// Get all run events
+	check := func() error {
+		runEvents, err := db.runEvents(startTime, mkt, 0, nil, false)
+		if err != nil {
+			return fmt.Errorf("error getting run events: %v", err)
+		}
+		if len(runEvents) != 2 {
+			return fmt.Errorf("expected 2 run event, got %d", len(runEvents))
+		}
+		if !reflect.DeepEqual(runEvents[0], event2) {
+			return fmt.Errorf("expected event:\n%v\n\ngot:\n%v", event2, runEvents[0])
+		}
+		if !reflect.DeepEqual(runEvents[1], event1) {
+			return fmt.Errorf("expected event:\n%v\n\ngot:\n%v", event1, runEvents[1])
+		}
+		return nil
+	}
+	tryWithTimeout(check)
+
 	// Get only 1 run event
-	runEvents, err = db.runEvents(startTime, mkt, 1, nil, false)
+	runEvents, err := db.runEvents(startTime, mkt, 1, nil, false)
 	if err != nil {
 		t.Fatalf("error getting run events: %v", err)
 	}
@@ -240,22 +249,24 @@ func TestEventLogDB(t *testing.T) {
 	fiatRates[60] = 3000
 	db.storeEvent(startTime, mkt, event1, currBalanceState())
 
-	time.Sleep(200 * time.Millisecond)
-
 	// Get all run events
-	runEvents, err = db.runEvents(startTime, mkt, 0, nil, false)
-	if err != nil {
-		t.Fatalf("error getting run events: %v", err)
+	check = func() error {
+		runEvents, err := db.runEvents(startTime, mkt, 0, nil, false)
+		if err != nil {
+			return fmt.Errorf("error getting run events: %v", err)
+		}
+		if len(runEvents) != 2 {
+			return fmt.Errorf("expected 2 run event, got %d", len(runEvents))
+		}
+		if !reflect.DeepEqual(runEvents[0], event2) {
+			return fmt.Errorf("expected event:\n%v\n\ngot:\n%v", event2, runEvents[0])
+		}
+		if !reflect.DeepEqual(runEvents[1], event1) {
+			return fmt.Errorf("expected event:\n%v\n\ngot:\n%v", event1, runEvents[1])
+		}
+		return nil
 	}
-	if len(runEvents) != 2 {
-		t.Fatalf("expected 2 run events, got %d", len(runEvents))
-	}
-	if !reflect.DeepEqual(runEvents[0], event2) {
-		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event2, runEvents[0])
-	}
-	if !reflect.DeepEqual(runEvents[1], event1) {
-		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event1, runEvents[1])
-	}
+	tryWithTimeout(check)
 
 	runs, err = db.runs(0, nil, nil)
 	if err != nil {

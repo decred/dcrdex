@@ -4837,7 +4837,8 @@ func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txID string) (*
 // WalletTransaction returns a transaction that either the wallet has made or
 // one in which the wallet has received funds.
 func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
-	txID = common.HexToHash(txID).String()
+	txHash := common.HexToHash(txID)
+	txID = txHash.String()
 	txs, err := w.TxHistory(1, &txID, false)
 	if errors.Is(err, asset.CoinNotFoundError) {
 		return w.getReceivingTransaction(ctx, txID)
@@ -4849,7 +4850,12 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.
 		return nil, asset.CoinNotFoundError
 	}
 
-	return txs[0], err
+	tx := txs[0]
+	if tx.BlockNumber > 0 {
+		tx.Confirmed = true
+	}
+
+	return tx, nil
 }
 
 func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
@@ -4908,7 +4914,12 @@ func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asse
 		return nil, asset.CoinNotFoundError
 	}
 
-	return txs[0], err
+	tx := txs[0]
+	if tx.BlockNumber > 0 {
+		tx.Confirmed = true
+	}
+
+	return tx, nil
 }
 
 // providersFile reads a file located at ~/dextest/credentials.json.

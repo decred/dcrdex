@@ -2,12 +2,8 @@
     "botConfigs": [
         {
             "host": "127.0.0.1:17273",
-            "baseAsset": 60,
-            "quoteAsset": 0,
-            "baseBalanceType": 0,
-            "quoteBalanceType": 0,
-            "baseBalance": 100,
-            "quoteBalance": 100,
+            "baseID": 60,
+            "quoteID": 0,
             "baseWalletOptions": {
                 "multisplit": "true"
             },
@@ -17,10 +13,6 @@
             },
             "cexCfg": {
                 "name": "Binance",
-                "baseBalanceType": 0,
-                "quoteBalanceType": 0,
-                "baseBalance": 100,
-                "quoteBalance": 100,
                 "autoRebalance": {
                     "minBaseAmt": 3000000000,
                     "minBaseTransfer" : 1000000000,

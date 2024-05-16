@@ -13,7 +13,6 @@ import (
 const (
 	validationNote = "validation"
 	runStats       = "runstats"
-	mmStartStop    = "mmstartstop"
 	runEvent       = "runevent"
 )
 
@@ -63,18 +62,5 @@ func newRunEventNote(host string, base, quote uint32, startTime int64, event *Ma
 		Quote:        quote,
 		StartTime:    startTime,
 		Event:        event,
-	}
-}
-
-type mmStartStopNote struct {
-	db.Notification
-
-	Running bool `json:"running"`
-}
-
-func newMMStartStopNote(running bool) *mmStartStopNote {
-	return &mmStartStopNote{
-		Notification: db.NewNotification(mmStartStop, "", "", "", db.Data),
-		Running:      running,
 	}
 }

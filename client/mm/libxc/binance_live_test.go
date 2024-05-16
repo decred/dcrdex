@@ -120,7 +120,7 @@ func TestTrade(t *testing.T) {
 		}
 	}()
 
-	trade, err := bnc.Trade(ctx, 60, 60001, false, 3000e5, 1e7, updaterID)
+	trade, err := bnc.Trade(ctx, 60, 60001, false, 3600e5, 1e7, updaterID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
 	}
@@ -265,20 +265,13 @@ func TestWithdrawal(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	onComplete := func(txID string) {
-		t.Logf("withdrawal complete: %v", txID)
-		wg.Done()
-	}
-
-	_, err = bnc.Withdraw(ctx, 966, 2e10, "", onComplete)
+	withdrawalID, err := bnc.Withdraw(ctx, 966, 2e10, "")
 	if err != nil {
 		fmt.Printf("withdrawal error: %v", err)
 		return
 	}
 
-	wg.Wait()
+	t.Logf("withdrawalID: %v", withdrawalID)
 }
 
 func TestConfirmDeposit(t *testing.T) {
@@ -291,18 +284,8 @@ func TestConfirmDeposit(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	onComplete := func(amount uint64) {
-		t.Logf("deposit complete: %v", amount)
-		wg.Done()
-	}
-
-	bnc.ConfirmDeposit(ctx, &DepositData{
-		TxID: "",
-	}, onComplete)
-
-	wg.Wait()
+	confirmed, amt := bnc.ConfirmDeposit(ctx, &DepositData{})
+	t.Logf("confirmed: %v, amt: %v", confirmed, amt)
 }
 
 func TestGetDepositAddress(t *testing.T) {
@@ -387,5 +370,10 @@ func TestTradeStatus(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	bnc.TradeStatus(ctx, "6a570ce0ad7531f9101300000003", 60, 0)
+	trade, err := bnc.TradeStatus(ctx, "eb6b6e1177213643142700000001", 60, 60001)
+	if err != nil {
+		t.Fatalf("trade status error: %v", err)
+	}
+
+	t.Logf("trade status: %+v", trade)
 }

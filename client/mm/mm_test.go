@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -412,833 +413,6 @@ func (o *tOracle) getMarketPrice(base, quote uint32) float64 {
 	return o.marketPrice
 }
 
-func TestInitialBaseBalances(t *testing.T) {
-	dcrBtcID := fmt.Sprintf("%s-%d-%d", "host1", 42, 0)
-	dcrEthID := fmt.Sprintf("%s-%d-%d", "host1", 42, 60)
-
-	type ttest struct {
-		name string
-		cfgs []*BotConfig
-
-		assetBalances map[uint32]uint64
-		cexBalances   map[string]map[uint32]uint64
-
-		wantReserves    map[string]map[uint32]uint64
-		wantCEXReserves map[string]map[uint32]uint64
-		wantErr         bool
-	}
-	tests := []*ttest{
-		// "percentages only, ok"
-		{
-			name: "percentages only, ok",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			wantReserves: map[string]map[uint32]uint64{
-				dcrBtcID: {
-					0:  500,
-					42: 500,
-				},
-				dcrEthID: {
-					42: 500,
-					60: 2000,
-				},
-			},
-		},
-		// "50% + 51% error"
-		{
-			name: "50% + 51% error",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      51,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			wantErr: true,
-		},
-		// "combine amount and percentages, ok"
-		{
-			name: "combine amount and percentages, ok",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Amount,
-					BaseBalance:      499,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			wantReserves: map[string]map[uint32]uint64{
-				dcrBtcID: {
-					0:  500,
-					42: 499,
-				},
-				dcrEthID: {
-					42: 500,
-					60: 2000,
-				},
-			},
-		},
-		// "combine amount and percentages, too high error"
-		{
-			name: "combine amount and percentages, too high error",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Amount,
-					BaseBalance:      501,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			wantErr: true,
-		},
-		// "CEX percentages only, ok"
-		{
-			name: "CEX percentages only, ok",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-					CEXCfg: &BotCEXCfg{
-						Name:             "Kraken",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     100,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					42: 2000,
-					0:  3000,
-				},
-				"Kraken": {
-					42: 4000,
-					60: 2000,
-				},
-			},
-
-			wantReserves: map[string]map[uint32]uint64{
-				dcrBtcID: {
-					0:  500,
-					42: 500,
-				},
-				dcrEthID: {
-					42: 500,
-					60: 2000,
-				},
-			},
-
-			wantCEXReserves: map[string]map[uint32]uint64{
-				dcrBtcID: {
-					0:  1500,
-					42: 1000,
-				},
-				dcrEthID: {
-					42: 2000,
-					60: 2000,
-				},
-			},
-		},
-		// "CEX 50% + 51% error"
-		{
-			name: "CEX 50% + 51% error",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      51,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					42: 2000,
-					60: 1000,
-					0:  3000,
-				},
-			},
-
-			wantErr: true,
-		},
-		// "CEX combine amount and percentages, ok"
-		{
-			name: "CEX combine amount and percentages, ok",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Amount,
-						BaseBalance:      600,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     100,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					42: 2000,
-					0:  3000,
-					60: 2000,
-				},
-				"Kraken": {
-					42: 4000,
-					60: 2000,
-				},
-			},
-
-			wantReserves: map[string]map[uint32]uint64{
-				dcrBtcID: {
-					0:  500,
-					42: 500,
-				},
-				dcrEthID: {
-					42: 500,
-					60: 2000,
-				},
-			},
-
-			wantCEXReserves: map[string]map[uint32]uint64{
-				dcrBtcID: {
-					0:  1500,
-					42: 1000,
-				},
-				dcrEthID: {
-					42: 600,
-					60: 2000,
-				},
-			},
-		},
-		// "CEX combine amount and percentages"
-		{
-			name: "CEX combine amount and percentages, too high error",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          0,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:             "host1",
-					BaseID:           42,
-					QuoteID:          60,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     100,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Amount,
-						BaseBalance:      1501,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     100,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:  1000,
-				42: 1000,
-				60: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					42: 2000,
-					0:  3000,
-					60: 2000,
-				},
-				"Kraken": {
-					42: 4000,
-					60: 2000,
-				},
-			},
-
-			wantErr: true,
-		},
-		// "CEX same asset on different chains"
-		{
-			name: "CEX same asset on different chains",
-			cfgs: []*BotConfig{
-				{
-					Host:                    "host1",
-					BaseID:                  60001,
-					QuoteID:                 0,
-					BaseBalanceType:         Percentage,
-					BaseBalance:             50,
-					QuoteBalanceType:        Percentage,
-					QuoteBalance:            50,
-					BaseFeeAssetBalanceType: Amount,
-					BaseFeeAssetBalance:     500,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:                     "host1",
-					BaseID:                   60,
-					QuoteID:                  966001,
-					BaseBalanceType:          Percentage,
-					BaseBalance:              50,
-					QuoteBalanceType:         Percentage,
-					QuoteBalance:             50,
-					QuoteFeeAssetBalanceType: Amount,
-					QuoteFeeAssetBalance:     500,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:      1000,
-				60:     2000,
-				966:    1000,
-				60001:  2000,
-				966001: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					0:      3000,
-					60:     2000,
-					60001:  2000,
-					966001: 2000,
-					61001:  2000,
-				},
-			},
-
-			wantReserves: map[string]map[uint32]uint64{
-				dexMarketID("host1", 60001, 0): {
-					60001: 1000,
-					0:     500,
-					60:    500,
-				},
-				dexMarketID("host1", 60, 966001): {
-					966001: 1000,
-					966:    500,
-					60:     1000,
-				},
-			},
-
-			wantCEXReserves: map[string]map[uint32]uint64{
-				dexMarketID("host1", 60001, 0): {
-					60001: 1000,
-					0:     1500,
-				},
-				dexMarketID("host1", 60, 966001): {
-					966001: 1000,
-					60:     1000,
-				},
-			},
-		},
-		// "CEX same asset on different chains, too high error"
-		{
-			name: "CEX same asset on different chains, too high error",
-			cfgs: []*BotConfig{
-				{
-					Host:                    "host1",
-					BaseID:                  60001,
-					QuoteID:                 0,
-					BaseBalanceType:         Percentage,
-					BaseBalance:             50,
-					QuoteBalanceType:        Percentage,
-					QuoteBalance:            50,
-					BaseFeeAssetBalanceType: Amount,
-					BaseFeeAssetBalance:     1,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:                    "host1",
-					BaseID:                  966001,
-					QuoteID:                 60,
-					BaseBalanceType:         Percentage,
-					BaseBalance:             50,
-					QuoteBalanceType:        Percentage,
-					QuoteBalance:            100,
-					BaseFeeAssetBalanceType: Amount,
-					BaseFeeAssetBalance:     1,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      51,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     100,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:      1000,
-				60:     2000,
-				966:    1000,
-				60001:  2000,
-				966001: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					0:      3000,
-					60:     2000,
-					60001:  2000,
-					966001: 2000,
-					61001:  2000,
-				},
-			},
-
-			wantErr: true,
-		},
-		// "No base fee asset specified, error"
-		{
-			name: "No base fee asset specified, error",
-			cfgs: []*BotConfig{
-				{
-					Host:             "host1",
-					BaseID:           60001,
-					QuoteID:          0,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:                     "host1",
-					BaseID:                   60,
-					QuoteID:                  966001,
-					BaseBalanceType:          Percentage,
-					BaseBalance:              50,
-					QuoteBalanceType:         Percentage,
-					QuoteBalance:             50,
-					QuoteFeeAssetBalanceType: Amount,
-					QuoteFeeAssetBalance:     500,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:      1000,
-				60:     2000,
-				966:    1000,
-				60001:  2000,
-				966001: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					0:      3000,
-					60:     2000,
-					60001:  2000,
-					966001: 2000,
-					61001:  2000,
-				},
-			},
-
-			wantErr: true,
-		},
-		// "No quote fee asset specified, error"
-		{
-			name: "No quote fee asset specified, error",
-			cfgs: []*BotConfig{
-				{
-					Host:                    "host1",
-					BaseID:                  60001,
-					QuoteID:                 0,
-					BaseBalanceType:         Percentage,
-					BaseBalance:             50,
-					QuoteBalanceType:        Percentage,
-					QuoteBalance:            50,
-					BaseFeeAssetBalanceType: Amount,
-					BaseFeeAssetBalance:     500,
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:             "host1",
-					BaseID:           60,
-					QuoteID:          966001,
-					BaseBalanceType:  Percentage,
-					BaseBalance:      50,
-					QuoteBalanceType: Percentage,
-					QuoteBalance:     50,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:      1000,
-				60:     2000,
-				966:    1000,
-				60001:  2000,
-				966001: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					0:      3000,
-					60:     2000,
-					60001:  2000,
-					966001: 2000,
-					61001:  2000,
-				},
-			},
-
-			wantErr: true,
-		},
-		// "Token asset insufficient balance, error"
-		{
-			name: "Token asset insufficient balance, error",
-			cfgs: []*BotConfig{
-				{
-					Host:                    "host1",
-					BaseID:                  60001,
-					QuoteID:                 0,
-					BaseBalanceType:         Percentage,
-					BaseBalance:             50,
-					QuoteBalanceType:        Percentage,
-					QuoteBalance:            50,
-					BaseFeeAssetBalanceType: Percentage,
-					BaseFeeAssetBalance:     51,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-				{
-					Host:                     "host1",
-					BaseID:                   60,
-					QuoteID:                  966001,
-					BaseBalanceType:          Percentage,
-					BaseBalance:              50,
-					QuoteBalanceType:         Percentage,
-					QuoteBalance:             50,
-					QuoteFeeAssetBalanceType: Amount,
-					QuoteFeeAssetBalance:     500,
-
-					CEXCfg: &BotCEXCfg{
-						Name:             "Binance",
-						BaseBalanceType:  Percentage,
-						BaseBalance:      50,
-						QuoteBalanceType: Percentage,
-						QuoteBalance:     50,
-					},
-				},
-			},
-
-			assetBalances: map[uint32]uint64{
-				0:      1000,
-				60:     2000,
-				966:    1000,
-				60001:  2000,
-				966001: 2000,
-			},
-
-			cexBalances: map[string]map[uint32]uint64{
-				"Binance": {
-					0:      3000,
-					60:     2000,
-					60001:  2000,
-					966001: 2000,
-					61001:  2000,
-				},
-			},
-
-			wantErr: true,
-		},
-	}
-
-	runTest := func(test *ttest) {
-		tCore := newTCore()
-		tCore.setAssetBalances(test.assetBalances)
-
-		cexes := make(map[string]*centralizedExchange)
-		for cexName, balances := range test.cexBalances {
-			cex := newTCEX()
-			cexes[cexName] = &centralizedExchange{CEX: cex}
-			cex.balances = make(map[uint32]*libxc.ExchangeBalance)
-			for assetID, balance := range balances {
-				cex.balances[assetID] = &libxc.ExchangeBalance{
-					Available: balance,
-				}
-			}
-		}
-
-		dexBalances, cexBalances, err := botInitialBaseBalances(test.cfgs, tCore, cexes)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("%s: expected error, got nil", test.name)
-			}
-			return
-		}
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", test.name, err)
-		}
-
-		for botID, wantReserve := range test.wantReserves {
-
-			botDexBalances := dexBalances[botID]
-			for assetID, wantReserve := range wantReserve {
-				if botDexBalances[assetID] != wantReserve {
-					t.Fatalf("%s: unexpected reserve for bot %s, asset %d. "+
-						"want %d, got %d", test.name, botID, assetID, wantReserve,
-						botDexBalances[assetID])
-				}
-			}
-
-			wantCEXReserves := test.wantCEXReserves[botID]
-			cexBalances := cexBalances[botID]
-			for assetID, wantReserve := range wantCEXReserves {
-				if cexBalances[assetID] != wantReserve {
-					t.Fatalf("%s: unexpected cex reserve for bot %s, asset %d. "+
-						"want %d, got %d", test.name, botID, assetID, wantReserve,
-						cexBalances[assetID])
-				}
-			}
-		}
-	}
-
-	for _, test := range tests {
-		runTest(test)
-	}
-}
-
 type vwapResult struct {
 	avg     uint64
 	extrema uint64
@@ -1252,45 +426,42 @@ type withdrawArgs struct {
 }
 
 type tCEX struct {
-	bidsVWAP                  map[uint64]vwapResult
-	asksVWAP                  map[uint64]vwapResult
-	vwapErr                   error
-	balances                  map[uint32]*libxc.ExchangeBalance
-	balanceErr                error
-	tradeID                   string
-	tradeErr                  error
-	lastTrade                 *libxc.Trade
-	cancelledTrades           []string
-	cancelTradeErr            error
-	tradeUpdates              chan *libxc.Trade
-	tradeUpdatesID            int
-	lastConfirmDepositTx      string
-	confirmDeposit            chan uint64
-	confirmDepositComplete    chan bool
-	depositAddress            string
-	lastWithdrawArgs          *withdrawArgs
-	confirmWithdrawal         chan *withdrawArgs
-	confirmWithdrawalComplete chan bool
+	bidsVWAP             map[uint64]vwapResult
+	asksVWAP             map[uint64]vwapResult
+	vwapErr              error
+	balances             map[uint32]*libxc.ExchangeBalance
+	balanceErr           error
+	tradeID              string
+	tradeErr             error
+	lastTrade            *libxc.Trade
+	cancelledTrades      []string
+	cancelTradeErr       error
+	tradeUpdates         chan *libxc.Trade
+	tradeUpdatesID       int
+	depositAddress       string
+	lastWithdrawArgs     *withdrawArgs
+	confirmWithdrawalMtx sync.Mutex
+	confirmWithdrawal    *withdrawArgs
+	withdrawalID         string
+	confirmDepositMtx    sync.Mutex
+	confirmedDeposit     *uint64
+	tradeStatus          *libxc.Trade
 }
 
 func newTCEX() *tCEX {
 	return &tCEX{
-		bidsVWAP:                  make(map[uint64]vwapResult),
-		asksVWAP:                  make(map[uint64]vwapResult),
-		balances:                  make(map[uint32]*libxc.ExchangeBalance),
-		cancelledTrades:           make([]string, 0),
-		tradeUpdates:              make(chan *libxc.Trade),
-		confirmDeposit:            make(chan uint64),
-		confirmDepositComplete:    make(chan bool),
-		confirmWithdrawal:         make(chan *withdrawArgs),
-		confirmWithdrawalComplete: make(chan bool),
+		bidsVWAP:        make(map[uint64]vwapResult),
+		asksVWAP:        make(map[uint64]vwapResult),
+		balances:        make(map[uint32]*libxc.ExchangeBalance),
+		cancelledTrades: make([]string, 0),
+		tradeUpdates:    make(chan *libxc.Trade),
 	}
 }
 
 var _ libxc.CEX = (*tCEX)(nil)
 
 func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	return nil, nil
+	return &sync.WaitGroup{}, nil
 }
 func (c *tCEX) Balances() (map[uint32]*libxc.ExchangeBalance, error) {
 	return nil, nil
@@ -1358,30 +529,38 @@ func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	return c.depositAddress, nil
 }
 
-func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(string)) (string, error) {
+func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
 	c.lastWithdrawArgs = &withdrawArgs{
 		address: address,
 		amt:     qty,
 		assetID: assetID,
 	}
 
-	go func() {
-		withdrawal := <-c.confirmWithdrawal
-		onComplete(withdrawal.txID)
-		c.confirmWithdrawalComplete <- true
-	}()
-
-	return "", nil
+	return c.withdrawalID, nil
 }
 
-func (c *tCEX) ConfirmDeposit(ctx context.Context, deposit *libxc.DepositData, onConfirm func(uint64)) {
-	c.lastConfirmDepositTx = deposit.TxID
+func (c *tCEX) ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error) {
+	c.confirmWithdrawalMtx.Lock()
+	defer c.confirmWithdrawalMtx.Unlock()
 
-	go func() {
-		confirmDepositAmt := <-c.confirmDeposit
-		onConfirm(confirmDepositAmt)
-		c.confirmDepositComplete <- true
-	}()
+	if c.confirmWithdrawal == nil {
+		return 0, "", libxc.ErrWithdrawalPending
+	}
+	return c.confirmWithdrawal.amt, c.confirmWithdrawal.txID, nil
+}
+
+func (c *tCEX) ConfirmDeposit(ctx context.Context, deposit *libxc.DepositData) (bool, uint64) {
+	c.confirmDepositMtx.Lock()
+	defer c.confirmDepositMtx.Unlock()
+
+	if c.confirmedDeposit != nil {
+		return true, *c.confirmedDeposit
+	}
+	return false, 0
+}
+
+func (c *tCEX) TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) (*libxc.Trade, error) {
+	return c.tradeStatus, nil
 }
 
 type prepareRebalanceResult struct {
@@ -1503,4 +682,174 @@ func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, se
 func (c *tBotCexAdaptor) PrepareRebalance(ctx context.Context, assetID uint32) (rebalance int64, dexReserves, cexReserves uint64) {
 	res := c.prepareRebalanceResults[assetID]
 	return res.rebalance, res.dexReserves, res.cexReserves
+}
+
+type tExchangeAdaptor struct {
+	dexBalances map[uint32]*BotBalance
+	cexBalances map[uint32]*BotBalance
+}
+
+var _ exchangeAdaptor = (*tExchangeAdaptor)(nil)
+
+func (t *tExchangeAdaptor) refreshAllPendingEvents(context.Context) {}
+func (t *tExchangeAdaptor) DEXBalance(assetID uint32) *BotBalance {
+	if t.dexBalances[assetID] == nil {
+		return &BotBalance{}
+	}
+	return t.dexBalances[assetID]
+}
+func (t *tExchangeAdaptor) CEXBalance(assetID uint32) *BotBalance {
+	if t.cexBalances[assetID] == nil {
+		return &BotBalance{}
+	}
+	return t.cexBalances[assetID]
+}
+func (t *tExchangeAdaptor) stats() *RunStats                                           { return nil }
+func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig, balanceDiffs *BotBalanceDiffs) {}
+func (t *tExchangeAdaptor) timeStart() int64                                           { return 0 }
+
+func TestAvailableBalances(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tCore := newTCore()
+
+	ethBtc := &MarketWithHost{
+		Host:    "dex.com",
+		BaseID:  60,
+		QuoteID: 0,
+	}
+
+	dcrBtc := &MarketWithHost{
+		Host:    "dex.com",
+		BaseID:  42,
+		QuoteID: 0,
+	}
+
+	dcrUsdc := &MarketWithHost{
+		Host:    "dex.com",
+		BaseID:  42,
+		QuoteID: 60001,
+	}
+
+	btcUsdc := &MarketWithHost{
+		Host:    "dex.com",
+		BaseID:  0,
+		QuoteID: 60001,
+	}
+
+	cfg := &MarketMakingConfig{
+		BotConfigs: []*BotConfig{
+			{
+				Host:    "dex.com",
+				BaseID:  42,
+				QuoteID: 0,
+			},
+			{
+				Host:    "dex.com",
+				BaseID:  60,
+				QuoteID: 0,
+				CEXCfg: &BotCEXCfg{
+					Name: libxc.Binance,
+				},
+			},
+			{
+				Host:    "dex.com",
+				BaseID:  0,
+				QuoteID: 60001,
+				CEXCfg: &BotCEXCfg{
+					Name: libxc.Binance,
+				},
+			},
+			{
+				Host:    "dex.com",
+				BaseID:  42,
+				QuoteID: 60001,
+				CEXCfg: &BotCEXCfg{
+					Name: libxc.BinanceUS,
+				},
+			},
+		},
+		CexConfigs: []*CEXConfig{
+			{
+				Name: libxc.Binance,
+			},
+			{
+				Name: libxc.BinanceUS,
+			},
+		},
+	}
+
+	binance := newTCEX()
+	binance.balances = map[uint32]*libxc.ExchangeBalance{
+		60:    {Available: 9e5},
+		0:     {Available: 8e5},
+		60001: {Available: 6e5},
+	}
+
+	binanceUS := newTCEX()
+	binanceUS.balances = map[uint32]*libxc.ExchangeBalance{
+		42:    {Available: 7e5},
+		60001: {Available: 6e5},
+	}
+
+	mm := MarketMaker{
+		ctx:         ctx,
+		log:         tLogger,
+		core:        tCore,
+		defaultCfg:  cfg,
+		runningBots: make(map[MarketWithHost]*runningBot),
+	}
+
+	mm.cexes = map[string]*centralizedExchange{
+		libxc.Binance:   {CEX: binance, CEXConfig: &CEXConfig{Name: libxc.Binance}},
+		libxc.BinanceUS: {CEX: binanceUS, CEXConfig: &CEXConfig{Name: libxc.BinanceUS}},
+	}
+
+	tCore.setAssetBalances(map[uint32]uint64{
+		42:    9e5,
+		60:    8e5,
+		0:     7e5,
+		60001: 6e5,
+	})
+
+	checkAvailableBalances := func(mkt *MarketWithHost, expDex, expCex map[uint32]uint64) {
+		t.Helper()
+		dexBalances, cexBalances, err := mm.AvailableBalances(mkt, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !reflect.DeepEqual(dexBalances, expDex) {
+			t.Fatalf("unexpected dex balances. wanted %v, got %v", expDex, dexBalances)
+		}
+		if !reflect.DeepEqual(cexBalances, expCex) {
+			t.Fatalf("unexpected cex balances. wanted %v, got %v", expCex, cexBalances)
+		}
+	}
+
+	// No running bots
+	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 7e5}, map[uint32]uint64{})
+	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 8e5, 0: 7e5}, map[uint32]uint64{60: 9e5, 0: 8e5})
+	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 7e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{0: 8e5, 60001: 6e5})
+	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
+
+	mm.runningBots[*btcUsdc] = &runningBot{
+		adaptor: &tExchangeAdaptor{
+			dexBalances: map[uint32]*BotBalance{
+				60:    {Available: 1e5},
+				0:     {Available: 4e5},
+				60001: {Available: 2e5},
+			},
+			cexBalances: map[uint32]*BotBalance{
+				60001: {Available: 2e5},
+				0:     {Available: 3e5},
+			},
+		},
+		botCfg: cfg.BotConfigs[1],
+	}
+
+	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 3e5}, map[uint32]uint64{})
+	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 7e5, 0: 3e5}, map[uint32]uint64{60: 9e5, 0: 5e5})
+	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 3e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{0: 5e5, 60001: 4e5})
+	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
 }

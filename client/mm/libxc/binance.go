@@ -825,10 +825,54 @@ func (bnc *binance) assetPrecision(coin string) (int, error) {
 	return 0, fmt.Errorf("asset %s not found", coin)
 }
 
+// ConfirmWithdrawal checks whether a withdrawal has been completed. If the
+// withdrawal has not yet been sent, ErrWithdrawalPending is returned.
+func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error) {
+	assetCfg, err := bncAssetCfg(assetID)
+	if err != nil {
+		return 0, "", fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
+	}
+
+	type withdrawalHistoryStatus struct {
+		ID     string  `json:"id"`
+		Amount float64 `json:"amount,string"`
+		Status int     `json:"status"`
+		TxID   string  `json:"txId"`
+	}
+
+	withdrawHistoryResponse := []*withdrawalHistoryStatus{}
+	v := make(url.Values)
+	v.Add("coin", assetCfg.coin)
+	err = bnc.getAPI(ctx, "/sapi/v1/capital/withdraw/history", v, true, true, &withdrawHistoryResponse)
+	if err != nil {
+		return 0, "", err
+	}
+
+	var status *withdrawalHistoryStatus
+	for _, s := range withdrawHistoryResponse {
+		if s.ID == withdrawalID {
+			status = s
+			break
+		}
+	}
+	if status == nil {
+		return 0, "", fmt.Errorf("withdrawal status not found for %s", withdrawalID)
+	}
+
+	bnc.log.Tracef("Withdrawal status: %+v", status)
+
+	if status.Status != 6 {
+		return 0, "", ErrWithdrawalPending
+	}
+
+	amt := status.Amount * float64(assetCfg.conversionFactor)
+	return uint64(amt), status.TxID, nil
+}
+
 // Withdraw withdraws funds from the CEX to a certain address. onComplete
 // is called with the actual amount withdrawn (amt - fees) and the
 // transaction ID of the withdrawal.
-func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string, onComplete func(string)) (string, error) {
+func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
 	assetCfg, err := bncAssetCfg(assetID)
 	if err != nil {
 		return "", fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
@@ -853,57 +897,6 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 	if err != nil {
 		return "", err
 	}
-
-	go func() {
-		getWithdrawalStatus := func() (complete bool, txID string) {
-			type withdrawalHistoryStatus struct {
-				ID     string  `json:"id"`
-				Amount float64 `json:"amount,string"`
-				Status int     `json:"status"`
-				TxID   string  `json:"txId"`
-			}
-
-			withdrawHistoryResponse := []*withdrawalHistoryStatus{}
-			v := make(url.Values)
-			v.Add("coin", assetCfg.coin)
-			err = bnc.getAPI(ctx, "/sapi/v1/capital/withdraw/history", v, true, true, &withdrawHistoryResponse)
-			if err != nil {
-				bnc.log.Errorf("Error getting withdrawal status: %v", err)
-				return false, ""
-			}
-
-			var status *withdrawalHistoryStatus
-			for _, s := range withdrawHistoryResponse {
-				if s.ID == withdrawResp.ID {
-					status = s
-					break
-				}
-			}
-			if status == nil {
-				bnc.log.Errorf("Withdrawal status not found for %s", withdrawResp.ID)
-				return false, ""
-			}
-
-			bnc.log.Tracef("Withdrawal status: %+v", status)
-
-			return status.Status == 6, status.TxID
-		}
-
-		for {
-			ticker := time.NewTicker(time.Second * 20)
-			defer ticker.Stop()
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if complete, txID := getWithdrawalStatus(); complete {
-					onComplete(txID)
-					return
-				}
-			}
-		}
-	}()
 
 	return withdrawResp.ID, nil
 }
@@ -932,84 +925,64 @@ func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (stri
 
 // ConfirmDeposit is an async function that calls onConfirm when the status of
 // a deposit has been confirmed.
-func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData, onConfirm func(uint64)) {
-	checkDepositStatus := func() (done bool, amt uint64) {
-		var resp []*bntypes.PendingDeposit
-		// We'll add info for the fake server.
-		var query url.Values
-		if bnc.accountsURL == fakeBinanceURL {
-			bncAsset, err := bncAssetCfg(deposit.AssetID)
-			if err != nil {
-				bnc.log.Errorf("Error getting asset cfg for %d: %v", deposit.AssetID, err)
-				return
-			}
-
-			query = url.Values{
-				"txid":    []string{deposit.TxID},
-				"amt":     []string{strconv.FormatFloat(deposit.AmountConventional, 'f', 9, 64)},
-				"coin":    []string{bncAsset.coin},
-				"network": []string{bncAsset.chain},
-			}
-		}
-		// TODO: Use the "startTime" parameter to apply a reasonable limit to
-		// this request.
-		err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", query, true, true, &resp)
+func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, uint64) {
+	var resp []*bntypes.PendingDeposit
+	// We'll add info for the fake server.
+	var query url.Values
+	if bnc.accountsURL == fakeBinanceURL {
+		bncAsset, err := bncAssetCfg(deposit.AssetID)
 		if err != nil {
-			bnc.log.Errorf("error getting deposit status: %v", err)
+			bnc.log.Errorf("Error getting asset cfg for %d: %v", deposit.AssetID, err)
 			return false, 0
 		}
 
-		for _, status := range resp {
-			if status.TxID == deposit.TxID {
-				switch status.Status {
-				case bntypes.DepositStatusSuccess, bntypes.DepositStatusCredited:
-					dexSymbol := binanceCoinNetworkToDexSymbol(status.Coin, status.Network)
-					assetID, found := dex.BipSymbolID(dexSymbol)
-					if !found {
-						bnc.log.Errorf("Failed to find DEX asset ID for Coin: %s, Network: %s", status.Coin, status.Network)
-						return true, 0
-					}
-					ui, err := asset.UnitInfo(assetID)
-					if err != nil {
-						bnc.log.Errorf("Failed to find unit info for asset ID %d", assetID)
-						return true, 0
-					}
-					amount := uint64(status.Amount * float64(ui.Conventional.ConversionFactor))
-					return true, amount
-				case bntypes.DepositStatusPending:
-					return false, 0
-				case bntypes.DepositStatusWaitingUserConfirm:
-					// This shouldn't ever happen.
-					bnc.log.Errorf("Deposit %s to binance requires user confirmation!")
-					return true, 0
-				case bntypes.DepositStatusWrongDeposit:
-					return true, 0
-				default:
-					bnc.log.Errorf("Deposit %s to binance has an unknown status %d", status.Status)
-				}
-			}
+		query = url.Values{
+			"txid":    []string{deposit.TxID},
+			"amt":     []string{strconv.FormatFloat(deposit.AmountConventional, 'f', 9, 64)},
+			"coin":    []string{bncAsset.coin},
+			"network": []string{bncAsset.chain},
 		}
-
+	}
+	// TODO: Use the "startTime" parameter to apply a reasonable limit to
+	// this request.
+	err := bnc.getAPI(ctx, "/sapi/v1/capital/deposit/hisrec", query, true, true, &resp)
+	if err != nil {
+		bnc.log.Errorf("error getting deposit status: %v", err)
 		return false, 0
 	}
 
-	go func() {
-		for {
-			ticker := time.NewTicker(time.Second * 20)
-			defer ticker.Stop()
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				done, amt := checkDepositStatus()
-				if done {
-					onConfirm(amt)
-					return
+	for _, status := range resp {
+		if status.TxID == deposit.TxID {
+			switch status.Status {
+			case bntypes.DepositStatusSuccess, bntypes.DepositStatusCredited:
+				dexSymbol := binanceCoinNetworkToDexSymbol(status.Coin, status.Network)
+				assetID, found := dex.BipSymbolID(dexSymbol)
+				if !found {
+					bnc.log.Errorf("Failed to find DEX asset ID for Coin: %s, Network: %s", status.Coin, status.Network)
+					return true, 0
 				}
+				ui, err := asset.UnitInfo(assetID)
+				if err != nil {
+					bnc.log.Errorf("Failed to find unit info for asset ID %d", assetID)
+					return true, 0
+				}
+				amount := uint64(status.Amount * float64(ui.Conventional.ConversionFactor))
+				return true, amount
+			case bntypes.DepositStatusPending:
+				return false, 0
+			case bntypes.DepositStatusWaitingUserConfirm:
+				// This shouldn't ever happen.
+				bnc.log.Errorf("Deposit %s to binance requires user confirmation!")
+				return true, 0
+			case bntypes.DepositStatusWrongDeposit:
+				return true, 0
+			default:
+				bnc.log.Errorf("Deposit %s to binance has an unknown status %d", status.Status)
 			}
 		}
-	}()
+	}
+
+	return false, 0
 }
 
 // SubscribeTradeUpdates returns a channel that the caller can use to
@@ -1741,17 +1714,16 @@ func (bnc *binance) MidGap(baseID, quoteID uint32) uint64 {
 	return book.midGap()
 }
 
-func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quoteID uint32) {
+// TradeStatus returns the current status of a trade.
+func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quoteID uint32) (*Trade, error) {
 	baseAsset, err := bncAssetCfg(baseID)
 	if err != nil {
-		bnc.log.Errorf("Error getting asset cfg for %d: %v", baseID, err)
-		return
+		return nil, err
 	}
 
 	quoteAsset, err := bncAssetCfg(quoteID)
 	if err != nil {
-		bnc.log.Errorf("Error getting asset cfg for %d: %v", quoteID, err)
-		return
+		return nil, err
 	}
 
 	v := make(url.Values)
@@ -1761,11 +1733,20 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 	var resp bntypes.BookedOrder
 	err = bnc.getAPI(ctx, "/api/v3/order", v, true, true, &resp)
 	if err != nil {
-		bnc.log.Errorf("Error getting trade status: %v", err)
-		return
+		return nil, err
 	}
 
-	bnc.log.Infof("Trade status: %+v", resp)
+	return &Trade{
+		ID:          tradeID,
+		Sell:        resp.Side == "SELL",
+		Rate:        calc.MessageRateAlt(resp.Price, baseAsset.conversionFactor, quoteAsset.conversionFactor),
+		Qty:         uint64(resp.OrigQty * float64(baseAsset.conversionFactor)),
+		BaseID:      baseID,
+		QuoteID:     quoteID,
+		BaseFilled:  uint64(resp.ExecutedQty * float64(baseAsset.conversionFactor)),
+		QuoteFilled: uint64(resp.CumulativeQuoteQty * float64(quoteAsset.conversionFactor)),
+		Complete:    resp.Status != "NEW" && resp.Status != "PARTIALLY_FILLED",
+	}, nil
 }
 
 func getDEXAssetIDs(binanceSymbol string, tokenIDs map[string][]uint32) []uint32 {
