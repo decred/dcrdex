@@ -53,7 +53,8 @@ const (
 	notificationsRoute         = "notifications"
 	startBotRoute              = "startmmbot"
 	stopBotRoute               = "stopmmbot"
-	updateRunningBotRoute      = "updaterunningbot"
+	updateRunningBotCfgRoute   = "updaterunningbotcfg"
+	updateRunningBotInvRoute   = "updaterunningbotinv"
 	mmAvailableBalancesRoute   = "mmavailablebalances"
 	mmStatusRoute              = "mmstatus"
 	multiTradeRoute            = "multitrade"
@@ -131,7 +132,8 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	stopBotRoute:               handleStopBot,
 	mmAvailableBalancesRoute:   handleMMAvailableBalances,
 	mmStatusRoute:              handleMMStatus,
-	updateRunningBotRoute:      handleUpdateRunningBot,
+	updateRunningBotCfgRoute:   handleUpdateRunningBotCfg,
+	updateRunningBotInvRoute:   handleUpdateRunningBotInventory,
 	multiTradeRoute:            handleMultiTrade,
 	stakeStatusRoute:           handleStakeStatus,
 	setVSPRoute:                handleSetVSP,
@@ -995,31 +997,31 @@ func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(stopBotRoute, "stopped bot", nil)
 }
 
-func handleUpdateRunningBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if s.mm == nil {
 		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
-		return createResponse(updateRunningBotRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
 	form, err := parseUpdateRunningBotArgs(params)
 	if err != nil {
-		return usage(updateRunningBotRoute, err)
+		return usage(updateRunningBotCfgRoute, err)
 	}
 
 	data, err := os.ReadFile(form.cfgFilePath)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to read config file: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
-		return createResponse(updateRunningBotRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
 	cfg := &mm.MarketMakingConfig{}
 	err = json.Unmarshal(data, cfg)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to unmarshal config: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
-		return createResponse(updateRunningBotRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
 	var botCfg *mm.BotConfig
@@ -1032,18 +1034,40 @@ func handleUpdateRunningBot(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 
 	if botCfg == nil {
 		errMsg := fmt.Sprintf("bot config not found for market %s", form.mkt.String())
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
-		return createResponse(updateRunningBotRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
-	err = s.mm.UpdateRunningBot(botCfg, form.balances, false)
+	err = s.mm.UpdateRunningBotCfg(botCfg, form.balances, false)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to update running bot: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotError, errMsg)
-		return createResponse(updateRunningBotRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
-	return createResponse(updateRunningBotRoute, "updated running bot", nil)
+	return createResponse(updateRunningBotCfgRoute, "updated running bot", nil)
+}
+
+func handleUpdateRunningBotInventory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if s.mm == nil {
+		errMsg := "experimental flag must be set to use market making"
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotInvError, errMsg)
+		return createResponse(updateRunningBotCfgRoute, nil, resErr)
+	}
+
+	form, err := parseUpdateRunningBotInventoryArgs(params)
+	if err != nil {
+		return usage(updateRunningBotCfgRoute, err)
+	}
+
+	err = s.mm.UpdateRunningBotInventory(form.mkt, form.balances)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to update running bot: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotInvError, errMsg)
+		return createResponse(updateRunningBotCfgRoute, nil, resErr)
+	}
+
+	return createResponse(updateRunningBotCfgRoute, "updated running bot", nil)
 }
 
 func handleMMStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -1055,7 +1079,6 @@ func handleMMStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	status := s.mm.RunningBotsStatus()
 	return createResponse(mmStatusRoute, status, nil)
-
 }
 
 func handleSetVSP(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -1806,16 +1829,26 @@ needed to complete a swap.`,
 	mmStatusRoute: {
 		cmdSummary: `Get market making status.`,
 	},
-	updateRunningBotRoute: {
-		cmdSummary: `Update config and balances of running bot`,
-		argsShort:  `(cfgPath) (host) (baseID) (quoteID) (dexBalances) (cexBalances)`,
+	updateRunningBotCfgRoute: {
+		cmdSummary: `Update the config and optionally the inventory of a running bot`,
+		argsShort:  `(cfgPath) (host) (baseID) (quoteID) (dexInventory) (cexInventory)`,
 		argsLong: `Args:
 		cfgPath (string): The path to the market maker config file.
 		host (string): The DEX address.
 		baseID (int): The base asset's BIP-44 registered coin index.
 		quoteID (int): The quote asset's BIP-44 registered coin index.
-		dexBalances (obj): (optional) The DEX balances adjustments i.e. [[60,-1000000],[42,10000000]].
-		cexBalances (obj): (optional) The CEX balances adjustments i.e. [[60,-1000000],[42,10000000]].`,
+		dexInventory (obj): (optional) The DEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].
+		cexInventory (obj): (optional) The CEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].`,
+	},
+	updateRunningBotInvRoute: {
+		cmdSummary: `Update the inventory of a running bot`,
+		argsShort:  `(host) (baseID) (quoteID) (dexInventory) (cexInventory)`,
+		argsLong: `Args:
+		host (string): The DEX address.
+		baseID (int): The base asset's BIP-44 registered coin index.
+		quoteID (int): The quote asset's BIP-44 registered coin index.
+		dexInventory (obj): The DEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].
+		cexInventory (obj): The CEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].`,
 	},
 	stakeStatusRoute: {
 		cmdSummary: `Get stake status. `,

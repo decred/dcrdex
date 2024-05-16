@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"runtime/debug"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
@@ -21,7 +24,8 @@ import (
 )
 
 type tEventLogDB struct {
-	storedEvents []*MarketMakingEvent
+	storedEventsMtx sync.Mutex
+	storedEvents    []*MarketMakingEvent
 }
 
 var _ eventLogDB = (*tEventLogDB)(nil)
@@ -37,7 +41,45 @@ func (db *tEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg *Bo
 }
 func (db *tEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime int64) error { return nil }
 func (db *tEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent, fs *BalanceState) {
+	db.storedEventsMtx.Lock()
+	defer db.storedEventsMtx.Unlock()
 	db.storedEvents = append(db.storedEvents, e)
+}
+func (db *tEventLogDB) storedEventAtIndexEquals(e *MarketMakingEvent, idx int) bool {
+	db.storedEventsMtx.Lock()
+	defer db.storedEventsMtx.Unlock()
+	if idx < 0 || idx >= len(db.storedEvents) {
+		return false
+	}
+	db.storedEvents[idx].TimeStamp = 0 // ignore timestamp
+	if !reflect.DeepEqual(db.storedEvents[idx], e) {
+		debug.PrintStack()
+		fmt.Println("storedEvents: ", spew.Sdump(db.storedEvents))
+		fmt.Printf("wanted:\n%v\ngot:\n%v\n", spew.Sdump(e), spew.Sdump(db.storedEvents[idx]))
+		return false
+	}
+	return true
+}
+func (db *tEventLogDB) latestStoredEventEquals(e *MarketMakingEvent) bool {
+	db.storedEventsMtx.Lock()
+	if e == nil && len(db.storedEvents) == 0 {
+		db.storedEventsMtx.Unlock()
+		return true
+	}
+	if e == nil {
+		db.storedEventsMtx.Unlock()
+		return false
+	}
+	db.storedEventsMtx.Unlock()
+	return db.storedEventAtIndexEquals(e, len(db.storedEvents)-1)
+}
+func (db *tEventLogDB) latestStoredEvent() *MarketMakingEvent {
+	db.storedEventsMtx.Lock()
+	defer db.storedEventsMtx.Unlock()
+	if len(db.storedEvents) == 0 {
+		return nil
+	}
+	return db.storedEvents[len(db.storedEvents)-1]
 }
 func (db *tEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWithHost) ([]*MarketMakingRun, error) {
 	return nil, nil
@@ -175,7 +217,10 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 				adaptor.botCfg.Store(&BotConfig{})
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
-				adaptor.run(ctx)
+				_, err := adaptor.Connect(ctx)
+				if err != nil {
+					t.Fatalf("Connect error: %v", err)
+				}
 				sufficient, err := adaptor.SufficientBalanceForDEXTrade(test.rate, test.qty, test.sell)
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -2535,7 +2580,11 @@ func TestDEXTrade(t *testing.T) {
 			eventLogDB: eventLogDB,
 		})
 		adaptor.botCfg.Store(&BotConfig{})
-		adaptor.run(ctx)
+		_, err := adaptor.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", test.name, err)
+		}
+
 		orders := adaptor.MultiTrade(test.placements, test.sell, 0.01, 100, nil, nil)
 		if len(orders) == 0 {
 			t.Fatalf("%s: multi trade did not place orders", test.name)
@@ -2579,9 +2628,9 @@ func TestDEXTrade(t *testing.T) {
 				},
 				Pending: true,
 			}
-			eventLogDB.storedEvents[i].TimeStamp = 0 // ignore timestamp
-			if !reflect.DeepEqual(e, eventLogDB.storedEvents[i]) {
-				t.Fatalf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, e.DEXOrderEvent, eventLogDB.storedEvents[i].DEXOrderEvent)
+
+			if !eventLogDB.storedEventAtIndexEquals(e, i) {
+				t.Fatalf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, e, eventLogDB.latestStoredEvent())
 			}
 		}
 
@@ -2641,6 +2690,7 @@ func TestDEXTrade(t *testing.T) {
 			stats := adaptor.stats()
 			stats.CEXBalances = nil
 			stats.StartTime = 0
+
 			if !reflect.DeepEqual(stats.DEXBalances, update.stats.DEXBalances) {
 				t.Fatalf("%s: stats mismatch after update %d.\nwant: %+v\n\ngot: %+v", test.name, i+1, update.stats, stats)
 			}
@@ -2992,9 +3042,12 @@ func TestDeposit(t *testing.T) {
 				},
 				eventLogDB: eventLogDB,
 			})
-			adaptor.run(ctx)
+			_, err := adaptor.Connect(ctx)
+			if err != nil {
+				t.Fatalf("%s: Connect error: %v", test.name, err)
+			}
 
-			err := adaptor.Deposit(ctx, test.assetID, test.depositAmt)
+			err = adaptor.Deposit(ctx, test.assetID, test.depositAmt)
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", test.name, err)
 			}
@@ -3011,16 +3064,18 @@ func TestDeposit(t *testing.T) {
 				}
 			}
 
-			i := len(eventLogDB.storedEvents) - 1
-			eventLogDB.storedEvents[i].TimeStamp = 0 // ignore timestamp
-			if !reflect.DeepEqual(eventLogDB.storedEvents[i], test.initialEvent) {
-				t.Fatalf("%s: unexpected event logged. want:\n%+v\ngot:\n%+v", test.name, test.initialEvent.DepositEvent, eventLogDB.storedEvents[i].DepositEvent)
+			if !eventLogDB.latestStoredEventEquals(test.initialEvent) {
+				t.Fatalf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, test.initialEvent, eventLogDB.latestStoredEvent())
 			}
 
 			tCore.walletTxsMtx.Lock()
 			tCore.walletTxs[test.unconfirmedTx.ID] = test.confirmedTx
 			tCore.walletTxsMtx.Unlock()
+
+			tCEX.confirmDepositMtx.Lock()
 			tCEX.confirmedDeposit = &test.receivedAmt
+			tCEX.confirmDepositMtx.Unlock()
+
 			adaptor.confirmDeposit(ctx, txID)
 
 			checkPostConfirmBalance := func() error {
@@ -3032,22 +3087,38 @@ func TestDeposit(t *testing.T) {
 				if test.assetID == 966001 {
 					postConfirmParentBal := adaptor.DEXBalance(966)
 					if postConfirmParentBal.Available != 2e6-test.confirmedTx.Fees {
-						return fmt.Errorf("%s: unexpected post confirm dex balance. want %d, got %d", test.name, 2e6-test.confirmedTx.Fees, postConfirmParentBal.Available)
+						return fmt.Errorf("%s: unexpected post confirm fee balance. want %d, got %d", test.name, 2e6-test.confirmedTx.Fees, postConfirmParentBal.Available)
 					}
 				}
 				return nil
 			}
 
-			err = checkPostConfirmBalance()
-			if err != nil {
+			tryWithTimeout := func(f func() error) {
+				t.Helper()
+				var err error
+				for i := 0; i < 20; i++ {
+					time.Sleep(100 * time.Millisecond)
+					err = f()
+					if err == nil {
+						return
+					}
+				}
 				t.Fatal(err)
 			}
 
-			i = len(eventLogDB.storedEvents) - 1
-			eventLogDB.storedEvents[i].TimeStamp = 0 // ignore timestamp
-			if !reflect.DeepEqual(eventLogDB.storedEvents[i], test.postConfirmEvent) {
-				t.Fatalf("%s: unexpected event logged. want:\n%+v\ngot:\n%+v", test.name, test.postConfirmEvent.DepositEvent, eventLogDB.storedEvents[i].DepositEvent)
-			}
+			// Synchronizing because the event may not yet be when confirmDeposit
+			// returns if two calls to confirmDeposit happen in parallel.
+			tryWithTimeout(func() error {
+				err = checkPostConfirmBalance()
+				if err != nil {
+					return err
+				}
+
+				if !eventLogDB.latestStoredEventEquals(test.postConfirmEvent) {
+					return fmt.Errorf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, test.postConfirmEvent, eventLogDB.latestStoredEvent())
+				}
+				return nil
+			})
 		})
 	}
 
@@ -3170,42 +3241,59 @@ func TestWithdraw(t *testing.T) {
 			},
 			eventLogDB: eventLogDB,
 		})
-		adaptor.run(ctx)
+		_, err := adaptor.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", test.name, err)
+		}
 
-		err := adaptor.Withdraw(ctx, assetID, test.withdrawAmt)
+		err = adaptor.Withdraw(ctx, assetID, test.withdrawAmt)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
-		i := len(eventLogDB.storedEvents) - 1
-		eventLogDB.storedEvents[i].TimeStamp = 0 // ignore timestamp
-		if !reflect.DeepEqual(eventLogDB.storedEvents[i], test.initialEvent) {
-			t.Fatalf("%s: unexpected event logged. want:\n%+v\ngot:\n%+v", test.name, spew.Sdump(test.initialEvent), spew.Sdump(eventLogDB.storedEvents[i]))
+		if !eventLogDB.latestStoredEventEquals(test.initialEvent) {
+			t.Fatalf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, test.initialEvent, eventLogDB.latestStoredEvent())
 		}
-
 		preConfirmBal := adaptor.DEXBalance(assetID)
 		if *preConfirmBal != *test.preConfirmDEXBalance {
 			t.Fatalf("%s: unexpected pre confirm dex balance. want %+v, got %+v", test.name, test.preConfirmDEXBalance, preConfirmBal)
 		}
 
+		tCEX.confirmWithdrawalMtx.Lock()
 		tCEX.confirmWithdrawal = &withdrawArgs{
 			assetID: assetID,
 			amt:     test.withdrawAmt,
 			txID:    test.tx.ID,
 		}
+		tCEX.confirmWithdrawalMtx.Unlock()
 
 		adaptor.confirmWithdrawal(ctx, withdrawalID)
 
-		postConfirmBal := adaptor.DEXBalance(assetID)
-		if *postConfirmBal != *test.postConfirmDEXBalance {
-			t.Fatalf("%s: unexpected post confirm dex balance. want %+v, got %+v", test.name, test.postConfirmDEXBalance, postConfirmBal)
+		tryWithTimeout := func(f func() error) {
+			t.Helper()
+			var err error
+			for i := 0; i < 20; i++ {
+				time.Sleep(100 * time.Millisecond)
+				err = f()
+				if err == nil {
+					return
+				}
+			}
+			t.Fatal(err)
 		}
 
-		i = len(eventLogDB.storedEvents) - 1
-		eventLogDB.storedEvents[i].TimeStamp = 0 // ignore timestamp
-		if !reflect.DeepEqual(eventLogDB.storedEvents[i], test.postConfirmEvent) {
-			t.Fatalf("%s: unexpected event logged. want:\n%s\ngot:\n%s", test.name, spew.Sdump(test.postConfirmEvent), spew.Sdump(eventLogDB.storedEvents[i]))
-		}
+		// Synchronizing because the event may not yet be when confirmWithdrawal
+		// returns if two calls to confirmWithdrawal happen in parallel.
+		tryWithTimeout(func() error {
+			postConfirmBal := adaptor.DEXBalance(assetID)
+			if *postConfirmBal != *test.postConfirmDEXBalance {
+				return fmt.Errorf("%s: unexpected post confirm dex balance. want %+v, got %+v", test.name, test.postConfirmDEXBalance, postConfirmBal)
+			}
+			if !eventLogDB.latestStoredEventEquals(test.postConfirmEvent) {
+				return fmt.Errorf("%s: unexpected event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.postConfirmEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
+			}
+			return nil
+		})
 	}
 
 	for _, test := range tests {
@@ -3601,11 +3689,14 @@ func TestCEXTrade(t *testing.T) {
 			},
 			eventLogDB: eventLogDB,
 		})
-		adaptor.run(ctx)
+		_, err := adaptor.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", test.name, err)
+		}
 
 		adaptor.SubscribeTradeUpdates()
 
-		_, err := adaptor.CEXTrade(ctx, baseID, quoteID, test.sell, test.rate, test.qty)
+		_, err = adaptor.CEXTrade(ctx, baseID, quoteID, test.sell, test.rate, test.qty)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
@@ -3639,18 +3730,8 @@ func TestCEXTrade(t *testing.T) {
 			if i > 0 {
 				step = fmt.Sprintf("after update #%d", i)
 			}
-
-			if expected == nil != (len(eventLogDB.storedEvents) == 0) {
-				t.Fatalf("%s: unexpected event logged %s. want: %v got: %v",
-					test.name, step, expected == nil, len(eventLogDB.storedEvents) == 0)
-			}
-			if expected == nil {
-				return
-			}
-			eventLogDB.storedEvents[0].TimeStamp = 0 // ignore timestamp
-			if !reflect.DeepEqual(eventLogDB.storedEvents[0], expected) {
-				t.Fatalf("%s: unexpected event logged %s. want:\n%+v\ngot:\n%+v", test.name, step,
-					expected, eventLogDB.storedEvents[0])
+			if !eventLogDB.latestStoredEventEquals(expected) {
+				t.Fatalf("%s: unexpected event %s. want:\n%+v,\ngot:\n%+v", test.name, step, expected, eventLogDB.latestStoredEvent())
 			}
 		}
 
@@ -3662,7 +3743,9 @@ func TestCEXTrade(t *testing.T) {
 			update.BaseID = baseID
 			update.QuoteID = quoteID
 			update.Sell = test.sell
+			eventLogDB.storedEventsMtx.Lock()
 			eventLogDB.storedEvents = []*MarketMakingEvent{}
+			eventLogDB.storedEventsMtx.Unlock()
 			tCEX.tradeUpdates <- updateAndStats.update
 			tCEX.tradeUpdates <- &libxc.Trade{} // dummy update
 			checkBalances(updateAndStats.stats.CEXBalances, i+1)
@@ -3767,7 +3850,10 @@ func TestOrderFeesInUnits(t *testing.T) {
 		adaptor.botCfg.Store(&BotConfig{})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		adaptor.run(ctx)
+		_, err := adaptor.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: Connect error: %v", tt.name, err)
+		}
 
 		sellBase, err := adaptor.OrderFeesInUnits(true, true, tt.rate)
 		if err != nil {
@@ -3991,7 +4077,9 @@ func TestRefreshPendingEvents(t *testing.T) {
 		feeConfirmed: true,
 	}
 	amtReceived := uint64(1e7 - 1000)
+	tCEX.confirmDepositMtx.Lock()
 	tCEX.confirmedDeposit = &amtReceived
+	tCEX.confirmDepositMtx.Unlock()
 	adaptor.refreshAllPendingEvents(ctx)
 	expectedDEXAvailableBalance[42] -= 1e7 + 1000
 	expectedCEXAvailableBalance[42] += amtReceived
@@ -4011,11 +4099,15 @@ func TestRefreshPendingEvents(t *testing.T) {
 		Amount:    2e7 - 3000,
 		Confirmed: true,
 	}
+
+	tCEX.confirmWithdrawalMtx.Lock()
 	tCEX.confirmWithdrawal = &withdrawArgs{
 		assetID: 42,
 		amt:     2e7,
 		txID:    withdrawalTxID,
 	}
+	tCEX.confirmWithdrawalMtx.Unlock()
+
 	adaptor.refreshAllPendingEvents(ctx)
 	expectedDEXAvailableBalance[42] += 2e7 - 3000
 	expectedCEXAvailableBalance[42] -= 2e7

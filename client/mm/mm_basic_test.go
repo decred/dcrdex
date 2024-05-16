@@ -366,7 +366,6 @@ func TestBasicMMRebalance(t *testing.T) {
 				SellPlacements: tt.cfgSellPlacements,
 			}
 			mm := &basicMarketMaker{
-				cfg:        cfg,
 				calculator: calculator,
 				core:       adaptor,
 				log:        tLogger,
@@ -375,6 +374,7 @@ func TestBasicMMRebalance(t *testing.T) {
 					AtomToConv: atomToConv,
 				},
 			}
+			mm.cfgV.Store(cfg)
 
 			mm.rebalance(100)
 

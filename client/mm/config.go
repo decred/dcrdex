@@ -63,16 +63,16 @@ type BotBalanceAllocation struct {
 	CEX map[uint32]uint64 `json:"cex"`
 }
 
-// BotBalanceDiffs is the amount of funds to add or remove from a bot's
+// BotInventoryDiffs is the amount of funds to add or remove from a bot's
 // allocation.
-type BotBalanceDiffs struct {
+type BotInventoryDiffs struct {
 	DEX map[uint32]int64 `json:"dex"`
 	CEX map[uint32]int64 `json:"cex"`
 }
 
-// balanceDiffsToAllocations converts a BotBalanceDiffs to a
+// balanceDiffsToAllocations converts a BotInventoryDiffs to a
 // BotBalanceAllocation by removing all negative diffs.
-func balanceDiffsToAllocation(diffs *BotBalanceDiffs) *BotBalanceAllocation {
+func balanceDiffsToAllocation(diffs *BotInventoryDiffs) *BotBalanceAllocation {
 	allocations := &BotBalanceAllocation{
 		DEX: make(map[uint32]uint64, len(diffs.DEX)),
 		CEX: make(map[uint32]uint64, len(diffs.CEX)),

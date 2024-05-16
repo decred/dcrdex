@@ -493,6 +493,40 @@ func (ob *OrderBook) BestNOrders(n int, sell bool) ([]*Order, bool, error) {
 	return orders, filled, nil
 }
 
+// OrderIsBooked checks if an order is booked or in the epoch queue.
+func (ob *OrderBook) OrderIsBooked(oid order.OrderID, sell bool) bool {
+	findOrder := func(orders []*Order) bool {
+		for _, order := range orders {
+			if order.OrderID == oid {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	var orders []*Order
+	if sell {
+		orders = ob.sells.Orders()
+	} else {
+		orders = ob.buys.Orders()
+	}
+
+	if findOrder(orders) {
+		return true
+	}
+
+	ob.epochMtx.Lock()
+	eq := ob.epochQueues[ob.currentEpoch]
+	ob.epochMtx.Unlock()
+	var epochOrders []*Order
+	if eq != nil {
+		epochOrders = eq.Orders()
+	}
+
+	return findOrder(epochOrders)
+}
+
 // VWAP calculates the volume weighted average price for the specified number
 // of lots.
 func (ob *OrderBook) VWAP(lots, lotSize uint64, sell bool) (avg, extrema uint64, filled bool, err error) {
@@ -555,6 +589,13 @@ func (ob *OrderBook) Enqueue(note *msgjson.EpochOrderNote) error {
 	}
 
 	return eq.Enqueue(note)
+}
+
+// CurrentEpoch returns the current epoch.
+func (ob *OrderBook) CurrentEpoch() uint64 {
+	ob.epochMtx.Lock()
+	defer ob.epochMtx.Unlock()
+	return ob.currentEpoch
 }
 
 // ValidateMatchProof ensures the match proof data provided is correct by

@@ -372,15 +372,9 @@ func TestEventLogDB(t *testing.T) {
 	inventoryMods[42] = 1e6
 	inventoryMods[60] = -2e6
 	updateCfgEvent := &MarketMakingEvent{
-		ID:        3,
-		TimeStamp: startTime + 2,
-		UpdateConfig: &UpdateConfigEvent{
-			NewCfg: updatedCfg,
-			InventoryMods: map[uint32]int64{
-				42: 1e6,
-				60: -2e6,
-			},
-		},
+		ID:           3,
+		TimeStamp:    startTime + 2,
+		UpdateConfig: updatedCfg,
 	}
 	db.storeEvent(startTime, mkt, updateCfgEvent, currBalanceState())
 

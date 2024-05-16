@@ -113,8 +113,8 @@ func TestArbMMRebalance(t *testing.T) {
 		mkt:         mkt,
 		dexReserves: make(map[uint32]uint64),
 		cexReserves: make(map[uint32]uint64),
-		cfg:         cfg,
 	}
+	arbMM.cfgV.Store(cfg)
 
 	arbMM.rebalance(currEpoch)
 
@@ -358,12 +358,15 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 			cexTrades:     make(map[string]uint64),
 			mkt:           mkt,
 			pendingOrders: test.pendingOrders,
-			cfg: &ArbMarketMakerConfig{
-				Profit: profit,
-			},
 		}
+		arbMM.cfgV.Store(&ArbMarketMakerConfig{
+			Profit: profit,
+		})
 		arbMM.currEpoch.Store(123)
-		go arbMM.run(&botCfgUpdateManager{})
+		_, err := arbMM.Connect(ctx)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
 
 		for i, note := range test.orderUpdates {
 			cex.lastTrade = nil

@@ -2253,7 +2253,7 @@ func (m *TMarketMaker) UpdateBotConfig(updatedCfg *mm.BotConfig) error {
 	return nil
 }
 
-func (m *TMarketMaker) UpdateRunningBot(updatedCfg *mm.BotConfig, balanceDiffs *mm.BotBalanceDiffs, saveUpdate bool) error {
+func (m *TMarketMaker) UpdateRunningBot(updatedCfg *mm.BotConfig, balanceDiffs *mm.BotInventoryDiffs, saveUpdate bool) error {
 	return m.UpdateBotConfig(updatedCfg)
 }
 

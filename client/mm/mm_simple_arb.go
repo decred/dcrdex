@@ -70,13 +70,17 @@ type simpleArbMarketMaker struct {
 	cex              botCexAdaptor
 	core             botCoreAdaptor
 	log              dex.Logger
-	cfg              *SimpleArbConfig
+	cfgV             atomic.Value // *SimpleArbConfig
 	mkt              *core.Market
 	book             dexOrderBook
 	rebalanceRunning atomic.Bool
 
 	activeArbsMtx sync.RWMutex
 	activeArbs    []*arbSequence
+}
+
+func (a *simpleArbMarketMaker) cfg() *SimpleArbConfig {
+	return a.cfgV.Load().(*SimpleArbConfig)
 }
 
 // arbExists checks if an arbitrage opportunity exists.
@@ -169,7 +173,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 		}
 		profitInQuote := quoteFromSell - quoteForBuy - feesInQuoteUnits
 		profitInBase := calc.QuoteToBase((buyRate+sellRate)/2, profitInQuote)
-		if profitInBase < prevProfit || float64(profitInBase)/float64(qty) < a.cfg.ProfitTrigger {
+		if profitInBase < prevProfit || float64(profitInBase)/float64(qty) < a.cfg().ProfitTrigger {
 			break
 		}
 
@@ -196,7 +200,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	a.activeArbsMtx.RLock()
 	numArbs := len(a.activeArbs)
 	a.activeArbsMtx.RUnlock()
-	if numArbs >= int(a.cfg.MaxActiveArbs) {
+	if numArbs >= int(a.cfg().MaxActiveArbs) {
 		a.log.Infof("cannot execute arb because already at max arbs")
 		return
 	}
@@ -350,15 +354,6 @@ func (a *simpleArbMarketMaker) handleDEXOrderUpdate(o *core.Order) {
 	}
 }
 
-func (a *simpleArbMarketMaker) cancelAllOrders() {
-	a.activeArbsMtx.Lock()
-	defer a.activeArbsMtx.Unlock()
-
-	for _, arb := range a.activeArbs {
-		a.cancelArbSequence(arb)
-	}
-}
-
 // rebalance checks if there is an arbitrage opportunity between the dex and cex,
 // and if so, executes trades to capitalize on it.
 func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
@@ -377,7 +372,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	a.activeArbsMtx.Lock()
 	remainingArbs := make([]*arbSequence, 0, len(a.activeArbs))
 	for _, arb := range a.activeArbs {
-		expired := newEpoch-arb.startEpoch > uint64(a.cfg.NumEpochsLeaveOpen)
+		expired := newEpoch-arb.startEpoch > uint64(a.cfg().NumEpochsLeaveOpen)
 		oppositeDirectionArbFound := exists && sellOnDex != arb.sellOnDEX
 
 		if expired || oppositeDirectionArbFound {
@@ -427,25 +422,20 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	a.registerFeeGap()
 }
 
-func (a *simpleArbMarketMaker) run(cfgUpdateManager *botCfgUpdateManager) {
+func (a *simpleArbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
 	if err != nil {
-		a.log.Errorf("Failed to sync book: %v", err)
-		return
+		return nil, fmt.Errorf("failed to sync book: %v", err)
 	}
 	a.book = book
 
 	err = a.cex.SubscribeMarket(a.ctx, a.baseID, a.quoteID)
 	if err != nil {
-		a.log.Errorf("Failed to subscribe to cex market: %v", err)
-		return
+		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
 	}
 
-	tradeUpdates, unsubscribe := a.cex.SubscribeTradeUpdates()
-	defer unsubscribe()
+	tradeUpdates := a.cex.SubscribeTradeUpdates()
 
-	pauseEpochs := make(chan interface{})
-	resumeEpochs := make(chan interface{})
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
@@ -457,16 +447,12 @@ func (a *simpleArbMarketMaker) run(cfgUpdateManager *botCfgUpdateManager) {
 					payload := n.Payload.(*core.EpochMatchSummaryPayload)
 					a.rebalance(payload.Epoch + 1)
 				}
-			case <-pauseEpochs:
-				<-resumeEpochs
 			case <-a.ctx.Done():
 				return
 			}
 		}
 	}()
 
-	pauseCEXUpdates := make(chan interface{})
-	resumeCEXUpdates := make(chan interface{})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -474,16 +460,12 @@ func (a *simpleArbMarketMaker) run(cfgUpdateManager *botCfgUpdateManager) {
 			select {
 			case update := <-tradeUpdates:
 				a.handleCEXTradeUpdate(update)
-			case <-pauseCEXUpdates:
-				<-resumeCEXUpdates
 			case <-a.ctx.Done():
 				return
 			}
 		}
 	}()
 
-	pauseDEXUpdates := make(chan interface{})
-	resumeDEXUpdates := make(chan interface{})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -492,37 +474,13 @@ func (a *simpleArbMarketMaker) run(cfgUpdateManager *botCfgUpdateManager) {
 			select {
 			case n := <-orderUpdates:
 				a.handleDEXOrderUpdate(n)
-			case <-pauseDEXUpdates:
-				<-resumeDEXUpdates
 			case <-a.ctx.Done():
 				return
 			}
 		}
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case cfg := <-cfgUpdateManager.updateBot:
-				pauseEpochs <- struct{}{}
-				pauseCEXUpdates <- struct{}{}
-				pauseDEXUpdates <- struct{}{}
-				cfgUpdateManager.botPaused <- struct{}{}
-				a.cfg = cfg.SimpleArbConfig
-				<-cfgUpdateManager.resumeBot
-				resumeEpochs <- struct{}{}
-				resumeCEXUpdates <- struct{}{}
-				resumeDEXUpdates <- struct{}{}
-			case <-a.ctx.Done():
-				return
-			}
-		}
-	}()
-
-	wg.Wait()
-	a.cancelAllOrders()
+	return wg, nil
 }
 
 func (a *simpleArbMarketMaker) registerFeeGap() {
@@ -534,21 +492,27 @@ func (a *simpleArbMarketMaker) registerFeeGap() {
 	a.core.registerFeeGap(feeGap)
 }
 
-func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, cex botCexAdaptor, cfgUpdateManager *botCfgUpdateManager, log dex.Logger) {
+func (a *simpleArbMarketMaker) updateConfig(cfg *BotConfig) error {
 	if cfg.SimpleArbConfig == nil {
 		// implies bug in caller
-		log.Errorf("No arb config provided. Exiting.")
-		return
+		return fmt.Errorf("no arb config provided")
+	}
+	a.cfgV.Store(cfg.SimpleArbConfig)
+	return nil
+}
+
+func newSimpleArbMarketMaker(cfg *BotConfig, c botCoreAdaptor, cex botCexAdaptor, log dex.Logger) (*simpleArbMarketMaker, error) {
+	if cfg.SimpleArbConfig == nil {
+		// implies bug in caller
+		return nil, fmt.Errorf("no arb config provided")
 	}
 
 	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	if err != nil {
-		log.Errorf("Failed to get market: %v", err)
-		return
+		return nil, fmt.Errorf("failed to get market: %v", err)
 	}
 
-	(&simpleArbMarketMaker{
-		ctx:        ctx,
+	simpleArb := &simpleArbMarketMaker{
 		host:       cfg.Host,
 		baseID:     cfg.BaseID,
 		quoteID:    cfg.QuoteID,
@@ -556,7 +520,8 @@ func RunSimpleArbBot(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, cex 
 		core:       c,
 		log:        log,
 		mkt:        mkt,
-		cfg:        cfg.SimpleArbConfig,
 		activeArbs: make([]*arbSequence, 0),
-	}).run(cfgUpdateManager)
+	}
+	simpleArb.cfgV.Store(cfg.SimpleArbConfig)
+	return simpleArb, nil
 }

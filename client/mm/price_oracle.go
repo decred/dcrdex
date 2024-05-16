@@ -285,12 +285,6 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 	return rate, nil
 }
 
-func coinpapSlug(symbol, name string) string {
-	slug := fmt.Sprintf("%s-%s", symbol, name)
-	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
-	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
-}
-
 func getRates(ctx context.Context, url string, thing any) (err error) {
 	_, err = getHTTPWithCode(ctx, url, thing)
 	return err

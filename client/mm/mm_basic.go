@@ -341,7 +341,7 @@ type basicMarketMaker struct {
 	host             string
 	baseID           uint32
 	quoteID          uint32
-	cfg              *BasicMarketMakingConfig
+	cfgV             atomic.Value // *BasicMarketMakingConfig
 	log              dex.Logger
 	core             botCoreAdaptor
 	oracle           oracle
@@ -350,11 +350,15 @@ type basicMarketMaker struct {
 	calculator       basicMMCalculator
 }
 
+func (m *basicMarketMaker) cfg() *BasicMarketMakingConfig {
+	return m.cfgV.Load().(*BasicMarketMakingConfig)
+}
+
 func (m *basicMarketMaker) orderPrice(basisPrice, breakEven uint64, sell bool, gapFactor float64) uint64 {
 	var halfSpread uint64
 
 	// Apply the base strategy.
-	switch m.cfg.GapStrategy {
+	switch m.cfg().GapStrategy {
 	case GapStrategyMultiplier:
 		halfSpread = uint64(math.Round(float64(breakEven) * gapFactor))
 	case GapStrategyPercent, GapStrategyPercentPlus:
@@ -364,7 +368,7 @@ func (m *basicMarketMaker) orderPrice(basisPrice, breakEven uint64, sell bool, g
 	}
 
 	// Add the break-even to the "-plus" strategies
-	switch m.cfg.GapStrategy {
+	switch m.cfg().GapStrategy {
 	case GapStrategyAbsolutePlus, GapStrategyPercentPlus:
 		halfSpread += breakEven
 	}
@@ -390,7 +394,7 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 	}
 
 	var breakEven uint64
-	if needBreakEvenHalfSpread(m.cfg.GapStrategy) {
+	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
 		var err error
 		feeGap, err := m.calculator.feeGapStats(basisPrice)
 		if err != nil {
@@ -417,8 +421,8 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 		return placements
 	}
 
-	buyOrders = orders(m.cfg.BuyPlacements, false)
-	sellOrders = orders(m.cfg.SellPlacements, true)
+	buyOrders = orders(m.cfg().BuyPlacements, false)
+	sellOrders = orders(m.cfg().SellPlacements, true)
 	return buyOrders, sellOrders
 }
 
@@ -430,23 +434,23 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	m.log.Tracef("rebalance: epoch %d", newEpoch)
 
 	buyOrders, sellOrders := m.ordersToPlace()
-	m.core.MultiTrade(buyOrders, false, m.cfg.DriftTolerance, newEpoch, nil, nil)
-	m.core.MultiTrade(sellOrders, true, m.cfg.DriftTolerance, newEpoch, nil, nil)
+	m.core.MultiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch, nil, nil)
+	m.core.MultiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch, nil, nil)
 }
 
-func (m *basicMarketMaker) run(cfgUpdateManager *botCfgUpdateManager) {
+func (m *basicMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	book, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
 	if err != nil {
-		m.log.Errorf("Failed to sync book: %v", err)
-		return
+		return nil, fmt.Errorf("failed to sync book: %v", err)
 	}
 
+	m.ctx = ctx
 	m.calculator = &basicMMCalculatorImpl{
 		book:   book,
 		oracle: m.oracle,
 		core:   m.core,
 		mkt:    m.mkt,
-		cfg:    m.cfg,
+		cfg:    m.cfg(),
 		log:    m.log,
 	}
 
@@ -463,59 +467,56 @@ func (m *basicMarketMaker) run(cfgUpdateManager *botCfgUpdateManager) {
 					payload := n.Payload.(*core.EpochMatchSummaryPayload)
 					m.rebalance(payload.Epoch + 1)
 				}
-			case cfg := <-cfgUpdateManager.updateBot:
-				cfgUpdateManager.botPaused <- struct{}{}
-				m.cfg = cfg.BasicMMConfig
-				m.calculator = &basicMMCalculatorImpl{
-					book:   book,
-					oracle: m.oracle,
-					core:   m.core,
-					mkt:    m.mkt,
-					cfg:    m.cfg,
-					log:    m.log,
-				}
-				<-cfgUpdateManager.resumeBot
 			case <-m.ctx.Done():
-				m.log.Info("Basic MM context done. Exiting.")
 				return
 			}
 		}
 	}()
 
-	wg.Wait()
-
-	m.core.CancelAllOrders()
+	return &wg, nil
 }
 
-// RunBasicMarketMaker starts a basic market maker bot.
-func RunBasicMarketMaker(ctx context.Context, cfg *BotConfig, c botCoreAdaptor, oracle oracle, cfgUpdateManager *botCfgUpdateManager, log dex.Logger) {
+func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
 	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
-		log.Errorf("No market making config provided. Exiting.")
-		return
+		return errors.New("no market making config provided")
 	}
 
 	err := cfg.BasicMMConfig.Validate()
 	if err != nil {
-		log.Errorf("Invalid market making config: %v", err)
-		return
+		return fmt.Errorf("invalid market making config: %v", err)
+	}
+
+	m.cfgV.Store(cfg.BasicMMConfig)
+	return nil
+}
+
+// RunBasicMarketMaker starts a basic market maker bot.
+func newBasicMarketMaker(cfg *BotConfig, c botCoreAdaptor, oracle oracle, log dex.Logger) (*basicMarketMaker, error) {
+	if cfg.BasicMMConfig == nil {
+		// implies bug in caller
+		return nil, errors.New("no market making config provided")
+	}
+
+	err := cfg.BasicMMConfig.Validate()
+	if err != nil {
+		return nil, fmt.Errorf("invalid market making config: %v", err)
 	}
 
 	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	if err != nil {
-		log.Errorf("Failed to get market: %v. Not starting market maker.", err)
-		return
+		return nil, fmt.Errorf("failed to get market: %v", err)
 	}
 
-	(&basicMarketMaker{
-		ctx:     ctx,
+	basicMM := &basicMarketMaker{
 		core:    c,
 		log:     log,
-		cfg:     cfg.BasicMMConfig,
 		host:    cfg.Host,
 		baseID:  cfg.BaseID,
 		quoteID: cfg.QuoteID,
 		oracle:  oracle,
 		mkt:     mkt,
-	}).run(cfgUpdateManager)
+	}
+	basicMM.cfgV.Store(cfg.BasicMMConfig)
+	return basicMM, nil
 }

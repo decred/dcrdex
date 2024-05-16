@@ -209,7 +209,12 @@ type startBotForm struct {
 type updateRunningBotForm struct {
 	cfgFilePath string
 	mkt         *mm.MarketWithHost
-	balances    *mm.BotBalanceDiffs
+	balances    *mm.BotInventoryDiffs
+}
+
+type updateRunningBotInventoryForm struct {
+	mkt      *mm.MarketWithHost
+	balances *mm.BotInventoryDiffs
 }
 
 type setVSPForm struct {
@@ -1013,7 +1018,38 @@ func parseUpdateRunningBotArgs(params *RawParams) (*updateRunningBotForm, error)
 		}
 	}
 
-	form.balances = &mm.BotBalanceDiffs{
+	form.balances = &mm.BotInventoryDiffs{
+		DEX: dexBals,
+		CEX: cexBals,
+	}
+
+	return form, nil
+}
+
+func parseUpdateRunningBotInventoryArgs(params *RawParams) (*updateRunningBotInventoryForm, error) {
+	if err := checkNArgs(params, []int{0}, []int{5}); err != nil {
+		return nil, err
+	}
+
+	form := new(updateRunningBotInventoryForm)
+
+	mkt, err := parseMktWithHost(params.Args[0], params.Args[1], params.Args[2])
+	if err != nil {
+		return nil, err
+	}
+	form.mkt = mkt
+
+	dexBals, err := parseBotDiffs(params.Args[3])
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal dex balance diffs: %v", err)
+	}
+
+	cexBals, err := parseBotDiffs(params.Args[4])
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cex balance diffs: %v", err)
+	}
+
+	form.balances = &mm.BotInventoryDiffs{
 		DEX: dexBals,
 		CEX: cexBals,
 	}

@@ -49,14 +49,6 @@ type WithdrawalEvent struct {
 	CEXDebit    uint64                   `json:"cexDebit"`
 }
 
-// UpdateConfigEvent represents a change in the bot's configuration
-// and/or inventory.
-type UpdateConfigEvent struct {
-	// NewCfg may be nil if only the inventory was updated.
-	NewCfg        *BotConfig       `json:"newCfg,omitempty"`
-	InventoryMods map[uint32]int64 `json:"inventoryMods"`
-}
-
 // MarketMakingEvent represents an action that a market making bot takes.
 type MarketMakingEvent struct {
 	ID         uint64 `json:"id"`
@@ -68,11 +60,12 @@ type MarketMakingEvent struct {
 	Pending    bool   `json:"pending"`
 
 	// Only one of the following will be populated.
-	DEXOrderEvent   *DEXOrderEvent     `json:"dexOrderEvent,omitempty"`
-	CEXOrderEvent   *CEXOrderEvent     `json:"cexOrderEvent,omitempty"`
-	DepositEvent    *DepositEvent      `json:"depositEvent,omitempty"`
-	WithdrawalEvent *WithdrawalEvent   `json:"withdrawalEvent,omitempty"`
-	UpdateConfig    *UpdateConfigEvent `json:"updateConfig,omitempty"`
+	DEXOrderEvent   *DEXOrderEvent    `json:"dexOrderEvent,omitempty"`
+	CEXOrderEvent   *CEXOrderEvent    `json:"cexOrderEvent,omitempty"`
+	DepositEvent    *DepositEvent     `json:"depositEvent,omitempty"`
+	WithdrawalEvent *WithdrawalEvent  `json:"withdrawalEvent,omitempty"`
+	UpdateConfig    *BotConfig        `json:"updateConfig,omitempty"`
+	UpdateInventory *map[uint32]int64 `json:"updateInventory,omitempty"`
 }
 
 // MarketMakingRun identifies a market making run.
@@ -227,8 +220,8 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 			return err
 		}
 
-		if update.e.UpdateConfig != nil && update.e.UpdateConfig.NewCfg != nil {
-			if err := db.storeCfgUpdate(runBucket, update.e.UpdateConfig.NewCfg, update.e.TimeStamp); err != nil {
+		if update.e.UpdateConfig != nil {
+			if err := db.storeCfgUpdate(runBucket, update.e.UpdateConfig, update.e.TimeStamp); err != nil {
 				return err
 			}
 		}

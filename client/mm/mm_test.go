@@ -79,8 +79,6 @@ type tCore struct {
 	isWithdrawer      map[uint32]bool
 	isDynamicSwapper  map[uint32]bool
 	cancelsPlaced     []dex.Bytes
-	buysPlaced        []*core.TradeForm
-	sellsPlaced       []*core.TradeForm
 	multiTradesPlaced []*core.MultiTradeForm
 	maxFundingFees    uint64
 	book              *orderbook.OrderBook
@@ -106,6 +104,7 @@ func newTCore() *tCore {
 			c: make(chan *core.BookUpdate, 1),
 		},
 		walletTxs: make(map[string]*asset.WalletTransaction),
+		book:      &orderbook.OrderBook{},
 	}
 }
 
@@ -616,8 +615,8 @@ func (c *tBotCexAdaptor) CancelTrade(ctx context.Context, baseID, quoteID uint32
 func (c *tBotCexAdaptor) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
 	return nil
 }
-func (c *tBotCexAdaptor) SubscribeTradeUpdates() (updates <-chan *libxc.Trade, unsubscribe func()) {
-	return c.tradeUpdates, func() {}
+func (c *tBotCexAdaptor) SubscribeTradeUpdates() (updates <-chan *libxc.Trade) {
+	return c.tradeUpdates
 }
 func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64) (*libxc.Trade, error) {
 	if c.tradeErr != nil {
@@ -704,9 +703,10 @@ func (t *tExchangeAdaptor) CEXBalance(assetID uint32) *BotBalance {
 	}
 	return t.cexBalances[assetID]
 }
-func (t *tExchangeAdaptor) stats() *RunStats                                           { return nil }
-func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig, balanceDiffs *BotBalanceDiffs) {}
-func (t *tExchangeAdaptor) timeStart() int64                                           { return 0 }
+func (t *tExchangeAdaptor) stats() *RunStats                         { return nil }
+func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig)              {}
+func (t *tExchangeAdaptor) updateInventory(diffs *BotInventoryDiffs) {}
+func (t *tExchangeAdaptor) timeStart() int64                         { return 0 }
 
 func TestAvailableBalances(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
