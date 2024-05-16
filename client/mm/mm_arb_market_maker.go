@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
@@ -83,15 +82,10 @@ type ArbMarketMakerConfig struct {
 }
 
 type arbMarketMaker struct {
-	ctx              context.Context
-	host             string
-	baseID           uint32
-	quoteID          uint32
+	*unifiedExchangeAdaptor
 	cex              botCexAdaptor
 	core             botCoreAdaptor
-	log              dex.Logger
 	cfgV             atomic.Value // *ArbMarketMakerConfig
-	mkt              *core.Market
 	book             dexOrderBook
 	rebalanceRunning atomic.Bool
 	currEpoch        atomic.Uint64
@@ -107,6 +101,8 @@ type arbMarketMaker struct {
 	cexTradesMtx sync.RWMutex
 	cexTrades    map[string]uint64
 }
+
+var _ bot = (*arbMarketMaker)(nil)
 
 func (a *arbMarketMaker) cfg() *ArbMarketMakerConfig {
 	return a.cfgV.Load().(*ArbMarketMakerConfig)
@@ -194,7 +190,7 @@ func (a *arbMarketMaker) cancelExpiredCEXTrades() {
 // the DEX order book based on the rate of the counter trade on the CEX. The
 // rate is calculated so that the difference in rates between the DEX and the
 // CEX will pay for the network fees and still leave the configured profit.
-func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *core.Market, feesInQuoteUnits uint64, log dex.Logger) (uint64, error) {
+func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *market, feesInQuoteUnits uint64, log dex.Logger) (uint64, error) {
 	var unadjustedRate uint64
 	if sell {
 		unadjustedRate = uint64(math.Round(float64(cexRate) * (1 + profitRate)))
@@ -202,31 +198,23 @@ func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *core.M
 		unadjustedRate = uint64(math.Round(float64(cexRate) / (1 + profitRate)))
 	}
 
-	rateAdj := rateAdjustment(feesInQuoteUnits, mkt.LotSize)
+	rateAdj := rateAdjustment(feesInQuoteUnits, mkt.lotSize)
 
 	if log.Level() <= dex.LevelTrace {
-		if qui, err := asset.UnitInfo(mkt.QuoteID); err != nil {
-			log.Errorf("no unit info for placement rate logging quote asset %d", mkt.QuoteID)
-		} else {
-			cexRateConv := mkt.MsgRateToConventional(cexRate)
-			rateAdjConv := mkt.MsgRateToConventional(rateAdj)
-			feesConv := qui.ConventionalString(feesInQuoteUnits)
-
-			log.Tracef("%s sell = %t placement rate: cexRate = %.8f, profitRate = %.3f, rateAdj = %.8f, fees = %s %s",
-				mkt.Name, sell, cexRateConv, profitRate, rateAdjConv, feesConv, qui.Conventional.Unit,
-			)
-		}
+		log.Tracef("%s %s placement rate: cexRate = %s, profitRate = %.3f, unadjustedRate = %s, rateAdj = %s, fees = %s",
+			mkt.name, sellStr(sell), mkt.fmtRate(cexRate), profitRate, mkt.fmtRate(unadjustedRate), mkt.fmtRate(rateAdj), mkt.fmtQuoteFees(feesInQuoteUnits),
+		)
 	}
 
 	if sell {
-		return steppedRate(unadjustedRate+rateAdj, mkt.RateStep), nil
+		return steppedRate(unadjustedRate+rateAdj, mkt.rateStep), nil
 	}
 
 	if rateAdj > unadjustedRate {
 		return 0, fmt.Errorf("rate adjustment required for fees %d > rate %d", rateAdj, unadjustedRate)
 	}
 
-	return steppedRate(unadjustedRate-rateAdj, mkt.RateStep), nil
+	return steppedRate(unadjustedRate-rateAdj, mkt.rateStep), nil
 }
 
 func rateAdjustment(feesInQuoteUnits, lotSize uint64) uint64 {
@@ -243,7 +231,7 @@ func (a *arbMarketMaker) dexPlacementRate(cexRate uint64, sell bool) (uint64, er
 		return 0, fmt.Errorf("error getting fees in quote units: %w", err)
 	}
 
-	return dexPlacementRate(cexRate, sell, a.cfg().Profit, a.mkt, feesInQuoteUnits, a.log)
+	return dexPlacementRate(cexRate, sell, a.cfg().Profit, a.market, feesInQuoteUnits, a.log)
 }
 
 func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
@@ -251,8 +239,8 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 		newPlacements := make([]*multiTradePlacement, 0, len(cfgPlacements))
 		var cumulativeCEXDepth uint64
 		for i, cfgPlacement := range cfgPlacements {
-			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*a.mkt.LotSize) * cfgPlacement.Multiplier)
-			_, extrema, filled, err := a.cex.VWAP(a.mkt.BaseID, a.mkt.QuoteID, !sellOnDEX, cumulativeCEXDepth)
+			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*a.lotSize) * cfgPlacement.Multiplier)
+			_, extrema, filled, err := a.cex.VWAP(a.baseID, a.quoteID, !sellOnDEX, cumulativeCEXDepth)
 			if err != nil {
 				a.log.Errorf("Error calculating vwap: %v", err)
 				newPlacements = append(newPlacements, &multiTradePlacement{
@@ -262,12 +250,14 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 				continue
 			}
 
-			a.log.Tracef("%s placement orders: sellOnDex = %t placement # %d, lots = %d, extrema = %.8f, filled = %t",
-				a.mkt.Name, sellOnDEX, i, cfgPlacement.Lots, a.mkt.MsgRateToConventional(extrema), filled,
-			)
+			if a.log.Level() == dex.LevelTrace {
+				a.log.Tracef("%s placement orders: %s placement # %d, lots = %d, extrema = %s, filled = %t",
+					a.name, sellStr(sellOnDEX), i, cfgPlacement.Lots, a.fmtRate(extrema), filled,
+				)
+			}
 
 			if !filled {
-				a.log.Infof("CEX %s side has < %d %s on the orderbook.", map[bool]string{true: "sell", false: "buy"}[!sellOnDEX], cumulativeCEXDepth, a.mkt.BaseSymbol)
+				a.log.Infof("CEX %s side has < %s on the orderbook.", map[bool]string{true: "sell", false: "buy"}[!sellOnDEX], a.fmtBase(cumulativeCEXDepth))
 				newPlacements = append(newPlacements, &multiTradePlacement{
 					rate: 0,
 					lots: 0,
@@ -312,13 +302,13 @@ func (a *arbMarketMaker) depositWithdrawIfNeeded() {
 	if rebalanceBase > 0 {
 		err := a.cex.Deposit(a.ctx, a.baseID, uint64(rebalanceBase))
 		if err != nil {
-			a.log.Errorf("Error depositing %d %s to CEX: %v", rebalanceBase, a.mkt.BaseSymbol, err)
+			a.log.Errorf("Error depositing %s to CEX: %v", rebalanceBase, a.baseTicker, err)
 		}
 	}
 	if rebalanceBase < 0 {
 		err := a.cex.Withdraw(a.ctx, a.baseID, uint64(-rebalanceBase))
 		if err != nil {
-			a.log.Errorf("Error withdrawing %d %s from CEX: %v", -rebalanceBase, a.mkt.BaseSymbol, err)
+			a.log.Errorf("Error withdrawing %s from CEX: %v", -rebalanceBase, a.baseTicker, err)
 		}
 	}
 	if cexReserves > 0 {
@@ -334,13 +324,13 @@ func (a *arbMarketMaker) depositWithdrawIfNeeded() {
 	if rebalanceQuote > 0 {
 		err := a.cex.Deposit(a.ctx, a.quoteID, uint64(rebalanceQuote))
 		if err != nil {
-			a.log.Errorf("Error depositing %d %s to CEX: %v", rebalanceQuote, a.mkt.QuoteSymbol, err)
+			a.log.Errorf("Error depositing %d %s to CEX: %v", rebalanceQuote, a.quoteTicker, err)
 		}
 	}
 	if rebalanceQuote < 0 {
 		err := a.cex.Withdraw(a.ctx, a.quoteID, uint64(-rebalanceQuote))
 		if err != nil {
-			a.log.Errorf("Error withdrawing %d %s from CEX: %v", -rebalanceQuote, a.mkt.QuoteSymbol, err)
+			a.log.Errorf("Error withdrawing %d %s from CEX: %v", -rebalanceQuote, a.quoteTicker, err)
 		}
 	}
 	if cexReserves > 0 {
@@ -434,7 +424,7 @@ func feeGap(core botCoreAdaptor, cex botCexAdaptor, baseID, quoteID uint32, lotS
 }
 
 func (a *arbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, a.cex, a.mkt.BaseID, a.mkt.QuoteID, a.mkt.LotSize)
+	feeGap, err := feeGap(a.core, a.cex, a.baseID, a.quoteID, a.lotSize)
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return
@@ -442,8 +432,7 @@ func (a *arbMarketMaker) registerFeeGap() {
 	a.core.registerFeeGap(feeGap)
 }
 
-func (a *arbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	a.ctx = ctx
+func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 
 	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
 	if err != nil {
@@ -458,10 +447,9 @@ func (a *arbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	tradeUpdates := a.cex.SubscribeTradeUpdates()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	a.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer a.wg.Done()
 		for {
 			select {
 			case ni := <-bookFeed.Next():
@@ -475,9 +463,9 @@ func (a *arbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
-	wg.Add(1)
+	a.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer a.wg.Done()
 		for {
 			select {
 			case update := <-tradeUpdates:
@@ -488,9 +476,9 @@ func (a *arbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
-	wg.Add(1)
+	a.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer a.wg.Done()
 		orderUpdates := a.core.SubscribeOrderUpdates()
 		for {
 			select {
@@ -502,13 +490,13 @@ func (a *arbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
-	wg.Add(1)
+	a.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer a.wg.Done()
 		<-ctx.Done()
 	}()
 
-	return &wg, nil
+	return &a.wg, nil
 }
 
 func (a *arbMarketMaker) updateConfig(cfg *BotConfig) error {
@@ -517,34 +505,33 @@ func (a *arbMarketMaker) updateConfig(cfg *BotConfig) error {
 	}
 
 	a.cfgV.Store(cfg.ArbMarketMakerConfig)
+	a.unifiedExchangeAdaptor.updateConfig(cfg)
 	return nil
 }
 
-func newArbMarketMaker(cfg *BotConfig, c botCoreAdaptor, cex botCexAdaptor, log dex.Logger) (*arbMarketMaker, error) {
+func newArbMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, log dex.Logger) (*arbMarketMaker, error) {
 	if cfg.ArbMarketMakerConfig == nil {
 		// implies bug in caller
 		return nil, errors.New("no arb market maker config provided")
 	}
 
-	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
+	adaptor, err := newUnifiedExchangeAdaptor(adaptorCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get market: %v", err)
+		return nil, fmt.Errorf("error constructing exchange adaptor: %w", err)
 	}
 
 	arbMM := &arbMarketMaker{
-		host:          cfg.Host,
-		baseID:        cfg.BaseID,
-		quoteID:       cfg.QuoteID,
-		cex:           cex,
-		core:          c,
-		log:           log,
-		mkt:           mkt,
-		matchesSeen:   make(map[order.MatchID]bool),
-		pendingOrders: make(map[order.OrderID]uint64),
-		cexTrades:     make(map[string]uint64),
-		dexReserves:   make(map[uint32]uint64),
-		cexReserves:   make(map[uint32]uint64),
+		unifiedExchangeAdaptor: adaptor,
+		cex:                    adaptor,
+		core:                   adaptor,
+		matchesSeen:            make(map[order.MatchID]bool),
+		pendingOrders:          make(map[order.OrderID]uint64),
+		cexTrades:              make(map[string]uint64),
+		dexReserves:            make(map[uint32]uint64),
+		cexReserves:            make(map[uint32]uint64),
 	}
+
+	adaptor.setBotLoop(arbMM.botLoop)
 
 	arbMM.cfgV.Store(cfg.ArbMarketMakerConfig)
 	return arbMM, nil

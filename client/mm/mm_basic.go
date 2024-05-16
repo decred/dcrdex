@@ -181,10 +181,10 @@ type basicMMCalculator interface {
 }
 
 type basicMMCalculatorImpl struct {
+	*market
 	book   dexOrderBook
 	oracle oracle
 	core   botCoreAdaptor
-	mkt    *core.Market
 	cfg    *BasicMarketMakingConfig
 	log    dex.Logger
 }
@@ -211,23 +211,23 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 	var oracleWeighting, oraclePrice float64
 	if b.cfg.OracleWeighting != nil && *b.cfg.OracleWeighting > 0 {
 		oracleWeighting = *b.cfg.OracleWeighting
-		oraclePrice = b.oracle.getMarketPrice(b.mkt.BaseID, b.mkt.QuoteID)
+		oraclePrice = b.oracle.getMarketPrice(b.baseID, b.quoteID)
 		if oraclePrice == 0 {
-			b.log.Warnf("no oracle price available for %s bot", b.mkt.Name)
+			b.log.Warnf("no oracle price available for %s bot", b.name)
 		}
 	}
 
 	if oraclePrice > 0 {
-		msgOracleRate := float64(b.mkt.ConventionalRateToMsg(oraclePrice))
+		msgOracleRate := float64(b.msgRate(oraclePrice))
 
 		// Apply the oracle mismatch filter.
 		if basisPrice > 0 {
 			low, high := msgOracleRate*(1-maxOracleMismatch), msgOracleRate*(1+maxOracleMismatch)
 			if basisPrice < low {
-				b.log.Debug("local mid-gap is below safe range. Using effective mid-gap of %d%% below the oracle rate.", maxOracleMismatch*100)
+				b.log.Debugf("local mid-gap is below safe range. Using effective mid-gap of %d%% below the oracle rate.", maxOracleMismatch*100)
 				basisPrice = low
 			} else if basisPrice > high {
-				b.log.Debug("local mid-gap is above safe range. Using effective mid-gap of %d%% above the oracle rate.", maxOracleMismatch*100)
+				b.log.Debugf("local mid-gap is above safe range. Using effective mid-gap of %d%% above the oracle rate.", maxOracleMismatch*100)
 				basisPrice = high
 			}
 		}
@@ -238,26 +238,26 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 
 		if basisPrice == 0 { // no mid-gap available. Use the oracle price.
 			basisPrice = msgOracleRate
-			b.log.Tracef("basisPrice: using basis price %.0f from oracle because no mid-gap was found in order book", basisPrice)
+			b.log.Tracef("basisPrice: using basis price %s from oracle because no mid-gap was found in order book", b.fmtRate(uint64(msgOracleRate)))
 		} else {
 			basisPrice = msgOracleRate*oracleWeighting + basisPrice*(1-oracleWeighting)
-			b.log.Tracef("basisPrice: oracle-weighted basis price = %f", basisPrice)
+			b.log.Tracef("basisPrice: oracle-weighted basis price = %f", b.fmtRate(uint64(msgOracleRate)))
 		}
 	}
 
 	if basisPrice > 0 {
-		return steppedRate(uint64(basisPrice), b.mkt.RateStep)
+		return steppedRate(uint64(basisPrice), b.rateStep)
 	}
 
 	// TODO: add a configuration to turn off use of fiat rate?
 	fiatRate := b.core.ExchangeRateFromFiatSources()
 	if fiatRate > 0 {
-		return steppedRate(fiatRate, b.mkt.RateStep)
+		return steppedRate(fiatRate, b.rateStep)
 	}
 
 	if b.cfg.EmptyMarketRate > 0 {
-		emptyMsgRate := b.mkt.ConventionalRateToMsg(b.cfg.EmptyMarketRate)
-		return steppedRate(emptyMsgRate, b.mkt.RateStep)
+		emptyMsgRate := b.msgRate(b.cfg.EmptyMarketRate)
+		return steppedRate(emptyMsgRate, b.rateStep)
 	}
 
 	return 0
@@ -319,15 +319,15 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 	 */
 
 	f := sellFeesInBaseUnits + buyFeesInBaseUnits
-	l := b.mkt.LotSize
+	l := b.lotSize
 
 	r := float64(basisPrice) / calc.RateEncodingFactor
 	g := float64(f) * r / float64(f+2*l)
 
 	halfGap := uint64(math.Round(g * calc.RateEncodingFactor))
 
-	b.log.Tracef("halfSpread: base basis price = %d, lot size = %d, fees in base units = %d, half-gap = %d",
-		basisPrice, l, f, halfGap)
+	b.log.Tracef("halfSpread: base basis price = %s, lot size = %s, aggregate fees = %s, half-gap = %s",
+		basisPrice, b.fmtRate(basisPrice), b.fmtBase(l), b.fmtBaseFees(f), b.fmtRate(halfGap))
 
 	return &FeeGapStats{
 		BasisPrice:    basisPrice,
@@ -337,18 +337,15 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 }
 
 type basicMarketMaker struct {
-	ctx              context.Context
-	host             string
-	baseID           uint32
-	quoteID          uint32
+	*unifiedExchangeAdaptor
 	cfgV             atomic.Value // *BasicMarketMakingConfig
-	log              dex.Logger
 	core             botCoreAdaptor
 	oracle           oracle
-	mkt              *core.Market
 	rebalanceRunning atomic.Bool
 	calculator       basicMMCalculator
 }
+
+var _ bot = (*basicMarketMaker)(nil)
 
 func (m *basicMarketMaker) cfg() *BasicMarketMakingConfig {
 	return m.cfgV.Load().(*BasicMarketMakingConfig)
@@ -364,7 +361,7 @@ func (m *basicMarketMaker) orderPrice(basisPrice, breakEven uint64, sell bool, g
 	case GapStrategyPercent, GapStrategyPercentPlus:
 		halfSpread = uint64(math.Round(gapFactor * float64(basisPrice)))
 	case GapStrategyAbsolute, GapStrategyAbsolutePlus:
-		halfSpread = m.mkt.ConventionalRateToMsg(gapFactor)
+		halfSpread = m.msgRate(gapFactor)
 	}
 
 	// Add the break-even to the "-plus" strategies
@@ -373,7 +370,7 @@ func (m *basicMarketMaker) orderPrice(basisPrice, breakEven uint64, sell bool, g
 		halfSpread += breakEven
 	}
 
-	halfSpread = steppedRate(halfSpread, m.mkt.RateStep)
+	halfSpread = steppedRate(halfSpread, m.rateStep)
 
 	if sell {
 		return basisPrice + halfSpread
@@ -405,10 +402,21 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 		breakEven = feeGap.FeeGap
 	}
 
+	if m.log.Level() == dex.LevelTrace {
+		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even gap = %s",
+			m.name, m.fmtRate(basisPrice), m.fmtRate(breakEven))
+	}
+
 	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
 		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
-		for _, p := range orderPlacements {
+		for i, p := range orderPlacements {
 			rate := m.orderPrice(basisPrice, breakEven, sell, p.GapFactor)
+
+			if m.log.Level() == dex.LevelTrace {
+				m.log.Tracef("ordersToPlace.orders: %s placement # %d, gap factor = %f, rate = %s",
+					sellStr(sell), i, p.GapFactor, m.fmtRate(rate))
+			}
+
 			lots := p.Lots
 			if rate == 0 {
 				lots = 0
@@ -438,28 +446,26 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	m.core.MultiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch, nil, nil)
 }
 
-func (m *basicMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
+
 	book, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)
 	}
 
-	m.ctx = ctx
 	m.calculator = &basicMMCalculatorImpl{
+		market: m.market,
 		book:   book,
 		oracle: m.oracle,
 		core:   m.core,
-		mkt:    m.mkt,
 		cfg:    m.cfg(),
 		log:    m.log,
 	}
 
-	wg := sync.WaitGroup{}
-
 	// Process book updates
-	wg.Add(1)
+	m.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer m.wg.Done()
 		for {
 			select {
 			case n := <-bookFeed.Next():
@@ -473,7 +479,7 @@ func (m *basicMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		}
 	}()
 
-	return &wg, nil
+	return &m.wg, nil
 }
 
 func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
@@ -492,31 +498,28 @@ func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
 }
 
 // RunBasicMarketMaker starts a basic market maker bot.
-func newBasicMarketMaker(cfg *BotConfig, c botCoreAdaptor, oracle oracle, log dex.Logger) (*basicMarketMaker, error) {
+func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle oracle, log dex.Logger) (*basicMarketMaker, error) {
 	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
 		return nil, errors.New("no market making config provided")
 	}
 
-	err := cfg.BasicMMConfig.Validate()
+	adaptor, err := newUnifiedExchangeAdaptor(adaptorCfg)
+	if err != nil {
+		return nil, fmt.Errorf("error constructing exchange adaptor: %w", err)
+	}
+
+	err = cfg.BasicMMConfig.Validate()
 	if err != nil {
 		return nil, fmt.Errorf("invalid market making config: %v", err)
 	}
 
-	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get market: %v", err)
-	}
-
 	basicMM := &basicMarketMaker{
-		core:    c,
-		log:     log,
-		host:    cfg.Host,
-		baseID:  cfg.BaseID,
-		quoteID: cfg.QuoteID,
-		oracle:  oracle,
-		mkt:     mkt,
+		unifiedExchangeAdaptor: adaptor,
+		core:                   adaptor,
+		oracle:                 oracle,
 	}
 	basicMM.cfgV.Store(cfg.BasicMMConfig)
+	adaptor.setBotLoop(basicMM.botLoop)
 	return basicMM, nil
 }

@@ -9,21 +9,18 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"sync/atomic"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/msgjson"
 )
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	NotificationFeed() *core.NoteFeed
 	ExchangeMarket(host string, baseID, quoteID uint32) (*core.Market, error)
-	MarketConfig(host string, baseID, quoteID uint32) (*msgjson.Market, error)
 	SyncBook(host string, baseID, quoteID uint32) (*orderbook.OrderBook, core.BookFeed, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uint64, error)
@@ -82,20 +79,29 @@ type centralizedExchange struct {
 	connectErr string
 }
 
-type runningBot struct {
-	adaptor exchangeAdaptor
-	botCM   *dex.ConnectionMaster
-	paused  atomic.Bool
-	cexCfg  *CEXConfig
-
-	botCfgV atomic.Value // *BotConfig
+// bot is an interface used by the MarketMaker to access functions in order to
+// check balances and update the bot configuration. An interface is created to
+// simplify testing.
+type bot interface {
+	dex.Connector
+	refreshAllPendingEvents(context.Context)
+	DEXBalance(assetID uint32) *BotBalance
+	CEXBalance(assetID uint32) *BotBalance
+	balances() map[uint32]*BotBalances
+	stats() *RunStats
+	updateConfig(cfg *BotConfig) error
+	updateInventory(balanceDiffs *BotInventoryDiffs)
+	withPause(func() error) error
+	timeStart() int64
+	sendStatsUpdate()
+	botCfg() *BotConfig
+	Book() (buys, sells []*core.MiniOrder, _ error)
 }
 
-func (rb *runningBot) botCfg() *BotConfig {
-	if cfg := rb.botCfgV.Load(); cfg != nil {
-		return cfg.(*BotConfig)
-	}
-	return nil
+type runningBot struct {
+	bot
+	cm     *dex.ConnectionMaster
+	cexCfg *CEXConfig
 }
 
 func (rb *runningBot) assets() map[uint32]interface{} {
@@ -218,8 +224,8 @@ func (m *MarketMaker) Status() *Status {
 		var stats *RunStats
 		var balances map[uint32]*BotBalances
 		if rb != nil {
-			stats = rb.adaptor.stats()
-			balances = rb.adaptor.balances()
+			stats = rb.stats()
+			balances = rb.balances()
 		}
 		status.Bots = append(status.Bots, &BotStatus{
 			Config:   botCfg,
@@ -252,13 +258,13 @@ func (m *MarketMaker) RunningBotsStatus() *Status {
 	}
 	runningBots := m.runningBotsLookup()
 	for _, rb := range runningBots {
-		stats := rb.adaptor.stats()
+		stats := rb.stats()
 
 		status.Bots = append(status.Bots, &BotStatus{
 			Config:   rb.botCfg(),
 			Running:  true,
 			RunStats: stats,
-			Balances: rb.adaptor.balances(),
+			Balances: rb.balances(),
 		})
 	}
 	return status
@@ -559,15 +565,15 @@ func (m *MarketMaker) cexInUse(cexName string) bool {
 	return false
 }
 
-func (m *MarketMaker) newBot(cfg *BotConfig, adaptor *unifiedExchangeAdaptor, oracle oracle, log dex.Logger) (dex.Connector, error) {
+func (m *MarketMaker) newBot(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg) (bot, error) {
 	mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 	switch {
 	case cfg.ArbMarketMakerConfig != nil:
-		return newArbMarketMaker(cfg, adaptor, adaptor, m.log.SubLogger(fmt.Sprintf("AMM-%s", mktID)))
+		return newArbMarketMaker(cfg, adaptorCfg, m.log.SubLogger(fmt.Sprintf("AMM-%s", mktID)))
 	case cfg.BasicMMConfig != nil:
-		return newBasicMarketMaker(cfg, adaptor, m.oracle, m.log.SubLogger(fmt.Sprintf("MM-%s", mktID)))
+		return newBasicMarketMaker(cfg, adaptorCfg, m.oracle, m.log.SubLogger(fmt.Sprintf("MM-%s", mktID)))
 	case cfg.SimpleArbConfig != nil:
-		return newSimpleArbMarketMaker(cfg, adaptor, adaptor, m.log.SubLogger(fmt.Sprintf("ARB-%s", mktID)))
+		return newSimpleArbMarketMaker(cfg, adaptorCfg, m.log.SubLogger(fmt.Sprintf("ARB-%s", mktID)))
 	default:
 		return nil, fmt.Errorf("not bot config found")
 	}
@@ -631,8 +637,8 @@ func (m *MarketMaker) StartBot(mkt *MarketWithHost, alternateConfigPath *string,
 	return m.startBot(mkt, botCfg, cexCfg, appPW)
 }
 
-func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *CEXConfig, appPW []byte) (err error) {
-	if err := m.balancesSufficient(botCfg.Alloc, mkt, cexCfg); err != nil {
+func (m *MarketMaker) startBot(mwh *MarketWithHost, botCfg *BotConfig, cexCfg *CEXConfig, appPW []byte) (err error) {
+	if err := m.balancesSufficient(botCfg.Alloc, mwh, cexCfg); err != nil {
 		return err
 	}
 
@@ -663,60 +669,53 @@ func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *C
 		}()
 	}
 
-	mktID := dexMarketID(botCfg.Host, botCfg.BaseID, botCfg.QuoteID)
-	logger := m.botSubLogger(botCfg)
-	exchangeAdaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
-		botID:           mktID,
-		market:          mkt,
+	adaptorCfg := &exchangeAdaptorCfg{
+		botID:           dexMarketID(botCfg.Host, botCfg.BaseID, botCfg.QuoteID),
+		mwh:             mwh,
 		baseDexBalances: botCfg.Alloc.DEX,
 		baseCexBalances: botCfg.Alloc.CEX,
 		core:            m.core,
 		cex:             cex,
-		log:             logger,
+		log:             m.botSubLogger(botCfg),
 		botCfg:          botCfg,
 		eventLogDB:      m.eventLogDB,
-	})
+	}
 
-	adaptorCm := dex.NewConnectionMaster(exchangeAdaptor)
-	err = adaptorCm.ConnectOnce(m.ctx)
+	bot, err := m.newBot(botCfg, adaptorCfg)
 	if err != nil {
 		return err
 	}
 
-	bot, err := m.newBot(botCfg, exchangeAdaptor, m.oracle, logger)
-	if err != nil {
-		return err
+	cm := dex.NewConnectionMaster(bot)
+	if err := cm.ConnectOnce(m.ctx); err != nil {
+		return fmt.Errorf("error connecting bot: %w", err)
 	}
-
-	botCM := dex.NewConnectionMaster(bot)
 
 	go func() {
-		botCM.Wait()
-		adaptorCm.Disconnect()
+		cm.Wait()
 		m.runningBotsMtx.Lock()
-		if bot, found := m.runningBots[*mkt]; found {
+		if bot, found := m.runningBots[*mwh]; found {
 			if bot.botCfg().requiresPriceOracle() {
-				m.oracle.stopAutoSyncingMarket(mkt.BaseID, mkt.QuoteID)
+				m.oracle.stopAutoSyncingMarket(mwh.BaseID, mwh.QuoteID)
 			}
-			delete(m.runningBots, *mkt)
+			delete(m.runningBots, *mwh)
 		}
 		m.runningBotsMtx.Unlock()
-		m.core.Broadcast(newRunStatsNote(mkt.Host, mkt.BaseID, mkt.QuoteID, nil))
+		m.core.Broadcast(newRunStatsNote(mwh.Host, mwh.BaseID, mwh.QuoteID, nil))
 	}()
 
 	startedBot = true
 
 	rb := &runningBot{
-		adaptor: exchangeAdaptor,
-		botCM:   botCM,
-		cexCfg:  cexCfg,
+		bot:    bot,
+		cm:     cm,
+		cexCfg: cexCfg,
 	}
-	rb.botCfgV.Store(botCfg)
 
 	m.runningBotsMtx.Lock()
-	m.runningBots[*mkt] = rb
+	m.runningBots[*mwh] = rb
 	m.runningBotsMtx.Unlock()
-	exchangeAdaptor.sendStatsUpdate()
+	bot.sendStatsUpdate()
 
 	return nil
 }
@@ -724,7 +723,7 @@ func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *C
 // StopAllBots stops all running bots.
 func (m *MarketMaker) StopAllBots() error {
 	for _, bot := range m.runningBotsLookup() {
-		bot.botCM.Disconnect()
+		bot.cm.Disconnect()
 	}
 	return nil
 }
@@ -736,7 +735,7 @@ func (m *MarketMaker) StopBot(mkt *MarketWithHost) error {
 	if !found {
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
-	bot.botCM.Disconnect()
+	bot.cm.Disconnect()
 	return nil
 }
 
@@ -887,30 +886,20 @@ func (m *MarketMaker) UpdateRunningBotInventory(mkt *MarketWithHost, balanceDiff
 	defer m.startUpdateMtx.Unlock()
 
 	m.runningBotsMtx.RLock()
-	runningBot := m.runningBots[*mkt]
+	rb := m.runningBots[*mkt]
 	m.runningBotsMtx.RUnlock()
-	if runningBot == nil {
+	if rb == nil {
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
 
-	if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), mkt, runningBot.cexCfg); err != nil {
+	if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), mkt, rb.cexCfg); err != nil {
 		return err
 	}
 
-	if !runningBot.paused.CompareAndSwap(false, true) {
-		return fmt.Errorf("bot already paused")
-	}
-	defer runningBot.paused.Store(false)
-
-	runningBot.botCM.Disconnect()
-
-	runningBot.adaptor.updateInventory(balanceDiffs)
-
-	if err := runningBot.botCM.ConnectOnce(m.ctx); err != nil {
-		return fmt.Errorf("Error restarting bot after inventory update: %v", err)
-	}
-
-	return nil
+	return rb.withPause(func() error {
+		rb.bot.updateInventory(balanceDiffs)
+		return nil
+	})
 }
 
 // UpdateRunningBotCfg updates the configuration and balance allocation for a
@@ -926,24 +915,19 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 
 	mkt := MarketWithHost{cfg.Host, cfg.BaseID, cfg.QuoteID}
 	m.runningBotsMtx.RLock()
-	runningBot := m.runningBots[mkt]
+	rb := m.runningBots[mkt]
 	m.runningBotsMtx.RUnlock()
-	if runningBot == nil {
+	if rb == nil {
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
 
-	if !runningBot.paused.CompareAndSwap(false, true) {
-		return fmt.Errorf("bot already paused")
-	}
-	defer runningBot.paused.Store(false)
-
-	oldCfg := runningBot.botCfg()
+	oldCfg := rb.botCfg()
 	if err := validRunningBotCfgUpdate(oldCfg, cfg); err != nil {
 		return err
 	}
 
 	if balanceDiffs != nil {
-		if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), &mkt, runningBot.cexCfg); err != nil {
+		if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), &mkt, rb.cexCfg); err != nil {
 			return err
 		}
 	}
@@ -974,24 +958,17 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 		stoppedOracle = true
 	}
 
-	if !runningBot.paused.CompareAndSwap(false, true) {
-		return fmt.Errorf("bot already paused")
+	if err := rb.withPause(func() error {
+		if err := rb.updateConfig(cfg); err != nil {
+			return err
+		}
+		if balanceDiffs != nil {
+			rb.updateInventory(balanceDiffs)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	defer runningBot.paused.Store(false)
-
-	runningBot.botCM.Disconnect()
-
-	runningBot.adaptor.updateConfig(cfg)
-
-	if balanceDiffs != nil {
-		runningBot.adaptor.updateInventory(balanceDiffs)
-	}
-
-	if err := runningBot.botCM.ConnectOnce(m.ctx); err != nil {
-		return fmt.Errorf("error restarting bot after config update: %v", err)
-	}
-
-	runningBot.botCfgV.Store(cfg)
 
 	updateSuccess = true
 
@@ -1009,7 +986,7 @@ func (m *MarketMaker) ArchivedRuns() ([]*MarketMakingRun, error) {
 	archivedRuns := make([]*MarketMakingRun, 0, len(allRuns))
 	for _, run := range allRuns {
 		runningBot := runningBots[*run.Market]
-		if runningBot == nil || runningBot.adaptor.timeStart() != run.StartTime {
+		if runningBot == nil || runningBot.bot.timeStart() != run.StartTime {
 			archivedRuns = append(archivedRuns, run)
 		}
 	}
@@ -1038,7 +1015,7 @@ func (m *MarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells 
 	if !found {
 		return nil, nil, fmt.Errorf("no running bot found for market %s", mwh)
 	}
-	return bot.adaptor.Book()
+	return bot.Book()
 }
 
 // LotFees are the fees for trading one lot.
@@ -1173,21 +1150,21 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 		reservedCEXBalances := make(map[uint32]uint64, len(cexAssets))
 
 		runningBots := m.runningBotsLookup()
-		for _, bot := range runningBots {
-			if !checkBot(bot) {
+		for _, rb := range runningBots {
+			if !checkBot(rb) {
 				continue
 			}
 
-			bot.adaptor.refreshAllPendingEvents(m.ctx)
+			rb.refreshAllPendingEvents(m.ctx)
 
 			for assetID := range dexAssets {
-				botBalance := bot.adaptor.DEXBalance(assetID)
+				botBalance := rb.DEXBalance(assetID)
 				reservedDEXBalances[assetID] += botBalance.Available
 			}
 
-			if cexCfg != nil && bot.cexName() == cexCfg.Name {
+			if cexCfg != nil && rb.cexName() == cexCfg.Name {
 				for assetID := range cexAssets {
-					botBalance := bot.adaptor.CEXBalance(assetID)
+					botBalance := rb.CEXBalance(assetID)
 					reservedCEXBalances[assetID] += botBalance.Available + botBalance.Reserved
 				}
 			}
@@ -1235,4 +1212,11 @@ func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, alternateConfigPath
 	}
 
 	return m.availableBalances(mkt, cexCfg)
+}
+
+func sellStr(sell bool) string {
+	if sell {
+		return "sell"
+	}
+	return "buy"
 }

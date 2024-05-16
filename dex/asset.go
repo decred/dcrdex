@@ -172,6 +172,22 @@ func (ui *UnitInfo) ConventionalString(v uint64) string {
 	return strconv.FormatFloat(float64(v)/float64(c), 'f', prec, 64)
 }
 
+// FormatAtoms formts the atomic value as a string with units. The number is
+// formatted with full precision. For small values, the value is formatted in
+// atomic units, while for larger values the value is formatted in conventional
+// units.
+func (ui *UnitInfo) FormatAtoms(v uint64) string {
+	const bestDisplayOrder = 1
+	conv := float64(v) / float64(ui.Conventional.ConversionFactor)
+	convDelta := uint(math.Abs(math.Floor(math.Log10(conv)) - bestDisplayOrder))
+	atomicDelta := uint(math.Abs(math.Floor(math.Log10(float64(v))) - bestDisplayOrder))
+	if convDelta <= atomicDelta {
+		prec := int(math.Round(math.Log10(float64(ui.Conventional.ConversionFactor))))
+		return fmt.Sprintf("%s %s", strconv.FormatFloat(conv, 'f', prec, 64), ui.Conventional.Unit)
+	}
+	return fmt.Sprintf("%d %s", v, ui.AtomicUnit)
+}
+
 // Token is a generic representation of a token-type asset.
 type Token struct {
 	// ParentID is the asset ID of the token's parent asset.

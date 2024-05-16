@@ -31,8 +31,6 @@ func TestArbRebalance(t *testing.T) {
 		cexTradeIDs = append(cexTradeIDs, fmt.Sprintf("%x", encode.RandomBytes(32)))
 	}
 
-	log := dex.StdOutLogger("T", dex.LevelTrace)
-
 	const currEpoch uint64 = 100
 	const numEpochsLeaveOpen uint32 = 10
 	const maxActiveArbs uint32 = 5
@@ -506,25 +504,23 @@ func TestArbRebalance(t *testing.T) {
 		defer cancel()
 
 		arbEngine := &simpleArbMarketMaker{
-			ctx: ctx,
-			log: log,
-			cex: cex,
-			mkt: &core.Market{
+			unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
 				LotSize: lotSize,
 				BaseID:  baseID,
 				QuoteID: quoteID,
-			},
-			baseID:     baseID,
-			quoteID:    quoteID,
+			}),
+			cex:        cex,
 			core:       coreAdaptor,
 			activeArbs: test.existingArbs,
 		}
+		arbEngine.setBotLoop(arbEngine.botLoop)
 		arbEngine.cfgV.Store(&SimpleArbConfig{
 			ProfitTrigger:      profitTrigger,
 			MaxActiveArbs:      maxActiveArbs,
 			NumEpochsLeaveOpen: numEpochsLeaveOpen,
 		})
-		_, err := arbEngine.Connect(ctx)
+		arbEngine.ctx = ctx
+		err := arbEngine.runBotLoop(ctx)
 		if err != nil {
 			t.Fatalf("%s: Connect error: %v", test.name, err)
 		}
@@ -675,20 +671,22 @@ func TestArbDexTradeUpdates(t *testing.T) {
 		defer cancel()
 
 		arbEngine := &simpleArbMarketMaker{
-			ctx:        ctx,
-			log:        tLogger,
+			unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
+				BaseID:  42,
+				QuoteID: 0,
+			}),
 			cex:        cex,
-			baseID:     42,
-			quoteID:    0,
 			core:       coreAdaptor,
 			activeArbs: test.activeArbs,
 		}
+		arbEngine.ctx = ctx
+		arbEngine.setBotLoop(arbEngine.botLoop)
 		arbEngine.cfgV.Store(&SimpleArbConfig{
 			ProfitTrigger:      0.01,
 			MaxActiveArbs:      5,
 			NumEpochsLeaveOpen: 10,
 		})
-		_, err := arbEngine.Connect(ctx)
+		err := arbEngine.runBotLoop(ctx)
 		if err != nil {
 			t.Fatalf("%s: Connect error: %v", test.name, err)
 		}
@@ -794,21 +792,23 @@ func TestCexTradeUpdates(t *testing.T) {
 		defer cancel()
 
 		arbEngine := &simpleArbMarketMaker{
-			ctx:        ctx,
-			log:        tLogger,
+			unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
+				BaseID:  42,
+				QuoteID: 0,
+			}),
 			cex:        cex,
-			baseID:     42,
-			quoteID:    0,
 			core:       newTBotCoreAdaptor(newTCore()),
 			activeArbs: test.activeArbs,
 		}
+		arbEngine.ctx = ctx
+		arbEngine.setBotLoop(arbEngine.botLoop)
 		arbEngine.cfgV.Store(&SimpleArbConfig{
 			ProfitTrigger:      0.01,
 			MaxActiveArbs:      5,
 			NumEpochsLeaveOpen: 10,
 		})
 
-		_, err := arbEngine.Connect(ctx)
+		err := arbEngine.runBotLoop(ctx)
 		if err != nil {
 			t.Fatalf("%s: Connect error: %v", test.name, err)
 		}
