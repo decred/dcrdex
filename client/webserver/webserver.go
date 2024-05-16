@@ -194,6 +194,7 @@ type mmCore interface {
 	ArchivedRuns() ([]*mm.MarketMakingRun, error)
 	RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error)
 	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, error)
+	CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -598,6 +599,7 @@ func New(cfg *Config) (*WebServer, error) {
 				apiAuth.Get("/archivedmmruns", s.apiArchivedRuns)
 				apiAuth.Post("/mmrunoverview", s.apiMMRunOverview)
 				apiAuth.Post("/mmrunlogs", s.apiRunLogs)
+				apiAuth.Post("/cexbook", s.apiCEXBook)
 			}
 		})
 	})

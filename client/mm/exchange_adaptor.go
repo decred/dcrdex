@@ -64,6 +64,7 @@ type exchangeAdaptor interface {
 	updateConfig(cfg *BotConfig)
 	updateInventory(balanceDiffs *BotInventoryDiffs)
 	timeStart() int64
+	Book() (buys, sells []*core.MiniOrder, _ error)
 }
 
 // botCoreAdaptor is an interface used by bots to access DEX related
@@ -102,6 +103,7 @@ type botCexAdaptor interface {
 	FreeUpFunds(assetID uint32, cex bool, amt uint64, currEpoch uint64)
 	Deposit(ctx context.Context, assetID uint32, amount uint64) error
 	Withdraw(ctx context.Context, assetID uint32, amount uint64) error
+	Book() (buys, sells []*core.MiniOrder, _ error)
 }
 
 // pendingWithdrawal represents a withdrawal from a CEX that has been
@@ -2828,6 +2830,10 @@ func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig) {
 
 func (u *unifiedExchangeAdaptor) updateInventory(balanceDiffs *BotInventoryDiffs) {
 	u.updateInventoryEvent(u.updateBalances(balanceDiffs))
+}
+
+func (u *unifiedExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
+	return u.CEX.Book(u.market.BaseID, u.market.QuoteID)
 }
 
 type exchangeAdaptorCfg struct {

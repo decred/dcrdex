@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 )
 
@@ -92,6 +93,8 @@ type CEX interface {
 	ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error)
 	// TradeStatus returns the current status of a trade.
 	TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) (*Trade, error)
+	// Book generates the CEX's current view of a market's orderbook.
+	Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
 }
 
 const (

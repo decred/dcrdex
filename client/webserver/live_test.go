@@ -2582,6 +2582,12 @@ func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64
 	return events, nil
 }
 
+func (m *TMarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {
+	mktID := dex.BipIDSymbol(baseID) + "_" + dex.BipIDSymbol(quoteID)
+	book := m.core.book(host, mktID)
+	return book.Buys, book.Sells, nil
+}
+
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
 	asset.Register(22, &TDriver{})                 // mona

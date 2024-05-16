@@ -24,6 +24,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
+	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -1692,6 +1693,31 @@ func (bnc *binance) book(baseID, quoteID uint32) (*binanceOrderBook, error) {
 		return nil, fmt.Errorf("no book for market %s", mktID)
 	}
 	return book, nil
+}
+
+func (bnc *binance) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {
+	book, err := bnc.book(baseID, quoteID)
+	if err != nil {
+		return nil, nil, err
+	}
+	bids, asks := book.book.snap()
+	bFactor := float64(book.baseConversionFactor)
+	convertSide := func(side []*obEntry, sell bool) []*core.MiniOrder {
+		ords := make([]*core.MiniOrder, len(side))
+		for i, e := range side {
+			ords[i] = &core.MiniOrder{
+				Qty:       float64(e.qty) / bFactor,
+				QtyAtomic: e.qty,
+				Rate:      calc.ConventionalRateAlt(e.rate, book.baseConversionFactor, book.quoteConversionFactor),
+				MsgRate:   e.rate,
+				Sell:      sell,
+			}
+		}
+		return ords
+	}
+	buys = convertSide(bids, false)
+	sells = convertSide(asks, true)
+	return
 }
 
 // VWAP returns the volume weighted average price for a certain quantity
