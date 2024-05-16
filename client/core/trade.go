@@ -3004,12 +3004,6 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 
 	case errors.Is(err, asset.ErrTxRejected):
 		match.redemptionRejected = true
-		// If we're the maker, give up. They don't have the secret anyway.
-		if match.Side == order.Maker {
-			match.MetaData.Proof.SelfRevoked = true
-			return false, fmt.Errorf("%s transaction %s was rejected. We're the maker, so we're giving up",
-				unbip(toWallet.AssetID), coinIDString(toWallet.AssetID, redeemCoinID))
-		}
 		// We need to seek user approval before trying again, since new fees
 		// could be incurred.
 		actionRequest, note := newRejectedRedemptionNote(toWallet.AssetID, t.ID(), redeemCoinID)
@@ -3023,11 +3017,17 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		// The transaction was nonce-replaced or otherwise lost without
 		// rejection or with user acknowlegement. Try again if we're the taker.
 		// If we're the maker we'll give up and try to refund.
-		c.log.Infof("Redemption %s (%s) has been noted as lost.", match.MetaData.Proof.TakerRedeem, unbip(toWallet.AssetID))
+		var coinID order.CoinID
 		if match.Side == order.Taker {
+			coinID = match.MetaData.Proof.TakerRedeem
 			match.MetaData.Proof.TakerRedeem = nil
 			match.Status = order.MakerRedeemed
+		} else {
+			coinID = match.MetaData.Proof.MakerRedeem
+			match.MetaData.Proof.MakerRedeem = nil
+			match.Status = order.TakerSwapCast
 		}
+		c.log.Infof("Redemption %s (%s) has been noted as lost.", coinID, unbip(toWallet.AssetID))
 
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)

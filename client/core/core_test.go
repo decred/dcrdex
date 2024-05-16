@@ -9098,6 +9098,22 @@ func TestConfirmRedemption(t *testing.T) {
 			expectConfirmRedemptionCalled: true,
 		},
 		{
+			name:                          "maker, makerRedeemed, redemption tx lost",
+			matchStatus:                   order.MakerRedeemed,
+			matchSide:                     order.Maker,
+			confirmRedemptionErr:          asset.ErrTxLost,
+			expectedStatus:                order.TakerSwapCast,
+			expectConfirmRedemptionCalled: true,
+		},
+		{
+			name:                          "taker, takerRedeemed, redemption tx lost",
+			matchStatus:                   order.MatchComplete,
+			matchSide:                     order.Taker,
+			confirmRedemptionErr:          asset.ErrTxLost,
+			expectedStatus:                order.MakerRedeemed,
+			expectConfirmRedemptionCalled: true,
+		},
+		{
 			name:                          "maker, matchConfirmed",
 			matchStatus:                   order.MatchConfirmed,
 			matchSide:                     order.Maker,
@@ -11157,10 +11173,16 @@ func TestTakeAction(t *testing.T) {
 	wrongMatch := newMatch()
 	wrongMatch.MetaData.Proof.TakerRedeem = encode.RandomBytes(31)
 
+	makerMatch := newMatch()
+	makerMatch.Status = order.MakerRedeemed
+	makerMatch.MetaData.Proof.MakerRedeem = coinID
+	makerMatch.Side = order.Maker
+
 	tracker := &trackedTrade{
 		matches: map[order.MatchID]*matchTracker{
 			rightMatch.MatchID: rightMatch,
 			wrongMatch.MatchID: wrongMatch,
+			makerMatch.MatchID: makerMatch,
 		},
 	}
 
@@ -11190,7 +11212,7 @@ func TestTakeAction(t *testing.T) {
 	requestData = []byte(fmt.Sprintf(`{"orderID":"%s","coinID":"%s","retry":true}`, oid, dex.Bytes(coinID)))
 	err = rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
 	if err != nil {
-		t.Fatalf("error for retry=true: %v", err)
+		t.Fatalf("error for taker retry=true: %v", err)
 	}
 
 	if len(rightMatch.MetaData.Proof.TakerRedeem) != 0 {
@@ -11199,4 +11221,14 @@ func TestTakeAction(t *testing.T) {
 	if len(wrongMatch.MetaData.Proof.TakerRedeem) == 0 {
 		t.Fatalf("wrong taker redemption cleared")
 	}
+
+	makerMatch.redemptionRejected = true
+	err = rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
+	if err != nil {
+		t.Fatalf("error for maker retry=true: %v", err)
+	}
+	if len(makerMatch.MetaData.Proof.MakerRedeem) != 0 {
+		t.Fatalf("maker redemption not cleared")
+	}
+
 }

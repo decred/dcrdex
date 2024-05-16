@@ -34,11 +34,9 @@ type extendedWalletTx struct {
 	// NonceReplacement is a transaction with the same nonce that was accepted
 	// by the network, meaning this tx was not applied.
 	NonceReplacement string `json:"nonceReplacement,omitempty"`
-	// FeeReplacement is a transaction that replaced this transaction but with
-	// higher fees. The FeeReplacement is always the NonceReplacement too,
-	// but the FeeReplacement can be assumed to otherwise be the same tx as
-	// the one replaced, just with higher fees.
-	FeeReplacement string `json:"feeReplacement,omitempty"`
+	// FeeReplacement is true if the NonceReplacement is the same tx as this
+	// one, just with higher fees.
+	FeeReplacement bool `json:"feeReplacement,omitempty"`
 	// AssumedLost will be set to true if a transaction is assumed to be lost.
 	// This typically requires feedback from the user in response to an
 	// ActionRequiredNote.

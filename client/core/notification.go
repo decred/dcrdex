@@ -763,7 +763,7 @@ type RejectedRedemptionData struct {
 }
 
 // ActionRequiredNote is structured like a WalletNote. The payload will be
-// an *asset.ActionRequiredNote. This is done for compatiblility reasons.
+// an *asset.ActionRequiredNote. This is done for compatibility reasons.
 type ActionRequiredNote WalletNote
 
 func newRejectedRedemptionNote(assetID uint32, oid order.OrderID, coinID []byte) (*asset.ActionRequiredNote, *ActionRequiredNote) {

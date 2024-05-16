@@ -11488,14 +11488,25 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 	}
 	tracker.mtx.Lock()
 	defer tracker.mtx.Unlock()
+
 	for _, match := range tracker.matches {
 		coinID := match.MetaData.Proof.TakerRedeem
+		if match.Side == order.Maker {
+			coinID = match.MetaData.Proof.MakerRedeem
+		}
 		if bytes.Equal(coinID, req.CoinID) {
 			if match.Side == order.Taker && match.Status == order.MatchComplete {
 				// Try to redeem again.
 				match.redemptionRejected = false
 				match.MetaData.Proof.TakerRedeem = nil
 				match.Status = order.MakerRedeemed
+				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+					c.log.Errorf("Failed to update match in DB: %v", err)
+				}
+			} else if match.Side == order.Maker && match.Status == order.MakerRedeemed {
+				match.redemptionRejected = false
+				match.MetaData.Proof.MakerRedeem = nil
+				match.Status = order.TakerSwapCast
 				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
 					c.log.Errorf("Failed to update match in DB: %v", err)
 				}

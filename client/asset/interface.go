@@ -1163,6 +1163,9 @@ type WalletTransaction struct {
 	// Confirmed transactions are no longer updated and will be considered
 	// finalized forever.
 	Confirmed bool `json:"confirmed"`
+	// Rejected will be true the transaction was rejected and did not have any
+	// effect, though fees were incurred.
+	Rejected bool `json:"rejected,omitempty"`
 }
 
 // WalletHistorian is a wallet that is able to retrieve the history of all
