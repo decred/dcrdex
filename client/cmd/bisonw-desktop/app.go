@@ -70,6 +70,7 @@ import (
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
 	"fyne.io/systray"
+	"github.com/gen2brain/beeep"
 	"github.com/pkg/browser"
 	"github.com/webview/webview"
 )

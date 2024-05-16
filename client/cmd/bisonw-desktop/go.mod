@@ -15,8 +15,11 @@ require (
 
 require (
 	github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a // indirect
+	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4 // indirect
 	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
 	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2 // indirect
+	github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d // indirect
+	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 )
 
 require (
@@ -97,6 +100,7 @@ require (
 	github.com/gcash/bchd v0.19.0 // indirect
 	github.com/gcash/bchlog v0.0.0-20180913005452-b4f036f92fa6 // indirect
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000 // indirect
+	github.com/gen2brain/beeep v0.0.0-20240112042604-c7bb2cd88fea
 	github.com/getsentry/sentry-go v0.18.0 // indirect
 	github.com/go-chi/chi/v5 v5.0.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
