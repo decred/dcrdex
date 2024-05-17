@@ -390,7 +390,6 @@ func (f *fakeBinance) run(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			}
-			debits := make(map[string]float64)
 			f.withdrawalHistoryMtx.Lock()
 			for transferID, withdraw := range f.withdrawalHistory {
 				if withdraw.txID.Load() != nil {
@@ -410,32 +409,8 @@ func (f *fakeBinance) run(ctx context.Context) {
 				}
 				log.Debug("Sent withdraw of %.8f to user %s, coin = %s, txid = %s", withdraw.amt, withdraw.apiKey, withdraw.coin, txID)
 				withdraw.txID.Store(txID)
-				debits[withdraw.coin] += withdraw.amt
 			}
 			f.withdrawalHistoryMtx.Unlock()
-			var balUpdates []*bntypes.WSBalance
-			debitBalance := func(coin string, amt float64) {
-				for _, b := range f.balances {
-					if b.Asset == coin {
-						if amt > b.Free {
-							b.Free = 0
-						} else {
-							b.Free -= amt
-						}
-						balUpdates = append(balUpdates, (*bntypes.WSBalance)(b))
-						break
-					}
-				}
-			}
-
-			f.balancesMtx.Lock()
-			for coin, debit := range debits {
-				debitBalance(coin, debit)
-			}
-			f.balancesMtx.Unlock()
-			if len(balUpdates) > 0 {
-				f.sendBalanceUpdates(balUpdates)
-			}
 		}
 	}()
 
@@ -738,6 +713,26 @@ func (f *fakeBinance) handleWithdrawal(w http.ResponseWriter, r *http.Request) {
 		apiKey:  apiKey,
 	}
 	f.withdrawalHistoryMtx.Unlock()
+
+	var balUpdate *bntypes.WSBalance
+	debitBalance := func(coin string, amt float64) {
+		for _, b := range f.balances {
+			if b.Asset == coin {
+				if amt > b.Free {
+					b.Free = 0
+				} else {
+					b.Free -= amt
+				}
+			}
+			balUpdate = (*bntypes.WSBalance)(b)
+		}
+	}
+
+	f.balancesMtx.Lock()
+	debitBalance(coin, amt)
+	f.balancesMtx.Unlock()
+
+	f.sendBalanceUpdates([]*bntypes.WSBalance{balUpdate})
 
 	resp := struct {
 		ID string `json:"id"`
