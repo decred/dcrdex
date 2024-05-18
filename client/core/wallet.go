@@ -213,7 +213,7 @@ func (w *xcWallet) Lock(timeout time.Duration) error {
 }
 
 // unlocked will only return true if both the wallet backend is unlocked and we
-// have cached the decryped wallet password. The wallet backend may be queried
+// have cached the decrypted wallet password. The wallet backend may be queried
 // directly, likely involving an RPC call. Use locallyUnlocked to determine if
 // the wallet is automatically unlockable rather than actually unlocked.
 func (w *xcWallet) unlocked() bool {
