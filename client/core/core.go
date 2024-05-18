@@ -10137,9 +10137,11 @@ func (c *Core) tipChange(assetID uint32) {
 		}
 	}
 
-	// Ensure we always at least update this asset's balance regardless of trade
-	// status changes.
-	assets.count(assetID)
+	if _, exists := c.wallet(assetID); exists {
+		// Ensure we always at least update this asset's balance regardless of
+		// trade status changes.
+		assets.count(assetID)
+	}
 	c.updateBalances(assets)
 }
 
