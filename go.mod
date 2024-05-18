@@ -18,7 +18,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
 	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be
-	github.com/dcrlabs/ltcwallet v0.0.0-20240421164041-ef931f280d85
+	github.com/dcrlabs/ltcwallet v0.0.0-20240510140852-5b5906621822
 	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095
 	github.com/decred/base58 v1.0.5
 	github.com/decred/dcrd/addrmgr/v2 v2.0.2

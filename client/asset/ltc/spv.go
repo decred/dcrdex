@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -33,7 +32,6 @@ import (
 	"github.com/btcsuite/btcwallet/wtxmgr"
 	"github.com/dcrlabs/ltcwallet/chain"
 	neutrino "github.com/dcrlabs/ltcwallet/spv"
-	labschain "github.com/dcrlabs/ltcwallet/spv/chain"
 	ltcwaddrmgr "github.com/dcrlabs/ltcwallet/waddrmgr"
 	"github.com/dcrlabs/ltcwallet/wallet"
 	"github.com/dcrlabs/ltcwallet/wallet/txauthor"
@@ -64,11 +62,15 @@ var (
 	waddrmgrNamespace = []byte("waddrmgr")
 	wtxmgrNamespace   = []byte("wtxmgr")
 
-	testnet4Seeds = [][]byte{
-		{0x12, 0xc0, 0x38, 0x95, 0x87, 0x4b},
-		{0x3, 0x47, 0x1e, 0x2e, 0x87, 0x4b},
-		{0x22, 0x59, 0x4e, 0x2d, 0x87, 0x4b},
-		{0x22, 0x8c, 0xc5, 0x98, 0x87, 0x4b},
+	// Snapshot of valid peers. 10 May 2024
+	testnet4Seeds = []string{
+		"13.200.66.216:19335",
+		"208.91.111.150:18333",
+		"92.244.111.167:19335",
+		"164.92.171.95:8333",
+		"204.16.244.114:18333",
+		"34.227.13.195:19335",
+		"18.192.56.149:18333",
 	}
 )
 
@@ -88,7 +90,7 @@ type ltcSPVWallet struct {
 
 	// This section is populated in Start.
 	*wallet.Wallet
-	chainClient *labschain.NeutrinoClient
+	chainClient *chain.NeutrinoClient
 	cl          *neutrino.ChainService
 	loader      *wallet.Loader
 	neutrinoDB  walletdb.DB
@@ -239,7 +241,7 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	}
 	errCloser.Add(w.cl.Stop)
 
-	w.chainClient = labschain.NewNeutrinoClient(w.chainParams, w.cl, &logAdapter{w.log})
+	w.chainClient = chain.NewNeutrinoClient(w.chainParams, w.cl)
 
 	oldBday := w.Manager.Birthday()
 	wdb := w.Database()
@@ -267,12 +269,7 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	var defaultPeers []string
 	switch w.chainParams.Net {
 	case ltcwire.TestNet4:
-		defaultPeers = []string{"127.0.0.1:19335"}
-		for _, host := range testnet4Seeds {
-			var addr netip.AddrPort
-			addr.UnmarshalBinary(host)
-			defaultPeers = append(defaultPeers, addr.String())
-		}
+		defaultPeers = append([]string{"127.0.0.1:19335"}, testnet4Seeds...)
 	case ltcwire.TestNet, ltcwire.SimNet: // plain "wire.TestNet" is regnet!
 		defaultPeers = []string{"127.0.0.1:20585"}
 	}
