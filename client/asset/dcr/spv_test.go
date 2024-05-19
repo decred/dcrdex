@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -55,6 +57,7 @@ type tDcrWallet struct {
 	sigErrs              []wallet.SignatureError
 	signTxErr            error
 	publishTxErr         error
+	headerRequests       uint16
 	blockHeader          map[chainhash.Hash]*wire.BlockHeader
 	blockHeaderErr       map[chainhash.Hash]error
 	mainchainDontHave    bool
@@ -63,7 +66,7 @@ type tDcrWallet struct {
 	filterKey            [gcs.KeySize]byte
 	filter               *gcs.FilterV2
 	filterErr            error
-	blockInfo            *wallet.BlockInfo
+	blockInfo            map[int32]*wallet.BlockInfo
 	blockInfoErr         error
 	// walletLocked         bool
 	acctLocked       bool
@@ -161,6 +164,7 @@ func (w *tDcrWallet) PublishTransaction(ctx context.Context, tx *wire.MsgTx, n w
 }
 
 func (w *tDcrWallet) BlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*wire.BlockHeader, error) {
+	w.headerRequests++
 	return w.blockHeader[*blockHash], w.blockHeaderErr[*blockHash]
 }
 
@@ -172,8 +176,31 @@ func (w *tDcrWallet) CFilterV2(ctx context.Context, blockHash *chainhash.Hash) (
 	return w.filterKey, w.filter, w.filterErr
 }
 
+func blockIDHeight(blockID *wallet.BlockIdentifier) int32 {
+	const fieldIndex = 0
+	rf := reflect.ValueOf(blockID).Elem().Field(fieldIndex)
+	return reflect.NewAt(rf.Type(), unsafe.Pointer(rf.UnsafeAddr())).Elem().Interface().(int32)
+}
+
+func (w *tDcrWallet) makeBlocks(from, to int32) {
+	var prevHash chainhash.Hash
+	for i := from; i <= to; i++ {
+		hdr := &wire.BlockHeader{
+			Height:    uint32(i),
+			PrevBlock: prevHash,
+			Timestamp: time.Unix(int64(i), 0),
+		}
+		h := hdr.BlockHash()
+		w.blockHeader[h] = hdr
+		w.blockInfo[i] = &wallet.BlockInfo{
+			Hash: h,
+		}
+		prevHash = h
+	}
+}
+
 func (w *tDcrWallet) BlockInfo(ctx context.Context, blockID *wallet.BlockIdentifier) (*wallet.BlockInfo, error) {
-	return w.blockInfo, w.blockInfoErr
+	return w.blockInfo[blockIDHeight(blockID)], w.blockInfoErr
 }
 
 func (w *tDcrWallet) AccountHasPassphrase(ctx context.Context, account uint32) (bool, error) {
@@ -403,6 +430,7 @@ func (w *tDcrWallet) RescanProgressFromHeight(ctx context.Context, n wallet.Netw
 
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 	dcrw := &tDcrWallet{
+		blockInfo:      make(map[int32]*wallet.BlockInfo),
 		blockHeader:    make(map[chainhash.Hash]*wire.BlockHeader),
 		blockHeaderErr: make(map[chainhash.Hash]error),
 	}
@@ -679,31 +707,13 @@ func TestGetBlockHeader(t *testing.T) {
 
 	const tipHeight = 12
 	const blockHeight = 11 // 2 confirmations
-	var blockHash, prevHash, blockHash5 chainhash.Hash
-	for height := 0; height <= tipHeight; height++ {
-		hdr := &wire.BlockHeader{
-			Height:    uint32(height),
-			PrevBlock: prevHash,
-			Timestamp: time.Unix(int64(height), 0),
-		}
-		h := hdr.BlockHash()
-		switch height {
-		case blockHeight:
-			blockHash = h
-		case 5:
-			blockHash5 = h
-		}
-		prevHash = h
-		dcrw.blockHeader[h] = hdr
-	}
-	tipHash := prevHash
+	dcrw.makeBlocks(0, tipHeight)
+	blockHash := dcrw.blockInfo[blockHeight].Hash
+	blockHash5 := dcrw.blockInfo[5].Hash
+	tipHash := dcrw.blockInfo[tipHeight].Hash
 
 	dcrw.tip.hash = tipHash
 	dcrw.tip.height = tipHeight
-
-	dcrw.blockInfo = &wallet.BlockInfo{
-		Hash: tipHash,
-	}
 
 	hdr, err := w.GetBlockHeader(tCtx, &blockHash)
 	if err != nil {
@@ -961,15 +971,47 @@ func TestGetRawTransaction(t *testing.T) {
 	dcrw.txsByHashErr = nil
 }
 
-func TestRescan(t *testing.T) {
+func TestBirthdayBlockHeight(t *testing.T) {
 	spvw, dcrw := tNewSpvWallet()
+
+	const tipHeight = 10
+	dcrw.makeBlocks(0, tipHeight)
 	w := &NativeWallet{
 		ExchangeWallet: &ExchangeWallet{
-			wallet: spvw,
-			log:    dex.StdOutLogger("T", dex.LevelInfo),
+			wallet:     spvw,
+			log:        dex.StdOutLogger("T", dex.LevelInfo),
+			currentTip: &block{height: tipHeight},
 		},
 		spvw: spvw,
 	}
+
+	if h := w.birthdayBlockHeight(tCtx, 5); h != 4 {
+		t.Fatalf("expected block 4, got %d", h)
+	}
+
+	if h := w.birthdayBlockHeight(tCtx, tipHeight); h != 0 {
+		t.Fatalf("expected zero for birthday from the future, got %d", h)
+	}
+
+	if h := w.birthdayBlockHeight(tCtx, 0); h != 0 {
+		t.Fatalf("expected zero for genesis birthday, got %d", h)
+	}
+}
+
+func TestRescan(t *testing.T) {
+	const tipHeight = 20
+
+	spvw, dcrw := tNewSpvWallet()
+	w := &NativeWallet{
+		ExchangeWallet: &ExchangeWallet{
+			wallet:     spvw,
+			log:        dex.StdOutLogger("T", dex.LevelInfo),
+			currentTip: &block{height: tipHeight},
+		},
+		spvw: spvw,
+	}
+
+	dcrw.makeBlocks(0, tipHeight)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -978,7 +1020,7 @@ func TestRescan(t *testing.T) {
 		t.Helper()
 		defer w.wg.Wait()
 		dcrw.rescanUpdates = us
-		err := w.Rescan(ctx)
+		err := w.Rescan(ctx, 0)
 		if err == nil {
 			if errStr == "" {
 				return

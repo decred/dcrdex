@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -62,7 +63,7 @@ var (
 		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  append(btc.SPVConfigOpts("BCH"), btc.CommonConfigOpts("BCH", true)...),
+		ConfigOpts:  btc.CommonConfigOpts("BCH", true),
 		Seeded:      true,
 	}
 
@@ -163,8 +164,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
+	bday := btc.DefaultWalletBirthday
+	if params.Birthday != 0 {
+		bday = time.Unix(int64(params.Birthday), 0)
+	}
+
 	walletDir := filepath.Join(params.DataDir, chainParams.Name)
-	return createSPVWallet(params.Pass, params.Seed, walletCfg.AdjustedBirthday(), walletDir,
+	return createSPVWallet(params.Pass, params.Seed, bday, walletDir,
 		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
 }
 

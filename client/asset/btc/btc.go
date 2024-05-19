@@ -137,7 +137,7 @@ var (
 
 	// 02 Jun 21 21:12 CDT
 	defaultWalletBirthdayUnix = 1622668320
-	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
+	DefaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
 
 	multiFundingOpts = []*asset.OrderOption{
 		{
@@ -191,7 +191,7 @@ var (
 		Type:             walletTypeSPV,
 		Tab:              "Native",
 		Description:      "Use the built-in SPV wallet",
-		ConfigOpts:       append(SPVConfigOpts("BTC"), CommonConfigOpts("BTC", true)...),
+		ConfigOpts:       CommonConfigOpts("BTC", true),
 		Seeded:           true,
 		MultiFundingOpts: multiFundingOpts,
 	}
@@ -276,25 +276,6 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 		opts = append(opts, apiFallbackOpt(true))
 	}
 	return opts
-}
-
-// SPVConfigOpts are the options common to built-in SPV wallets.
-func SPVConfigOpts(symbol string) []*asset.ConfigOption {
-	return []*asset.ConfigOption{{
-		Key:         "walletbirthday",
-		DisplayName: "Wallet Birthday",
-		Description: fmt.Sprintf("This is the date the wallet starts scanning the blockchain "+
-			"for transactions related to this wallet. If reconfiguring an existing "+
-			"wallet, this may start a rescan if the new birthday is older. This "+
-			"option is disabled if there are currently active %s trades.", symbol),
-		DefaultValue: defaultWalletBirthdayUnix,
-		MaxValue:     "now",
-		// This MinValue must be removed if we start supporting importing private keys
-		MinValue:          defaultWalletBirthdayUnix,
-		IsDate:            true,
-		DisableWhenActive: true,
-		IsBirthdayConfig:  true,
-	}}
 }
 
 // RPCConfigOpts are the settings that are used to connect to and external RPC
@@ -468,22 +449,7 @@ type WalletConfig struct {
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	ActivelyUsed     bool    `ini:"special_activelyUsed"` // injected by core
-	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 	ApiFeeFallback   bool    `ini:"apifeefallback"`
-}
-
-// AdjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
-// it so that defaultWalletBirthday <= WalletConfig.Birthday <= now.
-func (cfg *WalletConfig) AdjustedBirthday() time.Time {
-	bday := time.Unix(int64(cfg.Birthday), 0)
-	now := time.Now()
-	if defaultWalletBirthday.After(bday) {
-		return defaultWalletBirthday
-	} else if bday.After(now) {
-		return now
-	} else {
-		return bday
-	}
 }
 
 func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
@@ -628,8 +594,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
+	bday := DefaultWalletBirthday
+	if params.Birthday != 0 {
+		bday = time.Unix(int64(params.Birthday), 0)
+	}
+
 	dir := filepath.Join(params.DataDir, chainParams.Name)
-	return createSPVWallet(params.Pass, params.Seed, cfg.AdjustedBirthday(), dir,
+	return createSPVWallet(params.Pass, params.Seed, bday, dir,
 		params.Logger, cfg.NumExternalAddresses, cfg.NumInternalAddresses, chainParams)
 }
 
@@ -979,7 +950,7 @@ func (btc *ExchangeWalletSPV) Move(backupDir string) error {
 
 // Rescan satisfies the asset.Rescanner interface, and issues a rescan wallet
 // command if the backend is an SPV wallet.
-func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
+func (btc *ExchangeWalletSPV) Rescan(_ context.Context, _ /* bday already stored internally */ uint64) error {
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
 	return btc.spvNode.wallet.RescanAsync()

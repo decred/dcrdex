@@ -16,7 +16,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/config"
 	dexbch "decred.org/dcrdex/dex/networks/bch"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcjson"
@@ -71,12 +70,10 @@ var (
 // interface hell).
 type bchSPVWallet struct {
 	// This section is populated in openSPVWallet.
-	dir                  string
-	chainParams          *bchchaincfg.Params
-	btcParams            *chaincfg.Params
-	log                  dex.Logger
-	birthdayV            atomic.Value // time.Time
-	allowAutomaticRescan bool
+	dir         string
+	chainParams *bchchaincfg.Params
+	btcParams   *chaincfg.Params
+	log         dex.Logger
 
 	// This section is populated in Start.
 	*wallet.Wallet
@@ -104,13 +101,11 @@ func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params
 	}
 
 	w := &bchSPVWallet{
-		dir:                  dir,
-		chainParams:          bchParams,
-		btcParams:            btcParams,
-		log:                  log,
-		allowAutomaticRescan: !cfg.ActivelyUsed,
+		dir:         dir,
+		chainParams: bchParams,
+		btcParams:   btcParams,
+		log:         log,
 	}
-	w.birthdayV.Store(cfg.AdjustedBirthday())
 	return w
 }
 
@@ -211,24 +206,6 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	errCloser.Add(w.cl.Stop)
 
 	w.chainClient = labschain.NewNeutrinoClient(w.chainParams, w.cl, &logAdapter{w.log})
-
-	oldBday := w.Manager.Birthday()
-
-	performRescan := w.Birthday().Before(oldBday)
-	if performRescan && !w.allowAutomaticRescan {
-		return nil, errors.New("cannot set earlier birthday while there are active deals")
-	}
-
-	if !oldBday.Equal(w.Birthday()) {
-		if err := w.updateDBBirthday(w.Birthday()); err != nil {
-			w.log.Errorf("Failed to reset wallet manager birthday: %v", err)
-			performRescan = false
-		}
-	}
-
-	if performRescan {
-		w.ForceRescan()
-	}
 
 	var defaultPeers []string
 	switch w.chainParams.Net {
@@ -799,34 +776,7 @@ func (w *bchSPVWallet) BlockNotifications(ctx context.Context) <-chan *btc.Block
 }
 
 func (w *bchSPVWallet) Birthday() time.Time {
-	return w.birthdayV.Load().(time.Time)
-}
-
-func (w *bchSPVWallet) Reconfigure(cfg *asset.WalletConfig, _ /* oldAddress */ string) (restart bool, err error) {
-	parsedCfg := new(btc.WalletConfig)
-	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
-		return
-	}
-
-	newBday := parsedCfg.AdjustedBirthday()
-	if newBday.Equal(w.Birthday()) {
-		// It's the only setting we care about.
-		return
-	}
-	rescanRequired := newBday.Before(w.Birthday())
-	if rescanRequired && parsedCfg.ActivelyUsed {
-		return false, errors.New("cannot decrease the birthday with active orders")
-	}
-	if err := w.updateDBBirthday(newBday); err != nil {
-		return false, fmt.Errorf("error storing new birthday: %w", err)
-	}
-	w.birthdayV.Store(newBday)
-	if rescanRequired {
-		if err = w.RescanAsync(); err != nil {
-			return false, fmt.Errorf("error initiating rescan after birthday adjustment: %w", err)
-		}
-	}
-	return
+	return w.Manager.Birthday()
 }
 
 func (w *bchSPVWallet) updateDBBirthday(bday time.Time) error {

@@ -2857,11 +2857,17 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 	}
 	defer encode.ClearBytes(seed)
 
+	var bday uint64
+	if creds := c.creds(); !creds.Birthday.IsZero() {
+		bday = uint64(creds.Birthday.Unix())
+	}
+
 	c.log.Infof("Initializing a %s wallet", unbip(assetID))
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
 		Type:     form.Type,
 		Seed:     seed,
 		Pass:     pw,
+		Birthday: bday,
 		Settings: form.Config,
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
@@ -3226,8 +3232,21 @@ func (c *Core) RescanWallet(assetID uint32, force bool) error {
 			assetID, unbip(assetID), err)
 	}
 
+	walletDef, err := asset.WalletDef(assetID, wallet.walletType)
+	if err != nil {
+		return newError(assetSupportErr, "asset.WalletDef error: %w", err)
+	}
+
+	var bday uint64 // unix time seconds
+	if walletDef.Seeded {
+		creds := c.creds()
+		if !creds.Birthday.IsZero() {
+			bday = uint64(creds.Birthday.Unix())
+		}
+	}
+
 	// Begin potentially asynchronous wallet rescan operation.
-	if err = wallet.rescan(c.ctx); err != nil {
+	if err = wallet.rescan(c.ctx, bday); err != nil {
 		return err
 	}
 

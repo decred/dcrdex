@@ -731,6 +731,15 @@ func (w *spvWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allo
 	return w.PublishTransaction(ctx, tx, w.spv)
 }
 
+// BlockTimestamp gets the timestamp of the block.
+func (w *spvWallet) BlockTimestamp(ctx context.Context, blockHash *chainhash.Hash) (time.Time, error) {
+	hdr, err := w.dcrWallet.BlockHeader(ctx, blockHash)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return hdr.Timestamp, nil
+}
+
 // GetBlockHeader generates a *BlockHeader for the specified block hash. The
 // returned block header is a wire.BlockHeader with the addition of the block's
 // median time and other auxiliary information.
@@ -1031,9 +1040,9 @@ func (w *spvWallet) newVSPClient(vspHost, vspPubKey string, log dex.Logger) (*vs
 	}, log)
 }
 
-// Rescan performs a blocking rescan, sending updates on the channel.
-func (w *spvWallet) Rescan(ctx context.Context, c chan wallet.RescanProgress) {
-	w.dcrWallet.RescanProgressFromHeight(ctx, w.spv, 0, c)
+// rescan performs a blocking rescan, sending updates on the channel.
+func (w *spvWallet) rescan(ctx context.Context, fromHeight int32, c chan wallet.RescanProgress) {
+	w.dcrWallet.RescanProgressFromHeight(ctx, w.spv, fromHeight, c)
 }
 
 // PurchaseTickets purchases n tickets, tells the provided vspd to monitor the

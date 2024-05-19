@@ -17,6 +17,9 @@ const (
 	defaultMainnet  = "localhost:9110"
 	defaultTestnet3 = "localhost:19110"
 	defaultSimnet   = "localhost:19557"
+
+	// May 26, 2022
+	defaultWalletBirthdayUnix = 1653599386
 )
 
 var (
@@ -25,9 +28,6 @@ var (
 	dcrwHomeDir       = dcrutil.AppDataDir("dcrwallet", false)
 	defaultRPCCert    = filepath.Join(dcrwHomeDir, "rpc.cert")
 	defaultConfigPath = filepath.Join(dcrwHomeDir, "dcrwallet.conf")
-
-	// May 26, 2022
-	defaultWalletBirthdayUnix = 1653599386
 )
 
 type walletConfig struct {

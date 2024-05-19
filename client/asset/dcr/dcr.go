@@ -218,22 +218,6 @@ var (
 		},
 	}
 
-	spvOpts = []*asset.ConfigOption{{
-		Key:         "walletbirthday",
-		DisplayName: "Wallet Birthday",
-		Description: "This is the date the wallet starts scanning the blockchain " +
-			"for transactions related to this wallet. If reconfiguring an existing " +
-			"wallet, this may start a rescan if the new birthday is older. This " +
-			"option is disabled if there are currently active DCR trades.",
-		DefaultValue: defaultWalletBirthdayUnix,
-		MaxValue:     "now",
-		// This MinValue must be removed if we start supporting importing private keys
-		MinValue:          defaultWalletBirthdayUnix,
-		IsDate:            true,
-		DisableWhenActive: true,
-		IsBirthdayConfig:  true,
-	}}
-
 	multiFundingOpts = []*asset.OrderOption{
 		{
 			ConfigOption: asset.ConfigOption{
@@ -285,7 +269,7 @@ var (
 				Type:             walletTypeSPV,
 				Tab:              "Native",
 				Description:      "Use the built-in SPV wallet",
-				ConfigOpts:       append(spvOpts, walletOpts...),
+				ConfigOpts:       walletOpts,
 				Seeded:           true,
 				MultiFundingOpts: multiFundingOpts,
 			},

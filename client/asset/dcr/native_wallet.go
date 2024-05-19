@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -383,10 +384,48 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 	return nil
 }
 
+// birthdayBlockHeight performs a binary search for the last block with a
+// timestamp lower than the provided birthday.
+func (w *NativeWallet) birthdayBlockHeight(ctx context.Context, bday uint64) int32 {
+	w.tipMtx.RLock()
+	tipHeight := w.currentTip.height
+	w.tipMtx.RUnlock()
+	var err error
+	firstBlockAfterBday := sort.Search(int(tipHeight), func(blockHeightI int) bool {
+		if err != nil { // if we see any errors, just give up.
+			return false
+		}
+		var blockHash *chainhash.Hash
+		if blockHash, err = w.spvw.GetBlockHash(ctx, int64(blockHeightI)); err != nil {
+			w.log.Errorf("Error getting block hash for height %d: %v", blockHeightI, err)
+			return false
+		}
+		stamp, err := w.spvw.BlockTimestamp(ctx, blockHash)
+		if err != nil {
+			w.log.Errorf("Error getting block header for hash %s: %v", blockHash, err)
+			return false
+		}
+		return uint64(stamp.Unix()) >= bday
+	})
+	if err != nil {
+		w.log.Errorf("Error encountered searching for birthday block: %v", err)
+		firstBlockAfterBday = 1
+	}
+	if firstBlockAfterBday == int(tipHeight) {
+		w.log.Errorf("Birthday %d is from the future", bday)
+		return 0
+	}
+
+	if firstBlockAfterBday == 0 {
+		return 0
+	}
+	return int32(firstBlockAfterBday - 1)
+}
+
 // Rescan initiates a rescan of the wallet from height 0. Rescan only blocks
 // long enough for the first asynchronous update, either an error or after the
 // first 2000 blocks are scanned.
-func (w *NativeWallet) Rescan(ctx context.Context) error {
+func (w *NativeWallet) Rescan(ctx context.Context, bday uint64) (err error) {
 	// Make sure we don't already have one running.
 	w.rescan.Lock()
 	rescanInProgress := w.rescan.progress != nil
@@ -398,6 +437,18 @@ func (w *NativeWallet) Rescan(ctx context.Context) error {
 		return errors.New("rescan already in progress")
 	}
 
+	if bday == 0 {
+		bday = defaultWalletBirthdayUnix
+	}
+	bdayHeight := w.birthdayBlockHeight(ctx, bday)
+	// Add a little buffer.
+	const blockBufferN = 100
+	if bdayHeight >= blockBufferN {
+		bdayHeight -= blockBufferN
+	} else {
+		bdayHeight = 0
+	}
+
 	setProgress := func(height int32) {
 		w.rescan.Lock()
 		w.rescan.progress = &rescanProgress{scannedThrough: int64(height)}
@@ -405,7 +456,7 @@ func (w *NativeWallet) Rescan(ctx context.Context) error {
 	}
 
 	c := make(chan wallet.RescanProgress)
-	go w.spvw.Rescan(ctx, c) // RescanProgressWithHeight will defer close(c)
+	go w.spvw.rescan(ctx, bdayHeight, c) // RescanProgressWithHeight will defer close(c)
 
 	// First update will either be an error or a report of the first 2000
 	// blocks. We can block until we get one.
