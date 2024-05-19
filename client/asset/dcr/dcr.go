@@ -1065,7 +1065,8 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 
 	dcr.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer dcr.wg.Done()
+		defer dbCM.Disconnect()
 		dcr.monitorBlocks(ctx)
 		dcr.shutdown()
 	}()

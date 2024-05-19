@@ -57,7 +57,6 @@ type tDcrWallet struct {
 	sigErrs              []wallet.SignatureError
 	signTxErr            error
 	publishTxErr         error
-	headerRequests       uint16
 	blockHeader          map[chainhash.Hash]*wire.BlockHeader
 	blockHeaderErr       map[chainhash.Hash]error
 	mainchainDontHave    bool
@@ -164,7 +163,6 @@ func (w *tDcrWallet) PublishTransaction(ctx context.Context, tx *wire.MsgTx, n w
 }
 
 func (w *tDcrWallet) BlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*wire.BlockHeader, error) {
-	w.headerRequests++
 	return w.blockHeader[*blockHash], w.blockHeaderErr[*blockHash]
 }
 

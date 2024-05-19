@@ -466,7 +466,9 @@ func (w *NativeWallet) Rescan(ctx context.Context, bday uint64) (err error) {
 		case errC <- err:
 		default:
 		}
-		if err != nil {
+		if err == nil {
+			w.receiveTxLastQuery.Store(0)
+		} else {
 			w.log.Errorf("Error encountered in rescan: %v", err)
 		}
 	}
@@ -491,9 +493,9 @@ func (w *NativeWallet) Rescan(ctx context.Context, bday uint64) (err error) {
 			case u, open := <-c:
 				if !open { // channel was closed. rescan is finished.
 					if timeout == nil {
-						// We never saw an update.
 						sendErr(nil)
 					} else {
+						// We never saw an update.
 						sendErr(errors.New("rescan finished without a progress update"))
 					}
 					return

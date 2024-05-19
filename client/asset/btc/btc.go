@@ -953,7 +953,13 @@ func (btc *ExchangeWalletSPV) Move(backupDir string) error {
 func (btc *ExchangeWalletSPV) Rescan(_ context.Context, _ /* bday already stored internally */ uint64) error {
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
-	return btc.spvNode.wallet.RescanAsync()
+	if err := btc.spvNode.wallet.RescanAsync(); err != nil {
+		return err
+	}
+	btc.receiveTxLastQuery.Store(0)
+	// Rescan is occuring asynchronously, so there's probably no point in
+	// running checkPendingTxs.
+	return nil
 }
 
 // Peers returns a list of peers that the wallet is connected to.
