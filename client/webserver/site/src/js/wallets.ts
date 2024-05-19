@@ -240,13 +240,27 @@ export default class WalletsPage extends BasePage {
   mixerStatus: FundsMixingStats | null
   mixerToggle: AniToggle
   mixCertPicker: CertificatePicker
+  stampers: PageElement[]
+  secondTicker: number
 
   constructor (body: HTMLElement, data?: WalletsPageData) {
     super()
     this.body = body
     this.data = data
     const page = this.page = Doc.idDescendants(body)
+    this.stampers = []
     net = app().user.net
+
+    const setStamp = () => {
+      for (const span of this.stampers) {
+        if (span.dataset.stamp) {
+          span.textContent = Doc.timeSince(parseInt(span.dataset.stamp || '') * 1000)
+        }
+      }
+    }
+    this.secondTicker = window.setInterval(() => {
+      setStamp()
+    }, 10000) // update every 10 seconds
 
     Doc.cleanTemplates(page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
@@ -1772,10 +1786,10 @@ export default class WalletsPage extends BasePage {
   updateTxHistoryRow (row: PageElement, tx: WalletTransaction, assetID: number) {
     const tmpl = Doc.parseTemplate(row)
     const ui = app().unitInfo(assetID)
-    // const date = new Date(tx.timestamp * 1000)
     tmpl.age.textContent = Doc.timeSince(tx.timestamp * 1000)
     Doc.setVis(tx.timestamp === 0, tmpl.pending)
     Doc.setVis(tx.timestamp !== 0, tmpl.age)
+    if (tx.timestamp > 0) tmpl.age.dataset.stamp = String(tx.timestamp)
     let txType = txTypeString(tx.type)
     if (tx.tokenID && tx.tokenID !== assetID) {
       const tokenSymbol = ui.conventional.unit
@@ -1800,6 +1814,8 @@ export default class WalletsPage extends BasePage {
     row.dataset.txid = tx.id
     Doc.bind(row, 'click', () => this.showTxDetailsPopup(tx.id))
     this.updateTxHistoryRow(row, tx, assetID)
+    const tmpl = Doc.parseTemplate(row)
+    this.stampers.push(tmpl.age)
     return row
   }
 
@@ -1897,18 +1913,18 @@ export default class WalletsPage extends BasePage {
 
     // Bond Info
     if (tx.bondInfo) {
-      Doc.show(page.txDetailsBondSection)
+      Doc.show(page.txDetailsBondIDSection, page.txDetailsBondLocktimeSection)
+      Doc.setVis(tx.bondInfo.accountID !== '', page.txDetailsBondAccountIDSection)
       page.txDetailsBondID.textContent = trimStringWithEllipsis(tx.bondInfo.bondID, 20)
       page.txDetailsBondID.setAttribute('title', tx.bondInfo.bondID)
       const date = new Date(tx.bondInfo.lockTime * 1000)
       const dateStr = date.toLocaleDateString()
       const timeStr = date.toLocaleTimeString()
       page.txDetailsBondLocktime.textContent = `${dateStr} ${timeStr}`
-      Doc.setVis(tx.bondInfo.accountID !== '', page.txDetailsBondAccountIDSection)
       page.txDetailsBondAccountID.textContent = trimStringWithEllipsis(tx.bondInfo.accountID, 20)
       page.txDetailsBondAccountID.setAttribute('title', tx.bondInfo.accountID)
     } else {
-      Doc.hide(page.txDetailsBondSection)
+      Doc.hide(page.txDetailsBondIDSection, page.txDetailsBondLocktimeSection, page.txDetailsBondAccountIDSection)
     }
 
     // Nonce
@@ -2591,6 +2607,7 @@ export default class WalletsPage extends BasePage {
    * the /wallets page.
    */
   unload (): void {
+    clearInterval(this.secondTicker)
     Doc.unbind(document, 'keyup', this.keyup)
   }
 }
