@@ -75,7 +75,7 @@ type BadgerTxDB struct {
 	log      dex.Logger
 	seq      *badger.Sequence
 	running  atomic.Bool
-	wg       *sync.WaitGroup
+	wg       sync.WaitGroup
 	ctx      context.Context
 }
 
@@ -107,7 +107,6 @@ func NewBadgerTxDB(filePath string, log dex.Logger) *BadgerTxDB {
 	return &BadgerTxDB{
 		filePath: filePath,
 		log:      log,
-		wg:       new(sync.WaitGroup),
 	}
 }
 
@@ -157,6 +156,9 @@ func (db *BadgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			case <-ctx.Done():
 				db.running.Store(false)
 				db.wg.Wait()
+				if err := db.seq.Release(); err != nil {
+					db.log.Errorf("error releasing sequence: %v", err)
+				}
 				db.Close()
 				return
 			}
@@ -169,11 +171,10 @@ func (db *BadgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 // badgerDB returns ErrConflict when a read happening in a update (read/write)
 // transaction is stale. This function retries updates multiple times in
 // case of conflicts.
-func (db *BadgerTxDB) handleConflictWithBackoff(update func() error) error {
+func (db *BadgerTxDB) handleConflictWithBackoff(update func() error) (err error) {
 	maxRetries := 10
 	sleepTime := 5 * time.Millisecond
 
-	var err error
 	for i := 0; i < maxRetries; i++ {
 		sleepTime *= 2
 		err = update()

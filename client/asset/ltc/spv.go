@@ -409,6 +409,65 @@ func (w *ltcSPVWallet) ListSinceBlock(start, end, syncHeight int32) ([]btcjson.L
 	return btcRes, nil
 }
 
+func (w *ltcSPVWallet) GetTransactions(startBlock, endBlock int32, accountName string, cancel <-chan struct{}) (*btcwallet.GetTransactionsResult, error) {
+	startID := wallet.NewBlockIdentifierFromHeight(startBlock)
+	endID := wallet.NewBlockIdentifierFromHeight(endBlock)
+	ltcGTR, err := w.Wallet.GetTransactions(startID, endID, accountName, cancel)
+	if err != nil {
+		return nil, err
+	}
+
+	convertTxs := func(txs []wallet.TransactionSummary) []btcwallet.TransactionSummary {
+		transactions := make([]btcwallet.TransactionSummary, len(txs))
+		for i, tx := range txs {
+			txHash := chainhash.Hash(*tx.Hash)
+			inputs := make([]btcwallet.TransactionSummaryInput, len(tx.MyInputs))
+			for k, in := range tx.MyInputs {
+				inputs[k] = btcwallet.TransactionSummaryInput{
+					Index:           in.Index,
+					PreviousAccount: in.PreviousAccount,
+					PreviousAmount:  btcutil.Amount(in.PreviousAmount),
+				}
+			}
+			outputs := make([]btcwallet.TransactionSummaryOutput, len(tx.MyOutputs))
+			for k, out := range tx.MyOutputs {
+				outputs[k] = btcwallet.TransactionSummaryOutput{
+					Index:    out.Index,
+					Account:  out.Account,
+					Internal: out.Internal,
+				}
+			}
+			transactions[i] = btcwallet.TransactionSummary{
+				Hash:        &txHash,
+				Transaction: tx.Transaction,
+				MyInputs:    inputs,
+				MyOutputs:   outputs,
+				Fee:         btcutil.Amount(tx.Fee),
+				Timestamp:   tx.Timestamp,
+				Label:       tx.Label,
+			}
+		}
+		return transactions
+	}
+
+	btcGTR := &btcwallet.GetTransactionsResult{
+		MinedTransactions:   make([]btcwallet.Block, len(ltcGTR.MinedTransactions)),
+		UnminedTransactions: convertTxs(ltcGTR.UnminedTransactions),
+	}
+
+	for i, block := range ltcGTR.MinedTransactions {
+		blockHash := chainhash.Hash(*block.Hash)
+		btcGTR.MinedTransactions[i] = btcwallet.Block{
+			Hash:         &blockHash,
+			Height:       block.Height,
+			Timestamp:    block.Timestamp,
+			Transactions: convertTxs(block.Transactions),
+		}
+	}
+
+	return btcGTR, nil
+}
+
 func (w *ltcSPVWallet) ListUnspent(minconf, maxconf int32, acctName string) ([]*btcjson.ListUnspentResult, error) {
 	// ltcwallet's ListUnspent takes either a list of addresses, or else returns
 	// all non-locked unspent outputs for all accounts. We need to iterate the

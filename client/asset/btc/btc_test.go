@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -189,6 +190,7 @@ type testData struct {
 	confsErr          error
 	walletTxSpent     bool
 	txFee             uint64
+	ownedAddresses    map[string]bool
 	ownsAddress       bool
 	locked            bool
 }
@@ -492,7 +494,18 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	case methodGetWalletInfo:
 		return json.Marshal(&GetWalletInfoResult{UnlockedUntil: nil /* unencrypted -> unlocked */})
 	case methodGetAddressInfo:
-		return json.Marshal(&btcjson.GetAddressInfoResult{})
+		var addr string
+		err := json.Unmarshal(params[0], &addr)
+		if err != nil {
+			panic(err)
+		}
+		owns := c.ownedAddresses != nil && c.ownedAddresses[addr]
+		if !owns {
+			owns = c.ownsAddress
+		}
+		return json.Marshal(&btcjson.GetAddressInfoResult{
+			IsMine: owns,
+		})
 	}
 	panic("method not registered: " + method)
 }
@@ -664,6 +677,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 		FeeEstimator:        rpcFeeRate,
+		AddressDecoder:      btcutil.DecodeAddress,
 	}
 
 	var wallet *intermediaryWallet
@@ -6171,5 +6185,267 @@ func TestFindBond(t *testing.T) {
 				t.Fatal("pkh not equal")
 			}
 		})
+	}
+}
+
+func TestIDUnknownTx(t *testing.T) {
+	t.Run("non-segwit", func(t *testing.T) {
+		testIDUnknownTx(t, false)
+	})
+	t.Run("segwit", func(t *testing.T) {
+		testIDUnknownTx(t, true)
+	})
+}
+
+func testIDUnknownTx(t *testing.T, segwit bool) {
+	// Swap Tx - any tx with p2sh outputs that is not a bond.
+	_, _, swapPKScript, _, _, _, _ := makeSwapContract(true, time.Hour*12)
+	swapTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(1)), swapPKScript)},
+	}
+
+	// Redeem Tx
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+	addr, _ := decodeAddress(addrStr, &chaincfg.MainNetParams)
+	swapContract, _ := dexbtc.MakeContract(addr, addr, randBytes(32), time.Now().Unix(), segwit, &chaincfg.MainNetParams)
+	txIn := wire.NewTxIn(&wire.OutPoint{}, nil, nil)
+	if segwit {
+		txIn.Witness = dexbtc.RedeemP2WSHContract(swapContract, randBytes(73), randBytes(33), randBytes(32))
+	} else {
+		txIn.SignatureScript, _ = dexbtc.RedeemP2SHContract(swapContract, randBytes(73), randBytes(33), randBytes(32))
+	}
+	redeemFee := 0.0000143
+	redemptionTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(5-redeemFee)), tP2PKH)},
+	}
+
+	h2b := func(h string) []byte {
+		b, _ := hex.DecodeString(h)
+		return b
+	}
+
+	// Create Bond Tx
+	bondLockTime := 1711637410
+	bondID := h2b("0e39bbb09592fd00b7d770cc832ddf4d625ae3a0")
+	accountID := h2b("a0836b39b5ceb84f422b8a8cd5940117087a8522457c6d81d200557652fbe6ea")
+	bondContract, _ := dexbtc.MakeBondScript(0, uint32(bondLockTime), bondID)
+	contractAddr, _ := scriptHashAddress(segwit, bondContract, &chaincfg.MainNetParams)
+	bondPkScript, _ := txscript.PayToAddrScript(contractAddr)
+	bondOutput := wire.NewTxOut(int64(toSatoshi(2)), bondPkScript)
+	bondCommitPkScript, _ := bondPushDataScript(0, accountID, int64(bondLockTime), bondID)
+	bondCommitmentOutput := wire.NewTxOut(0, bondCommitPkScript)
+	createBondTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{bondOutput, bondCommitmentOutput},
+	}
+
+	// Redeem Bond Tx
+	txIn = wire.NewTxIn(&wire.OutPoint{}, nil, nil)
+	if segwit {
+		txIn.Witness = dexbtc.RefundBondScriptSegwit(bondContract, randBytes(73), randBytes(33))
+	} else {
+		txIn.SignatureScript, _ = dexbtc.RefundBondScript(bondContract, randBytes(73), randBytes(33))
+	}
+	redeemBondTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(5)), tP2PKH)},
+	}
+
+	// Acceleration Tx
+	accelerationTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(0, tP2PKH)},
+	}
+
+	// Split Tx
+	splitTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(0, tP2PKH), wire.NewTxOut(0, tP2PKH)},
+	}
+
+	// Send Tx
+	ourPkScript, cpPkScript := tP2PKH, tP2WPKH
+	if segwit {
+		ourPkScript, cpPkScript = tP2WPKH, tP2PKH
+	}
+
+	_, ourAddr, _, _ := txscript.ExtractPkScriptAddrs(ourPkScript, &chaincfg.MainNetParams)
+	ourAddrStr := ourAddr[0].String()
+
+	_, cpAddr, _, _ := txscript.ExtractPkScriptAddrs(cpPkScript, &chaincfg.MainNetParams)
+	cpAddrStr := cpAddr[0].String()
+
+	sendTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(0.001)), ourPkScript), wire.NewTxOut(int64(toSatoshi(4)), cpPkScript)},
+	}
+
+	// Receive Tx
+	receiveTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(4)), ourPkScript), wire.NewTxOut(int64(toSatoshi(0.001)), cpPkScript)},
+	}
+
+	floatPtr := func(f float64) *float64 {
+		return &f
+	}
+
+	type test struct {
+		name           string
+		ltr            *ListTransactionsResult
+		tx             *wire.MsgTx
+		ownedAddresses map[string]bool
+		ownsAddress    bool
+		exp            *asset.WalletTransaction
+	}
+
+	tests := []*test{
+		{
+			name: "swap",
+			ltr: &ListTransactionsResult{
+				Send: true,
+			},
+			tx: swapTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.SwapOrSend,
+				ID:     swapTx.TxHash().String(),
+				Amount: toSatoshi(1),
+			},
+		},
+		{
+			name: "redeem",
+			ltr: &ListTransactionsResult{
+				Send: false,
+				Fee:  &redeemFee,
+			},
+			tx: redemptionTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.Redeem,
+				ID:     redemptionTx.TxHash().String(),
+				Amount: toSatoshi(5),
+				Fees:   toSatoshi(redeemFee),
+			},
+		},
+		{
+			name: "create bond",
+			ltr: &ListTransactionsResult{
+				Send: true,
+				Fee:  floatPtr(0.0000222),
+			},
+			tx: createBondTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.CreateBond,
+				ID:     createBondTx.TxHash().String(),
+				Amount: toSatoshi(2),
+				Fees:   toSatoshi(0.0000222),
+				BondInfo: &asset.BondTxInfo{
+					AccountID: accountID,
+					BondID:    bondID,
+					LockTime:  uint64(bondLockTime),
+				},
+			},
+		},
+		{
+			name: "redeem bond",
+			ltr: &ListTransactionsResult{
+				Send: false,
+			},
+			tx: redeemBondTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.RedeemBond,
+				ID:     redeemBondTx.TxHash().String(),
+				Amount: toSatoshi(5),
+				BondInfo: &asset.BondTxInfo{
+					AccountID: []byte{},
+					BondID:    bondID,
+					LockTime:  uint64(bondLockTime),
+				},
+			},
+		},
+		{
+			name: "acceleration",
+			ltr: &ListTransactionsResult{
+				Send: true,
+			},
+			tx: accelerationTx,
+			exp: &asset.WalletTransaction{
+				Type: asset.Acceleration,
+				ID:   accelerationTx.TxHash().String(),
+			},
+			ownsAddress: true,
+		},
+		{
+			name: "split",
+			ltr: &ListTransactionsResult{
+				Send: true,
+			},
+			tx: splitTx,
+			exp: &asset.WalletTransaction{
+				Type: asset.Split,
+				ID:   splitTx.TxHash().String(),
+			},
+			ownsAddress: true,
+		},
+		{
+			name: "send",
+			ltr: &ListTransactionsResult{
+				Send: true,
+			},
+			tx: sendTx,
+			exp: &asset.WalletTransaction{
+				Type:      asset.Send,
+				ID:        sendTx.TxHash().String(),
+				Amount:    toSatoshi(4),
+				Recipient: &cpAddrStr,
+			},
+			ownedAddresses: map[string]bool{ourAddrStr: true},
+		},
+		{
+			name: "receive",
+			ltr:  &ListTransactionsResult{},
+			tx:   receiveTx,
+			exp: &asset.WalletTransaction{
+				Type:      asset.Receive,
+				ID:        receiveTx.TxHash().String(),
+				Amount:    toSatoshi(4),
+				Recipient: &ourAddrStr,
+			},
+			ownedAddresses: map[string]bool{ourAddrStr: true},
+		},
+	}
+
+	runTest := func(tt *test) {
+		t.Run(tt.name, func(t *testing.T) {
+			wallet, node, shutdown := tNewWallet(true, walletTypeRPC)
+			defer shutdown()
+			txID := tt.tx.TxHash().String()
+			tt.ltr.TxID = txID
+
+			buf := new(bytes.Buffer)
+			err := tt.tx.Serialize(buf)
+			if err != nil {
+				t.Fatalf("%s: error serializing tx: %v", tt.name, err)
+			}
+
+			node.getTransactionMap[txID] = &GetTransactionResult{Bytes: buf.Bytes()}
+			node.ownedAddresses = tt.ownedAddresses
+			node.ownsAddress = tt.ownsAddress
+			wt, err := wallet.idUnknownTx(tt.ltr)
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", tt.name, err)
+			}
+			if !reflect.DeepEqual(wt, tt.exp) {
+				t.Fatalf("%s: expected %+v, got %+v", tt.name, tt.exp, wt)
+			}
+		})
+	}
+
+	for _, tt := range tests {
+		runTest(tt)
 	}
 }

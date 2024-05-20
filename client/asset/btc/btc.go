@@ -856,6 +856,8 @@ type intermediaryWallet struct {
 	txFeeEstimator txFeeEstimator
 	tipRedeemer    tipRedemptionWallet
 	txLister       txLister
+
+	syncingTxHistory atomic.Bool
 }
 
 // ExchangeWalletSPV embeds a ExchangeWallet, but also provides the Rescan
@@ -1571,6 +1573,11 @@ func (btc *intermediaryWallet) Connect(ctx context.Context) (*sync.WaitGroup, er
 		defer wg.Done()
 		btc.monitorPeers(ctx)
 	}()
+
+	btc.tipMtx.RLock()
+	tip := btc.currentTip
+	btc.tipMtx.RUnlock()
+	go btc.syncTxHistory(uint64(tip.Height))
 
 	return wg, nil
 }
@@ -2558,7 +2565,12 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 	for _, txOut := range tx.TxOut {
 		totalOut += uint64(txOut.Value)
 	}
-	btc.addTxToHistory(asset.Split, txHash, 0, totalIn-totalOut, nil, nil, true)
+
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type: asset.Split,
+		ID:   txHash.String(),
+		Fees: totalIn - totalOut,
+	}, txHash, true)
 
 	success = true
 	return coins, totalIn - totalOut, nil
@@ -2814,7 +2826,11 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 		totalOut += uint64(msgTx.TxOut[i].Value)
 	}
 
-	btc.addTxToHistory(asset.Split, txHash, 0, coinSum-totalOut, nil, nil, true)
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type: asset.Split,
+		ID:   txHash.String(),
+		Fees: coinSum - totalOut,
+	}, txHash, true)
 
 	fundingCoins = map[OutPoint]*UTxO{op.Pt: {
 		TxHash:  op.txHash(),
@@ -3249,7 +3265,11 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 	}
 
 	txHash := btc.hashTx(signedTx)
-	btc.addTxToHistory(asset.Acceleration, txHash, 0, fees, nil, nil, true)
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type: asset.Acceleration,
+		ID:   txHash.String(),
+		Fees: fees,
+	}, txHash, true)
 
 	// Delete the old change from the cache
 	btc.cm.ReturnOutPoint(NewOutPoint(changeTxHash, changeVout))
@@ -3598,36 +3618,31 @@ func (btc *baseWallet) removeTxFromHistory(txHash *chainhash.Hash) {
 	btc.pendingTxsMtx.Unlock()
 }
 
-func (btc *baseWallet) addTxToHistory(txType asset.TransactionType, txHash *chainhash.Hash, amount uint64, fees uint64,
-	bondInfo *asset.BondTxInfo, recipient *string, submitted bool) {
+func (btc *baseWallet) addTxToHistory(wt *asset.WalletTransaction, txHash *chainhash.Hash, submitted bool, skipNotes ...bool) {
 	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
 		return
 	}
 
-	wt := &ExtendedWalletTx{
-		WalletTransaction: &asset.WalletTransaction{
-			Type:      txType,
-			ID:        txHash.String(),
-			Amount:    amount,
-			Fees:      fees,
-			BondInfo:  bondInfo,
-			Recipient: recipient,
-		},
-		Submitted: submitted,
+	ewt := &ExtendedWalletTx{
+		WalletTransaction: wt,
+		Submitted:         submitted,
 	}
 
-	btc.pendingTxsMtx.Lock()
-	btc.pendingTxs[*txHash] = *wt
-	btc.pendingTxsMtx.Unlock()
+	if wt.BlockNumber == 0 {
+		btc.pendingTxsMtx.Lock()
+		btc.pendingTxs[*txHash] = *ewt
+		btc.pendingTxsMtx.Unlock()
+	}
 
-	err := txHistoryDB.StoreTx(wt)
+	err := txHistoryDB.StoreTx(ewt)
 	if err != nil {
 		btc.log.Errorf("failed to store tx in tx history db: %v", err)
 	}
 
-	if submitted {
-		btc.emit.TransactionNote(wt.WalletTransaction, true)
+	skipNote := len(skipNotes) > 0 && skipNotes[0]
+	if submitted && !skipNote {
+		btc.emit.TransactionNote(wt, true)
 	}
 }
 
@@ -3759,7 +3774,12 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 		return nil, nil, 0, err
 	}
 
-	btc.addTxToHistory(asset.Swap, txHash, totalOut, fees, nil, nil, true)
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Swap,
+		ID:     txHash.String(),
+		Amount: totalOut,
+		Fees:   fees,
+	}, txHash, true)
 
 	// If change is nil, return a nil asset.Coin.
 	var changeCoin asset.Coin
@@ -3923,7 +3943,12 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 		return nil, nil, 0, err
 	}
 
-	btc.addTxToHistory(asset.Redeem, txHash, totalIn, fee, nil, nil, true)
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Redeem,
+		ID:     txHash.String(),
+		Amount: totalIn,
+		Fees:   fee,
+	}, txHash, true)
 
 	// Log the change output.
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
@@ -4180,7 +4205,12 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.B
 	if len(msgTx.TxOut) > 0 { // something went very wrong if not true
 		fee = uint64(utxo.Value - msgTx.TxOut[0].Value)
 	}
-	btc.addTxToHistory(asset.Refund, txHash, uint64(utxo.Value), fee, nil, nil, true)
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Refund,
+		ID:     txHash.String(),
+		Amount: uint64(utxo.Value),
+		Fees:   fee,
+	}, txHash, true)
 
 	return ToCoinID(refundHash, 0), nil
 }
@@ -4470,7 +4500,13 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 		txType = asset.SelfSend
 	}
 
-	btc.addTxToHistory(txType, txHash, toSend, totalIn-totalOut, nil, &address, true)
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type:      txType,
+		ID:        txHash.String(),
+		Amount:    toSend,
+		Fees:      totalIn - totalOut,
+		Recipient: &address,
+	}, txHash, true)
 
 	return txHash, 0, toSend, nil
 }
@@ -4648,7 +4684,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	btc.emit.TipChange(uint64(newTip.Height))
 
-	go btc.checkPendingTxs(uint64(newTip.Height))
+	go btc.syncTxHistory(uint64(newTip.Height))
 
 	btc.rf.ReportNewTip(ctx, prevTip, newTip)
 }
@@ -4888,6 +4924,26 @@ func (btc *baseWallet) SetBondReserves(reserves uint64) {
 	btc.bondReserves.Store(reserves)
 }
 
+func bondPushData(ver uint16, acctID []byte, lockTimeSec int64, pkh []byte) []byte {
+	pushData := make([]byte, 2+len(acctID)+4+20)
+	var offset int
+	binary.BigEndian.PutUint16(pushData[offset:], ver)
+	offset += 2
+	copy(pushData[offset:], acctID[:])
+	offset += len(acctID)
+	binary.BigEndian.PutUint32(pushData[offset:], uint32(lockTimeSec))
+	offset += 4
+	copy(pushData[offset:], pkh)
+	return pushData
+}
+
+func bondPushDataScript(ver uint16, acctID []byte, lockTimeSec int64, pkh []byte) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddOp(txscript.OP_RETURN).
+		AddData(bondPushData(ver, acctID, lockTimeSec, pkh)).
+		Script()
+}
+
 // MakeBondTx creates a time-locked fidelity bond transaction. The V0
 // transaction has two required outputs:
 //
@@ -4953,19 +5009,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 	// Acct ID commitment and bond details output, v0. The integers are encoded
 	// with big-endian byte order and a fixed number of bytes, unlike in Script,
 	// for natural visual inspection of the version and lock time.
-	pushData := make([]byte, 2+len(acctID)+4+20)
-	var offset int
-	binary.BigEndian.PutUint16(pushData[offset:], ver)
-	offset += 2
-	copy(pushData[offset:], acctID[:])
-	offset += len(acctID)
-	binary.BigEndian.PutUint32(pushData[offset:], uint32(lockTimeSec))
-	offset += 4
-	copy(pushData[offset:], pkh)
-	commitPkScript, err := txscript.NewScriptBuilder().
-		AddOp(txscript.OP_RETURN).
-		AddData(pushData).
-		Script()
+	commitPkScript, err := bondPushDataScript(ver, acctID, lockTimeSec, pkh)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build acct commit output script: %w", err)
 	}
@@ -5051,13 +5095,18 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 	}
 	success = true
 
-	bondInfo := &asset.BondTxInfo{
-		AccountID: acctID,
-		LockTime:  uint64(lockTimeSec),
-		BondID:    pkh,
-	}
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.CreateBond,
+		ID:     txid.String(),
+		Amount: amt,
+		Fees:   fee,
+		BondInfo: &asset.BondTxInfo{
+			AccountID: acctID,
+			LockTime:  uint64(lockTimeSec),
+			BondID:    pkh,
+		},
+	}, txid, false)
 
-	btc.addTxToHistory(asset.CreateBond, txid, amt, fee, bondInfo, nil, false)
 	txIDToRemoveFromHistory = txid
 
 	return bond, abandon, nil
@@ -5171,11 +5220,17 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 	if len(msgTx.TxOut) == 1 {
 		fees = amt - uint64(msgTx.TxOut[0].Value)
 	}
-	bondInfo := &asset.BondTxInfo{
-		LockTime: uint64(lockTime),
-		BondID:   pkhPush,
-	}
-	btc.addTxToHistory(asset.RedeemBond, txID, amt, fees, bondInfo, nil, true)
+	btc.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.RedeemBond,
+		ID:     txID.String(),
+		Amount: amt,
+		Fees:   fees,
+		BondInfo: &asset.BondTxInfo{
+			LockTime: uint64(lockTime),
+			BondID:   pkhPush,
+		},
+	}, txID, true)
+
 	return NewOutput(txHash, 0, uint64(msgTx.TxOut[0].Value)), nil
 }
 
@@ -5418,12 +5473,369 @@ func (btc *baseWallet) MaxFundingFees(numTrades uint32, feeRate uint64, options 
 	return feeRate * txSize
 }
 
-// checkPendingTxs checks to see if the wallet has received any incoming
-// transactions that need to be added to the transaction history. It also
-// checks all the pending transactions to see if they have been mined into
-// a block, and if so, updates the transaction history to reflect the
-// block height.
-func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
+func rpcTxFee(tx *ListTransactionsResult) uint64 {
+	if tx.Fee != nil {
+		// Fee always seems to be negative in btcwallet, but just
+		// in case.
+		if *tx.Fee < 0 {
+			return toSatoshi(-*tx.Fee)
+		}
+		return toSatoshi(*tx.Fee)
+	}
+	return 0
+}
+
+// idUnknownTx identifies the type and details of a transaction either made
+// or recieved by the wallet.
+func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTransaction, error) {
+	txHash, err := chainhash.NewHashFromStr(tx.TxID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding tx hash %s: %v", tx.TxID, err)
+	}
+	txRaw, _, err := btc.rawWalletTx(txHash)
+	if err != nil {
+		return nil, err
+	}
+	msgTx, err := btc.deserializeTx(txRaw)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing tx: %v", err)
+	}
+
+	fee := rpcTxFee(tx)
+
+	var totalOut uint64
+	for _, txOut := range msgTx.TxOut {
+		totalOut += uint64(txOut.Value)
+	}
+
+	txIsBond := func(msgTx *wire.MsgTx) (bool, *asset.BondTxInfo) {
+		if len(msgTx.TxOut) < 2 {
+			return false, nil
+		}
+		const scriptVer = 0
+		acctID, lockTime, pkHash, err := dexbtc.ExtractBondCommitDataV0(scriptVer, msgTx.TxOut[1].PkScript)
+		if err != nil {
+			return false, nil
+		}
+		return true, &asset.BondTxInfo{
+			AccountID: acctID[:],
+			LockTime:  uint64(lockTime),
+			BondID:    pkHash[:],
+		}
+	}
+	if isBond, bondInfo := txIsBond(msgTx); isBond {
+		return &asset.WalletTransaction{
+			ID:       tx.TxID,
+			Type:     asset.CreateBond,
+			Amount:   uint64(msgTx.TxOut[0].Value),
+			Fees:     fee,
+			BondInfo: bondInfo,
+		}, nil
+	}
+
+	// Any other P2SH may be a swap or a send. We cannot determine unless we
+	// look up the transaction that spends this UTXO.
+	txPaysToScriptHash := func(msgTx *wire.MsgTx) (v uint64) {
+		for _, txOut := range msgTx.TxOut {
+			scriptClass := txscript.GetScriptClass(txOut.PkScript)
+			if scriptClass == txscript.WitnessV0ScriptHashTy || scriptClass == txscript.ScriptHashTy {
+				v += uint64(txOut.Value)
+			}
+		}
+		return
+	}
+	if v := txPaysToScriptHash(msgTx); tx.Send && v > 0 {
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.SwapOrSend,
+			Amount: v,
+			Fees:   fee,
+		}, nil
+	}
+
+	// Helper function will help us identify inputs that spend P2SH contracts.
+	containsContractAtPushIndex := func(msgTx *wire.MsgTx, idx int, isContract func(segwit bool, contract []byte) bool) bool {
+	txinloop:
+		for _, txIn := range msgTx.TxIn {
+			if len(txIn.Witness) > 0 {
+				// segwit
+				if len(txIn.Witness) < idx+1 {
+					continue
+				}
+				contract := txIn.Witness[idx]
+				if isContract(true, contract) {
+					return true
+				}
+			} else {
+				// not segwit
+				const scriptVer = 0
+				tokenizer := txscript.MakeScriptTokenizer(scriptVer, txIn.SignatureScript)
+				for i := 0; i <= idx; i++ { // contract is 5th item item in redemption and 4th in refund
+					if !tokenizer.Next() {
+						continue txinloop
+					}
+				}
+				if isContract(false, tokenizer.Data()) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Swap redemptions and refunds
+	contractIsSwap := func(segwit bool, contract []byte) bool {
+		_, _, _, _, err := dexbtc.ExtractSwapDetails(contract, segwit, btc.chainParams)
+		return err == nil
+	}
+	redeemsSwap := func(msgTx *wire.MsgTx) bool {
+		return containsContractAtPushIndex(msgTx, 4, contractIsSwap)
+	}
+	if redeemsSwap(msgTx) {
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.Redeem,
+			Amount: totalOut + fee,
+			Fees:   fee,
+		}, nil
+	}
+	refundsSwap := func(msgTx *wire.MsgTx) bool {
+		return containsContractAtPushIndex(msgTx, 3, contractIsSwap)
+	}
+	if refundsSwap(msgTx) {
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.Refund,
+			Amount: totalOut + fee,
+			Fees:   fee,
+		}, nil
+	}
+
+	// Bond refunds
+	redeemsBond := func(msgTx *wire.MsgTx) (bool, *asset.BondTxInfo) {
+		var bondInfo *asset.BondTxInfo
+		isBond := func(segwit bool, contract []byte) bool {
+			const scriptVer = 0
+			lockTime, pkHash, err := dexbtc.ExtractBondDetailsV0(scriptVer, contract)
+			if err != nil {
+				return false
+			}
+			bondInfo = &asset.BondTxInfo{
+				AccountID: []byte{}, // Could look for the bond tx to get this, I guess.
+				LockTime:  uint64(lockTime),
+				BondID:    pkHash[:],
+			}
+			return true
+		}
+		return containsContractAtPushIndex(msgTx, 2, isBond), bondInfo
+	}
+	if isBondRedemption, bondInfo := redeemsBond(msgTx); isBondRedemption {
+		return &asset.WalletTransaction{
+			ID:       tx.TxID,
+			Type:     asset.RedeemBond,
+			Amount:   totalOut,
+			Fees:     fee,
+			BondInfo: bondInfo,
+		}, nil
+	}
+
+	allOutputsPayUs := func(msgTx *wire.MsgTx) bool {
+		for _, txOut := range msgTx.TxOut {
+			scriptClass, addrs, _, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, btc.chainParams)
+			if err != nil {
+				btc.log.Errorf("ExtractPkScriptAddrs error: %w", err)
+				return false
+			}
+			switch scriptClass {
+			case txscript.PubKeyHashTy, txscript.WitnessV0PubKeyHashTy:
+			default:
+				return false
+			}
+			if len(addrs) != 1 { // sanity check
+				return false
+			}
+
+			addr := addrs[0]
+			owns, err := btc.node.ownsAddress(addr)
+			if err != nil {
+				btc.log.Errorf("ownsAddress error: %w", err)
+				return false
+			}
+			if !owns {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	if tx.Send && allOutputsPayUs(msgTx) {
+		if len(msgTx.TxOut) == 1 {
+			return &asset.WalletTransaction{
+				ID:     tx.TxID,
+				Type:   asset.Acceleration,
+				Amount: 0,
+				Fees:   fee,
+			}, nil
+
+		}
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.Split,
+			Amount: 0,
+			Fees:   fee,
+		}, nil
+	}
+
+	txOutDirection := func(msgTx *wire.MsgTx) (in, out uint64) {
+		for _, txOut := range msgTx.TxOut {
+			_, addrs, _, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, btc.chainParams)
+			if err != nil {
+				btc.log.Errorf("ExtractPkScriptAddrs error: %w", err)
+				continue
+			}
+
+			if len(addrs) == 0 { // sanity check
+				continue
+			}
+
+			addr := addrs[0]
+			owns, err := btc.node.ownsAddress(addr)
+			if err != nil {
+				btc.log.Errorf("ownsAddress error: %w", err)
+				continue
+			}
+			if owns {
+				in += uint64(txOut.Value)
+			} else {
+				out += uint64(txOut.Value)
+			}
+		}
+		return
+	}
+	in, out := txOutDirection(msgTx)
+
+	getRecipient := func(msgTx *wire.MsgTx, receive bool) *string {
+		for _, txOut := range msgTx.TxOut {
+			_, addrs, _, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, btc.chainParams)
+			if err != nil {
+				btc.log.Errorf("ExtractPkScriptAddrs error: %w", err)
+				continue
+			}
+
+			if len(addrs) == 0 { // sanity check
+				continue
+			}
+
+			addr := addrs[0]
+			owns, err := btc.node.ownsAddress(addr)
+			if err != nil {
+				btc.log.Errorf("ownsAddress error: %w", err)
+				continue
+			}
+
+			if receive == owns {
+				str := addr.String()
+				return &str
+			}
+		}
+		return nil
+	}
+
+	if tx.Send {
+		return &asset.WalletTransaction{
+			ID:        tx.TxID,
+			Type:      asset.Send,
+			Amount:    out,
+			Fees:      fee,
+			Recipient: getRecipient(msgTx, false),
+		}, nil
+	}
+
+	return &asset.WalletTransaction{
+		ID:        tx.TxID,
+		Type:      asset.Receive,
+		Amount:    in,
+		Fees:      fee,
+		Recipient: getRecipient(msgTx, true),
+	}, nil
+}
+
+// addUnknownTransactionsToHistory checks for any transactions the wallet has
+// made or recieved that are not part of the transaction history. It scans
+// from the last point to which it had previously scanned to the current tip.
+func (btc *intermediaryWallet) addUnknownTransactionsToHistory(tip uint64) {
+	txHistoryDB := btc.txDB()
+
+	const blockQueryBuffer = 3
+	var blockToQuery uint64
+	lastQuery := btc.receiveTxLastQuery.Load()
+	if lastQuery == 0 {
+		// TODO: use wallet birthday instead of block 0.
+		// blockToQuery = 0
+	} else if lastQuery < tip-blockQueryBuffer {
+		blockToQuery = lastQuery - blockQueryBuffer
+	} else {
+		blockToQuery = tip - blockQueryBuffer
+	}
+
+	txs, err := btc.txLister.listTransactionsSinceBlock(int32(blockToQuery))
+	if err != nil {
+		btc.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
+		return
+	}
+
+	for _, tx := range txs {
+		txHash, err := chainhash.NewHashFromStr(tx.TxID)
+		if err != nil {
+			btc.log.Errorf("Error decoding tx hash %s: %v", tx.TxID, err)
+			continue
+		}
+		_, err = txHistoryDB.GetTx(txHash.String())
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, asset.CoinNotFoundError) {
+			btc.log.Errorf("Error getting tx %s: %v", txHash.String(), err)
+			continue
+		}
+		wt, err := btc.idUnknownTx(tx)
+		if err != nil {
+			btc.log.Errorf("error identifying transaction: %v", err)
+			continue
+		}
+		if tx.BlockHeight > 0 && tx.BlockHeight < uint32(tip-blockQueryBuffer) {
+			wt.BlockNumber = uint64(tx.BlockHeight)
+			wt.Timestamp = tx.BlockTime
+		}
+
+		// Don't send notifications for the initial sync to avoid spamming the
+		// front end. A notification is sent at the end of the initial sync.
+		btc.addTxToHistory(wt, txHash, true, blockToQuery == 0)
+	}
+
+	btc.receiveTxLastQuery.Store(tip)
+	err = txHistoryDB.SetLastReceiveTxQuery(tip)
+	if err != nil {
+		btc.log.Errorf("Error setting last query to %d: %v", tip, err)
+	}
+
+	if blockToQuery == 0 {
+		btc.emit.TransactionHistorySyncedNote()
+	}
+}
+
+// syncTxHistory checks to see if there are any transactions which the wallet
+// has made or recieved that are not part of the transaction history, then
+// identifies and adds them. It also checks all the pending transactions to see
+// if they have been mined into a block, and if so, updates the transaction
+// history to reflect the block height.
+func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
+	if !btc.syncingTxHistory.CompareAndSwap(false, true) {
+		return
+	}
+	defer btc.syncingTxHistory.Store(false)
+
 	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
 		return
@@ -5438,62 +5850,7 @@ func (btc *intermediaryWallet) checkPendingTxs(tip uint64) {
 		return
 	}
 
-	// First, check to see if there are any recieving transactions we have not
-	// yet seen.
-	{
-		const blockQueryBuffer = 3
-		var blockToQuery uint64
-		lastQuery := btc.receiveTxLastQuery.Load()
-
-		if lastQuery != 0 && lastQuery < tip-blockQueryBuffer {
-			blockToQuery = lastQuery - blockQueryBuffer
-		} else {
-			blockToQuery = tip - blockQueryBuffer
-		}
-
-		recentTxs, err := btc.txLister.listTransactionsSinceBlock(int32(blockToQuery))
-		if err != nil {
-			btc.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
-			recentTxs = nil
-		} else {
-			btc.receiveTxLastQuery.Store(tip)
-			err = txHistoryDB.SetLastReceiveTxQuery(tip)
-			if err != nil {
-				btc.log.Errorf("Error setting last query to %d: %v", tip, err)
-			}
-		}
-
-		for _, tx := range recentTxs {
-			if tx.Category == "receive" {
-				txHash, err := chainhash.NewHashFromStr(tx.TxID)
-				if err != nil {
-					btc.log.Errorf("Error decoding txid %s: %v", tx.TxID, err)
-					continue
-				}
-				_, err = txHistoryDB.GetTx(txHash.String())
-				if err == nil {
-					continue
-				}
-				if !errors.Is(err, asset.CoinNotFoundError) {
-					btc.log.Errorf("Error getting tx %s: %v", tx.TxID, err)
-					continue
-				}
-
-				var fee uint64
-				if tx.Fee != nil {
-					// Fee always seems to be negative in btcwallet, but just
-					// in case.
-					if *tx.Fee < 0 {
-						fee = toSatoshi(-*tx.Fee)
-					} else {
-						fee = toSatoshi(*tx.Fee)
-					}
-				}
-
-				btc.addTxToHistory(asset.Receive, txHash, toSatoshi(tx.Amount), fee, nil, nil, true)
-			}
-		}
-	}
+	btc.addUnknownTransactionsToHistory(tip)
 
 	pendingTxsCopy := make(map[chainhash.Hash]ExtendedWalletTx, len(btc.pendingTxs))
 	btc.pendingTxsMtx.RLock()

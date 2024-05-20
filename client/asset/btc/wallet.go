@@ -9,7 +9,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -48,7 +47,7 @@ type Wallet interface {
 }
 
 type txLister interface {
-	listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error)
+	listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error)
 }
 
 type tipRedemptionWallet interface {

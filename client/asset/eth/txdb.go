@@ -210,7 +210,6 @@ type badgerTxDB struct {
 	log      dex.Logger
 	running  atomic.Bool
 	wg       sync.WaitGroup
-	die      context.CancelFunc
 	ctx      context.Context
 }
 

@@ -4429,7 +4429,7 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 		LockTime: uint64(lockTime),
 		BondID:   pkhPush,
 	}
-	dcr.addTxToHistory(asset.RedeemBond, txHash, amt, amt-uint64(refundAmt), bondInfo, nil, true)
+	dcr.addTxToHistory(asset.RedeemBond, redeemHash, amt, amt-uint64(refundAmt), bondInfo, nil, true)
 	return newOutput(redeemHash, 0, uint64(refundAmt), wire.TxTreeRegular), nil
 
 	/* If we need to find the actual unspent bond transaction for any of:

@@ -111,6 +111,7 @@ export const txTypeRevokeTokenApproval = 12
 export const txTypeTicketPurchase = 13
 export const txTypeTicketVote = 14
 export const txTypeTicketRevocation = 15
+export const txTypeSwapOrSend = 16
 
 const positiveTxTypes : number[] = [
   txTypeReceive,
@@ -125,7 +126,8 @@ const negativeTxTypes : number[] = [
   txTypeSend,
   txTypeSwap,
   txTypeCreateBond,
-  txTypeTicketPurchase
+  txTypeTicketPurchase,
+  txTypeSwapOrSend
 ]
 
 const noAmtTxTypes : number[] = [
@@ -157,7 +159,8 @@ const txTypeTranslationKeys = [
   intl.ID_TX_TYPE_REVOKE_TOKEN_APPROVAL,
   intl.ID_TX_TYPE_TICKET_PURCHASE,
   intl.ID_TX_TYPE_TICKET_VOTE,
-  intl.ID_TX_TYPE_TICKET_REVOCATION
+  intl.ID_TX_TYPE_TICKET_REVOCATION,
+  intl.ID_TX_TYPE_SWAP_OR_SEND
 ]
 
 export function txTypeString (txType: number) : string {
@@ -1857,6 +1860,8 @@ export default class WalletsPage extends BasePage {
       txType = `${tokenSymbol} ${txType}`
     }
     page.txDetailsType.textContent = txType
+    Doc.setVis(tx.type === txTypeSwapOrSend, page.txTypeTooltip)
+    page.txTypeTooltip.dataset.tooltip = intl.prep(intl.ID_SWAP_OR_SEND_TOOLTIP)
 
     // Amount
     if (noAmtTxTypes.includes(tx.type)) {
@@ -2597,6 +2602,11 @@ export default class WalletsPage extends BasePage {
       case 'transaction': {
         const n = walletNote as TransactionNote
         if (n.assetID === this.selectedAssetID) this.handleTxNote(n.transaction, n.new)
+        break
+      }
+      case 'transactionHistorySynced' : {
+        const n = walletNote
+        if (n.assetID === this.selectedAssetID) this.showTxHistory(n.assetID)
         break
       }
     }

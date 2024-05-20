@@ -639,14 +639,35 @@ func (wc *rpcClient) listDescriptors(private bool) (*listDescriptorsResult, erro
 	return descriptors, wc.call(methodListDescriptors, anylist{private}, descriptors)
 }
 
-func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) ([]btcjson.ListTransactionsResult, error) {
+func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
 	blockHash, err := wc.getBlockHash(int64(blockHeight))
 	if err != nil {
 		return nil, fmt.Errorf("getBlockHash error: %w", err)
 	}
+	result := new(struct {
+		Transactions []btcjson.ListTransactionsResult `json:"transactions"`
+	})
+	err = wc.call(methodListSinceBlock, anylist{blockHash.String()}, result)
+	if err != nil {
+		return nil, fmt.Errorf("listtransactions error: %w", err)
+	}
 
-	result := new(listTransactionsResult)
-	return result.Transactions, wc.call(methodListSinceBlock, anylist{blockHash.String()}, result)
+	txs := make([]*ListTransactionsResult, 0, len(result.Transactions))
+	for _, tx := range result.Transactions {
+		var blockHeight uint32
+		if tx.BlockHeight != nil {
+			blockHeight = uint32(*tx.BlockHeight)
+		}
+		txs = append(txs, &ListTransactionsResult{
+			TxID:        tx.TxID,
+			BlockHeight: blockHeight,
+			BlockTime:   uint64(tx.BlockTime),
+			Fee:         tx.Fee,
+			Send:        tx.Category == "send",
+		})
+	}
+
+	return txs, nil
 }
 
 // privKeyForAddress retrieves the private key associated with the specified
