@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -39,7 +38,6 @@ import (
 	_ "github.com/dcrlabs/ltcwallet/walletdb/bdb"
 	ltcwtxmgr "github.com/dcrlabs/ltcwallet/wtxmgr"
 	"github.com/decred/slog"
-	"github.com/jrick/logrotate/rotator"
 	btcneutrino "github.com/lightninglabs/neutrino"
 	"github.com/lightninglabs/neutrino/headerfs"
 	ltcchaincfg "github.com/ltcsuite/ltcd/chaincfg"
@@ -1029,18 +1027,6 @@ var (
 	logFileName   = "neutrino.log"
 )
 
-// logRotator initializes a rotating file logger.
-func logRotator(walletDir string) (*rotator.Rotator, error) {
-	const maxLogRolls = 8
-	logDir := filepath.Join(walletDir, logDirName)
-	if err := os.MkdirAll(logDir, 0744); err != nil {
-		return nil, fmt.Errorf("error creating log directory: %w", err)
-	}
-
-	logFilename := filepath.Join(logDir, logFileName)
-	return rotator.New(logFilename, 32*1024, false, maxLogRolls)
-}
-
 // logNeutrino initializes logging in the neutrino + wallet packages. Logging
 // only has to be initialized once, so an atomic flag is used internally to
 // return early on subsequent invocations.
@@ -1049,69 +1035,27 @@ func logRotator(walletDir string) (*rotator.Rotator, error) {
 // there are concurrency issues with that since btcd and btcwallet have
 // unsupervised goroutines still running after shutdown. So we leave the rotator
 // running at the risk of losing some logs.
-func logNeutrino(walletDir string, errorLogger dex.Logger) error {
+func logNeutrino(walletDir string, baseLogger dex.Logger) error {
 	if !atomic.CompareAndSwapUint32(&loggingInited, 0, 1) {
 		return nil
 	}
 
-	logSpinner, err := logRotator(walletDir)
+	logDir := filepath.Join(walletDir, logDirName)
+	logSpinner, err := dex.LogRotator(logDir, logFileName)
 	if err != nil {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}
 
-	backendLog := btclog.NewBackend(logSpinner)
+	fileLogger := baseLogger.FileLogger(logSpinner)
+	log := newFileLoggerPlus(baseLogger, fileLogger)
 
-	logger := func(name string, lvl btclog.Level) btclog.Logger {
-		l := backendLog.Logger(name)
-		l.SetLevel(lvl)
-		return &fileLoggerPlus{Logger: l, log: errorLogger.SubLogger(name)}
-	}
-
-	neutrino.UseLogger(logger("NTRNO", btclog.LevelDebug))
-	wallet.UseLogger(logger("LTCW", btclog.LevelInfo))
-	ltcwtxmgr.UseLogger(logger("TXMGR", btclog.LevelInfo))
-	chain.UseLogger(logger("CHAIN", btclog.LevelInfo))
+	neutrino.UseLogGenerator(log)
+	wallet.UseLogger(log)
 
 	return nil
 }
 
-// fileLoggerPlus logs everything to a file, and everything with level >= warn
-// to both file and a specified dex.Logger.
-type fileLoggerPlus struct {
-	btclog.Logger
-	log dex.Logger
-}
-
-func (f *fileLoggerPlus) Warnf(format string, params ...any) {
-	f.log.Warnf(format, params...)
-	f.Logger.Warnf(format, params...)
-}
-
-func (f *fileLoggerPlus) Errorf(format string, params ...any) {
-	f.log.Errorf(format, params...)
-	f.Logger.Errorf(format, params...)
-}
-
-func (f *fileLoggerPlus) Criticalf(format string, params ...any) {
-	f.log.Criticalf(format, params...)
-	f.Logger.Criticalf(format, params...)
-}
-
-func (f *fileLoggerPlus) Warn(v ...any) {
-	f.log.Warn(v...)
-	f.Logger.Warn(v...)
-}
-
-func (f *fileLoggerPlus) Error(v ...any) {
-	f.log.Error(v...)
-	f.Logger.Error(v...)
-}
-
-func (f *fileLoggerPlus) Critical(v ...any) {
-	f.log.Critical(v...)
-	f.Logger.Critical(v...)
-}
-
+// logAdapter adapts dex.Logger to the btclog.Logger interface.
 type logAdapter struct {
 	dex.Logger
 }
@@ -1124,4 +1068,56 @@ func (a *logAdapter) Level() btclog.Level {
 
 func (a *logAdapter) SetLevel(lvl btclog.Level) {
 	a.Logger.SetLevel(slog.Level(lvl))
+}
+
+// fileLoggerPlus logs everything to a file, and everything with level >= warn
+// to both file and a specified dex.Logger.
+type fileLoggerPlus struct {
+	btclog.Logger
+	fileLogger dex.Logger
+	baseLogger dex.Logger
+}
+
+func newFileLoggerPlus(baseLogger, fileLogger dex.Logger) *fileLoggerPlus {
+	return &fileLoggerPlus{
+		Logger:     &logAdapter{fileLogger},
+		fileLogger: fileLogger,
+		baseLogger: baseLogger,
+	}
+}
+
+// NewLogger satisfies LogGenerator interface.
+func (f *fileLoggerPlus) NewLogger(name string) btclog.Logger {
+	fileLogger := f.fileLogger.SubLogger(name)
+	return newFileLoggerPlus(f.baseLogger.SubLogger(name), fileLogger)
+}
+
+func (f *fileLoggerPlus) Warnf(format string, params ...any) {
+	f.baseLogger.Warnf(format, params...)
+	f.fileLogger.Warnf(format, params...)
+}
+
+func (f *fileLoggerPlus) Errorf(format string, params ...any) {
+	f.baseLogger.Errorf(format, params...)
+	f.fileLogger.Errorf(format, params...)
+}
+
+func (f *fileLoggerPlus) Criticalf(format string, params ...any) {
+	f.baseLogger.Criticalf(format, params...)
+	f.fileLogger.Criticalf(format, params...)
+}
+
+func (f *fileLoggerPlus) Warn(v ...any) {
+	f.baseLogger.Warn(v...)
+	f.fileLogger.Warn(v...)
+}
+
+func (f *fileLoggerPlus) Error(v ...any) {
+	f.baseLogger.Error(v...)
+	f.fileLogger.Error(v...)
+}
+
+func (f *fileLoggerPlus) Critical(v ...any) {
+	f.baseLogger.Critical(v...)
+	f.fileLogger.Critical(v...)
 }

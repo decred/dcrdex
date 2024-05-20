@@ -247,8 +247,8 @@ github.com/dchest/siphash v1.2.3/go.mod h1:0NvQU092bT0ipiFN++/rXm69QG9tVxLAlQHIX
 github.com/dcrlabs/bchwallet v0.0.0-20240114115928-2a995d024eed/go.mod h1:dX7SZgs+dmGL56e6KHn+MktfriF/aM2qI4yYK56ySEQ=
 github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be h1:F61HTz77YatFuMgleG4Hp4QpXWJgjSG+S72YlXD4jPA=
 github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be/go.mod h1:Km7vMslEkg88jIFE2TA/XX7kAvXvnsoGTXN9ktYSi98=
-github.com/dcrlabs/ltcwallet v0.0.0-20240510140852-5b5906621822 h1:JZGfXO22Vv0gMOv0zjPqcFnPAGcNN1WV+fs7Xer10gE=
-github.com/dcrlabs/ltcwallet v0.0.0-20240510140852-5b5906621822/go.mod h1:UwMkslDKQGQx7UCGjolqPKulzX3YQxMhDvVZ0KukIQk=
+github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a h1:KJtx5FcK8oXCiXGoBpzQvGtRnhC1Q3UFKh7UVQ8YKSI=
+github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a/go.mod h1:UwMkslDKQGQx7UCGjolqPKulzX3YQxMhDvVZ0KukIQk=
 github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095 h1:oGXgq+wZ2FvBzBTqXnOJ+ZP6f79zhfJNd46nDkJaUdU=
 github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095/go.mod h1:aymH7e5PUsdsLagAIIMbpyJIff0Kv8/BJg7nolIVJbU=
 github.com/deckarep/golang-set/v2 v2.1.0 h1:g47V4Or+DUdzbs8FxCCmgb6VYd+ptPAngjM6dtGktsI=
