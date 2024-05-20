@@ -25,7 +25,6 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
 	"github.com/btcsuite/btcd/btcjson"
@@ -6190,23 +6189,39 @@ func TestFindBond(t *testing.T) {
 }
 
 func TestIDUnknownTx(t *testing.T) {
-	type idResult struct {
-		txType    asset.TransactionType
-		recipient *string
-		bondInfo  *asset.BondTxInfo
-		amt       uint64
-		fee       uint64
+	t.Run("non-segwit", func(t *testing.T) {
+		testIDUnknownTx(t, false)
+	})
+	t.Run("segwit", func(t *testing.T) {
+		testIDUnknownTx(t, true)
+	})
+}
+
+func testIDUnknownTx(t *testing.T, segwit bool) {
+	// Swap Tx - any tx with p2sh outputs that is not a bond.
+	_, _, swapPKScript, _, _, _, _ := makeSwapContract(true, time.Hour*12)
+	swapTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(1)), swapPKScript)},
 	}
 
-	type test struct {
-		name           string
-		ltr            *ListTransactionsResult
-		txB            dex.Bytes
-		segwit         bool
-		chainParams    *chaincfg.Params
-		ownedAddresses map[string]bool
-		ownsAddress    bool
-		exp            *idResult
+	// Redeem Tx
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+	addr, _ := decodeAddress(addrStr, &chaincfg.MainNetParams)
+	swapContract, _ := dexbtc.MakeContract(addr, addr, randBytes(32), time.Now().Unix(), segwit, &chaincfg.MainNetParams)
+	txIn := wire.NewTxIn(&wire.OutPoint{}, nil, nil)
+	if segwit {
+		txIn.Witness = dexbtc.RedeemP2WSHContract(swapContract, randBytes(73), randBytes(33), randBytes(32))
+	} else {
+		txIn.SignatureScript, _ = dexbtc.RedeemP2SHContract(swapContract, randBytes(73), randBytes(33), randBytes(32))
+	}
+	redeemFee := 0.0000143
+	redemptionTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(5-redeemFee)), tP2PKH)},
 	}
 
 	h2b := func(h string) []byte {
@@ -6214,246 +6229,218 @@ func TestIDUnknownTx(t *testing.T) {
 		return b
 	}
 
+	// Create Bond Tx
+	bondLockTime := 1711637410
+	bondID := h2b("0e39bbb09592fd00b7d770cc832ddf4d625ae3a0")
+	accountID := h2b("a0836b39b5ceb84f422b8a8cd5940117087a8522457c6d81d200557652fbe6ea")
+	bondContract, _ := dexbtc.MakeBondScript(0, uint32(bondLockTime), bondID)
+	contractAddr, _ := scriptHashAddress(segwit, bondContract, &chaincfg.MainNetParams)
+	bondPkScript, _ := txscript.PayToAddrScript(contractAddr)
+	bondOutput := wire.NewTxOut(int64(toSatoshi(2)), bondPkScript)
+	bondCommitPkScript, _ := bondPushDataScript(0, accountID, int64(bondLockTime), bondID)
+	bondCommitmentOutput := wire.NewTxOut(0, bondCommitPkScript)
+	createBondTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{bondOutput, bondCommitmentOutput},
+	}
+
+	// Redeem Bond Tx
+	txIn = wire.NewTxIn(&wire.OutPoint{}, nil, nil)
+	if segwit {
+		txIn.Witness = dexbtc.RefundBondScriptSegwit(bondContract, randBytes(73), randBytes(33))
+	} else {
+		txIn.SignatureScript, _ = dexbtc.RefundBondScript(bondContract, randBytes(73), randBytes(33))
+	}
+	redeemBondTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(5)), tP2PKH)},
+	}
+
+	// Acceleration Tx
+	accelerationTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(0, tP2PKH)},
+	}
+
+	// Split Tx
+	splitTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(0, tP2PKH), wire.NewTxOut(0, tP2PKH)},
+	}
+
+	// Send Tx
+	ourPkScript, cpPkScript := tP2PKH, tP2WPKH
+	if segwit {
+		ourPkScript, cpPkScript = tP2WPKH, tP2PKH
+	}
+
+	_, ourAddr, _, _ := txscript.ExtractPkScriptAddrs(ourPkScript, &chaincfg.MainNetParams)
+	ourAddrStr := ourAddr[0].String()
+
+	_, cpAddr, _, _ := txscript.ExtractPkScriptAddrs(cpPkScript, &chaincfg.MainNetParams)
+	cpAddrStr := cpAddr[0].String()
+
+	sendTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(0.001)), ourPkScript), wire.NewTxOut(int64(toSatoshi(4)), cpPkScript)},
+	}
+
+	// Receive Tx
+	receiveTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, nil, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toSatoshi(4)), ourPkScript), wire.NewTxOut(int64(toSatoshi(0.001)), cpPkScript)},
+	}
+
 	floatPtr := func(f float64) *float64 {
 		return &f
 	}
-	stringPtr := func(s string) *string {
-		return &s
+
+	type test struct {
+		name           string
+		ltr            *ListTransactionsResult
+		tx             *wire.MsgTx
+		ownedAddresses map[string]bool
+		ownsAddress    bool
+		exp            *asset.WalletTransaction
 	}
 
 	tests := []*test{
 		{
-			name: "btc swap",
+			name: "swap",
 			ltr: &ListTransactionsResult{
 				Send: true,
 			},
-			txB: h2b("01000000000101d291fc06a2f14c984bd2be00d4b319ba3ffe8131dbdaf8e8089df76e18d7f6400100000000ffffffff0200e1f505000000002200205c1989ae196beb93b57d26f714382d8c8b149d548d64804b9b6629da01133da4bcb62542020000001600148bb93295660c3530110a4eb1f8bd4a6c54fcbe050247304402205aa4c40e6bb5f79f5d0520f4e2928a989b48721785cb128805a8dafa88b8a6e5022018a9dd5478144c95aad7b2210b1d768ed81fda750d59af03435fe167aba53f070121037c226414b8613aa39e611958397ee727a622b4619a3837f28abc14eee7e4162c00000000"),
-			exp: &idResult{
-				txType: asset.SwapOrSend,
-				amt:    toSatoshi(1),
+			tx: swapTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.SwapOrSend,
+				ID:     swapTx.TxHash().String(),
+				Amount: toSatoshi(1),
 			},
-			segwit:      true,
-			chainParams: &chaincfg.RegressionNetParams,
 		},
 		{
-			name: "btc redeem",
+			name: "redeem",
 			ltr: &ListTransactionsResult{
 				Send: false,
-				Fee:  floatPtr(0.0000143),
+				Fee:  &redeemFee,
 			},
-			txB: h2b("010000000001016c5dfe4624d80beb2d6da0e7c58fd01782ecc602bc8ad233207b5febf69336f90000000000ffffffff016adbf50500000000160014b0cd6818ef5f504b1344176d6c835ea3828106630547304402207576c0ac7d9e1a12e641820b6009c092d216193f184c9acf4382b383543e2bf802204d2852725db5e88ad7db5a87f57f2466452f543ea520dcdd6f1d8868c3cdd8cb0121021c88273c992be50158b8fc6ac64c5530777de952a973a863452fb9006f10d7a620d5f148dcc90348c609846e62f36825cc7d8473f8fcdb769aa1938599d90978140101616382012088a8201736b4f1e1ede09dfb3629ade052736502eee684fe52318a9d3458d57753d79a8876a914ffb2c4df684587890f8c5ef961b5d939b8f5cce267048de80566b17576a91462ba66322a59ee8727e7220a8095f0f4904323816888ac00000000"),
-			exp: &idResult{
-				txType: asset.Redeem,
-				amt:    toSatoshi(1),
-				fee:    toSatoshi(0.0000143),
+			tx: redemptionTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.Redeem,
+				ID:     redemptionTx.TxHash().String(),
+				Amount: toSatoshi(5),
+				Fees:   toSatoshi(redeemFee),
 			},
-			segwit:      true,
-			chainParams: &chaincfg.RegressionNetParams,
 		},
 		{
-			name: "btc create bond",
+			name: "create bond",
 			ltr: &ListTransactionsResult{
-				Send: false,
+				Send: true,
 				Fee:  floatPtr(0.0000222),
 			},
-			txB: h2b("010000000001010d43ae30b1e90406cf0f5a9397ca76ace439027770bfc83ad7e01896320267fc0000000000ffffffff03a0860100000000002200201e3f29940add3ed71f384a5d3a026d8b2dcca86f2ecbff9e0a5d6072abe0445200000000000000003c6a3a0000a0836b39b5ceb84f422b8a8cd5940117087a8522457c6d81d200557652fbe6ea660583a20e39bbb09592fd00b7d770cc832ddf4d625ae3a0b4540a5402000000160014f0a2c09f74852593add56e3efb0bcbb2c1b0d6e402473044022003ac9c93e13e8af518d4623d4d675680adc4cb72b22ddab03d3233e036d391040220227ae36d036da035a5703d3a16726e20af878f8c05977b0e01b26a8bb39ac100012102767e264e6c356e17398dd35096df1782492443bbbb4186875617a937ad7c8ed900000000"),
-			exp: &idResult{
-				txType: asset.CreateBond,
-				amt:    toSatoshi(0.001),
-				fee:    toSatoshi(0.0000222),
-				bondInfo: &asset.BondTxInfo{
-					AccountID: h2b("a0836b39b5ceb84f422b8a8cd5940117087a8522457c6d81d200557652fbe6ea"),
-					BondID:    h2b("0e39bbb09592fd00b7d770cc832ddf4d625ae3a0"),
-					LockTime:  1711637410,
+			tx: createBondTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.CreateBond,
+				ID:     createBondTx.TxHash().String(),
+				Amount: toSatoshi(2),
+				Fees:   toSatoshi(0.0000222),
+				BondInfo: &asset.BondTxInfo{
+					AccountID: accountID,
+					BondID:    bondID,
+					LockTime:  uint64(bondLockTime),
 				},
 			},
-			segwit:      true,
-			chainParams: &chaincfg.RegressionNetParams,
 		},
 		{
-			name: "btc redeem bond",
+			name: "redeem bond",
 			ltr: &ListTransactionsResult{
 				Send: false,
 			},
-			txB: h2b("01000000000101429fc9ff1f7aea896226b8111bfb418d81e0dc19bd844c1de8d71f1a303c47300000000000feffffff0188580100000000001600142e49fdaa8079b5f4903877dd221ee333f46531520347304402204af5004a2aa0865c3c8d77516f57a670d93b63fc518730c8eba318905be88bf90220614007e3fa0811617aaaf11bf5de35be977fcc25f4561840e3282c184d5fb8c8012102e0f6490ea74c70e71ea6f033489b1dc6c44d2755edd0a035294d4a44b1c47b092004a2830566b17576a9140e39bbb09592fd00b7d770cc832ddf4d625ae3a088aca2830566"),
-			exp: &idResult{
-				txType: asset.RedeemBond,
-				amt:    toSatoshi(0.000882),
-				bondInfo: &asset.BondTxInfo{
+			tx: redeemBondTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.RedeemBond,
+				ID:     redeemBondTx.TxHash().String(),
+				Amount: toSatoshi(5),
+				BondInfo: &asset.BondTxInfo{
 					AccountID: []byte{},
-					BondID:    h2b("0e39bbb09592fd00b7d770cc832ddf4d625ae3a0"),
-					LockTime:  1711637410,
+					BondID:    bondID,
+					LockTime:  uint64(bondLockTime),
 				},
 			},
-			segwit:      true,
-			chainParams: &chaincfg.RegressionNetParams,
 		},
 		{
-			name: "btc acceleration",
+			name: "acceleration",
 			ltr: &ListTransactionsResult{
 				Send: true,
 			},
-			txB: h2b("01000000000101036633cbdd682bb3aa7b2e77f2012cdd0df3817c687e66a7115ea6507c97799e0100000000ffffffff0100ed074e020000001600141ed9add001c74e3cb0ecb5cb1ef07065773ab40902483045022100ea1f1137dd47bed6632546b8555c67b1942e899045ca14723c1c9e2badde1470022022579110c9ad68b357aff10ff9d852caec16e3f60f680f3be1532bd56c06113b012103597df71b639033fab233ac40b896357a83ad244b8768a14180023c1192fb2fde00000000"),
-			exp: &idResult{
-				txType: asset.Acceleration,
-			},
-			ownedAddresses: map[string]bool{
-				"bcrt1qrmv6m5qpca8rev8vkh93aursv4mn4dqfj8xhlr": true,
-			},
-			segwit:      true,
-			chainParams: &chaincfg.RegressionNetParams,
-		},
-		{
-			name: "btc receive",
-			ltr: &ListTransactionsResult{
-				Send: false,
-			},
-			txB: h2b("0200000000010843b998de1250c8e6a7ff646a5b36eb76fe79c79f972097fa482b8d4c7f06be930000000000feffffffe40884187079afdfb721ed4b58d9c629e948fff4bdef255d10da81c1630962350000000000feffffff19806278fd9c3752a5f4aed4173a4d5df26df7015d0d702d46a444f471fd52540000000000feffffff2e94494d4d43de61d924ba37d95ac3b8b818c6a5f7a14e2f04741b667c5cb63c0000000000feffffff6d78e080d529e2a8989d21860b78a6c790b0b233a1fff30d8a032f0f9518521d0000000000feffffff95c9c073f28a4353b0b9f8810c96fd83589e5da6bf45bf6a2343fdc5dffe08a20300000000feffffff4a1a43da251e6a9ffef5bf7b364bfd2a4a360e99e4b8eae5913a4613a562c9f50000000000feffffff6cf2c255cfbce2b93d0e6d5851a40405e7e459d88ed704ce15ba8cfd40cdf6e90000000000feffffff0200e40b54020000001600149cf5e30367e2ad3e0408013e41013166e42af97c4f7a75e800000000160014b1c6c90e26f833cceb9c4ee5d29a1a96d5fa5cfb02473044022074c1ffd5a61b396586752ee301a8e9e413587cd0fa4418c97d62dc4c1c177ef402207eae4f750febb7b9399e8b6adb13d18400eeca5a0eb2d1302b198d8713f8c4690121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb1024730440220231f320b17c1b82a72e053b8e248f6efa10559a238f017f67dcae3a34e0896460220154177afea441ae2189f7a6ce0b545240f7b042502856bf68b1a05d1b2a263680121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb102473044022006aa13d3ada09fc630a49e3324d6b27aa7ff942643e677755589788935d5ffb302204badb059d623672dba5a79b022f9b4c134030fd69cc2c19e6725c0850d3c1c950121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb102473044022063338039df79756c6d439cd17629bb0e385b0e55d76fc66f412d9240691d77bc0220691198f9888048ae62d993ec7676e38b31c11a9e27b9f7f5824249fcc28c98720121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb1024730440220456d5b7a9d0195e0e6540e6fc989c6091ec84cb87c0b1b9fdfdd02d86a3f7b7b02201156bc90675c6f244b48b1f291aab24475b76f250f21350cb06a51b76beb67a20121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb10247304402204095b1e62f69e14d3fb6dcebfba30f42c9a82b50e174051653f5291b3c742a08022010e219784fecfc9f43558442052b51beb7bcdf1c5ca19e4db19e487601bba0d90121034fbe054ccf4fc05c9a750d361c10b20ec19fc4e45c31a008f9686f2d0943fbc30247304402204c27e00912623630ea56979523454f608966da367a5eacee4911a7fa79f8d16902206248c8532a430e0ed1de7a85faab68060e88d8127611517fb08bb7b0362129af0121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb10247304402203f9539bc251546e6d50719f1b0fbc20f24834c3ba7791eab317e3d2e96b0b0510220479104cab8fe9bee68090685d7fa431374cf8572902745052df4a8411e86fa940121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb1ca030000"),
-			exp: &idResult{
-				txType:    asset.Receive,
-				amt:       toSatoshi(100),
-				recipient: stringPtr("bcrt1qnn67xqm8u2knupqgqylyzqf3vmjz47tumdumvy"),
-			},
-			ownedAddresses: map[string]bool{
-				"bcrt1qnn67xqm8u2knupqgqylyzqf3vmjz47tumdumvy": true,
-			},
-			segwit:      true,
-			chainParams: &chaincfg.RegressionNetParams,
-		},
-		{
-			name: "ltc swap",
-			ltr: &ListTransactionsResult{
-				Send: true,
-			},
-			txB: h2b("010000000001012f554d2dad719503eb7372e924f90ed1bb563745b0902d84f9898eb92ed7d1fe0100000000ffffffff02404b4c00000000002200209d1cd2b4f19f552208f0e09211f3ef693c9e2ffdb49e3245c0f235ebc2434c6a0a5b7d4d02000000160014cb7c5e4e69f18ab9353cd1b46010ff445786a8a20247304402203d8a546d37dece699dfe88dff011eaac54a85c8a46493a391c84022b7278c7fa02206fa9589415d354d4fab4342bf96dc766aaec03e14f3c0c4b28a099c87eb7175801210399d9d2b2c6765ae5ae47d2deeaca334ac93ee0588dc6190d9d9a5532ea66f10b00000000"),
-			exp: &idResult{
-				txType: asset.SwapOrSend,
-				amt:    toSatoshi(0.05),
-			},
-			segwit:      true,
-			chainParams: dexltc.RegressionNetParams,
-		},
-		{
-			name: "ltc redeem",
-			ltr: &ListTransactionsResult{
-				Send: false,
-				Fee:  floatPtr(0.0000143),
-			},
-			txB: h2b("01000000000101e56911e8f37ee44a8f5ab8bfd56d4738567b8d476e095212cfa4b99b53df93aa0000000000ffffffff01aa454c0000000000160014aa7c6c357ecef1da748cc8f49689e8c3a49b5ebb05483045022100d2d219c539f9ad88641fcab3d43103f90f1d83a702933a264c53fa111822f17502205d0428a917df83a6a9f7e53d5bc8f24a19955fd50f5e172713ffe84308bd252b01210355aee7e8af0613d27dfac540b0c86ec2c2ad01c1143ed209d0dc283ed91507da20bcb62416ef59372a5cd77e78698e57b794874dff9da3cc14ebd39874b643a6ad0101616382012088a820fe4f2da55f79f0acb8dca2d60ad1b37851c0daaefa8c30034c56f665b8704f4e8876a914fe8f599067f8e9ec878eb0fff667659601bc85c7670431ea0566b17576a914be1459bcc4fc021ebee36e2217a5a455b66415866888ac00000000"),
-			exp: &idResult{
-				txType: asset.Redeem,
-				amt:    toSatoshi(0.05),
-				fee:    toSatoshi(0.0000143),
-			},
-			segwit:      true,
-			chainParams: dexltc.RegressionNetParams,
-		},
-		{
-			name: "ltc receive",
-			ltr: &ListTransactionsResult{
-				Send: false,
-			},
-			txB: h2b("020000000001035bcb611338cc9b1534641eca1f6f176694e7f65798e915ebf89127f765f7dfbb000000001716001427ba894b4ac84cf236608590efe12ee514692c32feffffffb437473f057ce680b99a5e7644a29db92be4d53132d5433191ed58a554a1c251000000001716001427ba894b4ac84cf236608590efe12ee514692c32feffffff442c3085152ca4e695cbf4d142d02b8f5477264c02ae778a543e7006c12e8dcd0300000000feffffff0200e40b5402000000160014df9053f66260950c3f086ed7cbf636710120937128e5f90200000000160014f538a4ce11498ae288108e8aa8476da4d556e1c90247304402203767218411d8007721ee5937207376f9896239cb0509f3e90a33937ac4f9bc7f02202240562b068cc0c8453abe7a0e32317f912b8436d2a872e1686411ce8cf60e7c0121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb10247304402207f70b52b41455b82ab9d7aaefab6e29bb7dc9e76b3469c779ebe24ac5472f7c302207d3634ac4d340a03f8a476fba772ca9e98308f568eff17b958ce0ab8343de1670121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb1024730440220644c3c39db84eece837f1e559ce656e2aed9243cd837799b3588bb7d95fc7712022026411d73e130e1c9c58fa15f912b9edb8dedb73424b74043fdf31080a793baba012102e5e3124d3475365355315118ad7a093803fce7d30c10d120c84c144008125fbace030000"),
-			exp: &idResult{
-				txType:    asset.Receive,
-				amt:       toSatoshi(100),
-				recipient: stringPtr("rltc1qm7g98anzvz2sc0cgdmtuha3kwyqjpym3nmlx26"),
-			},
-			ownedAddresses: map[string]bool{
-				"rltc1qm7g98anzvz2sc0cgdmtuha3kwyqjpym3nmlx26": true,
-			},
-			segwit:      true,
-			chainParams: dexltc.RegressionNetParams,
-		},
-		{
-			name: "ltc receive 2", // This was a tx populating the wallet. It sends to p2sh.
-			ltr: &ListTransactionsResult{
-				Send: false,
-			},
-			txB: h2b("020000000001092e9c9b17bab0ef3e48a7036ad392d4d502ba7b3c4e892c40387720249e21c5190000000000feffffffde74fe76d8c70e0e7c7adf77247204067a67109b383e1477bec2c1a9faf9188d0300000000feffffffa62288711adce247f5dd65a03eda5ab7fe3d1c83a66a28672da4ee18bbe940e40000000000feffffffa6b454ff4e6256bfe362b53af26a084c449e3c37a4f1e8180ebe19d0e8269f300100000000feffffffb7920d7c20d2aec8967e6c7efe79d3373d23332f479acda1c914155a1a4ace7e0000000000feffffffc59832cae1ba20b0c3367baba2a98f330b6db8f93c37d9a510e068cd19b4026c000000001716001427ba894b4ac84cf236608590efe12ee514692c32feffffff080a596a4a4441e6a5a5aaa01c6875ef15d3653d88c101c2ff181d595d5e40670000000000feffffff78133092e9026f2df4b9f11d047335c38badc5455c5d5e39060329ba137533470200000000feffffff0cec7b521195a1adca741b1e60c9452dd924bf9d8a237de7a7c66eb7f7e13b1f0200000000feffffff04325ff5050000000016001443ad3a62f0d2b0bd04fc71e98ca3cbec94843de6008c86470000000017a914824af6b755a13eafb06c956bc6edc86f80ebe6b887008c86470000000017a914b096d49c0da63108c20b4ea78c6873466f018ad387008c86470000000017a914ce06fa7565bb215a0ba835e65418bd89dffe1ae4870247304402201a18559c1ac39621813709a5196a559b4639a5c0d81dc5903d763b36fec5123902205c3ca583401def87b3064d0282099a43b89c8e1366f1d1f4f7cf5e24279e14390121023f68d5d4fa933e84618b2919dee0dd30da447efe4f19d9e1bdc83a81df4c20950247304402205739478409f9c8d42816186ab3815bad6e7f7c49b6adee7ff3b550ac414a416e022054376b2457b522a3e61e712569f835c6572f0dc3cc33221674253b749f58f4ad0121034fbe054ccf4fc05c9a750d361c10b20ec19fc4e45c31a008f9686f2d0943fbc30247304402207b34b8466bdd69be9d03a2c2424f65b01cf68aba271525c0dd8620b9556d55f702200c393cb382ce09c900e590744fde34dae992adb892b02539c6b560440d5bfa160121031acec82644e5c18087a88d889560cc405f0f03f6f4beefa930ca4b653479764702473044022071049a5d5048c4ea6687fe7f433c3ab716c87363bab95fd1ef876c9e69a1d6cd022050495c796935dc4a544616d0c02120b2cb433356dfc031cb9f0298d0e0eb6ecf0121021d863c102e737d4db886416b5cec11bdd7784a873d6343388eaea9bf3f96243a024730440220793449fb3554fc42179bd7ad546d76ca981fbc432cdf7095ec73d73368ce1209022010c6a4689feb7874ac0c6217dd03588ab744b000bf2661305db06df3d2163691012103cd5297318bfe3120b94f0b5a6825ae39c65d8d4cf09728a8295c51b4e621c22d0247304402201f6ebf68c10b26afe953ed92dfc17286a52a4c5c4beeec0779b5ce9b6e51fdee02201a4e32cde8f345ffcef2ea946f8dfdfb7fadeadb7732e883e92416740b9f96ba0121030958f6fb97080b0e3fed9320316e49d3bdb113345e82caf8e5525d095c70cbb102473044022007d6b0dfe8144f5a01766bdb174e6f45c66ae0b6a9402457a1020274a94d9e6c0220023b6f9d31d044c9cf7599c913ce54781f28e20c211a8c774e7d8e44478857b6012103c69cfb1b8207574db8ac68db88b48ab73a86d96c9fedbc387859065e1726b5060247304402200ec806c73d609d41bea96bbca7f868edee54c3cf5b7f986eef1ad0d70e95f72b02202a5659c3334c3a3c17f36edda8de957ec67f3709c9f3f9d047a3436a482c317401210353394a72a4e7cee4846309843a35a535c1cea0efd2cd6d5cb4f199df7c4eadde0247304402200cf39c7dd3af1e7babc886eace4884524a3b43b82dba3e408cf0a0e4c609d4f402205baa81e83b3d30d6e37d5d20a30562fe5f70bb4239d6430596ad8f8b3785cd2c012103432cd635aac3419ec3b0fe830b96cf715744da770a5bd1e7e73feb8e0f2bfb9ec8010000"),
-			exp: &idResult{
-				txType:    asset.Receive,
-				amt:       toSatoshi(12),
-				recipient: stringPtr("QfPMfgRPHd6mvQKDkJN8uEnR2kmBYAUE1x"),
-			},
-			ownedAddresses: map[string]bool{
-				"QfPMfgRPHd6mvQKDkJN8uEnR2kmBYAUE1x": true,
-			},
-			segwit:      true,
-			chainParams: dexltc.RegressionNetParams,
-		},
-		{
-			name: "ltc send",
-			ltr: &ListTransactionsResult{
-				Send: true,
-				Fee:  floatPtr(0.0000141),
-			},
-			txB: h2b("0100000000010156ba41217c0114309279f0ab5b2b7992dbc9d99aad930978d4cbf82b07112d940100000000ffffffff0200e1f505000000001600148a94b43c8ab88812884b1f9aa5b9b8fdc0839fb3c8a0c94d02000000160014431ba070198d15ab57acdc890cf5bb163268e9b6024730440220206036192f90c5d52a6c924d614b8d2bda24a82b9e68161f85367846c0d8f33002200650623b7de5d5343f0f8630ab5e8d5b928d3f013c8300564a609c7cdb3b76b20121025c0a9fd0aaeb795b4efe6da04606564f233b850911c47a3b8d37e2986e95f2ed00000000"),
-			exp: &idResult{
-				txType:    asset.Send,
-				amt:       toSatoshi(1),
-				recipient: stringPtr("rltc1q322tg0y2hzyp9zztr7d2twdclhqg88anj0u8ea"),
-				fee:       toSatoshi(0.0000141),
-			},
-			ownedAddresses: map[string]bool{
-				"rltc1qgvd6quqe3526k4avmjyseadmzcex36dkywtqat": true, // change addr
-			},
-			segwit:      true,
-			chainParams: dexltc.RegressionNetParams,
-		},
-		{
-			name: "ltc split",
-			ltr: &ListTransactionsResult{
-				Send: true,
-			},
-			txB: h2b("01000000000101e79382797b0b59c227d4005588378c7a6b4d936892d03814d57c497592d226a30000000000ffffffff0234574c000000000016001483eb3eb25365fda46e66a54e00b1a8183eea23ff4a87bf5302000000160014a69e891e243b00fd8dde000afe9bb36ad39767e3024730440220419540531f49a7767cee3be0c31748937ec762d281987b227bc17b3263d4208b02206e0bd4058458a83900e7494d931ca71ffbf13923d292b62fc0ae19bbf65b6e970121033d77445341a7a972edfd9d902a036b9f7143013869453d41b04117882a7d261800000000"),
-			exp: &idResult{
-				txType: asset.Split,
+			tx: accelerationTx,
+			exp: &asset.WalletTransaction{
+				Type: asset.Acceleration,
+				ID:   accelerationTx.TxHash().String(),
 			},
 			ownsAddress: true,
-			segwit:      true,
-			chainParams: dexltc.RegressionNetParams,
+		},
+		{
+			name: "split",
+			ltr: &ListTransactionsResult{
+				Send: true,
+			},
+			tx: splitTx,
+			exp: &asset.WalletTransaction{
+				Type: asset.Split,
+				ID:   splitTx.TxHash().String(),
+			},
+			ownsAddress: true,
+		},
+		{
+			name: "send",
+			ltr: &ListTransactionsResult{
+				Send: true,
+			},
+			tx: sendTx,
+			exp: &asset.WalletTransaction{
+				Type:      asset.Send,
+				ID:        sendTx.TxHash().String(),
+				Amount:    toSatoshi(4),
+				Recipient: &cpAddrStr,
+			},
+			ownedAddresses: map[string]bool{ourAddrStr: true},
+		},
+		{
+			name: "receive",
+			ltr:  &ListTransactionsResult{},
+			tx:   receiveTx,
+			exp: &asset.WalletTransaction{
+				Type:      asset.Receive,
+				ID:        receiveTx.TxHash().String(),
+				Amount:    toSatoshi(4),
+				Recipient: &ourAddrStr,
+			},
+			ownedAddresses: map[string]bool{ourAddrStr: true},
 		},
 	}
 
 	runTest := func(tt *test) {
 		t.Run(tt.name, func(t *testing.T) {
 			wallet, node, shutdown := tNewWallet(true, walletTypeRPC)
-			wallet.chainParams = tt.chainParams
 			defer shutdown()
-			msgTx, err := msgTxFromBytes(tt.txB)
-			if err != nil {
-				panic(err)
-			}
-			txID := msgTx.TxHash().String()
+			txID := tt.tx.TxHash().String()
 			tt.ltr.TxID = txID
-			node.getTransactionMap[txID] = &GetTransactionResult{Bytes: tt.txB}
+
+			buf := new(bytes.Buffer)
+			err := tt.tx.Serialize(buf)
+			if err != nil {
+				t.Fatalf("%s: error serializing tx: %v", tt.name, err)
+			}
+
+			node.getTransactionMap[txID] = &GetTransactionResult{Bytes: buf.Bytes()}
 			node.ownedAddresses = tt.ownedAddresses
 			node.ownsAddress = tt.ownsAddress
-			txType, recipient, bondInfo, amt, fee, err := wallet.idUnknownTx(tt.ltr)
+			wt, err := wallet.idUnknownTx(tt.ltr)
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", tt.name, err)
 			}
-			if txType != tt.exp.txType {
-				t.Fatalf("%s: wrong tx type. wanted %v, got %v", tt.name, tt.exp.txType, txType)
-			}
-			if tt.exp.recipient == nil != (recipient == nil) {
-				t.Fatalf("%s: wrong recipient. wanted %v, got %v", tt.name, tt.exp.recipient, recipient)
-			}
-			if tt.exp.recipient != nil && *tt.exp.recipient != *recipient {
-				t.Fatalf("%s: wrong recipient. wanted %v, got %v", tt.name, *tt.exp.recipient, *recipient)
-			}
-			if tt.exp.bondInfo == nil != (bondInfo == nil) {
-				t.Fatalf("%s: wrong bond info. wanted %v, got %v", tt.name, tt.exp.bondInfo, bondInfo)
-			}
-			if !reflect.DeepEqual(tt.exp.bondInfo, bondInfo) {
-				t.Fatalf("%s: wrong bond info. wanted %v, got %v", tt.name, *tt.exp.bondInfo, *bondInfo)
-			}
-			if amt != tt.exp.amt {
-				t.Fatalf("%s: wrong amount. wanted %d, got %d", tt.name, tt.exp.amt, amt)
-			}
-			if fee != tt.exp.fee {
-				t.Fatalf("%s: wrong fee. wanted %d, got %d", tt.name, tt.exp.fee, fee)
+			if !reflect.DeepEqual(wt, tt.exp) {
+				t.Fatalf("%s: expected %+v, got %+v", tt.name, tt.exp, wt)
 			}
 		})
 	}

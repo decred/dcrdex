@@ -5487,22 +5487,18 @@ func rpcTxFee(tx *ListTransactionsResult) uint64 {
 
 // idUnknownTx identifies the type and details of a transaction either made
 // or recieved by the wallet.
-func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (asset.TransactionType, *string, *asset.BondTxInfo, uint64, uint64, error) {
-	fail := func(err error) (asset.TransactionType, *string, *asset.BondTxInfo, uint64, uint64, error) {
-		return asset.Unknown, nil, nil, 0, 0, err
-	}
-
+func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTransaction, error) {
 	txHash, err := chainhash.NewHashFromStr(tx.TxID)
 	if err != nil {
-		fail(fmt.Errorf("error decoding tx hash %s: %v", tx.TxID, err))
+		return nil, fmt.Errorf("error decoding tx hash %s: %v", tx.TxID, err)
 	}
 	txRaw, _, err := btc.rawWalletTx(txHash)
 	if err != nil {
-		return fail(err)
+		return nil, err
 	}
 	msgTx, err := btc.deserializeTx(txRaw)
 	if err != nil {
-		return fail(err)
+		return nil, fmt.Errorf("error deserializing tx: %v", err)
 	}
 
 	fee := rpcTxFee(tx)
@@ -5528,7 +5524,13 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (asset.Tr
 		}
 	}
 	if isBond, bondInfo := txIsBond(msgTx); isBond {
-		return asset.CreateBond, nil, bondInfo, uint64(msgTx.TxOut[0].Value), fee, nil
+		return &asset.WalletTransaction{
+			ID:       tx.TxID,
+			Type:     asset.CreateBond,
+			Amount:   uint64(msgTx.TxOut[0].Value),
+			Fees:     fee,
+			BondInfo: bondInfo,
+		}, nil
 	}
 
 	// Any other P2SH may be a swap or a send. We cannot determine unless we
@@ -5543,7 +5545,12 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (asset.Tr
 		return
 	}
 	if v := txPaysToScriptHash(msgTx); tx.Send && v > 0 {
-		return asset.SwapOrSend, nil, nil, v, fee, nil
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.SwapOrSend,
+			Amount: v,
+			Fees:   fee,
+		}, nil
 	}
 
 	// Helper function will help us identify inputs that spend P2SH contracts.
@@ -5585,13 +5592,23 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (asset.Tr
 		return containsContractAtPushIndex(msgTx, 4, contractIsSwap)
 	}
 	if redeemsSwap(msgTx) {
-		return asset.Redeem, nil, nil, totalOut + fee, fee, nil
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.Redeem,
+			Amount: totalOut + fee,
+			Fees:   fee,
+		}, nil
 	}
 	refundsSwap := func(msgTx *wire.MsgTx) bool {
 		return containsContractAtPushIndex(msgTx, 3, contractIsSwap)
 	}
 	if refundsSwap(msgTx) {
-		return asset.Refund, nil, nil, totalOut + fee, fee, nil
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.Refund,
+			Amount: totalOut + fee,
+			Fees:   fee,
+		}, nil
 	}
 
 	// Bond refunds
@@ -5613,7 +5630,13 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (asset.Tr
 		return containsContractAtPushIndex(msgTx, 2, isBond), bondInfo
 	}
 	if isBondRedemption, bondInfo := redeemsBond(msgTx); isBondRedemption {
-		return asset.RedeemBond, nil, bondInfo, totalOut, fee, nil
+		return &asset.WalletTransaction{
+			ID:       tx.TxID,
+			Type:     asset.RedeemBond,
+			Amount:   totalOut,
+			Fees:     fee,
+			BondInfo: bondInfo,
+		}, nil
 	}
 
 	allOutputsPayUs := func(msgTx *wire.MsgTx) bool {
@@ -5648,9 +5671,20 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (asset.Tr
 
 	if tx.Send && allOutputsPayUs(msgTx) {
 		if len(msgTx.TxOut) == 1 {
-			return asset.Acceleration, nil, nil, 0, fee, nil
+			return &asset.WalletTransaction{
+				ID:     tx.TxID,
+				Type:   asset.Acceleration,
+				Amount: 0,
+				Fees:   fee,
+			}, nil
+
 		}
-		return asset.Split, nil, nil, 0, fee, nil
+		return &asset.WalletTransaction{
+			ID:     tx.TxID,
+			Type:   asset.Split,
+			Amount: 0,
+			Fees:   fee,
+		}, nil
 	}
 
 	txOutDirection := func(msgTx *wire.MsgTx) (in, out uint64) {
@@ -5709,10 +5743,22 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (asset.Tr
 	}
 
 	if tx.Send {
-		return asset.Send, getRecipient(msgTx, false), nil, out, fee, nil
+		return &asset.WalletTransaction{
+			ID:        tx.TxID,
+			Type:      asset.Send,
+			Amount:    out,
+			Fees:      fee,
+			Recipient: getRecipient(msgTx, false),
+		}, nil
 	}
 
-	return asset.Receive, getRecipient(msgTx, true), nil, in, fee, nil
+	return &asset.WalletTransaction{
+		ID:        tx.TxID,
+		Type:      asset.Receive,
+		Amount:    in,
+		Fees:      fee,
+		Recipient: getRecipient(msgTx, true),
+	}, nil
 }
 
 // addUnknownTransactionsToHistory checks for any transactions the wallet has
@@ -5753,19 +5799,10 @@ func (btc *intermediaryWallet) addUnknownTransactionsToHistory(tip uint64) {
 			btc.log.Errorf("Error getting tx %s: %v", txHash.String(), err)
 			continue
 		}
-		txType, recipient, bondInfo, amt, fee, err := btc.idUnknownTx(tx)
+		wt, err := btc.idUnknownTx(tx)
 		if err != nil {
 			btc.log.Errorf("error identifying transaction: %v", err)
 			continue
-		}
-
-		wt := &asset.WalletTransaction{
-			Type:      txType,
-			ID:        tx.TxID,
-			Amount:    amt,
-			Fees:      fee,
-			Recipient: recipient,
-			BondInfo:  bondInfo,
 		}
 		if tx.BlockHeight > 0 && tx.BlockHeight < uint32(tip-blockQueryBuffer) {
 			wt.BlockNumber = uint64(tx.BlockHeight)

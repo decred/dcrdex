@@ -2588,8 +2588,7 @@ export default class WalletsPage extends BasePage {
         if (n.assetID === this.selectedAssetID) this.handleTxNote(n.transaction, n.new)
         break
       }
-      case 'transactionHistorySynced'
-      : {
+      case 'transactionHistorySynced' : {
         const n = walletNote
         if (n.assetID === this.selectedAssetID) this.showTxHistory(n.assetID)
         break
