@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -227,6 +228,7 @@ type tRPCClient struct {
 	purchasedTickets   [][]*chainhash.Hash
 	purchaseTicketsErr error
 	stakeInfo          walletjson.GetStakeInfoResult
+	validateAddress    map[string]*walletjson.ValidateAddressResult
 }
 
 type wireTxWithHeight struct {
@@ -521,8 +523,16 @@ func (c *tRPCClient) WalletInfo(_ context.Context) (*walletjson.WalletInfoResult
 }
 
 func (c *tRPCClient) ValidateAddress(_ context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error) {
+	if c.validateAddress != nil {
+		if c.validateAddress[address.String()] != nil {
+			return c.validateAddress[address.String()], nil
+		}
+		return &walletjson.ValidateAddressWalletResult{}, nil
+	}
+
 	return &walletjson.ValidateAddressWalletResult{
-		IsMine: true,
+		IsMine:  true,
+		Account: tAcctName,
 	}, nil
 }
 
@@ -963,6 +973,7 @@ func TestAvailableFund(t *testing.T) {
 	extraLottaLots := littleLots + lottaLots
 	// Prepare for a split transaction.
 	baggageFees := tDCR.MaxFeeRate * splitTxBaggage
+	node.newAddr = tPKHAddr
 	node.changeAddr = tPKHAddr
 	wallet.config().useSplitTx = true
 	// No split performed due to economics is not an error.
@@ -1030,6 +1041,14 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	// Hit some error paths.
+
+	// GetNewAddressGapPolicy error
+	node.newAddrErr = tErr
+	_, _, _, err = wallet.FundOrder(ord)
+	if err == nil {
+		t.Fatalf("no error for split tx change addr error")
+	}
+	node.newAddrErr = nil
 
 	// GetRawChangeAddress error
 	node.changeAddrErr = tErr
@@ -2333,6 +2352,7 @@ func TestFundMultiOrder(t *testing.T) {
 
 	for _, test := range tests {
 		node.unspent = test.utxos
+		node.newAddr = tPKHAddr
 		node.changeAddr = tPKHAddr
 		node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
 			return signFunc(msgTx, dexdcr.P2PKHSigScriptSize)
@@ -2615,6 +2635,7 @@ func TestFundEdges(t *testing.T) {
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
 	wallet.config().useSplitTx = true
+	node.newAddr = tPKHAddr
 	node.changeAddr = tPKHAddr
 	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
 		return signFunc(msgTx, dexdcr.P2PKHSigScriptSize)
@@ -2834,7 +2855,7 @@ func TestRedeem(t *testing.T) {
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 
-	node.changeAddr = tPKHAddr
+	node.newAddr = tPKHAddr
 	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 	if err != nil {
 		t.Fatalf("NewWIF error: %v", err)
@@ -2886,6 +2907,13 @@ func TestRedeem(t *testing.T) {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
 	coin.value = swapVal
+
+	// New address error
+	node.newAddrErr = tErr
+	_, _, _, err = wallet.Redeem(redemptions)
+	if err == nil {
+		t.Fatalf("no error for new address error")
+	}
 
 	// Change address error
 	node.changeAddrErr = tErr
@@ -4558,6 +4586,7 @@ func TestFindBond(t *testing.T) {
 		Spendable:     true,
 	}
 	node.unspent = []walletjson.ListUnspentResult{utxo}
+	node.newAddr = tPKHAddr
 	node.changeAddr = tPKHAddr
 
 	bond, _, err := wallet.MakeBondTx(0, amt, 200, lockTime, bondKey, acctID[:])
@@ -4686,5 +4715,311 @@ func TestFindBond(t *testing.T) {
 				t.Fatal("pkh not equal")
 			}
 		})
+	}
+}
+
+func makeSwapContract(lockTimeOffset time.Duration) (pkScriptVer uint16, pkScript []byte) {
+	secret := randBytes(32)
+	secretHash := sha256.Sum256(secret)
+
+	lockTime := time.Now().Add(lockTimeOffset)
+	var err error
+	contract, err := dexdcr.MakeContract(tPKHAddr.String(), tPKHAddr.String(), secretHash[:], lockTime.Unix(), chaincfg.MainNetParams())
+	if err != nil {
+		panic("error making swap contract:" + err.Error())
+	}
+
+	scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, chaincfg.MainNetParams())
+	if err != nil {
+		panic("error making script address:" + err.Error())
+	}
+
+	return scriptAddr.PaymentScript()
+}
+
+func TestIDUnknownTx(t *testing.T) {
+	// Swap Tx - any tx with p2sh outputs that is not a bond.
+	_, swapPKScript := makeSwapContract(time.Hour * 12)
+	swapTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toAtoms(1)), swapPKScript)},
+	}
+
+	// Redeem Tx
+	swapContract, _ := dexdcr.MakeContract(tPKHAddr.String(), tPKHAddr.String(), randBytes(32), time.Now().Unix(), chaincfg.MainNetParams())
+	txIn := wire.NewTxIn(&wire.OutPoint{}, 0, nil)
+	txIn.SignatureScript, _ = dexdcr.RedeemP2SHContract(swapContract, randBytes(73), randBytes(33), randBytes(32))
+	redeemFee := 0.0000143
+	_, tP2PKH := tPKHAddr.PaymentScript()
+	redemptionTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toAtoms(5-redeemFee)), tP2PKH)},
+	}
+
+	h2b := func(h string) []byte {
+		b, _ := hex.DecodeString(h)
+		return b
+	}
+
+	// Create Bond Tx
+	bondLockTime := 1711637410
+	bondID := h2b("0e39bbb09592fd00b7d770cc832ddf4d625ae3a0")
+	accountID := h2b("a0836b39b5ceb84f422b8a8cd5940117087a8522457c6d81d200557652fbe6ea")
+	bondContract, _ := dexdcr.MakeBondScript(0, uint32(bondLockTime), bondID)
+	contractAddr, err := stdaddr.NewAddressScriptHashV0(bondContract, chaincfg.MainNetParams())
+	if err != nil {
+		t.Fatal("error making script address:" + err.Error())
+	}
+	_, bondPkScript := contractAddr.PaymentScript()
+
+	bondOutput := wire.NewTxOut(int64(toAtoms(2)), bondPkScript)
+	bondCommitPkScript, _ := bondPushDataScript(0, accountID, int64(bondLockTime), bondID)
+	bondCommitmentOutput := wire.NewTxOut(0, bondCommitPkScript)
+	createBondTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, nil)},
+		TxOut: []*wire.TxOut{bondOutput, bondCommitmentOutput},
+	}
+
+	// Redeem Bond Tx
+	txIn = wire.NewTxIn(&wire.OutPoint{}, 0, nil)
+	txIn.SignatureScript, _ = dexdcr.RefundBondScript(bondContract, randBytes(73), randBytes(33))
+	redeemBondTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{txIn},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toAtoms(5)), tP2PKH)},
+	}
+
+	// Split Tx
+	splitTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(0, tP2PKH), wire.NewTxOut(0, tP2PKH)},
+	}
+
+	// Send Tx
+	cpAddr, _ := stdaddr.DecodeAddress("Dsedb5o6Tw225Loq5J56BZ9jS4ehnEnmQ16", tChainParams)
+	_, cpPkScript := cpAddr.PaymentScript()
+	sendTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toAtoms(0.001)), tP2PKH), wire.NewTxOut(int64(toAtoms(4)), cpPkScript)},
+	}
+
+	// Receive Tx
+	receiveTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toAtoms(0.001)), cpPkScript), wire.NewTxOut(int64(toAtoms(4)), tP2PKH)},
+	}
+	type test struct {
+		name            string
+		ltr             *ListTransactionsResult
+		tx              *wire.MsgTx
+		validateAddress map[string]*walletjson.ValidateAddressResult
+		exp             *asset.WalletTransaction
+	}
+
+	// Ticket Tx
+	ticketTx := &wire.MsgTx{
+		TxIn:  []*wire.TxIn{wire.NewTxIn(&wire.OutPoint{}, 0, nil)},
+		TxOut: []*wire.TxOut{wire.NewTxOut(int64(toAtoms(1)), cpPkScript)},
+	}
+
+	float64Ptr := func(f float64) *float64 {
+		return &f
+	}
+
+	stringPtr := func(s string) *string {
+		return &s
+	}
+
+	regularTx := walletjson.LTTTRegular
+	ticketPurchaseTx := walletjson.LTTTTicket
+	ticketRevocationTx := walletjson.LTTTRevocation
+	ticketVote := walletjson.LTTTVote
+
+	tests := []*test{
+		{
+			name: "swap",
+			ltr: &ListTransactionsResult{
+				TxType: &regularTx,
+				Fee:    float64Ptr(0.0000321),
+				TxID:   swapTx.TxHash().String(),
+			},
+			tx: swapTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.SwapOrSend,
+				ID:     swapTx.TxHash().String(),
+				Amount: toAtoms(1),
+				Fees:   toAtoms(0.0000321),
+			},
+		},
+		{
+			name: "redeem",
+			ltr: &ListTransactionsResult{
+				TxType: &regularTx,
+				TxID:   redemptionTx.TxHash().String(),
+			},
+			tx: redemptionTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.Redeem,
+				ID:     redemptionTx.TxHash().String(),
+				Amount: toAtoms(5 - redeemFee),
+				Fees:   0,
+			},
+		},
+		{
+			name: "create bond",
+			ltr: &ListTransactionsResult{
+				TxType: &regularTx,
+				Fee:    float64Ptr(0.0000222),
+				TxID:   createBondTx.TxHash().String(),
+			},
+			tx: createBondTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.CreateBond,
+				ID:     createBondTx.TxHash().String(),
+				Amount: toAtoms(2),
+				Fees:   toAtoms(0.0000222),
+				BondInfo: &asset.BondTxInfo{
+					AccountID: accountID,
+					BondID:    bondID,
+					LockTime:  uint64(bondLockTime),
+				},
+			},
+		},
+		{
+			name: "redeem bond",
+			ltr: &ListTransactionsResult{
+				TxType: &regularTx,
+				TxID:   redeemBondTx.TxHash().String(),
+			},
+			tx: redeemBondTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.RedeemBond,
+				ID:     redeemBondTx.TxHash().String(),
+				Amount: toAtoms(5),
+				BondInfo: &asset.BondTxInfo{
+					AccountID: []byte{},
+					BondID:    bondID,
+					LockTime:  uint64(bondLockTime),
+				},
+			},
+		},
+		{
+			name: "split",
+			ltr: &ListTransactionsResult{
+				TxType: &regularTx,
+				Fee:    float64Ptr(-0.0000251),
+				Send:   true,
+				TxID:   splitTx.TxHash().String(),
+			},
+			tx: splitTx,
+			exp: &asset.WalletTransaction{
+				Type: asset.Split,
+				ID:   splitTx.TxHash().String(),
+				Fees: toAtoms(0.0000251),
+			},
+		},
+		{
+			name: "send",
+			ltr: &ListTransactionsResult{
+				TxType: &regularTx,
+				Send:   true,
+				Fee:    float64Ptr(0.0000504),
+				TxID:   sendTx.TxHash().String(),
+			},
+			tx: sendTx,
+			exp: &asset.WalletTransaction{
+				Type:      asset.Send,
+				ID:        sendTx.TxHash().String(),
+				Amount:    toAtoms(4),
+				Recipient: stringPtr(cpAddr.String()),
+				Fees:      toAtoms(0.0000504),
+			},
+			validateAddress: map[string]*walletjson.ValidateAddressResult{
+				tPKHAddr.String(): {
+					IsMine:  true,
+					Account: tAcctName,
+				},
+			},
+		},
+		{
+			name: "receive",
+			ltr: &ListTransactionsResult{
+				TxType: &regularTx,
+				TxID:   receiveTx.TxHash().String(),
+			},
+			tx: receiveTx,
+			exp: &asset.WalletTransaction{
+				Type:      asset.Receive,
+				ID:        receiveTx.TxHash().String(),
+				Amount:    toAtoms(4),
+				Recipient: stringPtr(tPKHAddr.String()),
+			},
+			validateAddress: map[string]*walletjson.ValidateAddressResult{
+				tPKHAddr.String(): {
+					IsMine:  true,
+					Account: tAcctName,
+				},
+			},
+		},
+		{
+			name: "ticket purchase",
+			ltr: &ListTransactionsResult{
+				TxType: &ticketPurchaseTx,
+				TxID:   ticketTx.TxHash().String(),
+			},
+			tx: ticketTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.TicketPurchase,
+				ID:     ticketTx.TxHash().String(),
+				Amount: toAtoms(1),
+			},
+		},
+		{
+			name: "ticket vote",
+			ltr: &ListTransactionsResult{
+				TxType: &ticketVote,
+				TxID:   ticketTx.TxHash().String(),
+			},
+			tx: ticketTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.TicketVote,
+				ID:     ticketTx.TxHash().String(),
+				Amount: toAtoms(1),
+			},
+		},
+		{
+			name: "ticket revocation",
+			ltr: &ListTransactionsResult{
+				TxType: &ticketRevocationTx,
+				TxID:   ticketTx.TxHash().String(),
+			},
+			tx: ticketTx,
+			exp: &asset.WalletTransaction{
+				Type:   asset.TicketRevocation,
+				ID:     ticketTx.TxHash().String(),
+				Amount: toAtoms(1),
+			},
+		},
+	}
+
+	runTest := func(tt *test) {
+		t.Run(tt.name, func(t *testing.T) {
+			wallet, node, shutdown := tNewWallet()
+			defer shutdown()
+			node.validateAddress = tt.validateAddress
+			node.blockchain.rawTxs[tt.tx.TxHash()] = &wireTxWithHeight{
+				tx: tt.tx,
+			}
+			wt, err := wallet.idUnknownTx(context.Background(), tt.ltr)
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", tt.name, err)
+			}
+			if !reflect.DeepEqual(wt, tt.exp) {
+				t.Fatalf("%s: expected %+v, got %+v", tt.name, tt.exp, wt)
+			}
+		})
+	}
+
+	for _, tt := range tests {
+		runTest(tt)
 	}
 }

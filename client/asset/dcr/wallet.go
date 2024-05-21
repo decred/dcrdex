@@ -69,6 +69,19 @@ type XCWalletAccounts struct {
 	TradingAccount string
 }
 
+// ListTransactionsResult is similar to the walletjson.ListTransactionsResult,
+// but most fields omitted.
+type ListTransactionsResult struct {
+	TxID       string
+	BlockIndex *int64
+	BlockTime  int64
+	// Send set to true means that the inputs of the transaction were
+	// controlled by the wallet.
+	Send   bool `json:"send"`
+	Fee    *float64
+	TxType *walletjson.ListTransactionsTxType
+}
+
 // Wallet defines methods that the ExchangeWallet uses for communicating with
 // a Decred wallet and blockchain.
 type Wallet interface {
@@ -141,7 +154,7 @@ type Wallet interface {
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	// ListSinceBlock returns all wallet transactions confirmed since the specified
 	// height.
-	ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error)
+	ListSinceBlock(ctx context.Context, start int32) ([]ListTransactionsResult, error)
 	// MatchAnyScript looks for any of the provided scripts in the block specified.
 	MatchAnyScript(ctx context.Context, blockHash *chainhash.Hash, scripts [][]byte) (bool, error)
 	// AccountUnlocked returns true if the account is unlocked.

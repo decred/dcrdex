@@ -93,7 +93,6 @@ type NativeWallet struct {
 
 // NativeWallet must also satisfy the following interface(s).
 var _ asset.FundsMixer = (*NativeWallet)(nil)
-var _ asset.WalletHistorian = (*NativeWallet)(nil)
 
 func initNativeWallet(ew *ExchangeWallet) (*NativeWallet, error) {
 	spvWallet, ok := ew.wallet.(*spvWallet)

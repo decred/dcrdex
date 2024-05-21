@@ -1105,7 +1105,7 @@ const (
 	TicketPurchase
 	TicketVote
 	TicketRevocation
-	// SwapOrSend is used when a wallet scanned its historical transactions,
+	// SwapOrSend is used when a wallet scanned its historical transactions
 	// and was unable to determine if the transaction was a swap or a send.
 	SwapOrSend
 )
@@ -1140,8 +1140,8 @@ type WalletTransaction struct {
 	// TokenID will be non-nil if the BalanceDelta applies to the balance
 	// of a token.
 	TokenID *uint32 `json:"tokenID,omitempty"`
-	// Recipient wil be non-nil for Send transactions, and specifies the
-	// recipient of the send.
+	// Recipient will be non-nil for Send/Receive transactions, and specifies the
+	// recipient address of the transaction.
 	Recipient *string `json:"recipient,omitempty"`
 	// BondInfo will be non-nil for CreateBond and RedeemBond transactions.
 	BondInfo *BondTxInfo `json:"bondInfo,omitempty"`

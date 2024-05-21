@@ -100,7 +100,7 @@ type dcrWallet interface {
 	SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetRelayFee(relayFee dcrutil.Amount)
 	GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*wallet.TicketSummary, *wire.BlockHeader, error)
-	ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error)
+	GetTransactions(ctx context.Context, f func(*wallet.Block) (bool, error), startBlock, endBlock *wallet.BlockIdentifier) error
 	vspclient.Wallet
 	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
@@ -1335,6 +1335,52 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 		}
 		return nil
 	})
+}
+
+func (w *spvWallet) ListSinceBlock(ctx context.Context, start int32) ([]ListTransactionsResult, error) {
+	res := make([]ListTransactionsResult, 0)
+	f := func(block *wallet.Block) (bool, error) {
+		for _, tx := range block.Transactions {
+			convertTxType := func(txType wallet.TransactionType) *walletjson.ListTransactionsTxType {
+				switch txType {
+				case wallet.TransactionTypeTicketPurchase:
+					txType := walletjson.LTTTTicket
+					return &txType
+				case wallet.TransactionTypeVote:
+					txType := walletjson.LTTTVote
+					return &txType
+				case wallet.TransactionTypeRevocation:
+					txType := walletjson.LTTTRevocation
+					return &txType
+				case wallet.TransactionTypeCoinbase:
+				case wallet.TransactionTypeRegular:
+					txType := walletjson.LTTTRegular
+					return &txType
+				}
+				w.log.Warnf("unknown transaction type %v", tx.Type)
+				regularTxType := walletjson.LTTTRegular
+				return &regularTxType
+			}
+			fee := tx.Fee.ToUnit(dcrutil.AmountCoin)
+			var blockIndex, blockTime int64
+			if block.Header != nil {
+				blockIndex = int64(block.Header.Height)
+				blockTime = block.Header.Timestamp.Unix()
+			}
+			res = append(res, ListTransactionsResult{
+				TxID:       tx.Hash.String(),
+				BlockIndex: &blockIndex,
+				BlockTime:  blockTime,
+				Send:       len(tx.MyInputs) > 0,
+				TxType:     convertTxType(tx.Type),
+				Fee:        &fee,
+			})
+		}
+		return false, nil
+	}
+
+	startID := wallet.NewBlockIdentifierFromHeight(start)
+	return res, w.dcrWallet.GetTransactions(ctx, f, startID, nil)
 }
 
 func (w *spvWallet) SetTxFee(_ context.Context, feePerKB dcrutil.Amount) error {
