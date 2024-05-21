@@ -3015,8 +3015,7 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 			unbip(toWallet.AssetID), coinIDString(toWallet.AssetID, redeemCoinID))
 	case errors.Is(err, asset.ErrTxLost):
 		// The transaction was nonce-replaced or otherwise lost without
-		// rejection or with user acknowlegement. Try again if we're the taker.
-		// If we're the maker we'll give up and try to refund.
+		// rejection or with user acknowlegement. Try again.
 		var coinID order.CoinID
 		if match.Side == order.Taker {
 			coinID = match.MetaData.Proof.TakerRedeem

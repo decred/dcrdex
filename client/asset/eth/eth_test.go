@@ -796,7 +796,7 @@ func TestCheckPendingTxs(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			eth.confirmedNonceAt = new(big.Int).Add(tt.pendingTxs[0].Nonce, big.NewInt(1))
+			eth.confirmedNonceAt = tt.pendingTxs[0].Nonce
 			eth.pendingNonceAt = new(big.Int).Add(tt.pendingTxs[len(tt.pendingTxs)-1].Nonce, big.NewInt(1))
 
 			node.lastSignedTx = nil

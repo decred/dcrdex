@@ -4543,6 +4543,10 @@ func findMissingNonces(confirmedAt, pendingAt *big.Int, pendingTxs []*extendedWa
 	return
 }
 
+func (w *baseWallet) missingNoncesActionID() string {
+	return fmt.Sprintf("missingNonces_%d", w.baseChainID)
+}
+
 // updatePendingTx checks the confirmation status of a transaction. The
 // BlockNumber, Fees, and Timestamp fields of the extendedWalletTx are updated
 // if the transaction is confirmed, and if the transaction has reached the
@@ -4658,7 +4662,8 @@ func (w *baseWallet) checkPendingTxs() {
 	// lastConfirmed, will be the index of the last confirmed tx. All txs with
 	// nonces lower that lastConfirmed should also be confirmed, or else
 	// something isn't right and we may need to request user input.
-	var keepFromIndex, lastConfirmed int
+	var keepFromIndex int
+	var lastConfirmed int = -1
 	for i, pendingTx := range w.pendingTxs {
 		if w.ctx.Err() != nil {
 			return
@@ -4689,8 +4694,7 @@ func (w *baseWallet) checkPendingTxs() {
 	// If we have missing nonces, send an alert.
 	if !w.recoveryRequestSent && len(findMissingNonces(w.confirmedNonceAt, w.pendingNonceAt, w.pendingTxs)) != 0 {
 		w.recoveryRequestSent = true
-		uniqueID := fmt.Sprintf("missingNonces_%d", w.baseChainID)
-		w.requestAction(actionTypeMissingNonces, uniqueID, nil, nil)
+		w.requestAction(actionTypeMissingNonces, w.missingNoncesActionID(), nil, nil)
 	}
 
 	// Loop again, classifying problems and sending action requests.
@@ -4705,7 +4709,7 @@ func (w *baseWallet) checkPendingTxs() {
 		age := pendingTx.age()
 		// i < lastConfirmed means unconfirmed nonce < a confirmed nonce.
 		if (i < lastConfirmed) ||
-			w.confirmedNonceAt.Cmp(new(big.Int).Add(pendingTx.Nonce, big.NewInt(1))) > 0 ||
+			w.confirmedNonceAt.Cmp(pendingTx.Nonce) > 0 ||
 			(age >= txAgeOut && pendingTx.Receipt == nil && !pendingTx.indexed) {
 
 			// The tx in our records wasn't accepted. Where's the right one?
@@ -5022,7 +5026,9 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 		if skip {
 			w.log.Warnf("skipping storing underpriced replacement tx for nonce %d", nonce)
 		} else {
-			w.pendingTxs = append(w.pendingTxs, w.extendAndStoreTx(tx, asset.SelfSend, 0, nil))
+			pendingTx := w.extendAndStoreTx(tx, asset.SelfSend, 0, nil)
+			w.emitTransactionNote(pendingTx.WalletTransaction, true)
+			w.pendingTxs = append(w.pendingTxs, pendingTx)
 			sort.Slice(w.pendingTxs, func(i, j int) bool {
 				return w.pendingTxs[i].Nonce.Cmp(w.pendingTxs[j].Nonce) < 0
 			})
@@ -5035,6 +5041,7 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 			}
 		}
 	}
+	w.emit.ActionResolved(w.missingNoncesActionID())
 	return nil
 }
 
