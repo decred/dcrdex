@@ -4,8 +4,8 @@ package core
 
 // The asset and dcrdex harnesses should be running before executing this test.
 //
-// The dcrdex harness rebuilds the dcrdex binary with dex.testLockTimeTaker=30s
-// and dex.testLockTimeMaker=1m before running the binary, making it possible
+// The ./run script rebuilds the dcrdex binary with dex.testLockTimeTaker=1m
+// and dex.testLockTimeMaker=2m before running the binary, making it possible
 // for this test to wait for swap locktimes to expire and ensure that refundable
 // swaps are actually refunded when the swap locktimes expire.
 //
@@ -70,8 +70,6 @@ var (
 	ethAlphaIPCFile     = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
 	polygonAlphaIPCFile = filepath.Join(dextestDir, "polygon", "alpha", "bor", "bor.ipc")
 
-	tLockTimeTaker   = 30 * time.Second
-	tLockTimeMaker   = 1 * time.Minute
 	ethUsdcID, _     = dex.BipSymbolID("usdc.eth")
 	polygonUsdcID, _ = dex.BipSymbolID("usdc.polygon")
 )
@@ -516,14 +514,14 @@ func testNoMakerRedeem(s *simulationTest) error {
 	preFilter1 := func(route string) error {
 		if route == msgjson.InitRoute && atomic.CompareAndSwapUint32(&killed, 0, 1) {
 			s.client1.disableWallets()
-			time.AfterFunc(tLockTimeTaker, func() { enable(s.client1) })
+			time.AfterFunc(s.client1.core.lockTimeTaker, func() { enable(s.client1) })
 		}
 		return nil
 	}
 	preFilter2 := func(route string) error {
 		if route == msgjson.InitRoute && atomic.CompareAndSwapUint32(&killed, 0, 1) {
 			s.client2.disableWallets()
-			time.AfterFunc(tLockTimeTaker, func() { enable(s.client2) })
+			time.AfterFunc(s.client1.core.lockTimeTaker, func() { enable(s.client2) })
 		}
 		return nil
 	}
@@ -1899,8 +1897,6 @@ func (client *simulationClient) init(ctx context.Context) error {
 		return err
 	}
 
-	client.core.lockTimeTaker = tLockTimeTaker
-	client.core.lockTimeMaker = tLockTimeMaker
 	client.notes = client.startNotificationReader(ctx)
 	return nil
 }

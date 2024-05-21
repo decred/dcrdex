@@ -100,7 +100,7 @@ func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pk
 
 	// Scan block filters to find the tx block if it is yet unknown.
 	if txBlock == nil {
-		dcr.log.Infof("Output %s:%d NOT yet found; now searching with block filters.", op.txHash, op.vout)
+		dcr.log.Tracef("Output %s:%d NOT yet found; now searching with block filters.", op.txHash, op.vout)
 		txBlock, err = dcr.scanFiltersForTxBlock(ctx, tx, [][]byte{pkScript}, earliestTxTime)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error checking if tx %s is mined: %w", tx.hash, err)
