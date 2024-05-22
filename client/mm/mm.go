@@ -896,10 +896,14 @@ func (m *MarketMaker) UpdateRunningBotInventory(mkt *MarketWithHost, balanceDiff
 		return err
 	}
 
-	return rb.withPause(func() error {
+	if err := rb.withPause(func() error {
 		rb.bot.updateInventory(balanceDiffs)
 		return nil
-	})
+	}); err != nil {
+		rb.cm.Disconnect()
+		return fmt.Errorf("configuration update error. bot stopped: %w", err)
+	}
+	return nil
 }
 
 // UpdateRunningBotCfg updates the configuration and balance allocation for a
@@ -967,7 +971,8 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 		}
 		return nil
 	}); err != nil {
-		return err
+		rb.cm.Disconnect()
+		return fmt.Errorf("running bot reconfiguration unsuccessful. bot stopped: %w", err)
 	}
 
 	updateSuccess = true

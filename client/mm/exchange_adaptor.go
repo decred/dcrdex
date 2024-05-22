@@ -194,7 +194,7 @@ type pendingCEXOrder struct {
 }
 
 // market is the market-related data for the unifiedExchangeAdaptor and the
-// calculators. market provides a nubmer of methods for conversions and
+// calculators. market provides a number of methods for conversions and
 // formatting.
 type market struct {
 	host        string
@@ -289,7 +289,6 @@ type unifiedExchangeAdaptor struct {
 	libxc.CEX
 
 	ctx             context.Context
-	wg              sync.WaitGroup
 	botID           string
 	log             dex.Logger
 	fiatRates       atomic.Value // map[uint32]float64
@@ -2720,24 +2719,25 @@ func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, 
 		return nil, fmt.Errorf("failed to store new run in event log db: %v", err)
 	}
 
-	u.wg.Add(1)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		defer u.wg.Done()
+		defer wg.Done()
 		<-ctx.Done()
 		u.eventLogDB.endRun(startTime, u.mwh, time.Now().Unix())
 	}()
 
-	u.wg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer u.wg.Done()
+		defer wg.Done()
 		<-ctx.Done()
 		u.cancelAllOrders(ctx)
 	}()
 
 	// Listen for core notifications
-	u.wg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer u.wg.Done()
+		defer wg.Done()
 		feed := u.clientCore.NotificationFeed()
 		defer feed.ReturnFeed()
 
@@ -2751,9 +2751,9 @@ func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, 
 		}
 	}()
 
-	u.wg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer u.wg.Done()
+		defer wg.Done()
 		refreshTime := time.Minute * 10
 		for {
 			select {
@@ -2775,7 +2775,7 @@ func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, 
 		return nil, fmt.Errorf("error starting bot loop: %w", err)
 	}
 
-	return &u.wg, nil
+	return &wg, nil
 }
 
 // RunStats is a snapshot of the bot's balances and performance at a point in

@@ -447,9 +447,10 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 
 	tradeUpdates := a.cex.SubscribeTradeUpdates()
 
-	a.wg.Add(1)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		defer a.wg.Done()
+		defer wg.Done()
 		for {
 			select {
 			case ni := <-bookFeed.Next():
@@ -463,9 +464,9 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
-	a.wg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer a.wg.Done()
+		defer wg.Done()
 		for {
 			select {
 			case update := <-tradeUpdates:
@@ -476,9 +477,9 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
-	a.wg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer a.wg.Done()
+		defer wg.Done()
 		orderUpdates := a.core.SubscribeOrderUpdates()
 		for {
 			select {
@@ -490,13 +491,13 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
-	a.wg.Add(1)
+	wg.Add(1)
 	go func() {
-		defer a.wg.Done()
+		defer wg.Done()
 		<-ctx.Done()
 	}()
 
-	return &a.wg, nil
+	return &wg, nil
 }
 
 func (a *arbMarketMaker) updateConfig(cfg *BotConfig) error {

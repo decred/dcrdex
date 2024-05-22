@@ -172,7 +172,7 @@ func (ui *UnitInfo) ConventionalString(v uint64) string {
 	return strconv.FormatFloat(float64(v)/float64(c), 'f', prec, 64)
 }
 
-// FormatAtoms formts the atomic value as a string with units. The number is
+// FormatAtoms formats the atomic value as a string with units. The number is
 // formatted with full precision. For small values, the value is formatted in
 // atomic units, while for larger values the value is formatted in conventional
 // units.

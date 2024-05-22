@@ -463,9 +463,10 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	}
 
 	// Process book updates
-	m.wg.Add(1)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		defer m.wg.Done()
+		defer wg.Done()
 		for {
 			select {
 			case n := <-bookFeed.Next():
@@ -479,7 +480,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 		}
 	}()
 
-	return &m.wg, nil
+	return &wg, nil
 }
 
 func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
