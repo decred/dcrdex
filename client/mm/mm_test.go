@@ -562,6 +562,10 @@ func (c *tCEX) TradeStatus(ctx context.Context, id string, baseID, quoteID uint3
 	return c.tradeStatus, nil
 }
 
+func (c *tCEX) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {
+	return nil, nil, nil
+}
+
 type prepareRebalanceResult struct {
 	rebalance   int64
 	cexReserves uint64
@@ -683,6 +687,8 @@ func (c *tBotCexAdaptor) PrepareRebalance(ctx context.Context, assetID uint32) (
 	return res.rebalance, res.dexReserves, res.cexReserves
 }
 
+func (c *tBotCexAdaptor) Book() (_, _ []*core.MiniOrder, _ error) { return nil, nil, nil }
+
 type tExchangeAdaptor struct {
 	dexBalances map[uint32]*BotBalance
 	cexBalances map[uint32]*BotBalance
@@ -710,6 +716,9 @@ func (t *tExchangeAdaptor) stats() *RunStats                         { return ni
 func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig)              {}
 func (t *tExchangeAdaptor) updateInventory(diffs *BotInventoryDiffs) {}
 func (t *tExchangeAdaptor) timeStart() int64                         { return 0 }
+func (t *tExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
+	return nil, nil, nil
+}
 
 func TestAvailableBalances(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

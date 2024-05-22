@@ -7,6 +7,7 @@ declare global {
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
     user: () => User
+    cexBook: () => Promise<void>
     isWebview?: () => boolean
     webkit: any | undefined
     openUrl: (url: string) => void

@@ -1778,6 +1778,34 @@ func (s *WebServer) apiRunLogs(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiCEXBook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Host    string `json:"host"`
+		BaseID  uint32 `json:"baseID"`
+		QuoteID uint32 `json:"quoteID"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	buys, sells, err := s.mm.CEXBook(req.Host, req.BaseID, req.QuoteID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error CEX Book: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool            `json:"ok"`
+		Book *core.OrderBook `json:"book"`
+	}{
+		OK: true,
+		Book: &core.OrderBook{
+			Buys:  buys,
+			Sells: sells,
+		},
+	}, s.indent)
+
+}
+
 func (s *WebServer) apiShieldedStatus(w http.ResponseWriter, r *http.Request) {
 	var assetID uint32
 	if !readPost(w, r, &assetID) {

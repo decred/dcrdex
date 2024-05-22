@@ -24,7 +24,7 @@ var (
 type Wallet interface {
 	DepositAddress() string
 	Confirmations(ctx context.Context, txID string) (uint32, error)
-	Send(ctx context.Context, addr string, amt float64) (string, error)
+	Send(ctx context.Context, addr, coin string, amt float64) (string, error)
 }
 
 type utxoWallet struct {
@@ -85,7 +85,7 @@ func (w *utxoWallet) unlock(ctx context.Context) {
 	}
 }
 
-func (w *utxoWallet) Send(ctx context.Context, addr string, amt float64) (string, error) {
+func (w *utxoWallet) Send(ctx context.Context, addr, _ string, amt float64) (string, error) {
 	w.unlock(ctx)
 	cmd := exec.CommandContext(ctx, "./alpha", "sendtoaddress", addr, strconv.FormatFloat(amt, 'f', 8, 64))
 	cmd.Dir = w.dir
@@ -153,8 +153,12 @@ func (w *evmWallet) Confirmations(ctx context.Context, txID string) (uint32, err
 	return 0, nil
 }
 
-func (w *evmWallet) Send(ctx context.Context, addr string, amt float64) (string, error) {
-	cmd := exec.CommandContext(ctx, "./sendtoaddress", addr, strconv.FormatFloat(amt, 'f', 9, 64))
+func (w *evmWallet) Send(ctx context.Context, addr, coin string, amt float64) (string, error) {
+	script := "./sendtoaddress"
+	if strings.ToLower(coin) == "usdc" {
+		script = "./sendUSDC"
+	}
+	cmd := exec.CommandContext(ctx, script, addr, strconv.FormatFloat(amt, 'f', 9, 64))
 	cmd.Dir = w.dir
 	log.Tracef("Running evmWallet.Send command %q from directory %q", cmd, w.dir)
 	b, err := cmd.CombinedOutput()

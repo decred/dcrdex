@@ -1044,9 +1044,14 @@ export default class MarketsPage extends BasePage {
   }
 
   /* setMarket sets the currently displayed market. */
-  async setMarket (host: string, base: number, quote: number) {
+  async setMarket (host: string, baseID: number, quoteID: number) {
     const dex = app().user.exchanges[host]
     const page = this.page
+
+    window.cexBook = async () => {
+      const res = await postJSON('/api/cexbook', { host, baseID, quoteID })
+      console.log(res.book)
+    }
 
     // reset form inputs
     page.lotField.value = ''
@@ -1079,10 +1084,10 @@ export default class MarketsPage extends BasePage {
 
     for (const s of this.stats) Doc.show(s.row)
 
-    const baseCfg = dex.assets[base]
-    const quoteCfg = dex.assets[quote]
+    const baseCfg = dex.assets[baseID]
+    const quoteCfg = dex.assets[quoteID]
 
-    const [bui, qui] = [app().unitInfo(base, dex), app().unitInfo(quote, dex)]
+    const [bui, qui] = [app().unitInfo(baseID, dex), app().unitInfo(quoteID, dex)]
 
     const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
     Doc.hide(page.maxOrd, page.chartErrMsg)
@@ -1091,8 +1096,8 @@ export default class MarketsPage extends BasePage {
       this.maxEstimateTimer = null
     }
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
-    const baseAsset = app().assets[base]
-    const quoteAsset = app().assets[quote]
+    const baseAsset = app().assets[baseID]
+    const quoteAsset = app().assets[quoteID]
     const mkt = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
@@ -1121,21 +1126,21 @@ export default class MarketsPage extends BasePage {
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
 
     this.displayMessageIfMissingWallet()
-    this.balanceWgt.setWallets(host, base, quote)
+    this.balanceWgt.setWallets(host, baseID, quoteID)
     this.setMarketDetails()
     this.setCurrMarketPrice()
 
     // if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
 
     // depth chart
-    ws.request('loadmarket', makeMarket(host, base, quote))
+    ws.request('loadmarket', makeMarket(host, baseID, quoteID))
 
     State.storeLocal(State.lastMarketLK, {
       host: host,
-      base: base,
-      quote: quote
+      base: baseID,
+      quote: quoteID
     })
-    this.marketList.select(host, base, quote)
+    this.marketList.select(host, baseID, quoteID)
     this.setLoaderMsgVisibility()
     this.setTokenApprovalVisibility()
     this.setRegistrationStatusVisibility()

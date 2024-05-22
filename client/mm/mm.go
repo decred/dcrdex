@@ -1167,6 +1167,18 @@ func (m *MarketMaker) RunLogs(startTime int64, mkt *MarketWithHost, n uint64, re
 	return m.eventLogDB.runEvents(startTime, mkt, n, refID, false)
 }
 
+// CEXBook generates a snapshot of the specified CEX order book.
+func (m *MarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {
+	mwh := MarketWithHost{Host: host, BaseID: baseID, QuoteID: quoteID}
+	m.runningBotsMtx.RLock()
+	bot, found := m.runningBots[mwh]
+	m.runningBotsMtx.RUnlock()
+	if !found {
+		return nil, nil, fmt.Errorf("no running bot found for market %s", mwh)
+	}
+	return bot.adaptor.Book()
+}
+
 // LotFees are the fees for trading one lot.
 type LotFees struct {
 	Swap   uint64 `json:"swap"`

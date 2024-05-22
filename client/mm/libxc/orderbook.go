@@ -160,3 +160,21 @@ func (ob *orderbook) midGap() uint64 {
 	bestBuy, bestSell := bestBuyI.Value.(*obEntry), bestSellI.Value.(*obEntry)
 	return (bestBuy.rate + bestSell.rate) / 2
 }
+
+// snap generates a snapshot of the book.
+func (ob *orderbook) snap() (bids, asks []*obEntry) {
+	ob.mtx.RLock()
+	defer ob.mtx.RUnlock()
+
+	bids = make([]*obEntry, 0, ob.bids.Len())
+	for curr := ob.bids.Front(); curr != nil; curr = curr.Next() {
+		bids = append(bids, curr.Value.(*obEntry))
+	}
+
+	asks = make([]*obEntry, 0, ob.asks.Len())
+	for curr := ob.asks.Front(); curr != nil; curr = curr.Next() {
+		asks = append(asks, curr.Value.(*obEntry))
+	}
+
+	return bids, asks
+}
