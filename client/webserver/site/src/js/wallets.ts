@@ -28,6 +28,7 @@ import {
   WalletNote,
   CustomWalletNote,
   TipChangeNote,
+  Exchange,
   Market,
   PeerSource,
   WalletPeer,
@@ -1681,11 +1682,11 @@ export default class WalletsPage extends BasePage {
   showAvailableMarkets (assetID: number) {
     const page = this.page
     const exchanges = app().user.exchanges
-    const markets: [string, Market][] = []
+    const markets: [string, Exchange, Market][] = []
     for (const xc of Object.values(exchanges)) {
       if (!xc.markets) continue
       for (const mkt of Object.values(xc.markets)) {
-        if (mkt.baseid === assetID || mkt.quoteid === assetID) markets.push([xc.host, mkt])
+        if (mkt.baseid === assetID || mkt.quoteid === assetID) markets.push([xc.host, xc, mkt])
       }
     }
 
@@ -1697,15 +1698,15 @@ export default class WalletsPage extends BasePage {
       return volume / conversionFactor
     }
 
-    markets.sort((a: [string, Market], b: [string, Market]): number => {
-      const [hostA, mktA] = a
-      const [hostB, mktB] = b
+    markets.sort((a: [string, Exchange, Market], b: [string, Exchange, Market]): number => {
+      const [hostA,, mktA] = a
+      const [hostB,, mktB] = b
       if (!mktA.spot && !mktB.spot) return hostA.localeCompare(hostB)
       return spotVolume(assetID, mktB) - spotVolume(assetID, mktA)
     })
     Doc.empty(page.availableMarkets)
 
-    for (const [host, mkt] of markets) {
+    for (const [host, xc, mkt] of markets) {
       const { spot, baseid, basesymbol, quoteid, quotesymbol } = mkt
       const row = page.marketRow.cloneNode(true) as PageElement
       page.availableMarkets.appendChild(row)
@@ -1714,8 +1715,8 @@ export default class WalletsPage extends BasePage {
       tmpl.baseLogo.src = Doc.logoPath(basesymbol)
       tmpl.quoteLogo.src = Doc.logoPath(quotesymbol)
       Doc.empty(tmpl.baseSymbol, tmpl.quoteSymbol)
-      tmpl.baseSymbol.appendChild(Doc.symbolize(app().assets[baseid], true))
-      tmpl.quoteSymbol.appendChild(Doc.symbolize(app().assets[quoteid], true))
+      tmpl.baseSymbol.appendChild(Doc.symbolize(xc.assets[baseid], true))
+      tmpl.quoteSymbol.appendChild(Doc.symbolize(xc.assets[quoteid], true))
 
       if (spot) {
         const convRate = app().conventionalRate(baseid, quoteid, spot.rate, exchanges[host])
