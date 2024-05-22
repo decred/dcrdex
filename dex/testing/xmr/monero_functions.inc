@@ -1,0 +1,394 @@
+#!/usr/bin/env bash
+
+# https://www.getmonero.org/resources/developer-guides/daemon-rpc.html#
+
+daemon-rpc-request() {    # older rpc style
+	local port="${1:?}"   # monerod port
+	local method="${2:?}" # Non-JSON RPC method name
+	local params="${3:?}" # JSON parameters to method
+	curl --http0.9 "http://localhost:${port}/${method}" \
+		-d "${params}" \
+		-H 'Content-Type: application/json'
+}
+
+# https://www.getmonero.org/resources/developer-guides/wallet-rpc.html
+
+monero-rpc-request() {    # newer json2 style
+	local port="${1:?}"   # monerod or monero-wallet-rpc port
+	local method="${2:?}" # RPC method name
+	local params="${3:?}" # JSON parameters to method
+	curl --http0.9 "http://localhost:${port}/json_rpc" \
+		--silent \
+		--show-error \
+		-d "{\"jsonrpc\":\"2.0\",\"id\":\"0\",\"method\":\"${method}\",\"params\":${params}}" \
+		-H 'Content-Type: application/json' \
+		-w "\n"
+}
+
+# Daemon
+
+# get info for a daemon including height, latest block hash, etc.
+get_info() {
+	local port="${1:?input a monero daemon port}"
+	params="{}"
+	monero-rpc-request ${port} "get_info" "${params}"
+}
+
+# mine into a mining (primary) address
+generate() {
+	local mine_addr="${1:?input a valid mine to (primary) address}"
+	local port="${2:?input a valid daemon rpc port}"
+	local num_blocks="${3:-1}"
+	params="{\"amount_of_blocks\":${num_blocks},\"wallet_address\":\"${mine_addr}\",\"starting_nonce\": 0}"
+	monero-rpc-request "${port}" "generateblocks" "${params}"
+}
+
+sendrawtransaction() {
+	local port="${1:?input a valid daemon rpc port}"
+	local tx_as_hex="${2:?input a valid tx hex string}"
+	local do_not_relay="${3:-false}" # do not relay to other nodes
+	params="{\"tx_as_hex\":\"${tx_as_hex}\",\"do_not_relay\":${do_not_relay}}"
+	daemon-rpc-request "${port}" "sendrawtransaction" "${params}"
+}
+
+get_transaction_pool() {
+	local port="${1:?input a valid daemon rpc port}"
+	params="{}"
+	daemon-rpc-request "${port}" "get_transaction_pool" "${params}"
+}
+
+get_transactions() {
+	local port="${1:?input a valid daemon rpc port}"
+	local txs_hashes="${2:?input one or more tx hashes as a string 1,2,..}"
+	local decode_as_json="${3:-false}"
+	local txs_hashes_json=""
+	IFS=',' read -ra TXID <<< "$txs_hashes"
+	for i in "${TXID[@]}"; do
+  		 txs_hashes_json+="\""
+  		 txs_hashes_json+="$i"
+  		 txs_hashes_json+="\","
+	done
+	echo $txs_hashes_json
+	txs_hashes_json=${txs_hashes_json%?} # will work in BASH 3.x
+	echo $txs_hashes_json
+	params="{\"txs_hashes\":[${txs_hashes_json}],\"decode_as_json\":${decode_as_json}}"
+	echo $params
+	daemon-rpc-request "${port}" "get_transactions" "${params}"
+}
+
+# Wallets
+
+# recreate a wallet from seed
+restore_deterministic_wallet() {
+	local port="${1:?input a monero wallet port}"
+	local wallet_name="${2:?specify wallet name}"
+	local pass="${3:-""}" # default is no password ""
+	local seed="${4:?input seed 25 words from English wordlist}"
+	params="{\"filename\":\"${wallet_name}\",\"password\":\"${pass}\",\"seed\":\"${seed}\"}"
+	monero-rpc-request "${port}" "restore_deterministic_wallet" "${params}" | jq '.'
+ }
+
+generate_from_keys() {
+	local port="${1:?input a monero wallet port}"
+	local wallet_name="${2:?specify wallet name}"
+	local address="${3:?specify wallet primary address}"
+	local spendkey="${4:-""}" # if no spendkey then a view only wallet will be created
+	local viewkey="${5:?specify wallet viewkey}"
+	local pass="${6:-""}" # default is no password ""
+	if [ "${spendkey}" != "" ]
+	then
+		params="{\"filename\":\"${wallet_name}\",\"address\":\"${address}\",\"spendkey\":\"${spendkey}\",\"viewkey\":\"${viewkey}\",\"password\":\"${pass}\"}"
+	else
+		params="{\"filename\":\"${wallet_name}\",\"address\":\"${address}\",\"viewkey\":\"${viewkey}\",\"password\":\"${pass}\"}"
+	fi
+	monero-rpc-request "${port}" "generate_from_keys" "${params}" | jq '.'
+}
+
+# create a new nettype mainnet wallet (on the fake regtest network chain)
+create_wallet() {
+	local port="${1:?input a monero wallet port}"
+	local wallet_name="${2:?specify wallet name}"
+	local pass="${3:-""}" # default is no password ""
+	params="{\"filename\":\"${wallet_name}\",\"password\":\"${pass}\",\"language\":\"English\"}"
+	monero-rpc-request "${port}" "create_wallet" "${params}" | jq '.'
+}
+
+# refresh wallet from daemon known transfers
+refresh_wallet() {
+	local port="${1:?input a monero wallet port}"
+	monero-rpc-request "${port}" "refresh" "{}"
+}
+
+# open a wallet that has a '--wallet_dir' known to wallet server in the dextest/monero/wallets tree
+open_wallet() {
+	local port="${1:?input a valid wallet rpc port}"
+	local filename="${2:?input a valid wallet filename such a fred, charlie, etc.}"
+	local password="${3:-""}" # password defaults to "" no password
+	params="{\"filename\":\"${filename}\",\"password\":\"${password}\"}"
+	monero-rpc-request ${port} "open_wallet" "${params}"
+}
+
+# save wallet and close; can reopen
+close_wallet() {
+	local port="${1:?input a valid wallet rpc port}"
+	params="{}"
+	monero-rpc-request ${port} "close_wallet" "${params}"
+}
+
+# save wallet and exit monero-wallet-rpc process
+stop_wallet() {
+	local port="${1:?input a valid wallet rpc port}"
+	params="{}"
+	monero-rpc-request ${port} "stop_wallet" "${params}"
+}
+
+# get the primary address of a wallet account 0 address index 0
+get_primary_address() {
+	local port="${1:?input a valid wallet rpc port}"
+	# account 0, address index 0
+	params="{\"account_index\":0,\"address_indices\":[0]}"
+	monero-rpc-request "${port}" "get_address" "${params}" | jq -r '.result.address'
+}
+
+# get simple balance from a wallet account - defaults to account 0
+get_balance() {
+	local port="${1:?input a valid wallet rpc port}"
+	local account="${2:-0}"
+	params="{\"account_index\":${account}}" # no sub-addresses
+	monero-rpc-request "${port}" "get_balance" "${params}"
+}
+
+incoming_transfers() {
+	local port="${1:?input a valid wallet rpc port}"
+	local transfer_type="${2:-all}"
+	# all, available (not yet spent) or unavailable (spent)
+	params="{\"transfer_type\":\"${transfer_type}\"}"
+	monero-rpc-request "${port}" "incoming_transfers" "${params}"
+}
+
+# get a key from a wallet - key_type is either "view_key" or "spend_key" or "mnemonic"
+query_key() {
+	local port="${1:?input a valid wallet rpc port}"
+	local key_type="${2,?input either view_key or mnemonic}"
+	params="{\"key_type\":\"${key_type}\"}"
+	monero-rpc-request "${port}" "query_key" "${params}"
+}
+
+# transfer monero to 1 recipient at their account 0, subaddress-indeces [0]
+transfer_simple() {
+	local port="${1:?input a valid wallet rpc port}"
+	local amount="${2:?input an amount of monero to send in atomic units 1e12}"
+	local address="${3:?input a valid destination wallet address}"
+	local unlock_time=${4:-0} # unlock after n blocks
+	destinations="[{\"amount\":${amount},\"address\":\"${address}\"}]"
+    fixed_params="\"account_index\":0,\"subaddr_indices\":[0],\"priority\":0,\"ring_size\":11,\"get_tx_key\": true,\"get_tx_hex\":true"
+	params="{\"destinations\":[{\"amount\":${amount},\"address\":\"${address}\",\"unlock_time\":${unlock_time}}], "${fixed_params}" }"
+	echo "${params}"
+	monero-rpc-request "${port}" "transfer" "${params}"
+}
+
+# Online Tx Creation & Offline Signing
+
+# export wallet outputs
+export_outputs() {
+	local port="${1:?input a valid wallet rpc port}"
+	params="{\"all\":true}"
+	monero-rpc-request "${port}" "export_outputs" "${params}" | jq '.'
+}
+
+# import outputs into a cold wallet only for offline signing process - unused
+import_outputs() {
+	local port="${1:?input a valid wallet rpc port for an offline cold wallet}"
+	local outputs_data_hex="${2:?input a valid outputs data hex string}"
+	params="{\"outputs_data_hex\":\"${outputs_data_hex}\"}"
+	echo "${params}"
+	monero-rpc-request "${port}" "import_outputs" "${params}"
+}
+
+export_key_images() {
+	local port="${1:?input a valid wallet rpc port}"
+	params="{\"all\":true}"
+	monero-rpc-request "${port}" "export_key_images" "${params}" | jq '.'
+}
+
+import_key_images() {
+	local port="${1:?input a valid wallet rpc port}"
+	local signed_key_images="${2:?input a a set valid  key images}" # json array of signed key images:
+	params="{\"signed_key_images\":\"${signed_key_images}\"}"
+	monero-rpc-request "${port}" "import_key_images" "${params}"
+}
+
+# transfer monero to 1 recipient at their account 0, subaddress-indeces [0] 
+# but do not send. If called from a normal wallet with keys it generates a 
+# signed tx. Iff it is called for a view only wallet (like watch only) an
+# unsigned_txset (an unsigned tx) will be also returned. This can then be 
+# signed by the parent full wallet proxy but offline (i.e. not connected to
+# alpha node) using the interactive monero-wallet-cli.
+#
+# Note: This is for online unsigned tx creation and offline signing also and can
+# also be used with a hardware wallet device like trezor. As a consequence not
+# only must the offline wallet have no connection to the monerod it can never
+# have had any connection to monerod or it is considered a Hot wallet and thus
+# is prevented from importing outputs by the monero code.
+# https://github.com/monero-project/monero/issues/9333
+#
+transfer_no_relay() {
+	local port="${1:?input a valid wallet rpc port (view-only wallet only to generate unsigned tx for cold signing Only}"
+	local amount="${2:?input an amount of monero to send in atomic units 1e12}"
+	local address="${3:?input a valid destination wallet address}"
+	local unlock_time=${4:-0} # unlock after n blocks
+	destinations="[{\"amount\":${amount},\"address\":\"${address}\"}]"
+    other_params="\"account_index\":0,\"subaddr_indices\":[0],\"priority\":0,\"unlock_time\":${unlock_time},\"do_not_relay\":true,\"get_tx_key\":true,\"get_tx_hex\":true,\"get_tx_metadata\":true"
+	params="{\"destinations\":[{\"amount\":${amount},\"address\":\"${address}\"}], "${other_params}" }"
+	echo "${params}"
+	monero-rpc-request "${port}" "transfer" "${params}"
+}
+
+# sign a prepared unsigned txset -- offline manual experimental
+# 
+# Note: can only be done by an offline cold wallet that has never been "online"
+# use the monero-wallet-cli interactive tool instead in a manual process with
+# an unconnected charlie_view wallet which holds the inputs but not any keys.
+sign_transfer() {
+	local port="${1:?input a valid wallet rpc port for a cold wallet}"
+	local unsigned_txset="${2:?input an unsigned tx set}"
+	params="{\"unsigned_txset\":\"${unsigned_txset}\"}"
+	echo "${params}"
+	monero-rpc-request "${port}" "sign_transfer" "${params}"
+}
+
+cmd_help() {
+	echo "Commands Help:"
+	echo "--------------"
+	echo "alpha_get_transactions"
+	echo "- get transaction details for one or more txid"
+	echo "- inputs:"
+	echo "  - tx_hashes - hash1,hash2,hash3,..."
+	echo "  - decode_as_json - Optional - returns more detail but in a escaped raw json format"
+	echo ""
+	echo "alpha_info"
+	echo "- get running daemon details - height, etc."
+	echo "- inputs: None"
+	echo ""
+	echo "alpha_sendrawtransaction"
+	echo "- broadcast a previously built signed tx"
+	echo "- inputs:"
+	echo "  - tx_as_hex string - can be generated with charlie_build_tx or fred_build_tx"
+	echo ""
+	echo "alpha_transaction_pool"
+	echo "- get mempool details"
+	echo "- inputs: None"
+	echo ""
+	echo "mine-to-bill"
+	echo "- generate 1 or more blocks to bill wallet"
+	echo "- inputs:"
+	echo "  - num_blocks - defaults to 1"
+	echo ""
+	echo "bill_balance"
+	echo "- get bill wallet balance details"
+	echo "- inputs: None"
+	echo ""
+	echo "bill_refresh_wallet"
+	echo "- update bill's wallet from the daemon latest info"
+	echo "- inputs: None"
+	echo ""
+	echo "bill_transfer_to"
+	echo "- build, sign and broadcast a transaction from bill wallet to another address"
+	echo "- inputs:"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 echo = 1.23 XMR"
+	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
+	echo ""
+	echo "charlie_balance"
+	echo "- get charlie wallet balance details"
+	echo "- inputs: None"
+	echo ""
+	echo "charlie_refresh_wallet"
+	echo "- update charlie's wallet from the daemon latest info"
+	echo "- inputs: None"
+	echo ""
+	echo "charlie_build_tx"
+	echo "- build a signed tx for later broadcasting using alpha_sendrawtransaction"
+	echo "- inputs:"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 = 1.23 XMR"
+	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
+	echo "  - unlock_time - unlock after n blocks and make spendable - defaults to 0 (no lock)"
+	echo "-outputs:"
+	echo "  - signed tx_blob"
+	echo "  - tx_hash"
+	echo ""
+	echo "charlie_incoming_transfers"
+	echo "- get a list of incoming mined transfers to charlie wallet"
+	echo "- inputs: None"
+	echo ""
+	echo "charlie_transfer_to"
+	echo "- build, sign and broadcast a transaction from charlie wallet to another address"
+	echo "- inputs"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 echo = 1.23 XMR"
+	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
+	echo "  - unlock_time - unlock after n blocks and make spendable - defaults to 0 (no lock)"
+	echo ""   
+	echo "fred_export_outputs"
+	echo "- export fred outputs hex"
+	echo "- input:"
+	echo "  - all - defaults to true - otherwise only new outputs since the last call"
+	echo ""
+	echo "charlie_export_outputs"
+	echo "- export charlie outputs hex"
+	echo "- input:"
+	echo "  - all - defaults to true - otherwise only new outputs since the last call"
+	echo ""
+	echo "charlie_view_export_outputs"
+	echo "- export charlie_view outputs hex - charlie_view knows the outputs but has no spend key"
+	echo "- inputs: None"
+	echo "- only useful in offline, cold signing process using monero-wallet-cli interactive tool"
+	echo "  must be hex decoded into a file to use in monero-wallet-cli"
+	echo ""
+	echo "fred_export_key_images"
+	echo "- export signed key images from fred wallet - an array of key images and ephemeral signatures"
+	echo "- input:"
+	echo "  - all - defaults to true - otherwise only new key images since the last call"
+	echo ""
+	echo "charlie_export_key_images"
+	echo "- export signed key images from charlie wallet - an array of key images and ephemeral signatures"
+	echo "- input:"
+	echo "  - all - defaults to true - otherwise only new key images since the last call"
+	echo ""
+	echo "fred_balance"
+	echo "- get fred wallet balance details"
+	echo "- inputs: None"
+	echo ""
+	echo "fred_build_tx"
+	echo "- build a signed tx for later broadcasting using alpha_sendrawtransaction"
+	echo "- inputs:"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 = 1.23 XMR"
+	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
+	echo "  - unlock_time - unlock after n blocks and make spendable - defaults to 0 (no lock)"
+	echo "-outputs:"
+	echo "  - signed tx_blob"
+	echo "  - tx_hash"
+	echo ""
+	echo "fred_refresh_wallet"
+	echo "- update fred's wallet from the daemon latest info"
+	echo "- inputs: None"
+	echo ""
+	echo "fred_incoming_transfers"
+	echo "- get a list of incoming mined transfers to fred wallet"
+	echo "- inputs: None"
+	echo ""
+	echo "fred_transfer_to"
+	echo "- build, sign and broadcast a transaction from bill wallet to another address"
+	echo "- inputs"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 echo = 1.23 XMR"
+	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
+	echo "  - unlock_time - unlock after n blocks and make spendable - defaults to 0 (no lock)"
+	echo ""
+	echo "wallets"
+	echo "- wallet details exported to the harness environment - useful for building commands in the harness window 0"
+	echo ""
+	echo "help"
+	echo "- this help"
+	echo ""
+	echo "quit"
+	echo "- shutdown daemons and the quit harness"
+	echo ""
+}
