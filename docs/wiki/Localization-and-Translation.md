@@ -1,6 +1,6 @@
 # Localization and Translation
 
-The DEX client supports translations for the browser frontend and the notification messages from the backend.
+Bison Wallet supports translations for the browser frontend and the notification messages from the backend.
 
 To add a new locale, the translations must be defined in the following locations:
 

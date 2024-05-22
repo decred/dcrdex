@@ -10,7 +10,7 @@ echo "Go version: $GV"
 go generate -x ./client/webserver/site # no -write
 
 # list of all modules to test
-modules=". /dex/testing/loadbot /client/cmd/dexc-desktop"
+modules=". /dex/testing/loadbot /client/cmd/bisonw-desktop"
 
 # For each module, run go mod tidy, build and run test.
 for m in $modules
@@ -43,7 +43,7 @@ go run ./client/core/localetest/main.go
 export CGO_ENABLED=0
 go build ./...
 go build -tags harness -o /dev/null ./client/cmd/simnet-trade-tests
-go build -tags systray -o /dev/null ./client/cmd/dexc
+go build -tags systray -o /dev/null ./client/cmd/bisonw
 
 go test -c -o /dev/null -tags live ./client/webserver
 go test -c -o /dev/null -tags harness ./client/asset/dcr

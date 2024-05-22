@@ -46,7 +46,7 @@ func (wt WalletTrait) IsRescanner() bool {
 // IsNewAddresser tests if the WalletTrait has the WalletTraitNewAddresser bit
 // set, which indicates the presence of a NewAddress method that will generate a
 // new address on each call. If this method does not exist, the Address method
-// should be assumed to always return the same deposit address.
+// should be assumed to always return the same receiving address.
 func (wt WalletTrait) IsNewAddresser() bool {
 	return wt&WalletTraitNewAddresser != 0
 }
@@ -505,8 +505,7 @@ type Wallet interface {
 	// known when the init transaction was created. The client should store this
 	// information for persistence across sessions.
 	Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error)
-	// DepositAddress returns an address for depositing funds into the exchange
-	// wallet.
+	// DepositAddress returns an address for depositing funds into Bison Wallet.
 	DepositAddress() (string, error)
 	// OwnsDepositAddress indicates if the provided address can be used
 	// to deposit funds into the wallet.
@@ -1400,7 +1399,7 @@ type Order struct {
 	// Value is the amount required to satisfy the order. The Value does not
 	// include fees. Fees will be calculated internally based on the number of
 	// possible swaps (MaxSwapCount) and the exchange's configuration
-	// (DEXConfig).
+	// (Exchange).
 	Value uint64
 	// MaxSwapCount is the number of lots in the order, which is also the
 	// maximum number of transactions that an order could potentially generate
@@ -1438,7 +1437,7 @@ type MultiOrderValue struct {
 	// Value is the amount required to satisfy the order. The Value does not
 	// include fees. Fees will be calculated internally based on the number of
 	// possible swaps (MaxSwapCount) and the exchange's configuration
-	// (DEXConfig).
+	// (Exchange).
 	Value uint64
 	// MaxSwapCount is the number of lots in the order, which is also the
 	// maximum number of transactions that an order could potentially generate

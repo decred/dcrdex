@@ -6500,7 +6500,7 @@ func (dcr *ExchangeWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset
 					"replaced by tx %s. core should not be replacing the transaction. maybe ConfirmRedemption "+
 					"is being run concurrently for the same redeem", mRedeem.txHash, secretHash, *txHash)
 			}
-			// Will hit this if dexc was restarted with an actively
+			// Will hit this if bisonw was restarted with an actively
 			// redeeming swap.
 			dcr.mempoolRedeemsMtx.Lock()
 			dcr.mempoolRedeems[secretHash] = &mempoolRedeem{txHash: *txHash, firstSeen: time.Now()}

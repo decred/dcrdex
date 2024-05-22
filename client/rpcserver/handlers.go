@@ -193,7 +193,7 @@ func handleVersion(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 			Minor: rpcSemverMinor,
 			Patch: rpcSemverPatch,
 		},
-		DexcVersion: s.dexcVersion,
+		BWVersion: s.bwVersion,
 	}
 
 	return createResponse(versionRoute, result, nil)
@@ -670,7 +670,7 @@ func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 	return createResponse(rescanWalletRoute, "started", nil)
 }
 
-// handleLogout logs out the DEX client. *msgjson.ResponsePayload.Error is empty
+// handleLogout logs out Bison Wallet. *msgjson.ResponsePayload.Error is empty
 // if successful.
 func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	if err := s.core.Logout(); err != nil {
@@ -1269,9 +1269,9 @@ var helpMsgs = map[string]helpMsg{
     string: The help message for command.`, // returns breakdown
 	},
 	versionRoute: {
-		cmdSummary: `Print the DEX client rpcserver version.`,
+		cmdSummary: `Print the Bison Wallet rpcserver version.`,
 		returns: `Returns:
-    string: The DEX client rpcserver version.`,
+    string: The Bison Wallet rpcserver version.`,
 	},
 	discoverAcctRoute: {
 		pwArgsShort: `"appPass"`,
@@ -1280,7 +1280,7 @@ var helpMsgs = map[string]helpMsg{
     an account and can be used in place of register. Will error if
     the account has already been discovered/restored.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     addr (string): The DEX address to discover an account for.
     cert (string): Optional. The TLS certificate path.`,
@@ -1292,7 +1292,7 @@ var helpMsgs = map[string]helpMsg{
 		argsShort:   `("seed")`,
 		cmdSummary:  `Initialize the client.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     seed (string): Optional. hex-encoded 512-bit restoration seed.`,
 		returns: `Returns:
@@ -1344,7 +1344,7 @@ var helpMsgs = map[string]helpMsg{
 		argsShort:   `assetID walletType ("path" "settings")`,
 		cmdSummary:  `Connect to a new wallet.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.
+    appPass (string): The Bison Wallet password.
     walletPass (string): The wallet's password. Leave the password empty for wallets without a password set.`,
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
@@ -1363,7 +1363,7 @@ var helpMsgs = map[string]helpMsg{
 		argsShort:   `assetID`,
 		cmdSummary:  `Open an existing wallet.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md`,
@@ -1385,7 +1385,7 @@ var helpMsgs = map[string]helpMsg{
 		cmdSummary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
 	all token wallets for that chain will be disabled too.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
                   See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
@@ -1424,7 +1424,7 @@ var helpMsgs = map[string]helpMsg{
 		cmdSummary: `Register for DEX. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     addr (string): The DEX address to register for.
     fee (int): The DEX fee.
@@ -1442,7 +1442,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		cmdSummary: `Post new bond for DEX. An ok response does not mean that the bond is active.
 		Bond is active after the bond transaction has been confirmed and the server notified.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     addr (string): The DEX address to post bond for for.
     bond (int): The bond amount (in DCR presently).
@@ -1511,7 +1511,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsShort: `"appPass"`,
 		cmdSummary:  `Attempt to login to all registered DEX servers.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The dex client password.`,
+    appPass (string): The Bison Wallet password.`,
 		returns: `Returns:
     obj: A map of notifications and dexes.
     {
@@ -1545,7 +1545,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		argsShort:   `"host" isLimit sell base quote qty rate immediate`,
 		cmdSummary:  `Make an order to buy or sell an asset.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     host (string): The DEX to trade on.
     isLimit (bool): Whether the order is a limit order.
@@ -1572,7 +1572,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		argsShort:   `"host" sell base quote maxLock [[qty,rate]] options`,
 		cmdSummary:  `Place multiple orders in one go.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     host (string): The DEX to trade on.
     sell (bool): Whether the order is selling.
@@ -1597,7 +1597,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		argsShort:   `"orderID"`,
 		cmdSummary:  `Cancel an order.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     orderID (string): The hex ID of the order to cancel`,
 		returns: `Returns:
@@ -1626,7 +1626,7 @@ needed to complete a swap.`,
 		argsShort:   `assetID value "address"`,
 		cmdSummary:  `Withdraw value from an exchange wallet to address. Fees are subtracted from the value.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. Used to identify
       which wallet to withdraw from. e.g. 42 for DCR. See
@@ -1642,7 +1642,7 @@ needed to complete a swap.`,
 		argsShort:   `assetID value "address"`,
 		cmdSummary:  `Sends exact value from an exchange wallet to address.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. Used to identify
       which wallet to withdraw from. e.g. 42 for DCR. See
@@ -1654,7 +1654,7 @@ needed to complete a swap.`,
     string: "[coin ID]"`,
 	},
 	logoutRoute: {
-		cmdSummary: `Logout the DEX client.`,
+		cmdSummary: `Logout of Bison Wallet.`,
 		returns: `Returns:
     string: The message "` + logoutStr + `"`,
 	},
@@ -1763,7 +1763,7 @@ needed to complete a swap.`,
 		cmdSummary: `Show the application's seed. It is recommended to not store the seed
   digitally. Make a copy on paper with pencil and keep it safe.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The DEX client password.`,
+    appPass (string): The Bison Wallet password.`,
 		returns: `Returns:
     string: The application's seed as hex.`,
 	},
@@ -1921,7 +1921,7 @@ an spv wallet and enables options to view and set the vsp.
 		argsShort:   `assetID num`,
 		cmdSummary:  `Starts a asyncrhonous ticket purchasing process. Check stakestatus for number of tickets remaining to be purchased.`,
 		pwArgsLong: `Password Args:
-  appPass (string): The DEX client password.`,
+  appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
   assetID (int): The asset's BIP-44 registered coin index.
   num (int): The number of tickets to purchase`,

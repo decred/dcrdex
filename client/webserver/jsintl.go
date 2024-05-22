@@ -127,7 +127,7 @@ const (
 	reservesDeficitMsgID             = "RESERVES_DEFICIT_MSG"
 	bondReservesID                   = "BOND_RESERVES"
 	bondReservesMsgID                = "BOND_RESERVES_MSG"
-	shilededID                       = "SHIELDED"
+	shieldedID                       = "SHIELDED"
 	shieldedMsgID                    = "SHIELDED_MSG"
 	orderID                          = "ORDER"
 	lockedOrderBalMsgID              = "LOCKED_ORDER_BAL_MSG"
@@ -215,7 +215,7 @@ var enUS = map[string]*intl.Translation{
 	sellID:                           {T: "Sell"},
 	notSupportedID:                   {T: "{{ asset }} is not supported"},
 	versionNotSupportedID:            {T: "{{ asset }} (v{{version}}) is not supported"},
-	connectionFailedID:               {T: "Connection to dex server failed. You can close dexc and try again later or wait for it to reconnect."},
+	connectionFailedID:               {T: "Connection to dex server failed. You can close bisonw and try again later or wait for it to reconnect."},
 	orderPreviewID:                   {T: "Total: {{ total }} {{ asset }}"},
 	calculatingID:                    {T: "calculating..."},
 	estimateUnavailableID:            {T: "estimate unavailable"},
@@ -321,7 +321,7 @@ var enUS = map[string]*intl.Translation{
 	reservesDeficitMsgID:             {T: "The apparent wallet balance shortcoming to maintain bonding level. If this persists, you may need to add funds to stay fully bonded."},
 	bondReservesID:                   {T: "Bond Reserves"},
 	bondReservesMsgID:                {T: "Funds reserved to cover the expenses associated with bond maintenance"},
-	shilededID:                       {T: "Shielded"},
+	shieldedID:                       {T: "Shielded"},
 	shieldedMsgID:                    {T: "Total funds kept shielded"},
 	orderID:                          {T: "Order"},
 	lockedOrderBalMsgID:              {T: "Funds locked in unmatched orders"},
@@ -401,7 +401,7 @@ var ptBR = map[string]*intl.Translation{
 	buyID:                    {T: "Comprar"},
 	sellID:                   {T: "Vender"},
 	notSupportedID:           {T: "{{ asset }} não tem suporte"},
-	connectionFailedID:       {T: "Conexão ao server dex falhou. Pode fechar dexc e tentar novamente depois ou esperar para tentar se reconectar."},
+	connectionFailedID:       {T: "Conexão ao server dex falhou. Pode fechar bisonw e tentar novamente depois ou esperar para tentar se reconectar."},
 	orderPreviewID:           {T: "Total: {{ total }} {{ asset }}"},
 	calculatingID:            {T: "calculando..."},
 	estimateUnavailableID:    {T: "estimativa indisponível"},
@@ -455,7 +455,7 @@ var zhCN = map[string]*intl.Translation{
 	buyID:                    {T: "买入"},
 	sellID:                   {T: "卖出"},
 	notSupportedID:           {T: "{{ asset }}不受支持"},
-	connectionFailedID:       {T: "连接到服务器 dex 失败。您可以关闭 dexc 并稍后重试或等待尝试重新连接。"},
+	connectionFailedID:       {T: "连接到服务器 dex 失败。您可以关闭 bisonw 并稍后重试或等待尝试重新连接。"},
 	orderPreviewID:           {T: "总计： {{ total }} {{ asset }}"},
 	calculatingID:            {T: "计算中..."},
 	estimateUnavailableID:    {T: "估计不可用"},
@@ -495,7 +495,7 @@ var plPL = map[string]*intl.Translation{
 	buyID:                            {T: "Kup"},
 	sellID:                           {T: "Sprzedaj"},
 	notSupportedID:                   {T: "{{ asset }} nie jest wspierany"},
-	connectionFailedID:               {T: "Połączenie z serwerem dex nie powiodło się. Możesz zamknąć dexc i spróbować ponownie później, lub poczekać na wznowienie połączenia."},
+	connectionFailedID:               {T: "Połączenie z serwerem dex nie powiodło się. Możesz zamknąć bisonw i spróbować ponownie później, lub poczekać na wznowienie połączenia."},
 	orderPreviewID:                   {T: "W sumie: {{ total }} {{ asset }}"},
 	calculatingID:                    {T: "obliczanie..."},
 	estimateUnavailableID:            {T: "brak szacunkowego wyliczenia"},
@@ -617,7 +617,7 @@ var plPL = map[string]*intl.Translation{
 	availableTitleID:                 {T: "Dostępne"},
 	newWalletSuccessID:               {T: "Utworzono portfel {{ assetName }}!"},
 	txTypeTicketRevokeID:             {T: "Odwołanie biletu"},
-	shilededID:                       {T: "Osłonięte"},
+	shieldedID:                       {T: "Osłonięte"},
 	takerFoundMakerRedemptionID:      {T: "Wykupione przez {{ makerAddr }}"},
 	lockedSwappingBalMsgID:           {T: "Środki obecnie zablokowane w rozliczanych sparowaniach"},
 	refundImminentID:                 {T: "Odbędzie się w następnych paru blokach"},
@@ -680,7 +680,7 @@ var deDE = map[string]*intl.Translation{
 	buyID:                    {T: "Kaufen"},
 	sellID:                   {T: "Verkaufen"},
 	notSupportedID:           {T: "{{ asset }} wird nicht unterstützt"},
-	connectionFailedID:       {T: "Die Verbindung zum Dex-Server fehlgeschlagen. Du kannst dexc schließen und es später erneut versuchen oder warten bis die Verbindung wiederhergestellt ist."},
+	connectionFailedID:       {T: "Die Verbindung zum Dex-Server fehlgeschlagen. Du kannst bisonw schließen und es später erneut versuchen oder warten bis die Verbindung wiederhergestellt ist."},
 	orderPreviewID:           {T: "Insgesamt: {{ total }} {{ asset }}"},
 	calculatingID:            {T: "kalkuliere..."},
 	estimateUnavailableID:    {T: "Schätzung nicht verfügbar"},
@@ -789,7 +789,7 @@ var ar = map[string]*intl.Translation{
 	ticketStatusUnspentID:            {T: "غير منفقة"},
 	txTypeTicketVoteID:               {T: "تصويت التذكرة"},
 	disconnectedID:                   {T: "انقطع الاتصال"},
-	shilededID:                       {T: "محمية"},
+	shieldedID:                       {T: "محمية"},
 	ticketStatusExpiredID:            {T: "منتهية الصلاحية"},
 	txTypeRefundID:                   {T: "استرداد"},
 	discoveredID:                     {T: "مكتشفة"},

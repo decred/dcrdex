@@ -15,7 +15,7 @@ import (
 
 func main() {
 	var appSeed string
-	flag.StringVar(&appSeed, "seed", "", "DEX client application seed (128 hexadecimal characters)")
+	flag.StringVar(&appSeed, "seed", "", "Bison Wallet application seed (128 hexadecimal characters)")
 	var assetID uint
 	flag.UintVar(&assetID, "asset", 0, "Asset ID. BIP-0044 coin type (integer).\n"+
 		"See https://github.com/satoshilabs/slips/blob/master/slip-0044.md")

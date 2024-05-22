@@ -127,7 +127,7 @@ const languageData: Record<string, LangData> = {
   }
 }
 
-// Application is the main javascript web application for the Decred DEX client.
+// Application is the main javascript web application for Bison Wallet.
 export default class Application {
   notes: CoreNotePlus[]
   pokes: CoreNotePlus[]
@@ -167,7 +167,7 @@ export default class Application {
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
     this.txHistoryMap = {}
 
-    console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
+    console.log('Bison Wallet, Build', this.commitHash.substring(0, 7))
 
     // Set Bootstrap dark theme attribute if dark mode is enabled.
     if (State.isDark()) {

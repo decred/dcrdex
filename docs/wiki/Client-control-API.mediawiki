@@ -1,8 +1,8 @@
-==Client (dexc) ==
+==Bison Wallet (bisonw) ==
 
 ==RPC==
 
-The client (dexc) can be controlled via its remote procedure call (RPC) interface.
+Bison Wallet (bisonw) can be controlled via its remote procedure call (RPC) interface.
 
 ==HTTPS==
 
@@ -49,7 +49,7 @@ Print a help message.
 |-
 | cmd || string  || Optional. The command to print help for.
 |-
-| includePasswords || bool || Optional. Default is false. Whether to include password arguments in the returned help. Passwords are hidden when using dexcctl.
+| includePasswords || bool || Optional. Default is false. Whether to include password arguments in the returned help. Passwords are hidden when using bwctl.
 |}
 
 '''Response'''
@@ -66,7 +66,7 @@ The response will contain a help message based on the arguments.
 
 ===Version===
 
-Print the DEX client rpcserver version. Accepts no arguments
+Print the Bison Wallet rpcserver version. Accepts no arguments
 
 '''Request route:''' <code>version</code>
 
@@ -78,7 +78,7 @@ The response will contain the semver as a string. i.e. "1.0.0"
 {|
 ! type !! description
 |-
-| string || The DEX client rpcserver version.
+| string || The Bison Wallet rpcserver version.
 |}
 
 
@@ -92,7 +92,7 @@ Initialize the client with a password.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |}
 
 '''Response'''
@@ -152,7 +152,7 @@ Connect to a new wallet.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |-
 | walletPass || string  || The wallet's password. The client will encrypt and store this.
 |}
@@ -192,7 +192,7 @@ Unlock an existing wallet for one year.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |}
 
 <code>args</code>
@@ -306,7 +306,7 @@ Registration is complete after the fee transaction has been confirmed.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |}
 
 <code>args</code>
@@ -448,7 +448,7 @@ Attempt to login to all registered DEX servers.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |}
 
 '''Response'''
@@ -519,7 +519,7 @@ Make an order to buy or sell an asset.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |}
 
 <code>args</code>
@@ -577,7 +577,7 @@ Cancel an order.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |}
 
 <code>args</code>
@@ -609,7 +609,7 @@ Withdraw value from an exchange wallet to address.
 {|
 ! name !! type !! description
 |-
-| appPass || string  || The DEX client password.
+| appPass || string  || The Bison Wallet password.
 |}
 
 <code>args</code>
@@ -637,7 +637,7 @@ The response will contain coin ID of the withdraw transaction.
 
 ===Logout===
 
-Logout the DEX client. Accepts no arguments.
+Logout of Bison Wallet. Accepts no arguments.
 
 '''Request route:''' <code>logout</code>
 

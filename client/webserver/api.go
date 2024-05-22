@@ -1586,7 +1586,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 			setCookie(pwKeyCK, hex.EncodeToString(key), w)
 			zero(key)
 		} else {
-			// If dexc was shutdown and restarted, the old pw key cookie might
+			// If bisonw was shutdown and restarted, the old pw key cookie might
 			// need to be cleared.
 			clearCookie(pwKeyCK, w)
 		}

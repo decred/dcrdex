@@ -2,8 +2,8 @@
 
 ## Wallet Overview
 
-The Ethereum wallet in the DEX client application is similar to the "native"
-wallets for BTC and DCR, but requires some manual configuration.
+The Ethereum wallet in Bison Wallet is similar to the "native" wallets for BTC
+and DCR, but requires some manual configuration.
 
 Like the other native wallets, the private keys (and accounts) are derived from
 the DEX "application seed", so that reinitializing the DEX app from seed will

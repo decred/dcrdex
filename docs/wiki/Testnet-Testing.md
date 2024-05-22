@@ -147,10 +147,10 @@ Clear any existing client DB files from previous setups:
 rm ~/.dexc/testnet/dexc.db ~/.dexc/testnet/backup/dexc.db
 ```
 
-Start `dexc` with the web UI and RPC server in testnet mode and trace level logging:
+Start `bisonw` with the web UI and RPC server in testnet mode and trace level logging:
 
 ```sh
-./dexc --testnet --rpc --log=trace
+./bisonw --testnet --rpc --log=trace
 ```
 
 ## Add RPC Wallet

@@ -6,7 +6,7 @@
 # $ docker volume create --name=dcrdex_data
 #
 # Run the docker image, mapping web access port.
-# $ docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/dex/.dexc user/dcrdex
+# $ docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/dex/.bisonw user/dcrdex
 #
 
 # frontend build
@@ -25,7 +25,7 @@ WORKDIR /root/dex/client/webserver/site/
 RUN npm clean-install
 RUN npm run build
 
-# dexc binary build
+# bisonw binary build
 
 # The image below is golang:1.21.0-alpine3.18 (linux/amd64)
 # It's pulled by the digest (immutable id) to avoid supply-chain attacks.
@@ -35,9 +35,9 @@ RUN npm run build
 #    Docker will print the digest of the new image after the pull has finished.
 FROM golang@sha256:445f34008a77b0b98bf1821bf7ef5e37bb63cc42d22ee7c21cc17041070d134f AS gobuilder
 COPY --from=nodebuilder /root/dex/ /root/dex/
-WORKDIR /root/dex/client/cmd/dexc/
+WORKDIR /root/dex/client/cmd/bisonw/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
-WORKDIR /root/dex/client/cmd/dexcctl/
+WORKDIR /root/dex/client/cmd/bwctl/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
 
 # Final image
@@ -45,9 +45,9 @@ FROM debian:buster-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates
 WORKDIR /dex
 ENV HOME /dex
-RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
+RUN mkdir -p /dex/.bisonw && chown 1000 /dex/.bisonw
 USER 1000
-COPY --from=gobuilder /root/dex/client/cmd/dexc/dexc ./
-COPY --from=gobuilder /root/dex/client/cmd/dexcctl/dexcctl ./
+COPY --from=gobuilder /root/dex/client/cmd/bisonw/bisonw ./
+COPY --from=gobuilder /root/dex/client/cmd/bwctl/bwctl ./
 EXPOSE 5758
-CMD [ "./dexc", "--webaddr=0.0.0.0:5758" ]
+CMD [ "./bisonw", "--webaddr=0.0.0.0:5758" ]

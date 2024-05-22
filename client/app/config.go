@@ -55,24 +55,24 @@ type RPCConfig struct {
 
 // RPC creates a rpc server configuration.
 func (cfg *RPCConfig) RPC(c *core.Core, marketMaker *mm.MarketMaker, log dex.Logger) *rpcserver.Config {
-	dexcMajor, dexcMinor, dexcPatch, dexcPreRel, dexcBuildMeta, err := version.ParseSemVer(Version)
+	bwMajor, bwMinor, bwPatch, bwPreRel, bwBuildMeta, err := version.ParseSemVer(Version)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse version: %w", err))
 	}
 
 	runtimeVer := strings.Replace(runtime.Version(), ".", "-", -1)
 	runBuildMeta := version.NormalizeString(runtimeVer)
-	build := version.NormalizeString(dexcBuildMeta)
+	build := version.NormalizeString(bwBuildMeta)
 	if build != "" {
-		dexcBuildMeta = fmt.Sprintf("%s.%s", build, runBuildMeta)
+		bwBuildMeta = fmt.Sprintf("%s.%s", build, runBuildMeta)
 	}
-	dexcVersion := &rpcserver.SemVersion{
+	bwVersion := &rpcserver.SemVersion{
 		VersionString: Version,
-		Major:         dexcMajor,
-		Minor:         dexcMinor,
-		Patch:         dexcPatch,
-		Prerelease:    dexcPreRel,
-		BuildMetadata: dexcBuildMeta,
+		Major:         bwMajor,
+		Minor:         bwMinor,
+		Patch:         bwPatch,
+		Prerelease:    bwPreRel,
+		BuildMetadata: bwBuildMeta,
 	}
 
 	rpcserver.SetLogger(log)
@@ -84,7 +84,7 @@ func (cfg *RPCConfig) RPC(c *core.Core, marketMaker *mm.MarketMaker, log dex.Log
 		Pass:        cfg.RPCPass,
 		Cert:        cfg.RPCCert,
 		Key:         cfg.RPCKey,
-		DexcVersion: dexcVersion,
+		BWVersion:   bwVersion,
 		CertHosts: []string{
 			defaultTestnetHost, defaultSimnetHost, defaultMainnetHost,
 			walletPairOneHost, walletPairTwoHost,

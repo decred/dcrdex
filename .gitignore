@@ -22,9 +22,9 @@ server/cmd/usermatches/usermatches
 markets.json
 dist/
 node_modules/
-client/cmd/dexc/dexc
-client/cmd/dexc-desktop/dexc-desktop
-client/cmd/dexcctl/dexcctl
+client/cmd/bisonw/bisonw
+client/cmd/bisonw-desktop/bisonw-desktop
+client/cmd/bwctl/bwctl
 client/cmd/assetseed/assetseed
 client/cmd/simnet-trade-tests/simnet-trade-tests
 client/cmd/mmbot/mmbot
@@ -39,7 +39,7 @@ client/asset/btc/electrum/example/wallet/wallet
 **/testdata/fuzz
 client/asset/eth/cmd/getgas/getgas
 client/asset/eth/cmd/deploy/deploy
-client/cmd/dexc-desktop/pkg/installers
+client/cmd/bisonw-desktop/pkg/installers
 client/cmd/testbinance/testbinance
 client/cmd/mmbaltracker/mmbaltracker
 server/noderelay/cmd/sourcenode/sourcenode

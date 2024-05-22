@@ -34,10 +34,10 @@ type RawParams struct {
 	Args   []string           `json:"args"`
 }
 
-// VersionResponse holds dexc and dexc rpc server version.
+// VersionResponse holds bisonw and bisonw rpc server version.
 type VersionResponse struct {
 	RPCServerVer *dex.Semver `json:"rpcServerVersion"`
-	DexcVersion  *SemVersion `json:"dexcVersion"`
+	BWVersion    *SemVersion `json:"dexcVersion"`
 }
 
 // SemVersion holds a semver version JSON object.

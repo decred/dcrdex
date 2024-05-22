@@ -3,9 +3,9 @@ package locales
 import "decred.org/dcrdex/client/intl"
 
 var EnUS = map[string]*intl.Translation{
-	"Language":                       {T: "en-US"}, // the bcp47 lang tag
-	"Markets":                        {T: "Markets"},
-	"Wallets":                        {T: "Wallets"},
+	"Language":                       {T: "en-US"},   // the bcp47 lang tag
+	"Markets":                        {T: "Markets"}, // unused
+	"Wallets":                        {T: "Wallets"}, // unused
 	"Notifications":                  {T: "Notifications"},
 	"Recent Activity":                {T: "Recent Activity"},
 	"Sign Out":                       {T: "Sign Out"},
@@ -121,7 +121,7 @@ var EnUS = map[string]*intl.Translation{
 	"verify_market":                  {T: "This is a market order and will match the best available order(s) on the book. Based on the current market mid-gap rate, you might receive about"},
 	"auth_order_app_pw":              {T: "Authorize this order with your app password."},
 	"lots":                           {T: "lots"},
-	"order_disclaimer": {T: `<span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the DEX client software,
+	"order_disclaimer": {Version: 1, T: `<span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off Bison Wallet software,
 		or the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain and/or wallet software, until
 		settlement is complete. Settlement can complete as quickly as a few minutes or take as long as a few hours.`},
 	"acknowledge_and_hide":      {T: "acknowledge and hide"},
@@ -159,7 +159,7 @@ var EnUS = map[string]*intl.Translation{
 	"Show pop-up notifications": {T: "Show pop-up notifications"},
 	"Account ID":                {T: "Account ID"},
 	"Export Account":            {T: "Export Account"},
-	"simultaneous_servers_msg":  {T: "The Decred DEX Client supports simultaneous use of any number of DEX servers."},
+	"simultaneous_servers_msg":  {Version: 1, T: "Bison Wallet supports simultaneous use of any number of DEX servers."},
 	"Change App Password":       {T: "Change App Password"},
 	"enable_browser_ntfn":       {T: "Enable desktop notifications"},
 	"browser_ntfn_blocked":      {T: "Browser notifications are currently blocked.  Please unblock this site in your browser to receive notifications."},
@@ -168,14 +168,16 @@ var EnUS = map[string]*intl.Translation{
 	"Build ID":                  {T: "Build ID"},
 	"Connect":                   {T: "Connect"},
 	"Send":                      {T: "Send"},
-	"Deposit":                   {T: "Deposit"},
+	"Deposit":                   {T: "Deposit"}, // unused
+	"Receive":                   {T: "Receive"},
 	"Lock":                      {T: "Lock"},
-	"New Deposit Address":       {T: "New Deposit Address"},
+	"New Address":               {T: "New Address"},
+	"New Deposit Address":       {T: "New Deposit Address"}, // Unused
 	"Address":                   {T: "Address"},
 	"Amount":                    {T: "Amount"},
 	"Authorize the transfer with your app password.": {T: "Authorize the transfer with your app password."},
 	"Reconfigure":                 {T: "Reconfigure"},
-	"pw_change_instructions":      {T: "Changing the password below does not change the password for your wallet software. Use this form to update the DEX client after you have changed your password with the wallet software directly."},
+	"pw_change_instructions":      {T: "Changing the password below does not change the password for Bison Wallet. Use this form to update Bison Wallet after you have changed your password with the wallet software directly."},
 	"New Wallet Password":         {T: "New Wallet Password"},
 	"pw_change_warn":              {T: "Note: Changing to a different wallet while having active trades might cause funds to be lost."},
 	"Show more options":           {T: "Show more options"},
@@ -287,7 +289,6 @@ var EnUS = map[string]*intl.Translation{
 	"Synchronizing":               {T: "Synchronizing"},
 	"wallet_wait_synced":          {T: "wallet will be created after sync"},
 	"Create a Wallet":             {T: "Create a Wallet"},
-	"Receive":                     {T: "Receive"},
 	"Wallet Type":                 {T: "Wallet Type"},
 	"Peer Count":                  {T: "Peer Count"},
 	"Sync Progress":               {T: "Sync Progress"},
@@ -319,7 +320,7 @@ var EnUS = map[string]*intl.Translation{
 	"Pending":                     {T: "Pending"},
 	"disable_wallet":              {T: "Disable Wallet"},
 	"enable_wallet":               {T: "Enable Wallet"},
-	"disable_wallet_warning":      {T: "Note: This wallet will not be connected to when you start the DEX client software and cannot be used until it is enabled. This will also disable all token wallets that depend on this wallet."},
+	"disable_wallet_warning":      {T: "Note: This wallet will not be connected to when you start the Bison Wallet software and cannot be used until it is enabled. This will also disable all token wallets that depend on this wallet."},
 	"enable_wallet_message":       {T: "This wallet will resume operation and might take some time to sync. If this is a token wallet, the wallet for the chain's primary asset will also be enabled."},
 	"Disabled":                    {T: "Disabled"},
 	"txfee_not_available":         {T: "Transaction fee currently unavailable"},
@@ -332,8 +333,8 @@ var EnUS = map[string]*intl.Translation{
 	"archived_date_tooltip":       {T: "Archived orders and matches created before your specified and date and time will be deleted from the database."},
 	"save_matches_to_file":        {T: "Save matches to CSV file"},
 	"save_orders_to_file":         {T: "Save orders to CSV file"},
-	"save_orders_to_file_msg":     {T: "Optional: Whether to save deleted orders to CSV file on dexc data directory. Default is false."},
-	"save_matches_to_file_msg":    {T: "Optional: Whether to save deleted matches to CSV file on dexc data directory. Default is false."},
+	"save_orders_to_file_msg":     {T: "Optional: Whether to save deleted orders to CSV file on bisonw data directory. Default is false."},
+	"save_matches_to_file_msg":    {T: "Optional: Whether to save deleted matches to CSV file on bisonw data directory. Default is false."},
 	// Market maker bot
 	"Market Making":          {T: "Market Making"},
 	"Off":                    {T: "Off"},

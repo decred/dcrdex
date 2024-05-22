@@ -37,13 +37,6 @@ section {
   border-radius: 0.25rem;
 }
 
-.logo {
-  display: block;
-  background-size: cover;
-  cursor: pointer;
-  background-image: var(--logo-path);
-}
-
 div.main {
   display: flex;
   flex-grow: 1;

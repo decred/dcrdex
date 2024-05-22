@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {{- /* The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags */ -}}
   <link rel="icon" href="/img/favicon.png?v=AK4XS4">
-  <meta name="description" content="Decred DEX Client Web Portal">
+  <meta name="description" content="Bison Wallet">
   <title>{{.Title}}</title>
   <link href="/css/style.css?v={{commitHash}}" rel="stylesheet">
 </head>
@@ -25,14 +25,18 @@
 {{define "header"}}
 <header id="header" class="border-bottom mb-2">
   {{$authed := .UserInfo.Authed}}
-  <a href="/" class="logo large-icon d-none d-md-block mx-2"></a>
-  <a href="/" class="logo large-icon d-block d-md-none mx-2"></a>
+  <a href="/" class="d-none d-md-block pointer hoverbg mx-2">
+    <img src="/img/bison-full_97x50.png">
+  </a>
+  <a href="/" class="d-block d-md-none pointer hoverbg mx-2">
+    <img src="/img/bison-square_50.png">
+  </a>
   <div id="headerSpace"></div>
   <div class="mainlinks fs18 pe-2 text-nowrap">
 
-    <a href="/markets" class="demi hoverbg d-hide" id="marketsMenuEntry">[[[Markets]]]</a>
+    <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallet]]]</a>
 
-    <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallets]]]</a>
+    <a href="/markets" class="demi hoverbg d-hide" id="marketsMenuEntry">[[[Trade]]]</a>
 
     <div class="d-inline-block position-relative pointer hoverbg{{if not $authed}} d-hide{{end}}" id="noteBell">
       <span class="ico-bell fs20 p-2"></span>
