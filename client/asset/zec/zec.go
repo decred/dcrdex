@@ -130,6 +130,8 @@ var (
 			NoAuth:            true,
 		}},
 	}
+
+	feeReservesPerLot = dexzec.TxFeesZIP317(dexbtc.RedeemP2PKHInputSize+1, 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, 0)
 )
 
 func init() {
@@ -970,7 +972,7 @@ func (w *zecWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos [
 		return utxos, bals, est, err
 	}
 
-	return utxos, bals, &asset.SwapEstimate{}, nil
+	return utxos, bals, &asset.SwapEstimate{FeeReservesPerLot: feeReservesPerLot}, nil
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
@@ -1000,6 +1002,7 @@ func (w *zecWallet) estimateSwap(
 			MaxFees:            shieldedSplitFees,
 			RealisticBestCase:  shieldedSplitFees,
 			RealisticWorstCase: shieldedSplitFees,
+			FeeReservesPerLot:  feeReservesPerLot,
 		}, true, splitLocked, nil
 	}
 
@@ -1037,6 +1040,7 @@ func (w *zecWallet) estimateSwap(
 				MaxFees:            maxFees,
 				RealisticBestCase:  estLowFees,
 				RealisticWorstCase: estHighFees,
+				FeeReservesPerLot:  feeReservesPerLot,
 			}, true, reqFunds, nil
 		}
 	}
@@ -1048,6 +1052,7 @@ func (w *zecWallet) estimateSwap(
 		MaxFees:            maxFees,
 		RealisticBestCase:  estLowFees,
 		RealisticWorstCase: estHighFees,
+		FeeReservesPerLot:  feeReservesPerLot,
 	}, false, sum, nil
 }
 

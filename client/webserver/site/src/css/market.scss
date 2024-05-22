@@ -420,10 +420,6 @@ div[data-handler=markets] {
       margin: 0 5px;
     }
 
-    .red {
-      color: $danger;
-    }
-
     .disclaimer {
       text-align: justify;
     }
@@ -438,7 +434,7 @@ div[data-handler=markets] {
       }
     }
 
-    button.selected {
+    button {
       &.buygreen-bg {
         background-color: var(--market-buygreen-bg);
       }

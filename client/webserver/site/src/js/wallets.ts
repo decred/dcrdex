@@ -935,6 +935,7 @@ export default class WalletsPage extends BasePage {
       const bttn = page.iconSelectTmpl.cloneNode(true) as HTMLElement
       page.assetSelect.appendChild(bttn)
       const tmpl = Doc.parseTemplate(bttn)
+      tmpl.unit.textContent = a.unitInfo.conventional.unit
       this.assetButtons[a.id] = { tmpl, bttn }
       this.updateAssetButton(a.id)
       Doc.bind(bttn, 'click', () => {
@@ -949,7 +950,7 @@ export default class WalletsPage extends BasePage {
   updateAssetButton (assetID: number) {
     const a = app().assets[assetID]
     const { bttn, tmpl } = this.assetButtons[assetID]
-    Doc.hide(tmpl.fiat, tmpl.noWallet)
+    Doc.hide(tmpl.fiatBox, tmpl.noWallet)
     bttn.classList.add('nowallet')
     tmpl.img.src ||= Doc.logoPath(a.symbol) // don't initiate GET if already set (e.g. update on some notification)
     const symbolParts = a.symbol.split('.')
@@ -965,9 +966,10 @@ export default class WalletsPage extends BasePage {
       const { wallet: { balance: b }, unitInfo: ui } = a
       const totalBalance = b.available + b.locked + b.immature
       tmpl.balance.textContent = Doc.formatCoinValue(totalBalance, ui)
+      Doc.show(tmpl.balanceBox)
       const rate = app().fiatRatesMap[a.id]
       if (rate) {
-        Doc.show(tmpl.fiat)
+        Doc.show(tmpl.fiatBox)
         tmpl.fiat.textContent = Doc.formatFiatConversion(totalBalance, rate, ui)
       }
     } else Doc.show(tmpl.noWallet)
@@ -1005,7 +1007,7 @@ export default class WalletsPage extends BasePage {
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
       page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox,
-      page.needsProviderBttn
+      page.needsProviderBox
     )
     this.checkNeedsProvider(assetID)
     if (token) {
@@ -1040,14 +1042,10 @@ export default class WalletsPage extends BasePage {
 
   async checkNeedsProvider (assetID: number) {
     const needs = await app().needsCustomProvider(assetID)
-    const bttn = this.page.needsProviderBttn
-    Doc.setVis(needs, bttn)
+    const { page: { needsProviderBox: box, needsProviderBttn: bttn } } = this
+    Doc.setVis(needs, box)
     if (!needs) return
-    const [r, g, b] = State.isDark() ? [255, 255, 255] : [0, 0, 0]
-    const cycles = 2
-    Doc.animate(1000, (p: number) => {
-      bttn.style.outline = `2px solid rgba(${r}, ${g}, ${b}, ${(cycles - p * cycles) % 1})`
-    })
+    Doc.blink(bttn)
   }
 
   async updateTicketBuyer (assetID: number) {

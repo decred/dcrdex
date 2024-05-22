@@ -12,34 +12,36 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 )
 
 // Notifications should use the following note type strings.
 const (
-	NoteTypeFeePayment   = "feepayment"
-	NoteTypeBondPost     = "bondpost"
-	NoteTypeBondRefund   = "bondrefund"
-	NoteTypeUnknownBond  = "unknownbond"
-	NoteTypeSend         = "send"
-	NoteTypeOrder        = "order"
-	NoteTypeMatch        = "match"
-	NoteTypeEpoch        = "epoch"
-	NoteTypeConnEvent    = "conn"
-	NoteTypeBalance      = "balance"
-	NoteTypeSpots        = "spots"
-	NoteTypeWalletConfig = "walletconfig"
-	NoteTypeWalletState  = "walletstate"
-	NoteTypeServerNotify = "notify"
-	NoteTypeSecurity     = "security"
-	NoteTypeUpgrade      = "upgrade"
-	NoteTypeBot          = "bot"
-	NoteTypeDEXAuth      = "dex_auth"
-	NoteTypeFiatRates    = "fiatrateupdate"
-	NoteTypeCreateWallet = "createwallet"
-	NoteTypeLogin        = "login"
-	NoteTypeWalletNote   = "walletnote"
-	NoteTypeReputation   = "reputation"
+	NoteTypeFeePayment     = "feepayment"
+	NoteTypeBondPost       = "bondpost"
+	NoteTypeBondRefund     = "bondrefund"
+	NoteTypeUnknownBond    = "unknownbond"
+	NoteTypeSend           = "send"
+	NoteTypeOrder          = "order"
+	NoteTypeMatch          = "match"
+	NoteTypeEpoch          = "epoch"
+	NoteTypeConnEvent      = "conn"
+	NoteTypeBalance        = "balance"
+	NoteTypeSpots          = "spots"
+	NoteTypeWalletConfig   = "walletconfig"
+	NoteTypeWalletState    = "walletstate"
+	NoteTypeServerNotify   = "notify"
+	NoteTypeSecurity       = "security"
+	NoteTypeUpgrade        = "upgrade"
+	NoteTypeBot            = "bot"
+	NoteTypeDEXAuth        = "dex_auth"
+	NoteTypeFiatRates      = "fiatrateupdate"
+	NoteTypeCreateWallet   = "createwallet"
+	NoteTypeLogin          = "login"
+	NoteTypeWalletNote     = "walletnote"
+	NoteTypeReputation     = "reputation"
+	NoteTypeActionRequired = "actionrequired"
 )
 
 var noteChanCounter uint64
@@ -735,4 +737,47 @@ const TopicUnknownBondTierZero = "UnknownBondTierZero"
 func newUnknownBondTierZeroNote(subject, details string) *db.Notification {
 	note := db.NewNotification(NoteTypeUnknownBond, TopicUnknownBondTierZero, subject, details, db.WarningLevel)
 	return &note
+}
+
+const (
+	ActionIDRedeemRejected = "redeemRejected"
+	TopicRedeemRejected    = "RedeemRejected"
+)
+
+func newActionRequiredNote(actionID, uniqueID string, payload any) *asset.ActionRequiredNote {
+	n := &asset.ActionRequiredNote{
+		UniqueID: uniqueID,
+		ActionID: actionID,
+		Payload:  payload,
+	}
+	const routeNotNeededCuzCoreHasNoteType = ""
+	n.Route = routeNotNeededCuzCoreHasNoteType
+	return n
+}
+
+type RejectedRedemptionData struct {
+	OrderID dex.Bytes `json:"orderID"`
+	CoinID  dex.Bytes `json:"coinID"`
+	AssetID uint32    `json:"assetID"`
+	CoinFmt string    `json:"coinFmt"`
+}
+
+// ActionRequiredNote is structured like a WalletNote. The payload will be
+// an *asset.ActionRequiredNote. This is done for compatibility reasons.
+type ActionRequiredNote WalletNote
+
+func newRejectedRedemptionNote(assetID uint32, oid order.OrderID, coinID []byte) (*asset.ActionRequiredNote, *ActionRequiredNote) {
+	data := &RejectedRedemptionData{
+		AssetID: assetID,
+		OrderID: oid[:],
+		CoinID:  coinID,
+		CoinFmt: coinIDString(assetID, coinID),
+	}
+	uniqueID := dex.Bytes(coinID).String()
+	actionNote := newActionRequiredNote(ActionIDRedeemRejected, uniqueID, data)
+	coreNote := &ActionRequiredNote{
+		Notification: db.NewNotification(NoteTypeActionRequired, TopicRedeemRejected, "", "", db.Data),
+		Payload:      actionNote,
+	}
+	return actionNote, coreNote
 }

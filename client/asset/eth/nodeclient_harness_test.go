@@ -153,7 +153,7 @@ func waitForReceipt(nc ethFetcher, tx *types.Transaction) (*types.Receipt, error
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(time.Second):
-			receipt, _, err := nc.transactionReceipt(ctx, hash)
+			receipt, err := nc.transactionReceipt(ctx, hash)
 			if err != nil {
 				if errors.Is(err, asset.CoinNotFoundError) {
 					continue
@@ -255,7 +255,7 @@ func prepareRPCClient(name, dataDir string, providers []string, net dex.Network)
 		return nil, nil, err
 	}
 
-	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, net)
+	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, 3, net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
 	}
@@ -695,7 +695,7 @@ func prepareTokenClients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initiator unlock error; %v", err)
 	}
-	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -708,7 +708,7 @@ func prepareTokenClients(t *testing.T) {
 		t.Fatalf("participant unlock error; %v", err)
 	}
 
-	txOpts, err = participantEthClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil)
+	txOpts, err = participantEthClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -932,7 +932,7 @@ func testSendTransaction(t *testing.T) {
 		t.Fatalf("no CoinNotFoundError")
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -1014,10 +1014,11 @@ func testSendSignedTransaction(t *testing.T) {
 		ks = c.creds.ks
 		chainID = c.chainID
 	case *multiRPCClient:
-		nonce, err = c.nextNonce(ctx)
+		n, _, err := c.nonce(ctx)
 		if err != nil {
 			t.Fatalf("error getting nonce: %v", err)
 		}
+		nonce = n.Uint64()
 		ks = c.creds.ks
 		chainID = c.chainID
 	}
@@ -1068,7 +1069,7 @@ func testSendSignedTransaction(t *testing.T) {
 }
 
 func testTransactionReceipt(t *testing.T) {
-	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -1365,7 +1366,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		}
 
 		expGas := gases.SwapN(len(test.swaps))
-		txOpts, err := ethClient.txOpts(ctx, optsVal, expGas, dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err := ethClient.txOpts(ctx, optsVal, expGas, dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -1382,7 +1383,6 @@ func testInitiate(t *testing.T, assetID uint32) {
 		}
 		if err != nil {
 			if test.swapErr {
-				sc.voidUnusedNonce()
 				continue
 			}
 			t.Fatalf("%s: initiate error: %v", test.name, err)
@@ -1498,7 +1498,7 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 		pc = participantTokenContractor
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(len(swaps)), dexeth.GweiToWei(maxFeeRate), nil)
+	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(len(swaps)), dexeth.GweiToWei(maxFeeRate), nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -1708,7 +1708,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			}
 		}
 
-		txOpts, err := test.redeemerClient.txOpts(ctx, optsVal, gases.SwapN(len(test.swaps)), dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err := test.redeemerClient.txOpts(ctx, optsVal, gases.SwapN(len(test.swaps)), dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -1758,13 +1758,12 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		expGas := gases.RedeemN(len(test.redemptions))
-		txOpts, err = test.redeemerClient.txOpts(ctx, 0, expGas, dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err = test.redeemerClient.txOpts(ctx, 0, expGas, dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
 		tx, err = test.redeemerContractor.redeem(txOpts, test.redemptions)
 		if test.expectRedeemErr {
-			test.redeemerContractor.voidUnusedNonce()
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
 			}
@@ -1877,7 +1876,7 @@ func testRefundGas(t *testing.T, assetID uint32) {
 
 	lockTime := uint64(time.Now().Unix())
 
-	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
@@ -2006,7 +2005,7 @@ func testRefund(t *testing.T, assetID uint32) {
 
 		inLocktime := uint64(time.Now().Add(test.addTime).Unix())
 
-		txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil)
+		txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -2020,7 +2019,7 @@ func testRefund(t *testing.T, assetID uint32) {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
 
-			txOpts, err = participantEthClient.txOpts(ctx, 0, gases.RedeemN(1), nil, nil)
+			txOpts, err = participantEthClient.txOpts(ctx, 0, gases.RedeemN(1), nil, nil, nil)
 			if err != nil {
 				t.Fatalf("%s: txOpts error: %v", test.name, err)
 			}
@@ -2057,7 +2056,7 @@ func testRefund(t *testing.T, assetID uint32) {
 				test.name, test.isRefundable, isRefundable)
 		}
 
-		txOpts, err = test.refunderClient.txOpts(ctx, 0, gases.Refund, dexeth.GweiToWei(maxFeeRate), nil)
+		txOpts, err = test.refunderClient.txOpts(ctx, 0, gases.Refund, dexeth.GweiToWei(maxFeeRate), nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)
 		}
@@ -2152,7 +2151,7 @@ func testApproveAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil)
+	txOpts, err := ethClient.txOpts(ctx, 0, tokenGases.Approve, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}

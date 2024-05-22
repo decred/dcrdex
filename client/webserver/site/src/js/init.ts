@@ -121,11 +121,6 @@ class AppInitForm {
       return
     }
 
-    // Clear the notification cache. Useful for development purposes, since
-    // the Application will only clear them on login, which would leave old
-    // browser-cached notifications in place after registering even if the
-    // client db is wiped.
-    app().setNotes([])
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app().loading(this.form)

@@ -178,6 +178,7 @@ type clientCore interface {
 	DisableFundsMixer(assetID uint32) error
 	SetLanguage(string) error
 	Language() string
+	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
 }
 
 type mmCore interface {
@@ -565,6 +566,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/unapprovetoken", s.apiUnapproveToken)
 			apiAuth.Post("/approvetokenfee", s.apiApproveTokenFee)
 			apiAuth.Post("/txhistory", s.apiTxHistory)
+			apiAuth.Post("/takeaction", s.apiTakeAction)
 
 			apiAuth.Post("/shieldedstatus", s.apiShieldedStatus)
 			apiAuth.Post("/newshieldedaddress", s.apiNewShieldedAddress)

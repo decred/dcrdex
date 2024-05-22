@@ -5,6 +5,7 @@ import {
   WalletState,
   PageElement
 } from './registry'
+import State from './state'
 import { RateEncodingFactor } from './orderutil'
 
 // Symbolizer is satisfied by both dex.Asset and core.SupportedAsset. Used by
@@ -240,6 +241,14 @@ export default class Doc {
    */
   static async animate (duration: number, f: (progress: number) => void, easingAlgo?: string) {
     await new Animation(duration, f, easingAlgo).wait()
+  }
+
+  static async blink (el: PageElement) {
+    const [r, g, b] = State.isDark() ? [255, 255, 255] : [0, 0, 0]
+    const cycles = 2
+    Doc.animate(1000, (p: number) => {
+      el.style.outline = `2px solid rgba(${r}, ${g}, ${b}, ${(cycles - p * cycles) % 1})`
+    })
   }
 
   static applySelector (ancestor: HTMLElement, k: string): PageElement[] {

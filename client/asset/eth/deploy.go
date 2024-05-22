@@ -72,7 +72,7 @@ func (contractDeployer) estimateDeployFunding(
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
+	cl, maxFeeRate, _, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
 	if err != nil {
 		return err
 	}
@@ -102,6 +102,7 @@ func (contractDeployer) estimateDeployFunding(
 		}
 	}
 
+	feeRate := dexeth.WeiToGweiCeil(maxFeeRate)
 	if gas == 0 {
 		gas = deploymentGas
 	}
@@ -237,7 +238,7 @@ func (contractDeployer) deployContract(
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
+	cl, maxFeeRate, tipRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
 	if err != nil {
 		return err
 	}
@@ -262,7 +263,8 @@ func (contractDeployer) deployContract(
 		return fmt.Errorf("EstimateGas error: %v", err)
 	}
 
-	log.Infof("Estimated fees: %s", ui.ConventionalString(feeRate*gas))
+	feeRate := dexeth.WeiToGweiCeil(maxFeeRate)
+	log.Infof("Estimated fees: %s gwei / gas", ui.ConventionalString(feeRate*gas))
 
 	gas *= 5 / 4 // Add 20% buffer
 	feesWithBuffer := feeRate * gas
@@ -275,7 +277,7 @@ func (contractDeployer) deployContract(
 			ui.ConventionalString(shortage), cl.address())
 	}
 
-	txOpts, err := cl.txOpts(ctx, 0, gas, dexeth.GweiToWei(feeRate), nil)
+	txOpts, err := cl.txOpts(ctx, 0, gas, dexeth.GweiToWei(feeRate), tipRate, nil)
 	if err != nil {
 		return err
 	}
@@ -309,13 +311,13 @@ func (contractDeployer) ReturnETH(
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, feeRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
+	cl, maxFeeRate, tipRate, err := ContractDeployer.nodeAndRate(ctx, chain, walletDir, credentialsPath, chainCfg, log, net)
 	if err != nil {
 		return err
 	}
 	defer cl.shutdown()
 
-	return GetGas.returnFunds(ctx, cl, dexeth.GweiToWei(feeRate), returnAddr, nil, ui, log, net)
+	return GetGas.returnFunds(ctx, cl, maxFeeRate, tipRate, returnAddr, nil, ui, log, net)
 }
 
 func (contractDeployer) nodeAndRate(
@@ -327,11 +329,11 @@ func (contractDeployer) nodeAndRate(
 	chainCfg *params.ChainConfig,
 	log dex.Logger,
 	net dex.Network,
-) (*multiRPCClient, uint64, error) {
+) (*multiRPCClient, *big.Int, *big.Int, error) {
 
 	seed, providers, err := getFileCredentials(chain, credentialsPath, net)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, nil, err
 	}
 
 	pw := []byte("abc")
@@ -346,30 +348,30 @@ func (contractDeployer) nodeAndRate(
 		Net:      net,
 		Logger:   log,
 	}, nil /* we don't need the full api, skipConnect = true allows for nil compat */, true); err != nil {
-		return nil, 0, fmt.Errorf("error creating wallet: %w", err)
+		return nil, nil, nil, fmt.Errorf("error creating wallet: %w", err)
 	}
 
-	cl, err := newMultiRPCClient(walletDir, providers, log, chainCfg, net)
+	cl, err := newMultiRPCClient(walletDir, providers, log, chainCfg, 3, net)
 	if err != nil {
-		return nil, 0, fmt.Errorf("error creating rpc client: %w", err)
+		return nil, nil, nil, fmt.Errorf("error creating rpc client: %w", err)
 	}
 
 	if err := cl.unlock(string(pw)); err != nil {
-		return nil, 0, fmt.Errorf("error unlocking rpc client: %w", err)
+		return nil, nil, nil, fmt.Errorf("error unlocking rpc client: %w", err)
 	}
 
 	if err = cl.connect(ctx); err != nil {
-		return nil, 0, fmt.Errorf("error connecting: %w", err)
+		return nil, nil, nil, fmt.Errorf("error connecting: %w", err)
 	}
 
-	base, tip, err := cl.currentFees(ctx)
+	baseRate, tipRate, err := cl.currentFees(ctx)
 	if err != nil {
 		cl.shutdown()
-		return nil, 0, fmt.Errorf("Error estimating fee rate: %v", err)
+		return nil, nil, nil, fmt.Errorf("Error estimating fee rate: %v", err)
 	}
 
-	feeRate := dexeth.WeiToGwei(new(big.Int).Add(tip, new(big.Int).Mul(base, big.NewInt(2))))
-	return cl, feeRate, nil
+	maxFeeRate := new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
+	return cl, maxFeeRate, tipRate, nil
 }
 
 // DeployMultiBalance deployes a contract with a function for reading all

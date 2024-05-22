@@ -171,8 +171,12 @@ func (n *nodeClient) locked() bool {
 	return status != "Unlocked"
 }
 
+func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, err error) {
+	return nil, fmt.Errorf("unimplemented")
+}
+
 // transactionReceipt retrieves the transaction's receipt.
-func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
+func (n *nodeClient) transactionAndReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
 	tx, blockHash, _, index, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
@@ -195,6 +199,10 @@ func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash)
 		return nil, nil, fmt.Errorf("nil receipt at index %d in block %s for tx %s", index, blockHash, txHash)
 	}
 	return receipt, tx, nil
+}
+
+func (n *nodeClient) nonce(ctx context.Context) (*big.Int, *big.Int, error) {
+	return nil, nil, errors.New("unimplemented")
 }
 
 // pendingTransactions returns pending transactions.
@@ -224,7 +232,7 @@ func (n *nodeClient) getConfirmedNonce(ctx context.Context) (uint64, error) {
 
 // sendTransaction sends a tx. The nonce should be set in txOpts.
 func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts,
-	to common.Address, data []byte) (*types.Transaction, error) {
+	to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 
 	tx, err := n.creds.ks.SignTx(*n.creds.acct, types.NewTx(&types.DynamicFeeTx{
 		To:        &to,
@@ -309,7 +317,7 @@ func (n *nodeClient) getCodeAt(ctx context.Context, contractAddr common.Address)
 //
 // NOTE: The nonce included in the txOpts must be sent before txOpts is used
 // again. The caller should ensure that txOpts -> send sequence is synchronized.
-func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error) {
+func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, tipRate, nonce *big.Int) (*bind.TransactOpts, error) {
 	baseFee, gasTipCap, err := n.currentFees(ctx)
 	if err != nil {
 		return nil, err
@@ -387,14 +395,22 @@ func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common
 }
 
 // sendSignedTransaction injects a signed transaction into the pending pool for execution.
-func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error {
 	return n.leth.ApiBackend.SendTx(ctx, tx)
 }
 
 // newTxOpts is a constructor for a TransactOpts.
 func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, maxFeeRate, gasTipCap *big.Int) *bind.TransactOpts {
+	// We'll enforce dexeth.MinGasTipCap since the server does, but this isn't
+	// necessarily a constant for all networks or under all conditions.
+	minGasWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
+	if gasTipCap.Cmp(minGasWei) < 0 {
+		gasTipCap.Set(minGasWei)
+	}
+	// This is enforced by concensus. We shouldn't be able to get here with a
+	// swap tx.
 	if gasTipCap.Cmp(maxFeeRate) > 0 {
-		gasTipCap = maxFeeRate
+		gasTipCap.Set(maxFeeRate)
 	}
 	return &bind.TransactOpts{
 		Context:   ctx,

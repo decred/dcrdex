@@ -21,8 +21,8 @@ var _ asset.Coin = (*redeemCoin)(nil)
 type baseCoin struct {
 	backend      *AssetBackend
 	secretHash   [32]byte
-	gasFeeCap    uint64
-	gasTipCap    uint64
+	gasFeeCap    *big.Int
+	gasTipCap    *big.Int
 	txHash       common.Hash
 	value        *big.Int
 	txData       []byte
@@ -182,25 +182,17 @@ func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin,
 	if gasFeeCap == nil || gasFeeCap.Cmp(zero) <= 0 {
 		return nil, fmt.Errorf("Failed to parse gas fee cap from tx %s", txHash)
 	}
-	gasFeeCapGwei, err := dexeth.WeiToGweiUint64(gasFeeCap)
-	if err != nil {
-		return nil, fmt.Errorf("unable to convert gas fee cap: %v", err)
-	}
 
 	gasTipCap := tx.GasTipCap()
 	if gasTipCap == nil || gasTipCap.Cmp(zero) <= 0 {
 		return nil, fmt.Errorf("Failed to parse gas tip cap from tx %s", txHash)
 	}
-	gasTipCapGwei, err := dexeth.WeiToGweiUint64(gasTipCap)
-	if err != nil {
-		return nil, fmt.Errorf("unable to convert gas tip cap: %v", err)
-	}
 
 	return &baseCoin{
 		backend:      be,
 		secretHash:   secretHash,
-		gasFeeCap:    gasFeeCapGwei,
-		gasTipCap:    gasTipCapGwei,
+		gasFeeCap:    gasFeeCap,
+		gasTipCap:    gasTipCap,
 		txHash:       txHash,
 		value:        tx.Value(),
 		txData:       tx.Data(),
@@ -313,7 +305,7 @@ func (c *baseCoin) String() string {
 // FeeRate returns the gas rate, in gwei/gas. It is set in initialization of
 // the swapCoin.
 func (c *baseCoin) FeeRate() uint64 {
-	return c.gasFeeCap
+	return dexeth.WeiToGweiCeil(c.gasFeeCap)
 }
 
 // Value returns the value of one swap in order to validate during processing.

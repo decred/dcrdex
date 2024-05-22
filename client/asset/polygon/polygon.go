@@ -147,6 +147,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		CompatData:         &compat,
 		VersionedGases:     dexpolygon.VersionedGases,
 		Tokens:             dexpolygon.Tokens,
+		FinalizeConfs:      64,
 		Logger:             logger,
 		BaseChainContracts: contracts,
 		MultiBalAddress:    dexpolygon.MultiBalanceAddresses[net],

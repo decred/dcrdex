@@ -226,11 +226,23 @@ const (
 	// not yet been mined. There is no guarantee that the swap will be mined
 	// in the future.
 	ErrSwapNotInitiated = dex.ErrorKind("swap not yet initiated")
-	CoinNotFoundError   = dex.ErrorKind("coin not found")
-	ErrRequestTimeout   = dex.ErrorKind("request timeout")
-	ErrConnectionDown   = dex.ErrorKind("wallet not connected")
-	ErrNotImplemented   = dex.ErrorKind("not implemented")
-	ErrUnsupported      = dex.ErrorKind("unsupported")
+
+	CoinNotFoundError = dex.ErrorKind("coin not found")
+	// ErrTxRejected is returned when a transaction was rejected. This
+	// generally would indicate either an internal wallet error, or potentially
+	// a user using multiple instances of the wallet simultaneously. As such
+	// it may or may not be advisable to try the tx again without seeking
+	// further investigation.
+	ErrTxRejected = dex.ErrorKind("transaction was rejected")
+	// ErrTxLost is returned when the tx is irreparably lost, as would be the
+	// case if it's inputs were spent by another tx first or if it is not the
+	// accepted tx for a given nonce. These txs have incurred no fee losses, so
+	// the caller should feel free to re-issue the tx.
+	ErrTxLost         = dex.ErrorKind("tx lost")
+	ErrRequestTimeout = dex.ErrorKind("request timeout")
+	ErrConnectionDown = dex.ErrorKind("wallet not connected")
+	ErrNotImplemented = dex.ErrorKind("not implemented")
+	ErrUnsupported    = dex.ErrorKind("unsupported")
 	// ErrSwapRefunded is returned from ConfirmRedemption when the swap has
 	// been refunded before the user could redeem.
 	ErrSwapRefunded = dex.ErrorKind("swap refunded")
@@ -1147,7 +1159,13 @@ type WalletTransaction struct {
 	// AdditionalData contains asset specific information, i.e. nonce
 	// for ETH.
 	AdditionalData map[string]string `json:"additionalData"`
-	Confirmed      bool              `json:"confirmed"`
+	// Confirmed is true when the transaction is considered finalized.
+	// Confirmed transactions are no longer updated and will be considered
+	// finalized forever.
+	Confirmed bool `json:"confirmed"`
+	// Rejected will be true the transaction was rejected and did not have any
+	// effect, though fees were incurred.
+	Rejected bool `json:"rejected,omitempty"`
 }
 
 // WalletHistorian is a wallet that is able to retrieve the history of all
@@ -1513,12 +1531,33 @@ type CustomWalletNote struct {
 	Payload any `json:"payload"`
 }
 
+type ActionTaker interface {
+	// TakeAction processes a response to an ActionRequired wallet notification.
+	TakeAction(actionID string, payload []byte) error
+}
+
 // WalletEmitter handles a channel for wallet notifications and provides methods
 // that generates notifications.
 type WalletEmitter struct {
 	c       chan<- WalletNotification
 	assetID uint32
 	log     dex.Logger
+}
+
+type ActionRequiredNote struct {
+	baseWalletNotification
+	Payload  any    `json:"payload"`
+	UniqueID string `json:"uniqueID"`
+	ActionID string `json:"actionID"`
+}
+
+// ActionResolved is sent by wallets when action is no longer required for a
+// unique ID.
+const ActionResolved = "actionResolved"
+
+type ActionResolvedNote struct {
+	baseWalletNotification
+	UniqueID string `json:"uniqueID"`
 }
 
 // NewWalletEmitter constructs a WalletEmitter for an asset.
@@ -1591,5 +1630,29 @@ func (e *WalletEmitter) TransactionHistorySyncedNote() {
 	e.emit(&baseWalletNotification{
 		AssetID: e.assetID,
 		Route:   "transactionHistorySynced",
+	})
+}
+
+// ActionRequired is a route that will end up as a special dialogue seeking
+// user input via (ActionTaker).TakeAction.
+func (e *WalletEmitter) ActionRequired(uniqueID, actionID string, payload any) {
+	e.emit(&ActionRequiredNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "actionRequired",
+		},
+		UniqueID: uniqueID,
+		ActionID: actionID,
+		Payload:  payload,
+	})
+}
+
+func (e *WalletEmitter) ActionResolved(uniqueID string) {
+	e.emit(&ActionResolvedNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "actionResolved",
+		},
+		UniqueID: uniqueID,
 	})
 }

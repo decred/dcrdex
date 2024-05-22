@@ -97,6 +97,15 @@ type matchTracker struct {
 	// match reaches MatchConfirmed status.
 	redemptionConfs    uint64
 	redemptionConfsReq uint64
+	// redemptionRejected will be true if a redemption tx was rejected. A
+	// a rejected tx may indicate a serious internal issue, so we will seek
+	// user approval before replacing the tx.
+	redemptionRejected bool
+	// matchCompleteSent precludes sending another redeem to the server if we
+	// we are retrying after rejection and they already accepted our first
+	// request. Additional requests will just error and they don't really care
+	// if we redeem as taker anyway.
+	matchCompleteSent bool
 
 	// The fields below need to be modified without the parent trackedTrade's
 	// mutex being write locked, so they have dedicated mutexes.
@@ -1439,7 +1448,7 @@ func (t *trackedTrade) checkSwapFeeConfirms(match *matchTracker) bool {
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
 func (t *trackedTrade) checkRedemptionFeeConfirms(match *matchTracker) bool {
-	if match.MetaData.Proof.RedemptionFeeConfirmed {
+	if match.MetaData.Proof.RedemptionFeeConfirmed || match.redemptionRejected {
 		return false
 	}
 	_, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapper)
@@ -1798,6 +1807,10 @@ func shouldConfirmRedemption(match *matchTracker) bool {
 		return false
 	}
 
+	if match.redemptionRejected {
+		return false
+	}
+
 	proof := &match.MetaData.Proof
 	if match.Side == order.Maker {
 		return len(proof.MakerRedeem) > 0
@@ -2099,7 +2112,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(redemptionConfirms) > 0 {
-		t.confirmRedemptions(redemptionConfirms)
+		c.confirmRedemptions(t, redemptionConfirms)
 	}
 
 	for _, match := range dynamicSwapFeeConfirms {
@@ -2780,7 +2793,9 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
 				match, coinIDString(t.wallets.fromWallet.AssetID, coinID), err)
 		}
-		c.sendRedeemAsync(t, match, coinIDs[i], proof.Secret)
+		if !match.matchCompleteSent {
+			c.sendRedeemAsync(t, match, coinIDs[i], proof.Secret)
+		}
 	}
 	if refundNum != 0 {
 		t.unlockRefundFraction(refundNum, denom)
@@ -2868,6 +2883,8 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			} else {
 				match.Status = order.MatchComplete
 			}
+		} else if match.Side == order.Taker {
+			match.matchCompleteSent = true
 		}
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
@@ -2901,10 +2918,10 @@ func (t *trackedTrade) redeemFee() uint64 {
 
 // confirmRedemption attempts to confirm the redemptions for each match, and
 // then return any refund addresses that we won't be using.
-func (t *trackedTrade) confirmRedemptions(matches []*matchTracker) {
+func (c *Core) confirmRedemptions(t *trackedTrade, matches []*matchTracker) {
 	var refundContracts [][]byte
 	for _, m := range matches {
-		if confirmed, err := t.confirmRedemption(m); err != nil {
+		if confirmed, err := c.confirmRedemption(t, m); err != nil {
 			t.dc.log.Errorf("Unable to confirm redemption: %v", err)
 		} else if confirmed {
 			refundContracts = append(refundContracts, m.MetaData.Proof.ContractData)
@@ -2923,7 +2940,7 @@ func (t *trackedTrade) confirmRedemptions(matches []*matchTracker) {
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
+func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, error) {
 	if confs := match.redemptionConfs; confs > 0 && confs >= match.redemptionConfsReq { // already there, stop checking
 		if len(match.MetaData.Proof.Auth.RedeemSig) == 0 && (!t.isSelfGoverned() && !match.MetaData.Proof.IsRevoked()) {
 			return false, nil // waiting on redeem request to succeed
@@ -2972,7 +2989,9 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 		Spends: match.counterSwap,
 		Secret: proof.Secret,
 	}, t.redeemFee())
-	if errors.Is(asset.ErrSwapRefunded, err) {
+	switch {
+	case err == nil:
+	case errors.Is(err, asset.ErrSwapRefunded):
 		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), makeOrderToken(t.token()))
 		note := newMatchNote(TopicSwapRefunded, subject, details, db.ErrorLevel, t, match)
 		t.notify(note)
@@ -2982,7 +3001,38 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 			t.dc.log.Errorf("Failed to update match in db %v", err)
 		}
 		return false, errors.New("swap was already refunded by the counterparty")
-	} else if err != nil {
+
+	case errors.Is(err, asset.ErrTxRejected):
+		match.redemptionRejected = true
+		// We need to seek user approval before trying again, since new fees
+		// could be incurred.
+		actionRequest, note := newRejectedRedemptionNote(toWallet.AssetID, t.ID(), redeemCoinID)
+		t.notify(note)
+		c.requestedActionMtx.Lock()
+		c.requestedActions[dex.Bytes(redeemCoinID).String()] = actionRequest
+		c.requestedActionMtx.Unlock()
+		return false, fmt.Errorf("%s transaction %s was rejected. Seeking user approval before trying again",
+			unbip(toWallet.AssetID), coinIDString(toWallet.AssetID, redeemCoinID))
+	case errors.Is(err, asset.ErrTxLost):
+		// The transaction was nonce-replaced or otherwise lost without
+		// rejection or with user acknowlegement. Try again.
+		var coinID order.CoinID
+		if match.Side == order.Taker {
+			coinID = match.MetaData.Proof.TakerRedeem
+			match.MetaData.Proof.TakerRedeem = nil
+			match.Status = order.MakerRedeemed
+		} else {
+			coinID = match.MetaData.Proof.MakerRedeem
+			match.MetaData.Proof.MakerRedeem = nil
+			match.Status = order.TakerSwapCast
+		}
+		c.log.Infof("Redemption %s (%s) has been noted as lost.", coinID, unbip(toWallet.AssetID))
+
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)
+		}
+		return false, nil
+	default:
 		match.delayTicks(time.Minute * 15)
 		return false, fmt.Errorf("error confirming redemption for coin %v. already tried %d times, will retry later: %v",
 			redeemCoinID, match.confirmRedemptionNumTries, err)

@@ -1986,13 +1986,10 @@ export class LoginForm {
       return
     }
     await app().fetchUser()
-    if (res.notes) {
-      res.notes.reverse()
-      app().setNotes(res.notes)
-    }
-    if (res.pokes) {
-      app().setPokes(res.pokes)
-    }
+    res.notes = res.notes || []
+    res.notes.reverse()
+    res.pokes = res.pokes || []
+    app().loggedIn(res.notes, res.pokes)
     if (this.pwCache) this.pwCache.pw = pw
     this.success()
   }

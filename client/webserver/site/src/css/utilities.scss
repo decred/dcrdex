@@ -38,6 +38,10 @@
   background-color: var(--tertiary-bg);
 }
 
+.invisible {
+  visibility: hidden;
+}
+
 .stylish-overflow {
   @include stylish-overflow;
 
@@ -59,6 +63,10 @@
   }
 }
 
+.hidden-overflow {
+  @include hidden-overflow;
+}
+
 @keyframes spin {
   0% {
     transform: rotate(0deg);
@@ -71,6 +79,10 @@
 
 .ease-color {
   transition: color 1s ease;
+}
+
+.mw-375 {
+  max-width: 375px;
 }
 
 .mw-425 {
@@ -161,10 +173,9 @@ sup.token-parent {
 }
 
 
-// .hashwrap {
-//   word-break: break-all;
-//   user-select: all;
-// }
+.break-all {
+  word-break: break-all;
+}
 
 .lh1 {
   line-height: 1;

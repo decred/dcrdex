@@ -107,10 +107,11 @@ type provider struct {
 	// tip tracks the best known header as well as any error encountered
 	tip struct {
 		sync.RWMutex
-		header      *types.Header
-		headerStamp time.Time
-		failStamp   time.Time
-		failCount   int
+		header       *types.Header
+		headerStamp  time.Time
+		failStamp    time.Time
+		failCount    int
+		wsHeaderSeen atomic.Bool
 	}
 }
 
@@ -140,7 +141,7 @@ func (p *provider) setTip(header *types.Header, log dex.Logger) {
 // cachedTip retrieves the last known best header.
 func (p *provider) cachedTip() *types.Header {
 	stale := time.Second * 10
-	if p.ws {
+	if p.tip.wsHeaderSeen.Load() {
 		// We want to avoid requests, and we expect that our notification feed
 		// is working. Setting this too low would result in unnecessary requests
 		// when notifications are working right. Setting this too high will
@@ -318,6 +319,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 		case hdr := <-h:
 			log.Tracef("%q reported new tip at height %s (%s)", p.host, hdr.Number, hdr.Hash())
 			p.setTip(hdr, log)
+			p.tip.wsHeaderSeen.Store(true)
 		case err, ok := <-sub.Err():
 			if !ok {
 				// Subscription cancelled
@@ -363,15 +365,11 @@ type multiRPCClient struct {
 	chainID *big.Int
 	net     dex.Network
 
+	finalizeConfs uint64
+
 	providerMtx sync.RWMutex
 	endpoints   []string
 	providers   []*provider
-
-	lastNonce struct {
-		sync.Mutex
-		nonce uint64
-		stamp time.Time
-	}
 
 	// When we send transactions close together, we'll want to use the same
 	// provider.
@@ -390,7 +388,15 @@ type multiRPCClient struct {
 
 var _ ethFetcher = (*multiRPCClient)(nil)
 
-func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *params.ChainConfig, net dex.Network) (*multiRPCClient, error) {
+func newMultiRPCClient(
+	dir string,
+	endpoints []string,
+	log dex.Logger,
+	cfg *params.ChainConfig,
+	finalizeConfs uint64,
+	net dex.Network,
+) (*multiRPCClient, error) {
+
 	walletDir := getWalletDir(dir, net)
 	creds, err := pathCredentials(filepath.Join(walletDir, "keystore"))
 	if err != nil {
@@ -398,12 +404,13 @@ func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *para
 	}
 
 	m := &multiRPCClient{
-		net:       net,
-		cfg:       cfg,
-		log:       log,
-		creds:     creds,
-		chainID:   cfg.ChainID,
-		endpoints: endpoints,
+		net:           net,
+		cfg:           cfg,
+		log:           log,
+		creds:         creds,
+		chainID:       cfg.ChainID,
+		endpoints:     endpoints,
+		finalizeConfs: finalizeConfs,
 	}
 	m.receipts.cache = make(map[common.Hash]*receiptRecord)
 	m.receipts.lastClean = time.Now()
@@ -669,44 +676,6 @@ func (m *multiRPCClient) connect(ctx context.Context) (err error) {
 	return nil
 }
 
-// registerNonce returns true and saves the nonce for the next call when a nonce
-// has not been received recently.
-func (m *multiRPCClient) registerNonce(nonce uint64) bool {
-	const expiration = time.Minute
-	ln := &m.lastNonce
-	set := func() bool {
-		ln.nonce = nonce
-		ln.stamp = time.Now()
-		return true
-	}
-	ln.Lock()
-	defer ln.Unlock()
-	// Ok if the nonce is larger than previous.
-	if ln.nonce < nonce {
-		return set()
-	}
-	// Ok if initiation.
-	if ln.stamp.IsZero() {
-		return set()
-	}
-	// Ok if expiration has passed.
-	if time.Now().After(ln.stamp.Add(expiration)) {
-		return set()
-	}
-	// Nonce is the same or less than previous and expiration has not
-	// passed.
-	return false
-}
-
-// voidUnusedNonce sets time to zero time so that the next call to registerNonce
-// will return true. This is needed when we know that a tx has failed at the
-// time of sending so that the same nonce can be used again.
-func (m *multiRPCClient) voidUnusedNonce() {
-	m.lastNonce.Lock()
-	defer m.lastNonce.Unlock()
-	m.lastNonce.stamp = time.Time{}
-}
-
 // createAndCheckProviders creates and connects to providers. It checks that
 // unknown providers have a sufficient api to trade and saves good providers to
 // file. One bad provider or connect problem will cause this to error.
@@ -854,47 +823,65 @@ func (m *multiRPCClient) cachedReceipt(txHash common.Hash) *types.Receipt {
 	return nil
 }
 
-func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, tx *types.Transaction, err error) {
-	// TODO
-	// TODO: Plug in to the monitoredTx system from #1638.
-	// TODO
-	if tx, _, err = m.getTransaction(ctx, txHash); err != nil {
-		return nil, nil, err
-	}
-
+func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, err error) {
 	if r = m.cachedReceipt(txHash); r != nil {
-		return r, tx, nil
+		return r, nil
 	}
-
-	// Fetch a fresh one.
-	if err = m.withPreferred(ctx, func(ctx context.Context, p *provider) error {
+	if err := m.withPreferred(ctx, func(ctx context.Context, p *provider) error {
 		r, err = p.ec.TransactionReceipt(ctx, txHash)
 		return err
 	}); err != nil {
 		if isNotFoundError(err) {
-			return nil, nil, asset.CoinNotFoundError
+			return nil, asset.CoinNotFoundError
 		}
-		return nil, nil, err
+		return nil, err
 	}
-
-	var confs int64
+	var confs uint64
 	if r.BlockNumber != nil {
-		tip, err := m.bestHeader(ctx)
+		hdr, err := m.bestHeader(ctx)
 		if err != nil {
-			return nil, nil, fmt.Errorf("bestHeader error: %v", err)
+			return nil, fmt.Errorf("error getting best header: %v", err)
 		}
-		confs = new(big.Int).Sub(tip.Number, r.BlockNumber).Int64() + 1
+		if tip := hdr.Number.Uint64(); tip >= r.BlockNumber.Uint64() {
+			confs = tip - r.BlockNumber.Uint64() + 1
+		}
 	}
 
 	m.receipts.Lock()
 	m.receipts.cache[txHash] = &receiptRecord{
 		r:          r,
 		lastAccess: time.Now(),
-		confirmed:  confs > txConfsNeededToConfirm,
+		confirmed:  confs > m.finalizeConfs,
 	}
 	m.receipts.Unlock()
 
-	return r, tx, nil
+	return r, nil
+
+}
+
+func (m *multiRPCClient) transactionAndReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, tx *types.Transaction, err error) {
+	if tx, _, err = m.getTransaction(ctx, txHash); err != nil {
+		return nil, nil, err
+	}
+
+	r, err = m.transactionReceipt(ctx, txHash)
+	return r, tx, err
+}
+
+// nonce gets the best next nonce for the account.
+func (m *multiRPCClient) nonce(ctx context.Context) (confirmed, pending *big.Int, _ error) {
+	confirmed, pending = new(big.Int), new(big.Int)
+	return confirmed, pending, m.withAll(ctx, func(ctx context.Context, p *provider) error {
+		confirmedAt, err := p.ec.NonceAt(ctx, m.creds.addr, nil)
+		if err == nil && confirmed.Uint64() < confirmedAt {
+			confirmed.SetUint64(confirmedAt)
+		}
+		pendingAt, err := p.ec.PendingNonceAt(ctx, m.creds.addr)
+		if err == nil && pending.Uint64() < pendingAt {
+			pending.SetUint64(pendingAt)
+		}
+		return err
+	})
 }
 
 type rpcTransaction struct {
@@ -1065,8 +1052,12 @@ func (m *multiRPCClient) withOne(ctx context.Context, providers []*provider, f f
 // will not try all providers. withAll should only be used for actions that are
 // safe to repeat, such as broadcasting a transaction or getting results for a
 // read-only operation.
-func (m *multiRPCClient) withAll(ctx context.Context, f func(context.Context, *provider) error,
-	acceptabilityFilters ...acceptabilityFilter) error {
+func (m *multiRPCClient) withAll(
+	ctx context.Context,
+	f func(context.Context, *provider) error,
+	acceptabilityFilters ...acceptabilityFilter,
+) error {
+
 	var atLeastOne bool
 	var errs []error
 	for _, p := range m.nonceProviderList() {
@@ -1098,7 +1089,6 @@ func (m *multiRPCClient) withAll(ctx context.Context, f func(context.Context, *p
 		if discarded {
 			atLeastOne = true
 		} else {
-			errs = append(errs, err)
 			m.log.Warnf("Failed request from %q: %v", p, err)
 		}
 	}
@@ -1194,37 +1184,6 @@ func (m *multiRPCClient) nonceProviderList() []*provider {
 	return providers
 }
 
-// nextNonce returns the next nonce number for the account.
-func (m *multiRPCClient) nextNonce(ctx context.Context) (nonce uint64, err error) {
-	checks := 5
-	checkDelay := time.Second * 5
-	for i := 0; i < checks; i++ {
-		var host string
-		err = m.withPreferred(ctx, func(ctx context.Context, p *provider) error {
-			host = p.host
-			nonce, err = p.ec.PendingNonceAt(ctx, m.creds.addr)
-			return err
-		})
-		if err != nil {
-			return 0, err
-		}
-		if m.registerNonce(nonce) {
-			return nonce, nil
-		}
-		m.log.Warnf("host %s returned recently used account nonce number %d. try %d of %d.",
-			host, nonce, i+1, checks)
-		// Delay all but the last check.
-		if i+1 < checks {
-			select {
-			case <-time.After(checkDelay):
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			}
-		}
-	}
-	return 0, errors.New("preferred provider returned a recently used account nonce")
-}
-
 func (m *multiRPCClient) address() common.Address {
 	return m.creds.addr
 }
@@ -1305,20 +1264,21 @@ func (m *multiRPCClient) shutdown() {
 	for _, p := range m.providerList() {
 		p.shutdown()
 	}
-
 }
 
-func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+func allowAlreadyKnownFilter(err error) (discard, propagate, fail bool) {
+	// NOTE: err never hits errors.Is(err, txpool.ErrAlreadyKnown) because
+	// err is a *rpc.jsonError, but it does have a Message that matches.
+	return errorFilter(err, txpool.ErrAlreadyKnown, "known transaction"), false, false
+}
+
+func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error {
 	var lastProvider *provider
 	if err := m.withAll(ctx, func(ctx context.Context, p *provider) error {
 		lastProvider = p
 		m.log.Tracef("Sending signed tx via %q", p.host)
 		return p.ec.SendTransaction(ctx, tx)
-	}, func(err error) (discard, propagate, fail bool) {
-		// NOTE: err never hits errors.Is(err, txpool.ErrAlreadyKnown) because
-		// err is a *rpc.jsonError, but it does have a Message that matches.
-		return errorFilter(err, txpool.ErrAlreadyKnown, "known transaction"), false, false
-	}); err != nil {
+	}, filts...); err != nil {
 		return err
 	}
 	m.lastProvider.Lock()
@@ -1328,7 +1288,7 @@ func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Tr
 	return nil
 }
 
-func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte) (*types.Transaction, error) {
+func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 	tx, err := m.creds.ks.SignTx(*m.creds.acct, types.NewTx(&types.DynamicFeeTx{
 		To:        &to,
 		ChainID:   m.chainID,
@@ -1344,7 +1304,7 @@ func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.Trans
 		return nil, fmt.Errorf("signing error: %v", err)
 	}
 
-	return tx, m.sendSignedTransaction(ctx, tx)
+	return tx, m.sendSignedTransaction(ctx, tx, filts...)
 }
 
 func (m *multiRPCClient) signData(data []byte) (sig, pubKey []byte, err error) {
@@ -1401,26 +1361,31 @@ func (m *multiRPCClient) transactionConfirmations(ctx context.Context, txHash co
 
 // txOpts creates transaction options and sets the passed nonce if supplied. If
 // nonce is nil the next nonce will be fetched and the passed argument altered.
-func (m *multiRPCClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error) {
-	baseFees, gasTipCap, err := m.currentFees(ctx)
-	if err != nil {
-		return nil, err
+// txOpts can be called with either one or both of maxFeeRate or tipRate, but
+// if either is nil, as many as two RPC calls may be made to establish the
+// missing values. If the maxFeeRate is not specified, the standard 2*base+tip
+// formula is used.
+func (m *multiRPCClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, tipRate, nonce *big.Int) (_ *bind.TransactOpts, err error) {
+	if maxFeeRate == nil || tipRate == nil {
+		baseRate, newTipRate, err := m.currentFees(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if tipRate == nil {
+			tipRate = newTipRate
+		}
+		maxFeeRate = new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
 	}
 
-	if maxFeeRate == nil {
-		maxFeeRate = new(big.Int).Mul(baseFees, big.NewInt(2))
-	}
-
-	txOpts := newTxOpts(ctx, m.creds.addr, val, maxGas, maxFeeRate, gasTipCap)
+	txOpts := newTxOpts(ctx, m.creds.addr, val, maxGas, maxFeeRate, tipRate)
 
 	// If nonce is not nil, this indicates that we are trying to re-send an
 	// old transaction with higher fee in order to ensure it is mined.
 	if nonce == nil {
-		n, err := m.nextNonce(ctx)
+		_, nonce, err = m.nonce(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("error getting nonce: %v", err)
 		}
-		nonce = new(big.Int).SetUint64(n)
 	}
 	txOpts.Nonce = nonce
 
@@ -1613,7 +1578,7 @@ func newCompatibilityTests(cb bind.ContractBackend, compat *CompatibilityData, l
 				if err != nil {
 					return err
 				}
-				log.Debugf("#### Retrieved tip cap: %d gwei", dexeth.WeiToGwei(tipCap))
+				log.Debugf("#### Retrieved tip cap: %d gwei", dexeth.WeiToGweiCeil(tipCap))
 				return nil
 			},
 		},
@@ -1624,7 +1589,7 @@ func newCompatibilityTests(cb bind.ContractBackend, compat *CompatibilityData, l
 				if err != nil {
 					return err
 				}
-				log.Debugf("#### Balance retrieved: %.9f", float64(dexeth.WeiToGwei(bal))/1e9)
+				log.Debugf("#### Balance retrieved: %.9f", float64(dexeth.WeiToGweiCeil(bal))/1e9)
 				return nil
 			},
 		},

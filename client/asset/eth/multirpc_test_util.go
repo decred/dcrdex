@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math/big"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -17,7 +18,9 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -92,7 +95,7 @@ func (m *MRPCTest) rpcClient(dir string, seed []byte, endpoints []string, net de
 		return nil, fmt.Errorf("error creating wallet: %v", err)
 	}
 
-	return newMultiRPCClient(dir, endpoints, log, cfg, net)
+	return newMultiRPCClient(dir, endpoints, log, cfg, 3, net)
 }
 
 func (m *MRPCTest) TestHTTP(t *testing.T, port string) {
@@ -150,7 +153,7 @@ func (m *MRPCTest) TestSimnetMultiRPCClient(t *testing.T, wsPort, httpPort strin
 		for i := 0; i < 10; i++ {
 			// Send two in a row. They should use each provider, preferred first.
 			for j := 0; j < 2; j++ {
-				txOpts, err := cl.txOpts(ctx, amt, defaultSendGasLimit, nil, nil)
+				txOpts, err := cl.txOpts(ctx, amt, defaultSendGasLimit, nil, nil, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -176,6 +179,7 @@ func (m *MRPCTest) TestSimnetMultiRPCClient(t *testing.T, wsPort, httpPort strin
 func (m *MRPCTest) TestMonitorNet(t *testing.T, net dex.Network) {
 	seed, providers := m.readProviderFile(t, net)
 	dir, _ := os.MkdirTemp("", "")
+	defer os.RemoveAll(dir)
 
 	cl, err := m.rpcClient(dir, seed, providers, net, true)
 	if err != nil {
@@ -289,6 +293,136 @@ func (m *MRPCTest) TestMainnetCompliance(t *testing.T) {
 	}
 }
 
+func (m *MRPCTest) TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
+	m.withClient(t, dex.Mainnet, func(ctx context.Context, cl *multiRPCClient) {
+		if err := cl.withAny(ctx, func(ctx context.Context, p *provider) error {
+			blk, err := p.ec.BlockByNumber(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("BlockByNumber error: %v", err)
+			}
+			h := blk.Number()
+			const m = 20 // how many txs
+			var n int
+			for n < m {
+				txs := blk.Transactions()
+				fmt.Printf("##### Block %d has %d transactions", h, len(txs))
+				for _, tx := range txs {
+					n++
+					r, err := cl.transactionReceipt(ctx, tx.Hash())
+					if err != nil {
+						return fmt.Errorf("transactionReceipt error: %v", err)
+					}
+					if r.EffectiveGasPrice != nil {
+						fmt.Printf("##### Effective gas price: %s \n", r.EffectiveGasPrice)
+					} else {
+						fmt.Printf("##### No effective gas price for tx %s \n", tx.Hash())
+					}
+				}
+				h.Add(h, big.NewInt(-1))
+				blk, err = p.ec.BlockByNumber(ctx, h)
+				if err != nil {
+					return fmt.Errorf("error getting block %d: %w", h, err)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func (m *MRPCTest) withClient(t *testing.T, net dex.Network, f func(context.Context, *multiRPCClient)) {
+	seed, providers := m.readProviderFile(t, net)
+	dir, _ := os.MkdirTemp("", "")
+	defer os.RemoveAll(dir)
+
+	cl, err := m.rpcClient(dir, seed, providers, net, false)
+	if err != nil {
+		t.Fatalf("Error creating rpc client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(m.ctx, time.Hour)
+	defer cancel()
+
+	if err := cl.connect(ctx); err != nil {
+		t.Fatalf("Connection error: %v", err)
+	}
+
+	f(ctx, cl)
+}
+
+// FeeHistory prints the base fees sampled once per week going back the
+// specified number of days.
+func (m *MRPCTest) FeeHistory(t *testing.T, net dex.Network, blockTimeSecs, days uint64) {
+	m.withClient(t, net, func(ctx context.Context, cl *multiRPCClient) {
+		tip, err := cl.bestHeader(ctx)
+		if err != nil {
+			t.Fatalf("bestHeader error: %v", err)
+		}
+
+		tipHeight := tip.Number.Uint64()
+
+		baseFees := misc.CalcBaseFee(cl.cfg, tip)
+
+		fmt.Printf("##### Tip = %d \n", tipHeight)
+		fmt.Printf("##### Current base fees: %s \n", fmtFee(baseFees))
+
+		const secondsPerDay = 86_400
+		var samplingDuration uint64 = 7 * secondsPerDay // Check every 7 days
+		totalDuration := secondsPerDay * days
+		n := totalDuration / samplingDuration
+		samplingDistance := samplingDuration / blockTimeSecs
+		fees := make([]uint64, n)
+		for i := range fees {
+			height := tipHeight - (uint64(i+1) * samplingDistance)
+			hdr, err := cl.HeaderByNumber(ctx, big.NewInt(int64(height)))
+			if err != nil {
+				t.Fatalf("HeaderByNumber(%d) error: %v", height, err)
+			}
+			if hdr.BaseFee == nil {
+				fmt.Println("nil base fees for height", height)
+				continue
+			}
+			baseFees = misc.CalcBaseFee(cl.cfg, hdr)
+			fmt.Printf("##### Base fees height %d @ %s: %s \n", height, time.Unix(int64(hdr.Time), 0), fmtFee(baseFees))
+		}
+	})
+}
+
+func (m *MRPCTest) TipCaps(t *testing.T, net dex.Network) {
+	m.withClient(t, net, func(ctx context.Context, cl *multiRPCClient) {
+		if err := cl.withAny(ctx, func(ctx context.Context, p *provider) error {
+			blk, err := p.ec.BlockByNumber(ctx, nil)
+			if err != nil {
+				return err
+			}
+			h := blk.Number()
+			const m = 20 // how many txs
+			var n int
+			for {
+				txs := blk.Transactions()
+				fmt.Printf("##### Block %d has %d transactions \n", h, len(txs))
+				for _, tx := range txs {
+					n++
+					fmt.Println("##### Tx tip cap =", fmtFee(tx.GasTipCap()))
+				}
+				if n >= m {
+					break
+				}
+				h.Add(h, big.NewInt(-1))
+				blk, err = p.ec.BlockByNumber(ctx, h)
+				if err != nil {
+					return fmt.Errorf("error getting block %d: %w", h, err)
+				}
+			}
+
+			return nil
+		}); err != nil {
+			t.Fatalf("Error getting block: %v", err)
+		}
+	})
+}
+
 func (m *MRPCTest) testSimnetEndpoint(endpoints []string, syncBlocks uint64, tFunc func(context.Context, *multiRPCClient)) error {
 	dir, _ := os.MkdirTemp("", "")
 	defer os.RemoveAll(dir)
@@ -360,4 +494,11 @@ func (m *MRPCTest) readProviderFile(t *testing.T, net dex.Network) (seed []byte,
 		t.Fatalf("Error retreiving credentials from file at %q: %v", m.credentialsFile, err)
 	}
 	return
+}
+
+func fmtFee(v *big.Int) string {
+	if v.Cmp(dexeth.GweiToWei(1)) < 0 {
+		return fmt.Sprintf("%s wei / gas", v)
+	}
+	return fmt.Sprintf("%d gwei / gas", dexeth.WeiToGwei(v))
 }

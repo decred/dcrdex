@@ -108,7 +108,7 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 		return nil, nil, err
 	}
 
-	log.Debug("-------------------- BEGIN parsed markets.json --------------------")
+	log.Debug("|-------------------- BEGIN parsed markets.json --------------------")
 	log.Debug("MARKETS")
 	log.Debug("                  Base         Quote    LotSize     EpochDur")
 	for i, mktConf := range conf.Markets {
@@ -138,7 +138,7 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 		}
 		log.Debugf("%-12s % 10d  % 9d % 9s", asset, assetConf.MaxFeeRate, assetConf.SwapConf, assetConf.Network)
 	}
-	log.Debug("--------------------- END parsed markets.json ---------------------")
+	log.Debug("|--------------------- END parsed markets.json ---------------------|")
 
 	// Normalize the asset names to lower case.
 	var assets []*Asset

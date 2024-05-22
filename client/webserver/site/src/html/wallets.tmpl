@@ -7,17 +7,25 @@
   <span class="me-2 text-danger ico-cross d-hide pointer peers-table-icon" id="removeIconTmpl"></span>
   <div id="content" class="fill-abs d-flex">
     {{- /* ASSET SELECT */ -}}
-    <section id="assetSelect" class="w-auto d-flex align-items-stretch overflow-y-hidden stylish-overflow hoveronly invisible">
-      <div id="iconSelectTmpl" class="icon-select d-flex align-items-stretch p-2">
-        <div class="position-relative overflow-visible">
-          <img data-tmpl="img">
-          <img data-tmpl="parentImg" class="d-hide">
+    <section id="assetSelect" class="w-auto d-flex align-items-stretch overflow-y-hidden hidden-overflow invisible">
+      <div id="iconSelectTmpl" class="icon-select d-flex align-items-stretch p-2 border-bottom">
+        <div class="flex-center">
+          <div class="position-relative overflow-visible">
+            <img data-tmpl="img">
+            <img data-tmpl="parentImg" class="d-hide">
+          </div>
         </div>
-        <div class="d-none d-md-flex flex-column justify-content-around ps-3">
-          <span class="fs15 lh1 text-nowrap" data-tmpl="name"></span>
-          <span class="fs15 lh1" data-tmpl="balance"></span>
-          <span class="fs13 lh1" data-tmpl="fiat" class="d-hide"></span>
-          <span class="fs13 lh1" data-tmpl="noWallet">[[[Create a Wallet]]]</span>
+        <div class="d-none d-md-flex flex-column justify-content-around ps-3 lh1">
+          <span class="fs17 demi lh1 text-nowrap" data-tmpl="name"></span>
+          <span data-tmpl="balanceBox" class="d-hide">
+            <span class="fs14 lh1" data-tmpl="balance"></span>
+            <span class="fs14 grey" data-tmpl="unit"></span>
+          </span>
+          <span data-tmpl="fiatBox" class="d-hide">
+            <span class="fs14 lh1" data-tmpl="fiat"></span>
+            <span class="fs14 grey">USD</span>
+          </span>
+          <span class="fs15 lh1" data-tmpl="noWallet">[[[Create a Wallet]]]</span>
         </div>
       </div>
     </section>
@@ -138,10 +146,13 @@
                     [[[Settings]]]
                   </button>
                 </div>
-                <button id="needsProviderBttn" class="flex-center mt-2 lh1 fs17" data-tooltip="[[[add_provider_tooltip]]]">
-                  <span class="ico-disconnected text-warning demi me-2"></span>
-                  <span>Add a custom API provider</span>
-                </button>
+                <div id="needsProviderBox" class="flex-stretch-column border-top mt-2">
+                  <div class="mt-2 text-justify">[[[add_provider_tooltip]]]</div>
+                  <button id="needsProviderBttn" class="flex-center mt-2 lh1 fs17">
+                    <span class="ico-disconnected text-warning demi me-2"></span>
+                    <span>Add a custom API provider</span>
+                  </button>
+                </div>
               </div>
             </div>
           </section>

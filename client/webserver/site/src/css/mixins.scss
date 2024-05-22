@@ -21,6 +21,15 @@
   }
 }
 
+@mixin hidden-overflow {
+  overflow: auto;
+  scrollbar-width: none;  /* Firefox */
+
+  &::-webkit-scrollbar {
+    display: none;  /* Safari and Chrome */
+  }
+}
+
 @mixin fill-abs {
   position: absolute;
   top: 0;

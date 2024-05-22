@@ -106,3 +106,15 @@ func TestFreeTestnetServers(t *testing.T) {
 func TestMainnetCompliance(t *testing.T) {
 	mt.TestMainnetCompliance(t)
 }
+
+func TestTestnetFees(t *testing.T) {
+	mt.FeeHistory(t, dex.Testnet, 3, 90)
+}
+
+func TestTestnetTipCaps(t *testing.T) {
+	mt.TipCaps(t, dex.Testnet)
+}
+
+func TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
+	mt.TestReceiptsHaveEffectiveGasPrice(t)
+}
