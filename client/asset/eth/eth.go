@@ -3308,7 +3308,12 @@ func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, _, maxWith
 
 // StandardSendFees returns the fees for a simple send tx.
 func (w *TokenWallet) StandardSendFee(feeRate uint64) uint64 {
-	return defaultSendGasLimit * feeRate
+	g := w.gases(contractVersionNewest)
+	if g == nil {
+		w.log.Errorf("error getting gases for token %s", w.token.Name)
+		return 0
+	}
+	return g.Transfer * feeRate
 }
 
 // RestorationInfo returns information about how to restore the wallet in
