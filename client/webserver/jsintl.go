@@ -127,7 +127,7 @@ const (
 	reservesDeficitMsgID             = "RESERVES_DEFICIT_MSG"
 	bondReservesID                   = "BOND_RESERVES"
 	bondReservesMsgID                = "BOND_RESERVES_MSG"
-	shilededID                       = "SHIELDED"
+	shieldedID                       = "SHIELDED"
 	shieldedMsgID                    = "SHIELDED_MSG"
 	orderID                          = "ORDER"
 	lockedOrderBalMsgID              = "LOCKED_ORDER_BAL_MSG"
@@ -321,7 +321,7 @@ var enUS = map[string]*intl.Translation{
 	reservesDeficitMsgID:             {T: "The apparent wallet balance shortcoming to maintain bonding level. If this persists, you may need to add funds to stay fully bonded."},
 	bondReservesID:                   {T: "Bond Reserves"},
 	bondReservesMsgID:                {T: "Funds reserved to cover the expenses associated with bond maintenance"},
-	shilededID:                       {T: "Shielded"},
+	shieldedID:                       {T: "Shielded"},
 	shieldedMsgID:                    {T: "Total funds kept shielded"},
 	orderID:                          {T: "Order"},
 	lockedOrderBalMsgID:              {T: "Funds locked in unmatched orders"},
@@ -617,7 +617,7 @@ var plPL = map[string]*intl.Translation{
 	availableTitleID:                 {T: "Dostępne"},
 	newWalletSuccessID:               {T: "Utworzono portfel {{ assetName }}!"},
 	txTypeTicketRevokeID:             {T: "Odwołanie biletu"},
-	shilededID:                       {T: "Osłonięte"},
+	shieldedID:                       {T: "Osłonięte"},
 	takerFoundMakerRedemptionID:      {T: "Wykupione przez {{ makerAddr }}"},
 	lockedSwappingBalMsgID:           {T: "Środki obecnie zablokowane w rozliczanych sparowaniach"},
 	refundImminentID:                 {T: "Odbędzie się w następnych paru blokach"},
@@ -789,7 +789,7 @@ var ar = map[string]*intl.Translation{
 	ticketStatusUnspentID:            {T: "غير منفقة"},
 	txTypeTicketVoteID:               {T: "تصويت التذكرة"},
 	disconnectedID:                   {T: "انقطع الاتصال"},
-	shilededID:                       {T: "محمية"},
+	shieldedID:                       {T: "محمية"},
 	ticketStatusExpiredID:            {T: "منتهية الصلاحية"},
 	txTypeRefundID:                   {T: "استرداد"},
 	discoveredID:                     {T: "مكتشفة"},

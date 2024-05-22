@@ -336,8 +336,8 @@ var PlPL = map[string]*intl.Translation{
 	"archived_date_tooltip":       {T: "Archiwalne zamówienia i spasowania sprzed podanego okresu zostaną usunięte z bazy danych."},
 	"save_matches_to_file":        {T: "Zapisz spasowania do pliku CSV"},
 	"save_orders_to_file":         {T: "Zapisz zamówienia do pliku CSV"},
-	"save_orders_to_file_msg":     {T: "Opcjonalne: czy zapisywać usunięte zamówienia w pliku CSV w folderze danych dexc. Domyślnie: nie."},
-	"save_matches_to_file_msg":    {T: "Opcjonalne: czy zapisywać usunięte spasowania w pliku CSV w folderze danych dexc. Domyślnie: nie."},
+	"save_orders_to_file_msg":     {T: "Opcjonalne: czy zapisywać usunięte zamówienia w pliku CSV w folderze danych bisonw. Domyślnie: nie."},
+	"save_matches_to_file_msg":    {T: "Opcjonalne: czy zapisywać usunięte spasowania w pliku CSV w folderze danych bisonw. Domyślnie: nie."},
 	// Bot animatora rynku
 	"Market Making":          {T: "Animacja rynku"},
 	"Off":                    {T: "Wyłączona"},

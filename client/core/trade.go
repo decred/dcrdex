@@ -2451,8 +2451,8 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		c.log.Infof("The following are contract identifiers mapped to raw refund "+
 			"transactions that are only valid after the swap contract expires. "+
 			"These are fallback transactions that can be used to return funds "+
-			"to your wallet in the case dexc no longer functions. They should "+
-			"NOT be used if dexc is operable. dexc will refund failed "+
+			"to your wallet in the case the wallet software no longer functions. They should "+
+			"NOT be used if Bison Wallet is operable. The wallet will refund failed "+
 			"contracts automatically.\nRefund Txs: {%s}", refundTxs)
 	}
 

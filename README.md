@@ -51,7 +51,7 @@ data collection and censorship.
 We also focus on bringing advanced, asset-specific features for out wallets.
 With Decred, you can use CoinShuffle++ to further anonymize your funds, or stake
 your DCR and earn some block rewards. The Zcash wallet exposes unified addresses
-and shileded pools, and operates on a shielded-first principle that makes
+and shielded pools, and operates on a shielded-first principle that makes
 privacy effortless. Keep an eye on development here. We are dedicated to
 exposing these technologies to the communities that want them.
 
