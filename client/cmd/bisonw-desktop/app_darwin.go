@@ -4,11 +4,12 @@ package main
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -lobjc -framework WebKit -framework AppKit
+#cgo LDFLAGS: -lobjc -framework WebKit -framework AppKit -framework UserNotifications
 
 #import <objc/runtime.h>
 #import <WebKit/WebKit.h>
 #import <AppKit/AppKit.h>
+#import <UserNotifications/UserNotifications.h>
 
 // NavigationActionPolicyCancel is an integer used in Go code to represent
 // WKNavigationActionPolicyCancel
@@ -20,6 +21,7 @@ const int NavigationActionPolicyCancel = 1;
 - (void)completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler withURLs:(NSArray<NSURL *> * _Nullable)URLs;
 - (void)decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler withPolicy:(int)policy;
 - (void)authenticationCompletionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler withChallenge:(NSURLAuthenticationChallenge *)challenge;
+- (void)deliverNotificationWithTitle:(NSString *)title message:(NSString *)message icon:(NSImage *)icon;
 @end
 
 @implementation CompletionHandlerDelegate
@@ -45,6 +47,25 @@ const int NavigationActionPolicyCancel = 1;
 	SecTrustSetExceptions(serverTrust, exceptions);
 	CFRelease(exceptions);
 	completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust:serverTrust]);
+}
+
+// Implements "deliverNotificationWithTitle:message:icon:" handler with the NSUserNotification
+// and NSUserNotificationCenter classes which have been marked deprecated
+// but it is what works atm for macOS apps. The newer UNUserNotificationCenter has some
+// implementation issues and very little information to aid debugging.
+// See: https://developer.apple.com/documentation/foundation/nsusernotification?language=objc and
+// https://github.com/progrium/macdriver/discussions/258
+- (void)deliverNotificationWithTitle:(NSString *)title message:(NSString *)message icon:(NSImage *)icon{
+    NSUserNotification *notification = [NSUserNotification new];
+    notification.title = title;
+    notification.informativeText = message;
+	notification.actionButtonTitle = @"Ok";
+    notification.hasActionButton = 1;
+	notification.soundName = NSUserNotificationDefaultSoundName;
+	[notification setValue:icon forKey:@"_identityImage"];
+    [notification setValue:@(false) forKey:@"_identityImageHasBorder"];
+	[notification setValue:@YES forKey:@"_ignoresDoNotDisturb"];
+	[[NSUserNotificationCenter defaultUserNotificationCenter]deliverNotification:notification];
 }
 @end
 
@@ -98,6 +119,7 @@ var (
 	// completionHandler handles Objective-C callback functions for some
 	// delegate methods.
 	completionHandler = objc.Object_fromPointer(C.createCompletionHandlerDelegate())
+	dexcAppIcon       = cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon))))
 )
 
 const (
@@ -828,4 +850,10 @@ func (sc *shutdownCloser) Done() {
 		sc.closers[i]()
 	}
 	sc.closers = nil
+}
+
+func sendDesktopNotification(title, msg string) {
+	nsTitle := mdCore.NSString_FromString(title)
+	nsMessage := mdCore.NSString_FromString(msg)
+	completionHandler.Send("deliverNotificationWithTitle:message:icon:", nsTitle, nsMessage, dexcAppIcon)
 }

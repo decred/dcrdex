@@ -7,4 +7,3 @@ package main
 
 // After generating the rsrc_windows_amd64.syso file, it will be included in the
 // binary when making an amd64 build for windows.
-

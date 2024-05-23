@@ -70,6 +70,7 @@ import (
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
 	"fyne.io/systray"
+	"github.com/gen2brain/beeep"
 	"github.com/pkg/browser"
 	"github.com/webview/webview"
 )
@@ -549,4 +550,12 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 			}
 		}
 	}()
+}
+
+func sendDesktopNotification(title, msg string) {
+	err := beeep.Notify(title, msg, tmpLogoPath)
+	if err != nil {
+		log.Errorf("error sending desktop notification: %v", err)
+		return
+	}
 }
