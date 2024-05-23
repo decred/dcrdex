@@ -80,10 +80,15 @@ Commands Help:
 --------------
 alpha_get_transactions
 
-- get transaction details for one or more txid
+- get transactions info for one or more txid
 - inputs:
   - tx_hashes - hash1,hash2,hash3,...
-  - decode_as_json - Optional - returns more detail but in a escaped raw json format
+
+alpha_get_transactions_details
+
+- get transaction development details from monerod including tx lock time
+- inputs:
+  - tx_hashes - hash1,hash2,hash3,...
 
 alpha_info
 
