@@ -111,7 +111,7 @@ EOF
 chmod +x "${HARNESS_CTL_DIR}/alpha_sendrawtransaction"
 # -----------------------------------------------------------------------------
 
-# Get one or more transaction details from monerod
+# Get one or more transactions from monerod
 # inputs:
 # - txids as hex string - "hash1,hash2,hash3,..."
 # - decode_as_json - defaults to false
@@ -121,6 +121,17 @@ source monero_functions.inc
 get_transactions ${ALPHA_NODE_RPC_PORT} \$1 \$2 2>/dev/null
 EOF
 chmod +x "${HARNESS_CTL_DIR}/alpha_get_transactions"
+# -----------------------------------------------------------------------------
+
+# Get one or more transaction development details from monerod including tx lock time
+# inputs:
+# - txids as hex string - "hash1,hash2,hash3,..."
+cat > "${HARNESS_CTL_DIR}/alpha_get_transactions_details" <<EOF
+#!/usr/bin/env bash
+source monero_functions.inc
+get_transactions ${ALPHA_NODE_RPC_PORT} \$1 true 2>/dev/null | jq '.txs[] | .as_json | fromjson'
+EOF
+chmod +x "${HARNESS_CTL_DIR}/alpha_get_transactions_details"
 # -----------------------------------------------------------------------------
 
 # Mempool info
@@ -152,7 +163,7 @@ chmod +x "${HARNESS_CTL_DIR}/mine-to-bill"
 cat > "${HARNESS_CTL_DIR}/fred_transfer_to" <<EOF
 #!/usr/bin/env bash
 source monero_functions.inc
-transfer_simple ${FRED_WALLET_RPC_PORT} \$1 \$2
+transfer_simple ${FRED_WALLET_RPC_PORT} \$1 \$2 \$3
 sleep 0.5
 EOF
 chmod +x "${HARNESS_CTL_DIR}/fred_transfer_to"

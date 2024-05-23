@@ -4,7 +4,7 @@
 
 daemon-rpc-request() {    # older rpc style
 	local port="${1:?}"   # monerod port
-	local method="${2:?}" # Non-JSON RPC method name
+	local method="${2:?}" # RPC method name
 	local params="${3:?}" # JSON parameters to method
 	curl --http0.9 "http://localhost:${port}/${method}" \
 		-d "${params}" \
@@ -68,11 +68,8 @@ get_transactions() {
   		 txs_hashes_json+="$i"
   		 txs_hashes_json+="\","
 	done
-	echo $txs_hashes_json
 	txs_hashes_json=${txs_hashes_json%?} # will work in BASH 3.x
-	echo $txs_hashes_json
 	params="{\"txs_hashes\":[${txs_hashes_json}],\"decode_as_json\":${decode_as_json}}"
-	echo $params
 	daemon-rpc-request "${port}" "get_transactions" "${params}"
 }
 
@@ -180,10 +177,8 @@ transfer_simple() {
 	local amount="${2:?input an amount of monero to send in atomic units 1e12}"
 	local address="${3:?input a valid destination wallet address}"
 	local unlock_time=${4:-0} # unlock after n blocks
-	destinations="[{\"amount\":${amount},\"address\":\"${address}\"}]"
-    fixed_params="\"account_index\":0,\"subaddr_indices\":[0],\"priority\":0,\"ring_size\":11,\"get_tx_key\": true,\"get_tx_hex\":true"
-	params="{\"destinations\":[{\"amount\":${amount},\"address\":\"${address}\",\"unlock_time\":${unlock_time}}], "${fixed_params}" }"
-	echo "${params}"
+    other_params="\"account_index\":0,\"subaddr_indices\":[0],\"priority\":0,\"unlock_time\":${unlock_time},\"get_tx_key\":true,\"get_tx_hex\":true"
+	params="{\"destinations\":[{\"amount\":${amount},\"address\":\"${address}\"}], "${other_params}" }"
 	monero-rpc-request "${port}" "transfer" "${params}"
 }
 
@@ -201,7 +196,6 @@ import_outputs() {
 	local port="${1:?input a valid wallet rpc port for an offline cold wallet}"
 	local outputs_data_hex="${2:?input a valid outputs data hex string}"
 	params="{\"outputs_data_hex\":\"${outputs_data_hex}\"}"
-	echo "${params}"
 	monero-rpc-request "${port}" "import_outputs" "${params}"
 }
 
@@ -240,7 +234,6 @@ transfer_no_relay() {
 	destinations="[{\"amount\":${amount},\"address\":\"${address}\"}]"
     other_params="\"account_index\":0,\"subaddr_indices\":[0],\"priority\":0,\"unlock_time\":${unlock_time},\"do_not_relay\":true,\"get_tx_key\":true,\"get_tx_hex\":true,\"get_tx_metadata\":true"
 	params="{\"destinations\":[{\"amount\":${amount},\"address\":\"${address}\"}], "${other_params}" }"
-	echo "${params}"
 	monero-rpc-request "${port}" "transfer" "${params}"
 }
 
@@ -253,7 +246,6 @@ sign_transfer() {
 	local port="${1:?input a valid wallet rpc port for a cold wallet}"
 	local unsigned_txset="${2:?input an unsigned tx set}"
 	params="{\"unsigned_txset\":\"${unsigned_txset}\"}"
-	echo "${params}"
 	monero-rpc-request "${port}" "sign_transfer" "${params}"
 }
 
@@ -264,7 +256,11 @@ cmd_help() {
 	echo "- get transaction details for one or more txid"
 	echo "- inputs:"
 	echo "  - tx_hashes - hash1,hash2,hash3,..."
-	echo "  - decode_as_json - Optional - returns more detail but in a escaped raw json format"
+	echo ""
+	echo "alpha_get_transactions_details"
+	echo "- get transaction development details from monerod including tx lock time"
+	echo "- inputs:"
+	echo "  - tx_hashes - hash1,hash2,hash3,..."
 	echo ""
 	echo "alpha_info"
 	echo "- get running daemon details - height, etc."
@@ -295,7 +291,7 @@ cmd_help() {
 	echo "bill_transfer_to"
 	echo "- build, sign and broadcast a transaction from bill wallet to another address"
 	echo "- inputs:"
-	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 echo = 1.23 XMR"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 = 1.23 XMR"
 	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
 	echo ""
 	echo "charlie_balance"
@@ -323,7 +319,7 @@ cmd_help() {
 	echo "charlie_transfer_to"
 	echo "- build, sign and broadcast a transaction from charlie wallet to another address"
 	echo "- inputs"
-	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 echo = 1.23 XMR"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 = 1.23 XMR"
 	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
 	echo "  - unlock_time - unlock after n blocks and make spendable - defaults to 0 (no lock)"
 	echo ""   
@@ -378,7 +374,7 @@ cmd_help() {
 	echo "fred_transfer_to"
 	echo "- build, sign and broadcast a transaction from bill wallet to another address"
 	echo "- inputs"
-	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 echo = 1.23 XMR"
+	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 = 1.23 XMR"
 	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
 	echo "  - unlock_time - unlock after n blocks and make spendable - defaults to 0 (no lock)"
 	echo ""
