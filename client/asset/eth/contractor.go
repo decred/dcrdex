@@ -362,7 +362,7 @@ func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, erro
 func (c *contractorV0) estimateGas(ctx context.Context, value *big.Int, method string, args ...any) (uint64, error) {
 	data, err := c.abi.Pack(method, args...)
 	if err != nil {
-		return 0, fmt.Errorf("Pack error: %v", err)
+		return 0, fmt.Errorf("pack error: %v", err)
 	}
 
 	return c.cb.EstimateGas(ctx, ethereum.CallMsg{
@@ -425,34 +425,36 @@ func (c *contractorV0) outgoingValue(tx *types.Transaction) (swapped uint64) {
 
 // erc20Contractor supports the ERC20 ABI. Embedded in token contractors.
 type erc20Contractor struct {
-	tokenContract *erc20.IERC20
-	acct          common.Address
-	contract      common.Address
+	cb               bind.ContractBackend
+	tokenContract    *erc20.IERC20
+	tokenAddr        common.Address
+	acctAddr         common.Address
+	swapContractAddr common.Address
 }
 
 // balance exposes the read-only balanceOf method of the erc20 token contract.
 func (c *erc20Contractor) balance(ctx context.Context) (*big.Int, error) {
 	callOpts := &bind.CallOpts{
-		From:    c.acct,
+		From:    c.acctAddr,
 		Context: ctx,
 	}
 
-	return c.tokenContract.BalanceOf(callOpts, c.acct)
+	return c.tokenContract.BalanceOf(callOpts, c.acctAddr)
 }
 
 // allowance exposes the read-only allowance method of the erc20 token contract.
 func (c *erc20Contractor) allowance(ctx context.Context) (*big.Int, error) {
 	callOpts := &bind.CallOpts{
-		From:    c.acct,
+		From:    c.acctAddr,
 		Context: ctx,
 	}
-	return c.tokenContract.Allowance(callOpts, c.acct, c.contract)
+	return c.tokenContract.Allowance(callOpts, c.acctAddr, c.swapContractAddr)
 }
 
 // approve sends an approve transaction approving the linked contract to call
 // transferFrom for the specified amount.
 func (c *erc20Contractor) approve(txOpts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
-	return c.tokenContract.Approve(txOpts, c.contract, amount)
+	return c.tokenContract.Approve(txOpts, c.swapContractAddr, amount)
 }
 
 // transfer calls the transfer method of the erc20 token contract. Used for
@@ -461,17 +463,28 @@ func (c *erc20Contractor) transfer(txOpts *bind.TransactOpts, addr common.Addres
 	return c.tokenContract.Transfer(txOpts, addr, amount)
 }
 
+// estimateApproveGas estimates the gas needed to send an approve tx.
+func (c *erc20Contractor) estimateApproveGas(ctx context.Context, amount *big.Int) (uint64, error) {
+	return estimateGas(ctx, c.acctAddr, c.tokenAddr, erc20.ERC20ABI, c.cb, new(big.Int), "approve", c.swapContractAddr, amount)
+}
+
+// estimateTransferGas estimates the gas needed for a transfer tx. The account
+// needs to have > amount tokens to use this method.
+func (c *erc20Contractor) estimateTransferGas(ctx context.Context, amount *big.Int) (uint64, error) {
+	return estimateGas(ctx, c.acctAddr, c.swapContractAddr, erc20.ERC20ABI, c.cb, new(big.Int), "transfer", c.acctAddr, amount)
+}
+
 func (c *erc20Contractor) parseTransfer(receipt *types.Receipt) (uint64, error) {
 	var transferredAmt uint64
 	for _, log := range receipt.Logs {
-		if log.Address != c.contract {
+		if log.Address != c.tokenAddr {
 			continue
 		}
 		transfer, err := c.tokenContract.ParseTransfer(*log)
 		if err != nil {
 			continue
 		}
-		if transfer.To == c.acct {
+		if transfer.To == c.acctAddr {
 			transferredAmt += transfer.Value.Uint64()
 		}
 	}
@@ -480,7 +493,7 @@ func (c *erc20Contractor) parseTransfer(receipt *types.Receipt) (uint64, error) 
 		return transferredAmt, nil
 	}
 
-	return 0, fmt.Errorf("transfer log to %s not found", c.contract)
+	return 0, fmt.Errorf("transfer log to %s not found", c.tokenAddr)
 }
 
 // tokenContractorV0 is a contractor that implements the tokenContractor
@@ -488,7 +501,6 @@ func (c *erc20Contractor) parseTransfer(receipt *types.Receipt) (uint64, error) 
 type tokenContractorV0 struct {
 	*contractorV0
 	*erc20Contractor
-	tokenAddr common.Address
 }
 
 var _ contractor = (*tokenContractorV0)(nil)
@@ -537,30 +549,15 @@ func newV0TokenContractor(net dex.Network, token *dexeth.Token, acctAddr common.
 			evmify:       token.AtomicToEVM,
 			atomize:      token.EVMToAtomic,
 		},
-		tokenAddr: tokenAddr,
+
 		erc20Contractor: &erc20Contractor{
-			tokenContract: tokenContract,
-			acct:          acctAddr,
-			contract:      swapContractAddr,
+			cb:               cb,
+			tokenContract:    tokenContract,
+			tokenAddr:        tokenAddr,
+			acctAddr:         acctAddr,
+			swapContractAddr: swapContractAddr,
 		},
 	}, nil
-}
-
-// estimateApproveGas estimates the gas needed to send an approve tx.
-func (c *tokenContractorV0) estimateApproveGas(ctx context.Context, amount *big.Int) (uint64, error) {
-	return c.estimateGas(ctx, "approve", c.contractAddr, amount)
-}
-
-// estimateTransferGas esimates the gas needed for a transfer tx. The account
-// needs to have > amount tokens to use this method.
-func (c *tokenContractorV0) estimateTransferGas(ctx context.Context, amount *big.Int) (uint64, error) {
-	return c.estimateGas(ctx, "transfer", c.acctAddr, amount)
-}
-
-// estimateGas estimates the gas needed for methods on the ERC20 token contract.
-// For estimating methods on the swap contract, use (contractorV0).estimateGas.
-func (c *tokenContractorV0) estimateGas(ctx context.Context, method string, args ...interface{}) (uint64, error) {
-	return estimateGas(ctx, c.acctAddr, c.contractAddr, c.abi, c.cb, new(big.Int), method, args...)
 }
 
 // value finds incoming or outgoing value for the tx to either the swap contract
@@ -578,7 +575,7 @@ func (c *tokenContractorV0) value(ctx context.Context, tx *types.Transaction) (i
 
 	// Consider removing. We'll never be sending transferFrom transactions
 	// directly.
-	if sender, _, value, err := erc20.ParseTransferFromData(tx.Data()); err == nil && sender == c.acctAddr {
+	if sender, _, value, err := erc20.ParseTransferFromData(tx.Data()); err == nil && sender == c.contractorV0.acctAddr {
 		return 0, c.atomize(value), nil
 	}
 
@@ -850,7 +847,6 @@ func (c *contractorV1) value(ctx context.Context, tx *types.Transaction) (in, ou
 type tokenContractorV1 struct {
 	*contractorV1
 	*erc20Contractor
-	tokenAddr common.Address
 }
 
 func newV1TokenContractor(net dex.Network, token *dexeth.Token, acctAddr common.Address, cb bind.ContractBackend) (tokenContractor, error) {
@@ -894,28 +890,15 @@ func newV1TokenContractor(net dex.Network, token *dexeth.Token, acctAddr common.
 			evmify:       token.AtomicToEVM,
 			atomize:      token.EVMToAtomic,
 		},
-		tokenAddr: tokenAddr,
+
 		erc20Contractor: &erc20Contractor{
-			tokenContract: tokenContract,
-			acct:          acctAddr,
-			contract:      swapContractAddr,
+			cb:               cb,
+			tokenContract:    tokenContract,
+			tokenAddr:        tokenAddr,
+			acctAddr:         acctAddr,
+			swapContractAddr: swapContractAddr,
 		},
 	}, nil
-}
-
-// estimateApproveGas estimates the gas needed to send an approve tx.
-func (c *tokenContractorV1) estimateApproveGas(ctx context.Context, amount *big.Int) (uint64, error) {
-	return c.estimateTokenContractGas(ctx, "approve", c.contractAddr, amount)
-}
-
-// estimateTransferGas estimates the gas needed for a transfer tx. The account
-// needs to have > amount tokens to use this method.
-func (c *tokenContractorV1) estimateTransferGas(ctx context.Context, amount *big.Int) (uint64, error) {
-	return c.estimateTokenContractGas(ctx, "transfer", c.acctAddr, amount)
-}
-
-func (c *tokenContractorV1) estimateTokenContractGas(ctx context.Context, method string, args ...interface{}) (uint64, error) {
-	return estimateGas(ctx, c.acctAddr, c.tokenAddr, erc20.ERC20ABI, c.cb, new(big.Int), method, args...)
 }
 
 // value finds incoming or outgoing value for the tx to either the swap contract
@@ -933,7 +916,7 @@ func (c *tokenContractorV1) value(ctx context.Context, tx *types.Transaction) (i
 
 	// Consider removing. We'll never be sending transferFrom transactions
 	// directly.
-	if sender, _, value, err := erc20.ParseTransferFromData(tx.Data()); err == nil && sender == c.acctAddr {
+	if sender, _, value, err := erc20.ParseTransferFromData(tx.Data()); err == nil && sender == c.contractorV1.acctAddr {
 		return 0, c.atomize(value), nil
 	}
 

@@ -6195,7 +6195,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 			return fmt.Errorf("init tx failed status check: %w", err)
 		}
-		log.Infof("%d gas used for %d initiation txs", receipt.GasUsed, n)
+		log.Infof("%d gas used for %d initiations in tx %s", receipt.GasUsed, n, tx.Hash())
 		stats.swaps = append(stats.swaps, receipt.GasUsed)
 
 		// Estimate a refund
@@ -6223,7 +6223,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for %d redeems: %v", n, err)
 		}
-		log.Debugf("Sending %d redemption txs", n)
+		log.Debugf("Sending %d redemptions", n)
 		tx, err = c.redeem(txOpts, redemptions)
 		if err != nil {
 			return fmt.Errorf("redeem error for %d swaps: %v", n, err)
@@ -6238,7 +6238,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 			return fmt.Errorf("redeem tx failed status check: %w", err)
 		}
-		log.Infof("%d gas used for %d redemptions", receipt.GasUsed, n)
+		log.Infof("%d gas used for %d redemptions in tx %s", receipt.GasUsed, n, tx.Hash())
 		stats.redeems = append(stats.redeems, receipt.GasUsed)
 	}
 

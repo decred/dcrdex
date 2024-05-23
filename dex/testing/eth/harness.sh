@@ -54,6 +54,10 @@ PASSWORD="abc"
 export NODES_ROOT=~/dextest/eth
 export GENESIS_JSON_FILE_LOCATION="${NODES_ROOT}/genesis.json"
 
+# Ensure we can create the session and that there's not a session already
+# running before we nuke the data directory.
+tmux new-session -d -s $SESSION "${SHELL}"
+
 if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
 fi
@@ -234,8 +238,6 @@ chmod +x "${NODES_ROOT}/harness-ctl/quit"
 # Start harness
 ################################################################################
 
-echo "Starting harness"
-tmux new-session -d -s $SESSION "${SHELL}"
 tmux rename-window -t $SESSION:0 'harness-ctl'
 tmux send-keys -t $SESSION:0 "set +o history" C-m
 tmux send-keys -t $SESSION:0 "cd ${NODES_ROOT}/harness-ctl" C-m

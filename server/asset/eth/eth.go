@@ -184,6 +184,18 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 		chainID = 42
 	}
 
+	for _, tkn := range registeredTokens {
+		netToken, found := tkn.NetTokens[cfg.Net]
+		if !found {
+			return nil, fmt.Errorf("no %s token for %s", tkn.Name, cfg.Net)
+		}
+		if _, found = netToken.SwapContracts[tkn.ContractVersion]; !found {
+			return nil, fmt.Errorf("no version %d swap contract adddress for %s on %s. "+
+				"Do you need a version override in evm-protocol-overrides.json?",
+				tkn.ContractVersion, tkn.Name, cfg.Net)
+		}
+	}
+
 	return NewEVMBackend(cfg, chainID, dexeth.ContractAddresses, registeredTokens)
 }
 
