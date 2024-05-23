@@ -2048,8 +2048,6 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSNone, status.Step)
 		}
 
-		inLocktime := uint64(time.Now().Add(test.addTime).Unix())
-
 		txOpts, err := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil, nil, nil)
 		if err != nil {
 			t.Fatalf("%s: txOpts error: %v", test.name, err)

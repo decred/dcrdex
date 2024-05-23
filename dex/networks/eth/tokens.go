@@ -336,13 +336,13 @@ func MaybeReadSimnetAddrsDir(
 		return
 	}
 
-	ethSwapContractAddrFileV0 := filepath.Join(harnessDir, "eth_swap_contract_address.txt")
-	testUSDCSwapContractAddrFileV0 := filepath.Join(harnessDir, "usdc_swap_contract_address.txt")
+	ethSwapContractAddrFileV0 := filepath.Join(harnessDir, "eth_swap_contract_address_v0.txt")
+	ethSwapContractAddrFileV1 := filepath.Join(harnessDir, "eth_swap_contract_address_v1.txt")
+	testUSDCSwapContractAddrFileV0 := filepath.Join(harnessDir, "usdc_swap_contract_address_v0.txt")
+	testUSDCSwapContractAddrFileV1 := filepath.Join(harnessDir, "usdc_swap_contract_address_v1.txt")
 	testUSDCContractAddrFile := filepath.Join(harnessDir, "test_usdc_contract_address.txt")
 	testUSDTSwapContractAddrFileV0 := filepath.Join(harnessDir, "usdt_swap_contract_address.txt")
 	testUSDTContractAddrFile := filepath.Join(harnessDir, "test_usdt_contract_address.txt")
-	ethSwapContractAddrFileV1 := filepath.Join(harnessDir, "eth_swap_contract_address_v1.txt")
-	testUSDCSwapContractAddrFileV1 := filepath.Join(harnessDir, "usdc_swap_contract_address_v1.txt")
 	multiBalanceContractAddrFile := filepath.Join(harnessDir, "multibalance_address.txt")
 
 	contractAddrs[0][dex.Simnet] = maybeGetContractAddrFromFile(ethSwapContractAddrFileV0)
