@@ -191,7 +191,7 @@ func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, su
 func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
 	return c.validAddr, nil
 }
-func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
 	return c.estFee, true, c.estFeeErr
 }
 func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
@@ -294,22 +294,6 @@ func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 }
 func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
 	return c.notes, []*db.Notification{}, c.notesErr
-}
-
-func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
-	return nil, nil
-}
-func (c *TCore) NewShieldedAddress(assetID uint32) (string, error) {
-	return "", nil
-}
-func (c *TCore) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	return nil, nil
-}
-func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	return nil, nil
-}
-func (c *TCore) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
-	return nil, nil
 }
 func (c *TCore) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConfirm func()) (string, error) {
 	return "", nil

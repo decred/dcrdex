@@ -5946,7 +5946,7 @@ func (c *Core) ApproveTokenFee(assetID uint32, version uint32, approval bool) (u
 
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
 // withdraw the specified amount.
-func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
 	if amount == 0 {
 		return 0, false, fmt.Errorf("cannot check fee for zero %s", unbip(assetID))
 	}
@@ -5968,7 +5968,7 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 		return 0, false, fmt.Errorf("wallet does not support fee estimation")
 	}
 
-	return estimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
+	return estimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract, maxWithdraw)
 }
 
 // SingleLotFees returns the estimated swap, refund, and redeem fees for a single lot
@@ -11169,106 +11169,6 @@ func (c *Core) saveDisabledRateSources() {
 	if err != nil {
 		c.log.Errorf("Unable to save disabled fiat rate source to database: %v", err)
 	}
-}
-
-func (c *Core) shieldedWallet(assetID uint32, forFundTransfer ...bool) (asset.ShieldedWallet, error) {
-	w, found := c.wallet(assetID)
-	if !found {
-		return nil, fmt.Errorf("no %s wallet", unbip(assetID))
-	}
-
-	sw, is := w.Wallet.(asset.ShieldedWallet)
-	if !is {
-		return nil, fmt.Errorf("%s wallet is not a shielded wallet", unbip(assetID))
-	}
-
-	// Check if this wallet can send funds at the moment.
-	if len(forFundTransfer) > 0 && forFundTransfer[0] {
-		if err := w.checkPeersAndSyncStatus(); err != nil {
-			return nil, err
-		}
-	}
-
-	return sw, nil
-}
-
-// ShieldedStatus is the shielded balance and last address associated with the
-// shielded wallet.
-func (c *Core) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
-	sw, err := c.shieldedWallet(assetID)
-	if err != nil {
-		return nil, err
-	}
-	return sw.ShieldedStatus()
-}
-
-// NewShieldedAddress creates a new shielded address. Visit the link below for
-// additional notes on shielded address reuse.
-// https://electriccoin.co/blog/shielded-address-contexts/
-func (c *Core) NewShieldedAddress(assetID uint32) (string, error) {
-	sw, err := c.shieldedWallet(assetID)
-	if err != nil {
-		return "", err
-	}
-	return sw.NewShieldedAddress()
-}
-
-// ShieldFunds moves funds from the transparent account to the shielded account.
-func (c *Core) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	sw, err := c.shieldedWallet(assetID, true)
-	if err != nil {
-		return nil, err
-	}
-	return sw.ShieldFunds(c.ctx, amt)
-}
-
-// UnshieldFunds moves funds from the shielded account to the transparent
-// account.
-func (c *Core) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
-	sw, err := c.shieldedWallet(assetID, true)
-	if err != nil {
-		return nil, err
-	}
-
-	return sw.UnshieldFunds(c.ctx, amt)
-}
-
-// SendShielded sends funds from the shielded account to the provided shielded
-// or transparent address.
-func (c *Core) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
-	_, err := c.encryptionKey(appPW)
-	if err != nil {
-		return nil, fmt.Errorf("password error: %w", err)
-	}
-
-	sw, err := c.shieldedWallet(assetID, true)
-	if err != nil {
-		return nil, err
-	}
-
-	coinID, err := sw.SendShielded(c.ctx, toAddr, amt)
-	if err != nil {
-		// Let errors go to logs and UI forms.
-		c.log.Errorf("Error sending shielded funds: %v", err)
-		return nil, err
-	}
-
-	// Send success notification.
-	ui, err := asset.UnitInfo(assetID)
-	if err != nil {
-		c.log.Errorf("Error getting unit info for shielded asset %d", assetID)
-	} else {
-		coinIDStr, err := asset.DecodeCoinID(assetID, coinID)
-		if err != nil {
-			c.log.Errorf("Error decoding coin ID %x from shielded send: %v", coinID, err)
-		} else {
-			val, unit := ui.ConventionalString(amt), ui.Conventional.Unit
-			subject, details := c.formatDetails(TopicShieldedSendSuccess, val, unit, toAddr, coinIDStr)
-			c.notify(newSendNote(TopicShieldedSendSuccess, subject, details, db.Success))
-		}
-	}
-
-	return coinID, nil
 }
 
 // stakingWallet fetches the staking wallet and returns its asset.TicketBuyer

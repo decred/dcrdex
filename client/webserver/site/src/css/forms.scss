@@ -300,12 +300,6 @@ a[data-tmpl=walletCfgGuide] {
   }
 }
 
-.deposit-address {
-  font-size: 15px;
-  padding: 5px 10px;
-}
-
-
 .slider-container,
 .order-opt {
   border: 1px solid #424242;
@@ -456,6 +450,9 @@ div[data-handler=init] {
   }
 }
 
+.selectable.selected {
+  border: 2px solid green;
+}
 
 .dynamicopts {
   display: flex;

@@ -4137,7 +4137,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 
 	// This should return fee estimate for one output.
 	addUtxo(unspentVal, 1, false)
-	estimate, _, err := wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true)
+	estimate, _, err := wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4146,7 +4146,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 	}
 
 	// This should return fee estimate for two output.
-	estimate, _, err = wallet.EstimateSendTxFee(addr, unspentVal/2, optimalFeeRate, true)
+	estimate, _, err = wallet.EstimateSendTxFee(addr, unspentVal/2, optimalFeeRate, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4155,7 +4155,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 	}
 
 	// This should return an error, not enough funds to cover fees.
-	_, _, err = wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, false)
+	_, _, err = wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, false, false)
 	if err == nil {
 		t.Fatal("Expected error not enough to cover funds required")
 	}
@@ -4164,7 +4164,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 	addUtxo(dust, 0, true)
 	// This should return fee estimate for one output with dust added to fee.
 	estFeeWithDust := estFee + 100
-	estimate, _, err = wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true)
+	estimate, _, err = wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4173,19 +4173,19 @@ func TestEstimateSendTxFee(t *testing.T) {
 	}
 
 	// Invalid address
-	_, valid, _ := wallet.EstimateSendTxFee("invalidsendaddress", unspentVal, optimalFeeRate, true)
+	_, valid, _ := wallet.EstimateSendTxFee("invalidsendaddress", unspentVal, optimalFeeRate, true, false)
 	if valid {
 		t.Fatal("Expected false for an invalid address")
 	}
 
 	// Successful estimate for empty address
-	_, _, err = wallet.EstimateSendTxFee("", unspentVal, optimalFeeRate, true)
+	_, _, err = wallet.EstimateSendTxFee("", unspentVal, optimalFeeRate, true, false)
 	if err != nil {
 		t.Fatalf("Error for empty address: %v", err)
 	}
 
 	// Zero send amount
-	_, _, err = wallet.EstimateSendTxFee(addr, 0, optimalFeeRate, true)
+	_, _, err = wallet.EstimateSendTxFee(addr, 0, optimalFeeRate, true, false)
 	if err == nil {
 		t.Fatal("Expected error, send amount is zero")
 	}

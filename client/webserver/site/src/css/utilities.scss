@@ -172,9 +172,9 @@ sup.token-parent {
   }
 }
 
-
-.break-all {
+.word-break-all {
   word-break: break-all;
+  user-select: all;
 }
 
 .lh1 {

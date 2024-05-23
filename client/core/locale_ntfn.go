@@ -73,10 +73,6 @@ var originLocale = map[Topic]*translation{
 		subject:  intl.Translation{T: "Send successful"},
 		template: intl.Translation{Version: 1, T: "Sending %s %s to %s has completed successfully. Tx ID = %s", Notes: "args: [value string, ticker, destination address, coin ID]"},
 	},
-	TopicShieldedSendSuccess: {
-		subject:  intl.Translation{T: "Shielded send successful"},
-		template: intl.Translation{T: "Sent %s %s to %s: %s", Notes: "args: [value string, ticker, destination address, coin ID]"},
-	},
 	TopicAsyncOrderFailure: {
 		subject:  intl.Translation{T: "In-Flight Order Error"},
 		template: intl.Translation{T: "In-Flight order with ID %v failed: %v", Notes: "args: order ID, error]"},
@@ -1154,10 +1150,6 @@ var plPL = map[Topic]*translation{
 		subject:  intl.Translation{T: "Znaleziono nieznaną kaucję"},
 		template: intl.Translation{T: "Znaleziono nieznane kaucje %s i dodano je do aktywnych, ale Twój poziom handlu dla %s wynosi zero. Ustaw poziom docelowy w menu Ustawień, aby podtrzymać kaucje poprzez autoodnawianie."},
 	},
-	TopicShieldedSendSuccess: {
-		subject:  intl.Translation{T: "Wysyłka osłoniętych środków powiodła się"},
-		template: intl.Translation{T: "Wysłano %s %s na adres %s: %s"},
-	},
 	TopicDexAuthErrorBond: {
 		subject:  intl.Translation{T: "Błąd uwierzytelnienia"},
 		template: intl.Translation{T: "Kaucja została potwierdzona, ale uwierzytelnienie połączenia nie powiodło się: %v"},
@@ -1769,10 +1761,6 @@ var ar = map[Topic]*translation{
 	TopicBondConfirmed: {
 		subject:  intl.Translation{T: "تم تأكيد السند"},
 		template: intl.Translation{T: "الفئة الجديدة = %d (الهدف = %d)."},
-	},
-	TopicShieldedSendSuccess: {
-		subject:  intl.Translation{T: "تم الإرسال المحجوب بنجاح"},
-		template: intl.Translation{T: "تم إرسال %s %s إلى %s: %s"},
 	},
 	TopicAsyncOrderFailure: {
 		subject:  intl.Translation{T: "خطأ في الطلب القيد التنفيذ"},

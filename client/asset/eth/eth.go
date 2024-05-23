@@ -3273,8 +3273,8 @@ func (w *TokenWallet) canSend(value uint64, verifyBalance, isPreEstimate bool) (
 // rate is ignored since all sends will use an internally derived fee rate. If
 // an address is provided, it will ensure wallet has enough to cover total
 // spend.
-func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (uint64, bool, error) {
-	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
+func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, _, maxWithdraw bool) (uint64, bool, error) {
+	if err := isValidSend(addr, value, maxWithdraw); err != nil && addr != "" { // fee estimate for a send tx.
 		return 0, false, err
 	}
 	maxFee, _, _, err := w.canSend(value, addr != "", true)
@@ -3288,8 +3288,8 @@ func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract boo
 // rate is ignored since all sends will use an internally derived fee rate. If
 // an address is provided, it will ensure wallet has enough to cover total
 // spend.
-func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
-	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
+func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, _, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
+	if err := isValidSend(addr, value, maxWithdraw); err != nil && addr != "" { // fee estimate for a send tx.
 		return 0, false, err
 	}
 	maxFee, _, _, err := w.canSend(value, addr != "", true)

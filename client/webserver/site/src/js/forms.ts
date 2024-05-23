@@ -2018,6 +2018,7 @@ export class DepositAddress {
   constructor (form: PageElement) {
     this.form = form
     const page = this.page = Doc.idDescendants(form)
+    Doc.cleanTemplates(page.unifiedReceiverTmpl)
     Doc.bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
     Doc.bind(page.copyAddressBtn, 'click', () => { this.copyAddress() })
   }
@@ -2031,8 +2032,6 @@ export class DepositAddress {
     page.depositLogo.src = Doc.logoPath(asset.symbol)
     const wallet = app().walletMap[assetID]
     page.depositName.textContent = asset.unitInfo.conventional.unit
-    page.depositAddress.textContent = wallet.address
-    page.qrcode.src = `/generateqrcode?address=${wallet.address}`
     if (asset.token) {
       const parentAsset = app().assets[asset.token.parentID]
       page.depositTokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
@@ -2041,15 +2040,49 @@ export class DepositAddress {
     }
     if ((wallet.traits & traitNewAddresser) !== 0) Doc.show(page.newDepAddrBttn)
     else Doc.hide(page.newDepAddrBttn)
+
+    this.setAddress(wallet.address)
+  }
+
+  setAddress (addr: string) {
+    const page = this.page
+    Doc.hide(page.unifiedReceivers)
+    if (addr.startsWith('unified:')) {
+      const receivers = JSON.parse(addr.substring('unified:'.length)) as Record<string, string>
+      Doc.empty(page.unifiedReceivers)
+      Doc.show(page.unifiedReceivers)
+      const defaultReceiverType = 'unified'
+      for (const [recvType, recv] of Object.entries(receivers)) {
+        const div = page.unifiedReceiverTmpl.cloneNode(true) as PageElement
+        page.unifiedReceivers.appendChild(div)
+        div.textContent = recvType
+        div.dataset.type = recvType
+        if (recvType === defaultReceiverType) div.classList.add('selected')
+        // tmpl.addr.textContent = recv
+        Doc.bind(div, 'click', () => {
+          for (const bttn of (Array.from(page.unifiedReceivers.children) as PageElement[])) bttn.classList.toggle('selected', bttn.dataset.type === recvType)
+          this.setCentralAddress(recv)
+        })
+      }
+      addr = receivers.unified
+    }
+
+    this.setCentralAddress(addr)
+  }
+
+  setCentralAddress (addr: string) {
+    const page = this.page
+    page.depositAddress.textContent = addr
+    page.qrcode.src = `/generateqrcode?address=${addr}`
   }
 
   /* Fetch a new address from the wallet. */
   async newDepositAddress () {
-    const page = this.page
+    const { page, assetID, form } = this
     Doc.hide(page.depositErr)
-    const loaded = app().loading(this.form)
+    const loaded = app().loading(form)
     const res = await postJSON('/api/depositaddress', {
-      assetID: this.assetID
+      assetID: assetID
     })
     loaded()
     if (!app().checkResponse(res)) {
@@ -2057,8 +2090,8 @@ export class DepositAddress {
       Doc.show(page.depositErr)
       return
     }
-    page.depositAddress.textContent = res.address
-    page.qrcode.src = `/generateqrcode?address=${res.address}`
+    app().walletMap[assetID].address = res.address
+    this.setAddress(res.address)
   }
 
   async copyAddress () {

@@ -149,18 +149,13 @@ type clientCore interface {
 	WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error)
 	ToggleRateSourceStatus(src string, disable bool) error
 	FiatRateSources() map[string]bool
-	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
+	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error)
 	ValidateAddress(address string, assetID uint32) (bool, error)
 	DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error)
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
 	Notifications(n int) (notes, pokes []*db.Notification, _ error)
-	ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error)
-	NewShieldedAddress(assetID uint32) (string, error)
-	ShieldFunds(assetID uint32, amt uint64) ([]byte, error)
-	UnshieldFunds(assetID uint32, amt uint64) ([]byte, error)
-	SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error)
 	ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConrim func()) (string, error)
 	UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error)
 	ApproveTokenFee(assetID uint32, version uint32, approval bool) (uint64, error)
@@ -567,12 +562,6 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/approvetokenfee", s.apiApproveTokenFee)
 			apiAuth.Post("/txhistory", s.apiTxHistory)
 			apiAuth.Post("/takeaction", s.apiTakeAction)
-
-			apiAuth.Post("/shieldedstatus", s.apiShieldedStatus)
-			apiAuth.Post("/newshieldedaddress", s.apiNewShieldedAddress)
-			apiAuth.Post("/shieldfunds", s.apiShieldFunds)
-			apiAuth.Post("/unshieldfunds", s.apiUnshieldFunds)
-			apiAuth.Post("/sendshielded", s.apiSendShielded)
 
 			apiAuth.Post("/stakestatus", s.apiStakeStatus)
 			apiAuth.Post("/setvsp", s.apiSetVSP)

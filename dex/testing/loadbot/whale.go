@@ -63,8 +63,8 @@ func runWhale() {
 func (*whale) SetupWallets(m *Mantle) {
 	numCoins := 20
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, uint64(defaultMidGap*float64(rateEncFactor)+float64(rateStep)*(1+whalePercent*2 /* twice for buffering */)))
-	m.createWallet(baseSymbol, alpha, minBaseQty, maxBaseQty, numCoins)
-	m.createWallet(quoteSymbol, alpha, minQuoteQty, maxQuoteQty, numCoins)
+	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
+	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
 
 	m.log.Infof("Whale has been initialized with  %s to %s %s balance, and %s to %s %s balance, %d initial funding coins",
 		valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,

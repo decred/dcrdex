@@ -973,7 +973,7 @@ func (w *TXCWallet) ValidateAddress(address string) bool {
 	return w.validAddr
 }
 
-func (w *TXCWallet) EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+func (w *TXCWallet) EstimateSendTxFee(address string, value, feeRate uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
 	return w.estFee, true, w.estFeeErr
 }
 
@@ -10472,7 +10472,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 		if test.wantErr {
 			tWallet.estFeeErr = tErr
 		}
-		estimate, _, err := tCore.EstimateSendTxFee("addr", test.asset, test.value, test.subtract)
+		estimate, _, err := tCore.EstimateSendTxFee("addr", test.asset, test.value, test.subtract, false)
 		if test.wantErr {
 			if err != nil {
 				continue

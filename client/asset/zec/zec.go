@@ -8,9 +8,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -65,6 +67,8 @@ const (
 	// needs before the trade is considered confirmed. The redeem is
 	// monitored until this number of confirms is reached.
 	requiredRedeemConfirms = 1
+
+	depositAddrPrefix = "unified:"
 )
 
 var (
@@ -225,6 +229,10 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		return nil, err
 	}
 
+	if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
+		return nil, fmt.Errorf("error creating data directory at %q: %w", cfg.DataDir, err)
+	}
+
 	ar, err := btc.NewAddressRecycler(filepath.Join(cfg.DataDir, "recycled-addrs.txt"), logger)
 	if err != nil {
 		return nil, fmt.Errorf("error creating address recycler: %w", err)
@@ -313,7 +321,7 @@ type zecWallet struct {
 var _ asset.FeeRater = (*zecWallet)(nil)
 var _ asset.Wallet = (*zecWallet)(nil)
 
-// DRAFT TODO: Implement LiveReconfigurer
+// TODO: Implement LiveReconfigurer
 // var _ asset.LiveReconfigurer = (*zecWallet)(nil)
 
 func (w *zecWallet) CallRPC(method string, args []any, thing any) error {
@@ -1577,8 +1585,33 @@ func (w *zecWallet) ContractLockTimeExpired(ctx context.Context, contract dex.By
 	return expired, contractExpiry, nil
 }
 
+type depositAddressJSON struct {
+	Unified     string `json:"unified"`
+	Transparent string `json:"transparent"`
+	Orchard     string `json:"orchard"`
+	Sapling     string `json:"sapling,omitempty"`
+}
+
 func (w *zecWallet) DepositAddress() (string, error) {
-	return transparentAddressString(w)
+	addrRes, err := zGetAddressForAccount(w, shieldedAcctNumber, []string{transparentAddressType, orchardAddressType})
+	if err != nil {
+		return "", err
+	}
+	receivers, err := zGetUnifiedReceivers(w, addrRes.Address)
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(&depositAddressJSON{
+		Unified:     addrRes.Address,
+		Transparent: receivers.Transparent,
+		Orchard:     receivers.Orchard,
+		Sapling:     receivers.Sapling,
+	})
+	if err != nil {
+		return "", fmt.Errorf("error encoding address JSON: %w", err)
+	}
+	return depositAddrPrefix + string(b), nil
+
 }
 
 func (w *zecWallet) NewAddress() (string, error) {
@@ -1937,13 +1970,23 @@ func (w *zecWallet) MaxFundingFees(numTrades uint32, feeRate uint64, settings ma
 	if !customCfg.Split {
 		return shieldedSplitFees
 	}
-	const numInputs = 12 // plan for lots of inputs to get a safe estimate
 
 	return shieldedSplitFees + dexzec.TxFeesZIP317(1, uint64(numTrades+1)*dexbtc.P2PKHOutputSize, 0, 0, 0, 0)
 }
 
 func (w *zecWallet) OwnsDepositAddress(addrStr string) (bool, error) {
-	return ownsAddress(w, addrStr)
+	if strings.HasPrefix(addrStr, depositAddrPrefix) {
+		var addrs depositAddressJSON
+		if err := json.Unmarshal([]byte(addrStr[len(depositAddrPrefix):]), &addrs); err != nil {
+			return false, fmt.Errorf("error decoding unified address info: %w", err)
+		}
+		addrStr = addrs.Unified
+	}
+	res, err := zValidateAddress(w, addrStr)
+	if err != nil {
+		return false, fmt.Errorf("error validating address: %w", err)
+	}
+	return res.IsMine, nil
 }
 
 func (w *zecWallet) RedemptionAddress() (string, error) {
@@ -1967,7 +2010,7 @@ func (w *zecWallet) recyclableAddress() (string, error) {
 			returns = append(returns, addr)
 		}
 	}
-	return w.DepositAddress()
+	return transparentAddressString(w)
 }
 
 func (w *zecWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
@@ -2094,15 +2137,7 @@ func (w *zecWallet) createSig(msgTx *wire.MsgTx, idx int, pkScript []byte, addr 
 }
 
 func (w *zecWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) (confs uint32, err error) {
-	txHash, _, err := decodeCoinID(id)
-	if err != nil {
-		return 0, err
-	}
-	tx, err := getWalletTransaction(w, txHash)
-	if err != nil {
-		return 0, err
-	}
-	return uint32(tx.Confirmations), nil
+	return 0, errors.New("legacy registration not supported")
 }
 
 func sendEnough(val uint64) btc.EnoughFunc {
@@ -2116,29 +2151,156 @@ func sendEnough(val uint64) btc.EnoughFunc {
 	}
 }
 
-func (w *zecWallet) EstimateSendTxFee(
-	addrStr string, val, _ /* feeRate*/ uint64, _ /* subtract */ bool,
-) (
-	fee uint64, isValidAddress bool, err error,
-) {
-
-	isValidAddress = w.ValidateAddress(addrStr)
-
-	const minConfs = 0
-	_, _, spents, _, inputsSize, _, err := w.cm.Fund(w.reserves.Load(), minConfs, false, sendEnough(val))
+// fundOrchard checks whether a send of the specified amount can be funded from
+// the Orchard pool alone.
+func (w *zecWallet) fundOrchard(amt uint64) (sum, fees uint64, n int, funded bool, err error) {
+	unfiltered, err := zListUnspent(w)
 	if err != nil {
-		return 0, isValidAddress, newError(errFunding, "error funding transaction: %w", err)
+		return 0, 0, 0, false, err
 	}
-	fee = dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(uint64(len(spents)))), 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, 0)
+	unspents := make([]*zListUnspentResult, 0, len(unfiltered))
+	for _, u := range unfiltered {
+		if u.Account == shieldedAcctNumber && u.Confirmations >= minOrchardConfs {
+			unspents = append(unspents, u)
+		}
+	}
+	sort.Slice(unspents, func(i, j int) bool {
+		return unspents[i].Amount < unspents[j].Amount
+	})
+	var u *zListUnspentResult
+	for n, u = range unspents {
+		sum += toZats(u.Amount)
+		fees = dexzec.TxFeesZIP317(0, 0, 0, 0, 0, uint64(n))
+		if sum > amt+fees {
+			funded = true
+			return
+		}
+	}
 	return
 }
 
-func (w *zecWallet) Send(address string, value, feeRate uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := w.send(address, value, false)
+func (w *zecWallet) EstimateSendTxFee(
+	addrStr string, amt, _ /* feeRate*/ uint64, _ /* subtract */, maxWithdraw bool,
+) (
+	fees uint64, isValidAddress bool, err error,
+) {
+
+	res, err := zValidateAddress(w, addrStr)
+	isValidAddress = err == nil && res.IsValid
+
+	if maxWithdraw {
+		addrType := transparentAddressType
+		if isValidAddress {
+			addrType = res.AddressType
+		}
+		fees, err = w.maxWithdrawFees(addrType)
+		return
+	}
+
+	orchardSum, orchardFees, orchardN, orchardFunded, err := w.fundOrchard(amt)
+	if err != nil {
+		return 0, false, fmt.Errorf("error checking orchard funding: %w", err)
+	}
+	if orchardFunded {
+		return orchardFees, isValidAddress, nil
+	}
+
+	bal, err := zGetBalanceForAccount(w, shieldedAcctNumber, 0)
+	if err != nil {
+		return 0, false, fmt.Errorf("z_getbalanceforaccount (0) error: %w", err)
+	}
+
+	remain := amt - orchardSum - bal.Sapling /* sapling fees not accounted for */
+
+	const minConfs = 0
+	_, _, spents, _, inputsSize, _, err := w.cm.Fund(w.reserves.Load(), minConfs, false, sendEnough(remain))
+	if err != nil {
+		return 0, false, fmt.Errorf("error funding value %d with %d transparent and %d orchard balances: %w",
+			amt, bal.Transparent, orchardSum, err)
+	}
+
+	fees = dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(uint64(len(spents)))), 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, uint64(orchardN))
+	return
+}
+
+func (w *zecWallet) maxWithdrawFees(addrType string) (uint64, error) {
+	unfiltered, err := listUnspent(w)
+	if err != nil {
+		return 0, fmt.Errorf("listunspent error: %w", err)
+	}
+	numInputs := uint64(len(unfiltered))
+	noteCounts, err := zGetNotesCount(w)
+	if err != nil {
+		return 0, fmt.Errorf("balances error: %w", err)
+	}
+
+	txInsSize := numInputs*dexbtc.RedeemP2PKHInputSize + uint64(wire.VarIntSerializeSize(numInputs))
+	nActionsOrchard := uint64(noteCounts.Orchard)
+	var txOutsSize, nOutputsSapling uint64
+	switch addrType {
+	case unifiedAddressType, orchardAddressType:
+		nActionsOrchard++
+	case saplingAddressType:
+		nOutputsSapling = 1
+	default: // transparent
+		txOutsSize = dexbtc.P2PKHOutputSize + 1
+	}
+	// TODO: Do we get nJoinSplit from noteCounts.Sprout somehow?
+	return dexzec.TxFeesZIP317(txInsSize, txOutsSize, uint64(noteCounts.Sapling), nOutputsSapling, 0, nActionsOrchard), nil
+}
+
+type txCoin struct {
+	txHash *chainhash.Hash
+	v      uint64
+}
+
+var _ asset.Coin = (*txCoin)(nil)
+
+// ID is a unique identifier for this coin.
+func (c *txCoin) ID() dex.Bytes {
+	return c.txHash[:]
+}
+
+// String is a string representation of the coin.
+func (c *txCoin) String() string {
+	return c.txHash.String()
+}
+
+// Value is the available quantity, in atoms/satoshi.
+func (c *txCoin) Value() uint64 {
+	return c.v
+}
+
+// TxID is the ID of the transaction that created the coin.
+func (c *txCoin) TxID() string {
+	return c.txHash.String()
+}
+
+func (w *zecWallet) Send(addr string, value, feeRate uint64) (asset.Coin, error) {
+	txHash, err := w.sendShielded(w.ctx, addr, value)
 	if err != nil {
 		return nil, err
 	}
-	return btc.NewOutput(txHash, vout, sent), nil
+
+	return &txCoin{
+		txHash: txHash,
+		v:      value,
+	}, nil
+}
+
+// TransactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (w *zecWallet) TransactionConfirmations(ctx context.Context, txID string) (confs uint32, err error) {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding txid %q: %w", txID, err)
+	}
+	res, err := getWalletTransaction(w, txHash)
+	if err != nil {
+		return 0, err
+	}
+
+	return uint32(res.Confirmations), nil
 }
 
 // send the value to the address, with the given fee rate. If subtract is true,
@@ -2261,7 +2423,7 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	// Add the contract outputs.
 	// TODO: Make P2WSH contract and P2WPKH change outputs instead of
 	// legacy/non-segwit swap contracts pkScripts.
-	var txOutsSize uint64
+	var swapOutsSize uint64
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
 		// revokeAddr is the address belonging to the key that may be used to
@@ -2302,7 +2464,7 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 
 		// Add the transaction output.
 		txOut := wire.NewTxOut(int64(contract.Value), pkScript)
-		txOutsSize += uint64(txOut.SerializeSize())
+		swapOutsSize += uint64(txOut.SerializeSize())
 		baseTx.AddTxOut(txOut)
 	}
 	if totalIn < totalOut {
@@ -2322,6 +2484,7 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	txInsSize := uint64(len(coins))*dexbtc.RedeemP2PKHInputSize + 1
+	txOutsSize := swapOutsSize + dexbtc.P2PKHOutputSize
 	fees := dexzec.TxFeesZIP317(txInsSize, txOutsSize, 0, 0, 0, 0)
 
 	// Sign, add change, but don't send the transaction yet until
@@ -2442,9 +2605,13 @@ func (w *zecWallet) SyncStatus() (bool, float32, error) {
 	return numPeers > 0, 1, nil
 }
 
-func (w *zecWallet) ValidateAddress(address string) bool {
-	_, err := dexzec.DecodeAddress(address, w.addrParams, w.btcParams)
-	return err == nil
+func (w *zecWallet) ValidateAddress(addr string) bool {
+	res, err := zValidateAddress(w, addr)
+	if err != nil {
+		w.log.Errorf("z_validateaddress error for address %q: %w", addr, err)
+		return false
+	}
+	return res.IsValid
 }
 
 func (w *zecWallet) ValidateSecret(secret, secretHash []byte) bool {
@@ -2455,8 +2622,6 @@ func (w *zecWallet) ValidateSecret(secret, secretHash []byte) bool {
 func (w *zecWallet) useSplitTx() bool {
 	return w.walletCfg.Load().(*WalletConfig).UseSplitTx
 }
-
-var _ asset.ShieldedWallet = (*zecWallet)(nil)
 
 func transparentAddressString(c rpcCaller) (string, error) {
 	// One of the address types MUST be shielded.
@@ -2498,31 +2663,7 @@ func (w *zecWallet) lastShieldedAddress() (addr string, err error) {
 		w.lastAddress.Store(lastAddr)
 		return lastAddr, nil // Orchard = Unified for account 1
 	}
-	return w.NewShieldedAddress()
-}
-
-// ShieldedStatus list the last address and the balance in the shielded
-// account.
-func (w *zecWallet) ShieldedStatus() (status *asset.ShieldedStatus, err error) {
-	// z_listaccounts to get account 1 addresses
-	// DRAFT NOTE: It sucks that we need to list all accounts here. The zeroth
-	// account is our transparent addresses, and they'll all be included in the
-	// result. Should probably open a PR at zcash/zcash to add the ability to
-	// list a single account.
-	status = new(asset.ShieldedStatus)
-	status.LastAddress, err = w.lastShieldedAddress()
-	if err != nil {
-		return nil, err
-	}
-
-	bals, err := zGetBalanceForAccount(w, shieldedAcctNumber, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	status.Balance = bals.Orchard
-
-	return status, nil
+	return w.newShieldedAddress()
 }
 
 // Balance adds a sum of shielded pool balances to the transparent balance info.
@@ -2607,10 +2748,8 @@ func (w *zecWallet) lockedZats() (uint64, error) {
 	return sum, nil
 }
 
-// NewShieldedAddress creates a new shielded address. A shielded address can be
-// be reused without sacrifice of privacy on-chain, but that doesn't stop
-// meat-space coordination to reduce privacy.
-func (w *zecWallet) NewShieldedAddress() (string, error) {
+// newShieldedAddress creates a new shielded address.
+func (w *zecWallet) newShieldedAddress() (string, error) {
 	// An orchard address is the same as a unified address with only an orchard
 	// receiver.
 	addrRes, err := zGetAddressForAccount(w, shieldedAcctNumber, []string{orchardAddressType})
@@ -2619,63 +2758,6 @@ func (w *zecWallet) NewShieldedAddress() (string, error) {
 	}
 	w.lastAddress.Store(addrRes.Address)
 	return addrRes.Address, nil
-}
-
-// ShieldFunds moves funds from the transparent account to the shielded account.
-func (w *zecWallet) ShieldFunds(ctx context.Context, transparentVal uint64) ([]byte, error) {
-	bal, err := w.Balance()
-	if err != nil {
-		return nil, err
-	}
-	const fees = 1000 // TODO: Update after v5.5.0 which includes ZIP137
-	if bal.Available < fees || bal.Available-fees < transparentVal {
-		return nil, asset.ErrInsufficientBalance
-	}
-	oneAddr, err := w.lastShieldedAddress()
-	if err != nil {
-		return nil, err
-	}
-	// DRAFT TODO: Using ANY_TADDR can fail if some of the balance is in
-	// coinbase txs, which have special handling requirements. The user would
-	// need to either 1) Send all coinbase outputs to a transparent address, or
-	// 2) use z_shieldcoinbase from their zcash-cli interface.
-	const anyTAddr = "ANY_TADDR"
-	txHash, err := w.sendOne(ctx, anyTAddr, oneAddr, transparentVal, AllowRevealedSenders)
-	if err != nil {
-		return nil, err
-	}
-	return txHash[:], nil
-}
-
-// UnshieldFunds moves funds from the shielded account to the transparent
-// account.
-func (w *zecWallet) UnshieldFunds(ctx context.Context, amt uint64) ([]byte, error) {
-	bals, err := zGetBalanceForAccount(w, shieldedAcctNumber, minOrchardConfs)
-	if err != nil {
-		return nil, fmt.Errorf("z_getbalance error: %w", err)
-	}
-	bal := bals.Orchard
-	const fees = 1000 // TODO: Update after v5.5.0 which includes ZIP137
-	if bal < fees || bal-fees < amt {
-		return nil, asset.ErrInsufficientBalance
-	}
-
-	unified, err := zGetAddressForAccount(w, shieldedAcctNumber, []string{transparentAddressType, orchardAddressType})
-	if err != nil {
-		return nil, fmt.Errorf("z_getaddressforaccount error: %w", err)
-	}
-
-	receivers, err := zGetUnifiedReceivers(w, unified.Address)
-	if err != nil {
-		return nil, fmt.Errorf("z_getunifiedreceivers error: %w", err)
-	}
-
-	txHash, err := w.sendOneShielded(ctx, receivers.Transparent, amt, AllowRevealedRecipients)
-	if err != nil {
-		return nil, err
-	}
-
-	return txHash[:], nil
 }
 
 // sendOne is a helper function for doing a z_sendmany with a single recipient.
@@ -2733,55 +2815,35 @@ func (w *zecWallet) sendOneShielded(ctx context.Context, toAddr string, amt uint
 	return w.sendOne(ctx, lastAddr, toAddr, amt, priv)
 }
 
-// SendShielded sends funds from the shielded account to the provided shielded
-// or transparent address.
-func (w *zecWallet) SendShielded(ctx context.Context, toAddr string, amt uint64) ([]byte, error) {
-	bals, err := zGetBalanceForAccount(w, shieldedAcctNumber, minOrchardConfs)
-	if err != nil {
-		return nil, err
-	}
-	bal := bals.Orchard
-	const fees = 1000 // TODO: Update after v5.5.0 which includes ZIP137
-	if bal < fees || bal-fees < amt {
-		return nil, asset.ErrInsufficientBalance
-	}
-
+func (w *zecWallet) sendShielded(ctx context.Context, toAddr string, amt uint64) (*chainhash.Hash, error) {
 	res, err := zValidateAddress(w, toAddr)
 	if err != nil {
 		return nil, fmt.Errorf("error validating address: %w", err)
 	}
 
-	favoredReceiverAndPolicy := func(r *unifiedReceivers) (string, privacyPolicy, error) {
-		switch {
-		case r.Orchard != "":
-			return r.Orchard, FullPrivacy, nil
-		case r.Sapling != "":
-			return r.Sapling, AllowRevealedAmounts, nil
-		case r.Transparent != "":
-			return r.Transparent, AllowRevealedRecipients, nil
-		default:
-			return "", "", fmt.Errorf("no known receiver types")
-		}
+	if !res.IsValid {
+		return nil, fmt.Errorf("invalid address %q", toAddr)
 	}
 
-	var priv privacyPolicy
-	switch res.AddressType {
-	case unifiedAddressType:
-		// Could be orchard, or other unified..
-		receivers, err := zGetUnifiedReceivers(w, toAddr)
+	// TODO: We're using NoPrivacy for everything except orchard-to-orchard
+	// sends. This can potentially be tightened up, but why? The RPC provides
+	// no insight into calculating what privacy level is needed, so we would
+	// have to do a bunch of calculations regarding sources of funds and
+	// potential for change outputs. In the end, it changes nothing, and zcashd
+	// will optimize privacy the best it can.
+	priv := NoPrivacy
+	if res.AddressType == unifiedAddressType {
+		r, err := zGetUnifiedReceivers(w, toAddr)
 		if err != nil {
 			return nil, fmt.Errorf("error getting unified receivers: %w", err)
 		}
-		toAddr, priv, err = favoredReceiverAndPolicy(receivers)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing unified receiver: %w", err)
+		if r.Orchard != "" {
+			if _, _, _, isFunded, err := w.fundOrchard(amt); err != nil {
+				return nil, fmt.Errorf("error checking orchard funding: %w", err)
+			} else if isFunded {
+				priv = FullPrivacy
+			}
 		}
-	case transparentAddressType:
-		priv = AllowRevealedRecipients
-	case saplingAddressType:
-		priv = AllowRevealedAmounts
-	default:
-		return nil, fmt.Errorf("unknown address type: %q", res.AddressType)
 	}
 
 	txHash, err := w.sendOneShielded(ctx, toAddr, amt, priv)
@@ -2789,16 +2851,11 @@ func (w *zecWallet) SendShielded(ctx context.Context, toAddr string, amt uint64)
 		return nil, err
 	}
 
-	return txHash[:], nil
+	return txHash, nil
 }
 
 func zecTx(tx *wire.MsgTx) *dexzec.Tx {
 	return dexzec.NewTxFromMsgTx(tx, dexzec.MaxExpiryHeight)
-}
-
-// estimateFee returns the asset standard legacy fee rate.
-func estimateFee(context.Context, btc.RawRequester, uint64) (uint64, error) {
-	return dexzec.LegacyFeeRate, nil
 }
 
 // signTx signs the transaction input with Zcash's BLAKE-2B sighash digest.

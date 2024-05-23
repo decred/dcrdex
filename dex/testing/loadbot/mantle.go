@@ -298,7 +298,7 @@ func (m *Mantle) truncatedMidGap() uint64 {
 
 // createWallet creates a new wallet/account for the asset and node. If an error
 // is encountered, LoadBot will be killed.
-func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, numCoins int) {
+func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins int) {
 	// Generate a name for this wallet.
 	name := randomToken()
 	var rpcPort string
@@ -306,7 +306,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 	case eth, usdc, polygon, usdcp:
 		// Nothing to do here for internal wallets.
 	case dcr:
-		cmdOut := <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "createnewaccount", name)
+		cmdOut := <-harnessCtl(ctx, symbol, "./alpha", "createnewaccount", name)
 		if cmdOut.err != nil {
 			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
 			return
@@ -315,7 +315,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		// issues with trying to create the wallet immediately.
 		<-time.After(time.Second)
 	case ltc, bch, btc, dash, dgb:
-		cmdOut := <-harnessCtl(ctx, symbol, "./new-wallet", node, name)
+		cmdOut := <-harnessCtl(ctx, symbol, "./new-wallet", alpha, name)
 		if cmdOut.err != nil {
 			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
 			return
@@ -376,9 +376,9 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		walletPass = pass
 	}
 	if rpcPort == "" {
-		rpcPort = rpcAddr(symbol, node)
+		rpcPort = rpcAddr(symbol)
 	}
-	w := newBotWallet(symbol, node, name, rpcPort, walletPass, minFunds, maxFunds, numCoins)
+	w := newBotWallet(symbol, alpha, name, rpcPort, walletPass, minFunds, maxFunds, numCoins)
 	m.wallets[w.assetID] = w
 
 	createWallet := func(walletPW []byte, form *core.WalletForm, nCoins int) (string, error) {
@@ -387,12 +387,21 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 			return "", fmt.Errorf("Mantle %s failed to create wallet: %v", m.name, err)
 		}
 		walletSymbol := dex.BipIDSymbol(form.AssetID)
-		m.log.Infof("created wallet %s:%s on node %s", walletSymbol, name, node)
+		m.log.Infof("created wallet %s:%s", walletSymbol, name)
 		coreWallet := m.WalletState(form.AssetID)
 		if coreWallet == nil {
-			return "", fmt.Errorf("Failed to retrieve WalletState for newly created %s wallet, node %s", walletSymbol, node)
+			return "", fmt.Errorf("Failed to retrieve WalletState for newly created %s wallet", walletSymbol)
 		}
 		addr := coreWallet.Address
+		if symbol == zec {
+			var ua struct {
+				TAddr string `json:"transparent"`
+			}
+			if err := json.Unmarshal([]byte(addr[len("unified:"):]), &ua); err != nil {
+				return "", fmt.Errorf("error decoding unified address: %w", err)
+			}
+			addr = ua.TAddr
+		}
 		if numCoins < 1 {
 			return addr, nil
 		}
@@ -415,13 +424,13 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		if nCoins != 0 {
 			chunk := (maxFunds + minFunds) / 2 / uint64(nCoins)
 			for i := 0; i < nCoins; {
-				if err = send(walletSymbol, node, addr, chunk); err != nil {
+				if err = fund(walletSymbol, addr, chunk); err != nil {
 					if ignoreErrors && ctx.Err() == nil {
 						m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.", valString(chunk, walletSymbol), walletSymbol, addr, err)
 						// It often happens that the wallet is not able to
 						// create enough outputs. mine and try indefinitely
 						// if we are ignoring errors.
-						<-harnessCtl(ctx, walletSymbol, fmt.Sprintf("./mine-%s", node), "1")
+						<-harnessCtl(ctx, walletSymbol, "./mine-alpha", "1")
 						time.Sleep(time.Second)
 						continue
 					}
@@ -430,7 +439,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 				i++
 			}
 		}
-		<-harnessCtl(ctx, walletSymbol, fmt.Sprintf("./mine-%s", node), "1")
+		<-harnessCtl(ctx, walletSymbol, "./mine-alpha", "1")
 
 		return addr, nil
 	}
@@ -449,16 +458,16 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		m.fatalError(err.Error())
 		return
 	}
-	<-mine(symbol, node)
+	<-mine(symbol, alpha)
 
 }
 
-func send(symbol, node, addr string, val uint64) error {
-	log.Tracef("Sending %s %s from %s node to %s", valString(val, symbol), symbol, node, addr)
+func fund(symbol, addr string, val uint64) error {
+	log.Tracef("Sending %s %s to %s", valString(val, symbol), symbol, addr)
 	var res *harnessResult
 	switch symbol {
 	case btc, dcr, ltc, dash, doge, firo, bch, dgb:
-		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
+		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, valString(val, symbol))
 	case zec, zcl:
 		// sendtoaddress will choose spent outputs if a block was
 		// recently mined. Use the zecSendMtx to ensure we have waited
@@ -469,7 +478,7 @@ func send(symbol, node, addr string, val uint64) error {
 		// double spends. Alternatively, wait for zec to fix this and
 		// remove the lock https://github.com/zcash/zcash/issues/6045
 		zecSendMtx.Lock()
-		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
+		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, valString(val, symbol))
 		zecSendMtx.Unlock()
 	case eth, polygon:
 		// eth values are always handled as gwei, so multiply by 1e9
@@ -519,7 +528,7 @@ func (m *Mantle) replenishBalance(w *botWallet, minFunds, maxFunds uint64) {
 		chunk := (wantBal - bal.Available) / uint64(w.numCoins)
 		for i := 0; i < w.numCoins; {
 			m.log.Debugf("Requesting %s from %s alpha node", valString(chunk, w.symbol), w.symbol)
-			if err = send(w.symbol, alpha, w.address, chunk); err != nil {
+			if err = fund(w.symbol, w.address, chunk); err != nil {
 				if ignoreErrors && ctx.Err() == nil {
 					m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.",
 						valString(chunk, w.symbol), w.symbol, w.address, err)
@@ -539,7 +548,7 @@ func (m *Mantle) replenishBalance(w *botWallet, minFunds, maxFunds uint64) {
 		// Send some back to the alpha address.
 		amt := bal.Available - wantBal
 		m.log.Debugf("Sending %s back to %s alpha node", valString(amt, w.symbol), w.symbol)
-		_, err := m.Send(pass, w.assetID, amt, returnAddress(w.symbol, alpha), false)
+		_, err := m.Send(pass, w.assetID, amt, returnAddress(w.symbol), false)
 		if err != nil {
 			m.fatalError("failed to send funds to alpha: %v", err)
 		}

@@ -29,7 +29,7 @@ const (
 	WalletTraitTxFeeEstimator                         // The wallet can estimate transaction fees.
 	WalletTraitPeerManager                            // The wallet can manage its peers.
 	WalletTraitAuthenticator                          // The wallet require authentication.
-	WalletTraitShielded                               // The wallet is ShieldedWallet (e.g. ZCash)
+	WalletTraitShielded                               // DEPRECATED
 	WalletTraitTokenApprover                          // The wallet is a TokenApprover
 	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
 	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
@@ -110,12 +110,6 @@ func (wt WalletTrait) IsAuthenticator() bool {
 	return wt&WalletTraitAuthenticator != 0
 }
 
-// IsShielded tests if the WalletTrait has the WalletTraitShielded bit
-// set, which indicates the wallet implements the ShieldedWallet interface.
-func (wt WalletTrait) IsShielded() bool {
-	return wt&WalletTraitShielded != 0
-}
-
 // IsTokenApprover tests if the WalletTrait has the WalletTraitTokenApprover bit
 // set, which indicates the wallet implements the TokenApprover interface.
 func (wt WalletTrait) IsTokenApprover() bool {
@@ -192,9 +186,6 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(Authenticator); is {
 		t |= WalletTraitAuthenticator
-	}
-	if _, is := w.(ShieldedWallet); is {
-		t |= WalletTraitShielded
 	}
 	if _, is := w.(TokenApprover); is {
 		t |= WalletTraitTokenApprover
@@ -596,7 +587,7 @@ type TxFeeEstimator interface {
 	// the provided amount using the provided feeRate. This uses actual utxos to
 	// calculate the tx fee where possible and ensures the wallet has enough to
 	// cover send value and minimum fees.
-	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
+	EstimateSendTxFee(address string, value, feeRate uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error)
 }
 
 // Broadcaster is a wallet that can send a raw transaction on the asset network.
@@ -1207,34 +1198,6 @@ type Bond struct {
 	// RedeemTx is a backup transaction that spends the bond output. Normally
 	// the a key index will be used to derive the key when the bond expires.
 	RedeemTx []byte
-}
-
-// ShieldedStatus is the balance and address associated with the shielded
-// account.
-type ShieldedStatus struct {
-	LastAddress string
-	Balance     uint64
-}
-
-// ShieldedWallet is implemented by ZCash, and enables working with value in
-// shielded pools.
-type ShieldedWallet interface {
-	// ShieldedStatus list the last address and the balance in the shielded
-	// account.
-	ShieldedStatus() (*ShieldedStatus, error)
-	// NewShieldedAddress creates a new shielded address. A shielded address can
-	// be reused without sacrifice of privacy on-chain, but that doesn't stop
-	// meat-space coordination to reduce privacy.
-	NewShieldedAddress() (string, error)
-	// ShieldFunds moves funds from the transparent account to the shielded
-	// account.
-	ShieldFunds(ctx context.Context, amt uint64) ([]byte, error)
-	// UnshieldFunds moves funds from the shielded account to the transparent
-	// account.
-	UnshieldFunds(ctx context.Context, amt uint64) ([]byte, error)
-	// SendShielded sends funds from the shielded account to the provided
-	// shielded or transparent address.
-	SendShielded(ctx context.Context, toAddr string, amt uint64) ([]byte, error)
 }
 
 // Balance is categorized information about a wallet's balance.

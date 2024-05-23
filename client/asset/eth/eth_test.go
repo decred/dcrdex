@@ -4767,7 +4767,7 @@ func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
 	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
 
 	txFeeEstimator := w.(asset.TxFeeEstimator)
-	fee, _, err := txFeeEstimator.EstimateSendTxFee("", 0, 0, false)
+	fee, _, err := txFeeEstimator.EstimateSendTxFee("", 0, 0, false, false)
 	if err != nil {
 		t.Fatalf("error estimating fee: %v", err)
 	}
@@ -4861,7 +4861,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
 		}
 		txFeeEstimator := w.(asset.TxFeeEstimator)
-		estimate, _, err := txFeeEstimator.EstimateSendTxFee(test.addr, val, 0, false)
+		estimate, _, err := txFeeEstimator.EstimateSendTxFee(test.addr, val, 0, false, false)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)

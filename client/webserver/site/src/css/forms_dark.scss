@@ -1,0 +1,68 @@
+body.dark {
+  table.marketstable {
+    color: #a1a1a1;
+  }
+
+  .order-opt.selected {
+    background-color: #222e38;
+  }
+
+  #regAssetForm {
+    div.reg-asset {
+      .fader {
+        background-image:
+          linear-gradient(
+            to bottom,
+            #13202b00,
+            $dark_panel
+            90%
+          );
+      }
+
+      &:not(.nohover):hover {
+        .fader {
+          background-image:
+            linear-gradient(
+              to bottom,
+              #202c3500,
+              #202c35
+              90%
+            );
+        }
+      }
+    }
+
+    .reg-asset-table {
+      th, td {
+        border-color: $dark_border_color;
+      }
+    }
+  }
+
+  ::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+
+  #newWalletForm {
+    .wallet-tabs {
+      .wtab {
+        background-color: $dark_body_bg;
+        border-color: #999;
+        opacity: 0.8;
+      }
+
+      .wtab.selected {
+        opacity: 1;
+        background-color: #263846;
+      }
+    }
+
+    .bordertop {
+      border-top: solid 1px #999;
+    }
+  }
+
+  .selectable.selected {
+    border: 2px solid green;
+  }
+}

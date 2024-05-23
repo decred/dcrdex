@@ -196,7 +196,7 @@ func (*ZECBackend) ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize,
 	return valSum >= reqVal
 }
 
-func (be *ZECBackend) ValidateFeeRate(ci asset.Coin, reqFeeRate uint64) bool {
+func (be *ZECBackend) ValidateFeeRate(ci asset.Coin, _ uint64) bool {
 	c, is := ci.(interface {
 		InputsValue() uint64
 		RawTx() []byte
