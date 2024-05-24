@@ -5312,6 +5312,9 @@ func (c *Core) Logout() error {
 
 	// Lock wallets
 	if !c.cfg.NoAutoWalletLock {
+		// Ensure wallet lock in c.Run waits for c.Logout if this is called
+		// before shutdown.
+		c.wg.Add(1)
 		for _, w := range c.xcWallets() {
 			if w.connected() && w.unlocked() {
 				symb := strings.ToUpper(unbip(w.AssetID))
@@ -5323,6 +5326,7 @@ func (c *Core) Logout() error {
 				}
 			}
 		}
+		c.wg.Done()
 	}
 
 	// With no open orders for any of the dex connections, and all wallets locked,
