@@ -27,6 +27,8 @@ import (
 	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/ltc"
+	"decred.org/dcrdex/client/asset/polygon"
+	"decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
@@ -71,7 +73,7 @@ var (
 	randomizeOrdersCount  = false
 	initErrors            = false
 	mmConnectErrors       = false
-	enableActions         = true
+	enableActions         = false
 	actions               []*asset.ActionRequiredNote
 
 	rand   = mrand.New(mrand.NewSource(time.Now().UnixNano()))
@@ -325,6 +327,8 @@ var dexAssets = map[uint32]*dex.Asset{
 	145:                mkDexAsset("bch"),
 	60:                 mkDexAsset("eth"),
 	60001:              mkDexAsset("usdc.eth"),
+	133:                mkDexAsset("zec"),
+	966001:             mkDexAsset("usdc.polygon"),
 }
 
 var tExchanges = map[string]*core.Exchange{
@@ -333,15 +337,16 @@ var tExchanges = map[string]*core.Exchange{
 		Assets: dexAssets,
 		AcctID: "abcdef0123456789",
 		Markets: map[string]*core.Market{
-			mkid(42, 0):     mkMrkt("dcr", "btc"),
-			mkid(145, 42):   mkMrkt("bch", "dcr"),
-			mkid(60, 42):    mkMrkt("eth", "dcr"),
-			mkid(2, 42):     mkMrkt("ltc", "dcr"),
-			mkid(3, 0):      mkMrkt("doge", "btc"),
-			mkid(3, 42):     mkMrkt("doge", "dcr"),
-			mkid(22, 42):    mkMrkt("mona", "dcr"),
-			mkid(28, 0):     mkMrkt("vtc", "btc"),
-			mkid(60001, 42): mkMrkt("usdc.eth", "dcr"),
+			mkid(42, 0):       mkMrkt("dcr", "btc"),
+			mkid(145, 42):     mkMrkt("bch", "dcr"),
+			mkid(60, 42):      mkMrkt("eth", "dcr"),
+			mkid(2, 42):       mkMrkt("ltc", "dcr"),
+			mkid(3, 42):       mkMrkt("doge", "dcr"),
+			mkid(22, 42):      mkMrkt("mona", "dcr"),
+			mkid(28, 0):       mkMrkt("vtc", "btc"),
+			mkid(60001, 42):   mkMrkt("usdc.eth", "dcr"),
+			mkid(60, 60001):   mkMrkt("eth", "usdc.eth"),
+			mkid(133, 966001): mkMrkt("zec", "usdc.polygon"),
 		},
 		ConnectionStatus: comms.Connected,
 		RegFees: map[string]*core.FeeAsset{
@@ -586,15 +591,18 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:     randomWalletBalance(0),
-			2:     randomWalletBalance(2),
-			42:    randomWalletBalance(42),
-			22:    randomWalletBalance(22),
-			3:     randomWalletBalance(3),
-			28:    randomWalletBalance(28),
-			60:    randomWalletBalance(60),
-			145:   randomWalletBalance(145),
-			60001: randomWalletBalance(60001),
+			0:      randomWalletBalance(0),
+			2:      randomWalletBalance(2),
+			42:     randomWalletBalance(42),
+			22:     randomWalletBalance(22),
+			3:      randomWalletBalance(3),
+			28:     randomWalletBalance(28),
+			60:     randomWalletBalance(60),
+			145:    randomWalletBalance(145),
+			60001:  randomWalletBalance(60001),
+			966:    randomWalletBalance(966),
+			966001: randomWalletBalance(966001),
+			133:    randomWalletBalance(133),
 		},
 		noteFeed: make(chan core.Notification, 1),
 		fiatSources: map[string]bool{
@@ -1338,6 +1346,11 @@ func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	}
 }
 
+// random number logarithmically between [0, 10^x].
+func tenToThe(x int) float64 {
+	return math.Pow(10, float64(x)*rand.Float64())
+}
+
 func (c *TCore) AssetBalance(assetID uint32) (*core.WalletBalance, error) {
 	balNote := randomBalanceNote(assetID)
 	balNote.Balance.Stamp = time.Now()
@@ -1431,6 +1444,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
+	133: zec.WalletInfo,
+	966: &polygon.WalletInfo,
 }
 
 var tinfos map[uint32]*asset.Token
@@ -1530,7 +1545,11 @@ func (c *TCore) createWallet(form *core.WalletForm, synced bool) (done chan stru
 	c.wallets[form.AssetID] = tWallet
 
 	w := c.walletState(form.AssetID)
-	regFee := tExchanges[firstDEX].RegFees[w.Symbol].Amt * 2
+	var regFee uint64
+	r, found := tExchanges[firstDEX].RegFees[w.Symbol]
+	if found {
+		regFee = r.Amt
+	}
 
 	sendWalletState := func() {
 		wCopy := *w
@@ -1753,16 +1772,19 @@ func (c *TCore) User() *core.User {
 		Initialized: c.inited,
 		Assets:      c.SupportedAssets(),
 		FiatRates: map[uint32]float64{
-			0:     64_551.61, // btc
-			2:     59.08,     // ltc
-			42:    25.46,     // dcr
-			22:    0.5117,    // mona
-			28:    0.1599,    // vtc
-			141:   0.2048,    // kmd
-			3:     0.06769,   // doge
-			145:   114.68,    // bch
-			60:    1_209.51,  // eth
-			60001: 0.999,     // usdc.eth
+			0:      64_551.61, // btc
+			2:      59.08,     // ltc
+			42:     25.46,     // dcr
+			22:     0.5117,    // mona
+			28:     0.1599,    // vtc
+			141:    0.2048,    // kmd
+			3:      0.06769,   // doge
+			145:    114.68,    // bch
+			60:     1_209.51,  // eth
+			60001:  0.999,     // usdc.eth
+			133:    26.75,
+			966:    0.7001,
+			966001: 1.001,
 		},
 		Actions: actions,
 	}
@@ -1780,15 +1802,18 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:     mkSupportedAsset("btc", c.walletState(0)),
-		42:    mkSupportedAsset("dcr", c.walletState(42)),
-		2:     mkSupportedAsset("ltc", c.walletState(2)),
-		22:    mkSupportedAsset("mona", c.walletState(22)),
-		3:     mkSupportedAsset("doge", c.walletState(3)),
-		28:    mkSupportedAsset("vtc", c.walletState(28)),
-		60:    mkSupportedAsset("eth", c.walletState(60)),
-		145:   mkSupportedAsset("bch", c.walletState(145)),
-		60001: mkSupportedAsset("usdc.eth", c.walletState(60001)),
+		0:      mkSupportedAsset("btc", c.walletState(0)),
+		42:     mkSupportedAsset("dcr", c.walletState(42)),
+		2:      mkSupportedAsset("ltc", c.walletState(2)),
+		22:     mkSupportedAsset("mona", c.walletState(22)),
+		3:      mkSupportedAsset("doge", c.walletState(3)),
+		28:     mkSupportedAsset("vtc", c.walletState(28)),
+		60:     mkSupportedAsset("eth", c.walletState(60)),
+		145:    mkSupportedAsset("bch", c.walletState(145)),
+		60001:  mkSupportedAsset("usdc.eth", c.walletState(60001)),
+		966:    mkSupportedAsset("polygon", c.walletState(966)),
+		966001: mkSupportedAsset("usdc.polygon", c.walletState(966001)),
+		133:    mkSupportedAsset("zec", c.walletState(133)),
 	}
 }
 
@@ -2119,22 +2144,47 @@ func (c *TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMess
 	return nil
 }
 
-var binanceMarkets = []*libxc.Market{
-	{BaseID: 42, QuoteID: 0},
-	{BaseID: 145, QuoteID: 42},
-	{BaseID: 60, QuoteID: 42},
-	{BaseID: 2, QuoteID: 42},
-	// {3, 0},
-	// {3, 42},
-	// {22, 42},
-	// {28, 0},
-	// {60000, 42},
+func newMarketDay() *libxc.MarketDay {
+	avgPrice := tenToThe(7)
+	return &libxc.MarketDay{
+		Vol:            tenToThe(7),
+		QuoteVol:       tenToThe(7),
+		PriceChange:    tenToThe(7) - 2*tenToThe(7),
+		PriceChangePct: 0.15 - rand.Float64()*0.3,
+		AvgPrice:       avgPrice,
+		LastPrice:      avgPrice * (1 + (0.05 - 0.1*rand.Float64())),
+		OpenPrice:      avgPrice * (1 + (0.05 - 0.1*rand.Float64())),
+		HighPrice:      avgPrice * (1 + 0.15 + (0.1 - 0.2*rand.Float64())),
+		LowPrice:       avgPrice * (1 - 0.15 + (0.1 - 0.2*rand.Float64())),
+	}
+}
+
+var binanceMarkets = map[string]*libxc.Market{
+	"dcr_btc": {
+		BaseID:  42,
+		QuoteID: 0,
+		Day:     newMarketDay(),
+	},
+	"eth_dcr": {
+		BaseID:  60,
+		QuoteID: 42,
+		Day:     newMarketDay(),
+	},
+	"zec_usdc.polygon": {
+		BaseID:  133,
+		QuoteID: 966001,
+		Day:     newMarketDay(),
+	},
+	"eth_usdc.eth": {
+		BaseID:  60,
+		QuoteID: 60001,
+		Day:     newMarketDay(),
+	},
 }
 
 type TMarketMaker struct {
 	core *TCore
 	cfg  *mm.MarketMakingConfig
-	mkts map[string][]*libxc.Market
 
 	runningBotsMtx sync.RWMutex
 	runningBots    map[mm.MarketWithHost]int64 // mkt -> startTime
@@ -2161,13 +2211,13 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 		Oracles: []*mm.OracleReport{
 			{
 				Host:     "bittrex.com",
-				USDVol:   math.Pow10(rand.Intn(7)),
+				USDVol:   tenToThe(7),
 				BestBuy:  midGap * 99 / 100,
 				BestSell: midGap * 101 / 100,
 			},
 			{
-				Host:     "bittrex.com",
-				USDVol:   math.Pow10(rand.Intn(7)),
+				Host:     "binance.com",
+				USDVol:   tenToThe(7),
 				BestBuy:  midGap * 98 / 100,
 				BestSell: midGap * 102 / 100,
 			},
@@ -2183,36 +2233,23 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 	}, nil
 }
 
-func (m *TMarketMaker) StartAllBots(alternateConfigPath *string, appPW []byte) (err error) {
+func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *string, appPW []byte) (err error) {
 	m.runningBotsMtx.Lock()
 	defer m.runningBotsMtx.Unlock()
-	for mkt := range m.runningBots {
-		if err := m.startBot(&mkt, nil, appPW); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
-func (m *TMarketMaker) StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, appPW []byte) (err error) {
-	m.runningBotsMtx.Lock()
-	defer m.runningBotsMtx.Unlock()
-	return m.startBot(mkt, alternateConfigPath, appPW)
-}
-
-func (m *TMarketMaker) startBot(mkt *mm.MarketWithHost, alternateConfigPath *string, pappPWw []byte) (err error) {
-	_, running := m.runningBots[*mkt]
+	mkt := startCfg.MarketWithHost
+	_, running := m.runningBots[mkt]
 	if running {
-		return fmt.Errorf("bot already running for %s", mkt.String())
+		return fmt.Errorf("bot already running for %s", mkt)
 	}
 	startTime := time.Now().Unix()
-	m.runningBots[*mkt] = startTime
+	m.runningBots[mkt] = startTime
 
 	m.core.noteFeed <- &struct {
 		db.Notification
 		Host      string       `json:"host"`
-		Base      uint32       `json:"base"`
-		Quote     uint32       `json:"quote"`
+		Base      uint32       `json:"baseID"`
+		Quote     uint32       `json:"quoteID"`
 		StartTime int64        `json:"startTime"`
 		Stats     *mm.RunStats `json:"stats"`
 	}{
@@ -2221,15 +2258,49 @@ func (m *TMarketMaker) startBot(mkt *mm.MarketWithHost, alternateConfigPath *str
 		Base:         mkt.BaseID,
 		Quote:        mkt.QuoteID,
 		StartTime:    startTime,
-		Stats:        &mm.RunStats{},
+		Stats: &mm.RunStats{
+			InitialBalances: map[uint32]uint64{
+				mkt.BaseID: randomBalance(),
+				mkt.BaseID: randomBalance(),
+			},
+			DEXBalances: map[uint32]*mm.BotBalance{
+				mkt.BaseID: &mm.BotBalance{
+					Available: randomBalance(),
+					Locked:    randomBalance(),
+					Pending:   randomBalance(),
+					Reserved:  randomBalance(),
+				},
+				mkt.BaseID: &mm.BotBalance{
+					Available: randomBalance(),
+					Locked:    randomBalance(),
+					Pending:   randomBalance(),
+					Reserved:  randomBalance(),
+				},
+			},
+			CEXBalances: map[uint32]*mm.BotBalance{
+				mkt.BaseID: &mm.BotBalance{
+					Available: randomBalance(),
+					Locked:    randomBalance(),
+					Pending:   randomBalance(),
+					Reserved:  randomBalance(),
+				},
+				mkt.BaseID: &mm.BotBalance{
+					Available: randomBalance(),
+					Locked:    randomBalance(),
+					Pending:   randomBalance(),
+					Reserved:  randomBalance(),
+				},
+			},
+			ProfitLoss:         tenToThe(7),
+			ProfitRatio:        0.01 - rand.Float64()*0.2,
+			StartTime:          startTime,
+			PendingDeposits:    rand.Intn(3),
+			PendingWithdrawals: rand.Intn(3),
+			CompletedMatches:   uint32(math.Pow(10, 3*rand.Float64())),
+			TradedUSD:          math.Pow(10, 3*rand.Float64()),
+			FeeGap:             randomFeeGapStats(),
+		},
 	}
-	return nil
-}
-
-func (m *TMarketMaker) StopAllBots() error {
-	m.runningBotsMtx.Lock()
-	m.runningBots = make(map[mm.MarketWithHost]int64)
-	m.runningBotsMtx.Unlock()
 	return nil
 }
 
@@ -2246,8 +2317,8 @@ func (m *TMarketMaker) StopBot(mkt *mm.MarketWithHost) error {
 	m.core.noteFeed <- &struct {
 		db.Notification
 		Host      string       `json:"host"`
-		Base      uint32       `json:"base"`
-		Quote     uint32       `json:"quote"`
+		Base      uint32       `json:"baseID"`
+		Quote     uint32       `json:"quoteID"`
 		StartTime int64        `json:"startTime"`
 		Stats     *mm.RunStats `json:"stats"`
 	}{
@@ -2262,10 +2333,6 @@ func (m *TMarketMaker) StopBot(mkt *mm.MarketWithHost) error {
 }
 
 func (m *TMarketMaker) UpdateCEXConfig(updatedCfg *mm.CEXConfig) error {
-	switch updatedCfg.Name {
-	case libxc.Binance, libxc.BinanceUS:
-		m.mkts[updatedCfg.Name] = binanceMarkets
-	}
 	for i := 0; i < len(m.cfg.CexConfigs); i++ {
 		cfg := m.cfg.CexConfigs[i]
 		if cfg.Name == updatedCfg.Name {
@@ -2312,6 +2379,15 @@ func (m *TMarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.Exchan
 	}, nil
 }
 
+func randomFeeGapStats() *mm.FeeGapStats {
+	return &mm.FeeGapStats{
+		BasisPrice:    uint64(tenToThe(8) * 1e6),
+		RemoteGap:     uint64(tenToThe(8) * 1e6),
+		FeeGap:        uint64(tenToThe(8) * 1e6),
+		RoundTripFees: uint64(tenToThe(8) * 1e6),
+	}
+}
+
 func (m *TMarketMaker) Status() *mm.Status {
 	status := &mm.Status{
 		CEXes: make(map[string]*mm.CEXStatus, len(m.cfg.CexConfigs)),
@@ -2333,32 +2409,40 @@ func (m *TMarketMaker) Status() *mm.Status {
 					botCfg.BaseID:  &mm.BotBalance{Available: randomBalance()},
 					botCfg.QuoteID: &mm.BotBalance{Available: randomBalance()},
 				},
-				ProfitLoss:         rand.Float64()*1e6 - 5e5,
-				ProfitRatio:        rand.Float64()*0.4 - 0.2,
-				StartTime:          time.Now().Add(-time.Hour).Unix(),
+				ProfitLoss:         5e5 - rand.Float64()*1e6,
+				ProfitRatio:        0.2 - rand.Float64()*0.2,
+				StartTime:          time.Now().Add(-time.Duration(float64(time.Hour*10) * rand.Float64())).Unix(),
 				PendingDeposits:    rand.Intn(3),
 				PendingWithdrawals: rand.Intn(3),
 				CompletedMatches:   uint32(rand.Intn(200)),
 				TradedUSD:          rand.Float64() * 10_000,
-				FeeGap: &mm.FeeGapStats{
-					BasisPrice:    uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
-					RemoteGap:     uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
-					FeeGap:        uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
-					RoundTripFees: uint64(math.Pow10(12-rand.Intn(4)) * rand.Float64()),
-				},
+				FeeGap:             randomFeeGapStats(),
 			}
 		}
 		status.Bots = append(status.Bots, &mm.BotStatus{
 			Config:   botCfg,
+			Running:  stats != nil,
 			RunStats: stats,
 		})
+	}
+	bals := make(map[uint32]*libxc.ExchangeBalance)
+	for _, mkt := range binanceMarkets {
+		for _, assetID := range []uint32{mkt.BaseID, mkt.QuoteID} {
+			if _, found := bals[assetID]; !found {
+				bals[assetID] = &libxc.ExchangeBalance{
+					Available: randomBalance(),
+					Locked:    randomBalance(),
+				}
+			}
+		}
 	}
 	for _, cexCfg := range m.cfg.CexConfigs {
 		status.CEXes[cexCfg.Name] = &mm.CEXStatus{
 			Config:    cexCfg,
 			Connected: rand.Float32() < 0.5,
 			// ConnectionError: "test connection error",
-			Markets: binanceMarkets,
+			Markets:  binanceMarkets,
+			Balances: bals,
 		}
 	}
 	return status
@@ -2381,7 +2465,7 @@ func randomBotConfig(mkt *mm.MarketWithHost) *mm.BotConfig {
 	newPlacements := func(gapStategy mm.GapStrategy) (lots []uint64, gapFactors []float64) {
 		n := rand.Intn(3)
 		lots, gapFactors = make([]uint64, 0, n), make([]float64, 0, n)
-		maxQty := math.Pow10(rand.Intn(5)+6) * float64(rand.Intn(1e3))
+		maxQty := math.Pow(10, 6+rand.Float64()*6)
 		for i := 0; i < n; i++ {
 			var gapFactor float64
 			switch gapStategy {
@@ -2430,14 +2514,12 @@ func randomBotConfig(mkt *mm.MarketWithHost) *mm.BotConfig {
 			arbMMCfg.BuyPlacements = append(arbMMCfg.BuyPlacements, p)
 			arbMMCfg.SellPlacements = append(arbMMCfg.SellPlacements, p)
 		}
-		cfg.CEXCfg = &mm.BotCEXCfg{Name: "Binance"}
 	default: // simple-arb
 		cfg.SimpleArbConfig = &mm.SimpleArbConfig{
 			ProfitTrigger:      rand.Float64()*0.03 + 0.005,
 			MaxActiveArbs:      1 + uint32(rand.Intn(100)),
 			NumEpochsLeaveOpen: uint32(rand.Intn(100)),
 		}
-		cfg.CEXCfg = &mm.BotCEXCfg{Name: "Binance"}
 	}
 	return cfg
 }
@@ -2454,8 +2536,8 @@ func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm
 		},
 		InitialBalances: make(map[uint32]uint64),
 		FinalBalances:   make(map[uint32]uint64),
-		ProfitLoss:      rand.Float64()*1e6 - 5e5,
-		ProfitRatio:     rand.Float64()*0.4 - 0.2,
+		ProfitLoss:      tenToThe(3) - 2*tenToThe(3),
+		ProfitRatio:     rand.Float64()*0.2 - 0.1,
 	}
 
 	for _, assetID := range []uint32{mkt.BaseID, mkt.QuoteID} {
@@ -2645,7 +2727,8 @@ func TestServer(t *testing.T) {
 	asset.Register(3, &TDriver{})                  // doge
 
 	tinfos = map[uint32]*asset.Token{
-		60001: asset.TokenInfo(60001),
+		60001:  asset.TokenInfo(60001),
+		966001: asset.TokenInfo(966001),
 	}
 
 	numBuys = 10
@@ -2692,9 +2775,9 @@ func TestServer(t *testing.T) {
 	s, err := New(&Config{
 		Core: tCore,
 		MarketMaker: &TMarketMaker{
-			core: tCore,
-			cfg:  &mm.MarketMakingConfig{},
-			mkts: make(map[string][]*libxc.Market),
+			core:        tCore,
+			cfg:         &mm.MarketMakingConfig{},
+			runningBots: make(map[mm.MarketWithHost]int64),
 		},
 		Experimental: true,
 		Addr:         "127.0.0.3:54321",

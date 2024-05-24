@@ -75,6 +75,10 @@ header a:hover,
 
 div.spinner {
   animation: spin 2s infinite linear;
+
+  &.fast {
+    animation: spin 1s infinite linear;
+  }
 }
 
 div.note-indicator {
@@ -93,6 +97,14 @@ div.note-indicator {
   &.warn {
     background-color: $warning;
   }
+}
+
+.z10 {
+  z-index: 10;
+}
+
+img.dex-logo {
+  content: var(--dex-url);
 }
 
 #noteIndicator {

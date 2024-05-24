@@ -21,6 +21,20 @@ textarea {
     border-color: var(--form-input-border-focus);
     outline: none;
   }
+
+  &.micro {
+    font-size: 14px;
+    padding: 0 0.25rem;
+    width: 3rem;
+
+    &.wide {
+      width: 5rem;
+    }
+
+    &.thin {
+      width: 2rem;
+    }
+  }
 }
 
 select {
@@ -103,7 +117,6 @@ select {
       border-color: var(--border-color);
       opacity: 0.8;
       position: relative;
-      z-index: 150;
 
       &:hover {
         cursor: pointer;
@@ -187,6 +200,7 @@ button.form-button {
   right: 0;
   padding: 25px 0;
   background-color: var(--forms-bg);
+  backdrop-filter: blur(5px);
   z-index: 101;
 
   & > form {
@@ -250,11 +264,6 @@ div[data-handler=register] {
 
 #loginForm {
   width: 325px;
-
-  #loader {
-    -webkit-backdrop-filter: blur(4px);
-    backdrop-filter: blur(4px);
-  }
 }
 
 #unlockWalletForm,
@@ -297,6 +306,58 @@ a[data-tmpl=walletCfgGuide] {
   #copyAlert {
     margin-left: 12px;
     position: absolute;
+  }
+}
+
+.mini-slider {
+  padding: 0.5rem 0;
+  cursor: pointer;
+  user-select: none;
+
+  div[data-tmpl=color] {
+    width: 100%;
+    height: 0.2rem;
+    background-color: #7777;
+    position: relative;
+    overflow: visible;
+
+    
+
+    & > div[data-tmpl=track] {
+      position: absolute;
+      left: 0.375rem; // keep the ball inside of the color
+      right: 0.375rem;
+      bottom: 0;
+      top: 0;
+      overflow: visible;
+
+      & > div[data-tmpl=ball] {
+        width: 0.75rem;
+        height: 0.75rem;
+        top: 0.1rem;
+        border-radius: 1rem;
+        background-color: var(--text-grey);
+        position: absolute;
+        transform: translate(-50%, -50%);
+        cursor: pointer;
+      }
+    }
+  }
+
+  &.small {
+    div[data-tmpl=color] {
+      height: 0.125rem;
+
+      & > div[data-tmpl=track] {
+        left: 0.25rem;
+        right: 0.25rem;
+  
+        & > div[data-tmpl=ball] {
+          width: 0.5rem;
+          height: 0.5rem;
+        }
+      }
+    }
   }
 }
 

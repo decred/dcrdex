@@ -456,8 +456,8 @@ export interface SpotPriceNote extends CoreNote {
 
 export interface RunStatsNote extends CoreNote {
   host: string
-  base: number
-  quote: number
+  baseID: number
+  quoteID: number
   stats?: RunStats
 }
 
@@ -772,14 +772,34 @@ export interface BotBalanceAllocation {
   cex: Record<number, number>
 }
 
+export interface BotAssetConfig {
+  swapFeeN: number
+  orderReservesFactor: number
+  slippageBufferFactor: number
+  transferFactor: number
+  refillFactor: number
+}
+
+export interface UIConfig {
+  baseConfig: BotAssetConfig
+  quoteConfig: BotAssetConfig
+  simpleArbLots?: number
+  cexRebalance: boolean
+}
+
+export interface StartConfig extends MarketWithHost {
+  autoRebalance?: AutoRebalanceConfig
+  alloc: BotBalanceAllocation
+}
+
 export interface BotConfig {
   host: string
   baseID: number
   quoteID: number
   baseWalletOptions?: Record<string, string>
   quoteWalletOptions?: Record<string, string>
-  cexCfg?: BotCEXCfg
-  alloc: BotBalanceAllocation
+  cexName: string
+  uiConfig: UIConfig
   basicMarketMakingConfig?: BasicMarketMakingConfig
   arbMarketMakingConfig?: ArbMarketMakingConfig
   simpleArbConfig?: SimpleArbConfig
@@ -801,7 +821,8 @@ export interface MMCEXStatus {
   config: CEXConfig
   connected: boolean
   connectErr: string
-  markets?: CEXMarket[]
+  markets: Record<string, CEXMarket>
+  balances: Record<number, ExchangeBalance>
 }
 
 export interface BotBalance {
@@ -813,6 +834,56 @@ export interface BotBalance {
 export interface BotBalances {
   dex: BotBalance
   cex: BotBalance
+}
+
+export interface BotInventory {
+  avail: number
+  locked: number
+  total: number // avail + locked
+}
+
+export interface RunningBotInventory {
+  avail: number
+  locked: number
+  dex: BotInventory
+  cex: BotInventory
+}
+
+export interface FeeEstimates extends LotFeeRange {
+  bookingFeesPerLot: number
+  bookingFees: number
+  feesPerSwap: number
+}
+
+export interface ProjectedAlloc {
+  // book is inventory dedicated either to active orders for basicmm and arbmm,
+  // or on reserve for orders in the case of basicarb. book + bookingFees is the
+  // starvation threshold for DEX, meaning it's impossible to start a bot
+  // unstarved if there no way to get book + bookingFees to Bison Wallet. A user
+  // could potentially adjust order reserves or swap fee reserves to free up
+  // more funds, but with possible degradation of bot performance.
+  book: number
+  // booking fees is funding dedicated to covering the fees for funded orders.
+  // bookingFees are in the units of the parent chain for token assets.
+  bookingFees: number
+  // swapFeeReserves is only required for token assets. These are fees
+  // reserved for funding swaps. These fees are only debited, so will definitely
+  // run out eventually, but we'll get a UI that enabled manual and/or auto
+  // refill soon. swapFeeReserves are in the units of the parent chain.
+  swapFeeReserves: number
+  // cex is the inventory dedicated to funding counter-orders on cex for an
+  // arbmm or simplearb bot. cex is the starvation threshold for CEX.
+  cex: number
+  // orderReserves is inventory reserved for facilitating withdraws and
+  // deposits or for replacing matched orders. It's a good idea to have a
+  // little extra around, otherwise a trade sequence gone wrong could put
+  // the bot in a starved or unbalanced state.
+  orderReserves: number
+  // slippageBuffer is only required for the quote asset. This accounts for
+  // variations in rate, because the quote asset's "lot size" varies with
+  // rate. If the rate goes down, the quote-converted lot size goes up, so
+  // we'll let the user choose to reserve a little extra for this case.
+  slippageBuffer: number
 }
 
 export interface FeeGapStats {
@@ -840,7 +911,6 @@ export interface MMBotStatus {
   config: BotConfig
   running: boolean
   runStats?: RunStats
-  balances: Record<number, BotBalances>
 }
 
 export interface MarketMakingStatus {
@@ -892,9 +962,22 @@ export interface MarketMakingEvent {
   withdrawalEvent?: WithdrawalEvent
 }
 
+interface MarketDay {
+  vol: number
+  quoteVol: number
+  priceChange: number
+  priceChangePct: number
+  avgPrice: number
+  lastPrice: number
+  openPrice: number
+  highPrice: number
+  lowPrice: number
+}
+
 export interface CEXMarket {
   baseID: number
   quoteID: number
+  day: MarketDay
 }
 
 export interface OracleReport {
@@ -1048,6 +1131,7 @@ export interface Application {
   seedGenTime: number
   user: User
   experimental: boolean
+  mmStatus: MarketMakingStatus
   header: HTMLElement
   headerSpace: HTMLElement
   walletMap: Record<number, WalletState>
@@ -1059,6 +1143,7 @@ export interface Application {
   start (): Promise<void>
   reconnected (): void
   fetchUser (): Promise<User | void>
+  fetchMMStatus (): Promise<User | void>
   loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean>
   attach (data: any): void
   bindTooltips (ancestor: HTMLElement): void
@@ -1075,6 +1160,7 @@ export interface Application {
   handleBondNote (note: BondNote): void
   loggedIn (notes: CoreNote[], pokes: CoreNote[]): void
   setPokes(pokes: CoreNote[]): void
+  botStatus (host: string, baseID: number, quoteID: number): MMBotStatus | undefined
   notify (note: CoreNote): void
   log (loggerID: string, ...msg: any): void
   prependPokeElement (note: CoreNote): void

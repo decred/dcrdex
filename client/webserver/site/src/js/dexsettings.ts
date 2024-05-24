@@ -195,7 +195,7 @@ export default class DexSettingsPage extends BasePage {
     }
     Doc.bind(document, 'keyup', this.keyup)
 
-    page.forms.querySelectorAll('.form-closer').forEach(el => {
+    Doc.applySelector(page.forms, '.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { this.closePopups() })
     })
 

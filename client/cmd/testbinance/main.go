@@ -293,6 +293,7 @@ func newFakeBinanceServer(ctx context.Context) (*fakeBinance, error) {
 		r.Post("/userDataStream", f.handleListenKeyRequest)
 		r.Put("/userDataStream", f.streamExtend)
 		r.Delete("/order", f.handleDeleteOrder)
+		r.Get("/ticker/24hr", f.handleMarketTicker24)
 	})
 
 	mux.Get("/ws/{listenKey}", f.handleAccountSubscription)
@@ -958,6 +959,49 @@ func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) 
 	}
 	updateB, _ := json.Marshal(update)
 	sub.SendRaw(updateB)
+}
+
+func (f *fakeBinance) handleMarketTicker24(w http.ResponseWriter, r *http.Request) {
+	resp := make([]*bntypes.MarketTicker24, 0, len(xcInfo.Symbols))
+	for _, mkt := range xcInfo.Symbols {
+		baseFiatRate := f.fiatRates[parseAssetID(mkt.BaseAsset)]
+		quoteFiatRate := f.fiatRates[parseAssetID(mkt.QuoteAsset)]
+		m := newMarket(mkt.Symbol, baseFiatRate, quoteFiatRate)
+		var buyPrice, sellPrice float64
+		if len(m.buys) > 0 {
+			buyPrice = m.buys[0].rate
+		}
+		if len(m.sells) > 0 {
+			sellPrice = m.sells[0].rate
+		}
+		vol24USD := math.Pow(10, float64(rand.Intn(4)+2))
+		vol24Base := vol24USD / baseFiatRate
+		vol24Quote := vol24USD / quoteFiatRate
+		lastPrice := m.basisRate
+		highPrice := lastPrice * (1 + rand.Float64()*0.15)
+		lowPrice := lastPrice / (1 + rand.Float64()*0.15)
+		openPrice := lowPrice + ((highPrice - lowPrice) * rand.Float64())
+		priceChange := lastPrice - openPrice
+		priceChangePct := priceChange / openPrice * 100
+
+		avgPrice := (openPrice + lastPrice + highPrice + lowPrice) / 4
+
+		resp = append(resp, &bntypes.MarketTicker24{
+			Symbol:             mkt.Symbol,
+			PriceChange:        priceChange,
+			PriceChangePercent: priceChangePct,
+			BidPrice:           buyPrice,
+			AskPrice:           sellPrice,
+			Volume:             vol24Base,
+			QuoteVolume:        vol24Quote,
+			WeightedAvgPrice:   avgPrice,
+			LastPrice:          lastPrice,
+			OpenPrice:          openPrice,
+			HighPrice:          highPrice,
+			LowPrice:           lowPrice,
+		})
+	}
+	writeJSONWithStatus(w, &resp, http.StatusOK)
 }
 
 type rateQty struct {

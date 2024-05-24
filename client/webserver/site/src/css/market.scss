@@ -500,13 +500,13 @@ div[data-handler=markets] {
 
   #leftHider,
   #marketReopener {
-    .ico-arrowback,
+    .ico-arrowleft,
     .ico-arrowright {
       transform: scaleX(0.5);
       opacity: 0.5;
     }
 
-    &:hover .ico-arrowback,
+    &:hover .ico-arrowleft,
     &:hover .ico-arrowright {
       opacity: 1;
     }

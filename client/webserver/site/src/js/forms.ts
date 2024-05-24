@@ -32,6 +32,7 @@ import {
 } from './registry'
 import { XYRangeHandler } from './opts'
 import { CoinExplorers } from './coinexplorers'
+import { MM, setCexElements } from './mmutil'
 
 interface ConfigOptionInput extends HTMLInputElement {
   configOpt: ConfigOption
@@ -61,13 +62,19 @@ interface WalletConfig {
   walletType: string
 }
 
+interface FormsConfig {
+  closed?: () => void
+}
+
 export class Forms {
   formsDiv: PageElement
   currentForm: PageElement
   keyup: (e: KeyboardEvent) => void
+  closed?: () => void
 
-  constructor (formsDiv: PageElement) {
+  constructor (formsDiv: PageElement, cfg?: FormsConfig) {
     this.formsDiv = formsDiv
+    this.closed = cfg?.closed
 
     formsDiv.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { this.close() })
@@ -100,6 +107,7 @@ export class Forms {
 
   close (): void {
     Doc.hide(this.formsDiv)
+    if (this.closed) this.closed()
   }
 
   exit () {
@@ -186,7 +194,7 @@ export class NewWalletForm {
       parentForm: parentForm
     }
 
-    const ani = new Wave(this.page.mainForm, { backgroundColor: true })
+    const ani = new Wave(this.form, { backgroundColor: true })
     const res = await postJSON('/api/newwallet', createForm)
     ani.stop()
     return res
@@ -2305,6 +2313,72 @@ export class TokenApprovalForm {
     if (n.balance.available >= txFee) {
       Doc.hide(page.addressBox)
     } else Doc.hide(page.errMsg)
+  }
+}
+
+export class CEXConfigurationForm {
+  form: PageElement
+  page: Record<string, PageElement>
+  success: (cexName: string) => void
+  cexName: string
+
+  constructor (form: PageElement, success: (cexName: string) => void) {
+    this.form = form
+    this.success = success
+    this.page = Doc.parseTemplate(form)
+
+    Doc.bind(this.page.cexSubmit, 'click', () => this.submit())
+  }
+
+  setCEX (cexName: string) {
+    this.cexName = cexName
+    setCexElements(this.form, cexName)
+    const page = this.page
+    Doc.hide(page.cexConfigPrompt, page.cexConnectErrBox, page.cexFormErr)
+    page.cexApiKeyInput.value = ''
+    page.cexSecretInput.value = ''
+    const cexStatus = app().mmStatus.cexes[cexName]
+    const connectErr = cexStatus?.connectErr
+    if (connectErr) {
+      Doc.show(page.cexConnectErrBox)
+      page.cexConnectErr.textContent = connectErr
+      page.cexApiKeyInput.value = cexStatus.config.apiKey
+      page.cexSecretInput.value = cexStatus.config.apiSecret
+    } else {
+      Doc.show(page.cexConfigPrompt)
+    }
+  }
+
+  /*
+  * handleCEXSubmit handles clicks on the CEX configuration submission button.
+  */
+  async submit () {
+    const { page, cexName, form } = this
+    Doc.hide(page.cexFormErr)
+    const apiKey = page.cexApiKeyInput.value
+    const apiSecret = page.cexSecretInput.value
+    if (!apiKey || !apiSecret) {
+      Doc.show(page.cexFormErr)
+      page.cexFormErr.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
+      return
+    }
+    const loaded = app().loading(form)
+    try {
+      const res = await MM.updateCEXConfig({
+        name: cexName,
+        apiKey: apiKey,
+        apiSecret: apiSecret
+      })
+      if (!app().checkResponse(res)) throw res
+      await app().fetchMMStatus()
+      this.success(cexName)
+    } catch (e) {
+      Doc.show(page.cexFormErr)
+      page.cexFormErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg ?? String(e) })
+      return
+    } finally {
+      loaded()
+    }
   }
 }
 

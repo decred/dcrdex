@@ -454,7 +454,10 @@ func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 func (c *tCEX) Balances() (map[uint32]*libxc.ExchangeBalance, error) {
 	return nil, nil
 }
-func (c *tCEX) Markets(ctx context.Context) ([]*libxc.Market, error) {
+func (c *tCEX) MatchedMarkets(ctx context.Context) ([]*libxc.MarketMatch, error) {
+	return nil, nil
+}
+func (c *tCEX) Markets(ctx context.Context) (map[string]*libxc.Market, error) {
 	return nil, nil
 }
 func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
@@ -761,25 +764,19 @@ func TestAvailableBalances(t *testing.T) {
 				Host:    "dex.com",
 				BaseID:  60,
 				QuoteID: 0,
-				CEXCfg: &BotCEXCfg{
-					Name: libxc.Binance,
-				},
+				CEXName: libxc.Binance,
 			},
 			{
 				Host:    "dex.com",
 				BaseID:  0,
 				QuoteID: 60001,
-				CEXCfg: &BotCEXCfg{
-					Name: libxc.Binance,
-				},
+				CEXName: libxc.Binance,
 			},
 			{
 				Host:    "dex.com",
 				BaseID:  42,
 				QuoteID: 60001,
-				CEXCfg: &BotCEXCfg{
-					Name: libxc.BinanceUS,
-				},
+				CEXName: libxc.BinanceUS,
 			},
 		},
 		CexConfigs: []*CEXConfig{

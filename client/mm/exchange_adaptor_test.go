@@ -639,9 +639,10 @@ func TestPrepareRebalance(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			tCore := newTCore()
 			adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
-				core:            tCore,
-				baseDexBalances: test.dexBalances,
-				baseCexBalances: test.cexBalances,
+				core:                tCore,
+				baseDexBalances:     test.dexBalances,
+				baseCexBalances:     test.cexBalances,
+				autoRebalanceConfig: cfg,
 				mwh: &MarketWithHost{
 					Host:    "dex.com",
 					BaseID:  baseID,
@@ -649,9 +650,7 @@ func TestPrepareRebalance(t *testing.T) {
 				},
 			})
 			adaptor.botCfgV.Store(&BotConfig{
-				CEXCfg: &BotCEXCfg{
-					AutoRebalance: cfg,
-				},
+				CEXName: "Binance",
 			})
 			adaptor.pendingBaseRebalance.Store(test.baseRebalancePending)
 			adaptor.pendingQuoteRebalance.Store(test.quoteRebalancePending)
@@ -890,9 +889,10 @@ func TestFreeUpFunds(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			tCore := newTCore()
 			adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
-				core:            tCore,
-				baseDexBalances: test.dexBalances,
-				baseCexBalances: test.cexBalances,
+				core:                tCore,
+				baseDexBalances:     test.dexBalances,
+				baseCexBalances:     test.cexBalances,
+				autoRebalanceConfig: &AutoRebalanceConfig{},
 				mwh: &MarketWithHost{
 					Host:    "dex.com",
 					BaseID:  baseID,
@@ -900,9 +900,7 @@ func TestFreeUpFunds(t *testing.T) {
 				},
 			})
 			adaptor.botCfgV.Store(&BotConfig{
-				CEXCfg: &BotCEXCfg{
-					AutoRebalance: &AutoRebalanceConfig{},
-				},
+				CEXName: "Binance",
 			})
 			for id, state := range test.dexOrdersState {
 				test.pendingDEXOrders[id].updateState(state.order, state.balanceEffects)
@@ -3648,9 +3646,7 @@ func TestCEXTrade(t *testing.T) {
 		Host:    "host1",
 		BaseID:  baseID,
 		QuoteID: quoteID,
-		CEXCfg: &BotCEXCfg{
-			Name: "Binance",
-		},
+		CEXName: "Binance",
 	}
 
 	runTest := func(test *test) {

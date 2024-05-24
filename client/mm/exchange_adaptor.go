@@ -302,6 +302,8 @@ type unifiedExchangeAdaptor struct {
 	botLoop   *dex.ConnectionMaster
 	paused    atomic.Bool
 
+	autoRebalanceConfig *AutoRebalanceConfig
+
 	subscriptionIDMtx sync.RWMutex
 	subscriptionID    *int
 
@@ -1143,29 +1145,6 @@ type BotBalances struct {
 	CEX *BotBalance `json:"cex"`
 }
 
-func (u *unifiedExchangeAdaptor) balances() map[uint32]*BotBalances {
-	u.balancesMtx.RLock()
-	defer u.balancesMtx.RUnlock()
-
-	funds := make(map[uint32]*BotBalances, len(u.baseDexBalances))
-	for assetID := range u.baseDexBalances {
-		funds[assetID] = &BotBalances{
-			DEX: u.dexBalance(assetID),
-			CEX: u.cexBalance(assetID),
-		}
-	}
-	for assetID := range u.baseCexBalances {
-		if _, found := funds[assetID]; found { // already did it
-			continue
-		}
-		funds[assetID] = &BotBalances{
-			DEX: u.dexBalance(assetID),
-			CEX: u.cexBalance(assetID),
-		}
-	}
-	return funds
-}
-
 // dexBalance must be called with the balancesMtx locked.
 func (u *unifiedExchangeAdaptor) dexBalance(assetID uint32) *BotBalance {
 	bal, found := u.baseDexBalances[assetID]
@@ -1735,14 +1714,6 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 	return nil
 }
 
-func (u *unifiedExchangeAdaptor) autoRebalanceConfig() *AutoRebalanceConfig {
-	cexCfg := u.botCfg().CEXCfg
-	if cexCfg != nil {
-		return cexCfg.AutoRebalance
-	}
-	return nil
-}
-
 // FreeUpFunds cancels active orders to free up the specified amount of funds
 // for a rebalance between the dex and the cex. If the cex parameter is true,
 // it means we are freeing up funds for withdrawal. DEX orders that require a
@@ -1750,8 +1721,7 @@ func (u *unifiedExchangeAdaptor) autoRebalanceConfig() *AutoRebalanceConfig {
 // order of priority (determined by the order in which they were passed into
 // MultiTrade).
 func (u *unifiedExchangeAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint64, currEpoch uint64) {
-	autoRebalanceCfg := u.autoRebalanceConfig()
-	if autoRebalanceCfg == nil {
+	if u.autoRebalanceConfig == nil {
 		return
 	}
 
@@ -1824,7 +1794,7 @@ func (u *unifiedExchangeAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint6
 	}
 
 	u.log.Warnf("Could not free up enough funds for %s %s rebalance. Freed %d, needed %d",
-		dex.BipIDSymbol(assetID), dex.BipIDSymbol(u.quoteID), amt, amt+autoRebalanceCfg.MinQuoteTransfer)
+		dex.BipIDSymbol(assetID), dex.BipIDSymbol(u.quoteID), amt, amt+u.autoRebalanceConfig.MinQuoteTransfer)
 }
 
 func (u *unifiedExchangeAdaptor) rebalanceAsset(ctx context.Context, assetID uint32, minAmount, minTransferAmount uint64) (toSend int64, dexReserves, cexReserves uint64) {
@@ -1898,8 +1868,7 @@ func (u *unifiedExchangeAdaptor) rebalanceAsset(ctx context.Context, assetID uin
 // calls to MultiTrade to make sure the funds needed for rebalancing are not
 // used to place orders.
 func (u *unifiedExchangeAdaptor) PrepareRebalance(ctx context.Context, assetID uint32) (rebalance int64, dexReserves, cexReserves uint64) {
-	autoRebalanceCfg := u.autoRebalanceConfig()
-	if autoRebalanceCfg == nil {
+	if u.autoRebalanceConfig == nil {
 		return
 	}
 
@@ -1909,8 +1878,8 @@ func (u *unifiedExchangeAdaptor) PrepareRebalance(ctx context.Context, assetID u
 		if u.pendingBaseRebalance.Load() {
 			return
 		}
-		minAmount = autoRebalanceCfg.MinBaseAmt
-		minTransferAmount = autoRebalanceCfg.MinBaseTransfer
+		minAmount = u.autoRebalanceConfig.MinBaseAmt
+		minTransferAmount = u.autoRebalanceConfig.MinBaseTransfer
 	} else {
 		if assetID != u.quoteID {
 			u.log.Errorf("assetID %d is not the base or quote asset ID of the market", assetID)
@@ -1919,8 +1888,8 @@ func (u *unifiedExchangeAdaptor) PrepareRebalance(ctx context.Context, assetID u
 		if u.pendingQuoteRebalance.Load() {
 			return
 		}
-		minAmount = autoRebalanceCfg.MinQuoteAmt
-		minTransferAmount = autoRebalanceCfg.MinQuoteTransfer
+		minAmount = u.autoRebalanceConfig.MinQuoteAmt
+		minTransferAmount = u.autoRebalanceConfig.MinQuoteTransfer
 	}
 
 	return u.rebalanceAsset(ctx, assetID, minAmount, minTransferAmount)
@@ -2956,15 +2925,16 @@ func (u *unifiedExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error)
 }
 
 type exchangeAdaptorCfg struct {
-	botID           string
-	mwh             *MarketWithHost
-	baseDexBalances map[uint32]uint64
-	baseCexBalances map[uint32]uint64
-	core            clientCore
-	cex             libxc.CEX
-	log             dex.Logger
-	eventLogDB      eventLogDB
-	botCfg          *BotConfig
+	botID               string
+	mwh                 *MarketWithHost
+	baseDexBalances     map[uint32]uint64
+	baseCexBalances     map[uint32]uint64
+	autoRebalanceConfig *AutoRebalanceConfig
+	core                clientCore
+	cex                 libxc.CEX
+	log                 dex.Logger
+	eventLogDB          eventLogDB
+	botCfg              *BotConfig
 }
 
 // newUnifiedExchangeAdaptor is the constructor for a unifiedExchangeAdaptor.
@@ -3005,14 +2975,15 @@ func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor
 		eventLogDB:      cfg.eventLogDB,
 		initialBalances: initialBalances,
 
-		baseDexBalances:    baseDEXBalances,
-		baseCexBalances:    baseCEXBalances,
-		pendingDEXOrders:   make(map[order.OrderID]*pendingDEXOrder),
-		pendingCEXOrders:   make(map[string]*pendingCEXOrder),
-		pendingDeposits:    make(map[string]*pendingDeposit),
-		pendingWithdrawals: make(map[string]*pendingWithdrawal),
-		mwh:                cfg.mwh,
-		inventoryMods:      make(map[uint32]int64),
+		baseDexBalances:     baseDEXBalances,
+		baseCexBalances:     baseCEXBalances,
+		autoRebalanceConfig: cfg.autoRebalanceConfig,
+		pendingDEXOrders:    make(map[order.OrderID]*pendingDEXOrder),
+		pendingCEXOrders:    make(map[string]*pendingCEXOrder),
+		pendingDeposits:     make(map[string]*pendingDeposit),
+		pendingWithdrawals:  make(map[string]*pendingWithdrawal),
+		mwh:                 cfg.mwh,
+		inventoryMods:       make(map[uint32]int64),
 	}
 
 	adaptor.fiatRates.Store(map[uint32]float64{})

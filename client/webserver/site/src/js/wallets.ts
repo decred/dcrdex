@@ -1750,7 +1750,7 @@ export default class WalletsPage extends BasePage {
         tmpl.volume.textContent = Doc.formatFourSigFigs(spotVolume(assetID, mkt))
         tmpl.volumeUnit.textContent = assetID === baseid ? fmtSymbol(basesymbol) : fmtSymbol(quotesymbol)
       } else Doc.hide(tmpl.priceBox, tmpl.volumeBox)
-      Doc.bind(row, 'click', () => app().loadPage('markets', { host, base: baseid, quote: quoteid }))
+      Doc.bind(row, 'click', () => app().loadPage('markets', { host, baseID: baseid, quoteID: quoteid }))
     }
     page.marketsOverviewBox.classList.remove('invisible')
   }

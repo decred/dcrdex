@@ -377,7 +377,7 @@ var enUS = map[string]*intl.Translation{
 	noZeroID:                         {T: "zero not allowed"},
 	botTypeBasicMMID:                 {T: "Market Maker"},
 	botTypeArbMMID:                   {T: "Market Maker + Arbitrage"},
-	botTypeSimpleArbID:               {T: "Simple Arbitrage"},
+	botTypeSimpleArbID:               {Version: 1, T: "Arbitrage"},
 	botTypeNoneID:                    {T: "choose a bot type"},
 	noCexID:                          {T: "choose an exchange for arbitrage"},
 	cexBalanceErrID:                  {T: "error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}"},

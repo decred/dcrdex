@@ -62,13 +62,10 @@ import {
   RecentMatch,
   MatchNote,
   ApprovalStatus,
-  OrderFilter,
-  MMBotStatus,
-  BotBalance,
-  RunStats
+  OrderFilter
 } from './registry'
 import { setOptionTemplates } from './opts'
-import { MM, CEXDisplayInfos } from './mm'
+import { RunningMarketMakerDisplay } from './mmutil'
 
 const bind = Doc.bind
 
@@ -146,6 +143,12 @@ interface StatsDisplay {
   tmpl: Record<string, PageElement>
 }
 
+interface MarketsPageParams {
+  host: string
+  baseID: string
+  quoteID: string
+}
+
 export default class MarketsPage extends BasePage {
   page: Record<string, PageElement>
   main: HTMLElement
@@ -170,7 +173,7 @@ export default class MarketsPage extends BasePage {
   candleChart: CandleChart
   candleDur: string
   balanceWgt: BalanceWidget
-  mm: MarketMakerDisplay
+  mm: RunningMarketMakerDisplay
   marketList: MarketList
   unlockForm: UnlockWalletForm
   newWalletForm: NewWalletForm
@@ -188,7 +191,7 @@ export default class MarketsPage extends BasePage {
   loadingAnimations: { candles?: Wave, depth?: Wave }
   mmRunning: boolean | undefined
 
-  constructor (main: HTMLElement, data: any) {
+  constructor (main: HTMLElement, pageParams: MarketsPageParams) {
     super()
 
     const page = this.page = Doc.idDescendants(main)
@@ -268,7 +271,7 @@ export default class MarketsPage extends BasePage {
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
-    this.mm = new MarketMakerDisplay(page.mmRunning)
+    this.mm = new RunningMarketMakerDisplay(page.mmRunning)
 
     this.reputationMeter = new ReputationMeter(page.reputationMeter)
 
@@ -507,7 +510,8 @@ export default class MarketsPage extends BasePage {
       spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletState(note) },
       reputation: () => { this.updateReputation() },
-      feepayment: () => { this.updateReputation() }
+      feepayment: () => { this.updateReputation() },
+      runstats: () => { this.mm.update() }
     })
 
     this.loadingAnimations = {}
@@ -523,15 +527,15 @@ export default class MarketsPage extends BasePage {
       }
     }, 1000)
 
-    this.init(data)
+    this.init(pageParams)
   }
 
-  async init (data: any) {
+  async init (pageParams?: MarketsPageParams) {
     // Fetch the first market in the list, or the users last selected market, if
     // it exists.
     let selected
-    if (data && data.host && typeof data.base !== 'undefined' && typeof data.quote !== 'undefined') {
-      selected = makeMarket(data.host, parseInt(data.base), parseInt(data.quote))
+    if (pageParams?.host) {
+      selected = makeMarket(pageParams.host, parseInt(pageParams.baseID), parseInt(pageParams.quoteID))
     } else {
       selected = State.fetchLocal(State.lastMarketLK)
     }
@@ -762,8 +766,8 @@ export default class MarketsPage extends BasePage {
       Doc.setVis(effectiveTier > 0 || pendingStrength > 0, page.tradingLimits, page.reputationMeter)
     }
 
-    if (app().experimental && this.mmRunning === undefined) {
-      const mmStatus = await MM.status()
+    const mmStatus = app().mmStatus
+    if (mmStatus && this.mmRunning === undefined) {
       const { base: { id: baseID }, quote: { id: quoteID }, dex: { host } } = this.market
       const botStatus = mmStatus.bots.find(({ config: cfg }) => cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host)
       this.mmRunning = Boolean(botStatus?.running)
@@ -1113,7 +1117,7 @@ export default class MarketsPage extends BasePage {
     }
 
     this.market = mkt
-    this.mm.setMarket(mkt)
+    this.mm.setMarket(host, baseID, quoteID)
     this.mmRunning = undefined
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
@@ -3558,168 +3562,6 @@ class OrderTableRowManager {
     } else {
       return this.isEpoch() ? 1 : -1
     }
-  }
-}
-
-class MarketMakerDisplay {
-  div: PageElement
-  page: Record<string, PageElement>
-  market: CurrentMarket | null
-  startTime: number
-  ticker: any
-
-  constructor (div: PageElement) {
-    this.div = div
-    this.page = Doc.parseTemplate(div)
-  }
-
-  stuff () {
-    const { div, page, market } = this
-    const { base: { id: baseID }, quote: { id: quoteID } } = (market as CurrentMarket)
-    const [{ unitInfo: bui, symbol: baseSymbol }, { unitInfo: qui, symbol: quoteSymbol }] = [app().assets[baseID], app().assets[quoteID]]
-
-    return { div, page, baseID, quoteID, bui, qui, baseSymbol, quoteSymbol }
-  }
-
-  async setMarket (market: CurrentMarket) {
-    if (!market.base || !market.quote) {
-      this.market = null
-      Doc.hide(this.page.stats)
-      return
-    }
-    this.market = market
-    const { page, div, baseID, quoteID } = this.stuff()
-    app().updateMarketElements(div, baseID, quoteID)
-    const baseToken = app().assets[baseID].token
-    const quoteToken = app().assets[quoteID].token
-    Doc.setVis(baseToken, page.baseFeeReservesBox)
-    Doc.setVis(quoteToken && (!baseToken || baseToken.parentID !== quoteToken.parentID), page.quoteFeeReservesBox)
-    if (baseToken) {
-      const { symbol, unitInfo: { conventional: { unit } } } = app().assets[baseToken.parentID]
-      page.baseFeeLogo.src = Doc.logoPath(symbol)
-      page.baseFeeTicker.textContent = unit
-    }
-    if (quoteToken) {
-      const { symbol, unitInfo: { conventional: { unit } } } = app().assets[quoteToken.parentID]
-      page.quoteFeeLogo.src = Doc.logoPath(symbol)
-      page.quoteFeeTicker.textContent = unit
-    }
-    this.updateBalances()
-    this.readBook()
-  }
-
-  handleBalanceNote (n: BalanceNote) {
-    if (!this.market) return
-    const { market: { base: { id: baseID }, quote: { id: quoteID } } } = this
-    const baseParentID = app().assets[baseID].token?.parentID ?? baseID
-    const quoteParentID = app().assets[quoteID].token?.parentID ?? quoteID
-    if (n.assetID !== baseID && n.assetID !== baseParentID && n.assetID !== quoteID && n.assetID !== quoteParentID) return
-    this.updateBalances()
-  }
-
-  async runningMarketStatus () {
-    if (!this.market) return
-    const { base: { id: baseID }, quote: { id: quoteID } } = this.market
-    const status = await MM.status()
-    const bots = status.bots.filter((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
-    if (bots.length === 0) return
-    const { config: botCfg, runStats } = bots[0]
-    return { botCfg, runStats }
-  }
-
-  setTicker () {
-    let r = (new Date().getTime() / 1000) - this.startTime
-    const h = String(Math.floor(r / 3600))
-    r = r % 3600
-    const m = String(Math.floor(r / 60))
-    const s = String(Math.floor(r % 60))
-    this.page.runTime.textContent = `${h.padStart(2, '0')}:${m.padStart(2, '0')}:${s.padStart(2, '0')}`
-  }
-
-  async updateBalances () {
-    const { div, page, baseID, quoteID, bui, qui } = this.stuff()
-
-    const status = await this.runningMarketStatus()
-    Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
-    if (!status || !status.runStats) {
-      if (this.ticker) {
-        clearInterval(this.ticker)
-        this.ticker = undefined
-      }
-      return
-    }
-    const { botCfg: { cexCfg }, runStats } = status
-    Doc.show(page.stats)
-
-    page.profit.textContent = runStats.profitRatio.toFixed(1)
-    page.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss)
-    this.startTime = runStats.startTime
-    if (!this.ticker) {
-      this.setTicker()
-      this.ticker = setInterval(() => { this.setTicker() }, 1000)
-    }
-
-    const summedBalanceText = (b: BotBalance, ui: UnitInfo) => {
-      if (!b) return '0'
-      return Doc.formatFourSigFigs((b.available + b.locked + b.pending) / ui.conventional.conversionFactor)
-    }
-
-    page.walletBaseInventory.textContent = summedBalanceText(runStats.dexBalances[baseID], bui)
-    page.walletQuoteInventory.textContent = summedBalanceText(runStats.dexBalances[quoteID], qui)
-
-    Doc.setVis(cexCfg, page.cexRow)
-    if (cexCfg) {
-      Doc.show(page.pendingDepositBox, page.pendingWithdrawalBox)
-      const dinfo = CEXDisplayInfos[cexCfg.name]
-      Doc.setSrc(div, '[data-cex-logo]', dinfo.logo)
-      page.cexBaseInventory.textContent = summedBalanceText(runStats.cexBalances[baseID], bui)
-      page.cexQuoteInventory.textContent = summedBalanceText(runStats.cexBalances[quoteID], qui)
-    }
-
-    const baseToken = app().assets[baseID].token
-    const quoteToken = app().assets[quoteID].token
-    if (baseToken) {
-      const parentID = baseToken.parentID
-      const feeBalance = runStats.dexBalances[parentID] ?? 0
-      page.baseFeeReserves.textContent = summedBalanceText(feeBalance, app().assets[parentID].unitInfo)
-    }
-    if (quoteToken && (!baseToken || baseToken.parentID !== quoteToken.parentID)) {
-      const parentID = quoteToken.parentID
-      const feeBalance = runStats.dexBalances[parentID] ?? 0
-      page.quoteFeeReserves.textContent = summedBalanceText(feeBalance, app().assets[parentID].unitInfo)
-    }
-
-    this.updateStats(runStats)
-  }
-
-  updateStats (runStats: RunStats) {
-    const { page, baseID, quoteID, bui } = this.stuff()
-    page.pendingDeposits.textContent = String(Math.round(runStats.pendingDeposits))
-    page.pendingWithdrawals.textContent = String(Math.round(runStats.pendingWithdrawals))
-    page.completedMatches.textContent = String(Math.round(runStats.completedMatches))
-    Doc.setVis(runStats.tradedUSD, page.tradedUSDBox)
-    if (runStats.tradedUSD > 0) page.tradedUSD.textContent = Doc.formatFourSigFigs(runStats.tradedUSD)
-    const baseFiatRate = app().fiatRatesMap[baseID]
-    Doc.setVis(baseFiatRate, page.roundTripFeesBox)
-    if (baseFiatRate) page.roundTripFeesUSD.textContent = Doc.formatFourSigFigs((runStats.feeGap?.roundTripFees / bui.conventional.conversionFactor * baseFiatRate) || 0)
-    const basisPrice = app().conventionalRate(baseID, quoteID, runStats.feeGap?.basisPrice || 0)
-    page.basisPrice.textContent = Doc.formatFourSigFigs(basisPrice)
-    const feeGap = app().conventionalRate(baseID, quoteID, runStats.feeGap?.feeGap || 0)
-    page.feeGap.textContent = Doc.formatFourSigFigs(feeGap)
-    page.feeGapPct.textContent = (feeGap / basisPrice * 100 || 0).toFixed(2)
-    const remoteGap = app().conventionalRate(baseID, quoteID, runStats.feeGap?.remoteGap || 0)
-    Doc.setVis(remoteGap, page.remoteGapBox)
-    if (remoteGap) {
-      page.remoteGap.textContent = Doc.formatFourSigFigs(remoteGap)
-      page.remoteGapPct.textContent = (remoteGap / basisPrice * 100 || 0).toFixed(2)
-    }
-  }
-
-  readBook () {
-    if (!this.market) return
-    const { page, market: { dex: { host }, cfg: { name: marketName } } } = this
-    const orders = app().exchanges[host].markets[marketName].orders || []
-    page.nBookedOrders.textContent = String(orders.filter((ord: Order) => ord.status === OrderUtil.StatusBooked).length)
   }
 }
 

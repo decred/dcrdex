@@ -1,7 +1,3 @@
-.flex-column {
-  flex-direction: column;
-}
-
 .flex-grow-1 {
   flex-grow: 1;
 }
@@ -230,4 +226,8 @@ div.clear {
 
 .text-buycolor {
   color: var(--buy-color);
+}
+
+.text-sellcolor {
+  color: var(--sell-color);
 }

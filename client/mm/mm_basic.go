@@ -327,7 +327,7 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 	halfGap := uint64(math.Round(g * calc.RateEncodingFactor))
 
 	b.log.Tracef("halfSpread: base basis price = %s, lot size = %s, aggregate fees = %s, half-gap = %s",
-		basisPrice, b.fmtRate(basisPrice), b.fmtBase(l), b.fmtBaseFees(f), b.fmtRate(halfGap))
+		b.fmtRate(basisPrice), b.fmtBase(l), b.fmtBaseFees(f), b.fmtRate(halfGap))
 
 	return &FeeGapStats{
 		BasisPrice:    basisPrice,

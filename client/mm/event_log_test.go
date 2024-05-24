@@ -43,9 +43,7 @@ func TestEventLogDB(t *testing.T) {
 		Host:    "dex.com",
 		BaseID:  42,
 		QuoteID: 60,
-		CEXCfg: &BotCEXCfg{
-			Name: "Binance",
-		},
+		CEXName: "Binance",
 		ArbMarketMakerConfig: &ArbMarketMakerConfig{
 			BuyPlacements: []*ArbMarketMakingPlacement{
 				{

@@ -73,6 +73,18 @@ table {
   .table-group-divider {
     border-color: var(--border-color)
   }
+
+  &.px-0 {
+    th,
+    td {
+      &:last-child,
+      &:first-child {
+        padding-left: 0;
+        padding-right: 0;
+      }
+    }
+
+  }
   
   th,
   td {
@@ -237,6 +249,10 @@ input:invalid {
   box-shadow: none;
 }
 
+.dashed {
+  border-style: dashed;
+}
+
 .micro-icon {
   position: relative;
 }
@@ -294,5 +310,18 @@ div[data-handler=wallets] {
 
     background-color: var(--form-bg);
     box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
+  }
+}
+
+.corner-button {
+  position: absolute;
+  top: 0;
+
+  &.left {
+    left: 0;
+  }
+
+  &.right {
+    right: 0;
   }
 }

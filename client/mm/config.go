@@ -1,6 +1,7 @@
 package mm
 
 import (
+	"encoding/json"
 	"fmt"
 )
 
@@ -101,12 +102,18 @@ type BotConfig struct {
 	BaseWalletOptions  map[string]string `json:"baseWalletOptions"`
 	QuoteWalletOptions map[string]string `json:"quoteWalletOptions"`
 
-	// Only applicable for arb bots.
-	CEXCfg *BotCEXCfg `json:"cexCfg"`
+	CEXName string `json:"cexName"`
 
-	// Alloc will be the initial balance allocation used when the bot is
-	// started.
-	Alloc *BotBalanceAllocation `json:"alloc"`
+	// UIConfig is settings defined and used by the front end to determine
+	// allocations.
+	UIConfig json.RawMessage `json:"uiConfig,omitempty"`
+
+	// RPCConfig can be used for file-based initial allocations and
+	// auto-rebalance settings.
+	RPCConfig *struct {
+		Alloc         *BotBalanceAllocation `json:"alloc"`
+		AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
+	} `json:"rpcConfig"`
 
 	// Only one of the following configs should be set
 	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`

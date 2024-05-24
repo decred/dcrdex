@@ -1,11 +1,15 @@
 {{define "walletConfigTemplates"}}
-<h6 data-tmpl="walletSettingsHeader">
-  [[[Wallet Settings]]]
-</h6>
-<div>
-  <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile me-1"></span> [[[load from file]]]</div>
-  <input data-tmpl="fileInput" type="file" class="d-none" accept=".conf, .cfg, .cnf, .ini">
+<div class="d-flex align-items-center justify-content-between">
+  <h5 data-tmpl="walletSettingsHeader">
+    [[[Wallet Settings]]]
+  </h6>
+  <div class="flex-center">
+    <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile me-1"></span> [[[load from file]]]</div>
+    <input data-tmpl="fileInput" type="file" class="d-none" accept=".conf, .cfg, .cnf, .ini">
+  </div>
 </div>
+
+
 <div data-tmpl="allSettings">
   <div data-tmpl="dynamicOpts" class="dynamicopts">
     <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end mt-3">
@@ -70,7 +74,7 @@
     <button class="one-bttn w-auto" data-tmpl="oneBttn">[[[Create]]]!</button>
   </div>
   <div class="py-2 fs14 grey">
-    <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
+    <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowleft fs12 me-1"></span> [[[pick a different asset]]]</span>
   </div>
   <div data-tmpl="walletSettings">
     {{template "walletConfigTemplates"}}
@@ -150,7 +154,7 @@
 <div class="mono fs15 p-2 border word-break-all border mb-3 mx-3">
   <span id="depositAddress" class="user-select-all"></span>
   <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18 pointer"></span>
-  <span id="copyAlert" class="d-hide">[[[copied]]]</span>
+  <span id="copyAlert" class="d-hide text-nowrap">[[[copied]]]</span>
 </div>
 <div id="unifiedReceivers" class="d-flex align-items-stretch mb-3 mt-1">
   <div id="unifiedReceiverTmpl" class="p-1 me-2 hoverbg lh1 fs15 pointer brdr selectable"></div>
@@ -441,7 +445,7 @@
 </div>
 <div data-tmpl="prepaidBonds" class="d-hide">
   <div class="py-2 fs14 grey">
-    <span class="hoverbg pointer" data-tmpl="ppbGoBack"><span class="ico-arrowback fs12 me-1"></span> go back</span>
+    <span class="hoverbg pointer" data-tmpl="ppbGoBack"><span class="ico-arrowleft fs12 me-1"></span> go back</span>
   </div>
   <h3>Redeem Pre-paid Bond</h3>
   <label for="prepaidBondCode">Code</label>
@@ -480,7 +484,7 @@
 
 {{define "confirmRegistrationForm"}}
 <div class="w-100 flex-stretch-column">
-  <span class="hoverbg pointer grey mb-3" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
+  <span class="hoverbg pointer grey mb-3" data-tmpl="goBack"><span class="ico-arrowleft fs12 me-1"></span> [[[pick a different asset]]]</span>
   <h3>[[[Confirm Bond Options]]]</h3>
   <div class="d-flex align-items-stretch">
     <div class="flex-grow-1 flex-stretch-column pe-3">
@@ -752,7 +756,7 @@
 </div>
 
 <div class="hoverbg pointer grey d-inline-block text-center" data-tmpl="goBack">
-  <span class="ico-arrowback fs12 mb-1"></span>
+  <span class="ico-arrowleft fs12 mb-1"></span>
   [[[pick a different asset]]]
 </div>
 {{end}}
@@ -889,5 +893,182 @@
 </div>
 <div data-tmpl="addressBox" class="flex-center mt-2 fs15 d-hide">
   [[[approve_token_wallet_addr]]] <span data-tmpl="address" class="ms-2"></span>
+</div>
+{{end}}
+
+{{define "cexConfigForm"}}
+<div class="form-closer"><span class="ico-cross"></span></div>
+<h4 data-tmpl="cexConfigPrompt" class="mt-3 mb-3">
+  [[[configure_cex_prompt]]]
+</h4>
+<div class="flex-center flex-column mb-3">
+  <img class="xclogo enourmous-icon" data-cex-logo>
+  <div class="mt-2 fs20" data-cex-name></div>
+</div>
+<div data-tmpl="cexConnectErrBox" class="mb-3 flex-center flex-column text-danger">
+  <span class="ico-disconnected fs24"></span>
+  <span>[[[err_with_cex_creds]]]</span>
+  <span data-tmpl="cexConnectErr" class="fs14 mt-2 text-break"></span>
+</div>
+<div class="d-flex flex-column mb-3">
+  <label for="cexApiKeyInput">[[[API Key]]]</label>
+  <input type="text" data-tmpl="cexApiKeyInput" autocomplete="off">
+</div>
+<div class="d-flex flex-column mb-3">
+  <label for="cexSecretInput">[[[API Secret]]]</label>
+  <input type="text" data-tmpl="cexSecretInput" autocomplete="off">
+</div>
+<div data-tmpl="cexFormErr" class="flex-center px-3 mb-3 text-danger text-break d-hide"></div>
+<div class="d-flex justify-content-end">
+  <button type="button" data-tmpl="cexSubmit" class="col-12 go">[[[Submit]]]</button>
+</div>
+{{end}}
+
+{{define "runningBotDisplay"}}
+<div data-tmpl="stats" class="d-hide">
+  <div class="d-flex align-items-center justify-content-between px-3">
+    <span class="d-flex align-items-center fs28">
+      <span data-tmpl="plSign" class="me-1 fs10"></span>
+      <span data-tmpl="profitLoss"></span>
+      <span class="fs20 grey ms-1">USD</span>
+    </span>
+    <span data-tmpl="runTime" class="fs28 mono lh1">00:00:00</span>
+  </div>
+  <div class="pt-2 mt-2 border-top">
+    <table class="row-border fs18 lh1">
+      <thead>
+        <tr class="fs16">
+          <th class="no-stretch ps-3">[[[Inventory]]]</th>
+          <th class="text-end">
+            <div class="d-inline-flex align-items-center">
+              <img class="micro-icon me-2" data-base-logo>
+              <span data-base-ticker></span>
+            </div>
+          </th>
+          <th class="text-end pe-3 no-stretch">
+            <div class="d-inline-flex align-items-center">
+              <img class="micro-icon me-2" data-quote-logo>
+              <span data-quote-ticker></span>
+            </div>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="no-stretch ps-3">
+            <img src="/img/bison-square_50.png" class="mini-icon">
+          </td>
+          <td data-tmpl="walletBaseInventory" class="text-end"></td>
+          <td data-tmpl="walletQuoteInventory" class="no-stretch text-end pe-3"></td>
+        </tr>
+        <tr data-tmpl="cexRow">
+          <td class="ps-3">
+            <img class="mini-icon" data-cex-logo>
+          </td>
+          <td data-tmpl="cexBaseInventory" class="text-end"></td>
+          <td data-tmpl="cexQuoteInventory" class="no-stretch text-end pe-3"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="flex-stretch-column mt-2 px-3">
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Profit]]]</span>
+      <span class="flex-center">
+        <span data-tmpl="profitSign" class="fs8 me-1"></span>
+        <span data-tmpl="profit">
+        </span>%</span>
+      </span>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Booked orders]]]</span>
+      <span data-tmpl="nBookedOrders"></span>
+    </div>
+
+    <div data-tmpl="baseFeeReservesBox" class="d-flex justify-content-between align-items-center">
+      <span>
+        <span>[[[Fee reserves]]]</span>
+        <img data-tmpl="baseFeeLogo" class="micro-icon">
+      </span>
+      <span>
+        <span data-tmpl="baseFeeReserves"></span>
+        <span data-tmpl="baseFeeTicker"></span>
+      </span>
+    </div>
+
+    <div data-tmpl="quoteFeeReservesBox" class="d-flex justify-content-between align-items-center">
+      <span>
+        <span>[[[Fee reserves]]]</span>
+        <img data-tmpl="quoteFeeLogo" class="micro-icon">
+      </span>
+      <span>
+        <span data-tmpl="quoteFeeReserves"></span>
+        <span data-tmpl="quoteFeeTicker"></span>
+      </span>
+    </div>
+
+    <div data-tmpl="pendingDepositBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Pending deposits]]]</span>
+      <span data-tmpl="pendingDeposits"></span>
+    </div>
+
+    <div data-tmpl="pendingWithdrawalBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Pending withdrawals]]]</span>
+      <span data-tmpl="pendingWithdrawals"></span>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Settled matches]]]</span>
+      <span data-tmpl="completedMatches"></span>
+    </div>
+
+    <div data-tmpl="tradedUSDBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Traded]]]</span>
+      <span>
+        <span data-tmpl="tradedUSD"></span>
+        <span class="fs14 grey">USD</span>
+      </span>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Basis price]]]</span>
+      <span data-tmpl="basisPrice"></span>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      <span>
+        [[[Fee gap]]]
+        <span class="ico-info" data-tooltip="[[[feegap_tooltip]]]"></span>
+      </span>
+      <span>
+        <span data-tmpl="feeGap"></span> (<span data-tmpl="feeGapPct"></span>%)
+      </span>
+    </div>
+
+    <div data-tmpl="remoteGapBox" class="d-flex justify-content-between align-items-center">
+      <span>
+        [[[Remote gap]]]
+        <span class="ico-info" data-tooltip="[[[remotegap_tooltip]]]"></span>
+      </span>
+      <span>
+        <span data-tmpl="remoteGap"></span> (<span data-tmpl="remoteGapPct"></span>%)
+      </span>
+    </div>
+
+    <div data-tmpl="roundTripFeesBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Round_trip fees]]]</span>
+      <span>
+        <span data-tmpl="roundTripFeesUSD"></span>
+        <span class="fs14 grey">USD</span>
+      </span>
+    </div>
+  </div>
+
+
+  <div class="d-flex align-items-stretch px-3 pt-2 justify-content-end py-2 mt-2 border-top">
+    <button data-tmpl="runLogsBttn" class="ico-textfile"></button>
+    <button data-tmpl="stopBttn" class="ms-2 position-relative">Stop</button>
+  </div>
 </div>
 {{end}}

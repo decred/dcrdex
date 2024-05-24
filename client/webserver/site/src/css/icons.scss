@@ -27,23 +27,27 @@
 }
 
 .micro-icon {
-  width: 15px;
   height: 15px;
 }
 
 .mini-icon {
-  width: 20px;
   height: 20px;
 }
 
+.small-icon {
+  height: 25px;
+}
+
 .medium-icon {
-  width: 30px;
   height: 30px;
 }
 
 .large-icon {
-  width: 40px;
   height: 40px;
+}
+
+.enourmous-icon {
+  height: 60px;
 }
 
 .ico-spinner::before {
@@ -134,7 +138,7 @@
   transform: rotate(90deg);
 }
 
-.ico-arrowback::before {
+.ico-arrowleft::before {
   content: "\e90c";
   display: inline-block;
   transform: rotate(180deg);
@@ -205,4 +209,8 @@
 
 .ico-secretagent::before {
   content: "\e91b";
+}
+
+.ico-lever::before {
+  content: "\e91c";
 }

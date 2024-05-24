@@ -13,6 +13,7 @@ import DexSettingsPage from './dexsettings'
 import MarketMakerArchivesPage from './mmarchives'
 import MarketMakerLogsPage from './mmlogs'
 import InitPage from './init'
+import { MM } from './mmutil'
 import { RateEncodingFactor, StatusExecuted, hasActiveMatches } from './orderutil'
 import { getJSON, postJSON, Errors } from './http'
 import * as ntfn from './notifications'
@@ -53,7 +54,10 @@ import {
   ActionResolvedNote,
   TransactionActionNote,
   CoreActionRequiredNote,
-  RejectedRedemptionData
+  RejectedRedemptionData,
+  MarketMakingStatus,
+  RunStatsNote,
+  MMBotStatus
 } from './registry'
 import { setCoinHref } from './coinexplorers'
 
@@ -82,6 +86,7 @@ interface UserResponse extends APIResponse {
   langs: string[]
   inited: boolean
   experimental: boolean
+  mmStatus: MarketMakingStatus
 }
 
 /* constructors is a map to page constructors. */
@@ -148,6 +153,7 @@ export default class Application {
   langs: string[]
   lang: string
   experimental: boolean
+  mmStatus: MarketMakingStatus
   inited: boolean
   authed: boolean
   user: User
@@ -301,6 +307,7 @@ export default class Application {
     this.lang = resp.lang
     this.langs = resp.langs
     this.experimental = resp.experimental
+    this.mmStatus = resp.mmStatus
     if (!resp.user) return
     const user = resp.user
     this.seedGenTime = user.seedgentime
@@ -317,6 +324,10 @@ export default class Application {
 
     this.updateMenuItemsDisplay()
     return user
+  }
+
+  async fetchMMStatus () {
+    this.mmStatus = await MM.status()
   }
 
   /* Load the page from the server. Insert and bind the DOM. */
@@ -454,13 +465,14 @@ export default class Application {
    */
   attachHeader () {
     this.header = idel(document.body, 'header')
-    this.headerSpace = Doc.idel(this.header, 'headerSpace')
+    const page = this.page = Doc.idDescendants(this.header)
+    this.headerSpace = page.headerSpace
     this.popupNotes = idel(document.body, 'popupNotes')
     this.popupTmpl = Doc.tmplElement(this.popupNotes, 'note')
     if (this.popupTmpl) this.popupTmpl.remove()
     else console.error('popupTmpl element not found')
     this.tooltip = idel(document.body, 'tooltip')
-    const page = this.page = Doc.idDescendants(this.header)
+
     page.noteTmpl.removeAttribute('id')
     page.noteTmpl.remove()
     page.pokeTmpl.removeAttribute('id')
@@ -871,7 +883,7 @@ export default class Application {
    * and when the user registers a DEX.
    */
   updateMenuItemsDisplay () {
-    const { page, authed } = this
+    const { page, authed, mmStatus } = this
     if (!page) {
       // initial page load, header elements not yet attached but menu items
       // would already be hidden/displayed as appropriate.
@@ -885,6 +897,7 @@ export default class Application {
 
     page.profileBox.classList.add('authed')
     Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
+    Doc.setVis(mmStatus, page.mmLink)
   }
 
   async fetchNotes () {
@@ -988,6 +1001,15 @@ export default class Application {
     Doc.empty(this.page.pokeList)
     for (let i = 0; i < pokes.length; i++) {
       this.prependPokeElement(pokes[i])
+    }
+  }
+
+  botStatus (host: string, baseID: number, quoteID: number): MMBotStatus | undefined {
+    for (const bot of (this.mmStatus?.bots ?? [])) {
+      const { config: c } = bot
+      if (host === c.host && baseID === c.baseID && quoteID === c.quoteID) {
+        return bot
+      }
     }
   }
 
@@ -1121,6 +1143,15 @@ export default class Application {
         }
         if (n.payload.route === 'transactionHistorySynced') {
           this.handleTxHistorySyncedNote(n.payload.assetID)
+        }
+        break
+      }
+      case 'runstats': {
+        const n = note as RunStatsNote
+        const bot = this.botStatus(n.host, n.baseID, n.quoteID)
+        if (bot) {
+          bot.runStats = n.stats
+          bot.running = Boolean(n.stats)
         }
       }
     }
@@ -1536,8 +1567,8 @@ export default class Application {
   }
 
   async needsCustomProvider (assetID: number): Promise<boolean> {
-    const { token } = this.assets[assetID]
-    const baseChainID = token ? token.parentID : assetID
+    const baseChainID = this.assets[assetID]?.token?.parentID
+    if (!baseChainID) return false
     const w = this.walletMap[baseChainID]
     if (!w) return false
     const traitAccountLocker = 1 << 14
