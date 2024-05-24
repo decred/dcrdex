@@ -5,9 +5,8 @@ import (
 )
 
 type Config struct {
-	TatumMainnetAPIKey string `long:"tatumMainnetAPIKey" description:"Free Mainnet API key from tatum.io. Optional."`
-	TatumTestnetAPIKey string `long:"tatumTestnetAPIKey" description:"Free Testnet API key from tatum.io."`
-	BlockDeamonAPIKey  string `long:"blockDeamonAPIKey" description:"Free API key from blockdaemon.com, refresh every ~6 months."`
+	TatumAPIKey       string `long:"tatumAPIKey" description:"Free Mainnet or Testnet API key from tatum.io."`
+	BlockDeamonAPIKey string `long:"blockDeamonAPIKey" description:"Free API key from blockdaemon.com, refresh every ~6 months."`
 }
 
 type Estimate struct {
@@ -15,14 +14,7 @@ type Estimate struct {
 	LastUpdated time.Time
 }
 
-type FeeSourceCount struct {
+type feeSourceCount struct {
 	totalSource int
 	totalFee    uint64
-}
-
-type blockchairFeeInfo struct {
-	SuggestedTxFeePerBytePerSat uint64 `json:"suggested_transaction_fee_per_byte_sat"`
-	SuggestedFeeGweiOptions     struct {
-		Fast uint64 `json:"fast"`
-	} `json:"suggested_transaction_fee_gwei_options"`
 }

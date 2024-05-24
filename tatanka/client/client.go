@@ -374,7 +374,7 @@ func (c *TankaClient) handleBroadcast(tt *tatanka, msg *msgjson.Message) {
 	c.emit(bcast)
 }
 
-func (c *TankaClient) handleRates(tt *tatanka, msg *msgjson.Message) {
+func (c *TankaClient) handleRates(_ *tatanka, msg *msgjson.Message) {
 	var rm mj.RateMessage
 	if err := msg.Unmarshal(&rm); err != nil {
 		c.log.Errorf("%s rate message unmarshal error: %w", err)
@@ -427,7 +427,7 @@ func (c *TankaClient) FiatRate(assetID uint32) float64 {
 	return 0
 }
 
-func (c *TankaClient) handleFeeEstimates(tt *tatanka, msg *msgjson.Message) {
+func (c *TankaClient) handleFeeEstimates(_ *tatanka, msg *msgjson.Message) {
 	var rm mj.FeeEstimateMessage
 	if err := msg.Unmarshal(&rm); err != nil {
 		c.log.Errorf("%s rate message unmarshal error: %w", err)
