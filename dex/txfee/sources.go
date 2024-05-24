@@ -27,38 +27,44 @@ const (
 	FeeEstimateExpiry         = 30 * time.Minute
 	reactivationDuration      = 24 * time.Hour
 
-	// blockDaemon provides mainnet and testnet fee estimates for 9 chain, 5 of
-	// which dex currently has support for at the time of writing. Requires an
-	// API key which gives us 3 Million CU, 50CU per chain tx fee request. That
-	// means the 3 million CU would be exhausted at ~6 months if we request data
-	// every 5 minutes for max 5 chains.
-	blockDaemon           = "Block Deamon"
-	blockDaemonAPIURL     = "https://svc.blockdaemon.com/universal/v1/%s/%s/tx/estimate_fee" // bitcoin/testnet
-	defaultBlockDaemonKey = "2go1YqUcuAr4WZ2-3WgSD3c7qpatZqQuNWhTVBldKZnTSUtw"               // maybe we should just change this every month?
+	// blockDaemon provides mainnet and testnet fee estimates for 9 chains, 5 of
+	// which dex currently has support for at the time of writing (See:
+	// blockDaemonChainsSupported below). Requires an API key which gives us 3
+	// Million CU per month, 50CU per chain tx fee request. That means the 3
+	// million CU would be exhausted at ~6 months if we request data every 5
+	// minutes for max 5 chains.
+	blockDaemon       = "Block Deamon"
+	blockDaemonAPIURL = "https://svc.blockdaemon.com/universal/v1/%s/%s/tx/estimate_fee" // bitcoin/testnet
 
 	// dcrdata provided fee estimate for dcr and supports mainnet and testnet.
 	// Rate limits are unknown but we should be under limit if we request every
 	// 5 minutes.
 	dcrdata                 = "dcrdata"
 	defaultDcrdataFeeBlocks = "2"
-	dcrdataMainnetAPIURL    = "https://dcrdata.decred.org/insight/api/utils/estimatefee?nbBlocks=2" // nbBlocks=2 == 10 minutes
-	dcrdataTestnetAPIURL    = "https://testnet.decred.org/insight/api/utils/estimatefee?nbBlocks=2" // nbBlocks=2 == 10 minutes
+	dcrdataMainnetAPIURL    = "https://dcrdata.decred.org/insight/api/utils/estimatefee?nbBlocks=2"
+	dcrdataTestnetAPIURL    = "https://testnet.decred.org/insight/api/utils/estimatefee?nbBlocks=2"
 
-	// tatum supports 5 chains on testnet and mainnet at the time of writing. We
-	// get 1 million credits per month and max 3 requests per second. We should
-	// be under limit if we request for fee estimates every 5 minutes.
+	// tatum supports 4 chains (See: tatumChainsSupported below) on testnet and
+	// mainnet at the time of writing. We get 1 million credits per month and
+	// max 3 requests per second. We should be under limit if we request for fee
+	// estimates every 5 minutes.
 	tatum = "Tatum"
 	// Note: tatumAPIURL works for mainnet by default without an API key.
 	tatumAPIURL = "https://api.tatum.io/v3/blockchain/fee/%s"
 
-	// blockchair provides fee estimate for upto 20 chains out of which 7 are
-	// supported by dex at the time of writing. Rate limit is not clear but we
-	// should be out of trouble if we request every 5 minutes.
+	// blockchair provides fee estimate for 20 chains (Bitcoin, Bitcoin Cash,
+	// Ethereum, Litecoin, Bitcoin-sv, Dogecoin, Dash, Ripple, Groestlcoin,
+	// Stellar, Monero, Cardano, Zcash, Mixin, EOS, Ecash (xec), Polkadot,
+	// Solana, Kusama, Cross Chains - Tether, USD Coin, Binance US) out of which
+	// 7 are supported by dex at the time of writing (See:
+	// blockchairChainsSupported below). Rate limit is 1440 requests a day but
+	// we should be out of trouble if we request every 5 minutes.
 	blockchair       = "Blockchair"
 	blockchairAPIURL = "https://api.blockchair.com/stats"
 
-	// blockCypher provides fee estimate for upto five chains. Rate limit is 3
-	// per second and 100 per hour.
+	// blockCypher provides fee estimate for 5 chains (See:
+	// blockCypherChainsSupported below). Rate limit is 3 per second and 100 per
+	// hour.
 	blockCypher    = "BlockCypher"
 	blockCypherURL = "https://api.blockcypher.com/v1/%s/main"
 )
@@ -117,14 +123,13 @@ var (
 )
 
 type feeEstimateSource struct {
-	name            string
-	mtx             sync.RWMutex
-	feeEstimates    map[uint32]uint64
-	disabled        bool
-	canReactivate   bool
-	getFeeEstimate  func(ctx context.Context, log dex.Logger, chainsIDs []uint32) (map[uint32]uint64, error)
-	refreshInterval time.Duration
-	lastRefresh     time.Time
+	name           string
+	mtx            sync.RWMutex
+	feeEstimates   map[uint32]uint64
+	disabled       bool
+	canReactivate  bool
+	getFeeEstimate func(ctx context.Context, log dex.Logger, chainsIDs []uint32) (map[uint32]uint64, error)
+	lastRefresh    time.Time
 }
 
 func (fes *feeEstimateSource) isDisabled() bool {
@@ -164,16 +169,11 @@ func (fes *feeEstimateSource) checkIfSourceCanReactivate() bool {
 }
 
 func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
-	if cfg.BlockDeamonAPIKey == "" {
-		cfg.BlockDeamonAPIKey = defaultBlockDaemonKey
-	}
-
 	feeSources := []*feeEstimateSource{
 		{
-			name:            blockDaemon,
-			feeEstimates:    make(map[uint32]uint64),
-			disabled:        cfg.BlockDeamonAPIKey == "",
-			refreshInterval: defaultFeeRefreshInterval,
+			name:         blockDaemon,
+			feeEstimates: make(map[uint32]uint64),
+			disabled:     cfg.BlockDeamonAPIKey == "",
 			getFeeEstimate: func(ctx context.Context, log dex.Logger, chainsIDs []uint32) (map[uint32]uint64, error) {
 				authHeader := map[string]string{
 					"X-API-Key": cfg.BlockDeamonAPIKey,
@@ -189,7 +189,7 @@ func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
 					var feeEstimate uint64
 					var err error
 					if chainID == eth.BipID {
-						feeEstimate, err = fetchBlockDeamonEthFeeEstimate(ctx, net, authHeader)
+						feeEstimate, err = fetchBlockDaemonEthFeeEstimate(ctx, net, authHeader)
 					} else {
 						var resp struct {
 							EstimatedFees struct {
@@ -243,21 +243,15 @@ func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
 
 				return feeEstimates, nil
 			},
-			refreshInterval: defaultFeeRefreshInterval,
 		},
 		{
 			name:         tatum,
 			feeEstimates: make(map[uint32]uint64),
-			disabled:     net == dex.Testnet && cfg.TatumTestnetAPIKey == "",
+			disabled:     net == dex.Testnet && cfg.TatumAPIKey == "",
 			getFeeEstimate: func(ctx context.Context, log dex.Logger, chainsIDs []uint32) (map[uint32]uint64, error) {
-				apiKey := cfg.TatumMainnetAPIKey
-				if net == dex.Testnet {
-					apiKey = cfg.TatumTestnetAPIKey
-				}
-
 				authHeader := make(map[string]string)
-				if apiKey != "" {
-					authHeader["x-api-key"] = apiKey
+				if cfg.TatumAPIKey != "" {
+					authHeader["x-api-key"] = cfg.TatumAPIKey
 				}
 
 				feeEstimates := make(map[uint32]uint64, len(chainsIDs))
@@ -296,7 +290,6 @@ func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
 
 				return feeEstimates, nil
 			},
-			refreshInterval: defaultFeeRefreshInterval,
 		},
 		{
 			name:         blockchair,
@@ -320,7 +313,12 @@ func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
 						continue
 					}
 
-					var feeInfo blockchairFeeInfo
+					var feeInfo struct {
+						SuggestedTxFeePerBytePerSat uint64 `json:"suggested_transaction_fee_per_byte_sat"`
+						SuggestedFeeGweiOptions     struct {
+							Fast uint64 `json:"fast"`
+						} `json:"suggested_transaction_fee_gwei_options"`
+					}
 					feeInfoBytes := resp.Data[chain].Data
 					if err := json.Unmarshal(feeInfoBytes, &feeInfo); err != nil {
 						log.Errorf("%s: error unmarshalling (%s): %v", blockchair, string(feeInfoBytes), err)
@@ -336,7 +334,6 @@ func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
 
 				return feeEstimates, nil
 			},
-			refreshInterval: defaultFeeRefreshInterval,
 		},
 		{
 			name:         blockCypher,
@@ -385,7 +382,6 @@ func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
 
 				return feeEstimates, nil
 			},
-			refreshInterval: defaultFeeRefreshInterval,
 		},
 	}
 
@@ -396,9 +392,9 @@ func feeEstimateSources(net dex.Network, cfg Config) []*feeEstimateSource {
 	return feeSources
 }
 
-// fetchBlockDeamonEthFeeEstimate retrieves fee estimate for only ethereum as it
+// fetchBlockDaemonEthFeeEstimate retrieves fee estimate for only ethereum as it
 // has a different response.
-func fetchBlockDeamonEthFeeEstimate(ctx context.Context, net dex.Network, authHeader map[string]string) (uint64, error) {
+func fetchBlockDaemonEthFeeEstimate(ctx context.Context, net dex.Network, authHeader map[string]string) (uint64, error) {
 	var resp struct {
 		EstimatedFees struct {
 			//	"estimated_fees": {"fast": {"max_priority_fee": 1500000000,"max_total_fee": 5529003649},"medium": {"max_priority_fee": 1200000000 	"max_total_fee": 5099269857},"slow": {"max_priority_fee": 1000000000,"max_total_fee": 4704811587}
@@ -429,6 +425,8 @@ func getFeeEstimate(ctx context.Context, url string, thing any) error {
 }
 
 func getFeeEstimateWithHeader(ctx context.Context, url string, thing any, header map[string]string) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err

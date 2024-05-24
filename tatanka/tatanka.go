@@ -250,12 +250,11 @@ func New(cfg *Config) (*Tatanka, error) {
 	}
 
 	if t.net == dex.Mainnet || t.net == dex.Testnet {
-		t.txFeeOracle, err = txfee.NewOracle(t.net, cfg.TxFeeOracleCfg, nets)
+		t.txFeeEstimateChan = make(chan map[uint32]*txfee.Estimate)
+		t.txFeeOracle, err = txfee.NewOracle(t.net, cfg.TxFeeOracleCfg, nets, t.txFeeEstimateChan)
 		if err != nil {
 			return nil, fmt.Errorf("txfee.NewOracle error: %w", err)
 		}
-		t.txFeeEstimateChan = make(chan map[uint32]*txfee.Estimate)
-		t.txFeeOracle.AddFeeListener(tatankaUniqueID, t.txFeeEstimateChan)
 	}
 
 	return t, nil
@@ -744,7 +743,7 @@ func (t *Tatanka) broadcastFeeEstimate() {
 			return
 		case feeEstimate, ok := <-t.txFeeEstimateChan:
 			if !ok {
-				t.log.Trace("Tantanka stopped listening for tx fee estimates")
+				t.log.Debug("Tatanka stopped listening for fee estimates.")
 				return
 			}
 

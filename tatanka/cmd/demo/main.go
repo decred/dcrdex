@@ -109,12 +109,13 @@ func mainErr() (err error) {
 	dir1 := filepath.Join(tmpDir, "tatanka2")
 	priv1, pid1 := genKey(dir1)
 
+	client1Net := dex.Simnet // change to testnet or mainnet to test fee estimates
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dex.Simnet /* change to testnet or mainnet to test fee estimates */, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed(), true)
+		runServer(ctx, client1Net, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed(), true)
 	}()
 
 	time.Sleep(time.Second)
@@ -305,15 +306,19 @@ out:
 
 	fmt.Println("Testing fee estimates.....")
 
-	if err = cl1.SubscribeToFeeEstimates(); err != nil {
-		return err
-	}
+	if client1Net == dex.Mainnet || client1Net == dex.Testnet {
+		if err = cl1.SubscribeToFeeEstimates(); err != nil {
+			return err
+		}
 
-	// Wait for fee estimate.
-	<-cl1.Next()
+		// Wait for fee estimate.
+		<-cl1.Next()
 
-	for _, chainID := range []uint32{btc.BipID, dcr.BipID} {
-		fmt.Println(dex.BipIDSymbol(chainID), "->", cl1.FeeEstimate(chainID))
+		for _, chainID := range []uint32{btc.BipID, dcr.BipID} {
+			fmt.Println(dex.BipIDSymbol(chainID), "->", cl1.FeeEstimate(chainID))
+		}
+	} else {
+		fmt.Printf("\nSkipping fee estimate test for %s\n", client1Net)
 	}
 
 	fmt.Println("!!!!!!!! Test Success !!!!!!!!")
