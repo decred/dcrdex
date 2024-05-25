@@ -95,12 +95,6 @@ type Wallet interface {
 	// Accounts returns the names of the accounts for use by the exchange
 	// wallet.
 	Accounts() XCWalletAccounts
-	// NotifyOnTipChange registers a callback function that should be
-	// invoked when the wallet sees new mainchain blocks. The return value
-	// indicates if this notification can be provided. Where this tip change
-	// notification is unimplemented, monitorBlocks should be used to track
-	// tip changes.
-	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
 	// AddressInfo returns information for the provided address. It is an error
 	// if the address is not owned by the wallet.
 	AddressInfo(ctx context.Context, address string) (*AddressInfo, error)

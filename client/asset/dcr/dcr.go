@@ -1066,18 +1066,10 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	success = true // All good, don't disconnect the wallet when this method returns.
 	dcr.connected.Store(true)
 
-	// NotifyOnTipChange will return false if the wallet does not support
-	// tip change notification. We'll use dcr.monitorBlocks below if so.
-	monitoringBlocks := dcr.wallet.NotifyOnTipChange(ctx, dcr.handleTipChange)
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if !monitoringBlocks {
-			dcr.monitorBlocks(ctx)
-		} else {
-			<-ctx.Done() // just wait for shutdown signal
-		}
+		dcr.monitorBlocks(ctx)
 		dcr.shutdown()
 	}()
 
@@ -1087,7 +1079,11 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		dcr.monitorPeers(ctx)
 	}()
 
-	go dcr.syncTxHistory(ctx, uint64(tip.height))
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dcr.syncTxHistory(ctx, uint64(tip.height))
+	}()
 
 	return wg, nil
 }
@@ -5847,20 +5843,7 @@ func rpcTxFee(tx *ListTransactionsResult) uint64 {
 }
 
 func (dcr *ExchangeWallet) walletOwnsAddress(addr stdaddr.Address) (bool, error) {
-	accounts := dcr.wallet.Accounts()
-	accountsToCheck := make([]string, 0, 3)
-
-	if accounts.PrimaryAccount != "" {
-		accountsToCheck = append(accountsToCheck, accounts.PrimaryAccount)
-	}
-	if accounts.TradingAccount != "" {
-		accountsToCheck = append(accountsToCheck, accounts.TradingAccount)
-	}
-	if accounts.UnmixedAccount != "" {
-		accountsToCheck = append(accountsToCheck, accounts.UnmixedAccount)
-	}
-
-	for _, acct := range accountsToCheck {
+	for _, acct := range dcr.allAccounts() {
 		owns, err := dcr.wallet.AccountOwnsAddress(dcr.ctx, addr, acct)
 		if err != nil {
 			return false, err
@@ -5892,23 +5875,22 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 		totalOut += uint64(txOut.Value)
 	}
 
-	if *tx.TxType == walletjson.LTTTVote {
+	switch *tx.TxType {
+	case walletjson.LTTTVote:
 		return &asset.WalletTransaction{
 			Type:   asset.TicketVote,
 			ID:     tx.TxID,
 			Amount: totalOut,
 			Fees:   fee,
 		}, nil
-	}
-	if *tx.TxType == walletjson.LTTTRevocation {
+	case walletjson.LTTTRevocation:
 		return &asset.WalletTransaction{
 			Type:   asset.TicketRevocation,
 			ID:     tx.TxID,
 			Amount: totalOut,
 			Fees:   fee,
 		}, nil
-	}
-	if *tx.TxType == walletjson.LTTTTicket {
+	case walletjson.LTTTTicket:
 		return &asset.WalletTransaction{
 			Type:   asset.TicketPurchase,
 			ID:     tx.TxID,
@@ -6126,8 +6108,12 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 	}
 
 	if tx.Send {
+		txType := asset.Send
+		if allOutputsPayUs(msgTx) {
+			txType = asset.SelfSend
+		}
 		return &asset.WalletTransaction{
-			Type:      asset.Send,
+			Type:      txType,
 			ID:        tx.TxID,
 			Amount:    out,
 			Fees:      fee,
@@ -6539,13 +6525,10 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 				// Mempool tx seen.
 				dcr.emitBalance()
 
-				go func() {
-					dcr.tipMtx.RLock()
-					tip := dcr.currentTip
-					dcr.tipMtx.RUnlock()
-					dcr.syncTxHistory(ctx, uint64(tip.height))
-				}()
-
+				dcr.tipMtx.RLock()
+				tip := dcr.currentTip
+				dcr.tipMtx.RUnlock()
+				dcr.syncTxHistory(ctx, uint64(tip.height))
 				continue
 			}
 			if queuedBlock != nil && walletTip.height >= queuedBlock.height {
@@ -6555,7 +6538,6 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 				queuedBlock = nil
 			}
 			dcr.handleTipChange(ctx, walletTip.hash, walletTip.height, nil)
-
 		case <-ctx.Done():
 			return
 		}
@@ -6588,7 +6570,12 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 		dcr.cycleMixer()
 	}
 
-	go dcr.syncTxHistory(ctx, uint64(newTipHeight))
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dcr.syncTxHistory(ctx, uint64(newTipHeight))
+	}()
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.
@@ -6643,7 +6630,13 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 
 	// Run the redemption search from the startHeight determined above up
 	// till the current tip height.
-	go dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
+	}()
+
+	wg.Wait()
 }
 
 func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {

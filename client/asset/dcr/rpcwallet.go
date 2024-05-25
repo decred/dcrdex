@@ -486,14 +486,6 @@ func (w *rpcWallet) SpvMode() bool {
 	return w.spvMode
 }
 
-// NotifyOnTipChange registers a callback function that should be invoked when
-// the wallet sees new mainchain blocks. The return value indicates if this
-// notification can be provided.
-// Part of the Wallet interface.
-func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, _ TipChangeCallback) bool {
-	return false
-}
-
 // AddressInfo returns information for the provided address. It is an error
 // if the address is not owned by the wallet.
 // Part of the Wallet interface.

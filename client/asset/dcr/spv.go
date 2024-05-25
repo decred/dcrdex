@@ -526,11 +526,6 @@ func (w *spvWallet) SpvMode() bool {
 	return true
 }
 
-// NotifyOnTipChange is not used, in favor of the tipNotifier pattern from btc.
-func (w *spvWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool {
-	return false
-}
-
 // AddressInfo returns information for the provided address. It is an error if
 // the address is not owned by the wallet.
 func (w *spvWallet) AddressInfo(ctx context.Context, addrStr string) (*AddressInfo, error) {
