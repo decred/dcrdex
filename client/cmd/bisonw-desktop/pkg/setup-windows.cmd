@@ -82,7 +82,7 @@ if exist dcrdex rd /s /q dcrdex
 @echo Cloning %repoUrl%@%repoBranch%...
 "c:\Program Files\Git\bin\git.exe" clone -b %repoBranch% %repoUrl%
 
-cd dcrdex\client\cmd\dexc-desktop
+cd dcrdex\client\cmd\bisonw-desktop
 
 :: Install toolchain and SDKs
 powershell  -ExecutionPolicy Bypass -File pkg\setup-windows-stage2.ps1
