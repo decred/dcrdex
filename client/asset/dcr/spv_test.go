@@ -12,11 +12,11 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	walleterrors "decred.org/dcrwallet/v3/errors"
-	"decred.org/dcrwallet/v3/p2p"
-	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v3/wallet"
-	"decred.org/dcrwallet/v3/wallet/udb"
+	walleterrors "decred.org/dcrwallet/v4/errors"
+	"decred.org/dcrwallet/v4/p2p"
+	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v4/wallet"
+	"decred.org/dcrwallet/v4/wallet/udb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
@@ -123,7 +123,7 @@ func (w *tDcrWallet) ListTransactionDetails(ctx context.Context, txHash *chainha
 	return w.listTxs, w.listTxsErr
 }
 
-func (w *tDcrWallet) MixAccount(ctx context.Context, dialTLS wallet.DialFunc, csppserver string, changeAccount, mixAccount, mixBranch uint32) error {
+func (w *tDcrWallet) MixAccount(ctx context.Context, changeAccount, mixAccount, mixBranch uint32) error {
 	return fmt.Errorf("not stubbed")
 }
 
@@ -206,8 +206,8 @@ func (w *tDcrWallet) TxDetails(ctx context.Context, txHash *chainhash.Hash) (*ud
 	return w.txDetails, w.txDetailsErr
 }
 
-func (w *tDcrWallet) Synced() bool {
-	return true
+func (w *tDcrWallet) Synced(context.Context) (bool, int32) {
+	return true, 0
 }
 
 func (w *tDcrWallet) GetRemotePeers() map[string]*p2p.RemotePeer {
@@ -240,7 +240,7 @@ func (w *tDcrWallet) GetTickets(ctx context.Context, f func([]*wallet.TicketSumm
 	return nil
 }
 
-func (w *tDcrWallet) AgendaChoices(ctx context.Context, ticketHash *chainhash.Hash) (choices wallet.AgendaChoices, voteBits uint16, err error) {
+func (w *tDcrWallet) AgendaChoices(ctx context.Context, ticketHash *chainhash.Hash) (choices map[string]string, voteBits uint16, err error) {
 	return nil, 0, nil
 }
 
@@ -260,7 +260,7 @@ func (w *tDcrWallet) VSPHostForTicket(ctx context.Context, ticketHash *chainhash
 	return "", nil
 }
 
-func (w *tDcrWallet) SetAgendaChoices(ctx context.Context, ticketHash *chainhash.Hash, choices ...wallet.AgendaChoice) (voteBits uint16, err error) {
+func (w *tDcrWallet) SetAgendaChoices(ctx context.Context, ticketHash *chainhash.Hash, choices map[string]string) (voteBits uint16, err error) {
 	return 0, nil
 }
 
@@ -375,6 +375,14 @@ func (w *tDcrWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight 
 }
 
 func (w *tDcrWallet) AddressAtIdx(ctx context.Context, account, branch, childIdx uint32) (stdaddr.Address, error) {
+	return nil, nil
+}
+func (w *tDcrWallet) CreateVspPayment(ctx context.Context, tx *wire.MsgTx, fee dcrutil.Amount,
+	feeAddr stdaddr.Address, feeAcct uint32, changeAcct uint32) error {
+	return nil
+}
+
+func (w *tDcrWallet) NewVSPTicket(ctx context.Context, hash *chainhash.Hash) (*wallet.VSPTicket, error) {
 	return nil, nil
 }
 

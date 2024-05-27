@@ -33,9 +33,9 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v3/wallet"
-	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
+	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v4/wallet"
+	_ "decred.org/dcrwallet/v4/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -50,7 +50,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
-	vspdjson "github.com/decred/vspd/types"
+	vspdjson "github.com/decred/vspd/types/v2"
 )
 
 const (

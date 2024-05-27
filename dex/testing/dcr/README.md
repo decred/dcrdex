@@ -9,7 +9,7 @@ The harness depends on [dcrd](https://github.com/decred/dcrd), [dcrwallet](https
 
 ## Using
 
-You must have `dcrd` and `dcrctl` in `PATH` to use the harness.
+You must have `dcrd` `dcrwallet` `vspd` and `dcrctl` in `PATH` to use the harness.
 
 The harness script will create two connected simnet nodes and wallets, and
 then mine some blocks and send some regular transactions. The result is a set of
