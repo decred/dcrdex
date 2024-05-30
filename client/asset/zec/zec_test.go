@@ -1115,11 +1115,18 @@ func TestSend(t *testing.T) {
 		Result: &opResult{TxID: tTxID},
 	}}
 
+	dTx := dummyTx()
+	txB, _ := dTx.Bytes()
+	tx := &btc.GetTransactionResult{
+		Bytes: txB,
+	}
+
 	// Unified address.
 	cl.queueResponse(methodZValidateAddress, &zValidateAddressResult{IsValid: true, AddressType: unifiedAddressType})
 	cl.queueResponse(methodZListUnifiedReceivers, &unifiedReceivers{Transparent: tAddr})
 	cl.queueResponse(methodZSendMany, "operationid123")
 	cl.queueResponse(methodZGetOperationResult, successOp)
+	cl.queueResponse("gettransaction", tx)
 	if _, err := w.Send(tUnifiedAddr, sendAmt, 0); err != nil {
 		t.Fatalf("Send error: %v", err)
 	}
@@ -1128,6 +1135,7 @@ func TestSend(t *testing.T) {
 	cl.queueResponse(methodZValidateAddress, &zValidateAddressResult{IsValid: true, AddressType: transparentAddressType})
 	cl.queueResponse(methodZSendMany, "operationid123")
 	cl.queueResponse(methodZGetOperationResult, successOp)
+	cl.queueResponse("gettransaction", tx)
 	if _, err := w.Send(tAddr, sendAmt, 0); err != nil {
 		t.Fatalf("Send error: %v", err)
 	}
