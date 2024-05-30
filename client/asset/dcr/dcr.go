@@ -5859,8 +5859,6 @@ func (dcr *ExchangeWallet) walletOwnsAddress(addr stdaddr.Address) (bool, error)
 // idUnknownTx identifies the type and details of a transaction either made
 // or recieved by the wallet.
 func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactionsResult) (*asset.WalletTransaction, error) {
-	fee := rpcTxFee(tx)
-
 	txHash, err := chainhash.NewHashFromStr(tx.TxID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding tx hash %s: %v", tx.TxID, err)
@@ -5870,9 +5868,19 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 		return nil, err
 	}
 
+	var totalIn uint64
+	for _, txIn := range msgTx.TxIn {
+		totalIn += uint64(txIn.ValueIn)
+	}
+
 	var totalOut uint64
 	for _, txOut := range msgTx.TxOut {
 		totalOut += uint64(txOut.Value)
+	}
+
+	fee := rpcTxFee(tx)
+	if fee == 0 && totalIn > totalOut {
+		fee = totalIn - totalOut
 	}
 
 	switch *tx.TxType {
