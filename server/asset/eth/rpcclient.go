@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -47,7 +48,7 @@ type ethConn struct {
 	endpoint string
 	priority uint16
 	// swapContract is the current ETH swapContract.
-	swapContract swapContract
+	swapContracts map[uint32]swapContract
 	// tokens are tokeners for loaded tokens. tokens is not protected by a
 	// mutex, as it is expected that the caller will connect and place calls to
 	// loadToken sequentially in the same thread during initialization.
@@ -243,14 +244,25 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 		ec.txPoolSupported = true
 	}
 
-	es, err := swapv0.NewETHSwap(c.ethContractAddr, ec.Client)
+	es0, err := swapv0.NewETHSwap(c.ethContractAddr, ec.Client)
 	if err != nil {
-		return nil, fmt.Errorf("unable to initialize %v contract for %q: %v", c.baseChainName, endpoint, err)
+		return nil, err
 	}
-	ec.swapContract = &swapSourceV0{es}
+	sc0 := &swapSourceV0{es0}
+
+	es1, err := swapv1.NewETHSwap(c.ethContractAddr, ec.Client)
+	if err != nil {
+		return nil, err
+	}
+	sc1 := &swapSourceV1{es1}
+
+	ec.swapContracts = map[uint32]swapContract{
+		0: sc0,
+		1: sc1,
+	}
 
 	for assetID, vToken := range c.tokensLoaded {
-		tkn, err := newTokener(ctx, vToken, c.net, ec.Client)
+		tkn, err := newTokener(ctx, assetID, vToken, c.net, ec.Client)
 		if err != nil {
 			return nil, fmt.Errorf("error constructing ERC20Swap: %w", err)
 		}
@@ -429,7 +441,7 @@ func (c *rpcclient) withClient(f func(ec *ethConn) error, haltOnNotFound ...bool
 			return nil
 		}
 		if len(haltOnNotFound) > 0 && haltOnNotFound[0] && (errors.Is(err, ethereum.NotFound) || strings.Contains(err.Error(), "not found")) {
-			return err
+			return ethereum.NotFound
 		}
 
 		c.log.Errorf("Unpropagated error from %q: %v", ec.endpoint, err)
@@ -491,7 +503,7 @@ func (c *rpcclient) loadToken(ctx context.Context, assetID uint32, vToken *Versi
 	c.tokensLoaded[assetID] = vToken
 
 	for _, cl := range c.clientsCopy() {
-		tkn, err := newTokener(ctx, vToken, c.net, cl.Client)
+		tkn, err := newTokener(ctx, assetID, vToken, c.net, cl.Client)
 		if err != nil {
 			return fmt.Errorf("error constructing ERC20Swap: %w", err)
 		}
@@ -508,7 +520,21 @@ func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {
 		}
 		return f(tkn)
 	})
+}
 
+func (c *rpcclient) withSwapContract(assetID uint32, f func(swapContract) error) error {
+	if assetID == c.baseChainID {
+		return c.withClient(func(ec *ethConn) error {
+			sc, found := ec.swapContracts[ProtocolVersion(assetID).ContractVersion()]
+			if !found {
+				return fmt.Errorf("no rpc swap contract loaded for asset %d", assetID)
+			}
+			return f(sc)
+		})
+	}
+	return c.withTokener(assetID, func(tkn *tokener) error {
+		return f(tkn)
+	})
 }
 
 // bestHeader gets the best header at the time of calling.
@@ -547,16 +573,23 @@ func (c *rpcclient) blockNumber(ctx context.Context) (bn uint64, err error) {
 	})
 }
 
-// swap gets a swap keyed by secretHash in the contract.
-func (c *rpcclient) swap(ctx context.Context, assetID uint32, secretHash [32]byte) (state *dexeth.SwapState, err error) {
-	if assetID == c.baseChainID {
-		return state, c.withClient(func(ec *ethConn) error {
-			state, err = ec.swapContract.Swap(ctx, secretHash)
-			return err
-		})
-	}
-	return state, c.withTokener(assetID, func(tkn *tokener) error {
-		state, err = tkn.Swap(ctx, secretHash)
+func (c *rpcclient) status(ctx context.Context, assetID uint32, locator []byte) (status *dexeth.SwapStatus, err error) {
+	return status, c.withSwapContract(assetID, func(sc swapContract) error {
+		status, err = sc.status(ctx, locator)
+		return err
+	})
+}
+
+func (c *rpcclient) vector(ctx context.Context, assetID uint32, locator []byte) (vec *dexeth.SwapVector, err error) {
+	return vec, c.withSwapContract(assetID, func(sc swapContract) error {
+		vec, err = sc.vector(ctx, locator)
+		return err
+	})
+}
+
+func (c *rpcclient) statusAndVector(ctx context.Context, assetID uint32, locator []byte) (status *dexeth.SwapStatus, vec *dexeth.SwapVector, err error) {
+	return status, vec, c.withSwapContract(assetID, func(sc swapContract) error {
+		status, vec, err = sc.statusAndVector(ctx, locator)
 		return err
 	})
 }
@@ -568,6 +601,17 @@ func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *type
 		tx, isMempool, err = ec.TransactionByHash(ctx, hash)
 		return err
 	}, true) // stop on first provider with "not found", because this should be an error if tx does not exist
+}
+
+func (c *rpcclient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, err error) {
+	return r, c.withClient(func(ec *ethConn) error {
+		r, err = ec.TransactionReceipt(ctx, txHash)
+		return err
+	})
+}
+
+func isNotFoundError(err error) bool {
+	return strings.Contains(err.Error(), "not found")
 }
 
 // dumbBalance gets the account balance, ignoring the effects of unmined
