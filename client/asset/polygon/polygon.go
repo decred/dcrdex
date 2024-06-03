@@ -74,7 +74,7 @@ var (
 	WalletInfo = asset.WalletInfo{
 		Name:              "Polygon",
 		Version:           0,
-		SupportedVersions: []uint32{0},
+		SupportedVersions: []uint32{0, 1},
 		UnitInfo:          dexpolygon.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			{

@@ -123,8 +123,6 @@ func TestNewRedeemCoin(t *testing.T) {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 
-		fmt.Println("--", rc.gasFeeCap == nil, rc.gasTipCap == nil)
-
 		if test.txErr == nil && (!bytes.Equal(rc.locator, test.locator) ||
 			rc.secret != secretB ||
 			rc.value != 0 ||
