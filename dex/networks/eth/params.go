@@ -77,8 +77,8 @@ var (
 			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 		},
 		1: {
-			dex.Mainnet: common.Address{},
-			dex.Testnet: common.Address{},
+			dex.Mainnet: common.HexToAddress("0xa958d5B8a3a29E3f5f41742Fbb939A0dd93EB418"), // tx 0x4adf0314237c454acee1f8d33e97f84126af612245cad0794471693f0906610e
+			dex.Testnet: common.HexToAddress("0x9CDe3c347021F0AA63E2780dAD867B5949c5E083"), // tx 0x90f18e70121598a48fc49a5d5b0328358eb34441e2c5dee439dda2dfc7bf3dd8
 			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 		},
 	}

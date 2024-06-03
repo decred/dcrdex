@@ -300,16 +300,7 @@ var _ asset.AccountBalancer = (*ETHBackend)(nil)
 
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
-func unconnectedETH(bipID uint32, vTokens map[uint32]*VersionedToken, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
-	// TODO: At some point multiple contracts will need to be used, at
-	// least for transitory periods when updating the contract, and
-	// possibly a random contract setup, and so this section will need to
-	// change to support multiple contracts.
-	contractVer := ProtocolVersion(bipID).ContractVersion()
-	contractAddr, exists := dexeth.ContractAddresses[contractVer][net]
-	if !exists || contractAddr == (common.Address{}) {
-		return nil, fmt.Errorf("no eth contract for version %d, net %s", contractVer, net)
-	}
+func unconnectedETH(bipID, contractVer uint32, contractAddr common.Address, vTokens map[uint32]*VersionedToken, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 	return &ETHBackend{&AssetBackend{
 		baseBackend: &baseBackend{
 			net:             net,
@@ -419,7 +410,7 @@ func NewEVMBackend(
 		return nil, fmt.Errorf("no contract address for %s version %d on %s", assetName, contractVer, net)
 	}
 
-	eth, err := unconnectedETH(baseChainID, vTokens, log, net)
+	eth, err := unconnectedETH(baseChainID, contractVer, contractAddr, vTokens, log, net)
 	if err != nil {
 		return nil, err
 	}

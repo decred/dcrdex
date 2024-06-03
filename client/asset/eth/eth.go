@@ -46,10 +46,6 @@ import (
 	"github.com/tyler-smith/go-bip39"
 )
 
-func init() {
-	dexeth.MaybeReadSimnetAddrs()
-}
-
 func registerToken(tokenID uint32, desc string) {
 	token, found := dexeth.Tokens[tokenID]
 	if !found {
@@ -67,6 +63,7 @@ func registerToken(tokenID uint32, desc string) {
 }
 
 func init() {
+	dexeth.MaybeReadSimnetAddrs()
 	asset.Register(BipID, &Driver{})
 	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.")
 	registerToken(usdtTokenID, "The USDT Ethereum ERC20 token.")
@@ -882,7 +879,8 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	for ver, constructor := range contractorConstructors {
 		contractAddr, exists := w.versionedContracts[ver]
 		if !exists || contractAddr == (common.Address{}) {
-			return nil, fmt.Errorf("no contract address for version %d, net %s", ver, w.net)
+			w.log.Debugf("no eth swap contract address for version %d, net %s", ver, w.net)
+			continue
 		}
 		c, err := constructor(w.net, contractAddr, w.addr, w.node.contractBackend())
 		if err != nil {
@@ -5629,9 +5627,26 @@ func (getGas) ReadCredentials(chain, credentialsPath string, net dex.Network) (a
 	return
 }
 
-func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, contractVer uint32, maxSwaps int,
-	walletDir string, providers []string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
-	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
+func getGetGasClientWithEstimatesAndBalances(
+	ctx context.Context,
+	net dex.Network,
+	contractVer uint32,
+	maxSwaps int,
+	walletDir string,
+	providers []string,
+	seed []byte,
+	wParams *GetGasWalletParams,
+	log dex.Logger,
+) (
+	cl *multiRPCClient,
+	c contractor,
+	ethReq,
+	swapReq,
+	feeRate uint64,
+	ethBal,
+	tokenBal *big.Int,
+	err error,
+) {
 
 	cl, c, err = quickNode(ctx, walletDir, contractVer, seed, providers, wParams, net, log)
 	if err != nil {
@@ -5882,6 +5897,7 @@ func (getGas) returnFunds(
 	}
 
 	remainder := ethBal - fees
+
 	txOpts, err := cl.txOpts(ctx, remainder, defaultSendGasLimit, maxFeeRate, tipRate, nil)
 	if err != nil {
 		return fmt.Errorf("error generating tx opts: %w", err)
@@ -5905,6 +5921,10 @@ func (getGas) returnFunds(
 // indicating the amount of funding needed to run.
 func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int,
 	credentialsPath string, wParams *GetGasWalletParams, log dex.Logger) error {
+
+	if *wParams.Gas == (dexeth.Gases{}) {
+		return fmt.Errorf("empty gas table. put some estimates in VersionedGases or Tokens for this contract")
+	}
 
 	symbol := dex.BipIDSymbol(assetID)
 	log.Infof("Getting gas estimates for up to %d swaps of asset %s, contract version %d on %s", maxSwaps, symbol, contractVer, symbol)
@@ -6047,6 +6067,8 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		return fmt.Errorf("error getting network fees: %v", err)
 	}
 
+	maxFeeRate := new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
+
 	defer func() {
 		if len(stats.swaps) == 0 {
 			return
@@ -6087,10 +6109,15 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		fmt.Printf("    %+v \n", stats.transfers)
 	}()
 
+	logTx := func(tag string, n int, tx *types.Transaction) {
+		log.Infof("%s %d tx, hash = %s, nonce = %d, maxFeeRate = %s, tip cap = %s",
+			tag, n, tx.Hash(), tx.Nonce(), tx.GasFeeCap(), tx.GasTipCap())
+	}
+
 	// Estimate approve for tokens.
 	if isToken {
 		sendApprove := func(cl ethFetcher, c tokenContractor) error {
-			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, baseRate, tipRate, nil)
+			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, maxFeeRate, tipRate, nil)
 			if err != nil {
 				return fmt.Errorf("error constructing signed tx opts for approve: %w", err)
 			}
@@ -6098,6 +6125,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 			if err != nil {
 				return fmt.Errorf("error estimating approve gas: %w", err)
 			}
+			logTx("Approve", 1, tx)
 			if err = waitForConfirmation(ctx, cl, tx.Hash()); err != nil {
 				return fmt.Errorf("error waiting for approve transaction: %w", err)
 			}
@@ -6124,7 +6152,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 			return fmt.Errorf("error sending approve transaction for the initiator: %w", err)
 		}
 
-		txOpts, err := cl.txOpts(ctx, 0, g.Transfer*2, baseRate, tipRate, nil)
+		txOpts, err := cl.txOpts(ctx, 0, g.Transfer*2, maxFeeRate, tipRate, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for transfer: %w", err)
 		}
@@ -6137,6 +6165,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("transfer error: %w", err)
 		}
+		logTx("Transfer", 1, transferTx)
 		if err = waitForConfirmation(ctx, cl, transferTx.Hash()); err != nil {
 			return fmt.Errorf("error waiting for transfer tx: %w", err)
 		}
@@ -6176,7 +6205,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		}
 
 		// Send the inits
-		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(n)*2, baseRate, tipRate, nil)
+		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(n)*2, maxFeeRate, tipRate, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for %d swaps: %v", n, err)
 		}
@@ -6185,6 +6214,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("initiate error for %d swaps: %v", n, err)
 		}
+		logTx("Initiate", n, tx)
 		if err = waitForConfirmation(ctx, cl, tx.Hash()); err != nil {
 			return fmt.Errorf("error waiting for init tx to be mined: %w", err)
 		}
@@ -6219,7 +6249,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 			})
 		}
 
-		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, baseRate, tipRate, nil)
+		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, maxFeeRate, tipRate, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for %d redeems: %v", n, err)
 		}
@@ -6228,6 +6258,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("redeem error for %d swaps: %v", n, err)
 		}
+		logTx("Redeem", n, tx)
 		if err = waitForConfirmation(ctx, cl, tx.Hash()); err != nil {
 			return fmt.Errorf("error waiting for redeem tx to be mined: %w", err)
 		}

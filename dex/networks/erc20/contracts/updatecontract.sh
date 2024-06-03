@@ -36,16 +36,6 @@ fi
 mkdir temp
 
 solc --abi --bin --bin-runtime --overwrite --optimize ${SOLIDITY_FILE} -o ./temp/
-BYTECODE=$(<./temp/${CONTRACT_NAME}.bin-runtime)
-
-cat > "./${PKG_NAME}/BinRuntimeV${VERSION}.go" <<EOF
-// Code generated - DO NOT EDIT.
-// This file is a generated binding and any manual changes will be lost.
-
-package ${PKG_NAME}
-
-const ${CONTRACT_NAME}RuntimeBin = "${BYTECODE}"
-EOF
 
 CONTRACT_FILE=./${PKG_NAME}/contract.go 
 abigen --abi ./temp/${CONTRACT_NAME}.abi --bin ./temp/${CONTRACT_NAME}.bin \
@@ -56,15 +46,8 @@ BYTECODE=$(<./temp/${CONTRACT_NAME}.bin)
 solc --bin --optimize ${TEST_TOKEN} -o ./temp
 TEST_TOKEN_BYTECODE=$(<./temp/TestToken.bin)
 
-for HARNESS_PATH in "$(realpath ../../../testing/eth/harness.sh)" "$(realpath ../../../testing/polygon/harness.sh)"; do
-  sed -i.tmp "s/ERC20_SWAP_V${VERSION}=.*/ERC20_SWAP_V${VERSION}=\"${BYTECODE}\"/" "${HARNESS_PATH}"
-  # mac needs a temp file specified above.
-  rm "${HARNESS_PATH}.tmp"
-
-  sed -i.tmp "s/TEST_TOKEN=.*/TEST_TOKEN=\"${TEST_TOKEN_BYTECODE}\"/" "${HARNESS_PATH}"
-  # mac needs a temp file specified above.
-  rm "${HARNESS_PATH}.tmp"
-done
+echo "${BYTECODE}" | xxd -r -p > "v${VERSION}/swap_contract.bin"
+echo "${TEST_TOKEN_BYTECODE}" | xxd -r -p > "v${VERSION}/token_contract.bin"
 
 rm -fr temp
 

@@ -334,7 +334,7 @@ func TestDecodeCoinID(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	backend, err := unconnectedETH(BipID, registeredTokens, tLogger, dex.Simnet)
+	backend, err := unconnectedETH(BipID, defaultProtocolVersion.ContractVersion(), common.Address{}, registeredTokens, tLogger, dex.Simnet)
 	if err != nil {
 		t.Fatalf("unconnectedETH error: %v", err)
 	}

@@ -127,8 +127,6 @@ chmod +x "${DCRDEX_DATA_DIR}/quit"
 cat > "${DCRDEX_DATA_DIR}/evm-protocol-overrides.json" <<EOF
 {
     "usdt.eth": 0,
-    "polygon": 0,
-    "usdc.polygon": 0,
     "usdt.polygon": 0,
     "weth.polygon": 0,
     "wbtc.polygon": 0
