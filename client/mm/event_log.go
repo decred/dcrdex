@@ -95,8 +95,8 @@ type MarketMakingRunOverview struct {
 	Cfgs            []*CfgUpdate      `json:"cfgs"`
 	InitialBalances map[uint32]uint64 `json:"initialBalances"`
 	FinalBalances   map[uint32]uint64 `json:"finalBalances"`
-	ProfitLoss      float64           `json:"profitLoss"`
-	ProfitRatio     float64           `json:"profitRatio"`
+	ProfitLoss      *ProfitLoss       `json:"profitLoss"`
+	FinalState      *BalanceState     `json:"finalState"`
 }
 
 // eventLogDB is the interface for the event log database.
@@ -490,18 +490,16 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 
 		finalBals := make(map[uint32]uint64)
 		for assetID, bal := range finalState.Balances {
-			finalBals[assetID] = bal.Available + bal.Pending + bal.Locked
+			finalBals[assetID] = bal.Available + bal.Pending + bal.Locked + bal.Reserved
 		}
-
-		profitLoss, profitRatio := calcRunProfitLoss(initialBals, finalBals, finalState.InventoryMods, finalState.FiatRates)
 
 		overview = &MarketMakingRunOverview{
 			EndTime:         endTime,
 			Cfgs:            cfgs,
 			InitialBalances: initialBals,
 			FinalBalances:   finalBals,
-			ProfitLoss:      profitLoss,
-			ProfitRatio:     profitRatio,
+			ProfitLoss:      newProfitLoss(initialBals, finalBals, finalState.InventoryMods, finalState.FiatRates),
+			FinalState:      finalState,
 		}
 
 		return nil

@@ -1700,8 +1700,14 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting approval status: %v", err)
 	}
-	if approvalStatus != asset.Approved {
+	switch approvalStatus {
+	case asset.NotApproved:
 		return nil, nil, 0, asset.ErrUnapprovedToken
+	case asset.Pending:
+		return nil, nil, 0, asset.ErrApprovalPending
+	case asset.Approved:
+	default:
+		return nil, nil, 0, fmt.Errorf("unknown approval status %d", approvalStatus)
 	}
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), ord.Version,
@@ -1785,8 +1791,14 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting approval status: %v", err)
 	}
-	if approvalStatus != asset.Approved {
+	switch approvalStatus {
+	case asset.NotApproved:
 		return nil, nil, 0, asset.ErrUnapprovedToken
+	case asset.Pending:
+		return nil, nil, 0, asset.ErrApprovalPending
+	case asset.Approved:
+	default:
+		return nil, nil, 0, fmt.Errorf("unknown approval status %d", approvalStatus)
 	}
 
 	g, err := w.initGasEstimate(1, ord.Version,
@@ -2590,7 +2602,7 @@ func (w *TokenWallet) ApproveToken(assetVer uint32, onConfirm func()) (string, e
 		return "", fmt.Errorf("token is already approved")
 	}
 	if approvalStatus == asset.Pending {
-		return "", fmt.Errorf("approval is already pending")
+		return "", asset.ErrApprovalPending
 	}
 
 	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(w.ctx)
@@ -2640,7 +2652,7 @@ func (w *TokenWallet) UnapproveToken(assetVer uint32, onConfirm func()) (string,
 		return "", fmt.Errorf("token is not approved")
 	}
 	if approvalStatus == asset.Pending {
-		return "", fmt.Errorf("approval is pending")
+		return "", asset.ErrApprovalPending
 	}
 
 	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(w.ctx)
@@ -3748,7 +3760,7 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 	eth.currentTip = bestHdr
 	eth.tipMtx.Unlock()
 
-	eth.log.Debugf("tip change: %s (%s) => %s (%s)", prevTip.Number,
+	eth.log.Tracef("tip change: %s (%s) => %s (%s)", prevTip.Number,
 		currentTipHash, bestHdr.Number, bestHash)
 
 	eth.checkPendingTxs()
@@ -4111,7 +4123,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 				continue
 			}
 			if outEVM.Cmp(confirmed) > 0 {
-				return nil, fmt.Errorf("balance undeflow detected. pending out (%s) > balance (%s)", outEVM, confirmed)
+				return nil, fmt.Errorf("balance underflow detected. pending out (%s) > balance (%s)", outEVM, confirmed)
 			}
 
 			return &Balance{

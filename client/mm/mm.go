@@ -102,7 +102,6 @@ type bot interface {
 	updateInventory(balanceDiffs *BotInventoryDiffs)
 	withPause(func() error) error
 	timeStart() int64
-	sendStatsUpdate()
 	botCfg() *BotConfig
 	Book() (buys, sells []*core.MiniOrder, _ error)
 }
@@ -118,8 +117,8 @@ func (rb *runningBot) assets() map[uint32]interface{} {
 	cfg := rb.botCfg()
 	assets[cfg.BaseID] = struct{}{}
 	assets[cfg.QuoteID] = struct{}{}
-	assets[feeAsset(cfg.BaseID)] = struct{}{}
-	assets[feeAsset(cfg.QuoteID)] = struct{}{}
+	assets[feeAssetID(cfg.BaseID)] = struct{}{}
+	assets[feeAssetID(cfg.QuoteID)] = struct{}{}
 
 	return assets
 }
@@ -731,7 +730,6 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 	m.runningBotsMtx.Lock()
 	m.runningBots[*mwh] = rb
 	m.runningBotsMtx.Unlock()
-	bot.sendStatsUpdate()
 
 	return nil
 }
@@ -1086,8 +1084,8 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 
 	dexAssets[mkt.BaseID] = struct{}{}
 	dexAssets[mkt.QuoteID] = struct{}{}
-	dexAssets[feeAsset(mkt.BaseID)] = struct{}{}
-	dexAssets[feeAsset(mkt.QuoteID)] = struct{}{}
+	dexAssets[feeAssetID(mkt.BaseID)] = struct{}{}
+	dexAssets[feeAssetID(mkt.QuoteID)] = struct{}{}
 
 	if cexCfg != nil {
 		cexAssets[mkt.BaseID] = struct{}{}

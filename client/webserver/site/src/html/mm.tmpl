@@ -1,86 +1,87 @@
 {{define "mm"}}
 {{template "top" .}}
 <div id="main" data-handler="mm" class="flex-grow-1 flex-stretch-column stylish-overflow">
-  <div id="botsConfigured">
+  <div>
 
     {{- /* BOT PANELS */ -}}
     <div class="flex-center">
       <div id="box" class="col-12 d-flex align-items-start flex-wrap">
 
         {{- /* MARKET MAKING OVERVIEW */ -}}
-        <div id="overview" class="col-12 flex-stretch-column px-2 mt-2 mb-3">
-          <div class="d-flex justify-content-between">
-            <span class="fs26">Market Making</span>
-            <button id="newBot" class="feature lh1">
-              <span class="ico-robot fs20 me-1"></span>
-              <span>Create a New Bot</span>
-            </button>
-          </div>
-          <table class="row-border mt-2 px-0">
-            <tbody id="botRows">
-              <tr id="botRowTmpl" class="hoverbg pointer">
-                <td>
-                  <div class="d-flex justify-content-start align-items-center">
-                    <img class="mini-icon me-1" data-base-logo>
-                    <img class="mini-icon me-1" data-quote-logo>
-                    <span class="fs20" data-base-ticker></span>
-                    <span>-</span>
-                    <span class="fs20" data-quote-ticker></span>
-                  </div>
-                </td>
-                <td data-tmpl="allocateBttnBox" class="d-flex align-items-center justify-content-end px-0">
-                  <button data-tmpl="allocateBttn" class="small demi">Allocate</button>
-                </td>
-                <td data-tmpl="profitLossBox">
-                  <div class="d-flex align-items-center justify-content-end">
-                    <span class="fs14 grey me-2 demi">P/L</span>
-                    <div class="d-flex align-items-end fs18">
-                      <span data-tmpl="profitLoss"></span>
-                      <span class="grey fs15 ms-1">USD</span>
+        <div id="overview" class="col-12">
+          <section class="flex-stretch-column py-3">
+            <div class="d-flex justify-content-between px-3 pb-2">
+              <span class="fs26">Market Making</span>
+              <button id="newBot" class="feature lh1">
+                <span class="ico-robot fs20 me-1"></span>
+                <span>Create a New Bot</span>
+              </button>
+            </div>
+            <table class="row-border mt-2">
+              <tbody id="botRows">
+                <tr id="botRowTmpl" class="hoverbg pointer">
+                  <td class="ps-3">
+                    <div class="d-flex justify-content-start align-items-center">
+                      <img class="mini-icon me-1" data-base-logo>
+                      <img class="mini-icon me-1" data-quote-logo>
+                      <span class="fs20" data-base-ticker></span>
+                      <span>-</span>
+                      <span class="fs20" data-quote-ticker></span>
                     </div>
-                    <div class="on-indicator on ms-2"></div>
-                  </div>
-                  
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                  </td>
+                  <td data-tmpl="allocateBttnBox" class="d-flex align-items-center justify-content-end pe-3">
+                    <button data-tmpl="allocateBttn" class="small demi">Allocate</button>
+                  </td>
+                  <td data-tmpl="profitLossBox" class="pe-3">
+                    <div class="d-flex align-items-center justify-content-end">
+                      <span class="fs14 grey me-2 demi">P/L</span>
+                      <div class="d-flex align-items-end fs18">
+                        <span data-tmpl="profitLoss"></span>
+                        <span class="grey fs15 ms-1">USD</span>
+                      </div>
+                      <div class="on-indicator on ms-2"></div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
 
-          {{- /* CEX OVERVIEW */ -}}
-          <div class="pt-2 mt-2 fs22">Exchanges</div>
-          <table class="row-border mt-2 px-0">
-            <tbody id="cexRows">
-              <tr id="exchangeRowTmpl">
-                <td>
-                  <div class="d-flex justify-content-start align-items-center">
-                    <img data-tmpl="logo" class="small-icon me-2">
-                    <span data-tmpl="name" class="fs20"></span>
-                  </div>
-                </td>
-                <td data-tmpl="unconfigured" class="pe-0">
-                  <div class="d-flex align-items-center justify-content-end">
-                    <button data-tmpl="configureBttn" class="flex-center">
-                      <span class="ico-settings fs18 me-1"></span>
-                      <span>Configure</span>
-                    </button>
-                  </div>
-                </td>
-                <td data-tmpl="configured">
-                  <div class="d-flex align-items-center justify-content-end">
-                    <div class="d-flex align-items-end fs18">
-                      <span class="grey">~</span>
-                      <span data-tmpl="usdBalance"></span>
-                      <span class="grey fs15 ms-1">USD</span>
+            {{- /* CEX OVERVIEW */ -}}
+            <div class="mt-2 px-3 fs22">Exchanges</div>
+            <table class="row-border mt-2">
+              <tbody id="cexRows">
+                <tr id="exchangeRowTmpl">
+                  <td class="ps-3">
+                    <div class="d-flex justify-content-start align-items-center">
+                      <img data-tmpl="logo" class="small-icon me-2">
+                      <span data-tmpl="name" class="fs20"></span>
                     </div>
-                  </div>
-                </td>
-                <td data-tmpl="connectErrBox" class="d-hide">
-                  <span data-tmpl="connectErr" class="errcolor"></span>
-                  <button data-tmpl="reconfigureBttn" class="ico-settings ms-2 d-hide"></button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                  </td>
+                  <td data-tmpl="unconfigured" class="pe-3">
+                    <div class="d-flex align-items-center justify-content-end">
+                      <button data-tmpl="configureBttn" class="flex-center">
+                        <span class="ico-settings fs18 me-1"></span>
+                        <span>Configure</span>
+                      </button>
+                    </div>
+                  </td>
+                  <td data-tmpl="configured" class="pe-3">
+                    <div class="d-flex align-items-center justify-content-end">
+                      <div class="d-flex align-items-end fs18">
+                        <span class="grey">~</span>
+                        <span data-tmpl="usdBalance"></span>
+                        <span class="grey fs15 ms-1">USD</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td data-tmpl="connectErrBox" class="d-hide pe-3">
+                    <span data-tmpl="connectErr" class="errcolor"></span>
+                    <button data-tmpl="reconfigureBttn" class="ico-settings ms-2 d-hide"></button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
         </div>
 
         {{- /* NO CONFIGURED BOTS */ -}}
@@ -391,7 +392,7 @@
                 </div>
 
                 {{- /* PLACEMENTS */ -}}
-                <div data-tmpl="placementDataBox" class="d-flex align-items-stretch border-top mt-2">
+                <div data-tmpl="placementsChartBox" class="d-flex align-items-stretch border-top mt-2">
                   <div class="flex-center flex-column px-3 py-2">
                     <div class="flex-center pb-1 pt-1 lh1">
                       <span data-tmpl="buyPlacementCount" class="demi text-buycolor fs18 me-1"></span>
@@ -444,7 +445,7 @@
                   </div>
                 </div>
 
-                <div data-tmpl="errMsg" class="py-2 px-3 mb-2 border-bottom flex-center errcolor d-hide"></div>
+                <div data-tmpl="errMsg" class="py-2 px-3 mb-2 border-bottom flex-center text-warning d-hide"></div>
                 
                 {{- /* PROPOSED ALLOCATIONS AND ADJUSTMENTS */ -}}
                 <div class="allocation-grid pt-2 lh1">

@@ -319,6 +319,13 @@ func MinimumLotSize(assetID uint32, maxFeeRate uint64) (minLotSize uint64, found
 	return m.MinLotSize(maxFeeRate), true
 }
 
+func FormatAtoms(assetID uint32, atoms uint64) string {
+	if ui, err := UnitInfo(assetID); err == nil {
+		return ui.FormatAtoms(atoms)
+	}
+	return "<unknown asset>"
+}
+
 type spvWithdrawFunc func(ctx context.Context, walletPW []byte, recipient, dataDir string, net dex.Network, log dex.Logger) ([]byte, error)
 
 var spvRecovererFuncs = make(map[uint32]spvWithdrawFunc)

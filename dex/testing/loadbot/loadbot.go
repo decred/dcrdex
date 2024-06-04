@@ -114,7 +114,7 @@ var (
 	parcelSize                                            uint64
 	rateStep                                              uint64
 	rateShift, rateIncrease                               int64
-	conversionFactors                                     = make(map[string]uint64)
+	bui, qui                                              dex.UnitInfo
 
 	ethInitFee                                                 = (dexeth.InitGas(1, 0) + dexeth.RefundGas(0)) * ethFeeRate
 	ethRedeemFee                                               = dexeth.RedeemGas(1, 0) * ethFeeRate
@@ -357,7 +357,7 @@ func run() error {
 	flag.BoolVar(&debug, "debug", false, "use debug logging")
 	flag.BoolVar(&trace, "trace", false, "use trace logging")
 	flag.IntVar(&m, "m", 0, "for compound and sidestacker, m is the number of makers to stack before placing takers")
-	flag.IntVar(&n, "n", 0, "for compound and sidestacker, n is the number of orders to place per epoch (default 3)")
+	flag.IntVar(&n, "n", 0, "for compound, sniper, and sidestacker, n is the number of orders to place per epoch (default 3)")
 	flag.Int64Var(&rateShift, "rateshift", 0, "for compound and sidestacker, rateShift is applied to every order and increases or decreases price by the chosen shift times the rate step, use to create a market trending in one direction (default 0)")
 	flag.BoolVar(&oscillate, "oscillate", false, "for compound and sidestacker, whether the price should move up and down inside a window, use to emulate a sideways market (default false)")
 	flag.BoolVar(&randomOsc, "randomosc", false, "for compound and sidestacker, oscillate more randomly")
@@ -402,16 +402,15 @@ func run() error {
 	if registerWithQuote {
 		regAsset = quoteID
 	}
-	ui, err := asset.UnitInfo(baseID)
+	var err error
+	bui, err = asset.UnitInfo(baseID)
 	if err != nil {
 		return fmt.Errorf("cannot get base %q unit info: %v", baseSymbol, err)
 	}
-	conversionFactors[baseSymbol] = ui.Conventional.ConversionFactor
-	ui, err = asset.UnitInfo(quoteID)
+	qui, err = asset.UnitInfo(quoteID)
 	if err != nil {
 		return fmt.Errorf("cannot get quote %q unit info: %v", quoteSymbol, err)
 	}
-	conversionFactors[quoteSymbol] = ui.Conventional.ConversionFactor
 
 	f, err := os.ReadFile(filepath.Join(dextestDir, "dcrdex", "markets.json"))
 	if err != nil {
@@ -455,7 +454,8 @@ func run() error {
 	rateIncrease = int64(rateStep) * rateShift
 
 	// Adjust to be comparable to the dcr_btc market.
-	defaultMidGap = defaultBtcPerDcr * float64(rateStep) / 100
+	defaultMidGapConv := getXCRate(baseSymbol) / getXCRate(quoteSymbol)
+	defaultMidGap = float64(calc.MessageRate(defaultMidGapConv, bui, qui)) / calc.RateEncodingFactor
 
 	loggerMaker, err = dex.NewLoggerMaker(os.Stdout, logLevel)
 	if err != nil {
@@ -474,13 +474,8 @@ func run() error {
 		return fmt.Errorf("failed to find %q market in harness config. Available markets: %s", market, strings.Join(markets, ", "))
 	}
 
-	shortSymbol := func(s string) string {
-		parts := strings.Split(s, ".")
-		return parts[0]
-	}
-
-	baseAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(shortSymbol(baseSymbol)))]
-	quoteAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(shortSymbol(quoteSymbol)))]
+	baseAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(baseSymbol))]
+	quoteAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(quoteSymbol))]
 	if baseAssetCfg == nil || quoteAssetCfg == nil {
 		return errors.New("asset configuration missing from markets.json")
 	}
@@ -680,6 +675,8 @@ func run() error {
 		runCompound(m, n)
 	case "whale":
 		runWhale()
+	case "sniper":
+		runSniper(n)
 	default:
 		log.Criticalf("program " + programName + " not known")
 	}
@@ -754,15 +751,13 @@ func getXCRate(symbol string) float64 {
 	return 1
 }
 
-func symmetricWalletConfig(numCoins int, midGap uint64) (
+func symmetricWalletConfig() (
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
 
-	bui, _ := asset.UnitInfo(baseID)
-	qui, _ := asset.UnitInfo(quoteID)
 	minBaseQty = lotSize * parcelSize * tradingTier * 5 / 4
 	minBaseConventional := float64(minBaseQty) / float64(bui.Conventional.ConversionFactor)
 	xcB, xcQ := getXCRate(baseSymbol), getXCRate(quoteSymbol)
-	minQuoteConventional := minBaseConventional * xcQ / xcB
+	minQuoteConventional := minBaseConventional * xcB / xcQ
 	minQuoteQty = uint64(math.Round(minQuoteConventional * float64(qui.Conventional.ConversionFactor)))
 
 	// Add registration fees.

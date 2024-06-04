@@ -386,30 +386,7 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 	return basisPrice - adj
 }
 
-func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradePlacement) {
-	basisPrice := m.calculator.basisPrice()
-	if basisPrice == 0 {
-		m.log.Errorf("No basis price available and no empty-market rate set")
-		return
-	}
-
-	var feeAdj uint64
-	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
-		var err error
-		feeGap, err := m.calculator.feeGapStats(basisPrice)
-		if err != nil {
-			m.log.Errorf("Could not calculate break-even spread: %v", err)
-			return
-		}
-		m.core.registerFeeGap(feeGap)
-		feeAdj = feeGap.FeeGap / 2
-	}
-
-	if m.log.Level() == dex.LevelTrace {
-		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
-			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
-	}
-
+func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, sellOrders []*multiTradePlacement) {
 	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
 		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
 		for i, p := range orderPlacements {
@@ -443,14 +420,34 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	}
 	defer m.rebalanceRunning.Store(false)
 	m.log.Tracef("rebalance: epoch %d", newEpoch)
+	basisPrice := m.calculator.basisPrice()
+	if basisPrice == 0 {
+		m.log.Errorf("No basis price available and no empty-market rate set")
+		return
+	}
 
-	buyOrders, sellOrders := m.ordersToPlace()
+	feeGap, err := m.calculator.feeGapStats(basisPrice)
+	if err != nil {
+		m.log.Errorf("Could not calculate fee-gap stats: %v", err)
+		return
+	}
+	m.core.registerFeeGap(feeGap)
+	var feeAdj uint64
+	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
+		feeAdj = feeGap.FeeGap / 2
+	}
+
+	if m.log.Level() == dex.LevelTrace {
+		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
+			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
+	}
+
+	buyOrders, sellOrders := m.ordersToPlace(basisPrice, feeAdj)
 	m.core.MultiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch, nil, nil)
 	m.core.MultiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch, nil, nil)
 }
 
 func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
-
 	book, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)

@@ -96,10 +96,8 @@ class MarketMakerBot {
   }
 
   // botStats returns the RunStats for a running bot with the specified parameters.
-  async botStats (baseID: number, quoteID: number, host: string, startTime: number) : Promise<RunStats | undefined> {
-    const allBotStatus = await this.status()
-    for (let i = 0; i < allBotStatus.bots.length; i++) {
-      const botStatus = allBotStatus.bots[i]
+  botStats (baseID: number, quoteID: number, host: string, startTime: number): RunStats | undefined {
+    for (const botStatus of Object.values(app().mmStatus.bots)) {
       if (!botStatus.runStats) continue
       const runStats = botStatus.runStats
       const cfg = botStatus.config
@@ -340,6 +338,18 @@ export class PlacementsChart extends Chart {
 
 export function hostedMarketID (host: string, baseID: number, quoteID: number) {
   return `${host}-${baseID}-${quoteID}` // same as MarketWithHost.String()
+}
+
+export function liveBotConfig (host: string, baseID: number, quoteID: number): BotConfig | undefined {
+  const s = liveBotStatus(host, baseID, quoteID)
+  if (s) return s.config
+}
+
+export function liveBotStatus (host: string, baseID: number, quoteID: number): MMBotStatus | undefined {
+  const statuses = (app().mmStatus.bots || []).filter((s: MMBotStatus) =>  {
+    return s.config.baseID === baseID && s.config.quoteID === quoteID && s.config.host === host
+  })
+  if (statuses.length) return statuses[0]
 }
 
 interface Lotter {
@@ -897,8 +907,8 @@ export class RunningMarketMakerDisplay {
     }
 
     Doc.show(page.stats)
-    setSignedValue(runStats.profitRatio, page.profit, page.profitSign)
-    setSignedValue(runStats.profitLoss, page.profitLoss, page.plSign)
+    setSignedValue(runStats.profitLoss.profitRatio, page.profit, page.profitSign)
+    setSignedValue(runStats.profitLoss.profit, page.profitLoss, page.plSign)
     this.startTime = runStats.startTime
 
     const summedBalance = (b: BotBalance) => {

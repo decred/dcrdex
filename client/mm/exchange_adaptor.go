@@ -269,6 +269,15 @@ func (m *market) fmtRate(msgRate uint64) string {
 func (m *market) fmtBase(atoms uint64) string {
 	return m.bui.FormatAtoms(atoms)
 }
+func (m *market) fmtQuote(atoms uint64) string {
+	return m.qui.FormatAtoms(atoms)
+}
+func (m *market) fmtQty(assetID uint32, atoms uint64) string {
+	if assetID == m.baseID {
+		return m.fmtBase(atoms)
+	}
+	return m.fmtQuote(atoms)
+}
 
 func (m *market) fmtBaseFees(atoms uint64) string {
 	return m.baseFeeUI.FormatAtoms(atoms)
@@ -276,6 +285,12 @@ func (m *market) fmtBaseFees(atoms uint64) string {
 
 func (m *market) fmtQuoteFees(atoms uint64) string {
 	return m.quoteFeeUI.FormatAtoms(atoms)
+}
+func (m *market) fmtFees(assetID uint32, atoms uint64) string {
+	if assetID == m.baseID {
+		return m.fmtBaseFees(atoms)
+	}
+	return m.fmtQuoteFees(atoms)
 }
 
 func (m *market) msgRate(convRate float64) uint64 {
@@ -291,6 +306,7 @@ type unifiedExchangeAdaptor struct {
 	ctx             context.Context
 	botID           string
 	log             dex.Logger
+	bmodLog         dex.Logger
 	fiatRates       atomic.Value // map[uint32]float64
 	orderUpdates    atomic.Value // chan *core.Order
 	mwh             *MarketWithHost
@@ -398,56 +414,95 @@ func (u *unifiedExchangeAdaptor) withPause(f func() error) error {
 }
 
 func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[uint32]int64, reason string) {
+	if u.bmodLog.Level() > dex.LevelTrace {
+		return
+	}
+
 	var msg strings.Builder
-	msg.WriteString("\n" + reason)
-	msg.WriteString("\n  Balance adjustments:")
+	writeLine := func(s string, a ...interface{}) {
+		msg.WriteString("\n" + fmt.Sprintf(s, a...))
+	}
+	writeLine("Balance adjustments(%s):", reason)
+
+	diffStr := func(assetID uint32, diff int64) string {
+		var sign string
+		var v uint64
+		if diff < 0 {
+			v = uint64(-diff)
+			sign = "-"
+		} else if diff > 0 {
+			sign = "+"
+			v = uint64(diff)
+		}
+		return sign + asset.FormatAtoms(assetID, v)
+	}
+
 	if len(dexDiffs) > 0 {
-		msg.WriteString("\n    DEX: ")
-		i := 0
-		for assetID, diff := range dexDiffs {
-			msg.WriteString(fmt.Sprintf("%s: %d", dex.BipIDSymbol(assetID), diff))
-			if i < len(dexDiffs)-1 {
-				msg.WriteString(", ")
-			}
-			i++
+		writeLine("  DEX:")
+		for assetID, dexDiff := range dexDiffs {
+			writeLine("    " + diffStr(assetID, dexDiff))
 		}
 	}
 
 	if len(cexDiffs) > 0 {
-		msg.WriteString("\n    CEX: ")
-		i := 0
-		for assetID, diff := range cexDiffs {
-			msg.WriteString(fmt.Sprintf("%s: %d", dex.BipIDSymbol(assetID), diff))
-			if i < len(cexDiffs)-1 {
-				msg.WriteString(", ")
-			}
-			i++
+		writeLine("  CEX:")
+		for assetID, cexDiff := range cexDiffs {
+			writeLine("    " + diffStr(assetID, cexDiff))
 		}
 	}
 
-	msg.WriteString("\n\n  Updated base balances:\n    DEX: ")
-	i := 0
+	writeLine("Updated settled balances:")
+	writeLine("  DEX:")
 	for assetID, bal := range u.baseDexBalances {
-		msg.WriteString(fmt.Sprintf("%s: %d", dex.BipIDSymbol(assetID), bal))
-		if i < len(u.baseDexBalances)-1 {
-			msg.WriteString(", ")
-		}
-		i++
+		writeLine("    " + diffStr(assetID, bal))
 	}
 
 	if len(u.baseCexBalances) > 0 {
-		msg.WriteString("\n    CEX: ")
-		i = 0
+		writeLine("  CEX:")
 		for assetID, bal := range u.baseCexBalances {
-			msg.WriteString(fmt.Sprintf("%s: %d", dex.BipIDSymbol(assetID), bal))
-			if i < len(u.baseCexBalances)-1 {
-				msg.WriteString(", ")
-			}
-			i++
+			writeLine("    " + diffStr(assetID, bal))
 		}
 	}
 
-	u.log.Infof(msg.String())
+	dexPending := make(map[uint32]uint64)
+	addDexPending := func(assetID uint32) {
+		if v := u.dexBalance(assetID).Pending; v > 0 {
+			dexPending[assetID] = v
+		}
+	}
+	cexPending := make(map[uint32]uint64)
+	addCexPending := func(assetID uint32) {
+		if v := u.cexBalance(assetID).Pending; v > 0 {
+			cexPending[assetID] = v
+		}
+	}
+	addDexPending(u.baseID)
+	addCexPending(u.baseID)
+	addDexPending(u.quoteID)
+	addCexPending(u.quoteID)
+	if u.baseFeeID != u.baseID {
+		addCexPending(u.baseFeeID)
+		addCexPending(u.baseFeeID)
+	}
+	if u.quoteFeeID != u.quoteID && u.quoteFeeID != u.baseID {
+		addCexPending(u.quoteFeeID)
+		addCexPending(u.quoteFeeID)
+	}
+	if len(dexPending) > 0 {
+		writeLine("  DEX pending:")
+		for assetID, v := range dexPending {
+			writeLine("    " + asset.FormatAtoms(assetID, v))
+		}
+	}
+	if len(cexPending) > 0 {
+		writeLine("  CEX pending:")
+		for assetID, v := range cexPending {
+			writeLine("    " + asset.FormatAtoms(assetID, v))
+		}
+	}
+
+	writeLine("")
+	u.bmodLog.Tracef(msg.String())
 }
 
 // SufficientBalanceForDEXTrade returns whether the bot has sufficient balance
@@ -1080,6 +1135,8 @@ func (u *unifiedExchangeAdaptor) MultiTrade(
 		// If there is insufficient balance to place a higher priority order,
 		// cancel the lower priority orders.
 		if lotsToPlace < placement.lots {
+			u.log.Tracef("MultiTrade(%s,%d) out of funds for more placements. %d of %d lots for rate %d",
+				sellStr(sell), i, lotsToPlace, placement.lots, u.fmtRate(placement.rate))
 			for _, o := range keptOrders {
 				if o.placementIndex > uint64(i) {
 					order := o.currentState().order
@@ -1407,16 +1464,15 @@ func (u *unifiedExchangeAdaptor) pendingDepositComplete(deposit *pendingDeposit)
 
 	delete(u.pendingDeposits, tx.ID)
 	u.baseDexBalances[assetID] -= int64(tx.Amount)
-	var feeAsset uint32
+	var feeAssetID uint32
 	token := asset.TokenInfo(assetID)
 	if token != nil {
-		feeAsset = token.ParentID
+		feeAssetID = token.ParentID
 	} else {
-		feeAsset = assetID
+		feeAssetID = assetID
 	}
-	u.baseDexBalances[feeAsset] -= int64(tx.Fees)
+	u.baseDexBalances[feeAssetID] -= int64(tx.Fees)
 	u.baseCexBalances[assetID] += int64(amtCredited)
-
 	u.balancesMtx.Unlock()
 
 	var diff int64
@@ -1440,7 +1496,7 @@ func (u *unifiedExchangeAdaptor) pendingDepositComplete(deposit *pendingDeposit)
 	dexDiffs := map[uint32]int64{}
 	cexDiffs := map[uint32]int64{}
 	dexDiffs[assetID] -= int64(tx.Amount)
-	dexDiffs[feeAsset] -= int64(tx.Fees)
+	dexDiffs[feeAssetID] -= int64(tx.Fees)
 	cexDiffs[assetID] += int64(amtCredited)
 
 	var msg string
@@ -1814,7 +1870,9 @@ func (u *unifiedExchangeAdaptor) rebalanceAsset(ctx context.Context, assetID uin
 	// Don't take into account locked funds on CEX, because we don't do
 	// rebalancing while there are active orders on the CEX.
 	if (totalDexBalance+totalCexBalance)/2 < minAmount {
-		u.log.Warnf("Cannot rebalance %s because balance is too low on both DEX and CEX. Min amount: %v, CEX balance: %v, DEX Balance: %v",
+		u.log.Warnf(
+			"Cannot rebalance %s because balance is too low on both DEX and CEX. "+
+				"Min amount: %v, CEX balance: %v, DEX Balance: %v",
 			dex.BipIDSymbol(assetID), minAmount, totalCexBalance, totalDexBalance)
 		return
 	}
@@ -1917,11 +1975,10 @@ func (u *unifiedExchangeAdaptor) handleCEXTradeUpdate(trade *libxc.Trade) {
 
 	u.balancesMtx.Lock()
 	currCEXOrder, found := u.pendingCEXOrders[trade.ID]
+	u.balancesMtx.Unlock()
 	if !found {
-		u.balancesMtx.Unlock()
 		return
 	}
-	u.balancesMtx.Unlock()
 
 	if !trade.Complete {
 		currCEXOrder.tradeMtx.Lock()
@@ -2029,6 +2086,8 @@ func (u *unifiedExchangeAdaptor) CEXTrade(ctx context.Context, baseID, quoteID u
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println("--CEXTrade complete?", trade.Complete)
 
 	if trade.Complete {
 		diffs := make(map[uint32]int64)
@@ -2345,7 +2404,7 @@ func orderAssets(baseID, quoteID uint32, sell bool) (fromAsset, fromFeeAsset, to
 	return
 }
 
-func feeAsset(assetID uint32) uint32 {
+func feeAssetID(assetID uint32) uint32 {
 	if token := asset.TokenInfo(assetID); token != nil {
 		return token.ParentID
 	}
@@ -2752,6 +2811,8 @@ func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, 
 		return nil, fmt.Errorf("error starting bot loop: %w", err)
 	}
 
+	u.sendStatsUpdate()
+
 	return &wg, nil
 }
 
@@ -2761,8 +2822,7 @@ type RunStats struct {
 	InitialBalances    map[uint32]uint64      `json:"initialBalances"`
 	DEXBalances        map[uint32]*BotBalance `json:"dexBalances"`
 	CEXBalances        map[uint32]*BotBalance `json:"cexBalances"`
-	ProfitLoss         float64                `json:"profitLoss"`
-	ProfitRatio        float64                `json:"profitRatio"`
+	ProfitLoss         *ProfitLoss            `json:"profitLoss"`
 	StartTime          int64                  `json:"startTime"`
 	PendingDeposits    int                    `json:"pendingDeposits"`
 	PendingWithdrawals int                    `json:"pendingWithdrawals"`
@@ -2771,51 +2831,83 @@ type RunStats struct {
 	FeeGap             *FeeGapStats           `json:"feeGap"`
 }
 
-func calcRunProfitLoss(initialBalances, finalBalances map[uint32]uint64, mods map[uint32]int64, fiatRates map[uint32]float64) (deltaUSD, profitRatio float64) {
-	assetIDs := make(map[uint32]struct{}, len(initialBalances))
-	for assetID := range initialBalances {
-		assetIDs[assetID] = struct{}{}
-	}
-	for assetID := range finalBalances {
-		assetIDs[assetID] = struct{}{}
-	}
+// Amount contains the conversions and formatted strings associated with an
+// amount of asset and a fiat exchange rate.
+type Amount struct {
+	Atoms        int64   `json:"atoms"`
+	Conventional float64 `json:"conventional"`
+	Fmt          string  `json:"fmt"`
+	USD          float64 `json:"usd"`
+	FmtUSD       string  `json:"fmtUSD"`
+	FiatRate     float64 `json:"fiatRate"`
+}
 
-	convertToConventional := func(assetID uint32, amount int64) (float64, error) {
-		unitInfo, err := asset.UnitInfo(assetID)
-		if err != nil {
-			return 0, err
-		}
-		return float64(amount) / float64(unitInfo.Conventional.ConversionFactor), nil
+// NewAmount generates an Amount for a known asset.
+func NewAmount(assetID uint32, atoms int64, fiatRate float64) *Amount {
+	ui, err := asset.UnitInfo(assetID)
+	if err != nil {
+		return &Amount{}
 	}
+	conv := float64(atoms) / float64(ui.Conventional.ConversionFactor)
+	usd := conv * fiatRate
+	return &Amount{
+		Atoms:        atoms,
+		Conventional: conv,
+		USD:          usd,
+		Fmt:          ui.FormatSignedAtoms(atoms),
+		FmtUSD:       strconv.FormatFloat(usd, 'f', 2, 64) + " USD",
+		FiatRate:     fiatRate,
+	}
+}
 
-	var initialBalanceUSD, finalBalanceUSD float64
+// ProfitLoss is a breakdown of the profit calculations.
+type ProfitLoss struct {
+	Initial     map[uint32]*Amount `json:"initial"`
+	InitialUSD  float64            `json:"initialUSD"`
+	Mods        map[uint32]*Amount `json:"mods"`
+	ModsUSD     float64            `json:"modsUSD"`
+	Final       map[uint32]*Amount `json:"final"`
+	FinalUSD    float64            `json:"finalUSD"`
+	Profit      float64            `json:"profit"`
+	ProfitRatio float64            `json:"profitRatio"`
+}
 
-	for assetID := range assetIDs {
-		initialBalance, err := convertToConventional(assetID, int64(initialBalances[assetID]))
-		if err != nil {
+func newProfitLoss(
+	initialBalances,
+	finalBalances map[uint32]uint64,
+	mods map[uint32]int64,
+	fiatRates map[uint32]float64,
+) *ProfitLoss {
+
+	pl := &ProfitLoss{
+		Initial: make(map[uint32]*Amount, len(initialBalances)),
+		Mods:    make(map[uint32]*Amount, len(mods)),
+		Final:   make(map[uint32]*Amount, len(finalBalances)),
+	}
+	for assetID, v := range initialBalances {
+		if v == 0 {
 			continue
 		}
-		finalBalance, err := convertToConventional(assetID, int64(finalBalances[assetID]))
-		if err != nil {
-			continue
-		}
-
-		if mod := mods[assetID]; mod != 0 {
-			if modConv, err := convertToConventional(assetID, mod); err == nil {
-				initialBalance += modConv
-			}
-		}
-
 		fiatRate := fiatRates[assetID]
-		if fiatRate == 0 {
+		init := NewAmount(assetID, int64(v), fiatRate)
+		pl.Initial[assetID] = init
+		mod := NewAmount(assetID, mods[assetID], fiatRate)
+		pl.InitialUSD += init.USD
+		pl.ModsUSD += mod.USD
+	}
+	for assetID, v := range finalBalances {
+		if v == 0 {
 			continue
 		}
-
-		initialBalanceUSD += initialBalance * fiatRate
-		finalBalanceUSD += finalBalance * fiatRate
+		fin := NewAmount(assetID, int64(v), fiatRates[assetID])
+		pl.Final[assetID] = fin
+		pl.FinalUSD += fin.USD
 	}
 
-	return finalBalanceUSD - initialBalanceUSD, (finalBalanceUSD / initialBalanceUSD) - 1
+	basis := pl.InitialUSD + pl.ModsUSD
+	pl.Profit = pl.FinalUSD - basis
+	pl.ProfitRatio = pl.Profit / basis
+	return pl
 }
 
 func (u *unifiedExchangeAdaptor) stats() *RunStats {
@@ -2829,13 +2921,13 @@ func (u *unifiedExchangeAdaptor) stats() *RunStats {
 	for assetID := range u.baseDexBalances {
 		bal := u.dexBalance(assetID)
 		dexBalances[assetID] = bal
-		totalBalances[assetID] = bal.Available + bal.Locked + bal.Pending
+		totalBalances[assetID] = bal.Available + bal.Locked + bal.Pending + bal.Reserved
 	}
 
 	for assetID := range u.baseCexBalances {
 		bal := u.cexBalance(assetID)
 		cexBalances[assetID] = bal
-		totalBalances[assetID] += bal.Available + bal.Locked + bal.Pending
+		totalBalances[assetID] += bal.Available + bal.Locked + bal.Pending + bal.Reserved
 	}
 
 	fiatRates := u.fiatRates.Load().(map[uint32]float64)
@@ -2845,7 +2937,6 @@ func (u *unifiedExchangeAdaptor) stats() *RunStats {
 		feeGap = feeGapI.(*FeeGapStats)
 	}
 
-	profitLoss, profitRatio := calcRunProfitLoss(u.initialBalances, totalBalances, u.inventoryMods, fiatRates)
 	u.runStats.tradedUSD.Lock()
 	tradedUSD := u.runStats.tradedUSD.v
 	u.runStats.tradedUSD.Unlock()
@@ -2856,8 +2947,7 @@ func (u *unifiedExchangeAdaptor) stats() *RunStats {
 		InitialBalances:    u.initialBalances,
 		DEXBalances:        dexBalances,
 		CEXBalances:        cexBalances,
-		ProfitLoss:         profitLoss,
-		ProfitRatio:        profitRatio,
+		ProfitLoss:         newProfitLoss(u.initialBalances, totalBalances, u.inventoryMods, fiatRates),
 		StartTime:          u.startTime.Load(),
 		PendingDeposits:    len(u.pendingDeposits),
 		PendingWithdrawals: len(u.pendingWithdrawals),
@@ -2875,11 +2965,11 @@ func (u *unifiedExchangeAdaptor) notifyEvent(e *MarketMakingEvent) {
 	u.clientCore.Broadcast(newRunEventNote(u.host, u.baseID, u.quoteID, u.startTime.Load(), e))
 }
 
-func (u *unifiedExchangeAdaptor) registerFeeGap(s *FeeGapStats) {
-	u.runStats.feeGapStats.Store(s)
+func (u *unifiedExchangeAdaptor) registerFeeGap(feeGap *FeeGapStats) {
+	u.runStats.feeGapStats.Store(feeGap)
 }
 
-func (u *unifiedExchangeAdaptor) updateBalances(balanceDiffs *BotInventoryDiffs) map[uint32]int64 {
+func (u *unifiedExchangeAdaptor) applyInventoryDiffs(balanceDiffs *BotInventoryDiffs) map[uint32]int64 {
 	u.balancesMtx.Lock()
 	defer u.balancesMtx.Unlock()
 
@@ -2913,7 +3003,7 @@ func (u *unifiedExchangeAdaptor) updateBalances(balanceDiffs *BotInventoryDiffs)
 		u.inventoryMods[assetID] += diff
 	}
 
-	u.logBalanceAdjustments(balanceDiffs.DEX, balanceDiffs.CEX, "Balances updated")
+	u.logBalanceAdjustments(balanceDiffs.DEX, balanceDiffs.CEX, "Inventory updated")
 	u.log.Debugf("Aggregate inventory mods: %+v", u.inventoryMods)
 
 	return mods
@@ -2925,7 +3015,7 @@ func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig) {
 }
 
 func (u *unifiedExchangeAdaptor) updateInventory(balanceDiffs *BotInventoryDiffs) {
-	u.updateInventoryEvent(u.updateBalances(balanceDiffs))
+	u.updateInventoryEvent(u.applyInventoryDiffs(balanceDiffs))
 }
 
 func (u *unifiedExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
@@ -2983,6 +3073,7 @@ func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor
 		CEX:             cfg.cex,
 		botID:           cfg.botID,
 		log:             cfg.log,
+		bmodLog:         cfg.log.SubLogger("BMOD"),
 		eventLogDB:      cfg.eventLogDB,
 		initialBalances: initialBalances,
 

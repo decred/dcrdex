@@ -497,6 +497,8 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 		<-ctx.Done()
 	}()
 
+	a.registerFeeGap()
+
 	return &wg, nil
 }
 

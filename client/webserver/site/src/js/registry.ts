@@ -8,6 +8,7 @@ declare global {
     testFormatRateFullPrecision: () => void
     user: () => User
     cexBook: () => Promise<void>
+    mmStatus: () => MarketMakingStatus
     isWebview?: () => boolean
     webkit: any | undefined
     openUrl: (url: string) => void
@@ -899,8 +900,7 @@ export interface RunStats {
   initialBalances: Record<number, number>
   dexBalances: Record<number, BotBalance>
   cexBalances: Record<number, BotBalance>
-  profitLoss: number
-  profitRatio: number
+  profitLoss: ProfitLoss
   startTime: number
   pendingDeposits: number
   pendingWithdrawals: number
@@ -1002,12 +1002,38 @@ export enum PeerSource {
   Discovered,
 }
 
+export interface BalanceState {
+  fiatRates: Record<number, number>
+  balances: Record<number, BotBalance>
+  invMods: Record<number, number>
+}
+
+export interface Amount {
+  atoms: number
+  conventional: number
+  fmt: string
+  usd: number
+  fmtUSD: string
+}
+
+export interface ProfitLoss {
+  initial: Record<number, Amount>
+  initialUSD: number
+  mods: Record<number, Amount>
+  modsUSD: number
+  final: Record<number, Amount>
+  finalUSD: number
+  profit: number
+  profitRatio: number
+}
+
 export interface MarketMakingRunOverview {
   endTime: number
-  cfg: BotConfig
+  cfgs: BotConfig[]
   initialBalances: Record<number, number>
   finalBalances: Record<number, number>
-  profitLoss: number
+  profitLoss: ProfitLoss
+  finalState: BalanceState
 }
 
 export interface WalletPeer {

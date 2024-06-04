@@ -181,7 +181,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 	}
 
 	if lotsToArb > 0 {
-		a.log.Infof("arb opportunity - sellOnDex: %v, lotsToArb: %v, dexRate: %v, cexRate: %v: profit: %d",
+		a.log.Infof("arb opportunity - sellOnDex: %t, lotsToArb: %d, dexRate: %s, cexRate: %s: profit: %s",
 			sellOnDEX, lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate), a.fmtBase(prevProfit))
 		return true, lotsToArb, dexRate, cexRate
 	}
@@ -365,7 +365,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	exists, sellOnDex, lotsToArb, dexRate, cexRate := a.arbExists()
 	if a.log.Level() == dex.LevelTrace {
 		a.log.Tracef("%s rebalance. exists = %t, %s on dex, lots = %d, dex rate = %s, cex rate = %s",
-			a.name, sellStr(sellOnDex), lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate))
+			a.name, exists, sellStr(sellOnDex), lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate))
 	}
 	if exists {
 		// Execution will not happen if it would cause a self-match.
@@ -483,6 +483,8 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 			}
 		}
 	}()
+
+	a.registerFeeGap()
 
 	return &wg, nil
 }

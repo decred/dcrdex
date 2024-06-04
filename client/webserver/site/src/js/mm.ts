@@ -334,9 +334,8 @@ class Bot extends BotMarket {
       page.botTypeDisplay.textContent = intl.prep(intl.ID_BOTTYPE_BASIC_MM)
     }
 
-    Doc.setVis(botType !== botTypeBasicArb, page.placementDataBox, page.baseTokenSwapFeesBox)
-    if (botType === botTypeBasicArb) Doc.hide(page.placementDataBox)
-    else {
+    Doc.setVis(botType !== botTypeBasicArb, page.placementsChartBox, page.baseTokenSwapFeesBox)
+    if (botType !== botTypeBasicArb) {
       this.placementsChart = new PlacementsChart(page.placementsChart)
       page.buyPlacementCount.textContent = String(nBuyPlacements)
       page.sellPlacementCount.textContent = String(nSellPlacements)
@@ -393,6 +392,8 @@ class Bot extends BotMarket {
       this.placementsChart.setMarket(marketConfig)
     }
 
+    
+
     Doc.setVis(botType !== botTypeBasicMM, page.cexDataBox)
     if (botType !== botTypeBasicMM) {
       const cex = app().mmStatus.cexes[cexName]
@@ -426,7 +427,7 @@ class Bot extends BotMarket {
     Doc.setVis(running, tmpl.profitLossBox)
     Doc.setVis(!running, tmpl.allocateBttnBox)
     if (runStats) {
-      tmpl.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss)
+      tmpl.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss.profit)
     }
   }
 
@@ -648,6 +649,7 @@ class Bot extends BotMarket {
     if (cexRebalance) startConfig.autoRebalance = this.autoRebalanceSettings()
 
     try {
+      app().log('mm', 'starting mm bot', startConfig)
       await MM.startBot(appPW, startConfig)
     } catch (e) {
       page.errMsg.textContent = intl.prep(intl.ID_API_ERROR, e.msg)

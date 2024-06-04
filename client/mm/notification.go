@@ -29,18 +29,18 @@ type runStatsNote struct {
 	db.Notification
 
 	Host      string    `json:"host"`
-	Base      uint32    `json:"baseID"`
-	Quote     uint32    `json:"quoteID"`
+	BaseID    uint32    `json:"baseID"`
+	QuoteID   uint32    `json:"quoteID"`
 	StartTime int64     `json:"startTime"`
 	Stats     *RunStats `json:"stats"`
 }
 
-func newRunStatsNote(host string, base, quote uint32, stats *RunStats) *runStatsNote {
+func newRunStatsNote(host string, baseID, quoteID uint32, stats *RunStats) *runStatsNote {
 	return &runStatsNote{
 		Notification: db.NewNotification(NoteTypeRunStats, "", "", "", db.Data),
 		Host:         host,
-		Base:         base,
-		Quote:        quote,
+		BaseID:       baseID,
+		QuoteID:      quoteID,
 		Stats:        stats,
 	}
 }

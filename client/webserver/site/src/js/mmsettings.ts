@@ -13,7 +13,6 @@ import {
   ArbMarketMakingPlacement,
   ExchangeBalance,
   MarketMakingStatus,
-  MMBotStatus,
   MMCEXStatus,
   BalanceNote,
   BotAssetConfig,
@@ -46,6 +45,7 @@ import {
   setCexElements,
   calculateQuoteLot,
   PlacementsChart,
+  liveBotConfig,
   GapStrategyMultiplier,
   GapStrategyAbsolute,
   GapStrategyAbsolutePlus,
@@ -630,7 +630,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     // If we have specs specifying only a market, make sure the cex name and
     // bot type are set.
     if (specs && !specs.botType) {
-      const botCfg = await botConfig(specs, app().mmStatus)
+      const botCfg = liveBotConfig(specs.host, specs.baseID, specs.quoteID)
       specs.cexName = botCfg?.cexName ?? ''
       specs.botType = botTypeBasicMM
       if (botCfg?.arbMarketMakingConfig) specs.botType = botTypeArbMM
@@ -667,7 +667,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const mmStatus = app().mmStatus
     const viewOnly = isViewOnly(specs, mmStatus)
-    const botCfg = await botConfig(specs, mmStatus)
+    const botCfg = liveBotConfig(host, baseID, quoteID)
     const dmm = defaultMarketMakingConfig
     Doc.setVis(botCfg, page.deleteBttnBox)
 
@@ -699,6 +699,11 @@ export default class MarketMakerSettingsPage extends BasePage {
         oldCfg.buyPlacements = mmCfg.buyPlacements
         oldCfg.sellPlacements = mmCfg.sellPlacements
         oldCfg.driftTolerance = mmCfg.driftTolerance
+        oldCfg.gapStrategy = mmCfg.gapStrategy
+        oldCfg.driftTolerance = mmCfg.driftTolerance
+        oldCfg.oracleWeighting = mmCfg.oracleWeighting
+        oldCfg.oracleBias = mmCfg.oracleBias
+        oldCfg.emptyMarketRate = mmCfg.emptyMarketRate
       } else if (arbMMCfg) {
         const { buyPlacements, sellPlacements } = arbMMCfg
         oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
@@ -761,8 +766,10 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.setVis(hasFiatRates, page.switchToQuickConfig)
 
     // If this is a new bot, show the quick config form.
-    const canUseQuickConfig = !botCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)
-    if (canUseQuickConfig) this.showQuickConfig()
+    const isQuickPlacements = !botCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)
+    const gapStrategy = botCfg?.basicMarketMakingConfig?.gapStrategy ?? GapStrategyPercentPlus
+    page.gapStrategySelect.value = gapStrategy
+    if (isQuickPlacements && gapStrategy === GapStrategyPercentPlus) this.showQuickConfig()
     else this.showAdvancedConfig()
 
     Doc.hide(page.marketLoading)
@@ -1036,7 +1043,6 @@ export default class MarketMakerSettingsPage extends BasePage {
           page.qcLevelPerSideBox, page.levelSpacingBox, page.placementsChartBox,
           page.lotsPerLevelLabel
         )
-        page.gapStrategySelect.value = GapStrategyPercentPlus
         break
       case botTypeBasicArb:
         Doc.show(page.arbLotsLabel)
@@ -1158,7 +1164,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.formSpecs = { host, baseID, quoteID, botType: '' }
     const viewOnly = isViewOnly(this.formSpecs, app().mmStatus)
     if (viewOnly) {
-      const botCfg = await botConfig(this.formSpecs, app().mmStatus)
+      const botCfg = liveBotConfig(host, baseID, quoteID)
       const specs = this.specs = this.formSpecs
       switch (true) {
         case Boolean(botCfg?.simpleArbConfig):
@@ -1900,6 +1906,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         botCfg.simpleArbConfig = this.basicArbConfig()
     }
 
+    app().log('mm', 'saving bot config', botCfg)
     await MM.updateBotConfig(botCfg)
     await app().fetchMMStatus()
     this.originalConfig = JSON.parse(JSON.stringify(cfg))
@@ -2139,16 +2146,6 @@ export default class MarketMakerSettingsPage extends BasePage {
 function isViewOnly (specs: BotSpecs, mmStatus: MarketMakingStatus): boolean {
   const botStatus = mmStatus.bots.find(({ config: cfg }) => cfg.host === specs.host && cfg.baseID === specs.baseID && cfg.quoteID === specs.quoteID)
   return Boolean(botStatus?.running)
-}
-
-async function botConfig (specs: BotSpecs, mmStatus: MarketMakingStatus): Promise<BotConfig | null> {
-  const { baseID, quoteID, host } = specs
-
-  const cfgs = (mmStatus.bots || []).map((s: MMBotStatus) => s.config).filter((cfg: BotConfig) => {
-    return cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host
-  })
-  if (cfgs.length) return cfgs[0]
-  return null
 }
 
 const ExchangeNames: Record<string, string> = {

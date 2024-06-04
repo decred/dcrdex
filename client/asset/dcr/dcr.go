@@ -6589,7 +6589,7 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 	prevTip := dcr.currentTip
 	dcr.currentTip = &block{newTipHeight, newTipHash}
 
-	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
+	dcr.log.Tracef("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
 
 	dcr.emitTipChange(newTipHeight)
 

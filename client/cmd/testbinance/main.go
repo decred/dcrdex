@@ -213,12 +213,13 @@ type marketSubscriber struct {
 }
 
 type userOrder struct {
-	slug      string
-	sell      bool
-	rate      float64
-	qty       float64
-	apiKey    string
-	cancelled atomic.Bool
+	slug   string
+	sell   bool
+	rate   float64
+	qty    float64
+	apiKey string
+	stamp  time.Time
+	status string
 }
 
 type fakeBinance struct {
@@ -364,29 +365,43 @@ func (f *fakeBinance) run(ctx context.Context) {
 			if rand.Float32() < 0.5 {
 				continue
 			}
-			f.bookedOrdersMtx.Lock()
-			ords := f.bookedOrders
-			f.bookedOrders = make(map[string]*userOrder)
-			f.bookedOrdersMtx.Unlock()
-			if len(ords) > 0 {
-				log.Tracef("Filling %d booked user orders", len(ords))
+			type filledOrder struct {
+				bntypes.StreamUpdate
+				apiKey string
 			}
-			for tradeID, ord := range ords {
+
+			f.bookedOrdersMtx.Lock()
+			fills := make([]*filledOrder, 0)
+			for tradeID, ord := range f.bookedOrders {
+				if ord.status == "FILLED" && time.Since(ord.stamp) > time.Hour {
+					delete(f.bookedOrders, tradeID)
+					continue
+				}
+				ord.status = "FILLED"
+				fills = append(fills, &filledOrder{
+					StreamUpdate: bntypes.StreamUpdate{
+						EventType:          "executionReport",
+						CurrentOrderStatus: "FILLED",
+						// CancelledOrderID
+						ClientOrderID: tradeID,
+						Filled:        ord.qty,
+						QuoteFilled:   ord.qty * ord.rate,
+					},
+					apiKey: ord.apiKey,
+				})
+			}
+			f.bookedOrdersMtx.Unlock()
+			if len(fills) > 0 {
+				log.Tracef("Filling %d booked user orders", len(fills))
+			}
+			for _, ord := range fills {
 				f.accountSubscribersMtx.RLock()
 				sub, found := f.accountSubscribers[ord.apiKey]
 				f.accountSubscribersMtx.RUnlock()
 				if !found {
 					continue
 				}
-				update := &bntypes.StreamUpdate{
-					EventType:          "executionReport",
-					CurrentOrderStatus: "FILLED",
-					// CancelledOrderID
-					ClientOrderID: tradeID,
-					Filled:        ord.qty,
-					QuoteFilled:   ord.qty * ord.rate,
-				}
-				respB, _ := json.Marshal(update)
+				respB, _ := json.Marshal(ord)
 				sub.SendRaw(respB)
 			}
 		}
@@ -838,17 +853,17 @@ func (f *fakeBinance) handleDepth(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeBinance) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	tradeID := r.URL.Query().Get("origClientOrderId")
+	var status string
 	f.bookedOrdersMtx.RLock()
 	ord, found := f.bookedOrders[tradeID]
+	if found {
+		status = ord.status
+	}
 	f.bookedOrdersMtx.RUnlock()
 	if !found {
 		log.Errorf("User %s requested unknown order %s", extractAPIKey(r), tradeID)
 		http.Error(w, "order not found", http.StatusBadRequest)
 		return
-	}
-	status := "NEW"
-	if ord.cancelled.Load() {
-		status = "CANCELED"
 	}
 	resp := &bntypes.BookedOrder{
 		Symbol: ord.slug,
@@ -894,21 +909,25 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	if bookIt {
 		resp.Status = "NEW"
 		log.Tracef("Booking %s order on %s for %.8f for user %s", side, slug, qty, apiKey)
-		f.bookedOrdersMtx.Lock()
-		f.bookedOrders[tradeID] = &userOrder{
-			slug:   slug,
-			sell:   side == "SELL",
-			rate:   price,
-			qty:    qty,
-			apiKey: apiKey,
-		}
-		f.bookedOrdersMtx.Unlock()
+
 	} else {
 		log.Tracef("Filled %s order on %s for %.8f for user %s", side, slug, qty, apiKey)
 		resp.Status = "FILLED"
 		resp.ExecutedQty = qty
 		resp.CumulativeQuoteQty = qty * price
 	}
+
+	f.bookedOrdersMtx.Lock()
+	f.bookedOrders[tradeID] = &userOrder{
+		slug:   slug,
+		sell:   side == "SELL",
+		rate:   price,
+		qty:    qty,
+		apiKey: apiKey,
+		stamp:  time.Now(),
+		status: resp.Status,
+	}
+	f.bookedOrdersMtx.Unlock()
 
 	writeJSONWithStatus(w, &resp, http.StatusOK)
 }
@@ -929,13 +948,13 @@ func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) 
 	apiKey := extractAPIKey(r)
 	f.bookedOrdersMtx.Lock()
 	ord, found := f.bookedOrders[tradeID]
-	f.bookedOrdersMtx.Unlock()
 	if found {
-		if !ord.cancelled.CompareAndSwap(false, true) {
+		if ord.status == "CANCELED" {
 			log.Errorf("Detected cancellation of an already cancelled order %s", tradeID)
 		}
-		ord.cancelled.Store(true)
+		ord.status = "CANCELED"
 	}
+	f.bookedOrdersMtx.Unlock()
 	writeJSONWithStatus(w, &struct{}{}, http.StatusOK)
 	if !found {
 		log.Errorf("DELETE request received from user %s for unknown order %s", apiKey, tradeID)

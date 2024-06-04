@@ -4755,7 +4755,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 
 	prevTip := btc.currentTip
 	btc.currentTip = newTip
-	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
+	btc.log.Tracef("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	btc.emit.TipChange(uint64(newTip.Height))
 
 	go btc.syncTxHistory(uint64(newTip.Height))

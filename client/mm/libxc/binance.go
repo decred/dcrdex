@@ -56,6 +56,7 @@ const (
 type binanceOrderBook struct {
 	mtx            sync.RWMutex
 	synced         atomic.Bool
+	syncChan       chan struct{}
 	numSubscribers uint32
 	cm             *dex.ConnectionMaster
 
@@ -143,6 +144,7 @@ func (b *binanceOrderBook) sync(ctx context.Context) {
 	if err := cm.ConnectOnce(ctx); err != nil {
 		b.log.Errorf("Error connecting %s order book: %v", b.mktID, err)
 	}
+	<-b.syncChan
 }
 
 func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no errors */) {
@@ -151,6 +153,8 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 	// We'll run two goroutines and sychronize two local vars.
 	var syncMtx sync.Mutex
 	var syncCache []*bntypes.BookUpdate
+	syncChan := make(chan struct{})
+	b.syncChan = syncChan
 	var updateID uint64 = updateIDUnsynced
 
 	resyncChan := make(chan struct{}, 1)
@@ -202,6 +206,10 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 			}
 		}
 		b.synced.Store(true)
+		if syncChan != nil {
+			close(syncChan)
+			syncChan = nil
+		}
 		return true
 	}
 
@@ -1307,6 +1315,8 @@ func (bnc *binance) handleExecutionReport(update *bntypes.StreamUpdate) {
 		return
 	}
 
+	fmt.Println("--handleExecuationReport sending trade update with complete =", complete)
+
 	updater <- &Trade{
 		ID:          id,
 		Complete:    complete,
@@ -1806,6 +1816,9 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 	if err != nil {
 		return nil, err
 	}
+
+	b, _ := json.MarshalIndent(resp, "", "    ")
+	fmt.Println("--/api/v3/order response", string(b))
 
 	return &Trade{
 		ID:          tradeID,

@@ -6,6 +6,8 @@ package main
 import (
 	"math"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/core"
@@ -18,6 +20,7 @@ type sniper struct {
 	// single epoch. The actual number will be a random number in the range
 	// [0, maxOrdsPerEpoch].
 	maxOrdsPerEpoch int
+	oneAndDone      bool
 }
 
 var _ Trader = (*sniper)(nil)
@@ -25,20 +28,21 @@ var _ Trader = (*sniper)(nil)
 func newSniper(maxOrdsPerEpoch int) *sniper {
 	return &sniper{
 		maxOrdsPerEpoch: maxOrdsPerEpoch,
+		oneAndDone:      true,
 	}
 }
 
 // SetupWallets is part of the Trader interface.
 func (s *sniper) SetupWallets(m *Mantle) {
 	numCoins := 3 * s.maxOrdsPerEpoch
-	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, uint64(defaultMidGap*rateEncFactor))
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
 	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
 	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
 
 	m.log.Infof("Sniper has been initialized with %d max orders per epoch"+
 		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial funding coins",
-		s.maxOrdsPerEpoch, valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
-		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
+		s.maxOrdsPerEpoch, fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
+		fmtAtoms(minQuoteQty, quoteSymbol), fmtAtoms(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
 
 }
 
@@ -57,10 +61,7 @@ func (s *sniper) HandleNotification(m *Mantle, note core.Notification) {
 				}
 				s.snipe(m)
 			}()
-			numCoins := 3 * s.maxOrdsPerEpoch
-			book := m.book()
-			midGap := midGap(book)
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, midGap)
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
 			wmm := walletMinMax{
 				baseID:  {min: minBaseQty, max: maxBaseQty},
 				quoteID: {min: minQuoteQty, max: maxQuoteQty},
@@ -79,6 +80,9 @@ func (s *sniper) HandleNotification(m *Mantle, note core.Notification) {
 // snipe picks a random order and places a market order in an attempt to match
 // it exactly.
 func (s *sniper) snipe(m *Mantle) {
+	if s.oneAndDone && atomic.LoadUint32(&orderCounter) > 0 {
+		return
+	}
 	book := m.book()
 
 	var sell bool
@@ -92,17 +96,48 @@ func (s *sniper) snipe(m *Mantle) {
 		sell = rand.Float32() > 0.5
 	}
 
+	maxQty := m.wallets[baseID].minFunds / 2
+	if !sell {
+		maxQty = m.wallets[quoteID].minFunds / 2
+	}
+
 	maxOrders := int(math.Round(float64(s.maxOrdsPerEpoch) * rand.Float64()))
 	targets := book.Sells[:clamp(maxOrders, 0, len(book.Sells))]
 	if sell {
 		targets = book.Buys[:clamp(maxOrders, 0, len(book.Buys))]
 	}
+	rem := maxQty
 	for _, ord := range targets {
+		if rem == 0 {
+			break
+		}
+		lot := lotSize
 		qty := ord.QtyAtomic
 		if !sell {
 			qty = calc.BaseToQuote(ord.MsgRate, qty)
 			qty = uint64(float64(qty) * marketBuyBuffer)
 		}
+		if qty < lot {
+			break
+		}
+		if qty > rem {
+			qty = rem
+		}
 		m.marketOrder(sell, qty)
+		rem -= qty
 	}
+}
+
+func runSniper(n int) {
+	if n == 0 {
+		n = 3
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runTrader(newSniper(n), "OL'SNIPEY")
+	}()
+
+	wg.Wait()
 }

@@ -29,13 +29,14 @@
 
     <table id="eventsTable" class="my-3 striped row-hover compact border row-border">
       <thead>
-        <th scope="col">[[[Time]]]</th>
-        <th scope="col">[[[Type]]]</th>
-        <th scope="col">[[[ID]]]</th>
-        <th scope="col">[[[base_change]]]</th>
-        <th scope="col">[[[quote_change]]]</th>
-        <th scope="col">[[[base_fees]]]</th>
-        <th scope="col">[[[quote_fees]]]</th>
+        <th>[[[Time]]]</th>
+        <th>[[[Type]]]</th>
+        <th>[[[ID]]]</th>
+        <th>[[[base_change]]]</th>
+        <th>[[[quote_change]]]</th>
+        <th>[[[base_fees]]]</th>
+        <th>[[[quote_fees]]]</th>
+        <th>Sum USD</th>
         <th scope="col">[[[Details]]]</th>
       </thead>
       <tbody id="eventsTableBody">
@@ -47,6 +48,7 @@
           <td data-tmpl="quoteDelta"></td>
           <td data-tmpl="baseFees"></td>
           <td data-tmpl="quoteFees"></td>
+          <td data-tmpl="sumUSD"></td>
           <td><span class="ico-open fs20 pointer mx-2" data-tmpl="details"></span></td>        
         </tr>
       </tbody>
