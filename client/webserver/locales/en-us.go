@@ -121,8 +121,8 @@ var EnUS = map[string]*intl.Translation{
 	"verify_market":                  {T: "This is a market order and will match the best available order(s) on the book. Based on the current market mid-gap rate, you might receive about"},
 	"auth_order_app_pw":              {T: "Authorize this order with your app password."},
 	"lots":                           {T: "lots"},
-	"order_disclaimer": {Version: 1, T: `<span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off Bison Wallet software,
-		or the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain and/or wallet software, until
+	"order_disclaimer": {Version: 1, T: `<span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the Bison Wallet software,
+		or the <span data-quote-ticker></span> or <span data-base-ticker></span> blockchain and/or wallet software, until
 		settlement is complete. Settlement can complete as quickly as a few minutes or take as long as a few hours.`},
 	"acknowledge_and_hide":      {T: "acknowledge and hide"},
 	"show_disclaimer":           {T: "view warnings"},

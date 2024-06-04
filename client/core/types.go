@@ -136,6 +136,16 @@ type WalletState struct {
 	SyncProgress float32                         `json:"syncProgress"`
 	Disabled     bool                            `json:"disabled"`
 	Approved     map[uint32]asset.ApprovalStatus `json:"approved"`
+	FeeState     *FeeState                       `json:"feeState"`
+}
+
+// FeeState is information about the current network transaction fees and
+// estimates of standard operations.
+type FeeState struct {
+	Rate    uint64 `json:"rate"`
+	Send    uint64 `json:"send"`
+	Swap    uint64 `json:"swap"`
+	StampMS int64  `json:"stampMS"`
 }
 
 // ExtensionModeConfig is configuration for running core in extension mode,

@@ -11,4 +11,15 @@ var UnitInfo = dex.UnitInfo{
 		Unit:             "DCR",
 		ConversionFactor: 1e8,
 	},
+	Alternatives: []dex.Denomination{
+		{
+			Unit:             "mDCR",
+			ConversionFactor: 1e5,
+		},
+		{
+			Unit:             "µDCR",
+			ConversionFactor: 1e2,
+		},
+	},
+	FeeRateDenom: "B",
 }

@@ -9,12 +9,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,6 +27,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/dexnet"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
@@ -82,11 +81,6 @@ const (
 	multiSplitKey       = "multisplit"
 	multiSplitBufferKey = "multisplitbuffer"
 	redeemFeeBumpFee    = "redeemfeebump"
-	// externalApiUrl is the URL of the external API in case of fallback.
-	externalApiUrl = "https://mempool.space/api/"
-	// testnetExternalApiUrl is the URL of the testnet external API in case of
-	// fallback.
-	testnetExternalApiUrl = "https://mempool.space/testnet/api/"
 
 	// requiredRedeemConfirms is the amount of confirms a redeem transaction
 	// needs before the trade is considered confirmed. The redeem is
@@ -406,6 +400,9 @@ type BTCCloneCFG struct {
 	// ExternalFeeEstimator should be supplied if the clone provides the
 	// apifeefallback ConfigOpt. TODO: confTarget uint64
 	ExternalFeeEstimator func(context.Context, dex.Network) (uint64, error)
+	// ExternalFeeShelfLife can be set to adjust the time to staleness of
+	// external fee rates. Default is 5 minutes.
+	ExternalFeeShelfLife time.Duration
 	// OmitAddressType causes the address type (bech32, legacy) to be omitted
 	// from calls to getnewaddress.
 	OmitAddressType bool
@@ -759,6 +756,44 @@ type baseWalletConfig struct {
 	apiFeeFallback   bool
 }
 
+// feeRateCache wraps a ExternalFeeEstimator function and caches results.
+type feeRateCache struct {
+	f         func(context.Context, dex.Network) (uint64, error)
+	shelfLife time.Duration
+
+	mtx        sync.Mutex
+	fetchStamp time.Time
+	lastRate   uint64
+	errorStamp time.Time
+	lastError  error
+}
+
+func (c *feeRateCache) rate(ctx context.Context, net dex.Network) (uint64, error) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	const defaultShelfLife = time.Minute * 5
+	shelfLife := defaultShelfLife
+	if c.shelfLife > 0 {
+		shelfLife = c.shelfLife
+	}
+	if time.Since(c.fetchStamp) < shelfLife {
+		return c.lastRate, nil
+	}
+	const errorDelay = time.Minute
+	if time.Since(c.errorStamp) < errorDelay {
+		return 0, c.lastError
+	}
+	feeRate, err := c.f(ctx, net)
+	if err != nil {
+		c.errorStamp = time.Now()
+		c.lastError = err
+		return 0, err
+	}
+	c.fetchStamp = time.Now()
+	c.lastRate = feeRate
+	return feeRate, nil
+}
+
 // baseWallet is a wallet backend for Bitcoin. The backend is how the DEX
 // client app communicates with the BTC blockchain and wallet. baseWallet
 // satisfies the dex.Wallet interface.
@@ -786,7 +821,7 @@ type baseWallet struct {
 	segwit            bool
 	signNonSegwit     TxInSigner
 	localFeeRate      func(context.Context, RawRequester, uint64) (uint64, error)
-	externalFeeRate   func(context.Context, dex.Network) (uint64, error)
+	feeCache          *feeRateCache
 	decodeAddr        dexbtc.AddressDecoder
 	walletDir         string
 
@@ -1019,7 +1054,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		Segwit:              true,
 		// FeeEstimator must default to rpcFeeRate if not set, but set a
 		// specific external estimator:
-		ExternalFeeEstimator: externalFeeEstimator,
+		ExternalFeeEstimator: externalFeeRate,
 		AssetID:              BipID,
 	}
 
@@ -1232,6 +1267,14 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		return nil, err
 	}
 
+	var feeCache *feeRateCache
+	if cfg.ExternalFeeEstimator != nil {
+		feeCache = &feeRateCache{
+			f:         cfg.ExternalFeeEstimator,
+			shelfLife: cfg.ExternalFeeShelfLife,
+		}
+	}
+
 	w := &baseWallet{
 		symbol:            cfg.Symbol,
 		chainParams:       cfg.ChainParams,
@@ -1248,7 +1291,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		initTxSizeBase:    initTxSizeBase,
 		signNonSegwit:     nonSegwitSigner,
 		localFeeRate:      cfg.FeeEstimator,
-		externalFeeRate:   cfg.ExternalFeeEstimator,
+		feeCache:          feeCache,
 		decodeAddr:        addrDecoder,
 		stringAddr:        addrStringer,
 		walletInfo:        cfg.WalletInfo,
@@ -1790,18 +1833,16 @@ func (btc *baseWallet) feeRate(confTarget uint64) (uint64, error) {
 	if !btc.apiFeeFallback() {
 		return 0, err
 	}
-	if btc.externalFeeRate == nil {
+	if btc.feeCache == nil {
 		return 0, fmt.Errorf("external fee rate fetcher not configured")
 	}
 
 	// External estimate fallback. Error if it exceeds our limit, and the caller
 	// may use btc.fallbackFeeRate(), as in targetFeeRateWithFallback.
-	feeRate, err = btc.externalFeeRate(btc.ctx, btc.Network) // e.g. externalFeeEstimator
+	feeRate, err = btc.feeCache.rate(btc.ctx, btc.Network) // e.g. externalFeeRate
 	if err != nil {
-		if btc.cloneParams.Network != dex.Simnet {
-			btc.log.Errorf("Failed to get fee rate from external API: %v", err)
-		}
-		return 0, err
+		btc.log.Meter("feeRate.rate.fail", time.Hour).Errorf("Failed to get fee rate from external API: %v", err)
+		return 0, nil
 	}
 	if feeRate <= 0 || feeRate > btc.feeRateLimit() { // but fetcher shouldn't return <= 0 without error
 		return 0, fmt.Errorf("external fee rate %v exceeds configured limit", feeRate)
@@ -1832,40 +1873,32 @@ func rpcFeeRate(ctx context.Context, rr RawRequester, confTarget uint64) (uint64
 	return uint64(dex.IntDivUp(int64(satPerKB), 1000)), nil
 }
 
-// externalFeeEstimator gets the fee rate from the external API and returns it
+// externalFeeRate gets the fee rate from the external API and returns it
 // in sats/vByte.
-func externalFeeEstimator(ctx context.Context, net dex.Network) (uint64, error) {
-	var url string
+func externalFeeRate(ctx context.Context, net dex.Network) (uint64, error) {
+	// https://mempool.space/docs/api
+	var uri string
 	if net == dex.Testnet {
-		url = testnetExternalApiUrl
+		uri = "https://mempool.space/testnet/api/v1/fees/recommended"
 	} else {
-		url = externalApiUrl
+		uri = "https://mempool.space/api/v1/fees/recommended"
 	}
-	url = url + "v1/fees/recommended"
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
+	var resp struct {
+		Fastest  uint64 `json:"fastestFee"`
+		HalfHour uint64 `json:"halfHourFee"`
+		Hour     uint64 `json:"hourFee"`
+		Economy  uint64 `json:"economyFee"`
+		Minimum  uint64 `json:"minimumFee"`
+	}
+	if err := dexnet.Get(ctx, uri, &resp, dexnet.WithSizeLimit(1<<14)); err != nil {
 		return 0, err
 	}
-	httpResponse, err := http.DefaultClient.Do(r)
-	if err != nil {
-		return 0, err
-	}
-	var resp map[string]uint64
-	reader := io.LimitReader(httpResponse.Body, 1<<20)
-	err = json.NewDecoder(reader).Decode(&resp)
-	if err != nil {
-		return 0, err
-	}
-	httpResponse.Body.Close()
-
-	// we use fastestFee, docs to mempool api https://mempool.space/docs/api
-	feeInSat, ok := resp["fastestFee"]
-	if !ok {
+	if resp.Fastest == 0 {
 		return 0, errors.New("no fee rate found")
 	}
-	return feeInSat, nil
+	return resp.Fastest, nil
 }
 
 type amount uint64
@@ -2070,7 +2103,7 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 
 // SingleLotSwapRefundFees returns the fees for a swap and refund transaction
 // for a single lot.
-func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (swapFees uint64, redeemFees uint64, err error) {
+func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, useSafeTxSize bool) (swapFees uint64, refundFees uint64, err error) {
 	var numInputs uint64
 	if useSafeTxSize {
 		numInputs = 12
@@ -2083,7 +2116,8 @@ func (btc *baseWallet) SingleLotSwapRefundFees(_ uint32, feeSuggestion uint64, u
 
 	var swapTxSize uint64
 	if btc.segwit {
-		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2WPKHInputSize) + dexbtc.P2WSHOutputSize + dexbtc.P2WPKHOutputSize
+		inputSize := dexbtc.RedeemP2WPKHInputSize + uint64((dexbtc.RedeemP2PKSigScriptSize+2+3)/4)
+		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * inputSize) + dexbtc.P2WSHOutputSize + dexbtc.P2WPKHOutputSize
 	} else {
 		swapTxSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2PKHInputSize) + dexbtc.P2SHOutputSize + dexbtc.P2PKHOutputSize
 	}
@@ -4926,6 +4960,19 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 	return fee, isValidAddress, nil
 }
 
+// StandardSendFees returns the fees for a simple send tx with one input and two
+// outputs.
+func (btc *baseWallet) StandardSendFee(feeRate uint64) uint64 {
+	var sz uint64 = dexbtc.MinimumTxOverhead
+	if btc.segwit {
+		inputSize := dexbtc.RedeemP2WPKHInputSize + uint64((dexbtc.RedeemP2PKSigScriptSize+2+3)/4)
+		sz += inputSize + dexbtc.P2WPKHOutputSize*2
+	} else {
+		sz += dexbtc.RedeemP2PKHInputSize + dexbtc.P2PKHOutputSize*2
+	}
+	return feeRate * sz
+}
+
 func (btc *baseWallet) SetBondReserves(reserves uint64) {
 	btc.bondReserves.Store(reserves)
 }
@@ -6330,5 +6377,32 @@ func (a *AddressRecycler) ReturnAddresses(addrs []string) {
 			continue
 		}
 		a.addrs[addr] = struct{}{}
+	}
+}
+
+// BitcoreRateFetcher generates a rate fetching function for the bitcore.io API.
+func BitcoreRateFetcher(ticker string) func(ctx context.Context, net dex.Network) (uint64, error) {
+	const uriTemplate = "https://api.bitcore.io/api/%s/%s/fee/1"
+	mainnetURI, testnetURI := fmt.Sprintf(uriTemplate, ticker, "mainnet"), fmt.Sprintf(uriTemplate, ticker, "testnet")
+
+	return func(ctx context.Context, net dex.Network) (uint64, error) {
+		var uri string
+		if net == dex.Testnet {
+			uri = testnetURI
+		} else {
+			uri = mainnetURI
+		}
+		ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel()
+		var resp struct {
+			RatePerKB float64 `json:"feerate"`
+		}
+		if err := dexnet.Get(ctx, uri, &resp); err != nil {
+			return 0, err
+		}
+		if resp.RatePerKB <= 0 {
+			return 0, fmt.Errorf("zero or negative fee rate")
+		}
+		return uint64(math.Round(resp.RatePerKB * 1e5)), nil // 1/kB => 1/B
 	}
 }

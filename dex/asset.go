@@ -162,6 +162,8 @@ type UnitInfo struct {
 	// Alternatives lists additionally available Denominations, and can be
 	// empty.
 	Alternatives []Denomination `json:"denominations"`
+	// FeeRateDenom is the denominator used for fee rates.
+	FeeRateDenom string `json:"feeRateDenom"`
 }
 
 // ConventionalString converts the quantity to conventional units, and returns

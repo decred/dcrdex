@@ -42,7 +42,8 @@ import {
   TxHistoryResult,
   TransactionNote,
   WalletTransaction,
-  FundsMixingStats
+  FundsMixingStats,
+  FeeState
 } from './registry'
 import { CoinExplorers } from './coinexplorers'
 
@@ -998,16 +999,17 @@ export default class WalletsPage extends BasePage {
 
   updateDisplayedAsset (assetID: number) {
     if (assetID !== this.selectedAssetID) return
-    const { symbol, wallet, name, token } = app().assets[assetID]
-    const page = this.page
-    for (const el of document.querySelectorAll('[data-asset-name]')) el.textContent = name
+    const { symbol, wallet, name, token, unitInfo } = app().assets[assetID]
+    const { page, body } = this
+    Doc.setText(body, '[data-asset-name]', name)
+    Doc.setText(body, '[data-ticker]', unitInfo.conventional.unit)
     page.assetLogo.src = Doc.logoPath(symbol)
     Doc.hide(
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
       page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox,
-      page.needsProviderBox
+      page.needsProviderBox, page.feeStateBox
     )
     this.checkNeedsProvider(assetID)
     if (token) {
@@ -1019,25 +1021,49 @@ export default class WalletsPage extends BasePage {
     }
     if (wallet) {
       this.updateDisplayedAssetBalance()
+      const { feeState, running, disabled, peerCount, syncProgress, type: walletType, encrypted, open } = wallet
 
-      const walletDef = app().walletDefinition(assetID, wallet.type)
+      const walletDef = app().walletDefinition(assetID, walletType)
       page.walletType.textContent = walletDef.tab
       const configurable = assetIsConfigurable(assetID)
       Doc.setVis(configurable, page.passwordWrapper)
+      if (feeState) this.updateFeeState(feeState)
 
-      if (wallet.disabled) Doc.show(page.statusDisabled) // wallet is disabled
-      else if (wallet.running) {
+      if (disabled) Doc.show(page.statusDisabled) // wallet is disabled
+      else if (running) {
         Doc.show(page.sendReceive, page.peerCountBox, page.syncProgressBox)
-        page.peerCount.textContent = String(wallet.peerCount)
-        page.syncProgress.textContent = `${(wallet.syncProgress * 100).toFixed(1)}%`
-        if (wallet.open) {
+        page.peerCount.textContent = String(peerCount)
+        page.syncProgress.textContent = `${(syncProgress * 100).toFixed(1)}%`
+        if (open) {
           Doc.show(page.statusReady)
-          if (!app().haveActiveOrders(assetID) && wallet.encrypted) Doc.show(page.lockBttnBox)
+          if (!app().haveActiveOrders(assetID) && encrypted) Doc.show(page.lockBttnBox)
         } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
       } else Doc.show(page.statusOff, page.connectBttnBox) // wallet not running
     } else Doc.show(page.createWalletBox) // no wallet
 
     page.walletDetailsBox.classList.remove('invisible')
+  }
+
+  updateFeeState (feeState: FeeState) {
+    const { page, selectedAssetID: assetID } = this
+    Doc.hide(page.feeStateBox)
+    const { unitInfo: ui, token } = app().assets[assetID]
+    const fiatRate = app().fiatRatesMap[assetID]
+    if (!fiatRate) return
+    const feeAssetID = token ? token.parentID : assetID
+    const feeFiatRate = app().fiatRatesMap[feeAssetID]
+    if (token && !feeFiatRate) return
+    Doc.show(page.feeStateBox)
+    const feeUI = token ? app().assets[token.parentID].unitInfo : ui
+    Doc.formatBestRateElement(page.feeStateNetRate, feeAssetID, feeState.rate, feeUI)
+    Doc.formatBestValueElement(page.feeStateSendFees, feeAssetID, feeState.send, feeUI)
+    Doc.formatBestValueElement(page.feeStateSwapFees, feeAssetID, feeState.swap, feeUI)
+    page.feeStateXcRate.textContent = Doc.formatFourSigFigs(fiatRate)
+    const sendFiat = feeState.send / feeUI.conventional.conversionFactor * feeFiatRate
+    page.feeStateSendFiat.textContent = Doc.formatFourSigFigs(sendFiat)
+    const swapFiat = feeState.swap / feeUI.conventional.conversionFactor * feeFiatRate
+    page.feeStateSwapFiat.textContent = Doc.formatFourSigFigs(swapFiat)
+    Doc.show(page.feeStateBox)
   }
 
   async checkNeedsProvider (assetID: number) {
@@ -1615,8 +1641,7 @@ export default class WalletsPage extends BasePage {
     const totalLocked = bal.locked + bal.contractlocked + bal.bondlocked
     const totalBalance = bal.available + totalLocked + bal.immature
     page.balance.textContent = Doc.formatCoinValue(totalBalance, ui)
-    Doc.empty(page.balanceUnit)
-    page.balanceUnit.appendChild(Doc.symbolize(asset))
+    page.balanceUnit.textContent = ui.conventional.unit
     const rate = app().fiatRatesMap[assetID]
     if (rate) {
       Doc.show(page.fiatBalanceBox)
@@ -2553,6 +2578,8 @@ export default class WalletsPage extends BasePage {
     this.updateAssetButton(this.selectedAssetID)
     if (!note.fiatRates[this.selectedAssetID]) return
     this.updateDisplayedAssetBalance()
+    const { feeState } = app().walletMap[this.selectedAssetID]
+    if (feeState) this.updateFeeState(feeState)
   }
 
   /*
@@ -2560,13 +2587,15 @@ export default class WalletsPage extends BasePage {
    * 'walletconfig' notifications.
    */
   handleWalletStateNote (note: WalletStateNote): void {
-    this.updateAssetButton(note.wallet.assetID)
-    this.assetUpdated(note.wallet.assetID)
+    const { assetID, feeState } = note.wallet
+    this.updateAssetButton(assetID)
+    this.assetUpdated(assetID)
     if (note.topic === 'WalletPeersUpdate' &&
-        note.wallet.assetID === this.selectedAssetID &&
+        assetID === this.selectedAssetID &&
         Doc.isDisplayed(this.page.managePeersForm)) {
       this.updateWalletPeersTable()
     }
+    if (feeState && assetID === this.selectedAssetID) this.updateFeeState(feeState)
   }
 
   /*

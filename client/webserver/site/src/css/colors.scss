@@ -11,6 +11,7 @@ body:not(.dark) {
   --text-danger: #d22;
   --text-grey: #777;
   --border-color: #ddd;
+  --hint-color: #4397cd;
 
   // links
   --link-color: #2a71d5;
@@ -76,6 +77,7 @@ body.dark {
   --text-danger: #ec6a6a;
   --text-grey: #999;
   --border-color: #383f4b;
+  --hint-color: #64b2e5;
 
   // links
   --link-color: #388bff;
@@ -127,4 +129,8 @@ body.dark {
 
   // logo
   --logo-path: url("/img/softened-icon-dark.png");
+}
+
+.body-bg {
+  background-color: var(--body-bg);
 }

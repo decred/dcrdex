@@ -25,17 +25,22 @@ const (
 
 var (
 	UnitInfo = dex.UnitInfo{
-		AtomicUnit: "Satoshi",
+		AtomicUnit: "Sats",
 		Conventional: dex.Denomination{
 			Unit:             "DASH",
 			ConversionFactor: 1e8,
 		},
 		Alternatives: []dex.Denomination{
 			{
-				Unit:             "mDASH", // Casino usage
+				Unit:             "mDASH",
 				ConversionFactor: 1e5,
 			},
+			{
+				Unit:             "µDASH",
+				ConversionFactor: 1e2,
+			},
 		},
+		FeeRateDenom: "B",
 	}
 
 	// MainNetParams are the clone parameters for mainnet.

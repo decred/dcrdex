@@ -765,7 +765,7 @@ export class WalletConfigForm {
         let date = input.value ? toUnixDate(new Date(input.value + 'T00:00')) : 0
         if (date < minDate) date = minDate
         else if (date > maxDate) date = maxDate
-        config[opt.key] = '' + date
+        config[opt.key] = String(date)
       } else if (input.value) {
         if (opt.repeatable && config[opt.key]) config[opt.key] += opt.repeatable + input.value
         else config[opt.key] = input.value
@@ -1039,8 +1039,8 @@ export class FeeAssetSelectionForm {
       page.markets.appendChild(tr)
       const { symbol: baseSymbol, unitInfo: bui } = xc.assets[baseID]
       const { symbol: quoteSymbol, unitInfo: qui } = xc.assets[quoteID]
-      for (const el of Doc.applySelector(tr, '[data-base-ticker')) el.textContent = bui.conventional.unit
-      for (const el of Doc.applySelector(tr, '[data-quote-ticker')) el.textContent = qui.conventional.unit
+      for (const el of Doc.applySelector(tr, '[data-base-ticker]')) el.textContent = bui.conventional.unit
+      for (const el of Doc.applySelector(tr, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
 
       const tmpl = Doc.parseTemplate(tr)
       tmpl.baseLogo.src = Doc.logoPath(baseSymbol)

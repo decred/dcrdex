@@ -330,7 +330,7 @@ func (w *zecWallet) CallRPC(method string, args []any, thing any) error {
 
 // FeeRate returns the asset standard fee rate for Zcash.
 func (w *zecWallet) FeeRate() uint64 {
-	return dexzec.LegacyFeeRate
+	return 5000 // per logical action
 }
 
 func (w *zecWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
@@ -2286,6 +2286,12 @@ func (w *zecWallet) Send(addr string, value, feeRate uint64) (asset.Coin, error)
 		txHash: txHash,
 		v:      value,
 	}, nil
+}
+
+// StandardSendFees returns the fees for a simple send tx with one input and two
+// outputs.
+func (w *zecWallet) StandardSendFee(feeRate uint64) uint64 {
+	return dexzec.TxFeesZIP317(dexbtc.RedeemP2PKHInputSize+1, 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, 0)
 }
 
 // TransactionConfirmations gets the number of confirmations for the specified

@@ -11,11 +11,22 @@ import (
 
 var (
 	UnitInfo = dex.UnitInfo{
-		AtomicUnit: "Zats",
+		AtomicUnit: "zats",
 		Conventional: dex.Denomination{
 			Unit:             "ZCL",
 			ConversionFactor: 1e8,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "mZCL",
+				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µZCL",
+				ConversionFactor: 1e2,
+			},
+		},
+		FeeRateDenom: "B",
 	}
 
 	// MainNetParams are the clone parameters for mainnet. Zcash,

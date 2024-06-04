@@ -99,7 +99,7 @@ var ZhCN = map[string]*intl.Translation{
 	"auth_order_app_pw":              {T: "输入您的应用程序密码授权此订单。"},
 	"lots":                           {T: "手数"},
 	"order_disclaimer": {T: `<span class="red">请注意</span>：交易需要时间结算，您不能关闭 DEX 客户端软件，
-		 以及<span data-unit="quote"></span> 或 <span data-unit="base"></span> 钱包软件，直到
+		 以及<span data-quote-ticker></span> 或 <span data-base-ticker></span> 钱包软件，直到
 		结算完成。结算可能在几分钟内完成，也可能需要几个小时完成。`},
 	"Order":                     {T: "订单"},
 	"see all orders":            {T: "查看所有订单"},

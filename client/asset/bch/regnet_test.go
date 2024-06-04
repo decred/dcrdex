@@ -15,7 +15,10 @@ package bch
 // 10:8, 18:7, 5:6, 7:5, 1:4, 15:3, 3:2, 25:1
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
@@ -42,4 +45,19 @@ func TestWallet(t *testing.T) {
 		LotSize:   tLotSize,
 		Asset:     tBCH,
 	})
+}
+
+func TestExternalFeeRate(t *testing.T) {
+	fetchRateWithTimeout(t, dex.Mainnet)
+	fetchRateWithTimeout(t, dex.Testnet)
+}
+
+func fetchRateWithTimeout(t *testing.T, net dex.Network) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	feeRate, err := externalFeeRate(ctx, net)
+	if err != nil {
+		t.Fatalf("error fetching %s fees: %v", net, err)
+	}
+	fmt.Printf("##### Fee rate fetched for %s! %d Sats/vB \n", net, feeRate)
 }

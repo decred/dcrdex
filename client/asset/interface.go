@@ -256,6 +256,10 @@ const (
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
 	InternalNodeLoggerName = "INTL"
+
+	// VersionNewest can be passed to some estimation methods to instruct the
+	// wallet to use whatever is the newest version available.
+	VersionNewest = ^uint32(0)
 )
 
 type WalletDefinition struct {
@@ -562,6 +566,8 @@ type Wallet interface {
 	SingleLotSwapRefundFees(version uint32, feeRate uint64, useSafeTxSize bool) (uint64, uint64, error)
 	// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
 	SingleLotRedeemFees(version uint32, feeRate uint64) (uint64, error)
+	// StandardSendFee returns the fee for a "standard" send tx.
+	StandardSendFee(feeRate uint64) uint64
 	// FundMultiOrder funds multiple orders at once. The return values will
 	// be in the same order as the passed orders. If less values are returned
 	// than the number of orders, then the orders at the end of the list were

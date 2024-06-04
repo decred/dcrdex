@@ -25,6 +25,17 @@ var (
 			Unit:             "LTC",
 			ConversionFactor: 1e8,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "mLTC",
+				ConversionFactor: 1e5,
+			},
+			{
+				Unit:             "µLTC",
+				ConversionFactor: 1e2,
+			},
+		},
+		FeeRateDenom: "vB",
 	}
 	// MainNetParams are the clone parameters for mainnet.
 	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{

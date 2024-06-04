@@ -76,8 +76,8 @@ var DeDE = map[string]*intl.Translation{
 	"outdated_tooltip":               {T: "Der Guthabenstand ist möglicherweise veraltet. Stell eine Verbindung zum Wallet her um ihn zu aktualisieren."},
 	"available":                      {T: "verfügbar"},
 	"connect_refresh_tooltip":        {T: "Zum Verbinden und Aktualisieren klicken"},
-	"add_a_base_wallet":              {T: `Füge ein<br><span data-unit="base"></span><br>Wallet hinzu`},
-	"add_a_quote_wallet":             {T: `Füge ein<br><span data-unit="quote"></span><br>Wallet hinzu`},
+	"add_a_base_wallet":              {T: `Füge ein<br><span data-base-ticker></span><br>Wallet hinzu`},
+	"add_a_quote_wallet":             {T: `Füge ein<br><span data-quote-ticker></span><br>Wallet hinzu`},
 	"locked":                         {T: "gesperrt"},
 	"immature":                       {T: "unfertig"},
 	"Sell Orders":                    {T: "Verkaufsaufträge"},
@@ -99,7 +99,7 @@ var DeDE = map[string]*intl.Translation{
 	"auth_order_app_pw":              {T: "Autorisiere diesen Auftrat mit deinem App-Passwort."},
 	"lots":                           {T: "Lots"},
 	"order_disclaimer": {T: `<span class="red">WICHTIG</span>: Der Handel braucht Zeit zur Abwicklung und du darfst währenddessen den DEX Klient   
-		oder die<span data-unit="quote"></span> oder <span data-unit="base"></span> Blockchain und/oder die Walletsoftware nicht schließen bis
+		oder die<span data-quote-ticker></span> oder <span data-base-ticker></span> Blockchain und/oder die Walletsoftware nicht schließen bis
 		die Abwicklung abgeschlossen ist. Die Abwicklung kann innerhalb weniger Minuten abgeschlossen sein oder bis zu einigen Stunden dauern.`},
 	"Order":                     {T: "Auftrag"},
 	"see all orders":            {T: "Alle Aufträge anzeigen"},

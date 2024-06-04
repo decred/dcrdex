@@ -89,7 +89,7 @@ func fiatSources(cfg Config) []*source {
 
 				reqURL := fmt.Sprintf(cryptoComparePriceEndpoint, parseTickers(tickers...))
 				response := make(map[string]map[string]float64)
-				err := getRatesWithHeader(ctx, reqURL, &response, map[string]string{})
+				err := getRates(ctx, reqURL, &response)
 				if err != nil {
 					return nil, fmt.Errorf("unable to fetch fiat rates: %w", err)
 				}

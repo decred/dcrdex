@@ -8,15 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
 	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexfiro "decred.org/dcrdex/dex/networks/firo"
 
@@ -34,9 +33,6 @@ const (
 	walletTypeRPC      = "firodRPC"
 	walletTypeElectrum = "electrumRPC"
 	estimateFeeConfs   = 2 // 2 blocks should be enough
-
-	mainnetExplorerFeeAPI = "https://explorer.firo.org/insight-api-zcoin/utils/estimatefee"
-	testnetExplorerFeeAPI = "https://testexplorer.firo.org/insight-api-zcoin/utils/estimatefee"
 )
 
 var (
@@ -85,7 +81,7 @@ var (
 				Type:        walletTypeElectrum,
 				Tab:         "Electrum-Firo (external)",
 				Description: "Use an external Electrum-Firo Wallet",
-				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", false)...),
+				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", true)...),
 			},
 		},
 	}
@@ -171,7 +167,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		UnlockSpends:             true, // Firo chain wallet does Not unlock coins after sendrawtransaction
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
-		ExternalFeeEstimator:     fetchExternalFee,
+		ExternalFeeEstimator:     externalFeeRate,
 		PrivKeyFunc:              nil, // set only for walletTypeRPC below
 	}
 
@@ -261,33 +257,36 @@ func estimateFee(ctx context.Context, rr btc.RawRequester, _ uint64) (uint64, er
 	return uint64(math.Round(feeRate * 1e5)), nil
 }
 
+// externalFeeRate returns a fee rate for the network. If an error is
+// encountered fetching the testnet fee rate, we will try to return the
+// mainnet fee rate.
+func externalFeeRate(ctx context.Context, net dex.Network) (uint64, error) {
+	const mainnetURI = "https://explorer.firo.org/insight-api-zcoin/utils/estimatefee"
+	var uri string
+	if net == dex.Testnet {
+		uri = "https://testexplorer.firo.org/insight-api-zcoin/utils/estimatefee"
+	} else {
+		uri = "https://explorer.firo.org/insight-api-zcoin/utils/estimatefee"
+	}
+	feeRate, err := fetchExternalFee(ctx, uri)
+	if err == nil || net != dex.Testnet {
+		return feeRate, err
+	}
+	return fetchExternalFee(ctx, mainnetURI)
+}
+
 // fetchExternalFee calls 'estimatefee' API on Firo block explorer for
 // the network. API returned float value is converted into sats/byte.
-func fetchExternalFee(ctx context.Context, net dex.Network) (uint64, error) {
-	var url string
-	if net == dex.Testnet {
-		url = testnetExplorerFeeAPI
-	} else {
-		url = mainnetExplorerFeeAPI
-	}
-	// timed call
+func fetchExternalFee(ctx context.Context, uri string) (uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, err
-	}
-	httpResponse, err := http.DefaultClient.Do(r)
-	if err != nil {
-		return 0, err
-	}
 	var resp map[string]float64
-	reader := io.LimitReader(httpResponse.Body, 1<<20)
-	err = json.NewDecoder(reader).Decode(&resp)
-	if err != nil {
+	if err := dexnet.Get(ctx, uri, &resp); err != nil {
 		return 0, err
 	}
-	httpResponse.Body.Close()
+	if resp == nil {
+		return 0, errors.New("null response")
+	}
 
 	firoPerKilobyte, ok := resp["2"] // field '2': n.nnnn
 	if !ok {

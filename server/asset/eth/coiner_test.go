@@ -128,18 +128,9 @@ func TestNewSwapCoin(t *testing.T) {
 	const gasPrice = 30
 	const value = 5e9
 	const gasTipCap = 2
-	wantGas, err := dexeth.WeiToGweiSafe(big.NewInt(3e10))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantVal, err := dexeth.WeiToGweiSafe(big.NewInt(5e18))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantGasTipCap, err := dexeth.WeiToGweiSafe(big.NewInt(2e9))
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantGas := dexeth.WeiToGwei(big.NewInt(3e10))
+	wantVal := dexeth.WeiToGwei(big.NewInt(5e18))
+	wantGasTipCap := dexeth.WeiToGweiCeil(big.NewInt(2e9))
 	tests := []struct {
 		name          string
 		coinID        []byte

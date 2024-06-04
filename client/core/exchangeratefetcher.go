@@ -5,14 +5,12 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/fiatrates"
 )
 
@@ -209,22 +207,6 @@ func FetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 	return fiatRates
 }
 
-func getRates(ctx context.Context, url string, thing any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("error %d fetching %q", resp.StatusCode, url)
-	}
-
-	reader := io.LimitReader(resp.Body, 1<<22)
-	return json.NewDecoder(reader).Decode(thing)
+func getRates(ctx context.Context, uri string, thing any) error {
+	return dexnet.Get(ctx, uri, thing, dexnet.WithSizeLimit(1<<22))
 }

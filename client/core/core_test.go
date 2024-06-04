@@ -1069,6 +1069,8 @@ func (w *TXCWallet) SingleLotRedeemFees(version uint32, feeRate uint64) (uint64,
 	return 0, nil
 }
 
+func (w *TXCWallet) StandardSendFee(uint64) uint64 { return 1 }
+
 func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error) {
 	if w.accelerateOrderErr != nil {
 		return 0, w.accelerateOrderErr

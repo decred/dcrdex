@@ -75,11 +75,18 @@ var Tokens = map[uint32]*Token{
 			ParentID: EthBipID,
 			Name:     "USDC",
 			UnitInfo: dex.UnitInfo{
-				AtomicUnit: "microUSD",
+				AtomicUnit: "µUSD",
 				Conventional: dex.Denomination{
 					Unit:             "USDC",
 					ConversionFactor: 1e6,
 				},
+				Alternatives: []dex.Denomination{
+					{
+						Unit:             "cents",
+						ConversionFactor: 1e2,
+					},
+				},
+				FeeRateDenom: "gas",
 			},
 		},
 		NetTokens: map[dex.Network]*NetToken{

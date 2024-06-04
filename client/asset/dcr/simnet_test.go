@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
@@ -730,4 +731,19 @@ func testTickets(t *testing.T, isInternal bool, ew *ExchangeWallet) {
 			t.Fatalf("wrong policy reported. expected %s, got %s", policy, tspend.CurrentPolicy)
 		}
 	}
+}
+
+func TestExternalFeeRate(t *testing.T) {
+	fetchRateWithTimeout(t, dex.Mainnet)
+	fetchRateWithTimeout(t, dex.Testnet)
+}
+
+func fetchRateWithTimeout(t *testing.T, net dex.Network) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	feeRate, err := fetchFeeFromOracle(ctx, net, 2)
+	if err != nil {
+		t.Fatalf("error fetching %s fees: %v", net, err)
+	}
+	fmt.Printf("##### Fee rate fetched for %s! %.8f DCR/kB \n", net, feeRate)
 }

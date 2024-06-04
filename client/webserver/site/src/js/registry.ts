@@ -220,6 +220,13 @@ export enum ApprovalStatus {
   NotApproved = 2
 }
 
+export interface FeeState {
+  rate: number
+  send: number
+  swap: number
+  stampMS: number
+}
+
 export interface WalletState {
   symbol: string
   assetID: number
@@ -237,6 +244,7 @@ export interface WalletState {
   synced: boolean
   syncProgress: number
   approved: Record<number, ApprovalStatus>
+  feeState?: FeeState
 }
 
 export interface WalletInfo {
@@ -314,6 +322,7 @@ export interface UnitInfo {
   atomicUnit: string
   conventional: Denomination
   denominations: Denomination[]
+  feeRateDenom: string
 }
 
 export interface Denomination {
@@ -1055,6 +1064,7 @@ export interface Application {
   bindTooltips (ancestor: HTMLElement): void
   bindUrlHandlers (ancestor: HTMLElement): void
   attachHeader (): void
+  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number): void
   showDropdown (icon: HTMLElement, dialog: HTMLElement): void
   ackNotes (): void
   setNoteTimes (noteList: HTMLElement): void

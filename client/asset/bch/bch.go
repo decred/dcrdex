@@ -56,13 +56,13 @@ var (
 		Tab:               "External",
 		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"), // Same as bitcoin. That's dumb.
-		ConfigOpts:        append(btc.RPCConfigOpts("Bitcoin Cash", ""), btc.CommonConfigOpts("BCH", false)...),
+		ConfigOpts:        append(btc.RPCConfigOpts("Bitcoin Cash", ""), btc.CommonConfigOpts("BCH", true)...),
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  append(btc.SPVConfigOpts("BCH"), btc.CommonConfigOpts("BCH", false)...),
+		ConfigOpts:  append(btc.SPVConfigOpts("BCH"), btc.CommonConfigOpts("BCH", true)...),
 		Seeded:      true,
 	}
 
@@ -71,7 +71,7 @@ var (
 		Tab:         "Electron Cash  (external)",
 		Description: "Use an external Electron Cash (BCH Electrum fork) Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrom-cash", false), "config"), // maybe?
-		ConfigOpts: btc.CommonConfigOpts("BCH", false),
+		ConfigOpts: btc.CommonConfigOpts("BCH", true),
 	}
 
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.
@@ -87,6 +87,8 @@ var (
 			// electrumWalletDefinition, // getinfo RPC needs backport: https://github.com/Electron-Cash/Electron-Cash/pull/2399
 		},
 	}
+
+	externalFeeRate = btc.BitcoreRateFetcher("BCH")
 )
 
 func init() {
@@ -192,19 +194,20 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	// settings in the configuration file. Bitcoin Cash uses the same default
 	// ports as Bitcoin.
 	cloneCFG := &btc.BTCCloneCFG{
-		WalletCFG:          cfg,
-		MinNetworkVersion:  minNetworkVersion,
-		WalletInfo:         WalletInfo,
-		Symbol:             "bch",
-		Logger:             logger,
-		Network:            network,
-		ChainParams:        cloneParams,
-		Ports:              netPorts,
-		DefaultFallbackFee: defaultFee,
-		Segwit:             false,
-		InitTxSizeBase:     dexbtc.InitTxSizeBase,
-		InitTxSize:         dexbtc.InitTxSize,
-		LegacyBalance:      cfg.Type != walletTypeSPV,
+		WalletCFG:            cfg,
+		MinNetworkVersion:    minNetworkVersion,
+		WalletInfo:           WalletInfo,
+		Symbol:               "bch",
+		Logger:               logger,
+		Network:              network,
+		ChainParams:          cloneParams,
+		Ports:                netPorts,
+		DefaultFallbackFee:   defaultFee,
+		Segwit:               false,
+		InitTxSizeBase:       dexbtc.InitTxSizeBase,
+		InitTxSize:           dexbtc.InitTxSize,
+		ExternalFeeEstimator: externalFeeRate,
+		LegacyBalance:        cfg.Type != walletTypeSPV,
 		// Bitcoin Cash uses the Cash Address encoding, which is Bech32, but not
 		// indicative of segwit. We provide a custom encoder and decode to go
 		// to/from a btcutil.Address and a string.

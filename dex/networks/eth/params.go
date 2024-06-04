@@ -50,6 +50,17 @@ var (
 			Unit:             "ETH",
 			ConversionFactor: 1e9,
 		},
+		Alternatives: []dex.Denomination{
+			{
+				Unit:             "Szabos",
+				ConversionFactor: 1e6,
+			},
+			{
+				Unit:             "Finneys",
+				ConversionFactor: 1e3,
+			},
+		},
+		FeeRateDenom: "gas",
 	}
 
 	VersionedGases = map[uint32]*Gases{
@@ -147,7 +158,11 @@ func RefundGas(contractVer uint32) uint64 {
 	return g.Refund
 }
 
-var gweiFactorBig = big.NewInt(GweiFactor)
+var (
+	// add before diving by gweiFactorBig to take the ceiling.
+	gweiCeilAddend = big.NewInt(GweiFactor - 1)
+	gweiFactorBig  = big.NewInt(GweiFactor)
+)
 
 // GweiToWei converts uint64 Gwei to *big.Int Wei.
 func GweiToWei(v uint64) *big.Int {
@@ -158,19 +173,18 @@ func GweiToWei(v uint64) *big.Int {
 // unsuitable for a uint64, zero is returned. For values that are not even
 // multiples of 1 gwei, this function returns the floor.
 func WeiToGwei(v *big.Int) uint64 {
-	vGwei := new(big.Int).Div(v, big.NewInt(GweiFactor))
+	vGwei := new(big.Int).Div(v, gweiFactorBig)
 	if vGwei.IsUint64() {
 		return vGwei.Uint64()
 	}
 	return 0
 }
 
-// add before diving by gweiFactorBig to take the ceiling.
-var gweiCeilAddend = big.NewInt(GweiFactor - 1)
-
 // WeiToGweiCeil converts *big.Int Wei to uint64 Gwei. If v is determined to be
 // unsuitable for a uint64, zero is returned. For values that are not even
-// multiples of 1 gwei, this function returns the ceiling.
+// multiples of 1 gwei, this function returns the ceiling. In general,
+// WeiToWeiCeil should be used with gwei-unit fee rates are generated or
+// validated and WeiToGwei should be used with balances and values.
 func WeiToGweiCeil(v *big.Int) uint64 {
 	vGwei := new(big.Int).Div(new(big.Int).Add(v, gweiCeilAddend), big.NewInt(GweiFactor))
 	if vGwei.IsUint64() {
@@ -182,14 +196,16 @@ func WeiToGweiCeil(v *big.Int) uint64 {
 // WeiToGweiSafe converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as
 // a uint64. Errors if the amount of gwei is too big to fit fully into a uint64.
 // For values that are not even multiples of 1 gwei, this function returns the
-// ceiling.
+// ceiling. As such, WeiToGweiSafe is more suitable for validating or generating
+// fee rates. If balance or value validation is the goal, use truncation e.g.
+// WeiToGwei.
 func WeiToGweiSafe(wei *big.Int) (uint64, error) {
 	if wei.Cmp(new(big.Int)) == -1 {
 		return 0, fmt.Errorf("wei must be non-negative")
 	}
 	gwei := new(big.Int).Div(new(big.Int).Add(wei, gweiCeilAddend), gweiFactorBig)
 	if !gwei.IsUint64() {
-		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
+		return 0, fmt.Errorf("%v gwei is too big for a uint64", gwei)
 	}
 	return gwei.Uint64(), nil
 }

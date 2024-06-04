@@ -55,9 +55,23 @@ func TestWallet(t *testing.T) {
 func TestFetchExternalFee(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	rate, err := fetchExternalFee(ctx, dex.Mainnet)
+	rate, err := externalFeeRate(ctx, dex.Mainnet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fmt.Printf("External fee rate fetched:: %d sat/B\n", rate)
+}
+func TestExternalFeeRate(t *testing.T) {
+	fetchRateWithTimeout(t, dex.Mainnet)
+	fetchRateWithTimeout(t, dex.Testnet)
+}
+
+func fetchRateWithTimeout(t *testing.T, net dex.Network) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	feeRate, err := externalFeeRate(ctx, net)
+	if err != nil {
+		t.Fatalf("error fetching %s fees: %v", net, err)
+	}
+	fmt.Printf("##### Fee rate fetched for %s! %d Sats/B \n", net, feeRate)
 }

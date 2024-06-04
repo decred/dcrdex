@@ -6,12 +6,8 @@ package doge
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -184,7 +180,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		UnlockSpends:             true,
 		ConstantDustLimit:        dustLimit,
 		FeeEstimator:             estimateFee,
-		ExternalFeeEstimator:     fetchExternalFee,
+		ExternalFeeEstimator:     externalFeeRate,
 		BlockDeserializer:        dexdoge.DeserializeBlock,
 		AssetID:                  BipID,
 	}
@@ -220,37 +216,16 @@ func estimateFee(ctx context.Context, cl btc.RawRequester, _ uint64) (uint64, er
 	return uint64(math.Round(feeRate * 1e5)), nil
 }
 
-func fetchExternalFee(ctx context.Context, net dex.Network) (uint64, error) {
-	var url string
-	if net == dex.Testnet {
-		url = "https://api.bitcore.io/api/DOGE/testnet/fee/1"
-	} else {
-		url = "https://api.bitcore.io/api/DOGE/mainnet/fee/1"
-	}
-	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, err
-	}
-	httpResponse, err := http.DefaultClient.Do(r)
-	if err != nil {
-		return 0, err
-	}
-	var resp map[string]float64
-	reader := io.LimitReader(httpResponse.Body, 1<<20)
-	err = json.NewDecoder(reader).Decode(&resp)
-	if err != nil {
-		return 0, err
-	}
-	httpResponse.Body.Close()
+// DRAFT TODO: Fee rate -1 for testnet. Just use mainnet?
+var bitcoreFeeRate = btc.BitcoreRateFetcher("DOGE")
 
-	dogePerKb, ok := resp["feerate"]
-	if !ok {
-		return 0, errors.New("no fee rate in response")
+// externalFeeRate returns a fee rate for the network. If an error is
+// encountered fetching the testnet fee rate, we will try to return the
+// mainnet fee rate.
+func externalFeeRate(ctx context.Context, net dex.Network) (uint64, error) {
+	feeRate, err := bitcoreFeeRate(ctx, net)
+	if err == nil || net != dex.Testnet {
+		return feeRate, err
 	}
-	if dogePerKb <= 0 {
-		return 0, fmt.Errorf("zero or negative fee rate")
-	}
-	return uint64(math.Round(dogePerKb * 1e5)), nil // DOGE/kB => sat/B
+	return bitcoreFeeRate(ctx, dex.Mainnet)
 }

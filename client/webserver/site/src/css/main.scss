@@ -147,6 +147,22 @@ z-index: 1000;
   }
 }
 
+[data-unit] {
+  color: var(--hint-color);
+}
+
+[data-unit-box] {
+  cursor: default;
+  position: relative;
+  overflow: visible;
+
+  & > div { // unit choice menu
+    left: -2rem;
+    z-index: 10;
+    color: var(--text-color);
+  }
+}
+
 #profileBox,
 #noteBox {
   position: fixed;
