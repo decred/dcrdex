@@ -208,7 +208,7 @@ export default class Application {
     }
     // Enable logging from anywhere.
     window.log = (loggerID, ...a) => { this.log(loggerID, ...a) }
-    window.mmStatus = () => { console.log(this.mmStatus) }
+    // window.mmStatus = () => { console.log(this.mmStatus) }
 
     // Recorders can record log messages, and then save them to file on request.
     const recorderKeys = State.fetchLocal(State.recordersLK) || []

@@ -322,7 +322,6 @@ class Bot extends BotMarket {
     const div = this.div = pg.page.botTmpl.cloneNode(true) as PageElement
     const page = this.page = Doc.parseTemplate(div)
     this.runDisplay = new RunningMarketMakerDisplay(page.onBox)
-    this.runDisplay.setBotMarket(this)
 
     setMarketElements(div, baseID, quoteID, host)
     if (cexName) setCexElements(div, cexName)
@@ -368,6 +367,7 @@ class Bot extends BotMarket {
 
   async initialize (startupBalanceCache: Record<number, Promise<ExchangeBalance>>) {
     await super.initialize(startupBalanceCache)
+    this.runDisplay.setBotMarket(this)
     const {
       page, host, cexName, botType,
       cfg: { arbMarketMakingConfig, basicMarketMakingConfig }, mktID,
@@ -453,7 +453,7 @@ class Bot extends BotMarket {
     page.baseAlloc.textContent = Doc.formatFullPrecision(alloc[baseID], bui)
     const baseUSD = alloc[baseID] / baseFactor * baseFiatRate
     let totalUSD = baseUSD
-    page.baseAllocUSD.textContent = Doc.formatFullPrecision(baseUSD * baseFactor, bui)
+    page.baseAllocUSD.textContent = Doc.formatFourSigFigs(baseUSD)
     page.baseBookAlloc.textContent = Doc.formatFullPrecision(bProj.book * baseFactor, bui)
     page.baseOrderReservesAlloc.textContent = Doc.formatFullPrecision(bProj.orderReserves * baseFactor, bui)
     page.baseOrderReservesPct.textContent = String(Math.round(baseConfig.orderReservesFactor * 100))

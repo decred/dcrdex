@@ -809,7 +809,9 @@ export class RunningMarketMakerDisplay {
   async setMarket (host: string, baseID: number, quoteID: number) {
     const botStatus = app().mmStatus.bots.find(({ config: c }: MMBotStatus) => c.baseID === baseID && c.quoteID === quoteID && c.host === host)
     if (!botStatus) return
-    this.setBotMarket(new BotMarket(botStatus.config))
+    const mkt = new BotMarket(botStatus.config)
+    await mkt.initialize({})
+    this.setBotMarket(mkt)
   }
 
   async setBotMarket (mkt: BotMarket) {
@@ -873,9 +875,14 @@ export class RunningMarketMakerDisplay {
   }
 
   update () {
-    const { div, page, mkt: { baseID, quoteID, bui, qui } } = this
+    const {
+      div, page, mkt: {
+        baseID, quoteID, baseFeeID, needBaseFeeAsset, needQuoteFeeAsset, quoteFeeID,
+        baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor, marketReport: { baseFiatRate, quoteFiatRate }
+      }
+    } = this
     // Get fresh stats
-    const { botCfg: { cexName }, runStats } = this.mkt.status()
+    const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats } = this.mkt.status()
     Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
     if (!runStats) {
       if (this.ticker) {
@@ -894,33 +901,35 @@ export class RunningMarketMakerDisplay {
     setSignedValue(runStats.profitLoss, page.profitLoss, page.plSign)
     this.startTime = runStats.startTime
 
-    const summedBalanceText = (b: BotBalance, ui: UnitInfo) => {
-      if (!b) return '0'
-      return Doc.formatFourSigFigs((b.available + b.locked + b.pending) / ui.conventional.conversionFactor)
+    const summedBalance = (b: BotBalance) => {
+      if (!b) return 0
+      return b.available + b.locked + b.pending
     }
 
-    page.walletBaseInventory.textContent = summedBalanceText(runStats.dexBalances[baseID], bui)
-    page.walletQuoteInventory.textContent = summedBalanceText(runStats.dexBalances[quoteID], qui)
+    const dexBaseInv = summedBalance(runStats.dexBalances[baseID]) / baseFactor
+    page.walletBaseInventory.textContent = Doc.formatFourSigFigs(dexBaseInv)
+    page.walletBaseInvFiat.textContent = Doc.formatFourSigFigs(dexBaseInv * baseFiatRate)
+    const dexQuoteInv = summedBalance(runStats.dexBalances[quoteID]) / quoteFactor
+    page.walletQuoteInventory.textContent = Doc.formatFourSigFigs(dexQuoteInv)
+    page.walletQuoteInvFiat.textContent = Doc.formatFourSigFigs(dexQuoteInv * quoteFiatRate)
 
     Doc.setVis(cexName, page.cexRow)
     if (cexName) {
       Doc.show(page.pendingDepositBox, page.pendingWithdrawalBox)
       setCexElements(div, cexName)
-      page.cexBaseInventory.textContent = summedBalanceText(runStats.cexBalances[baseID], bui)
-      page.cexQuoteInventory.textContent = summedBalanceText(runStats.cexBalances[quoteID], qui)
+      const cexBaseInv = summedBalance(runStats.cexBalances[baseID]) / baseFactor
+      page.cexBaseInventory.textContent = Doc.formatFourSigFigs(cexBaseInv)
+      const cexQuoteInv = summedBalance(runStats.cexBalances[quoteID]) / quoteFactor
+      page.cexQuoteInventory.textContent = Doc.formatFourSigFigs(cexQuoteInv)
     }
 
-    const baseToken = app().assets[baseID].token
-    const quoteToken = app().assets[quoteID].token
-    if (baseToken) {
-      const parentID = baseToken.parentID
-      const feeBalance = runStats.dexBalances[parentID] ?? 0
-      page.baseFeeReserves.textContent = summedBalanceText(feeBalance, app().assets[parentID].unitInfo)
+    if (needBaseFeeAsset) {
+      const feeBalance = summedBalance(runStats.dexBalances[baseFeeID]) / baseFeeFactor
+      page.baseFeeReserves.textContent = Doc.formatFourSigFigs(feeBalance)
     }
-    if (quoteToken && (!baseToken || baseToken.parentID !== quoteToken.parentID)) {
-      const parentID = quoteToken.parentID
-      const feeBalance = runStats.dexBalances[parentID] ?? 0
-      page.quoteFeeReserves.textContent = summedBalanceText(feeBalance, app().assets[parentID].unitInfo)
+    if (needQuoteFeeAsset) {
+      const feeBalance = summedBalance(runStats.dexBalances[quoteFeeID]) / quoteFeeFactor
+      page.quoteFeeReserves.textContent = Doc.formatFourSigFigs(feeBalance)
     }
 
     page.pendingDeposits.textContent = String(Math.round(runStats.pendingDeposits))
@@ -928,14 +937,21 @@ export class RunningMarketMakerDisplay {
     page.completedMatches.textContent = String(Math.round(runStats.completedMatches))
     Doc.setVis(runStats.tradedUSD, page.tradedUSDBox)
     if (runStats.tradedUSD > 0) page.tradedUSD.textContent = Doc.formatFourSigFigs(runStats.tradedUSD)
-    const baseFiatRate = app().fiatRatesMap[baseID]
     Doc.setVis(baseFiatRate, page.roundTripFeesBox)
-    if (baseFiatRate) page.roundTripFeesUSD.textContent = Doc.formatFourSigFigs((runStats.feeGap?.roundTripFees / bui.conventional.conversionFactor * baseFiatRate) || 0)
+    if (baseFiatRate) page.roundTripFeesUSD.textContent = Doc.formatFourSigFigs((runStats.feeGap?.roundTripFees / baseFactor * baseFiatRate) || 0)
     const basisPrice = app().conventionalRate(baseID, quoteID, runStats.feeGap?.basisPrice || 0)
     page.basisPrice.textContent = Doc.formatFourSigFigs(basisPrice)
-    const feeGap = app().conventionalRate(baseID, quoteID, runStats.feeGap?.feeGap || 0)
-    page.feeGap.textContent = Doc.formatFourSigFigs(feeGap)
-    page.feeGapPct.textContent = (feeGap / basisPrice * 100 || 0).toFixed(2)
+
+    const displayFeeGap = !bmmCfg || bmmCfg.gapStrategy === GapStrategyAbsolutePlus || bmmCfg.gapStrategy === GapStrategyPercentPlus
+    Doc.setVis(displayFeeGap, page.feeGapBox)
+    if (displayFeeGap) {
+      const feeGap = app().conventionalRate(baseID, quoteID, runStats.feeGap?.feeGap || 0)
+      page.feeGap.textContent = Doc.formatFourSigFigs(feeGap)
+      page.feeGapPct.textContent = (feeGap / basisPrice * 100 || 0).toFixed(2)
+    }
+    Doc.setVis(bmmCfg, page.gapStrategyBox)
+    if (bmmCfg) page.gapStrategy.textContent = bmmCfg.gapStrategy
+
     const remoteGap = app().conventionalRate(baseID, quoteID, runStats.feeGap?.remoteGap || 0)
     Doc.setVis(remoteGap, page.remoteGapBox)
     if (remoteGap) {

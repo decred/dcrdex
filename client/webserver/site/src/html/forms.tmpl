@@ -956,10 +956,28 @@
       <tbody>
         <tr>
           <td class="no-stretch ps-3">
-            <img src="/img/bison-square_50.png" class="mini-icon">
+            <img class="bison-logo-square small-icon">
           </td>
-          <td data-tmpl="walletBaseInventory" class="text-end"></td>
-          <td data-tmpl="walletQuoteInventory" class="no-stretch text-end pe-3"></td>
+          <td class="text-end">
+            <div class="d-inline-flex flex-column align-items-end text-nowrap">
+              <span data-tmpl="walletBaseInventory"></span>
+              <span class="fs14 grey">
+                <span>~</span>
+                <span data-tmpl="walletBaseInvFiat"></span>
+                <span>USD</span>
+              </span>
+            </div>
+          </td>
+          <td class="no-stretch pe-3">
+            <div class="d-inline-flex flex-column text-nowrap">
+              <span data-tmpl="walletQuoteInventory"></span>
+              <span class="fs14 grey">
+                <span>~</span>
+                <span data-tmpl="walletQuoteInvFiat"></span>
+                <span>USD</span>
+              </span>
+            </div>
+          </td>
         </tr>
         <tr data-tmpl="cexRow">
           <td class="ps-3">
@@ -1036,7 +1054,7 @@
       <span data-tmpl="basisPrice"></span>
     </div>
 
-    <div class="d-flex justify-content-between align-items-center">
+    <div data-tmpl="feeGapBox" class="d-flex justify-content-between align-items-center">
       <span>
         [[[Fee gap]]]
         <span class="ico-info" data-tooltip="[[[feegap_tooltip]]]"></span>
@@ -1044,6 +1062,11 @@
       <span>
         <span data-tmpl="feeGap"></span> (<span data-tmpl="feeGapPct"></span>%)
       </span>
+    </div>
+
+    <div data-tmpl="gapStrategyBox" class="d-flex justify-content-between align-items-center">
+      <span>Gap strategy</span>
+      <span data-tmpl="gapStrategy"></span>
     </div>
 
     <div data-tmpl="remoteGapBox" class="d-flex justify-content-between align-items-center">

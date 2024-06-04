@@ -627,6 +627,16 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setupCEXes()
     this.initializeMarketRows()
 
+    // If we have specs specifying only a market, make sure the cex name and
+    // bot type are set.
+    if (specs && !specs.botType) {
+      const botCfg = await botConfig(specs, app().mmStatus)
+      specs.cexName = botCfg?.cexName ?? ''
+      specs.botType = botTypeBasicMM
+      if (botCfg?.arbMarketMakingConfig) specs.botType = botTypeArbMM
+      else if (botCfg?.simpleArbConfig) specs.botType = botTypeBasicArb
+    }
+
     const isRefresh = specs && Object.keys(specs).length === 0
     if (isRefresh) specs = State.fetchLocal(specLK)
     if (!specs || !app().walletMap[specs.baseID] || !app().walletMap[specs.quoteID]) {
@@ -642,7 +652,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   async configureUI () {
     const { page, specs } = this
-    const { host, baseID, quoteID } = specs
+    const { host, baseID, quoteID, cexName, botType } = specs
 
     const [{ symbol: baseSymbol }, { symbol: quoteSymbol }] = [app().assets[baseID], app().assets[quoteID]]
     this.mktID = `${baseSymbol}_${quoteSymbol}`
@@ -686,12 +696,10 @@ export default class MarketMakerSettingsPage extends BasePage {
       oldCfg.cexRebalance = cexRebalance
 
       if (mmCfg) {
-        this.specs.botType = botTypeBasicMM
         oldCfg.buyPlacements = mmCfg.buyPlacements
         oldCfg.sellPlacements = mmCfg.sellPlacements
         oldCfg.driftTolerance = mmCfg.driftTolerance
       } else if (arbMMCfg) {
-        this.specs.botType = botTypeArbMM
         const { buyPlacements, sellPlacements } = arbMMCfg
         oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
         oldCfg.sellPlacements = Array.from(sellPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
@@ -699,22 +707,15 @@ export default class MarketMakerSettingsPage extends BasePage {
         oldCfg.driftTolerance = arbMMCfg.driftTolerance
         oldCfg.orderPersistence = arbMMCfg.orderPersistence
       } else if (arbCfg) {
-        this.specs.botType = botTypeBasicArb
         // TODO: expose maxActiveArbs
         oldCfg.profit = arbCfg.profitTrigger
         oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
-      }
-      if (botCfg.cexName !== this.specs.cexName) {
-        this.specs.cexName = botCfg.cexName
-        if (botCfg.cexName) await this.fetchCEXBalances(this.specs)
       }
       Doc.setVis(!viewOnly, page.updateButton, page.resetButton)
     } else {
       this.creatingNewBot = true
       Doc.setVis(!viewOnly, page.createButton)
     }
-
-    const { cexName, botType } = this.specs
 
     // Now that we've updated the originalConfig, we'll copy it.
     this.updatedConfig = JSON.parse(JSON.stringify(oldCfg))
