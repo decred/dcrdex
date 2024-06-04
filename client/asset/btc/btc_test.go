@@ -855,6 +855,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 	if segwit {
 		addrStr = tP2WPKHAddr
 	}
+	node.newAddress = addrStr
 	node.changeAddr = addrStr
 	node.signFunc = func(tx *wire.MsgTx) {
 		signFunc(tx, 0, wallet.segwit)
@@ -2367,8 +2368,10 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	baggageFees := tBTC.MaxFeeRate * splitTxBaggage
 	if segwit {
 		node.changeAddr = tP2WPKHAddr
+		node.newAddress = tP2WPKHAddr
 	} else {
 		node.changeAddr = tP2PKHAddr
+		node.newAddress = tP2PKHAddr
 	}
 	node.walletCfg.useSplitTx = true
 	// No error when no split performed cuz math.
@@ -2794,6 +2797,7 @@ func TestFundEdges(t *testing.T) {
 	// well.
 	node.walletCfg.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
+	node.newAddress = tP2WPKHAddr
 	node.signFunc = func(tx *wire.MsgTx) {
 		signFunc(tx, 0, wallet.segwit)
 	}
@@ -3017,6 +3021,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// well.
 	node.walletCfg.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
+	node.newAddress = tP2WPKHAddr
 	node.signFunc = func(tx *wire.MsgTx) {
 		signFunc(tx, 0, wallet.segwit)
 	}
@@ -3220,6 +3225,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 	}
 
 	node.changeAddr = addrStr
+	node.newAddress = addrStr
 	node.privKeyForAddr = wif
 
 	redemptions := &asset.RedeemForm{
@@ -3269,13 +3275,13 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 	}
 	coin.Val = swapVal
 
-	// Change address error
-	node.changeAddrErr = tErr
+	// New address error
+	node.newAddressErr = tErr
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
-		t.Fatalf("no error for change address error")
+		t.Fatalf("no error for new address error")
 	}
-	node.changeAddrErr = nil
+	node.newAddressErr = nil
 
 	// Missing priv key error
 	node.privKeyForAddrErr = tErr
@@ -3611,6 +3617,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	bigTxOut := newTxOutResult(nil, 1e8, 2)
 	node.txOutRes = bigTxOut // rpc
 	node.changeAddr = addr.String()
+	node.newAddress = addr.String()
 	const feeSuggestion = 100
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
@@ -3676,9 +3683,9 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	tx.TxOut[0].Value = 1e8
 
 	// getrawchangeaddress error
-	node.changeAddrErr = tErr
-	ensureErr("getchangeaddress error")
-	node.changeAddrErr = nil
+	node.newAddressErr = tErr
+	ensureErr("new address error")
+	node.newAddressErr = nil
 
 	// signature error
 	node.privKeyForAddrErr = tErr
@@ -4763,8 +4770,10 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 
 	if segwit {
 		node.changeAddr = tP2WPKHAddr
+		node.newAddress = tP2WPKHAddr
 	} else {
 		node.changeAddr = tP2PKHAddr
+		node.newAddress = tP2PKHAddr
 	}
 
 	node.signFunc = func(tx *wire.MsgTx) {
@@ -5856,7 +5865,7 @@ func TestConfirmRedemption(t *testing.T) {
 		t.Fatalf("error encoding wif: %v", err)
 	}
 
-	node.changeAddr = tP2WPKHAddr
+	node.newAddress = tP2WPKHAddr
 	node.privKeyForAddr = wif
 
 	tests := []struct {
@@ -6054,6 +6063,7 @@ func TestFindBond(t *testing.T) {
 	}
 	node.listUnspent = []*ListUnspentResult{utxo}
 	node.changeAddr = tP2PKHAddr
+	node.newAddress = tP2PKHAddr
 
 	bond, _, err := wallet.MakeBondTx(0, amt, 200, lockTime, bondKey, acctID[:])
 	if err != nil {
