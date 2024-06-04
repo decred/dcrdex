@@ -6031,10 +6031,6 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 	allOutputsPayUs := func(msgTx *wire.MsgTx) bool {
 		for _, txOut := range msgTx.TxOut {
 			_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
-			if err != nil {
-				dcr.log.Errorf("ExtractAddrs error: %w", err)
-				return false
-			}
 			if len(addrs) != 1 { // sanity check
 				return false
 			}
