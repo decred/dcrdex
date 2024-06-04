@@ -6,6 +6,7 @@ package mm
 import (
 	"context"
 	"reflect"
+	"sync"
 	"testing"
 
 	"decred.org/dcrdex/client/core"
@@ -105,14 +106,11 @@ func TestArbMMRebalance(t *testing.T) {
 	}
 
 	arbMM := &arbMarketMaker{
-		baseID:      baseID,
-		quoteID:     quoteID,
-		cex:         cexAdaptor,
-		core:        coreAdaptor,
-		log:         tLogger,
-		mkt:         mkt,
-		dexReserves: make(map[uint32]uint64),
-		cexReserves: make(map[uint32]uint64),
+		unifiedExchangeAdaptor: mustParseAdaptorFromMarket(mkt),
+		cex:                    cexAdaptor,
+		core:                   coreAdaptor,
+		dexReserves:            make(map[uint32]uint64),
+		cexReserves:            make(map[uint32]uint64),
 	}
 	arbMM.cfgV.Store(cfg)
 
@@ -123,7 +121,7 @@ func TestArbMMRebalance(t *testing.T) {
 		if sell {
 			fees = sellFeesInQuoteUnits
 		}
-		rate, err := dexPlacementRate(counterTradeRate, sell, 0.01, mkt, fees, tLogger)
+		rate, err := dexPlacementRate(counterTradeRate, sell, 0.01, mustParseMarket(mkt), fees, tLogger)
 		if err != nil {
 			panic(err)
 		}
@@ -349,21 +347,20 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 		defer cancel()
 
 		arbMM := &arbMarketMaker{
-			cex:           cex,
-			core:          coreAdaptor,
-			ctx:           ctx,
-			baseID:        42,
-			quoteID:       0,
-			matchesSeen:   make(map[order.MatchID]bool),
-			cexTrades:     make(map[string]uint64),
-			mkt:           mkt,
-			pendingOrders: test.pendingOrders,
+			unifiedExchangeAdaptor: mustParseAdaptorFromMarket(mkt),
+			cex:                    cex,
+			core:                   coreAdaptor,
+			matchesSeen:            make(map[order.MatchID]bool),
+			cexTrades:              make(map[string]uint64),
+			pendingOrders:          test.pendingOrders,
 		}
+		arbMM.ctx = ctx
+		arbMM.setBotLoop(arbMM.botLoop)
 		arbMM.cfgV.Store(&ArbMarketMakerConfig{
 			Profit: profit,
 		})
 		arbMM.currEpoch.Store(123)
-		_, err := arbMM.Connect(ctx)
+		err := arbMM.runBotLoop(ctx)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
@@ -399,7 +396,7 @@ func TestDEXPlacementRate(t *testing.T) {
 		base             uint32
 		quote            uint32
 		fees             uint64
-		mkt              *core.Market
+		mkt              *market
 	}
 
 	tests := []*test{
@@ -410,12 +407,12 @@ func TestDEXPlacementRate(t *testing.T) {
 			base:             42,
 			quote:            0,
 			fees:             4e5,
-			mkt: &core.Market{
+			mkt: mustParseMarket(&core.Market{
 				BaseID:   42,
 				QuoteID:  0,
 				LotSize:  40e8,
 				RateStep: 1e2,
-			},
+			}),
 		},
 		{
 			name:             "btc/usdc.eth",
@@ -424,12 +421,12 @@ func TestDEXPlacementRate(t *testing.T) {
 			base:             0,
 			quote:            60001,
 			fees:             5e5,
-			mkt: &core.Market{
+			mkt: mustParseMarket(&core.Market{
 				BaseID:   0,
 				QuoteID:  60001,
 				LotSize:  5e6,
 				RateStep: 1e4,
-			},
+			}),
 		},
 		{
 			name:             "wbtc.polygon/usdc.eth",
@@ -438,12 +435,12 @@ func TestDEXPlacementRate(t *testing.T) {
 			base:             966003,
 			quote:            60001,
 			fees:             3e5,
-			mkt: &core.Market{
+			mkt: mustParseMarket(&core.Market{
 				BaseID:   966003,
 				QuoteID:  60001,
 				LotSize:  5e6,
 				RateStep: 1e4,
-			},
+			}),
 		},
 	}
 
@@ -454,7 +451,7 @@ func TestDEXPlacementRate(t *testing.T) {
 		}
 
 		expectedProfitableSellRate := uint64(float64(tt.counterTradeRate) * (1 + tt.profit))
-		additional := calc.BaseToQuote(sellRate, tt.mkt.LotSize) - calc.BaseToQuote(expectedProfitableSellRate, tt.mkt.LotSize)
+		additional := calc.BaseToQuote(sellRate, tt.mkt.lotSize) - calc.BaseToQuote(expectedProfitableSellRate, tt.mkt.lotSize)
 		if additional > tt.fees*101/100 || additional < tt.fees*99/100 {
 			t.Fatalf("%s: expected additional %d but got %d", tt.name, tt.fees, additional)
 		}
@@ -464,7 +461,7 @@ func TestDEXPlacementRate(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", tt.name, err)
 		}
 		expectedProfitableBuyRate := uint64(float64(tt.counterTradeRate) / (1 + tt.profit))
-		savings := calc.BaseToQuote(expectedProfitableBuyRate, tt.mkt.LotSize) - calc.BaseToQuote(buyRate, tt.mkt.LotSize)
+		savings := calc.BaseToQuote(expectedProfitableBuyRate, tt.mkt.lotSize) - calc.BaseToQuote(buyRate, tt.mkt.lotSize)
 		if savings > tt.fees*101/100 || savings < tt.fees*99/100 {
 			t.Fatalf("%s: expected savings %d but got %d", tt.name, tt.fees, savings)
 		}
@@ -473,4 +470,48 @@ func TestDEXPlacementRate(t *testing.T) {
 	for _, test := range tests {
 		runTest(test)
 	}
+}
+
+func mustParseMarket(m *core.Market) *market {
+	mkt, err := parseMarket("host.com", m)
+	if err != nil {
+		panic(err.Error())
+	}
+	return mkt
+}
+
+func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
+	return &unifiedExchangeAdaptor{
+		market:    mustParseMarket(m),
+		log:       tLogger,
+		botLooper: botLooper(dummyLooper),
+	}
+}
+
+func mustParseAdaptor(cfg *exchangeAdaptorCfg) *unifiedExchangeAdaptor {
+	if cfg.core.(*tCore).market == nil {
+		cfg.core.(*tCore).market = &core.Market{
+			BaseID:  cfg.mwh.BaseID,
+			QuoteID: cfg.mwh.QuoteID,
+		}
+	}
+	cfg.log = tLogger
+	adaptor, err := newUnifiedExchangeAdaptor(cfg)
+	if err != nil {
+		panic(err.Error())
+	}
+	adaptor.ctx = context.Background()
+	adaptor.botLooper = botLooper(dummyLooper)
+	adaptor.botCfgV.Store(&BotConfig{})
+	return adaptor
+}
+
+func dummyLooper(ctx context.Context) (*sync.WaitGroup, error) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		<-ctx.Done()
+		wg.Done()
+	}()
+	return &wg, nil
 }

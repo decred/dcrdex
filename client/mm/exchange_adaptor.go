@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +21,6 @@ import (
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -52,21 +52,6 @@ type orderFees struct {
 	funding uint64
 }
 
-// exchangeAdaptor is an interface used by the MarketMaker to access functions
-// in order to check balances and update the bot configuration. An interface
-// is created to simplify testing.
-type exchangeAdaptor interface {
-	refreshAllPendingEvents(context.Context)
-	DEXBalance(assetID uint32) *BotBalance
-	CEXBalance(assetID uint32) *BotBalance
-	balances() map[uint32]*BotBalances
-	stats() *RunStats
-	updateConfig(cfg *BotConfig)
-	updateInventory(balanceDiffs *BotInventoryDiffs)
-	timeStart() int64
-	Book() (buys, sells []*core.MiniOrder, _ error)
-}
-
 // botCoreAdaptor is an interface used by bots to access DEX related
 // functions. Common functionality used by multiple market making
 // strategies is implemented here. The functions in this interface
@@ -77,7 +62,6 @@ type botCoreAdaptor interface {
 	Cancel(oidB dex.Bytes) error
 	DEXTrade(rate, qty uint64, sell bool) (*core.Order, error)
 	ExchangeMarket(host string, baseID, quoteID uint32) (*core.Market, error)
-	MarketConfig(host string, baseID, quoteID uint32) (*msgjson.Market, error)
 	MultiTrade(placements []*multiTradePlacement, sell bool, driftTolerance float64, currEpoch uint64, dexReserves, cexReserves map[uint32]uint64) []*order.OrderID
 	ExchangeRateFromFiatSources() uint64
 	OrderFeesInUnits(sell, base bool, rate uint64) (uint64, error) // estimated fees, not max
@@ -209,8 +193,98 @@ type pendingCEXOrder struct {
 	trade    *libxc.Trade
 }
 
+// market is the market-related data for the unifiedExchangeAdaptor and the
+// calculators. market provides a number of methods for conversions and
+// formatting.
+type market struct {
+	host        string
+	name        string
+	rateStep    uint64
+	lotSize     uint64
+	baseID      uint32
+	baseTicker  string
+	bui         dex.UnitInfo
+	baseFeeID   uint32
+	baseFeeUI   dex.UnitInfo
+	quoteID     uint32
+	quoteTicker string
+	qui         dex.UnitInfo
+	quoteFeeID  uint32
+	quoteFeeUI  dex.UnitInfo
+}
+
+func parseMarket(host string, mkt *core.Market) (*market, error) {
+	bui, err := asset.UnitInfo(mkt.BaseID)
+	if err != nil {
+		return nil, err
+	}
+	baseFeeID := mkt.BaseID
+	baseFeeUI := bui
+	if tkn := asset.TokenInfo(mkt.BaseID); tkn != nil {
+		baseFeeID = tkn.ParentID
+		baseFeeUI, err = asset.UnitInfo(tkn.ParentID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	qui, err := asset.UnitInfo(mkt.QuoteID)
+	if err != nil {
+		return nil, err
+	}
+	quoteFeeID := mkt.QuoteID
+	quoteFeeUI := qui
+	if tkn := asset.TokenInfo(mkt.QuoteID); tkn != nil {
+		quoteFeeID = tkn.ParentID
+		quoteFeeUI, err = asset.UnitInfo(tkn.ParentID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &market{
+		host:        host,
+		name:        mkt.Name,
+		rateStep:    mkt.RateStep,
+		lotSize:     mkt.LotSize,
+		baseID:      mkt.BaseID,
+		baseTicker:  bui.Conventional.Unit,
+		bui:         bui,
+		baseFeeID:   baseFeeID,
+		baseFeeUI:   baseFeeUI,
+		quoteID:     mkt.QuoteID,
+		quoteTicker: qui.Conventional.Unit,
+		qui:         qui,
+		quoteFeeID:  quoteFeeID,
+		quoteFeeUI:  quoteFeeUI,
+	}, nil
+}
+
+func (m *market) fmtRate(msgRate uint64) string {
+	r := calc.ConventionalRate(msgRate, m.bui, m.qui)
+	s := strconv.FormatFloat(r, 'f', 8, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0.")
+	}
+	return s
+}
+func (m *market) fmtBase(atoms uint64) string {
+	return m.bui.FormatAtoms(atoms)
+}
+
+func (m *market) fmtBaseFees(atoms uint64) string {
+	return m.baseFeeUI.FormatAtoms(atoms)
+}
+
+func (m *market) fmtQuoteFees(atoms uint64) string {
+	return m.quoteFeeUI.FormatAtoms(atoms)
+}
+
+func (m *market) msgRate(convRate float64) uint64 {
+	return calc.MessageRate(convRate, m.bui, m.qui)
+}
+
 // unifiedExchangeAdaptor implements both botCoreAdaptor and botCexAdaptor.
 type unifiedExchangeAdaptor struct {
+	*market
 	clientCore
 	libxc.CEX
 
@@ -219,10 +293,14 @@ type unifiedExchangeAdaptor struct {
 	log             dex.Logger
 	fiatRates       atomic.Value // map[uint32]float64
 	orderUpdates    atomic.Value // chan *core.Order
-	market          *MarketWithHost
+	mwh             *MarketWithHost
 	eventLogDB      eventLogDB
-	botCfg          atomic.Value // *BotConfig
+	botCfgV         atomic.Value // *BotConfig
 	initialBalances map[uint32]uint64
+
+	botLooper dex.Connector
+	botLoop   *dex.ConnectionMaster
+	paused    atomic.Bool
 
 	subscriptionIDMtx sync.RWMutex
 	subscriptionID    *int
@@ -274,7 +352,48 @@ type unifiedExchangeAdaptor struct {
 
 var _ botCoreAdaptor = (*unifiedExchangeAdaptor)(nil)
 var _ botCexAdaptor = (*unifiedExchangeAdaptor)(nil)
-var _ exchangeAdaptor = (*unifiedExchangeAdaptor)(nil)
+
+func (u *unifiedExchangeAdaptor) botCfg() *BotConfig {
+	return u.botCfgV.Load().(*BotConfig)
+}
+
+// botLooper is just a dex.Connector for a function.
+type botLooper func(context.Context) (*sync.WaitGroup, error)
+
+func (f botLooper) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	return f(ctx)
+}
+
+// setBotLoop sets the loop that must be shut down for configuration updates.
+// Every bot should call setBotLoop during construction.
+func (u *unifiedExchangeAdaptor) setBotLoop(f botLooper) {
+	u.botLooper = f
+}
+
+func (u *unifiedExchangeAdaptor) runBotLoop(ctx context.Context) error {
+	if u.botLooper == nil {
+		return errors.New("no bot looper set")
+	}
+	u.botLoop = dex.NewConnectionMaster(u.botLooper)
+	return u.botLoop.ConnectOnce(ctx)
+}
+
+// withPause runs a function with the bot loop paused.
+func (u *unifiedExchangeAdaptor) withPause(f func() error) error {
+	if !u.paused.CompareAndSwap(false, true) {
+		return errors.New("already paused")
+	}
+	defer u.paused.Store(false)
+
+	u.botLoop.Disconnect()
+	if err := f(); err != nil {
+		return err
+	}
+	if u.ctx.Err() != nil { // Make sure we weren't shut down during pause.
+		return u.ctx.Err()
+	}
+	return u.botLoop.ConnectOnce(u.ctx)
+}
 
 func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[uint32]int64, reason string) {
 	var msg strings.Builder
@@ -332,18 +451,13 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 // SufficientBalanceForDEXTrade returns whether the bot has sufficient balance
 // to place a DEX trade.
 func (u *unifiedExchangeAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, sell bool) (bool, error) {
-	fromAsset, fromFeeAsset, toAsset, toFeeAsset := orderAssets(u.market.BaseID, u.market.QuoteID, sell)
+	fromAsset, fromFeeAsset, toAsset, toFeeAsset := orderAssets(u.baseID, u.quoteID, sell)
 	balances := map[uint32]uint64{}
 	for _, assetID := range []uint32{fromAsset, fromFeeAsset, toAsset, toFeeAsset} {
 		if _, found := balances[assetID]; !found {
 			bal := u.DEXBalance(assetID)
 			balances[assetID] = bal.Available
 		}
-	}
-
-	mkt, err := u.clientCore.MarketConfig(u.market.Host, u.market.BaseID, u.market.QuoteID)
-	if err != nil {
-		return false, fmt.Errorf("Error getting lot size for market %s: %v", u.market, err)
 	}
 
 	buyFees, sellFees, err := u.orderFees()
@@ -369,7 +483,7 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, 
 	}
 	balances[fromAsset] -= fromQty
 
-	numLots := qty / mkt.LotSize
+	numLots := qty / u.lotSize
 	if balances[fromFeeAsset] < numLots*fees.Swap {
 		return false, nil
 	}
@@ -398,10 +512,10 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID ui
 	var fromAssetID uint32
 	var fromAssetQty uint64
 	if sell {
-		fromAssetID = u.market.BaseID
+		fromAssetID = u.baseID
 		fromAssetQty = qty
 	} else {
-		fromAssetID = u.market.QuoteID
+		fromAssetID = u.quoteID
 		fromAssetQty = calc.BaseToQuote(rate, qty)
 	}
 
@@ -451,7 +565,7 @@ func (u *unifiedExchangeAdaptor) updateDEXOrderEvent(o *pendingDEXOrder, complet
 		},
 	}
 
-	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e, u.balanceState())
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, e, u.balanceState())
 	u.notifyEvent(e)
 }
 
@@ -483,7 +597,7 @@ func (u *unifiedExchangeAdaptor) updateCEXOrderEvent(trade *libxc.Trade, eventID
 		},
 	}
 
-	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e, u.balanceState())
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, e, u.balanceState())
 	u.notifyEvent(e)
 }
 
@@ -497,7 +611,7 @@ func (u *unifiedExchangeAdaptor) updateDepositEvent(deposit *pendingDeposit) {
 	if deposit.cexConfirmed && deposit.tx.Amount > deposit.amtCredited {
 		diff = int64(deposit.tx.Amount - deposit.amtCredited)
 	}
-	if deposit.assetID == u.market.BaseID {
+	if deposit.assetID == u.baseID {
 		baseDelta = -diff
 		baseFees = deposit.tx.Fees
 	} else {
@@ -520,7 +634,7 @@ func (u *unifiedExchangeAdaptor) updateDepositEvent(deposit *pendingDeposit) {
 	}
 	deposit.mtx.RUnlock()
 
-	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e, u.balanceState())
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, e, u.balanceState())
 	u.notifyEvent(e)
 }
 
@@ -530,7 +644,7 @@ func (u *unifiedExchangeAdaptor) updateConfigEvent(updatedCfg *BotConfig) {
 		TimeStamp:    time.Now().Unix(),
 		UpdateConfig: updatedCfg,
 	}
-	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e, u.balanceState())
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, e, u.balanceState())
 }
 
 func (u *unifiedExchangeAdaptor) updateInventoryEvent(inventoryMods map[uint32]int64) {
@@ -539,7 +653,7 @@ func (u *unifiedExchangeAdaptor) updateInventoryEvent(inventoryMods map[uint32]i
 		TimeStamp:       time.Now().Unix(),
 		UpdateInventory: &inventoryMods,
 	}
-	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e, u.balanceState())
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, e, u.balanceState())
 }
 
 // updateWithdrawalEvent updates the event log with the current state of a
@@ -548,7 +662,7 @@ func (u *unifiedExchangeAdaptor) updateWithdrawalEvent(withdrawalID string, with
 	var baseFees, quoteFees uint64
 	complete := tx != nil && tx.Confirmed
 	if complete && withdrawal.amtWithdrawn > tx.Amount {
-		if withdrawal.assetID == u.market.BaseID {
+		if withdrawal.assetID == u.baseID {
 			baseFees = withdrawal.amtWithdrawn - tx.Amount
 		} else {
 			quoteFees = withdrawal.amtWithdrawn - tx.Amount
@@ -569,7 +683,7 @@ func (u *unifiedExchangeAdaptor) updateWithdrawalEvent(withdrawalID string, with
 		},
 	}
 
-	u.eventLogDB.storeEvent(u.startTime.Load(), u.market, e, u.balanceState())
+	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, e, u.balanceState())
 	u.notifyEvent(e)
 }
 
@@ -653,7 +767,7 @@ func (u *unifiedExchangeAdaptor) placeMultiTrade(placements []*dexOrderInfo, sel
 		corePlacements = append(corePlacements, p.placement)
 	}
 
-	botCfg := u.botCfg.Load().(*BotConfig)
+	botCfg := u.botCfg()
 	var walletOptions map[string]string
 	if sell {
 		walletOptions = botCfg.BaseWalletOptions
@@ -661,11 +775,11 @@ func (u *unifiedExchangeAdaptor) placeMultiTrade(placements []*dexOrderInfo, sel
 		walletOptions = botCfg.QuoteWalletOptions
 	}
 
-	fromAsset, fromFeeAsset, _, toFeeAsset := orderAssets(u.market.BaseID, u.market.QuoteID, sell)
+	fromAsset, fromFeeAsset, _, toFeeAsset := orderAssets(u.baseID, u.quoteID, sell)
 	multiTradeForm := &core.MultiTradeForm{
-		Host:       u.market.Host,
-		Base:       u.market.BaseID,
-		Quote:      u.market.QuoteID,
+		Host:       u.host,
+		Base:       u.baseID,
+		Quote:      u.quoteID,
 		Sell:       sell,
 		Placements: corePlacements,
 		Options:    walletOptions,
@@ -773,7 +887,7 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 	if len(placements) == 0 {
 		return nil
 	}
-	mkt, err := u.ExchangeMarket(u.market.Host, u.market.BaseID, u.market.QuoteID)
+	mkt, err := u.ExchangeMarket(u.host, u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("MultiTrade: error getting market: %v", err)
 		return nil
@@ -872,6 +986,9 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 			}
 
 			if mustCancel {
+				u.log.Tracef("%s cancel with rate = %s, placement rate = %s, drift tolerance = %.4f%%",
+					u.mwh, u.fmtRate(order.Rate), u.fmtRate(placements[o.placementIndex].rate), driftTolerance*100,
+				)
 				addCancel(order)
 			} else {
 				keptOrders = append([]*pendingDEXOrder{o}, keptOrders...)
@@ -1255,7 +1372,7 @@ func (u *unifiedExchangeAdaptor) balanceState() *BalanceState {
 	u.balancesMtx.RLock()
 	defer u.balancesMtx.RUnlock()
 
-	fromAsset, toAsset, fromFeeAsset, toFeeAsset := orderAssets(u.market.BaseID, u.market.QuoteID, true)
+	fromAsset, toAsset, fromFeeAsset, toFeeAsset := orderAssets(u.baseID, u.quoteID, true)
 
 	balances := make(map[uint32]*BotBalance, 4)
 	assets := []uint32{fromAsset, toAsset}
@@ -1319,7 +1436,7 @@ func (u *unifiedExchangeAdaptor) pendingDepositComplete(deposit *pendingDeposit)
 	if tx.Amount > amtCredited {
 		diff = int64(tx.Amount - amtCredited)
 	}
-	if assetID == u.market.BaseID {
+	if assetID == u.baseID {
 		u.runStats.baseBalanceDelta.Add(-diff)
 		u.runStats.baseFees.Add(tx.Fees)
 	} else {
@@ -1327,7 +1444,7 @@ func (u *unifiedExchangeAdaptor) pendingDepositComplete(deposit *pendingDeposit)
 		u.runStats.quoteFees.Add(tx.Fees)
 	}
 
-	if assetID == u.market.BaseID {
+	if assetID == u.baseID {
 		u.pendingBaseRebalance.Store(false)
 	} else {
 		u.pendingQuoteRebalance.Store(false)
@@ -1430,7 +1547,7 @@ func (u *unifiedExchangeAdaptor) Deposit(ctx context.Context, assetID uint32, am
 		return err
 	}
 
-	if assetID == u.market.BaseID {
+	if assetID == u.baseID {
 		u.pendingBaseRebalance.Store(true)
 	} else {
 		u.pendingQuoteRebalance.Store(true)
@@ -1491,7 +1608,7 @@ func (u *unifiedExchangeAdaptor) pendingWithdrawalComplete(id string, tx *asset.
 	}
 	delete(u.pendingWithdrawals, id)
 
-	if withdrawal.assetID == u.market.BaseID {
+	if withdrawal.assetID == u.baseID {
 		u.pendingBaseRebalance.Store(false)
 	} else {
 		u.pendingQuoteRebalance.Store(false)
@@ -1503,7 +1620,7 @@ func (u *unifiedExchangeAdaptor) pendingWithdrawalComplete(id string, tx *asset.
 
 	dexDiffs := map[uint32]int64{withdrawal.assetID: int64(tx.Amount)}
 	cexDiffs := map[uint32]int64{withdrawal.assetID: -int64(withdrawal.amtWithdrawn)}
-	if withdrawal.assetID == u.market.BaseID {
+	if withdrawal.assetID == u.baseID {
 		u.runStats.baseFees.Add(withdrawal.amtWithdrawn - tx.Amount)
 	} else {
 		u.runStats.quoteFees.Add(withdrawal.amtWithdrawn - tx.Amount)
@@ -1582,7 +1699,7 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 	if err != nil {
 		return err
 	}
-	if assetID == u.market.BaseID {
+	if assetID == u.baseID {
 		u.pendingBaseRebalance.Store(true)
 	} else {
 		u.pendingQuoteRebalance.Store(true)
@@ -1619,7 +1736,7 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 }
 
 func (u *unifiedExchangeAdaptor) autoRebalanceConfig() *AutoRebalanceConfig {
-	cexCfg := u.botCfg.Load().(*BotConfig).CEXCfg
+	cexCfg := u.botCfg().CEXCfg
 	if cexCfg != nil {
 		return cexCfg.AutoRebalance
 	}
@@ -1639,9 +1756,9 @@ func (u *unifiedExchangeAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint6
 	}
 
 	var base bool
-	if assetID == u.market.BaseID {
+	if assetID == u.baseID {
 		base = true
-	} else if assetID != u.market.QuoteID {
+	} else if assetID != u.quoteID {
 		u.log.Errorf("Asset %d is not the base or quote asset of the market", assetID)
 		return
 	}
@@ -1707,7 +1824,7 @@ func (u *unifiedExchangeAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint6
 	}
 
 	u.log.Warnf("Could not free up enough funds for %s %s rebalance. Freed %d, needed %d",
-		dex.BipIDSymbol(assetID), dex.BipIDSymbol(u.market.QuoteID), amt, amt+autoRebalanceCfg.MinQuoteTransfer)
+		dex.BipIDSymbol(assetID), dex.BipIDSymbol(u.quoteID), amt, amt+autoRebalanceCfg.MinQuoteTransfer)
 }
 
 func (u *unifiedExchangeAdaptor) rebalanceAsset(ctx context.Context, assetID uint32, minAmount, minTransferAmount uint64) (toSend int64, dexReserves, cexReserves uint64) {
@@ -1788,14 +1905,14 @@ func (u *unifiedExchangeAdaptor) PrepareRebalance(ctx context.Context, assetID u
 
 	var minAmount uint64
 	var minTransferAmount uint64
-	if assetID == u.market.BaseID {
+	if assetID == u.baseID {
 		if u.pendingBaseRebalance.Load() {
 			return
 		}
 		minAmount = autoRebalanceCfg.MinBaseAmt
 		minTransferAmount = autoRebalanceCfg.MinBaseTransfer
 	} else {
-		if assetID != u.market.QuoteID {
+		if assetID != u.quoteID {
 			u.log.Errorf("assetID %d is not the base or quote asset ID of the market", assetID)
 			return
 		}
@@ -1972,7 +2089,7 @@ func (u *unifiedExchangeAdaptor) fiatRate(assetID uint32) float64 {
 
 // ExchangeRateFromFiatSources returns market's exchange rate using fiat sources.
 func (u *unifiedExchangeAdaptor) ExchangeRateFromFiatSources() uint64 {
-	atomicCFactor, err := u.atomicConversionRateFromFiat(u.market.BaseID, u.market.QuoteID)
+	atomicCFactor, err := u.atomicConversionRateFromFiat(u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("Error genrating atomic conversion rate: %v", err)
 		return 0
@@ -2032,9 +2149,9 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 	if sell {
 		baseFees, quoteFees = sellFees.Swap, sellFees.Redeem
 	}
-	toID := u.market.QuoteID
+	toID := u.quoteID
 	if base {
-		toID = u.market.BaseID
+		toID = u.baseID
 	}
 
 	convertViaFiat := func(fees uint64, fromID uint32) (uint64, error) {
@@ -2047,7 +2164,7 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 
 	var baseFeesInUnits, quoteFeesInUnits uint64
 
-	baseToken := asset.TokenInfo(u.market.BaseID)
+	baseToken := asset.TokenInfo(u.baseID)
 	if baseToken != nil {
 		baseFeesInUnits, err = convertViaFiat(baseFees, baseToken.ParentID)
 		if err != nil {
@@ -2061,7 +2178,7 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 		}
 	}
 
-	quoteToken := asset.TokenInfo(u.market.QuoteID)
+	quoteToken := asset.TokenInfo(u.quoteID)
 	if quoteToken != nil {
 		quoteFeesInUnits, err = convertViaFiat(quoteFees, quoteToken.ParentID)
 		if err != nil {
@@ -2127,7 +2244,7 @@ func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
 			}
 
 			done = false
-			err = u.CEX.CancelTrade(ctx, u.market.BaseID, u.market.QuoteID, pendingOrder.trade.ID)
+			err = u.CEX.CancelTrade(ctx, u.baseID, u.quoteID, pendingOrder.trade.ID)
 			if err != nil {
 				u.log.Errorf("Error canceling CEX trade %s: %v", pendingOrder.trade.ID, err)
 			}
@@ -2141,14 +2258,14 @@ func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
 		return true
 	}
 
-	book, bookFeed, err := u.clientCore.SyncBook(u.market.Host, u.market.BaseID, u.market.QuoteID)
+	book, bookFeed, err := u.clientCore.SyncBook(u.host, u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("Error syncing book for cancellations: %v", err)
 		doCancels(nil, orderAlwaysBooked)
 		return
 	}
 
-	mktCfg, err := u.clientCore.ExchangeMarket(u.market.Host, u.market.BaseID, u.market.QuoteID)
+	mktCfg, err := u.clientCore.ExchangeMarket(u.host, u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("Error getting market configuration: %v", err)
 		doCancels(nil, orderAlwaysBooked)
@@ -2502,8 +2619,8 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 			return
 		}
 		u.updatePendingDEXOrder(o)
-		cfg := u.botCfg.Load().(*BotConfig)
-		if cfg.Host != note.Host || u.market.ID() != note.MarketID {
+		cfg := u.botCfg()
+		if cfg.Host != note.Host || u.mwh.ID() != note.MarketID {
 			return
 		}
 		if note.Topic() == core.TopicRedemptionConfirmed {
@@ -2524,25 +2641,25 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 // updateFeeRates updates the cached fee rates for placing orders on the market
 // specified by the exchangeAdaptorCfg used to create the unifiedExchangeAdaptor.
 func (u *unifiedExchangeAdaptor) updateFeeRates() error {
-	maxBaseFees, maxQuoteFees, err := marketFees(u.clientCore, u.market.Host, u.market.BaseID, u.market.QuoteID, true)
+	maxBaseFees, maxQuoteFees, err := marketFees(u.clientCore, u.host, u.baseID, u.quoteID, true)
 	if err != nil {
 		return err
 	}
 
-	estBaseFees, estQuoteFees, err := marketFees(u.clientCore, u.market.Host, u.market.BaseID, u.market.QuoteID, false)
+	estBaseFees, estQuoteFees, err := marketFees(u.clientCore, u.host, u.baseID, u.quoteID, false)
 	if err != nil {
 		return err
 	}
 
-	botCfg := u.botCfg.Load().(*BotConfig)
+	botCfg := u.botCfg()
 	maxBuyPlacements, maxSellPlacements := botCfg.maxPlacements()
 
-	buyFundingFees, err := u.clientCore.MaxFundingFees(u.market.QuoteID, u.market.Host, maxBuyPlacements, botCfg.BaseWalletOptions)
+	buyFundingFees, err := u.clientCore.MaxFundingFees(u.quoteID, u.host, maxBuyPlacements, botCfg.BaseWalletOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get buy funding fees: %v", err)
 	}
 
-	sellFundingFees, err := u.clientCore.MaxFundingFees(u.market.BaseID, u.market.Host, maxSellPlacements, botCfg.QuoteWalletOptions)
+	sellFundingFees, err := u.clientCore.MaxFundingFees(u.baseID, u.host, maxSellPlacements, botCfg.QuoteWalletOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get sell funding fees: %v", err)
 	}
@@ -2597,19 +2714,17 @@ func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, 
 	startTime := time.Now().Unix()
 	u.startTime.Store(startTime)
 
-	botCfg := u.botCfg.Load().(*BotConfig)
-	err = u.eventLogDB.storeNewRun(startTime, u.market, botCfg, u.balanceState())
+	err = u.eventLogDB.storeNewRun(startTime, u.mwh, u.botCfg(), u.balanceState())
 	if err != nil {
 		return nil, fmt.Errorf("failed to store new run in event log db: %v", err)
 	}
 
 	var wg sync.WaitGroup
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		<-ctx.Done()
-		u.eventLogDB.endRun(startTime, u.market, time.Now().Unix())
+		u.eventLogDB.endRun(startTime, u.mwh, time.Now().Unix())
 	}()
 
 	wg.Add(1)
@@ -2655,6 +2770,10 @@ func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, 
 			}
 		}
 	}()
+
+	if err := u.runBotLoop(ctx); err != nil {
+		return nil, fmt.Errorf("error starting bot loop: %w", err)
+	}
 
 	return &wg, nil
 }
@@ -2772,11 +2891,11 @@ func (u *unifiedExchangeAdaptor) stats() *RunStats {
 }
 
 func (u *unifiedExchangeAdaptor) sendStatsUpdate() {
-	u.clientCore.Broadcast(newRunStatsNote(u.market.Host, u.market.BaseID, u.market.QuoteID, u.stats()))
+	u.clientCore.Broadcast(newRunStatsNote(u.host, u.baseID, u.quoteID, u.stats()))
 }
 
 func (u *unifiedExchangeAdaptor) notifyEvent(e *MarketMakingEvent) {
-	u.clientCore.Broadcast(newRunEventNote(u.market.Host, u.market.BaseID, u.market.QuoteID, u.startTime.Load(), e))
+	u.clientCore.Broadcast(newRunEventNote(u.host, u.baseID, u.quoteID, u.startTime.Load(), e))
 }
 
 func (u *unifiedExchangeAdaptor) registerFeeGap(s *FeeGapStats) {
@@ -2824,7 +2943,7 @@ func (u *unifiedExchangeAdaptor) updateBalances(balanceDiffs *BotInventoryDiffs)
 }
 
 func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig) {
-	u.botCfg.Store(cfg)
+	u.botCfgV.Store(cfg)
 	u.updateConfigEvent(cfg)
 }
 
@@ -2833,12 +2952,12 @@ func (u *unifiedExchangeAdaptor) updateInventory(balanceDiffs *BotInventoryDiffs
 }
 
 func (u *unifiedExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
-	return u.CEX.Book(u.market.BaseID, u.market.QuoteID)
+	return u.CEX.Book(u.baseID, u.quoteID)
 }
 
 type exchangeAdaptorCfg struct {
 	botID           string
-	market          *MarketWithHost
+	mwh             *MarketWithHost
 	baseDexBalances map[uint32]uint64
 	baseCexBalances map[uint32]uint64
 	core            clientCore
@@ -2848,8 +2967,8 @@ type exchangeAdaptorCfg struct {
 	botCfg          *BotConfig
 }
 
-// unifiedExchangeAdaptorForBot returns a unifiedExchangeAdaptor for the specified bot.
-func unifiedExchangeAdaptorForBot(cfg *exchangeAdaptorCfg) *unifiedExchangeAdaptor {
+// newUnifiedExchangeAdaptor is the constructor for a unifiedExchangeAdaptor.
+func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor, error) {
 	initialBalances := make(map[uint32]uint64, len(cfg.baseDexBalances))
 	for assetID, balance := range cfg.baseDexBalances {
 		initialBalances[assetID] = balance
@@ -2867,7 +2986,18 @@ func unifiedExchangeAdaptorForBot(cfg *exchangeAdaptorCfg) *unifiedExchangeAdapt
 		baseCEXBalances[assetID] = int64(balance)
 	}
 
+	coreMkt, err := cfg.core.ExchangeMarket(cfg.mwh.Host, cfg.mwh.BaseID, cfg.mwh.QuoteID)
+	if err != nil {
+		return nil, err
+	}
+
+	mkt, err := parseMarket(cfg.mwh.Host, coreMkt)
+	if err != nil {
+		return nil, err
+	}
+
 	adaptor := &unifiedExchangeAdaptor{
+		market:          mkt,
 		clientCore:      cfg.core,
 		CEX:             cfg.cex,
 		botID:           cfg.botID,
@@ -2881,12 +3011,12 @@ func unifiedExchangeAdaptorForBot(cfg *exchangeAdaptorCfg) *unifiedExchangeAdapt
 		pendingCEXOrders:   make(map[string]*pendingCEXOrder),
 		pendingDeposits:    make(map[string]*pendingDeposit),
 		pendingWithdrawals: make(map[string]*pendingWithdrawal),
-		market:             cfg.market,
+		mwh:                cfg.mwh,
 		inventoryMods:      make(map[uint32]int64),
 	}
 
 	adaptor.fiatRates.Store(map[uint32]float64{})
-	adaptor.botCfg.Store(cfg.botCfg)
+	adaptor.botCfgV.Store(cfg.botCfg)
 
-	return adaptor
+	return adaptor, nil
 }

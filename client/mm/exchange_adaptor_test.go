@@ -198,7 +198,7 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 				QuoteID: test.quoteID,
 				LotSize: lotSize,
 			}
-			mkt := &MarketWithHost{
+			mwh := &MarketWithHost{
 				BaseID:  test.baseID,
 				QuoteID: test.quoteID,
 			}
@@ -207,14 +207,12 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 
 			checkBalanceSufficient := func(expSufficient bool) {
 				t.Helper()
-				adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+				adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 					core:            tCore,
 					baseDexBalances: test.balances,
-					market:          mkt,
-					log:             tLogger,
+					mwh:             mwh,
 					eventLogDB:      &tEventLogDB{},
 				})
-				adaptor.botCfg.Store(&BotConfig{})
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				_, err := adaptor.Connect(ctx)
@@ -280,14 +278,13 @@ func TestSufficientBalanceForCEXTrade(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			checkBalanceSufficient := func(expSufficient bool) {
 				tCore := newTCore()
-				adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+				adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 					core:            tCore,
 					baseCexBalances: test.cexBalances,
-					market: &MarketWithHost{
+					mwh: &MarketWithHost{
 						BaseID:  baseID,
 						QuoteID: quoteID,
 					},
-					log: tLogger,
 				})
 				sufficient, err := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty)
 				if err != nil {
@@ -333,14 +330,13 @@ func TestCEXBalanceCounterTrade(t *testing.T) {
 
 	botID := dexMarketID("host1", 42, 0)
 	eventLogDB := newTEventLogDB()
-	adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+	adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 		botID:           botID,
 		core:            tCore,
 		cex:             tCEX,
 		baseDexBalances: dexBalances,
 		baseCexBalances: cexBalances,
-		log:             tLogger,
-		market: &MarketWithHost{
+		mwh: &MarketWithHost{
 			Host:    "host1",
 			BaseID:  42,
 			QuoteID: 0,
@@ -642,18 +638,17 @@ func TestPrepareRebalance(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			tCore := newTCore()
-			adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+			adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 				core:            tCore,
 				baseDexBalances: test.dexBalances,
 				baseCexBalances: test.cexBalances,
-				market: &MarketWithHost{
+				mwh: &MarketWithHost{
 					Host:    "dex.com",
 					BaseID:  baseID,
 					QuoteID: quoteID,
 				},
-				log: tLogger,
 			})
-			adaptor.botCfg.Store(&BotConfig{
+			adaptor.botCfgV.Store(&BotConfig{
 				CEXCfg: &BotCEXCfg{
 					AutoRebalance: cfg,
 				},
@@ -894,18 +889,17 @@ func TestFreeUpFunds(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			tCore := newTCore()
-			adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+			adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 				core:            tCore,
 				baseDexBalances: test.dexBalances,
 				baseCexBalances: test.cexBalances,
-				market: &MarketWithHost{
+				mwh: &MarketWithHost{
 					Host:    "dex.com",
 					BaseID:  baseID,
 					QuoteID: quoteID,
 				},
-				log: tLogger,
 			})
-			adaptor.botCfg.Store(&BotConfig{
+			adaptor.botCfgV.Store(&BotConfig{
 				CEXCfg: &BotCEXCfg{
 					AutoRebalance: &AutoRebalanceConfig{},
 				},
@@ -1737,19 +1731,17 @@ func TestMultiTrade(t *testing.T) {
 						cexBalances = test.buyCexBalances
 					}
 
-					adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+					adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 						core:            tCore,
 						baseDexBalances: dexBalances,
 						baseCexBalances: cexBalances,
-						market: &MarketWithHost{
+						mwh: &MarketWithHost{
 							Host:    "dex.com",
 							BaseID:  test.baseID,
 							QuoteID: test.quoteID,
 						},
-						log:        tLogger,
 						eventLogDB: &tEventLogDB{},
 					})
-					adaptor.botCfg.Store(&BotConfig{})
 
 					var pendingOrders map[order.OrderID]*pendingDEXOrder
 					if sell {
@@ -2567,19 +2559,17 @@ func TestDEXTrade(t *testing.T) {
 
 		botID := dexMarketID(host, test.baseID, test.quoteID)
 		eventLogDB := newTEventLogDB()
-		adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+		adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 			botID:           botID,
 			core:            tCore,
 			baseDexBalances: test.initialBalances,
-			log:             tLogger,
-			market: &MarketWithHost{
+			mwh: &MarketWithHost{
 				Host:    host,
 				BaseID:  test.baseID,
 				QuoteID: test.quoteID,
 			},
 			eventLogDB: eventLogDB,
 		})
-		adaptor.botCfg.Store(&BotConfig{})
 		_, err := adaptor.Connect(ctx)
 		if err != nil {
 			t.Fatalf("%s: Connect error: %v", test.name, err)
@@ -3028,14 +3018,13 @@ func TestDeposit(t *testing.T) {
 
 			botID := dexMarketID("host1", test.assetID, 0)
 			eventLogDB := newTEventLogDB()
-			adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+			adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 				botID:           botID,
 				core:            tCore,
 				cex:             tCEX,
 				baseDexBalances: dexBalances,
 				baseCexBalances: cexBalances,
-				log:             tLogger,
-				market: &MarketWithHost{
+				mwh: &MarketWithHost{
 					Host:    "host1",
 					BaseID:  test.assetID,
 					QuoteID: 0,
@@ -3227,14 +3216,13 @@ func TestWithdraw(t *testing.T) {
 
 		botID := dexMarketID("host1", assetID, 0)
 		eventLogDB := newTEventLogDB()
-		adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+		adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 			botID:           botID,
 			core:            tCore,
 			cex:             tCEX,
 			baseDexBalances: dexBalances,
 			baseCexBalances: cexBalances,
-			log:             tLogger,
-			market: &MarketWithHost{
+			mwh: &MarketWithHost{
 				Host:    "host1",
 				BaseID:  assetID,
 				QuoteID: 0,
@@ -3675,14 +3663,13 @@ func TestCEXTrade(t *testing.T) {
 
 		botID := dexMarketID(botCfg.Host, botCfg.BaseID, botCfg.QuoteID)
 		eventLogDB := newTEventLogDB()
-		adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+		adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 			botID:           botID,
 			core:            tCore,
 			cex:             tCEX,
 			baseDexBalances: test.balances,
 			baseCexBalances: test.balances,
-			log:             tLogger,
-			market: &MarketWithHost{
+			mwh: &MarketWithHost{
 				Host:    "host1",
 				BaseID:  botCfg.BaseID,
 				QuoteID: botCfg.QuoteID,
@@ -3841,13 +3828,11 @@ func TestOrderFeesInUnits(t *testing.T) {
 		tCore.fiatRates = tt.fiatRates
 		tCore.singleLotBuyFees = tt.buyFees
 		tCore.singleLotSellFees = tt.sellFees
-		adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+		adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 			core:       tCore,
-			log:        tLogger,
-			market:     tt.market,
+			mwh:        tt.market,
 			eventLogDB: &tEventLogDB{},
 		})
-		adaptor.botCfg.Store(&BotConfig{})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_, err := adaptor.Connect(ctx)
@@ -3946,17 +3931,16 @@ func TestRefreshPendingEvents(t *testing.T) {
 		0:  1e9,
 	}
 
-	adaptor := unifiedExchangeAdaptorForBot(&exchangeAdaptorCfg{
+	adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 		core: tCore,
 		cex:  tCEX,
-		market: &MarketWithHost{
+		mwh: &MarketWithHost{
 			Host:    "host1",
 			BaseID:  42,
 			QuoteID: 0,
 		},
 		baseDexBalances: dexBalances,
 		baseCexBalances: cexBalances,
-		log:             tLogger,
 		eventLogDB:      &tEventLogDB{},
 	})
 

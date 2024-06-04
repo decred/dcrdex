@@ -16,7 +16,6 @@ import (
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 
 	_ "decred.org/dcrdex/client/asset/btc"     // register btc asset
@@ -115,16 +114,6 @@ func (c *tCore) NotificationFeed() *core.NoteFeed {
 }
 func (c *tCore) ExchangeMarket(host string, base, quote uint32) (*core.Market, error) {
 	return c.market, nil
-}
-
-func (c *tCore) MarketConfig(host string, base, quote uint32) (*msgjson.Market, error) {
-	return &msgjson.Market{
-		Name:     c.market.Name,
-		Base:     c.market.BaseID,
-		Quote:    c.market.QuoteID,
-		LotSize:  c.market.LotSize,
-		RateStep: c.market.RateStep,
-	}, nil
 }
 
 func (t *tCore) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
@@ -692,9 +681,14 @@ func (c *tBotCexAdaptor) Book() (_, _ []*core.MiniOrder, _ error) { return nil, 
 type tExchangeAdaptor struct {
 	dexBalances map[uint32]*BotBalance
 	cexBalances map[uint32]*BotBalance
+	cfg         *BotConfig
 }
 
-var _ exchangeAdaptor = (*tExchangeAdaptor)(nil)
+var _ bot = (*tExchangeAdaptor)(nil)
+
+func (t *tExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	return &sync.WaitGroup{}, nil
+}
 
 func (t *tExchangeAdaptor) refreshAllPendingEvents(context.Context) {}
 func (t *tExchangeAdaptor) balances() map[uint32]*BotBalances {
@@ -712,13 +706,19 @@ func (t *tExchangeAdaptor) CEXBalance(assetID uint32) *BotBalance {
 	}
 	return t.cexBalances[assetID]
 }
-func (t *tExchangeAdaptor) stats() *RunStats                         { return nil }
-func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig)              {}
+func (t *tExchangeAdaptor) stats() *RunStats { return nil }
+func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig) error {
+	t.cfg = cfg
+	return nil
+}
 func (t *tExchangeAdaptor) updateInventory(diffs *BotInventoryDiffs) {}
 func (t *tExchangeAdaptor) timeStart() int64                         { return 0 }
 func (t *tExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
 	return nil, nil, nil
 }
+func (t *tExchangeAdaptor) sendStatsUpdate()             {}
+func (t *tExchangeAdaptor) withPause(func() error) error { return nil }
+func (t *tExchangeAdaptor) botCfg() *BotConfig           { return t.cfg }
 
 func TestAvailableBalances(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -845,8 +845,8 @@ func TestAvailableBalances(t *testing.T) {
 	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 7e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{0: 8e5, 60001: 6e5})
 	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
 
-	mm.runningBots[*btcUsdc] = &runningBot{
-		adaptor: &tExchangeAdaptor{
+	rb := &runningBot{
+		bot: &tExchangeAdaptor{
 			dexBalances: map[uint32]*BotBalance{
 				60:    {Available: 1e5},
 				0:     {Available: 4e5},
@@ -856,9 +856,10 @@ func TestAvailableBalances(t *testing.T) {
 				60001: {Available: 2e5},
 				0:     {Available: 3e5},
 			},
+			cfg: cfg.BotConfigs[1],
 		},
-		botCfg: cfg.BotConfigs[1],
 	}
+	mm.runningBots[*btcUsdc] = rb
 
 	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 3e5}, map[uint32]uint64{})
 	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 7e5, 0: 3e5}, map[uint32]uint64{60: 9e5, 0: 5e5})

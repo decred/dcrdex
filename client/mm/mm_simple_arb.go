@@ -63,21 +63,18 @@ type arbSequence struct {
 }
 
 type simpleArbMarketMaker struct {
-	ctx              context.Context
-	host             string
-	baseID           uint32
-	quoteID          uint32
+	*unifiedExchangeAdaptor
 	cex              botCexAdaptor
 	core             botCoreAdaptor
-	log              dex.Logger
 	cfgV             atomic.Value // *SimpleArbConfig
-	mkt              *core.Market
 	book             dexOrderBook
 	rebalanceRunning atomic.Bool
 
 	activeArbsMtx sync.RWMutex
 	activeArbs    []*arbSequence
 }
+
+var _ bot = (*simpleArbMarketMaker)(nil)
 
 func (a *simpleArbMarketMaker) cfg() *SimpleArbConfig {
 	return a.cfgV.Load().(*SimpleArbConfig)
@@ -103,11 +100,11 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 		return false, 0, 0, 0
 	}
 
-	lotSize := a.mkt.LotSize
+	lotSize := a.lotSize
 	var prevProfit uint64
 
 	for numLots := uint64(1); ; numLots++ {
-		dexAvg, dexExtrema, dexFilled, err := a.book.VWAP(numLots, a.mkt.LotSize, !sellOnDEX)
+		dexAvg, dexExtrema, dexFilled, err := a.book.VWAP(numLots, a.lotSize, !sellOnDEX)
 		if err != nil {
 			a.log.Errorf("error calculating dex VWAP: %v", err)
 			break
@@ -184,7 +181,8 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 	}
 
 	if lotsToArb > 0 {
-		a.log.Infof("arb opportunity - sellOnDex: %v, lotsToArb: %v, dexRate: %v, cexRate: %v: profit: %d", sellOnDEX, lotsToArb, dexRate, cexRate, prevProfit)
+		a.log.Infof("arb opportunity - sellOnDex: %v, lotsToArb: %v, dexRate: %v, cexRate: %v: profit: %d",
+			sellOnDEX, lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate), a.fmtBase(prevProfit))
 		return true, lotsToArb, dexRate, cexRate
 	}
 
@@ -195,18 +193,19 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 // and cex. An entry will be added to the a.activeArbs slice if both orders
 // are successfully placed.
 func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, cexRate, epoch uint64) {
-	a.log.Debugf("executing arb opportunity - sellOnDex: %v, lotsToArb: %v, dexRate: %v, cexRate: %v", sellOnDex, lotsToArb, dexRate, cexRate)
+	a.log.Debugf("executing arb opportunity - sellOnDex: %v, lotsToArb: %v, dexRate: %v, cexRate: %v",
+		sellOnDex, lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate))
 
 	a.activeArbsMtx.RLock()
 	numArbs := len(a.activeArbs)
 	a.activeArbsMtx.RUnlock()
 	if numArbs >= int(a.cfg().MaxActiveArbs) {
-		a.log.Infof("cannot execute arb because already at max arbs")
+		a.log.Info("cannot execute arb because already at max arbs")
 		return
 	}
 
 	if a.selfMatch(sellOnDex, dexRate) {
-		a.log.Infof("cannot execute arb opportunity due to self-match")
+		a.log.Info("cannot execute arb opportunity due to self-match")
 		return
 	}
 	// also check self-match on CEX?
@@ -219,13 +218,13 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*a.mkt.LotSize)
+	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*a.lotSize)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
 	}
 
-	dexOrder, err := a.core.DEXTrade(dexRate, lotsToArb*a.mkt.LotSize, sellOnDex)
+	dexOrder, err := a.core.DEXTrade(dexRate, lotsToArb*a.lotSize, sellOnDex)
 	if err != nil {
 		if err != nil {
 			a.log.Errorf("error placing dex order: %v", err)
@@ -364,6 +363,10 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	a.log.Tracef("rebalance: epoch %d", newEpoch)
 
 	exists, sellOnDex, lotsToArb, dexRate, cexRate := a.arbExists()
+	if a.log.Level() == dex.LevelTrace {
+		a.log.Tracef("%s rebalance. exists = %t, %s on dex, lots = %d, dex rate = %s, cex rate = %s",
+			a.name, sellStr(sellOnDex), lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate))
+	}
 	if exists {
 		// Execution will not happen if it would cause a self-match.
 		a.executeArb(sellOnDex, lotsToArb, dexRate, cexRate, newEpoch)
@@ -422,7 +425,8 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	a.registerFeeGap()
 }
 
-func (a *simpleArbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
+
 	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)
@@ -436,7 +440,7 @@ func (a *simpleArbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, er
 
 	tradeUpdates := a.cex.SubscribeTradeUpdates()
 
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -480,11 +484,11 @@ func (a *simpleArbMarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, er
 		}
 	}()
 
-	return wg, nil
+	return &wg, nil
 }
 
 func (a *simpleArbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, a.cex, a.mkt.BaseID, a.mkt.QuoteID, a.mkt.LotSize)
+	feeGap, err := feeGap(a.core, a.cex, a.baseID, a.quoteID, a.lotSize)
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return
@@ -501,27 +505,24 @@ func (a *simpleArbMarketMaker) updateConfig(cfg *BotConfig) error {
 	return nil
 }
 
-func newSimpleArbMarketMaker(cfg *BotConfig, c botCoreAdaptor, cex botCexAdaptor, log dex.Logger) (*simpleArbMarketMaker, error) {
+func newSimpleArbMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, log dex.Logger) (*simpleArbMarketMaker, error) {
 	if cfg.SimpleArbConfig == nil {
 		// implies bug in caller
 		return nil, fmt.Errorf("no arb config provided")
 	}
 
-	mkt, err := c.ExchangeMarket(cfg.Host, cfg.BaseID, cfg.QuoteID)
+	adaptor, err := newUnifiedExchangeAdaptor(adaptorCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get market: %v", err)
+		return nil, fmt.Errorf("error constructing exchange adaptor: %w", err)
 	}
 
 	simpleArb := &simpleArbMarketMaker{
-		host:       cfg.Host,
-		baseID:     cfg.BaseID,
-		quoteID:    cfg.QuoteID,
-		cex:        cex,
-		core:       c,
-		log:        log,
-		mkt:        mkt,
-		activeArbs: make([]*arbSequence, 0),
+		unifiedExchangeAdaptor: adaptor,
+		cex:                    adaptor,
+		core:                   adaptor,
+		activeArbs:             make([]*arbSequence, 0),
 	}
 	simpleArb.cfgV.Store(cfg.SimpleArbConfig)
+	adaptor.setBotLoop(simpleArb.botLoop)
 	return simpleArb, nil
 }

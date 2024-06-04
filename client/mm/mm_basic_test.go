@@ -116,9 +116,9 @@ func TestBasisPrice(t *testing.T) {
 		adaptor.fiatExchangeRate = tt.fiatRate
 
 		calculator := &basicMMCalculatorImpl{
+			market: mustParseMarket(mkt),
 			book:   ob,
 			oracle: oracle,
-			mkt:    mkt,
 			cfg:    cfg,
 			log:    tLogger,
 			core:   adaptor,
@@ -189,9 +189,9 @@ func TestBreakEvenHalfSpread(t *testing.T) {
 		coreAdaptor.sellFeesInQuote = tt.sellFeesInQuoteUnits
 
 		calculator := &basicMMCalculatorImpl{
-			core: coreAdaptor,
-			mkt:  tt.mkt,
-			log:  tLogger,
+			market: mustParseMarket(tt.mkt),
+			core:   coreAdaptor,
+			log:    tLogger,
 		}
 
 		halfSpread, err := calculator.halfSpread(tt.basisPrice)
@@ -366,13 +366,12 @@ func TestBasicMMRebalance(t *testing.T) {
 				SellPlacements: tt.cfgSellPlacements,
 			}
 			mm := &basicMarketMaker{
-				calculator: calculator,
-				core:       adaptor,
-				log:        tLogger,
-				mkt: &core.Market{
+				unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
 					RateStep:   rateStep,
 					AtomToConv: atomToConv,
-				},
+				}),
+				calculator: calculator,
+				core:       adaptor,
 			}
 			mm.cfgV.Store(cfg)
 
