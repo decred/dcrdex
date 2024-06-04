@@ -1051,7 +1051,7 @@ func marketFees(c clientCore, host string, baseID, quoteID uint32, useMaxFeeRate
 		Base:          baseID,
 		Quote:         quoteID,
 		UseMaxFeeRate: useMaxFeeRate,
-		UseSafeTxSize: true,
+		UseSafeTxSize: useMaxFeeRate,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get buy single lot fees: %v", err)
@@ -1062,7 +1062,7 @@ func marketFees(c clientCore, host string, baseID, quoteID uint32, useMaxFeeRate
 		Base:          baseID,
 		Quote:         quoteID,
 		UseMaxFeeRate: useMaxFeeRate,
-		UseSafeTxSize: true,
+		UseSafeTxSize: useMaxFeeRate,
 		Sell:          true,
 	})
 	if err != nil {

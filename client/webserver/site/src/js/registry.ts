@@ -224,6 +224,8 @@ export interface FeeState {
   rate: number
   send: number
   swap: number
+  redeem: number
+  refund: number
   stampMS: number
 }
 

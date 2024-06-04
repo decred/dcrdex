@@ -2947,9 +2947,11 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 
 	// Construct the unconnected xcWallet.
 	contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(assetID)
+	symbol := unbip(assetID)
 	wallet := &xcWallet{ // captured by the PeersChange closure
 		AssetID: assetID,
-		Symbol:  unbip(assetID),
+		Symbol:  symbol,
+		log:     c.log.SubLogger(symbol),
 		balance: &WalletBalance{
 			Balance:        dbWallet.Balance,
 			OrderLocked:    orderLockedAmt,

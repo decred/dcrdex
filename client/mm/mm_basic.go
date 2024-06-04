@@ -326,8 +326,11 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 
 	halfGap := uint64(math.Round(g * calc.RateEncodingFactor))
 
-	b.log.Tracef("halfSpread: base basis price = %s, lot size = %s, aggregate fees = %s, half-gap = %s",
-		b.fmtRate(basisPrice), b.fmtBase(l), b.fmtBaseFees(f), b.fmtRate(halfGap))
+	if b.log.Level() == dex.LevelTrace {
+		b.log.Tracef("halfSpread: basis price = %s, lot size = %s, aggregate fees = %s, half-gap = %s, sell fees = %s, buy fees = %s",
+			b.fmtRate(basisPrice), b.fmtBase(l), b.fmtBaseFees(f), b.fmtRate(halfGap),
+			b.fmtBaseFees(sellFeesInBaseUnits), b.fmtBaseFees(buyFeesInBaseUnits))
+	}
 
 	return &FeeGapStats{
 		BasisPrice:    basisPrice,
@@ -351,36 +354,36 @@ func (m *basicMarketMaker) cfg() *BasicMarketMakingConfig {
 	return m.cfgV.Load().(*BasicMarketMakingConfig)
 }
 
-func (m *basicMarketMaker) orderPrice(basisPrice, breakEven uint64, sell bool, gapFactor float64) uint64 {
-	var halfSpread uint64
+func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapFactor float64) uint64 {
+	var adj uint64
 
 	// Apply the base strategy.
 	switch m.cfg().GapStrategy {
 	case GapStrategyMultiplier:
-		halfSpread = uint64(math.Round(float64(breakEven) * gapFactor))
+		adj = uint64(math.Round(float64(feeAdj) * gapFactor))
 	case GapStrategyPercent, GapStrategyPercentPlus:
-		halfSpread = uint64(math.Round(gapFactor * float64(basisPrice)))
+		adj = uint64(math.Round(gapFactor * float64(basisPrice)))
 	case GapStrategyAbsolute, GapStrategyAbsolutePlus:
-		halfSpread = m.msgRate(gapFactor)
+		adj = m.msgRate(gapFactor)
 	}
 
 	// Add the break-even to the "-plus" strategies
 	switch m.cfg().GapStrategy {
 	case GapStrategyAbsolutePlus, GapStrategyPercentPlus:
-		halfSpread += breakEven
+		adj += feeAdj
 	}
 
-	halfSpread = steppedRate(halfSpread, m.rateStep)
+	adj = steppedRate(adj, m.rateStep)
 
 	if sell {
-		return basisPrice + halfSpread
+		return basisPrice + adj
 	}
 
-	if basisPrice < halfSpread {
+	if basisPrice < adj {
 		return 0
 	}
 
-	return basisPrice - halfSpread
+	return basisPrice - adj
 }
 
 func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradePlacement) {
@@ -390,7 +393,7 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 		return
 	}
 
-	var breakEven uint64
+	var feeAdj uint64
 	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
 		var err error
 		feeGap, err := m.calculator.feeGapStats(basisPrice)
@@ -399,18 +402,18 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 			return
 		}
 		m.core.registerFeeGap(feeGap)
-		breakEven = feeGap.FeeGap
+		feeAdj = feeGap.FeeGap / 2
 	}
 
 	if m.log.Level() == dex.LevelTrace {
-		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even gap = %s",
-			m.name, m.fmtRate(basisPrice), m.fmtRate(breakEven))
+		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
+			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
 	}
 
 	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
 		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
 		for i, p := range orderPlacements {
-			rate := m.orderPrice(basisPrice, breakEven, sell, p.GapFactor)
+			rate := m.orderPrice(basisPrice, feeAdj, sell, p.GapFactor)
 
 			if m.log.Level() == dex.LevelTrace {
 				m.log.Tracef("ordersToPlace.orders: %s placement # %d, gap factor = %f, rate = %s",

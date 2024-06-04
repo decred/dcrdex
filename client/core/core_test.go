@@ -769,6 +769,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
 		version:           w.info.Version,
+		log:               tLogger,
 		supportedVersions: w.info.SupportedVersions,
 		Wallet:            w,
 		Symbol:            dex.BipIDSymbol(assetID),

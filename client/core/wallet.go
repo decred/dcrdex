@@ -44,6 +44,7 @@ func runWithTimeout(f func() error, timeout time.Duration) error {
 // xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
 	asset.Wallet
+	log               dex.Logger
 	connector         *dex.ConnectionMaster
 	AssetID           uint32
 	Symbol            string
@@ -665,12 +666,21 @@ func (w *xcWallet) ApprovalStatus() map[uint32]asset.ApprovalStatus {
 }
 
 func (w *xcWallet) setFeeState(feeRate uint64) {
-	swapFees, _, _ := w.SingleLotSwapRefundFees(asset.VersionNewest, feeRate, false)
+	swapFees, refundFees, err := w.SingleLotSwapRefundFees(asset.VersionNewest, feeRate, false)
+	if err != nil {
+		w.log.Errorf("Error getting single-lot swap+refund estimates: %v", err)
+	}
+	redeemFees, err := w.SingleLotRedeemFees(asset.VersionNewest, feeRate)
+	if err != nil {
+		w.log.Errorf("Error getting single-lot redeem estimates: %v", err)
+	}
 	sendFees := w.StandardSendFee(feeRate)
 	w.feeState.Store(&FeeState{
 		Rate:    feeRate,
 		Send:    sendFees,
 		Swap:    swapFees,
+		Redeem:  redeemFees,
+		Refund:  refundFees,
 		StampMS: time.Now().UnixMilli(),
 	})
 }

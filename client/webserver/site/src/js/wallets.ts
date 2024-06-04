@@ -1058,11 +1058,14 @@ export default class WalletsPage extends BasePage {
     Doc.formatBestRateElement(page.feeStateNetRate, feeAssetID, feeState.rate, feeUI)
     Doc.formatBestValueElement(page.feeStateSendFees, feeAssetID, feeState.send, feeUI)
     Doc.formatBestValueElement(page.feeStateSwapFees, feeAssetID, feeState.swap, feeUI)
+    Doc.formatBestValueElement(page.feeStateRedeemFees, feeAssetID, feeState.redeem, feeUI)
     page.feeStateXcRate.textContent = Doc.formatFourSigFigs(fiatRate)
     const sendFiat = feeState.send / feeUI.conventional.conversionFactor * feeFiatRate
     page.feeStateSendFiat.textContent = Doc.formatFourSigFigs(sendFiat)
     const swapFiat = feeState.swap / feeUI.conventional.conversionFactor * feeFiatRate
     page.feeStateSwapFiat.textContent = Doc.formatFourSigFigs(swapFiat)
+    const redeemFiat = feeState.redeem / feeUI.conventional.conversionFactor * feeFiatRate
+    page.feeStateRedeemFiat.textContent = Doc.formatFourSigFigs(redeemFiat)
     Doc.show(page.feeStateBox)
   }
 

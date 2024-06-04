@@ -1065,10 +1065,26 @@
     </div>
   </div>
 
-
-  <div class="d-flex align-items-stretch px-3 pt-2 justify-content-end py-2 mt-2 border-top">
-    <button data-tmpl="runLogsBttn" class="ico-textfile"></button>
-    <button data-tmpl="stopBttn" class="ms-2 position-relative">Stop</button>
+  <div class="d-flex align-items-stretch px-3 pt-2 py-2 mt-2 border-top">
+    <div class="flex-grow-1 d-flex align-items-center justify-content-between pe-3">
+      <span>
+        <span data-tmpl="profitLabel">Profit threshold</span>
+        <span data-tmpl="gapLabel">Gap</span>
+        <span data-tmpl="multiplierLabel">Multiplier</span>
+      </span>
+      <div class="d-flex align-items-end">
+        <span data-tmpl="gapFactor"></span>
+        <span data-tmpl="profitUnit" class="fs14 grey ms-1">%</span>
+        <span data-tmpl="gapUnit" class="fs14 grey ms-1">
+          <span data-quote-ticker></span>/<span data-base-ticker></span>
+        </span>
+        <span data-tmpl="multiplierUnit" class="fs14 grey ms-1">X</span>
+      </div>
+    </div>
+    <div class="d-flex align-items-stretch ps-3 border-start">
+      <button data-tmpl="runLogsBttn" class="ico-textfile"></button>
+      <button data-tmpl="stopBttn" class="ms-3 position-relative">Stop</button>
+    </div>
   </div>
 </div>
 {{end}}

@@ -45,21 +45,21 @@ import {
   setMarketElements,
   setCexElements,
   calculateQuoteLot,
-  PlacementsChart
+  PlacementsChart,
+  GapStrategyMultiplier,
+  GapStrategyAbsolute,
+  GapStrategyAbsolutePlus,
+  GapStrategyPercent,
+  GapStrategyPercentPlus
 } from './mmutil'
 import { Forms, bind as bindForm, NewWalletForm, TokenApprovalForm, DepositAddress, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
-const GapStrategyMultiplier = 'multiplier'
-const GapStrategyAbsolute = 'absolute'
-const GapStrategyAbsolutePlus = 'absolute-plus'
-const GapStrategyPercent = 'percent'
-const GapStrategyPercentPlus = 'percent-plus'
-const arbMMRowCacheKey = 'arbmm'
 
 const specLK = 'lastMMSpecs'
 const lastBotsLK = 'lastBots'
 const lastArbExchangeLK = 'lastArbExchange'
+const arbMMRowCacheKey = 'arbmm'
 
 const defaultSwapReserves = {
   n: 50,

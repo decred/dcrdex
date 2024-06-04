@@ -28,6 +28,12 @@ import Doc, { clamp } from './doc'
 import * as OrderUtil from './orderutil'
 import { Chart, Region, Extents, Translator } from './charts'
 
+export const GapStrategyMultiplier = 'multiplier'
+export const GapStrategyAbsolute = 'absolute'
+export const GapStrategyAbsolutePlus = 'absolute-plus'
+export const GapStrategyPercent = 'percent'
+export const GapStrategyPercentPlus = 'percent-plus'
+
 export const botTypeBasicMM = 'basicMM'
 export const botTypeArbMM = 'arbMM'
 export const botTypeBasicArb = 'basicArb'
@@ -212,11 +218,13 @@ export class PlacementsChart extends Chart {
   setMarket (cfg: PlacementChartConfig) {
     this.cfg = cfg
     const { loadedCEX, cfg: { cexName } } = this
-    if (!cexName || cexName === loadedCEX) return
-    this.loadedCEX = cexName
-    this.cexLogo = new Image()
-    Doc.bind(this.cexLogo, 'load', () => { this.render() })
-    this.cexLogo.src = CEXDisplayInfos[cexName || ''].logo
+    if (cexName && cexName !== loadedCEX) {
+      this.loadedCEX = cexName
+      this.cexLogo = new Image()
+      Doc.bind(this.cexLogo, 'load', () => { this.render() })
+      this.cexLogo.src = CEXDisplayInfos[cexName || ''].logo
+    }
+    this.render()
   }
 
   render () {
@@ -473,7 +481,6 @@ export class BotMarket {
 
   async initialize (startupBalanceCache: Record<number, Promise<ExchangeBalance>>) {
     const { host, baseID, quoteID, lotSizeConv, quoteLotConv, cexName } = this
-
     const res = await MM.report(host, baseID, quoteID)
     const r = this.marketReport = res.report as MarketReport
     this.lotSizeUSD = lotSizeConv * r.baseFiatRate
@@ -490,9 +497,9 @@ export class BotMarket {
 
   status () {
     const { baseID, quoteID } = this
-    const bot = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
-    if (!bot) return { botCfg: {} as BotConfig, running: false, runStats: {} as RunStats }
-    const { config: botCfg, running, runStats } = bot
+    const botStatus = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
+    if (!botStatus) return { botCfg: {} as BotConfig, running: false, runStats: {} as RunStats }
+    const { config: botCfg, running, runStats } = botStatus
     return { botCfg, running, runStats }
   }
 
@@ -810,7 +817,7 @@ export class RunningMarketMakerDisplay {
     const {
       page, div, mkt: {
         host, baseID, quoteID, baseFeeSymbol, quoteFeeSymbol, baseFeeTicker, quoteFeeTicker,
-        needBaseFeeAsset, needQuoteFeeAsset
+        needBaseFeeAsset, needQuoteFeeAsset, cfg, baseFactor, quoteFactor
       }
     } = this
     setMarketElements(div, baseID, quoteID, host)
@@ -820,6 +827,35 @@ export class RunningMarketMakerDisplay {
     page.baseFeeTicker.textContent = baseFeeTicker
     page.quoteFeeLogo.src = Doc.logoPath(quoteFeeSymbol)
     page.quoteFeeTicker.textContent = quoteFeeTicker
+
+    const basicCfg = cfg.basicMarketMakingConfig
+    const gapStrategy = basicCfg?.gapStrategy ?? GapStrategyPercent
+    let gapFactor = cfg.arbMarketMakingConfig?.profit ?? cfg.simpleArbConfig?.profitTrigger ?? 0
+    if (basicCfg) {
+      const buys = [...basicCfg.buyPlacements].sort((a: OrderPlacement, b: OrderPlacement) => a.gapFactor - b.gapFactor)
+      const sells = [...basicCfg.sellPlacements].sort((a: OrderPlacement, b: OrderPlacement) => a.gapFactor - b.gapFactor)
+      if (buys.length > 0) {
+        if (sells.length > 0) {
+          gapFactor = (buys[0].gapFactor + sells[0].gapFactor) / 2
+        } else {
+          gapFactor = buys[0].gapFactor
+        }
+      } else gapFactor = sells[0].gapFactor
+    }
+    Doc.hide(page.profitLabel, page.gapLabel, page.multiplierLabel, page.profitUnit, page.gapUnit, page.multiplierUnit)
+    switch (gapStrategy) {
+      case GapStrategyPercent:
+      case GapStrategyPercentPlus:
+        Doc.show(page.profitLabel, page.profitUnit)
+        page.gapFactor.textContent = (gapFactor * 100).toFixed(2)
+        break
+      case GapStrategyMultiplier:
+        Doc.show(page.multiplierLabel, page.multiplierUnit)
+        page.gapFactor.textContent = (gapFactor * 100).toFixed(2)
+        break
+      default:
+        page.gapFactor.textContent = Doc.formatFourSigFigs(gapFactor / OrderUtil.RateEncodingFactor * baseFactor / quoteFactor)
+    }
 
     this.update()
     this.readBook()

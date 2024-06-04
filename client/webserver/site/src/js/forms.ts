@@ -1963,6 +1963,7 @@ export class LoginForm {
   handleLoginNote (n: CoreNote) {
     if (n.details === '') return
     const loginMsg = Doc.idel(this.form, 'loaderMsg')
+    Doc.show(loginMsg)
     if (loginMsg) loginMsg.textContent = n.details
   }
 

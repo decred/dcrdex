@@ -73,7 +73,7 @@ cat > "${FILEPATH}" <<EOF
         {
             "base": "DCR_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 1000000000,
+            "lotSize": 2000000000,
             "rateStep": 100,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,

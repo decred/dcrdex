@@ -145,6 +145,8 @@ type FeeState struct {
 	Rate    uint64 `json:"rate"`
 	Send    uint64 `json:"send"`
 	Swap    uint64 `json:"swap"`
+	Redeem  uint64 `json:"redeem"`
+	Refund  uint64 `json:"refund"`
 	StampMS int64  `json:"stampMS"`
 }
 

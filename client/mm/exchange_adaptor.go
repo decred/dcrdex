@@ -885,7 +885,15 @@ func (u *unifiedExchangeAdaptor) placeMultiTrade(placements []*dexOrderInfo, sel
 // The placements must be passed in decreasing priority order. If there is not
 // enough balance to place all of the orders, the lower priority trades that
 // were made in previous calls will be cancelled.
-func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, sell bool, driftTolerance float64, currEpoch uint64, dexReserves, cexReserves map[uint32]uint64) []*order.OrderID {
+func (u *unifiedExchangeAdaptor) MultiTrade(
+	placements []*multiTradePlacement,
+	sell bool,
+	driftTolerance float64,
+	currEpoch uint64,
+	dexReserves,
+	cexReserves map[uint32]uint64,
+) []*order.OrderID {
+
 	if len(placements) == 0 {
 		return nil
 	}
@@ -988,7 +996,7 @@ func (u *unifiedExchangeAdaptor) MultiTrade(placements []*multiTradePlacement, s
 			}
 
 			if mustCancel {
-				u.log.Tracef("%s cancel with rate = %s, placement rate = %s, drift tolerance = %.4f%%",
+				u.log.Tracef("%s cancel with order rate = %s, placement rate = %s, drift tolerance = %.4f%%",
 					u.mwh, u.fmtRate(order.Rate), u.fmtRate(placements[o.placementIndex].rate), driftTolerance*100,
 				)
 				addCancel(order)
@@ -2623,12 +2631,12 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() error {
 	botCfg := u.botCfg()
 	maxBuyPlacements, maxSellPlacements := botCfg.maxPlacements()
 
-	buyFundingFees, err := u.clientCore.MaxFundingFees(u.quoteID, u.host, maxBuyPlacements, botCfg.BaseWalletOptions)
+	buyFundingFees, err := u.clientCore.MaxFundingFees(u.quoteID, u.host, maxBuyPlacements, botCfg.QuoteWalletOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get buy funding fees: %v", err)
 	}
 
-	sellFundingFees, err := u.clientCore.MaxFundingFees(u.baseID, u.host, maxSellPlacements, botCfg.QuoteWalletOptions)
+	sellFundingFees, err := u.clientCore.MaxFundingFees(u.baseID, u.host, maxSellPlacements, botCfg.BaseWalletOptions)
 	if err != nil {
 		return fmt.Errorf("failed to get sell funding fees: %v", err)
 	}
@@ -2921,6 +2929,9 @@ func (u *unifiedExchangeAdaptor) updateInventory(balanceDiffs *BotInventoryDiffs
 }
 
 func (u *unifiedExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
+	if u.CEX == nil {
+		return nil, nil, errors.New("not a cex-connected bot")
+	}
 	return u.CEX.Book(u.baseID, u.quoteID)
 }
 

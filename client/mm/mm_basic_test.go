@@ -27,7 +27,7 @@ func (r *tBasicMMCalculator) halfSpread(basisPrice uint64) (uint64, error) {
 }
 
 func (r *tBasicMMCalculator) feeGapStats(basisPrice uint64) (*FeeGapStats, error) {
-	return &FeeGapStats{FeeGap: r.hs}, nil
+	return &FeeGapStats{FeeGap: r.hs * 2}, nil
 }
 
 func TestBasisPrice(t *testing.T) {
