@@ -83,7 +83,7 @@ restore_deterministic_wallet() {
 	local seed="${4:?input seed 25 words from English wordlist}"
 	params="{\"filename\":\"${wallet_name}\",\"password\":\"${pass}\",\"seed\":\"${seed}\"}"
 	monero-rpc-request "${port}" "restore_deterministic_wallet" "${params}" | jq '.'
- }
+}
 
 generate_from_keys() {
 	local port="${1:?input a monero wallet port}"
@@ -207,15 +207,15 @@ export_key_images() {
 
 import_key_images() {
 	local port="${1:?input a valid wallet rpc port}"
-	local signed_key_images="${2:?input a a set valid  key images}" # json array of signed key images:
+	local signed_key_images="${2:?input a a set valid  key images}" # json array of signed key images
 	params="{\"signed_key_images\":\"${signed_key_images}\"}"
 	monero-rpc-request "${port}" "import_key_images" "${params}"
 }
 
-# transfer monero to 1 recipient at their account 0, subaddress-indeces [0] 
-# but do not send. If called from a normal wallet with keys it generates a 
+# transfer monero to 1 recipient at their account 0, subaddress-indeces [0]
+# but do not send. If called from a normal wallet with keys it generates a
 # signed tx. Iff it is called for a view only wallet (like watch only) an
-# unsigned_txset (an unsigned tx) will be also returned. This can then be 
+# unsigned_txset (an unsigned tx) will be also returned. This can then be
 # signed by the parent full wallet proxy but offline (i.e. not connected to
 # alpha node) using the interactive monero-wallet-cli.
 #
@@ -238,10 +238,10 @@ transfer_no_relay() {
 }
 
 # sign a prepared unsigned txset -- offline manual experimental
-# 
+#
 # Note: can only be done by an offline cold wallet that has never been "online"
 # use the monero-wallet-cli interactive tool instead in a manual process with
-# an unconnected charlie_view wallet which holds the inputs but not any keys.
+# an unconnected charlie_view wallet which holds the inputs but not any spend keys.
 sign_transfer() {
 	local port="${1:?input a valid wallet rpc port for a cold wallet}"
 	local unsigned_txset="${2:?input an unsigned tx set}"
@@ -322,7 +322,7 @@ cmd_help() {
 	echo "  - amount in in atomic units 1e12 - e.g. 1230000000000 = 1.23 XMR"
 	echo "  - address - recipient primary address - account index 0, subaddr_indeces [0]"
 	echo "  - unlock_time - unlock after n blocks and make spendable - defaults to 0 (no lock)"
-	echo ""   
+	echo ""
 	echo "fred_export_outputs"
 	echo "- export fred outputs hex"
 	echo "- input:"
