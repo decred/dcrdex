@@ -1832,7 +1832,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	}
 
 	// Credit the user for completing the swap, adjusting the user's score.
-	if actor.user != counterParty.user || newStatus == order.MatchComplete { // if user is both sides, only credit on MatchComplete (taker done too)
+	if actor.user != counterParty.user {
 		s.authMgr.SwapSuccess(actor.user, db.MatchID(match.Match), match.Quantity, redeemTime) // maybe call this in swapDone callback
 	}
 
