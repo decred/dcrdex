@@ -474,7 +474,7 @@ func (db *tTxDB) storeTx(wt *extendedWalletTx) error {
 	db.storeTxCalled = true
 	return db.storeTxErr
 }
-func (db *tTxDB) removeTx(id string) error {
+func (db *tTxDB) removeTx(_ /* id */ string) error {
 	db.removeTxCalled = true
 	return db.removeTxErr
 }

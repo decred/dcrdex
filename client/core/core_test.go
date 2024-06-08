@@ -995,7 +995,7 @@ func (w *TXCWallet) setConfs(coinID dex.Bytes, confs uint32, err error) {
 	w.confsMtx.Unlock()
 }
 
-func (w *TXCWallet) tConfirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {
+func (w *TXCWallet) tConfirmations(_ context.Context, coinID dex.Bytes) (uint32, error) {
 	id := coinID.String()
 	w.confsMtx.RLock()
 	defer w.confsMtx.RUnlock()
@@ -10180,7 +10180,7 @@ func TestDeleteArchivedRecords(t *testing.T) {
 	tdb := tCore.db.(*TDB)
 
 	tempFile := func(suffix string) (path string) {
-		matchesFile, err := os.CreateTemp("", "delete_archives_test_matches")
+		matchesFile, err := os.CreateTemp("", suffix+"delete_archives_test_matches")
 		if err != nil {
 			t.Fatal(err)
 		}

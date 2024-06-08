@@ -3981,7 +3981,7 @@ func (w *assetWallet) checkPendingApprovals() {
 // sumPendingTxs sums the expected incoming and outgoing values in pending
 // transactions stored in pendingTxs. Not used if the node is a
 // txPoolFetcher.
-func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
+func (w *assetWallet) sumPendingTxs(_ /* bal */ *big.Int) (out, in uint64) {
 	isToken := w.assetID != w.baseChainID
 
 	sumPendingTx := func(pendingTx *extendedWalletTx) {
@@ -5486,7 +5486,7 @@ func (getGas) ReadCredentials(chain, credentialsPath string, net dex.Network) (a
 	return
 }
 
-func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int,
+func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, _ /* assetID */, contractVer uint32, maxSwaps int,
 	walletDir string, providers []string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
 	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
 
