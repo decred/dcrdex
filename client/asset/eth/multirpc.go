@@ -1059,11 +1059,14 @@ func (m *multiRPCClient) withAll(
 ) error {
 
 	var atLeastOne bool
-	var errs []error
-	for _, p := range m.nonceProviderList() {
+	var errs []string
+	providers := m.nonceProviderList()
+	for i := range providers {
+		p := providers[i]
 		if p.failed() {
 			continue
 		}
+
 		ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 		err := f(ctx, p)
 		cancel()
@@ -1071,6 +1074,7 @@ func (m *multiRPCClient) withAll(
 			atLeastOne = true // return nil err unless a later "propagated" error says to
 			continue
 		}
+		errs = append(errs, err.Error())
 		var discarded bool
 		for i, f := range acceptabilityFilters {
 			discard, propagate, fail := f(err)
@@ -1096,18 +1100,12 @@ func (m *multiRPCClient) withAll(
 	if atLeastOne {
 		return nil
 	}
-	if errs == nil {
-		return errors.New("all providers in a failed state")
+
+	if len(errs) == len(providers) {
+		return fmt.Errorf("all providers in a failed state: %s", strings.Join(errs, "\n"))
 	}
-	// TODO: use errors.Join(errs) when Go 1.20 is the min
-	var b []byte
-	for i, err := range errs {
-		if i > 0 {
-			b = append(b, '\n')
-		}
-		b = append(b, err.Error()...)
-	}
-	return errors.New(string(b))
+
+	return nil
 }
 
 // withAny runs the provider function against known providers in random order
