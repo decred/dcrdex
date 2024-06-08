@@ -1050,6 +1050,7 @@ export default class MarketsPage extends BasePage {
     page.lotField.value = ''
     page.qtyField.value = ''
     page.rateField.value = ''
+    this.setOrderFormTickers('', '')
 
     // clear depth chart and orderbook.
     this.depthChart.clear()
@@ -1117,6 +1118,7 @@ export default class MarketsPage extends BasePage {
     this.mmRunning = undefined
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
+    this.setOrderFormTickers(baseCfg.symbol.toUpperCase(), quoteCfg.symbol.toUpperCase())
 
     this.displayMessageIfMissingWallet()
     this.balanceWgt.setWallets(host, baseID, quoteID)
@@ -1146,6 +1148,17 @@ export default class MarketsPage extends BasePage {
     this.reputationMeter.setHost(dex.host)
     this.updateReputation()
     this.loadUserOrders()
+  }
+
+  /*
+    setOrderFormTickers sets the base and quote tickers on the order form.
+  */
+  setOrderFormTickers (baseSym: string, quoteSym: string) {
+    const page = this.page
+    Doc.setText(page.priceBox, '[data-base-ticker]', baseSym)
+    Doc.setText(page.qtyBox, '[data-base-ticker]', baseSym)
+    Doc.setText(page.priceBox, '[data-quote-ticker]', quoteSym)
+    Doc.setText(page.mktBuyBox, '[data-quote-ticker]', quoteSym)
   }
 
   /*
