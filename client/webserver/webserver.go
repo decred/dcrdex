@@ -1081,7 +1081,13 @@ func writeJSON(w http.ResponseWriter, thing any, indent bool) {
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing any, code int, indent bool) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	b, err := json.Marshal(thing)
+	var b []byte
+	var err error
+	if indent {
+		b, err = json.MarshalIndent(thing, "", "	") // tab
+	} else {
+		b, err = json.Marshal(thing)
+	}
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Errorf("JSON encode error: %v", err)

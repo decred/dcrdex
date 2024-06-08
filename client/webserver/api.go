@@ -1449,7 +1449,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	form.Subtract = true
-	s.send(w, r, form)
+	s.send(w, form)
 }
 
 // apiSend handles the 'send' API request.
@@ -1459,10 +1459,10 @@ func (s *WebServer) apiSend(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	s.send(w, r, form)
+	s.send(w, form)
 }
 
-func (s *WebServer) send(w http.ResponseWriter, r *http.Request, form *sendOrWithdrawForm) {
+func (s *WebServer) send(w http.ResponseWriter, form *sendOrWithdrawForm) {
 	state := s.core.WalletState(form.AssetID)
 	if state == nil {
 		s.writeAPIError(w, fmt.Errorf("no wallet found for %s", unbip(form.AssetID)))
