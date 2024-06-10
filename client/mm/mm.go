@@ -289,7 +289,7 @@ func (m *MarketMaker) CEXBalance(cexName string, assetID uint32) (*libxc.Exchang
 		return nil, fmt.Errorf("error getting connected CEX: %w", err)
 	}
 
-	return cex.Balance(assetID)
+	return cex.Balance(m.ctx, assetID)
 }
 
 // MarketReport returns information about the oracle rates on a market
@@ -1105,7 +1105,7 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 			}
 
 			for assetID := range cexAssets {
-				balance, err := cex.Balance(assetID)
+				balance, err := cex.Balance(m.ctx, assetID)
 				if err != nil {
 					return nil, nil, err
 				}

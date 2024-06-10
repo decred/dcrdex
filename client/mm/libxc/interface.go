@@ -52,7 +52,7 @@ var (
 type CEX interface {
 	dex.Connector
 	// Balance returns the balance of an asset at the CEX.
-	Balance(assetID uint32) (*ExchangeBalance, error)
+	Balance(ctx context.Context, assetID uint32) (*ExchangeBalance, error)
 	// CancelTrade cancels a trade on the CEX.
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
 	// Markets returns the list of markets at the CEX.
@@ -62,7 +62,7 @@ type CEX interface {
 	SubscribeCEXUpdates() (updates <-chan interface{}, unsubscribe func())
 	// SubscribeMarket subscribes to order book updates on a market. This must
 	// be called before calling VWAP.
-	SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error
+	SubscribeMarket(baseID, quoteID uint32) error
 	// SubscribeTradeUpdates returns a channel that the caller can use to
 	// listen for updates to a trade's status. When the subscription ID
 	// returned from this function is passed as the updaterID argument to
@@ -84,10 +84,9 @@ type CEX interface {
 	// ConfirmDeposit is an async function that calls onConfirm when the status
 	// of a deposit has been confirmed.
 	ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, uint64)
-	// Withdraw withdraws funds from the CEX to a certain address. onComplete
-	// is called with the actual amount withdrawn (amt - fees) and the
-	// transaction ID of the withdrawal.
-	Withdraw(ctx context.Context, assetID uint32, amt uint64, address string) (string, error)
+	// Withdraw withdraws funds from the CEX to a certain address. A withdrawal
+	// ID and the amount the CEX balance was decremented by are returned.
+	Withdraw(ctx context.Context, assetID uint32, amt uint64, address string) (string, uint64, error)
 	// ConfirmWithdrawal checks whether a withdrawal has been completed. If the
 	// withdrawal has not yet been sent, ErrWithdrawalPending is returned.
 	ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error)
@@ -100,12 +99,8 @@ type CEX interface {
 const (
 	Binance   = "Binance"
 	BinanceUS = "BinanceUS"
+	Coinbase  = "Coinbase"
 )
-
-// IsValidCEXName returns whether or not a cex name is supported.
-func IsValidCexName(cexName string) bool {
-	return cexName == Binance || cexName == BinanceUS
-}
 
 // NewCEX creates a new CEX.
 func NewCEX(cexName string, apiKey, secretKey string, log dex.Logger, net dex.Network) (CEX, error) {
@@ -114,6 +109,8 @@ func NewCEX(cexName string, apiKey, secretKey string, log dex.Logger, net dex.Ne
 		return newBinance(apiKey, secretKey, log, net, false), nil
 	case BinanceUS:
 		return newBinance(apiKey, secretKey, log, net, true), nil
+	case Coinbase:
+		return newCoinbase(apiKey, secretKey, log, net)
 	default:
 		return nil, fmt.Errorf("unrecognized CEX: %v", cexName)
 	}

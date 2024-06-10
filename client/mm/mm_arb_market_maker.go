@@ -440,7 +440,7 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(ctx, a.baseID, a.quoteID)
+	err = a.cex.SubscribeMarket(a.baseID, a.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
 	}

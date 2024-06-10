@@ -457,7 +457,7 @@ func (c *tCEX) Balances() (map[uint32]*libxc.ExchangeBalance, error) {
 func (c *tCEX) Markets(ctx context.Context) ([]*libxc.Market, error) {
 	return nil, nil
 }
-func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
+func (c *tCEX) Balance(_ context.Context, assetID uint32) (*libxc.ExchangeBalance, error) {
 	return c.balances[assetID], c.balanceErr
 }
 func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, updaterID int) (*libxc.Trade, error) {
@@ -481,7 +481,7 @@ func (c *tCEX) CancelTrade(ctx context.Context, seID, quoteID uint32, tradeID st
 	c.cancelledTrades = append(c.cancelledTrades, tradeID)
 	return nil
 }
-func (c *tCEX) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
+func (c *tCEX) SubscribeMarket(baseID, quoteID uint32) error {
 	return nil
 }
 func (c *tCEX) UnsubscribeMarket(baseID, quoteID uint32) error {
@@ -517,14 +517,14 @@ func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	return c.depositAddress, nil
 }
 
-func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
+func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, uint64, error) {
 	c.lastWithdrawArgs = &withdrawArgs{
 		address: address,
 		amt:     qty,
 		assetID: assetID,
 	}
 
-	return c.withdrawalID, nil
+	return c.withdrawalID, qty, nil
 }
 
 func (c *tCEX) ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error) {
@@ -605,7 +605,7 @@ func (c *tBotCexAdaptor) CancelTrade(ctx context.Context, baseID, quoteID uint32
 	c.cancelledTrades = append(c.cancelledTrades, tradeID)
 	return nil
 }
-func (c *tBotCexAdaptor) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
+func (c *tBotCexAdaptor) SubscribeMarket(baseID, quoteID uint32) error {
 	return nil
 }
 func (c *tBotCexAdaptor) SubscribeTradeUpdates() (updates <-chan *libxc.Trade) {
