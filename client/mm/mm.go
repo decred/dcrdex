@@ -586,7 +586,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 		CEX:       cex,
 		CEXConfig: cfg,
 	}
-	c.mkts, err = cex.Markets(ctx)
+	/* c.mkts, err = cex.Markets(ctx)
 	if err != nil {
 		m.log.Errorf("Failed to get markets for %s: %v", cfg.Name, err)
 		c.mkts = make(map[string]*libxc.Market)
@@ -596,7 +596,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 		m.log.Errorf("Failed to get balances for %s: %v", cfg.Name, err)
 		c.balances = make(map[uint32]*libxc.ExchangeBalance)
 		c.connectErr = core.UnwrapErr(err).Error()
-	}
+	} */
 	m.cexes[cfg.Name] = c
 	success = true
 	return c, nil
