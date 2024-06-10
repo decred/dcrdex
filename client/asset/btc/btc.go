@@ -5818,6 +5818,9 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.W
 // from the last point to which it had previously scanned to the current tip.
 func (btc *intermediaryWallet) addUnknownTransactionsToHistory(tip uint64) {
 	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return
+	}
 
 	const blockQueryBuffer = 3
 	var blockToQuery uint64
