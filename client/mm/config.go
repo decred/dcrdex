@@ -37,9 +37,7 @@ type CEXConfig struct {
 // brought above the minimum amount and the transfer amount would be above the
 // minimum transfer amount.
 type AutoRebalanceConfig struct {
-	MinBaseAmt       uint64 `json:"minBaseAmt"`
 	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
-	MinQuoteAmt      uint64 `json:"minQuoteAmt"`
 	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
 }
 

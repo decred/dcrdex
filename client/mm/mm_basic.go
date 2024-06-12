@@ -224,10 +224,10 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 		if basisPrice > 0 {
 			low, high := msgOracleRate*(1-maxOracleMismatch), msgOracleRate*(1+maxOracleMismatch)
 			if basisPrice < low {
-				b.log.Debugf("local mid-gap is below safe range. Using effective mid-gap of %d%% below the oracle rate.", maxOracleMismatch*100)
+				b.log.Debugf("local mid-gap is below safe range. Using effective mid-gap of %.2f below the oracle rate.", maxOracleMismatch*100)
 				basisPrice = low
 			} else if basisPrice > high {
-				b.log.Debugf("local mid-gap is above safe range. Using effective mid-gap of %d%% above the oracle rate.", maxOracleMismatch*100)
+				b.log.Debugf("local mid-gap is above safe range. Using effective mid-gap of %.2f above the oracle rate.", maxOracleMismatch*100)
 				basisPrice = high
 			}
 		}
@@ -241,7 +241,7 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 			b.log.Tracef("basisPrice: using basis price %s from oracle because no mid-gap was found in order book", b.fmtRate(uint64(msgOracleRate)))
 		} else {
 			basisPrice = msgOracleRate*oracleWeighting + basisPrice*(1-oracleWeighting)
-			b.log.Tracef("basisPrice: oracle-weighted basis price = %f", b.fmtRate(uint64(msgOracleRate)))
+			b.log.Tracef("basisPrice: oracle-weighted basis price = %s", b.fmtRate(uint64(msgOracleRate)))
 		}
 	}
 
@@ -393,8 +393,8 @@ func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, 
 			rate := m.orderPrice(basisPrice, feeAdj, sell, p.GapFactor)
 
 			if m.log.Level() == dex.LevelTrace {
-				m.log.Tracef("ordersToPlace.orders: %s placement # %d, gap factor = %f, rate = %s",
-					sellStr(sell), i, p.GapFactor, m.fmtRate(rate))
+				m.log.Tracef("ordersToPlace.orders: %s placement # %d, gap factor = %f, rate = %s, %+v",
+					sellStr(sell), i, p.GapFactor, m.fmtRate(rate), rate)
 			}
 
 			lots := p.Lots
@@ -431,7 +431,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		m.log.Errorf("Could not calculate fee-gap stats: %v", err)
 		return
 	}
-	m.core.registerFeeGap(feeGap)
+	m.registerFeeGap(feeGap)
 	var feeAdj uint64
 	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
 		feeAdj = feeGap.FeeGap / 2
@@ -443,8 +443,8 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	}
 
 	buyOrders, sellOrders := m.ordersToPlace(basisPrice, feeAdj)
-	m.core.MultiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch, nil, nil)
-	m.core.MultiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch, nil, nil)
+	m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
+	m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
 }
 
 func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {

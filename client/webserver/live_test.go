@@ -2198,6 +2198,28 @@ func tLotFees() *mm.LotFees {
 	}
 }
 
+func randomProfitLoss(baseID, quoteID uint32) *mm.ProfitLoss {
+	return &mm.ProfitLoss{
+		Initial: map[uint32]*mm.Amount{
+			baseID:  mm.NewAmount(baseID, int64(randomBalance()), tenToThe(5)),
+			quoteID: mm.NewAmount(quoteID, int64(randomBalance()), tenToThe(5)),
+		},
+		InitialUSD: tenToThe(5),
+		Mods: map[uint32]*mm.Amount{
+			baseID:  mm.NewAmount(baseID, int64(randomBalance()), tenToThe(5)),
+			quoteID: mm.NewAmount(quoteID, int64(randomBalance()), tenToThe(5)),
+		},
+		ModsUSD: tenToThe(5),
+		Final: map[uint32]*mm.Amount{
+			baseID:  mm.NewAmount(baseID, int64(randomBalance()), tenToThe(5)),
+			quoteID: mm.NewAmount(quoteID, int64(randomBalance()), tenToThe(5)),
+		},
+		FinalUSD:    tenToThe(5),
+		Profit:      tenToThe(5),
+		ProfitRatio: 0.2 - rand.Float64()*0.4,
+	}
+}
+
 func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.MarketReport, error) {
 	baseFiatRate := math.Pow10(3 - rand.Intn(6))
 	quoteFiatRate := math.Pow10(3 - rand.Intn(6))
@@ -2291,8 +2313,7 @@ func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *s
 					Reserved:  randomBalance(),
 				},
 			},
-			ProfitLoss:         tenToThe(7),
-			ProfitRatio:        0.01 - rand.Float64()*0.2,
+			ProfitLoss:         randomProfitLoss(mkt.BaseID, mkt.QuoteID),
 			StartTime:          startTime,
 			PendingDeposits:    rand.Intn(3),
 			PendingWithdrawals: rand.Intn(3),
@@ -2409,8 +2430,7 @@ func (m *TMarketMaker) Status() *mm.Status {
 					botCfg.BaseID:  &mm.BotBalance{Available: randomBalance()},
 					botCfg.QuoteID: &mm.BotBalance{Available: randomBalance()},
 				},
-				ProfitLoss:         5e5 - rand.Float64()*1e6,
-				ProfitRatio:        0.2 - rand.Float64()*0.2,
+				ProfitLoss:         randomProfitLoss(botCfg.BaseID, botCfg.QuoteID),
 				StartTime:          time.Now().Add(-time.Duration(float64(time.Hour*10) * rand.Float64())).Unix(),
 				PendingDeposits:    rand.Intn(3),
 				PendingWithdrawals: rand.Intn(3),
@@ -2536,8 +2556,7 @@ func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm
 		},
 		InitialBalances: make(map[uint32]uint64),
 		FinalBalances:   make(map[uint32]uint64),
-		ProfitLoss:      tenToThe(3) - 2*tenToThe(3),
-		ProfitRatio:     rand.Float64()*0.2 - 0.1,
+		ProfitLoss:      randomProfitLoss(mkt.BaseID, mkt.QuoteID),
 	}
 
 	for _, assetID := range []uint32{mkt.BaseID, mkt.QuoteID} {

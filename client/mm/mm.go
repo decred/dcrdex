@@ -26,7 +26,7 @@ type clientCore interface {
 	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, uint64, error)
 	Cancel(oidB dex.Bytes) error
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
-	WalletState(assetID uint32) *core.WalletState
+	WalletTraits(assetID uint32) (asset.WalletTrait, error)
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	MaxFundingFees(fromAsset uint32, host string, numTrades uint32, fromSettings map[string]string) (uint64, error)
 	User() *core.User

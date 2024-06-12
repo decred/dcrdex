@@ -3048,6 +3048,14 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 	return wallet.state()
 }
 
+func (c *Core) WalletTraits(assetID uint32) (asset.WalletTrait, error) {
+	w, found := c.wallet(assetID)
+	if !found {
+		return 0, fmt.Errorf("no %d wallet found", assetID)
+	}
+	return w.traits, nil
+}
+
 // assetHasActiveOrders checks whether there are any active orders or
 // negotiating matches for the specified asset.
 func (c *Core) assetHasActiveOrders(assetID uint32) bool {

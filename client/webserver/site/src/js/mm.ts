@@ -5,7 +5,8 @@ import {
   RunStatsNote,
   ExchangeBalance,
   StartConfig,
-  OrderPlacement
+  OrderPlacement,
+  AutoRebalanceConfig
 } from './registry'
 import {
   MM,
@@ -392,8 +393,6 @@ class Bot extends BotMarket {
       this.placementsChart.setMarket(marketConfig)
     }
 
-    
-
     Doc.setVis(botType !== botTypeBasicMM, page.cexDataBox)
     if (botType !== botTypeBasicMM) {
       const cex = app().mmStatus.cexes[cexName]
@@ -659,7 +658,7 @@ class Bot extends BotMarket {
     this.hideAllocationDialog()
   }
 
-  autoRebalanceSettings () {
+  autoRebalanceSettings (): AutoRebalanceConfig {
     const {
       proj: { bProj, qProj, alloc }, baseFeeID, quoteFeeID, cfg: { uiConfig: { baseConfig, quoteConfig } },
       lotSize: minBase, quoteLot: minQuote, baseID, quoteID
@@ -681,9 +680,7 @@ class Bot extends BotMarket {
     const baseRange = maxBase - minBase
     const quoteRange = maxQuote - minQuote
     return {
-      minBaseAmt: Math.round(minBase + baseConfig.refillFactor * baseRange),
       minBaseTransfer: Math.round(minBase + baseConfig.transferFactor * baseRange),
-      minQuoteAmt: Math.round(minQuote + quoteConfig.refillFactor * quoteRange),
       minQuoteTransfer: Math.round(minQuote + quoteConfig.transferFactor * quoteRange)
     }
   }

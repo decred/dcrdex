@@ -730,9 +730,7 @@ export interface OrderPlacement {
 }
 
 export interface AutoRebalanceConfig {
-  minBaseAmt: number
   minBaseTransfer: number
-  minQuoteAmt: number
   minQuoteTransfer: number
 }
 
@@ -780,7 +778,6 @@ export interface BotAssetConfig {
   orderReservesFactor: number
   slippageBufferFactor: number
   transferFactor: number
-  refillFactor: number
 }
 
 export interface UIConfig {
@@ -832,6 +829,7 @@ export interface BotBalance {
   available: number
   locked: number
   pending: number
+  reserved: number
 }
 
 export interface BotBalances {
@@ -841,7 +839,7 @@ export interface BotBalances {
 
 export interface BotInventory {
   avail: number
-  locked: number
+  locked: number // includes BotBalance.reserved
   total: number // avail + locked
 }
 

@@ -105,7 +105,7 @@ type CEX interface {
 	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error)
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseID, quoteID uint32) error
-	// VWAP returns the volume weighted average price for a certainWithdraw(address string, value, feeRate uint64)  quantity
+	// VWAP returns the volume weighted average price for a certain quantity
 	// of the base asset on a market.
 	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
 	// MidGap returns the mid-gap price for an order book.

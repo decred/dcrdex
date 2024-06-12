@@ -28,6 +28,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/utils"
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/comms"
 	"github.com/go-chi/chi/v5"
@@ -231,7 +232,7 @@ type fakeBinance struct {
 	withdrawalHistory    map[string]*withdrawal
 
 	balancesMtx sync.RWMutex
-	balances    []*bntypes.Balance
+	balances    map[string]*bntypes.Balance
 
 	accountSubscribersMtx sync.RWMutex
 	accountSubscribers    map[string]*ws.WSLink
@@ -262,11 +263,16 @@ func newFakeBinanceServer(ctx context.Context) (*fakeBinance, error) {
 		return nil, fmt.Errorf("Error creating server: %w", err)
 	}
 
+	balances := make(map[string]*bntypes.Balance, len(initialBalances))
+	for _, bal := range initialBalances {
+		balances[bal.Asset] = bal
+	}
+
 	f := &fakeBinance{
 		ctx:                ctx,
 		srv:                srv,
 		withdrawalHistory:  make(map[string]*withdrawal, 0),
-		balances:           initialBalances,
+		balances:           balances,
 		accountSubscribers: make(map[string]*ws.WSLink),
 		wallets:            make(map[string]Wallet),
 		fiatRates:          fiatRates,
@@ -811,7 +817,7 @@ func (f *fakeBinance) handleExchangeInfo(w http.ResponseWriter, r *http.Request)
 func (f *fakeBinance) handleAccount(w http.ResponseWriter, r *http.Request) {
 	f.balancesMtx.RLock()
 	defer f.balancesMtx.RUnlock()
-	writeJSONWithStatus(w, &bntypes.Account{Balances: f.balances}, http.StatusOK)
+	writeJSONWithStatus(w, &bntypes.Account{Balances: utils.MapItems(f.balances)}, http.StatusOK)
 }
 
 func (f *fakeBinance) handleDepth(w http.ResponseWriter, r *http.Request) {
@@ -833,7 +839,7 @@ func (f *fakeBinance) handleDepth(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		baseFiatRate := f.fiatRates[parseAssetID(mkt.BaseAsset)]
 		quoteFiatRate := f.fiatRates[parseAssetID(mkt.QuoteAsset)]
-		m = newMarket(slug, baseFiatRate, quoteFiatRate)
+		m = newMarket(slug, mkt.BaseAsset, mkt.QuoteAsset, baseFiatRate, quoteFiatRate)
 		f.markets[slug] = m
 	}
 	f.marketsMtx.Unlock()
@@ -877,6 +883,20 @@ func (f *fakeBinance) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 		TimeInForce:        "GTC",
 	}
 	writeJSONWithStatus(w, &resp, http.StatusOK)
+}
+
+func (f *fakeBinance) updateOrderBalances(symbol string, sell bool, qty, rate float64) {
+	f.marketsMtx.RLock()
+	mkt := f.markets[symbol]
+	f.marketsMtx.RUnlock()
+	fromSlug, toSlug, fromQty, toQty := mkt.quoteSlug, mkt.baseSlug, qty*rate, qty
+	if sell {
+		fromSlug, toSlug, fromQty, toQty = toSlug, fromSlug, toQty, fromQty
+	}
+	f.balancesMtx.Lock()
+	f.balances[toSlug].Free += toQty
+	f.balances[fromSlug].Free -= fromQty
+	f.balancesMtx.Unlock()
 }
 
 func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
@@ -985,7 +1005,7 @@ func (f *fakeBinance) handleMarketTicker24(w http.ResponseWriter, r *http.Reques
 	for _, mkt := range xcInfo.Symbols {
 		baseFiatRate := f.fiatRates[parseAssetID(mkt.BaseAsset)]
 		quoteFiatRate := f.fiatRates[parseAssetID(mkt.QuoteAsset)]
-		m := newMarket(mkt.Symbol, baseFiatRate, quoteFiatRate)
+		m := newMarket(mkt.Symbol, mkt.BaseAsset, mkt.QuoteAsset, baseFiatRate, quoteFiatRate)
 		var buyPrice, sellPrice float64
 		if len(m.buys) > 0 {
 			buyPrice = m.buys[0].rate
@@ -1029,7 +1049,7 @@ type rateQty struct {
 }
 
 type market struct {
-	slug                                   string
+	symbol, baseSlug, quoteSlug            string
 	baseFiatRate, quoteFiatRate, basisRate float64
 	minRate, maxRate                       float64
 
@@ -1040,12 +1060,14 @@ type market struct {
 	buys, sells []*rateQty
 }
 
-func newMarket(slug string, baseFiatRate, quoteFiatRate float64) *market {
+func newMarket(symbol, baseSlug, quoteSlug string, baseFiatRate, quoteFiatRate float64) *market {
 	const maxVariation = 0.1
 	basisRate := baseFiatRate / quoteFiatRate
 	minRate, maxRate := basisRate*(1/(1+maxVariation)), basisRate*(1+maxVariation)
 	m := &market{
-		slug:          slug,
+		symbol:        symbol,
+		baseSlug:      baseSlug,
+		quoteSlug:     quoteSlug,
 		baseFiatRate:  baseFiatRate,
 		quoteFiatRate: quoteFiatRate,
 		basisRate:     basisRate,
@@ -1057,7 +1079,7 @@ func newMarket(slug string, baseFiatRate, quoteFiatRate float64) *market {
 	m.rate.Store(math.Float64bits(basisRate))
 	log.Tracef("Market %s intitialized with base fiat rate = %.4f, quote fiat rate = %.4f "+
 		"basis rate = %.8f. Mid-gap rate will randomly walk between %.8f and %.8f",
-		slug, baseFiatRate, quoteFiatRate, basisRate, minRate, maxRate)
+		symbol, baseFiatRate, quoteFiatRate, basisRate, minRate, maxRate)
 	m.shuffle()
 	return m
 }
@@ -1084,7 +1106,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	m.rate.Store(math.Float64bits(newRate))
 	log.Tracef("%s: A randomized (max %.1f%%) shift of %.8f (%.3f%%) was applied to the old rate of %.8f, "+
 		"resulting in a new mid-gap of %.8f",
-		m.slug, maxChangeRatio*100, shift, shiftRoll*maxChangeRatio*100, oldRate, newRate,
+		m.symbol, maxChangeRatio*100, shift, shiftRoll*maxChangeRatio*100, oldRate, newRate,
 	)
 
 	halfGapRoll := rand.Float64()
@@ -1099,7 +1121,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 
 	log.Tracef("%s: Half-gap roll of %.4f%% resulted in a half-gap factor of %.4f%%, range %.8f to %0.8f. "+
 		"Level-spacing roll of %.4f%% resulted in a level spacing of %.8f",
-		m.slug, halfGapRoll*100, halfGapFactor*100, bestBuy, bestSell, levelSpacingRoll*100, levelSpacing,
+		m.symbol, halfGapRoll*100, halfGapFactor*100, bestBuy, bestSell, levelSpacingRoll*100, levelSpacing,
 	)
 
 	zeroBookSide := func(ords []*rateQty) map[string]string {
@@ -1131,7 +1153,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	m.buys = makeOrders(bestBuy, -1, jsBuys)
 	m.sells = makeOrders(bestSell, 1, jsSells)
 
-	log.Tracef("%s: Shuffle resulted in %d buy orders and %d sell orders being placed", m.slug, len(m.buys), len(m.sells))
+	log.Tracef("%s: Shuffle resulted in %d buy orders and %d sell orders being placed", m.symbol, len(m.buys), len(m.sells))
 
 	convertSide := func(side map[string]string) [][2]json.Number {
 		updates := make([][2]json.Number, 0, len(side))

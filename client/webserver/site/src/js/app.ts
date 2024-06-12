@@ -275,6 +275,7 @@ export default class Application {
     this.attachActions()
     this.attachCommon(this.header)
     this.attach({})
+
     // If we are authed, populate notes, otherwise get we'll them from the login
     // response.
     if (this.authed) await this.fetchNotes()
@@ -473,7 +474,6 @@ export default class Application {
     if (this.popupTmpl) this.popupTmpl.remove()
     else console.error('popupTmpl element not found')
     this.tooltip = idel(document.body, 'tooltip')
-
     page.noteTmpl.removeAttribute('id')
     page.noteTmpl.remove()
     page.pokeTmpl.removeAttribute('id')
@@ -895,6 +895,7 @@ export default class Application {
       Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
       return
     }
+    Doc.setVis(Object.keys(this.exchanges).length > 0, page.marketsMenuEntry, page.mmLink)
 
     page.profileBox.classList.add('authed')
     Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)

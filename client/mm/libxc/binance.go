@@ -1315,8 +1315,6 @@ func (bnc *binance) handleExecutionReport(update *bntypes.StreamUpdate) {
 		return
 	}
 
-	fmt.Println("--handleExecuationReport sending trade update with complete =", complete)
-
 	updater <- &Trade{
 		ID:          id,
 		Complete:    complete,
@@ -1816,9 +1814,6 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 	if err != nil {
 		return nil, err
 	}
-
-	b, _ := json.MarshalIndent(resp, "", "    ")
-	fmt.Println("--/api/v3/order response", string(b))
 
 	return &Trade{
 		ID:          tradeID,

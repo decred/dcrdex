@@ -135,9 +135,11 @@ export function runningBotInventory (assetID: number): RunningBotInventory {
     if (!running || !runStats) return v
     const { dexBalances: d, cexBalances: c } = runStats
     v.cex.locked += c[assetID]?.locked ?? 0
+    v.cex.locked += c[assetID]?.reserved ?? 0
     v.cex.avail += c[assetID]?.available ?? 0
     v.cex.total = v.cex.avail + v.cex.locked
     v.dex.locked += d[assetID]?.locked ?? 0
+    v.dex.locked += d[assetID]?.reserved ?? 0
     v.dex.avail += d[assetID]?.available ?? 0
     v.dex.total = v.dex.avail + v.dex.locked
     v.avail += (d[assetID]?.available ?? 0) + (c[assetID]?.available ?? 0)
@@ -346,7 +348,7 @@ export function liveBotConfig (host: string, baseID: number, quoteID: number): B
 }
 
 export function liveBotStatus (host: string, baseID: number, quoteID: number): MMBotStatus | undefined {
-  const statuses = (app().mmStatus.bots || []).filter((s: MMBotStatus) =>  {
+  const statuses = (app().mmStatus.bots || []).filter((s: MMBotStatus) => {
     return s.config.baseID === baseID && s.config.quoteID === quoteID && s.config.host === host
   })
   if (statuses.length) return statuses[0]
@@ -913,7 +915,7 @@ export class RunningMarketMakerDisplay {
 
     const summedBalance = (b: BotBalance) => {
       if (!b) return 0
-      return b.available + b.locked + b.pending
+      return b.available + b.locked + b.pending + b.reserved
     }
 
     const dexBaseInv = summedBalance(runStats.dexBalances[baseID]) / baseFactor

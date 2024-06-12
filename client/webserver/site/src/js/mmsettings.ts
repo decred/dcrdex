@@ -77,13 +77,7 @@ const defaultOrderReserves = {
   prec: 3
 }
 const defaultTransfer = {
-  factor: 0.5,
-  minR: 0,
-  maxR: 1,
-  range: 1
-}
-const defaultRefill = {
-  factor: 0.5,
+  factor: 0.2,
   minR: 0,
   maxR: 1,
   range: 1
@@ -170,16 +164,6 @@ const defaultMarketMakingConfig: ConfigState = {
   emptyMarketRate: 0,
   profit: 0.02,
   orderPersistence: defaultOrderPersistence.value,
-  baseBalance: 0,
-  quoteBalance: 0,
-  baseTokenFees: 0,
-  quoteTokenFees: 0,
-  cexBaseBalance: 0,
-  cexBaseMinBalance: 0,
-  cexBaseMinTransfer: 0,
-  cexQuoteBalance: 0,
-  cexQuoteMinBalance: 0,
-  cexQuoteMinTransfer: 0,
   cexRebalance: true,
   simpleArbLots: 1
 } as any as ConfigState
@@ -188,8 +172,7 @@ const defaultBotAssetConfig: BotAssetConfig = {
   swapFeeN: defaultSwapReserves.n,
   orderReservesFactor: defaultOrderReserves.factor,
   slippageBufferFactor: defaultSlippage.factor,
-  transferFactor: defaultTransfer.factor,
-  refillFactor: defaultRefill.factor
+  transferFactor: defaultTransfer.factor
 }
 
 // cexButton stores parts of a CEX selection button.
@@ -1088,7 +1071,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.levelSpacingBox.classList.toggle('disabled', levelSpacingDisabled)
     page.qcLevelSpacing.disabled = levelSpacingDisabled
 
-    cfg.simpleArbLots = levelsPerSide * lotsPerLevel
+    cfg.simpleArbLots = lotsPerLevel
 
     if (botType !== botTypeBasicArb) {
       this.clearPlacements(cexName ? arbMMRowCacheKey : cfg.gapStrategy)
@@ -2202,8 +2185,6 @@ class AssetPane {
   orderReservesSlider: MiniSlider
   slippageBuffer: NumberInput
   slippageBufferSlider: MiniSlider
-  refillBalance: NumberInput
-  refillBalanceSlider: MiniSlider
   minTransfer: NumberInput
   minTransferSlider: MiniSlider
 
@@ -2263,25 +2244,9 @@ class AssetPane {
       this.cfg.slippageBufferFactor = v
       this.pg.updateAllocations()
     })
-    this.refillBalance = new NumberInput(page.refillBalance, {
-      sigFigs: true,
-      changed: (v: number) => {
-        const { cfg, lotSizeConv } = this
-        const totalInventory = this.commit()
-        const [minV, maxV] = [lotSizeConv, totalInventory]
-        cfg.refillFactor = (v - minV) / (maxV - minV)
-        this.refillBalanceSlider.setValue(cfg.refillFactor)
-      }
-    })
-    this.refillBalanceSlider = new MiniSlider(page.refillBalanceSlider, (r: number) => {
-      const { cfg, lotSizeConv } = this
-      const totalInventory = this.commit()
-      const [minV, maxV] = [lotSizeConv, totalInventory]
-      cfg.refillFactor = r
-      this.refillBalance.setValue(minV + r * (maxV - minV))
-    })
     this.minTransfer = new NumberInput(page.minTransfer, {
       sigFigs: true,
+      min: 0,
       changed: (v: number) => {
         const { cfg, lotSizeConv } = this
         const totalInventory = this.commit()
@@ -2291,9 +2256,9 @@ class AssetPane {
       }
     })
     this.minTransferSlider = new MiniSlider(page.minTransferSlider, (r: number) => {
-      const { cfg, lotSizeConv } = this
+      const { cfg } = this
       const totalInventory = this.commit()
-      const [minV, maxV] = [lotSizeConv, totalInventory]
+      const [minV, maxV] = [0, totalInventory]
       cfg.transferFactor = r
       this.minTransfer.setValue(minV + r * (maxV - minV))
     })
@@ -2306,7 +2271,6 @@ class AssetPane {
     const { ui } = this
     this.lotSize = lotSize
     this.lotSizeConv = lotSize / ui.conventional.conversionFactor
-    this.minTransfer.min = this.refillBalance.min = this.lotSizeConv
   }
 
   setAsset (assetID: number, counterAssetID: number, isQuote: boolean) {
@@ -2343,7 +2307,7 @@ class AssetPane {
       const [v] = toPrecision(cfg.orderReservesFactor ?? defaultOrderReserves.factor, defaultOrderReserves.prec)
       this.orderReserves.setValue(v)
       this.orderReservesSlider.setValue((v - defaultOrderReserves.minR) / defaultOrderReserves.range)
-      this.minTransfer.prec = this.refillBalance.prec = Math.log10(ui.conventional.conversionFactor)
+      this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
     }
     this.slippageBuffer.setValue(cfg.slippageBufferFactor)
     const { minR, range } = defaultSlippage
@@ -2442,17 +2406,15 @@ class AssetPane {
   }
 
   updateRebalance () {
-    const { page, cfg, lotSizeConv, pg: { updatedConfig: { cexRebalance }, specs: { cexName } } } = this
+    const { page, cfg, pg: { updatedConfig: { cexRebalance }, specs: { cexName } } } = this
     const showRebalance = cexName && cexRebalance
     Doc.setVis(showRebalance, page.rebalanceOpts)
     if (!showRebalance) return
     const totalInventory = this.commit()
-    const [minV, maxV] = [lotSizeConv, totalInventory]
+    const [minV, maxV] = [0, totalInventory]
     const rangeV = maxV - minV
     this.minTransfer.setValue(minV + cfg.transferFactor * rangeV)
     this.minTransferSlider.setValue((cfg.transferFactor - defaultTransfer.minR) / defaultTransfer.range)
-    this.refillBalance.setValue(minV + cfg.refillFactor * rangeV)
-    this.refillBalanceSlider.setValue((cfg.refillFactor - defaultRefill.minR) / defaultRefill.range)
   }
 
   setupWalletSettings () {

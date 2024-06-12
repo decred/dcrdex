@@ -86,7 +86,7 @@ export default class MarketMakerLogsPage extends BasePage {
     }
     this.overview = await MM.mmRunOverview(host, baseID, quoteID, startTime)
     this.fiatRates = this.overview.finalState.fiatRates
-    return this.overview.cfgs[this.overview.cfgs.length-1]
+    return this.overview.cfgs[this.overview.cfgs.length - 1]
   }
 
   async setup (host: string, baseID: number, quoteID: number) {
@@ -100,7 +100,6 @@ export default class MarketMakerLogsPage extends BasePage {
     } else if (overview) {
       this.populateStats(overview.profitLoss.profit, overview.endTime)
     }
-   
     Doc.bind(this.page.backButton, 'click', () => { app().loadPage(runStats ? 'mm' : 'mmarchives') })
     const events = await this.getRunLogs()
     this.populateTable(events)
@@ -172,10 +171,12 @@ export default class MarketMakerLogsPage extends BasePage {
       tmpl.eventID.textContent = trimStringWithEllipsis(id, 30)
       tmpl.eventID.setAttribute('title', id)
     }
-    const { mkt: {
-      bui, qui, baseFeeUI, quoteFeeUI, baseID, quoteID, baseFeeID, quoteFeeID,
-      baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor
-    }, fiatRates } = this
+    const {
+      mkt: {
+        bui, qui, baseFeeUI, quoteFeeUI, baseID, quoteID, baseFeeID, quoteFeeID,
+        baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor
+      }, fiatRates
+    } = this
     const { baseFees, quoteFees, baseDelta, quoteDelta } = event
     tmpl.baseDelta.textContent = Doc.formatCoinValue(baseDelta, bui)
     tmpl.quoteDelta.textContent = Doc.formatCoinValue(quoteDelta, qui)
@@ -216,7 +217,7 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   showDexOrderEventDetails (event: DEXOrderEvent) {
-    const { page, mkt: { baseID, quoteID, bui, qui, baseTicker, quoteTicker} } = this
+    const { page, mkt: { baseID, quoteID, bui, qui, baseTicker, quoteTicker } } = this
     page.dexOrderID.textContent = trimStringWithEllipsis(event.id, 20)
     page.dexOrderID.setAttribute('title', event.id)
     const rate = app().conventionalRate(baseID, quoteID, event.rate)

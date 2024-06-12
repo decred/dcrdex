@@ -464,8 +464,6 @@ func TestArbRebalance(t *testing.T) {
 		cex.tradeErr = test.cexTradeErr
 		cex.maxBuyQty = test.cexMaxBuyQty
 		cex.maxSellQty = test.cexMaxSellQty
-		cex.prepareRebalanceResults[baseID] = &prepareRebalanceResult{}
-		cex.prepareRebalanceResults[quoteID] = &prepareRebalanceResult{}
 
 		tCore := newTCore()
 		coreAdaptor := newTBotCoreAdaptor(tCore)
@@ -500,10 +498,7 @@ func TestArbRebalance(t *testing.T) {
 			cex.asksVWAP[uint64(i+1)*lotSize] = &vwapResult{test.books.cexAsksAvg[i], test.books.cexAsksExtrema[i]}
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		arbEngine := &simpleArbMarketMaker{
+		a := &simpleArbMarketMaker{
 			unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
 				LotSize: lotSize,
 				BaseID:  baseID,
@@ -513,30 +508,37 @@ func TestArbRebalance(t *testing.T) {
 			core:       coreAdaptor,
 			activeArbs: test.existingArbs,
 		}
-		arbEngine.setBotLoop(arbEngine.botLoop)
-		arbEngine.cfgV.Store(&SimpleArbConfig{
+		const sellSwapFees, sellRedeemFees = 3e5, 1e5
+		const buySwapFees, buyRedeemFees = 2e4, 1e4
+		const buyRate, sellRate = 1e7, 1.1e7
+		tcex := newTCEX()
+		a.CEX = tcex
+		tcex.asksVWAP[lotSize] = vwapResult{avg: buyRate}
+		tcex.bidsVWAP[lotSize] = vwapResult{avg: sellRate}
+		a.buyFees = &orderFees{
+			LotFeeRange: &LotFeeRange{
+				Max: &LotFees{
+					Redeem: buyRedeemFees,
+				},
+			},
+			bookingFeesPerLot: buySwapFees,
+		}
+		a.sellFees = &orderFees{
+			LotFeeRange: &LotFeeRange{
+				Max: &LotFees{
+					Redeem: sellRedeemFees,
+				},
+			},
+			bookingFeesPerLot: sellSwapFees,
+		}
+		// arbEngine.setBotLoop(arbEngine.botLoop)
+		a.cfgV.Store(&SimpleArbConfig{
 			ProfitTrigger:      profitTrigger,
 			MaxActiveArbs:      maxActiveArbs,
 			NumEpochsLeaveOpen: numEpochsLeaveOpen,
 		})
-		arbEngine.ctx = ctx
-		err := arbEngine.runBotLoop(ctx)
-		if err != nil {
-			t.Fatalf("%s: Connect error: %v", test.name, err)
-		}
-
-		dummyNote := &core.BookUpdate{}
-		tCore.bookFeed.c <- dummyNote
-		tCore.bookFeed.c <- dummyNote
-		arbEngine.book = orderBook
-		tCore.bookFeed.c <- &core.BookUpdate{
-			Action: core.EpochMatchSummary,
-			Payload: &core.EpochMatchSummaryPayload{
-				Epoch: currEpoch - 1,
-			},
-		}
-		tCore.bookFeed.c <- dummyNote
-		tCore.bookFeed.c <- dummyNote
+		a.book = orderBook
+		a.rebalance(currEpoch)
 
 		// Check dex trade
 		if test.expectedDexOrder == nil != (coreAdaptor.lastTradePlaced == nil) {
@@ -568,7 +570,7 @@ func TestArbRebalance(t *testing.T) {
 			t.Fatalf("%s: expected %d cancels but got %d", test.name, len(test.expectedDEXCancels), len(tCore.cancelsPlaced))
 		}
 		for i := range test.expectedDEXCancels {
-			if !bytes.Equal(test.expectedDEXCancels[i], tCore.cancelsPlaced[i]) {
+			if !bytes.Equal(test.expectedDEXCancels[i], tCore.cancelsPlaced[i][:]) {
 				t.Fatalf("%s: expected cancel %x but got %x", test.name, test.expectedDEXCancels[i], tCore.cancelsPlaced[i])
 			}
 		}
