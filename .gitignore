@@ -49,3 +49,4 @@ client/cmd/translationsreport/translationsreport
 client/cmd/translationsreport/worksheets
 server/cmd/dexadm/dexadm
 server/cmd/geogame/geogame
+internal/libsecp256k1/secp256k1
