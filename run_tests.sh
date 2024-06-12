@@ -9,6 +9,12 @@ echo "Go version: $GV"
 # Ensure html templates pass localization.
 go generate -x ./client/webserver/site # no -write
 
+cd ./internal/libsecp256k1
+./build.sh
+go test -race -tags libsecp256k1
+
+cd "$dir"
+
 # list of all modules to test
 modules=". /dex/testing/loadbot /client/cmd/bisonw-desktop"
 
