@@ -500,9 +500,10 @@ func TestArbRebalance(t *testing.T) {
 
 		a := &simpleArbMarketMaker{
 			unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
-				LotSize: lotSize,
-				BaseID:  baseID,
-				QuoteID: quoteID,
+				LotSize:  lotSize,
+				BaseID:   baseID,
+				QuoteID:  quoteID,
+				RateStep: 1e2,
 			}),
 			cex:        cex,
 			core:       coreAdaptor,
@@ -520,12 +521,20 @@ func TestArbRebalance(t *testing.T) {
 				Max: &LotFees{
 					Redeem: buyRedeemFees,
 				},
+				Estimated: &LotFees{
+					Swap:   buySwapFees,
+					Redeem: buyRedeemFees,
+				},
 			},
 			bookingFeesPerLot: buySwapFees,
 		}
 		a.sellFees = &orderFees{
 			LotFeeRange: &LotFeeRange{
 				Max: &LotFees{
+					Redeem: sellRedeemFees,
+				},
+				Estimated: &LotFees{
+					Swap:   sellSwapFees,
 					Redeem: sellRedeemFees,
 				},
 			},

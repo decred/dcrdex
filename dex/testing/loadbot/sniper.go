@@ -4,10 +4,8 @@
 package main
 
 import (
-	"math"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/core"
@@ -20,7 +18,6 @@ type sniper struct {
 	// single epoch. The actual number will be a random number in the range
 	// [0, maxOrdsPerEpoch].
 	maxOrdsPerEpoch int
-	oneAndDone      bool
 }
 
 var _ Trader = (*sniper)(nil)
@@ -28,7 +25,6 @@ var _ Trader = (*sniper)(nil)
 func newSniper(maxOrdsPerEpoch int) *sniper {
 	return &sniper{
 		maxOrdsPerEpoch: maxOrdsPerEpoch,
-		oneAndDone:      true,
 	}
 }
 
@@ -80,9 +76,6 @@ func (s *sniper) HandleNotification(m *Mantle, note core.Notification) {
 // snipe picks a random order and places a market order in an attempt to match
 // it exactly.
 func (s *sniper) snipe(m *Mantle) {
-	if s.oneAndDone && atomic.LoadUint32(&orderCounter) > 0 {
-		return
-	}
 	book := m.book()
 
 	var sell bool
@@ -101,12 +94,13 @@ func (s *sniper) snipe(m *Mantle) {
 		maxQty = m.wallets[quoteID].minFunds / 2
 	}
 
-	maxOrders := int(math.Round(float64(s.maxOrdsPerEpoch) * rand.Float64()))
+	maxOrders := 1 + rand.Intn(s.maxOrdsPerEpoch)
 	targets := book.Sells[:clamp(maxOrders, 0, len(book.Sells))]
 	if sell {
 		targets = book.Buys[:clamp(maxOrders, 0, len(book.Buys))]
 	}
 	rem := maxQty
+
 	for _, ord := range targets {
 		if rem == 0 {
 			break
@@ -114,6 +108,7 @@ func (s *sniper) snipe(m *Mantle) {
 		lot := lotSize
 		qty := ord.QtyAtomic
 		if !sell {
+			lot = calc.BaseToQuote(ord.MsgRate, lot)
 			qty = calc.BaseToQuote(ord.MsgRate, qty)
 			qty = uint64(float64(qty) * marketBuyBuffer)
 		}
@@ -123,6 +118,7 @@ func (s *sniper) snipe(m *Mantle) {
 		if qty > rem {
 			qty = rem
 		}
+
 		m.marketOrder(sell, qty)
 		rem -= qty
 	}

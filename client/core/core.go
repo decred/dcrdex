@@ -176,6 +176,11 @@ type dexConnection struct {
 
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
+	// resolvedEpoch differs from epoch in that an epoch is not considered
+	// resolved until all of our orders are out of the epoch queue. i.e.
+	// we have received match or nomatch notification for all of our orders
+	// from the epoch.
+	resolvedEpoch map[string]uint64
 
 	// connectionStatus is a best guess on the ws connection status.
 	connectionStatus uint32
@@ -5450,8 +5455,8 @@ func (c *Core) marketWallets(host string, base, quote uint32) (ba, qa *dex.Asset
 // market. An order rate must be provided, since the number of lots available
 // for trading will vary based on the rate for a buy order (unlike a sell
 // order).
-func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error) {
-	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+func (c *Core) MaxBuy(host string, baseID, quoteID uint32, rate uint64) (*MaxOrderEstimate, error) {
+	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, baseID, quoteID)
 	if err != nil {
 		return nil, err
 	}
@@ -5461,7 +5466,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, err
 	}
 
-	mktID := marketName(base, quote)
+	mktID := marketName(baseID, quoteID)
 	mktConf := dc.marketConfig(mktID)
 	if mktConf == nil {
 		return nil, newError(marketErr, "unknown market %q", mktID)
@@ -5473,14 +5478,14 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, fmt.Errorf("quote lot estimate of zero for market %s", mktID)
 	}
 
-	swapFeeSuggestion := c.feeSuggestion(dc, quote)
+	swapFeeSuggestion := c.feeSuggestion(dc, quoteID)
 	if swapFeeSuggestion == 0 {
-		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(quote), host)
+		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(quoteID), host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestionAny(base)
+	redeemFeeSuggestion := c.feeSuggestionAny(baseID)
 	if redeemFeeSuggestion == 0 {
-		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(base), host)
+		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(baseID), host)
 	}
 
 	maxBuy, err := quoteWallet.MaxOrder(&asset.MaxOrderForm{
@@ -5492,7 +5497,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		RedeemAssetID: baseWallet.AssetID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
+		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quoteID), err)
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
@@ -5501,7 +5506,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		FeeSuggestion: redeemFeeSuggestion,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(base), err)
+		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(baseID), err)
 	}
 
 	return &MaxOrderEstimate{
@@ -9809,10 +9814,13 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		return err
 	}
 
+	mktIDs := make(map[string]struct{})
+
 	// Warn about new matches for unfunded orders. We still must ack all the
 	// matches in the 'match' request for the server to accept it, although the
 	// server doesn't require match acks. See (*Swapper).processMatchAcks.
 	for oid, srvMatch := range matches {
+		mktIDs[srvMatch.tracker.mktID] = struct{}{}
 		if !srvMatch.tracker.hasFundingCoins() {
 			c.log.Warnf("Received new match for unfunded order %v!", oid)
 			// In runMatches>tracker.negotiate we generate the matchTracker and
@@ -9842,6 +9850,10 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		c.updateBalances(updatedAssets)
 	}
 
+	for mktID := range mktIDs {
+		c.checkEpochResolution(dc.acct.host, mktID)
+	}
+
 	return err
 }
 
@@ -9868,10 +9880,12 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 		}
 		return newError(unknownOrderErr, "nomatch request received for unknown order %v from %s", oid, dc.acct.host)
 	}
+
 	updatedAssets, err := tracker.nomatch(oid)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
+	c.checkEpochResolution(dc.acct.host, tracker.mktID)
 	return err
 }
 
@@ -11514,4 +11528,50 @@ func (c *Core) GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([
 		return nil, err
 	}
 	return asset.SPVWithdrawTx(c.ctx, bipID, walletPW, recipient, c.assetDataDirectory(bipID), c.net, c.log.SubLogger("BCH"))
+}
+
+func (c *Core) checkEpochResolution(host string, mktID string) {
+	dc, _, _ := c.dex(host)
+	if dc == nil {
+		return
+	}
+	currentEpoch := dc.marketEpoch(mktID, time.Now())
+	lastEpoch := currentEpoch - 1
+	ts, inFlights := dc.marketTrades(mktID)
+	for _, ord := range inFlights {
+		if ord.Epoch == lastEpoch {
+			return
+		}
+	}
+	for _, t := range ts {
+		if t.epochIdx() == lastEpoch && t.status() == order.OrderStatusEpoch {
+			return
+		}
+		if t.cancel != nil && t.cancelEpochIdx() == lastEpoch {
+			t.mtx.RLock()
+			matched := t.cancel.matches.taker != nil
+			t.mtx.RUnlock()
+			if !matched {
+				return
+			}
+		}
+	}
+	dc.epochMtx.Lock()
+	sendUpdate := lastEpoch > dc.resolvedEpoch[mktID]
+	dc.resolvedEpoch[mktID] = lastEpoch
+	dc.epochMtx.Unlock()
+	if sendUpdate {
+		if bookie := dc.bookie(mktID); bookie != nil {
+			bookie.send(&BookUpdate{
+				Action:   EpochResolved,
+				Host:     dc.acct.host,
+				MarketID: mktID,
+				Payload: &ResolvedEpoch{
+					Current:  currentEpoch,
+					Resolved: lastEpoch,
+				},
+			})
+		}
+
+	}
 }

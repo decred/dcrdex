@@ -973,6 +973,7 @@ export class RunningMarketMakerDisplay {
   }
 
   readBook () {
+    if (!this.mkt) return
     const { page, mkt: { host, mktID } } = this
     const orders = app().exchanges[host].markets[mktID].orders || []
     page.nBookedOrders.textContent = String(orders.filter((ord: Order) => ord.status === OrderUtil.StatusBooked).length)

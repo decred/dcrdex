@@ -793,6 +793,7 @@ const (
 	UpdateRemainingAction = "update_remaining"
 	CandleUpdateAction    = "candle_update"
 	EpochMatchSummary     = "epoch_match_summary"
+	EpochResolved         = "epoch_resolved"
 )
 
 // BookUpdate is an order book update.
@@ -812,6 +813,11 @@ type CandlesPayload struct {
 type EpochMatchSummaryPayload struct {
 	MatchSummaries []*orderbook.MatchSummary `json:"matchSummaries"`
 	Epoch          uint64                    `json:"epoch"`
+}
+
+type ResolvedEpoch struct {
+	Current  uint64 `json:"current"`
+	Resolved uint64 `json:"resolved"`
 }
 
 // dexAccount is the core type to represent the client's account information for

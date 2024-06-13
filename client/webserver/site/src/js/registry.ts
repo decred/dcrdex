@@ -1025,9 +1025,14 @@ export interface ProfitLoss {
   profitRatio: number
 }
 
+export interface StampedBotConfig {
+  timestamp: number
+  cfg: BotConfig
+}
+
 export interface MarketMakingRunOverview {
   endTime: number
-  cfgs: BotConfig[]
+  cfgs: StampedBotConfig[]
   initialBalances: Record<number, number>
   finalBalances: Record<number, number>
   profitLoss: ProfitLoss

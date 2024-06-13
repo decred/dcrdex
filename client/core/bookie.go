@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/utils"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -913,6 +914,7 @@ func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 
 	dc.epochMtx.Lock()
 	dc.epoch = epochs
+	dc.resolvedEpoch = utils.CopyMap(epochs)
 	dc.epochMtx.Unlock()
 
 	return cfg, nil
@@ -1023,7 +1025,7 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 }
 
 // handleEpochReportMsg is called when an epoch_report notification is received.
-func handleEpochReportMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handleEpochReportMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	note := new(msgjson.EpochReportNote)
 	err := msg.Unmarshal(note)
 	if err != nil {
@@ -1038,6 +1040,7 @@ func handleEpochReportMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	if err != nil {
 		return fmt.Errorf("error logging epoch report: %w", err)
 	}
+	c.checkEpochResolution(dc.acct.host, note.MarketID)
 	return nil
 }
 

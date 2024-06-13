@@ -423,43 +423,38 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 	writeLine("")
 	writeLine("Balance adjustments(%s):", reason)
 
-	diffStr := func(assetID uint32, diff int64) string {
-		var sign string
-		var v uint64
-		if diff < 0 {
-			v = uint64(-diff)
-			sign = "-"
-		} else if diff > 0 {
-			sign = "+"
-			v = uint64(diff)
+	format := func(assetID uint32, v int64, plusSign bool) string {
+		ui, err := asset.UnitInfo(assetID)
+		if err != nil {
+			return "<what the asset?>"
 		}
-		return sign + asset.FormatAtoms(assetID, v)
+		return ui.FormatSignedAtoms(v, plusSign)
 	}
 
 	if len(dexDiffs) > 0 {
 		writeLine("  DEX:")
 		for assetID, dexDiff := range dexDiffs {
-			writeLine("    " + diffStr(assetID, dexDiff))
+			writeLine("    " + format(assetID, dexDiff, true))
 		}
 	}
 
 	if len(cexDiffs) > 0 {
 		writeLine("  CEX:")
 		for assetID, cexDiff := range cexDiffs {
-			writeLine("    " + diffStr(assetID, cexDiff))
+			writeLine("    " + format(assetID, cexDiff, true))
 		}
 	}
 
 	writeLine("Updated settled balances:")
 	writeLine("  DEX:")
 	for assetID, bal := range u.baseDexBalances {
-		writeLine("    " + diffStr(assetID, bal))
+		writeLine("    " + format(assetID, bal, false))
 	}
 
 	if len(u.baseCexBalances) > 0 {
 		writeLine("  CEX:")
 		for assetID, bal := range u.baseCexBalances {
-			writeLine("    " + diffStr(assetID, bal))
+			writeLine("    " + format(assetID, bal, false))
 		}
 	}
 
@@ -490,13 +485,13 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 	if len(dexPending) > 0 {
 		writeLine("  DEX pending:")
 		for assetID, v := range dexPending {
-			writeLine("    " + asset.FormatAtoms(assetID, v))
+			writeLine("    " + format(assetID, int64(v), true))
 		}
 	}
 	if len(cexPending) > 0 {
 		writeLine("  CEX pending:")
 		for assetID, v := range cexPending {
-			writeLine("    " + asset.FormatAtoms(assetID, v))
+			writeLine("    " + format(assetID, int64(v), true))
 		}
 	}
 
@@ -945,7 +940,6 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 	driftTolerance float64,
 	currEpoch uint64,
 ) map[order.OrderID]*dexOrderInfo {
-
 	if len(placements) == 0 {
 		return nil
 	}
@@ -1094,7 +1088,6 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 
 		var lotsToPlace uint64
 		if lotsPlus1 > 1 {
-
 			lotsToPlace = uint64(lotsPlus1) - 1
 			dexReq, cexReq := fundingReq(placement.rate, lotsToPlace, placement.counterTradeRate)
 			for assetID, v := range dexReq {
@@ -1484,6 +1477,7 @@ func (u *unifiedExchangeAdaptor) pendingDepositComplete(deposit *pendingDeposit)
 		msg = fmt.Sprintf("Deposit %s complete, but not successful.", tx.ID)
 	}
 
+	u.sendStatsUpdate()
 	u.logBalanceAdjustments(dexDiffs, cexDiffs, msg)
 }
 
@@ -1751,6 +1745,10 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, assetID uint32, a
 			select {
 			case <-timer.C:
 				if u.confirmWithdrawal(ctx, withdrawalID) {
+					// TODO: Trigger a rebalance here somehow. Same with
+					// confirmed deposit. Maybe confirmWithdrawal should be
+					// checked as part of the rebalance sequence instead of in
+					// a goroutine.
 					return
 				}
 				timer = time.NewTimer(time.Minute)
@@ -1820,6 +1818,10 @@ func (u *unifiedExchangeAdaptor) freeUpFunds(
 	}
 	if persistentMatchable > pruneMatchableTo {
 		return nil, false
+	}
+
+	if minToFree == 0 && matchableCounterQty <= pruneMatchableTo {
+		return nil, true
 	}
 
 	amtFreedByCancellingOrder := func(o *dexOrderState) (locked, counterQty uint64) {
@@ -2072,12 +2074,8 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 	if sell {
 		baseFees, quoteFees = sellFees.Swap, sellFees.Redeem
 	}
-	toID := u.quoteID
-	if base {
-		toID = u.baseID
-	}
 
-	convertViaFiat := func(fees uint64, fromID uint32) (uint64, error) {
+	convertViaFiat := func(fees uint64, fromID, toID uint32) (uint64, error) {
 		atomicCFactor, err := u.atomicConversionRateFromFiat(fromID, toID)
 		if err != nil {
 			return 0, err
@@ -2086,33 +2084,29 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 	}
 
 	var baseFeesInUnits, quoteFeesInUnits uint64
-
-	baseToken := asset.TokenInfo(u.baseID)
-	if baseToken != nil {
-		baseFeesInUnits, err = convertViaFiat(baseFees, baseToken.ParentID)
+	if tkn := asset.TokenInfo(u.baseID); tkn != nil {
+		baseFees, err = convertViaFiat(baseFees, tkn.ParentID, u.baseID)
 		if err != nil {
 			return 0, err
 		}
-	} else {
-		if base {
-			baseFeesInUnits = baseFees
-		} else {
-			baseFeesInUnits = calc.BaseToQuote(rate, baseFees)
+	}
+	if tkn := asset.TokenInfo(u.quoteID); tkn != nil {
+		quoteFees, err = convertViaFiat(quoteFees, tkn.ParentID, u.quoteID)
+		if err != nil {
+			return 0, err
 		}
 	}
 
-	quoteToken := asset.TokenInfo(u.quoteID)
-	if quoteToken != nil {
-		quoteFeesInUnits, err = convertViaFiat(quoteFees, quoteToken.ParentID)
-		if err != nil {
-			return 0, err
-		}
+	if base {
+		baseFeesInUnits = baseFees
 	} else {
-		if base {
-			quoteFeesInUnits = calc.QuoteToBase(rate, quoteFees)
-		} else {
-			quoteFeesInUnits = quoteFees
-		}
+		baseFeesInUnits = calc.BaseToQuote(rate, baseFees)
+	}
+
+	if base {
+		quoteFeesInUnits = calc.QuoteToBase(rate, quoteFees)
+	} else {
+		quoteFeesInUnits = quoteFees
 	}
 
 	return baseFeesInUnits + quoteFeesInUnits, nil
@@ -2325,7 +2319,12 @@ func orderTransactions(o *core.Order) (swaps map[string]bool, redeems map[string
 	return
 }
 
-func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDEXOrder, o *core.Order) {
+func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDEXOrder, o *core.Order) (effects *balanceEffects) {
+	effects = &balanceEffects{
+		availableDiff: make(map[uint32]int64),
+		locked:        make(map[uint32]uint64),
+		pending:       make(map[uint32]uint64),
+	}
 	swaps, redeems, refunds := orderTransactions(o)
 	// Add new txs to tx cache
 	fromAsset, fromFeeAsset, toAsset, toFeeAsset := orderAssets(o.BaseID, o.QuoteID, o.Sell)
@@ -2355,12 +2354,6 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 	processTxs(fromAsset, pendingOrder.refunds, refunds)
 
 	// Calculate balance effects based on current state of the order.
-	effects := &balanceEffects{
-		availableDiff: make(map[uint32]int64),
-		locked:        make(map[uint32]uint64),
-		pending:       make(map[uint32]uint64),
-	}
-
 	addFees := func(fromAsset bool, fee uint64) {
 		if fromAsset && o.Sell || !fromAsset && !o.Sell {
 			effects.baseFees += fee
@@ -2422,6 +2415,18 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 		addFees(true, tx.Fees)
 		addDelta(true, -int64(tx.Amount))
 	}
+
+	// for _, m := range o.Matches {
+	// 	if m.Side == order.Maker && m.Status == order.MakerSwapCast || m.Side == order.Taker && m.Status == order.TakerSwapCast {
+	// 		if o.Sell {
+	// 			// Could also choose the asset based on m.Revoked, but meh.
+	// 			effects.pending[toAsset] += calc.BaseToQuote(m.Rate, m.Qty)
+	// 		} else {
+	// 			effects.pending[toAsset] += m.Qty
+	// 		}
+	// 	}
+	// }
+
 	for _, tx := range pendingOrder.redeems {
 		isDynamicSwapper := u.isDynamicSwapper(toAsset)
 
@@ -2462,6 +2467,7 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 	}
 
 	pendingOrder.updateState(o, effects)
+	return
 }
 
 // updatePendingDEXOrder updates a pending DEX order based its current state.
@@ -2479,7 +2485,14 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 	}
 
 	pendingOrder.txsMtx.Lock()
-	u.checkPendingDEXOrderTxs(pendingOrder, o)
+	effects := u.checkPendingDEXOrderTxs(pendingOrder, o)
+	var havePending bool
+	for _, v := range effects.pending {
+		if v > 0 {
+			havePending = true
+			break
+		}
+	}
 	pendingOrder.txsMtx.Unlock()
 
 	orderUpdates := u.orderUpdates.Load()
@@ -2487,7 +2500,7 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 		orderUpdates.(chan *core.Order) <- o
 	}
 
-	complete := dexOrderComplete(o)
+	complete := !havePending && dexOrderComplete(o)
 	// If complete, remove the order from the pending list, and update the
 	// bot's balance.
 
@@ -2499,6 +2512,7 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 
 		adjustedBals := false
 		for assetID, diff := range effects.availableDiff {
+
 			adjustedBals = adjustedBals || diff != 0
 			u.baseDexBalances[assetID] += diff
 		}
@@ -2559,10 +2573,11 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 type lotCosts struct {
 	dexBase, dexQuote,
 	cexBase, cexQuote uint64
-	baseRedeem, quoteRedeem uint64
+	baseRedeem, quoteRedeem   uint64
+	baseFunding, quoteFunding uint64 // per multi-order
 }
 
-func (u *unifiedExchangeAdaptor) lotCosts(dexSellLots, dexBuyLots uint64) (*lotCosts, error) {
+func (u *unifiedExchangeAdaptor) lotCosts(sellVWAP, buyVWAP uint64) (*lotCosts, error) {
 	perLot := new(lotCosts)
 	buyFees, sellFees, err := u.orderFees()
 	if err != nil {
@@ -2570,17 +2585,15 @@ func (u *unifiedExchangeAdaptor) lotCosts(dexSellLots, dexBuyLots uint64) (*lotC
 	}
 	perLot.dexBase = u.lotSize + sellFees.bookingFeesPerLot
 	perLot.cexBase = u.lotSize
-	perLot.baseRedeem = sellFees.Max.Redeem
+	perLot.baseRedeem = buyFees.Max.Redeem
+	perLot.baseFunding = sellFees.funding
 
-	dexBuyRate, dexSellRate, err := u.cexCounterRates(dexSellLots, dexBuyLots)
-	if err != nil {
-		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
-	}
-	dexQuoteLot := calc.BaseToQuote(dexBuyRate, u.lotSize)
-	cexQuoteLot := calc.BaseToQuote(dexSellRate, u.lotSize)
+	dexQuoteLot := calc.BaseToQuote(sellVWAP, u.lotSize)
+	cexQuoteLot := calc.BaseToQuote(buyVWAP, u.lotSize)
 	perLot.dexQuote = dexQuoteLot + buyFees.bookingFeesPerLot
 	perLot.cexQuote = cexQuoteLot
-	perLot.quoteRedeem = buyFees.Max.Redeem
+	perLot.quoteRedeem = sellFees.Max.Redeem
+	perLot.quoteFunding = buyFees.funding
 	return perLot, nil
 }
 
@@ -2612,19 +2625,19 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	}
 	minBaseTransfer, minQuoteTransfer := u.autoRebalanceCfg.MinBaseTransfer, u.autoRebalanceCfg.MinQuoteTransfer
 
-	var baseCounterFees, quoteCounterFees uint64
+	additionalBaseFees, additionalQuoteFees := perLot.baseFunding, perLot.quoteFunding
 	if u.baseID == u.quoteFeeID {
-		baseCounterFees = perLot.baseRedeem * dexBuyLots
+		additionalBaseFees += perLot.baseRedeem * dexBuyLots
 	}
 	if u.quoteID == u.baseFeeID {
-		quoteCounterFees = perLot.quoteRedeem * dexSellLots
+		additionalQuoteFees += perLot.quoteRedeem * dexSellLots
 	}
 	var baseAvail, quoteAvail uint64
-	if baseInv.total > baseCounterFees {
-		baseAvail = baseInv.total - baseCounterFees
+	if baseInv.total > additionalBaseFees {
+		baseAvail = baseInv.total - additionalBaseFees
 	}
-	if quoteInv.total > quoteCounterFees {
-		quoteAvail = quoteInv.total - quoteCounterFees
+	if quoteInv.total > additionalQuoteFees {
+		quoteAvail = quoteInv.total - additionalQuoteFees
 	}
 
 	// matchability is the number of lots that can be matched with a specified
@@ -2640,6 +2653,9 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	// targetedSplit finds a distribution that targets a specified ratio of
 	// dex-to-cex.
 	targetedSplit := func(avail, dexTarget, cexTarget, dexLot, cexLot uint64) (dexLots, cexLots, extra uint64) {
+		if dexTarget+cexTarget == 0 {
+			return
+		}
 		cexR := float64(cexTarget*cexLot) / float64(dexTarget*dexLot+cexTarget*cexLot)
 		cexLots = uint64(math.Round(cexR*float64(avail))) / cexLot
 		cexBal := cexLots * cexLot
@@ -2691,11 +2707,14 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 		if score <= currentScore {
 			return
 		}
+
 		var fees uint64
 		var baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64
 		if dexBaseLots != baseInv.dexLots || cexBaseLots != baseInv.cexLots {
-			dexTarget := dexBaseLots*perLot.dexBase + baseCounterFees + extraBase
+			fees++
+			dexTarget := dexBaseLots*perLot.dexBase + additionalBaseFees + extraBase
 			cexTarget := cexBaseLots * perLot.cexBase
+
 			if dexTarget > baseInv.dex {
 				if withdraw := dexTarget - baseInv.dex; withdraw >= minBaseTransfer {
 					baseWithdraw = withdraw
@@ -2715,7 +2734,8 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 			}
 		}
 		if dexQuoteLots != quoteInv.dexLots || cexQuoteLots != quoteInv.cexLots {
-			dexTarget := dexQuoteLots*perLot.dexQuote + quoteCounterFees + (extraQuote / 2)
+			fees++
+			dexTarget := dexQuoteLots*perLot.dexQuote + additionalQuoteFees + (extraQuote / 2)
 			cexTarget := cexQuoteLots*perLot.cexQuote + (extraQuote / 2)
 			if dexTarget > quoteInv.dex {
 				if withdraw := dexTarget - quoteInv.dex; withdraw >= minQuoteTransfer {
@@ -2784,6 +2804,7 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	quoteInv.toWithdraw = split.quoteWithdraw
 }
 
+// transfer attempts to perform the transers specified in the distribution.
 func (u *unifiedExchangeAdaptor) transfer(dist *distribution, currEpoch uint64) (actionTaken bool, err error) {
 	baseInv, quoteInv := dist.baseInv, dist.quoteInv
 	if baseInv.toDeposit+baseInv.toWithdraw+quoteInv.toDeposit+quoteInv.toWithdraw == 0 {
@@ -2793,10 +2814,14 @@ func (u *unifiedExchangeAdaptor) transfer(dist *distribution, currEpoch uint64) 
 	var cancels []*dexOrderState
 	if baseInv.toDeposit > 0 || quoteInv.toWithdraw > 0 {
 		var toFree uint64
-		if dist.baseInv.dexAvail < baseInv.toDeposit {
-			toFree = baseInv.toDeposit - dist.baseInv.dexAvail
+		if baseInv.dexAvail < baseInv.toDeposit {
+			if baseInv.dexAvail+baseInv.dexPending >= baseInv.toDeposit {
+				u.log.Tracef("Waiting on pending balance for base deposit")
+				return false, nil
+			}
+			toFree = baseInv.toDeposit - baseInv.dexAvail
 		}
-		counterQty := dist.quoteInv.cex - quoteInv.toWithdraw + quoteInv.toDeposit
+		counterQty := quoteInv.cex - quoteInv.toWithdraw + quoteInv.toDeposit
 		cs, ok := u.freeUpFunds(u.baseID, toFree, counterQty, currEpoch)
 		if !ok {
 			if u.log.Level() == dex.LevelTrace {
@@ -2813,10 +2838,15 @@ func (u *unifiedExchangeAdaptor) transfer(dist *distribution, currEpoch uint64) 
 	}
 	if quoteInv.toDeposit > 0 || baseInv.toWithdraw > 0 {
 		var toFree uint64
-		if dist.quoteInv.dexAvail < quoteInv.toDeposit {
-			toFree = quoteInv.toDeposit - dist.quoteInv.dexAvail
+		if quoteInv.dexAvail < quoteInv.toDeposit {
+			if quoteInv.dexAvail+quoteInv.dexPending >= quoteInv.toDeposit {
+				// waiting on pending
+				u.log.Tracef("Waiting on pending balance for quote deposit")
+				return false, nil
+			}
+			toFree = quoteInv.toDeposit - quoteInv.dexAvail
 		}
-		counterQty := dist.baseInv.cex - baseInv.toWithdraw + baseInv.toDeposit
+		counterQty := baseInv.cex - baseInv.toWithdraw + baseInv.toDeposit
 		cs, ok := u.freeUpFunds(u.quoteID, toFree, counterQty, currEpoch)
 		if !ok {
 			if u.log.Level() == dex.LevelTrace {
@@ -2875,6 +2905,7 @@ type assetInventory struct {
 	cexAvail    uint64
 	cexPending  uint64
 	cexReserved uint64
+	cexLocked   uint64
 	cexLots     uint64
 	total       uint64
 	toDeposit   uint64
@@ -2898,6 +2929,7 @@ func (u *unifiedExchangeAdaptor) inventory(assetID uint32, dexLot, cexLot uint64
 	b.cexAvail = cexBalance.Available
 	b.cexPending = cexBalance.Pending
 	b.cexReserved = cexBalance.Reserved
+	b.cexLocked = cexBalance.Locked
 	b.cex = cexBalance.Available + cexBalance.Reserved + cexBalance.Pending
 	b.cexLots = b.cex / cexLot
 	b.total = b.dex + b.cex
@@ -2970,10 +3002,16 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() error {
 	if u.quoteID == u.quoteFeeID {
 		buyBookingFeesPerLot += maxQuoteFees.Redeem
 	}
+	if u.quoteTraits.IsAccountLocker() {
+		buyBookingFeesPerLot += maxQuoteFees.Refund
+	}
 
 	sellBookingFeesPerLot := maxBaseFees.Swap
 	if u.baseID == u.baseFeeID {
 		sellBookingFeesPerLot += maxBaseFees.Redeem
+	}
+	if u.baseTraits.IsAccountLocker() {
+		sellBookingFeesPerLot += maxBaseFees.Refund
 	}
 
 	u.feesMtx.Lock()
@@ -3354,15 +3392,16 @@ func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor
 	}
 
 	adaptor := &unifiedExchangeAdaptor{
-		market:          mkt,
-		clientCore:      cfg.core,
-		CEX:             cfg.cex,
-		botID:           cfg.botID,
-		log:             cfg.log,
-		eventLogDB:      cfg.eventLogDB,
-		initialBalances: initialBalances,
-		baseTraits:      baseTraits,
-		quoteTraits:     quoteTraits,
+		market:           mkt,
+		clientCore:       cfg.core,
+		CEX:              cfg.cex,
+		botID:            cfg.botID,
+		log:              cfg.log,
+		eventLogDB:       cfg.eventLogDB,
+		initialBalances:  initialBalances,
+		baseTraits:       baseTraits,
+		quoteTraits:      quoteTraits,
+		autoRebalanceCfg: cfg.autoRebalanceConfig,
 
 		baseDexBalances:    baseDEXBalances,
 		baseCexBalances:    baseCEXBalances,

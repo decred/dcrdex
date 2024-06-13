@@ -86,11 +86,12 @@ export default class MarketMakerLogsPage extends BasePage {
     }
     this.overview = await MM.mmRunOverview(host, baseID, quoteID, startTime)
     this.fiatRates = this.overview.finalState.fiatRates
-    return this.overview.cfgs[this.overview.cfgs.length - 1]
+    return this.overview.cfgs[this.overview.cfgs.length - 1].cfg
   }
 
   async setup (host: string, baseID: number, quoteID: number) {
     const botCfg = await this.prepareRecords(host, baseID, quoteID)
+
     this.mkt = new BotMarket(botCfg)
     await this.mkt.initialize({})
     const { fiatRates, runStats, overview } = this

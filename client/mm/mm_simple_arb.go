@@ -401,7 +401,24 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 }
 
 func (a *simpleArbMarketMaker) distribution() (dist *distribution, err error) {
-	perLot, err := a.lotCosts(1, 1)
+	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1)
+	if err != nil {
+		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
+	}
+	// TODO: Adjust these rates to account for profit and fees.
+	sellFeesInBase, err := a.OrderFeesInUnits(true, true, sellVWAP)
+	if err != nil {
+		return nil, fmt.Errorf("error getting converted fees: %w", err)
+	}
+	adj := float64(sellFeesInBase)/float64(a.lotSize) + a.cfg().ProfitTrigger
+	sellRate := steppedRate(uint64(math.Round(float64(sellVWAP)*(1+adj))), a.rateStep)
+	buyFeesInBase, err := a.OrderFeesInUnits(false, true, buyVWAP)
+	if err != nil {
+		return nil, fmt.Errorf("error getting converted fees: %w", err)
+	}
+	adj = float64(buyFeesInBase)/float64(a.lotSize) + a.cfg().ProfitTrigger
+	buyRate := steppedRate(uint64(math.Round(float64(buyVWAP)/(1+adj))), a.rateStep)
+	perLot, err := a.lotCosts(sellRate, buyRate)
 	if perLot == nil {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
 	}

@@ -78,8 +78,8 @@ var (
 	}
 
 	initialBalances = []*bntypes.Balance{
-		makeBalance("btc", 0.1),
-		makeBalance("dcr", 100),
+		makeBalance("btc", 1.5),
+		makeBalance("dcr", 10000),
 		makeBalance("eth", 5),
 		makeBalance("usdc", 1152),
 	}
@@ -379,8 +379,10 @@ func (f *fakeBinance) run(ctx context.Context) {
 			f.bookedOrdersMtx.Lock()
 			fills := make([]*filledOrder, 0)
 			for tradeID, ord := range f.bookedOrders {
-				if ord.status == "FILLED" && time.Since(ord.stamp) > time.Hour {
-					delete(f.bookedOrders, tradeID)
+				if ord.status == "FILLED" {
+					if time.Since(ord.stamp) > time.Hour {
+						delete(f.bookedOrders, tradeID)
+					}
 					continue
 				}
 				ord.status = "FILLED"
@@ -806,7 +808,7 @@ func (f *fakeBinance) handleWithdrawalHistory(w http.ResponseWriter, r *http.Req
 	}
 	f.withdrawalHistoryMtx.RUnlock()
 
-	log.Tracef("Sending %s withdraws to user %s", len(withdrawalHistory), extractAPIKey(r))
+	log.Tracef("Sending %d withdraws to user %s", len(withdrawalHistory), extractAPIKey(r))
 	writeJSONWithStatus(w, withdrawalHistory, http.StatusOK)
 }
 

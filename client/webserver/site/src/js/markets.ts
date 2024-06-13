@@ -62,7 +62,8 @@ import {
   RecentMatch,
   MatchNote,
   ApprovalStatus,
-  OrderFilter
+  OrderFilter,
+  RunStatsNote
 } from './registry'
 import { setOptionTemplates } from './opts'
 import { RunningMarketMakerDisplay } from './mmutil'
@@ -511,7 +512,14 @@ export default class MarketsPage extends BasePage {
       walletstate: (note: WalletStateNote) => { this.handleWalletState(note) },
       reputation: () => { this.updateReputation() },
       feepayment: () => { this.updateReputation() },
-      runstats: () => { this.mm.update() }
+      runstats: (note: RunStatsNote) => {
+        this.mm.update()
+        if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
+        if (Boolean(this.mmRunning) !== Boolean(note.stats)) {
+          this.mmRunning = Boolean(note.stats)
+          this.resolveOrderFormVisibility()
+        }
+      }
     })
 
     this.loadingAnimations = {}

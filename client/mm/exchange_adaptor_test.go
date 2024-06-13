@@ -473,46 +473,97 @@ func TestFreeUpFunds(t *testing.T) {
 }
 
 func TestDistribution(t *testing.T) {
-	const baseID, quoteID = 42, 0
+	// utxo/utxo
+	testDistribution(t, 42, 0)
+	// utxo/account-locker
+	testDistribution(t, 42, 60)
+	testDistribution(t, 60, 42)
+	// token/parent
+	testDistribution(t, 60001, 60)
+	testDistribution(t, 60, 60001)
+	// token/token
+	testDistribution(t, 60001, 966003)
+	testDistribution(t, 966003, 60001)
+	// token/utxo
+	testDistribution(t, 42, 966003)
+	testDistribution(t, 966003, 42)
+}
+
+func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	const lotSize = 5e7
 	const sellSwapFees, sellRedeemFees = 3e5, 1e5
 	const buySwapFees, buyRedeemFees = 2e4, 1e4
-	const buyRate, sellRate = 1e7, 1.1e7
+	const sellRefundFees, buyRefundFees = 8e3, 9e4
+	const buyVWAP, sellVWAP = 1e7, 1.1e7
 	const extra = 80
+	const profit = 0.01
 
-	mkt := &core.Market{
-		RateStep:   1e3,
-		AtomToConv: 1,
-		LotSize:    lotSize,
-		BaseID:     baseID,
-		QuoteID:    quoteID,
-	}
-
+	u := mustParseAdaptorFromMarket(&core.Market{
+		LotSize:  lotSize,
+		BaseID:   baseID,
+		QuoteID:  quoteID,
+		RateStep: 1e2,
+	})
 	cex := newTCEX()
 	tCore := newTCore()
-	u := mustParseAdaptorFromMarket(mkt)
 	u.CEX = cex
 	u.clientCore = tCore
 	u.autoRebalanceCfg = &AutoRebalanceConfig{}
 	a := &arbMarketMaker{unifiedExchangeAdaptor: u}
+	a.cfgV.Store(&ArbMarketMakerConfig{Profit: profit})
+	fiatRates := map[uint32]float64{baseID: 1, quoteID: 1}
+	u.fiatRates.Store(fiatRates)
+
+	isAccountLocker := func(assetID uint32) bool {
+		if tkn := asset.TokenInfo(assetID); tkn != nil {
+			fiatRates[tkn.ParentID] = 1
+			return true
+		}
+		return len(asset.Asset(assetID).Tokens) > 0
+	}
+	var sellFundingFees, buyFundingFees uint64
+	if !isAccountLocker(baseID) {
+		sellFundingFees = 5e3
+	}
+	if !isAccountLocker(quoteID) {
+		buyFundingFees = 6e3
+	}
+
 	a.buyFees = &orderFees{
 		LotFeeRange: &LotFeeRange{
 			Max: &LotFees{
 				Redeem: buyRedeemFees,
+				Refund: buyRefundFees,
+			},
+			Estimated: &LotFees{
+				Swap:   buySwapFees,
+				Redeem: buyRedeemFees,
+				Refund: buyRefundFees,
 			},
 		},
+		funding:           buyFundingFees,
 		bookingFeesPerLot: buySwapFees,
 	}
 	a.sellFees = &orderFees{
 		LotFeeRange: &LotFeeRange{
 			Max: &LotFees{
 				Redeem: sellRedeemFees,
+				Refund: sellRefundFees,
+			},
+			Estimated: &LotFees{
+				Swap:   sellSwapFees,
+				Redeem: sellRedeemFees,
 			},
 		},
+		funding:           sellFundingFees,
 		bookingFeesPerLot: sellSwapFees,
 	}
 
+	buyRate, _ := a.dexPlacementRate(buyVWAP, false)
+	sellRate, _ := a.dexPlacementRate(sellVWAP, true)
+
 	var buyLots, sellLots, minDexBase, minCexBase, totalBase, minDexQuote, minCexQuote, totalQuote uint64
+	var addBaseFees, addQuoteFees uint64
 	var perLot *lotCosts
 
 	setBals := func(dexBase, cexBase, dexQuote, cexQuote uint64) {
@@ -528,16 +579,25 @@ func TestDistribution(t *testing.T) {
 			baseLots:  sellLots,
 			quoteLots: buyLots,
 		})
-		cex.asksVWAP[lotSize*buyLots] = vwapResult{avg: buyRate}
-		cex.bidsVWAP[lotSize*sellLots] = vwapResult{avg: sellRate}
-		minDexBase = sellLots * (lotSize + sellSwapFees)
+		addBaseFees, addQuoteFees = sellFundingFees, buyFundingFees
+		cex.asksVWAP[lotSize*buyLots] = vwapResult{avg: buyVWAP}
+		cex.bidsVWAP[lotSize*sellLots] = vwapResult{avg: sellVWAP}
+		minDexBase = sellLots*(lotSize+sellSwapFees) + sellFundingFees
+		if baseID == u.quoteFeeID {
+			addBaseFees += buyRedeemFees * buyLots
+			minDexBase += buyRedeemFees * buyLots
+		}
 		minCexBase = buyLots * lotSize
-		minDexQuote = calc.BaseToQuote(buyRate, buyLots*lotSize) + a.buyFees.bookingFeesPerLot*buyLots
+		minDexQuote = calc.BaseToQuote(buyRate, buyLots*lotSize) + a.buyFees.bookingFeesPerLot*buyLots + buyFundingFees
+		if quoteID == u.baseFeeID {
+			addQuoteFees += sellRedeemFees * sellLots
+			minDexQuote += sellRedeemFees * sellLots
+		}
 		minCexQuote = calc.BaseToQuote(sellRate, sellLots*lotSize)
 		totalBase = minCexBase + minDexBase
 		totalQuote = minCexQuote + minDexQuote
 		var err error
-		perLot, err = a.lotCosts(sellLots, buyLots)
+		perLot, err = a.lotCosts(buyRate, sellRate)
 		if err != nil {
 			t.Fatalf("Error getting lot costs: %v", err)
 		}
@@ -627,17 +687,17 @@ func TestDistribution(t *testing.T) {
 
 	// Deficit math.
 	// Since cex lot is smaller, dex can't use this extra.
-	setBals(perLot.dexBase*2+perLot.cexBase, 0, minDexQuote, minCexQuote)
+	setBals(addBaseFees+perLot.dexBase*2+perLot.cexBase, 0, addQuoteFees+minDexQuote, minCexQuote)
 	checkDistribution(perLot.cexBase, 0, 0, 0)
 	// Same thing, but with enough for fees, and there's no reason to transfer
 	// because it doesn't improve our matchability.
 	setBals(perLot.dexBase*3, extra, minDexQuote, minCexQuote)
 	checkDistribution(0, 0, 0, 0)
-	setBals(minDexBase, minCexBase, perLot.dexQuote*5+perLot.cexQuote*2+extra, 0)
+	setBals(addBaseFees+minDexBase, minCexBase, addQuoteFees+perLot.dexQuote*5+perLot.cexQuote*2+extra, 0)
 	checkDistribution(0, 0, perLot.cexQuote*2+extra/2, 0)
-	setBals(perLot.dexBase, perLot.cexBase*5+perLot.dexBase+extra, minDexQuote, minCexQuote)
+	setBals(addBaseFees+perLot.dexBase, perLot.cexBase*5+perLot.dexBase+extra, addQuoteFees+minDexQuote, minCexQuote)
 	checkDistribution(0, perLot.dexBase+extra, 0, 0)
-	setBals(perLot.dexBase*2, perLot.cexBase*2, perLot.dexQuote, perLot.cexQuote*2+perLot.dexQuote+extra)
+	setBals(addBaseFees+perLot.dexBase*2, perLot.cexBase*2, addQuoteFees+perLot.dexQuote, perLot.cexQuote*2+perLot.dexQuote+extra)
 	checkDistribution(0, 0, 0, perLot.dexQuote+extra/2)
 
 	var epok uint64
@@ -645,7 +705,8 @@ func TestDistribution(t *testing.T) {
 		epok++
 		return epok
 	}
-	testTransfers := func(expActionTaken bool, expBaseDeposit, expBaseWithdraw, expQuoteDeposit, expQuoteWithdraw uint64) {
+
+	checkTransfers := func(expActionTaken bool, expBaseDeposit, expBaseWithdraw, expQuoteDeposit, expQuoteWithdraw uint64) {
 		t.Helper()
 		defer func() {
 			u.wg.Wait()
@@ -723,32 +784,31 @@ func TestDistribution(t *testing.T) {
 
 	setLots(1, 1)
 	setBals(minDexBase, minCexBase, minDexQuote, minCexQuote)
-	testTransfers(false, 0, 0, 0, 0)
+	checkTransfers(false, 0, 0, 0, 0)
 
 	coinID := []byte{0xa0}
 	coin := &tCoin{coinID: coinID, value: 1}
 	txID := coin.TxID()
 	tCore.sendCoin = coin
 	tCore.walletTxs[txID] = &asset.WalletTransaction{Confirmed: true}
-	u.fiatRates.Store(make(map[uint32]float64))
 	cex.confirmedDeposit = &coin.value
 
 	// Base deposit.
 	setBals(totalBase, 0, minDexQuote, minCexQuote)
-	testTransfers(true, minCexBase, 0, 0, 0)
+	checkTransfers(true, minCexBase, 0, 0, 0)
 
 	// Base withdrawal
 	cex.confirmWithdrawal = &withdrawArgs{txID: txID}
 	setBals(0, totalBase, minDexQuote, minCexQuote)
-	testTransfers(true, 0, minDexBase, 0, 0)
+	checkTransfers(true, 0, minDexBase, 0, 0)
 
 	// Quote deposit
 	setBals(minDexBase, minCexBase, totalQuote, 0)
-	testTransfers(true, 0, 0, minCexQuote, 0)
+	checkTransfers(true, 0, 0, minCexQuote, 0)
 
 	// Quote withdrawal
 	setBals(minDexBase, minCexBase, 0, totalQuote)
-	testTransfers(true, 0, 0, 0, minDexQuote)
+	checkTransfers(true, 0, 0, 0, minDexQuote)
 
 	// Base deposit, but we need to cancel an order to free up the funds.
 	setBals(totalBase, 0, minDexQuote, minCexQuote)
@@ -779,12 +839,12 @@ func TestDistribution(t *testing.T) {
 		tCore.cancelsPlaced = nil
 	}
 	addLocked(baseID, totalBase)
-	testTransfers(true, 0, 0, 0, 0)
+	checkTransfers(true, 0, 0, 0, 0)
 	checkCancel()
 
 	setBals(minDexBase, minCexBase, totalQuote, 0)
 	addLocked(quoteID, totalQuote)
-	testTransfers(true, 0, 0, 0, 0)
+	checkTransfers(true, 0, 0, 0, 0)
 	checkCancel()
 
 	setBals(0, totalBase /* being withdrawn */, minDexQuote, minCexQuote)
@@ -795,7 +855,7 @@ func TestDistribution(t *testing.T) {
 	// Distribution should indicate a deposit.
 	checkDistribution(minCexBase, 0, 0, 0)
 	// But freeUpFunds will come up short. No action taken.
-	testTransfers(false, 0, 0, 0, 0)
+	checkTransfers(false, 0, 0, 0, 0)
 
 	setBals(minDexBase, minCexBase, 0, totalQuote)
 	u.pendingWithdrawals["a"] = &pendingWithdrawal{
@@ -803,7 +863,9 @@ func TestDistribution(t *testing.T) {
 		amtWithdrawn: totalQuote,
 	}
 	checkDistribution(0, 0, minCexQuote, 0)
-	testTransfers(false, 0, 0, 0, 0)
+	checkTransfers(false, 0, 0, 0, 0)
+
+	u.market = mustParseMarket(&core.Market{})
 }
 
 func TestMultiTrade(t *testing.T) {
@@ -3534,9 +3596,18 @@ func TestOrderFeesInUnits(t *testing.T) {
 				60:    2300,
 				0:     42999,
 			},
-			rate:              calc.MessageRateAlt(43000, 1e8, 1e6),
-			expectedSellBase:  108839, // 5e4 sats + (1.1e7 gwei / 1e9 * 2300 / 42999 * 1e8) = 108838.57
-			expectedBuyBase:   93490,
+			rate: calc.MessageRateAlt(43000, 1e8, 1e6),
+			// We first convert from the parent asset to the child.
+			// 5e4 sats + (1.1e7 gwei / 1e9 * 2300 / 0.99 * 1e6) = 25555555 microUSDC
+			// Then we use QuoteToBase with the message-rate.
+			// r = 43000 * 1e8 / 1e8 * 1e6 = 43_000_000_000
+			// 25555555 * 1e8 / 43_000_000_000 = 59431 Sats
+			// 5e4 + 59431 = 109431
+			expectedSellBase: 109431,
+			// 1e7 gwei * / 1e9 * 2300 / 0.99 * 1e6 = 23232323 microUSDC
+			// 23232323 * 1e8 / 43_000_000_000 = 54028
+			// 4e4 + 54028 = 94028
+			expectedBuyBase:   94028,
 			expectedSellQuote: 47055556,
 			expectedBuyQuote:  40432323,
 		},
@@ -3554,11 +3625,27 @@ func TestOrderFeesInUnits(t *testing.T) {
 				966003: 42500,
 				966:    0.8,
 			},
-			rate:              calc.MessageRateAlt(43000, 1e8, 1e6),
-			expectedSellBase:  60470,
-			expectedBuyBase:   54494,
-			expectedSellQuote: 25959596,
-			expectedBuyQuote:  23393939,
+			rate: calc.MessageRateAlt(43000, 1e8, 1e6),
+			// 1.1e7 gwei / 1e9 * 2300 / 0.99 * 1e6 = 25555556 micoUSDC
+			// 25555556 * 1e8 / 43_000_000_000 = 59431 Sats
+			// 5e8 gwei / 1e9 * 0.8 / 42500 * 1e8 = 941 wSats
+			// 59431 + 941 = 60372
+			expectedSellBase: 60372,
+			// 1e7 gwei / 1e9 * 2300 / 0.99 = 23232323 microUSDC
+			// 23232323 * 1e8 / 43_000_000_000 = 54028 wSats
+			// 2e8 / 1e9 * 0.8 / 42500 * 1e8 = 376 wSats
+			// 54028 + 376 = 54404
+			expectedBuyBase: 54404,
+			// 5e8 gwei / 1e9 * 0.8 / 42500 * 1e8 = 941 wSats
+			// 941 * 43_000_000_000 / 1e8 = 404630 microUSDC
+			// 1.1e7 gwei / 1e9 * 2300 / 0.99 * 1e6 = 25555556 microUSDC
+			// 404630 + 25555556 = 25960186
+			expectedSellQuote: 25960186,
+			// 1e7 / 1e9 * 2300 / 0.99 * 1e6 = 23232323 microUSDC
+			// 2e8 / 1e9 * 0.8 / 42500 * 1e8 = 376 wSats
+			// 376 * 43_000_000_000 / 1e8 = 161680 microUSDC
+			// 23232323 + 161680 = 23394003
+			expectedBuyQuote: 23394003,
 		},
 	}
 

@@ -77,7 +77,7 @@ const defaultOrderReserves = {
   prec: 3
 }
 const defaultTransfer = {
-  factor: 0.2,
+  factor: 0.1,
   minR: 0,
   maxR: 1,
   range: 1

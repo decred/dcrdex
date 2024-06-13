@@ -114,6 +114,20 @@ func runTrader(t Trader, name string) {
 		m.fatalError("error approving token: %v", err)
 	}
 
+	defer func() {
+		for _, w := range m.wallets {
+			bal, err := m.AssetBalance(w.assetID)
+			if err != nil {
+				log.Errorf("error updating %s balance: %v", w.symbol, err)
+				return
+			}
+			_, err = m.Send(pass, w.assetID, bal.Available*99/100, returnAddress(w.symbol), false)
+			if err != nil {
+				log.Errorf("failed to send funds to alpha: %v", err)
+			}
+		}
+	}()
+
 out:
 	for {
 		select {
@@ -618,7 +632,8 @@ func mustJSON(thing any) string {
 // units.
 func fmtAtoms(v uint64, assetSymbol string) string {
 	assetID, _ := dex.BipSymbolID(assetSymbol)
-	return asset.FormatAtoms(assetID, v)
+	ui, _ := asset.UnitInfo(assetID)
+	return ui.FormatAtoms(v)
 }
 
 func fmtConv(v uint64, assetSymbol string) string {

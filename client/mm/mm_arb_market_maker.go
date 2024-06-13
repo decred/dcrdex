@@ -232,7 +232,6 @@ func (a *arbMarketMaker) dexPlacementRate(cexRate uint64, sell bool) (uint64, er
 	if err != nil {
 		return 0, fmt.Errorf("error getting fees in quote units: %w", err)
 	}
-
 	return dexPlacementRate(cexRate, sell, a.cfg().Profit, a.market, feesInQuoteUnits, a.log)
 }
 
@@ -304,7 +303,20 @@ func (a *arbMarketMaker) distribution() (dist *distribution, err error) {
 		return nil, errors.New("zero placement lots?")
 	}
 	dexSellLots, dexBuyLots := placements.baseLots, placements.quoteLots
-	perLot, err := a.lotCosts(dexSellLots, dexBuyLots)
+	dexBuyRate, dexSellRate, err := a.cexCounterRates(dexSellLots, dexBuyLots)
+	if err != nil {
+		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
+	}
+	adjustedBuy, err := a.dexPlacementRate(dexBuyRate, false)
+	if err != nil {
+		return nil, fmt.Errorf("error getting adjusted buy rate: %v", err)
+	}
+	adjustedSell, err := a.dexPlacementRate(dexSellRate, true)
+	if err != nil {
+		return nil, fmt.Errorf("error getting adjusted sell rate: %v", err)
+	}
+
+	perLot, err := a.lotCosts(adjustedBuy, adjustedSell)
 	if perLot == nil {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
 	}
@@ -427,9 +439,9 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 		for {
 			select {
 			case ni := <-bookFeed.Next():
-				switch payload := ni.Payload.(type) {
-				case *core.EpochMatchSummaryPayload:
-					a.rebalance(payload.Epoch + 1)
+				switch epoch := ni.Payload.(type) {
+				case *core.ResolvedEpoch:
+					a.rebalance(epoch.Current)
 				}
 			case <-ctx.Done():
 				return

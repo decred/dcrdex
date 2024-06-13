@@ -661,7 +661,7 @@ class Bot extends BotMarket {
   autoRebalanceSettings (): AutoRebalanceConfig {
     const {
       proj: { bProj, qProj, alloc }, baseFeeID, quoteFeeID, cfg: { uiConfig: { baseConfig, quoteConfig } },
-      lotSize: minBase, quoteLot: minQuote, baseID, quoteID
+      baseID, quoteID
     } = this
 
     const totalBase = alloc[baseID]
@@ -677,11 +677,9 @@ class Bot extends BotMarket {
     if (maxBase < 0 || maxQuote < 0) {
       throw Error(`rebalance math doesn't work: ${JSON.stringify({ bProj, qProj, maxBase, maxQuote })}`)
     }
-    const baseRange = maxBase - minBase
-    const quoteRange = maxQuote - minQuote
     return {
-      minBaseTransfer: Math.round(minBase + baseConfig.transferFactor * baseRange),
-      minQuoteTransfer: Math.round(minQuote + quoteConfig.transferFactor * quoteRange)
+      minBaseTransfer: Math.round(baseConfig.transferFactor * maxBase),
+      minQuoteTransfer: Math.round(quoteConfig.transferFactor * maxQuote)
     }
   }
 

@@ -190,8 +190,11 @@ func (ui *UnitInfo) FormatAtoms(v uint64) string {
 	return fmt.Sprintf("%d %s", v, ui.AtomicUnit)
 }
 
-func (ui *UnitInfo) FormatSignedAtoms(v int64) string {
+func (ui *UnitInfo) FormatSignedAtoms(v int64, plusSign ...bool) string {
 	if v >= 0 {
+		if len(plusSign) > 0 && plusSign[0] {
+			return "+" + ui.FormatAtoms(uint64(v))
+		}
 		return ui.FormatAtoms(uint64(v))
 	}
 	return "-" + ui.FormatAtoms(uint64(-v))
