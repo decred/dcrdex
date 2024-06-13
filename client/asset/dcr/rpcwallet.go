@@ -486,14 +486,6 @@ func (w *rpcWallet) SpvMode() bool {
 	return w.spvMode
 }
 
-// NotifyOnTipChange registers a callback function that should be invoked when
-// the wallet sees new mainchain blocks. The return value indicates if this
-// notification can be provided.
-// Part of the Wallet interface.
-func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, _ TipChangeCallback) bool {
-	return false
-}
-
 // AddressInfo returns information for the provided address. It is an error
 // if the address is not owned by the wallet.
 // Part of the Wallet interface.
@@ -526,6 +518,7 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, addr stdaddr.Address
 	if err != nil {
 		return false, translateRPCCancelErr(err)
 	}
+
 	return va.IsMine && va.Account == acctName, nil
 }
 
@@ -750,14 +743,29 @@ func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 // asset.CoinNotFoundError if the tx is not found.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*wire.MsgTx, error) {
+	if w.spvMode {
+		gtr, err := w.rpcClient.GetTransaction(ctx, txHash)
+		if err != nil {
+			return nil, err
+		}
+
+		txB, err := hex.DecodeString(gtr.Hex)
+		if err != nil {
+			return nil, err
+		}
+
+		return msgTxFromBytes(txB)
+	}
+
 	utilTx, err := w.rpcClient.GetRawTransaction(ctx, txHash)
 	if err != nil {
 		return nil, err
 	}
+
 	return utilTx.MsgTx(), nil
 }
 
-func (w *rpcWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error) {
+func (w *rpcWallet) ListSinceBlock(ctx context.Context, start int32) ([]ListTransactionsResult, error) {
 	hash, err := w.GetBlockHash(ctx, int64(start))
 	if err != nil {
 		return nil, err
@@ -768,7 +776,19 @@ func (w *rpcWallet) ListSinceBlock(ctx context.Context, start, end, syncHeight i
 		return nil, err
 	}
 
-	return res.Transactions, nil
+	toReturn := make([]ListTransactionsResult, 0, len(res.Transactions))
+	for _, tx := range res.Transactions {
+		toReturn = append(toReturn, ListTransactionsResult{
+			TxID:       tx.TxID,
+			BlockIndex: tx.BlockIndex,
+			BlockTime:  tx.BlockTime,
+			Send:       tx.Category == "send",
+			TxType:     tx.TxType,
+			Fee:        tx.Fee,
+		})
+	}
+
+	return toReturn, nil
 }
 
 // GetRawMempool returns hashes for all txs of the specified type in the node's

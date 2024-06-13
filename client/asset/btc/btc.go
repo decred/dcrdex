@@ -1617,10 +1617,14 @@ func (btc *intermediaryWallet) Connect(ctx context.Context) (*sync.WaitGroup, er
 		btc.monitorPeers(ctx)
 	}()
 
-	btc.tipMtx.RLock()
-	tip := btc.currentTip
-	btc.tipMtx.RUnlock()
-	go btc.syncTxHistory(uint64(tip.Height))
+	wg.Add(1)
+	func() {
+		defer wg.Done()
+		btc.tipMtx.RLock()
+		tip := btc.currentTip
+		btc.tipMtx.RUnlock()
+		go btc.syncTxHistory(uint64(tip.Height))
+	}()
 
 	return wg, nil
 }

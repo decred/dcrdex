@@ -69,6 +69,19 @@ type XCWalletAccounts struct {
 	TradingAccount string
 }
 
+// ListTransactionsResult is similar to the walletjson.ListTransactionsResult,
+// but most fields omitted.
+type ListTransactionsResult struct {
+	TxID       string
+	BlockIndex *int64
+	BlockTime  int64
+	// Send set to true means that the inputs of the transaction were
+	// controlled by the wallet.
+	Send   bool `json:"send"`
+	Fee    *float64
+	TxType *walletjson.ListTransactionsTxType
+}
+
 // Wallet defines methods that the ExchangeWallet uses for communicating with
 // a Decred wallet and blockchain.
 type Wallet interface {
@@ -82,12 +95,6 @@ type Wallet interface {
 	// Accounts returns the names of the accounts for use by the exchange
 	// wallet.
 	Accounts() XCWalletAccounts
-	// NotifyOnTipChange registers a callback function that should be
-	// invoked when the wallet sees new mainchain blocks. The return value
-	// indicates if this notification can be provided. Where this tip change
-	// notification is unimplemented, monitorBlocks should be used to track
-	// tip changes.
-	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
 	// AddressInfo returns information for the provided address. It is an error
 	// if the address is not owned by the wallet.
 	AddressInfo(ctx context.Context, address string) (*AddressInfo, error)
@@ -141,7 +148,7 @@ type Wallet interface {
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	// ListSinceBlock returns all wallet transactions confirmed since the specified
 	// height.
-	ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error)
+	ListSinceBlock(ctx context.Context, start int32) ([]ListTransactionsResult, error)
 	// MatchAnyScript looks for any of the provided scripts in the block specified.
 	MatchAnyScript(ctx context.Context, blockHash *chainhash.Hash, scripts [][]byte) (bool, error)
 	// AccountUnlocked returns true if the account is unlocked.
