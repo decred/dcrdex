@@ -830,13 +830,14 @@ export class RunningMarketMakerDisplay {
     this.mkt = mkt
     const {
       page, div, mkt: {
-        host, baseID, quoteID, baseFeeSymbol, quoteFeeSymbol, baseFeeTicker, quoteFeeTicker,
-        needBaseFeeAsset, needQuoteFeeAsset, cfg, baseFactor, quoteFactor
+        host, baseID, quoteID, cexName, baseFeeSymbol, quoteFeeSymbol, baseFeeTicker,
+        quoteFeeTicker, needBaseFeeAsset, needQuoteFeeAsset, cfg, baseFactor, quoteFactor
       }
     } = this
     setMarketElements(div, baseID, quoteID, host)
     Doc.setVis(needBaseFeeAsset, page.baseFeeReservesBox)
     Doc.setVis(needQuoteFeeAsset, page.quoteFeeReservesBox)
+    Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
     page.baseFeeLogo.src = Doc.logoPath(baseFeeSymbol)
     page.baseFeeTicker.textContent = baseFeeTicker
     page.quoteFeeLogo.src = Doc.logoPath(quoteFeeSymbol)

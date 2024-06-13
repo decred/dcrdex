@@ -5,10 +5,10 @@
 
     {{- /* BOT PANELS */ -}}
     <div class="flex-center">
-      <div id="box" class="col-12 d-flex align-items-start flex-wrap">
+      <div id="box" class="col-24 col-lg-20 col-xl-16 col-xxl-12 d-flex align-items-start flex-wrap">
 
         {{- /* MARKET MAKING OVERVIEW */ -}}
-        <div id="overview" class="col-12">
+        <div id="overview" class="col-24 col-md-12">
           <section class="flex-stretch-column py-3">
             <div class="d-flex justify-content-between px-3 pb-2">
               <span class="fs26">Market Making</span>
@@ -85,7 +85,7 @@
         </div>
 
         {{- /* NO CONFIGURED BOTS */ -}}
-        <div id="noBots" class="col-12">
+        <div id="noBots" class="col-24 col-md-12">
           <section class="flex-stretch-column">
             <div class="flex-center lh1 pt-3">
               <span class="ico-robot"></span>
@@ -97,7 +97,7 @@
         </div>
 
         {{- /* BOT PANEL TEMPLATE */ -}}
-        <div id="botTmpl" class="col-12 flex-stretch-column mb-3">
+        <div id="botTmpl" class="col-24 col-md-12 flex-stretch-column mb-3">
           <section class="flex-stretch-column position-relative pt-3">
             <div data-tmpl="loadingBg" class="fill-abs z10 blurry-bg flex-center">
               <div class="ico-robot fs50 grey position-relative spinner fast pb-2"></div>
@@ -451,13 +451,11 @@
                 <div class="allocation-grid pt-2 lh1">
                   {{- /* CEX AND DEX LOGO COLUMN HEADERS */ -}}
                   <div class="flex-center pe-2 pb-2 second">
-                    <div class="d-inline-block">
-                      <img class="small-icon" data-cex-logo>
-                    </div>
+                    <img class="small-icon" data-cex-logo data-cex-show>
                   </div>
                   <div class="flex-center ps-2 pb-2 border-start">
                     <div class="d-inline-block">
-                      <img src="/img/bison-full_97x50.png" class="small-icon">
+                      <img class="bison-logo-full small">
                     </div>
                   </div>
 

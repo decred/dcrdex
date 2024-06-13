@@ -72,7 +72,7 @@ const defaultSwapReserves = {
 const defaultOrderReserves = {
   factor: 1.0,
   minR: 0,
-  maxR: 2,
+  maxR: 3,
   range: 2,
   prec: 3
 }
@@ -343,6 +343,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.addBuyPlacementGapFactor.value = ''
       this.updateModifiedMarkers()
       this.placementsChart.render()
+      this.updateAllocations()
     })
     Doc.bind(page.addSellPlacementBtn, 'click', () => {
       this.addPlacement(false, null)
@@ -350,6 +351,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.addSellPlacementGapFactor.value = ''
       this.updateModifiedMarkers()
       this.placementsChart.render()
+      this.updateAllocations()
     })
 
     this.driftTolerance = new NumberInput(page.driftToleranceInput, {
@@ -1615,6 +1617,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       updateArrowVis()
       this.updateModifiedMarkers()
       this.placementsChart.render()
+      this.updateAllocations()
     })
 
     Doc.bind(newRowTmpl.upBtn, 'click', () => {
@@ -1913,8 +1916,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       return
     }
     await app().fetchMMStatus()
-    this.specs = (undefined as any) as BotSpecs
-    this.initialize()
+    app().loadPage('mm')
   }
 
   /*
@@ -2300,15 +2302,16 @@ class AssetPane {
     const complexFeeUI = counterToken && counterToken.parentID === assetID
     Doc.setVis(complexFeeUI, page.bookingFeesComplex)
     Doc.setVis(!complexFeeUI, page.bookingFeesSimple)
-    Doc.setVis(botType !== botTypeBasicMM, page.orderReservesBox, page.cexMinInvBox)
+    Doc.setVis(botType !== botTypeBasicMM, page.cexMinInvBox)
+    Doc.setVis(botType !== botTypeBasicArb, page.orderReservesBox)
     this.nSwapFees.setValue(cfg.swapFeeN ?? defaultSwapReserves.n)
     this.nSwapFeesSlider.setValue(cfg.swapFeeN / defaultSwapReserves.maxR)
-    if (botType !== botTypeBasicMM) {
+    if (botType !== botTypeBasicArb) {
       const [v] = toPrecision(cfg.orderReservesFactor ?? defaultOrderReserves.factor, defaultOrderReserves.prec)
       this.orderReserves.setValue(v)
       this.orderReservesSlider.setValue((v - defaultOrderReserves.minR) / defaultOrderReserves.range)
-      this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
     }
+    if (botType !== botTypeBasicMM) this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
     this.slippageBuffer.setValue(cfg.slippageBufferFactor)
     const { minR, range } = defaultSlippage
     this.slippageBufferSlider.setValue((cfg.slippageBufferFactor - minR) / range)
@@ -2360,13 +2363,12 @@ class AssetPane {
   }
 
   updateCEXInventory (cexCommit: number, dexCommit: number) {
-    const { page, cfg, inv, ui, pg: { updatedConfig: { cexRebalance }, specs: { cexName } } } = this
+    const { page, cfg, inv, ui, pg: { specs: { cexName, botType } } } = this
     if (!cexName) return
     inv.cex = cexCommit / ui.conventional.conversionFactor
     page.cexMinInv.textContent = Doc.formatFourSigFigs(inv.cex)
-    Doc.setVis(cexRebalance, page.orderReservesBox)
-    if (cexRebalance) {
-      const totalInventory = Math.max(cexCommit, dexCommit) / ui.conventional.conversionFactor
+    const totalInventory = Math.max(cexCommit, dexCommit) / ui.conventional.conversionFactor
+    if (botType !== botTypeBasicArb) {
       page.orderReservesBasis.textContent = Doc.formatFourSigFigs(totalInventory)
       const orderReserves = totalInventory * cfg.orderReservesFactor
       inv.orderReserves = totalInventory

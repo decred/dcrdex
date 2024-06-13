@@ -389,7 +389,7 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 	return &bncAssetConfig{
 		assetID:          assetID,
 		symbol:           dex.BipIDSymbol(assetID),
-		coin:             mapDexToBinanceSymbol(coin),
+		coin:             coin,
 		chain:            mapDexToBinanceSymbol(chain),
 		conversionFactor: ui.Conventional.ConversionFactor,
 	}, nil
@@ -456,9 +456,6 @@ type binance struct {
 	tradeInfo          map[string]*tradeInfo
 	tradeUpdaters      map[int]chan *Trade
 	tradeUpdateCounter int
-
-	cexUpdatersMtx sync.RWMutex
-	cexUpdaters    map[chan interface{}]struct{}
 }
 
 var _ CEX = (*binance)(nil)
@@ -502,7 +499,6 @@ func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
 		net:                cfg.Net,
 		tradeInfo:          make(map[string]*tradeInfo),
 		tradeUpdaters:      make(map[int]chan *Trade),
-		cexUpdaters:        make(map[chan interface{}]struct{}, 0),
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 	}
 
@@ -695,23 +691,6 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}()
 
 	return wg, nil
-}
-
-// SubscribeCEXUpdates returns a channel which sends an empty struct when
-// the balance of an asset on the CEX has been updated.
-func (bnc *binance) SubscribeCEXUpdates() (<-chan interface{}, func()) {
-	updater := make(chan interface{}, 128)
-	bnc.cexUpdatersMtx.Lock()
-	bnc.cexUpdaters[updater] = struct{}{}
-	bnc.cexUpdatersMtx.Unlock()
-
-	unsubscribe := func() {
-		bnc.cexUpdatersMtx.Lock()
-		delete(bnc.cexUpdaters, updater)
-		bnc.cexUpdatersMtx.Unlock()
-	}
-
-	return updater, unsubscribe
 }
 
 // Balance returns the balance of an asset at the CEX.
@@ -1065,14 +1044,14 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 	bnc.marketSnapshotMtx.Lock()
 	defer bnc.marketSnapshotMtx.Unlock()
 
-	const snapshotTimeout = time.Minute & 30
+	const snapshotTimeout = time.Minute * 30
 	if bnc.marketSnapshot.m != nil && time.Since(bnc.marketSnapshot.stamp) < snapshotTimeout {
 		return bnc.marketSnapshot.m, nil
 	}
 
 	mktIDs, err := bnc.MatchedMarkets(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error getting maret list for market data request: %w", err)
+		return nil, fmt.Errorf("error getting market list for market data request: %w", err)
 	}
 
 	slugs := make([]string, len(mktIDs))

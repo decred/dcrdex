@@ -14,7 +14,7 @@
   <div id="botSettingsContainer" class="flex-grow-1 d-flex flex-wrap d-hide">
 
     {{- /* PLACEMENTS */ -}}
-    <div class="col-24 col-xl-8 col-xxl-6">
+    <div class="col-24 col-md-12 col-xl-8 col-xxl-6">
       <section class="p-3">
         <div class="position-relative">
           <div id="mmTitle" class="flex-center fs28 d-none d-md-block lh1">[[[Market Maker Settings]]]</div>
@@ -345,8 +345,8 @@
     </div>
 
     {{- /* ASSET SETTINGS */ -}}
-    <div class="col-24 col-xl-16 col-xxl-14 flex-stretch-column">
-      <div id=assetPaneBox class="d-flex align-items-start">
+    <div class="d-flex flex-wrap col-24 col-md-12 col-xl-16 col-xxl-18">
+      <div id=assetPaneBox class="d-flex flex-wrap col-24 col-xxl-19">
         <div id="basePane" class="flex-stretch-column col-24 col-xl-12">
           <section class="flex-stretch-column">
 
@@ -649,109 +649,107 @@
           </section>
         </div>
       </div>
-    </div>
-
-    {{- /* GENERAL SETTINGS */ -}}
-    <div class="col-24 col-xxl-4 flex-stretch-column">
-      <section class="flex-stretch-column py-2 px-3">
-        <div class="d-flex align-items-center">
-          <span class="ico-lever fs20 pe-2"></span>
-          <span class="fs22">Knobs</span>
-        </div>
-        {{- /* CEX REBALANCE CHECKBOX */ -}}
-        <label id="cexRebalanceSettings" for="cexRebalanceCheckbox" class="fs16 d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
-          <div class="flex-center">
-            <input type="checkbox" id="cexRebalanceCheckbox" class="form-check-input me-2 mt-0" checked>
-            <span>[[[Arbitrage Rebalance]]]</span>
+      {{- /* GENERAL SETTINGS */ -}}
+      <div class="col-24 col-xxl-5 flex-stretch-column">
+        <section class="flex-stretch-column py-2 px-3">
+          <div class="d-flex align-items-center">
+            <span class="ico-lever fs20 pe-2"></span>
+            <span class="fs22">Knobs</span>
           </div>
-          <span class="ico-info fs12" data-tooltip="[[[enable_rebalance_tooltip]]]"></span>
-        </label>
+          {{- /* CEX REBALANCE CHECKBOX */ -}}
+          <label id="cexRebalanceSettings" for="cexRebalanceCheckbox" class="fs16 d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+            <div class="flex-center">
+              <input type="checkbox" id="cexRebalanceCheckbox" class="form-check-input me-2 mt-0" checked>
+              <span>[[[Arbitrage Rebalance]]]</span>
+            </div>
+            <span class="ico-info fs12" data-tooltip="[[[enable_rebalance_tooltip]]]"></span>
+          </label>
 
-        {{- /* DRIFT TOLERANCE */ -}}
-        <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
-          <span class="fs16">
-            [[[Drift tolerance]]]
-          </span>
-          <span class="ico-info fs12" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
-        </div>
-        <div class="d-flex align-items-center">
-          <div id="driftToleranceSlider" class="mini-slider flex-grow-1 me-2"></div>
-          <input type="number" id="driftToleranceInput" class="micro text-end">
-          <span class="fs14 grey ms-1">%</span>
-        </div>
-
-        {{- /* ORDER PERSISTENCE */ -}}
-        <div id="orderPersistenceBox" class="flex-stretch-column mt-2 pt-2 border-top">
-          <div class="fs16 mb-2 d-flex align-items-center justify-content-between">
-            <span>[[[Order persistence]]]</span>
-            <span class="ico-info fs12" data-tooltip="[[[order_persistence_tooltip]]]"></span>
+          {{- /* DRIFT TOLERANCE */ -}}
+          <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+            <span class="fs16">
+              [[[Drift tolerance]]]
+            </span>
+            <span class="ico-info fs12" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
           </div>
           <div class="d-flex align-items-center">
-            <div id="orderPersistenceSlider" class="mini-slider flex-grow-1 me-2"></div>
-            <input type="number" id="orderPersistence" class="micro thin text-end">
-            <span class="fs14 grey ms-1">epochs</span>
+            <div id="driftToleranceSlider" class="mini-slider flex-grow-1 me-2"></div>
+            <input type="number" id="driftToleranceInput" class="micro text-end">
+            <span class="fs14 grey ms-1">%</span>
           </div>
-        </div>
 
-
-        {{- /* EMPTY MARKET RATE */ -}}
-        <div id="emptyMarketRateBox" class="flex-stretch-column pt-2 mt-2 border-top">
-          <label for="emptyMarketRateCheckbox" class="fs16 d-flex align-items-center justify-content-between">
-            <div class="flex-center">
-              <input type="checkbox" id="emptyMarketRateCheckbox" class="form-check-input me-2 mt-0" checked>
-              <span>[[[empty_market_rate]]]</span>
+          {{- /* ORDER PERSISTENCE */ -}}
+          <div id="orderPersistenceBox" class="flex-stretch-column mt-2 pt-2 border-top">
+            <div class="fs16 mb-2 d-flex align-items-center justify-content-between">
+              <span>[[[Order persistence]]]</span>
+              <span class="ico-info fs12" data-tooltip="[[[order_persistence_tooltip]]]"></span>
             </div>
-            <span class="ico-info fs12" data-tooltip="[[[empty_market_rate_tooltip]]]"></span>
-          </label>
-          <div id="emptyMarketRateInputBox" class="mt-2 d-flex align-items-center justify-content-end">
-            <input type="number" id="emptyMarketRateInput" class="w-25 micro wide text-end">
-            <span class="fs14 grey ms-1">
-              <span data-quote-ticker></span>
-              <span>/</span>
-              <span data-base-ticker></span>
-            </span>
-          </div>
-          <div id="emptyMarketRateErr" class="pt-2 flex-center text-danger d-hide"></div>
-        </div>
-
-        {{- /* ORACLE SETTINGS */ -}}
-        <div id="oraclesSettingBox" class="flex-stretch-column pt-2 mt-2 border-top">
-          {{- /* USE ORACLE CHECKBOX */ -}}
-          <label for="useOracleCheckbox" class="fs16 d-flex align-items-center justify-content-between">
-            <div class="flex-center">
-              <input type="checkbox" id="useOracleCheckbox" class="form-check-input me-2 mt-0" checked>
-              <span>[[[use_oracles]]]</span>
-            </div>
-            <span class="ico-info fs12" data-tooltip="[[[use_oracles_tooltip]]]"></span>
-          </label>
-
-          {{- /* ORACLE WEIGHTING */ -}}
-          <div id="oracleWeightingBox" class="mt-2">
-            <div class="d-flex align-items-center justify-content-between">
-              <span>[[[Oracle weight]]]</span>
-              <span class="ico-info fs12" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
-            </div>
-            <div class="d-flex align-items-center justify-content-end">
-              <div id="oracleWeightingSlider" class="mini-slider flex-grow-1 me-2"></div>
-              <input type="number" id="oracleWeighting" class="micro text-end">
-              <span class="fs14 grey ms-1">%</span>
+            <div class="d-flex align-items-center">
+              <div id="orderPersistenceSlider" class="mini-slider flex-grow-1 me-2"></div>
+              <input type="number" id="orderPersistence" class="micro thin text-end">
+              <span class="fs14 grey ms-1">epochs</span>
             </div>
           </div>
 
-          {{- /* ORACLE BIAS */ -}}
-          <div id="oracleBiasBox" class="mt-2">
-            <div class="d-flex align-items-center justify-content-between">
-              <span>[[[Oracle bias]]]</span>
-              <span class="ico-info fs12" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
+          {{- /* EMPTY MARKET RATE */ -}}
+          <div id="emptyMarketRateBox" class="flex-stretch-column pt-2 mt-2 border-top">
+            <label for="emptyMarketRateCheckbox" class="fs16 d-flex align-items-center justify-content-between">
+              <div class="flex-center">
+                <input type="checkbox" id="emptyMarketRateCheckbox" class="form-check-input me-2 mt-0" checked>
+                <span>[[[empty_market_rate]]]</span>
+              </div>
+              <span class="ico-info fs12" data-tooltip="[[[empty_market_rate_tooltip]]]"></span>
+            </label>
+            <div id="emptyMarketRateInputBox" class="mt-2 d-flex align-items-center justify-content-end">
+              <input type="number" id="emptyMarketRateInput" class="w-25 micro wide text-end">
+              <span class="fs14 grey ms-1">
+                <span data-quote-ticker></span>
+                <span>/</span>
+                <span data-base-ticker></span>
+              </span>
             </div>
-            <div class="d-flex align-items-center justify-content-end">
-              <div id="oracleBiasSlider" class="mini-slider flex-grow-1 me-2"></div>
-              <input type="number" id="oracleBias" class="micro text-end">
-              <span class="fs14 grey ms-1">%</span>
+            <div id="emptyMarketRateErr" class="pt-2 flex-center text-danger d-hide"></div>
+          </div>
+
+          {{- /* ORACLE SETTINGS */ -}}
+          <div id="oraclesSettingBox" class="flex-stretch-column pt-2 mt-2 border-top">
+            {{- /* USE ORACLE CHECKBOX */ -}}
+            <label for="useOracleCheckbox" class="fs16 d-flex align-items-center justify-content-between">
+              <div class="flex-center">
+                <input type="checkbox" id="useOracleCheckbox" class="form-check-input me-2 mt-0" checked>
+                <span>[[[use_oracles]]]</span>
+              </div>
+              <span class="ico-info fs12" data-tooltip="[[[use_oracles_tooltip]]]"></span>
+            </label>
+
+            {{- /* ORACLE WEIGHTING */ -}}
+            <div id="oracleWeightingBox" class="mt-2">
+              <div class="d-flex align-items-center justify-content-between">
+                <span>[[[Oracle weight]]]</span>
+                <span class="ico-info fs12" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
+              </div>
+              <div class="d-flex align-items-center justify-content-end">
+                <div id="oracleWeightingSlider" class="mini-slider flex-grow-1 me-2"></div>
+                <input type="number" id="oracleWeighting" class="micro text-end">
+                <span class="fs14 grey ms-1">%</span>
+              </div>
+            </div>
+
+            {{- /* ORACLE BIAS */ -}}
+            <div id="oracleBiasBox" class="mt-2">
+              <div class="d-flex align-items-center justify-content-between">
+                <span>[[[Oracle bias]]]</span>
+                <span class="ico-info fs12" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
+              </div>
+              <div class="d-flex align-items-center justify-content-end">
+                <div id="oracleBiasSlider" class="mini-slider flex-grow-1 me-2"></div>
+                <input type="number" id="oracleBias" class="micro text-end">
+                <span class="fs14 grey ms-1">%</span>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   </div>
 

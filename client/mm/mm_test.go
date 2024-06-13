@@ -480,9 +480,6 @@ func (c *tCEX) MidGap(baseID, quoteID uint32) uint64 { return 0 }
 func (c *tCEX) SubscribeTradeUpdates() (<-chan *libxc.Trade, func(), int) {
 	return c.tradeUpdates, func() {}, c.tradeUpdatesID
 }
-func (c *tCEX) SubscribeCEXUpdates() (<-chan interface{}, func()) {
-	return nil, func() {}
-}
 func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, error) {
 	return c.depositAddress, nil
 }

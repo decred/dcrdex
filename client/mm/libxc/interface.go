@@ -59,11 +59,14 @@ type DepositData struct {
 	TxID               string
 }
 
+// MarketMatch is a market for which both assets are supported by Bison Wallet.
 type MarketMatch struct {
-	BaseID   uint32 `json:"baseID"`
-	QuoteID  uint32 `json:"quoteID"`
+	BaseID  uint32 `json:"baseID"`
+	QuoteID uint32 `json:"quoteID"`
+	// MarketID is the id used by DCRDEX.
 	MarketID string `json:"marketID"`
-	Slug     string `json:"slug"`
+	// Slug is a market identifier used by the cex.
+	Slug string `json:"slug"`
 }
 
 type BalanceUpdate struct {

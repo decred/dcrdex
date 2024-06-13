@@ -111,6 +111,15 @@ img.bison-logo-square {
   content: url("/img/bison-square_50.png");
 }
 
+img.bison-logo-full {
+  content: url("/img/bison-full_97x50.png");
+
+  &.small {
+    height: 25px;
+    width: 48.5px;
+  }
+}
+
 #noteIndicator {
   position: absolute;
   top: 0;

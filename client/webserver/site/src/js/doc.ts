@@ -1101,7 +1101,7 @@ export function toPrecision (v: number, prec: number): [number, string] {
 }
 
 export function toFourSigFigs (v: number, maxPrec: number): [number, string] {
-  const ord = Math.floor(Math.log10(v))
+  const ord = Math.floor(Math.log10(Math.abs(v)))
   if (ord >= 3) return [Math.round(v), v.toFixed(0)]
   const prec = Math.min(4 - ord, maxPrec)
   return toPrecision(v, prec)

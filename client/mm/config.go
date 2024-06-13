@@ -41,14 +41,6 @@ type AutoRebalanceConfig struct {
 	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
 }
 
-// BotCEXCfg specifies the CEX that a bot uses, the initial balances
-// that should be allocated to the bot on that CEX, and the configuration
-// for automatically rebalancing between the CEX and DEX.
-type BotCEXCfg struct {
-	Name          string               `json:"name"`
-	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance"`
-}
-
 // BotBalanceAllocation is the initial allocation of funds for a bot.
 type BotBalanceAllocation struct {
 	DEX map[uint32]uint64 `json:"dex"`
