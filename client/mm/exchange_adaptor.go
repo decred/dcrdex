@@ -117,15 +117,19 @@ type pendingDeposit struct {
 }
 
 type balanceEffects struct {
-	availableDiff     map[uint32]int64
-	locked            map[uint32]uint64
-	pending           map[uint32]uint64
-	baseDelta         int64
-	quoteDelta        int64
-	pendingBaseDelta  uint64
-	pendingQuoteDelta uint64
-	baseFees          uint64
-	quoteFees         uint64
+	settled map[uint32]int64
+	locked  map[uint32]uint64
+	pending map[uint32]uint64
+	fees    map[uint32]uint64
+}
+
+func newBalanceEffects() *balanceEffects {
+	return &balanceEffects{
+		settled: make(map[uint32]int64),
+		locked:  make(map[uint32]uint64),
+		pending: make(map[uint32]uint64),
+		fees:    make(map[uint32]uint64),
+	}
 }
 
 type dexOrderState struct {
@@ -603,10 +607,10 @@ func (u *unifiedExchangeAdaptor) updateDEXOrderEvent(o *pendingDEXOrder, complet
 		ID:         o.eventLogID,
 		TimeStamp:  o.timestamp,
 		Pending:    !complete,
-		BaseDelta:  state.balanceEffects.baseDelta,
-		QuoteDelta: state.balanceEffects.quoteDelta,
-		BaseFees:   state.balanceEffects.baseFees,
-		QuoteFees:  state.balanceEffects.quoteFees,
+		BaseDelta:  state.balanceEffects.settled[u.baseID],
+		QuoteDelta: state.balanceEffects.settled[u.quoteID],
+		BaseFees:   state.balanceEffects.fees[u.baseFeeID],
+		QuoteFees:  state.balanceEffects.fees[u.quoteFeeID],
 		DEXOrderEvent: &DEXOrderEvent{
 			ID:           state.order.ID.String(),
 			Rate:         state.order.Rate,
@@ -858,26 +862,14 @@ func (u *unifiedExchangeAdaptor) placeMultiTrade(placements []*dexOrderInfo, sel
 		var orderID order.OrderID
 		copy(orderID[:], o.ID)
 
-		availableDiff := map[uint32]int64{}
-		availableDiff[fromAsset] -= int64(o.LockedAmt)
-		availableDiff[fromFeeAsset] -= int64(o.ParentAssetLockedAmt + o.RefundLockedAmt)
-		availableDiff[toFeeAsset] -= int64(o.RedeemLockedAmt)
-		if o.FeesPaid != nil {
-			availableDiff[fromFeeAsset] -= int64(o.FeesPaid.Funding)
-		}
+		effects := newBalanceEffects()
 
-		locked := map[uint32]uint64{}
-		locked[fromAsset] += o.LockedAmt
-		locked[fromFeeAsset] += o.ParentAssetLockedAmt + o.RefundLockedAmt
-		locked[toFeeAsset] += o.RedeemLockedAmt
+		effects.locked[fromAsset] += o.LockedAmt
+		effects.locked[fromFeeAsset] += o.ParentAssetLockedAmt + o.RefundLockedAmt
+		effects.locked[toFeeAsset] += o.RedeemLockedAmt
 
-		var baseFees, quoteFees uint64
 		if o.FeesPaid != nil && o.FeesPaid.Funding > 0 {
-			if o.Sell {
-				baseFees = o.FeesPaid.Funding
-			} else {
-				quoteFees = o.FeesPaid.Funding
-			}
+			effects.fees[fromFeeAsset] += o.FeesPaid.Funding
 		}
 
 		pendingOrder := &pendingDEXOrder{
@@ -891,14 +883,8 @@ func (u *unifiedExchangeAdaptor) placeMultiTrade(placements []*dexOrderInfo, sel
 		}
 		pendingOrder.state.Store(
 			&dexOrderState{
-				order: o,
-				balanceEffects: &balanceEffects{
-					availableDiff: availableDiff,
-					locked:        locked,
-					pending:       map[uint32]uint64{},
-					baseFees:      baseFees,
-					quoteFees:     quoteFees,
-				},
+				order:          o,
+				balanceEffects: effects,
 			})
 		u.pendingDEXOrders[orderID] = pendingOrder
 		newPendingDEXOrders = append(newPendingDEXOrders, u.pendingDEXOrders[orderID])
@@ -1193,8 +1179,11 @@ func (u *unifiedExchangeAdaptor) dexBalance(assetID uint32) *BotBalance {
 
 	for _, pendingOrder := range u.pendingDEXOrders {
 		effects := pendingOrder.currentState().balanceEffects
-		totalAvailableDiff += effects.availableDiff[assetID]
-		totalLocked += effects.locked[assetID]
+		totalAvailableDiff += effects.settled[assetID]
+		locked := effects.locked[assetID]
+		totalAvailableDiff -= int64(locked)
+		totalLocked += locked
+		totalAvailableDiff -= int64(effects.fees[assetID])
 		totalPending += effects.pending[assetID]
 	}
 
@@ -2320,11 +2309,7 @@ func orderTransactions(o *core.Order) (swaps map[string]bool, redeems map[string
 }
 
 func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDEXOrder, o *core.Order) (effects *balanceEffects) {
-	effects = &balanceEffects{
-		availableDiff: make(map[uint32]int64),
-		locked:        make(map[uint32]uint64),
-		pending:       make(map[uint32]uint64),
-	}
+	effects = newBalanceEffects()
 	swaps, redeems, refunds := orderTransactions(o)
 	// Add new txs to tx cache
 	fromAsset, fromFeeAsset, toAsset, toFeeAsset := orderAssets(o.BaseID, o.QuoteID, o.Sell)
@@ -2353,29 +2338,7 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 	processTxs(toAsset, pendingOrder.redeems, redeems)
 	processTxs(fromAsset, pendingOrder.refunds, refunds)
 
-	// Calculate balance effects based on current state of the order.
-	addFees := func(fromAsset bool, fee uint64) {
-		if fromAsset && o.Sell || !fromAsset && !o.Sell {
-			effects.baseFees += fee
-		} else {
-			effects.quoteFees += fee
-		}
-	}
-	addDelta := func(fromAsset bool, delta int64) {
-		if fromAsset && o.Sell || !fromAsset && !o.Sell {
-			effects.baseDelta += delta
-		} else {
-			effects.quoteDelta += delta
-		}
-	}
-	addPendingDelta := func(fromAsset bool, delta uint64) {
-		if fromAsset && o.Sell || !fromAsset && !o.Sell {
-			effects.pendingBaseDelta += delta
-		} else {
-			effects.pendingQuoteDelta += delta
-		}
-	}
-
+	// Account for pending funds locked in swaps awaiting confirmation.
 	for _, match := range o.Matches {
 		if match.Swap == nil || match.Redeem != nil || match.Refund != nil {
 			continue
@@ -2384,7 +2347,7 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 		if match.Revoked {
 			swapTx, found := pendingOrder.swaps[match.Swap.ID.String()]
 			if found {
-				addPendingDelta(true, swapTx.Amount)
+				effects.pending[fromAsset] += swapTx.Amount
 			}
 		} else {
 			var redeemAmt uint64
@@ -2393,27 +2356,20 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 			} else {
 				redeemAmt = match.Qty
 			}
-			addPendingDelta(false, redeemAmt)
+			effects.pending[toAsset] += redeemAmt
 		}
-	}
-
-	effects.availableDiff[fromAsset] -= int64(o.LockedAmt)
-	effects.availableDiff[fromFeeAsset] -= int64(o.ParentAssetLockedAmt + o.RefundLockedAmt)
-	effects.availableDiff[toFeeAsset] -= int64(o.RedeemLockedAmt)
-	if o.FeesPaid != nil {
-		effects.availableDiff[fromFeeAsset] -= int64(o.FeesPaid.Funding)
-		addFees(true, o.FeesPaid.Funding)
 	}
 
 	effects.locked[fromAsset] += o.LockedAmt
 	effects.locked[fromFeeAsset] += o.ParentAssetLockedAmt + o.RefundLockedAmt
 	effects.locked[toFeeAsset] += o.RedeemLockedAmt
+	if o.FeesPaid != nil {
+		effects.fees[fromFeeAsset] += o.FeesPaid.Funding
+	}
 
 	for _, tx := range pendingOrder.swaps {
-		effects.availableDiff[fromAsset] -= int64(tx.Amount)
-		effects.availableDiff[fromFeeAsset] -= int64(tx.Fees)
-		addFees(true, tx.Fees)
-		addDelta(true, -int64(tx.Amount))
+		effects.settled[fromAsset] -= int64(tx.Amount)
+		effects.fees[fromFeeAsset] += tx.Fees
 	}
 
 	// for _, m := range o.Matches {
@@ -2428,39 +2384,19 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 	// }
 
 	for _, tx := range pendingOrder.redeems {
-		isDynamicSwapper := u.isDynamicSwapper(toAsset)
-
-		// For dynamic fee assets, the fees are paid from the active balance,
-		// and are not taken out of the redeem amount.
-		if isDynamicSwapper || tx.Confirmed {
-			effects.availableDiff[toFeeAsset] -= int64(tx.Fees)
-		} else {
-			effects.pending[toFeeAsset] -= tx.Fees
-		}
-		addFees(false, tx.Fees)
-		addDelta(false, int64(tx.Amount))
+		effects.fees[toFeeAsset] += tx.Fees
 
 		if tx.Confirmed {
-			effects.availableDiff[toAsset] += int64(tx.Amount)
+			effects.settled[toAsset] += int64(tx.Amount)
 		} else {
 			effects.pending[toAsset] += tx.Amount
 		}
 	}
 	for _, tx := range pendingOrder.refunds {
-		isDynamicSwapper := u.isDynamicSwapper(fromAsset)
-
-		// For dynamic fee assets, the fees are paid from the active balance,
-		// and are not taken out of the redeem amount.
-		if isDynamicSwapper || tx.Confirmed {
-			effects.availableDiff[fromFeeAsset] -= int64(tx.Fees)
-		} else {
-			effects.pending[fromFeeAsset] -= tx.Fees
-		}
-		addFees(true, tx.Fees)
-		addDelta(true, int64(tx.Amount))
+		effects.fees[fromFeeAsset] += tx.Fees
 
 		if tx.Confirmed {
-			effects.availableDiff[fromAsset] += int64(tx.Amount)
+			effects.settled[fromAsset] += int64(tx.Amount)
 		} else {
 			effects.pending[fromAsset] += tx.Amount
 		}
@@ -2505,30 +2441,26 @@ func (u *unifiedExchangeAdaptor) updatePendingDEXOrder(o *core.Order) {
 	// bot's balance.
 
 	if complete { // TODO: complete when all fees are confirmed
-		effects := pendingOrder.currentState().balanceEffects
-
 		u.balancesMtx.Lock()
 		delete(u.pendingDEXOrders, orderID)
 
 		adjustedBals := false
-		for assetID, diff := range effects.availableDiff {
-
+		for assetID, diff := range effects.settled {
 			adjustedBals = adjustedBals || diff != 0
 			u.baseDexBalances[assetID] += diff
 		}
-
-		u.runStats.baseBalanceDelta.Add(effects.baseDelta)
-		u.runStats.quoteBalanceDelta.Add(effects.quoteDelta)
-		u.runStats.baseFees.Add(effects.baseFees)
-		u.runStats.quoteFees.Add(effects.quoteFees)
-
-		if effects.pendingBaseDelta != 0 || effects.pendingQuoteDelta != 0 {
-			u.log.Errorf("bot %s pending delta not zero after order %s complete. base: %d, quote: %d",
-				u.botID, orderID, effects.pendingBaseDelta, effects.pendingQuoteDelta)
+		for assetID, fees := range effects.fees {
+			adjustedBals = adjustedBals || fees != 0
+			u.baseDexBalances[assetID] -= int64(fees)
 		}
 
+		u.runStats.baseBalanceDelta.Add(effects.settled[u.baseID])
+		u.runStats.quoteBalanceDelta.Add(effects.settled[u.quoteID])
+		u.runStats.baseFees.Add(effects.fees[u.baseFeeID])
+		u.runStats.quoteFees.Add(effects.fees[u.quoteFeeID])
+
 		if adjustedBals {
-			u.logBalanceAdjustments(effects.availableDiff, nil, fmt.Sprintf("DEX order %s complete.", orderID))
+			u.logBalanceAdjustments(effects.settled, nil, fmt.Sprintf("DEX order %s complete.", orderID))
 		}
 		u.balancesMtx.Unlock()
 	}

@@ -414,7 +414,7 @@ func TestFreeUpFunds(t *testing.T) {
 		po := &pendingDEXOrder{}
 		po.state.Store(&dexOrderState{
 			balanceEffects: &balanceEffects{
-				availableDiff: map[uint32]int64{
+				settled: map[uint32]int64{
 					assetID: -int64(matchable),
 				},
 				locked: map[uint32]uint64{
@@ -817,7 +817,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		po := &pendingDEXOrder{}
 		po.state.Store(&dexOrderState{
 			balanceEffects: &balanceEffects{
-				availableDiff: map[uint32]int64{
+				settled: map[uint32]int64{
 					assetID: -int64(val),
 				},
 				locked: map[uint32]uint64{
@@ -1653,9 +1653,6 @@ func TestMultiTrade(t *testing.T) {
 }
 
 func TestDEXTrade(t *testing.T) {
-	host := "dex.com"
-	lotSize := uint64(1e6)
-
 	orderIDs := make([]order.OrderID, 5)
 	for i := range orderIDs {
 		var id order.OrderID
@@ -1771,6 +1768,15 @@ func TestDEXTrade(t *testing.T) {
 		updatesAndBalances []*updatesAndBalances
 	}
 
+	const host = "dex.com"
+	const lotSize = 1e6
+	const rate1, rate2 = 5e7, 6e7
+	const swapFees, redeemFees, refundFees = 1000, 1100, 1200
+	const sellFees, buyFees = 2000, 50 // booking fees per lot
+	const basePerLot = lotSize + sellFees
+	quoteLot1, quoteLot2 := b2q(rate1, lotSize), b2q(rate2, lotSize)
+	quotePerLot1, quotePerLot2 := quoteLot1+buyFees, quoteLot2+buyFees
+
 	tests := []*test{
 		{
 			name: "non dynamic swapper, sell",
@@ -1782,29 +1788,29 @@ func TestDEXTrade(t *testing.T) {
 			baseID:  42,
 			quoteID: 0,
 			placements: []*multiTradePlacement{
-				{lots: 5, rate: 5e7},
-				{lots: 5, rate: 6e7},
+				{lots: 5, rate: rate1},
+				{lots: 5, rate: rate2},
 			},
 			initialLockedFunds: []*orderLockedFunds{
-				newOrderLockedFunds(orderIDs[0], 5e6+2000, 0, 0, 0),
-				newOrderLockedFunds(orderIDs[1], 5e6+2000, 0, 0, 0),
+				newOrderLockedFunds(orderIDs[0], basePerLot*5, 0, 0, 0),
+				newOrderLockedFunds(orderIDs[1], basePerLot*5, 0, 0, 0),
 			},
 			postTradeBalances: map[uint32]*BotBalance{
-				42: {1e8 - (5e6+2000)*2, (5e6 + 2000) * 2, 0, 0},
+				42: {1e8 - 10*basePerLot, 10 * basePerLot, 0, 0},
 				0:  {1e8, 0, 0, 0},
 			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2e6, 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - (5e6+2000)*2, 5e6 + 2000 + 3e6 + 1000, 0, 0},
-							0:  {1e8, 0, 0, 0},
+							42: {1e8 - 8*basePerLot - 2*lotSize - swapFees, 8 * basePerLot, 0, 0},
+							0:  {1e8, 0, 2 * quoteLot1, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1812,14 +1818,14 @@ func TestDEXTrade(t *testing.T) {
 				// Second order has a match and sends swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[1], 2e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
+					orderUpdate: newOrderUpdate(orderIDs[1], 2*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0, 0},
-							0:  {1e8, 0, 0, 0},
+							42: {1e8 - 5*basePerLot - 5*lotSize - 2*swapFees, 5 * basePerLot, 0, 0},
+							0:  {1e8, 0, 2*quoteLot1 + 3*quoteLot2, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1827,15 +1833,15 @@ func TestDEXTrade(t *testing.T) {
 				// First order swap is confirmed, and redemption is sent
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2e6, 1000, true),
-						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0, 0},
-							0:  {1e8, 0, b2q(5e7, 2e6) - 1000, 0},
+							42: {1e8 - 5*basePerLot - 5*lotSize - 2*swapFees, 5 * basePerLot, 0, 0},
+							0:  {1e8 - redeemFees, 0, 2*quoteLot1 + 3*quoteLot2, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1843,14 +1849,14 @@ func TestDEXTrade(t *testing.T) {
 				// First order redemption confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 1000, true),
+						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), redeemFees, true),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - (5e6+2000)*2, 5e6 + 2000, 0, 0},
-							0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0, 0},
+							42: {1e8 - 5*basePerLot - 5*lotSize - 2*swapFees, 5 * basePerLot, 0, 0},
+							0:  {1e8 + 2*quoteLot1 - redeemFees, 0, 3 * quoteLot2, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1858,11 +1864,11 @@ func TestDEXTrade(t *testing.T) {
 				// First order cancelled
 				{
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - (7e6 + 2000 + 1000), 2e6 + 1000, 0, 0},
-							0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0, 0},
+							42: {1e8 - 2*basePerLot - 5*lotSize - 2*swapFees, 2 * basePerLot, 0, 0},
+							0:  {1e8 + 2*quoteLot1 - redeemFees, 0, 3 * quoteLot2, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -1870,17 +1876,17 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match, swap sent, and first match refunded
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, true),
-						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1200, false),
-						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, false),
+						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, false,
-						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
-						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
+						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
+						newMatchUpdate(&coinIDs[4], nil, nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - (7e6 + 1800 + 1000), 0, 3e6 - 1200, 0},
-							0:  {1e8 + b2q(5e7, 2e6) - 1000, 0, 0, 0},
+							42: {1e8 - 7*lotSize - 3*swapFees - refundFees, 0, 3 * lotSize /* refund */, 0},
+							0:  {1e8 + 2*quoteLot1 - redeemFees, 0, 2 * quoteLot2 /* new swap */, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -1888,17 +1894,17 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1200, true),
-						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, true),
-						newWalletTx(coinIDs[5], asset.Redeem, b2q(6e7, 2e6), 700, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, true),
+						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, true),
+						newWalletTx(coinIDs[5], asset.Redeem, 2*quoteLot2, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
 						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2e6, 6e7)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - (4e6 + 1800 + 1000 + 1200), 0, 0, 0},
-							0:  {1e8 + b2q(5e7, 2e6) + b2q(6e7, 2e6) - 1700, 0, 0, 0},
+							42: {1e8 - 4*lotSize - 3*swapFees - refundFees, 0, 0, 0},
+							0:  {1e8 + 2*quoteLot1 + 2*quoteLot2 - 2*redeemFees, 0, 0, 0},
 						},
 					},
 				},
@@ -1913,29 +1919,29 @@ func TestDEXTrade(t *testing.T) {
 			baseID:  42,
 			quoteID: 0,
 			placements: []*multiTradePlacement{
-				{lots: 5, rate: 5e7},
-				{lots: 5, rate: 6e7},
+				{lots: 5, rate: rate1},
+				{lots: 5, rate: rate2},
 			},
 			initialLockedFunds: []*orderLockedFunds{
-				newOrderLockedFunds(orderIDs[0], b2q(5e7, 5e6)+2000, 0, 0, 0),
-				newOrderLockedFunds(orderIDs[1], b2q(6e7, 5e6)+2000, 0, 0, 0),
+				newOrderLockedFunds(orderIDs[0], 5*quotePerLot1, 0, 0, 0),
+				newOrderLockedFunds(orderIDs[1], 5*quotePerLot2, 0, 0, 0),
 			},
 			postTradeBalances: map[uint32]*BotBalance{
 				42: {1e8, 0, 0, 0},
-				0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000, 0, 0},
+				0:  {1e8 - 5*quotePerLot1 - 5*quotePerLot2, 5*quotePerLot1 + 5*quotePerLot2, 0, 0},
 			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, b2q(5e7, 2e6), 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*quotePerLot1, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8, 0, 0, 0},
-							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 5e6) + 3000, 0, 0},
+							42: {1e8, 0, 2 * lotSize, 0},
+							0:  {1e8 - 3*quotePerLot1 - 5*quotePerLot2 - 2*quoteLot1 - swapFees, 3*quotePerLot1 + 5*quotePerLot2, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1943,14 +1949,14 @@ func TestDEXTrade(t *testing.T) {
 				// Second order has a match and sends swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, b2q(6e7, 3e6), 1000, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[1], b2q(6e7, 2e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
+					orderUpdate: newOrderUpdate(orderIDs[1], 2*quotePerLot2, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8, 0, 0, 0},
-							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0, 0},
+							42: {1e8, 0, 5 * lotSize, 0},
+							0:  {1e8 - 3*quotePerLot1 - 2*quotePerLot2 - 2*quoteLot1 - 3*quoteLot2 - 2*swapFees, 3*quotePerLot1 + 2*quotePerLot2, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1958,15 +1964,15 @@ func TestDEXTrade(t *testing.T) {
 				// First order swap is confirmed, and redemption is sent
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, b2q(5e7, 2e6), 1000, true),
-						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*quotePerLot1, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*quoteLot1, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8, 0, 2e6 - 1000, 0},
-							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0, 0},
+							42: {1e8 - redeemFees, 0, 5 * lotSize, 0},
+							0:  {1e8 - 3*quotePerLot1 - 2*quotePerLot2 - 2*quoteLot1 - 3*quoteLot2 - 2*swapFees, 3*quotePerLot1 + 2*quotePerLot2, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1974,14 +1980,14 @@ func TestDEXTrade(t *testing.T) {
 				// First order redemption confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 1000, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], b2q(5e7, 3e6)+1000, 0, 0, 0, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*quotePerLot1, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 + 2e6 - 1000, 0, 0, 0},
-							0:  {1e8 - (b2q(5e7, 5e6) + b2q(6e7, 5e6) + 4000), b2q(5e7, 3e6) + b2q(6e7, 2e6) + 2000, 0, 0},
+							42: {1e8 + 2*lotSize - redeemFees, 0, 3 * lotSize, 0},
+							0:  {1e8 - 3*quotePerLot1 - 2*quotePerLot2 - 2*quoteLot1 - 3*quoteLot2 - 2*swapFees, 3*quotePerLot1 + 2*quotePerLot2, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1989,11 +1995,11 @@ func TestDEXTrade(t *testing.T) {
 				// First order cancelled
 				{
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 + 2e6 - 1000, 0, 0, 0},
-							0:  {1e8 - (b2q(5e7, 2e6) + b2q(6e7, 5e6) + 3000), b2q(6e7, 2e6) + 1000, 0, 0},
+							42: {1e8 + 2*lotSize - redeemFees, 0, 3 * lotSize, 0},
+							0:  {1e8 - 2*quotePerLot2 - 2*quoteLot1 - 3*quoteLot2 - 2*swapFees, 2 * quotePerLot2, 0, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -2001,17 +2007,17 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match, swap sent, and first match refunded
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, b2q(6e7, 3e6), 1000, true),
-						newWalletTx(coinIDs[3], asset.Refund, b2q(6e7, 3e6), 1200, false),
-						newWalletTx(coinIDs[4], asset.Swap, b2q(6e7, 2e6), 800, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, false),
+						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, false,
-						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
-						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
+						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
+						newMatchUpdate(&coinIDs[4], nil, nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 + 2e6 - 1000, 0, 0, 0},
-							0:  {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6) + 2800), 0, calc.BaseToQuote(6e7, 3e6) - 1200, 0},
+							42: {1e8 + 2*lotSize - redeemFees, 0, 2 * lotSize, 0},
+							0:  {1e8 - 2*quoteLot1 - 5*quoteLot2 - 3*swapFees - refundFees, 0, 3 * quoteLot2, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -2019,17 +2025,17 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, b2q(6e7, 3e6), 1200, true),
-						newWalletTx(coinIDs[4], asset.Swap, b2q(6e7, 2e6), 800, true),
-						newWalletTx(coinIDs[5], asset.Redeem, 2e6, 700, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, true),
+						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, true),
+						newWalletTx(coinIDs[5], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true,
-						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
-						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2e6, 6e7)),
+						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
+						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 + 4e6 - 1700, 0, 0, 0},
-							0:  {1e8 - (b2q(5e7, 2e6) + b2q(6e7, 2e6) + 2800 + 1200), 0, 0, 0},
+							42: {1e8 + 4*lotSize - 2*redeemFees, 0, 0, 0},
+							0:  {1e8 - 2*quoteLot1 - 2*quoteLot2 - 3*swapFees - refundFees, 0, 0, 0},
 						},
 					},
 				},
@@ -2051,31 +2057,31 @@ func TestDEXTrade(t *testing.T) {
 			baseID:  60,
 			quoteID: 966001,
 			placements: []*multiTradePlacement{
-				{lots: 5, rate: 5e7},
-				{lots: 5, rate: 6e7},
+				{lots: 5, rate: rate1},
+				{lots: 5, rate: rate2},
 			},
 			initialLockedFunds: []*orderLockedFunds{
-				newOrderLockedFunds(orderIDs[0], 5e6+2000, 0, 4000, 3000),
-				newOrderLockedFunds(orderIDs[1], 5e6+2000, 0, 4000, 3000),
+				newOrderLockedFunds(orderIDs[1], 5*basePerLot, 0, 5*redeemFees, 5*refundFees),
+				newOrderLockedFunds(orderIDs[0], 5*basePerLot, 0, 5*redeemFees, 5*refundFees),
 			},
 			postTradeBalances: map[uint32]*BotBalance{
 				966001: {1e8, 0, 0, 0},
-				966:    {1e8 - 8000, 8000, 0, 0},
-				60:     {1e8 - (5e6+2000+3000)*2, (5e6 + 2000 + 3000) * 2, 0, 0},
+				966:    {1e8 - 10*redeemFees, 10 * redeemFees, 0, 0},
+				60:     {1e8 - 10*(basePerLot+refundFees), 10 * (basePerLot + refundFees), 0, 0},
 			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2e6, 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 4000, 3000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8, 0, 0, 0},
-							966:    {1e8 - 8000, 8000, 0, 0},
-							60:     {1e8 - (5e6+2000+3000)*2, 3e6 + 1000 + 5e6 + 2000 + 3000 + 3000, 0, 0},
+							966001: {1e8, 0, 2 * quoteLot1, 0},
+							966:    {1e8 - 10*redeemFees, 10 * redeemFees, 0, 0},
+							60:     {1e8 - 8*(basePerLot+refundFees) - 2*lotSize - 2*refundFees - swapFees, 8*(basePerLot+refundFees) + 2*refundFees, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2083,15 +2089,15 @@ func TestDEXTrade(t *testing.T) {
 				// Second order has a match and sends swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[1], 2e6+1000, 0, 4000, 3000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
+					orderUpdate: newOrderUpdate(orderIDs[1], 2*basePerLot, 0, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8, 0, 0, 0},
-							966:    {1e8 - 8000, 8000, 0, 0},
-							60:     {1e8 - (5e6+2000+3000)*2, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0, 0},
+							966001: {1e8, 0, 2*quoteLot1 + 3*quoteLot2, 0},
+							966:    {1e8 - 10*redeemFees, 10 * redeemFees, 0, 0},
+							60:     {1e8 - 5*(basePerLot+refundFees) - 5*lotSize - 5*refundFees - 2*swapFees, 5*(basePerLot+refundFees) + 5*refundFees, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2099,16 +2105,16 @@ func TestDEXTrade(t *testing.T) {
 				// First order swap is confirmed, and redemption is sent
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2e6, 900, true),
-						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 3000, 3000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8, 0, b2q(5e7, 2e6), 0},
-							966:    {1e8 - 8000, 7000, 0, 0},
-							60:     {1e8 - (5e6+2000+3000)*2 + 100, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0, 0},
+							966001: {1e8, 0, 2*quoteLot1 + 3*quoteLot2, 0},
+							966:    {1e8 - 9*redeemFees, 8 * redeemFees, 0, 0},
+							60:     {1e8 - 5*(basePerLot+refundFees) - 5*lotSize - 3*refundFees - 2*swapFees, 5*(basePerLot+refundFees) + 3*refundFees, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2116,15 +2122,15 @@ func TestDEXTrade(t *testing.T) {
 				// First order redemption confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), 800, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, true),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], 3e6+1000, 0, 3000, 3000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 + b2q(5e7, 2e6), 0, 0, 0},
-							966:    {1e8 - 7000 - 800, 7000, 0, 0},
-							60:     {1e8 - (5e6+2000+3000)*2 + 100, 3e6 + 1000 + 2e6 + 1000 + 3000 + 3000, 0, 0},
+							966001: {1e8 + 2*quoteLot1, 0, 3 * quoteLot2, 0},
+							966:    {1e8 - 9*redeemFees, 8 * redeemFees, 0, 0},
+							60:     {1e8 - 5*(basePerLot+refundFees) - 5*lotSize - 3*refundFees - 2*swapFees, 5*(basePerLot+refundFees) + 3*refundFees, 0, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2132,12 +2138,12 @@ func TestDEXTrade(t *testing.T) {
 				// First order cancelled
 				{
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 + b2q(5e7, 2e6), 0, 0, 0},
-							966:    {1e8 - 4000 - 800, 4000, 0, 0},
-							60:     {1e8 - (7e6 + 900 + 2000 + 3000), 2e6 + 1000 + 3000, 0, 0},
+							966001: {1e8 + 2*quoteLot1, 0, 3 * quoteLot2, 0},
+							966:    {1e8 - 6*redeemFees, 5 * redeemFees, 0, 0},
+							60:     {1e8 - 2*(basePerLot+refundFees) - 5*lotSize - 3*refundFees - 2*swapFees, 2*(basePerLot+refundFees) + 3*refundFees, 0, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -2145,18 +2151,18 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match, swap sent, and first match refunded
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3e6, 1000, true),
-						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1200, false),
-						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, false),
+						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 4000, 1800, order.OrderStatusExecuted, false,
-						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
-						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 2*redeemFees, 2*refundFees, order.OrderStatusExecuted, false,
+						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
+						newMatchUpdate(&coinIDs[4], nil, nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 + b2q(5e7, 2e6), 0, 0, 0},
-							966:    {1e8 - 4000 - 800, 4000, 0, 0},
-							60:     {1e8 - (7e6 + 900 + 2000 + 3000) + 200, 1800, 3e6, 0},
+							966001: {1e8 + 2*quoteLot1, 0, 2 * quoteLot2, 0},
+							966:    {1e8 - 3*redeemFees, 2 * redeemFees, 0, 0},
+							60:     {1e8 - 7*lotSize - 2*refundFees - 3*swapFees - refundFees, 2 * refundFees, 3 * lotSize, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -2164,16 +2170,16 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, 3e6, 1100, true),
-						newWalletTx(coinIDs[4], asset.Swap, 2e6, 800, true),
-						newWalletTx(coinIDs[5], asset.Redeem, calc.BaseToQuote(6e7, 2e6), 700, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, true),
+						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, true),
+						newWalletTx(coinIDs[5], asset.Redeem, 2*quoteLot2, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 0, 0), newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 0, 0)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 + calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6), 0, 0, 0},
-							966:    {1e8 - 1500, 0, 0, 0},
-							60:     {1e8 - (4e6 + 3800), 0, 0, 0},
+							966001: {1e8 + 2*quoteLot1 + 2*quoteLot2, 0, 0, 0},
+							966:    {1e8 - 2*redeemFees, 0, 0, 0},
+							60:     {1e8 - 4*lotSize - 3*swapFees - refundFees, 0, 0, 0},
 						},
 					},
 				},
@@ -2194,31 +2200,31 @@ func TestDEXTrade(t *testing.T) {
 			baseID:  60,
 			quoteID: 966001,
 			placements: []*multiTradePlacement{
-				{lots: 5, rate: 5e7},
-				{lots: 5, rate: 6e7},
+				{lots: 5, rate: rate1},
+				{lots: 5, rate: rate2},
 			},
 			initialLockedFunds: []*orderLockedFunds{
-				newOrderLockedFunds(orderIDs[0], b2q(5e7, 5e6), 2000, 3000, 4000),
-				newOrderLockedFunds(orderIDs[1], b2q(6e7, 5e6), 2000, 3000, 4000),
+				newOrderLockedFunds(orderIDs[0], 5*quoteLot1, 5*buyFees, 5*redeemFees, 5*refundFees),
+				newOrderLockedFunds(orderIDs[1], 5*quoteLot2, 5*buyFees, 5*redeemFees, 5*refundFees),
 			},
 			postTradeBalances: map[uint32]*BotBalance{
-				966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6), 0, 0},
-				966:    {1e8 - 12000, 12000, 0, 0},
-				60:     {1e8 - 6000, 6000, 0, 0},
+				966001: {1e8 - 5*quoteLot1 - 5*quoteLot2, 5*quoteLot1 + 5*quoteLot2, 0, 0},
+				966:    {1e8 - 10*(buyFees+refundFees), 10 * (buyFees + refundFees), 0, 0},
+				60:     {1e8 - 10*redeemFees, 10 * redeemFees, 0, 0},
 			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, calc.BaseToQuote(5e7, 2e6), 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 3000, 4000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], nil, nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*quoteLot1, 3*buyFees, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 5e6), 0, 0},
-							966:    {1e8 - 12000, 11000, 0, 0},
-							60:     {1e8 - 6000, 6000, 0, 0},
+							966001: {1e8 - 5*quoteLot1 - 5*quoteLot2, 3*quoteLot1 + 5*quoteLot2, 0, 0},
+							966:    {1e8 - 8*(buyFees+refundFees) - swapFees - 2*refundFees, 8*(buyFees+refundFees) + 2*refundFees, 0, 0},
+							60:     {1e8 - 10*redeemFees, 10 * redeemFees, 2 * lotSize, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2226,15 +2232,15 @@ func TestDEXTrade(t *testing.T) {
 				// Second order has a match and sends swap tx
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, calc.BaseToQuote(6e7, 3e6), 1000, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[1], calc.BaseToQuote(6e7, 2e6), 1000, 3000, 4000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[1], nil, nil, 3e6, 6e7)),
+					orderUpdate: newOrderUpdate(orderIDs[1], 2*quoteLot2, 2*buyFees, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0, 0},
-							966:    {1e8 - 12000, 10000, 0, 0},
-							60:     {1e8 - 6000, 6000, 0, 0},
+							966001: {1e8 - 5*quoteLot1 - 5*quoteLot2, 3*quoteLot1 + 2*quoteLot2, 0, 0},
+							966:    {1e8 - 5*(buyFees+refundFees) - 2*swapFees - 5*refundFees, 5*(buyFees+refundFees) + 5*refundFees, 0, 0},
+							60:     {1e8 - 10*redeemFees, 10 * redeemFees, 5 * lotSize, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2242,16 +2248,16 @@ func TestDEXTrade(t *testing.T) {
 				// First order swap is confirmed, and redemption is sent
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, calc.BaseToQuote(5e7, 2e6), 900, true),
-						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 1000, false),
+						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 2000, 4000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*quoteLot1, 3*buyFees, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0, 0},
-							966:    {1e8 - 12000 + 100, 10000, 0, 0},
-							60:     {1e8 - 6000, 5000, 2e6, 0},
+							966001: {1e8 - 5*quoteLot1 - 5*quoteLot2, 3*quoteLot1 + 2*quoteLot2, 0, 0},
+							966:    {1e8 - 5*(buyFees+refundFees) - 2*swapFees - 3*refundFees, 5*(buyFees+refundFees) + 3*refundFees, 0, 0},
+							60:     {1e8 - 8*redeemFees - redeemFees, 8 * redeemFees, 5 * lotSize, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2259,15 +2265,15 @@ func TestDEXTrade(t *testing.T) {
 				// First order redemption confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, 2e6, 800, true),
+						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[0], calc.BaseToQuote(5e7, 3e6), 1000, 2000, 4000, order.OrderStatusBooked, false,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+					orderUpdate: newOrderUpdate(orderIDs[0], 3*quoteLot1, 3*buyFees, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 - (calc.BaseToQuote(5e7, 5e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(5e7, 3e6) + calc.BaseToQuote(6e7, 2e6), 0, 0},
-							966:    {1e8 - 12000 + 100, 10000, 0, 0},
-							60:     {1e8 - 5800 + 2e6, 5000, 0, 0},
+							966001: {1e8 - 5*quoteLot1 - 5*quoteLot2, 3*quoteLot1 + 2*quoteLot2, 0, 0},
+							966:    {1e8 - 5*(buyFees+refundFees) - 2*swapFees - 3*refundFees, 5*(buyFees+refundFees) + 3*refundFees, 0, 0},
+							60:     {1e8 + 2*lotSize - 8*redeemFees - redeemFees, 8 * redeemFees, 3 * lotSize, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -2275,12 +2281,12 @@ func TestDEXTrade(t *testing.T) {
 				// First order cancelled
 				{
 					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusCanceled, true,
-						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2e6, 5e7)),
+						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)), calc.BaseToQuote(6e7, 2e6), 0, 0},
-							966:    {1e8 - 7000 + 100, 5000, 0, 0},
-							60:     {1e8 + 2e6 - 3800, 3000, 0, 0},
+							966001: {1e8 - 2*quoteLot1 - 5*quoteLot2, 2 * quoteLot2, 0, 0},
+							966:    {1e8 - 2*(buyFees+refundFees) - 2*swapFees - 3*refundFees, 2*(buyFees+refundFees) + 3*refundFees, 0, 0},
+							60:     {1e8 + 2*lotSize - 5*redeemFees - redeemFees, 5 * redeemFees, 3 * lotSize, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -2288,18 +2294,18 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match, swap sent, and first match refunded
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, calc.BaseToQuote(6e7, 3e6), 1000, true),
-						newWalletTx(coinIDs[3], asset.Refund, calc.BaseToQuote(6e7, 3e6), 1200, false),
-						newWalletTx(coinIDs[4], asset.Swap, calc.BaseToQuote(6e7, 2e6), 800, false),
+						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, false),
+						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, false),
 					},
-					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 3000, 2000, order.OrderStatusExecuted, false,
-						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
-						newMatchUpdate(&coinIDs[4], nil, nil, 2e6, 6e7)),
+					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 2*redeemFees, 2*refundFees, order.OrderStatusExecuted, false,
+						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
+						newMatchUpdate(&coinIDs[4], nil, nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 5e6)), 0, calc.BaseToQuote(6e7, 3e6), 0},
-							966:    {1e8 - 6000 + 100, 2000, 0, 0},
-							60:     {1e8 + 2e6 - 3800, 3000, 0, 0},
+							966001: {1e8 - 2*quoteLot1 - 5*quoteLot2, 0, 3 * quoteLot2, 0},
+							966:    {1e8 - 3*swapFees - 3*refundFees, 2 * refundFees, 0, 0},
+							60:     {1e8 + 2*lotSize - 2*redeemFees - redeemFees, 2 * redeemFees, 2 * lotSize, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -2307,18 +2313,18 @@ func TestDEXTrade(t *testing.T) {
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
 					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, calc.BaseToQuote(6e7, 3e6), 1200, true),
-						newWalletTx(coinIDs[4], asset.Swap, calc.BaseToQuote(6e7, 2e6), 800, true),
-						newWalletTx(coinIDs[5], asset.Redeem, 2e6, 700, true),
+						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, true),
+						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, true),
+						newWalletTx(coinIDs[5], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true,
-						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
-						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2e6, 6e7)),
+						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
+						newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							966001: {1e8 - (calc.BaseToQuote(5e7, 2e6) + calc.BaseToQuote(6e7, 2e6)), 0, 0, 0},
-							966:    {1e8 - 3900, 0, 0, 0},
-							60:     {1e8 + 4e6 - 1500, 0, 0, 0},
+							966001: {1e8 - 2*quoteLot1 - 2*quoteLot2, 0, 0, 0},
+							966:    {1e8 - 3*swapFees - 1*refundFees, 0, 0, 0},
+							60:     {1e8 + 4*lotSize - 2*redeemFees, 0, 0, 0},
 						},
 					},
 				},
@@ -2478,6 +2484,7 @@ func TestDEXTrade(t *testing.T) {
 			}
 			tCore.noteFeed <- &note
 			tCore.noteFeed <- &core.BondPostNote{} // dummy note
+
 			checkBalances(update.stats.DEXBalances, i+1)
 
 			stats := adaptor.stats()
