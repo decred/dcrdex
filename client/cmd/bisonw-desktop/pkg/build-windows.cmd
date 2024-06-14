@@ -35,7 +35,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo Building dexc-desktop with CGO configured...
+echo Building bisonw-desktop with CGO configured...
 set CGO_CXXFLAGS="-I%libDir%\build\native\include"
 set CGO_ENABLED=1
 go build -v -ldflags="-H windowsgui" -o %exeFile%
@@ -46,7 +46,7 @@ copy /Y %libDir%\build\native\x64\WebView2Loader.dll %outputDir%
 
 
 
-echo The WebView2Loader.dll file should be included with dexc-desktop.exe
+echo The WebView2Loader.dll file should be included with bisonw-desktop.exe
 exit /b 0
 
 :ERROR

@@ -1,5 +1,5 @@
 # PowerShell script that installs the toolchain and required SDKs for building 
-# dexc-desktop and the MSI installer on Windows.
+# bisonw-desktop and the MSI installer on Windows.
 #
 # This script is normally called from setup-windows.cmd
 
