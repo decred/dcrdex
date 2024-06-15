@@ -1020,6 +1020,61 @@ func (btc *ExchangeWalletSPV) LogFilePath() string {
 	return btc.spvNode.logFilePath()
 }
 
+// WithdrawTx generates a transaction that withdraws all funds to the specified
+// address.
+func (btc *ExchangeWalletSPV) WithdrawTx(ctx context.Context, walletPW []byte, addr btcutil.Address) (_ *wire.MsgTx, err error) {
+	btc.ctx = ctx
+	spvw := btc.node.(*spvWallet)
+	spvw.cl, err = spvw.wallet.Start()
+	if err != nil {
+		return nil, fmt.Errorf("error starting wallet")
+	}
+
+	defer spvw.wallet.Stop()
+
+	if err := spvw.Unlock(walletPW); err != nil {
+		return nil, fmt.Errorf("error unlocking wallet: %w", err)
+	}
+
+	feeRate := btc.FeeRate()
+	if feeRate == 0 {
+		return nil, errors.New("no fee rate")
+	}
+	utxos, _, _, err := btc.cm.SpendableUTXOs(0)
+	if err != nil {
+		return nil, err
+	}
+	var inputsSize uint64
+	coins := make(asset.Coins, 0, len(utxos))
+	for _, utxo := range utxos {
+		op := NewOutput(utxo.TxHash, utxo.Vout, utxo.Amount)
+		coins = append(coins, op)
+		inputsSize += uint64(utxo.Input.VBytes())
+	}
+
+	var baseSize uint64 = dexbtc.MinimumTxOverhead
+	if btc.segwit {
+		baseSize += dexbtc.P2WPKHOutputSize * 2
+	} else {
+		baseSize += dexbtc.P2PKHOutputSize * 2
+	}
+
+	fundedTx, totalIn, _, err := btc.fundedTx(coins)
+	if err != nil {
+		return nil, fmt.Errorf("error adding inputs to transaction: %w", err)
+	}
+
+	fees := feeRate * (inputsSize + baseSize)
+	toSend := totalIn - fees
+
+	signedTx, _, _, err := btc.signTxAndAddChange(fundedTx, addr, toSend, 0, feeRate)
+	if err != nil {
+		return nil, err
+	}
+
+	return signedTx, nil
+}
+
 func parseChainParams(net dex.Network) (*chaincfg.Params, error) {
 	switch net {
 	case dex.Mainnet:
@@ -1506,8 +1561,6 @@ func (btc *baseWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, e
 	btc.log.Debugf("Using tx history db at %s", dbPath)
 
 	db := NewBadgerTxDB(dbPath, btc.log)
-	btc.txHistoryDB.Store(db)
-
 	wg, err := db.Connect(ctx)
 	if err != nil {
 		return nil, err

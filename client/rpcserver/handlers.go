@@ -64,6 +64,7 @@ const (
 	setVotingPreferencesRoute  = "setvotingprefs"
 	txHistoryRoute             = "txhistory"
 	walletTxRoute              = "wallettx"
+	withdrawBchSpvRoute        = "withdrawbchspv"
 )
 
 const (
@@ -141,6 +142,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	setVotingPreferencesRoute:  handleSetVotingPreferences,
 	txHistoryRoute:             handleTxHistory,
 	walletTxRoute:              handleWalletTx,
+	withdrawBchSpvRoute:        handleWithdrawBchSpv,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -1176,6 +1178,23 @@ func handleWalletTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(walletTxRoute, tx, nil)
 }
 
+func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	appPW, recipient, err := parseBchWithdrawArgs(params)
+	if err != nil {
+		return usage(withdrawBchSpvRoute, err)
+	}
+	defer appPW.Clear()
+
+	txB, err := s.core.GenerateBCHRecoveryTransaction(appPW, recipient)
+	if err != nil {
+		errMsg := fmt.Sprintf("error generating tx: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, errMsg)
+		return createResponse(withdrawBchSpvRoute, nil, resErr)
+	}
+
+	return createResponse(withdrawBchSpvRoute, dex.Bytes(txB).String(), nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1956,5 +1975,12 @@ an spv wallet and enables options to view and set the vsp.
 		argsLong: `Args:
 		  assetID (int): The asset's BIP-44 registered coin index.
 		  txID (string): The transaction ID.`,
+	},
+	withdrawBchSpvRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `recipient`,
+		cmdSummary:  `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet`,
+		argsLong: `Args:
+		  recipient (string): The Bitcoin Cash address to withdraw the funds to`,
 	},
 }
