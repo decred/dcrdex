@@ -1240,6 +1240,7 @@ type BalanceCategory string
 const (
 	BalanceCategoryShielded = "Shielded"
 	BalanceCategoryUnmixed  = "Unmixed"
+	BalanceCategoryStaked   = "Staked"
 )
 
 // Coin is some amount of spendable asset. Coin provides the information needed

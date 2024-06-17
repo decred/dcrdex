@@ -23,7 +23,6 @@ import {
   RunningMarketMakerDisplay
 } from './mmutil'
 import Doc, { MiniSlider } from './doc'
-import State from './state'
 import BasePage from './basepage'
 import * as OrderUtil from './orderutil'
 import { Forms, CEXConfigurationForm } from './forms'
@@ -562,9 +561,6 @@ class Bot extends BotMarket {
       baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor
     } = this
 
-    page.appPW.value = ''
-    Doc.setVis(!State.passwordIsCached(), page.appPWBox)
-
     const [proposedDexBase, proposedCexBase, baseSlider] = parseFundingOptions(f.base)
     const [proposedDexQuote, proposedCexQuote, quoteSlider] = parseFundingOptions(f.quote)
 
@@ -666,7 +662,6 @@ class Bot extends BotMarket {
   }
 
   hideAllocationDialog () {
-    this.page.appPW.value = ''
     Doc.hide(this.page.allocationDialog)
   }
 
@@ -674,13 +669,6 @@ class Bot extends BotMarket {
     const { page, alloc, baseID, quoteID, host, cfg: { uiConfig: { cexRebalance } } } = this
 
     Doc.hide(page.errMsg)
-    const appPW = page.appPW.value
-    if (!appPW && !State.passwordIsCached()) {
-      page.errMsg.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
-      Doc.show(page.errMsg)
-      return
-    }
-
     // round allocations values.
     for (const m of [alloc.dex, alloc.cex]) {
       for (const [assetID, v] of Object.entries(m)) m[parseInt(assetID)] = Math.round(v)
@@ -696,7 +684,7 @@ class Bot extends BotMarket {
 
     try {
       app().log('mm', 'starting mm bot', startConfig)
-      await MM.startBot(appPW, startConfig)
+      await MM.startBot(startConfig)
     } catch (e) {
       page.errMsg.textContent = intl.prep(intl.ID_API_ERROR, e.msg)
       Doc.show(page.errMsg)

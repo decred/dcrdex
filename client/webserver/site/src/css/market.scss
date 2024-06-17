@@ -154,7 +154,7 @@ div[data-handler=markets] {
         width: 8px;
 
         &.buy {
-          background-color: var(--market-buy-color);
+          background-color: var(--buy-color);
         }
 
         &.sell {
@@ -173,7 +173,7 @@ div[data-handler=markets] {
         &.active {
           margin: 0 5px;
           width: 8px;
-          background-color: var(--market-buy-color);
+          background-color: var(--buy-color);
         }
       }
     }
@@ -424,7 +424,7 @@ div[data-handler=markets] {
       text-align: justify;
     }
 
-    .header {
+    header {
       &.buygreen-bg {
         background-color: var(--market-buygreen-bg);
       }
@@ -462,12 +462,6 @@ div[data-handler=markets] {
         div.opt-check {
           background-color: $success;
         }
-      }
-    }
-
-    #vUnlockPreorder {
-      .ico-locked {
-        font-size: 35px;
       }
     }
   }
@@ -570,12 +564,6 @@ div[data-handler=markets] {
 
   &:not(.listopen) .ico-arrowup {
     display: none;
-  }
-
-  #vUnlockPreorder {
-    .ico-locked {
-      font-size: 35px;
-    }
   }
 }
 

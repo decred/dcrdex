@@ -283,7 +283,7 @@ export default class Application {
     // initialize desktop notifications
     ntfn.fetchDesktopNtfnSettings()
     // Connect the websocket and register the notification route.
-    ws.connect(getSocketURI(), this.reconnected)
+    ws.connect(getSocketURI(), () => this.reconnected())
     ws.registerRoute(notificationRoute, (note: CoreNote) => {
       this.notify(note)
     })
@@ -293,7 +293,8 @@ export default class Application {
    * reconnected is called by the websocket client when a reconnection is made.
    */
   reconnected () {
-    window.location.reload() // This triggers another websocket disconnect/connect (!)
+    if (this.main?.dataset.handler === 'settings') window.location.assign('/')
+    else window.location.reload() // This triggers another websocket disconnect/connect (!)
     // a fetchUser() and loadPage(window.history.state.page) might work
   }
 

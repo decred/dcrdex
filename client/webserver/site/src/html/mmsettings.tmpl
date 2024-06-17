@@ -737,37 +737,36 @@
     {{- /* BOT TYPE FORM */ -}}
     <form id="botTypeForm" class="position-relative mw-425 d-hide" autocomplete="off">
       <div class="form-closer"><span class="ico-cross"></span></div>
-
-      <h3 class="">
+      <header>
         <img class="mini-icon me-1" data-base-logo>
         <img class="mini-icon me-2" data-quote-logo>
         <span id="botTypeBaseSymbol" class="fs20"></span>-<span id="botTypeQuoteSymbol" class="fs20"></span>
         <span id="botTypeChangeMarket" class="p-2 fs14 ico-edit hoverbg pointer"></span>
-      </h3>
+      </header>
 
-      <h4 class="flex-center mb-3">
+      <div class="flex-center">
         <span class="fs35 ico-robot me-2"></span>
         <span class="fs22 pt-1">[[[Choose Your Bot]]]</span>
-      </h4>
+      </div>
 
-      <div id="noCexesConfigured" class="fs18 mb-3">
+      <div id="noCexesConfigured" class="fs18">
         [[[only_basic_mm_no_more_cexes]]]
       </div>
 
-      <div id="noCexMarket" class="fs18 mb-3">
+      <div id="noCexMarket" class="fs18">
         [[[only_basic_mm_more_cexes]]]
         <span id="noCexMarketConfigureMore">[[[configure_more_cexes]]]</span>
       </div>
 
-      <div id="botSelect" class="mb-3">
-        <div id="botTypeBasicMM" data-bot-type="basicMM" class="bot-type-selector mb-3">
+      <div id="botSelect">
+        <div id="botTypeBasicMM" data-bot-type="basicMM" class="bot-type-selector mt-2">
           <div class="flex-center fs24 p-2">[[[Basic Market Maker]]]</div>
           <div class="flex-center fs16 px-3 pb-2 d-hide">
             Keep orders on both sides of a DEX market with a configurable spread. If a buy and a sell order both match with minimal market movement in between, you profit.
           </div>
         </div>
   
-        <div id="botTypeARbMM" data-bot-type="arbMM" class="bot-type-selector mb-3">
+        <div id="botTypeARbMM" data-bot-type="arbMM" class="bot-type-selector mt-2">
           <div class="flex-center fs24 p-2">[[[mm_plus_arb]]]</div>
           <div class="flex-center fs16 px-3 pb-2 d-hide">
             Maintain orders on a DEX market placed at positions calculated for matching profitable existing orders
@@ -777,7 +776,7 @@
           </div>
         </div>
   
-        <div id="botTypeBasicArb" data-bot-type="basicArb" class="bot-type-selector mb-3">
+        <div id="botTypeBasicArb" data-bot-type="basicArb" class="bot-type-selector mt-2">
           <div class="flex-center fs24 p-2">[[[Basic Arbitrage]]]</div>
           <div class="flex-center fs16 px-3 pb-2 d-hide">
             Watch both CEX and DEX order books and wait for conditions favorable to place
@@ -787,7 +786,7 @@
         </div>
       </div>
 
-      <div id="cexSelection" class="d-flex flex-wrap mb-4 justify-content-between">
+      <div id="cexSelection" class="d-flex flex-wrap justify-content-between">
         <div id="cexOptTmpl" class="position-relative p-2 col-11 flex-center flex-column border rounded3 cex-selector">
           <div data-tmpl="reconfig" class="fs14 ico-settings p-2 hoverbg pointer reconfig"></div>
           <div class="flex-center lh1">
@@ -806,51 +805,56 @@
         </div>
       </div>
 
-      <div id="botTypeErr" class="flex-center pt-3 text-danger d-hide"></div>
+      <div id="botTypeErr" class="flex-center text-danger d-hide"></div>
 
-      <div class="d-flex justify-content-center">
-        <button id="botTypeSubmit" type="button" class="go w-100">[[[Submit]]]</butt>
+      <div class="flex-stretch-column">
+        <button id="botTypeSubmit" type="button" class="feature">[[[Submit]]]</butt>
       </div>
     </form>
 
     <form id="marketSelectForm">
       <div class="form-closer"><span class="ico-cross"></span></div>
-      <h3 class="flex-center"><span class="me-2 ico-robot fs35 pb-1"></span>[[[Select a Market]]]</h3>
+      <header>
+        <span class="me-2 ico-robot fs35 pb-1"></span>
+        <span class="fs26">[[[Select a Market]]]</span>
+      </header>
 
-      <div id="marketFilterBox" class="flex-center mb-3">
+      <div id="marketFilterBox" class="flex-center">
         <div class="position-relative">
           <input id="marketFilterInput" type="text">
           <span id="marketFilterIcon" class="fs22 ico-search"></span>
         </div>
       </div>
 
-      <table id="marketSelectionTable" class="row-border">
-        <thead>
-          <tr>
-            <th>[[[Market]]]</th>
-            <th>[[[Host]]]</th>
-            <th>[[[Arb]]]</th>
-          </tr>
-        </thead>
-        <tbody id="marketSelect">
-          <tr id="marketRowTmpl" class="hoverbg pointer">
-            <td>
-              <img data-tmpl="baseIcon" class="mini-icon me-1">
-              <img data-tmpl="quoteIcon" class="mini-icon me-1">
-              <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
-            </td>
-            <td data-tmpl="host"></td>
-            <td data-tmpl="arbs">
-              <img id="arbBttnTmpl" class="mini-icon me-1">
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div id="noMarkets" class="flex-center mt-2">
+      <div id="marketSelectionTable">
+        <table class="row-border">
+          <thead>
+            <tr>
+              <th>[[[Market]]]</th>
+              <th>[[[Host]]]</th>
+              <th>[[[Arb]]]</th>
+            </tr>
+          </thead>
+          <tbody id="marketSelect">
+            <tr id="marketRowTmpl" class="hoverbg pointer">
+              <td>
+                <img data-tmpl="baseIcon" class="mini-icon me-1">
+                <img data-tmpl="quoteIcon" class="mini-icon me-1">
+                <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
+              </td>
+              <td data-tmpl="host"></td>
+              <td data-tmpl="arbs">
+                <img id="arbBttnTmpl" class="mini-icon me-1">
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="noMarkets" class="flex-center">
         [[[No markets available]]]
       </div>
-      <div id="needRegBox" class="d-flex flex-column mt-2 d-hide">
-        <button type="button" id="needRegTmpl" class="mt-2">
+      <div id="needRegBox" class="flex-stretch-column pt-0 d-hide">
+        <button type="button" id="needRegTmpl" class="mt-3">
           [[[register_to_enable_mm]]]
         </button>
       </div>
@@ -860,7 +864,7 @@
       {{template "tokenApprovalForm"}}
     </form>
 
-    <form class="position-relative flex-center flex-column fs20 d-hide" id="walletAddrForm">
+    <form class="mw-425 d-hide" id="walletAddrForm">
       {{template "depositAddress"}}
     </form>
   </div>

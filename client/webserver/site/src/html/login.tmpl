@@ -1,14 +1,14 @@
 {{define "login"}}
 {{template "top" .}}
-<div id="main" data-handler="login" class="main align-items-center justify-content-center flex-column">
-  <div class="d-flex flex-column w-100" id="forms">
+<div id="main" data-handler="login" class="main">
+  <div id="forms" class="flex-center">
     {{- /* LOGIN FORM */ -}}
-    <form class="mx-auto my-5 d-hide" id="loginForm">
+    <form class="d-hide" id="loginForm">
       {{template "loginForm"}}
     </form>
 
      {{- /* RESET APP PASSWORD */ -}}
-    <form class="mx-auto my-5 d-hide" id="resetAppPWForm">
+    <form class="d-hide" id="resetAppPWForm">
       {{template "appPassResetForm"}}
     </form>
   </div>

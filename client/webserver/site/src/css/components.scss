@@ -26,7 +26,7 @@ button {
 
   &.small {
     padding: 0.25rem 0.5rem;
-    font-size: .8rem;
+    font-size: .9rem;
   }
 
   &.large {
@@ -195,27 +195,6 @@ table.reg-asset-markets {
   th,
   td {
     padding: 1px 5px;
-  }
-}
-
-// form components
-div.form-closer {
-  @extend .flex-center;
-  @extend .hoverbg;
-
-  width: 3rem;
-  margin-left: auto;
-  cursor: pointer;
-  line-height: 1;
-  font-size: 1rem;
-  padding-top: 1rem;
-  padding-bottom: 1rem;
-  position: absolute;
-  top: 0;
-  right: 0;
-
-  span {
-    opacity: 0.8;
   }
 }
 

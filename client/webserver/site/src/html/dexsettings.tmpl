@@ -2,22 +2,22 @@
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="py-5 overflow-y-auto">
-  <section class="flex-stretch-column mw-425 mx-auto p-2">
+  <section class="flex-stretch-column mw-425 mx-auto pb-3 pt-2">
     <div class="d-flex justify-content-start align-items-center">
-      <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 lh1 hoverbg pointer p-2"></span>
+      <span id="goBackToSettings" class="ico-wide-headed-left-arrow fs24 py-1 px-2 lh1 hoverbg pointer"></span>
     </div>
     <h1 class="text-center"><span class="ico-settings"></span></h1>
-    <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
-    <div class="flex-center fs16 mb-2">
+    <div class="flex-center fs28 text-break px-3">{{.Exchange.Host}}</div>
+    <div class="flex-center fs16 mb-2 px-3">
       <span class="me-2 ico-connection d-hide text-success" id="connectedIcon"></span>
       <span class="me-2 text-danger ico-disconnected d-hide" id="disconnectedIcon"></span>
       <span id="connectionStatus"></span>
     </div>
-    <div class="py-1 border-top border-bottom">
+    <div class="py-1 border-top pt-3 px-3">
       <div>Account ID</div>
       <div class="user-select-all w-100 overflow-ellipsis">{{.Exchange.AcctID}}</div>
     </div>
-    <div class="flex-stretch-column">
+    <div class="flex-stretch-column pt-3 mt-3 px-3 border-top">
       <div class="d-flex align-items-stretch">
         <div class="flex-center flex-grow-1 pe-3">
           <div class="flex-stretch-column w-100">
@@ -43,9 +43,8 @@
           <button id="changeTier">[[[Change Tier]]]</button>
         </div>
       </div>
-      <hr class="mb-1">
-      <div id="otherBondSettings" class="d-flex align-items-stretch border-bottom pb-1">
-        <div class="col-12 pe-2">
+      <div id="otherBondSettings" class="d-flex align-items-stretch mt-3 border-top">
+        <div class="col-12 pe-2 py-2">
           <div id="autoRenewBox" class="d-flex justify-content-between align-items-center hoverbg pointer">
             <span>Auto Renew</span>
             <div>
@@ -54,7 +53,7 @@
           </div>
           <div id="renewErr" class="d-hide flex-center text-danger fs15"></div>
         </div>
-        <div class="col-12 ps-2 border-start hoverbg">
+        <div class="col-12 ps-2 py-2 border-start hoverbg">
           <div id="penaltyCompBox" class="row">
             <div class="col-18">
               <label for="penaltyCompInput">Penalty Comps
@@ -69,24 +68,24 @@
           <div id="penaltyCompsErr" class="d-hide flex-center text-danger fs15"></div>
         </div>
       </div>
-      <div id="repMeter" class="w-100">
+      <div id="repMeter" class="pt-3 border-top">
         {{template "reputationMeter"}}
       </div>
     </div>
-    <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="errMsg"></div>
-    <div class="settings">
-      <div class="border-top py-2 {{if .Exchange.ViewOnly}}d-hide{{end}}">
+    <div class="fs15 text-center d-hide text-danger text-break pt-3 mt-3 px-3 border-top" id="errMsg"></div>
+    <div class="settings mt-3 border-top">
+      <div class="{{if .Exchange.ViewOnly}}d-hide{{end}}">
         <button id="exportDexBtn">[[[Export Account]]]</button>
       </div>
-      <div class="border-top py-2">
+      <div class="border-bottom px-3 py-2">
         <button id="disableAcctBtn">[[[Disable Account]]]</button>
       </div>
-      <div class="border-top py-2">
+      <div class="border-bottom px-3 py-2">
         <input type="file" class="d-none" id="certFileInput">
         <button id="updateCertBtn">[[[Update TLS Certificate]]]</button>
         <span class="mx-2 d-hide text-success" id="updateCertMsg">[[[successful_cert_update]]]</span>
       </div>
-      <div class="border-top py-2 border-bottom">
+      <div class="border-bottom px-3 py-2 border-bottom">
         <button id="updateHostBtn">[[[update dex host]]]</button>
       </div>
     </div>
@@ -95,12 +94,18 @@
   <div id="forms" class="d-hide">
     {{- /* DISABLE ACCOUNT */ -}}
     <form class="d-hide" id="disableAccountForm">
-      {{template "disableAccountForm"}}
-    </form>
-
-    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
-    <form class="d-hide" id="authorizeAccountExportForm">
-      {{template "authorizeAccountExportForm"}}
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <header>
+        [[[Disable Account]]]
+      </header>
+      <div id="disableAccountHost" class="flex-center"></div>
+      <div>
+        [[[disable_dex_server]]]
+      </div>
+      <div class="flex-stretch-column">
+        <button id="disableAccountConfirm" type="button" class="feature">[[[Disable Account]]]</button>
+      </div>
+      <div class="fs15 text-center d-hide text-danger text-break" id="disableAccountErr"></div>
     </form>
 
     {{- /* DEX ADDRESS */ -}}
@@ -117,7 +122,7 @@
     </form>
 
     {{- /* REG ASSET SELECTOR */ -}}
-    <form class="d-hide mw-425" id="regAssetForm">
+    <form class="d-hide" id="regAssetForm">
       {{template "regAssetForm"}}
     </form>
 
@@ -133,12 +138,7 @@
 
     {{- /* Form to set up a wallet. Shown on demand when a user clicks a setupWallet button. */ -}}
     <form class="d-hide" id="newWalletForm">
-      {{template "newWalletForm" }}
-    </form>
-
-    {{- /* UNLOCK WALLET */ -}}
-    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
-      {{template "unlockWalletForm"}}
+      {{template "newWalletForm"}}
     </form>
 
   </div>

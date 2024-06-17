@@ -237,10 +237,8 @@
               <div class="d-hide p-2 mt-2" id="bondCreationPending">
                 <div class="p-0 w-100">
                   <div class="d-flex flex-column justify-content-center align-items-center">
-                    <p id="postingBondsShortlyTitle" class="title">[[[posting_bonds_shortly]]]
-                    </p>
-                    <p id="bondCreationPendingMessage">[[[bond_creation_pending_msg]]]
-                    </p>
+                    <p class="title">[[[posting_bonds_shortly]]]</p>
+                    <p>[[[bond_creation_pending_msg]]]</p>
                   </div>
                 </div>
               </div>
@@ -279,7 +277,7 @@
               </div>
 
               {{- /* ORDER FORM */ -}}
-              <form id="orderForm" class="p-3 d-hide">
+              <div id="orderForm" class="p-3 d-hide">
                 <div class="p-0 w-100">
 
                   {{- /* BUY - SELL SELECTOR */ -}}
@@ -399,7 +397,7 @@
 
                 </div>
                 <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="orderErr"></div>
-              </form>
+              </div>
 
               {{- /* BALANCES */ -}}
               <div id="noWallet" class="p-3 border-bottom flex-center fs16 grey d-hide"></div>
@@ -440,52 +438,62 @@
               </div>
 
               {{- /* REPUTATION */ -}}
-              <div id="tradingLimits" class="d-flex align-items-stretch fs15 mx-2 mb-2 border">
-                <div class="d-flex flex-column flex-grow-1 align-items-stretch p-2">
-
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>[[[Parcel Size]]]</span>
-                    <span>
-                      <span id="parcelSizeLots"></span> <span>[[[lots]]]</span>
-                    </span>
-                  </div>
-
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span><!-- Parcel Size Base --></span>
-                    <span>
-                      <span id="marketLimitBase"></span> <span id="marketLimitBaseUnit"></span>
-                    </span>
-                  </div>
-
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span><!-- Parcel Size Quote --></span>
-                    <span>
-                      ~<span id="marketLimitQuote"></span> <span id="marketLimitQuoteUnit"></span>
-                    </span>
-                  </div>
-
+              <div id="reputationAndTradingTierBox">
+                <div id="showTradingTier" class="p-2 grey fs15 hoverbg pointer">
+                  <span class="ico-plus fs10 me-2"></span>
+                  <span>Show trading tier info</span>
                 </div>
-                <div class="d-flex flex-column flex-grow-1 align-items-stretch p-2 border-start">
+                <div id="tradingLimits" class="d-flex align-items-stretch fs15 mx-2 mb-2 border d-hide">
+                  <div class="d-flex flex-column flex-grow-1 align-items-stretch p-2">
 
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>[[[Trading Tier]]]</span>
-                    <span id="tradingTier"></span>
-                  </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                      <span>[[[Parcel Size]]]</span>
+                      <span>
+                        <span id="parcelSizeLots"></span> <span>[[[lots]]]</span>
+                      </span>
+                    </div>
 
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>[[[Trading Limit]]]</span>
-                    <span><span id="tradingLimit"></span> lots</span>
-                  </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                      <span><!-- Parcel Size Base --></span>
+                      <span>
+                        <span id="marketLimitBase"></span> <span id="marketLimitBaseUnit"></span>
+                      </span>
+                    </div>
 
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>[[[Current Usage]]]</span>
-                    <span><span id="limitUsage"></span>%</span>
+                    <div class="d-flex justify-content-between align-items-center">
+                      <span><!-- Parcel Size Quote --></span>
+                      <span>
+                        ~<span id="marketLimitQuote"></span> <span id="marketLimitQuoteUnit"></span>
+                      </span>
+                    </div>
+
                   </div>
-                  
+                  <div class="d-flex flex-column flex-grow-1 align-items-stretch p-2 border-start">
+
+                    <div class="d-flex justify-content-between align-items-center">
+                      <span>[[[Trading Tier]]]</span>
+                      <span id="tradingTier"></span>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center">
+                      <span>[[[Trading Limit]]]</span>
+                      <span><span id="tradingLimit"></span> lots</span>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center">
+                      <span>[[[Current Usage]]]</span>
+                      <span><span id="limitUsage"></span>%</span>
+                    </div>
+
+                  </div>
                 </div>
-              </div>
-              <div id="reputationMeter" class="px-3 mb-3 border-bottom">
-                {{template "reputationMeter"}}
+                <div id="showTradingReputation" class="p-2 grey fs15 hoverbg pointer">
+                  <span class="ico-plus fs10 me-2"></span>
+                  <span>Show reputation</span>
+                </div>
+                <div id="reputationMeter" class="px-3 mb-3 border-bottom d-hide">
+                  {{template "reputationMeter"}}
+                </div>
               </div>
 
               {{- /* USER ORDERS */ -}}
@@ -586,13 +594,8 @@
   {{- /* POP-UP FORMS */ -}}
   <div id="forms" class="d-hide">
 
-    {{- /* UNLOCK WALLET */ -}}
-    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
-      {{template "unlockWalletForm"}}
-    </form>
-
     {{- /* DEPOSIT ADDRESS */ -}}
-    <form class="mw-425 position-relative flex-center flex-column fs20 py-2 d-hide" id="deposit">
+    <form class="mw-425 d-hide" id="deposit">
       {{template "depositAddress"}}
     </form>
 
@@ -607,246 +610,216 @@
     </form>
 
     {{- /* VERIFY FORM */ -}}
-      <form class="position-relative d-hide" id="verifyForm" autocomplete="off">
-        <div class="form-closer"><span class="ico-cross"></span></div>
-        <div class="text-center fs18 position-relative header buygreen-bg mt-3 py-1" id="vHeader">
-          <span id="vBuySell"></span> <span data-base-ticker></span>
-        </div>
-        <div class="d-flex justify-content-between align-items-center py-2 fs13">
-          <span id="vOrderType" class="grey"></span>
-          <span id="vOrderHost" class="grey"></span>
-        </div>
+    <form class="position-relative d-hide" id="verifyForm" autocomplete="off">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <header class="fs18 buygreen-bg" id="vHeader">
+        <span id="vBuySell" class="me-2"></span> <span data-base-ticker></span>
+      </header>
+      <div class="d-flex justify-content-between align-items-center fs14">
+        <span id="vOrderType" class="grey"></span>
+        <span id="vOrderHost" class="grey"></span>
+      </div>
 
-        <hr class="dashed mt-0 mb-3">
-
-        {{- /* Price, Quantity, Total Section */ -}}
-        <div id="verifyLimit">
-          <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">[[[:title:price]]]</span>
-            <span id="vRate" class="fs18 demi"></span>
-            <span class="grey fs14 ms-2">
-              <sup data-quote-ticker></sup>/<sub data-base-ticker></sub>
-            </span>
-          </div>
-          <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Quantity]]]</span>
-            <span id="vQty" class="fs18 demi"></span>
-            <span data-base-ticker class="grey fs14 ms-2"></span>
-          </div>
-          <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Total]]]</span>
-            <span id="vTotal" class="fs18 demi"></span>
-            <span data-quote-ticker class="grey fs14 ms-2"></span>
-          </div>
-          <span class="d-flex d-hide justify-content-end grey fs14">
-          ~<span id="vFiatTotal" class="mx-1"></span>USD
+      {{- /* Price, Quantity, Total Section */ -}}
+      <div id="verifyLimit">
+        <div class="d-flex align-items-center justify-content-between">
+          <span class="grey fs17 flex-grow-1 text-start">[[[:title:price]]]</span>
+          <span id="vRate" class="fs18 demi"></span>
+          <span class="grey fs14 ms-2">
+            <sup data-quote-ticker></sup>/<sub data-base-ticker></sub>
           </span>
         </div>
-        <div id="verifyMarket">
-          <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Trading]]]</span>
-            <span id="vmFromTotal" class="fs18 demi"></span>
-            <span id="vmFromAsset" class="grey fs14 ms-2"></span>
-          </div>
-          <span class="d-flex d-hide justify-content-end grey fs14">
-           ~<span id="vmFromTotalFiat" class="mx-1"></span>USD
-          </span>
-          <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">
-              [[[Receiving Approximately]]]
-              <span class="ico-info fs12" data-tooltip="[[[verify_market]]]"></span>
-            </span>
-            <span id="vmToTotal" class="fs18 demi"></span>
-            <span id="vmToAsset" class="grey fs14 ms-2"></span>
-          </div>
-          <span class="d-flex d-hide justify-content-end grey fs14">
-           ~<span id="vmTotalFiat" class="mx-1"></span>USD
-          </span>
+        <div class="d-flex align-items-center mt-1">
+          <span class="grey fs17 flex-grow-1 text-start">[[[Quantity]]]</span>
+          <span id="vQty" class="fs18 demi"></span>
+          <span data-base-ticker class="grey fs14 ms-2"></span>
         </div>
-
-        <hr class="dashed my-2">
-
-        {{- /* Auth Section */ -}}
-        {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">[[[auth_order_app_pw]]]</div>
-        <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
-          <div class="col-12 p-0 text-start {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="vPass" class="ps-1 mb-1">[[[Password]]]</label>
-            <input type="password" id="vPass">
-          </div>
-          <div class="col-12 p-0 d-flex justify-content-end">
-            <button id="vSubmit" class="w-75 mt-1 justify-content-center fs15 go sellred-bg">
-              <span id="vSideSubmit"></span>
-              <span data-base-ticker></span>
-            </button>
-            <div id="vLoader" class="loader flex-center d-hide">
-              <div class="ico-spinner spinner"></div>
-            </div>
-          </div>
+        <div class="d-flex align-items-center mt-1">
+          <span class="grey fs17 flex-grow-1 text-start">[[[Total]]]</span>
+          <span id="vTotal" class="fs18 demi"></span>
+          <span data-quote-ticker class="grey fs14 ms-2"></span>
         </div>
-        <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="vErr"></div>{{- /* End Auth Section */ -}}
+        <span class="d-flex d-hide justify-content-end grey fs14">
+        ~<span id="vFiatTotal" class="mx-1"></span>USD
+        </span>
+      </div>
+      <div id="verifyMarket">
+        <div class="d-flex align-items-center justify-content-between">
+          <span class="grey fs17 flex-grow-1 text-start">[[[Trading]]]</span>
+          <span id="vmFromTotal" class="fs18 demi"></span>
+          <span id="vmFromAsset" class="grey fs14 ms-2"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+          ~<span id="vmFromTotalFiat" class="mx-1"></span>USD
+        </span>
+        <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
+          <span class="grey fs17 flex-grow-1 text-start">
+            [[[Receiving Approximately]]]
+            <span class="ico-info fs12" data-tooltip="[[[verify_market]]]"></span>
+          </span>
+          <span id="vmToTotal" class="fs18 demi"></span>
+          <span id="vmToAsset" class="grey fs14 ms-2"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+          ~<span id="vmTotalFiat" class="mx-1"></span>USD
+        </span>
+      </div>
 
-        <div id="vPreorder">
-          <div id="vPreorderEstimates">
-            <hr class="dashed mb-2 mt-3">
+      <div class="flex-stretch-column">
+        <button id="vSubmit" class="justify-content-center fs15 go sellred-bg">
+          <span id="vSideSubmit"></span>
+          <span data-base-ticker></span>
+        </button>
+        <div id="vLoader" class="loader flex-center d-hide">
+          <div class="ico-spinner spinner"></div>
+        </div>
+      </div>
+      <div class="fs15 p-3 text-center d-hide text-danger text-break" id="vErr"></div>{{- /* End Auth Section */ -}}
 
-            <div class="d-flex justify-content-between align-items-center">
-              <span class="grey fs18">
-                [[[Fee Projection]]]
-                <span class="ico-info fs12" data-tooltip="[[[fee_projection_tooltip]]]"></span>
-              </span>
-              <span class="grey fs14 underline pointer hoverbg" id="vFeeDetails">[[[details]]]</span>
-            </div>
-
-            <div class="py-1 d-flex align-items-center justify-content-center fs18" id="vFeeSummaryPct">
-              <span id="vFeeSummaryLow"></span>
-              <span class="fs15">%</span>
-              <span class="fs15 px-2">[[[to]]]</span>
-              <span id="vFeeSummaryHigh"></span>
-              <span class="fs15">%</span>
-            </div>
-
-            <div class="py-1 flex-column align-items-center justify-content-center fs18" id="vFeeSummary">
-              <div class="d-flex flex-row align-items-center justify-content-center">
-                <img class="micro-icon mx-1" data-icon="from">
-                <span id="summarySwapFeesLow"></span>
-                <span class="px-1">&ndash;</span>
-                <span id="summarySwapFeesHigh"></span>
-              </div>
-              <div class="d-flex flex-row align-items-center justify-content-center">
-                <img class="micro-icon mx-1" data-icon="to">
-                <span id="summaryRedeemFeesLow"></span>
-                <span class="px-1">&ndash;</span>
-                <span id="summaryRedeemFeesHigh"></span>
-              </div>
-            </div>
-          </div>
-
+      <div id="vPreorder">
+        <div id="vPreorderEstimates">
           <hr class="dashed mb-2 mt-3">
 
-          <div class="grey fs18 d-flex justify-content-between align-items-center">
-            [[[Options]]]
-            <span class="grey fs14 underline pointer hoverbg" id="showAdvancedOptions">
-              [[[show advanced options]]]
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="grey fs18">
+              [[[Fee Projection]]]
+              <span class="ico-info fs12" data-tooltip="[[[fee_projection_tooltip]]]"></span>
             </span>
-            <span class="grey fs14 underline pointer hoverbg d-hide" id="hideAdvancedOptions">
-              [[[hide advanced options]]]
-            </span>
+            <span class="grey fs14 underline pointer hoverbg" id="vFeeDetails">[[[details]]]</span>
           </div>
 
-          <div id="vDefaultOrderOpts">
-            {{template "orderOptionTemplates"}}
+          <div class="py-1 d-flex align-items-center justify-content-center fs18" id="vFeeSummaryPct">
+            <span id="vFeeSummaryLow"></span>
+            <span class="fs15">%</span>
+            <span class="fs15 px-2">[[[to]]]</span>
+            <span id="vFeeSummaryHigh"></span>
+            <span class="fs15">%</span>
           </div>
-          <div id="vOtherOrderOpts" class="d-hide"></div>
-        </div> {{- /* END id="vPreorder" */ -}}
 
-        <div id="vUnlockPreorder">
-          <hr class="dashed mb-2 mt-3">
-          <div class="flex-center flex-column my-2 p-3">
-            <span class="ico-locked my-2"></span>
-            <span>[[[unlock_for_details]]]</span>
-            <div class="d-flex align-items-stretch w-100">
-              <div class="col-12 p-0 text-start">
-                <label for="vUnlockPass" class="ps-1">[[[Password]]]</label>
-                <input type="password" id="vUnlockPass">
-              </div>
-              <div class="col-12 p-0 d-flex align-items-end justify-content-end">
-                <button type="button" id="vUnlockSubmit" class="buygreen-bg">[[[Unlock]]]</button>
-              </div>
+          <div class="py-1 flex-column align-items-center justify-content-center fs18" id="vFeeSummary">
+            <div class="d-flex flex-row align-items-center justify-content-center">
+              <img class="micro-icon mx-1" data-icon="from">
+              <span id="summarySwapFeesLow"></span>
+              <span class="px-1">&ndash;</span>
+              <span id="summarySwapFeesHigh"></span>
+            </div>
+            <div class="d-flex flex-row align-items-center justify-content-center">
+              <img class="micro-icon mx-1" data-icon="to">
+              <span id="summaryRedeemFeesLow"></span>
+              <span class="px-1">&ndash;</span>
+              <span id="summaryRedeemFeesHigh"></span>
             </div>
           </div>
         </div>
 
-        <div id="vPreorderErr" class="mt-2">
-          [[[estimate_unavailable]]]
-          <span class="ico-info text-danger fs12" id="vPreorderErrTip" data-tooltip=" "></span>
+        <hr class="dashed mb-2 mt-3">
+
+        <div class="grey fs18 d-flex justify-content-between align-items-center">
+          [[[Options]]]
+          <span class="grey fs14 underline pointer hoverbg" id="showAdvancedOptions">
+            [[[show advanced options]]]
+          </span>
+          <span class="grey fs14 underline pointer hoverbg d-hide" id="hideAdvancedOptions">
+            [[[hide advanced options]]]
+          </span>
         </div>
 
-        <hr class="dashed mt-2 mb-0">
-        <div id="disclaimer" class="disclaimer fs14 mt-2">
-          [[[order_disclaimer]]]
+        <div id="vDefaultOrderOpts">
+          {{template "orderOptionTemplates"}}
         </div>
-        <div id="disclaimerAck" class="grey text-start pointer hoverbg py-1 fs14 lh1">
-          <span class="ico-check fs12"></span> [[[acknowledge_and_hide]]]
-        </div>
-        <div id="showDisclaimer" class="d-flex align-items-center grey text-start pointer hoverbg fs14 lh1 py-1 d-hide">
-          <span class="fs8 ico-plus me-1 mt-1"></span> [[[show_disclaimer]]]
-        </div>
-      </form>
+        <div id="vOtherOrderOpts" class="d-hide"></div>
+      </div> {{- /* END id="vPreorder" */ -}}
 
-      {{- /* FEE DETAIL BREAKDOWN */ -}}
-      <form id="vDetailPane" class="d-hide">
-        <div class="d-flex flex-center justify-content-end"><span id="closeDetailPane" class="ico-cross pointer hoverbg p-2"></span></div>
-        <h3>[[[Fee Details]]]</h3>
-        <div>
-          <div class="mb-3">
-            [[[estimate_market_conditions]]]
+      <div id="vPreorderErr">
+        [[[estimate_unavailable]]]
+        <span class="ico-info text-danger fs12" id="vPreorderErrTip" data-tooltip=" "></span>
+      </div>
+
+      <div id="disclaimer" class="disclaimer fs14 pt-3 mt-3 border-top">
+        [[[order_disclaimer]]]
+      </div>
+      <div id="disclaimerAck" class="grey text-start pointer hoverbg fs14 lh1">
+        <span class="ico-check fs12"></span> [[[acknowledge_and_hide]]]
+      </div>
+      <div id="showDisclaimer" class="d-flex align-items-center grey text-start pointer hoverbg fs14 lh1 d-hide">
+        <span class="fs8 ico-plus me-1 mt-1"></span> [[[show_disclaimer]]]
+      </div>
+    </form>
+
+    {{- /* FEE DETAIL BREAKDOWN */ -}}
+    <form id="vDetailPane" class="d-hide">
+      <div id="closeDetailPane" class="form-closer-unbound"><span class="ico-cross"></span></div>
+      <header>
+        [[[Fee Details]]]
+      </header>
+      <div>
+        <div class="mb-3">
+          [[[estimate_market_conditions]]]
+        </div>
+
+        <div class="fs18 demi">[[[Best Case Fees]]]</div>
+        <div class="ps-3 mb-3 indent">
+          <div>
+            [[[best_case_conditions]]]
           </div>
-
-          <div class="fs18 demi">[[[Best Case Fees]]]</div>
-          <div class="ps-3 mb-3 indent">
-            <div>
-              [[[best_case_conditions]]]
-            </div>
-            <div class="d-flex">
-              <table class="fee-breakout cell-border my-1">
-                <tr>
-                  <td><img class="micro-icon" data-icon="from"> [[[Swap]]]</td>
-                  <td><img class="micro-icon" data-icon="to"> [[[Redeem]]]</td>
-                </tr>
-                <tr>
-                  <td><span id="vSwapFeesLow"></span> <span id="vSwapFeesLowPct"></span></td>
-                  <td><span id="vRedeemFeesLow"></span> <span id="vRedeemFeesLowPct"></span></td>
-                </tr>
-              </table>
-            </div>
+          <div class="d-flex">
+            <table class="fee-breakout cell-border my-1">
+              <tr>
+                <td><img class="micro-icon" data-icon="from"> [[[Swap]]]</td>
+                <td><img class="micro-icon" data-icon="to"> [[[Redeem]]]</td>
+              </tr>
+              <tr>
+                <td><span id="vSwapFeesLow"></span> <span id="vSwapFeesLowPct"></span></td>
+                <td><span id="vRedeemFeesLow"></span> <span id="vRedeemFeesLowPct"></span></td>
+              </tr>
+            </table>
           </div>
-
-          <div class="fs18 demi">[[[Worst Case Fees]]]</div>
-          <div class="ps-3 mb-3 indent">
-            <div>
-              [[[worst_case_conditions]]]
-            </div>
-            <div class="d-flex">
-              <table class="fee-breakout cell-border my-1">
-                <tr>
-                  <td><img class="micro-icon" data-icon="from"> [[[Swap]]]</td>
-                  <td><img class="micro-icon" data-icon="to"> [[[Redeem]]]</td>
-                </tr>
-                <tr>
-                  <td><span id="vSwapFeesHigh"></span> <span id="vSwapFeesHighPct"></span></td>
-                  <td><span id="vRedeemFeesHigh"></span> <span id="vRedeemFeesHighPct"></span></td>
-                </tr>
-              </table>
-            </div>
-          </div>
-
-          <div class="fs18 demi">[[[Maximum Possible Swap Fees]]]</div>
-          <div class="ps-3 indent">
-            <div>
-              [[[max_fee_conditions]]]
-            </div>
-            <div>
-              <img class="micro-icon me-1" data-icon="from">
-              <span id="vSwapFeesMax"></span>  <span id="vSwapFeesMaxPct"></span>
-            </div>
-          </div>
-
         </div>
-      </form>
 
-      <form id="approveTokenForm" class="position-relative flex-center flex-column fs20 d-hide">
-        {{template "tokenApprovalForm"}}
-      </form>
+        <div class="fs18 demi">[[[Worst Case Fees]]]</div>
+        <div class="ps-3 mb-3 indent">
+          <div>
+            [[[worst_case_conditions]]]
+          </div>
+          <div class="d-flex">
+            <table class="fee-breakout cell-border my-1">
+              <tr>
+                <td><img class="micro-icon" data-icon="from"> [[[Swap]]]</td>
+                <td><img class="micro-icon" data-icon="to"> [[[Redeem]]]</td>
+              </tr>
+              <tr>
+                <td><span id="vSwapFeesHigh"></span> <span id="vSwapFeesHighPct"></span></td>
+                <td><span id="vRedeemFeesHigh"></span> <span id="vRedeemFeesHighPct"></span></td>
+              </tr>
+            </table>
+          </div>
+        </div>
 
-      {{- /* CANCEL ORDER FORM */ -}}
-      <form class="d-hide" id="cancelForm" autocomplete="off">
-        {{template "cancelOrderForm" .}}
-      </form>
-      <form class="d-hide" id="accelerateForm">
-        {{template "accelerateForm" .}}
-      </form>
-    </div>
+        <div class="fs18 demi">[[[Maximum Possible Swap Fees]]]</div>
+        <div class="ps-3 indent">
+          <div>
+            [[[max_fee_conditions]]]
+          </div>
+          <div>
+            <img class="micro-icon me-1" data-icon="from">
+            <span id="vSwapFeesMax"></span>  <span id="vSwapFeesMaxPct"></span>
+          </div>
+        </div>
+
+      </div>
+    </form>
+
+    <form id="approveTokenForm" class="position-relative flex-center flex-column fs20 d-hide">
+      {{template "tokenApprovalForm"}}
+    </form>
+
+    {{- /* CANCEL ORDER FORM */ -}}
+    <form class="d-hide" id="cancelForm" autocomplete="off">
+      {{template "cancelOrderForm" .}}
+    </form>
+    <form class="d-hide" id="accelerateForm">
+      {{template "accelerateForm" .}}
+    </form>
   </div>
 
 </div>

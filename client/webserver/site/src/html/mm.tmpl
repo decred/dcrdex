@@ -565,12 +565,6 @@
                     <span class="fs16 grey ms-1">USD</span>
                     <span class="ms-1">total</span>
                   </div>
-                  <div data-tmpl="appPWBox" class="text-end pt-2 mt-2 border-top d-hide">
-                    <form class="text-end">
-                      App Password:
-                      <input type="password" data-tmpl="appPW" autocomplete="off">
-                    </form>
-                  </div>
                 </div>
               </div>
             </section>
@@ -588,18 +582,6 @@
   {{- /* FORMS */ -}}
   <div id="forms" class="d-hide">
     {{template "orderOptionTemplates"}}
-
-    {{- /* APP PASSWORD */ -}}
-    <form id="pwForm" class="flex-stretch-column">
-      <div class="form-closer"><span class="ico-cross"></span></div>
-      <div class="mb-3">
-        <label for="pwInput">[[[App Password]]]</label>
-        <input type="password" id="pwInput" autocomplete="off">
-      </div>
-      <div class="text-end">
-        <button id="pwSubmit" class="go">[[[Submit]]]</button>
-      </div>
-    </form>
 
     <form class="position-relative mw-425 d-hide" id="cexConfigForm" autocomplete="off">
       {{template "cexConfigForm"}}

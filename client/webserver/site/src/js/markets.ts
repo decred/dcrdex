@@ -1,4 +1,4 @@
-import Doc, { WalletIcons } from './doc'
+import Doc, { WalletIcons, parseFloatDefault } from './doc'
 import State from './state'
 import BasePage from './basepage'
 import OrderBook from './orderbook'
@@ -16,7 +16,6 @@ import {
 import { postJSON } from './http'
 import {
   NewWalletForm,
-  UnlockWalletForm,
   AccelerateOrderForm,
   DepositAddress,
   TokenApprovalForm,
@@ -158,7 +157,6 @@ export default class MarketsPage extends BasePage {
   market: CurrentMarket
   currentForm: HTMLElement
   openAsset: SupportedAsset
-  openFunc: () => void
   currentCreate: SupportedAsset
   maxEstimateTimer: number | null
   book: OrderBook
@@ -176,7 +174,6 @@ export default class MarketsPage extends BasePage {
   balanceWgt: BalanceWidget
   mm: RunningMarketMakerDisplay
   marketList: MarketList
-  unlockForm: UnlockWalletForm
   newWalletForm: NewWalletForm
   depositAddrForm: DepositAddress
   approveTokenForm: TokenApprovalForm
@@ -253,14 +250,14 @@ export default class MarketsPage extends BasePage {
       const wgt = this.balanceWgt = new BalanceWidget(bWidget, qWidget)
       const baseIcons = wgt.base.stateIcons.icons
       const quoteIcons = wgt.quote.stateIcons.icons
-      bind(wgt.base.tmpl.connect, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(wgt.quote.tmpl.connect, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-      bind(wgt.base.tmpl.expired, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(wgt.quote.tmpl.expired, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-      bind(baseIcons.sleeping, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(quoteIcons.sleeping, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-      bind(baseIcons.locked, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(quoteIcons.locked, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(wgt.base.tmpl.connect, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(wgt.quote.tmpl.connect, 'click', () => { this.unlockWallet(this.market.quote.id) })
+      bind(wgt.base.tmpl.expired, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(wgt.quote.tmpl.expired, 'click', () => { this.unlockWallet(this.market.quote.id) })
+      bind(baseIcons.sleeping, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(quoteIcons.sleeping, 'click', () => { this.unlockWallet(this.market.quote.id) })
+      bind(baseIcons.locked, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(quoteIcons.locked, 'click', () => { this.unlockWallet(this.market.quote.id) })
       bind(baseIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.base) })
       bind(quoteIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.quote) })
       bind(wgt.base.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.base) })
@@ -290,6 +287,15 @@ export default class MarketsPage extends BasePage {
     bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalForm(true) })
     bind(page.approveQuoteBttn, 'click', () => { this.showTokenApprovalForm(false) })
 
+    bind(page.showTradingTier, 'click', () => {
+      Doc.hide(page.showTradingTier)
+      Doc.show(page.tradingLimits)
+    })
+    bind(page.showTradingReputation, 'click', () => {
+      Doc.hide(page.showTradingReputation)
+      Doc.show(page.reputationMeter)
+    })
+
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => { this.setBuy() })
     bind(page.sellBttn, 'click', () => { this.setSell() })
@@ -299,7 +305,7 @@ export default class MarketsPage extends BasePage {
       this.setOrderVisibility()
       if (!page.rateField.value) return
       this.depthLines.input = [{
-        rate: parseFloat(page.rateField.value || '0'),
+        rate: parseFloatDefault(page.rateField.value, 0),
         color: this.isSell() ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
       }]
       this.drawChartLines()
@@ -343,16 +349,12 @@ export default class MarketsPage extends BasePage {
 
     // Handle the recent matches update on the 'epoch_report' route.
     ws.registerRoute(epochMatchSummaryRoute, (data: BookUpdate) => { this.handleEpochMatchSummary(data) })
-    // Bind the wallet unlock form.
-    this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, async () => { this.openFunc() })
     // Create a wallet
     this.newWalletForm = new NewWalletForm(page.newWalletForm, async () => { this.createWallet() })
     // Main order form.
     bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form.
     bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
-    // Unlock for order estimation
-    Doc.bind(page.vUnlockSubmit, 'click', async () => { this.submitEstimateUnlock() })
     // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
     // Order detail view.
@@ -399,7 +401,6 @@ export default class MarketsPage extends BasePage {
 
     const closePopups = () => {
       Doc.hide(page.forms)
-      page.vPass.value = ''
     }
 
     // If the user clicks outside of a form, it should close the page overlay.
@@ -771,7 +772,7 @@ export default class MarketsPage extends BasePage {
 
     if (this.market) {
       const { auth: { effectiveTier, pendingStrength } } = this.market.dex
-      Doc.setVis(effectiveTier > 0 || pendingStrength > 0, page.tradingLimits, page.reputationMeter)
+      Doc.setVis(effectiveTier > 0 || pendingStrength > 0, page.reputationAndTradingTierBox)
     }
 
     const mmStatus = app().mmStatus
@@ -1145,6 +1146,7 @@ export default class MarketsPage extends BasePage {
       base: baseID,
       quote: quoteID
     })
+    app().updateMarketElements(this.main, baseID, quoteID)
     this.marketList.select(host, baseID, quoteID)
     this.setLoaderMsgVisibility()
     this.setTokenApprovalVisibility()
@@ -1947,16 +1949,6 @@ export default class MarketsPage extends BasePage {
     form.style.right = '0'
   }
 
-  /* showOpen shows the form to unlock a wallet. */
-  async showOpen (asset: SupportedAsset, f: () => void) {
-    const page = this.page
-    this.openAsset = asset
-    this.openFunc = f
-    this.unlockForm.refresh(app().assets[asset.id])
-    this.showForm(page.unlockWalletForm)
-    page.uwAppPass.focus()
-  }
-
   /*
    * showToggleWalletStatus displays the toggleWalletStatusConfirm form to
    * enable a wallet.
@@ -2038,7 +2030,7 @@ export default class MarketsPage extends BasePage {
       setIcon(icon)
     }
 
-    Doc.hide(page.vUnlockPreorder, page.vPreorderErr)
+    Doc.hide(page.vPreorderErr)
     Doc.show(page.vPreorder)
 
     page.vBuySell.textContent = isSell ? intl.prep(intl.ID_SELLING) : intl.prep(intl.ID_BUYING)
@@ -2090,13 +2082,11 @@ export default class MarketsPage extends BasePage {
       page.vSubmit.classList.remove(sellBtnClass)
     }
     this.showVerifyForm()
-    page.vPass.focus()
 
     if (baseAsset.wallet.open && quoteAsset.wallet.open) this.preOrder(order)
     else {
       Doc.hide(page.vPreorder)
-      if (State.passwordIsCached()) this.unlockWalletsForEstimates('')
-      else Doc.show(page.vUnlockPreorder)
+      this.unlockWalletsForEstimates()
     }
   }
 
@@ -2118,48 +2108,37 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * submitEstimateUnlock reads the current vUnlockPass and unlocks any locked
-   * wallets.
-   */
-  async submitEstimateUnlock () {
-    const pw = this.page.vUnlockPass.value || ''
-    return await this.unlockWalletsForEstimates(pw)
-  }
-
-  /*
    * unlockWalletsForEstimates unlocks any locked wallets with the provided
    * password.
    */
-  async unlockWalletsForEstimates (pw: string) {
+  async unlockWalletsForEstimates () {
     const page = this.page
     const loaded = app().loading(page.verifyForm)
-    const err = await this.attemptWalletUnlock(pw)
+    await this.unlockMarketWallets()
     loaded()
-    if (err) return this.setPreorderErr(err)
     Doc.show(page.vPreorder)
-    Doc.hide(page.vUnlockPreorder)
     this.preOrder(this.parseOrder())
   }
 
+  async unlockWallet (assetID: number) {
+    const res = await postJSON('/api/openwallet', { assetID })
+    if (!app().checkResponse(res)) {
+      throw Error('error unlocking wallet ' + res.msg)
+    }
+    this.balanceWgt.updateAsset(this.openAsset.id)
+  }
+
   /*
-   * attemptWalletUnlock unlocks both the base and quote wallets for the current
+   * unlockMarketWallets unlocks both the base and quote wallets for the current
    * market, if locked.
    */
-  async attemptWalletUnlock (pw: string) {
+  async unlockMarketWallets () {
     const { base, quote } = this.market
     const assetIDs = []
     if (!base.wallet.open) assetIDs.push(base.id)
     if (!quote.wallet.open) assetIDs.push(quote.id)
-    const req = {
-      pass: pw,
-      assetID: -1
-    }
     for (const assetID of assetIDs) {
-      req.assetID = assetID
-      const res = await postJSON('/api/openwallet', req)
-      if (!app().checkResponse(res)) {
-        return res.msg
-      }
+      this.unlockWallet(assetID)
     }
   }
 
@@ -2685,12 +2664,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     Doc.hide(page.orderErr, page.vErr)
     const order = this.currentOrder
-    const pw = page.vPass.value
-    page.vPass.value = ''
-    const req = {
-      order: wireOrder(order),
-      pw: pw
-    }
+    const req = { order: wireOrder(order) }
     if (!this.validateOrder(order)) return
     // Show loader and hide submit button.
     page.vSubmit.classList.add('d-hide')
@@ -2726,16 +2700,6 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(asset.id)
     this.displayMessageIfMissingWallet()
     this.resolveOrderFormVisibility()
-  }
-
-  /*
-   * walletUnlocked is attached to successful submission of the wallet unlock
-   * form. walletUnlocked is only called once the form is submitted and a
-   * success response is received from the client.
-   */
-  async walletUnlocked () {
-    Doc.hide(this.page.forms)
-    this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
   /* lotChanged is attached to the keyup and change events of the lots input. */

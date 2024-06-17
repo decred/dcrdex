@@ -94,9 +94,10 @@
   {{- /* POP UP FORMS */ -}}
   <div id="forms" class="d-hide">
     {{- /* DELETE ARCHIVED RECORDS FORM */ -}}
-    <form class="d-hide" id="deleteArchivedRecordsForm"><div class="form-closer"><span class="ico-cross"></span></div>
-      <h3>[[[delete_archived_records]]]</h3>
-      <div class="mb-3">
+    <form class="d-hide" id="deleteArchivedRecordsForm">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <header>[[[delete_archived_records]]]</header>
+      <div>
         <input id="showArchivedDateField" class="form-check-input" type="checkbox">
         <label class="form-check-label" for="showArchivedDateField" data-tooltip="[[[delete_all_archived_records]]]">
          [[[show_archived_date_msg]]]
@@ -112,29 +113,28 @@
         </div>
        </div>
       </div>
-      <div class="mb-3">
+      <div>
         <input id="saveOrdersToFile" class="form-check-input" type="checkbox">
         <label class="form-check-label" for="saveOrdersToFile" data-tooltip="[[[save_orders_to_file_msg]]]">
         [[[save_orders_to_file]]]
         <span class="ico-info"></span>
         </label>
       </div>
-      <div class="mb-3">
+      <div>
         <input id="saveMatchesToFile" class="form-check-input" type="checkbox">
         <label class="form-check-label" for="saveMatchesToFile" data-tooltip="[[[save_matches_to_file_msg]]]">
          [[[save_matches_to_file]]]
         <span class="ico-info"></span>
         </label>
       </div>
-      <div id="deleteArchivedResult">
-        <hr class="dashed my-3">
+      <div id="deleteArchivedResult" class="mt-3 border-top">
         <div id="deleteArchivedRecordsMsg" class="fs15 d-hide text-break mb-2"></div>
         <div id="archivedRecordsLocation" class="fs15 d-hide text-break mb-2"></div>
       </div>
-      <div class="d-flex justify-content-end">
+      <div class="flex-stretch-column">
         <button id="deleteArchivedRecordsSubmit" type="button" class="danger">[[[Submit]]]</button>
       </div>
-      <div id="deleteArchivedRecordsErr" class="fs15 pt-3 text-center d-hide text-danger text-break"></div>
+      <div id="deleteArchivedRecordsErr" class="fs15 text-center d-hide text-danger text-break"></div>
     </form>
   </div>
 

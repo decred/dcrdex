@@ -34,7 +34,7 @@
         </label>
       </div>
       <div class="py-2 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
-        <form id="browserNotificationsForm">
+        <div>
           <div class="form-check">
             <label class="form-check-label">
               <input class="form-check-input" name="browserNtfnEnabled" type="checkbox" value="1" id="browserNtfnEnabled">
@@ -51,7 +51,7 @@
               </label>
             </div>
           </div>
-        </form>
+        </div>
       </div>
       <div class="py-3 border-bottom {{if not $authed}} d-hide{{end}}">
         <div id="exchanges" {{if eq (len .Exchanges) 0}} class="d-hide"{{end}}>
@@ -85,12 +85,12 @@
   <div id="forms" class="d-hide">
     
     {{- /* DEX ADDRESS */ -}}
-    <form class="position-relative text-start" id="dexAddrForm" autocomplete="off">
+    <form class="d-hide" id="dexAddrForm" autocomplete="off">
       {{template "dexAddrForm" .}}
     </form>
 
     {{- /* REG ASSET SELECTOR */ -}}
-    <form class="d-hide mw-425" id="regAssetForm">
+    <form class="d-hide" id="regAssetForm">
       {{template "regAssetForm"}}
     </form>
     {{- /* CONFIRM REGISTRATION */ -}}
@@ -121,27 +121,27 @@
     {{- /* EXPORT SEED AUTHORIZATION */ -}}
     <form class="d-hide" id="exportSeedAuth">
       <div class="form-closer"><span class="ico-cross"></span></div>
-      <h3>
+      <header>
         [[[Export Seed]]]
-      </h3>
-      <div class="fs15 text-start mt-2">
+      </header>
+      <div class="text-start">
         [[[pw_for_seed]]]
       </div>
-      <div class="text-start mt-2">
+      <div class="text-start">
         <label for="exportSeedPW">[[[Password]]]</label>
         <input type="password" id="exportSeedPW" autocomplete="current-password">
       </div>
-      <div class="d-flex justify-content-end mt-4">
-        <button id="exportSeedSubmit" type="button" class="go">[[[Show Me]]]</button>
+      <div class="flex-stretch-column">
+        <button id="exportSeedSubmit" type="button" class="feature">[[[Show Me]]]</button>
       </div>
-      <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="exportSeedErr"></div>
+      <div class="fs15 text-center d-hide text-danger text-break" id="exportSeedErr"></div>
     </form>
 
     {{- /* SEED DISPLAY */ -}}
     <form class="d-hide" id="authorizeSeedDisplay">
       <div class="form-closer"><span class="ico-cross"></span></div>
-      <h3>[[[dont_share]]]</h3>
-      <div class="mt-3 p-2 flex-center">
+      <div class="pt-4">[[[dont_share]]]</div>
+      <div class="flex-center">
         <div class="fs18 mono mx-auto user-select-all text-break" id="legacySeed"></div>
         <div class="fs18 mono mx-auto user-select-all text-break" id="mnemonic"></div>
       </div>
@@ -151,9 +151,7 @@
     <form class="d-hide" id="walletWait">
       {{template "waitingForWalletForm"}}
     </form>
-
   </div>
-
 </div>
 {{template "bottom"}}
 {{end}}

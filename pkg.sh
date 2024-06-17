@@ -12,13 +12,13 @@ export GOWORK=off
 # if META set, append "+${META}", otherwise nothing.
 LDFLAGS_BASE="-buildid= -s -w -X main.Version=${VER}${META:++${META}}"
 
-# Build the webpack bundle prior to building the webserver package, which embeds
-# the files.
-pushd client/webserver/site
-go generate # just check, no write
-npm ci
-npm run build
-popd
+# # Build the webpack bundle prior to building the webserver package, which embeds
+# # the files.
+# pushd client/webserver/site
+# go generate # just check, no write
+# npm ci
+# npm run build
+# popd
 
 rm -rf bin
 

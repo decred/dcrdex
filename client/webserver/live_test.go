@@ -2738,8 +2738,8 @@ func TestServer(t *testing.T) {
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
-	initialize := true
-	register := true
+	initialize := false
+	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = false
