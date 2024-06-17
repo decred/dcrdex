@@ -225,13 +225,13 @@ chmod +x "./start-wallet"
 
 cat > "./connect-alpha" <<EOF
 #!/usr/bin/env bash
-${CLI} -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
+${CLI} -conf=${NODES_ROOT}/\$2/\$2.conf -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
 EOF
 chmod +x "./connect-alpha"
 
 cat > "./stop-wallet" <<EOF
 #!/usr/bin/env bash
-${CLI} -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass stop
+${CLI} -conf=${NODES_ROOT}/\$2/\$2.conf -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass stop
 EOF
 chmod +x "./stop-wallet"
 

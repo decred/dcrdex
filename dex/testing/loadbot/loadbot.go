@@ -499,13 +499,13 @@ func run() error {
 		switch symbol {
 		case btc, ltc, dgb:
 			args = []string{"getnewaddress", "''", "bech32"}
-		case dash, doge, bch, firo, zcl:
+		case dash, doge, bch, firo:
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
 		case eth, usdc, polygon, usdcp:
 			args = []string{"attach", `--exec eth.accounts[1]`}
-		case zec:
+		case zec, zcl:
 			return "tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD", nil // ALPHA_ADDR in the zcash harness.sh
 		default:
 			return "", fmt.Errorf("getAddress: unknown symbol %q", symbol)
