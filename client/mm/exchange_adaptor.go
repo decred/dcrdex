@@ -2526,14 +2526,20 @@ func (u *unifiedExchangeAdaptor) lotCosts(sellVWAP, buyVWAP uint64) (*lotCosts, 
 	if err != nil {
 		return nil, fmt.Errorf("error getting order fees: %w", err)
 	}
-	perLot.dexBase = u.lotSize + sellFees.bookingFeesPerLot
+	perLot.dexBase = u.lotSize
+	if u.baseID == u.baseFeeID {
+		perLot.dexBase += sellFees.bookingFeesPerLot
+	}
 	perLot.cexBase = u.lotSize
 	perLot.baseRedeem = buyFees.Max.Redeem
 	perLot.baseFunding = sellFees.funding
 
 	dexQuoteLot := calc.BaseToQuote(sellVWAP, u.lotSize)
 	cexQuoteLot := calc.BaseToQuote(buyVWAP, u.lotSize)
-	perLot.dexQuote = dexQuoteLot + buyFees.bookingFeesPerLot
+	perLot.dexQuote = dexQuoteLot
+	if u.quoteID == u.quoteFeeID {
+		perLot.dexQuote += buyFees.bookingFeesPerLot
+	}
 	perLot.cexQuote = cexQuoteLot
 	perLot.quoteRedeem = sellFees.Max.Redeem
 	perLot.quoteFunding = buyFees.funding
@@ -2918,6 +2924,28 @@ func (u *unifiedExchangeAdaptor) cexCounterRates(cexBuyLots, cexSellLots uint64)
 	return
 }
 
+// bookingFees are the per-lot fees that have to be available before placing an
+// order.
+func (u *unifiedExchangeAdaptor) bookingFees(buyFees, sellFees *LotFees) (buyBookingFeesPerLot, sellBookingFeesPerLot uint64) {
+	buyBookingFeesPerLot = buyFees.Swap
+	// If we're redeeming on the same chain, add redemption fees.
+	if u.quoteFeeID == u.baseFeeID {
+		buyBookingFeesPerLot += buyFees.Redeem
+	}
+	// EVM assets need to reserve refund gas.
+	if u.quoteTraits.IsAccountLocker() {
+		buyBookingFeesPerLot += buyFees.Refund
+	}
+	sellBookingFeesPerLot = sellFees.Swap
+	if u.baseFeeID == u.quoteFeeID {
+		sellBookingFeesPerLot += sellFees.Redeem
+	}
+	if u.baseTraits.IsAccountLocker() {
+		sellBookingFeesPerLot += sellFees.Refund
+	}
+	return
+}
+
 // updateFeeRates updates the cached fee rates for placing orders on the market
 // specified by the exchangeAdaptorCfg used to create the unifiedExchangeAdaptor.
 func (u *unifiedExchangeAdaptor) updateFeeRates() error {
@@ -2944,32 +2972,25 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() error {
 		return fmt.Errorf("failed to get sell funding fees: %v", err)
 	}
 
-	buyBookingFeesPerLot := maxQuoteFees.Swap
-	if u.quoteFeeID == u.baseFeeID {
-		buyBookingFeesPerLot += maxBaseFees.Redeem
+	maxBuyFees := &LotFees{
+		Swap:   maxQuoteFees.Swap,
+		Redeem: maxBaseFees.Redeem,
+		Refund: maxQuoteFees.Refund,
 	}
-	if u.quoteTraits.IsAccountLocker() {
-		buyBookingFeesPerLot += maxQuoteFees.Refund
+	maxSellFees := &LotFees{
+		Swap:   maxBaseFees.Swap,
+		Redeem: maxQuoteFees.Redeem,
+		Refund: maxBaseFees.Refund,
 	}
 
-	sellBookingFeesPerLot := maxBaseFees.Swap
-	if u.baseFeeID == u.quoteFeeID {
-		sellBookingFeesPerLot += maxQuoteFees.Redeem
-	}
-	if u.baseTraits.IsAccountLocker() {
-		sellBookingFeesPerLot += maxBaseFees.Refund
-	}
+	buyBookingFeesPerLot, sellBookingFeesPerLot := u.bookingFees(maxBuyFees, maxSellFees)
 
 	u.feesMtx.Lock()
 	defer u.feesMtx.Unlock()
 
 	u.buyFees = &orderFees{
 		LotFeeRange: &LotFeeRange{
-			Max: &LotFees{
-				Swap:   maxQuoteFees.Swap,
-				Redeem: maxBaseFees.Redeem,
-				Refund: maxQuoteFees.Refund,
-			},
+			Max: maxBuyFees,
 			Estimated: &LotFees{
 				Swap:   estQuoteFees.Swap,
 				Redeem: estBaseFees.Redeem,
@@ -2981,11 +3002,7 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() error {
 	}
 	u.sellFees = &orderFees{
 		LotFeeRange: &LotFeeRange{
-			Max: &LotFees{
-				Swap:   maxBaseFees.Swap,
-				Redeem: maxQuoteFees.Redeem,
-				Refund: maxBaseFees.Refund,
-			},
+			Max: maxSellFees,
 			Estimated: &LotFees{
 				Swap:   estBaseFees.Swap,
 				Redeem: estQuoteFees.Redeem,

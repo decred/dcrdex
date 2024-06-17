@@ -534,12 +534,22 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		buyFundingFees = 6e3
 	}
 
+	maxBuyFees := &LotFees{
+		Swap:   buySwapFees,
+		Redeem: buyRedeemFees,
+		Refund: buyRefundFees,
+	}
+	maxSellFees := &LotFees{
+		Swap:   sellSwapFees,
+		Redeem: sellRedeemFees,
+		Refund: sellRefundFees,
+	}
+
+	buyBookingFees, sellBookingFees := u.bookingFees(maxBuyFees, maxSellFees)
+
 	a.buyFees = &orderFees{
 		LotFeeRange: &LotFeeRange{
-			Max: &LotFees{
-				Redeem: buyRedeemFees,
-				Refund: buyRefundFees,
-			},
+			Max: maxBuyFees,
 			Estimated: &LotFees{
 				Swap:   buySwapFees,
 				Redeem: buyRedeemFees,
@@ -547,21 +557,18 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			},
 		},
 		funding:           buyFundingFees,
-		bookingFeesPerLot: buySwapFees,
+		bookingFeesPerLot: buyBookingFees,
 	}
 	a.sellFees = &orderFees{
 		LotFeeRange: &LotFeeRange{
-			Max: &LotFees{
-				Redeem: sellRedeemFees,
-				Refund: sellRefundFees,
-			},
+			Max: maxSellFees,
 			Estimated: &LotFees{
 				Swap:   sellSwapFees,
 				Redeem: sellRedeemFees,
 			},
 		},
 		funding:           sellFundingFees,
-		bookingFeesPerLot: sellSwapFees,
+		bookingFeesPerLot: sellBookingFees,
 	}
 
 	buyRate, _ := a.dexPlacementRate(buyVWAP, false)
@@ -587,13 +594,20 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		addBaseFees, addQuoteFees = sellFundingFees, buyFundingFees
 		cex.asksVWAP[lotSize*buyLots] = vwapResult{avg: buyVWAP}
 		cex.bidsVWAP[lotSize*sellLots] = vwapResult{avg: sellVWAP}
-		minDexBase = sellLots*(lotSize+sellSwapFees) + sellFundingFees
+		minDexBase = sellLots*lotSize + sellFundingFees
+		if baseID == u.baseFeeID {
+			minDexBase += sellLots * u.sellFees.bookingFeesPerLot
+		}
 		if baseID == u.quoteFeeID {
 			addBaseFees += buyRedeemFees * buyLots
 			minDexBase += buyRedeemFees * buyLots
 		}
 		minCexBase = buyLots * lotSize
-		minDexQuote = calc.BaseToQuote(buyRate, buyLots*lotSize) + a.buyFees.bookingFeesPerLot*buyLots + buyFundingFees
+
+		minDexQuote = calc.BaseToQuote(buyRate, buyLots*lotSize) + buyFundingFees
+		if quoteID == u.quoteFeeID {
+			minDexQuote += buyLots * a.buyFees.bookingFeesPerLot
+		}
 		if quoteID == u.baseFeeID {
 			addQuoteFees += sellRedeemFees * sellLots
 			minDexQuote += sellRedeemFees * sellLots
@@ -690,16 +704,16 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 
 	// Deficit math.
 	// Since cex lot is smaller, dex can't use this extra.
-	setBals(addBaseFees+perLot.dexBase*2+perLot.cexBase, 0, addQuoteFees+minDexQuote, minCexQuote)
-	checkDistribution(perLot.cexBase, 0, 0, 0)
+	setBals(addBaseFees+perLot.dexBase*3+perLot.cexBase, 0, addQuoteFees+minDexQuote, minCexQuote)
+	checkDistribution(2*perLot.cexBase, 0, 0, 0)
 	// Same thing, but with enough for fees, and there's no reason to transfer
 	// because it doesn't improve our matchability.
 	setBals(perLot.dexBase*3, extra, minDexQuote, minCexQuote)
 	checkDistribution(0, 0, 0, 0)
 	setBals(addBaseFees+minDexBase, minCexBase, addQuoteFees+perLot.dexQuote*5+perLot.cexQuote*2+extra, 0)
 	checkDistribution(0, 0, perLot.cexQuote*2+extra/2, 0)
-	setBals(addBaseFees+perLot.dexBase, perLot.cexBase*5+perLot.dexBase+extra, addQuoteFees+minDexQuote, minCexQuote)
-	checkDistribution(0, perLot.dexBase+extra, 0, 0)
+	setBals(addBaseFees+perLot.dexBase, 5*perLot.cexBase+2*perLot.dexBase+extra, addQuoteFees+minDexQuote, minCexQuote)
+	checkDistribution(0, 2*perLot.dexBase+extra, 0, 0)
 	setBals(addBaseFees+perLot.dexBase*2, perLot.cexBase*2, addQuoteFees+perLot.dexQuote, perLot.cexQuote*2+perLot.dexQuote+extra)
 	checkDistribution(0, 0, 0, perLot.dexQuote+extra/2)
 
