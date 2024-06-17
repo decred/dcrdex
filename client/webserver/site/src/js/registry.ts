@@ -853,7 +853,7 @@ export interface RunningBotInventory {
 export interface FeeEstimates extends LotFeeRange {
   bookingFeesPerLot: number
   bookingFees: number
-  feesPerSwap: number
+  tokenFeesPerSwap: number
 }
 
 export interface ProjectedAlloc {
@@ -1034,7 +1034,6 @@ export interface MarketMakingRunOverview {
   endTime: number
   cfgs: StampedBotConfig[]
   initialBalances: Record<number, number>
-  finalBalances: Record<number, number>
   profitLoss: ProfitLoss
   finalState: BalanceState
 }

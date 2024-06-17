@@ -19,7 +19,6 @@ import {
   ApprovalStatus,
   SupportedAsset,
   WalletState,
-  FeeEstimates,
   UnitInfo,
   ProjectedAlloc
 } from './registry'
@@ -50,7 +49,8 @@ import {
   GapStrategyAbsolute,
   GapStrategyAbsolutePlus,
   GapStrategyPercent,
-  GapStrategyPercentPlus
+  GapStrategyPercentPlus,
+  feesAndCommit
 } from './mmutil'
 import { Forms, bind as bindForm, NewWalletForm, TokenApprovalForm, DepositAddress, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
@@ -737,8 +737,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.qcUSDPerSide.inc = this.lotsPerLevelIncrement * lotSizeUSD
     this.qcUSDPerSide.min = lotSizeUSD
 
-    this.basePane.setAsset(baseID, quoteID, false)
-    this.quotePane.setAsset(quoteID, baseID, true)
+    this.basePane.setAsset(baseID, false)
+    this.quotePane.setAsset(quoteID, true)
     const {
       updatedConfig: { buyPlacements, sellPlacements, profit },
       marketReport: { baseFiatRate, quoteFiatRate }
@@ -868,54 +868,13 @@ export default class MarketMakerSettingsPage extends BasePage {
       dexQuoteLots = this.updatedConfig.buyPlacements.reduce((lots: number, p: OrderPlacement) => lots + p.lots, 0)
     }
     const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID, spot)
-    const [cexBaseLots, cexQuoteLots] = [dexQuoteLots, dexBaseLots]
-
-    const commit = {
-      dex: {
-        base: {
-          lots: dexBaseLots,
-          val: dexBaseLots * lotSize
-        },
-        quote: {
-          lots: dexQuoteLots,
-          val: dexQuoteLots * quoteLot
-        }
-      },
-      cex: {
-        base: {
-          lots: cexBaseLots,
-          val: cexBaseLots * lotSize
-        },
-        quote: {
-          lots: cexQuoteLots,
-          val: cexQuoteLots * quoteLot
-        }
-      }
-    }
-
     const walletStuff = this.walletStuff()
-    const { baseFeeAssetID, quoteFeeAssetID } = walletStuff
+    const { baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker } = walletStuff
 
-    const baseFeeReserves = baseFees.estimated.swap + Math.max(baseFees.estimated.redeem, baseFees.estimated.refund)
-    const quoteFeeReserves = quoteFees.estimated.swap + Math.max(quoteFees.estimated.redeem + quoteFees.estimated.refund)
-    let baseBookingFeesPerLot = baseFees.max.swap
-    if (quoteFeeAssetID === baseFeeAssetID) baseBookingFeesPerLot += quoteFees.max.redeem
-    let quoteBookingFeesPerLot = quoteFees.max.swap
-    if (baseFeeAssetID === quoteFeeAssetID) quoteBookingFeesPerLot += baseFees.max.redeem
-    const fees: { base: FeeEstimates, quote: FeeEstimates } = {
-      base: {
-        ...baseFees,
-        bookingFeesPerLot: baseBookingFeesPerLot,
-        bookingFees: baseBookingFeesPerLot * commit.dex.base.lots,
-        feesPerSwap: baseFeeReserves
-      },
-      quote: {
-        ...quoteFees,
-        bookingFeesPerLot: quoteBookingFeesPerLot,
-        bookingFees: quoteBookingFeesPerLot * commit.dex.quote.lots,
-        feesPerSwap: quoteFeeReserves
-      }
-    }
+    const { commit, fees } = feesAndCommit(
+      baseID, quoteID, baseFees, quoteFees, lotSize, dexBaseLots, dexQuoteLots,
+      baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker
+    )
 
     return {
       page, cfg, oldCfg, host, xc, baseID, quoteID, botType, cexName, baseFiatRate, quoteFiatRate,
@@ -931,9 +890,13 @@ export default class MarketMakerSettingsPage extends BasePage {
     const baseFeeAssetID = baseToken ? baseToken.parentID : baseID
     const quoteFeeAssetID = quoteToken ? quoteToken.parentID : quoteID
     const [baseFeeUI, quoteFeeUI] = [app().assets[baseFeeAssetID].unitInfo, app().assets[quoteFeeAssetID].unitInfo]
+    const traitAccountLocker = 1 << 14
+    const baseIsAccountLocker = (baseWallet.traits & traitAccountLocker) > 0
+    const quoteIsAccountLocker = (quoteWallet.traits & traitAccountLocker) > 0
     return {
       baseWallet, quoteWallet, baseFeeUI, quoteFeeUI, baseToken, quoteToken,
-      bui, qui, baseFeeAssetID, quoteFeeAssetID, ...this.adjustedBalances(baseWallet, quoteWallet)
+      bui, qui, baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker,
+      ...this.adjustedBalances(baseWallet, quoteWallet)
     }
   }
 
@@ -1099,30 +1062,16 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   updateBaseAllocations () {
-    const { commit, baseID, botType, quoteFeeAssetID, lotSize, basePane, fees } = this.marketStuff()
+    const { commit, lotSize, basePane, fees } = this.marketStuff()
 
-    basePane.updateOrderInventory(commit.dex.base.lots, lotSize)
-    if (baseID === quoteFeeAssetID) { // This is the fee asset for the quote asset.
-      basePane.updateBookingFeesComplex(commit.dex.quote.lots, fees.quote.max.redeem, commit.dex.base.lots, fees.base.bookingFeesPerLot)
-    } else {
-      basePane.updateBookingFeesSimple(commit.dex.base.lots, fees.base.bookingFeesPerLot)
-    }
-    basePane.updateFeeReserves(fees.base.feesPerSwap)
-    if (botType !== botTypeBasicMM) basePane.updateCEXInventory(commit.cex.base.val, commit.dex.base.val)
+    basePane.updateInventory(commit.dex.base.lots, lotSize, commit.dex.base.val, commit.cex.base.val, fees.base.bookingFeesPerLot, fees.base.tokenFeesPerSwap)
     basePane.updateCommitTotal()
   }
 
   updateQuoteAllocations () {
-    const { commit, quoteID, botType, baseFeeAssetID, quoteLot: lotSize, quotePane, fees } = this.marketStuff()
+    const { commit, quoteLot: lotSize, quotePane, fees } = this.marketStuff()
 
-    quotePane.updateOrderInventory(commit.dex.quote.lots, lotSize)
-    if (quoteID === baseFeeAssetID) { // This is the fee asset for the base asset.
-      quotePane.updateBookingFeesComplex(commit.dex.quote.lots, fees.quote.max.redeem, commit.dex.quote.lots, fees.quote.bookingFeesPerLot)
-    } else {
-      quotePane.updateBookingFeesSimple(commit.dex.quote.lots, fees.quote.bookingFeesPerLot)
-    }
-    quotePane.updateFeeReserves(fees.base.feesPerSwap)
-    if (botType !== botTypeBasicMM) quotePane.updateCEXInventory(commit.cex.quote.val, commit.dex.quote.val)
+    quotePane.updateInventory(commit.dex.quote.lots, lotSize, commit.dex.quote.val, commit.cex.quote.val, fees.quote.bookingFeesPerLot, fees.quote.tokenFeesPerSwap)
     quotePane.updateCommitTotal()
   }
 
@@ -2275,11 +2224,10 @@ class AssetPane {
     this.lotSizeConv = lotSize / ui.conventional.conversionFactor
   }
 
-  setAsset (assetID: number, counterAssetID: number, isQuote: boolean) {
+  setAsset (assetID: number, isQuote: boolean) {
     this.assetID = assetID
     this.isQuote = isQuote
     const cfg = this.cfg = isQuote ? this.pg.updatedConfig.quoteConfig : this.pg.updatedConfig.baseConfig
-    const { token: counterToken } = app().assets[counterAssetID]
     const { page, div, pg: { specs: { botType, baseID }, updatedConfig: { baseOptions, quoteOptions } } } = this
     const { symbol, name, token, unitInfo: ui } = app().assets[assetID]
     this.ui = ui
@@ -2299,9 +2247,6 @@ class AssetPane {
     Doc.setText(div, '[data-fee-ticker]', feeTicker)
     Doc.setText(div, '[data-fee-name]', feeName)
     Doc.setSrc(div, '[data-fee-logo]', Doc.logoPath(feeSymbol))
-    const complexFeeUI = counterToken && counterToken.parentID === assetID
-    Doc.setVis(complexFeeUI, page.bookingFeesComplex)
-    Doc.setVis(!complexFeeUI, page.bookingFeesSimple)
     Doc.setVis(botType !== botTypeBasicMM, page.cexMinInvBox)
     Doc.setVis(botType !== botTypeBasicArb, page.orderReservesBox)
     this.nSwapFees.setValue(cfg.swapFeeN ?? defaultSwapReserves.n)
@@ -2326,13 +2271,51 @@ class AssetPane {
     return commit
   }
 
+  updateInventory (lots: number, lotSize: number, dexCommit: number, cexCommit: number, bookingFeesPerLot: number, feesPerSwap: number) {
+    this.setLotSize(lotSize)
+    const { page, cfg, lotSizeConv, inv, ui, feeUI, isToken, isQuote, pg: { specs: { cexName, botType } } } = this
+    page.bookLots.textContent = String(lots)
+    page.bookLotSize.textContent = Doc.formatFourSigFigs(lotSizeConv)
+    inv.book = lots * lotSizeConv
+    page.bookCommitment.textContent = Doc.formatFourSigFigs(inv.book)
+    const feesPerLotConv = bookingFeesPerLot / feeUI.conventional.conversionFactor
+    page.bookingFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
+    page.bookingFeesLots.textContent = String(lots)
+    inv.bookingFees = lots * feesPerLotConv
+    page.bookingFees.textContent = Doc.formatFourSigFigs(inv.bookingFees)
+    if (cexName) {
+      inv.cex = cexCommit / ui.conventional.conversionFactor
+      page.cexMinInv.textContent = Doc.formatFourSigFigs(inv.cex)
+    }
+    if (botType !== botTypeBasicArb) {
+      const totalInventory = Math.max(cexCommit, dexCommit) / ui.conventional.conversionFactor
+      page.orderReservesBasis.textContent = Doc.formatFourSigFigs(totalInventory)
+      const orderReserves = totalInventory * cfg.orderReservesFactor
+      inv.orderReserves = totalInventory
+      page.orderReserves.textContent = Doc.formatFourSigFigs(orderReserves)
+    }
+    if (isToken) {
+      const feesPerSwapConv = feesPerSwap / feeUI.conventional.conversionFactor
+      page.feeReservesPerSwap.textContent = Doc.formatFourSigFigs(feesPerSwapConv)
+      inv.swapFeeReserves = feesPerSwapConv * cfg.swapFeeN
+      page.feeReserves.textContent = Doc.formatFourSigFigs(inv.swapFeeReserves)
+    }
+    if (isQuote) {
+      const basis = inv.book + inv.cex + inv.orderReserves
+      page.slippageBufferBasis.textContent = Doc.formatCoinValue(basis * ui.conventional.conversionFactor, ui)
+      inv.slippageBuffer = basis * cfg.slippageBufferFactor
+      page.slippageBuffer.textContent = Doc.formatCoinValue(inv.slippageBuffer * ui.conventional.conversionFactor, ui)
+    }
+    this.updateCommitTotal()
+    this.updateTokenFees()
+    this.updateRebalance()
+  }
+
   updateCommitTotal () {
     const { page, assetID, ui } = this
     const commit = this.commit()
     page.commitTotal.textContent = Doc.formatCoinValue(Math.round(commit * ui.conventional.conversionFactor), ui)
     page.commitTotalFiat.textContent = Doc.formatFourSigFigs(commit * app().fiatRatesMap[assetID])
-    this.updateTokenFees()
-    this.updateRebalance()
   }
 
   updateTokenFees () {
@@ -2341,70 +2324,6 @@ class AssetPane {
     const feeReserves = inv.bookingFees + inv.swapFeeReserves
     page.feeTotal.textContent = Doc.formatCoinValue(feeReserves * feeUI.conventional.conversionFactor, feeUI)
     page.feeTotalFiat.textContent = Doc.formatFourSigFigs(feeReserves * app().fiatRatesMap[feeAssetID])
-  }
-
-  updateSlippage () {
-    const { cfg, isQuote, inv, page, ui } = this
-    if (!isQuote) return
-    const basis = inv.book + inv.cex + inv.orderReserves
-    page.slippageBufferBasis.textContent = Doc.formatCoinValue(basis * ui.conventional.conversionFactor, ui)
-    inv.slippageBuffer = basis * cfg.slippageBufferFactor
-    page.slippageBuffer.textContent = Doc.formatCoinValue(inv.slippageBuffer * ui.conventional.conversionFactor, ui)
-  }
-
-  updateOrderInventory (lots: number, lotSize: number) {
-    this.setLotSize(lotSize)
-    const { page, lotSizeConv, inv } = this
-    page.bookLots.textContent = String(lots)
-    page.bookLotSize.textContent = Doc.formatFourSigFigs(lotSizeConv)
-    inv.book = lots * lotSizeConv
-    page.bookCommitment.textContent = Doc.formatFourSigFigs(inv.book)
-    this.updateSlippage()
-  }
-
-  updateCEXInventory (cexCommit: number, dexCommit: number) {
-    const { page, cfg, inv, ui, pg: { specs: { cexName, botType } } } = this
-    if (!cexName) return
-    inv.cex = cexCommit / ui.conventional.conversionFactor
-    page.cexMinInv.textContent = Doc.formatFourSigFigs(inv.cex)
-    const totalInventory = Math.max(cexCommit, dexCommit) / ui.conventional.conversionFactor
-    if (botType !== botTypeBasicArb) {
-      page.orderReservesBasis.textContent = Doc.formatFourSigFigs(totalInventory)
-      const orderReserves = totalInventory * cfg.orderReservesFactor
-      inv.orderReserves = totalInventory
-      page.orderReserves.textContent = Doc.formatFourSigFigs(orderReserves)
-    }
-    this.updateSlippage()
-  }
-
-  updateBookingFeesSimple (lots: number, feesPerLot: number) {
-    const { page, feeUI, inv } = this
-    const feesPerLotConv = feesPerLot / feeUI.conventional.conversionFactor
-    page.bookingFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
-    page.bookingFeesLots.textContent = String(lots)
-    inv.bookingFees = lots * feesPerLotConv
-    page.bookingFees.textContent = Doc.formatFourSigFigs(inv.bookingFees)
-  }
-
-  updateBookingFeesComplex (buyLots: number, feesPerBuyLot: number, sellLots: number, feesPerSellLot: number) {
-    const { page, feeUI, inv } = this
-    const feesPerSellLotConv = feesPerSellLot / feeUI.conventional.conversionFactor
-    page.bookingFeesPerSellLot.textContent = Doc.formatFourSigFigs(feesPerSellLotConv)
-    page.bookingFeesSellLots.textContent = String(sellLots)
-    const feesPerBuyLotConv = feesPerBuyLot / feeUI.conventional.conversionFactor
-    page.bookingFeesPerBuyLot.textContent = Doc.formatFourSigFigs(feesPerBuyLotConv)
-    page.bookingFeesBuyLots.textContent = String(buyLots)
-    inv.bookingFees = feesPerSellLotConv * sellLots + feesPerBuyLotConv * buyLots
-    page.bookingFees.textContent = Doc.formatFourSigFigs(inv.bookingFees)
-  }
-
-  updateFeeReserves (feesPerSwap: number) {
-    const { page, cfg, feeUI, inv, isToken } = this
-    if (!isToken) return
-    const feesPerSwapConv = feesPerSwap / feeUI.conventional.conversionFactor
-    page.feeReservesPerSwap.textContent = Doc.formatFourSigFigs(feesPerSwapConv)
-    inv.swapFeeReserves = feesPerSwapConv * cfg.swapFeeN
-    page.feeReserves.textContent = Doc.formatFourSigFigs(inv.swapFeeReserves)
   }
 
   updateRebalance () {

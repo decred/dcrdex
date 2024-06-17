@@ -361,6 +361,8 @@ func TestCEXBalanceCounterTrade(t *testing.T) {
 		BaseID:  42,
 		QuoteID: 0,
 	}
+	pendingOrder0 := adaptor.pendingDEXOrders[orderIDs[0]]
+	pendingOrder1 := adaptor.pendingDEXOrders[orderIDs[1]]
 
 	order1 := &core.Order{
 		Qty:     5e6,
@@ -370,8 +372,8 @@ func TestCEXBalanceCounterTrade(t *testing.T) {
 		QuoteID: 0,
 	}
 
-	adaptor.pendingDEXOrders[orderIDs[0]].updateState(order0, &balanceEffects{})
-	adaptor.pendingDEXOrders[orderIDs[1]].updateState(order1, &balanceEffects{})
+	pendingOrder0.updateState(order0, &balanceEffects{}, pendingOrder0.counterTradeRate)
+	pendingOrder1.updateState(order1, &balanceEffects{}, pendingOrder1.counterTradeRate)
 
 	dcrBalance := adaptor.CEXBalance(42)
 	expDCR := &BotBalance{
@@ -481,10 +483,13 @@ func TestDistribution(t *testing.T) {
 	// token/parent
 	testDistribution(t, 60001, 60)
 	testDistribution(t, 60, 60001)
-	// token/token
+	// token/token - same chain
+	testDistribution(t, 966002, 966001)
+	testDistribution(t, 966001, 966002)
+	// token/token - different chains
 	testDistribution(t, 60001, 966003)
 	testDistribution(t, 966003, 60001)
-	// token/utxo
+	// utxo/token
 	testDistribution(t, 42, 966003)
 	testDistribution(t, 966003, 42)
 }
@@ -628,8 +633,6 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	setLots(1, 1)
 	// Base asset - perfect distribution - no action
 	setBals(minDexBase, minCexBase, minDexQuote, minCexQuote)
-	checkDistribution(0, 0, 0, 0)
-	// Quote asset - perfect distribution - no action
 	checkDistribution(0, 0, 0, 0)
 
 	// Move all of the base balance to cex and max sure we get a withdraw.
@@ -1014,8 +1017,8 @@ func TestMultiTrade(t *testing.T) {
 			},
 		}
 
-		for id, order := range orders {
-			toReturn[id].updateState(order, &balanceEffects{})
+		for oid, order := range orders {
+			toReturn[oid].updateState(order, &balanceEffects{}, toReturn[oid].counterTradeRate)
 		}
 		return toReturn
 	}
@@ -1048,7 +1051,7 @@ func TestMultiTrade(t *testing.T) {
 			ID:    orderIDs[4][:],
 			Rate:  rate,
 			Epoch: currEpoch - 2,
-		}, &balanceEffects{})
+		}, &balanceEffects{}, pendingOrder.counterTradeRate)
 		orders[orderIDs[4]] = pendingOrder
 		return orders
 	}
@@ -3820,12 +3823,13 @@ func TestRefreshPendingEvents(t *testing.T) {
 			Amount:    calc.BaseToQuote(5e6, 5e7),
 		},
 	}
-	adaptor.pendingDEXOrders[dexOrderID] = &pendingDEXOrder{
+	pord := &pendingDEXOrder{
 		swaps:   map[string]*asset.WalletTransaction{},
 		redeems: map[string]*asset.WalletTransaction{},
 		refunds: map[string]*asset.WalletTransaction{},
 	}
-	adaptor.pendingDEXOrders[dexOrderID].updateState(&core.Order{
+	adaptor.pendingDEXOrders[dexOrderID] = pord
+	pord.updateState(&core.Order{
 		ID:      dexOrderID[:],
 		Sell:    true,
 		Rate:    5e6,
@@ -3844,7 +3848,7 @@ func TestRefreshPendingEvents(t *testing.T) {
 				},
 			},
 		},
-	}, &balanceEffects{})
+	}, &balanceEffects{}, pord.counterTradeRate)
 	ctx := context.Background()
 	adaptor.refreshAllPendingEvents(ctx)
 	expectedDEXAvailableBalance[42] -= 5e6 + 2000

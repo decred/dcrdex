@@ -445,8 +445,8 @@ class Bot extends BotMarket {
 
   updateIdleDisplay () {
     const {
-      page, proj: { alloc, qProj, bProj }, baseID, quoteID, cexName, bui, qui, needQuoteFeeAsset,
-      needBaseFeeAsset, baseFeeID, quoteFeeID, baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor,
+      page, proj: { alloc, qProj, bProj }, baseID, quoteID, cexName, bui, qui, baseFeeID,
+      quoteFeeID, baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor,
       marketReport: { baseFiatRate, quoteFiatRate }, cfg: { uiConfig: { baseConfig, quoteConfig } },
       quoteFeeUI, baseFeeUI
     } = this
@@ -460,18 +460,22 @@ class Bot extends BotMarket {
     Doc.setVis(cexName, page.baseCexAllocBox)
     if (cexName) page.baseCexAlloc.textContent = Doc.formatFullPrecision(bProj.cex * baseFactor, bui)
     Doc.setVis(baseFeeID === baseID, page.baseBookingFeesAllocBox)
-    Doc.setVis(needBaseFeeAsset, page.baseTokenFeesAllocBox)
+    Doc.setVis(baseFeeID !== baseID, page.baseTokenFeesAllocBox)
     if (baseFeeID === baseID) {
       const bookingFees = baseID === quoteFeeID ? bProj.bookingFees + qProj.bookingFees : bProj.bookingFees
       page.baseBookingFeesAlloc.textContent = Doc.formatFullPrecision(bookingFees * baseFeeFactor, baseFeeUI)
-    } else if (needBaseFeeAsset) {
-      page.baseTokenFeeAlloc.textContent = Doc.formatFullPrecision(alloc[baseFeeID], baseFeeUI)
-      const baseFeeUSD = alloc[baseFeeID] / baseFeeFactor * app().fiatRatesMap[baseFeeID]
+    } else {
+      const feeAlloc = alloc[baseFeeID]
+      page.baseTokenFeeAlloc.textContent = Doc.formatFullPrecision(feeAlloc, baseFeeUI)
+      const baseFeeUSD = feeAlloc / baseFeeFactor * app().fiatRatesMap[baseFeeID]
       totalUSD += baseFeeUSD
       page.baseTokenAllocUSD.textContent = Doc.formatFourSigFigs(baseFeeUSD)
-      page.baseTokenBookingFees.textContent = Doc.formatFullPrecision(bProj.bookingFees * baseFeeFactor, baseFeeUI)
-      page.baseTokenSwapFeeN.textContent = String(baseConfig.swapFeeN)
-      page.baseTokenSwapFees.textContent = Doc.formatFullPrecision(bProj.swapFeeReserves * baseFactor, baseFeeUI)
+      const withQuote = baseFeeID === quoteFeeID
+      const bookingFees = bProj.bookingFees + (withQuote ? qProj.bookingFees : 0)
+      page.baseTokenBookingFees.textContent = Doc.formatFullPrecision(bookingFees * baseFeeFactor, baseFeeUI)
+      page.baseTokenSwapFeeN.textContent = String(baseConfig.swapFeeN + (withQuote ? quoteConfig.swapFeeN : 0))
+      const swapReserves = bProj.swapFeeReserves + (withQuote ? qProj.swapFeeReserves : 0)
+      page.baseTokenSwapFees.textContent = Doc.formatFullPrecision(swapReserves * baseFactor, baseFeeUI)
     }
 
     page.quoteAlloc.textContent = Doc.formatFullPrecision(alloc[quoteID], qui)
@@ -485,13 +489,12 @@ class Bot extends BotMarket {
     page.slippageBufferFactor.textContent = String(Math.round(quoteConfig.slippageBufferFactor * 100))
     Doc.setVis(cexName, page.quoteCexAllocBox)
     if (cexName) page.quoteCexAlloc.textContent = Doc.formatFullPrecision(qProj.cex * quoteFactor, qui)
-    const needQuoteFeesDisplay = needQuoteFeeAsset && quoteFeeID !== baseFeeID
     Doc.setVis(quoteID === quoteFeeID, page.quoteBookingFeesAllocBox)
-    Doc.setVis(needQuoteFeesDisplay, page.quoteTokenFeesAllocBox)
+    Doc.setVis(quoteFeeID !== quoteID && quoteFeeID !== baseFeeID, page.quoteTokenFeesAllocBox)
     if (quoteID === quoteFeeID) {
       const bookingFees = quoteID === baseFeeID ? bProj.bookingFees + qProj.bookingFees : qProj.bookingFees
       page.quoteBookingFeesAlloc.textContent = Doc.formatFullPrecision(bookingFees * quoteFeeFactor, quoteFeeUI)
-    } else if (needQuoteFeesDisplay) {
+    } else if (quoteFeeID !== baseFeeID) {
       page.quoteTokenFeeAlloc.textContent = Doc.formatFullPrecision(alloc[quoteFeeID], quoteFeeUI)
       const quoteFeeUSD = alloc[quoteFeeID] / quoteFeeFactor * app().fiatRatesMap[quoteFeeID]
       totalUSD += quoteFeeUSD
@@ -512,8 +515,7 @@ class Bot extends BotMarket {
     const {
       page, marketReport: { baseFiatRate, quoteFiatRate }, baseID, quoteID,
       baseFeeID, quoteFeeID, baseFeeFiatRate, quoteFeeFiatRate, cexName,
-      baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor, needBaseFeeAsset,
-      needQuoteFeeAsset
+      baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor
     } = this
 
     page.appPW.value = ''
@@ -532,14 +534,13 @@ class Bot extends BotMarket {
         [quoteID]: proposedCexQuote * quoteFactor
       }
     }
-    if (f.base.fees.req > 0) alloc.dex[baseFeeID] = f.base.fees.req * baseFeeFactor
-    // special handling here because quoteFeeID could also be baseFeeID
-    if (f.quote.fees.req > 0) alloc.dex[quoteFeeID] = ((alloc.dex[quoteFeeID] ?? 0) + f.quote.fees.req) * quoteFeeFactor
+    alloc.dex[baseFeeID] = (alloc.dex[baseFeeID] ?? 0) + f.base.fees.req * baseFeeFactor
+    alloc.dex[quoteFeeID] = (alloc.dex[quoteFeeID] ?? 0) + f.quote.fees.req * quoteFeeFactor
 
     let totalUSD = (alloc.dex[baseID] / baseFactor * baseFiatRate) + (alloc.dex[quoteID] / quoteFactor * quoteFiatRate)
     totalUSD += (alloc.cex[baseID] / baseFactor * baseFiatRate) + (alloc.cex[quoteID] / quoteFactor * quoteFiatRate)
-    if (needBaseFeeAsset) totalUSD += alloc.dex[baseFeeID] / baseFeeFactor * baseFeeFiatRate
-    if (needQuoteFeeAsset && quoteFeeID !== baseFeeID) totalUSD += alloc.dex[quoteFeeID] / quoteFeeFactor * quoteFeeFiatRate
+    if (baseFeeID !== baseID) totalUSD += alloc.dex[baseFeeID] / baseFeeFactor * baseFeeFiatRate
+    if (quoteFeeID !== quoteID && quoteFeeID !== baseFeeID) totalUSD += alloc.dex[quoteFeeID] / quoteFeeFactor * quoteFeeFiatRate
     page.allocUSD.textContent = Doc.formatFourSigFigs(totalUSD)
 
     Doc.setVis(cexName, ...Doc.applySelector(page.allocationDialog, '[data-cex-only]'))
@@ -548,6 +549,9 @@ class Bot extends BotMarket {
     Doc.setVis(f.fundedAndNotBalanced, page.fundedAndNotBalancedBox)
     Doc.setVis(f.starved, page.starvedBox)
     page.startBttn.classList.toggle('go', f.fundedAndBalanced)
+    page.startBttn.classList.toggle('warning', !f.fundedAndBalanced)
+    page.proposedDexBaseAlloc.classList.toggle('text-warning', !(f.base.fundedAndBalanced || f.base.fundedAndNotBalanced))
+    page.proposedDexQuoteAlloc.classList.toggle('text-warning', !(f.quote.fundedAndBalanced || f.quote.fundedAndNotBalanced))
 
     const setBaseProposal = (dex: number, cex: number) => {
       page.proposedDexBaseAlloc.textContent = Doc.formatFourSigFigs(dex)
@@ -593,15 +597,14 @@ class Bot extends BotMarket {
       }
     }
 
-    const needBaseTokenFees = baseID !== baseFeeID && baseFeeID !== quoteID
-    Doc.setVis(needBaseTokenFees, ...Doc.applySelector(page.allocationDialog, '[data-base-token-fees]'))
-    if (needBaseTokenFees) {
-      const feeReq = f.base.fees.req
+    Doc.setVis(baseFeeID !== baseID, ...Doc.applySelector(page.allocationDialog, '[data-base-token-fees]'))
+    if (baseFeeID !== baseID) {
+      const feeReq = f.base.fees.req + (baseFeeID === quoteFeeID ? f.quote.fees.req : 0)
       page.proposedDexBaseFeeAlloc.textContent = Doc.formatFourSigFigs(feeReq)
       page.proposedDexBaseFeeAllocUSD.textContent = Doc.formatFourSigFigs(feeReq * baseFeeFiatRate)
     }
 
-    const needQuoteTokenFees = quoteID !== quoteFeeID && quoteFeeID !== baseID
+    const needQuoteTokenFees = quoteFeeID !== quoteID && quoteFeeID !== baseFeeID
     Doc.setVis(needQuoteTokenFees, ...Doc.applySelector(page.allocationDialog, '[data-quote-token-fees]'))
     if (needQuoteTokenFees) {
       const feeReq = f.quote.fees.req

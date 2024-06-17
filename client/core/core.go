@@ -3053,6 +3053,7 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 	return wallet.state()
 }
 
+// WalletTraits gets the traits for the wallet.
 func (c *Core) WalletTraits(assetID uint32) (asset.WalletTrait, error) {
 	w, found := c.wallet(assetID)
 	if !found {

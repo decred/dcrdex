@@ -50,7 +50,13 @@ type multiTradePlacement struct {
 // dex order.
 type orderFees struct {
 	*LotFeeRange
-	funding           uint64
+	funding uint64
+	// bookingFeesPerLot is the amount of fee asset that needs to be reserved
+	// for fees, per ordered lot. For all assets, this will include
+	// LotFeeRange.Max.Swap. For non-token EVM assets (eth, matic) Max.Refund
+	// will be added. If the asset is the parent chain of a token counter-asset,
+	// Max.Redeem is added. This is a commonly needed sum in various validation
+	// and optimization functions.
 	bookingFeesPerLot uint64
 }
 
@@ -133,8 +139,9 @@ func newBalanceEffects() *balanceEffects {
 }
 
 type dexOrderState struct {
-	balanceEffects *balanceEffects
-	order          *core.Order
+	balanceEffects   *balanceEffects
+	order            *core.Order
+	counterTradeRate uint64
 }
 
 // pendingDEXOrder keeps track of the balance effects of a pending DEX order.
@@ -162,10 +169,11 @@ type pendingDEXOrder struct {
 // state is stored as an atomic.Value in order to allow reads without locking.
 // The mutex only needs to be locked for reading if the caller wants a consistent
 // view of the transactions and the state.
-func (p *pendingDEXOrder) updateState(order *core.Order, balanceEffects *balanceEffects) {
+func (p *pendingDEXOrder) updateState(order *core.Order, balanceEffects *balanceEffects, counterTradeRate uint64) {
 	p.state.Store(&dexOrderState{
-		order:          order,
-		balanceEffects: balanceEffects,
+		order:            order,
+		balanceEffects:   balanceEffects,
+		counterTradeRate: counterTradeRate,
 	})
 }
 
@@ -883,8 +891,9 @@ func (u *unifiedExchangeAdaptor) placeMultiTrade(placements []*dexOrderInfo, sel
 		}
 		pendingOrder.state.Store(
 			&dexOrderState{
-				order:          o,
-				balanceEffects: effects,
+				order:            o,
+				balanceEffects:   effects,
+				counterTradeRate: pendingOrder.counterTradeRate,
 			})
 		u.pendingDEXOrders[orderID] = pendingOrder
 		newPendingDEXOrders = append(newPendingDEXOrders, u.pendingDEXOrders[orderID])
@@ -1772,12 +1781,14 @@ func (u *unifiedExchangeAdaptor) reversePriorityOrders(sell bool) []*dexOrderSta
 	return orders
 }
 
-// freeUpFunds cancels active orders to free up the specified amount of funds
-// for a transfer between the dex and the cex. The orders are cancelled in
-// reverse order of priority (determined by the order in which they were passed
-// into MultiTrade).
-// pruneMatchableTo is the amount of counter-asset that will be available
-// for matching if our intended transfers are completed succesfully.
+// freeUpFunds identifies cancelable orders to free up funds for a proposed
+// transfer. Identified orders are sorted in reverse order of priority. For
+// orders with the same placement index, smaller orders are first. minToFree
+// specifies a minimum amount of funds to liberate. pruneMatchableTo is the
+// counter-asset quantity for some amount of cex balance, and we'll continue to
+// add cancel orders until we're not over-matching. freeUpFunds does not
+// actually cancel any orders. It just identifies orders that can be canceled
+// immediately to satisfy the conditions specified.
 func (u *unifiedExchangeAdaptor) freeUpFunds(
 	assetID uint32,
 	minToFree uint64,
@@ -1790,7 +1801,7 @@ func (u *unifiedExchangeAdaptor) freeUpFunds(
 	for _, o := range orders {
 		var matchable uint64
 		if assetID == o.order.BaseID {
-			matchable += calc.BaseToQuote(o.order.Rate, o.order.Qty)
+			matchable += calc.BaseToQuote(o.counterTradeRate, o.order.Qty)
 		} else {
 			matchable += o.order.Qty
 		}
@@ -1815,7 +1826,7 @@ func (u *unifiedExchangeAdaptor) freeUpFunds(
 
 	amtFreedByCancellingOrder := func(o *dexOrderState) (locked, counterQty uint64) {
 		if assetID == o.order.BaseID {
-			return o.balanceEffects.locked[assetID], calc.BaseToQuote(o.order.Rate, o.order.Qty)
+			return o.balanceEffects.locked[assetID], calc.BaseToQuote(o.counterTradeRate, o.order.Qty)
 		}
 		return o.balanceEffects.locked[assetID], o.order.Qty
 	}
@@ -2402,7 +2413,7 @@ func (u *unifiedExchangeAdaptor) checkPendingDEXOrderTxs(pendingOrder *pendingDE
 		}
 	}
 
-	pendingOrder.updateState(o, effects)
+	pendingOrder.updateState(o, effects, pendingOrder.counterTradeRate)
 	return
 }
 
@@ -2828,20 +2839,23 @@ func (u *unifiedExchangeAdaptor) transfer(dist *distribution, currEpoch uint64) 
 // assetInventory is an accounting of the distribution of base- or quote-asset
 // funding.
 type assetInventory struct {
-	dex         uint64
-	dexAvail    uint64
-	dexPending  uint64
-	dexLocked   uint64
-	dexLots     uint64
+	dex        uint64
+	dexAvail   uint64
+	dexPending uint64
+	dexLocked  uint64
+	dexLots    uint64
+
 	cex         uint64
 	cexAvail    uint64
 	cexPending  uint64
 	cexReserved uint64
 	cexLocked   uint64
 	cexLots     uint64
-	total       uint64
-	toDeposit   uint64
-	toWithdraw  uint64
+
+	total uint64
+
+	toDeposit  uint64
+	toWithdraw uint64
 }
 
 // inventory generates a current view of the the bot's asset distribution.
@@ -2868,7 +2882,7 @@ func (u *unifiedExchangeAdaptor) inventory(assetID uint32, dexLot, cexLot uint64
 	return
 }
 
-// cexCounterRates attemts to get vwap estimates for the cex book for a
+// cexCounterRates attempts to get vwap estimates for the cex book for a
 // specified number of lots. If the book is too empty for the specified number
 // of lots, a 1-lot estimate will be attempted too.
 func (u *unifiedExchangeAdaptor) cexCounterRates(cexBuyLots, cexSellLots uint64) (dexBuyRate, dexSellRate uint64, err error) {
@@ -2931,16 +2945,16 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() error {
 	}
 
 	buyBookingFeesPerLot := maxQuoteFees.Swap
-	if u.quoteID == u.quoteFeeID {
-		buyBookingFeesPerLot += maxQuoteFees.Redeem
+	if u.quoteFeeID == u.baseFeeID {
+		buyBookingFeesPerLot += maxBaseFees.Redeem
 	}
 	if u.quoteTraits.IsAccountLocker() {
 		buyBookingFeesPerLot += maxQuoteFees.Refund
 	}
 
 	sellBookingFeesPerLot := maxBaseFees.Swap
-	if u.baseID == u.baseFeeID {
-		sellBookingFeesPerLot += maxBaseFees.Redeem
+	if u.baseFeeID == u.quoteFeeID {
+		sellBookingFeesPerLot += maxQuoteFees.Redeem
 	}
 	if u.baseTraits.IsAccountLocker() {
 		sellBookingFeesPerLot += maxBaseFees.Refund

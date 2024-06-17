@@ -469,10 +469,10 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 		defer wg.Done()
 		for {
 			select {
-			case n := <-bookFeed.Next():
-				if n.Action == core.EpochMatchSummary {
-					payload := n.Payload.(*core.EpochMatchSummaryPayload)
-					m.rebalance(payload.Epoch + 1)
+			case ni := <-bookFeed.Next():
+				switch epoch := ni.Payload.(type) {
+				case *core.ResolvedEpoch:
+					m.rebalance(epoch.Current)
 				}
 			case <-m.ctx.Done():
 				return

@@ -460,10 +460,10 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 		defer wg.Done()
 		for {
 			select {
-			case n := <-bookFeed.Next():
-				if n.Action == core.EpochMatchSummary {
-					payload := n.Payload.(*core.EpochMatchSummaryPayload)
-					a.rebalance(payload.Epoch + 1)
+			case ni := <-bookFeed.Next():
+				switch epoch := ni.Payload.(type) {
+				case *core.ResolvedEpoch:
+					a.rebalance(epoch.Current)
 				}
 			case <-a.ctx.Done():
 				return

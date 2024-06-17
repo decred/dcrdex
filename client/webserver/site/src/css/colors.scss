@@ -9,6 +9,7 @@ body:not(.dark) {
   --text-color: #333;
   --text-color-secondary: #4a4949;
   --text-danger: #d22;
+  --text-warning: #f82e;
   --text-grey: #777;
   --border-color: #ddd;
   --hint-color: #4397cd;
@@ -75,6 +76,7 @@ body.dark {
   --text-color: #dfe2e1;
   --text-color-secondary: #a1a1a1;
   --text-danger: #ec6a6a;
+  --text-warning: #f82e;
   --text-grey: #999;
   --border-color: #383f4b;
   --hint-color: #64b2e5;

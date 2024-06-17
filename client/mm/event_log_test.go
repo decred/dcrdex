@@ -313,9 +313,6 @@ func TestEventLogDB(t *testing.T) {
 	if !reflect.DeepEqual(overview.InitialBalances, initialBals) {
 		t.Fatalf("expected initial balances %v, got %v", initialBals, overview.InitialBalances)
 	}
-	if !reflect.DeepEqual(overview.FinalBalances, finalBals) {
-		t.Fatalf("expected final balances %v, got %v", finalBals, overview.FinalBalances)
-	}
 	expPL := newProfitLoss(initialBals, finalBals, nil, fiatRates)
 	if overview.ProfitLoss.Profit != expPL.Profit {
 		t.Fatalf("expected profit loss %v, got %v", expPL, overview.ProfitLoss)

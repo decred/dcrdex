@@ -221,7 +221,7 @@ div.clear {
 }
 
 .text-warning {
-  color: $warning;
+  color: var(--text-warning);
 }
 
 .text-buycolor {

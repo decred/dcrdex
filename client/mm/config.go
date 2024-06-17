@@ -31,11 +31,19 @@ type CEXConfig struct {
 	APISecret string `json:"apiSecret"`
 }
 
-// AutoRebalanceConfig determines how the bot will automatically rebalance its
-// assets between the CEX and DEX. If the base or quote asset dips below the
-// minimum amount, a transfer will take place, but only if both balances can be
-// brought above the minimum amount and the transfer amount would be above the
-// minimum transfer amount.
+// AutoRebalanceConfig configures deposits and withdrawals by setting minimum
+// transfer sizes. Minimum transfer sizes should be set to prevent excessive
+// fees on high-fee blockchains. To calculate a minimum transfer size for an
+// asset, choose a fee-loss tolerance <= your profit target. If you only wanted to
+// lose a maximum of 1% to transfers, and the fees associated with a transfer
+// are 350 Sats, then your minimum transfer size might be set to
+// 350 * (1 / 0.01) = 35000 Sats.
+// For low-fee assets, a transfer size of zero would be perfectly fine in most
+// cases, but using a higher value prevents churn.
+// For obvious reasons, minimum transfer sizes should never be more than the
+// total amount allocated for trading.
+// The way these are configured will probably be changed to better capture the
+// reasoning above.
 type AutoRebalanceConfig struct {
 	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
 	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`

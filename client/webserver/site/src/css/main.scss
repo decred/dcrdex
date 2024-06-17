@@ -95,7 +95,7 @@ div.note-indicator {
   }
 
   &.warn {
-    background-color: $warning;
+    background-color: var(--text-warning);
   }
 }
 
@@ -139,7 +139,7 @@ img.bison-logo-full {
   }
 
   &.warn {
-    color: $warning;
+    color: var(--text-warning);
   }
 }
 

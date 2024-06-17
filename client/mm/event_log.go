@@ -94,7 +94,6 @@ type MarketMakingRunOverview struct {
 	EndTime         *int64            `json:"endTime,omitempty"`
 	Cfgs            []*CfgUpdate      `json:"cfgs"`
 	InitialBalances map[uint32]uint64 `json:"initialBalances"`
-	FinalBalances   map[uint32]uint64 `json:"finalBalances"`
 	ProfitLoss      *ProfitLoss       `json:"profitLoss"`
 	FinalState      *BalanceState     `json:"finalState"`
 }
@@ -497,7 +496,6 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 			EndTime:         endTime,
 			Cfgs:            cfgs,
 			InitialBalances: initialBals,
-			FinalBalances:   finalBals,
 			ProfitLoss:      newProfitLoss(initialBals, finalBals, finalState.InventoryMods, finalState.FiatRates),
 			FinalState:      finalState,
 		}

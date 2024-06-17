@@ -18,10 +18,10 @@ import {
   MarketReport,
   BotBalanceAllocation,
   ProjectedAlloc,
-  FeeEstimates,
   BalanceNote,
   BotBalance,
-  Order
+  Order,
+  LotFeeRange
 } from './registry'
 import { getJSON, postJSON } from './http'
 import Doc, { clamp } from './doc'
@@ -379,6 +379,7 @@ export class BotMarket {
   baseSymbol: string
   baseTicker: string
   baseFeeID: number
+  baseIsAccountLocker: boolean
   baseFeeSymbol: string
   baseFeeTicker: string
   baseToken?: Token
@@ -386,6 +387,7 @@ export class BotMarket {
   quoteSymbol: string
   quoteTicker: string
   quoteFeeID: number
+  quoteIsAccountLocker: boolean
   quoteFeeSymbol: string
   quoteFeeTicker: string
   quoteToken?: Token
@@ -398,12 +400,10 @@ export class BotMarket {
   baseFactor: number
   baseFeeUI: UnitInfo
   baseFeeFactor: number
-  needBaseFeeAsset: boolean
   qui: UnitInfo
   quoteFactor: number
   quoteFeeUI: UnitInfo
   quoteFeeFactor: number
-  needQuoteFeeAsset: boolean
   id: string // includes host
   mktID: string
   lotSize: number
@@ -438,12 +438,13 @@ export class BotMarket {
     this.baseFactor = bui.conventional.conversionFactor
     this.baseToken = baseToken
     const baseFeeID = this.baseFeeID = baseToken ? baseToken.parentID : baseID
-    const { unitInfo: baseFeeUI, symbol: baseFeeSymbol } = app().assets[this.baseFeeID]
+    const { unitInfo: baseFeeUI, symbol: baseFeeSymbol, wallet: baseWallet } = app().assets[this.baseFeeID]
+    const traitAccountLocker = 1 << 14
+    this.baseIsAccountLocker = (baseWallet.traits & traitAccountLocker) > 0
     this.baseFeeUI = baseFeeUI
     this.baseFeeTicker = baseFeeUI.conventional.unit
     this.baseFeeSymbol = baseFeeSymbol
     this.baseFeeFactor = this.baseFeeUI.conventional.conversionFactor
-    this.needBaseFeeAsset = baseFeeID !== baseID && baseFeeID !== quoteID
 
     const { token: quoteToken, symbol: quoteSymbol, unitInfo: qui } = app().assets[quoteID]
     this.quoteSymbol = quoteSymbol
@@ -452,12 +453,12 @@ export class BotMarket {
     this.quoteFactor = qui.conventional.conversionFactor
     this.quoteToken = quoteToken
     const quoteFeeID = this.quoteFeeID = quoteToken ? quoteToken.parentID : quoteID
-    const { unitInfo: quoteFeeUI, symbol: quoteFeeSymbol } = app().assets[this.quoteFeeID]
+    const { unitInfo: quoteFeeUI, symbol: quoteFeeSymbol, wallet: quoteWallet } = app().assets[this.quoteFeeID]
+    this.quoteIsAccountLocker = (quoteWallet.traits & traitAccountLocker) > 0
     this.quoteFeeUI = quoteFeeUI
     this.quoteFeeTicker = quoteFeeUI.conventional.unit
     this.quoteFeeSymbol = quoteFeeSymbol
     this.quoteFeeFactor = this.quoteFeeUI.conventional.conversionFactor
-    this.needQuoteFeeAsset = quoteFeeID !== quoteID && quoteFeeID !== baseID
 
     this.id = hostedMarketID(host, baseID, quoteID)
     this.mktID = `${baseSymbol}_${quoteSymbol}`
@@ -571,57 +572,14 @@ export class BotMarket {
    */
   feesAndCommit () {
     const {
-      baseID, quoteID, marketReport: { baseFees, quoteFees },
-      lotSize, baseLots, quoteLots, baseFeeID, quoteFeeID
+      baseID, quoteID, marketReport: { baseFees, quoteFees }, lotSize,
+      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker
     } = this
 
-    const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID)
-    const [cexBaseLots, cexQuoteLots] = [quoteLots, baseLots]
-    const commit = {
-      dex: {
-        base: {
-          lots: baseLots,
-          val: baseLots * lotSize
-        },
-        quote: {
-          lots: quoteLots,
-          val: quoteLots * quoteLot
-        }
-      },
-      cex: {
-        base: {
-          lots: cexBaseLots,
-          val: cexBaseLots * lotSize
-        },
-        quote: {
-          lots: cexQuoteLots,
-          val: cexQuoteLots * quoteLot
-        }
-      }
-    }
-
-    const baseFeeReserves = baseFees.estimated.swap + Math.max(baseFees.estimated.redeem, baseFees.estimated.refund)
-    const quoteFeeReserves = quoteFees.estimated.swap + Math.max(quoteFees.estimated.redeem + quoteFees.estimated.refund)
-    let baseBookingFeesPerLot = baseFees.max.swap
-    if (quoteFeeID === baseFeeID) baseBookingFeesPerLot += quoteFees.max.redeem
-    let quoteBookingFeesPerLot = quoteFees.max.swap
-    if (baseFeeID === quoteFeeID) quoteBookingFeesPerLot += baseFees.max.redeem
-    const fees: { base: FeeEstimates, quote: FeeEstimates } = {
-      base: {
-        ...baseFees,
-        bookingFeesPerLot: baseBookingFeesPerLot,
-        bookingFees: baseBookingFeesPerLot * commit.dex.base.lots,
-        feesPerSwap: baseFeeReserves
-      },
-      quote: {
-        ...quoteFees,
-        bookingFeesPerLot: quoteBookingFeesPerLot,
-        bookingFees: quoteBookingFeesPerLot * commit.dex.quote.lots,
-        feesPerSwap: quoteFeeReserves
-      }
-    }
-
-    return { commit, fees }
+    return feesAndCommit(
+      baseID, quoteID, baseFees, quoteFees, lotSize, baseLots, quoteLots,
+      baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker
+    )
   }
 
   /*
@@ -651,18 +609,19 @@ export class BotMarket {
       qProj.cex = commit.cex.quote.lots * quoteLotConv
     }
 
-    bProj.bookingFees = commit.dex.base.lots * fees.base.bookingFeesPerLot / baseFeeFactor
-    qProj.bookingFees = commit.dex.quote.lots * fees.quote.bookingFeesPerLot / quoteFeeFactor
+    bProj.bookingFees = fees.base.bookingFees / baseFeeFactor
+    qProj.bookingFees = fees.quote.bookingFees / quoteFeeFactor
 
-    if (baseToken) bProj.swapFeeReserves = fees.base.feesPerSwap * baseConfig.swapFeeN / baseFeeFactor
-    if (quoteToken) qProj.swapFeeReserves = fees.quote.feesPerSwap * quoteConfig.swapFeeN / quoteFeeFactor
+    if (baseToken) bProj.swapFeeReserves = fees.base.tokenFeesPerSwap * baseConfig.swapFeeN / baseFeeFactor
+    if (quoteToken) qProj.swapFeeReserves = fees.quote.tokenFeesPerSwap * quoteConfig.swapFeeN / quoteFeeFactor
     qProj.slippageBuffer = (qProj.book + qProj.cex + qProj.orderReserves) * quoteConfig.slippageBufferFactor
 
     const alloc: Record<number, number> = {}
-    alloc[baseID] = Math.round((bProj.book + bProj.cex + bProj.orderReserves) * baseFactor)
-    alloc[baseFeeID] = (alloc[baseFeeID] ?? 0) + Math.round((bProj.bookingFees + bProj.swapFeeReserves) * baseFeeFactor)
-    alloc[quoteID] = Math.round((qProj.book + qProj.cex + qProj.orderReserves + qProj.slippageBuffer) * quoteFactor)
-    alloc[quoteFeeID] = (alloc[quoteFeeID] ?? 0) + Math.round((qProj.bookingFees + qProj.swapFeeReserves) * quoteFactor)
+    const addAlloc = (assetID: number, amt: number) => { alloc[assetID] = (alloc[assetID] ?? 0) + amt }
+    addAlloc(baseID, Math.round((bProj.book + bProj.cex + bProj.orderReserves) * baseFactor))
+    addAlloc(baseFeeID, Math.round((bProj.bookingFees + bProj.swapFeeReserves) * baseFeeFactor))
+    addAlloc(quoteID, Math.round((qProj.book + qProj.cex + qProj.orderReserves + qProj.slippageBuffer) * quoteFactor))
+    addAlloc(quoteFeeID, Math.round((qProj.bookingFees + qProj.swapFeeReserves) * quoteFeeFactor))
 
     return { qProj, bProj, alloc }
   }
@@ -830,13 +789,13 @@ export class RunningMarketMakerDisplay {
     this.mkt = mkt
     const {
       page, div, mkt: {
-        host, baseID, quoteID, cexName, baseFeeSymbol, quoteFeeSymbol, baseFeeTicker,
-        quoteFeeTicker, needBaseFeeAsset, needQuoteFeeAsset, cfg, baseFactor, quoteFactor
+        host, baseID, quoteID, baseFeeID, quoteFeeID, cexName, baseFeeSymbol,
+        quoteFeeSymbol, baseFeeTicker, quoteFeeTicker, cfg, baseFactor, quoteFactor
       }
     } = this
     setMarketElements(div, baseID, quoteID, host)
-    Doc.setVis(needBaseFeeAsset, page.baseFeeReservesBox)
-    Doc.setVis(needQuoteFeeAsset, page.quoteFeeReservesBox)
+    Doc.setVis(baseFeeID !== baseID, page.baseFeeReservesBox)
+    Doc.setVis(quoteFeeID !== quoteID, page.quoteFeeReservesBox)
     Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
     page.baseFeeLogo.src = Doc.logoPath(baseFeeSymbol)
     page.baseFeeTicker.textContent = baseFeeTicker
@@ -890,8 +849,8 @@ export class RunningMarketMakerDisplay {
   update () {
     const {
       div, page, mkt: {
-        baseID, quoteID, baseFeeID, needBaseFeeAsset, needQuoteFeeAsset, quoteFeeID,
-        baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor, marketReport: { baseFiatRate, quoteFiatRate }
+        baseID, quoteID, baseFeeID, quoteFeeID, baseFactor, quoteFactor, baseFeeFactor,
+        quoteFeeFactor, marketReport: { baseFiatRate, quoteFiatRate }
       }
     } = this
     // Get fresh stats
@@ -936,11 +895,11 @@ export class RunningMarketMakerDisplay {
       page.cexQuoteInventory.textContent = Doc.formatFourSigFigs(cexQuoteInv)
     }
 
-    if (needBaseFeeAsset) {
+    if (baseFeeID !== baseID) {
       const feeBalance = summedBalance(runStats.dexBalances[baseFeeID]) / baseFeeFactor
       page.baseFeeReserves.textContent = Doc.formatFourSigFigs(feeBalance)
     }
-    if (needQuoteFeeAsset) {
+    if (quoteFeeID !== quoteID) {
       const feeBalance = summedBalance(runStats.dexBalances[quoteFeeID]) / quoteFeeFactor
       page.quoteFeeReserves.textContent = Doc.formatFourSigFigs(feeBalance)
     }
@@ -986,4 +945,70 @@ function setSignedValue (v: number, vEl: PageElement, signEl: PageElement) {
   signEl.classList.toggle('ico-plus', v > 0)
   signEl.classList.toggle('text-good', v > 0)
   // signEl.classList.toggle('ico-minus', v < 0)
+}
+
+export function feesAndCommit (
+  baseID: number, quoteID: number, baseFees: LotFeeRange, quoteFees: LotFeeRange,
+  lotSize: number, baseLots: number, quoteLots: number, baseFeeID: number, quoteFeeID: number,
+  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean
+) {
+  const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID)
+  const [cexBaseLots, cexQuoteLots] = [quoteLots, baseLots]
+  const commit = {
+    dex: {
+      base: {
+        lots: baseLots,
+        val: baseLots * lotSize
+      },
+      quote: {
+        lots: quoteLots,
+        val: quoteLots * quoteLot
+      }
+    },
+    cex: {
+      base: {
+        lots: cexBaseLots,
+        val: cexBaseLots * lotSize
+      },
+      quote: {
+        lots: cexQuoteLots,
+        val: cexQuoteLots * quoteLot
+      }
+    }
+  }
+
+  let baseTokenFeesPerSwap = 0
+  if (baseID !== baseFeeID) { // token
+    baseTokenFeesPerSwap += baseFees.estimated.swap
+    if (baseFeeID === quoteFeeID) baseTokenFeesPerSwap += quoteFees.estimated.redeem
+  }
+  let baseBookingFeesPerLot = baseFees.max.swap
+  if (baseID === quoteFeeID) baseBookingFeesPerLot += quoteFees.max.redeem
+  if (baseIsAccountLocker) baseBookingFeesPerLot += baseFees.max.refund
+
+  let quoteTokenFeesPerSwap = 0
+  if (quoteID !== quoteFeeID) {
+    quoteTokenFeesPerSwap += quoteFees.estimated.swap
+    if (quoteFeeID === baseFeeID) quoteTokenFeesPerSwap += baseFees.estimated.redeem
+  }
+  let quoteBookingFeesPerLot = quoteFees.max.swap
+  if (quoteID === baseFeeID) quoteBookingFeesPerLot += baseFees.max.redeem
+  if (quoteIsAccountLocker) quoteBookingFeesPerLot += quoteFees.max.refund
+
+  const fees = {
+    base: {
+      ...baseFees,
+      bookingFeesPerLot: baseBookingFeesPerLot,
+      bookingFees: baseBookingFeesPerLot * commit.dex.base.lots,
+      tokenFeesPerSwap: baseTokenFeesPerSwap
+    },
+    quote: {
+      ...quoteFees,
+      bookingFeesPerLot: quoteBookingFeesPerLot,
+      bookingFees: quoteBookingFeesPerLot * commit.dex.quote.lots,
+      tokenFeesPerSwap: quoteTokenFeesPerSwap
+    }
+  }
+
+  return { commit, fees }
 }

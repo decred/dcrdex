@@ -2555,16 +2555,13 @@ func (m *TMarketMaker) RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm
 			},
 		},
 		InitialBalances: make(map[uint32]uint64),
-		FinalBalances:   make(map[uint32]uint64),
 		ProfitLoss:      randomProfitLoss(mkt.BaseID, mkt.QuoteID),
 	}
 
 	for _, assetID := range []uint32{mkt.BaseID, mkt.QuoteID} {
 		run.InitialBalances[assetID] = randomBalance()
-		run.FinalBalances[assetID] = randomBalance()
 		if tkn := asset.TokenInfo(assetID); tkn != nil {
 			run.InitialBalances[tkn.ParentID] = randomBalance()
-			run.FinalBalances[tkn.ParentID] = randomBalance()
 		}
 	}
 

@@ -100,7 +100,7 @@ div[data-handler=markets] {
     }
 
     .ico-disconnected {
-      color: $warning;
+      color: var(--text-warning);
     }
   }
 
@@ -350,8 +350,8 @@ div[data-handler=markets] {
 
       &:hover,
       &.selected {
-        border-color: $warning;
-        color: $warning;
+        border-color: var(--text-warning);
+        color: var(--text-warning);
       }
     }
   }
