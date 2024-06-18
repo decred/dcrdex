@@ -29,6 +29,8 @@ import * as OrderUtil from './orderutil'
 import { Forms, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
 
+const mediumBreakpoint = 768
+
 interface FundingSlider {
   left: {
     cex: number
@@ -164,12 +166,15 @@ export default class MarketMakerPage extends BasePage {
   keyup: (e: KeyboardEvent) => void
   cexConfigForm: CEXConfigurationForm
   bots: Record<string, Bot>
+  sortedBots: Bot[]
   cexes: Record<string, CEXRow>
+  twoColumn: boolean
 
   constructor (main: HTMLElement) {
     super()
 
     this.bots = {}
+    this.sortedBots = []
     this.cexes = {}
 
     const page = this.page = Doc.idDescendants(main)
@@ -181,7 +186,10 @@ export default class MarketMakerPage extends BasePage {
 
     Doc.bind(page.newBot, 'click', () => { this.newBot() })
     Doc.bind(page.archivedLogsBtn, 'click', () => { app().loadPage('mmarchives') })
-    // bindForm(page.pwForm, page.pwSubmit, () => this.startBots())
+
+    this.twoColumn = window.innerWidth >= mediumBreakpoint
+    const ro = new ResizeObserver(() => { this.resized() })
+    ro.observe(main)
 
     for (const [cexName, dinfo] of Object.entries(CEXDisplayInfos)) {
       const tr = page.exchangeRowTmpl.cloneNode(true) as PageElement
@@ -198,6 +206,15 @@ export default class MarketMakerPage extends BasePage {
     this.setup()
   }
 
+  resized () {
+    const useTwoColumn = window.innerWidth >= 768
+    if (useTwoColumn !== this.twoColumn) {
+      this.twoColumn = useTwoColumn
+      this.clearBotBoxes()
+      for (const { div } of this.sortedBots) this.appendBotBox(div)
+    }
+  }
+
   async setup () {
     const page = this.page
     const mmStatus = app().mmStatus
@@ -211,6 +228,7 @@ export default class MarketMakerPage extends BasePage {
     const noBots = !botConfigs || botConfigs.length === 0
     Doc.setVis(noBots, page.noBots)
     if (noBots) return
+    page.noBots.remove()
 
     const sortedBots = [...mmStatus.bots].sort((a: MMBotStatus, b: MMBotStatus) => {
       if (a.running && !b.running) return -1
@@ -239,15 +257,39 @@ export default class MarketMakerPage extends BasePage {
   }
 
   addBot (botStatus: MMBotStatus, startupBalanceCache?: Record<number, Promise<ExchangeBalance>>) {
-    const { page, bots } = this
+    const { page, bots, sortedBots } = this
     const bot = new Bot(this, botStatus, startupBalanceCache)
-    page.box.appendChild(bot.div)
     page.botRows.appendChild(bot.row.tr)
+    sortedBots.push(bot)
     bots[bot.id] = bot
+    this.appendBotBox(bot.div)
+  }
+
+  appendBotBox (div: PageElement) {
+    const { page: { boxZero, boxOne }, twoColumn } = this
+    const useZeroth = !twoColumn || (boxZero.children.length + boxOne.children.length) % 2 === 0
+    const box = useZeroth ? boxZero : boxOne
+    box.append(div)
+  }
+
+  clearBotBoxes () {
+    const { page: { boxOne, boxZero } } = this
+    while (boxZero.children.length > 1) boxZero.removeChild(boxZero.lastChild as Element)
+    while (boxOne.children.length > 0) boxOne.removeChild(boxOne.lastChild as Element)
   }
 
   showBot (botID: string) {
-    this.page.overview.after(this.bots[botID].div)
+    const { sortedBots } = this
+    const idx = sortedBots.findIndex((bot: Bot) => bot.id === botID)
+    sortedBots.splice(idx, 1)
+    sortedBots.unshift(this.bots[botID])
+    this.clearBotBoxes()
+    for (const { div } of sortedBots) this.appendBotBox(div)
+    const div = this.bots[botID].div
+    Doc.animate(250, (p: number) => {
+      div.style.opacity = `${p}`
+      div.style.transform = `scale(${0.8 + 0.2 * p})`
+    })
   }
 
   newBot () {
@@ -319,6 +361,7 @@ class Bot extends BotMarket {
     startupBalanceCache = startupBalanceCache ?? {}
     this.pg = pg
     const { baseID, quoteID, host, botType, nBuyPlacements, nSellPlacements, cexName } = this
+    this.id = hostedMarketID(host, baseID, quoteID)
 
     const div = this.div = pg.page.botTmpl.cloneNode(true) as PageElement
     const page = this.page = Doc.parseTemplate(div)
@@ -369,7 +412,7 @@ class Bot extends BotMarket {
     await super.initialize(startupBalanceCache)
     this.runDisplay.setBotMarket(this)
     const {
-      page, host, cexName, botType,
+      page, host, cexName, botType, div,
       cfg: { arbMarketMakingConfig, basicMarketMakingConfig }, mktID,
       baseFactor, quoteFactor, marketReport: { baseFiatRate }
     } = this
@@ -406,6 +449,7 @@ class Bot extends BotMarket {
         }
       }
     }
+    Doc.setVis(Boolean(cexName), ...Doc.applySelector(div, '[data-cex-show]'))
 
     const { spot } = app().exchanges[host].markets[mktID]
     if (spot) {

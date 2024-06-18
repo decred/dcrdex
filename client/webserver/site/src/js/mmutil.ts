@@ -172,6 +172,7 @@ export function setCexElements (ancestor: PageElement, cexName: string) {
   const dinfo = CEXDisplayInfos[cexName]
   Doc.setText(ancestor, '[data-cex-name]', dinfo.name)
   Doc.setSrc(ancestor, '[data-cex-logo]', dinfo.logo)
+  for (const img of Doc.applySelector(ancestor, '[data-cex-logo]')) Doc.show(img)
 }
 
 export function calculateQuoteLot (lotSize: number, baseID: number, quoteID: number, spot?: Spot) {
@@ -796,7 +797,7 @@ export class RunningMarketMakerDisplay {
     setMarketElements(div, baseID, quoteID, host)
     Doc.setVis(baseFeeID !== baseID, page.baseFeeReservesBox)
     Doc.setVis(quoteFeeID !== quoteID, page.quoteFeeReservesBox)
-    Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
+    Doc.setVis(Boolean(cexName), ...Doc.applySelector(div, '[data-cex-show]'))
     page.baseFeeLogo.src = Doc.logoPath(baseFeeSymbol)
     page.baseFeeTicker.textContent = baseFeeTicker
     page.quoteFeeLogo.src = Doc.logoPath(quoteFeeSymbol)
