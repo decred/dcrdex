@@ -58,7 +58,7 @@ const (
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
 
-	minNetworkVersion  = 210000
+	minNetworkVersion  = 270000
 	minProtocolVersion = 70015
 	// version which descriptor wallets have been introduced.
 	minDescriptorVersion = 220000
