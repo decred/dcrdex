@@ -414,7 +414,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         const { minV, range, prec } = defaultOracleWeighting
         const [v] = toFourSigFigs(rawV / 100, prec)
         this.oracleWeightingSlider.setValue((v - minV) / range)
-        this.updatedConfig.oracleWeighting = v
+        this.updatedConfig.oracleWeighting = v / 100
       }
     })
 
@@ -612,6 +612,13 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setupCEXes()
     this.initializeMarketRows()
 
+    const isRefresh = specs && Object.keys(specs).length === 0
+    if (isRefresh) specs = State.fetchLocal(specLK)
+    if (!specs || !app().walletMap[specs.baseID] || !app().walletMap[specs.quoteID]) {
+      this.showMarketSelectForm()
+      return
+    }
+
     // If we have specs specifying only a market, make sure the cex name and
     // bot type are set.
     if (specs && !specs.botType) {
@@ -620,13 +627,6 @@ export default class MarketMakerSettingsPage extends BasePage {
       specs.botType = botTypeBasicMM
       if (botCfg?.arbMarketMakingConfig) specs.botType = botTypeArbMM
       else if (botCfg?.simpleArbConfig) specs.botType = botTypeBasicArb
-    }
-
-    const isRefresh = specs && Object.keys(specs).length === 0
-    if (isRefresh) specs = State.fetchLocal(specLK)
-    if (!specs || !app().walletMap[specs.baseID] || !app().walletMap[specs.quoteID]) {
-      this.showMarketSelectForm()
-      return
     }
 
     // Must be a reconfig.
@@ -678,6 +678,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
       oldCfg.baseConfig = Object.assign({}, defaultBotAssetConfig, botCfg.uiConfig.baseConfig)
       oldCfg.quoteConfig = Object.assign({}, defaultBotAssetConfig, botCfg.uiConfig.quoteConfig)
+      oldCfg.baseOptions = botCfg.baseWalletOptions || {}
+      oldCfg.quoteOptions = botCfg.quoteWalletOptions || {}
       oldCfg.cexRebalance = cexRebalance
 
       if (mmCfg) {
@@ -685,7 +687,6 @@ export default class MarketMakerSettingsPage extends BasePage {
         oldCfg.sellPlacements = mmCfg.sellPlacements
         oldCfg.driftTolerance = mmCfg.driftTolerance
         oldCfg.gapStrategy = mmCfg.gapStrategy
-        oldCfg.driftTolerance = mmCfg.driftTolerance
         oldCfg.oracleWeighting = mmCfg.oracleWeighting
         oldCfg.oracleBias = mmCfg.oracleBias
         oldCfg.emptyMarketRate = mmCfg.emptyMarketRate
@@ -723,6 +724,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     setMarketElements(document.body, baseID, quoteID, host)
     Doc.setVis(botType === botTypeBasicMM, page.emptyMarketRateBox)
+    Doc.setVis(botType !== botTypeBasicArb, page.driftToleranceBox)
     Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
 
     Doc.setVis(viewOnly, page.viewOnlyRunning)
@@ -745,8 +747,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     } = this
     this.placementsChart.setMarket({ cexName: cexName as string, botType, baseFiatRate, buyPlacements, sellPlacements, profit })
 
-    this.setOriginalValues()
-
     const hasFiatRates = baseFiatRate > 0 && quoteFiatRate > 0
     Doc.setVis(hasFiatRates, page.switchToQuickConfig)
 
@@ -756,6 +756,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     page.gapStrategySelect.value = gapStrategy
     if (isQuickPlacements && gapStrategy === GapStrategyPercentPlus) this.showQuickConfig()
     else this.showAdvancedConfig()
+
+    this.setOriginalValues()
 
     Doc.hide(page.marketLoading)
     Doc.show(page.botSettingsContainer, page.marketBox)
@@ -1667,8 +1669,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (page.useOracleCheckbox.checked) {
       Doc.show(page.oracleBiasBox, page.oracleWeightingBox)
       cfg.useOracles = true
-      this.oracleWeighting.setValue(cfg.oracleWeighting || defaultMarketMakingConfig.oracleWeighting)
-      this.oracleBias.setValue(cfg.oracleBias || defaultMarketMakingConfig.oracleBias)
+      this.oracleWeighting.setValue((cfg.oracleWeighting || defaultMarketMakingConfig.oracleWeighting) * 100)
+      this.oracleBias.setValue((cfg.oracleBias || defaultMarketMakingConfig.oracleBias) * 100)
     } else {
       Doc.hide(page.oracleBiasBox, page.oracleWeightingBox)
       cfg.useOracles = false
@@ -1726,8 +1728,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.oracleBiasSlider.setValue((oracleBias - defaultOracleBias.minV) / defaultOracleBias.range)
 
     const oracleWeight = cfg.oracleWeighting ?? defaultOracleWeighting.value
-    this.oracleWeighting.setValue(oracleWeight)
-    this.oracleWeightingSlider.setValue((oracleBias - defaultOracleWeighting.minV) / defaultOracleWeighting.range)
+    this.oracleWeighting.setValue(oracleWeight * 100)
+    this.oracleWeightingSlider.setValue((oracleWeight - defaultOracleWeighting.minV) / defaultOracleWeighting.range)
 
     const profit = cfg.profit ?? defaultProfit.value
     page.profitInput.value = String(profit * 100)

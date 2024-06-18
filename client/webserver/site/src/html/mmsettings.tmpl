@@ -635,16 +635,18 @@
           </label>
 
           {{- /* DRIFT TOLERANCE */ -}}
-          <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
-            <span class="fs16">
-              [[[Drift tolerance]]]
-            </span>
-            <span class="ico-info fs12" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
-          </div>
-          <div class="d-flex align-items-center">
-            <div id="driftToleranceSlider" class="mini-slider flex-grow-1 me-2"></div>
-            <input type="number" id="driftToleranceInput" class="micro text-end">
-            <span class="fs14 grey ms-1">%</span>
+          <div id="driftToleranceBox" class="flex-stretch-column">
+            <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+              <span class="fs16">
+                [[[Drift tolerance]]]
+              </span>
+              <span class="ico-info fs12" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
+            </div>
+            <div class="d-flex align-items-center">
+              <div id="driftToleranceSlider" class="mini-slider flex-grow-1 me-2"></div>
+              <input type="number" id="driftToleranceInput" class="micro text-end">
+              <span class="fs14 grey ms-1">%</span>
+            </div>
           </div>
 
           {{- /* ORDER PERSISTENCE */ -}}
