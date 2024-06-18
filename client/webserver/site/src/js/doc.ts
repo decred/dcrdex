@@ -1000,9 +1000,7 @@ export interface IncrementalInputOpts extends NumberInputOpts {
 }
 
 export class IncrementalInput extends NumberInput {
-  input: PageElement
   inc: number
-  min: number
   opts: IncrementalInputOpts
 
   constructor (box: PageElement, opts: IncrementalInputOpts) {
