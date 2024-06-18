@@ -176,7 +176,7 @@ type clientCore interface {
 	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
 }
 
-type mmCore interface {
+type MMCore interface {
 	MarketReport(host string, base, quote uint32) (*mm.MarketReport, error)
 	StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, pw []byte) (err error)
 	StartAllBots(alternateConfigPath *string, appPW []byte) (err error)
@@ -229,7 +229,7 @@ type cachedPassword struct {
 
 type Config struct {
 	Core          clientCore // *core.Core
-	MarketMaker   mmCore     // *mm.MarketMaker
+	MarketMaker   MMCore     // *mm.MarketMaker
 	MMCfgPath     string
 	Addr          string
 	CustomSiteDir string
@@ -264,7 +264,7 @@ type WebServer struct {
 	lang         atomic.Value // string
 	langs        []string
 	core         clientCore
-	mm           mmCore
+	mm           MMCore
 	mmCfgPath    string
 	addr         string
 	csp          string
