@@ -1570,7 +1570,7 @@ export default class Application {
   }
 
   async needsCustomProvider (assetID: number): Promise<boolean> {
-    const baseChainID = this.assets[assetID]?.token?.parentID
+    const baseChainID = this.assets[assetID]?.token?.parentID ?? assetID
     if (!baseChainID) return false
     const w = this.walletMap[baseChainID]
     if (!w) return false
