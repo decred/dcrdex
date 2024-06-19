@@ -83,7 +83,7 @@ var (
 		// Same as bitcoin. That's dumb.
 		UnitInfo: dexbch.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
-			spvWalletDefinition,
+			// spvWalletDefinition,
 			rpcWalletDefinition,
 			// electrumWalletDefinition, // getinfo RPC needs backport: https://github.com/Electron-Cash/Electron-Cash/pull/2399
 		},
@@ -94,6 +94,7 @@ var (
 
 func init() {
 	asset.Register(BipID, &Driver{})
+	asset.RegisterSPVWithdrawFunc(BipID, WithdrawSPVFunds)
 }
 
 // Driver implements asset.Driver.
@@ -104,6 +105,9 @@ var _ asset.Driver = (*Driver)(nil)
 
 // Open creates the BCH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
+	if cfg.Type == walletTypeSPV {
+		return nil, asset.ErrWalletTypeDisabled
+	}
 	return NewWallet(cfg, logger, network)
 }
 
@@ -184,15 +188,8 @@ func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	var cloneParams *chaincfg.Params
-	switch network {
-	case dex.Mainnet:
-		cloneParams = dexbch.MainNetParams
-	case dex.Testnet:
-		cloneParams = dexbch.TestNet4Params
-	case dex.Regtest:
-		cloneParams = dexbch.RegressionNetParams
-	default:
+	cloneParams := parseCloneParams(network)
+	if cloneParams == nil {
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
@@ -309,6 +306,18 @@ func translateTx(btcTx *wire.MsgTx) (*bchwire.MsgTx, error) {
 	return bchTx, nil
 }
 
+func parseCloneParams(net dex.Network) *chaincfg.Params {
+	switch net {
+	case dex.Mainnet:
+		return dexbch.MainNetParams
+	case dex.Testnet:
+		return dexbch.TestNet4Params
+	case dex.Regtest:
+		return dexbch.RegressionNetParams
+	}
+	return nil
+}
+
 func parseChainParams(net dex.Network) (*bchchaincfg.Params, error) {
 	switch net {
 	case dex.Mainnet:
@@ -319,4 +328,49 @@ func parseChainParams(net dex.Network) (*bchchaincfg.Params, error) {
 		return &bchchaincfg.RegressionNetParams, nil
 	}
 	return nil, fmt.Errorf("unknown network ID %v", net)
+}
+
+// WithdrawSPVFunds is a function to generate a tx that spends all funds from a
+// deprecated SPV wallet.
+func WithdrawSPVFunds(ctx context.Context, walletPW []byte, recipient, dataDir string, net dex.Network, log dex.Logger) ([]byte, error) {
+	cloneParams := parseCloneParams(net)
+	if cloneParams == nil {
+		return nil, fmt.Errorf("unknown net %v", net)
+	}
+	addr, err := dexbch.DecodeCashAddress(recipient, cloneParams)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding address %q: %w", recipient, err)
+	}
+	c := make(chan asset.WalletNotification, 16)
+	cfg := &asset.WalletConfig{
+		Type:        walletTypeSPV,
+		Emit:        asset.NewWalletEmitter(c, BipID, log),
+		PeersChange: func(u uint32, err error) {},
+		DataDir:     dataDir,
+		Settings: map[string]string{
+			"apifeefallback": "true",
+			"fallbackfee":    "0.001", // = defaultFee in BCH/kB
+		},
+	}
+	wi, err := NewWallet(cfg, log, net)
+	if err != nil {
+		return nil, fmt.Errorf("error constructing wallet: %w", err)
+	}
+	w := wi.(*btc.ExchangeWalletSPV)
+
+	btcTx, err := w.WithdrawTx(ctx, walletPW, addr)
+	if err != nil {
+		return nil, fmt.Errorf("error generating withdraw tx: %w", err)
+	}
+
+	bchTx, err := translateTx(btcTx)
+	if err != nil {
+		return nil, fmt.Errorf("btc->bch wire.MsgTx translation error: %v", err)
+	}
+
+	buf := bytes.NewBuffer(make([]byte, 0, bchTx.SerializeSize()))
+	if err = bchTx.Serialize(buf); err != nil {
+		return nil, fmt.Errorf("error serializing tx: %w", err)
+	}
+	return buf.Bytes(), nil
 }

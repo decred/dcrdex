@@ -11490,3 +11490,18 @@ func (c *Core) TakeAction(assetID uint32, actionID string, actionB json.RawMessa
 	}
 	return goGetter.TakeAction(actionID, actionB)
 }
+
+// GenerateBCHRecoveryTransaction generates a tx that spends all inputs from the
+// deprecated BCH wallet to the given recipient.
+func (c *Core) GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error) {
+	const bipID = 145
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, err
+	}
+	_, walletPW, err := c.assetSeedAndPass(bipID, crypter)
+	if err != nil {
+		return nil, err
+	}
+	return asset.SPVWithdrawTx(c.ctx, bipID, walletPW, recipient, c.assetDataDirectory(bipID), c.net, c.log.SubLogger("BCH"))
+}

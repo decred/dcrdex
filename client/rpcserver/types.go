@@ -249,7 +249,7 @@ func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 			}
 		} else {
 			if have < want[0] || have > want[1] {
-				return fmt.Errorf("%w: wanted between %d and %d argument but got %d argument", errArgs, want[0], want[1], have)
+				return fmt.Errorf("%w: wanted between %d and %d argument but got %d arguments", errArgs, want[0], want[1], have)
 			}
 		}
 		return nil
@@ -731,6 +731,13 @@ func parseSendOrWithdrawArgs(params *RawParams) (*sendOrWithdrawForm, error) {
 		address: params.Args[2],
 	}
 	return req, nil
+}
+
+func parseBchWithdrawArgs(params *RawParams) (appPW encode.PassBytes, recipient string, _ error) {
+	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
+		return nil, "", err
+	}
+	return params.PWArgs[0], params.Args[0], nil
 }
 
 func parseRescanWalletArgs(params *RawParams) (uint32, bool, error) {

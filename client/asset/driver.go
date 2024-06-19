@@ -4,6 +4,8 @@
 package asset
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -315,4 +317,24 @@ func MinimumLotSize(assetID uint32, maxFeeRate uint64) (minLotSize uint64, found
 		return 1, true
 	}
 	return m.MinLotSize(maxFeeRate), true
+}
+
+type spvWithdrawFunc func(ctx context.Context, walletPW []byte, recipient, dataDir string, net dex.Network, log dex.Logger) ([]byte, error)
+
+var spvRecovererFuncs = make(map[uint32]spvWithdrawFunc)
+
+// RegisterSPVWithdrawFunc registers the function to genreate a withdraw
+// transaction that spends funds from a deprecated SPV wallet.
+func RegisterSPVWithdrawFunc(assetID uint32, f spvWithdrawFunc) {
+	spvRecovererFuncs[assetID] = f
+}
+
+// SPVWithdrawTx generates a transaction that spends all funds from a deprecated
+// spv wallet.
+func SPVWithdrawTx(ctx context.Context, assetID uint32, walletPW []byte, recipient, dataDir string, net dex.Network, log dex.Logger) ([]byte, error) {
+	f, found := spvRecovererFuncs[assetID]
+	if !found {
+		return nil, errors.New("no withdraw function")
+	}
+	return f(ctx, walletPW, recipient, dataDir, net, log)
 }
