@@ -27,8 +27,8 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	"decred.org/dcrwallet/v3/rpc/client/dcrwallet"
-	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v4/rpc/client/dcrwallet"
+	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -715,6 +715,9 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 			Complete: complete,
 		}
 		return json.Marshal(&res)
+
+	case methodWalletInfo:
+		return json.Marshal(new(walletjson.WalletInfoResult))
 	}
 
 	return nil, fmt.Errorf("method %v not implemented by (*tRPCClient).RawRequest", method)

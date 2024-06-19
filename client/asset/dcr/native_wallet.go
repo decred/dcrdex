@@ -17,8 +17,8 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v3/wallet"
+	"decred.org/dcrwallet/v4/p2p"
+	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v4"
 )
@@ -40,7 +40,7 @@ type mixingConfigFile struct {
 type mixingConfig struct {
 	server  string
 	cert    []byte
-	dialer  wallet.DialFunc
+	dialer  p2p.DialFunc
 	enabled bool
 }
 
@@ -155,7 +155,7 @@ func initNativeWallet(ew *ExchangeWallet) (*NativeWallet, error) {
 	return w, nil
 }
 
-func makeCSPPDialer(serverAddress string, certB []byte) (wallet.DialFunc, error) {
+func makeCSPPDialer(serverAddress string, certB []byte) (p2p.DialFunc, error) {
 	serverName, _, err := net.SplitHostPort(serverAddress)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse CoinShuffle++ server name %q: %v", serverAddress, err)

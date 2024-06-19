@@ -302,7 +302,7 @@ ENABLE_VOTING="2" # 2 = enable voting and ticket buyer
 MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:3" "alpha" ${ALPHA_WALLET_SEED} \
 ${ALPHA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_PORT} \
-${MANUAL_TICKETS}
+${MANUAL_TICKETS} "_"
 # alpha uses walletpassphrase/walletlock.
 
 # SPV wallets will declare peers stalled and disconnect with only ancient blocks
@@ -310,13 +310,28 @@ ${MANUAL_TICKETS}
 # voting wallet (alpha) is running.
 tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
 
+echo "Creating simnet vspd wallet"
+USE_SPV="0"
+ENABLE_VOTING="1"
+MANUAL_TICKETS="1"
+"${HARNESS_DIR}/create-wallet.sh" "$SESSION:7" "vspdwallet" ${VSPD_WALLET_SEED} \
+${VSPD_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS} "_"
+
+echo "Creating simnet vspd"
+ALPHA_WALLET_PUBKEY=$("${NODES_ROOT}/harness-ctl/alpha" "getmasterpubkey")
+"${HARNESS_DIR}/create-vspd.sh" "$SESSION:8" "${VSPD_PORT}" "${ALPHA_WALLET_PUBKEY}"
+
+sleep 3
+
+VSP_PUBKEY=$(curl -sS "http://127.0.0.1:19591/api/v3/vspinfo" | jq -r '.pubkey')
+
 echo "Creating simnet beta wallet"
 USE_SPV="1"
 ENABLE_VOTING="0"
 MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:4" "beta" ${BETA_WALLET_SEED} \
 ${BETA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${BETA_WALLET_HTTPPROF_PORT} \
-${MANUAL_TICKETS}
+${MANUAL_TICKETS} ${VSP_PUBKEY}
 
 # The trading wallets need to be created from scratch every time.
 echo "Creating simnet trading wallet 1"
@@ -324,27 +339,16 @@ USE_SPV="1"
 ENABLE_VOTING="0"
 MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:5" "trading1" ${TRADING_WALLET1_SEED} \
-${TRADING_WALLET1_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS}
+${TRADING_WALLET1_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS} "_"
 
 echo "Creating simnet trading wallet 2"
 USE_SPV="1"
 ENABLE_VOTING="0"
 MANUAL_TICKETS="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:6" "trading2" ${TRADING_WALLET2_SEED} \
-${TRADING_WALLET2_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS}
-
-echo "Creating simnet vspd wallet"
-USE_SPV="0"
-ENABLE_VOTING="1"
-MANUAL_TICKETS="1"
-"${HARNESS_DIR}/create-wallet.sh" "$SESSION:7" "vspdwallet" ${VSPD_WALLET_SEED} \
-${VSPD_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS}
+${TRADING_WALLET2_PORT} ${USE_SPV} ${ENABLE_VOTING} "_" ${MANUAL_TICKETS} "_"
 
 sleep 3
-
-echo "Creating simnet vspd"
-ALPHA_WALLET_PUBKEY=$("${NODES_ROOT}/harness-ctl/alpha" "getmasterpubkey")
-"${HARNESS_DIR}/create-vspd.sh" "$SESSION:8" "${VSPD_PORT}" "${ALPHA_WALLET_PUBKEY}"
 
 # Give beta's "default" account a password, so it uses unlockaccount/lockaccount.
 tmux send-keys -t $SESSION:0 "./beta setaccountpassphrase default ${WALLET_PASS}${WAIT}" C-m\; wait-for donedcr

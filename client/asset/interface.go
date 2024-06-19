@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	dcrwalletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	dcrwalletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 

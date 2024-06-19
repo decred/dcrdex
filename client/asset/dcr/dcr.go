@@ -33,9 +33,9 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v3/wallet"
-	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
+	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v4/wallet"
+	_ "decred.org/dcrwallet/v4/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -50,7 +50,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
-	vspdjson "github.com/decred/vspd/types"
+	vspdjson "github.com/decred/vspd/types/v2"
 )
 
 const (
@@ -5366,9 +5366,13 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
-	// Try to get tickets first, because this will error for RPC + SPV wallets.
+	// Try to get tickets first, because this will error for older RPC + SPV
+	// wallets.
 	tickets, err := dcr.tickets(dcr.ctx)
 	if err != nil {
+		if errors.Is(err, oldSPVWalletErr) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("error retrieving tickets: %w", err)
 	}
 	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
@@ -5382,6 +5386,16 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 		if v := dcr.vspV.Load(); v != nil {
 			vspURL = v.(*vsp).URL
 		}
+	} else {
+		rpcW, ok := dcr.wallet.(*rpcWallet)
+		if !ok {
+			return nil, errors.New("wallet not an *rpcWallet")
+		}
+		walletInfo, err := rpcW.walletInfo(dcr.ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving wallet info: %w", err)
+		}
+		vspURL = walletInfo.VSP
 	}
 	voteChoices, tSpends, treasuryPolicy, err := dcr.wallet.VotingPreferences(dcr.ctx)
 	if err != nil {
@@ -5517,6 +5531,20 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) error {
 	bal, err := dcr.Balance()
 	if err != nil {
 		return fmt.Errorf("error getting balance: %v", err)
+	}
+	isRPC := !dcr.isNative()
+	if isRPC {
+		rpcW, ok := dcr.wallet.(*rpcWallet)
+		if !ok {
+			return errors.New("wallet not an *rpcWallet")
+		}
+		walletInfo, err := rpcW.walletInfo(dcr.ctx)
+		if err != nil {
+			return fmt.Errorf("error retrieving wallet info: %w", err)
+		}
+		if walletInfo.SPV && walletInfo.VSP == "" {
+			return errors.New("a vsp must best set to purchase tickets with an spv wallet")
+		}
 	}
 	sinfo, err := dcr.wallet.StakeInfo(dcr.ctx)
 	if err != nil {

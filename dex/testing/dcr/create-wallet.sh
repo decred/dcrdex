@@ -11,6 +11,7 @@ USE_SPV=$5
 ENABLE_VOTING=$6
 HTTPPROF_PORT=$7
 MANUAL_TICKETS=$8
+VSP_PUBKEY=$9
 
 WALLET_DIR="${NODES_ROOT}/${NAME}"
 mkdir -p ${WALLET_DIR}
@@ -72,6 +73,13 @@ enableticketbuyer=1
 ticketbuyer.limit=6
 ; NOTE: when regenerating the chain from genesis, might need to comment out this line:
 ticketbuyer.balancetomaintainabsolute=1000
+EOF
+fi
+
+if [ "${VSP_PUBKEY}" != "_" ]; then
+cat >> "${WALLET_DIR}/${NAME}.conf" <<EOF
+vsp.url=http://127.0.0.1:19591
+vsp.pubkey=${VSP_PUBKEY}
 EOF
 fi
 

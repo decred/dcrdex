@@ -3,7 +3,7 @@ package dcr
 import (
 	"context"
 
-	"decred.org/dcrwallet/v3/wallet/udb"
+	"decred.org/dcrwallet/v4/wallet/udb"
 )
 
 const (
@@ -27,12 +27,13 @@ func (w *spvWallet) mix(ctx context.Context, cfg *mixingConfig) {
 
 	// Don't perform any actions while transactions are not synced
 	// through the tip block.
-	if !w.spv.Synced() {
+	synced, _ := w.spv.Synced(ctx)
+	if !synced {
 		w.log.Tracef("Skipping account mixing: transactions are not synced")
 		return
 	}
 
-	if err = w.MixAccount(ctx, cfg.dialer, cfg.server, unmixedAccount, mixedAccount, mixedAccountBranch); err != nil {
+	if err = w.MixAccount(ctx, unmixedAccount, mixedAccount, mixedAccountBranch); err != nil {
 		w.log.Errorf("Error mixing account: %v", err)
 	}
 }

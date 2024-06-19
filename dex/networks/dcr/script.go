@@ -12,7 +12,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/account"
-	"decred.org/dcrwallet/v3/wallet/txsizes"
+	"decred.org/dcrwallet/v4/wallet/txsizes"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v4"
