@@ -192,9 +192,11 @@ export interface PlacementChartConfig {
   cexName: string
   botType: string
   baseFiatRate: number
-  buyPlacements: OrderPlacement[]
-  sellPlacements: OrderPlacement[]
-  profit: number
+  dict: {
+    profit: number
+    buyPlacements: OrderPlacement[]
+    sellPlacements: OrderPlacement[]
+  }
 }
 
 export class PlacementsChart extends Chart {
@@ -231,7 +233,7 @@ export class PlacementsChart extends Chart {
   render () {
     const { ctx, canvas, theme, cfg } = this
     if (canvas.width === 0 || !cfg) return
-    const { buyPlacements, sellPlacements, profit, baseFiatRate, botType } = cfg
+    const { dict: { buyPlacements, sellPlacements, profit }, baseFiatRate, botType } = cfg
     if (botType === botTypeBasicArb) return
 
     this.clear()
@@ -267,7 +269,7 @@ export class PlacementsChart extends Chart {
       // rates, e.g. the spacing will be larger.
       const ps = [...buyPlacements, ...sellPlacements]
       const matchBuffer = ps.reduce((sum: number, p: OrderPlacement) => sum + p.gapFactor, 0) / ps.length
-      fauxSpacer = 0.01 * (1 + matchBuffer / 100)
+      fauxSpacer = 0.01 * (1 + matchBuffer)
       widest = Math.min(10, Math.max(buyPlacements.length, sellPlacements.length)) * fauxSpacer // arb-mm
     }
 
@@ -311,13 +313,13 @@ export class PlacementsChart extends Chart {
         const sideFactor = isBuy ? -1 : 1
         const firstPt = placements[0]
         const y0 = tools.y(0)
-        const firstX = tools.x((isBasicMM ? firstPt.gapFactor : profit) * sideFactor)
+        const firstX = tools.x((isBasicMM ? firstPt.gapFactor : profit + fauxSpacer) * sideFactor)
         ctx.moveTo(firstX, y0)
         let cumulativeLots = 0
         for (let i = 0; i < placements.length; i++) {
           const p = placements[i]
           // For arb-mm, we don't know exactly
-          const rawX = isBasicMM ? p.gapFactor : profit + i * fauxSpacer
+          const rawX = isBasicMM ? p.gapFactor : profit + (i + 1) * fauxSpacer
           const x = tools.x(rawX * sideFactor)
           ctx.lineTo(x, tools.y(cumulativeLots))
           cumulativeLots += p.lots

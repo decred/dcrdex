@@ -73,7 +73,7 @@ const defaultOrderReserves = {
   factor: 1.0,
   minR: 0,
   maxR: 3,
-  range: 2,
+  range: 3,
   prec: 3
 }
 const defaultTransfer = {
@@ -479,6 +479,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.qcMatchBufferSlider = new MiniSlider(page.qcMatchBufferSlider, (r: number) => {
       const { minV, range } = defaultMatchBuffer
       this.qcMatchBuffer.setValue(minV + r * range * 100)
+      this.quickConfigUpdated()
     })
 
     this.qcLevelsPerSide = new IncrementalInput(page.qcLevelsPerSide, {
@@ -652,7 +653,11 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const mmStatus = app().mmStatus
     const viewOnly = isViewOnly(specs, mmStatus)
-    const botCfg = liveBotConfig(host, baseID, quoteID)
+    let botCfg = liveBotConfig(host, baseID, quoteID)
+    if (botCfg) {
+      const oldBotType = botCfg.arbMarketMakingConfig ? botTypeArbMM : botCfg.basicMarketMakingConfig ? botTypeBasicMM : botTypeBasicArb
+      if (oldBotType !== botType) botCfg = undefined
+    }
     const dmm = defaultMarketMakingConfig
     Doc.setVis(botCfg, page.deleteBttnBox)
 
@@ -701,6 +706,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         // TODO: expose maxActiveArbs
         oldCfg.profit = arbCfg.profitTrigger
         oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
+        oldCfg.simpleArbLots = botCfg.uiConfig.simpleArbLots ?? 1
       }
       Doc.setVis(!viewOnly, page.updateButton, page.resetButton)
     } else {
@@ -724,7 +730,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     setMarketElements(document.body, baseID, quoteID, host)
     Doc.setVis(botType === botTypeBasicMM, page.emptyMarketRateBox)
-    Doc.setVis(botType !== botTypeBasicArb, page.driftToleranceBox)
+    Doc.setVis(botType !== botTypeBasicArb, page.driftToleranceBox, page.switchToAdvanced)
     Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
 
     Doc.setVis(viewOnly, page.viewOnlyRunning)
@@ -741,11 +747,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     this.basePane.setAsset(baseID, false)
     this.quotePane.setAsset(quoteID, true)
-    const {
-      updatedConfig: { buyPlacements, sellPlacements, profit },
-      marketReport: { baseFiatRate, quoteFiatRate }
-    } = this
-    this.placementsChart.setMarket({ cexName: cexName as string, botType, baseFiatRate, buyPlacements, sellPlacements, profit })
+    const { marketReport: { baseFiatRate, quoteFiatRate } } = this
+    this.placementsChart.setMarket({ cexName: cexName as string, botType, baseFiatRate, dict: this.updatedConfig })
 
     const hasFiatRates = baseFiatRate > 0 && quoteFiatRate > 0
     Doc.setVis(hasFiatRates, page.switchToQuickConfig)
@@ -754,7 +757,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     const isQuickPlacements = !botCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)
     const gapStrategy = botCfg?.basicMarketMakingConfig?.gapStrategy ?? GapStrategyPercentPlus
     page.gapStrategySelect.value = gapStrategy
-    if (isQuickPlacements && gapStrategy === GapStrategyPercentPlus) this.showQuickConfig()
+    if (botType === botTypeBasicArb || (isQuickPlacements && gapStrategy === GapStrategyPercentPlus)) this.showQuickConfig()
     else this.showAdvancedConfig()
 
     this.setOriginalValues()
@@ -919,7 +922,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   switchToQuickConfig () {
-    const { page, cfg, botType, lotSizeUSD } = this.marketStuff()
+    const { cfg, botType, lotSizeUSD } = this.marketStuff()
     const { buyPlacements: buys, sellPlacements: sells } = cfg
     // If we have both buys and sells, get the best approximation quick config
     // approximation.
@@ -934,19 +937,26 @@ export default class MarketMakerSettingsPage extends BasePage {
         const worstSell = sells.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor > prev.gapFactor ? curr : prev)
         const range = ((worstBuy.gapFactor - bestBuy.gapFactor) + (worstSell.gapFactor - bestSell.gapFactor)) / 2
         const inc = range / (levelsPerSide - 1)
-        page.qcLevelSpacing.value = String(inc * 100)
+        this.qcProfit.setValue(cfg.profit * 100)
+        this.qcProfitSlider.setValue((cfg.profit - defaultProfit.minV) / defaultProfit.range)
+        this.qcLevelSpacing.setValue(inc * 100)
+        this.qcLevelSpacingSlider.setValue((inc - defaultLevelSpacing.minV) / defaultLevelSpacing.range)
       } else if (botType === botTypeArbMM) {
-        this.quickConfigUpdated()
         const multSum = buys.reduce((v: number, p: OrderPlacement) => v + p.gapFactor, 0) + sells.reduce((v: number, p: OrderPlacement) => v + p.gapFactor, 0)
-        page.qcMatchBuffer.value = String(((multSum / placementCount) - 1) * 100 || String(defaultMatchBuffer.value * 100))
+        const buffer = ((multSum / placementCount) - 1) || defaultMatchBuffer.value
+        this.qcMatchBuffer.setValue(buffer * 100)
+        this.qcMatchBufferSlider.setValue((buffer - defaultMatchBuffer.minV) / defaultMatchBuffer.range)
       }
       const lots = buys.reduce((v: number, p: OrderPlacement) => v + p.lots, 0) + sells.reduce((v: number, p: OrderPlacement) => v + p.lots, 0)
       const lotsPerLevel = Math.max(1, Math.round(lots / 2 / levelsPerSide))
       this.qcLotsPerLevel.setValue(lotsPerLevel)
       this.qcUSDPerSide.setValue(lotsPerLevel * levelsPerSide * lotSizeUSD)
       this.qcLevelsPerSide.setValue(levelsPerSide)
+    } else if (botType === botTypeBasicArb) {
+      this.qcLotsPerLevel.setValue(cfg.simpleArbLots)
     }
     this.showQuickConfig()
+    this.quickConfigUpdated()
   }
 
   showQuickConfig () {
@@ -970,8 +980,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.show(page.quickConfig)
 
     this.showInputsForBot(botType)
-
-    this.quickConfigUpdated()
   }
 
   showInputsForBot (botType: string) {
@@ -1030,7 +1038,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     const matchBuffer = botType === botTypeArbMM ? parseFloat(page.qcMatchBuffer.value ?? '') / 100 : 0
-    if (isNaN(lotsPerLevel)) {
+    if (isNaN(matchBuffer)) {
       setError('invalid value for match buffer')
     }
     const multiplier = matchBuffer + 1
@@ -1038,7 +1046,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     const levelSpacingDisabled = levelsPerSide === 1
     page.levelSpacingBox.classList.toggle('disabled', levelSpacingDisabled)
     page.qcLevelSpacing.disabled = levelSpacingDisabled
-
     cfg.simpleArbLots = lotsPerLevel
 
     if (botType !== botTypeBasicArb) {

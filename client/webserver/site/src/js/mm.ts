@@ -432,7 +432,7 @@ class Bot extends BotMarket {
         const bestSell = basicMarketMakingConfig.sellPlacements.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor < prev.gapFactor ? curr : prev)
         profit = (bestBuy.gapFactor + bestSell.gapFactor) / 2
       }
-      const marketConfig = { cexName: cexName as string, botType, baseFiatRate: baseFiatRate, buyPlacements, sellPlacements, profit }
+      const marketConfig = { cexName: cexName as string, botType, baseFiatRate: baseFiatRate, dict: { profit, buyPlacements, sellPlacements } }
       this.placementsChart.setMarket(marketConfig)
     }
 
