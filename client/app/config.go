@@ -171,6 +171,11 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 	}
 	ip := net.ParseIP(addr)
 
+	var mmCore webserver.MMCore
+	if mm != nil {
+		mmCore = mm
+	}
+
 	var certFile, keyFile string
 	if cfg.WebTLS || (ip != nil && !ip.IsLoopback() && !ip.IsPrivate()) || (ip == nil && addr != "localhost") {
 		certFile = filepath.Join(cfg.AppData, "web.cert")
@@ -179,7 +184,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 
 	return &webserver.Config{
 		Core:          c,
-		MarketMaker:   mm,
+		MarketMaker:   mmCore,
 		Addr:          cfg.WebAddr,
 		CustomSiteDir: cfg.SiteDir,
 		Logger:        log,
