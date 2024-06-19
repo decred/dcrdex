@@ -944,6 +944,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       const lotsPerLevel = Math.max(1, Math.round(lots / 2 / levelsPerSide))
       this.qcLotsPerLevel.setValue(lotsPerLevel)
       this.qcUSDPerSide.setValue(lotsPerLevel * levelsPerSide * lotSizeUSD)
+      this.qcLevelsPerSide.setValue(levelsPerSide)
     }
     this.showQuickConfig()
   }
