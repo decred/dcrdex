@@ -5026,3 +5026,54 @@ func TestIDUnknownTx(t *testing.T) {
 		runTest(tt)
 	}
 }
+
+func TestRescanSync(t *testing.T) {
+	wallet, node, shutdown := tNewWalletMonitorBlocks(false)
+	defer shutdown()
+
+	const tip = 1000
+	wallet.currentTip = &block{height: tip}
+
+	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(&walletjson.SyncStatusResult{
+		Synced:               true,
+		InitialBlockDownload: false,
+		HeadersFetchProgress: 1,
+	})
+
+	checkProgress := func(expSynced bool, expProgress float32) {
+		synced, progress, err := wallet.SyncStatus()
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if synced != expSynced {
+			t.Fatalf("expected synced = %t, bot %t", expSynced, synced)
+		}
+		if progress == 0 && expProgress != 0 || math.Abs(float64(expProgress/progress)-1) > 0.001 {
+			t.Fatalf("expected progress %f, got %f", expProgress, progress)
+		}
+	}
+
+	// No rescan in progress.
+	checkProgress(true, 1)
+
+	// Rescan running. No progress.
+	wallet.rescan.progress = &rescanProgress{}
+	checkProgress(false, 0)
+
+	// Halfway done.
+	wallet.rescan.progress = &rescanProgress{scannedThrough: tip / 2}
+	checkProgress(false, 0.5)
+
+	// Not synced until progress is nil.
+	wallet.rescan.progress = &rescanProgress{scannedThrough: tip}
+	checkProgress(false, 1)
+
+	// Scanned > tip OK
+	wallet.rescan.progress = &rescanProgress{scannedThrough: tip * 2}
+	checkProgress(false, 1)
+
+	// Rescan complete.
+	wallet.rescan.progress = nil
+	checkProgress(true, 1)
+
+}

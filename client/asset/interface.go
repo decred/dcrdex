@@ -354,7 +354,6 @@ type ConfigOption struct {
 	IsBoolean         bool `json:"isboolean"`
 	IsDate            bool `json:"isdate"`
 	DisableWhenActive bool `json:"disablewhenactive"`
-	IsBirthdayConfig  bool `json:"isBirthdayConfig"`
 	// Repeatable signals a text input that can be duplicated and submitted
 	// multiple times, with the specified delimiter used to encode the data
 	// in the settings map.
@@ -656,7 +655,10 @@ type Bonder interface {
 
 // Rescanner is a wallet implementation with rescan functionality.
 type Rescanner interface {
-	Rescan(ctx context.Context) error
+	// Rescan performs a rescan and block until it is done. If no birthday is
+	// provided, internal wallets may use a birthday concurrent with the
+	// earliest date at which a wallet was possible, which is asset-dependent.
+	Rescan(ctx context.Context, bday /* unix time seconds */ uint64) error
 }
 
 // Recoverer is a wallet implementation with recover functionality.

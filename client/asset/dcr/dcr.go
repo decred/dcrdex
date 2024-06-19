@@ -218,22 +218,6 @@ var (
 		},
 	}
 
-	spvOpts = []*asset.ConfigOption{{
-		Key:         "walletbirthday",
-		DisplayName: "Wallet Birthday",
-		Description: "This is the date the wallet starts scanning the blockchain " +
-			"for transactions related to this wallet. If reconfiguring an existing " +
-			"wallet, this may start a rescan if the new birthday is older. This " +
-			"option is disabled if there are currently active DCR trades.",
-		DefaultValue: defaultWalletBirthdayUnix,
-		MaxValue:     "now",
-		// This MinValue must be removed if we start supporting importing private keys
-		MinValue:          defaultWalletBirthdayUnix,
-		IsDate:            true,
-		DisableWhenActive: true,
-		IsBirthdayConfig:  true,
-	}}
-
 	multiFundingOpts = []*asset.OrderOption{
 		{
 			ConfigOption: asset.ConfigOption{
@@ -285,7 +269,7 @@ var (
 				Type:             walletTypeSPV,
 				Tab:              "Native",
 				Description:      "Use the built-in SPV wallet",
-				ConfigOpts:       append(spvOpts, walletOpts...),
+				ConfigOpts:       walletOpts,
 				Seeded:           true,
 				MultiFundingOpts: multiFundingOpts,
 			},
@@ -621,6 +605,11 @@ type vsp struct {
 	PubKey        string  `json:"pubkey"`
 }
 
+// rescanProgress is the progress of an asynchronous rescan.
+type rescanProgress struct {
+	scannedThrough int64
+}
+
 // ExchangeWallet is a wallet backend for Decred. The backend is how the DEX
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
@@ -629,6 +618,7 @@ type ExchangeWallet struct {
 	cfgV         atomic.Value // *exchangeWalletConfig
 
 	ctx           context.Context // the asset subsystem starts with Connect(ctx)
+	wg            sync.WaitGroup
 	wallet        Wallet
 	chainParams   *chaincfg.Params
 	log           dex.Logger
@@ -685,6 +675,11 @@ type ExchangeWallet struct {
 
 	txHistoryDB      atomic.Value // *btc.BadgerTxDB
 	syncingTxHistory atomic.Bool
+
+	rescan struct {
+		sync.RWMutex
+		progress *rescanProgress // nil = no rescan in progress
+	}
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -940,7 +935,7 @@ func (dcr *ExchangeWallet) findExistingAddressBasedTxHistoryDB() (string, error)
 	return "", nil
 }
 
-func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, error) {
+func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*dex.ConnectionMaster, error) {
 	var dbPath string
 	if spvWallet, ok := dcr.wallet.(*spvWallet); ok {
 		initialAddress, err := spvWallet.InitialAddress(ctx)
@@ -974,10 +969,17 @@ func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGrou
 	db := btc.NewBadgerTxDB(dbPath, dcr.log)
 	dcr.txHistoryDB.Store(db)
 
-	wg, err := db.Connect(ctx)
-	if err != nil {
+	cm := dex.NewConnectionMaster(db)
+	if err := cm.ConnectOnce(ctx); err != nil {
 		return nil, fmt.Errorf("error connecting to tx history db: %w", err)
 	}
+
+	var success bool
+	defer func() {
+		if !success {
+			cm.Disconnect()
+		}
+	}()
 
 	pendingTxs, err := db.GetPendingTxs()
 	if err != nil {
@@ -1004,7 +1006,8 @@ func (dcr *ExchangeWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGrou
 
 	dcr.receiveTxLastQuery.Store(lastQuery)
 
-	return wg, nil
+	success = true
+	return cm, nil
 }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
@@ -1052,7 +1055,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
 
-	wg, err := dcr.startTxHistoryDB(ctx)
+	dbCM, err := dcr.startTxHistoryDB(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1060,26 +1063,27 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	success = true // All good, don't disconnect the wallet when this method returns.
 	dcr.connected.Store(true)
 
-	wg.Add(1)
+	dcr.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer dcr.wg.Done()
+		defer dbCM.Disconnect()
 		dcr.monitorBlocks(ctx)
 		dcr.shutdown()
 	}()
 
-	wg.Add(1)
+	dcr.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer dcr.wg.Done()
 		dcr.monitorPeers(ctx)
 	}()
 
-	wg.Add(1)
+	dcr.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer dcr.wg.Done()
 		dcr.syncTxHistory(ctx, uint64(tip.height))
 	}()
 
-	return wg, nil
+	return &dcr.wg, nil
 }
 
 // Reconfigure attempts to reconfigure the wallet.
@@ -4823,6 +4827,18 @@ func (dcr *ExchangeWallet) shutdown() {
 
 // SyncStatus is information about the blockchain sync status.
 func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
+	// If we have a rescan running, do different math.
+	dcr.rescan.RLock()
+	rescanProgress := dcr.rescan.progress
+	dcr.rescan.RUnlock()
+	if rescanProgress != nil {
+		height := dcr.cachedBestBlock().height
+		if height < rescanProgress.scannedThrough {
+			height = rescanProgress.scannedThrough
+		}
+		return false, float32(rescanProgress.scannedThrough) / float32(height), nil
+	}
+	// No rescan in progress. Ask wallet.
 	return dcr.wallet.SyncStatus(dcr.ctx)
 }
 
@@ -5562,10 +5578,9 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int, feeSuggestion uint64) error {
 	ticketPrice := sinfo.Sdiff + fees
 	total := uint64(n) * uint64(ticketPrice)
 	if bal.Available < total {
-		return fmt.Errorf("available balance %s is lower than project cost %s for %d tickets",
+		return fmt.Errorf("available balance %s is lower than projected cost %s for %d tickets",
 			dcrutil.Amount(bal.Available), dcrutil.Amount(total), n)
 	}
-
 	remain := dcr.ticketBuyer.remaining.Add(int32(n))
 	dcr.emit.Data(ticketDataRoute, &TicketPurchaseUpdate{Remaining: uint32(remain)})
 	go dcr.runTicketBuyer()

@@ -457,7 +457,7 @@ func (w *xcWallet) Disconnect() {
 
 // rescan will initiate a rescan of the wallet if the asset.Wallet
 // implementation is a Rescanner.
-func (w *xcWallet) rescan(ctx context.Context) error {
+func (w *xcWallet) rescan(ctx context.Context, bday /* unix time seconds*/ uint64) error {
 	if !w.connected() {
 		return errWalletNotConnected
 	}
@@ -465,7 +465,7 @@ func (w *xcWallet) rescan(ctx context.Context) error {
 	if !ok {
 		return errors.New("wallet does not support rescanning")
 	}
-	return rescanner.Rescan(ctx)
+	return rescanner.Rescan(ctx, bday)
 }
 
 // logFilePath returns the path of the wallet's log file if the

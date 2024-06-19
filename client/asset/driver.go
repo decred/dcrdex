@@ -30,6 +30,7 @@ type CreateWalletParams struct {
 	Type     string
 	Seed     []byte
 	Pass     []byte
+	Birthday uint64
 	Settings map[string]string
 	DataDir  string
 	Net      dex.Network
