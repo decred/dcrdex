@@ -8,12 +8,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ import (
 	dexzec "decred.org/dcrdex/dex/networks/zec"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -45,6 +48,10 @@ const (
 	defaultFeeRateLimit = 1000
 	minNetworkVersion   = 5040250 // v5.4.2
 	walletTypeRPC       = "zcashdRPC"
+
+	// defaultConfTarget is the amount of confirmations required to consider
+	// a transaction is confirmed for tx history.
+	defaultConfTarget = 1
 
 	// transparentAcctNumber = 0
 	shieldedAcctNumber = 0
@@ -262,8 +269,10 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		decodeAddr: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
 			return dexzec.DecodeAddress(addr, addrParams, btcParams)
 		},
-		ar:   ar,
-		node: cl,
+		ar:         ar,
+		node:       cl,
+		walletDir:  cfg.DataDir,
+		pendingTxs: make(map[chainhash.Hash]*btc.ExtendedWalletTx),
 	}
 	zw.walletCfg.Store(&walletCfg)
 	zw.prepareCoinManager()
@@ -308,6 +317,7 @@ type zecWallet struct {
 	peersChange   func(uint32, error)
 	emit          *asset.WalletEmitter
 	walletCfg     atomic.Value // *WalletConfig
+	walletDir     string
 
 	// Coins returned by Fund are cached for quick reference.
 	cm *btc.CoinManager
@@ -316,10 +326,19 @@ type zecWallet struct {
 	currentTip *btc.BlockVector
 
 	reserves atomic.Uint64
+
+	pendingTxsMtx sync.RWMutex
+	pendingTxs    map[chainhash.Hash]*btc.ExtendedWalletTx
+
+	receiveTxLastQuery atomic.Uint64
+
+	txHistoryDB      atomic.Value // *btc.BadgerTxDB
+	syncingTxHistory atomic.Bool
 }
 
 var _ asset.FeeRater = (*zecWallet)(nil)
 var _ asset.Wallet = (*zecWallet)(nil)
+var _ asset.WalletHistorian = (*zecWallet)(nil)
 
 // TODO: Implement LiveReconfigurer
 // var _ asset.LiveReconfigurer = (*zecWallet)(nil)
@@ -335,7 +354,6 @@ func (w *zecWallet) FeeRate() uint64 {
 
 func (w *zecWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	w.ctx = ctx
-	var wg sync.WaitGroup
 
 	if err := w.connectRPC(ctx); err != nil {
 		return nil, err
@@ -382,6 +400,11 @@ func (w *zecWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	w.tipMtx.Unlock()
 	atomic.StoreInt64(&w.tipAtConnect, w.currentTip.Height)
 
+	wg, err := w.startTxHistoryDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -400,7 +423,14 @@ func (w *zecWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		defer wg.Done()
 		w.monitorPeers(ctx)
 	}()
-	return &wg, nil
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w.syncTxHistory(uint64(w.currentTip.Height))
+	}()
+
+	return wg, nil
 }
 
 func (w *zecWallet) monitorPeers(ctx context.Context) {
@@ -634,6 +664,8 @@ func (w *zecWallet) reportNewTip(ctx context.Context, newTip *btc.BlockVector) {
 	w.emit.TipChange(uint64(newTip.Height))
 
 	w.rf.ReportNewTip(ctx, prevTip, newTip)
+
+	w.syncTxHistory(uint64(newTip.Height))
 }
 
 type swapOptions struct {
@@ -914,6 +946,14 @@ func (w *zecWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uin
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error sending tx: %w", err)
 	}
+
+	w.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Redeem,
+		ID:     txHash.String(),
+		Amount: totalIn,
+		Fees:   fee,
+	}, txHash, true)
+
 	// Log the change output.
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
 	for i := range form.Redemptions {
@@ -1614,6 +1654,19 @@ func (w *zecWallet) DepositAddress() (string, error) {
 
 }
 
+func (w *zecWallet) transparentAddress() (string, error) {
+	addrRes, err := zGetAddressForAccount(w, shieldedAcctNumber, []string{transparentAddressType, orchardAddressType})
+	if err != nil {
+		return "", err
+	}
+	receivers, err := zGetUnifiedReceivers(w, addrRes.Address)
+	if err != nil {
+		return "", err
+	}
+	return receivers.Transparent, nil
+
+}
+
 func (w *zecWallet) NewAddress() (string, error) {
 	return w.DepositAddress()
 }
@@ -1864,9 +1917,16 @@ func (w *zecWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*btc.O
 	for _, txOut := range tx.TxOut {
 		totalOut += uint64(txOut.Value)
 	}
+	fee := totalIn - totalOut
+
+	w.addTxToHistory(&asset.WalletTransaction{
+		Type: asset.Split,
+		ID:   txHash.String(),
+		Fees: fee,
+	}, &txHash, true)
 
 	success = true
-	return coins, totalIn - totalOut, nil
+	return coins, fee, nil
 }
 
 func (w *zecWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, inputCount, inputsSize uint64) ([]uint64, uint64) {
@@ -2043,6 +2103,15 @@ func (w *zecWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Byte
 	if err != nil {
 		return nil, fmt.Errorf("broadcastTx: %w", err)
 	}
+
+	tx := zecTx(msgTx)
+	w.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Refund,
+		ID:     refundHash.String(),
+		Amount: uint64(utxo.Value),
+		Fees:   tx.RequiredTxFeesZIP317(),
+	}, refundHash, true)
+
 	return btc.ToCoinID(refundHash, 0), nil
 }
 
@@ -2281,6 +2350,27 @@ func (w *zecWallet) Send(addr string, value, feeRate uint64) (asset.Coin, error)
 	if err != nil {
 		return nil, err
 	}
+
+	selfSend, err := w.OwnsDepositAddress(addr)
+	if err != nil {
+		w.log.Errorf("error checking if address %q is owned: %v", addr, err)
+	}
+	txType := asset.Send
+	if selfSend {
+		txType = asset.SelfSend
+	}
+
+	tx, err := getTransaction(w, txHash)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find tx after send %s: %v", txHash, err)
+	}
+
+	w.addTxToHistory(&asset.WalletTransaction{
+		Type:   txType,
+		ID:     txHash.String(),
+		Amount: value,
+		Fees:   tx.RequiredTxFeesZIP317(),
+	}, txHash, true)
 
 	return &txCoin{
 		txHash: txHash,
@@ -2528,6 +2618,13 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
+	w.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Swap,
+		ID:     txHash.String(),
+		Amount: totalOut,
+		Fees:   msgTx.RequiredTxFeesZIP317(),
+	}, &txHash, true)
 
 	// If change is nil, return a nil asset.Coin.
 	var changeCoin asset.Coin
@@ -2911,4 +3008,670 @@ func deserializeTx(b []byte) (*wire.MsgTx, error) {
 		return nil, err
 	}
 	return tx.MsgTx, nil
+}
+
+func (w *zecWallet) txDB() *btc.BadgerTxDB {
+	db := w.txHistoryDB.Load()
+	if db == nil {
+		return nil
+	}
+	return db.(*btc.BadgerTxDB)
+}
+
+func (w *zecWallet) listSinceBlock(start int64) ([]btcjson.ListTransactionsResult, error) {
+	hash, err := getBlockHash(w, start)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := listSinceBlock(w, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func toAtoms(v float64) uint64 {
+	return uint64(math.Round(v * 1e8))
+}
+
+func (w *zecWallet) markTxAsSubmitted(txHash *chainhash.Hash) {
+	txHistoryDB := w.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	err := txHistoryDB.MarkTxAsSubmitted(txHash.String())
+	if err != nil {
+		w.log.Errorf("failed to mark tx as submitted in tx history db: %v", err)
+	}
+
+	w.pendingTxsMtx.Lock()
+	wt, found := w.pendingTxs[*txHash]
+	w.pendingTxsMtx.Unlock()
+
+	if !found {
+		w.log.Errorf("Transaction %s not found in pending txs", txHash)
+		return
+	}
+
+	wt.Submitted = true
+
+	w.emit.TransactionNote(wt.WalletTransaction, true)
+}
+
+func (w *zecWallet) removeTxFromHistory(txHash *chainhash.Hash) {
+	txHistoryDB := w.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	w.pendingTxsMtx.Lock()
+	delete(w.pendingTxs, *txHash)
+	w.pendingTxsMtx.Unlock()
+
+	err := txHistoryDB.RemoveTx(txHash.String())
+	if err != nil {
+		w.log.Errorf("failed to remove tx from tx history db: %v", err)
+	}
+}
+
+func (w *zecWallet) addTxToHistory(wt *asset.WalletTransaction, txHash *chainhash.Hash, submitted bool, skipNotes ...bool) {
+	txHistoryDB := w.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	ewt := &btc.ExtendedWalletTx{
+		WalletTransaction: wt,
+		Submitted:         submitted,
+	}
+
+	if wt.BlockNumber == 0 {
+		w.pendingTxsMtx.Lock()
+		w.pendingTxs[*txHash] = ewt
+		w.pendingTxsMtx.Unlock()
+	}
+
+	err := txHistoryDB.StoreTx(ewt)
+	if err != nil {
+		w.log.Errorf("failed to store tx in tx history db: %v", err)
+	}
+
+	skipNote := len(skipNotes) > 0 && skipNotes[0]
+	if submitted && !skipNote {
+		w.emit.TransactionNote(wt, true)
+	}
+}
+
+func (w *zecWallet) txHistoryDBPath(walletID string) string {
+	return filepath.Join(w.walletDir, fmt.Sprintf("txhistorydb-%s", walletID))
+}
+
+// findExistingAddressBasedTxHistoryDB finds the path of a tx history db that
+// was created using an address controlled by the wallet. This should only be
+// used for RPC wallets, as SPV wallets are able to get the first address
+// generated by the wallet.
+func (w *zecWallet) findExistingAddressBasedTxHistoryDB(encSeed string) (string, error) {
+	dir, err := os.Open(w.walletDir)
+	if err != nil {
+		return "", fmt.Errorf("error opening wallet directory: %w", err)
+	}
+	defer dir.Close()
+
+	entries, err := dir.Readdir(0)
+	if err != nil {
+		return "", fmt.Errorf("error reading wallet directory: %w", err)
+	}
+
+	pattern := regexp.MustCompile(`^txhistorydb-(.+)$`)
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		match := pattern.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+
+		name := match[1]
+		if name == encSeed {
+			return filepath.Join(w.walletDir, entry.Name()), nil
+		}
+	}
+
+	return "", nil
+}
+
+func (w *zecWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, error) {
+	wInfo, err := walletInfo(w)
+	if err != nil {
+		return nil, err
+	}
+	encSeed := wInfo.MnemonicSeedfp
+	name, err := w.findExistingAddressBasedTxHistoryDB(encSeed)
+	if err != nil {
+		return nil, err
+	}
+	dbPath := name
+
+	if dbPath == "" {
+		dbPath = w.txHistoryDBPath(encSeed)
+	}
+
+	w.log.Debugf("Using tx history db at %s", dbPath)
+
+	db := btc.NewBadgerTxDB(dbPath, w.log)
+	w.txHistoryDB.Store(db)
+
+	wg, err := db.Connect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting to tx history db: %w", err)
+	}
+
+	pendingTxs, err := db.GetPendingTxs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load unconfirmed txs: %v", err)
+	}
+
+	w.pendingTxsMtx.Lock()
+	for _, tx := range pendingTxs {
+		txHash, err := chainhash.NewHashFromStr(tx.ID)
+		if err != nil {
+			w.log.Errorf("Invalid txid %v from tx history db: %v", tx.ID, err)
+			continue
+		}
+		w.pendingTxs[*txHash] = tx
+	}
+	w.pendingTxsMtx.Unlock()
+
+	lastQuery, err := db.GetLastReceiveTxQuery()
+	if errors.Is(err, btc.ErrNeverQueried) {
+		lastQuery = 0
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to load last query time: %v", err)
+	}
+
+	w.receiveTxLastQuery.Store(lastQuery)
+
+	return wg, nil
+}
+
+// WalletTransaction returns a transaction that either the wallet has made or
+// one in which the wallet has received funds.
+func (w *zecWallet) WalletTransaction(_ context.Context, txID string) (*asset.WalletTransaction, error) {
+	coinID, err := hex.DecodeString(txID)
+	if err == nil {
+		txHash, _, err := decodeCoinID(coinID)
+		if err == nil {
+			txID = txHash.String()
+		}
+	}
+
+	txHistoryDB := w.txDB()
+	tx, err := txHistoryDB.GetTx(txID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the wallet knows about the transaction, it will be part of the
+	// available balance, so we always return Confirmed = true.
+	tx.Confirmed = true
+
+	return tx, nil
+}
+
+// TxHistory returns all the transactions the wallet has made. If refID is nil,
+// then transactions starting from the most recent are returned (past is ignored).
+// If past is true, the transactions prior to the refID are returned, otherwise
+// the transactions after the refID are returned. n is the number of
+// transactions to return. If n is <= 0, all the transactions will be returned.
+func (w *zecWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	txHistoryDB := w.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
+	}
+
+	return txHistoryDB.GetTxs(n, refID, past)
+}
+
+const sendCategory = "send"
+
+// idUnknownTx identifies the type and details of a transaction either made
+// or recieved by the wallet.
+func (w *zecWallet) idUnknownTx(tx *btcjson.ListTransactionsResult) (*asset.WalletTransaction, error) {
+	txHash, err := chainhash.NewHashFromStr(tx.TxID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding tx hash %s: %v", tx.TxID, err)
+	}
+	msgTx, err := getTransaction(w, txHash)
+	if err != nil {
+		return nil, err
+	}
+
+	var totalOut uint64
+	for _, txOut := range msgTx.TxOut {
+		totalOut += uint64(txOut.Value)
+	}
+
+	fee := msgTx.RequiredTxFeesZIP317()
+
+	txIsBond := func(msgTx *zTx) (bool, *asset.BondTxInfo) {
+		if len(msgTx.TxOut) < 2 {
+			return false, nil
+		}
+		const scriptVer = 0
+		acctID, lockTime, pkHash, err := dexbtc.ExtractBondCommitDataV0(scriptVer, msgTx.TxOut[1].PkScript)
+		if err != nil {
+			return false, nil
+		}
+		return true, &asset.BondTxInfo{
+			AccountID: acctID[:],
+			LockTime:  uint64(lockTime),
+			BondID:    pkHash[:],
+		}
+	}
+	if isBond, bondInfo := txIsBond(msgTx); isBond {
+		return &asset.WalletTransaction{
+			Type:     asset.CreateBond,
+			ID:       tx.TxID,
+			Amount:   uint64(msgTx.TxOut[0].Value),
+			Fees:     fee,
+			BondInfo: bondInfo,
+		}, nil
+	}
+
+	// Any other P2SH may be a swap or a send. We cannot determine unless we
+	// look up the transaction that spends this UTXO.
+	txPaysToScriptHash := func(msgTx *zTx) (v uint64) {
+		for _, txOut := range msgTx.TxOut {
+			if txscript.IsPayToScriptHash(txOut.PkScript) {
+				v += uint64(txOut.Value)
+			}
+		}
+		return
+	}
+	if v := txPaysToScriptHash(msgTx); v > 0 {
+		return &asset.WalletTransaction{
+			Type:   asset.SwapOrSend,
+			ID:     tx.TxID,
+			Amount: v,
+			Fees:   fee,
+		}, nil
+	}
+
+	// Helper function will help us identify inputs that spend P2SH contracts.
+	containsContractAtPushIndex := func(msgTx *zTx, idx int, isContract func(contract []byte) bool) bool {
+	txinloop:
+		for _, txIn := range msgTx.TxIn {
+			// not segwit
+			const scriptVer = 0
+			tokenizer := txscript.MakeScriptTokenizer(scriptVer, txIn.SignatureScript)
+			for i := 0; i <= idx; i++ { // contract is 5th item item in redemption and 4th in refund
+				if !tokenizer.Next() {
+					continue txinloop
+				}
+			}
+			if isContract(tokenizer.Data()) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Swap redemptions and refunds
+	contractIsSwap := func(contract []byte) bool {
+		_, _, _, _, err := dexbtc.ExtractSwapDetails(contract, false /* segwit */, w.btcParams)
+		return err == nil
+	}
+	redeemsSwap := func(msgTx *zTx) bool {
+		return containsContractAtPushIndex(msgTx, 4, contractIsSwap)
+	}
+	if redeemsSwap(msgTx) {
+		return &asset.WalletTransaction{
+			Type:   asset.Redeem,
+			ID:     tx.TxID,
+			Amount: totalOut + fee,
+			Fees:   fee,
+		}, nil
+	}
+	refundsSwap := func(msgTx *zTx) bool {
+		return containsContractAtPushIndex(msgTx, 3, contractIsSwap)
+	}
+	if refundsSwap(msgTx) {
+		return &asset.WalletTransaction{
+			Type:   asset.Refund,
+			ID:     tx.TxID,
+			Amount: totalOut + fee,
+			Fees:   fee,
+		}, nil
+	}
+
+	// Bond refunds
+	redeemsBond := func(msgTx *zTx) (bool, *asset.BondTxInfo) {
+		var bondInfo *asset.BondTxInfo
+		isBond := func(contract []byte) bool {
+			const scriptVer = 0
+			lockTime, pkHash, err := dexbtc.ExtractBondDetailsV0(scriptVer, contract)
+			if err != nil {
+				return false
+			}
+			bondInfo = &asset.BondTxInfo{
+				AccountID: []byte{}, // Could look for the bond tx to get this, I guess.
+				LockTime:  uint64(lockTime),
+				BondID:    pkHash[:],
+			}
+			return true
+		}
+		return containsContractAtPushIndex(msgTx, 2, isBond), bondInfo
+	}
+	if isBondRedemption, bondInfo := redeemsBond(msgTx); isBondRedemption {
+		return &asset.WalletTransaction{
+			Type:     asset.RedeemBond,
+			ID:       tx.TxID,
+			Amount:   totalOut,
+			Fees:     fee,
+			BondInfo: bondInfo,
+		}, nil
+	}
+
+	const scriptVersion = 0
+
+	allOutputsPayUs := func(msgTx *zTx) bool {
+		for _, txOut := range msgTx.TxOut {
+			_, addrs, _, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, w.btcParams)
+			if err != nil {
+				w.log.Errorf("ExtractAddrs error: %w", err)
+				return false
+			}
+			if len(addrs) != 1 { // sanity check
+				return false
+			}
+
+			addr, err := dexzec.EncodeAddress(addrs[0], w.addrParams)
+			if err != nil {
+				w.log.Errorf("unable to encode address: %w", err)
+				return false
+			}
+			owns, err := w.OwnsDepositAddress(addr)
+			if err != nil {
+				w.log.Errorf("w.OwnsDepositAddress error: %w", err)
+				return false
+			}
+			if !owns {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	if tx.Category == sendCategory && allOutputsPayUs(msgTx) && len(msgTx.TxIn) == 1 {
+		return &asset.WalletTransaction{
+			Type: asset.Split,
+			ID:   tx.TxID,
+			Fees: fee,
+		}, nil
+	}
+
+	txOutDirection := func(msgTx *zTx) (in, out uint64) {
+		for _, txOut := range msgTx.TxOut {
+			_, addrs, _, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, w.btcParams)
+			if err != nil {
+				w.log.Errorf("ExtractAddrs error: %w", err)
+				continue
+			}
+			if len(addrs) != 1 { // sanity check
+				continue
+			}
+
+			addr, err := dexzec.EncodeAddress(addrs[0], w.addrParams)
+			if err != nil {
+				w.log.Errorf("unable to encode address: %w", err)
+				continue
+			}
+			owns, err := w.OwnsDepositAddress(addr)
+			if err != nil {
+				w.log.Errorf("w.OwnsDepositAddress error: %w", err)
+				continue
+			}
+			if owns {
+				in += uint64(txOut.Value)
+			} else {
+				out += uint64(txOut.Value)
+			}
+		}
+		return
+	}
+
+	in, out := txOutDirection(msgTx)
+
+	getRecipient := func(msgTx *zTx, receive bool) *string {
+		for _, txOut := range msgTx.TxOut {
+			_, addrs, _, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, w.btcParams)
+			if err != nil {
+				w.log.Errorf("ExtractAddrs error: %w", err)
+				continue
+			}
+			if len(addrs) != 1 { // sanity check
+				continue
+			}
+
+			addr, err := dexzec.EncodeAddress(addrs[0], w.addrParams)
+			if err != nil {
+				w.log.Errorf("unable to encode address: %w", err)
+				continue
+			}
+			owns, err := w.OwnsDepositAddress(addr)
+			if err != nil {
+				w.log.Errorf("w.OwnsDepositAddress error: %w", err)
+				continue
+			}
+
+			if receive == owns {
+				return &addr
+			}
+		}
+		return nil
+	}
+
+	if tx.Category == sendCategory {
+		txType := asset.Send
+		if allOutputsPayUs(msgTx) {
+			txType = asset.SelfSend
+		}
+		return &asset.WalletTransaction{
+			Type:      txType,
+			ID:        tx.TxID,
+			Amount:    out,
+			Fees:      fee,
+			Recipient: getRecipient(msgTx, false),
+		}, nil
+	}
+
+	return &asset.WalletTransaction{
+		Type:      asset.Receive,
+		ID:        tx.TxID,
+		Amount:    in,
+		Fees:      fee,
+		Recipient: getRecipient(msgTx, true),
+	}, nil
+}
+
+// addUnknownTransactionsToHistory checks for any transactions the wallet has
+// made or recieved that are not part of the transaction history. It scans
+// from the last point to which it had previously scanned to the current tip.
+func (w *zecWallet) addUnknownTransactionsToHistory(tip uint64) {
+	txHistoryDB := w.txDB()
+
+	const blockQueryBuffer = 3
+	var blockToQuery uint64
+	lastQuery := w.receiveTxLastQuery.Load()
+	if lastQuery == 0 {
+		// TODO: use wallet birthday instead of block 0.
+		// blockToQuery = 0
+	} else if lastQuery < tip-blockQueryBuffer {
+		blockToQuery = lastQuery - blockQueryBuffer
+	} else {
+		blockToQuery = tip - blockQueryBuffer
+	}
+
+	txs, err := w.listSinceBlock(int64(blockToQuery))
+	if err != nil {
+		w.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
+		return
+	}
+
+	for _, tx := range txs {
+		txHash, err := chainhash.NewHashFromStr(tx.TxID)
+		if err != nil {
+			w.log.Errorf("Error decoding tx hash %s: %v", tx.TxID, err)
+			continue
+		}
+		_, err = txHistoryDB.GetTx(txHash.String())
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, asset.CoinNotFoundError) {
+			w.log.Errorf("Error getting tx %s: %v", txHash.String(), err)
+			continue
+		}
+		wt, err := w.idUnknownTx(&tx)
+		if err != nil {
+			w.log.Errorf("error identifying transaction: %v", err)
+			continue
+		}
+
+		if tx.BlockIndex != nil && *tx.BlockIndex > 0 && *tx.BlockIndex < int64(tip-blockQueryBuffer) {
+			wt.BlockNumber = uint64(*tx.BlockIndex)
+			wt.Timestamp = uint64(tx.BlockTime)
+		}
+
+		// Don't send notifications for the initial sync to avoid spamming the
+		// front end. A notification is sent at the end of the initial sync.
+		w.addTxToHistory(wt, txHash, true, blockToQuery == 0)
+	}
+
+	w.receiveTxLastQuery.Store(tip)
+	err = txHistoryDB.SetLastReceiveTxQuery(tip)
+	if err != nil {
+		w.log.Errorf("Error setting last query to %d: %v", tip, err)
+	}
+
+	if blockToQuery == 0 {
+		w.emit.TransactionHistorySyncedNote()
+	}
+}
+
+// syncTxHistory checks to see if there are any transactions which the wallet
+// has made or recieved that are not part of the transaction history, then
+// identifies and adds them. It also checks all the pending transactions to see
+// if they have been mined into a block, and if so, updates the transaction
+// history to reflect the block height.
+func (w *zecWallet) syncTxHistory(tip uint64) {
+	if !w.syncingTxHistory.CompareAndSwap(false, true) {
+		return
+	}
+	defer w.syncingTxHistory.Store(false)
+
+	txHistoryDB := w.txDB()
+	if txHistoryDB == nil {
+		return
+	}
+
+	synced, _, err := w.SyncStatus()
+	if err != nil {
+		w.log.Errorf("Error getting sync status: %v", err)
+		return
+	}
+	if !synced {
+		return
+	}
+
+	w.addUnknownTransactionsToHistory(tip)
+
+	pendingTxsCopy := make(map[chainhash.Hash]btc.ExtendedWalletTx, len(w.pendingTxs))
+	w.pendingTxsMtx.RLock()
+	for hash, tx := range w.pendingTxs {
+		pendingTxsCopy[hash] = *tx
+	}
+	w.pendingTxsMtx.RUnlock()
+
+	handlePendingTx := func(txHash chainhash.Hash, tx *btc.ExtendedWalletTx) {
+		if !tx.Submitted {
+			return
+		}
+
+		gtr, err := getTransaction(w, &txHash)
+		if errors.Is(err, asset.CoinNotFoundError) {
+			err = txHistoryDB.RemoveTx(txHash.String())
+			if err == nil {
+				w.pendingTxsMtx.Lock()
+				delete(w.pendingTxs, txHash)
+				w.pendingTxsMtx.Unlock()
+			} else {
+				// Leave it in the pendingPendingTxs and attempt to remove it
+				// again next time.
+				w.log.Errorf("Error removing tx %s from the history store: %v", txHash.String(), err)
+			}
+			return
+		}
+		if err != nil {
+			w.log.Errorf("Error getting transaction %s: %v", txHash, err)
+			return
+		}
+
+		var updated bool
+		if gtr.blockHash != nil {
+			block, _, err := getVerboseBlockHeader(w, gtr.blockHash)
+			if err != nil {
+				w.log.Errorf("Error getting block height for %s: %v", gtr.blockHash, err)
+				return
+			}
+			blockHeight := block.Height
+			if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != uint64(block.Time) {
+				tx.BlockNumber = uint64(blockHeight)
+				tx.Timestamp = uint64(block.Time)
+				updated = true
+			}
+		} else if gtr.blockHash == nil && tx.BlockNumber != 0 {
+			tx.BlockNumber = 0
+			tx.Timestamp = 0
+			updated = true
+		}
+
+		var confs uint64
+		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
+			confs = tip - tx.BlockNumber + 1
+		}
+		if confs >= defaultConfTarget {
+			tx.Confirmed = true
+			updated = true
+		}
+
+		if updated {
+			err = txHistoryDB.StoreTx(tx)
+			if err != nil {
+				w.log.Errorf("Error updating tx %s: %v", txHash, err)
+				return
+			}
+
+			w.pendingTxsMtx.Lock()
+			if tx.Confirmed {
+				delete(w.pendingTxs, txHash)
+			} else {
+				w.pendingTxs[txHash] = tx
+			}
+			w.pendingTxsMtx.Unlock()
+
+			w.emit.TransactionNote(tx.WalletTransaction, false)
+		}
+	}
+
+	for hash, tx := range pendingTxsCopy {
+		handlePendingTx(hash, &tx)
+	}
 }

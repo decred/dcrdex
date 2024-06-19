@@ -350,7 +350,7 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 		// to be stopped here. So, it is probably fine to ignore the
 		// error returned from stop-wallet.
 		stopFn := func(ctx context.Context) {
-			<-harnessCtl(ctx, symbol, "./stop-wallet", rpcPort)
+			<-harnessCtl(ctx, symbol, "./stop-wallet", rpcPort, name)
 		}
 		if err = harnessProcessCtl(symbol, stopFn, "./start-wallet", name, rpcPort, networkPort); err != nil {
 			m.fatalError("%s start-wallet error: %v", symbol, err)
@@ -360,13 +360,16 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 		if symbol == zec || symbol == zcl {
 			<-time.After(time.Second * 10)
 		}
-		// Connect the new node to the alpha node.
-		cmdOut := <-harnessCtl(ctx, symbol, "./connect-alpha", rpcPort)
+		// Connect the new node to the alpha node. name only used with zec and zcl.
+		cmdOut := <-harnessCtl(ctx, symbol, "./connect-alpha", rpcPort, name)
 		if cmdOut.err != nil {
 			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
 			return
 		}
 		<-time.After(time.Second)
+		if symbol == zec || symbol == zcl {
+			<-time.After(time.Second * 20)
+		}
 	default:
 		m.fatalError("createWallet: symbol %s unknown", symbol)
 	}
