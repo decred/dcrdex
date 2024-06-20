@@ -1610,6 +1610,7 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		Inited       bool       `json:"inited"`
 		OK           bool       `json:"ok"`
 		Experimental bool       `json:"experimental"`
+		OnionUrl     string     `json:"onionUrl"`
 	}{
 		User:         u,
 		Lang:         s.lang.Load().(string),
@@ -1617,6 +1618,7 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		Inited:       s.core.IsInitialized(),
 		OK:           true,
 		Experimental: s.experimental,
+		OnionUrl:     s.onion,
 	}
 	writeJSON(w, response, s.indent)
 }
