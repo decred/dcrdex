@@ -2,10 +2,6 @@ div[data-handler=mmsettings],
 div[data-handler=mmarchives],
 div[data-handler=mmlogs],
 div[data-handler=mm] {
-  .modified {
-    border: 1px solid $warning !important;
-  }
-
   #gapStrategySelect {
     width: 300px;
   }
@@ -15,30 +11,16 @@ div[data-handler=mm] {
     max-width: 75px;
   }
 
-  .settings-card {
-    background-color: var(--section-bg);
-    padding: 0.5rem;
+  [data-tmpl=value].wide {
+    width: 3rem;
   }
 
-  .xclogo {
-    &.small {
-      width: 16px;
-      height: 16px;
-    }
-  
-    &.large {
-      width: 60px;
-      height: 60px;
-    }
+  .ico-arrowup.ml2px {
+    margin-left: 2px;
+  }
 
-    &.medium {
-      width: 30px;
-      height: 30px;
-    }
-
-    &.off {
-      filter: grayscale(1);
-    }
+  .pt-pt5 {
+    padding-top: 0.125rem;
   }
 
   #profitInput {
@@ -69,7 +51,7 @@ div[data-handler=mm] {
       }
     }
   }
- 
+
   #marketFilterIcon {
     position: absolute;
     left: 10px;
@@ -122,11 +104,7 @@ div[data-handler=mm] {
     }
   }
 
-  #lotsPerLevel,
-  #levelsPerSide,
-  #qcProfit,
-  #qcLevelSpacing,
-  #qcMatchBuffer {
+  #quickConfig input[type=number] {
     width: 100px;
   }
 
@@ -134,16 +112,13 @@ div[data-handler=mm] {
     opacity: 0.5;
   }
 
-  #placementsChart {
+  #placementsChart,
+  [data-tmpl=placementsChart] {
     height: 100px;
-  }
 
-  .ico-rocket {
-    color: $success;
-  }
-
-  .ico-sleeping {
-    color: #7777;
+    canvas {
+      @extend .fill-abs;
+    }
   }
 
   #buyPlacementsBox,
@@ -159,45 +134,9 @@ div[data-handler=mm] {
 
   #noBots {
     .ico-robot {
-      font-size: 100px;
+      font-size: 80px;
       opacity: 0.7;
     }
-  }
-
-  .on-indicator {
-    width: 15px;
-    height: 15px;
-    border-radius: 8px;
-
-    &.on {
-      background-color: $warning;
-    }
-
-    &.off {
-      background-color: #777;
-    }
-  }
-
-  .balance-layover {
-    background-color: #777;
-    z-index: 99;
-    position: absolute;
-    padding: 4px;
-    border-radius: 3px;
-    border-color: #242424;
-  }
-  
-  .dark-logo {
-    display: none;
-  }
-
-  #runSelect {
-    width: 20%;
-  }
-
-  img {
-      width: 16px;
-      height: 16px;
   }
 
   #dexOrderDetailsForm,
@@ -206,13 +145,17 @@ div[data-handler=mm] {
   #withdrawalDetailsForm {
       min-width: 400px;
   }
-}
 
-div[data-handler=mmsettings] {
-  .input-unit {
-    position: absolute;
-    right: 0.25rem;
-    top: 50%;
-    transform: translateY(-50%);
+  .allocation-grid {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+
+    .second {
+      grid-column: 2;
+    }
+
+    .third {
+      grid-column: 3;
+    }
   }
 }

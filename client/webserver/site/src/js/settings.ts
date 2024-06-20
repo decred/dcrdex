@@ -397,10 +397,6 @@ export default class SettingsPage extends BasePage {
 
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
-    const page = this.page
-    Doc.hide(page.forms)
-    await app().fetchUser()
-    // Initial method of displaying added dex.
     window.location.reload()
   }
 

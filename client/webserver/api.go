@@ -1603,6 +1603,11 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		u = s.core.User()
 	}
 
+	var mmStatus *mm.Status
+	if s.mm != nil {
+		mmStatus = s.mm.Status()
+	}
+
 	response := struct {
 		User         *core.User `json:"user"`
 		Lang         string     `json:"lang"`
@@ -1610,6 +1615,7 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		Inited       bool       `json:"inited"`
 		OK           bool       `json:"ok"`
 		Experimental bool       `json:"experimental"`
+		MMStatus     *mm.Status `json:"mmStatus"`
 	}{
 		User:         u,
 		Lang:         s.lang.Load().(string),
@@ -1617,6 +1623,7 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		Inited:       s.core.IsInitialized(),
 		OK:           true,
 		Experimental: s.experimental,
+		MMStatus:     mmStatus,
 	}
 	writeJSON(w, response, s.indent)
 }
@@ -2021,32 +2028,10 @@ func (s *WebServer) apiDisableMixer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-func (s *WebServer) apiStartAllMarketMakingBots(w http.ResponseWriter, r *http.Request) {
-	var form struct {
-		AppPW encode.PassBytes `json:"appPW"`
-	}
-	defer form.AppPW.Clear()
-	if !readPost(w, r, &form) {
-		s.writeAPIError(w, fmt.Errorf("failed to read form"))
-		return
-	}
-	appPW, err := s.resolvePass(form.AppPW, r)
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
-		return
-	}
-	if err = s.mm.StartAllBots(nil, appPW); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error starting mm bots: %v", err))
-		return
-	}
-
-	writeJSON(w, simpleAck(), s.indent)
-}
-
 func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		Market *mm.MarketWithHost `json:"market"`
-		AppPW  encode.PassBytes   `json:"appPW"`
+		Config *mm.StartConfig  `json:"config"`
+		AppPW  encode.PassBytes `json:"appPW"`
 	}
 	defer form.AppPW.Clear()
 	if !readPost(w, r, &form) {
@@ -2058,19 +2043,11 @@ func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Reque
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	if err = s.mm.StartBot(form.Market, nil, appPW); err != nil {
+	if err = s.mm.StartBot(form.Config, nil, appPW); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error starting market making: %v", err))
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
-}
-
-func (s *WebServer) apiStopAllMarketMakingBots(w http.ResponseWriter, _ *http.Request) {
-	if err := s.mm.StopAllBots(); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error stopping mm bots: %v", err))
-		return
-	}
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -2121,16 +2098,16 @@ func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) apiRemoveBotConfig(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		Host       string `json:"host"`
-		BaseAsset  uint32 `json:"baseAsset"`
-		QuoteAsset uint32 `json:"quoteAsset"`
+		Host    string `json:"host"`
+		BaseID  uint32 `json:"baseID"`
+		QuoteID uint32 `json:"quoteID"`
 	}
 	if !readPost(w, r, &form) {
 		s.writeAPIError(w, fmt.Errorf("failed to read form"))
 		return
 	}
 
-	if err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset); err != nil {
+	if err := s.mm.RemoveBotConfig(form.Host, form.BaseID, form.QuoteID); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}

@@ -75,6 +75,10 @@ header a:hover,
 
 div.spinner {
   animation: spin 2s infinite linear;
+
+  &.fast {
+    animation: spin 1s infinite linear;
+  }
 }
 
 div.note-indicator {
@@ -91,7 +95,28 @@ div.note-indicator {
   }
 
   &.warn {
-    background-color: $warning;
+    background-color: var(--text-warning);
+  }
+}
+
+.z10 {
+  z-index: 10;
+}
+
+img.dex-logo {
+  content: var(--dex-url);
+}
+
+img.bison-logo-square {
+  content: url("/img/bison-square_50.png");
+}
+
+img.bison-logo-full {
+  content: url("/img/bison-full_97x50.png");
+
+  &.small {
+    height: 25px;
+    width: 48.5px;
   }
 }
 
@@ -114,7 +139,7 @@ div.note-indicator {
   }
 
   &.warn {
-    color: $warning;
+    color: var(--text-warning);
   }
 }
 

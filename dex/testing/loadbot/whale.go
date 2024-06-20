@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
@@ -62,13 +63,13 @@ func runWhale() {
 // SetupWallets is part of the Trader interface.
 func (*whale) SetupWallets(m *Mantle) {
 	numCoins := 20
-	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, uint64(defaultMidGap*float64(rateEncFactor)+float64(rateStep)*(1+whalePercent*2 /* twice for buffering */)))
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
 	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
 	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
 
 	m.log.Infof("Whale has been initialized with  %s to %s %s balance, and %s to %s %s balance, %d initial funding coins",
-		valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
-		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
+		fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
+		fmtAtoms(minQuoteQty, quoteSymbol), fmtAtoms(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
 
 }
 
@@ -103,12 +104,7 @@ func (w *whale) HandleNotification(m *Mantle, note core.Notification) {
 	case *core.BondPostNote:
 		// Once registration is complete, register for a book feed.
 		if n.Topic() == core.TopicAccountRegistered {
-			book := m.book()
-			rate := midGap(book)
-			if !liveMidGap {
-				rate += uint64(float64(rate) * whalePercent)
-			}
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(20, rate)
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
 			wmm := walletMinMax{
 				baseID:  {min: minBaseQty, max: maxBaseQty},
 				quoteID: {min: minQuoteQty, max: maxQuoteQty},
@@ -139,12 +135,7 @@ func (w *whale) HandleNotification(m *Mantle, note core.Notification) {
 		switch {
 		// Refresh balances one epoch at a time.
 		case c < numWhale:
-			book := m.book()
-			rate := midGap(book)
-			if !liveMidGap {
-				rate += uint64(float64(rate) * whalePercent)
-			}
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(20, rate)
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
 			wmm := walletMinMax{
 				baseID:  {min: minBaseQty, max: maxBaseQty},
 				quoteID: {min: minQuoteQty, max: maxQuoteQty},
@@ -188,8 +179,8 @@ func (*whale) whale(m *Mantle) {
 			target = truncate(int64(midGap)+int64(tweak), int64(rateStep))
 		}
 	}
-	conversionRatio := float64(conversionFactors[quoteSymbol]) / float64(conversionFactors[baseSymbol])
-	m.log.Infof("TS whaling at %v rate.", float64(target)/float64(rateEncFactor)/conversionRatio)
+
+	m.log.Infof("TS whaling at rate = %s", calc.ConventionalRate(target, bui, qui))
 	sell := true
 	if target > midGap {
 		sell = false
@@ -225,7 +216,7 @@ func (*whale) whale(m *Mantle) {
 		rem = 0
 	}
 
-	m.log.Infof("Whaling with %d lots at %v", lots, float64(target)/float64(rateEncFactor)/conversionRatio)
+	m.log.Infof("Whaling with %d lots at rate = %s", lots, calc.ConventionalRate(target, bui, qui))
 
 	for _, man := range wMantles {
 		for i := 0; i < int(nMaxOrd); i++ {

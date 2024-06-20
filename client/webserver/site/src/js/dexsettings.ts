@@ -56,9 +56,11 @@ export default class DexSettingsPage extends BasePage {
     const page = this.page = Doc.idDescendants(body)
     this.forms = Doc.applySelector(page.forms, ':scope > form')
 
-    this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
+    this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, async () => {
       this.showSuccess(intl.prep(intl.ID_TRADING_TIER_UPDATED))
       this.renewToggle.setState(this.confirmRegisterForm.tier > 0)
+      await app().fetchUser()
+      app().updateMenuItemsDisplay()
     }, () => {
       this.runAnimation(this.regAssetForm, page.regAssetForm)
     }, this.pwCache)
@@ -195,7 +197,7 @@ export default class DexSettingsPage extends BasePage {
     }
     Doc.bind(document, 'keyup', this.keyup)
 
-    page.forms.querySelectorAll('.form-closer').forEach(el => {
+    Doc.applySelector(page.forms, '.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { this.closePopups() })
     })
 

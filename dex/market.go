@@ -61,16 +61,16 @@ func marketName(base, quote string) string {
 // MarketName creates the string representation of a DEX market (e.g. "dcr_btc")
 // given the base and quote asset indexes defined in BIP-0044. See also
 // BipIDSymbol.
-func MarketName(base, quote uint32) (string, error) {
-	baseSymbol := BipIDSymbol(base)
+func MarketName(baseID, quoteID uint32) (string, error) {
+	baseSymbol := BipIDSymbol(baseID)
 	if baseSymbol == "" {
-		return "", fmt.Errorf("base asset %d not found", base)
+		return "", fmt.Errorf("base asset %d not found", baseID)
 	}
 	baseSymbol = strings.ToLower(baseSymbol)
 
-	quoteSymbol := BipIDSymbol(quote)
+	quoteSymbol := BipIDSymbol(quoteID)
 	if quoteSymbol == "" {
-		return "", fmt.Errorf("quote asset %d not found", quote)
+		return "", fmt.Errorf("quote asset %d not found", quoteID)
 	}
 	quoteSymbol = strings.ToLower(quoteSymbol)
 

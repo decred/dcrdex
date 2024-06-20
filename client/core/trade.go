@@ -1220,10 +1220,11 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 
 	// Clear the trackedCancel, allowing this order to be canceled again, and
 	// set the cancel order's status as revoked.
+	cancelOrd := t.cancel
 	t.deleteCancelOrder()
 	err := t.db.LinkOrder(t.ID(), order.OrderID{})
 	if err != nil {
-		t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %v", t.cancel.ID(), t.ID(), err)
+		t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %v", cancelOrd.ID(), t.ID(), err)
 	}
 
 	subject, details := t.formatDetails(TopicFailedCancel, makeOrderToken(t.token()))

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -181,7 +182,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 	}
 
 	if lotsToArb > 0 {
-		a.log.Infof("arb opportunity - sellOnDex: %v, lotsToArb: %v, dexRate: %v, cexRate: %v: profit: %d",
+		a.log.Infof("arb opportunity - sellOnDex: %t, lotsToArb: %d, dexRate: %s, cexRate: %s: profit: %s",
 			sellOnDEX, lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate), a.fmtBase(prevProfit))
 		return true, lotsToArb, dexRate, cexRate
 	}
@@ -362,10 +363,19 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	defer a.rebalanceRunning.Store(false)
 	a.log.Tracef("rebalance: epoch %d", newEpoch)
 
+	actionTaken, err := a.tryTransfers(newEpoch)
+	if err != nil {
+		a.log.Errorf("Error performing transfers: %v", err)
+		return
+	}
+	if actionTaken {
+		return
+	}
+
 	exists, sellOnDex, lotsToArb, dexRate, cexRate := a.arbExists()
 	if a.log.Level() == dex.LevelTrace {
 		a.log.Tracef("%s rebalance. exists = %t, %s on dex, lots = %d, dex rate = %s, cex rate = %s",
-			a.name, sellStr(sellOnDex), lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate))
+			a.name, exists, sellStr(sellOnDex), lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate))
 	}
 	if exists {
 		// Execution will not happen if it would cause a self-match.
@@ -385,44 +395,48 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 		}
 	}
 	a.activeArbs = remainingArbs
-	attemptRebalance := len(a.activeArbs) == 0
 	a.activeArbsMtx.Unlock()
 
-	if !attemptRebalance {
+	a.registerFeeGap()
+}
+
+func (a *simpleArbMarketMaker) distribution() (dist *distribution, err error) {
+	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1)
+	if err != nil {
+		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
+	}
+	// TODO: Adjust these rates to account for profit and fees.
+	sellFeesInBase, err := a.OrderFeesInUnits(true, true, sellVWAP)
+	if err != nil {
+		return nil, fmt.Errorf("error getting converted fees: %w", err)
+	}
+	adj := float64(sellFeesInBase)/float64(a.lotSize) + a.cfg().ProfitTrigger
+	sellRate := steppedRate(uint64(math.Round(float64(sellVWAP)*(1+adj))), a.rateStep)
+	buyFeesInBase, err := a.OrderFeesInUnits(false, true, buyVWAP)
+	if err != nil {
+		return nil, fmt.Errorf("error getting converted fees: %w", err)
+	}
+	adj = float64(buyFeesInBase)/float64(a.lotSize) + a.cfg().ProfitTrigger
+	buyRate := steppedRate(uint64(math.Round(float64(buyVWAP)/(1+adj))), a.rateStep)
+	perLot, err := a.lotCosts(sellRate, buyRate)
+	if perLot == nil {
+		return nil, fmt.Errorf("error getting lot costs: %w", err)
+	}
+	dist = a.newDistribution(perLot)
+	avgBaseLot, avgQuoteLot := float64(perLot.dexBase+perLot.cexBase)/2, float64(perLot.dexQuote+perLot.cexQuote)/2
+	baseLots := uint64(math.Round(float64(dist.baseInv.total) / avgBaseLot / 2))
+	quoteLots := uint64(math.Round(float64(dist.quoteInv.total) / avgQuoteLot / 2))
+	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2)
+	return dist, nil
+}
+
+func (a *simpleArbMarketMaker) tryTransfers(currEpoch uint64) (actionTaken bool, err error) {
+	dist, err := a.distribution()
+	if err != nil {
+		a.log.Errorf("distribution calculation error: %v", err)
 		return
 	}
-
-	// There will be no reserves, as this will only be called when there
-	// are no active orders.
-	rebalanceBase, _, _ := a.cex.PrepareRebalance(a.ctx, a.baseID)
-	if rebalanceBase > 0 {
-		err := a.cex.Deposit(a.ctx, a.baseID, uint64(rebalanceBase))
-		if err != nil {
-			a.log.Errorf("error depositing base asset: %v", err)
-		}
-	}
-	if rebalanceBase < 0 {
-		err := a.cex.Withdraw(a.ctx, a.baseID, uint64(-rebalanceBase))
-		if err != nil {
-			a.log.Errorf("error withdrawing base asset: %v", err)
-		}
-	}
-
-	rebalanceQuote, _, _ := a.cex.PrepareRebalance(a.ctx, a.quoteID)
-	if rebalanceQuote > 0 {
-		err := a.cex.Deposit(a.ctx, a.quoteID, uint64(rebalanceQuote))
-		if err != nil {
-			a.log.Errorf("error depositing quote asset: %v", err)
-		}
-	}
-	if rebalanceQuote < 0 {
-		err := a.cex.Withdraw(a.ctx, a.quoteID, uint64(-rebalanceQuote))
-		if err != nil {
-			a.log.Errorf("error withdrawing quote asset: %v", err)
-		}
-	}
-
-	a.registerFeeGap()
+	return a.transfer(dist, currEpoch)
 }
 
 func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
@@ -446,10 +460,10 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 		defer wg.Done()
 		for {
 			select {
-			case n := <-bookFeed.Next():
-				if n.Action == core.EpochMatchSummary {
-					payload := n.Payload.(*core.EpochMatchSummaryPayload)
-					a.rebalance(payload.Epoch + 1)
+			case ni := <-bookFeed.Next():
+				switch epoch := ni.Payload.(type) {
+				case *core.ResolvedEpoch:
+					a.rebalance(epoch.Current)
 				}
 			case <-a.ctx.Done():
 				return
@@ -484,6 +498,8 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 		}
 	}()
 
+	a.registerFeeGap()
+
 	return &wg, nil
 }
 
@@ -493,7 +509,7 @@ func (a *simpleArbMarketMaker) registerFeeGap() {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return
 	}
-	a.core.registerFeeGap(feeGap)
+	a.unifiedExchangeAdaptor.registerFeeGap(feeGap)
 }
 
 func (a *simpleArbMarketMaker) updateConfig(cfg *BotConfig) error {

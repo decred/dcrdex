@@ -1,6 +1,7 @@
 package mm
 
 import (
+	"encoding/json"
 	"fmt"
 )
 
@@ -30,24 +31,22 @@ type CEXConfig struct {
 	APISecret string `json:"apiSecret"`
 }
 
-// AutoRebalanceConfig determines how the bot will automatically rebalance its
-// assets between the CEX and DEX. If the base or quote asset dips below the
-// minimum amount, a transfer will take place, but only if both balances can be
-// brought above the minimum amount and the transfer amount would be above the
-// minimum transfer amount.
+// AutoRebalanceConfig configures deposits and withdrawals by setting minimum
+// transfer sizes. Minimum transfer sizes should be set to prevent excessive
+// fees on high-fee blockchains. To calculate a minimum transfer size for an
+// asset, choose a fee-loss tolerance <= your profit target. If you only wanted to
+// lose a maximum of 1% to transfers, and the fees associated with a transfer
+// are 350 Sats, then your minimum transfer size might be set to
+// 350 * (1 / 0.01) = 35000 Sats.
+// For low-fee assets, a transfer size of zero would be perfectly fine in most
+// cases, but using a higher value prevents churn.
+// For obvious reasons, minimum transfer sizes should never be more than the
+// total amount allocated for trading.
+// The way these are configured will probably be changed to better capture the
+// reasoning above.
 type AutoRebalanceConfig struct {
-	MinBaseAmt       uint64 `json:"minBaseAmt"`
 	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
-	MinQuoteAmt      uint64 `json:"minQuoteAmt"`
 	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
-}
-
-// BotCEXCfg specifies the CEX that a bot uses, the initial balances
-// that should be allocated to the bot on that CEX, and the configuration
-// for automatically rebalancing between the CEX and DEX.
-type BotCEXCfg struct {
-	Name          string               `json:"name"`
-	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance"`
 }
 
 // BotBalanceAllocation is the initial allocation of funds for a bot.
@@ -101,12 +100,18 @@ type BotConfig struct {
 	BaseWalletOptions  map[string]string `json:"baseWalletOptions"`
 	QuoteWalletOptions map[string]string `json:"quoteWalletOptions"`
 
-	// Only applicable for arb bots.
-	CEXCfg *BotCEXCfg `json:"cexCfg"`
+	CEXName string `json:"cexName"`
 
-	// Alloc will be the initial balance allocation used when the bot is
-	// started.
-	Alloc *BotBalanceAllocation `json:"alloc"`
+	// UIConfig is settings defined and used by the front end to determine
+	// allocations.
+	UIConfig json.RawMessage `json:"uiConfig,omitempty"`
+
+	// RPCConfig can be used for file-based initial allocations and
+	// auto-rebalance settings.
+	RPCConfig *struct {
+		Alloc         *BotBalanceAllocation `json:"alloc"`
+		AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
+	} `json:"rpcConfig"`
 
 	// Only one of the following configs should be set
 	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`

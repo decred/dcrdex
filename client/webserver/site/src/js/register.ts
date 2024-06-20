@@ -216,6 +216,7 @@ export default class RegistrationPage extends BasePage {
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
     await app().fetchUser()
+    app().updateMenuItemsDisplay()
     await app().loadPage(this.data.backTo || 'markets')
   }
 

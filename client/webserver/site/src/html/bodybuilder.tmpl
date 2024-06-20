@@ -29,7 +29,7 @@
     <img src="/img/bison-full_97x50.png">
   </a>
   <a href="/" class="d-block d-md-none pointer hoverbg mx-2">
-    <img src="/img/bison-square_50.png">
+    <img class="bison-logo-square">
   </a>
   <div id="headerSpace"></div>
   <div class="mainlinks fs18 pe-2 text-nowrap">
@@ -37,6 +37,8 @@
     <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallet]]]</a>
 
     <a href="/markets" class="demi hoverbg d-hide" id="marketsMenuEntry">[[[Trade]]]</a>
+
+    <a href="/mm" class="ico-robot lh1 fs32 hoverbg d-hide" id="mmLink"></a>
 
     <div class="d-inline-block position-relative pointer hoverbg{{if not $authed}} d-hide{{end}}" id="noteBell">
       <span class="ico-bell fs20 p-2"></span>
@@ -50,7 +52,7 @@
   </div>
   <div id="loader" class="fill-abs flex-center d-hide">
     <div class="ico-spinner spinner"></div>
-    <div id="loaderMsg" class="mx-2"></div>
+    <div id="loaderMsg" class="mx-2 d-hide"></div>
   </div>
 
   <div id="noteBox" class="d-hide">
@@ -242,7 +244,7 @@
 
     </div>
     <div id="actionsNavigator" class="flex-center mt-2 lh1 fs16 user-select-none">
-      <span id="prevAction" class="p-1 ico-arrowback pointer hoverbg"></span>
+      <span id="prevAction" class="p-1 ico-arrowleft pointer hoverbg"></span>
       <span id="currentAction" class="mx-1"></span>
       <span>/</span>
       <span id="actionCount" class="mx-1"></span>

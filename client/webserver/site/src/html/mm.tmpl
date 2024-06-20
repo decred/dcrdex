@@ -1,158 +1,588 @@
 {{define "mm"}}
 {{template "top" .}}
-<div id="main" data-handler="mm" class="main mm w-100 overflow-y-auto">
-  <div class="d-flex align-items-stretch justify-content-center flex-column align-items-stretch w-100 p-2">
+<div id="main" data-handler="mm" class="flex-grow-1 flex-stretch-column stylish-overflow">
+  <div>
 
-    <div id="onOff" class="flex-center align-items-stretch py-2">
-      <div class="flex-center flex-column p-3">
-        <div class="fs28 text-nowrap">[[[Market Making]]]</div>
-        <div class="flex-center mt-1 fs20">
-          <span id="onIndicator" class="on-indicator off me-2"></span>
-          <span id="onMsg" class="d-hide">[[[Running]]]</span>
-          <span id="offMsg">[[[Off]]]</span>
-        </div>
-      </div>
-      <div class="flex-center p-3 border-start">
-        <button class="go large px-4" id="startBotsBtn">
-          <span class="ico-arrowright me-1"></span>
-          [[[start_market_making]]]
-        </button>
-        <button class="danger large px-4 d-hide" id="stopBotsBtn">
-          <span class="ico-pause me-1"></span>
-          [[[stop_market_making]]]
-        </button>
-      </div>
-    </div>
+    {{- /* BOT PANELS */ -}}
+    <div class="flex-center">
+      <div class="d-flex col-24 col-lg-20 col-xl-16 col-xxl-12">
+        <div id="boxZero" class=" flex-stretch-column col-24 col-md-12">
 
-    <div id="noBots" class="w-100 flex-center flex-column">
-      <div class="d-flex align-items-stretch border-start border-end">
-        <div class="col-12 flex-stretch-column mw-425 p-2">
-          <h3 class="flex-center text-nowrap border-bottom pb-3">[[[Market Making]]]</h3>
-          <p class="p-2">
-            [[[whats_a_market_maker]]]
-          </p>
-        </div>
-        <div class="col-12 flex-center flex-column mw-425 p-3 border-start">
-          <span class="ico-robot mb-3"></span>
-          <button id="addBotBtnNoExisting" class="large go">[[[Add a Market Maker Bot]]]</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="mmErr"  class="flex-center text-danger d-hide"></div>
-
-    <div class="px-5 pt-3 w-100">
-      <table id="botTable" class="row-border d-hide mb-3">
-        <thead>
-          <th id="enabledHeader">[[[enabled]]]</th>
-          <th id="runningHeader" class="d-hide">[[[running]]]</th>
-          <th>[[[Host]]]</th>
-          <th>[[[Market]]]</th>
-          <th>[[[bot_type]]]</th>
-          <th>[[[base_balance]]]</th>
-          <th>[[[quote_balance]]]</th>
-          <th id="profitLossHeader">[[[profit_loss]]]</th>
-          <th id="removeHeader" class="text-end">[[[Remove]]]</th>
-          <th class="text-end">[[[Settings]]]</th>
-          <th id="logsHeader" class="text-end">[[[run_logs]]]</th>
-        </thead>
-        <tbody id="botTableBody" class="fs18">
-          <tr id="botTableRowTmpl">
-            <td class="d-hide" data-tmpl="running">
-              <span class="ico-rocket fs20 mx-2" data-tmpl="runningIcon"></span>
-              <span class="ico-sleeping fs20 mx-2" data-tmpl="notRunningIcon"></span>
-            </td>
-            <td data-tmpl="host"></td>
-            <td>
-              <div class="d-flex align-items-center justify-content-start">
-                <img data-tmpl="baseMktLogo" class="micro-icon">
-                <img class="mx-1 micro-icon" data-tmpl="quoteMktLogo">
-                <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
-              </div>
-            </td>
-            <td>
-              <span data-tmpl="botType" class="me-1"></span>
-              <span data-tmpl="cexLink" class="d-hide">
-                <span class="fs16 ico-exchange me-1"></span>
-                <img data-tmpl="cexLogo" class="micro-icon">
-                <span data-tmpl="cexName"></span>
-              </span>
-            </td>
-            <td data-tmpl="baseBalanceTd">
-              <img src="/img/softened-icon-dark.png" class="micro-icon dark-logo">
-              <img src="/img/softened-icon.png" class="micro-icon light-logo">
-              <span data-tmpl="baseBalance"></span><img class="mx-1 micro-icon" data-tmpl="baseBalanceLogo">
-                <span class="ico-info fs12 ms-1" data-tmpl="baseBalanceDetails"></span>
-                <div data-tmpl="baseBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
-                  <span>[[[Available]]]: <span data-tmpl="runningBaseBalanceAvailable"></span></span>
-                  <span>[[[Locked]]]: <span data-tmpl="runningBaseBalanceLocked"></span></span>
-                  <span>[[[Pending]]]: <span data-tmpl="runningBaseBalancePending"></span></span>
-                </div>
-                </br>
-                <span data-tmpl="cexBaseBalanceContainer">
-                  <img data-tmpl="baseBalanceCexLogo" class="micro-icon">
-                  <span data-tmpl="cexBaseBalanceLoaded">
-                    <span data-tmpl="cexBaseBalance"></span><img class="mx-1 micro-icon" data-tmpl="cexBaseBalanceLogo">
-                    <span class="ico-info fs12 ms-1" data-tmpl="cexBaseBalanceDetails"></span>
-                  </span>
-                  <div class="ico-spinner spinner fs14 d-inline-block d-hide" data-tmpl="cexBaseBalanceSpinner"></div>
-                  <div data-tmpl="cexBaseBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
-                    <span>[[[Available]]]: <span data-tmpl="runningCexBaseBalanceAvailable"></span></span>
-                    <span>[[[Locked]]]: <span data-tmpl="runningCexBaseBalanceLocked"></span></span>
-                  </div>
-                </span>
-              </div>
-            </td>
-            <td data-tmpl="quoteBalanceTd">
-              <img src="/img/softened-icon-dark.png" class="micro-icon dark-logo">
-              <img src="/img/softened-icon.png" class="micro-icon light-logo">
-              <span data-tmpl="quoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="quoteBalanceLogo">
-                <span class="ico-info fs12 ms-1" data-tmpl="quoteBalanceDetails"></span>
-                <div data-tmpl="quoteBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
-                  <span>[[[Available]]]: <span data-tmpl="runningQuoteBalanceAvailable"></span></span>
-                  <span>[[[Locked]]]: <span data-tmpl="runningQuoteBalanceLocked"></span></span>
-                  <span>[[[Pending]]]: <span data-tmpl="runningQuoteBalancePending"></span></span>
-                </div>
-                </br>
-                <span data-tmpl="cexQuoteBalanceContainer">
-                  <img data-tmpl="quoteBalanceCexLogo" class="micro-icon">
-                  <span data-tmpl="cexQuoteBalanceLoaded">
-                    <span data-tmpl="cexQuoteBalance"></span><img class="mx-1 micro-icon" data-tmpl="cexQuoteBalanceLogo">
-                    <span class="ico-info fs12 ms-1" data-tmpl="cexQuoteBalanceDetails"></span>
-                  </span>
-                  <div class="ico-spinner spinner fs14 d-inline-block d-hide" data-tmpl="cexQuoteBalanceSpinner"></div>
-                  <div data-tmpl="cexQuoteBalanceHoverContainer" class="balance-layover d-flex flex-column d-hide">
-                    <span>[[[Available]]]: <span data-tmpl="runningCexQuoteBalanceAvailable"></span></span>
-                    <span>[[[Locked]]]: <span data-tmpl="runningCexQuoteBalanceLocked"></span></span>
-                  </div>
-                </span>
-              </div>
-            </td>
-            <td data-tmpl="profitLossTd"><span data-tmpl="profitLoss"></span></td>
-            <td class="text-end hoverbg pointer" data-tmpl="removeTd"><span class="ico-cross fs20 p-2 text-danger"></span></td>
-            <td class="text-end hoverbg pointer" data-tmpl="settings"><span class="ico-settings fs24 p-2"></span></td>
-            <td class="text-end hoverbg pointer" data-tmpl="logs"><span class="ico-open fs20 p-2"></span></td>
-          </tr>
-        </tbody>
-        <tbody>
-          <tr>
-            <td colspan="9">
-              <div class="flex-center">
-                <button class="large" id="addBotBtnWithExisting">
-                  <span class="ico-plus me-2"></span>
-                  [[[Add another bot]]]
+          {{- /* MARKET MAKING OVERVIEW */ -}}
+          <div id="overview">
+            <section class="flex-stretch-column py-3">
+              <div class="d-flex justify-content-between px-3 pb-2">
+                <span class="fs26">Market Making</span>
+                <button id="newBot" class="feature lh1">
+                  <span class="ico-robot fs20 me-1"></span>
+                  <span>Create a New Bot</span>
                 </button>
               </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="flex-center align-items-stretch py-2">
-      <button type="button" class="medium px-4" id="archivedLogsBtn">[[[previous_run_logs]]]</button>
-    </div>
+              <table class="row-border mt-2">
+                <tbody id="botRows">
+                  <tr id="botRowTmpl" class="hoverbg pointer">
+                    <td class="ps-3">
+                      <div class="d-flex justify-content-start align-items-center">
+                        <img class="mini-icon me-1" data-base-logo>
+                        <img class="mini-icon me-1" data-quote-logo>
+                        <span class="fs20" data-base-ticker></span>
+                        <span>-</span>
+                        <span class="fs20" data-quote-ticker></span>
+                      </div>
+                    </td>
+                    <td data-tmpl="allocateBttnBox" class="d-flex align-items-center justify-content-end pe-3">
+                      <button data-tmpl="allocateBttn" class="small demi">Allocate</button>
+                    </td>
+                    <td data-tmpl="profitLossBox" class="pe-3">
+                      <div class="d-flex align-items-center justify-content-end">
+                        <span class="fs14 grey me-2 demi">P/L</span>
+                        <div class="d-flex align-items-end fs18">
+                          <span data-tmpl="profitLoss"></span>
+                          <span class="grey fs15 ms-1">USD</span>
+                        </div>
+                        <div class="on-indicator on ms-2"></div>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
 
-</div>
+              {{- /* CEX OVERVIEW */ -}}
+              <div class="mt-2 px-3 fs22">Exchanges</div>
+              <table class="row-border mt-2">
+                <tbody id="cexRows">
+                  <tr id="exchangeRowTmpl">
+                    <td class="ps-3">
+                      <div class="d-flex justify-content-start align-items-center">
+                        <img data-tmpl="logo" class="small-icon me-2">
+                        <span data-tmpl="name" class="fs20"></span>
+                      </div>
+                    </td>
+                    <td data-tmpl="unconfigured" class="pe-3">
+                      <div class="d-flex align-items-center justify-content-end">
+                        <button data-tmpl="configureBttn" class="flex-center">
+                          <span class="ico-settings fs18 me-1"></span>
+                          <span>Configure</span>
+                        </button>
+                      </div>
+                    </td>
+                    <td data-tmpl="configured" class="pe-3">
+                      <div class="d-flex align-items-center justify-content-end">
+                        <div class="d-flex align-items-end fs18">
+                          <span class="grey">~</span>
+                          <span data-tmpl="usdBalance"></span>
+                          <span class="grey fs15 ms-1">USD</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td data-tmpl="connectErrBox" class="d-hide pe-3">
+                      <span data-tmpl="connectErr" class="errcolor"></span>
+                      <button data-tmpl="reconfigureBttn" class="ico-settings ms-2 d-hide"></button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+          </div>
+        </div>
+        <div id="boxOne" class=" flex-stretch-column col-24 col-md-12">
+          {{- /* NO CONFIGURED BOTS */ -}}
+          <div id="noBots">
+            <section class="flex-stretch-column">
+              <div class="flex-center lh1 pt-3">
+                <span class="ico-robot"></span>
+              </div>
+              <p class="px-3 pt-2 mt-2 border-top fs18 text-justify">
+                [[[whats_a_market_maker]]]
+              </p>
+            </section>
+          </div>
+          {{- /* BOT PANEL TEMPLATE */ -}}
+          <div id="botTmpl" class="flex-stretch-column mb-3">
+            <section class="flex-stretch-column position-relative pt-3">
+              <div data-tmpl="loadingBg" class="fill-abs z10 blurry-bg flex-center">
+                <div class="ico-robot fs50 grey position-relative spinner fast pb-2"></div>
+              </div>
+
+              <div class="d-flex px-3">
+                {{- /* MARKET NAME DISPLAY */ -}}
+                <div data-tmpl="marketLink" class="flex-grow-1 d-flex flex-column align-items-start hoverbg pointer">
+                  <div class="d-flex align-items-center fs24 lh1 pb-1">
+                    <img class="mini-icon" data-base-logo><img class="mx-1 mini-icon" data-quote-logo>
+                    <span data-base-ticker></span>&ndash;<span data-quote-ticker></span>
+                  </div>
+                  <div class="fs14 grey">
+                    <span class="me-1">@</span>
+                    <span data-host></span>
+                  </div>
+                </div>
+                {{- /* BOT TYPE DISPLAY */ -}}
+                <div class="flex-grow-1 d-flex flex-column align-items-end">
+                  <div class="d-flex align-items-center lh1 pb-1">
+                    <div data-tmpl="botTypeDisplay" class="fs20"></div>
+                  </div>
+                  <div class="d-flex align-items-center" data-cex-show>
+                    <img class="micro-icon greyscale me-1" data-cex-logo>
+                    <span class="grey fs15" data-cex-name></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="position-relative">
+
+                {{- /* ON */ -}}
+                <div data-tmpl="onBox" class="flex-stretch-column mt-2 pt-2 border-top">
+                  {{template "runningBotDisplay"}}
+                </div>
+
+                {{- /* OFF */ -}}
+                <div data-tmpl="offBox" class="flex-stretch-column">
+                  {{- /* STATUS AND ALLOCATE BUTTON */ -}}
+                  <div class="d-flex align-items-center mt-2 px-3 pt-2 border-top">
+                    <div class="col-8 ico-sleeping fs26 grey"></div>
+                    <div class="col-8 flex-center">
+                      <button data-tmpl="allocationBttn" class="small feature">
+                        <span class="fs16 ico-arrowright"></span>
+                        <span class="fs18">Allocate and Run</span>
+                      </button>
+                    </div>
+                    <div class="col-8 d-flex align-items-center justify-content-end">
+                      <button data-tmpl="reconfigureBttn">
+                        <span class="ico-settings fs17"></span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {{- /* PROJECTED ALLOCATIONS */ -}}
+                  <div class="flex-stretch-column px-3 pt-2 mt-2 border-top">
+                    <div class="d-flex align-items-center justify-content-between">
+                      <div class="flex-center">
+                        <span class="ico-barchart fs18 me-2"></span>
+                        <span class="fs20">Projected Allocation</span>
+                      </div>
+                      <div class="d-flex align-items-end">
+                        <div data-tmpl="totalAllocUSD" class="fs20"></div>
+                        <div class="fs18 grey ms-1">USD</div>
+                      </div>
+                    </div>
+
+                    {{- /* PROJECTED BASE ASSET ALLOCATIONS */ -}}
+                    <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+                      <div class="flex-center">
+                        <img class="micro-icon me-1" data-base-logo>
+                        <span class="fs20" data-base-name></span>
+                      </div>
+                      <div class="d-flex align-items-end">
+                        <div data-tmpl="baseAlloc" class="fs18"></div>
+                        <span class="fs15 grey ms-1" data-base-ticker></span>
+                      </div>
+                    </div>
+                    <div class="grey pe-2 fs16">
+                      <div data-tmpl="baseBookingFeesAllocBox" class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">├─</span>
+                          <span>Booking Fees</span>
+                        </span>
+                        <span data-tmpl="baseBookingFeesAlloc" class="mono"></span>
+                      </div>
+                      <div data-tmpl="baseCexAllocBox" class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">├─</span>
+                          <span>CEX Inventory</span>
+                        </span>
+                        <span data-tmpl="baseCexAlloc" class="mono"></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">├─</span>
+                          <span>Order Inventory</span>
+                        </span>
+                        <span data-tmpl="baseBookAlloc" class="mono"></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">└─</span>
+                          <span>Order Reserves</span>
+                          <span>(<span data-tmpl="baseOrderReservesPct"></span>%)</span>
+                        </span>
+                        <span data-tmpl="baseOrderReservesAlloc" class="mono"></span>
+                      </div>
+                    </div>
+                    <div class="d-flex align-items-end justify-content-end">
+                      <span class="grey me-1">~</span>
+                      <span data-tmpl="baseAllocUSD" class="fs18 mono"></span>
+                      <span class="fs15 grey ms-1">USD</span>
+                    </div>
+
+                    {{- /* PROJECTED QUOTE ASSET ALLOCATIONS */ -}}
+                    <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+                      <div class="flex-center">
+                        <img class="micro-icon me-1" data-quote-logo>
+                        <span class="fs20" data-quote-name></span>
+                      </div>
+                      <div class="d-flex align-items-end">
+                        <div data-tmpl="quoteAlloc" class="fs18"></div>
+                        <span class="fs15 grey ms-1" data-quote-ticker></span>
+                      </div>
+                    </div>
+                    <div class="grey pe-2 fs16">
+                      <div data-tmpl="quoteBookingFeesAllocBox" class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">├─</span>
+                          <span>Booking Fees</span>
+                        </span>
+                        <span data-tmpl="quoteBookingFeesAlloc" class="mono"></span>
+                      </div>
+                      <div data-tmpl="quoteCexAllocBox" class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">├─</span>
+                          <span>CEX Inventory</span>
+                        </span>
+                        <span data-tmpl="quoteCexAlloc" class="mono"></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">├─</span>
+                          <span>Order Inventory</span>
+                        </span>
+                        <span data-tmpl="quoteBookAlloc" class="mono"></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">├─</span>
+                          <span>Order Reserves</span>
+                          <span>(<span data-tmpl="quoteOrderReservesPct"></span>%)</span>
+                        </span>
+                        <span data-tmpl="quoteOrderReservesAlloc" class="mono"></span>
+                      </div>
+                      <div data-tmpl="quoteSlippageAllocBox" class="d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">└─</span>
+                          <span>Slippage Buffer</span>
+                          <span>(<span data-tmpl="slippageBufferFactor"></span>%)</span>
+                        </span>
+                        <span data-tmpl="quoteSlippageAlloc" class="mono"></span>
+                      </div>
+                    </div>
+                    <div class="d-flex align-items-end justify-content-end">
+                      <span class="grey me-1">~</span>
+                        <span data-tmpl="quoteAllocUSD" class="fs18"></span>
+                        <span class="fs15 grey ms-1">USD</span>
+                    </div>
+
+                    {{- /* PROJECTED BASE TOKEN FEE ALLOCATIONS */ -}}
+                    <div data-tmpl="baseTokenFeesAllocBox">
+                      <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+                        <div class="flex-center">
+                          <img class="micro-icon me-1" data-base-fee-logo>
+                          <span class="fs20" data-base-fee-name></span>
+                        </div>
+                        <div class="d-flex align-items-end">
+                          <div data-tmpl="baseTokenFeeAlloc" class="fs18"></div>
+                          <span class="fs14 grey ms-1" data-base-fee-ticker></span>
+                        </div>
+                      </div>
+                      <div class="grey pe-2 fs16">
+                        <div data-tmpl="baseTokenSwapFeesBox" class="d-flex align-items-center justify-content-between lh1">
+                          <span>
+                            <span class="fs20">├─</span>
+                            <span>Swap Fee Reserves</span>
+                            <span>(<span data-tmpl="baseTokenSwapFeeN"></span>)</span>
+                          </span>
+                          <span data-tmpl="baseTokenSwapFees" class="mono"></span>
+                        </div>
+                      </div>
+                      <div class="grey d-flex align-items-center justify-content-between lh1">
+                        <span>
+                          <span class="fs20">└─</span>
+                          <span>Booking Fees</span>
+                        </span>
+                        <span data-tmpl="baseTokenBookingFees" class="mono"></span>
+                      </div>
+                      <div class="d-flex align-items-end justify-content-end">
+                        <span class="grey me-1">~</span>
+                        <span data-tmpl="baseTokenAllocUSD" class="fs18"></span>
+                        <span class="fs15 grey ms-1">USD</span>
+                      </div>
+                    </div>
+
+                    {{- /* PROJECTED QUOTE TOKEN FEE ALLOCATIONS */ -}}
+                    <div data-tmpl="quoteTokenFeesAllocBox">
+                      <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+                        <div class="flex-center">
+                          <img class="micro-icon me-1" data-quote-fee-logo>
+                          <span class="fs20" data-quote-fee-name></span>
+                        </div>
+                        <div class="d-flex align-items-end">
+                          <div data-tmpl="quoteTokenFeeAlloc" class="fs18"></div>
+                          <span class="fs14 grey ms-1" data-quote-fee-ticker></span>
+                        </div>
+                      </div>
+                      <div class="grey pe-2 fs16">
+                        <div data-tmpl="quoteTokenSwapFeesBox" class="d-flex align-items-center justify-content-between lh1">
+                          <span>
+                            <span class="fs20">├─</span>
+                            <span>Swap Fee Reserves</span>
+                            <span>(<span data-tmpl="quoteTokenSwapFeeN" class="mono"></span>)</span>
+                          </span>
+                          <span data-tmpl="quoteTokenSwapFees"></span>
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between lh1">
+                          <span>
+                            <span class="fs20">└─</span>
+                            <span>Booking Fees</span>
+                          </span>
+                          <span data-tmpl="quoteTokenBookingFees" class="mono"></span>
+                        </div>
+                      </div>
+                      <div class="d-flex align-items-end justify-content-end">
+                        <span class="grey me-1">~</span>
+                          <span data-tmpl="quoteTokenAllocUSD" class="fs18"></span>
+                          <span class="fs15 grey ms-1">USD</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {{- /* CURRENT MARKET DATA */ -}}
+                  <div class="d-flex align-items-stretch justify-content-start mt-2 pt-2 px-3 border-top">
+                    {{- /* HIDDEN FOR NOW - MOVE TO SETTINGS OVERVIEW WHEN IMPLEMENTED */ -}}
+                    <div class="flex-center flex-column p-2 d-hide">
+                      <span class="fs14 grey">Trigger</span>
+                      <span class="lh1">
+                        <span data-tmpl="profitTrigger" class="fs28">5</span>
+                        <span class="fs22 grey">%</span>
+                      </span>
+                    </div>
+
+                    {{- /* DEX MARKET INFO */ -}}
+                    <div data-tmpl="dexDataBox" class="flex-stretch-column flex-grow-1">
+                      <div class="d-flex align-items-center justify-content-start pt-1">
+                        <img class="mini-icon dex-logo me-1">
+                        <span class="fs18">DCRDEX</span>
+                      </div>
+                      <div class="flex-grow-1 d-flex align-items-end lh1 pt-1">
+                        <span data-tmpl="dexPrice" class="fs17"></span>
+                        <span class="fs14 grey ms-1">
+                          <span data-quote-ticker></span><span>/</span> <span data-base-ticker></span>
+                        </span>
+                      </div>
+                      <div class="flex-grow-1 d-flex align-items-end lh1 pt-1 pb-2">
+                        <span data-tmpl="dexVol" class="fs17"></span>
+                        <span class="fs14 grey ms-1">USD 24 hr. vol.</span>
+                      </div>
+                    </div>
+
+                    {{- /* CEX MARKET INFO */ -}}
+                    <div data-tmpl="cexDataBox" class="d-flex flex-column align-items-end flex-grow-1">
+                      <div class="flex-center">
+                        <img class="mini-icon me-1" data-cex-logo>
+                        <span class="fs20" data-cex-name></span>
+                      </div>
+                      <div class="flex-grow-1 d-flex align-items-end lh1 pt-1">
+                        <span data-tmpl="cexPrice" class="fs17"></span>
+                        <span class="fs14 grey ms-1">
+                          <span data-quote-ticker></span><span>/</span> <span data-base-ticker></span>
+                        </span>
+                      </div>
+                      <div class="flex-grow-1 d-flex align-items-end lh1 pt-1 pb-2">
+                        <span data-tmpl="cexVol" class="fs17"></span>
+                        <span class="fs14 grey ms-1">USD 24 hr. vol.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {{- /* PLACEMENTS */ -}}
+                  <div data-tmpl="placementsChartBox" class="d-flex align-items-stretch border-top mt-2">
+                    <div class="flex-center flex-column px-3 py-2">
+                      <div class="flex-center pb-1 pt-1 lh1">
+                        <span data-tmpl="buyPlacementCount" class="demi text-buycolor fs18 me-1"></span>
+                        <span class="fs16">buy placements</span>
+                      </div>
+                      <div class="flex-center pt-1">
+                        <span data-tmpl="sellPlacementCount" class="demi text-sellcolor fs18 me-1"></span>
+                        <span class="fs16">sell placements</span>
+                      </div>
+                    </div>
+                    <div data-tmpl="placementsChart" class="flex-grow-1 border-start position-relative"></div>
+                  </div>
+                </div>
+
+                {{- /* ALLOCATE AND START */ -}}
+                <div data-tmpl="allocationDialog"
+                    class="fill-abs z10 section-bg flex-stretch-column d-hide px-3 mt-2 border-top">
+
+                  {{- /* FUNDING STATUS DEPENDENT MESSAGING AND START BUTTON */ -}}
+                  <div class="d-flex align-items-stretch border-bottom">
+                    <div class="py-3">
+                      <div data-tmpl="fundedAndBalancedBox" class="fs17 text-justify">
+                        <span class="ico-rocket text-buycolor fs20"></span>
+                        You have all the funding to run your program immediately.
+                        <span data-tmpl="hasTransferable">
+                          You also have some flexibility to determine where funds are sourced.
+                        </span>
+                      </div>
+
+                      <div data-tmpl="fundedAndNotBalancedBox" class="fs17 text-justify">
+                        You have enough funding, but it's not all in the right place.
+                        Luckily, you have withdrawals and deposits enabled, so the problem
+                        could resolve itself. Should we start in this unbalanced condition?
+                      </div>
+
+                      <div data-tmpl="starvedBox" class="fs17 text-justify">
+                        You do not appear to have the funding to satisfy your program
+                        configuration. If you'd like, we can still start in this starved
+                        condition, but the bot will probably not perform as intended.
+                      </div>
+                    </div>
+
+                    <div class="p-3 ps-4 d-flex flex-column justify-content-between align-items-end">
+                      <button data-tmpl="startBttn" class="ico-arrowright fs35 p-3 go"></button>
+                      <div data-tmpl="goBackFromAllocation"
+                      class="d-flex align-items-center justify-content-start py-2 hoverbg pointer text-nowrap">
+                        <span class="ico-wide-headed-left-arrow me-1 mt-1"></span>
+                        <span>go back</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div data-tmpl="errMsg" class="py-2 px-3 mb-2 border-bottom flex-center text-warning d-hide"></div>
+
+                  {{- /* PROPOSED ALLOCATIONS AND ADJUSTMENTS */ -}}
+                  <div class="allocation-grid pt-2 lh1">
+                    {{- /* CEX AND DEX LOGO COLUMN HEADERS */ -}}
+                    <div class="flex-center pe-2 pb-2 second">
+                      <img class="small-icon" data-cex-logo data-cex-show>
+                    </div>
+                    <div class="flex-center ps-2 pb-2 border-start">
+                      <div class="d-inline-block">
+                        <img class="bison-logo-full small">
+                      </div>
+                    </div>
+
+                    {{- /* PROPOSED BASE ALLOCATIONS */ -}}
+                    <div class="flex-stretch-column py-2 border-top">
+                      <div class="d-flex align-items-center">
+                        <img class="mini-icon me-1" data-base-logo>
+                        <div class="fs22" data-base-name></div>
+                      </div>
+                      <div class="flex-grow-1 pt-2 pe-4">
+                        <div data-tmpl="baseAllocSlider" class="mini-slider small col-16"></div>
+                      </div>
+                    </div>
+                    <div class="flex-stretch-column align-items-end pe-2 border-top py-2">
+                      <div class="d-flex align-items-end justify-content-end" data-cex-only>
+                        <span data-tmpl="proposedCexBaseAlloc" class="fs20"></span>
+                        <span class="fs17 grey ms-1" data-base-ticker></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-end grey pt-1" data-cex-only>
+                        <span data-tmpl="proposedCexBaseAllocUSD" class="fs18"></span>
+                        <span class="fs14 ms-1">USD</span>
+                      </div>
+                    </div>
+                    <div class="third flex-stretch-column align-items-end ps-2 py-2 border-top border-start">
+                      <div class="d-flex align-items-end justify-content-end">
+                        <span data-tmpl="proposedDexBaseAlloc" class="fs20"></span>
+                        <span class="fs17 grey ms-1" data-base-ticker></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-end grey pt-1">
+                        <span data-tmpl="proposedDexBaseAllocUSD" class="fs18"></span>
+                        <span class="fs14 ms-1">USD</span>
+                      </div>
+                    </div>
+
+                    {{- /* PROPOSED QUOTE ALLOCATIONS */ -}}
+                    <div class="flex-stretch-column py-2 border-top">
+                      <div class="d-flex align-items-center">
+                        <img class="mini-icon me-1" data-quote-logo>
+                        <div class="fs22" data-quote-name></div>
+                      </div>
+                      <div class="flex-grow-1 pt-2 pe-4">
+                        <div data-tmpl="quoteAllocSlider" class="mini-slider small col-16"></div>
+                      </div>
+                    </div>
+                    <div class="flex-stretch-column align-items-end pe-2 py-2 border-top">
+                      <div class="d-flex align-items-end justify-content-end" data-cex-only>
+                        <span data-tmpl="proposedCexQuoteAlloc" class="fs20"></span>
+                        <span class="fs17 grey ms-1" data-quote-ticker></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-end grey pt-1" data-cex-only>
+                        <span data-tmpl="proposedCexQuoteAllocUSD" class="fs18"></span>
+                        <span class="fs14 ms-1">USD</span>
+                      </div>
+                    </div>
+                    <div class="third flex-stretch-column align-items-end ps-2 py-2 border-top border-start">
+                      <div class="d-flex align-items-end justify-content-end">
+                        <span data-tmpl="proposedDexQuoteAlloc" class="fs20"></span>
+                        <span class="fs17 grey ms-1" data-quote-ticker></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-end grey pt-1">
+                        <span data-tmpl="proposedDexQuoteAllocUSD" class="fs18"></span>
+                        <span class="fs14 ms-1">USD</span>
+                      </div>
+                    </div>
+
+                    {{- /* BASE TOKEN FEE ALLOCATIONS */ -}}
+                    <div class="d-flex flex-column align-items-start py-2 border-top" data-base-token-fees>
+                      <div class="d-flex align-items-center justify-content-start">
+                        <img class="mini-icon me-1" data-base-fee-logo>
+                        <div class="fs22" data-base-fee-name></div>
+                      </div>
+                    </div>
+                    <div class="border-top" data-base-token-fees></div>
+                    <div class="third flex-stretch-column align-items-end ps-2 py-2 border-top border-start" data-base-token-fees>
+                      <div class="d-flex align-items-end justify-content-end">
+                        <span data-tmpl="proposedDexBaseFeeAlloc" class="fs20"></span>
+                        <span class="fs17 grey ms-1" data-base-fee-ticker></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-end grey pt-1">
+                        <span data-tmpl="proposedDexBaseFeeAllocUSD" class="fs18"></span>
+                        <span class="fs14 ms-1">USD</span>
+                      </div>
+                    </div>
+
+                    {{- /* QUOTE TOKEN FEE ALLOCATIONS */ -}}
+                    <div class="d-flex flex-column align-items-start py-2 border-top" data-quote-token-fees>
+                      <div class="d-flex align-items-center justify-content-start">
+                        <img class="mini-icon me-1" data-quote-fee-logo>
+                        <div class="fs22" data-quote-fee-name></div>
+                      </div>
+                    </div>
+                    <div class="border-top" data-quote-token-fees></div>
+                    <div class="third flex-stretch-column align-items-end ps-2 py-2 border-top border-start" data-quote-token-fees>
+                      <div class="d-flex align-items-end justify-content-end">
+                        <span data-tmpl="proposedDexQuoteFeeAlloc" class="fs20"></span>
+                        <span class="fs17 grey ms-1" data-quote-fee-ticker></span>
+                      </div>
+                      <div class="d-flex align-items-center justify-content-end grey pt-1">
+                        <span data-tmpl="proposedDexQuoteFeeAllocUSD" class="fs18"></span>
+                        <span class="fs14 ms-1">USD</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="d-flex justify-content-end align-items-end py-2 border-top lh1">
+                    <span class="grey me-1">~</span>
+                    <span data-tmpl="allocUSD" class="fs20"></span>
+                    <span class="fs16 grey ms-1">USD</span>
+                    <span class="ms-1">total</span>
+                  </div>
+                  <div data-tmpl="appPWBox" class="text-end pt-2 mt-2 border-top d-hide">
+                    <form class="text-end">
+                      App Password:
+                      <input type="password" data-tmpl="appPW" autocomplete="off">
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex-center align-items-stretch py-3">
+    <button type="button" class="medium px-4" id="archivedLogsBtn">[[[previous_run_logs]]]</button>
+  </div>
     
 
   {{- /* FORMS */ -}}
@@ -169,6 +599,10 @@
       <div class="text-end">
         <button id="pwSubmit" class="go">[[[Submit]]]</button>
       </div>
+    </form>
+
+    <form class="position-relative mw-425 d-hide" id="cexConfigForm" autocomplete="off">
+      {{template "cexConfigForm"}}
     </form>
   </div>  {{- /* END FORMS */ -}}
 </div>

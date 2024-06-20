@@ -660,7 +660,7 @@ func (w *zecWallet) reportNewTip(ctx context.Context, newTip *btc.BlockVector) {
 
 	prevTip := w.currentTip
 	w.currentTip = newTip
-	w.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
+	w.log.Tracef("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	w.emit.TipChange(uint64(newTip.Height))
 
 	w.rf.ReportNewTip(ctx, prevTip, newTip)

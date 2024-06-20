@@ -158,8 +158,8 @@
           </section>
 
             {{- /* FEE INFO */ -}}
-            <section id="feeStateBox" class="d-flex align-items-stretch d-hide">
-              <div class="flex-grow-1 flex-stretch-column">
+            <section id="feeStateBox" class="flex-stretch-column d-hide">
+              <div class="d-flex align-items-stretch justify-content-around">
                 <div class="d-flex flex-column align-items-center py-3">
                   <span class="grey demi">Network Fee Rate</span>
                   <span id="feeStateNetRate" data-conversion-value>
@@ -171,7 +171,16 @@
                     </span>
                   </span>
                 </div>
-                <div class="d-flex flex-column align-items-center py-3 border-top">
+                <div class="d-flex flex-column align-items-center py-3">
+                  <span class="grey demi">Exchange Rate</span>
+                  <span>
+                    <span id="feeStateXcRate" class="fs20"></span>
+                    <span class="fs17 grey">USD/<span data-ticker></span></span>
+                  </span>
+                </div>
+              </div>
+              <div class="d-flex align-items-stretch justify-content-around border-top">
+                <div class="d-flex flex-column align-items-center py-3">
                   <span class="grey demi">Send Fees</span>
                   <span id="feeStateSendFees" data-conversion-value>
                     <span class="fs20" data-value></span>
@@ -185,17 +194,8 @@
                     <span>USD</span>
                   </span>
                 </div>
-              </div>
-              <div class="flex-grow-1">
                 <div class="d-flex flex-column align-items-center py-3">
-                  <span class="grey demi">Exchange Rate</span>
-                  <span>
-                    <span id="feeStateXcRate" class="fs20"></span>
-                    <span class="fs17 grey">USD/<span data-ticker></span></span>
-                  </span>
-                </div>
-                <div class="d-flex flex-column align-items-center py-3 border-top">
-                  <span class="grey demi">Swap Fees</span>
+                  <span class="grey demi">Sell Fees</span>
                   <span id="feeStateSwapFees" data-conversion-value>
                     <span class="fs20" data-value></span>
                     <span class="grey fs17">
@@ -205,6 +205,20 @@
                   </span>
                   <span class="fs15 grey">
                     ~ <span id="feeStateSwapFiat"></span>
+                    <span>USD</span>
+                  </span>
+                </div>
+                <div class="d-flex flex-column align-items-center py-3">
+                  <span class="grey demi">Buy Fees</span>
+                  <span id="feeStateRedeemFees" data-conversion-value>
+                    <span class="fs20" data-value></span>
+                    <span class="grey fs17">
+                      <span data-unit-box><span data-unit></span></span>
+                      and up
+                    </span>
+                  </span>
+                  <span class="fs15 grey">
+                    ~ <span id="feeStateRedeemFiat"></span>
                     <span>USD</span>
                   </span>
                 </div>
@@ -617,7 +631,7 @@
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}
-    <form class="mw-425 position-relative flex-center flex-column fs20 p-0 d-hide" id="deposit">
+    <form class="mw-425 position-relative flex-center flex-column fs20 py-2 d-hide" id="deposit">
       {{template "depositAddress"}}
     </form>
 
@@ -984,7 +998,7 @@
         </tbody>
       </table>
       <div id="ticketHistoryPagination" class="d-flex justify-content-end align-items-center fs18">
-        <span id="ticketHistoryPrevPage" class="ico-arrowback me-1 p-1 hoverbg pointer"></span>
+        <span id="ticketHistoryPrevPage" class="ico-arrowleft me-1 p-1 hoverbg pointer"></span>
         <span id="ticketHistoryPage" class="me-1"></span>
         <span id="ticketHistoryNextPage" class="ico-arrowright p-1 hoverbg pointer"></span>
       </div>

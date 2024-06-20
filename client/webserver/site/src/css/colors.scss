@@ -9,6 +9,7 @@ body:not(.dark) {
   --text-color: #333;
   --text-color-secondary: #4a4949;
   --text-danger: #d22;
+  --text-warning: #f82e;
   --text-grey: #777;
   --border-color: #ddd;
   --hint-color: #4397cd;
@@ -36,7 +37,7 @@ body:not(.dark) {
   --btn-go-color: #fff;
 
   // forms
-  --forms-bg: #fafafae4;
+  --forms-bg: #fafafa99;
   --form-input-bg: #fff;
   --form-input-border: #999;
   --form-input-border-focus: #555;
@@ -62,7 +63,7 @@ body:not(.dark) {
   --loader-bg: #e0e0e077;
 
   // logo
-  --logo-path: url("/img/softened-icon.png");
+  --dex-url: url("/img/softened-icon.png");
 }
 
 
@@ -75,6 +76,7 @@ body.dark {
   --text-color: #dfe2e1;
   --text-color-secondary: #a1a1a1;
   --text-danger: #ec6a6a;
+  --text-warning: #f82e;
   --text-grey: #999;
   --border-color: #383f4b;
   --hint-color: #64b2e5;
@@ -102,7 +104,7 @@ body.dark {
   --btn-go-color: #fff;
 
   // forms
-  --forms-bg: #05141fe4;
+  --forms-bg: #05141f99;
   --form-input-bg: black;
   --form-input-border: #555;
   --form-input-border-focus: #999;
@@ -128,9 +130,26 @@ body.dark {
   --loader-bg: #13202b77;
 
   // logo
-  --logo-path: url("/img/softened-icon-dark.png");
+  --dex-url: url("/img/softened-icon-dark.png");
+}
+
+.greyscale {
+  filter: grayscale(1);
+}
+
+.blurry-bg {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
 
 .body-bg {
   background-color: var(--body-bg);
+}
+
+.section-bg {
+  background-color: var(--section-bg);
+}
+
+.text-good {
+  color: var(--indicator-good);
 }

@@ -4,12 +4,10 @@ package mm
 
 import (
 	"math"
-	"reflect"
 	"testing"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex/calc"
-	"github.com/davecgh/go-spew/spew"
 )
 
 type tBasicMMCalculator struct {
@@ -27,7 +25,7 @@ func (r *tBasicMMCalculator) halfSpread(basisPrice uint64) (uint64, error) {
 }
 
 func (r *tBasicMMCalculator) feeGapStats(basisPrice uint64) (*FeeGapStats, error) {
-	return &FeeGapStats{FeeGap: r.hs}, nil
+	return &FeeGapStats{FeeGap: r.hs * 2}, nil
 }
 
 func TestBasisPrice(t *testing.T) {
@@ -323,7 +321,6 @@ func TestBasicMMRebalance(t *testing.T) {
 			expBuyPlacements: []*multiTradePlacement{
 				{lots: 1, rate: steppedRate(basisPrice-1e6, rateStep)},
 				{lots: 2, rate: steppedRate(basisPrice-3e6, rateStep)},
-				{lots: 0, rate: 0}, // 5e6 - 6e6 < 0
 			},
 			expSellPlacements: []*multiTradePlacement{
 				{lots: 3, rate: steppedRate(basisPrice+6e6, rateStep)},
@@ -347,7 +344,6 @@ func TestBasicMMRebalance(t *testing.T) {
 			expBuyPlacements: []*multiTradePlacement{
 				{lots: 1, rate: steppedRate(basisPrice-halfSpread-1e6, rateStep)},
 				{lots: 2, rate: steppedRate(basisPrice-halfSpread-3e6, rateStep)},
-				{lots: 0, rate: 0},
 			},
 			expSellPlacements: []*multiTradePlacement{
 				{lots: 3, rate: steppedRate(basisPrice+halfSpread+6e6, rateStep)},
@@ -359,29 +355,90 @@ func TestBasicMMRebalance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adaptor := newTBotCoreAdaptor(newTCore())
-			cfg := &BasicMarketMakingConfig{
-				GapStrategy:    tt.strategy,
-				BuyPlacements:  tt.cfgBuyPlacements,
-				SellPlacements: tt.cfgSellPlacements,
-			}
+			const lotSize = 5e9
+			const baseID, quoteID = 42, 0
 			mm := &basicMarketMaker{
 				unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
 					RateStep:   rateStep,
 					AtomToConv: atomToConv,
+					LotSize:    lotSize,
+					BaseID:     baseID,
+					QuoteID:    quoteID,
 				}),
 				calculator: calculator,
-				core:       adaptor,
 			}
-			mm.cfgV.Store(cfg)
-
+			tcore := newTCore()
+			mm.clientCore = tcore
+			mm.botCfgV.Store(&BotConfig{})
+			mm.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
+			const sellSwapFees, sellRedeemFees = 3e6, 1e6
+			const buySwapFees, buyRedeemFees = 2e5, 1e5
+			mm.buyFees = &orderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: buyRedeemFees,
+						Swap:   buySwapFees,
+					},
+					Estimated: &LotFees{},
+				},
+				bookingFeesPerLot: buySwapFees,
+			}
+			mm.sellFees = &orderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: sellRedeemFees,
+						Swap:   sellSwapFees,
+					},
+					Estimated: &LotFees{},
+				},
+				bookingFeesPerLot: sellSwapFees,
+			}
+			mm.baseDexBalances[baseID] = lotSize * 50
+			mm.baseCexBalances[baseID] = lotSize * 50
+			mm.baseDexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
+			mm.baseCexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
+			mm.cfgV.Store(&BasicMarketMakingConfig{
+				GapStrategy:    tt.strategy,
+				BuyPlacements:  tt.cfgBuyPlacements,
+				SellPlacements: tt.cfgSellPlacements,
+			})
 			mm.rebalance(100)
 
-			if !reflect.DeepEqual(tt.expBuyPlacements, adaptor.lastMultiTradeBuys) {
-				t.Fatal(spew.Sprintf("expected buy placements:\n%#+v\ngot:\n%#+v", tt.expBuyPlacements, adaptor.lastMultiTradeBuys))
+			if len(tcore.multiTradesPlaced) != 2 {
+				t.Fatal("expected both buy and sell orders placed")
 			}
-			if !reflect.DeepEqual(tt.expSellPlacements, adaptor.lastMultiTradeSells) {
-				t.Fatal(spew.Sprintf("expected sell placements:\n%#+v\ngot:\n%#+v", tt.expSellPlacements, adaptor.lastMultiTradeSells))
+			buys, sells := tcore.multiTradesPlaced[0], tcore.multiTradesPlaced[1]
+
+			expOrdersN := len(tt.expBuyPlacements) + len(tt.expSellPlacements)
+			if len(buys.Placements)+len(sells.Placements) != expOrdersN {
+				t.Fatalf("expected %d orders, got %d", expOrdersN, len(buys.Placements)+len(sells.Placements))
+			}
+
+			buyRateLots := make(map[uint64]uint64, len(buys.Placements))
+			for _, p := range buys.Placements {
+				buyRateLots[p.Rate] = p.Qty / lotSize
+			}
+			for _, expBuy := range tt.expBuyPlacements {
+				if lots, found := buyRateLots[expBuy.rate]; !found {
+					t.Fatalf("buy rate %d not found", expBuy.rate)
+				} else {
+					if expBuy.lots != lots {
+						t.Fatalf("wrong lots %d for buy at rate %d", lots, expBuy.rate)
+					}
+				}
+			}
+			sellRateLots := make(map[uint64]uint64, len(sells.Placements))
+			for _, p := range sells.Placements {
+				sellRateLots[p.Rate] = p.Qty / lotSize
+			}
+			for _, expSell := range tt.expSellPlacements {
+				if lots, found := sellRateLots[expSell.rate]; !found {
+					t.Fatalf("sell rate %d not found", expSell.rate)
+				} else {
+					if expSell.lots != lots {
+						t.Fatalf("wrong lots %d for sell at rate %d", lots, expSell.rate)
+					}
+				}
 			}
 		})
 	}

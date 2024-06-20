@@ -153,7 +153,7 @@ func TestCancelTrade(t *testing.T) {
 	}
 }
 
-func TestMarkets(t *testing.T) {
+func TestMatchedMarkets(t *testing.T) {
 	bnc := tNewBinance(t, dex.Testnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
@@ -376,4 +376,24 @@ func TestTradeStatus(t *testing.T) {
 	}
 
 	t.Logf("trade status: %+v", trade)
+}
+
+func TestMarkets(t *testing.T) {
+	// Need keys for getCoinInfo
+	bnc := tNewBinance(t, dex.Testnet)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
+	defer cancel()
+
+	err := bnc.getCoinInfo(ctx)
+	if err != nil {
+		t.Fatalf("error getting coin info: %v", err)
+	}
+
+	mkts, err := bnc.Markets(ctx)
+	if err != nil {
+		t.Fatalf("error getting markets: %v", err)
+	}
+
+	b, _ := json.MarshalIndent(mkts, "", "    ")
+	fmt.Println("##### Market Data:", string(b))
 }

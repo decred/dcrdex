@@ -8,32 +8,23 @@
     <div class="flex-center fs24 p-2 flex-grow-1">[[[previous_mm_runs]]]</div>
   </div>
   <div class="px-5 py-3 w-100">
-    <table id="runTable" class="my-3 striped row-hover compact border row-border">
+    <table id="runTable" class="my-3 striped row-hover compact border row-border fs18">
       <thead>
         <th scope="col">[[[start_time]]]</th>
         <th scope="col">[[[Host]]]</th>
         <th scope="col">[[[Market]]]</th>
-        <th scope="col">[[[bot_type]]]</th>
         <th scope="col">[[[logs]]]</th>
         <th scope="col">[[[Settings]]]</th>
       </thead>
       <tbody id="runTableBody">
         <tr id="runTableRowTmpl">
           <td data-tmpl="startTime"></td>
-          <td data-tmpl="host"></td>
+          <td data-host></td>
           <td>
-            <img data-tmpl="baseMktLogo">
-            <span data-tmpl="baseSymbol"></span> - 
-            <img data-tmpl="quoteMktLogo">
-            <span data-tmpl="quoteSymbol"></span>
-          </td>
-          <td>
-            <span data-tmpl="botType"></span>
-            <span data-tmpl="cexLink" class="d-hide">
-              <span class="fs16 ico-exchange me-1"></span>
-              <img data-tmpl="cexLogo" class="micro-icon">
-              <span data-tmpl="cexName"></span>
-            </span>
+            <img class="mini-icon" data-base-logo>
+            <span data-base-ticker></span> - 
+            <img class="mini-icon" data-quote-logo>
+            <span data-quote-ticker></span>
           </td>
           <td><button data-tmpl="logs">[[[view_logs]]]</button></td>
           <td><span class="ico-settings fs20 pointer mx-2" data-tmpl="settings"></span></td>        

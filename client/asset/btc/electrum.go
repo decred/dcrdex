@@ -336,7 +336,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 				continue
 			}
 
-			btc.log.Debugf("tip change: %d (%s) => %d (%s)", currentTip.Height, currentTip.Hash,
+			btc.log.Tracef("tip change: %d (%s) => %d (%s)", currentTip.Height, currentTip.Hash,
 				newTip.Height, newTip.Hash)
 			currentTip = newTip
 			btc.emit.TipChange(uint64(newTip.Height))

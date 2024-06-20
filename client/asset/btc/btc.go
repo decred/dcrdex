@@ -700,7 +700,7 @@ type fundMultiOptions struct {
 	// is no split buffer, this may necessitate a new split transaction.
 	//
 	// Use the multiSplitBufferKey const defined above in the options map to set this.
-	SplitBuffer uint64 `ini:"multisplitbuffer"`
+	SplitBuffer float64 `ini:"multisplitbuffer"`
 }
 
 func decodeFundMultiOptions(options map[string]string) (*fundMultiOptions, error) {
@@ -2506,13 +2506,13 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, ui
 
 // fundsRequiredForMultiOrders returns an slice of the required funds for each
 // of a slice of orders and the total required funds.
-func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, feeRate, splitBuffer, swapInputSize uint64) ([]uint64, uint64) {
+func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, feeRate uint64, splitBuffer float64, swapInputSize uint64) ([]uint64, uint64) {
 	requiredForOrders := make([]uint64, len(orders))
 	var totalRequired uint64
 
 	for i, value := range orders {
 		req := calc.RequiredOrderFundsAlt(value.Value, swapInputSize, value.MaxSwapCount, btc.initTxSizeBase, btc.initTxSize, feeRate)
-		req = req * (100 + splitBuffer) / 100
+		req = uint64(math.Round(float64(req) * (100 + splitBuffer) / 100))
 		requiredForOrders[i] = req
 		totalRequired += req
 	}
@@ -2527,7 +2527,8 @@ func (btc *baseWallet) fundMultiSplitTx(
 	orders []*asset.MultiOrderValue,
 	utxos []*CompositeUTXO,
 	splitTxFeeRate, maxFeeRate uint64,
-	splitBuffer, keep, maxLock uint64,
+	splitBuffer float64,
+	keep, maxLock uint64,
 ) (bool, asset.Coins, []*Output) {
 
 	var swapInputSize uint64
@@ -2572,7 +2573,7 @@ func (btc *baseWallet) fundMultiSplitTx(
 // submitMultiSplitTx creates a multi-split transaction using fundingCoins with
 // one output for each order, and submits it to the network.
 func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Output, orders []*asset.MultiOrderValue,
-	maxFeeRate, splitTxFeeRate, splitBuffer uint64) ([]asset.Coins, uint64, error) {
+	maxFeeRate, splitTxFeeRate uint64, splitBuffer float64) ([]asset.Coins, uint64, error) {
 	baseTx, totalIn, _, err := btc.fundedTx(fundingCoins)
 	if err != nil {
 		return nil, 0, err
@@ -2656,7 +2657,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 // called after it has been determined that all of the orders cannot be funded
 // without a split transaction.
 func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.MultiOrderValue,
-	splitTxFeeRate, maxFeeRate, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
+	splitTxFeeRate, maxFeeRate uint64, splitBuffer float64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
 	utxos, _, avail, err := btc.cm.SpendableUTXOs(0)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting spendable utxos: %w", err)
@@ -2777,7 +2778,7 @@ func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.
 // UTXOs. If a split is not allowed, it will fund the orders that it was able
 // to fund. If splitting is allowed, a split transaction will be created to fund
 // all of the orders.
-func (btc *baseWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue, splitTxFeeRate, maxFeeRate uint64, allowSplit bool, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
+func (btc *baseWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue, splitTxFeeRate, maxFeeRate uint64, allowSplit bool, splitBuffer float64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
 	reserves := btc.bondReserves.Load()
 
 	coins, redeemScripts, fundingCoins, spents, err := btc.cm.FundMultiBestEffort(reserves, maxLock, values, maxFeeRate, allowSplit)
@@ -4754,7 +4755,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 
 	prevTip := btc.currentTip
 	btc.currentTip = newTip
-	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
+	btc.log.Tracef("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	btc.emit.TipChange(uint64(newTip.Height))
 
 	go btc.syncTxHistory(uint64(newTip.Height))

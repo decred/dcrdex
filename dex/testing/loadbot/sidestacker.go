@@ -108,8 +108,8 @@ func (s *sideStacker) SetupWallets(m *Mantle) {
 	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, quoteCoins)
 	s.log.Infof("Side Stacker has been initialized with %d target standing orders, %d orders "+
 		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial %s coins, %d initial %s coins",
-		s.numStanding, s.ordsPerEpoch, valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
-		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, baseCoins, baseSymbol, quoteCoins, quoteSymbol)
+		s.numStanding, s.ordsPerEpoch, fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
+		fmtAtoms(minQuoteQty, quoteSymbol), fmtAtoms(maxQuoteQty, quoteSymbol), quoteSymbol, baseCoins, baseSymbol, quoteCoins, quoteSymbol)
 	<-mine(baseSymbol, alpha)
 	<-mine(quoteSymbol, alpha)
 }

@@ -21,7 +21,7 @@
           <div class="ico-search fs22"></div>
         </div>
         <div id="leftHider" class="flex-center pointer hoverbg border-start px-2">
-          <span class="ico-arrowback d-inline-block fs24">
+          <span class="ico-arrowleft d-inline-block fs24">
         </div>
       </div>
 
@@ -269,153 +269,13 @@
               </div>
 
               {{- /* MM RUNNING */ -}}
-              <div class="d-hide fs15 p-2 flex-stretch-column border-bottom" id="mmRunning">
-                <div class="flex-center mt-2">
+              <div class="d-hide fs15 flex-stretch-column border-bottom" id="mmRunning">
+                <div class="flex-center my-2">
                   <span class="ico-robot fs35 me-2 text-buycolor"></span>
                   <span class="flex-center fs22">[[[market_making_running]]]</span>
                 </div>
-                <div data-tmpl="stats" class="d-hide">
-                  <div class="d-flex align-items-stretch mt-3">
-                    <div class="flex-grow-1 flex-center flex-column">
-                      <span class="fs15 grey">[[[Profit]]]</span>
-                      <span class="fs28 text-nowrap"><span data-tmpl="profit"></span> %</span>
-                    </div>
-                    <div class="flex-grow-1 flex-center flex-column text-nowrap border-start">
-                      <span class="fs15 grey">[[[Run Time]]]</span>
-                      <span data-tmpl="runTime" class="fs28 mono">00:00:00</span>
-                    </div>
-                  </div>
-                  <div class="fs18 flex-center mt-3 mb-1">[[[Bot Market Inventory]]]</div>
-                  <table class="cell-border fs18 lh1">
-                    <thead>
-                      <tr class="fs16">
-                        <th class="no-stretch"></th>
-                        <th class="text-center">
-                          <div class="d-inline-flex align-items-center">
-                            <img class="micro-icon me-2" data-base-logo>
-                            <span data-base-ticker></span>
-                          </div>
-                        </th>
-                        <th class="text-center">
-                          <div class="d-inline-flex align-items-center">
-                            <img class="micro-icon me-2" data-quote-logo>
-                            <span data-quote-ticker></span>
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td class="text-center no-stretch">
-                          <img src="/img/bison-square_50.png" class="mini-icon">
-                        </td>
-                        <td data-tmpl="walletBaseInventory" class="text-center"></td>
-                        <td data-tmpl="walletQuoteInventory" class="text-center"></td>
-                      </tr>
-                      <tr data-tmpl="cexRow">
-                        <td>
-                          <img class="mini-icon" data-cex-logo>
-                        </td>
-                        <td data-tmpl="cexBaseInventory" class="text-center"></td>
-                        <td data-tmpl="cexQuoteInventory" class="text-center"></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div class="flex-stretch-column mt-3 p-2 border">
-                    <div class="d-flex justify-content-between align-items-center">
-                      <span>[[[profit_loss]]]</span>
-                      <span>
-                        <span data-tmpl="profitLoss"></span>
-                        <span class="fs14 grey">USD</span>
-                      </span>
-                    </div>
-
-                    <div class="d-flex justify-content-between align-items-center">
-                      <span>[[[Booked orders]]]</span>
-                      <span data-tmpl="nBookedOrders"></span>
-                    </div>
-
-                    <div data-tmpl="baseFeeReservesBox" class="d-flex justify-content-between align-items-center">
-                      <span>
-                        <span>[[[Fee reserves]]]</span>
-                        <img data-tmpl="baseFeeLogo" class="micro-icon">
-                      </span>
-                      <span>
-                        <span data-tmpl="baseFeeReserves"></span>
-                        <span data-tmpl="baseFeeTicker"></span>
-                      </span>
-                    </div>
-
-                    <div data-tmpl="quoteFeeReservesBox" class="d-flex justify-content-between align-items-center">
-                      <span>
-                        <span>[[[Fee reserves]]]</span>
-                        <img data-tmpl="quoteFeeLogo" class="micro-icon">
-                      </span>
-                      <span>
-                        <span data-tmpl="quoteFeeReserves"></span>
-                        <span data-tmpl="quoteFeeTicker"></span>
-                      </span>
-                    </div>
-
-                    <div data-tmpl="pendingDepositBox" class="d-flex justify-content-between align-items-center">
-                      <span>[[[Pending deposits]]]</span>
-                      <span data-tmpl="pendingDeposits"></span>
-                    </div>
-
-                    <div data-tmpl="pendingWithdrawalBox" class="d-flex justify-content-between align-items-center">
-                      <span>[[[Pending withdrawals]]]</span>
-                      <span data-tmpl="pendingWithdrawals"></span>
-                    </div>
-
-                    <div class="d-flex justify-content-between align-items-center">
-                      <span>[[[Settled matches]]]</span>
-                      <span data-tmpl="completedMatches"></span>
-                    </div>
-
-                    <div data-tmpl="tradedUSDBox" class="d-flex justify-content-between align-items-center">
-                      <span>[[[Traded]]]</span>
-                      <span>
-                        <span data-tmpl="tradedUSD"></span>
-                        <span class="fs14 grey">USD</span>
-                      </span>
-                    </div>
-
-                    <div class="d-flex justify-content-between align-items-center">
-                      <span>[[[Basis price]]]</span>
-                      <span data-tmpl="basisPrice"></span>
-                    </div>
-
-                    <div class="d-flex justify-content-between align-items-center">
-                      <span>
-                        [[[Fee gap]]]
-                        <span class="ico-info" data-tooltip="[[[feegap_tooltip]]]"></span>
-                      </span>
-                      <span>
-                        <span data-tmpl="feeGap"></span> (<span data-tmpl="feeGapPct"></span>%)
-                      </span>
-                    </div>
-
-                    <div data-tmpl="remoteGapBox" class="d-flex justify-content-between align-items-center">
-                      <span>
-                        [[[Remote gap]]]
-                        <span class="ico-info" data-tooltip="[[[remotegap_tooltip]]]"></span>
-                      </span>
-                      <span>
-                        <span data-tmpl="remoteGap"></span> (<span data-tmpl="remoteGapPct"></span>%)
-                      </span>
-                    </div>
-
-                    <div data-tmpl="roundTripFeesBox" class="d-flex justify-content-between align-items-center">
-                      <span>[[[Round_trip fees]]]</span>
-                      <span>
-                        <span data-tmpl="roundTripFeesUSD"></span>
-                        <span class="fs14 grey">USD</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <span class="fs14 grey mt-3 pt-2 border-top">[[[cannot_manually_trade]]]</span>
+                {{template "runningBotDisplay"}}
+                <span class="fs14 grey mt-2 p-2 border-top">[[[cannot_manually_trade]]]</span>
               </div>
 
               {{- /* ORDER FORM */ -}}
@@ -732,7 +592,7 @@
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}
-    <form class="mw-425 position-relative flex-center flex-column fs20 p-0 d-hide" id="deposit">
+    <form class="mw-425 position-relative flex-center flex-column fs20 py-2 d-hide" id="deposit">
       {{template "depositAddress"}}
     </form>
 

@@ -29,16 +29,49 @@ type Trade struct {
 	Complete    bool // cancelled or filled
 }
 
+type MarketDay struct {
+	Vol            float64 `json:"vol"`
+	QuoteVol       float64 `json:"quoteVol"`
+	PriceChange    float64 `json:"priceChange"`
+	PriceChangePct float64 `json:"priceChangePct"`
+	AvgPrice       float64 `json:"avgPrice"`
+	LastPrice      float64 `json:"lastPrice"`
+	OpenPrice      float64 `json:"openPrice"`
+	HighPrice      float64 `json:"highPrice"`
+	LowPrice       float64 `json:"lowPrice"`
+}
+
 // Market is the base and quote assets of a market on a CEX.
 type Market struct {
-	BaseID  uint32 `json:"baseID"`
-	QuoteID uint32 `json:"quoteID"`
+	BaseID  uint32     `json:"baseID"`
+	QuoteID uint32     `json:"quoteID"`
+	Day     *MarketDay `json:"day"`
+}
+
+type Status struct {
+	Markets  map[string]*Market          `json:"markets"`
+	Balances map[uint32]*ExchangeBalance `json:"balances"`
 }
 
 type DepositData struct {
 	AssetID            uint32
 	AmountConventional float64
 	TxID               string
+}
+
+// MarketMatch is a market for which both assets are supported by Bison Wallet.
+type MarketMatch struct {
+	BaseID  uint32 `json:"baseID"`
+	QuoteID uint32 `json:"quoteID"`
+	// MarketID is the id used by DCRDEX.
+	MarketID string `json:"marketID"`
+	// Slug is a market identifier used by the cex.
+	Slug string `json:"slug"`
+}
+
+type BalanceUpdate struct {
+	AssetID uint32           `json:"assetID"`
+	Balance *ExchangeBalance `json:"balance"`
 }
 
 var (
@@ -53,13 +86,14 @@ type CEX interface {
 	dex.Connector
 	// Balance returns the balance of an asset at the CEX.
 	Balance(assetID uint32) (*ExchangeBalance, error)
+	// Balances returns the balances of known assets on the CEX.
+	Balances() (map[uint32]*ExchangeBalance, error)
 	// CancelTrade cancels a trade on the CEX.
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
+	// MatchedMarkets returns the list of markets at the CEX.
+	MatchedMarkets(ctx context.Context) ([]*MarketMatch, error)
 	// Markets returns the list of markets at the CEX.
-	Markets(ctx context.Context) ([]*Market, error)
-	// SubscribeCEXUpdates returns a channel which sends an empty struct when
-	// the balance of an asset on the CEX has been updated.
-	SubscribeCEXUpdates() (updates <-chan interface{}, unsubscribe func())
+	Markets(ctx context.Context) (map[string]*Market, error)
 	// SubscribeMarket subscribes to order book updates on a market. This must
 	// be called before calling VWAP.
 	SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error
@@ -74,7 +108,7 @@ type CEX interface {
 	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error)
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseID, quoteID uint32) error
-	// VWAP returns the volume weighted average price for a certainWithdraw(address string, value, feeRate uint64)  quantity
+	// VWAP returns the volume weighted average price for a certain quantity
 	// of the base asset on a market.
 	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
 	// MidGap returns the mid-gap price for an order book.
@@ -107,13 +141,21 @@ func IsValidCexName(cexName string) bool {
 	return cexName == Binance || cexName == BinanceUS
 }
 
+type CEXConfig struct {
+	Net       dex.Network
+	APIKey    string
+	SecretKey string
+	Logger    dex.Logger
+	Notify    func(interface{})
+}
+
 // NewCEX creates a new CEX.
-func NewCEX(cexName string, apiKey, secretKey string, log dex.Logger, net dex.Network) (CEX, error) {
+func NewCEX(cexName string, cfg *CEXConfig) (CEX, error) {
 	switch cexName {
 	case Binance:
-		return newBinance(apiKey, secretKey, log, net, false), nil
+		return newBinance(cfg, false), nil
 	case BinanceUS:
-		return newBinance(apiKey, secretKey, log, net, true), nil
+		return newBinance(cfg, true), nil
 	default:
 		return nil, fmt.Errorf("unrecognized CEX: %v", cexName)
 	}
