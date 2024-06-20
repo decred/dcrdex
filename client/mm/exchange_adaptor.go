@@ -77,7 +77,7 @@ type botCoreAdaptor interface {
 // multi-hop strategy.
 type botCexAdaptor interface {
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
-	SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error
+	SubscribeMarket(baseID, quoteID uint32) error
 	SubscribeTradeUpdates() <-chan *libxc.Trade
 	CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64) (*libxc.Trade, error)
 	SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) (bool, error)
@@ -1645,8 +1645,9 @@ func (u *unifiedExchangeAdaptor) confirmWithdrawal(ctx context.Context, id strin
 	withdrawal.txIDMtx.RUnlock()
 
 	if txID == "" {
+		var amt uint64
 		var err error
-		_, txID, err = u.CEX.ConfirmWithdrawal(ctx, id, withdrawal.assetID)
+		amt, txID, err = u.CEX.ConfirmWithdrawal(ctx, id, withdrawal.assetID)
 		if errors.Is(err, libxc.ErrWithdrawalPending) {
 			return false
 		}
@@ -1656,6 +1657,7 @@ func (u *unifiedExchangeAdaptor) confirmWithdrawal(ctx context.Context, id strin
 		}
 
 		withdrawal.txIDMtx.Lock()
+		withdrawal.amtWithdrawn = amt
 		withdrawal.txID = txID
 		withdrawal.txIDMtx.Unlock()
 	}
@@ -1695,7 +1697,7 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 	}
 
 	u.balancesMtx.Lock()
-	withdrawalID, err := u.CEX.Withdraw(ctx, assetID, amount, addr)
+	withdrawalID, amtWithdrawn, err := u.CEX.Withdraw(ctx, assetID, amount, addr)
 	if err != nil {
 		return err
 	}
@@ -1708,7 +1710,7 @@ func (u *unifiedExchangeAdaptor) Withdraw(ctx context.Context, assetID uint32, a
 		eventLogID:   u.eventLogID.Add(1),
 		timestamp:    time.Now().Unix(),
 		assetID:      assetID,
-		amtWithdrawn: amount,
+		amtWithdrawn: amtWithdrawn,
 		withdrawalID: withdrawalID,
 	}
 	u.balancesMtx.Unlock()

@@ -431,6 +431,7 @@ type binance struct {
 	net                dex.Network
 	tradeIDNonce       atomic.Uint32
 	tradeIDNoncePrefix dex.Bytes
+	ctx                context.Context
 
 	markets atomic.Value // map[string]*binanceMarket
 	// tokenIDs maps the token's symbol to the list of bip ids of the token
@@ -703,7 +704,7 @@ func (bnc *binance) SubscribeCEXUpdates() (<-chan interface{}, func()) {
 }
 
 // Balance returns the balance of an asset at the CEX.
-func (bnc *binance) Balance(assetID uint32) (*ExchangeBalance, error) {
+func (bnc *binance) Balance(_ context.Context, assetID uint32) (*ExchangeBalance, error) {
 	assetConfig, err := bncAssetCfg(assetID)
 	if err != nil {
 		return nil, err
@@ -873,15 +874,15 @@ func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, 
 // Withdraw withdraws funds from the CEX to a certain address. onComplete
 // is called with the actual amount withdrawn (amt - fees) and the
 // transaction ID of the withdrawal.
-func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
+func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, uint64, error) {
 	assetCfg, err := bncAssetCfg(assetID)
 	if err != nil {
-		return "", fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
+		return "", 0, fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
 	}
 
 	precision, err := bnc.assetPrecision(assetCfg.coin)
 	if err != nil {
-		return "", fmt.Errorf("error getting precision for %s: %w", assetCfg.coin, err)
+		return "", 0, fmt.Errorf("error getting precision for %s: %w", assetCfg.coin, err)
 	}
 
 	amt := float64(qty) / float64(assetCfg.conversionFactor)
@@ -896,10 +897,10 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 	}{}
 	err = bnc.postAPI(ctx, "/sapi/v1/capital/withdraw/apply", nil, v, true, true, &withdrawResp)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
-	return withdrawResp.ID, nil
+	return withdrawResp.ID, qty, nil
 }
 
 // GetDepositAddress returns a deposit address for an asset.
@@ -1437,7 +1438,7 @@ func (bnc *binance) getOrderbookSnapshot(ctx context.Context, mktSymbol string) 
 // subscribeToAdditionalMarketDataStream is called when a new market is
 // subscribed to after the market data stream connection has already been
 // established.
-func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, baseID, quoteID uint32) error {
+func (bnc *binance) subscribeToAdditionalMarketDataStream(baseID, quoteID uint32) error {
 	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
 		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
@@ -1462,11 +1463,11 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 	}
 
 	getSnapshot := func() (*bntypes.OrderbookSnapshot, error) {
-		return bnc.getOrderbookSnapshot(ctx, mktID)
+		return bnc.getOrderbookSnapshot(bnc.ctx, mktID)
 	}
 	book = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, bnc.log)
 	bnc.books[mktID] = book
-	book.sync(ctx)
+	book.sync(bnc.ctx)
 
 	return nil
 }
@@ -1476,7 +1477,7 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 // to reconnect every 12 hours, as Binance will close the stream every 24
 // hours. Additional markets are subscribed to by calling
 // subscribeToAdditionalMarketDataStream.
-func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quoteID uint32) error {
+func (bnc *binance) connectToMarketDataStream(baseID, quoteID uint32) error {
 	newConnection := func() (comms.WsConn, *dex.ConnectionMaster, error) {
 		bnc.booksMtx.Lock()
 		streamNames := make([]string, 0, len(bnc.books))
@@ -1507,7 +1508,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 
 		bnc.marketStream = conn
 		cm := dex.NewConnectionMaster(conn)
-		if err = cm.ConnectOnce(ctx); err != nil {
+		if err = cm.ConnectOnce(bnc.ctx); err != nil {
 			return nil, nil, fmt.Errorf("websocketHandler remote connect: %v", err)
 		}
 
@@ -1522,7 +1523,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 	mktID := binanceMktID(baseCfg, quoteCfg)
 	bnc.booksMtx.Lock()
 	getSnapshot := func() (*bntypes.OrderbookSnapshot, error) {
-		return bnc.getOrderbookSnapshot(ctx, mktID)
+		return bnc.getOrderbookSnapshot(bnc.ctx, mktID)
 	}
 	book := newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, bnc.log)
 	bnc.books[mktID] = book
@@ -1536,7 +1537,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 
 	bnc.marketStream = conn
 
-	book.sync(ctx)
+	book.sync(bnc.ctx)
 
 	// Start a goroutine to reconnect every 12 hours
 	go func() {
@@ -1569,7 +1570,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 					continue
 				}
 				reconnectTimer = time.After(time.Hour * 12)
-			case <-ctx.Done():
+			case <-bnc.ctx.Done():
 				bnc.marketStreamMtx.Lock()
 				bnc.marketStream = nil
 				bnc.marketStreamMtx.Unlock()
@@ -1639,15 +1640,15 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 
 // SubscribeMarket subscribes to order book updates on a market. This must
 // be called before calling VWAP.
-func (bnc *binance) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
+func (bnc *binance) SubscribeMarket(baseID, quoteID uint32) error {
 	bnc.marketStreamMtx.Lock()
 	defer bnc.marketStreamMtx.Unlock()
 
 	if bnc.marketStream == nil {
-		bnc.connectToMarketDataStream(ctx, baseID, quoteID)
+		bnc.connectToMarketDataStream(baseID, quoteID)
 	}
 
-	return bnc.subscribeToAdditionalMarketDataStream(ctx, baseID, quoteID)
+	return bnc.subscribeToAdditionalMarketDataStream(baseID, quoteID)
 }
 
 func (bnc *binance) book(baseID, quoteID uint32) (*binanceOrderBook, error) {
