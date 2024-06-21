@@ -268,7 +268,6 @@ type WebServer struct {
 	csp          string
 	srv          *http.Server
 	html         atomic.Value // *templates
-	indent       bool
 	experimental bool
 
 	authMtx         sync.RWMutex
@@ -1073,21 +1072,15 @@ func fileServer(r chi.Router, pathPrefix, siteDir, subDir, forceContentType stri
 
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
-func writeJSON(w http.ResponseWriter, thing any, indent bool) {
-	writeJSONWithStatus(w, thing, http.StatusOK, indent)
+func writeJSON(w http.ResponseWriter, thing any) {
+	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
 // writeJSON writes marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
-func writeJSONWithStatus(w http.ResponseWriter, thing any, code int, indent bool) {
+func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	var b []byte
-	var err error
-	if indent {
-		b, err = json.MarshalIndent(thing, "", "	") // tab
-	} else {
-		b, err = json.Marshal(thing)
-	}
+	b, err := json.Marshal(thing)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Errorf("JSON encode error: %v", err)
