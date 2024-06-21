@@ -5213,11 +5213,16 @@ func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txHash common.H
 	if *tx.To() != w.addr {
 		return nil, asset.CoinNotFoundError
 	}
-
-	wt := w.extendedTx(tx, asset.Receive, dexeth.WeiToGweiCeil(tx.Value()))
 	tip := int64(w.tipHeight())
-	wt.Confirmed = blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs)
-	return wt.WalletTransaction, nil
+	recipient := w.addr.String()
+	return &asset.WalletTransaction{
+		Type:        asset.Receive,
+		ID:          txHash.String(),
+		Amount:      dexeth.WeiToGweiCeil(tx.Value()),
+		Confirmed:   blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs),
+		BlockNumber: uint64(blockHeight),
+		Recipient:   &recipient,
+	}, nil
 }
 
 // WalletTransaction returns a transaction that either the wallet has made or
@@ -5251,10 +5256,17 @@ func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common
 		return nil, asset.CoinNotFoundError
 	}
 
-	wt := w.extendedTx(tx, asset.Receive, w.atomize(value))
 	tip := int64(w.tipHeight())
-	wt.Confirmed = blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs)
-	return wt.WalletTransaction, nil
+	recipient := w.addr.String()
+	return &asset.WalletTransaction{
+		Type:        asset.Receive,
+		ID:          txHash.String(),
+		Amount:      w.atomize(value),
+		BlockNumber: uint64(blockHeight),
+		Confirmed:   blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs),
+		Recipient:   &recipient,
+		TokenID:     &w.assetID,
+	}, nil
 }
 
 func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
