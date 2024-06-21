@@ -5122,8 +5122,8 @@ func transactionFeeLimit(tx *types.Transaction) *big.Int {
 	return fees
 }
 
-// extendedTx generates an *extendedWalletTx for a newly-broadcast tx and stores
-// it in the DB.
+// extendedTx generates an *extendedWalletTx for a newly-broadcasted tx and
+// stores it in the DB.
 func (w *assetWallet) extendedTx(tx *types.Transaction, txType asset.TransactionType, amt uint64) *extendedWalletTx {
 	var tokenAssetID *uint32
 	if w.assetID != w.baseChainID {
@@ -5213,15 +5213,20 @@ func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txHash common.H
 	if *tx.To() != w.addr {
 		return nil, asset.CoinNotFoundError
 	}
-	tip := int64(w.tipHeight())
-	recipient := w.addr.String()
+
+	addr := w.addr.String()
 	return &asset.WalletTransaction{
-		Type:        asset.Receive,
-		ID:          txHash.String(),
-		Amount:      dexeth.WeiToGweiCeil(tx.Value()),
-		Confirmed:   blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs),
-		BlockNumber: uint64(blockHeight),
-		Recipient:   &recipient,
+		Type:      asset.Receive,
+		ID:        tx.Hash().String(),
+		Amount:    w.atomize(tx.Value()),
+		Recipient: &addr,
+		AdditionalData: map[string]string{
+			txHistoryNonceKey: strconv.FormatUint(tx.Nonce(), 10),
+		},
+		// For receiving transactions, if the transaction is mined, it is
+		// confirmed confirmed, because the value received will be part of
+		// the available balance.
+		Confirmed: blockHeight > 0,
 	}, nil
 }
 
@@ -5238,34 +5243,70 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.
 	return w.getReceivingTransaction(ctx, txHash)
 }
 
+// extractValueFromTransferLog checks the Transfer event logs in the
+// transaction, finds the log that sends tokens to the wallet's address,
+// and returns the value of the transfer.
+func (w *TokenWallet) extractValueFromTransferLog(receipt *types.Receipt) (uint64, error) {
+	if len(receipt.Logs) == 0 {
+		return 0, fmt.Errorf("no logs found in receipt")
+	}
+
+	tokenContract, err := erc20.NewIERC20(w.netToken.Address, w.node.contractBackend())
+	if err != nil {
+		return 0, fmt.Errorf("NewIERC20 error: %v", err)
+	}
+
+	var transferredAmt uint64
+	for _, log := range receipt.Logs {
+		if log.Address != w.netToken.Address {
+			continue
+		}
+		transfer, err := tokenContract.ParseTransfer(*log)
+		if err != nil {
+			continue
+		}
+		if transfer.To == w.addr {
+			transferredAmt += transfer.Value.Uint64()
+		}
+	}
+
+	if transferredAmt > 0 {
+		return transferredAmt, nil
+	}
+
+	return 0, fmt.Errorf("transfer log to %s not found", w.addr.String())
+}
+
 func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common.Hash) (*asset.WalletTransaction, error) {
-	tx, blockHeight, err := w.node.getTransaction(ctx, txHash)
+	receipt, _, err := w.node.transactionAndReceipt(ctx, txHash)
 	if err != nil {
 		return nil, err
 	}
-	if *tx.To() != w.netToken.Address {
-		return nil, asset.CoinNotFoundError
-	}
 
-	receivingAddr, value, err := erc20.ParseTransferData(tx.Data())
+	blockHeight := receipt.BlockNumber.Int64()
+	value, err := w.extractValueFromTransferLog(receipt)
 	if err != nil {
-		return nil, asset.CoinNotFoundError
+		w.log.Errorf("Error extracting value from transfer log: %v", err)
+		return &asset.WalletTransaction{
+			Type:        asset.Unknown,
+			ID:          txHash.String(),
+			BlockNumber: uint64(blockHeight),
+			Confirmed:   blockHeight > 0,
+		}, nil
 	}
 
-	if receivingAddr != w.addr {
-		return nil, asset.CoinNotFoundError
-	}
-
-	tip := int64(w.tipHeight())
-	recipient := w.addr.String()
+	addr := w.addr.String()
 	return &asset.WalletTransaction{
 		Type:        asset.Receive,
 		ID:          txHash.String(),
-		Amount:      w.atomize(value),
 		BlockNumber: uint64(blockHeight),
-		Confirmed:   blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs),
-		Recipient:   &recipient,
 		TokenID:     &w.assetID,
+		Amount:      value,
+		Recipient:   &addr,
+		// For receiving transactions, if the transaction is mined, it is
+		// confirmed confirmed, because the value received will be part of
+		// the available balance.
+		Confirmed: blockHeight > 0,
 	}, nil
 }
 
