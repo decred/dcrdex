@@ -452,6 +452,10 @@ func (c *tTokenContractor) transfer(*bind.TransactOpts, common.Address, *big.Int
 	return c.transferTx, c.transferErr
 }
 
+func (c *tTokenContractor) parseTransfer(*types.Receipt) (uint64, error) {
+	return 0, nil
+}
+
 func (c *tTokenContractor) estimateTransferGas(context.Context, *big.Int) (uint64, error) {
 	return c.transferEstimate, c.transferEstimateErr
 }

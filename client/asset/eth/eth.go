@@ -5246,35 +5246,11 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.
 // extractValueFromTransferLog checks the Transfer event logs in the
 // transaction, finds the log that sends tokens to the wallet's address,
 // and returns the value of the transfer.
-func (w *TokenWallet) extractValueFromTransferLog(receipt *types.Receipt) (uint64, error) {
-	if len(receipt.Logs) == 0 {
-		return 0, fmt.Errorf("no logs found in receipt")
-	}
-
-	tokenContract, err := erc20.NewIERC20(w.netToken.Address, w.node.contractBackend())
-	if err != nil {
-		return 0, fmt.Errorf("NewIERC20 error: %v", err)
-	}
-
-	var transferredAmt uint64
-	for _, log := range receipt.Logs {
-		if log.Address != w.netToken.Address {
-			continue
-		}
-		transfer, err := tokenContract.ParseTransfer(*log)
-		if err != nil {
-			continue
-		}
-		if transfer.To == w.addr {
-			transferredAmt += transfer.Value.Uint64()
-		}
-	}
-
-	if transferredAmt > 0 {
-		return transferredAmt, nil
-	}
-
-	return 0, fmt.Errorf("transfer log to %s not found", w.addr.String())
+func (w *TokenWallet) extractValueFromTransferLog(receipt *types.Receipt) (v uint64, err error) {
+	return v, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+		v, err = c.parseTransfer(receipt)
+		return err
+	})
 }
 
 func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common.Hash) (*asset.WalletTransaction, error) {

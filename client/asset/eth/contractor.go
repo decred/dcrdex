@@ -53,6 +53,7 @@ type tokenContractor interface {
 	approve(*bind.TransactOpts, *big.Int) (*types.Transaction, error)
 	estimateApproveGas(context.Context, *big.Int) (uint64, error)
 	transfer(*bind.TransactOpts, common.Address, *big.Int) (*types.Transaction, error)
+	parseTransfer(*types.Receipt) (uint64, error)
 	estimateTransferGas(context.Context, *big.Int) (uint64, error)
 }
 
@@ -397,6 +398,28 @@ func (c *tokenContractorV0) approve(txOpts *bind.TransactOpts, amount *big.Int) 
 // sends or withdrawals.
 func (c *tokenContractorV0) transfer(txOpts *bind.TransactOpts, addr common.Address, amount *big.Int) (tx *types.Transaction, err error) {
 	return c.tokenContract.Transfer(txOpts, addr, amount)
+}
+
+func (c *tokenContractorV0) parseTransfer(receipt *types.Receipt) (uint64, error) {
+	var transferredAmt uint64
+	for _, log := range receipt.Logs {
+		if log.Address != c.tokenAddr {
+			continue
+		}
+		transfer, err := c.tokenContract.ParseTransfer(*log)
+		if err != nil {
+			continue
+		}
+		if transfer.To == c.acctAddr {
+			transferredAmt += transfer.Value.Uint64()
+		}
+	}
+
+	if transferredAmt > 0 {
+		return transferredAmt, nil
+	}
+
+	return 0, fmt.Errorf("transfer log to %s not found", c.acctAddr)
 }
 
 // estimateApproveGas estimates the gas needed to send an approve tx.
