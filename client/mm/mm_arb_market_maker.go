@@ -81,6 +81,52 @@ type ArbMarketMakerConfig struct {
 	NumEpochsLeaveOpen uint64                      `json:"orderPersistence"`
 }
 
+func (a *ArbMarketMakerConfig) copy() *ArbMarketMakerConfig {
+	c := *a
+
+	c.BuyPlacements = make([]*ArbMarketMakingPlacement, 0, len(a.BuyPlacements))
+	for _, p := range a.BuyPlacements {
+		c.BuyPlacements = append(c.BuyPlacements, &ArbMarketMakingPlacement{
+			Lots:       p.Lots,
+			Multiplier: p.Multiplier,
+		})
+	}
+
+	c.SellPlacements = make([]*ArbMarketMakingPlacement, 0, len(a.SellPlacements))
+	for _, p := range a.SellPlacements {
+		c.SellPlacements = append(c.SellPlacements, &ArbMarketMakingPlacement{
+			Lots:       p.Lots,
+			Multiplier: p.Multiplier,
+		})
+	}
+
+	return &c
+}
+
+func (c *ArbMarketMakerConfig) updateLotSize(originalLotSize, newLotSize uint64) {
+	for _, p := range c.SellPlacements {
+		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	}
+
+	for _, p := range c.BuyPlacements {
+		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	}
+}
+
+func (a *ArbMarketMakerConfig) placementLots() *placementLots {
+	var baseLots, quoteLots uint64
+	for _, p := range a.BuyPlacements {
+		quoteLots += p.Lots
+	}
+	for _, p := range a.SellPlacements {
+		baseLots += p.Lots
+	}
+	return &placementLots{
+		baseLots:  baseLots,
+		quoteLots: quoteLots,
+	}
+}
+
 type placementLots struct {
 	baseLots  uint64
 	quoteLots uint64
@@ -90,8 +136,6 @@ type arbMarketMaker struct {
 	*unifiedExchangeAdaptor
 	cex              botCexAdaptor
 	core             botCoreAdaptor
-	cfgV             atomic.Value // *ArbMarketMakerConfig
-	placementLotsV   atomic.Value // *placementLots
 	book             dexOrderBook
 	rebalanceRunning atomic.Bool
 	currEpoch        atomic.Uint64
@@ -107,7 +151,7 @@ type arbMarketMaker struct {
 var _ bot = (*arbMarketMaker)(nil)
 
 func (a *arbMarketMaker) cfg() *ArbMarketMakerConfig {
-	return a.cfgV.Load().(*ArbMarketMakerConfig)
+	return a.botCfg().ArbMarketMakerConfig
 }
 
 func (a *arbMarketMaker) handleCEXTradeUpdate(update *libxc.Trade) {
@@ -200,7 +244,8 @@ func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *market
 		unadjustedRate = uint64(math.Round(float64(cexRate) / (1 + profitRate)))
 	}
 
-	rateAdj := rateAdjustment(feesInQuoteUnits, mkt.lotSize)
+	lotSize, rateStep := mkt.lotSize.Load(), mkt.rateStep.Load()
+	rateAdj := rateAdjustment(feesInQuoteUnits, lotSize)
 
 	if log.Level() <= dex.LevelTrace {
 		log.Tracef("%s %s placement rate: cexRate = %s, profitRate = %.3f, unadjustedRate = %s, rateAdj = %s, fees = %s",
@@ -209,14 +254,14 @@ func dexPlacementRate(cexRate uint64, sell bool, profitRate float64, mkt *market
 	}
 
 	if sell {
-		return steppedRate(unadjustedRate+rateAdj, mkt.rateStep), nil
+		return steppedRate(unadjustedRate+rateAdj, rateStep), nil
 	}
 
 	if rateAdj > unadjustedRate {
 		return 0, fmt.Errorf("rate adjustment required for fees %d > rate %d", rateAdj, unadjustedRate)
 	}
 
-	return steppedRate(unadjustedRate-rateAdj, mkt.rateStep), nil
+	return steppedRate(unadjustedRate-rateAdj, rateStep), nil
 }
 
 func rateAdjustment(feesInQuoteUnits, lotSize uint64) uint64 {
@@ -240,7 +285,7 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 		newPlacements := make([]*multiTradePlacement, 0, len(cfgPlacements))
 		var cumulativeCEXDepth uint64
 		for i, cfgPlacement := range cfgPlacements {
-			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*a.lotSize) * cfgPlacement.Multiplier)
+			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*a.lotSize.Load()) * cfgPlacement.Multiplier)
 			_, extrema, filled, err := a.CEX.VWAP(a.baseID, a.quoteID, !sellOnDEX, cumulativeCEXDepth)
 			if err != nil {
 				a.log.Errorf("Error calculating vwap: %v", err)
@@ -294,11 +339,7 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 // distribution parses the current inventory distribution and checks if better
 // distributions are possible via deposit or withdrawal.
 func (a *arbMarketMaker) distribution() (dist *distribution, err error) {
-	cfgI := a.placementLotsV.Load()
-	if cfgI == nil {
-		return nil, errors.New("no placements?")
-	}
-	placements := cfgI.(*placementLots)
+	placements := a.cfg().placementLots()
 	if placements.baseLots == 0 && placements.quoteLots == 0 {
 		return nil, errors.New("zero placement lots?")
 	}
@@ -409,7 +450,7 @@ func feeGap(core botCoreAdaptor, cex botCexAdaptor, baseID, quoteID uint32, lotS
 }
 
 func (a *arbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, a.cex, a.baseID, a.quoteID, a.lotSize)
+	feeGap, err := feeGap(a.core, a.cex, a.baseID, a.quoteID, a.lotSize.Load())
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return
@@ -487,31 +528,6 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
-func (a *arbMarketMaker) setTransferConfig(cfg *ArbMarketMakerConfig) {
-	var baseLots, quoteLots uint64
-	for _, p := range cfg.BuyPlacements {
-		quoteLots += p.Lots
-	}
-	for _, p := range cfg.SellPlacements {
-		baseLots += p.Lots
-	}
-	a.placementLotsV.Store(&placementLots{
-		baseLots:  baseLots,
-		quoteLots: quoteLots,
-	})
-}
-
-func (a *arbMarketMaker) updateConfig(cfg *BotConfig) error {
-	if cfg.ArbMarketMakerConfig == nil {
-		return errors.New("no arb market maker config provided")
-	}
-
-	a.cfgV.Store(cfg.ArbMarketMakerConfig)
-	a.setTransferConfig(cfg.ArbMarketMakerConfig)
-	a.unifiedExchangeAdaptor.updateConfig(cfg)
-	return nil
-}
-
 func newArbMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, log dex.Logger) (*arbMarketMaker, error) {
 	if cfg.ArbMarketMakerConfig == nil {
 		// implies bug in caller
@@ -533,8 +549,5 @@ func newArbMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, log dex.L
 	}
 
 	adaptor.setBotLoop(arbMM.botLoop)
-
-	arbMM.cfgV.Store(cfg.ArbMarketMakerConfig)
-	arbMM.setTransferConfig(cfg.ArbMarketMakerConfig)
 	return arbMM, nil
 }

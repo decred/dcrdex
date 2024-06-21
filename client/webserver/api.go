@@ -2043,7 +2043,7 @@ func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Reque
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	if err = s.mm.StartBot(form.Config, nil, appPW); err != nil {
+	if err = s.mm.StartBot(form.Config, nil, appPW, true); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error starting market making: %v", err))
 		return
 	}
