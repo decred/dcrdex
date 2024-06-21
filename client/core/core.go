@@ -90,6 +90,9 @@ const (
 	// pokesCapacity is the maximum number of poke notifications that
 	// will be cached.
 	pokesCapacity = 100
+
+	// walletLockTimeout is the default timeout used when locking wallets.
+	walletLockTimeout = 5 * time.Second
 )
 
 var (
@@ -1850,10 +1853,10 @@ fetchers:
 		if !wallet.connected() {
 			continue
 		}
-		if !c.cfg.NoAutoWalletLock {
+		if !c.cfg.NoAutoWalletLock && wallet.unlocked() { // no-op if Logout did it
 			symb := strings.ToUpper(unbip(assetID))
-			c.log.Infof("Locking %s wallet", symb) // no-op if Logout did it
-			if err := wallet.Lock(5 * time.Second); err != nil {
+			c.log.Infof("Locking %s wallet", symb)
+			if err := wallet.Lock(walletLockTimeout); err != nil {
 				c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
 			}
 		}
@@ -3457,7 +3460,7 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return fmt.Errorf("wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
-	err = wallet.Lock(5 * time.Second)
+	err = wallet.Lock(walletLockTimeout)
 	if err != nil {
 		return err
 	}
@@ -5309,15 +5312,21 @@ func (c *Core) Logout() error {
 
 	// Lock wallets
 	if !c.cfg.NoAutoWalletLock {
+		// Ensure wallet lock in c.Run waits for c.Logout if this is called
+		// before shutdown.
+		c.wg.Add(1)
 		for _, w := range c.xcWallets() {
-			if w.connected() {
-				if err := w.Lock(5 * time.Second); err != nil {
+			if w.connected() && w.unlocked() {
+				symb := strings.ToUpper(unbip(w.AssetID))
+				c.log.Infof("Locking %s wallet", symb)
+				if err := w.Lock(walletLockTimeout); err != nil {
 					// A failure to lock the wallet need not block the ability to
 					// lock the DEX accounts or shutdown Core gracefully.
 					c.log.Warnf("Unable to lock %v wallet: %v", unbip(w.AssetID), err)
 				}
 			}
 		}
+		c.wg.Done()
 	}
 
 	// With no open orders for any of the dex connections, and all wallets locked,
