@@ -1100,8 +1100,13 @@ func (m *multiRPCClient) withAll(
 		return nil
 	}
 
-	if len(errs) > 0 {
-		return fmt.Errorf("all providers in a failed state: %s", strings.Join(errs, "\n"))
+	// err will be nil if all providers were already in a failed state.
+	if errs == nil || len(errs) > 0 {
+		err := errors.New("all providers in a failed state")
+		if errs != nil {
+			err = fmt.Errorf("%w: %s", err, strings.Join(errs, "\n"))
+		}
+		return err
 	}
 
 	return nil
