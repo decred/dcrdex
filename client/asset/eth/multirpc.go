@@ -1073,7 +1073,6 @@ func (m *multiRPCClient) withAll(
 			atLeastOne = true // return nil err unless a later "propagated" error says to
 			continue
 		}
-		errs = append(errs, err.Error())
 		var discarded bool
 		for i, f := range acceptabilityFilters {
 			discard, propagate, fail := f(err)
@@ -1092,6 +1091,7 @@ func (m *multiRPCClient) withAll(
 		if discarded {
 			atLeastOne = true
 		} else {
+			errs = append(errs, err.Error())
 			m.log.Warnf("Failed request from %q: %v", p, err)
 		}
 	}
@@ -1100,13 +1100,14 @@ func (m *multiRPCClient) withAll(
 		return nil
 	}
 
-	// err will be nil if all providers were already in a failed state.
-	if errs == nil || len(errs) > 0 {
-		err := errors.New("all providers in a failed state")
-		if errs != nil {
-			err = fmt.Errorf("%w: %s", err, strings.Join(errs, "\n"))
-		}
-		return err
+	// err will be nil if all providers were already in a failed state or if
+	// atLeastOne is false.
+	if errs == nil {
+		return errors.New("all providers in a failed state")
+	}
+
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "\n"))
 	}
 
 	return nil
