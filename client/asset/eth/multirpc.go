@@ -1061,8 +1061,7 @@ func (m *multiRPCClient) withAll(
 	var atLeastOne bool
 	var errs []string
 	providers := m.nonceProviderList()
-	for i := range providers {
-		p := providers[i]
+	for _, p := range providers {
 		if p.failed() {
 			continue
 		}
@@ -1101,7 +1100,7 @@ func (m *multiRPCClient) withAll(
 		return nil
 	}
 
-	if len(errs) == len(providers) {
+	if len(errs) > 0 {
 		return fmt.Errorf("all providers in a failed state: %s", strings.Join(errs, "\n"))
 	}
 
