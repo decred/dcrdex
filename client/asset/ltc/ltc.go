@@ -36,6 +36,7 @@ const (
 	walletTypeSPV       = "SPV"
 	walletTypeLegacy    = ""
 	walletTypeElectrum  = "electrumRPC"
+	needElectrumVersion = "4.2.2"
 )
 
 var (
@@ -235,6 +236,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return btc.OpenSPVWallet(cloneCFG, openSPVWallet)
 	case walletTypeElectrum:
 		cloneCFG.Ports = dexbtc.NetPorts{} // no default ports
+		ver, err := dex.SemverFromString(needElectrumVersion)
+		if err != nil {
+			return nil, err
+		}
+		cloneCFG.MinElectrumVersion = *ver
 		return btc.ElectrumWallet(cloneCFG)
 	default:
 		makeCustomWallet, ok := customSPVWalletConstructors[cfg.Type]

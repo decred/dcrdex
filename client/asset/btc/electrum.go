@@ -21,11 +21,14 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
+const needElectrumVersion = "4.5.5"
+
 // ExchangeWalletElectrum is the asset.Wallet for an external Electrum wallet.
 type ExchangeWalletElectrum struct {
 	*baseWallet
 	*authAddOn
-	ew *electrumWallet
+	ew                 *electrumWallet
+	minElectrumVersion dex.Semver
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[OutPoint]*FindRedemptionReq
@@ -71,6 +74,7 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 		authAddOn:           &authAddOn{btc.node},
 		ew:                  ew,
 		findRedemptionQueue: make(map[OutPoint]*FindRedemptionReq),
+		minElectrumVersion:  cfg.MinElectrumVersion,
 	}
 	// In (*baseWallet).feeRate, use ExchangeWalletElectrum's walletFeeRate
 	// override for localFeeRate. No externalFeeRate is required but will be
@@ -130,16 +134,38 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 			genesis.String(), serverFeats.Genesis)
 	}
 
-	dbWG, err := btc.startTxHistoryDB(ctx)
+	verStr, err := btc.ew.wallet.Version(ctx)
 	if err != nil {
 		return nil, err
 	}
+	gotVer, err := dex.SemverFromString(verStr)
+	if err != nil {
+		return nil, err
+	}
+	if !dex.SemverCompatible(btc.minElectrumVersion, *gotVer) {
+		return nil, fmt.Errorf("wanted electrum wallet version %s but got %s", btc.minElectrumVersion, gotVer)
+	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		dbWG.Wait()
-	}()
+	if btc.minElectrumVersion.Major >= 4 && btc.minElectrumVersion.Minor >= 5 {
+		btc.ew.wallet.SetIncludeIgnoreWarnings(true)
+	}
+
+	// TODO: Firo electrum does not have "onchain_history" method as of firo
+	// electrum 4.1.5.3, find an alternative.
+	hasOnchainHistory := btc.symbol != "firo"
+
+	if hasOnchainHistory {
+		dbWG, err := btc.startTxHistoryDB(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dbWG.Wait()
+		}()
+	}
 
 	wg.Add(1)
 	go func() {
@@ -153,14 +179,16 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 		btc.monitorPeers(ctx)
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		btc.tipMtx.RLock()
-		tip := btc.currentTip
-		btc.tipMtx.RUnlock()
-		go btc.syncTxHistory(uint64(tip.Height))
-	}()
+	if hasOnchainHistory {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			btc.tipMtx.RLock()
+			tip := btc.currentTip
+			btc.tipMtx.RUnlock()
+			go btc.syncTxHistory(uint64(tip.Height))
+		}()
+	}
 
 	return wg, nil
 }

@@ -39,6 +39,7 @@ const (
 	methodFreezeUTXO       = "freeze_utxo"
 	methodUnfreezeUTXO     = "unfreeze_utxo"
 	methodOnchainHistory   = "onchain_history"
+	methodVersion          = "version"
 )
 
 // Commands gets a list of the supported wallet RPCs.
@@ -108,32 +109,20 @@ func (wc *WalletClient) GetServers(ctx context.Context) ([]*GetServersResult, er
 	return servers, nil
 }
 
-type feeRateReq struct {
-	Method string  `json:"fee_method"`
-	Level  float64 `json:"fee_level"`
-}
-
 // FeeRate gets a fee rate estimate for a block confirmation target, where 1
 // indicates the next block.
-func (wc *WalletClient) FeeRate(ctx context.Context, confTarget int64) (int64, error) {
-	if confTarget > 10 {
-		confTarget = 10
-	} else if confTarget < 1 {
-		confTarget = 1
+func (wc *WalletClient) FeeRate(ctx context.Context, _ int64) (int64, error) {
+	var res struct {
+		Method   string `json:"method"`
+		SatPerKB int64  `json:"sat/kvB"`
+		Tooltip  string `json:"tooltip"`
+		Value    int64  `json:"value"`
 	}
-
-	// Based on the Electrum wallet UI:
-	// "mempool": 1.0 corresponds to 0.1 MB from tip, 0.833 to 0.2 MB, 0.667 to 0.5 MB, 0.5 to 1.0 MB, 0.333 to 2 MB
-	// "eta": 1.0 corresponds to "next block", 0.75 to "within 2 blocks", 0.5 to 5 blks, 0.25 to 10 blks (non-linear)
-	target := map[int64]float64{1: 1.0, 2: 0.75, 3: 0.66, 4: 0.56, 5: 0.5,
-		6: 0.445, 7: 0.39, 8: 0.333, 9: 0.278, 10: 0.25}[confTarget] // "eta", roughly interpolated
-
-	var satPerKB int64
-	err := wc.Call(ctx, methodGetFeeRate, feeRateReq{"eta", target}, &satPerKB) // or anylist{"mempool", target}
+	err := wc.Call(ctx, methodGetFeeRate, nil, &res)
 	if err != nil {
 		return 0, err
 	}
-	return satPerKB, nil
+	return res.SatPerKB, nil
 }
 
 type walletReq struct {
@@ -415,18 +404,28 @@ type signTransactionArgs struct {
 	// signtransaction_with_privkey request. (this RPC should not use positional
 	// arguments)
 	// Privkey string `json:"privkey,omitempty"` // sign with wallet if empty
-	Wallet string `json:"wallet,omitempty"`
+	Wallet         string `json:"wallet,omitempty"`
+	IgnoreWarnings bool   `json:"iknowwhatimdoing,omitempty"`
+}
+
+// SetIncludeIgnoreWarnings sets the includeIgnoreWarnings bool. Needed for btc
+// at 4.5.5 but causes ltc at 4.2.2 to fail.
+func (wc *WalletClient) SetIncludeIgnoreWarnings(include bool) {
+	wc.includeIgnoreWarnings.Store(include)
 }
 
 // SignTx signs the base-64 encoded PSBT with the wallet's keys, returning the
 // signed transaction.
 func (wc *WalletClient) SignTx(ctx context.Context, walletPass string, psbtB64 string) ([]byte, error) {
 	var res string
-	err := wc.Call(ctx, methodSignTransaction, &signTransactionArgs{
+	req := &signTransactionArgs{
 		Tx:     psbtB64,
 		Pass:   walletPass,
-		Wallet: wc.walletFile},
-		&res)
+		Wallet: wc.walletFile}
+	if wc.includeIgnoreWarnings.Load() {
+		req.IgnoreWarnings = true
+	}
+	err := wc.Call(ctx, methodSignTransaction, req, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -516,4 +515,13 @@ func (wc *WalletClient) OnchainHistory(ctx context.Context, from, to int64) ([]T
 		return nil, err
 	}
 	return res.Transactions, nil
+}
+
+func (wc *WalletClient) Version(ctx context.Context) (string, error) {
+	var res string
+	err := wc.Call(ctx, methodVersion, &walletReq{wc.walletFile}, &res)
+	if err != nil {
+		return "", err
+	}
+	return res, nil
 }
