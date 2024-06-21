@@ -3981,7 +3981,7 @@ func (w *assetWallet) checkPendingApprovals() {
 // sumPendingTxs sums the expected incoming and outgoing values in pending
 // transactions stored in pendingTxs. Not used if the node is a
 // txPoolFetcher.
-func (w *assetWallet) sumPendingTxs(_ /* bal */ *big.Int) (out, in uint64) {
+func (w *assetWallet) sumPendingTxs() (out, in uint64) {
 	isToken := w.assetID != w.baseChainID
 
 	sumPendingTx := func(pendingTx *extendedWalletTx) {
@@ -4108,7 +4108,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 	txPoolNode, is := w.node.(txPoolFetcher)
 	if !is {
 		for {
-			out, in := w.sumPendingTxs(confirmed)
+			out, in := w.sumPendingTxs()
 			checkBal, err := w.getConfirmedBalance()
 			if err != nil {
 				return nil, fmt.Errorf("balance consistency check error: %v", err)
@@ -5486,7 +5486,7 @@ func (getGas) ReadCredentials(chain, credentialsPath string, net dex.Network) (a
 	return
 }
 
-func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, _ /* assetID */, contractVer uint32, maxSwaps int,
+func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, contractVer uint32, maxSwaps int,
 	walletDir string, providers []string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
 	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
 
@@ -5572,9 +5572,9 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
+	cl, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: getGetGasClientWithEstimatesAndBalances error: %w", symbol, err)
 	}
 	defer cl.shutdown()
 	ethBal := dexeth.WeiToGwei(ethBalBig)
@@ -5779,9 +5779,9 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, c, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
+	cl, c, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: getGetGasClientWithEstimatesAndBalances error: %w", symbol, err)
 	}
 	defer cl.shutdown()
 
