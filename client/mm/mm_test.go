@@ -91,9 +91,10 @@ type tCore struct {
 	walletTxsMtx      sync.Mutex
 	walletTxs         map[string]*asset.WalletTransaction
 	fiatRates         map[uint32]float64
-	user              *core.User
 	userParcels       uint32
 	parcelLimit       uint32
+	exchange          *core.Exchange
+	walletStates      map[uint32]*core.WalletState
 }
 
 func newTCore() *tCore {
@@ -107,8 +108,9 @@ func newTCore() *tCore {
 		bookFeed: &tBookFeed{
 			c: make(chan *core.BookUpdate, 1),
 		},
-		walletTxs: make(map[string]*asset.WalletTransaction),
-		book:      &orderbook.OrderBook{},
+		walletTxs:    make(map[string]*asset.WalletTransaction),
+		book:         &orderbook.OrderBook{},
+		walletStates: make(map[uint32]*core.WalletState),
 	}
 }
 
@@ -186,9 +188,6 @@ func (c *tCore) Login(pw []byte) error {
 func (c *tCore) OpenWallet(assetID uint32, pw []byte) error {
 	return nil
 }
-func (c *tCore) User() *core.User {
-	return c.user
-}
 func (c *tCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
 	c.walletTxsMtx.Lock()
 	defer c.walletTxsMtx.Unlock()
@@ -226,6 +225,30 @@ func (c *tCore) Order(id dex.Bytes) (*core.Order, error) {
 		return o, nil
 	}
 	return nil, fmt.Errorf("order %s not found", id)
+}
+
+func (c *tCore) Exchange(host string) (*core.Exchange, error) {
+	return c.exchange, nil
+}
+
+func (c *tCore) WalletState(assetID uint32) *core.WalletState {
+	return c.walletStates[assetID]
+}
+
+func (c *tCore) setWalletsAndExchange(m *core.Market) {
+	c.walletStates[m.BaseID] = &core.WalletState{
+		PeerCount: 1,
+		Synced:    true,
+	}
+	c.walletStates[m.QuoteID] = &core.WalletState{
+		PeerCount: 1,
+		Synced:    true,
+	}
+	c.exchange = &core.Exchange{
+		Auth: core.ExchangeAuth{
+			EffectiveTier: 2,
+		},
+	}
 }
 
 func (c *tCore) setAssetBalances(balances map[uint32]uint64) {

@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // clientCore is satisfied by core.Core.
@@ -30,7 +31,6 @@ type clientCore interface {
 	WalletTraits(assetID uint32) (asset.WalletTrait, error)
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	MaxFundingFees(fromAsset uint32, host string, numTrades uint32, fromSettings map[string]string) (uint64, error)
-	User() *core.User
 	Login(pw []byte) error
 	OpenWallet(assetID uint32, appPW []byte) error
 	Broadcast(core.Notification)
@@ -41,6 +41,8 @@ type clientCore interface {
 	Order(oidB dex.Bytes) (*core.Order, error)
 	WalletTransaction(uint32, string) (*asset.WalletTransaction, error)
 	TradingLimits(host string) (userParcels, parcelLimit uint32, err error)
+	WalletState(assetID uint32) *core.WalletState
+	Exchange(host string) (*core.Exchange, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -291,56 +293,13 @@ func newBotProblems() *BotProblems {
 
 func (bp *BotProblems) copy() *BotProblems {
 	copy := *bp
-
-	if bp.WalletNotSynced != nil {
-		copy.WalletNotSynced = make(map[uint32]bool, len(bp.WalletNotSynced))
-		for k, v := range bp.WalletNotSynced {
-			copy.WalletNotSynced[k] = v
-		}
-	}
-
-	if bp.NoWalletPeers != nil {
-		copy.NoWalletPeers = make(map[uint32]bool, len(bp.NoWalletPeers))
-		for k, v := range bp.NoWalletPeers {
-			copy.NoWalletPeers[k] = v
-		}
-	}
-
-	if bp.DepositErr != nil {
-		copy.DepositErr = make(map[uint32]*StampedError, len(bp.DepositErr))
-		for k, v := range bp.DepositErr {
-			copy.DepositErr[k] = v
-		}
-	}
-
-	if bp.WithdrawErr != nil {
-		copy.WithdrawErr = make(map[uint32]*StampedError, len(bp.WithdrawErr))
-		for k, v := range bp.WithdrawErr {
-			copy.WithdrawErr[k] = v
-		}
-	}
-
-	if bp.DEXBalanceDeficiencies != nil {
-		copy.DEXBalanceDeficiencies = make(map[uint32]uint64, len(bp.DEXBalanceDeficiencies))
-		for k, v := range bp.DEXBalanceDeficiencies {
-			copy.DEXBalanceDeficiencies[k] = v
-		}
-	}
-
-	if bp.CEXBalanceDeficiencies != nil {
-		copy.CEXBalanceDeficiencies = make(map[uint32]uint64, len(bp.CEXBalanceDeficiencies))
-		for k, v := range bp.CEXBalanceDeficiencies {
-			copy.CEXBalanceDeficiencies[k] = v
-		}
-	}
-
-	if bp.CEXTooShallow != nil {
-		copy.CEXTooShallow = make(map[string]bool, len(bp.CEXTooShallow))
-		for k, v := range bp.CEXTooShallow {
-			copy.CEXTooShallow[k] = v
-		}
-	}
-
+	copy.WalletNotSynced = utils.CopyMap(bp.WalletNotSynced)
+	copy.NoWalletPeers = utils.CopyMap(bp.NoWalletPeers)
+	copy.DepositErr = utils.CopyMap(bp.DepositErr)
+	copy.WithdrawErr = utils.CopyMap(bp.WithdrawErr)
+	copy.DEXBalanceDeficiencies = utils.CopyMap(bp.DEXBalanceDeficiencies)
+	copy.CEXBalanceDeficiencies = utils.CopyMap(bp.CEXBalanceDeficiencies)
+	copy.CEXTooShallow = utils.CopyMap(bp.CEXTooShallow)
 	return &copy
 }
 

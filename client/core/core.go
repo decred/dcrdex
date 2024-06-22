@@ -6341,7 +6341,8 @@ func (c *Core) TradeAsync(pw []byte, form *TradeForm) (*InFlightOrder, error) {
 		_, err := c.sendTradeRequest(req)
 		if err != nil {
 			// If it's an OrderQuantityTooHigh error, send simplified notification
-			if errors.Is(err, ErrOrderQtyTooHigh) {
+			var mErr *msgjson.Error
+			if errors.As(err, &mErr) && mErr.Code == msgjson.OrderQuantityTooHigh {
 				topic := TopicOrderQuantityTooHigh
 				subject, details := c.formatDetails(topic, corder.Host)
 				c.notify(newOrderNoteWithTempID(topic, subject, details, db.ErrorLevel, corder, tempID))
@@ -10302,7 +10303,7 @@ func sendRequest(conn comms.WsConn, route string, request, response any, timeout
 	}
 
 	// Check the response error.
-	return mapServerError(<-errChan)
+	return <-errChan
 }
 
 // newPreimage creates a random order commitment. If you require a matching
@@ -11591,122 +11592,43 @@ func calcParcelLimit(tier int64, score, maxScore int32) uint32 {
 // TradingLimits returns the number of parcels the user can trade on an
 // exchange and the amount that are currently being traded.
 func (c *Core) TradingLimits(host string) (userParcels, parcelLimit uint32, err error) {
-	exchange, err := c.Exchange(host)
-	if err != nil {
-		return 0, 0, err
-	}
-
 	dc, _, err := c.dex(host)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	likelyTaker := func(o *Order, midGap uint64) bool {
-		if o.Type == order.MarketOrderType || o.TimeInForce == order.ImmediateTiF {
-			return true
-		}
+	cfg := dc.config()
+	dc.acct.authMtx.RLock()
+	rep := dc.acct.rep
+	dc.acct.authMtx.RUnlock()
 
-		if midGap == 0 {
-			return false
-		}
-
-		if o.Sell {
-			return o.Rate < midGap
-		}
-
-		return o.Rate > midGap
+	mkts := make(map[string]*msgjson.Market, len(cfg.Markets))
+	for _, mkt := range cfg.Markets {
+		mkts[mkt.Name] = mkt
+	}
+	mktTrades := make(map[string][]*trackedTrade)
+	for _, t := range dc.trackedTrades() {
+		mktTrades[t.mktID] = append(mktTrades[t.mktID], t)
 	}
 
-	baseQty := func(o *Order, midGap, lotSize uint64) uint64 {
-		qty := o.Qty
-
-		if o.Type == order.MarketOrderType && !o.Sell {
-			if midGap == 0 {
-				qty = lotSize
-			} else {
-				qty = calc.QuoteToBase(midGap, qty)
-			}
-		}
-
-		return qty
-	}
-
-	epochWeight := func(o *Order, midGap, lotSize uint64) uint64 {
-		if o.Status >= order.OrderStatusBooked {
-			return 0
-		}
-
-		if likelyTaker(o, midGap) {
-			return 2 * baseQty(o, midGap, lotSize)
-		}
-
-		return baseQty(o, midGap, lotSize)
-	}
-
-	bookedWeight := func(o *Order) uint64 {
-		if o.Status != order.OrderStatusBooked {
-			return 0
-		}
-
-		return o.Qty - o.Filled
-	}
-
-	settlingWeight := func(o *Order) (weight uint64) {
-		for _, match := range o.Matches {
-			if (match.Side == order.Maker && match.Status >= order.MakerRedeemed) ||
-				(match.Side == order.Taker && match.Status >= order.MatchComplete) {
-				continue
-			}
-			weight += match.Qty
-		}
-		return
-	}
-
-	isEpochOrder := func(o *Order) bool {
-		return o.Status == order.OrderStatusEpoch
-	}
-
-	parcelLimit = calcParcelLimit(exchange.Auth.EffectiveTier, exchange.Auth.Rep.Score, int32(exchange.MaxScore))
-	for _, mkt := range exchange.Markets {
-		if len(mkt.InFlightOrders) == 0 && len(mkt.Orders) == 0 {
+	parcelLimit = calcParcelLimit(rep.EffectiveTier(), rep.Score, int32(cfg.MaxScore))
+	for mktID, trades := range mktTrades {
+		mkt := mkts[mktID]
+		if mkt == nil {
+			c.log.Warnf("trade for unknown market %q", mktID)
 			continue
 		}
 
-		var hasEpochOrder bool
-		for _, ord := range mkt.InFlightOrders {
-			if isEpochOrder(ord.Order) {
-				hasEpochOrder = true
-				break
-			}
-		}
-
-		if !hasEpochOrder {
-			for _, ord := range mkt.Orders {
-				if isEpochOrder(ord) {
-					hasEpochOrder = true
-					break
+		var midGap, mktWeight uint64
+		for _, t := range trades {
+			if t.isEpochOrder() && midGap == 0 {
+				midGap, err = dc.midGap(mkt.Base, mkt.Quote)
+				if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
+					return 0, 0, err
 				}
 			}
+			mktWeight += t.marketWeight(midGap, mkt.LotSize)
 		}
-
-		// The mid-gap is only required for epoch orders. If there are no epoch
-		// orders, there is no reason to get the mid-gap.
-		var midGap uint64
-		if hasEpochOrder {
-			midGap, err = dc.midGap(mkt.BaseID, mkt.QuoteID)
-			if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
-				return 0, 0, err
-			}
-		}
-
-		var mktWeight uint64
-		for _, ord := range mkt.InFlightOrders {
-			mktWeight += epochWeight(ord.Order, midGap, mkt.LotSize) + bookedWeight(ord.Order) + settlingWeight(ord.Order)
-		}
-		for _, ord := range mkt.Orders {
-			mktWeight += epochWeight(ord, midGap, mkt.LotSize) + bookedWeight(ord) + settlingWeight(ord)
-		}
-
 		userParcels += uint32(mktWeight / (uint64(mkt.ParcelSize) * mkt.LotSize))
 	}
 

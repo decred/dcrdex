@@ -507,7 +507,6 @@ func TestArbRebalance(t *testing.T) {
 				QuoteID:  quoteID,
 				RateStep: 1e2,
 			})
-			setHealthyUser(u)
 			u.clientCore.(*tCore).userParcels = 0
 			u.clientCore.(*tCore).parcelLimit = 1
 
@@ -930,8 +929,6 @@ func TestArbBotProblems(t *testing.T) {
 			u.CEX = cex
 			u.botCfgV.Store(&BotConfig{})
 			c := newTCore()
-			u.clientCore = c
-			setHealthyUser(u)
 			if !tt.userLimitTooLow {
 				u.clientCore.(*tCore).userParcels = 0
 				u.clientCore.(*tCore).parcelLimit = 1

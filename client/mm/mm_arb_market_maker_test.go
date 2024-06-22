@@ -12,8 +12,10 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -43,8 +45,8 @@ func TestArbMMRebalance(t *testing.T) {
 	u.CEX = cex
 	u.botCfgV.Store(&BotConfig{})
 	c := newTCore()
+	c.setWalletsAndExchange(mkt)
 	u.clientCore = c
-	setHealthyUser(u)
 	u.autoRebalanceCfg = &AutoRebalanceConfig{}
 	u.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
 	a := &arbMarketMaker{
@@ -159,29 +161,29 @@ func TestArbMMRebalance(t *testing.T) {
 	setBals(baseID, minDexBase, minCexBase)
 	setBals(quoteID, minDexQuote, minCexQuote)
 
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(false, buyRate, 1), ep(true, sellRate, 1))
 
 	// base balance too low
 	setBals(baseID, minDexBase-1, minCexBase)
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(false, buyRate, 1))
 
 	// quote balance too low
 	setBals(baseID, minDexBase, minCexBase)
 	setBals(quoteID, minDexQuote-1, minCexQuote)
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(true, sellRate, 1))
 
 	// cex quote balance too low. Can't place sell.
 	setBals(quoteID, minDexQuote, minCexQuote-1)
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(false, buyRate, 1))
 
 	// cex base balance too low. Can't place buy.
 	setBals(baseID, minDexBase, minCexBase-1)
 	setBals(quoteID, minDexQuote, minCexQuote)
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(true, sellRate, 1))
 }
 
@@ -484,7 +486,7 @@ func TestArbMMBotProblems(t *testing.T) {
 		{
 			name:              "buy no peers, sell qty too high",
 			multiTradeBuyErr:  &core.WalletNoPeersError{AssetID: baseID},
-			multiTradeSellErr: core.ErrOrderQtyTooHigh,
+			multiTradeSellErr: &msgjson.Error{Code: msgjson.OrderQuantityTooHigh},
 			expBotProblems: updateBotProblems(func(bp *BotProblems) {
 				bp.NoWalletPeers[baseID] = true
 				bp.UserLimitTooLow = true
@@ -539,8 +541,8 @@ func TestArbMMBotProblems(t *testing.T) {
 			u.CEX = cex
 			u.botCfgV.Store(&BotConfig{})
 			c := newTCore()
+			c.setWalletsAndExchange(mkt)
 			u.clientCore = c
-			setHealthyUser(u)
 			u.autoRebalanceCfg = &AutoRebalanceConfig{}
 			u.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
 			a := &arbMarketMaker{
@@ -627,7 +629,7 @@ func TestArbMMBotProblems(t *testing.T) {
 				bookingFeesPerLot: sellSwapFees,
 			}
 
-			a.rebalance(1)
+			a.rebalance(1, &orderbook.OrderBook{})
 
 			problems := a.problems()
 			if !reflect.DeepEqual(tt.expBotProblems, problems) {
@@ -649,34 +651,10 @@ func mustParseMarket(m *core.Market) *market {
 	return mkt
 }
 
-func setHealthyUser(adaptor *unifiedExchangeAdaptor) {
-	c := adaptor.clientCore.(*tCore)
-	c.user = &core.User{
-		Assets: map[uint32]*core.SupportedAsset{
-			adaptor.baseID: {
-				Wallet: &core.WalletState{
-					PeerCount: 1,
-					Synced:    true,
-				},
-			},
-			adaptor.quoteID: {
-				Wallet: &core.WalletState{
-					PeerCount: 1,
-					Synced:    true,
-				},
-			},
-		},
-		Exchanges: map[string]*core.Exchange{
-			adaptor.host: {
-				Auth: core.ExchangeAuth{
-					EffectiveTier: 2,
-				},
-			},
-		},
-	}
-}
-
 func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
+	tCore := newTCore()
+	tCore.setWalletsAndExchange(m)
+
 	u := &unifiedExchangeAdaptor{
 		ctx:                context.Background(),
 		market:             mustParseMarket(m),
@@ -690,13 +668,15 @@ func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
 		pendingDeposits:    make(map[string]*pendingDeposit),
 		pendingWithdrawals: make(map[string]*pendingWithdrawal),
 		botProblems:        newBotProblems(),
-		clientCore:         newTCore(),
+		clientCore:         tCore,
 	}
+
 	u.botCfgV.Store(&BotConfig{
 		Host:    u.host,
 		BaseID:  u.baseID,
 		QuoteID: u.quoteID,
 	})
+
 	return u
 }
 

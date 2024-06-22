@@ -461,30 +461,7 @@ func (m *basicMarketMaker) updateBotLoopProblems(buyErr, sellErr, determinePlace
 	})
 }
 
-// clearAllOrders returns slices of order placements with zero rate and lots.
-// When these are passed to multiTrade, all orders will be cancelled.
-func clearAllOrders(numBuyOrders, numSellOrders int) (buyOrders, sellOrders []*multiTradePlacement) {
-	buyOrders = make([]*multiTradePlacement, 0, numBuyOrders)
-	sellOrders = make([]*multiTradePlacement, 0, numSellOrders)
-
-	for i := 0; i < numBuyOrders; i++ {
-		buyOrders = append(buyOrders, &multiTradePlacement{
-			rate: 0,
-			lots: 0,
-		})
-	}
-
-	for i := 0; i < numSellOrders; i++ {
-		sellOrders = append(sellOrders, &multiTradePlacement{
-			rate: 0,
-			lots: 0,
-		})
-	}
-
-	return buyOrders, sellOrders
-}
-
-func (m *basicMarketMaker) rebalance(newEpoch uint64) {
+func (m *basicMarketMaker) rebalance(newEpoch uint64, book *orderbook.OrderBook) {
 	if !m.rebalanceRunning.CompareAndSwap(false, true) {
 		return
 	}
@@ -495,25 +472,29 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		return
 	}
 
+	var buyErr, sellErr, determinePlacementsErr error
+	var dexDefs map[uint32]uint64
+	var oracleOutsideSafeRange bool
+	defer func() {
+		m.updateBotLoopProblems(buyErr, sellErr, determinePlacementsErr, oracleOutsideSafeRange, dexDefs)
+	}()
+
 	buyOrders, sellOrders, oracleOutsideSafeRange, determinePlacementsErr := m.ordersToPlace()
 	if determinePlacementsErr != nil {
-		numBuyOrders := len(m.cfg().BuyPlacements)
-		numSellOrders := len(m.cfg().SellPlacements)
-		buyOrders, sellOrders = clearAllOrders(numBuyOrders, numSellOrders)
+		m.tryCancelOrders(m.ctx, &newEpoch, book.OrderIsBooked, false)
+		return
 	}
 
 	_, buyDEXDefs, _, buyErr := m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
 	_, sellDEXDefs, _, sellErr := m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
 
-	dexDefs := make(map[uint32]uint64)
+	dexDefs = make(map[uint32]uint64)
 	for k, v := range buyDEXDefs {
 		dexDefs[k] += v
 	}
 	for k, v := range sellDEXDefs {
 		dexDefs[k] += v
 	}
-
-	m.updateBotLoopProblems(buyErr, sellErr, determinePlacementsErr, oracleOutsideSafeRange, dexDefs)
 }
 
 func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
@@ -541,7 +522,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 			case ni := <-bookFeed.Next():
 				switch epoch := ni.Payload.(type) {
 				case *core.ResolvedEpoch:
-					m.rebalance(epoch.Current)
+					m.rebalance(epoch.Current, book)
 				}
 			case <-m.ctx.Done():
 				return

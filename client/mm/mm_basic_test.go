@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/msgjson"
 )
 
 type tBasicMMCalculator struct {
@@ -404,8 +406,11 @@ func TestBasicMMRebalance(t *testing.T) {
 				calculator: calculator,
 			}
 			tcore := newTCore()
+			tcore.setWalletsAndExchange(&core.Market{
+				BaseID:  baseID,
+				QuoteID: quoteID,
+			})
 			mm.clientCore = tcore
-			setHealthyUser(mm.unifiedExchangeAdaptor)
 			mm.botCfgV.Store(&BotConfig{})
 			mm.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
 			const sellSwapFees, sellRedeemFees = 3e6, 1e6
@@ -439,7 +444,7 @@ func TestBasicMMRebalance(t *testing.T) {
 				BuyPlacements:  tt.cfgBuyPlacements,
 				SellPlacements: tt.cfgSellPlacements,
 			})
-			mm.rebalance(100)
+			mm.rebalance(100, &orderbook.OrderBook{})
 
 			if len(tcore.multiTradesPlaced) != 2 {
 				t.Fatal("expected both buy and sell orders placed")
@@ -543,7 +548,7 @@ func TestBasicMMBotProblems(t *testing.T) {
 		{
 			name:              "buy no peers, sell qty too high",
 			multiTradeBuyErr:  &core.WalletNoPeersError{AssetID: baseID},
-			multiTradeSellErr: core.ErrOrderQtyTooHigh,
+			multiTradeSellErr: &msgjson.Error{Code: msgjson.OrderQuantityTooHigh},
 			expBotProblems: updateBotProblems(func(bp *BotProblems) {
 				bp.NoWalletPeers[baseID] = true
 				bp.UserLimitTooLow = true
@@ -613,10 +618,9 @@ func TestBasicMMBotProblems(t *testing.T) {
 				},
 			})
 
-			setHealthyUser(mm.unifiedExchangeAdaptor)
 			mm.unifiedExchangeAdaptor.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
 
-			mm.rebalance(100)
+			mm.rebalance(100, &orderbook.OrderBook{})
 
 			problems := mm.problems()
 			if !reflect.DeepEqual(tt.expBotProblems, problems) {

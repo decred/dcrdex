@@ -1070,38 +1070,29 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 
 	orderInfos := make([]*dexOrderInfo, 0, len(requiredPlacements))
 
-	dexDeficiencies, cexDeficiencies = func() (dexDeficiencies, cexDeficiencies map[uint32]uint64) {
-		totalDEXRequired := make(map[uint32]uint64)
-		var totalCEXRequired uint64
-
-		totalDEXRequired[fromID] = fundingFees
-
-		for _, placement := range requiredPlacements {
-			if placement.lots == 0 {
-				continue
-			}
-
-			dexReq, cexReq := fundingReq(placement.rate, placement.lots, placement.counterTradeRate)
-			for assetID, v := range dexReq {
-				totalDEXRequired[assetID] += v
-			}
-			totalCEXRequired += cexReq
+	totalDEXRequired := make(map[uint32]uint64)
+	var totalCEXRequired uint64
+	totalDEXRequired[fromID] = fundingFees
+	for _, placement := range requiredPlacements {
+		if placement.lots == 0 {
+			continue
 		}
-
-		dexDeficiencies = make(map[uint32]uint64)
-		for assetID, v := range totalDEXRequired {
-			if remainingBalances[assetID] < v {
-				dexDeficiencies[assetID] = v - remainingBalances[assetID]
-			}
+		dexReq, cexReq := fundingReq(placement.rate, placement.lots, placement.counterTradeRate)
+		for assetID, v := range dexReq {
+			totalDEXRequired[assetID] += v
 		}
-
-		cexDeficiencies = make(map[uint32]uint64)
-		if remainingCEXBal < totalCEXRequired {
-			cexDeficiencies[toID] = totalCEXRequired - remainingCEXBal
+		totalCEXRequired += cexReq
+	}
+	dexDeficiencies = make(map[uint32]uint64)
+	for assetID, v := range totalDEXRequired {
+		if remainingBalances[assetID] < v {
+			dexDeficiencies[assetID] = v - remainingBalances[assetID]
 		}
-
-		return
-	}()
+	}
+	cexDeficiencies = make(map[uint32]uint64)
+	if remainingCEXBal < totalCEXRequired {
+		cexDeficiencies[toID] = totalCEXRequired - remainingCEXBal
+	}
 
 	if remainingBalances[fromFeeID] < fundingFees {
 		return nil, dexDeficiencies, cexDeficiencies, nil
@@ -2153,64 +2144,72 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 	return baseFeesInUnits + quoteFeesInUnits, nil
 }
 
-func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
-	doCancels := func(epoch *uint64, dexOrderBooked func(oid order.OrderID, sell bool) bool) bool {
-		u.balancesMtx.RLock()
-		defer u.balancesMtx.RUnlock()
+// tryCancelOrders cancels all booked DEX orders that are past the free cancel
+// threshold. If cancelCEXOrders is true, it will also cancel CEX orders. True
+// is returned if all orders have been cancelled. If cancelCEXOrders is false,
+// false will always be returned.
+func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uint64, dexOrderBooked func(oid order.OrderID, sell bool) bool, cancelCEXOrders bool) bool {
+	u.balancesMtx.RLock()
+	defer u.balancesMtx.RUnlock()
 
-		done := true
+	done := true
 
-		freeCancel := func(orderEpoch uint64) bool {
-			if epoch == nil {
-				return true
-			}
-			return *epoch-orderEpoch >= 2
+	freeCancel := func(orderEpoch uint64) bool {
+		if epoch == nil {
+			return true
 		}
-
-		for _, pendingOrder := range u.pendingDEXOrders {
-			o := pendingOrder.currentState().order
-
-			var oid order.OrderID
-			copy(oid[:], o.ID)
-			// We need to look in the order book to see if the cancel succeeded
-			// because the epoch summary note comes before the order statuses
-			// are updated.
-			if !dexOrderBooked(oid, o.Sell) {
-				continue
-			}
-
-			done = false
-			if freeCancel(o.Epoch) {
-				err := u.clientCore.Cancel(o.ID)
-				if err != nil {
-					u.log.Errorf("Error canceling order %s: %v", o.ID, err)
-				}
-			}
-		}
-
-		for _, pendingOrder := range u.pendingCEXOrders {
-			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-
-			tradeStatus, err := u.CEX.TradeStatus(ctx, pendingOrder.trade.ID, pendingOrder.trade.BaseID, pendingOrder.trade.QuoteID)
-			if err != nil {
-				u.log.Errorf("Error getting CEX trade status: %v", err)
-				continue
-			}
-			if tradeStatus.Complete {
-				continue
-			}
-
-			done = false
-			err = u.CEX.CancelTrade(ctx, u.baseID, u.quoteID, pendingOrder.trade.ID)
-			if err != nil {
-				u.log.Errorf("Error canceling CEX trade %s: %v", pendingOrder.trade.ID, err)
-			}
-		}
-
-		return done
+		return *epoch-orderEpoch >= 2
 	}
 
+	for _, pendingOrder := range u.pendingDEXOrders {
+		o := pendingOrder.currentState().order
+
+		var oid order.OrderID
+		copy(oid[:], o.ID)
+		// We need to look in the order book to see if the cancel succeeded
+		// because the epoch summary note comes before the order statuses
+		// are updated.
+		if !dexOrderBooked(oid, o.Sell) {
+			continue
+		}
+
+		done = false
+		if freeCancel(o.Epoch) {
+			err := u.clientCore.Cancel(o.ID)
+			if err != nil {
+				u.log.Errorf("Error canceling order %s: %v", o.ID, err)
+			}
+		}
+	}
+
+	if !cancelCEXOrders {
+		return false
+	}
+
+	for _, pendingOrder := range u.pendingCEXOrders {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		tradeStatus, err := u.CEX.TradeStatus(ctx, pendingOrder.trade.ID, pendingOrder.trade.BaseID, pendingOrder.trade.QuoteID)
+		if err != nil {
+			u.log.Errorf("Error getting CEX trade status: %v", err)
+			continue
+		}
+		if tradeStatus.Complete {
+			continue
+		}
+
+		done = false
+		err = u.CEX.CancelTrade(ctx, u.baseID, u.quoteID, pendingOrder.trade.ID)
+		if err != nil {
+			u.log.Errorf("Error canceling CEX trade %s: %v", pendingOrder.trade.ID, err)
+		}
+	}
+
+	return done
+}
+
+func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
 	// Use this in case the order book is not available.
 	orderAlwaysBooked := func(_ order.OrderID, _ bool) bool {
 		return true
@@ -2219,19 +2218,19 @@ func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
 	book, bookFeed, err := u.clientCore.SyncBook(u.host, u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("Error syncing book for cancellations: %v", err)
-		doCancels(nil, orderAlwaysBooked)
+		u.tryCancelOrders(ctx, nil, orderAlwaysBooked, true)
 		return
 	}
 
 	mktCfg, err := u.clientCore.ExchangeMarket(u.host, u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("Error getting market configuration: %v", err)
-		doCancels(nil, orderAlwaysBooked)
+		u.tryCancelOrders(ctx, nil, orderAlwaysBooked, true)
 		return
 	}
 
 	currentEpoch := book.CurrentEpoch()
-	if doCancels(&currentEpoch, book.OrderIsBooked) {
+	if u.tryCancelOrders(ctx, &currentEpoch, orderAlwaysBooked, true) {
 		return
 	}
 
@@ -2247,14 +2246,14 @@ func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
 			if n.Action == core.EpochMatchSummary {
 				payload := n.Payload.(*core.EpochMatchSummaryPayload)
 				currentEpoch := payload.Epoch + 1
-				if doCancels(&currentEpoch, book.OrderIsBooked) {
+				if u.tryCancelOrders(ctx, &currentEpoch, book.OrderIsBooked, true) {
 					return
 				}
 				timer.Reset(timeout)
 				i++
 			}
 		case <-timer.C:
-			doCancels(nil, orderAlwaysBooked)
+			u.tryCancelOrders(ctx, nil, orderAlwaysBooked, true)
 			return
 		}
 
@@ -3438,8 +3437,6 @@ func (u *unifiedExchangeAdaptor) updateCEXTradeError(err error) {
 
 // checkBotHealth returns true if the bot is healthy and can continue trading.
 func (u *unifiedExchangeAdaptor) checkBotHealth() bool {
-	user := u.clientCore.User()
-
 	var err error
 	var baseAssetNotSynced, baseAssetNoPeers, quoteAssetNotSynced, quoteAssetNoPeers, accountSuspended bool
 	defer u.updateBotProblems(func(problems *BotProblems) {
@@ -3471,37 +3468,30 @@ func (u *unifiedExchangeAdaptor) checkBotHealth() bool {
 		problems.AdditionalError = err
 	})
 
-	baseAsset, found := user.Assets[u.baseID]
-	if !found {
-		err = fmt.Errorf("base asset %d not found in user assets", u.baseID)
+	baseWallet := u.clientCore.WalletState(u.baseID)
+	if baseWallet == nil {
+		err = fmt.Errorf("base asset %d wallet not found", u.baseID)
 		return false
 	}
 
-	baseAssetNotSynced = !baseAsset.Wallet.Synced
-	baseAssetNoPeers = baseAsset.Wallet.PeerCount == 0
+	baseAssetNotSynced = !baseWallet.Synced
+	baseAssetNoPeers = baseWallet.PeerCount == 0
 
-	quoteAsset, found := user.Assets[u.quoteID]
-	if !found {
-		err = fmt.Errorf("quote asset %d not found in user assets", u.quoteID)
+	quoteWallet := u.clientCore.WalletState(u.quoteID)
+	if quoteWallet == nil {
+		err = fmt.Errorf("quote asset %d wallet not found", u.quoteID)
 		return false
 	}
-	quoteAssetNotSynced = !quoteAsset.Wallet.Synced
-	quoteAssetNoPeers = quoteAsset.Wallet.PeerCount == 0
 
-	exchange, found := user.Exchanges[u.host]
-	if !found {
-		err = fmt.Errorf("exchange %s not found in user exchanges", u.host)
+	quoteAssetNotSynced = !quoteWallet.Synced
+	quoteAssetNoPeers = quoteWallet.PeerCount == 0
+
+	exchange, err := u.clientCore.Exchange(u.host)
+	if err != nil {
+		err = fmt.Errorf("error getting exchange: %w", err)
 		return false
 	}
 	accountSuspended = exchange.Auth.EffectiveTier <= 0
-
-	u.updateBotProblems(func(problems *BotProblems) {
-		problems.NoWalletPeers[u.baseID] = baseAssetNoPeers
-		problems.NoWalletPeers[u.quoteID] = quoteAssetNoPeers
-		problems.WalletNotSynced[u.baseID] = baseAssetNotSynced
-		problems.WalletNotSynced[u.quoteID] = quoteAssetNotSynced
-		problems.AccountSuspended = accountSuspended
-	})
 
 	return !(baseAssetNotSynced || baseAssetNoPeers || quoteAssetNotSynced || quoteAssetNoPeers || accountSuspended)
 }

@@ -6,8 +6,6 @@ package core
 import (
 	"errors"
 	"fmt"
-
-	"decred.org/dcrdex/dex/msgjson"
 )
 
 // Error codes here are used on the frontend.
@@ -110,32 +108,8 @@ func UnwrapErr(err error) error {
 }
 
 var (
-	ErrOrderQtyTooHigh  = errors.New("user order limit exceeded")
 	ErrAccountSuspended = errors.New("may not trade while account is suspended")
 )
-
-var serverErrsMap = map[int]error{
-	msgjson.OrderQuantityTooHigh: ErrOrderQtyTooHigh,
-}
-
-// mapServerError maps an error sent in a server response to a client core
-// error.
-func mapServerError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	var mErr *msgjson.Error
-	if !errors.As(err, &mErr) {
-		return err
-	}
-
-	if mappedErr, found := serverErrsMap[mErr.Code]; found {
-		return mappedErr
-	}
-
-	return err
-}
 
 // WalletNoPeersError should be returned when a wallet has no network peers.
 type WalletNoPeersError struct {

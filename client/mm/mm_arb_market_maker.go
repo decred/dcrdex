@@ -13,6 +13,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
@@ -256,7 +257,7 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement, ce
 			}
 
 			if !filled {
-				cexTooShallow[map[bool]string{true: "sell", false: "buy"}[!sellOnDEX]] = true
+				cexTooShallow[sellStr(!sellOnDEX)] = true
 				a.log.Infof("CEX %s side has < %s on the orderbook.", map[bool]string{true: "sell", false: "buy"}[!sellOnDEX], a.fmtBase(cumulativeCEXDepth))
 				newPlacements = append(newPlacements, &multiTradePlacement{
 					rate: 0,
@@ -352,7 +353,7 @@ func (a *arbMarketMaker) updateBotLoopProblems(buyErr, sellErr, determinePlaceme
 // and potentially needed withdrawals and deposits, and finally cancel any
 // trades on the CEX that have been open for more than the number of epochs
 // specified in the config.
-func (a *arbMarketMaker) rebalance(epoch uint64) {
+func (a *arbMarketMaker) rebalance(epoch uint64, book *orderbook.OrderBook) {
 	if !a.rebalanceRunning.CompareAndSwap(false, true) {
 		return
 	}
@@ -378,11 +379,17 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 		return
 	}
 
+	var buyErr, sellErr, determinePlacementsErr error
+	var dexDefs, cexDefs map[uint32]uint64
+	var cexTooShallow map[string]bool
+	defer func() {
+		a.updateBotLoopProblems(buyErr, sellErr, determinePlacementsErr, cexTooShallow, dexDefs, cexDefs)
+	}()
+
 	buyOrders, sellOrders, cexTooShallow, determinePlacementsErr := a.ordersToPlace()
 	if determinePlacementsErr != nil {
-		numBuyOrders := len(a.cfg().BuyPlacements)
-		numSellOrders := len(a.cfg().SellPlacements)
-		buyOrders, sellOrders = clearAllOrders(numBuyOrders, numSellOrders)
+		a.tryCancelOrders(a.ctx, &epoch, book.OrderIsBooked, false)
+		return
 	}
 
 	buys, buyDEXDefs, buyCEXDefs, buyErr := a.multiTrade(buyOrders, false, a.cfg().DriftTolerance, currEpoch)
@@ -399,8 +406,8 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 		a.matchesMtx.Unlock()
 	}
 
-	dexDefs := make(map[uint32]uint64)
-	cexDefs := make(map[uint32]uint64)
+	dexDefs = make(map[uint32]uint64)
+	cexDefs = make(map[uint32]uint64)
 	for assetID, def := range buyDEXDefs {
 		dexDefs[assetID] += def
 	}
@@ -496,7 +503,7 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 			case ni := <-bookFeed.Next():
 				switch epoch := ni.Payload.(type) {
 				case *core.ResolvedEpoch:
-					a.rebalance(epoch.Current)
+					a.rebalance(epoch.Current, book)
 				}
 			case <-ctx.Done():
 				return

@@ -6,6 +6,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/dex/msgjson"
 )
 
 // steppedRate rounds the rate to the nearest integer multiple of the step.
@@ -58,7 +59,8 @@ func updateBotProblemsBasedOnError(problems *BotProblems, err error) bool {
 		return true
 	}
 
-	if errors.Is(err, core.ErrOrderQtyTooHigh) {
+	var mErr *msgjson.Error
+	if errors.As(err, &mErr) && mErr.Code == msgjson.OrderQuantityTooHigh {
 		problems.UserLimitTooLow = true
 		return true
 	}
