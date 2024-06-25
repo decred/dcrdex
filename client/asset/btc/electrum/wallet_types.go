@@ -69,3 +69,21 @@ type Balance struct {
 	Unconfirmed float64 // will be negative for sends
 	Immature    float64
 }
+
+// TransactionResult is is an element of the array treturned by the
+// onchainhistory RPC.
+type TransactionResult struct {
+	BcBalance          string  `json:"bc_balance"`
+	BcValue            string  `json:"bc_value"`
+	Confirmations      int64   `json:"confirmations"`
+	Date               string  `json:"date"`
+	Fee                *string `json:"fee,omitempty"`
+	FeeSat             *int64  `json:"fee_sat,omitempty"`
+	Height             int64   `json:"height"`
+	Incoming           bool    `json:"incoming"`
+	Label              string  `json:"label"`
+	MonotonicTimestamp int64   `json:"monotonic_timestamp"`
+	Timestamp          int64   `json:"timestamp"`
+	TxID               string  `json:"txid"`
+	TxposInBlock       int64   `json:"txpos_in_block"`
+}

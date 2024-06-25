@@ -44,9 +44,6 @@ type Wallet interface {
 	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
 	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
 	fingerprint() (string, error)
-}
-
-type txLister interface {
 	listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error)
 }
 

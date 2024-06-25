@@ -38,6 +38,7 @@ const (
 	methodSignTransaction  = "signtransaction" // requires password for protected wallets
 	methodFreezeUTXO       = "freeze_utxo"
 	methodUnfreezeUTXO     = "unfreeze_utxo"
+	methodOnchainHistory   = "onchain_history"
 )
 
 // Commands gets a list of the supported wallet RPCs.
@@ -497,4 +498,22 @@ func (wc *WalletClient) GetPrivateKeys(ctx context.Context, walletPass, addr str
 		return "", errors.New("bad key")
 	}
 	return privSplit[1], nil
+}
+
+type onchainHistoryReq struct {
+	Wallet string `json:"wallet,omitempty"`
+	From   int64  `json:"from_height,omitempty"`
+	To     int64  `json:"to_height,omitempty"`
+}
+
+func (wc *WalletClient) OnchainHistory(ctx context.Context, from, to int64) ([]TransactionResult, error) {
+	// A balance summary is included but left out here.
+	var res struct {
+		Transactions []TransactionResult `json:"transactions"`
+	}
+	err := wc.Call(ctx, methodOnchainHistory, &onchainHistoryReq{Wallet: wc.walletFile, From: from, To: to}, &res)
+	if err != nil {
+		return nil, err
+	}
+	return res.Transactions, nil
 }
