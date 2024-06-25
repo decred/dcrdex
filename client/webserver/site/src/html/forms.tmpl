@@ -52,7 +52,7 @@
 {{end}}
 
 {{define "walletCfgGuideTemplate"}}
-<a data-tmpl="walletCfgGuide" class="d-flex justify-content-start align-items-center pt-2 pointer hoverbg" target="_blank">
+<a data-tmpl="walletCfgGuide" class="d-flex justify-content-start align-items-center pt-2 mx-3 pointer hoverbg" target="_blank">
   <span class="ico-textfile me-2"></span>
   <span class="pointer">[[[configuration guide]]]</span>
 </a>
@@ -158,41 +158,40 @@
   <div data-tmpl="addDexHdr" class="fs26 d-flex align-items-center justify-content-center">[[[Add a DEX]]]</div>
   <div data-tmpl="updateDexHdr" class="fs26 d-hide">[[[update dex host]]]</div>
 </div>
-<div data-tmpl="pickServerMsg" class="fs20 pt-2 mt-2 px-3 border-top">
+<div data-tmpl="pickServerMsg" class="fs20 mt-2 border-top">
   [[[Pick a server]]]
 </div>
-<div data-tmpl="knownXCs" class="flex-stretch-column mt-2 px-3">
+<div data-tmpl="knownXCs" class="flex-stretch-column">
   {{range .KnownExchanges}}
     <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
   {{end}}
 </div>
-<div data-tmpl="skipRegistrationBox" class="fs14 mt-2 px-3">
-  <hr class="dashed my-2">
+<div data-tmpl="skipRegistrationBox" class="fs14">
   <input class="form-check-input" type="checkbox" data-tmpl="skipRegistration" id="skipRegistration">
   <label for="skipRegistration" class="ps-1">[[[Skip Registration]]]</label>
 </div>
-<div data-tmpl="showCustom" class="mt-2 px-3">
+<div data-tmpl="showCustom">
   <div class="px-1 mb-2 fs14 pointer d-flex justify-content-start align-items-center {{if eq (len .KnownExchanges) 0}}d-hide{{end}}">
     <span class="ico-plus fs11"></span>
     <div class="ps-2">[[[add a different server]]]</div>
   </div>
 </div>
 
-<div data-tmpl="customBox" class="mt-2 pt-2 mb-3 px-3 border-top">
+<div data-tmpl="customBox" class="mt-2 border-top">
   <div class="fs20 " data-tmpl="addCustomMsg">[[[Add a custom server]]]</div>
   <div class="mb-3">
     <label for="dexAddr">[[[DEX Address]]]</label>
     <input type="text" data-tmpl="addr" id="dexAddr">
   </div>
-  <div class="mt-2 mb-3 fs14 d-hide" data-tmpl="needCert">
+  <div class="fs14 d-hide" data-tmpl="needCert">
     [[[reg_ssl_needed]]]
   </div>
   {{template "certPicker"}}
 </div>
-<div class="flex-stretch-column py-2 px-3 d-hide" data-tmpl="auth">
+<div class="flex-stretch-column d-hide" data-tmpl="auth">
   <button data-tmpl="submit" type="button" class="feature">[[[Submit]]]</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="err"></div>
+<div class="fs15 text-center d-hide text-danger text-break" data-tmpl="err"></div>
 {{end}}
 
 {{define "discoverAcctForm"}}
@@ -484,7 +483,6 @@
 {{end}}
 
 {{define "authorizeAccountImportForm"}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer"><span class="ico-cross"></span></div>
 <header>
   [[[Authorize Import]]]
@@ -529,7 +527,6 @@
 {{end}}
 
 {{define "cancelOrderForm"}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer"><span class="ico-cross"></span></div>
 <header>
   [[[:title:cancel_order]]]
@@ -547,7 +544,6 @@
 {{end}}
 
 {{define "accelerateForm"}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer"><span class="ico-cross"></span></div>
 <header>[[[:title:accelerate_order]]]</header>
 <div id="accelerateMainDiv">
@@ -566,12 +562,8 @@
       [[[acceleration_cost_msg]]]
     </div>
     <hr class="dashed mt-2">
-    <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
-      <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-        <label for="acceleratePass">[[[Password]]]</label>
-        <input type="password" id="acceleratePass" autocomplete="off">
-      </div>
-      <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
+    <div class="d-flex flex-row align-items-end justify-content-end pb-4">
+      <div class="col-12 pt-2">
         <button id="accelerateSubmit" type="button" class="go">[[[Submit]]]</button>
       </div>
     </div>

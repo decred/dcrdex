@@ -1,6 +1,5 @@
 {{define "dexsettings"}}
 {{template "top" .}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="py-5 overflow-y-auto">
   <section class="flex-stretch-column mw-425 mx-auto pb-3 pt-2">
     <div class="d-flex justify-content-start align-items-center">
@@ -62,7 +61,7 @@
             </div>
             <div class="col-6 text-end">
               <span id="penaltyComps"></span>
-              <input id="penaltyCompInput" type="number" step="1" class="w-100 text-center d-hide fs14">
+              <input id="penaltyCompInput" type="number" step="1" class="micro thin text-center d-hide fs14">
             </div>
           </div>
           <div id="penaltyCompsErr" class="d-hide flex-center text-danger fs15"></div>
@@ -74,7 +73,7 @@
     </div>
     <div class="fs15 text-center d-hide text-danger text-break pt-3 mt-3 px-3 border-top" id="errMsg"></div>
     <div class="settings mt-3 border-top">
-      <div class="{{if .Exchange.ViewOnly}}d-hide{{end}}">
+      <div class="border-bottom px-3 py-2 {{if .Exchange.ViewOnly}}d-hide{{end}}">
         <button id="exportDexBtn">[[[Export Account]]]</button>
       </div>
       <div class="border-bottom px-3 py-2">
