@@ -352,6 +352,10 @@
             {{- /* TRANSACTION HISTORY */ -}}
             <section id="txHistoryBox" class="flex-stretch-column">
               <h4 class="m-3">[[[asset_name tx_history]]]</h4>
+              <span class="mx-3" id="hideMixTxs">
+                <input type="checkbox" id="hideMixTxsCheckbox" class="form-check-input">
+                <label for="hideMixTxsCheckbox" class="form-check-label">[[[Hide Mixing Transactions]]]</label>
+              </span>
               <div id="txHistoryTableContainer" class="flex-stretch-column pb-3">
                 <table id="txHistoryTable" class="row-border border-top">
                   <thead>
