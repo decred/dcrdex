@@ -1059,11 +1059,13 @@ func (m *multiRPCClient) withAll(
 ) error {
 
 	var atLeastOne bool
-	var errs []error
-	for _, p := range m.nonceProviderList() {
+	var errs []string
+	providers := m.nonceProviderList()
+	for _, p := range providers {
 		if p.failed() {
 			continue
 		}
+
 		ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 		err := f(ctx, p)
 		cancel()
@@ -1089,6 +1091,7 @@ func (m *multiRPCClient) withAll(
 		if discarded {
 			atLeastOne = true
 		} else {
+			errs = append(errs, err.Error())
 			m.log.Warnf("Failed request from %q: %v", p, err)
 		}
 	}
@@ -1096,18 +1099,18 @@ func (m *multiRPCClient) withAll(
 	if atLeastOne {
 		return nil
 	}
+
+	// err will be nil if all providers were already in a failed state or if
+	// atLeastOne is false.
 	if errs == nil {
 		return errors.New("all providers in a failed state")
 	}
-	// TODO: use errors.Join(errs) when Go 1.20 is the min
-	var b []byte
-	for i, err := range errs {
-		if i > 0 {
-			b = append(b, '\n')
-		}
-		b = append(b, err.Error()...)
+
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "\n"))
 	}
-	return errors.New(string(b))
+
+	return nil
 }
 
 // withAny runs the provider function against known providers in random order

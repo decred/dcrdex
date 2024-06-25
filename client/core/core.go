@@ -6471,7 +6471,7 @@ func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host st
 }
 
 func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemScripts []dex.Bytes, dc *dexConnection, redeemAddr string,
-	form *TradeForm, lots, redemptionRefundLots uint64, fundingFees uint64, assetConfigs *assetSet, mktConf *msgjson.Market, errCloser *dex.ErrorCloser) (*tradeRequest, error) {
+	form *TradeForm, redemptionRefundLots uint64, fundingFees uint64, assetConfigs *assetSet, mktConf *msgjson.Market, errCloser *dex.ErrorCloser) (*tradeRequest, error) {
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
@@ -6761,7 +6761,7 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 	})
 
 	tradeRequest, err := c.createTradeRequest(wallets, coins, redeemScripts, dc, redeemAddr, form,
-		lots, redemptionRefundLots, fundingFees, assetConfigs, mktConf, errCloser)
+		redemptionRefundLots, fundingFees, assetConfigs, mktConf, errCloser)
 	if err != nil {
 		return nil, err
 	}
@@ -6872,7 +6872,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 			fees = fundingFees
 		}
 		req, err := c.createTradeRequest(wallets, coins, allRedeemScripts[i], dc, redeemAddresses[i], tradeForm,
-			orderValues[i].MaxSwapCount, orderValues[i].MaxSwapCount, fees, assetConfigs, mktConf, errClosers[i])
+			orderValues[i].MaxSwapCount, fees, assetConfigs, mktConf, errClosers[i])
 		if err != nil {
 			return nil, err
 		}
