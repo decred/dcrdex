@@ -440,14 +440,13 @@ func (a *simpleArbMarketMaker) tryTransfers(currEpoch uint64) (actionTaken bool,
 }
 
 func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
-
 	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(a.ctx, a.baseID, a.quoteID)
+	err = a.cex.SubscribeMarket(ctx, a.baseID, a.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
 	}
@@ -465,7 +464,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 				case *core.ResolvedEpoch:
 					a.rebalance(epoch.Current)
 				}
-			case <-a.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -478,7 +477,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 			select {
 			case update := <-tradeUpdates:
 				a.handleCEXTradeUpdate(update)
-			case <-a.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -492,7 +491,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 			select {
 			case n := <-orderUpdates:
 				a.handleDEXOrderUpdate(n)
-			case <-a.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}

@@ -474,7 +474,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 				case *core.ResolvedEpoch:
 					m.rebalance(epoch.Current)
 				}
-			case <-m.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
