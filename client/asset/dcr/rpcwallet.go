@@ -252,17 +252,6 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		return false, fmt.Errorf("TLS certificate read error: %w", err)
 	}
 
-	var allOk bool
-	defer func() {
-		if allOk { // update the account names as the last step
-			w.accountsV.Store(XCWalletAccounts{
-				PrimaryAccount: rpcCfg.PrimaryAccount,
-				UnmixedAccount: rpcCfg.UnmixedAccount,
-				TradingAccount: rpcCfg.TradingAccount,
-			})
-		}
-	}()
-
 	currentAccts := w.accountsV.Load().(XCWalletAccounts)
 
 	if rpcCfg.RPCUser == w.rpcCfg.User &&
@@ -272,66 +261,37 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 		rpcCfg.PrimaryAccount == currentAccts.PrimaryAccount &&
 		rpcCfg.UnmixedAccount == currentAccts.UnmixedAccount &&
 		rpcCfg.TradingAccount == currentAccts.TradingAccount {
-		allOk = true
 		return false, nil
 	}
 
-	newWallet, err := newRPCWallet(cfg.Settings, w.log, net)
-	if err != nil {
-		return false, err
+	return true, nil
+}
+
+// IsMixingTx returns whether or not a transaction is a mixing related
+// transaction, which happens when funds are moved into the mixed account.
+func (w *rpcWallet) IsMixingTx(ctx context.Context, msgTx *wire.MsgTx) (isMix bool, amt, fees uint64, err error) {
+	currentAccts := w.accountsV.Load().(XCWalletAccounts)
+
+	if currentAccts.UnmixedAccount == "" {
+		return false, 0, 0, nil
 	}
 
-	err = newWallet.Connect(ctx)
-	if err != nil {
-		return false, fmt.Errorf("error connecting new wallet")
-	}
-
-	defer func() {
-		if !allOk {
-			newWallet.Disconnect()
+	acctOwnsAddress := func(addr stdaddr.Address) (bool, string, error) {
+		va, err := w.rpcClient.ValidateAddress(ctx, addr)
+		if err != nil {
+			return false, "", err
 		}
-	}()
-
-	for _, acctName := range []string{rpcCfg.PrimaryAccount, rpcCfg.TradingAccount, rpcCfg.UnmixedAccount} {
-		if acctName == "" {
-			continue
+		if !va.IsMine {
+			return false, "", nil
 		}
-		if _, err := newWallet.AccountUnlocked(ctx, acctName); err != nil {
-			return false, fmt.Errorf("error checking lock status on account %q: %v", acctName, err)
-		}
+		return true, va.Account, nil
 	}
 
-	a, err := stdaddr.DecodeAddress(currentAddress, w.chainParams)
-	if err != nil {
-		return false, err
-	}
-	var depositAccount string
-	if rpcCfg.UnmixedAccount != "" {
-		depositAccount = rpcCfg.UnmixedAccount
-	} else {
-		depositAccount = rpcCfg.PrimaryAccount
-	}
-	owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
-	if err != nil {
-		return false, err
-	}
-	if !owns {
-		if walletCfg.ActivelyUsed {
-			return false, errors.New("cannot reconfigure to different wallet while there are active trades")
-		}
-		return true, nil
+	getTx := func(txHash *chainhash.Hash) (*WalletTransaction, error) {
+		return w.GetTransaction(ctx, txHash)
 	}
 
-	w.rpcMtx.Lock()
-	defer w.rpcMtx.Unlock()
-	w.chainParams = newWallet.chainParams
-	w.rpcCfg = newWallet.rpcCfg
-	w.spvMode = newWallet.spvMode
-	w.rpcConnector = newWallet.rpcConnector
-	w.rpcClient = newWallet.rpcClient
-
-	allOk = true
-	return false, nil
+	return isMixingTx(msgTx, acctOwnsAddress, getTx, currentAccts.UnmixedAccount, currentAccts.TradingAccount, currentAccts.PrimaryAccount, w.chainParams)
 }
 
 func (w *rpcWallet) handleRPCClientReconnection(ctx context.Context) {
@@ -532,6 +492,101 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, addr stdaddr.Address
 	}
 
 	return va.IsMine && va.Account == acctName, nil
+}
+
+// WalletOwnsAddress returns whether any of the account controlled by this
+// wallet owns the specified address.
+func (w *rpcWallet) WalletOwnsAddress(ctx context.Context, addr stdaddr.Address) (bool, error) {
+	va, err := w.rpcClient.ValidateAddress(ctx, addr)
+	if err != nil {
+		return false, translateRPCCancelErr(err)
+	}
+
+	return va.IsMine, nil
+}
+
+// rpcWalletAddresses is a struct for holding an address from each of the
+// primary, trading, and unmixed accounts. This is used to uniquely identify
+// a wallet configuration.
+type rpcWalletAddresses struct {
+	PrimaryAccount string `json:"primaryAccount"`
+	UnmixedAccount string `json:"unmixedAccount"`
+	TradingAccount string `json:"tradingAccount"`
+}
+
+// addressesMatchAccounts returns true of the addresses are owned by the
+// currently configured accounts.
+func (w *rpcWallet) addressesMatchAccounts(ctx context.Context, addresses *rpcWalletAddresses) (bool, error) {
+	accounts := w.Accounts()
+
+	accountMatches := func(account, address string) (bool, error) {
+		if address == "" != (account == "") {
+			return false, nil
+		}
+
+		if address == "" {
+			return true, nil
+		}
+
+		addr, err := stdaddr.DecodeAddress(address, w.chainParams)
+		if err != nil {
+			return false, err
+		}
+
+		return w.AccountOwnsAddress(ctx, addr, account)
+	}
+
+	if matches, err := accountMatches(accounts.PrimaryAccount, addresses.PrimaryAccount); err != nil || !matches {
+		return false, err
+	}
+
+	if matches, err := accountMatches(accounts.TradingAccount, addresses.TradingAccount); err != nil || !matches {
+		return false, err
+	}
+
+	if matches, err := accountMatches(accounts.UnmixedAccount, addresses.UnmixedAccount); err != nil || !matches {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// accountAddresses returns an address owned by each of the currently
+// configured accounts.
+func (w *rpcWallet) accountAddresses(ctx context.Context) (*rpcWalletAddresses, error) {
+	accounts := w.Accounts()
+
+	var primaryAcctAddress, tradingAccountAddress, unmixedAccountAddress string
+
+	if accounts.PrimaryAccount != "" {
+		addr, err := w.ExternalAddress(ctx, accounts.PrimaryAccount)
+		if err != nil {
+			return nil, err
+		}
+		primaryAcctAddress = addr.String()
+	}
+
+	if accounts.TradingAccount != "" {
+		addr, err := w.ExternalAddress(ctx, accounts.TradingAccount)
+		if err != nil {
+			return nil, err
+		}
+		tradingAccountAddress = addr.String()
+	}
+
+	if accounts.UnmixedAccount != "" {
+		addr, err := w.ExternalAddress(ctx, accounts.UnmixedAccount)
+		if err != nil {
+			return nil, err
+		}
+		unmixedAccountAddress = addr.String()
+	}
+
+	return &rpcWalletAddresses{
+		PrimaryAccount: primaryAcctAddress,
+		TradingAccount: tradingAccountAddress,
+		UnmixedAccount: unmixedAccountAddress,
+	}, nil
 }
 
 // AccountBalance returns the balance breakdown for the specified account.
