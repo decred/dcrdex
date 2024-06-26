@@ -6040,39 +6040,42 @@ func (btc *intermediaryWallet) WalletTransaction(ctx context.Context, txID strin
 		}
 	}
 
-	txs, err := btc.TxHistory(1, &txID, false)
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
+	}
+
+	tx, err := txHistoryDB.GetTx(txID)
 	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 		return nil, err
 	}
-
-	var tx *asset.WalletTransaction
-	if len(txs) > 0 {
-		tx = txs[0]
+	if tx != nil && tx.Confirmed {
+		return tx, nil
 	}
+
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding txid %s: %w", txID, err)
+	}
+	gtr, err := btc.node.getWalletTransaction(txHash)
+	if err != nil {
+		return nil, fmt.Errorf("error getting transaction %s: %w", txID, err)
+	}
+
+	var blockHeight uint32
+	if gtr.BlockHash != "" {
+		blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding block hash %s: %w", gtr.BlockHash, err)
+		}
+		height, err := btc.tipRedeemer.getBlockHeight(blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error getting block height for %s: %w", blockHash, err)
+		}
+		blockHeight = uint32(height)
+	}
+
 	if tx == nil {
-		txHash, err := chainhash.NewHashFromStr(txID)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding txid %s: %w", txID, err)
-		}
-
-		gtr, err := btc.node.getWalletTransaction(txHash)
-		if err != nil {
-			return nil, fmt.Errorf("error getting transaction %s: %w", txID, err)
-		}
-
-		var blockHeight uint32
-		if gtr.BlockHash != "" {
-			blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
-			if err != nil {
-				return nil, fmt.Errorf("error decoding block hash %s: %w", gtr.BlockHash, err)
-			}
-			height, err := btc.tipRedeemer.getBlockHeight(blockHash)
-			if err != nil {
-				return nil, fmt.Errorf("error getting block height for %s: %w", blockHash, err)
-			}
-			blockHeight = uint32(height)
-		}
-
 		tx, err = btc.idUnknownTx(&ListTransactionsResult{
 			BlockHeight: blockHeight,
 			BlockTime:   gtr.BlockTime,
@@ -6081,12 +6084,11 @@ func (btc *intermediaryWallet) WalletTransaction(ctx context.Context, txID strin
 		if err != nil {
 			return nil, fmt.Errorf("error identifying transaction: %v", err)
 		}
-
-		tx.BlockNumber = uint64(blockHeight)
-		tx.Timestamp = gtr.BlockTime
-		tx.Confirmed = blockHeight > 0
 	}
 
+	tx.BlockNumber = uint64(blockHeight)
+	tx.Timestamp = gtr.BlockTime
+	tx.Confirmed = blockHeight > 0
 	return tx, nil
 }
 

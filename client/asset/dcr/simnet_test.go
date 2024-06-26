@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -850,11 +851,13 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWallet)
 		t.Fatalf("error redeeming: %v", err)
 	}
 
-	confirmSync := func(originalBalance uint64, coinID []byte) error {
+	confirmSync := func(originalBalance uint64, coinID []byte) {
+		t.Helper()
+
 		for i := 0; i < 10; i++ {
 			balance, err := toWallet.Balance()
 			if err != nil {
-				return fmt.Errorf("error getting balance: %v", err)
+				t.Fatalf("error getting balance: %v", err)
 			}
 			balDiff := balance.Available - originalBalance
 
@@ -866,8 +869,8 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWallet)
 				if wt.Type != asset.Receive {
 					txDiff -= wt.Fees
 				}
-			} else {
-				fmt.Printf("error getting wallet transaction: %v\n", err)
+			} else if !errors.Is(err, asset.CoinNotFoundError) {
+				t.Fatal(err)
 			}
 
 			balanceChanged := balance.Available != originalBalance
@@ -875,32 +878,28 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWallet)
 				if balanceChanged && !confirmed {
 					for j := 0; j < 20; j++ {
 						if wt, err := toWallet.WalletTransaction(context.Background(), hex.EncodeToString(coinID)); err == nil && wt.Confirmed {
-							return fmt.Errorf("num tried: %d", j)
-						} else {
-							fmt.Printf("error getting wallet transaction: %v\n", err)
+							t.Fatalf("took %d seconds after balance changed before tx was confirmed", j/2)
 						}
 						time.Sleep(500 * time.Millisecond)
 					}
 				}
-				return fmt.Errorf("confirmed status does not match balance change. confirmed = %v, balance changed = %d", confirmed, balDiff)
+				t.Fatalf("confirmed status does not match balance change. confirmed = %v, balance changed = %d", confirmed, balDiff)
 			}
+
 			if confirmed {
 				if balDiff != txDiff {
-					return fmt.Errorf("balance and transaction diffs do not match. balance diff = %d, tx diff = %d", balDiff, txDiff)
+					t.Fatalf("balance and transaction diffs do not match. balance diff = %d, tx diff = %d", balDiff, txDiff)
 				}
-				return nil
+				return
 			}
 
 			time.Sleep(5 * time.Second)
 		}
 
-		return fmt.Errorf("timed out waiting for balance and transaction to sync")
+		t.Fatal("timed out waiting for balance and transaction to sync")
 	}
 
-	err = confirmSync(balance.Available, out.ID())
-	if err != nil {
-		t.Fatalf("error confirming sync: %v", err)
-	}
+	confirmSync(balance.Available, out.ID())
 
 	balance, err = toWallet.Balance()
 	if err != nil {
@@ -917,8 +916,5 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWallet)
 		t.Fatalf("error sending: %v", err)
 	}
 
-	err = confirmSync(balance.Available, coin.ID())
-	if err != nil {
-		t.Fatalf("error confirming sync: %v", err)
-	}
+	confirmSync(balance.Available, coin.ID())
 }
