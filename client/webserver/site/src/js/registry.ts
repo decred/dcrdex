@@ -1097,12 +1097,6 @@ export interface TicketStats {
   queued: number
 }
 
-export interface FundsMixingStats {
-  enabled: boolean
-  server: string
-  isMixing: boolean
-}
-
 export interface TicketStakingStatus {
   ticketPrice: number
   votingSubsidy: number

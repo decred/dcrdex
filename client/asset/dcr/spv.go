@@ -1047,7 +1047,7 @@ func (w *spvWallet) rescan(ctx context.Context, fromHeight int32, c chan wallet.
 
 // PurchaseTickets purchases n tickets, tells the provided vspd to monitor the
 // ticket, and pays the vsp fee.
-func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, isMixingEnabled bool) ([]*asset.Ticket, error) {
+func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, mixing bool) ([]*asset.Ticket, error) {
 	vspClient, err := w.newVSPClient(vspHost, vspPubKey, w.log.SubLogger("VSP"))
 	if err != nil {
 		return nil, err
@@ -1057,9 +1057,10 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 		Count:                n,
 		VSPFeePaymentProcess: vspClient.Process,
 		VSPFeePercent:        vspClient.FeePercentage,
+		Mixing:               mixing,
 	}
 
-	if isMixingEnabled {
+	if mixing {
 		accts := w.Accounts()
 		mixedAccountNum, err := w.AccountNumber(ctx, accts.PrimaryAccount)
 		if err != nil {

@@ -3442,8 +3442,6 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}()
 
 	c.notify(newWalletStateNote(state))
-
-	c.resumeMixing(crypter, []*xcWallet{wallet})
 	return nil
 }
 
@@ -5080,7 +5078,6 @@ func (c *Core) Login(pw []byte) error {
 		c.connectWallets() // initialize reserves
 		c.notify(newLoginNote("Resuming active trades..."))
 		c.resolveActiveTrades(crypter)
-		c.resumeMixing(crypter, c.xcWallets())
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
 
@@ -8146,31 +8143,6 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	}
 
 	return trackers, nil
-}
-
-// resumeMixing unlocks and starts mixing on any FundsMixer that is enabled.
-func (c *Core) resumeMixing(crypter encrypt.Crypter, wallets []*xcWallet) {
-	for _, w := range wallets {
-		if mixer, is := w.Wallet.(asset.FundsMixer); is {
-			stats, err := mixer.FundsMixingStats()
-			if err != nil {
-				c.log.Errorf("FundsMixingStats error during login: %v", err)
-				continue
-			}
-			if !stats.Enabled || stats.IsMixing {
-				continue
-			}
-			if !w.unlocked() {
-				if err := w.Unlock(crypter); err != nil {
-					c.log.Errorf("Error unlocking mixing wallet on initialization: %v", err)
-					continue
-				}
-			}
-			if err := mixer.StartFundsMixer(c.ctx); err != nil {
-				c.log.Errorf("Error starting funds mixer on initialization: %v", err)
-			}
-		}
-	}
 }
 
 // loadDBTrades load's the active trades from the db, populates the trade's
@@ -11366,51 +11338,6 @@ func (c *Core) ConfigureFundsMixer(assetID uint32, isMixerEnabled bool) error {
 		return err
 	}
 	return mw.ConfigureFundsMixer(isMixerEnabled)
-}
-
-// StartFundsMixer starts the funds mixer. This will error if the wallet
-// does not allow starting or stopping the mixer or if the mixer was already
-// started.
-func (c *Core) StartFundsMixer(appPW []byte, assetID uint32) error {
-	w, mw, err := c.mixingWallet(assetID)
-	if err != nil {
-		return err
-	}
-	if !w.unlocked() {
-		crypter, err := c.encryptionKey(appPW)
-		if err != nil {
-			return fmt.Errorf("password error: %w", err)
-		}
-		defer crypter.Close()
-		err = c.connectAndUnlock(crypter, w)
-		if err != nil {
-			return fmt.Errorf("unlock error: %w", err)
-		}
-	}
-	return mw.StartFundsMixer(c.ctx)
-}
-
-// StopFundsMixer stops the funds mixer. This will error if the wallet does
-// not allow starting or stopping the mixer or if the mixer was not already
-// running.
-func (c *Core) StopFundsMixer(assetID uint32) error {
-	_, mw, err := c.mixingWallet(assetID)
-	if err != nil {
-		return err
-	}
-	mw.StopFundsMixer()
-	return nil
-}
-
-// DisableFundsMixer disables the funds mixer and moves all funds to the
-// default account. The wallet will need to be re-configured to re-enable
-// mixing.
-func (c *Core) DisableFundsMixer(assetID uint32) error {
-	_, mw, err := c.mixingWallet(assetID)
-	if err != nil {
-		return err
-	}
-	return mw.DisableFundsMixer()
 }
 
 // NetworkFeeRate generates a network tx fee rate for the specified asset.

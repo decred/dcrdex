@@ -7,8 +7,7 @@ import {
   UnlockWalletForm,
   DepositAddress,
   bind as bindForm,
-  showSuccess,
-  CertificatePicker
+  showSuccess
 } from './forms'
 import State from './state'
 import * as intl from './locales'
@@ -42,7 +41,6 @@ import {
   TxHistoryResult,
   TransactionNote,
   WalletTransaction,
-  FundsMixingStats,
   FeeState
 } from './registry'
 import { CoinExplorers } from './coinexplorers'
@@ -205,7 +203,6 @@ interface TicketPagination {
 }
 
 interface WalletsPageData {
-  promptProvider?: number
   goBack?: string
 }
 
@@ -242,9 +239,8 @@ export default class WalletsPage extends BasePage {
   ticketPage: TicketPagination
   oldestTx: WalletTransaction | undefined
   currTx: WalletTransaction | undefined
-  mixerStatus: FundsMixingStats | null
+  mixing: boolean
   mixerToggle: AniToggle
-  mixCertPicker: CertificatePicker
   stampers: PageElement[]
   secondTicker: number
 
@@ -366,19 +362,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.ticketHistoryPrevPage, 'click', () => { this.prevTicketPage() })
     Doc.bind(page.setVotes, 'click', () => { this.showSetVotesDialog() })
     Doc.bind(page.purchaseTicketsErrCloser, 'click', () => { Doc.hide(page.purchaseTicketsErrBox) })
-    bindForm(page.mixerPWForm, page.mixerPWSubmit, () => { this.startMixerWithPW() })
-    Doc.bind(page.enablePrivacyButton, 'click', () => { this.enablePrivacyDefaultSettings() })
-    Doc.bind(page.configureMixer, 'click', () => { this.showPrivacyConfiguration(false) })
-    Doc.bind(page.mixAddrEdit, 'click', () => { this.showMixServerInput() })
-    bindForm(page.mixerConfigForm, page.mixConfigSubmit, () => { this.submitCustomMixerConfig() })
-    Doc.bind(page.reconfigureMixer, 'click', () => { this.showPrivacyConfiguration(true) })
-    Doc.bind(page.mixerDisable, 'click', () => { this.disableMixer() })
     Doc.bind(page.privacyInfoBttn, 'click', () => { this.showForm(page.mixingInfo) })
-    Doc.bind(page.mixingOffGo, 'click', () => { this.turnPrivacyOff() })
-    Doc.bind(page.mixingOffNo, 'click', () => { this.closePopups() })
-    Doc.bind(page.needsProviderBttn, 'click', () => { this.promptProvider(this.selectedAssetID) })
-
-    this.mixCertPicker = new CertificatePicker(page.mixAddrInputBox)
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -438,12 +422,6 @@ export default class WalletsPage extends BasePage {
     })
 
     const firstAsset = this.sortAssetButtons()
-
-    if (data?.promptProvider) {
-      this.promptProvider(data.promptProvider)
-      return
-    }
-
     let selectedAsset = firstAsset.id
     const assetIDStr = State.fetchLocal(State.selectedAssetLK)
     if (assetIDStr) selectedAsset = Number(assetIDStr)
@@ -990,13 +968,6 @@ export default class WalletsPage extends BasePage {
     for (const p of [a, b, c, d]) await p
   }
 
-  async promptProvider (assetID: number) {
-    const { token } = app().assets[assetID]
-    assetID = token ? token.parentID : assetID
-    await this.setSelectedAsset(assetID)
-    this.showReconfig(assetID, { elevateProviders: true })
-  }
-
   updateDisplayedAsset (assetID: number) {
     if (assetID !== this.selectedAssetID) return
     const { symbol, wallet, name, token, unitInfo } = app().assets[assetID]
@@ -1453,14 +1424,14 @@ export default class WalletsPage extends BasePage {
 
   async updatePrivacy (assetID: number) {
     const disablePrivacy = app().extensionWallet(assetID)?.disablePrivacy
-    this.mixerStatus = null
+    this.mixing = false
     const { wallet } = app().assets[assetID]
     const page = this.page
-    Doc.hide(page.mixingBox, page.enableMixing, page.mixerOff, page.mixerOn)
+    Doc.hide(page.mixingBox, page.mixerOff, page.mixerOn)
     // TODO: Show special messaging if the asset supports mixing but not this
     // wallet type.
     if (disablePrivacy || !wallet?.running || (wallet.traits & traitFundsMixer) === 0) return
-    Doc.show(page.mixingBox, page.mixerSettings, page.mixerLoading)
+    Doc.show(page.mixingBox, page.mixerLoading)
     const res = await this.safePost('/api/mixingstats', { assetID })
     Doc.hide(page.mixerLoading)
     if (!app().checkResponse(res)) {
@@ -1469,162 +1440,26 @@ export default class WalletsPage extends BasePage {
       return
     }
 
-    const mixCfg = this.mixerStatus = res.stats as FundsMixingStats
-    if (!mixCfg.enabled) {
-      Doc.hide(page.mixerSettings)
-      Doc.show(page.enableMixing, page.mixerOff)
-      return
-    }
-
-    if (mixCfg.isMixing) Doc.show(page.mixerOn)
+    this.mixing = res.stats.enabled as boolean
+    if (this.mixing) Doc.show(page.mixerOn)
     else Doc.show(page.mixerOff)
-    this.mixerToggle.setState(mixCfg.isMixing)
-  }
-
-  async enablePrivacyDefaultSettings () {
-    const { page, selectedAssetID: assetID, mixerStatus } = this
-    if (!mixerStatus) return
-    const loaded = app().loading(page.mixingBox)
-    const cfg = { assetID: assetID, isMixingEnabled: page.enableMixing } as any
-    const res = await postJSON('/api/configuremixer', cfg)
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixingErr)
-      page.mixingErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    Doc.hide(page.enableMixing)
-    Doc.show(page.mixerSettings)
-    mixerStatus.enabled = true
-    this.updateMixerState(true)
-  }
-
-  showPrivacyConfiguration (showDisable: boolean) {
-    const { page, mixerStatus } = this
-    if (!mixerStatus) return
-    this.mixCertPicker.clearCertFile()
-    page.mixAddrInput.value = ''
-    page.mixAddrDisplay.textContent = mixerStatus.server
-    Doc.hide(page.mixAddrInputBox)
-    Doc.show(page.mixAddrDisplayBox)
-    Doc.setVis(showDisable, page.mixerDisable, page.mixerConfigureLabel)
-    Doc.setVis(!showDisable, page.mixerEnableLabel)
-    this.showForm(page.mixerConfigForm)
-  }
-
-  showMixServerInput () {
-    const page = this.page
-    Doc.show(page.mixAddrInputBox)
-    Doc.hide(page.mixAddrDisplayBox)
-  }
-
-  async submitCustomMixerConfig () {
-    const { page, selectedAssetID: assetID, mixerStatus } = this
-    if (!mixerStatus) return
-    Doc.hide(page.mixConfigErr)
-    const cfg = { assetID: assetID, isMixingEnabled: page.enableMixing } as any
-    const loaded = app().loading(page.mixerConfigForm)
-    const res = await postJSON('/api/configuremixer', cfg)
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixConfigErr)
-      page.mixConfigErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    Doc.show(page.mixerSettings)
-    Doc.hide(page.enableMixing)
-    this.closePopups()
-    this.updateMixerState(true)
+    this.mixerToggle.setState(this.mixing)
   }
 
   async updateMixerState (on: boolean) {
     const page = this.page
     Doc.hide(page.mixingErr)
-    if (!on) {
-      this.showForm(page.mixingOffConfirmationForm)
-      return
-    }
-    const { wallet } = app().assets[this.selectedAssetID]
-    // Do we need a password?
-    if (wallet.open || State.passwordIsCached()) {
-      const loaded = app().loading(page.mixingBox)
-      const res = await postJSON('/api/startmixer', { assetID: this.selectedAssetID })
-      loaded()
-      if (!app().checkResponse(res)) {
-        page.mixingErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-        Doc.show(page.mixingErr)
-        return
-      }
-      this.setMixerStateDisplay(true)
-      return
-    }
-    // Show mixer password form.
-    Doc.hide(page.mixerPWErr)
-    page.mixerPWInput.value = ''
-    await this.showForm(this.page.mixerPWForm)
-    this.page.mixerPWInput.focus()
-  }
-
-  async turnPrivacyOff () {
-    this.closePopups()
-    const page = this.page
     const loaded = app().loading(page.mixingBox)
-    const res = await postJSON('/api/stopmixer', { assetID: this.selectedAssetID })
+    const res = await postJSON('/api/configuremixer', { assetID: this.selectedAssetID, enabled: on })
     loaded()
     if (!app().checkResponse(res)) {
-      page.mixingErr.textContent = res.msg
+      page.mixingErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
       Doc.show(page.mixingErr)
       return
     }
-    this.setMixerStateDisplay(false)
-  }
-
-  setMixerStateDisplay (on: boolean) {
-    if (!this.mixerStatus) return
-    this.mixerStatus.isMixing = on
-    Doc.setVis(on, this.page.mixerOn)
-    Doc.setVis(!on, this.page.mixerOff)
+    Doc.setVis(on, page.mixerOn)
+    Doc.setVis(!on, page.mixerOff)
     this.mixerToggle.setState(on)
-  }
-
-  async startMixerWithPW () {
-    const page = this.page
-    Doc.hide(page.mixerPWErr)
-    const pw = page.mixerPWInput.value || ''
-    if (!pw) {
-      Doc.show(page.mixerPWErr)
-      page.mixerPWErr.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
-      return
-    }
-    const loaded = app().loading(page.mixerPWForm)
-    const res = await postJSON('/api/startmixer', { appPW: pw, assetID: this.selectedAssetID })
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixerPWErr)
-      page.mixerPWErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    this.setMixerStateDisplay(true)
-    this.closePopups()
-  }
-
-  async disableMixer () {
-    const { page, selectedAssetID: assetID, mixerStatus } = this
-    if (!mixerStatus) return
-    Doc.hide(page.mixConfigErr)
-    const loaded = app().loading(page.mixerConfigForm)
-    const res = await postJSON('/api/disablemixer', { assetID })
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixConfigErr)
-      page.mixConfigErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    mixerStatus.enabled = false
-    this.setMixerStateDisplay(false)
-    Doc.show(page.enableMixing)
-    Doc.hide(page.mixerSettings)
-    this.closePopups()
   }
 
   updateDisplayedAssetBalance (): void {
@@ -2439,7 +2274,7 @@ export default class WalletsPage extends BasePage {
       Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
-    if (this.data?.promptProvider && this.data?.goBack) {
+    if (this.data?.goBack) {
       app().loadPage(this.data.goBack)
       return
     }

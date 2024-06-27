@@ -336,19 +336,7 @@ func (c *TCore) FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error
 	return nil, nil
 }
 
-func (c *TCore) ConfigureFundsMixer(assetID uint32, isMixerEnabled bool) error {
-	return nil
-}
-
-func (c *TCore) StartFundsMixer(appPW []byte, assetID uint32) error {
-	return nil
-}
-
-func (c *TCore) StopFundsMixer(assetID uint32) error {
-	return nil
-}
-
-func (c *TCore) DisableFundsMixer(assetID uint32) error {
+func (c *TCore) ConfigureFundsMixer(assetID uint32, enabled bool) error {
 	return nil
 }
 

@@ -321,18 +321,7 @@
 
             {{- /* MIXING */ -}}
             <section id="mixingBox" class="position-relative d-flex align-items-stretch flex-column border">
-              <div id="enableMixing" class="w-100 d-flex align-items-stretch">
-                <div class="flex-grow-1 d-flex justify-content-between align-items-stretch">
-                  <div class="flex-center p-2">
-                    <span class="fs35 ico-secretagent me-2"></span>
-                    <span class="fs24">[[[Privacy]]]</span>
-                  </div>
-                  <button id="enablePrivacyButton" class="feature m-2">[[[Enable]]]</button>
-                </div>
-                <div id="privacyInfoBttn" class="flex-center p-3 fs24 ico-info border-start hoverbg pointer"></div>
-                <div id="configureMixer" class="flex-center p-3 fs24 ico-settings border-start hoverbg pointer"></div>
-              </div>
-              <div id="mixerSettings" class="w-100 d-flex align-items-stretch d-hide">
+              <div class="w-100 d-flex align-items-stretch">
                 <div class="p-2 flex-center fs35 ico-secretagent border-end"></div>
                 <div class="flex-center flex-grow-1">
                   <div id="mixerOn" class="flex-center fs20 d-hide">
@@ -344,10 +333,10 @@
                     <span class="">[[[Privacy off]]]</span>
                   </div>
                 </div>
+                <div id="privacyInfoBttn" class="flex-center p-3 fs24 ico-info border-start hoverbg pointer"></div>
                 <div class="p-2 border-start flex-center">
                   <div id="toggleMixer" class="anitoggle big"></div>
                 </div>
-                <div id="reconfigureMixer" class="ico-settings fs28 p-2 flex-center border-start hoverbg pointer"></div>
               </div>
               <div id="mixerLoading" class="fill-abs flex-center bodybg">
                 <span>
@@ -1125,55 +1114,6 @@
       </table>
     </form>
 
-    {{- /* START MIXER PASSWORD FORM */ -}}
-    <form id="mixerPWForm" class="d-flex align-items-stretch flex-column p-0 m-4 mw-425">
-      <div class="form-closer hoverbg p-2 mt-2"><span class="ico-cross"></span></div>
-      <div class="flex-center px-3">
-        [[[mixing_pw_prompt]]]
-      </div>
-      <div class="d-flex flex-column align-items-stretch mt-2">
-        <div class="flex-center w-100">
-          <div class="flex-column flex-center">
-            <label for="mixerPWInput">[[[App Password]]]</label>
-            <input type="password" id="mixerPWInput" class="p-2 text-center mt-1" autocomplete="off">
-          </div>
-        </div>
-        <div id="mixerPWErr" class="p-2 flex-center text-danger d-hide"></div>
-        <div id="mixerPWSubmit" class="feature flex-center m-2 p-3 rounded3">
-          <span class="ico-arrowright me-1"></span>
-          Start
-        </div>
-      </div>
-    </form>
-
-    {{- /* CSPP ADDRESS CONFIG */ -}}
-    <form id="mixerConfigForm" class="d-flex align-items-stretch flex-column mw-425">
-      <div class="form-closer"><span class="ico-cross"></span></div>
-      <h3>
-        <span class="ico-secretagent fs35 me-1"></span>
-        <span id="mixerEnableLabel">[[[Enable Privacy]]]</span>
-        <span id="mixerConfigureLabel">[[[Configure Privacy]]]</span>
-      </h3>
-      <div id="mixAddrDisplayBox" class="flex-center fs18 mb-3 px-3">
-        <span id="mixAddrDisplay"></span>
-        <div id="mixAddrEdit" class="d-inline-block ico-edit fs14 p-2 hoverbg pointer"></div>
-      </div>
-      <div id="mixAddrInputBox" class="flex-column mb-3">
-        <div class="mb-3">
-          <label for="mixAddrInput">[[[cspp_addr]]]</label>
-          <input type="text" id="mixAddrInput">
-        </div>
-        <div class="mb-3">
-          {{template "certPicker"}}
-        </div>
-      </div>
-      <div class="d-flex justify-content-between w-100">
-        <button id="mixerDisable" type="button" class="danger me-4">[[[Disable Privacy]]]</button>
-        <button id="mixConfigSubmit" type="button" class="go ms-auto">[[[Submit]]]</button>
-      </div>
-      <div id="mixConfigErr" class="pt-3 flex-center text-danger d-hide"></div>
-    </form>
-
     {{- /* CSPP INFO */ -}}
     <form id="mixingInfo" class="mw-425">
       <div class="form-closer"><span class="ico-cross"></span></div>
@@ -1191,22 +1131,6 @@
           [[[privacy_optional]]]
         </li>
       </ul>
-    </form>
-
-    {{- /* CSPP INFO */ -}}
-    <form id="mixingOffConfirmationForm" class="mw-425">
-      <div class="form-closer"><span class="ico-cross"></span></div>
-      <h3 class="w-100 px-3 mb-4">
-        Are you sure that you want to turn off the privacy engine?
-      </h3>
-      <div class="flex-center w-100 mb-3">
-        Newly received funds will not become available for
-        use until privacy is turned back on.
-      </div>
-      <div class="d-flex justify-content-between mt-4">
-        <button id="mixingOffNo" type="button">Nevermind</button>
-        <button id="mixingOffGo" type="button" class="danger">Turn it off</button>
-      </div>
     </form>
   </div>
 </div>

@@ -738,8 +738,6 @@ type FundsMixingStats struct {
 	// Enabled is true if the wallet is configured for funds mixing. The wallet
 	// must be configured before mixing can be started.
 	Enabled bool `json:"enabled"`
-	// IsMixing is true if the wallet is currently mixing funds.
-	IsMixing bool `json:"isMixing"`
 	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
 	// be in the wallet for mixing to happen.
 	UnmixedBalanceThreshold uint64 `json:"unmixedBalanceThreshold"`
@@ -750,19 +748,7 @@ type FundsMixer interface {
 	// FundsMixingStats returns the current state of the wallet's funds mixer.
 	FundsMixingStats() (*FundsMixingStats, error)
 	// ConfigureFundsMixer configures the wallet for funds mixing.
-	ConfigureFundsMixer(isMixing bool) error
-	// StartFundsMixer starts the funds mixer. This will error if the wallet
-	// does not allow starting or stopping the mixer or if the mixer was already
-	// started.
-	StartFundsMixer(ctx context.Context) error
-	// StopFundsMixer stops the funds mixer. This will error if the wallet does
-	// not allow starting or stopping the mixer or if the mixer was not already
-	// running.
-	StopFundsMixer()
-	// DisableFundsMixer disables the funds mixer and moves all funds to the
-	// default account. The wallet will need to be re-configured to re-enable
-	// mixing.
-	DisableFundsMixer() error
+	ConfigureFundsMixer(enabled bool) error
 }
 
 // WalletRestoration contains all the information needed for a user to restore

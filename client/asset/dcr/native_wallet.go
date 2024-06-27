@@ -5,12 +5,9 @@ package dcr
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +16,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrwallet/v4/p2p"
 	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
 	"decred.org/dcrwallet/v4/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -35,22 +31,16 @@ var nativeAccounts = []string{defaultAccountName, mixedAccountName, tradingAccou
 // mixingConfigFile is the structure for saving cspp server configuration to
 // file.
 type mixingConfigFile struct {
-	IsEnabled bool `json:"isEnabled"`
+	LegacyOn string `json:"csppserver"`
+	On       bool   `json:"on"`
 }
 
 // mixer is the settings and concurrency primitives for mixing operations.
 type mixer struct {
-	mtx       sync.RWMutex
-	isEnabled bool // Mixing is activated if true
-	ctx       context.Context
-	cancel    func()
-	wg        sync.WaitGroup
-}
-
-func (m *mixer) isMixerEnabled() bool {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
-	return m.isEnabled
+	mtx    sync.RWMutex
+	ctx    context.Context
+	cancel func()
+	wg     sync.WaitGroup
 }
 
 // turnOn should be called with the mtx locked.
@@ -69,12 +59,6 @@ func (m *mixer) closeAndClear() {
 	m.ctx, m.cancel = nil, nil
 }
 
-func (m *mixer) isOn() bool {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
-	return m.ctx != nil
-}
-
 // NativeWallet implements optional interfaces that are only provided by the
 // built-in SPV wallet.
 type NativeWallet struct {
@@ -82,7 +66,7 @@ type NativeWallet struct {
 	csppConfigFilePath string
 	spvw               *spvWallet
 
-	mixer *mixer
+	mixer mixer
 }
 
 // NativeWallet must also satisfy the following interface(s).
@@ -101,79 +85,51 @@ func initNativeWallet(ew *ExchangeWallet) (*NativeWallet, error) {
 		return nil, fmt.Errorf("unable to read cspp config file: %v", err)
 	}
 
-	var isMixingEnabled bool
 	if len(cfgFileB) > 0 {
 		var cfg mixingConfigFile
 		err = json.Unmarshal(cfgFileB, &cfg)
 		if err != nil {
 			return nil, fmt.Errorf("unable to unmarshal csppConfig: %v", err)
 		}
-
-		isMixingEnabled = cfg.IsEnabled
+		ew.mixing.Store(cfg.On || cfg.LegacyOn != "")
 	}
 
-	spvWallet.setAccounts(isMixingEnabled)
+	spvWallet.setAccounts(ew.mixing.Load())
 
 	w := &NativeWallet{
 		ExchangeWallet:     ew,
 		spvw:               spvWallet,
 		csppConfigFilePath: csppConfigFilePath,
-		mixer: &mixer{
-			isEnabled: isMixingEnabled,
-		},
 	}
 	ew.cycleMixer = func() {
 		w.mixer.mtx.RLock()
 		defer w.mixer.mtx.RUnlock()
 		w.mixFunds()
 	}
-	ew.isMixingEnabled = w.mixer.isMixerEnabled
 
 	return w, nil
 }
 
-func makeCSPPDialer(serverAddress string, certB []byte) (p2p.DialFunc, error) {
-	serverName, _, err := net.SplitHostPort(serverAddress)
+func (w *NativeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	wg, err := w.ExchangeWallet.Connect(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("cannot parse CoinShuffle++ server name %q: %v", serverAddress, err)
+		return nil, err
 	}
-
-	tlsConfig := new(tls.Config)
-	tlsConfig.ServerName = serverName
-
-	if len(certB) > 0 {
-		pool := x509.NewCertPool()
-		pool.AppendCertsFromPEM(certB)
-		tlsConfig.RootCAs = pool
+	if w.mixing.Load() {
+		w.startFundsMixer()
+	} else {
+		// Ensure any funds in the mixed account are transferred back to
+		// primary.
+		w.stopFundsMixer()
 	}
-
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		conn, err := new(net.Dialer).DialContext(ctx, network, addr)
-		if err != nil {
-			return nil, err
-		}
-		conn = tls.Client(conn, tlsConfig)
-		return conn, nil
-	}, nil
-}
-
-func defaultMixerHostForNet(net dex.Network) string {
-	switch net {
-	case dex.Mainnet:
-		return defaultCSPPMainnet
-	case dex.Testnet:
-		return defaultCSPPTestnet3
-	case dex.Simnet:
-		return "fake.simnet.mixer.gov:1000"
-	}
-	return ""
+	return wg, err
 }
 
 // ConfigureFundsMixer configures the wallet for funds mixing. Part of the
 // asset.FundsMixer interface.
-func (w *NativeWallet) ConfigureFundsMixer(isEnabled bool) (err error) {
+func (w *NativeWallet) ConfigureFundsMixer(enabled bool) (err error) {
 	csppCfgBytes, err := json.Marshal(&mixingConfigFile{
-		IsEnabled: isEnabled,
+		On: enabled,
 	})
 	if err != nil {
 		return fmt.Errorf("error marshaling cspp config file: %w", err)
@@ -182,11 +138,11 @@ func (w *NativeWallet) ConfigureFundsMixer(isEnabled bool) (err error) {
 		return fmt.Errorf("error writing cspp config file: %w", err)
 	}
 
-	w.spvw.setAccounts(true)
-
-	w.mixer.mtx.Lock()
-	w.mixer.isEnabled = isEnabled
-	w.mixer.mtx.Unlock()
+	if !enabled {
+		return w.stopFundsMixer()
+	}
+	w.startFundsMixer()
+	w.emitBalance()
 	return nil
 }
 
@@ -194,23 +150,33 @@ func (w *NativeWallet) ConfigureFundsMixer(isEnabled bool) (err error) {
 // of the asset.FundsMixer interface.
 func (w *NativeWallet) FundsMixingStats() (*asset.FundsMixingStats, error) {
 	return &asset.FundsMixingStats{
-		Enabled:                 w.mixer.isMixerEnabled(),
-		IsMixing:                w.mixer.isOn(),
+		Enabled:                 w.mixing.Load(),
 		UnmixedBalanceThreshold: smalletCSPPSplitPoint,
 	}, nil
 }
 
-// StartFundsMixer starts the funds mixer.  This will error if the wallet does
+// startFundsMixer starts the funds mixer.  This will error if the wallet does
 // not allow starting or stopping the mixer or if the mixer was already
 // started. Part of the asset.FundsMixer interface.
-func (w *NativeWallet) StartFundsMixer(ctx context.Context) error {
+func (w *NativeWallet) startFundsMixer() {
 	w.mixer.mtx.Lock()
 	defer w.mixer.mtx.Unlock()
-	if !w.mixer.isEnabled {
-		return errors.New("mixing is not enabled")
-	}
-	w.mixer.turnOn(ctx)
+	w.mixer.turnOn(w.ctx)
+	w.spvw.setAccounts(true)
+	w.mixing.Store(true)
 	w.mixFunds()
+}
+
+func (w *NativeWallet) stopFundsMixer() error {
+	w.mixer.mtx.Lock()
+	defer w.mixer.mtx.Unlock()
+	w.mixer.closeAndClear()
+	w.mixer.wg.Wait()
+	if err := w.transferAccount(w.ctx, defaultAccountName, mixedAccountName, tradingAccountName); err != nil {
+		return fmt.Errorf("error transferring funds while disabling mixing: %w", err)
+	}
+	w.spvw.setAccounts(false)
+	w.mixing.Store(false)
 	return nil
 }
 
@@ -234,7 +200,7 @@ func (w *NativeWallet) mixFunds() {
 	if on := w.mixer.ctx != nil; !on {
 		return
 	}
-	if !w.mixer.isEnabled {
+	if !w.mixing.Load() {
 		return
 	}
 	ctx := w.mixer.ctx
@@ -260,41 +226,6 @@ func (w *NativeWallet) runSimnetMixer(ctx context.Context) {
 	if err := w.transferAccount(ctx, mixedAccountName, defaultAccountName); err != nil {
 		w.log.Errorf("error transferring funds while disabling mixing: %w", err)
 	}
-}
-
-// StopFundsMixer stops the funds mixer.
-func (w *NativeWallet) StopFundsMixer() {
-	w.mixer.mtx.Lock()
-	w.mixer.closeAndClear()
-	w.mixer.mtx.Unlock()
-	w.mixer.wg.Wait()
-}
-
-// DisableFundsMixer disables the funds mixer and moves all funds to the default
-// account. The wallet will need to be re-configured to re-enable mixing. Part
-// of the asset.FundsMixer interface.
-func (w *NativeWallet) DisableFundsMixer() error {
-	w.mixer.mtx.Lock()
-	defer w.mixer.mtx.Unlock()
-
-	w.mixer.closeAndClear()
-	w.mixer.wg.Wait()
-
-	if err := w.transferAccount(w.ctx, defaultAccountName, mixedAccountName, tradingAccountName); err != nil {
-		return fmt.Errorf("error transferring funds while disabling mixing: %w", err)
-	}
-
-	w.spvw.setAccounts(false)
-
-	// Delete the cspp config file after moving funds, to prevent the mixer from
-	// starting when the wallet is restarted. If moving the funds above failed,
-	// this file will be left untouched and the mixer isn't really disabled yet.
-	if err := os.Remove(w.csppConfigFilePath); err != nil {
-		return fmt.Errorf("unable to delete cfg file: %v", err)
-	}
-	w.mixer.isEnabled = false
-
-	return nil
 }
 
 // transferAccount sends all funds from the fromAccts to the toAcct.
