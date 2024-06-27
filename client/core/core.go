@@ -11360,12 +11360,12 @@ func (c *Core) FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error)
 }
 
 // ConfigureFundsMixer configures the wallet for funds mixing.
-func (c *Core) ConfigureFundsMixer(assetID uint32, serverAddress string, cert []byte) error {
+func (c *Core) ConfigureFundsMixer(assetID uint32, isMixerEnabled bool) error {
 	_, mw, err := c.mixingWallet(assetID)
 	if err != nil {
 		return err
 	}
-	return mw.ConfigureFundsMixer(serverAddress, cert)
+	return mw.ConfigureFundsMixer(isMixerEnabled)
 }
 
 // StartFundsMixer starts the funds mixer. This will error if the wallet

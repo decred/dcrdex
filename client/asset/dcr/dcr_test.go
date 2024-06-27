@@ -172,8 +172,8 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 		go wallet.monitorBlocks(walletCtx)
 	}
 
-	wallet.mixingConfig = func() *mixingConfig {
-		return &mixingConfig{enabled: false}
+	wallet.isMixingEnabled = func() bool {
+		return false
 	}
 
 	return wallet, client, shutdown

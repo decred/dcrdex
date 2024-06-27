@@ -738,8 +738,6 @@ type FundsMixingStats struct {
 	// Enabled is true if the wallet is configured for funds mixing. The wallet
 	// must be configured before mixing can be started.
 	Enabled bool `json:"enabled"`
-	// Server is the currently configured server.
-	Server string `json:"server"`
 	// IsMixing is true if the wallet is currently mixing funds.
 	IsMixing bool `json:"isMixing"`
 	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
@@ -752,7 +750,7 @@ type FundsMixer interface {
 	// FundsMixingStats returns the current state of the wallet's funds mixer.
 	FundsMixingStats() (*FundsMixingStats, error)
 	// ConfigureFundsMixer configures the wallet for funds mixing.
-	ConfigureFundsMixer(serverAddress string, cert []byte) error
+	ConfigureFundsMixer(isMixing bool) error
 	// StartFundsMixer starts the funds mixer. This will error if the wallet
 	// does not allow starting or stopping the mixer or if the mixer was already
 	// started.

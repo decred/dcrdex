@@ -336,7 +336,7 @@ func (c *TCore) FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error
 	return nil, nil
 }
 
-func (c *TCore) ConfigureFundsMixer(assetID uint32, serverAddress string, cert []byte) error {
+func (c *TCore) ConfigureFundsMixer(assetID uint32, isMixerEnabled bool) error {
 	return nil
 }
 

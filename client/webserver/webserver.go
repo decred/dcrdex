@@ -167,7 +167,7 @@ type clientCore interface {
 	TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error)
 	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error)
-	ConfigureFundsMixer(assetID uint32, serverAddress string, cert []byte) error
+	ConfigureFundsMixer(assetID uint32, isMixerEnabled bool) error
 	StartFundsMixer(appPW []byte, assetID uint32) error
 	StopFundsMixer(assetID uint32) error
 	DisableFundsMixer(assetID uint32) error

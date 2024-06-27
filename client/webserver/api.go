@@ -1953,14 +1953,13 @@ func (s *WebServer) apiMixingStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) apiConfigureMixer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AssetID    uint32 `json:"assetID"`
-		ServerAddr string `json:"serverAddr"`
-		Cert       string `json:"cert"`
+		AssetID         uint32 `json:"assetID"`
+		IsMixingEnabled bool   `json:"isMixingEnabled"`
 	}
 	if !readPost(w, r, &req) {
 		return
 	}
-	if err := s.core.ConfigureFundsMixer(req.AssetID, req.ServerAddr, []byte(req.Cert)); err != nil {
+	if err := s.core.ConfigureFundsMixer(req.AssetID, req.IsMixingEnabled); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error configuring mixing for %d: %w", req.AssetID, err))
 		return
 	}
