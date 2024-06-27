@@ -1485,7 +1485,8 @@ export default class WalletsPage extends BasePage {
     const { page, selectedAssetID: assetID, mixerStatus } = this
     if (!mixerStatus) return
     const loaded = app().loading(page.mixingBox)
-    const res = await postJSON('/api/configuremixer', { assetID })
+    const cfg = { assetID: assetID, IsMixingEnabled: page.enableMixing } as any
+    const res = await postJSON('/api/configuremixer', cfg)
     loaded()
     if (!app().checkResponse(res)) {
       Doc.show(page.mixingErr)
@@ -1521,7 +1522,7 @@ export default class WalletsPage extends BasePage {
     const { page, selectedAssetID: assetID, mixerStatus } = this
     if (!mixerStatus) return
     Doc.hide(page.mixConfigErr)
-    const cfg = { assetID: assetID } as any
+    const cfg = { assetID: assetID, IsMixingEnabled: page.enableMixing } as any
     const loaded = app().loading(page.mixerConfigForm)
     if (Doc.isDisplayed(page.mixAddrInputBox)) {
       cfg.serverAddr = page.mixAddrInput.value
