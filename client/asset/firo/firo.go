@@ -66,7 +66,6 @@ var (
 	// WalletInfo defines some general information about a Firo wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Firo",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexfiro.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{

@@ -54,7 +54,6 @@ const (
 	ErrReusedCommit
 	ErrOrderNotExecuted
 	ErrUpdateCount
-	ErrAccountExists
 	ErrAccountUnknown
 	ErrAccountBadFeeInfo
 	ErrUnknownFeeKey
@@ -79,8 +78,6 @@ func (ae ArchiveError) Error() string {
 		desc = "order not in executed status"
 	case ErrUpdateCount:
 		desc = "unexpected number of rows updated"
-	case ErrAccountExists:
-		desc = "account already exists"
 	case ErrAccountUnknown:
 		desc = "account unknown"
 	case ErrAccountBadFeeInfo:

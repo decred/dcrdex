@@ -425,8 +425,6 @@ func (a *TBackend) ValidateContract(contract []byte) error {
 	return nil
 }
 func (a *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate  { return a.bChan }
-func (a *TBackend) InitTxSize() uint32                               { return 100 }
-func (a *TBackend) InitTxSizeBase() uint32                           { return 66 }
 func (a *TBackend) FeeRate(context.Context) (uint64, error)          { return 10, nil }
 func (a *TBackend) CheckSwapAddress(string) bool                     { return true }
 func (a *TBackend) Connect(context.Context) (*sync.WaitGroup, error) { return nil, nil }
@@ -496,6 +494,8 @@ func (b *TAccountBackend) AccountBalance(addr string) (uint64, error) {
 func (b *TAccountBackend) ValidateSignature(addr string, pubkey, msg, sig []byte) error {
 	return nil
 }
+
+func (a *TAccountBackend) InitTxSize() uint64 { return 100 }
 
 func (b *TAccountBackend) RedeemSize() uint64 {
 	return 21_000

@@ -547,7 +547,6 @@ func loadAccountInfo(acct *bbolt.Bucket, log dex.Logger) (*db.AccountInfo, error
 	if err != nil {
 		return nil, err
 	}
-	acctInfo.LegacyFeePaid = len(acct.Get(feeProofKey)) > 0
 
 	bondsBkt := acct.Bucket(bondsSubBucket)
 	if bondsBkt == nil {
@@ -770,36 +769,6 @@ func (db *BoltDB) disabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
 			return err
 		}
 		return nil
-	})
-}
-
-func (db *BoltDB) AccountProof(url string) (*dexdb.AccountProof, error) {
-	var acctProof *dexdb.AccountProof
-	acctKey := []byte(url)
-	return acctProof, db.acctsView(func(accts *bbolt.Bucket) error {
-		acct := accts.Bucket(acctKey)
-		if acct == nil {
-			return fmt.Errorf("account not found for %s", url)
-		}
-		var err error
-		acctProof, err = dexdb.DecodeAccountProof(getCopy(acct, feeProofKey))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-}
-
-// StoreAccountProof marks the account as paid with the legacy registration fee
-// by setting the "fee proof".
-func (db *BoltDB) StoreAccountProof(proof *dexdb.AccountProof) error {
-	acctKey := []byte(proof.Host)
-	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct := accts.Bucket(acctKey)
-		if acct == nil {
-			return fmt.Errorf("account not found for %s", proof.Host)
-		}
-		return acct.Put(feeProofKey, proof.Encode())
 	})
 }
 

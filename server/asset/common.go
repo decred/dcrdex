@@ -11,17 +11,6 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
-// Addresser retrieves unique addresses.
-type Addresser interface {
-	NextAddress() (string, error)
-}
-
-// KeyIndexer retrieves and stores child indexes for an extended public key.
-type KeyIndexer interface {
-	KeyIndex(xpub string) (uint32, error)
-	SetKeyIndex(idx uint32, xpub string) error
-}
-
 // BackendInfo provides auxiliary information about a backend.
 type BackendInfo struct {
 	SupportsDynamicTxFee bool
@@ -58,12 +47,6 @@ type Backend interface {
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) <-chan *BlockUpdate
-	// InitTxSize is the size of a serialized atomic swap initialization
-	// transaction with 1 input spending a P2PKH utxo, 1 swap contract output and
-	// 1 change output.
-	InitTxSize() uint32
-	// InitTxSizeBase is InitTxSize not including an input.
-	InitTxSizeBase() uint32
 	// CheckSwapAddress checks that the given address is parseable, and suitable
 	// as a redeem address in a swap contract script or initiation.
 	CheckSwapAddress(string) bool
@@ -118,6 +101,7 @@ type AccountBalancer interface {
 	ValidateSignature(addr string, pubkey, msg, sig []byte) error
 	// RedeemSize is the gas used for a single redemption.
 	RedeemSize() uint64
+	InitTxSize() uint64
 }
 
 // TokenBacker is implemented by Backends that support degenerate tokens.

@@ -77,19 +77,6 @@ func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
 	return dexbtc.MinLotSize(maxFeeRate, true)
 }
 
-// NewAddresser creates an asset.Addresser for deriving addresses for the given
-// extended public key. The KeyIndexer will be used for discovering the current
-// child index, and storing the index as new addresses are generated with the
-// NextAddress method of the Addresser.
-func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network dex.Network) (asset.Addresser, uint32, error) {
-	params, err := netParams(network)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return NewAddressDeriver(xPub, keyIndexer, params)
-}
-
 // Name is the asset's name.
 func (d *Driver) Name() string {
 	return "Bitcoin"
@@ -177,9 +164,6 @@ type Backend struct {
 	feeConfs          int64
 	noCompetitionRate uint64
 
-	initTxSize     uint32
-	initTxSizeBase uint32
-
 	// The feeCache prevents repeated calculations of the median fee rate
 	// between block changes when estimate(smart)fee is unprimed.
 	feeCache struct {
@@ -235,24 +219,6 @@ func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 		feeConfs = 1
 	}
 
-	initTxSize := cloneCfg.InitTxSize
-	if initTxSize == 0 {
-		if cloneCfg.Segwit {
-			initTxSize = dexbtc.InitTxSizeSegwit
-		} else {
-			initTxSize = dexbtc.InitTxSize
-		}
-	}
-
-	initTxSizeBase := cloneCfg.InitTxSizeBase
-	if initTxSizeBase == 0 {
-		if cloneCfg.Segwit {
-			initTxSizeBase = dexbtc.InitTxSizeBaseSegwit
-		} else {
-			initTxSizeBase = dexbtc.InitTxSizeBase
-		}
-	}
-
 	txDeserializer := cloneCfg.TxDeserializer
 	if txDeserializer == nil {
 		txDeserializer = msgTxFromBytes
@@ -280,8 +246,6 @@ func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 		txDeserializer:     txDeserializer,
 		txHasher:           txHasher,
 		numericGetRawRPC:   cloneCfg.NumericGetRawRPC,
-		initTxSize:         initTxSize,
-		initTxSizeBase:     initTxSizeBase,
 	}
 }
 
@@ -337,9 +301,7 @@ type BackendCloneConfig struct {
 	// ShieldedIO is a function to read a transaction and calculate the shielded
 	// input and output amounts. This is a temporary measure until zcashd
 	// encodes valueBalanceOrchard in their getrawtransaction RPC results.
-	ShieldedIO     func(tx *VerboseTxExtended) (in, out uint64, err error)
-	InitTxSize     uint32
-	InitTxSizeBase uint32
+	ShieldedIO func(tx *VerboseTxExtended) (in, out uint64, err error)
 	// RelayAddr is an address for a NodeRelay.
 	RelayAddr string
 }
@@ -535,7 +497,7 @@ func (btc *Backend) FundingCoin(_ context.Context, coinID []byte, redeemScript [
 }
 
 func (*Backend) ValidateOrderFunding(swapVal, valSum, _, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
-	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, nfo)
+	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, dexbtc.InitTxSizeBase, dexbtc.InitTxSize, nfo.MaxFeeRate)
 	return valSum >= reqVal
 }
 
@@ -755,32 +717,6 @@ func (btc *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (am
 	return
 }
 
-// FeeCoin gets the recipient address, value, and confirmations of a transaction
-// output encoded by the given coinID. A non-nil error is returned if the
-// output's pubkey script is not a P2WPKH requiring a single ECDSA-secp256k1
-// signature.
-func (btc *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error) {
-	txHash, vout, errCoin := decodeCoinID(coinID)
-	if errCoin != nil {
-		err = fmt.Errorf("error decoding coin ID %x: %w", coinID, errCoin)
-		return
-	}
-
-	var txOut *txOutData
-	txOut, confs, err = btc.outputSummary(txHash, vout)
-	if err != nil {
-		return
-	}
-
-	// AddressDeriver gives out p2wpkh addresses.
-	if len(txOut.addresses) != 1 || !txOut.scriptType.IsP2WPKH() {
-		return "", 0, -1, dex.UnsupportedScriptError
-	}
-	addr = txOut.addresses[0]
-	val = txOut.value
-	return
-}
-
 // txOutData is transaction output data, including recipient addresses, value,
 // script type, and number of required signatures.
 type txOutData struct {
@@ -840,17 +776,6 @@ func (btc *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	defer btc.signalMtx.Unlock()
 	btc.blockChans[c] = struct{}{}
 	return c
-}
-
-// InitTxSize is an asset.Backend method that must produce the max size of a
-// standardized atomic swap initialization transaction.
-func (btc *Backend) InitTxSize() uint32 {
-	return btc.initTxSize
-}
-
-// InitTxSizeBase is InitTxSize not including an input.
-func (btc *Backend) InitTxSizeBase() uint32 {
-	return btc.initTxSizeBase
 }
 
 // FeeRate returns the current optimal fee rate in sat / byte.

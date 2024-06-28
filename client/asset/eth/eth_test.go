@@ -52,34 +52,26 @@ var (
 
 	tETH = &dex.Asset{
 		// Version meaning?
-		ID:           60,
-		Symbol:       "ETH",
-		MaxFeeRate:   100,
-		SwapSize:     ethGases.Swap,
-		SwapSizeBase: ethGases.Swap,
-		RedeemSize:   ethGases.Redeem,
-		SwapConf:     1,
+		ID:         60,
+		Symbol:     "ETH",
+		MaxFeeRate: 100,
+		SwapConf:   1,
 	}
 
 	tBTC = &dex.Asset{
-		ID:           0,
-		Symbol:       "btc",
-		Version:      0, // match btc.version
-		SwapSize:     300,
-		SwapSizeBase: 300,
-		MaxFeeRate:   10,
-		SwapConf:     1,
+		ID:         0,
+		Symbol:     "btc",
+		Version:    0, // match btc.version
+		MaxFeeRate: 10,
+		SwapConf:   1,
 	}
 
 	tToken = &dex.Asset{
-		ID:           usdcTokenID,
-		Symbol:       "usdc.eth",
-		Version:      0,
-		SwapSize:     tokenGases.Swap,
-		SwapSizeBase: tokenGases.Swap,
-		RedeemSize:   tokenGases.Redeem,
-		MaxFeeRate:   20,
-		SwapConf:     1,
+		ID:         usdcTokenID,
+		Symbol:     "usdc.eth",
+		Version:    0,
+		MaxFeeRate: 20,
+		SwapConf:   1,
 	}
 
 	signer = types.LatestSigner(params.AllEthashProtocolChanges)
@@ -1817,8 +1809,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 
 	// Test fund order with less than available funds
 	coins1, redeemScripts1, _, err := w.FundOrder(&order)
-	// NOTE: the following should NOT use dex.Asset.SwapSize, instead w.gases(ver) and the swap count and fee rate
-	expectedOrderFees := fromAsset.SwapSize * order.MaxFeeRate * order.MaxSwapCount
+	expectedOrderFees := eth.gases(fromAsset.Version).Swap * order.MaxFeeRate * order.MaxSwapCount
 	expectedFees := expectedOrderFees
 	expectedCoinValue := order.Value
 	if assetID == BipID {

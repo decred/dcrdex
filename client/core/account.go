@@ -100,17 +100,6 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, []*db.Bond, erro
 	pubKey := privKey.PubKey()
 	accountID := account.NewID(pubKey.SerializeCompressed())
 
-	var feeProofSig string
-	var feeProofStamp uint64
-	if acctInf.LegacyFeePaid {
-		accountProof, err := c.db.AccountProof(host)
-		if err != nil {
-			return nil, nil, codedError(accountProofErr, err)
-		}
-		feeProofSig = hex.EncodeToString(accountProof.Sig)
-		feeProofStamp = accountProof.Stamp
-	}
-
 	// Account ID is exported for informational purposes only, it is not used during import.
 	acct := &Account{
 		Host:      host,
@@ -118,12 +107,9 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, []*db.Bond, erro
 		// PrivKey: Note that we don't differentiate between legacy and
 		// hierarchical private keys here. On import, all keys are treated as
 		// legacy keys.
-		PrivKey:       hex.EncodeToString(keyB),
-		DEXPubKey:     hex.EncodeToString(acctInf.DEXPubKey.SerializeCompressed()),
-		Cert:          hex.EncodeToString(acctInf.Cert),
-		FeeCoin:       hex.EncodeToString(acctInf.LegacyFeeCoin),
-		FeeProofSig:   feeProofSig,
-		FeeProofStamp: feeProofStamp,
+		PrivKey:   hex.EncodeToString(keyB),
+		DEXPubKey: hex.EncodeToString(acctInf.DEXPubKey.SerializeCompressed()),
+		Cert:      hex.EncodeToString(acctInf.Cert),
 	}
 	return acct, acctInf.Bonds, nil
 }
@@ -225,13 +211,6 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 		return codedError(decodeErr, err)
 	}
 
-	accountInfo.LegacyFeeCoin, err = hex.DecodeString(acct.FeeCoin)
-	if err != nil {
-		return codedError(decodeErr, err)
-	}
-
-	accountInfo.LegacyFeePaid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
-
 	// Before we import the private key as LegacyEncKey, see if the account
 	// derives from the app seed. Somewhat inconsequential except for logging
 	// and use of the appropriate enc key field.
@@ -269,22 +248,6 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 	err = c.db.CreateAccount(&accountInfo)
 	if err != nil {
 		return codedError(dbErr, err)
-	}
-
-	if accountInfo.LegacyFeePaid {
-		sig, err := hex.DecodeString(acct.FeeProofSig)
-		if err != nil {
-			return codedError(decodeErr, err)
-		}
-		accountProof := db.AccountProof{
-			Host:  host,
-			Stamp: acct.FeeProofStamp,
-			Sig:   sig,
-		}
-		err = c.db.StoreAccountProof(&accountProof)
-		if err != nil {
-			return codedError(dbErr, err)
-		}
 	}
 
 	dc, err := c.connectDEX(&accountInfo)
@@ -374,12 +337,6 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (
 
 	if oldDc.acct.dexPubKey == nil {
 		return nil, fmt.Errorf("cannot update host if dex public key is nil")
-	}
-
-	if oldDc.getPendingFee() != nil {
-		// The notify fee code will have to be completely refactored to allow
-		// this.
-		return nil, fmt.Errorf("host cannot be updated while registration fee is pending")
 	}
 
 	var updatedHost bool

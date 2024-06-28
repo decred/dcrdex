@@ -936,10 +936,6 @@ func TestWSRateLimiter(t *testing.T) {
 	}()
 
 	handled := make(chan struct{}, 1)
-	server.Route(msgjson.RegisterRoute, func(Link, *msgjson.Message) *msgjson.Error {
-		handled <- struct{}{}
-		return nil
-	})
 
 	server.Route(msgjson.FeeRateRoute, func(Link, *msgjson.Message) *msgjson.Error {
 		handled <- struct{}{}
@@ -973,8 +969,6 @@ func TestWSRateLimiter(t *testing.T) {
 		}
 	}()
 
-	sendToConn(t, conn, msgjson.RegisterRoute, `{}`)
-
 	waitResult := func() int {
 		t.Helper()
 		select {
@@ -1004,15 +998,6 @@ func TestWSRateLimiter(t *testing.T) {
 			t.Fatal("timeout")
 		}
 		return 2
-	}
-
-	if waitResult() != 0 {
-		t.Fatalf("initial register request failed")
-	}
-
-	sendToConn(t, conn, msgjson.RegisterRoute, `{}`)
-	if waitResult() != 1 {
-		t.Fatalf("second register request did not fail")
 	}
 
 	// Other routes still work.
@@ -1053,10 +1038,4 @@ func TestWSRateLimiter(t *testing.T) {
 		for range conn.nextRead {
 		}
 	}()
-
-	sendToConn(t, conn, msgjson.RegisterRoute, `{}`)
-
-	if waitResult() != 0 {
-		t.Fatalf("initial register request from different conn failed")
-	}
 }

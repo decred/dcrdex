@@ -63,7 +63,6 @@ var (
 	// WalletInfo defines some general information about a Dash wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Dash",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexdash.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{

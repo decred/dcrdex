@@ -57,7 +57,6 @@ var (
 
 // SvrCore is satisfied by server/dex.DEX.
 type SvrCore interface {
-	Accounts() (accts []*db.Account, err error)
 	AccountInfo(acctID account.AccountID) (*db.Account, error)
 	Notify(acctID account.AccountID, msg *msgjson.Message)
 	NotifyAll(msg *msgjson.Message)
@@ -150,7 +149,6 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Use(middleware.AllowContentType("text/plain"))
 		r.Get("/ping", apiPing)
 		r.Get("/config", s.apiConfig)
-		r.Get("/accounts", s.apiAccounts)
 		r.Get("/enabledataapi/{"+yesKey+"}", s.apiEnableDataAPI)
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)

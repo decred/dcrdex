@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 )
 
@@ -173,13 +172,6 @@ const (
 	// ConnectRoute is a client-originating request-type message seeking
 	// authentication so that the connection can be used for trading.
 	ConnectRoute = "connect"
-	// RegisterRoute is the client-originating request-type message initiating a
-	// new client registration. DEPRECATED with bonds (V0PURGE)
-	RegisterRoute = "register"
-	// NotifyFeeRoute is the client-originating request-type message informing the
-	// DEX that the fee has been paid and has the requisite number of
-	// confirmations. DEPRECATED with bonds (V0PURGE)
-	NotifyFeeRoute = "notifyfee"
 	// PostBondRoute is the client-originating request used to post a new
 	// fidelity bond. This can create a new account or it can add bond to an
 	// existing account.
@@ -972,12 +964,8 @@ type ConnectResult struct {
 	ActiveOrderStatuses []*OrderStatus      `json:"activeorderstatuses"`
 	ActiveMatches       []*Match            `json:"activematches"`
 	Score               int32               `json:"score"`
-	Tier                *int64              `json:"tier"` // == v1. Deprecated in v2. means bonded and may trade, a function of active bond amounts and conduct, nil legacy
 	ActiveBonds         []*Bond             `json:"activeBonds"`
-	LegacyFeePaid       *bool               `json:"legacyFeePaid"` // == v1. Deprected in v2.
-	Reputation          *account.Reputation `json:"reputation"`    // v2
-
-	Suspended *bool `json:"suspended,omitempty"` // DEPRECATED - implied by tier<1
+	Reputation          *account.Reputation `json:"reputation"`
 }
 
 // TierChangedNotification is the dex-originating notification sent when the
@@ -1008,15 +996,10 @@ type ScoreChangedNotification struct {
 
 // Serialize serializes the ScoreChangedNotification data.
 func (tc *ScoreChangedNotification) Serialize() []byte {
-	// serialization: bondedTier 8 + penalties 2 + legacy 1 + score 4
-	b := make([]byte, 0, 11)
+	// serialization: bondedTier 8 + penalties 2 + score 4
+	b := make([]byte, 0, 10)
 	b = append(b, uint64Bytes(uint64(tc.Reputation.BondedTier))...)
 	b = append(b, uint16Bytes(tc.Reputation.Penalties)...)
-	legacy := encode.ByteFalse
-	if tc.Reputation.Legacy {
-		legacy = encode.ByteTrue
-	}
-	b = append(b, legacy...)
 	return append(b, uint32Bytes(uint32(tc.Reputation.Score))...)
 }
 
@@ -1029,21 +1012,19 @@ type PenaltyNote struct {
 // Penalty is part of the payload for a dex-originating Penalty notification
 // and part of the connect response.
 type Penalty struct {
-	Rule     account.Rule `json:"rule"`
-	Time     uint64       `json:"timestamp"`
-	Duration uint64       `json:"duration,omitempty"` // DEPRECATED with bonding tiers, but must remain in serialization until v1 (V0PURGE)
-	Details  string       `json:"details"`
+	Rule    account.Rule `json:"rule"`
+	Time    uint64       `json:"timestamp"`
+	Details string       `json:"details"`
 }
 
 // Serialize serializes the PenaltyNote data.
 func (n *PenaltyNote) Serialize() []byte {
 	p := n.Penalty
-	// serialization: rule(1) + time (8) + duration (8) +
-	// details (variable, ~100) = 117 bytes
-	b := make([]byte, 0, 117)
+	// serialization: rule(1) + time (8) +
+	// details (variable, ~100) = 109 bytes
+	b := make([]byte, 0, 109)
 	b = append(b, byte(p.Rule))
 	b = append(b, uint64Bytes(p.Time)...)
-	b = append(b, uint64Bytes(p.Duration)...)
 	return append(b, []byte(p.Details)...)
 }
 
@@ -1140,7 +1121,6 @@ type PostBondResult struct {
 	Expiry     uint64              `json:"expiry"` // not locktime, but time when bond expires for dex
 	Strength   uint32              `json:"strength"`
 	BondID     Bytes               `json:"bondID"`
-	Tier       int64               `json:"tier"`
 	Reputation *account.Reputation `json:"reputation"`
 }
 
@@ -1191,35 +1171,6 @@ func (r *Register) Serialize() []byte {
 		s = append(s, uint32Bytes(*r.Asset)...)
 	}
 	return s
-}
-
-// RegisterResult is the result for the response to Register.
-type RegisterResult struct {
-	Signature
-	DEXPubKey Bytes `json:"pubkey"`
-	// ClientPubKey is excluded from the JSON payload to save bandwidth. The
-	// client must add it back to verify the server's signature.
-	ClientPubKey Bytes   `json:"-"`
-	AssetID      *uint32 `json:"feeAsset,omitempty"` // default to 42 if not set by server
-	Address      string  `json:"address"`
-	Fee          uint64  `json:"fee"`
-	Time         uint64  `json:"timestamp"`
-}
-
-// Serialize serializes the RegisterResult data.
-func (r *RegisterResult) Serialize() []byte {
-	// serialization: pubkey (33) + client pubkey (33) + time (8) + fee (8) +
-	// address (35-ish) + asset (4 if set) = 121
-	b := make([]byte, 0, 121)
-	b = append(b, r.DEXPubKey...)
-	b = append(b, r.ClientPubKey...)
-	b = append(b, uint64Bytes(r.Time)...)
-	b = append(b, uint64Bytes(r.Fee)...)
-	b = append(b, []byte(r.Address)...)
-	if r.AssetID != nil {
-		b = append(b, uint32Bytes(*r.AssetID)...)
-	}
-	return b
 }
 
 // NotifyFee is the payload for a client-originating NotifyFeeRoute request.
@@ -1294,25 +1245,6 @@ type Asset struct {
 	MaxFeeRate uint64       `json:"maxfeerate"`
 	SwapConf   uint16       `json:"swapconf"`
 	UnitInfo   dex.UnitInfo `json:"unitinfo"`
-
-	// The swap/redeem size fields are DEPRECATED. They are implied by version.
-	// The values provided by the server in these fields should not be used by
-	// client wallets, which know the structure of their own transactions.
-	SwapSize     uint64 `json:"swapsize"`
-	SwapSizeBase uint64 `json:"swapsizebase"`
-	RedeemSize   uint64 `json:"redeemsize"`
-
-	// The Asset LotSize and RateStep fields are DEPRECATED. They are now
-	// market specific.
-	LotSize  uint64 `json:"lotsize,omitempty"`
-	RateStep uint64 `json:"ratestep,omitempty"`
-}
-
-// FeeAsset describes an asset for which registration fees are supported.
-type FeeAsset struct {
-	ID    uint32 `json:"id"`
-	Confs uint32 `json:"confs"`
-	Amt   uint64 `json:"amount"`
 }
 
 // BondAsset describes an asset for which fidelity bonds are supported.
@@ -1346,8 +1278,6 @@ type ConfigResult struct {
 	// what we expect at any given time. BondAsset.Amt may also become implied
 	// by bond version.
 	BondExpiry uint64 `json:"DEV_bondExpiry"`
-
-	RegFees map[string]*FeeAsset `json:"regFees"`
 
 	PenaltyThreshold uint32 `json:"penaltyThreshold"`
 	MaxScore         uint32 `json:"maxScore"`

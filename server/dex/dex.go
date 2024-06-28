@@ -45,9 +45,10 @@ const (
 	// PreAPIVersion covers all API iterations before versioning started.
 	PreAPIVersion  = iota
 	BondAPIVersion // when we drop the legacy reg fee proto
+	V1APIVersion
 
 	// APIVersion is the current API version.
-	APIVersion = PreAPIVersion // only advance server to BondAPIVersion with the V0PURGE
+	APIVersion = V1APIVersion
 )
 
 // Asset represents an asset in the Config file.
@@ -475,7 +476,7 @@ type configResponse struct {
 	configEnc json.RawMessage
 }
 
-func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, bondAssets map[string]*msgjson.BondAsset,
+func newConfigResponse(cfg *DexConf, bondAssets map[string]*msgjson.BondAsset,
 	cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
 
 	configMsg := &msgjson.ConfigResult{
@@ -488,7 +489,6 @@ func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, bon
 		BondAssets:       bondAssets,
 		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)), // temporary while we figure it out
 		BinSizes:         candles.BinSizes,
-		RegFees:          regAssets,
 		PenaltyThreshold: cfg.PenaltyThreshold,
 		MaxScore:         auth.ScoringMatchLimit,
 	}
@@ -671,33 +671,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		assetIDs[i] = assetID
 	}
 
-	// Check each market's base lot size to see if any asset has different base
-	// lots sizes, which will break older clients. In this case, set
-	// msgjson.Asset.LotSize 0 so older clients cannot use the market. Do the
-	// same for rate step.
-	// V0PURGE
-	lotSizes := make(map[uint32]uint64)
-	rateSteps := make(map[uint32]uint64)
-	for _, mktInfo := range cfg.Markets {
-		lotSize, found := lotSizes[mktInfo.Base]
-		if !found {
-			lotSizes[mktInfo.Base] = mktInfo.LotSize
-		} else if lotSize > 0 && lotSize != mktInfo.LotSize {
-			lotSizes[mktInfo.Base] = 0
-			log.Warnf("Asset %d (%s) has multiple lot sizes. Old clients will not work with this asset.",
-				mktInfo.Base, dex.BipIDSymbol(mktInfo.Base))
-		}
-
-		rateStep, found := rateSteps[mktInfo.Quote]
-		if !found {
-			rateSteps[mktInfo.Quote] = mktInfo.RateStep
-		} else if rateStep > 0 && rateStep != mktInfo.RateStep {
-			rateSteps[mktInfo.Quote] = 0
-			log.Warnf("Asset %d (%s) has multiple rate steps. Old clients will not work with this asset.",
-				mktInfo.Quote, dex.BipIDSymbol(mktInfo.Quote))
-		}
-	}
-
 	// Create DEXArchivist with the pg DB driver. The fee Addressers require the
 	// archivist for key index storage and retrieval.
 	pgCfg := &pg.Config{
@@ -766,11 +739,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Create a MasterCoinLocker for each asset.
 	dexCoinLocker := coinlock.NewDEXCoinLocker(assetIDs)
 
-	// Prepare registration fee assets.
-	feeAssets := make(map[string]*msgjson.FeeAsset)
-	feeCoiners := make(map[uint32]FeeCoiner)
-	feeAddressers := make(map[uint32]asset.Addresser)
-	xpubs := make(map[string]string) // to enforce uniqueness
+	// Prepare bonders.
 	bondAssets := make(map[string]*msgjson.BondAsset)
 	bonders := make(map[uint32]Bonder)
 
@@ -845,60 +814,24 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				symbol, assetConf.BondAmt, assetConf.BondConfs)
 		}
 
-		if assetConf.RegFee > 0 {
-			// Make sure we can check on fee transactions.
-			fc, ok := be.(FeeCoiner)
-			if !ok {
-				return fmt.Errorf("asset %v is not a FeeCoiner", symbol)
-			}
-			// Make sure we can derive addresses from an extended public key.
-			addresser, startChild, err := asset.NewAddresser(assetID, assetConf.RegXPub, storage, cfg.Network)
-			if err != nil {
-				return fmt.Errorf("failed to create fee addresser for asset %v: %w", symbol, err)
-			}
-			if other := xpubs[assetConf.RegXPub]; other != "" {
-				return fmt.Errorf("reused xpub for assets %v and %v forbidden", other, symbol)
-			}
-			xpubs[assetConf.RegXPub] = symbol
-			feeAssets[symbol] = &msgjson.FeeAsset{
-				ID:    assetID,
-				Amt:   assetConf.RegFee,
-				Confs: assetConf.RegConfs,
-			}
-			feeCoiners[assetID] = fc
-			feeAddressers[assetID] = addresser
-			log.Infof("Registration fees permitted using %s: amount %d, confs %d, next child %d",
-				symbol, assetConf.RegFee, assetConf.RegConfs, startChild)
-		}
-
 		unitInfo, err := asset.UnitInfo(assetID)
 		if err != nil {
 			return err
 		}
 
-		var redeemSize uint64
 		var coinLocker coinlock.CoinLocker
-
-		accountBalancer, isAccountRedeemer := be.(asset.AccountBalancer)
-		if isAccountRedeemer {
-			redeemSize = accountBalancer.RedeemSize()
-		} else {
+		if _, isAccountRedeemer := be.(asset.AccountBalancer); isAccountRedeemer {
 			coinLocker = dexCoinLocker.AssetLocker(assetID).Swap()
 		}
 
-		initTxSize := uint64(be.InitTxSize())
-		initTxSizeBase := uint64(be.InitTxSizeBase())
 		ba := &asset.BackedAsset{
 			Asset: dex.Asset{
-				ID:           assetID,
-				Symbol:       symbol,
-				Version:      assetVer,
-				MaxFeeRate:   assetConf.MaxFeeRate,
-				SwapSize:     initTxSize,
-				SwapSizeBase: initTxSizeBase,
-				RedeemSize:   redeemSize,
-				SwapConf:     assetConf.SwapConf,
-				UnitInfo:     unitInfo,
+				ID:         assetID,
+				Symbol:     symbol,
+				Version:    assetVer,
+				MaxFeeRate: assetConf.MaxFeeRate,
+				SwapConf:   assetConf.SwapConf,
+				UnitInfo:   unitInfo,
 			},
 			Backend: be,
 		}
@@ -912,17 +845,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 		// Prepare assets portion of config response.
 		cfgAssets = append(cfgAssets, &msgjson.Asset{
-			Symbol:       assetConf.Symbol,
-			ID:           assetID,
-			Version:      assetVer,
-			LotSize:      lotSizes[assetID],
-			RateStep:     rateSteps[assetID],
-			MaxFeeRate:   assetConf.MaxFeeRate,
-			SwapSize:     initTxSize,
-			SwapSizeBase: initTxSizeBase,
-			RedeemSize:   redeemSize,
-			SwapConf:     uint16(assetConf.SwapConf),
-			UnitInfo:     unitInfo,
+			Symbol:     assetConf.Symbol,
+			ID:         assetID,
+			Version:    assetVer,
+			MaxFeeRate: assetConf.MaxFeeRate,
+			SwapConf:   uint16(assetConf.SwapConf),
+			UnitInfo:   unitInfo,
 		})
 
 		txDataSources[assetID] = be.TxData
@@ -965,28 +893,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 	}
 
-	feeAddresser := func(assetID uint32) string {
-		addresser := feeAddressers[assetID]
-		if addresser == nil {
-			return ""
-		}
-		addr, err := addresser.NextAddress()
-		if err != nil {
-			log.Errorf("Failed to retrieve new address for asset %d: %v", assetID, err)
-			return ""
-		}
-		return addr
-	}
-
-	feeChecker := func(assetID uint32, coinID []byte) (addr string, val uint64, confs int64, err error) {
-		fc := feeCoiners[assetID]
-		if fc == nil {
-			err = fmt.Errorf("unsupported fee asset")
-			return
-		}
-		return fc.FeeCoin(coinID)
-	}
-
 	bondChecker := func(ctx context.Context, assetID uint32, version uint16, coinID []byte) (amt, lockTime, confs int64,
 		acct account.AccountID, err error) {
 		bc := bonders[assetID]
@@ -1023,9 +929,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	authCfg := auth.Config{
 		Storage:          storage,
 		Signer:           signer{cfg.DEXPrivKey},
-		FeeAddress:       feeAddresser,
-		FeeAssets:        feeAssets,
-		FeeChecker:       feeChecker,
 		BondAssets:       bondAssets,
 		BondTxParser:     bondTxParser,
 		BondChecker:      bondChecker,
@@ -1225,7 +1128,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
-	cfgResp, err := newConfigResponse(cfg, feeAssets, bondAssets, cfgAssets, cfgMarkets)
+	cfgResp, err := newConfigResponse(cfg, bondAssets, cfgAssets, cfgMarkets)
 	if err != nil {
 		return nil, err
 	}
@@ -1458,11 +1361,6 @@ func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, 
 	}
 
 	return
-}
-
-// Accounts returns data for all accounts.
-func (dm *DEX) Accounts() ([]*db.Account, error) {
-	return dm.storage.Accounts()
 }
 
 // AccountInfo returns data for an account.

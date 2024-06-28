@@ -36,7 +36,6 @@ const (
 	orderBookRoute             = "orderbook"
 	getDEXConfRoute            = "getdexconfig"
 	bondAssetsRoute            = "bondassets"
-	registerRoute              = "register"
 	postBondRoute              = "postbond"
 	bondOptionsRoute           = "bondopts"
 	tradeRoute                 = "trade"
@@ -113,7 +112,6 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	toggleWalletStatusRoute:    handleToggleWalletStatus,
 	orderBookRoute:             handleOrderBook,
 	getDEXConfRoute:            handleGetDEXConfig,
-	registerRoute:              handleRegister,
 	postBondRoute:              handlePostBond,
 	bondOptionsRoute:           handleBondOptions,
 	bondAssetsRoute:            handleBondAssets,
@@ -390,45 +388,6 @@ func handleDiscoverAcct(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 	return createResponse(discoverAcctRoute, &paid, nil)
 }
 
-// handleRegister handles requests for register. *msgjson.ResponsePayload.Error
-// is empty if successful. DEPRECATED BY postbond. (V0PURGE)
-func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseRegisterArgs(params)
-	if err != nil {
-		return usage(registerRoute, err)
-	}
-	defer form.AppPass.Clear()
-	assetID := uint32(42)
-	if form.Asset != nil {
-		assetID = *form.Asset
-	}
-	exchange, err := s.core.GetDEXConfig(form.Addr, form.Cert)
-	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCGetDEXConfigError, Message: err.Error()}
-		return createResponse(registerRoute, nil, resErr)
-	}
-	symb := dex.BipIDSymbol(assetID)
-	feeAsset := exchange.RegFees[symb]
-	if feeAsset == nil {
-		errMsg := fmt.Sprintf("dex does not support asset %v for registration", symb)
-		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
-		return createResponse(registerRoute, nil, resErr)
-	}
-	fee := feeAsset.Amt
-
-	if fee != form.Fee {
-		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.Addr, fee, form.Fee)
-		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
-		return createResponse(registerRoute, nil, resErr)
-	}
-	res, err := s.core.Register(form)
-	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCRegisterError, Message: err.Error()}
-		return createResponse(registerRoute, nil, resErr)
-	}
-	return createResponse(registerRoute, res, nil)
-}
-
 func handleBondOptions(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	form, err := parseBondOptsArgs(params)
 	if err != nil {
@@ -459,7 +418,7 @@ func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		exchCfg, err = s.core.GetDEXConfig(form.Addr, form.Cert)
 		if err != nil {
 			resErr := &msgjson.Error{Code: msgjson.RPCGetDEXConfigError, Message: err.Error()}
-			return createResponse(registerRoute, nil, resErr)
+			return createResponse(postBondRoute, nil, resErr)
 		}
 	}
 	// Registration with different assets will be supported in the future, but
@@ -1436,24 +1395,6 @@ var helpMsgs = map[string]helpMsg{
         "units" (string): Unit of measure for amounts.
       },...
     ]`,
-	},
-	registerRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" fee assetID ("cert")`,
-		cmdSummary: `Register for DEX. An ok response does not mean that registration is complete.
-Registration is complete after the fee transaction has been confirmed.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    addr (string): The DEX address to register for.
-    fee (int): The DEX fee.
-    assetID (int): The asset ID with which to pay the fee.
-    cert (string): Optional. The TLS certificate path.`,
-		returns: `Returns:
-    {
-      "feeID" (string): The fee transactions's txid and output index.
-      "reqConfirms" (int): The number of confirmations required to start trading.
-    }`,
 	},
 	postBondRoute: {
 		pwArgsShort: `"appPass"`,
