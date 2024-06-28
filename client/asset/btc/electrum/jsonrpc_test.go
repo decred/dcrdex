@@ -4,6 +4,7 @@
 package electrum
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 )
@@ -11,23 +12,28 @@ import (
 func Test_floatString_UnmarshalJSON(t *testing.T) {
 	tests := []struct {
 		name    string
-		arg     []byte
+		arg     any
 		wantErr bool
 	}{
 		{
-			name: "float64",
-			arg:  []byte{49, 50, 46, 50, 51}, // 12.23
+			name: "float",
+			arg:  12.23,
 		},
 		{
-			name: "string float64",
-			arg:  []byte{34, 49, 50, 46, 50, 51, 34}, // "12.23"
+			name: "string float",
+			arg:  "12.23",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			argByte, err := json.Marshal(tt.arg)
+			if err != nil {
+				t.Errorf("%s: json.Marshal error: %v", tt.name, err)
+			}
+
 			var fs floatString
-			if err := fs.UnmarshalJSON(tt.arg); (err != nil) != tt.wantErr {
+			if err := fs.UnmarshalJSON(argByte); (err != nil) != tt.wantErr {
 				t.Errorf("%s: error = %v, wantErr %v", tt.name, err, tt.wantErr)
 			}
 
