@@ -287,58 +287,6 @@ func TestParseGetDEXConfigArgs(t *testing.T) {
 	}
 }
 
-func TestParseRegisterArgs(t *testing.T) {
-	paramsWithFee := func(fee, assetID string) *RawParams {
-		pw := encode.PassBytes("password123")
-		pwArgs := []encode.PassBytes{pw}
-		args := []string{"dex", fee, assetID, "cert"}
-		return &RawParams{PWArgs: pwArgs, Args: args}
-	}
-	tests := []struct {
-		name    string
-		params  *RawParams
-		wantErr error
-	}{{
-		name:   "ok",
-		params: paramsWithFee("1000", "42"),
-	}, {
-		name:    "fee not int",
-		params:  paramsWithFee("1000.0", "42"),
-		wantErr: errArgs,
-	}, {
-		name:    "asset not int",
-		params:  paramsWithFee("1000", "asdf"),
-		wantErr: errArgs,
-	}}
-	for _, test := range tests {
-		reg, err := parseRegisterArgs(test.params)
-		if test.wantErr != nil {
-			if errors.Is(err, test.wantErr) {
-				continue
-			}
-			t.Fatalf("expected error for test %v", test.name)
-		}
-		if err != nil {
-			t.Fatalf("unexpected error %v for test %s", err, test.name)
-		}
-		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
-			t.Fatalf("appPass doesn't match")
-		}
-		if reg.Addr != test.params.Args[0] {
-			t.Fatalf("url doesn't match")
-		}
-		if fmt.Sprint(reg.Fee) != test.params.Args[1] {
-			t.Fatalf("fee doesn't match")
-		}
-		if fmt.Sprint(*reg.Asset) != test.params.Args[2] {
-			t.Fatalf("assetID doesn't match")
-		}
-		if string(reg.Cert.([]byte)) != test.params.Args[3] {
-			t.Fatalf("cert doesn't match")
-		}
-	}
-}
-
 func TestParseHelpArgs(t *testing.T) {
 	tests := []struct {
 		name    string

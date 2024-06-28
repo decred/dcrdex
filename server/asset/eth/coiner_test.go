@@ -92,7 +92,6 @@ func TestNewRedeemCoin(t *testing.T) {
 				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
-			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 			assetID:      BipID,
 			log:          tLogger,
 		}
@@ -210,7 +209,6 @@ func TestNewSwapCoin(t *testing.T) {
 				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
-			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 			atomize:      dexeth.WeiToGwei,
 		}
 		sc, err := eth.newSwapCoin(test.coinID, test.contract)
@@ -334,7 +332,6 @@ func TestConfirmations(t *testing.T) {
 				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
-			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 			atomize:      dexeth.WeiToGwei,
 		}
 

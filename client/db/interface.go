@@ -49,11 +49,6 @@ type DB interface {
 	BondRefunded(host string, assetID uint32, bondCoinID []byte) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(host string) error
-	// AccountProof retrieves the AccountPoof value specified by url. DEPRECATED
-	AccountProof(host string) (*AccountProof, error)
-	// StoreAccountProof stores an AccountProof, marking the account as paid
-	// with the legacy registration fee. DEPRECATED
-	StoreAccountProof(proof *AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error

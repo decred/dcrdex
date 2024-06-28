@@ -50,13 +50,11 @@ var (
 	tLotSize  uint64 = 1e7
 	tRateStep uint64 = 100
 	tDCR             = &dex.Asset{
-		ID:           42,
-		Symbol:       "dcr",
-		Version:      version,
-		SwapSize:     dexdcr.InitTxSize,
-		SwapSizeBase: dexdcr.InitTxSizeBase,
-		MaxFeeRate:   24, // FundOrder and swap/redeem fallback when estimation fails
-		SwapConf:     1,
+		ID:         42,
+		Symbol:     "dcr",
+		Version:    version,
+		MaxFeeRate: 24, // FundOrder and swap/redeem fallback when estimation fails
+		SwapConf:   1,
 	}
 	optimalFeeRate uint64 = 22
 	tErr                  = fmt.Errorf("test error")
@@ -822,7 +820,7 @@ func TestAvailableFund(t *testing.T) {
 	// Add 1 unspent output and check balance
 	var littleLots uint64 = 6
 	littleOrder := tLotSize * littleLots
-	littleFunds := calc.RequiredOrderFunds(littleOrder, dexdcr.P2PKHInputSize, littleLots, tDCR)
+	littleFunds := calc.RequiredOrderFunds(littleOrder, dexdcr.P2PKHInputSize, littleLots, dexdcr.InitTxSizeBase, dexdcr.InitTxSize, tDCR.MaxFeeRate)
 	addUtxo(littleFunds, 0, false)
 	bal, err = wallet.Balance()
 	if err != nil {
@@ -860,7 +858,7 @@ func TestAvailableFund(t *testing.T) {
 	var lottaLots uint64 = 100
 	lottaOrder := tLotSize * 100
 	// Add funding for an extra input to accommodate the later combined tests.
-	lottaFunds := calc.RequiredOrderFunds(lottaOrder, 2*dexdcr.P2PKHInputSize, lottaLots, tDCR)
+	lottaFunds := calc.RequiredOrderFunds(lottaOrder, 2*dexdcr.P2PKHInputSize, lottaLots, dexdcr.InitTxSizeBase, dexdcr.InitTxSize, tDCR.MaxFeeRate)
 	addUtxo(lottaFunds, 1, false)
 	bal, err = wallet.Balance()
 	if err != nil {
@@ -990,7 +988,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	// Not enough to cover transaction fees.
-	tweak := float64(littleFunds+lottaFunds-calc.RequiredOrderFunds(extraLottaOrder, 2*dexdcr.P2PKHInputSize, extraLottaLots, tDCR)+1) / 1e8
+	tweak := float64(littleFunds+lottaFunds-calc.RequiredOrderFunds(extraLottaOrder, 2*dexdcr.P2PKHInputSize, extraLottaLots, dexdcr.InitTxSizeBase, dexdcr.InitTxSize, tDCR.MaxFeeRate)+1) / 1e8
 	node.unspent[0].Amount -= tweak
 	setOrderValue(extraLottaOrder)
 	_, _, _, err = wallet.FundOrder(ord)
@@ -1291,7 +1289,7 @@ func TestFundMultiOrder(t *testing.T) {
 
 	requiredForOrder := func(value, maxSwapCount uint64) int64 {
 		inputSize := uint64(dexdcr.P2PKHInputSize)
-		return int64(calc.RequiredOrderFundsAlt(value, inputSize, maxSwapCount,
+		return int64(calc.RequiredOrderFunds(value, inputSize, maxSwapCount,
 			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, maxFeeRate))
 	}
 
@@ -3921,31 +3919,6 @@ func TestPreRedeem(t *testing.T) {
 	// Just a sanity check.
 	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("best case > worst case")
-	}
-}
-
-func TestEstimateRegistrationTxFee(t *testing.T) {
-	wallet, _, shutdown := tNewWallet()
-	defer shutdown()
-
-	const inputCount = 5
-	const txSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize
-	wallet.config().feeRateLimit = 100
-	wallet.config().fallbackFeeRate = 30
-
-	estimate := wallet.EstimateRegistrationTxFee(50)
-	if estimate != 50*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", 50*txSize, estimate)
-	}
-
-	estimate = wallet.EstimateRegistrationTxFee(0)
-	if estimate != wallet.config().fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.config().fallbackFeeRate*txSize, estimate)
-	}
-
-	estimate = wallet.EstimateRegistrationTxFee(wallet.config().feeRateLimit + 1)
-	if estimate != wallet.config().fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.config().fallbackFeeRate*txSize, estimate)
 	}
 }
 

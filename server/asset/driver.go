@@ -15,11 +15,6 @@ var (
 	childTokens = make(map[uint32]map[uint32]*dex.Token)
 )
 
-// AddresserFactory describes a type that can construct new Addressers.
-type AddresserFactory interface {
-	NewAddresser(acctXPub string, keyIndexer KeyIndexer, network dex.Network) (Addresser, uint32, error)
-}
-
 // driverBase defines a base set of driver methods common to both base-chain and
 // degenerate assets.
 type driverBase interface {
@@ -83,21 +78,6 @@ func UnitInfo(assetID uint32) (dex.UnitInfo, error) {
 	}
 	return drv.UnitInfo(), nil
 
-}
-
-// NewAddresser creates an Addresser for a named asset for deriving addresses
-// for the given extended public key on a certain network while maintaining the
-// address index in an external HDKeyIndex.
-func NewAddresser(assetID uint32, acctXPub string, keyIndexer KeyIndexer, network dex.Network) (Addresser, uint32, error) {
-	drv, ok := drivers[assetID]
-	if !ok {
-		return nil, 0, fmt.Errorf("unknown asset driver %d", assetID)
-	}
-	af, ok := drv.(AddresserFactory)
-	if !ok {
-		return nil, 0, fmt.Errorf("asset does not support NewAddresser")
-	}
-	return af.NewAddresser(acctXPub, keyIndexer, network)
 }
 
 // Register should be called by the init function of an asset's package.

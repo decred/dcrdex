@@ -9,18 +9,15 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
-	dexzec "decred.org/dcrdex/dex/networks/zec"
 )
 
 var (
 	tLotSize uint64 = 1e6
 	tZCL            = &dex.Asset{
-		ID:           BipID,
-		Symbol:       "zcl",
-		SwapSize:     dexzec.InitTxSize,
-		SwapSizeBase: dexzec.InitTxSizeBase,
-		MaxFeeRate:   100,
-		SwapConf:     1,
+		ID:         BipID,
+		Symbol:     "zcl",
+		MaxFeeRate: 100,
+		SwapConf:   1,
 	}
 )
 

@@ -22,7 +22,6 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
 // const alphaAddress = "rltc1qjld4f85m96rr77035c5yuhkz8apxlkkla0ftmz"
@@ -30,13 +29,11 @@ import (
 var (
 	tLotSize uint64 = 1e6
 	tLTC            = &dex.Asset{
-		ID:           2,
-		Symbol:       "ltc",
-		Version:      version,
-		SwapSize:     dexbtc.InitTxSizeSegwit,
-		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
-		MaxFeeRate:   10,
-		SwapConf:     1,
+		ID:         2,
+		Symbol:     "ltc",
+		Version:    version,
+		MaxFeeRate: 10,
+		SwapConf:   1,
 	}
 )
 

@@ -31,19 +31,16 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
 var (
 	tLotSize uint64 = 1e6
 	tDASH           = &dex.Asset{
-		ID:           5,
-		Symbol:       "dash",
-		Version:      version,
-		SwapSize:     dexbtc.InitTxSize,
-		SwapSizeBase: dexbtc.InitTxSizeBase,
-		MaxFeeRate:   20,
-		SwapConf:     2,
+		ID:         5,
+		Symbol:     "dash",
+		Version:    version,
+		MaxFeeRate: 20,
+		SwapConf:   2,
 	}
 )
 

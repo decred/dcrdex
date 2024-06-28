@@ -65,7 +65,6 @@ type TCore struct {
 	balanceErr       error
 	syncFeed         core.BookFeed
 	syncErr          error
-	regErr           error
 	postBondErr      error
 	loginErr         error
 	logoutErr        error
@@ -105,7 +104,6 @@ func (c *TCore) AddDEX(appPW []byte, dexAddr string, certI any) error {
 func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI any) (*core.Exchange, bool, error) {
 	return nil, false, nil
 }
-func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
 func (c *TCore) PostBond(r *core.PostBondForm) (*core.PostBondResult, error) {
 	return nil, c.postBondErr
 }
@@ -114,9 +112,6 @@ func (c *TCore) RedeemPrepaidBond(appPW []byte, code []byte, host string, certI 
 }
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	return c.postBondErr
-}
-func (c *TCore) EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error) {
-	return 0, nil
 }
 func (c *TCore) BondsFeeBuffer(assetID uint32) (uint64, error) {
 	return 222, nil
@@ -510,41 +505,6 @@ func TestConnectBindError(t *testing.T) {
 	}
 }
 
-func TestAPIRegister(t *testing.T) {
-	writer := new(TWriter)
-	var body any
-	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
-	defer shutdown()
-
-	ensure := func(want string) {
-		t.Helper()
-		ensureResponse(t, s.apiRegister, want, reader, writer, body, nil)
-	}
-
-	goodBody := &registrationForm{
-		Addr:     "test",
-		Password: []byte("pass"),
-	}
-	body = goodBody
-	ensure(`{"ok":true}`)
-
-	// Likely not going to happen, but check the read error.
-	reader.err = tErr
-	ensure("error reading JSON message")
-	reader.err = nil
-
-	// Send nonsense
-	body = []byte("nonsense")
-	ensure("failed to unmarshal JSON request")
-	body = goodBody
-
-	// Registration error
-	tCore.regErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
-	tCore.regErr = nil
-}
-
 func TestAPILogin(t *testing.T) {
 	writer := new(TWriter)
 	var body any
@@ -578,12 +538,7 @@ func TestAPILogin(t *testing.T) {
 	tCore.loginErr = nil
 }
 
-func TestAPISendAndAPIWithdraw(t *testing.T) {
-	testAPISendAndAPIWithdraw(t, true)
-	testAPISendAndAPIWithdraw(t, false)
-}
-
-func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
+func TestSend(t *testing.T) {
 	writer := new(TWriter)
 	var body any
 	reader := new(TReader)
@@ -596,11 +551,7 @@ func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
 		if err != nil {
 			t.Fatalf("error creating request: %v", err)
 		}
-		if !withdraw {
-			s.apiSend(writer, req)
-		} else {
-			s.apiWithdraw(writer, req)
-		}
+		s.apiSend(writer, req)
 		if len(writer.b) == 0 {
 			t.Fatalf("no response")
 		}
@@ -612,7 +563,7 @@ func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
 		return resp.OK
 	}
 
-	body = &sendOrWithdrawForm{
+	body = &sendForm{
 		Pass: encode.PassBytes("dummyAppPass"),
 	}
 

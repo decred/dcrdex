@@ -440,9 +440,6 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	}
 	// Look for penalties to replace.
 	expectedServerTier := state.LiveStrength
-	if state.Rep.Legacy {
-		expectedServerTier++
-	}
 	reportedServerTier := state.Rep.EffectiveTier()
 	if reportedServerTier < expectedServerTier {
 		state.toComp = expectedServerTier - reportedServerTier
@@ -820,7 +817,7 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 	}
 
 	dc.acct.authMtx.Lock()
-	dc.updateReputation(postBondRes.Reputation, postBondRes.Tier, nil, nil)
+	dc.updateReputation(postBondRes.Reputation)
 	dc.acct.authMtx.Unlock()
 
 	return postBondRes, nil
@@ -1020,7 +1017,7 @@ func (c *Core) RedeemPrepaidBond(appPW []byte, code []byte, host string, certI a
 	}
 
 	dc.acct.authMtx.Lock()
-	dc.updateReputation(postBondRes.Reputation, postBondRes.Tier, nil, nil)
+	dc.updateReputation(postBondRes.Reputation)
 	dc.acct.bonds = append(dc.acct.bonds, dbBond)
 	dc.acct.authMtx.Unlock()
 
@@ -1708,13 +1705,7 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 		}
 	}
 
-	if pbr.Reputation != nil {
-		dc.acct.rep = *pbr.Reputation
-	} else {
-		// We get no score updates before v2, so we assume no change in
-		// penalties.
-		dc.acct.rep.BondedTier = pbr.Tier + int64(dc.acct.rep.Penalties)
-	}
+	dc.acct.rep = *pbr.Reputation
 	effectiveTier := dc.acct.rep.EffectiveTier()
 	bondedTier := dc.acct.rep.BondedTier
 	targetTier := dc.acct.targetTier

@@ -34,6 +34,7 @@ import (
 
 const (
 	dummySize    = 50
+	tInitTxSize  = 150
 	tRedeemSize  = 50
 	btcLotSize   = 10_0000 // 0.001
 	btcRateStep  = 1_000
@@ -442,8 +443,6 @@ func (b *TBackend) Redemption(redemptionID, contractID, contractData []byte) (as
 	return b.utxo(redemptionID)
 }
 func (b *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate { return nil }
-func (b *TBackend) InitTxSize() uint32                              { return dummySize }
-func (b *TBackend) InitTxSizeBase() uint32                          { return dummySize / 2 }
 func (b *TBackend) CheckSwapAddress(string) bool                    { return b.addrChecks }
 func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
@@ -508,8 +507,12 @@ func (b *tAccountBackend) ValidateSignature(addr string, pubkey, msg, sig []byte
 	return b.sigErr
 }
 
+func (b *tAccountBackend) InitTxSize() uint64 {
+	return tInitTxSize
+}
+
 func (b *tAccountBackend) RedeemSize() uint64 {
-	return 21_000
+	return tRedeemSize
 }
 
 type tUTXO struct {
@@ -592,70 +595,55 @@ func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin 
 
 var assetBTC = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:           0,
-		Symbol:       "btc",
-		MaxFeeRate:   14,
-		SwapSize:     dummySize,
-		SwapSizeBase: dummySize / 2,
-		SwapConf:     2,
+		ID:         0,
+		Symbol:     "btc",
+		MaxFeeRate: 14,
+		SwapConf:   2,
 	},
 }
 
 var assetDCR = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:           42,
-		Symbol:       "dcr",
-		MaxFeeRate:   10,
-		SwapSize:     dummySize,
-		SwapSizeBase: dummySize / 2,
-		SwapConf:     2,
+		ID:         42,
+		Symbol:     "dcr",
+		MaxFeeRate: 10,
+		SwapConf:   2,
 	},
 }
 
 var assetETH = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:           60,
-		Symbol:       "eth",
-		MaxFeeRate:   10,
-		SwapSize:     dummySize,
-		SwapSizeBase: dummySize,
-		RedeemSize:   tRedeemSize,
-		SwapConf:     2,
+		ID:         60,
+		Symbol:     "eth",
+		MaxFeeRate: 10,
+		SwapConf:   2,
 	},
 }
 
 var assetToken = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:           60001,
-		Symbol:       "usdc.eth",
-		MaxFeeRate:   12,
-		SwapSize:     dummySize + 10,
-		SwapSizeBase: dummySize + 10,
-		RedeemSize:   tRedeemSize + 10,
-		SwapConf:     2,
+		ID:         60001,
+		Symbol:     "usdc.eth",
+		MaxFeeRate: 12,
+		SwapConf:   2,
 	},
 }
 
 var assetMATIC = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:           966,
-		Symbol:       "polygon",
-		MaxFeeRate:   10,
-		SwapSize:     dummySize,
-		SwapSizeBase: dummySize,
-		RedeemSize:   tRedeemSize,
-		SwapConf:     2,
+		ID:         966,
+		Symbol:     "polygon",
+		MaxFeeRate: 10,
+		SwapConf:   2,
 	},
 }
 
 var assetUnknown = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:           54321,
-		Symbol:       "buk",
-		MaxFeeRate:   10,
-		SwapSize:     2,
-		SwapSizeBase: 1,
-		SwapConf:     0,
+		ID:         54321,
+		Symbol:     "buk",
+		MaxFeeRate: 10,
+		SwapConf:   0,
 	},
 }
 
@@ -996,7 +984,7 @@ func TestLimit(t *testing.T) {
 	limit.Side = msgjson.SellOrderNum
 	limit.Base = assetETH.ID
 	limit.RedeemSig = &msgjson.RedeemSig{}
-	reqFunds := calc.RequiredOrderFunds(qty, 0, lots, &assetETH.Asset)
+	reqFunds := calc.RequiredOrderFunds(qty, 0, lots, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate)
 	oRig.eth.bal = reqFunds - 1 // 1 gwei too few
 	ensureErr("not enough for order", sendLimit(), msgjson.FundingError)
 
@@ -1006,7 +994,7 @@ func TestLimit(t *testing.T) {
 
 	// Just enough for the order, but not enough because there are pending
 	// redeems in Swapper.
-	redeemCost := assetETH.RedeemSize * assetETH.MaxFeeRate
+	redeemCost := tRedeemSize * assetETH.MaxFeeRate
 	oRig.matchNegotiator.redeems[assetETH.ID] = 1
 	oRig.eth.bal = reqFunds + redeemCost - 1
 	ensureErr("not enough for active redeems", sendLimit(), msgjson.FundingError)
@@ -1029,7 +1017,7 @@ func TestLimit(t *testing.T) {
 
 	// With funding from account based quote asset. Fail first.
 	limit.Quote = assetMATIC.ID
-	reqFunds = calc.RequiredOrderFunds(qty, 0, lots, &assetMATIC.Asset)
+	reqFunds = calc.RequiredOrderFunds(qty, 0, lots, tInitTxSize, tInitTxSize, assetMATIC.Asset.MaxFeeRate)
 	oRig.polygon.bal = reqFunds - 1
 	ensureErr("not enough to order account-based quote", sendLimit(), msgjson.FundingError)
 
@@ -1039,10 +1027,10 @@ func TestLimit(t *testing.T) {
 
 	// Switch directions.
 	limit.Side = msgjson.SellOrderNum
-	oRig.eth.bal = calc.RequiredOrderFunds(qty, 0, lots, &assetETH.Asset)
+	oRig.eth.bal = calc.RequiredOrderFunds(qty, 0, lots, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate)
 
 	// Not enough to redeem.
-	redeemCost = assetMATIC.RedeemSize * assetETH.MaxFeeRate
+	redeemCost = tRedeemSize * assetETH.MaxFeeRate
 	oRig.polygon.bal = lots*redeemCost - 1
 	ensureErr("not enough to redeem account-based quote", sendLimit(), msgjson.FundingError)
 
@@ -1139,7 +1127,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 	// Redeem to a quote asset.
 	mkt.Quote = assetETH.ID
 	mkt.RedeemSig = &msgjson.RedeemSig{}
-	redeemCost := assetETH.RedeemSize * assetETH.MaxFeeRate
+	redeemCost := tRedeemSize * assetETH.MaxFeeRate
 	oRig.eth.bal = sellLots*redeemCost - 1
 	ensureErr("can't redeem to acct-based quote", sendMarket(), msgjson.FundingError)
 
@@ -1234,7 +1222,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 	ensureErr("insufficient account-based funding", sendMarket(), msgjson.FundingError)
 
 	// With enough.
-	oRig.eth.bal = calc.RequiredOrderFunds(mktBuyQty, 0, 1, &assetETH.Asset)
+	oRig.eth.bal = calc.RequiredOrderFunds(mktBuyQty, 0, 1, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate)
 	ensureSuccess("account-based funding")
 
 }

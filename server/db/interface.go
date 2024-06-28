@@ -216,11 +216,8 @@ type OrderArchiver interface {
 
 // Account holds data returned by Accounts.
 type Account struct {
-	AccountID  account.AccountID `json:"accountid"`
-	Pubkey     dex.Bytes         `json:"pubkey"`
-	FeeAsset   uint32            `json:"feeasset"`
-	FeeAddress string            `json:"feeaddress"` // DEPRECATED
-	FeeCoin    dex.Bytes         `json:"feecoin"`    // DEPRECATED
+	AccountID account.AccountID `json:"accountid"`
+	Pubkey    dex.Bytes         `json:"pubkey"`
 }
 
 // Bond represents a time-locked fidelity bond posted by a user.
@@ -249,16 +246,7 @@ type AccountArchiver interface {
 	// time.Now().Add(bondExpiry). The legacy bool return refers to the legacy
 	// registration fee system, and legacyPaid indicates if the account has a
 	// recorded fee coin (paid legacy fee).
-	Account(acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, activeBonds []*Bond, legacy, legacyPaid bool)
-
-	// CreateAccount stores a new account with an assigned registration address
-	// for a specific asset. The account is considered unpaid until PayAccount
-	// is used to set the payment transaction details. This is intended for use
-	// with the old registration fee system, since with the bond system,
-	// accounts are not to be created until a bond transaction is created and
-	// broadcasted. The account is considered unpaid until PayAccount is used to
-	// set the registration fee payment details. (V0PURGE)
-	CreateAccount(acct *account.Account, assetID uint32, regAddr string) error
+	Account(acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, activeBonds []*Bond)
 
 	// CreateAccountWithBond creates a new account with the given bond. This is
 	// used for the new postbond request protocol. The bond tx should be
@@ -275,18 +263,6 @@ type AccountArchiver interface {
 	FetchPrepaidBond(bondCoinID []byte) (strength uint32, lockTime int64, err error)
 	DeletePrepaidBond(coinID []byte) error
 	StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime int64) error
-
-	// AccountRegAddr gets any legacy registration fee address and the
-	// corresponding asset ID for the account. (V0PURGE)
-	AccountRegAddr(account.AccountID) (string, uint32, error)
-
-	// PayAccount sets the registration fee payment transaction details for the
-	// account, completing the registration process for old fee system.
-	// (V0PURGE)
-	PayAccount(account.AccountID, []byte) error
-
-	// Accounts returns data for all accounts.
-	Accounts() ([]*Account, error)
 
 	// AccountInfo returns data for an account.
 	AccountInfo(account.AccountID) (*Account, error)

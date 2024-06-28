@@ -19,15 +19,15 @@ import (
 // legacy registration fee address and transaction recorded. If the account does
 // not exist or there is in an error retrieving any data, a nil *account.Account
 // is returned.
-func (a *Archiver) Account(aid account.AccountID, bondExpiry time.Time) (acct *account.Account, bonds []*db.Bond, legacy, legacyPaid bool) {
-	acct, legacy, legacyPaid, err := getAccount(a.db, a.tables.accounts, aid)
+func (a *Archiver) Account(aid account.AccountID, bondExpiry time.Time) (acct *account.Account, bonds []*db.Bond) {
+	acct, err := getAccount(a.db, a.tables.accounts, aid)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return nil, nil, false, false
+		return nil, nil
 	case err == nil:
 	default:
 		log.Errorf("getAccount error: %v", err)
-		return nil, nil, false, false
+		return nil, nil
 	}
 
 	bonds, err = getBondsForAccount(a.db, a.tables.bonds, aid, bondExpiry.Unix())
@@ -37,37 +37,10 @@ func (a *Archiver) Account(aid account.AccountID, bondExpiry time.Time) (acct *a
 	case err == nil:
 	default:
 		log.Errorf("getBondsForAccount error: %v", err)
-		return nil, nil, false, false
+		return nil, nil
 	}
 
-	return acct, bonds, legacy, legacyPaid
-}
-
-// Accounts returns data for all accounts.
-func (a *Archiver) Accounts() ([]*db.Account, error) {
-	stmt := fmt.Sprintf(internal.SelectAllAccounts, a.tables.accounts)
-	rows, err := a.db.Query(stmt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var accts []*db.Account
-	var feeAddress sql.NullString
-	var feeAsset sql.NullInt32
-	for rows.Next() {
-		a := new(db.Account)
-		err = rows.Scan(&a.AccountID, &a.Pubkey, &feeAsset, &feeAddress, &a.FeeCoin)
-		if err != nil {
-			return nil, err
-		}
-		a.FeeAsset = uint32(feeAsset.Int32)
-		a.FeeAddress = feeAddress.String
-		accts = append(accts, a)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	return accts, nil
+	return acct, bonds
 }
 
 // AccountInfo returns data for an account.
@@ -75,47 +48,13 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 	// bondExpiry time.Time and bonds return needed?
 	stmt := fmt.Sprintf(internal.SelectAccountInfo, a.tables.accounts)
 	acct := new(db.Account)
-	var feeAddress sql.NullString
-	var feeAsset sql.NullInt32
-	if err := a.db.QueryRow(stmt, aid).Scan(&acct.AccountID, &acct.Pubkey, &feeAsset,
-		&feeAddress, &acct.FeeCoin); err != nil {
+	if err := a.db.QueryRow(stmt, aid).Scan(&acct.AccountID, &acct.Pubkey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			err = db.ArchiveError{Code: db.ErrAccountUnknown}
 		}
 		return nil, err
 	}
-
-	acct.FeeAsset = uint32(feeAsset.Int32)
-	acct.FeeAddress = feeAddress.String
 	return acct, nil
-}
-
-// CreateAccount creates an entry for a new account in the accounts table.
-// DEPRECATED: See CreateAccountWithBond. (V0PURGE)
-func (a *Archiver) CreateAccount(acct *account.Account, assetID uint32, regAddr string) error {
-	ai, err := a.AccountInfo(acct.ID)
-	if err == nil {
-		if ai.FeeAddress != regAddr || ai.FeeAsset != assetID {
-			return db.ArchiveError{Code: db.ErrAccountBadFeeInfo}
-		}
-		// Account exists. Respond with either a fee address, or their (paid)
-		// fee coin.
-		if len(ai.FeeCoin) == 0 {
-			return nil // fee address and asset match, just unpaid
-		}
-		return &db.ArchiveError{Code: db.ErrAccountExists, Detail: ai.FeeCoin.String()}
-		// With tiers, "ErrAccountSuspended" is no more. Instead, the caller
-		// should check the user's tier to decide if the caller (the legacy
-		// 'register' handler) should respond with msgjson.AccountSuspendedError
-		// or msgjson.AccountExistsError.
-	}
-	if !db.IsErrAccountUnknown(err) {
-		log.Errorf("AccountInfo error for ID %s: %v", acct.ID, err)
-		return db.ArchiveError{Code: db.ErrGeneralFailure}
-	}
-
-	// ErrAccountUnknown, so create the account.
-	return createAccount(a.db, a.tables.accounts, acct, assetID, regAddr)
 }
 
 // CreateAccountWithBond creates a new account with a fidelity bond.
@@ -173,25 +112,6 @@ func (a *Archiver) StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime
 		if _, err := a.db.ExecContext(a.ctx, stmt, coinIDs[i], strength, lockTime); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-// AccountRegAddr retrieves the registration fee address and the corresponding
-// asset ID created for the the specified account.
-func (a *Archiver) AccountRegAddr(aid account.AccountID) (string, uint32, error) {
-	return accountRegAddr(a.db, a.tables.accounts, aid)
-}
-
-// PayAccount sets the registration fee payment details for the account,
-// effectively completing the registration process.
-func (a *Archiver) PayAccount(aid account.AccountID, coinID []byte) error {
-	ok, err := payAccount(a.db, a.tables.accounts, aid, coinID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("no accounts updated")
 	}
 	return nil
 }
@@ -266,10 +186,10 @@ func createAccountTables(db sqlQueryExecutor) error {
 // getAccount gets retrieves the account details, including the pubkey, a flag
 // indicating if the account was created with a legacy fee address (not a
 // fidelity bond), and a flag indicating if that legacy fee was paid.
-func getAccount(dbe sqlQueryer, tableName string, aid account.AccountID) (acct *account.Account, legacy, legacyPaid bool, err error) {
+func getAccount(dbe sqlQueryer, tableName string, aid account.AccountID) (acct *account.Account, err error) {
 	var pubkey []byte
 	stmt := fmt.Sprintf(internal.SelectAccount, tableName)
-	err = dbe.QueryRow(stmt, aid).Scan(&pubkey, &legacy, &legacyPaid)
+	err = dbe.QueryRow(stmt, aid).Scan(&pubkey)
 	if err != nil {
 		return
 	}
@@ -278,13 +198,6 @@ func getAccount(dbe sqlQueryer, tableName string, aid account.AccountID) (acct *
 		return
 	}
 	return
-}
-
-// createAccount creates an entry for the account in the accounts table.
-func createAccount(dbe sqlExecutor, tableName string, acct *account.Account, feeAsset uint32, regAddr string) error {
-	stmt := fmt.Sprintf(internal.CreateAccount, tableName)
-	_, err := dbe.Exec(stmt, acct.ID, acct.PubKey.SerializeCompressed(), feeAsset, regAddr)
-	return err
 }
 
 // createAccountForBond creates an entry for the account in the accounts table.
@@ -329,28 +242,4 @@ func getBondsForAccount(dbe sqlQueryer, tableName string, acct account.AccountID
 		return nil, err
 	}
 	return bonds, nil
-}
-
-// accountRegAddr gets the registration fee address and its asset ID created for
-// the specified account.
-func accountRegAddr(dbe sqlQueryer, tableName string, aid account.AccountID) (string, uint32, error) {
-	var addr string
-	var assetID sql.NullInt32
-	stmt := fmt.Sprintf(internal.SelectRegAddress, tableName)
-	err := dbe.QueryRow(stmt, aid).Scan(&assetID, &addr)
-	if err != nil {
-		return "", 0, err
-	}
-	return addr, uint32(assetID.Int32), nil
-}
-
-// payAccount sets the registration fee payment details.
-func payAccount(dbe sqlExecutor, tableName string, aid account.AccountID, coinID []byte) (bool, error) {
-	stmt := fmt.Sprintf(internal.SetRegOutput, tableName)
-	res, err := dbe.Exec(stmt, coinID, aid)
-	if err != nil {
-		return false, err
-	}
-	rows, err := res.RowsAffected()
-	return rows > 0, err
 }

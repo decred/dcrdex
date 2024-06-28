@@ -25,7 +25,6 @@ import (
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
@@ -90,27 +89,6 @@ func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
 // Name is the asset's name.
 func (d *Driver) Name() string {
 	return "Decred"
-}
-
-// NewAddresser creates an asset.Addresser for deriving addresses for the given
-// extended public key. The KeyIndexer will be used for discovering the current
-// child index, and storing the index as new addresses are generated with the
-// NextAddress method of the Addresser. The Backend must have been created with
-// NewBackend (or Setup) to initialize the chain parameters.
-func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network dex.Network) (asset.Addresser, uint32, error) {
-	var params NetParams
-	switch network {
-	case dex.Simnet:
-		params = chaincfg.SimNetParams()
-	case dex.Testnet:
-		params = chaincfg.TestNet3Params()
-	case dex.Mainnet:
-		params = chaincfg.MainNetParams()
-	default:
-		return nil, 0, fmt.Errorf("unknown network ID: %d", uint8(network))
-	}
-
-	return NewAddressDeriver(xPub, keyIndexer, params)
 }
 
 func init() {
@@ -429,17 +407,6 @@ func (dcr *Backend) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	return &wg, nil
 }
 
-// InitTxSize is an asset.Backend method that must produce the max size of a
-// standardized atomic swap initialization transaction.
-func (dcr *Backend) InitTxSize() uint32 {
-	return dexdcr.InitTxSize
-}
-
-// InitTxSizeBase is InitTxSize not including an input.
-func (dcr *Backend) InitTxSizeBase() uint32 {
-	return dexdcr.InitTxSizeBase
-}
-
 // FeeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
@@ -596,7 +563,7 @@ func ValidateXPub(xpub string) error {
 }
 
 func (*Backend) ValidateOrderFunding(swapVal, valSum, _, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
-	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, nfo)
+	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, dexdcr.InitTxSizeBase, dexdcr.InitTxSize, nfo.MaxFeeRate)
 	return valSum >= reqVal
 }
 

@@ -48,7 +48,7 @@ func unixMsNow() time.Time {
 type Storage interface {
 	// Account retrieves account info for the specified account ID and lock time
 	// threshold, which determines when a bond is considered expired.
-	Account(account.AccountID, time.Time) (acct *account.Account, bonds []*db.Bond, legacy, legacyPaid bool)
+	Account(account.AccountID, time.Time) (acct *account.Account, bonds []*db.Bond)
 
 	CreateAccountWithBond(acct *account.Account, bond *db.Bond) error
 	AddBond(acct account.AccountID, bond *db.Bond) error
@@ -56,10 +56,6 @@ type Storage interface {
 	FetchPrepaidBond(bondCoinID []byte) (strength uint32, lockTime int64, err error)
 	DeletePrepaidBond(coinID []byte) error
 	StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime int64) error
-
-	CreateAccount(acct *account.Account, feeAsset uint32, feeAddr string) error // DEPRECATED
-	AccountRegAddr(account.AccountID) (addr string, asset uint32, err error)    // DEPRECATED
-	PayAccount(account.AccountID, []byte) error                                 // DEPRECATED
 
 	AccountInfo(aid account.AccountID) (*db.Account, error)
 
@@ -123,8 +119,6 @@ type clientInfo struct {
 	tier         int64
 	score        int32
 	bonds        []*db.Bond // only confirmed and active, not pending
-
-	legacyFeePaid bool // deprecated with bonds
 }
 
 // not thread-safe
@@ -234,7 +228,6 @@ type AuthManager struct {
 	wg             sync.WaitGroup
 	storage        Storage
 	signer         Signer
-	checkFee       FeeChecker // legacy fee confs, amt, and address
 	parseBondTx    BondTxParser
 	checkBond      BondCoinChecker // fidelity bond amount, lockTime, acct, and confs
 	miaUserTimeout time.Duration
@@ -244,18 +237,12 @@ type AuthManager struct {
 	bondExpiry time.Duration // a bond is expired when time.Until(lockTime) < bondExpiry
 	bondAssets map[uint32]*msgjson.BondAsset
 
-	feeAddress func(assetID uint32) string  // DEPRECATED (V0PURGE)
-	feeAssets  map[uint32]*msgjson.FeeAsset // DEPRECATED (V0PURGE)
-
 	freeCancels      bool
 	penaltyThreshold int32
 	cancelThresh     float64
 
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
-
-	feeWaiterMtx sync.Mutex                     // DEPRECATED (V0PURGE)
-	feeWaiterIdx map[account.AccountID]struct{} // DEPRECATED
 
 	bondWaiterMtx sync.Mutex
 	bondWaiterIdx map[string]struct{}
@@ -395,15 +382,6 @@ type Config struct {
 	// and account ID, plus txn confirmations.
 	BondChecker BondCoinChecker
 
-	// FeeAddress retrieves a fresh registration fee address for an asset. It
-	// should return an empty string for an unsupported asset.
-	FeeAddress func(assetID uint32) string
-	// FeeAssets specifies the registration fee parameters for assets supported
-	// for registration.
-	FeeAssets map[string]*msgjson.FeeAsset
-	// FeeChecker is a method for getting the registration fee output info.
-	FeeChecker FeeChecker
-
 	// TxDataSources are sources of tx data for a coin ID.
 	TxDataSources map[uint32]TxDataSource
 
@@ -433,10 +411,6 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		penaltyThreshold *= -1
 	}
 	// Re-key the maps for efficiency in AuthManager methods.
-	feeAssets := make(map[uint32]*msgjson.FeeAsset, len(cfg.FeeAssets))
-	for _, asset := range cfg.FeeAssets {
-		feeAssets[asset.ID] = asset
-	}
 	bondAssets := make(map[uint32]*msgjson.BondAsset, len(cfg.BondAssets))
 	for _, asset := range cfg.BondAssets {
 		bondAssets[asset.ID] = asset
@@ -447,14 +421,11 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		signer:           cfg.Signer,
 		bondAssets:       bondAssets,
 		bondExpiry:       time.Duration(cfg.BondExpiry) * time.Second,
-		checkFee:         cfg.FeeChecker,   // e.g. dcr's FeeCoin
 		parseBondTx:      cfg.BondTxParser, // e.g. dcr's ParseBondTx
 		checkBond:        cfg.BondChecker,  // e.g. dcr's BondCoin
 		miaUserTimeout:   cfg.MiaUserTimeout,
 		unbookFun:        cfg.UserUnbooker,
 		route:            cfg.Route,
-		feeAddress:       cfg.FeeAddress,
-		feeAssets:        feeAssets,
 		freeCancels:      cfg.FreeCancels,
 		penaltyThreshold: penaltyThreshold,
 		cancelThresh:     cfg.CancelThreshold,
@@ -462,7 +433,6 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		users:            make(map[account.AccountID]*clientInfo),
 		conns:            make(map[uint64]*clientInfo),
 		unbookers:        make(map[account.AccountID]*time.Timer),
-		feeWaiterIdx:     make(map[account.AccountID]struct{}),
 		bondWaiterIdx:    make(map[string]struct{}),
 		matchOutcomes:    make(map[account.AccountID]*latestMatchOutcomes),
 		preimgOutcomes:   make(map[account.AccountID]*latestPreimageOutcomes),
@@ -472,8 +442,6 @@ func NewAuthManager(cfg *Config) *AuthManager {
 
 	// Unauthenticated
 	cfg.Route(msgjson.ConnectRoute, auth.handleConnect)
-	cfg.Route(msgjson.RegisterRoute, auth.handleRegister)   // DEPRECATED (V0PURGE)
-	cfg.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee) // DEPRECATED (V0PURGE)
 	cfg.Route(msgjson.PostBondRoute, auth.handlePostBond)
 	cfg.Route(msgjson.PreValidateBondRoute, auth.handlePreValidateBond)
 	cfg.Route(msgjson.MatchStatusRoute, auth.handleMatchStatus)
@@ -849,7 +817,7 @@ func (auth *AuthManager) UserReputation(user account.AccountID) (tier int64, sco
 }
 
 // userReputation computes the breakdown of a user's tier and score.
-func (auth *AuthManager) userReputation(bondTier int64, score int32, legacyFeePaid bool) *account.Reputation {
+func (auth *AuthManager) userReputation(bondTier int64, score int32) *account.Reputation {
 	var penalties int32
 	if score < 0 {
 		penalties = score / auth.penaltyThreshold
@@ -857,14 +825,13 @@ func (auth *AuthManager) userReputation(bondTier int64, score int32, legacyFeePa
 	return &account.Reputation{
 		BondedTier: bondTier,
 		Penalties:  uint16(penalties),
-		Legacy:     legacyFeePaid,
 		Score:      score,
 	}
 }
 
 // tier computes a user's tier from their conduct score and bond tier.
-func (auth *AuthManager) tier(bondTier int64, score int32, legacyFeePaid bool) int64 {
-	return auth.userReputation(bondTier, score, legacyFeePaid).EffectiveTier()
+func (auth *AuthManager) tier(bondTier int64, score int32) int64 {
+	return auth.userReputation(bondTier, score).EffectiveTier()
 }
 
 // computeUserReputation computes the user's tier given the provided score
@@ -877,12 +844,12 @@ func (auth *AuthManager) computeUserReputation(user account.AccountID, score int
 	if client == nil {
 		// Offline. Load active bonds and legacyFeePaid flag from DB.
 		lockTimeThresh := time.Now().Add(auth.bondExpiry)
-		_, bonds, _, legacyFeePaid := auth.storage.Account(user, lockTimeThresh)
+		_, bonds := auth.storage.Account(user, lockTimeThresh)
 		var bondTier int64
 		for _, bond := range bonds {
 			bondTier += int64(bond.Strength)
 		}
-		return auth.userReputation(bondTier, score, legacyFeePaid), false, false
+		return auth.userReputation(bondTier, score), false, false
 	}
 
 	client.mtx.Lock()
@@ -890,7 +857,7 @@ func (auth *AuthManager) computeUserReputation(user account.AccountID, score int
 	wasTier := client.tier
 	wasScore := client.score
 	bondTier := client.bondTier()
-	r = auth.userReputation(bondTier, score, client.legacyFeePaid)
+	r = auth.userReputation(bondTier, score)
 	client.tier = r.EffectiveTier()
 	client.score = score
 	scoreChanged = wasScore != score
@@ -1070,10 +1037,9 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 	details := "Ordering has been suspended for this account. Post additional bond to offset violations."
 	details = fmt.Sprintf("%s\nLast Broken Rule Details: %s\n%s", details, lastRule.Description(), extraDetails)
 	penalty := &msgjson.Penalty{
-		Rule:     lastRule,
-		Time:     uint64(time.Now().UnixMilli()),
-		Duration: math.MaxUint32, // deprecated
-		Details:  details,
+		Rule:    lastRule,
+		Time:    uint64(time.Now().UnixMilli()),
+		Details: details,
 	}
 	penaltyNote := &msgjson.PenaltyNote{
 		Penalty: penalty,
@@ -1254,10 +1220,10 @@ func (auth *AuthManager) checkBonds() {
 		score := auth.userScore(client.acct.ID)
 		auth.violationMtx.Unlock()
 
-		client.tier = auth.tier(bondTier, score, client.legacyFeePaid)
+		client.tier = auth.tier(bondTier, score)
 		client.score = score
 
-		return pruned, auth.userReputation(bondTier, score, client.legacyFeePaid)
+		return pruned, auth.userReputation(bondTier, score)
 	}
 
 	auth.connMtx.RLock()
@@ -1313,7 +1279,7 @@ func (auth *AuthManager) addBond(user account.AccountID, bond *db.Bond) *account
 	defer client.mtx.Unlock()
 
 	bondTier := client.addBond(bond)
-	rep := auth.userReputation(bondTier, score, client.legacyFeePaid)
+	rep := auth.userReputation(bondTier, score)
 	client.tier = rep.EffectiveTier()
 	client.score = score
 
@@ -1523,19 +1489,11 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	var user account.AccountID
 	copy(user[:], connect.AccountID[:])
 	lockTimeThresh := time.Now().Add(auth.bondExpiry).Truncate(time.Second)
-	acctInfo, bonds, legacy, legacyPaid := auth.storage.Account(user, lockTimeThresh)
+	acctInfo, bonds := auth.storage.Account(user, lockTimeThresh)
 	if acctInfo == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AccountNotFoundError,
 			Message: "no account found for account ID: " + connect.AccountID.String(),
-		}
-	}
-	if legacy && !legacyPaid {
-		// They began the legacy 'register' sequence, but did not 'notifyfee'
-		// yet. (V0PURGE)
-		return &msgjson.Error{
-			Code:    msgjson.UnpaidAccountError,
-			Message: "unpaid account",
 		}
 	}
 
@@ -1590,8 +1548,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		acct:         acctInfo,
 		conn:         conn,
 		respHandlers: respHandlers,
-		// bonds and tier set after screening them again below
-		legacyFeePaid: legacyPaid,
 	}
 
 	// Get the list of active orders for this user.
@@ -1695,24 +1651,19 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Ensure tier and filtered bonds agree.
-	rep := auth.userReputation(bondTier, score, legacyPaid)
-	tier := rep.EffectiveTier()
-	client.tier = tier
+	rep := auth.userReputation(bondTier, score)
+	client.tier = rep.EffectiveTier()
 	client.score = score
 	client.bonds = activeBonds
 
 	// Sign and send the connect response.
-	suspended := tier < 1 // for legacy clients
 	sig := auth.SignMsg(sigMsg)
 	resp := &msgjson.ConnectResult{
 		Sig:                 sig,
 		ActiveOrderStatuses: msgOrderStatuses,
 		ActiveMatches:       msgMatches,
 		Score:               score,
-		Tier:                &tier,
 		ActiveBonds:         msgBonds,
-		Suspended:           &suspended,  // V0PURGE
-		LegacyFeePaid:       &legacyPaid, // courtesy for account discovery
 		Reputation:          rep,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)

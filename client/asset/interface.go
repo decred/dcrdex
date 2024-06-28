@@ -29,7 +29,7 @@ const (
 	WalletTraitTxFeeEstimator                         // The wallet can estimate transaction fees.
 	WalletTraitPeerManager                            // The wallet can manage its peers.
 	WalletTraitAuthenticator                          // The wallet require authentication.
-	WalletTraitShielded                               // DEPRECATED
+	WalletTraitShielded                               // DEPRECATED. Left for ordering
 	WalletTraitTokenApprover                          // The wallet is a TokenApprover
 	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
 	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
@@ -307,10 +307,6 @@ type Token struct {
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
 	Name string `json:"name"`
-	// Version is the Wallet's primary asset version number, which is used to
-	// signal when major changes are made to internal details such as coin ID
-	// encoding and contract structure that must be common to a server's.
-	Version uint32 `json:"version"` // Deprecated? Does frontend need .version?
 	// SupportedVersions lists all supported asset versions. Several wallet
 	// methods accept a version argument to indicate which contract to use,
 	// however, the consumer (e.g. Core) is responsible for ensuring the
@@ -548,9 +544,6 @@ type Wallet interface {
 	// Send sends the exact value to the specified address. This is different
 	// from Withdraw, which subtracts the tx fees from the amount sent.
 	Send(address string, value, feeRate uint64) (Coin, error)
-	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
-	// pay the registration fee using the provided feeRate.
-	EstimateRegistrationTxFee(feeRate uint64) uint64
 	// ValidateAddress checks that the provided address is valid.
 	ValidateAddress(address string) bool
 	// ConfirmRedemption checks the status of a redemption. It returns the

@@ -52,13 +52,11 @@ var (
 	tLotSize  uint64 = 1e7
 	tRateStep uint64 = 100
 	tDCR             = &dex.Asset{
-		ID:           42,
-		Symbol:       "dcr",
-		Version:      version,
-		SwapSize:     dexdcr.InitTxSize,
-		SwapSizeBase: dexdcr.InitTxSizeBase,
-		MaxFeeRate:   10,
-		SwapConf:     1,
+		ID:         42,
+		Symbol:     "dcr",
+		Version:    version,
+		MaxFeeRate: 10,
+		SwapConf:   1,
 	}
 	walletPassword = []byte("abc")
 )

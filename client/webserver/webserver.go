@@ -95,7 +95,6 @@ type clientCore interface {
 	Network() dex.Network
 	Exchanges() map[string]*core.Exchange
 	Exchange(host string) (*core.Exchange, error)
-	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
 	RedeemPrepaidBond(appPW []byte, code []byte, host string, certI any) (tier uint64, err error)
 	UpdateBondOptions(form *core.BondOptionsForm) error
@@ -139,7 +138,6 @@ type clientCore interface {
 	ExportSeed(pw []byte) (string, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
-	EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error)
 	BondsFeeBuffer(assetID uint32) (uint64, error)
 	PreAccelerateOrder(oidB dex.Bytes) (*core.PreAccelerate, error)
 	AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error)
@@ -498,7 +496,6 @@ func New(cfg *Config) (*WebServer, error) {
 			apiInit.Post("/getdexinfo", s.apiGetDEXInfo) // TODO: Seems unused.
 			apiInit.Post("/adddex", s.apiAddDEX)
 			apiInit.Post("/discoveracct", s.apiDiscoverAccount)
-			apiInit.Post("/regtxfee", s.apiEstimateRegistrationTxFee)
 			apiInit.Post("/bondsfeebuffer", s.apiBondsFeeBuffer)
 		})
 
@@ -506,7 +503,6 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Use(s.rejectUnauthed)
 			apiAuth.Get("/notes", s.apiNotes)
 			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
-			apiAuth.Post("/register", s.apiRegister)
 			apiAuth.Post("/postbond", s.apiPostBond)
 			apiAuth.Post("/updatebondoptions", s.apiUpdateBondOptions)
 			apiAuth.Post("/redeemprepaidbond", s.apiRedeemPrepaidBond)
@@ -529,7 +525,6 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/togglewalletstatus", s.apiToggleWalletStatus)
 			apiAuth.Post("/orders", s.apiOrders)
 			apiAuth.Post("/order", s.apiOrder)
-			apiAuth.Post("/withdraw", s.apiWithdraw) // Deprecated.
 			apiAuth.Post("/send", s.apiSend)
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
 			apiAuth.Post("/maxsell", s.apiMaxSell)

@@ -40,14 +40,14 @@ var (
 	tCtx     context.Context
 	tLotSize uint64 = 1e6 // 0.01 BTC
 	tBTC            = &dex.Asset{
-		ID:           0,
-		Symbol:       "btc",
-		Version:      version,
-		SwapSize:     dexbtc.InitTxSizeSegwit, // patched by tNewWallet, but default to segwit
-		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
-		MaxFeeRate:   34,
-		SwapConf:     1,
+		ID:         0,
+		Symbol:     "btc",
+		Version:    version,
+		MaxFeeRate: 34,
+		SwapConf:   1,
 	}
+	tSwapSizeBase  uint64 = dexbtc.InitTxSizeBaseSegwit
+	tSwapSize      uint64 = dexbtc.InitTxSizeSegwit
 	optimalFeeRate uint64 = 24
 	tErr                  = fmt.Errorf("test error")
 	tTxID                 = "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
@@ -646,11 +646,11 @@ func makeSwapContract(segwit bool, lockTimeOffset time.Duration) (secret []byte,
 
 func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData, func()) {
 	if segwit {
-		tBTC.SwapSize = dexbtc.InitTxSizeSegwit
-		tBTC.SwapSizeBase = dexbtc.InitTxSizeBaseSegwit
+		tSwapSize = dexbtc.InitTxSizeSegwit
+		tSwapSizeBase = dexbtc.InitTxSizeBaseSegwit
 	} else {
-		tBTC.SwapSize = dexbtc.InitTxSize
-		tBTC.SwapSizeBase = dexbtc.InitTxSizeBase
+		tSwapSize = dexbtc.InitTxSize
+		tSwapSizeBase = dexbtc.InitTxSizeBase
 	}
 
 	dataDir, err := os.MkdirTemp("", "")
@@ -881,7 +881,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 		} else {
 			inputSize = dexbtc.RedeemP2PKHInputSize
 		}
-		return int64(calc.RequiredOrderFundsAlt(value, inputSize, maxSwapCount,
+		return int64(calc.RequiredOrderFunds(value, inputSize, maxSwapCount,
 			wallet.initTxSizeBase, wallet.initTxSize, maxFeeRate))
 	}
 
@@ -2114,7 +2114,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	node.getBalancesErr = nil
 	var littleLots uint64 = 12
 	littleOrder := tLotSize * littleLots
-	littleFunds := calc.RequiredOrderFunds(littleOrder, dexbtc.RedeemP2PKHInputSize, littleLots, tBTC)
+	littleFunds := calc.RequiredOrderFunds(littleOrder, dexbtc.RedeemP2PKHInputSize, littleLots, tSwapSizeBase, tSwapSize, tBTC.MaxFeeRate)
 	littleUTXO := &ListUnspentResult{
 		TxID:          tTxID,
 		Address:       "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi",
@@ -2168,7 +2168,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	var lottaLots uint64 = 100
 	lottaOrder := tLotSize * lottaLots
 	// Add funding for an extra input to accommodate the later combined tests.
-	lottaFunds := calc.RequiredOrderFunds(lottaOrder, 2*dexbtc.RedeemP2PKHInputSize, lottaLots, tBTC)
+	lottaFunds := calc.RequiredOrderFunds(lottaOrder, 2*dexbtc.RedeemP2PKHInputSize, lottaLots, tSwapSizeBase, tSwapSize, tBTC.MaxFeeRate)
 	lottaUTXO := &ListUnspentResult{
 		TxID:          tTxID,
 		Address:       "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi",
@@ -2354,7 +2354,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	_ = wallet.ReturnCoins(spendables)
 
 	// Not enough to cover transaction fees.
-	tweak := float64(littleFunds+lottaFunds-calc.RequiredOrderFunds(extraLottaOrder, 2*dexbtc.RedeemP2PKHInputSize, extraLottaLots, tBTC)+1) / 1e8
+	tweak := float64(littleFunds+lottaFunds-calc.RequiredOrderFunds(extraLottaOrder, 2*dexbtc.RedeemP2PKHInputSize, extraLottaLots, tSwapSizeBase, tSwapSize, tBTC.MaxFeeRate)+1) / 1e8
 	lottaUTXO.Amount -= tweak
 	node.listUnspent = unspents
 	_, _, _, err = wallet.FundOrder(ord)
@@ -3964,35 +3964,6 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		if test.expectChange > 0 && tx.TxOut[1].Value != int64(test.expectChange) {
 			t.Fatalf("expected change value to be %d, got %d", test.expectChange, tx.TxOut[1].Value)
 		}
-	}
-}
-
-func TestEstimateRegistrationTxFee(t *testing.T) {
-	runRubric(t, testEstimateRegistrationTxFee)
-}
-
-func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown := tNewWallet(segwit, walletType)
-	defer shutdown()
-
-	const inputCount = 5
-	const txSize = dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize
-	node.walletCfg.feeRateLimit = 100
-	node.walletCfg.fallbackFeeRate = 30
-
-	estimate := wallet.EstimateRegistrationTxFee(50)
-	if estimate != 50*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", 50*txSize, estimate)
-	}
-
-	estimate = wallet.EstimateRegistrationTxFee(0)
-	if estimate != wallet.fallbackFeeRate()*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate()*txSize, estimate)
-	}
-
-	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit() + 1)
-	if estimate != wallet.fallbackFeeRate()*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate()*txSize, estimate)
 	}
 }
 

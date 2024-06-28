@@ -78,7 +78,6 @@ var (
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin Cash",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		// Same as bitcoin. That's dumb.
 		UnitInfo: dexbch.UnitInfo,

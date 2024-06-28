@@ -75,7 +75,6 @@ var (
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Litecoin",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexltc.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{

@@ -16,7 +16,6 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
 const (
@@ -28,13 +27,11 @@ const (
 
 var (
 	tBTC = &dex.Asset{
-		ID:           0,
-		Symbol:       "btc",
-		Version:      0, // match btc.version
-		SwapSize:     dexbtc.InitTxSizeSegwit,
-		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
-		MaxFeeRate:   10,
-		SwapConf:     1,
+		ID:         0,
+		Symbol:     "btc",
+		Version:    0, // match btc.version
+		MaxFeeRate: 10,
+		SwapConf:   1,
 	}
 
 	usr, _        = user.Current()

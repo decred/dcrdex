@@ -129,7 +129,6 @@ var (
 	// WalletInfo defines some general information about a Zcash wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Zcash",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexzec.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{
@@ -1669,11 +1668,6 @@ func (w *zecWallet) transparentAddress() (string, error) {
 
 func (w *zecWallet) NewAddress() (string, error) {
 	return w.DepositAddress()
-}
-
-// DEPRECATED
-func (w *zecWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
-	return math.MaxUint64
 }
 
 func (w *zecWallet) FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
