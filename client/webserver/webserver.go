@@ -167,10 +167,7 @@ type clientCore interface {
 	TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error)
 	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error)
-	ConfigureFundsMixer(assetID uint32, serverAddress string, cert []byte) error
-	StartFundsMixer(appPW []byte, assetID uint32) error
-	StopFundsMixer(assetID uint32) error
-	DisableFundsMixer(assetID uint32) error
+	ConfigureFundsMixer(assetID uint32, enabled bool) error
 	SetLanguage(string) error
 	Language() string
 	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
@@ -569,9 +566,6 @@ func New(cfg *Config) (*WebServer, error) {
 
 			apiAuth.Post("/mixingstats", s.apiMixingStats)
 			apiAuth.Post("/configuremixer", s.apiConfigureMixer)
-			apiAuth.Post("/startmixer", s.apiStartMixer)
-			apiAuth.Post("/stopmixer", s.apiStopMixer)
-			apiAuth.Post("/disablemixer", s.apiDisableMixer)
 
 			if cfg.Experimental {
 				apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)

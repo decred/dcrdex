@@ -1008,7 +1008,7 @@ func (w *rpcWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error
 
 // PurchaseTickets purchases n amount of tickets. Returns the purchased ticket
 // hashes if successful.
-func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string, _ *mixingConfig) ([]*asset.Ticket, error) {
+func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string, _ bool) ([]*asset.Ticket, error) {
 	hashes, err := w.rpcClient.PurchaseTicket(
 		ctx,
 		"default",

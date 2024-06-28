@@ -13,7 +13,7 @@ const (
 	tradingAccountName    = "dextrading"
 )
 
-func (w *spvWallet) mix(ctx context.Context, cfg *mixingConfig) {
+func (w *spvWallet) mix(ctx context.Context) {
 	mixedAccount, err := w.AccountNumber(ctx, mixedAccountName)
 	if err != nil {
 		w.log.Errorf("unable to look up mixed account: %v", err)
@@ -23,7 +23,7 @@ func (w *spvWallet) mix(ctx context.Context, cfg *mixingConfig) {
 	// unmixed account is the default account
 	unmixedAccount := uint32(defaultAcct)
 
-	w.log.Debugf("Starting cspp funds mixer with %s", cfg.server)
+	w.log.Debug("Starting cspp peer-to-peer funds mixer")
 
 	// Don't perform any actions while transactions are not synced
 	// through the tip block.

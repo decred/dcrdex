@@ -665,8 +665,8 @@ type ExchangeWallet struct {
 
 	// Embedding wallets can set cycleMixer, which will be triggered after
 	// new block are seen.
-	cycleMixer   func()
-	mixingConfig func() *mixingConfig
+	cycleMixer func()
+	mixing     atomic.Bool
 
 	pendingTxsMtx sync.RWMutex
 	pendingTxs    map[chainhash.Hash]*btc.ExtendedWalletTx
@@ -5666,14 +5666,14 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 
 	var tickets []*asset.Ticket
 	if !dcr.isNative() {
-		tickets, err = dcr.wallet.PurchaseTickets(dcr.ctx, int(remain), "", "", nil)
+		tickets, err = dcr.wallet.PurchaseTickets(dcr.ctx, int(remain), "", "", false)
 	} else {
 		v := dcr.vspV.Load()
 		if v == nil {
 			err = errors.New("no vsp set")
 		} else {
 			vInfo := v.(*vsp)
-			tickets, err = dcr.wallet.PurchaseTickets(dcr.ctx, int(remain), vInfo.URL, vInfo.PubKey, dcr.mixingConfig())
+			tickets, err = dcr.wallet.PurchaseTickets(dcr.ctx, int(remain), vInfo.URL, vInfo.PubKey, dcr.mixing.Load())
 		}
 	}
 	if err != nil {
