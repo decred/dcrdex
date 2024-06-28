@@ -705,6 +705,12 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		// locked. However, we must refund bonds regardless.
 
 		bondCfg := c.dexBondConfig(dc, now)
+		if len(bondCfg.bondAssets) == 0 {
+			if !dc.IsDown() {
+				dc.log.Meter("no-bond-assets", time.Minute*10).Warnf("Zero bond assets reported for apparently connected DCRDEX server")
+			}
+			continue
+		}
 		acctBondState := c.bondStateOfDEX(dc, bondCfg)
 
 		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
