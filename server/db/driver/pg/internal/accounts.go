@@ -11,10 +11,7 @@ const (
 	// CreateAccountsTable creates the account table.
 	CreateAccountsTable = `CREATE TABLE IF NOT EXISTS %s (
 		account_id BYTEA PRIMARY KEY,  -- UNIQUE INDEX
-		pubkey BYTEA,
-		fee_asset INT4, -- NOTE upgrade will add this column after broken_rule 
-		fee_address TEXT,          -- DEPRECATED
-		fee_coin BYTEA             -- DEPRECATED
+		pubkey BYTEA
 		);`
 
 	CreateBondsTableV0 = `CREATE TABLE IF NOT EXISTS %s (
@@ -70,31 +67,15 @@ const (
 	CloseAccount = `UPDATE %s SET broken_rule = $1 WHERE account_id = $2;`
 
 	// SelectAccount gathers account details for the specified account ID.
-	SelectAccount = `SELECT pubkey, fee_address IS NOT NULL, fee_coin IS NOT NULL
+	SelectAccount = `SELECT pubkey
 		FROM %s
 		WHERE account_id = $1;`
 
-	// SelectAllAccounts retrieves all accounts.
-	SelectAllAccounts = `SELECT account_id, pubkey, fee_asset, fee_address, fee_coin FROM %s;`
-
 	// SelectAccountInfo retrieves all fields for an account.
-	SelectAccountInfo = `SELECT account_id, pubkey, fee_asset, fee_address, fee_coin FROM %s
+	SelectAccountInfo = `SELECT account_id, pubkey FROM %s
 		WHERE account_id = $1;`
 
-	// CreateAccount creates an entry for a new account.
-	CreateAccount = `INSERT INTO %s (account_id, pubkey, fee_asset, fee_address)
-		VALUES ($1, $2, $3, $4);`
-
 	CreateAccountForBond = `INSERT INTO %s (account_id, pubkey) VALUES ($1, $2);`
-
-	// SelectRegAddress fetches the registration fee address for the account.
-	SelectRegAddress = `SELECT fee_asset, fee_address FROM %s WHERE account_id = $1;`
-
-	// SetRegOutput sets the registration fee payment transaction details for the
-	// account.
-	SetRegOutput = `UPDATE %s SET
-		fee_coin = $1
-		WHERE account_id = $2;`
 
 	CreatePrepaidBondsTable = `CREATE TABLE IF NOT EXISTS %s (
 		coin_id BYTEA PRIMARY KEY,

@@ -48,8 +48,6 @@ type TCore struct {
 	walletStatusErr          error
 	wallets                  []*core.WalletState
 	initializeClientErr      error
-	registerResult           *core.RegisterResult
-	registerErr              error
 	postBondResult           *core.PostBondResult
 	postBondErr              error
 	bondOptsErr              error
@@ -133,9 +131,6 @@ func (c *TCore) RescanWallet(assetID uint32, force bool) error {
 }
 func (c *TCore) GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error) {
 	return c.dexExchange, c.getDEXConfigErr
-}
-func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
-	return c.registerResult, c.registerErr
 }
 func (c *TCore) PostBond(*core.PostBondForm) (*core.PostBondResult, error) {
 	return c.postBondResult, c.postBondErr

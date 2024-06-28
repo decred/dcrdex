@@ -30,13 +30,11 @@ var (
 	tLotSize  uint64 = 1e7
 	tRateStep uint64 = 100
 	tBTC             = &dex.Asset{
-		ID:           0,
-		Symbol:       "btc",
-		Version:      version,
-		SwapSize:     dexbtc.InitTxSize,
-		SwapSizeBase: dexbtc.InitTxSizeBase,
-		MaxFeeRate:   10,
-		SwapConf:     1,
+		ID:         0,
+		Symbol:     "btc",
+		Version:    version,
+		MaxFeeRate: 10,
+		SwapConf:   1,
 	}
 )
 

@@ -178,9 +178,6 @@ type Reputation struct {
 	// Penalties are the number of tiers that are currently revoked due to low
 	// user score.
 	Penalties uint16 `json:"penalties"`
-	// Legacy is true if the server recognizes a legacy registration for this
-	// user. Legacy registration increases effective tier by 1.
-	Legacy bool `json:"legacyTier"`
 	// Score is the user's current score. Score must be evaluated against a
 	// server's configured penalty threshold to calculate penalties.
 	Score int32 `json:"score"`
@@ -189,8 +186,5 @@ type Reputation struct {
 // Effective calculates the effective tier for trading limit calculations.
 func (r *Reputation) EffectiveTier() int64 {
 	tier := r.BondedTier - int64(r.Penalties)
-	if r.Legacy {
-		tier++
-	}
 	return tier
 }

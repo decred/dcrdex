@@ -237,18 +237,6 @@ type PostBondForm struct {
 	Cert any `json:"cert"`
 }
 
-// RegisterForm is information necessary to register an account on a DEX. Old
-// registration fee (V0PURGE)
-type RegisterForm struct {
-	Addr    string           `json:"url"`
-	AppPass encode.PassBytes `json:"appPass"`
-	Fee     uint64           `json:"fee"`
-	Asset   *uint32          `json:"assetID,omitempty"` // do not default to 0
-	// Cert can be a string, which is interpreted as a filepath, or a []byte,
-	// which is interpreted as the file contents of the certificate.
-	Cert any `json:"cert"`
-}
-
 // Match represents a match on an order. An order may have many matches.
 type Match struct {
 	MatchID       dex.Bytes         `json:"matchID"`
@@ -657,9 +645,6 @@ type BondAsset struct {
 	Amt     uint64 `json:"amount"`
 }
 
-// FeeAsset is deprecated (V0PURGE), but the same as BondAsset.
-type FeeAsset BondAsset
-
 // PendingBondState conveys a pending bond's asset and current confirmation
 // count.
 type PendingBondState struct {
@@ -668,9 +653,6 @@ type PendingBondState struct {
 	AssetID uint32 `json:"assetID"`
 	Confs   uint32 `json:"confs"`
 }
-
-// PendingFeeState is deprecated (V0PURGE), but the same as PendingBondState.
-type PendingFeeState PendingBondState
 
 // BondOptions are auto-bond maintenance settings for a particular DEX.
 type BondOptions struct {
@@ -728,10 +710,6 @@ type Exchange struct {
 	Auth             ExchangeAuth           `json:"auth"`
 	PenaltyThreshold uint32                 `json:"penaltyThreshold"`
 	MaxScore         uint32                 `json:"maxScore"`
-
-	// OLD fields for the legacy registration fee (V0PURGE):
-	RegFees    map[string]*FeeAsset `json:"regFees"`
-	PendingFee *PendingFeeState     `json:"pendingFee,omitempty"`
 }
 
 // newDisplayIDFromSymbols creates a display-friendly market ID for a base/quote
@@ -844,14 +822,6 @@ type dexAccount struct {
 	maxBondedAmt      uint64
 	penaltyComps      uint16 // max penalties to compensate for
 	bondAsset         uint32 // asset used for bond maintenance/rotation
-	legacyFeePaid     bool   // server reports a legacy fee paid
-
-	// Legacy reg fee (V0PURGE)
-	feeAssetID uint32
-	feeCoin    []byte
-	isPaid     bool // feeCoin fully confirmed
-	// Instead of isSuspended, set tier=0 if legacy fee paid and server
-	// indicates the account is suspended.
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
@@ -862,9 +832,6 @@ func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
 		dexPubKey:         acctInfo.DEXPubKey,
 		viewOnly:          viewOnly,
 		encKey:            acctInfo.EncKey(), // privKey and id on decrypt
-		feeAssetID:        acctInfo.LegacyFeeAssetID,
-		feeCoin:           acctInfo.LegacyFeeCoin,
-		isPaid:            acctInfo.LegacyFeePaid,
 		pendingBondsConfs: make(map[string]uint32),
 		// bonds are set separately when categorized in connectDEX
 		targetTier:   acctInfo.TargetTier,
@@ -1016,7 +983,6 @@ func (a *dexAccount) authed() bool {
 func (a *dexAccount) unAuth() {
 	a.authMtx.Lock()
 	a.isAuthed = false
-	a.legacyFeePaid = false
 	a.authMtx.Unlock()
 }
 
@@ -1025,29 +991,6 @@ func (a *dexAccount) suspended() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
 	return a.rep.EffectiveTier() < 1
-}
-
-// feePending checks whether the fee transaction has been broadcast, but the
-// notifyfee request has not been sent/accepted yet.
-func (a *dexAccount) feePending() bool {
-	a.authMtx.RLock()
-	defer a.authMtx.RUnlock()
-	return !a.isPaid && len(a.feeCoin) > 0
-}
-
-// feePaid returns true if the account registration fee has been accepted by the
-// DEX.
-func (a *dexAccount) feePaid() bool {
-	a.authMtx.RLock()
-	defer a.authMtx.RUnlock()
-	return a.isPaid
-}
-
-// markFeePaid sets the account paid flag.
-func (a *dexAccount) markFeePaid() {
-	a.authMtx.Lock()
-	a.isPaid = true
-	a.authMtx.Unlock()
 }
 
 // sign uses the account private key to sign the message. If the account is
@@ -1150,12 +1093,6 @@ func coinIDString(assetID uint32, coinID []byte) string {
 	return coinStr
 }
 
-// RegisterResult holds data returned from Register.
-type RegisterResult struct { // V0PURGE
-	FeeID       string `json:"feeID"`
-	ReqConfirms uint16 `json:"reqConfirms"`
-}
-
 // PostBondResult holds the data returned from PostBond.
 type PostBondResult struct {
 	BondID      string `json:"bondID"`
@@ -1178,14 +1115,11 @@ type OrderFilter struct {
 
 // Account holds data returned from AccountExport.
 type Account struct {
-	Host          string `json:"host"`
-	AccountID     string `json:"accountID"`
-	PrivKey       string `json:"privKey"`
-	DEXPubKey     string `json:"DEXPubKey"`
-	Cert          string `json:"cert"`
-	FeeCoin       string `json:"feeCoin,omitempty"`       // DEPRECATED, remains for old accounts
-	FeeProofSig   string `json:"feeProofSig,omitempty"`   // DEPRECATED
-	FeeProofStamp uint64 `json:"feeProofStamp,omitempty"` // DEPRECATED
+	Host      string `json:"host"`
+	AccountID string `json:"accountID"`
+	PrivKey   string `json:"privKey"`
+	DEXPubKey string `json:"DEXPubKey"`
+	Cert      string `json:"cert"`
 }
 
 // assetMap tracks a series of assets and provides methods for registering an

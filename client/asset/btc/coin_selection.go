@@ -47,7 +47,7 @@ func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, r
 // only unselected UTXOs to cover any required reserves.
 func orderEnough(val, lots, feeRate, initTxSizeBase, initTxSize uint64, segwit, reportChange bool) EnoughFunc {
 	return func(_, inputsSize, sum uint64) (bool, uint64) {
-		reqFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots, initTxSizeBase, initTxSize, feeRate)
+		reqFunds := calc.RequiredOrderFunds(val, inputsSize, lots, initTxSizeBase, initTxSize, feeRate)
 		if sum >= reqFunds {
 			excess := sum - reqFunds
 			if !reportChange || dexbtc.IsDustVal(dexbtc.P2PKHOutputSize, excess, feeRate, segwit) {

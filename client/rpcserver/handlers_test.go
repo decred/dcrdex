@@ -50,17 +50,13 @@ func verifyResponse(payload *msgjson.ResponsePayload, res any, wantErrCode int) 
 var (
 	wsServer    = websocket.New(&TCore{}, dex.StdOutLogger("TEST", dex.LevelTrace))
 	tUTXOAssetA = &dex.Asset{
-		ID:           42,
-		Symbol:       "dcr",
-		Version:      0, // match the stubbed (*TXCWallet).Info result
-		SwapSize:     251,
-		SwapSizeBase: 85,
-		RedeemSize:   200,
-		MaxFeeRate:   10,
-		SwapConf:     1,
+		ID:         42,
+		Symbol:     "dcr",
+		Version:    0, // match the stubbed (*TXCWallet).Info result
+		MaxFeeRate: 10,
+		SwapConf:   1,
 	}
 	tWalletInfo = &asset.WalletInfo{
-		Version:           0,
 		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			Conventional: dex.Denomination{
@@ -513,67 +509,6 @@ func TestHandleWallets(t *testing.T) {
 	res := ""
 	if err := verifyResponse(payload, &res, -1); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestHandleRegister(t *testing.T) {
-	pw := encode.PassBytes("password123")
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{pw},
-		Args: []string{
-			"dex:1234",
-			"1000",
-			"42",
-			"cert",
-		},
-	}
-	dcrFeeAsset := &core.FeeAsset{Amt: 1000, ID: 42}
-	tests := []struct {
-		name                         string
-		params                       *RawParams
-		regFees                      map[string]*core.FeeAsset
-		getDEXConfigErr, registerErr error
-		wantErrCode                  int
-	}{{
-		name:        "ok",
-		params:      params,
-		regFees:     map[string]*core.FeeAsset{"dcr": dcrFeeAsset},
-		wantErrCode: -1,
-	}, {
-		name:        "fee different",
-		params:      params,
-		regFees:     map[string]*core.FeeAsset{"dcr": {Amt: 100, ID: 42}},
-		wantErrCode: msgjson.RPCRegisterError,
-	}, {
-		name:        "core.Register error",
-		params:      params,
-		regFees:     map[string]*core.FeeAsset{"dcr": dcrFeeAsset},
-		registerErr: errors.New("error"),
-		wantErrCode: msgjson.RPCRegisterError,
-	}, {
-		name:            "core.GetDEXConfig error",
-		params:          params,
-		getDEXConfigErr: errors.New("error"),
-		wantErrCode:     msgjson.RPCGetDEXConfigError,
-	}, {
-		name:        "bad params",
-		params:      &RawParams{},
-		wantErrCode: msgjson.RPCArgumentsError,
-	}}
-	for _, test := range tests {
-		tc := &TCore{
-			registerErr: test.registerErr,
-			dexExchange: &core.Exchange{
-				RegFees: test.regFees,
-			},
-			getDEXConfigErr: test.getDEXConfigErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleRegister(r, test.params)
-		res := new(core.RegisterResult)
-		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 

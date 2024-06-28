@@ -117,8 +117,6 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 		AddressDecoder: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
 			return dexzec.DecodeAddress(addr, addrParams, btcParams)
 		},
-		InitTxSize:     dexzec.InitTxSize,
-		InitTxSizeBase: dexzec.InitTxSizeBase,
 		TxDeserializer: func(b []byte) (*wire.MsgTx, error) {
 			zecTx, err := dexzec.DeserializeTx(b)
 			if err != nil {

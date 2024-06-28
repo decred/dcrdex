@@ -219,7 +219,7 @@ type AssetBackend struct {
 	blockChans    map[chan *asset.BlockUpdate]struct{}
 
 	// initTxSize is the gas used for an initiation transaction with one swap.
-	initTxSize uint32
+	initTxSize uint64
 	redeemSize uint64
 
 	contractAddr common.Address
@@ -263,7 +263,7 @@ func unconnectedETH(bipID uint32, contractAddr common.Address, vTokens map[uint3
 		log:          logger,
 		contractAddr: contractAddr,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
-		initTxSize:   uint32(dexeth.InitGas(1, ethContractVersion)),
+		initTxSize:   dexeth.InitGas(1, ethContractVersion),
 		redeemSize:   dexeth.RedeemGas(1, ethContractVersion),
 		assetID:      bipID,
 		atomize:      dexeth.WeiToGwei,
@@ -456,7 +456,7 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 			log:          eth.baseLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 			assetID:      assetID,
 			blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
-			initTxSize:   uint32(gases.Swap),
+			initTxSize:   gases.Swap,
 			redeemSize:   gases.Redeem,
 			contractAddr: swapContract.Address,
 			atomize:      vToken.EVMToAtomic,
@@ -486,12 +486,7 @@ func (eth *baseBackend) TxData(coinID []byte) ([]byte, error) {
 }
 
 // InitTxSize is an upper limit on the gas used for an initiation.
-func (be *AssetBackend) InitTxSize() uint32 {
-	return be.initTxSize
-}
-
-// InitTxSizeBase is the same as (dex.Asset).SwapSize for asset.
-func (be *AssetBackend) InitTxSizeBase() uint32 {
+func (be *AssetBackend) InitTxSize() uint64 {
 	return be.initTxSize
 }
 

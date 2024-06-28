@@ -89,7 +89,6 @@ var (
 	// WalletInfo defines some general information about a Dogecoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Dogecoin",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexdoge.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{

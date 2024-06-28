@@ -8,7 +8,6 @@ import (
 	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -67,36 +66,29 @@ var (
 	dcrBtcLotSize  uint64 = 1e7
 	dcrBtcRateStep uint64 = 10
 	tUTXOAssetA           = &dex.Asset{
-		ID:           42,
-		Symbol:       "dcr",
-		Version:      0, // match the stubbed (*TXCWallet).Info result
-		SwapSize:     251,
-		SwapSizeBase: 85,
-		RedeemSize:   200,
-		MaxFeeRate:   10,
-		SwapConf:     1,
+		ID:         42,
+		Symbol:     "dcr",
+		Version:    0, // match the stubbed (*TXCWallet).Info result
+		MaxFeeRate: 10,
+		SwapConf:   1,
 	}
+	tSwapSizeA uint64 = 251
 
 	tUTXOAssetB = &dex.Asset{
-		ID:           0,
-		Symbol:       "btc",
-		Version:      0, // match the stubbed (*TXCWallet).Info result
-		SwapSize:     225,
-		SwapSizeBase: 76,
-		RedeemSize:   260,
-		MaxFeeRate:   2,
-		SwapConf:     1,
+		ID:         0,
+		Symbol:     "btc",
+		Version:    0, // match the stubbed (*TXCWallet).Info result
+		MaxFeeRate: 2,
+		SwapConf:   1,
 	}
+	tSwapSizeB uint64 = 225
 
 	tACCTAsset = &dex.Asset{
-		ID:           60,
-		Symbol:       "eth",
-		Version:      0, // match the stubbed (*TXCWallet).Info result
-		SwapSize:     135000,
-		SwapSizeBase: 135000,
-		RedeemSize:   68000,
-		MaxFeeRate:   20,
-		SwapConf:     1,
+		ID:         60,
+		Symbol:     "eth",
+		Version:    0, // match the stubbed (*TXCWallet).Info result
+		MaxFeeRate: 20,
+		SwapConf:   1,
 	}
 	tDexPriv            *secp256k1.PrivateKey
 	tDexKey             *secp256k1.PublicKey
@@ -114,7 +106,6 @@ var (
 	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelInfo)
 	tMaxFeeRate         uint64 = 10
 	tWalletInfo                = &asset.WalletInfo{
-		Version:           0,
 		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			Conventional: dex.Denomination{
@@ -133,13 +124,11 @@ type msgFunc = func(*msgjson.Message)
 
 func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 	return &msgjson.Asset{
-		Symbol:       ai.Symbol,
-		ID:           ai.ID,
-		Version:      ai.Version,
-		MaxFeeRate:   ai.MaxFeeRate,
-		SwapSize:     ai.SwapSize,
-		SwapSizeBase: ai.SwapSizeBase,
-		SwapConf:     uint16(ai.SwapConf),
+		Symbol:     ai.Symbol,
+		ID:         ai.ID,
+		Version:    ai.Version,
+		MaxFeeRate: ai.MaxFeeRate,
+		SwapConf:   uint16(ai.SwapConf),
 	}
 }
 
@@ -209,7 +198,6 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		dexPubKey: tDexKey,
 		privKey:   privKey,
 		id:        account.NewID(privKey.PubKey().SerializeCompressed()),
-		feeCoin:   []byte("somecoin"),
 		// feeAssetID is 0 (btc)
 		// tier, bonds, etc. set on auth
 		pendingBondsConfs: make(map[string]uint32),
@@ -235,7 +223,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		},
 		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
-			APIVersion:       serverdex.PreAPIVersion,
+			APIVersion:       serverdex.V1APIVersion,
 			DEXPubKey:        acct.dexPubKey.SerializeCompressed(),
 			CancelMax:        0.8,
 			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
@@ -277,9 +265,6 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			BondExpiry: 86400, // >0 make client treat as API v1
 			BondAssets: map[string]*msgjson.BondAsset{
 				"dcr": dcrBondAsset,
-			},
-			RegFees: map[string]*msgjson.FeeAsset{
-				"dcr": {ID: 42, Amt: tFee, Confs: 0},
 			},
 			BinSizes: []string{"1h", "24h"},
 		},
@@ -366,7 +351,6 @@ type TDB struct {
 	acctErr                  error
 	createAccountErr         error
 	addBondErr               error
-	storeAccountProofErr     error
 	updateOrderErr           error
 	activeDEXOrders          []*db.MetaOrder
 	matchesForOID            []*db.MetaMatch
@@ -384,9 +368,7 @@ type TDB struct {
 	linkedFromID             order.OrderID
 	linkedToID               order.OrderID
 	existValues              map[string]bool
-	accountProof             *db.AccountProof
 	accountProofErr          error
-	verifyAccountPaid        bool
 	verifyCreateAccount      bool
 	verifyUpdateAccountInfo  bool
 	disabledHost             *string
@@ -537,16 +519,6 @@ func (tdb *TDB) Wallets() ([]*db.Wallet, error) {
 
 func (tdb *TDB) Wallet([]byte) (*db.Wallet, error) {
 	return tdb.wallet, tdb.walletErr
-}
-
-func (tdb *TDB) AccountProof(url string) (*db.AccountProof, error) {
-	return tdb.accountProof, tdb.accountProofErr
-}
-
-func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
-	tdb.verifyAccountPaid = true
-	// todo: save proof?
-	return tdb.storeAccountProofErr
 }
 
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
@@ -762,14 +734,12 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		lastSwaps:        make([]*asset.Swaps, 0),
 		lastRedeems:      make([]*asset.RedeemForm, 0),
 		info: &asset.WalletInfo{
-			Version:           0, // match tUTXOAssetA/tUTXOAssetB
 			SupportedVersions: []uint32{0},
 		},
 		bondTxCoinID: encode.RandomBytes(32),
 	}
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
-		version:           w.info.Version,
 		log:               tLogger,
 		supportedVersions: w.info.SupportedVersions,
 		Wallet:            w,
@@ -965,10 +935,6 @@ func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
 	w.sendFeeSuggestion = feeSuggestion
 	return w.sendCoin, w.sendErr
-}
-
-func (w *TXCWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
-	return 0
 }
 
 func (w *TXCWallet) ValidateAddress(address string) bool {
@@ -1328,9 +1294,6 @@ func newTestRig() *testRig {
 		Cert:      acct.cert,
 		DEXPubKey: acct.dexPubKey,
 		EncKeyV2:  acct.encKey,
-		// LegacyFeeCoin:    acct.feeCoin,
-		// LegacyFeeAssetID: acct.feeAssetID,
-		// LegacyFeePaid: true,
 	}
 	tdb.acct = ai
 
@@ -1420,21 +1383,6 @@ func (rig *testRig) queueConfig() {
 	})
 }
 
-func (rig *testRig) queueRegister(regRes *msgjson.RegisterResult) {
-	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-		// The response includes data from the request. Patch the pre-defined
-		// response with the client's pubkey from the request, and then sign the
-		// response, which needs the client pubkey for serialization.
-		reg := new(msgjson.Register)
-		msg.Unmarshal(reg)
-		regRes.ClientPubKey = reg.PubKey
-		sign(tDexPriv, regRes)
-		resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
-		f(resp)
-		return nil
-	})
-}
-
 func (rig *testRig) queuePrevalidateBond() {
 	rig.ws.queueResponse(msgjson.PreValidateBondRoute, func(msg *msgjson.Message, f msgFunc) error {
 		preEval := new(msgjson.PreValidateBond)
@@ -1466,19 +1414,6 @@ func (rig *testRig) queuePostBond(postBondResult *msgjson.PostBondResult) {
 	})
 }
 
-func (rig *testRig) queueNotifyFee() {
-	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
-		req := new(msgjson.NotifyFee)
-		json.Unmarshal(msg.Payload, req)
-		sigMsg := req.Serialize()
-		sig := signMsg(tDexPriv, sigMsg)
-		result := &msgjson.Acknowledgement{Sig: sig}
-		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-		f(resp)
-		return nil
-	})
-}
-
 func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.OrderStatus, suspended ...bool) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		if rpcErr != nil {
@@ -1490,8 +1425,6 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
-		// Default position is post-legacy but pre-v1, singly-bonded.
-		legacyFeePaid, tier := false, int64(1)
 
 		activeBonds := make([]*msgjson.Bond, 0, 1)
 		if b := rig.ws.submittedBond; b != nil {
@@ -1508,21 +1441,12 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match
 			Sig:                 connect.Sig,
 			ActiveMatches:       matches,
 			ActiveOrderStatuses: orders,
-			LegacyFeePaid:       &legacyFeePaid,
 			ActiveBonds:         activeBonds,
-			Tier:                &tier,
 			Score:               10,
+			Reputation:          &account.Reputation{BondedTier: 1},
 		}
-		if len(suspended) > 0 {
-			result.Suspended = &suspended[0]
-			if suspended[0] {
-				// DRAFT NOTE: I've modified this value. There was a comment
-				// that said "even <0 so keys cycle even with v1 api", but from
-				// my read, you are suspended at tier = 0.
-				tier := int64(0)
-				result.Tier = &tier
-				result.Score = defaultPenaltyThreshold
-			}
+		if len(suspended) > 0 && suspended[0] {
+			result.Reputation.Penalties = 1
 		}
 		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 		f(resp)
@@ -2071,13 +1995,11 @@ func TestPostBond(t *testing.T) {
 	// handler configured by queueRegister.
 	rig.ws.liveBondExpiry = uint64(time.Now().Add(time.Duration(pendingBuffer(dex.Simnet)) * 2 * time.Second).Unix())
 	postBondResult := &msgjson.PostBondResult{
-		AccountID: rig.acct.id[:],
-		AssetID:   dcrBondAsset.ID,
-		Amount:    dcrBondAsset.Amt,
-		Expiry:    rig.ws.liveBondExpiry,
-		Tier:      1,
-		// BondID , // set in queuePostBond
-		// TierReportV2: , // DRAFT TODO: Add tests for v2
+		AccountID:  rig.acct.id[:],
+		AssetID:    dcrBondAsset.ID,
+		Amount:     dcrBondAsset.Amt,
+		Expiry:     rig.ws.liveBondExpiry,
+		Reputation: &account.Reputation{BondedTier: 1},
 	}
 
 	var wg sync.WaitGroup
@@ -2136,7 +2058,6 @@ func TestPostBond(t *testing.T) {
 		rig.queuePrevalidateBond()
 		rig.queuePostBond(postBondResult)
 		queueTipChange()
-		rig.queueNotifyFee()
 		rig.queueConnect(nil, nil, nil)
 	}
 
@@ -2286,16 +2207,6 @@ func TestPostBond(t *testing.T) {
 	}
 	tWallet.bal.Available = bal0
 
-	// register request error
-	queueConfigAndConnectUnknownAcct()
-	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-		return tErr
-	})
-	run()
-	if !errorHasCode(err, registerErr) {
-		t.Fatalf("wrong error for register request error: %v", err)
-	}
-
 	// signature error
 	queueConfigAndConnectUnknownAcct()
 	rig.ws.queueResponse(msgjson.PreValidateBondRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -2407,7 +2318,7 @@ func TestLogin(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
-	rig.acct.markFeePaid()
+	rig.acct.rep = account.Reputation{BondedTier: 1}
 
 	rig.queueConnect(nil, nil, nil)
 	err := tCore.Login(tPW)
@@ -2426,7 +2337,7 @@ func TestLogin(t *testing.T) {
 	tCore.credentials = creds
 
 	// Account not Paid. No error, and account should be unlocked.
-	rig.acct.isPaid = false
+	rig.acct.rep = account.Reputation{BondedTier: 0}
 	rig.queueConnect(nil, nil, nil)
 	err = tCore.Login(tPW)
 	if err != nil || rig.acct.authed() {
@@ -2435,7 +2346,7 @@ func TestLogin(t *testing.T) {
 	if rig.acct.locked() {
 		t.Fatalf("unpaid account is locked")
 	}
-	rig.acct.markFeePaid()
+	rig.acct.rep = account.Reputation{BondedTier: 1}
 
 	// 'connect' route error.
 	rig = newTestRig()
@@ -2525,7 +2436,6 @@ func TestLogin(t *testing.T) {
 	}
 
 	tCore = rig.core
-	rig.acct.markFeePaid()
 	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch}, nil)
 	rig.queueCancel(nil) // for the unfunded order that gets canceled in authDEX
 	// Login>authDEX will do 4 match DB updates for these two matches:
@@ -2578,7 +2488,7 @@ func TestAccountNotFoundError(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
-	rig.acct.markFeePaid()
+	rig.acct.rep = account.Reputation{BondedTier: 1}
 
 	expectedErrorMessage := "test account not found error"
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
@@ -2617,7 +2527,7 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
-	rig.acct.markFeePaid()
+	rig.acct.rep = account.Reputation{BondedTier: 1}
 	rig.queueConnect(nil, nil, nil)
 
 	// Make sure that the connections got authenticated
@@ -5852,10 +5762,10 @@ var (
 )
 
 // auth sets the account as authenticated at the provided tier.
-func auth(a *dexAccount, legacyFeePaid bool) {
+func auth(a *dexAccount) {
 	a.authMtx.Lock()
 	a.isAuthed = true
-	a.legacyFeePaid = legacyFeePaid
+	a.rep = account.Reputation{BondedTier: 1}
 	a.authMtx.Unlock()
 }
 
@@ -5864,7 +5774,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	auth(rig.acct, false) // Short path through initializeDEXConnections
+	auth(rig.acct) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -6030,7 +5940,7 @@ func TestReReserveFunding(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	auth(rig.acct, false) // Short path through initializeDEXConnections
+	auth(rig.acct) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -7661,10 +7571,9 @@ func TestHandlePenaltyMsg(t *testing.T) {
 	tCore := rig.core
 	dc := rig.dc
 	penalty := &msgjson.Penalty{
-		Rule:     account.Rule(1),
-		Time:     uint64(1598929305),
-		Duration: uint64(3153600000000000000),
-		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
+		Rule:    account.Rule(1),
+		Time:    uint64(1598929305),
+		Details: "You may no longer trade. Leave your client running to finish pending trades.",
 	}
 	diffKey, _ := secp256k1.GeneratePrivateKey()
 	noMatch, err := msgjson.NewNotification(msgjson.NoMatchRoute, "fake")
@@ -7826,10 +7735,10 @@ func TestAccelerateOrder(t *testing.T) {
 	dc := rig.dc
 
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
-	tDcrWallet.swapSize = tUTXOAssetA.SwapSize
+	tDcrWallet.swapSize = tSwapSizeA
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
-	tBtcWallet.swapSize = tUTXOAssetB.SwapSize
+	tBtcWallet.swapSize = tSwapSizeB
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
 
 	buyWalletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
@@ -7879,7 +7788,7 @@ func TestAccelerateOrder(t *testing.T) {
 			previousAccelerations:      []order.CoinID{encode.RandomBytes(32)},
 			orderStatus:                order.OrderStatusExecuted,
 			rate:                       dcrBtcRateStep * 10,
-			expectRequiredForRemaining: 2*tMaxFeeRate*tUTXOAssetB.SwapSize + calc.BaseToQuote(dcrBtcRateStep*10, 2*dcrBtcLotSize),
+			expectRequiredForRemaining: 2*tMaxFeeRate*tSwapSizeB + calc.BaseToQuote(dcrBtcRateStep*10, 2*dcrBtcLotSize),
 			matches: []testMatch{
 				{
 					side:     order.Maker,
@@ -7896,7 +7805,7 @@ func TestAccelerateOrder(t *testing.T) {
 			orderStatus:                order.OrderStatusExecuted,
 			previousAccelerations:      []order.CoinID{encode.RandomBytes(32), encode.RandomBytes(32)},
 			rate:                       dcrBtcRateStep * 10,
-			expectRequiredForRemaining: 4*tMaxFeeRate*tUTXOAssetB.SwapSize + calc.BaseToQuote(dcrBtcRateStep*10, 5*dcrBtcLotSize),
+			expectRequiredForRemaining: 4*tMaxFeeRate*tSwapSizeB + calc.BaseToQuote(dcrBtcRateStep*10, 5*dcrBtcLotSize),
 			matches: []testMatch{
 				{
 					side:     order.Maker,
@@ -7926,7 +7835,7 @@ func TestAccelerateOrder(t *testing.T) {
 			orderFilled:                5 * dcrBtcLotSize,
 			orderStatus:                order.OrderStatusExecuted,
 			rate:                       dcrBtcRateStep * 10,
-			expectRequiredForRemaining: 4*tMaxFeeRate*tUTXOAssetB.SwapSize + 5*dcrBtcLotSize,
+			expectRequiredForRemaining: 4*tMaxFeeRate*tSwapSizeB + 5*dcrBtcLotSize,
 			matches: []testMatch{
 				{
 					side:     order.Maker,
@@ -8067,7 +7976,7 @@ func TestAccelerateOrder(t *testing.T) {
 			orderFilled:                dcrBtcLotSize,
 			orderStatus:                order.OrderStatusExecuted,
 			rate:                       dcrBtcRateStep * 10,
-			expectRequiredForRemaining: 2*tMaxFeeRate*tUTXOAssetB.SwapSize + calc.BaseToQuote(dcrBtcRateStep*10, 2*dcrBtcLotSize),
+			expectRequiredForRemaining: 2*tMaxFeeRate*tSwapSizeB + calc.BaseToQuote(dcrBtcRateStep*10, 2*dcrBtcLotSize),
 			matches: []testMatch{
 				{
 					side:     order.Maker,

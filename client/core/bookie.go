@@ -824,14 +824,8 @@ func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 		return nil, fmt.Errorf("unable to fetch server config: %w", err)
 	}
 
-	// (V0PURGE) Infer if the server advertises API v0 but supports the upcoming
-	// v1 routes such as postbond. Server can only advertise a single version
-	// presently so we have to detect this indirectly.
 	apiVer := int32(cfg.APIVersion)
-	if apiVer == 0 && cfg.BondExpiry > 0 {
-		apiVer = 1
-	}
-	dc.log.Infof("Server %v supports API version %v.", dc.acct.host, apiVer)
+	dc.log.Infof("Server %v supports API version %v.", dc.acct.host, cfg.APIVersion)
 	atomic.StoreInt32(&dc.apiVer, apiVer)
 
 	// Check that we are able to communicate with this DEX.
@@ -854,34 +848,6 @@ func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 	dc.log.Debugf("Server %v broadcast timeout %v. Tick interval %v", dc.acct.host, bTimeout, tickInterval)
 	if dc.ticker.Dur() != tickInterval {
 		dc.ticker.Reset(tickInterval)
-	}
-
-	getAsset := func(id uint32) *msgjson.Asset {
-		for _, asset := range cfg.Assets {
-			if id == asset.ID {
-				return asset
-			}
-		}
-		return nil
-	}
-
-	// Attempt to patch the ConfigResponse.Markets with zero LotSize and
-	// RateStep from the Asset configs. This may be the case with an old server.
-	for _, mkt := range cfg.Markets {
-		if mkt.LotSize == 0 {
-			if asset := getAsset(mkt.Base); asset != nil {
-				mkt.LotSize = asset.LotSize
-			} else {
-				dc.log.Warnf("Market %s with zero lot size and no configured asset %d", mkt.Name, mkt.Base)
-			}
-		}
-		if mkt.RateStep == 0 {
-			if asset := getAsset(mkt.Quote); asset != nil {
-				mkt.RateStep = asset.RateStep
-			} else {
-				dc.log.Warnf("Market %s with zero rate step and no configured asset %d", mkt.Name, mkt.Quote)
-			}
-		}
 	}
 
 	// Update the dex connection with the new config details, including

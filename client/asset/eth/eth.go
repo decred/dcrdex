@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"os"
 	"os/exec"
@@ -151,8 +150,7 @@ var (
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = asset.WalletInfo{
-		Name:    "Ethereum",
-		Version: 0,
+		Name: "Ethereum",
 		// SupportedVersions: For Ethereum, the server backend maintains a
 		// single protocol version, so tokens and ETH have the same set of
 		// supported versions. Even though the SupportedVersions are made
@@ -1276,7 +1274,6 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		ui:                 token.UnitInfo,
 		wi: asset.WalletInfo{
 			Name:              token.Name,
-			Version:           w.wi.Version,
 			SupportedVersions: w.wi.SupportedVersions,
 			UnitInfo:          token.UnitInfo,
 		},
@@ -3161,23 +3158,6 @@ func (eth *baseWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 		return nil, err
 	}
 	return tx.Hash().Bytes(), nil
-}
-
-// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
-// pay the registration fee using the provided feeRate.
-func (w *ETHWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
-	return feeRate * defaultSendGasLimit
-}
-
-// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
-// pay the registration fee using the provided feeRate.
-func (w *TokenWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
-	g := w.gases(contractVersionNewest)
-	if g == nil {
-		w.log.Errorf("no gas table")
-		return math.MaxUint64
-	}
-	return g.Transfer * feeRate
 }
 
 // ValidateAddress checks whether the provided address is a valid hex-encoded

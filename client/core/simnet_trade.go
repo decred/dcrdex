@@ -305,6 +305,8 @@ func (s *simulationTest) startClients() error {
 		}
 		c.log.Infof("Core initialized.")
 
+		c.core.Login(c.appPass)
+
 		createWallet := func(pass []byte, fund bool, form *WalletForm) error {
 			err = c.core.CreateWallet(c.appPass, pass, form)
 			if err != nil {
@@ -1928,19 +1930,16 @@ func (s *simulationTest) registerDEX(client *simulationClient) error {
 
 	feeAssetSymbol := dex.BipIDSymbol(s.regAsset)
 
-	feeAsset := dexConf.RegFees[feeAssetSymbol]
-	if feeAsset == nil {
+	bondAsset := dexConf.BondAssets[feeAssetSymbol]
+	if bondAsset == nil {
 		return fmt.Errorf("%s not supported for fees!", feeAssetSymbol)
 	}
-	dexFee := feeAsset.Amt
-
-	// TODO: Use bonds.
-	// connect dex and pay fee
-	regRes, err := client.core.Register(&RegisterForm{
-		Addr:    dexHost,
-		AppPass: client.appPass,
-		Fee:     dexFee,
-		Asset:   &s.regAsset,
+	postBondRes, err := client.core.PostBond(&PostBondForm{
+		Addr:     dexHost,
+		AppPass:  client.appPass,
+		Asset:    &s.regAsset,
+		Bond:     bondAsset.Amt,
+		LockTime: uint64(time.Now().Add(time.Hour * 24 * 30 * 5).Unix()),
 	})
 	if err != nil {
 		return err
@@ -1964,14 +1963,14 @@ func (s *simulationTest) registerDEX(client *simulationClient) error {
 		}
 	}()
 
-	client.log.Infof("Mined %d %s blocks for fee payment confirmation.", regRes.ReqConfirms, feeAssetSymbol)
+	client.log.Infof("Mined %d %s blocks for fee payment confirmation.", postBondRes.ReqConfirms, feeAssetSymbol)
 
 	// Wait up to bTimeout+12 seconds for fee payment. notify_fee times out
 	// after bTimeout+10 seconds.
 	feeTimeout := time.Millisecond*time.Duration(client.dc().cfg.BroadcastTimeout) + 12*time.Second
-	client.log.Infof("Waiting %v for fee confirmation notice.", feeTimeout)
+	client.log.Infof("Waiting %v for bond confirmation notice.", feeTimeout)
 	feePaid := client.notes.find(s.ctx, feeTimeout, func(n Notification) bool {
-		return n.Type() == NoteTypeFeePayment && n.Topic() == TopicAccountRegistered
+		return n.Type() == NoteTypeBondPost && n.Topic() == TopicBondConfirmed
 	})
 	close(done)
 	if !feePaid {
