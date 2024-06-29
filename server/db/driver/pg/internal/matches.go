@@ -187,6 +187,24 @@ const (
 		ORDER BY lastTime DESC   -- last action time i.e. success or approx. when could have acted
 		LIMIT $2;`
 
+	UserMatchFails = `
+		WITH acct (aid) AS ( VALUES($1::BYTEA) )
+
+		SELECT matchid, status
+		FROM %s, acct
+		WHERE takerSell IS NOT NULL      -- exclude cancel order matches
+			AND (makerAccount = aid OR takerAccount = aid)
+			AND NOT active -- failure means inactive/revoked
+			AND (forgiven IS NULL OR NOT forgiven)
+			AND (
+				(status=0 AND makerAccount = aid) OR   -- fault for maker
+				(status=1 AND takerAccount = aid) OR   -- fault for taker
+				(status=2 AND makerAccount = aid) OR   -- fault for maker
+				(status=3 AND takerAccount = aid)      -- fault for taker
+			)
+		ORDER BY GREATEST((epochIdx+1)*epochDur, aContractTime, bContractTime, aRedeemTime, bRedeemTime) DESC   -- last action time i.e. success or approx. when could have acted
+		LIMIT $2;`
+
 	ForgiveMatchFail = `UPDATE %s SET forgiven = TRUE
 		WHERE matchid = $1 AND NOT active;`
 

@@ -161,6 +161,29 @@ func (a *Archiver) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN in
 	return outcomes, nil
 }
 
+// UserMatchFails retrieves up to the last n most recent failed and unforgiven
+// match outcomes for the user.
+func (a *Archiver) UserMatchFails(aid account.AccountID, lastN int) ([]*db.MatchFail, error) {
+	var fails []*db.MatchFail
+
+	for schema := range a.markets {
+		matchesTableName := fullMatchesTableName(a.dbName, schema)
+		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+		marketFails, err := atFaultMatches(ctx, a.db, matchesTableName, aid, lastN)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+
+		fails = append(fails, marketFails...)
+	}
+
+	if len(fails) > lastN {
+		fails = fails[:lastN]
+	}
+	return fails, nil
+}
+
 func completedAndAtFaultMatches(ctx context.Context, dbe *sql.DB, tableName string,
 	aid account.AccountID, lastN int, base, quote uint32) (outcomes []*db.MatchOutcome, err error) {
 	stmt := fmt.Sprintf(internal.CompletedOrAtFaultMatchesLastN, tableName)
@@ -209,6 +232,35 @@ func completedAndAtFaultMatches(ctx context.Context, dbe *sql.DB, tableName stri
 			Value:  value,
 			Base:   base,
 			Quote:  quote,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return
+}
+
+func atFaultMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID, lastN int) (fails []*db.MatchFail, err error) {
+	stmt := fmt.Sprintf(internal.UserMatchFails, tableName)
+	rows, err := dbe.QueryContext(ctx, stmt, aid, lastN)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status uint8
+		var mid order.MatchID
+		err = rows.Scan(&mid, &status)
+		if err != nil {
+			return
+		}
+
+		fails = append(fails, &db.MatchFail{
+			Status: order.MatchStatus(status),
+			ID:     mid,
 		})
 	}
 

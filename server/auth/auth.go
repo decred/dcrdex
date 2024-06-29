@@ -68,6 +68,7 @@ type Storage interface {
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) ([]*db.CancelRecord, error)
 	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error)
+	UserMatchFails(aid account.AccountID, lastN int) ([]*db.MatchFail, error)
 	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
@@ -1388,6 +1389,23 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 	auth.violationMtx.Unlock()
 }
 
+func matchStatusToViol(status order.MatchStatus) Violation {
+	switch status {
+	case order.NewlyMatched:
+		return ViolationNoSwapAsMaker
+	case order.MakerSwapCast:
+		return ViolationNoSwapAsTaker
+	case order.TakerSwapCast:
+		return ViolationNoRedeemAsMaker
+	case order.MakerRedeemed:
+		return ViolationNoRedeemAsTaker
+	case order.MatchComplete:
+		return ViolationSwapSuccess // should be caught by Fail==false
+	default:
+		return ViolationInvalid
+	}
+}
+
 // loadUserOutcomes returns user's latest match and preimage outcomes from order
 // and swap data retrieved from the DB.
 func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (*latestMatchOutcomes, *latestPreimageOutcomes, *latestOrders, error) {
@@ -1396,23 +1414,6 @@ func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (*latestMatchO
 	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, ScoringMatchLimit)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
-	}
-
-	matchStatusToViol := func(status order.MatchStatus) Violation {
-		switch status {
-		case order.NewlyMatched:
-			return ViolationNoSwapAsMaker
-		case order.MakerSwapCast:
-			return ViolationNoSwapAsTaker
-		case order.TakerSwapCast:
-			return ViolationNoRedeemAsMaker
-		case order.MakerRedeemed:
-			return ViolationNoRedeemAsTaker
-		case order.MatchComplete:
-			return ViolationSwapSuccess // should be caught by Fail==false
-		default:
-			return ViolationInvalid
-		}
 	}
 
 	// Load the count of preimage misses in the N most recently placed orders.
@@ -1470,6 +1471,12 @@ type MatchOutcome struct {
 	Quote  uint32    `json:"quoteID"`
 }
 
+// MatchFail is a failed match and the effect on the user's score.
+type MatchFail struct {
+	ID      dex.Bytes `json:"matchID"`
+	Penalty uint32    `json:"penalty"`
+}
+
 // AccountMatchOutcomesN generates a list of recent match outcomes for a user.
 func (auth *AuthManager) AccountMatchOutcomesN(user account.AccountID, n int) ([]*MatchOutcome, error) {
 	dbOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, n)
@@ -1489,6 +1496,21 @@ func (auth *AuthManager) AccountMatchOutcomesN(user account.AccountID, n int) ([
 		}
 	}
 	return outcomes, nil
+}
+
+func (auth *AuthManager) UserMatchFails(user account.AccountID, n int) ([]*MatchFail, error) {
+	matchFails, err := auth.storage.UserMatchFails(user, n)
+	if err != nil {
+		return nil, err
+	}
+	fails := make([]*MatchFail, len(matchFails))
+	for i, fail := range matchFails {
+		fails[i] = &MatchFail{
+			ID:      fail.ID[:],
+			Penalty: uint32(-1 * matchStatusToViol(fail.Status).Score()),
+		}
+	}
+	return fails, nil
 }
 
 // loadUserScore computes the user's current score from order and swap data
