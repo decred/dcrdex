@@ -38,7 +38,7 @@ const (
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
 	defaultFee         = 100
-	minNetworkVersion  = 221100
+	minNetworkVersion  = 270000 // v27.0.0-49ad6a9a9
 	walletTypeRPC      = "bitcoindRPC"
 	walletTypeSPV      = "SPV"
 	walletTypeLegacy   = ""

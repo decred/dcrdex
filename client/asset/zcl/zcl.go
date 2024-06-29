@@ -30,7 +30,7 @@ const (
 	// structure.
 	defaultFee          = 10
 	defaultFeeRateLimit = 1000
-	minNetworkVersion   = 2010158 // v2.1.1-8-c13026078-dirty
+	minNetworkVersion   = 2010159 // v2.1.1-9-f7bff4ff3-dirty
 	walletTypeRPC       = "zclassicdRPC"
 
 	transparentAddressType = "p2pkh"
