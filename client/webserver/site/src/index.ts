@@ -6,3 +6,7 @@ import './css/application.scss'
 const app = new Application()
 registerApplication(app)
 app.start()
+
+if (module.hot) {
+  module.hot.accept('./css/application.scss')
+}

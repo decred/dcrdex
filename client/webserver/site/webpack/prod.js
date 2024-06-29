@@ -1,6 +1,7 @@
 const { merge } = require('webpack-merge')
 const common = require('./common.js')
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin')
+const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 
 module.exports = merge(common, {
   mode: 'production',
@@ -33,7 +34,35 @@ module.exports = merge(common, {
             ]
           }
         }
+      },
+      {
+        test: /\.s?[ac]ss$/,
+        use: [
+          {
+            loader: MiniCssExtractPlugin.loader
+          },
+          {
+            loader: 'css-loader',
+            options: {
+              modules: false,
+              url: false,
+              sourceMap: true
+            }
+          },
+          {
+            loader: 'sass-loader',
+            options: {
+              implementation: require('sass'), // dart-sass
+              sourceMap: true
+            }
+          }
+        ]
       }
     ]
-  }
+  },
+  plugins: [
+    new MiniCssExtractPlugin({
+      filename: 'style.css'
+    })
+  ]
 })
