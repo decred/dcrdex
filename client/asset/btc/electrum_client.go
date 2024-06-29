@@ -56,6 +56,7 @@ type electrumWalletClient interface {
 	GetRawTransaction(ctx context.Context, txid string) ([]byte, error) // wallet method
 	GetAddressHistory(ctx context.Context, addr string) ([]*electrum.GetAddressHistoryResult, error)
 	GetAddressUnspent(ctx context.Context, addr string) ([]*electrum.GetAddressUnspentResult, error)
+	OnchainHistory(ctx context.Context, from, to int64) ([]electrum.TransactionResult, error)
 }
 
 type electrumNetworkClient interface {
@@ -971,6 +972,51 @@ func (ew *electrumWallet) syncStatus() (*SyncStatus, error) {
 		Height:  int32(info.SyncHeight),
 		Syncing: !info.Connected || info.SyncHeight < info.ServerHeight,
 	}, nil
+}
+
+// part of the btc.Wallet interface
+func (ew *electrumWallet) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
+	bestHeight, err := ew.getBestBlockHeight()
+	if err != nil {
+		return nil, fmt.Errorf("error getting best block: %v", err)
+	}
+	if bestHeight < blockHeight {
+		return nil, nil
+	}
+	var txs []*ListTransactionsResult
+	from := int64(blockHeight)
+	to := int64(blockHeight + 2000)
+	for {
+		if to > int64(bestHeight) {
+			to = int64(bestHeight)
+		}
+		addTxs, err := ew.wallet.OnchainHistory(ew.ctx, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("error getting onchain history: %v", err)
+		}
+		for _, tx := range addTxs {
+			ltr := &ListTransactionsResult{
+				BlockHeight: uint32(tx.Height),
+				BlockTime:   uint64(tx.Timestamp), // Maybe?
+				Send:        !tx.Incoming,
+				TxID:        tx.TxID,
+			}
+			if tx.Fee != nil {
+				f, err := strconv.ParseFloat(*tx.Fee, 64)
+				if err != nil {
+					return nil, fmt.Errorf("error parsing fee: %v", err)
+				}
+				ltr.Fee = &f
+			}
+			txs = append(txs, ltr)
+		}
+		if to == int64(bestHeight) {
+			break
+		}
+		from = to
+		to += 2000
+	}
+	return txs, nil
 }
 
 // checkWalletTx will get the bytes and confirmations of a wallet transaction.

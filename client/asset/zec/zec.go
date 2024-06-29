@@ -3217,6 +3217,45 @@ func (w *zecWallet) WalletTransaction(_ context.Context, txID string) (*asset.Wa
 		return nil, err
 	}
 
+	if tx == nil {
+		txHash, err := chainhash.NewHashFromStr(txID)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding txid %s: %w", txID, err)
+		}
+
+		gtr, err := getTransaction(w, txHash)
+		if err != nil {
+			return nil, fmt.Errorf("error getting transaction %s: %w", txID, err)
+		}
+
+		var (
+			blockHeight int32
+			blockTime   int64
+		)
+		if gtr.blockHash != nil {
+			block, _, err := getVerboseBlockHeader(w, gtr.blockHash)
+			if err != nil {
+				return nil, fmt.Errorf("error getting block height for %s: %v", gtr.blockHash, err)
+			}
+			blockHeight = int32(block.Height)
+			blockTime = block.Time
+		}
+
+		tx, err = w.idUnknownTx(&btcjson.ListTransactionsResult{
+			BlockHeight: &blockHeight,
+			BlockTime:   blockTime,
+			TxID:        txID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("error identifying transaction: %v", err)
+		}
+
+		tx.BlockNumber = uint64(blockHeight)
+		tx.Timestamp = uint64(blockTime)
+		tx.Confirmed = true
+		w.addTxToHistory(tx, txHash, true, false)
+	}
+
 	// If the wallet knows about the transaction, it will be part of the
 	// available balance, so we always return Confirmed = true.
 	tx.Confirmed = true

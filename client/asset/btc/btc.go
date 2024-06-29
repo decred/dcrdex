@@ -861,7 +861,6 @@ type intermediaryWallet struct {
 	*baseWallet
 	txFeeEstimator txFeeEstimator
 	tipRedeemer    tipRedemptionWallet
-	txLister       txLister
 
 	syncingTxHistory atomic.Bool
 }
@@ -1206,7 +1205,6 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		baseWallet:     btc,
 		txFeeEstimator: node,
 		tipRedeemer:    node,
-		txLister:       node,
 	}
 
 	w.prepareRedemptionFinder()
@@ -1397,7 +1395,6 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 			baseWallet:     btc,
 			txFeeEstimator: spvw,
 			tipRedeemer:    spvw,
-			txLister:       spvw,
 		},
 		authAddOn: &authAddOn{spvw},
 		spvNode:   spvw,
@@ -1538,6 +1535,8 @@ func (btc *baseWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, e
 	btc.log.Debugf("Using tx history db at %s", dbPath)
 
 	db := NewBadgerTxDB(dbPath, btc.log)
+	btc.txHistoryDB.Store(db)
+
 	wg, err := db.Connect(ctx)
 	if err != nil {
 		return nil, err
@@ -5574,7 +5573,7 @@ func rpcTxFee(tx *ListTransactionsResult) uint64 {
 
 // idUnknownTx identifies the type and details of a transaction either made
 // or recieved by the wallet.
-func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTransaction, error) {
+func (btc *baseWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTransaction, error) {
 	txHash, err := chainhash.NewHashFromStr(tx.TxID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding tx hash %s: %v", tx.TxID, err)
@@ -5851,7 +5850,7 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.W
 // addUnknownTransactionsToHistory checks for any transactions the wallet has
 // made or recieved that are not part of the transaction history. It scans
 // from the last point to which it had previously scanned to the current tip.
-func (btc *intermediaryWallet) addUnknownTransactionsToHistory(tip uint64) {
+func (btc *baseWallet) addUnknownTransactionsToHistory(tip uint64) {
 	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
 		return
@@ -5869,7 +5868,7 @@ func (btc *intermediaryWallet) addUnknownTransactionsToHistory(tip uint64) {
 		blockToQuery = tip - blockQueryBuffer
 	}
 
-	txs, err := btc.txLister.listTransactionsSinceBlock(int32(blockToQuery))
+	txs, err := btc.node.listTransactionsSinceBlock(int32(blockToQuery))
 	if err != nil {
 		btc.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
 		return
