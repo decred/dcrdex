@@ -1130,6 +1130,7 @@ export default class MarketsPage extends BasePage {
     this.mmRunning = undefined
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
+    app().updateMarketElements(this.main, baseID, quoteID)
 
     this.displayMessageIfMissingWallet()
     this.balanceWgt.setWallets(host, baseID, quoteID)
