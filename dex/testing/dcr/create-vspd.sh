@@ -9,7 +9,7 @@ FEE_XPUB=$3
 
 VSPD_DIR="${NODES_ROOT}/vspd"
 
-git clone -b client/v2.1.0 https://github.com/decred/vspd ${VSPD_DIR}
+git clone -b release-v1.3.2 --depth 1 https://github.com/decred/vspd ${VSPD_DIR}
 
 DCRD_PORT="${ALPHA_NODE_RPC_PORT}"
 DCRD_CERT="${NODES_ROOT}/alpha/rpc.cert"

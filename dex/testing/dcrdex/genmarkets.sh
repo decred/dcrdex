@@ -73,7 +73,7 @@ cat > "${FILEPATH}" <<EOF
         {
             "base": "DCR_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 1000000000,
+            "lotSize": 2000000000,
             "rateStep": 100,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
@@ -239,8 +239,8 @@ if [ $ZEC_ON -eq 0 ]; then
         {
             "base": "ZEC_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 100000000,
-            "rateStep": 1000,
+            "lotSize": 1000000,
+            "rateStep": 100000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
             "parcelSize": 5
@@ -254,8 +254,8 @@ if [ $ZCL_ON -eq 0 ]; then
         {
             "base": "ZCL_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 50000000000,
-            "rateStep": 1000,
+            "lotSize": 5000000,
+            "rateStep": 100000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
             "parcelSize": 8

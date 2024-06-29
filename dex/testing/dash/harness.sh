@@ -270,7 +270,7 @@ sleep 2
 ################################################################################
 echo "Creating alpha wallet - encrypted HD"
 
-tmux send-keys -t $SESSION:2 "./alpha createwallet \"\" false false \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:2 "./alpha createwallet \"\" false true \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
 sleep 2
 
 tmux send-keys -t $SESSION:2 "./alpha  upgradetohd \"${ALPHA_SEED_MNEMONIC}\" \"\" \"${WALLET_PASSWORD}\"${DONE}" C-m\; ${WAIT}
@@ -281,7 +281,7 @@ sleep 3
 ################################################################################
 echo "Creating beta wallet - encrypted HD"
 
-tmux send-keys -t $SESSION:2 "./beta  createwallet \"\" false false \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:2 "./beta  createwallet \"\" false true \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
 sleep 2
 
 tmux send-keys -t $SESSION:2 "./beta  upgradetohd \"${BETA_SEED_MNEMONIC}\" \"\" ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
@@ -292,7 +292,7 @@ sleep 3
 ################################################################################
 echo "Creating gamma wallet - encrypted HD"
 
-tmux send-keys -t $SESSION:2 "./alpha createwallet \"gamma\" false false \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:2 "./alpha createwallet \"gamma\" false true \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
 sleep 2
 
 tmux send-keys -t $SESSION:2 "./alpha -rpcwallet=\"gamma\" upgradetohd \"${GAMMA_SEED_MNEMONIC}\" \"\" \"${WALLET_PASSWORD}\"${DONE}" C-m\; ${WAIT}
@@ -303,7 +303,7 @@ sleep 3
 ################################################################################
 echo "Creating delta wallet - encrypted HD"
 
-tmux send-keys -t $SESSION:2 "./beta createwallet \"delta\" false false \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:2 "./beta createwallet \"delta\" false true \"${WALLET_PASSWORD}\" ${DONE}" C-m\; ${WAIT}
 sleep 3
 
 tmux send-keys -t $SESSION:2 "./beta -rpcwallet=\"delta\" upgradetohd \"${DELTA_SEED_MNEMONIC}\" \"\" \"${WALLET_PASSWORD}\"${DONE}" C-m\; ${WAIT}

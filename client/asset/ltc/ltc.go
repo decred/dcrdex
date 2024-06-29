@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -68,7 +69,7 @@ var (
 		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  append(btc.SPVConfigOpts("LTC"), btc.CommonConfigOpts("LTC", true)...),
+		ConfigOpts:  btc.CommonConfigOpts("LTC", true),
 		Seeded:      true,
 	}
 	// WalletInfo defines some general information about a Litecoin wallet.
@@ -163,8 +164,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
+	bday := btc.DefaultWalletBirthday
+	if params.Birthday != 0 {
+		bday = time.Unix(int64(params.Birthday), 0)
+	}
+
 	walletDir := filepath.Join(params.DataDir, chainParams.Name)
-	return createSPVWallet(params.Pass, params.Seed, walletCfg.AdjustedBirthday(), walletDir,
+	return createSPVWallet(params.Pass, params.Seed, bday, walletDir,
 		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
 }
 

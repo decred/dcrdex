@@ -44,13 +44,7 @@ body.dark {
   }
 
   #newWalletForm {
-    .wallet-tabs {
-      .wtab {
-        background-color: $dark_body_bg;
-        border-color: #999;
-        opacity: 0.8;
-      }
-
+    [data-tmpl=walletTypeTabs] {
       .wtab.selected {
         opacity: 1;
         background-color: #263846;

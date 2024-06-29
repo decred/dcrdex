@@ -11,16 +11,17 @@ import (
 )
 
 const (
-	validationNote = "validation"
-	runStats       = "runstats"
-	runEvent       = "runevent"
+	NoteTypeValidation       = "validation"
+	NoteTypeRunStats         = "runstats"
+	NoteTypeRunEvent         = "runevent"
+	NoteTypeCEXBalanceUpdate = "cexbal"
 )
 
 func newValidationErrorNote(host string, baseID, quoteID uint32, errorMsg string) *db.Notification {
 	baseSymbol := dex.BipIDSymbol(baseID)
 	quoteSymbol := dex.BipIDSymbol(quoteID)
 	msg := fmt.Sprintf("%s-%s @ %s: %s", baseSymbol, quoteSymbol, host, errorMsg)
-	note := db.NewNotification(validationNote, "", "Bot Config Validation Error", msg, db.ErrorLevel)
+	note := db.NewNotification(NoteTypeValidation, "", "Bot Config Validation Error", msg, db.ErrorLevel)
 	return &note
 }
 
@@ -28,18 +29,18 @@ type runStatsNote struct {
 	db.Notification
 
 	Host      string    `json:"host"`
-	Base      uint32    `json:"base"`
-	Quote     uint32    `json:"quote"`
+	BaseID    uint32    `json:"baseID"`
+	QuoteID   uint32    `json:"quoteID"`
 	StartTime int64     `json:"startTime"`
 	Stats     *RunStats `json:"stats"`
 }
 
-func newRunStatsNote(host string, base, quote uint32, stats *RunStats) *runStatsNote {
+func newRunStatsNote(host string, baseID, quoteID uint32, stats *RunStats) *runStatsNote {
 	return &runStatsNote{
-		Notification: db.NewNotification(runStats, "", "", "", db.Data),
+		Notification: db.NewNotification(NoteTypeRunStats, "", "", "", db.Data),
 		Host:         host,
-		Base:         base,
-		Quote:        quote,
+		BaseID:       baseID,
+		QuoteID:      quoteID,
 		Stats:        stats,
 	}
 }
@@ -56,11 +57,25 @@ type runEventNote struct {
 
 func newRunEventNote(host string, base, quote uint32, startTime int64, event *MarketMakingEvent) *runEventNote {
 	return &runEventNote{
-		Notification: db.NewNotification(runEvent, "", "", "", db.Data),
+		Notification: db.NewNotification(NoteTypeRunEvent, "", "", "", db.Data),
 		Host:         host,
 		Base:         base,
 		Quote:        quote,
 		StartTime:    startTime,
 		Event:        event,
+	}
+}
+
+type cexNotification struct {
+	db.Notification
+	CEXName string      `json:"cexName"`
+	Note    interface{} `json:"note"`
+}
+
+func newCexUpdateNote(cexName string, noteType string, note interface{}) *cexNotification {
+	return &cexNotification{
+		Notification: db.NewNotification(noteType, "", "", "", db.Data),
+		CEXName:      cexName,
+		Note:         note,
 	}
 }

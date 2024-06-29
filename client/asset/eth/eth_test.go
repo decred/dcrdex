@@ -452,6 +452,10 @@ func (c *tTokenContractor) transfer(*bind.TransactOpts, common.Address, *big.Int
 	return c.transferTx, c.transferErr
 }
 
+func (c *tTokenContractor) parseTransfer(*types.Receipt) (uint64, error) {
+	return 0, nil
+}
+
 func (c *tTokenContractor) estimateTransferGas(context.Context, *big.Int) (uint64, error) {
 	return c.transferEstimate, c.transferEstimateErr
 }
@@ -474,7 +478,7 @@ func (db *tTxDB) storeTx(wt *extendedWalletTx) error {
 	db.storeTxCalled = true
 	return db.storeTxErr
 }
-func (db *tTxDB) removeTx(id string) error {
+func (db *tTxDB) removeTx(_ /* id */ string) error {
 	db.removeTxCalled = true
 	return db.removeTxErr
 }

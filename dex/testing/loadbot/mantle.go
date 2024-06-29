@@ -6,8 +6,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math"
 	"math/rand"
 	"net"
 	"os"
@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
@@ -83,6 +84,50 @@ func runTrader(t Trader, name string) {
 		return
 	}
 
+	approveToken := func(assetID uint32) error {
+		if asset.TokenInfo(assetID) == nil {
+			return nil
+		}
+		symbol := dex.BipIDSymbol(assetID)
+		approved := make(chan struct{})
+		if _, err := m.ApproveToken(pass, assetID, hostAddr, func() {
+			close(approved)
+		}); err != nil && !isApprovalPendingError(err) {
+			return fmt.Errorf("error approving %s token: %v", symbol, err)
+		}
+		m.log.Infof("Waiting for %s token approval", symbol)
+		<-harnessCtl(ctx, symbol, "./mine-alpha", "1")
+		select {
+		case <-approved:
+			m.log.Infof("%s token approved", symbol)
+		case <-time.After(time.Minute):
+			return fmt.Errorf("%s token not approved after 1 minute", symbol)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return nil
+	}
+	if err := approveToken(baseID); err != nil {
+		m.fatalError("error approving token: %v", err)
+	}
+	if err := approveToken(quoteID); err != nil {
+		m.fatalError("error approving token: %v", err)
+	}
+
+	defer func() {
+		for _, w := range m.wallets {
+			bal, err := m.AssetBalance(w.assetID)
+			if err != nil {
+				log.Errorf("error updating %s balance: %v", w.symbol, err)
+				return
+			}
+			_, err = m.Send(pass, w.assetID, bal.Available*99/100, returnAddress(w.symbol), false)
+			if err != nil {
+				log.Errorf("failed to send funds to alpha: %v", err)
+			}
+		}
+	}()
+
 out:
 	for {
 		select {
@@ -139,11 +184,12 @@ out:
 // and fields.
 type Mantle struct {
 	*core.Core
-	waiter  *dex.StartStopWaiter
-	name    string
-	log     dex.Logger
-	notes   <-chan core.Notification
-	wallets map[uint32]*botWallet
+	waiter        *dex.StartStopWaiter
+	name          string
+	log           dex.Logger
+	notes         <-chan core.Notification
+	wallets       map[uint32]*botWallet
+	lastReplenish time.Time
 }
 
 // newMantle is a constructor for a *Mantle. Each Mantle has its own core. The
@@ -350,7 +396,7 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 		// to be stopped here. So, it is probably fine to ignore the
 		// error returned from stop-wallet.
 		stopFn := func(ctx context.Context) {
-			<-harnessCtl(ctx, symbol, "./stop-wallet", rpcPort)
+			<-harnessCtl(ctx, symbol, "./stop-wallet", rpcPort, name)
 		}
 		if err = harnessProcessCtl(symbol, stopFn, "./start-wallet", name, rpcPort, networkPort); err != nil {
 			m.fatalError("%s start-wallet error: %v", symbol, err)
@@ -360,13 +406,16 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 		if symbol == zec || symbol == zcl {
 			<-time.After(time.Second * 10)
 		}
-		// Connect the new node to the alpha node.
-		cmdOut := <-harnessCtl(ctx, symbol, "./connect-alpha", rpcPort)
+		// Connect the new node to the alpha node. name only used with zec and zcl.
+		cmdOut := <-harnessCtl(ctx, symbol, "./connect-alpha", rpcPort, name)
 		if cmdOut.err != nil {
 			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
 			return
 		}
 		<-time.After(time.Second)
+		if symbol == zec || symbol == zcl {
+			<-time.After(time.Second * 20)
+		}
 	default:
 		m.fatalError("createWallet: symbol %s unknown", symbol)
 	}
@@ -390,7 +439,7 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 		m.log.Infof("created wallet %s:%s", walletSymbol, name)
 		coreWallet := m.WalletState(form.AssetID)
 		if coreWallet == nil {
-			return "", fmt.Errorf("Failed to retrieve WalletState for newly created %s wallet", walletSymbol)
+			return "", fmt.Errorf("failed to retrieve WalletState for newly created %s wallet", walletSymbol)
 		}
 		addr := coreWallet.Address
 		if symbol == zec {
@@ -422,11 +471,23 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 		}
 
 		if nCoins != 0 {
+			// Send fee funding for token assets.
+			if tkn := asset.TokenInfo(form.AssetID); tkn != nil {
+				if err = send(dex.BipIDSymbol(tkn.ParentID), addr, 1000e9); err != nil {
+					if ignoreErrors && ctx.Err() == nil {
+						m.log.Errorf("Trouble sending fee funding: %v", err)
+					} else {
+						return "", err
+					}
+				}
+				time.Sleep(time.Second * 3)
+				<-harnessCtl(ctx, walletSymbol, fmt.Sprintf("./mine-alpha"), "1")
+			}
 			chunk := (maxFunds + minFunds) / 2 / uint64(nCoins)
 			for i := 0; i < nCoins; {
-				if err = fund(walletSymbol, addr, chunk); err != nil {
+				if err = send(walletSymbol, addr, chunk); err != nil {
 					if ignoreErrors && ctx.Err() == nil {
-						m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.", valString(chunk, walletSymbol), walletSymbol, addr, err)
+						m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.", fmtAtoms(chunk, walletSymbol), walletSymbol, addr, err)
 						// It often happens that the wallet is not able to
 						// create enough outputs. mine and try indefinitely
 						// if we are ignoring errors.
@@ -462,12 +523,12 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 
 }
 
-func fund(symbol, addr string, val uint64) error {
-	log.Tracef("Sending %s %s to %s", valString(val, symbol), symbol, addr)
+func send(symbol, addr string, val uint64) error {
+	log.Tracef("Sending %s %s to %s", fmtAtoms(val, symbol), symbol, addr)
 	var res *harnessResult
 	switch symbol {
 	case btc, dcr, ltc, dash, doge, firo, bch, dgb:
-		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, valString(val, symbol))
+		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, fmtConv(val, symbol))
 	case zec, zcl:
 		// sendtoaddress will choose spent outputs if a block was
 		// recently mined. Use the zecSendMtx to ensure we have waited
@@ -478,7 +539,7 @@ func fund(symbol, addr string, val uint64) error {
 		// double spends. Alternatively, wait for zec to fix this and
 		// remove the lock https://github.com/zcash/zcash/issues/6045
 		zecSendMtx.Lock()
-		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, valString(val, symbol))
+		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, fmtConv(val, symbol))
 		zecSendMtx.Unlock()
 	case eth, polygon:
 		// eth values are always handled as gwei, so multiply by 1e9
@@ -519,7 +580,7 @@ func (m *Mantle) replenishBalance(w *botWallet, minFunds, maxFunds uint64) {
 	}
 
 	m.log.Debugf("Balance note received for %s (minFunds = %s, maxFunds = %s): %s",
-		w.symbol, valString(minFunds, w.symbol), valString(maxFunds, w.symbol), mustJSON(bal))
+		w.symbol, fmtConv(minFunds, w.symbol), fmtConv(maxFunds, w.symbol), mustJSON(bal))
 
 	// If over or under max, make the average of the two.
 	wantBal := (maxFunds + minFunds) / 2
@@ -527,14 +588,15 @@ func (m *Mantle) replenishBalance(w *botWallet, minFunds, maxFunds uint64) {
 	if bal.Available < minFunds {
 		chunk := (wantBal - bal.Available) / uint64(w.numCoins)
 		for i := 0; i < w.numCoins; {
-			m.log.Debugf("Requesting %s from %s alpha node", valString(chunk, w.symbol), w.symbol)
-			if err = fund(w.symbol, w.address, chunk); err != nil {
+			m.log.Debugf("Requesting %s from %s alpha node", fmtAtoms(chunk, w.symbol), w.symbol)
+			if err = send(w.symbol, w.address, chunk); err != nil {
 				if ignoreErrors && ctx.Err() == nil {
 					m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.",
-						valString(chunk, w.symbol), w.symbol, w.address, err)
+						fmtAtoms(chunk, w.symbol), w.symbol, w.address, err)
 					// It often happens that the wallet is not able to
 					// create enough outputs. mine and try indefinitely
 					// if we are ignoring errors.
+					time.Sleep(3)
 					<-harnessCtl(ctx, w.symbol, fmt.Sprintf("./mine-%s", alpha), "1")
 					time.Sleep(time.Second)
 					continue
@@ -547,11 +609,12 @@ func (m *Mantle) replenishBalance(w *botWallet, minFunds, maxFunds uint64) {
 	} else if bal.Available > maxFunds {
 		// Send some back to the alpha address.
 		amt := bal.Available - wantBal
-		m.log.Debugf("Sending %s back to %s alpha node", valString(amt, w.symbol), w.symbol)
+		m.log.Debugf("Sending %s back to %s alpha node", fmtAtoms(amt, w.symbol), w.symbol)
 		_, err := m.Send(pass, w.assetID, amt, returnAddress(w.symbol), false)
 		if err != nil {
 			m.fatalError("failed to send funds to alpha: %v", err)
 		}
+		time.Sleep(time.Second * 3)
 	}
 }
 
@@ -565,11 +628,23 @@ func mustJSON(thing any) string {
 	return string(s)
 }
 
-// valString returns a string representation of the value in conventional
+// fmtAtoms returns a string representation of the value in conventional
 // units.
-func valString(v uint64, assetSymbol string) string {
-	precisionStr := fmt.Sprintf("%%.%vf", math.Log10(float64(conversionFactors[assetSymbol])))
-	return fmt.Sprintf(precisionStr, float64(v)/float64(conversionFactors[assetSymbol]))
+func fmtAtoms(v uint64, assetSymbol string) string {
+	assetID, _ := dex.BipSymbolID(assetSymbol)
+	ui, _ := asset.UnitInfo(assetID)
+	return ui.FormatAtoms(v)
+}
+
+func fmtConv(v uint64, assetSymbol string) string {
+	assetID, found := dex.BipSymbolID(assetSymbol)
+	if !found {
+		return "<unknown symbol>"
+	}
+	if ui, err := asset.UnitInfo(assetID); err == nil {
+		return ui.ConventionalString(v)
+	}
+	return "<unknown asset>"
 }
 
 // coreOrder creates a *core.Order.
@@ -641,6 +716,8 @@ func randomToken() string {
 type botWallet struct {
 	form          *core.WalletForm
 	parentForm    *core.WalletForm
+	minFunds      uint64
+	maxFunds      uint64
 	name          string
 	node          string
 	symbol        string
@@ -821,6 +898,8 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 		pass:       pass,
 		assetID:    form.AssetID,
 		numCoins:   numCoins,
+		minFunds:   minFunds,
+		maxFunds:   maxFunds,
 	}
 }
 
@@ -836,8 +915,5 @@ func isOverLimitError(err error) bool {
 }
 
 func isApprovalPendingError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "an approval is already pending")
+	return errors.Is(err, asset.ErrApprovalPending)
 }

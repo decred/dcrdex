@@ -1,6 +1,5 @@
 import Doc, { Animation, AniToggle } from './doc'
 import BasePage from './basepage'
-import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
 import * as intl from './locales'
@@ -10,7 +9,6 @@ import {
   PageElement,
   ConnectionStatus,
   Exchange,
-  PasswordCache,
   WalletState,
   PrepaidBondID
 } from './registry'
@@ -38,30 +36,29 @@ export default class DexSettingsPage extends BasePage {
   dexAddrForm: forms.DEXAddressForm
   bondFeeBufferCache: Record<string, number>
   newWalletForm: forms.NewWalletForm
-  unlockWalletForm: forms.UnlockWalletForm
   regAssetForm: forms.FeeAssetSelectionForm
   walletWaitForm: forms.WalletWaitForm
   confirmRegisterForm: forms.ConfirmRegistrationForm
   reputationMeter: ReputationMeter
   animation: Animation
-  pwCache: PasswordCache
   renewToggle: AniToggle
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
-    this.pwCache = { pw: '' }
     const host = this.host = body.dataset.host ? body.dataset.host : ''
     const xc = app().exchanges[host]
     const page = this.page = Doc.idDescendants(body)
     this.forms = Doc.applySelector(page.forms, ':scope > form')
 
-    this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
+    this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, async () => {
       this.showSuccess(intl.prep(intl.ID_TRADING_TIER_UPDATED))
       this.renewToggle.setState(this.confirmRegisterForm.tier > 0)
+      await app().fetchUser()
+      app().updateMenuItemsDisplay()
     }, () => {
       this.runAnimation(this.regAssetForm, page.regAssetForm)
-    }, this.pwCache)
+    })
     this.confirmRegisterForm.setExchange(xc, '')
 
     this.walletWaitForm = new forms.WalletWaitForm(page.walletWait, () => {
@@ -74,13 +71,8 @@ export default class DexSettingsPage extends BasePage {
     this.newWalletForm = new forms.NewWalletForm(
       page.newWalletForm,
       assetID => this.newWalletCreated(assetID, this.confirmRegisterForm.tier),
-      this.pwCache,
       () => this.runAnimation(this.regAssetForm, page.regAssetForm)
     )
-
-    this.unlockWalletForm = new forms.UnlockWalletForm(page.unlockWalletForm, (assetID: number) => {
-      this.progressTierFormsWithWallet(assetID, app().walletMap[assetID])
-    }, this.pwCache)
 
     this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, async (assetID: number, tier: number) => {
       if (assetID === PrepaidBondID) {
@@ -102,13 +94,13 @@ export default class DexSettingsPage extends BasePage {
       this.confirmRegisterForm.setAsset(assetID, tier, 0)
       this.newWalletForm.setAsset(assetID)
       this.showForm(page.newWalletForm)
-    }, this.pwCache)
+    })
     this.regAssetForm.setExchange(xc, '')
 
     this.reputationMeter = new ReputationMeter(page.repMeter)
     this.reputationMeter.setHost(host)
 
-    Doc.bind(page.exportDexBtn, 'click', () => this.prepareAccountExport(page.authorizeAccountExportForm))
+    Doc.bind(page.exportDexBtn, 'click', () => this.exportAccount())
     Doc.bind(page.disableAcctBtn, 'click', () => this.prepareAccountDisable(page.disableAccountForm))
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
@@ -178,10 +170,9 @@ export default class DexSettingsPage extends BasePage {
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
       window.location.assign(`/dexsettings/${xc.host}`)
-    }, undefined, this.host)
+    }, this.host)
 
     // forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
-    forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
@@ -195,7 +186,7 @@ export default class DexSettingsPage extends BasePage {
     }
     Doc.bind(document, 'keyup', this.keyup)
 
-    page.forms.querySelectorAll('.form-closer').forEach(el => {
+    Doc.applySelector(page.forms, '.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { this.closePopups() })
     })
 
@@ -220,21 +211,14 @@ export default class DexSettingsPage extends BasePage {
     const { bondAssets } = this.regAssetForm.xc
     const bondAsset = bondAssets[asset.symbol]
     if (!wallet.open) {
-      if (State.passwordIsCached()) {
-        const loaded = app().loading(page.forms)
-        const res = await postJSON('/api/openwallet', { assetID: assetID })
-        loaded()
-        if (!app().checkResponse(res)) {
-          this.regAssetForm.setAssetError(`error unlocking wallet: ${res.msg}`)
-          this.runAnimation(this.regAssetForm, page.regAssetForm)
-        }
-        return
-      } else {
-        // Password not cached. Show the unlock wallet form.
-        this.unlockWalletForm.refresh(asset)
-        this.showForm(page.unlockWalletForm)
-        return
+      const loaded = app().loading(page.forms)
+      const res = await postJSON('/api/openwallet', { assetID: assetID })
+      loaded()
+      if (!app().checkResponse(res)) {
+        this.regAssetForm.setAssetError(`error unlocking wallet: ${res.msg}`)
+        this.runAnimation(this.regAssetForm, page.regAssetForm)
       }
+      return
     }
     if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + fees) {
       // If we are raising our tier, we'll show a confirmation form
@@ -318,14 +302,8 @@ export default class DexSettingsPage extends BasePage {
 
   // exportAccount exports and downloads the account info.
   async exportAccount () {
-    const page = this.page
-    const pw = page.exportAccountAppPass.value
-    const host = page.exportAccountHost.textContent
-    page.exportAccountAppPass.value = ''
-    const req = {
-      pw,
-      host
-    }
+    const { page, host } = this
+    const req = { host }
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/exportaccount', req)
     loaded()
@@ -346,13 +324,8 @@ export default class DexSettingsPage extends BasePage {
   // disableAccount disables the account associated with the provided host.
   async disableAccount () {
     const page = this.page
-    const pw = page.disableAccountAppPW.value
     const host = page.disableAccountHost.textContent
-    page.disableAccountAppPW.value = ''
-    const req = {
-      pw,
-      host
-    }
+    const req = { host }
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/disableaccount', req)
     loaded()
@@ -363,17 +336,6 @@ export default class DexSettingsPage extends BasePage {
     }
     Doc.hide(page.forms)
     window.location.assign('/settings')
-  }
-
-  async prepareAccountExport (authorizeAccountExportForm: HTMLElement) {
-    const page = this.page
-    page.exportAccountHost.textContent = this.host
-    page.exportAccountErr.textContent = ''
-    if (State.passwordIsCached()) {
-      this.exportAccount()
-    } else {
-      this.showForm(authorizeAccountExportForm)
-    }
   }
 
   async prepareAccountDisable (disableAccountForm: HTMLElement) {

@@ -23,7 +23,7 @@ const (
 
 	dustLimit = 1_000_000 // sats => 0.01 DOGE, the "soft" limit (DEFAULT_DUST_LIMIT)
 
-	minNetworkVersion = 1140500
+	minNetworkVersion = 1140700 // v1.14.7.0-a6d122013
 	walletTypeRPC     = "dogecoindRPC"
 	feeConfs          = 10
 )

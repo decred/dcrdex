@@ -222,7 +222,7 @@ cat > "./start-wallet" <<EOF
 
 mkdir ${NODES_ROOT}/\$1
 
-printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:2\nnuparams=821a451c:3\nnuparams=930b540d:4\n" > ${NODES_ROOT}/\$1/\$1.conf
+printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOURCE_DIR}\nnuparams=5ba81b19:1\nnuparams=76b809bb:2\nnuparams=821a451c:3\nnuparams=930b540d:4\neqparams=5ba81b19:48:5\neqparams=76b809bb:48:5\neqparams=821a451c:48:5\neqparams=930b540d:48:5\n" > ${NODES_ROOT}/\$1/\$1.conf
 
 ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -regtest=1 -conf=\$1.conf \
@@ -233,13 +233,13 @@ chmod +x "./start-wallet"
 
 cat > "./connect-alpha" <<EOF
 #!/usr/bin/env bash
-${CLI} -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
+${CLI} -conf=${NODES_ROOT}/\$2/\$2.conf -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass addnode 127.0.0.1:${ALPHA_LISTEN_PORT} onetry
 EOF
 chmod +x "./connect-alpha"
 
 cat > "./stop-wallet" <<EOF
 #!/usr/bin/env bash
-${CLI} -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass stop
+${CLI} -conf=${NODES_ROOT}/\$2/\$2.conf -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass stop
 EOF
 chmod +x "./stop-wallet"
 
@@ -321,7 +321,7 @@ sleep 10
 tmux send-keys -t $SESSION:4 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./delta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./gamma addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
-# # This timeout is apparently critical. Give the nodes time to sync.
+# This timeout is apparently critical. Give the nodes time to sync.
 sleep 3
 
 echo "Generating the genesis block"

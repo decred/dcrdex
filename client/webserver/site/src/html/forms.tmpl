@@ -1,41 +1,47 @@
 {{define "walletConfigTemplates"}}
-<h6 data-tmpl="walletSettingsHeader">
-  [[[Wallet Settings]]]
-</h6>
-<div>
-  <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile me-1"></span> [[[load from file]]]</div>
-  <input data-tmpl="fileInput" type="file" class="d-none" accept=".conf, .cfg, .cnf, .ini">
+<div class="d-flex align-items-center justify-content-between">
+  <span data-tmpl="walletSettingsHeader" class="fs20">
+    [[[Wallet Settings]]]
+  </span>
+  <div class="flex-center">
+    <button data-tmpl="fileSelector" type="button" class="small">
+      <span>[[[load from file]]]</span>
+      <span class="ico-textfile ms-1 fs14"></span>
+    </button>
+    <input data-tmpl="fileInput" type="file" class="d-none" accept=".conf, .cfg, .cnf, .ini">
+  </div>
 </div>
+
 <div data-tmpl="allSettings">
   <div data-tmpl="dynamicOpts" class="dynamicopts">
-    <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end mt-3">
+    <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end mt-2">
       <label class="small"> <span class="ico-info"></span></label>
       <input type="text">
     </div>
-    <div data-tmpl="checkbox" class="d-flex align-items-center mt-3">
+    <div data-tmpl="checkbox" class="d-flex align-items-center mt-2 text-nowrap">
       <div class="form-check">
         <input class="form-check-input" type="checkbox" value="">
         <label class="form-check-label fs14"> <span class="ico-info fs13"></span></label>
       </div>
     </div>
-    <div data-tmpl="dateInput" class="px-0 d-flex flex-column justify-content-end mt-3">
+    <div data-tmpl="dateInput" class="px-0 d-flex flex-column justify-content-end mt-2">
       <label class="small"> <span class="ico-info"></span></label>
       <input type="date">
     </div>
   </div>
-  <div data-tmpl="repeatableInput" class="w-100 mb-3">
+  <div data-tmpl="repeatableInput" class="w-100 mt-2">
     <label class="small"> <span class="ico-info"></span></label>
     <div class="d-flex align-items-stretch justify-content-center">
       <input type="text" class="flex-grow-1">
       <div class="ico-plus fs14 p-2 ms-2 pointer hoverbg" data-tmpl="add"></div>
     </div>
   </div>
-  <div data-tmpl="showOther" class="d-hide mb-3 pointer d-flex align-items-center justify-content-start">
+  <div data-tmpl="showOther" class="d-hide mt-2 pointer d-flex align-items-center justify-content-start">
     <span data-tmpl="showIcon" class="ico-plus fs8 ps-1"></span>
     <span data-tmpl="hideIcon" class="ico-minus fs8 ps-1"></span>
     <span data-tmpl="showHideMsg" class="d-inline-block ps-1 pb-1"></span>
   </div>
-  <div data-tmpl="otherSettings" class="d-hide mb-3">
+  <div data-tmpl="otherSettings" class="d-hide mt-3">
     <div data-tmpl="loadedSettingsMsg" class="fs15 pt-3 pb-1 ps-1">&mdash; [[[loaded from file]]] &mdash;</div>
     <div data-tmpl="loadedSettings" class="dynamicopts"></div>
     <div data-tmpl="defaultSettingsMsg" class="fs15">&mdash; [[[defaults]]] &mdash;</div>
@@ -46,119 +52,93 @@
 {{end}}
 
 {{define "walletCfgGuideTemplate"}}
-<a data-tmpl="walletCfgGuide" class="d-flex justify-content-start align-items-center py-2 mt-2 pointer hoverbg" target="_blank">
-  <span class="ico-textfile fs18"></span>
-  <span class="pointer ps-1">[[[configuration guide]]]</span>
+<a data-tmpl="walletCfgGuide" class="d-flex justify-content-start align-items-center pt-2 mx-3 pointer hoverbg" target="_blank">
+  <span class="ico-textfile me-2"></span>
+  <span class="pointer">[[[configuration guide]]]</span>
 </a>
 {{end}}
 
 {{define "newWalletForm"}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<div class="wallet-tabs mb-3" data-tmpl="walletTypeTabs">
-  <div class="wtab" data-tmpl="walletTabTmpl"></div>
+<header>
+  <span class="fs14 ico-plus grey me-2"></span>
+  <span>[[[add_a_x_wallet]]]</span>
+</header>
+<div class="flex-center pb-2 border-bottom d-hide" data-tmpl="tokenMsgBox">
+  <span>[[[Token on]]]</span>
+  <img data-tmpl="tokenParentLogo" class="ms-1 micro-icon">
+  <span data-tmpl="tokenParentName"></span>
 </div>
-<h3 data-tmpl="header">
-  [[[add_a_x_wallet]]]
-  <small class="flex-center mt-1 d-hide" data-tmpl="tokenMsgBox">
-    <span>[[[Token on]]]</span>
-    <img data-tmpl="tokenParentLogo" class="ms-1 micro-icon">
-    <span data-tmpl="tokenParentName"></span>
-  </small>
-</h3>
+<div data-tmpl="walletTypeTabs" class="d-flex justify-content-stretch border-bottom p-0">
+  <div data-tmpl="walletTabTmpl" class="wtab px-3 py-2 border-end user-select-none"></div>
+</div>
 <div class="position-relative" data-tmpl="mainForm">
-  <div class="flex-center py-3" data-tmpl="oneBttnBox">
+  <div class="flex-center pt-3" data-tmpl="oneBttnBox">
     <button class="one-bttn w-auto" data-tmpl="oneBttn">[[[Create]]]!</button>
   </div>
-  <div class="py-2 fs14 grey">
-    <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
+  <div data-tmpl="goBack" class="pt-3 d-flex align-items-center fs14 grey d-hide">
+    <span class="ico-arrowleft fs12 me-1"></span>
+    <span>[[[pick a different asset]]]</span>
   </div>
-  <div data-tmpl="walletSettings">
+  <div data-tmpl="walletSettings" class="pt-3">
     {{template "walletConfigTemplates"}}
   </div>
   {{template "walletCfgGuideTemplate"}}
-  <hr class="dashed my-3">
-  <div class="d-flex justify-content-between align-items-stretch flex-wrap mb-3" data-tmpl=walletPassAndSubmitBttn>
-    <div class="col-11 p-0" data-tmpl="newWalletPassBox">
+  <div class="d-flex align-items-end flex-wrap mt-3" data-tmpl="walletPassAndSubmitBttn">
+    <div class="flex-grow-1 me-3" data-tmpl="newWalletPassBox">
       <label for="newWalletPass">[[[Wallet Password]]]
         <span class="ico-info" data-tooltip="[[[w_password_tooltip]]]"></span>
       </label>
       <input type="password" data-tmpl="newWalletPass" autocomplete="off">
     </div>
-    <div class="hide-pw col-11">
-      <label for="nwAppPass">[[[App Password]]]</label>
-      <input type="password" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
-    </div>
-    <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
-    <div class="d-grid align-items-end col-10 p-0">
-      <button data-tmpl="submitAdd" type="submit" class="go">[[[Add]]]</button>
-    </div>
+    <button data-tmpl="submitAdd" type="submit" class="feature flex-grow-1">[[[Add]]]</button>
   </div>
-
-  <div class="pt-3 text-center d-hide text-danger text-break" data-tmpl="newWalletErr"></div>
+  <div class="p-3 text-center d-hide text-danger text-break" data-tmpl="newWalletErr"></div>
 </div>
 <div class="d-hide flex-center flex-column" data-tmpl="parentSyncing">
-  <div class="p-3">
+  <div>
     [[[Synchronizing]]] <img data-tmpl="parentLogo" class="micro-icon"> <span data-tmpl="parentName"></span>.
   </div>
 
-  <div class="fs20">
+  <div class="fs20 pt-3">
     <span data-tmpl="parentSyncPct"></span> %
   </div>
-  <div class="p-3">
+  <div class="pt-3">
     <img data-tmpl="childLogo" class="micro-icon"> <span data-tmpl="childName"></span> [[[wallet_wait_synced]]].
   </div>
 </div>
 {{end}}
 
-{{define "unlockWalletForm"}}
-<div class="form-closer"><span class="ico-cross"></span></div>
-<h3 class="text-center text-nowrap position-relative mb-3">
-  [[[Unlock]]]
-  <img id="uwAssetLogo" class="micro-icon mx-1">
-  <span id="uwAssetName"></span>
-  [[[Wallet]]]
-</h3>
-{{if .}}
-  <div class="fs16">{{.}}</div>
-  <hr class="dashed my-4">
-{{end}}
-<div id="uwAppPassBox" class="mb-3">
-  <label for="uwAppPass">[[[App Password]]]</label>
-  <input type="password" id="uwAppPass" autocomplete="off" autofocus>
-  <div class="mb-3 fs14 grey">[[[app_password_reminder]]]</div>
-</div>
-<div id="submitUnlockDiv" class="d-flex justify-content-end">
-  <button id="submitUnlock" type="submit" class="go">[[[Unlock]]]</button>
-</div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" id="unlockErr"></div>
-{{end}}
-
 {{define "depositAddress"}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<h3 class="text-center position-relative mb-4">
+<header>
   [[[Receive]]]
   <img id="depositLogo" class="mini-icon mx-1">
   <span id="depositName"></span>
-</h3>
-  <div class="flex-center pt-1 d-hide fs18 sans" id="depositTokenMsgBox">
-    <span>[[[Token on]]]</span>
-    <img id="depositTokenParentLogo" class="ms-1 micro-icon">
-    <span id="depositTokenParentName"></span>
-  </div>
-</h3>
-<img class="mb-4" id="qrcode" />
-<div class="mono fs15 p-2 border word-break-all border mb-3 mx-3">
-  <span id="depositAddress" class="user-select-all"></span>
-  <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18 pointer"></span>
-  <span id="copyAlert" class="d-hide">[[[copied]]]</span>
+</header>
+<div class="flex-center d-hide fs18 sans pb-3 border-bottom" id="depositTokenMsgBox">
+  <span>[[[Token on]]]</span>
+  <img id="depositTokenParentLogo" class="ms-1 micro-icon">
+  <span id="depositTokenParentName"></span>
 </div>
-<div id="unifiedReceivers" class="d-flex align-items-stretch mb-3 mt-1">
+<div class="flex-center">
+  <img id="qrcode" />
+</div>
+<div>
+  <div class="mono fs15 px-2 py-1 border word-break-all border">
+    <span id="depositAddress" class="user-select-all"></span>
+    <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18 pointer"></span>
+    <span id="copyAlert" class="d-hide text-nowrap">[[[copied]]]</span>
+  </div>
+</div>
+
+<div id="unifiedReceivers" class="d-flex align-items-stretch">
   <div id="unifiedReceiverTmpl" class="p-1 me-2 hoverbg lh1 fs15 pointer brdr selectable"></div>
 </div>
-<div class="d-flex">
-  <button id="newDepAddrBttn" type="button" class="go justify-content-center">[[[New Address]]]</button>
+<div id="newDepAddrBttnBox" class="flex-stretch-column">
+  <button id="newDepAddrBttn" type="button" class="feature">[[[New Address]]]</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break mb-3" id="depositErr"></div>
+<div class="fs15 text-center d-hide text-danger text-break" id="depositErr"></div>
 {{end}}
 
 {{define "certPicker"}}
@@ -173,73 +153,60 @@
 
 {{define "dexAddrForm"}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<h3 data-tmpl="addDexHdr" class="d-flex align-items-center justify-content-center"><span class="ico-plus fs12 me-2"></span> [[[Add a DEX]]]</h3>
-<h3 data-tmpl="updateDexHdr" class="d-hide"></span> [[[update dex host]]]</h3>
-<div class="fs20" data-tmpl="pickServerMsg">
-  <hr class="dashed my-2">
+<div class="flex-center pt-2 px-3">
+  <img class="dex-logo mini-icon me-2">
+  <div data-tmpl="addDexHdr" class="fs26 d-flex align-items-center justify-content-center">[[[Add a DEX]]]</div>
+  <div data-tmpl="updateDexHdr" class="fs26 d-hide">[[[update dex host]]]</div>
+</div>
+<div data-tmpl="pickServerMsg" class="fs20 mt-2 border-top">
   [[[Pick a server]]]
 </div>
-<div class="flex-stretch-column mt-1" data-tmpl="knownXCs">
+<div data-tmpl="knownXCs" class="flex-stretch-column">
   {{range .KnownExchanges}}
     <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
   {{end}}
 </div>
-<div class="fs14" data-tmpl="skipRegistrationBox">
-  <hr class="dashed my-2">
+<div data-tmpl="skipRegistrationBox" class="fs14">
   <input class="form-check-input" type="checkbox" data-tmpl="skipRegistration" id="skipRegistration">
   <label for="skipRegistration" class="ps-1">[[[Skip Registration]]]</label>
 </div>
 <div data-tmpl="showCustom">
-  <hr class="dashed my-2">
-  <div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center {{if eq (len .KnownExchanges) 0}}d-hide{{end}}">
+  <div class="px-1 mb-2 fs14 pointer d-flex justify-content-start align-items-center {{if eq (len .KnownExchanges) 0}}d-hide{{end}}">
     <span class="ico-plus fs11"></span>
     <div class="ps-2">[[[add a different server]]]</div>
   </div>
 </div>
 
-<div data-tmpl="customBox" class="mb-3">
-  <hr class="dashed my-2">
+<div data-tmpl="customBox" class="mt-2 border-top">
   <div class="fs20 " data-tmpl="addCustomMsg">[[[Add a custom server]]]</div>
   <div class="mb-3">
     <label for="dexAddr">[[[DEX Address]]]</label>
     <input type="text" data-tmpl="addr" id="dexAddr">
   </div>
-  <div class="px-1 mt-3 mb-3 fs14 d-hide" data-tmpl="needCert">
+  <div class="fs14 d-hide" data-tmpl="needCert">
     [[[reg_ssl_needed]]]
   </div>
   {{template "certPicker"}}
 </div>
-<div class="d-flex d-hide" data-tmpl="auth">
-  <div class="col-12 p-0">
-    <div data-tmpl="appPWBox" {{if $.UserInfo.PasswordIsCached}}class="d-hide"{{end}}>
-      <label for="dexAddrAppPW">[[[App Password]]]</label>
-      <input type="password" id="dexAddrAppPW" data-tmpl="appPW" autocomplete="current-password">
-    </div>
-  </div>
-  <div class="col-12 d-flex justify-content-end align-items-end p-0">
-    <button data-tmpl="submit" type="button" class="go">[[[Submit]]]</button>
-  </div>
+<div class="flex-stretch-column d-hide" data-tmpl="auth">
+  <button data-tmpl="submit" type="button" class="feature">[[[Submit]]]</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="err"></div>
+<div class="fs15 text-center d-hide text-danger text-break" data-tmpl="err"></div>
 {{end}}
 
 {{define "discoverAcctForm"}}
-<h3 data-tmpl="header">[[[Create Account]]]</h3>
-<div class="fs16 text-center mb-3"><span data-tmpl="dexHost"></span></div>
-<div data-tmpl="appPWBox" class="mb-3">
-  <label for="discoverAcctAppPW">[[[App Password]]]</label>
-  <input type="password" id="discoverAcctAppPW" data-tmpl="appPW">
+<header data-tmpl="header">[[[Create Account]]]</header>
+<div class="fs16 text-center"><span data-tmpl="dexHost"></span></div>
+<div class="flex-stretch-column">
+  <button data-tmpl="submit" type="button" class="feature">[[[Create Account]]]</button>
 </div>
-<div class="d-flex justify-content-center">
-  <button data-tmpl="submit" type="button" class="go">[[[Create Account]]]</button>
-</div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="err"></div>
+<div class="fs15 text-center d-hide text-danger text-break" data-tmpl="err"></div>
 {{end}}
 
 {{define "regAssetForm"}}
 <div data-tmpl="whatsABondPanel" class="d-hide">
   <div data-tmpl="whatsABondBack" class="small">
-    <span class="ico-wide-headed-left-arrow fs24"></span>
+    <span class="ico-wide-headed-left-arrow pointer hoverbg fs24"></span>
   </div>
   <h4 class="flex-center fs22 mb-3">[[[What is a fidelity bond]]]</h4>
   <ul>
@@ -259,49 +226,51 @@
       [[[wallet_bond_reserves]]]
     </li>
   </ul>
-  <div class="flex-center p-3">
-    <div data-tmpl="bondGotIt">[[[Got it]]]</div>
+  <div class="flex-center">
+    <button type="button" data-tmpl="bondGotIt" class="mt-3">[[[Got it]]]</button>
   </div>
 </div>
 
-<div data-tmpl="assetForm">
-  <h3 class="text-center">[[[Select your bond asset]]]</h3>
-  <div data-tmpl="regAssetErr" class="fs14 text-danger flex-center"></div>
-  <div data-tmpl="bondAssets">
-
+<div data-tmpl="assetForm" class="flex-stretch-column">
+  <div class="flex-center fs26">
+    <span>[[[Select your bond asset]]]</span>
+  </div>
+  <div data-tmpl="regAssetErr" class="fs14 text-danger flex-center p-3"></div>
+  <div data-tmpl="bondAssets" class="mt-3 border-top">
     <div data-tmpl="bondAssetTmpl" class="border rounded3 d-flex align-items-stretch p-2 hoverbg pointer mt-3">
       <div class="flex-center pe-4">
         <div class="flex-center">
-          <img class="medium-icon" data-tmpl="logo">
-          <span class="fs28 ms-2" data-tmpl="name"></span>
+          <img class="small-icon" data-tmpl="logo">
+          <span class="fs26 ms-2" data-tmpl="name"></span>
         </div>
         <div class="fs14 readygreen" data-tmpl="ready"></div>
       </div>
       <div class="d-flex flex-column align-items-end justify-content-center flex-grow-1">
-        <div class="flex-center lh1">
-          <span data-tmpl="feeAmt" class="fs22"></span>
-          <span data-tmpl="feeSymbol" class="fs20 grey ms-1"></span>
+        <div class="d-flex align-items-end lh1">
+          <span data-tmpl="feeAmt" class="fs20"></span>
+          <span data-tmpl="feeSymbol" class="fs17 grey ms-1"></span>
         </div>
-        <div data-tmpl="fiatBox" class="flex-center lh1">
-          <span>~</span>
-          <span data-tmpl="fiatBondAmount" class="fs18"></span>
-          <span class="grey ms-1 fs16">USD</span>
+        <div data-tmpl="fiatBox" class="d-flex align-items-end grey fs15 lh1">
+          <span class="me-1">~</span>
+          <span data-tmpl="fiatBondAmount"></span>
+          <span class="ms-1 fs14">USD</span>
         </div>
       </div>
     </div>
-
   </div>
-  <button type="button" data-tmpl="usePrepaidBond" class="w-100 mt-3">
-    <span class="ico-ticket fs22 me-2"></span>
+  <button type="button" data-tmpl="usePrepaidBond" class="mt-3">
+    <span class="ico-ticket fs20 me-2"></span>
     <span class="fs22">Use a pre-paid bond</span>
   </button>
-  <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline pt-2 pb-1 mt-1">[[[what_s_a_bond]]]</div>
+  <div data-tmpl="whatsABond" class="flex-center fs18 hoverbg pointer underline py-2">[[[what_s_a_bond]]]</div>
 </div>
 
-<div data-tmpl="tradingTierForm" class="d-hide">
-  <h3>[[[Choose your trading tier]]]</h3>
-  <div class="d-flex align-items-center mb-2">
-    <div class="flex-grow-1 flex-column px-2">
+<div data-tmpl="tradingTierForm" class="flex-stretch-column d-hide">
+  <div class="flex-center fs26">
+    [[[Choose your trading tier]]]
+  </div>
+  <div class="d-flex align-items-center pt-3 mt-3 border-top">
+    <div class="flex-grow-1 flex-column pe-2">
       <div class="fs15">[[[trading_tier_message]]]</div>
     </div>
     <div class="flex-center flex-grow-1">
@@ -315,14 +284,14 @@
       </div>
     </div>
   </div>
-  <div data-tmpl="tradingTierErr" class="fs14 text-danger flex-center"></div>
-  <div>
-    <div data-tmpl="goBackToAssets" class="d-inline-block fs16 grey pointer hoverbg py-1">
+  <div data-tmpl="tradingTierErr" class="fs14 text-danger flex-center p-3"></div>
+  <div class="pt-1">
+    <div data-tmpl="goBackToAssets" class="d-inline-block fs16 grey pointer hoverbg">
       <span class="ico-wide-headed-left-arrow"></span>
       [[[choose a different asset]]]
     </div>
   </div>
-  <table class="cell-border compact mt-1">
+  <table class="cell-border w-auto compact mt-3">
     <thead>
       <tr>
         <th class="text-center">Bond</th>
@@ -356,46 +325,44 @@
       </tr>
     </tbody>
   </table>
-  <button type="button" data-tmpl="submitTradingTier" class="w-100 large go mt-3">[[[Submit]]]</button>
-  <div data-tmpl="currentBondBox" class="mt-3">
-    <table class="cell-border lh1">
-      <thead>
-        <tr>
-          <th colspan="2" class="text-center">Current Bond Lock</th>
-        </tr>
-      </thead>
-      <tbody data-tmpl="currentBonds">
-        <tr data-tmpl="currentBondTmpl">
-          <td class="no-stretch">
-            <div class="flex-center">
-              <img data-tmpl="icon" class="mini-icon me-2">
-              <span data-tmpl="name" class="fs20"></span>
+  <button type="button" data-tmpl="submitTradingTier" class="feature mt-3">[[[Submit]]]</button>
+  <table data-tmpl="currentBondBox" class="cell-border w-auto mt-3 lh1">
+    <thead>
+      <tr>
+        <th colspan="2" class="text-center">Current Bond Lock</th>
+      </tr>
+    </thead>
+    <tbody data-tmpl="currentBonds">
+      <tr data-tmpl="currentBondTmpl">
+        <td class="no-stretch">
+          <div class="flex-center">
+            <img data-tmpl="icon" class="mini-icon me-2">
+            <span data-tmpl="name" class="fs20"></span>
+          </div>
+        </td>
+        <td>
+          <div class="flex-stretch-column">
+            <div class="d-flex align-items-center justify-content-end lh1">
+              <span data-tmpl="amt" class="fs18 me-1"></span>
+              <span data-tmpl="ticker" class="fs16 grey"></span>
             </div>
-          </td>
-          <td>
-            <div class="flex-stretch-column">
-              <div class="d-flex align-items-center justify-content-end lh1">
-                <span data-tmpl="amt" class="fs18 me-1"></span>
-                <span data-tmpl="ticker" class="fs16 grey"></span>
-              </div>
-              <div data-tmpl="fiatBox" class="d-flex align-items-center justify-content-end lh1">
-                <span>~</span>
-                <span data-tmpl="fiatAmt" class="fs16 me-1"></span>
-                <span class="fs14 grey">USD</span>
-              </div>
+            <div data-tmpl="fiatBox" class="d-flex align-items-center justify-content-end lh1">
+              <span>~</span>
+              <span data-tmpl="fiatAmt" class="fs16 me-1"></span>
+              <span class="fs14 grey">USD</span>
             </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="text-center fs22 mt-3">Tier <span data-tier></span> Trading Limits</div>
-  <table class="cell-border">
+          </div>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="text-center fs22 pt-3">Tier <span data-tier></span> Trading Limits</div>
+  <table class="cell-border w-auto mt-3">
     <thead>
       <tr class="fs16">
         <th class="no-stretch">[[[Market]]]</th>
         <th class="text-end text-nowrap">Starting Limit</th>
-        <th class="text-nowrap">Good Reputation Limit</th>
+        <th class="text-nowrap">Upper Limit</th>
       </tr>
     </thead>
     <tbody data-tmpl="markets">
@@ -435,147 +402,92 @@
           </div>
         </td>
       </tr>
-
     </tbody>
   </table>
 </div>
+
 <div data-tmpl="prepaidBonds" class="d-hide">
-  <div class="py-2 fs14 grey">
-    <span class="hoverbg pointer" data-tmpl="ppbGoBack"><span class="ico-arrowback fs12 me-1"></span> go back</span>
+  <div class="flex-center fs26">
+    <span>Redeem Pre-paid Bond</span>
   </div>
-  <h3>Redeem Pre-paid Bond</h3>
-  <label for="prepaidBondCode">Code</label>
-  <input type="text" data-tmpl="prepaidBondCode" autocomplete="off">
-  <div data-tmpl="prepaidBondPWBox">
-    <label for="ppbAppPW">[[[Password]]]</label>
-    <input type="password" data-tmpl="prepaidBondPW" autocomplete="off">
+  <div class="flex-stretch-column mt-3 border-top">
+    <label for="prepaidBondCode">Code</label>
+    <input type="text" data-tmpl="prepaidBondCode" autocomplete="off">
+    <div data-tmpl="prepaidBondErr" class="p-3 text-danger d-hide"></div>
+    <button data-tmpl="submitPrepaidBond" type="button" class="feature mt-3">[[[Submit]]]</button>
   </div>
-  <div data-tmpl="prepaidBondErr" class="pt-2 px-2 text-danger d-hide"></div>
-  <div class="text-left mt-2">
-    <button data-tmpl="submitPrepaidBond" type="button" class="go">[[[Submit]]]</button>
+  <div class="pt-3 fs14 grey">
+    <span class="hoverbg pointer" data-tmpl="ppbGoBack"><span class="ico-arrowleft fs12 me-1"></span> go back</span>
   </div>
 </div>
 {{end}}
 
 {{define "loginForm"}}
-<h3 data-tmpl="header">[[[Log In]]]</h3>
-<div class="mb-2">
-  <label for="pw">[[[Password]]]</label>
-  <input type="password" data-tmpl="pw" autocomplete="current-password">
-</div>
-<div class="mb-4">
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" data-tmpl="rememberPass" id="logRememberPass">
-      <label for="logRememberPass" class="form-check-label">[[[Remember my password]]]</label>
-    </div>
-</div>
-<div class="d-flex justify-content-center mb-3">
-  <button data-tmpl="submit" type="button" class="go px-5" id="loginSubmit">[[[Submit]]]</button>
+<header>
+  <span class="ico-locked fs20 grey me-1"></span>
+  <span>[[[Log In]]]</span>
+</header>
+<div class="d-flex align-items-end">
+  <div class="flex-grow-1">
+    <label for="pw">[[[Password]]]</label>
+    <input type="password" data-tmpl="pw" autocomplete="current-password">
+  </div>
+  <button data-tmpl="submit" type="button" class="feature ms-3" id="loginSubmit">[[[Submit]]]</button>
 </div>
 <div class="d-flex justify-content-center">
-  <strong id="forgotPassBtn" class="grey pointer">[[[Forgot Password]]]</strong>
+  <div id="forgotPassBtn" class="grey demi pointer pointer hoverbg">[[[Forgot Password]]]</div>
 </div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="errMsg"></div>
+<div class="fs15 text-center d-hide text-danger text-break" data-tmpl="errMsg"></div>
 {{end}}
 
 {{define "confirmRegistrationForm"}}
-<div class="w-100 flex-stretch-column">
-  <span class="hoverbg pointer grey mb-3" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> [[[pick a different asset]]]</span>
-  <h3>[[[Confirm Bond Options]]]</h3>
-  <div class="d-flex align-items-stretch">
-    <div class="flex-grow-1 flex-stretch-column pe-3">
-      <div class="d-flex justify-content-between">
-        <span>[[[Host]]]</span>
-        <span data-tmpl="host"></span>
-      </div>
-      <div class="d-flex justify-content-between">
-        <span>[[[Trading Tier]]]</span>
-        <span data-tmpl="tradingTier"></span>
-      </div>
-      <div class="d-flex justify-content-between">
-        <span>[[[Bond Lock]]]</span>
-        <span>
-          <span data-tmpl="bondLock"></span>
-          <span data-tmpl="bondUnit"></span>
-          <img data-tmpl="logo" class="micro-icon ms-1">
-        </span>
-      </div>
-      <div data-tmpl="bondLockUSDBox" class="d-flex justify-content-between lh1 fs14 grey">
-        <span></span>
-        <span><span>~</span><span data-tmpl="bondLockUSD"></span> <span>USD</span></span>
-      </div>
-      <div class="d-flex justify-content-between">
-        <span>[[[Fee Reserves]]]</span>
-        <span><span data-tmpl="feeReserves"></span> <span data-tmpl="reservesUnit"></span></span>
-      </div>
+<header>
+  [[[Confirm Bond Options]]]
+</header>
+<div class="d-flex align-items-stretch">
+  <div class="flex-grow-1 flex-stretch-column pe-3">
+    <div class="d-flex justify-content-between">
+      <span>[[[Host]]]</span>
+      <span data-tmpl="host"></span>
     </div>
-    <div class="flex-center flex-column border-start mw50">
-      <div data-tmpl="passBox" class="text-center px-3 mt-1">
-        <span class="fs14">[[[app_pw_reg]]]</span>
-        <input type="password" class="app-pass mt-3" data-tmpl="appPass" autocomplete="current-password">
-      </div>
-      <div class="flex-center p-3 mt-1">
-        <button data-tmpl="submit" class="go">[[[Submit]]]</button>
-      </div>
+    <div class="d-flex justify-content-between">
+      <span>[[[Trading Tier]]]</span>
+      <span data-tmpl="tradingTier"></span>
+    </div>
+    <div class="d-flex justify-content-between">
+      <span>[[[Bond Lock]]]</span>
+      <span>
+        <span data-tmpl="bondLock"></span>
+        <span data-tmpl="bondUnit"></span>
+        <img data-tmpl="logo" class="micro-icon ms-1">
+      </span>
+    </div>
+    <div data-tmpl="bondLockUSDBox" class="d-flex justify-content-between lh1 fs14 grey">
+      <span></span>
+      <span><span>~</span><span data-tmpl="bondLockUSD"></span> <span>USD</span></span>
+    </div>
+    <div class="d-flex justify-content-between">
+      <span>[[[Fee Reserves]]]</span>
+      <span><span data-tmpl="feeReserves"></span> <span data-tmpl="reservesUnit"></span></span>
     </div>
   </div>
-  <div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="regErr"></div>
-  <hr class="dashed my-3">
-  <div class="fs16 reg-conf-msg" data-tmpl="text">
-    <span class="ico-info"></span> [[[reg_confirm_submit]]]
+  <div class="flex-center flex-column border-start ps-3">
+    <button data-tmpl="submit" class="large feature">[[[Submit]]]</button>
   </div>
 </div>
-{{end}}
-
-{{define "authorizeAccountExportForm"}}
-<div class="form-closer"><span class="ico-cross"></span></div>
-<h3>
-  [[[Authorize Export]]]
-</h3>
-<p class="mb-3">
-  [[[export_app_pw_msg]]]: <span id="exportAccountHost"></span>.
-</p>
-<hr class="dashed mb-3">
-<div class="mb-3">
-  <label for="exportAccountAppPass">[[[Password]]]</label>
-  <input type="password" id="exportAccountAppPass" autocomplete="current-password">
+<div class="fs15 text-center d-hide text-danger text-break" data-tmpl="regErr"></div>
+<div data-tmpl="text" class="fs16 reg-conf-msg mt-3 border-top">
+  <span class="ico-info"></span> [[[reg_confirm_submit]]]
 </div>
-<div class="d-flex justify-content-end">
-  <button id="authorizeExportAccountConfirm" type="button" class="go">[[[Authorize Export]]]</button>
-</div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" id="exportAccountErr"></div>
-{{end}}
-
-{{define "disableAccountForm"}}
-<div class="form-closer"><span class="ico-cross"></span></div>
-<h3>
-  [[[Disable Account]]]
-</h3>
-<div class="mb-3">
-  [[[disable_app_pw_msg]]]: <span id="disableAccountHost"></span>.
-</div>
-<hr class="dashed mb-3">
-<div class="mb-3">
-  [[[disable_dex_server]]]
-</div>
-<hr class="dashed mb-3">
-<div class="mb-3">
-  <label for="disableAccountAppPW">[[[Password]]]</label>
-  <input type="password" id="disableAccountAppPW" autocomplete="current-password">
-</div>
-<div class="d-flex justify-content-end">
-  <button id="disableAccountConfirm" type="button" class="go">[[[Disable Account]]]</button>
-</div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" id="disableAccountErr"></div>
+<div class="hoverbg pointer grey pt-2" data-tmpl="goBack"><span class="ico-arrowleft fs12 me-1"></span> [[[pick a different asset]]]</div>
 {{end}}
 
 {{define "authorizeAccountImportForm"}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<h3>
+<header>
   [[[Authorize Import]]]
-</h3>
-<div class="mb-3">
+</header>
+<div>
   <label for="accountFile">[[[Account File]]]</label>
   <input type="file" class="d-none" id="accountFile">
   <small class="pointer">
@@ -584,65 +496,57 @@
     <u class="ms-3 pointer" id="addAccount"><span class="ico-textfile me-1"></span> [[[load from file]]]</u>
   </small>
 </div>
-<hr class="dashed mb-3">
-<div class="mb-3 {{if $passwordIsCached}} d-hide{{end}}">
-  <label for="importAccountAppPass">[[[Password]]]</label>
-  <input type="password" id="importAccountAppPass" autocomplete="current-password">
-  <div class="fs14 grey">[[[app_pw_import_msg]]]</div>
+<div class="flex-stretch-column">
+  <button id="authorizeImportAccountConfirm" type="button" class="mt-2 mx-3 mb-3 feature">[[[Authorize Import]]]</button>
 </div>
-<div class="d-flex justify-content-end">
-  <button id="authorizeImportAccountConfirm" type="button" class="go">[[[Authorize Import]]]</button>
-</div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" id="importAccountErr"></div>
+<div class="fs15 text-center d-hide text-danger text-break" id="importAccountErr"></div>
 {{end}}
 
 {{define "changeAppPWForm"}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<h3>
-  [[[Change Application Password]]]
-</h3>
-<div class="mb-3">
+<div class="flex-center pt-2 px-3">
+  <span class="ico-locked fs16 grey me-2"></span>
+  <span class="fs26">[[[Change Application Password]]]</span>
+</div>
+<div class="mt-2 pt-2 px-3 border-top">
   <label for="appPW">[[[Current Password]]]</label>
   <input type="password" id="appPW" autocomplete="current-password">
 </div>
-<div class="mb-3">
+<div class="pt-2 px-3">
   <label for="newAppPW">[[[New Password]]]</label>
   <input type="password" id="newAppPW" autocomplete="new-password">
 </div>
-<div class="mb-3">
+<div class="pt-2 px-3">
   <label for="confirmNewPW">[[[Confirm New Password]]]</label>
   <input type="password" id="confirmNewPW" autocomplete="new-password">
 </div>
-<div class="d-flex justify-content-end">
-  <button id="submitNewPW" type="submit" class="go">[[[Submit]]]</button>
+<div class="flex-stretch-column pt-2 px-3 pb-3">
+  <button id="submitNewPW" type="submit" class="feature">[[[Submit]]]</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" id="changePWErrMsg"></div>
+<div class="fs15 p-3 text-center d-hide text-danger text-break" id="changePWErrMsg"></div>
 {{end}}
 
 {{define "cancelOrderForm"}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<h3>
+<header>
   [[[:title:cancel_order]]]
-</h3>
-<div class="mb-3">
+</header>
+<div>
   [[[cancel_no_pw]]]
   <span id="cancelRemain" class="fs16 sans"></span>
   <span id="cancelUnit" class="fs14 sans"></span>.<br>
   [[[cancel_remain]]]
 </div>
-<hr class="dashed mb-3">
-<div class="d-flex justify-content-end">
-  <button id="cancelSubmit" type="button" class="go px-4">[[[Submit]]]</button>
+<div class="flex-stretch-column">
+  <button id="cancelSubmit" type="button" class="feature">[[[Submit]]]</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide text-danger" id="cancelErr"></div>
+<div class="fs15 text-center d-hide text-danger" id="cancelErr"></div>
 {{end}}
 
 {{define "accelerateForm"}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<h3>[[[:title:accelerate_order]]]</h3>
-<div id=accelerateMainDiv>
+<header>[[[:title:accelerate_order]]]</header>
+<div id="accelerateMainDiv">
   <div id="configureAccelerationDiv">
     [[[acceleration_text]]]
     <br />
@@ -658,12 +562,8 @@
       [[[acceleration_cost_msg]]]
     </div>
     <hr class="dashed mt-2">
-    <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
-      <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-        <label for="acceleratePass">[[[Password]]]</label>
-        <input type="password" id="acceleratePass" autocomplete="off">
-      </div>
-      <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
+    <div class="d-flex flex-row align-items-end justify-content-end pb-4">
+      <div class="col-12 pt-2">
         <button id="accelerateSubmit" type="button" class="go">[[[Submit]]]</button>
       </div>
     </div>
@@ -691,8 +591,8 @@
 {{end}}
 
 {{define "waitingForWalletForm"}}
-<div class="text-center mb-4"><img class="large-icon" data-tmpl="logo" src="/img/coins/dcr.png"></div>
-<div class="d-flex flex-column align-items-start border-start ps-3 mb-4">
+<div class="flex-center"><img class="large-icon" data-tmpl="logo" src="/img/coins/dcr.png"></div>
+<div class="d-flex flex-column align-items-start border-start">
   <div class="flex-center flex-row">
     <div class="icons text-end pe-3">
       <span class="ico-check fs16 d-hide" data-tmpl="syncCheck"></span>
@@ -752,7 +652,7 @@
 </div>
 
 <div class="hoverbg pointer grey d-inline-block text-center" data-tmpl="goBack">
-  <span class="ico-arrowback fs12 mb-1"></span>
+  <span class="ico-arrowleft fs12 mb-1"></span>
   [[[pick a different asset]]]
 </div>
 {{end}}
@@ -794,42 +694,41 @@
 
 {{define "toggleWalletStatusConfirm"}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<h3>
+<header>
    <span id="walletStatusDisable" class="d-hide">[[[disable_wallet]]]</span>
     <span id="walletStatusEnable" class="d-hide">[[[enable_wallet]]]</span>
-</h3>
-<div class="fs15 text-left mb-3">
+</header>
+<div class="fs15 text-left">
  <span id="disableWalletMsg" class="hide">[[[disable_wallet_warning]]]</span>
  <span id="enableWalletMsg" class="hide">[[[enable_wallet_message]]]</span>
 </div>
-<div class="d-flex justify-content-end">
-  <button id="toggleWalletStatusSubmit" type="button" class="go">[[[Submit]]]</button>
+<div class="flex-stretch-column">
+  <button id="toggleWalletStatusSubmit" type="button" class="feature">[[[Submit]]]</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide text-danger" id="toggleWalletStatusErr"></div>
+<div class="fs15 text-center d-hide text-danger" id="toggleWalletStatusErr"></div>
 {{end}}
 
 {{define "appPassResetForm"}}
  <div class="form-closer" id="resetPassFormCloser"><span class="ico-cross"></span></div>
- <h3>[[[Reset App Password]]]</h3>
- <div class="fs18 mb-3">[[[reset_app_pw_msg]]]</div>
- <hr class="dashed mb-3">
- <div class="mb-3">
+ <header>[[[Reset App Password]]]</header>
+ <div>[[[reset_app_pw_msg]]]</div>
+ <div class="mt-3 border-top">
    <label for="newAppPassword">[[[New Password]]]</label>
    <input type="password" id="newAppPassword" autocomplete="new-password">
  </div>
- <div class="mb-3">
+ <div>
    <label for="confirmNewAppPassword">[[[Confirm New Password]]]</label>
    <input type="password" id="confirmNewAppPassword" autocomplete="off">
  </div>
- <div class="mb-3">
+ <div>
    <label for="seedInput">[[[Restoration Seed]]]</label>
    <textarea class="mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
  </div>
- <div class="d-flex justify-content-end">
-    <button id="resetAppPWSubmitBtn" type="button" class="go">[[[Submit]]]</button>
+ <div class="flex-stretch-column">
+    <button id="resetAppPWSubmitBtn" type="button" class="feature">[[[Submit]]]</button>
  </div>
- <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="appPWResetErrMsg"></div>
- <div id="appPWResetSuccessMsg" class="d-hide text-break text-center pt-3 fs15"></div> 
+ <div class="fs15 text-center d-hide text-danger text-break" id="appPWResetErrMsg"></div>
+ <div id="appPWResetSuccessMsg" class="d-hide text-break text-center fs15"></div> 
 {{end}}
 
 {{define "reputationMeter"}}
@@ -862,32 +761,242 @@
 
 {{define "tokenApprovalForm"}}
 <div class="form-closer"><span class="ico-cross"></span></div>
-<div class="px-2 py-1 text-center fs22 text-nowrap position-relative">
+<header>
   [[[:title:Approve]]] <div data-tmpl="tokenSymbol" class="d-inline-block"></div>
-</div>
+</header>
 <div data-tmpl="submissionElements">
   <div class="fs15 text-start mt-2">
     [[[approve_token_text]]]
   </div>
-  <hr class="dashed my-2">
-  <div class="d-flex justify-content-between align-items-stretch flex-wrap">
-    <div data-tmpl="pwBox" class="col-11 p-0">
-      <label for="tokenApprovalPW" class="pt-3 ps-1">[[[App Password]]]</label>
-      <input type="password" id="tokenApprovalPW" data-tmpl="pw" data-tmpl="appPass" autocomplete="off">
-    </div>
-    <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
-    <div class="d-grid align-items-end col-10 p-0">
-      <button data-tmpl="submit" type="button" class="fs15 feature">[[[Approve]]]</button>
-    </div>
+  <div class="flex-stretch-column mt-2 flex-wrap">
+    <button data-tmpl="submit" type="button" class="fs15 feature">[[[Approve]]]</button>
   </div>
 </div>
-<span data-tmpl="txMsg" class="text-center fs17 d-hide">[[[token_approval_tx_msg]]]</span>
-<a target="_blank" class="subtlelink fs14" data-tmpl="txid"></a>
-<div class="fs15 pt-3 text-center d-hide text-danger text-break" data-tmpl="errMsg"></div>
-<div data-tmpl="balanceBox" class="flex-center w-100 mt-3 pt-3 border-top fs15">
+<div data-tmpl="txMsg">
+  <span class="text-center fs17 pt-2 px-3 d-hide">[[[token_approval_tx_msg]]]</span>
+  <a target="_blank" class="subtlelink word-break-all fs14" data-tmpl="txid"></a>
+</div>
+<div class="fs15 text-center d-hide text-danger text-break" data-tmpl="errMsg"></div>
+<div data-tmpl="balanceBox" class="flex-center w-100 py-2 mt-2 px-3 border-top fs15">
   [[[Available fee balance]]]: <span data-tmpl="balance" class="ms-2"></span> <span data-tmpl="parentTicker" class="grey ms-1"></span>
 </div>
-<div data-tmpl="addressBox" class="flex-center mt-2 fs15 d-hide">
+<div data-tmpl="addressBox" class="flex-center fs15 d-hide">
   [[[approve_token_wallet_addr]]] <span data-tmpl="address" class="ms-2"></span>
+</div>
+{{end}}
+
+{{define "cexConfigForm"}}
+<div class="form-closer"><span class="ico-cross"></span></div>
+<div data-tmpl="cexConfigPrompt" class="pt-4 fs18">
+  [[[configure_cex_prompt]]]
+</div>
+<div class="flex-center flex-column mt-3 border-top">
+  <img class="xclogo enourmous-icon" data-cex-logo>
+  <div class="mt-2 fs20" data-cex-name></div>
+</div>
+<div data-tmpl="cexConnectErrBox" class="flex-center flex-column text-danger">
+  <span class="ico-disconnected fs24"></span>
+  <span>[[[err_with_cex_creds]]]</span>
+  <span data-tmpl="cexConnectErr" class="fs14 mt-2 text-break"></span>
+</div>
+<div class="d-flex flex-column">
+  <label for="cexApiKeyInput">[[[API Key]]]</label>
+  <input type="text" data-tmpl="cexApiKeyInput" autocomplete="off">
+</div>
+<div class="d-flex flex-column">
+  <label for="cexSecretInput">[[[API Secret]]]</label>
+  <input type="text" data-tmpl="cexSecretInput" autocomplete="off">
+</div>
+<div data-tmpl="cexFormErr" class="flex-center text-danger text-break d-hide"></div>
+<div class="flex-stretch-column">
+  <button type="button" data-tmpl="cexSubmit" class="feature">[[[Submit]]]</button>
+</div>
+{{end}}
+
+{{define "runningBotDisplay"}}
+<div data-tmpl="stats" class="d-hide">
+  <div class="d-flex align-items-center justify-content-between px-3">
+    <span class="d-flex align-items-center fs28">
+      <span data-tmpl="plSign" class="me-1 fs10"></span>
+      <span data-tmpl="profitLoss"></span>
+      <span class="fs20 grey ms-1">USD</span>
+    </span>
+    <span data-tmpl="runTime" class="fs28 mono lh1">00:00:00</span>
+  </div>
+  <div class="pt-2 mt-2 border-top">
+    <table class="row-border fs18 lh1">
+      <thead>
+        <tr class="fs16">
+          <th class="no-stretch ps-3">[[[Inventory]]]</th>
+          <th class="text-end">
+            <div class="d-inline-flex align-items-center">
+              <img class="micro-icon me-2" data-base-logo>
+              <span data-base-ticker></span>
+            </div>
+          </th>
+          <th class="text-end pe-3 no-stretch">
+            <div class="d-inline-flex align-items-center">
+              <img class="micro-icon me-2" data-quote-logo>
+              <span data-quote-ticker></span>
+            </div>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="no-stretch ps-3">
+            <img class="bison-logo-square small-icon">
+          </td>
+          <td class="text-end">
+            <div class="d-inline-flex flex-column align-items-end text-nowrap">
+              <span data-tmpl="walletBaseInventory"></span>
+              <span class="fs14 grey">
+                <span>~</span>
+                <span data-tmpl="walletBaseInvFiat"></span>
+                <span>USD</span>
+              </span>
+            </div>
+          </td>
+          <td class="no-stretch pe-3">
+            <div class="d-inline-flex flex-column text-nowrap">
+              <span data-tmpl="walletQuoteInventory"></span>
+              <span class="fs14 grey">
+                <span>~</span>
+                <span data-tmpl="walletQuoteInvFiat"></span>
+                <span>USD</span>
+              </span>
+            </div>
+          </td>
+        </tr>
+        <tr data-tmpl="cexRow">
+          <td class="ps-3">
+            <img class="mini-icon" data-cex-logo>
+          </td>
+          <td data-tmpl="cexBaseInventory" class="text-end"></td>
+          <td data-tmpl="cexQuoteInventory" class="no-stretch text-end pe-3"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="flex-stretch-column mt-2 px-3">
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Profit]]]</span>
+      <span class="flex-center">
+        <span data-tmpl="profitSign" class="fs8 me-1"></span>
+        <span data-tmpl="profit">
+        </span>%</span>
+      </span>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Booked orders]]]</span>
+      <span data-tmpl="nBookedOrders"></span>
+    </div>
+
+    <div data-tmpl="baseFeeReservesBox" class="d-flex justify-content-between align-items-center">
+      <span>
+        <span>[[[Fee reserves]]]</span>
+        <img data-tmpl="baseFeeLogo" class="micro-icon">
+      </span>
+      <span>
+        <span data-tmpl="baseFeeReserves"></span>
+        <span data-tmpl="baseFeeTicker"></span>
+      </span>
+    </div>
+
+    <div data-tmpl="quoteFeeReservesBox" class="d-flex justify-content-between align-items-center">
+      <span>
+        <span>[[[Fee reserves]]]</span>
+        <img data-tmpl="quoteFeeLogo" class="micro-icon">
+      </span>
+      <span>
+        <span data-tmpl="quoteFeeReserves"></span>
+        <span data-tmpl="quoteFeeTicker"></span>
+      </span>
+    </div>
+
+    <div data-tmpl="pendingDepositBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Pending deposits]]]</span>
+      <span data-tmpl="pendingDeposits"></span>
+    </div>
+
+    <div data-tmpl="pendingWithdrawalBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Pending withdrawals]]]</span>
+      <span data-tmpl="pendingWithdrawals"></span>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Settled matches]]]</span>
+      <span data-tmpl="completedMatches"></span>
+    </div>
+
+    <div data-tmpl="tradedUSDBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Traded]]]</span>
+      <span>
+        <span data-tmpl="tradedUSD"></span>
+        <span class="fs14 grey">USD</span>
+      </span>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      <span>[[[Basis price]]]</span>
+      <span data-tmpl="basisPrice"></span>
+    </div>
+
+    <div data-tmpl="feeGapBox" class="d-flex justify-content-between align-items-center">
+      <span>
+        [[[Fee gap]]]
+        <span class="ico-info" data-tooltip="[[[feegap_tooltip]]]"></span>
+      </span>
+      <span>
+        <span data-tmpl="feeGap"></span> (<span data-tmpl="feeGapPct"></span>%)
+      </span>
+    </div>
+
+    <div data-tmpl="gapStrategyBox" class="d-flex justify-content-between align-items-center">
+      <span>Gap strategy</span>
+      <span data-tmpl="gapStrategy"></span>
+    </div>
+
+    <div data-tmpl="remoteGapBox" class="d-flex justify-content-between align-items-center">
+      <span>
+        [[[Remote gap]]]
+        <span class="ico-info" data-tooltip="[[[remotegap_tooltip]]]"></span>
+      </span>
+      <span>
+        <span data-tmpl="remoteGap"></span> (<span data-tmpl="remoteGapPct"></span>%)
+      </span>
+    </div>
+
+    <div data-tmpl="roundTripFeesBox" class="d-flex justify-content-between align-items-center">
+      <span>[[[Round_trip fees]]]</span>
+      <span>
+        <span data-tmpl="roundTripFeesUSD"></span>
+        <span class="fs14 grey">USD</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="d-flex align-items-stretch px-3 pt-2 py-2 mt-2 border-top">
+    <div class="flex-grow-1 d-flex align-items-center justify-content-between pe-3">
+      <span>
+        <span data-tmpl="profitLabel">Profit threshold</span>
+        <span data-tmpl="gapLabel">Gap</span>
+        <span data-tmpl="multiplierLabel">Multiplier</span>
+      </span>
+      <div class="d-flex align-items-end">
+        <span data-tmpl="gapFactor"></span>
+        <span data-tmpl="profitUnit" class="fs14 grey ms-1">%</span>
+        <span data-tmpl="gapUnit" class="fs14 grey ms-1">
+          <span data-quote-ticker></span>/<span data-base-ticker></span>
+        </span>
+        <span data-tmpl="multiplierUnit" class="fs14 grey ms-1">X</span>
+      </div>
+    </div>
+    <div class="d-flex align-items-stretch ps-3 border-start">
+      <button data-tmpl="runLogsBttn" class="ico-textfile"></button>
+      <button data-tmpl="stopBttn" class="ms-3 position-relative">Stop</button>
+    </div>
+  </div>
 </div>
 {{end}}

@@ -28,6 +28,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/utils"
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/comms"
 	"github.com/go-chi/chi/v5"
@@ -77,8 +78,8 @@ var (
 	}
 
 	initialBalances = []*bntypes.Balance{
-		makeBalance("btc", 0.1),
-		makeBalance("dcr", 100),
+		makeBalance("btc", 1.5),
+		makeBalance("dcr", 10000),
 		makeBalance("eth", 5),
 		makeBalance("usdc", 1152),
 	}
@@ -213,12 +214,13 @@ type marketSubscriber struct {
 }
 
 type userOrder struct {
-	slug      string
-	sell      bool
-	rate      float64
-	qty       float64
-	apiKey    string
-	cancelled atomic.Bool
+	slug   string
+	sell   bool
+	rate   float64
+	qty    float64
+	apiKey string
+	stamp  time.Time
+	status string
 }
 
 type fakeBinance struct {
@@ -230,7 +232,7 @@ type fakeBinance struct {
 	withdrawalHistory    map[string]*withdrawal
 
 	balancesMtx sync.RWMutex
-	balances    []*bntypes.Balance
+	balances    map[string]*bntypes.Balance
 
 	accountSubscribersMtx sync.RWMutex
 	accountSubscribers    map[string]*ws.WSLink
@@ -261,11 +263,16 @@ func newFakeBinanceServer(ctx context.Context) (*fakeBinance, error) {
 		return nil, fmt.Errorf("Error creating server: %w", err)
 	}
 
+	balances := make(map[string]*bntypes.Balance, len(initialBalances))
+	for _, bal := range initialBalances {
+		balances[bal.Asset] = bal
+	}
+
 	f := &fakeBinance{
 		ctx:                ctx,
 		srv:                srv,
 		withdrawalHistory:  make(map[string]*withdrawal, 0),
-		balances:           initialBalances,
+		balances:           balances,
 		accountSubscribers: make(map[string]*ws.WSLink),
 		wallets:            make(map[string]Wallet),
 		fiatRates:          fiatRates,
@@ -293,6 +300,7 @@ func newFakeBinanceServer(ctx context.Context) (*fakeBinance, error) {
 		r.Post("/userDataStream", f.handleListenKeyRequest)
 		r.Put("/userDataStream", f.streamExtend)
 		r.Delete("/order", f.handleDeleteOrder)
+		r.Get("/ticker/24hr", f.handleMarketTicker24)
 	})
 
 	mux.Get("/ws/{listenKey}", f.handleAccountSubscription)
@@ -363,29 +371,45 @@ func (f *fakeBinance) run(ctx context.Context) {
 			if rand.Float32() < 0.5 {
 				continue
 			}
-			f.bookedOrdersMtx.Lock()
-			ords := f.bookedOrders
-			f.bookedOrders = make(map[string]*userOrder)
-			f.bookedOrdersMtx.Unlock()
-			if len(ords) > 0 {
-				log.Tracef("Filling %d booked user orders", len(ords))
+			type filledOrder struct {
+				bntypes.StreamUpdate
+				apiKey string
 			}
-			for tradeID, ord := range ords {
+
+			f.bookedOrdersMtx.Lock()
+			fills := make([]*filledOrder, 0)
+			for tradeID, ord := range f.bookedOrders {
+				if ord.status == "FILLED" {
+					if time.Since(ord.stamp) > time.Hour {
+						delete(f.bookedOrders, tradeID)
+					}
+					continue
+				}
+				ord.status = "FILLED"
+				fills = append(fills, &filledOrder{
+					StreamUpdate: bntypes.StreamUpdate{
+						EventType:          "executionReport",
+						CurrentOrderStatus: "FILLED",
+						// CancelledOrderID
+						ClientOrderID: tradeID,
+						Filled:        ord.qty,
+						QuoteFilled:   ord.qty * ord.rate,
+					},
+					apiKey: ord.apiKey,
+				})
+			}
+			f.bookedOrdersMtx.Unlock()
+			if len(fills) > 0 {
+				log.Tracef("Filling %d booked user orders", len(fills))
+			}
+			for _, ord := range fills {
 				f.accountSubscribersMtx.RLock()
 				sub, found := f.accountSubscribers[ord.apiKey]
 				f.accountSubscribersMtx.RUnlock()
 				if !found {
 					continue
 				}
-				update := &bntypes.StreamUpdate{
-					EventType:          "executionReport",
-					CurrentOrderStatus: "FILLED",
-					// CancelledOrderID
-					ClientOrderID: tradeID,
-					Filled:        ord.qty,
-					QuoteFilled:   ord.qty * ord.rate,
-				}
-				respB, _ := json.Marshal(update)
+				respB, _ := json.Marshal(ord)
 				sub.SendRaw(respB)
 			}
 		}
@@ -784,7 +808,7 @@ func (f *fakeBinance) handleWithdrawalHistory(w http.ResponseWriter, r *http.Req
 	}
 	f.withdrawalHistoryMtx.RUnlock()
 
-	log.Tracef("Sending %s withdraws to user %s", len(withdrawalHistory), extractAPIKey(r))
+	log.Tracef("Sending %d withdraws to user %s", len(withdrawalHistory), extractAPIKey(r))
 	writeJSONWithStatus(w, withdrawalHistory, http.StatusOK)
 }
 
@@ -795,7 +819,7 @@ func (f *fakeBinance) handleExchangeInfo(w http.ResponseWriter, r *http.Request)
 func (f *fakeBinance) handleAccount(w http.ResponseWriter, r *http.Request) {
 	f.balancesMtx.RLock()
 	defer f.balancesMtx.RUnlock()
-	writeJSONWithStatus(w, &bntypes.Account{Balances: f.balances}, http.StatusOK)
+	writeJSONWithStatus(w, &bntypes.Account{Balances: utils.MapItems(f.balances)}, http.StatusOK)
 }
 
 func (f *fakeBinance) handleDepth(w http.ResponseWriter, r *http.Request) {
@@ -817,7 +841,7 @@ func (f *fakeBinance) handleDepth(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		baseFiatRate := f.fiatRates[parseAssetID(mkt.BaseAsset)]
 		quoteFiatRate := f.fiatRates[parseAssetID(mkt.QuoteAsset)]
-		m = newMarket(slug, baseFiatRate, quoteFiatRate)
+		m = newMarket(slug, mkt.BaseAsset, mkt.QuoteAsset, baseFiatRate, quoteFiatRate)
 		f.markets[slug] = m
 	}
 	f.marketsMtx.Unlock()
@@ -837,17 +861,17 @@ func (f *fakeBinance) handleDepth(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeBinance) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	tradeID := r.URL.Query().Get("origClientOrderId")
+	var status string
 	f.bookedOrdersMtx.RLock()
 	ord, found := f.bookedOrders[tradeID]
+	if found {
+		status = ord.status
+	}
 	f.bookedOrdersMtx.RUnlock()
 	if !found {
 		log.Errorf("User %s requested unknown order %s", extractAPIKey(r), tradeID)
 		http.Error(w, "order not found", http.StatusBadRequest)
 		return
-	}
-	status := "NEW"
-	if ord.cancelled.Load() {
-		status = "CANCELED"
 	}
 	resp := &bntypes.BookedOrder{
 		Symbol: ord.slug,
@@ -861,6 +885,20 @@ func (f *fakeBinance) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 		TimeInForce:        "GTC",
 	}
 	writeJSONWithStatus(w, &resp, http.StatusOK)
+}
+
+func (f *fakeBinance) updateOrderBalances(symbol string, sell bool, qty, rate float64) {
+	f.marketsMtx.RLock()
+	mkt := f.markets[symbol]
+	f.marketsMtx.RUnlock()
+	fromSlug, toSlug, fromQty, toQty := mkt.quoteSlug, mkt.baseSlug, qty*rate, qty
+	if sell {
+		fromSlug, toSlug, fromQty, toQty = toSlug, fromSlug, toQty, fromQty
+	}
+	f.balancesMtx.Lock()
+	f.balances[toSlug].Free += toQty
+	f.balances[fromSlug].Free -= fromQty
+	f.balancesMtx.Unlock()
 }
 
 func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
@@ -893,21 +931,25 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	if bookIt {
 		resp.Status = "NEW"
 		log.Tracef("Booking %s order on %s for %.8f for user %s", side, slug, qty, apiKey)
-		f.bookedOrdersMtx.Lock()
-		f.bookedOrders[tradeID] = &userOrder{
-			slug:   slug,
-			sell:   side == "SELL",
-			rate:   price,
-			qty:    qty,
-			apiKey: apiKey,
-		}
-		f.bookedOrdersMtx.Unlock()
+
 	} else {
 		log.Tracef("Filled %s order on %s for %.8f for user %s", side, slug, qty, apiKey)
 		resp.Status = "FILLED"
 		resp.ExecutedQty = qty
 		resp.CumulativeQuoteQty = qty * price
 	}
+
+	f.bookedOrdersMtx.Lock()
+	f.bookedOrders[tradeID] = &userOrder{
+		slug:   slug,
+		sell:   side == "SELL",
+		rate:   price,
+		qty:    qty,
+		apiKey: apiKey,
+		stamp:  time.Now(),
+		status: resp.Status,
+	}
+	f.bookedOrdersMtx.Unlock()
 
 	writeJSONWithStatus(w, &resp, http.StatusOK)
 }
@@ -928,13 +970,13 @@ func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) 
 	apiKey := extractAPIKey(r)
 	f.bookedOrdersMtx.Lock()
 	ord, found := f.bookedOrders[tradeID]
-	f.bookedOrdersMtx.Unlock()
 	if found {
-		if !ord.cancelled.CompareAndSwap(false, true) {
+		if ord.status == "CANCELED" {
 			log.Errorf("Detected cancellation of an already cancelled order %s", tradeID)
 		}
-		ord.cancelled.Store(true)
+		ord.status = "CANCELED"
 	}
+	f.bookedOrdersMtx.Unlock()
 	writeJSONWithStatus(w, &struct{}{}, http.StatusOK)
 	if !found {
 		log.Errorf("DELETE request received from user %s for unknown order %s", apiKey, tradeID)
@@ -960,13 +1002,56 @@ func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) 
 	sub.SendRaw(updateB)
 }
 
+func (f *fakeBinance) handleMarketTicker24(w http.ResponseWriter, r *http.Request) {
+	resp := make([]*bntypes.MarketTicker24, 0, len(xcInfo.Symbols))
+	for _, mkt := range xcInfo.Symbols {
+		baseFiatRate := f.fiatRates[parseAssetID(mkt.BaseAsset)]
+		quoteFiatRate := f.fiatRates[parseAssetID(mkt.QuoteAsset)]
+		m := newMarket(mkt.Symbol, mkt.BaseAsset, mkt.QuoteAsset, baseFiatRate, quoteFiatRate)
+		var buyPrice, sellPrice float64
+		if len(m.buys) > 0 {
+			buyPrice = m.buys[0].rate
+		}
+		if len(m.sells) > 0 {
+			sellPrice = m.sells[0].rate
+		}
+		vol24USD := math.Pow(10, float64(rand.Intn(4)+2))
+		vol24Base := vol24USD / baseFiatRate
+		vol24Quote := vol24USD / quoteFiatRate
+		lastPrice := m.basisRate
+		highPrice := lastPrice * (1 + rand.Float64()*0.15)
+		lowPrice := lastPrice / (1 + rand.Float64()*0.15)
+		openPrice := lowPrice + ((highPrice - lowPrice) * rand.Float64())
+		priceChange := lastPrice - openPrice
+		priceChangePct := priceChange / openPrice * 100
+
+		avgPrice := (openPrice + lastPrice + highPrice + lowPrice) / 4
+
+		resp = append(resp, &bntypes.MarketTicker24{
+			Symbol:             mkt.Symbol,
+			PriceChange:        priceChange,
+			PriceChangePercent: priceChangePct,
+			BidPrice:           buyPrice,
+			AskPrice:           sellPrice,
+			Volume:             vol24Base,
+			QuoteVolume:        vol24Quote,
+			WeightedAvgPrice:   avgPrice,
+			LastPrice:          lastPrice,
+			OpenPrice:          openPrice,
+			HighPrice:          highPrice,
+			LowPrice:           lowPrice,
+		})
+	}
+	writeJSONWithStatus(w, &resp, http.StatusOK)
+}
+
 type rateQty struct {
 	rate float64
 	qty  float64
 }
 
 type market struct {
-	slug                                   string
+	symbol, baseSlug, quoteSlug            string
 	baseFiatRate, quoteFiatRate, basisRate float64
 	minRate, maxRate                       float64
 
@@ -977,12 +1062,14 @@ type market struct {
 	buys, sells []*rateQty
 }
 
-func newMarket(slug string, baseFiatRate, quoteFiatRate float64) *market {
+func newMarket(symbol, baseSlug, quoteSlug string, baseFiatRate, quoteFiatRate float64) *market {
 	const maxVariation = 0.1
 	basisRate := baseFiatRate / quoteFiatRate
 	minRate, maxRate := basisRate*(1/(1+maxVariation)), basisRate*(1+maxVariation)
 	m := &market{
-		slug:          slug,
+		symbol:        symbol,
+		baseSlug:      baseSlug,
+		quoteSlug:     quoteSlug,
 		baseFiatRate:  baseFiatRate,
 		quoteFiatRate: quoteFiatRate,
 		basisRate:     basisRate,
@@ -994,7 +1081,7 @@ func newMarket(slug string, baseFiatRate, quoteFiatRate float64) *market {
 	m.rate.Store(math.Float64bits(basisRate))
 	log.Tracef("Market %s intitialized with base fiat rate = %.4f, quote fiat rate = %.4f "+
 		"basis rate = %.8f. Mid-gap rate will randomly walk between %.8f and %.8f",
-		slug, baseFiatRate, quoteFiatRate, basisRate, minRate, maxRate)
+		symbol, baseFiatRate, quoteFiatRate, basisRate, minRate, maxRate)
 	m.shuffle()
 	return m
 }
@@ -1021,7 +1108,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	m.rate.Store(math.Float64bits(newRate))
 	log.Tracef("%s: A randomized (max %.1f%%) shift of %.8f (%.3f%%) was applied to the old rate of %.8f, "+
 		"resulting in a new mid-gap of %.8f",
-		m.slug, maxChangeRatio*100, shift, shiftRoll*maxChangeRatio*100, oldRate, newRate,
+		m.symbol, maxChangeRatio*100, shift, shiftRoll*maxChangeRatio*100, oldRate, newRate,
 	)
 
 	halfGapRoll := rand.Float64()
@@ -1036,7 +1123,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 
 	log.Tracef("%s: Half-gap roll of %.4f%% resulted in a half-gap factor of %.4f%%, range %.8f to %0.8f. "+
 		"Level-spacing roll of %.4f%% resulted in a level spacing of %.8f",
-		m.slug, halfGapRoll*100, halfGapFactor*100, bestBuy, bestSell, levelSpacingRoll*100, levelSpacing,
+		m.symbol, halfGapRoll*100, halfGapFactor*100, bestBuy, bestSell, levelSpacingRoll*100, levelSpacing,
 	)
 
 	zeroBookSide := func(ords []*rateQty) map[string]string {
@@ -1068,7 +1155,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	m.buys = makeOrders(bestBuy, -1, jsBuys)
 	m.sells = makeOrders(bestSell, 1, jsSells)
 
-	log.Tracef("%s: Shuffle resulted in %d buy orders and %d sell orders being placed", m.slug, len(m.buys), len(m.sells))
+	log.Tracef("%s: Shuffle resulted in %d buy orders and %d sell orders being placed", m.symbol, len(m.buys), len(m.sells))
 
 	convertSide := func(side map[string]string) [][2]json.Number {
 		updates := make([][2]json.Number, 0, len(side))

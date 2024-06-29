@@ -26,7 +26,7 @@ button {
 
   &.small {
     padding: 0.25rem 0.5rem;
-    font-size: .8rem;
+    font-size: .9rem;
   }
 
   &.large {
@@ -54,6 +54,16 @@ button {
     }
   }
 
+  &.warning {
+    border-color: var(--text-warning);
+    color: var(--text-warning);
+
+    &:hover {
+      background-color: var(--text-warning);
+      color: var(--btn-danger-hover-color);
+    }
+  }
+
   &.go {
     background-color: var(--btn-go-bg);
     color: var(--btn-go-color);
@@ -72,6 +82,18 @@ table {
 
   .table-group-divider {
     border-color: var(--border-color)
+  }
+
+  &.px-0 {
+    th,
+    td {
+      &:last-child,
+      &:first-child {
+        padding-left: 0;
+        padding-right: 0;
+      }
+    }
+
   }
   
   th,
@@ -176,27 +198,6 @@ table.reg-asset-markets {
   }
 }
 
-// form components
-div.form-closer {
-  @extend .flex-center;
-  @extend .hoverbg;
-
-  width: 3rem;
-  margin-left: auto;
-  cursor: pointer;
-  line-height: 1;
-  font-size: 1rem;
-  padding-top: 1rem;
-  padding-bottom: 1rem;
-  position: absolute;
-  top: 0;
-  right: 0;
-
-  span {
-    opacity: 0.8;
-  }
-}
-
 .form-check-label {
   cursor: pointer;
 }
@@ -235,6 +236,10 @@ form.card button:hover {
 // Remove red background for firefox on empty number input fields.
 input:invalid {
   box-shadow: none;
+}
+
+.dashed {
+  border-style: dashed;
 }
 
 .micro-icon {
@@ -294,5 +299,18 @@ div[data-handler=wallets] {
 
     background-color: var(--form-bg);
     box-shadow: 0 3px 6px #00000021, 0 2px 7px #00000041;
+  }
+}
+
+.corner-button {
+  position: absolute;
+  top: 0;
+
+  &.left {
+    left: 0;
+  }
+
+  &.right {
+    right: 0;
   }
 }

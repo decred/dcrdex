@@ -61,7 +61,7 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
     [Testnet]: (cid: string) => `https://sochain.com/tx/LTCTEST/${cid.split(':')[0]}`,
     [Simnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`
   },
-  20: {
+  20: { // dgb
     [Mainnet]: (cid: string) => `https://digiexplorer.info/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://testnetexplorer.digibyteservers.io/tx/${cid.split(':')[0]}`,
     [Simnet]: (cid: string) => `https://digiexplorer.info/tx/${cid.split(':')[0]}`

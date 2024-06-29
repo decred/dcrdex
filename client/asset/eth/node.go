@@ -189,7 +189,7 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 }
 
 // startNode starts a geth node.
-func startNode(chainID int64, node *node.Node, network dex.Network) (*les.LightEthereum, error) {
+func startNode(_ /* chainID */ int64, node *node.Node, network dex.Network) (*les.LightEthereum, error) {
 	ethCfg, err := ETHConfig(network)
 	if err != nil {
 		return nil, err

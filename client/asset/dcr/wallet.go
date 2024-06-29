@@ -9,8 +9,8 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v3/wallet"
+	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v4/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -69,6 +69,19 @@ type XCWalletAccounts struct {
 	TradingAccount string
 }
 
+// ListTransactionsResult is similar to the walletjson.ListTransactionsResult,
+// but most fields omitted.
+type ListTransactionsResult struct {
+	TxID       string
+	BlockIndex *int64
+	BlockTime  int64
+	// Send set to true means that the inputs of the transaction were
+	// controlled by the wallet.
+	Send   bool `json:"send"`
+	Fee    *float64
+	TxType *walletjson.ListTransactionsTxType
+}
+
 // Wallet defines methods that the ExchangeWallet uses for communicating with
 // a Decred wallet and blockchain.
 type Wallet interface {
@@ -82,12 +95,6 @@ type Wallet interface {
 	// Accounts returns the names of the accounts for use by the exchange
 	// wallet.
 	Accounts() XCWalletAccounts
-	// NotifyOnTipChange registers a callback function that should be
-	// invoked when the wallet sees new mainchain blocks. The return value
-	// indicates if this notification can be provided. Where this tip change
-	// notification is unimplemented, monitorBlocks should be used to track
-	// tip changes.
-	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
 	// AddressInfo returns information for the provided address. It is an error
 	// if the address is not owned by the wallet.
 	AddressInfo(ctx context.Context, address string) (*AddressInfo, error)
@@ -141,7 +148,7 @@ type Wallet interface {
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	// ListSinceBlock returns all wallet transactions confirmed since the specified
 	// height.
-	ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error)
+	ListSinceBlock(ctx context.Context, start int32) ([]ListTransactionsResult, error)
 	// MatchAnyScript looks for any of the provided scripts in the block specified.
 	MatchAnyScript(ctx context.Context, blockHash *chainhash.Hash, scripts [][]byte) (bool, error)
 	// AccountUnlocked returns true if the account is unlocked.
@@ -158,8 +165,8 @@ type Wallet interface {
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
 	// PurchaseTickets purchases n tickets. vspHost and vspPubKey only
-	// needed for internal wallets.
-	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, mixCfg *mixingConfig) ([]*asset.Ticket, error)
+	// needed for internal wallets. Peer-to-peer mixing can be enabled if required.
+	PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, isMixing bool) ([]*asset.Ticket, error)
 	// Tickets returns current active ticket hashes up until they are voted
 	// or revoked. Includes unconfirmed tickets.
 	Tickets(ctx context.Context) ([]*asset.Ticket, error)

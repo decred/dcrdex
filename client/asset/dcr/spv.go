@@ -22,13 +22,14 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/utils"
-	"decred.org/dcrwallet/v3/chain"
-	walleterrors "decred.org/dcrwallet/v3/errors"
-	"decred.org/dcrwallet/v3/p2p"
-	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v3/spv"
-	"decred.org/dcrwallet/v3/wallet"
-	"decred.org/dcrwallet/v3/wallet/udb"
+	"decred.org/dcrwallet/v4/chain"
+	walleterrors "decred.org/dcrwallet/v4/errors"
+	"decred.org/dcrwallet/v4/p2p"
+	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v4/spv"
+	vspclient "decred.org/dcrwallet/v4/vsp"
+	"decred.org/dcrwallet/v4/wallet"
+	"decred.org/dcrwallet/v4/wallet/udb"
 	"github.com/decred/dcrd/addrmgr/v2"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -42,7 +43,6 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/slog"
-	vspclient "github.com/decred/vspd/client/v2"
 	"github.com/jrick/logrotate/rotator"
 )
 
@@ -71,9 +71,8 @@ type dcrWallet interface {
 	ListUnspent(ctx context.Context, minconf, maxconf int32, addresses map[string]struct{}, accountName string) ([]*walletjson.ListUnspentResult, error)
 	LockOutpoint(txHash *chainhash.Hash, index uint32)
 	ListTransactionDetails(ctx context.Context, txHash *chainhash.Hash) ([]walletjson.ListTransactionsResult, error)
-	MixAccount(ctx context.Context, dialTLS wallet.DialFunc, csppserver string, changeAccount, mixAccount, mixBranch uint32) error
+	MixAccount(context.Context, uint32, uint32, uint32) error
 	MainChainTip(ctx context.Context) (hash chainhash.Hash, height int32)
-	MainTipChangedNotifications() (chan *wallet.MainTipChangedNotification, func())
 	NewExternalAddress(ctx context.Context, account uint32, callOpts ...wallet.NextAddressCallOption) (stdaddr.Address, error)
 	NewInternalAddress(ctx context.Context, account uint32, callOpts ...wallet.NextAddressCallOption) (stdaddr.Address, error)
 	PublishTransaction(ctx context.Context, tx *wire.MsgTx, n wallet.NetworkBackend) (*chainhash.Hash, error)
@@ -95,20 +94,25 @@ type dcrWallet interface {
 	GetAllTSpends(ctx context.Context) []*wire.MsgTx
 	TSpendPolicy(tspendHash, ticketHash *chainhash.Hash) stake.TreasuryVoteT
 	VSPHostForTicket(ctx context.Context, ticketHash *chainhash.Hash) (string, error)
-	SetAgendaChoices(ctx context.Context, ticketHash *chainhash.Hash, choices ...wallet.AgendaChoice) (voteBits uint16, err error)
+	SetAgendaChoices(ctx context.Context, ticketHash *chainhash.Hash, choices map[string]string) (voteBits uint16, err error)
 	SetTSpendPolicy(ctx context.Context, tspendHash *chainhash.Hash, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error
 	SetRelayFee(relayFee dcrutil.Amount)
 	GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*wallet.TicketSummary, *wire.BlockHeader, error)
+	GetTransactions(ctx context.Context, f func(*wallet.Block) (bool, error), startBlock, endBlock *wallet.BlockIdentifier) error
 	ListSinceBlock(ctx context.Context, start, end, syncHeight int32) ([]walletjson.ListTransactionsResult, error)
-	vspclient.Wallet
-	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
+	UnlockOutpoint(txHash *chainhash.Hash, index uint32)
+	SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType txscript.SigHashType, additionalPrevScripts map[wire.OutPoint][]byte,
+		additionalKeysByAddress map[string]*dcrutil.WIF, p2shRedeemScriptsByAddress map[string][]byte) ([]wallet.SignatureError, error)
+	AgendaChoices(ctx context.Context, ticketHash *chainhash.Hash) (choices map[string]string, voteBits uint16, err error)
+	NewVSPTicket(ctx context.Context, hash *chainhash.Hash) (*wallet.VSPTicket, error)
+	RescanProgressFromHeight(ctx context.Context, n wallet.NetworkBackend, startHeight int32, p chan<- wallet.RescanProgress)
 }
 
 // Interface for *spv.Syncer so that we can test with a stub.
 type spvSyncer interface {
 	wallet.NetworkBackend
-	Synced() bool
+	Synced(context.Context) (bool, int32)
 	GetRemotePeers() map[string]*p2p.RemotePeer
 }
 
@@ -146,7 +150,7 @@ func (w *extendedWallet) MainTipChangedNotifications() (chan *wallet.MainTipChan
 // spvWallet is a Wallet built on dcrwallet's *wallet.Wallet running in SPV
 // mode.
 type spvWallet struct {
-	dcrWallet         // *wallet.Wallet
+	dcrWallet         // *extendedWallet
 	db                wallet.DB
 	dir               string
 	chainParams       *chaincfg.Params
@@ -526,11 +530,6 @@ func (w *spvWallet) SpvMode() bool {
 	return true
 }
 
-// NotifyOnTipChange is not used, in favor of the tipNotifier pattern from btc.
-func (w *spvWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool {
-	return false
-}
-
 // AddressInfo returns information for the provided address. It is an error if
 // the address is not owned by the wallet.
 func (w *spvWallet) AddressInfo(ctx context.Context, addrStr string) (*AddressInfo, error) {
@@ -730,6 +729,15 @@ func (w *spvWallet) SignRawTransaction(ctx context.Context, baseTx *wire.MsgTx) 
 func (w *spvWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
 	// TODO: Conditional high fee check?
 	return w.PublishTransaction(ctx, tx, w.spv)
+}
+
+// BlockTimestamp gets the timestamp of the block.
+func (w *spvWallet) BlockTimestamp(ctx context.Context, blockHash *chainhash.Hash) (time.Time, error) {
+	hdr, err := w.dcrWallet.BlockHeader(ctx, blockHash)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return hdr.Timestamp, nil
 }
 
 // GetBlockHeader generates a *BlockHeader for the specified block hash. The
@@ -977,7 +985,8 @@ func (w *spvWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 		targetHeight = height
 	}
 
-	synced, progress := w.spv.Synced(), float32(height)/float32(targetHeight)
+	synced, _ := w.spv.Synced(ctx)
+	progress := float32(height) / float32(targetHeight)
 	if progress > 0.999 && !synced {
 		progress = 0.999
 	}
@@ -1016,24 +1025,30 @@ func (w *spvWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error
 	return w.dcrWallet.StakeInfo(ctx)
 }
 
-func newVSPClient(w vspclient.Wallet, vspHost, vspPubKey string, log dex.Logger) (*vspclient.AutoClient, error) {
+func (w *spvWallet) newVSPClient(vspHost, vspPubKey string, log dex.Logger) (*vspclient.Client, error) {
 	return vspclient.New(vspclient.Config{
 		URL:    vspHost,
 		PubKey: vspPubKey,
 		Dialer: new(net.Dialer).DialContext,
-		Wallet: w,
+		Wallet: w.dcrWallet.(*extendedWallet).Wallet,
 		Policy: &vspclient.Policy{
 			MaxFee:     0.2e8,
 			FeeAcct:    0,
 			ChangeAcct: 0,
 		},
+		Params: w.chainParams,
 	}, log)
+}
+
+// rescan performs a blocking rescan, sending updates on the channel.
+func (w *spvWallet) rescan(ctx context.Context, fromHeight int32, c chan wallet.RescanProgress) {
+	w.dcrWallet.RescanProgressFromHeight(ctx, w.spv, fromHeight, c)
 }
 
 // PurchaseTickets purchases n tickets, tells the provided vspd to monitor the
 // ticket, and pays the vsp fee.
-func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, mixCfg *mixingConfig) ([]*asset.Ticket, error) {
-	vspClient, err := newVSPClient(w.dcrWallet, vspHost, vspPubKey, w.log.SubLogger("VSP"))
+func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubKey string, mixing bool) ([]*asset.Ticket, error) {
+	vspClient, err := w.newVSPClient(vspHost, vspPubKey, w.log.SubLogger("VSP"))
 	if err != nil {
 		return nil, err
 	}
@@ -1041,10 +1056,11 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 	req := &wallet.PurchaseTicketsRequest{
 		Count:                n,
 		VSPFeePaymentProcess: vspClient.Process,
-		VSPFeeProcess:        vspClient.FeePercentage,
+		VSPFeePercent:        vspClient.FeePercentage,
+		Mixing:               mixing,
 	}
 
-	if mixCfg.enabled {
+	if mixing {
 		accts := w.Accounts()
 		mixedAccountNum, err := w.AccountNumber(ctx, accts.PrimaryAccount)
 		if err != nil {
@@ -1054,8 +1070,6 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 		// For simnet, we just change the source account. Others we need to
 		// mix tickets through the cspp server.
 		if w.chainParams.Net != wire.SimNet {
-			req.CSPPServer = mixCfg.server
-			req.DialCSPPServer = mixCfg.dialer
 			req.MixedAccount = mixedAccountNum
 			req.MixedAccountBranch = mixedAccountBranch
 			req.MixedSplitAccount = req.MixedAccount
@@ -1174,18 +1188,25 @@ func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 
 	voteChoices := make([]*walletjson.VoteChoice, len(choices))
 
-	for i := range choices {
+	i := 0
+	for agendaID, choiceID := range choices {
 		voteChoices[i] = &walletjson.VoteChoice{
-			AgendaID:          choices[i].AgendaID,
-			AgendaDescription: agendas[i].Vote.Description,
-			ChoiceID:          choices[i].ChoiceID,
+			AgendaID: agendaID,
+			ChoiceID: choiceID,
 		}
-		for j := range agendas[i].Vote.Choices {
-			if choices[i].ChoiceID == agendas[i].Vote.Choices[j].Id {
-				voteChoices[i].ChoiceDescription = agendas[i].Vote.Choices[j].Description
-				break
+		for _, agenda := range agendas {
+			if agenda.Vote.Id != agendaID {
+				continue
+			}
+			voteChoices[i].AgendaDescription = agenda.Vote.Description
+			for _, choice := range agenda.Vote.Choices {
+				if choiceID == choice.Id {
+					voteChoices[i].ChoiceDescription = choice.Description
+					break
+				}
 			}
 		}
+		i++
 	}
 	policyToStr := func(p stake.TreasuryVoteT) string {
 		var policy string
@@ -1235,16 +1256,8 @@ func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPolicy,
 	treasuryPolicy map[string]string) error {
 	// Set the consensus vote choices for the wallet.
-	agendaChoices := make([]wallet.AgendaChoice, 0, len(choices))
-	for k, v := range choices {
-		choice := wallet.AgendaChoice{
-			AgendaID: k,
-			ChoiceID: v,
-		}
-		agendaChoices = append(agendaChoices, choice)
-	}
-	if len(agendaChoices) > 0 {
-		_, err := w.SetAgendaChoices(ctx, nil, agendaChoices...)
+	if len(choices) > 0 {
+		_, err := w.SetAgendaChoices(ctx, nil, choices)
 		if err != nil {
 			return err
 		}
@@ -1300,7 +1313,7 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 			return err
 		}
 	}
-	clientCache := make(map[string]*vspclient.AutoClient)
+	clientCache := make(map[string]*vspclient.Client)
 	// Set voting preferences for VSPs. Continuing for all errors.
 	// NOTE: Doing this in an unmetered loop like this is a privacy breaker.
 	return w.dcrWallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
@@ -1321,7 +1334,7 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 				return nil
 			}
 			vspPubKey := base64.StdEncoding.EncodeToString(info.PubKey)
-			vspClient, err = newVSPClient(w.dcrWallet, vspHost, vspPubKey, w.log.SubLogger("VSP"))
+			vspClient, err = w.newVSPClient(vspHost, vspPubKey, w.log.SubLogger("VSP"))
 			if err != nil {
 				w.log.Warnf("unable to load vsp at %s for ticket %s: %v", vspHost, hash, err)
 				return nil
@@ -1329,12 +1342,62 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 		}
 		// Never return errors here, so all tickets are tried.
 		// The first error will be returned to the user.
-		err = vspClient.SetVoteChoice(ctx, hash, choices, tspendPolicy, treasuryPolicy)
+		vspTicket, err := w.NewVSPTicket(ctx, hash)
+		if err != nil {
+			w.log.Warnf("unable to create vsp ticket for vsp at %s for ticket %s: %v", vspHost, hash, err)
+		}
+		err = vspClient.SetVoteChoice(ctx, vspTicket, choices, tspendPolicy, treasuryPolicy)
 		if err != nil {
 			w.log.Warnf("unable to set vote for vsp at %s for ticket %s: %v", vspHost, hash, err)
 		}
 		return nil
 	})
+}
+
+func (w *spvWallet) ListSinceBlock(ctx context.Context, start int32) ([]ListTransactionsResult, error) {
+	res := make([]ListTransactionsResult, 0)
+	f := func(block *wallet.Block) (bool, error) {
+		for _, tx := range block.Transactions {
+			convertTxType := func(txType wallet.TransactionType) *walletjson.ListTransactionsTxType {
+				switch txType {
+				case wallet.TransactionTypeTicketPurchase:
+					txType := walletjson.LTTTTicket
+					return &txType
+				case wallet.TransactionTypeVote:
+					txType := walletjson.LTTTVote
+					return &txType
+				case wallet.TransactionTypeRevocation:
+					txType := walletjson.LTTTRevocation
+					return &txType
+				case wallet.TransactionTypeCoinbase:
+				case wallet.TransactionTypeRegular:
+					txType := walletjson.LTTTRegular
+					return &txType
+				}
+				w.log.Warnf("unknown transaction type %v", tx.Type)
+				regularTxType := walletjson.LTTTRegular
+				return &regularTxType
+			}
+			fee := tx.Fee.ToUnit(dcrutil.AmountCoin)
+			var blockIndex, blockTime int64
+			if block.Header != nil {
+				blockIndex = int64(block.Header.Height)
+				blockTime = block.Header.Timestamp.Unix()
+			}
+			res = append(res, ListTransactionsResult{
+				TxID:       tx.Hash.String(),
+				BlockIndex: &blockIndex,
+				BlockTime:  blockTime,
+				Send:       len(tx.MyInputs) > 0,
+				TxType:     convertTxType(tx.Type),
+				Fee:        &fee,
+			})
+		}
+		return false, nil
+	}
+
+	startID := wallet.NewBlockIdentifierFromHeight(start)
+	return res, w.dcrWallet.GetTransactions(ctx, f, startID, nil)
 }
 
 func (w *spvWallet) SetTxFee(_ context.Context, feePerKB dcrutil.Amount) error {

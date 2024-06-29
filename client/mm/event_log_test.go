@@ -43,9 +43,7 @@ func TestEventLogDB(t *testing.T) {
 		Host:    "dex.com",
 		BaseID:  42,
 		QuoteID: 60,
-		CEXCfg: &BotCEXCfg{
-			Name: "Binance",
-		},
+		CEXName: "Binance",
 		ArbMarketMakerConfig: &ArbMarketMakerConfig{
 			BuyPlacements: []*ArbMarketMakingPlacement{
 				{
@@ -309,17 +307,14 @@ func TestEventLogDB(t *testing.T) {
 	}
 	bs := currBalanceState()
 	finalBals := map[uint32]uint64{
-		42: bs.Balances[42].Available + bs.Balances[42].Pending + bs.Balances[42].Locked,
-		60: bs.Balances[60].Available + bs.Balances[60].Pending + bs.Balances[60].Locked,
+		42: bs.Balances[42].Available + bs.Balances[42].Pending + bs.Balances[42].Locked + bs.Balances[42].Reserved,
+		60: bs.Balances[60].Available + bs.Balances[60].Pending + bs.Balances[60].Locked + bs.Balances[60].Reserved,
 	}
 	if !reflect.DeepEqual(overview.InitialBalances, initialBals) {
 		t.Fatalf("expected initial balances %v, got %v", initialBals, overview.InitialBalances)
 	}
-	if !reflect.DeepEqual(overview.FinalBalances, finalBals) {
-		t.Fatalf("expected final balances %v, got %v", finalBals, overview.FinalBalances)
-	}
-	expPL, _ := calcRunProfitLoss(initialBals, finalBals, nil, fiatRates)
-	if overview.ProfitLoss != expPL {
+	expPL := newProfitLoss(initialBals, finalBals, nil, fiatRates)
+	if overview.ProfitLoss.Profit != expPL.Profit {
 		t.Fatalf("expected profit loss %v, got %v", expPL, overview.ProfitLoss)
 	}
 	if !reflect.DeepEqual(overview.Cfgs[0].Cfg, cfg) {

@@ -53,7 +53,7 @@ const BipSymbols = Object.values(BipIDs)
 
 const log10RateEncodingFactor = Math.round(Math.log10(RateEncodingFactor))
 
-const intFormatter = new Intl.NumberFormat((navigator.languages as string[]), { maximumFractionDigits: 0 })
+const intFormatter = new Intl.NumberFormat(navigator.languages as string[], { maximumFractionDigits: 0 })
 
 const fourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
   minimumSignificantDigits: 4,
@@ -537,10 +537,23 @@ export default class Doc {
 
   /*
    * timeSince returns a string representation of the duration since the
-   * specified unix timestamp.
+   * specified unix timestamp (milliseconds).
    */
-  static timeSince (t: number): string {
-    return Doc.formatDuration((new Date().getTime()) - t)
+  static timeSince (ms: number): string {
+    return Doc.formatDuration((new Date().getTime()) - ms)
+  }
+
+  /*
+   * hmsSince returns a time duration since the specified unix timestamp
+   * formatted as HH:MM:SS
+   */
+  static hmsSince (secs: number) {
+    let r = (new Date().getTime() / 1000) - secs
+    const h = String(Math.floor(r / 3600))
+    r = r % 3600
+    const m = String(Math.floor(r / 60))
+    const s = String(Math.floor(r % 60))
+    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}:${s.padStart(2, '0')}`
   }
 
   /* formatDuration returns a string representation of the duration */
@@ -846,7 +859,7 @@ function formatSigFigsWithFormatters (intFormatter: Intl.NumberFormat, sigFigFor
   if (n >= 1000) return intFormatter.format(n)
   const s = sigFigFormatter.format(n)
   if (typeof maxDecimals !== 'number') return s
-  const fractional = sigFigFormatter.formatToParts(n).filter((part: Intl.NumberFormatPart) => part.type === 'fraction')[0].value
+  const fractional = sigFigFormatter.formatToParts(n).filter((part: Intl.NumberFormatPart) => part.type === 'fraction')[0]?.value ?? ''
   if (fractional.length <= maxDecimals) return s
   return fullPrecisionFormatter(maxDecimals, locales).format(n)
 }
@@ -884,7 +897,7 @@ if (process.env.NODE_ENV === 'development') {
       })
       for (const k in decimalFormatters) delete decimalFormatters[k] // cleanup
       for (const k in fullPrecisionFormatters) delete fullPrecisionFormatters[k] // cleanup
-      const s = formatSigFigsWithFormatters(intFormatter, sigFigFormatter, parseFloat(unformatted), maxDecimals, code)
+      const s = formatSigFigsWithFormatters(intFormatter, sigFigFormatter, parseFloatDefault(unformatted), maxDecimals, code)
       if (s !== expected) console.log(`TEST FAILED: f('${code}', ${unformatted}, ${maxDecimals}) => '${s}' != '${expected}'}`)
       else console.log(`✔️ f('${code}', ${unformatted}, ${maxDecimals}) => ${s} ✔️`)
     }
@@ -933,4 +946,174 @@ if (process.env.NODE_ENV === 'development') {
       else console.log(`✔️ f(${encRate}, ${bFactor}, ${qFactor}, ${rateStep}) => ${enc} ✔️`)
     }
   }
+}
+
+export interface NumberInputOpts {
+  prec?: number
+  sigFigs?: boolean
+  changed?: (v: number) => void
+  min?: number
+  set?: (v: number, s: string) => void // called when setValue is called
+}
+
+export class NumberInput {
+  input: PageElement
+  prec: number
+  fmt: (v: number, prec: number) => [number, string]
+  changed: (v: number) => void
+  set?: (v: number, s: string) => void
+  min: number
+
+  constructor (input: PageElement, opts: NumberInputOpts) {
+    this.input = input
+    this.prec = opts.prec ?? 0
+    this.fmt = opts.sigFigs ? toFourSigFigs : toPrecision
+    this.changed = opts.changed ?? (() => { /* pass */ })
+    this.set = opts.set
+    this.min = opts.min ?? 0
+
+    Doc.bind(input, 'change', () => { this.inputChanged() })
+  }
+
+  inputChanged () {
+    const { changed } = this
+    if (changed) changed(this.value())
+  }
+
+  setValue (v: number) {
+    this.input.value = String(v)
+    v = this.value()
+    if (this.set) this.set(v, this.input.value)
+  }
+
+  value () {
+    const { input, min, prec, fmt } = this
+    const rawV = Math.max(parseFloatDefault(input.value, min ?? 0), min ?? 0)
+    const [v, s] = fmt(rawV, prec ?? 0)
+    input.value = s
+    return v
+  }
+}
+
+export interface IncrementalInputOpts extends NumberInputOpts {
+  inc?: number
+}
+
+export class IncrementalInput extends NumberInput {
+  inc: number
+  opts: IncrementalInputOpts
+
+  constructor (box: PageElement, opts: IncrementalInputOpts) {
+    super(Doc.safeSelector(box, 'input'), opts)
+    this.opts = opts
+    this.inc = opts.inc ?? 1
+
+    const up = Doc.safeSelector(box, '.ico-arrowup')
+    const down = Doc.safeSelector(box, '.ico-arrowdown')
+
+    Doc.bind(up, 'click', () => { this.increment(1) })
+    Doc.bind(down, 'click', () => { this.increment(-1) })
+  }
+
+  setIncrementAndMinimum (inc: number, min: number) {
+    this.inc = inc
+    this.min = min
+  }
+
+  increment (sign: number) {
+    const { inc, min, input } = this
+    input.value = String(Math.max(this.value() + sign * inc, min))
+    this.inputChanged()
+  }
+}
+
+export class MiniSlider {
+  track: PageElement
+  ball: PageElement
+  r: number
+  changed: (r: number) => void
+
+  constructor (box: PageElement, changed: (r: number) => void) {
+    this.changed = changed
+    this.r = 0
+
+    const color = document.createElement('div')
+    color.dataset.tmpl = 'color'
+    box.appendChild(color)
+    const track = this.track = document.createElement('div')
+    track.dataset.tmpl = 'track'
+    color.appendChild(track)
+    const ball = this.ball = document.createElement('div')
+    ball.dataset.tmpl = 'ball'
+    track.appendChild(ball)
+
+    Doc.bind(box, 'mousedown', (e: MouseEvent) => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      const startX = e.pageX
+      const w = track.clientWidth
+      const startLeft = this.r * w
+      const left = (ee: MouseEvent) => Math.max(Math.min(startLeft + (ee.pageX - startX), w), 0)
+      const trackMouse = (ee: MouseEvent) => {
+        ee.preventDefault()
+        const l = left(ee)
+        this.r = l / w
+        ball.style.left = `${this.r * 100}%`
+        this.changed(this.r)
+      }
+      const mouseUp = (ee: MouseEvent) => {
+        trackMouse(ee)
+        Doc.unbind(document, 'mousemove', trackMouse)
+        Doc.unbind(document, 'mouseup', mouseUp)
+      }
+      Doc.bind(document, 'mousemove', trackMouse)
+      Doc.bind(document, 'mouseup', mouseUp)
+    })
+
+    Doc.bind(box, 'click', (e: MouseEvent) => {
+      if (e.button !== 0) return
+      const x = e.pageX
+      const m = Doc.layoutMetrics(track)
+      this.r = clamp((x - m.bodyLeft) / m.width, 0, 1)
+      ball.style.left = `${this.r * m.width}px`
+      this.changed(this.r)
+    })
+  }
+
+  setValue (r: number) {
+    this.r = clamp(r, 0, 1)
+    this.ball.style.left = `${this.r * 100}%`
+  }
+}
+
+export function toPrecision (v: number, prec: number): [number, string] {
+  const ord = Math.pow(10, prec ?? 0)
+  v = Math.round(v * ord) / ord
+  let s = v.toFixed(prec)
+  if (prec > 0) {
+    while (s.endsWith('0')) s = s.substring(0, s.length - 1)
+    if (s.endsWith('.')) s = s.substring(0, s.length - 1)
+  }
+  return [v, s]
+}
+
+export function toFourSigFigs (v: number, maxPrec: number): [number, string] {
+  const ord = Math.floor(Math.log10(Math.abs(v)))
+  if (ord >= 3) return [Math.round(v), v.toFixed(0)]
+  const prec = Math.min(4 - ord, maxPrec)
+  return toPrecision(v, prec)
+}
+
+export function parseFloatDefault (inputValue: string | undefined, defaultValue?: number) {
+  const v = parseFloat((inputValue ?? '').replace(/,/g, ''))
+  if (!isNaN(v)) return v
+  return defaultValue ?? 0
+}
+
+/* clamp returns v if min <= v <= max, else min or max. */
+export function clamp (v: number, min: number, max: number): number {
+  if (v < min) return min
+  if (v > max) return max
+  return v
 }

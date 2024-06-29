@@ -1,29 +1,29 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package UpgradeCode="2c62692a-c72e-4182-a8eb-7d1d7e55adc0" Version="1.0.0.0" Language="1033"
-    Name="DCRDEX" Manufacturer="Decred Developers" InstallerVersion="300">
-    <Media Id="1" Cabinet="dexcdesktop.cab" EmbedCab="yes" />
+    Name="BisonWallet" Manufacturer="Decred Developers" InstallerVersion="300">
+    <Media Id="1" Cabinet="bisonwdesktop.cab" EmbedCab="yes" />
     <Property Id="PIDTEMPLATE" Value="Decred Developers" />
 
     <DirectoryRef Id="APPLICATIONROOTDIRECTORY">
-      <Component Id="DexcDesktopExe" Guid="fcdc8c43-a305-42a5-b043-5f91bad2a21a">
-        <File Source="..\..\build\windows\dexc-desktop.exe" Id="DexcDesktopExe" KeyPath="yes" Checksum="yes" />
+      <Component Id="BisonwDesktopExe" Guid="fcdc8c43-a305-42a5-b043-5f91bad2a21a">
+        <File Source="..\..\build\windows\Bisonw-desktop.exe" Id="BisonwDesktopExe" KeyPath="yes" Checksum="yes" />
         <File Source="..\..\build\windows\WebView2Loader.dll" Checksum="yes" />
       </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="ApplicationProgramsFolder">
       <Component Id="ApplicationShortcut" Guid="0491370b-681c-490c-9a39-21d6fd6a0a31">
-        <Shortcut Id="ApplicationStartMenuShortcut" Name="Decred DEX Client"
-          Description="Multi-wallet backed by Decred DEX" Target="[#DexcDesktopExe]"
+        <Shortcut Id="ApplicationStartMenuShortcut" Name="Bison Wallet"
+          Description="Multi-wallet backed by Decred DEX" Target="[#BisonwDesktopExe]"
           WorkingDirectory="APPLICATIONROOTDIRECTORY" />
         <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\Decred\DexcDesktop" Name="installed"
+        <RegistryValue Root="HKCU" Key="Software\Decred\BisonwDesktop" Name="installed"
           Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
     <Feature Id="MainApplication" Title="Main Application" Level="1">
-      <ComponentRef Id="DexcDesktopExe" />
+      <ComponentRef Id="BisonwDesktopExe" />
       <ComponentRef Id="ApplicationShortcut" />
     </Feature>
 

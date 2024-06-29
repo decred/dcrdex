@@ -44,6 +44,7 @@ func runWithTimeout(f func() error, timeout time.Duration) error {
 // xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
 	asset.Wallet
+	log               dex.Logger
 	connector         *dex.ConnectionMaster
 	AssetID           uint32
 	Symbol            string
@@ -212,7 +213,7 @@ func (w *xcWallet) Lock(timeout time.Duration) error {
 }
 
 // unlocked will only return true if both the wallet backend is unlocked and we
-// have cached the decryped wallet password. The wallet backend may be queried
+// have cached the decrypted wallet password. The wallet backend may be queried
 // directly, likely involving an RPC call. Use locallyUnlocked to determine if
 // the wallet is automatically unlockable rather than actually unlocked.
 func (w *xcWallet) unlocked() bool {
@@ -457,7 +458,7 @@ func (w *xcWallet) Disconnect() {
 
 // rescan will initiate a rescan of the wallet if the asset.Wallet
 // implementation is a Rescanner.
-func (w *xcWallet) rescan(ctx context.Context) error {
+func (w *xcWallet) rescan(ctx context.Context, bday /* unix time seconds*/ uint64) error {
 	if !w.connected() {
 		return errWalletNotConnected
 	}
@@ -465,7 +466,7 @@ func (w *xcWallet) rescan(ctx context.Context) error {
 	if !ok {
 		return errors.New("wallet does not support rescanning")
 	}
-	return rescanner.Rescan(ctx)
+	return rescanner.Rescan(ctx, bday)
 }
 
 // logFilePath returns the path of the wallet's log file if the
@@ -665,12 +666,21 @@ func (w *xcWallet) ApprovalStatus() map[uint32]asset.ApprovalStatus {
 }
 
 func (w *xcWallet) setFeeState(feeRate uint64) {
-	swapFees, _, _ := w.SingleLotSwapRefundFees(asset.VersionNewest, feeRate, false)
+	swapFees, refundFees, err := w.SingleLotSwapRefundFees(asset.VersionNewest, feeRate, false)
+	if err != nil {
+		w.log.Errorf("Error getting single-lot swap+refund estimates: %v", err)
+	}
+	redeemFees, err := w.SingleLotRedeemFees(asset.VersionNewest, feeRate)
+	if err != nil {
+		w.log.Errorf("Error getting single-lot redeem estimates: %v", err)
+	}
 	sendFees := w.StandardSendFee(feeRate)
 	w.feeState.Store(&FeeState{
 		Rate:    feeRate,
 		Send:    sendFees,
 		Swap:    swapFees,
+		Redeem:  redeemFees,
+		Refund:  refundFees,
 		StampMS: time.Now().UnixMilli(),
 	})
 }

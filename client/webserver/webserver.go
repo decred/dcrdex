@@ -167,21 +167,16 @@ type clientCore interface {
 	TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error)
 	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error)
-	ConfigureFundsMixer(assetID uint32, serverAddress string, cert []byte) error
-	StartFundsMixer(appPW []byte, assetID uint32) error
-	StopFundsMixer(assetID uint32) error
-	DisableFundsMixer(assetID uint32) error
+	ConfigureFundsMixer(assetID uint32, enabled bool) error
 	SetLanguage(string) error
 	Language() string
 	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
 }
 
-type mmCore interface {
+type MMCore interface {
 	MarketReport(host string, base, quote uint32) (*mm.MarketReport, error)
-	StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, pw []byte) (err error)
-	StartAllBots(alternateConfigPath *string, appPW []byte) (err error)
+	StartBot(mkt *mm.StartConfig, alternateConfigPath *string, pw []byte) (err error)
 	StopBot(mkt *mm.MarketWithHost) error
-	StopAllBots() error
 	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error
 	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
 	UpdateBotConfig(updatedCfg *mm.BotConfig) error
@@ -229,7 +224,7 @@ type cachedPassword struct {
 
 type Config struct {
 	Core          clientCore // *core.Core
-	MarketMaker   mmCore     // *mm.MarketMaker
+	MarketMaker   MMCore     // *mm.MarketMaker
 	MMCfgPath     string
 	Addr          string
 	CustomSiteDir string
@@ -264,13 +259,12 @@ type WebServer struct {
 	lang         atomic.Value // string
 	langs        []string
 	core         clientCore
-	mm           mmCore
+	mm           MMCore
 	mmCfgPath    string
 	addr         string
 	csp          string
 	srv          *http.Server
 	html         atomic.Value // *templates
-	indent       bool
 	experimental bool
 
 	authMtx         sync.RWMutex
@@ -572,13 +566,8 @@ func New(cfg *Config) (*WebServer, error) {
 
 			apiAuth.Post("/mixingstats", s.apiMixingStats)
 			apiAuth.Post("/configuremixer", s.apiConfigureMixer)
-			apiAuth.Post("/startmixer", s.apiStartMixer)
-			apiAuth.Post("/stopmixer", s.apiStopMixer)
-			apiAuth.Post("/disablemixer", s.apiDisableMixer)
 
 			if cfg.Experimental {
-				apiAuth.Post("/startallmmbots", s.apiStartAllMarketMakingBots)
-				apiAuth.Post("/stopallmmbots", s.apiStopAllMarketMakingBots)
 				apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)
 				apiAuth.Post("/stopmarketmakingbot", s.apiStopMarketMakingBot)
 				apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
@@ -1077,13 +1066,13 @@ func fileServer(r chi.Router, pathPrefix, siteDir, subDir, forceContentType stri
 
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
-func writeJSON(w http.ResponseWriter, thing any, indent bool) {
-	writeJSONWithStatus(w, thing, http.StatusOK, indent)
+func writeJSON(w http.ResponseWriter, thing any) {
+	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
 // writeJSON writes marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
-func writeJSONWithStatus(w http.ResponseWriter, thing any, code int, indent bool) {
+func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	b, err := json.Marshal(thing)
 	if err != nil {

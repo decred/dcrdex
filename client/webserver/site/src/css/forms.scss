@@ -21,6 +21,24 @@ textarea {
     border-color: var(--form-input-border-focus);
     outline: none;
   }
+
+  &.thin {
+    width: 4rem;
+  }
+
+  &.micro {
+    font-size: 14px;
+    padding: 0 0.25rem;
+    width: 3rem;
+
+    &.wide {
+      width: 5rem;
+    }
+
+    &.thin {
+      width: 2rem;
+    }
+  }
 }
 
 select {
@@ -87,41 +105,15 @@ select {
 #newWalletForm {
   width: 425px;
 
-  .wallet-tabs {
-    width: 100%;
-    display: flex;
-    justify-content: flex-start;
-    align-items: stretch;
-    
-    .wtab {
-      background-color: var(--form-bg);
-      padding: 8px 20px;
-      font-size: 15px;
-      border-style: solid solid none;
-      border-radius: 5px 5px 0 0;
-      border-width: 1px;
-      border-color: var(--border-color);
-      opacity: 0.8;
-      position: relative;
-      z-index: 150;
-
-      &:hover {
-        cursor: pointer;
-      }
-    }
-
-    .wtab:not(:first-child) {
-      border-left-style: none;
-    }
-
+  [data-tmpl=walletTypeTabs] {
     .wtab.selected {
       opacity: 1;
-      top: 1px;
       cursor: default;
       background-color: var(--form-selected-tab-bg);
     }
 
     .wtab:not(.selected) {
+      opacity: 0.8;
       cursor: pointer;
 
       &:hover {
@@ -154,22 +146,6 @@ select {
       opacity: 1;
     }
   }
-
-  .asset-logo {
-    width: 20px;
-    height: 20px;
-  }
-}
-
-button.form-button {
-  padding: 10px;
-  border-radius: 3px;
-  opacity: 0.9;
-  white-space: nowrap;
-
-  &:hover {
-    opacity: 1;
-  }
 }
 
 .form-check-label {
@@ -187,23 +163,51 @@ button.form-button {
   right: 0;
   padding: 25px 0;
   background-color: var(--forms-bg);
+  backdrop-filter: blur(5px);
   z-index: 101;
 
   & > form {
-    box-sizing: content-box;
-    padding: 2rem;
-    margin: auto;
-    text-align: left;
-    position: relative;
+    @extend .flex-stretch-column;
 
-    button {
-      @extend .form-button;
+    box-sizing: content-box;
+    margin: auto;
+    position: relative;
+    padding-bottom: 1rem;
+
+    & > div {
+      padding: 1rem 1rem 0;
+
+      &.form-closer-unbound,
+      &.form-closer {
+        @extend .flex-center;
+        @extend .hoverbg;
+
+        cursor: pointer;
+        line-height: 1;
+        font-size: 0.8rem;
+        padding: 0.75rem;
+        position: absolute;
+        top: 0;
+        right: 0;
+        z-index: 1;
+
+        span {
+          opacity: 0.6;
+
+          &:hover {
+            opacity: 1;
+          }
+        }
+      }
     }
 
-    h3 {
-      text-align: center;
-      margin-bottom: 1rem;
-      position: relative;
+    header {
+      @extend .flex-center;
+
+      padding: 1rem;
+      line-height: 1;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 1.6rem;
     }
   }
 }
@@ -218,8 +222,6 @@ div[data-handler=register] {
 }
 
 #walletWait {
-  max-width: 425px;
-
   .icons {
     width: 25px;
   }
@@ -248,17 +250,7 @@ div[data-handler=register] {
   }
 }
 
-#loginForm {
-  width: 325px;
-
-  #loader {
-    -webkit-backdrop-filter: blur(4px);
-    backdrop-filter: blur(4px);
-  }
-}
-
-#unlockWalletForm,
-#authorizeAccountExportForm,
+#loginForm,
 #authorizeAccountImportForm,
 #disableAccountForm,
 #discoverAcctForm {
@@ -269,22 +261,30 @@ div[data-handler=register] {
 #resetAppPWForm,
 #dexAddrForm,
 #verifyForm,
-#appPWForm,
 #deleteArchivedRecordsForm {
   width: 325px;
+}
+
+#appPWForm {
+  width: 350px;
 }
 
 #sendForm,
 #vSendForm,
 #exportSeedAuth,
 #cancelForm,
-#quickConfigForm {
+#quickConfigForm,
+#toggleWalletStatusConfirm,
+#walletWait {
   width: 375px;
 }
 
+#confirmRegistrationForm,
+#regAssetForm,
 #reconfigForm,
 #authorizeSeedDisplay,
-#seedBackupForm {
+#seedBackupForm,
+#votingForm {
   width: 425px;
 }
 
@@ -297,6 +297,58 @@ a[data-tmpl=walletCfgGuide] {
   #copyAlert {
     margin-left: 12px;
     position: absolute;
+  }
+}
+
+.mini-slider {
+  padding: 0.5rem 0;
+  cursor: pointer;
+  user-select: none;
+
+  div[data-tmpl=color] {
+    width: 100%;
+    height: 0.2rem;
+    background-color: #7777;
+    position: relative;
+    overflow: visible;
+
+    
+
+    & > div[data-tmpl=track] {
+      position: absolute;
+      left: 0.375rem; // keep the ball inside of the color
+      right: 0.375rem;
+      bottom: 0;
+      top: 0;
+      overflow: visible;
+
+      & > div[data-tmpl=ball] {
+        width: 0.75rem;
+        height: 0.75rem;
+        top: 0.1rem;
+        border-radius: 1rem;
+        background-color: var(--text-grey);
+        position: absolute;
+        transform: translate(-50%, -50%);
+        cursor: pointer;
+      }
+    }
+  }
+
+  &.small {
+    div[data-tmpl=color] {
+      height: 0.125rem;
+
+      & > div[data-tmpl=track] {
+        left: 0.25rem;
+        right: 0.25rem;
+  
+        & > div[data-tmpl=ball] {
+          width: 0.5rem;
+          height: 0.5rem;
+        }
+      }
+    }
   }
 }
 
@@ -432,21 +484,21 @@ div[data-handler=init] {
   }
 
   &.big {
-    width: 2.2rem;
-    height: 1.25rem;
-    border-radius: 0.65rem;
-  }
+    width: 35px;
+    height: 20px;
+    border-radius: 10px;
 
-  &.big > div {
-    top: 0.15rem;
-    left: 0.15rem;
-    width: 1rem;
-    height: 1rem;
-    border-radius: 0.5rem;
-  }
+    & > div {
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 12px;
+    }
 
-  &.big.on > div {
-    left: 1.05rem;
+    &.on > div {
+      left: 17px;
+    }
   }
 }
 
@@ -464,7 +516,7 @@ div[data-handler=init] {
     min-height: 55px;
   }
 
-  & > div:not(.repeatable) {
+  & > div:not(.repeatable, [data-tmpl=checkbox]) {
     width: 47%;
   }
 }

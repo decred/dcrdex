@@ -58,7 +58,7 @@ const (
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
 
-	minNetworkVersion  = 210000
+	minNetworkVersion  = 270000
 	minProtocolVersion = 70015
 	// version which descriptor wallets have been introduced.
 	minDescriptorVersion = 220000
@@ -137,7 +137,7 @@ var (
 
 	// 02 Jun 21 21:12 CDT
 	defaultWalletBirthdayUnix = 1622668320
-	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
+	DefaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
 
 	multiFundingOpts = []*asset.OrderOption{
 		{
@@ -191,7 +191,7 @@ var (
 		Type:             walletTypeSPV,
 		Tab:              "Native",
 		Description:      "Use the built-in SPV wallet",
-		ConfigOpts:       append(SPVConfigOpts("BTC"), CommonConfigOpts("BTC", true)...),
+		ConfigOpts:       CommonConfigOpts("BTC", true),
 		Seeded:           true,
 		MultiFundingOpts: multiFundingOpts,
 	}
@@ -276,25 +276,6 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 		opts = append(opts, apiFallbackOpt(true))
 	}
 	return opts
-}
-
-// SPVConfigOpts are the options common to built-in SPV wallets.
-func SPVConfigOpts(symbol string) []*asset.ConfigOption {
-	return []*asset.ConfigOption{{
-		Key:         "walletbirthday",
-		DisplayName: "Wallet Birthday",
-		Description: fmt.Sprintf("This is the date the wallet starts scanning the blockchain "+
-			"for transactions related to this wallet. If reconfiguring an existing "+
-			"wallet, this may start a rescan if the new birthday is older. This "+
-			"option is disabled if there are currently active %s trades.", symbol),
-		DefaultValue: defaultWalletBirthdayUnix,
-		MaxValue:     "now",
-		// This MinValue must be removed if we start supporting importing private keys
-		MinValue:          defaultWalletBirthdayUnix,
-		IsDate:            true,
-		DisableWhenActive: true,
-		IsBirthdayConfig:  true,
-	}}
 }
 
 // RPCConfigOpts are the settings that are used to connect to and external RPC
@@ -468,22 +449,7 @@ type WalletConfig struct {
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	ActivelyUsed     bool    `ini:"special_activelyUsed"` // injected by core
-	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 	ApiFeeFallback   bool    `ini:"apifeefallback"`
-}
-
-// AdjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
-// it so that defaultWalletBirthday <= WalletConfig.Birthday <= now.
-func (cfg *WalletConfig) AdjustedBirthday() time.Time {
-	bday := time.Unix(int64(cfg.Birthday), 0)
-	now := time.Now()
-	if defaultWalletBirthday.After(bday) {
-		return defaultWalletBirthday
-	} else if bday.After(now) {
-		return now
-	} else {
-		return bday
-	}
 }
 
 func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
@@ -628,8 +594,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
+	bday := DefaultWalletBirthday
+	if params.Birthday != 0 {
+		bday = time.Unix(int64(params.Birthday), 0)
+	}
+
 	dir := filepath.Join(params.DataDir, chainParams.Name)
-	return createSPVWallet(params.Pass, params.Seed, cfg.AdjustedBirthday(), dir,
+	return createSPVWallet(params.Pass, params.Seed, bday, dir,
 		params.Logger, cfg.NumExternalAddresses, cfg.NumInternalAddresses, chainParams)
 }
 
@@ -729,7 +700,7 @@ type fundMultiOptions struct {
 	// is no split buffer, this may necessitate a new split transaction.
 	//
 	// Use the multiSplitBufferKey const defined above in the options map to set this.
-	SplitBuffer uint64 `ini:"multisplitbuffer"`
+	SplitBuffer float64 `ini:"multisplitbuffer"`
 }
 
 func decodeFundMultiOptions(options map[string]string) (*fundMultiOptions, error) {
@@ -979,10 +950,16 @@ func (btc *ExchangeWalletSPV) Move(backupDir string) error {
 
 // Rescan satisfies the asset.Rescanner interface, and issues a rescan wallet
 // command if the backend is an SPV wallet.
-func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
+func (btc *ExchangeWalletSPV) Rescan(_ context.Context, _ /* bday already stored internally */ uint64) error {
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
-	return btc.spvNode.wallet.RescanAsync()
+	if err := btc.spvNode.wallet.RescanAsync(); err != nil {
+		return err
+	}
+	btc.receiveTxLastQuery.Store(0)
+	// Rescan is occuring asynchronously, so there's probably no point in
+	// running checkPendingTxs.
+	return nil
 }
 
 // Peers returns a list of peers that the wallet is connected to.
@@ -1018,6 +995,61 @@ func (btc *baseWallet) FeeRate() uint64 {
 // LogFilePath returns the path to the neutrino log file.
 func (btc *ExchangeWalletSPV) LogFilePath() string {
 	return btc.spvNode.logFilePath()
+}
+
+// WithdrawTx generates a transaction that withdraws all funds to the specified
+// address.
+func (btc *ExchangeWalletSPV) WithdrawTx(ctx context.Context, walletPW []byte, addr btcutil.Address) (_ *wire.MsgTx, err error) {
+	btc.ctx = ctx
+	spvw := btc.node.(*spvWallet)
+	spvw.cl, err = spvw.wallet.Start()
+	if err != nil {
+		return nil, fmt.Errorf("error starting wallet")
+	}
+
+	defer spvw.wallet.Stop()
+
+	if err := spvw.Unlock(walletPW); err != nil {
+		return nil, fmt.Errorf("error unlocking wallet: %w", err)
+	}
+
+	feeRate := btc.FeeRate()
+	if feeRate == 0 {
+		return nil, errors.New("no fee rate")
+	}
+	utxos, _, _, err := btc.cm.SpendableUTXOs(0)
+	if err != nil {
+		return nil, err
+	}
+	var inputsSize uint64
+	coins := make(asset.Coins, 0, len(utxos))
+	for _, utxo := range utxos {
+		op := NewOutput(utxo.TxHash, utxo.Vout, utxo.Amount)
+		coins = append(coins, op)
+		inputsSize += uint64(utxo.Input.VBytes())
+	}
+
+	var baseSize uint64 = dexbtc.MinimumTxOverhead
+	if btc.segwit {
+		baseSize += dexbtc.P2WPKHOutputSize * 2
+	} else {
+		baseSize += dexbtc.P2PKHOutputSize * 2
+	}
+
+	fundedTx, totalIn, _, err := btc.fundedTx(coins)
+	if err != nil {
+		return nil, fmt.Errorf("error adding inputs to transaction: %w", err)
+	}
+
+	fees := feeRate * (inputsSize + baseSize)
+	toSend := totalIn - fees
+
+	signedTx, _, _, err := btc.signTxAndAddChange(fundedTx, addr, toSend, 0, feeRate)
+	if err != nil {
+		return nil, err
+	}
+
+	return signedTx, nil
 }
 
 func parseChainParams(net dex.Network) (*chaincfg.Params, error) {
@@ -1506,8 +1538,6 @@ func (btc *baseWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, e
 	btc.log.Debugf("Using tx history db at %s", dbPath)
 
 	db := NewBadgerTxDB(dbPath, btc.log)
-	btc.txHistoryDB.Store(db)
-
 	wg, err := db.Connect(ctx)
 	if err != nil {
 		return nil, err
@@ -1617,10 +1647,14 @@ func (btc *intermediaryWallet) Connect(ctx context.Context) (*sync.WaitGroup, er
 		btc.monitorPeers(ctx)
 	}()
 
-	btc.tipMtx.RLock()
-	tip := btc.currentTip
-	btc.tipMtx.RUnlock()
-	go btc.syncTxHistory(uint64(tip.Height))
+	wg.Add(1)
+	func() {
+		defer wg.Done()
+		btc.tipMtx.RLock()
+		tip := btc.currentTip
+		btc.tipMtx.RUnlock()
+		go btc.syncTxHistory(uint64(tip.Height))
+	}()
 
 	return wg, nil
 }
@@ -2472,13 +2506,13 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, ui
 
 // fundsRequiredForMultiOrders returns an slice of the required funds for each
 // of a slice of orders and the total required funds.
-func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, feeRate, splitBuffer, swapInputSize uint64) ([]uint64, uint64) {
+func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, feeRate uint64, splitBuffer float64, swapInputSize uint64) ([]uint64, uint64) {
 	requiredForOrders := make([]uint64, len(orders))
 	var totalRequired uint64
 
 	for i, value := range orders {
 		req := calc.RequiredOrderFundsAlt(value.Value, swapInputSize, value.MaxSwapCount, btc.initTxSizeBase, btc.initTxSize, feeRate)
-		req = req * (100 + splitBuffer) / 100
+		req = uint64(math.Round(float64(req) * (100 + splitBuffer) / 100))
 		requiredForOrders[i] = req
 		totalRequired += req
 	}
@@ -2493,7 +2527,8 @@ func (btc *baseWallet) fundMultiSplitTx(
 	orders []*asset.MultiOrderValue,
 	utxos []*CompositeUTXO,
 	splitTxFeeRate, maxFeeRate uint64,
-	splitBuffer, keep, maxLock uint64,
+	splitBuffer float64,
+	keep, maxLock uint64,
 ) (bool, asset.Coins, []*Output) {
 
 	var swapInputSize uint64
@@ -2538,7 +2573,7 @@ func (btc *baseWallet) fundMultiSplitTx(
 // submitMultiSplitTx creates a multi-split transaction using fundingCoins with
 // one output for each order, and submits it to the network.
 func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Output, orders []*asset.MultiOrderValue,
-	maxFeeRate, splitTxFeeRate, splitBuffer uint64) ([]asset.Coins, uint64, error) {
+	maxFeeRate, splitTxFeeRate uint64, splitBuffer float64) ([]asset.Coins, uint64, error) {
 	baseTx, totalIn, _, err := btc.fundedTx(fundingCoins)
 	if err != nil {
 		return nil, 0, err
@@ -2622,7 +2657,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 // called after it has been determined that all of the orders cannot be funded
 // without a split transaction.
 func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.MultiOrderValue,
-	splitTxFeeRate, maxFeeRate, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
+	splitTxFeeRate, maxFeeRate uint64, splitBuffer float64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
 	utxos, _, avail, err := btc.cm.SpendableUTXOs(0)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting spendable utxos: %w", err)
@@ -2743,7 +2778,7 @@ func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.
 // UTXOs. If a split is not allowed, it will fund the orders that it was able
 // to fund. If splitting is allowed, a split transaction will be created to fund
 // all of the orders.
-func (btc *baseWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue, splitTxFeeRate, maxFeeRate uint64, allowSplit bool, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
+func (btc *baseWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue, splitTxFeeRate, maxFeeRate uint64, allowSplit bool, splitBuffer float64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
 	reserves := btc.bondReserves.Load()
 
 	coins, redeemScripts, fundingCoins, spents, err := btc.cm.FundMultiBestEffort(reserves, maxLock, values, maxFeeRate, allowSplit)
@@ -4720,7 +4755,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 
 	prevTip := btc.currentTip
 	btc.currentTip = newTip
-	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
+	btc.log.Tracef("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	btc.emit.TipChange(uint64(newTip.Height))
 
 	go btc.syncTxHistory(uint64(newTip.Height))
@@ -5818,6 +5853,9 @@ func (btc *intermediaryWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.W
 // from the last point to which it had previously scanned to the current tip.
 func (btc *intermediaryWallet) addUnknownTransactionsToHistory(tip uint64) {
 	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return
+	}
 
 	const blockQueryBuffer = 3
 	var blockToQuery uint64

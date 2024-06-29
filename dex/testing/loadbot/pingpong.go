@@ -32,13 +32,13 @@ func runPingPong(n int) {
 // SetupWallets is part of the Trader interface.
 func (p *pingPonger) SetupWallets(m *Mantle) {
 	numCoins := 4
-	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, uint64(defaultMidGap*rateEncFactor))
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
 	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
 	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
 	m.log.Infof("Ping Ponger has been initialized with %s to %s %s balance, "+
 		"and %s to %s %s balance, %d initial funding coins",
-		valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
-		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
+		fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
+		fmtAtoms(minQuoteQty, quoteSymbol), fmtAtoms(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
 }
 
 // HandleNotification is part of the Trader interface.
@@ -65,10 +65,7 @@ func (p *pingPonger) HandleNotification(m *Mantle, note core.Notification) {
 		}
 	case *core.EpochNotification:
 		if n.MarketID == market {
-			numCoins := 4
-			book := m.book()
-			midGap := midGap(book)
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, midGap)
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
 			wmm := walletMinMax{
 				baseID:  {min: minBaseQty, max: maxBaseQty},
 				quoteID: {min: minQuoteQty, max: maxQuoteQty},

@@ -123,8 +123,8 @@ chmod +x "${HARNESS_DIR}/bisonw1"
 echo "bwctl -C ${CLIENT_1_CTL_CONF} \$1" > "${HARNESS_DIR}/bw1ctl"
 chmod +x "${HARNESS_DIR}/bw1ctl"
 
-echo "xdg-open http://${CLIENT_2_ADDR} > /dev/null 2>&1" > "${HARNESS_DIR}/dexc2"
-chmod +x "${HARNESS_DIR}/dexc2"
+echo "xdg-open http://${CLIENT_2_ADDR} > /dev/null 2>&1" > "${HARNESS_DIR}/bisonw2"
+chmod +x "${HARNESS_DIR}/bisonw2"
 
 echo "bwctl -C ${CLIENT_2_CTL_CONF} \$1" > "${HARNESS_DIR}/bw2ctl"
 chmod +x "${HARNESS_DIR}/bw2ctl"

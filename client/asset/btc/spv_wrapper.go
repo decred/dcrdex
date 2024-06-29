@@ -113,7 +113,6 @@ type BTCWallet interface {
 	ForceRescan()
 	Start() (SPVService, error)
 	Stop()
-	Reconfigure(*asset.WalletConfig, string) (bool, error)
 	Birthday() time.Time
 	Peers() ([]*asset.WalletPeer, error)
 	AddPeer(string) error
@@ -228,9 +227,7 @@ var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
 // reconfigure attempts to reconfigure the rpcClient for the new settings. Live
-// reconfiguration is only attempted if the new wallet type is walletTypeSPV. An
-// error is generated if the birthday is reduced and the special_activelyUsed
-// flag is set.
+// reconfiguration is only attempted if the new wallet type is walletTypeSPV.
 func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	// If the wallet type is not SPV, then we can't reconfigure the wallet.
 	if cfg.Type != walletTypeSPV {
@@ -247,7 +244,7 @@ func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) 
 		return false, errors.New("wallet not found")
 	}
 
-	return w.wallet.Reconfigure(cfg, currentAddress)
+	return false, nil
 }
 
 // tipFeed satisfies the tipNotifier interface, signaling that *spvWallet

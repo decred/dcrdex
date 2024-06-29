@@ -1,14 +1,12 @@
-import Doc, { Animation, AniToggle } from './doc'
+import Doc, { Animation, AniToggle, parseFloatDefault } from './doc'
 import BasePage from './basepage'
 import { postJSON, Errors } from './http'
 import {
   NewWalletForm,
   WalletConfigForm,
-  UnlockWalletForm,
   DepositAddress,
   bind as bindForm,
-  showSuccess,
-  CertificatePicker
+  showSuccess
 } from './forms'
 import State from './state'
 import * as intl from './locales'
@@ -42,7 +40,6 @@ import {
   TxHistoryResult,
   TransactionNote,
   WalletTransaction,
-  FundsMixingStats,
   FeeState
 } from './registry'
 import { CoinExplorers } from './coinexplorers'
@@ -73,7 +70,7 @@ const traitTicketBuyer = 1 << 15
 const traitHistorian = 1 << 16
 const traitFundsMixer = 1 << 17
 
-const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
+const traitsExtraOpts = traitLogFiler | traitRecoverer | traitRestorer | traitRescanner | traitPeerManager | traitTokenApprover
 
 export const ticketStatusUnknown = 0
 export const ticketStatusUnmined = 1
@@ -177,7 +174,6 @@ interface ReconfigRequest {
   walletType: string
   config: Record<string, string>
   newWalletPW?: string
-  appPW: string
 }
 
 interface RescanRecoveryRequest {
@@ -205,7 +201,6 @@ interface TicketPagination {
 }
 
 interface WalletsPageData {
-  promptProvider?: number
   goBack?: string
 }
 
@@ -224,7 +219,6 @@ export default class WalletsPage extends BasePage {
   newWalletForm: NewWalletForm
   reconfigForm: WalletConfigForm
   walletCfgGuide: PageElement
-  unlockForm: UnlockWalletForm
   depositAddrForm: DepositAddress
   keyup: (e: KeyboardEvent) => void
   changeWalletPW: boolean
@@ -242,9 +236,8 @@ export default class WalletsPage extends BasePage {
   ticketPage: TicketPagination
   oldestTx: WalletTransaction | undefined
   currTx: WalletTransaction | undefined
-  mixerStatus: FundsMixingStats | null
+  mixing: boolean
   mixerToggle: AniToggle
-  mixCertPicker: CertificatePicker
   stampers: PageElement[]
   secondTicker: number
 
@@ -313,15 +306,10 @@ export default class WalletsPage extends BasePage {
 
     this.walletCfgGuide = Doc.tmplElement(page.reconfigForm, 'walletCfgGuide')
 
-    // Bind the wallet unlock form.
-    this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, (assetID: number) => this.openWalletSuccess(assetID, page.unlockWalletForm))
-
     // Bind the send form.
     bindForm(page.sendForm, page.submitSendForm, async () => { this.stepSend() })
     // Send confirmation form.
     bindForm(page.vSendForm, page.vSend, async () => { this.send() })
-    // Cancel send confirmation form.
-    Doc.bind(page.vCancelSend, 'click', async () => { this.cancelSend() })
     // Bind the wallet reconfiguration submission.
     bindForm(page.reconfigForm, page.submitReconfig, () => this.reconfig())
 
@@ -366,19 +354,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.ticketHistoryPrevPage, 'click', () => { this.prevTicketPage() })
     Doc.bind(page.setVotes, 'click', () => { this.showSetVotesDialog() })
     Doc.bind(page.purchaseTicketsErrCloser, 'click', () => { Doc.hide(page.purchaseTicketsErrBox) })
-    bindForm(page.mixerPWForm, page.mixerPWSubmit, () => { this.startMixerWithPW() })
-    Doc.bind(page.enablePrivacyButton, 'click', () => { this.enablePrivacyDefaultSettings() })
-    Doc.bind(page.configureMixer, 'click', () => { this.showPrivacyConfiguration(false) })
-    Doc.bind(page.mixAddrEdit, 'click', () => { this.showMixServerInput() })
-    bindForm(page.mixerConfigForm, page.mixConfigSubmit, () => { this.submitCustomMixerConfig() })
-    Doc.bind(page.reconfigureMixer, 'click', () => { this.showPrivacyConfiguration(true) })
-    Doc.bind(page.mixerDisable, 'click', () => { this.disableMixer() })
     Doc.bind(page.privacyInfoBttn, 'click', () => { this.showForm(page.mixingInfo) })
-    Doc.bind(page.mixingOffGo, 'click', () => { this.turnPrivacyOff() })
-    Doc.bind(page.mixingOffNo, 'click', () => { this.closePopups() })
-    Doc.bind(page.needsProviderBttn, 'click', () => { this.promptProvider(this.selectedAssetID) })
-
-    this.mixCertPicker = new CertificatePicker(page.mixAddrInputBox)
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -390,7 +366,7 @@ export default class WalletsPage extends BasePage {
     // Display fiat value for current send amount.
     Doc.bind(page.sendAmt, 'input', () => {
       const { unitInfo: ui } = app().assets[this.selectedAssetID]
-      const amt = parseFloat(page.sendAmt.value || '0')
+      const amt = parseFloatDefault(page.sendAmt.value)
       const conversionFactor = ui.conventional.conversionFactor
       Doc.showFiatValue(page.sendValue, amt * conversionFactor, app().fiatRatesMap[this.selectedAssetID], ui)
     })
@@ -438,12 +414,6 @@ export default class WalletsPage extends BasePage {
     })
 
     const firstAsset = this.sortAssetButtons()
-
-    if (data?.promptProvider) {
-      this.promptProvider(data.promptProvider)
-      return
-    }
-
     let selectedAsset = firstAsset.id
     const assetIDStr = State.fetchLocal(State.selectedAssetLK)
     if (assetIDStr) selectedAsset = Number(assetIDStr)
@@ -472,7 +442,7 @@ export default class WalletsPage extends BasePage {
     const token = app().assets[assetID].token
     const subtract = page.subtractCheckBox.checked || false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
-    const value = Math.round(parseFloat(page.sendAmt.value || '') * conversionFactor)
+    const value = Math.round(parseFloatDefault(page.sendAmt.value, 0) * conversionFactor)
     const addr = page.sendAddr.value || ''
     if (addr === '') return Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: addr }))
     const { wallet, unitInfo: ui, symbol } = app().assets[assetID]
@@ -614,7 +584,6 @@ export default class WalletsPage extends BasePage {
     const path = '/api/unapprovetoken'
     const res = await postJSON(path, {
       assetID: this.selectedAssetID,
-      pass: page.unapproveTokenPW.value,
       version: this.unapprovingTokenVersion
     })
     if (!app().checkResponse(res)) {
@@ -641,12 +610,12 @@ export default class WalletsPage extends BasePage {
     this.unapprovingTokenVersion = version
     Doc.show(page.unapproveTokenSubmissionElements)
     Doc.hide(page.unapproveTokenTxMsg, page.unapproveTokenErr)
-    Doc.setVis(!State.passwordIsCached(), page.unapproveTokenPWBox)
     const asset = app().assets[this.selectedAssetID]
     if (!asset || !asset.token) return
     const parentAsset = app().assets[asset.token.parentID]
     if (!parentAsset) return
-    page.tokenAllowanceRemoveSymbol.textContent = asset.symbol.toUpperCase()
+    Doc.empty(page.tokenAllowanceRemoveSymbol)
+    page.tokenAllowanceRemoveSymbol.appendChild(Doc.symbolize(asset, true))
     page.tokenAllowanceRemoveVersion.textContent = version.toString()
 
     const path = '/api/approvetokenfee'
@@ -681,7 +650,8 @@ export default class WalletsPage extends BasePage {
     while (page.tokenVersionBody.firstChild) {
       page.tokenVersionBody.removeChild(page.tokenVersionBody.firstChild)
     }
-    page.tokenVersionTableAssetSymbol.textContent = asset.symbol.toUpperCase()
+    Doc.empty(page.tokenVersionTableAssetSymbol)
+    page.tokenVersionTableAssetSymbol.appendChild(Doc.symbolize(asset, true))
     const versionToDEXes = this.assetVersionUsedByDEXes()
 
     let showTable = false
@@ -936,7 +906,6 @@ export default class WalletsPage extends BasePage {
       const bttn = page.iconSelectTmpl.cloneNode(true) as HTMLElement
       page.assetSelect.appendChild(bttn)
       const tmpl = Doc.parseTemplate(bttn)
-      tmpl.unit.textContent = a.unitInfo.conventional.unit
       this.assetButtons[a.id] = { tmpl, bttn }
       this.updateAssetButton(a.id)
       Doc.bind(bttn, 'click', () => {
@@ -966,12 +935,14 @@ export default class WalletsPage extends BasePage {
       bttn.classList.remove('nowallet')
       const { wallet: { balance: b }, unitInfo: ui } = a
       const totalBalance = b.available + b.locked + b.immature
-      tmpl.balance.textContent = Doc.formatCoinValue(totalBalance, ui)
+      const [s, unit] = Doc.formatBestUnitsFourSigFigs(totalBalance, ui)
+      tmpl.balance.textContent = s
+      tmpl.unit.textContent = unit
       Doc.show(tmpl.balanceBox)
-      const rate = app().fiatRatesMap[a.id]
-      if (rate) {
+      const fiatRate = app().fiatRatesMap[a.id]
+      if (fiatRate) {
         Doc.show(tmpl.fiatBox)
-        tmpl.fiat.textContent = Doc.formatFiatConversion(totalBalance, rate, ui)
+        tmpl.fiat.textContent = Doc.formatFourSigFigs(totalBalance / ui.conventional.conversionFactor * fiatRate)
       }
     } else Doc.show(tmpl.noWallet)
   }
@@ -990,13 +961,6 @@ export default class WalletsPage extends BasePage {
     for (const p of [a, b, c, d]) await p
   }
 
-  async promptProvider (assetID: number) {
-    const { token } = app().assets[assetID]
-    assetID = token ? token.parentID : assetID
-    await this.setSelectedAsset(assetID)
-    this.showReconfig(assetID, { elevateProviders: true })
-  }
-
   updateDisplayedAsset (assetID: number) {
     if (assetID !== this.selectedAssetID) return
     const { symbol, wallet, name, token, unitInfo } = app().assets[assetID]
@@ -1005,7 +969,7 @@ export default class WalletsPage extends BasePage {
     Doc.setText(body, '[data-ticker]', unitInfo.conventional.unit)
     page.assetLogo.src = Doc.logoPath(symbol)
     Doc.hide(
-      page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
+      page.balanceBox, page.fiatBalanceBox, page.createWallet, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
       page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox,
@@ -1025,8 +989,6 @@ export default class WalletsPage extends BasePage {
 
       const walletDef = app().walletDefinition(assetID, walletType)
       page.walletType.textContent = walletDef.tab
-      const configurable = assetIsConfigurable(assetID)
-      Doc.setVis(configurable, page.passwordWrapper)
       if (feeState) this.updateFeeState(feeState)
 
       if (disabled) Doc.show(page.statusDisabled) // wallet is disabled
@@ -1039,7 +1001,7 @@ export default class WalletsPage extends BasePage {
           if (!app().haveActiveOrders(assetID) && encrypted) Doc.show(page.lockBttnBox)
         } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
       } else Doc.show(page.statusOff, page.connectBttnBox) // wallet not running
-    } else Doc.show(page.createWalletBox) // no wallet
+    } else Doc.show(page.createWallet) // no wallet
 
     page.walletDetailsBox.classList.remove('invisible')
   }
@@ -1058,11 +1020,14 @@ export default class WalletsPage extends BasePage {
     Doc.formatBestRateElement(page.feeStateNetRate, feeAssetID, feeState.rate, feeUI)
     Doc.formatBestValueElement(page.feeStateSendFees, feeAssetID, feeState.send, feeUI)
     Doc.formatBestValueElement(page.feeStateSwapFees, feeAssetID, feeState.swap, feeUI)
+    Doc.formatBestValueElement(page.feeStateRedeemFees, feeAssetID, feeState.redeem, feeUI)
     page.feeStateXcRate.textContent = Doc.formatFourSigFigs(fiatRate)
     const sendFiat = feeState.send / feeUI.conventional.conversionFactor * feeFiatRate
     page.feeStateSendFiat.textContent = Doc.formatFourSigFigs(sendFiat)
     const swapFiat = feeState.swap / feeUI.conventional.conversionFactor * feeFiatRate
     page.feeStateSwapFiat.textContent = Doc.formatFourSigFigs(swapFiat)
+    const redeemFiat = feeState.redeem / feeUI.conventional.conversionFactor * feeFiatRate
+    page.feeStateRedeemFiat.textContent = Doc.formatFourSigFigs(redeemFiat)
     Doc.show(page.feeStateBox)
   }
 
@@ -1186,9 +1151,7 @@ export default class WalletsPage extends BasePage {
   showPurchaseTicketsDialog () {
     const page = this.page
     page.purchaserInput.value = ''
-    page.purchaserAppPW.value = ''
     Doc.hide(page.purchaserErr)
-    Doc.setVis(!State.passwordIsCached(), page.purchaserAppPWBox)
     this.showForm(this.page.purchaseTicketsForm)
     page.purchaserInput.focus()
   }
@@ -1214,7 +1177,7 @@ export default class WalletsPage extends BasePage {
     if (n < 1) return
     // TODO: Add confirmation dialog.
     const loaded = app().loading(page.purchaseTicketsForm)
-    const res = await this.safePost('/api/purchasetickets', { assetID, n, appPW: page.purchaserAppPW.value || '' })
+    const res = await this.safePost('/api/purchasetickets', { assetID, n })
     loaded()
     if (!app().checkResponse(res)) {
       page.purchaserErr.textContent = res.msg
@@ -1382,7 +1345,6 @@ export default class WalletsPage extends BasePage {
       const tmpl = Doc.parseTemplate(div)
       tmpl.description.textContent = agenda.description
       for (const choice of agenda.choices) {
-        if (choice.id === 'abstain') continue
         const div = page.votingChoiceTmpl.cloneNode(true) as PageElement
         tmpl.choices.appendChild(div)
         const choiceTmpl = Doc.parseTemplate(div)
@@ -1430,7 +1392,7 @@ export default class WalletsPage extends BasePage {
     }
 
     Doc.empty(page.votingTKeys)
-    for (const keyPolicy of stakeStatus.stances.treasuryKeys) {
+    for (const keyPolicy of (stakeStatus.stances.treasuryKeys ?? [])) {
       const div = page.tkeyTmpl.cloneNode(true) as PageElement
       page.votingTKeys.appendChild(div)
       const tmpl = Doc.parseTemplate(div)
@@ -1450,14 +1412,14 @@ export default class WalletsPage extends BasePage {
 
   async updatePrivacy (assetID: number) {
     const disablePrivacy = app().extensionWallet(assetID)?.disablePrivacy
-    this.mixerStatus = null
+    this.mixing = false
     const { wallet } = app().assets[assetID]
     const page = this.page
-    Doc.hide(page.mixingBox, page.enableMixing, page.mixerOff, page.mixerOn)
+    Doc.hide(page.mixingBox, page.mixerOff, page.mixerOn)
     // TODO: Show special messaging if the asset supports mixing but not this
     // wallet type.
     if (disablePrivacy || !wallet?.running || (wallet.traits & traitFundsMixer) === 0) return
-    Doc.show(page.mixingBox, page.mixerSettings, page.mixerLoading)
+    Doc.show(page.mixingBox, page.mixerLoading)
     const res = await this.safePost('/api/mixingstats', { assetID })
     Doc.hide(page.mixerLoading)
     if (!app().checkResponse(res)) {
@@ -1466,170 +1428,26 @@ export default class WalletsPage extends BasePage {
       return
     }
 
-    const mixCfg = this.mixerStatus = res.stats as FundsMixingStats
-    if (!mixCfg.enabled) {
-      Doc.hide(page.mixerSettings)
-      Doc.show(page.enableMixing, page.mixerOff)
-      return
-    }
-
-    if (mixCfg.isMixing) Doc.show(page.mixerOn)
+    this.mixing = res.stats.enabled as boolean
+    if (this.mixing) Doc.show(page.mixerOn)
     else Doc.show(page.mixerOff)
-    this.mixerToggle.setState(mixCfg.isMixing)
-  }
-
-  async enablePrivacyDefaultSettings () {
-    const { page, selectedAssetID: assetID, mixerStatus } = this
-    if (!mixerStatus) return
-    const loaded = app().loading(page.mixingBox)
-    const res = await postJSON('/api/configuremixer', { assetID })
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixingErr)
-      page.mixingErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    Doc.hide(page.enableMixing)
-    Doc.show(page.mixerSettings)
-    mixerStatus.enabled = true
-    this.updateMixerState(true)
-  }
-
-  showPrivacyConfiguration (showDisable: boolean) {
-    const { page, mixerStatus } = this
-    if (!mixerStatus) return
-    this.mixCertPicker.clearCertFile()
-    page.mixAddrInput.value = ''
-    page.mixAddrDisplay.textContent = mixerStatus.server
-    Doc.hide(page.mixAddrInputBox)
-    Doc.show(page.mixAddrDisplayBox)
-    Doc.setVis(showDisable, page.mixerDisable, page.mixerConfigureLabel)
-    Doc.setVis(!showDisable, page.mixerEnableLabel)
-    this.showForm(page.mixerConfigForm)
-  }
-
-  showMixServerInput () {
-    const page = this.page
-    Doc.show(page.mixAddrInputBox)
-    Doc.hide(page.mixAddrDisplayBox)
-  }
-
-  async submitCustomMixerConfig () {
-    const { page, selectedAssetID: assetID, mixerStatus } = this
-    if (!mixerStatus) return
-    Doc.hide(page.mixConfigErr)
-    const cfg = { assetID: assetID } as any
-    const loaded = app().loading(page.mixerConfigForm)
-    if (Doc.isDisplayed(page.mixAddrInputBox)) {
-      cfg.serverAddr = page.mixAddrInput.value
-      if (!cfg.serverAddr) {
-        Doc.show(page.mixConfigErr)
-        page.mixConfigErr.textContent = intl.prep(intl.ID_INVALID_ADDRESS_MSG)
-        return
-      }
-      cfg.cert = await this.mixCertPicker.file()
-    }
-    const res = await postJSON('/api/configuremixer', cfg)
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixConfigErr)
-      page.mixConfigErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    Doc.show(page.mixerSettings)
-    Doc.hide(page.enableMixing)
-    this.closePopups()
-    this.updateMixerState(true)
+    this.mixerToggle.setState(this.mixing)
   }
 
   async updateMixerState (on: boolean) {
     const page = this.page
     Doc.hide(page.mixingErr)
-    if (!on) {
-      this.showForm(page.mixingOffConfirmationForm)
-      return
-    }
-    const { wallet } = app().assets[this.selectedAssetID]
-    // Do we need a password?
-    if (wallet.open || State.passwordIsCached()) {
-      const loaded = app().loading(page.mixingBox)
-      const res = await postJSON('/api/startmixer', { assetID: this.selectedAssetID })
-      loaded()
-      if (!app().checkResponse(res)) {
-        page.mixingErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-        Doc.show(page.mixingErr)
-        return
-      }
-      this.setMixerStateDisplay(true)
-      return
-    }
-    // Show mixer password form.
-    Doc.hide(page.mixerPWErr)
-    page.mixerPWInput.value = ''
-    await this.showForm(this.page.mixerPWForm)
-    this.page.mixerPWInput.focus()
-  }
-
-  async turnPrivacyOff () {
-    this.closePopups()
-    const page = this.page
     const loaded = app().loading(page.mixingBox)
-    const res = await postJSON('/api/stopmixer', { assetID: this.selectedAssetID })
+    const res = await postJSON('/api/configuremixer', { assetID: this.selectedAssetID, enabled: on })
     loaded()
     if (!app().checkResponse(res)) {
-      page.mixingErr.textContent = res.msg
+      page.mixingErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
       Doc.show(page.mixingErr)
       return
     }
-    this.setMixerStateDisplay(false)
-  }
-
-  setMixerStateDisplay (on: boolean) {
-    if (!this.mixerStatus) return
-    this.mixerStatus.isMixing = on
-    Doc.setVis(on, this.page.mixerOn)
-    Doc.setVis(!on, this.page.mixerOff)
+    Doc.setVis(on, page.mixerOn)
+    Doc.setVis(!on, page.mixerOff)
     this.mixerToggle.setState(on)
-  }
-
-  async startMixerWithPW () {
-    const page = this.page
-    Doc.hide(page.mixerPWErr)
-    const pw = page.mixerPWInput.value || ''
-    if (!pw) {
-      Doc.show(page.mixerPWErr)
-      page.mixerPWErr.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
-      return
-    }
-    const loaded = app().loading(page.mixerPWForm)
-    const res = await postJSON('/api/startmixer', { appPW: pw, assetID: this.selectedAssetID })
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixerPWErr)
-      page.mixerPWErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    this.setMixerStateDisplay(true)
-    this.closePopups()
-  }
-
-  async disableMixer () {
-    const { page, selectedAssetID: assetID, mixerStatus } = this
-    if (!mixerStatus) return
-    Doc.hide(page.mixConfigErr)
-    const loaded = app().loading(page.mixerConfigForm)
-    const res = await postJSON('/api/disablemixer', { assetID })
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.show(page.mixConfigErr)
-      page.mixConfigErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
-      return
-    }
-    mixerStatus.enabled = false
-    this.setMixerStateDisplay(false)
-    Doc.show(page.enableMixing)
-    Doc.hide(page.mixerSettings)
-    this.closePopups()
   }
 
   updateDisplayedAssetBalance (): void {
@@ -1691,9 +1509,12 @@ export default class WalletsPage extends BasePage {
     if (bal.contractlocked > 0) addSubBalance(intl.prep(intl.ID_SWAPPING), bal.contractlocked, intl.prep(intl.ID_LOCKED_SWAPPING_BAL_MSG))
     if (bal.bondlocked > 0) addSubBalance(intl.prep(intl.ID_BONDED), bal.bondlocked, intl.prep(intl.ID_LOCKED_BOND_BAL_MSG))
     if (bal.bondReserves > 0) addSubBalance(intl.prep(intl.ID_BOND_RESERVES), bal.bondReserves, intl.prep(intl.ID_BOND_RESERVES_MSG))
+    if (bal?.other?.Staked !== undefined) addSubBalance('Staked', bal.other.Staked.amt)
     setRowClasses()
 
     if (bal.immature) addPrimaryBalance(intl.prep(intl.ID_IMMATURE_TITLE), bal.immature, intl.prep(intl.ID_IMMATURE_BAL_MSG))
+    if (bal?.other?.Unmixed !== undefined) addSubBalance('Unmixed', bal.other.Unmixed.amt)
+    setRowClasses()
 
     // TODO: handle reserves deficit with a notification.
     // if (bal.reservesDeficit > 0) addPrimaryBalance(intl.prep(intl.ID_RESERVES_DEFICIT), bal.reservesDeficit, intl.prep(intl.ID_RESERVES_DEFICIT_MSG))
@@ -1750,7 +1571,7 @@ export default class WalletsPage extends BasePage {
         tmpl.volume.textContent = Doc.formatFourSigFigs(spotVolume(assetID, mkt))
         tmpl.volumeUnit.textContent = assetID === baseid ? fmtSymbol(basesymbol) : fmtSymbol(quotesymbol)
       } else Doc.hide(tmpl.priceBox, tmpl.volumeBox)
-      Doc.bind(row, 'click', () => app().loadPage('markets', { host, base: baseid, quote: quoteid }))
+      Doc.bind(row, 'click', () => app().loadPage('markets', { host, baseID: baseid, quoteID: quoteid }))
     }
     page.marketsOverviewBox.classList.remove('invisible')
   }
@@ -2119,29 +1940,15 @@ export default class WalletsPage extends BasePage {
    * attempt to open the wallet.
    */
   async openWallet (assetID: number) {
-    if (!State.passwordIsCached()) {
-      this.showOpen(assetID)
-    } else {
-      const open = {
-        assetID: assetID
-      }
-      const res = await postJSON('/api/openwallet', open)
-      if (app().checkResponse(res)) {
-        this.openWalletSuccess(assetID)
-        this.updatePrivacy(assetID)
-      } else {
-        this.showOpen(assetID, intl.prep(intl.ID_OPEN_WALLET_ERR_MSG, { msg: res.msg }))
-      }
+    const open = {
+      assetID: assetID
     }
-  }
-
-  /* Show the form used to unlock a wallet. */
-  async showOpen (assetID: number, errorMsg?: string) {
-    const page = this.page
-    // await this.hideBox()
-    this.unlockForm.refresh(app().assets[assetID])
-    if (errorMsg) this.unlockForm.showErrorOnly(errorMsg)
-    this.showForm(page.unlockWalletForm)
+    const res = await postJSON('/api/openwallet', open)
+    if (!app().checkResponse(res)) {
+      console.error('openwallet error', res)
+      return
+    }
+    this.assetUpdated(assetID, undefined, intl.prep(intl.ID_WALLET_UNLOCKED))
   }
 
   /* Show the form used to change wallet configuration settings. */
@@ -2347,11 +2154,6 @@ export default class WalletsPage extends BasePage {
     this.updateDisplayedAsset(assetID)
   }
 
-  /* openWalletSuccess is the success callback for wallet unlocking. */
-  async openWalletSuccess (assetID: number, form?: PageElement) {
-    this.assetUpdated(assetID, form, intl.prep(intl.ID_WALLET_UNLOCKED))
-  }
-
   assetUpdated (assetID: number, oldForm?: PageElement, successMsg?: string) {
     if (assetID !== this.selectedAssetID) return
     this.updateDisplayedAsset(assetID)
@@ -2399,7 +2201,7 @@ export default class WalletsPage extends BasePage {
       assetID: assetID,
       address: page.sendAddr.value,
       subtract: subtract,
-      value: Math.round(parseFloat(page.sendAmt.value ?? '') * conversionFactor),
+      value: Math.round(parseFloatDefault(page.sendAmt.value) * conversionFactor),
       pw: pw
     }
     const loaded = app().loading(page.vSendForm)
@@ -2418,11 +2220,6 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const assetID = this.selectedAssetID
     Doc.hide(page.reconfigErr)
-    if (!page.appPW.value && !State.passwordIsCached()) {
-      Doc.showFormError(page.reconfigErr, intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG))
-      return
-    }
-
     let walletType = app().currentWalletDefinition(assetID).type
     if (!Doc.isHidden(page.changeWalletType)) {
       walletType = page.changeWalletTypeSelect.value || ''
@@ -2432,19 +2229,17 @@ export default class WalletsPage extends BasePage {
     const req: ReconfigRequest = {
       assetID: assetID,
       config: this.reconfigForm.map(assetID),
-      appPW: page.appPW.value ?? '',
       walletType: walletType
     }
     if (this.changeWalletPW) req.newWalletPW = page.newPW.value
     const res = await this.safePost('/api/reconfigurewallet', req)
-    page.appPW.value = ''
     page.newPW.value = ''
     loaded()
     if (!app().checkResponse(res)) {
       Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
-    if (this.data?.promptProvider && this.data?.goBack) {
+    if (this.data?.goBack) {
       app().loadPage(this.data.goBack)
       return
     }
@@ -2527,10 +2322,8 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.recoverWalletErr)
     const req = {
-      assetID: this.selectedAssetID,
-      appPW: page.recoverWalletPW.value
+      assetID: this.selectedAssetID
     }
-    page.recoverWalletPW.value = ''
     const url = '/api/recoverwallet'
     const loaded = app().loading(page.forms)
     const res = await postJSON(url, req)
@@ -2655,20 +2448,4 @@ export default class WalletsPage extends BasePage {
 function trimStringWithEllipsis (str: string, maxLen: number): string {
   if (str.length <= maxLen) return str
   return `${str.substring(0, maxLen / 2)}...${str.substring(str.length - maxLen / 2)}`
-}
-
-/*
- * assetIsConfigurable indicates whether there are any user-configurable wallet
- * settings for the asset.
- */
-function assetIsConfigurable (assetID: number) {
-  const asset = app().assets[assetID]
-  if (asset.token) {
-    const opts = asset.token.definition.configopts
-    return opts && opts.length > 0
-  }
-  if (!asset.info) throw Error('this asset isn\'t an asset, I guess')
-  const defs = asset.info.availablewallets
-  const zerothOpts = defs[0].configopts
-  return defs.length > 1 || (zerothOpts && zerothOpts.length > 0)
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	dcrwalletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	dcrwalletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -252,6 +252,7 @@ const (
 	// ErrUnapprovedToken is returned when trying to fund an order using a token
 	// that has not been approved.
 	ErrUnapprovedToken = dex.ErrorKind("token not approved")
+	ErrApprovalPending = dex.ErrorKind("approval pending")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
@@ -354,7 +355,6 @@ type ConfigOption struct {
 	IsBoolean         bool `json:"isboolean"`
 	IsDate            bool `json:"isdate"`
 	DisableWhenActive bool `json:"disablewhenactive"`
-	IsBirthdayConfig  bool `json:"isBirthdayConfig"`
 	// Repeatable signals a text input that can be duplicated and submitted
 	// multiple times, with the specified delimiter used to encode the data
 	// in the settings map.
@@ -656,7 +656,10 @@ type Bonder interface {
 
 // Rescanner is a wallet implementation with rescan functionality.
 type Rescanner interface {
-	Rescan(ctx context.Context) error
+	// Rescan performs a rescan and block until it is done. If no birthday is
+	// provided, internal wallets may use a birthday concurrent with the
+	// earliest date at which a wallet was possible, which is asset-dependent.
+	Rescan(ctx context.Context, bday /* unix time seconds */ uint64) error
 }
 
 // Recoverer is a wallet implementation with recover functionality.
@@ -735,10 +738,6 @@ type FundsMixingStats struct {
 	// Enabled is true if the wallet is configured for funds mixing. The wallet
 	// must be configured before mixing can be started.
 	Enabled bool `json:"enabled"`
-	// Server is the currently configured server.
-	Server string `json:"server"`
-	// IsMixing is true if the wallet is currently mixing funds.
-	IsMixing bool `json:"isMixing"`
 	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
 	// be in the wallet for mixing to happen.
 	UnmixedBalanceThreshold uint64 `json:"unmixedBalanceThreshold"`
@@ -749,19 +748,7 @@ type FundsMixer interface {
 	// FundsMixingStats returns the current state of the wallet's funds mixer.
 	FundsMixingStats() (*FundsMixingStats, error)
 	// ConfigureFundsMixer configures the wallet for funds mixing.
-	ConfigureFundsMixer(serverAddress string, cert []byte) error
-	// StartFundsMixer starts the funds mixer. This will error if the wallet
-	// does not allow starting or stopping the mixer or if the mixer was already
-	// started.
-	StartFundsMixer(ctx context.Context) error
-	// StopFundsMixer stops the funds mixer. This will error if the wallet does
-	// not allow starting or stopping the mixer or if the mixer was not already
-	// running.
-	StopFundsMixer()
-	// DisableFundsMixer disables the funds mixer and moves all funds to the
-	// default account. The wallet will need to be re-configured to re-enable
-	// mixing.
-	DisableFundsMixer() error
+	ConfigureFundsMixer(enabled bool) error
 }
 
 // WalletRestoration contains all the information needed for a user to restore
@@ -1113,7 +1100,7 @@ const (
 	TicketPurchase
 	TicketVote
 	TicketRevocation
-	// SwapOrSend is used when a wallet scanned its historical transactions,
+	// SwapOrSend is used when a wallet scanned its historical transactions
 	// and was unable to determine if the transaction was a swap or a send.
 	SwapOrSend
 )
@@ -1148,8 +1135,8 @@ type WalletTransaction struct {
 	// TokenID will be non-nil if the BalanceDelta applies to the balance
 	// of a token.
 	TokenID *uint32 `json:"tokenID,omitempty"`
-	// Recipient wil be non-nil for Send transactions, and specifies the
-	// recipient of the send.
+	// Recipient will be non-nil for Send/Receive transactions, and specifies the
+	// recipient address of the transaction.
 	Recipient *string `json:"recipient,omitempty"`
 	// BondInfo will be non-nil for CreateBond and RedeemBond transactions.
 	BondInfo *BondTxInfo `json:"bondInfo,omitempty"`
@@ -1253,6 +1240,7 @@ type BalanceCategory string
 const (
 	BalanceCategoryShielded = "Shielded"
 	BalanceCategoryUnmixed  = "Unmixed"
+	BalanceCategoryStaked   = "Staked"
 )
 
 // Coin is some amount of spendable asset. Coin provides the information needed

@@ -1,4 +1,4 @@
-import Doc, { Animation } from './doc'
+import Doc, { Animation, clamp } from './doc'
 import { RateEncodingFactor } from './orderutil'
 import OrderBook from './orderbook'
 import State from './state'
@@ -332,7 +332,8 @@ export class Chart {
       ctx.save()
       ctx.fillStyle = this.theme.body
       ctx.beginPath()
-      ctx.roundRect(x, y, w, h, r)
+      if (ctx.roundRect) ctx.roundRect(x, y, w, h, r) // Safari < 16 doesn't support
+      else ctx.rect(x, y, w, h)
       ctx.fill()
       ctx.restore()
     }
@@ -1131,7 +1132,7 @@ export class Wave extends Chart {
     const { region, msgRegion, canvas: { width: w, height: h }, opts: { backgroundColor: bg, message: msg }, colorShift, ctx } = this
 
     if (bg) {
-      if (bg === true) ctx.fillStyle = State.isDark() ? '#122739' : '#333'
+      if (bg === true) ctx.fillStyle = State.isDark() ? '#0a1e34' : '#f0f0f0'
       else ctx.fillStyle = bg
       ctx.fillRect(0, 0, w, h)
     }
@@ -1448,13 +1449,6 @@ function dot (ctx: CanvasRenderingContext2D, x: number, y: number, color: string
   ctx.beginPath()
   ctx.arc(x, y, radius, 0, PIPI)
   ctx.fill()
-}
-
-/* clamp returns v if min <= v <= max, else min or max. */
-export function clamp (v: number, min: number, max: number): number {
-  if (v < min) return min
-  if (v > max) return max
-  return v
 }
 
 /* floatCompare compares two floats to within a tolerance of  1e-8. */

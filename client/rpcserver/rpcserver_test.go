@@ -203,6 +203,9 @@ func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*a
 func (c *TCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
 	return nil, nil
 }
+func (c *TCore) GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error) {
+	return nil, nil
+}
 
 type tBookFeed struct{}
 

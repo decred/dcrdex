@@ -93,6 +93,7 @@ type clientCore interface {
 	SetVSP(assetID uint32, addr string) error
 	PurchaseTickets(assetID uint32, pw []byte, n int) error
 	SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error
+	GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

@@ -100,7 +100,7 @@ div[data-handler=markets] {
     }
 
     .ico-disconnected {
-      color: $warning;
+      color: var(--text-warning);
     }
   }
 
@@ -154,7 +154,7 @@ div[data-handler=markets] {
         width: 8px;
 
         &.buy {
-          background-color: var(--market-buy-color);
+          background-color: var(--buy-color);
         }
 
         &.sell {
@@ -173,7 +173,7 @@ div[data-handler=markets] {
         &.active {
           margin: 0 5px;
           width: 8px;
-          background-color: var(--market-buy-color);
+          background-color: var(--buy-color);
         }
       }
     }
@@ -350,8 +350,8 @@ div[data-handler=markets] {
 
       &:hover,
       &.selected {
-        border-color: $warning;
-        color: $warning;
+        border-color: var(--text-warning);
+        color: var(--text-warning);
       }
     }
   }
@@ -424,7 +424,7 @@ div[data-handler=markets] {
       text-align: justify;
     }
 
-    .header {
+    header {
       &.buygreen-bg {
         background-color: var(--market-buygreen-bg);
       }
@@ -464,12 +464,6 @@ div[data-handler=markets] {
         }
       }
     }
-
-    #vUnlockPreorder {
-      .ico-locked {
-        font-size: 35px;
-      }
-    }
   }
 
   #vDetailPane {
@@ -500,13 +494,13 @@ div[data-handler=markets] {
 
   #leftHider,
   #marketReopener {
-    .ico-arrowback,
+    .ico-arrowleft,
     .ico-arrowright {
       transform: scaleX(0.5);
       opacity: 0.5;
     }
 
-    &:hover .ico-arrowback,
+    &:hover .ico-arrowleft,
     &:hover .ico-arrowright {
       opacity: 1;
     }
@@ -570,12 +564,6 @@ div[data-handler=markets] {
 
   &:not(.listopen) .ico-arrowup {
     display: none;
-  }
-
-  #vUnlockPreorder {
-    .ico-locked {
-      font-size: 35px;
-    }
   }
 }
 

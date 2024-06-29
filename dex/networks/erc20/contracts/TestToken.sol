@@ -5,8 +5,9 @@
 pragma solidity = 0.8.18;
 
 contract TestToken {
-    mapping(address => uint256) private _balances;
+    event Transfer(address indexed _from, address indexed _to, uint256 _value);
 
+    mapping(address => uint256) private _balances;
     mapping(address => mapping(address => uint256)) private _allowances;
 
     uint256 private _totalSupply;
@@ -181,6 +182,7 @@ contract TestToken {
             _balances[sender] = senderBalance - amount;
         }
         _balances[recipient] += amount;
+        emit Transfer(sender, recipient, amount);
     }
 
     /**

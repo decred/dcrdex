@@ -11,16 +11,6 @@
                 "multisplit": "true",
                 "multisplitbuffer": "5"
             },
-            "alloc": {
-                "dex": {
-                    "60": 1000000000,
-                    "0": 10000000
-                },
-                "cex": {
-                    "60": 1000000000,
-                    "0": 10000000
-                }
-            },
             "cexCfg": {
                 "name": "Binance",
                 "autoRebalance": {
@@ -28,6 +18,18 @@
                     "minBaseTransfer" : 1000000000,
                     "minQuoteAmt": 20000000,
                     "minQuoteTransfer": 10000000
+                }
+            },
+            "rpcConfig": {
+                "alloc": {
+                    "dex": {
+                        "60": 1000000000,
+                        "0": 10000000
+                    },
+                    "cex": {
+                        "60": 1000000000,
+                        "0": 10000000
+                    }
                 }
             },
             "simpleArbConfig": {

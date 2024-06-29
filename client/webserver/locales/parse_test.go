@@ -10,7 +10,6 @@ func TestTokens(t *testing.T) {
 	tmplFile := []byte(`
 {{define "settings"}}
 {{template "top" .}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
   <div class="settings">
     <div class="form-check">

@@ -38,12 +38,29 @@ func lockUnspent(c rpcCaller, unlock bool, ops []*btc.Output) error {
 	return err
 }
 
-func getTransaction(c rpcCaller, txHash *chainhash.Hash) (*dexzec.Tx, error) {
+type zTx struct {
+	*dexzec.Tx
+	blockHash *chainhash.Hash
+}
+
+func getTransaction(c rpcCaller, txHash *chainhash.Hash) (*zTx, error) {
 	var tx btc.GetTransactionResult
 	if err := c.CallRPC("gettransaction", []any{txHash.String()}, &tx); err != nil {
 		return nil, err
 	}
-	return dexzec.DeserializeTx(tx.Bytes)
+	dexzecTx, err := dexzec.DeserializeTx(tx.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	blockHash, err := chainhash.NewHashFromStr(tx.BlockHash)
+	if err != nil {
+		return nil, fmt.Errorf("invalid block hash for transaction: %v", err)
+	}
+	zt := &zTx{
+		Tx:        dexzecTx,
+		blockHash: blockHash,
+	}
+	return zt, nil
 }
 
 func getRawTransaction(c rpcCaller, txHash *chainhash.Hash) ([]byte, error) {
@@ -346,4 +363,39 @@ func syncStatus(c rpcCaller) (*btc.SyncStatus, error) {
 		Height:  int32(chainInfo.Blocks),
 		Syncing: chainInfo.Syncing(),
 	}, nil
+}
+
+type listSinceBlockRes struct {
+	Transactions []btcjson.ListTransactionsResult `json:"transactions"`
+}
+
+func listSinceBlock(c rpcCaller, txHash *chainhash.Hash) ([]btcjson.ListTransactionsResult, error) {
+	var res listSinceBlockRes
+	if err := c.CallRPC("listsinceblock", []any{txHash.String()}, &res); err != nil {
+		return nil, err
+	}
+	return res.Transactions, nil
+}
+
+type walletInfoRes struct {
+	WalletVersion              int     `json:"walletversion"`
+	Balance                    float64 `json:"balance"`
+	UnconfirmedBalance         float64 `json:"unconfirmed_balance"`
+	ImmatureBalance            float64 `json:"immature_balance"`
+	ShieldedBalance            string  `json:"shielded_balance"`
+	ShieldedUnconfirmedBalance string  `json:"shielded_unconfirmed_balance"`
+	TxCount                    int     `json:"txcount"`
+	KeypoolOldest              int     `json:"keypoololdest"`
+	KeypoolSize                int     `json:"keypoolsize"`
+	PayTxFee                   float64 `json:"paytxfee"`
+	MnemonicSeedfp             string  `json:"mnemonic_seedfp"`
+	LegacySeedfp               string  `json:"legacy_seedfp,omitempty"`
+}
+
+func walletInfo(c rpcCaller) (*walletInfoRes, error) {
+	var res walletInfoRes
+	if err := c.CallRPC("getwalletinfo", nil, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }

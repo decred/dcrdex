@@ -1,4 +1,4 @@
-import Doc, { WalletIcons } from './doc'
+import Doc, { WalletIcons, parseFloatDefault } from './doc'
 import State from './state'
 import BasePage from './basepage'
 import OrderBook from './orderbook'
@@ -16,7 +16,6 @@ import {
 import { postJSON } from './http'
 import {
   NewWalletForm,
-  UnlockWalletForm,
   AccelerateOrderForm,
   DepositAddress,
   TokenApprovalForm,
@@ -63,12 +62,10 @@ import {
   MatchNote,
   ApprovalStatus,
   OrderFilter,
-  MMBotStatus,
-  BotBalance,
-  RunStats
+  RunStatsNote
 } from './registry'
 import { setOptionTemplates } from './opts'
-import { MM, CEXDisplayInfos } from './mm'
+import { RunningMarketMakerDisplay } from './mmutil'
 
 const bind = Doc.bind
 
@@ -146,6 +143,12 @@ interface StatsDisplay {
   tmpl: Record<string, PageElement>
 }
 
+interface MarketsPageParams {
+  host: string
+  baseID: string
+  quoteID: string
+}
+
 export default class MarketsPage extends BasePage {
   page: Record<string, PageElement>
   main: HTMLElement
@@ -154,7 +157,6 @@ export default class MarketsPage extends BasePage {
   market: CurrentMarket
   currentForm: HTMLElement
   openAsset: SupportedAsset
-  openFunc: () => void
   currentCreate: SupportedAsset
   maxEstimateTimer: number | null
   book: OrderBook
@@ -170,9 +172,8 @@ export default class MarketsPage extends BasePage {
   candleChart: CandleChart
   candleDur: string
   balanceWgt: BalanceWidget
-  mm: MarketMakerDisplay
+  mm: RunningMarketMakerDisplay
   marketList: MarketList
-  unlockForm: UnlockWalletForm
   newWalletForm: NewWalletForm
   depositAddrForm: DepositAddress
   approveTokenForm: TokenApprovalForm
@@ -188,7 +189,7 @@ export default class MarketsPage extends BasePage {
   loadingAnimations: { candles?: Wave, depth?: Wave }
   mmRunning: boolean | undefined
 
-  constructor (main: HTMLElement, data: any) {
+  constructor (main: HTMLElement, pageParams: MarketsPageParams) {
     super()
 
     const page = this.page = Doc.idDescendants(main)
@@ -249,14 +250,14 @@ export default class MarketsPage extends BasePage {
       const wgt = this.balanceWgt = new BalanceWidget(bWidget, qWidget)
       const baseIcons = wgt.base.stateIcons.icons
       const quoteIcons = wgt.quote.stateIcons.icons
-      bind(wgt.base.tmpl.connect, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(wgt.quote.tmpl.connect, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-      bind(wgt.base.tmpl.expired, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(wgt.quote.tmpl.expired, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-      bind(baseIcons.sleeping, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(quoteIcons.sleeping, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-      bind(baseIcons.locked, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(quoteIcons.locked, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(wgt.base.tmpl.connect, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(wgt.quote.tmpl.connect, 'click', () => { this.unlockWallet(this.market.quote.id) })
+      bind(wgt.base.tmpl.expired, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(wgt.quote.tmpl.expired, 'click', () => { this.unlockWallet(this.market.quote.id) })
+      bind(baseIcons.sleeping, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(quoteIcons.sleeping, 'click', () => { this.unlockWallet(this.market.quote.id) })
+      bind(baseIcons.locked, 'click', () => { this.unlockWallet(this.market.base.id) })
+      bind(quoteIcons.locked, 'click', () => { this.unlockWallet(this.market.quote.id) })
       bind(baseIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.base) })
       bind(quoteIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.quote) })
       bind(wgt.base.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.base) })
@@ -268,7 +269,7 @@ export default class MarketsPage extends BasePage {
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
-    this.mm = new MarketMakerDisplay(page.mmRunning)
+    this.mm = new RunningMarketMakerDisplay(page.mmRunning)
 
     this.reputationMeter = new ReputationMeter(page.reputationMeter)
 
@@ -286,6 +287,15 @@ export default class MarketsPage extends BasePage {
     bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalForm(true) })
     bind(page.approveQuoteBttn, 'click', () => { this.showTokenApprovalForm(false) })
 
+    bind(page.showTradingTier, 'click', () => {
+      Doc.hide(page.showTradingTier)
+      Doc.show(page.tradingLimits)
+    })
+    bind(page.showTradingReputation, 'click', () => {
+      Doc.hide(page.showTradingReputation)
+      Doc.show(page.reputationMeter)
+    })
+
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => { this.setBuy() })
     bind(page.sellBttn, 'click', () => { this.setSell() })
@@ -295,7 +305,7 @@ export default class MarketsPage extends BasePage {
       this.setOrderVisibility()
       if (!page.rateField.value) return
       this.depthLines.input = [{
-        rate: parseFloat(page.rateField.value || '0'),
+        rate: parseFloatDefault(page.rateField.value, 0),
         color: this.isSell() ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
       }]
       this.drawChartLines()
@@ -339,16 +349,12 @@ export default class MarketsPage extends BasePage {
 
     // Handle the recent matches update on the 'epoch_report' route.
     ws.registerRoute(epochMatchSummaryRoute, (data: BookUpdate) => { this.handleEpochMatchSummary(data) })
-    // Bind the wallet unlock form.
-    this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, async () => { this.openFunc() })
     // Create a wallet
     this.newWalletForm = new NewWalletForm(page.newWalletForm, async () => { this.createWallet() })
     // Main order form.
     bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form.
     bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
-    // Unlock for order estimation
-    Doc.bind(page.vUnlockSubmit, 'click', async () => { this.submitEstimateUnlock() })
     // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
     // Order detail view.
@@ -395,7 +401,6 @@ export default class MarketsPage extends BasePage {
 
     const closePopups = () => {
       Doc.hide(page.forms)
-      page.vPass.value = ''
     }
 
     // If the user clicks outside of a form, it should close the page overlay.
@@ -507,7 +512,15 @@ export default class MarketsPage extends BasePage {
       spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletState(note) },
       reputation: () => { this.updateReputation() },
-      feepayment: () => { this.updateReputation() }
+      feepayment: () => { this.updateReputation() },
+      runstats: (note: RunStatsNote) => {
+        this.mm.update()
+        if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
+        if (Boolean(this.mmRunning) !== Boolean(note.stats)) {
+          this.mmRunning = Boolean(note.stats)
+          this.resolveOrderFormVisibility()
+        }
+      }
     })
 
     this.loadingAnimations = {}
@@ -523,15 +536,15 @@ export default class MarketsPage extends BasePage {
       }
     }, 1000)
 
-    this.init(data)
+    this.init(pageParams)
   }
 
-  async init (data: any) {
+  async init (pageParams?: MarketsPageParams) {
     // Fetch the first market in the list, or the users last selected market, if
     // it exists.
     let selected
-    if (data && data.host && typeof data.base !== 'undefined' && typeof data.quote !== 'undefined') {
-      selected = makeMarket(data.host, parseInt(data.base), parseInt(data.quote))
+    if (pageParams?.host) {
+      selected = makeMarket(pageParams.host, parseInt(pageParams.baseID), parseInt(pageParams.quoteID))
     } else {
       selected = State.fetchLocal(State.lastMarketLK)
     }
@@ -759,11 +772,11 @@ export default class MarketsPage extends BasePage {
 
     if (this.market) {
       const { auth: { effectiveTier, pendingStrength } } = this.market.dex
-      Doc.setVis(effectiveTier > 0 || pendingStrength > 0, page.tradingLimits, page.reputationMeter)
+      Doc.setVis(effectiveTier > 0 || pendingStrength > 0, page.reputationAndTradingTierBox)
     }
 
-    if (app().experimental && this.mmRunning === undefined) {
-      const mmStatus = await MM.status()
+    const mmStatus = app().mmStatus
+    if (mmStatus && this.mmRunning === undefined) {
       const { base: { id: baseID }, quote: { id: quoteID }, dex: { host } } = this.market
       const botStatus = mmStatus.bots.find(({ config: cfg }) => cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host)
       this.mmRunning = Boolean(botStatus?.running)
@@ -1113,7 +1126,7 @@ export default class MarketsPage extends BasePage {
     }
 
     this.market = mkt
-    this.mm.setMarket(mkt)
+    this.mm.setMarket(host, baseID, quoteID)
     this.mmRunning = undefined
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
@@ -1134,6 +1147,7 @@ export default class MarketsPage extends BasePage {
       base: baseID,
       quote: quoteID
     })
+    app().updateMarketElements(this.main, baseID, quoteID)
     this.marketList.select(host, baseID, quoteID)
     this.setLoaderMsgVisibility()
     this.setTokenApprovalVisibility()
@@ -1936,16 +1950,6 @@ export default class MarketsPage extends BasePage {
     form.style.right = '0'
   }
 
-  /* showOpen shows the form to unlock a wallet. */
-  async showOpen (asset: SupportedAsset, f: () => void) {
-    const page = this.page
-    this.openAsset = asset
-    this.openFunc = f
-    this.unlockForm.refresh(app().assets[asset.id])
-    this.showForm(page.unlockWalletForm)
-    page.uwAppPass.focus()
-  }
-
   /*
    * showToggleWalletStatus displays the toggleWalletStatusConfirm form to
    * enable a wallet.
@@ -2027,7 +2031,7 @@ export default class MarketsPage extends BasePage {
       setIcon(icon)
     }
 
-    Doc.hide(page.vUnlockPreorder, page.vPreorderErr)
+    Doc.hide(page.vPreorderErr)
     Doc.show(page.vPreorder)
 
     page.vBuySell.textContent = isSell ? intl.prep(intl.ID_SELLING) : intl.prep(intl.ID_BUYING)
@@ -2079,13 +2083,11 @@ export default class MarketsPage extends BasePage {
       page.vSubmit.classList.remove(sellBtnClass)
     }
     this.showVerifyForm()
-    page.vPass.focus()
 
     if (baseAsset.wallet.open && quoteAsset.wallet.open) this.preOrder(order)
     else {
       Doc.hide(page.vPreorder)
-      if (State.passwordIsCached()) this.unlockWalletsForEstimates('')
-      else Doc.show(page.vUnlockPreorder)
+      this.unlockWalletsForEstimates()
     }
   }
 
@@ -2107,48 +2109,37 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * submitEstimateUnlock reads the current vUnlockPass and unlocks any locked
-   * wallets.
-   */
-  async submitEstimateUnlock () {
-    const pw = this.page.vUnlockPass.value || ''
-    return await this.unlockWalletsForEstimates(pw)
-  }
-
-  /*
    * unlockWalletsForEstimates unlocks any locked wallets with the provided
    * password.
    */
-  async unlockWalletsForEstimates (pw: string) {
+  async unlockWalletsForEstimates () {
     const page = this.page
     const loaded = app().loading(page.verifyForm)
-    const err = await this.attemptWalletUnlock(pw)
+    await this.unlockMarketWallets()
     loaded()
-    if (err) return this.setPreorderErr(err)
     Doc.show(page.vPreorder)
-    Doc.hide(page.vUnlockPreorder)
     this.preOrder(this.parseOrder())
   }
 
+  async unlockWallet (assetID: number) {
+    const res = await postJSON('/api/openwallet', { assetID })
+    if (!app().checkResponse(res)) {
+      throw Error('error unlocking wallet ' + res.msg)
+    }
+    this.balanceWgt.updateAsset(this.openAsset.id)
+  }
+
   /*
-   * attemptWalletUnlock unlocks both the base and quote wallets for the current
+   * unlockMarketWallets unlocks both the base and quote wallets for the current
    * market, if locked.
    */
-  async attemptWalletUnlock (pw: string) {
+  async unlockMarketWallets () {
     const { base, quote } = this.market
     const assetIDs = []
     if (!base.wallet.open) assetIDs.push(base.id)
     if (!quote.wallet.open) assetIDs.push(quote.id)
-    const req = {
-      pass: pw,
-      assetID: -1
-    }
     for (const assetID of assetIDs) {
-      req.assetID = assetID
-      const res = await postJSON('/api/openwallet', req)
-      if (!app().checkResponse(res)) {
-        return res.msg
-      }
+      this.unlockWallet(assetID)
     }
   }
 
@@ -2674,12 +2665,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     Doc.hide(page.orderErr, page.vErr)
     const order = this.currentOrder
-    const pw = page.vPass.value
-    page.vPass.value = ''
-    const req = {
-      order: wireOrder(order),
-      pw: pw
-    }
+    const req = { order: wireOrder(order) }
     if (!this.validateOrder(order)) return
     // Show loader and hide submit button.
     page.vSubmit.classList.add('d-hide')
@@ -2715,16 +2701,6 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(asset.id)
     this.displayMessageIfMissingWallet()
     this.resolveOrderFormVisibility()
-  }
-
-  /*
-   * walletUnlocked is attached to successful submission of the wallet unlock
-   * form. walletUnlocked is only called once the form is submitted and a
-   * success response is received from the client.
-   */
-  async walletUnlocked () {
-    Doc.hide(this.page.forms)
-    this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
   /* lotChanged is attached to the keyup and change events of the lots input. */
@@ -3559,168 +3535,6 @@ class OrderTableRowManager {
     } else {
       return this.isEpoch() ? 1 : -1
     }
-  }
-}
-
-class MarketMakerDisplay {
-  div: PageElement
-  page: Record<string, PageElement>
-  market: CurrentMarket | null
-  startTime: number
-  ticker: any
-
-  constructor (div: PageElement) {
-    this.div = div
-    this.page = Doc.parseTemplate(div)
-  }
-
-  stuff () {
-    const { div, page, market } = this
-    const { base: { id: baseID }, quote: { id: quoteID } } = (market as CurrentMarket)
-    const [{ unitInfo: bui, symbol: baseSymbol }, { unitInfo: qui, symbol: quoteSymbol }] = [app().assets[baseID], app().assets[quoteID]]
-
-    return { div, page, baseID, quoteID, bui, qui, baseSymbol, quoteSymbol }
-  }
-
-  async setMarket (market: CurrentMarket) {
-    if (!market.base || !market.quote) {
-      this.market = null
-      Doc.hide(this.page.stats)
-      return
-    }
-    this.market = market
-    const { page, div, baseID, quoteID } = this.stuff()
-    app().updateMarketElements(div, baseID, quoteID)
-    const baseToken = app().assets[baseID].token
-    const quoteToken = app().assets[quoteID].token
-    Doc.setVis(baseToken, page.baseFeeReservesBox)
-    Doc.setVis(quoteToken && (!baseToken || baseToken.parentID !== quoteToken.parentID), page.quoteFeeReservesBox)
-    if (baseToken) {
-      const { symbol, unitInfo: { conventional: { unit } } } = app().assets[baseToken.parentID]
-      page.baseFeeLogo.src = Doc.logoPath(symbol)
-      page.baseFeeTicker.textContent = unit
-    }
-    if (quoteToken) {
-      const { symbol, unitInfo: { conventional: { unit } } } = app().assets[quoteToken.parentID]
-      page.quoteFeeLogo.src = Doc.logoPath(symbol)
-      page.quoteFeeTicker.textContent = unit
-    }
-    this.updateBalances()
-    this.readBook()
-  }
-
-  handleBalanceNote (n: BalanceNote) {
-    if (!this.market) return
-    const { market: { base: { id: baseID }, quote: { id: quoteID } } } = this
-    const baseParentID = app().assets[baseID].token?.parentID ?? baseID
-    const quoteParentID = app().assets[quoteID].token?.parentID ?? quoteID
-    if (n.assetID !== baseID && n.assetID !== baseParentID && n.assetID !== quoteID && n.assetID !== quoteParentID) return
-    this.updateBalances()
-  }
-
-  async runningMarketStatus () {
-    if (!this.market) return
-    const { base: { id: baseID }, quote: { id: quoteID } } = this.market
-    const status = await MM.status()
-    const bots = status.bots.filter((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
-    if (bots.length === 0) return
-    const { config: botCfg, runStats } = bots[0]
-    return { botCfg, runStats }
-  }
-
-  setTicker () {
-    let r = (new Date().getTime() / 1000) - this.startTime
-    const h = String(Math.floor(r / 3600))
-    r = r % 3600
-    const m = String(Math.floor(r / 60))
-    const s = String(Math.floor(r % 60))
-    this.page.runTime.textContent = `${h.padStart(2, '0')}:${m.padStart(2, '0')}:${s.padStart(2, '0')}`
-  }
-
-  async updateBalances () {
-    const { div, page, baseID, quoteID, bui, qui } = this.stuff()
-
-    const status = await this.runningMarketStatus()
-    Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
-    if (!status || !status.runStats) {
-      if (this.ticker) {
-        clearInterval(this.ticker)
-        this.ticker = undefined
-      }
-      return
-    }
-    const { botCfg: { cexCfg }, runStats } = status
-    Doc.show(page.stats)
-
-    page.profit.textContent = runStats.profitRatio.toFixed(1)
-    page.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss)
-    this.startTime = runStats.startTime
-    if (!this.ticker) {
-      this.setTicker()
-      this.ticker = setInterval(() => { this.setTicker() }, 1000)
-    }
-
-    const summedBalanceText = (b: BotBalance, ui: UnitInfo) => {
-      if (!b) return '0'
-      return Doc.formatFourSigFigs((b.available + b.locked + b.pending) / ui.conventional.conversionFactor)
-    }
-
-    page.walletBaseInventory.textContent = summedBalanceText(runStats.dexBalances[baseID], bui)
-    page.walletQuoteInventory.textContent = summedBalanceText(runStats.dexBalances[quoteID], qui)
-
-    Doc.setVis(cexCfg, page.cexRow)
-    if (cexCfg) {
-      Doc.show(page.pendingDepositBox, page.pendingWithdrawalBox)
-      const dinfo = CEXDisplayInfos[cexCfg.name]
-      Doc.setSrc(div, '[data-cex-logo]', dinfo.logo)
-      page.cexBaseInventory.textContent = summedBalanceText(runStats.cexBalances[baseID], bui)
-      page.cexQuoteInventory.textContent = summedBalanceText(runStats.cexBalances[quoteID], qui)
-    }
-
-    const baseToken = app().assets[baseID].token
-    const quoteToken = app().assets[quoteID].token
-    if (baseToken) {
-      const parentID = baseToken.parentID
-      const feeBalance = runStats.dexBalances[parentID] ?? 0
-      page.baseFeeReserves.textContent = summedBalanceText(feeBalance, app().assets[parentID].unitInfo)
-    }
-    if (quoteToken && (!baseToken || baseToken.parentID !== quoteToken.parentID)) {
-      const parentID = quoteToken.parentID
-      const feeBalance = runStats.dexBalances[parentID] ?? 0
-      page.quoteFeeReserves.textContent = summedBalanceText(feeBalance, app().assets[parentID].unitInfo)
-    }
-
-    this.updateStats(runStats)
-  }
-
-  updateStats (runStats: RunStats) {
-    const { page, baseID, quoteID, bui } = this.stuff()
-    page.pendingDeposits.textContent = String(Math.round(runStats.pendingDeposits))
-    page.pendingWithdrawals.textContent = String(Math.round(runStats.pendingWithdrawals))
-    page.completedMatches.textContent = String(Math.round(runStats.completedMatches))
-    Doc.setVis(runStats.tradedUSD, page.tradedUSDBox)
-    if (runStats.tradedUSD > 0) page.tradedUSD.textContent = Doc.formatFourSigFigs(runStats.tradedUSD)
-    const baseFiatRate = app().fiatRatesMap[baseID]
-    Doc.setVis(baseFiatRate, page.roundTripFeesBox)
-    if (baseFiatRate) page.roundTripFeesUSD.textContent = Doc.formatFourSigFigs((runStats.feeGap?.roundTripFees / bui.conventional.conversionFactor * baseFiatRate) || 0)
-    const basisPrice = app().conventionalRate(baseID, quoteID, runStats.feeGap?.basisPrice || 0)
-    page.basisPrice.textContent = Doc.formatFourSigFigs(basisPrice)
-    const feeGap = app().conventionalRate(baseID, quoteID, runStats.feeGap?.feeGap || 0)
-    page.feeGap.textContent = Doc.formatFourSigFigs(feeGap)
-    page.feeGapPct.textContent = (feeGap / basisPrice * 100 || 0).toFixed(2)
-    const remoteGap = app().conventionalRate(baseID, quoteID, runStats.feeGap?.remoteGap || 0)
-    Doc.setVis(remoteGap, page.remoteGapBox)
-    if (remoteGap) {
-      page.remoteGap.textContent = Doc.formatFourSigFigs(remoteGap)
-      page.remoteGapPct.textContent = (remoteGap / basisPrice * 100 || 0).toFixed(2)
-    }
-  }
-
-  readBook () {
-    if (!this.market) return
-    const { page, market: { dex: { host }, cfg: { name: marketName } } } = this
-    const orders = app().exchanges[host].markets[marketName].orders || []
-    page.nBookedOrders.textContent = String(orders.filter((ord: Order) => ord.status === OrderUtil.StatusBooked).length)
   }
 }
 

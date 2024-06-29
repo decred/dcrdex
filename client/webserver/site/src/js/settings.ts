@@ -15,7 +15,6 @@ import {
   app,
   Exchange,
   PageElement,
-  PasswordCache,
   PrepaidBondID
 } from './registry'
 
@@ -34,7 +33,6 @@ export default class SettingsPage extends BasePage {
   dexAddrForm: forms.DEXAddressForm
   appPassResetForm: forms.AppPassResetForm
   currentForm: PageElement
-  pwCache: PasswordCache
   keyup: (e: KeyboardEvent) => void
 
   constructor (body: HTMLElement) {
@@ -107,20 +105,19 @@ export default class SettingsPage extends BasePage {
       this.confirmRegisterForm.setAsset(assetID, tier, 0)
       this.newWalletForm.setAsset(assetID)
       this.slideSwap(page.newWalletForm)
-    }, this.pwCache)
+    })
 
     // Approve fee payment
     this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
       this.registerDEXSuccess()
     }, () => {
       this.animateRegAsset(page.confirmRegForm)
-    }, this.pwCache)
+    })
 
     // Create a new wallet
     this.newWalletForm = new forms.NewWalletForm(
       page.newWalletForm,
       assetID => this.newWalletCreated(assetID, this.confirmRegisterForm.tier),
-      this.pwCache,
       () => this.animateRegAsset(page.newWalletForm)
     )
 
@@ -312,8 +309,6 @@ export default class SettingsPage extends BasePage {
   // importAccount imports the account
   async importAccount () {
     const page = this.page
-    const pw = page.importAccountAppPass.value
-    page.importAccountAppPass.value = ''
     let accountString = ''
     if (page.accountFile.value) {
       const files = page.accountFile.files
@@ -337,7 +332,6 @@ export default class SettingsPage extends BasePage {
     }
     const { bonds = [], ...acctInf } = account
     const req = {
-      pw: pw,
       account: acctInf,
       bonds: bonds
     }
@@ -397,10 +391,6 @@ export default class SettingsPage extends BasePage {
 
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
-    const page = this.page
-    Doc.hide(page.forms)
-    await app().fetchUser()
-    // Initial method of displaying added dex.
     window.location.reload()
   }
 

@@ -41,7 +41,7 @@ func (s *WebServer) apiAddDEX(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiDiscoverAccount is the handler for the '/discoveracct' API request.
@@ -72,7 +72,7 @@ func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 		Exchange: exchangeInfo,
 		Paid:     paid,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiEstimateRegistrationTxFee is the handler for the '/regtxfee' API request.
@@ -98,7 +98,7 @@ func (s *WebServer) apiEstimateRegistrationTxFee(w http.ResponseWriter, r *http.
 		OK:    true,
 		TxFee: txFee,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiValidateAddress is the handlers for the '/validateaddress' API request.
@@ -124,7 +124,7 @@ func (s *WebServer) apiValidateAddress(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK: valid,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiEstimateSendTxFee is the handler for the '/txfee' API request.
@@ -151,7 +151,7 @@ func (s *WebServer) apiEstimateSendTxFee(w http.ResponseWriter, r *http.Request)
 		TxFee:        txFee,
 		ValidAddress: validAddress,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiGetWalletPeers is the handler for the '/getwalletpeers' API request.
@@ -174,7 +174,7 @@ func (s *WebServer) apiGetWalletPeers(w http.ResponseWriter, r *http.Request) {
 		OK:    true,
 		Peers: peers,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiAddWalletPeer is the handler for the '/addwalletpeer' API request.
@@ -191,7 +191,7 @@ func (s *WebServer) apiAddWalletPeer(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiRemoveWalletPeer is the handler for the '/removewalletpeer' API request.
@@ -208,7 +208,7 @@ func (s *WebServer) apiRemoveWalletPeer(w http.ResponseWriter, r *http.Request) 
 		s.writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiApproveTokenFee(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +234,7 @@ func (s *WebServer) apiApproveTokenFee(w http.ResponseWriter, r *http.Request) {
 		OK:    true,
 		TxFee: txFee,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 func (s *WebServer) apiApproveToken(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +265,7 @@ func (s *WebServer) apiApproveToken(w http.ResponseWriter, r *http.Request) {
 		OK:   true,
 		TxID: txID,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 func (s *WebServer) apiUnapproveToken(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +296,7 @@ func (s *WebServer) apiUnapproveToken(w http.ResponseWriter, r *http.Request) {
 		OK:   true,
 		TxID: txID,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
@@ -318,7 +318,7 @@ func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 		OK:       true,
 		Exchange: exchangeInfo,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiRegister is the handler for the '/register' API request.
@@ -357,7 +357,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	// There was no error paying the fee, but we must wait on confirmations
 	// before informing the DEX of the fee payment. Those results will come
 	// through as a notification.
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // bondsFeeBuffer is a caching helper for the bonds fee buffer. Values for a
@@ -407,7 +407,7 @@ func (s *WebServer) apiBondsFeeBuffer(w http.ResponseWriter, r *http.Request) {
 		OK:        true,
 		FeeBuffer: feeBuffer,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiPostBond is the handler for the '/postbond' API request.
@@ -457,7 +457,7 @@ func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 	// There was no error paying the fee, but we must wait on confirmations
 	// before informing the DEX of the fee payment. Those results will come
 	// through as a notification.
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiUpdateBondOptions is the handler for the '/updatebondoptions' API request.
@@ -473,7 +473,7 @@ func (s *WebServer) apiUpdateBondOptions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiRedeemPrepaidBond(w http.ResponseWriter, r *http.Request) {
@@ -504,7 +504,7 @@ func (s *WebServer) apiRedeemPrepaidBond(w http.ResponseWriter, r *http.Request)
 		OK:   true,
 		Tier: tier,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiNewWallet is the handler for the '/newwallet' API request.
@@ -546,7 +546,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiRecoverWallet is the handler for the '/recoverwallet' API request. Commands
@@ -560,12 +560,17 @@ func (s *WebServer) apiRecoverWallet(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, &form) {
 		return
 	}
+	appPW, err := s.resolvePass(form.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
 	status := s.core.WalletState(form.AssetID)
 	if status == nil {
 		s.writeAPIError(w, fmt.Errorf("no wallet for %d -> %s", form.AssetID, unbip(form.AssetID)))
 		return
 	}
-	err := s.core.RecoverWallet(form.AssetID, form.AppPW, form.Force)
+	err = s.core.RecoverWallet(form.AssetID, appPW, form.Force)
 	if err != nil {
 		// NOTE: client may check for code activeOrdersErr to prompt for
 		// override the active orders safety check.
@@ -573,7 +578,7 @@ func (s *WebServer) apiRecoverWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiRescanWallet is the handler for the '/rescanwallet' API request. Commands
@@ -597,7 +602,7 @@ func (s *WebServer) apiRescanWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiOpenWallet is the handler for the '/openwallet' API request. Unlocks the
@@ -625,7 +630,7 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiNewDepositAddress gets a new deposit address from a wallet.
@@ -654,7 +659,7 @@ func (s *WebServer) apiNewDepositAddress(w http.ResponseWriter, r *http.Request)
 	}{
 		OK:      true,
 		Address: addr,
-	}, s.indent)
+	})
 }
 
 // apiConnectWallet is the handler for the '/connectwallet' API request.
@@ -672,7 +677,7 @@ func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiTrade is the handler for the '/trade' API request.
@@ -702,7 +707,7 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		Order: ord,
 	}
 	w.Header().Set("Connection", "close")
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiTradeAsync is the handler for the '/tradeasync' API request.
@@ -732,7 +737,7 @@ func (s *WebServer) apiTradeAsync(w http.ResponseWriter, r *http.Request) {
 		Order: ord,
 	}
 	w.Header().Set("Connection", "close")
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiAccountExport is the handler for the '/exportaccount' API request.
@@ -767,7 +772,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		Account: account,
 		Bonds:   bonds,
 	}
-	writeJSON(w, res, s.indent)
+	writeJSON(w, res)
 }
 
 // apiExportSeed is the handler for the '/exportseed' API request.
@@ -791,7 +796,7 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:   true,
 		Seed: seed,
-	}, s.indent)
+	})
 }
 
 // apiAccountImport is the handler for the '/importaccount' API request.
@@ -814,7 +819,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Connection", "close")
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiUpdateCert(w http.ResponseWriter, r *http.Request) {
@@ -832,7 +837,7 @@ func (s *WebServer) apiUpdateCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiUpdateDEXHost(w http.ResponseWriter, r *http.Request) {
@@ -867,7 +872,7 @@ func (s *WebServer) apiUpdateDEXHost(w http.ResponseWriter, r *http.Request) {
 		Exchange: exchange,
 	}
 
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiRestoreWalletInfo is the handler for the '/restorewalletinfo' API
@@ -895,7 +900,7 @@ func (s *WebServer) apiRestoreWalletInfo(w http.ResponseWriter, r *http.Request)
 		OK:              true,
 		RestorationInfo: info,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiAccountDisable is the handler for the '/disableaccount' API request.
@@ -905,15 +910,20 @@ func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-
+	defer form.Pass.Clear()
+	appPW, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
 	// Disable account.
-	err := s.core.AccountDisable(form.Pass, form.Host)
+	err = s.core.AccountDisable(appPW, form.Host)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error disabling account: %w", err))
 		return
 	}
 	w.Header().Set("Connection", "close")
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiCancel is the handler for the '/cancel' API request.
@@ -927,7 +937,7 @@ func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error cancelling order %s: %w", form.OrderID, err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiCloseWallet is the handler for the '/closewallet' API request.
@@ -944,15 +954,14 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	var init struct {
-		Pass         encode.PassBytes `json:"pass"`
-		Seed         string           `json:"seed,omitempty"`
-		RememberPass bool             `json:"rememberPass"`
+		Pass encode.PassBytes `json:"pass"`
+		Seed string           `json:"seed,omitempty"`
 	}
 	defer init.Pass.Clear()
 	if !readPost(w, r, &init) {
@@ -967,7 +976,7 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
 	}
-	err = s.actuallyLogin(w, r, &loginForm{Pass: init.Pass, RememberPass: init.RememberPass})
+	err = s.actuallyLogin(w, r, &loginForm{Pass: init.Pass})
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
@@ -981,7 +990,7 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 		OK:           true,
 		Hosts:        s.knownUnregisteredExchanges(map[string]*core.Exchange{}),
 		MnemonicSeed: mnemonicSeed,
-	}, s.indent)
+	})
 }
 
 // apiIsInitialized is the handler for the '/isinitialized' request.
@@ -992,7 +1001,7 @@ func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:          true,
 		Initialized: s.core.IsInitialized(),
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiLocale(w http.ResponseWriter, r *http.Request) {
@@ -1014,7 +1023,7 @@ func (s *WebServer) apiLocale(w http.ResponseWriter, r *http.Request) {
 		resp[translationID] = t.T
 	}
 
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
@@ -1033,7 +1042,7 @@ func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiLogin handles the 'login' API request.
@@ -1063,7 +1072,7 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 		OK:    true,
 		Notes: notes,
 		Pokes: pokes,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiNotes(w http.ResponseWriter, r *http.Request) {
@@ -1081,7 +1090,7 @@ func (s *WebServer) apiNotes(w http.ResponseWriter, r *http.Request) {
 		OK:    true,
 		Notes: notes,
 		Pokes: pokes,
-	}, s.indent)
+	})
 }
 
 // apiLogout handles the 'logout' API request.
@@ -1104,7 +1113,7 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK: true,
 	}
-	writeJSON(w, response, s.indent)
+	writeJSON(w, response)
 }
 
 // apiGetBalance handles the 'balance' API request.
@@ -1127,7 +1136,7 @@ func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
 		OK:      true,
 		Balance: bal,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 
 }
 
@@ -1151,7 +1160,7 @@ func (s *WebServer) apiParseConfig(w http.ResponseWriter, r *http.Request) {
 		OK:  true,
 		Map: configMap,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiWalletSettings fetches the currently stored wallet configuration settings.
@@ -1173,7 +1182,7 @@ func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:  true,
 		Map: settings,
-	}, s.indent)
+	})
 }
 
 // apiToggleWalletStatus updates the wallet's status.
@@ -1192,7 +1201,7 @@ func (s *WebServer) apiToggleWalletStatus(w http.ResponseWriter, r *http.Request
 	}{
 		OK: true,
 	}
-	writeJSON(w, response, s.indent)
+	writeJSON(w, response)
 }
 
 // apiDefaultWalletCfg attempts to load configuration settings from the
@@ -1216,7 +1225,7 @@ func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) 
 	}{
 		OK:     true,
 		Config: cfg,
-	}, s.indent)
+	})
 }
 
 // apiOrders responds with a filtered list of user orders.
@@ -1237,7 +1246,7 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:     true,
 		Orders: ords,
-	}, s.indent)
+	})
 }
 
 // apiAccelerateOrder speeds up the mining of transactions in an order.
@@ -1269,7 +1278,7 @@ func (s *WebServer) apiAccelerateOrder(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:   true,
 		TxID: txID,
-	}, s.indent)
+	})
 }
 
 // apiPreAccelerate responds with information about accelerating the mining of
@@ -1292,7 +1301,7 @@ func (s *WebServer) apiPreAccelerate(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:            true,
 		PreAccelerate: preAccelerate,
-	}, s.indent)
+	})
 }
 
 // apiAccelerationEstimate responds with how much it would cost to accelerate
@@ -1319,7 +1328,7 @@ func (s *WebServer) apiAccelerationEstimate(w http.ResponseWriter, r *http.Reque
 	}{
 		OK:  true,
 		Fee: fee,
-	}, s.indent)
+	})
 }
 
 // apiOrder responds with data for an order.
@@ -1340,7 +1349,7 @@ func (s *WebServer) apiOrder(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:    true,
 		Order: ord,
-	}, s.indent)
+	})
 }
 
 // apiChangeAppPass updates the application password.
@@ -1380,7 +1389,7 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiResetAppPassword resets the application password.
@@ -1400,7 +1409,7 @@ func (s *WebServer) apiResetAppPassword(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiReconfig sets new configuration details for the wallet.
@@ -1437,7 +1446,7 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiWithdraw handles the 'withdraw' API request. This end-point is Deprecated.
@@ -1449,7 +1458,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	form.Subtract = true
-	s.send(w, r, form)
+	s.send(w, form)
 }
 
 // apiSend handles the 'send' API request.
@@ -1459,10 +1468,10 @@ func (s *WebServer) apiSend(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	s.send(w, r, form)
+	s.send(w, form)
 }
 
-func (s *WebServer) send(w http.ResponseWriter, r *http.Request, form *sendOrWithdrawForm) {
+func (s *WebServer) send(w http.ResponseWriter, form *sendOrWithdrawForm) {
 	state := s.core.WalletState(form.AssetID)
 	if state == nil {
 		s.writeAPIError(w, fmt.Errorf("no wallet found for %s", unbip(form.AssetID)))
@@ -1484,7 +1493,7 @@ func (s *WebServer) send(w http.ResponseWriter, r *http.Request, form *sendOrWit
 		OK:   true,
 		Coin: coin.String(),
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiMaxBuy handles the 'maxbuy' API request.
@@ -1510,7 +1519,7 @@ func (s *WebServer) apiMaxBuy(w http.ResponseWriter, r *http.Request) {
 		OK:     true,
 		MaxBuy: maxBuy,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiMaxSell handles the 'maxsell' API request.
@@ -1535,7 +1544,7 @@ func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
 		OK:      true,
 		MaxSell: maxSell,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiPreOrder handles the 'preorder' API request.
@@ -1559,7 +1568,7 @@ func (s *WebServer) apiPreOrder(w http.ResponseWriter, r *http.Request) {
 		Estimate: est,
 	}
 
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // apiActuallyLogin logs the user in. login form private data is expected to be
@@ -1578,19 +1587,13 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 	if !s.isAuthed(r) {
 		authToken := s.authorize()
 		setCookie(authCK, authToken, w)
-		if login.RememberPass {
-			key, err := s.cacheAppPassword(pass, authToken)
-			if err != nil {
-				return fmt.Errorf("login error: %w", err)
+		key, err := s.cacheAppPassword(pass, authToken)
+		if err != nil {
+			return fmt.Errorf("login error: %w", err)
 
-			}
-			setCookie(pwKeyCK, hex.EncodeToString(key), w)
-			zero(key)
-		} else {
-			// If bisonw was shutdown and restarted, the old pw key cookie might
-			// need to be cleared.
-			clearCookie(pwKeyCK, w)
 		}
+		setCookie(pwKeyCK, hex.EncodeToString(key), w)
+		zero(key)
 	}
 
 	return nil
@@ -1603,6 +1606,11 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		u = s.core.User()
 	}
 
+	var mmStatus *mm.Status
+	if s.mm != nil {
+		mmStatus = s.mm.Status()
+	}
+
 	response := struct {
 		User         *core.User `json:"user"`
 		Lang         string     `json:"lang"`
@@ -1610,6 +1618,7 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		Inited       bool       `json:"inited"`
 		OK           bool       `json:"ok"`
 		Experimental bool       `json:"experimental"`
+		MMStatus     *mm.Status `json:"mmStatus"`
 	}{
 		User:         u,
 		Lang:         s.lang.Load().(string),
@@ -1617,8 +1626,9 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		Inited:       s.core.IsInitialized(),
 		OK:           true,
 		Experimental: s.experimental,
+		MMStatus:     mmStatus,
 	}
-	writeJSON(w, response, s.indent)
+	writeJSON(w, response)
 }
 
 // apiToggleRateSource handles the /toggleratesource API request.
@@ -1635,7 +1645,7 @@ func (s *WebServer) apiToggleRateSource(w http.ResponseWriter, r *http.Request) 
 		s.writeAPIError(w, fmt.Errorf("error disabling/enabling rate source: %w", err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // apiDeleteArchiveRecords handles the '/deletearchivedrecords' API request.
@@ -1665,7 +1675,7 @@ func (s *WebServer) apiDeleteArchivedRecords(w http.ResponseWriter, r *http.Requ
 		ArchivedRecordsDeleted: nRecordsDeleted,
 		ArchivedRecordsPath:    archivedRecordsPath,
 	}
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
@@ -1688,7 +1698,7 @@ func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:     true,
 		Report: report,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiCEXBalance(w http.ResponseWriter, r *http.Request) {
@@ -1710,7 +1720,7 @@ func (s *WebServer) apiCEXBalance(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:         true,
 		CEXBalance: bal,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiArchivedRuns(w http.ResponseWriter, r *http.Request) {
@@ -1726,7 +1736,7 @@ func (s *WebServer) apiArchivedRuns(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:   true,
 		Runs: runs,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiMMRunOverview(w http.ResponseWriter, r *http.Request) {
@@ -1750,7 +1760,7 @@ func (s *WebServer) apiMMRunOverview(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:       true,
 		Overview: overview,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiRunLogs(w http.ResponseWriter, r *http.Request) {
@@ -1776,7 +1786,7 @@ func (s *WebServer) apiRunLogs(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:   true,
 		Logs: logs,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiCEXBook(w http.ResponseWriter, r *http.Request) {
@@ -1803,7 +1813,7 @@ func (s *WebServer) apiCEXBook(w http.ResponseWriter, r *http.Request) {
 			Buys:  buys,
 			Sells: sells,
 		},
-	}, s.indent)
+	})
 
 }
 
@@ -1823,7 +1833,7 @@ func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:     true,
 		Status: status,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiSetVSP(w http.ResponseWriter, r *http.Request) {
@@ -1838,7 +1848,7 @@ func (s *WebServer) apiSetVSP(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error settings vsp to %q for asset ID %d: %w", req.URL, req.AssetID, err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiPurchaseTickets(w http.ResponseWriter, r *http.Request) {
@@ -1860,7 +1870,7 @@ func (s *WebServer) apiPurchaseTickets(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error purchasing tickets for asset ID %d: %w", req.AssetID, err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiSetVotingPreferences(w http.ResponseWriter, r *http.Request) {
@@ -1877,7 +1887,7 @@ func (s *WebServer) apiSetVotingPreferences(w http.ResponseWriter, r *http.Reque
 		s.writeAPIError(w, fmt.Errorf("error setting voting preferences for asset ID %d: %w", req.AssetID, err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiListVSPs(w http.ResponseWriter, r *http.Request) {
@@ -1896,7 +1906,7 @@ func (s *WebServer) apiListVSPs(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:   true,
 		VSPs: vsps,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiTicketPage(w http.ResponseWriter, r *http.Request) {
@@ -1920,7 +1930,7 @@ func (s *WebServer) apiTicketPage(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:      true,
 		Tickets: tickets,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiMixingStats(w http.ResponseWriter, r *http.Request) {
@@ -1941,112 +1951,28 @@ func (s *WebServer) apiMixingStats(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:    true,
 		Stats: stats,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiConfigureMixer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AssetID    uint32 `json:"assetID"`
-		ServerAddr string `json:"serverAddr"`
-		Cert       string `json:"cert"`
+		AssetID uint32 `json:"assetID"`
+		Enabled bool   `json:"enabled"`
 	}
 	if !readPost(w, r, &req) {
 		return
 	}
-	if err := s.core.ConfigureFundsMixer(req.AssetID, req.ServerAddr, []byte(req.Cert)); err != nil {
+	if err := s.core.ConfigureFundsMixer(req.AssetID, req.Enabled); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error configuring mixing for %d: %w", req.AssetID, err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
-}
-
-func (s *WebServer) apiStartMixer(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		AssetID uint32           `json:"assetID"`
-		AppPW   encode.PassBytes `json:"appPW"`
-	}
-	if !readPost(w, r, &req) {
-		return
-	}
-	defer req.AppPW.Clear()
-	// We only need a password if the wallet is locked.
-	walletState := s.core.WalletState(req.AssetID)
-	if walletState == nil {
-		s.writeAPIError(w, errors.New("no wallet state retrieved"))
-		return
-	}
-
-	var appPW []byte
-	defer encode.ClearBytes(appPW)
-	if !walletState.Open {
-		var err error
-		appPW, err = s.resolvePass(req.AppPW, r)
-		if err != nil {
-			s.writeAPIError(w, fmt.Errorf("password error: %w", err))
-			return
-		}
-	}
-	if err := s.core.StartFundsMixer(appPW, req.AssetID); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error starting mixing for %d: %w", req.AssetID, err))
-		return
-	}
-	writeJSON(w, simpleAck(), s.indent)
-}
-
-func (s *WebServer) apiStopMixer(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		AssetID uint32 `json:"assetID"`
-	}
-	if !readPost(w, r, &req) {
-		return
-	}
-	if err := s.core.StopFundsMixer(req.AssetID); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error stopping mixing for %d: %w", req.AssetID, err))
-		return
-	}
-	writeJSON(w, simpleAck(), s.indent)
-}
-
-func (s *WebServer) apiDisableMixer(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		AssetID uint32 `json:"assetID"`
-	}
-	if !readPost(w, r, &req) {
-		return
-	}
-	if err := s.core.DisableFundsMixer(req.AssetID); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error disabling mixing for %d: %w", req.AssetID, err))
-		return
-	}
-	writeJSON(w, simpleAck(), s.indent)
-}
-
-func (s *WebServer) apiStartAllMarketMakingBots(w http.ResponseWriter, r *http.Request) {
-	var form struct {
-		AppPW encode.PassBytes `json:"appPW"`
-	}
-	defer form.AppPW.Clear()
-	if !readPost(w, r, &form) {
-		s.writeAPIError(w, fmt.Errorf("failed to read form"))
-		return
-	}
-	appPW, err := s.resolvePass(form.AppPW, r)
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
-		return
-	}
-	if err = s.mm.StartAllBots(nil, appPW); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error starting mm bots: %v", err))
-		return
-	}
-
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		Market *mm.MarketWithHost `json:"market"`
-		AppPW  encode.PassBytes   `json:"appPW"`
+		Config *mm.StartConfig  `json:"config"`
+		AppPW  encode.PassBytes `json:"appPW"`
 	}
 	defer form.AppPW.Clear()
 	if !readPost(w, r, &form) {
@@ -2058,20 +1984,12 @@ func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Reque
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	if err = s.mm.StartBot(form.Market, nil, appPW); err != nil {
+	if err = s.mm.StartBot(form.Config, nil, appPW); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error starting market making: %v", err))
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
-}
-
-func (s *WebServer) apiStopAllMarketMakingBots(w http.ResponseWriter, _ *http.Request) {
-	if err := s.mm.StopAllBots(); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error stopping mm bots: %v", err))
-		return
-	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiStopMarketMakingBot(w http.ResponseWriter, r *http.Request) {
@@ -2086,7 +2004,7 @@ func (s *WebServer) apiStopMarketMakingBot(w http.ResponseWriter, r *http.Reques
 		s.writeAPIError(w, fmt.Errorf("error stopping mm bot %q: %v", form.Market, err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiUpdateCEXConfig(w http.ResponseWriter, r *http.Request) {
@@ -2101,7 +2019,7 @@ func (s *WebServer) apiUpdateCEXConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
@@ -2116,26 +2034,26 @@ func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiRemoveBotConfig(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		Host       string `json:"host"`
-		BaseAsset  uint32 `json:"baseAsset"`
-		QuoteAsset uint32 `json:"quoteAsset"`
+		Host    string `json:"host"`
+		BaseID  uint32 `json:"baseID"`
+		QuoteID uint32 `json:"quoteID"`
 	}
 	if !readPost(w, r, &form) {
 		s.writeAPIError(w, fmt.Errorf("failed to read form"))
 		return
 	}
 
-	if err := s.mm.RemoveBotConfig(form.Host, form.BaseAsset, form.QuoteAsset); err != nil {
+	if err := s.mm.RemoveBotConfig(form.Host, form.BaseID, form.QuoteID); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request) {
@@ -2145,7 +2063,7 @@ func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request
 	}{
 		OK:     true,
 		Status: s.mm.Status(),
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiTxHistory(w http.ResponseWriter, r *http.Request) {
@@ -2175,7 +2093,7 @@ func (s *WebServer) apiTxHistory(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:  true,
 		Txs: txs,
-	}, s.indent)
+	})
 }
 
 func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
@@ -2191,7 +2109,7 @@ func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error taking action: %w", err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, simpleAck())
 }
 
 // writeAPIError logs the formatted error and sends a standardResponse with the
@@ -2210,7 +2128,7 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
 		Code: code,
 	}
 	log.Error(err.Error())
-	writeJSON(w, resp, s.indent)
+	writeJSON(w, resp)
 }
 
 // setCookie sets the value of a cookie in the http response.

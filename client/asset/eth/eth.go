@@ -1700,8 +1700,14 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting approval status: %v", err)
 	}
-	if approvalStatus != asset.Approved {
+	switch approvalStatus {
+	case asset.NotApproved:
 		return nil, nil, 0, asset.ErrUnapprovedToken
+	case asset.Pending:
+		return nil, nil, 0, asset.ErrApprovalPending
+	case asset.Approved:
+	default:
+		return nil, nil, 0, fmt.Errorf("unknown approval status %d", approvalStatus)
 	}
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), ord.Version,
@@ -1785,8 +1791,14 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting approval status: %v", err)
 	}
-	if approvalStatus != asset.Approved {
+	switch approvalStatus {
+	case asset.NotApproved:
 		return nil, nil, 0, asset.ErrUnapprovedToken
+	case asset.Pending:
+		return nil, nil, 0, asset.ErrApprovalPending
+	case asset.Approved:
+	default:
+		return nil, nil, 0, fmt.Errorf("unknown approval status %d", approvalStatus)
 	}
 
 	g, err := w.initGasEstimate(1, ord.Version,
@@ -2339,9 +2351,9 @@ func (w *TokenWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, u
 }
 
 // Redeem sends the redemption transaction, which may contain more than one
-// redemption. The nonceOverride paramater is used to specify a specific nonce
-// to be used for the redemption transaction. It is needed when resubmitting
-// a redemption with a fee too low to be mined.
+// redemption. The nonceOverride parameter is used to specify a specific nonce
+// to be used for the redemption transaction. It is needed when resubmitting a
+// redemption with a fee too low to be mined.
 func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, nonceOverride *uint64) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
@@ -2590,7 +2602,7 @@ func (w *TokenWallet) ApproveToken(assetVer uint32, onConfirm func()) (string, e
 		return "", fmt.Errorf("token is already approved")
 	}
 	if approvalStatus == asset.Pending {
-		return "", fmt.Errorf("approval is already pending")
+		return "", asset.ErrApprovalPending
 	}
 
 	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(w.ctx)
@@ -2640,7 +2652,7 @@ func (w *TokenWallet) UnapproveToken(assetVer uint32, onConfirm func()) (string,
 		return "", fmt.Errorf("token is not approved")
 	}
 	if approvalStatus == asset.Pending {
-		return "", fmt.Errorf("approval is pending")
+		return "", asset.ErrApprovalPending
 	}
 
 	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(w.ctx)
@@ -3748,7 +3760,7 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 	eth.currentTip = bestHdr
 	eth.tipMtx.Unlock()
 
-	eth.log.Debugf("tip change: %s (%s) => %s (%s)", prevTip.Number,
+	eth.log.Tracef("tip change: %s (%s) => %s (%s)", prevTip.Number,
 		currentTipHash, bestHdr.Number, bestHash)
 
 	eth.checkPendingTxs()
@@ -3969,7 +3981,7 @@ func (w *assetWallet) checkPendingApprovals() {
 // sumPendingTxs sums the expected incoming and outgoing values in pending
 // transactions stored in pendingTxs. Not used if the node is a
 // txPoolFetcher.
-func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
+func (w *assetWallet) sumPendingTxs() (out, in uint64) {
 	isToken := w.assetID != w.baseChainID
 
 	sumPendingTx := func(pendingTx *extendedWalletTx) {
@@ -4096,7 +4108,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 	txPoolNode, is := w.node.(txPoolFetcher)
 	if !is {
 		for {
-			out, in := w.sumPendingTxs(confirmed)
+			out, in := w.sumPendingTxs()
 			checkBal, err := w.getConfirmedBalance()
 			if err != nil {
 				return nil, fmt.Errorf("balance consistency check error: %v", err)
@@ -4111,7 +4123,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 				continue
 			}
 			if outEVM.Cmp(confirmed) > 0 {
-				return nil, fmt.Errorf("balance undeflow detected. pending out (%s) > balance (%s)", outEVM, confirmed)
+				return nil, fmt.Errorf("balance underflow detected. pending out (%s) > balance (%s)", outEVM, confirmed)
 			}
 
 			return &Balance{
@@ -5110,8 +5122,8 @@ func transactionFeeLimit(tx *types.Transaction) *big.Int {
 	return fees
 }
 
-// extendedTx generates an *extendedWalletTx for a newly-broadcast tx and stores
-// it in the DB.
+// extendedTx generates an *extendedWalletTx for a newly-broadcasted tx and
+// stores it in the DB.
 func (w *assetWallet) extendedTx(tx *types.Transaction, txType asset.TransactionType, amt uint64) *extendedWalletTx {
 	var tokenAssetID *uint32
 	if w.assetID != w.baseChainID {
@@ -5202,10 +5214,20 @@ func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txHash common.H
 		return nil, asset.CoinNotFoundError
 	}
 
-	wt := w.extendedTx(tx, asset.Receive, dexeth.WeiToGweiCeil(tx.Value()))
-	tip := int64(w.tipHeight())
-	wt.Confirmed = blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs)
-	return wt.WalletTransaction, nil
+	addr := w.addr.String()
+	return &asset.WalletTransaction{
+		Type:      asset.Receive,
+		ID:        tx.Hash().String(),
+		Amount:    w.atomize(tx.Value()),
+		Recipient: &addr,
+		AdditionalData: map[string]string{
+			txHistoryNonceKey: strconv.FormatUint(tx.Nonce(), 10),
+		},
+		// For receiving transactions, if the transaction is mined, it is
+		// confirmed confirmed, because the value received will be part of
+		// the available balance.
+		Confirmed: blockHeight > 0,
+	}, nil
 }
 
 // WalletTransaction returns a transaction that either the wallet has made or
@@ -5221,28 +5243,47 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.
 	return w.getReceivingTransaction(ctx, txHash)
 }
 
+// extractValueFromTransferLog checks the Transfer event logs in the
+// transaction, finds the log that sends tokens to the wallet's address,
+// and returns the value of the transfer.
+func (w *TokenWallet) extractValueFromTransferLog(receipt *types.Receipt) (v uint64, err error) {
+	return v, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+		v, err = c.parseTransfer(receipt)
+		return err
+	})
+}
+
 func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common.Hash) (*asset.WalletTransaction, error) {
-	tx, blockHeight, err := w.node.getTransaction(ctx, txHash)
+	receipt, _, err := w.node.transactionAndReceipt(ctx, txHash)
 	if err != nil {
 		return nil, err
 	}
-	if *tx.To() != w.netToken.Address {
-		return nil, asset.CoinNotFoundError
-	}
 
-	receivingAddr, value, err := erc20.ParseTransferData(tx.Data())
+	blockHeight := receipt.BlockNumber.Int64()
+	value, err := w.extractValueFromTransferLog(receipt)
 	if err != nil {
-		return nil, asset.CoinNotFoundError
+		w.log.Errorf("Error extracting value from transfer log: %v", err)
+		return &asset.WalletTransaction{
+			Type:        asset.Unknown,
+			ID:          txHash.String(),
+			BlockNumber: uint64(blockHeight),
+			Confirmed:   blockHeight > 0,
+		}, nil
 	}
 
-	if receivingAddr != w.addr {
-		return nil, asset.CoinNotFoundError
-	}
-
-	wt := w.extendedTx(tx, asset.Receive, w.atomize(value))
-	tip := int64(w.tipHeight())
-	wt.Confirmed = blockHeight > 0 && (tip-blockHeight+1) >= int64(w.finalizeConfs)
-	return wt.WalletTransaction, nil
+	addr := w.addr.String()
+	return &asset.WalletTransaction{
+		Type:        asset.Receive,
+		ID:          txHash.String(),
+		BlockNumber: uint64(blockHeight),
+		TokenID:     &w.assetID,
+		Amount:      value,
+		Recipient:   &addr,
+		// For receiving transactions, if the transaction is mined, it is
+		// confirmed confirmed, because the value received will be part of
+		// the available balance.
+		Confirmed: blockHeight > 0,
+	}, nil
 }
 
 func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
@@ -5462,7 +5503,7 @@ func (getGas) ReadCredentials(chain, credentialsPath string, net dex.Network) (a
 	return
 }
 
-func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int,
+func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, contractVer uint32, maxSwaps int,
 	walletDir string, providers []string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
 	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
 
@@ -5548,9 +5589,9 @@ func (getGas) EstimateFunding(ctx context.Context, net dex.Network, assetID, con
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
+	cl, _, ethReq, swapReq, _, ethBalBig, tokenBalBig, err := getGetGasClientWithEstimatesAndBalances(ctx, net, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: getGetGasClientWithEstimatesAndBalances error: %w", symbol, err)
 	}
 	defer cl.shutdown()
 	ethBal := dexeth.WeiToGwei(ethBalBig)
@@ -5755,9 +5796,9 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 	}
 	defer os.RemoveAll(walletDir)
 
-	cl, c, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, assetID, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
+	cl, c, ethReq, swapReq, feeRate, ethBal, tokenBal, err := getGetGasClientWithEstimatesAndBalances(ctx, net, contractVer, maxSwaps, walletDir, providers, seed, wParams, log)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: getGetGasClientWithEstimatesAndBalances error: %w", symbol, err)
 	}
 	defer cl.shutdown()
 

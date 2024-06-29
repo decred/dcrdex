@@ -92,14 +92,14 @@ class AppInitForm {
     const page = this.page = Doc.idDescendants(form)
     bindForm(form, page.appPWSubmit, () => this.setAppPass())
     bindForm(form, page.toggleSeedInput, () => {
-      if (Doc.isHidden(page.seedInput)) {
+      if (Doc.isHidden(page.seedInputBox)) {
         page.toggleSeedInputIcon.classList.remove('ico-plus')
         page.toggleSeedInputIcon.classList.add('ico-minus')
-        Doc.show(page.seedInput)
+        Doc.show(page.seedInputBox)
       } else {
         page.toggleSeedInputIcon.classList.remove('ico-minus')
         page.toggleSeedInputIcon.classList.add('ico-plus')
-        Doc.hide(page.seedInput)
+        Doc.hide(page.seedInputBox)
       }
     })
   }
@@ -126,11 +126,9 @@ class AppInitForm {
     const loaded = app().loading(this.form)
     // const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
     const seed = page.seedInput.value ?? ''
-    const rememberPass = page.rememberPass.checked
     const res: InitResponse = await postJSON('/api/init', {
       pass: pw,
-      seed: seed,
-      rememberPass
+      seed: seed
     })
     loaded()
     if (!app().checkResponse(res)) {
@@ -246,7 +244,7 @@ class QuickConfigForm {
       if (!checkbox.checked) return
       const config: Record<string, string> = {}
       const walletDef = app().walletDefinition(a.id, type)
-      for (const opt of walletDef.configopts) {
+      for (const opt of (walletDef.configopts ?? [])) {
         if (!opt.default) continue
         if (opt.isboolean) {
           config[opt.key] = opt.default ? '1' : '0'

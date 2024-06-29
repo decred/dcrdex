@@ -287,6 +287,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		trades:            make(map[order.OrderID]*trackedTrade),
 		inFlightOrders:    make(map[uint64]*InFlightOrder),
 		epoch:             map[string]uint64{tDcrBtcMktName: 0},
+		resolvedEpoch:     map[string]uint64{tDcrBtcMktName: 0},
 		apiVer:            serverdex.PreAPIVersion,
 		connectionStatus:  uint32(comms.Connected),
 		reportingConnects: 1,
@@ -769,6 +770,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
 		version:           w.info.Version,
+		log:               tLogger,
 		supportedVersions: w.info.SupportedVersions,
 		Wallet:            w,
 		Symbol:            dex.BipIDSymbol(assetID),
@@ -993,7 +995,7 @@ func (w *TXCWallet) setConfs(coinID dex.Bytes, confs uint32, err error) {
 	w.confsMtx.Unlock()
 }
 
-func (w *TXCWallet) tConfirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {
+func (w *TXCWallet) tConfirmations(_ context.Context, coinID dex.Bytes) (uint32, error) {
 	id := coinID.String()
 	w.confsMtx.RLock()
 	defer w.confsMtx.RUnlock()
@@ -1863,6 +1865,7 @@ func TestBookFeed(t *testing.T) {
 	// We'll only receive 1 candle update, since we only synced one set of
 	// candles so far.
 	checkAction(feed2, CandleUpdateAction)
+	checkAction(feed2, EpochResolved)
 
 	// Now subscribe to the 24h candles too.
 	queueCandles()
@@ -1878,7 +1881,6 @@ func TestBookFeed(t *testing.T) {
 	checkAction(feed2, EpochMatchSummary)
 	checkAction(feed2, CandleUpdateAction)
 	checkAction(feed2, CandleUpdateAction)
-
 }
 
 type tDriver struct {
@@ -10178,7 +10180,7 @@ func TestDeleteArchivedRecords(t *testing.T) {
 	tdb := tCore.db.(*TDB)
 
 	tempFile := func(suffix string) (path string) {
-		matchesFile, err := os.CreateTemp("", "delete_archives_test_matches")
+		matchesFile, err := os.CreateTemp("", suffix+"delete_archives_test_matches")
 		if err != nil {
 			t.Fatal(err)
 		}

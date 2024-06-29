@@ -90,6 +90,9 @@ const (
 	// pokesCapacity is the maximum number of poke notifications that
 	// will be cached.
 	pokesCapacity = 100
+
+	// walletLockTimeout is the default timeout used when locking wallets.
+	walletLockTimeout = 5 * time.Second
 )
 
 var (
@@ -176,6 +179,11 @@ type dexConnection struct {
 
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
+	// resolvedEpoch differs from epoch in that an epoch is not considered
+	// resolved until all of our orders are out of the epoch queue. i.e.
+	// we have received match or nomatch notification for all of our orders
+	// from the epoch.
+	resolvedEpoch map[string]uint64
 
 	// connectionStatus is a best guess on the ws connection status.
 	connectionStatus uint32
@@ -1845,10 +1853,10 @@ fetchers:
 		if !wallet.connected() {
 			continue
 		}
-		if !c.cfg.NoAutoWalletLock {
+		if !c.cfg.NoAutoWalletLock && wallet.unlocked() { // no-op if Logout did it
 			symb := strings.ToUpper(unbip(assetID))
-			c.log.Infof("Locking %s wallet", symb) // no-op if Logout did it
-			if err := wallet.Lock(5 * time.Second); err != nil {
+			c.log.Infof("Locking %s wallet", symb)
+			if err := wallet.Lock(walletLockTimeout); err != nil {
 				c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
 			}
 		}
@@ -2857,11 +2865,17 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 	}
 	defer encode.ClearBytes(seed)
 
+	var bday uint64
+	if creds := c.creds(); !creds.Birthday.IsZero() {
+		bday = uint64(creds.Birthday.Unix())
+	}
+
 	c.log.Infof("Initializing a %s wallet", unbip(assetID))
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
 		Type:     form.Type,
 		Seed:     seed,
 		Pass:     pw,
+		Birthday: bday,
 		Settings: form.Config,
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
@@ -2941,9 +2955,11 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 
 	// Construct the unconnected xcWallet.
 	contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(assetID)
+	symbol := unbip(assetID)
 	wallet := &xcWallet{ // captured by the PeersChange closure
 		AssetID: assetID,
-		Symbol:  unbip(assetID),
+		Symbol:  symbol,
+		log:     c.log.SubLogger(symbol),
 		balance: &WalletBalance{
 			Balance:        dbWallet.Balance,
 			OrderLocked:    orderLockedAmt,
@@ -3038,6 +3054,15 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 		return nil
 	}
 	return wallet.state()
+}
+
+// WalletTraits gets the traits for the wallet.
+func (c *Core) WalletTraits(assetID uint32) (asset.WalletTrait, error) {
+	w, found := c.wallet(assetID)
+	if !found {
+		return 0, fmt.Errorf("no %d wallet found", assetID)
+	}
+	return w.traits, nil
 }
 
 // assetHasActiveOrders checks whether there are any active orders or
@@ -3226,8 +3251,21 @@ func (c *Core) RescanWallet(assetID uint32, force bool) error {
 			assetID, unbip(assetID), err)
 	}
 
+	walletDef, err := asset.WalletDef(assetID, wallet.walletType)
+	if err != nil {
+		return newError(assetSupportErr, "asset.WalletDef error: %w", err)
+	}
+
+	var bday uint64 // unix time seconds
+	if walletDef.Seeded {
+		creds := c.creds()
+		if !creds.Birthday.IsZero() {
+			bday = uint64(creds.Birthday.Unix())
+		}
+	}
+
 	// Begin potentially asynchronous wallet rescan operation.
-	if err = wallet.rescan(c.ctx); err != nil {
+	if err = wallet.rescan(c.ctx, bday); err != nil {
 		return err
 	}
 
@@ -3404,8 +3442,6 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}()
 
 	c.notify(newWalletStateNote(state))
-
-	c.resumeMixing(crypter, []*xcWallet{wallet})
 	return nil
 }
 
@@ -3422,7 +3458,7 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return fmt.Errorf("wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
-	err = wallet.Lock(5 * time.Second)
+	err = wallet.Lock(walletLockTimeout)
 	if err != nil {
 		return err
 	}
@@ -5042,7 +5078,6 @@ func (c *Core) Login(pw []byte) error {
 		c.connectWallets() // initialize reserves
 		c.notify(newLoginNote("Resuming active trades..."))
 		c.resolveActiveTrades(crypter)
-		c.resumeMixing(crypter, c.xcWallets())
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
 
@@ -5274,15 +5309,21 @@ func (c *Core) Logout() error {
 
 	// Lock wallets
 	if !c.cfg.NoAutoWalletLock {
+		// Ensure wallet lock in c.Run waits for c.Logout if this is called
+		// before shutdown.
+		c.wg.Add(1)
 		for _, w := range c.xcWallets() {
-			if w.connected() {
-				if err := w.Lock(5 * time.Second); err != nil {
+			if w.connected() && w.unlocked() {
+				symb := strings.ToUpper(unbip(w.AssetID))
+				c.log.Infof("Locking %s wallet", symb)
+				if err := w.Lock(walletLockTimeout); err != nil {
 					// A failure to lock the wallet need not block the ability to
 					// lock the DEX accounts or shutdown Core gracefully.
 					c.log.Warnf("Unable to lock %v wallet: %v", unbip(w.AssetID), err)
 				}
 			}
 		}
+		c.wg.Done()
 	}
 
 	// With no open orders for any of the dex connections, and all wallets locked,
@@ -5421,8 +5462,8 @@ func (c *Core) marketWallets(host string, base, quote uint32) (ba, qa *dex.Asset
 // market. An order rate must be provided, since the number of lots available
 // for trading will vary based on the rate for a buy order (unlike a sell
 // order).
-func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error) {
-	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+func (c *Core) MaxBuy(host string, baseID, quoteID uint32, rate uint64) (*MaxOrderEstimate, error) {
+	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, baseID, quoteID)
 	if err != nil {
 		return nil, err
 	}
@@ -5432,7 +5473,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, err
 	}
 
-	mktID := marketName(base, quote)
+	mktID := marketName(baseID, quoteID)
 	mktConf := dc.marketConfig(mktID)
 	if mktConf == nil {
 		return nil, newError(marketErr, "unknown market %q", mktID)
@@ -5444,14 +5485,14 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, fmt.Errorf("quote lot estimate of zero for market %s", mktID)
 	}
 
-	swapFeeSuggestion := c.feeSuggestion(dc, quote)
+	swapFeeSuggestion := c.feeSuggestion(dc, quoteID)
 	if swapFeeSuggestion == 0 {
-		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(quote), host)
+		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(quoteID), host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestionAny(base)
+	redeemFeeSuggestion := c.feeSuggestionAny(baseID)
 	if redeemFeeSuggestion == 0 {
-		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(base), host)
+		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(baseID), host)
 	}
 
 	maxBuy, err := quoteWallet.MaxOrder(&asset.MaxOrderForm{
@@ -5463,7 +5504,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		RedeemAssetID: baseWallet.AssetID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
+		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quoteID), err)
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
@@ -5472,7 +5513,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		FeeSuggestion: redeemFeeSuggestion,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(base), err)
+		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(baseID), err)
 	}
 
 	return &MaxOrderEstimate{
@@ -6427,7 +6468,7 @@ func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host st
 }
 
 func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemScripts []dex.Bytes, dc *dexConnection, redeemAddr string,
-	form *TradeForm, lots, redemptionRefundLots uint64, fundingFees uint64, assetConfigs *assetSet, mktConf *msgjson.Market, errCloser *dex.ErrorCloser) (*tradeRequest, error) {
+	form *TradeForm, redemptionRefundLots uint64, fundingFees uint64, assetConfigs *assetSet, mktConf *msgjson.Market, errCloser *dex.ErrorCloser) (*tradeRequest, error) {
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
@@ -6717,7 +6758,7 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 	})
 
 	tradeRequest, err := c.createTradeRequest(wallets, coins, redeemScripts, dc, redeemAddr, form,
-		lots, redemptionRefundLots, fundingFees, assetConfigs, mktConf, errCloser)
+		redemptionRefundLots, fundingFees, assetConfigs, mktConf, errCloser)
 	if err != nil {
 		return nil, err
 	}
@@ -6828,7 +6869,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 			fees = fundingFees
 		}
 		req, err := c.createTradeRequest(wallets, coins, allRedeemScripts[i], dc, redeemAddresses[i], tradeForm,
-			orderValues[i].MaxSwapCount, orderValues[i].MaxSwapCount, fees, assetConfigs, mktConf, errClosers[i])
+			orderValues[i].MaxSwapCount, fees, assetConfigs, mktConf, errClosers[i])
 		if err != nil {
 			return nil, err
 		}
@@ -8102,31 +8143,6 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	}
 
 	return trackers, nil
-}
-
-// resumeMixing unlocks and starts mixing on any FundsMixer that is enabled.
-func (c *Core) resumeMixing(crypter encrypt.Crypter, wallets []*xcWallet) {
-	for _, w := range wallets {
-		if mixer, is := w.Wallet.(asset.FundsMixer); is {
-			stats, err := mixer.FundsMixingStats()
-			if err != nil {
-				c.log.Errorf("FundsMixingStats error during login: %v", err)
-				continue
-			}
-			if !stats.Enabled || stats.IsMixing {
-				continue
-			}
-			if !w.unlocked() {
-				if err := w.Unlock(crypter); err != nil {
-					c.log.Errorf("Error unlocking mixing wallet on initialization: %v", err)
-					continue
-				}
-			}
-			if err := mixer.StartFundsMixer(c.ctx); err != nil {
-				c.log.Errorf("Error starting funds mixer on initialization: %v", err)
-			}
-		}
-	}
 }
 
 // loadDBTrades load's the active trades from the db, populates the trade's
@@ -9780,10 +9796,13 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		return err
 	}
 
+	mktIDs := make(map[string]struct{})
+
 	// Warn about new matches for unfunded orders. We still must ack all the
 	// matches in the 'match' request for the server to accept it, although the
 	// server doesn't require match acks. See (*Swapper).processMatchAcks.
 	for oid, srvMatch := range matches {
+		mktIDs[srvMatch.tracker.mktID] = struct{}{}
 		if !srvMatch.tracker.hasFundingCoins() {
 			c.log.Warnf("Received new match for unfunded order %v!", oid)
 			// In runMatches>tracker.negotiate we generate the matchTracker and
@@ -9813,6 +9832,10 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		c.updateBalances(updatedAssets)
 	}
 
+	for mktID := range mktIDs {
+		c.checkEpochResolution(dc.acct.host, mktID)
+	}
+
 	return err
 }
 
@@ -9839,10 +9862,12 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 		}
 		return newError(unknownOrderErr, "nomatch request received for unknown order %v from %s", oid, dc.acct.host)
 	}
+
 	updatedAssets, err := tracker.nomatch(oid)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
+	c.checkEpochResolution(dc.acct.host, tracker.mktID)
 	return err
 }
 
@@ -11307,57 +11332,12 @@ func (c *Core) FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error)
 }
 
 // ConfigureFundsMixer configures the wallet for funds mixing.
-func (c *Core) ConfigureFundsMixer(assetID uint32, serverAddress string, cert []byte) error {
+func (c *Core) ConfigureFundsMixer(assetID uint32, isMixerEnabled bool) error {
 	_, mw, err := c.mixingWallet(assetID)
 	if err != nil {
 		return err
 	}
-	return mw.ConfigureFundsMixer(serverAddress, cert)
-}
-
-// StartFundsMixer starts the funds mixer. This will error if the wallet
-// does not allow starting or stopping the mixer or if the mixer was already
-// started.
-func (c *Core) StartFundsMixer(appPW []byte, assetID uint32) error {
-	w, mw, err := c.mixingWallet(assetID)
-	if err != nil {
-		return err
-	}
-	if !w.unlocked() {
-		crypter, err := c.encryptionKey(appPW)
-		if err != nil {
-			return fmt.Errorf("password error: %w", err)
-		}
-		defer crypter.Close()
-		err = c.connectAndUnlock(crypter, w)
-		if err != nil {
-			return fmt.Errorf("unlock error: %w", err)
-		}
-	}
-	return mw.StartFundsMixer(c.ctx)
-}
-
-// StopFundsMixer stops the funds mixer. This will error if the wallet does
-// not allow starting or stopping the mixer or if the mixer was not already
-// running.
-func (c *Core) StopFundsMixer(assetID uint32) error {
-	_, mw, err := c.mixingWallet(assetID)
-	if err != nil {
-		return err
-	}
-	mw.StopFundsMixer()
-	return nil
-}
-
-// DisableFundsMixer disables the funds mixer and moves all funds to the
-// default account. The wallet will need to be re-configured to re-enable
-// mixing.
-func (c *Core) DisableFundsMixer(assetID uint32) error {
-	_, mw, err := c.mixingWallet(assetID)
-	if err != nil {
-		return err
-	}
-	return mw.DisableFundsMixer()
+	return mw.ConfigureFundsMixer(isMixerEnabled)
 }
 
 // NetworkFeeRate generates a network tx fee rate for the specified asset.
@@ -11470,4 +11450,65 @@ func (c *Core) TakeAction(assetID uint32, actionID string, actionB json.RawMessa
 		return fmt.Errorf("wallet for %s cannot handle user actions", w.Symbol)
 	}
 	return goGetter.TakeAction(actionID, actionB)
+}
+
+// GenerateBCHRecoveryTransaction generates a tx that spends all inputs from the
+// deprecated BCH wallet to the given recipient.
+func (c *Core) GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error) {
+	const bipID = 145
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, err
+	}
+	_, walletPW, err := c.assetSeedAndPass(bipID, crypter)
+	if err != nil {
+		return nil, err
+	}
+	return asset.SPVWithdrawTx(c.ctx, bipID, walletPW, recipient, c.assetDataDirectory(bipID), c.net, c.log.SubLogger("BCH"))
+}
+
+func (c *Core) checkEpochResolution(host string, mktID string) {
+	dc, _, _ := c.dex(host)
+	if dc == nil {
+		return
+	}
+	currentEpoch := dc.marketEpoch(mktID, time.Now())
+	lastEpoch := currentEpoch - 1
+	ts, inFlights := dc.marketTrades(mktID)
+	for _, ord := range inFlights {
+		if ord.Epoch == lastEpoch {
+			return
+		}
+	}
+	for _, t := range ts {
+		if t.epochIdx() == lastEpoch && t.status() == order.OrderStatusEpoch {
+			return
+		}
+		if t.cancel != nil && t.cancelEpochIdx() == lastEpoch {
+			t.mtx.RLock()
+			matched := t.cancel.matches.taker != nil
+			t.mtx.RUnlock()
+			if !matched {
+				return
+			}
+		}
+	}
+	dc.epochMtx.Lock()
+	sendUpdate := lastEpoch > dc.resolvedEpoch[mktID]
+	dc.resolvedEpoch[mktID] = lastEpoch
+	dc.epochMtx.Unlock()
+	if sendUpdate {
+		if bookie := dc.bookie(mktID); bookie != nil {
+			bookie.send(&BookUpdate{
+				Action:   EpochResolved,
+				Host:     dc.acct.host,
+				MarketID: mktID,
+				Payload: &ResolvedEpoch{
+					Current:  currentEpoch,
+					Resolved: lastEpoch,
+				},
+			})
+		}
+
+	}
 }

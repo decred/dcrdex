@@ -56,6 +56,7 @@ const (
 type binanceOrderBook struct {
 	mtx            sync.RWMutex
 	synced         atomic.Bool
+	syncChan       chan struct{}
 	numSubscribers uint32
 	cm             *dex.ConnectionMaster
 
@@ -143,6 +144,7 @@ func (b *binanceOrderBook) sync(ctx context.Context) {
 	if err := cm.ConnectOnce(ctx); err != nil {
 		b.log.Errorf("Error connecting %s order book: %v", b.mktID, err)
 	}
+	<-b.syncChan
 }
 
 func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no errors */) {
@@ -151,6 +153,8 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 	// We'll run two goroutines and sychronize two local vars.
 	var syncMtx sync.Mutex
 	var syncCache []*bntypes.BookUpdate
+	syncChan := make(chan struct{})
+	b.syncChan = syncChan
 	var updateID uint64 = updateIDUnsynced
 
 	resyncChan := make(chan struct{}, 1)
@@ -202,6 +206,10 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 			}
 		}
 		b.synced.Store(true)
+		if syncChan != nil {
+			close(syncChan)
+			syncChan = nil
+		}
 		return true
 	}
 
@@ -364,51 +372,41 @@ type bncAssetConfig struct {
 }
 
 func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
-	symbol := dex.BipIDSymbol(assetID)
-	if symbol == "" {
-		return nil, fmt.Errorf("no symbol found for %d", assetID)
-	}
-
-	coin := strings.ToUpper(symbol)
-	chain := strings.ToUpper(symbol)
-	if parts := strings.Split(symbol, "."); len(parts) > 1 {
-		coin = strings.ToUpper(parts[0])
-		chain = strings.ToUpper(parts[1])
-	}
-
 	ui, err := asset.UnitInfo(assetID)
 	if err != nil {
-		return nil, fmt.Errorf("no unit info found for %d", assetID)
+		return nil, err
+	}
+	coin := mapDexToBinanceSymbol(ui.Conventional.Unit)
+	chain := coin
+	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		pui, err := asset.UnitInfo(tkn.ParentID)
+		if err != nil {
+			return nil, err
+		}
+		chain = pui.Conventional.Unit
 	}
 
 	return &bncAssetConfig{
 		assetID:          assetID,
-		symbol:           symbol,
-		coin:             mapDexToBinanceSymbol(coin),
+		symbol:           dex.BipIDSymbol(assetID),
+		coin:             coin,
 		chain:            mapDexToBinanceSymbol(chain),
 		conversionFactor: ui.Conventional.ConversionFactor,
 	}, nil
 }
 
-func bncAssetCfgs(baseAsset, quoteAsset uint32) (*bncAssetConfig, *bncAssetConfig, error) {
-	baseCfg, err := bncAssetCfg(baseAsset)
+func bncAssetCfgs(baseID, quoteID uint32) (*bncAssetConfig, *bncAssetConfig, error) {
+	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	quoteCfg, err := bncAssetCfg(quoteAsset)
+	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return baseCfg, quoteCfg, nil
-}
-
-// bncBalance is the balance of an asset in conventional units. This must be
-// converted before returning.
-type bncBalance struct {
-	available float64
-	locked    float64
 }
 
 type tradeInfo struct {
@@ -431,6 +429,7 @@ type binance struct {
 	net                dex.Network
 	tradeIDNonce       atomic.Uint32
 	tradeIDNoncePrefix dex.Bytes
+	broadcast          func(interface{})
 
 	markets atomic.Value // map[string]*binanceMarket
 	// tokenIDs maps the token's symbol to the list of bip ids of the token
@@ -438,8 +437,14 @@ type binance struct {
 	// binance.
 	tokenIDs atomic.Value // map[string][]uint32
 
+	marketSnapshotMtx sync.Mutex
+	marketSnapshot    struct {
+		stamp time.Time
+		m     map[string]*Market
+	}
+
 	balanceMtx sync.RWMutex
-	balances   map[uint32]*bncBalance
+	balances   map[uint32]*ExchangeBalance
 
 	marketStreamMtx sync.RWMutex
 	marketStream    comms.WsConn
@@ -451,9 +456,6 @@ type binance struct {
 	tradeInfo          map[string]*tradeInfo
 	tradeUpdaters      map[int]chan *Trade
 	tradeUpdateCounter int
-
-	cexUpdatersMtx sync.RWMutex
-	cexUpdaters    map[chan interface{}]struct{}
 }
 
 var _ CEX = (*binance)(nil)
@@ -461,10 +463,10 @@ var _ CEX = (*binance)(nil)
 // TODO: Investigate stablecoin auto-conversion.
 // https://developers.binance.com/docs/wallet/endpoints/switch-busd-stable-coins-convertion
 
-func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binanceUS bool) *binance {
+func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
 	var marketsURL, accountsURL, wsURL string
 
-	switch net {
+	switch cfg.Net {
 	case dex.Testnet:
 		marketsURL, accountsURL, wsURL = testnetHttpURL, fakeBinanceURL, testnetWebsocketURL
 	case dex.Simnet:
@@ -484,24 +486,23 @@ func newBinance(apiKey, secretKey string, log dex.Logger, net dex.Network, binan
 	}
 
 	bnc := &binance{
-		log:                log,
+		log:                cfg.Logger,
+		broadcast:          cfg.Notify,
 		marketsURL:         marketsURL,
 		accountsURL:        accountsURL,
 		wsURL:              wsURL,
-		apiKey:             apiKey,
-		secretKey:          secretKey,
+		apiKey:             cfg.APIKey,
+		secretKey:          cfg.SecretKey,
 		knownAssets:        knownAssets,
-		balances:           make(map[uint32]*bncBalance),
+		balances:           make(map[uint32]*ExchangeBalance),
 		books:              make(map[string]*binanceOrderBook),
-		net:                net,
+		net:                cfg.Net,
 		tradeInfo:          make(map[string]*tradeInfo),
 		tradeUpdaters:      make(map[int]chan *Trade),
-		cexUpdaters:        make(map[chan interface{}]struct{}, 0),
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 	}
 
 	bnc.markets.Store(make(map[string]*bntypes.Market))
-	bnc.tokenIDs.Store(make(map[string][]uint32))
 
 	return bnc
 }
@@ -515,16 +516,25 @@ func (bnc *binance) setBalances(ctx context.Context) error {
 		return fmt.Errorf("error getting balances: %w", err)
 	}
 
-	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
+	tokenIDsI := bnc.tokenIDs.Load()
+	if tokenIDsI == nil {
+		return errors.New("cannot set balances before coin info is fetched")
+	}
+	tokenIDs := tokenIDsI.(map[string][]uint32)
 
 	bnc.balanceMtx.Lock()
 	defer bnc.balanceMtx.Unlock()
 
 	for _, bal := range resp.Balances {
 		for _, assetID := range getDEXAssetIDs(bal.Asset, tokenIDs) {
-			updatedBalance := &bncBalance{
-				available: bal.Free,
-				locked:    bal.Locked,
+			ui, err := asset.UnitInfo(assetID)
+			if err != nil {
+				bnc.log.Errorf("no unit info for known asset ID %d?", assetID)
+				continue
+			}
+			updatedBalance := &ExchangeBalance{
+				Available: uint64(math.Round(bal.Free * float64(ui.Conventional.ConversionFactor))),
+				Locked:    uint64(math.Round(bal.Locked * float64(ui.Conventional.ConversionFactor))),
 			}
 			currBalance, found := bnc.balances[assetID]
 			if found && *currBalance != *updatedBalance {
@@ -652,7 +662,6 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 					nextTick = time.After(time.Minute)
 				} else {
 					nextTick = time.After(time.Hour)
-					bnc.sendCexUpdateNotes()
 				}
 			case <-ctx.Done():
 				return
@@ -674,7 +683,6 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 					nextTick = time.After(time.Minute)
 				} else {
 					nextTick = time.After(time.Hour)
-					bnc.sendCexUpdateNotes()
 				}
 			case <-ctx.Done():
 				return
@@ -683,23 +691,6 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}()
 
 	return wg, nil
-}
-
-// SubscribeCEXUpdates returns a channel which sends an empty struct when
-// the balance of an asset on the CEX has been updated.
-func (bnc *binance) SubscribeCEXUpdates() (<-chan interface{}, func()) {
-	updater := make(chan interface{}, 128)
-	bnc.cexUpdatersMtx.Lock()
-	bnc.cexUpdaters[updater] = struct{}{}
-	bnc.cexUpdatersMtx.Unlock()
-
-	unsubscribe := func() {
-		bnc.cexUpdatersMtx.Lock()
-		delete(bnc.cexUpdaters, updater)
-		bnc.cexUpdatersMtx.Unlock()
-	}
-
-	return updater, unsubscribe
 }
 
 // Balance returns the balance of an asset at the CEX.
@@ -717,10 +708,7 @@ func (bnc *binance) Balance(assetID uint32) (*ExchangeBalance, error) {
 		return nil, fmt.Errorf("no %q balance found", assetConfig.coin)
 	}
 
-	return &ExchangeBalance{
-		Available: uint64(math.Floor(bal.available * float64(assetConfig.conversionFactor))),
-		Locked:    uint64(math.Floor(bal.locked * float64(assetConfig.conversionFactor))),
-	}, nil
+	return bal, nil
 }
 
 func (bnc *binance) generateTradeID() string {
@@ -1046,16 +1034,81 @@ func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
 			continue
 		}
 
-		balances[assetConfig.assetID] = &ExchangeBalance{
-			Available: uint64(bal.available * float64(assetConfig.conversionFactor)),
-			Locked:    uint64(bal.locked * float64(assetConfig.conversionFactor)),
-		}
+		balances[assetConfig.assetID] = bal
 	}
 
 	return balances, nil
 }
 
-func (bnc *binance) Markets(ctx context.Context) (_ []*Market, err error) {
+func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
+	bnc.marketSnapshotMtx.Lock()
+	defer bnc.marketSnapshotMtx.Unlock()
+
+	const snapshotTimeout = time.Minute * 30
+	if bnc.marketSnapshot.m != nil && time.Since(bnc.marketSnapshot.stamp) < snapshotTimeout {
+		return bnc.marketSnapshot.m, nil
+	}
+
+	mktIDs, err := bnc.MatchedMarkets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting market list for market data request: %w", err)
+	}
+
+	slugs := make([]string, len(mktIDs))
+	mkts := make(map[string]*MarketMatch, len(slugs))
+	for i, m := range mktIDs {
+		slugs[i] = m.Slug
+		mkts[m.Slug] = m
+	}
+	encSymbols, err := json.Marshal(slugs)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding symbold for market data request: %w", err)
+	}
+
+	q := make(url.Values)
+	q.Set("symbols", string(encSymbols))
+
+	var ds []*bntypes.MarketTicker24
+	if err = bnc.getAPI(ctx, "/api/v3/ticker/24hr", q, false, false, &ds); err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]*Market, len(ds))
+	for _, d := range ds {
+		mkt, found := mkts[d.Symbol]
+		if !found {
+			bnc.log.Errorf("Market %s not returned in market data request", d.Symbol)
+			continue
+		}
+		m[mkt.MarketID] = &Market{
+			BaseID:  mkt.BaseID,
+			QuoteID: mkt.QuoteID,
+			Day: &MarketDay{
+				Vol:            d.Volume,
+				QuoteVol:       d.QuoteVolume,
+				PriceChange:    d.PriceChange,
+				PriceChangePct: d.PriceChangePercent,
+				AvgPrice:       d.WeightedAvgPrice,
+				LastPrice:      d.LastPrice,
+				OpenPrice:      d.OpenPrice,
+				HighPrice:      d.HighPrice,
+				LowPrice:       d.LowPrice,
+			},
+		}
+	}
+	bnc.marketSnapshot.m = m
+	bnc.marketSnapshot.stamp = time.Now()
+	return m, nil
+}
+
+func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err error) {
+	if tokenIDsI := bnc.tokenIDs.Load(); tokenIDsI == nil {
+		if err := bnc.getCoinInfo(ctx); err != nil {
+			return nil, fmt.Errorf("error getting coin info for token IDs: %v", err)
+		}
+	}
+	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
+
 	bnMarkets := bnc.markets.Load().(map[string]*bntypes.Market)
 	if len(bnMarkets) == 0 {
 		bnMarkets, err = bnc.getMarkets(ctx)
@@ -1063,8 +1116,8 @@ func (bnc *binance) Markets(ctx context.Context) (_ []*Market, err error) {
 			return nil, fmt.Errorf("error getting markets: %v", err)
 		}
 	}
-	markets := make([]*Market, 0, len(bnMarkets))
-	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
+	markets := make([]*MarketMatch, 0, len(bnMarkets))
+
 	for _, mkt := range bnMarkets {
 		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs)
 		markets = append(markets, dexMarkets...)
@@ -1142,14 +1195,6 @@ func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string
 	return req, nil
 }
 
-func (bnc *binance) sendCexUpdateNotes() {
-	bnc.cexUpdatersMtx.RLock()
-	defer bnc.cexUpdatersMtx.RUnlock()
-	for updater := range bnc.cexUpdaters {
-		updater <- struct{}{}
-	}
-}
-
 func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) {
 	bnc.log.Debugf("Received outboundAccountPosition: %+v", update)
 	for _, bal := range update.Balances {
@@ -1157,12 +1202,26 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 	}
 
 	supportedTokens := bnc.tokenIDs.Load().(map[string][]uint32)
+	updates := make([]*BalanceUpdate, 0, len(update.Balances))
 
 	processSymbol := func(symbol string, bal *bntypes.WSBalance) {
 		for _, assetID := range getDEXAssetIDs(symbol, supportedTokens) {
-			bnc.balances[assetID] = &bncBalance{
-				available: bal.Free,
-				locked:    bal.Locked,
+			ui, err := asset.UnitInfo(assetID)
+			if err != nil {
+				bnc.log.Errorf("no unit info for known asset ID %d?", assetID)
+				return
+			}
+			oldBal := bnc.balances[assetID]
+			newBal := &ExchangeBalance{
+				Available: uint64(math.Round(bal.Free * float64(ui.Conventional.ConversionFactor))),
+				Locked:    uint64(math.Round(bal.Locked * float64(ui.Conventional.ConversionFactor))),
+			}
+			bnc.balances[assetID] = newBal
+			if oldBal != nil && *oldBal != *newBal {
+				updates = append(updates, &BalanceUpdate{
+					AssetID: assetID,
+					Balance: newBal,
+				})
 			}
 		}
 	}
@@ -1177,7 +1236,9 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 	}
 	bnc.balanceMtx.Unlock()
 
-	bnc.sendCexUpdateNotes()
+	for _, u := range updates {
+		bnc.broadcast(u)
+	}
 }
 
 func (bnc *binance) getTradeUpdater(tradeID string) (chan *Trade, *tradeInfo, error) {
@@ -1758,13 +1819,26 @@ func getDEXAssetIDs(binanceSymbol string, tokenIDs map[string][]uint32) []uint32
 		dexNonTokenSymbol = "eth"
 	}
 
+	isRegistered := func(assetID uint32) bool {
+		_, err := asset.UnitInfo(assetID)
+		return err == nil
+	}
+
 	assetIDs := make([]uint32, 0, 1)
 	if assetID, found := dex.BipSymbolID(dexNonTokenSymbol); found {
-		assetIDs = append(assetIDs, assetID)
+		// Only registered assets.
+		if isRegistered(assetID) {
+			assetIDs = append(assetIDs, assetID)
+		}
+
 	}
 
 	if tokenIDs, found := tokenIDs[dexSymbol]; found {
-		assetIDs = append(assetIDs, tokenIDs...)
+		for _, tokenID := range tokenIDs {
+			if isRegistered(tokenID) {
+				assetIDs = append(assetIDs, tokenID)
+			}
+		}
 	}
 
 	return assetIDs
@@ -1774,7 +1848,7 @@ func getDEXAssetIDs(binanceSymbol string, tokenIDs map[string][]uint32) []uint32
 // A symbol represents a single market on the CEX, but tokens on the DEX
 // have a different assetID for each network they are on, therefore they will
 // match multiple markets as defined using assetID.
-func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32) []*Market {
+func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32) []*MarketMatch {
 	var baseAssetIDs, quoteAssetIDs []uint32
 
 	baseAssetIDs = getDEXAssetIDs(binanceBaseSymbol, tokenIDs)
@@ -1787,12 +1861,14 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 		return nil
 	}
 
-	markets := make([]*Market, 0, len(baseAssetIDs)*len(quoteAssetIDs))
+	markets := make([]*MarketMatch, 0, len(baseAssetIDs)*len(quoteAssetIDs))
 	for _, baseID := range baseAssetIDs {
 		for _, quoteID := range quoteAssetIDs {
-			markets = append(markets, &Market{
-				BaseID:  baseID,
-				QuoteID: quoteID,
+			markets = append(markets, &MarketMatch{
+				Slug:     binanceBaseSymbol + binanceQuoteSymbol,
+				MarketID: dex.BipIDSymbol(baseID) + "_" + dex.BipIDSymbol(quoteID),
+				BaseID:   baseID,
+				QuoteID:  quoteID,
 			})
 		}
 	}

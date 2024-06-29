@@ -57,11 +57,6 @@ export default class State {
     return State.fetchLocal(State.darkModeLK) === '1'
   }
 
-  /* passwordIsCached returns whether or not there is a cached password in the cookies. */
-  static passwordIsCached () {
-    return !!this.getCookie(State.pwKeyCK)
-  }
-
   /* storeLocal puts the key-value pair into Window.localStorage. */
   static storeLocal (k: string, v: any) {
     window.localStorage.setItem(k, JSON.stringify(v))
