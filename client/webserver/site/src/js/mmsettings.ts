@@ -2164,6 +2164,7 @@ class AssetPane {
         this.pg.updateAllocations()
       }
     })
+
     this.nSwapFeesSlider = new MiniSlider(page.nSwapFeesSlider, (r: number) => {
       const { minR, range, prec } = defaultSwapReserves
       const [v] = toPrecision(minR + r * range, prec)
@@ -2404,7 +2405,7 @@ class AssetPane {
           input.setValue(v)
         })
         // TODO: default value should be smaller or none for base asset.
-        const [v, s] = toFourSigFigs(parseFloatDefault(currVal ?? start.x, start.x), 3)
+        const [v, s] = toFourSigFigs(parseFloatDefault(currVal, start.x), 3)
         walletConfig[opt.key] = s
         slider.setValue((v - start.x) / range)
         input.setValue(v)

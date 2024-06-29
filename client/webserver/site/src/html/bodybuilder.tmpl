@@ -50,9 +50,11 @@
     </div>
 
   </div>
-  <div id="loader" class="fill-abs flex-center d-hide">
-    <div class="ico-spinner spinner"></div>
-    <div id="loaderMsg" class="mx-2 d-hide"></div>
+  <div id="loader" class="fill-abs d-hide">
+    <div class="fill-abs flex-center blurry-bg">
+      <img class="d-inline-block bison-logo-square small-icon spinner">
+      <div id="loaderMsg" class="mx-2 d-hide"></div>
+    </div>
   </div>
 
   <div id="noteBox" class="d-hide">
@@ -66,7 +68,7 @@
         <div class="d-flex justify-content-center align-items-center px-1">
           <div class="note-indicator d-inline-block me-2"></div>
           <div class="note-subject flex-grow-1 d-inline-block fs16 demi"></div>
-          <span class="note-time nowrap pe-2"></span>
+          <span class="note-time text-nowrap pe-2"></span>
         </div>
         <div class="note-details fs15 px-3"></div>
       </div>
@@ -78,7 +80,7 @@
             <span data-tmpl="subject"></span>
             <span data-tmpl="details"></span>
           </div>
-          <span class="note-time nowrap"></span>
+          <span class="note-time text-nowrap"></span>
         </div>
       </div>
     </div>

@@ -85,8 +85,12 @@
       padding-top: 0.5rem;
     }
 
+    tr {
+      font-size: 1.1rem;
+    }
+
     tr.sub {
-      font-size: 0.875rem;
+      font-size: 0.9rem;
 
       &.last > td:first-child::before {
         content: '└─ ',
@@ -126,7 +130,6 @@
   }
 
   #checkmarkBox {
-    width: 100px;
     height: 100px;
   }
 

@@ -19,7 +19,7 @@ body {
   color: var(--text-color);
 }
 
-header {
+header#header {
   width: 100%;
   height: 70px;
   min-height: 70px;
@@ -28,6 +28,19 @@ header {
   align-items: center;
   z-index: 100;
   background-color: var(--section-bg);
+
+  a,
+  a:visited,
+  a:hover,
+  .plainlink,
+  .plainlink:visited,
+  .plainlink:hover {
+    text-decoration: none;
+  }
+
+  .hoverbright:hover {
+    color: var(--subtle-link-hover);
+  }
 }
 
 section {
@@ -59,21 +72,7 @@ div.mainlinks {
   }
 }
 
-header a,
-header a:visited,
-header a:hover,
-.plainlink,
-.plainlink:visited,
-.plainlink:hover {
-  text-decoration: none;
-}
-
-
-#header .hoverbright:hover {
-  color: var(--subtle-link-hover);
-}
-
-div.spinner {
+.spinner {
   animation: spin 2s infinite linear;
 
   &.fast {
@@ -246,7 +245,7 @@ z-index: 1000;
 }
 
 #loader {
-  background-color: var(--loader-bg);
+  background-color: var(--body-bg-lower-opacity);
 }
 
 #requiredActions {

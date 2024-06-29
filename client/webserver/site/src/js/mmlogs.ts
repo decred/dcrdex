@@ -42,6 +42,7 @@ export default class MarketMakerLogsPage extends BasePage {
     super()
     const page = this.page = Doc.idDescendants(main)
     Doc.cleanTemplates(page.eventTableRowTmpl, page.dexOrderTxRowTmpl)
+    Doc.bind(this.page.backButton, 'click', () => { app().loadPage(this.runStats ? 'mm' : 'mmarchives') })
     if (params?.host) {
       const url = new URL(window.location.href)
       url.searchParams.set('host', params.host)
@@ -101,7 +102,6 @@ export default class MarketMakerLogsPage extends BasePage {
     } else if (overview) {
       this.populateStats(overview.profitLoss.profit, overview.endTime)
     }
-    Doc.bind(this.page.backButton, 'click', () => { app().loadPage(runStats ? 'mm' : 'mmarchives') })
     const events = await this.getRunLogs()
     this.populateTable(events)
     app().registerNoteFeeder({

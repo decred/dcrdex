@@ -83,8 +83,8 @@ class MarketMakerBot {
     return postJSON('/api/marketreport', { host, baseID, quoteID })
   }
 
-  async startBot (appPW: string | undefined, config: StartConfig) {
-    return await postJSON('/api/startmarketmakingbot', { config, appPW })
+  async startBot (config: StartConfig) {
+    return await postJSON('/api/startmarketmakingbot', { config })
   }
 
   async stopBot (market: MarketWithHost) : Promise<void> {

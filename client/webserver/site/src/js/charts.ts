@@ -332,7 +332,8 @@ export class Chart {
       ctx.save()
       ctx.fillStyle = this.theme.body
       ctx.beginPath()
-      ctx.roundRect(x, y, w, h, r)
+      if (ctx.roundRect) ctx.roundRect(x, y, w, h, r) // Safari < 16 doesn't support
+      else ctx.rect(x, y, w, h)
       ctx.fill()
       ctx.restore()
     }

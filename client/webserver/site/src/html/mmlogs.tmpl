@@ -58,126 +58,134 @@
   <div id="forms" class="d-hide">
     <form id="dexOrderDetailsForm" class="position-relative flex-center flex-column fs20 d-hide">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+      <header>
           [[[dex_order_details]]]
+      </header>
+      <div class="flex-stretch-column">
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[ID]]]</span>
+          <span id="dexOrderID"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Rate]]]</span>
+          <span id="dexOrderRate"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Quantity]]]</span>
+          <span id="dexOrderQty"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Side]]]</span>
+          <span id="dexOrderSide"></span>
+        </span>
+        <table id="dexOrderTxsTable" class="mt-3 striped row-hover compact border row-border">
+          <thead>
+            <th scope="col">[[[ID]]]</th>
+            <th scope="col">[[[Type]]]</th>
+            <th scope="col">[[[Amount]]]</th>
+            <th scope="col">[[[Fees]]]</th>
+          </thead>
+          <tbody id="dexOrderTxsTableBody">
+            <tr id="dexOrderTxRowTmpl">
+              <td data-tmpl="id"></td>
+              <td data-tmpl="type"></td>
+              <td data-tmpl="amt"></td>
+              <td data-tmpl="fees"></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[ID]]]</span>
-        <span id="dexOrderID"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Rate]]]</span>
-        <span id="dexOrderRate"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Quantity]]]</span>
-        <span id="dexOrderQty"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Side]]]</span>
-        <span id="dexOrderSide"></span>
-      </span>
-      <table id="dexOrderTxsTable" class="my-3 striped row-hover compact border row-border">
-        <thead>
-          <th scope="col">[[[ID]]]</th>
-          <th scope="col">[[[Type]]]</th>
-          <th scope="col">[[[Amount]]]</th>
-          <th scope="col">[[[Fees]]]</th>
-        </thead>
-        <tbody id="dexOrderTxsTableBody">
-          <tr id="dexOrderTxRowTmpl">
-            <td data-tmpl="id"></td>
-            <td data-tmpl="type"></td>
-            <td data-tmpl="amt"></td>
-            <td data-tmpl="fees"></td>
-          </tr>
-        </tbody>
-      </table>
     </form>
 
     <form id="cexOrderDetailsForm" class="position-relative flex-center flex-column fs20 d-hide">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+      <header>
           [[[cex_order_details]]]
+      </header>
+      <div class="flex-stretch-column">
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[ID]]]</span>
+          <span id="cexOrderID"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Rate]]]</span>
+          <span id="cexOrderRate"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Quantity]]]</span>
+          <span id="cexOrderQty"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Side]]]</span>
+          <span id="cexOrderSide"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[base_filled]]]</span>
+          <span id="cexOrderBaseFilled"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[quote_filled]]]</span>
+          <span id="cexOrderQuoteFilled"></span>
+        </span>
       </div>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[ID]]]</span>
-        <span id="cexOrderID"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Rate]]]</span>
-        <span id="cexOrderRate"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Quantity]]]</span>
-        <span id="cexOrderQty"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Side]]]</span>
-        <span id="cexOrderSide"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[base_filled]]]</span>
-        <span id="cexOrderBaseFilled"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[quote_filled]]]</span>
-        <span id="cexOrderQuoteFilled"></span>
-      </span>
     </form>
 
     <form id="depositDetailsForm" class="position-relative flex-center flex-column fs20 d-hide">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+      <header>
           [[[deposit_details]]]
+      </header>
+      <div class="flex-stretch-column">
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[ID]]]</span>
+          <span id="depositID"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Amount]]]</span>
+          <span id="depositAmt"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Fees]]]</span>
+          <span id="depositFees"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Status]]]</span>
+          <span id="depositStatus"></span>
+        </span>
+        <span id="depositCreditSection" class="d-flex justify-content-between w-100">
+          <span>[[[credited_amt]]]</span>
+          <span id="depositCredit"></span>
+        </span>
       </div>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[ID]]]</span>
-        <span id="depositID"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Amount]]]</span>
-        <span id="depositAmt"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Fees]]]</span>
-        <span id="depositFees"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Status]]]</span>
-        <span id="depositStatus"></span>
-      </span>
-      <span id="depositCreditSection" class="d-flex justify-content-between w-100">
-        <span>[[[credited_amt]]]</span>
-        <span id="depositCredit"></span>
-      </span>
     </form>
 
     <form id="withdrawalDetailsForm" class="position-relative flex-center flex-column fs20 d-hide">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="px-2 py-1 text-center position-relative fs24 sans-light">
+      <header>
           [[[withdrawal_details]]]
+      </header>
+      <div class="flex-stretch-column">
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[ID]]]</span>
+          <span id="withdrawalID"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Amount]]]</span>
+          <span id="withdrawalAmt"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[Status]]]</span>
+          <span id="withdrawalStatus"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[tx_id]]]</span>
+          <span id="withdrawalTxID"></span>
+        </span>
+        <span class="d-flex justify-content-between w-100">
+          <span>[[[amt_received]]]</span>
+          <span id="withdrawalReceived"></span>
+        </span>
       </div>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[ID]]]</span>
-        <span id="withdrawalID"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Amount]]]</span>
-        <span id="withdrawalAmt"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[Status]]]</span>
-        <span id="withdrawalStatus"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[tx_id]]]</span>
-        <span id="withdrawalTxID"></span>
-      </span>
-      <span class="d-flex justify-content-between w-100">
-        <span>[[[amt_received]]]</span>
-        <span id="withdrawalReceived"></span>
-      </span>
     </form>
   </div>
 </div>

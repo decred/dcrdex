@@ -576,10 +576,6 @@ export interface LayoutMetrics {
   centerY: number
 }
 
-export interface PasswordCache {
-  pw: string
-}
-
 export interface PageElement extends HTMLElement {
   value?: string
   src?: string
