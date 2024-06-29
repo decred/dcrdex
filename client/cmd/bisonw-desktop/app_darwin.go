@@ -104,7 +104,6 @@ import (
 	mdCore "github.com/progrium/macdriver/core"
 	"github.com/progrium/macdriver/objc"
 	"github.com/progrium/macdriver/webkit"
-	"google.golang.org/appengine/log"
 )
 
 var (
@@ -119,7 +118,7 @@ var (
 	// completionHandler handles Objective-C callback functions for some
 	// delegate methods.
 	completionHandler = objc.Object_fromPointer(C.createCompletionHandlerDelegate())
-	dexcAppIcon       = cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon))))
+	dexcAppIcon       = cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(Icon, uint64(len(Icon))))
 )
 
 const (
@@ -196,8 +195,8 @@ func mainCore() error {
 	// Use a hidden "bisonw-desktop-state" file to prevent other processes when
 	// bisonw-desktop is already running (e.g when non-bundled version of
 	// bisonw-desktop is executed from cmd and vice versa).
-	dexcDesktopStateFile := filepath.Join(cfg.Config.AppData, cfg.Net.String(), ".dexc-desktop-state")
-	alreadyRunning, err := createDexcDesktopStateFile(dexcDesktopStateFile)
+	bisonwDesktopStateFile := filepath.Join(cfg.Config.AppData, cfg.Net.String(), ".bisonw-desktop-state")
+	alreadyRunning, err := createDesktopStateFile(bisonwDesktopStateFile)
 	if err != nil {
 		return err
 	}
@@ -523,7 +522,7 @@ func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationWillFinishLaunching
 	// still running (even with the dot below the dock icon).
 	obj := cocoa.NSStatusBar_System().StatusItemWithLength(cocoa.NSVariableStatusItemLength)
 	obj.Retain()
-	obj.Button().SetImage(cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon)))))
+	obj.Button().SetImage(cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(Icon, uint64(len(Icon)))))
 	obj.Button().Image().SetSize(mdCore.Size(18, 18))
 	obj.Button().SetToolTip("Self-custodial multi-wallet")
 
@@ -771,7 +770,7 @@ func handleJSFunctionsCallback(f_ objc.Object /* functionHandler */, ct objc.Obj
 // from a webpage script. Expected message content: [title, body].
 func sendDesktopNotificationJSCallback(msg []string) {
 	const expectedArgs = 2
-	const defaultTitle = "DCRDEX Notification"
+	const defaultTitle = "Bison Wallet Notification"
 	if len(msg) == 1 {
 		sendDesktopNotification(defaultTitle, msg[0])
 	} else if len(msg) >= expectedArgs {

@@ -341,7 +341,7 @@ var enUS = map[string]*intl.Translation{
 	ticketStatusRevokedID:            {T: "revoked"},
 	invalidSeedID:                    {T: "Invalid seed"},
 	passwordResetSuccessMsgID:        {T: "Your password reset was successful. You can proceed to login with your new password."},
-	browserNtfnEnabledID:             {T: "DCRDEX notifications enabled"},
+	browserNtfnEnabledID:             {T: "Bison Wallet notifications enabled"},
 	browserNtfnOrdersID:              {T: "Orders"},
 	browserNtfnMatchesID:             {T: "Matches"},
 	browserNtfnBondsID:               {T: "Bonds"},

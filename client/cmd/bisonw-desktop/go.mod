@@ -10,7 +10,6 @@ require (
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/progrium/macdriver v0.4.0
 	github.com/webview/webview v0.0.0-20230415172654-8387ff8945fc
-	google.golang.org/appengine v1.6.7
 )
 
 require (
