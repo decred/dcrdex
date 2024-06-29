@@ -39,6 +39,8 @@ func parseCoinpapNameSymbol(name, symbol string) (string, string) {
 	case "polygon":
 		symbol = "matic"
 		name = "polygon"
+	case "weth":
+		name = "weth"
 	}
 	return name, symbol
 }
