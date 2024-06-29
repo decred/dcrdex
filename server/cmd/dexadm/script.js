@@ -54,6 +54,7 @@ async function requestJSON (method, addr, opts) {
   page.listAccountsBttn.addEventListener('click', () => get('/accounts'))
   page.accountInfoBttn.addEventListener('click', () => get(`/account/${page.accountIDInput.value}`))
   page.accountOutcomesBttn.addEventListener('click', () => get(`/account/${page.accountIDInput.value}/outcomes?n=100`))
+  page.matchFailsBttn.addEventListener('click', () => get(`/account/${page.accountIDInput.value}/fails?n=100`))
   page.forgiveMatchBttn.addEventListener('click', () => get(`/account/${page.accountIDInput.value}/forgive_match/${page.forgiveMatchIDInput.value}`))
   page.notifyAccountBttn.addEventListener('click', () => post(`/account/${page.accountIDInput.value}/notify`, page.notifyAccountInput.value, 'text/plain'))
   page.broadcastBttn.addEventListener('click', () => post(`/notifyall`, page.broadcastInput.value, 'text/plain'))

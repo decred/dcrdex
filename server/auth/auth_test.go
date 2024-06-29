@@ -87,6 +87,9 @@ func (s *TStorage) StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime
 func (s *TStorage) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
 	return s.userMatchOutcomes, nil
 }
+func (s *TStorage) UserMatchFails(aid account.AccountID, lastN int) ([]*db.MatchFail, error) {
+	return nil, nil
+}
 func (s *TStorage) PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error) {
 	return s.userPreimageResults, nil
 }

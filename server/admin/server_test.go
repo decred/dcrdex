@@ -202,6 +202,9 @@ func (c *TCore) Accounts() ([]*db.Account, error) { return c.accounts, c.account
 func (c *TCore) AccountInfo(_ account.AccountID) (*db.Account, error) {
 	return c.account, c.accountErr
 }
+func (c *TCore) UserMatchFails(aid account.AccountID, n int) ([]*auth.MatchFail, error) {
+	return nil, nil
+}
 func (c *TCore) Penalize(_ account.AccountID, _ account.Rule, _ string) error {
 	return c.penalizeErr
 }
