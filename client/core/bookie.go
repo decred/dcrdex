@@ -391,6 +391,16 @@ func (dc *dexConnection) bookie(marketID string) *bookie {
 	return dc.books[marketID]
 }
 
+func (dc *dexConnection) midGap(base, quote uint32) (midGap uint64, err error) {
+	marketID := marketName(base, quote)
+	booky := dc.bookie(marketID)
+	if booky == nil {
+		return 0, fmt.Errorf("no bookie found for market %s", marketID)
+	}
+
+	return booky.MidGap()
+}
+
 // syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use. Use stopBook to unsubscribed and clean up the feed.

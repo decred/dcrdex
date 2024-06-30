@@ -5,13 +5,17 @@ package mm
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -41,12 +45,14 @@ func TestArbMMRebalance(t *testing.T) {
 	u.CEX = cex
 	u.botCfgV.Store(&BotConfig{})
 	c := newTCore()
+	c.setWalletsAndExchange(mkt)
 	u.clientCore = c
 	u.autoRebalanceCfg = &AutoRebalanceConfig{}
 	u.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
 	a := &arbMarketMaker{
 		unifiedExchangeAdaptor: u,
 		cex:                    newTBotCEXAdaptor(),
+		core:                   newTBotCoreAdaptor(c),
 		pendingOrders:          make(map[order.OrderID]uint64),
 	}
 	a.buyFees = &orderFees{
@@ -71,7 +77,6 @@ func TestArbMMRebalance(t *testing.T) {
 	}
 
 	var buyLots, sellLots, minDexBase, minCexBase /* totalBase, */, minDexQuote, minCexQuote /*, totalQuote */ uint64
-	// var perLot *lotCosts
 	setLots := func(buy, sell uint64) {
 		buyLots, sellLots = buy, sell
 		a.placementLotsV.Store(&placementLots{
@@ -105,9 +110,6 @@ func TestArbMMRebalance(t *testing.T) {
 		minCexBase = buyLots * lotSize
 		minDexQuote = calc.BaseToQuote(buyRate, buyLots*lotSize) + a.buyFees.bookingFeesPerLot*buyLots
 		minCexQuote = calc.BaseToQuote(sellRate, sellLots*lotSize)
-		// totalBase = minCexBase + minDexBase
-		// totalQuote = minCexQuote + minDexQuote
-		// perLot = a.lotCosts(buyLots, sellLots)
 	}
 
 	setBals := func(assetID uint32, dexBal, cexBal uint64) {
@@ -126,6 +128,12 @@ func TestArbMMRebalance(t *testing.T) {
 	}
 
 	checkPlacements := func(ps ...*expectedPlacement) {
+		t.Helper()
+
+		if len(ps) != len(c.multiTradesPlaced) {
+			t.Fatalf("expected %d placements, got %d", len(ps), len(c.multiTradesPlaced))
+		}
+
 		var n int
 		for _, ord := range c.multiTradesPlaced {
 			for _, pl := range ord.Placements {
@@ -153,28 +161,29 @@ func TestArbMMRebalance(t *testing.T) {
 	setBals(baseID, minDexBase, minCexBase)
 	setBals(quoteID, minDexQuote, minCexQuote)
 
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(false, buyRate, 1), ep(true, sellRate, 1))
 
 	// base balance too low
 	setBals(baseID, minDexBase-1, minCexBase)
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(false, buyRate, 1))
 
 	// quote balance too low
 	setBals(baseID, minDexBase, minCexBase)
 	setBals(quoteID, minDexQuote-1, minCexQuote)
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(true, sellRate, 1))
 
 	// cex quote balance too low. Can't place sell.
 	setBals(quoteID, minDexQuote, minCexQuote-1)
-	a.rebalance(epoch())
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(false, buyRate, 1))
 
 	// cex base balance too low. Can't place buy.
 	setBals(baseID, minDexBase, minCexBase-1)
 	setBals(quoteID, minDexQuote, minCexQuote)
+	a.rebalance(epoch(), &orderbook.OrderBook{})
 	checkPlacements(ep(true, sellRate, 1))
 }
 
@@ -307,6 +316,7 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 			cexTrades:              make(map[string]uint64),
 			pendingOrders:          test.pendingOrders,
 		}
+		arbMM.CEX = newTCEX()
 		arbMM.ctx = ctx
 		arbMM.setBotLoop(arbMM.botLoop)
 		arbMM.cfgV.Store(&ArbMarketMakerConfig{
@@ -425,6 +435,214 @@ func TestDEXPlacementRate(t *testing.T) {
 	}
 }
 
+func TestArbMMBotProblems(t *testing.T) {
+	const baseID, quoteID = 42, 0
+	const lotSize uint64 = 5e9
+	const sellSwapFees, sellRedeemFees = 3e6, 1e6
+	const buySwapFees, buyRedeemFees = 2e5, 1e5
+	const buyRate, sellRate = 1e7, 1.1e7
+
+	type test struct {
+		name              string
+		multiTradeBuyErr  error
+		multiTradeSellErr error
+		cexTooShallow     bool
+		noBalance         bool
+
+		expBotProblems *BotProblems
+	}
+
+	noIDErr1 := errors.New("no ID")
+	noIDErr2 := errors.New("no ID")
+
+	updateBotProblems := func(f func(*BotProblems)) *BotProblems {
+		bp := newBotProblems()
+		f(bp)
+		return bp
+	}
+
+	tests := []*test{
+		{
+			name:           "no problems",
+			expBotProblems: newBotProblems(),
+		},
+		{
+			name:              "wallet sync errors",
+			multiTradeBuyErr:  &core.WalletSyncError{AssetID: baseID},
+			multiTradeSellErr: &core.WalletSyncError{AssetID: quoteID},
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.WalletNotSynced[baseID] = true
+				bp.WalletNotSynced[quoteID] = true
+			}),
+		},
+		{
+			name:              "account suspended",
+			multiTradeBuyErr:  core.ErrAccountSuspended,
+			multiTradeSellErr: core.ErrAccountSuspended,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.AccountSuspended = true
+			}),
+		},
+		{
+			name:              "buy no peers, sell qty too high",
+			multiTradeBuyErr:  &core.WalletNoPeersError{AssetID: baseID},
+			multiTradeSellErr: &msgjson.Error{Code: msgjson.OrderQuantityTooHigh},
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.NoWalletPeers[baseID] = true
+				bp.UserLimitTooLow = true
+			}),
+		},
+		{
+			name:              "unidentified errors",
+			multiTradeBuyErr:  noIDErr1,
+			multiTradeSellErr: noIDErr2,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.PlaceBuyOrdersErr = noIDErr1
+				bp.PlaceSellOrdersErr = noIDErr2
+			}),
+		},
+		{
+			name:          "CEX too shallow",
+			cexTooShallow: true,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.CEXTooShallow = map[string]bool{
+					"buy":  true,
+					"sell": true,
+				}
+			}),
+		},
+		{
+			name:      "no balance",
+			noBalance: true,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.DEXBalanceDeficiencies = map[uint32]uint64{
+					baseID:  lotSize + sellSwapFees,
+					quoteID: calc.BaseToQuote(buyRate, lotSize) + buySwapFees,
+				}
+				bp.CEXBalanceDeficiencies = map[uint32]uint64{
+					baseID:  lotSize,
+					quoteID: calc.BaseToQuote(sellRate, lotSize),
+				}
+			}),
+		},
+	}
+
+	runTest := func(tt *test) {
+		t.Run(tt.name, func(t *testing.T) {
+			cex := newTCEX()
+			mkt := &core.Market{
+				RateStep:   1e3,
+				AtomToConv: 1,
+				LotSize:    lotSize,
+				BaseID:     baseID,
+				QuoteID:    quoteID,
+			}
+			u := mustParseAdaptorFromMarket(mkt)
+			u.CEX = cex
+			u.botCfgV.Store(&BotConfig{})
+			c := newTCore()
+			c.setWalletsAndExchange(mkt)
+			u.clientCore = c
+			u.autoRebalanceCfg = &AutoRebalanceConfig{}
+			u.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
+			a := &arbMarketMaker{
+				unifiedExchangeAdaptor: u,
+				core:                   newTBotCoreAdaptor(c),
+				cex:                    newTBotCEXAdaptor(),
+				pendingOrders:          make(map[order.OrderID]uint64),
+			}
+
+			cfg := &ArbMarketMakerConfig{
+				Profit: 0,
+				BuyPlacements: []*ArbMarketMakingPlacement{
+					{
+						Lots:       1,
+						Multiplier: 1,
+					},
+				},
+				SellPlacements: []*ArbMarketMakingPlacement{
+					{
+						Lots:       1,
+						Multiplier: 1,
+					},
+				},
+			}
+
+			var lots uint64 = 1
+			if tt.cexTooShallow {
+				lots++
+				cfg.BuyPlacements = append(cfg.BuyPlacements, &ArbMarketMakingPlacement{
+					Lots:       1,
+					Multiplier: 1,
+				})
+				cfg.SellPlacements = append(cfg.SellPlacements, &ArbMarketMakingPlacement{
+					Lots:       1,
+					Multiplier: 1,
+				})
+			}
+
+			a.cfgV.Store(cfg)
+			a.placementLotsV.Store(&placementLots{
+				baseLots:  lots,
+				quoteLots: lots,
+			})
+
+			cex.asksVWAP[lotSize] = vwapResult{
+				avg:     buyRate,
+				extrema: buyRate,
+			}
+			cex.bidsVWAP[lotSize] = vwapResult{
+				avg:     sellRate,
+				extrema: sellRate,
+			}
+
+			if !tt.noBalance {
+				setBals := func(assetID uint32, dexBal, cexBal uint64) {
+					a.baseDexBalances[assetID] = int64(dexBal)
+					a.baseCexBalances[assetID] = int64(cexBal)
+				}
+				setBals(baseID, 1e10, 1e10)
+				setBals(quoteID, 1e10, 1e10)
+			}
+
+			a.unifiedExchangeAdaptor.clientCore.(*tCore).multiTradeBuyErr = tt.multiTradeBuyErr
+			a.unifiedExchangeAdaptor.clientCore.(*tCore).multiTradeSellErr = tt.multiTradeSellErr
+
+			a.buyFees = &orderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: buyRedeemFees,
+						Swap:   buySwapFees,
+					},
+					Estimated: &LotFees{},
+				},
+				bookingFeesPerLot: buySwapFees,
+			}
+			a.sellFees = &orderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: sellRedeemFees,
+						Swap:   sellSwapFees,
+					},
+					Estimated: &LotFees{},
+				},
+				bookingFeesPerLot: sellSwapFees,
+			}
+
+			a.rebalance(1, &orderbook.OrderBook{})
+
+			problems := a.problems()
+			if !reflect.DeepEqual(tt.expBotProblems, problems) {
+				t.Fatalf("expected bot problems %v, got %v", tt.expBotProblems, problems)
+			}
+		})
+	}
+
+	for _, test := range tests {
+		runTest(test)
+	}
+}
+
 func mustParseMarket(m *core.Market) *market {
 	mkt, err := parseMarket("host.com", m)
 	if err != nil {
@@ -434,7 +652,10 @@ func mustParseMarket(m *core.Market) *market {
 }
 
 func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
-	return &unifiedExchangeAdaptor{
+	tCore := newTCore()
+	tCore.setWalletsAndExchange(m)
+
+	u := &unifiedExchangeAdaptor{
 		ctx:                context.Background(),
 		market:             mustParseMarket(m),
 		log:                tLogger,
@@ -446,7 +667,17 @@ func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
 		eventLogDB:         newTEventLogDB(),
 		pendingDeposits:    make(map[string]*pendingDeposit),
 		pendingWithdrawals: make(map[string]*pendingWithdrawal),
+		botProblems:        newBotProblems(),
+		clientCore:         tCore,
 	}
+
+	u.botCfgV.Store(&BotConfig{
+		Host:    u.host,
+		BaseID:  u.baseID,
+		QuoteID: u.quoteID,
+	})
+
+	return u
 }
 
 func mustParseAdaptor(cfg *exchangeAdaptorCfg) *unifiedExchangeAdaptor {

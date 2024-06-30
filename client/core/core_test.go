@@ -250,7 +250,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 					Base:            tUTXOAssetA.ID,
 					Quote:           tUTXOAssetB.ID,
 					LotSize:         dcrBtcLotSize,
-					ParcelSize:      100,
+					ParcelSize:      1,
 					RateStep:        dcrBtcRateStep,
 					EpochLen:        60000,
 					MarketBuyBuffer: 1.1,
@@ -11147,6 +11147,118 @@ func TestPokesCachePokes(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestTradingLimits(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+
+	checkTradingLimits := func(expectedUserParcels, expectedParcelLimit uint32) {
+		t.Helper()
+
+		userParcels, parcelLimit, err := rig.core.TradingLimits(tDexHost)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if userParcels != expectedUserParcels {
+			t.Fatalf("expected user parcels %d, got %d", expectedUserParcels, userParcels)
+		}
+
+		if parcelLimit != expectedParcelLimit {
+			t.Fatalf("expected parcel limit %d, got %d", expectedParcelLimit, parcelLimit)
+		}
+	}
+
+	rig.dc.acct.rep.BondedTier = 10
+	book := newBookie(rig.dc, tUTXOAssetA.ID, tUTXOAssetB.ID, nil, tLogger)
+	rig.dc.books[tDcrBtcMktName] = book
+	checkTradingLimits(0, 20)
+
+	oids := []order.OrderID{
+		{0x01}, {0x02}, {0x03}, {0x04}, {0x05},
+	}
+
+	// Add an epoch order, 2 lots not likely taker
+	ord := &order.LimitOrder{
+		Force: order.StandingTiF,
+		P:     order.Prefix{ServerTime: time.Now()},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: dcrBtcLotSize * 2,
+		},
+	}
+	tracker := &trackedTrade{
+		Order:  ord,
+		preImg: newPreimage(),
+		mktID:  tDcrBtcMktName,
+		db:     rig.db,
+		dc:     rig.dc,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+		},
+	}
+	rig.dc.trades[oids[0]] = tracker
+	checkTradingLimits(2, 20)
+
+	// Add another epoch order, 2 lots, likely taker, so 2x
+	ord = &order.LimitOrder{
+		Force: order.ImmediateTiF,
+		P:     order.Prefix{ServerTime: time.Now()},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: dcrBtcLotSize * 2,
+		},
+	}
+	tracker = &trackedTrade{
+		Order:  ord,
+		preImg: newPreimage(),
+		mktID:  tDcrBtcMktName,
+		db:     rig.db,
+		dc:     rig.dc,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+		},
+	}
+	rig.dc.trades[oids[1]] = tracker
+	checkTradingLimits(6, 20)
+
+	// Add partially filled booked order
+	ord = &order.LimitOrder{
+		P: order.Prefix{ServerTime: time.Now()},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: dcrBtcLotSize * 2,
+			FillAmt:  dcrBtcLotSize,
+		},
+	}
+	tracker = &trackedTrade{
+		Order:  ord,
+		preImg: newPreimage(),
+		mktID:  tDcrBtcMktName,
+		db:     rig.db,
+		dc:     rig.dc,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusBooked,
+		},
+	}
+	rig.dc.trades[oids[2]] = tracker
+	checkTradingLimits(7, 20)
+
+	// Add settling match to the booked order
+	tracker.matches = map[order.MatchID]*matchTracker{
+		{0x01}: {
+			MetaMatch: db.MetaMatch{
+				UserMatch: &order.UserMatch{
+					Quantity: dcrBtcLotSize,
+				},
+				MetaData: &db.MatchMetaData{
+					Proof: db.MatchProof{},
+				},
+			},
+		},
+	}
+	checkTradingLimits(8, 20)
 }
 
 func TestTakeAction(t *testing.T) {

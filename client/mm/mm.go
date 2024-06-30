@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // clientCore is satisfied by core.Core.
@@ -29,7 +31,6 @@ type clientCore interface {
 	WalletTraits(assetID uint32) (asset.WalletTrait, error)
 	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
 	MaxFundingFees(fromAsset uint32, host string, numTrades uint32, fromSettings map[string]string) (uint64, error)
-	User() *core.User
 	Login(pw []byte) error
 	OpenWallet(assetID uint32, appPW []byte) error
 	Broadcast(core.Notification)
@@ -39,6 +40,9 @@ type clientCore interface {
 	Network() dex.Network
 	Order(oidB dex.Bytes) (*core.Order, error)
 	WalletTransaction(uint32, string) (*asset.WalletTransaction, error)
+	TradingLimits(host string) (userParcels, parcelLimit uint32, err error)
+	WalletState(assetID uint32) *core.WalletState
+	Exchange(host string) (*core.Exchange, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -98,6 +102,7 @@ type bot interface {
 	DEXBalance(assetID uint32) *BotBalance
 	CEXBalance(assetID uint32) *BotBalance
 	stats() *RunStats
+	problems() *BotProblems
 	updateConfig(cfg *BotConfig) error
 	updateInventory(balanceDiffs *BotInventoryDiffs)
 	withPause(func() error) error
@@ -205,12 +210,106 @@ type CEXStatus struct {
 	Balances        map[uint32]*libxc.ExchangeBalance `json:"balances"`
 }
 
+// StampedError is an error with a timestamp.
+type StampedError struct {
+	Stamp int64  `json:"stamp"`
+	Error string `json:"error"`
+}
+
+func newStampedError(err error) *StampedError {
+	return &StampedError{
+		Stamp: time.Now().Unix(),
+		Error: err.Error(),
+	}
+}
+
+// BotProblems is a collection of problems that may affect the operation of a
+// bot.
+type BotProblems struct {
+	// WalletNotSynced is true if orders were unable to be placed due to a
+	// wallet not being synced.
+	WalletNotSynced map[uint32]bool `json:"walletSyncError"`
+	// NoWalletPeers is true if orders were unable to be placed due to a wallet
+	// not having any peers.
+	NoWalletPeers map[uint32]bool `json:"noWalletPeers"`
+	// AccountSuspended is true if orders were unable to be placed due to the
+	// account being suspended.
+	AccountSuspended bool
+	// NoOracleAvailable is true if the oracle is not available for the market
+	// when it is required.
+	NoOracleAvailable bool `json:"noOracleAvailable"`
+	// UserLimitTooLow is true if the user does not have the bonding amount
+	// necessary to place all of their orders.
+	UserLimitTooLow bool `json:"userLimitTooLow"`
+	// EmptyMarket is true if the market has no orders and no empty market rate
+	// is available.
+	EmptyMarket bool `json:"emptyMarket"`
+	// MidGapOutsideOracleSafeRange is true if the mid-gap is outside the oracle's
+	// safe range as defined by the config.
+	MidGapOutsideOracleSafeRange bool `json:"midGapOutsideOracleSafeRange"`
+	// CEXOrderbookUnsynced is true if the CEX orderbook is unsynced.
+	CEXOrderbookUnsynced bool `json:"cexOrderbookUnsynced"`
+	// DeterminePlacementsErr is non-nil if there was an unidentified error
+	// when attempting to determine the rates at which to place orders.
+	DeterminePlacementsErr error `json:"determinePlacementsErr"`
+	// PlaceBuyOrdersErr is non-nil if there was an unidentified error while
+	// placing buy orders.
+	PlaceBuyOrdersErr error `json:"placeBuyOrdersErr"`
+	// PlaceBuyOrdersErr is non-nil if there was an unidentified error while
+	// placing sell orders.
+	PlaceSellOrdersErr error `json:"placeSellOrdersErr"`
+	// DepositErr is set if the last attempted deposit for an asset failed.
+	DepositErr map[uint32]*StampedError `json:"depositErr"`
+	// WithdrawErr is set if the last attempted withdrawal for an asset failed.
+	WithdrawErr map[uint32]*StampedError `json:"withdrawErr"`
+	// CEXTradeErr is set if the last attempted CEX trade failed.
+	CEXTradeErr *StampedError `json:"cexTradeErr"`
+	// AdditionalError is a catch-all for any other error that may have occurred.
+	AdditionalError error `json:"additionalError"`
+	// DEXBalanceDeficiencies is a map of asset IDs to the amount of the asset
+	// that is still needed to place all orders.
+	DEXBalanceDeficiencies map[uint32]uint64 `json:"dexBalanceDeficiencies"`
+	// CEXBalanceDeficiencies is a map of asset IDs to the amount of the asset
+	// that is still needed to place all orders.
+	CEXBalanceDeficiencies map[uint32]uint64 `json:"cexBalanceDeficiencies"`
+	// CEXTooShallow is a map from "sell" or "buy" to whether the CEX orderbook
+	// is too shallow determine the rate at which to place orders. This is only
+	// relevant for the Arb-MM bot.
+	CEXTooShallow map[string]bool `json:"cexTooShallow"`
+}
+
+func newBotProblems() *BotProblems {
+	// *** Each map added here must be copied in the copy method ***
+	return &BotProblems{
+		WalletNotSynced:        make(map[uint32]bool),
+		NoWalletPeers:          make(map[uint32]bool),
+		DepositErr:             make(map[uint32]*StampedError),
+		WithdrawErr:            make(map[uint32]*StampedError),
+		DEXBalanceDeficiencies: make(map[uint32]uint64),
+		CEXBalanceDeficiencies: make(map[uint32]uint64),
+		CEXTooShallow:          make(map[string]bool),
+	}
+}
+
+func (bp *BotProblems) copy() *BotProblems {
+	copy := *bp
+	copy.WalletNotSynced = utils.CopyMap(bp.WalletNotSynced)
+	copy.NoWalletPeers = utils.CopyMap(bp.NoWalletPeers)
+	copy.DepositErr = utils.CopyMap(bp.DepositErr)
+	copy.WithdrawErr = utils.CopyMap(bp.WithdrawErr)
+	copy.DEXBalanceDeficiencies = utils.CopyMap(bp.DEXBalanceDeficiencies)
+	copy.CEXBalanceDeficiencies = utils.CopyMap(bp.CEXBalanceDeficiencies)
+	copy.CEXTooShallow = utils.CopyMap(bp.CEXTooShallow)
+	return &copy
+}
+
 // BotStatus is state information about a configured bot.
 type BotStatus struct {
 	Config  *BotConfig `json:"config"`
 	Running bool       `json:"running"`
 	// RunStats being non-nil means the bot is running.
-	RunStats *RunStats `json:"runStats"`
+	RunStats *RunStats    `json:"runStats"`
+	Problems *BotProblems `json:"problems"`
 }
 
 // Status generates a Status for the MarketMaker. This returns the status of
@@ -226,13 +325,16 @@ func (m *MarketMaker) Status() *Status {
 		mkt := MarketWithHost{botCfg.Host, botCfg.BaseID, botCfg.QuoteID}
 		rb := runningBots[mkt]
 		var stats *RunStats
+		var problems *BotProblems
 		if rb != nil {
 			stats = rb.stats()
+			problems = rb.problems()
 		}
 		status.Bots = append(status.Bots, &BotStatus{
 			Config:   botCfg,
 			Running:  rb != nil,
 			RunStats: stats,
+			Problems: problems,
 		})
 	}
 	for _, cex := range m.cexList() {
