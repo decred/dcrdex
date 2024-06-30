@@ -2858,6 +2858,7 @@ func trade(t *testing.T, async bool) {
 	defer rig.shutdown()
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	dcrWallet.hookedUp = false
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
 	dcrWallet.Unlock(rig.crypter)
@@ -9550,6 +9551,7 @@ func TestWalletSyncing(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
 	dcrWallet.synced = false
 	dcrWallet.syncProgress = 0
+	dcrWallet.hookedUp = false
 	// Connect with tCore.connectWallet below.
 
 	tStart := time.Now()
