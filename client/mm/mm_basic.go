@@ -174,6 +174,40 @@ func (c *BasicMarketMakingConfig) Validate() error {
 	return nil
 }
 
+func (c *BasicMarketMakingConfig) copy() *BasicMarketMakingConfig {
+	cfg := *c
+
+	sellPlacements := make([]*OrderPlacement, 0, len(c.SellPlacements))
+	for _, p := range c.SellPlacements {
+		sellPlacements = append(sellPlacements, &OrderPlacement{
+			Lots:      p.Lots,
+			GapFactor: p.GapFactor,
+		})
+	}
+	cfg.SellPlacements = sellPlacements
+
+	buyPlacements := make([]*OrderPlacement, 0, len(c.BuyPlacements))
+	for _, p := range c.BuyPlacements {
+		buyPlacements = append(buyPlacements, &OrderPlacement{
+			Lots:      p.Lots,
+			GapFactor: p.GapFactor,
+		})
+	}
+	cfg.BuyPlacements = buyPlacements
+
+	return &cfg
+}
+
+func (c *BasicMarketMakingConfig) updateLotSize(originalLotSize, newLotSize uint64) {
+	for _, p := range c.SellPlacements {
+		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	}
+
+	for _, p := range c.BuyPlacements {
+		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	}
+}
+
 type basicMMCalculator interface {
 	basisPrice() uint64
 	halfSpread(uint64) (uint64, error)
@@ -245,19 +279,20 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 		}
 	}
 
+	rateStep := b.rateStep.Load()
 	if basisPrice > 0 {
-		return steppedRate(uint64(basisPrice), b.rateStep)
+		return steppedRate(uint64(basisPrice), rateStep)
 	}
 
 	// TODO: add a configuration to turn off use of fiat rate?
 	fiatRate := b.core.ExchangeRateFromFiatSources()
 	if fiatRate > 0 {
-		return steppedRate(fiatRate, b.rateStep)
+		return steppedRate(fiatRate, rateStep)
 	}
 
 	if b.cfg.EmptyMarketRate > 0 {
 		emptyMsgRate := b.msgRate(b.cfg.EmptyMarketRate)
-		return steppedRate(emptyMsgRate, b.rateStep)
+		return steppedRate(emptyMsgRate, rateStep)
 	}
 
 	return 0
@@ -319,7 +354,7 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 	 */
 
 	f := sellFeesInBaseUnits + buyFeesInBaseUnits
-	l := b.lotSize
+	l := b.lotSize.Load()
 
 	r := float64(basisPrice) / calc.RateEncodingFactor
 	g := float64(f) * r / float64(f+2*l)
@@ -341,7 +376,6 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 
 type basicMarketMaker struct {
 	*unifiedExchangeAdaptor
-	cfgV             atomic.Value // *BasicMarketMakingConfig
 	core             botCoreAdaptor
 	oracle           oracle
 	rebalanceRunning atomic.Bool
@@ -351,7 +385,7 @@ type basicMarketMaker struct {
 var _ bot = (*basicMarketMaker)(nil)
 
 func (m *basicMarketMaker) cfg() *BasicMarketMakingConfig {
-	return m.cfgV.Load().(*BasicMarketMakingConfig)
+	return m.botCfg().BasicMMConfig
 }
 
 func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapFactor float64) uint64 {
@@ -373,7 +407,7 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 		adj += feeAdj
 	}
 
-	adj = steppedRate(adj, m.rateStep)
+	adj = steppedRate(adj, m.rateStep.Load())
 
 	if sell {
 		return basisPrice + adj
@@ -443,6 +477,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	}
 
 	buyOrders, sellOrders := m.ordersToPlace(basisPrice, feeAdj)
+
 	m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
 	m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
 }
@@ -467,6 +502,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+
 		for {
 			select {
 			case ni := <-bookFeed.Next():
@@ -481,21 +517,6 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	}()
 
 	return &wg, nil
-}
-
-func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
-	if cfg.BasicMMConfig == nil {
-		// implies bug in caller
-		return errors.New("no market making config provided")
-	}
-
-	err := cfg.BasicMMConfig.Validate()
-	if err != nil {
-		return fmt.Errorf("invalid market making config: %v", err)
-	}
-
-	m.cfgV.Store(cfg.BasicMMConfig)
-	return nil
 }
 
 // RunBasicMarketMaker starts a basic market maker bot.
@@ -520,7 +541,6 @@ func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle 
 		core:                   adaptor,
 		oracle:                 oracle,
 	}
-	basicMM.cfgV.Store(cfg.BasicMMConfig)
 	adaptor.setBotLoop(basicMM.botLoop)
 	return basicMM, nil
 }

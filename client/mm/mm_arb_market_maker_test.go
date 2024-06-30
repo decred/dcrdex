@@ -74,22 +74,14 @@ func TestArbMMRebalance(t *testing.T) {
 	// var perLot *lotCosts
 	setLots := func(buy, sell uint64) {
 		buyLots, sellLots = buy, sell
-		a.placementLotsV.Store(&placementLots{
-			baseLots:  sellLots,
-			quoteLots: buyLots,
-		})
-		a.cfgV.Store(&ArbMarketMakerConfig{
-			Profit: 0,
-			BuyPlacements: []*ArbMarketMakingPlacement{
-				{
-					Lots:       buyLots,
-					Multiplier: 1,
+		u.botCfgV.Store(&BotConfig{
+			ArbMarketMakerConfig: &ArbMarketMakerConfig{
+				Profit: 0,
+				BuyPlacements: []*ArbMarketMakingPlacement{
+					{Lots: buyLots, Multiplier: 1},
 				},
-			},
-			SellPlacements: []*ArbMarketMakingPlacement{
-				{
-					Lots:       sellLots,
-					Multiplier: 1,
+				SellPlacements: []*ArbMarketMakingPlacement{
+					{Lots: sellLots, Multiplier: 1},
 				},
 			},
 		})
@@ -309,9 +301,12 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 		}
 		arbMM.ctx = ctx
 		arbMM.setBotLoop(arbMM.botLoop)
-		arbMM.cfgV.Store(&ArbMarketMakerConfig{
-			Profit: profit,
+		arbMM.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+			ArbMarketMakerConfig: &ArbMarketMakerConfig{
+				Profit: profit,
+			},
 		})
+
 		arbMM.currEpoch.Store(123)
 		err := arbMM.runBotLoop(ctx)
 		if err != nil {
@@ -404,7 +399,7 @@ func TestDEXPlacementRate(t *testing.T) {
 		}
 
 		expectedProfitableSellRate := uint64(float64(tt.counterTradeRate) * (1 + tt.profit))
-		additional := calc.BaseToQuote(sellRate, tt.mkt.lotSize) - calc.BaseToQuote(expectedProfitableSellRate, tt.mkt.lotSize)
+		additional := calc.BaseToQuote(sellRate, tt.mkt.lotSize.Load()) - calc.BaseToQuote(expectedProfitableSellRate, tt.mkt.lotSize.Load())
 		if additional > tt.fees*101/100 || additional < tt.fees*99/100 {
 			t.Fatalf("%s: expected additional %d but got %d", tt.name, tt.fees, additional)
 		}
@@ -414,7 +409,7 @@ func TestDEXPlacementRate(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", tt.name, err)
 		}
 		expectedProfitableBuyRate := uint64(float64(tt.counterTradeRate) / (1 + tt.profit))
-		savings := calc.BaseToQuote(expectedProfitableBuyRate, tt.mkt.lotSize) - calc.BaseToQuote(buyRate, tt.mkt.lotSize)
+		savings := calc.BaseToQuote(expectedProfitableBuyRate, tt.mkt.lotSize.Load()) - calc.BaseToQuote(buyRate, tt.mkt.lotSize.Load())
 		if savings > tt.fees*101/100 || savings < tt.fees*99/100 {
 			t.Fatalf("%s: expected savings %d but got %d", tt.name, tt.fees, savings)
 		}
