@@ -249,13 +249,13 @@ type BotProblems struct {
 	MidGapOutsideOracleSafeRange bool `json:"midGapOutsideOracleSafeRange"`
 	// CEXOrderbookUnsynced is true if the CEX orderbook is unsynced.
 	CEXOrderbookUnsynced bool `json:"cexOrderbookUnsynced"`
-	// DeterminePlacementsErr is true if there was an unidentified error when
-	// attempting to determine the rates at which to place orders.
+	// DeterminePlacementsErr is non-nil if there was an unidentified error
+	// when attempting to determine the rates at which to place orders.
 	DeterminePlacementsErr error `json:"determinePlacementsErr"`
-	// PlaceBuyOrdersErr is true if there was an unidentified error while
+	// PlaceBuyOrdersErr is non-nil if there was an unidentified error while
 	// placing buy orders.
 	PlaceBuyOrdersErr error `json:"placeBuyOrdersErr"`
-	// PlaceBuyOrdersErr is true if there was an unidentified error while
+	// PlaceBuyOrdersErr is non-nil if there was an unidentified error while
 	// placing sell orders.
 	PlaceSellOrdersErr error `json:"placeSellOrdersErr"`
 	// DepositErr is set if the last attempted deposit for an asset failed.

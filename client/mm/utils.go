@@ -28,6 +28,7 @@ func clearBotProblemErrors(problems *BotProblems) {
 	problems.AccountSuspended = false
 	problems.NoOracleAvailable = false
 	problems.EmptyMarket = false
+	problems.CEXOrderbookUnsynced = false
 }
 
 // updateBotProblemsBasedOnError updates BotProblems based on an error
