@@ -21,7 +21,11 @@ const (
 
 	// dustLimit = 1_000_000 // sats => 0.01 DGB, the "soft" limit (DEFAULT_DUST_LIMIT) **TODO check for dgb**
 
-	minNetworkVersion       = 7170300
+	// Digibyte's version went from 7170300 in v7.17 to 82200 in version 8.22.
+	// I know of no RPC changes that would make 8.22 wallets incompatible with
+	// 7.17, so I guess we'll support both and let the chain decide when to
+	// kill 7.17 wallets.
+	minNetworkVersion       = 82200
 	walletTypeRPC           = "digibytedRPC"
 	defaultRedeemConfTarget = 2
 )
