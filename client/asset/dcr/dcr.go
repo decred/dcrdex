@@ -5892,7 +5892,7 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 	}
 	msgTx, err := dcr.wallet.GetRawTransaction(ctx, txHash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GetRawTransaction error: %v", err)
 	}
 
 	var totalIn uint64
@@ -6828,44 +6828,47 @@ func (dcr *ExchangeWallet) WalletTransaction(ctx context.Context, txID string) (
 		}
 	}
 
-	txs, err := dcr.TxHistory(1, &txID, false)
+	txHistoryDB := dcr.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
+	}
+
+	tx, err := txHistoryDB.GetTx(txID)
 	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 		return nil, err
 	}
-
-	var tx *asset.WalletTransaction
-	if len(txs) > 0 {
-		tx = txs[0]
+	if tx != nil && tx.Confirmed {
+		return tx, nil
 	}
 
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding txid %s: %w", txID, err)
+	}
+	gtr, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err != nil {
+		return nil, fmt.Errorf("error getting transaction %s: %w", txID, err)
+	}
+	if len(gtr.Details) == 0 {
+		return nil, fmt.Errorf("no details found for transaction %s", txID)
+	}
+
+	var blockHeight, blockTime uint64
+	if gtr.BlockHash != "" {
+		blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding block hash %s: %w", gtr.BlockHash, err)
+		}
+		blockHeader, err := dcr.wallet.GetBlockHeader(ctx, blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error getting block header for block %s: %w", blockHash, err)
+		}
+		blockHeight = uint64(blockHeader.Height)
+		blockTime = uint64(blockHeader.Timestamp.Unix())
+	}
+
+	updated := tx == nil
 	if tx == nil {
-		txHash, err := chainhash.NewHashFromStr(txID)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding txid %s: %w", txID, err)
-		}
-
-		gtr, err := dcr.wallet.GetTransaction(ctx, txHash)
-		if err != nil {
-			return nil, fmt.Errorf("error getting transaction %s: %w", txID, err)
-		}
-		if len(gtr.Details) == 0 {
-			return nil, fmt.Errorf("no details found for transaction %s", txID)
-		}
-
-		var blockHeight, blockTime uint64
-		if gtr.BlockHash != "" {
-			blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
-			if err != nil {
-				return nil, fmt.Errorf("error decoding block hash %s: %w", gtr.BlockHash, err)
-			}
-			blockHeader, err := dcr.wallet.GetBlockHeader(ctx, blockHash)
-			if err != nil {
-				return nil, fmt.Errorf("error getting block header for block %s: %w", blockHash, err)
-			}
-			blockHeight = uint64(blockHeader.Height)
-			blockTime = uint64(blockHeader.Timestamp.Unix())
-		}
-
 		blockIndex := int64(blockHeight)
 		regularTx := walletjson.LTTTRegular
 		tx, err = dcr.idUnknownTx(ctx, &ListTransactionsResult{
@@ -6876,8 +6879,18 @@ func (dcr *ExchangeWallet) WalletTransaction(ctx context.Context, txID string) (
 			TxType:     &regularTx,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("error identifying transaction: %v", err)
+			return nil, fmt.Errorf("xerror identifying transaction: %v", err)
 		}
+	}
+
+	if tx.BlockNumber != blockHeight || tx.Timestamp != blockTime {
+		tx.BlockNumber = blockHeight
+		tx.Timestamp = blockTime
+		updated = true
+	}
+
+	if updated {
+		dcr.addTxToHistory(tx, txHash, true)
 	}
 
 	// If the wallet knows about the transaction, it will be part of the

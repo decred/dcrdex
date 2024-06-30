@@ -6075,6 +6075,7 @@ func (btc *intermediaryWallet) WalletTransaction(ctx context.Context, txID strin
 		blockHeight = uint32(height)
 	}
 
+	updated := tx == nil
 	if tx == nil {
 		tx, err = btc.idUnknownTx(&ListTransactionsResult{
 			BlockHeight: blockHeight,
@@ -6086,9 +6087,17 @@ func (btc *intermediaryWallet) WalletTransaction(ctx context.Context, txID strin
 		}
 	}
 
-	tx.BlockNumber = uint64(blockHeight)
-	tx.Timestamp = gtr.BlockTime
-	tx.Confirmed = blockHeight > 0
+	if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != gtr.BlockTime {
+		tx.BlockNumber = uint64(blockHeight)
+		tx.Timestamp = gtr.BlockTime
+		tx.Confirmed = blockHeight > 0
+		updated = true
+	}
+
+	if updated {
+		btc.addTxToHistory(tx, txHash, true, false)
+	}
+
 	return tx, nil
 }
 
