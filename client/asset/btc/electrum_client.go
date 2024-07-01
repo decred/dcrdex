@@ -57,6 +57,8 @@ type electrumWalletClient interface {
 	GetAddressHistory(ctx context.Context, addr string) ([]*electrum.GetAddressHistoryResult, error)
 	GetAddressUnspent(ctx context.Context, addr string) ([]*electrum.GetAddressUnspentResult, error)
 	OnchainHistory(ctx context.Context, from, to int64) ([]electrum.TransactionResult, error)
+	Version(ctx context.Context) (string, error)
+	SetIncludeIgnoreWarnings(include bool)
 }
 
 type electrumNetworkClient interface {
