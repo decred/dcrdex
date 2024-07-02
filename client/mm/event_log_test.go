@@ -16,6 +16,19 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
+func tryWithTimeout(t *testing.T, f func() error) {
+	t.Helper()
+	var err error
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		err = f()
+		if err == nil {
+			return
+		}
+	}
+	t.Fatal(err)
+}
+
 func TestEventLogDB(t *testing.T) {
 	dir := t.TempDir()
 
@@ -118,13 +131,17 @@ func TestEventLogDB(t *testing.T) {
 	}
 
 	event1 := &MarketMakingEvent{
-		ID:         1,
-		TimeStamp:  startTime + 1,
-		BaseDelta:  1e6,
-		QuoteDelta: -2e6,
-		BaseFees:   200,
-		QuoteFees:  100,
-		Pending:    true,
+		ID:        1,
+		TimeStamp: startTime + 1,
+		BalanceEffects: &BalanceEffects{
+			Settled: map[uint32]int64{
+				42: 1e6,
+			},
+			Locked: map[uint32]uint64{
+				60: 2e6,
+			},
+		},
+		Pending: true,
 		DEXOrderEvent: &DEXOrderEvent{
 			ID:   "order1",
 			Rate: 5e7,
@@ -147,17 +164,23 @@ func TestEventLogDB(t *testing.T) {
 		},
 	}
 
-	currBals[42].Available += uint64(event1.BaseDelta) - event1.BaseFees
+	currBals[42].Available += 2e6
 	currBals[42].Pending += 1e6
-	currBals[60].Available += uint64(event1.QuoteDelta) - event1.QuoteFees
+	currBals[60].Available += 8e6
 	db.storeEvent(startTime, mkt, event1, currBalanceState())
 
 	event2 := &MarketMakingEvent{
-		ID:         2,
-		TimeStamp:  startTime + 1,
-		BaseDelta:  1e6,
-		QuoteDelta: -2e6,
-		Pending:    true,
+		ID:        2,
+		TimeStamp: startTime + 1,
+		BalanceEffects: &BalanceEffects{
+			Settled: map[uint32]int64{
+				42: 3e6,
+			},
+			Locked: map[uint32]uint64{
+				60: 4e6,
+			},
+		},
+		Pending: true,
 		CEXOrderEvent: &CEXOrderEvent{
 			ID:          "order1",
 			Rate:        5e7,
@@ -167,23 +190,10 @@ func TestEventLogDB(t *testing.T) {
 			QuoteFilled: 2e6,
 		},
 	}
-	currBals[42].Available += uint64(event2.BaseDelta)
-	currBals[60].Available += uint64(event2.QuoteDelta)
+	currBals[42].Available += 3e6
+	currBals[60].Available += 4e6
 	currBals[42].Pending += 1e6
 	db.storeEvent(startTime, mkt, event2, currBalanceState())
-
-	tryWithTimeout := func(f func() error) {
-		t.Helper()
-		var err error
-		for i := 0; i < 20; i++ {
-			time.Sleep(100 * time.Millisecond)
-			err = f()
-			if err == nil {
-				return
-			}
-		}
-		t.Fatal(err)
-	}
 
 	// Get all run events
 	check := func() error {
@@ -202,7 +212,7 @@ func TestEventLogDB(t *testing.T) {
 		}
 		return nil
 	}
-	tryWithTimeout(check)
+	tryWithTimeout(t, check)
 
 	// Get only 1 run event
 	runEvents, err := db.runEvents(startTime, mkt, 1, nil, false)
@@ -240,10 +250,8 @@ func TestEventLogDB(t *testing.T) {
 	}
 
 	// Update event1 and fiat rates
-	event1.BaseDelta += 100
-	event1.QuoteDelta -= 200
-	event1.BaseFees += 20
-	event1.QuoteFees += 10
+	event1.BalanceEffects.Settled[42] += 100
+	event1.BalanceEffects.Locked[60] -= 100
 	event1.Pending = false
 	currBals[42].Available += 100 - 20
 	currBals[60].Available -= 200 + 10
@@ -268,7 +276,7 @@ func TestEventLogDB(t *testing.T) {
 		}
 		return nil
 	}
-	tryWithTimeout(check)
+	tryWithTimeout(t, check)
 
 	runs, err = db.runs(0, nil, nil)
 	if err != nil {
@@ -390,5 +398,134 @@ func TestEventLogDB(t *testing.T) {
 		return nil
 	}
 
-	tryWithTimeout(check)
+	tryWithTimeout(t, check)
+}
+
+func TestUpdateFinalBalanceDueToEventDiff(t *testing.T) {
+	originalEvent := &MarketMakingEvent{
+		ID: 1,
+		BalanceEffects: &BalanceEffects{
+			Settled: map[uint32]int64{
+				42: 1e6,
+				0:  2e6,
+			},
+			Locked: map[uint32]uint64{
+				42: 3e6,
+				0:  4e6,
+			},
+			Pending: map[uint32]uint64{
+				42: 5e6,
+				0:  6e6,
+			},
+			Reserved: map[uint32]uint64{
+				42: 7e6,
+				0:  8e6,
+			},
+		},
+	}
+
+	finalState := &BalanceState{
+		FiatRates: map[uint32]float64{
+			42: 20,
+			60: 2500,
+		},
+		Balances: map[uint32]*BotBalance{
+			42: {
+				Available: 3e6,
+				Locked:    3e6,
+				Pending:   5e6,
+				Reserved:  7e6,
+			},
+			0: {
+				Available: 4e6,
+				Locked:    4e6,
+				Pending:   6e6,
+				Reserved:  8e6,
+			},
+		},
+	}
+
+	dir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	db, err := newBoltEventLogDB(ctx, filepath.Join(dir, "event_log.db"), tLogger)
+	if err != nil {
+		t.Fatalf("error creating event log db: %v", err)
+	}
+
+	startTime := time.Now().Unix()
+	mkt := &MarketWithHost{
+		Host:    "dex.com",
+		BaseID:  42,
+		QuoteID: 60,
+	}
+
+	cfg := &BotConfig{}
+
+	err = db.storeNewRun(startTime, mkt, cfg, finalState)
+	if err != nil {
+		t.Fatalf("error storing new run: %v", err)
+	}
+
+	db.storeEvent(startTime, mkt, originalEvent, finalState)
+
+	updatedEvent := &MarketMakingEvent{
+		ID: 1,
+		BalanceEffects: &BalanceEffects{
+			Settled: map[uint32]int64{
+				42: 1e6 + 100,
+				0:  2e6 - 300,
+			},
+			Locked: map[uint32]uint64{
+				42: 3e6 + 500,
+				0:  4e6 + 200,
+			},
+			Pending: map[uint32]uint64{
+				42: 5e6 - 100,
+				0:  6e6 - 800,
+			},
+			Reserved: map[uint32]uint64{
+				42: 0,
+				0:  0,
+			},
+		},
+	}
+
+	db.storeEvent(startTime, mkt, updatedEvent, nil)
+
+	expectedUpdatedFinalState := &BalanceState{
+		FiatRates: map[uint32]float64{
+			42: 20,
+			60: 2500,
+		},
+		Balances: map[uint32]*BotBalance{
+			42: {
+				Available: 3e6 + 100,
+				Locked:    3e6 + 500,
+				Pending:   5e6 - 100,
+				Reserved:  0,
+			},
+			0: {
+				Available: 4e6 - 300,
+				Locked:    4e6 + 200,
+				Pending:   6e6 - 800,
+				Reserved:  0,
+			},
+		},
+	}
+
+	checkFinalState := func() error {
+		overview, err := db.runOverview(startTime, mkt)
+		if err != nil {
+			return fmt.Errorf("error getting final state: %v", err)
+		}
+		if !reflect.DeepEqual(overview.FinalState, expectedUpdatedFinalState) {
+			return fmt.Errorf("expected final state:\n%v\n\ngot:\n%v", expectedUpdatedFinalState, finalState)
+		}
+		return nil
+	}
+
+	tryWithTimeout(t, checkFinalState)
 }

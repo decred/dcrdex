@@ -5,7 +5,9 @@ package mm
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -15,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
 )
 
 // clientCore is satisfied by core.Core.
@@ -351,14 +354,7 @@ func (m *MarketMaker) loginAndUnlockWallets(pw []byte, cfg *BotConfig) error {
 	return nil
 }
 
-// loadAndConnectCEX initializes the centralizedExchange if required, and
-// connects if not already connected.
-func (m *MarketMaker) loadAndConnectCEX(ctx context.Context, cfg *CEXConfig) (*centralizedExchange, error) {
-	c, err := m.loadCEX(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("error loading CEX: %w", err)
-	}
-
+func (m *MarketMaker) connectCEX(ctx context.Context, c *centralizedExchange) error {
 	var cm *dex.ConnectionMaster
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -371,24 +367,39 @@ func (m *MarketMaker) loadAndConnectCEX(ctx context.Context, cfg *CEXConfig) (*c
 
 	if !cm.On() {
 		c.connectErr = ""
-		if err = cm.ConnectOnce(ctx); err != nil {
+		if err := cm.ConnectOnce(ctx); err != nil {
 			c.connectErr = err.Error()
-			return nil, fmt.Errorf("failed to connect to CEX: %v", err)
+			return fmt.Errorf("failed to connect to CEX: %v", err)
 		}
 		mkts, err := c.Markets(ctx)
 		if err != nil {
 			// Probably can't get here if we didn't error on connect, but
 			// checking anyway.
 			c.connectErr = err.Error()
-			return nil, fmt.Errorf("error refreshing markets: %v", err)
+			return fmt.Errorf("error refreshing markets: %v", err)
 		}
 		c.mkts = mkts
 		bals, err := c.Balances()
 		if err != nil {
 			c.connectErr = err.Error()
-			return nil, fmt.Errorf("error getting balances: %v", err)
+			return fmt.Errorf("error getting balances: %v", err)
 		}
 		c.balances = bals
+	}
+
+	return nil
+}
+
+// loadAndConnectCEX initializes the centralizedExchange if required, and
+// connects if not already connected.
+func (m *MarketMaker) loadAndConnectCEX(ctx context.Context, cfg *CEXConfig) (*centralizedExchange, error) {
+	c, err := m.loadCEX(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error loading CEX: %w", err)
+	}
+
+	if err := m.connectCEX(ctx, c); err != nil {
+		return nil, fmt.Errorf("error connecting to CEX: %w", err)
 	}
 
 	return c, nil
@@ -1010,11 +1021,266 @@ func (m *MarketMaker) RunOverview(startTime int64, mkt *MarketWithHost) (*Market
 	return m.eventLogDB.runOverview(startTime, mkt)
 }
 
+func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMakingEvent) (*MarketMakingEvent, error) {
+	orderEvent := event.DEXOrderEvent
+
+	findEventTx := func(txid string) *asset.WalletTransaction {
+		for _, tx := range orderEvent.Transactions {
+			if tx.ID == txid {
+				return tx
+			}
+		}
+		return nil
+	}
+
+	oidB, err := hex.DecodeString(orderEvent.ID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding order ID: %v", err)
+	}
+	o, err := m.core.Order(oidB)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching order: %v", err)
+	}
+
+	swapIDs, redeemIDs, refundIDs := orderTransactions(o)
+	fromAsset, _, toAsset, _ := orderAssets(mkt.BaseID, mkt.QuoteID, o.Sell)
+	swaps := make(map[string]*asset.WalletTransaction, len(swapIDs))
+	redeems := make(map[string]*asset.WalletTransaction, len(redeemIDs))
+	refunds := make(map[string]*asset.WalletTransaction, len(refundIDs))
+	allTxs := make([]*asset.WalletTransaction, 0, len(orderEvent.Transactions))
+	pendingTx := false
+
+	processTxs := func(assetID uint32, txIDs map[string]bool, txs map[string]*asset.WalletTransaction) {
+		for txid := range txIDs {
+			tx := findEventTx(txid)
+
+			if tx == nil || !tx.Confirmed {
+				var err error
+				tx, err = m.core.WalletTransaction(assetID, txid)
+				if err != nil {
+					m.log.Errorf("Error fetching transaction %s for %s: %v", txid, mkt, err)
+					pendingTx = true
+					continue
+				}
+			}
+
+			txs[txid] = tx
+			allTxs = append(allTxs, tx)
+			pendingTx = pendingTx || !tx.Confirmed
+		}
+	}
+
+	processTxs(fromAsset, swapIDs, swaps)
+	processTxs(toAsset, redeemIDs, redeems)
+	processTxs(fromAsset, refundIDs, refunds)
+
+	var activeMatches bool
+	for _, match := range o.Matches {
+		if match.Active {
+			activeMatches = true
+			break
+		}
+	}
+
+	return &MarketMakingEvent{
+		ID:             event.ID,
+		TimeStamp:      event.TimeStamp,
+		Pending:        pendingTx || o.Status <= order.OrderStatusBooked || activeMatches,
+		BalanceEffects: combineBalanceEffects(dexOrderEffects(o, swaps, redeems, refunds, 0)),
+		DEXOrderEvent: &DEXOrderEvent{
+			ID:           orderEvent.ID,
+			Sell:         o.Sell,
+			Rate:         o.Rate,
+			Qty:          o.Qty,
+			Transactions: allTxs,
+		},
+	}, nil
+}
+
+func (m *MarketMaker) updateCEXOrderEvent(mkt *MarketWithHost, event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
+	cex, err := m.connectedCEX(cexName)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting to CEX: %v", err)
+	}
+
+	orderEvent := event.CEXOrderEvent
+
+	trade, err := cex.TradeStatus(m.ctx, orderEvent.ID, mkt.BaseID, mkt.QuoteID)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching trade status: %v", err)
+	}
+
+	return cexOrderEvent(trade, event.ID, event.TimeStamp), nil
+}
+
+func (m *MarketMaker) updateDepositEvent(event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
+	wt := event.DepositEvent.Transaction
+	if wt == nil {
+		return nil, fmt.Errorf("nil transaction")
+	}
+
+	if !wt.Confirmed {
+		tx, err := m.core.WalletTransaction(event.DepositEvent.AssetID, wt.ID)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching transaction: %v", err)
+		}
+		wt = tx
+	}
+
+	cex, err := m.connectedCEX(cexName)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting to CEX: %v", err)
+	}
+
+	unitInfo, err := asset.UnitInfo(event.DepositEvent.AssetID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting unit info: %v", err)
+	}
+
+	convAmount := float64(wt.Amount) / float64(unitInfo.Conventional.ConversionFactor)
+	confirmed, cexCredit := cex.ConfirmDeposit(m.ctx, &libxc.DepositData{
+		AssetID:            event.DepositEvent.AssetID,
+		AmountConventional: convAmount,
+		TxID:               wt.ID,
+	})
+
+	return &MarketMakingEvent{
+		ID:             event.ID,
+		TimeStamp:      event.TimeStamp,
+		Pending:        !confirmed,
+		BalanceEffects: combineBalanceEffects(depositBalanceEffects(event.DepositEvent.AssetID, wt, confirmed)),
+		DepositEvent: &DepositEvent{
+			Transaction: wt,
+			AssetID:     event.DepositEvent.AssetID,
+			CEXCredit:   cexCredit,
+		},
+	}, nil
+}
+
+func (m *MarketMaker) updateWithdrawalEvent(mkt *MarketWithHost, event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
+	tx := event.WithdrawalEvent.Transaction
+	withdrawalID := event.WithdrawalEvent.ID
+	assetID := event.WithdrawalEvent.AssetID
+	var cexDebit uint64
+	if tx == nil {
+		cex, err := m.connectedCEX(cexName)
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to CEX: %v", err)
+		}
+
+		var txID string
+		cexDebit, txID, err = cex.ConfirmWithdrawal(m.ctx, withdrawalID, assetID)
+		if errors.Is(err, libxc.ErrWithdrawalPending) {
+			return event, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error confirming withdrawal: %v", err)
+		}
+
+		tx, err = m.core.WalletTransaction(assetID, txID)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching transaction: %v", err)
+		}
+	} else {
+		cexDebit = event.WithdrawalEvent.CEXDebit
+	}
+
+	return &MarketMakingEvent{
+		ID:             event.ID,
+		TimeStamp:      event.TimeStamp,
+		BalanceEffects: combineBalanceEffects(withdrawalBalanceEffects(tx, cexDebit, event.WithdrawalEvent.AssetID)),
+		Pending:        tx == nil || !tx.Confirmed,
+		WithdrawalEvent: &WithdrawalEvent{
+			AssetID:     assetID,
+			ID:          withdrawalID,
+			Transaction: tx,
+			CEXDebit:    cexDebit,
+		},
+	}, nil
+}
+
+func (m *MarketMaker) connectedCEX(cexName string) (*centralizedExchange, error) {
+	m.cexMtx.RLock()
+	cex := m.cexes[cexName]
+	m.cexMtx.RUnlock()
+	if cex == nil {
+		return nil, fmt.Errorf("CEX %s not found", cexName)
+	}
+
+	err := m.connectCEX(m.ctx, cex)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting to CEX: %v", err)
+	}
+
+	return cex, nil
+}
+
+// updatePendingEvent looks up the latest state related to a pending
+// MarketMakingEvent returns an updated MarketMakingEvent.
+func (m *MarketMaker) updatePendingEvent(mkt *MarketWithHost, event *MarketMakingEvent, overview *MarketMakingRunOverview) (*MarketMakingEvent, error) {
+	if len(overview.Cfgs) == 0 {
+		return nil, fmt.Errorf("no bot config found for %s", mkt)
+	}
+	cexName := overview.Cfgs[0].Cfg.CEXName // may be empty string, but that's OK
+
+	switch {
+	case event.DEXOrderEvent != nil:
+		return m.updateDEXOrderEvent(mkt, event)
+	case event.CEXOrderEvent != nil:
+		return m.updateCEXOrderEvent(mkt, event, cexName)
+	case event.DepositEvent != nil:
+		return m.updateDepositEvent(event, cexName)
+	case event.WithdrawalEvent != nil:
+		return m.updateWithdrawalEvent(mkt, event, cexName)
+	default:
+		return event, nil
+	}
+}
+
 // RunLogs returns the event logs of a market making run. At most n events are
 // returned, if n == 0 then all events are returned. If refID is not nil, then
 // the events including and after refID are returned.
-func (m *MarketMaker) RunLogs(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64) ([]*MarketMakingEvent, error) {
-	return m.eventLogDB.runEvents(startTime, mkt, n, refID, false)
+func (m *MarketMaker) RunLogs(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64) ([]*MarketMakingEvent, *MarketMakingRunOverview, error) {
+	var running bool
+	runningBotsLookup := m.runningBotsLookup()
+	if bot, found := runningBotsLookup[*mkt]; found {
+		running = bot.timeStart() == startTime
+	}
+
+	if !running {
+		pendingEvents, err := m.eventLogDB.runEvents(startTime, mkt, 0, nil, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(pendingEvents) > 0 {
+			overview, err := m.eventLogDB.runOverview(startTime, mkt)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, event := range pendingEvents {
+				if event.Pending {
+					updatedEvent, err := m.updatePendingEvent(mkt, event, overview)
+					if err != nil {
+						m.log.Errorf("Error updating pending event: %v", err)
+						continue
+					}
+					m.eventLogDB.storeEvent(startTime, mkt, updatedEvent, nil)
+				}
+			}
+		}
+	}
+
+	events, err := m.eventLogDB.runEvents(startTime, mkt, n, refID, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	overview, err := m.eventLogDB.runOverview(startTime, mkt)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return events, overview, nil
 }
 
 // CEXBook generates a snapshot of the specified CEX order book.

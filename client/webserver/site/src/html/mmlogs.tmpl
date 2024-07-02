@@ -28,15 +28,11 @@
     </div>
 
     <table id="eventsTable" class="my-3 striped row-hover compact border row-border">
-      <thead>
+      <thead id="eventsTableHeader">
         <th>[[[Time]]]</th>
         <th>[[[Type]]]</th>
         <th>[[[ID]]]</th>
-        <th>[[[base_change]]]</th>
-        <th>[[[quote_change]]]</th>
-        <th>[[[base_fees]]]</th>
-        <th>[[[quote_fees]]]</th>
-        <th>Sum USD</th>
+        <th id="sumUSDHeader">Sum USD</th>
         <th scope="col">[[[Details]]]</th>
       </thead>
       <tbody id="eventsTableBody">
@@ -44,10 +40,6 @@
           <td data-tmpl="time"></td>
           <td data-tmpl="eventType"></td>
           <td data-tmpl="eventID"></td>
-          <td data-tmpl="baseDelta"></td>
-          <td data-tmpl="quoteDelta"></td>
-          <td data-tmpl="baseFees"></td>
-          <td data-tmpl="quoteFees"></td>
           <td data-tmpl="sumUSD"></td>
           <td><span class="ico-open fs20 pointer mx-2" data-tmpl="details"></span></td>        
         </tr>

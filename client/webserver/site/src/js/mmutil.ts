@@ -10,7 +10,6 @@ import {
   StartConfig,
   MarketWithHost,
   RunningBotInventory,
-  MarketMakingRunOverview,
   Spot,
   OrderPlacement,
   Token,
@@ -116,14 +115,6 @@ class MarketMakerBot {
     const cexBalance = (await postJSON('/api/cexbalance', { cexName, assetID })).cexBalance
     this.cexBalanceCache[cexName][assetID] = cexBalance
     return cexBalance
-  }
-
-  // mmRunOverview returns the MarketMakingRunOverview for an archived bot run.
-  async mmRunOverview (host: string, baseID: number, quoteID: number, startTime: number) : Promise<MarketMakingRunOverview> {
-    return (await postJSON('/api/mmrunoverview', {
-      market: { host, base: baseID, quote: quoteID },
-      startTime
-    })).overview
   }
 }
 

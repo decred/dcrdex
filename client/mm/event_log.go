@@ -51,13 +51,10 @@ type WithdrawalEvent struct {
 
 // MarketMakingEvent represents an action that a market making bot takes.
 type MarketMakingEvent struct {
-	ID         uint64 `json:"id"`
-	TimeStamp  int64  `json:"timestamp"`
-	BaseDelta  int64  `json:"baseDelta"`
-	QuoteDelta int64  `json:"quoteDelta"`
-	BaseFees   uint64 `json:"baseFees"`
-	QuoteFees  uint64 `json:"quoteFees"`
-	Pending    bool   `json:"pending"`
+	ID             uint64          `json:"id"`
+	TimeStamp      int64           `json:"timestamp"`
+	Pending        bool            `json:"pending"`
+	BalanceEffects *BalanceEffects `json:"balanceEffects,omitempty"`
 
 	// Only one of the following will be populated.
 	DEXOrderEvent   *DEXOrderEvent    `json:"dexOrderEvent,omitempty"`
@@ -163,6 +160,7 @@ var (
 	endTimeKey     = []byte("endTime")
 	initialBalsKey = []byte("ib")
 	finalStateKey  = []byte("fs")
+	noPendingKey   = []byte("np")
 )
 
 func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltEventLogDB, error) {
@@ -194,6 +192,58 @@ func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltE
 	return eventLogDB, nil
 }
 
+// calcFinalStateBasedOnEventDiff calculated an updated final balance state
+// based on the difference between an existing event and its updated version.
+func calcFinalStateBasedOnEventDiff(runBucket, eventsBucket *bbolt.Bucket, eventKey []byte, newEvent *MarketMakingEvent) (*BalanceState, error) {
+	finalStateB := runBucket.Get(finalStateKey)
+	if finalStateB == nil {
+		return nil, fmt.Errorf("no final state found")
+	}
+
+	finalState, err := decodeFinalState(finalStateB)
+	if err != nil {
+		return nil, err
+	}
+
+	originalEventB := eventsBucket.Get(eventKey)
+	if originalEventB == nil {
+		return nil, fmt.Errorf("no original event found")
+	}
+
+	originalEvent, err := decodeMarketMakingEvent(originalEventB)
+	if err != nil {
+		return nil, err
+	}
+
+	applyDiff := func(curr uint64, diff int64) uint64 {
+		if diff > 0 {
+			return curr + uint64(diff)
+		}
+
+		if curr < uint64(-diff) {
+			return 0
+		}
+
+		return curr + uint64(diff)
+	}
+
+	balanceEffectDiff := newEvent.BalanceEffects.sub(originalEvent.BalanceEffects)
+	for assetID, diff := range balanceEffectDiff.settled {
+		finalState.Balances[assetID].Available = applyDiff(finalState.Balances[assetID].Available, diff)
+	}
+	for assetID, diff := range balanceEffectDiff.pending {
+		finalState.Balances[assetID].Pending = applyDiff(finalState.Balances[assetID].Pending, diff)
+	}
+	for assetID, diff := range balanceEffectDiff.locked {
+		finalState.Balances[assetID].Locked = applyDiff(finalState.Balances[assetID].Locked, diff)
+	}
+	for assetID, diff := range balanceEffectDiff.reserved {
+		finalState.Balances[assetID].Reserved = applyDiff(finalState.Balances[assetID].Reserved, diff)
+	}
+
+	return finalState, nil
+}
+
 // updateEvent is called for each event that is popped off the updateEvent. If
 // the event already exists, it is updated. If it does not exist, it is added.
 // The stats for the run are also updated based on the event.
@@ -204,6 +254,7 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 		if runBucket == nil {
 			return fmt.Errorf("nil run bucket for key %x", update.runKey)
 		}
+
 		eventsBkt, err := runBucket.CreateBucketIfNotExists(eventsBucket)
 		if err != nil {
 			return err
@@ -214,6 +265,14 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 			return err
 		}
 		eventB := versionedBytes(0).AddData(eventJSON)
+
+		bs := update.bs
+		if bs == nil {
+			bs, err = calcFinalStateBasedOnEventDiff(runBucket, eventsBkt, eventKey, update.e)
+			if err != nil {
+				return err
+			}
+		}
 
 		if err := eventsBkt.Put(eventKey, eventB); err != nil {
 			return err
@@ -226,7 +285,7 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 		}
 
 		// Update the final state.
-		bsJSON, err := json.Marshal(update.bs)
+		bsJSON, err := json.Marshal(bs)
 		if err != nil {
 			return err
 		}
@@ -429,6 +488,25 @@ func (db *boltEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWit
 	return runs, nil
 }
 
+func decodeFinalState(finalStateB []byte) (*BalanceState, error) {
+	finalState := new(BalanceState)
+	ver, pushes, err := encode.DecodeBlob(finalStateB)
+	if err != nil {
+		return nil, err
+	}
+	if ver != 0 {
+		return nil, fmt.Errorf("unknown final state version %d", ver)
+	}
+	if len(pushes) != 1 {
+		return nil, fmt.Errorf("expected 1 push for final state, got %d", len(pushes))
+	}
+	err = json.Unmarshal(pushes[0], finalState)
+	if err != nil {
+		return nil, err
+	}
+	return finalState, nil
+}
+
 // runOverview returns overview information about a run, not including the
 // events that took place.
 func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*MarketMakingRunOverview, error) {
@@ -459,18 +537,11 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 		}
 
 		finalStateB := runBucket.Get(finalStateKey)
-		finalState := new(BalanceState)
-		ver, pushes, err = encode.DecodeBlob(finalStateB)
-		if err != nil {
-			return err
+		if finalStateB == nil {
+			return fmt.Errorf("no final state found")
 		}
-		if ver != 0 {
-			return fmt.Errorf("unknown final state version %d", ver)
-		}
-		if len(pushes) != 1 {
-			return fmt.Errorf("expected 1 push for final state, got %d", len(pushes))
-		}
-		err = json.Unmarshal(pushes[0], finalState)
+
+		finalState, err := decodeFinalState(finalStateB)
 		if err != nil {
 			return err
 		}
@@ -518,7 +589,9 @@ func (db *boltEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime i
 	})
 }
 
-// storeEvent stores/updates a market making event.
+// storeEvent stores/updates a market making event. BalanceState can be nil if
+// the run has ended and the final state should be updated based on the
+// difference between the event and the previous version of the event.
 func (db *boltEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent, bs *BalanceState) {
 	db.eventUpdates <- &eventUpdate{
 		runKey: runKey(startTime, mkt),
@@ -527,18 +600,48 @@ func (db *boltEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *Ma
 	}
 }
 
+func decodeMarketMakingEvent(eventB []byte) (*MarketMakingEvent, error) {
+	e := new(MarketMakingEvent)
+	ver, pushes, err := encode.DecodeBlob(eventB)
+	if err != nil {
+		return nil, err
+	}
+	if ver != 0 {
+		return nil, fmt.Errorf("unknown version %d", ver)
+	}
+	if len(pushes) != 1 {
+		return nil, fmt.Errorf("expected 1 push for event, got %d", len(pushes))
+	}
+	err = json.Unmarshal(pushes[0], e)
+	if err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
 // runEvents returns the events that took place during a run. If n == 0, all of the
 // events will be returned. If refID is not nil, the events including and after the
 // event with the ID will be returned. If pendingOnly is true, only pending events
 // will be returned.
 func (db *boltEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool) ([]*MarketMakingEvent, error) {
 	events := make([]*MarketMakingEvent, 0, 32)
+
 	return events, db.View(func(tx *bbolt.Tx) error {
 		botRuns := tx.Bucket(botRunsBucket)
 		key := runKey(startTime, mkt)
 		runBucket := botRuns.Bucket(key)
 		if runBucket == nil {
 			return fmt.Errorf("nil run bucket for key %x", key)
+		}
+
+		// If a run has ended, and we have queried for all pending events and
+		// nothing was found, we store this fact to avoid having to search for
+		// pending events again.
+		if pendingOnly {
+			noPending := runBucket.Get(noPendingKey)
+			if noPending != nil {
+				return nil
+			}
 		}
 
 		eventsBkt := runBucket.Bucket(eventsBucket)
@@ -555,19 +658,7 @@ func (db *boltEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint
 		}
 
 		for ; k != nil; k, v = cursor.Prev() {
-			ver, pushes, err := encode.DecodeBlob(v)
-			if err != nil {
-				return err
-			}
-			if ver != 0 {
-				return fmt.Errorf("unknown version %d", ver)
-			}
-			if len(pushes) != 1 {
-				return fmt.Errorf("expected 1 push for event, got %d", len(pushes))
-			}
-
-			var e MarketMakingEvent
-			err = json.Unmarshal(pushes[0], &e)
+			e, err := decodeMarketMakingEvent(v)
 			if err != nil {
 				return err
 			}
@@ -576,9 +667,18 @@ func (db *boltEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint
 				continue
 			}
 
-			events = append(events, &e)
+			events = append(events, e)
 			if n > 0 && uint64(len(events)) >= n {
 				break
+			}
+		}
+
+		// If there are no pending events, and the run as ended, store this
+		// information to avoid unnecessary iteration in the future.
+		if pendingOnly && len(events) == 0 && refID == nil && n == 0 {
+			endTime := runBucket.Get(endTimeKey)
+			if endTime != nil {
+				runBucket.Put(noPendingKey, []byte{1})
 			}
 		}
 

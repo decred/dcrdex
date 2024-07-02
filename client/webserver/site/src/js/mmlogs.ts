@@ -10,14 +10,16 @@ import {
   DepositEvent,
   WithdrawalEvent,
   RunStats,
-  BotConfig,
-  MarketMakingRunOverview
+  MarketMakingRunOverview,
+  SupportedAsset,
+  BalanceEffects,
+  MarketWithHost
 } from './registry'
 import { Forms } from './forms'
 import { postJSON } from './http'
 import Doc from './doc'
 import BasePage from './basepage'
-import { MM, setMarketElements, liveBotStatus, BotMarket } from './mmutil'
+import { setMarketElements, liveBotStatus } from './mmutil'
 import * as intl from './locales'
 import * as wallets from './wallets'
 
@@ -30,7 +32,7 @@ interface LogsPageParams {
 
 export default class MarketMakerLogsPage extends BasePage {
   page: Record<string, PageElement>
-  mkt: BotMarket
+  mkt: MarketWithHost
   startTime: number
   fiatRates: Record<number, number>
   runStats: RunStats
@@ -62,47 +64,36 @@ export default class MarketMakerLogsPage extends BasePage {
     this.startTime = startTime
     this.forms = new Forms(page.forms)
     this.events = {}
+    this.mkt = { base: baseID, quote: quoteID, host }
     setMarketElements(main, baseID, quoteID, host)
     this.setup(host, baseID, quoteID)
   }
 
-  async getRunLogs (): Promise<MarketMakingEvent[]> {
-    const { mkt: { baseID, quoteID, host }, startTime } = this
-    const market: any = { host, base: baseID, quote: quoteID }
-    const req: any = { market, startTime }
+  async getRunLogs (): Promise<[MarketMakingEvent[], MarketMakingRunOverview]> {
+    const { mkt, startTime } = this
+    const req: any = { market: mkt, startTime }
     const res = await postJSON('/api/mmrunlogs', req)
     if (!app().checkResponse(res)) {
       console.error('failed to get bot logs', res)
     }
-    return res.logs
-  }
-
-  async prepareRecords (host: string, baseID: number, quoteID: number): Promise<BotConfig> {
-    const { startTime } = this
-    const botStatus = liveBotStatus(host, baseID, quoteID)
-    if (botStatus?.runStats?.startTime === startTime) {
-      this.fiatRates = app().fiatRatesMap
-      this.runStats = botStatus.runStats
-      return botStatus.config
-    }
-    this.overview = await MM.mmRunOverview(host, baseID, quoteID, startTime)
-    this.fiatRates = this.overview.finalState.fiatRates
-    return this.overview.cfgs[this.overview.cfgs.length - 1].cfg
+    return [res.logs, res.overview]
   }
 
   async setup (host: string, baseID: number, quoteID: number) {
-    const botCfg = await this.prepareRecords(host, baseID, quoteID)
-
-    this.mkt = new BotMarket(botCfg)
-    await this.mkt.initialize({})
-    const { fiatRates, runStats, overview } = this
-    this.fiatRates = fiatRates
-    if (runStats) {
-      this.populateStats(runStats.profitLoss.profit, 0)
-    } else if (overview) {
-      this.populateStats(overview.profitLoss.profit, overview.endTime)
+    const { startTime } = this
+    let profit = 0
+    let endTime = 0
+    const botStatus = liveBotStatus(host, baseID, quoteID)
+    const [events, overview] = await this.getRunLogs()
+    if (botStatus?.runStats?.startTime === startTime) {
+      this.fiatRates = app().fiatRatesMap
+      profit = botStatus.runStats.profitLoss.profit
+    } else {
+      this.fiatRates = overview.finalState.fiatRates
+      profit = overview.profitLoss.profit
+      endTime = overview.endTime
     }
-    const events = await this.getRunLogs()
+    this.populateStats(profit, endTime)
     this.populateTable(events)
     app().registerNoteFeeder({
       runevent: (note: RunEventNote) => { this.handleRunEventNote(note) },
@@ -111,26 +102,26 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   handleRunEventNote (note: RunEventNote) {
-    const { baseID, quoteID, host } = this.mkt
-    if (note.host !== host || note.base !== baseID || note.quote !== quoteID) return
+    const { base, quote, host } = this.mkt
+    if (note.host !== host || note.base !== base || note.quote !== quote) return
     const page = this.page
     const event = note.event
     this.events[event.id] = event
     for (let i = 0; i < page.eventsTableBody.children.length; i++) {
       const row = page.eventsTableBody.children[i] as HTMLElement
       if (row.id === event.id.toString()) {
-        this.setRowContents(row, event)
+        this.setRowContents(row, event, this.mktAssets())
         return
       }
     }
-    this.newEventRow(event, true)
+    this.newEventRow(event, true, this.mktAssets())
   }
 
   handleRunStatsNote (note: RunStatsNote) {
-    const { mkt: { baseID, quoteID, host }, startTime } = this
+    const { mkt: { base, quote, host }, startTime } = this
     if (note.host !== host ||
-      note.baseID !== baseID ||
-      note.quoteID !== quoteID) return
+      note.baseID !== base ||
+      note.quoteID !== quote) return
     if (!note.stats || note.stats.startTime !== startTime) return
     this.page.profitLoss.textContent = `$${Doc.formatFiatValue(note.stats.profitLoss.profit)}`
   }
@@ -146,15 +137,50 @@ export default class MarketMakerLogsPage extends BasePage {
     page.profitLoss.textContent = `$${Doc.formatFiatValue(profitLoss)}`
   }
 
+  mktAssets () : SupportedAsset[] {
+    const baseAsset = app().assets[this.mkt.base]
+    const quoteAsset = app().assets[this.mkt.quote]
+
+    const assets = [baseAsset, quoteAsset]
+    const assetIDs = { [baseAsset.id]: true, [quoteAsset.id]: true }
+
+    if (baseAsset.token && !assetIDs[baseAsset.token.parentID]) {
+      const baseTokenAsset = app().assets[baseAsset.token.parentID]
+      assetIDs[baseTokenAsset.id] = true
+      assets.push(baseTokenAsset)
+    }
+
+    if (quoteAsset.token && !assetIDs[quoteAsset.token.parentID]) {
+      const quoteTokenAsset = app().assets[quoteAsset.token.parentID]
+      assets.push(quoteTokenAsset)
+    }
+
+    return assets
+  }
+
   populateTable (events: MarketMakingEvent[]) {
-    Doc.empty(this.page.eventsTableBody)
+    const page = this.page
+    Doc.empty(page.eventsTableBody)
+
+    const assets = this.mktAssets()
+
+    const parentHeader = page.sumUSDHeader.parentElement
+    for (const asset of assets) {
+      const th = document.createElement('th') as PageElement
+      th.textContent = `${asset.symbol.toUpperCase()} Delta`
+      console.log(parentHeader, page.sumUSDHeader)
+      if (parentHeader) {
+        parentHeader.insertBefore(th, page.sumUSDHeader)
+      }
+    }
+
     for (const event of events) {
       this.events[event.id] = event
-      this.newEventRow(event, false)
+      this.newEventRow(event, false, assets)
     }
   }
 
-  setRowContents (row: HTMLElement, event: MarketMakingEvent) {
+  setRowContents (row: HTMLElement, event: MarketMakingEvent, assets: SupportedAsset[]) {
     const tmpl = Doc.parseTemplate(row)
     tmpl.time.textContent = (new Date(event.timestamp * 1000)).toLocaleString()
     tmpl.eventType.textContent = this.eventType(event)
@@ -172,30 +198,35 @@ export default class MarketMakerLogsPage extends BasePage {
       tmpl.eventID.textContent = trimStringWithEllipsis(id, 30)
       tmpl.eventID.setAttribute('title', id)
     }
-    const {
-      mkt: {
-        bui, qui, baseFeeUI, quoteFeeUI, baseID, quoteID, baseFeeID, quoteFeeID,
-        baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor
-      }, fiatRates
-    } = this
-    const { baseFees, quoteFees, baseDelta, quoteDelta } = event
-    tmpl.baseDelta.textContent = Doc.formatCoinValue(baseDelta, bui)
-    tmpl.quoteDelta.textContent = Doc.formatCoinValue(quoteDelta, qui)
-    tmpl.baseFees.textContent = Doc.formatCoinValue(baseFees, baseFeeUI)
-    tmpl.quoteFees.textContent = Doc.formatCoinValue(quoteFees, quoteFeeUI)
-    let usd = baseDelta / baseFactor * fiatRates[baseID] ?? 0
-    usd += quoteDelta / quoteFactor * fiatRates[quoteID] ?? 0
-    usd -= baseFees / baseFeeFactor * fiatRates[baseFeeID] ?? 0
-    usd -= quoteFees / quoteFeeFactor * fiatRates[quoteFeeID] ?? 0
+    let usd = 0
+    for (const asset of assets) {
+      const be = event.balanceEffects
+      const sum = sumBalanceEffects(asset.id, be)
+      const tmplID = `sum${asset.symbol.toUpperCase()}`
+      let el : PageElement
+      if (tmpl[tmplID]) {
+        el = tmpl[tmplID]
+      } else {
+        el = document.createElement('td')
+        el.dataset.tmpl = tmplID
+        const parent = tmpl.sumUSD.parentElement
+        if (parent) {
+          parent.insertBefore(el, tmpl.sumUSD)
+        }
+      }
+      el.textContent = Doc.formatCoinValue(sum, asset.unitInfo)
+      const factor = asset.unitInfo.conventional.conversionFactor
+      usd += sum / factor * this.fiatRates[asset.id] ?? 0
+    }
     tmpl.sumUSD.textContent = Doc.formatFourSigFigs(usd)
     Doc.bind(tmpl.details, 'click', () => { this.showEventDetails(event.id) })
   }
 
-  newEventRow (event: MarketMakingEvent, prepend: boolean) {
+  newEventRow (event: MarketMakingEvent, prepend: boolean, assets: SupportedAsset[]) {
     const page = this.page
     const row = page.eventTableRowTmpl.cloneNode(true) as HTMLElement
     row.id = event.id.toString()
-    this.setRowContents(row, event)
+    this.setRowContents(row, event, assets)
     if (prepend) {
       page.eventsTableBody.insertBefore(row, page.eventsTableBody.firstChild)
     } else {
@@ -218,10 +249,15 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   showDexOrderEventDetails (event: DEXOrderEvent) {
-    const { page, mkt: { baseID, quoteID, bui, qui, baseTicker, quoteTicker } } = this
+    const { page, mkt: { base, quote } } = this
+    const baseAsset = app().assets[base]
+    const quoteAsset = app().assets[quote]
+    const [bui, qui] = [baseAsset.unitInfo, quoteAsset.unitInfo]
+    const [baseTicker, quoteTicker] = [bui.conventional.unit, qui.conventional.unit]
+
     page.dexOrderID.textContent = trimStringWithEllipsis(event.id, 20)
     page.dexOrderID.setAttribute('title', event.id)
-    const rate = app().conventionalRate(baseID, quoteID, event.rate)
+    const rate = app().conventionalRate(base, quote, event.rate)
 
     page.dexOrderRate.textContent = `${rate} ${baseTicker}/${quoteTicker}`
     page.dexOrderQty.textContent = `${event.qty / bui.conventional.conversionFactor} ${baseTicker}`
@@ -262,10 +298,15 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   showCexOrderEventDetails (event: CEXOrderEvent) {
-    const { page, mkt: { baseID, quoteID, bui, qui, quoteTicker, baseTicker } } = this
+    const { page, mkt: { base, quote } } = this
+    const baseAsset = app().assets[base]
+    const quoteAsset = app().assets[quote]
+    const [bui, qui] = [baseAsset.unitInfo, quoteAsset.unitInfo]
+    const [baseTicker, quoteTicker] = [bui.conventional.unit, qui.conventional.unit]
+
     page.cexOrderID.textContent = trimStringWithEllipsis(event.id, 20)
     page.cexOrderID.setAttribute('title', event.id)
-    const rate = app().conventionalRate(baseID, quoteID, event.rate)
+    const rate = app().conventionalRate(base, quote, event.rate)
     page.cexOrderRate.textContent = `${rate} ${baseTicker}/${quoteTicker}`
     page.cexOrderQty.textContent = `${event.qty / bui.conventional.conversionFactor} ${baseTicker}`
     if (event.sell) {
@@ -322,4 +363,13 @@ export default class MarketMakerLogsPage extends BasePage {
 function trimStringWithEllipsis (str: string, maxLen: number): string {
   if (str.length <= maxLen) return str
   return `${str.substring(0, maxLen / 2)}...${str.substring(str.length - maxLen / 2)}`
+}
+
+function sumBalanceEffects (assetID: number, be: BalanceEffects): number {
+  let sum = 0
+  if (be.settled[assetID]) sum += be.settled[assetID]
+  if (be.pending[assetID]) sum += be.pending[assetID]
+  if (be.locked[assetID]) sum += be.locked[assetID]
+  if (be.reserved[assetID]) sum += be.reserved[assetID]
+  return sum
 }
