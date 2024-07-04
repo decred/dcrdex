@@ -29,8 +29,8 @@ var (
 	homeDir      = os.Getenv("HOME")
 	alphaIPCFile = filepath.Join(homeDir, "dextest", "eth", "alpha", "node", "geth.ipc")
 
-	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
-	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
+	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address_v0.txt")
+	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "usdc_swap_contract_address_v0.txt")
 	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_usdc_contract_address.txt")
 	deltaAddress       = "d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
 	gammaAddress       = "41293c2032bac60aa747374e966f79f575d42379"
@@ -48,13 +48,14 @@ func TestMain(m *testing.M) {
 		defer cancel()
 		log := dex.StdOutLogger("T", dex.LevelTrace)
 
-		netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
+		const contractVer = 0
+		netAddrs, found := dexeth.ContractAddresses[contractVer]
 		if !found {
-			return 1, fmt.Errorf("no contract address for eth version %d", ethContractVersion)
+			return 1, fmt.Errorf("no contract address for eth version %d", contractVer)
 		}
 		ethContractAddr, found := netAddrs[dex.Simnet]
 		if !found {
-			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
+			return 1, fmt.Errorf("no contract address for eth version %d on %s", contractVer, dex.Simnet)
 		}
 
 		ethClient = newRPCClient(BipID, 42, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
@@ -110,10 +111,10 @@ func TestSuggestGasTipCap(t *testing.T) {
 	}
 }
 
-func TestSwap(t *testing.T) {
+func TestStatus(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.swap(ctx, BipID, secretHash)
+	_, err := ethClient.status(ctx, BipID, secretHash[:])
 	if err != nil {
 		t.Fatal(err)
 	}
