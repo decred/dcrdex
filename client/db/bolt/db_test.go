@@ -264,36 +264,6 @@ func TestAccounts(t *testing.T) {
 	acct.DEXPubKey = nil
 	ensureErr("DEX key")
 	acct.DEXPubKey = dexKey
-
-	// encKey := acct.EncKeyV2
-	// acct.EncKeyV2 = nil
-	// // TODO: Modify db.CreateAccount to take viewOnly bool to get error for no private key
-	// ensureErr("no private key")
-	// acct.EncKeyV2 = encKey
-
-	err = boltdb.CreateAccount(acct)
-	if err != nil {
-		t.Fatalf("failed to create account after fixing")
-	}
-
-	// Test account proofs.
-	zerothHost := accts[0].Host
-	zerothAcct, _ := boltdb.Account(zerothHost)
-	if zerothAcct.LegacyFeePaid {
-		t.Fatalf("Account marked as paid before account proof set")
-	}
-	err = boltdb.StoreAccountProof(&db.AccountProof{
-		Host:  zerothAcct.Host,
-		Stamp: 123456789,
-		Sig:   []byte("some signature here"),
-	})
-	if err != nil {
-		t.Fatalf("AccountPaid error: %v", err)
-	}
-	reAcct, _ := boltdb.Account(zerothHost)
-	if !reAcct.LegacyFeePaid {
-		t.Fatalf("Account not marked as paid after account proof set")
-	}
 }
 
 func TestDisableAccount(t *testing.T) {
@@ -329,36 +299,6 @@ func TestDisableAccount(t *testing.T) {
 	}
 	if actualDisabledAccount == nil {
 		t.Fatalf("Expected to retrieve a disabledAccount.")
-	}
-}
-
-func TestAccountProof(t *testing.T) {
-	boltdb, shutdown := newTestDB(t)
-	defer shutdown()
-
-	acct := dbtest.RandomAccountInfo()
-	host := acct.Host
-
-	err := boltdb.CreateAccount(acct)
-	if err != nil {
-		t.Fatalf("Unexpected CreateAccount error: %v", err)
-	}
-
-	err = boltdb.StoreAccountProof(&db.AccountProof{
-		Host:  acct.Host,
-		Stamp: 123456789,
-		Sig:   []byte("some signature here"),
-	})
-	if err != nil {
-		t.Fatalf("AccountPaid error: %v", err)
-	}
-
-	accountProof, err := boltdb.AccountProof(host)
-	if err != nil {
-		t.Fatalf("Unexpected AccountProof error: %v", err)
-	}
-	if accountProof == nil {
-		t.Fatal("AccountProof not found")
 	}
 }
 

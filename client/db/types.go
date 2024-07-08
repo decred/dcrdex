@@ -234,12 +234,10 @@ type AccountInfo struct {
 	BondAsset    uint32 // the asset to use when auto-posting bonds
 
 	// DEPRECATED reg fee data. Bond txns are in a sub-bucket.
-
-	// LegacyFeeCoin is the a legacy registration fee coin ID.
+	// Left until we need to upgrade just for serialization simplicity.
 	LegacyFeeCoin    []byte
 	LegacyFeeAssetID uint32
-	// LegacyFeePaid should be set on retrieval if there is an AccountProof set.
-	LegacyFeePaid bool // DEPRECATED
+	LegacyFeePaid    bool
 }
 
 // Encode the AccountInfo as bytes. NOTE: remove deprecated fee fields and do a
@@ -386,43 +384,16 @@ func decodeAccountInfo_v4(pushes [][]byte) (*AccountInfo, error) {
 // AccountProof is information necessary to prove that the DEX server accepted
 // the account's fee payment. The fee coin is not part of the proof, since it
 // is already stored as part of the AccountInfo blob. DEPRECATED.
-type AccountProof struct {
-	Host  string
-	Stamp uint64
-	Sig   []byte
-}
+type AccountProof struct{}
 
 // Encode encodes the AccountProof to a versioned blob.
 func (p *AccountProof) Encode() []byte {
-	return versionedBytes(0).
-		AddData([]byte(p.Host)).
-		AddData(uint64Bytes(p.Stamp)).
-		AddData(p.Sig)
+	return versionedBytes(1)
 }
 
 // DecodeAccountProof decodes the versioned blob to a *MatchProof.
 func DecodeAccountProof(b []byte) (*AccountProof, error) {
-	ver, pushes, err := encode.DecodeBlob(b)
-	if err != nil {
-		return nil, err
-	}
-	switch ver {
-	case 0:
-		return decodeAccountProof_v0(pushes)
-	}
-	return nil, fmt.Errorf("unknown AccountProof version %d", ver)
-}
-
-func decodeAccountProof_v0(pushes [][]byte) (*AccountProof, error) {
-	if len(pushes) != 3 {
-		return nil, fmt.Errorf("decodeAccountProof_v0: expected 3 pushes, got %d", len(pushes))
-	}
-	hostB, stampB := pushes[0], pushes[1]
-	return &AccountProof{
-		Host:  string(hostB),
-		Stamp: intCoder.Uint64(stampB),
-		Sig:   pushes[2],
-	}, nil
+	return &AccountProof{}, nil
 }
 
 // MetaOrder is an order and its metadata.

@@ -435,16 +435,6 @@ func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// apiAccounts is the handler for the '/accounts' API request.
-func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
-	accts, err := s.core.Accounts()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to retrieve accounts: %v", err), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, accts)
-}
-
 // apiEnableDataAPI is the handler for the `/enabledataapi/{yes}` API request,
 // used to enable or disable the HTTP data API.
 func (s *Server) apiEnableDataAPI(w http.ResponseWriter, r *http.Request) {

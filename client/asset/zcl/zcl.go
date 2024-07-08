@@ -89,7 +89,6 @@ var (
 	// WalletInfo defines some general information about a Zcash wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Zclassic",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexzcl.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{

@@ -75,32 +75,6 @@ func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// apiEstimateRegistrationTxFee is the handler for the '/regtxfee' API request.
-func (s *WebServer) apiEstimateRegistrationTxFee(w http.ResponseWriter, r *http.Request) {
-	form := new(registrationTxFeeForm)
-	if !readPost(w, r, form) {
-		return
-	}
-	if form.AssetID == nil {
-		s.writeAPIError(w, errors.New("missing asset ID"))
-		return
-	}
-	cert := []byte(form.Cert)
-	txFee, err := s.core.EstimateRegistrationTxFee(form.Addr, cert, *form.AssetID)
-	if err != nil {
-		s.writeAPIError(w, err)
-		return
-	}
-	resp := struct {
-		OK    bool   `json:"ok"`
-		TxFee uint64 `json:"txfee"`
-	}{
-		OK:    true,
-		TxFee: txFee,
-	}
-	writeJSON(w, resp)
-}
-
 // apiValidateAddress is the handlers for the '/validateaddress' API request.
 func (s *WebServer) apiValidateAddress(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
@@ -319,45 +293,6 @@ func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 		Exchange: exchangeInfo,
 	}
 	writeJSON(w, resp)
-}
-
-// apiRegister is the handler for the '/register' API request.
-func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
-	reg := new(registrationForm)
-	defer reg.Password.Clear()
-	if !readPost(w, r, reg) {
-		return
-	}
-	assetID := uint32(42)
-	if reg.AssetID != nil {
-		assetID = *reg.AssetID
-	}
-	wallet := s.core.WalletState(assetID)
-	if wallet == nil {
-		s.writeAPIError(w, errors.New("no wallet"))
-		return
-	}
-	pass, err := s.resolvePass(reg.Password, r)
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
-		return
-	}
-	defer zero(pass)
-	_, err = s.core.Register(&core.RegisterForm{
-		Addr:    reg.Addr,
-		Cert:    []byte(reg.Cert),
-		AppPass: pass,
-		Fee:     reg.Fee,
-		Asset:   &assetID,
-	})
-	if err != nil {
-		s.writeAPIError(w, err)
-		return
-	}
-	// There was no error paying the fee, but we must wait on confirmations
-	// before informing the DEX of the fee payment. Those results will come
-	// through as a notification.
-	writeJSON(w, simpleAck())
 }
 
 // bondsFeeBuffer is a caching helper for the bonds fee buffer. Values for a
@@ -1449,29 +1384,13 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck())
 }
 
-// apiWithdraw handles the 'withdraw' API request. This end-point is Deprecated.
-// Use the 'send' end-point.
-func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
-	form := new(sendOrWithdrawForm)
-	defer form.Pass.Clear()
-	if !readPost(w, r, form) {
-		return
-	}
-	form.Subtract = true
-	s.send(w, form)
-}
-
 // apiSend handles the 'send' API request.
 func (s *WebServer) apiSend(w http.ResponseWriter, r *http.Request) {
-	form := new(sendOrWithdrawForm)
+	form := new(sendForm)
 	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
-	s.send(w, form)
-}
-
-func (s *WebServer) send(w http.ResponseWriter, form *sendOrWithdrawForm) {
 	state := s.core.WalletState(form.AssetID)
 	if state == nil {
 		s.writeAPIError(w, fmt.Errorf("no wallet found for %s", unbip(form.AssetID)))

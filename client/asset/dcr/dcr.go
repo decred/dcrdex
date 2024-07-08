@@ -261,7 +261,6 @@ var (
 	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Decred",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexdcr.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
@@ -1486,15 +1485,15 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 
 	digestInputs := func(inputsSize uint32) (reqFunds, maxFees, estHighFees, estLowFees uint64) {
 		// NOTE: reqFunds = val + fees, so change (extra) will be sum-reqFunds
-		reqFunds = calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
+		reqFunds = calc.RequiredOrderFunds(val, uint64(inputsSize), lots,
 			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate) // as in tryFund's enough func
 		maxFees = reqFunds - val
 
-		estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
+		estHighFunds := calc.RequiredOrderFunds(val, uint64(inputsSize), lots,
 			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
 		estHighFees = estHighFunds - val
 
-		estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1,
+		estLowFunds := calc.RequiredOrderFunds(val, uint64(inputsSize), 1,
 			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate) // best means single multi-lot match, even better than batch
 		estLowFees = estLowFunds - val
 		return
@@ -2011,7 +2010,7 @@ func (dcr *ExchangeWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrde
 	var totalRequired uint64
 
 	for i, value := range orders {
-		req := calc.RequiredOrderFundsAlt(value.Value, dexdcr.P2PKHInputSize, value.MaxSwapCount,
+		req := calc.RequiredOrderFunds(value.Value, dexdcr.P2PKHInputSize, value.MaxSwapCount,
 			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, feeRate)
 		req = uint64(math.Round(float64(req) * (100 + splitBuffer) / 100))
 		requiredForOrders[i] = req
@@ -2428,7 +2427,7 @@ func (dcr *ExchangeWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) 
 		if value.MaxSwapCount == 0 {
 			return nil, nil, 0, fmt.Errorf("cannot fund zero-lot order")
 		}
-		req := calc.RequiredOrderFundsAlt(value.Value, dexdcr.P2PKHInputSize, value.MaxSwapCount,
+		req := calc.RequiredOrderFunds(value.Value, dexdcr.P2PKHInputSize, value.MaxSwapCount,
 			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, mo.MaxFeeRate)
 		totalRequiredForOrders += req
 	}
@@ -2715,7 +2714,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 
 	valStr := amount(value).String()
 
-	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots,
+	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots,
 		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate)
 
 	if baggageFees > excess {
@@ -2757,7 +2756,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		}
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(value, dexdcr.P2PKHInputSize, lots,
+	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots,
 		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate)
 
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
@@ -4183,17 +4182,6 @@ func (dcr *ExchangeWallet) Locked() bool {
 		}
 	}
 	return false
-}
-
-// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
-// pay the registration fee using the provided feeRate.
-func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
-	cfg := dcr.config()
-	const inputCount = 5 // buffer so this estimate is higher than actual reg tx fee.
-	if feeRate == 0 || feeRate > cfg.feeRateLimit {
-		feeRate = cfg.fallbackFeeRate
-	}
-	return (dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize) * feeRate
 }
 
 func bondPushDataScript(ver uint16, acctID []byte, lockTimeSec int64, pkh []byte) ([]byte, error) {

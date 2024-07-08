@@ -48,7 +48,7 @@ func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint32, reportCha
 // leaving only unselected UTXOs to cover any required reserves.
 func orderEnough(val, lots, feeRate uint64, reportChange bool) func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64) {
 	return func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64) {
-		reqFunds := calc.RequiredOrderFundsAlt(val, uint64(size+unspent.input.Size()), lots,
+		reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.Size()), lots,
 			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, feeRate)
 		total := sum + toAtoms(unspent.rpc.Amount) // all selected utxos
 

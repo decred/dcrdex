@@ -389,26 +389,17 @@ func TestSynced(t *testing.T) {
 // TestRequiredOrderFunds ensures that a fee calculation in the calc package
 // will come up with the correct required funds.
 func TestRequiredOrderFunds(t *testing.T) {
-	eth, _ := tNewBackend(BipID)
-	eth.initTxSize = uint32(dexeth.InitGas(1, 0))
 
-	swapVal := uint64(1000000000)                // gwei
-	numSwaps := uint64(17)                       // swaps
-	initSizeBase := uint64(eth.InitTxSizeBase()) // 0 gas
-	initSize := uint64(eth.InitTxSize())         // init value gas
-	feeRate := uint64(30)                        // gwei / gas
+	initTxSize := dexeth.InitGas(1, ethContractVersion)
+	swapVal := uint64(1000000000) // gwei
+	numSwaps := uint64(17)        // swaps
+	feeRate := uint64(30)         // gwei / gas
 
 	// We want the fee calculation to simply be the cost of the gas used
 	// for each swap plus the initial value.
-	want := swapVal + (numSwaps * initSize * feeRate)
-	nfo := &dex.Asset{
-		SwapSizeBase: initSizeBase,
-		SwapSize:     initSize,
-		MaxFeeRate:   feeRate,
-	}
-
+	want := swapVal + (numSwaps * initTxSize * feeRate)
 	// Second argument called inputsSize same as another initSize.
-	got := calc.RequiredOrderFunds(swapVal, 0, numSwaps, nfo)
+	got := calc.RequiredOrderFunds(swapVal, 0, numSwaps, initTxSize, initTxSize, feeRate)
 	if got != want {
 		t.Fatalf("want %v got %v for fees", want, got)
 	}

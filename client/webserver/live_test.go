@@ -250,14 +250,12 @@ func mkDexAsset(symbol string) *dex.Asset {
 		}
 	}
 	a := &dex.Asset{
-		ID:           assetID,
-		Symbol:       symbol,
-		Version:      0,
-		MaxFeeRate:   uint64(rand.Intn(10) + 1),
-		SwapSize:     uint64(rand.Intn(150) + 150),
-		SwapSizeBase: uint64(rand.Intn(150) + 15),
-		SwapConf:     uint32(rand.Intn(5) + 2),
-		UnitInfo:     ui,
+		ID:         assetID,
+		Symbol:     symbol,
+		Version:    0,
+		MaxFeeRate: uint64(rand.Intn(10) + 1),
+		SwapConf:   uint32(rand.Intn(5) + 2),
+		UnitInfo:   ui,
 	}
 	return a
 }
@@ -349,59 +347,7 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(133, 966001): mkMrkt("zec", "usdc.polygon"),
 		},
 		ConnectionStatus: comms.Connected,
-		RegFees: map[string]*core.FeeAsset{
-			"dcr": {
-				ID:    42,
-				Confs: 1,
-				Amt:   1e8,
-			},
-			"btc": {
-				ID:    0,
-				Confs: 2,
-				Amt:   1e5,
-			},
-			"eth": {
-				ID:    60,
-				Confs: 5,
-				Amt:   1e7,
-			},
-			"bch": {
-				ID:    145,
-				Confs: 2,
-				Amt:   1e10,
-			},
-			"ltc": {
-				ID:    2,
-				Confs: 5,
-				Amt:   1e10,
-			},
-			"doge": {
-				ID:    3,
-				Confs: 10,
-				Amt:   1e12,
-			},
-			"usdc.eth": {
-				ID:    60001,
-				Confs: 10,
-				Amt:   1e11,
-			},
-			"mona": {
-				ID:    22,
-				Confs: 5,
-				Amt:   1e10,
-			},
-			"vtc": {
-				ID:    28,
-				Confs: 5,
-				Amt:   1e11,
-			},
-			"kmd": { // Not-supported
-				ID:    unsupportedAssetID,
-				Confs: 10,
-				Amt:   1e12,
-			},
-		},
-		CandleDurs: []string{"1h", "24h"},
+		CandleDurs:       []string{"1h", "24h"},
 		Auth: core.ExchangeAuth{
 			PendingBonds: []*core.PendingBondState{},
 			BondAssetID:  42,
@@ -428,39 +374,7 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(22, unsupportedAssetID): mkMrkt("mona", "kmd"),
 		},
 		ConnectionStatus: comms.Connected,
-		RegFees: map[string]*core.FeeAsset{
-			"dcr": {
-				ID:    42,
-				Confs: 1,
-				Amt:   1e8,
-			},
-			"btc": {
-				ID:    0,
-				Confs: 2,
-				Amt:   1e6,
-			},
-			"vtc": {
-				ID:    28,
-				Confs: 5,
-				Amt:   1e11,
-			},
-			"mona": {
-				ID:    22,
-				Confs: 5,
-				Amt:   1e10,
-			},
-			"kmd": { // Not-supported
-				ID:    unsupportedAssetID,
-				Confs: 10,
-				Amt:   1e12,
-			},
-			"ltc": {
-				ID:    2,
-				Confs: 5,
-				Amt:   1e10,
-			},
-		},
-		CandleDurs: []string{"5m", "1h", "24h"},
+		CandleDurs:       []string{"5m", "1h", "24h"},
 		Auth: core.ExchangeAuth{
 			PendingBonds: []*core.PendingBondState{},
 			BondAssetID:  42,
@@ -530,7 +444,6 @@ func (t *tBookFeed) Candles(dur string) error {
 }
 
 type TCore struct {
-	reg       *core.RegisterForm
 	inited    bool
 	mtx       sync.RWMutex
 	wallets   map[uint32]*tWalletState
@@ -577,7 +490,6 @@ func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {
 
 func (*TDriver) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{
-		Version:           0,
 		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			Conventional: dex.Denomination{
@@ -664,15 +576,9 @@ func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI any) (*core.Exc
 		xc = tExchanges[firstDEX]
 	}
 	if dexAddr == secondDEX {
-		c.reg = &core.RegisterForm{}
+		// c.reg = &core.RegisterForm{}
 	}
 	return tExchanges[firstDEX], dexAddr == secondDEX, nil
-}
-
-func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
-	randomDelay()
-	c.reg = r
-	return nil, nil
 }
 func (c *TCore) PostBond(form *core.PostBondForm) (*core.PostBondResult, error) {
 	xc, exists := tExchanges[form.Addr]
@@ -703,21 +609,6 @@ func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	xc.Auth.EffectiveTier = int64(*form.TargetTier)
 	xc.Auth.Rep.BondedTier = int64(*form.TargetTier)
 	return nil
-}
-func (c *TCore) EstimateRegistrationTxFee(host string, certI any, assetID uint32) (uint64, error) {
-	xc := tExchanges[host]
-	if xc == nil {
-		xc = tExchanges[firstDEX]
-	}
-	assetFeeID := assetID
-	if tkn := asset.TokenInfo(assetID); tkn != nil {
-		assetFeeID = tkn.ParentID
-	}
-	var txFee uint64 = 1e6
-	if regFee := xc.RegFees[unbip(assetFeeID)]; regFee != nil {
-		txFee = regFee.Amt / 100
-	}
-	return txFee, nil
 }
 func (c *TCore) BondsFeeBuffer(assetID uint32) (uint64, error) {
 	return 222, nil
@@ -1375,7 +1266,6 @@ var winfos = map[uint32]*asset.WalletInfo{
 	2:  ltc.WalletInfo,
 	42: dcr.WalletInfo,
 	22: {
-		Version:           0,
 		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "atoms",
@@ -1399,7 +1289,6 @@ var winfos = map[uint32]*asset.WalletInfo{
 		},
 	},
 	3: {
-		Version:           0,
 		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "atoms",
@@ -1416,7 +1305,6 @@ var winfos = map[uint32]*asset.WalletInfo{
 		}},
 	},
 	28: {
-		Version:           0,
 		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "Sats",
@@ -1434,7 +1322,6 @@ var winfos = map[uint32]*asset.WalletInfo{
 	},
 	60: &eth.WalletInfo,
 	145: {
-		Version:           0,
 		SupportedVersions: []uint32{0},
 		Name:              "Bitcoin Cash",
 		UnitInfo:          dexbch.UnitInfo,
@@ -1546,7 +1433,7 @@ func (c *TCore) createWallet(form *core.WalletForm, synced bool) (done chan stru
 
 	w := c.walletState(form.AssetID)
 	var regFee uint64
-	r, found := tExchanges[firstDEX].RegFees[w.Symbol]
+	r, found := tExchanges[firstDEX].BondAssets[w.Symbol]
 	if found {
 		regFee = r.Amt
 	}
@@ -2773,7 +2660,8 @@ func TestServer(t *testing.T) {
 		if !initialize {
 			tCore.InitializeClient([]byte(""), nil)
 		}
-		tCore.Register(new(core.RegisterForm))
+		var assetID uint32 = 42
+		tCore.PostBond(&core.PostBondForm{Addr: firstDEX, Bond: 1, Asset: &assetID})
 	}
 
 	s, err := New(&Config{

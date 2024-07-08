@@ -442,35 +442,6 @@ func parseGetDEXConfigArgs(params *RawParams) (host string, cert []byte, err err
 	return params.Args[0], []byte(params.Args[1]), nil
 }
 
-func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{3, 4}); err != nil {
-		return nil, err
-	}
-	fee, err := checkUIntArg(params.Args[1], "fee", 64)
-	if err != nil {
-		return nil, err
-	}
-	asset, err := checkUIntArg(params.Args[2], "asset", 32)
-	if err != nil {
-		return nil, err
-	}
-
-	var cert []byte
-	if len(params.Args) > 3 {
-		cert = []byte(params.Args[3])
-	}
-
-	asset32 := uint32(asset)
-	req := &core.RegisterForm{
-		AppPass: params.PWArgs[0],
-		Addr:    params.Args[0],
-		Fee:     fee,
-		Asset:   &asset32,
-		Cert:    cert,
-	}
-	return req, nil
-}
-
 func parseBondAssetsArgs(params *RawParams) (host string, cert []byte, err error) {
 	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return "", nil, err

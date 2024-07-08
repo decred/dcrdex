@@ -1092,95 +1092,6 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
-func TestAccounts(t *testing.T) {
-	core := &TCore{
-		accounts: []*db.Account{},
-	}
-	srv := &Server{
-		core: core,
-	}
-
-	mux := chi.NewRouter()
-	mux.Get("/accounts", srv.apiAccounts)
-
-	// No accounts.
-	w := httptest.NewRecorder()
-	r, _ := http.NewRequest(http.MethodGet, "https://localhost/accounts", nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
-	}
-	respBody := w.Body.String()
-	if respBody != "[]\n" {
-		t.Errorf("incorrect response body: %q", respBody)
-	}
-
-	accountIDSlice, err := hex.DecodeString("0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var accountID account.AccountID
-	copy(accountID[:], accountIDSlice)
-	pubkey, err := hex.DecodeString("0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19")
-	if err != nil {
-		t.Fatal(err)
-	}
-	feeCoin, err := hex.DecodeString("6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// An account.
-	acct := &db.Account{
-		AccountID:  accountID,
-		Pubkey:     dex.Bytes(pubkey),
-		FeeAsset:   42,
-		FeeAddress: "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-		FeeCoin:    dex.Bytes(feeCoin),
-	}
-	core.accounts = append(core.accounts, acct)
-
-	w = httptest.NewRecorder()
-	r, _ = http.NewRequest(http.MethodGet, "https://localhost/accounts", nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
-	}
-
-	exp := `[
-    {
-        "accountid": "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc",
-        "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19",
-        "feeasset": 42,
-        "feeaddress": "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-        "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005"
-    }
-]
-`
-	if exp != w.Body.String() {
-		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
-	}
-
-	// core.Accounts error
-	core.accountsErr = errors.New("error")
-
-	w = httptest.NewRecorder()
-	r, _ = http.NewRequest(http.MethodGet, "https://localhost/accounts", nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusInternalServerError)
-	}
-}
-
 func TestAccountInfo(t *testing.T) {
 	core := new(TCore)
 	srv := &Server{
@@ -1219,18 +1130,11 @@ func TestAccountInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeCoin, err := hex.DecodeString("6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005")
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// An account.
 	core.account = &db.Account{
-		AccountID:  accountID,
-		Pubkey:     dex.Bytes(pubkey),
-		FeeAsset:   42,
-		FeeAddress: "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-		FeeCoin:    dex.Bytes(feeCoin),
+		AccountID: accountID,
+		Pubkey:    dex.Bytes(pubkey),
 	}
 
 	w = httptest.NewRecorder()
@@ -1245,10 +1149,7 @@ func TestAccountInfo(t *testing.T) {
 
 	exp := `{
     "accountid": "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc",
-    "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19",
-    "feeasset": 42,
-    "feeaddress": "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-    "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005"
+    "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19"
 }
 `
 	if exp != w.Body.String() {

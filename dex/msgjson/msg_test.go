@@ -810,10 +810,9 @@ func TestConnect(t *testing.T) {
 func TestPenalty(t *testing.T) {
 	// serialization: rule(1) + time (8) + duration (8) + details (variable, ~100) = 117 bytes
 	penalty := &Penalty{
-		Rule:     account.Rule(1),
-		Time:     uint64(1598929305),
-		Duration: uint64(3153600000000000000),
-		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
+		Rule:    account.Rule(1),
+		Time:    uint64(1598929305),
+		Details: "You may no longer trade. Leave your client running to finish pending trades.",
 	}
 	penaltyNote := &PenaltyNote{Penalty: penalty}
 
@@ -822,8 +821,6 @@ func TestPenalty(t *testing.T) {
 		0x01,
 		// Time 8 bytes.
 		0x00, 0x00, 0x00, 0x00, 0x5f, 0x4d, 0xb9, 0x99,
-		// Duration 8 bytes.
-		0x2b, 0xc3, 0xd6, 0x7d, 0xd3, 0xac, 0x00, 0x00,
 		// Details 76 bytes.
 		0x59, 0x6f, 0x75, 0x20, 0x6d, 0x61, 0x79, 0x20, 0x6e, 0x6f,
 		0x20, 0x6c, 0x6f, 0x6e, 0x67, 0x65, 0x72, 0x20, 0x74, 0x72,
@@ -856,9 +853,6 @@ func TestPenalty(t *testing.T) {
 	}
 	if penaltyBack.Time != penalty.Time {
 		t.Fatal(penaltyBack.Time, penalty.Time)
-	}
-	if penaltyBack.Duration != penalty.Duration {
-		t.Fatal(penaltyBack.Duration, penalty.Duration)
 	}
 	if penaltyBack.Details != penalty.Details {
 		t.Fatal(penaltyBack.Details, penalty.Details)
@@ -903,71 +897,6 @@ func TestRegister(t *testing.T) {
 	}
 	if registerBack.Time != register.Time {
 		t.Fatal(registerBack.Time, register.Time)
-	}
-}
-
-func TestRegisterResult(t *testing.T) {
-	// serialization: pubkey (33) + client pubkey (33) + time (8) + fee (8) +
-	// address (35-ish) = 117
-	dexPK, _ := hex.DecodeString("511a26bd3db115fd63e4093471227532b7264b125b8cad596bf4f15ed57ef1564d")
-	clientPK, _ := hex.DecodeString("405441ebff6608bdc59f2fbb5020d9b30ca1cb6e8b11ca597997b1e37cadb550b9")
-	address := "Dcur2mcGjmENx4DhNqDctW5wJCVyT3Qeqkx"
-	regRes := &RegisterResult{
-		DEXPubKey:    dexPK,
-		ClientPubKey: clientPK,
-		Address:      address,
-		Time:         1571701946,
-		Fee:          100_000_000,
-	}
-
-	exp := []byte{
-		// DEX PubKey 33 bytes
-		0x51, 0x1a, 0x26, 0xbd, 0x3d, 0xb1, 0x15, 0xfd, 0x63, 0xe4, 0x09, 0x34,
-		0x71, 0x22, 0x75, 0x32, 0xb7, 0x26, 0x4b, 0x12, 0x5b, 0x8c, 0xad, 0x59,
-		0x6b, 0xf4, 0xf1, 0x5e, 0xd5, 0x7e, 0xf1, 0x56, 0x4d,
-		// Client PubKey 33 bytes
-		0x40, 0x54, 0x41, 0xeb, 0xff, 0x66, 0x08, 0xbd, 0xc5, 0x9f, 0x2f, 0xbb,
-		0x50, 0x20, 0xd9, 0xb3, 0x0c, 0xa1, 0xcb, 0x6e, 0x8b, 0x11, 0xca, 0x59,
-		0x79, 0x97, 0xb1, 0xe3, 0x7c, 0xad, 0xb5, 0x50, 0xb9,
-		// Time 8 Bytes
-		0x00, 0x00, 0x00, 0x00, 0x5d, 0xae, 0x44, 0xba,
-		// Fee 8 bytes
-		0x00, 0x00, 0x00, 0x00, 0x05, 0xf5, 0xe1, 0x00,
-		// Address 35 bytes
-		0x44, 0x63, 0x75, 0x72, 0x32, 0x6d, 0x63, 0x47, 0x6a, 0x6d, 0x45, 0x4e,
-		0x78, 0x34, 0x44, 0x68, 0x4e, 0x71, 0x44, 0x63, 0x74, 0x57, 0x35, 0x77,
-		0x4a, 0x43, 0x56, 0x79, 0x54, 0x33, 0x51, 0x65, 0x71, 0x6b, 0x78,
-	}
-
-	b := regRes.Serialize()
-	if !bytes.Equal(b, exp) {
-		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
-	}
-
-	regResB, err := json.Marshal(regRes)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-
-	var regResBack RegisterResult
-	err = json.Unmarshal(regResB, &regResBack)
-	if err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-
-	if !bytes.Equal(regResBack.DEXPubKey, regRes.DEXPubKey) {
-		t.Fatal(regResBack.DEXPubKey, regRes.DEXPubKey)
-	}
-	// We don't check the ClientPubKey, since it is not encoded in the JSON
-	// message. The client must add it themselves before serialization.
-	if regResBack.Address != regRes.Address {
-		t.Fatal(regResBack.Address, regRes.Address)
-	}
-	if regResBack.Time != regRes.Time {
-		t.Fatal(regResBack.Time, regRes.Time)
-	}
-	if regResBack.Fee != regRes.Fee {
-		t.Fatal(regResBack.Fee, regRes.Fee)
 	}
 }
 

@@ -69,7 +69,6 @@ var (
 	// WalletInfo defines some general information about a DigiByte wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "DigiByte",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexdgb.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{

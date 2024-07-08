@@ -12,18 +12,15 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
 var (
 	tLotSize uint64 = 1e12
 	tDOGE           = &dex.Asset{
-		ID:           BipID,
-		Symbol:       "doge",
-		SwapSize:     dexbtc.InitTxSize,
-		SwapSizeBase: dexbtc.InitTxSizeBase,
-		MaxFeeRate:   1e6,
-		SwapConf:     1,
+		ID:         BipID,
+		Symbol:     "doge",
+		MaxFeeRate: 1e6,
+		SwapConf:   1,
 	}
 )
 

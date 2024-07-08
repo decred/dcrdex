@@ -184,12 +184,13 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 	}
 
 	var swapFees, redeemFees uint64
+	redeemTxSize, initTxSize := backedAsset.balancer.RedeemSize(), backedAsset.balancer.InitTxSize()
 	addFees := func(assetInfo *dex.Asset, l uint64, r int) {
 		// The fee rate assigned to redemptions is at the discretion of the
 		// user. MaxFeeRate is used as a conservatively high estimate. This is
 		// then a server policy that clients must satisfy.
-		redeemFees += uint64(r) * assetInfo.RedeemSize * assetInfo.MaxFeeRate
-		swapFees += calc.RequiredOrderFunds(0, 0, l, assetInfo) // Alt: assetInfo.SwapSize * l
+		redeemFees += uint64(r) * redeemTxSize * assetInfo.MaxFeeRate
+		swapFees += calc.RequiredOrderFunds(0, 0, l, initTxSize, initTxSize, assetInfo.MaxFeeRate) // Alt: assetInfo.SwapSize * l
 	}
 
 	// Add the fees for the requested lots.
@@ -238,7 +239,7 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 	// Add redeems if we're redeeming this to a fee-family asset.
 	if assetID != redeemAssetID { // Don't double count
 		if redeemAsset, found := backedAsset.feeFamily[redeemAssetID]; found {
-			redeemFees += redeemAsset.RedeemSize * redeemAsset.MaxFeeRate * lots
+			redeemFees += redeemTxSize * redeemAsset.MaxFeeRate * lots
 		}
 	}
 

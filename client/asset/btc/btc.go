@@ -207,7 +207,6 @@ var (
 	// WalletInfo defines some general information about a Bitcoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin",
-		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexbtc.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
@@ -2254,15 +2253,15 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 	}
 
 	digestInputs := func(inputsSize uint64) (reqFunds, maxFees, estHighFees, estLowFees uint64) {
-		reqFunds = calc.RequiredOrderFundsAlt(val, inputsSize, lots,
+		reqFunds = calc.RequiredOrderFunds(val, inputsSize, lots,
 			btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate) // same as in enough func
 		maxFees = reqFunds - val
 
-		estHighFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots,
+		estHighFunds := calc.RequiredOrderFunds(val, inputsSize, lots,
 			btc.initTxSizeBase, btc.initTxSize, bumpedNetRate)
 		estHighFees = estHighFunds - val
 
-		estLowFunds := calc.RequiredOrderFundsAlt(val, inputsSize, 1,
+		estLowFunds := calc.RequiredOrderFunds(val, inputsSize, 1,
 			btc.initTxSizeBase, btc.initTxSize, bumpedNetRate) // best means single multi-lot match, even better than batch
 		estLowFees = estLowFunds - val
 		return
@@ -2510,7 +2509,7 @@ func (btc *baseWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderVal
 	var totalRequired uint64
 
 	for i, value := range orders {
-		req := calc.RequiredOrderFundsAlt(value.Value, swapInputSize, value.MaxSwapCount, btc.initTxSizeBase, btc.initTxSize, feeRate)
+		req := calc.RequiredOrderFunds(value.Value, swapInputSize, value.MaxSwapCount, btc.initTxSizeBase, btc.initTxSize, feeRate)
 		req = uint64(math.Round(float64(req) * (100 + splitBuffer) / 100))
 		requiredForOrders[i] = req
 		totalRequired += req
@@ -2840,7 +2839,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 
 	valueStr := amount(value).String()
 
-	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots, btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate)
+	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate)
 	if baggage > excess {
 		btc.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. "+
 			"%s > %s", amount(baggage), amount(excess))
@@ -2858,7 +2857,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 		return nil, false, 0, fmt.Errorf("failed to stringify the change address: %w", err)
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(value, swapInputSize, lots, btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate)
+	reqFunds := calc.RequiredOrderFunds(value, swapInputSize, lots, btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate)
 
 	baseTx, _, _, err := btc.fundedTx(coins)
 	splitScript, err := txscript.PayToAddrScript(addr)
@@ -4451,16 +4450,6 @@ func (btc *baseWallet) NewAddress() (string, error) {
 	return btc.DepositAddress()
 }
 
-// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
-// pay the registration fee using the provided feeRate.
-func (btc *baseWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
-	const inputCount = 5 // buffer so this estimate is higher than actual reg tx fee.
-	if feeRate == 0 || feeRate > btc.feeRateLimit() {
-		feeRate = btc.fallbackFeeRate()
-	}
-	return (dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize) * feeRate
-}
-
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of sats/byte.
 // Withdraw satisfies asset.Withdrawer.
@@ -5496,7 +5485,7 @@ func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) ([]a
 		if value.MaxSwapCount == 0 {
 			return nil, nil, 0, fmt.Errorf("cannot fund zero-lot order")
 		}
-		req := calc.RequiredOrderFundsAlt(value.Value, swapInputSize, value.MaxSwapCount,
+		req := calc.RequiredOrderFunds(value.Value, swapInputSize, value.MaxSwapCount,
 			btc.initTxSizeBase, btc.initTxSize, mo.MaxFeeRate)
 		totalRequiredForOrders += req
 	}

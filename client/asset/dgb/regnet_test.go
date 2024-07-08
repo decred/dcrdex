@@ -19,19 +19,16 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
 var (
 	tLotSize uint64 = 1e6
 	tDGB            = &dex.Asset{
-		ID:           20,
-		Symbol:       "dgb",
-		Version:      version,
-		SwapSize:     dexbtc.InitTxSizeSegwit,
-		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
-		MaxFeeRate:   100,
-		SwapConf:     1,
+		ID:         20,
+		Symbol:     "dgb",
+		Version:    version,
+		MaxFeeRate: 100,
+		SwapConf:   1,
 	}
 )
 

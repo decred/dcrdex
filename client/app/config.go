@@ -151,7 +151,6 @@ type Config struct {
 	Simnet     bool   `long:"simnet" description:"use simnet"`
 	RPCOn      bool   `long:"rpc" description:"turn on the rpc server"`
 	NoWeb      bool   `long:"noweb" description:"disable the web server."`
-	ReloadHTML bool   `long:"reload-html" description:"(DEPRECATED) Reload the webserver's page template from disk with every request. Prevents use of any embedded UI files. For development purposes. This is deprecated. Use --no-embed-site instead."`
 	CPUProfile string `long:"cpuprofile" description:"File for CPU profiling."`
 	ShowVer    bool   `short:"V" long:"version" description:"Display version information and exit"`
 	Language   string `long:"lang" description:"BCP 47 tag for preferred language, e.g. en-GB, fr, zh-CN"`
@@ -346,12 +345,6 @@ func ResolveConfig(appData string, cfg *Config) error {
 	if cfg.MMConfig.EventLogDBPath == "" {
 		cfg.MMConfig.EventLogDBPath = defaultMMEventLogDBPath
 	}
-
-	if cfg.ReloadHTML {
-		fmt.Println("The --reload-html switch is deprecated. Use --no-embed-site instead, which has the same reloading effect.")
-		cfg.NoEmbedSite = cfg.ReloadHTML
-	}
-
 	return nil
 }
 
