@@ -42,6 +42,7 @@ const defaultNoCompetitionRate = 10
 
 type v1Config struct {
 	ConfigPath     string `json:"configPath"`
+	DisableAPIFees bool   `json:"disableApiFees"`
 	TatumKey       string `json:"tatumKey"`
 	BlockdaemonKey string `json:"blockdaemonKey"`
 }
@@ -236,12 +237,17 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 			return nil, errors.New("no config path defined in v1 config file")
 		}
 		configPath = cfgV1.ConfigPath
+
 		if cfgV1.TatumKey != "" {
 			feeSources = append(feeSources, tatumFeeFetcher(cfgV1.TatumKey))
 		}
 		if cfgV1.BlockdaemonKey != "" {
 			feeSources = append(feeSources, blockDaemonFeeFetcher(cfgV1.BlockdaemonKey))
 		}
+	}
+	var feeFetcher *txfee.FeeFetcher
+	if !cfgV1.DisableAPIFees {
+		feeFetcher = txfee.NewFeeFetcher(feeSources, cfg.Logger)
 	}
 	return NewBTCClone(&BackendCloneConfig{
 		Name:        assetName,
@@ -252,7 +258,7 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 		ChainParams: params,
 		Ports:       dexbtc.RPCPorts,
 		RelayAddr:   cfg.RelayAddr,
-		FeeFetcher:  txfee.NewFeeFetcher(feeSources, cfg.Logger),
+		FeeFetcher:  feeFetcher,
 	})
 }
 
