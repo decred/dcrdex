@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -140,6 +141,11 @@ func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string)) 
 			time.Sleep(time.Second)
 		}
 	}
+
+	if nativeWallet, is := backend.(*NativeWallet); is {
+		return nativeWallet.ExchangeWallet, cm
+	}
+
 	return backend.(*ExchangeWallet), cm
 }
 
@@ -744,4 +750,169 @@ func fetchRateWithTimeout(t *testing.T, net dex.Network) {
 		t.Fatalf("error fetching %s fees: %v", net, err)
 	}
 	fmt.Printf("##### Fee rate fetched for %s! %.8f DCR/kB \n", net, feeRate)
+}
+
+func TestWalletTxBalanceSync(t *testing.T) {
+	rig := newTestRig(t, func(name string) {
+		tLogger.Infof("%s has reported a new block", name)
+	})
+	defer rig.close(t)
+
+	beta := rig.beta()
+	gamma := rig.gamma()
+
+	err := beta.Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking beta wallet: %v", err)
+	}
+	err = gamma.Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking gamma wallet: %v", err)
+	}
+
+	t.Run("rpc", func(t *testing.T) {
+		testWalletTxBalanceSync(t, gamma, beta)
+	})
+	t.Run("spv", func(t *testing.T) {
+		testWalletTxBalanceSync(t, beta, gamma)
+	})
+}
+
+// This tests that redemptions becoming available in the balance and the
+// asset.WalletTransaction returned from WalletTransaction becomes confirmed
+// at the same time.
+func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWallet) {
+	receivingAddr, err := toWallet.DepositAddress()
+	if err != nil {
+		t.Fatalf("error getting deposit address: %v", err)
+	}
+
+	order := &asset.Order{
+		Value:         toAtoms(1),
+		FeeSuggestion: 10,
+		MaxSwapCount:  1,
+		MaxFeeRate:    20,
+	}
+	coins, _, _, err := fromWallet.FundOrder(order)
+	if err != nil {
+		t.Fatalf("error funding order: %v", err)
+	}
+
+	secret := randBytes(32)
+	secretHash := sha256.Sum256(secret)
+	contract := &asset.Contract{
+		Address:    receivingAddr,
+		Value:      order.Value,
+		SecretHash: secretHash[:],
+		LockTime:   uint64(time.Now().Add(-1 * time.Hour).Unix()),
+	}
+	swaps := &asset.Swaps{
+		Inputs:  coins,
+		FeeRate: 10,
+		Contracts: []*asset.Contract{
+			contract,
+		},
+	}
+	receipts, _, _, err := fromWallet.Swap(swaps)
+	if err != nil {
+		t.Fatalf("error swapping: %v", err)
+	}
+	receipt := receipts[0]
+
+	var auditInfo *asset.AuditInfo
+	for i := 0; i < 10; i++ {
+		auditInfo, err = toWallet.AuditContract(receipt.Coin().ID(), receipt.Contract(), []byte{}, false)
+		if err == nil {
+			break
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+	if err != nil {
+		t.Fatalf("error auditing contract: %v", err)
+	}
+
+	balance, err := toWallet.Balance()
+	if err != nil {
+		t.Fatalf("error getting balance: %v", err)
+	}
+	_, out, _, err := toWallet.Redeem(&asset.RedeemForm{
+		Redemptions: []*asset.Redemption{
+			{
+				Spends: auditInfo,
+				Secret: secret,
+			},
+		},
+		FeeSuggestion: 10,
+	})
+	if err != nil {
+		t.Fatalf("error redeeming: %v", err)
+	}
+
+	confirmSync := func(originalBalance uint64, coinID []byte) {
+		t.Helper()
+
+		for i := 0; i < 10; i++ {
+			balance, err := toWallet.Balance()
+			if err != nil {
+				t.Fatalf("error getting balance: %v", err)
+			}
+			balDiff := balance.Available - originalBalance
+
+			var confirmed bool
+			var txDiff uint64
+			if wt, err := toWallet.WalletTransaction(context.Background(), hex.EncodeToString(coinID)); err == nil {
+				confirmed = wt.Confirmed
+				txDiff = wt.Amount
+				if wt.Type != asset.Receive {
+					txDiff -= wt.Fees
+				}
+			} else if !errors.Is(err, asset.CoinNotFoundError) {
+				t.Fatal(err)
+			}
+
+			balanceChanged := balance.Available != originalBalance
+			if confirmed != balanceChanged {
+				if balanceChanged && !confirmed {
+					for j := 0; j < 20; j++ {
+						if wt, err := toWallet.WalletTransaction(context.Background(), hex.EncodeToString(coinID)); err == nil && wt.Confirmed {
+							t.Fatalf("took %d seconds after balance changed before tx was confirmed", j/2)
+						}
+						time.Sleep(500 * time.Millisecond)
+					}
+				}
+				t.Fatalf("confirmed status does not match balance change. confirmed = %v, balance changed = %d", confirmed, balDiff)
+			}
+
+			if confirmed {
+				if balDiff != txDiff {
+					t.Fatalf("balance and transaction diffs do not match. balance diff = %d, tx diff = %d", balDiff, txDiff)
+				}
+				return
+			}
+
+			time.Sleep(5 * time.Second)
+		}
+
+		t.Fatal("timed out waiting for balance and transaction to sync")
+	}
+
+	confirmSync(balance.Available, out.ID())
+
+	balance, err = toWallet.Balance()
+	if err != nil {
+		t.Fatalf("error getting balance: %v", err)
+	}
+
+	receivingAddr, err = toWallet.DepositAddress()
+	if err != nil {
+		t.Fatalf("error getting deposit address: %v", err)
+	}
+
+	coin, err := fromWallet.Send(receivingAddr, toAtoms(1), 10)
+	if err != nil {
+		t.Fatalf("error sending: %v", err)
+	}
+
+	confirmSync(balance.Available, coin.ID())
 }

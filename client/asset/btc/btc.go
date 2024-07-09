@@ -6029,15 +6029,65 @@ func (btc *intermediaryWallet) WalletTransaction(ctx context.Context, txID strin
 		}
 	}
 
-	txs, err := btc.TxHistory(1, &txID, false)
-	if err != nil {
-		return nil, err
-	}
-	if len(txs) == 0 {
-		return nil, asset.CoinNotFoundError
+	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
 	}
 
-	return txs[0], nil
+	tx, err := txHistoryDB.GetTx(txID)
+	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
+		return nil, err
+	}
+	if tx != nil && tx.Confirmed {
+		return tx, nil
+	}
+
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding txid %s: %w", txID, err)
+	}
+	gtr, err := btc.node.getWalletTransaction(txHash)
+	if err != nil {
+		return nil, fmt.Errorf("error getting transaction %s: %w", txID, err)
+	}
+
+	var blockHeight uint32
+	if gtr.BlockHash != "" {
+		blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding block hash %s: %w", gtr.BlockHash, err)
+		}
+		height, err := btc.tipRedeemer.getBlockHeight(blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error getting block height for %s: %w", blockHash, err)
+		}
+		blockHeight = uint32(height)
+	}
+
+	updated := tx == nil
+	if tx == nil {
+		tx, err = btc.idUnknownTx(&ListTransactionsResult{
+			BlockHeight: blockHeight,
+			BlockTime:   gtr.BlockTime,
+			TxID:        txID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("error identifying transaction: %v", err)
+		}
+	}
+
+	if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != gtr.BlockTime {
+		tx.BlockNumber = uint64(blockHeight)
+		tx.Timestamp = gtr.BlockTime
+		tx.Confirmed = blockHeight > 0
+		updated = true
+	}
+
+	if updated {
+		btc.addTxToHistory(tx, txHash, true, false)
+	}
+
+	return tx, nil
 }
 
 // TxHistory returns all the transactions the wallet has made. If refID is nil,
