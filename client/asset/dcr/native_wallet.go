@@ -197,10 +197,12 @@ func (w *NativeWallet) Lock() (err error) {
 // mixFunds checks the status of mixing operations and starts a mix cycle.
 // mixFunds must be called with the mixer.mtx >= RLock'd.
 func (w *NativeWallet) mixFunds() {
-	if on := w.mixer.ctx != nil; !on {
+	synced, _, _ := w.SyncStatus()
+	if !synced {
 		return
 	}
-	if !w.mixing.Load() {
+	on := w.mixer.ctx != nil
+	if !on || !w.mixing.Load() {
 		return
 	}
 	ctx := w.mixer.ctx
