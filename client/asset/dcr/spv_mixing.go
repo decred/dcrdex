@@ -23,7 +23,7 @@ func (w *spvWallet) mix(ctx context.Context) {
 	// unmixed account is the default account
 	unmixedAccount := uint32(defaultAcct)
 
-	w.log.Debug("Starting cspp peer-to-peer funds mixer")
+	w.log.Debug("Starting new cspp peer-to-peer funds mixing cycle")
 
 	// Don't perform any actions while transactions are not synced
 	// through the tip block.
