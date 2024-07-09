@@ -58,6 +58,7 @@ var (
 // SvrCore is satisfied by server/dex.DEX.
 type SvrCore interface {
 	AccountInfo(acctID account.AccountID) (*db.Account, error)
+	UserMatchFails(aid account.AccountID, n int) ([]*auth.MatchFail, error)
 	Notify(acctID account.AccountID, msg *msgjson.Message)
 	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
@@ -153,6 +154,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
 			rm.Get("/outcomes", s.apiMatchOutcomes)
+			rm.Get("/fails", s.apiMatchFails)
 			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
 		})

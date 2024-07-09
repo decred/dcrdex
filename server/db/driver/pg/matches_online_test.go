@@ -853,6 +853,54 @@ func TestCompletedAndAtFaultMatchStats(t *testing.T) {
 	}
 }
 
+func TestUserMatchFails(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	epIdx := uint64(132412341)
+	nextIdx := func() uint64 {
+		epIdx++
+		return epIdx
+	}
+
+	user, otherUser := randomAccountID(), randomAccountID()
+	matches := []*matchPair{
+		generateMatch(t, order.TakerSwapCast, false, user, otherUser, nextIdx()), // 0: failed, user fault
+		generateMatch(t, order.MatchComplete, false, user, otherUser, nextIdx()), // 1: success
+		generateMatch(t, order.MakerRedeemed, true, user, otherUser, nextIdx()),  // 2: still active, but user success
+		generateMatch(t, order.MakerRedeemed, false, otherUser, user, nextIdx()), // 3: failed, user success, otherUser fault
+		generateMatch(t, order.MakerSwapCast, false, otherUser, user, nextIdx()), // 5: failed, user fault
+		generateMatch(t, order.NewlyMatched, false, otherUser, user, nextIdx()),  // 6: failed, otherUser fault
+	}
+	// Put one of them on another market
+	m4 := matches[4]
+	m4.match.Maker.Prefix().BaseAsset = AssetBTC
+	m4.match.Maker.Prefix().QuoteAsset = AssetLTC
+	m4.match.Taker.Prefix().BaseAsset = AssetBTC
+	m4.match.Taker.Prefix().QuoteAsset = AssetLTC
+	for _, m := range matches {
+		err := archie.InsertMatch(m.match)
+		if err != nil {
+			t.Fatalf("InsertMatch() failed: %v", err)
+		}
+	}
+	fails, err := archie.UserMatchFails(user, 100)
+	if err != nil {
+		t.Fatalf("UserMatchFails() failed: %v", err)
+	}
+check:
+	for _, i := range []int{0, 3, 4} {
+		matchID := matches[i].match.ID()
+		for _, fail := range fails {
+			if fail.ID == matchID {
+				continue check
+			}
+		}
+		t.Fatalf("expected to find fail for match at index %d, but did not", i)
+	}
+}
+
 func TestAllActiveUserMatches(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)

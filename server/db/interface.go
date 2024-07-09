@@ -377,6 +377,12 @@ type MatchOutcome struct {
 	Base, Quote uint32 // the market
 }
 
+// MatchFail is a failed match and the effect on the user's score
+type MatchFail struct {
+	ID     order.MatchID
+	Status order.MatchStatus
+}
+
 // MatchArchiver is the interface required for storage and retrieval of all
 // match data.
 type MatchArchiver interface {
@@ -384,6 +390,7 @@ type MatchArchiver interface {
 	MatchByID(mid order.MatchID, base, quote uint32) (*MatchData, error)
 	UserMatches(aid account.AccountID, base, quote uint32) ([]*MatchData, error)
 	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*MatchOutcome, error)
+	UserMatchFails(aid account.AccountID, lastN int) ([]*MatchFail, error)
 	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*MatchData, error)
 	MarketMatches(base, quote uint32) ([]*MatchDataWithCoins, error)

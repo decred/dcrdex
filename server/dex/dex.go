@@ -1384,6 +1384,10 @@ func (dm *DEX) AccountMatchOutcomesN(aid account.AccountID, n int) ([]*auth.Matc
 	return dm.authMgr.AccountMatchOutcomesN(aid, n)
 }
 
+func (dm *DEX) UserMatchFails(aid account.AccountID, n int) ([]*auth.MatchFail, error) {
+	return dm.authMgr.UserMatchFails(aid, n)
+}
+
 // Notify sends a text notification to a connected client.
 func (dm *DEX) Notify(acctID account.AccountID, msg *msgjson.Message) {
 	dm.authMgr.Notify(acctID, msg)
