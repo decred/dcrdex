@@ -1,4 +1,4 @@
-import Doc, { Animation, AniToggle, parseFloatDefault } from './doc'
+import Doc, { Animation, AniToggle, parseFloatDefault, setupCopyBtn } from './doc'
 import BasePage from './basepage'
 import { postJSON, Errors } from './http'
 import {
@@ -288,10 +288,10 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedAssetID))
     Doc.bind(page.earlierTxs, 'click', () => this.loadEarlierTxs())
 
-    Doc.bind(page.copyTxIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.id || '', page.txDetailsID, page.copyTxIDBtn) })
-    Doc.bind(page.copyRecipientBtn, 'click', () => { this.copyTxDetail(this.currTx?.recipient || '', page.txDetailsRecipient, page.copyRecipientBtn) })
-    Doc.bind(page.copyBondIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.bondID || '', page.txDetailsBondID, page.copyBondIDBtn) })
-    Doc.bind(page.copyBondAccountIDBtn, 'click', () => { this.copyTxDetail(this.currTx?.bondInfo?.accountID || '', page.txDetailsBondAccountID, page.copyBondAccountIDBtn) })
+    Doc.bind(page.copyTxIDBtn, 'click', () => { setupCopyBtn(this.currTx?.id || '', page.txDetailsID, page.copyTxIDBtn, '#1e7d11') })
+    Doc.bind(page.copyRecipientBtn, 'click', () => { setupCopyBtn(this.currTx?.recipient || '', page.txDetailsRecipient, page.copyRecipientBtn, '#1e7d11') })
+    Doc.bind(page.copyBondIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.bondID || '', page.txDetailsBondID, page.copyBondIDBtn, '#1e7d11') })
+    Doc.bind(page.copyBondAccountIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.accountID || '', page.txDetailsBondAccountID, page.copyBondAccountIDBtn, '#1e7d11') })
 
     // Bind the new wallet form.
     this.newWalletForm = new NewWalletForm(page.newWalletForm, (assetID: number) => {
@@ -1691,21 +1691,6 @@ export default class WalletsPage extends BasePage {
     const tmpl = Doc.parseTemplate(row)
     tmpl.date.textContent = date
     return row
-  }
-
-  async copyTxDetail (detail: string, textEl: PageElement, btnEl: PageElement) {
-    try {
-      await navigator.clipboard.writeText(detail)
-    } catch (err) {
-      console.error('Unable to copy: ', err)
-    }
-    const originalColor = textEl.style.color
-    textEl.style.color = '#1e7d11'
-    btnEl.style.color = '#1e7d11'
-    setTimeout(() => {
-      textEl.style.color = originalColor
-      btnEl.style.color = originalColor
-    }, 350)
   }
 
   setTxDetailsPopupElements (tx: WalletTransaction) {

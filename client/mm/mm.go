@@ -1237,25 +1237,72 @@ func (m *MarketMaker) updatePendingEvent(mkt *MarketWithHost, event *MarketMakin
 	}
 }
 
+type RunLogFilters struct {
+	DexBuys     bool `json:"dexBuys"`
+	DexSells    bool `json:"dexSells"`
+	CexBuys     bool `json:"cexBuys"`
+	CexSells    bool `json:"cexSells"`
+	Deposits    bool `json:"deposits"`
+	Withdrawals bool `json:"withdrawals"`
+}
+
+func (f *RunLogFilters) filter(event *MarketMakingEvent) bool {
+	switch {
+	case event.DEXOrderEvent != nil:
+		if event.DEXOrderEvent.Sell {
+			return f.DexSells
+		}
+		return f.DexBuys
+	case event.CEXOrderEvent != nil:
+		if event.CEXOrderEvent.Sell {
+			return f.CexSells
+		}
+		return f.CexBuys
+	case event.DepositEvent != nil:
+		return f.Deposits
+	case event.WithdrawalEvent != nil:
+		return f.Withdrawals
+	default:
+		return false
+	}
+}
+
+var noFilters = &RunLogFilters{
+	DexBuys:     true,
+	DexSells:    true,
+	CexBuys:     true,
+	CexSells:    true,
+	Deposits:    true,
+	Withdrawals: true,
+}
+
 // RunLogs returns the event logs of a market making run. At most n events are
 // returned, if n == 0 then all events are returned. If refID is not nil, then
 // the events including and after refID are returned.
-func (m *MarketMaker) RunLogs(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64) ([]*MarketMakingEvent, *MarketMakingRunOverview, error) {
+// Updated events are events that were updated from pending to confirmed during
+// this call. For completed runs, on each call to RunLogs, all pending events are
+// checked for updates, and anything that was updated is returned.
+func (m *MarketMaker) RunLogs(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, filters *RunLogFilters) (events, updatedEvents []*MarketMakingEvent, overview *MarketMakingRunOverview, err error) {
 	var running bool
 	runningBotsLookup := m.runningBotsLookup()
 	if bot, found := runningBotsLookup[*mkt]; found {
 		running = bot.timeStart() == startTime
 	}
 
+	if filters == nil {
+		filters = noFilters
+	}
+
 	if !running {
-		pendingEvents, err := m.eventLogDB.runEvents(startTime, mkt, 0, nil, true)
+		pendingEvents, err := m.eventLogDB.runEvents(startTime, mkt, 0, nil, true, noFilters)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if len(pendingEvents) > 0 {
+			updatedEvents = make([]*MarketMakingEvent, 0, len(pendingEvents))
 			overview, err := m.eventLogDB.runOverview(startTime, mkt)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			for _, event := range pendingEvents {
 				if event.Pending {
@@ -1264,23 +1311,24 @@ func (m *MarketMaker) RunLogs(startTime int64, mkt *MarketWithHost, n uint64, re
 						m.log.Errorf("Error updating pending event: %v", err)
 						continue
 					}
+					updatedEvents = append(updatedEvents, updatedEvent)
 					m.eventLogDB.storeEvent(startTime, mkt, updatedEvent, nil)
 				}
 			}
 		}
 	}
 
-	events, err := m.eventLogDB.runEvents(startTime, mkt, n, refID, false)
+	events, err = m.eventLogDB.runEvents(startTime, mkt, n, refID, false, filters)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	overview, err := m.eventLogDB.runOverview(startTime, mkt)
+	overview, err = m.eventLogDB.runOverview(startTime, mkt)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return events, overview, nil
+	return events, updatedEvents, overview, nil
 }
 
 // CEXBook generates a snapshot of the specified CEX order book.

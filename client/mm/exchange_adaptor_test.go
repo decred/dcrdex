@@ -81,7 +81,7 @@ func (db *tEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWithHo
 func (db *tEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*MarketMakingRunOverview, error) {
 	return nil, nil
 }
-func (db *tEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool) ([]*MarketMakingEvent, error) {
+func (db *tEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool, filters *RunLogFilters) ([]*MarketMakingEvent, error) {
 	return nil, nil
 }
 

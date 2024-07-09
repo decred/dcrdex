@@ -182,7 +182,7 @@ type MMCore interface {
 	Status() *mm.Status
 	ArchivedRuns() ([]*mm.MarketMakingRun, error)
 	RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error)
-	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, *mm.MarketMakingRunOverview, error)
+	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64, filter *mm.RunLogFilters) (events, updatedEvents []*mm.MarketMakingEvent, overview *mm.MarketMakingRunOverview, err error)
 	CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
 }
 

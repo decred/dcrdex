@@ -1021,6 +1021,7 @@ export interface ProfitLoss {
   modsUSD: number
   final: Record<number, Amount>
   finalUSD: number
+  diffs: Record<number, Amount>
   profit: number
   profitRatio: number
 }

@@ -117,7 +117,7 @@ type eventLogDB interface {
 	// all of the events will be returned. If refID is not nil, the events
 	// including and after the event with the ID will be returned. If
 	// pendingOnly is true, only pending events will be returned.
-	runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool) ([]*MarketMakingEvent, error)
+	runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool, filters *RunLogFilters) ([]*MarketMakingEvent, error)
 }
 
 // eventUpdate is used to asynchronously add events to the event log.
@@ -623,7 +623,7 @@ func decodeMarketMakingEvent(eventB []byte) (*MarketMakingEvent, error) {
 // events will be returned. If refID is not nil, the events including and after the
 // event with the ID will be returned. If pendingOnly is true, only pending events
 // will be returned.
-func (db *boltEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool) ([]*MarketMakingEvent, error) {
+func (db *boltEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool, filter *RunLogFilters) ([]*MarketMakingEvent, error) {
 	events := make([]*MarketMakingEvent, 0, 32)
 
 	return events, db.View(func(tx *bbolt.Tx) error {
@@ -664,6 +664,10 @@ func (db *boltEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint
 			}
 
 			if pendingOnly && !e.Pending {
+				continue
+			}
+
+			if filter != nil && !filter.filter(e) {
 				continue
 			}
 

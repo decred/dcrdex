@@ -2495,7 +2495,7 @@ func randomWalletTransaction(txType asset.TransactionType, qty uint64) *asset.Wa
 	return tx
 }
 
-func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, *mm.MarketMakingRunOverview, error) {
+func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64, filters *mm.RunLogFilters) ([]*mm.MarketMakingEvent, []*mm.MarketMakingEvent, *mm.MarketMakingRunOverview, error) {
 	if n == 0 {
 		n = uint64(rand.Intn(100))
 	}
@@ -2585,10 +2585,10 @@ func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64
 
 	overview, err := m.RunOverview(startTime, mkt)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return events, overview, nil
+	return events, nil, overview, nil
 }
 
 func (m *TMarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {

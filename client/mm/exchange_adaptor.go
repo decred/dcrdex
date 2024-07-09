@@ -3236,6 +3236,7 @@ type ProfitLoss struct {
 	ModsUSD     float64            `json:"modsUSD"`
 	Final       map[uint32]*Amount `json:"final"`
 	FinalUSD    float64            `json:"finalUSD"`
+	Diffs       map[uint32]*Amount `json:"diffs"`
 	Profit      float64            `json:"profit"`
 	ProfitRatio float64            `json:"profitRatio"`
 }
@@ -3250,6 +3251,7 @@ func newProfitLoss(
 	pl := &ProfitLoss{
 		Initial: make(map[uint32]*Amount, len(initialBalances)),
 		Mods:    make(map[uint32]*Amount, len(mods)),
+		Diffs:   make(map[uint32]*Amount, len(initialBalances)),
 		Final:   make(map[uint32]*Amount, len(finalBalances)),
 	}
 	for assetID, v := range initialBalances {
@@ -3262,6 +3264,8 @@ func newProfitLoss(
 		mod := NewAmount(assetID, mods[assetID], fiatRate)
 		pl.InitialUSD += init.USD
 		pl.ModsUSD += mod.USD
+		diff := int64(finalBalances[assetID]) - int64(initialBalances[assetID]) - mods[assetID]
+		pl.Diffs[assetID] = NewAmount(assetID, diff, fiatRate)
 	}
 	for assetID, v := range finalBalances {
 		if v == 0 {

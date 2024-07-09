@@ -197,7 +197,7 @@ func TestEventLogDB(t *testing.T) {
 
 	// Get all run events
 	check := func() error {
-		runEvents, err := db.runEvents(startTime, mkt, 0, nil, false)
+		runEvents, err := db.runEvents(startTime, mkt, 0, nil, false, nil)
 		if err != nil {
 			return fmt.Errorf("error getting run events: %v", err)
 		}
@@ -215,7 +215,7 @@ func TestEventLogDB(t *testing.T) {
 	tryWithTimeout(t, check)
 
 	// Get only 1 run event
-	runEvents, err := db.runEvents(startTime, mkt, 1, nil, false)
+	runEvents, err := db.runEvents(startTime, mkt, 1, nil, false, nil)
 	if err != nil {
 		t.Fatalf("error getting run events: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestEventLogDB(t *testing.T) {
 	}
 
 	// Get run events with ref ID
-	runEvents, err = db.runEvents(startTime, mkt, 1, &event1.ID, false)
+	runEvents, err = db.runEvents(startTime, mkt, 1, &event1.ID, false, nil)
 	if err != nil {
 		t.Fatalf("error getting run events: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestEventLogDB(t *testing.T) {
 
 	// Get all run events
 	check = func() error {
-		runEvents, err := db.runEvents(startTime, mkt, 0, nil, false)
+		runEvents, err := db.runEvents(startTime, mkt, 0, nil, false, nil)
 		if err != nil {
 			return fmt.Errorf("error getting run events: %v", err)
 		}
@@ -290,7 +290,7 @@ func TestEventLogDB(t *testing.T) {
 	}
 
 	// Fetch pending runs only
-	runEvents, err = db.runEvents(startTime, mkt, 0, nil, true)
+	runEvents, err = db.runEvents(startTime, mkt, 0, nil, true, nil)
 	if err != nil {
 		t.Fatalf("error getting run events: %v", err)
 	}
