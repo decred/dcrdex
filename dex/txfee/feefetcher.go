@@ -14,8 +14,9 @@ import (
 	"decred.org/dcrdex/dex/utils"
 )
 
-// FeeFetchFunc is a function that fetches a fee rate. If an error encountered
-// the FeeFetchFunc will indicate how long to wait until trying again.
+// FeeFetchFunc is a function that fetches a fee rate. If an error is
+// encountered the FeeFetchFunc will indicate how long to wait until trying
+// again.
 type FeeFetchFunc func(ctx context.Context) (rate uint64, errDelay time.Duration, err error)
 
 // SourceConfig defines a fee rate source.
@@ -159,7 +160,7 @@ func (f *FeeFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		defer cancel()
 		r, errDelay, err := src.F(ctx)
 		if err != nil {
-			src.log.Meter("fetch-error", time.Minute*30).Error("Fetch error: %v", err)
+			src.log.Meter("fetch-error", time.Minute*30).Errorf("Fetch error: %v", err)
 			src.failUntil = time.Now().Add(utils.Max(minFeeFetchErrorDelay, errDelay))
 			return false
 		}
