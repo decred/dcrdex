@@ -418,6 +418,13 @@ export default class WalletsPage extends BasePage {
     const assetIDStr = State.fetchLocal(State.selectedAssetLK)
     if (assetIDStr) selectedAsset = Number(assetIDStr)
     this.setSelectedAsset(selectedAsset)
+
+    setInterval(() => {
+      for (const row of this.page.txHistoryTableBody.children) {
+        const age = Doc.tmplElement(row as PageElement, 'age')
+        age.textContent = Doc.timeSince(parseInt(age.dataset.timestamp as string))
+      }
+    }, 5000)
   }
 
   closePopups () {
@@ -900,7 +907,16 @@ export default class WalletsPage extends BasePage {
     sortedAssets.sort((a: SupportedAsset, b: SupportedAsset) => {
       if (a.wallet && !b.wallet) return -1
       if (!a.wallet && b.wallet) return 1
-      return a.symbol.localeCompare(b.symbol)
+      if (!a.wallet && !b.wallet) return a.symbol === 'dcr' ? -1 : 1
+      const [aBal, bBal] = [a.wallet.balance, b.wallet.balance]
+      const [aTotal, bTotal] = [aBal.available + aBal.immature + aBal.locked, bBal.available + bBal.immature + bBal.locked]
+      if (aTotal === 0 && bTotal === 0) return a.symbol.localeCompare(b.symbol)
+      else if (aTotal === 0) return 1
+      else if (aTotal === 0) return -1
+      const [aFiat, bFiat] = [app().fiatRatesMap[a.id], app().fiatRatesMap[b.id]]
+      if (aFiat && !bFiat) return -1
+      if (!aFiat && bFiat) return 1
+      return bFiat * bTotal - aFiat * aTotal
     })
     for (const a of sortedAssets) {
       const bttn = page.iconSelectTmpl.cloneNode(true) as HTMLElement
@@ -1635,6 +1651,7 @@ export default class WalletsPage extends BasePage {
     const tmpl = Doc.parseTemplate(row)
     const ui = app().unitInfo(assetID)
     tmpl.age.textContent = Doc.timeSince(tx.timestamp * 1000)
+    tmpl.age.dataset.timestamp = String(tx.timestamp * 1000)
     Doc.setVis(tx.timestamp === 0, tmpl.pending)
     Doc.setVis(tx.timestamp !== 0, tmpl.age)
     if (tx.timestamp > 0) tmpl.age.dataset.stamp = String(tx.timestamp)

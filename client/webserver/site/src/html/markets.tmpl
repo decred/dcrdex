@@ -76,39 +76,24 @@
           <span class="ico-arrowup fs18 grey ms-1"></span>
         </div>
   
-        <div class="data-point">
-          <span class="label grey">[[[:title:price]]]</span>
+        <div class="d-flex flex-column">
+          <span class="fs15 grey">[[[:title:price]]]</span>
           <div class="flex-center me-2">
             <span data-tmpl="price"></span>
             <div data-tmpl="change" class="ms-2"></div>
           </div>
         </div>
 
-        <div class="twentyfour flex-center align-items-stretch border-start">
-          <div class="data-point">
-            <span class="label grey border-bottom">24 Hr.</span>
+        <div class="statgrid">
+          <span class="fs15 grey border-bottom border-start ps-2 pe-4">[[[volume_24]]]</span>
+          <span class="fs15 grey border-bottom ps-2 pe-4">[[[High]]]</span>
+          <span class="fs15 grey border-bottom ps-2">[[[Low]]]</span>
+          <div class="d-flex align-items-end border-start ps-2 pe-4">
+            <div data-tmpl="volume">-</div>
+            <div data-tmpl="volUnit" class="fs14 grey ms-1">USD</div>
           </div>
-    
-          <div class="data-point">
-            <span class="label grey border-bottom">[[[:title:volume]]]</span>
-            <div class="flex-center me-2">
-              <div data-tmpl="volume">-</div>
-            </div>
-          </div>
-    
-          <div class="data-point">
-            <span class="label grey border-bottom">High</span>
-            <div class="flex-center ms-2">
-              <div data-tmpl="high">-</div>
-            </div>
-          </div>
-    
-          <div class="data-point">
-            <span class="label grey border-bottom">Low</span>
-            <div class="flex-center ms-2">
-              <div data-tmpl="low">-</div>
-            </div>
-          </div>
+          <div class="ps-2 pe-4" data-tmpl="high">-</div>
+          <div class="ps-2" data-tmpl="low">-</div>
         </div>
       </div>
 
