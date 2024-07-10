@@ -241,7 +241,7 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 		var cumulativeCEXDepth uint64
 		for i, cfgPlacement := range cfgPlacements {
 			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*a.lotSize) * cfgPlacement.Multiplier)
-			_, extrema, filled, err := a.CEX.VWAP(a.baseID, a.quoteID, !sellOnDEX, cumulativeCEXDepth)
+			_, extrema, filled, err := a.CEX.VWAP(a.baseID, a.quoteID, sellOnDEX, cumulativeCEXDepth)
 			if err != nil {
 				a.log.Errorf("Error calculating vwap: %v", err)
 				newPlacements = append(newPlacements, &multiTradePlacement{
@@ -258,7 +258,7 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 			}
 
 			if !filled {
-				a.log.Infof("CEX %s side has < %s on the orderbook.", map[bool]string{true: "sell", false: "buy"}[!sellOnDEX], a.fmtBase(cumulativeCEXDepth))
+				a.log.Infof("CEX %s side has < %s on the orderbook.", sellStr(!sellOnDEX), a.fmtBase(cumulativeCEXDepth))
 				newPlacements = append(newPlacements, &multiTradePlacement{
 					rate: 0,
 					lots: 0,

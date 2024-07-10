@@ -93,11 +93,11 @@ func TestArbMMRebalance(t *testing.T) {
 				},
 			},
 		})
-		cex.asksVWAP[lotSize*buyLots] = vwapResult{
+		cex.bidsVWAP[lotSize*buyLots] = vwapResult{
 			avg:     buyRate,
 			extrema: buyRate,
 		}
-		cex.bidsVWAP[lotSize*sellLots] = vwapResult{
+		cex.asksVWAP[lotSize*sellLots] = vwapResult{
 			avg:     sellRate,
 			extrema: sellRate,
 		}
@@ -105,9 +105,6 @@ func TestArbMMRebalance(t *testing.T) {
 		minCexBase = buyLots * lotSize
 		minDexQuote = calc.BaseToQuote(buyRate, buyLots*lotSize) + a.buyFees.bookingFeesPerLot*buyLots
 		minCexQuote = calc.BaseToQuote(sellRate, sellLots*lotSize)
-		// totalBase = minCexBase + minDexBase
-		// totalQuote = minCexQuote + minDexQuote
-		// perLot = a.lotCosts(buyLots, sellLots)
 	}
 
 	setBals := func(assetID uint32, dexBal, cexBal uint64) {
