@@ -297,7 +297,7 @@ func (b *binanceOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, fi
 	defer b.mtx.RUnlock()
 
 	if !b.synced.Load() {
-		return 0, 0, filled, errors.New("orderbook not synced")
+		return 0, 0, filled, ErrUnsyncedOrderbook
 	}
 
 	vwap, extrema, filled = b.book.vwap(bids, qty)

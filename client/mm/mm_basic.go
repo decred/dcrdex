@@ -175,7 +175,7 @@ func (c *BasicMarketMakingConfig) Validate() error {
 }
 
 type basicMMCalculator interface {
-	basisPrice() uint64
+	basisPrice() (bp uint64, outsideOracleSafeRange bool, err error)
 	halfSpread(uint64) (uint64, error)
 	feeGapStats(uint64) (*FeeGapStats, error)
 }
@@ -189,6 +189,9 @@ type basicMMCalculatorImpl struct {
 	log    dex.Logger
 }
 
+var errNoOracleAvailable = errors.New("no oracle available")
+var errNoBasisPrice = errors.New("order book empty and no empty-market rate set")
+
 // basisPrice calculates the basis price for the market maker.
 // The mid-gap of the dex order book is used, and if oracles are
 // available, and the oracle weighting is > 0, the oracle price
@@ -199,11 +202,10 @@ type basicMMCalculatorImpl struct {
 // or oracle weighting is 0, the fiat rate is used.
 // If there is no fiat rate available, the empty market rate in the
 // configuration is used.
-func (b *basicMMCalculatorImpl) basisPrice() uint64 {
+func (b *basicMMCalculatorImpl) basisPrice() (bp uint64, outsideOracleSafeRange bool, err error) {
 	midGap, err := b.book.MidGap()
 	if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
-		b.log.Errorf("MidGap error: %v", err)
-		return 0
+		return 0, false, err
 	}
 
 	basisPrice := float64(midGap) // float64 message-rate units
@@ -213,7 +215,7 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 		oracleWeighting = *b.cfg.OracleWeighting
 		oraclePrice = b.oracle.getMarketPrice(b.baseID, b.quoteID)
 		if oraclePrice == 0 {
-			b.log.Warnf("no oracle price available for %s bot", b.name)
+			return 0, false, errNoOracleAvailable
 		}
 	}
 
@@ -226,9 +228,11 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 			if basisPrice < low {
 				b.log.Debugf("local mid-gap is below safe range. Using effective mid-gap of %.2f below the oracle rate.", maxOracleMismatch*100)
 				basisPrice = low
+				outsideOracleSafeRange = true
 			} else if basisPrice > high {
 				b.log.Debugf("local mid-gap is above safe range. Using effective mid-gap of %.2f above the oracle rate.", maxOracleMismatch*100)
 				basisPrice = high
+				outsideOracleSafeRange = true
 			}
 		}
 
@@ -246,21 +250,21 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 	}
 
 	if basisPrice > 0 {
-		return steppedRate(uint64(basisPrice), b.rateStep)
+		return steppedRate(uint64(basisPrice), b.rateStep), outsideOracleSafeRange, nil
 	}
 
 	// TODO: add a configuration to turn off use of fiat rate?
 	fiatRate := b.core.ExchangeRateFromFiatSources()
 	if fiatRate > 0 {
-		return steppedRate(fiatRate, b.rateStep)
+		return steppedRate(fiatRate, b.rateStep), outsideOracleSafeRange, nil
 	}
 
 	if b.cfg.EmptyMarketRate > 0 {
 		emptyMsgRate := b.msgRate(b.cfg.EmptyMarketRate)
-		return steppedRate(emptyMsgRate, b.rateStep)
+		return steppedRate(emptyMsgRate, b.rateStep), outsideOracleSafeRange, nil
 	}
 
-	return 0
+	return 0, outsideOracleSafeRange, errNoBasisPrice
 }
 
 // halfSpread calculates the distance from the mid-gap where if you sell a lot
@@ -386,7 +390,27 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 	return basisPrice - adj
 }
 
-func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, sellOrders []*multiTradePlacement) {
+func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradePlacement, oracleOutsideSafeRange bool, err error) {
+	basisPrice, oracleOutsideSafeRange, err := m.calculator.basisPrice()
+	if err != nil {
+		return nil, nil, oracleOutsideSafeRange, fmt.Errorf("could not calculate basis price: %w", err)
+	}
+
+	feeGap, err := m.calculator.feeGapStats(basisPrice)
+	if err != nil {
+		return nil, nil, oracleOutsideSafeRange, fmt.Errorf("could not calculate fee-gap stats: %w", err)
+	}
+	m.registerFeeGap(feeGap)
+	var feeAdj uint64
+	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
+		feeAdj = feeGap.FeeGap / 2
+	}
+
+	if m.log.Level() == dex.LevelTrace {
+		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
+			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
+	}
+
 	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
 		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
 		for i, p := range orderPlacements {
@@ -411,40 +435,66 @@ func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, 
 
 	buyOrders = orders(m.cfg().BuyPlacements, false)
 	sellOrders = orders(m.cfg().SellPlacements, true)
-	return buyOrders, sellOrders
+	return buyOrders, sellOrders, oracleOutsideSafeRange, nil
 }
 
-func (m *basicMarketMaker) rebalance(newEpoch uint64) {
+// updateBotProblems updates the bot problems based on the errors encountered
+// during the bot loop.
+func (m *basicMarketMaker) updateBotLoopProblems(buyErr, sellErr, determinePlacementsErr error, outsideOracleSafeRange bool, dexDefs map[uint32]uint64) {
+	m.unifiedExchangeAdaptor.updateBotProblems(func(problems *BotProblems) {
+		clearBotProblemErrors(problems)
+		problems.MidGapOutsideOracleSafeRange = outsideOracleSafeRange
+
+		if !updateBotProblemsBasedOnError(problems, buyErr) {
+			problems.PlaceBuyOrdersErr = buyErr
+		}
+
+		if !updateBotProblemsBasedOnError(problems, sellErr) {
+			problems.PlaceSellOrdersErr = sellErr
+		}
+
+		if !updateBotProblemsBasedOnError(problems, determinePlacementsErr) {
+			problems.DeterminePlacementsErr = determinePlacementsErr
+		}
+
+		problems.DEXBalanceDeficiencies = dexDefs
+	})
+}
+
+func (m *basicMarketMaker) rebalance(newEpoch uint64, book *orderbook.OrderBook) {
 	if !m.rebalanceRunning.CompareAndSwap(false, true) {
 		return
 	}
 	defer m.rebalanceRunning.Store(false)
 	m.log.Tracef("rebalance: epoch %d", newEpoch)
-	basisPrice := m.calculator.basisPrice()
-	if basisPrice == 0 {
-		m.log.Errorf("No basis price available and no empty-market rate set")
+
+	if !m.checkBotHealth() {
 		return
 	}
 
-	feeGap, err := m.calculator.feeGapStats(basisPrice)
-	if err != nil {
-		m.log.Errorf("Could not calculate fee-gap stats: %v", err)
+	var buyErr, sellErr, determinePlacementsErr error
+	var dexDefs map[uint32]uint64
+	var oracleOutsideSafeRange bool
+	defer func() {
+		m.updateBotLoopProblems(buyErr, sellErr, determinePlacementsErr, oracleOutsideSafeRange, dexDefs)
+	}()
+
+	buyOrders, sellOrders, oracleOutsideSafeRange, determinePlacementsErr := m.ordersToPlace()
+	if determinePlacementsErr != nil {
+		m.tryCancelOrders(m.ctx, &newEpoch, book.OrderIsBooked, false)
 		return
 	}
-	m.registerFeeGap(feeGap)
-	var feeAdj uint64
-	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
-		feeAdj = feeGap.FeeGap / 2
-	}
 
-	if m.log.Level() == dex.LevelTrace {
-		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
-			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
-	}
+	_, buyDEXDefs, _, buyErr := m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
+	_, sellDEXDefs, _, sellErr := m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
 
-	buyOrders, sellOrders := m.ordersToPlace(basisPrice, feeAdj)
-	m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
-	m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
+	dexDefs = make(map[uint32]uint64)
+	for k, v := range buyDEXDefs {
+		dexDefs[k] += v
+	}
+	for k, v := range sellDEXDefs {
+		dexDefs[k] += v
+	}
 }
 
 func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
@@ -472,7 +522,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 			case ni := <-bookFeed.Next():
 				switch epoch := ni.Payload.(type) {
 				case *core.ResolvedEpoch:
-					m.rebalance(epoch.Current)
+					m.rebalance(epoch.Current, book)
 				}
 			case <-ctx.Done():
 				return

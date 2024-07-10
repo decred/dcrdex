@@ -3,22 +3,29 @@
 package mm
 
 import (
+	"errors"
 	"math"
+	"reflect"
 	"testing"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/msgjson"
 )
 
 type tBasicMMCalculator struct {
-	bp uint64
+	bp                       uint64
+	bpOracleOutsideSafeRange bool
+	bpErr                    error
+
 	hs uint64
 }
 
 var _ basicMMCalculator = (*tBasicMMCalculator)(nil)
 
-func (r *tBasicMMCalculator) basisPrice() uint64 {
-	return r.bp
+func (r *tBasicMMCalculator) basisPrice() (uint64, bool, error) {
+	return r.bp, r.bpOracleOutsideSafeRange, r.bpErr
 }
 func (r *tBasicMMCalculator) halfSpread(basisPrice uint64) (uint64, error) {
 	return r.hs, nil
@@ -37,40 +44,45 @@ func TestBasisPrice(t *testing.T) {
 	}
 
 	tests := []*struct {
-		name         string
-		midGap       uint64
-		oraclePrice  uint64
-		oracleBias   float64
-		oracleWeight float64
-		conversions  map[uint32]float64
-		fiatRate     uint64
-		exp          uint64
+		name            string
+		midGap          uint64
+		oraclePrice     uint64
+		oracleBias      float64
+		oracleWeight    float64
+		conversions     map[uint32]float64
+		fiatRate        uint64
+		emptyMarketRate float64
+
+		expBP                     uint64
+		expErr                    error
+		expOutsideOracleSafeRange bool
 	}{
 		{
 			name:   "just mid-gap is enough",
 			midGap: 123e5,
-			exp:    123e5,
+			expBP:  123e5,
 		},
 		{
 			name:         "mid-gap + oracle weight",
 			midGap:       1950,
 			oraclePrice:  2000,
 			oracleWeight: 0.5,
-			exp:          1975,
+			expBP:        1975,
 		},
 		{
-			name:         "adjusted mid-gap + oracle weight",
-			midGap:       1000, // adjusted to 1940
-			oraclePrice:  2000,
-			oracleWeight: 0.5,
-			exp:          1970,
+			name:                      "adjusted mid-gap + oracle weight",
+			midGap:                    1000, // adjusted to 1940
+			oraclePrice:               2000,
+			oracleWeight:              0.5,
+			expBP:                     1970,
+			expOutsideOracleSafeRange: true,
 		},
 		{
 			name:         "no mid-gap effectively sets oracle weight to 100%",
 			midGap:       0,
 			oraclePrice:  2000,
 			oracleWeight: 0.5,
-			exp:          2000,
+			expBP:        2000,
 		},
 		{
 			name:         "mid-gap + oracle weight + oracle bias",
@@ -78,54 +90,80 @@ func TestBasisPrice(t *testing.T) {
 			oraclePrice:  2000,
 			oracleBias:   -0.01, // minus 20
 			oracleWeight: 0.75,
-			exp:          1972, // 0.25 * 1950 + 0.75 * (2000 - 20) = 1972
+			expBP:        1972, // 0.25 * 1950 + 0.75 * (2000 - 20) = 1972
 		},
 		{
-			name:         "no mid-gap and no oracle weight fails to produce result",
+			name:         "oracle not available",
+			oracleWeight: 0.5,
+			oraclePrice:  0,
+			expErr:       errNoOracleAvailable,
+		},
+		{
+			name:            "no mid-gap, oracle weight, fiat rate, use empty market rate",
+			emptyMarketRate: 1200.0,
+			expBP:           calc.MessageRateAlt(1200, 1e8, 1e8),
+		},
+		{
+			name:         "no mid-gap, no oracle weight, no empty market rate",
 			midGap:       0,
 			oraclePrice:  0,
-			oracleWeight: 0.75,
-			exp:          0,
+			oracleWeight: 0,
+			expBP:        0,
+			expErr:       errNoBasisPrice,
 		},
 		{
 			name:         "no mid-gap and no oracle weight, but fiat rate is set",
 			midGap:       0,
 			oraclePrice:  0,
-			oracleWeight: 0.75,
+			oracleWeight: 0,
 			fiatRate:     1200,
-			exp:          1200,
+			expBP:        1200,
 		},
 	}
 
 	for _, tt := range tests {
-		oracle := &tOracle{
-			marketPrice: mkt.MsgRateToConventional(tt.oraclePrice),
-		}
-		ob := &tOrderBook{
-			midGap: tt.midGap,
-		}
-		cfg := &BasicMarketMakingConfig{
-			OracleWeighting: &tt.oracleWeight,
-			OracleBias:      tt.oracleBias,
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			oracle := &tOracle{
+				marketPrice: mkt.MsgRateToConventional(tt.oraclePrice),
+			}
+			ob := &tOrderBook{
+				midGap: tt.midGap,
+			}
+			cfg := &BasicMarketMakingConfig{
+				OracleWeighting: &tt.oracleWeight,
+				OracleBias:      tt.oracleBias,
+				EmptyMarketRate: tt.emptyMarketRate,
+			}
 
-		tCore := newTCore()
-		adaptor := newTBotCoreAdaptor(tCore)
-		adaptor.fiatExchangeRate = tt.fiatRate
+			tCore := newTCore()
+			adaptor := newTBotCoreAdaptor(tCore)
+			adaptor.fiatExchangeRate = tt.fiatRate
 
-		calculator := &basicMMCalculatorImpl{
-			market: mustParseMarket(mkt),
-			book:   ob,
-			oracle: oracle,
-			cfg:    cfg,
-			log:    tLogger,
-			core:   adaptor,
-		}
+			calculator := &basicMMCalculatorImpl{
+				market: mustParseMarket(mkt),
+				book:   ob,
+				oracle: oracle,
+				cfg:    cfg,
+				log:    tLogger,
+				core:   adaptor,
+			}
 
-		rate := calculator.basisPrice()
-		if rate != tt.exp {
-			t.Fatalf("%s: %d != %d", tt.name, rate, tt.exp)
-		}
+			rate, outsideSafeRange, err := calculator.basisPrice()
+			if err != nil {
+				if tt.expErr != err {
+					t.Fatalf("expected error %v, got %v", tt.expErr, err)
+				}
+				return
+			}
+
+			if outsideSafeRange != tt.expOutsideOracleSafeRange {
+				t.Fatalf("expected outsideSafeRange %t, got %t", tt.expOutsideOracleSafeRange, outsideSafeRange)
+			}
+
+			if rate != tt.expBP {
+				t.Fatalf("%s: %d != %d", tt.name, rate, tt.expBP)
+			}
+		})
 	}
 }
 
@@ -368,6 +406,10 @@ func TestBasicMMRebalance(t *testing.T) {
 				calculator: calculator,
 			}
 			tcore := newTCore()
+			tcore.setWalletsAndExchange(&core.Market{
+				BaseID:  baseID,
+				QuoteID: quoteID,
+			})
 			mm.clientCore = tcore
 			mm.botCfgV.Store(&BotConfig{})
 			mm.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
@@ -402,7 +444,7 @@ func TestBasicMMRebalance(t *testing.T) {
 				BuyPlacements:  tt.cfgBuyPlacements,
 				SellPlacements: tt.cfgSellPlacements,
 			})
-			mm.rebalance(100)
+			mm.rebalance(100, &orderbook.OrderBook{})
 
 			if len(tcore.multiTradesPlaced) != 2 {
 				t.Fatal("expected both buy and sell orders placed")
@@ -439,6 +481,150 @@ func TestBasicMMRebalance(t *testing.T) {
 						t.Fatalf("wrong lots %d for sell at rate %d", lots, expSell.rate)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestBasicMMBotProblems(t *testing.T) {
+	const basisPrice uint64 = 5e6
+	const halfSpread uint64 = 2e5
+	const rateStep uint64 = 1e3
+	const atomToConv float64 = 1
+	const baseID, quoteID = uint32(42), uint32(0)
+	const lotSize = uint64(1e8)
+
+	type test struct {
+		name                     string
+		bpOracleOutsideSafeRange bool
+		bpErr                    error
+		multiTradeBuyErr         error
+		multiTradeSellErr        error
+		noBalance                bool
+
+		expBotProblems *BotProblems
+	}
+
+	updateBotProblems := func(f func(*BotProblems)) *BotProblems {
+		bp := newBotProblems()
+		f(bp)
+		return bp
+	}
+
+	noIDErr1 := errors.New("no ID")
+	noIDErr2 := errors.New("no ID")
+
+	var swapFees, redeemFees, refundFees uint64 = 1e5, 2e5, 3e5
+
+	tests := []*test{
+		{
+			name:           "no problems",
+			expBotProblems: newBotProblems(),
+		},
+		{
+			name:                     "mid gap outside oracle safe range",
+			bpOracleOutsideSafeRange: true,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.MidGapOutsideOracleSafeRange = true
+			}),
+		},
+		{
+			name:              "wallet sync errors",
+			multiTradeBuyErr:  &core.WalletSyncError{AssetID: baseID},
+			multiTradeSellErr: &core.WalletSyncError{AssetID: quoteID},
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.WalletNotSynced[baseID] = true
+				bp.WalletNotSynced[quoteID] = true
+			}),
+		},
+		{
+			name:              "account suspended",
+			multiTradeBuyErr:  core.ErrAccountSuspended,
+			multiTradeSellErr: core.ErrAccountSuspended,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.AccountSuspended = true
+			}),
+		},
+		{
+			name:              "buy no peers, sell qty too high",
+			multiTradeBuyErr:  &core.WalletNoPeersError{AssetID: baseID},
+			multiTradeSellErr: &msgjson.Error{Code: msgjson.OrderQuantityTooHigh},
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.NoWalletPeers[baseID] = true
+				bp.UserLimitTooLow = true
+			}),
+		},
+		{
+			name:              "unidentified errors",
+			multiTradeBuyErr:  noIDErr1,
+			multiTradeSellErr: noIDErr2,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.PlaceBuyOrdersErr = noIDErr1
+				bp.PlaceSellOrdersErr = noIDErr2
+			}),
+		},
+		{
+			name:      "no balance",
+			noBalance: true,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.DEXBalanceDeficiencies = map[uint32]uint64{
+					baseID:  lotSize + swapFees,
+					quoteID: calc.BaseToQuote(basisPrice-basisPrice/100, lotSize) + swapFees,
+				}
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calculator := &tBasicMMCalculator{
+				bp:                       basisPrice,
+				bpOracleOutsideSafeRange: tt.bpOracleOutsideSafeRange,
+				bpErr:                    tt.bpErr,
+				hs:                       halfSpread,
+			}
+
+			adaptor := newTBotCoreAdaptor(newTCore())
+			mm := &basicMarketMaker{
+				unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
+					RateStep:   rateStep,
+					AtomToConv: atomToConv,
+					BaseID:     baseID,
+					QuoteID:    quoteID,
+					LotSize:    lotSize,
+				}),
+				calculator: calculator,
+				core:       adaptor,
+			}
+
+			mm.buyFees = tFees(swapFees, redeemFees, refundFees, 0)
+			mm.sellFees = tFees(swapFees, redeemFees, refundFees, 0)
+
+			mm.unifiedExchangeAdaptor.clientCore.(*tCore).multiTradeBuyErr = tt.multiTradeBuyErr
+			mm.unifiedExchangeAdaptor.clientCore.(*tCore).multiTradeSellErr = tt.multiTradeSellErr
+
+			if !tt.noBalance {
+				mm.baseDexBalances[baseID] = int64(lotSize * 50)
+				mm.baseDexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
+			}
+
+			mm.cfgV.Store(&BasicMarketMakingConfig{
+				GapStrategy: GapStrategyPercent,
+				SellPlacements: []*OrderPlacement{
+					{Lots: 1, GapFactor: 0.01},
+				},
+				BuyPlacements: []*OrderPlacement{
+					{Lots: 1, GapFactor: 0.01},
+				},
+			})
+
+			mm.unifiedExchangeAdaptor.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
+
+			mm.rebalance(100, &orderbook.OrderBook{})
+
+			problems := mm.problems()
+			if !reflect.DeepEqual(tt.expBotProblems, problems) {
+				t.Fatalf("expected bot problems %v, got %v", tt.expBotProblems, problems)
 			}
 		})
 	}

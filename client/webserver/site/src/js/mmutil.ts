@@ -1015,3 +1015,7 @@ export function feesAndCommit (
 
   return { commit, fees }
 }
+
+window.mmstatus = function () : Promise<MarketMakingStatus> {
+  return MM.status()
+}
