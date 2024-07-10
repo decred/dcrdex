@@ -4584,7 +4584,7 @@ func (c *Core) Login(pw []byte) error {
 		// is needed for active trades, it will be unlocked in resolveActiveTrades
 		// and the balance updated there.
 		c.notify(newLoginNote("Connecting wallets..."))
-		c.connectWallets() // initialize reserves
+		c.connectWallets(crypter) // initialize reserves
 		c.notify(newLoginNote("Resuming active trades..."))
 		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
@@ -4636,7 +4636,7 @@ func (c *Core) upgradeV0CredsToV1(appPW []byte, creds db.PrimaryCredentials) (en
 
 // connectWallets attempts to connect to and retrieve balance from all known
 // wallets. This should be done only ONCE on Login.
-func (c *Core) connectWallets() {
+func (c *Core) connectWallets(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	var connectCount uint32
 	connectWallet := func(wallet *xcWallet) {
@@ -4657,6 +4657,31 @@ func (c *Core) connectWallets() {
 				c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject, err.Error(),
 					db.ErrorLevel, wallet.state()))
 				return
+			}
+			if mw, is := wallet.Wallet.(asset.FundsMixer); is {
+				startMixing := func() error {
+					stats, err := mw.FundsMixingStats()
+					if err != nil {
+						return fmt.Errorf("error checking %s wallet mixing stats: %v", unbip(wallet.AssetID), err)
+					}
+					// If the wallet has no funds to transfer to the default account
+					// and mixing is not enabled unlocking is not required.
+					if !stats.Enabled && stats.MixedFunds == 0 && stats.TradingFunds == 0 {
+						return nil
+					}
+					// Unlocking is required for mixing or to move funds if mixing
+					// was recently turned off without funds being moved yet.
+					if err := c.connectAndUnlock(crypter, wallet); err != nil {
+						return fmt.Errorf("error unlocking %s wallet for mixing: %v", unbip(wallet.AssetID), err)
+					}
+					if err := mw.ConfigureFundsMixer(stats.Enabled); err != nil {
+						return fmt.Errorf("error starting %s wallet mixing: %v", unbip(wallet.AssetID), err)
+					}
+					return nil
+				}
+				if err := startMixing(); err != nil {
+					c.log.Errorf("Failed to start or stop mixing: %v", err)
+				}
 			}
 			if c.cfg.UnlockCoinsOnLogin {
 				if err = wallet.ReturnCoins(nil); err != nil {
@@ -10563,9 +10588,17 @@ func (c *Core) FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error)
 }
 
 // ConfigureFundsMixer configures the wallet for funds mixing.
-func (c *Core) ConfigureFundsMixer(assetID uint32, isMixerEnabled bool) error {
-	_, mw, err := c.mixingWallet(assetID)
+func (c *Core) ConfigureFundsMixer(pw []byte, assetID uint32, isMixerEnabled bool) error {
+	wallet, mw, err := c.mixingWallet(assetID)
 	if err != nil {
+		return err
+	}
+	crypter, err := c.encryptionKey(pw)
+	if err != nil {
+		return fmt.Errorf("mixing password error: %w", err)
+	}
+	defer crypter.Close()
+	if err := c.connectAndUnlock(crypter, wallet); err != nil {
 		return err
 	}
 	return mw.ConfigureFundsMixer(isMixerEnabled)

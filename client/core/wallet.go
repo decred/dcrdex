@@ -192,23 +192,23 @@ func (w *xcWallet) Lock(timeout time.Duration) error {
 	if w.isDisabled() || !is { // wallet is disabled and is locked or it's not an authenticator.
 		return nil
 	}
+	w.mtx.Lock()
+	defer w.mtx.Unlock()
 	if w.parent != nil {
 		return w.parent.Lock(timeout)
 	}
-	w.mtx.Lock()
 	if !w.hookedUp {
-		w.mtx.Unlock()
 		return errWalletNotConnected
 	}
 	if len(w.encPass) == 0 {
-		w.mtx.Unlock()
 		return nil
 	}
-	w.pw.Clear()
-	w.pw = nil
-	w.mtx.Unlock() // end critical section before actual wallet request
-
-	return runWithTimeout(a.Lock, timeout)
+	err := runWithTimeout(a.Lock, timeout)
+	if err == nil {
+		w.pw.Clear()
+		w.pw = nil
+	}
+	return err
 }
 
 // unlocked will only return true if both the wallet backend is unlocked and we
