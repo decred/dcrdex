@@ -734,6 +734,10 @@ type FundsMixingStats struct {
 	// UnmixedBalanceThreshold is the minimum amount of unmixed funds that must
 	// be in the wallet for mixing to happen.
 	UnmixedBalanceThreshold uint64 `json:"unmixedBalanceThreshold"`
+	// MixedFunds is the total amout of funds in the mixed account.
+	MixedFunds uint64 `json:"mixedFunds"`
+	// TradingFunds is the total amout of funds in the trading account.
+	TradingFunds uint64 `json:"tradingFunds"`
 }
 
 // FundsMixer defines methods for mixing funds in a wallet.

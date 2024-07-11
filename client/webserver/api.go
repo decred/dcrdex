@@ -1881,7 +1881,13 @@ func (s *WebServer) apiConfigureMixer(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, &req) {
 		return
 	}
-	if err := s.core.ConfigureFundsMixer(req.AssetID, req.Enabled); err != nil {
+	pass, err := s.resolvePass(nil, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	defer zero(pass)
+	if err := s.core.ConfigureFundsMixer(pass, req.AssetID, req.Enabled); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error configuring mixing for %d: %w", req.AssetID, err))
 		return
 	}

@@ -115,18 +115,11 @@ func (w *NativeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, err
 	}
-	if w.mixing.Load() {
-		w.startFundsMixer()
-	} else {
-		// Ensure any funds in the mixed account are transferred back to
-		// primary.
-		w.stopFundsMixer()
-	}
 	return wg, err
 }
 
-// ConfigureFundsMixer configures the wallet for funds mixing. Part of the
-// asset.FundsMixer interface.
+// ConfigureFundsMixer configures the wallet for funds mixing. The wallet must
+// be unlocked before calling. Part of the asset.FundsMixer interface.
 func (w *NativeWallet) ConfigureFundsMixer(enabled bool) (err error) {
 	csppCfgBytes, err := json.Marshal(&mixingConfigFile{
 		On: enabled,
@@ -149,9 +142,19 @@ func (w *NativeWallet) ConfigureFundsMixer(enabled bool) (err error) {
 // FundsMixingStats returns the current state of the wallet's funds mixer. Part
 // of the asset.FundsMixer interface.
 func (w *NativeWallet) FundsMixingStats() (*asset.FundsMixingStats, error) {
+	mixedFunds, err := w.spvw.AccountBalance(w.ctx, 0, mixedAccountName)
+	if err != nil {
+		return nil, err
+	}
+	tradingFunds, err := w.spvw.AccountBalance(w.ctx, 0, tradingAccountName)
+	if err != nil {
+		return nil, err
+	}
 	return &asset.FundsMixingStats{
 		Enabled:                 w.mixing.Load(),
 		UnmixedBalanceThreshold: smalletCSPPSplitPoint,
+		MixedFunds:              toAtoms(mixedFunds.Total),
+		TradingFunds:            toAtoms(tradingFunds.Total),
 	}, nil
 }
 
@@ -182,6 +185,9 @@ func (w *NativeWallet) stopFundsMixer() error {
 
 // Lock locks all the native wallet accounts.
 func (w *NativeWallet) Lock() (err error) {
+	if w.mixing.Load() {
+		return fmt.Errorf("cannot lock wallet while mixing")
+	}
 	w.mixer.mtx.Lock()
 	w.mixer.closeAndClear()
 	w.mixer.mtx.Unlock()
