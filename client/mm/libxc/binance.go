@@ -1752,8 +1752,9 @@ func (bnc *binance) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder,
 	return
 }
 
-// VWAP returns the volume weighted average price for a certain quantity
-// of the base asset on a market. SubscribeMarket must be called, and the
+// VWAP returns the volume weighted average price for a certain quantity of the
+// base asset on a market. The sell parameter specifies the side of the market
+// on which to get the average price. SubscribeMarket must be called, and the
 // market must be synced before results can be expected.
 func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
 	book, err := bnc.book(baseID, quoteID)

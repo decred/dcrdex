@@ -109,7 +109,9 @@ type CEX interface {
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseID, quoteID uint32) error
 	// VWAP returns the volume weighted average price for a certain quantity
-	// of the base asset on a market.
+	// of the base asset on a market. The sell parameter specifies the side of
+	// the market on which to get the average price. SubscribeMarket must be
+	// called, and the market must be synced before results can be expected.
 	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
 	// MidGap returns the mid-gap price for an order book.
 	MidGap(baseID, quoteID uint32) uint64
