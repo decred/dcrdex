@@ -1716,7 +1716,6 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 	}
 
 	ethToLock := ord.MaxFeeRate * g.Swap * ord.MaxSwapCount
-
 	var success bool
 	if err = w.lockFunds(ord.Value, initiationReserve); err != nil {
 		return nil, nil, 0, fmt.Errorf("error locking token funds: %v", err)

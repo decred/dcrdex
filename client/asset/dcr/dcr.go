@@ -6174,6 +6174,9 @@ func (dcr *ExchangeWallet) addUnknownTransactionsToHistory(tip uint64) {
 	}
 
 	for _, tx := range txs {
+		if dcr.ctx.Err() != nil {
+			return
+		}
 		txHash, err := chainhash.NewHashFromStr(tx.TxID)
 		if err != nil {
 			dcr.log.Errorf("Error decoding tx hash %s: %v", tx.TxID, err)
@@ -6325,6 +6328,9 @@ func (dcr *ExchangeWallet) syncTxHistory(ctx context.Context, tip uint64) {
 	}
 
 	for hash, tx := range pendingTxsCopy {
+		if dcr.ctx.Err() != nil {
+			return
+		}
 		handlePendingTx(hash, &tx)
 	}
 }

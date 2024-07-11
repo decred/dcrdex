@@ -20,7 +20,8 @@ import {
   SupportedAsset,
   WalletState,
   UnitInfo,
-  ProjectedAlloc
+  ProjectedAlloc,
+  AssetBookingFees
 } from './registry'
 import Doc, {
   NumberInput,
@@ -1074,14 +1075,14 @@ export default class MarketMakerSettingsPage extends BasePage {
   updateBaseAllocations () {
     const { commit, lotSize, basePane, fees } = this.marketStuff()
 
-    basePane.updateInventory(commit.dex.base.lots, lotSize, commit.dex.base.val, commit.cex.base.val, fees.base.bookingFeesPerLot, fees.base.tokenFeesPerSwap)
+    basePane.updateInventory(commit.dex.base.lots, commit.dex.quote.lots, lotSize, commit.dex.base.val, commit.cex.base.val, fees.base)
     basePane.updateCommitTotal()
   }
 
   updateQuoteAllocations () {
     const { commit, quoteLot: lotSize, quotePane, fees } = this.marketStuff()
 
-    quotePane.updateInventory(commit.dex.quote.lots, lotSize, commit.dex.quote.val, commit.cex.quote.val, fees.quote.bookingFeesPerLot, fees.quote.tokenFeesPerSwap)
+    quotePane.updateInventory(commit.dex.quote.lots, commit.dex.base.lots, lotSize, commit.dex.quote.val, commit.cex.quote.val, fees.quote)
     quotePane.updateCommitTotal()
   }
 
@@ -2282,14 +2283,14 @@ class AssetPane {
     return commit
   }
 
-  updateInventory (lots: number, lotSize: number, dexCommit: number, cexCommit: number, bookingFeesPerLot: number, feesPerSwap: number) {
+  updateInventory (lots: number, counterLots: number, lotSize: number, dexCommit: number, cexCommit: number, fees: AssetBookingFees) {
     this.setLotSize(lotSize)
     const { page, cfg, lotSizeConv, inv, ui, feeUI, isToken, isQuote, pg: { specs: { cexName, botType } } } = this
     page.bookLots.textContent = String(lots)
     page.bookLotSize.textContent = Doc.formatFourSigFigs(lotSizeConv)
     inv.book = lots * lotSizeConv
     page.bookCommitment.textContent = Doc.formatFourSigFigs(inv.book)
-    const feesPerLotConv = bookingFeesPerLot / feeUI.conventional.conversionFactor
+    const feesPerLotConv = fees.bookingFeesPerLot / feeUI.conventional.conversionFactor
     page.bookingFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
     page.bookingFeesLots.textContent = String(lots)
     inv.bookingFees = lots * feesPerLotConv
@@ -2306,7 +2307,7 @@ class AssetPane {
       page.orderReserves.textContent = Doc.formatFourSigFigs(orderReserves)
     }
     if (isToken) {
-      const feesPerSwapConv = feesPerSwap / feeUI.conventional.conversionFactor
+      const feesPerSwapConv = fees.tokenFeesPerSwap / feeUI.conventional.conversionFactor
       page.feeReservesPerSwap.textContent = Doc.formatFourSigFigs(feesPerSwapConv)
       inv.swapFeeReserves = feesPerSwapConv * cfg.swapFeeN
       page.feeReserves.textContent = Doc.formatFourSigFigs(inv.swapFeeReserves)
@@ -2316,6 +2317,12 @@ class AssetPane {
       page.slippageBufferBasis.textContent = Doc.formatCoinValue(basis * ui.conventional.conversionFactor, ui)
       inv.slippageBuffer = basis * cfg.slippageBufferFactor
       page.slippageBuffer.textContent = Doc.formatCoinValue(inv.slippageBuffer * ui.conventional.conversionFactor, ui)
+    }
+    Doc.setVis(fees.bookingFeesPerCounterLot > 0, page.redemptionFeesBox)
+    if (fees.bookingFeesPerCounterLot > 0) {
+      const feesPerLotConv = fees.bookingFeesPerCounterLot / feeUI.conventional.conversionFactor
+      page.redemptionFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
+      page.redemptionFeesLots.textContent = String(counterLots)
     }
     this.updateCommitTotal()
     this.updateTokenFees()

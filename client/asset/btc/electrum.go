@@ -499,6 +499,9 @@ func (btc *ExchangeWalletElectrum) syncTxHistory(tip uint64) {
 	}
 
 	for hash, tx := range pendingTxsCopy {
+		if btc.ctx.Err() != nil {
+			return
+		}
 		handlePendingTx(hash, &tx)
 	}
 }

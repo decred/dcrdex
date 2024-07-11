@@ -508,6 +508,18 @@ export interface LotFeeRange {
   estimated: LotFees
 }
 
+export interface AssetBookingFees extends LotFeeRange {
+  bookingFeesPerLot: number
+  bookingFeesPerCounterLot: number
+  bookingFees: number
+  tokenFeesPerSwap: number
+}
+
+export interface BookingFees {
+  base: AssetBookingFees
+  quote:AssetBookingFees
+}
+
 export interface MarketReport {
   price: number
   oracles: OracleReport[]

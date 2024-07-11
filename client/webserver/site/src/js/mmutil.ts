@@ -20,7 +20,8 @@ import {
   BalanceNote,
   BotBalance,
   Order,
-  LotFeeRange
+  LotFeeRange,
+  BookingFees
 } from './registry'
 import { getJSON, postJSON } from './http'
 import Doc, { clamp } from './doc'
@@ -972,34 +973,44 @@ export function feesAndCommit (
   }
 
   let baseTokenFeesPerSwap = 0
+  let baseRedeemReservesPerLot = 0
   if (baseID !== baseFeeID) { // token
     baseTokenFeesPerSwap += baseFees.estimated.swap
     if (baseFeeID === quoteFeeID) baseTokenFeesPerSwap += quoteFees.estimated.redeem
   }
   let baseBookingFeesPerLot = baseFees.max.swap
   if (baseID === quoteFeeID) baseBookingFeesPerLot += quoteFees.max.redeem
-  if (baseIsAccountLocker) baseBookingFeesPerLot += baseFees.max.refund
+  if (baseIsAccountLocker) {
+    baseBookingFeesPerLot += baseFees.max.refund
+    if (!quoteIsAccountLocker && baseFeeID !== quoteFeeID) baseRedeemReservesPerLot += baseFees.max.redeem
+  }
 
   let quoteTokenFeesPerSwap = 0
+  let quoteRedeemReservesPerLot = 0
   if (quoteID !== quoteFeeID) {
     quoteTokenFeesPerSwap += quoteFees.estimated.swap
     if (quoteFeeID === baseFeeID) quoteTokenFeesPerSwap += baseFees.estimated.redeem
   }
   let quoteBookingFeesPerLot = quoteFees.max.swap
   if (quoteID === baseFeeID) quoteBookingFeesPerLot += baseFees.max.redeem
-  if (quoteIsAccountLocker) quoteBookingFeesPerLot += quoteFees.max.refund
+  if (quoteIsAccountLocker) {
+    quoteBookingFeesPerLot += quoteFees.max.refund
+    if (!baseIsAccountLocker && quoteFeeID !== baseFeeID) quoteRedeemReservesPerLot = quoteFees.max.redeem
+  }
 
-  const fees = {
+  const fees: BookingFees = {
     base: {
       ...baseFees,
       bookingFeesPerLot: baseBookingFeesPerLot,
-      bookingFees: baseBookingFeesPerLot * commit.dex.base.lots,
+      bookingFeesPerCounterLot: baseRedeemReservesPerLot + baseRedeemReservesPerLot * quoteLots,
+      bookingFees: baseBookingFeesPerLot * baseLots,
       tokenFeesPerSwap: baseTokenFeesPerSwap
     },
     quote: {
       ...quoteFees,
       bookingFeesPerLot: quoteBookingFeesPerLot,
-      bookingFees: quoteBookingFeesPerLot * commit.dex.quote.lots,
+      bookingFeesPerCounterLot: quoteRedeemReservesPerLot,
+      bookingFees: quoteBookingFeesPerLot * quoteLots + quoteRedeemReservesPerLot * baseLots,
       tokenFeesPerSwap: quoteTokenFeesPerSwap
     }
   }

@@ -3560,6 +3560,9 @@ func (w *zecWallet) addUnknownTransactionsToHistory(tip uint64) {
 	}
 
 	for _, tx := range txs {
+		if w.ctx.Err() != nil {
+			return
+		}
 		txHash, err := chainhash.NewHashFromStr(tx.TxID)
 		if err != nil {
 			w.log.Errorf("Error decoding tx hash %s: %v", tx.TxID, err)
@@ -3654,6 +3657,9 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 			return
 		}
 		if err != nil {
+			if w.ctx.Err() != nil {
+				return
+			}
 			w.log.Errorf("Error getting transaction %s: %v", txHash, err)
 			return
 		}
