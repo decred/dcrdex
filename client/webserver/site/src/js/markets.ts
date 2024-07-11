@@ -625,8 +625,15 @@ export default class MarketsPage extends BasePage {
     if (!mkt.spot) return
 
     for (const s of this.stats) {
-      const bconv = xc.assets[mkt.baseid].unitInfo.conventional.conversionFactor
-      s.tmpl.volume.textContent = Doc.formatFourSigFigs(mkt.spot.vol24 / bconv)
+      const { unitInfo: { conventional: { conversionFactor: cFactor, unit } } } = xc.assets[mkt.baseid]
+      const fiatRate = app().fiatRatesMap[mkt.baseid]
+      if (fiatRate) {
+        s.tmpl.volume.textContent = Doc.formatFourSigFigs(mkt.spot.vol24 / cFactor * fiatRate)
+        s.tmpl.volUnit.textContent = 'USD'
+      } else {
+        s.tmpl.volume.textContent = Doc.formatFourSigFigs(mkt.spot.vol24 / cFactor)
+        s.tmpl.volUnit.textContent = unit
+      }
       setPriceAndChange(s.tmpl, xc, mkt)
     }
 

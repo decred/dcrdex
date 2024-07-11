@@ -1456,6 +1456,11 @@ func (c *TCore) createWallet(form *core.WalletForm, synced bool) (done chan stru
 		}
 		if delayBalance {
 			time.AfterFunc(time.Second*10, func() {
+				avail := w.Balance.Available
+				if avail < regFee {
+					avail = 2 * regFee
+					w.Balance.Available = avail
+				}
 				w.Balance.Available = regFee
 				c.noteFeed <- &core.BalanceNote{
 					Notification: db.NewNotification(core.NoteTypeBalance, core.TopicBalanceUpdated, "", "", db.Data),
@@ -1463,7 +1468,7 @@ func (c *TCore) createWallet(form *core.WalletForm, synced bool) (done chan stru
 					Balance: &core.WalletBalance{
 						Balance: &db.Balance{
 							Balance: asset.Balance{
-								Available: regFee,
+								Available: avail,
 							},
 							Stamp: time.Now(),
 						},
