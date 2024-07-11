@@ -96,7 +96,7 @@ type arbMarketMaker struct {
 	rebalanceRunning atomic.Bool
 	currEpoch        atomic.Uint64
 
-	matchesMtx    sync.RWMutex
+	matchesMtx    sync.Mutex
 	matchesSeen   map[order.MatchID]bool
 	pendingOrders map[order.OrderID]uint64 // orderID -> rate for counter trade on cex
 
@@ -354,12 +354,16 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 	}
 
 	buys, sells := a.ordersToPlace()
-	for oid, info := range a.multiTrade(buys, false, a.cfg().DriftTolerance, currEpoch) {
+	buyInfos := a.multiTrade(buys, false, a.cfg().DriftTolerance, currEpoch)
+	sellInfos := a.multiTrade(sells, true, a.cfg().DriftTolerance, currEpoch)
+	a.matchesMtx.Lock()
+	for oid, info := range buyInfos {
 		a.pendingOrders[oid] = info.counterTradeRate
 	}
-	for oid, info := range a.multiTrade(sells, true, a.cfg().DriftTolerance, currEpoch) {
+	for oid, info := range sellInfos {
 		a.pendingOrders[oid] = info.counterTradeRate
 	}
+	a.matchesMtx.Unlock()
 
 	a.cancelExpiredCEXTrades()
 
