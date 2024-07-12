@@ -29,6 +29,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // Binance API spot trading docs:
@@ -1049,18 +1050,16 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 		return bnc.marketSnapshot.m, nil
 	}
 
-	mktIDs, err := bnc.MatchedMarkets(ctx)
+	matches, err := bnc.MatchedMarkets(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting market list for market data request: %w", err)
 	}
 
-	slugs := make([]string, len(mktIDs))
-	mkts := make(map[string]*MarketMatch, len(slugs))
-	for i, m := range mktIDs {
-		slugs[i] = m.Slug
-		mkts[m.Slug] = m
+	mkts := make(map[string][]*MarketMatch, len(matches))
+	for _, m := range matches {
+		mkts[m.Slug] = append(mkts[m.Slug], m)
 	}
-	encSymbols, err := json.Marshal(slugs)
+	encSymbols, err := json.Marshal(utils.MapKeys(mkts))
 	if err != nil {
 		return nil, fmt.Errorf("error encoding symbold for market data request: %w", err)
 	}
@@ -1075,25 +1074,27 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 
 	m := make(map[string]*Market, len(ds))
 	for _, d := range ds {
-		mkt, found := mkts[d.Symbol]
+		ms, found := mkts[d.Symbol]
 		if !found {
 			bnc.log.Errorf("Market %s not returned in market data request", d.Symbol)
 			continue
 		}
-		m[mkt.MarketID] = &Market{
-			BaseID:  mkt.BaseID,
-			QuoteID: mkt.QuoteID,
-			Day: &MarketDay{
-				Vol:            d.Volume,
-				QuoteVol:       d.QuoteVolume,
-				PriceChange:    d.PriceChange,
-				PriceChangePct: d.PriceChangePercent,
-				AvgPrice:       d.WeightedAvgPrice,
-				LastPrice:      d.LastPrice,
-				OpenPrice:      d.OpenPrice,
-				HighPrice:      d.HighPrice,
-				LowPrice:       d.LowPrice,
-			},
+		for _, mkt := range ms {
+			m[mkt.MarketID] = &Market{
+				BaseID:  mkt.BaseID,
+				QuoteID: mkt.QuoteID,
+				Day: &MarketDay{
+					Vol:            d.Volume,
+					QuoteVol:       d.QuoteVolume,
+					PriceChange:    d.PriceChange,
+					PriceChangePct: d.PriceChangePercent,
+					AvgPrice:       d.WeightedAvgPrice,
+					LastPrice:      d.LastPrice,
+					OpenPrice:      d.OpenPrice,
+					HighPrice:      d.HighPrice,
+					LowPrice:       d.LowPrice,
+				},
+			}
 		}
 	}
 	bnc.marketSnapshot.m = m
@@ -1752,9 +1753,8 @@ func (bnc *binance) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder,
 	return
 }
 
-// VWAP returns the volume weighted average price for a certain quantity of the
-// base asset on a market. The sell parameter specifies the side of the market
-// on which to get the average price. SubscribeMarket must be called, and the
+// VWAP returns the volume weighted average price for a certain quantity
+// of the base asset on a market. SubscribeMarket must be called, and the
 // market must be synced before results can be expected.
 func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
 	book, err := bnc.book(baseID, quoteID)

@@ -36,8 +36,18 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func tNewBinance(t *testing.T, network dex.Network) *binance {
-	return newBinance(apiKey, apiSecret, log, network, true)
+func tNewBinance(t *testing.T, net dex.Network) *binance {
+	cfg := &CEXConfig{
+		Net:       net,
+		APIKey:    apiKey,
+		SecretKey: apiSecret,
+		Logger:    log,
+		Notify: func(n interface{}) {
+			log.Infof("Notification sent: %+v", n)
+		},
+	}
+	const binanceUS = true
+	return newBinance(cfg, binanceUS)
 }
 
 type spoofDriver struct {
@@ -154,7 +164,7 @@ func TestCancelTrade(t *testing.T) {
 }
 
 func TestMatchedMarkets(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance(t, dex.Mainnet)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -169,7 +179,7 @@ func TestMatchedMarkets(t *testing.T) {
 	}
 
 	for _, market := range markets {
-		t.Logf("%v - %v", dex.BipIDSymbol(market.BaseID), dex.BipIDSymbol(market.QuoteID))
+		fmt.Printf("%s_%s \n", dex.BipIDSymbol(market.BaseID), dex.BipIDSymbol(market.QuoteID))
 	}
 }
 
@@ -335,18 +345,17 @@ func TestGetCoinInfo(t *testing.T) {
 		t.Fatalf("error getting binance coin info: %v", err)
 	}
 
-	bcoins, err := json.MarshalIndent(coins, "", "    ")
-	if err != nil {
-		t.Fatalf("error marshaling binance coin info: %v", err)
+	coinLookup := make(map[string]bool)
+	for _, a := range asset.Assets() {
+		coinLookup[a.Info.UnitInfo.Conventional.Unit] = true
+		for _, tkn := range a.Tokens {
+			coinLookup[tkn.UnitInfo.Conventional.Unit] = true
+		}
 	}
 
-	t.Logf("binance coin info:\n %v", string(bcoins))
-	return
-
 	for _, c := range coins {
-		if c.Coin == "USDC" {
-			b, _ := json.MarshalIndent(c, "", "    ")
-			fmt.Println(string(b))
+		if !coinLookup[c.Coin] {
+			continue
 		}
 		networks := make([]string, 0)
 		for _, n := range c.NetworkList {
