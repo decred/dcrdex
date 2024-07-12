@@ -1054,15 +1054,16 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 		return nil, fmt.Errorf("error getting market list for market data request: %w", err)
 	}
 
-	slugs := make([]string, len(mktIDs))
+	slugs := make(map[string]any, len(mktIDs))
 	mkts := make(map[string]*MarketMatch, len(slugs))
-	for i, m := range mktIDs {
-		slugs[i] = m.Slug
+	for _, m := range mktIDs {
+		slugs[m.Slug] = nil // ignore duplicate slugs if any
 		mkts[m.Slug] = m
 	}
-	encSymbols, err := json.Marshal(slugs)
+
+	encSymbols, err := json.Marshal(mapToSlice(slugs))
 	if err != nil {
-		return nil, fmt.Errorf("error encoding symbold for market data request: %w", err)
+		return nil, fmt.Errorf("error encoding symbols for market data request: %w", err)
 	}
 
 	q := make(url.Values)
@@ -1099,6 +1100,15 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 	bnc.marketSnapshot.m = m
 	bnc.marketSnapshot.stamp = time.Now()
 	return m, nil
+}
+
+// mapToSlice returns all keys in data as a slice of strings.
+func mapToSlice(data map[string]any) []string {
+	var dataSlice []string
+	for value := range data {
+		dataSlice = append(dataSlice, value)
+	}
+	return dataSlice
 }
 
 func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err error) {
@@ -1831,7 +1841,6 @@ func getDEXAssetIDs(binanceSymbol string, tokenIDs map[string][]uint32) []uint32
 		if isRegistered(assetID) {
 			assetIDs = append(assetIDs, assetID)
 		}
-
 	}
 
 	if tokenIDs, found := tokenIDs[dexSymbol]; found {
