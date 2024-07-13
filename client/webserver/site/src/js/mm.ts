@@ -518,7 +518,7 @@ class Bot extends BotMarket {
       page.baseTokenBookingFees.textContent = Doc.formatFullPrecision(bookingFees * baseFeeFactor, baseFeeUI)
       page.baseTokenSwapFeeN.textContent = String(baseConfig.swapFeeN + (withQuote ? quoteConfig.swapFeeN : 0))
       const swapReserves = bProj.swapFeeReserves + (withQuote ? qProj.swapFeeReserves : 0)
-      page.baseTokenSwapFees.textContent = Doc.formatFullPrecision(swapReserves * baseFactor, baseFeeUI)
+      page.baseTokenSwapFees.textContent = Doc.formatFullPrecision(swapReserves * baseFeeFactor, baseFeeUI)
     }
 
     page.quoteAlloc.textContent = Doc.formatFullPrecision(alloc[quoteID], qui)
