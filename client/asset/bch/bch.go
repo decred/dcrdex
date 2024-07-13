@@ -58,13 +58,15 @@ var (
 		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"), // Same as bitcoin. That's dumb.
 		ConfigOpts:        append(btc.RPCConfigOpts("Bitcoin Cash", ""), btc.CommonConfigOpts("BCH", true)...),
+		MultiFundingOpts:  btc.MultiFundingOpts,
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
-		Type:        walletTypeSPV,
-		Tab:         "Native",
-		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  btc.CommonConfigOpts("BCH", true),
-		Seeded:      true,
+		Type:             walletTypeSPV,
+		Tab:              "Native",
+		Description:      "Use the built-in SPV wallet",
+		ConfigOpts:       btc.CommonConfigOpts("BCH", true),
+		Seeded:           true,
+		MultiFundingOpts: btc.MultiFundingOpts,
 	}
 
 	electrumWalletDefinition = &asset.WalletDefinition{
@@ -72,7 +74,8 @@ var (
 		Tab:         "Electron Cash  (external)",
 		Description: "Use an external Electron Cash (BCH Electrum fork) Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrom-cash", false), "config"), // maybe?
-		ConfigOpts: btc.CommonConfigOpts("BCH", true),
+		ConfigOpts:       btc.CommonConfigOpts("BCH", true),
+		MultiFundingOpts: btc.MultiFundingOpts,
 	}
 
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.

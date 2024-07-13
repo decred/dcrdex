@@ -139,7 +139,7 @@ var (
 	defaultWalletBirthdayUnix = 1622668320
 	DefaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
 
-	multiFundingOpts = []*asset.OrderOption{
+	MultiFundingOpts = []*asset.OrderOption{
 		{
 			ConfigOption: asset.ConfigOption{
 				Key:         multiSplitKey,
@@ -185,7 +185,7 @@ var (
 		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        append(RPCConfigOpts("Bitcoin", "8332"), CommonConfigOpts("BTC", true)...),
-		MultiFundingOpts:  multiFundingOpts,
+		MultiFundingOpts:  MultiFundingOpts,
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
 		Type:             walletTypeSPV,
@@ -193,7 +193,7 @@ var (
 		Description:      "Use the built-in SPV wallet",
 		ConfigOpts:       CommonConfigOpts("BTC", true),
 		Seeded:           true,
-		MultiFundingOpts: multiFundingOpts,
+		MultiFundingOpts: MultiFundingOpts,
 	}
 
 	electrumWalletDefinition = &asset.WalletDefinition{
@@ -201,7 +201,8 @@ var (
 		Tab:         "Electrum (external)",
 		Description: "Use an external Electrum Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
-		ConfigOpts: append(append(ElectrumConfigOpts, CommonConfigOpts("BTC", false)...), apiFallbackOpt(false)),
+		ConfigOpts:       append(append(ElectrumConfigOpts, CommonConfigOpts("BTC", false)...), apiFallbackOpt(false)),
+		MultiFundingOpts: MultiFundingOpts,
 	}
 
 	// WalletInfo defines some general information about a Bitcoin wallet.
