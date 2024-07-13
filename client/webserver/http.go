@@ -258,7 +258,6 @@ func (s *WebServer) handleGenerateCompanionAppQRCode(w http.ResponseWriter, r *h
 	// TODO save this token in the DB to make it permanent?
 	authToken := s.authorize()
 	url = fmt.Sprintf("%s?%s=%s", url, authCK, authToken)
-	log.Infof("Companion app QR code URL: %s", url)
 
 	png, err := qrcode.Encode(url, qrcode.Medium, 200)
 	if err != nil {
