@@ -179,7 +179,7 @@ func TestMatchedMarkets(t *testing.T) {
 	}
 
 	for _, market := range markets {
-		fmt.Printf("%s_%s \n", dex.BipIDSymbol(market.BaseID), dex.BipIDSymbol(market.QuoteID))
+		fmt.Printf("%s_%s %d %d\n", dex.BipIDSymbol(market.BaseID), dex.BipIDSymbol(market.QuoteID), market.BaseMinWithdraw, market.QuoteMinWithdraw)
 	}
 }
 

@@ -43,9 +43,11 @@ type MarketDay struct {
 
 // Market is the base and quote assets of a market on a CEX.
 type Market struct {
-	BaseID  uint32     `json:"baseID"`
-	QuoteID uint32     `json:"quoteID"`
-	Day     *MarketDay `json:"day"`
+	BaseID           uint32     `json:"baseID"`
+	QuoteID          uint32     `json:"quoteID"`
+	Day              *MarketDay `json:"day"`
+	BaseMinWithdraw  uint64     `json:"baseMinWithdraw"`
+	QuoteMinWithdraw uint64     `json:"quoteMinWithdraw"`
 }
 
 type Status struct {

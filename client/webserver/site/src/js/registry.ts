@@ -989,6 +989,8 @@ interface MarketDay {
 export interface CEXMarket {
   baseID: number
   quoteID: number
+  baseMinWithdraw: number
+  quoteMinWithdraw: number
   day: MarketDay
 }
 

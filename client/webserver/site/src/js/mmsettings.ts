@@ -2240,7 +2240,7 @@ class AssetPane {
     this.assetID = assetID
     this.isQuote = isQuote
     const cfg = this.cfg = isQuote ? this.pg.updatedConfig.quoteConfig : this.pg.updatedConfig.baseConfig
-    const { page, div, pg: { specs: { botType, baseID }, updatedConfig: { baseOptions, quoteOptions } } } = this
+    const { page, div, pg: { specs: { botType, baseID, cexName }, mktID, updatedConfig: { baseOptions, quoteOptions } } } = this
     const { symbol, name, token, unitInfo: ui } = app().assets[assetID]
     this.ui = ui
     this.walletConfig = assetID === baseID ? baseOptions : quoteOptions
@@ -2268,7 +2268,11 @@ class AssetPane {
       this.orderReserves.setValue(v)
       this.orderReservesSlider.setValue((v - defaultOrderReserves.minR) / defaultOrderReserves.range)
     }
-    if (botType !== botTypeBasicMM) this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
+    if (botType !== botTypeBasicMM) {
+      this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
+      const mkt = app().mmStatus.cexes[cexName as string].markets[mktID]
+      this.minTransfer.min = ((isQuote ? mkt.quoteMinWithdraw : mkt.baseMinWithdraw) / ui.conventional.conversionFactor)
+    }
     this.slippageBuffer.setValue(cfg.slippageBufferFactor)
     const { minR, range } = defaultSlippage
     this.slippageBufferSlider.setValue((cfg.slippageBufferFactor - minR) / range)
@@ -2350,7 +2354,7 @@ class AssetPane {
     Doc.setVis(showRebalance, page.rebalanceOpts)
     if (!showRebalance) return
     const totalInventory = this.commit()
-    const [minV, maxV] = [0, totalInventory]
+    const [minV, maxV] = [this.minTransfer.min, totalInventory]
     const rangeV = maxV - minV
     this.minTransfer.setValue(minV + cfg.transferFactor * rangeV)
     this.minTransferSlider.setValue((cfg.transferFactor - defaultTransfer.minR) / defaultTransfer.range)
