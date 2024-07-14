@@ -95,7 +95,7 @@ function parseFundingOptions (f: FundingOutlook): [number, number, FundingSlider
         // We did something really bad with math to get here.
         throw Error('bad math has us with dex surplus + cex underfund invalid remains')
       }
-      proposedDex += cexShort
+      proposedDex += cexShort + transferable
     } else {
       // We don't have enough on dex, but we have enough on cex to cover the
       // short.
@@ -104,7 +104,7 @@ function parseFundingOptions (f: FundingOutlook): [number, number, FundingSlider
       if (cexRemain < dexShort) {
         throw Error('bad math got us with cex surplus + dex underfund invalid remains')
       }
-      proposedCex += dexShort
+      proposedCex += dexShort + transferable
     }
   } else if (f.fundedAndBalanced && transferable > 0) {
     // This asset is fully funded, but the user may choose to fund order
