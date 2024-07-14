@@ -287,7 +287,7 @@ func (m *MRPCTest) TestMainnetCompliance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = checkProvidersCompliance(ctx, providers, &compat, log)
+	_, err = checkProvidersCompliance(ctx, providers, &compat, log, true)
 	if err != nil {
 		t.Fatal(err)
 	}

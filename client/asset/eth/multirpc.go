@@ -269,7 +269,21 @@ func (p *provider) refreshHeader(ctx context.Context, log dex.Logger) {
 // instantiation of these variable is necessary to accepting that a websocket
 // connection is valid, so they are generated early in connectProviders.
 func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscription, h chan *types.Header, log dex.Logger) {
-	defer sub.Unsubscribe()
+	defer func() {
+		// If a provider does not respond to an unsubscribe request, the unsubscribe function
+		// will never return because geth does not use a timeout.
+		doneUnsubbing := make(chan struct{})
+		go func() {
+			sub.Unsubscribe()
+			close(doneUnsubbing)
+		}()
+		select {
+		case <-doneUnsubbing:
+		case <-time.After(time.Second * 15):
+			log.Errorf("Timed out waiting to unsubscribe from %q", p.host)
+		}
+	}()
+
 	var lastWarning time.Time
 	newSub := func() (ethereum.Subscription, error) {
 		for {
@@ -396,7 +410,6 @@ func newMultiRPCClient(
 	finalizeConfs uint64,
 	net dex.Network,
 ) (*multiRPCClient, error) {
-
 	walletDir := getWalletDir(dir, net)
 	creds, err := pathCredentials(filepath.Join(walletDir, "keystore"))
 	if err != nil {
@@ -680,7 +693,7 @@ func (m *multiRPCClient) connect(ctx context.Context) (err error) {
 // unknown providers have a sufficient api to trade and saves good providers to
 // file. One bad provider or connect problem will cause this to error.
 func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, chainID *big.Int,
-	compat *CompatibilityData, net dex.Network, log dex.Logger) error {
+	compat *CompatibilityData, net dex.Network, log dex.Logger, defaultProviders bool) error {
 
 	var localCP map[string]bool
 	path := filepath.Join(walletDir, "compliant-providers.json")
@@ -727,14 +740,19 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 				p.shutdown()
 			}
 		}()
-		if len(providers) != len(unknownEndpoints) {
+		if !defaultProviders && len(providers) != len(unknownEndpoints) {
 			return fmt.Errorf("expected to successfully connect to all of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
 		}
-		if err := checkProvidersCompliance(ctx, providers, compat, dex.Disabled /* logger is for testing only */); err != nil {
+		providers, err = checkProvidersCompliance(ctx, providers, compat, dex.Disabled /* logger is for testing only */, !defaultProviders)
+		if err != nil {
 			return err
 		}
+		if len(providers) == 0 {
+			return fmt.Errorf("no compliant providers found among: %s", unknownEndpoints)
+		}
 	}
+
 	if writeLocalCP {
 		// All unknown providers were checked.
 		b, err := json.Marshal(localCP)
@@ -767,19 +785,22 @@ func failedProviders(succeeded []*provider, tried []string) string {
 	return strings.Join(notOK, " ")
 }
 
-func (m *multiRPCClient) reconfigure(ctx context.Context, endpoints []string, compat *CompatibilityData, walletDir string) error {
-	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log); err != nil {
+func (m *multiRPCClient) reconfigure(ctx context.Context, endpoints []string, compat *CompatibilityData, walletDir string, defaultProviders bool) error {
+	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log, defaultProviders); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
+
 	// TODO: If endpoints haven't change, do nothing.
 	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net)
 	if err != nil {
 		return err
 	}
+
 	m.providerMtx.Lock()
 	oldProviders := m.providers
 	m.providers = providers
 	m.endpoints = endpoints
+
 	m.providerMtx.Unlock()
 	for _, p := range oldProviders {
 		p.shutdown()
@@ -1736,19 +1757,28 @@ func domain(addr string) (string, error) {
 // requires by sending a series of requests and verifying the responses. If a
 // provider is found to be compliant, their domain name is added to a list and
 // stored in a file on disk so that future checks can be short-circuited.
-func checkProvidersCompliance(ctx context.Context, providers []*provider, compat *CompatibilityData, log dex.Logger) error {
+func checkProvidersCompliance(ctx context.Context, providers []*provider, compat *CompatibilityData, log dex.Logger, errOnNonCompliant bool) ([]*provider, error) {
+	compliantProviders := make([]*provider, 0, len(providers))
 	for _, p := range providers {
 		// Need to run API tests on this endpoint.
 		for _, t := range newCompatibilityTests(p.ec, compat, log) {
 			ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 			err := t.f(ctx, p)
 			cancel()
-			if err != nil {
-				return fmt.Errorf("%s: RPC Provider @ %q has a non-compliant API: %v", t.name, p.host, err)
+			if err == nil {
+				compliantProviders = append(compliantProviders, p)
+				continue
+			}
+
+			if errOnNonCompliant {
+				return nil, fmt.Errorf("%s: RPC Provider @ %q has a non-compliant API: %v", t.name, p.host, err)
+			} else {
+				log.Errorf("%s: RPC Provider @ %q has a non-compliant API: %v", t.name, p.host, err)
 			}
 		}
 	}
-	return nil
+
+	return compliantProviders, nil
 }
 
 // shuffleProviders shuffles the provider slice in-place.

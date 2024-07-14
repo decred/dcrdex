@@ -284,6 +284,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.unlockBttn, 'click', () => this.openWallet(this.selectedAssetID))
     Doc.bind(page.lockBttn, 'click', () => this.lock(this.selectedAssetID))
     Doc.bind(page.reconfigureBttn, 'click', () => this.showReconfig(this.selectedAssetID))
+    Doc.bind(page.needsProviderBttn, 'click', () => this.showReconfig(this.selectedAssetID))
     Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedAssetID))
     Doc.bind(page.earlierTxs, 'click', () => this.loadEarlierTxs())
 
