@@ -684,9 +684,10 @@ class Bot extends BotMarket {
 
     try {
       app().log('mm', 'starting mm bot', startConfig)
-      await MM.startBot(startConfig)
+      const res = await MM.startBot(startConfig)
+      if (!app().checkResponse(res)) throw res
     } catch (e) {
-      page.errMsg.textContent = intl.prep(intl.ID_API_ERROR, e.msg)
+      page.errMsg.textContent = intl.prep(intl.ID_API_ERROR, e)
       Doc.show(page.errMsg)
       return
     }
