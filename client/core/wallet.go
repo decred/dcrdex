@@ -54,6 +54,7 @@ type xcWallet struct {
 	traits            asset.WalletTrait
 	parent            *xcWallet
 	feeState          atomic.Value // *FeeState
+	connectMtx        sync.Mutex
 
 	mtx          sync.RWMutex
 	encPass      []byte // empty means wallet not password protected
@@ -392,9 +393,16 @@ func (w *xcWallet) checkPeersAndSyncStatus() error {
 // flag to true, and validates the deposit address. Use Disconnect to cleanly
 // shutdown the wallet.
 func (w *xcWallet) Connect() error {
+	w.connectMtx.Lock()
+	defer w.connectMtx.Unlock()
+
 	// Disabled wallet cannot be connected to unless it is enabled.
 	if w.isDisabled() {
 		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+	}
+
+	if w.connected() {
+		return nil
 	}
 
 	// No parent context; use Disconnect instead. Also note that there's no
