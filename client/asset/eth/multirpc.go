@@ -279,7 +279,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 		}()
 		select {
 		case <-doneUnsubbing:
-		case <-time.After(time.Second * 15):
+		case <-time.After(defaultRequestTimeout):
 			log.Errorf("Timed out waiting to unsubscribe from %q", p.host)
 		}
 	}()
@@ -693,7 +693,7 @@ func (m *multiRPCClient) connect(ctx context.Context) (err error) {
 // unknown providers have a sufficient api to trade and saves good providers to
 // file. One bad provider or connect problem will cause this to error.
 func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, chainID *big.Int,
-	compat *CompatibilityData, net dex.Network, log dex.Logger, defaultProviders bool) error {
+	compat *CompatibilityData, net dex.Network, log dex.Logger, allProvidersMustConnect bool) error {
 
 	var localCP map[string]bool
 	path := filepath.Join(walletDir, "compliant-providers.json")
@@ -740,11 +740,11 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 				p.shutdown()
 			}
 		}()
-		if !defaultProviders && len(providers) != len(unknownEndpoints) {
+		if allProvidersMustConnect && len(providers) != len(unknownEndpoints) {
 			return fmt.Errorf("expected to successfully connect to all of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
 		}
-		providers, err = checkProvidersCompliance(ctx, providers, compat, dex.Disabled /* logger is for testing only */, !defaultProviders)
+		providers, err = checkProvidersCompliance(ctx, providers, compat, dex.Disabled /* logger is for testing only */, allProvidersMustConnect)
 		if err != nil {
 			return err
 		}
@@ -786,7 +786,7 @@ func failedProviders(succeeded []*provider, tried []string) string {
 }
 
 func (m *multiRPCClient) reconfigure(ctx context.Context, endpoints []string, compat *CompatibilityData, walletDir string, defaultProviders bool) error {
-	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log, defaultProviders); err != nil {
+	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log, !defaultProviders); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
 
