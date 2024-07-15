@@ -1657,7 +1657,8 @@ export default class WalletsPage extends BasePage {
     if (tx.timestamp > 0) tmpl.age.dataset.stamp = String(tx.timestamp)
     let txType = txTypeString(tx.type)
     if (tx.tokenID && tx.tokenID !== assetID) {
-      const tokenSymbol = ui.conventional.unit
+      const tokenAsset = app().assets[tx.tokenID]
+      const tokenSymbol = tokenAsset.unitInfo.conventional.unit
       txType = `${tokenSymbol} ${txType}`
     }
     tmpl.type.textContent = txType
