@@ -27,6 +27,8 @@ func TestPriceOracle(t *testing.T) {
 	markets := []*marketPair{
 		{baseID: 42, quoteID: 0},
 		{baseID: 60, quoteID: 0},
+		{baseID: 42, quoteID: 60002},
+		{baseID: 60001, quoteID: 60002},
 	}
 	for _, mkt := range markets {
 		price, oracleReport, err := oracle.getOracleInfo(mkt.baseID, mkt.quoteID)
@@ -89,7 +91,7 @@ func TestAutoSyncPriceOracle(t *testing.T) {
 func testSpreader(t *testing.T, spreader Spreader, baseSymbol, quoteSymbol string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	sell, buy, err := spreader(ctx, baseSymbol, quoteSymbol)
+	sell, buy, err := spreader(ctx, baseSymbol, quoteSymbol, tLogger)
 	if err != nil {
 		t.Fatal(err)
 	}

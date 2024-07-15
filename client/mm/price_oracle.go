@@ -230,10 +230,12 @@ func (o *priceOracle) syncMarket(baseID, quoteID uint32) (float64, []*OracleRepo
 
 func coinpapAsset(assetID uint32) (*fiatrates.CoinpaprikaAsset, error) {
 	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		symbol := dex.BipIDSymbol(assetID)
+		symbol = strings.Split(symbol, ".")[0]
 		return &fiatrates.CoinpaprikaAsset{
 			AssetID: assetID,
 			Name:    tkn.Name,
-			Symbol:  dex.BipIDSymbol(assetID),
+			Symbol:  symbol,
 		}, nil
 	}
 	a := asset.Asset(assetID)
