@@ -33,6 +33,21 @@ const ethExplorers: Record<number, (cid: string) => string> = {
   }
 }
 
+const polygonExplorers: Record<number, (cid: string) => string> = {
+  [Mainnet]: (cid: string) => {
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://polygonscan.com/address/${arg}` : `https://polygonscan.com/tx/${arg}`
+  },
+  [Testnet]: (cid: string) => {
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://amoy.polygonscan.com/address/${arg}` : `https://amoy.polygonscan.com/tx/${arg}`
+  },
+  [Simnet]: (cid: string) => {
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://polygonscan.com/address/${arg}` : `https://polygonscan.com/tx/${arg}`
+  }
+}
+
 export const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   42: { // dcr
     [Mainnet]: (cid: string) => {
@@ -68,6 +83,7 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   },
   60: ethExplorers,
   60001: ethExplorers,
+  60002: ethExplorers,
   3: { // doge
     [Mainnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`,
@@ -97,20 +113,11 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
     [Testnet]: (cid: string) => `https://tbch4.loping.net/tx/${cid.split(':')[0]}`,
     [Simnet]: (cid: string) => `https://bch.loping.net/tx/${cid.split(':')[0]}`
   },
-  966: { // matic
-    [Mainnet]: (cid: string) => {
-      const [arg, isAddr] = ethBasedExplorerArg(cid)
-      return isAddr ? `https://polygonscan.com/address/${arg}` : `https://polygonscan.com/tx/${arg}`
-    },
-    [Testnet]: (cid: string) => {
-      const [arg, isAddr] = ethBasedExplorerArg(cid)
-      return isAddr ? `https://amoy.polygonscan.com/address/${arg}` : `https://amoy.polygonscan.com/tx/${arg}`
-    },
-    [Simnet]: (cid: string) => {
-      const [arg, isAddr] = ethBasedExplorerArg(cid)
-      return isAddr ? `https://polygonscan.com/address/${arg}` : `https://polygonscan.com/tx/${arg}`
-    }
-  }
+  966: polygonExplorers,
+  966001: polygonExplorers,
+  966002: polygonExplorers,
+  966003: polygonExplorers,
+  966004: polygonExplorers
 }
 
 export function formatCoinID (cid: string) {
