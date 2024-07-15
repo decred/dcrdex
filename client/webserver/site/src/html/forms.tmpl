@@ -872,8 +872,26 @@
           <td class="ps-3">
             <img class="mini-icon" data-cex-logo>
           </td>
-          <td data-tmpl="cexBaseInventory" class="text-end"></td>
-          <td data-tmpl="cexQuoteInventory" class="no-stretch text-end pe-3"></td>
+          <td class="text-end">
+            <div class="d-inline-flex flex-column align-items-end text-nowrap">
+              <span data-tmpl="cexBaseInventory"></span>
+              <span class="fs14 grey">
+                <span>~</span>
+                <span data-tmpl="cexBaseInventoryFiat"></span>
+                <span>USD</span>
+              </span>
+            </div>
+          </td>
+          <td class="no-stretch text-end pe-3">
+            <div class="d-inline-flex flex-column text-nowrap">
+              <span data-tmpl="cexQuoteInventory"></span>
+              <span class="fs14 grey">
+                <span>~</span>
+                <span data-tmpl="cexQuoteInventoryFiat"></span>
+                <span>USD</span>
+              </span>
+            </div>
+          </td>
         </tr>
       </tbody>
     </table>

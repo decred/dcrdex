@@ -878,10 +878,10 @@ export class RunningMarketMakerDisplay {
 
     const dexBaseInv = summedBalance(runStats.dexBalances[baseID]) / baseFactor
     page.walletBaseInventory.textContent = Doc.formatFourSigFigs(dexBaseInv)
-    page.walletBaseInvFiat.textContent = Doc.formatFourSigFigs(dexBaseInv * baseFiatRate)
+    page.walletBaseInvFiat.textContent = Doc.formatFourSigFigs(dexBaseInv * baseFiatRate, 2)
     const dexQuoteInv = summedBalance(runStats.dexBalances[quoteID]) / quoteFactor
     page.walletQuoteInventory.textContent = Doc.formatFourSigFigs(dexQuoteInv)
-    page.walletQuoteInvFiat.textContent = Doc.formatFourSigFigs(dexQuoteInv * quoteFiatRate)
+    page.walletQuoteInvFiat.textContent = Doc.formatFourSigFigs(dexQuoteInv * quoteFiatRate, 2)
 
     Doc.setVis(cexName, page.cexRow)
     if (cexName) {
@@ -889,8 +889,10 @@ export class RunningMarketMakerDisplay {
       setCexElements(div, cexName)
       const cexBaseInv = summedBalance(runStats.cexBalances[baseID]) / baseFactor
       page.cexBaseInventory.textContent = Doc.formatFourSigFigs(cexBaseInv)
+      page.cexBaseInventoryFiat.textContent = Doc.formatFourSigFigs(cexBaseInv * baseFiatRate, 2)
       const cexQuoteInv = summedBalance(runStats.cexBalances[quoteID]) / quoteFactor
       page.cexQuoteInventory.textContent = Doc.formatFourSigFigs(cexQuoteInv)
+      page.cexQuoteInventoryFiat.textContent = Doc.formatFourSigFigs(cexQuoteInv * quoteFiatRate, 2)
     }
 
     if (baseFeeID !== baseID) {
