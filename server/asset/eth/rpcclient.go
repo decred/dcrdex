@@ -86,7 +86,21 @@ func (ec *ethConn) monitorBlocks(ctx context.Context, log dex.Logger) {
 		log.Errorf("Error connecting to Websockets headers: %w", err)
 		return
 	}
-	defer sub.Unsubscribe()
+
+	defer func() {
+		// If a provider does not respond to an unsubscribe request, the unsubscribe function
+		// will never return because geth does not use a timeout.
+		doneUnsubbing := make(chan struct{})
+		go func() {
+			sub.Unsubscribe()
+			close(doneUnsubbing)
+		}()
+		select {
+		case <-doneUnsubbing:
+		case <-time.After(10 * time.Second):
+			log.Errorf("Timed out waiting to unsubscribe from %q", ec.endpoint)
+		}
+	}()
 
 	for {
 		select {

@@ -131,7 +131,6 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 			"https://polygon-mainnet.public.blastapi.io",
 			"https://polygon.blockpi.network/v1/rpc/public",
 			"https://polygon.llamarpc.com",
-			"https://rpc-mainnet.maticvigil.com",
 			"https://endpoints.omniatech.io/v1/matic/mainnet/public",
 			"https://rpc-mainnet.matic.quiknode.pro",
 			"https://gateway.tenderly.co/public/polygon",
