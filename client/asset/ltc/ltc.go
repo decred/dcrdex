@@ -44,33 +44,29 @@ var (
 		Testnet: "19332",
 		Simnet:  "19443",
 	}
-	walletNameOpt = []*asset.ConfigOption{ // slice for easy appends
-		{
-			Key:         "walletname",
-			DisplayName: "Wallet Name",
-			Description: "The wallet name",
-		},
-	}
 	rpcWalletDefinition = &asset.WalletDefinition{
 		Type:              walletTypeRPC,
 		Tab:               "Litecoin Core (external)",
 		Description:       "Connect to litecoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
 		ConfigOpts:        append(btc.RPCConfigOpts("Litecoin", "9332"), btc.CommonConfigOpts("LTC", true)...),
+		MultiFundingOpts:  btc.MultiFundingOpts,
 	}
 	electrumWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeElectrum,
 		Tab:         "Electrum-LTC (external)",
 		Description: "Use an external Electrum-LTC Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum-ltc", false), "config"), // e.g. ~/.electrum-ltc/config		ConfigOpts:        append(rpcOpts, commonOpts...),
-		ConfigOpts: append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("LTC", true)...),
+		ConfigOpts:       append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("LTC", true)...),
+		MultiFundingOpts: btc.MultiFundingOpts,
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
-		Type:        walletTypeSPV,
-		Tab:         "Native",
-		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  btc.CommonConfigOpts("LTC", true),
-		Seeded:      true,
+		Type:             walletTypeSPV,
+		Tab:              "Native",
+		Description:      "Use the built-in SPV wallet",
+		ConfigOpts:       btc.CommonConfigOpts("LTC", true),
+		Seeded:           true,
+		MultiFundingOpts: btc.MultiFundingOpts,
 	}
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{

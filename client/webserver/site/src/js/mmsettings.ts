@@ -2368,6 +2368,7 @@ class AssetPane {
       for (const optKey of optKeys) Doc.setVis(vis, optToDiv[optKey])
     }
     const addOpt = (opt: OrderOption) => {
+      if (opt.quoteAssetOnly && !this.isQuote) return
       const currVal = walletConfig[opt.key]
       let div: PageElement | undefined
       if (opt.isboolean) {

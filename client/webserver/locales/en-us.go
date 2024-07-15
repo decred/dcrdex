@@ -627,4 +627,5 @@ var EnUS = map[string]*intl.Translation{
 	"remotegap_tooltip":           {T: "The buy-sell spread on the linked cex market"},
 	"max_zero_no_fees":            {T: `<span id="maxZeroNoFeesTicker"></span> balance < min fees ~<span id="maxZeroMinFees"></span>`},
 	"max_zero_no_bal":             {T: `low <span id="maxZeroNoBalTicker"></span> balance`},
+	"Wallet Options":              {T: "Wallet Options"},
 }

@@ -138,6 +138,7 @@ var (
 			DefaultConfigPath: dexbtc.SystemConfigPath("zcash"),
 			ConfigOpts:        configOpts,
 			NoAuth:            true,
+			MultiFundingOpts:  btc.MultiFundingOpts,
 		}},
 	}
 
