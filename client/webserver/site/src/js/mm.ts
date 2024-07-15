@@ -3,6 +3,7 @@ import {
   PageElement,
   MMBotStatus,
   RunStatsNote,
+  RunEventNote,
   ExchangeBalance,
   StartConfig,
   OrderPlacement,
@@ -220,7 +221,11 @@ export default class MarketMakerPage extends BasePage {
 
     const botConfigs = mmStatus.bots.map((s: MMBotStatus) => s.config)
     app().registerNoteFeeder({
-      runstats: (note: RunStatsNote) => { this.handleRunStatsNote(note) }
+      runstats: (note: RunStatsNote) => { this.handleRunStatsNote(note) },
+      runevent: (note: RunEventNote) => {
+        const bot = this.bots[hostedMarketID(note.host, note.baseID, note.quoteID)]
+        if (bot) return bot.handleRunStats()
+      }
       // TODO bot start-stop notification
     })
 

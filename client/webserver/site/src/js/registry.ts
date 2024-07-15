@@ -466,8 +466,8 @@ export interface RunStatsNote extends CoreNote {
 
 export interface RunEventNote extends CoreNote {
   host: string
-  base: number
-  quote: number
+  baseID: number
+  quoteID: number
   startTime: number
   event: MarketMakingEvent
 }

@@ -579,7 +579,7 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 			}
 			ui, err := asset.UnitInfo(assetID)
 			if err != nil {
-				bnc.log.Error("known asset but no unit info")
+				// not a registered asset
 				continue
 			}
 			withdrawMin := uint64(math.Round(float64(ui.Conventional.ConversionFactor) * netInfo.WithdrawMin))

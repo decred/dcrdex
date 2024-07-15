@@ -49,18 +49,18 @@ type runEventNote struct {
 	db.Notification
 
 	Host      string             `json:"host"`
-	Base      uint32             `json:"base"`
-	Quote     uint32             `json:"quote"`
+	BaseID    uint32             `json:"baseID"`
+	QuoteID   uint32             `json:"quoteID"`
 	StartTime int64              `json:"startTime"`
 	Event     *MarketMakingEvent `json:"event"`
 }
 
-func newRunEventNote(host string, base, quote uint32, startTime int64, event *MarketMakingEvent) *runEventNote {
+func newRunEventNote(host string, baseID, quoteID uint32, startTime int64, event *MarketMakingEvent) *runEventNote {
 	return &runEventNote{
 		Notification: db.NewNotification(NoteTypeRunEvent, "", "", "", db.Data),
 		Host:         host,
-		Base:         base,
-		Quote:        quote,
+		BaseID:       baseID,
+		QuoteID:      quoteID,
 		StartTime:    startTime,
 		Event:        event,
 	}

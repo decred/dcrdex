@@ -2047,7 +2047,7 @@ func (c *Core) connectAndUpdateWalletResumeTrades(w *xcWallet, resumeTrades bool
 		}
 	}
 
-	c.log.Infof("Connecting wallet for %s", unbip(assetID))
+	c.log.Debugf("Connecting wallet for %s", unbip(assetID))
 	addr := w.currentDepositAddress()
 	newAddr, err := c.connectWalletResumeTrades(w, resumeTrades)
 	if err != nil {
@@ -3133,7 +3133,7 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 	}
 	if synced && !wasSynced {
 		c.updateWalletBalance(w)
-		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
+		c.log.Debugf("Wallet synced for asset %s", unbip(w.AssetID))
 		c.updateBondReserves(w.AssetID)
 	}
 	return synced
@@ -7161,7 +7161,7 @@ func (c *Core) initialize() error {
 			continue
 		}
 		// Wallet is loaded from the DB, but not yet connected.
-		c.log.Infof("Loaded %s wallet configuration.", unbip(assetID))
+		c.log.Tracef("Loaded %s wallet configuration.", unbip(assetID))
 		c.updateWallet(assetID, wallet)
 	}
 

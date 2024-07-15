@@ -815,7 +815,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 
 	maxSwaps, maxRedeems := aw.maxSwapsAndRedeems()
 
-	cfg.Logger.Infof("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
+	cfg.Logger.Debugf("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
 		maxSwaps, maxRedeems)
 
 	aw.wallets = map[uint32]*assetWallet{

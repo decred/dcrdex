@@ -33,7 +33,7 @@ const (
 	LevelCritical = slog.LevelCritical
 	LevelOff      = slog.LevelOff
 
-	DefaultLogLevel = LevelDebug // TODO: back to LevelInfo at some point
+	DefaultLogLevel = LevelInfo
 )
 
 // Logger is a logger. Many dcrdex types will take a logger as an argument.

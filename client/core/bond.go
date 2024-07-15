@@ -1724,7 +1724,6 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, p
 		if err != nil {
 			return fmt.Errorf("db.ConfirmBond failure: %w", err)
 		}
-		c.log.Infof("Bond %s (%s) confirmed.", bondIDStr, unbip(assetID))
 		subject, details := c.formatDetails(TopicBondConfirmed, effectiveTier, targetTier)
 		c.notify(newBondPostNoteWithTier(TopicBondConfirmed, subject, details, db.Success, dc.acct.host, bondedTier, c.exchangeAuth(dc)))
 	} else if !foundConfirmed {

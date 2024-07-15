@@ -443,13 +443,13 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*orderbook.OrderBook, Boo
 // request. The response, which includes book's snapshot, is returned. Proper
 // synchronization is required by the caller to ensure that order feed messages
 // aren't processed before they are prepared to handle this subscription.
-func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, error) {
-	mkt := marketName(base, quote)
+func (dc *dexConnection) subscribe(baseID, quoteID uint32) (*msgjson.OrderBook, error) {
+	mkt := marketName(baseID, quoteID)
 	// Subscribe via the 'orderbook' request.
 	dc.log.Debugf("Subscribing to the %v order book for %v", mkt, dc.acct.host)
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
-		Base:  base,
-		Quote: quote,
+		Base:  baseID,
+		Quote: quoteID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error encoding 'orderbook' request: %w", err)
