@@ -564,7 +564,7 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 	for _, nfo := range coins {
 		for _, netInfo := range nfo.NetworkList {
 			if !netInfo.WithdrawEnable || !netInfo.DepositEnable {
-				bnc.log.Infof("Skipping %s network %s because deposits and/or withdraws are not enabled.", netInfo.Coin, netInfo.Network)
+				// bnc.log.Tracef("Skipping %s network %s because deposits and/or withdraws are not enabled.", netInfo.Coin, netInfo.Network)
 				continue
 			}
 			symbol := binanceCoinNetworkToDexSymbol(nfo.Coin, netInfo.Network)
@@ -1267,10 +1267,9 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 
 	bnc.balanceMtx.Lock()
 	for _, bal := range update.Balances {
-		symbol := strings.ToLower(bal.Asset)
-		processSymbol(symbol, bal)
-		if symbol == "eth" {
-			processSymbol("weth", bal)
+		processSymbol(bal.Asset, bal)
+		if bal.Asset == "ETH" {
+			processSymbol("WETH", bal)
 		}
 	}
 	bnc.balanceMtx.Unlock()
@@ -1847,10 +1846,7 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 }
 
 func getDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
-	dexSymbol := strings.ToLower(coin)
-	if convertedDEXSymbol, found := binanceToDexSymbol[coin]; found {
-		dexSymbol = strings.ToLower(convertedDEXSymbol)
-	}
+	dexSymbol := convertBnCoin(coin)
 
 	// Binance does not differentiate between eth and weth like we do.
 	dexNonTokenSymbol := dexSymbol

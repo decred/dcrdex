@@ -2297,7 +2297,7 @@ class AssetPane {
     const feesPerLotConv = fees.bookingFeesPerLot / feeUI.conventional.conversionFactor
     page.bookingFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
     page.bookingFeesLots.textContent = String(lots)
-    inv.bookingFees = lots * feesPerLotConv
+    inv.bookingFees = fees.bookingFees / feeUI.conventional.conversionFactor
     page.bookingFees.textContent = Doc.formatFourSigFigs(inv.bookingFees)
     if (cexName) {
       inv.cex = cexCommit / ui.conventional.conversionFactor

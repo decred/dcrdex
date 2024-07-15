@@ -642,6 +642,7 @@ class Bot extends BotMarket {
       const feeReq = f.base.fees.req + (baseFeeID === quoteFeeID ? f.quote.fees.req : 0)
       page.proposedDexBaseFeeAlloc.textContent = Doc.formatFourSigFigs(feeReq)
       page.proposedDexBaseFeeAllocUSD.textContent = Doc.formatFourSigFigs(feeReq * baseFeeFiatRate)
+      page.proposedDexBaseFeeAlloc.classList.toggle('text-warning', !f.base.fees.funded)
     }
 
     const needQuoteTokenFees = quoteFeeID !== quoteID && quoteFeeID !== baseFeeID
@@ -650,6 +651,7 @@ class Bot extends BotMarket {
       const feeReq = f.quote.fees.req
       page.proposedDexQuoteFeeAlloc.textContent = Doc.formatFourSigFigs(feeReq)
       page.proposedDexQuoteFeeAllocUSD.textContent = Doc.formatFourSigFigs(feeReq * quoteFeeFiatRate)
+      page.proposedDexQuoteFeeAlloc.classList.toggle('text-warning', !f.quote.fees.funded)
     }
 
     Doc.show(page.allocationDialog)

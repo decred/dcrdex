@@ -688,8 +688,9 @@ export class BotMarket {
     const totalQuoteReq = dexMinQuoteAlloc + cexMinQuoteAlloc + transferableQuoteAlloc
     const baseFundedAndBalanced = dexBaseFunded && cexBaseFunded && baseAvail >= totalBaseReq
     const quoteFundedAndBalanced = dexQuoteFunded && cexQuoteFunded && quoteAvail >= totalQuoteReq
-    const baseFeesFunded = (baseID === baseFeeID) || dexBaseFeeAvail >= dexBaseFeeReq
-    const quoteFeesFunded = (quoteID === quoteFeeID && dexQuoteFunded) || dexQuoteFeeAvail >= dexQuoteFeeReq
+    const baseFeesFunded = dexBaseFeeAvail >= dexBaseFeeReq
+    const quoteFeesFunded = dexQuoteFeeAvail >= dexQuoteFeeReq
+
     const fundedAndBalanced = baseFundedAndBalanced && quoteFundedAndBalanced && baseFeesFunded && quoteFeesFunded
 
     // Are we funded but not balanced, but able to rebalance with a cex?
@@ -1003,6 +1004,8 @@ export function feesAndCommit (
       ...baseFees,
       bookingFeesPerLot: baseBookingFeesPerLot,
       bookingFeesPerCounterLot: baseRedeemReservesPerLot,
+      // TODO: We may want to consider the order reserves factor too, since
+      // booking fees for the taker are not freed immediately after matching.
       bookingFees: baseBookingFeesPerLot * baseLots + baseRedeemReservesPerLot * quoteLots,
       tokenFeesPerSwap: baseTokenFeesPerSwap
     },
