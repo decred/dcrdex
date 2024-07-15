@@ -879,7 +879,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const { commit, fees } = feesAndCommit(
       baseID, quoteID, baseFees, quoteFees, lotSize, dexBaseLots, dexQuoteLots,
-      baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker
+      baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker,
+      cfg.baseConfig.orderReservesFactor, cfg.quoteConfig.orderReservesFactor
     )
 
     return {
@@ -2221,7 +2222,7 @@ class AssetPane {
     this.minTransferSlider = new MiniSlider(page.minTransferSlider, (r: number) => {
       const { cfg } = this
       const totalInventory = this.commit()
-      const [minV, maxV] = [0, totalInventory]
+      const [minV, maxV] = [this.minTransfer.min, Math.min(this.minTransfer.min, totalInventory)]
       cfg.transferFactor = r
       this.minTransfer.setValue(minV + r * (maxV - minV))
     })
@@ -2296,6 +2297,7 @@ class AssetPane {
     page.bookCommitment.textContent = Doc.formatFourSigFigs(inv.book)
     const feesPerLotConv = fees.bookingFeesPerLot / feeUI.conventional.conversionFactor
     page.bookingFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
+    page.swapReservesFactor.textContent = fees.swapReservesFactor.toFixed(2)
     page.bookingFeesLots.textContent = String(lots)
     inv.bookingFees = fees.bookingFees / feeUI.conventional.conversionFactor
     page.bookingFees.textContent = Doc.formatFourSigFigs(inv.bookingFees)
@@ -2327,6 +2329,7 @@ class AssetPane {
       const feesPerLotConv = fees.bookingFeesPerCounterLot / feeUI.conventional.conversionFactor
       page.redemptionFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
       page.redemptionFeesLots.textContent = String(counterLots)
+      page.redeemReservesFactor.textContent = fees.redeemReservesFactor.toFixed(2)
     }
     this.updateCommitTotal()
     this.updateTokenFees()
@@ -2354,7 +2357,7 @@ class AssetPane {
     Doc.setVis(showRebalance, page.rebalanceOpts)
     if (!showRebalance) return
     const totalInventory = this.commit()
-    const [minV, maxV] = [this.minTransfer.min, totalInventory]
+    const [minV, maxV] = [this.minTransfer.min, Math.min(this.minTransfer.min * 2, totalInventory)]
     const rangeV = maxV - minV
     this.minTransfer.setValue(minV + cfg.transferFactor * rangeV)
     this.minTransferSlider.setValue((cfg.transferFactor - defaultTransfer.minR) / defaultTransfer.range)

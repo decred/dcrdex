@@ -574,8 +574,8 @@ class Bot extends BotMarket {
         [quoteID]: proposedCexQuote * quoteFactor
       }
     }
-    alloc.dex[baseFeeID] = (alloc.dex[baseFeeID] ?? 0) + f.base.fees.req * baseFeeFactor
-    alloc.dex[quoteFeeID] = (alloc.dex[quoteFeeID] ?? 0) + f.quote.fees.req * quoteFeeFactor
+    alloc.dex[baseFeeID] = Math.min((alloc.dex[baseFeeID] ?? 0) + f.base.fees.req, f.base.fees.avail) * baseFeeFactor
+    alloc.dex[quoteFeeID] = Math.min((alloc.dex[quoteFeeID] ?? 0) + f.quote.fees.req, f.quote.fees.avail) * quoteFeeFactor
 
     let totalUSD = (alloc.dex[baseID] / baseFactor * baseFiatRate) + (alloc.dex[quoteID] / quoteFactor * quoteFiatRate)
     totalUSD += (alloc.cex[baseID] / baseFactor * baseFiatRate) + (alloc.cex[quoteID] / quoteFactor * quoteFiatRate)
@@ -639,18 +639,19 @@ class Bot extends BotMarket {
 
     Doc.setVis(baseFeeID !== baseID, ...Doc.applySelector(page.allocationDialog, '[data-base-token-fees]'))
     if (baseFeeID !== baseID) {
-      const feeReq = f.base.fees.req + (baseFeeID === quoteFeeID ? f.quote.fees.req : 0)
-      page.proposedDexBaseFeeAlloc.textContent = Doc.formatFourSigFigs(feeReq)
-      page.proposedDexBaseFeeAllocUSD.textContent = Doc.formatFourSigFigs(feeReq * baseFeeFiatRate)
+      const reqFees = f.base.fees.req + (baseFeeID === quoteFeeID ? f.quote.fees.req : 0)
+      const proposedFees = Math.min(reqFees, f.base.fees.avail)
+      page.proposedDexBaseFeeAlloc.textContent = Doc.formatFourSigFigs(proposedFees)
+      page.proposedDexBaseFeeAllocUSD.textContent = Doc.formatFourSigFigs(proposedFees * baseFeeFiatRate)
       page.proposedDexBaseFeeAlloc.classList.toggle('text-warning', !f.base.fees.funded)
     }
 
     const needQuoteTokenFees = quoteFeeID !== quoteID && quoteFeeID !== baseFeeID
     Doc.setVis(needQuoteTokenFees, ...Doc.applySelector(page.allocationDialog, '[data-quote-token-fees]'))
     if (needQuoteTokenFees) {
-      const feeReq = f.quote.fees.req
-      page.proposedDexQuoteFeeAlloc.textContent = Doc.formatFourSigFigs(feeReq)
-      page.proposedDexQuoteFeeAllocUSD.textContent = Doc.formatFourSigFigs(feeReq * quoteFeeFiatRate)
+      const proposedFees = Math.min(f.quote.fees.req, f.quote.fees.avail)
+      page.proposedDexQuoteFeeAlloc.textContent = Doc.formatFourSigFigs(proposedFees)
+      page.proposedDexQuoteFeeAllocUSD.textContent = Doc.formatFourSigFigs(proposedFees * quoteFeeFiatRate)
       page.proposedDexQuoteFeeAlloc.classList.toggle('text-warning', !f.quote.fees.funded)
     }
 

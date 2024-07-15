@@ -512,6 +512,8 @@ export interface AssetBookingFees extends LotFeeRange {
   bookingFeesPerLot: number
   bookingFeesPerCounterLot: number
   bookingFees: number
+  swapReservesFactor: number // (1 + orderReservesFactor)
+  redeemReservesFactor: number
   tokenFeesPerSwap: number
 }
 

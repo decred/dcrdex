@@ -568,12 +568,14 @@ export class BotMarket {
   feesAndCommit () {
     const {
       baseID, quoteID, marketReport: { baseFees, quoteFees }, lotSize,
-      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker
+      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
+      cfg: { uiConfig: { baseConfig, quoteConfig } }
     } = this
 
     return feesAndCommit(
       baseID, quoteID, baseFees, quoteFees, lotSize, baseLots, quoteLots,
-      baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker
+      baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
+      baseConfig.orderReservesFactor, quoteConfig.orderReservesFactor
     )
   }
 
@@ -865,8 +867,8 @@ export class RunningMarketMakerDisplay {
     }
 
     Doc.show(page.stats)
-    setSignedValue(runStats.profitLoss.profitRatio, page.profit, page.profitSign)
-    setSignedValue(runStats.profitLoss.profit, page.profitLoss, page.plSign)
+    setSignedValue(runStats.profitLoss.profitRatio, page.profit, page.profitSign, 2)
+    setSignedValue(runStats.profitLoss.profit, page.profitLoss, page.plSign, 2)
     this.startTime = runStats.startTime
 
     const summedBalance = (b: BotBalance) => {
@@ -936,8 +938,8 @@ export class RunningMarketMakerDisplay {
   }
 }
 
-function setSignedValue (v: number, vEl: PageElement, signEl: PageElement) {
-  vEl.textContent = Doc.formatFourSigFigs(v)
+function setSignedValue (v: number, vEl: PageElement, signEl: PageElement, maxDecimals?: number) {
+  vEl.textContent = Doc.formatFourSigFigs(v, maxDecimals)
   signEl.classList.toggle('ico-plus', v > 0)
   signEl.classList.toggle('text-good', v > 0)
   // signEl.classList.toggle('ico-minus', v < 0)
@@ -946,7 +948,8 @@ function setSignedValue (v: number, vEl: PageElement, signEl: PageElement) {
 export function feesAndCommit (
   baseID: number, quoteID: number, baseFees: LotFeeRange, quoteFees: LotFeeRange,
   lotSize: number, baseLots: number, quoteLots: number, baseFeeID: number, quoteFeeID: number,
-  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean
+  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean, baseOrderReservesFactor: number,
+  quoteOrderReservesFactor: number
 ) {
   const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID)
   const [cexBaseLots, cexQuoteLots] = [quoteLots, baseLots]
@@ -983,7 +986,7 @@ export function feesAndCommit (
   if (baseID === quoteFeeID) baseBookingFeesPerLot += quoteFees.max.redeem
   if (baseIsAccountLocker) {
     baseBookingFeesPerLot += baseFees.max.refund
-    if (!quoteIsAccountLocker && baseFeeID !== quoteFeeID) baseRedeemReservesPerLot += baseFees.max.redeem
+    if (!quoteIsAccountLocker && baseFeeID !== quoteFeeID) baseRedeemReservesPerLot = baseFees.max.redeem
   }
 
   let quoteTokenFeesPerSwap = 0
@@ -999,21 +1002,31 @@ export function feesAndCommit (
     if (!baseIsAccountLocker && quoteFeeID !== baseFeeID) quoteRedeemReservesPerLot = quoteFees.max.redeem
   }
 
+  const baseReservesFactor = 1 + baseOrderReservesFactor
+  const quoteReservesFactor = 1 + quoteOrderReservesFactor
+
+  const baseBookingFees = (baseBookingFeesPerLot * baseLots) * baseReservesFactor
+  const baseRedeemFees = (baseRedeemReservesPerLot * quoteLots) * quoteReservesFactor
+  const quoteBookingFees = (quoteBookingFeesPerLot * quoteLots) * quoteReservesFactor
+  const quoteRedeemFees = (quoteRedeemReservesPerLot * baseLots) * baseReservesFactor
+
   const fees: BookingFees = {
     base: {
       ...baseFees,
       bookingFeesPerLot: baseBookingFeesPerLot,
       bookingFeesPerCounterLot: baseRedeemReservesPerLot,
-      // TODO: We may want to consider the order reserves factor too, since
-      // booking fees for the taker are not freed immediately after matching.
-      bookingFees: baseBookingFeesPerLot * baseLots + baseRedeemReservesPerLot * quoteLots,
+      bookingFees: baseBookingFees + baseRedeemFees,
+      swapReservesFactor: baseReservesFactor,
+      redeemReservesFactor: quoteReservesFactor,
       tokenFeesPerSwap: baseTokenFeesPerSwap
     },
     quote: {
       ...quoteFees,
       bookingFeesPerLot: quoteBookingFeesPerLot,
       bookingFeesPerCounterLot: quoteRedeemReservesPerLot,
-      bookingFees: quoteBookingFeesPerLot * quoteLots + quoteRedeemReservesPerLot * baseLots,
+      bookingFees: quoteBookingFees + quoteRedeemFees,
+      swapReservesFactor: quoteReservesFactor,
+      redeemReservesFactor: baseReservesFactor,
       tokenFeesPerSwap: quoteTokenFeesPerSwap
     }
   }
