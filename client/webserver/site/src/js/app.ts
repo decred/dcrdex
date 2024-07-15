@@ -1496,9 +1496,10 @@ export default class Application {
    * a subsequent call.
   */
   async txHistory (assetID: number, n: number, after?: string): Promise<TxHistoryResult> {
+    const url = '/api/txhistory'
     const cachedTxHistory = this.txHistoryMap[assetID]
     if (!cachedTxHistory) {
-      const res = await postJSON('/api/txhistory', {
+      const res = await postJSON(url, {
         n: n,
         assetID: assetID
       })

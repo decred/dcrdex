@@ -852,7 +852,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// Record any cancel order Match and update order status.
 	var metaCancelMatch *db.MetaMatch
 	if cancelMatch != nil {
-		t.dc.log.Infof("Maker notification for cancel order received for order %s. match id = %s",
+		t.dc.log.Infof("Order %s canceled. match id = %s",
 			t.ID(), cancelMatch.MatchID)
 
 		// Set this order status to Canceled and unlock any locked coins
@@ -1092,7 +1092,8 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 	if oid != t.cancel.ID() {
 		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.cancel.ID())
 	}
-	t.dc.log.Infof("Taker notification for cancel order %v received. Match id = %s", oid, mid)
+	// Maker notification is logged at info.
+	t.dc.log.Debugf("Taker notification for cancel order %v received. Match id = %s", oid, mid)
 	t.cancel.matches.taker = msgMatch
 	// Store the completed taker cancel match.
 	takerCancelMeta := t.makeMetaMatch(t.cancel.matches.taker)
@@ -2541,7 +2542,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		return
 	}
 
-	c.log.Infof("Notifying DEX %s of our %s swap contract %v for match %s",
+	c.log.Debugf("Notifying DEX %s of our %s swap contract %v for match %s",
 		t.dc.acct.host, t.wallets.fromWallet.Symbol, coinIDString(t.wallets.fromWallet.AssetID, coinID), match)
 
 	// Send the init request asynchronously.
@@ -2811,7 +2812,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		return
 	}
 
-	c.log.Infof("Notifying DEX %s of our %s swap redemption %v for match %s",
+	c.log.Debugf("Notifying DEX %s of our %s swap redemption %v for match %s",
 		t.dc.acct.host, t.wallets.toWallet.Symbol, coinIDString(t.wallets.toWallet.AssetID, coinID), match)
 
 	// Send the redeem request asynchronously.

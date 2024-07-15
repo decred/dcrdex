@@ -8765,15 +8765,6 @@ func (c *Core) listen(dc *dexConnection) {
 	}()
 
 	checkTrades := func() {
-		// checkTrades should be snappy. If it takes too long we are creating
-		// lock contention.
-		tStart := time.Now()
-		defer func() {
-			if eTime := time.Since(tStart); eTime > 250*time.Millisecond {
-				c.log.Warnf("checkTrades completed in %v (slow)", eTime)
-			}
-		}()
-
 		var doneTrades, activeTrades []*trackedTrade
 		// NOTE: Don't lock tradeMtx while also locking a trackedTrade's mtx
 		// since we risk blocking access to the trades map if there is lock
@@ -8813,7 +8804,7 @@ func (c *Core) listen(dc *dexConnection) {
 		updatedAssets := make(assetMap)
 		for _, trade := range doneTrades {
 			trade.mtx.Lock()
-			c.log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
+			c.log.Debugf("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
 			trade.returnCoins()
 			trade.mtx.Unlock()
 			updatedAssets.count(trade.wallets.fromWallet.AssetID)
