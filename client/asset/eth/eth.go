@@ -1079,7 +1079,7 @@ func (eth *baseWallet) gasFeeLimit() uint64 {
 
 // transactionGenerator is an action that uses a nonce and returns a tx, it's
 // type specifier, and its value.
-type transactionGenerator func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error)
+type transactionGenerator func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, *string, error)
 
 // withNonce is called with a function intended to generate a new transaction
 // using the next available nonce. If the function returns a non-nil tx, the
@@ -1110,7 +1110,7 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 	w.log.Trace("Nonce chosen for tx generator =", n)
 
 	// Make a first attempt with our best-known nonce.
-	tx, txType, amt, err := f(n)
+	tx, txType, amt, recipient, err := f(n)
 	if err != nil && strings.Contains(err.Error(), "nonce too low") {
 		w.log.Warnf("Too-low nonce detected. Attempting recovery")
 		confirmedNonceAt, pendingNonceAt, err := w.node.nonce(ctx)
@@ -1122,7 +1122,7 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 		if newNonce := nonce(); newNonce != n {
 			n = newNonce
 			// Try again.
-			tx, txType, amt, err = f(n)
+			tx, txType, amt, recipient, err = f(n)
 			if err != nil {
 				return err
 			}
@@ -1133,7 +1133,7 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 	}
 
 	if tx != nil {
-		et := w.extendedTx(tx, txType, amt)
+		et := w.extendedTx(tx, txType, amt, recipient)
 		w.pendingTxs = append(w.pendingTxs, et)
 		if n.Cmp(w.pendingNonceAt) >= 0 {
 			w.pendingNonceAt.Add(n, big.NewInt(1))
@@ -2530,13 +2530,13 @@ func (w *assetWallet) tokenAllowance(version uint32) (allowance *big.Int, err er
 // approveToken approves the token swap contract to spend tokens on behalf of
 // account handled by the wallet.
 func (w *assetWallet) approveToken(ctx context.Context, amount *big.Int, gasLimit uint64, maxFeeRate, tipRate *big.Int, contractVer uint32) (tx *types.Transaction, err error) {
-	return tx, w.withNonce(ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error) {
+	return tx, w.withNonce(ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, *string, error) {
 		txOpts, err := w.node.txOpts(w.ctx, 0, gasLimit, maxFeeRate, tipRate, nonce)
 		if err != nil {
-			return nil, 0, 0, fmt.Errorf("addSignerToOpts error: %w", err)
+			return nil, 0, 0, nil, fmt.Errorf("addSignerToOpts error: %w", err)
 		}
 
-		return tx, asset.ApproveToken, w.atomize(amount), w.withTokenContractor(w.assetID, contractVer, func(c tokenContractor) error {
+		return tx, asset.ApproveToken, w.atomize(amount), nil, w.withTokenContractor(w.assetID, contractVer, func(c tokenContractor) error {
 			tx, err = c.approve(txOpts, amount)
 			if err != nil {
 				return err
@@ -4212,7 +4212,7 @@ func (w *ETHWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, tipR
 	// 	defer w.borkNonce(tx)
 	// }
 
-	return tx, w.withNonce(w.ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error) {
+	return tx, w.withNonce(w.ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, *string, error) {
 
 		// Uncomment here and above to test actionTypeMissingNonces.
 		// if nonceFuturized.CompareAndSwap(false, true) {
@@ -4229,17 +4229,18 @@ func (w *ETHWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, tipR
 
 		txOpts, err := w.node.txOpts(w.ctx, amt, defaultSendGasLimit, maxFeeRate, tipRate, nonce)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
 		tx, err = w.node.sendTransaction(w.ctx, txOpts, addr, nil)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
 		txType := asset.Send
 		if addr == w.addr {
 			txType = asset.SelfSend
 		}
-		return tx, txType, amt, nil
+		recipient := addr.Hex()
+		return tx, txType, amt, &recipient, nil
 	})
 }
 
@@ -4249,16 +4250,17 @@ func (w *TokenWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, ti
 	if g == nil {
 		return nil, fmt.Errorf("no gas table")
 	}
-	return tx, w.withNonce(w.ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error) {
+	return tx, w.withNonce(w.ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, *string, error) {
 		txOpts, err := w.node.txOpts(w.ctx, 0, g.Transfer, maxFeeRate, tipRate, nonce)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
 		txType := asset.Send
 		if addr == w.addr {
 			txType = asset.SelfSend
 		}
-		return tx, txType, amt, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+		recipient := addr.Hex()
+		return tx, txType, amt, &recipient, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
 			tx, err = c.transfer(txOpts, addr, w.evmify(amt))
 			if err != nil {
 				return err
@@ -4289,13 +4291,13 @@ func (w *assetWallet) initiate(
 			val += c.Value
 		}
 	}
-	return tx, w.withNonce(ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error) {
+	return tx, w.withNonce(ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, *string, error) {
 		txOpts, err := w.node.txOpts(ctx, val, gasLimit, maxFeeRate, tipRate, nonce)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
 
-		return tx, asset.Swap, amt, w.withContractor(contractVer, func(c contractor) error {
+		return tx, asset.Swap, amt, nil, w.withContractor(contractVer, func(c contractor) error {
 			tx, err = c.initiate(txOpts, contracts)
 			return err
 		})
@@ -4434,7 +4436,7 @@ func (w *assetWallet) redeem(
 	// 	return types.NewTransaction(10, w.addr, big.NewInt(dexeth.GweiFactor), gasLimit, dexeth.GweiToWei(maxFeeRate), nil), nil
 	// }
 
-	return tx, w.withNonce(ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error) {
+	return tx, w.withNonce(ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, *string, error) {
 		var amt uint64
 		for _, r := range redemptions {
 			amt += r.Spends.Coin.Value()
@@ -4447,9 +4449,9 @@ func (w *assetWallet) redeem(
 
 		txOpts, err := w.node.txOpts(ctx, 0, gasLimit, dexeth.GweiToWei(maxFeeRate), tipRate, nonce)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
-		return tx, asset.Redeem, amt, w.withContractor(contractVer, func(c contractor) error {
+		return tx, asset.Redeem, amt, nil, w.withContractor(contractVer, func(c contractor) error {
 			tx, err = c.redeem(txOpts, redemptions)
 			return err
 		})
@@ -4464,12 +4466,12 @@ func (w *assetWallet) refund(secretHash [32]byte, amt uint64, maxFeeRate, tipRat
 	if gas == nil {
 		return nil, fmt.Errorf("no gas table for asset %d, version %d", w.assetID, contractVer)
 	}
-	return tx, w.withNonce(w.ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, error) {
+	return tx, w.withNonce(w.ctx, func(nonce *big.Int) (*types.Transaction, asset.TransactionType, uint64, *string, error) {
 		txOpts, err := w.node.txOpts(w.ctx, 0, gas.Refund, maxFeeRate, tipRate, nonce)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
-		return tx, asset.Refund, amt, w.withContractor(contractVer, func(c contractor) error {
+		return tx, asset.Refund, amt, nil, w.withContractor(contractVer, func(c contractor) error {
 			tx, err = c.refund(txOpts, secretHash)
 			return err
 		})
@@ -4898,7 +4900,7 @@ func (w *assetWallet) userActionBumpFees(actionB []byte) error {
 			return fmt.Errorf("error sending bumped-fee transaction: %w", err)
 		}
 
-		newPendingTx := w.extendedTx(newTx, pendingTx.Type, pendingTx.Amount)
+		newPendingTx := w.extendedTx(newTx, pendingTx.Type, pendingTx.Amount, pendingTx.Recipient)
 
 		pendingTx.NonceReplacement = newPendingTx.ID
 		pendingTx.FeeReplacement = true
@@ -4971,7 +4973,8 @@ func (w *assetWallet) userActionNonceReplacement(actionB []byte) error {
 		if replacementTx.Nonce() != pendingTx.Nonce.Uint64() {
 			return fmt.Errorf("nonce replacement doesn't have the right nonce. %d != %s", replacementTx.Nonce(), pendingTx.Nonce)
 		}
-		newPendingTx := w.extendedTx(replacementTx, asset.Unknown, 0)
+		recipient := w.addr.Hex()
+		newPendingTx := w.extendedTx(replacementTx, asset.Unknown, 0, &recipient)
 		pendingTx.NonceReplacement = newPendingTx.ID
 		var oldTo, newTo common.Address
 		if oldAddr := oldTx.To(); oldAddr != nil {
@@ -5039,7 +5042,8 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 		if skip {
 			w.log.Warnf("skipping storing underpriced replacement tx for nonce %d", nonce)
 		} else {
-			pendingTx := w.extendAndStoreTx(tx, asset.SelfSend, 0, nil)
+			recipient := w.addr.Hex()
+			pendingTx := w.extendAndStoreTx(tx, asset.SelfSend, 0, nil, &recipient)
 			w.emitTransactionNote(pendingTx.WalletTransaction, true)
 			w.pendingTxs = append(w.pendingTxs, pendingTx)
 			sort.Slice(w.pendingTxs, func(i, j int) bool {
@@ -5104,24 +5108,19 @@ func transactionFeeLimit(tx *types.Transaction) *big.Int {
 
 // extendedTx generates an *extendedWalletTx for a newly-broadcasted tx and
 // stores it in the DB.
-func (w *assetWallet) extendedTx(tx *types.Transaction, txType asset.TransactionType, amt uint64) *extendedWalletTx {
+func (w *assetWallet) extendedTx(tx *types.Transaction, txType asset.TransactionType, amt uint64, recipient *string) *extendedWalletTx {
 	var tokenAssetID *uint32
 	if w.assetID != w.baseChainID {
 		tokenAssetID = &w.assetID
 	}
-	return w.baseWallet.extendAndStoreTx(tx, txType, amt, tokenAssetID)
+	return w.baseWallet.extendAndStoreTx(tx, txType, amt, tokenAssetID, recipient)
 }
 
-func (w *baseWallet) extendAndStoreTx(tx *types.Transaction, txType asset.TransactionType, amt uint64, tokenAssetID *uint32) *extendedWalletTx {
+func (w *baseWallet) extendAndStoreTx(tx *types.Transaction, txType asset.TransactionType, amt uint64, tokenAssetID *uint32, recipient *string) *extendedWalletTx {
 	nonce := tx.Nonce()
 	rawTx, err := tx.MarshalBinary()
 	if err != nil {
 		w.log.Errorf("Error marshaling tx %q: %v", tx.Hash(), err)
-	}
-	var recipient *string
-	if to := tx.To(); to != nil {
-		s := to.String()
-		recipient = &s
 	}
 
 	now := time.Now()
