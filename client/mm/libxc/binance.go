@@ -850,7 +850,7 @@ func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, 
 
 	bnc.log.Tracef("Withdrawal status: %+v", status)
 
-	if status.Status != 6 {
+	if status.TxID == "" {
 		return 0, "", ErrWithdrawalPending
 	}
 
