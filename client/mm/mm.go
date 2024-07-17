@@ -1082,11 +1082,21 @@ func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 		}
 	}
 
+	baseTraits, err := m.core.WalletTraits(mkt.BaseID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting base asset traits: %v", err)
+	}
+
+	quoteTraits, err := m.core.WalletTraits(mkt.QuoteID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting quote asset traits: %v", err)
+	}
+
 	return &MarketMakingEvent{
 		ID:             event.ID,
 		TimeStamp:      event.TimeStamp,
 		Pending:        pendingTx || o.Status <= order.OrderStatusBooked || activeMatches,
-		BalanceEffects: combineBalanceEffects(dexOrderEffects(o, swaps, redeems, refunds, 0)),
+		BalanceEffects: combineBalanceEffects(dexOrderEffects(o, swaps, redeems, refunds, 0, baseTraits, quoteTraits)),
 		DEXOrderEvent: &DEXOrderEvent{
 			ID:           orderEvent.ID,
 			Sell:         o.Sell,

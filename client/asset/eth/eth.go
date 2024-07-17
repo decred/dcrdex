@@ -5220,6 +5220,12 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.
 	if w.withLocalTxRead(txHash, func(wt *extendedWalletTx) {
 		localTx = *wt.WalletTransaction
 	}) {
+		// Do not modify tx in pending tx map. Only modify copy.
+		// Confirmed should be true, because the value is part of the available
+		// balance.
+		if localTx.BlockNumber > 0 {
+			localTx.Confirmed = true
+		}
 		return &localTx, nil
 	}
 	return w.getReceivingTransaction(ctx, txHash)
@@ -5270,11 +5276,17 @@ func (w *TokenWallet) getReceivingTransaction(ctx context.Context, txHash common
 
 func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
 	txHash := common.HexToHash(txID)
-	var localTx *extendedWalletTx
+	var localTx asset.WalletTransaction
 	if w.withLocalTxRead(txHash, func(wt *extendedWalletTx) {
-		localTx = wt
+		localTx = *wt.WalletTransaction
 	}) {
-		return localTx.WalletTransaction, nil
+		// Do not modify tx in pending tx map. Only modify copy.
+		// Confirmed should be true, because the value is part of the available
+		// balance.
+		if localTx.BlockNumber > 0 {
+			localTx.Confirmed = true
+		}
+		return &localTx, nil
 	}
 	return w.getReceivingTransaction(ctx, txHash)
 }

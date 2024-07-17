@@ -1369,7 +1369,7 @@ func (u *unifiedExchangeAdaptor) refreshAllPendingEvents(ctx context.Context) {
 	for _, pendingOrder := range pendingDEXOrders {
 		pendingOrder.txsMtx.Lock()
 		state := pendingOrder.currentState()
-		pendingOrder.updateState(state.order, u.clientCore.WalletTransaction)
+		pendingOrder.updateState(state.order, u.clientCore.WalletTransaction, u.baseTraits, u.quoteTraits)
 		pendingOrder.txsMtx.Unlock()
 	}
 
@@ -2399,7 +2399,7 @@ func orderTransactions(o *core.Order) (swaps map[string]bool, redeems map[string
 	return
 }
 
-func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.WalletTransaction, counterTradeRate uint64) (dex, cex *BalanceEffects) {
+func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.WalletTransaction, counterTradeRate uint64, baseTraits, quoteTraits asset.WalletTrait) (dex, cex *BalanceEffects) {
 	dex, cex = newBalanceEffects(), newBalanceEffects()
 
 	fromAsset, fromFeeAsset, toAsset, toFeeAsset := orderAssets(o.BaseID, o.QuoteID, o.Sell)
@@ -2415,15 +2415,16 @@ func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.Wa
 			if found {
 				dex.Pending[fromAsset] += swapTx.Amount
 			}
-		} else {
-			var redeemAmt uint64
-			if o.Sell {
-				redeemAmt = calc.BaseToQuote(match.Rate, match.Qty)
-			} else {
-				redeemAmt = match.Qty
-			}
-			dex.Pending[toAsset] += redeemAmt
+			continue
 		}
+
+		var redeemAmt uint64
+		if o.Sell {
+			redeemAmt = calc.BaseToQuote(match.Rate, match.Qty)
+		} else {
+			redeemAmt = match.Qty
+		}
+		dex.Pending[toAsset] += redeemAmt
 	}
 
 	dex.Settled[fromAsset] -= int64(o.LockedAmt)
@@ -2443,13 +2444,27 @@ func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.Wa
 		dex.Settled[fromFeeAsset] -= int64(tx.Fees)
 	}
 
+	var reedeemIsDynamicSwapper, refundIsDynamicSwapper bool
+	if o.Sell {
+		reedeemIsDynamicSwapper = quoteTraits.IsDynamicSwapper()
+		refundIsDynamicSwapper = baseTraits.IsDynamicSwapper()
+	} else {
+		reedeemIsDynamicSwapper = baseTraits.IsDynamicSwapper()
+		refundIsDynamicSwapper = quoteTraits.IsDynamicSwapper()
+	}
+
 	for _, tx := range redeems {
 		if tx.Confirmed {
 			dex.Settled[toAsset] += int64(tx.Amount)
 			dex.Settled[toFeeAsset] -= int64(tx.Fees)
-		} else {
-			dex.Pending[toAsset] += tx.Amount
+			continue
+		}
+
+		dex.Pending[toAsset] += tx.Amount
+		if reedeemIsDynamicSwapper {
 			dex.Settled[toFeeAsset] -= int64(tx.Fees)
+		} else if dex.Pending[toFeeAsset] >= tx.Fees {
+			dex.Pending[toFeeAsset] -= tx.Fees
 		}
 	}
 
@@ -2457,9 +2472,14 @@ func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.Wa
 		if tx.Confirmed {
 			dex.Settled[fromAsset] += int64(tx.Amount)
 			dex.Settled[fromFeeAsset] -= int64(tx.Fees)
-		} else {
-			dex.Pending[fromAsset] += tx.Amount
+			continue
+		}
+
+		dex.Pending[fromAsset] += tx.Amount
+		if refundIsDynamicSwapper {
 			dex.Settled[fromFeeAsset] -= int64(tx.Fees)
+		} else if dex.Pending[fromFeeAsset] >= tx.Fees {
+			dex.Pending[fromFeeAsset] -= tx.Fees
 		}
 	}
 
@@ -2476,7 +2496,7 @@ func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.Wa
 // state is stored as an atomic.Value in order to allow reads without locking.
 // The mutex only needs to be locked for reading if the caller wants a consistent
 // view of the transactions and the state.
-func (p *pendingDEXOrder) updateState(o *core.Order, getTx func(uint32, string) (*asset.WalletTransaction, error)) {
+func (p *pendingDEXOrder) updateState(o *core.Order, getTx func(uint32, string) (*asset.WalletTransaction, error), baseTraits, quoteTraits asset.WalletTrait) {
 	swaps, redeems, refunds := orderTransactions(o)
 	// Add new txs to tx cache
 	fromAsset, _, toAsset, _ := orderAssets(o.BaseID, o.QuoteID, o.Sell)
@@ -2506,7 +2526,7 @@ func (p *pendingDEXOrder) updateState(o *core.Order, getTx func(uint32, string) 
 	processTxs(toAsset, p.redeems, redeems)
 	processTxs(fromAsset, p.refunds, refunds)
 
-	dexEffects, cexEffects := dexOrderEffects(o, p.swaps, p.redeems, p.refunds, p.counterTradeRate)
+	dexEffects, cexEffects := dexOrderEffects(o, p.swaps, p.redeems, p.refunds, p.counterTradeRate, baseTraits, quoteTraits)
 	p.state.Store(&dexOrderState{
 		order:             o,
 		dexBalanceEffects: dexEffects,
@@ -2530,7 +2550,7 @@ func (u *unifiedExchangeAdaptor) handleDEXOrderUpdate(o *core.Order) {
 	}
 
 	pendingOrder.txsMtx.Lock()
-	pendingOrder.updateState(o, u.clientCore.WalletTransaction)
+	pendingOrder.updateState(o, u.clientCore.WalletTransaction, u.baseTraits, u.quoteTraits)
 	dexEffects := pendingOrder.currentState().dexBalanceEffects
 	var havePending bool
 	for _, v := range dexEffects.Pending {

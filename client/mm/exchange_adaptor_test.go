@@ -365,8 +365,8 @@ func TestCEXBalanceCounterTrade(t *testing.T) {
 		QuoteID: 0,
 	}
 
-	pendingOrder0.updateState(order0, adaptor.WalletTransaction)
-	pendingOrder1.updateState(order1, adaptor.WalletTransaction)
+	pendingOrder0.updateState(order0, adaptor.WalletTransaction, 0, 0)
+	pendingOrder1.updateState(order1, adaptor.WalletTransaction, 0, 0)
 
 	dcrBalance := adaptor.CEXBalance(42)
 	expDCR := &BotBalance{
@@ -1893,7 +1893,7 @@ func TestDEXTrade(t *testing.T) {
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - 5*basePerLot - 5*lotSize - 2*swapFees, 5 * basePerLot, 0, 0},
-							0:  {1e8 - redeemFees, 0, 2*quoteLot1 + 3*quoteLot2, 0},
+							0:  {1e8, 0, 2*quoteLot1 + 3*quoteLot2 - redeemFees, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1937,7 +1937,7 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[4], nil, nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - 7*lotSize - 3*swapFees - refundFees, 0, 3 * lotSize /* refund */, 0},
+							42: {1e8 - 7*lotSize - 3*swapFees, 0, 3*lotSize - refundFees /* refund */, 0},
 							0:  {1e8 + 2*quoteLot1 - redeemFees, 0, 2 * quoteLot2 /* new swap */, 0},
 						},
 					},
@@ -2023,7 +2023,7 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*quoteLot1, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - redeemFees, 0, 5 * lotSize, 0},
+							42: {1e8, 0, 5*lotSize - redeemFees, 0},
 							0:  {1e8 - 3*quotePerLot1 - 2*quotePerLot2 - 2*quoteLot1 - 3*quoteLot2 - 2*swapFees, 3*quotePerLot1 + 2*quotePerLot2, 0, 0},
 						},
 					},
@@ -2069,7 +2069,7 @@ func TestDEXTrade(t *testing.T) {
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 + 2*lotSize - redeemFees, 0, 2 * lotSize, 0},
-							0:  {1e8 - 2*quoteLot1 - 5*quoteLot2 - 3*swapFees - refundFees, 0, 3 * quoteLot2, 0},
+							0:  {1e8 - 2*quoteLot1 - 5*quoteLot2 - 3*swapFees, 0, 3*quoteLot2 - refundFees, 0},
 						},
 					},
 					numPendingTrades: 1,
