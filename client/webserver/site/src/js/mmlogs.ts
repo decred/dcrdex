@@ -8,7 +8,6 @@ import {
   RunStatsNote,
   DepositEvent,
   WithdrawalEvent,
-  RunStats,
   MarketMakingRunOverview,
   SupportedAsset,
   BalanceEffects,
@@ -63,7 +62,7 @@ export default class MarketMakerLogsPage extends BasePage {
   mkt: MarketWithHost
   startTime: number
   fiatRates: Record<number, number>
-  runStats: RunStats
+  liveBot: boolean
   overview: MarketMakingRunOverview
   events: Record<number, [MarketMakingEvent, HTMLElement]>
   forms: Forms
@@ -82,7 +81,7 @@ export default class MarketMakerLogsPage extends BasePage {
     const page = this.page = Doc.idDescendants(main)
     net = app().user.net
     Doc.cleanTemplates(page.eventTableRowTmpl, page.dexOrderTxRowTmpl, page.performanceTableRowTmpl)
-    Doc.bind(this.page.backButton, 'click', () => { app().loadPage(this.runStats ? 'mm' : 'mmarchives') })
+    Doc.bind(this.page.backButton, 'click', () => { app().loadPage(this.liveBot ? 'mm' : 'mmarchives') })
     Doc.bind(this.page.filterButton, 'click', () => { this.applyFilters() })
     if (params?.host) {
       const url = new URL(window.location.href)
@@ -190,6 +189,7 @@ export default class MarketMakerLogsPage extends BasePage {
     const botStatus = liveBotStatus(host, baseID, quoteID)
     const [events, , overview] = await this.getRunLogs()
     if (botStatus?.runStats?.startTime === startTime) {
+      this.liveBot = true
       this.fiatRates = app().fiatRatesMap
       profitLoss = botStatus.runStats.profitLoss
     } else {
