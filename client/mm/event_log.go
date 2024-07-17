@@ -4,6 +4,7 @@
 package mm
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -139,6 +140,7 @@ var _ eventLogDB = (*boltEventLogDB)(nil)
  * Schema:
  *
  * - botRuns
+ *   - version
  *   - runBucket (<startTime><baseID><quoteID><host>)
  *     - startTime
  *     - endTime
@@ -153,6 +155,7 @@ var _ eventLogDB = (*boltEventLogDB)(nil)
 
 var (
 	botRunsBucket = []byte("botRuns")
+	versionKey    = []byte("version")
 	eventsBucket  = []byte("events")
 	cfgsBucket    = []byte("cfgs")
 
@@ -162,6 +165,8 @@ var (
 	finalStateKey  = []byte("fs")
 	noPendingKey   = []byte("np")
 )
+
+const balanceStateDBVersion uint32 = 1
 
 func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltEventLogDB, error) {
 	db, err := bbolt.Open(path, 0600, nil)
@@ -182,6 +187,11 @@ func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltE
 		DB:           db,
 		log:          log,
 		eventUpdates: eventUpdates,
+	}
+
+	err = eventLogDB.upgradeDB()
+	if err != nil {
+		return nil, err
 	}
 
 	go func() {
@@ -242,6 +252,33 @@ func calcFinalStateBasedOnEventDiff(runBucket, eventsBucket *bbolt.Bucket, event
 	}
 
 	return finalState, nil
+}
+
+func (db *boltEventLogDB) upgradeDB() error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		botRuns := tx.Bucket(botRunsBucket)
+		versionB := botRuns.Get(versionKey)
+
+		var version uint32
+		if versionB != nil {
+			version = encode.BytesToUint32(versionB)
+		}
+
+		if version < balanceStateDBVersion {
+			err := botRuns.ForEachBucket(func(k []byte) error {
+				err := botRuns.DeleteBucket(k)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return botRuns.Put(versionKey, encode.Uint32Bytes(balanceStateDBVersion))
+	})
 }
 
 // updateEvent is called for each event that is popped off the updateEvent. If
@@ -448,6 +485,7 @@ func (db *boltEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWit
 	var runs []*MarketMakingRun
 	err := db.View(func(tx *bbolt.Tx) error {
 		botRuns := tx.Bucket(botRunsBucket)
+
 		runs = make([]*MarketMakingRun, 0, botRuns.Stats().BucketN)
 		cursor := botRuns.Cursor()
 
@@ -459,6 +497,9 @@ func (db *boltEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWit
 		}
 
 		for ; k != nil; k, _ = cursor.Prev() {
+			if bytes.Equal(k, versionKey) {
+				continue
+			}
 			startTime, mkt, err := parseRunKey(k)
 			if err != nil {
 				return err
