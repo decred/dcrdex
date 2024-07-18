@@ -1117,3 +1117,19 @@ export function clamp (v: number, min: number, max: number): number {
   if (v > max) return max
   return v
 }
+
+export async function setupCopyBtn (txt: string, textEl: PageElement, btnEl: PageElement, color: string) {
+  try {
+    await navigator.clipboard.writeText(txt)
+  } catch (err) {
+    console.error('Unable to copy: ', err)
+  }
+  const textOriginalColor = textEl.style.color
+  const btnOriginalColor = btnEl.style.color
+  textEl.style.color = color
+  btnEl.style.color = color
+  setTimeout(() => {
+    textEl.style.color = textOriginalColor
+    btnEl.style.color = btnOriginalColor
+  }, 350)
+}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"runtime/debug"
 	"sort"
 	"sync"
 	"testing"
@@ -53,13 +52,7 @@ func (db *tEventLogDB) storedEventAtIndexEquals(e *MarketMakingEvent, idx int) b
 		return false
 	}
 	db.storedEvents[idx].TimeStamp = 0 // ignore timestamp
-	if !reflect.DeepEqual(db.storedEvents[idx], e) {
-		debug.PrintStack()
-		fmt.Println("storedEvents: ", spew.Sdump(db.storedEvents))
-		fmt.Printf("wanted:\n%v\ngot:\n%v\n", spew.Sdump(e), spew.Sdump(db.storedEvents[idx]))
-		return false
-	}
-	return true
+	return !reflect.DeepEqual(db.storedEvents[idx], e)
 }
 func (db *tEventLogDB) latestStoredEventEquals(e *MarketMakingEvent) bool {
 	db.storedEventsMtx.Lock()
@@ -88,7 +81,7 @@ func (db *tEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWithHo
 func (db *tEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*MarketMakingRunOverview, error) {
 	return nil, nil
 }
-func (db *tEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool) ([]*MarketMakingEvent, error) {
+func (db *tEventLogDB) runEvents(startTime int64, mkt *MarketWithHost, n uint64, refID *uint64, pendingOnly bool, filters *RunLogFilters) ([]*MarketMakingEvent, error) {
 	return nil, nil
 }
 
@@ -372,8 +365,8 @@ func TestCEXBalanceCounterTrade(t *testing.T) {
 		QuoteID: 0,
 	}
 
-	pendingOrder0.updateState(order0, &balanceEffects{}, pendingOrder0.counterTradeRate)
-	pendingOrder1.updateState(order1, &balanceEffects{}, pendingOrder1.counterTradeRate)
+	pendingOrder0.updateState(order0, adaptor.WalletTransaction, 0, 0)
+	pendingOrder1.updateState(order1, adaptor.WalletTransaction, 0, 0)
 
 	dcrBalance := adaptor.CEXBalance(42)
 	expDCR := &BotBalance{
@@ -415,15 +408,16 @@ func TestFreeUpFunds(t *testing.T) {
 		}
 		po := &pendingDEXOrder{}
 		po.state.Store(&dexOrderState{
-			balanceEffects: &balanceEffects{
-				settled: map[uint32]int64{
+			dexBalanceEffects: &BalanceEffects{
+				Settled: map[uint32]int64{
 					assetID: -int64(matchable),
 				},
-				locked: map[uint32]uint64{
+				Locked: map[uint32]uint64{
 					assetID: matchable,
 				},
-				pending: make(map[uint32]uint64),
+				Pending: make(map[uint32]uint64),
 			},
+			cexBalanceEffects: &BalanceEffects{},
 			order: &core.Order{
 				ID:    oid[:],
 				Sell:  assetID == baseID,
@@ -833,15 +827,16 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	addLocked := func(assetID uint32, val uint64) {
 		po := &pendingDEXOrder{}
 		po.state.Store(&dexOrderState{
-			balanceEffects: &balanceEffects{
-				settled: map[uint32]int64{
+			dexBalanceEffects: &BalanceEffects{
+				Settled: map[uint32]int64{
 					assetID: -int64(val),
 				},
-				locked: map[uint32]uint64{
+				Locked: map[uint32]uint64{
 					assetID: val,
 				},
-				pending: make(map[uint32]uint64),
+				Pending: make(map[uint32]uint64),
 			},
+			cexBalanceEffects: &BalanceEffects{},
 			order: &core.Order{
 				ID:   oid[:],
 				Sell: assetID == baseID,
@@ -972,6 +967,11 @@ func TestMultiTrade(t *testing.T) {
 			placements = buyPlacements
 		}
 
+		toAsset := baseID
+		if sell {
+			toAsset = quoteID
+		}
+
 		orders := map[order.OrderID]*core.Order{
 			orderIDs[0]: { // Should cancel, but cannot due to epoch > currEpoch - 2
 				Qty:     1 * lotSize,
@@ -1032,7 +1032,20 @@ func TestMultiTrade(t *testing.T) {
 		}
 
 		for oid, order := range orders {
-			toReturn[oid].updateState(order, &balanceEffects{}, toReturn[oid].counterTradeRate)
+			reserved := reservedForCounterTrade(sell, toReturn[oid].counterTradeRate, orders[oid].Qty-orders[oid].Filled)
+			toReturn[oid].state.Store(&dexOrderState{
+				order:             order,
+				dexBalanceEffects: &BalanceEffects{},
+				cexBalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						toAsset: -int64(reserved),
+					},
+					Reserved: map[uint32]uint64{
+						toAsset: reserved,
+					},
+				},
+				counterTradeRate: toReturn[oid].counterTradeRate,
+			})
 		}
 		return toReturn
 	}
@@ -1041,7 +1054,22 @@ func TestMultiTrade(t *testing.T) {
 	// pendingOrders, but with the second order not filled.
 	secondPendingOrderNotFilled := func(sell bool, baseID, quoteID uint32) map[order.OrderID]*pendingDEXOrder {
 		orders := pendingOrders(sell, baseID, quoteID)
+		toAsset := baseID
+		if sell {
+			toAsset = quoteID
+		}
+		currentState := orders[orderIDs[1]].currentState()
+		reserved := reservedForCounterTrade(sell, currentState.counterTradeRate, currentState.order.Qty)
 		orders[orderIDs[1]].currentState().order.Filled = 0
+		orders[orderIDs[1]].currentState().cexBalanceEffects = &BalanceEffects{
+			Settled: map[uint32]int64{
+				toAsset: -int64(reserved),
+			},
+			Reserved: map[uint32]uint64{
+				toAsset: reserved,
+			},
+		}
+
 		return orders
 	}
 
@@ -1059,13 +1087,19 @@ func TestMultiTrade(t *testing.T) {
 		pendingOrder := &pendingDEXOrder{
 			placementIndex: 0,
 		}
-		pendingOrder.updateState(&core.Order{ // Within tolerance, don't cancel
-			Qty:   lotSize,
-			Sell:  !sell,
-			ID:    orderIDs[4][:],
-			Rate:  rate,
-			Epoch: currEpoch - 2,
-		}, &balanceEffects{}, pendingOrder.counterTradeRate)
+		pendingOrder.state.Store(&dexOrderState{
+			order: &core.Order{ // Within tolerance, don't cancel
+				Qty:   lotSize,
+				Sell:  !sell,
+				ID:    orderIDs[4][:],
+				Rate:  rate,
+				Epoch: currEpoch - 2,
+			},
+			dexBalanceEffects: &BalanceEffects{},
+			cexBalanceEffects: &BalanceEffects{},
+			counterTradeRate:  pendingOrder.counterTradeRate,
+		})
+
 		orders[orderIDs[4]] = pendingOrder
 		return orders
 	}
@@ -1575,6 +1609,7 @@ func TestMultiTrade(t *testing.T) {
 						pendingOrdersCopy[id] = order
 					}
 					adaptor.pendingDEXOrders = pendingOrdersCopy
+
 					adaptor.buyFees = buyFees
 					adaptor.sellFees = sellFees
 
@@ -1858,7 +1893,7 @@ func TestDEXTrade(t *testing.T) {
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 - 5*basePerLot - 5*lotSize - 2*swapFees, 5 * basePerLot, 0, 0},
-							0:  {1e8 - redeemFees, 0, 2*quoteLot1 + 3*quoteLot2, 0},
+							0:  {1e8, 0, 2*quoteLot1 + 3*quoteLot2 - redeemFees, 0},
 						},
 					},
 					numPendingTrades: 2,
@@ -1902,7 +1937,7 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[4], nil, nil, 2*lotSize, rate2)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - 7*lotSize - 3*swapFees - refundFees, 0, 3 * lotSize /* refund */, 0},
+							42: {1e8 - 7*lotSize - 3*swapFees, 0, 3*lotSize - refundFees /* refund */, 0},
 							0:  {1e8 + 2*quoteLot1 - redeemFees, 0, 2 * quoteLot2 /* new swap */, 0},
 						},
 					},
@@ -1988,7 +2023,7 @@ func TestDEXTrade(t *testing.T) {
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*quoteLot1, rate1)),
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
-							42: {1e8 - redeemFees, 0, 5 * lotSize, 0},
+							42: {1e8, 0, 5*lotSize - redeemFees, 0},
 							0:  {1e8 - 3*quotePerLot1 - 2*quotePerLot2 - 2*quoteLot1 - 3*quoteLot2 - 2*swapFees, 3*quotePerLot1 + 2*quotePerLot2, 0, 0},
 						},
 					},
@@ -2034,7 +2069,7 @@ func TestDEXTrade(t *testing.T) {
 					stats: &RunStats{
 						DEXBalances: map[uint32]*BotBalance{
 							42: {1e8 + 2*lotSize - redeemFees, 0, 2 * lotSize, 0},
-							0:  {1e8 - 2*quoteLot1 - 5*quoteLot2 - 3*swapFees - refundFees, 0, 3 * quoteLot2, 0},
+							0:  {1e8 - 2*quoteLot1 - 5*quoteLot2 - 3*swapFees, 0, 3*quoteLot2 - refundFees, 0},
 						},
 					},
 					numPendingTrades: 1,
@@ -2585,9 +2620,13 @@ func TestDeposit(t *testing.T) {
 				Available: 2e6 - 2000,
 			},
 			initialEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 2000,
-				Pending:  true,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -2000,
+					},
+				},
+				Pending: true,
 				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
@@ -2598,9 +2637,13 @@ func TestDeposit(t *testing.T) {
 				},
 			},
 			postConfirmEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 2000,
-				Pending:  false,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -2000,
+					},
+				},
+				Pending: false,
 				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
@@ -2647,9 +2690,13 @@ func TestDeposit(t *testing.T) {
 				Available: 2e6,
 			},
 			initialEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 2000,
-				Pending:  true,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -2000,
+					},
+				},
+				Pending: true,
 				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
@@ -2660,9 +2707,13 @@ func TestDeposit(t *testing.T) {
 				},
 			},
 			postConfirmEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 2000,
-				Pending:  false,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -2000,
+					},
+				},
+				Pending: false,
 				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
@@ -2712,9 +2763,13 @@ func TestDeposit(t *testing.T) {
 				Available: 2e6,
 			},
 			initialEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 4000,
-				Pending:  true,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -2000,
+					},
+				},
+				Pending: true,
 				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
@@ -2725,9 +2780,13 @@ func TestDeposit(t *testing.T) {
 				},
 			},
 			postConfirmEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 2000,
-				Pending:  false,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -2000,
+					},
+				},
+				Pending: false,
 				DepositEvent: &DepositEvent{
 					AssetID: 42,
 					Transaction: &asset.WalletTransaction{
@@ -2778,9 +2837,13 @@ func TestDeposit(t *testing.T) {
 				Available: 2e6,
 			},
 			initialEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 4000,
-				Pending:  true,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						966001: -4000,
+					},
+				},
+				Pending: true,
 				DepositEvent: &DepositEvent{
 					AssetID: 966001,
 					Transaction: &asset.WalletTransaction{
@@ -2791,9 +2854,13 @@ func TestDeposit(t *testing.T) {
 				},
 			},
 			postConfirmEvent: &MarketMakingEvent{
-				ID:       1,
-				BaseFees: 2000,
-				Pending:  false,
+				ID: 1,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						966001: -2000,
+					},
+				},
+				Pending: false,
 				DepositEvent: &DepositEvent{
 					AssetID: 966001,
 					Transaction: &asset.WalletTransaction{
@@ -3000,9 +3067,13 @@ func TestWithdraw(t *testing.T) {
 				},
 			},
 			postConfirmEvent: &MarketMakingEvent{
-				ID:       1,
-				Pending:  false,
-				BaseFees: 0.1e6 + 2000,
+				ID:      1,
+				Pending: false,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -(0.1e6 + 2000),
+					},
+				},
 				WithdrawalEvent: &WithdrawalEvent{
 					AssetID:  42,
 					CEXDebit: 1e6,
@@ -3180,10 +3251,17 @@ func TestCEXTrade(t *testing.T) {
 						QuoteFilled: 1.6e6,
 					},
 					event: &MarketMakingEvent{
-						ID:         1,
-						Pending:    true,
-						BaseDelta:  -3e6,
-						QuoteDelta: 1.6e6,
+						ID:      1,
+						Pending: true,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								42: -5e6,
+								0:  1.6e6,
+							},
+							Locked: map[uint32]uint64{
+								42: 2e6,
+							},
+						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
@@ -3209,10 +3287,14 @@ func TestCEXTrade(t *testing.T) {
 						Complete:    true,
 					},
 					event: &MarketMakingEvent{
-						ID:         1,
-						Pending:    false,
-						BaseDelta:  -5e6,
-						QuoteDelta: 2.8e6,
+						ID:      1,
+						Pending: false,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								42: -5e6,
+								0:  2.8e6,
+							},
+						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
@@ -3284,10 +3366,14 @@ func TestCEXTrade(t *testing.T) {
 						Complete:    true,
 					},
 					event: &MarketMakingEvent{
-						ID:         1,
-						Pending:    false,
-						BaseDelta:  -3e6,
-						QuoteDelta: 1.6e6,
+						ID:      1,
+						Pending: false,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								42: -3e6,
+								0:  1.6e6,
+							},
+						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
@@ -3343,10 +3429,17 @@ func TestCEXTrade(t *testing.T) {
 						QuoteFilled: 1.6e6,
 					},
 					event: &MarketMakingEvent{
-						ID:         1,
-						Pending:    true,
-						BaseDelta:  3e6,
-						QuoteDelta: -1.6e6,
+						ID:      1,
+						Pending: true,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								42: 3e6,
+								0:  -1.6e6,
+							},
+							Locked: map[uint32]uint64{
+								0: b2q(5e7, 2e6),
+							},
+						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
@@ -3372,17 +3465,21 @@ func TestCEXTrade(t *testing.T) {
 						Complete:    true,
 					},
 					event: &MarketMakingEvent{
-						ID:         1,
-						Pending:    false,
-						BaseDelta:  5.1e6,
-						QuoteDelta: -int64(b2q(5e7, 5e6)),
+						ID:      1,
+						Pending: false,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								42: 5.1e6,
+								0:  -int64(b2q(5e7, 5e6)),
+							},
+						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
 							Qty:         5e6,
 							Sell:        false,
 							BaseFilled:  5.1e6,
-							QuoteFilled: calc.BaseToQuote(5e7, 5e6),
+							QuoteFilled: b2q(5e7, 5e6),
 						},
 					},
 					stats: &RunStats{
@@ -3447,10 +3544,14 @@ func TestCEXTrade(t *testing.T) {
 						Complete:    true,
 					},
 					event: &MarketMakingEvent{
-						ID:         1,
-						Pending:    false,
-						BaseDelta:  3e6,
-						QuoteDelta: -1.6e6,
+						ID:      1,
+						Pending: false,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								42: 3e6,
+								0:  -1.6e6,
+							},
+						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
 							Rate:        5e7,
@@ -3843,26 +3944,31 @@ func TestRefreshPendingEvents(t *testing.T) {
 		refunds: map[string]*asset.WalletTransaction{},
 	}
 	adaptor.pendingDEXOrders[dexOrderID] = pord
-	pord.updateState(&core.Order{
-		ID:      dexOrderID[:],
-		Sell:    true,
-		Rate:    5e6,
-		Qty:     5e7,
-		BaseID:  42,
-		QuoteID: 0,
-		Matches: []*core.Match{
-			{
-				Rate: 5e6,
-				Qty:  5e7,
-				Swap: &core.Coin{
-					ID: swapCoinID,
-				},
-				Redeem: &core.Coin{
-					ID: redeemCoinID,
+	pord.state.Store(&dexOrderState{
+		order: &core.Order{
+			ID:      dexOrderID[:],
+			Sell:    true,
+			Rate:    5e6,
+			Qty:     5e7,
+			BaseID:  42,
+			QuoteID: 0,
+			Matches: []*core.Match{
+				{
+					Rate: 5e6,
+					Qty:  5e7,
+					Swap: &core.Coin{
+						ID: swapCoinID,
+					},
+					Redeem: &core.Coin{
+						ID: redeemCoinID,
+					},
 				},
 			},
 		},
-	}, &balanceEffects{}, pord.counterTradeRate)
+		dexBalanceEffects: &BalanceEffects{},
+		cexBalanceEffects: &BalanceEffects{},
+		counterTradeRate:  pord.counterTradeRate,
+	})
 	ctx := context.Background()
 	adaptor.refreshAllPendingEvents(ctx)
 	expectedDEXAvailableBalance[42] -= 5e6 + 2000

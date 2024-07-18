@@ -944,13 +944,17 @@ export interface WithdrawalEvent {
   cexDebit: number
 }
 
+export interface BalanceEffects {
+  settled: Record<number, number>
+  pending: Record<number, number>
+  locked: Record<number, number>
+  reserved: Record<number, number>
+}
+
 export interface MarketMakingEvent {
   id: number
   timestamp: number
-  baseDelta: number
-  quoteDelta: number
-  baseFees: number
-  quoteFees: number
+  balanceEffects: BalanceEffects
   pending: boolean
   dexOrderEvent?: DEXOrderEvent
   cexOrderEvent?: CEXOrderEvent
@@ -1017,6 +1021,7 @@ export interface ProfitLoss {
   modsUSD: number
   final: Record<number, Amount>
   finalUSD: number
+  diffs: Record<number, Amount>
   profit: number
   profitRatio: number
 }

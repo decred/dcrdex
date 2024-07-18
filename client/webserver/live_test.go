@@ -2495,7 +2495,7 @@ func randomWalletTransaction(txType asset.TransactionType, qty uint64) *asset.Wa
 	return tx
 }
 
-func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, error) {
+func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64, filters *mm.RunLogFilters) ([]*mm.MarketMakingEvent, []*mm.MarketMakingEvent, *mm.MarketMakingRunOverview, error) {
 	if n == 0 {
 		n = uint64(rand.Intn(100))
 	}
@@ -2505,13 +2505,24 @@ func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64
 	midGap, maxQty := getMarketStats(mktID)
 	for i := uint64(0); i < n; i++ {
 		ev := &mm.MarketMakingEvent{
-			ID:         i,
-			TimeStamp:  endTime.Add(-time.Hour * time.Duration(i)).Unix(),
-			BaseDelta:  int64(maxQty * (-0.5 + rand.Float64())),
-			QuoteDelta: int64(maxQty * (-0.5 + rand.Float64())),
-			BaseFees:   uint64(maxQty * 0.01 * rand.Float64()),
-			QuoteFees:  uint64(maxQty * 0.01 * rand.Float64()),
-			Pending:    i < 10 && rand.Float32() < 0.3,
+			ID:        i,
+			TimeStamp: endTime.Add(-time.Hour * time.Duration(i)).Unix(),
+			BalanceEffects: &mm.BalanceEffects{
+				Settled: map[uint32]int64{
+					mkt.BaseID:  int64(maxQty * (-0.5 + rand.Float64())),
+					mkt.QuoteID: int64(maxQty * (0.5 + rand.Float64())),
+				},
+				Pending: map[uint32]uint64{
+					mkt.BaseID:  uint64(maxQty * (-0.5 + rand.Float64())),
+					mkt.QuoteID: uint64(maxQty * (0.5 + rand.Float64())),
+				},
+				Locked: map[uint32]uint64{
+					mkt.BaseID:  uint64(maxQty * (-0.5 + rand.Float64())),
+					mkt.QuoteID: uint64(maxQty * (0.5 + rand.Float64())),
+				},
+				Reserved: map[uint32]uint64{},
+			},
+			Pending: i < 10 && rand.Float32() < 0.3,
 			// DEXOrderEvent   *DEXOrderEvent   `json:"dexOrderEvent,omitempty"`
 			// CEXOrderEvent   *CEXOrderEvent   `json:"cexOrderEvent,omitempty"`
 			// DepositEvent    *DepositEvent    `json:"depositEvent,omitempty"`
@@ -2571,7 +2582,13 @@ func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64
 		}
 		events = append(events, ev)
 	}
-	return events, nil
+
+	overview, err := m.RunOverview(startTime, mkt)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return events, nil, overview, nil
 }
 
 func (m *TMarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {

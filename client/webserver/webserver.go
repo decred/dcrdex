@@ -182,7 +182,7 @@ type MMCore interface {
 	Status() *mm.Status
 	ArchivedRuns() ([]*mm.MarketMakingRun, error)
 	RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error)
-	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64) ([]*mm.MarketMakingEvent, error)
+	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64, filter *mm.RunLogFilters) (events, updatedEvents []*mm.MarketMakingEvent, overview *mm.MarketMakingRunOverview, err error)
 	CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
 }
 
@@ -572,7 +572,6 @@ func New(cfg *Config) (*WebServer, error) {
 				apiAuth.Post("/marketreport", s.apiMarketReport)
 				apiAuth.Post("/cexbalance", s.apiCEXBalance)
 				apiAuth.Get("/archivedmmruns", s.apiArchivedRuns)
-				apiAuth.Post("/mmrunoverview", s.apiMMRunOverview)
 				apiAuth.Post("/mmrunlogs", s.apiRunLogs)
 				apiAuth.Post("/cexbook", s.apiCEXBook)
 			}
