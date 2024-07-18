@@ -329,8 +329,12 @@ export default class MarketMakerPage extends BasePage {
     tmpl.logo.classList.toggle('greyscale', !status)
     if (!status) return
     let usdBal = 0
+    const cexSymbolAdded : Record<string, boolean> = {} // avoid double counting tokens or counting both eth and weth
     for (const [assetIDStr, bal] of Object.entries(status.balances)) {
       const assetID = parseInt(assetIDStr)
+      const cexSymbol = Doc.bipCEXSymbol(assetID)
+      if (cexSymbolAdded[cexSymbol]) continue
+      cexSymbolAdded[cexSymbol] = true
       const { unitInfo } = app().assets[assetID]
       const fiatRate = app().fiatRatesMap[assetID]
       if (fiatRate) usdBal += fiatRate * (bal.available + bal.locked) / unitInfo.conventional.conversionFactor
