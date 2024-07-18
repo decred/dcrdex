@@ -722,7 +722,7 @@ export class BotMarket {
           funded: baseFeesFunded
         },
         fundedAndBalanced: baseFundedAndBalanced,
-        fundedAndNotBalanced: !baseFundedAndBalanced && baseAvail >= totalBaseReq
+        fundedAndNotBalanced: !baseFundedAndBalanced && baseAvail >= totalBaseReq && canRebalance
       },
       quote: {
         dex: {
@@ -742,7 +742,7 @@ export class BotMarket {
           funded: quoteFeesFunded
         },
         fundedAndBalanced: quoteFundedAndBalanced,
-        fundedAndNotBalanced: !quoteFundedAndBalanced && quoteAvail >= totalQuoteReq
+        fundedAndNotBalanced: !quoteFundedAndBalanced && quoteAvail >= totalQuoteReq && canRebalance
       },
       fundedAndBalanced,
       fundedAndNotBalanced,
