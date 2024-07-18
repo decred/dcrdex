@@ -379,7 +379,7 @@ func (m *MarketMaker) connectCEX(ctx context.Context, c *centralizedExchange) er
 			return fmt.Errorf("error refreshing markets: %v", err)
 		}
 		c.mkts = mkts
-		bals, err := c.Balances()
+		bals, err := c.Balances(ctx)
 		if err != nil {
 			c.connectErr = err.Error()
 			return fmt.Errorf("error getting balances: %v", err)
@@ -450,7 +450,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 		c.mkts = make(map[string]*libxc.Market)
 		c.connectErr = err.Error()
 	}
-	if c.balances, err = c.Balances(); err != nil {
+	if c.balances, err = c.Balances(ctx); err != nil {
 		m.log.Errorf("Failed to get balances for %s: %w", cfg.Name, err)
 		c.balances = make(map[uint32]*libxc.ExchangeBalance)
 		c.connectErr = err.Error()
@@ -473,7 +473,7 @@ func (m *MarketMaker) handleCEXUpdate(cexName string, ni interface{}) {
 		cex.mtx.Lock()
 		cex.balances[n.AssetID] = n.Balance
 		cex.mtx.Unlock()
-		m.core.Broadcast(newCexUpdateNote(cexName, NoteTypeCEXBalanceUpdate, ni))
+		m.core.Broadcast(newCexUpdateNote(cexName, TopicBalanceUpdate, ni))
 	}
 }
 

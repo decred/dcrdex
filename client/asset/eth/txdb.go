@@ -476,12 +476,24 @@ func (log *badgerLoggerWrapper) Debugf(s string, a ...interface{}) {
 	log.Tracef(s, a...)
 }
 
+func (log *badgerLoggerWrapper) Debug(a ...interface{}) {
+	log.Trace(a...)
+}
+
 // Infof -> dex.Logger.Debugf
 func (log *badgerLoggerWrapper) Infof(s string, a ...interface{}) {
 	log.Debugf(s, a...)
 }
 
+func (log *badgerLoggerWrapper) Info(a ...interface{}) {
+	log.Debug(a...)
+}
+
 // Warningf -> dex.Logger.Warnf
 func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
 	log.Warnf(s, a...)
+}
+
+func (log *badgerLoggerWrapper) Warning(a ...interface{}) {
+	log.Warn(a...)
 }

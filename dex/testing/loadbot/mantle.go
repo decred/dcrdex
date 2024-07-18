@@ -100,8 +100,8 @@ func runTrader(t Trader, name string) {
 		select {
 		case <-approved:
 			m.log.Infof("%s token approved", symbol)
-		case <-time.After(time.Minute):
-			return fmt.Errorf("%s token not approved after 1 minute", symbol)
+		case <-time.After(time.Minute * 3):
+			return fmt.Errorf("%s token not approved after 3 minutes", symbol)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -146,7 +146,7 @@ out:
 					_, bookFeed, err := m.SyncBook(hostAddr, baseID, quoteID)
 					if err != nil {
 						m.fatalError("SyncBook error: %v", err)
-						return
+						break out
 					}
 					go func() {
 						for {
@@ -480,8 +480,23 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 						return "", err
 					}
 				}
-				time.Sleep(time.Second * 3)
-				<-harnessCtl(ctx, walletSymbol, fmt.Sprintf("./mine-alpha"), "1")
+				for {
+					time.Sleep(time.Second * 3)
+					<-harnessCtl(ctx, walletSymbol, "./mine-alpha", "1")
+					bal, err := m.AssetBalance(tkn.ParentID)
+					if err != nil {
+						if ignoreErrors && ctx.Err() == nil {
+							m.log.Errorf("Trouble sending fee funding: %v", err)
+						} else {
+							return "", err
+						}
+					}
+					if bal.Available > 0 {
+						break
+					}
+					m.log.Infof("%s fee balance not available yet. Trying again in 3 seconds", dex.BipIDSymbol(tkn.ParentID))
+				}
+
 			}
 			chunk := (maxFunds + minFunds) / 2 / uint64(nCoins)
 			for i := 0; i < nCoins; {
@@ -546,7 +561,7 @@ func send(symbol, addr string, val uint64) error {
 		// here to convert to wei.
 		res = <-harnessCtl(ctx, symbol, "./sendtoaddress", addr, strconv.FormatFloat(float64(val)/1e9, 'f', 9, 64))
 	case usdc, usdcp:
-		res = <-harnessCtl(ctx, symbol, "./sendUSDC", addr, strconv.FormatFloat(float64(val)/1e9, 'f', 9, 64))
+		res = <-harnessCtl(ctx, symbol, "./sendUSDC", addr, strconv.FormatFloat(float64(val)/1e6, 'f', 6, 64))
 	default:
 		return fmt.Errorf("send unknown symbol %q", symbol)
 	}

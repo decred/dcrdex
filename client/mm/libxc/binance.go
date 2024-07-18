@@ -29,6 +29,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // Binance API spot trading docs:
@@ -316,6 +317,35 @@ var dexToBinanceSymbol = map[string]string{
 
 var binanceToDexSymbol = make(map[string]string)
 
+func convertBnCoin(coin string) string {
+	symbol := strings.ToLower(coin)
+	if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
+		symbol = strings.ToLower(convertedSymbol)
+	}
+	return symbol
+}
+
+func convertBnNetwork(network string) string {
+	symbol := convertBnCoin(network)
+	if symbol == "weth" {
+		return "eth"
+	}
+	return symbol
+}
+
+// binanceCoinNetworkToDexSymbol takes the coin name and its network name as
+// returned by the binance API and returns the DEX symbol.
+func binanceCoinNetworkToDexSymbol(coin, network string) string {
+	symbol, netSymbol := convertBnCoin(coin), convertBnNetwork(network)
+	if symbol == "weth" && netSymbol == "eth" {
+		return "eth"
+	}
+	if symbol == netSymbol {
+		return symbol
+	}
+	return symbol + "." + netSymbol
+}
+
 func init() {
 	for key, value := range dexToBinanceSymbol {
 		binanceToDexSymbol[value] = key
@@ -327,33 +357,6 @@ func mapDexToBinanceSymbol(symbol string) string {
 		return binanceSymbol
 	}
 	return symbol
-}
-
-// binanceCoinNetworkToDexSymbol takes the coin name and its network name as
-// returned by the binance API and returns the DEX symbol.
-func binanceCoinNetworkToDexSymbol(coin, network string) string {
-	if coin == "ETH" && network == "ETH" {
-		return "eth"
-	}
-
-	var dexSymbol, dexNetwork string
-	if symbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
-		dexSymbol = strings.ToLower(symbol)
-	} else {
-		dexSymbol = strings.ToLower(coin)
-	}
-
-	if symbol, found := binanceToDexSymbol[strings.ToUpper(network)]; found && network != "ETH" {
-		dexNetwork = strings.ToLower(symbol)
-	} else {
-		dexNetwork = strings.ToLower(network)
-	}
-
-	if dexSymbol == dexNetwork {
-		return dexSymbol
-	}
-
-	return fmt.Sprintf("%s.%s", dexSymbol, dexNetwork)
 }
 
 type bncAssetConfig struct {
@@ -435,7 +438,8 @@ type binance struct {
 	// tokenIDs maps the token's symbol to the list of bip ids of the token
 	// for each chain for which deposits and withdrawals are enabled on
 	// binance.
-	tokenIDs atomic.Value // map[string][]uint32
+	tokenIDs    atomic.Value // map[string][]uint32, binance coin ID string -> assset IDs
+	minWithdraw atomic.Value // map[uint32]map[uint32]uint64
 
 	marketSnapshotMtx sync.Mutex
 	marketSnapshot    struct {
@@ -510,6 +514,12 @@ func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
 // setBalances queries binance for the user's balances and stores them in the
 // balances map.
 func (bnc *binance) setBalances(ctx context.Context) error {
+	bnc.balanceMtx.Lock()
+	defer bnc.balanceMtx.Unlock()
+	return bnc.refreshBalances(ctx)
+}
+
+func (bnc *binance) refreshBalances(ctx context.Context) error {
 	var resp bntypes.Account
 	err := bnc.getAPI(ctx, "/api/v3/account", nil, true, true, &resp)
 	if err != nil {
@@ -521,9 +531,6 @@ func (bnc *binance) setBalances(ctx context.Context) error {
 		return errors.New("cannot set balances before coin info is fetched")
 	}
 	tokenIDs := tokenIDsI.(map[string][]uint32)
-
-	bnc.balanceMtx.Lock()
-	defer bnc.balanceMtx.Unlock()
 
 	for _, bal := range resp.Balances {
 		for _, assetID := range getDEXAssetIDs(bal.Asset, tokenIDs) {
@@ -552,30 +559,35 @@ func (bnc *binance) setBalances(ctx context.Context) error {
 	return nil
 }
 
-// setTokenIDs stores the token IDs for which deposits and withdrawals are
-// enabled on binance.
-func (bnc *binance) setTokenIDs(coins []*bntypes.CoinInfo) {
+// readCoins stores the token IDs for which deposits and withdrawals are
+// enabled on binance and sets the minWithdraw map.
+func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 	tokenIDs := make(map[string][]uint32)
+	minWithdraw := make(map[uint32]uint64)
 	for _, nfo := range coins {
-		tokenSymbol := strings.ToLower(nfo.Coin)
-		if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(nfo.Coin)]; found {
-			tokenSymbol = strings.ToLower(convertedSymbol)
-		}
 		for _, netInfo := range nfo.NetworkList {
+			symbol := binanceCoinNetworkToDexSymbol(nfo.Coin, netInfo.Network)
+			assetID, found := dex.BipSymbolID(symbol)
+			if !found {
+				continue
+			}
+			ui, err := asset.UnitInfo(assetID)
+			if err != nil {
+				// not a registered asset
+				continue
+			}
 			if !netInfo.WithdrawEnable || !netInfo.DepositEnable {
-				bnc.log.Infof("Skipping %s network %s because deposits and/or withdraws are not enabled.", netInfo.Coin, netInfo.Network)
+				bnc.log.Tracef("Skipping %s network %s because deposits and/or withdraws are not enabled.", netInfo.Coin, netInfo.Network)
 				continue
 			}
-			dexSymbol := binanceCoinNetworkToDexSymbol(nfo.Coin, netInfo.Network)
-			if !strings.Contains(dexSymbol, ".") {
-				continue
+			if tkn := asset.TokenInfo(assetID); tkn != nil {
+				tokenIDs[nfo.Coin] = append(tokenIDs[nfo.Coin], assetID)
 			}
-			if bipID, supported := dex.BipSymbolID(dexSymbol); supported {
-				tokenIDs[tokenSymbol] = append(tokenIDs[tokenSymbol], bipID)
-			}
+			minWithdraw[assetID] = uint64(math.Round(float64(ui.Conventional.ConversionFactor) * netInfo.WithdrawMin))
 		}
 	}
 	bnc.tokenIDs.Store(tokenIDs)
+	bnc.minWithdraw.Store(minWithdraw)
 }
 
 // getCoinInfo retrieves binance configs then updates the user balances and
@@ -587,7 +599,7 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 		return fmt.Errorf("error getting binance coin info: %w", err)
 	}
 
-	bnc.setTokenIDs(coins)
+	bnc.readCoins(coins)
 	return nil
 }
 
@@ -944,8 +956,8 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData) (b
 		if status.TxID == deposit.TxID {
 			switch status.Status {
 			case bntypes.DepositStatusSuccess, bntypes.DepositStatusCredited:
-				dexSymbol := binanceCoinNetworkToDexSymbol(status.Coin, status.Network)
-				assetID, found := dex.BipSymbolID(dexSymbol)
+				symbol := binanceCoinNetworkToDexSymbol(status.Coin, status.Network)
+				assetID, found := dex.BipSymbolID(symbol)
 				if !found {
 					bnc.log.Errorf("Failed to find DEX asset ID for Coin: %s, Network: %s", status.Coin, status.Network)
 					return true, 0
@@ -1022,9 +1034,15 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 	return requestInto(req, &struct{}{})
 }
 
-func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
+func (bnc *binance) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error) {
 	bnc.balanceMtx.RLock()
 	defer bnc.balanceMtx.RUnlock()
+
+	if len(bnc.balances) == 0 {
+		if err := bnc.refreshBalances(ctx); err != nil {
+			return nil, err
+		}
+	}
 
 	balances := make(map[uint32]*ExchangeBalance)
 
@@ -1040,6 +1058,15 @@ func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
 	return balances, nil
 }
 
+func (bnc *binance) minimumWithdraws(baseID, quoteID uint32) (uint64, uint64) {
+	minsI := bnc.minWithdraw.Load()
+	if minsI == nil {
+		return 0, 0
+	}
+	mins := minsI.(map[uint32]uint64)
+	return mins[baseID], mins[quoteID]
+}
+
 func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 	bnc.marketSnapshotMtx.Lock()
 	defer bnc.marketSnapshotMtx.Unlock()
@@ -1049,18 +1076,16 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 		return bnc.marketSnapshot.m, nil
 	}
 
-	mktIDs, err := bnc.MatchedMarkets(ctx)
+	matches, err := bnc.MatchedMarkets(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting market list for market data request: %w", err)
 	}
 
-	slugs := make([]string, len(mktIDs))
-	mkts := make(map[string]*MarketMatch, len(slugs))
-	for i, m := range mktIDs {
-		slugs[i] = m.Slug
-		mkts[m.Slug] = m
+	mkts := make(map[string][]*MarketMatch, len(matches))
+	for _, m := range matches {
+		mkts[m.Slug] = append(mkts[m.Slug], m)
 	}
-	encSymbols, err := json.Marshal(slugs)
+	encSymbols, err := json.Marshal(utils.MapKeys(mkts))
 	if err != nil {
 		return nil, fmt.Errorf("error encoding symbold for market data request: %w", err)
 	}
@@ -1075,25 +1100,30 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 
 	m := make(map[string]*Market, len(ds))
 	for _, d := range ds {
-		mkt, found := mkts[d.Symbol]
+		ms, found := mkts[d.Symbol]
 		if !found {
 			bnc.log.Errorf("Market %s not returned in market data request", d.Symbol)
 			continue
 		}
-		m[mkt.MarketID] = &Market{
-			BaseID:  mkt.BaseID,
-			QuoteID: mkt.QuoteID,
-			Day: &MarketDay{
-				Vol:            d.Volume,
-				QuoteVol:       d.QuoteVolume,
-				PriceChange:    d.PriceChange,
-				PriceChangePct: d.PriceChangePercent,
-				AvgPrice:       d.WeightedAvgPrice,
-				LastPrice:      d.LastPrice,
-				OpenPrice:      d.OpenPrice,
-				HighPrice:      d.HighPrice,
-				LowPrice:       d.LowPrice,
-			},
+		for _, mkt := range ms {
+			baseMinWithdraw, quoteMinWithdraw := bnc.minimumWithdraws(mkt.BaseID, mkt.QuoteID)
+			m[mkt.MarketID] = &Market{
+				BaseID:           mkt.BaseID,
+				QuoteID:          mkt.QuoteID,
+				BaseMinWithdraw:  baseMinWithdraw,
+				QuoteMinWithdraw: quoteMinWithdraw,
+				Day: &MarketDay{
+					Vol:            d.Volume,
+					QuoteVol:       d.QuoteVolume,
+					PriceChange:    d.PriceChange,
+					PriceChangePct: d.PriceChangePercent,
+					AvgPrice:       d.WeightedAvgPrice,
+					LastPrice:      d.LastPrice,
+					OpenPrice:      d.OpenPrice,
+					HighPrice:      d.HighPrice,
+					LowPrice:       d.LowPrice,
+				},
+			}
 		}
 	}
 	bnc.marketSnapshot.m = m
@@ -1122,6 +1152,7 @@ func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err e
 		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs)
 		markets = append(markets, dexMarkets...)
 	}
+
 	return markets, nil
 }
 
@@ -1228,10 +1259,9 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 
 	bnc.balanceMtx.Lock()
 	for _, bal := range update.Balances {
-		symbol := strings.ToLower(bal.Asset)
-		processSymbol(symbol, bal)
-		if symbol == "eth" {
-			processSymbol("weth", bal)
+		processSymbol(bal.Asset, bal)
+		if bal.Asset == "ETH" {
+			processSymbol("WETH", bal)
 		}
 	}
 	bnc.balanceMtx.Unlock()
@@ -1752,9 +1782,8 @@ func (bnc *binance) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder,
 	return
 }
 
-// VWAP returns the volume weighted average price for a certain quantity of the
-// base asset on a market. The sell parameter specifies the side of the market
-// on which to get the average price. SubscribeMarket must be called, and the
+// VWAP returns the volume weighted average price for a certain quantity
+// of the base asset on a market. SubscribeMarket must be called, and the
 // market must be synced before results can be expected.
 func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPrice, extrema uint64, filled bool, err error) {
 	book, err := bnc.book(baseID, quoteID)
@@ -1808,11 +1837,8 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 	}, nil
 }
 
-func getDEXAssetIDs(binanceSymbol string, tokenIDs map[string][]uint32) []uint32 {
-	dexSymbol := strings.ToLower(binanceSymbol)
-	if convertedDEXSymbol, found := binanceToDexSymbol[strings.ToUpper(binanceSymbol)]; found {
-		dexSymbol = strings.ToLower(convertedDEXSymbol)
-	}
+func getDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
+	dexSymbol := convertBnCoin(coin)
 
 	// Binance does not differentiate between eth and weth like we do.
 	dexNonTokenSymbol := dexSymbol
@@ -1831,10 +1857,9 @@ func getDEXAssetIDs(binanceSymbol string, tokenIDs map[string][]uint32) []uint32
 		if isRegistered(assetID) {
 			assetIDs = append(assetIDs, assetID)
 		}
-
 	}
 
-	if tokenIDs, found := tokenIDs[dexSymbol]; found {
+	if tokenIDs, found := tokenIDs[coin]; found {
 		for _, tokenID := range tokenIDs {
 			if isRegistered(tokenID) {
 				assetIDs = append(assetIDs, tokenID)

@@ -2047,7 +2047,7 @@ func (c *Core) connectAndUpdateWalletResumeTrades(w *xcWallet, resumeTrades bool
 		}
 	}
 
-	c.log.Infof("Connecting wallet for %s", unbip(assetID))
+	c.log.Debugf("Connecting wallet for %s", unbip(assetID))
 	addr := w.currentDepositAddress()
 	newAddr, err := c.connectWalletResumeTrades(w, resumeTrades)
 	if err != nil {
@@ -3133,7 +3133,7 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 	}
 	if synced && !wasSynced {
 		c.updateWalletBalance(w)
-		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
+		c.log.Debugf("Wallet synced for asset %s", unbip(w.AssetID))
 		c.updateBondReserves(w.AssetID)
 	}
 	return synced
@@ -6287,7 +6287,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 	}
 
 	if len(allCoins) != len(form.Placements) {
-		c.log.Infof("FundMultiOrder only funded %d orders out of %d", len(allCoins), len(form.Placements))
+		c.log.Infof("FundMultiOrder only funded %d orders out of %d (options = %+v)", len(allCoins), len(form.Placements), form.Options)
 	}
 	defer func() {
 		if _, err := c.updateWalletBalance(fromWallet); err != nil {
@@ -7161,7 +7161,7 @@ func (c *Core) initialize() error {
 			continue
 		}
 		// Wallet is loaded from the DB, but not yet connected.
-		c.log.Infof("Loaded %s wallet configuration.", unbip(assetID))
+		c.log.Tracef("Loaded %s wallet configuration.", unbip(assetID))
 		c.updateWallet(assetID, wallet)
 	}
 
@@ -8765,15 +8765,6 @@ func (c *Core) listen(dc *dexConnection) {
 	}()
 
 	checkTrades := func() {
-		// checkTrades should be snappy. If it takes too long we are creating
-		// lock contention.
-		tStart := time.Now()
-		defer func() {
-			if eTime := time.Since(tStart); eTime > 250*time.Millisecond {
-				c.log.Warnf("checkTrades completed in %v (slow)", eTime)
-			}
-		}()
-
 		var doneTrades, activeTrades []*trackedTrade
 		// NOTE: Don't lock tradeMtx while also locking a trackedTrade's mtx
 		// since we risk blocking access to the trades map if there is lock
@@ -8813,7 +8804,7 @@ func (c *Core) listen(dc *dexConnection) {
 		updatedAssets := make(assetMap)
 		for _, trade := range doneTrades {
 			trade.mtx.Lock()
-			c.log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
+			c.log.Debugf("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
 			trade.returnCoins()
 			trade.mtx.Unlock()
 			updatedAssets.count(trade.wallets.fromWallet.AssetID)

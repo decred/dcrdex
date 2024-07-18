@@ -218,8 +218,8 @@ var (
 						Gas: dexeth.Gases{
 							Swap:      235_661,
 							SwapAdd:   146_368,
-							Redeem:    92_032,
-							RedeemAdd: 41_117,
+							Redeem:    122_032,
+							RedeemAdd: 61_117,
 							Refund:    82_059,
 							Approve:   67_693,
 							Transfer:  74_451,

@@ -3,10 +3,12 @@ import {
   PageElement,
   MMBotStatus,
   RunStatsNote,
+  RunEventNote,
   ExchangeBalance,
   StartConfig,
   OrderPlacement,
-  AutoRebalanceConfig
+  AutoRebalanceConfig,
+  CEXNotification
 } from './registry'
 import {
   MM,
@@ -95,7 +97,7 @@ function parseFundingOptions (f: FundingOutlook): [number, number, FundingSlider
         // We did something really bad with math to get here.
         throw Error('bad math has us with dex surplus + cex underfund invalid remains')
       }
-      proposedDex += cexShort
+      proposedDex += cexShort + transferable
     } else {
       // We don't have enough on dex, but we have enough on cex to cover the
       // short.
@@ -104,49 +106,60 @@ function parseFundingOptions (f: FundingOutlook): [number, number, FundingSlider
       if (cexRemain < dexShort) {
         throw Error('bad math got us with cex surplus + dex underfund invalid remains')
       }
-      proposedCex += dexShort
+      proposedCex += dexShort + transferable
     }
-  } else if (f.fundedAndBalanced && transferable > 0) {
+  } else if (f.fundedAndBalanced) {
     // This asset is fully funded, but the user may choose to fund order
     // reserves either cex or dex.
-    const dexRemain = dexAvail - dexReq
-    const cexRemain = cexAvail - cexReq
+    if (transferable > 0) {
+      const dexRemain = dexAvail - dexReq
+      const cexRemain = cexAvail - cexReq
 
-    slider = newSlider()
+      slider = newSlider()
 
-    if (cexRemain > transferable && dexRemain > transferable) {
-      // Either one could fully fund order reserves. Let the user choose.
-      slider.left.cex = transferable + cexReq
-      slider.left.dex = dexReq
-      slider.right.cex = cexReq
-      slider.right.dex = transferable + dexReq
-    } else if (dexRemain < transferable && cexRemain < transferable) {
-      // => implied that cexRemain + dexRemain > transferable.
-      // CEX can contribute SOME and DEX can contribute SOME.
-      slider.left.cex = transferable - dexRemain + cexReq
-      slider.left.dex = dexRemain + dexReq
-      slider.right.cex = cexRemain + cexReq
-      slider.right.dex = transferable - cexRemain + dexReq
-    } else if (dexRemain > transferable) {
-      // So DEX has enough to cover reserves, but CEX could potentially
-      // constribute SOME. NOT ALL.
-      slider.left.cex = cexReq
-      slider.left.dex = transferable + dexReq
-      slider.right.cex = cexRemain + cexReq
-      slider.right.dex = transferable - cexRemain + dexReq
-    } else {
-      // CEX has enough to cover reserves, but DEX could contribute SOME,
-      // NOT ALL.
-      slider.left.cex = transferable - dexRemain + cexReq
-      slider.left.dex = dexRemain + dexReq
-      slider.right.cex = transferable + cexReq
-      slider.right.dex = dexReq
+      if (cexRemain > transferable && dexRemain > transferable) {
+        // Either one could fully fund order reserves. Let the user choose.
+        slider.left.cex = transferable + cexReq
+        slider.left.dex = dexReq
+        slider.right.cex = cexReq
+        slider.right.dex = transferable + dexReq
+      } else if (dexRemain < transferable && cexRemain < transferable) {
+        // => implied that cexRemain + dexRemain > transferable.
+        // CEX can contribute SOME and DEX can contribute SOME.
+        slider.left.cex = transferable - dexRemain + cexReq
+        slider.left.dex = dexRemain + dexReq
+        slider.right.cex = cexRemain + cexReq
+        slider.right.dex = transferable - cexRemain + dexReq
+      } else if (dexRemain > transferable) {
+        // So DEX has enough to cover reserves, but CEX could potentially
+        // constribute SOME. NOT ALL.
+        slider.left.cex = cexReq
+        slider.left.dex = transferable + dexReq
+        slider.right.cex = cexRemain + cexReq
+        slider.right.dex = transferable - cexRemain + dexReq
+      } else {
+        // CEX has enough to cover reserves, but DEX could contribute SOME,
+        // NOT ALL.
+        slider.left.cex = transferable - dexRemain + cexReq
+        slider.left.dex = dexRemain + dexReq
+        slider.right.cex = transferable + cexReq
+        slider.right.dex = dexReq
+      }
+      // We prefer the slider right in the center.
+      slider.cexRange = slider.right.cex - slider.left.cex
+      slider.dexRange = slider.right.dex - slider.left.dex
+      proposedDex = slider.left.dex + (slider.dexRange / 2)
+      proposedCex = slider.left.cex + (slider.cexRange / 2)
     }
-    // We prefer the slider right in the center.
-    slider.cexRange = slider.right.cex - slider.left.cex
-    slider.dexRange = slider.right.dex - slider.left.dex
-    proposedDex = slider.left.dex + (slider.dexRange / 2)
-    proposedCex = slider.left.cex + (slider.cexRange / 2)
+  } else { // starved
+    if (cexAvail < cexReq) {
+      proposedDex = Math.min(dexAvail, dexReq + transferable + (cexReq - cexAvail))
+    } else if (dexAvail < dexReq) {
+      proposedCex = Math.min(cexAvail, cexReq + transferable + (dexReq - dexAvail))
+    } else { // just transferable wasn't covered
+      proposedDex = Math.min(dexAvail, dexReq + transferable)
+      proposedCex = Math.min(cexAvail, dexReq + cexReq + transferable - proposedDex)
+    }
   }
   return [proposedDex, proposedCex, slider]
 }
@@ -194,10 +207,13 @@ export default class MarketMakerPage extends BasePage {
       const tr = page.exchangeRowTmpl.cloneNode(true) as PageElement
       page.cexRows.appendChild(tr)
       const tmpl = Doc.parseTemplate(tr)
-      Doc.bind(tmpl.configureBttn, 'click', () => {
+      const configure = () => {
         this.cexConfigForm.setCEX(cexName)
         this.forms.show(page.cexConfigForm)
-      })
+      }
+      Doc.bind(tmpl.configureBttn, 'click', configure)
+      Doc.bind(tmpl.reconfigBttn, 'click', configure)
+      Doc.bind(tmpl.errConfigureBttn, 'click', configure)
       const row = this.cexes[cexName] = { tr, tmpl, dinfo, cexName }
       this.updateCexRow(row)
     }
@@ -220,7 +236,12 @@ export default class MarketMakerPage extends BasePage {
 
     const botConfigs = mmStatus.bots.map((s: MMBotStatus) => s.config)
     app().registerNoteFeeder({
-      runstats: (note: RunStatsNote) => { this.handleRunStatsNote(note) }
+      runstats: (note: RunStatsNote) => { this.handleRunStatsNote(note) },
+      runevent: (note: RunEventNote) => {
+        const bot = this.bots[hostedMarketID(note.host, note.baseID, note.quoteID)]
+        if (bot) return bot.handleRunStats()
+      },
+      cexnote: (note: CEXNotification) => { this.handleCEXNote(note) }
       // TODO bot start-stop notification
     })
 
@@ -242,6 +263,18 @@ export default class MarketMakerPage extends BasePage {
     const startupBalanceCache: Record<number, Promise<ExchangeBalance>> = {}
 
     for (const botStatus of sortedBots) this.addBot(botStatus, startupBalanceCache)
+  }
+
+  async handleCEXNote (n: CEXNotification) {
+    switch (n.topic) {
+      case 'BalanceUpdate':
+        return this.handleCEXBalanceUpdate(n.cexName /* , n.note */)
+    }
+  }
+
+  async handleCEXBalanceUpdate (cexName: string /* , note: CEXBalanceUpdate */) {
+    const cexRow = this.cexes[cexName]
+    if (cexRow) this.updateCexRow(cexRow)
   }
 
   async handleRunStatsNote (note: RunStatsNote) {
@@ -313,8 +346,12 @@ export default class MarketMakerPage extends BasePage {
     tmpl.logo.classList.toggle('greyscale', !status)
     if (!status) return
     let usdBal = 0
+    const cexSymbolAdded : Record<string, boolean> = {} // avoid double counting tokens or counting both eth and weth
     for (const [assetIDStr, bal] of Object.entries(status.balances)) {
       const assetID = parseInt(assetIDStr)
+      const cexSymbol = Doc.bipCEXSymbol(assetID)
+      if (cexSymbolAdded[cexSymbol]) continue
+      cexSymbolAdded[cexSymbol] = true
       const { unitInfo } = app().assets[assetID]
       const fiatRate = app().fiatRatesMap[assetID]
       if (fiatRate) usdBal += fiatRate * (bal.available + bal.locked) / unitInfo.conventional.conversionFactor
@@ -574,8 +611,9 @@ class Bot extends BotMarket {
         [quoteID]: proposedCexQuote * quoteFactor
       }
     }
-    alloc.dex[baseFeeID] = (alloc.dex[baseFeeID] ?? 0) + f.base.fees.req * baseFeeFactor
-    alloc.dex[quoteFeeID] = (alloc.dex[quoteFeeID] ?? 0) + f.quote.fees.req * quoteFeeFactor
+
+    alloc.dex[baseFeeID] = Math.min((alloc.dex[baseFeeID] ?? 0) + (f.base.fees.req * baseFeeFactor), f.base.fees.avail * baseFeeFactor)
+    alloc.dex[quoteFeeID] = Math.min((alloc.dex[quoteFeeID] ?? 0) + (f.quote.fees.req * quoteFeeFactor), f.quote.fees.avail * quoteFeeFactor)
 
     let totalUSD = (alloc.dex[baseID] / baseFactor * baseFiatRate) + (alloc.dex[quoteID] / quoteFactor * quoteFiatRate)
     totalUSD += (alloc.cex[baseID] / baseFactor * baseFiatRate) + (alloc.cex[quoteID] / quoteFactor * quoteFiatRate)
@@ -639,17 +677,20 @@ class Bot extends BotMarket {
 
     Doc.setVis(baseFeeID !== baseID, ...Doc.applySelector(page.allocationDialog, '[data-base-token-fees]'))
     if (baseFeeID !== baseID) {
-      const feeReq = f.base.fees.req + (baseFeeID === quoteFeeID ? f.quote.fees.req : 0)
-      page.proposedDexBaseFeeAlloc.textContent = Doc.formatFourSigFigs(feeReq)
-      page.proposedDexBaseFeeAllocUSD.textContent = Doc.formatFourSigFigs(feeReq * baseFeeFiatRate)
+      const reqFees = f.base.fees.req + (baseFeeID === quoteFeeID ? f.quote.fees.req : 0)
+      const proposedFees = Math.min(reqFees, f.base.fees.avail)
+      page.proposedDexBaseFeeAlloc.textContent = Doc.formatFourSigFigs(proposedFees)
+      page.proposedDexBaseFeeAllocUSD.textContent = Doc.formatFourSigFigs(proposedFees * baseFeeFiatRate)
+      page.proposedDexBaseFeeAlloc.classList.toggle('text-warning', !f.base.fees.funded)
     }
 
     const needQuoteTokenFees = quoteFeeID !== quoteID && quoteFeeID !== baseFeeID
     Doc.setVis(needQuoteTokenFees, ...Doc.applySelector(page.allocationDialog, '[data-quote-token-fees]'))
     if (needQuoteTokenFees) {
-      const feeReq = f.quote.fees.req
-      page.proposedDexQuoteFeeAlloc.textContent = Doc.formatFourSigFigs(feeReq)
-      page.proposedDexQuoteFeeAllocUSD.textContent = Doc.formatFourSigFigs(feeReq * quoteFeeFiatRate)
+      const proposedFees = Math.min(f.quote.fees.req, f.quote.fees.avail)
+      page.proposedDexQuoteFeeAlloc.textContent = Doc.formatFourSigFigs(proposedFees)
+      page.proposedDexQuoteFeeAllocUSD.textContent = Doc.formatFourSigFigs(proposedFees * quoteFeeFiatRate)
+      page.proposedDexQuoteFeeAlloc.classList.toggle('text-warning', !f.quote.fees.funded)
     }
 
     Doc.show(page.allocationDialog)
@@ -684,9 +725,10 @@ class Bot extends BotMarket {
 
     try {
       app().log('mm', 'starting mm bot', startConfig)
-      await MM.startBot(startConfig)
+      const res = await MM.startBot(startConfig)
+      if (!app().checkResponse(res)) throw res
     } catch (e) {
-      page.errMsg.textContent = intl.prep(intl.ID_API_ERROR, e.msg)
+      page.errMsg.textContent = intl.prep(intl.ID_API_ERROR, e)
       Doc.show(page.errMsg)
       return
     }

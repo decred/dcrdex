@@ -1850,7 +1850,7 @@ export default class WalletsPage extends BasePage {
     Doc.hide(page.txHistoryTable, page.txHistoryBox, page.noTxHistory, page.earlierTxs, page.txHistoryNotAvailable)
     Doc.empty(page.txHistoryTableBody)
     const w = app().assets[assetID].wallet
-    if (!w || (w.traits & traitHistorian) === 0) {
+    if (!w || w.disabled || (w.traits & traitHistorian) === 0) {
       Doc.show(page.txHistoryNotAvailable)
       return
     }

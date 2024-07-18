@@ -520,7 +520,8 @@ export default class MarketsPage extends BasePage {
           this.mmRunning = Boolean(note.stats)
           this.resolveOrderFormVisibility()
         }
-      }
+      },
+      runevent: (/* note: RunEventNote */) => { this.mm.update() }
     })
 
     this.loadingAnimations = {}

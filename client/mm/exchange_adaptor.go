@@ -1804,6 +1804,7 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, assetID uint32, a
 	u.balancesMtx.Lock()
 	withdrawalID, err := u.CEX.Withdraw(ctx, assetID, amount, addr)
 	if err != nil {
+		u.balancesMtx.Unlock()
 		return err
 	}
 	u.log.Infof("Withdrew %s", u.fmtQty(assetID, amount))

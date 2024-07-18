@@ -217,7 +217,7 @@ export default class MarketMakerLogsPage extends BasePage {
 
   handleRunEventNote (note: RunEventNote) {
     const { baseID, quoteID, host } = this.mkt
-    if (note.host !== host || note.base !== baseID || note.quote !== quoteID) return
+    if (note.host !== host || note.baseID !== baseID || note.quoteID !== quoteID) return
     if (!eventPassesFilter(note.event, this.filters)) return
     const event = note.event
     const cachedEvent = this.events[event.id]

@@ -38,7 +38,7 @@ type NetworkInfo struct {
 	WithdrawFee    float64 `json:"withdrawFee,string"`
 	// WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
 	// WithdrawMax             float64 `json:"withdrawMax,string"`
-	// WithdrawMin             float64 `json:"withdrawMin,string"`
+	WithdrawMin float64 `json:"withdrawMin,string"`
 	// SameAddress             bool    `json:"sameAddress"`
 	// EstimatedArrivalTime    int     `json:"estimatedArrivalTime"`
 	// Busy                    bool    `json:"busy"`

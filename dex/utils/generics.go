@@ -27,6 +27,14 @@ func MapItems[K comparable, V any](m map[K]V) []V {
 	return vs
 }
 
+func MapKeys[K comparable, V any](m map[K]V) []K {
+	ks := make([]K, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
 func Min[I constraints.Ordered](m I, ns ...I) I {
 	min := m
 	for _, n := range ns {

@@ -20,7 +20,8 @@ import {
   BalanceNote,
   BotBalance,
   Order,
-  LotFeeRange
+  LotFeeRange,
+  BookingFees
 } from './registry'
 import { getJSON, postJSON } from './http'
 import Doc, { clamp } from './doc'
@@ -567,12 +568,14 @@ export class BotMarket {
   feesAndCommit () {
     const {
       baseID, quoteID, marketReport: { baseFees, quoteFees }, lotSize,
-      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker
+      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
+      cfg: { uiConfig: { baseConfig, quoteConfig } }
     } = this
 
     return feesAndCommit(
       baseID, quoteID, baseFees, quoteFees, lotSize, baseLots, quoteLots,
-      baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker
+      baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
+      baseConfig.orderReservesFactor, quoteConfig.orderReservesFactor
     )
   }
 
@@ -687,8 +690,9 @@ export class BotMarket {
     const totalQuoteReq = dexMinQuoteAlloc + cexMinQuoteAlloc + transferableQuoteAlloc
     const baseFundedAndBalanced = dexBaseFunded && cexBaseFunded && baseAvail >= totalBaseReq
     const quoteFundedAndBalanced = dexQuoteFunded && cexQuoteFunded && quoteAvail >= totalQuoteReq
-    const baseFeesFunded = (baseID === baseFeeID) || dexBaseFeeAvail >= dexBaseFeeReq
-    const quoteFeesFunded = (quoteID === quoteFeeID && dexQuoteFunded) || dexQuoteFeeAvail >= dexQuoteFeeReq
+    const baseFeesFunded = dexBaseFeeAvail >= dexBaseFeeReq
+    const quoteFeesFunded = dexQuoteFeeAvail >= dexQuoteFeeReq
+
     const fundedAndBalanced = baseFundedAndBalanced && quoteFundedAndBalanced && baseFeesFunded && quoteFeesFunded
 
     // Are we funded but not balanced, but able to rebalance with a cex?
@@ -718,7 +722,7 @@ export class BotMarket {
           funded: baseFeesFunded
         },
         fundedAndBalanced: baseFundedAndBalanced,
-        fundedAndNotBalanced: !baseFundedAndBalanced && baseAvail >= totalBaseReq
+        fundedAndNotBalanced: !baseFundedAndBalanced && baseAvail >= totalBaseReq && canRebalance
       },
       quote: {
         dex: {
@@ -738,7 +742,7 @@ export class BotMarket {
           funded: quoteFeesFunded
         },
         fundedAndBalanced: quoteFundedAndBalanced,
-        fundedAndNotBalanced: !quoteFundedAndBalanced && quoteAvail >= totalQuoteReq
+        fundedAndNotBalanced: !quoteFundedAndBalanced && quoteAvail >= totalQuoteReq && canRebalance
       },
       fundedAndBalanced,
       fundedAndNotBalanced,
@@ -863,8 +867,8 @@ export class RunningMarketMakerDisplay {
     }
 
     Doc.show(page.stats)
-    setSignedValue(runStats.profitLoss.profitRatio, page.profit, page.profitSign)
-    setSignedValue(runStats.profitLoss.profit, page.profitLoss, page.plSign)
+    setSignedValue(runStats.profitLoss.profitRatio, page.profit, page.profitSign, 2)
+    setSignedValue(runStats.profitLoss.profit, page.profitLoss, page.plSign, 2)
     this.startTime = runStats.startTime
 
     const summedBalance = (b: BotBalance) => {
@@ -874,10 +878,10 @@ export class RunningMarketMakerDisplay {
 
     const dexBaseInv = summedBalance(runStats.dexBalances[baseID]) / baseFactor
     page.walletBaseInventory.textContent = Doc.formatFourSigFigs(dexBaseInv)
-    page.walletBaseInvFiat.textContent = Doc.formatFourSigFigs(dexBaseInv * baseFiatRate)
+    page.walletBaseInvFiat.textContent = Doc.formatFourSigFigs(dexBaseInv * baseFiatRate, 2)
     const dexQuoteInv = summedBalance(runStats.dexBalances[quoteID]) / quoteFactor
     page.walletQuoteInventory.textContent = Doc.formatFourSigFigs(dexQuoteInv)
-    page.walletQuoteInvFiat.textContent = Doc.formatFourSigFigs(dexQuoteInv * quoteFiatRate)
+    page.walletQuoteInvFiat.textContent = Doc.formatFourSigFigs(dexQuoteInv * quoteFiatRate, 2)
 
     Doc.setVis(cexName, page.cexRow)
     if (cexName) {
@@ -885,8 +889,10 @@ export class RunningMarketMakerDisplay {
       setCexElements(div, cexName)
       const cexBaseInv = summedBalance(runStats.cexBalances[baseID]) / baseFactor
       page.cexBaseInventory.textContent = Doc.formatFourSigFigs(cexBaseInv)
+      page.cexBaseInventoryFiat.textContent = Doc.formatFourSigFigs(cexBaseInv * baseFiatRate, 2)
       const cexQuoteInv = summedBalance(runStats.cexBalances[quoteID]) / quoteFactor
       page.cexQuoteInventory.textContent = Doc.formatFourSigFigs(cexQuoteInv)
+      page.cexQuoteInventoryFiat.textContent = Doc.formatFourSigFigs(cexQuoteInv * quoteFiatRate, 2)
     }
 
     if (baseFeeID !== baseID) {
@@ -934,8 +940,8 @@ export class RunningMarketMakerDisplay {
   }
 }
 
-function setSignedValue (v: number, vEl: PageElement, signEl: PageElement) {
-  vEl.textContent = Doc.formatFourSigFigs(v)
+function setSignedValue (v: number, vEl: PageElement, signEl: PageElement, maxDecimals?: number) {
+  vEl.textContent = Doc.formatFourSigFigs(v, maxDecimals)
   signEl.classList.toggle('ico-plus', v > 0)
   signEl.classList.toggle('text-good', v > 0)
   // signEl.classList.toggle('ico-minus', v < 0)
@@ -944,7 +950,8 @@ function setSignedValue (v: number, vEl: PageElement, signEl: PageElement) {
 export function feesAndCommit (
   baseID: number, quoteID: number, baseFees: LotFeeRange, quoteFees: LotFeeRange,
   lotSize: number, baseLots: number, quoteLots: number, baseFeeID: number, quoteFeeID: number,
-  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean
+  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean, baseOrderReservesFactor: number,
+  quoteOrderReservesFactor: number
 ) {
   const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID)
   const [cexBaseLots, cexQuoteLots] = [quoteLots, baseLots]
@@ -972,34 +979,56 @@ export function feesAndCommit (
   }
 
   let baseTokenFeesPerSwap = 0
+  let baseRedeemReservesPerLot = 0
   if (baseID !== baseFeeID) { // token
     baseTokenFeesPerSwap += baseFees.estimated.swap
     if (baseFeeID === quoteFeeID) baseTokenFeesPerSwap += quoteFees.estimated.redeem
   }
   let baseBookingFeesPerLot = baseFees.max.swap
   if (baseID === quoteFeeID) baseBookingFeesPerLot += quoteFees.max.redeem
-  if (baseIsAccountLocker) baseBookingFeesPerLot += baseFees.max.refund
+  if (baseIsAccountLocker) {
+    baseBookingFeesPerLot += baseFees.max.refund
+    if (!quoteIsAccountLocker && baseFeeID !== quoteFeeID) baseRedeemReservesPerLot = baseFees.max.redeem
+  }
 
   let quoteTokenFeesPerSwap = 0
+  let quoteRedeemReservesPerLot = 0
   if (quoteID !== quoteFeeID) {
     quoteTokenFeesPerSwap += quoteFees.estimated.swap
     if (quoteFeeID === baseFeeID) quoteTokenFeesPerSwap += baseFees.estimated.redeem
   }
   let quoteBookingFeesPerLot = quoteFees.max.swap
   if (quoteID === baseFeeID) quoteBookingFeesPerLot += baseFees.max.redeem
-  if (quoteIsAccountLocker) quoteBookingFeesPerLot += quoteFees.max.refund
+  if (quoteIsAccountLocker) {
+    quoteBookingFeesPerLot += quoteFees.max.refund
+    if (!baseIsAccountLocker && quoteFeeID !== baseFeeID) quoteRedeemReservesPerLot = quoteFees.max.redeem
+  }
 
-  const fees = {
+  const baseReservesFactor = 1 + baseOrderReservesFactor
+  const quoteReservesFactor = 1 + quoteOrderReservesFactor
+
+  const baseBookingFees = (baseBookingFeesPerLot * baseLots) * baseReservesFactor
+  const baseRedeemFees = (baseRedeemReservesPerLot * quoteLots) * quoteReservesFactor
+  const quoteBookingFees = (quoteBookingFeesPerLot * quoteLots) * quoteReservesFactor
+  const quoteRedeemFees = (quoteRedeemReservesPerLot * baseLots) * baseReservesFactor
+
+  const fees: BookingFees = {
     base: {
       ...baseFees,
       bookingFeesPerLot: baseBookingFeesPerLot,
-      bookingFees: baseBookingFeesPerLot * commit.dex.base.lots,
+      bookingFeesPerCounterLot: baseRedeemReservesPerLot,
+      bookingFees: baseBookingFees + baseRedeemFees,
+      swapReservesFactor: baseReservesFactor,
+      redeemReservesFactor: quoteReservesFactor,
       tokenFeesPerSwap: baseTokenFeesPerSwap
     },
     quote: {
       ...quoteFees,
       bookingFeesPerLot: quoteBookingFeesPerLot,
-      bookingFees: quoteBookingFeesPerLot * commit.dex.quote.lots,
+      bookingFeesPerCounterLot: quoteRedeemReservesPerLot,
+      bookingFees: quoteBookingFees + quoteRedeemFees,
+      swapReservesFactor: quoteReservesFactor,
+      redeemReservesFactor: baseReservesFactor,
       tokenFeesPerSwap: quoteTokenFeesPerSwap
     }
   }

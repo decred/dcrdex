@@ -285,7 +285,7 @@ During this process, `bisonw` should log messages similar to the following:
 ...
 [TRC] CORE: processing tip change for dcr
 [DBG] CORE: Registration fee txn 326661613264653632393833386337653864616464643433326663333434633939636661323836633436373766393832666532626139656161306166393234393030303030303030 now has 1 confirmations.
-[INF] CORE: Notifying dex http://127.0.0.1:17273 of fee payment.
+[DBG] CORE: Notifying dex http://127.0.0.1:17273 of fee payment.
 [DBG] CORE: authenticated connection to http://127.0.0.1:17273
 [INF] CORE: notify: |SUCCESS| (fee payment) Account registered - You may now trade at http://127.0.0.1:17273
 ```

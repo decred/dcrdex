@@ -30,11 +30,11 @@ const BipIDs: Record<number, string> = {
   3: 'doge',
   145: 'bch',
   60: 'eth',
+  60001: 'usdc.eth',
+  60002: 'usdt.eth',
   136: 'firo',
   133: 'zec',
   966: 'polygon',
-  60001: 'usdc.eth',
-  60002: 'usdt.eth',
   966001: 'usdc.polygon',
   966002: 'weth.polygon',
   966003: 'wbtc.polygon',
@@ -451,6 +451,14 @@ export default class Doc {
 
   static bipIDFromSymbol (symbol: string): number {
     return BipSymbolIDs[symbol]
+  }
+
+  static bipCEXSymbol (assetID: number): string {
+    const bipSymbol = BipIDs[assetID]
+    if (!bipSymbol || bipSymbol === '') return ''
+    const parts = bipSymbol.split('.')
+    if (parts[0] === 'weth') return 'eth'
+    return parts[0]
   }
 
   static logoPathFromID (assetID: number): string {

@@ -43,9 +43,11 @@ type MarketDay struct {
 
 // Market is the base and quote assets of a market on a CEX.
 type Market struct {
-	BaseID  uint32     `json:"baseID"`
-	QuoteID uint32     `json:"quoteID"`
-	Day     *MarketDay `json:"day"`
+	BaseID           uint32     `json:"baseID"`
+	QuoteID          uint32     `json:"quoteID"`
+	Day              *MarketDay `json:"day"`
+	BaseMinWithdraw  uint64     `json:"baseMinWithdraw"`
+	QuoteMinWithdraw uint64     `json:"quoteMinWithdraw"`
 }
 
 type Status struct {
@@ -87,7 +89,7 @@ type CEX interface {
 	// Balance returns the balance of an asset at the CEX.
 	Balance(assetID uint32) (*ExchangeBalance, error)
 	// Balances returns the balances of known assets on the CEX.
-	Balances() (map[uint32]*ExchangeBalance, error)
+	Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error)
 	// CancelTrade cancels a trade on the CEX.
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
 	// MatchedMarkets returns the list of markets at the CEX.

@@ -5865,6 +5865,9 @@ func (btc *baseWallet) addUnknownTransactionsToHistory(tip uint64) {
 	}
 
 	for _, tx := range txs {
+		if btc.ctx.Err() != nil {
+			return
+		}
 		txHash, err := chainhash.NewHashFromStr(tx.TxID)
 		if err != nil {
 			btc.log.Errorf("Error decoding tx hash %s: %v", tx.TxID, err)
@@ -6014,6 +6017,9 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 	}
 
 	for hash, tx := range pendingTxsCopy {
+		if btc.ctx.Err() != nil {
+			return
+		}
 		handlePendingTx(hash, &tx)
 	}
 }

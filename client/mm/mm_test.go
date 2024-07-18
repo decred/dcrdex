@@ -418,7 +418,7 @@ var _ libxc.CEX = (*tCEX)(nil)
 func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &sync.WaitGroup{}, nil
 }
-func (c *tCEX) Balances() (map[uint32]*libxc.ExchangeBalance, error) {
+func (c *tCEX) Balances(ctx context.Context) (map[uint32]*libxc.ExchangeBalance, error) {
 	return nil, nil
 }
 func (c *tCEX) MatchedMarkets(ctx context.Context) ([]*libxc.MarketMatch, error) {

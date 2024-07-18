@@ -20,7 +20,8 @@ import {
   SupportedAsset,
   WalletState,
   UnitInfo,
-  ProjectedAlloc
+  ProjectedAlloc,
+  AssetBookingFees
 } from './registry'
 import Doc, {
   NumberInput,
@@ -878,7 +879,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const { commit, fees } = feesAndCommit(
       baseID, quoteID, baseFees, quoteFees, lotSize, dexBaseLots, dexQuoteLots,
-      baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker
+      baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker,
+      cfg.baseConfig.orderReservesFactor, cfg.quoteConfig.orderReservesFactor
     )
 
     return {
@@ -1074,14 +1076,14 @@ export default class MarketMakerSettingsPage extends BasePage {
   updateBaseAllocations () {
     const { commit, lotSize, basePane, fees } = this.marketStuff()
 
-    basePane.updateInventory(commit.dex.base.lots, lotSize, commit.dex.base.val, commit.cex.base.val, fees.base.bookingFeesPerLot, fees.base.tokenFeesPerSwap)
+    basePane.updateInventory(commit.dex.base.lots, commit.dex.quote.lots, lotSize, commit.dex.base.val, commit.cex.base.val, fees.base)
     basePane.updateCommitTotal()
   }
 
   updateQuoteAllocations () {
     const { commit, quoteLot: lotSize, quotePane, fees } = this.marketStuff()
 
-    quotePane.updateInventory(commit.dex.quote.lots, lotSize, commit.dex.quote.val, commit.cex.quote.val, fees.quote.bookingFeesPerLot, fees.quote.tokenFeesPerSwap)
+    quotePane.updateInventory(commit.dex.quote.lots, commit.dex.base.lots, lotSize, commit.dex.quote.val, commit.cex.quote.val, fees.quote)
     quotePane.updateCommitTotal()
   }
 
@@ -2220,7 +2222,7 @@ class AssetPane {
     this.minTransferSlider = new MiniSlider(page.minTransferSlider, (r: number) => {
       const { cfg } = this
       const totalInventory = this.commit()
-      const [minV, maxV] = [0, totalInventory]
+      const [minV, maxV] = [this.minTransfer.min, Math.min(this.minTransfer.min, totalInventory)]
       cfg.transferFactor = r
       this.minTransfer.setValue(minV + r * (maxV - minV))
     })
@@ -2239,7 +2241,7 @@ class AssetPane {
     this.assetID = assetID
     this.isQuote = isQuote
     const cfg = this.cfg = isQuote ? this.pg.updatedConfig.quoteConfig : this.pg.updatedConfig.baseConfig
-    const { page, div, pg: { specs: { botType, baseID }, updatedConfig: { baseOptions, quoteOptions } } } = this
+    const { page, div, pg: { specs: { botType, baseID, cexName }, mktID, updatedConfig: { baseOptions, quoteOptions } } } = this
     const { symbol, name, token, unitInfo: ui } = app().assets[assetID]
     this.ui = ui
     this.walletConfig = assetID === baseID ? baseOptions : quoteOptions
@@ -2267,7 +2269,11 @@ class AssetPane {
       this.orderReserves.setValue(v)
       this.orderReservesSlider.setValue((v - defaultOrderReserves.minR) / defaultOrderReserves.range)
     }
-    if (botType !== botTypeBasicMM) this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
+    if (botType !== botTypeBasicMM) {
+      this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
+      const mkt = app().mmStatus.cexes[cexName as string].markets[mktID]
+      this.minTransfer.min = ((isQuote ? mkt.quoteMinWithdraw : mkt.baseMinWithdraw) / ui.conventional.conversionFactor)
+    }
     this.slippageBuffer.setValue(cfg.slippageBufferFactor)
     const { minR, range } = defaultSlippage
     this.slippageBufferSlider.setValue((cfg.slippageBufferFactor - minR) / range)
@@ -2282,17 +2288,18 @@ class AssetPane {
     return commit
   }
 
-  updateInventory (lots: number, lotSize: number, dexCommit: number, cexCommit: number, bookingFeesPerLot: number, feesPerSwap: number) {
+  updateInventory (lots: number, counterLots: number, lotSize: number, dexCommit: number, cexCommit: number, fees: AssetBookingFees) {
     this.setLotSize(lotSize)
     const { page, cfg, lotSizeConv, inv, ui, feeUI, isToken, isQuote, pg: { specs: { cexName, botType } } } = this
     page.bookLots.textContent = String(lots)
     page.bookLotSize.textContent = Doc.formatFourSigFigs(lotSizeConv)
     inv.book = lots * lotSizeConv
     page.bookCommitment.textContent = Doc.formatFourSigFigs(inv.book)
-    const feesPerLotConv = bookingFeesPerLot / feeUI.conventional.conversionFactor
+    const feesPerLotConv = fees.bookingFeesPerLot / feeUI.conventional.conversionFactor
     page.bookingFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
+    page.swapReservesFactor.textContent = fees.swapReservesFactor.toFixed(2)
     page.bookingFeesLots.textContent = String(lots)
-    inv.bookingFees = lots * feesPerLotConv
+    inv.bookingFees = fees.bookingFees / feeUI.conventional.conversionFactor
     page.bookingFees.textContent = Doc.formatFourSigFigs(inv.bookingFees)
     if (cexName) {
       inv.cex = cexCommit / ui.conventional.conversionFactor
@@ -2306,7 +2313,7 @@ class AssetPane {
       page.orderReserves.textContent = Doc.formatFourSigFigs(orderReserves)
     }
     if (isToken) {
-      const feesPerSwapConv = feesPerSwap / feeUI.conventional.conversionFactor
+      const feesPerSwapConv = fees.tokenFeesPerSwap / feeUI.conventional.conversionFactor
       page.feeReservesPerSwap.textContent = Doc.formatFourSigFigs(feesPerSwapConv)
       inv.swapFeeReserves = feesPerSwapConv * cfg.swapFeeN
       page.feeReserves.textContent = Doc.formatFourSigFigs(inv.swapFeeReserves)
@@ -2316,6 +2323,13 @@ class AssetPane {
       page.slippageBufferBasis.textContent = Doc.formatCoinValue(basis * ui.conventional.conversionFactor, ui)
       inv.slippageBuffer = basis * cfg.slippageBufferFactor
       page.slippageBuffer.textContent = Doc.formatCoinValue(inv.slippageBuffer * ui.conventional.conversionFactor, ui)
+    }
+    Doc.setVis(fees.bookingFeesPerCounterLot > 0, page.redemptionFeesBox)
+    if (fees.bookingFeesPerCounterLot > 0) {
+      const feesPerLotConv = fees.bookingFeesPerCounterLot / feeUI.conventional.conversionFactor
+      page.redemptionFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
+      page.redemptionFeesLots.textContent = String(counterLots)
+      page.redeemReservesFactor.textContent = fees.redeemReservesFactor.toFixed(2)
     }
     this.updateCommitTotal()
     this.updateTokenFees()
@@ -2343,7 +2357,7 @@ class AssetPane {
     Doc.setVis(showRebalance, page.rebalanceOpts)
     if (!showRebalance) return
     const totalInventory = this.commit()
-    const [minV, maxV] = [0, totalInventory]
+    const [minV, maxV] = [this.minTransfer.min, Math.min(this.minTransfer.min * 2, totalInventory)]
     const rangeV = maxV - minV
     this.minTransfer.setValue(minV + cfg.transferFactor * rangeV)
     this.minTransferSlider.setValue((cfg.transferFactor - defaultTransfer.minR) / defaultTransfer.range)

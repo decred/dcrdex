@@ -466,8 +466,8 @@ export interface RunStatsNote extends CoreNote {
 
 export interface RunEventNote extends CoreNote {
   host: string
-  base: number
-  quote: number
+  baseID: number
+  quoteID: number
   startTime: number
   event: MarketMakingEvent
 }
@@ -506,6 +506,20 @@ export interface LotFees {
 export interface LotFeeRange {
   max: LotFees
   estimated: LotFees
+}
+
+export interface AssetBookingFees extends LotFeeRange {
+  bookingFeesPerLot: number
+  bookingFeesPerCounterLot: number
+  bookingFees: number
+  swapReservesFactor: number // (1 + orderReservesFactor)
+  redeemReservesFactor: number
+  tokenFeesPerSwap: number
+}
+
+export interface BookingFees {
+  base: AssetBookingFees
+  quote:AssetBookingFees
 }
 
 export interface MarketReport {
@@ -846,6 +860,16 @@ export interface RunningBotInventory {
   cex: BotInventory
 }
 
+export interface CEXNotification extends CoreNote {
+  cexName: string
+  note: any
+}
+
+export interface CEXBalanceUpdate {
+  assetID: number
+  balance: ExchangeBalance
+}
+
 export interface FeeEstimates extends LotFeeRange {
   bookingFeesPerLot: number
   bookingFees: number
@@ -977,6 +1001,8 @@ interface MarketDay {
 export interface CEXMarket {
   baseID: number
   quoteID: number
+  baseMinWithdraw: number
+  quoteMinWithdraw: number
   day: MarketDay
 }
 
