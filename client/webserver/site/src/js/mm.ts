@@ -206,10 +206,13 @@ export default class MarketMakerPage extends BasePage {
       const tr = page.exchangeRowTmpl.cloneNode(true) as PageElement
       page.cexRows.appendChild(tr)
       const tmpl = Doc.parseTemplate(tr)
-      Doc.bind(tmpl.configureBttn, 'click', () => {
+      const configure = () => {
         this.cexConfigForm.setCEX(cexName)
         this.forms.show(page.cexConfigForm)
-      })
+      }
+      Doc.bind(tmpl.configureBttn, 'click', configure)
+      Doc.bind(tmpl.reconfigBttn, 'click', configure)
+      Doc.bind(tmpl.errConfigureBttn, 'click', configure)
       const row = this.cexes[cexName] = { tr, tmpl, dinfo, cexName }
       this.updateCexRow(row)
     }
