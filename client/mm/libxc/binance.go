@@ -433,6 +433,7 @@ type binance struct {
 	tradeIDNonce       atomic.Uint32
 	tradeIDNoncePrefix dex.Bytes
 	broadcast          func(interface{})
+	isUS               bool
 
 	markets atomic.Value // map[string]*binanceMarket
 	// tokenIDs maps the token's symbol to the list of bip ids of the token
@@ -492,6 +493,7 @@ func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
 	bnc := &binance{
 		log:                cfg.Logger,
 		broadcast:          cfg.Notify,
+		isUS:               binanceUS,
 		marketsURL:         marketsURL,
 		accountsURL:        accountsURL,
 		wsURL:              wsURL,
@@ -1149,7 +1151,7 @@ func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err e
 	markets := make([]*MarketMatch, 0, len(bnMarkets))
 
 	for _, mkt := range bnMarkets {
-		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs)
+		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs, bnc.isUS)
 		markets = append(markets, dexMarkets...)
 	}
 
@@ -1870,11 +1872,19 @@ func getDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
 	return assetIDs
 }
 
+func assetDisabled(isUS bool, assetID uint32) bool {
+	switch dex.BipIDSymbol(assetID) {
+	case "firo", "zec":
+		return !isUS // exchange addresses not yet implemented
+	}
+	return false
+}
+
 // dexMarkets returns all the possible dex markets for this binance market.
 // A symbol represents a single market on the CEX, but tokens on the DEX
 // have a different assetID for each network they are on, therefore they will
 // match multiple markets as defined using assetID.
-func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32) []*MarketMatch {
+func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32, isUS bool) []*MarketMatch {
 	var baseAssetIDs, quoteAssetIDs []uint32
 
 	baseAssetIDs = getDEXAssetIDs(binanceBaseSymbol, tokenIDs)
@@ -1890,6 +1900,9 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 	markets := make([]*MarketMatch, 0, len(baseAssetIDs)*len(quoteAssetIDs))
 	for _, baseID := range baseAssetIDs {
 		for _, quoteID := range quoteAssetIDs {
+			if assetDisabled(isUS, baseID) || assetDisabled(isUS, quoteID) {
+				continue
+			}
 			markets = append(markets, &MarketMatch{
 				Slug:     binanceBaseSymbol + binanceQuoteSymbol,
 				MarketID: dex.BipIDSymbol(baseID) + "_" + dex.BipIDSymbol(quoteID),
