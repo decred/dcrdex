@@ -1395,7 +1395,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 			}
 			ready = confs >= req
 			if changed && !ready {
-				t.dc.log.Infof("Match %s not yet swappable: current confs = %d, required confs = %d",
+				t.dc.log.Debugf("Match %s not yet swappable: current confs = %d, required confs = %d",
 					match, confs, req)
 			}
 			return ready, false

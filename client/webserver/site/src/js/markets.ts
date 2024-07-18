@@ -2133,7 +2133,7 @@ export default class MarketsPage extends BasePage {
     if (!app().checkResponse(res)) {
       throw Error('error unlocking wallet ' + res.msg)
     }
-    this.balanceWgt.updateAsset(this.openAsset.id)
+    this.balanceWgt.updateAsset(assetID)
   }
 
   /*

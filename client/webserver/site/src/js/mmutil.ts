@@ -767,7 +767,7 @@ export class RunningMarketMakerDisplay {
   async stop () {
     const { page, mkt: { host, baseID, quoteID } } = this
     const loaded = app().loading(page.stopBttn)
-    await MM.stopBot({ host, base: baseID, quote: quoteID })
+    await MM.stopBot({ host, baseID: baseID, quoteID: quoteID })
     loaded()
   }
 

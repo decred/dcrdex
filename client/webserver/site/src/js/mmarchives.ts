@@ -38,7 +38,7 @@ export default class MarketMakerArchivesPage extends BasePage {
     const runs : MarketMakingRun[] = res.runs
 
     for (let i = 0; i < runs.length; i++) {
-      const { startTime, market: { base: baseID, quote: quoteID, host } } = runs[i]
+      const { startTime, market: { baseID, quoteID, host } } = runs[i]
       const row = this.page.runTableRowTmpl.cloneNode(true) as HTMLElement
       const tmpl = Doc.parseTemplate(row)
       tmpl.startTime.textContent = new Date(startTime * 1000).toLocaleString()

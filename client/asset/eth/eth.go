@@ -892,6 +892,11 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		return nil, err
 	}
 
+	txCM := dex.NewConnectionMaster(w.txDB)
+	if err := txCM.ConnectOnce(ctx); err != nil {
+		return nil, err
+	}
+
 	pendingTxs, err := w.txDB.getPendingTxs()
 	if err != nil {
 		return nil, err
@@ -945,12 +950,6 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		w.txDB.run(ctx)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
 		w.monitorBlocks(ctx)
 		w.node.shutdown()
 	}()
@@ -964,6 +963,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.connected.Store(true)
 	go func() {
 		<-ctx.Done()
+		txCM.Wait()
 		w.connected.Store(false)
 	}()
 
