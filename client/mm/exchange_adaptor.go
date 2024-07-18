@@ -1801,8 +1801,10 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, assetID uint32, a
 		return err
 	}
 
+	u.balancesMtx.Lock()
 	withdrawalID, err := u.CEX.Withdraw(ctx, assetID, amount, addr)
 	if err != nil {
+		u.balancesMtx.Unlock()
 		return err
 	}
 	u.log.Infof("Withdrew %s", u.fmtQty(assetID, amount))
@@ -1811,7 +1813,6 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, assetID uint32, a
 	} else {
 		u.pendingQuoteRebalance.Store(true)
 	}
-	u.balancesMtx.Lock()
 	u.pendingWithdrawals[withdrawalID] = &pendingWithdrawal{
 		eventLogID:   u.eventLogID.Add(1),
 		timestamp:    time.Now().Unix(),

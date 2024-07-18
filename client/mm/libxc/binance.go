@@ -557,10 +557,10 @@ func (bnc *binance) setBalances(ctx context.Context) error {
 }
 
 // readCoins stores the token IDs for which deposits and withdrawals are
-// enabled on binance and sets the minTransfers map.
+// enabled on binance and sets the minWithdraw map.
 func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 	tokenIDs := make(map[string][]uint32)
-	minWithdraw := make(map[uint32]map[uint32]uint64)
+	minWithdraw := make(map[uint32]uint64)
 	for _, nfo := range coins {
 		for _, netInfo := range nfo.NetworkList {
 			if !netInfo.WithdrawEnable || !netInfo.DepositEnable {
@@ -572,22 +572,12 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 			if !found {
 				continue
 			}
-			netID := assetID
-			if tkn := asset.TokenInfo(assetID); tkn != nil {
-				netID = tkn.ParentID
-				tokenIDs[nfo.Coin] = append(tokenIDs[nfo.Coin], assetID)
-			}
 			ui, err := asset.UnitInfo(assetID)
 			if err != nil {
 				// not a registered asset
 				continue
 			}
-			withdrawMin := uint64(math.Round(float64(ui.Conventional.ConversionFactor) * netInfo.WithdrawMin))
-			if m, found := minWithdraw[assetID]; found {
-				m[netID] = withdrawMin
-			} else {
-				minWithdraw[assetID] = map[uint32]uint64{netID: withdrawMin}
-			}
+			minWithdraw[assetID] = uint64(math.Round(float64(ui.Conventional.ConversionFactor) * netInfo.WithdrawMin))
 		}
 	}
 	bnc.tokenIDs.Store(tokenIDs)
@@ -1061,18 +1051,8 @@ func (bnc *binance) minimumWithdraws(baseID, quoteID uint32) (uint64, uint64) {
 	if minsI == nil {
 		return 0, 0
 	}
-	mins := minsI.(map[uint32]map[uint32]uint64)
-	getMin := func(assetID uint32) uint64 {
-		m := mins[assetID]
-		if m == nil {
-			return 0
-		}
-		if tkn := asset.TokenInfo(assetID); tkn != nil {
-			return m[tkn.ParentID]
-		}
-		return m[assetID]
-	}
-	return getMin(baseID), getMin(quoteID)
+	mins := minsI.(map[uint32]uint64)
+	return mins[baseID], mins[quoteID]
 }
 
 func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {

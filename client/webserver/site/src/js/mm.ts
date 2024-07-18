@@ -579,8 +579,9 @@ class Bot extends BotMarket {
         [quoteID]: proposedCexQuote * quoteFactor
       }
     }
-    alloc.dex[baseFeeID] = Math.min((alloc.dex[baseFeeID] ?? 0) + f.base.fees.req, f.base.fees.avail) * baseFeeFactor
-    alloc.dex[quoteFeeID] = Math.min((alloc.dex[quoteFeeID] ?? 0) + f.quote.fees.req, f.quote.fees.avail) * quoteFeeFactor
+
+    alloc.dex[baseFeeID] = Math.min((alloc.dex[baseFeeID] ?? 0) + (f.base.fees.req * baseFeeFactor), f.base.fees.avail * baseFeeFactor)
+    alloc.dex[quoteFeeID] = Math.min((alloc.dex[quoteFeeID] ?? 0) + (f.quote.fees.req * quoteFeeFactor), f.quote.fees.avail * quoteFeeFactor)
 
     let totalUSD = (alloc.dex[baseID] / baseFactor * baseFiatRate) + (alloc.dex[quoteID] / quoteFactor * quoteFiatRate)
     totalUSD += (alloc.cex[baseID] / baseFactor * baseFiatRate) + (alloc.cex[quoteID] / quoteFactor * quoteFiatRate)
