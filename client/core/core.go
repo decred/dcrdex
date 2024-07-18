@@ -6287,7 +6287,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 	}
 
 	if len(allCoins) != len(form.Placements) {
-		c.log.Infof("FundMultiOrder only funded %d orders out of %d", len(allCoins), len(form.Placements))
+		c.log.Infof("FundMultiOrder only funded %d orders out of %d (options = %+v)", len(allCoins), len(form.Placements), form.Options)
 	}
 	defer func() {
 		if _, err := c.updateWalletBalance(fromWallet); err != nil {

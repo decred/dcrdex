@@ -7,7 +7,8 @@ import {
   ExchangeBalance,
   StartConfig,
   OrderPlacement,
-  AutoRebalanceConfig
+  AutoRebalanceConfig,
+  CEXNotification
 } from './registry'
 import {
   MM,
@@ -239,7 +240,8 @@ export default class MarketMakerPage extends BasePage {
       runevent: (note: RunEventNote) => {
         const bot = this.bots[hostedMarketID(note.host, note.baseID, note.quoteID)]
         if (bot) return bot.handleRunStats()
-      }
+      },
+      cexnote: (note: CEXNotification) => { this.handleCEXNote(note) }
       // TODO bot start-stop notification
     })
 
@@ -261,6 +263,18 @@ export default class MarketMakerPage extends BasePage {
     const startupBalanceCache: Record<number, Promise<ExchangeBalance>> = {}
 
     for (const botStatus of sortedBots) this.addBot(botStatus, startupBalanceCache)
+  }
+
+  async handleCEXNote (n: CEXNotification) {
+    switch (n.topic) {
+      case 'BalanceUpdate':
+        return this.handleCEXBalanceUpdate(n.cexName /* , n.note */)
+    }
+  }
+
+  async handleCEXBalanceUpdate (cexName: string /* , note: CEXBalanceUpdate */) {
+    const cexRow = this.cexes[cexName]
+    if (cexRow) this.updateCexRow(cexRow)
   }
 
   async handleRunStatsNote (note: RunStatsNote) {

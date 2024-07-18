@@ -57,7 +57,9 @@ import {
   RejectedRedemptionData,
   MarketMakingStatus,
   RunStatsNote,
-  MMBotStatus
+  MMBotStatus,
+  CEXNotification,
+  CEXBalanceUpdate
 } from './registry'
 import { setCoinHref } from './coinexplorers'
 
@@ -1157,6 +1159,17 @@ export default class Application {
           bot.runStats = n.stats
           bot.running = Boolean(n.stats)
         }
+        break
+      }
+      case 'cexnote': {
+        const n = note as CEXNotification
+        switch (n.topic) {
+          case 'BalanceUpdate': {
+            const u = n.note as CEXBalanceUpdate
+            this.mmStatus.cexes[n.cexName].balances[u.assetID] = u.balance
+          }
+        }
+        break
       }
     }
   }

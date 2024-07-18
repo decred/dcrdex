@@ -860,6 +860,16 @@ export interface RunningBotInventory {
   cex: BotInventory
 }
 
+export interface CEXNotification extends CoreNote {
+  cexName: string
+  note: any
+}
+
+export interface CEXBalanceUpdate {
+  assetID: number
+  balance: ExchangeBalance
+}
+
 export interface FeeEstimates extends LotFeeRange {
   bookingFeesPerLot: number
   bookingFees: number

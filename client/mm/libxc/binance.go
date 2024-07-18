@@ -514,6 +514,12 @@ func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
 // setBalances queries binance for the user's balances and stores them in the
 // balances map.
 func (bnc *binance) setBalances(ctx context.Context) error {
+	bnc.balanceMtx.Lock()
+	defer bnc.balanceMtx.Unlock()
+	return bnc.refreshBalances(ctx)
+}
+
+func (bnc *binance) refreshBalances(ctx context.Context) error {
 	var resp bntypes.Account
 	err := bnc.getAPI(ctx, "/api/v3/account", nil, true, true, &resp)
 	if err != nil {
@@ -525,9 +531,6 @@ func (bnc *binance) setBalances(ctx context.Context) error {
 		return errors.New("cannot set balances before coin info is fetched")
 	}
 	tokenIDs := tokenIDsI.(map[string][]uint32)
-
-	bnc.balanceMtx.Lock()
-	defer bnc.balanceMtx.Unlock()
 
 	for _, bal := range resp.Balances {
 		for _, assetID := range getDEXAssetIDs(bal.Asset, tokenIDs) {
@@ -563,10 +566,6 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 	minWithdraw := make(map[uint32]uint64)
 	for _, nfo := range coins {
 		for _, netInfo := range nfo.NetworkList {
-			if !netInfo.WithdrawEnable || !netInfo.DepositEnable {
-				// bnc.log.Tracef("Skipping %s network %s because deposits and/or withdraws are not enabled.", netInfo.Coin, netInfo.Network)
-				continue
-			}
 			symbol := binanceCoinNetworkToDexSymbol(nfo.Coin, netInfo.Network)
 			assetID, found := dex.BipSymbolID(symbol)
 			if !found {
@@ -576,6 +575,13 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 			if err != nil {
 				// not a registered asset
 				continue
+			}
+			if !netInfo.WithdrawEnable || !netInfo.DepositEnable {
+				bnc.log.Tracef("Skipping %s network %s because deposits and/or withdraws are not enabled.", netInfo.Coin, netInfo.Network)
+				continue
+			}
+			if tkn := asset.TokenInfo(assetID); tkn != nil {
+				tokenIDs[nfo.Coin] = append(tokenIDs[nfo.Coin], assetID)
 			}
 			minWithdraw[assetID] = uint64(math.Round(float64(ui.Conventional.ConversionFactor) * netInfo.WithdrawMin))
 		}
@@ -1028,9 +1034,15 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 	return requestInto(req, &struct{}{})
 }
 
-func (bnc *binance) Balances() (map[uint32]*ExchangeBalance, error) {
+func (bnc *binance) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error) {
 	bnc.balanceMtx.RLock()
 	defer bnc.balanceMtx.RUnlock()
+
+	if len(bnc.balances) == 0 {
+		if err := bnc.refreshBalances(ctx); err != nil {
+			return nil, err
+		}
+	}
 
 	balances := make(map[uint32]*ExchangeBalance)
 
