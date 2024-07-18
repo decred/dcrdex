@@ -107,47 +107,58 @@ function parseFundingOptions (f: FundingOutlook): [number, number, FundingSlider
       }
       proposedCex += dexShort + transferable
     }
-  } else if (f.fundedAndBalanced && transferable > 0) {
+  } else if (f.fundedAndBalanced) {
     // This asset is fully funded, but the user may choose to fund order
     // reserves either cex or dex.
-    const dexRemain = dexAvail - dexReq
-    const cexRemain = cexAvail - cexReq
+    if (transferable > 0) {
+      const dexRemain = dexAvail - dexReq
+      const cexRemain = cexAvail - cexReq
 
-    slider = newSlider()
+      slider = newSlider()
 
-    if (cexRemain > transferable && dexRemain > transferable) {
-      // Either one could fully fund order reserves. Let the user choose.
-      slider.left.cex = transferable + cexReq
-      slider.left.dex = dexReq
-      slider.right.cex = cexReq
-      slider.right.dex = transferable + dexReq
-    } else if (dexRemain < transferable && cexRemain < transferable) {
-      // => implied that cexRemain + dexRemain > transferable.
-      // CEX can contribute SOME and DEX can contribute SOME.
-      slider.left.cex = transferable - dexRemain + cexReq
-      slider.left.dex = dexRemain + dexReq
-      slider.right.cex = cexRemain + cexReq
-      slider.right.dex = transferable - cexRemain + dexReq
-    } else if (dexRemain > transferable) {
-      // So DEX has enough to cover reserves, but CEX could potentially
-      // constribute SOME. NOT ALL.
-      slider.left.cex = cexReq
-      slider.left.dex = transferable + dexReq
-      slider.right.cex = cexRemain + cexReq
-      slider.right.dex = transferable - cexRemain + dexReq
-    } else {
-      // CEX has enough to cover reserves, but DEX could contribute SOME,
-      // NOT ALL.
-      slider.left.cex = transferable - dexRemain + cexReq
-      slider.left.dex = dexRemain + dexReq
-      slider.right.cex = transferable + cexReq
-      slider.right.dex = dexReq
+      if (cexRemain > transferable && dexRemain > transferable) {
+        // Either one could fully fund order reserves. Let the user choose.
+        slider.left.cex = transferable + cexReq
+        slider.left.dex = dexReq
+        slider.right.cex = cexReq
+        slider.right.dex = transferable + dexReq
+      } else if (dexRemain < transferable && cexRemain < transferable) {
+        // => implied that cexRemain + dexRemain > transferable.
+        // CEX can contribute SOME and DEX can contribute SOME.
+        slider.left.cex = transferable - dexRemain + cexReq
+        slider.left.dex = dexRemain + dexReq
+        slider.right.cex = cexRemain + cexReq
+        slider.right.dex = transferable - cexRemain + dexReq
+      } else if (dexRemain > transferable) {
+        // So DEX has enough to cover reserves, but CEX could potentially
+        // constribute SOME. NOT ALL.
+        slider.left.cex = cexReq
+        slider.left.dex = transferable + dexReq
+        slider.right.cex = cexRemain + cexReq
+        slider.right.dex = transferable - cexRemain + dexReq
+      } else {
+        // CEX has enough to cover reserves, but DEX could contribute SOME,
+        // NOT ALL.
+        slider.left.cex = transferable - dexRemain + cexReq
+        slider.left.dex = dexRemain + dexReq
+        slider.right.cex = transferable + cexReq
+        slider.right.dex = dexReq
+      }
+      // We prefer the slider right in the center.
+      slider.cexRange = slider.right.cex - slider.left.cex
+      slider.dexRange = slider.right.dex - slider.left.dex
+      proposedDex = slider.left.dex + (slider.dexRange / 2)
+      proposedCex = slider.left.cex + (slider.cexRange / 2)
     }
-    // We prefer the slider right in the center.
-    slider.cexRange = slider.right.cex - slider.left.cex
-    slider.dexRange = slider.right.dex - slider.left.dex
-    proposedDex = slider.left.dex + (slider.dexRange / 2)
-    proposedCex = slider.left.cex + (slider.cexRange / 2)
+  } else { // starved
+    if (cexAvail < cexReq) {
+      proposedDex = Math.min(dexAvail, dexReq + transferable + (cexReq - cexAvail))
+    } else if (dexAvail < dexReq) {
+      proposedCex = Math.min(cexAvail, cexReq + transferable + (dexReq - dexAvail))
+    } else { // just transferable wasn't covered
+      proposedDex = Math.min(dexAvail, dexReq + transferable)
+      proposedCex = Math.min(cexAvail, dexReq + cexReq + transferable - proposedDex)
+    }
   }
   return [proposedDex, proposedCex, slider]
 }
