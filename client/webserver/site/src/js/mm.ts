@@ -675,8 +675,8 @@ class Bot extends BotMarket {
     }
 
     const startConfig: StartConfig = {
-      base: baseID,
-      quote: quoteID,
+      baseID: baseID,
+      quoteID: quoteID,
       host: host,
       alloc: alloc
     }

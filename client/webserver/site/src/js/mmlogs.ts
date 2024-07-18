@@ -103,7 +103,7 @@ export default class MarketMakerLogsPage extends BasePage {
     this.forms = new Forms(page.forms)
     this.events = {}
     this.statsRows = {}
-    this.mkt = { base: baseID, quote: quoteID, host }
+    this.mkt = { baseID: baseID, quoteID: quoteID, host }
     setMarketElements(main, baseID, quoteID, host)
     Doc.bind(main, 'scroll', () => {
       if (this.loading) return
@@ -216,8 +216,8 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   handleRunEventNote (note: RunEventNote) {
-    const { base, quote, host } = this.mkt
-    if (note.host !== host || note.base !== base || note.quote !== quote) return
+    const { baseID, quoteID, host } = this.mkt
+    if (note.host !== host || note.base !== baseID || note.quote !== quoteID) return
     if (!eventPassesFilter(note.event, this.filters)) return
     const event = note.event
     const cachedEvent = this.events[event.id]
@@ -231,10 +231,10 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   handleRunStatsNote (note: RunStatsNote) {
-    const { mkt: { base, quote, host }, startTime } = this
+    const { mkt: { baseID, quoteID, host }, startTime } = this
     if (note.host !== host ||
-      note.baseID !== base ||
-      note.quoteID !== quote) return
+      note.baseID !== baseID ||
+      note.quoteID !== quoteID) return
     if (!note.stats || note.stats.startTime !== startTime) return
     this.populateStats(note.stats.profitLoss, 0)
   }
@@ -268,8 +268,8 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   mktAssets () : SupportedAsset[] {
-    const baseAsset = app().assets[this.mkt.base]
-    const quoteAsset = app().assets[this.mkt.quote]
+    const baseAsset = app().assets[this.mkt.baseID]
+    const quoteAsset = app().assets[this.mkt.quoteID]
 
     const assets = [baseAsset, quoteAsset]
     const assetIDs = { [baseAsset.id]: true, [quoteAsset.id]: true }
@@ -379,9 +379,9 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   showDexOrderEventDetails (event: DEXOrderEvent) {
-    const { page, mkt: { base, quote } } = this
-    const baseAsset = app().assets[base]
-    const quoteAsset = app().assets[quote]
+    const { page, mkt: { baseID, quoteID } } = this
+    const baseAsset = app().assets[baseID]
+    const quoteAsset = app().assets[quoteID]
     const [bui, qui] = [baseAsset.unitInfo, quoteAsset.unitInfo]
     const [baseTicker, quoteTicker] = [bui.conventional.unit, qui.conventional.unit]
     if (this.dexOrderIDCopyListener !== undefined) {
@@ -391,7 +391,7 @@ export default class MarketMakerLogsPage extends BasePage {
     page.copyDexOrderID.addEventListener('click', this.dexOrderIDCopyListener)
     page.dexOrderID.textContent = trimStringWithEllipsis(event.id, 20)
     page.dexOrderID.setAttribute('title', event.id)
-    const rate = app().conventionalRate(base, quote, event.rate)
+    const rate = app().conventionalRate(baseID, quoteID, event.rate)
 
     page.dexOrderRate.textContent = `${rate} ${baseTicker}/${quoteTicker}`
     page.dexOrderQty.textContent = `${event.qty / bui.conventional.conversionFactor} ${baseTicker}`
@@ -437,9 +437,9 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   showCexOrderEventDetails (event: CEXOrderEvent) {
-    const { page, mkt: { base, quote } } = this
-    const baseAsset = app().assets[base]
-    const quoteAsset = app().assets[quote]
+    const { page, mkt: { baseID, quoteID } } = this
+    const baseAsset = app().assets[baseID]
+    const quoteAsset = app().assets[quoteID]
     const [bui, qui] = [baseAsset.unitInfo, quoteAsset.unitInfo]
     const [baseTicker, quoteTicker] = [bui.conventional.unit, qui.conventional.unit]
 
@@ -450,7 +450,7 @@ export default class MarketMakerLogsPage extends BasePage {
     this.cexOrderIDCopyListener = () => { setupCopyBtn(event.id, page.cexOrderID, page.copyCexOrderID, '#1e7d11') }
     page.copyCexOrderID.addEventListener('click', this.cexOrderIDCopyListener)
     page.cexOrderID.setAttribute('title', event.id)
-    const rate = app().conventionalRate(base, quote, event.rate)
+    const rate = app().conventionalRate(baseID, quoteID, event.rate)
     page.cexOrderRate.textContent = `${rate} ${baseTicker}/${quoteTicker}`
     page.cexOrderQty.textContent = `${event.qty / bui.conventional.conversionFactor} ${baseTicker}`
     if (event.sell) {

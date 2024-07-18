@@ -128,7 +128,7 @@ const txMappingVersion = 2
 const txDBVersion = txMappingVersion
 
 type txDB interface {
-	run(ctx context.Context)
+	dex.Connector
 	storeTx(wt *extendedWalletTx) error
 	getTxs(n int, refID *common.Hash, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error)
 	// getTx gets a single transaction. It is not an error if the tx is not known.
@@ -174,32 +174,36 @@ func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
 		filePath: filePath,
 		log:      log,
 	}
-
-	err = db.updateVersion()
-	if err != nil {
-		return nil, fmt.Errorf("failed to update db: %w", err)
-	}
 	return db, nil
 }
 
-func (db *badgerTxDB) run(ctx context.Context) {
-	defer func() {
-		db.updateWG.Wait()
-		db.Close()
-	}()
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			err := db.RunValueLogGC(0.5)
-			if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
-				db.log.Errorf("garbage collection error: %v", err)
-			}
-		case <-ctx.Done():
-			return
-		}
+func (db *badgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	if err := db.updateVersion(); err != nil {
+		return nil, fmt.Errorf("failed to update db: %w", err)
 	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer db.Close()
+		defer db.updateWG.Wait()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				err := db.RunValueLogGC(0.5)
+				if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
+					db.log.Errorf("garbage collection error: %v", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return &wg, nil
 }
 
 // txForNonce gets the registered for the given nonce.

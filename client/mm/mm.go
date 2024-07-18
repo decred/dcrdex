@@ -58,8 +58,8 @@ var _ dexOrderBook = (*orderbook.OrderBook)(nil)
 // MarketWithHost represents a market on a specific dex server.
 type MarketWithHost struct {
 	Host    string `json:"host"`
-	BaseID  uint32 `json:"base"`
-	QuoteID uint32 `json:"quote"`
+	BaseID  uint32 `json:"baseID"`
+	QuoteID uint32 `json:"quoteID"`
 }
 
 func (m MarketWithHost) String() string {

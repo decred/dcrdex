@@ -809,8 +809,8 @@ export interface CEXConfig {
 
 export interface MarketWithHost {
   host: string
-  base: number
-  quote: number
+  baseID: number
+  quoteID: number
 }
 
 export interface MMCEXStatus {
