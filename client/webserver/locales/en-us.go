@@ -379,6 +379,7 @@ var EnUS = map[string]*intl.Translation{
 	"show advanced options":  {T: "show advanced options"},
 	"hide advanced options":  {T: "hide advanced options"},
 	"manage_peers":           {T: "Manage Peers"},
+	"enter_peer_address":     {T: "Enter peer address"},
 	"add_peer":               {T: "Add Peer"},
 	"address":                {T: "Address"},
 	"source":                 {T: "Source"},
