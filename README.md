@@ -4,7 +4,7 @@
 [![ISC License](https://img.shields.io/badge/license-Blue_Oak-007788.svg)](https://blueoakcouncil.org/license/1.0.0)
 [![GoDoc](https://img.shields.io/badge/go.dev-reference-blue.svg?logo=go&logoColor=lightblue)](https://pkg.go.dev/decred.org/dcrdex)
 
-### Bison Wallet and DCRDEX development
+## Bison Wallet and DCRDEX development
 
 This is the repository for development of Bison Wallet, DCRDEX, and Tatanka
 Mesh.
@@ -46,7 +46,7 @@ Our goal is to find a balance of convenience and privacy that works for you,
 while giving you access to advanced features most wallets ignore. For many
 assets, we can cut out the middleman altogether and allow you to interact
 directly with the blockchain network. This type of wallet is highly-resilient to
-data collection and censorship. 
+data collection and censorship.
 
 We also focus on bringing advanced, asset-specific features for out wallets.
 With Decred, you can use CoinShuffle++ to further anonymize your funds, or stake
