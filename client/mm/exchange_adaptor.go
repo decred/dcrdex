@@ -750,6 +750,7 @@ func (u *unifiedExchangeAdaptor) updateCEXOrderEvent(trade *libxc.Trade, eventID
 // updateDepositEvent updates the event log with the current state of a
 // pending deposit and sends an event notification.
 func (u *unifiedExchangeAdaptor) updateDepositEvent(deposit *pendingDeposit) {
+	deposit.mtx.RLock()
 	e := &MarketMakingEvent{
 		ID:             deposit.eventLogID,
 		TimeStamp:      deposit.timestamp,
@@ -761,6 +762,7 @@ func (u *unifiedExchangeAdaptor) updateDepositEvent(deposit *pendingDeposit) {
 			CEXCredit:   deposit.amtCredited,
 		},
 	}
+	deposit.mtx.RUnlock()
 
 	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, e, u.balanceState())
 	u.notifyEvent(e)
