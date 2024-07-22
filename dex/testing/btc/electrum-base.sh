@@ -34,9 +34,7 @@ fi
 source ${ELECTRUM_DIR}/venv/bin/activate
 python -m ensurepip --upgrade
 pip install .
-pip install requests cryptography pycryptodomex pyqt5 scrypt
-
-./contrib/pull_locale # I think we need this?
+pip install requests cryptography pycryptodomex pyqt5 scrypt setuptools
 
 cp "${SCRIPT_DIR}/electrum_default_wallet" "${NET_DIR}/wallets/default_wallet"
 

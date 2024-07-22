@@ -278,7 +278,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 	return opts
 }
 
-// RPCConfigOpts are the settings that are used to connect to and external RPC
+// RPCConfigOpts are the settings that are used to connect to an external RPC
 // wallet.
 func RPCConfigOpts(name, rpcPort string) []*asset.ConfigOption {
 	return []*asset.ConfigOption{
@@ -321,13 +321,14 @@ type TxInSigner func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscrip
 
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
-	WalletCFG         *asset.WalletConfig
-	MinNetworkVersion uint64
-	WalletInfo        *asset.WalletInfo
-	Symbol            string
-	Logger            dex.Logger
-	Network           dex.Network
-	ChainParams       *chaincfg.Params
+	WalletCFG          *asset.WalletConfig
+	MinNetworkVersion  uint64
+	MinElectrumVersion dex.Semver
+	WalletInfo         *asset.WalletInfo
+	Symbol             string
+	Logger             dex.Logger
+	Network            dex.Network
+	ChainParams        *chaincfg.Params
 	// Ports is the default wallet RPC tcp ports used when undefined in
 	// WalletConfig.
 	Ports               dexbtc.NetPorts
@@ -1100,6 +1101,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		return &ExchangeWalletAccelerator{rpcWallet}, nil
 	case walletTypeElectrum:
 		cloneCFG.Ports = dexbtc.NetPorts{} // no default ports
+		ver, err := dex.SemverFromString(needElectrumVersion)
+		if err != nil {
+			return nil, err
+		}
+		cloneCFG.MinElectrumVersion = *ver
 		return ElectrumWallet(cloneCFG)
 	default:
 		makeCustomWallet, ok := customSPVWalletConstructors[cfg.Type]

@@ -30,6 +30,8 @@ type WalletClient struct {
 	// Timeout is the timeout on http requests. A 10 second default is set by
 	// the constructor.
 	Timeout time.Duration
+
+	includeIgnoreWarnings atomic.Bool
 }
 
 // NewWalletClient constructs a new Electrum wallet RPC client with the given

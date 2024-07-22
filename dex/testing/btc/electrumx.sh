@@ -37,7 +37,7 @@ if [ ! -d "${REPO_DIR}/.git" ]; then
     git remote add origin https://github.com/spesmilo/electrumx.git
 fi
 
-git fetch --depth 1 origin fb037fbd23b8ce418cd67d68bbf8d32e69ecef62
+git fetch --depth 1 origin 914938264e5621ea8980be6d3e69964e7f219d16
 git reset --hard FETCH_HEAD
 
 if [ ! -d "${ELECTRUMX_DIR}/venv" ]; then

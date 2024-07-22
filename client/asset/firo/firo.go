@@ -29,10 +29,11 @@ const (
 	// Zcoin XZC
 	BipID = 136
 	// Lelantus Spark. Net proto 90031. Wallet version 130000
-	minNetworkVersion  = 141303
-	walletTypeRPC      = "firodRPC"
-	walletTypeElectrum = "electrumRPC"
-	estimateFeeConfs   = 2 // 2 blocks should be enough
+	minNetworkVersion   = 141303
+	walletTypeRPC       = "firodRPC"
+	walletTypeElectrum  = "electrumRPC"
+	estimateFeeConfs    = 2 // 2 blocks should be enough
+	needElectrumVersion = "4.1.5"
 )
 
 var (
@@ -183,6 +184,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	case walletTypeElectrum:
 		// override Ports - no default ports
 		cloneCFG.Ports = dexbtc.NetPorts{}
+		ver, err := dex.SemverFromString(needElectrumVersion)
+		if err != nil {
+			return nil, err
+		}
+		cloneCFG.MinElectrumVersion = *ver
 		return btc.ElectrumWallet(cloneCFG)
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q for firo", cfg.Type)
