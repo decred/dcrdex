@@ -48,12 +48,12 @@ checkmark in the "native" column, no external software is required.
 
 | Coin         | native | full node | Electrum | notes                        |
 |--------------|--------|-----------|----------|------------------------------|
-| Bitcoin      |    ✓   | [v0.21-v24](https://bitcoincore.org/en/download/) | [v4.2.x](https://electrum.org/) |                              |
-| Decred       |    ✓   | [v1.7-1.8](https://github.com/decred/decred-release/releases) |     x    |                              |
+| Bitcoin      |    ✓   | [v27.0](https://bitcoincore.org/en/download/) | [v4.5.5](https://electrum.org/) |                              |
+| Decred       |    ✓   | [v2.0.3](https://github.com/decred/decred-release/releases) |     x    |                              |
 | Ethereum     |    ✓   | geth IPC/http/ws |   N/A   |  see <https://github.com/decred/dcrdex/wiki/Ethereum>   |
-| Litecoin     |    ✓   | [v0.21.2.2](https://litecoin.org/) | [v4.2.x](https://electrum-ltc.org/) | may require a [bootstrap peer](https://gist.github.com/chappjc/d0f26b12258f8531bb78b37f38d080a0) |
-| Bitcoin Cash |    ✓   | [v24+](https://bitcoincashnode.org/) |     x    | use only Bitcoin Cash Node for full node |
-| Dogecoin     |    x   |  [v1.14.5+](https://dogecoin.com/) |     x    |                              |
+| Litecoin     |    ✓   | [v0.21.2.1](https://litecoin.org/) | [v4.2.2](https://electrum-ltc.org/) | |
+| Bitcoin Cash |    ✓   | [v27.0.0](https://bitcoincashnode.org/) |     x    | use only Bitcoin Cash Node for full node |
+| Dogecoin     |    x   |  [v1.14.7.0](https://dogecoin.com/) |     x    |                              |
 | Zcash        |    x   |   [v5.4.2](https://z.cash/download/)  |     x    |                              |
 
 NOTE: The Electrum option is less mature and provides less privacy than the
@@ -76,7 +76,8 @@ several blocks.
 
 ### Initial Setup
 
-1. Start the client. For standalone Bison Wallet (**bisonw**), open a command prompt
+1. Start the client. For installed versions, open through your system applications menu.
+   For standalone Bison Wallet (**bisonw**), open a command prompt
    in the folder containing the bisonw application and run it. e.g. `./bisonw` on
    Mac and Linux, or `bisonw.exe` on Windows. To avoid the command prompt on
    Windows, `bisonw-tray.exe` may be run instead. If using Decrediton instead of
