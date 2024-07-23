@@ -300,7 +300,28 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 	return basisPrice - adj
 }
 
-func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, sellOrders []*multiTradePlacement) {
+func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradePlacement, err error) {
+	basisPrice := m.calculator.basisPrice()
+	if basisPrice == 0 {
+		return nil, nil, fmt.Errorf("no basis price available")
+	}
+
+	feeGap, err := m.calculator.feeGapStats(basisPrice)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error calculating fee gap stats: %w", err)
+	}
+
+	m.registerFeeGap(feeGap)
+	var feeAdj uint64
+	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
+		feeAdj = feeGap.FeeGap / 2
+	}
+
+	if m.log.Level() == dex.LevelTrace {
+		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
+			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
+	}
+
 	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
 		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
 		for i, p := range orderPlacements {
@@ -325,7 +346,7 @@ func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, 
 
 	buyOrders = orders(m.cfg().BuyPlacements, false)
 	sellOrders = orders(m.cfg().SellPlacements, true)
-	return buyOrders, sellOrders
+	return buyOrders, sellOrders, nil
 }
 
 func (m *basicMarketMaker) rebalance(newEpoch uint64) {
@@ -335,30 +356,14 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	defer m.rebalanceRunning.Store(false)
 
 	m.log.Tracef("rebalance: epoch %d", newEpoch)
-	basisPrice := m.calculator.basisPrice()
-	if basisPrice == 0 {
-		m.log.Errorf("No basis price available")
-		return
-	}
 
-	feeGap, err := m.calculator.feeGapStats(basisPrice)
+	buyOrders, sellOrders, err := m.ordersToPlace()
 	if err != nil {
-		m.log.Errorf("Could not calculate fee-gap stats: %v", err)
+		m.log.Errorf("error calculating orders to place: %v. cancelling all orders", err)
+		m.tryCancelOrders(m.ctx, &newEpoch, false)
 		return
 	}
 
-	m.registerFeeGap(feeGap)
-	var feeAdj uint64
-	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
-		feeAdj = feeGap.FeeGap / 2
-	}
-
-	if m.log.Level() == dex.LevelTrace {
-		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
-			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
-	}
-
-	buyOrders, sellOrders := m.ordersToPlace(basisPrice, feeAdj)
 	m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
 	m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
 }
