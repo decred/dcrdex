@@ -685,64 +685,6 @@
               <span class="fs14 grey ms-1">epochs</span>
             </div>
           </div>
-
-          {{- /* EMPTY MARKET RATE */ -}}
-          <div id="emptyMarketRateBox" class="flex-stretch-column pt-2 mt-2 border-top">
-            <label for="emptyMarketRateCheckbox" class="fs16 d-flex align-items-center justify-content-between">
-              <div class="flex-center">
-                <input type="checkbox" id="emptyMarketRateCheckbox" class="form-check-input me-2 mt-0" checked>
-                <span>[[[empty_market_rate]]]</span>
-              </div>
-              <span class="ico-info fs12" data-tooltip="[[[empty_market_rate_tooltip]]]"></span>
-            </label>
-            <div id="emptyMarketRateInputBox" class="mt-2 d-flex align-items-center justify-content-end">
-              <input type="number" id="emptyMarketRateInput" class="w-25 micro wide text-end">
-              <span class="fs14 grey ms-1">
-                <span data-quote-ticker></span>
-                <span>/</span>
-                <span data-base-ticker></span>
-              </span>
-            </div>
-            <div id="emptyMarketRateErr" class="pt-2 flex-center text-danger d-hide"></div>
-          </div>
-
-          {{- /* ORACLE SETTINGS */ -}}
-          <div id="oraclesSettingBox" class="flex-stretch-column pt-2 mt-2 border-top">
-            {{- /* USE ORACLE CHECKBOX */ -}}
-            <label for="useOracleCheckbox" class="fs16 d-flex align-items-center justify-content-between">
-              <div class="flex-center">
-                <input type="checkbox" id="useOracleCheckbox" class="form-check-input me-2 mt-0" checked>
-                <span>[[[use_oracles]]]</span>
-              </div>
-              <span class="ico-info fs12" data-tooltip="[[[use_oracles_tooltip]]]"></span>
-            </label>
-
-            {{- /* ORACLE WEIGHTING */ -}}
-            <div id="oracleWeightingBox" class="mt-2">
-              <div class="d-flex align-items-center justify-content-between">
-                <span>[[[Oracle weight]]]</span>
-                <span class="ico-info fs12" data-tooltip="[[[oracle_weighting_tooltip]]]"></span>
-              </div>
-              <div class="d-flex align-items-center justify-content-end">
-                <div id="oracleWeightingSlider" class="mini-slider flex-grow-1 me-2"></div>
-                <input type="number" id="oracleWeighting" class="micro text-end">
-                <span class="fs14 grey ms-1">%</span>
-              </div>
-            </div>
-
-            {{- /* ORACLE BIAS */ -}}
-            <div id="oracleBiasBox" class="mt-2">
-              <div class="d-flex align-items-center justify-content-between">
-                <span>[[[Oracle bias]]]</span>
-                <span class="ico-info fs12" data-tooltip="[[[oracle_bias_tooltip]]]"></span>
-              </div>
-              <div class="d-flex align-items-center justify-content-end">
-                <div id="oracleBiasSlider" class="mini-slider flex-grow-1 me-2"></div>
-                <input type="number" id="oracleBias" class="micro text-end">
-                <span class="fs14 grey ms-1">%</span>
-              </div>
-            </div>
-          </div>
         </section>
       </div>
     </div>

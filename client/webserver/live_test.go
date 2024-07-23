@@ -2386,13 +2386,9 @@ func randomBotConfig(mkt *mm.MarketWithHost) *mm.BotConfig {
 	switch {
 	case typeRoll < 0.33: // basic MM
 		gapStrategy := gapStrategies[rand.Intn(len(gapStrategies))]
-		oracleWeight := rand.Float64()
-		oracleBias := rand.Float64()
 		basicCfg := &mm.BasicMarketMakingConfig{
-			GapStrategy:     gapStrategies[rand.Intn(len(gapStrategies))],
-			DriftTolerance:  rand.Float64() * 0.01,
-			OracleWeighting: &oracleWeight,
-			OracleBias:      oracleBias,
+			GapStrategy:    gapStrategies[rand.Intn(len(gapStrategies))],
+			DriftTolerance: rand.Float64() * 0.01,
 		}
 		cfg.BasicMMConfig = basicCfg
 		lots, gapFactors := newPlacements(gapStrategy)

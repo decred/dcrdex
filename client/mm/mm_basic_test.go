@@ -37,76 +37,34 @@ func TestBasisPrice(t *testing.T) {
 	}
 
 	tests := []*struct {
-		name         string
-		midGap       uint64
-		oraclePrice  uint64
-		oracleBias   float64
-		oracleWeight float64
-		conversions  map[uint32]float64
-		fiatRate     uint64
-		exp          uint64
+		name        string
+		oraclePrice uint64
+		fiatRate    uint64
+		exp         uint64
 	}{
 		{
-			name:   "just mid-gap is enough",
-			midGap: 123e5,
-			exp:    123e5,
+			name:        "oracle price",
+			oraclePrice: 2000,
+			fiatRate:    1000,
+			exp:         2000,
 		},
 		{
-			name:         "mid-gap + oracle weight",
-			midGap:       1950,
-			oraclePrice:  2000,
-			oracleWeight: 0.5,
-			exp:          1975,
+			name:        "no oracle price",
+			oraclePrice: 0,
+			fiatRate:    1000,
+			exp:         1000,
 		},
 		{
-			name:         "adjusted mid-gap + oracle weight",
-			midGap:       1000, // adjusted to 1940
-			oraclePrice:  2000,
-			oracleWeight: 0.5,
-			exp:          1970,
-		},
-		{
-			name:         "no mid-gap effectively sets oracle weight to 100%",
-			midGap:       0,
-			oraclePrice:  2000,
-			oracleWeight: 0.5,
-			exp:          2000,
-		},
-		{
-			name:         "mid-gap + oracle weight + oracle bias",
-			midGap:       1950,
-			oraclePrice:  2000,
-			oracleBias:   -0.01, // minus 20
-			oracleWeight: 0.75,
-			exp:          1972, // 0.25 * 1950 + 0.75 * (2000 - 20) = 1972
-		},
-		{
-			name:         "no mid-gap and no oracle weight fails to produce result",
-			midGap:       0,
-			oraclePrice:  0,
-			oracleWeight: 0.75,
-			exp:          0,
-		},
-		{
-			name:         "no mid-gap and no oracle weight, but fiat rate is set",
-			midGap:       0,
-			oraclePrice:  0,
-			oracleWeight: 0.75,
-			fiatRate:     1200,
-			exp:          1200,
+			name:        "no oracle price or fiat rate",
+			oraclePrice: 0,
+			fiatRate:    0,
+			exp:         0,
 		},
 	}
 
 	for _, tt := range tests {
 		oracle := &tOracle{
 			marketPrice: mkt.MsgRateToConventional(tt.oraclePrice),
-		}
-		ob := &tOrderBook{
-			midGap: tt.midGap,
-		}
-		cfg := &BasicMarketMakingConfig{
-			OracleWeighting: &tt.oracleWeight,
-			OracleBias:      tt.oracleBias,
 		}
 
 		tCore := newTCore()
@@ -115,9 +73,8 @@ func TestBasisPrice(t *testing.T) {
 
 		calculator := &basicMMCalculatorImpl{
 			market: mustParseMarket(mkt),
-			book:   ob,
 			oracle: oracle,
-			cfg:    cfg,
+			cfg:    &BasicMarketMakingConfig{},
 			log:    tLogger,
 			core:   adaptor,
 		}

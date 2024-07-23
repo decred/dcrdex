@@ -749,9 +749,6 @@ export interface BasicMarketMakingConfig {
   sellPlacements: OrderPlacement[]
   buyPlacements: OrderPlacement[]
   driftTolerance: number
-  oracleWeighting: number
-  oracleBias: number
-  emptyMarketRate: number
 }
 
 export interface ArbMarketMakingPlacement {

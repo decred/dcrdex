@@ -104,20 +104,6 @@ const defaultOrderPersistence = {
   range: 40,
   prec: 0
 }
-const defaultOracleBias = {
-  value: 0,
-  minV: -0.01,
-  maxV: 0.01,
-  range: 0.02,
-  prec: 4
-}
-const defaultOracleWeighting = {
-  value: 1,
-  minV: 0,
-  maxV: 1,
-  range: 1,
-  prec: 4
-}
 const defaultProfit = {
   prec: 3,
   value: 0.01,
@@ -160,9 +146,6 @@ const defaultMarketMakingConfig: ConfigState = {
   sellPlacements: [],
   buyPlacements: [],
   driftTolerance: defaultDriftTolerance.value,
-  oracleWeighting: 0.1,
-  oracleBias: 0,
-  emptyMarketRate: 0,
   profit: 0.02,
   orderPersistence: defaultOrderPersistence.value,
   cexRebalance: true,
@@ -192,14 +175,9 @@ interface cexButton {
  */
 interface ConfigState {
   gapStrategy: string
-  useOracles: boolean
   profit: number
-  useEmptyMarketRate: boolean
-  emptyMarketRate: number
   driftTolerance: number
   orderPersistence: number // epochs
-  oracleWeighting: number
-  oracleBias: number
   cexRebalance: boolean
   disabled: boolean
   buyPlacements: OrderPlacement[]
@@ -273,10 +251,6 @@ export default class MarketMakerSettingsPage extends BasePage {
   driftToleranceSlider: MiniSlider
   orderPersistence: NumberInput
   orderPersistenceSlider: MiniSlider
-  oracleBias: NumberInput
-  oracleBiasSlider: MiniSlider
-  oracleWeighting: NumberInput
-  oracleWeightingSlider: MiniSlider
 
   constructor (main: HTMLElement, specs: BotSpecs) {
     super()
@@ -388,42 +362,6 @@ export default class MarketMakerSettingsPage extends BasePage {
       const [v] = toPrecision(rawV, prec)
       this.updatedConfig.orderPersistence = v
       this.orderPersistence.setValue(v)
-    })
-
-    this.oracleBias = new NumberInput(page.oracleBias, {
-      prec: defaultOracleBias.prec - 2,
-      min: defaultOracleBias.minV * 100,
-      changed: (rawV: number) => {
-        const { minV, range, prec } = defaultOracleBias
-        const [v] = toFourSigFigs(rawV / 100, prec)
-        this.oracleBiasSlider.setValue((v - minV) / range)
-        this.updatedConfig.oracleBias = v
-      }
-    })
-
-    this.oracleBiasSlider = new MiniSlider(page.oracleBiasSlider, (r: number) => {
-      const { minV, range, prec } = defaultOracleBias
-      const [v] = toFourSigFigs(minV + r * range, prec)
-      this.oracleBias.setValue(v * 100)
-      this.updatedConfig.oracleBias = v
-    })
-
-    this.oracleWeighting = new NumberInput(page.oracleWeighting, {
-      prec: defaultOracleWeighting.prec - 2,
-      min: defaultOracleWeighting.minV * 100,
-      changed: (rawV: number) => {
-        const { minV, range, prec } = defaultOracleWeighting
-        const [v] = toFourSigFigs(rawV / 100, prec)
-        this.oracleWeightingSlider.setValue((v - minV) / range)
-        this.updatedConfig.oracleWeighting = v / 100
-      }
-    })
-
-    this.oracleWeightingSlider = new MiniSlider(page.oracleWeightingSlider, (r: number) => {
-      const { minV, range, prec } = defaultOracleWeighting
-      const [v] = toFourSigFigs(minV + r * range, prec)
-      this.oracleWeighting.setValue(v * 100)
-      this.updatedConfig.oracleWeighting = v
     })
 
     this.qcProfit = new NumberInput(page.qcProfit, {
@@ -561,26 +499,6 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.updateModifiedMarkers()
     })
 
-    Doc.bind(page.useOracleCheckbox, 'change', () => {
-      this.useOraclesChanged()
-      this.updateModifiedMarkers()
-    })
-
-    Doc.bind(page.emptyMarketRateCheckbox, 'change', () => {
-      this.useEmptyMarketRateChanged()
-      this.updateModifiedMarkers()
-    })
-
-    Doc.bind(page.emptyMarketRateInput, 'change', () => {
-      Doc.hide(page.emptyMarketRateErr)
-      this.updatedConfig.emptyMarketRate = parseFloatDefault(page.emptyMarketRateInput.value, 0)
-      this.updateModifiedMarkers()
-      if (this.updatedConfig.emptyMarketRate === 0) {
-        Doc.show(page.emptyMarketRateErr)
-        page.emptyMarketRateErr.textContent = intl.prep(intl.ID_NO_ZERO)
-      }
-    })
-
     this.botTypeSelectors = Doc.applySelector(page.botTypeForm, '[data-bot-type]')
     for (const div of this.botTypeSelectors) {
       Doc.bind(div, 'click', () => {
@@ -659,12 +577,9 @@ export default class MarketMakerSettingsPage extends BasePage {
       const oldBotType = botCfg.arbMarketMakingConfig ? botTypeArbMM : botCfg.basicMarketMakingConfig ? botTypeBasicMM : botTypeBasicArb
       if (oldBotType !== botType) botCfg = undefined
     }
-    const dmm = defaultMarketMakingConfig
     Doc.setVis(botCfg, page.deleteBttnBox)
 
     const oldCfg = this.originalConfig = Object.assign({}, defaultMarketMakingConfig, {
-      useOracles: dmm.oracleWeighting > 0,
-      useEmptyMarketRate: dmm.emptyMarketRate > 0,
       disabled: viewOnly,
       baseOptions: this.defaultWalletOptions(baseID),
       quoteOptions: this.defaultWalletOptions(quoteID),
@@ -693,9 +608,6 @@ export default class MarketMakerSettingsPage extends BasePage {
         oldCfg.sellPlacements = mmCfg.sellPlacements
         oldCfg.driftTolerance = mmCfg.driftTolerance
         oldCfg.gapStrategy = mmCfg.gapStrategy
-        oldCfg.oracleWeighting = mmCfg.oracleWeighting
-        oldCfg.oracleBias = mmCfg.oracleBias
-        oldCfg.emptyMarketRate = mmCfg.emptyMarketRate
       } else if (arbMMCfg) {
         const { buyPlacements, sellPlacements } = arbMMCfg
         oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
@@ -730,7 +642,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     setMarketElements(document.body, baseID, quoteID, host)
-    Doc.setVis(botType === botTypeBasicMM, page.emptyMarketRateBox)
     Doc.setVis(botType !== botTypeBasicArb, page.driftToleranceBox, page.switchToAdvanced)
     Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
 
@@ -1408,9 +1319,6 @@ export default class MarketMakerSettingsPage extends BasePage {
       }
     }
     page.sellPlacementsTableWrapper.classList.toggle('modified', sellPlacementsModified)
-    page.useOracleCheckbox.classList.toggle('modified', oldCfg.useOracles !== newCfg.useOracles)
-    page.emptyMarketRateInput.classList.toggle('modified', oldCfg.emptyMarketRate !== newCfg.emptyMarketRate)
-    page.emptyMarketRateCheckbox.classList.toggle('modified', oldCfg.useEmptyMarketRate !== newCfg.useEmptyMarketRate)
   }
 
   /*
@@ -1674,34 +1582,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     for (const p of cfg.sellPlacements) this.addPlacement(false, p, gapStrategy)
   }
 
-  useOraclesChanged () {
-    const { page, updatedConfig: cfg } = this
-    if (page.useOracleCheckbox.checked) {
-      Doc.show(page.oracleBiasBox, page.oracleWeightingBox)
-      cfg.useOracles = true
-      this.oracleWeighting.setValue((cfg.oracleWeighting || defaultMarketMakingConfig.oracleWeighting) * 100)
-      this.oracleBias.setValue((cfg.oracleBias || defaultMarketMakingConfig.oracleBias) * 100)
-    } else {
-      Doc.hide(page.oracleBiasBox, page.oracleWeightingBox)
-      cfg.useOracles = false
-    }
-  }
-
-  useEmptyMarketRateChanged () {
-    const { page, updatedConfig: cfg } = this
-    if (page.emptyMarketRateCheckbox.checked) {
-      cfg.useEmptyMarketRate = true
-      const r = cfg.emptyMarketRate ?? this.originalConfig.emptyMarketRate ?? 0
-      page.emptyMarketRateInput.value = String(r)
-      cfg.emptyMarketRate = r
-      Doc.show(page.emptyMarketRateInputBox)
-      this.updateModifiedMarkers()
-    } else {
-      cfg.useEmptyMarketRate = false
-      Doc.hide(page.emptyMarketRateInputBox)
-    }
-  }
-
   /*
    * setOriginalValues sets the updatedConfig field to be equal to the
    * and sets the values displayed buy each field input to be equal
@@ -1733,23 +1613,10 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.orderPersistence.setValue(persist)
     this.orderPersistenceSlider.setValue(persist / defaultOrderPersistence.maxV)
 
-    const oracleBias = cfg.oracleBias ?? defaultOracleBias.value
-    this.oracleBias.setValue(oracleBias * 100)
-    this.oracleBiasSlider.setValue((oracleBias - defaultOracleBias.minV) / defaultOracleBias.range)
-
-    const oracleWeight = cfg.oracleWeighting ?? defaultOracleWeighting.value
-    this.oracleWeighting.setValue(oracleWeight * 100)
-    this.oracleWeightingSlider.setValue((oracleWeight - defaultOracleWeighting.minV) / defaultOracleWeighting.range)
-
     const profit = cfg.profit ?? defaultProfit.value
     page.profitInput.value = String(profit * 100)
     this.qcProfit.setValue(profit * 100)
     this.qcProfitSlider.setValue((profit - defaultProfit.minV) / defaultProfit.range)
-
-    page.useOracleCheckbox.checked = cfg.useOracles && oldCfg.oracleWeighting > 0
-    this.useOraclesChanged()
-    page.emptyMarketRateCheckbox.checked = cfg.useEmptyMarketRate && cfg.emptyMarketRate > 0
-    this.useEmptyMarketRateChanged()
 
     if (cexName) {
       page.cexRebalanceCheckbox.checked = cfg.cexRebalance
@@ -1762,11 +1629,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.setGapFactorLabels(cfg.gapStrategy)
 
     if (botType === botTypeBasicMM) {
-      Doc.show(page.gapStrategyBox, page.oraclesSettingBox)
+      Doc.show(page.gapStrategyBox)
       Doc.hide(page.profitSelectorBox, page.orderPersistenceBox)
       this.setGapFactorLabels(page.gapStrategySelect.value || '')
     } else if (cexName && app().mmStatus.cexes[cexName]) {
-      Doc.hide(page.gapStrategyBox, page.oraclesSettingBox)
+      Doc.hide(page.gapStrategyBox)
       Doc.show(page.profitSelectorBox, page.orderPersistenceBox)
       this.setArbMMLabels()
     }
@@ -1790,7 +1657,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     let ok = true
     const {
       page, specs: { botType },
-      updatedConfig: { sellPlacements, buyPlacements, profit, useEmptyMarketRate, emptyMarketRate }
+      updatedConfig: { sellPlacements, buyPlacements, profit }
     } = this
     const setError = (errEl: PageElement, errID: string) => {
       ok = false
@@ -1800,7 +1667,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
     if (showErrors) {
       Doc.hide(
-        page.buyPlacementsErr, page.sellPlacementsErr, page.profitInputErr, page.emptyMarketRateErr
+        page.buyPlacementsErr, page.sellPlacementsErr, page.profitInputErr
       )
     }
     if (botType !== botTypeBasicArb && buyPlacements.length + sellPlacements.length === 0) {
@@ -1810,10 +1677,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (botType !== botTypeBasicMM) {
       if (isNaN(profit)) setError(page.profitInputErr, intl.ID_INVALID_VALUE)
       else if (profit === 0) setError(page.profitInputErr, intl.ID_NO_ZERO)
-    } else { // basic mm
-      // TODO: Should we enforce an empty market rate if there are no
-      // oracles?
-      if (useEmptyMarketRate && emptyMarketRate === 0) setError(page.emptyMarketRateErr, intl.ID_NO_ZERO)
     }
     return ok
   }
@@ -1921,10 +1784,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       gapStrategy: cfg.gapStrategy,
       sellPlacements: cfg.sellPlacements,
       buyPlacements: cfg.buyPlacements,
-      driftTolerance: cfg.driftTolerance,
-      oracleWeighting: cfg.useOracles ? cfg.oracleWeighting : 0,
-      oracleBias: cfg.useOracles ? cfg.oracleBias : 0,
-      emptyMarketRate: cfg.useEmptyMarketRate ? cfg.emptyMarketRate : 0
+      driftTolerance: cfg.driftTolerance
     }
     return mmCfg
   }
