@@ -236,9 +236,7 @@ export default class Application {
       }, 0)
     }
 
-    if (process.env.NODE_ENV === 'development') {
-      window.user = () => this.user
-    }
+    window.user = () => this.user
   }
 
   /**
