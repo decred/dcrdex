@@ -347,7 +347,10 @@ export default class MarketMakerPage extends BasePage {
     Doc.setVis(!status, tmpl.unconfigured)
     Doc.setVis(status && !status.connectErr, tmpl.configured)
     Doc.setVis(status?.connectErr, tmpl.connectErrBox)
-    if (status?.connectErr) tmpl.connectErr.textContent = `connect error: ${status.connectErr}`
+    if (status?.connectErr) {
+      tmpl.connectErr.textContent = 'connection error'
+      tmpl.connectErr.dataset.tooltip = status.connectErr
+    }
     tmpl.logo.classList.toggle('greyscale', !status)
     if (!status) return
     let usdBal = 0
@@ -712,9 +715,15 @@ class Bot extends BotMarket {
   }
 
   async start () {
-    const { page, alloc, baseID, quoteID, host, cfg: { uiConfig: { cexRebalance } } } = this
+    const { page, alloc, baseID, quoteID, host, cexName, cfg: { uiConfig: { cexRebalance } } } = this
 
     Doc.hide(page.errMsg)
+    if (cexName && !app().mmStatus.cexes[cexName]?.connected) {
+      page.errMsg.textContent = `${cexName} not connected`
+      Doc.show(page.errMsg)
+      return
+    }
+
     // round allocations values.
     for (const m of [alloc.dex, alloc.cex]) {
       for (const [assetID, v] of Object.entries(m)) m[parseInt(assetID)] = Math.round(v)
