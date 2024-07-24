@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexzec "decred.org/dcrdex/dex/networks/zec"
 	"decred.org/dcrdex/dex/txfee"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
@@ -150,7 +151,8 @@ type Backend struct {
 	name string
 	// segwit should be set to true for blockchains that support segregated
 	// witness.
-	segwit bool
+	segwit                     bool
+	initTxSizeBase, initTxSize uint64
 	// node is used throughout for RPC calls. For testing, it can be set to a stub.
 	node *RPCClient
 	// The block cache stores just enough info about the blocks to shortcut future
@@ -272,6 +274,14 @@ func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 		txHasher = hashTx
 	}
 
+	initTxSize, initTxSizeBase := uint64(dexbtc.InitTxSize), uint64(dexbtc.InitTxSizeBase)
+	switch {
+	case cloneCfg.Segwit:
+		initTxSize, initTxSizeBase = dexbtc.InitTxSizeSegwit, dexbtc.InitTxSizeBaseSegwit
+	case cloneCfg.Name == "zcl":
+		initTxSize, initTxSizeBase = dexzec.InitTxSize, dexzec.InitTxSizeBase
+	}
+
 	return &Backend{
 		rpcCfg:             rpcCfg,
 		cfg:                cloneCfg,
@@ -281,6 +291,8 @@ func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 		chainParams:        cloneCfg.ChainParams,
 		log:                cloneCfg.Logger,
 		segwit:             cloneCfg.Segwit,
+		initTxSizeBase:     initTxSizeBase,
+		initTxSize:         initTxSize,
 		decodeAddr:         addrDecoder,
 		noCompetitionRate:  noCompetitionRate,
 		feeConfs:           feeConfs,
@@ -566,8 +578,8 @@ func (btc *Backend) FundingCoin(_ context.Context, coinID []byte, redeemScript [
 	return utxo, nil
 }
 
-func (*Backend) ValidateOrderFunding(swapVal, valSum, _, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
-	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, dexbtc.InitTxSizeBase, dexbtc.InitTxSize, nfo.MaxFeeRate)
+func (btc *Backend) ValidateOrderFunding(swapVal, valSum, _, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
+	reqVal := calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, btc.initTxSizeBase, btc.initTxSize, nfo.MaxFeeRate)
 	return valSum >= reqVal
 }
 
