@@ -1531,21 +1531,19 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := struct {
-		User         *core.User `json:"user"`
-		Lang         string     `json:"lang"`
-		Langs        []string   `json:"langs"`
-		Inited       bool       `json:"inited"`
-		OK           bool       `json:"ok"`
-		Experimental bool       `json:"experimental"`
-		MMStatus     *mm.Status `json:"mmStatus"`
+		User     *core.User `json:"user"`
+		Lang     string     `json:"lang"`
+		Langs    []string   `json:"langs"`
+		Inited   bool       `json:"inited"`
+		OK       bool       `json:"ok"`
+		MMStatus *mm.Status `json:"mmStatus"`
 	}{
-		User:         u,
-		Lang:         s.lang.Load().(string),
-		Langs:        s.langs,
-		Inited:       s.core.IsInitialized(),
-		OK:           true,
-		Experimental: s.experimental,
-		MMStatus:     mmStatus,
+		User:     u,
+		Lang:     s.lang.Load().(string),
+		Langs:    s.langs,
+		Inited:   s.core.IsInitialized(),
+		OK:       true,
+		MMStatus: mmStatus,
 	}
 	writeJSON(w, response)
 }

@@ -500,8 +500,14 @@ func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	m.ctx = ctx
 	cfg := m.defaultConfig()
 	for _, cexCfg := range cfg.CexConfigs {
-		if _, err := m.loadCEX(ctx, cexCfg); err != nil {
+		if c, err := m.loadCEX(ctx, cexCfg); err != nil {
 			m.log.Errorf("Error adding %s: %v", cexCfg.Name, err)
+		} else {
+			// Try to connect so we can update our balances and set the
+			// connected flag, but ignore errors.
+			if err := m.connectCEX(ctx, c); err != nil {
+				m.log.Infof("Could not connect to %q: %w", cexCfg.Name, err)
+			}
 		}
 	}
 

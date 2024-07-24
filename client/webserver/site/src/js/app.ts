@@ -87,7 +87,6 @@ interface UserResponse extends APIResponse {
   lang: string
   langs: string[]
   inited: boolean
-  experimental: boolean
   mmStatus: MarketMakingStatus
 }
 
@@ -154,7 +153,6 @@ export default class Application {
   pokes: CoreNotePlus[]
   langs: string[]
   lang: string
-  experimental: boolean
   mmStatus: MarketMakingStatus
   inited: boolean
   authed: boolean
@@ -311,7 +309,6 @@ export default class Application {
     this.authed = Boolean(resp.user)
     this.lang = resp.lang
     this.langs = resp.langs
-    this.experimental = resp.experimental
     this.mmStatus = resp.mmStatus
     if (!resp.user) return
     const user = resp.user

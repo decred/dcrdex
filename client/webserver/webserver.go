@@ -237,9 +237,8 @@ type Config struct {
 	// should be used by default since site files from older distributions may
 	// be present on the disk. When NoEmbed is true, this also implies reloading
 	// and execution of html templates on each request.
-	NoEmbed      bool
-	HttpProf     bool
-	Experimental bool
+	NoEmbed  bool
+	HttpProf bool
 }
 
 type valStamp struct {
@@ -250,20 +249,19 @@ type valStamp struct {
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to Bison Wallet.
 type WebServer struct {
-	ctx          context.Context
-	wsServer     *websocket.Server
-	mux          *chi.Mux
-	siteDir      string
-	lang         atomic.Value // string
-	langs        []string
-	core         clientCore
-	mm           MMCore
-	mmCfgPath    string
-	addr         string
-	csp          string
-	srv          *http.Server
-	html         atomic.Value // *templates
-	experimental bool
+	ctx       context.Context
+	wsServer  *websocket.Server
+	mux       *chi.Mux
+	siteDir   string
+	lang      atomic.Value // string
+	langs     []string
+	core      clientCore
+	mm        MMCore
+	mmCfgPath string
+	addr      string
+	csp       string
+	srv       *http.Server
+	html      atomic.Value // *templates
 
 	authMtx         sync.RWMutex
 	authTokens      map[string]bool
@@ -386,7 +384,6 @@ func New(cfg *Config) (*WebServer, error) {
 		wsServer:        websocket.New(cfg.Core, log.SubLogger("WS")),
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
-		experimental:    cfg.Experimental,
 		bondBuf:         map[uint32]valStamp{},
 	}
 	s.lang.Store(lang)
@@ -562,19 +559,17 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/mixingstats", s.apiMixingStats)
 			apiAuth.Post("/configuremixer", s.apiConfigureMixer)
 
-			if cfg.Experimental {
-				apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)
-				apiAuth.Post("/stopmarketmakingbot", s.apiStopMarketMakingBot)
-				apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
-				apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
-				apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)
-				apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
-				apiAuth.Post("/marketreport", s.apiMarketReport)
-				apiAuth.Post("/cexbalance", s.apiCEXBalance)
-				apiAuth.Get("/archivedmmruns", s.apiArchivedRuns)
-				apiAuth.Post("/mmrunlogs", s.apiRunLogs)
-				apiAuth.Post("/cexbook", s.apiCEXBook)
-			}
+			apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)
+			apiAuth.Post("/stopmarketmakingbot", s.apiStopMarketMakingBot)
+			apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
+			apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
+			apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)
+			apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
+			apiAuth.Post("/marketreport", s.apiMarketReport)
+			apiAuth.Post("/cexbalance", s.apiCEXBalance)
+			apiAuth.Get("/archivedmmruns", s.apiArchivedRuns)
+			apiAuth.Post("/mmrunlogs", s.apiRunLogs)
+			apiAuth.Post("/cexbook", s.apiCEXBook)
 		})
 	})
 

@@ -80,9 +80,6 @@ func LockTimeMaker(network Network) time.Duration {
 }
 
 // BondExpiry returns the bond expiry duration in seconds for a given network.
-// Once APIVersion reaches BondAPIVersion, clients should use this compiled
-// helper function. Until then, bonds are considered experimental and the
-// current value should be referenced from config response.
 func BondExpiry(net Network) int64 {
 	switch net {
 	case Mainnet:

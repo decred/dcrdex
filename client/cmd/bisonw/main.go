@@ -87,14 +87,9 @@ func runCore(cfg *app.Config) error {
 		return fmt.Errorf("error creating client core: %w", err)
 	}
 
-	var marketMaker *mm.MarketMaker
-	if cfg.Experimental {
-		// TODO: on shutdown, stop market making and wait for trades to be
-		// canceled.
-		marketMaker, err = mm.NewMarketMaker(clientCore, cfg.MMConfig.EventLogDBPath, cfg.MMConfig.BotConfigPath, logMaker.Logger("MM"))
-		if err != nil {
-			return fmt.Errorf("error creating market maker: %w", err)
-		}
+	marketMaker, err := mm.NewMarketMaker(clientCore, cfg.MMConfig.EventLogDBPath, cfg.MMConfig.BotConfigPath, logMaker.Logger("MM"))
+	if err != nil {
+		return fmt.Errorf("error creating market maker: %w", err)
 	}
 
 	// Catch interrupt signal (e.g. ctrl+c), prompting to shutdown if the user
