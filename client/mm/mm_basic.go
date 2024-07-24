@@ -12,19 +12,8 @@ import (
 	"sync/atomic"
 
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-)
-
-const (
-	// Our mid-gap rate derived from the local DEX order book is converted to an
-	// effective mid-gap that can only vary by up to 3% from the oracle rate.
-	// This is to prevent someone from taking advantage of a sparse market to
-	// force a bot into giving a favorable price. In reality a market maker on
-	// an empty market should use a high oracle bias anyway, but this should
-	// prevent catastrophe.
-	maxOracleMismatch = 0.03
 )
 
 // GapStrategy is a specifier for an algorithm to choose the maker bot's target
@@ -81,22 +70,6 @@ type BasicMarketMakingConfig struct {
 	// before they are replaced (units: ratio of price). Default: 0.1%.
 	// 0 <= x <= 0.01.
 	DriftTolerance float64 `json:"driftTolerance"`
-
-	// OracleWeighting affects how the target price is derived based on external
-	// market data. OracleWeighting, r, determines the target price with the
-	// formula:
-	//   target_price = dex_mid_gap_price * (1 - r) + oracle_price * r
-	// OracleWeighting is limited to 0 <= x <= 1.0.
-	// Fetching of price data is disabled if OracleWeighting = 0.
-	OracleWeighting *float64 `json:"oracleWeighting"`
-
-	// OracleBias applies a bias in the positive (higher price) or negative
-	// (lower price) direction. -0.05 <= x <= 0.05.
-	OracleBias float64 `json:"oracleBias"`
-
-	// EmptyMarketRate can be set if there is no market data available, and is
-	// ignored if there is market data available.
-	EmptyMarketRate float64 `json:"emptyMarketRate"`
 }
 
 func needBreakEvenHalfSpread(strat GapStrategy) bool {
@@ -104,16 +77,6 @@ func needBreakEvenHalfSpread(strat GapStrategy) bool {
 }
 
 func (c *BasicMarketMakingConfig) Validate() error {
-	if c.OracleBias < -0.05 || c.OracleBias > 0.05 {
-		return fmt.Errorf("bias %f out of bounds", c.OracleBias)
-	}
-	if c.OracleWeighting != nil {
-		w := *c.OracleWeighting
-		if w < 0 || w > 1 {
-			return fmt.Errorf("oracle weighting %f out of bounds", w)
-		}
-	}
-
 	if c.DriftTolerance == 0 {
 		c.DriftTolerance = 0.001
 	}
@@ -182,7 +145,6 @@ type basicMMCalculator interface {
 
 type basicMMCalculatorImpl struct {
 	*market
-	book   dexOrderBook
 	oracle oracle
 	core   botCoreAdaptor
 	cfg    *BasicMarketMakingConfig
@@ -200,67 +162,19 @@ type basicMMCalculatorImpl struct {
 // If there is no fiat rate available, the empty market rate in the
 // configuration is used.
 func (b *basicMMCalculatorImpl) basisPrice() uint64 {
-	midGap, err := b.book.MidGap()
-	if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
-		b.log.Errorf("MidGap error: %v", err)
-		return 0
-	}
+	oracleRate := b.msgRate(b.oracle.getMarketPrice(b.baseID, b.quoteID))
+	b.log.Tracef("oracle rate = %s", b.fmtRate(oracleRate))
 
-	basisPrice := float64(midGap) // float64 message-rate units
-
-	var oracleWeighting, oraclePrice float64
-	if b.cfg.OracleWeighting != nil && *b.cfg.OracleWeighting > 0 {
-		oracleWeighting = *b.cfg.OracleWeighting
-		oraclePrice = b.oracle.getMarketPrice(b.baseID, b.quoteID)
-		if oraclePrice == 0 {
-			b.log.Warnf("no oracle price available for %s bot", b.name)
-		}
-	}
-
-	if oraclePrice > 0 {
-		msgOracleRate := float64(b.msgRate(oraclePrice))
-
-		// Apply the oracle mismatch filter.
-		if basisPrice > 0 {
-			low, high := msgOracleRate*(1-maxOracleMismatch), msgOracleRate*(1+maxOracleMismatch)
-			if basisPrice < low {
-				b.log.Debugf("local mid-gap is below safe range. Using effective mid-gap of %.2f below the oracle rate.", maxOracleMismatch*100)
-				basisPrice = low
-			} else if basisPrice > high {
-				b.log.Debugf("local mid-gap is above safe range. Using effective mid-gap of %.2f above the oracle rate.", maxOracleMismatch*100)
-				basisPrice = high
-			}
+	if oracleRate == 0 {
+		oracleRate = b.core.ExchangeRateFromFiatSources()
+		if oracleRate == 0 {
+			return 0
 		}
 
-		if b.cfg.OracleBias != 0 {
-			msgOracleRate *= 1 + b.cfg.OracleBias
-		}
-
-		if basisPrice == 0 { // no mid-gap available. Use the oracle price.
-			basisPrice = msgOracleRate
-			b.log.Tracef("basisPrice: using basis price %s from oracle because no mid-gap was found in order book", b.fmtRate(uint64(msgOracleRate)))
-		} else {
-			basisPrice = msgOracleRate*oracleWeighting + basisPrice*(1-oracleWeighting)
-			b.log.Tracef("basisPrice: oracle-weighted basis price = %s", b.fmtRate(uint64(msgOracleRate)))
-		}
+		b.log.Tracef("using fiat rate = %s", b.fmtRate(oracleRate))
 	}
 
-	if basisPrice > 0 {
-		return steppedRate(uint64(basisPrice), b.rateStep)
-	}
-
-	// TODO: add a configuration to turn off use of fiat rate?
-	fiatRate := b.core.ExchangeRateFromFiatSources()
-	if fiatRate > 0 {
-		return steppedRate(fiatRate, b.rateStep)
-	}
-
-	if b.cfg.EmptyMarketRate > 0 {
-		emptyMsgRate := b.msgRate(b.cfg.EmptyMarketRate)
-		return steppedRate(emptyMsgRate, b.rateStep)
-	}
-
-	return 0
+	return steppedRate(oracleRate, b.rateStep)
 }
 
 // halfSpread calculates the distance from the mid-gap where if you sell a lot
@@ -386,7 +300,28 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 	return basisPrice - adj
 }
 
-func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, sellOrders []*multiTradePlacement) {
+func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradePlacement, err error) {
+	basisPrice := m.calculator.basisPrice()
+	if basisPrice == 0 {
+		return nil, nil, fmt.Errorf("no basis price available")
+	}
+
+	feeGap, err := m.calculator.feeGapStats(basisPrice)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error calculating fee gap stats: %w", err)
+	}
+
+	m.registerFeeGap(feeGap)
+	var feeAdj uint64
+	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
+		feeAdj = feeGap.FeeGap / 2
+	}
+
+	if m.log.Level() == dex.LevelTrace {
+		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
+			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
+	}
+
 	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
 		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
 		for i, p := range orderPlacements {
@@ -411,7 +346,7 @@ func (m *basicMarketMaker) ordersToPlace(basisPrice, feeAdj uint64) (buyOrders, 
 
 	buyOrders = orders(m.cfg().BuyPlacements, false)
 	sellOrders = orders(m.cfg().SellPlacements, true)
-	return buyOrders, sellOrders
+	return buyOrders, sellOrders, nil
 }
 
 func (m *basicMarketMaker) rebalance(newEpoch uint64) {
@@ -419,43 +354,28 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		return
 	}
 	defer m.rebalanceRunning.Store(false)
+
 	m.log.Tracef("rebalance: epoch %d", newEpoch)
-	basisPrice := m.calculator.basisPrice()
-	if basisPrice == 0 {
-		m.log.Errorf("No basis price available and no empty-market rate set")
-		return
-	}
 
-	feeGap, err := m.calculator.feeGapStats(basisPrice)
+	buyOrders, sellOrders, err := m.ordersToPlace()
 	if err != nil {
-		m.log.Errorf("Could not calculate fee-gap stats: %v", err)
+		m.log.Errorf("error calculating orders to place: %v. cancelling all orders", err)
+		m.tryCancelOrders(m.ctx, &newEpoch, false)
 		return
 	}
-	m.registerFeeGap(feeGap)
-	var feeAdj uint64
-	if needBreakEvenHalfSpread(m.cfg().GapStrategy) {
-		feeAdj = feeGap.FeeGap / 2
-	}
 
-	if m.log.Level() == dex.LevelTrace {
-		m.log.Tracef("ordersToPlace %s, basis price = %s, break-even fee adjustment = %s",
-			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
-	}
-
-	buyOrders, sellOrders := m.ordersToPlace(basisPrice, feeAdj)
 	m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
 	m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
 }
 
 func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
-	book, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
+	_, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)
 	}
 
 	m.calculator = &basicMMCalculatorImpl{
 		market: m.market,
-		book:   book,
 		oracle: m.oracle,
 		core:   m.core,
 		cfg:    m.cfg(),

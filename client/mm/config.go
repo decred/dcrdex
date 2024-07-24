@@ -120,10 +120,7 @@ type BotConfig struct {
 }
 
 func (c *BotConfig) requiresPriceOracle() bool {
-	if c.BasicMMConfig != nil {
-		return c.BasicMMConfig.OracleWeighting != nil && *c.BasicMMConfig.OracleWeighting > 0
-	}
-	return false
+	return c.BasicMMConfig != nil
 }
 
 func (c *BotConfig) requiresCEX() bool {

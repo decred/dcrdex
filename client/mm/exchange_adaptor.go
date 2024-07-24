@@ -2221,112 +2221,113 @@ func (u *unifiedExchangeAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) 
 	return baseFeesInUnits + quoteFeesInUnits, nil
 }
 
+// tryCancelOrders cancels all booked DEX orders that are past the free cancel
+// threshold. If cancelCEXOrders is true, it will also cancel CEX orders. True
+// is returned if all orders have been cancelled. If cancelCEXOrders is false,
+// false will always be returned.
+func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uint64, cancelCEXOrders bool) bool {
+	u.balancesMtx.RLock()
+	defer u.balancesMtx.RUnlock()
+
+	done := true
+
+	freeCancel := func(orderEpoch uint64) bool {
+		if epoch == nil {
+			return true
+		}
+		return *epoch-orderEpoch >= 2
+	}
+
+	for _, pendingOrder := range u.pendingDEXOrders {
+		o := pendingOrder.currentState().order
+
+		orderLatestState, err := u.clientCore.Order(o.ID)
+		if err != nil {
+			u.log.Errorf("Error fetching order %s: %v", o.ID, err)
+			continue
+		}
+		if orderLatestState.Status > order.OrderStatusBooked {
+			continue
+		}
+
+		done = false
+		if freeCancel(o.Epoch) {
+			err := u.clientCore.Cancel(o.ID)
+			if err != nil {
+				u.log.Errorf("Error canceling order %s: %v", o.ID, err)
+			}
+		}
+	}
+
+	if !cancelCEXOrders {
+		return false
+	}
+
+	for _, pendingOrder := range u.pendingCEXOrders {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		pendingOrder.tradeMtx.RLock()
+		tradeID, baseID, quoteID := pendingOrder.trade.ID, pendingOrder.trade.BaseID, pendingOrder.trade.QuoteID
+		pendingOrder.tradeMtx.RUnlock()
+
+		tradeStatus, err := u.CEX.TradeStatus(ctx, tradeID, baseID, quoteID)
+		if err != nil {
+			u.log.Errorf("Error getting CEX trade status: %v", err)
+			continue
+		}
+		if tradeStatus.Complete {
+			continue
+		}
+
+		done = false
+		err = u.CEX.CancelTrade(ctx, baseID, quoteID, tradeID)
+		if err != nil {
+			u.log.Errorf("Error canceling CEX trade %s: %v", tradeID, err)
+		}
+	}
+
+	return done
+}
+
 func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
-	doCancels := func(epoch *uint64, dexOrderBooked func(oid order.OrderID, sell bool) bool) bool {
-		u.balancesMtx.RLock()
-		defer u.balancesMtx.RUnlock()
-
-		done := true
-
-		freeCancel := func(orderEpoch uint64) bool {
-			if epoch == nil {
-				return true
-			}
-			return *epoch-orderEpoch >= 2
-		}
-
-		for _, pendingOrder := range u.pendingDEXOrders {
-			o := pendingOrder.currentState().order
-
-			var oid order.OrderID
-			copy(oid[:], o.ID)
-			// We need to look in the order book to see if the cancel succeeded
-			// because the epoch summary note comes before the order statuses
-			// are updated.
-			if !dexOrderBooked(oid, o.Sell) {
-				continue
-			}
-
-			done = false
-			if freeCancel(o.Epoch) {
-				err := u.clientCore.Cancel(o.ID)
-				if err != nil {
-					u.log.Errorf("Error canceling order %s: %v", o.ID, err)
-				}
-			}
-		}
-
-		for _, pendingOrder := range u.pendingCEXOrders {
-			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-
-			pendingOrder.tradeMtx.RLock()
-			id, baseID, quoteID := pendingOrder.trade.ID, pendingOrder.trade.BaseID, pendingOrder.trade.QuoteID
-			pendingOrder.tradeMtx.RUnlock()
-
-			tradeStatus, err := u.CEX.TradeStatus(ctx, id, baseID, quoteID)
-			if err != nil {
-				u.log.Errorf("Error getting CEX trade status: %v", err)
-				continue
-			}
-			if tradeStatus.Complete {
-				continue
-			}
-
-			done = false
-			err = u.CEX.CancelTrade(ctx, baseID, quoteID, id)
-			if err != nil {
-				u.log.Errorf("Error canceling CEX trade %s: %v", id, err)
-			}
-		}
-
-		return done
-	}
-
-	// Use this in case the order book is not available.
-	orderAlwaysBooked := func(_ order.OrderID, _ bool) bool {
-		return true
-	}
-
 	book, bookFeed, err := u.clientCore.SyncBook(u.host, u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("Error syncing book for cancellations: %v", err)
-		doCancels(nil, orderAlwaysBooked)
+		u.tryCancelOrders(ctx, nil, true)
 		return
 	}
 
 	mktCfg, err := u.clientCore.ExchangeMarket(u.host, u.baseID, u.quoteID)
 	if err != nil {
 		u.log.Errorf("Error getting market configuration: %v", err)
-		doCancels(nil, orderAlwaysBooked)
+		u.tryCancelOrders(ctx, nil, true)
 		return
 	}
 
 	currentEpoch := book.CurrentEpoch()
-	if doCancels(&currentEpoch, book.OrderIsBooked) {
+	if u.tryCancelOrders(ctx, &currentEpoch, true) {
 		return
 	}
-
-	i := 0
 
 	timeout := time.Millisecond * time.Duration(3*mktCfg.EpochLen)
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	i := 0
 	for {
 		select {
-		case n := <-bookFeed.Next():
-			if n.Action == core.EpochMatchSummary {
-				payload := n.Payload.(*core.EpochMatchSummaryPayload)
-				currentEpoch := payload.Epoch + 1
-				if doCancels(&currentEpoch, book.OrderIsBooked) {
+		case ni := <-bookFeed.Next():
+			switch epoch := ni.Payload.(type) {
+			case *core.ResolvedEpoch:
+				if u.tryCancelOrders(ctx, &epoch.Current, true) {
 					return
 				}
 				timer.Reset(timeout)
 				i++
 			}
 		case <-timer.C:
-			doCancels(nil, orderAlwaysBooked)
+			u.tryCancelOrders(ctx, nil, true)
 			return
 		}
 
