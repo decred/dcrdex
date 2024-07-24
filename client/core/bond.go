@@ -397,7 +397,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 			} else {
 				if int64(bond.LockTime) <= bondCfg.replaceThresh {
 					weakBonds = append(weakBonds, bond) // but not yet expired (still live or pending)
-					c.log.Infof("Soon to expire bond found: %v (%s)",
+					c.log.Debugf("Soon to expire bond found: %v (%s)",
 						coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 				}
 				liveBonds = append(liveBonds, bond)

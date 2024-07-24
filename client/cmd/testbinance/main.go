@@ -64,10 +64,10 @@ var (
 	}
 
 	coinInfos = []*bntypes.CoinInfo{
-		makeCoinInfo("BTC", "BTC", true, true, 0.00000610),
-		makeCoinInfo("ETH", "ETH", true, true, 0.00035),
-		makeCoinInfo("DCR", "DCR", true, true, 0.00001000),
-		makeCoinInfo("USDC", "MATIC", true, true, 0.01000),
+		makeCoinInfo("BTC", "BTC", true, true, 0.00000610, 0.0007),
+		makeCoinInfo("ETH", "ETH", true, true, 0.00035, 0.008),
+		makeCoinInfo("DCR", "DCR", true, true, 0.00001000, 0.05),
+		makeCoinInfo("USDC", "MATIC", true, true, 0.01000, 10),
 	}
 
 	coinpapAssets = []*fiatrates.CoinpaprikaAsset{
@@ -123,7 +123,7 @@ func makeBalance(symbol string, bal float64) *bntypes.Balance {
 	}
 }
 
-func makeCoinInfo(coin, network string, withdrawsEnabled, depositsEnabled bool, withdrawFee float64) *bntypes.CoinInfo {
+func makeCoinInfo(coin, network string, withdrawsEnabled, depositsEnabled bool, withdrawFee, withdrawMin float64) *bntypes.CoinInfo {
 	return &bntypes.CoinInfo{
 		Coin: coin,
 		NetworkList: []*bntypes.NetworkInfo{{
@@ -132,6 +132,7 @@ func makeCoinInfo(coin, network string, withdrawsEnabled, depositsEnabled bool, 
 			WithdrawEnable: withdrawsEnabled,
 			DepositEnable:  depositsEnabled,
 			WithdrawFee:    withdrawFee,
+			WithdrawMin:    withdrawMin,
 		}},
 	}
 }
