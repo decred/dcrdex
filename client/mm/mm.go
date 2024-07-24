@@ -467,7 +467,7 @@ func (m *MarketMaker) handleCEXUpdate(cexName string, ni interface{}) {
 		cex := m.cexes[cexName]
 		m.cexMtx.RUnlock()
 		if cex == nil {
-			m.log.Errorf("CEX update received from uknown cex %q?", cexName)
+			m.log.Errorf("CEX update received from unknown cex %q?", cexName)
 			return
 		}
 		cex.mtx.Lock()
@@ -481,10 +481,12 @@ func (m *MarketMaker) handleCEXUpdate(cexName string, ni interface{}) {
 func (m *MarketMaker) cexList() []*centralizedExchange {
 	m.cexMtx.RLock()
 	defer m.cexMtx.RUnlock()
+
 	cexes := make([]*centralizedExchange, 0, len(m.cexes))
 	for _, cex := range m.cexes {
 		cexes = append(cexes, cex)
 	}
+
 	return cexes
 }
 
@@ -517,13 +519,18 @@ func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	go func() {
 		defer wg.Done()
 		<-ctx.Done()
-		for _, cex := range m.cexList() {
+
+		m.cexMtx.Lock()
+		defer m.cexMtx.Unlock()
+
+		for _, cex := range m.cexes {
 			cex.mtx.RLock()
 			cm := cex.cm
 			cex.mtx.RUnlock()
 			if cm != nil {
 				cm.Disconnect()
 			}
+
 			delete(m.cexes, cex.Name)
 		}
 	}()
@@ -843,7 +850,8 @@ func (m *MarketMaker) UpdateCEXConfig(updatedCfg *CEXConfig) error {
 		m.defaultCfg.CexConfigs = append(m.defaultCfg.CexConfigs, updatedCfg)
 	}
 	m.defaultCfgMtx.Unlock()
-	if err := m.writeConfigFile(m.defaultCfg); err != nil {
+
+	if err := m.writeConfigFile(m.defaultConfig()); err != nil {
 		m.log.Errorf("Error saving new bot configuration: %w", err)
 	}
 

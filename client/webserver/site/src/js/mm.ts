@@ -290,6 +290,11 @@ export default class MarketMakerPage extends BasePage {
 
   addBot (botStatus: MMBotStatus, startupBalanceCache?: Record<number, Promise<ExchangeBalance>>) {
     const { page, bots, sortedBots } = this
+    // Make sure the market still exists.
+    const { config: { baseID, quoteID, host } } = botStatus
+    const [baseSymbol, quoteSymbol] = [app().assets[baseID].symbol, app().assets[quoteID].symbol]
+    const mktID = `${baseSymbol}_${quoteSymbol}`
+    if (!app().exchanges[host]?.markets[mktID]) return
     const bot = new Bot(this, botStatus, startupBalanceCache)
     page.botRows.appendChild(bot.row.tr)
     sortedBots.push(bot)
@@ -342,7 +347,10 @@ export default class MarketMakerPage extends BasePage {
     Doc.setVis(!status, tmpl.unconfigured)
     Doc.setVis(status && !status.connectErr, tmpl.configured)
     Doc.setVis(status?.connectErr, tmpl.connectErrBox)
-    if (status?.connectErr) tmpl.connectErr.textContent = `connect error: ${status.connectErr}`
+    if (status?.connectErr) {
+      tmpl.connectErr.textContent = 'connection error'
+      tmpl.connectErr.dataset.tooltip = status.connectErr
+    }
     tmpl.logo.classList.toggle('greyscale', !status)
     if (!status) return
     let usdBal = 0
@@ -707,9 +715,15 @@ class Bot extends BotMarket {
   }
 
   async start () {
-    const { page, alloc, baseID, quoteID, host, cfg: { uiConfig: { cexRebalance } } } = this
+    const { page, alloc, baseID, quoteID, host, cexName, cfg: { uiConfig: { cexRebalance } } } = this
 
     Doc.hide(page.errMsg)
+    if (cexName && !app().mmStatus.cexes[cexName]?.connected) {
+      page.errMsg.textContent = `${cexName} not connected`
+      Doc.show(page.errMsg)
+      return
+    }
+
     // round allocations values.
     for (const m of [alloc.dex, alloc.cex]) {
       for (const [assetID, v] of Object.entries(m)) m[parseInt(assetID)] = Math.round(v)
@@ -738,7 +752,7 @@ class Bot extends BotMarket {
   autoRebalanceSettings (): AutoRebalanceConfig {
     const {
       proj: { bProj, qProj, alloc }, baseFeeID, quoteFeeID, cfg: { uiConfig: { baseConfig, quoteConfig } },
-      baseID, quoteID
+      baseID, quoteID, cexName, mktID, bui, qui
     } = this
 
     const totalBase = alloc[baseID]
@@ -754,10 +768,14 @@ class Bot extends BotMarket {
     if (maxBase < 0 || maxQuote < 0) {
       throw Error(`rebalance math doesn't work: ${JSON.stringify({ bProj, qProj, maxBase, maxQuote })}`)
     }
-    return {
-      minBaseTransfer: Math.round(baseConfig.transferFactor * maxBase),
-      minQuoteTransfer: Math.round(quoteConfig.transferFactor * maxQuote)
-    }
+    const cex = app().mmStatus.cexes[cexName]
+    const mkt = cex.markets[mktID]
+    const [baseMinWithdraw, quoteMinWithdraw] = [mkt.baseMinWithdraw * bui.conventional.conversionFactor, mkt.quoteMinWithdraw * qui.conventional.conversionFactor]
+    const [minB, maxB] = [baseMinWithdraw, Math.max(baseMinWithdraw * 2, maxBase)]
+    const minBaseTransfer = minB + baseConfig.transferFactor * (maxB - minB)
+    const [minQ, maxQ] = [quoteMinWithdraw, Math.max(quoteMinWithdraw * 2, maxQuote)]
+    const minQuoteTransfer = minQ + quoteConfig.transferFactor * (maxQ - minQ)
+    return { minBaseTransfer, minQuoteTransfer }
   }
 
   reconfigure () {

@@ -151,7 +151,7 @@ func (b *binanceOrderBook) sync(ctx context.Context) {
 func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no errors */) {
 	const updateIDUnsynced = math.MaxUint64
 
-	// We'll run two goroutines and sychronize two local vars.
+	// We'll run two goroutines and synchronize two local vars.
 	var syncMtx sync.Mutex
 	var syncCache []*bntypes.BookUpdate
 	syncChan := make(chan struct{})

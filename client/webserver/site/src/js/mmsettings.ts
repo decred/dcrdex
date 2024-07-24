@@ -2072,9 +2072,9 @@ class AssetPane {
       sigFigs: true,
       min: 0,
       changed: (v: number) => {
-        const { cfg, lotSizeConv } = this
+        const { cfg } = this
         const totalInventory = this.commit()
-        const [minV, maxV] = [lotSizeConv, totalInventory]
+        const [minV, maxV] = [this.minTransfer.min, Math.max(this.minTransfer.min * 2, totalInventory)]
         cfg.transferFactor = (v - minV) / (maxV - minV)
         this.minTransferSlider.setValue(cfg.transferFactor)
       }
@@ -2082,7 +2082,7 @@ class AssetPane {
     this.minTransferSlider = new MiniSlider(page.minTransferSlider, (r: number) => {
       const { cfg } = this
       const totalInventory = this.commit()
-      const [minV, maxV] = [this.minTransfer.min, Math.min(this.minTransfer.min, totalInventory)]
+      const [minV, maxV] = [this.minTransfer.min, Math.max(this.minTransfer.min, totalInventory)]
       cfg.transferFactor = r
       this.minTransfer.setValue(minV + r * (maxV - minV))
     })
@@ -2217,7 +2217,7 @@ class AssetPane {
     Doc.setVis(showRebalance, page.rebalanceOpts)
     if (!showRebalance) return
     const totalInventory = this.commit()
-    const [minV, maxV] = [this.minTransfer.min, Math.min(this.minTransfer.min * 2, totalInventory)]
+    const [minV, maxV] = [this.minTransfer.min, Math.max(this.minTransfer.min * 2, totalInventory)]
     const rangeV = maxV - minV
     this.minTransfer.setValue(minV + cfg.transferFactor * rangeV)
     this.minTransferSlider.setValue((cfg.transferFactor - defaultTransfer.minR) / defaultTransfer.range)

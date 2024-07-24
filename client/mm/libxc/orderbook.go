@@ -149,6 +149,9 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 }
 
 func (ob *orderbook) midGap() uint64 {
+	ob.mtx.RLock()
+	defer ob.mtx.RUnlock()
+
 	bestBuyI := ob.bids.Front()
 	if bestBuyI == nil {
 		return 0
