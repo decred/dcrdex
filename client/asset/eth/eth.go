@@ -5123,6 +5123,13 @@ func (w *baseWallet) extendAndStoreTx(tx *types.Transaction, txType asset.Transa
 		w.log.Errorf("Error marshaling tx %q: %v", tx.Hash(), err)
 	}
 
+	if recipient == nil {
+		if to := tx.To(); to != nil {
+			s := to.String()
+			recipient = &s
+		}
+	}
+
 	now := time.Now()
 
 	wt := &extendedWalletTx{
