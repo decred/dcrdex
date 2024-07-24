@@ -88,6 +88,7 @@ interface UserResponse extends APIResponse {
   langs: string[]
   inited: boolean
   experimental: boolean
+  onionUrl: string
   mmStatus: MarketMakingStatus
 }
 
@@ -179,6 +180,7 @@ export default class Application {
   noteReceivers: Record<string, (n: CoreNote) => void>[]
   txHistoryMap: Record<number, TxHistoryResult>
   requiredActions: Record<string, requiredAction>
+  onionUrl: string
 
   constructor () {
     this.notes = []
@@ -197,6 +199,7 @@ export default class Application {
     if (State.isDark()) {
       document.body.classList.add('dark')
     }
+    document.body.classList.add('loaded')
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
@@ -309,6 +312,7 @@ export default class Application {
     if (!this.checkResponse(resp)) return
     this.inited = resp.inited
     this.authed = Boolean(resp.user)
+    this.onionUrl = resp.onionUrl
     this.lang = resp.lang
     this.langs = resp.langs
     this.experimental = resp.experimental
