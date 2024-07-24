@@ -752,7 +752,7 @@ class Bot extends BotMarket {
   autoRebalanceSettings (): AutoRebalanceConfig {
     const {
       proj: { bProj, qProj, alloc }, baseFeeID, quoteFeeID, cfg: { uiConfig: { baseConfig, quoteConfig } },
-      baseID, quoteID, cexName, mktID, bui, qui
+      baseID, quoteID, cexName, mktID
     } = this
 
     const totalBase = alloc[baseID]
@@ -770,11 +770,10 @@ class Bot extends BotMarket {
     }
     const cex = app().mmStatus.cexes[cexName]
     const mkt = cex.markets[mktID]
-    const [baseMinWithdraw, quoteMinWithdraw] = [mkt.baseMinWithdraw * bui.conventional.conversionFactor, mkt.quoteMinWithdraw * qui.conventional.conversionFactor]
-    const [minB, maxB] = [baseMinWithdraw, Math.max(baseMinWithdraw * 2, maxBase)]
-    const minBaseTransfer = minB + baseConfig.transferFactor * (maxB - minB)
-    const [minQ, maxQ] = [quoteMinWithdraw, Math.max(quoteMinWithdraw * 2, maxQuote)]
-    const minQuoteTransfer = minQ + quoteConfig.transferFactor * (maxQ - minQ)
+    const [minB, maxB] = [mkt.baseMinWithdraw, Math.max(mkt.baseMinWithdraw * 2, maxBase)]
+    const minBaseTransfer = Math.round(minB + baseConfig.transferFactor * (maxB - minB))
+    const [minQ, maxQ] = [mkt.quoteMinWithdraw, Math.max(mkt.quoteMinWithdraw * 2, maxQuote)]
+    const minQuoteTransfer = Math.round(minQ + quoteConfig.transferFactor * (maxQ - minQ))
     return { minBaseTransfer, minQuoteTransfer }
   }
 

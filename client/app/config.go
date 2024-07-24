@@ -110,12 +110,11 @@ type CoreConfig struct {
 
 // WebConfig encapsulates the configuration needed for the web server.
 type WebConfig struct {
-	WebAddr      string `long:"webaddr" description:"HTTP server address"`
-	WebTLS       bool   `long:"webtls" description:"Use a self-signed certificate for HTTPS with the web server. This is implied for a publicly routable (not loopback or private subnet) webaddr. When changing webaddr, you mean need to delete web.cert and web.key."`
-	SiteDir      string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Unspecified = default is good in most cases."`
-	NoEmbedSite  bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
-	HTTPProfile  bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
-	Experimental bool   `long:"experimental" description:"Enable experimental features"`
+	WebAddr     string `long:"webaddr" description:"HTTP server address"`
+	WebTLS      bool   `long:"webtls" description:"Use a self-signed certificate for HTTPS with the web server. This is implied for a publicly routable (not loopback or private subnet) webaddr. When changing webaddr, you mean need to delete web.cert and web.key."`
+	SiteDir     string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Unspecified = default is good in most cases."`
+	NoEmbedSite bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
+	HTTPProfile bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
 }
 
 // LogConfig encapsulates the logging-related settings.
@@ -193,7 +192,6 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		NoEmbed:       cfg.NoEmbedSite,
 		HttpProf:      cfg.HTTPProfile,
 		Language:      cfg.Language,
-		Experimental:  cfg.Experimental,
 	}
 }
 

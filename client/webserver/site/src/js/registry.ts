@@ -1178,7 +1178,6 @@ export interface Application {
   assets: Record<number, SupportedAsset>
   seedGenTime: number
   user: User
-  experimental: boolean
   mmStatus: MarketMakingStatus
   header: HTMLElement
   headerSpace: HTMLElement

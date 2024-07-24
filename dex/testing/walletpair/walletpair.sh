@@ -57,7 +57,6 @@ CLIENT_1_CTL_CERT="${CLIENT_1_DIR}/ctl.cert"
 rm -f "$CLIENT_1_CTL_CERT"
 cat > "${CLIENT_1_CONF}" <<EOF
 webaddr=${CLIENT_1_ADDR}
-experimental=true
 rpc=1
 rpckey=${CLIENT_1_CTL_KEY}
 rpccert=${CLIENT_1_CTL_CERT}
@@ -85,7 +84,6 @@ CLIENT_2_CTL_CERT="${CLIENT_2_DIR}/ctlcert.conf"
 rm -f "$CLIENT_2_CTL_CERT"
 cat > "$CLIENT_2_CONF" <<EOF
 webaddr=${CLIENT_2_ADDR}
-experimental=true
 rpc=1
 rpckey=${CLIENT_2_CTL_KEY}
 rpccert=${CLIENT_2_CTL_CERT}

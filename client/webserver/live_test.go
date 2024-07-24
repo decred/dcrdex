@@ -2689,11 +2689,10 @@ func TestServer(t *testing.T) {
 			cfg:         &mm.MarketMakingConfig{},
 			runningBots: make(map[mm.MarketWithHost]int64),
 		},
-		Experimental: true,
-		Addr:         "127.0.0.3:54321",
-		Logger:       logger,
-		NoEmbed:      true, // use files on disk, and reload on each page load
-		HttpProf:     true,
+		Addr:     "127.0.0.3:54321",
+		Logger:   logger,
+		NoEmbed:  true, // use files on disk, and reload on each page load
+		HttpProf: true,
 	})
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)

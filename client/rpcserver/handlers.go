@@ -885,12 +885,6 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 }
 
 func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if s.mm == nil {
-		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
-		return createResponse(mmAvailableBalancesRoute, nil, resErr)
-	}
-
 	form, err := parseMMAvailableBalancesArgs(params)
 	if err != nil {
 		return usage(mmAvailableBalancesRoute, err)
@@ -915,12 +909,6 @@ func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.Respons
 }
 
 func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if s.mm == nil {
-		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
-		return createResponse(startBotRoute, nil, resErr)
-	}
-
 	form, err := parseStartBotArgs(params)
 	if err != nil {
 		return usage(startBotRoute, err)
@@ -937,12 +925,6 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 }
 
 func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if s.mm == nil {
-		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)
-		return createResponse(stopBotRoute, nil, resErr)
-	}
-
 	mkt, err := parseStopBotArgs(params)
 	if err != nil {
 		return usage(startBotRoute, err)
@@ -959,12 +941,6 @@ func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 }
 
 func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if s.mm == nil {
-		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
-		return createResponse(updateRunningBotCfgRoute, nil, resErr)
-	}
-
 	form, err := parseUpdateRunningBotArgs(params)
 	if err != nil {
 		return usage(updateRunningBotCfgRoute, err)
@@ -1010,12 +986,6 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 }
 
 func handleUpdateRunningBotInventory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if s.mm == nil {
-		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotInvError, errMsg)
-		return createResponse(updateRunningBotCfgRoute, nil, resErr)
-	}
-
 	form, err := parseUpdateRunningBotInventoryArgs(params)
 	if err != nil {
 		return usage(updateRunningBotCfgRoute, err)
@@ -1032,12 +1002,6 @@ func handleUpdateRunningBotInventory(s *RPCServer, params *RawParams) *msgjson.R
 }
 
 func handleMMStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if s.mm == nil {
-		errMsg := "experimental flag must be set to use market making"
-		resErr := msgjson.NewError(msgjson.RPCMMStatusError, errMsg)
-		return createResponse(mmStatusRoute, nil, resErr)
-	}
-
 	status := s.mm.RunningBotsStatus()
 	return createResponse(mmStatusRoute, status, nil)
 }
