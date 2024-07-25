@@ -114,15 +114,6 @@ func openSPVWallet(dir string, cfg *WalletConfig,
 	return w
 }
 
-// AccountInfo returns the account information of the wallet for use by the
-// exchange wallet.
-func (w *btcSPVWallet) AccountInfo() XCWalletAccount {
-	return XCWalletAccount{
-		AccountName:   defaultAcctName,
-		AccountNumber: defaultAcctNum,
-	}
-}
-
 func (w *btcSPVWallet) Birthday() time.Time {
 	return w.Manager.Birthday()
 }

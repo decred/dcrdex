@@ -633,26 +633,30 @@ func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
 	return dexbtc.MinLotSize(maxFeeRate, true)
 }
 
-type CustomSPVWalletConstructor func(settings map[string]string, params *chaincfg.Params) (BTCWallet, error)
+type CustomWallet interface {
+	Wallet
+	TxFeeEstimator
+	TipRedemptionWallet
+}
 
-// customSPVWalletConstructors are functions for setting up custom
-// implementations of the BTCWallet interface that may be used by the
-// ExchangeWalletSPV instead of the default spv implementation.
-var customSPVWalletConstructors = map[string]CustomSPVWalletConstructor{}
+type CustomWalletConstructor func(settings map[string]string, params *chaincfg.Params) (CustomWallet, error)
 
-// RegisterCustomSPVWallet registers a function that should be used in creating
-// a BTCWallet implementation that the ExchangeWalletSPV will use in place of
-// the default spv wallet implementation. External consumers can use this
-// function to provide alternative BTCWallet implementations, and must do so
-// before attempting to create an ExchangeWalletSPV instance of this type. It'll
-// panic if callers try to register a wallet twice.
-func RegisterCustomSPVWallet(constructor CustomSPVWalletConstructor, def *asset.WalletDefinition) {
+// customWalletConstructors are functions for setting up CustomWallet
+// implementations used by ExchangeWalletCustom.
+var customWalletConstructors = map[string]CustomWalletConstructor{}
+
+// RegisterCustomWallet registers a function that should be used in creating a
+// CustomWallet implementation for ExchangeWalletCustom. External consumers can
+// use this function to provide CustomWallet implementation, and must do so
+// before attempting to create an ExchangeWalletCustom instance of this type.
+// It'll panic if callers try to register a wallet twice.
+func RegisterCustomWallet(constructor CustomWalletConstructor, def *asset.WalletDefinition) {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
 			panic(fmt.Sprintf("wallet type (%q) is already registered", def.Type))
 		}
 	}
-	customSPVWalletConstructors[def.Type] = constructor
+	customWalletConstructors[def.Type] = constructor
 	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
 }
 
@@ -860,8 +864,8 @@ func (w *baseWallet) apiFeeFallback() bool {
 
 type intermediaryWallet struct {
 	*baseWallet
-	txFeeEstimator txFeeEstimator
-	tipRedeemer    tipRedemptionWallet
+	txFeeEstimator TxFeeEstimator
+	tipRedeemer    TipRedemptionWallet
 
 	syncingTxHistory atomic.Bool
 }
@@ -891,6 +895,13 @@ type ExchangeWalletAccelerator struct {
 	*ExchangeWalletFullNode
 }
 
+// ExchangeWalletCustom is an external wallet that implements the Wallet,
+// TxFeeEstimator and TipRedemptionWallet interface.
+type ExchangeWalletCustom struct {
+	*intermediaryWallet
+	*authAddOn
+}
+
 // Check that wallets satisfy their supported interfaces.
 var _ asset.Wallet = (*intermediaryWallet)(nil)
 var _ asset.Accelerator = (*ExchangeWalletAccelerator)(nil)
@@ -906,6 +917,7 @@ var _ asset.Bonder = (*baseWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWalletSPV)(nil)
 var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
 var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
+var _ asset.Authenticator = (*ExchangeWalletCustom)(nil)
 var _ asset.AddressReturner = (*baseWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWalletSPV)(nil)
 
@@ -1108,22 +1120,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		cloneCFG.MinElectrumVersion = *ver
 		return ElectrumWallet(cloneCFG)
 	default:
-		makeCustomWallet, ok := customSPVWalletConstructors[cfg.Type]
+		makeCustomWallet, ok := customWalletConstructors[cfg.Type]
 		if !ok {
 			return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
 		}
-
-		// Create custom wallet first and return early if we encounter any
-		// error.
-		btcWallet, err := makeCustomWallet(cfg.Settings, cloneCFG.ChainParams)
-		if err != nil {
-			return nil, fmt.Errorf("btc custom wallet setup error: %v", err)
-		}
-
-		walletConstructor := func(_ string, _ *WalletConfig, _ *chaincfg.Params, _ dex.Logger) BTCWallet {
-			return btcWallet
-		}
-		return OpenSPVWallet(cloneCFG, walletConstructor)
+		return OpenCustomWallet(cloneCFG, makeCustomWallet)
 	}
 }
 
@@ -1361,6 +1362,43 @@ func noLocalFeeRate(ctx context.Context, rr RawRequester, u uint64) (uint64, err
 	return 0, errors.New("no local fee rate estimate possible")
 }
 
+// OpenCustomWallet opens a custom wallet.
+func OpenCustomWallet(cfg *BTCCloneCFG, walletConstructor CustomWalletConstructor) (*ExchangeWalletCustom, error) {
+	walletCfg := new(WalletConfig)
+	err := config.Unmapify(cfg.WalletCFG.Settings, walletCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Custom wallets without a FeeEstimator will default to any enabled
+	// external fee estimator.
+	if cfg.FeeEstimator == nil {
+		cfg.FeeEstimator = noLocalFeeRate
+	}
+
+	btc, err := newUnconnectedWallet(cfg, walletCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	customWallet, err := walletConstructor(cfg.WalletCFG.Settings, cfg.ChainParams)
+	if err != nil {
+		return nil, err
+	}
+	btc.setNode(customWallet)
+
+	w := &ExchangeWalletCustom{
+		intermediaryWallet: &intermediaryWallet{
+			baseWallet:     btc,
+			txFeeEstimator: customWallet,
+			tipRedeemer:    customWallet,
+		},
+		authAddOn: &authAddOn{customWallet},
+	}
+	w.prepareRedemptionFinder()
+	return w, nil
+}
+
 // OpenSPVWallet opens the previously created native SPV wallet.
 func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*ExchangeWalletSPV, error) {
 	walletCfg := new(WalletConfig)
@@ -1383,6 +1421,8 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	spvw := &spvWallet{
 		chainParams: cfg.ChainParams,
 		cfg:         walletCfg,
+		acctNum:     defaultAcctNum,
+		acctName:    defaultAcctName,
 		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name),
 		log:         cfg.Logger.SubLogger("SPV"),
 		tipChan:     make(chan *BlockVector, 8),
@@ -1392,9 +1432,6 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	spvw.BlockFiltersScanner = NewBlockFiltersScanner(spvw, spvw.log)
 	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 	btc.setNode(spvw)
-
-	// Set account number for easy reference.
-	spvw.acctNum = spvw.wallet.AccountInfo().AccountNumber
 
 	w := &ExchangeWalletSPV{
 		intermediaryWallet: &intermediaryWallet{
@@ -1418,13 +1455,13 @@ func (btc *baseWallet) setNode(node Wallet) {
 			return orderEnough(val, lots, maxFeeRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, reportChange)
 		},
 		func() ([]*ListUnspentResult, error) { // list
-			return node.listUnspent()
+			return node.ListUnspent()
 		},
 		func(unlock bool, ops []*Output) error { // lock
-			return node.lockUnspent(unlock, ops)
+			return node.LockUnspent(unlock, ops)
 		},
 		func() ([]*RPCOutpoint, error) { // listLocked
-			return node.listLockUnspent()
+			return node.ListLockUnspent()
 		},
 		func(txHash *chainhash.Hash, vout uint32) (*wire.TxOut, error) {
 			txRaw, _, err := btc.rawWalletTx(txHash)
@@ -1451,16 +1488,16 @@ func (btc *baseWallet) setNode(node Wallet) {
 func (btc *intermediaryWallet) prepareRedemptionFinder() {
 	btc.rf = NewRedemptionFinder(
 		btc.log,
-		btc.tipRedeemer.getWalletTransaction,
-		btc.tipRedeemer.getBlockHeight,
-		btc.tipRedeemer.getBlock,
-		btc.tipRedeemer.getBlockHeader,
+		btc.tipRedeemer.GetWalletTransaction,
+		btc.tipRedeemer.GetBlockHeight,
+		btc.tipRedeemer.GetBlock,
+		btc.tipRedeemer.GetBlockHeader,
 		btc.hashTx,
 		btc.deserializeTx,
-		btc.tipRedeemer.getBestBlockHeight,
-		btc.tipRedeemer.searchBlockForRedemptions,
-		btc.tipRedeemer.getBlockHash,
-		btc.tipRedeemer.findRedemptionsInMempool,
+		btc.tipRedeemer.GetBestBlockHeight,
+		btc.tipRedeemer.SearchBlockForRedemptions,
+		btc.tipRedeemer.GetBlockHash,
+		btc.tipRedeemer.FindRedemptionsInMempool,
 	)
 }
 
@@ -1515,7 +1552,7 @@ func (btc *baseWallet) findExistingAddressBasedTxHistoryDB() (string, error) {
 
 func (btc *baseWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, error) {
 	var dbPath string
-	fingerPrint, err := btc.node.fingerprint()
+	fingerPrint, err := btc.node.Fingerprint()
 	if err == nil && fingerPrint != "" {
 		dbPath = btc.txHistoryDBPath(fingerPrint)
 	}
@@ -1584,12 +1621,12 @@ func (btc *baseWallet) startTxHistoryDB(ctx context.Context) (*sync.WaitGroup, e
 func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	btc.ctx = ctx
 	var wg sync.WaitGroup
-	if err := btc.node.connect(ctx, &wg); err != nil {
+	if err := btc.node.Connect(ctx, &wg); err != nil {
 		return nil, err
 	}
 
 	// Initialize the best block.
-	bestBlockHdr, err := btc.node.getBestBlockHeader()
+	bestBlockHdr, err := btc.node.GetBestBlockHeader()
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for %s: %w", btc.symbol, err)
 	}
@@ -1667,7 +1704,7 @@ func (btc *intermediaryWallet) Connect(ctx context.Context) (*sync.WaitGroup, er
 // Reconfigure attempts to reconfigure the wallet.
 func (btc *baseWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, currentAddress string) (restart bool, err error) {
 	// See what the node says.
-	restart, err = btc.node.reconfigure(cfg, currentAddress)
+	restart, err = btc.node.Reconfigure(cfg, currentAddress)
 	if err != nil {
 		return false, err
 	}
@@ -1728,7 +1765,7 @@ func (r *GetBlockchainInfoResult) Syncing() bool {
 
 // SyncStatus is information about the blockchain sync status.
 func (btc *baseWallet) SyncStatus() (bool, float32, error) {
-	ss, err := btc.node.syncStatus()
+	ss, err := btc.node.SyncStatus()
 	if err != nil {
 		return false, 0, err
 	}
@@ -1748,7 +1785,7 @@ func (btc *baseWallet) SyncStatus() (bool, float32, error) {
 
 	// It looks like we are ready based on syncStatus, but that may just be
 	// comparing wallet height to known chain height. Now check peers.
-	numPeers, err := btc.node.peerCount()
+	numPeers, err := btc.node.PeerCount()
 	if err != nil {
 		return false, 0, err
 	}
@@ -1762,7 +1799,7 @@ func (btc *baseWallet) OwnsDepositAddress(address string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return btc.node.ownsAddress(addr)
+	return btc.node.OwnsAddress(addr)
 }
 
 func (btc *baseWallet) balance() (*asset.Balance, error) {
@@ -1776,7 +1813,7 @@ func (btc *baseWallet) balance() (*asset.Balance, error) {
 	if btc.useLegacyBalance {
 		return btc.legacyBalance()
 	}
-	balances, err := btc.node.balances()
+	balances, err := btc.node.Balances()
 	if err != nil {
 		return nil, err
 	}
@@ -2588,7 +2625,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 	var success bool
 	defer func() {
 		if !success {
-			btc.node.lockUnspent(true, spents)
+			btc.node.LockUnspent(true, spents)
 		}
 	}()
 
@@ -2603,7 +2640,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 
 	outputAddresses := make([]btcutil.Address, len(orders))
 	for i, req := range requiredForOrders {
-		outputAddr, err := btc.node.externalAddress()
+		outputAddr, err := btc.node.ExternalAddress()
 		if err != nil {
 			return nil, 0, err
 		}
@@ -2615,7 +2652,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 		baseTx.AddTxOut(wire.NewTxOut(int64(req), script))
 	}
 
-	changeAddr, err := btc.node.changeAddress()
+	changeAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2639,7 +2676,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 		}
 	}
 	btc.cm.LockOutputs(locks)
-	btc.node.lockUnspent(false, ops)
+	btc.node.LockUnspent(false, ops)
 
 	var totalOut uint64
 	for _, txOut := range tx.TxOut {
@@ -2774,7 +2811,7 @@ func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.
 
 	btc.cm.LockOutputs(locks)
 
-	btc.node.lockUnspent(false, spents)
+	btc.node.LockUnspent(false, spents)
 
 	return coins, redeemScripts, splitFees, nil
 }
@@ -2792,7 +2829,7 @@ func (btc *baseWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue
 	}
 	if len(coins) == len(values) || !allowSplit {
 		btc.cm.LockOutputsMap(fundingCoins)
-		btc.node.lockUnspent(false, spents)
+		btc.node.LockUnspent(false, spents)
 		return coins, redeemScripts, 0, nil
 	}
 
@@ -2827,7 +2864,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 			return
 		}
 		btc.cm.LockOutputsMap(fundingCoins)
-		err = btc.node.lockUnspent(false, outputs)
+		err = btc.node.LockUnspent(false, outputs)
 		if err != nil {
 			btc.log.Errorf("error locking unspent outputs: %v", err)
 		}
@@ -2855,7 +2892,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 		return coins, false, 0, nil // err==nil records and locks the provided fundingCoins in defer
 	}
 
-	addr, err := btc.node.externalAddress()
+	addr, err := btc.node.ExternalAddress()
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error creating split transaction address: %w", err)
 	}
@@ -2874,7 +2911,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 	baseTx.AddTxOut(wire.NewTxOut(int64(reqFunds), splitScript))
 
 	if extraOutput > 0 {
-		addr, err := btc.node.changeAddress()
+		addr, err := btc.node.ChangeAddress()
 		if err != nil {
 			return nil, false, 0, fmt.Errorf("error creating split transaction address: %w", err)
 		}
@@ -2886,7 +2923,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 	}
 
 	// Grab a change address.
-	changeAddr, err := btc.node.changeAddress()
+	changeAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -2971,7 +3008,7 @@ func (btc *baseWallet) rawWalletTx(hash *chainhash.Hash) ([]byte, uint32, error)
 		// fallback to getWalletTransaction
 	}
 
-	tx, err := btc.node.getWalletTransaction(hash)
+	tx, err := btc.node.GetWalletTransaction(hash)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2994,18 +3031,18 @@ type authAddOn struct {
 // the password for the underlying bitcoind wallet which will also be unlocked.
 // It implements asset.authenticator.
 func (a *authAddOn) Unlock(pw []byte) error {
-	return a.w.walletUnlock(pw)
+	return a.w.WalletUnlock(pw)
 }
 
 // Lock locks the underlying bitcoind wallet. It implements asset.authenticator.
 func (a *authAddOn) Lock() error {
-	return a.w.walletLock()
+	return a.w.WalletLock()
 }
 
 // Locked will be true if the wallet is currently locked. It implements
 // asset.authenticator.
 func (a *authAddOn) Locked() bool {
-	return a.w.locked()
+	return a.w.Locked()
 }
 
 func (btc *baseWallet) addInputsToTx(tx *wire.MsgTx, coins asset.Coins) (uint64, []OutPoint, error) {
@@ -3041,7 +3078,7 @@ func (btc *baseWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []OutPo
 // lookupWalletTxOutput looks up the value of a transaction output that is
 // spandable by this wallet, and creates an output.
 func (btc *baseWallet) lookupWalletTxOutput(txHash *chainhash.Hash, vout uint32) (*Output, error) {
-	getTxResult, err := btc.node.getWalletTransaction(txHash)
+	getTxResult, err := btc.node.GetWalletTransaction(txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -3069,7 +3106,7 @@ func (btc *baseWallet) getTransactions(coins []dex.Bytes) ([]*GetTransactionResu
 		if err != nil {
 			return nil, err
 		}
-		getTxRes, err := btc.node.getWalletTransaction(txHash)
+		getTxRes, err := btc.node.GetWalletTransaction(txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -3087,7 +3124,7 @@ func (btc *baseWallet) getTxFee(tx *wire.MsgTx) (uint64, error) {
 	}
 
 	for _, txIn := range tx.TxIn {
-		prevTx, err := btc.node.getWalletTransaction(&txIn.PreviousOutPoint.Hash)
+		prevTx, err := btc.node.GetWalletTransaction(&txIn.PreviousOutPoint.Hash)
 		if err != nil {
 			return 0, err
 		}
@@ -3157,7 +3194,7 @@ func (btc *baseWallet) additionalFeesRequired(txs []*GetTransactionResult, newFe
 // changeCanBeAccelerated returns nil if the change can be accelerated,
 // otherwise it returns an error containing the reason why it cannot.
 func (btc *baseWallet) changeCanBeAccelerated(change *Output, remainingSwaps bool) error {
-	lockedUtxos, err := btc.node.listLockUnspent()
+	lockedUtxos, err := btc.node.ListLockUnspent()
 	if err != nil {
 		return err
 	}
@@ -3173,7 +3210,7 @@ func (btc *baseWallet) changeCanBeAccelerated(change *Output, remainingSwaps boo
 		}
 	}
 
-	utxos, err := btc.node.listUnspent()
+	utxos, err := btc.node.ListUnspent()
 	if err != nil {
 		return err
 	}
@@ -3267,7 +3304,7 @@ func (btc *baseWallet) signedAccelerationTx(previousTxs []*GetTransactionResult,
 		return makeError(err)
 	}
 
-	addr, err := btc.node.externalAddress()
+	addr, err := btc.node.ExternalAddress()
 	if err != nil {
 		return makeError(fmt.Errorf("error creating change address: %w", err))
 	}
@@ -3364,7 +3401,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 	// changeCanBeAccelerated would have returned an error since this means
 	// that the change was locked by another order.
 	if requiredForRemainingSwaps > 0 {
-		err = btc.node.lockUnspent(false, []*Output{newChange})
+		err = btc.node.LockUnspent(false, []*Output{newChange})
 		if err != nil {
 			// The transaction is already broadcasted, so don't fail now.
 			btc.log.Errorf("failed to lock change output: %v", err)
@@ -3806,7 +3843,7 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 	}
 
 	// Grab a change address.
-	changeAddr, err := btc.node.changeAddress()
+	changeAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -3870,7 +3907,7 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 	if change != nil && swaps.LockChange {
 		// Lock the change output
 		btc.log.Debugf("locking change coin %s", change)
-		err = btc.node.lockUnspent(false, []*Output{change})
+		err = btc.node.LockUnspent(false, []*Output{change})
 		if err != nil {
 			// The swap transaction is already broadcasted, so don't fail now.
 			btc.log.Errorf("failed to lock change output: %v", err)
@@ -3974,7 +4011,7 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	}
 
 	// Send the funds back to the exchange wallet.
-	redeemAddr, err := btc.node.externalAddress()
+	redeemAddr, err := btc.node.ExternalAddress()
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 	}
@@ -4076,7 +4113,7 @@ func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 	if utxo == nil {
 		return nil, nil, fmt.Errorf("no utxo found for %s", op)
 	}
-	privKey, err := btc.node.privKeyForAddress(utxo.Address)
+	privKey, err := btc.node.PrivKeyForAddress(utxo.Address)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4120,7 +4157,7 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 	if len(txData) == 0 {
 		// Fall back to gettxout, but we won't have the tx to rebroadcast.
 		pkScript, _ := btc.scriptHashScript(contract) // pkScript and since time are unused if full node
-		txOut, _, err = btc.node.getTxOut(txHash, vout, pkScript, time.Now().Add(-ContractSearchLimit))
+		txOut, _, err = btc.node.GetTxOut(txHash, vout, pkScript, time.Now().Add(-ContractSearchLimit))
 		if err != nil || txOut == nil {
 			return nil, fmt.Errorf("error finding unspent contract: %s:%d : %w", txHash, vout, err)
 		}
@@ -4175,7 +4212,7 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 	// and does not affect the audit result.
 	if rebroadcast && tx != nil {
 		go func() {
-			if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
+			if hashSent, err := btc.node.SendRawTransaction(tx); err != nil {
 				btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			} else if !hashSent.IsEqual(txHash) {
 				btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
@@ -4201,7 +4238,7 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 // LockTimeExpired returns true if the specified locktime has expired, making it
 // possible to refund the locked coins.
 func (btc *baseWallet) LockTimeExpired(_ context.Context, lockTime time.Time) (bool, error) {
-	medianTime, err := btc.node.medianTime() // TODO: pass ctx
+	medianTime, err := btc.node.MedianTime() // TODO: pass ctx
 	if err != nil {
 		return false, fmt.Errorf("error getting median time: %w", err)
 	}
@@ -4263,7 +4300,7 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.B
 	// the wallet tx though and used for the spender search, while not passing
 	// a script here to ensure no attempt is made to find the output without
 	// a limited startTime.
-	utxo, _, err := btc.node.getTxOut(txHash, vout, pkScript, time.Time{})
+	utxo, _, err := btc.node.GetTxOut(txHash, vout, pkScript, time.Time{})
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", err)
 	}
@@ -4329,7 +4366,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 	if refundAddr == nil {
-		refundAddr, err = btc.node.externalAddress()
+		refundAddr, err = btc.node.ExternalAddress()
 		if err != nil {
 			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -4374,7 +4411,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 // DepositAddress returns an address for depositing funds into the
 // exchange wallet.
 func (btc *baseWallet) DepositAddress() (string, error) {
-	addr, err := btc.node.externalAddress()
+	addr, err := btc.node.ExternalAddress()
 	if err != nil {
 		return "", err
 	}
@@ -4382,14 +4419,14 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if btc.node.locked() {
+	if btc.node.Locked() {
 		return addrStr, nil
 	}
 
 	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
 	// us an address for which we can retrieve the private keys, regardless of
 	// what ownsAddress would say.
-	priv, err := btc.node.privKeyForAddress(addrStr)
+	priv, err := btc.node.PrivKeyForAddress(addrStr)
 	if err != nil {
 		return "", fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
 	}
@@ -4486,7 +4523,7 @@ func (btc *baseWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	txHash, err := btc.node.sendRawTransaction(msgTx)
+	txHash, err := btc.node.SendRawTransaction(msgTx)
 	if err != nil {
 		return nil, err
 	}
@@ -4522,7 +4559,7 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 		baseSize += dexbtc.P2PKHOutputSize * 2
 	}
 
-	enough := sendEnough(val, feeRate, subtract, uint64(baseSize), btc.segwit, true)
+	enough := SendEnough(val, feeRate, subtract, uint64(baseSize), btc.segwit, true)
 	minConfs := uint32(0)
 	coins, _, _, _, inputsSize, _, err := btc.cm.Fund(btc.bondReserves.Load(), minConfs, false, enough)
 	if err != nil {
@@ -4543,7 +4580,7 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 	}
 	fundedTx.AddTxOut(wire.NewTxOut(int64(toSend), pay2script))
 
-	changeAddr, err := btc.node.changeAddress()
+	changeAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -4592,7 +4629,7 @@ func (btc *baseWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contra
 	if err != nil {
 		return 0, false, err
 	}
-	return btc.node.swapConfirmations(txHash, vout, pkScript, startTime)
+	return btc.node.SwapConfirmations(txHash, vout, pkScript, startTime)
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified output
@@ -4608,7 +4645,7 @@ func (btc *baseWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) (con
 }
 
 func (btc *baseWallet) checkPeers() {
-	numPeers, err := btc.node.peerCount()
+	numPeers, err := btc.node.PeerCount()
 	if err != nil {
 		prevPeer := atomic.SwapUint32(&btc.lastPeerCount, 0)
 		if prevPeer != 0 {
@@ -4666,7 +4703,7 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 		// Poll for the block. If the wallet offers tip reports, delay reporting
 		// the tip to give the wallet a moment to request and scan block data.
 		case <-ticker.C:
-			newTipHdr, err := btc.node.getBestBlockHeader()
+			newTipHdr, err := btc.node.GetBestBlockHeader()
 			if err != nil {
 				btc.log.Errorf("failed to get best block header from %s node: %v", btc.symbol, err)
 				continue
@@ -4703,7 +4740,7 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 					queuedBlock.queue.Stop()
 				}
 				blockAllowance := walletBlockAllowance
-				syncStatus, err := btc.node.syncStatus()
+				syncStatus, err := btc.node.SyncStatus()
 				if err != nil {
 					btc.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
 				} else if syncStatus.Syncing {
@@ -4784,7 +4821,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 	// Sign the transaction to get an initial size estimate and calculate whether
 	// a change output would be dust.
 	sigCycles := 1
-	msgTx, err := btc.node.signTx(baseTx)
+	msgTx, err := btc.node.SignTx(baseTx)
 	if err != nil {
 		return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 	}
@@ -4829,7 +4866,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		for {
 			// Sign the transaction with the change output and compute new size.
 			sigCycles++
-			msgTx, err = btc.node.signTx(baseTx)
+			msgTx, err = btc.node.SignTx(baseTx)
 			if err != nil {
 				return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
@@ -4887,7 +4924,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 }
 
 func (btc *baseWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
-	txHash, err := btc.node.sendRawTransaction(signedTx)
+	txHash, err := btc.node.SendRawTransaction(signedTx)
 	if err != nil {
 		return nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(signedTx))
 	}
@@ -4907,7 +4944,7 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 		return nil, nil, err
 	}
 
-	privKey, err := btc.node.privKeyForAddress(addrStr)
+	privKey, err := btc.node.PrivKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4929,7 +4966,7 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 	if err != nil {
 		return nil, nil, err
 	}
-	privKey, err := btc.node.privKeyForAddress(addrStr)
+	privKey, err := btc.node.PrivKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4982,7 +5019,7 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 
 	tx := wire.NewMsgTx(btc.txVersion())
 	tx.AddTxOut(wireOP)
-	fee, err = btc.txFeeEstimator.estimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
+	fee, err = btc.txFeeEstimator.EstimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
 	if err != nil {
 		return 0, false, err
 	}
@@ -5106,7 +5143,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 	}
 
 	const subtract = false
-	coins, _, _, _, _, _, err := btc.cm.Fund(0, 0, true, sendEnough(amt, feeRate, subtract, uint64(baseSize), btc.segwit, true))
+	coins, _, _, _, _, _, err := btc.cm.Fund(0, 0, true, SendEnough(amt, feeRate, subtract, uint64(baseSize), btc.segwit, true))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to fund bond tx: %w", err)
 	}
@@ -5135,7 +5172,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		return nil, nil, fmt.Errorf("failed to add inputs to bond tx: %w", err)
 	}
 
-	changeAddr, err := btc.node.changeAddress()
+	changeAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -5230,7 +5267,7 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 	}
 
 	// Add the refund output.
-	redeemAddr, err := btc.node.externalAddress()
+	redeemAddr, err := btc.node.ExternalAddress()
 	if err != nil {
 		return nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -5292,7 +5329,7 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 		return nil, err
 	}
 
-	_, err = btc.node.sendRawTransaction(msgTx)
+	_, err = btc.node.SendRawTransaction(msgTx)
 	if err != nil {
 		return nil, fmt.Errorf("error sending refund bond transaction: %w", err)
 	}
@@ -5372,7 +5409,7 @@ func (btc *baseWallet) FindBond(_ context.Context, coinID []byte, _ time.Time) (
 
 	// If the bond was funded by this wallet or had a change output paying
 	// to this wallet, it should be found here.
-	tx, err := btc.node.getWalletTransaction(txHash)
+	tx, err := btc.node.GetWalletTransaction(txHash)
 	if err != nil {
 		return nil, fmt.Errorf("did not find the bond output %v:%d", txHash, vout)
 	}
@@ -5398,7 +5435,7 @@ func (btc *intermediaryWallet) FindBond(
 
 	// If the bond was funded by this wallet or had a change output paying
 	// to this wallet, it should be found here.
-	tx, err := btc.node.getWalletTransaction(txHash)
+	tx, err := btc.node.GetWalletTransaction(txHash)
 	if err == nil {
 		msgTx, err := btc.deserializeTx(tx.Bytes)
 		if err != nil {
@@ -5414,7 +5451,7 @@ func (btc *intermediaryWallet) FindBond(
 	// restored from seed. This is not a problem. However, we are unable to
 	// use filters because we don't know any output scripts. Brute force
 	// finding the transaction.
-	bestBlockHdr, err := btc.node.getBestBlockHeader()
+	bestBlockHdr, err := btc.node.GetBestBlockHeader()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get best hash: %v", err)
 	}
@@ -5431,7 +5468,7 @@ out:
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("bond search stopped: %w", err)
 		}
-		blk, err = btc.tipRedeemer.getBlock(*blockHash)
+		blk, err = btc.tipRedeemer.GetBlock(*blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
 		}
@@ -5738,7 +5775,7 @@ func (btc *baseWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTra
 			}
 
 			addr := addrs[0]
-			owns, err := btc.node.ownsAddress(addr)
+			owns, err := btc.node.OwnsAddress(addr)
 			if err != nil {
 				btc.log.Errorf("ownsAddress error: %w", err)
 				return false
@@ -5782,7 +5819,7 @@ func (btc *baseWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTra
 			}
 
 			addr := addrs[0]
-			owns, err := btc.node.ownsAddress(addr)
+			owns, err := btc.node.OwnsAddress(addr)
 			if err != nil {
 				btc.log.Errorf("ownsAddress error: %w", err)
 				continue
@@ -5810,7 +5847,7 @@ func (btc *baseWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTra
 			}
 
 			addr := addrs[0]
-			owns, err := btc.node.ownsAddress(addr)
+			owns, err := btc.node.OwnsAddress(addr)
 			if err != nil {
 				btc.log.Errorf("ownsAddress error: %w", err)
 				continue
@@ -5864,7 +5901,7 @@ func (btc *baseWallet) addUnknownTransactionsToHistory(tip uint64) {
 		blockToQuery = tip - blockQueryBuffer
 	}
 
-	txs, err := btc.node.listTransactionsSinceBlock(int32(blockToQuery))
+	txs, err := btc.node.ListTransactionsSinceBlock(int32(blockToQuery))
 	if err != nil {
 		btc.log.Errorf("Error listing transactions since block %d: %v", blockToQuery, err)
 		return
@@ -5952,7 +5989,7 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 			return
 		}
 
-		gtr, err := btc.node.getWalletTransaction(&txHash)
+		gtr, err := btc.node.GetWalletTransaction(&txHash)
 		if errors.Is(err, asset.CoinNotFoundError) {
 			err = txHistoryDB.RemoveTx(txHash.String())
 			if err == nil || errors.Is(err, asset.CoinNotFoundError) {
@@ -5978,7 +6015,7 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 				btc.log.Errorf("Error decoding block hash %s: %v", gtr.BlockHash, err)
 				return
 			}
-			blockHeight, err := btc.tipRedeemer.getBlockHeight(blockHash)
+			blockHeight, err := btc.tipRedeemer.GetBlockHeight(blockHash)
 			if err != nil {
 				btc.log.Errorf("Error getting block height for %s: %v", blockHash, err)
 				return
@@ -6118,7 +6155,7 @@ func (btc *intermediaryWallet) TxHistory(n int, refID *string, past bool) ([]*as
 
 // lockedSats is the total value of locked outputs, as locked with LockUnspent.
 func (btc *baseWallet) lockedSats() (uint64, error) {
-	lockedOutpoints, err := btc.node.listLockUnspent()
+	lockedOutpoints, err := btc.node.ListLockUnspent()
 	if err != nil {
 		return 0, err
 	}
@@ -6134,7 +6171,7 @@ func (btc *baseWallet) lockedSats() (uint64, error) {
 			sum += utxo.Amount
 			continue
 		}
-		tx, err := btc.node.getWalletTransaction(txHash)
+		tx, err := btc.node.GetWalletTransaction(txHash)
 		if err != nil {
 			return 0, err
 		}
@@ -6162,7 +6199,7 @@ func (btc *baseWallet) wireBytes(tx *wire.MsgTx) []byte {
 // GetBestBlockHeight is exported for use by clone wallets. Not part of the
 // asset.Wallet interface.
 func (btc *baseWallet) GetBestBlockHeight() (int32, error) {
-	return btc.node.getBestBlockHeight()
+	return btc.node.GetBestBlockHeight()
 }
 
 // Convert the BTC value to satoshi.
@@ -6371,7 +6408,7 @@ func (btc *baseWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Red
 		return nil, err
 	}
 
-	utxo, _, err := btc.node.getTxOut(swapHash, vout, pkScript, time.Now().Add(-ContractSearchLimit))
+	utxo, _, err := btc.node.GetTxOut(swapHash, vout, pkScript, time.Now().Add(-ContractSearchLimit))
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract %s with swap hash %v vout %d: %w", redemption.Spends.Coin.ID(), swapHash, vout, err)
 	}

@@ -124,7 +124,7 @@ var (
 	// be tried over and over with wallet in SPV mode.
 	maxRedeemMempoolAge = time.Hour * 2
 
-	walletOpts = []*asset.ConfigOption{
+	WalletOpts = []*asset.ConfigOption{
 		{
 			Key:         "fallbackfee",
 			DisplayName: "Fallback fee rate",
@@ -268,7 +268,7 @@ var (
 				Type:             walletTypeSPV,
 				Tab:              "Native",
 				Description:      "Use the built-in SPV wallet",
-				ConfigOpts:       walletOpts,
+				ConfigOpts:       WalletOpts,
 				Seeded:           true,
 				MultiFundingOpts: multiFundingOpts,
 			},
@@ -277,7 +277,7 @@ var (
 				Tab:               "External",
 				Description:       "Connect to dcrwallet",
 				DefaultConfigPath: defaultConfigPath,
-				ConfigOpts:        append(rpcOpts, walletOpts...),
+				ConfigOpts:        append(rpcOpts, WalletOpts...),
 				MultiFundingOpts:  multiFundingOpts,
 			},
 		},
