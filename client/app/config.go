@@ -115,6 +115,8 @@ type WebConfig struct {
 	SiteDir     string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Unspecified = default is good in most cases."`
 	NoEmbedSite bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
 	HTTPProfile bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
+	// Deprecated
+	Experimental bool `long:"experimental" description:"DEPRECATED: Enable experimental features"`
 }
 
 // LogConfig encapsulates the logging-related settings.
