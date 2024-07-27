@@ -466,23 +466,31 @@ func TestFreeUpFunds(t *testing.T) {
 }
 
 func TestDistribution(t *testing.T) {
-	// utxo/utxo
-	testDistribution(t, 42, 0)
-	// utxo/account-locker
-	testDistribution(t, 42, 60)
-	testDistribution(t, 60, 42)
-	// token/parent
-	testDistribution(t, 60001, 60)
-	testDistribution(t, 60, 60001)
-	// token/token - same chain
-	testDistribution(t, 966002, 966001)
-	testDistribution(t, 966001, 966002)
-	// token/token - different chains
-	testDistribution(t, 60001, 966003)
-	testDistribution(t, 966003, 60001)
-	// utxo/token
-	testDistribution(t, 42, 966003)
-	testDistribution(t, 966003, 42)
+	tests := [][2]uint32{
+		// utxo/utxo
+		{42, 0},
+		// utxo/account-locker
+		{42, 60},
+		{60, 42},
+		// token/parent
+		{60001, 60},
+		{60, 60001},
+		// token/token - same chain
+		{966002, 966001},
+		{966001, 966002},
+		// token/token - different chains
+		{60001, 966003},
+		{966003, 60001},
+		// utxo/token
+		{42, 966003},
+		{966003, 42},
+	}
+
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%d/%d", test[0], test[1]), func(t *testing.T) {
+			testDistribution(t, test[0], test[1])
+		})
+	}
 }
 
 func testDistribution(t *testing.T, baseID, quoteID uint32) {
@@ -624,58 +632,136 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		a.autoRebalanceCfg.MinQuoteTransfer = min(perLot.cexQuote, perLot.dexQuote)
 	}
 
-	checkDistribution := func(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64) {
+	dexAvailableBalances := map[uint32]uint64{}
+	cexAvailableBalances := map[uint32]uint64{}
+	setAvailableBalances := func(dexBase, cexBase, dexQuote, cexQuote uint64) {
+		dexAvailableBalances[baseID] = dexBase
+		dexAvailableBalances[quoteID] = dexQuote
+		cexAvailableBalances[baseID] = cexBase
+		cexAvailableBalances[quoteID] = cexQuote
+		updateInternalTransferBalances(u, dexAvailableBalances, cexAvailableBalances)
+	}
+
+	checkDistribution := func(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64, baseInternal, quoteInternal bool) {
 		t.Helper()
-		dist, err := a.distribution()
+		dist, err := a.distribution(dexAvailableBalances, cexAvailableBalances)
 		if err != nil {
 			t.Fatalf("distribution error: %v", err)
 		}
-		if dist.baseInv.toDeposit != baseDeposit {
-			t.Fatalf("wrong base deposit size. wanted %d, got %d", baseDeposit, dist.baseInv.toDeposit)
+
+		var expBaseExternalDeposit, expBaseExternalWithdraw, expQuoteExternalDeposit, expQuoteExternalWithdraw uint64
+		var expBaseInternalDeposit, expBaseInternalWithdraw, expQuoteInternalDeposit, expQuoteInternalWithdraw uint64
+
+		if baseInternal {
+			expBaseInternalDeposit = baseDeposit
+			expBaseInternalWithdraw = baseWithdraw
+		} else {
+			expBaseExternalDeposit = baseDeposit
+			expBaseExternalWithdraw = baseWithdraw
 		}
-		if dist.baseInv.toWithdraw != baseWithdraw {
-			t.Fatalf("wrong base withrawal size. wanted %d, got %d", baseWithdraw, dist.baseInv.toWithdraw)
+
+		if quoteInternal {
+			expQuoteInternalDeposit = quoteDeposit
+			expQuoteInternalWithdraw = quoteWithdraw
+		} else {
+			expQuoteExternalDeposit = quoteDeposit
+			expQuoteExternalWithdraw = quoteWithdraw
 		}
-		if dist.quoteInv.toDeposit != quoteDeposit {
-			t.Fatalf("wrong quote deposit size. wanted %d, got %d", quoteDeposit, dist.quoteInv.toDeposit)
+
+		if dist.baseInv.toDeposit != expBaseExternalDeposit {
+			t.Fatalf("wrong base deposit size. wanted %d, got %d", expBaseExternalDeposit, dist.baseInv.toDeposit)
 		}
-		if dist.quoteInv.toWithdraw != quoteWithdraw {
-			t.Fatalf("wrong quote withrawal size. wanted %d, got %d", quoteWithdraw, dist.quoteInv.toWithdraw)
+		if dist.baseInv.toWithdraw != expBaseExternalWithdraw {
+			t.Fatalf("wrong base withrawal size. wanted %d, got %d", expBaseExternalWithdraw, dist.baseInv.toWithdraw)
+		}
+		if dist.quoteInv.toDeposit != expQuoteExternalDeposit {
+			t.Fatalf("wrong quote deposit size. wanted %d, got %d", expQuoteExternalDeposit, dist.quoteInv.toDeposit)
+		}
+		if dist.quoteInv.toWithdraw != expQuoteExternalWithdraw {
+			t.Fatalf("wrong quote withrawal size. wanted %d, got %d", expQuoteExternalWithdraw, dist.quoteInv.toWithdraw)
+		}
+
+		if dist.baseInv.toInternalDeposit != expBaseInternalDeposit {
+			t.Fatalf("wrong base internal deposit size. wanted %d, got %d", expBaseInternalDeposit, dist.baseInv.toInternalDeposit)
+		}
+		if dist.baseInv.toInternalWithdraw != expBaseInternalWithdraw {
+			t.Fatalf("wrong base internal withrawal size. wanted %d, got %d", expBaseInternalWithdraw, dist.baseInv.toInternalWithdraw)
+		}
+		if dist.quoteInv.toInternalDeposit != expQuoteInternalDeposit {
+			t.Fatalf("wrong quote internal deposit size. wanted %d, got %d", expQuoteInternalDeposit, dist.quoteInv.toInternalDeposit)
+		}
+		if dist.quoteInv.toInternalWithdraw != expQuoteInternalWithdraw {
+			t.Fatalf("wrong quote internal withrawal size. wanted %d, got %d", expQuoteInternalWithdraw, dist.quoteInv.toInternalWithdraw)
 		}
 	}
 
 	setLots(1, 1)
 	// Base asset - perfect distribution - no action
 	setBals(minDexBase, minCexBase, minDexQuote, minCexQuote)
-	checkDistribution(0, 0, 0, 0)
+	checkDistribution(0, 0, 0, 0, false, false)
 
 	// Move all of the base balance to cex and max sure we get a withdraw.
 	setBals(0, totalBase, minDexQuote, minCexQuote)
-	checkDistribution(0, minDexBase, 0, 0)
-	// Raise the transfer threshold by one atom and it should zero the withdraw.
+	checkDistribution(0, minDexBase, 0, 0, false, false)
+	// Set available balance enough to cover the withdraw.
+	setAvailableBalances(minDexBase, 0, 0, 0)
+	checkDistribution(0, minDexBase, 0, 0, true, false)
+	setAvailableBalances(0, 0, 0, 0)
+	// One less available balance causes withdrawal to happen
+	setAvailableBalances(minDexBase-1, 0, 0, 0)
+	checkDistribution(0, minDexBase, 0, 0, false, false)
+	setAvailableBalances(0, 0, 0, 0)
+	// Raise the transfer theshold by one atom and it should zero the withdraw.
 	a.autoRebalanceCfg.MinBaseTransfer = minDexBase + 1
-	checkDistribution(0, 0, 0, 0)
-	a.autoRebalanceCfg.MinBaseTransfer = 0
+	checkDistribution(0, 0, 0, 0, false, false)
 
 	// Same for quote
+	setLots(1, 1)
 	setBals(minDexBase, minCexBase, 0, totalQuote)
-	checkDistribution(0, 0, 0, minDexQuote)
+	checkDistribution(0, 0, 0, minDexQuote, false, false)
+	setAvailableBalances(0, 0, minDexQuote, 0)
+	checkDistribution(0, 0, 0, minDexQuote, false, true)
+	setAvailableBalances(0, 0, minDexQuote-1, 0)
+	checkDistribution(0, 0, 0, minDexQuote, false, false)
+	setAvailableBalances(0, 0, 0, 0)
 	a.autoRebalanceCfg.MinQuoteTransfer = minDexQuote + 1
-	checkDistribution(0, 0, 0, 0)
-	a.autoRebalanceCfg.MinQuoteTransfer = 0
-	// Base deposit
-	setBals(totalBase, 0, minDexQuote, minCexQuote)
+	checkDistribution(0, 0, 0, 0, false, false)
 
-	checkDistribution(minCexBase, 0, 0, 0)
+	// Base deposit
+	setLots(1, 1)
+	setBals(totalBase, 0, minDexQuote, minCexQuote)
+	checkDistribution(minCexBase, 0, 0, 0, false, false)
+	setAvailableBalances(0, minCexBase, 0, 0)
+	checkDistribution(minCexBase, 0, 0, 0, true, false)
+	setAvailableBalances(0, minCexBase-1, 0, 0)
+	checkDistribution(minCexBase, 0, 0, 0, false, false)
+	setAvailableBalances(0, 0, 0, 0)
+
 	// Quote deposit
 	setBals(minDexBase, minCexBase, totalQuote, 0)
-	checkDistribution(0, 0, minCexQuote, 0)
+	checkDistribution(0, 0, minCexQuote, 0, false, false)
+	setAvailableBalances(0, 0, 0, minCexQuote)
+	checkDistribution(0, 0, minCexQuote, 0, false, true)
+	setAvailableBalances(0, 0, 0, minCexQuote-1)
+	checkDistribution(0, 0, minCexQuote, 0, false, false)
+	setAvailableBalances(0, 0, 0, 0)
+
 	// Doesn't have to be symmetric.
 	setLots(1, 3)
 	setBals(totalBase, 0, minDexQuote, minCexQuote)
-	checkDistribution(minCexBase, 0, 0, 0)
+	checkDistribution(minCexBase, 0, 0, 0, false, false)
+	setAvailableBalances(0, minCexBase, 0, 0)
+	checkDistribution(minCexBase, 0, 0, 0, true, false)
+	setAvailableBalances(0, minCexBase-1, 0, 0)
+	checkDistribution(minCexBase, 0, 0, 0, false, false)
+	setAvailableBalances(0, 0, 0, 0)
 	setBals(minDexBase, minCexBase, 0, totalQuote)
-	checkDistribution(0, 0, 0, minDexQuote)
+	checkDistribution(0, 0, 0, minDexQuote, false, false)
+	setAvailableBalances(minDexQuote, minDexQuote, minDexQuote, minDexQuote)
+	checkDistribution(0, 0, 0, minDexQuote, false, true)
+	setAvailableBalances(0, 0, minDexQuote-1, 0)
+	checkDistribution(0, 0, 0, minDexQuote, false, false)
+	setAvailableBalances(0, 0, 0, 0)
 
 	// Even if there's extra, if neither side has too low of balance, nothing
 	// will happen. The extra will be split evenly between dex and cex.
@@ -683,39 +769,47 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	setLots(5, 3)
 	// Base OK
 	setBals(minDexBase, minCexBase*10, minDexQuote, minCexQuote)
-	checkDistribution(0, 0, 0, 0)
+	checkDistribution(0, 0, 0, 0, false, false)
 	// Base withdraw. Extra goes to dex for base asset.
 	setBals(0, minDexBase+minCexBase+extra, minDexQuote, minCexQuote)
-	checkDistribution(0, minDexBase+extra, 0, 0)
+	checkDistribution(0, minDexBase+extra, 0, 0, false, false)
+
+	setBals(0, minCexBase*10, minDexQuote, minCexQuote)
+	setAvailableBalances(minDexBase, 0, 0, 0)
+	checkDistribution(0, minDexBase, 0, 0, true, false)
+	setAvailableBalances(minDexBase-1, 0, 0, 0)
+	checkDistribution(0, 950000000, 0, 0, false, false)
+	setAvailableBalances(0, 0, 0, 0)
+
 	// Base deposit.
 	setBals(minDexBase+minCexBase, extra, minDexQuote, minCexQuote)
-	checkDistribution(minCexBase-extra, 0, 0, 0)
+	checkDistribution(minCexBase-extra, 0, 0, 0, false, false)
 	// Quote OK
 	setBals(minDexBase, minCexBase, minDexQuote*100, minCexQuote*100)
-	checkDistribution(0, 0, 0, 0)
+	checkDistribution(0, 0, 0, 0, false, false)
 	// Quote withdraw. Extra is split for the quote asset. Gotta lower the min
 	// transfer a little bit to make this one happen.
 	setBals(minDexBase, minCexBase, minDexQuote-perLot.dexQuote+extra, minCexQuote+perLot.dexQuote)
 	a.autoRebalanceCfg.MinQuoteTransfer = perLot.dexQuote - extra/2
-	checkDistribution(0, 0, 0, perLot.dexQuote-extra/2)
+	checkDistribution(0, 0, 0, perLot.dexQuote-extra/2, false, false)
 	// Quote deposit
 	setBals(minDexBase, minCexBase, minDexQuote+perLot.cexQuote+extra, minCexQuote-perLot.cexQuote)
-	checkDistribution(0, 0, perLot.cexQuote+extra/2, 0)
+	checkDistribution(0, 0, perLot.cexQuote+extra/2, 0, false, false)
 
 	// Deficit math.
 	// Since cex lot is smaller, dex can't use this extra.
 	setBals(addBaseFees+perLot.dexBase*3+perLot.cexBase, 0, addQuoteFees+minDexQuote, minCexQuote)
-	checkDistribution(2*perLot.cexBase, 0, 0, 0)
+	checkDistribution(2*perLot.cexBase, 0, 0, 0, false, false)
 	// Same thing, but with enough for fees, and there's no reason to transfer
 	// because it doesn't improve our matchability.
 	setBals(perLot.dexBase*3, extra, minDexQuote, minCexQuote)
-	checkDistribution(0, 0, 0, 0)
+	checkDistribution(0, 0, 0, 0, false, false)
 	setBals(addBaseFees+minDexBase, minCexBase, addQuoteFees+perLot.dexQuote*5+perLot.cexQuote*2+extra, 0)
-	checkDistribution(0, 0, perLot.cexQuote*2+extra/2, 0)
+	checkDistribution(0, 0, perLot.cexQuote*2+extra/2, 0, false, false)
 	setBals(addBaseFees+perLot.dexBase, 5*perLot.cexBase+2*perLot.dexBase+extra, addQuoteFees+minDexQuote, minCexQuote)
-	checkDistribution(0, 2*perLot.dexBase+extra, 0, 0)
+	checkDistribution(0, 2*perLot.dexBase+extra, 0, 0, false, false)
 	setBals(addBaseFees+perLot.dexBase*2, perLot.cexBase*2, addQuoteFees+perLot.dexQuote, perLot.cexQuote*2+perLot.dexQuote+extra)
-	checkDistribution(0, 0, 0, perLot.dexQuote+extra/2)
+	checkDistribution(0, 0, 0, perLot.dexQuote+extra/2, false, false)
 
 	var epok uint64
 	epoch := func() uint64 {
@@ -723,7 +817,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		return epok
 	}
 
-	checkTransfers := func(expActionTaken bool, expBaseDeposit, expBaseWithdraw, expQuoteDeposit, expQuoteWithdraw uint64) {
+	checkTransfers := func(expActionTaken bool, expBaseDeposit, expBaseWithdraw, expQuoteDeposit, expQuoteWithdraw uint64, baseInternal, quoteInternal bool) {
 		t.Helper()
 		defer func() {
 			u.wg.Wait()
@@ -734,13 +828,36 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			u.pendingDEXOrders = make(map[order.OrderID]*pendingDEXOrder)
 		}()
 
-		actionTaken, err := a.tryTransfers(epoch())
+		var expBaseExternalDeposit, expBaseExternalWithdraw, expQuoteExternalDeposit, expQuoteExternalWithdraw uint64
+		var expBaseInternalDeposit, expBaseInternalWithdraw, expQuoteInternalDeposit, expQuoteInternalWithdraw uint64
+		if baseInternal {
+			expBaseInternalDeposit = expBaseDeposit
+			expBaseInternalWithdraw = expBaseWithdraw
+		} else {
+			expBaseExternalDeposit = expBaseDeposit
+			expBaseExternalWithdraw = expBaseWithdraw
+		}
+		if quoteInternal {
+			expQuoteInternalDeposit = expQuoteDeposit
+			expQuoteInternalWithdraw = expQuoteWithdraw
+		} else {
+			expQuoteExternalDeposit = expQuoteDeposit
+			expQuoteExternalWithdraw = expQuoteWithdraw
+		}
+
+		u.balancesMtx.RLock()
+		initialDexBase, initialCexBase := u.baseDexBalances[baseID], u.baseCexBalances[baseID]
+		initialDexQuote, initialCexQuote := u.baseDexBalances[quoteID], u.baseCexBalances[quoteID]
+		u.balancesMtx.RUnlock()
+
+		actionTaken, err := a.tryTransfers(epoch(), a.distribution)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
 		if actionTaken != expActionTaken {
 			t.Fatalf("wrong actionTaken result. wanted %t, got %t", expActionTaken, actionTaken)
 		}
+
 		var baseDeposit, quoteDeposit *sendArgs
 		for _, s := range tCore.sends {
 			if s.assetID == baseID {
@@ -757,51 +874,83 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 				quoteWithdrawal = w
 			}
 		}
-		if expBaseDeposit > 0 {
+
+		if expBaseExternalDeposit > 0 {
 			if baseDeposit == nil {
 				t.Fatalf("Missing base deposit")
 			}
-			if baseDeposit.value != expBaseDeposit {
-				t.Fatalf("Wrong value for base deposit. wanted %d, got %d", expBaseDeposit, baseDeposit.value)
+			if baseDeposit.value != expBaseExternalDeposit {
+				t.Fatalf("Wrong value for base deposit. wanted %d, got %d", expBaseExternalDeposit, baseDeposit.value)
 			}
 		} else if baseDeposit != nil {
 			t.Fatalf("Unexpected base deposit")
 		}
-		if expQuoteDeposit > 0 {
-			if quoteDeposit == nil {
-				t.Fatalf("Missing quote deposit")
-			}
-			if quoteDeposit.value != expQuoteDeposit {
-				t.Fatalf("Wrong value for quote deposit. wanted %d, got %d", expQuoteDeposit, quoteDeposit.value)
-			}
-		} else if quoteDeposit != nil {
-			t.Fatalf("Unexpected quote deposit")
-		}
-		if expBaseWithdraw > 0 {
+
+		if expBaseExternalWithdraw > 0 {
 			if baseWithdrawal == nil {
 				t.Fatalf("Missing base withdrawal")
 			}
-			if baseWithdrawal.amt != expBaseWithdraw {
-				t.Fatalf("Wrong value for base withdrawal. wanted %d, got %d", expBaseWithdraw, baseWithdrawal.amt)
+			if baseWithdrawal.amt != expBaseExternalWithdraw {
+				t.Fatalf("Wrong value for base withdrawal. wanted %d, got %d", expBaseExternalWithdraw, baseWithdrawal.amt)
 			}
 		} else if baseWithdrawal != nil {
 			t.Fatalf("Unexpected base withdrawal")
 		}
-		if expQuoteWithdraw > 0 {
+
+		if expQuoteExternalDeposit > 0 {
+			if quoteDeposit == nil {
+				t.Fatalf("Missing quote deposit")
+			}
+			if quoteDeposit.value != expQuoteExternalDeposit {
+				t.Fatalf("Wrong value for quote deposit. wanted %d, got %d", expQuoteExternalDeposit, quoteDeposit.value)
+			}
+		} else if quoteDeposit != nil {
+			t.Fatalf("Unexpected quote deposit")
+		}
+
+		if expQuoteExternalWithdraw > 0 {
 			if quoteWithdrawal == nil {
 				t.Fatalf("Missing quote withdrawal")
 			}
-			if quoteWithdrawal.amt != expQuoteWithdraw {
-				t.Fatalf("Wrong value for quote withdrawal. wanted %d, got %d", expQuoteWithdraw, quoteWithdrawal.amt)
+			if quoteWithdrawal.amt != expQuoteExternalWithdraw {
+				t.Fatalf("Wrong value for quote withdrawal. wanted %d, got %d", expQuoteExternalWithdraw, quoteWithdrawal.amt)
 			}
 		} else if quoteWithdrawal != nil {
 			t.Fatalf("Unexpected quote withdrawal")
+		}
+
+		u.balancesMtx.RLock()
+		dexBaseDiff := u.baseDexBalances[baseID] - initialDexBase
+		cexBaseDiff := u.baseCexBalances[baseID] - initialCexBase
+		dexQuoteDiff := u.baseDexBalances[quoteID] - initialDexQuote
+		cexQuoteDiff := u.baseCexBalances[quoteID] - initialCexQuote
+		u.balancesMtx.RUnlock()
+
+		// Don't check internal diffs if there is an external action. The diffs
+		// should be zero, but goroutines are started to confirm pending deposits
+		// and withdrawals which will cause the diffs to be non-zero.
+		if expBaseExternalDeposit == 0 && expBaseExternalWithdraw == 0 {
+			if dexBaseDiff != int64(expBaseInternalWithdraw-expBaseInternalDeposit) {
+				t.Fatalf("wrong dex base diff. wanted %d, got %d", int64(expBaseInternalWithdraw-expBaseInternalDeposit), dexBaseDiff)
+			}
+			if cexBaseDiff != int64(expBaseInternalDeposit-expBaseInternalWithdraw) {
+				t.Fatalf("wrong cex base diff. wanted %d, got %d", int64(expBaseInternalDeposit-expBaseInternalWithdraw), cexBaseDiff)
+			}
+		}
+
+		if expQuoteExternalDeposit == 0 && expQuoteExternalWithdraw == 0 {
+			if dexQuoteDiff != int64(expQuoteInternalWithdraw-expQuoteInternalDeposit) {
+				t.Fatalf("wrong dex quote diff. wanted %d, got %d", int64(expQuoteInternalWithdraw-expQuoteInternalDeposit), dexQuoteDiff)
+			}
+			if cexQuoteDiff != int64(expQuoteInternalDeposit-expQuoteInternalWithdraw) {
+				t.Fatalf("wrong cex quote diff. wanted %d, got %d", int64(expQuoteInternalDeposit-expQuoteInternalWithdraw), cexQuoteDiff)
+			}
 		}
 	}
 
 	setLots(1, 1)
 	setBals(minDexBase, minCexBase, minDexQuote, minCexQuote)
-	checkTransfers(false, 0, 0, 0, 0)
+	checkTransfers(false, 0, 0, 0, 0, false, false)
 
 	coinID := []byte{0xa0}
 	coin := &tCoin{coinID: coinID, value: 1}
@@ -812,20 +961,40 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 
 	// Base deposit.
 	setBals(totalBase, 0, minDexQuote, minCexQuote)
-	checkTransfers(true, minCexBase, 0, 0, 0)
+	checkTransfers(true, minCexBase, 0, 0, 0, false, false)
+	// Base internal deposit.
+	setBals(totalBase, 0, minDexQuote, minCexQuote)
+	setAvailableBalances(0, minCexBase, 0, 0)
+	checkTransfers(false, minCexBase, 0, 0, 0, true, false)
+	setAvailableBalances(0, 0, 0, 0)
 
 	// Base withdrawal
 	cex.confirmWithdrawal = &withdrawArgs{txID: txID}
 	setBals(0, totalBase, minDexQuote, minCexQuote)
-	checkTransfers(true, 0, minDexBase, 0, 0)
+	checkTransfers(true, 0, minDexBase, 0, 0, false, false)
+	// Base internal withdrawal
+	setBals(0, totalBase, minDexQuote, minCexQuote)
+	setAvailableBalances(minDexBase, 0, 0, 0)
+	checkTransfers(false, 0, minDexBase, 0, 0, true, false)
+	setAvailableBalances(0, 0, 0, 0)
 
 	// Quote deposit
 	setBals(minDexBase, minCexBase, totalQuote, 0)
-	checkTransfers(true, 0, 0, minCexQuote, 0)
+	checkTransfers(true, 0, 0, minCexQuote, 0, false, false)
+	// Quote internal deposit
+	setBals(minDexBase, minCexBase, totalQuote, 0)
+	setAvailableBalances(0, 0, 0, minCexQuote)
+	checkTransfers(false, 0, 0, minCexQuote, 0, false, true)
+	setAvailableBalances(0, 0, 0, 0)
 
 	// Quote withdrawal
 	setBals(minDexBase, minCexBase, 0, totalQuote)
-	checkTransfers(true, 0, 0, 0, minDexQuote)
+	checkTransfers(true, 0, 0, 0, minDexQuote, false, false)
+	// Quote internal withdrawal
+	setBals(minDexBase, minCexBase, 0, totalQuote)
+	setAvailableBalances(0, 0, minDexQuote, 0)
+	checkTransfers(false, 0, 0, 0, minDexQuote, false, true)
+	setAvailableBalances(0, 0, 0, 0)
 
 	// Base deposit, but we need to cancel an order to free up the funds.
 	setBals(totalBase, 0, minDexQuote, minCexQuote)
@@ -851,18 +1020,19 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		u.pendingDEXOrders[oid] = po
 	}
 	checkCancel := func() {
+		t.Helper()
 		if len(tCore.cancelsPlaced) != 1 || tCore.cancelsPlaced[0] != oid {
 			t.Fatalf("No cancels placed")
 		}
 		tCore.cancelsPlaced = nil
 	}
 	addLocked(baseID, totalBase)
-	checkTransfers(true, 0, 0, 0, 0)
+	checkTransfers(true, 0, 0, 0, 0, false, false)
 	checkCancel()
 
 	setBals(minDexBase, minCexBase, totalQuote, 0)
 	addLocked(quoteID, totalQuote)
-	checkTransfers(true, 0, 0, 0, 0)
+	checkTransfers(true, 0, 0, 0, 0, false, false)
 	checkCancel()
 
 	setBals(0, totalBase /* being withdrawn */, minDexQuote, minCexQuote)
@@ -871,17 +1041,17 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		amtWithdrawn: totalBase,
 	}
 	// Distribution should indicate a deposit.
-	checkDistribution(minCexBase, 0, 0, 0)
+	checkDistribution(minCexBase, 0, 0, 0, false, false)
 	// But freeUpFunds will come up short. No action taken.
-	checkTransfers(false, 0, 0, 0, 0)
+	checkTransfers(false, 0, 0, 0, 0, false, false)
 
 	setBals(minDexBase, minCexBase, 0, totalQuote)
 	u.pendingWithdrawals["a"] = &pendingWithdrawal{
 		assetID:      quoteID,
 		amtWithdrawn: totalQuote,
 	}
-	checkDistribution(0, 0, minCexQuote, 0)
-	checkTransfers(false, 0, 0, 0, 0)
+	checkDistribution(0, 0, minCexQuote, 0, false, false)
+	checkTransfers(false, 0, 0, 0, 0, false, false)
 
 	u.market = mustParseMarket(&core.Market{})
 }
