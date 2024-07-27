@@ -443,6 +443,9 @@ func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
 		eventLogDB:         newTEventLogDB(),
 		pendingDeposits:    make(map[string]*pendingDeposit),
 		pendingWithdrawals: make(map[string]*pendingWithdrawal),
+		internalTransfer: func(*MarketWithHost, doTransferFunc) bool {
+			return false
+		},
 	}
 }
 
