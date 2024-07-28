@@ -380,12 +380,13 @@ func (f *fakeBinance) run(ctx context.Context) {
 			f.bookedOrdersMtx.Lock()
 			fills := make([]*filledOrder, 0)
 			for tradeID, ord := range f.bookedOrders {
-				if ord.status == "FILLED" {
+				if ord.status != "NEW" {
 					if time.Since(ord.stamp) > time.Hour {
 						delete(f.bookedOrders, tradeID)
 					}
 					continue
 				}
+
 				ord.status = "FILLED"
 				fills = append(fills, &filledOrder{
 					StreamUpdate: bntypes.StreamUpdate{
@@ -398,6 +399,7 @@ func (f *fakeBinance) run(ctx context.Context) {
 					},
 					apiKey: ord.apiKey,
 				})
+				f.updateOrderBalances(ord.slug, ord.sell, ord.qty, ord.rate, updateTypeFillBooked)
 			}
 			f.bookedOrdersMtx.Unlock()
 			if len(fills) > 0 {
@@ -888,18 +890,49 @@ func (f *fakeBinance) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSONWithStatus(w, &resp, http.StatusOK)
 }
 
-func (f *fakeBinance) updateOrderBalances(symbol string, sell bool, qty, rate float64) {
+type orderBalanceUpdate uint16
+
+const (
+	updateTypeInstantFill orderBalanceUpdate = iota
+	updateTypeBook
+	updateTypeFillBooked
+	updateTypeCancelBooked
+)
+
+func (f *fakeBinance) updateOrderBalances(symbol string, sell bool, qty, rate float64, updateType orderBalanceUpdate) {
 	f.marketsMtx.RLock()
 	mkt := f.markets[symbol]
 	f.marketsMtx.RUnlock()
+
 	fromSlug, toSlug, fromQty, toQty := mkt.quoteSlug, mkt.baseSlug, qty*rate, qty
 	if sell {
 		fromSlug, toSlug, fromQty, toQty = toSlug, fromSlug, toQty, fromQty
 	}
+
+	balUpdates := make([]*bntypes.WSBalance, 0, 2)
+
 	f.balancesMtx.Lock()
-	f.balances[toSlug].Free += toQty
-	f.balances[fromSlug].Free -= fromQty
+	fromBal, toBal := f.balances[fromSlug], f.balances[toSlug]
+	switch updateType {
+	case updateTypeInstantFill:
+		fromBal.Free -= fromQty
+		toBal.Free += toQty
+		balUpdates = append(balUpdates, (*bntypes.WSBalance)(toBal))
+	case updateTypeBook:
+		fromBal.Free -= fromQty
+		fromBal.Locked += fromQty
+	case updateTypeFillBooked:
+		fromBal.Locked -= fromQty
+		toBal.Free += toQty
+		balUpdates = append(balUpdates, (*bntypes.WSBalance)(toBal))
+	case updateTypeCancelBooked:
+		fromBal.Locked -= fromQty
+		fromBal.Free += fromQty
+	}
+	balUpdates = append(balUpdates, (*bntypes.WSBalance)(fromBal))
 	f.balancesMtx.Unlock()
+
+	f.sendBalanceUpdates(balUpdates)
 }
 
 func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
@@ -932,12 +965,13 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	if bookIt {
 		resp.Status = "NEW"
 		log.Tracef("Booking %s order on %s for %.8f for user %s", side, slug, qty, apiKey)
-
+		f.updateOrderBalances(slug, side == "SELL", qty, price, updateTypeBook)
 	} else {
 		log.Tracef("Filled %s order on %s for %.8f for user %s", side, slug, qty, apiKey)
 		resp.Status = "FILLED"
 		resp.ExecutedQty = qty
 		resp.CumulativeQuoteQty = qty * price
+		f.updateOrderBalances(slug, side == "SELL", qty, price, updateTypeInstantFill)
 	}
 
 	f.bookedOrdersMtx.Lock()
@@ -969,15 +1003,26 @@ func (f *fakeBinance) handleListenKeyRequest(w http.ResponseWriter, r *http.Requ
 func (f *fakeBinance) handleDeleteOrder(w http.ResponseWriter, r *http.Request) {
 	tradeID := r.URL.Query().Get("origClientOrderId")
 	apiKey := extractAPIKey(r)
+
 	f.bookedOrdersMtx.Lock()
 	ord, found := f.bookedOrders[tradeID]
+	updateBals := false
 	if found {
 		if ord.status == "CANCELED" {
 			log.Errorf("Detected cancellation of an already cancelled order %s", tradeID)
+		} else if ord.status == "FILLED" {
+			log.Errorf("Detected cancellation of an already filled order %s", tradeID)
+		} else {
+			updateBals = true
 		}
 		ord.status = "CANCELED"
 	}
 	f.bookedOrdersMtx.Unlock()
+
+	if updateBals {
+		f.updateOrderBalances(ord.slug, ord.sell, ord.qty, ord.rate, updateTypeCancelBooked)
+	}
+
 	writeJSONWithStatus(w, &struct{}{}, http.StatusOK)
 	if !found {
 		log.Errorf("DELETE request received from user %s for unknown order %s", apiKey, tradeID)
