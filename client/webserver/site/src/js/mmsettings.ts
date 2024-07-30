@@ -2169,7 +2169,7 @@ class AssetPane {
       const totalInventory = Math.max(cexCommit, dexCommit) / ui.conventional.conversionFactor
       page.orderReservesBasis.textContent = Doc.formatFourSigFigs(totalInventory)
       const orderReserves = totalInventory * cfg.orderReservesFactor
-      inv.orderReserves = totalInventory
+      inv.orderReserves = orderReserves
       page.orderReserves.textContent = Doc.formatFourSigFigs(orderReserves)
     }
     if (isToken) {
