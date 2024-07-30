@@ -426,6 +426,10 @@ func (w *tDcrWallet) RescanProgressFromHeight(ctx context.Context, n wallet.Netw
 	}()
 }
 
+func (w *tDcrWallet) RescanPoint(ctx context.Context) (*chainhash.Hash, error) {
+	return nil, nil
+}
+
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 	dcrw := &tDcrWallet{
 		blockInfo:      make(map[int32]*wallet.BlockInfo),

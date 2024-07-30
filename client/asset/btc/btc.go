@@ -1727,32 +1727,20 @@ func (r *GetBlockchainInfoResult) Syncing() bool {
 }
 
 // SyncStatus is information about the blockchain sync status.
-func (btc *baseWallet) SyncStatus() (bool, float32, error) {
+func (btc *baseWallet) SyncStatus() (*asset.SyncStatus, error) {
 	ss, err := btc.node.syncStatus()
 	if err != nil {
-		return false, 0, err
+		return nil, err
 	}
-
-	if ss.Target == 0 { // do not say progress = 1
-		return false, 0, nil
-	}
-	if ss.Syncing {
-		ogTip := atomic.LoadInt64(&btc.tipAtConnect)
-		totalToSync := ss.Target - int32(ogTip)
-		var progress float32 = 1
-		if totalToSync > 0 {
-			progress = 1 - (float32(ss.Target-ss.Height) / float32(totalToSync))
+	ss.StartingBlocks = uint64(atomic.LoadInt64(&btc.tipAtConnect))
+	if ss.Synced {
+		numPeers, err := btc.node.peerCount()
+		if err != nil {
+			return nil, err
 		}
-		return false, progress, nil
+		ss.Synced = numPeers > 0
 	}
-
-	// It looks like we are ready based on syncStatus, but that may just be
-	// comparing wallet height to known chain height. Now check peers.
-	numPeers, err := btc.node.peerCount()
-	if err != nil {
-		return false, 0, err
-	}
-	return numPeers > 0, 1, nil
+	return ss, nil
 }
 
 // OwnsDepositAddress indicates if the provided address can be used
@@ -4706,7 +4694,7 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 				syncStatus, err := btc.node.syncStatus()
 				if err != nil {
 					btc.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
-				} else if syncStatus.Syncing {
+				} else if !syncStatus.Synced {
 					blockAllowance *= 10
 				}
 				queuedBlock = &polledBlock{
@@ -5929,12 +5917,12 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 		return
 	}
 
-	synced, _, err := btc.SyncStatus()
+	ss, err := btc.SyncStatus()
 	if err != nil {
 		btc.log.Errorf("Error getting sync status: %v", err)
 		return
 	}
-	if !synced {
+	if !ss.Synced {
 		return
 	}
 

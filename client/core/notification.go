@@ -31,6 +31,7 @@ const (
 	NoteTypeSpots          = "spots"
 	NoteTypeWalletConfig   = "walletconfig"
 	NoteTypeWalletState    = "walletstate"
+	NoteTypeWalletSync     = "walletsync"
 	NoteTypeServerNotify   = "notify"
 	NoteTypeSecurity       = "security"
 	NoteTypeUpgrade        = "upgrade"
@@ -627,6 +628,25 @@ func newWalletStateNote(walletState *WalletState) *WalletStateNote {
 	return &WalletStateNote{
 		Notification: db.NewNotification(NoteTypeWalletState, TopicWalletState, "", "", db.Data),
 		Wallet:       walletState,
+	}
+}
+
+// WalletSyncNote is a notification of the wallet sync status.
+type WalletSyncNote struct {
+	db.Notification
+	AssetID      uint32            `json:"assetID"`
+	SyncStatus   *asset.SyncStatus `json:"syncStatus"`
+	SyncProgress float32           `json:"syncProgress"`
+}
+
+const TopicWalletSync = "WalletSync"
+
+func newWalletSyncNote(assetID uint32, ss *asset.SyncStatus) *WalletSyncNote {
+	return &WalletSyncNote{
+		Notification: db.NewNotification(NoteTypeWalletSync, TopicWalletState, "", "", db.Data),
+		AssetID:      assetID,
+		SyncStatus:   ss,
+		SyncProgress: ss.BlockProgress(),
 	}
 }
 

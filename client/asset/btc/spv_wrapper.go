@@ -406,7 +406,7 @@ func (w *spvWallet) syncHeight() int32 {
 // the chain service sync stage that comes before the wallet has performed any
 // address recovery/rescan, and switch to the wallet's sync height when it
 // reports non-zero height.
-func (w *spvWallet) syncStatus() (*SyncStatus, error) {
+func (w *spvWallet) syncStatus() (*asset.SyncStatus, error) {
 	// Chain service headers (block and filter) height.
 	chainBlk, err := w.cl.BestBlock()
 	if err != nil {
@@ -422,6 +422,10 @@ func (w *spvWallet) syncStatus() (*SyncStatus, error) {
 		target = atomic.LoadInt32(&w.syncTarget)
 	}
 
+	if target == 0 {
+		return new(asset.SyncStatus), nil
+	}
+
 	var synced bool
 	var blk *BlockVector
 	// Wallet address manager sync height.
@@ -434,10 +438,11 @@ func (w *spvWallet) syncStatus() (*SyncStatus, error) {
 		if walletBlock.Height == 0 {
 			// The wallet is about to start its sync, so just return the last
 			// chain service height prior to wallet birthday until it begins.
-			return &SyncStatus{
-				Target:  target,
-				Height:  atomic.LoadInt32(&w.lastPrenatalHeight),
-				Syncing: true,
+			h := atomic.LoadInt32(&w.lastPrenatalHeight)
+			return &asset.SyncStatus{
+				Synced:       false,
+				TargetHeight: uint64(target),
+				Blocks:       uint64(h),
 			}, nil
 		}
 		blk = &BlockVector{
@@ -459,10 +464,10 @@ func (w *spvWallet) syncStatus() (*SyncStatus, error) {
 		w.tipChan <- blk
 	}
 
-	return &SyncStatus{
-		Target:  target,
-		Height:  int32(blk.Height),
-		Syncing: !synced,
+	return &asset.SyncStatus{
+		Synced:       synced,
+		TargetHeight: uint64(target),
+		Blocks:       uint64(blk.Height),
 	}, nil
 }
 

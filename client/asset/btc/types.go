@@ -192,10 +192,3 @@ func (r *SwapReceipt) String() string {
 func (r *SwapReceipt) SignedRefund() dex.Bytes {
 	return r.SignedRefundBytes
 }
-
-// SyncStatus is the current synchronization state of the node.
-type SyncStatus struct {
-	Target  int32 `json:"target"`
-	Height  int32 `json:"height"`
-	Syncing bool  `json:"syncing"`
-}

@@ -36,7 +36,7 @@ type Wallet interface {
 	walletUnlock(pw []byte) error
 	walletLock() error
 	locked() bool
-	syncStatus() (*SyncStatus, error)
+	syncStatus() (*asset.SyncStatus, error)
 	peerCount() (uint32, error)
 	swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error)
 	getBestBlockHeader() (*BlockHeader, error)

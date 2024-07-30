@@ -1236,20 +1236,20 @@ func TestSyncStatus(t *testing.T) {
 	// ok
 	cl.queueResponse("getblockchaininfo", bci)
 	cl.queueResponse("getnetworkinfo", ni)
-	synced, progress, err := w.SyncStatus()
+	ss, err := w.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (synced expected): %v", err)
 	}
-	if !synced {
+	if !ss.Synced {
 		t.Fatalf("synced = false")
 	}
-	if progress < 1 {
+	if ss.BlockProgress() < 1 {
 		t.Fatalf("progress not complete when loading last block")
 	}
 
 	// getblockchaininfo error
 	cl.queueResponse("getblockchaininfo", tErr)
-	_, _, err = w.SyncStatus()
+	_, err = w.SyncStatus()
 	if !errorHasCode(err, errGetChainInfo) {
 		t.Fatalf("SyncStatus wrong error: %v", err)
 	}
@@ -1257,7 +1257,7 @@ func TestSyncStatus(t *testing.T) {
 	// getnetworkinfo error
 	cl.queueResponse("getblockchaininfo", bci)
 	cl.queueResponse("getnetworkinfo", tErr)
-	_, _, err = w.SyncStatus()
+	_, err = w.SyncStatus()
 	if !errorHasCode(err, errGetNetInfo) {
 		t.Fatalf("SyncStatus wrong error: %v", err)
 	}
@@ -1266,11 +1266,11 @@ func TestSyncStatus(t *testing.T) {
 	ni.Connections = 0
 	cl.queueResponse("getblockchaininfo", bci)
 	cl.queueResponse("getnetworkinfo", ni)
-	synced, _, err = w.SyncStatus()
+	ss, err = w.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (!synced expected): %v", err)
 	}
-	if synced {
+	if ss.Synced {
 		t.Fatalf("synced = true")
 	}
 	ni.Connections = 2
@@ -1278,29 +1278,29 @@ func TestSyncStatus(t *testing.T) {
 	// No headers is progress = 0
 	bci.Headers = 0
 	cl.queueResponse("getblockchaininfo", bci)
-	synced, progress, err = w.SyncStatus()
+	ss, err = w.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (no headers): %v", err)
 	}
-	if synced || progress != 0 {
-		t.Fatal("wrong sync status for no headers", synced, progress)
+	if ss.Synced || ss.BlockProgress() != 0 {
+		t.Fatal("wrong sync status for no headers", ss.Synced, ss.BlockProgress())
 	}
 	bci.Headers = 100
 
 	// 50% synced
-	w.tipAtConnect = 100
+	w.tipAtConnect.Store(100)
 	bci.Headers = 200
 	bci.Blocks = 150
 	cl.queueResponse("getblockchaininfo", bci)
-	synced, progress, err = w.SyncStatus()
+	ss, err = w.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
 	}
-	if synced {
+	if ss.Synced {
 		t.Fatalf("synced = true for 50 blocks to go")
 	}
-	if progress > 0.500001 || progress < 0.4999999 {
-		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
+	if ss.BlockProgress() > 0.500001 || ss.BlockProgress() < 0.4999999 {
+		t.Fatalf("progress out of range. Expected 0.5, got %.2f", ss.BlockProgress())
 	}
 }
 
