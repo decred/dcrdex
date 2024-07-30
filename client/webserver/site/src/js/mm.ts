@@ -735,7 +735,7 @@ class Bot extends BotMarket {
       host: host,
       alloc: alloc
     }
-    if (cexRebalance) startConfig.autoRebalance = this.autoRebalanceSettings()
+    if (cexName && cexRebalance) startConfig.autoRebalance = this.autoRebalanceSettings()
 
     try {
       app().log('mm', 'starting mm bot', startConfig)
