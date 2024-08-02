@@ -641,4 +641,5 @@ var EnUS = map[string]*intl.Translation{
 	"withdrawal":                  {T: "Withdrawal"},
 	"filters":                     {T: "Filters"},
 	"Apply":                       {T: "Apply"},
+	"Hide Mixing Transactions":    {T: "Hide Mixing Transactions"},
 }
