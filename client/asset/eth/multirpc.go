@@ -1339,7 +1339,7 @@ func (m *multiRPCClient) signData(data []byte) (sig, pubKey []byte, err error) {
 // but the best header's time in seconds can be used to determine if the
 // provider is out of sync.
 func (m *multiRPCClient) syncProgress(ctx context.Context) (prog *ethereum.SyncProgress, tipTime uint64, err error) {
-	return prog, tipTime, m.withAny(ctx, func(ctx context.Context, p *provider) error {
+	return prog, tipTime, m.withFreshest(ctx, func(ctx context.Context, p *provider) error {
 		tip, err := p.bestHeader(ctx, m.log)
 		if err != nil {
 			return err

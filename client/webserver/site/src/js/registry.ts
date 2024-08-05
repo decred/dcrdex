@@ -230,6 +230,14 @@ export interface FeeState {
   stampMS: number
 }
 
+export interface SyncStatus {
+  synced: boolean
+  targetHeight: number
+  startingBlocks: number
+  blocks: number
+  txs: number | undefined
+}
+
 export interface WalletState {
   symbol: string
   assetID: number
@@ -246,6 +254,7 @@ export interface WalletState {
   peerCount: number
   synced: boolean
   syncProgress: number
+  syncStatus: SyncStatus
   approved: Record<number, ApprovalStatus>
   feeState?: FeeState
 }
@@ -394,6 +403,12 @@ export interface RateNote extends CoreNote {
 
 export interface WalletConfigNote extends CoreNote {
   wallet: WalletState
+}
+
+export interface WalletSyncNote extends CoreNote {
+  assetID: number
+  syncStatus: SyncStatus
+  syncProgress: number
 }
 
 export type WalletStateNote = WalletConfigNote

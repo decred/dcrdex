@@ -353,15 +353,15 @@ func getTxOutput(c rpcCaller, txHash *chainhash.Hash, index uint32) (*btcjson.Ge
 	return res, c.CallRPC("gettxout", []any{txHash.String(), index, true}, &res)
 }
 
-func syncStatus(c rpcCaller) (*btc.SyncStatus, error) {
+func syncStatus(c rpcCaller) (*asset.SyncStatus, error) {
 	chainInfo, err := getBlockchainInfo(c)
 	if err != nil {
 		return nil, newError(errGetChainInfo, "getblockchaininfo error: %w", err)
 	}
-	return &btc.SyncStatus{
-		Target:  int32(chainInfo.Headers),
-		Height:  int32(chainInfo.Blocks),
-		Syncing: chainInfo.Syncing(),
+	return &asset.SyncStatus{
+		Synced:       chainInfo.Blocks > 0 && !chainInfo.Syncing(),
+		TargetHeight: uint64(chainInfo.Headers),
+		Blocks:       uint64(chainInfo.Blocks),
 	}, nil
 }
 

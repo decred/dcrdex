@@ -56,17 +56,16 @@ type xcWallet struct {
 	feeState          atomic.Value // *FeeState
 	connectMtx        sync.Mutex
 
-	mtx          sync.RWMutex
-	encPass      []byte // empty means wallet not password protected
-	balance      *WalletBalance
-	pw           encode.PassBytes
-	address      string
-	peerCount    int32  // -1 means no count yet
-	monitored    uint32 // startWalletSyncMonitor goroutines monitoring sync status
-	hookedUp     bool
-	synced       bool
-	syncProgress float32
-	disabled     bool
+	mtx        sync.RWMutex
+	encPass    []byte // empty means wallet not password protected
+	balance    *WalletBalance
+	pw         encode.PassBytes
+	address    string
+	peerCount  int32  // -1 means no count yet
+	monitored  uint32 // startWalletSyncMonitor goroutines monitoring sync status
+	hookedUp   bool
+	syncStatus *asset.SyncStatus
+	disabled   bool
 
 	// When wallets are being reconfigured and especially when the wallet type
 	// or host is being changed, we want to suppress "walletstate" notes to
@@ -298,8 +297,9 @@ func (w *xcWallet) state() *WalletState {
 		Units:        winfo.UnitInfo.AtomicUnit,
 		Encrypted:    len(w.encPass) > 0,
 		PeerCount:    peerCount,
-		Synced:       w.synced,
-		SyncProgress: w.syncProgress,
+		Synced:       w.syncStatus.Synced,
+		SyncProgress: w.syncStatus.BlockProgress(),
+		SyncStatus:   w.syncStatus,
 		WalletType:   w.walletType,
 		Traits:       w.traits,
 		Disabled:     w.disabled,
@@ -383,7 +383,7 @@ func (w *xcWallet) checkPeersAndSyncStatus() error {
 	if w.peerCount < 1 {
 		return fmt.Errorf("%s wallet has no connected peers", unbip(w.AssetID))
 	}
-	if !w.synced {
+	if !w.syncStatus.Synced {
 		return fmt.Errorf("%s wallet is not synchronized", unbip(w.AssetID))
 	}
 	return nil
@@ -422,7 +422,7 @@ func (w *xcWallet) Connect() error {
 		}
 	}()
 
-	synced, progress, err := w.SyncStatus()
+	ss, err := w.SyncStatus()
 	if err != nil {
 		return fmt.Errorf("SyncStatus error: %w", err)
 	}
@@ -442,8 +442,7 @@ func (w *xcWallet) Connect() error {
 	}
 	w.feeRate() // prime the feeState
 	w.hookedUp = true
-	w.synced = synced
-	w.syncProgress = progress // updated in walletCheckAndNotify
+	w.syncStatus = ss
 	ready = true
 
 	return nil

@@ -54,3 +54,12 @@ func Max[I constraints.Ordered](m I, ns ...I) I {
 	}
 	return max
 }
+
+func Clamp[I constraints.Ordered](v I, min I, max I) I {
+	if v < min {
+		v = min
+	} else if v > max {
+		v = max
+	}
+	return v
+}

@@ -964,15 +964,15 @@ func (ew *electrumWallet) ownsAddress(addr btcutil.Address) (bool, error) {
 }
 
 // part of the btc.Wallet interface
-func (ew *electrumWallet) syncStatus() (*SyncStatus, error) {
+func (ew *electrumWallet) syncStatus() (*asset.SyncStatus, error) {
 	info, err := ew.wallet.GetInfo(ew.ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &SyncStatus{
-		Target:  int32(info.ServerHeight),
-		Height:  int32(info.SyncHeight),
-		Syncing: !info.Connected || info.SyncHeight < info.ServerHeight,
+	return &asset.SyncStatus{
+		Synced:       info.Connected && info.SyncHeight >= info.ServerHeight,
+		TargetHeight: uint64(info.ServerHeight),
+		Blocks:       uint64(info.SyncHeight),
 	}, nil
 }
 

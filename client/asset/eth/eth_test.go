@@ -1029,19 +1029,14 @@ func TestSyncStatus(t *testing.T) {
 		wantRatio:  1,
 		wantSynced: true,
 	}, {
-		name: "ok syncing",
-		syncProg: ethereum.SyncProgress{
-			CurrentBlock: 25,
-			HighestBlock: 100,
-		},
-		wantRatio: 0.25,
-	}, {
 		name: "ok header too old",
 		syncProg: ethereum.SyncProgress{
 			CurrentBlock: 25,
-			HighestBlock: 0,
+			HighestBlock: 25,
 		},
-		subSecs: dexeth.MaxBlockInterval + 1,
+		subSecs:    dexeth.MaxBlockInterval + 1,
+		wantRatio:  0.999,
+		wantSynced: false,
 	}, {
 		name: "sync progress error",
 		syncProg: ethereum.SyncProgress{
@@ -1067,7 +1062,7 @@ func TestSyncStatus(t *testing.T) {
 			log:           tLogger,
 			finalizeConfs: txConfsNeededToConfirm,
 		}
-		synced, ratio, err := eth.SyncStatus()
+		ss, err := eth.SyncStatus()
 		cancel()
 		if test.wantErr {
 			if err == nil {
@@ -1078,11 +1073,11 @@ func TestSyncStatus(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
-		if synced != test.wantSynced {
-			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, synced, test.name)
+		if ss.Synced != test.wantSynced {
+			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, ss.Synced, test.name)
 		}
-		if ratio != test.wantRatio {
-			t.Fatalf("want ratio %v got %v for test %q", test.wantRatio, ratio, test.name)
+		if ss.BlockProgress() != test.wantRatio {
+			t.Fatalf("want ratio %v got %v for test %q", test.wantRatio, ss.BlockProgress(), test.name)
 		}
 	}
 }

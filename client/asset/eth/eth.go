@@ -442,6 +442,8 @@ type baseWallet struct {
 	compat      *CompatibilityData
 	tokens      map[uint32]*dexeth.Token
 
+	startingBlocks atomic.Uint64
+
 	tipMtx     sync.RWMutex
 	currentTip *types.Header
 
@@ -918,6 +920,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.tipMtx.Lock()
 	w.currentTip = bestHdr
 	w.tipMtx.Unlock()
+	w.startingBlocks.Store(bestHdr.Number.Uint64())
 
 	w.nonceMtx.Lock()
 	w.pendingTxs = pendingTxs
@@ -3427,10 +3430,10 @@ func (*baseWallet) ValidateSecret(secret, secretHash []byte) bool {
 // together but never indicate the highest known block on the chain. Further
 // more, requesting the best block header starts to fail after a few tries
 // during initial sync. Investigate how to get correct sync progress.
-func (eth *baseWallet) SyncStatus() (bool, float32, error) {
+func (eth *baseWallet) SyncStatus() (*asset.SyncStatus, error) {
 	prog, tipTime, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
-		return false, 0, err
+		return nil, err
 	}
 	checkHeaderTime := func() bool {
 		// Time in the header is in seconds.
@@ -3443,37 +3446,12 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 		}
 		return true
 	}
-	if prog.HighestBlock != 0 {
-		// HighestBlock was set. This means syncing started and is
-		// finished if CurrentBlock is higher. CurrentBlock will
-		// continue to go up even if we are not in a syncing state.
-		// HighestBlock will not.
-		if prog.CurrentBlock >= prog.HighestBlock {
-			if fresh := checkHeaderTime(); !fresh {
-				return false, 0, nil
-			}
-			return eth.node.peerCount() > 0, 1.0, nil
-		}
-
-		// We are certain we are syncing and can return progress.
-		var ratio float32
-		if prog.HighestBlock != 0 {
-			ratio = float32(prog.CurrentBlock) / float32(prog.HighestBlock)
-		}
-		return false, ratio, nil
-	}
-
-	// HighestBlock is zero if syncing never happened or if it just hasn't
-	// started. Syncing only happens if the light node gets a header that
-	// is over one block higher than the current block or the server
-	// indicates a reorg. It's possible that a light client never enters a
-	// syncing state. In order to discern if syncing has begun when
-	// HighestBlock is not set, check that the best header came in under
-	// dexeth.MaxBlockInterval and guess.
-	if fresh := checkHeaderTime(); !fresh {
-		return false, 0, nil
-	}
-	return eth.node.peerCount() > 0, 1.0, nil
+	return &asset.SyncStatus{
+		Synced:         checkHeaderTime() && eth.node.peerCount() > 0,
+		StartingBlocks: eth.startingBlocks.Load(),
+		TargetHeight:   prog.HighestBlock,
+		Blocks:         prog.CurrentBlock,
+	}, nil
 }
 
 // DynamicSwapFeesPaid returns fees for initiation transactions. Part of the

@@ -158,7 +158,7 @@ type Wallet interface {
 	// UnlockAccount unlocks the account.
 	UnlockAccount(ctx context.Context, passphrase []byte, acctName string) error
 	// SyncStatus returns the wallet's sync status.
-	SyncStatus(ctx context.Context) (bool, float32, error)
+	SyncStatus(ctx context.Context) (*asset.SyncStatus, error)
 	// PeerCount returns the number of network peers to which the wallet or its
 	// backing node are connected.
 	PeerCount(ctx context.Context) (uint32, error)

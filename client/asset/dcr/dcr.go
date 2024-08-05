@@ -150,6 +150,12 @@ var (
 			DefaultValue: defaultRedeemConfTarget,
 		},
 		{
+			Key:          "gaplimit",
+			DisplayName:  "Address Gap Limit",
+			Description:  "The gap limit for used address discovery",
+			DefaultValue: wallet.DefaultGapLimit,
+		},
+		{
 			Key:         "txsplit",
 			DisplayName: "Pre-size funding inputs",
 			Description: "When placing an order, create a \"split\" transaction to " +
@@ -529,7 +535,7 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 	}
 
 	return createSPVWallet(params.Pass, params.Seed, params.DataDir, recoveryCfg.NumExternalAddresses,
-		recoveryCfg.NumInternalAddresses, chainParams)
+		recoveryCfg.NumInternalAddresses, recoveryCfg.GapLimit, chainParams)
 }
 
 // MinLotSize calculates the minimum bond size for a given fee rate that avoids
@@ -548,6 +554,7 @@ func init() {
 type RecoveryCfg struct {
 	NumExternalAddresses uint32 `ini:"numexternaladdr"`
 	NumInternalAddresses uint32 `ini:"numinternaladdr"`
+	GapLimit             uint32 `ini:"gaplimit"`
 }
 
 // swapOptions captures the available Swap options. Tagged to be used with
@@ -616,18 +623,19 @@ type ExchangeWallet struct {
 	bondReserves atomic.Uint64
 	cfgV         atomic.Value // *exchangeWalletConfig
 
-	ctx           context.Context // the asset subsystem starts with Connect(ctx)
-	wg            sync.WaitGroup
-	wallet        Wallet
-	chainParams   *chaincfg.Params
-	log           dex.Logger
-	network       dex.Network
-	emit          *asset.WalletEmitter
-	lastPeerCount uint32
-	peersChange   func(uint32, error)
-	vspFilepath   string
-	walletType    string
-	walletDir     string
+	ctx            context.Context // the asset subsystem starts with Connect(ctx)
+	wg             sync.WaitGroup
+	wallet         Wallet
+	chainParams    *chaincfg.Params
+	log            dex.Logger
+	network        dex.Network
+	emit           *asset.WalletEmitter
+	lastPeerCount  uint32
+	peersChange    func(uint32, error)
+	vspFilepath    string
+	walletType     string
+	walletDir      string
+	startingBlocks atomic.Uint64
 
 	oracleFeesMtx sync.Mutex
 	oracleFees    map[uint64]feeStamped // conf target => fee rate
@@ -747,7 +755,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 			return nil, err
 		}
 	case walletTypeSPV:
-		dcr.wallet, err = openSPVWallet(cfg.DataDir, chainParams, logger)
+		dcr.wallet, err = openSPVWallet(cfg.DataDir, walletCfg.GapLimit, chainParams, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -857,7 +865,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 }
 
 // openSPVWallet opens the previously created native SPV wallet.
-func openSPVWallet(dataDir string, chainParams *chaincfg.Params, log dex.Logger) (*spvWallet, error) {
+func openSPVWallet(dataDir string, gapLimit uint32, chainParams *chaincfg.Params, log dex.Logger) (*spvWallet, error) {
 	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 	if exists, err := walletExists(dir); err != nil {
 		return nil, err
@@ -872,7 +880,8 @@ func openSPVWallet(dataDir string, chainParams *chaincfg.Params, log dex.Logger)
 		blockCache: blockCache{
 			blocks: make(map[chainhash.Hash]*cachedBlock),
 		},
-		tipChan: make(chan *block, 16),
+		tipChan:  make(chan *block, 16),
+		gapLimit: gapLimit,
 	}, nil
 }
 
@@ -1053,6 +1062,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
+	dcr.startingBlocks.Store(uint64(tip.height))
 
 	dbCM, err := dcr.startTxHistoryDB(ctx)
 	if err != nil {
@@ -4818,7 +4828,7 @@ func (dcr *ExchangeWallet) shutdown() {
 }
 
 // SyncStatus is information about the blockchain sync status.
-func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
+func (dcr *ExchangeWallet) SyncStatus() (*asset.SyncStatus, error) {
 	// If we have a rescan running, do different math.
 	dcr.rescan.RLock()
 	rescanProgress := dcr.rescan.progress
@@ -4828,10 +4838,22 @@ func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
 		if height < rescanProgress.scannedThrough {
 			height = rescanProgress.scannedThrough
 		}
-		return false, float32(rescanProgress.scannedThrough) / float32(height), nil
+		txHeight := uint64(rescanProgress.scannedThrough)
+		return &asset.SyncStatus{
+			Synced:         false,
+			TargetHeight:   uint64(height),
+			StartingBlocks: dcr.startingBlocks.Load(),
+			Blocks:         uint64(height),
+			Transactions:   &txHeight,
+		}, nil
 	}
 	// No rescan in progress. Ask wallet.
-	return dcr.wallet.SyncStatus(dcr.ctx)
+	ss, err := dcr.wallet.SyncStatus(dcr.ctx)
+	if err != nil {
+		return nil, err
+	}
+	ss.StartingBlocks = dcr.startingBlocks.Load()
+	return ss, nil
 }
 
 // Combines the RPC type with the spending input information.
@@ -6233,12 +6255,12 @@ func (dcr *ExchangeWallet) syncTxHistory(ctx context.Context, tip uint64) {
 		return
 	}
 
-	synced, _, err := dcr.SyncStatus()
+	ss, err := dcr.SyncStatus()
 	if err != nil {
 		dcr.log.Errorf("Error getting sync status: %v", err)
 		return
 	}
-	if !synced {
+	if !ss.Synced {
 		return
 	}
 
@@ -6523,18 +6545,20 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 		blockAllowance := walletBlockAllowance
 		ctxInternal, cancel1 := context.WithTimeout(ctx, 4*time.Second)
 		defer cancel1()
-		synced, _, err := dcr.wallet.SyncStatus(ctxInternal)
+		ss, err := dcr.wallet.SyncStatus(ctxInternal)
 		if err != nil {
 			dcr.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
-		} else if !synced {
+		} else if !ss.Synced {
 			blockAllowance *= 10
 		}
 		queuedBlock = &polledBlock{
 			block: newTip,
 			queue: time.AfterFunc(blockAllowance, func() {
-				dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
-					"never reported: %s (%d). If you see this message repeatedly, it may indicate "+
-					"an issue with the wallet.", newTip.hash, newTip.height)
+				if ss, _ := dcr.SyncStatus(); ss != nil && ss.Synced {
+					dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
+						"never reported: %s (%d). If you see this message repeatedly, it may indicate "+
+						"an issue with the wallet.", newTip.hash, newTip.height)
+				}
 				dcr.handleTipChange(ctx, newTip.hash, newTip.height, nil)
 			}),
 		}

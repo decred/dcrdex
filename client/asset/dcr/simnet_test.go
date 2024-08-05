@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"decred.org/dcrwallet/v4/wallet"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -95,7 +96,7 @@ func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string)) 
 			t.Fatal(err)
 		}
 		dataDir := t.TempDir()
-		createSPVWallet(walletPassword, seed, dataDir, 0, 0, chaincfg.SimNetParams())
+		createSPVWallet(walletPassword, seed, dataDir, 0, 0, wallet.DefaultGapLimit, chaincfg.SimNetParams())
 		walletCfg.Type = walletTypeSPV
 		walletCfg.DataDir = dataDir
 	}
@@ -127,11 +128,11 @@ func tBackend(t *testing.T, name string, isInternal bool, blkFunc func(string)) 
 	if isInternal {
 		i := 0
 		for {
-			synced, _, err := backend.SyncStatus()
+			ss, err := backend.SyncStatus()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if synced {
+			if ss.Synced {
 				break
 			}
 			if i == 5 {

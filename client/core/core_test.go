@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"reflect"
@@ -750,8 +751,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		dbID:              encode.Uint32Bytes(assetID),
 		encPass:           []byte{0x01},
 		peerCount:         1,
-		synced:            true,
-		syncProgress:      1,
+		syncStatus:        &asset.SyncStatus{Synced: true},
 		pw:                tPW,
 		traits:            asset.DetermineWalletTraits(w),
 		broadcasting:      &broadcasting,
@@ -949,8 +949,13 @@ func (w *TXCWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return !w.badSecret
 }
 
-func (w *TXCWallet) SyncStatus() (synced bool, progress float32, err error) {
-	return w.syncStatus()
+func (w *TXCWallet) SyncStatus() (*asset.SyncStatus, error) {
+	synced, progress, err := w.syncStatus()
+	if err != nil {
+		return nil, err
+	}
+	blocks := uint64(math.Round(float64(progress) * 100))
+	return &asset.SyncStatus{Synced: synced, TargetHeight: blocks, Blocks: blocks}, nil
 }
 
 func (w *TXCWallet) setConfs(coinID dex.Bytes, confs uint32, err error) {
@@ -2756,7 +2761,7 @@ func TestSend(t *testing.T) {
 	}
 
 	// wallet is not synced
-	wallet.synced = false
+	wallet.syncStatus.Synced = false
 	_, err = tCore.Send(tPW, tUTXOAssetA.ID, 1e8, address, false)
 	if err == nil {
 		t.Fatalf("Expected error for a non-synchronized wallet")
@@ -2993,21 +2998,6 @@ func trade(t *testing.T, async bool) {
 	}
 	tCore.peerChange(dcrWallet, 1, nil)
 
-	// Wait for the balance update note when the sync status goroutine flags the
-	// wallet as synced and returns.
-wait:
-	for {
-		select {
-		case note := <-ch.C:
-			t.Log(note)
-			if note.Topic() == TopicBalanceUpdated {
-				break wait
-			}
-		case <-time.After(time.Second):
-			t.Fatal("no balance note from sync status monitor")
-		}
-	}
-
 	// Dex not found
 	form.Host = "someotherdex.org"
 	_, err = tCore.Trade(tPW, form)
@@ -3034,7 +3024,7 @@ wait:
 
 	setWalletSyncStatus := func(w *xcWallet, status bool) {
 		w.mtx.Lock()
-		w.synced = status
+		w.syncStatus.Synced = status
 		w.mtx.Unlock()
 	}
 
@@ -9458,8 +9448,8 @@ func TestWalletSyncing(t *testing.T) {
 
 	noteFeed := tCore.NotificationFeed()
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
-	dcrWallet.synced = false
-	dcrWallet.syncProgress = 0
+	dcrWallet.syncStatus.Synced = false
+	dcrWallet.syncStatus.Blocks = 0
 	dcrWallet.hookedUp = false
 	// Connect with tCore.connectWallet below.
 
@@ -9487,12 +9477,12 @@ out:
 	for {
 		select {
 		case note := <-noteFeed.C:
-			walletNote, ok := note.(*WalletStateNote)
+			syncNote, ok := note.(*WalletSyncNote)
 			if !ok {
 				continue
 			}
 			progressNotes++
-			if walletNote.Wallet.Synced {
+			if syncNote.SyncStatus.Synced {
 				break out
 			}
 		case <-timeout.C:

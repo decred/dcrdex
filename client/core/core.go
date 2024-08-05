@@ -2119,7 +2119,7 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 
 	w.mtx.RLock()
 	depositAddr = w.address
-	synced := w.synced
+	synced := w.syncStatus.Synced
 	w.mtx.RUnlock()
 
 	// If the wallet is synced, update the bond reserves, logging any balance
@@ -2616,7 +2616,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 		for {
 			parentWallet.mtx.RLock()
-			synced := parentWallet.synced
+			synced := parentWallet.syncStatus.Synced
 			parentWallet.mtx.RUnlock()
 			if synced {
 				break
@@ -2707,6 +2707,7 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 	c.updateWallet(assetID, wallet)
 
 	atomic.StoreUint32(wallet.broadcasting, 1)
+	c.notify(newWalletStateNote(wallet.state()))
 	c.walletCheckAndNotify(wallet)
 
 	return wallet, nil
@@ -2915,6 +2916,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		walletType:   dbWallet.Type,
 		broadcasting: new(uint32),
 		disabled:     dbWallet.Disabled,
+		syncStatus:   &asset.SyncStatus{},
 	}
 
 	token := asset.TokenInfo(assetID)
@@ -3115,7 +3117,7 @@ func (c *Core) isActiveBondAsset(assetID uint32, includeLive bool) bool {
 // stores the balance in the DB, emits a BalanceNote, and updates the bond
 // reserves (with balance checking).
 func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
-	synced, progress, err := w.SyncStatus()
+	ss, err := w.SyncStatus()
 	if err != nil {
 		c.log.Errorf("Unable to get wallet/node sync status for %s: %v",
 			unbip(w.AssetID), err)
@@ -3123,20 +3125,19 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 	}
 
 	w.mtx.Lock()
-	wasSynced := w.synced
-	w.synced = synced
-	w.syncProgress = progress
+	wasSynced := w.syncStatus.Synced
+	w.syncStatus = ss
 	w.mtx.Unlock()
 
 	if atomic.LoadUint32(w.broadcasting) == 1 {
-		c.notify(newWalletStateNote(w.state()))
+		c.notify(newWalletSyncNote(w.AssetID, ss))
 	}
-	if synced && !wasSynced {
+	if ss.Synced && !wasSynced {
 		c.updateWalletBalance(w)
 		c.log.Debugf("Wallet synced for asset %s", unbip(w.AssetID))
 		c.updateBondReserves(w.AssetID)
 	}
-	return synced
+	return ss.Synced
 }
 
 // startWalletSyncMonitor repeatedly calls walletCheckAndNotify on a ticker
@@ -3693,6 +3694,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	defer func() {
 		if success {
 			atomic.StoreUint32(wallet.broadcasting, 1)
+			c.notify(newWalletStateNote(wallet.state()))
 			c.walletCheckAndNotify(wallet)
 		}
 	}()
@@ -5909,9 +5911,9 @@ func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host st
 			return fmt.Errorf("%s wallet has no network peers (check your network or firewall)",
 				unbip(w.AssetID))
 		}
-		if !w.synced {
+		if !w.syncStatus.Synced {
 			return fmt.Errorf("%s still syncing. progress = %.2f%%", unbip(w.AssetID),
-				w.syncProgress*100)
+				w.syncStatus.BlockProgress()*100)
 		}
 		return nil
 	}
@@ -9346,12 +9348,16 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 		c.log.Tracef("New peer count for asset %s: %v", unbip(w.AssetID), numPeers)
 	}
 
+	ss, err := w.SyncStatus()
+	if err != nil {
+		c.log.Errorf("error getting sync status after peer change: %v", err)
+		return
+	}
+
 	w.mtx.Lock()
 	wasDisconnected := w.peerCount == 0 // excludes no count (-1)
 	w.peerCount = int32(numPeers)
-	if numPeers == 0 {
-		w.synced = false
-	}
+	w.syncStatus = ss
 	w.mtx.Unlock()
 
 	c.notify(newWalletConfigNote(TopicWalletPeersUpdate, "", "", db.Data, w.state()))

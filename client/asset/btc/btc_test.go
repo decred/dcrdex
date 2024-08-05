@@ -4277,14 +4277,14 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	node.birthdayTime = msgBlock.Header.Timestamp.Add(-time.Minute) // SPV, wallet birthday is passed
 	node.mainchain[100] = blkHash                                   // SPV, actually has to reach target
 
-	synced, progress, err := wallet.SyncStatus()
+	ss, err := wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (synced expected): %v", err)
 	}
-	if !synced {
+	if !ss.Synced {
 		t.Fatalf("synced = false")
 	}
-	if progress < 1 {
+	if ss.BlockProgress() < 1 {
 		t.Fatalf("progress not complete when loading last block")
 	}
 
@@ -4293,7 +4293,7 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	node.getBestBlockHashErr = tErr // spv BestBlock()
 	node.blockchainMtx.Unlock()
 	delete(node.mainchain, 100) // force spv to BestBlock() with no wallet block
-	_, _, err = wallet.SyncStatus()
+	_, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
@@ -4308,15 +4308,15 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 		Blocks:  150,
 	}
 	node.addRawTx(150, makeRawTx([]dex.Bytes{randBytes(1)}, []*wire.TxIn{dummyInput()})) // spv needs this for BestBlock
-	synced, progress, err = wallet.SyncStatus()
+	ss, err = wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
 	}
-	if synced {
+	if ss.Synced {
 		t.Fatalf("synced = true for 50 blocks to go")
 	}
-	if progress > 0.500001 || progress < 0.4999999 {
-		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
+	if ss.BlockProgress() > 0.500001 || ss.BlockProgress() < 0.4999999 {
+		t.Fatalf("progress out of range. Expected 0.5, got %.2f", ss.BlockProgress())
 	}
 }
 

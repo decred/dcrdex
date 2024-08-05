@@ -982,15 +982,16 @@ func (wc *rpcClient) ownsAddress(addr btcutil.Address) (bool, error) {
 }
 
 // syncStatus is information about the blockchain sync status.
-func (wc *rpcClient) syncStatus() (*SyncStatus, error) {
+func (wc *rpcClient) syncStatus() (*asset.SyncStatus, error) {
 	chainInfo, err := wc.getBlockchainInfo()
 	if err != nil {
 		return nil, fmt.Errorf("getblockchaininfo error: %w", err)
 	}
-	return &SyncStatus{
-		Target:  int32(chainInfo.Headers),
-		Height:  int32(chainInfo.Blocks),
-		Syncing: chainInfo.Syncing(),
+	synced := !chainInfo.Syncing()
+	return &asset.SyncStatus{
+		Synced:       synced,
+		TargetHeight: uint64(chainInfo.Headers),
+		Blocks:       uint64(chainInfo.Blocks),
 	}, nil
 }
 

@@ -106,14 +106,14 @@ func TestWallet(t *testing.T) {
 		time.Sleep(time.Second * 3)
 
 		for {
-			synced, progress, err := w.SyncStatus()
+			ss, err := w.SyncStatus()
 			if err != nil {
 				return fmt.Errorf("SyncStatus error: %w", err)
 			}
-			if synced {
+			if ss.Synced {
 				break
 			}
-			fmt.Printf("%s sync progress %.1f \n", name, progress*100)
+			fmt.Printf("%s sync progress %.1f \n", name, ss.BlockProgress()*100)
 			time.Sleep(time.Second)
 		}
 

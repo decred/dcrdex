@@ -47,10 +47,9 @@ import (
 )
 
 const (
-	defaultGapLimit        = uint32(100)
 	defaultAllowHighFees   = false
 	defaultRelayFeePerKb   = 1e4
-	defaultAccountGapLimit = 10
+	defaultAccountGapLimit = 3
 	defaultManualTickets   = false
 	defaultMixSplitLimit   = 10
 
@@ -107,6 +106,7 @@ type dcrWallet interface {
 	AgendaChoices(ctx context.Context, ticketHash *chainhash.Hash) (choices map[string]string, voteBits uint16, err error)
 	NewVSPTicket(ctx context.Context, hash *chainhash.Hash) (*wallet.VSPTicket, error)
 	RescanProgressFromHeight(ctx context.Context, n wallet.NetworkBackend, startHeight int32, p chan<- wallet.RescanProgress)
+	RescanPoint(ctx context.Context) (*chainhash.Hash, error)
 }
 
 // Interface for *spv.Syncer so that we can test with a stub.
@@ -158,6 +158,7 @@ type spvWallet struct {
 	spv               spvSyncer // *spv.Syncer
 	bestSpvPeerHeight int32     // atomic
 	tipChan           chan *block
+	gapLimit          uint32
 
 	blockCache blockCache
 
@@ -172,7 +173,7 @@ type spvWallet struct {
 var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
-func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
+func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx, gapLimit uint32, chainParams *chaincfg.Params) error {
 	netDir := filepath.Join(dataDir, chainParams.Name)
 	walletDir := filepath.Join(netDir, "spv")
 
@@ -225,7 +226,7 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	}
 
 	// Open the newly-created wallet.
-	w, err := wallet.Open(ctx, newWalletConfig(db, chainParams))
+	w, err := wallet.Open(ctx, newWalletConfig(db, chainParams, gapLimit))
 	if err != nil {
 		return fmt.Errorf("wallet.Open error: %w", err)
 	}
@@ -382,7 +383,7 @@ func (w *spvWallet) startWallet(ctx context.Context) error {
 		return fmt.Errorf("wallet.OpenDB error: %w", err)
 	}
 
-	dcrw, err := wallet.Open(ctx, newWalletConfig(db, w.chainParams))
+	dcrw, err := wallet.Open(ctx, newWalletConfig(db, w.chainParams, w.gapLimit))
 	if err != nil {
 		// If this function does not return to completion the database must be
 		// closed.  Otherwise, because the database is locked on open, any
@@ -970,28 +971,36 @@ func (w *spvWallet) upgradeAccounts(ctx context.Context, pw []byte) error {
 
 // SyncStatus returns the wallet's sync status.
 // Part of the Wallet interface.
-func (w *spvWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
+func (w *spvWallet) SyncStatus(ctx context.Context) (*asset.SyncStatus, error) {
+	ss := new(asset.SyncStatus)
+
 	targetHeight := w.bestPeerInitialHeight()
 	if targetHeight == 0 {
-		return false, 0, nil
+		return ss, nil
 	}
+	ss.TargetHeight = uint64(targetHeight)
 
 	_, height := w.dcrWallet.MainChainTip(ctx)
 	if height == 0 {
-		return false, 0, nil
+		return ss, nil
+	}
+	height = utils.Clamp(height, 0, targetHeight)
+	ss.Blocks = uint64(height)
+
+	ss.Synced, _ = w.spv.Synced(ctx)
+
+	if rescanHash, err := w.dcrWallet.RescanPoint(ctx); err != nil {
+		return nil, fmt.Errorf("error getting rescan point: %w", err)
+	} else if rescanHash != nil {
+		rescanHeader, err := w.dcrWallet.BlockHeader(ctx, rescanHash)
+		if err != nil {
+			return nil, fmt.Errorf("error getting rescan point header: %w", err)
+		}
+		h := uint64(utils.Clamp(rescanHeader.Height, 1, uint32(targetHeight)+1) - 1)
+		ss.Transactions = &h
 	}
 
-	if height > targetHeight {
-		targetHeight = height
-	}
-
-	synced, _ := w.spv.Synced(ctx)
-	progress := float32(height) / float32(targetHeight)
-	if progress > 0.999 && !synced {
-		progress = 0.999
-	}
-
-	return synced, progress, nil
+	return ss, nil
 }
 
 // bestPeerInitialHeight is the highest InitialHeight recorded from connected
@@ -1480,10 +1489,13 @@ func extendAddresses(ctx context.Context, extIdx, intIdx uint32, dcrw *wallet.Wa
 	return nil
 }
 
-func newWalletConfig(db wallet.DB, chainParams *chaincfg.Params) *wallet.Config {
+func newWalletConfig(db wallet.DB, chainParams *chaincfg.Params, gapLimit uint32) *wallet.Config {
+	if gapLimit < wallet.DefaultGapLimit {
+		gapLimit = wallet.DefaultGapLimit
+	}
 	return &wallet.Config{
 		DB:              db,
-		GapLimit:        defaultGapLimit,
+		GapLimit:        gapLimit,
 		AccountGapLimit: defaultAccountGapLimit,
 		ManualTickets:   defaultManualTickets,
 		AllowHighFees:   defaultAllowHighFees,

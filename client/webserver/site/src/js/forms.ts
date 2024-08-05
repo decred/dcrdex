@@ -23,6 +23,7 @@ import {
   Order,
   XYRange,
   WalletStateNote,
+  WalletSyncNote,
   WalletInfo,
   Token,
   WalletCreationNote,
@@ -151,6 +152,7 @@ export class NewWalletForm {
 
     app().registerNoteFeeder({
       walletstate: (note: WalletStateNote) => { this.reportWalletState(note.wallet) },
+      walletsync: (note: WalletSyncNote) => { if (this.parentSyncer) this.parentSyncer(app().walletMap[note.assetID]) },
       createwallet: (note: WalletCreationNote) => { this.reportCreationUpdate(note) }
     })
   }
@@ -1254,6 +1256,11 @@ export class WalletWaitForm {
 
     app().registerNoteFeeder({
       walletstate: (note: WalletStateNote) => this.reportWalletState(note.wallet),
+      walletsync: (note: WalletSyncNote) => {
+        if (note.assetID !== this.assetID) return
+        const w = app().walletMap[note.assetID]
+        this.reportProgress(w.synced, w.syncProgress)
+      },
       balance: (note: BalanceNote) => this.reportBalance(note.assetID)
     })
   }
