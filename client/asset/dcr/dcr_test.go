@@ -3798,19 +3798,19 @@ func TestSyncStatus(t *testing.T) {
 		InitialBlockDownload: false,
 		HeadersFetchProgress: 1,
 	})
-	synced, progress, err := wallet.SyncStatus()
+	ss, err := wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (synced expected): %v", err)
 	}
-	if !synced {
+	if !ss.Synced {
 		t.Fatalf("synced = false for progress=1")
 	}
-	if progress < 1 {
+	if ss.BlockProgress() < 1 {
 		t.Fatalf("progress not complete with sync true")
 	}
 
 	node.rawErr[methodSyncStatus] = tErr
-	_, _, err = wallet.SyncStatus()
+	_, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
@@ -3822,15 +3822,20 @@ func TestSyncStatus(t *testing.T) {
 		HeadersFetchProgress: 0.5, // Headers: 200, WalletTip: 100
 	}
 	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(nodeSyncStatusResult)
-	synced, progress, err = wallet.SyncStatus()
+	node.rawRes[methodGetPeerInfo], node.rawErr[methodGetPeerInfo] = json.Marshal([]*walletjson.GetPeerInfoResult{{StartingHeight: 1000}})
+
+	ss, err = wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
 	}
-	if synced {
+	if ss.Synced {
 		t.Fatalf("synced = true for progress=0.5")
 	}
-	if progress != nodeSyncStatusResult.HeadersFetchProgress {
-		t.Fatalf("progress out of range. Expected %.2f, got %.2f", nodeSyncStatusResult.HeadersFetchProgress, progress)
+	if ss.BlockProgress() != nodeSyncStatusResult.HeadersFetchProgress {
+		t.Fatalf("progress out of range. Expected %.2f, got %.2f", nodeSyncStatusResult.HeadersFetchProgress, ss.BlockProgress())
+	}
+	if ss.Blocks != 500 {
+		t.Fatalf("wrong header sync height. expected 500, got %d", ss.Blocks)
 	}
 }
 
@@ -5009,16 +5014,22 @@ func TestRescanSync(t *testing.T) {
 		HeadersFetchProgress: 1,
 	})
 
+	node.blockchain.mainchain[tip] = &chainhash.Hash{}
+
 	checkProgress := func(expSynced bool, expProgress float32) {
-		synced, progress, err := wallet.SyncStatus()
+		t.Helper()
+		ss, err := wallet.SyncStatus()
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		if synced != expSynced {
-			t.Fatalf("expected synced = %t, bot %t", expSynced, synced)
+		if ss.Synced != expSynced {
+			t.Fatalf("expected synced = %t, bot %t", expSynced, ss.Synced)
 		}
-		if progress == 0 && expProgress != 0 || math.Abs(float64(expProgress/progress)-1) > 0.001 {
-			t.Fatalf("expected progress %f, got %f", expProgress, progress)
+		if !ss.Synced {
+			txProgress := float32(*ss.Transactions) / float32(ss.TargetHeight)
+			if math.Abs(float64(expProgress/txProgress)-1) > 0.001 {
+				t.Fatalf("expected progress %f, got %f", expProgress, txProgress)
+			}
 		}
 	}
 

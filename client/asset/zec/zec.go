@@ -299,10 +299,6 @@ type rpcCaller interface {
 //     cannot be disabled via configuration.
 //  4. ...
 type zecWallet struct {
-	// 64-bit atomic variables first. See
-	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	tipAtConnect int64
-
 	ctx           context.Context
 	log           dex.Logger
 	net           dex.Network
@@ -321,6 +317,8 @@ type zecWallet struct {
 
 	// Coins returned by Fund are cached for quick reference.
 	cm *btc.CoinManager
+
+	tipAtConnect atomic.Uint64
 
 	tipMtx     sync.RWMutex
 	currentTip *btc.BlockVector
@@ -398,7 +396,7 @@ func (w *zecWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	w.tipMtx.Lock()
 	w.currentTip = bestBlock
 	w.tipMtx.Unlock()
-	atomic.StoreInt64(&w.tipAtConnect, w.currentTip.Height)
+	w.tipAtConnect.Store(uint64(w.currentTip.Height))
 
 	wg, err := w.startTxHistoryDB(ctx)
 	if err != nil {
@@ -2675,32 +2673,24 @@ func (w *zecWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contract 
 	return uint32(tx.Confirmations), true, nil
 }
 
-func (w *zecWallet) SyncStatus() (bool, float32, error) {
+func (w *zecWallet) SyncStatus() (*asset.SyncStatus, error) {
 	ss, err := syncStatus(w)
 	if err != nil {
-		return false, 0, err
+		return nil, err
 	}
+	ss.StartingBlocks = w.tipAtConnect.Load()
 
-	if ss.Target == 0 { // do not say progress = 1
-		return false, 0, nil
+	if ss.TargetHeight == 0 { // do not say progress = 1
+		return &asset.SyncStatus{}, nil
 	}
-	if ss.Syncing {
-		ogTip := atomic.LoadInt64(&w.tipAtConnect)
-		totalToSync := ss.Target - int32(ogTip)
-		var progress float32 = 1
-		if totalToSync > 0 {
-			progress = 1 - (float32(ss.Target-ss.Height) / float32(totalToSync))
+	if ss.Synced {
+		numPeers, err := peerCount(w)
+		if err != nil {
+			return nil, err
 		}
-		return false, progress, nil
+		ss.Synced = numPeers > 0
 	}
-
-	// It looks like we are ready based on syncStatus, but that may just be
-	// comparing wallet height to known chain height. Now check peers.
-	numPeers, err := peerCount(w)
-	if err != nil {
-		return false, 0, err
-	}
-	return numPeers > 0, 1, nil
+	return ss, nil
 }
 
 func (w *zecWallet) ValidateAddress(addr string) bool {
@@ -3619,12 +3609,12 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 		return
 	}
 
-	synced, _, err := w.SyncStatus()
+	ss, err := w.SyncStatus()
 	if err != nil {
 		w.log.Errorf("Error getting sync status: %v", err)
 		return
 	}
-	if !synced {
+	if !ss.Synced {
 		return
 	}
 

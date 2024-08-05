@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -933,30 +934,53 @@ func (w *rpcWallet) UnlockAccount(ctx context.Context, pw []byte, acctName strin
 
 // SyncStatus returns the wallet's sync status.
 // Part of the Wallet interface.
-func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
+func (w *rpcWallet) SyncStatus(ctx context.Context) (*asset.SyncStatus, error) {
 	syncStatus := new(walletjson.SyncStatusResult)
-	err := w.rpcClientRawRequest(ctx, methodSyncStatus, nil, syncStatus)
+	if err := w.rpcClientRawRequest(ctx, methodSyncStatus, nil, syncStatus); err != nil {
+		return nil, fmt.Errorf("rawrequest error: %w", err)
+	}
+	peers, err := w.PeerInfo(ctx)
 	if err != nil {
-		return false, 0, fmt.Errorf("rawrequest error: %w", err)
+		return nil, fmt.Errorf("error getting peer info: %w", err)
 	}
-	ready := syncStatus.Synced && !syncStatus.InitialBlockDownload
-	if !ready {
-		return false, syncStatus.HeadersFetchProgress, nil
+	if syncStatus.Synced {
+		_, targetHeight, err := w.client().GetBestBlock(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error getting block count: %w", err)
+		}
+		return &asset.SyncStatus{
+			Synced:       len(peers) > 0 && !syncStatus.InitialBlockDownload,
+			TargetHeight: uint64(targetHeight),
+			Blocks:       uint64(targetHeight),
+		}, nil
 	}
-	// It looks like we are ready based on syncstatus, but that may just be
-	// comparing wallet height to known chain height. Now check peers.
-	numPeers, err := w.PeerCount(ctx)
-	if err != nil {
-		return false, 0, err
+	var targetHeight int64
+	for _, p := range peers {
+		if p.StartingHeight > targetHeight {
+			targetHeight = p.StartingHeight
+		}
 	}
-	return numPeers > 0, syncStatus.HeadersFetchProgress, nil
+	if targetHeight == 0 {
+		return new(asset.SyncStatus), nil
+	}
+	return &asset.SyncStatus{
+		Synced:       syncStatus.Synced && !syncStatus.InitialBlockDownload,
+		TargetHeight: uint64(targetHeight),
+		Blocks:       uint64(math.Round(float64(syncStatus.HeadersFetchProgress) * float64(targetHeight))),
+	}, nil
+}
+
+func (w *rpcWallet) PeerInfo(ctx context.Context) (peerInfo []*walletjson.GetPeerInfoResult, _ error) {
+	return peerInfo, w.rpcClientRawRequest(ctx, methodGetPeerInfo, nil, &peerInfo)
 }
 
 // PeerCount returns the number of network peers to which the wallet or its
 // backing node are connected.
 func (w *rpcWallet) PeerCount(ctx context.Context) (uint32, error) {
-	var peerInfo []*walletjson.GetPeerInfoResult
-	err := w.rpcClientRawRequest(ctx, methodGetPeerInfo, nil, &peerInfo)
+	peerInfo, err := w.PeerInfo(ctx)
+	if err != nil {
+		return 0, err
+	}
 	return uint32(len(peerInfo)), err
 }
 

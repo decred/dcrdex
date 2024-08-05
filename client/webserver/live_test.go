@@ -1376,6 +1376,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		PeerCount:    10,
 		Synced:       syncPct == 100,
 		SyncProgress: float32(syncPct) / 100,
+		SyncStatus:   &asset.SyncStatus{Synced: syncPct == 100, TargetHeight: 100, Blocks: uint64(syncPct)},
 		Traits:       traits,
 	}
 }

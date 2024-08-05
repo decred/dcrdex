@@ -18,6 +18,7 @@ import {
   WalletDefinition,
   BalanceNote,
   WalletStateNote,
+  WalletSyncNote,
   RateNote,
   Order,
   OrderFilter,
@@ -410,6 +411,7 @@ export default class WalletsPage extends BasePage {
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       walletconfig: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
+      walletsync: (note: WalletSyncNote) => { this.updateSyncAndPeers(note.assetID) },
       createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) },
       walletnote: (note: WalletNote) => { this.handleCustomWalletNote(note) }
     })
@@ -990,7 +992,8 @@ export default class WalletsPage extends BasePage {
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
       page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox,
-      page.needsProviderBox, page.feeStateBox
+      page.needsProviderBox, page.feeStateBox, page.txSyncBox, page.txProgress,
+      page.txFindingAddrs
     )
     this.checkNeedsProvider(assetID)
     if (token) {
@@ -1002,25 +1005,42 @@ export default class WalletsPage extends BasePage {
     }
     if (wallet) {
       this.updateDisplayedAssetBalance()
-      const { feeState, running, disabled, peerCount, syncProgress, type: walletType, encrypted, open } = wallet
+      const { feeState, running, disabled, type: walletType } = wallet
 
       const walletDef = app().walletDefinition(assetID, walletType)
       page.walletType.textContent = walletDef.tab
       if (feeState) this.updateFeeState(feeState)
-
       if (disabled) Doc.show(page.statusDisabled) // wallet is disabled
       else if (running) {
-        Doc.show(page.sendReceive, page.peerCountBox, page.syncProgressBox)
-        page.peerCount.textContent = String(peerCount)
-        page.syncProgress.textContent = `${(syncProgress * 100).toFixed(1)}%`
-        if (open) {
-          Doc.show(page.statusReady)
-          if (!app().haveActiveOrders(assetID) && encrypted) Doc.show(page.lockBttnBox)
-        } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
+        this.updateSyncAndPeers(wallet.assetID)
       } else Doc.show(page.statusOff, page.connectBttnBox) // wallet not running
     } else Doc.show(page.createWallet) // no wallet
 
     page.walletDetailsBox.classList.remove('invisible')
+  }
+
+  updateSyncAndPeers (assetID: number) {
+    const { page, selectedAssetID } = this
+    if (assetID !== selectedAssetID) return
+    const { peerCount, syncProgress, syncStatus, encrypted, open, running } = app().walletMap[assetID]
+    if (!running) return
+    Doc.show(page.sendReceive, page.peerCountBox, page.syncProgressBox)
+    page.peerCount.textContent = String(peerCount)
+    page.syncProgress.textContent = `${(syncProgress * 100).toFixed(1)}%`
+    if (open) {
+      Doc.show(page.statusReady)
+      if (!app().haveActiveOrders(assetID) && encrypted) Doc.show(page.lockBttnBox)
+    } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
+    Doc.setVis(syncStatus.txs !== undefined, page.txSyncBox)
+    if (syncStatus.txs !== undefined) {
+      Doc.hide(page.txProgress, page.txFindingAddrs)
+      if (syncStatus.txs === 0 && syncStatus.blocks >= syncStatus.targetHeight) Doc.show(page.txFindingAddrs)
+      else {
+        Doc.show(page.txProgress)
+        const prog = syncStatus.txs / syncStatus.targetHeight
+        page.txProgress.textContent = `${(prog * 100).toFixed(1)}%`
+      }
+    }
   }
 
   updateFeeState (feeState: FeeState) {

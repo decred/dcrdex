@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/utils"
 	dcrwalletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -536,7 +537,7 @@ type Wallet interface {
 	// SyncStatus is information about the blockchain sync status. It should
 	// only indicate synced when there are network peers and all blocks on the
 	// network have been processed by the wallet.
-	SyncStatus() (synced bool, progress float32, err error)
+	SyncStatus() (*SyncStatus, error)
 	// RegFeeConfirmations gets the confirmations for a registration fee
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
@@ -593,6 +594,29 @@ type TxFeeEstimator interface {
 type Broadcaster interface {
 	// SendTransaction broadcasts a raw transaction, returning its coin ID.
 	SendTransaction(rawTx []byte) ([]byte, error)
+}
+
+// SyncStatus is the status of wallet syncing.
+type SyncStatus struct {
+	Synced         bool    `json:"synced"`
+	TargetHeight   uint64  `json:"targetHeight"`
+	StartingBlocks uint64  `json:"startingBlocks"`
+	Blocks         uint64  `json:"blocks"`
+	Transactions   *uint64 `json:"txs,omitempty"`
+}
+
+func (ss *SyncStatus) BlockProgress() float32 {
+	switch {
+	case ss.Synced:
+		return 1
+	case ss.TargetHeight == 0:
+		return 0
+	}
+	prog := float32(ss.Blocks-ss.StartingBlocks) / float32(ss.TargetHeight-ss.StartingBlocks)
+	if ss.Transactions == nil { // If the asset doesn't support tx sync status, max unsynced is 0.999
+		return utils.Min(prog, 0.999)
+	}
+	return prog
 }
 
 // BondDetails is the return from Bonder.FindBond.

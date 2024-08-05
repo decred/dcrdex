@@ -47,6 +47,7 @@ import {
   PreSwap,
   PreRedeem,
   WalletStateNote,
+  WalletSyncNote,
   WalletCreationNote,
   SpotPriceNote,
   BondNote,
@@ -3245,6 +3246,7 @@ class BalanceWidget {
     app().registerNoteFeeder({
       balance: (note: BalanceNote) => { this.updateAsset(note.assetID) },
       walletstate: (note: WalletStateNote) => { this.updateAsset(note.wallet.assetID) },
+      walletsync: (note: WalletSyncNote) => { this.updateAsset(note.assetID) },
       createwallet: (note: WalletCreationNote) => { this.updateAsset(note.assetID) }
     })
   }

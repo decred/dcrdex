@@ -367,13 +367,13 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			// only comparing heights instead of hashes, which means we might
 			// not notice a reorg to a block at the same height, which is
 			// unimportant because of how electrum searches for transactions.
-			stat, err := btc.node.syncStatus()
+			ss, err := btc.node.syncStatus()
 			if err != nil {
 				btc.log.Errorf("failed to get sync status: %w", err)
 				continue
 			}
 
-			sameTip := currentTip.Height == int64(stat.Height)
+			sameTip := currentTip.Height == int64(ss.Blocks)
 			if sameTip {
 				// Could have actually been a reorg to different block at same
 				// height. We'll report a new tip block on the next block.
@@ -419,12 +419,12 @@ func (btc *ExchangeWalletElectrum) syncTxHistory(tip uint64) {
 		return
 	}
 
-	synced, _, err := btc.SyncStatus()
+	ss, err := btc.SyncStatus()
 	if err != nil {
 		btc.log.Errorf("Error getting sync status: %v", err)
 		return
 	}
-	if !synced {
+	if !ss.Synced {
 		return
 	}
 

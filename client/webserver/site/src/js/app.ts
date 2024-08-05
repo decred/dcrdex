@@ -33,6 +33,7 @@ import {
   Match,
   BalanceNote,
   WalletConfigNote,
+  WalletSyncNote,
   MatchNote,
   ConnEventNote,
   SpotPriceNote,
@@ -1091,6 +1092,16 @@ export default class Application {
         const asset = assets[wallet.assetID]
         asset.wallet = wallet
         walletMap[wallet.assetID] = wallet
+        break
+      }
+      case 'walletsync': {
+        const n = note as WalletSyncNote
+        const w = this.walletMap[n.assetID]
+        if (w) {
+          w.syncStatus = n.syncStatus
+          w.synced = w.syncStatus.synced
+          w.syncProgress = n.syncProgress
+        }
         break
       }
       case 'match': {

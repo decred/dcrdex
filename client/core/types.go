@@ -134,6 +134,7 @@ type WalletState struct {
 	PeerCount    uint32                          `json:"peerCount"`
 	Synced       bool                            `json:"synced"`
 	SyncProgress float32                         `json:"syncProgress"`
+	SyncStatus   *asset.SyncStatus               `json:"syncStatus"`
 	Disabled     bool                            `json:"disabled"`
 	Approved     map[uint32]asset.ApprovalStatus `json:"approved"`
 	FeeState     *FeeState                       `json:"feeState"`
