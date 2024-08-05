@@ -33,7 +33,7 @@ func TestTxDB(t *testing.T) {
 	}
 
 	newTx := func(nonce uint64) *extendedWalletTx {
-		return eth.extendedTx(node.newTransaction(nonce, big.NewInt(1)), asset.Send, 1)
+		return eth.extendedTx(node.newTransaction(nonce, big.NewInt(1)), asset.Send, 1, nil)
 	}
 
 	wt1 := newTx(1)

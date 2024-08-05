@@ -687,7 +687,7 @@ func TestCheckPendingTxs(t *testing.T) {
 
 	val := dexeth.GweiToWei(1)
 	extendedTx := func(nonce, blockNum, blockStamp, submissionStamp uint64) *extendedWalletTx {
-		pendingTx := eth.extendedTx(node.newTransaction(nonce, val), asset.Send, 1)
+		pendingTx := eth.extendedTx(node.newTransaction(nonce, val), asset.Send, 1, nil)
 		pendingTx.BlockNumber = blockNum
 		pendingTx.Confirmed = blockNum > 0 && blockNum <= finalized
 		pendingTx.Timestamp = blockStamp
@@ -843,7 +843,7 @@ func TestTakeAction(t *testing.T) {
 
 	aGwei := dexeth.GweiToWei(1)
 
-	pendingTx := eth.extendedTx(node.newTransaction(0, aGwei), asset.Send, 1)
+	pendingTx := eth.extendedTx(node.newTransaction(0, aGwei), asset.Send, 1, nil)
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 
 	feeCap := new(big.Int).Mul(aGwei, big.NewInt(5))
@@ -877,7 +877,7 @@ func TestTakeAction(t *testing.T) {
 		t.Fatal("didn't save to DB")
 	}
 
-	pendingTx = eth.extendedTx(node.newTransaction(1, aGwei), asset.Send, 1)
+	pendingTx = eth.extendedTx(node.newTransaction(1, aGwei), asset.Send, 1, nil)
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	pendingTx.SubmissionTime = 0
 	// Neglecting to bump should reset submission time.
@@ -916,7 +916,7 @@ func TestTakeAction(t *testing.T) {
 		t.Fatalf("replacement tx wasn't accepted")
 	}
 	// wrong nonce is an error though
-	pendingTx = eth.extendedTx(node.newTransaction(5050, aGwei), asset.Send, 1)
+	pendingTx = eth.extendedTx(node.newTransaction(5050, aGwei), asset.Send, 1, nil)
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	lostNonceAction = []byte(fmt.Sprintf(`{"txID":"%s","abandon":false,"replacementID":"%s"}`, pendingTx.ID, replacementTx.Hash()))
 	if err := eth.TakeAction(actionTypeLostNonce, lostNonceAction); err == nil {
@@ -924,7 +924,7 @@ func TestTakeAction(t *testing.T) {
 	}
 
 	// Missing nonces
-	tx5 := eth.extendedTx(node.newTransaction(5, aGwei), asset.Send, 1)
+	tx5 := eth.extendedTx(node.newTransaction(5, aGwei), asset.Send, 1, nil)
 	eth.pendingTxs = []*extendedWalletTx{tx5}
 	eth.confirmedNonceAt = big.NewInt(2)
 	eth.pendingNonceAt = big.NewInt(6)
@@ -5093,7 +5093,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	for _, test := range tests {
 		var txHash common.Hash
 		if test.pendingTx != nil {
-			wt := bw.extendedTx(test.pendingTx, asset.Unknown, 1)
+			wt := bw.extendedTx(test.pendingTx, asset.Unknown, 1, nil)
 			wt.BlockNumber = test.pendingTxBlock
 			wt.Fees = fees
 			bw.pendingTxs = []*extendedWalletTx{wt}
