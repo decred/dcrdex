@@ -616,7 +616,7 @@ func (ss *SyncStatus) BlockProgress() float32 {
 	if ss.Transactions == nil { // If the asset doesn't support tx sync status, max unsynced is 0.999
 		return utils.Min(prog, 0.999)
 	}
-	return float32(ss.Blocks-ss.StartingBlocks) / float32(ss.TargetHeight-ss.StartingBlocks)
+	return prog
 }
 
 // BondDetails is the return from Bonder.FindBond.
