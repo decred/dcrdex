@@ -4700,9 +4700,11 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 				queuedBlock = &polledBlock{
 					BlockVector: newTip,
 					queue: time.AfterFunc(blockAllowance, func() {
-						btc.log.Warnf("Reporting a block found in polling that the wallet apparently "+
-							"never reported: %d %s. If you see this message repeatedly, it may indicate "+
-							"an issue with the wallet.", newTip.Height, newTip.Hash)
+						if ss, _ := btc.SyncStatus(); ss != nil && ss.Synced {
+							btc.log.Warnf("Reporting a block found in polling that the wallet apparently "+
+								"never reported: %d %s. If you see this message repeatedly, it may indicate "+
+								"an issue with the wallet.", newTip.Height, newTip.Hash)
+						}
 						btc.reportNewTip(ctx, newTip)
 					}),
 				}

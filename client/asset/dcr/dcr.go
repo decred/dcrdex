@@ -6554,9 +6554,11 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 		queuedBlock = &polledBlock{
 			block: newTip,
 			queue: time.AfterFunc(blockAllowance, func() {
-				dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
-					"never reported: %s (%d). If you see this message repeatedly, it may indicate "+
-					"an issue with the wallet.", newTip.hash, newTip.height)
+				if ss, _ := dcr.SyncStatus(); ss != nil && ss.Synced {
+					dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
+						"never reported: %s (%d). If you see this message repeatedly, it may indicate "+
+						"an issue with the wallet.", newTip.hash, newTip.height)
+				}
 				dcr.handleTipChange(ctx, newTip.hash, newTip.height, nil)
 			}),
 		}
