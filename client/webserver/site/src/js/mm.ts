@@ -29,6 +29,7 @@ import BasePage from './basepage'
 import * as OrderUtil from './orderutil'
 import { Forms, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
+import { StatusBooked } from './orderutil'
 
 const mediumBreakpoint = 768
 
@@ -603,7 +604,7 @@ class Bot extends BotMarket {
     const {
       page, marketReport: { baseFiatRate, quoteFiatRate }, baseID, quoteID,
       baseFeeID, quoteFeeID, baseFeeFiatRate, quoteFeeFiatRate, cexName,
-      baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor
+      baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor, host, mktID
     } = this
 
     const [proposedDexBase, proposedCexBase, baseSlider] = parseFundingOptions(f.base)
@@ -700,6 +701,18 @@ class Bot extends BotMarket {
       page.proposedDexQuoteFeeAllocUSD.textContent = Doc.formatFourSigFigs(proposedFees * quoteFeeFiatRate)
       page.proposedDexQuoteFeeAlloc.classList.toggle('text-warning', !f.quote.fees.funded)
     }
+
+    const mkt = app().exchanges[host]?.markets[mktID]
+    let existingOrders = false
+    if (mkt && mkt.orders) {
+      for (let i = 0; i < mkt.orders.length; i++) {
+        if (mkt.orders[i].status <= StatusBooked) {
+          existingOrders = true
+          break
+        }
+      }
+    }
+    Doc.setVis(existingOrders, page.existingOrdersBox)
 
     Doc.show(page.allocationDialog)
     const closeDialog = (e: MouseEvent) => {
