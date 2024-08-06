@@ -661,6 +661,20 @@ func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *strin
 		return fmt.Errorf("bot for %s already running", mkt)
 	}
 
+	coreMkt, err := m.core.ExchangeMarket(startCfg.Host, startCfg.BaseID, startCfg.QuoteID)
+	if err != nil {
+		return fmt.Errorf("error getting market: %v", err)
+	}
+
+	for _, ord := range coreMkt.Orders {
+		if ord.Status <= order.OrderStatusBooked {
+			err = m.core.Cancel(ord.ID)
+			if err != nil {
+				return fmt.Errorf("error canceling order %s: %v", ord.ID, err)
+			}
+		}
+	}
+
 	botCfg, cexCfg, err := m.configsForMarket(&startCfg.MarketWithHost, alternateConfigPath)
 	if err != nil {
 		return err
