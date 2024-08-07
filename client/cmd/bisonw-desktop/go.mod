@@ -1,6 +1,6 @@
 module decred.org/dcrdex/client/cmd/bisonw-desktop
 
-go 1.21
+go 1.21.10
 
 replace decred.org/dcrdex => ../../..
 
