@@ -5,6 +5,7 @@ go 1.21
 require (
 	decred.org/dcrwallet/v4 v4.1.1
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
+	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
 	github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/btcsuite/btcd/btcutil v1.1.5
@@ -43,6 +44,7 @@ require (
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/decred/vspd/types/v2 v2.1.0
+	github.com/dev-warrior777/go-monero v0.1.0
 	github.com/dgraph-io/badger v1.6.2
 	github.com/ethereum/go-ethereum v1.14.8
 	github.com/fatih/color v1.16.0
@@ -51,6 +53,7 @@ require (
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
 	github.com/go-chi/chi/v5 v5.0.1
 	github.com/gorilla/websocket v1.5.1
+	github.com/haven-protocol-org/monero-go-utils v0.0.0-20211126154105-058b2666f217
 	github.com/huandu/skiplist v1.2.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jrick/logrotate v1.0.0
@@ -81,7 +84,6 @@ require (
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
 	github.com/aead/siphash v1.0.1 // indirect
-	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/btcsuite/btcwallet/wallet/txrules v1.2.1 // indirect
