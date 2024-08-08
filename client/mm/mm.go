@@ -446,12 +446,12 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 	}
 	c.mkts, err = cex.Markets(ctx)
 	if err != nil {
-		m.log.Errorf("Failed to get markets for %s: %w", cfg.Name, err)
+		m.log.Errorf("Failed to get markets for %s: %v", cfg.Name, err)
 		c.mkts = make(map[string]*libxc.Market)
 		c.connectErr = err.Error()
 	}
 	if c.balances, err = c.Balances(ctx); err != nil {
-		m.log.Errorf("Failed to get balances for %s: %w", cfg.Name, err)
+		m.log.Errorf("Failed to get balances for %s: %v", cfg.Name, err)
 		c.balances = make(map[uint32]*libxc.ExchangeBalance)
 		c.connectErr = err.Error()
 	}
