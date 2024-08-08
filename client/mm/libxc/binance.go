@@ -1917,5 +1917,5 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 
 func requestInto(req *http.Request, thing interface{}) error {
 	// bnc.log.Tracef("Sending request: %+v", req)
-	return dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<22))
+	return dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24))
 }
