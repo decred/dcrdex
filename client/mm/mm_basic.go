@@ -395,6 +395,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 					m.rebalance(epoch.Current)
 				}
 			case <-ctx.Done():
+				bookFeed.Close()
 				return
 			}
 		}

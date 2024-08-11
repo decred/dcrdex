@@ -448,6 +448,7 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 					a.rebalance(epoch.Current)
 				}
 			case <-ctx.Done():
+				bookFeed.Close()
 				return
 			}
 		}
