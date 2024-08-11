@@ -1,12 +1,12 @@
 #
 # Build the docker image
-# $ docker build -t user/dcrdex -f client/Dockerfile .
+# $ docker build -t user/bisonw -f client/Dockerfile .
 #
 # Create docker volume to store client data
-# $ docker volume create --name=dcrdex_data
+# $ docker volume create --name=bisonw_data
 #
 # Run the docker image, mapping web access port.
-# $ docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/dex/.bisonw user/dcrdex
+# $ docker run -d --rm -p 127.0.0.1:5758:5758 -v bisonw_data:/dex/.dexc user/bisonw
 #
 
 # frontend build
@@ -20,7 +20,7 @@
 FROM node@sha256:d75175d449921d06250afd87d51f39a74fc174789fa3c50eba0d3b18369cc749 AS nodebuilder
 WORKDIR /root/dex
 COPY . .
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git
+RUN apk add git
 WORKDIR /root/dex/client/webserver/site/
 RUN npm clean-install
 RUN npm run build
@@ -45,7 +45,7 @@ FROM debian:buster-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates
 WORKDIR /dex
 ENV HOME /dex
-RUN mkdir -p /dex/.bisonw && chown 1000 /dex/.bisonw
+RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
 USER 1000
 COPY --from=gobuilder /root/dex/client/cmd/bisonw/bisonw ./
 COPY --from=gobuilder /root/dex/client/cmd/bwctl/bwctl ./
