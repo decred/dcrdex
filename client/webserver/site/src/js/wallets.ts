@@ -2147,9 +2147,9 @@ export default class WalletsPage extends BasePage {
         page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)
         Doc.showFiatValue(page.maxSendFiat, canSend, xcRate, ui)
         if (token) {
-          const { unitInfo: feeUI, symbol: feeSymbol } = app().assets[token.parentID]
-          page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, feeUI) + ' ' + feeSymbol
-          Doc.showFiatValue(page.maxSendFeeFiat, res.txfee, app().fiatRatesMap[token.parentID], ui)
+          const feeUI = app().assets[token.parentID].unitInfo
+          page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, feeUI) + ' ' + feeUI.conventional.unit
+          Doc.showFiatValue(page.maxSendFeeFiat, res.txfee, app().fiatRatesMap[token.parentID], feeUI)
         } else {
           page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, ui)
           Doc.showFiatValue(page.maxSendFeeFiat, res.txfee, xcRate, ui)

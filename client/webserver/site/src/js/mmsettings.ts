@@ -559,15 +559,19 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { page, specs } = this
     const { host, baseID, quoteID, cexName, botType } = specs
 
-    const [{ symbol: baseSymbol }, { symbol: quoteSymbol }] = [app().assets[baseID], app().assets[quoteID]]
+    const [{ symbol: baseSymbol, token: baseToken }, { symbol: quoteSymbol, token: quoteToken }] = [app().assets[baseID], app().assets[quoteID]]
     this.mktID = `${baseSymbol}_${quoteSymbol}`
-
-    Doc.show(page.marketLoading)
     Doc.hide(
       page.botSettingsContainer, page.marketBox, page.updateButton, page.resetButton,
-      page.createButton, page.noMarket
+      page.createButton, page.noMarket, page.missingFiatRates
     )
 
+    if ([baseID, quoteID, baseToken?.parentID ?? baseID, quoteToken?.parentID ?? quoteID].some((assetID: number) => !app().fiatRatesMap[assetID])) {
+      Doc.show(page.missingFiatRates)
+      return
+    }
+
+    Doc.show(page.marketLoading)
     State.storeLocal(specLK, specs)
 
     const mmStatus = app().mmStatus
@@ -659,11 +663,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     this.basePane.setAsset(baseID, false)
     this.quotePane.setAsset(quoteID, true)
-    const { marketReport: { baseFiatRate, quoteFiatRate } } = this
+    const { marketReport: { baseFiatRate } } = this
     this.placementsChart.setMarket({ cexName: cexName as string, botType, baseFiatRate, dict: this.updatedConfig })
-
-    const hasFiatRates = baseFiatRate > 0 && quoteFiatRate > 0
-    Doc.setVis(hasFiatRates, page.switchToQuickConfig)
 
     // If this is a new bot, show the quick config form.
     const isQuickPlacements = !botCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)

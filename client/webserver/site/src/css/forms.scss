@@ -426,16 +426,16 @@ div[data-tmpl=scoreTray] {
 span[data-tmpl=scorePointer] {
   transform: translateX(-50%);
 
-  div[data-tmpl=scoreData] {
+  span[data-tmpl=scoreData] {
     top: 0;
     bottom: 0;
 
     &.positive {
-      right: 150%;
+      right: calc(100% + 0.125rem);
     }
 
     &.negative {
-      left: 150%;
+      left: calc(100% + 0.125rem);
     }
   }
 }
