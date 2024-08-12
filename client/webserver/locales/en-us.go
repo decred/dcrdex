@@ -644,4 +644,5 @@ var EnUS = map[string]*intl.Translation{
 	"Block Sync":                  {T: "Block Sync"},
 	"Balance Discovery":           {T: "Balance Discovery"},
 	"Finding Addresses":           {T: "Finding Addresses"},
+	"Hide Mixing Transactions":    {T: "Hide Mixing Transactions"},
 }
