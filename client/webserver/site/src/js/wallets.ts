@@ -974,6 +974,7 @@ export default class WalletsPage extends BasePage {
     for (const b of assetSelect.children) b.classList.remove('selected')
     this.assetButtons[assetID].bttn.classList.add('selected')
     this.selectedAssetID = assetID
+    this.page.hideMixTxsCheckbox.checked = true
     this.updateDisplayedAsset(assetID)
     this.showAvailableMarkets(assetID)
     const a = this.showRecentActivity(assetID)

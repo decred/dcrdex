@@ -4835,7 +4835,22 @@ func (dcr *ExchangeWallet) shutdown() {
 }
 
 // SyncStatus is information about the blockchain sync status.
-func (dcr *ExchangeWallet) SyncStatus() (*asset.SyncStatus, error) {
+func (dcr *ExchangeWallet) SyncStatus() (ss *asset.SyncStatus, err error) {
+	defer func() {
+		var synced bool
+		if ss != nil {
+			synced = ss.Synced
+		}
+
+		if wasSynced := dcr.previouslySynced.Swap(synced); synced && !wasSynced {
+			dcr.tipMtx.RLock()
+			tip := dcr.currentTip
+			dcr.tipMtx.RUnlock()
+
+			dcr.syncTxHistory(dcr.ctx, uint64(tip.height))
+		}
+	}()
+
 	// If we have a rescan running, do different math.
 	dcr.rescan.RLock()
 	rescanProgress := dcr.rescan.progress
@@ -4857,7 +4872,7 @@ func (dcr *ExchangeWallet) SyncStatus() (*asset.SyncStatus, error) {
 	}
 
 	// No rescan in progress. Ask wallet.
-	ss, err := dcr.wallet.SyncStatus(dcr.ctx)
+	ss, err = dcr.wallet.SyncStatus(dcr.ctx)
 	if err != nil {
 		return nil, err
 	}
