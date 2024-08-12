@@ -515,7 +515,7 @@ class Bot extends BotMarket {
     Doc.setVis(running, tmpl.profitLossBox)
     Doc.setVis(!running, tmpl.allocateBttnBox)
     if (runStats) {
-      tmpl.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss.profit)
+      tmpl.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss.profit, 2)
     }
   }
 
@@ -798,5 +798,6 @@ class Bot extends BotMarket {
   handleRunStats () {
     this.updateDisplay()
     this.updateTableRow()
+    this.runDisplay.readBook()
   }
 }
