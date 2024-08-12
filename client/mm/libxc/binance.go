@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -27,7 +28,6 @@ import (
 	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/utils"
 )
@@ -1915,7 +1915,34 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 	return markets
 }
 
+type BNApiResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+}
+
 func requestInto(req *http.Request, thing interface{}) error {
-	// bnc.log.Tracef("Sending request: %+v", req)
-	return dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24))
+	var sizeLimit int64 = 1 << 24
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("error performing request: %w", err)
+	}
+	defer resp.Body.Close()
+	// https://binance-docs.github.io/apidocs/websocket_api/en/#response-format
+	if resp.StatusCode != http.StatusOK {
+		var apiResp BNApiResponse
+		reader := io.LimitReader(resp.Body, sizeLimit)
+		if err = json.NewDecoder(reader).Decode(&apiResp); err != nil {
+			return fmt.Errorf("error decoding response: %w", err)
+		}
+		return fmt.Errorf("API error %d: %s (%d)", resp.StatusCode, apiResp.Msg, apiResp.Code)
+	}
+	if thing == nil {
+		return nil
+	}
+	reader := io.LimitReader(resp.Body, sizeLimit)
+	if err = json.NewDecoder(reader).Decode(thing); err != nil {
+		return fmt.Errorf("error decoding request: %w", err)
+	}
+	return nil
 }
