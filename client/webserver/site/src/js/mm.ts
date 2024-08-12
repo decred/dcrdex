@@ -409,6 +409,7 @@ class Bot extends BotMarket {
 
     const div = this.div = pg.page.botTmpl.cloneNode(true) as PageElement
     const page = this.page = Doc.parseTemplate(div)
+
     this.runDisplay = new RunningMarketMakerDisplay(page.onBox)
 
     setMarketElements(div, baseID, quoteID, host)
@@ -519,7 +520,12 @@ class Bot extends BotMarket {
   }
 
   updateDisplay () {
-    const { page } = this
+    const { page, marketReport: { baseFiatRate, quoteFiatRate }, baseFeeFiatRate, quoteFeeFiatRate } = this
+    if ([baseFiatRate, quoteFiatRate, baseFeeFiatRate, quoteFeeFiatRate].some((r: number) => !r)) {
+      Doc.hide(page.onBox, page.offBox)
+      Doc.show(page.noFiatDisplay)
+      return
+    }
     const { running } = this.status()
     Doc.setVis(running, page.onBox)
     Doc.setVis(!running, page.offBox)
