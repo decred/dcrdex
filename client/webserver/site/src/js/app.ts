@@ -815,11 +815,14 @@ export default class Application {
    * dialog according to the position of its icon button.
    */
   showDropdown (icon: HTMLElement, dialog: HTMLElement) {
-    const ico = icon.getBoundingClientRect()
     Doc.hide(this.page.noteBox, this.page.profileBox)
     Doc.show(dialog)
-    dialog.style.right = `${window.innerWidth - ico.left - ico.width + 5}px`
-    dialog.style.top = `${ico.top - 4}px`
+    if (window.innerWidth < 500) Object.assign(dialog.style, { left: '0', right: '0', top: '0' })
+    else {
+      const ico = icon.getBoundingClientRect()
+      const right = `${window.innerWidth - ico.left - ico.width + 5}px`
+      Object.assign(dialog.style, { left: 'auto', right, top: `${ico.top - 4}px` })
+    }
 
     const hide = (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, dialog)) {
