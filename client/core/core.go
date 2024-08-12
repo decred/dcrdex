@@ -6784,11 +6784,13 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// Identify bonds we consider live that are either pending or missing from
 	// server. In either case, do c.monitorBondConfs (will be immediate postBond
 	// and bondConfirmed if at required confirmations).
-	var bondedTiers uint64 // nominal expected tier based on active bonds
 	for _, bond := range localActiveBonds {
+		if bond.AssetID == account.PrepaidBondID {
+			continue
+		}
+
 		symb := dex.BipIDSymbol(bond.AssetID)
 		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
-
 		bondAsset := bondAssets[bond.AssetID]
 		if bondAsset == nil {
 			c.log.Warnf("Server no longer supports %d as a bond asset!", bond.AssetID)
@@ -6798,21 +6800,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		key := bondKey(bond.AssetID, bond.CoinID)
 		_, found := remoteLiveBonds[key]
 		if found {
-			// TODO: This is not how the server calculates our bonded tier.
-			// On the server, they do
-			//    bondTier += int64(bond.Strength)
-			// where bond.Strength is a value stored in the database during
-			// postbond. This means if the server doubles the bond size for an
-			// asset we're bonded in up to N tiers, by their calculation we'll
-			// still have N tiers from existing bonds, but by ours we would have
-			// floor(N / 2). If they halve the bond size, they'd say we have N,
-			// and we'd think we should have 2N.
-			if bond.Strength > 0 {
-				bondedTiers += uint64(bond.Strength)
-			} else {
-				bondedTiers += bond.Amount / bondAsset.Amt
-			}
-
 			continue // good, it's live server-side too
 		} // else needs post retry or it's expired
 
@@ -6850,11 +6837,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		if found {
 			// It's live server-side. Confirm it locally (db and slices).
 			toConfirmLocally = append(toConfirmLocally, queuedBond{assetBond(bond), 0})
-			if bond.Strength > 0 {
-				bondedTiers += uint64(bond.Strength)
-			} else {
-				bondedTiers += bond.Amount / bondAsset.Amt
-			}
 			continue
 		}
 
