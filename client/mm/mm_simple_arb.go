@@ -448,6 +448,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 
 	err = a.cex.SubscribeMarket(ctx, a.baseID, a.quoteID)
 	if err != nil {
+		bookFeed.Close()
 		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
 	}
 
@@ -457,6 +458,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer bookFeed.Close()
 		for {
 			select {
 			case ni := <-bookFeed.Next():
@@ -465,7 +467,6 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 					a.rebalance(epoch.Current)
 				}
 			case <-ctx.Done():
-				bookFeed.Close()
 				return
 			}
 		}
