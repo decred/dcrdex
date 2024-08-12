@@ -4,7 +4,30 @@ import (
 	"context"
 
 	"decred.org/dcrwallet/v4/wallet/udb"
+	"github.com/decred/dcrd/dcrutil/v4"
 )
+
+// must be sorted large to small
+var splitPoints = [...]dcrutil.Amount{
+	1 << 36, // 687.19476736
+	1 << 34, // 171.79869184
+	1 << 32, // 042.94967296
+	1 << 30, // 010.73741824
+	1 << 28, // 002.68435456
+	1 << 26, // 000.67108864
+	1 << 24, // 000.16777216
+	1 << 22, // 000.04194304
+	1 << 20, // 000.01048576
+	1 << 18, // 000.00262144
+}
+
+var splitPointMap = map[int64]struct{}{}
+
+func init() {
+	for _, amt := range splitPoints {
+		splitPointMap[int64(amt)] = struct{}{}
+	}
+}
 
 const (
 	smalletCSPPSplitPoint = 1 << 18 // 262144

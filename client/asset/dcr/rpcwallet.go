@@ -535,6 +535,17 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, addr stdaddr.Address
 	return va.IsMine && va.Account == acctName, nil
 }
 
+// WalletOwnsAddress returns whether any of the account controlled by this
+// wallet owns the specified address.
+func (w *rpcWallet) WalletOwnsAddress(ctx context.Context, addr stdaddr.Address) (bool, error) {
+	va, err := w.rpcClient.ValidateAddress(ctx, addr)
+	if err != nil {
+		return false, translateRPCCancelErr(err)
+	}
+
+	return va.IsMine, nil
+}
+
 // AccountBalance returns the balance breakdown for the specified account.
 // Part of the Wallet interface.
 func (w *rpcWallet) AccountBalance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error) {

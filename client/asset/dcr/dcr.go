@@ -683,6 +683,8 @@ type ExchangeWallet struct {
 	txHistoryDB      atomic.Value // *btc.BadgerTxDB
 	syncingTxHistory atomic.Bool
 
+	previouslySynced atomic.Bool
+
 	rescan struct {
 		sync.RWMutex
 		progress *rescanProgress // nil = no rescan in progress
@@ -931,7 +933,12 @@ func (dcr *ExchangeWallet) findExistingAddressBasedTxHistoryDB() (string, error)
 		}
 
 		address := match[1]
-		owns, err := dcr.OwnsDepositAddress(address)
+
+		decodedAddr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
+		if err != nil {
+			continue
+		}
+		owns, err := dcr.wallet.WalletOwnsAddress(dcr.ctx, decodedAddr)
 		if err != nil {
 			continue
 		}
@@ -4828,11 +4835,27 @@ func (dcr *ExchangeWallet) shutdown() {
 }
 
 // SyncStatus is information about the blockchain sync status.
-func (dcr *ExchangeWallet) SyncStatus() (*asset.SyncStatus, error) {
+func (dcr *ExchangeWallet) SyncStatus() (ss *asset.SyncStatus, err error) {
+	defer func() {
+		var synced bool
+		if ss != nil {
+			synced = ss.Synced
+		}
+
+		if wasSynced := dcr.previouslySynced.Swap(synced); synced && !wasSynced {
+			dcr.tipMtx.RLock()
+			tip := dcr.currentTip
+			dcr.tipMtx.RUnlock()
+
+			dcr.syncTxHistory(dcr.ctx, uint64(tip.height))
+		}
+	}()
+
 	// If we have a rescan running, do different math.
 	dcr.rescan.RLock()
 	rescanProgress := dcr.rescan.progress
 	dcr.rescan.RUnlock()
+
 	if rescanProgress != nil {
 		height := dcr.cachedBestBlock().height
 		if height < rescanProgress.scannedThrough {
@@ -4847,8 +4870,9 @@ func (dcr *ExchangeWallet) SyncStatus() (*asset.SyncStatus, error) {
 			Transactions:   &txHeight,
 		}, nil
 	}
+
 	// No rescan in progress. Ask wallet.
-	ss, err := dcr.wallet.SyncStatus(dcr.ctx)
+	ss, err = dcr.wallet.SyncStatus(dcr.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -5879,18 +5903,34 @@ func rpcTxFee(tx *ListTransactionsResult) uint64 {
 	return 0
 }
 
-func (dcr *ExchangeWallet) walletOwnsAddress(addr stdaddr.Address) (bool, error) {
-	for _, acct := range dcr.allAccounts() {
-		owns, err := dcr.wallet.AccountOwnsAddress(dcr.ctx, addr, acct)
-		if err != nil {
-			return false, err
-		}
-		if owns {
-			return true, nil
+func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
+	if len(tx.TxOut) < 3 || len(tx.TxIn) < 3 {
+		return false, 0
+	}
+
+	mixedOuts := make(map[int64]uint32)
+	for _, o := range tx.TxOut {
+		val := o.Value
+		if _, ok := splitPointMap[val]; ok {
+			mixedOuts[val]++
+			continue
 		}
 	}
 
-	return false, nil
+	var mixCount uint32
+	for val, count := range mixedOuts {
+		if count < 3 {
+			continue
+		}
+		if val > mixDenom {
+			mixDenom = val
+			mixCount = count
+		}
+	}
+
+	// TODO: revisit the input count requirements
+	isMix = mixCount >= uint32(len(tx.TxOut)/2)
+	return
 }
 
 // idUnknownTx identifies the type and details of a transaction either made
@@ -5907,7 +5947,9 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 
 	var totalIn uint64
 	for _, txIn := range msgTx.TxIn {
-		totalIn += uint64(txIn.ValueIn)
+		if txIn.ValueIn > 0 {
+			totalIn += uint64(txIn.ValueIn)
+		}
 	}
 
 	var totalOut uint64
@@ -6073,7 +6115,7 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 			}
 
 			addr := addrs[0]
-			owns, err := dcr.walletOwnsAddress(addr)
+			owns, err := dcr.wallet.WalletOwnsAddress(ctx, addr)
 			if err != nil {
 				dcr.log.Errorf("walletOwnsAddress error: %w", err)
 				return false
@@ -6094,6 +6136,66 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 		}, nil
 	}
 
+	if isMix, mixDenom := isMixTx(msgTx); isMix {
+		var mixedAmount uint64
+		for _, txOut := range msgTx.TxOut {
+			if txOut.Value == mixDenom {
+				_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
+				if err != nil {
+					dcr.log.Errorf("ExtractAddrs error: %w", err)
+					continue
+				}
+				if len(addrs) != 1 { // sanity check
+					continue
+				}
+
+				addr := addrs[0]
+				owns, err := dcr.wallet.WalletOwnsAddress(ctx, addr)
+				if err != nil {
+					dcr.log.Errorf("walletOwnsAddress error: %w", err)
+					continue
+				}
+
+				if owns {
+					mixedAmount += uint64(txOut.Value)
+				}
+			}
+		}
+
+		return &asset.WalletTransaction{
+			Type:   asset.Mix,
+			ID:     tx.TxID,
+			Amount: mixedAmount,
+			Fees:   fee,
+		}, nil
+	}
+
+	getRecipient := func(msgTx *wire.MsgTx, receive bool) *string {
+		for _, txOut := range msgTx.TxOut {
+			_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
+			if err != nil {
+				dcr.log.Errorf("ExtractAddrs error: %w", err)
+				continue
+			}
+			if len(addrs) != 1 { // sanity check
+				continue
+			}
+
+			addr := addrs[0]
+			owns, err := dcr.wallet.WalletOwnsAddress(ctx, addr)
+			if err != nil {
+				dcr.log.Errorf("walletOwnsAddress error: %w", err)
+				continue
+			}
+
+			if receive == owns {
+				str := addr.String()
+				return &str
+			}
+		}
+		return nil
+	}
+
 	txOutDirection := func(msgTx *wire.MsgTx) (in, out uint64) {
 		for _, txOut := range msgTx.TxOut {
 			_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
@@ -6106,7 +6208,7 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 			}
 
 			addr := addrs[0]
-			owns, err := dcr.walletOwnsAddress(addr)
+			owns, err := dcr.wallet.WalletOwnsAddress(ctx, addr)
 			if err != nil {
 				dcr.log.Errorf("walletOwnsAddress error: %w", err)
 				continue
@@ -6122,41 +6224,17 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 
 	in, out := txOutDirection(msgTx)
 
-	getRecipient := func(msgTx *wire.MsgTx, receive bool) *string {
-		for _, txOut := range msgTx.TxOut {
-			_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
-			if err != nil {
-				dcr.log.Errorf("ExtractAddrs error: %w", err)
-				continue
-			}
-			if len(addrs) != 1 { // sanity check
-				continue
-			}
-
-			addr := addrs[0]
-			owns, err := dcr.walletOwnsAddress(addr)
-			if err != nil {
-				dcr.log.Errorf("walletOwnsAddress error: %w", err)
-				continue
-			}
-
-			if receive == owns {
-				str := addr.String()
-				return &str
-			}
-		}
-		return nil
-	}
-
 	if tx.Send {
 		txType := asset.Send
+		amt := out
 		if allOutputsPayUs(msgTx) {
 			txType = asset.SelfSend
+			amt = in
 		}
 		return &asset.WalletTransaction{
 			Type:      txType,
 			ID:        tx.TxID,
-			Amount:    out,
+			Amount:    amt,
 			Fees:      fee,
 			Recipient: getRecipient(msgTx, false),
 		}, nil
