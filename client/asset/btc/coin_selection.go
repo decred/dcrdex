@@ -82,7 +82,7 @@ func SumUTXOs(set []*CompositeUTXO) (tot uint64) {
 	return tot
 }
 
-// subsetWithLeastSumGreaterThan attempts to select the subset of UTXOs with
+// subsetWithLeastOverFund attempts to select the subset of UTXOs with
 // the smallest total value that is enough. It does this by making
 // 1000 random selections and returning the best one. Each selection
 // involves two passes over the UTXOs. The first pass randomly selects
