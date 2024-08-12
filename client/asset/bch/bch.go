@@ -249,7 +249,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	return nil, fmt.Errorf("wallet type %q not known", cfg.Type)
 }
 
-// rawTxSigner signs the transaction using Bitcoin Cash's custom signature
+// rawTxInSigner signs the transaction using Bitcoin Cash's custom signature
 // hash and signing algorithm.
 func rawTxInSigner(btcTx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType,
 	btcKey *btcec.PrivateKey, vals []int64, _ [][]byte) ([]byte, error) {

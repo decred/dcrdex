@@ -3098,7 +3098,7 @@ func (btc *baseWallet) getTxFee(tx *wire.MsgTx) (uint64, error) {
 	return in - out, nil
 }
 
-// sizeAndFeesOfConfirmedTxs returns the total size in vBytes and the total
+// sizeAndFeesOfUnconfirmedTxs returns the total size in vBytes and the total
 // fees spent by the unconfirmed transactions in txs.
 func (btc *baseWallet) sizeAndFeesOfUnconfirmedTxs(txs []*GetTransactionResult) (size uint64, fees uint64, err error) {
 	for _, tx := range txs {
