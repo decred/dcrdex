@@ -1548,6 +1548,7 @@ export default class Application {
     for (let i = startIndex; i < cachedTxHistory.txs.length && txs.length < n; i++) {
       txs.push(cachedTxHistory.txs[i])
       lastIndex = i
+      after = cachedTxHistory.txs[i].id
     }
     if (cachedTxHistory.lastTx && lastIndex === cachedTxHistory.txs.length - 1) {
       lastTx = true

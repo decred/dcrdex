@@ -1124,6 +1124,7 @@ const (
 	// SwapOrSend is used when a wallet scanned its historical transactions
 	// and was unable to determine if the transaction was a swap or a send.
 	SwapOrSend
+	Mix
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a

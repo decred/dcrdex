@@ -162,8 +162,6 @@ type spvWallet struct {
 
 	blockCache blockCache
 
-	// hasMixingAccts is used to track if a wallet has the accounts required for
-	// funds mixing.
 	accts atomic.Value
 
 	cancel context.CancelFunc
@@ -548,6 +546,23 @@ func (w *spvWallet) AddressInfo(ctx context.Context, addrStr string) (*AddressIn
 		return &AddressInfo{Account: ka.AccountName(), Branch: branch}, nil
 	}
 	return nil, fmt.Errorf("unsupported address type %T", ka)
+}
+
+// WalletOwnsAddress returns whether any of the account controlled by this
+// wallet owns the specified address.
+func (w *spvWallet) WalletOwnsAddress(ctx context.Context, addr stdaddr.Address) (bool, error) {
+	ka, err := w.KnownAddress(ctx, addr)
+	if err != nil {
+		if errors.Is(err, walleterrors.NotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("KnownAddress error: %w", err)
+	}
+	if kind := ka.AccountKind(); kind != wallet.AccountKindBIP0044 && kind != wallet.AccountKindImported {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // AccountOwnsAddress checks if the provided address belongs to the specified
