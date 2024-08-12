@@ -387,6 +387,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer bookFeed.Close()
 		for {
 			select {
 			case ni := <-bookFeed.Next():

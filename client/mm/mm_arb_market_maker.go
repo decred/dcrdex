@@ -422,7 +422,6 @@ func (a *arbMarketMaker) registerFeeGap() {
 }
 
 func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
-
 	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)
@@ -431,6 +430,7 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 
 	err = a.cex.SubscribeMarket(ctx, a.baseID, a.quoteID)
 	if err != nil {
+		bookFeed.Close()
 		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
 	}
 
@@ -440,6 +440,7 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer bookFeed.Close()
 		for {
 			select {
 			case ni := <-bookFeed.Next():

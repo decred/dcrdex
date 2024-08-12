@@ -2297,6 +2297,7 @@ func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
 		u.tryCancelOrders(ctx, nil, true)
 		return
 	}
+	defer bookFeed.Close()
 
 	mktCfg, err := u.clientCore.ExchangeMarket(u.host, u.baseID, u.quoteID)
 	if err != nil {
