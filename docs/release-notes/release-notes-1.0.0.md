@@ -1,7 +1,7 @@
 # DCRDEX v1.0.0
 
 This release introduces a major version upgrade. Backwards compatibility is
-not preserved.
+not strictly preserved.
 
 There are many new features, improvements, and bug fixes in since v0.6.
 
@@ -26,10 +26,10 @@ There are many new features, improvements, and bug fixes in since v0.6.
 - Enable password recovery using seed to avoid full wallet restorations
 - Server: Enable public BTC RPC providers
 - Normalize translation system to enable report generation for translators
-- Server: Add database table for finalized candles for faster startup]
+- Server: Add database table for finalized candles for faster startup
 - Total GUI refactor. Differentiated sections. Normalized forms. Drop sans-light font
 - Add desktop notifiations
-- Implement model Tatanka mesh network for next-gen DEX
+- Implement model Tatanka Mesh for next-gen DEX
 - Use binary searches for optimial lot count in various places for snappier response on low-lot-size markets
 - Make transation IDs and addresses in notification into links
 - Enable locating bonds when restoring from seed
@@ -47,7 +47,7 @@ There are many new features, improvements, and bug fixes in since v0.6.
 - Multiple UI fixes for incorrect conversions or wrong units displayed
 - Fix panic for nil bookie via core.Book
 - Implement binary searches for
-- Disable Bitcoin Bash SPV wallet for lack of filter support
+- Disable Bitcoin Cash SPV wallet for lack of filter support
 - Tons of other minor fixes
 
 ## Code Summary
