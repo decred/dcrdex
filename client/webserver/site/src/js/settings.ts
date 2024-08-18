@@ -466,7 +466,7 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.gameCodeErr)
     const code = page.gameCodeInput.value
     if (!code) {
-      page.gameCodeErr.textContent = 'no code provided'
+      page.gameCodeErr.textContent = intl.prep(intl.ID_NO_CODE_PROVIDED)
       Doc.show(page.gameCodeErr)
       return
     }

@@ -194,6 +194,7 @@ const (
 	completeID                       = "COMPLETE"
 	archivedSettingsID               = "ARCHIVED_SETTINGS"
 	idTransparent                    = "TRANSPARENT"
+	idNoCodeProvided                 = "NO_CODE_PROVIDED"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -387,6 +388,7 @@ var enUS = map[string]*intl.Translation{
 	completeID:                       {T: "Complete"},
 	archivedSettingsID:               {T: "Archived Settings"},
 	idTransparent:                    {T: "Transparent"},
+	idNoCodeProvided:                 {T: "no code provided"},
 }
 
 var ptBR = map[string]*intl.Translation{

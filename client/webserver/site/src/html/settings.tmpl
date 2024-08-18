@@ -77,7 +77,7 @@
         <button id="exportSeed" class="fs15">[[[View Application Seed]]]</button>
       </div>
       <div id="gameCodeLink" class="py-3 mb-3 border-bottom pointer hoverbg">
-        <span class="ico-ticket"></span> Redeem game code
+        <span class="ico-ticket"></span> [[[Redeem game code]]]
       </div>
       <p class="grey">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
     </div>
@@ -156,19 +156,19 @@
 
     <form id="gameCodeForm" class="d-hide">
       <div class="form-closer"><span class="ico-cross"></span></div>
-      <header><span class="ico-ticket me-2"></span> Redeem Game Code</header>
+      <header><span class="ico-ticket me-2"></span> [[[Redeem Game Code]]]</header>
       <div class="px-3 flex-stretch-column">
-        <label for="gameCodeInput" class="pt-2">Code</label>
+        <label for="gameCodeInput" class="pt-2">[[[Code]]]</label>
         <input type="text" id="gameCodeInput">
-        <label for="gameCodeMsg" class="mt-2">Message (optional)</label>
+        <label for="gameCodeMsg" class="mt-2">[[[Message_optional]]]</label>
         <input type="text" id="gameCodeMsg" maxlength="256">
-        <button type="button" id="gameCodeSubmit" class="feature mt-2">Redeem</button>
+        <button type="button" id="gameCodeSubmit" class="feature mt-2">[[[Redeem]]]</button>
         <div id="gameCodeSuccess" class="mt-2 pt-2 border-top flex-stretch-column d-hide">
-          <span>Game code redeemed!</span>
-          <span class="mt-2">Transaction</span>
+          <span>[[[Game code redeemed]]]</span>
+          <span class="mt-2">[[[Transaction]]]</span>
           <a id="gameRedeemTx" class="mt-1 word-break-all" target="_blank"></a>
-          <span class="mt-2">Value: <span id="gameRedeemValue"></span> <span class="fs14 grey">DCR</span></span>
-          <span class="mt-2">Prepaid bond redeemed!</span>
+          <span class="mt-2">[[[Value]]]: <span id="gameRedeemValue"></span> <span class="fs14 grey">DCR</span></span>
+          <span class="mt-2">[[[Prepaid bond redeemed]]]</span>
         </div>
         <div id="gameCodeErr" class="mt-2 text-warning d-hide"></div>
       </div>
