@@ -4,6 +4,7 @@ import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
 import * as intl from './locales'
+import { setCoinHref } from './coinexplorers'
 import {
   updateNtfnSetting,
   DesktopNtfnSetting,
@@ -159,6 +160,9 @@ export default class SettingsPage extends BasePage {
       this.showForm(page.exportSeedAuth)
     })
     forms.bind(page.exportSeedAuth, page.exportSeedSubmit, () => this.submitExportSeedReq())
+
+    Doc.bind(page.gameCodeLink, 'click', () => this.showForm(page.gameCodeForm))
+    Doc.bind(page.gameCodeSubmit, 'click', () => this.submitGameCode())
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -455,5 +459,32 @@ export default class SettingsPage extends BasePage {
     this.currentForm = form
     Doc.hide(oldForm)
     Doc.show(form)
+  }
+
+  async submitGameCode () {
+    const page = this.page
+    Doc.hide(page.gameCodeErr)
+    const code = page.gameCodeInput.value
+    if (!code) {
+      page.gameCodeErr.textContent = 'no code provided'
+      Doc.show(page.gameCodeErr)
+      return
+    }
+    const msg = page.gameCodeMsg.value || ''
+    const loaded = app().loading(page.gameCodeForm)
+    const resp = await postJSON('/api/redeemgamecode', { code, msg })
+    loaded()
+    if (!app().checkResponse(resp)) {
+      page.gameCodeErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: resp.msg })
+      Doc.show(page.gameCodeErr)
+      return
+    }
+    Doc.show(page.gameCodeSuccess)
+    page.gameRedeemTx.dataset.explorerCoin = resp.coinString
+    const dcrBipID = 42
+    setCoinHref(dcrBipID, page.gameRedeemTx)
+    page.gameRedeemTx.textContent = resp.coinString
+    const ui = app().unitInfo(dcrBipID)
+    page.gameRedeemValue.textContent = Doc.formatCoinValue(resp.win, ui)
   }
 }

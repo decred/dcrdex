@@ -10755,3 +10755,59 @@ func (c *Core) checkEpochResolution(host string, mktID string) {
 
 	}
 }
+
+// RedeemGeocode redeems the provided game code with the wallet and redeems the
+// prepaid bond (code is a prepaid bond). If the user is not registered with
+// dex.decred.org yet, the dex will be added first.
+func (c *Core) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error) {
+	const dcrBipID = 42
+	dcrWallet, found := c.wallet(dcrBipID)
+	if !found {
+		return nil, 0, errors.New("no decred wallet")
+	}
+	if !dcrWallet.connected() {
+		return nil, 0, errors.New("decred wallet is not connected")
+	}
+
+	host := "dex.decred.org:7232"
+	switch c.net {
+	case dex.Testnet:
+		host = "bison.exchange:17232"
+	case dex.Simnet:
+		host = "127.0.0.1:17273"
+	}
+	cert := CertStore[c.net][host]
+
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if !found {
+		if err := c.AddDEX(appPW, host, cert); err != nil {
+			return nil, 0, fmt.Errorf("error adding %s: %w", host, err)
+		}
+		c.connMtx.RLock()
+		_, found = c.conns[host]
+		c.connMtx.RUnlock()
+		if !found {
+			return nil, 0, fmt.Errorf("dex not found after adding")
+		}
+	} else if dc.status() != comms.Connected {
+		return nil, 0, fmt.Errorf("not currently connected to %s", host)
+	}
+
+	w, is := dcrWallet.Wallet.(asset.GeocodeRedeemer)
+	if !is {
+		return nil, 0, errors.New("decred wallet is not a GeocodeRedeemer?")
+	}
+
+	coinID, win, err := w.RedeemGeocode(code, msg)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error redeeming geocode: %w", err)
+	}
+
+	if _, err := c.RedeemPrepaidBond(appPW, code, host, cert); err != nil {
+		return nil, 0, fmt.Errorf("geocode redeemed, but failed to redeem prepaid bond: %w", err)
+	}
+
+	return coinID, win, nil
+}

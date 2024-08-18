@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	neturl "net/url"
@@ -44,6 +45,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/sign"
@@ -1310,7 +1312,7 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 		return 0, errors.New("fee rate oracle is in a temporary failing state")
 	}
 
-	dcr.log.Debugf("Retrieving fee rate from external fee oracle for %d target blocks", confTarget)
+	dcr.log.Tracef("Retrieving fee rate from external fee oracle for %d target blocks", confTarget)
 	dcrPerKB, err := fetchFeeFromOracle(dcr.ctx, dcr.network, confTarget)
 	if err != nil {
 		// Just log it and return zero. If we return an error, it's just logged
@@ -7204,4 +7206,153 @@ func (dcr *ExchangeWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset
 		Req:    requiredRedeemConfirms,
 		CoinID: coinID,
 	}, nil
+}
+
+var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
+
+// RedeemGeocode redeems funds from a geocode game tx to this wallet.
+func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, uint64, error) {
+	msgLen := len([]byte(msg))
+	if msgLen > stdscript.MaxDataCarrierSizeV0 {
+		return nil, 0, fmt.Errorf("message is too long. must be %d > %d", msgLen, stdscript.MaxDataCarrierSizeV0)
+	}
+
+	k, err := hdkeychain.NewMaster(code, dcr.chainParams)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error generating key from bond: %w", err)
+	}
+	gameKey, err := k.SerializedPrivKey()
+	if err != nil {
+		return nil, 0, fmt.Errorf("error serializing private key: %w", err)
+	}
+
+	gamePub := k.SerializedPubKey()
+	gameAddr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(dcrutil.Hash160(gamePub), dcr.chainParams)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error generating address: %w", err)
+	}
+
+	gameTxs, err := getDcrdataTxs(dcr.ctx, gameAddr.String(), dcr.network)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error getting tx from dcrdata: %w", err)
+	}
+
+	_, gameScript := gameAddr.PaymentScript()
+
+	feeRate, err := dcr.feeRate(2)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error getting tx fee rate: %w", err)
+	}
+
+	redeemTx := wire.NewMsgTx()
+	var redeemable int64
+	for _, gameTx := range gameTxs {
+		txHash := gameTx.TxHash()
+		for vout, txOut := range gameTx.TxOut {
+			if bytes.Equal(txOut.PkScript, gameScript) {
+				redeemable += txOut.Value
+				prevOut := wire.NewOutPoint(&txHash, uint32(vout), wire.TxTreeRegular)
+				redeemTx.AddTxIn(wire.NewTxIn(prevOut, txOut.Value, gameScript))
+			}
+		}
+	}
+
+	if len(redeemTx.TxIn) == 0 {
+		return nil, 0, fmt.Errorf("no spendable game outputs found in %d txs for address %s", len(gameTxs), gameAddr)
+	}
+
+	var txSize uint64 = dexdcr.MsgTxOverhead + uint64(len(redeemTx.TxIn))*dexdcr.P2PKHInputSize + dexdcr.P2PKHOutputSize
+	if msgLen > 0 {
+		txSize += dexdcr.TxOutOverhead + 1 /* opreturn */ + uint64(wire.VarIntSerializeSize(uint64(msgLen))) + uint64(msgLen)
+	}
+	fees := feeRate * txSize
+
+	if uint64(redeemable) < fees {
+		return nil, 0, fmt.Errorf("estimated fees %d are less than the redeemable value %d", fees, redeemable)
+	}
+	win := uint64(redeemable) - fees
+	if dexdcr.IsDustVal(dexdcr.P2PKHOutputSize, win, feeRate) {
+		return nil, 0, fmt.Errorf("received value is dust after fees: %d - %d = %d", redeemable, fees, win)
+	}
+
+	redeemAddr, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
+	if err != nil {
+		return nil, 0, fmt.Errorf("error getting redeem address: %w", err)
+	}
+	_, redeemScript := redeemAddr.PaymentScript()
+
+	redeemTx.AddTxOut(wire.NewTxOut(int64(win), redeemScript))
+	if msgLen > 0 {
+		msgScript, err := txscript.NewScriptBuilder().AddOp(txscript.OP_RETURN).AddData([]byte(msg)).Script()
+		if err != nil {
+			return nil, 0, fmt.Errorf("error building message script: %w", err)
+		}
+		redeemTx.AddTxOut(wire.NewTxOut(0, msgScript))
+	}
+
+	for vin, txIn := range redeemTx.TxIn {
+		redeemInSig, err := sign.RawTxInSignature(redeemTx, vin, gameScript, txscript.SigHashAll,
+			gameKey, dcrec.STEcdsaSecp256k1)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error creating signature for input script: %w", err)
+		}
+		txIn.SignatureScript, err = txscript.NewScriptBuilder().AddData(redeemInSig).AddData(gamePub).Script()
+		if err != nil {
+			return nil, 0, fmt.Errorf("error building p2pkh sig script: %w", err)
+		}
+	}
+
+	redeemHash, err := dcr.broadcastTx(redeemTx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error broadcasting tx: %w", err)
+	}
+
+	return toCoinID(redeemHash, 0), win, nil
+}
+
+func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wire.MsgTx, _ error) {
+	apiRoot := "https://dcrdata.decred.org/api/"
+	switch net {
+	case dex.Testnet:
+		apiRoot = "https://testnet.dcrdata.org/api/"
+	case dex.Simnet:
+		apiRoot = "http://127.0.0.1:17779/api/"
+	}
+
+	var resp struct {
+		Txs []struct {
+			TxID string `json:"txid"`
+		} `json:"address_transactions"`
+	}
+	if err := dexnet.Get(ctx, apiRoot+"address/"+addr, &resp); err != nil {
+		return nil, fmt.Errorf("error getting address info for address %q: %w", addr, err)
+	}
+	for _, tx := range resp.Txs {
+		txID := tx.TxID
+
+		// tx/hex response is a hex string but is not JSON encoded.
+		r, err := http.DefaultClient.Get(apiRoot + "tx/hex/" + txID)
+		if err != nil {
+			return nil, fmt.Errorf("error getting transaction %q: %w", txID, err)
+		}
+		defer r.Body.Close()
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, fmt.Errorf("error reading response body: %w", err)
+		}
+		r.Body.Close()
+		hexTx := string(b)
+		txB, err := hex.DecodeString(hexTx)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding hex for tx %q: %w", txID, err)
+		}
+
+		tx, err := msgTxFromBytes(txB)
+		if err != nil {
+			return nil, fmt.Errorf("error deserializing tx %x: %w", txID, err)
+		}
+		txs = append(txs, tx)
+	}
+
+	return
 }

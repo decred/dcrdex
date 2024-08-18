@@ -335,6 +335,10 @@ func (c *TCore) ConfigureFundsMixer(appPW []byte, assetID uint32, enabled bool) 
 	return nil
 }
 
+func (c *TCore) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error) {
+	return nil, 0, nil
+}
+
 func (*TCore) SetLanguage(string) error { return nil }
 func (*TCore) Language() string         { return "en-US" }
 

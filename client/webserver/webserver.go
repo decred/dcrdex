@@ -169,6 +169,7 @@ type clientCore interface {
 	SetLanguage(string) error
 	Language() string
 	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
+	RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error)
 }
 
 type MMCore interface {
@@ -548,6 +549,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/approvetokenfee", s.apiApproveTokenFee)
 			apiAuth.Post("/txhistory", s.apiTxHistory)
 			apiAuth.Post("/takeaction", s.apiTakeAction)
+			apiAuth.Post("/redeemgamecode", s.redeemGameCode)
 
 			apiAuth.Post("/stakestatus", s.apiStakeStatus)
 			apiAuth.Post("/setvsp", s.apiSetVSP)
