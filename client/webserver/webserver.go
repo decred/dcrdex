@@ -667,7 +667,11 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		// Safari. When this is removed, the allowInCSP variable can be removed
 		// but prepareAddr should still return 127.0.0.1 for unspecified
 		// addresses.
-		s.csp = fmt.Sprintf("%s ws://%s", baseCSP, addr)
+		scheme := "ws"
+		if s.srv.TLSConfig != nil {
+			scheme = "wss"
+		}
+		s.csp = fmt.Sprintf("%s %s://%s", baseCSP, scheme, addr)
 	}
 	s.addr = addr
 
