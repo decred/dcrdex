@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/dcrlabs/ltcwallet v0.0.0-20240518141247-13553c8fce6a // indirect
+	github.com/dcrlabs/ltcwallet v0.0.0-20240817190502-ee5cf83672a6 // indirect
 	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
 	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2 // indirect
 )
@@ -31,7 +31,7 @@ require (
 	github.com/btcsuite/btcd/btcutil/psbt v1.1.8 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f // indirect
-	github.com/btcsuite/btcwallet v0.16.10-0.20240809133323-7d3434c65ae2 // indirect
+	github.com/btcsuite/btcwallet v0.16.10-0.20240815225602-6ecae9c12fde // indirect
 	github.com/btcsuite/btcwallet/wallet/txauthor v1.3.4 // indirect
 	github.com/btcsuite/btcwallet/wallet/txrules v1.2.1 // indirect
 	github.com/btcsuite/btcwallet/wallet/txsizes v1.2.4 // indirect
