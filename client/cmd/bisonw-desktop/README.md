@@ -1,8 +1,8 @@
-# Build Instructions for dexc-desktop
+# Build Instructions for bisonw-desktop
 
-The dexc-desktop client is a cross-platform desktop application for the DEX client and wallet. The instructions below are for building the client from source. If you are looking for pre-built binaries, see the [releases page](https://github.com/decred/dcrdex/releases).
+bison-desktop is a cross-platform desktop application for Bison Wallet. The instructions below are for building the client from source. If you are looking for pre-built binaries, see the [releases page](https://github.com/decred/dcrdex/releases).
 
-**Note**: The instructions below are to be run in your CLI from the `dexc-desktop` directory.
+**Note**: The instructions below are to be run in your CLI from the `bisonw-desktop` directory.
 
 ## Debian
 Build with `./pkg/pkg-debian.sh`. The deb archive is located in **./build**.
