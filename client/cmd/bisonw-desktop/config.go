@@ -11,7 +11,7 @@ import (
 	"decred.org/dcrdex/client/app"
 )
 
-// Config is the configuration for the DEX client application.
+// Config is the configuration for Bison Wallet.
 type Config struct {
 	app.Config
 	Kill      bool   `long:"kill" description:"Send a kill signal to a running instance and exit. This is not be supported on darwin"`

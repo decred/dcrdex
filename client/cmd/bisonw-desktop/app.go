@@ -288,7 +288,7 @@ func mainCore() error {
 						break windowloop
 					}
 					if !backgroundNoteSent {
-						sendDesktopNotification("DEX client still running", "DEX client is still resolving active DEX orders")
+						sendDesktopNotification("Bison Wallet still running", "Bison Wallet is still resolving active DEX orders")
 						backgroundNoteSent = true
 					}
 					// Can't log out. Keep checking until either
@@ -461,7 +461,7 @@ func runWebviewSubprocess(ctx context.Context, url string) {
 func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struct{},
 	killC chan<- os.Signal, activeState <-chan bool) {
 	systray.SetIcon(FavIcon)
-	systray.SetTitle("DEX client")
+	systray.SetTitle("Bison Wallet")
 	systray.SetTooltip("Self-custodial multi-wallet with atomic swap capability, by Decred.")
 
 	// TODO: Consider reworking main so we can show the icon earlier?
@@ -481,7 +481,7 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 
 	// mStarting.Hide()
 
-	mOpen := systray.AddMenuItem("Open", "Open DEX client window")
+	mOpen := systray.AddMenuItem("Open", "Open Bison Wallet window")
 	mOpen.SetIcon(FavIcon)
 	go func() {
 		for range mOpen.ClickedCh {
@@ -527,17 +527,17 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 		}
 	}()
 
-	mQuit := systray.AddMenuItem("Force Quit", "Force DEX client to close with active orders.")
+	mQuit := systray.AddMenuItem("Force Quit", "Force Bison Wallet to close with active orders.")
 	go func() {
 		for {
 			select {
 			case active := <-activeState:
 				if active {
 					mQuit.SetTitle("Force Quit")
-					mQuit.SetTooltip("Force DEX client to close with active orders.")
+					mQuit.SetTooltip("Force Bison Wallet to close with active orders.")
 				} else {
 					mQuit.SetTitle("Quit")
-					mQuit.SetTooltip("Shutdown the DEX client. You have no active orders.")
+					mQuit.SetTooltip("Shutdown Bison Wallet. You have no active orders.")
 				}
 			case <-mQuit.ClickedCh:
 				mOpen.Disable()
