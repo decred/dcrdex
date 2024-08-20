@@ -369,7 +369,7 @@ func mainCore() error {
 
 		if !noteSent && cocoa.NSApp().IsRunning() { // last window has been closed but app is still running
 			noteSent = true
-			sendDesktopNotification("DEX client still running", "DEX client is still resolving active DEX orders")
+			sendDesktopNotification("Bison Wallet still running", "Bison Wallet is still resolving active DEX orders")
 		}
 	})
 
@@ -523,13 +523,13 @@ func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationWillFinishLaunching
 	obj.Button().SetToolTip("Self-custodial multi-wallet")
 
 	runningItem := cocoa.NSMenuItem_New()
-	runningItem.SetTitle("Dex Client is running")
+	runningItem.SetTitle("Bison Wallet is running")
 	runningItem.SetEnabled(false)
 
 	menu := cocoa.NSMenu_New()
 	menu.AddItem(runningItem)
 	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
-	quitMenuItem.SetToolTip("Quit DEX client")
+	quitMenuItem.SetToolTip("Quit Bison Wallet")
 	menu.AddItem(quitMenuItem)
 	obj.SetMenu(menu)
 
@@ -633,7 +633,7 @@ func setAppMainMenuBar() {
 	hideOthersMenuItem := cocoa.NSMenuItem_Init("Hide Others", objc.Sel("hideOtherApplications:"), "")
 	showAllMenuItem := cocoa.NSMenuItem_Init("Show All", objc.Sel("unhideAllApplications:"), "")
 	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
-	quitMenuItem.SetToolTip("Quit DEX client")
+	quitMenuItem.SetToolTip("Quit Bison Wallet")
 
 	// Add the menu items.
 	appMenu.AddItem(hideMenuItem)
