@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -72,6 +73,10 @@ var (
 	// when given an HTTP(S) provider URL. Can be disabled for testing
 	// ((*MRPCTest).TestRPC).
 	forceTryWS = true
+	// https://github.com/ethereum/go-ethereum/blob/16341e05636fd088aa04a27fca6dc5cda5dbab8f/eth/backend.go#L110-L113
+	// ultimately results in a minimum fee rate by the filter applied at
+	// https://github.com/ethereum/go-ethereum/blob/4ebeca19d739a243dc0549bcaf014946cde95c4f/core/tx_pool.go#L626
+	minGasPrice = ethconfig.Defaults.Miner.GasPrice
 )
 
 // TODO: Handle rate limiting? From the docs:

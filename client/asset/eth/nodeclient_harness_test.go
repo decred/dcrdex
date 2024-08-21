@@ -50,11 +50,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/rpc"
-	//	"encoding/binary"
-	//	"github.com/decred/dcrd/dcrutil/v4"
-	// 	"github.com/decred/dcrd/crypto/blake256"
 )
 
 const (
@@ -101,8 +96,6 @@ var (
 	// If you are testing on testnet, you must specify the rpcNode. You can also
 	// specify it in the testnet-credentials.json file.
 	rpcProviders []string
-	// useRPC can be set to true to test the RPC clients.
-	useRPC bool
 
 	// isTestnet can be set to true to perform tests on the sepolia testnet.
 	// May need some setup including sending testnet coins to the addresses
@@ -170,7 +163,7 @@ func waitForReceipt(nc ethFetcher, tx *types.Transaction) (*types.Receipt, error
 	}
 }
 
-func waitForMinedRPC() error {
+func waitForMined() error {
 	hdr, err := ethClient.bestHeader(ctx)
 	if err != nil {
 		return err
@@ -199,56 +192,6 @@ func waitForMinedRPC() error {
 	}
 }
 
-// waitForMined will multiply the time limit by secPerBlock for
-// testnet and mine blocks when on simnet.
-func waitForMined(nBlock int, waitTimeLimit bool) error {
-	timesUp := time.After(time.Duration(nBlock) * secPerBlock)
-	if useRPC {
-		return waitForMinedRPC()
-	}
-	if !isTestnet {
-		err := exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.start()").Run()
-		if err != nil {
-			return err
-		}
-		defer func() {
-			_ = exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.stop()").Run()
-		}()
-	}
-out:
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timesUp:
-			return errors.New("timed out")
-		case <-time.After(time.Second):
-			// NOTE: Not effectual for providers. waitForMinedRPC
-			// above handles waiting for mined blocks that we assume
-			// have our transactions.
-			txsa, err := ethClient.(txPoolFetcher).pendingTransactions()
-			if err != nil {
-				return fmt.Errorf("initiator pendingTransactions error: %v", err)
-			}
-			txsb, err := participantEthClient.(txPoolFetcher).pendingTransactions()
-			if err != nil {
-				return fmt.Errorf("participant pendingTransactions error: %v", err)
-			}
-			if len(txsa)+len(txsb) == 0 {
-				break out
-			}
-		}
-	}
-	if waitTimeLimit {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timesUp:
-		}
-	}
-	return nil
-}
-
 func prepareRPCClient(name, dataDir string, providers []string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
 	cfg, err := ChainConfig(net)
 	if err != nil {
@@ -257,7 +200,7 @@ func prepareRPCClient(name, dataDir string, providers []string, net dex.Network)
 
 	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, 3, net)
 	if err != nil {
-		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
+		return nil, nil, fmt.Errorf("(%s) prepareRPCClient error: %v", name, err)
 	}
 	if err := c.connect(ctx); err != nil {
 		return nil, nil, fmt.Errorf("(%s) connect error: %v", name, err)
@@ -288,53 +231,6 @@ func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network)
 	}
 	fmt.Println("participant address is", participantEthClient.address())
 	return nil
-}
-
-func prepareNodeClient(name, dataDir string, net dex.Network) (*nodeClient, *accounts.Account, error) {
-	c, err := newNodeClient(getWalletDir(dataDir, net), dexeth.ChainIDs[net], net, tLogger.SubLogger(name))
-	if err != nil {
-		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
-	}
-
-	if err := c.connect(ctx); err != nil {
-		return nil, nil, fmt.Errorf("(%s) connect error: %v", name, err)
-	}
-
-	accts, err := exportAccountsFromNode(c.node)
-	if err != nil {
-		c.shutdown()
-		return nil, nil, fmt.Errorf("(%s) account export error: %v", name, err)
-	}
-	if len(accts) != 1 {
-		c.shutdown()
-		return nil, nil, fmt.Errorf("(%s) expected 1 account to be exported but got %v", name, len(accts))
-	}
-
-	if addPeer != "" {
-		if err = c.addPeer(addPeer); err != nil {
-			c.shutdown()
-			return nil, nil, fmt.Errorf("initiator unable to add peer: %w", err)
-		}
-	}
-
-	return c, &accts[0], nil
-}
-
-func prepareTestNodeClients(initiatorDir, participantDir string, net dex.Network) (err error) {
-	ethClient, simnetAcct, err = prepareNodeClient("initiator", initiatorDir, net)
-	if err != nil {
-		return err
-	}
-
-	participantEthClient, participantAcct, err = prepareNodeClient("participant", participantDir, net)
-	if err != nil {
-		ethClient.shutdown()
-		return err
-	}
-
-	fmt.Println("initiator address is", ethClient.address())
-	fmt.Println("participant address is", participantEthClient.address())
-	return
 }
 
 func runSimnet(m *testing.M) (int, error) {
@@ -374,12 +270,7 @@ func runSimnet(m *testing.M) (int, error) {
 		return 1, err
 	}
 
-	if useRPC {
-		err = prepareTestRPCClients(simnetWalletDir, participantWalletDir, dex.Simnet)
-	} else {
-		err = prepareTestNodeClients(simnetWalletDir, participantWalletDir, dex.Simnet)
-	}
-	if err != nil {
+	if err = prepareTestRPCClients(simnetWalletDir, participantWalletDir, dex.Simnet); err != nil {
 		return 1, err
 	}
 	defer ethClient.shutdown()
@@ -509,12 +400,7 @@ func runTestnet(m *testing.M) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	if useRPC {
-		err = prepareTestRPCClients(testnetWalletDir, testnetParticipantWalletDir, dex.Testnet)
-	} else {
-		err = prepareTestNodeClients(testnetWalletDir, testnetParticipantWalletDir, dex.Testnet)
-	}
-	if err != nil {
+	if err = prepareTestRPCClients(testnetWalletDir, testnetParticipantWalletDir, dex.Testnet); err != nil {
 		return 1, err
 	}
 	defer ethClient.shutdown()
@@ -618,7 +504,6 @@ func TestMain(m *testing.M) {
 	dexeth.MaybeReadSimnetAddrs()
 
 	flag.BoolVar(&isTestnet, "testnet", false, "use testnet")
-	flag.BoolVar(&useRPC, "rpc", true, "use RPC")
 	flag.Parse()
 
 	if isTestnet {
@@ -663,15 +548,9 @@ func TestMain(m *testing.M) {
 }
 
 func setupWallet(walletDir, seed, listenAddress string, providers []string, net dex.Network) error {
-	walletType := walletTypeGeth
+	walletType := walletTypeRPC
 	settings := map[string]string{
-		"nodelistenaddr": listenAddress,
-	}
-	if useRPC {
-		walletType = walletTypeRPC
-		settings = map[string]string{
-			providersKey: strings.Join(providers, " "),
-		}
+		providersKey: strings.Join(providers, " "),
 	}
 	seedB, _ := hex.DecodeString(seed)
 	createWalletParams := asset.CreateWalletParams{
@@ -716,7 +595,7 @@ func prepareTokenClients(t *testing.T) {
 		t.Fatalf("participant approveToken error: %v", err)
 	}
 
-	if err := waitForMined(8, true); err != nil {
+	if err := waitForMined(); err != nil {
 		t.Fatalf("unexpected error while waiting to mine approval block: %v", err)
 	}
 
@@ -777,9 +656,7 @@ func TestBasicRetrieval(t *testing.T) {
 }
 
 func TestPeering(t *testing.T) {
-	t.Run("testAddPeer", testAddPeer)
 	t.Run("testSyncProgress", testSyncProgress)
-	t.Run("testGetCodeAt", testGetCodeAt)
 }
 
 func TestAccount(t *testing.T) {
@@ -827,16 +704,6 @@ func TestTokenGas(t *testing.T) {
 func TestTokenAccess(t *testing.T) {
 	t.Run("testTokenBalance", testTokenBalance)
 	t.Run("testApproveAllowance", testApproveAllowance)
-}
-
-func testAddPeer(t *testing.T) {
-	c, is := ethClient.(*nodeClient)
-	if !is {
-		t.Skip("add peer not supported for RPC clients")
-	}
-	if err := c.addPeer(alphaNode); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func testBestHeader(t *testing.T) {
@@ -946,7 +813,7 @@ func testSendTransaction(t *testing.T) {
 
 	confs, err := ethClient.transactionConfirmations(ctx, txHash)
 	// CoinNotFoundError OK for RPC wallet until mined.
-	if err != nil && !(useRPC && errors.Is(err, asset.CoinNotFoundError)) {
+	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("transactionConfirmations error: %v", err)
 	}
 	if confs != 0 {
@@ -954,7 +821,7 @@ func testSendTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(10, false); err != nil {
+	if err := waitForMined(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1001,27 +868,17 @@ func testSendSignedTransaction(t *testing.T) {
 	if !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("no CoinNotFoundError")
 	}
-
+	c := ethClient.(*multiRPCClient)
 	var nonce uint64
 	var chainID *big.Int
 	var ks *keystore.KeyStore
-	switch c := ethClient.(type) {
-	case *nodeClient:
-		nonce, err = c.leth.ApiBackend.GetPoolNonce(ctx, c.creds.addr)
-		if err != nil {
-			t.Fatalf("error getting nonce: %v", err)
-		}
-		ks = c.creds.ks
-		chainID = c.chainID
-	case *multiRPCClient:
-		n, _, err := c.nonce(ctx)
-		if err != nil {
-			t.Fatalf("error getting nonce: %v", err)
-		}
-		nonce = n.Uint64()
-		ks = c.creds.ks
-		chainID = c.chainID
+	n, _, err := ethClient.nonce(ctx)
+	if err != nil {
+		t.Fatalf("error getting nonce: %v", err)
 	}
+	nonce = n.Uint64()
+	ks = c.creds.ks
+	chainID = c.chainID
 
 	tx := types.NewTx(&types.DynamicFeeTx{
 		To:        &simnetAddr,
@@ -1047,7 +904,7 @@ func testSendSignedTransaction(t *testing.T) {
 
 	confs, err := ethClient.transactionConfirmations(ctx, txHash)
 	// CoinNotFoundError OK for RPC wallet until mined.
-	if err != nil && !(useRPC && errors.Is(err, asset.CoinNotFoundError)) {
+	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("transactionConfirmations error: %v", err)
 	}
 	if confs != 0 {
@@ -1055,7 +912,7 @@ func testSendSignedTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(10, false); err != nil {
+	if err := waitForMined(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1077,7 +934,7 @@ func testTransactionReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForMined(10, false); err != nil {
+	if err := waitForMined(); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := waitForReceipt(ethClient, tx)
@@ -1170,13 +1027,7 @@ func testInitiateGas(t *testing.T, assetID uint32) {
 // feesAtBlk calculates the gas fee at blkNum. This adds the base fee at blkNum
 // to a minimum gas tip cap.
 func feesAtBlk(ctx context.Context, n ethFetcher, blkNum int64) (fees *big.Int, err error) {
-	var hdr *types.Header
-	switch c := n.(type) {
-	case *nodeClient:
-		hdr, err = c.leth.ApiBackend.HeaderByNumber(ctx, rpc.BlockNumber(blkNum))
-	case *multiRPCClient:
-		hdr, err = c.HeaderByNumber(ctx, big.NewInt(blkNum))
-	}
+	hdr, err := n.(*multiRPCClient).HeaderByNumber(ctx, big.NewInt(blkNum))
 	if err != nil {
 		return nil, err
 	}
@@ -1388,7 +1239,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: initiate error: %v", test.name, err)
 		}
 
-		if err := waitForMined(10, false); err != nil {
+		if err := waitForMined(); err != nil {
 			t.Fatalf("%s: post-initiate mining error: %v", test.name, err)
 		}
 
@@ -1506,7 +1357,7 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(8, true); err != nil {
+	if err := waitForMined(); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 	receipt, err := waitForReceipt(ethClient, tx)
@@ -1718,7 +1569,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		// This waitForMined will always take test.sleepNBlocks to complete.
-		if err := waitForMined(test.sleepNBlocks, true); err != nil {
+		if err := waitForMined(); err != nil {
 			t.Fatalf("%s: post-init mining error: %v", test.name, err)
 		}
 
@@ -1774,7 +1625,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 		spew.Dump(tx)
 
-		if err := waitForMined(10, false); err != nil {
+		if err := waitForMined(); err != nil {
 			t.Fatalf("%s: post-redeem mining error: %v", test.name, err)
 		}
 
@@ -1884,7 +1735,7 @@ func testRefundGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(8, true); err != nil {
+	if err := waitForMined(); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 
@@ -1929,7 +1780,6 @@ func testRefund(t *testing.T, assetID uint32) {
 		tc := c.(*tokenContractorV0)
 		evmify = tc.evmify
 	}
-	sleepForNBlocks := 8
 	tests := []struct {
 		name                         string
 		refunder                     *accounts.Account
@@ -2015,7 +1865,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		if test.redeem {
-			if err := waitForMined(sleepForNBlocks, false); err != nil {
+			if err := waitForMined(); err != nil {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
 
@@ -2030,7 +1880,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		// This waitForMined will always take test.sleep to complete.
-		if err := waitForMined(sleepForNBlocks, true); err != nil {
+		if err := waitForMined(); err != nil {
 			t.Fatalf("unexpected post-init mining error for test %v: %v", test.name, err)
 		}
 
@@ -2075,7 +1925,7 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: unexpected pending in balance %d", test.name, in)
 		}
 
-		if err := waitForMined(10, false); err != nil {
+		if err := waitForMined(); err != nil {
 			t.Fatalf("%s: post-refund mining error: %v", test.name, err)
 		}
 
@@ -2160,7 +2010,7 @@ func testApproveAllowance(t *testing.T) {
 		t.Fatalf("initiator approveToken error: %v", err)
 	}
 
-	if err := waitForMined(10, false); err != nil {
+	if err := waitForMined(); err != nil {
 		t.Fatalf("post approve mining error: %v", err)
 	}
 
@@ -2265,24 +2115,6 @@ func testApproveGas(t *testing.T) {
 	fmt.Printf("replacement tx hash: %s\n", tx.Hash())
 }*/
 
-func testGetCodeAt(t *testing.T) {
-	cl, is := ethClient.(*nodeClient)
-	if !is {
-		t.Skip("getCode tests only run for nodeClient")
-	}
-	byteCode, err := cl.getCodeAt(ctx, ethSwapContractAddr)
-	if err != nil {
-		t.Fatalf("Failed to get bytecode: %v", err)
-	}
-	c, err := hex.DecodeString(swapv0.ETHSwapRuntimeBin)
-	if err != nil {
-		t.Fatalf("Error decoding")
-	}
-	if !bytes.Equal(byteCode, c) {
-		t.Fatal("Contract on chain does not match one in code")
-	}
-}
-
 func testSignMessage(t *testing.T) {
 	msg := []byte("test message")
 	sig, pubKey, err := ethClient.signData(msg)
@@ -2328,14 +2160,4 @@ func bytesToArray(b []byte) (a [32]byte) {
 
 func bigUint(v uint64) *big.Int {
 	return new(big.Int).SetUint64(v)
-}
-
-// exportAccountsFromNode returns all the accounts for which a the ethereum wallet
-// has stored a private key.
-func exportAccountsFromNode(node *node.Node) ([]accounts.Account, error) {
-	ks, err := exportKeyStoreFromNode(node)
-	if err != nil {
-		return nil, err
-	}
-	return ks.Accounts(), nil
 }

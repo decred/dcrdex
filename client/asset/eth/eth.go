@@ -118,8 +118,9 @@ const (
 	stateUpdateTick = time.Second * 5
 	// maxUnindexedTxs is the number of pending txs we will allow to be
 	// unverified on-chain before we halt broadcasting of new txs.
-	maxUnindexedTxs = 10
-	peerCountTicker = 5 * time.Second // no rpc calls here
+	maxUnindexedTxs       = 10
+	peerCountTicker       = 5 * time.Second // no rpc calls here
+	contractVersionNewest = ^uint32(0)
 )
 
 var (
@@ -6090,4 +6091,42 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 	}
 
 	return nil
+}
+
+// newTxOpts is a constructor for a TransactOpts.
+func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, maxFeeRate, gasTipCap *big.Int) *bind.TransactOpts {
+	// We'll enforce dexeth.MinGasTipCap since the server does, but this isn't
+	// necessarily a constant for all networks or under all conditions.
+	minGasWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
+	if gasTipCap.Cmp(minGasWei) < 0 {
+		gasTipCap.Set(minGasWei)
+	}
+	// This is enforced by concensus. We shouldn't be able to get here with a
+	// swap tx.
+	if gasTipCap.Cmp(maxFeeRate) > 0 {
+		gasTipCap.Set(maxFeeRate)
+	}
+	return &bind.TransactOpts{
+		Context:   ctx,
+		From:      from,
+		Value:     dexeth.GweiToWei(val),
+		GasFeeCap: maxFeeRate,
+		GasTipCap: gasTipCap,
+		GasLimit:  maxGas,
+	}
+}
+
+func gases(contractVer uint32, versionedGases map[uint32]*dexeth.Gases) *dexeth.Gases {
+	if contractVer != contractVersionNewest {
+		return versionedGases[contractVer]
+	}
+	var bestVer uint32
+	var bestGases *dexeth.Gases
+	for ver, gases := range versionedGases {
+		if ver >= bestVer {
+			bestGases = gases
+			bestVer = ver
+		}
+	}
+	return bestGases
 }

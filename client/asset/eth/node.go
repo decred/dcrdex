@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"fmt"
-	"path/filepath"
 
 	"decred.org/dcrdex/dex"
 
@@ -15,22 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/les"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/nat"
-	"github.com/ethereum/go-ethereum/params"
 )
-
-const maxPeers = 10
-
-type nodeConfig struct {
-	net                dex.Network
-	listenAddr, appDir string
-	logger             dex.Logger
-}
 
 // ethLogger satisfies geth's logger interface.
 type ethLogger struct {
@@ -121,115 +106,6 @@ func (el *ethLogger) Crit(msg string, ctx ...any) {
 // Check that *ethLogger satisfies the log.Logger interface.
 var _ log.Logger = (*ethLogger)(nil)
 
-// prepareNode sets up a geth node, but does not start it.
-func prepareNode(cfg *nodeConfig) (*node.Node, error) {
-	stackConf := &node.Config{
-		DataDir: cfg.appDir,
-		// KeyStoreDir is set the same as the geth default, but we rely on this
-		// location for Exists, so protect against future geth changes.
-		KeyStoreDir: filepath.Join(cfg.appDir, "keystore"),
-	}
-
-	stackConf.Logger = &ethLogger{dl: cfg.logger}
-
-	stackConf.P2P.MaxPeers = maxPeers
-	var key *ecdsa.PrivateKey
-	var err error
-	if key, err = crypto.GenerateKey(); err != nil {
-		return nil, err
-	}
-	stackConf.P2P.PrivateKey = key
-	stackConf.P2P.ListenAddr = cfg.listenAddr
-	stackConf.P2P.NAT = nat.Any()
-
-	var urls []string
-	switch cfg.net {
-	case dex.Simnet:
-		urls = []string{
-			"enode://897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f@127.0.0.1:30304", // alpha
-			"enode://b1d3e358ee5c9b268e911f2cab47bc12d0e65c80a6d2b453fece34facc9ac3caed14aa3bc7578166bb08c5bc9719e5a2267ae14e0b42da393f4d86f6d5829061@127.0.0.1:30305", // beta
-			"enode://b1c14deee09b9d5549c90b7b30a35c812a56bf6afea5873b05d7a1bcd79c7b0848bcfa982faf80cc9e758a3a0d9b470f0a002840d365050fd5bf45052a6ec313@127.0.0.1:30306", // gamma
-			"enode://ca414c361d1a38716170923e4900d9dc9203dbaf8fdcaee73e1f861df9fdf20a1453b76fd218c18bc6f3c7e13cbca0b3416af02a53b8e31188faa45aab398d1c@127.0.0.1:30307", // delta
-		}
-	case dex.Testnet:
-		urls = params.SepoliaBootnodes
-	case dex.Mainnet:
-		urls = params.MainnetBootnodes
-	default:
-		return nil, fmt.Errorf("unknown network ID: %d", uint8(cfg.net))
-	}
-
-	for _, url := range urls {
-		node, err := enode.Parse(enode.ValidSchemes, url)
-		if err != nil {
-			return nil, fmt.Errorf("Bootstrap URL %q invalid: %v", url, err)
-		}
-		stackConf.P2P.BootstrapNodes = append(stackConf.P2P.BootstrapNodes, node)
-	}
-
-	if cfg.net != dex.Simnet {
-		for _, url := range params.V5Bootnodes {
-			node, err := enode.Parse(enode.ValidSchemes, url)
-			if err != nil {
-				return nil, fmt.Errorf("Bootstrap v5 URL %q invalid: %v", url, err)
-			}
-			stackConf.P2P.BootstrapNodesV5 = append(stackConf.P2P.BootstrapNodesV5, node)
-		}
-	}
-
-	node, err := node.New(stackConf)
-	if err != nil {
-		return nil, err
-	}
-
-	ks := keystore.NewKeyStore(node.KeyStoreDir(), keystore.LightScryptN, keystore.LightScryptP)
-	node.AccountManager().AddBackend(ks)
-
-	return node, nil
-}
-
-// startNode starts a geth node.
-func startNode(_ /* chainID */ int64, node *node.Node, network dex.Network) (*les.LightEthereum, error) {
-	ethCfg, err := ETHConfig(network)
-	if err != nil {
-		return nil, err
-	}
-
-	ethCfg.SyncMode = downloader.LightSync
-
-	// Eth has a default RPCTxFeeCap of one eth. This prevents txn with a
-	// total gas fee higher than than one eth to fail when sending. Setting
-	// the value to zero removes the limit completely.
-	ethCfg.RPCTxFeeCap = 0
-
-	leth, err := les.New(node, &ethCfg)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := node.Start(); err != nil {
-		return nil, err
-	}
-
-	return leth, nil
-}
-
-// importKeyToNode imports an private key into an ethereum node that can be
-// unlocked with password.
-func importKeyToNode(node *node.Node, privateKey, password []byte) error {
-	priv, err := crypto.ToECDSA(privateKey)
-	if err != nil {
-		return err
-	}
-	backends := node.AccountManager().Backends(keystore.KeyStoreType)
-	if len(backends) == 0 {
-		return fmt.Errorf("importKeyToNode: expected at least 1 keystore backend")
-	}
-	ks := backends[0].(*keystore.KeyStore)
-
-	return importKeyToKeyStore(ks, priv, password)
-}
-
 func importKeyToKeyStore(ks *keystore.KeyStore, priv *ecdsa.PrivateKey, pw []byte) error {
 	accounts := ks.Accounts()
 	if len(accounts) == 0 {
@@ -248,29 +124,12 @@ func importKeyToKeyStore(ks *keystore.KeyStore, priv *ecdsa.PrivateKey, pw []byt
 	return nil
 }
 
-func exportKeyStoreFromNode(node *node.Node) (*keystore.KeyStore, error) {
-	backends := node.AccountManager().Backends(keystore.KeyStoreType)
-	if len(backends) == 0 {
-		return nil, fmt.Errorf("exportKeyStoreFromNode: expected at least 1 keystore backend")
-	}
-	return backends[0].(*keystore.KeyStore), nil
-}
-
 // accountCredentials captures the account-specific geth interfaces.
 type accountCredentials struct {
 	ks     *keystore.KeyStore
 	acct   *accounts.Account
 	addr   common.Address
 	wallet accounts.Wallet
-}
-
-// nodeCredentials parses the accountCredentials from the node.
-func nodeCredentials(node *node.Node) (*accountCredentials, error) {
-	ks, err := exportKeyStoreFromNode(node)
-	if err != nil {
-		return nil, fmt.Errorf("exportKeyStoreFromNode error: %v", err)
-	}
-	return credentialsFromKeyStore(ks)
 }
 
 func pathCredentials(dir string) (*accountCredentials, error) {
