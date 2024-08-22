@@ -483,11 +483,11 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 	for _, coinID := range trade.Coins {
 		coinStr, err := fundingAsset.Backend.ValidateCoinID(coinID)
 		if err != nil {
-			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("invalid coin ID %v: %v", coinID, err))
+			return msgjson.NewError(msgjson.FundingError, "invalid coin ID %v: %v", coinID, err)
 		}
 		// TODO: Check all markets here?
 		if tunnel.CoinLocked(assets.funding.ID, coinID) {
-			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %s is locked", fmtCoinID(assets.funding.ID, coinID)))
+			return msgjson.NewError(msgjson.FundingError, "coin %s is locked", fmtCoinID(assets.funding.ID, coinID))
 		}
 		coinStrs = append(coinStrs, coinStr)
 	}
@@ -534,14 +534,14 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 					return true, nil
 				}
 				log.Errorf("Error retrieving limit order funding coin ID %s. user = %s: %v", coin.ID, user, err)
-				return false, msgjson.NewError(msgjson.FundingError, fmt.Sprintf("error retrieving coin ID %v", coin.ID))
+				return false, msgjson.NewError(msgjson.FundingError, "error retrieving coin ID %v", coin.ID)
 			}
 
 			// Verify that the user controls the funding coins.
 			err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
 			if err != nil {
 				log.Debugf("Auth error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
-				return false, msgjson.NewError(msgjson.CoinAuthError, fmt.Sprintf("failed to authorize coin %v", dexCoin))
+				return false, msgjson.NewError(msgjson.CoinAuthError, "failed to authorize coin %v", dexCoin)
 			}
 
 			msgErr := r.checkZeroConfs(dexCoin, fundingAsset)
@@ -586,8 +586,8 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 				lotWithBuffer := uint64(float64(lotSize) * buyBuffer)
 				swapVal = matcher.BaseToQuote(midGap, lotWithBuffer)
 				if trade.Quantity < swapVal {
-					errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", trade.Quantity, swapVal, midGap)
-					return false, msgjson.NewError(msgjson.FundingError, errStr)
+					return false, msgjson.NewError(msgjson.FundingError, "order quantity does not satisfy market buy buffer. %d < %d. midGap = %d",
+						trade.Quantity, swapVal, midGap)
 				}
 			}
 		}
@@ -623,7 +623,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			// Tell them to broadcast again or check their node before broadcast
 			// timeout is reached and the match is revoked.
 			r.respondError(oRecord.msgID, user, msgjson.NewError(msgjson.TransactionUndiscovered,
-				fmt.Sprintf("failed to find funding coins %v", coinStrs)))
+				"failed to find funding coins %v", coinStrs))
 		},
 	})
 
@@ -753,7 +753,7 @@ func (r *OrderRouter) submitOrderToMarket(tunnel MarketTunnel, oRecord *orderRec
 		default:
 			log.Debugf("Market failed to SubmitOrder: %v", err)
 		}
-		return msgjson.NewError(code, err.Error())
+		return msgjson.NewError(code, "%v", err)
 	}
 	return nil
 }
@@ -766,7 +766,7 @@ func (r *OrderRouter) checkZeroConfs(dexCoin asset.FundingCoin, fundingAsset *as
 	confs, err := coinConfirmations(dexCoin.Coin())
 	if err != nil {
 		log.Debugf("Confirmations error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
-		return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("failed to verify coin %v", dexCoin))
+		return msgjson.NewError(msgjson.FundingError, "failed to verify coin %v", dexCoin)
 	}
 	if confs > 0 {
 		return nil
@@ -777,7 +777,7 @@ func (r *OrderRouter) checkZeroConfs(dexCoin asset.FundingCoin, fundingAsset *as
 	if !fundingAsset.Backend.ValidateFeeRate(dexCoin.Coin(), feeMinimum) {
 		log.Debugf("Fees too low %s coin %s: fee mim %d", fundingAsset.Symbol, dexCoin, feeMinimum)
 		return msgjson.NewError(msgjson.FundingError,
-			fmt.Sprintf("fee rate for %s is too low. fee min %d", dexCoin, feeMinimum))
+			"fee rate for %s is too low. fee min %d", dexCoin, feeMinimum)
 	}
 	return nil
 }
@@ -855,7 +855,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 		if errors.Is(err, ErrInternalServer) {
 			log.Errorf("Market failed to SubmitOrder: %v", err)
 		}
-		return msgjson.NewError(msgjson.UnknownMarketError, err.Error())
+		return msgjson.NewError(msgjson.UnknownMarketError, "%v", err)
 	}
 	return nil
 }
@@ -870,7 +870,7 @@ func (r *OrderRouter) verifyAccount(user account.AccountID, msgAcct msgjson.Byte
 	sigMsg := signable.Serialize()
 	err := r.auth.Auth(user, sigMsg, signable.SigBytes())
 	if err != nil {
-		return msgjson.NewError(msgjson.SignatureError, "signature error: "+err.Error())
+		return msgjson.NewError(msgjson.SignatureError, "signature error: %v", err.Error())
 	}
 	return nil
 }
@@ -879,11 +879,11 @@ func (r *OrderRouter) verifyAccount(user account.AccountID, msgAcct msgjson.Byte
 func (r *OrderRouter) extractMarket(prefix *msgjson.Prefix) (MarketTunnel, *msgjson.Error) {
 	mktName, err := dex.MarketName(prefix.Base, prefix.Quote)
 	if err != nil {
-		return nil, msgjson.NewError(msgjson.UnknownMarketError, "asset lookup error: "+err.Error())
+		return nil, msgjson.NewError(msgjson.UnknownMarketError, "asset lookup error: %v", err.Error())
 	}
 	tunnel, found := r.tunnels[mktName]
 	if !found {
-		return nil, msgjson.NewError(msgjson.UnknownMarketError, "unknown market "+mktName)
+		return nil, msgjson.NewError(msgjson.UnknownMarketError, "unknown market %s", mktName)
 	}
 	return tunnel, nil
 }
@@ -949,7 +949,7 @@ func (r *OrderRouter) extractMarketDetails(prefix *msgjson.Prefix, trade *msgjso
 		sell = true
 	default:
 		return nil, nil, false, msgjson.NewError(msgjson.OrderParameterError,
-			fmt.Sprintf("invalid side value %d", trade.Side))
+			"invalid side value %d", trade.Side)
 	}
 	quote, found := r.assets[prefix.Quote]
 	if !found {
@@ -969,10 +969,10 @@ func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
 		offset *= -1
 	}
 	if offset >= maxClockOffset {
-		return msgjson.NewError(msgjson.ClockRangeError, fmt.Sprintf(
+		return msgjson.NewError(msgjson.ClockRangeError,
 			"clock offset of %d ms is larger than maximum allowed, %d ms",
 			offset, maxClockOffset,
-		))
+		)
 	}
 	// Server time should be unset.
 	if prefix.ServerTime != 0 {
@@ -1010,13 +1010,13 @@ func (r *OrderRouter) checkPrefixTrade(assets *assetSet, lotSize uint64, prefix 
 	for i, coin := range trade.Coins {
 		sigCount := len(coin.Sigs)
 		if sigCount == 0 {
-			return msgjson.NewError(msgjson.SignatureError, fmt.Sprintf("no signature for coin %d", i))
+			return msgjson.NewError(msgjson.SignatureError, "no signature for coin %d", i)
 		}
 		if len(coin.PubKeys) != sigCount {
-			return msgjson.NewError(msgjson.OrderParameterError, fmt.Sprintf(
+			return msgjson.NewError(msgjson.OrderParameterError,
 				"pubkey count %d not equal to signature count %d for coin %d",
 				len(coin.PubKeys), sigCount, i,
-			))
+			)
 		}
 	}
 

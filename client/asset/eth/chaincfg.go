@@ -13,7 +13,6 @@ import (
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
 	ethcore "github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/params"
@@ -100,9 +99,9 @@ func ETHConfig(net dex.Network) (c ethconfig.Config, err error) {
 	switch net {
 	// Ethereum
 	case dex.Mainnet:
-		c.Genesis = core.DefaultGenesisBlock()
+		c.Genesis = ethcore.DefaultGenesisBlock()
 	case dex.Testnet:
-		c.Genesis = core.DefaultSepoliaGenesisBlock()
+		c.Genesis = ethcore.DefaultSepoliaGenesisBlock()
 	case dex.Simnet:
 		c.Genesis, err = readSimnetGenesisFile()
 		if err != nil {

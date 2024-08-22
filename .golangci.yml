@@ -2,7 +2,7 @@ run:
   deadline: 10m
 
 output:
-  format: github-actions,colored-line-number
+  formats: colored-line-number
 
 linters:
   disable-all: true
@@ -10,7 +10,6 @@ linters:
     - asciicheck
     - bidichk
     - durationcheck
-    - exportloopref
     - gofmt
     - goimports
     - gosimple

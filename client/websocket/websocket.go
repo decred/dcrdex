@@ -6,7 +6,6 @@ package websocket
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -197,7 +196,7 @@ func (s *Server) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson.Er
 	if msg.Type == msgjson.Request {
 		handler, found := wsHandlers[msg.Route]
 		if !found {
-			return msgjson.NewError(msgjson.UnknownMessageType, "unknown route '"+msg.Route+"'")
+			return msgjson.NewError(msgjson.UnknownMessageType, "unknown route %q", msg.Route)
 		}
 		return handler(s, conn, msg)
 	}
@@ -286,9 +285,7 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 	req := new(marketLoad)
 	err := json.Unmarshal(msg.Payload, req)
 	if err != nil {
-		errMsg := fmt.Sprintf("error unmarshalling marketload payload: %v", err)
-		s.log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCInternal, errMsg)
+		return msgjson.NewError(msgjson.RPCInternal, "error unmarshalling marketload payload: %v", err)
 	}
 	_, msgErr := loadMarket(s, cl, req)
 	return msgErr
@@ -297,16 +294,12 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 func loadMarket(s *Server, cl *wsClient, req *marketLoad) (*bookFeed, *msgjson.Error) {
 	name, err := dex.MarketName(req.Base, req.Quote)
 	if err != nil {
-		errMsg := fmt.Sprintf("unknown market: %v", err)
-		s.log.Errorf(errMsg)
-		return nil, msgjson.NewError(msgjson.UnknownMarketError, errMsg)
+		return nil, msgjson.NewError(msgjson.UnknownMarketError, "unknown market: %v", err)
 	}
 
 	_, feed, err := s.core.SyncBook(req.Host, req.Base, req.Quote)
 	if err != nil {
-		errMsg := fmt.Sprintf("error getting order feed: %v", err)
-		s.log.Errorf(errMsg)
-		return nil, msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
+		return nil, msgjson.NewError(msgjson.RPCOrderBookError, "error getting order feed: %v", err)
 	}
 
 	cl.feedMtx.Lock()
@@ -326,9 +319,7 @@ func wsLoadCandles(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error
 	req := new(candlesLoad)
 	err := json.Unmarshal(msg.Payload, req)
 	if err != nil {
-		errMsg := fmt.Sprintf("error unmarshalling candlesLoad payload: %v", err)
-		s.log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCInternal, errMsg)
+		return msgjson.NewError(msgjson.RPCInternal, "error unmarshalling candlesLoad payload: %v", err)
 	}
 	cl.feedMtx.RLock()
 	feed := cl.feed
@@ -347,7 +338,7 @@ func wsLoadCandles(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error
 	}
 	err = feed.Candles(req.Dur)
 	if err != nil {
-		return msgjson.NewError(msgjson.RPCInternal, err.Error())
+		return msgjson.NewError(msgjson.RPCInternal, "%v", err)
 	}
 	return nil
 }

@@ -327,7 +327,7 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	h, exists := routes[req.Route]
 	if !exists {
 		log.Debugf("%v: %v", errUnknownCmd, req.Route)
-		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, errUnknownCmd.Error())
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "%v", errUnknownCmd)
 		return payload
 	}
 

@@ -1885,7 +1885,7 @@ func rpcFeeRate(ctx context.Context, rr RawRequester, confTarget uint64) (uint64
 	}
 
 	if len(feeResult.Errors) > 0 {
-		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
+		return 0, errors.New(strings.Join(feeResult.Errors, "; "))
 	}
 	if feeResult.FeeRate == nil {
 		return 0, fmt.Errorf("no fee rate available")

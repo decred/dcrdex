@@ -45,7 +45,7 @@ func (s *Server) meterIP(ip dex.IPKey) (int, error) {
 	}
 	ipLimiter := getIPLimiter(ip)
 	if !ipLimiter.Allow() {
-		return http.StatusTooManyRequests, fmt.Errorf(http.StatusText(http.StatusTooManyRequests))
+		return http.StatusTooManyRequests, fmt.Errorf("too many requests")
 	}
 	return 0, nil
 }
