@@ -3,7 +3,7 @@
 This release introduces a major version upgrade. Backwards compatibility is
 not strictly preserved.
 
-There are many new features, improvements, and bug fixes in since v0.6.
+There are many new features, improvements, and bug fixes since v0.6.
 
 ## Features and Improvements
 
@@ -15,12 +15,12 @@ There are many new features, improvements, and bug fixes in since v0.6.
 - Use free RPC providers by default for Ethereum and Polygon to enable one-click wallet creation
 - Implement Zcash shielded pool features and refactor wallet to be shielded-by-default
 - Add Digibyte, Firo, Zclassic wallets
-- Expose wallet tx history
-- Add wallet notifications for new txs, tip changes, async ticket purchases...
+- Expose wallet transaction history
+- Add wallet notifications for new transactions, tip changes, and async ticket purchases
 - Server: Add a Websockets-based reverse tunnel for remote node RPC APIs
 - Server: Enable CA certificates for simplified registration
 - Implement new market making and arbitrage bots and GUI
-- Add Binance and Binance US support
+- Add Binance and Binance US arbitrage support
 - Refactor reputation system to accommodate low-lot-size markets and smaller bond sizes
 - Show reputation data on dexsettings and trading views
 - Enable password recovery using seed to avoid full wallet restorations
@@ -28,14 +28,14 @@ There are many new features, improvements, and bug fixes in since v0.6.
 - Normalize translation system to enable report generation for translators
 - Server: Add database table for finalized candles for faster startup
 - Total GUI refactor. Differentiated sections. Normalized forms. Drop sans-light font
-- Add desktop notifiations
+- Add desktop notifications
 - Implement model Tatanka Mesh for next-gen DEX
-- Use binary searches for optimial lot count in various places for snappier response on low-lot-size markets
-- Make transation IDs and addresses in notification into links
+- Use binary searches for optimal lot count in various places for snappier response on low-lot-size markets
+- Make transaction IDs and addresses in notifications into links
 - Enable locating bonds when restoring from seed
 - Switch to a custom BIP-39 based mnemonic seed that encodes the wallet birthday
 - Server: Add endpoint for simple health check for is.decred.online/
-- Enforce minimum minimum rates, minimum lot sizes, and minimum bond sizes based on dust limits
+- Enforce minimum rates, minimum lot sizes, and minimum bond sizes based on dust limits
 - Add system installers for Windows, Mac, Linux
 - Rebrand wallet from DCRDEX client (dexc) to Bison Wallet
 - Allow displaying values in custom units in some places
@@ -46,7 +46,6 @@ There are many new features, improvements, and bug fixes in since v0.6.
 - Fix rescan panic for native BTC and LTC wallets
 - Multiple UI fixes for incorrect conversions or wrong units displayed
 - Fix panic for nil bookie via core.Book
-- Implement binary searches for
 - Disable Bitcoin Cash SPV wallet for lack of filter support
 - Tons of other minor fixes
 
