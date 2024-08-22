@@ -11,7 +11,7 @@
   <title>{{.Title}}</title>
   <link href="/css/style.css?v={{commitHash}}" rel="stylesheet">
 </head>
-<body >
+<body {{if .UseDEXBranding}}class="dex-branding"{{end}}>
   <div class="popup-notes d-hide" id="popupNotes">
     <span data-tmpl="note" class="fs15">
       <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>
@@ -26,10 +26,10 @@
 <header id="header" class="border-bottom mb-2">
   {{$authed := .UserInfo.Authed}}
   <a href="/" class="d-none d-md-block pointer hoverbg mx-2">
-    <img src="/img/bison-full_97x50.png">
+    <img class="logo-full">
   </a>
   <a href="/" class="d-block d-md-none pointer hoverbg mx-2">
-    <img class="bison-logo-square">
+    <img class="logo-square">
   </a>
   <div id="headerSpace"></div>
   <div class="mainlinks fs18 pe-2 text-nowrap">
@@ -52,7 +52,7 @@
   </div>
   <div id="loader" class="fill-abs d-hide">
     <div class="fill-abs flex-center blurry-bg">
-      <img class="d-inline-block bison-logo-square small-icon spinner">
+      <img class="d-inline-block logo-square small spinner">
       <div id="loaderMsg" class="mx-2 d-hide"></div>
     </div>
   </div>

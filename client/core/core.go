@@ -10812,3 +10812,8 @@ func (c *Core) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64,
 
 	return coinID, win, nil
 }
+
+// ExtensionModeConfig is the configuration parsed from the extension-mode file.
+func (c *Core) ExtensionModeConfig() *ExtensionModeConfig {
+	return c.extensionModeConfig
+}

@@ -2030,6 +2030,10 @@ func (c *TCore) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64
 	return coinID, 100e8, nil
 }
 
+func (*TCore) ExtensionModeConfig() *core.ExtensionModeConfig {
+	return nil
+}
+
 func newMarketDay() *libxc.MarketDay {
 	avgPrice := tenToThe(7)
 	return &libxc.MarketDay{

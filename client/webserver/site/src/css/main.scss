@@ -102,20 +102,52 @@ div.note-indicator {
   z-index: 10;
 }
 
+span.brand::before {
+  content: "Bison Wallet";
+}
+
 img.dex-logo {
   content: var(--dex-url);
 }
 
-img.bison-logo-square {
+img.logo-square {
   content: url("/img/bison-square_50.png");
 }
 
-img.bison-logo-full {
+img.logo-full {
   content: url("/img/bison-full_97x50.png");
 
   &.small {
     height: 25px;
     width: 48.5px;
+  }
+}
+
+body.dex-branding {
+  img.logo-square,
+  img.logo-full {
+    width: 50px;
+    height: 50px;
+    content: url("/img/softened-icon.png");
+
+    &.small {
+      height: 25px;
+      width: 25px;
+    }
+
+    &.micro-icon {
+      height: 15px;
+      width: 15px;
+    }
+  }
+
+  &.dark img.logo-square,
+  &.dark img.logo-full {
+    content: url("/img/softened-icon-dark.png");
+  }
+
+  span.brand::before {
+    content: "DCRDEX";
   }
 }
 

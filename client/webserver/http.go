@@ -55,15 +55,17 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data any)
 // CommonArguments are common page arguments that must be supplied to every
 // page to populate the <title> and <header> elements.
 type CommonArguments struct {
-	UserInfo *userInfo
-	Title    string
+	UserInfo       *userInfo
+	Title          string
+	UseDEXBranding bool
 }
 
 // Create the CommonArguments for the request.
 func (s *WebServer) commonArgs(r *http.Request, title string) *CommonArguments {
 	return &CommonArguments{
-		UserInfo: extractUserInfo(r),
-		Title:    title,
+		UserInfo:       extractUserInfo(r),
+		Title:          title,
+		UseDEXBranding: s.useDEXBranding,
 	}
 }
 

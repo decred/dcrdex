@@ -133,7 +133,7 @@ var DeDE = map[string]*intl.Translation{
 	"Show pop-up notifications": {T: "Popup-Benachrichtigungen anzeigen"},
 	"Account ID":                {T: "Account ID"},
 	"Export Account":            {T: "Account exportieren"},
-	"simultaneous_servers_msg":  {T: "Der Bison Wallet unterstützt die gleichzeitige Nutzung einer beliebigen Anzahl von DEX-Servern."},
+	"simultaneous_servers_msg":  {T: "Der <span class=brand></span> unterstützt die gleichzeitige Nutzung einer beliebigen Anzahl von DEX-Servern."},
 	"Change App Password":       {T: "App-Passwort ändern"},
 	"Build ID":                  {T: "Build ID"},
 	"Connect":                   {T: "Verbinden"},
