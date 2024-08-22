@@ -333,7 +333,7 @@ func Test_nonstandardScript(t *testing.T) {
 		t.Fatalf("ExtractScriptHash failed")
 	}
 	if !bytes.Equal(dcrutil.Hash160(contractScript), scriptHash) {
-		t.Fatalf(fmt.Sprintf("script hash check failed for output %s,%d", contractTx, vout))
+		t.Fatalf("script hash check failed for output %s,%d", contractTx, vout)
 	}
 
 	// ExtractScriptAddrs should detect non-standard scripts.

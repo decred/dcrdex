@@ -30,7 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
@@ -1433,7 +1433,7 @@ func (m *multiRPCClient) currentFees(ctx context.Context) (baseFees, tipCap *big
 			return err
 		}
 
-		baseFees = misc.CalcBaseFee(m.cfg, hdr)
+		baseFees = eip1559.CalcBaseFee(m.cfg, hdr)
 
 		if baseFees.Cmp(minGasPrice) < 0 {
 			baseFees.Set(minGasPrice)

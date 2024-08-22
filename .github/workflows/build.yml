@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: ['1.20', '1.21']
+        go: ['1.22', '1.23']
     steps:
       - uses: awalsh128/cache-apt-pkgs-action@1850ee53f6e706525805321a3f2f863dcf73c962 #v1.3.0
         with:
@@ -28,7 +28,7 @@ jobs:
       - name: restore timestamps
         run: git restore-mtime
       - name: Install Linters
-        run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.2"
+        run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.60.2"
       - name: Use test and module cache
         uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 #v3.3.2
         with:

@@ -75,7 +75,7 @@ func (auth *AuthManager) handlePreValidateBond(conn comms.Link, msg *msgjson.Mes
 	// Create an account.Account from the provided pubkey.
 	acct, err := account.NewAccountFromPubKey(preBond.AcctPubKey)
 	if err != nil {
-		return msgjson.NewError(msgjson.BondError, "error parsing account pubkey: "+err.Error())
+		return msgjson.NewError(msgjson.BondError, "error parsing account pubkey: %v", err)
 	}
 	acctID := acct.ID
 
@@ -162,7 +162,7 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 	// Create an account.Account from the provided pubkey.
 	acct, err := account.NewAccountFromPubKey(postBond.AcctPubKey)
 	if err != nil {
-		return msgjson.NewError(msgjson.BondError, "error parsing account pubkey: "+err.Error())
+		return msgjson.NewError(msgjson.BondError, "error parsing account pubkey: %v", err)
 	}
 	acctID := acct.ID
 

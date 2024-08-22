@@ -20,7 +20,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -362,7 +362,7 @@ func (m *MRPCTest) FeeHistory(t *testing.T, net dex.Network, blockTimeSecs, days
 
 		tipHeight := tip.Number.Uint64()
 
-		baseFees := misc.CalcBaseFee(cl.cfg, tip)
+		baseFees := eip1559.CalcBaseFee(cl.cfg, tip)
 
 		fmt.Printf("##### Tip = %d \n", tipHeight)
 		fmt.Printf("##### Current base fees: %s \n", fmtFee(baseFees))
@@ -383,7 +383,7 @@ func (m *MRPCTest) FeeHistory(t *testing.T, net dex.Network, blockTimeSecs, days
 				fmt.Println("nil base fees for height", height)
 				continue
 			}
-			baseFees = misc.CalcBaseFee(cl.cfg, hdr)
+			baseFees = eip1559.CalcBaseFee(cl.cfg, hdr)
 			fmt.Printf("##### Base fees height %d @ %s: %s \n", height, time.Unix(int64(hdr.Time), 0), fmtFee(baseFees))
 		}
 	})

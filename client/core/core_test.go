@@ -2495,7 +2495,7 @@ func TestAccountNotFoundError(t *testing.T) {
 	tCore := rig.core
 	rig.acct.rep = account.Reputation{BondedTier: 1}
 
-	expectedErrorMessage := "test account not found error"
+	const expectedErrorMessage = "test account not found error"
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
 	rig.queueConnect(accountNotFoundError, nil, nil)
 	rig.queueConnect(accountNotFoundError, nil, nil)

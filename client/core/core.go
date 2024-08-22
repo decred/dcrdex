@@ -8946,7 +8946,7 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		if !acceptCsum(tracker, isCancel, commitChecksum) {
 			csumErr := errors.New("invalid csum in duplicate preimage request")
 			resp, err := msgjson.NewResponse(reqID, nil,
-				msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+				msgjson.NewError(msgjson.InvalidRequestError, "%v", csumErr))
 			if err != nil {
 				c.log.Errorf("Failed to encode response to denied preimage request: %v", err)
 				return csumErr
