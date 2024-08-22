@@ -2,8 +2,6 @@ module decred.org/dcrdex/dex/testing/loadbot
 
 go 1.21
 
-toolchain go1.23.0
-
 replace decred.org/dcrdex => ../../../
 
 require (

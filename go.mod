@@ -2,8 +2,6 @@ module decred.org/dcrdex
 
 go 1.21
 
-toolchain go1.21.5
-
 require (
 	decred.org/dcrwallet/v4 v4.1.1
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
