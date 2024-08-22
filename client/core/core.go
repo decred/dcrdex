@@ -3623,6 +3623,8 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 				if err = c.setWalletPassword(oldWallet, newWalletPW, crypter); err != nil {
 					return newError(walletAuthErr, "failed to update password: %v", err)
 				}
+				dbWallet.EncryptedPW = oldWallet.encPW()
+
 			}
 			if err = storeWithBalance(oldWallet, dbWallet); err != nil {
 				return err
@@ -3737,8 +3739,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 					return fmt.Errorf("setWalletPassword: %v", err)
 				}
 				// Update dbWallet so db.UpdateWallet below reflects the new password.
-				dbWallet.EncryptedPW = make([]byte, len(wallet.encPass))
-				copy(dbWallet.EncryptedPW, wallet.encPass)
+				dbWallet.EncryptedPW = wallet.encPW()
 			} else if oldWallet.locallyUnlocked() {
 				// If the password was not changed, carry over any cached password
 				// regardless of backend lock state. loadWallet already copied encPW, so
