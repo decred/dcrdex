@@ -697,11 +697,11 @@ func TestOnline(t *testing.T) {
 	server.Route("ok", func(c Link, msg *msgjson.Message) *msgjson.Error {
 		resp, err := msgjson.NewResponse(msg.ID, &okresult{OK: true}, nil)
 		if err != nil {
-			return msgjson.NewError(500, err.Error())
+			return msgjson.NewError(500, "%v", err)
 		}
 		err = c.Send(resp)
 		if err != nil {
-			return msgjson.NewError(500, err.Error())
+			return msgjson.NewError(500, "%v", err)
 		}
 		return nil
 	})

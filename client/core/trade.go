@@ -2015,7 +2015,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// are likely to be responsive below.
 
 	// Take the actions that will modify the match.
-	errs := newErrorSet(t.dc.acct.host + " tick: ")
+	errs := newErrorSet("%s tick: ", t.dc.acct.host)
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 

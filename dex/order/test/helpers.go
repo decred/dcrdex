@@ -331,7 +331,7 @@ func MustComparePrefix(t testKiller, p1, p2 *order.Prefix) {
 	t.Helper()
 	err := ComparePrefix(p1, p2)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -341,7 +341,7 @@ func MustCompareTrade(t testKiller, t1, t2 *order.Trade) {
 	t.Helper()
 	err := CompareTrade(t1, t2)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -351,7 +351,7 @@ func MustCompareUserMatch(t testKiller, m1, m2 *order.UserMatch) {
 	t.Helper()
 	err := CompareUserMatch(m1, m2)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatalf("%v", err)
 	}
 }
 

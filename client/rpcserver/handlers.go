@@ -159,8 +159,7 @@ func handleHelp(_ *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		var err error
 		res, err = commandUsage(form.helpWith, form.includePasswords)
 		if err != nil {
-			resErr := msgjson.NewError(msgjson.RPCUnknownRoute,
-				err.Error())
+			resErr := msgjson.NewError(msgjson.RPCUnknownRoute, "error getting usage: %v", err)
 			return createResponse(helpRoute, nil, resErr)
 		}
 	}
@@ -176,8 +175,7 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	defer appPass.Clear()
 	if _, err := s.core.InitializeClient(appPass, seed); err != nil {
-		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCInitError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCInitError, "unable to initialize client: %v", err)
 		return createResponse(initRoute, nil, resErr)
 	}
 	res := initializedStr
@@ -216,17 +214,13 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}()
 
 	if s.core.WalletState(form.assetID) != nil {
-		errMsg := fmt.Sprintf("error creating %s wallet: wallet already exists",
-			dex.BipIDSymbol(form.assetID))
-		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, "error creating %s wallet: wallet already exists", dex.BipIDSymbol(form.assetID))
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
 	walletDef, err := asset.WalletDef(form.assetID, form.walletType)
 	if err != nil {
-		errMsg := fmt.Sprintf("error creating %s wallet: unable to get wallet definition: %v",
-			dex.BipIDSymbol(form.assetID), err)
-		resErr := msgjson.NewError(msgjson.RPCWalletDefinitionError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCWalletDefinitionError, "error creating %s wallet: unable to get wallet definition: %v", dex.BipIDSymbol(form.assetID), err)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
@@ -244,17 +238,13 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		Config:  form.config,
 	})
 	if err != nil {
-		errMsg := fmt.Sprintf("error creating %s wallet: %v",
-			dex.BipIDSymbol(form.assetID), err)
-		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error creating %s wallet: %v", dex.BipIDSymbol(form.assetID), err)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
 	err = s.core.OpenWallet(form.assetID, form.appPass)
 	if err != nil {
-		errMsg := fmt.Sprintf("wallet connected, but failed to open with provided password: %v",
-			err)
-		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "wallet connected, but failed to open with provided password: %v", err)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
@@ -274,9 +264,7 @@ func handleOpenWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 
 	err = s.core.OpenWallet(form.assetID, form.appPass)
 	if err != nil {
-		errMsg := fmt.Sprintf("error unlocking %s wallet: %v",
-			dex.BipIDSymbol(form.assetID), err)
-		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "error unlocking %s wallet: %v", dex.BipIDSymbol(form.assetID), err)
 		return createResponse(openWalletRoute, nil, resErr)
 	}
 
@@ -292,9 +280,7 @@ func handleCloseWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 		return usage(closeWalletRoute, err)
 	}
 	if err := s.core.CloseWallet(assetID); err != nil {
-		errMsg := fmt.Sprintf("unable to close wallet %s: %v",
-			dex.BipIDSymbol(assetID), err)
-		resErr := msgjson.NewError(msgjson.RPCCloseWalletError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCCloseWalletError, "unable to close wallet %s: %v", dex.BipIDSymbol(assetID), err)
 		return createResponse(closeWalletRoute, nil, resErr)
 	}
 
@@ -311,9 +297,7 @@ func handleToggleWalletStatus(s *RPCServer, params *RawParams) *msgjson.Response
 		return usage(toggleWalletStatusRoute, err)
 	}
 	if err := s.core.ToggleWalletStatus(form.assetID, form.disable); err != nil {
-		errMsg := fmt.Sprintf("unable to change %s wallet status: %v",
-			dex.BipIDSymbol(form.assetID), err)
-		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, "unable to change %s wallet status: %v", dex.BipIDSymbol(form.assetID), err)
 		return createResponse(toggleWalletStatusRoute, nil, resErr)
 	}
 
@@ -345,7 +329,7 @@ func handleBondAssets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 	if exchCfg == nil {
 		exchCfg, err = s.core.GetDEXConfig(host, cert) // cert is file contents, not name
 		if err != nil {
-			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, err.Error())
+			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
 			return createResponse(bondAssetsRoute, nil, resErr)
 		}
 	}
@@ -366,7 +350,7 @@ func handleGetDEXConfig(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 	}
 	exchange, err := s.core.GetDEXConfig(host, cert) // cert is file contents, not name
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, err.Error())
+		resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
 		return createResponse(getDEXConfRoute, nil, resErr)
 	}
 	return createResponse(getDEXConfRoute, exchange, nil)
@@ -431,14 +415,12 @@ func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	bondAsset, supported := exchCfg.BondAssets[symb]
 	if !supported {
-		errMsg := fmt.Sprintf("DEX %s does not support registration with %s", form.Addr, symb)
-		resErr := msgjson.NewError(msgjson.RPCPostBondError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX %s does not support registration with %s", form.Addr, symb)
 		return createResponse(postBondRoute, nil, resErr)
 	}
 	if bondAsset.Amt > form.Bond || form.Bond%bondAsset.Amt != 0 {
-		errMsg := fmt.Sprintf("DEX at %s expects a bond amount in multiples of %d %s but %d was offered",
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX at %s expects a bond amount in multiples of %d %s but %d was offered",
 			form.Addr, bondAsset.Amt, dex.BipIDSymbol(assetID), form.Bond)
-		resErr := msgjson.NewError(msgjson.RPCPostBondError, errMsg)
 		return createResponse(postBondRoute, nil, resErr)
 	}
 	res, err := s.core.PostBond(form)
@@ -508,8 +490,7 @@ func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	defer appPass.Clear()
 	err = s.core.Login(appPass)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to login: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCLoginError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCLoginError, "unable to login: %v", err)
 		return createResponse(loginRoute, nil, resErr)
 	}
 	res := "successfully logged in"
@@ -526,8 +507,7 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	defer form.appPass.Clear()
 	res, err := s.core.Trade(form.appPass, form.srvForm)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to trade: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCTradeError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCTradeError, "unable to trade: %v", err)
 		return createResponse(tradeRoute, nil, resErr)
 	}
 	tradeRes := &tradeResponse{
@@ -546,8 +526,7 @@ func handleMultiTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 	defer form.appPass.Clear()
 	res, err := s.core.MultiTrade(form.appPass, form.srvForm)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to multi trade: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCTradeError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCTradeError, "unable to multi trade: %v", err)
 		return createResponse(multiTradeRoute, nil, resErr)
 	}
 	trades := make([]*tradeResponse, 0, len(res))
@@ -569,8 +548,7 @@ func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(cancelRoute, err)
 	}
 	if err := s.core.Cancel(form.orderID); err != nil {
-		errMsg := fmt.Sprintf("unable to cancel order %q: %v", form.orderID, err)
-		resErr := msgjson.NewError(msgjson.RPCCancelError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCCancelError, "unable to cancel order %q: %v", form.orderID, err)
 		return createResponse(cancelRoute, nil, resErr)
 	}
 	res := fmt.Sprintf(canceledOrderStr, form.orderID)
@@ -605,8 +583,7 @@ func send(s *RPCServer, params *RawParams, route string) *msgjson.ResponsePayloa
 	}
 	coin, err := s.core.Send(form.appPass, form.assetID, form.value, form.address, subtract)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to %s: %v", err, route)
-		resErr := msgjson.NewError(msgjson.RPCFundTransferError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "unable to %s: %v", route, err)
 		return createResponse(route, nil, resErr)
 	}
 	res := coin.String()
@@ -624,8 +601,7 @@ func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 	}
 	err = s.core.RescanWallet(assetID, force)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to rescan wallet: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to rescan wallet: %v", err)
 		return createResponse(rescanWalletRoute, nil, resErr)
 	}
 	return createResponse(rescanWalletRoute, "started", nil)
@@ -635,8 +611,7 @@ func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 // if successful.
 func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	if err := s.core.Logout(); err != nil {
-		errMsg := fmt.Sprintf("unable to logout: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCLogoutError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCLogoutError, "unable to logout: %v", err)
 		return createResponse(logoutRoute, nil, resErr)
 	}
 	res := logoutStr
@@ -670,8 +645,7 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	book, err := s.core.Book(form.host, form.base, form.quote)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to retrieve order book: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCOrderBookError, "unable to retrieve order book: %v", err)
 		return createResponse(orderBookRoute, nil, resErr)
 	}
 	if form.nOrders > 0 {
@@ -792,8 +766,7 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	defer appPass.Clear()
 	seed, err := s.core.ExportSeed(appPass)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to retrieve app seed: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCExportSeedError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCExportSeedError, "unable to retrieve app seed: %v", err)
 		return createResponse(appSeedRoute, nil, resErr)
 	}
 
@@ -809,8 +782,7 @@ func handleDeleteArchivedRecords(s *RPCServer, params *RawParams) *msgjson.Respo
 	}
 	nRecordsDeleted, err := s.core.DeleteArchivedRecords(form.olderThan, form.matchesFileStr, form.ordersFileStr)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to delete records: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCDeleteArchivedRecordsError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCDeleteArchivedRecordsError, "unable to delete records: %v", err)
 		return createResponse(deleteArchivedRecordsRoute, nil, resErr)
 	}
 
@@ -829,8 +801,7 @@ func handleWalletPeers(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 
 	peers, err := s.core.WalletPeers(assetID)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to get wallet peers: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to get wallet peers: %v", err)
 		return createResponse(walletPeersRoute, nil, resErr)
 	}
 	return createResponse(walletPeersRoute, peers, nil)
@@ -844,8 +815,7 @@ func handleAddWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 
 	err = s.core.AddWalletPeer(form.assetID, form.address)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to add wallet peer: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to add wallet peer: %v", err)
 		return createResponse(addWalletPeerRoute, nil, resErr)
 	}
 
@@ -860,8 +830,7 @@ func handleRemoveWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 
 	err = s.core.RemoveWalletPeer(form.assetID, form.address)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to remove wallet peer: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to remove wallet peer: %v", err)
 		return createResponse(removeWalletPeerRoute, nil, resErr)
 	}
 
@@ -876,8 +845,7 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 
 	notes, _, err := s.core.Notifications(numNotes)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to handle notification: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCNotificationsError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCNotificationsError, "unable to handle notification: %v", err)
 		return createResponse(notificationsRoute, nil, resErr)
 	}
 
@@ -892,8 +860,7 @@ func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, &form.cfgFilePath)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to get available balances: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, "unable to get available balances: %v", err)
 		return createResponse(mmAvailableBalancesRoute, nil, resErr)
 	}
 
@@ -916,8 +883,7 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	err = s.mm.StartBot(&mm.StartConfig{MarketWithHost: *form.mkt}, &form.cfgFilePath, form.appPass)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to start market making: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "unable to start market making: %v", err)
 		return createResponse(startBotRoute, nil, resErr)
 	}
 
@@ -932,8 +898,7 @@ func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	err = s.mm.StopBot(mkt)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to stop market making: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, "unable to stop market making: %v", err)
 		return createResponse(stopBotRoute, nil, resErr)
 	}
 
@@ -948,16 +913,14 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	data, err := os.ReadFile(form.cfgFilePath)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to read config file: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to read config file: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
 	cfg := &mm.MarketMakingConfig{}
 	err = json.Unmarshal(data, cfg)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to unmarshal config: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to unmarshal config: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
@@ -970,15 +933,13 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 	}
 
 	if botCfg == nil {
-		errMsg := fmt.Sprintf("bot config not found for market %s", form.mkt.String())
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "bot config not found for market %s", form.mkt.String())
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
 	err = s.mm.UpdateRunningBotCfg(botCfg, form.balances, false)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to update running bot: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to update running bot: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
@@ -993,8 +954,7 @@ func handleUpdateRunningBotInventory(s *RPCServer, params *RawParams) *msgjson.R
 
 	err = s.mm.UpdateRunningBotInventory(form.mkt, form.balances)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to update running bot: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotInvError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotInvError, "unable to update running bot: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
@@ -1014,8 +974,7 @@ func handleSetVSP(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	err = s.core.SetVSP(form.assetID, form.addr)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to set vsp: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCSetVSPError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCSetVSPError, "unable to set vsp: %v", err)
 		return createResponse(setVSPRoute, nil, resErr)
 	}
 
@@ -1030,8 +989,7 @@ func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePay
 	defer form.appPass.Clear()
 
 	if err = s.core.PurchaseTickets(form.assetID, form.appPass, form.num); err != nil {
-		errMsg := fmt.Sprintf("unable to purchase tickets: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, "unable to purchase tickets: %v", err)
 		return createResponse(purchaseTicketsRoute, nil, resErr)
 	}
 
@@ -1045,8 +1003,7 @@ func handleStakeStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 	}
 	stakeStatus, err := s.core.StakeStatus(assetID)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to get staking status: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCStakeStatusError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCStakeStatusError, "unable to get staking status: %v", err)
 		return createResponse(stakeStatusRoute, nil, resErr)
 	}
 
@@ -1061,8 +1018,7 @@ func handleSetVotingPreferences(s *RPCServer, params *RawParams) *msgjson.Respon
 
 	err = s.core.SetVotingPreferences(form.assetID, form.voteChoices, form.tSpendPolicy, form.treasuryPolicy)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to set voting preferences: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCSetVotingPreferencesError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCSetVotingPreferencesError, "unable to set voting preferences: %v", err)
 		return createResponse(setVotingPreferencesRoute, nil, resErr)
 	}
 
@@ -1077,8 +1033,7 @@ func handleTxHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	txs, err := s.core.TxHistory(form.assetID, form.num, form.refID, form.past)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to get tx history: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get tx history: %v", err)
 		return createResponse(txHistoryRoute, nil, resErr)
 	}
 
@@ -1093,8 +1048,7 @@ func handleWalletTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	tx, err := s.core.WalletTransaction(form.assetID, form.txID)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to get wallet tx: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get wallet tx: %v", err)
 		return createResponse(walletTxRoute, nil, resErr)
 	}
 
@@ -1110,8 +1064,7 @@ func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayl
 
 	txB, err := s.core.GenerateBCHRecoveryTransaction(appPW, recipient)
 	if err != nil {
-		errMsg := fmt.Sprintf("error generating tx: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, errMsg)
+		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error generating tx: %v", err)
 		return createResponse(withdrawBchSpvRoute, nil, resErr)
 	}
 

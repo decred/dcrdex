@@ -1428,7 +1428,7 @@ func makeEnsureNilErr(t *testing.T) func(error) {
 	return func(err error) {
 		t.Helper()
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err)
 		}
 	}
 }

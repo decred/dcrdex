@@ -147,7 +147,7 @@ func (s *Server) handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		handler := s.rpcRoutes[msg.Route]
 		if handler != nil {
 			if !c.wsLimiter.allow(msg.Route) {
-				return msgjson.NewError(msgjson.TooManyRequestsError, "too many requests to "+msg.Route)
+				return msgjson.NewError(msgjson.TooManyRequestsError, "too many requests to %s", msg.Route)
 			}
 			// Handle the request.
 			return handler(c, msg)
@@ -164,7 +164,7 @@ func (s *Server) handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 			if _, err := c.dataMeter(); err != nil {
 				// These errors are actually formatted nicely for sending, since
 				// they are used directly in HTTP errors as well.
-				return msgjson.NewError(msgjson.TooManyRequestsError, err.Error())
+				return msgjson.NewError(msgjson.TooManyRequestsError, "metered: %v", err)
 			}
 		}
 
@@ -186,7 +186,7 @@ func (s *Server) handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		// Process request.
 		resp, err := httpHandler(thing)
 		if err != nil {
-			return msgjson.NewError(msgjson.HTTPRouteError, err.Error())
+			return msgjson.NewError(msgjson.HTTPRouteError, "handler error: %v", err)
 		}
 
 		// Respond.
@@ -206,7 +206,7 @@ func (s *Server) handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		handler := s.rpcRoutes[msg.Route]
 		if handler != nil {
 			if !c.wsLimiter.allow(msg.Route) {
-				return msgjson.NewError(msgjson.TooManyRequestsError, "too many requests to "+msg.Route)
+				return msgjson.NewError(msgjson.TooManyRequestsError, "too many requests to %s", msg.Route)
 			}
 			// Handle the request.
 			return handler(c, msg)

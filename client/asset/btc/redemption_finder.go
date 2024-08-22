@@ -232,9 +232,8 @@ func (r *RedemptionFinder) tryRedemptionRequests(ctx context.Context, startBlock
 	}
 
 	epicFail := func(s string, a ...any) {
-		errMsg := fmt.Sprintf(s, a...)
 		for _, req := range reqs {
-			req.fail(errMsg)
+			req.fail(s, a...)
 		}
 	}
 
