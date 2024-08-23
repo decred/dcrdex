@@ -1,4 +1,5 @@
 {
+    "useDEXBranding": true,
     "restrictedWallets": {
         "dcr": {
             "hiddenFields": [
