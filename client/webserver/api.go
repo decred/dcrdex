@@ -2016,6 +2016,41 @@ func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck())
 }
 
+func (s *WebServer) redeemGameCode(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		Code  dex.Bytes        `json:"code"`
+		Msg   string           `json:"msg"`
+		AppPW encode.PassBytes `json:"appPW"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	defer form.AppPW.Clear()
+	appPW, err := s.resolvePass(form.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	coinID, win, err := s.core.RedeemGeocode(appPW, form.Code, form.Msg)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("redemption error: %w", err))
+		return
+	}
+	const dcrBipID = 42
+	coinIDString, _ := asset.DecodeCoinID(dcrBipID, coinID)
+	writeJSON(w, &struct {
+		OK         bool      `json:"ok"`
+		CoinID     dex.Bytes `json:"coinID"`
+		CoinString string    `json:"coinString"`
+		Win        uint64    `json:"win"`
+	}{
+		OK:         true,
+		CoinID:     coinID,
+		CoinString: coinIDString,
+		Win:        win,
+	})
+}
+
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
 func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {

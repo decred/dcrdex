@@ -2025,6 +2025,11 @@ func (c *TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMess
 	return nil
 }
 
+func (c *TCore) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error) {
+	coinID, _ := hex.DecodeString("308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad900000001")
+	return coinID, 100e8, nil
+}
+
 func newMarketDay() *libxc.MarketDay {
 	avgPrice := tenToThe(7)
 	return &libxc.MarketDay{

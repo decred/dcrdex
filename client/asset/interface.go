@@ -1471,6 +1471,11 @@ type MultiOrder struct {
 	RedeemAssetID uint32
 }
 
+// A GeocodeRedeemer redeems funds from a geocode game.
+type GeocodeRedeemer interface {
+	RedeemGeocode(code []byte, msg string) (dex.Bytes, uint64, error)
+}
+
 // WalletNotification can be any asynchronous information the wallet needs
 // to convey.
 type WalletNotification any

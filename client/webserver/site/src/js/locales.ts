@@ -194,6 +194,7 @@ export const ID_CEXBALANCE_ERR = 'CEXBALANCE_ERR'
 export const ID_PENDING = 'PENDING'
 export const ID_COMPLETE = 'COMPLETE'
 export const ID_ARCHIVED_SETTINGS = 'ARCHIVED_SETTINGS'
+export const ID_NO_CODE_PROVIDED = 'NO_CODE_PROVIDED'
 
 let locale: Locale
 
