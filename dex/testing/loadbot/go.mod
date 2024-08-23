@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/dcrlabs/ltcwallet v0.0.0-20240817190502-ee5cf83672a6 // indirect
+	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010 // indirect
 	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
 	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2 // indirect
 )

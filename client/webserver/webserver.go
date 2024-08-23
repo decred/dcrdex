@@ -225,7 +225,6 @@ type cachedPassword struct {
 type Config struct {
 	Core          clientCore // *core.Core
 	MarketMaker   MMCore     // *mm.MarketMaker
-	MMCfgPath     string
 	Addr          string
 	CustomSiteDir string
 	Language      string
@@ -251,19 +250,18 @@ type valStamp struct {
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to Bison Wallet.
 type WebServer struct {
-	ctx       context.Context
-	wsServer  *websocket.Server
-	mux       *chi.Mux
-	siteDir   string
-	lang      atomic.Value // string
-	langs     []string
-	core      clientCore
-	mm        MMCore
-	mmCfgPath string
-	addr      string
-	csp       string
-	srv       *http.Server
-	html      atomic.Value // *templates
+	ctx      context.Context
+	wsServer *websocket.Server
+	mux      *chi.Mux
+	siteDir  string
+	lang     atomic.Value // string
+	langs    []string
+	core     clientCore
+	mm       MMCore
+	addr     string
+	csp      string
+	srv      *http.Server
+	html     atomic.Value // *templates
 
 	authMtx         sync.RWMutex
 	authTokens      map[string]bool
@@ -385,7 +383,6 @@ func New(cfg *Config) (*WebServer, error) {
 		langs:           langs,
 		core:            cfg.Core,
 		mm:              cfg.MarketMaker,
-		mmCfgPath:       cfg.MMCfgPath,
 		siteDir:         siteDir,
 		mux:             mux,
 		srv:             httpServer,
