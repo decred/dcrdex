@@ -19,7 +19,7 @@ export function setOptionTemplates (page: Record<string, PageElement>): void {
   [booleanOptTmpl, rangeOptTmpl, orderOptTmpl] = [page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl]
 }
 
-const threeSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+const threeSigFigs = new Intl.NumberFormat(Doc.languages(), {
   minimumSignificantDigits: 3,
   maximumSignificantDigits: 3
 })

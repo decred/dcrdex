@@ -6,7 +6,6 @@ import {
   PageElement
 } from './registry'
 import State from './state'
-import { RateEncodingFactor } from './orderutil'
 
 // Symbolizer is satisfied by both dex.Asset and core.SupportedAsset. Used by
 // Doc.symbolize.
@@ -51,11 +50,15 @@ const BipSymbolIDs: Record<string, number> = {};
 
 const BipSymbols = Object.values(BipIDs)
 
+const RateEncodingFactor = 1e8 // same as value defined in ./orderutil
+
 const log10RateEncodingFactor = Math.round(Math.log10(RateEncodingFactor))
 
-const intFormatter = new Intl.NumberFormat(navigator.languages as string[], { maximumFractionDigits: 0 })
+const languages = navigator.languages.filter((locale: string) => locale !== 'c')
 
-const fourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+const intFormatter = new Intl.NumberFormat(languages, { maximumFractionDigits: 0 })
+
+const fourSigFigs = new Intl.NumberFormat(languages, {
   minimumSignificantDigits: 4,
   maximumSignificantDigits: 4
 })
@@ -90,7 +93,7 @@ function formatter (formatters: Record<string, Intl.NumberFormat>, min: number, 
   const k = `${min}-${max}`
   let fmt = formatters[k]
   if (!fmt) {
-    fmt = new Intl.NumberFormat(locales || navigator.languages as string[], {
+    fmt = new Intl.NumberFormat(locales ?? languages, {
       minimumFractionDigits: min,
       maximumFractionDigits: max
     })
@@ -363,6 +366,10 @@ export default class Doc {
     const [v] = convertToConventional(vAtomic, unitInfo)
     const value = v * rate
     return fullPrecisionFormatter(prec).format(value)
+  }
+
+  static languages (): string[] {
+    return languages
   }
 
   static formatFiatValue (value: number): string {

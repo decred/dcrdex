@@ -1225,7 +1225,7 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.purchaserErr)
       return
     }
-    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: n.toLocaleString(navigator.languages) }))
+    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: n.toLocaleString(Doc.languages()) }))
   }
 
   processTicketPurchaseUpdate (walletNote: CustomWalletNote) {

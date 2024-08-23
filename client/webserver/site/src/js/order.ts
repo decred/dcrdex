@@ -152,7 +152,7 @@ export default class OrderPage extends BasePage {
     tmpl.matchID.textContent = match.matchID
 
     const time = new Date(match.stamp)
-    tmpl.matchTime.textContent = time.toLocaleTimeString(navigator.languages as string[], {
+    tmpl.matchTime.textContent = time.toLocaleTimeString(Doc.languages(), {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
@@ -287,7 +287,7 @@ export default class OrderPage extends BasePage {
       const refundAfter = new Date(m.stamp + lockTime)
       if (Date.now() > refundAfter.getTime()) tmpl.refundPending.textContent = intl.prep(intl.ID_REFUND_IMMINENT)
       else {
-        const refundAfterStr = refundAfter.toLocaleTimeString(navigator.languages as string[], {
+        const refundAfterStr = refundAfter.toLocaleTimeString(Doc.languages(), {
           year: 'numeric',
           month: 'short',
           day: 'numeric'

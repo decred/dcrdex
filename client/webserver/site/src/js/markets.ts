@@ -91,7 +91,7 @@ const sellBtnClass = 'sellred-bg'
 const fiveMinBinKey = '5m'
 const oneHrBinKey = '1h'
 
-const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
+const percentFormatter = new Intl.NumberFormat(Doc.languages(), {
   minimumFractionDigits: 1,
   maximumFractionDigits: 2
 })
