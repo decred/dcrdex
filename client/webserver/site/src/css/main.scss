@@ -112,6 +112,11 @@ img.dex-logo {
 
 img.logo-square {
   content: url("/img/bison-square_50.png");
+
+  &.small {
+    height: 25px;
+    width: 25px;
+  }
 }
 
 img.logo-full {
