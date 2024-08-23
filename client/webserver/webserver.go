@@ -170,6 +170,7 @@ type clientCore interface {
 	Language() string
 	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
 	RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error)
+	ExtensionModeConfig() *core.ExtensionModeConfig
 }
 
 type MMCore interface {
@@ -270,6 +271,8 @@ type WebServer struct {
 
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
+
+	useDEXBranding bool
 }
 
 // New is the constructor for a new WebServer. CustomSiteDir in the Config can
@@ -372,6 +375,11 @@ func New(cfg *Config) (*WebServer, error) {
 		langs = append(langs, l)
 	}
 
+	var useDEXBranding bool
+	if xCfg := cfg.Core.ExtensionModeConfig(); xCfg != nil {
+		useDEXBranding = xCfg.UseDEXBranding
+	}
+
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
 		langs:           langs,
@@ -386,6 +394,7 @@ func New(cfg *Config) (*WebServer, error) {
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
 		bondBuf:         map[uint32]valStamp{},
+		useDEXBranding:  useDEXBranding,
 	}
 	s.lang.Store(lang)
 

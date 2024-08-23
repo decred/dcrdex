@@ -344,6 +344,10 @@ func (*TCore) Language() string         { return "en-US" }
 
 func (*TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error { return nil }
 
+func (*TCore) ExtensionModeConfig() *core.ExtensionModeConfig {
+	return nil
+}
+
 type TWriter struct {
 	b []byte
 }
