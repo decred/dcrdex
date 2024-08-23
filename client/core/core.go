@@ -9353,6 +9353,8 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 		c.notify(newWalletConfigNote(TopicWalletPeersRestored, subject, details,
 			db.Success, w.state()))
 		c.startWalletSyncMonitor(w)
+	} else if !ss.Synced {
+		c.startWalletSyncMonitor(w)
 	}
 
 	// Send a WalletStateNote in case Synced or anything else has changed.
