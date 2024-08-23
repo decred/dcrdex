@@ -645,4 +645,12 @@ var EnUS = map[string]*intl.Translation{
 	"Balance Discovery":           {T: "Balance Discovery"},
 	"Finding Addresses":           {T: "Finding Addresses"},
 	"Hide Mixing Transactions":    {T: "Hide Mixing Transactions"},
+	"Redeem game code":            {T: "Redeem game code"},
+	"Redeem Game Code":            {T: "Redeem Game Code"},
+	"Code":                        {T: "Code"},
+	"Message_optional":            {T: "Message (optional)"},
+	"Game code redeemed":          {T: "Game code redeemed!"},
+	"Transaction":                 {T: "Transaction"},
+	"Value":                       {T: "Value"},
+	"Prepaid bond redeemed":       {T: "Prepaid bond redeemed!"},
 }

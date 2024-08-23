@@ -72,9 +72,12 @@
           <button id="changeAppPW" class="my-1 {{if not $authed}} d-hide{{end}}">[[[Change App Password]]]</button>
           <button id="resetAppPW" class="my-1 {{if or $authed }} d-hide{{end}}">[[[Reset App Password]]]</button>
       </div>
-      <div class="mb-3 py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
+      <div class="py-3 border-bottom {{if not .UserInfo.Authed}}d-hide{{end}}">
         <p class="grey">[[[seed_implore_msg]]]</p>
         <button id="exportSeed" class="fs15">[[[View Application Seed]]]</button>
+      </div>
+      <div id="gameCodeLink" class="py-3 mb-3 border-bottom pointer hoverbg">
+        <span class="ico-ticket"></span> [[[Redeem game code]]]
       </div>
       <p class="grey">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
     </div>
@@ -149,6 +152,26 @@
     {{- /* SYNC AND BALANCE FORM */ -}}
     <form class="d-hide" id="walletWait">
       {{template "waitingForWalletForm"}}
+    </form>
+
+    <form id="gameCodeForm" class="d-hide">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <header><span class="ico-ticket me-2"></span> [[[Redeem Game Code]]]</header>
+      <div class="px-3 flex-stretch-column">
+        <label for="gameCodeInput" class="pt-2">[[[Code]]]</label>
+        <input type="text" id="gameCodeInput">
+        <label for="gameCodeMsg" class="mt-2">[[[Message_optional]]]</label>
+        <input type="text" id="gameCodeMsg" maxlength="256">
+        <button type="button" id="gameCodeSubmit" class="feature mt-2">[[[Redeem]]]</button>
+        <div id="gameCodeSuccess" class="mt-2 pt-2 border-top flex-stretch-column d-hide">
+          <span>[[[Game code redeemed]]]</span>
+          <span class="mt-2">[[[Transaction]]]</span>
+          <a id="gameRedeemTx" class="mt-1 word-break-all" target="_blank"></a>
+          <span class="mt-2">[[[Value]]]: <span id="gameRedeemValue"></span> <span class="fs14 grey">DCR</span></span>
+          <span class="mt-2">[[[Prepaid bond redeemed]]]</span>
+        </div>
+        <div id="gameCodeErr" class="mt-2 text-warning d-hide"></div>
+      </div>
     </form>
   </div>
 </div>
