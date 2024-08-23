@@ -127,6 +127,7 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if err != nil {
 		return fmt.Errorf("%s unlockWallet decryption error: %w", unbip(w.AssetID), err)
 	}
+
 	err = a.Unlock(pw) // can be slow - no timeout and NOT in the critical section!
 	if err != nil {
 		return err
