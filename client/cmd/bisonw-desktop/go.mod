@@ -21,7 +21,7 @@ require (
 	github.com/consensys/gnark-crypto v0.12.1 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240223125850-b1e8a79f509c // indirect
 	github.com/crate-crypto/go-kzg-4844 v1.0.0 // indirect
-	github.com/dcrlabs/ltcwallet v0.0.0-20240817190502-ee5cf83672a6 // indirect
+	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010 // indirect
 	github.com/decred/dcrd/mixing v0.3.0 // indirect
 	github.com/decred/vspd/client/v3 v3.0.0 // indirect
 	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
