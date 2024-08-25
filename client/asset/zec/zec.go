@@ -138,7 +138,6 @@ var (
 			DefaultConfigPath: dexbtc.SystemConfigPath("zcash"),
 			ConfigOpts:        configOpts,
 			NoAuth:            true,
-			MultiFundingOpts:  btc.MultiFundingOpts,
 		}},
 	}
 
@@ -1336,7 +1335,11 @@ type balanceBreakdown struct {
 type balances struct {
 	orchard     *balanceBreakdown
 	sapling     uint64
-	transparent uint64
+	transparent *balanceBreakdown
+}
+
+func (b *balances) available() uint64 {
+	return b.orchard.avail + b.transparent.avail
 }
 
 func (w *zecWallet) balances() (*balances, error) {
@@ -1358,8 +1361,11 @@ func (w *zecWallet) balances() (*balances, error) {
 			maturing:  zeroConf.Orchard - mature.Orchard,
 			noteCount: noteCounts.Orchard,
 		},
-		sapling:     zeroConf.Sapling,
-		transparent: zeroConf.Transparent,
+		sapling: zeroConf.Sapling,
+		transparent: &balanceBreakdown{
+			avail:    mature.Transparent,
+			maturing: zeroConf.Transparent - mature.Transparent,
+		},
 	}, nil
 }
 
@@ -1652,19 +1658,6 @@ func (w *zecWallet) DepositAddress() (string, error) {
 
 }
 
-func (w *zecWallet) transparentAddress() (string, error) {
-	addrRes, err := zGetAddressForAccount(w, shieldedAcctNumber, []string{transparentAddressType, orchardAddressType})
-	if err != nil {
-		return "", err
-	}
-	receivers, err := zGetUnifiedReceivers(w, addrRes.Address)
-	if err != nil {
-		return "", err
-	}
-	return receivers.Transparent, nil
-
-}
-
 func (w *zecWallet) NewAddress() (string, error) {
 	return w.DepositAddress()
 }
@@ -1685,7 +1678,7 @@ func (w *zecWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) (coins 
 		if v.MaxSwapCount == 0 {
 			return nil, nil, 0, fmt.Errorf("cannot fund zero-lot order")
 		}
-		req := dexzec.RequiredOrderFunds(v.Value, 1, swapInputSize+1, v.MaxSwapCount)
+		req := dexzec.RequiredOrderFunds(v.Value, 1, swapInputSize, v.MaxSwapCount)
 		totalRequiredForOrders += req
 	}
 
@@ -1701,273 +1694,115 @@ func (w *zecWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) (coins 
 		return nil, nil, 0, newError(errInsufficientBalance, "insufficient funds. %d < %d", bal.Available, totalRequiredForOrders)
 	}
 
-	customCfg, err := decodeFundMultiSettings(mo.Options)
-	if err != nil {
-		return nil, nil, 0, fmt.Errorf("error decoding options: %w", err)
-	}
-
-	return w.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, customCfg.Split)
-}
-
-func (w *zecWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderValue, splitTxFeeRate, maxFeeRate uint64, allowSplit bool) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
 	reserves := w.reserves.Load()
 
-	coins, redeemScripts, fundingCoins, spents, err := w.cm.FundMultiBestEffort(reserves, maxLock, values, maxFeeRate, allowSplit)
+	const multiSplitAllowed = true
+
+	coins, redeemScripts, fundingCoins, spents, err := w.cm.FundMultiBestEffort(reserves, maxLock, mo.Values, mo.MaxFeeRate, multiSplitAllowed)
 	if err != nil {
 		return nil, nil, 0, codedError(errFunding, err)
 	}
-	if len(coins) == len(values) || !allowSplit {
+	if len(coins) == len(mo.Values) {
 		w.cm.LockOutputsMap(fundingCoins)
 		lockUnspent(w, false, spents)
 		return coins, redeemScripts, 0, nil
 	}
 
-	return w.fundMultiWithSplit(reserves, maxLock, values)
-}
-
-// fundMultiWithSplit creates a split transaction to fund multiple orders. It
-// attempts to fund as many of the orders as possible without a split transaction,
-// and only creates a split transaction for the remaining orders. This is only
-// called after it has been determined that all of the orders cannot be funded
-// without a split transaction.
-func (w *zecWallet) fundMultiWithSplit(
-	keep, maxLock uint64,
-	values []*asset.MultiOrderValue,
-) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
-
-	utxos, _, avail, err := w.cm.SpendableUTXOs(0)
-	if err != nil {
-		return nil, nil, 0, fmt.Errorf("error getting spendable utxos: %w", err)
-	}
-
-	canFund, splitCoins, splitSpents := w.fundMultiSplitTx(values, utxos, keep, maxLock)
-	if !canFund {
-		return nil, nil, 0, fmt.Errorf("cannot fund all with split")
-	}
-
-	remainingUTXOs := utxos
-	remainingOrders := values
-
-	// The return values must be in the same order as the values that were
-	// passed in, so we keep track of the original indexes here.
-	indexToFundingCoins := make(map[int][]*btc.CompositeUTXO, len(values))
-	remainingIndexes := make([]int, len(values))
-	for i := range remainingIndexes {
-		remainingIndexes[i] = i
-	}
-
-	var totalFunded uint64
-
-	// Find each of the orders that can be funded without being included
-	// in the split transaction.
-	for range values {
-		// First find the order the can be funded with the least overlock.
-		// If there is no order that can be funded without going over the
-		// maxLock limit, or not leaving enough for bond reserves, then all
-		// of the remaining orders must be funded with the split transaction.
-		orderIndex, fundingUTXOs := w.cm.OrderWithLeastOverFund(maxLock-totalFunded, 0, remainingOrders, remainingUTXOs)
-		if orderIndex == -1 {
-			break
-		}
-		totalFunded += btc.SumUTXOs(fundingUTXOs)
-		if totalFunded > avail-keep {
-			break
-		}
-
-		newRemainingOrders := make([]*asset.MultiOrderValue, 0, len(remainingOrders)-1)
-		newRemainingIndexes := make([]int, 0, len(remainingOrders)-1)
-		for j := range remainingOrders {
-			if j != orderIndex {
-				newRemainingOrders = append(newRemainingOrders, remainingOrders[j])
-				newRemainingIndexes = append(newRemainingIndexes, remainingIndexes[j])
-			}
-		}
-		remainingUTXOs = btc.UTxOSetDiff(remainingUTXOs, fundingUTXOs)
-
-		// Then we make sure that a split transaction can be created for
-		// any remaining orders without using the utxos returned by
-		// orderWithLeastOverFund.
-		if len(newRemainingOrders) > 0 {
-			canFund, newSplitCoins, newSpents := w.fundMultiSplitTx(newRemainingOrders, remainingUTXOs, keep, maxLock-totalFunded)
-			if !canFund {
-				break
-			}
-			splitCoins = newSplitCoins
-			splitSpents = newSpents
-		}
-
-		indexToFundingCoins[remainingIndexes[orderIndex]] = fundingUTXOs
-		remainingOrders = newRemainingOrders
-		remainingIndexes = newRemainingIndexes
-	}
-
-	var splitOutputCoins []asset.Coins
-	var splitFees uint64
-
-	// This should always be true, otherwise this function would not have been
-	// called.
-	if len(remainingOrders) > 0 {
-		splitOutputCoins, splitFees, err = w.submitMultiSplitTx(splitCoins, splitSpents, remainingOrders)
-		if err != nil {
-			return nil, nil, 0, fmt.Errorf("error creating split transaction: %w", err)
-		}
-	}
-
-	coins := make([]asset.Coins, len(values))
-	redeemScripts := make([][]dex.Bytes, len(values))
-	spents := make([]*btc.Output, 0, len(values))
-
-	var splitIndex int
-	locks := make([]*btc.UTxO, 0)
-	for i := range values {
-		if fundingUTXOs, ok := indexToFundingCoins[i]; ok {
-			coins[i] = make(asset.Coins, len(fundingUTXOs))
-			redeemScripts[i] = make([]dex.Bytes, len(fundingUTXOs))
-			for j, unspent := range fundingUTXOs {
-				output := btc.NewOutput(unspent.TxHash, unspent.Vout, unspent.Amount)
-				locks = append(locks, &btc.UTxO{
-					TxHash:  unspent.TxHash,
-					Vout:    unspent.Vout,
-					Amount:  unspent.Amount,
-					Address: unspent.Address,
-				})
-				coins[i][j] = output
-				spents = append(spents, output)
-				redeemScripts[i][j] = unspent.RedeemScript
-			}
-		} else {
-			coins[i] = splitOutputCoins[splitIndex]
-			redeemScripts[i] = []dex.Bytes{nil}
-			splitIndex++
-		}
-	}
-
-	w.cm.LockOutputs(locks)
-
-	lockUnspent(w, false, spents)
-
-	return coins, redeemScripts, splitFees, nil
-}
-
-func (w *zecWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*btc.Output, orders []*asset.MultiOrderValue) ([]asset.Coins, uint64, error) {
-	baseTx, totalIn, _, err := w.fundedTx(spents)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	// DRAFT TODO: Should we lock these without locking with CoinManager?
-	lockUnspent(w, false, spents)
-	var success bool
+	recips := make([]*zSendManyRecipient, len(mo.Values))
+	addrs := make([]string, len(mo.Values))
+	orderReqs := make([]uint64, len(mo.Values))
+	var txWasBroadcast bool
 	defer func() {
-		if !success {
-			lockUnspent(w, true, spents)
+		if txWasBroadcast || len(addrs) == 0 {
+			return
 		}
+		w.ar.ReturnAddresses(addrs)
 	}()
-
-	requiredForOrders, totalRequired := w.fundsRequiredForMultiOrders(orders, uint64(len(spents)), dexbtc.RedeemP2WPKHInputTotalSize)
-
-	outputAddresses := make([]btcutil.Address, len(orders))
-	for i, req := range requiredForOrders {
-		outputAddr, err := transparentAddress(w, w.addrParams, w.btcParams)
+	for i, v := range mo.Values {
+		addr, err := w.recyclableAddress()
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, fmt.Errorf("error getting address for split tx: %v", err)
 		}
-		outputAddresses[i] = outputAddr
-		script, err := txscript.PayToAddrScript(outputAddr)
-		if err != nil {
-			return nil, 0, err
-		}
-		baseTx.AddTxOut(wire.NewTxOut(int64(req), script))
+		orderReqs[i] = dexzec.RequiredOrderFunds(v.Value, 1, dexbtc.RedeemP2PKHInputSize, v.MaxSwapCount)
+		addrs[i] = addr
+		recips[i] = &zSendManyRecipient{Address: addr, Amount: btcutil.Amount(orderReqs[i]).ToBTC()}
 	}
 
-	changeAddr, err := transparentAddress(w, w.addrParams, w.btcParams)
+	txHash, err := w.sendManyShielded(recips)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, fmt.Errorf("sendManyShielded error: %w", err)
 	}
-	tx, err := w.sendWithReturn(baseTx, changeAddr, totalIn, totalRequired)
+
+	tx, err := getTransaction(w, txHash)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, fmt.Errorf("error retreiving split transaction %s: %w", txHash, err)
 	}
 
-	txHash := tx.TxHash()
-	coins := make([]asset.Coins, len(orders))
-	ops := make([]*btc.Output, len(orders))
-	locks := make([]*btc.UTxO, len(coins))
-	for i := range coins {
-		coins[i] = asset.Coins{btc.NewOutput(&txHash, uint32(i), uint64(tx.TxOut[i].Value))}
-		ops[i] = btc.NewOutput(&txHash, uint32(i), uint64(tx.TxOut[i].Value))
-		locks[i] = &btc.UTxO{
-			TxHash:  &txHash,
-			Vout:    uint32(i),
-			Amount:  uint64(tx.TxOut[i].Value),
-			Address: outputAddresses[i].String(),
+	txWasBroadcast = true
+
+	fundingFees = tx.RequiredTxFeesZIP317()
+
+	txOuts := make(map[uint32]*wire.TxOut, len(mo.Values))
+	for vout, txOut := range tx.TxOut {
+		txOuts[uint32(vout)] = txOut
+	}
+
+	coins = make([]asset.Coins, len(mo.Values))
+	utxos := make([]*btc.UTxO, len(mo.Values))
+	ops := make([]*btc.Output, len(mo.Values))
+	redeemScripts = make([][]dex.Bytes, len(mo.Values))
+next:
+	for i, v := range mo.Values {
+		orderReq := orderReqs[i]
+		for vout, txOut := range txOuts {
+			if uint64(txOut.Value) == orderReq {
+				_, addrs, _, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, w.btcParams)
+				if err != nil {
+					return nil, nil, 0, fmt.Errorf("error extracting addresses error: %w", err)
+				}
+				if len(addrs) != 1 {
+					return nil, nil, 0, fmt.Errorf("unexpected multi-sig (%d)", len(addrs))
+				}
+				addr := addrs[0]
+				addrStr, err := dexzec.EncodeAddress(addr, w.addrParams)
+				if err != nil {
+					return nil, nil, 0, fmt.Errorf("error encoding Zcash transparent address: %w", err)
+				}
+				utxos[i] = &btc.UTxO{
+					TxHash:  txHash,
+					Vout:    vout,
+					Address: addrStr,
+					Amount:  orderReq,
+				}
+				ops[i] = btc.NewOutput(txHash, vout, orderReq)
+				coins[i] = asset.Coins{ops[i]}
+				redeemScripts[i] = []dex.Bytes{nil}
+				delete(txOuts, vout)
+				continue next
+			}
 		}
+		return nil, nil, 0, fmt.Errorf("failed to find output coin for multisplit value %s at index %d", btcutil.Amount(v.Value), i)
 	}
-	w.cm.LockOutputs(locks)
-	lockUnspent(w, false, ops)
-
-	var totalOut uint64
-	for _, txOut := range tx.TxOut {
-		totalOut += uint64(txOut.Value)
+	w.cm.LockUTXOs(utxos)
+	if err := lockUnspent(w, false, ops); err != nil {
+		return nil, nil, 0, fmt.Errorf("error locking unspents: %w", err)
 	}
-	fee := totalIn - totalOut
 
-	w.addTxToHistory(&asset.WalletTransaction{
-		Type: asset.Split,
-		ID:   txHash.String(),
-		Fees: fee,
-	}, &txHash, true)
-
-	success = true
-	return coins, fee, nil
+	return coins, redeemScripts, fundingFees, nil
 }
 
-func (w *zecWallet) fundsRequiredForMultiOrders(orders []*asset.MultiOrderValue, inputCount, inputsSize uint64) ([]uint64, uint64) {
-	requiredForOrders := make([]uint64, len(orders))
-	var totalRequired uint64
-
-	for i, value := range orders {
-		req := dexzec.RequiredOrderFunds(value.Value, inputCount, inputsSize, value.MaxSwapCount)
-		requiredForOrders[i] = req
-		totalRequired += req
-	}
-
-	return requiredForOrders, totalRequired
-}
-
-// fundMultiSplitTx uses the utxos provided and attempts to fund a multi-split
-// transaction to fund each of the orders. If successful, it returns the
-// funding coins and outputs.
-func (w *zecWallet) fundMultiSplitTx(
-	orders []*asset.MultiOrderValue,
-	utxos []*btc.CompositeUTXO,
-	keep, maxLock uint64,
-) (bool, asset.Coins, []*btc.Output) {
-
-	_, totalOutputRequired := w.fundsRequiredForMultiOrders(orders, uint64(len(utxos)), dexbtc.RedeemP2PKHInputSize)
-
-	outputsSize := uint64(dexbtc.P2WPKHOutputSize) * uint64(len(utxos)+1)
-	// splitTxSizeWithoutInputs := dexbtc.MinimumTxOverhead + outputsSize
-
-	enough := func(inputCount, inputsSize, sum uint64) (bool, uint64) {
-		fees := dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(inputCount)), outputsSize, 0, 0, 0, 0)
-		req := totalOutputRequired + fees
-		return sum >= req, sum - req
-	}
-
-	fundSplitCoins, _, spents, _, inputsSize, _, err := w.cm.FundWithUTXOs(utxos, keep, false, enough)
+func (w *zecWallet) sendManyShielded(recips []*zSendManyRecipient) (*chainhash.Hash, error) {
+	lastAddr, err := w.lastShieldedAddress()
 	if err != nil {
-		return false, nil, nil
+		return nil, err
 	}
 
-	if maxLock > 0 {
-		fees := dexzec.TxFeesZIP317(inputsSize+uint64(wire.VarIntSerializeSize(uint64(len(spents)))), outputsSize, 0, 0, 0, 0)
-		if totalOutputRequired+fees > maxLock {
-			return false, nil, nil
-		}
+	operationID, err := zSendMany(w, lastAddr, recips, NoPrivacy)
+	if err != nil {
+		return nil, fmt.Errorf("z_sendmany error: %w", err)
 	}
 
-	return true, fundSplitCoins, spents
+	return w.awaitSendManyOperation(w.ctx, w, operationID)
 }
 
 func (w *zecWallet) Info() *asset.WalletInfo {
@@ -2462,6 +2297,7 @@ func (w *zecWallet) sendWithReturn(baseTx *dexzec.Tx, addr btcutil.Address, tota
 }
 
 func (w *zecWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+
 	op, err := btc.ConvertCoin(coin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error converting coin: %w", err)
@@ -2639,7 +2475,7 @@ func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 			w.log.Errorf("Failed to stringify address %v (default encoding): %v", changeAddr, err)
 			addrStr = changeAddr.String() // may or may not be able to retrieve the private keys for the next swap!
 		}
-		w.cm.LockOutputs([]*btc.UTxO{{
+		w.cm.LockUTXOs([]*btc.UTxO{{
 			TxHash:  &change.Pt.TxHash,
 			Vout:    change.Pt.Vout,
 			Address: addrStr,
@@ -2780,8 +2616,8 @@ func (w *zecWallet) Balance() (*asset.Balance, error) {
 	}
 
 	bal := &asset.Balance{
-		Available: bals.orchard.avail + bals.transparent,
-		Immature:  bals.orchard.maturing,
+		Available: bals.orchard.avail + bals.transparent.avail,
+		Immature:  bals.orchard.maturing + bals.transparent.maturing,
 		Locked:    locked,
 		Other:     make(map[asset.BalanceCategory]asset.CustomBalance),
 	}
@@ -3015,51 +2851,6 @@ func (w *zecWallet) listSinceBlock(start int64) ([]btcjson.ListTransactionsResul
 	}
 
 	return res, nil
-}
-
-func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
-}
-
-func (w *zecWallet) markTxAsSubmitted(txHash *chainhash.Hash) {
-	txHistoryDB := w.txDB()
-	if txHistoryDB == nil {
-		return
-	}
-
-	err := txHistoryDB.MarkTxAsSubmitted(txHash.String())
-	if err != nil {
-		w.log.Errorf("failed to mark tx as submitted in tx history db: %v", err)
-	}
-
-	w.pendingTxsMtx.Lock()
-	wt, found := w.pendingTxs[*txHash]
-	w.pendingTxsMtx.Unlock()
-
-	if !found {
-		w.log.Errorf("Transaction %s not found in pending txs", txHash)
-		return
-	}
-
-	wt.Submitted = true
-
-	w.emit.TransactionNote(wt.WalletTransaction, true)
-}
-
-func (w *zecWallet) removeTxFromHistory(txHash *chainhash.Hash) {
-	txHistoryDB := w.txDB()
-	if txHistoryDB == nil {
-		return
-	}
-
-	w.pendingTxsMtx.Lock()
-	delete(w.pendingTxs, *txHash)
-	w.pendingTxsMtx.Unlock()
-
-	err := txHistoryDB.RemoveTx(txHash.String())
-	if err != nil {
-		w.log.Errorf("failed to remove tx from tx history db: %v", err)
-	}
 }
 
 func (w *zecWallet) addTxToHistory(wt *asset.WalletTransaction, txHash *chainhash.Hash, submitted bool, skipNotes ...bool) {
@@ -3655,7 +3446,7 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 		}
 
 		var updated bool
-		if gtr.blockHash != nil {
+		if gtr.blockHash != nil && *gtr.blockHash != (chainhash.Hash{}) {
 			block, _, err := getVerboseBlockHeader(w, gtr.blockHash)
 			if err != nil {
 				w.log.Errorf("Error getting block height for %s: %v", gtr.blockHash, err)

@@ -446,7 +446,7 @@ func TestFundOrder(t *testing.T) {
 		TxID:          tTxID,
 		Address:       "tmH2m5fi5yY3Qg2GpGwcCrnnoD4wp944RMJ",
 		Amount:        float64(littleFunds) / 1e8,
-		Confirmations: 0,
+		Confirmations: 1,
 		ScriptPubKey:  tP2PKH,
 		Spendable:     true,
 		Solvable:      true,
@@ -510,7 +510,7 @@ func TestFundOrder(t *testing.T) {
 		TxID:          tTxID,
 		Address:       "tmH2m5fi5yY3Qg2GpGwcCrnnoD4wp944RMJ",
 		Amount:        float64(lottaFunds) / 1e8,
-		Confirmations: 0,
+		Confirmations: 1,
 		Vout:          1,
 		ScriptPubKey:  tP2PKH,
 		Spendable:     true,
@@ -1470,7 +1470,7 @@ func TestFundMultiOrder(t *testing.T) {
 			MaxSwapCount: 1,
 		}},
 	}
-	req := tLotSize + dexzec.TxFeesZIP317(dexbtc.RedeemP2PKHInputSize+1, dexbtc.P2SHOutputSize+1, 0, 0, 0, 0)
+	req := dexzec.RequiredOrderFunds(tLotSize, 1, dexbtc.RedeemP2PKHInputSize, 1)
 
 	// maxLock too low
 	if _, _, _, err := w.FundMultiOrder(mo, 1); !errorHasCode(err, errMaxLock) {
@@ -1512,25 +1512,19 @@ func TestFundMultiOrder(t *testing.T) {
 		t.Fatalf("wrong error for listunspent error: %v", err)
 	}
 
-	// got enough
+	// Enough without split.
 	unspent := &btc.ListUnspentResult{
-		ScriptPubKey: tP2PKH,
-		Amount:       float64(req) / 1e8,
+		ScriptPubKey:  tP2PKH,
+		Amount:        float64(req) / 1e8,
+		TxID:          tTxID,
+		Confirmations: 1,
+		Spendable:     true,
 	}
 	unspents := []*btc.ListUnspentResult{unspent}
+
 	queueBalance()
 	cl.queueResponse("listunspent", unspents)
 	if _, _, _, err := w.FundMultiOrder(mo, maxLock); err != nil {
 		t.Fatalf("error for simple path: %v", err)
 	}
-
-	// Enough without split.
-	queueBalance()
-	cl.queueResponse("listunspent", unspents)
-	if _, _, _, err := w.FundMultiOrder(mo, maxLock); err != nil {
-		t.Fatalf("error for simple path: %v", err)
-	}
-
-	// DRAFT TODO: Test with split
-
 }

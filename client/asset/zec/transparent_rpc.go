@@ -43,8 +43,19 @@ type zTx struct {
 	blockHash *chainhash.Hash
 }
 
+type GetTransactionResult struct {
+	Confirmations int64  `json:"confirmations"`
+	BlockHash     string `json:"blockhash"`
+	// BlockIndex    int64  `json:"blockindex"` // unused, consider commenting
+	BlockTime    uint64    `json:"blocktime"`
+	TxID         string    `json:"txid"`
+	Time         uint64    `json:"time"`
+	TimeReceived uint64    `json:"timereceived"`
+	Bytes        dex.Bytes `json:"hex"`
+}
+
 func getTransaction(c rpcCaller, txHash *chainhash.Hash) (*zTx, error) {
-	var tx btc.GetTransactionResult
+	var tx GetTransactionResult
 	if err := c.CallRPC("gettransaction", []any{txHash.String()}, &tx); err != nil {
 		return nil, err
 	}

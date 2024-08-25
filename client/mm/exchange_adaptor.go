@@ -5,6 +5,7 @@ package mm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -1824,6 +1825,19 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, assetID uint32, a
 	addr, err := u.clientCore.NewDepositAddress(assetID)
 	if err != nil {
 		return err
+	}
+
+	// Pull transparent address out of unified address. There may be a different
+	// field "exchangeAddress" once we add support for the new special encoding
+	// required on binance global for zec and firo.
+	if strings.HasPrefix(addr, "unified:") {
+		var addrs struct {
+			Transparent string `json:"transparent"`
+		}
+		if err := json.Unmarshal([]byte(addr[len("unified:"):]), &addrs); err != nil {
+			return fmt.Errorf("error decoding unified address %q: %v", addr, err)
+		}
+		addr = addrs.Transparent
 	}
 
 	u.balancesMtx.Lock()
