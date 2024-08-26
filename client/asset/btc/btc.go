@@ -2626,7 +2626,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 			Address: outputAddresses[i].String(),
 		}
 	}
-	btc.cm.LockOutputs(locks)
+	btc.cm.LockUTXOs(locks)
 	btc.node.lockUnspent(false, ops)
 
 	var totalOut uint64
@@ -2760,8 +2760,7 @@ func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.
 		}
 	}
 
-	btc.cm.LockOutputs(locks)
-
+	btc.cm.LockUTXOs(locks)
 	btc.node.lockUnspent(false, spents)
 
 	return coins, redeemScripts, splitFees, nil
@@ -3360,7 +3359,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 
 		// Log it as a fundingCoin, since it is expected that this will be
 		// chained into further matches.
-		btc.cm.LockOutputs([]*UTxO{{
+		btc.cm.LockUTXOs([]*UTxO{{
 			TxHash:  newChange.txHash(),
 			Vout:    newChange.vout(),
 			Address: newChange.String(),
@@ -3880,7 +3879,7 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 		})
 	}
 
-	btc.cm.LockOutputs(locks)
+	btc.cm.LockUTXOs(locks)
 	btc.cm.UnlockOutPoints(pts)
 
 	return receipts, changeCoin, fees, nil

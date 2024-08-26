@@ -36,18 +36,26 @@ type utxoWallet struct {
 func newUtxoWallet(ctx context.Context, symbol string) (*utxoWallet, error) {
 	symbol = strings.ToLower(symbol)
 	dir := filepath.Join(dextestDir, symbol, "harness-ctl")
-	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "./alpha", "getnewaddress")
-	cmd.Dir = dir
-	addr, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("getnewaddress error with output = %q, err = %v", string(addr), err)
+	var addr string
+	switch symbol {
+	case "zec":
+		addr = "tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD"
+	default:
+		ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "./alpha", "getnewaddress")
+		cmd.Dir = dir
+		addrB, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("getnewaddress error with output = %q, err = %v", string(addrB), err)
+		}
+		addr = string(addrB)
 	}
+
 	return &utxoWallet{
 		symbol: symbol,
 		dir:    dir,
-		addr:   strings.TrimSpace(string(addr)),
+		addr:   strings.TrimSpace(addr),
 	}, nil
 }
 
@@ -180,7 +188,7 @@ func (w *evmWallet) Send(ctx context.Context, addr, coin string, amt float64) (s
 
 func newWallet(ctx context.Context, symbol string) (w Wallet, err error) {
 	switch strings.ToLower(symbol) {
-	case "btc", "dcr":
+	case "btc", "dcr", "zec":
 		w, err = newUtxoWallet(ctx, symbol)
 	case "eth", "matic", "polygon":
 		w, err = newEvmWallet(ctx, symbol)
