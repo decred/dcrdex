@@ -527,8 +527,10 @@ func (c *CoinManager) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	return coins, nil
 }
 
-// LockOutputs locks the specified utxos.
-func (c *CoinManager) LockOutputs(utxos []*UTxO) {
+// LockUTXOs locks the specified utxos.
+// TODO: Move lockUnspent calls into this method instead of the caller doing it
+// at every callsite, and because that's what we do with unlocking.
+func (c *CoinManager) LockUTXOs(utxos []*UTxO) {
 	c.mtx.Lock()
 	for _, utxo := range utxos {
 		c.lockedOutputs[NewOutPoint(utxo.TxHash, utxo.Vout)] = utxo

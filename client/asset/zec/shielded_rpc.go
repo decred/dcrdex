@@ -153,8 +153,8 @@ const (
 
 // z_sendmany "fromaddress" [{"address":... ,"amount":...},...] ( minconf ) ( fee ) ( privacyPolicy )
 func zSendMany(c rpcCaller, fromAddress string, recips []*zSendManyRecipient, priv privacyPolicy) (operationID string, err error) {
-	const minConf, fee = 1, 0.00001
-	return operationID, c.CallRPC(methodZSendMany, []any{fromAddress, recips, minConf, fee, priv}, &operationID)
+	const minConf = 1
+	return operationID, c.CallRPC(methodZSendMany, []any{fromAddress, recips, minConf, nil, priv}, &operationID)
 }
 
 type opResult struct {

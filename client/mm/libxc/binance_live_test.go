@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -357,15 +358,15 @@ func TestGetCoinInfo(t *testing.T) {
 		if !coinLookup[c.Coin] {
 			continue
 		}
-		networks := make([]string, 0)
+		networkMins := make([]string, 0)
 		for _, n := range c.NetworkList {
 			if !n.DepositEnable || !n.WithdrawEnable {
 				fmt.Printf("%s on network %s not withdrawing and/or depositing. withdraw = %t, deposit = %t\n",
 					c.Coin, n.Network, n.WithdrawEnable, n.DepositEnable)
 			}
-			networks = append(networks, n.Network)
+			networkMins = append(networkMins, fmt.Sprintf("{net: %s, min_withdraw: %.8f, withdraw_fee: %.8f}", n.Network, n.WithdrawMin, n.WithdrawFee))
 		}
-		fmt.Printf("%q networks: %+v \n", c.Coin, networks)
+		fmt.Printf("%q network mins: %+v \n", c.Coin, strings.Join(networkMins, ", "))
 	}
 }
 

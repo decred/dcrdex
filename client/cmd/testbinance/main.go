@@ -60,6 +60,7 @@ var (
 			makeMarket("dcr", "btc"),
 			makeMarket("eth", "btc"),
 			makeMarket("dcr", "usdc"),
+			makeMarket("zec", "btc"),
 		},
 	}
 
@@ -68,6 +69,7 @@ var (
 		makeCoinInfo("ETH", "ETH", true, true, 0.00035, 0.008),
 		makeCoinInfo("DCR", "DCR", true, true, 0.00001000, 0.05),
 		makeCoinInfo("USDC", "MATIC", true, true, 0.01000, 10),
+		makeCoinInfo("ZEC", "ZEC", true, true, 0.00500000, 0.01000000),
 	}
 
 	coinpapAssets = []*fiatrates.CoinpaprikaAsset{
@@ -75,6 +77,7 @@ var (
 		makeCoinpapAsset(42, "dcr", "Decred"),
 		makeCoinpapAsset(60, "eth", "Ethereum"),
 		makeCoinpapAsset(966001, "usdc.polygon", "USDC"),
+		makeCoinpapAsset(133, "zec", "Zcash"),
 	}
 
 	initialBalances = []*bntypes.Balance{
@@ -82,6 +85,7 @@ var (
 		makeBalance("dcr", 10000),
 		makeBalance("eth", 5),
 		makeBalance("usdc", 1152),
+		makeBalance("zec", 10000),
 	}
 )
 
