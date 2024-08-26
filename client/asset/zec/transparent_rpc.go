@@ -256,8 +256,8 @@ func getRPCBlockHeader(c rpcCaller, blockHash *chainhash.Hash) (*btc.BlockHeader
 	return blkHeader, nil
 }
 
-func getWalletTransaction(c rpcCaller, txHash *chainhash.Hash) (*btc.GetTransactionResult, error) {
-	var tx btc.GetTransactionResult
+func getWalletTransaction(c rpcCaller, txHash *chainhash.Hash) (*GetTransactionResult, error) {
+	var tx GetTransactionResult
 	err := c.CallRPC("gettransaction", []any{txHash.String()}, &tx)
 	if err != nil {
 		if btc.IsTxNotFoundErr(err) {

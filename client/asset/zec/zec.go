@@ -512,7 +512,22 @@ func (w *zecWallet) prepareRedemptionFinder() {
 	w.rf = btc.NewRedemptionFinder(
 		w.log,
 		func(h *chainhash.Hash) (*btc.GetTransactionResult, error) {
-			return getWalletTransaction(w, h)
+			tx, err := getWalletTransaction(w, h)
+			if err != nil {
+				return nil, err
+			}
+			if tx.Confirmations < 0 {
+				tx.Confirmations = 0
+			}
+			return &btc.GetTransactionResult{
+				Confirmations: uint64(tx.Confirmations),
+				BlockHash:     tx.BlockHash,
+				BlockTime:     tx.BlockTime,
+				TxID:          tx.TxID,
+				Time:          tx.Time,
+				TimeReceived:  tx.TimeReceived,
+				Bytes:         tx.Bytes,
+			}, nil
 		},
 		func(h *chainhash.Hash) (int32, error) {
 			return getBlockHeight(w, h)
@@ -1565,8 +1580,11 @@ func (w *zecWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemp
 	// mempool for a long amount of time, possibly requiring some action by
 	// us to get it unstuck.
 	if err == nil {
+		if tx.Confirmations < 0 {
+			tx.Confirmations = 0
+		}
 		return &asset.ConfirmRedemptionStatus{
-			Confs:  tx.Confirmations,
+			Confs:  uint64(tx.Confirmations),
 			Req:    requiredRedeemConfirms,
 			CoinID: coinID,
 		}, nil
@@ -2219,12 +2237,15 @@ func (w *zecWallet) TransactionConfirmations(ctx context.Context, txID string) (
 	if err != nil {
 		return 0, fmt.Errorf("error decoding txid %q: %w", txID, err)
 	}
-	res, err := getWalletTransaction(w, txHash)
+	tx, err := getWalletTransaction(w, txHash)
 	if err != nil {
 		return 0, err
 	}
+	if tx.Confirmations < 0 {
+		tx.Confirmations = 0
+	}
 
-	return uint32(res.Confirmations), nil
+	return uint32(tx.Confirmations), nil
 }
 
 // send the value to the address, with the given fee rate. If subtract is true,
@@ -2505,6 +2526,9 @@ func (w *zecWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contract 
 			return 0, false, asset.CoinNotFoundError
 		}
 		return 0, false, newError(errNoTx, "gettransaction error; %w", err)
+	}
+	if tx.Confirmations < 0 {
+		tx.Confirmations = 0
 	}
 	return uint32(tx.Confirmations), true, nil
 }
