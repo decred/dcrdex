@@ -228,7 +228,7 @@ func (conn *wsConn) setConnectionStatus(status ConnectionStatus) {
 // connect attempts to establish a websocket connection.
 func (conn *wsConn) connect(ctx context.Context) error {
 	dialer := &websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
+		HandshakeTimeout: DefaultResponseTimeout,
 		TLSClientConfig:  conn.tlsCfg,
 	}
 	if conn.cfg.NetDialContext != nil {
