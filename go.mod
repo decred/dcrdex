@@ -4,8 +4,10 @@ go 1.21
 
 require (
 	decred.org/dcrwallet/v4 v4.1.1
+	filippo.io/edwards25519 v1.0.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
+	github.com/athanorlabs/go-dleq v0.1.0
 	github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/btcsuite/btcd/btcutil v1.1.5
