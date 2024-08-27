@@ -8111,14 +8111,15 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 				return nil, errors.New("tor must be configured for .onion addresses")
 			}
 			proxyAddr = c.cfg.Onion
+
+			wsURL.Scheme = "ws"
+			wsCfg.URL = wsURL.String()
 		}
 		proxy := &socks.Proxy{
 			Addr:         proxyAddr,
 			TorIsolation: c.cfg.TorIsolation, // need socks.NewPool with isolation???
 		}
 		wsCfg.NetDialContext = proxy.DialContext
-		wsURL.Scheme = "ws"
-		wsCfg.URL = wsURL.String()
 	}
 
 	wsCfg.ConnectEventFunc = func(status comms.ConnectionStatus) {
