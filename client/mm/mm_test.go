@@ -556,7 +556,7 @@ func newTBotCEXAdaptor() *tBotCexAdaptor {
 
 var _ botCexAdaptor = (*tBotCexAdaptor)(nil)
 
-var tLogger = dex.StdOutLogger("mm_TEST", dex.LevelTrace)
+var tLogger = dex.StdOutLogger("mm_TEST", dex.LevelInfo)
 
 func (c *tBotCexAdaptor) CEXBalance(assetID uint32) (*BotBalance, error) {
 	return c.balances[assetID], c.balanceErr
