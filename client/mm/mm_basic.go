@@ -10,6 +10,7 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
@@ -165,13 +166,27 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 	oracleRate := b.msgRate(b.oracle.getMarketPrice(b.baseID, b.quoteID))
 	b.log.Tracef("oracle rate = %s", b.fmtRate(oracleRate))
 
+	rateFromFiat := b.core.ExchangeRateFromFiatSources()
+	if rateFromFiat == 0 {
+		b.log.Meter("basisPrice_nofiat_"+b.market.name, time.Hour).Warn(
+			"No fiat-based rate estimate(s) available for sanity check for %s", b.market.name,
+		)
+		return oracleRate
+	}
 	if oracleRate == 0 {
-		oracleRate = b.core.ExchangeRateFromFiatSources()
-		if oracleRate == 0 {
-			return 0
-		}
-
-		b.log.Tracef("using fiat rate = %s", b.fmtRate(oracleRate))
+		b.log.Meter("basisPrice_nooracle_"+b.market.name, time.Hour).Infof(
+			"No oracle rate available. Using fiat-derived basis rate = %s for %s", b.fmtRate(rateFromFiat), b.market.name,
+		)
+		return rateFromFiat
+	}
+	mismatch := math.Abs((float64(oracleRate) - float64(rateFromFiat)) / float64(oracleRate))
+	const maxOracleFiatMismatch = 0.05
+	if mismatch > maxOracleFiatMismatch {
+		b.log.Meter("basisPrice_sanity_fail+"+b.market.name, time.Minute*20).Warnf(
+			"Oracle rate sanity check failed for %s. oracle rate = %s, rate from fiat = %s",
+			b.market.name, b.market.fmtRate(oracleRate), b.market.fmtRate(rateFromFiat),
+		)
+		return 0
 	}
 
 	return steppedRate(oracleRate, b.rateStep)

@@ -24,6 +24,11 @@ import (
 const (
 	oraclePriceExpiration = time.Minute * 10
 	oracleRecheckInterval = time.Minute * 3
+
+	// If the total USD volume of all oracles is less than
+	// minimumUSDVolumeForOraclesAvg, the oracles will be ignored for
+	// pricing averages.
+	minimumUSDVolumeForOraclesAvg = 100_000
 )
 
 // MarketReport contains a market's rates on various exchanges and the fiat
@@ -265,12 +270,22 @@ func fetchMarketPrice(ctx context.Context, baseID, quoteID uint32, log dex.Logge
 		return 0, nil, err
 	}
 
-	price, err := oracleAverage(oracles, log)
+	price, usdVolume, err := oracleAverage(oracles, log)
+	if err != nil {
+		return 0, nil, err
+	}
+	if usdVolume < minimumUSDVolumeForOraclesAvg {
+		log.Meter("oracle_low_volume_"+b.Symbol+"_"+q.Symbol, 12*time.Hour).Infof(
+			"rejecting oracle average price for %s. not enough volume (%.2f USD < %.2f)",
+			b.Symbol+"_"+q.Symbol, usdVolume, float32(minimumUSDVolumeForOraclesAvg),
+		)
+		return 0, oracles, nil
+	}
 	return price, oracles, err
 }
 
-func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
-	var weightedSum, usdVolume float64
+func oracleAverage(mkts []*OracleReport, log dex.Logger) (rate, usdVolume float64, _ error) {
+	var weightedSum float64
 	var n int
 	for _, mkt := range mkts {
 		n++
@@ -278,13 +293,13 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 		usdVolume += mkt.USDVol
 	}
 	if usdVolume == 0 {
-		return 0, nil // No markets have data. OK.
+		return 0, 0, nil // No markets have data. OK.
 	}
 
-	rate := weightedSum / usdVolume
+	rate = weightedSum / usdVolume
 	// TODO: Require a minimum USD volume?
 	log.Tracef("marketAveragedPrice: price calculated from %d markets: rate = %f, USD volume = %f", n, rate, usdVolume)
-	return rate, nil
+	return rate, usdVolume, nil
 }
 
 func getRates(ctx context.Context, url string, thing any) (err error) {
@@ -325,7 +340,7 @@ func spread(ctx context.Context, addr string, baseSymbol, quoteSymbol string, lo
 	}
 	sell, buy, err = s(ctx, baseSymbol, quoteSymbol, log)
 	if err != nil {
-		log.Errorf("Error getting spread from %q: %v", addr, err)
+		log.Meter("spread_"+addr, time.Hour*12).Errorf("Error getting spread from %q: %v", addr, err)
 		return 0, 0
 	}
 	return sell, buy
@@ -351,7 +366,8 @@ func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, l
 		QuoteCurrencyID string                   `json:"quote_currency_id"`
 		MarketURL       string                   `json:"market_url"`
 		LastUpdated     time.Time                `json:"last_updated"`
-		TrustScore      string                   `json:"trust_score"`
+		TrustScore      string                   `json:"trust_score"` // TrustScore appears to be deprecated?
+		Outlier         bool                     `json:"outlier"`
 		Quotes          map[string]*coinpapQuote `json:"quotes"`
 	}
 
@@ -375,7 +391,7 @@ func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, l
 
 	// Create filter for desirable matches.
 	marketMatches := func(mkt *coinpapMarket) bool {
-		if mkt.TrustScore != "high" {
+		if mkt.TrustScore != "high" || mkt.Outlier {
 			return false
 		}
 
@@ -441,23 +457,36 @@ func oracleMarketReport(ctx context.Context, b, q *fiatrates.CoinpaprikaAsset, l
 type Spreader func(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error)
 
 var spreaders = map[string]Spreader{
-	"binance.com":  fetchBinanceSpread,
+	"binance.com":  fetchBinanceGlobalSpread,
+	"binance.us":   fetchBinanceUSSpread,
 	"coinbase.com": fetchCoinbaseSpread,
 	"bittrex.com":  fetchBittrexSpread,
 	"hitbtc.com":   fetchHitBTCSpread,
 	"exmo.com":     fetchEXMOSpread,
 }
 
-var binanceGlobalIs451 atomic.Bool
+var binanceGlobalIs451, binanceUSIs451 atomic.Bool
 
-func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error) {
+func fetchBinanceGlobalSpread(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error) {
+	if binanceGlobalIs451.Load() {
+		return 0, 0, nil
+	}
+	return fetchBinanceSpread(ctx, baseSymbol, quoteSymbol, false, log)
+}
+
+func fetchBinanceUSSpread(ctx context.Context, baseSymbol, quoteSymbol string, log dex.Logger) (sell, buy float64, err error) {
+	if binanceUSIs451.Load() {
+		return 0, 0, nil
+	}
+	return fetchBinanceSpread(ctx, baseSymbol, quoteSymbol, true, log)
+}
+
+func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string, isUS bool, log dex.Logger) (sell, buy float64, err error) {
 	slug := fmt.Sprintf("%s%s", strings.ToUpper(baseSymbol), strings.ToUpper(quoteSymbol))
 	var url string
-	var isGlobal bool
-	if binanceGlobalIs451.Load() {
+	if isUS {
 		url = fmt.Sprintf("https://api.binance.us/api/v3/ticker/bookTicker?symbol=%s", slug)
 	} else {
-		isGlobal = true
 		url = fmt.Sprintf("https://api.binance.com/api/v3/ticker/bookTicker?symbol=%s", slug)
 	}
 
@@ -465,11 +494,16 @@ func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string, log
 		BidPrice float64 `json:"bidPrice,string"`
 		AskPrice float64 `json:"askPrice,string"`
 	}
+
 	code, err := getHTTPWithCode(ctx, url, &resp)
 	if err != nil {
-		if isGlobal && code == http.StatusUnavailableForLegalReasons && binanceGlobalIs451.CompareAndSwap(false, true) {
-			log.Info("Binance Global responded with a 451. Oracle will use Binance U.S.")
-			return fetchBinanceSpread(ctx, baseSymbol, quoteSymbol, log)
+		if code == http.StatusUnavailableForLegalReasons {
+			if isUS && binanceUSIs451.CompareAndSwap(false, true) {
+				log.Debugf("Binance U.S. responded with a 451. Disabling")
+			} else if !isUS && binanceGlobalIs451.CompareAndSwap(false, true) {
+				log.Debugf("Binance Global responded with a 451. Disabling")
+			}
+			return 0, 0, nil
 		}
 		return 0, 0, err
 	}
@@ -553,8 +587,4 @@ func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string, _ dex.
 	}
 
 	return mkt.AskTop, mkt.BidTop, nil
-}
-
-func shortSymbol(symbol string) string {
-	return strings.Split(symbol, ".")[0]
 }
