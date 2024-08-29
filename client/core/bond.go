@@ -706,7 +706,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 
 		bondCfg := c.dexBondConfig(dc, now)
 		if len(bondCfg.bondAssets) == 0 {
-			if !dc.IsDown() {
+			if !dc.IsDown() && dc.config() != nil {
 				dc.log.Meter("no-bond-assets", time.Minute*10).Warnf("Zero bond assets reported for apparently connected DCRDEX server")
 			}
 			continue

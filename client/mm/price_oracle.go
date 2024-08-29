@@ -276,7 +276,7 @@ func fetchMarketPrice(ctx context.Context, baseID, quoteID uint32, log dex.Logge
 	}
 	if usdVolume < minimumUSDVolumeForOraclesAvg {
 		log.Meter("oracle_low_volume_"+b.Symbol+"_"+q.Symbol, 12*time.Hour).Infof(
-			"rejecting oracle average price for %s. not enough volume (%.2f USD < %.2f)",
+			"Rejecting oracle average price for %s. not enough volume (%.2f USD < %.2f)",
 			b.Symbol+"_"+q.Symbol, usdVolume, float32(minimumUSDVolumeForOraclesAvg),
 		)
 		return 0, oracles, nil
