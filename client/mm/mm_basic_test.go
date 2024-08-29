@@ -45,8 +45,14 @@ func TestBasisPrice(t *testing.T) {
 		{
 			name:        "oracle price",
 			oraclePrice: 2000,
-			fiatRate:    1000,
+			fiatRate:    1900,
 			exp:         2000,
+		},
+		{
+			name:        "failed sanity check",
+			oraclePrice: 2000,
+			fiatRate:    1850, // mismatch > 5%
+			exp:         0,
 		},
 		{
 			name:        "no oracle price",
