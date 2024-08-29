@@ -101,7 +101,7 @@ function build_targets() {
 	mkdir -p "${APP_EXCE_DIR}"
 
     pushd ..
-    GOOS=${OS} GOARCH=${ARCH} go build -v -trimpath ${TAGS_DEXC:+-tags ${TAGS_DEXC}} -o "${APP_EXCE_DIR}/${APP_NAME}" -ldflags "${LDFLAGS_DEXC:-${LDFLAGS_BASE}}"
+    GOOS=${OS} GOARCH=${ARCH} CGO_ENABLED=1 go build -v -trimpath ${TAGS_DEXC:+-tags ${TAGS_DEXC}} -o "${APP_EXCE_DIR}/${APP_NAME}" -ldflags "${LDFLAGS_DEXC:-${LDFLAGS_BASE}}"
     popd
 
 	./create-dmg.sh \
@@ -120,7 +120,7 @@ function build_targets() {
   done
 }
 
-TARGETS="darwin/amd64" # unable to build for darwin/arm64 on a darwin/amd64 machine.
+TARGETS="darwin/amd64 darwin/arm64"
 FLAVOR="-tray"
 TAGS_DEXC="systray"
 prepare
