@@ -171,13 +171,16 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 		b.log.Meter("basisPrice_nofiat_"+b.market.name, time.Hour).Warn(
 			"No fiat-based rate estimate(s) available for sanity check for %s", b.market.name,
 		)
-		return oracleRate
+		if oracleRate == 0 { // steppedRate(0, x) => x, so we have to handle this.
+			return 0
+		}
+		return steppedRate(oracleRate, b.rateStep)
 	}
 	if oracleRate == 0 {
 		b.log.Meter("basisPrice_nooracle_"+b.market.name, time.Hour).Infof(
 			"No oracle rate available. Using fiat-derived basis rate = %s for %s", b.fmtRate(rateFromFiat), b.market.name,
 		)
-		return rateFromFiat
+		return steppedRate(rateFromFiat, b.rateStep)
 	}
 	mismatch := math.Abs((float64(oracleRate) - float64(rateFromFiat)) / float64(oracleRate))
 	const maxOracleFiatMismatch = 0.05
