@@ -83,14 +83,27 @@ type client struct {
 	xmr *rpc.Client
 	dcr *combinedClient
 
-	kbvf, kbsf, kbvl, kbsl, vkbv *edwards.PrivateKey
-	pkbsf, pkbs                  *edwards.PublicKey
-	kaf, kal                     *secp256k1.PrivateKey
-	pkal, pkaf, pkasl, pkbsl     *secp256k1.PublicKey
-	kbsfDleag, kbslDleag         []byte
-	lockTxEsig                   *adaptorsigs.AdaptorSignature
-	lockTx                       *wire.MsgTx
-	vIn                          int
+	viewKey                                                                *edwards.PrivateKey
+	pubSpendKeyf, pubSpendKey                                              *edwards.PublicKey
+	pubInitSignKeyHalf, pubPartSignKeyHalf, pubSpendKeyProof, pubSpendKeyl *secp256k1.PublicKey
+	partSpendKeyHalfDleag, initSpendKeyHalfDleag                           []byte
+	lockTxEsig                                                             *adaptorsigs.AdaptorSignature
+	lockTx                                                                 *wire.MsgTx
+	vIn                                                                    int
+}
+
+// initClient is the swap initiator.
+type initClient struct {
+	*client
+	initSpendKeyHalf *edwards.PrivateKey
+	initSignKeyHalf  *secp256k1.PrivateKey
+}
+
+// partClient is the participator.
+type partClient struct {
+	*client
+	partSpendKeyHalf *edwards.PrivateKey
+	partSignKeyHalf  *secp256k1.PrivateKey
 }
 
 func newRPCWallet(settings map[string]string, logger dex.Logger, net dex.Network) (*combinedClient, error) {
@@ -311,109 +324,108 @@ func run(ctx context.Context) error {
 }
 
 // generateDleag starts the trade by creating some keys.
-func (c *client) generateDleag(ctx context.Context) (pkbsf *edwards.PublicKey, kbvf *edwards.PrivateKey,
-	pkaf *secp256k1.PublicKey, dleag []byte, err error) {
+func (c *partClient) generateDleag(ctx context.Context) (pubSpendKeyf *edwards.PublicKey, kbvf *edwards.PrivateKey,
+	pubPartSignKeyHalf *secp256k1.PublicKey, dleag []byte, err error) {
 	fail := func(err error) (*edwards.PublicKey, *edwards.PrivateKey,
 		*secp256k1.PublicKey, []byte, error) {
 		return nil, nil, nil, nil, err
 	}
 	// This private key is shared with bob and becomes half of the view key.
-	c.kbvf, err = edwards.GeneratePrivateKey()
+	kbvf, err = edwards.GeneratePrivateKey()
 	if err != nil {
 		return fail(err)
 	}
 
 	// Not shared. Becomes half the spend key. The pubkey is shared.
-	c.kbsf, err = edwards.GeneratePrivateKey()
+	c.partSpendKeyHalf, err = edwards.GeneratePrivateKey()
 	if err != nil {
 		return fail(err)
 	}
-	c.pkbsf = c.kbsf.PubKey()
+	c.pubSpendKeyf = c.partSpendKeyHalf.PubKey()
 
 	// Not shared. This is used for all dcr signatures. Using a wallet
 	// address because funds may go here in the case of success. Any address
 	// would work for the spendTx though.
-	kafAddr, err := c.dcr.GetNewAddress(ctx, "default")
+	partSignKeyHalfAddr, err := c.dcr.GetNewAddress(ctx, "default")
 	if err != nil {
 		return fail(err)
 	}
-	kafWIF, err := c.dcr.DumpPrivKey(ctx, kafAddr)
+	partSignKeyHalfWIF, err := c.dcr.DumpPrivKey(ctx, partSignKeyHalfAddr)
 	if err != nil {
 		return fail(err)
 	}
-	c.kaf = secp256k1.PrivKeyFromBytes(kafWIF.PrivKey())
+	c.partSignKeyHalf = secp256k1.PrivKeyFromBytes(partSignKeyHalfWIF.PrivKey())
 
 	// Share this pubkey with the other party.
-	c.pkaf = c.kaf.PubKey()
+	c.pubPartSignKeyHalf = c.partSignKeyHalf.PubKey()
 
-	c.kbsfDleag, err = adaptorsigs.ProveDLEQ(c.kbsf.Serialize())
+	c.partSpendKeyHalfDleag, err = adaptorsigs.ProveDLEQ(c.partSpendKeyHalf.Serialize())
 	if err != nil {
 		return fail(err)
 	}
 
-	c.pkasl, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.kbsfDleag)
+	c.pubSpendKeyProof, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.partSpendKeyHalfDleag)
 	if err != nil {
 		return fail(err)
 	}
 
-	return c.pkbsf, c.kbvf, c.pkaf, c.kbsfDleag, nil
+	return c.pubSpendKeyf, kbvf, c.pubPartSignKeyHalf, c.partSpendKeyHalfDleag, nil
 }
 
 // generateLockTxn creates even more keys and some transactions.
-func (c *client) generateLockTxn(ctx context.Context, pkbsf *edwards.PublicKey,
-	kbvf *edwards.PrivateKey, pkaf *secp256k1.PublicKey, kbsfDleag []byte) (refundSig,
+func (c *initClient) generateLockTxn(ctx context.Context, pubSpendKeyf *edwards.PublicKey,
+	kbvf *edwards.PrivateKey, pubPartSignKeyHalf *secp256k1.PublicKey, partSpendKeyHalfDleag []byte) (refundSig,
 	lockRefundTxScript, lockTxScript []byte, refundTx, spendRefundTx *wire.MsgTx, lockTxVout int,
-	pkbs *edwards.PublicKey, vkbv *edwards.PrivateKey, dleag []byte, bdcrpk *secp256k1.PublicKey, err error) {
+	pubSpendKey *edwards.PublicKey, viewKey *edwards.PrivateKey, dleag []byte, bdcrpk *secp256k1.PublicKey, err error) {
 
 	fail := func(err error) ([]byte, []byte, []byte, *wire.MsgTx, *wire.MsgTx, int, *edwards.PublicKey, *edwards.PrivateKey, []byte, *secp256k1.PublicKey, error) {
 		return nil, nil, nil, nil, nil, 0, nil, nil, nil, nil, err
 	}
-	c.kbsfDleag = kbsfDleag
-	c.pkasl, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.kbsfDleag)
+	c.partSpendKeyHalfDleag = partSpendKeyHalfDleag
+	c.pubSpendKeyProof, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.partSpendKeyHalfDleag)
 	if err != nil {
 		return fail(err)
 	}
-	c.kbvf = kbvf
-	c.pkbsf = pkbsf
-	c.pkaf = pkaf
+	c.pubSpendKeyf = pubSpendKeyf
+	c.pubPartSignKeyHalf = pubPartSignKeyHalf
 
 	// This becomes the other half of the view key.
-	c.kbvl, err = edwards.GeneratePrivateKey()
+	kbvl, err := edwards.GeneratePrivateKey()
 	if err != nil {
 		return fail(err)
 	}
 
 	// This becomes the other half of the spend key and is shared.
-	c.kbsl, err = edwards.GeneratePrivateKey()
+	c.initSpendKeyHalf, err = edwards.GeneratePrivateKey()
 	if err != nil {
 		return fail(err)
 	}
 
 	// This kept private. This is used for all dcr signatures.
-	c.kal, err = secp256k1.GeneratePrivateKey()
+	c.initSignKeyHalf, err = secp256k1.GeneratePrivateKey()
 	if err != nil {
 		return fail(err)
 	}
 
-	pkal := c.kal.PubKey()
+	pubInitSignKeyHalf := c.initSignKeyHalf.PubKey()
 
 	// This is the full xmr view key and is shared. Alice can also calculate
 	// it using kbvl.
-	vkbvBig := scalarAdd(c.kbvf.GetD(), c.kbvl.GetD())
-	vkbvBig.Mod(vkbvBig, curve.N)
-	var vkbvBytes [32]byte
-	vkbvBig.FillBytes(vkbvBytes[:])
-	c.vkbv, _, err = edwards.PrivKeyFromScalar(vkbvBytes[:])
+	viewKeyBig := scalarAdd(kbvf.GetD(), kbvl.GetD())
+	viewKeyBig.Mod(viewKeyBig, curve.N)
+	var viewKeyBytes [32]byte
+	viewKeyBig.FillBytes(viewKeyBytes[:])
+	c.viewKey, _, err = edwards.PrivKeyFromScalar(viewKeyBytes[:])
 	if err != nil {
-		return fail(fmt.Errorf("unable to create vkbv: %v", err))
+		return fail(fmt.Errorf("unable to create viewKey: %v", err))
 	}
 
 	// The public key for the xmr spend key. No party knows the full private
 	// key yet.
-	c.pkbs = sumPubKeys(c.kbsl.PubKey(), c.pkbsf)
+	c.pubSpendKey = sumPubKeys(c.initSpendKeyHalf.PubKey(), c.pubSpendKeyf)
 
 	// The lock tx is the initial dcr transaction.
-	lockTxScript, err = dcradaptor.LockTxScript(pkal.SerializeCompressed(), c.pkaf.SerializeCompressed())
+	lockTxScript, err = dcradaptor.LockTxScript(pubInitSignKeyHalf.SerializeCompressed(), c.pubPartSignKeyHalf.SerializeCompressed())
 	if err != nil {
 		return fail(err)
 	}
@@ -464,7 +476,7 @@ func (c *client) generateLockTxn(ctx context.Context, pkbsf *edwards.PublicKey,
 
 	// The refund tx does not outright refund but moves funds to the refund
 	// script's address. This is signed by both parties before the initial tx.
-	lockRefundTxScript, err = dcradaptor.LockRefundTxScript(pkal.SerializeCompressed(), c.pkaf.SerializeCompressed(), durationLocktime)
+	lockRefundTxScript, err = dcradaptor.LockRefundTxScript(pubInitSignKeyHalf.SerializeCompressed(), c.pubPartSignKeyHalf.SerializeCompressed(), durationLocktime)
 	if err != nil {
 		return fail(err)
 	}
@@ -487,7 +499,7 @@ func (c *client) generateLockTxn(ctx context.Context, pkbsf *edwards.PublicKey,
 	refundTx.AddTxIn(txIn)
 
 	// This sig must be shared with Alice.
-	refundSig, err = sign.RawTxInSignature(refundTx, c.vIn, lockTxScript, txscript.SigHashAll, c.kal.Serialize(), dcrec.STSchnorrSecp256k1)
+	refundSig, err = sign.RawTxInSignature(refundTx, c.vIn, lockTxScript, txscript.SigHashAll, c.initSignKeyHalf.Serialize(), dcrec.STSchnorrSecp256k1)
 	if err != nil {
 		return fail(err)
 	}
@@ -514,27 +526,27 @@ func (c *client) generateLockTxn(ctx context.Context, pkbsf *edwards.PublicKey,
 	spendRefundTx.AddTxIn(txIn)
 	spendRefundTx.Version = wire.TxVersionTreasury
 
-	c.kbslDleag, err = adaptorsigs.ProveDLEQ(c.kbsl.Serialize())
+	c.initSpendKeyHalfDleag, err = adaptorsigs.ProveDLEQ(c.initSpendKeyHalf.Serialize())
 	if err != nil {
 		return fail(err)
 	}
-	c.pkbsl, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.kbslDleag)
+	c.pubSpendKeyl, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.initSpendKeyHalfDleag)
 	if err != nil {
 		return fail(err)
 	}
 
-	return refundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, c.vIn, c.pkbs, c.vkbv, c.kbslDleag, pkal, nil
+	return refundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, c.vIn, c.pubSpendKey, c.viewKey, c.initSpendKeyHalfDleag, pubInitSignKeyHalf, nil
 }
 
 // generateRefundSigs signs the refund tx and shares the spendRefund esig that
 // allows bob to spend the refund tx.
-func (c *client) generateRefundSigs(refundTx, spendRefundTx *wire.MsgTx, vIn int, lockTxScript, lockRefundTxScript []byte, dleag []byte) (esig *adaptorsigs.AdaptorSignature, refundSig []byte, err error) {
+func (c *partClient) generateRefundSigs(refundTx, spendRefundTx *wire.MsgTx, vIn int, lockTxScript, lockRefundTxScript []byte, dleag []byte) (esig *adaptorsigs.AdaptorSignature, refundSig []byte, err error) {
 	fail := func(err error) (*adaptorsigs.AdaptorSignature, []byte, error) {
 		return nil, nil, err
 	}
-	c.kbslDleag = dleag
+	c.initSpendKeyHalfDleag = dleag
 	c.vIn = vIn
-	c.pkbsl, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.kbslDleag)
+	c.pubSpendKeyl, err = adaptorsigs.ExtractSecp256k1PubKeyFromProof(c.initSpendKeyHalfDleag)
 	if err != nil {
 		return fail(err)
 	}
@@ -548,14 +560,14 @@ func (c *client) generateRefundSigs(refundTx, spendRefundTx *wire.MsgTx, vIn int
 	copy(h[:], hash)
 
 	jacobianBobPubKey := new(secp256k1.JacobianPoint)
-	c.pkbsl.AsJacobian(jacobianBobPubKey)
-	esig, err = adaptorsigs.PublicKeyTweakedAdaptorSig(c.kaf, h[:], jacobianBobPubKey)
+	c.pubSpendKeyl.AsJacobian(jacobianBobPubKey)
+	esig, err = adaptorsigs.PublicKeyTweakedAdaptorSig(c.partSignKeyHalf, h[:], jacobianBobPubKey)
 	if err != nil {
 		return fail(err)
 	}
 
 	// Share with bob.
-	refundSig, err = sign.RawTxInSignature(refundTx, c.vIn, lockTxScript, txscript.SigHashAll, c.kaf.Serialize(), dcrec.STSchnorrSecp256k1)
+	refundSig, err = sign.RawTxInSignature(refundTx, c.vIn, lockTxScript, txscript.SigHashAll, c.partSignKeyHalf.Serialize(), dcrec.STSchnorrSecp256k1)
 	if err != nil {
 		return fail(err)
 	}
@@ -564,15 +576,15 @@ func (c *client) generateRefundSigs(refundTx, spendRefundTx *wire.MsgTx, vIn int
 }
 
 // initDcr is the first transaction to happen and creates a dcr transaction.
-func (c *client) initDcr(ctx context.Context) (spendTx *wire.MsgTx, err error) {
+func (c *initClient) initDcr(ctx context.Context) (spendTx *wire.MsgTx, err error) {
 	fail := func(err error) (*wire.MsgTx, error) {
 		return nil, err
 	}
-	pkaslAddr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1(0, stdaddr.Hash160(c.pkaf.SerializeCompressed()), c.dcr.chainParams)
+	pubSpendKeyProofAddr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1(0, stdaddr.Hash160(c.pubPartSignKeyHalf.SerializeCompressed()), c.dcr.chainParams)
 	if err != nil {
 		return fail(err)
 	}
-	p2AddrScriptVer, p2AddrScript := pkaslAddr.PaymentScript()
+	p2AddrScriptVer, p2AddrScript := pubSpendKeyProofAddr.PaymentScript()
 
 	txOut := &wire.TxOut{
 		Value:    dcrAmt - dumbFee,
@@ -604,12 +616,12 @@ func (c *client) initDcr(ctx context.Context) (spendTx *wire.MsgTx, err error) {
 
 // initXmr sends an xmr transaciton. Alice can only do this after confirming the
 // dcr transaction.
-func (c *client) initXmr(ctx context.Context, vkbv *edwards.PrivateKey, pkbs *edwards.PublicKey) error {
-	c.vkbv = vkbv
-	c.pkbs = pkbs
+func (c *partClient) initXmr(ctx context.Context, viewKey *edwards.PrivateKey, pubSpendKey *edwards.PublicKey) error {
+	c.viewKey = viewKey
+	c.pubSpendKey = pubSpendKey
 	var fullPubKey []byte
-	fullPubKey = append(fullPubKey, c.pkbs.SerializeCompressed()...)
-	fullPubKey = append(fullPubKey, c.vkbv.PubKey().SerializeCompressed()...)
+	fullPubKey = append(fullPubKey, c.pubSpendKey.SerializeCompressed()...)
+	fullPubKey = append(fullPubKey, c.viewKey.PubKey().SerializeCompressed()...)
 
 	sharedAddr := base58.EncodeAddr(18, fullPubKey)
 
@@ -632,7 +644,7 @@ func (c *client) initXmr(ctx context.Context, vkbv *edwards.PrivateKey, pkbs *ed
 // sendLockTxSig allows Alice to redeem the dcr. If bob does not send this alice
 // can eventually take his btc. Otherwise bob refunding will reveal his half of
 // the xmr spend key allowing Alice to refund.
-func (c *client) sendLockTxSig(lockTxScript []byte, spendTx *wire.MsgTx) (esig *adaptorsigs.AdaptorSignature, err error) {
+func (c *initClient) sendLockTxSig(lockTxScript []byte, spendTx *wire.MsgTx) (esig *adaptorsigs.AdaptorSignature, err error) {
 	hash, err := txscript.CalcSignatureHash(lockTxScript, txscript.SigHashAll, spendTx, 0, nil)
 	if err != nil {
 		return nil, err
@@ -642,8 +654,8 @@ func (c *client) sendLockTxSig(lockTxScript []byte, spendTx *wire.MsgTx) (esig *
 	copy(h[:], hash)
 
 	jacobianAlicePubKey := new(secp256k1.JacobianPoint)
-	c.pkasl.AsJacobian(jacobianAlicePubKey)
-	esig, err = adaptorsigs.PublicKeyTweakedAdaptorSig(c.kal, h[:], jacobianAlicePubKey)
+	c.pubSpendKeyProof.AsJacobian(jacobianAlicePubKey)
+	esig, err = adaptorsigs.PublicKeyTweakedAdaptorSig(c.initSignKeyHalf, h[:], jacobianAlicePubKey)
 	if err != nil {
 		return nil, err
 	}
@@ -655,24 +667,24 @@ func (c *client) sendLockTxSig(lockTxScript []byte, spendTx *wire.MsgTx) (esig *
 
 // redeemDcr redeems the dcr, revealing a signature that reveals half of the xmr
 // spend key.
-func (c *client) redeemDcr(ctx context.Context, esig *adaptorsigs.AdaptorSignature, lockTxScript []byte, spendTx *wire.MsgTx, bobDCRPK *secp256k1.PublicKey) (kalSig []byte, err error) {
-	kasl := secp256k1.PrivKeyFromBytes(c.kbsf.Serialize())
+func (c *partClient) redeemDcr(ctx context.Context, esig *adaptorsigs.AdaptorSignature, lockTxScript []byte, spendTx *wire.MsgTx, bobDCRPK *secp256k1.PublicKey) (initSignKeyHalfSig []byte, err error) {
+	kasl := secp256k1.PrivKeyFromBytes(c.partSpendKeyHalf.Serialize())
 
-	kalSigShnorr, err := esig.Decrypt(&kasl.Key)
+	initSignKeyHalfSigShnorr, err := esig.Decrypt(&kasl.Key)
 	if err != nil {
 		return nil, err
 	}
-	kalSig = kalSigShnorr.Serialize()
-	kalSig = append(kalSig, byte(txscript.SigHashAll))
+	initSignKeyHalfSig = initSignKeyHalfSigShnorr.Serialize()
+	initSignKeyHalfSig = append(initSignKeyHalfSig, byte(txscript.SigHashAll))
 
-	kafSig, err := sign.RawTxInSignature(spendTx, 0, lockTxScript, txscript.SigHashAll, c.kaf.Serialize(), dcrec.STSchnorrSecp256k1)
+	partSignKeyHalfSig, err := sign.RawTxInSignature(spendTx, 0, lockTxScript, txscript.SigHashAll, c.partSignKeyHalf.Serialize(), dcrec.STSchnorrSecp256k1)
 	if err != nil {
 		return nil, err
 	}
 
 	spendSig, err := txscript.NewScriptBuilder().
-		AddData(kafSig).
-		AddData(kalSig).
+		AddData(partSignKeyHalfSig).
+		AddData(initSignKeyHalfSig).
 		AddData(lockTxScript).
 		Script()
 	if err != nil {
@@ -688,28 +700,28 @@ func (c *client) redeemDcr(ctx context.Context, esig *adaptorsigs.AdaptorSignatu
 
 	fmt.Println("Redeem Tx -", tx)
 
-	return kalSig, nil
+	return initSignKeyHalfSig, nil
 }
 
 // redeemXmr redeems xmr by creating a new xmr wallet with the complete spend
 // and view private keys.
-func (c *client) redeemXmr(ctx context.Context, kalSig []byte) (*rpc.Client, error) {
-	kalSigParsed, err := schnorr.ParseSignature(kalSig[:len(kalSig)-1])
+func (c *initClient) redeemXmr(ctx context.Context, initSignKeyHalfSig []byte) (*rpc.Client, error) {
+	initSignKeyHalfSigParsed, err := schnorr.ParseSignature(initSignKeyHalfSig[:len(initSignKeyHalfSig)-1])
 	if err != nil {
 		return nil, err
 	}
-	kaslRecoveredScalar, err := c.lockTxEsig.RecoverTweak(kalSigParsed)
+	kaslRecoveredScalar, err := c.lockTxEsig.RecoverTweak(initSignKeyHalfSigParsed)
 	if err != nil {
 		return nil, err
 	}
 	kaslRecoveredBytes := kaslRecoveredScalar.Bytes()
 	kaslRecovered := secp256k1.PrivKeyFromBytes(kaslRecoveredBytes[:])
 
-	kbsfRecovered, _, err := edwards.PrivKeyFromScalar(kaslRecovered.Serialize())
+	partSpendKeyHalfRecovered, _, err := edwards.PrivKeyFromScalar(kaslRecovered.Serialize())
 	if err != nil {
-		return nil, fmt.Errorf("unable to recover kbsf: %v", err)
+		return nil, fmt.Errorf("unable to recover partSpendKeyHalf: %v", err)
 	}
-	vkbsBig := scalarAdd(c.kbsl.GetD(), kbsfRecovered.GetD())
+	vkbsBig := scalarAdd(c.initSpendKeyHalf.GetD(), partSpendKeyHalfRecovered.GetD())
 	vkbsBig.Mod(vkbsBig, curve.N)
 	var vkbsBytes [32]byte
 	vkbsBig.FillBytes(vkbsBytes[:])
@@ -720,21 +732,21 @@ func (c *client) redeemXmr(ctx context.Context, kalSig []byte) (*rpc.Client, err
 
 	var fullPubKey []byte
 	fullPubKey = append(fullPubKey, vkbs.PubKey().Serialize()...)
-	fullPubKey = append(fullPubKey, c.vkbv.PubKey().Serialize()...)
+	fullPubKey = append(fullPubKey, c.viewKey.PubKey().Serialize()...)
 	walletAddr := base58.EncodeAddr(18, fullPubKey)
 	walletFileName := fmt.Sprintf("%s_spend", walletAddr)
 
-	var vkbvBytes [32]byte
-	copy(vkbvBytes[:], c.vkbv.Serialize())
+	var viewKeyBytes [32]byte
+	copy(viewKeyBytes[:], c.viewKey.Serialize())
 
 	reverse(&vkbsBytes)
-	reverse(&vkbvBytes)
+	reverse(&viewKeyBytes)
 
 	genReq := rpc.GenerateFromKeysRequest{
 		Filename: walletFileName,
 		Address:  walletAddr,
 		SpendKey: hex.EncodeToString(vkbsBytes[:]),
-		ViewKey:  hex.EncodeToString(vkbvBytes[:]),
+		ViewKey:  hex.EncodeToString(viewKeyBytes[:]),
 	}
 
 	xmrChecker, err := createNewXMRWallet(ctx, genReq)
@@ -746,10 +758,10 @@ func (c *client) redeemXmr(ctx context.Context, kalSig []byte) (*rpc.Client, err
 }
 
 // startRefund starts the refund and can be done by either party.
-func (c *client) startRefund(ctx context.Context, kalSig, kafSig, lockTxScript []byte, refundTx *wire.MsgTx) error {
+func (c *client) startRefund(ctx context.Context, initSignKeyHalfSig, partSignKeyHalfSig, lockTxScript []byte, refundTx *wire.MsgTx) error {
 	refundSig, err := txscript.NewScriptBuilder().
-		AddData(kafSig).
-		AddData(kalSig).
+		AddData(partSignKeyHalfSig).
+		AddData(initSignKeyHalfSig).
 		AddData(lockTxScript).
 		Script()
 	if err != nil {
@@ -769,23 +781,23 @@ func (c *client) startRefund(ctx context.Context, kalSig, kafSig, lockTxScript [
 }
 
 // refundDcr returns dcr to bob while revealing his half of the xmr spend key.
-func (c *client) refundDcr(ctx context.Context, spendRefundTx *wire.MsgTx, esig *adaptorsigs.AdaptorSignature, lockRefundTxScript []byte) (kafSig []byte, err error) {
-	kasf := secp256k1.PrivKeyFromBytes(c.kbsl.Serialize())
+func (c *initClient) refundDcr(ctx context.Context, spendRefundTx *wire.MsgTx, esig *adaptorsigs.AdaptorSignature, lockRefundTxScript []byte) (partSignKeyHalfSig []byte, err error) {
+	kasf := secp256k1.PrivKeyFromBytes(c.initSpendKeyHalf.Serialize())
 	decryptedSig, err := esig.Decrypt(&kasf.Key)
 	if err != nil {
 		return nil, err
 	}
-	kafSig = decryptedSig.Serialize()
-	kafSig = append(kafSig, byte(txscript.SigHashAll))
+	partSignKeyHalfSig = decryptedSig.Serialize()
+	partSignKeyHalfSig = append(partSignKeyHalfSig, byte(txscript.SigHashAll))
 
-	kalSig, err := sign.RawTxInSignature(spendRefundTx, 0, lockRefundTxScript, txscript.SigHashAll, c.kal.Serialize(), dcrec.STSchnorrSecp256k1)
+	initSignKeyHalfSig, err := sign.RawTxInSignature(spendRefundTx, 0, lockRefundTxScript, txscript.SigHashAll, c.initSignKeyHalf.Serialize(), dcrec.STSchnorrSecp256k1)
 	if err != nil {
 		return nil, err
 	}
 
 	refundSig, err := txscript.NewScriptBuilder().
-		AddData(kafSig).
-		AddData(kalSig).
+		AddData(partSignKeyHalfSig).
+		AddData(initSignKeyHalfSig).
 		AddOp(txscript.OP_TRUE).
 		AddData(lockRefundTxScript).
 		Script()
@@ -803,28 +815,28 @@ func (c *client) refundDcr(ctx context.Context, spendRefundTx *wire.MsgTx, esig 
 	fmt.Println("Refund tx -", tx)
 
 	// TODO: Confirm refund happened.
-	return kafSig, nil
+	return partSignKeyHalfSig, nil
 }
 
 // refundXmr refunds xmr but cannot happen without the dcr refund happening first.
-func (c *client) refundXmr(ctx context.Context, kafSig []byte, esig *adaptorsigs.AdaptorSignature) (*rpc.Client, error) {
-	kafSigParsed, err := schnorr.ParseSignature(kafSig[:len(kafSig)-1])
+func (c *partClient) refundXmr(ctx context.Context, partSignKeyHalfSig []byte, esig *adaptorsigs.AdaptorSignature) (*rpc.Client, error) {
+	partSignKeyHalfSigParsed, err := schnorr.ParseSignature(partSignKeyHalfSig[:len(partSignKeyHalfSig)-1])
 	if err != nil {
 		return nil, err
 	}
-	kbslRecoveredScalar, err := esig.RecoverTweak(kafSigParsed)
+	initSpendKeyHalfRecoveredScalar, err := esig.RecoverTweak(partSignKeyHalfSigParsed)
 	if err != nil {
 		return nil, err
 	}
 
-	kbslRecoveredBytes := kbslRecoveredScalar.Bytes()
-	kbslRecovered := secp256k1.PrivKeyFromBytes(kbslRecoveredBytes[:])
+	initSpendKeyHalfRecoveredBytes := initSpendKeyHalfRecoveredScalar.Bytes()
+	initSpendKeyHalfRecovered := secp256k1.PrivKeyFromBytes(initSpendKeyHalfRecoveredBytes[:])
 
-	kaslRecovered, _, err := edwards.PrivKeyFromScalar(kbslRecovered.Serialize())
+	kaslRecovered, _, err := edwards.PrivKeyFromScalar(initSpendKeyHalfRecovered.Serialize())
 	if err != nil {
 		return nil, fmt.Errorf("unable to recover kasl: %v", err)
 	}
-	vkbsBig := scalarAdd(c.kbsf.GetD(), kaslRecovered.GetD())
+	vkbsBig := scalarAdd(c.partSpendKeyHalf.GetD(), kaslRecovered.GetD())
 	vkbsBig.Mod(vkbsBig, curve.N)
 	var vkbsBytes [32]byte
 	vkbsBig.FillBytes(vkbsBytes[:])
@@ -835,21 +847,21 @@ func (c *client) refundXmr(ctx context.Context, kafSig []byte, esig *adaptorsigs
 
 	var fullPubKey []byte
 	fullPubKey = append(fullPubKey, vkbs.PubKey().Serialize()...)
-	fullPubKey = append(fullPubKey, c.vkbv.PubKey().Serialize()...)
+	fullPubKey = append(fullPubKey, c.viewKey.PubKey().Serialize()...)
 	walletAddr := base58.EncodeAddr(18, fullPubKey)
 	walletFileName := fmt.Sprintf("%s_spend", walletAddr)
 
-	var vkbvBytes [32]byte
-	copy(vkbvBytes[:], c.vkbv.Serialize())
+	var viewKeyBytes [32]byte
+	copy(viewKeyBytes[:], c.viewKey.Serialize())
 
 	reverse(&vkbsBytes)
-	reverse(&vkbvBytes)
+	reverse(&viewKeyBytes)
 
 	genReq := rpc.GenerateFromKeysRequest{
 		Filename: walletFileName,
 		Address:  walletAddr,
 		SpendKey: hex.EncodeToString(vkbsBytes[:]),
-		ViewKey:  hex.EncodeToString(vkbvBytes[:]),
+		ViewKey:  hex.EncodeToString(viewKeyBytes[:]),
 	}
 
 	xmrChecker, err := createNewXMRWallet(ctx, genReq)
@@ -862,7 +874,7 @@ func (c *client) refundXmr(ctx context.Context, kafSig []byte, esig *adaptorsigs
 
 // takeDcr is the punish if Bob takes too long. Alice gets the dcr while bob
 // gets nothing.
-func (c *client) takeDcr(ctx context.Context, lockRefundTxScript []byte, spendRefundTx *wire.MsgTx) (err error) {
+func (c *partClient) takeDcr(ctx context.Context, lockRefundTxScript []byte, spendRefundTx *wire.MsgTx) (err error) {
 	newAddr, err := c.dcr.GetNewAddress(ctx, "default")
 	if err != nil {
 		return err
@@ -875,12 +887,12 @@ func (c *client) takeDcr(ctx context.Context, lockRefundTxScript []byte, spendRe
 	}
 	spendRefundTx.TxOut[0] = txOut
 
-	kafSig, err := sign.RawTxInSignature(spendRefundTx, 0, lockRefundTxScript, txscript.SigHashAll, c.kaf.Serialize(), dcrec.STSchnorrSecp256k1)
+	partSignKeyHalfSig, err := sign.RawTxInSignature(spendRefundTx, 0, lockRefundTxScript, txscript.SigHashAll, c.partSignKeyHalf.Serialize(), dcrec.STSchnorrSecp256k1)
 	if err != nil {
 		return err
 	}
 	refundSig, err := txscript.NewScriptBuilder().
-		AddData(kafSig).
+		AddData(partSignKeyHalfSig).
 		AddOp(txscript.OP_FALSE).
 		AddData(lockRefundTxScript).
 		Script()
@@ -900,10 +912,11 @@ func (c *client) takeDcr(ctx context.Context, lockRefundTxScript []byte, spendRe
 
 // success is a successful trade.
 func success(ctx context.Context) error {
-	alice, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
 	if err != nil {
 		return err
 	}
+	alice := partClient{client: pc}
 	balReq := rpc.GetBalanceRequest{
 		AccountIndex: 0,
 	}
@@ -920,21 +933,22 @@ func success(ctx context.Context) error {
 	dcrBeforeBal := toAtoms(dcrBal.Balances[0].Total)
 	fmt.Printf("alice dcr balance %v\n", dcrBeforeBal)
 
-	bob, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
 	if err != nil {
 		return err
 	}
+	bob := initClient{client: ic}
 
 	// Alice generates dleag.
 
-	pkbsf, kbvf, pkaf, aliceDleag, err := alice.generateDleag(ctx)
+	pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag, err := alice.generateDleag(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Bob generates transactions but does not send anything yet.
 
-	_, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, pkbs, vkbv, bobDleag, bDCRPK, err := bob.generateLockTxn(ctx, pkbsf, kbvf, pkaf, aliceDleag)
+	_, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, pubSpendKey, viewKey, bobDleag, bDCRPK, err := bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
 	if err != nil {
 		return fmt.Errorf("unalbe to generate lock transactions: %v", err)
 	}
@@ -954,7 +968,7 @@ func success(ctx context.Context) error {
 	}
 
 	// Alice inits her monero side.
-	if err := alice.initXmr(ctx, vkbv, pkbs); err != nil {
+	if err := alice.initXmr(ctx, viewKey, pubSpendKey); err != nil {
 		return err
 	}
 
@@ -967,22 +981,22 @@ func success(ctx context.Context) error {
 	}
 
 	// Alice redeems using the esig.
-	kalSig, err := alice.redeemDcr(ctx, bobEsig, lockTxScript, spendTx, bDCRPK)
+	initSignKeyHalfSig, err := alice.redeemDcr(ctx, bobEsig, lockTxScript, spendTx, bDCRPK)
 	if err != nil {
 		return err
 	}
 
 	// Prove that bob can't just sign the spend tx for the signature we need.
-	ks, err := sign.RawTxInSignature(spendTx, 0, lockTxScript, txscript.SigHashAll, bob.kal.Serialize(), dcrec.STSchnorrSecp256k1)
+	ks, err := sign.RawTxInSignature(spendTx, 0, lockTxScript, txscript.SigHashAll, bob.initSignKeyHalf.Serialize(), dcrec.STSchnorrSecp256k1)
 	if err != nil {
 		return err
 	}
-	if bytes.Equal(ks, kalSig) {
+	if bytes.Equal(ks, initSignKeyHalfSig) {
 		return errors.New("bob was able to get the correct sig without alice")
 	}
 
 	// Bob redeems the xmr with the dcr signature.
-	xmrChecker, err := bob.redeemXmr(ctx, kalSig)
+	xmrChecker, err := bob.redeemXmr(ctx, initSignKeyHalfSig)
 	if err != nil {
 		return err
 	}
@@ -1015,15 +1029,17 @@ func success(ctx context.Context) error {
 // aliceBailsBeforeXmrInit is a trade that fails because alice does nothing after
 // Bob inits.
 func aliceBailsBeforeXmrInit(ctx context.Context) error {
-	alice, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
 	if err != nil {
 		return err
 	}
+	alice := partClient{client: pc}
 
-	bob, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
 	if err != nil {
 		return err
 	}
+	bob := initClient{client: ic}
 
 	dcrBal, err := bob.dcr.GetBalance(ctx, "default")
 	if err != nil {
@@ -1033,14 +1049,14 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 
 	// Alice generates dleag.
 
-	pkbsf, kbvf, pkaf, aliceDleag, err := alice.generateDleag(ctx)
+	pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag, err := alice.generateDleag(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Bob generates transactions but does not send anything yet.
 
-	bobRefundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, _, _, bobDleag, _, err := bob.generateLockTxn(ctx, pkbsf, kbvf, pkaf, aliceDleag)
+	bobRefundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, _, _, bobDleag, _, err := bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
 	if err != nil {
 		return fmt.Errorf("unalbe to generate lock transactions: %v", err)
 	}
@@ -1100,24 +1116,26 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 // refund is a failed trade where both parties have sent their initial funds and
 // both get them back minus fees.
 func refund(ctx context.Context) error {
-	alice, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
 	if err != nil {
 		return err
 	}
+	alice := partClient{client: pc}
 
-	bob, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
 	if err != nil {
 		return err
 	}
+	bob := initClient{client: ic}
 
 	// Alice generates dleag.
-	pkbsf, kbvf, pkaf, aliceDleag, err := alice.generateDleag(ctx)
+	pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag, err := alice.generateDleag(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Bob generates transactions but does not send anything yet.
-	bobRefundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, pkbs, vkbv, bobDleag, _, err := bob.generateLockTxn(ctx, pkbsf, kbvf, pkaf, aliceDleag)
+	bobRefundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, pubSpendKey, viewKey, bobDleag, _, err := bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
 	if err != nil {
 		return fmt.Errorf("unalbe to generate lock transactions: %v", err)
 	}
@@ -1135,7 +1153,7 @@ func refund(ctx context.Context) error {
 	}
 
 	// Alice inits her monero side.
-	if err := alice.initXmr(ctx, vkbv, pkbs); err != nil {
+	if err := alice.initXmr(ctx, viewKey, pubSpendKey); err != nil {
 		return err
 	}
 
@@ -1149,13 +1167,13 @@ func refund(ctx context.Context) error {
 	time.Sleep(time.Second * 5)
 
 	// Bob refunds.
-	kafSig, err := bob.refundDcr(ctx, spendRefundTx, spendRefundESig, lockRefundTxScript)
+	partSignKeyHalfSig, err := bob.refundDcr(ctx, spendRefundTx, spendRefundESig, lockRefundTxScript)
 	if err != nil {
 		return err
 	}
 
 	// Alice refunds.
-	xmrChecker, err := alice.refundXmr(ctx, kafSig, spendRefundESig)
+	xmrChecker, err := alice.refundXmr(ctx, partSignKeyHalfSig, spendRefundESig)
 	if err != nil {
 		return err
 	}
@@ -1181,15 +1199,17 @@ func refund(ctx context.Context) error {
 // bobBailsAfterXmrInit is a failed trade where bob disappears after both parties
 // init and alice takes all his dcr while losing her xmr. Bob gets nothing.
 func bobBailsAfterXmrInit(ctx context.Context) error {
-	alice, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
 	if err != nil {
 		return err
 	}
+	alice := partClient{client: pc}
 
-	bob, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
 	if err != nil {
 		return err
 	}
+	bob := initClient{client: ic}
 
 	dcrBal, err := alice.dcr.GetBalance(ctx, "default")
 	if err != nil {
@@ -1199,14 +1219,14 @@ func bobBailsAfterXmrInit(ctx context.Context) error {
 
 	// Alice generates dleag.
 
-	pkbsf, kbvf, pkaf, aliceDleag, err := alice.generateDleag(ctx)
+	pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag, err := alice.generateDleag(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Bob generates transactions but does not send anything yet.
 
-	bobRefundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, pkbs, vkbv, bobDleag, _, err := bob.generateLockTxn(ctx, pkbsf, kbvf, pkaf, aliceDleag)
+	bobRefundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, pubSpendKey, viewKey, bobDleag, _, err := bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
 	if err != nil {
 		return fmt.Errorf("unalbe to generate lock transactions: %v", err)
 	}
@@ -1226,7 +1246,7 @@ func bobBailsAfterXmrInit(ctx context.Context) error {
 	}
 
 	// Alice inits her monero side.
-	if err := alice.initXmr(ctx, vkbv, pkbs); err != nil {
+	if err := alice.initXmr(ctx, viewKey, pubSpendKey); err != nil {
 		return err
 	}
 
