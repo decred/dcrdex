@@ -7115,6 +7115,12 @@ func (c *Core) initialize() error {
 	var liveConns uint32
 	var wg sync.WaitGroup
 	for _, acct := range accts {
+		if !acct.Active {
+			// TODO: We should list this account separatly for display on the
+			// dex settings page to allow re-enabling this server. But we should
+			// listen for unspent bond refund if any.
+			continue
+		}
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()

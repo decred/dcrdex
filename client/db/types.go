@@ -232,6 +232,7 @@ type AccountInfo struct {
 	MaxBondedAmt uint64
 	PenaltyComps uint16
 	BondAsset    uint32 // the asset to use when auto-posting bonds
+	Active       bool   // whether the account is enabled
 
 	// DEPRECATED reg fee data. Bond txns are in a sub-bucket.
 	// Left until we need to upgrade just for serialization simplicity.

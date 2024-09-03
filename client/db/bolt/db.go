@@ -55,20 +55,19 @@ var (
 // value encodings.
 var (
 	// bucket keys
-	appBucket              = []byte("appBucket")
-	accountsBucket         = []byte("accounts")
-	bondIndexesBucket      = []byte("bondIndexes")
-	bondsSubBucket         = []byte("bonds") // sub bucket of accounts
-	disabledAccountsBucket = []byte("disabledAccounts")
-	activeOrdersBucket     = []byte("activeOrders")
-	archivedOrdersBucket   = []byte("orders")
-	activeMatchesBucket    = []byte("activeMatches")
-	archivedMatchesBucket  = []byte("matches")
-	botProgramsBucket      = []byte("botPrograms")
-	walletsBucket          = []byte("wallets")
-	notesBucket            = []byte("notes")
-	pokesBucket            = []byte("pokes")
-	credentialsBucket      = []byte("credentials")
+	appBucket             = []byte("appBucket")
+	accountsBucket        = []byte("accounts")
+	bondIndexesBucket     = []byte("bondIndexes")
+	bondsSubBucket        = []byte("bonds") // sub bucket of accounts
+	activeOrdersBucket    = []byte("activeOrders")
+	archivedOrdersBucket  = []byte("orders")
+	activeMatchesBucket   = []byte("activeMatches")
+	archivedMatchesBucket = []byte("matches")
+	botProgramsBucket     = []byte("botPrograms")
+	walletsBucket         = []byte("wallets")
+	notesBucket           = []byte("notes")
+	pokesBucket           = []byte("pokes")
+	credentialsBucket     = []byte("credentials")
 
 	// value keys
 	versionKey            = []byte("version")
@@ -179,7 +178,7 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 	}
 
 	if err = bdb.makeTopLevelBuckets([][]byte{
-		appBucket, accountsBucket, bondIndexesBucket, disabledAccountsBucket,
+		appBucket, accountsBucket, bondIndexesBucket,
 		activeOrdersBucket, archivedOrdersBucket,
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
@@ -548,6 +547,8 @@ func loadAccountInfo(acct *bbolt.Bucket, log dex.Logger) (*db.AccountInfo, error
 		return nil, err
 	}
 
+	acctInfo.Active = bytes.Equal(acct.Get(activeKey), byteTrue)
+
 	bondsBkt := acct.Bucket(bondsSubBucket)
 	if bondsBkt == nil {
 		return acctInfo, nil // no bonds, OK for legacy account
@@ -627,7 +628,7 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		if err != nil {
 			return fmt.Errorf("accountKey put error: %w", err)
 		}
-		err = acct.Put(activeKey, byteTrue) // huh?
+		err = acct.Put(activeKey, byteTrue)
 		if err != nil {
 			return fmt.Errorf("activeKey put error: %w", err)
 		}
@@ -710,63 +711,31 @@ func (db *BoltDB) UpdateAccountInfo(ai *dexdb.AccountInfo) error {
 	})
 }
 
-// deleteAccount removes the account by host.
-func (db *BoltDB) deleteAccount(host string) error {
-	acctKey := []byte(host)
+// ToggleAccountStatus enables or disables the account associated with the given
+// host.
+func (db *BoltDB) ToggleAccountStatus(host string, disable bool) error {
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		return accts.DeleteBucket(acctKey)
-	})
-}
-
-// DisableAccount disables the account associated with the given host
-// and archives it. The Accounts and Account methods will no longer find
-// the disabled account.
-//
-// TODO: Add disabledAccounts method for retrieval of a disabled account and
-// possible recovery of the account data.
-func (db *BoltDB) DisableAccount(url string) error {
-	// Get account's info.
-	ai, err := db.Account(url)
-	if err != nil {
-		return err
-	}
-	// Copy AccountInfo to disabledAccounts. Not necessary for view-only
-	// accounts.
-	acctKey := ai.EncKey()
-	if len(acctKey) > 0 {
-		err = db.disabledAcctsUpdate(func(disabledAccounts *bbolt.Bucket) error {
-			return disabledAccounts.Put(acctKey, ai.Encode())
-		})
-		if err != nil {
-			return err
-		}
-	}
-	// WARNING/TODO: account proof (fee paid info) not saved!
-	err = db.deleteAccount(ai.Host)
-	if err != nil {
-		if errors.Is(err, bbolt.ErrBucketNotFound) {
-			db.log.Warnf("Cannot delete account from active accounts"+
-				" table. Host: not found. %s err: %v", ai.Host, err)
-		} else {
-			return err
-		}
-	}
-	return nil
-}
-
-// disabledAccount gets the AccountInfo from disabledAccount associated with
-// the specified EncKey.
-func (db *BoltDB) disabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
-	var acctInfo *dexdb.AccountInfo
-	return acctInfo, db.disabledAcctsView(func(accts *bbolt.Bucket) error {
-		acct := accts.Get(encKey)
+		acct := accts.Bucket([]byte(host))
 		if acct == nil {
-			return fmt.Errorf("account not found for key")
+			return fmt.Errorf("account not found for %s", host)
 		}
-		var err error
-		acctInfo, err = dexdb.DecodeAccountInfo(acct)
+
+		newStatus := byteTrue
+		if disable {
+			newStatus = byteFalse
+		}
+
+		if bytes.Equal(acct.Get(activeKey), newStatus) {
+			msg := "account is already enabled"
+			if disable {
+				msg = "account is already disabled"
+			}
+			return errors.New(msg)
+		}
+
+		err := acct.Put(activeKey, newStatus)
 		if err != nil {
-			return err
+			return fmt.Errorf("accountKey put error: %w", err)
 		}
 		return nil
 	})
@@ -780,16 +749,6 @@ func (db *BoltDB) acctsView(f bucketFunc) error {
 // acctsUpdate is a convenience function for updating the account bucket.
 func (db *BoltDB) acctsUpdate(f bucketFunc) error {
 	return db.withBucket(accountsBucket, db.Update, f)
-}
-
-// disabledAcctsView is a convenience function for reading from the disabledAccounts bucket.
-func (db *BoltDB) disabledAcctsView(f bucketFunc) error {
-	return db.withBucket(disabledAccountsBucket, db.View, f)
-}
-
-// disabledAcctsUpdate is a convenience function for inserting into the disabledAccounts bucket.
-func (db *BoltDB) disabledAcctsUpdate(f bucketFunc) error {
-	return db.withBucket(disabledAccountsBucket, db.Update, f)
 }
 
 func (db *BoltDB) storeBond(bondBkt *bbolt.Bucket, bond *db.Bond) error {

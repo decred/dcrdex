@@ -266,7 +266,7 @@ func TestAccounts(t *testing.T) {
 	acct.DEXPubKey = dexKey
 }
 
-func TestDisableAccount(t *testing.T) {
+func TestToggleAccountStatus(t *testing.T) {
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()
 
@@ -276,29 +276,43 @@ func TestDisableAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected CreateAccount error: %v", err)
 	}
-	actualDisabledAccount, err := boltdb.disabledAccount(acct.EncKey())
-	if err == nil {
-		t.Fatalf("Expected disabledAccount error but there was none.")
+
+	accounts, err := boltdb.Accounts()
+	if err != nil {
+		t.Fatalf("Unexpected boltdb.Accounts error: %v", err)
 	}
-	if actualDisabledAccount != nil {
-		t.Fatalf("Expected not to retrieve a disabledAccount.")
+	if len(accounts) != 1 {
+		t.Fatalf("Expected 1 account but got %d", len(accounts))
 	}
 
-	err = boltdb.DisableAccount(host)
+	// Test disable account
+	err = boltdb.ToggleAccountStatus(host, true)
+	if err != nil {
+		t.Fatalf("Unexpected ToggleAccountStatus error: %v", err)
+	}
 
+	actualAcct, err := boltdb.Account(host)
 	if err != nil {
-		t.Fatalf("Unexpected DisableAccount error: %v", err)
+		t.Fatalf("Unexpected boltdb.Account error: %v", err)
 	}
-	actualAcct, _ := boltdb.Account(host)
-	if actualAcct != nil {
-		t.Fatalf("Expected retrieval of deleted account to be nil")
+
+	if actualAcct.Active {
+		t.Fatalf("Expected a disabled account.")
 	}
-	actualDisabledAccount, err = boltdb.disabledAccount(acct.EncKey())
+
+	// Test enable account
+	err = boltdb.ToggleAccountStatus(host, false)
 	if err != nil {
-		t.Fatalf("Unexpected disabledAccount error: %v", err)
+		t.Fatalf("Unexpected ToggleAccountStatus error: %v", err)
 	}
-	if actualDisabledAccount == nil {
-		t.Fatalf("Expected to retrieve a disabledAccount.")
+
+	actualAcct, err = boltdb.Account(host)
+	if err != nil {
+		t.Fatalf("Unexpected boltdb.Account error: %v", err)
+	}
+
+	if !actualAcct.Active {
+		t.Fatalf("Expected an active account.")
 	}
 }
 

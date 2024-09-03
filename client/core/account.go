@@ -41,35 +41,44 @@ func (c *Core) disconnectDEX(dc *dexConnection) {
 	c.connMtx.Unlock()
 }
 
-// AccountDisable is used to disable an account by given host and application
-// password.
-func (c *Core) AccountDisable(pw []byte, addr string) error {
+// ToggleAccountStatus is used to disable or enable an account by given host and
+// application password.
+func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 	// Validate password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {
 		return codedError(passwordErr, err)
 	}
 
-	// Get dex connection by host.
-	dc, _, err := c.dex(addr)
+	var dc *dexConnection
+	if disable {
+		// Get dex connection by host.
+		dc, _, err = c.dex(addr)
+		if err != nil {
+			return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
+		}
+
+		// Check active orders or bonds.
+		if dc.hasActiveOrders() {
+			return fmt.Errorf("cannot disable account with active orders")
+		}
+	}
+
+	err = c.db.ToggleAccountStatus(addr, disable)
 	if err != nil {
-		return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
+		return newError(accountStatusUpdateErr, "error updating account status: %w", err)
 	}
 
-	// Check active orders or bonds.
-	if dc.hasActiveOrders() {
-		return fmt.Errorf("cannot disable account with active orders")
-	}
-	if dc.hasUnspentBond() {
-		return fmt.Errorf("cannot disable account with unspent bonds")
-	}
+	if disable {
+		c.disconnectDEX(dc)
+	} else {
+		acct, err := c.db.Account(addr)
+		if err != nil {
+			return err
+		}
 
-	err = c.db.DisableAccount(dc.acct.host)
-	if err != nil {
-		return newError(accountDisableErr, "error disabling account: %w", err)
+		c.connectAccount(acct)
 	}
-
-	c.disconnectDEX(dc)
 
 	return nil
 }
@@ -368,9 +377,9 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (
 		}
 	}
 
-	err = c.db.DisableAccount(oldDc.acct.host)
+	err = c.db.ToggleAccountStatus(oldDc.acct.host, true)
 	if err != nil {
-		return nil, newError(accountDisableErr, "error disabling account: %w", err)
+		return nil, newError(accountStatusUpdateErr, "error updating account status: %w", err)
 	}
 
 	updatedHost = true

@@ -325,9 +325,9 @@ export default class DexSettingsPage extends BasePage {
   async disableAccount () {
     const page = this.page
     const host = page.disableAccountHost.textContent
-    const req = { host }
+    const req = { host, disable: true }
     const loaded = app().loading(this.body)
-    const res = await postJSON('/api/disableaccount', req)
+    const res = await postJSON('/api/toggleaccountstatus', req)
     loaded()
     if (!app().checkResponse(res)) {
       page.disableAccountErr.textContent = res.msg
