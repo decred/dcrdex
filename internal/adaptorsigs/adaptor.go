@@ -10,7 +10,7 @@ import (
 )
 
 // AdaptorSignatureSize is the size of an encoded adaptor Schnorr signature.
-const AdaptorSignatureSize = 129
+const AdaptorSignatureSize = 97
 
 // scalarSize is the size of an encoded big endian scalar.
 const scalarSize = 32
@@ -29,6 +29,19 @@ var (
 		0x4f, 0xd1, 0x44, 0x6a, 0x76, 0x83, 0x31, 0xcb,
 	}
 )
+
+type affinePoint struct {
+	x secp256k1.FieldVal
+	y secp256k1.FieldVal
+}
+
+func (p *affinePoint) asJacobian() *secp256k1.JacobianPoint {
+	var result secp256k1.JacobianPoint
+	result.X.Set(&p.x)
+	result.Y.Set(&p.y)
+	result.Z.SetInt(1)
+	return &result
+}
 
 // AdaptorSignature is a signature with auxillary data that commits to a hidden
 // value. When an adaptor signature is combined with a corresponding signature,
@@ -54,35 +67,32 @@ var (
 //     party B can recover the tweak and use it to decrypt the private key
 //     tweaked adaptor signature that party A originally sent them.
 type AdaptorSignature struct {
-	r secp256k1.FieldVal
-	s secp256k1.ModNScalar
-	// t will always be in affine coordinates.
-	t           secp256k1.JacobianPoint
+	r           secp256k1.FieldVal
+	s           secp256k1.ModNScalar
+	t           affinePoint
 	pubKeyTweak bool
 }
 
 // Serialize returns a serialized adaptor signature in the following format:
 //
-//	 sig[0:32]  x coordinate of the point R, encoded as a big-endian uint256
-//	 sig[32:64] s, encoded also as big-endian uint256
-//	 sig[64:96] x coordinate of the point T, encoded as a big-endian uint256
-//	 sig[96:128] y coordinate of the point T, encoded as a big-endian uint256
-//	 sig[128] 1 if the adaptor was created with a public key tweak, 0 if it was
-//		created with a private key tweak.
+//	sig[0:32]  x coordinate of the point R, encoded as a big-endian uint256
+//	sig[32:64] s, encoded also as big-endian uint256
+//	sig[64:96] x coordinate of the point T, encoded as a big-endian uint256
+//	sig[96] first bit is 1 if the signature is public key tweaked, second bit
+//	        is 1 if the y coordinate of T is odd.
 func (sig *AdaptorSignature) Serialize() []byte {
 	var b [AdaptorSignatureSize]byte
 	sig.r.PutBytesUnchecked(b[0:32])
 	sig.s.PutBytesUnchecked(b[32:64])
-	sig.t.X.PutBytesUnchecked(b[64:96])
-	sig.t.Y.PutBytesUnchecked(b[96:128])
+	sig.t.x.PutBytesUnchecked(b[64:96])
 	if sig.pubKeyTweak {
-		b[128] = 1
-	} else {
-		b[128] = 0
+		b[96] = 1
 	}
+	b[96] |= byte(sig.t.y.IsOddBit()) << 1
 	return b[:]
 }
 
+// ParseAdaptorSignature parses an adaptor signature from a serialized format.
 func ParseAdaptorSignature(b []byte) (*AdaptorSignature, error) {
 	if len(b) != AdaptorSignatureSize {
 		str := fmt.Sprintf("malformed signature: wrong size: %d", len(b))
@@ -101,20 +111,20 @@ func ParseAdaptorSignature(b []byte) (*AdaptorSignature, error) {
 		return nil, errors.New(str)
 	}
 
-	var t secp256k1.JacobianPoint
-	if overflow := t.X.SetBytes((*[32]byte)(b[64:96])); overflow > 0 {
+	var t affinePoint
+	if overflow := t.x.SetBytes((*[32]byte)(b[64:96])); overflow > 0 {
 		str := "invalid signature: t.x >= field prime"
 		return nil, errors.New(str)
 	}
 
-	if overflow := t.Y.SetBytes((*[32]byte)(b[96:128])); overflow > 0 {
-		str := "invalid signature: t.y >= field prime"
+	isOdd := (b[96]>>1)&1 == 1
+	if valid := secp256k1.DecompressY(&t.x, isOdd, &t.y); !valid {
+		str := "invalid signature: not for a valid curve point"
 		return nil, errors.New(str)
 	}
+	t.y.Normalize()
 
-	t.Z.SetInt(1)
-
-	pubKeyTweak := b[128] == byte(1)
+	pubKeyTweak := b[96]&1 == 1
 
 	return &AdaptorSignature{
 		r:           r,
@@ -122,6 +132,15 @@ func ParseAdaptorSignature(b []byte) (*AdaptorSignature, error) {
 		t:           t,
 		pubKeyTweak: pubKeyTweak,
 	}, nil
+}
+
+// IsEqual returns true if the adaptor signature is equal to another.
+func (sig *AdaptorSignature) IsEqual(otherSig *AdaptorSignature) bool {
+	return sig.r.Equals(&otherSig.r) &&
+		sig.s.Equals(&otherSig.s) &&
+		sig.t.x.Equals(&otherSig.t.x) &&
+		sig.t.y.Equals(&otherSig.t.y) &&
+		sig.pubKeyTweak == otherSig.pubKeyTweak
 }
 
 // schnorrAdaptorVerify verifies that the adaptor signature will result in a
@@ -195,9 +214,9 @@ func schnorrAdaptorVerify(sig *AdaptorSignature, hash []byte, pubKey *secp256k1.
 	secp256k1.ScalarBaseMultNonConst(&sig.s, &sG)
 	secp256k1.ScalarMultNonConst(&e, &Q, &eQ)
 	secp256k1.AddNonConst(&sG, &eQ, &R)
-	tInv := sig.t
+	tInv := sig.t.asJacobian()
 	tInv.Y.Negate(1)
-	secp256k1.AddNonConst(&R, &tInv, &encryptedR)
+	secp256k1.AddNonConst(&R, tInv, &encryptedR)
 
 	// Step 8.
 	//
@@ -231,7 +250,8 @@ func schnorrAdaptorVerify(sig *AdaptorSignature, hash []byte, pubKey *secp256k1.
 	return nil
 }
 
-// Verify checks that the adaptor signature, when decrypted using the ke
+// Verify checks that the adaptor signature, when decrypted using the tweak,
+// will result in a valid schnorr signature for the given hash and public key.
 func (sig *AdaptorSignature) Verify(hash []byte, pubKey *secp256k1.PublicKey) error {
 	if sig.pubKeyTweak {
 		return fmt.Errorf("only priv key tweaked adaptors can be verified")
@@ -247,14 +267,14 @@ func (sig *AdaptorSignature) Decrypt(tweak *secp256k1.ModNScalar) (*schnorr.Sign
 	var expectedT secp256k1.JacobianPoint
 	secp256k1.ScalarBaseMultNonConst(tweak, &expectedT)
 	expectedT.ToAffine()
-	if !expectedT.X.Equals(&sig.t.X) {
+	if !expectedT.X.Equals(&sig.t.x) {
 		return nil, fmt.Errorf("tweak X does not match expected")
 	}
-	if !expectedT.Y.Equals(&sig.t.Y) {
+	if !expectedT.Y.Equals(&sig.t.y) {
 		return nil, fmt.Errorf("tweak Y does not match expected")
 	}
 
-	s := new(secp256k1.ModNScalar).Add(tweak)
+	s := new(secp256k1.ModNScalar).Set(tweak)
 	if !sig.pubKeyTweak {
 		s.Negate()
 	}
@@ -278,10 +298,10 @@ func (sig *AdaptorSignature) RecoverTweak(validSig *schnorr.Signature) (*secp256
 	var expectedT secp256k1.JacobianPoint
 	secp256k1.ScalarBaseMultNonConst(t, &expectedT)
 	expectedT.ToAffine()
-	if !expectedT.X.Equals(&sig.t.X) {
+	if !expectedT.X.Equals(&sig.t.x) {
 		return nil, fmt.Errorf("recovered tweak does not match expected")
 	}
-	if !expectedT.Y.Equals(&sig.t.Y) {
+	if !expectedT.Y.Equals(&sig.t.y) {
 		return nil, fmt.Errorf("recovered tweak does not match expected")
 	}
 
@@ -290,8 +310,7 @@ func (sig *AdaptorSignature) RecoverTweak(validSig *schnorr.Signature) (*secp256
 
 // PublicTweak returns the hidden value multiplied by the generator point.
 func (sig *AdaptorSignature) PublicTweak() *secp256k1.JacobianPoint {
-	T := sig.t
-	return &T
+	return sig.t.asJacobian()
 }
 
 // schnorrEncryptedSign creates an adaptor signature by modifying the nonce in
@@ -375,10 +394,11 @@ func schnorrEncryptedSign(privKey, nonce *secp256k1.ModNScalar, hash []byte, T *
 	affineT := new(secp256k1.JacobianPoint)
 	affineT.Set(T)
 	affineT.ToAffine()
+	t := affinePoint{x: affineT.X, y: affineT.Y}
 	return &AdaptorSignature{
 		r:           *r,
 		s:           *s,
-		t:           *affineT,
+		t:           t,
 		pubKeyTweak: true}, nil
 }
 
@@ -484,6 +504,6 @@ func PrivateKeyTweakedAdaptorSig(sig *schnorr.Signature, pubKey *secp256k1.Publi
 	return &AdaptorSignature{
 		r: *r,
 		s: *tweakedS,
-		t: *T,
+		t: affinePoint{x: T.X, y: T.Y},
 	}
 }
