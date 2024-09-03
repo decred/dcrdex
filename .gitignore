@@ -50,4 +50,5 @@ client/cmd/translationsreport/worksheets
 server/cmd/dexadm/dexadm
 client/tor/build
 server/cmd/geogame/geogame
-internal/libsecp256k1/secp256k1
+internal/cmd/xmrswap/xmrswap
+internal/cmd/xmrswap/config.json
