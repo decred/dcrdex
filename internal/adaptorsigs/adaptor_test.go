@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/schnorr"
 )
@@ -19,19 +20,15 @@ func TestAdaptorSignatureRandom(t *testing.T) {
 	}(t, seed)
 
 	for i := 0; i < 100; i++ {
-		// Generate two private keys
-		var pkBuf1, pkBuf2 [32]byte
-		if _, err := rng.Read(pkBuf1[:]); err != nil {
+		// Generate two private keys.
+		privKey1, err := secp256k1.GeneratePrivateKeyFromRand(rng)
+		if err != nil {
 			t.Fatalf("failed to read random private key: %v", err)
 		}
-		if _, err := rng.Read(pkBuf2[:]); err != nil {
+		privKey2, err := secp256k1.GeneratePrivateKeyFromRand(rng)
+		if err != nil {
 			t.Fatalf("failed to read random private key: %v", err)
 		}
-		var privKey1Scalar, privKey2Scalar secp256k1.ModNScalar
-		privKey1Scalar.SetBytes(&pkBuf1)
-		privKey2Scalar.SetBytes(&pkBuf2)
-		privKey1 := secp256k1.NewPrivateKey(&privKey1Scalar)
-		privKey2 := secp256k1.NewPrivateKey(&privKey2Scalar)
 
 		// Generate random hashes to sign.
 		var hash1, hash2 [32]byte
@@ -77,6 +74,9 @@ func TestAdaptorSignatureRandom(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if !decryptedSig.Verify(hash2[:], privKey2.PubKey()) {
+			t.Fatal("failed to verify decrypted signature")
+		}
 
 		// Using the decrypted version of their sig, which has been made public,
 		// the owner of privKey2 can recover the tweak.
@@ -109,23 +109,63 @@ func RandomBytes(len int) []byte {
 	return bytes
 }
 
-func TestAdaptorSigParsing(t *testing.T) {
-	adaptor := &AdaptorSignature{}
-	adaptor.r.SetByteSlice(RandomBytes(32))
-	adaptor.s.SetByteSlice(RandomBytes(32))
-	adaptor.pubKeyTweak = true
+func TestPublicKeyTweakParsing(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		privKey, err := secp256k1.GeneratePrivateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := encode.RandomBytes(32)
+		tweak, err := secp256k1.GeneratePrivateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var T secp256k1.JacobianPoint
+		tweak.PubKey().AsJacobian(&T)
 
-	var tweak secp256k1.JacobianPoint
-	secp256k1.ScalarBaseMultNonConst(&adaptor.s, &tweak)
+		adaptorSig, err := PublicKeyTweakedAdaptorSig(privKey, hash, &T)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	serialized := adaptor.Serialize()
+		serialized := adaptorSig.Serialize()
+		parsed, err := ParseAdaptorSignature(serialized)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	adaptor2, err := ParseAdaptorSignature(serialized)
-	if err != nil {
-		t.Fatal(err)
+		if !adaptorSig.IsEqual(parsed) {
+			t.Fatalf("parsed sig does not equal original")
+		}
 	}
+}
 
-	if !adaptor2.r.Equals(&adaptor.r) {
-		t.Fatal("r mismatch")
+func TestPrivateKeyTweakParsing(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		privKey, err := secp256k1.GeneratePrivateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := encode.RandomBytes(32)
+		tweak, err := secp256k1.GeneratePrivateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		sig, err := schnorr.Sign(privKey, hash)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		adaptorSig := PrivateKeyTweakedAdaptorSig(sig, privKey.PubKey(), &tweak.Key)
+		serialized := adaptorSig.Serialize()
+		parsed, err := ParseAdaptorSignature(serialized)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !adaptorSig.IsEqual(parsed) {
+			t.Fatalf("parsed sig does not equal original")
+		}
 	}
 }
