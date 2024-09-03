@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"math"
 	"math/big"
@@ -46,6 +48,8 @@ const (
 	dcrAmt       = 7_000_000 // atoms
 	xmrAmt       = 1_000     // 1e12 units
 	dumbFee      = int64(6000)
+	configName   = "config.json"
+	lockBlocks   = 2
 )
 
 var (
@@ -53,7 +57,25 @@ var (
 	dextestDir = filepath.Join(homeDir, "dextest")
 	bobDir     = filepath.Join(dextestDir, "xmr", "wallets", "bob")
 	curve      = edwards.Edwards()
+
+	// These should be wallets with funds.
+	alicexmr = "http://127.0.0.1:28284/json_rpc"
+	bobdcr   = filepath.Join(dextestDir, "dcr", "trading2", "trading2.conf")
+
+	// These do not need funds.
+	bobxmr   = "http://127.0.0.1:28184/json_rpc"
+	alicedcr = filepath.Join(dextestDir, "dcr", "trading1", "trading1.conf")
+
+	// This wallet does not need funds or to be loaded.
+	extraxmr = "http://127.0.0.1:28484/json_rpc"
+
+	testnet bool
+	netTag  = uint64(18)
 )
+
+func init() {
+	flag.BoolVar(&testnet, "testnet", false, "use testnet")
+}
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -147,19 +169,48 @@ func newRPCWallet(settings map[string]string, logger dex.Logger, net dex.Network
 	return newCombinedClient(nodeRPCClient, params), nil
 }
 
-func newClient(ctx context.Context, xmrAddr, dcrNode string) (*client, error) {
+func newClient(ctx context.Context, xmrAddr, dcrConf string) (*client, error) {
 	xmr := rpc.New(rpc.Config{
 		Address: xmrAddr,
 		Client:  &http.Client{},
 	})
 
-	settings, err := config.Parse(filepath.Join(dextestDir, "dcr", dcrNode, fmt.Sprintf("%s.conf", dcrNode)))
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+	balReq := rpc.GetBalanceRequest{}
+	i := 0
+out:
+	for {
+		select {
+		case <-ticker.C:
+			bal, err := xmr.GetBalance(ctx, &balReq)
+			if err != nil {
+				return nil, fmt.Errorf("unable to get xmr balance: %v", err)
+			}
+			if bal.UnlockedBalance > xmrAmt*2 {
+				break out
+			}
+			if i%5 == 0 {
+				fmt.Println("xmr wallet has no unlocked funds. Waiting...")
+			}
+			i++
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+
+	}
+
+	settings, err := config.Parse(dcrConf)
 	if err != nil {
 		return nil, err
 	}
 	settings["account"] = "default"
 
-	dcr, err := newRPCWallet(settings, dex.StdOutLogger(dcrNode, slog.LevelTrace), dex.Simnet)
+	net := dex.Simnet
+	if testnet {
+		net = dex.Testnet
+	}
+	dcr, err := newRPCWallet(settings, dex.StdOutLogger("client", slog.LevelTrace), net)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +316,7 @@ func toAtoms(v float64) uint64 {
 // and open it. Can only create one wallet at a time.
 func createNewXMRWallet(ctx context.Context, genReq rpc.GenerateFromKeysRequest) (*rpc.Client, error) {
 	xmrChecker := rpc.New(rpc.Config{
-		Address: "http://127.0.0.1:28484/json_rpc",
+		Address: extraxmr,
 		Client:  &http.Client{},
 	})
 
@@ -294,6 +345,14 @@ func (cl prettyLogger) Write(p []byte) (n int, err error) {
 }
 
 func run(ctx context.Context) error {
+	if err := parseConfig(); err != nil {
+		return err
+	}
+
+	if testnet {
+		netTag = 24 // stagenet
+	}
+
 	pl := prettyLogger{c: color.New(color.FgGreen)}
 	log := dex.NewLogger("T", dex.LevelInfo, pl)
 
@@ -320,6 +379,51 @@ func run(ctx context.Context) error {
 		return err
 	}
 	log.Info("Bob bails after xmr init completed without error.")
+	return nil
+}
+
+type clientJSON struct {
+	XMRHost string `json:"xmrhost"`
+	DCRConf string `json:"dcrconf"`
+}
+
+type configJSON struct {
+	Alice        clientJSON `json:"alice"`
+	Bob          clientJSON `json:"bob"`
+	ExtraXMRHost string     `json:"extraxmrhost"`
+}
+
+func parseConfig() error {
+	flag.Parse()
+
+	if !testnet {
+		return nil
+	}
+
+	ex, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	exPath := filepath.Dir(ex)
+	configPath := filepath.Join(exPath, configName)
+
+	b, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+
+	var cj configJSON
+	if err := json.Unmarshal(b, &cj); err != nil {
+		return err
+	}
+
+	alicexmr = cj.Alice.XMRHost
+	bobxmr = cj.Bob.XMRHost
+	alicedcr = cj.Alice.DCRConf
+	bobdcr = cj.Bob.DCRConf
+	extraxmr = cj.ExtraXMRHost
+
 	return nil
 }
 
@@ -469,7 +573,7 @@ func (c *initClient) generateLockTxn(ctx context.Context, pubSpendKeyf *edwards.
 		}
 	}
 
-	durationLocktime := int64(2) // blocks
+	durationLocktime := int64(lockBlocks) // blocks
 	// Unable to use time for tests as this is multiples of 512 seconds.
 	// durationLocktime := int64(10) // seconds * 512
 	// durationLocktime |= wire.SequenceLockTimeIsSeconds
@@ -623,7 +727,7 @@ func (c *partClient) initXmr(ctx context.Context, viewKey *edwards.PrivateKey, p
 	fullPubKey = append(fullPubKey, c.pubSpendKey.SerializeCompressed()...)
 	fullPubKey = append(fullPubKey, c.viewKey.PubKey().SerializeCompressed()...)
 
-	sharedAddr := base58.EncodeAddr(18, fullPubKey)
+	sharedAddr := base58.EncodeAddr(netTag, fullPubKey)
 
 	dest := rpc.Destination{
 		Amount:  xmrAmt,
@@ -635,7 +739,7 @@ func (c *partClient) initXmr(ctx context.Context, viewKey *edwards.PrivateKey, p
 
 	sendRes, err := c.xmr.Transfer(ctx, &sendReq)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to send xmr: %v", err)
 	}
 	fmt.Printf("xmr sent\n%+v\n", *sendRes)
 	return nil
@@ -705,7 +809,7 @@ func (c *partClient) redeemDcr(ctx context.Context, esig *adaptorsigs.AdaptorSig
 
 // redeemXmr redeems xmr by creating a new xmr wallet with the complete spend
 // and view private keys.
-func (c *initClient) redeemXmr(ctx context.Context, initSignKeyHalfSig []byte) (*rpc.Client, error) {
+func (c *initClient) redeemXmr(ctx context.Context, initSignKeyHalfSig []byte, restoreHeight uint64) (*rpc.Client, error) {
 	initSignKeyHalfSigParsed, err := schnorr.ParseSignature(initSignKeyHalfSig[:len(initSignKeyHalfSig)-1])
 	if err != nil {
 		return nil, err
@@ -733,7 +837,7 @@ func (c *initClient) redeemXmr(ctx context.Context, initSignKeyHalfSig []byte) (
 	var fullPubKey []byte
 	fullPubKey = append(fullPubKey, vkbs.PubKey().Serialize()...)
 	fullPubKey = append(fullPubKey, c.viewKey.PubKey().Serialize()...)
-	walletAddr := base58.EncodeAddr(18, fullPubKey)
+	walletAddr := base58.EncodeAddr(netTag, fullPubKey)
 	walletFileName := fmt.Sprintf("%s_spend", walletAddr)
 
 	var viewKeyBytes [32]byte
@@ -743,10 +847,11 @@ func (c *initClient) redeemXmr(ctx context.Context, initSignKeyHalfSig []byte) (
 	reverse(&viewKeyBytes)
 
 	genReq := rpc.GenerateFromKeysRequest{
-		Filename: walletFileName,
-		Address:  walletAddr,
-		SpendKey: hex.EncodeToString(vkbsBytes[:]),
-		ViewKey:  hex.EncodeToString(viewKeyBytes[:]),
+		Filename:      walletFileName,
+		Address:       walletAddr,
+		SpendKey:      hex.EncodeToString(vkbsBytes[:]),
+		ViewKey:       hex.EncodeToString(viewKeyBytes[:]),
+		RestoreHeight: restoreHeight,
 	}
 
 	xmrChecker, err := createNewXMRWallet(ctx, genReq)
@@ -819,7 +924,7 @@ func (c *initClient) refundDcr(ctx context.Context, spendRefundTx *wire.MsgTx, e
 }
 
 // refundXmr refunds xmr but cannot happen without the dcr refund happening first.
-func (c *partClient) refundXmr(ctx context.Context, partSignKeyHalfSig []byte, esig *adaptorsigs.AdaptorSignature) (*rpc.Client, error) {
+func (c *partClient) refundXmr(ctx context.Context, partSignKeyHalfSig []byte, esig *adaptorsigs.AdaptorSignature, restoreHeight uint64) (*rpc.Client, error) {
 	partSignKeyHalfSigParsed, err := schnorr.ParseSignature(partSignKeyHalfSig[:len(partSignKeyHalfSig)-1])
 	if err != nil {
 		return nil, err
@@ -848,7 +953,7 @@ func (c *partClient) refundXmr(ctx context.Context, partSignKeyHalfSig []byte, e
 	var fullPubKey []byte
 	fullPubKey = append(fullPubKey, vkbs.PubKey().Serialize()...)
 	fullPubKey = append(fullPubKey, c.viewKey.PubKey().Serialize()...)
-	walletAddr := base58.EncodeAddr(18, fullPubKey)
+	walletAddr := base58.EncodeAddr(netTag, fullPubKey)
 	walletFileName := fmt.Sprintf("%s_spend", walletAddr)
 
 	var viewKeyBytes [32]byte
@@ -858,10 +963,11 @@ func (c *partClient) refundXmr(ctx context.Context, partSignKeyHalfSig []byte, e
 	reverse(&viewKeyBytes)
 
 	genReq := rpc.GenerateFromKeysRequest{
-		Filename: walletFileName,
-		Address:  walletAddr,
-		SpendKey: hex.EncodeToString(vkbsBytes[:]),
-		ViewKey:  hex.EncodeToString(viewKeyBytes[:]),
+		Filename:      walletFileName,
+		Address:       walletAddr,
+		SpendKey:      hex.EncodeToString(vkbsBytes[:]),
+		ViewKey:       hex.EncodeToString(viewKeyBytes[:]),
+		RestoreHeight: restoreHeight,
 	}
 
 	xmrChecker, err := createNewXMRWallet(ctx, genReq)
@@ -910,16 +1016,79 @@ func (c *partClient) takeDcr(ctx context.Context, lockRefundTxScript []byte, spe
 	return nil
 }
 
+func (c *client) waitDCR(ctx context.Context, startHeight int64) error {
+	// Refund requires two blocks to be mined in tests.
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+	timeout := time.After(time.Minute * 30)
+	i := 0
+out:
+	for {
+		select {
+		case <-ticker.C:
+			_, height, err := c.dcr.GetBestBlock(ctx)
+			if err != nil {
+				return fmt.Errorf("undable to get best block: %v", err)
+			}
+			if height > startHeight+lockBlocks {
+				break out
+			}
+			if i%25 == 0 {
+				fmt.Println("Waiting for dcr blocks...")
+			}
+			i++
+		case <-timeout:
+			return errors.New("dcr timeout waiting for two blocks to be mined")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+	}
+	return nil
+}
+
+func waitXMR(ctx context.Context, c *rpc.Client) (*rpc.GetBalanceResponse, error) {
+	defer func() {
+		if err := c.CloseWallet(ctx); err != nil {
+			fmt.Printf("Error closing xmr wallet: %v\n", err)
+		}
+	}()
+
+	var bal *rpc.GetBalanceResponse
+	balReq := rpc.GetBalanceRequest{}
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+	timeout := time.After(time.Minute * 5)
+	var err error
+out:
+	for {
+		select {
+		case <-ticker.C:
+			bal, err = c.GetBalance(ctx, &balReq)
+			if err != nil {
+				return nil, err
+			}
+			if bal.Balance > 0 {
+				break out
+			}
+		case <-timeout:
+			return nil, errors.New("xmr wallet not synced after five minutes")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+
+	}
+	return bal, nil
+}
+
 // success is a successful trade.
 func success(ctx context.Context) error {
-	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, alicexmr, alicedcr)
 	if err != nil {
 		return err
 	}
 	alice := partClient{client: pc}
-	balReq := rpc.GetBalanceRequest{
-		AccountIndex: 0,
-	}
+	balReq := rpc.GetBalanceRequest{}
 	xmrBal, err := alice.xmr.GetBalance(ctx, &balReq)
 	if err != nil {
 		return err
@@ -933,7 +1102,7 @@ func success(ctx context.Context) error {
 	dcrBeforeBal := toAtoms(dcrBal.Balances[0].Total)
 	fmt.Printf("alice dcr balance %v\n", dcrBeforeBal)
 
-	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, bobxmr, bobdcr)
 	if err != nil {
 		return err
 	}
@@ -967,6 +1136,11 @@ func success(ctx context.Context) error {
 		return err
 	}
 
+	xmrRestoreHeightResp, err := alice.xmr.GetHeight(ctx)
+	if err != nil {
+		return err
+	}
+
 	// Alice inits her monero side.
 	if err := alice.initXmr(ctx, viewKey, pubSpendKey); err != nil {
 		return err
@@ -996,19 +1170,18 @@ func success(ctx context.Context) error {
 	}
 
 	// Bob redeems the xmr with the dcr signature.
-	xmrChecker, err := bob.redeemXmr(ctx, initSignKeyHalfSig)
+	xmrChecker, err := bob.redeemXmr(ctx, initSignKeyHalfSig, xmrRestoreHeightResp.Height)
 	if err != nil {
 		return err
 	}
 
-	// NOTE: This wallet must sync so may take a long time on mainnet.
-	// TODO: Wait for wallet sync rather than a dumb sleep.
-	time.Sleep(time.Second * 40)
+	time.Sleep(time.Second * 5)
 
-	xmrBal, err = xmrChecker.GetBalance(ctx, &balReq)
+	xmrBal, err = waitXMR(ctx, xmrChecker)
 	if err != nil {
 		return err
 	}
+
 	if xmrBal.Balance != xmrAmt {
 		return fmt.Errorf("expected redeem xmr balance of %d but got %d", xmrAmt, xmrBal.Balance)
 	}
@@ -1029,13 +1202,13 @@ func success(ctx context.Context) error {
 // aliceBailsBeforeXmrInit is a trade that fails because alice does nothing after
 // Bob inits.
 func aliceBailsBeforeXmrInit(ctx context.Context) error {
-	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, alicexmr, alicedcr)
 	if err != nil {
 		return err
 	}
 	alice := partClient{client: pc}
 
-	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, alicexmr, alicedcr)
 	if err != nil {
 		return err
 	}
@@ -1061,6 +1234,11 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 		return fmt.Errorf("unalbe to generate lock transactions: %v", err)
 	}
 
+	_, startHeight, err := bob.dcr.GetBestBlock(ctx)
+	if err != nil {
+		return fmt.Errorf("undable to get best block: %v", err)
+	}
+
 	// Alice signs a refund script for Bob.
 
 	spendRefundESig, aliceRefundSig, err := alice.generateRefundSigs(refundTx, spendRefundTx, vIn, lockTxScript, lockRefundTxScript, bobDleag)
@@ -1081,7 +1259,9 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 		return err
 	}
 
-	time.Sleep(time.Second * 5)
+	if err := bob.waitDCR(ctx, startHeight); err != nil {
+		return err
+	}
 
 	// Bob refunds.
 	_, err = bob.refundDcr(ctx, spendRefundTx, spendRefundESig, lockRefundTxScript)
@@ -1116,13 +1296,13 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 // refund is a failed trade where both parties have sent their initial funds and
 // both get them back minus fees.
 func refund(ctx context.Context) error {
-	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, alicexmr, alicedcr)
 	if err != nil {
 		return err
 	}
 	alice := partClient{client: pc}
 
-	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, bobxmr, bobdcr)
 	if err != nil {
 		return err
 	}
@@ -1140,6 +1320,11 @@ func refund(ctx context.Context) error {
 		return fmt.Errorf("unalbe to generate lock transactions: %v", err)
 	}
 
+	_, startHeight, err := bob.dcr.GetBestBlock(ctx)
+	if err != nil {
+		return fmt.Errorf("undable to get best block: %v", err)
+	}
+
 	// Alice signs a refund script for Bob.
 	spendRefundESig, aliceRefundSig, err := alice.generateRefundSigs(refundTx, spendRefundTx, vIn, lockTxScript, lockRefundTxScript, bobDleag)
 	if err != nil {
@@ -1148,6 +1333,11 @@ func refund(ctx context.Context) error {
 
 	// Bob initializes the swap with dcr being sent.
 	_, err = bob.initDcr(ctx)
+	if err != nil {
+		return err
+	}
+
+	xmrRestoreHeightResp, err := alice.xmr.GetHeight(ctx)
 	if err != nil {
 		return err
 	}
@@ -1164,7 +1354,9 @@ func refund(ctx context.Context) error {
 		return err
 	}
 
-	time.Sleep(time.Second * 5)
+	if err := bob.waitDCR(ctx, startHeight); err != nil {
+		return err
+	}
 
 	// Bob refunds.
 	partSignKeyHalfSig, err := bob.refundDcr(ctx, spendRefundTx, spendRefundESig, lockRefundTxScript)
@@ -1173,20 +1365,18 @@ func refund(ctx context.Context) error {
 	}
 
 	// Alice refunds.
-	xmrChecker, err := alice.refundXmr(ctx, partSignKeyHalfSig, spendRefundESig)
+	xmrChecker, err := alice.refundXmr(ctx, partSignKeyHalfSig, spendRefundESig, xmrRestoreHeightResp.Height)
 	if err != nil {
 		return err
 	}
 
-	// NOTE: This wallet must sync so may take a long time on mainnet.
-	// TODO: Wait for wallet sync rather than a dumb sleep.
-	time.Sleep(time.Second * 40)
+	time.Sleep(time.Second * 5)
 
-	balReq := rpc.GetBalanceRequest{}
-	bal, err := xmrChecker.GetBalance(ctx, &balReq)
+	bal, err := waitXMR(ctx, xmrChecker)
 	if err != nil {
 		return err
 	}
+
 	if bal.Balance != xmrAmt {
 		return fmt.Errorf("expected refund xmr balance of %d but got %d", xmrAmt, bal.Balance)
 	}
@@ -1199,13 +1389,13 @@ func refund(ctx context.Context) error {
 // bobBailsAfterXmrInit is a failed trade where bob disappears after both parties
 // init and alice takes all his dcr while losing her xmr. Bob gets nothing.
 func bobBailsAfterXmrInit(ctx context.Context) error {
-	pc, err := newClient(ctx, "http://127.0.0.1:28284/json_rpc", "trading1")
+	pc, err := newClient(ctx, alicexmr, alicedcr)
 	if err != nil {
 		return err
 	}
 	alice := partClient{client: pc}
 
-	ic, err := newClient(ctx, "http://127.0.0.1:28184/json_rpc", "trading2")
+	ic, err := newClient(ctx, bobxmr, bobdcr)
 	if err != nil {
 		return err
 	}
@@ -1229,6 +1419,11 @@ func bobBailsAfterXmrInit(ctx context.Context) error {
 	bobRefundSig, lockRefundTxScript, lockTxScript, refundTx, spendRefundTx, vIn, pubSpendKey, viewKey, bobDleag, _, err := bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
 	if err != nil {
 		return fmt.Errorf("unalbe to generate lock transactions: %v", err)
+	}
+
+	_, startHeight, err := bob.dcr.GetBestBlock(ctx)
+	if err != nil {
+		return fmt.Errorf("undable to get best block: %v", err)
 	}
 
 	// Alice signs a refund script for Bob.
@@ -1257,8 +1452,9 @@ func bobBailsAfterXmrInit(ctx context.Context) error {
 		return err
 	}
 
-	// Lessen this sleep for failure. Two blocks must be mined for success.
-	time.Sleep(time.Second * 35)
+	if err := bob.waitDCR(ctx, startHeight); err != nil {
+		return err
+	}
 
 	if err := alice.takeDcr(ctx, lockRefundTxScript, spendRefundTx); err != nil {
 		return err
