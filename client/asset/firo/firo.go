@@ -28,8 +28,8 @@ const (
 	version = 0
 	// Zcoin XZC
 	BipID = 136
-	// Lelantus Spark. Net proto 90031. Wallet version 130000
-	minNetworkVersion   = 141303
+	// Consensus changes v0.14.14.0
+	minNetworkVersion   = 141400
 	walletTypeRPC       = "firodRPC"
 	walletTypeElectrum  = "electrumRPC"
 	estimateFeeConfs    = 2 // 2 blocks should be enough
