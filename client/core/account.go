@@ -62,6 +62,10 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 		return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
 	}
 
+	if dc.acct.isDisabled() == disable {
+		return nil // no-op
+	}
+
 	if disable {
 		// Check active orders or bonds.
 		if dc.hasActiveOrders() {

@@ -64,7 +64,6 @@ func TestToggleAccountStatus(t *testing.T) {
 		{}: {metaData: &db.OrderMetaData{Status: order.OrderStatusBooked}},
 	}
 
-	// TODO: Add test case for enable dex account
 	tests := []struct {
 		name, host                                   string
 		recryptErr, acctErr, disableAcctErr          error
@@ -72,9 +71,13 @@ func TestToggleAccountStatus(t *testing.T) {
 		activeTrades                                 map[order.OrderID]*trackedTrade
 		errCode                                      int
 	}{{
-		name:        "ok",
+		name:        "ok: disable account",
 		host:        tDexHost,
 		wantDisable: true,
+	}, {
+		name:        "ok: enable account",
+		host:        tDexHost,
+		wantDisable: false,
 	}, {
 		name:        "password error",
 		host:        tDexHost,
@@ -143,8 +146,8 @@ func TestToggleAccountStatus(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 		if test.wantDisable {
-			if _, found := tCore.conns[test.host]; found {
-				t.Fatal("found disabled account dex connection")
+			if dc, found := tCore.conns[test.host]; found && !dc.acct.isDisabled() {
+				t.Fatal("expected disabled dex account")
 			}
 			if rig.db.disabledHost == nil {
 				t.Fatal("expected a disable dex server host")
@@ -152,6 +155,10 @@ func TestToggleAccountStatus(t *testing.T) {
 			if *rig.db.disabledHost != test.host {
 				t.Fatalf("expected db account to match test host, want: %v"+
 					" got: %v", test.host, *rig.db.disabledHost)
+			}
+		} else {
+			if dc, found := tCore.conns[test.host]; found && dc.acct.isDisabled() {
+				t.Fatal("expected enabled dex account")
 			}
 		}
 	}
