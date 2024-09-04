@@ -14,9 +14,9 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
-// disconnectDEX unsubscribes from the dex's orderbooks, ends the connection
-// with the dex, and removes it from the connection map.
-func (c *Core) disconnectDEX(dc *dexConnection) {
+// stopDEXConnection unsubscribes from the dex's orderbooks and ends the
+// connection with the dex. The dexConnection will still remain in c.conns map.
+func (c *Core) stopDEXConnection(dc *dexConnection) {
 	// Stop dexConnection books.
 	dc.cfgMtx.RLock()
 	if dc.cfg != nil {
@@ -34,8 +34,13 @@ func (c *Core) disconnectDEX(dc *dexConnection) {
 		}
 	}
 	dc.cfgMtx.RUnlock()
+	dc.connMaster.Disconnect() // disconnect
+}
+
+// disconnectDEX disconnects a dex and removes it from the connection map.
+func (c *Core) disconnectDEX(dc *dexConnection) {
 	// Disconnect and delete connection from map.
-	dc.connMaster.Disconnect()
+	c.stopDEXConnection(dc)
 	c.connMtx.Lock()
 	delete(c.conns, dc.acct.host)
 	c.connMtx.Unlock()
@@ -45,19 +50,19 @@ func (c *Core) disconnectDEX(dc *dexConnection) {
 // application password.
 func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 	// Validate password.
-	_, err := c.encryptionKey(pw)
+	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return codedError(passwordErr, err)
 	}
 
-	var dc *dexConnection
-	if disable {
-		// Get dex connection by host.
-		dc, _, err = c.dex(addr)
-		if err != nil {
-			return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
-		}
+	// Get dex connection by host. All exchange servers (enabled or not) are loaded as
+	// dexConnections but disabled servers are not connected.
+	dc, _, err := c.dex(addr)
+	if err != nil {
+		return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
+	}
 
+	if disable {
 		// Check active orders or bonds.
 		if dc.hasActiveOrders() {
 			return fmt.Errorf("cannot disable account with active orders")
@@ -70,14 +75,19 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 	}
 
 	if disable {
-		c.disconnectDEX(dc)
+		dc.acct.toggleAccountStatus(true)
+		c.stopDEXConnection(dc)
 	} else {
 		acct, err := c.db.Account(addr)
 		if err != nil {
 			return err
 		}
 
-		c.connectAccount(acct)
+		if !c.connectAccount(acct) {
+			c.log.Errorf("Failed to establish connection to %s (will retry)", addr)
+		}
+
+		c.initializeDEXConnections(crypter)
 	}
 
 	return nil

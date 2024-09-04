@@ -455,6 +455,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 			Host:             dc.acct.host,
 			AcctID:           acctID,
 			ConnectionStatus: dc.status(),
+			Disabled:         dc.acct.isDisabled(),
 		}
 	}
 
@@ -493,6 +494,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		Auth:             acctBondState.ExchangeAuth,
 		MaxScore:         cfg.MaxScore,
 		PenaltyThreshold: cfg.PenaltyThreshold,
+		Disabled:         dc.acct.isDisabled(),
 	}
 }
 
@@ -5140,6 +5142,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 			continue
 		}
 
+		if dc.acct.isDisabled() {
+			continue // we can only unlock the dex account to init the account ID.
+		}
+
 		// Unlock the bond wallet if a target tier is set.
 		if bondAssetID, targetTier, maxBondedAmt := dc.bondOpts(); targetTier > 0 {
 			c.log.Debugf("Preparing %s wallet to maintain target tier of %d for %v, bonding limit %v",
@@ -7115,12 +7121,6 @@ func (c *Core) initialize() error {
 	var liveConns uint32
 	var wg sync.WaitGroup
 	for _, acct := range accts {
-		if !acct.Active {
-			// TODO: We should list this account separatly for display on the
-			// dex settings page to allow re-enabling this server. But we should
-			// listen for unspent bond refund if any.
-			continue
-		}
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
@@ -7178,7 +7178,8 @@ func (c *Core) initialize() error {
 // connectAccount makes a connection to the DEX for the given account. If a
 // non-nil dexConnection is returned from newDEXConnection, it was inserted into
 // the conns map even if the connection attempt failed (connected == false), and
-// the connect retry / keepalive loop is active.
+// the connect retry / keepalive loop is active. The intial connection attempt
+// or keepalive loop will not run if acct is disabled.
 func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 	host, err := addrHost(acct.Host)
 	if err != nil {
@@ -8173,7 +8174,7 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 	// the dexConnection's ConnectionMaster is shut down. This goroutine should
 	// be started as long as the reconnect loop is running. It only returns when
 	// the wsConn is stopped.
-	listen := dc.broadcastingConnect()
+	listen := dc.broadcastingConnect() && !dc.acct.isDisabled()
 	if listen {
 		c.wg.Add(1)
 		go c.listen(dc)
@@ -8218,6 +8219,12 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 
 		// Now in authDEX, we must reconcile the above categorized bonds
 		// according to ConnectResult.Bonds slice.
+	}
+
+	if dc.acct.isDisabled() {
+		// Sort out the bonds with current time to indicate refundable bonds.
+		categorizeBonds(time.Now().Unix())
+		return nil // nothing else to do
 	}
 
 	err := dc.connMaster.Connect(c.ctx)

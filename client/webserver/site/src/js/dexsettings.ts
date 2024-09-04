@@ -32,6 +32,7 @@ export default class DexSettingsPage extends BasePage {
   currentForm: PageElement
   page: Record<string, PageElement>
   host: string
+  accountDisabled:boolean
   keyup: (e: KeyboardEvent) => void
   dexAddrForm: forms.DEXAddressForm
   bondFeeBufferCache: Record<string, number>
@@ -101,7 +102,12 @@ export default class DexSettingsPage extends BasePage {
     this.reputationMeter.setHost(host)
 
     Doc.bind(page.exportDexBtn, 'click', () => this.exportAccount())
-    Doc.bind(page.disableAcctBtn, 'click', () => this.prepareAccountDisable(page.disableAccountForm))
+
+    this.accountDisabled = body.dataset.disabled === 'true'
+    Doc.bind(page.toggleAccountStatusBtn, 'click', () => {
+      if (!this.accountDisabled) this.prepareAccountDisable(page.disableAccountForm)
+      else this.toggleAccountStatus(false)
+    })
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
@@ -114,12 +120,13 @@ export default class DexSettingsPage extends BasePage {
     Doc.bind(page.changeTier, 'click', () => { showTierForm() })
     const willAutoRenew = xc.auth.targetTier > 0
     this.renewToggle = new AniToggle(page.toggleAutoRenew, page.renewErr, willAutoRenew, async (newState: boolean) => {
+      if (this.accountDisabled) return
       if (newState) showTierForm()
       else return this.disableAutoRenew()
     })
     Doc.bind(page.autoRenewBox, 'click', (e: MouseEvent) => {
       e.stopPropagation()
-      page.toggleAutoRenew.click()
+      if (!this.accountDisabled) page.toggleAutoRenew.click()
     })
 
     page.penaltyComps.textContent = String(xc.auth.penaltyComps)
@@ -173,7 +180,7 @@ export default class DexSettingsPage extends BasePage {
     }, this.host)
 
     // forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
-    forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
+    forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.toggleAccountStatus(true))
 
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, this.currentForm)) { this.closePopups() }
@@ -321,21 +328,35 @@ export default class DexSettingsPage extends BasePage {
     Doc.hide(page.forms)
   }
 
-  // disableAccount disables the account associated with the provided host.
-  async disableAccount () {
+  // toggleAccountStatus enables or disables the account associated with the
+  // provided host.
+  async toggleAccountStatus (disable:boolean) {
     const page = this.page
-    const host = page.disableAccountHost.textContent
-    const req = { host, disable: true }
+    Doc.hide(page.errMsg)
+    let host: string|null = this.host
+    if (disable) host = page.disableAccountHost.textContent
+    const req = { host, disable: disable }
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/toggleaccountstatus', req)
     loaded()
     if (!app().checkResponse(res)) {
-      page.disableAccountErr.textContent = res.msg
-      Doc.show(page.disableAccountErr)
+      if (disable) {
+        page.disableAccountErr.textContent = res.msg
+        Doc.show(page.disableAccountErr)
+      } else {
+        page.errMsg.textContent = res.msg
+        Doc.show(page.errMsg)
+      }
       return
     }
-    Doc.hide(page.forms)
-    window.location.assign('/settings')
+    if (disable) {
+      this.page.toggleAccountStatusBtn.textContent = intl.prep(intl.ID_ENABLE_ACCOUNT)
+      Doc.hide(page.forms)
+    } else {
+      this.page.toggleAccountStatusBtn.textContent = intl.prep(intl.ID_DISABLE_ACCOUNT)
+    }
+    this.accountDisabled = disable
+    window.location.assign(`/dexsettings/${host}`)
   }
 
   async prepareAccountDisable (disableAccountForm: HTMLElement) {
@@ -402,7 +423,8 @@ export default class DexSettingsPage extends BasePage {
           break
         case ConnectionStatus.Disconnected:
           displayIcons(false)
-          page.connectionStatus.textContent = intl.prep(intl.ID_DISCONNECTED)
+          if (this.accountDisabled) page.connectionStatus.textContent = intl.prep(intl.ID_ACCOUNT_DISABLED_MSG)
+          else page.connectionStatus.textContent = intl.prep(intl.ID_DISCONNECTED)
           break
         case ConnectionStatus.InvalidCert:
           displayIcons(false)

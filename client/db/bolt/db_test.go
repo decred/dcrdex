@@ -296,7 +296,7 @@ func TestToggleAccountStatus(t *testing.T) {
 		t.Fatalf("Unexpected boltdb.Account error: %v", err)
 	}
 
-	if actualAcct.Active {
+	if !actualAcct.Disabled {
 		t.Fatalf("Expected a disabled account.")
 	}
 
@@ -311,7 +311,7 @@ func TestToggleAccountStatus(t *testing.T) {
 		t.Fatalf("Unexpected boltdb.Account error: %v", err)
 	}
 
-	if !actualAcct.Active {
+	if actualAcct.Disabled {
 		t.Fatalf("Expected an active account.")
 	}
 }

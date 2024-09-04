@@ -713,8 +713,6 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		}
 		acctBondState := c.bondStateOfDEX(dc, bondCfg)
 
-		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
-
 		refundedAssets, expiredStrength, err := c.refundExpiredBonds(ctx, dc.acct, bondCfg, acctBondState, now)
 		if err != nil {
 			c.log.Errorf("Failed to refund expired bonds for %v: %v", dc.acct.host, err)
@@ -723,6 +721,12 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		for assetID := range refundedAssets {
 			c.updateAssetBalance(assetID)
 		}
+
+		if dc.acct.isDisabled() {
+			continue // we can only attempt bond refund(if any) for disabled accounts
+		}
+
+		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
 
 		bondAsset := bondCfg.bondAssets[acctBondState.BondAssetID]
 		if bondAsset == nil {

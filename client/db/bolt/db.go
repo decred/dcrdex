@@ -547,7 +547,7 @@ func loadAccountInfo(acct *bbolt.Bucket, log dex.Logger) (*db.AccountInfo, error
 		return nil, err
 	}
 
-	acctInfo.Active = bytes.Equal(acct.Get(activeKey), byteTrue)
+	acctInfo.Disabled = bytes.Equal(acct.Get(activeKey), byteFalse)
 
 	bondsBkt := acct.Bucket(bondsSubBucket)
 	if bondsBkt == nil {
