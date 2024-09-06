@@ -86,18 +86,19 @@ type WSBalance struct {
 }
 
 type StreamUpdate struct {
-	Asset              string          `json:"a"`
-	EventType          string          `json:"e"`
-	ClientOrderID      string          `json:"c"`
-	CurrentOrderStatus string          `json:"X"`
-	Balances           []*WSBalance    `json:"B"`
-	BalanceDelta       float64         `json:"d,string"`
-	Filled             float64         `json:"z,string"`
-	QuoteFilled        float64         `json:"Z,string"`
-	OrderQty           float64         `json:"q,string"`
-	QuoteOrderQty      float64         `json:"Q,string"`
-	CancelledOrderID   string          `json:"C"`
-	E                  json.RawMessage `json:"E"`
+	Asset              string       `json:"a"`
+	EventType          string       `json:"e"`
+	ClientOrderID      string       `json:"c"`
+	CurrentOrderStatus string       `json:"X"`
+	Balances           []*WSBalance `json:"B"`
+	BalanceDelta       float64      `json:"d,string"`
+	Filled             float64      `json:"z,string"`
+	QuoteFilled        float64      `json:"Z,string"`
+	OrderQty           float64      `json:"q,string"`
+	QuoteOrderQty      float64      `json:"Q,string"`
+	CancelledOrderID   string       `json:"C"`
+	E                  int64        `json:"E"`
+	ListenKey          string       `json:"listenKey"`
 }
 
 type RateLimit struct {
