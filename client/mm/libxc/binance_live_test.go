@@ -5,9 +5,9 @@ package libxc
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
-	"os/user"
 	"strings"
 	"sync"
 	"testing"
@@ -20,13 +20,23 @@ import (
 )
 
 var (
-	log       = dex.StdOutLogger("T", dex.LevelTrace)
-	u, _      = user.Current()
-	apiKey    = ""
-	apiSecret = ""
+	log            = dex.StdOutLogger("T", dex.LevelTrace)
+	binanceUS      = true
+	global         bool
+	apiKey         string
+	apiSecret      string
+	minTradeSymbol string
 )
 
 func TestMain(m *testing.M) {
+	flag.StringVar(&minTradeSymbol, "symbol", "", "Market slug")
+	flag.BoolVar(&global, "global", false, "Use Binance global")
+	flag.Parse()
+
+	if global {
+		binanceUS = false
+	}
+
 	if s := os.Getenv("SECRET"); s != "" {
 		apiSecret = s
 	}
@@ -47,7 +57,6 @@ func tNewBinance(t *testing.T, net dex.Network) *binance {
 			log.Infof("Notification sent: %+v", n)
 		},
 	}
-	const binanceUS = true
 	return newBinance(cfg, binanceUS)
 }
 
@@ -406,4 +415,33 @@ func TestMarkets(t *testing.T) {
 
 	b, _ := json.MarshalIndent(mkts, "", "    ")
 	fmt.Println("##### Market Data:", string(b))
+}
+
+func TestGetMinTrade(t *testing.T) {
+	// e.g.
+	// go test -tags bnclive -run TestGetMinTrade --symbol DCRBTC --global
+
+	if minTradeSymbol == "" {
+		t.Fatal("No market symbol provided")
+	}
+	bnc := tNewBinance(t, dex.Testnet)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var xcInfo bntypes.ExchangeInfo
+	if err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &xcInfo); err != nil {
+		t.Fatal(err)
+	}
+	for _, mkt := range xcInfo.Symbols {
+		if mkt.Symbol != minTradeSymbol {
+			continue
+		}
+		for _, filt := range mkt.Filters {
+			if filt.FilterType == "LOT_SIZE" {
+				fmt.Printf("Market %s min trade = %f %s \n", mkt.Symbol, filt.MinQty, mkt.BaseAsset)
+				return
+			}
+		}
+	}
+	t.Fatal("Market not found")
 }
