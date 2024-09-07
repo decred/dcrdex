@@ -153,14 +153,19 @@ type CEXConfig struct {
 	Notify    func(interface{})
 }
 
+type CEXConstructor func(cfg *CEXConfig) CEX
+
+var cexConstructors = map[string]CEXConstructor{}
+
+func RegisterCEXConstructor(s string, f CEXConstructor) {
+	cexConstructors[s] = f
+}
+
 // NewCEX creates a new CEX.
 func NewCEX(cexName string, cfg *CEXConfig) (CEX, error) {
-	switch cexName {
-	case Binance:
-		return newBinance(cfg, false), nil
-	case BinanceUS:
-		return newBinance(cfg, true), nil
-	default:
+	c, found := cexConstructors[cexName]
+	if !found {
 		return nil, fmt.Errorf("unrecognized CEX: %v", cexName)
 	}
+	return c(cfg), nil
 }

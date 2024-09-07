@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package libxc
+package binance
 
 import (
 	"bytes"
@@ -24,7 +24,8 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/mm/libxc/bntypes"
+	"decred.org/dcrdex/client/mm/binance/bntypes"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/dexnet"
@@ -52,6 +53,17 @@ const (
 	fakeBinanceWsURL = "ws://localhost:37346"
 )
 
+var _ libxc.CEXConstructor = (func(cfg *libxc.CEXConfig) libxc.CEX)(nil)
+
+func init() {
+	libxc.RegisterCEXConstructor(libxc.Binance, func(cfg *libxc.CEXConfig) libxc.CEX {
+		return New(cfg, false)
+	})
+	libxc.RegisterCEXConstructor(libxc.BinanceUS, func(cfg *libxc.CEXConfig) libxc.CEX {
+		return New(cfg, true)
+	})
+}
+
 // binanceOrderBook manages an orderbook for a single market. It keeps
 // the orderbook synced and allows querying of vwap.
 type binanceOrderBook struct {
@@ -63,7 +75,7 @@ type binanceOrderBook struct {
 
 	getSnapshot func() (*bntypes.OrderbookSnapshot, error)
 
-	book                  *orderbook
+	book                  *libxc.Orderbook
 	updateQueue           chan *bntypes.BookUpdate
 	mktID                 string
 	baseConversionFactor  uint64
@@ -78,7 +90,7 @@ func newBinanceOrderBook(
 	log dex.Logger,
 ) *binanceOrderBook {
 	return &binanceOrderBook{
-		book:                  newOrderBook(),
+		book:                  libxc.NewOrderBook(),
 		mktID:                 mktID,
 		updateQueue:           make(chan *bntypes.BookUpdate, 1024),
 		numSubscribers:        1,
@@ -92,9 +104,9 @@ func newBinanceOrderBook(
 // convertBinanceBook converts bids and asks in the binance format,
 // with the conventional quantity and rate, to the DEX message format which
 // can be used to update the orderbook.
-func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json.Number) (bids, asks []*obEntry, err error) {
-	convert := func(updates [][2]json.Number) ([]*obEntry, error) {
-		convertedUpdates := make([]*obEntry, 0, len(updates))
+func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json.Number) (bids, asks []*libxc.PriceBin, err error) {
+	convert := func(updates [][2]json.Number) ([]*libxc.PriceBin, error) {
+		convertedUpdates := make([]*libxc.PriceBin, 0, len(updates))
 
 		for _, update := range updates {
 			price, err := update[0].Float64()
@@ -107,9 +119,9 @@ func (b *binanceOrderBook) convertBinanceBook(binanceBids, binanceAsks [][2]json
 				return nil, fmt.Errorf("error parsing qty: %v", err)
 			}
 
-			convertedUpdates = append(convertedUpdates, &obEntry{
-				rate: calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor),
-				qty:  uint64(qty * float64(b.baseConversionFactor)),
+			convertedUpdates = append(convertedUpdates, &libxc.PriceBin{
+				Rate: calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor),
+				Qty:  uint64(qty * float64(b.baseConversionFactor)),
 			})
 		}
 
@@ -206,7 +218,7 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 			// Data is compromised. Trigger a resync.
 			return false
 		}
-		b.book.update(bids, asks)
+		b.book.Update(bids, asks)
 		return true
 	}
 
@@ -244,8 +256,8 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 
 		b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
 
-		b.book.clear()
-		b.book.update(bids, asks)
+		b.book.Clear()
+		b.book.Update(bids, asks)
 
 		return processSyncCache(snapshot.LastUpdateID)
 	}
@@ -316,12 +328,12 @@ func (b *binanceOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, fi
 		return 0, 0, filled, errors.New("orderbook not synced")
 	}
 
-	vwap, extrema, filled = b.book.vwap(bids, qty)
+	vwap, extrema, filled = b.book.VWAP(bids, qty)
 	return
 }
 
 func (b *binanceOrderBook) midGap() uint64 {
-	return b.book.midGap()
+	return b.book.MidGap()
 }
 
 // TODO: check all symbols
@@ -460,11 +472,11 @@ type binance struct {
 	marketSnapshotMtx sync.Mutex
 	marketSnapshot    struct {
 		stamp time.Time
-		m     map[string]*Market
+		m     map[string]*libxc.Market
 	}
 
 	balanceMtx sync.RWMutex
-	balances   map[uint32]*ExchangeBalance
+	balances   map[uint32]*libxc.ExchangeBalance
 
 	marketStreamMtx sync.RWMutex
 	marketStream    comms.WsConn
@@ -474,16 +486,16 @@ type binance struct {
 
 	tradeUpdaterMtx    sync.RWMutex
 	tradeInfo          map[string]*tradeInfo
-	tradeUpdaters      map[int]chan *Trade
+	tradeUpdaters      map[int]chan *libxc.Trade
 	tradeUpdateCounter int
 }
 
-var _ CEX = (*binance)(nil)
+var _ libxc.CEX = (*binance)(nil)
 
 // TODO: Investigate stablecoin auto-conversion.
 // https://developers.binance.com/docs/wallet/endpoints/switch-busd-stable-coins-convertion
 
-func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
+func New(cfg *libxc.CEXConfig, binanceUS bool) *binance {
 	var marketsURL, accountsURL, wsURL string
 
 	switch cfg.Net {
@@ -515,11 +527,11 @@ func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
 		apiKey:             cfg.APIKey,
 		secretKey:          cfg.SecretKey,
 		knownAssets:        knownAssets,
-		balances:           make(map[uint32]*ExchangeBalance),
+		balances:           make(map[uint32]*libxc.ExchangeBalance),
 		books:              make(map[string]*binanceOrderBook),
 		net:                cfg.Net,
 		tradeInfo:          make(map[string]*tradeInfo),
-		tradeUpdaters:      make(map[int]chan *Trade),
+		tradeUpdaters:      make(map[int]chan *libxc.Trade),
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 	}
 
@@ -556,7 +568,7 @@ func (bnc *binance) refreshBalances(ctx context.Context) error {
 				bnc.log.Errorf("no unit info for known asset ID %d?", assetID)
 				continue
 			}
-			updatedBalance := &ExchangeBalance{
+			updatedBalance := &libxc.ExchangeBalance{
 				Available: uint64(math.Round(bal.Free * float64(ui.Conventional.ConversionFactor))),
 				Locked:    uint64(math.Round(bal.Locked * float64(ui.Conventional.ConversionFactor))),
 			}
@@ -723,7 +735,7 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 }
 
 // Balance returns the balance of an asset at the CEX.
-func (bnc *binance) Balance(assetID uint32) (*ExchangeBalance, error) {
+func (bnc *binance) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
 	assetConfig, err := bncAssetCfg(assetID)
 	if err != nil {
 		return nil, err
@@ -748,7 +760,7 @@ func (bnc *binance) generateTradeID() string {
 
 // Trade executes a trade on the CEX. subscriptionID takes an ID returned from
 // SubscribeTradeUpdates.
-func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error) {
+func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*libxc.Trade, error) {
 	side := "BUY"
 	if sell {
 		side = "SELL"
@@ -818,7 +830,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 
 	success = true
 
-	return &Trade{
+	return &libxc.Trade{
 		ID:          tradeID,
 		Sell:        sell,
 		Rate:        rate,
@@ -880,7 +892,7 @@ func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, 
 	bnc.log.Tracef("Withdrawal status: %+v", status)
 
 	if status.TxID == "" {
-		return 0, "", ErrWithdrawalPending
+		return 0, "", libxc.ErrWithdrawalPending
 	}
 
 	amt := status.Amount * float64(assetCfg.conversionFactor)
@@ -943,7 +955,7 @@ func (bnc *binance) GetDepositAddress(ctx context.Context, assetID uint32) (stri
 
 // ConfirmDeposit is an async function that calls onConfirm when the status of
 // a deposit has been confirmed.
-func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, uint64) {
+func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *libxc.DepositData) (bool, uint64) {
 	var resp []*bntypes.PendingDeposit
 	// We'll add info for the fake server.
 	var query url.Values
@@ -1008,12 +1020,12 @@ func (bnc *binance) ConfirmDeposit(ctx context.Context, deposit *DepositData) (b
 // returned from this function is passed as the updaterID argument to
 // Trade, then updates to the trade will be sent on the updated channel
 // returned from this function.
-func (bnc *binance) SubscribeTradeUpdates() (<-chan *Trade, func(), int) {
+func (bnc *binance) SubscribeTradeUpdates() (<-chan *libxc.Trade, func(), int) {
 	bnc.tradeUpdaterMtx.Lock()
 	defer bnc.tradeUpdaterMtx.Unlock()
 	updaterID := bnc.tradeUpdateCounter
 	bnc.tradeUpdateCounter++
-	updater := make(chan *Trade, 256)
+	updater := make(chan *libxc.Trade, 256)
 	bnc.tradeUpdaters[updaterID] = updater
 
 	unsubscribe := func() {
@@ -1051,7 +1063,7 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 	return requestInto(req, &struct{}{})
 }
 
-func (bnc *binance) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error) {
+func (bnc *binance) Balances(ctx context.Context) (map[uint32]*libxc.ExchangeBalance, error) {
 	bnc.balanceMtx.RLock()
 	defer bnc.balanceMtx.RUnlock()
 
@@ -1061,7 +1073,7 @@ func (bnc *binance) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, 
 		}
 	}
 
-	balances := make(map[uint32]*ExchangeBalance)
+	balances := make(map[uint32]*libxc.ExchangeBalance)
 
 	for assetID, bal := range bnc.balances {
 		assetConfig, err := bncAssetCfg(assetID)
@@ -1084,7 +1096,7 @@ func (bnc *binance) minimumWithdraws(baseID, quoteID uint32) (uint64, uint64) {
 	return mins[baseID], mins[quoteID]
 }
 
-func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
+func (bnc *binance) Markets(ctx context.Context) (map[string]*libxc.Market, error) {
 	bnc.marketSnapshotMtx.Lock()
 	defer bnc.marketSnapshotMtx.Unlock()
 
@@ -1098,7 +1110,7 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 		return nil, fmt.Errorf("error getting market list for market data request: %w", err)
 	}
 
-	mkts := make(map[string][]*MarketMatch, len(matches))
+	mkts := make(map[string][]*libxc.MarketMatch, len(matches))
 	for _, m := range matches {
 		mkts[m.Slug] = append(mkts[m.Slug], m)
 	}
@@ -1115,7 +1127,7 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 		return nil, err
 	}
 
-	m := make(map[string]*Market, len(ds))
+	m := make(map[string]*libxc.Market, len(ds))
 	for _, d := range ds {
 		ms, found := mkts[d.Symbol]
 		if !found {
@@ -1124,12 +1136,12 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 		}
 		for _, mkt := range ms {
 			baseMinWithdraw, quoteMinWithdraw := bnc.minimumWithdraws(mkt.BaseID, mkt.QuoteID)
-			m[mkt.MarketID] = &Market{
+			m[mkt.MarketID] = &libxc.Market{
 				BaseID:           mkt.BaseID,
 				QuoteID:          mkt.QuoteID,
 				BaseMinWithdraw:  baseMinWithdraw,
 				QuoteMinWithdraw: quoteMinWithdraw,
-				Day: &MarketDay{
+				Day: &libxc.MarketDay{
 					Vol:            d.Volume,
 					QuoteVol:       d.QuoteVolume,
 					PriceChange:    d.PriceChange,
@@ -1148,7 +1160,7 @@ func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
 	return m, nil
 }
 
-func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err error) {
+func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*libxc.MarketMatch, err error) {
 	if tokenIDsI := bnc.tokenIDs.Load(); tokenIDsI == nil {
 		if err := bnc.getCoinInfo(ctx); err != nil {
 			return nil, fmt.Errorf("error getting coin info for token IDs: %v", err)
@@ -1163,7 +1175,7 @@ func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err e
 			return nil, fmt.Errorf("error getting markets: %v", err)
 		}
 	}
-	markets := make([]*MarketMatch, 0, len(bnMarkets))
+	markets := make([]*libxc.MarketMatch, 0, len(bnMarkets))
 
 	for _, mkt := range bnMarkets {
 		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs, bnc.isUS)
@@ -1250,7 +1262,7 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 	}
 
 	supportedTokens := bnc.tokenIDs.Load().(map[string][]uint32)
-	updates := make([]*BalanceUpdate, 0, len(update.Balances))
+	updates := make([]*libxc.BalanceUpdate, 0, len(update.Balances))
 
 	processSymbol := func(symbol string, bal *bntypes.WSBalance) {
 		for _, assetID := range getDEXAssetIDs(symbol, supportedTokens) {
@@ -1260,13 +1272,13 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 				return
 			}
 			oldBal := bnc.balances[assetID]
-			newBal := &ExchangeBalance{
+			newBal := &libxc.ExchangeBalance{
 				Available: uint64(math.Round(bal.Free * float64(ui.Conventional.ConversionFactor))),
 				Locked:    uint64(math.Round(bal.Locked * float64(ui.Conventional.ConversionFactor))),
 			}
 			bnc.balances[assetID] = newBal
 			if oldBal != nil && *oldBal != *newBal {
-				updates = append(updates, &BalanceUpdate{
+				updates = append(updates, &libxc.BalanceUpdate{
 					AssetID: assetID,
 					Balance: newBal,
 				})
@@ -1288,7 +1300,7 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 	}
 }
 
-func (bnc *binance) getTradeUpdater(tradeID string) (chan *Trade, *tradeInfo, error) {
+func (bnc *binance) getTradeUpdater(tradeID string) (chan *libxc.Trade, *tradeInfo, error) {
 	bnc.tradeUpdaterMtx.RLock()
 	defer bnc.tradeUpdaterMtx.RUnlock()
 
@@ -1341,7 +1353,7 @@ func (bnc *binance) handleExecutionReport(update *bntypes.StreamUpdate) {
 		return
 	}
 
-	updater <- &Trade{
+	updater <- &libxc.Trade{
 		ID:          id,
 		Complete:    complete,
 		Rate:        tradeInfo.rate,
@@ -1779,16 +1791,16 @@ func (bnc *binance) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder,
 	if err != nil {
 		return nil, nil, err
 	}
-	bids, asks := book.book.snap()
+	bids, asks := book.book.Snap()
 	bFactor := float64(book.baseConversionFactor)
-	convertSide := func(side []*obEntry, sell bool) []*core.MiniOrder {
+	convertSide := func(side []*libxc.PriceBin, sell bool) []*core.MiniOrder {
 		ords := make([]*core.MiniOrder, len(side))
 		for i, e := range side {
 			ords[i] = &core.MiniOrder{
-				Qty:       float64(e.qty) / bFactor,
-				QtyAtomic: e.qty,
-				Rate:      calc.ConventionalRateAlt(e.rate, book.baseConversionFactor, book.quoteConversionFactor),
-				MsgRate:   e.rate,
+				Qty:       float64(e.Qty) / bFactor,
+				QtyAtomic: e.Qty,
+				Rate:      calc.ConventionalRateAlt(e.Rate, book.baseConversionFactor, book.quoteConversionFactor),
+				MsgRate:   e.Rate,
 				Sell:      sell,
 			}
 		}
@@ -1820,7 +1832,7 @@ func (bnc *binance) MidGap(baseID, quoteID uint32) uint64 {
 }
 
 // TradeStatus returns the current status of a trade.
-func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quoteID uint32) (*Trade, error) {
+func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quoteID uint32) (*libxc.Trade, error) {
 	baseAsset, err := bncAssetCfg(baseID)
 	if err != nil {
 		return nil, err
@@ -1841,7 +1853,7 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 		return nil, err
 	}
 
-	return &Trade{
+	return &libxc.Trade{
 		ID:          tradeID,
 		Sell:        resp.Side == "SELL",
 		Rate:        calc.MessageRateAlt(resp.Price, baseAsset.conversionFactor, quoteAsset.conversionFactor),
@@ -1899,7 +1911,7 @@ func assetDisabled(isUS bool, assetID uint32) bool {
 // A symbol represents a single market on the CEX, but tokens on the DEX
 // have a different assetID for each network they are on, therefore they will
 // match multiple markets as defined using assetID.
-func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32, isUS bool) []*MarketMatch {
+func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32, isUS bool) []*libxc.MarketMatch {
 	var baseAssetIDs, quoteAssetIDs []uint32
 
 	baseAssetIDs = getDEXAssetIDs(binanceBaseSymbol, tokenIDs)
@@ -1912,13 +1924,13 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 		return nil
 	}
 
-	markets := make([]*MarketMatch, 0, len(baseAssetIDs)*len(quoteAssetIDs))
+	markets := make([]*libxc.MarketMatch, 0, len(baseAssetIDs)*len(quoteAssetIDs))
 	for _, baseID := range baseAssetIDs {
 		for _, quoteID := range quoteAssetIDs {
 			if assetDisabled(isUS, baseID) || assetDisabled(isUS, quoteID) {
 				continue
 			}
-			markets = append(markets, &MarketMatch{
+			markets = append(markets, &libxc.MarketMatch{
 				Slug:     binanceBaseSymbol + binanceQuoteSymbol,
 				MarketID: dex.BipIDSymbol(baseID) + "_" + dex.BipIDSymbol(quoteID),
 				BaseID:   baseID,

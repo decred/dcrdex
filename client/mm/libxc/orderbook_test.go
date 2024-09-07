@@ -6,14 +6,14 @@ package libxc
 import "testing"
 
 func TestOrderbook(t *testing.T) {
-	ob := newOrderBook()
+	ob := NewOrderBook()
 
 	// Test vwap on empty books
-	_, _, filled := ob.vwap(true, 1)
+	_, _, filled := ob.VWAP(true, 1)
 	if filled {
 		t.Fatalf("empty book should not be filled")
 	}
-	_, _, filled = ob.vwap(false, 1)
+	_, _, filled = ob.VWAP(false, 1)
 	if filled {
 		t.Fatalf("empty book should not be filled")
 	}
@@ -21,18 +21,18 @@ func TestOrderbook(t *testing.T) {
 	// Populate the book with some bids and asks. They both
 	// have the same values, but VWAP for asks should be
 	// calculate from the lower values first.
-	ob.update([]*obEntry{
-		{qty: 30, rate: 4000},
-		{qty: 30, rate: 5000},
-		{qty: 80, rate: 400},
-		{qty: 10, rate: 3000},
-	}, []*obEntry{
-		{qty: 30, rate: 4000},
-		{qty: 30, rate: 5000},
-		{qty: 80, rate: 400},
-		{qty: 10, rate: 3000},
+	ob.Update([]*PriceBin{
+		{Qty: 30, Rate: 4000},
+		{Qty: 30, Rate: 5000},
+		{Qty: 80, Rate: 400},
+		{Qty: 10, Rate: 3000},
+	}, []*PriceBin{
+		{Qty: 30, Rate: 4000},
+		{Qty: 30, Rate: 5000},
+		{Qty: 80, Rate: 400},
+		{Qty: 10, Rate: 3000},
 	})
-	vwap, extrema, filled := ob.vwap(true, 65)
+	vwap, extrema, filled := ob.VWAP(true, 65)
 	if !filled {
 		t.Fatalf("should be filled")
 	}
@@ -44,7 +44,7 @@ func TestOrderbook(t *testing.T) {
 		t.Fatalf("wrong extrema")
 	}
 
-	vwap, extrema, filled = ob.vwap(false, 65)
+	vwap, extrema, filled = ob.VWAP(false, 65)
 	if !filled {
 		t.Fatalf("should be filled")
 	}
@@ -57,25 +57,25 @@ func TestOrderbook(t *testing.T) {
 	}
 
 	// Tests querying more quantity than on books
-	_, _, filled = ob.vwap(true, 161)
+	_, _, filled = ob.VWAP(true, 161)
 	if filled {
 		t.Fatalf("should not be filled")
 	}
-	_, _, filled = ob.vwap(false, 161)
+	_, _, filled = ob.VWAP(false, 161)
 	if filled {
 		t.Fatalf("should not be filled")
 	}
 
 	// Update quantities. Setting qty to 0 should delete.
-	ob.update([]*obEntry{
-		{qty: 0, rate: 5000},
-		{qty: 50, rate: 4000},
-	}, []*obEntry{
-		{qty: 0, rate: 400},
-		{qty: 35, rate: 4000},
+	ob.Update([]*PriceBin{
+		{Qty: 0, Rate: 5000},
+		{Qty: 50, Rate: 4000},
+	}, []*PriceBin{
+		{Qty: 0, Rate: 400},
+		{Qty: 35, Rate: 4000},
 	})
 
-	vwap, extrema, filled = ob.vwap(true, 65)
+	vwap, extrema, filled = ob.VWAP(true, 65)
 	if !filled {
 		t.Fatalf("should be filled")
 	}
@@ -87,7 +87,7 @@ func TestOrderbook(t *testing.T) {
 		t.Fatalf("wrong extrema")
 	}
 
-	vwap, extrema, filled = ob.vwap(false, 65)
+	vwap, extrema, filled = ob.VWAP(false, 65)
 	if !filled {
 		t.Fatalf("should be filled")
 	}

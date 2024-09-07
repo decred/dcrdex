@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/comms"
-	"decred.org/dcrdex/client/mm/libxc/bntypes"
+	"decred.org/dcrdex/client/mm/binance/bntypes"
 	"decred.org/dcrdex/dex"
 )
 
@@ -49,7 +49,7 @@ func TestEvmWallet(t *testing.T) {
 func testWallet(t *testing.T, ctx context.Context, w Wallet) {
 	addr := w.DepositAddress()
 	fmt.Println("##### Deposit address:", addr)
-	txID, err := w.Send(ctx, addr, 0.1)
+	txID, err := w.Send(ctx, addr, "", 0.1)
 	if err != nil {
 		t.Fatalf("Send error: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestAccountFeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error constructing btc wallet: %v", err)
 	}
-	txID, err := w.Send(ctx, addrResp.Address, 0.1)
+	txID, err := w.Send(ctx, addrResp.Address, "", 0.1)
 	if err != nil {
 		t.Fatalf("Send error: %v", err)
 	}

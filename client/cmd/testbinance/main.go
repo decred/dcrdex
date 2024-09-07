@@ -23,7 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"decred.org/dcrdex/client/mm/libxc/bntypes"
+	"decred.org/dcrdex/client/mm/binance/bntypes"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/fiatrates"
