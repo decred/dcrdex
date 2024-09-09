@@ -51,6 +51,7 @@ var (
 
 	walkingSpeedAdj float64
 	gapRange        float64
+	flappyWS        bool
 
 	xcInfo = &bntypes.ExchangeInfo{
 		Timezone:   "UTC",
@@ -155,6 +156,7 @@ func main() {
 	flag.Float64Var(&gapRange, "gaprange", 0.04, "a ratio of how much the gap can vary. default is 0.04 => 4%")
 	flag.BoolVar(&logDebug, "debug", false, "use debug logging")
 	flag.BoolVar(&logTrace, "trace", false, "use trace logging")
+	flag.BoolVar(&flappyWS, "flappyws", false, "periodically drop websocket clients and delete subscriptions")
 	flag.Parse()
 
 	switch {
@@ -454,6 +456,35 @@ func (f *fakeBinance) run(ctx context.Context) {
 			f.withdrawalHistoryMtx.Unlock()
 		}
 	}()
+
+	if flappyWS {
+		go func() {
+			tick := func() <-chan time.Time {
+				const minDelay = time.Minute
+				const delayRange = time.Minute * 5
+				return time.After(minDelay + time.Duration(rand.Float64()*float64(delayRange)))
+			}
+			for {
+				select {
+				case <-tick():
+					f.marketsMtx.Lock()
+					for addr, sub := range f.marketSubscribers {
+						sub.Disconnect()
+						delete(f.marketSubscribers, addr)
+					}
+					f.marketsMtx.Unlock()
+					f.accountSubscribersMtx.Lock()
+					for apiKey, sub := range f.accountSubscribers {
+						sub.Disconnect()
+						delete(f.accountSubscribers, apiKey)
+					}
+					f.accountSubscribersMtx.Unlock()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	f.srv.Run(ctx)
 }
