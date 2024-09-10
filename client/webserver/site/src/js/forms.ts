@@ -1959,10 +1959,7 @@ export class AppPassResetForm {
 
   constructor (form: PageElement, success: () => void) {
     this.form = form
-    this.success = () => {
-      success()
-      this.refresh()
-    }
+    this.success = success
     const page = this.page = Doc.idDescendants(form)
     bind(form, page.resetAppPWSubmitBtn, () => this.resetAppPW())
   }
