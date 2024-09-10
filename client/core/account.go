@@ -71,6 +71,10 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 		if dc.hasActiveOrders() {
 			return fmt.Errorf("cannot disable account with active orders")
 		}
+
+		if dc.hasUnspentBond() {
+			c.log.Warnf("Disabling dex server with unspent bonds. Bonds will be refunded when expired.")
+		}
 	}
 
 	err = c.db.ToggleAccountStatus(addr, disable)

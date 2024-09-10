@@ -5143,7 +5143,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 		}
 
 		if dc.acct.isDisabled() {
-			continue // we can only unlock the dex account to init the account ID.
+			continue // For disabled account, we only want dc.acct.unlock above to initialize the account ID.
 		}
 
 		// Unlock the bond wallet if a target tier is set.

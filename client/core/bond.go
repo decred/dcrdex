@@ -705,7 +705,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		// locked. However, we must refund bonds regardless.
 
 		bondCfg := c.dexBondConfig(dc, now)
-		if len(bondCfg.bondAssets) == 0 {
+		if len(bondCfg.bondAssets) == 0 && !dc.acct.isDisabled() {
 			if !dc.IsDown() && dc.config() != nil {
 				dc.log.Meter("no-bond-assets", time.Minute*10).Warnf("Zero bond assets reported for apparently connected DCRDEX server")
 			}
@@ -723,7 +723,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		}
 
 		if dc.acct.isDisabled() {
-			continue // we can only attempt bond refund(if any) for disabled accounts
+			continue // For disabled account, we should only bother about unspent bonds that might have been refunded by refundExpiredBonds above.
 		}
 
 		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
