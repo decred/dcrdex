@@ -1959,7 +1959,10 @@ export class AppPassResetForm {
 
   constructor (form: PageElement, success: () => void) {
     this.form = form
-    this.success = success
+    this.success = () => {
+      success()
+      this.refresh()
+    }
     const page = this.page = Doc.idDescendants(form)
     bind(form, page.resetAppPWSubmitBtn, () => this.resetAppPW())
   }
@@ -1977,15 +1980,10 @@ export class AppPassResetForm {
       return
     }
 
-    const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
-    if (!seed || seed.length !== 128 /* 64 bytes hex encoded value, check and fail early */) {
-      Doc.showFormError(page.appPWResetErrMsg, intl.prep(intl.ID_INVALID_SEED))
-      return
-    }
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/resetapppassword', {
       newPass: newAppPW,
-      seed
+      seed: page.seedInput.value
     })
     loaded()
     if (!app().checkResponse(res)) {
@@ -2007,6 +2005,7 @@ export class AppPassResetForm {
     const page = this.page
     page.newAppPassword.value = ''
     page.confirmNewAppPassword.value = ''
+    page.seedInput.value = ''
     Doc.hide(page.appPWResetSuccessMsg, page.appPWResetErrMsg)
   }
 }
