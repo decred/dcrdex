@@ -538,6 +538,11 @@ func (f *fakeBinance) handleAccountSubscription(w http.ResponseWriter, r *http.R
 	}()
 }
 
+type listSubsResp struct {
+	ID     uint64   `json:"id"`
+	Result []string `json:"result"`
+}
+
 func (f *fakeBinance) handleMarketStream(w http.ResponseWriter, r *http.Request) {
 	streamsStr := r.URL.Query().Get("streams")
 	if streamsStr == "" {
@@ -587,6 +592,25 @@ func (f *fakeBinance) handleMarketStream(w http.ResponseWriter, r *http.Request)
 		f.cleanMarkets()
 	}
 
+	listSubscriptions := func(id uint64) {
+		f.marketsMtx.Lock()
+		defer f.marketsMtx.Unlock()
+		var streams []string
+		for mktID := range cl.markets {
+			streams = append(streams, fmt.Sprintf("%s@depth", mktID))
+		}
+		resp := listSubsResp{
+			ID:     id,
+			Result: streams,
+		}
+		b, err := json.Marshal(resp)
+		if err != nil {
+			log.Errorf("LIST_SUBSCRIBE marshal error: %v", err)
+		}
+		cl.WSLink.SendRaw(b)
+		f.cleanMarkets()
+	}
+
 	conn, cm := f.newWSLink(w, r, func(b []byte) {
 		var req bntypes.StreamSubscription
 		if err := json.Unmarshal(b, &req); err != nil {
@@ -598,6 +622,8 @@ func (f *fakeBinance) handleMarketStream(w http.ResponseWriter, r *http.Request)
 			subscribe(req.Params)
 		case "UNSUBSCRIBE":
 			unsubscribe(req.Params)
+		case "LIST_SUBSCRIPTIONS":
+			listSubscriptions(req.ID)
 		}
 	})
 	if conn == nil {

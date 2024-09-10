@@ -77,6 +77,8 @@ type BookUpdate struct {
 type BookNote struct {
 	StreamName string      `json:"stream"`
 	Data       *BookUpdate `json:"data"`
+	ID         uint64      `json:"id"`
+	Result     []string    `json:"result"`
 }
 
 type WSBalance struct {
