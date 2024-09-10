@@ -22,17 +22,18 @@ import (
 )
 
 const (
-	defaultRPCCertFile = "rpc.cert"
-	defaultRPCKeyFile  = "rpc.key"
-	defaultMainnetHost = "127.0.0.1"
-	defaultTestnetHost = "127.0.0.2"
-	defaultSimnetHost  = "127.0.0.3"
-	walletPairOneHost  = "127.0.0.6"
-	walletPairTwoHost  = "127.0.0.7"
-	defaultRPCPort     = "5757"
-	defaultWebPort     = "5758"
-	defaultLogLevel    = "debug"
-	configFilename     = "dexc.conf"
+	defaultRPCCertFile      = "rpc.cert"
+	defaultRPCKeyFile       = "rpc.key"
+	defaultMainnetHost      = "127.0.0.1"
+	defaultTestnetHost      = "127.0.0.2"
+	defaultSimnetHost       = "127.0.0.3"
+	walletPairOneHost       = "127.0.0.6"
+	walletPairTwoHost       = "127.0.0.7"
+	defaultRPCPort          = "5757"
+	defaultWebPort          = "5758"
+	defaultLogLevel         = "debug"
+	configFilename          = "dexc.conf"
+	defaultArchiveSizeLimit = 1000
 )
 
 var (
@@ -106,6 +107,8 @@ type CoreConfig struct {
 	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
 
 	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
+
+	ArchiveSizeLimit uint64 `long:"archivesize" description:"the maximum number of orders to be archived before deleting the oldest"`
 }
 
 // WebConfig encapsulates the configuration needed for the web server.
@@ -213,6 +216,7 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		NoAutoWalletLock:   cfg.NoAutoWalletLock,
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
+		ArchiveSizeLimit:   cfg.ArchiveSizeLimit,
 	}
 }
 
@@ -222,6 +226,9 @@ var DefaultConfig = Config{
 	LogConfig:  LogConfig{DebugLevel: defaultLogLevel},
 	RPCConfig: RPCConfig{
 		CertHosts: []string{defaultTestnetHost, defaultSimnetHost, defaultMainnetHost},
+	},
+	CoreConfig: CoreConfig{
+		ArchiveSizeLimit: defaultArchiveSizeLimit,
 	},
 }
 
