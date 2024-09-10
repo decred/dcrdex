@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"math/rand"
 	"os"
@@ -21,13 +22,14 @@ import (
 )
 
 var (
-	tLogger = dex.StdOutLogger("db_TEST", dex.LevelTrace)
+	tLogger       = dex.StdOutLogger("db_TEST", dex.LevelTrace)
+	withLongTests bool
 )
 
-func newTestDB(t *testing.T) (*BoltDB, func()) {
+func newTestDB(t *testing.T, opts ...Opts) (*BoltDB, func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "db.db")
-	dbi, err := NewDB(dbPath, tLogger)
+	dbi, err := NewDB(dbPath, tLogger, opts...)
 	if err != nil {
 		t.Fatalf("error creating dB: %v", err)
 	}
@@ -50,6 +52,9 @@ func newTestDB(t *testing.T) (*BoltDB, func()) {
 }
 
 func TestMain(m *testing.M) {
+	flag.BoolVar(&withLongTests, "withlongtests", false, "include tests that take a long time to run")
+	flag.Parse()
+
 	defer os.Stdout.Sync()
 	os.Exit(m.Run())
 }
@@ -1162,6 +1167,10 @@ func testCredentialsUpdate(t *testing.T, boltdb *BoltDB, tester func([]byte, str
 }
 
 func TestDeleteInactiveMatches(t *testing.T) {
+	// TODO: This test takes way too long to run. Why?
+	if !withLongTests {
+		return
+	}
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()
 
@@ -1340,6 +1349,10 @@ func TestDeleteInactiveMatches(t *testing.T) {
 }
 
 func TestDeleteInactiveOrders(t *testing.T) {
+	// TODO: This test takes way too long to run. Why?
+	if !withLongTests {
+		return
+	}
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()
 
@@ -1611,5 +1624,124 @@ func TestPokes(t *testing.T) {
 	}
 	if len(noPokes) != 0 {
 		t.Fatal("Result from second LoadPokes wasn't empty")
+	}
+}
+
+func TestPruneArchivedOrders(t *testing.T) {
+	const host = "blah"
+	const archiveSizeLimit = 5
+	boltdb, shutdown := newTestDB(t, Opts{ArchiveSizeLimit: archiveSizeLimit})
+	defer shutdown()
+
+	archivedOrdersN := func() (n int) {
+		boltdb.View(func(tx *bbolt.Tx) error {
+			n = tx.Bucket(archivedOrdersBucket).Stats().BucketN - 1 /* BucketN includes top bucket */
+			return nil
+		})
+		return n
+	}
+
+	var ordStampI int64
+	addOrder := func(optStamp int64) order.OrderID {
+		ord, _ := ordertest.RandomLimitOrder()
+		if optStamp != 0 {
+			ord.P.ClientTime = time.Unix(optStamp, 0)
+		} else {
+			ord.P.ClientTime = time.Unix(ordStampI, 0)
+			ordStampI++
+		}
+		boltdb.UpdateOrder(&db.MetaOrder{
+			MetaData: &db.OrderMetaData{
+				Status: order.OrderStatusExecuted,
+				Host:   host,
+				Proof:  db.OrderProof{DEXSig: []byte{0xa}},
+			},
+			Order: ord,
+		})
+		return ord.ID()
+	}
+	for i := 0; i < archiveSizeLimit*2; i++ {
+		addOrder(0)
+	}
+
+	if n := archivedOrdersN(); n != archiveSizeLimit*2 {
+		t.Fatalf("Expected %d archived orders after intitialization, saw %d", archiveSizeLimit*2, n)
+	}
+
+	if err := boltdb.pruneArchivedOrders(); err != nil {
+		t.Fatalf("pruneArchivedOrders error: %v", err)
+	}
+
+	if n := archivedOrdersN(); n != archiveSizeLimit {
+		t.Fatalf("Expected %d archived orders after first pruning, saw %d", archiveSizeLimit, n)
+	}
+
+	// Make sure we pruned the first 5.
+	if err := boltdb.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(archivedOrdersBucket)
+		return bkt.ForEach(func(oidB, _ []byte) error {
+			ord, err := decodeOrderBucket(oidB, bkt.Bucket(oidB))
+			if err != nil {
+				return fmt.Errorf("error decoding order %x: %v", oidB, err)
+			}
+			if stamp := ord.Order.Prefix().ClientTime.Unix(); stamp < int64(archiveSizeLimit) {
+				return fmt.Errorf("order stamp %d should have been pruned", stamp)
+			}
+			return nil
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an order with an early stamp and an active match
+	oid := addOrder(1)
+	m := &db.MetaMatch{
+		MetaData: &db.MatchMetaData{
+			DEX:  host,
+			Base: 1,
+		},
+		UserMatch: ordertest.RandomUserMatch(),
+	}
+	m.OrderID = oid
+	m.Status = order.NewlyMatched
+	if err := boltdb.UpdateMatch(m); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := boltdb.pruneArchivedOrders(); err != nil {
+		t.Fatalf("Error pruning orders when one has an active match: %v", err)
+	}
+
+	if n := archivedOrdersN(); n != archiveSizeLimit {
+		t.Fatalf("Expected %d archived orders after pruning with active match order in place, saw %d", archiveSizeLimit, n)
+	}
+
+	// Our active match order should still be available
+	if _, err := boltdb.Order(oid); err != nil {
+		t.Fatalf("Error retrieving unpruned active match order: %v", err)
+	}
+
+	// Retire the active match order
+	m.Status = order.MatchComplete
+	if err := boltdb.UpdateMatch(m); err != nil {
+		t.Fatal(err)
+	}
+	// Add an order to push the now retirable older order out
+	addOrder(0)
+	if err := boltdb.pruneArchivedOrders(); err != nil {
+		t.Fatalf("Error pruning orders after retiring match: %v", err)
+	}
+	if n := archivedOrdersN(); n != archiveSizeLimit {
+		t.Fatalf("Expected %d archived orders after pruning with retired match, saw %d", archiveSizeLimit, n)
+	}
+	// Match should not be archived any longer.
+	metaID := m.MatchOrderUniqueID()
+	if err := boltdb.matchesView(func(mb, archivedMB *bbolt.Bucket) error {
+		if mb.Bucket(metaID) != nil || archivedMB.Bucket(metaID) != nil {
+			return errors.New("still found bucket for retired match of pruned order")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

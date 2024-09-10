@@ -1460,8 +1460,11 @@ type Config struct {
 	// for running core in extension mode, which gives the caller options for
 	// e.g. limiting the ability to configure wallets.
 	ExtensionModeFile string
-
+	// TheOneHost will run core with only the specified server.
 	TheOneHost string
+	// ArchiveSizeLimit is the maximum number of orders that will be archived
+	// before we start deleting the oldest.
+	ArchiveSizeLimit uint64
 }
 
 // locale is data associated with the currently selected language.
@@ -1544,6 +1547,7 @@ func New(cfg *Config) (*Core, error) {
 	}
 	dbOpts := bolt.Opts{
 		BackupOnShutdown: !cfg.NoAutoDBBackup,
+		ArchiveSizeLimit: cfg.ArchiveSizeLimit,
 	}
 	boltDB, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"), dbOpts)
 	if err != nil {
