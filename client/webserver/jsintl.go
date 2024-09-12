@@ -144,7 +144,6 @@ const (
 	ticketStatusExpiredID            = "TICKET_STATUS_EXPIRED"
 	ticketStatusUnspentID            = "TICKET_STATUS_UNSPENT"
 	ticketStatusRevokedID            = "TICKET_STATUS_REVOKED"
-	invalidSeedID                    = "INVALID_SEED"
 	passwordResetSuccessMsgID        = "PASSWORD_RESET_SUCCESS_MSG"
 	browserNtfnEnabledID             = "BROWSER_NTFN_ENABLED"
 	browserNtfnOrdersID              = "BROWSER_NTFN_ORDERS"
@@ -341,7 +340,6 @@ var enUS = map[string]*intl.Translation{
 	ticketStatusExpiredID:            {T: "expired"},
 	ticketStatusUnspentID:            {T: "unspent"},
 	ticketStatusRevokedID:            {T: "revoked"},
-	invalidSeedID:                    {T: "Invalid seed"},
 	passwordResetSuccessMsgID:        {T: "Your password reset was successful. You can proceed to login with your new password."},
 	browserNtfnEnabledID:             {T: "Bison Wallet notifications enabled"},
 	browserNtfnOrdersID:              {T: "Orders"},
@@ -611,7 +609,6 @@ var plPL = map[string]*intl.Translation{
 	txFeeSupportedID:                 {T: "szacowanie opłat dla tego rodzaju portfela nie jest wspierane"},
 	matchStatusRedeemPendingID:       {T: "Wykup środków w toku"},
 	passwordResetSuccessMsgID:        {T: "Hasło zostało zresetowane pomyślnie. Możesz zalogować się z użyciem nowego hasła."},
-	invalidSeedID:                    {T: "Nieprawidłowe ziarno"},
 	depthLoadingID:                   {T: "pobieranie danych o głębokości"},
 	txTypeApproveTokenID:             {T: "Zatwierdź token"},
 	txTypeSendID:                     {T: "Wyślij"},
@@ -839,7 +836,6 @@ var ar = map[string]*intl.Translation{
 	browserNtfnMatchesID:             {T: "التطابقات"},
 	noCexID:                          {T: "اختر منصة مبادلات للمراجحة"},
 	walletRecoverySupportMsgID:       {T: "فشل تحميل محفظة {{ walletSymbol }} الأصلية بشكل صحيح. حاول النقر على زر 'استعادة' أدناه لإصلاحها"},
-	invalidSeedID:                    {T: "بذرة غير صحيحة"},
 	invalidCompsValueID:              {T: "قيمة المقارنات غير صحيحة"},
 	immatureBalMsgID:                 {T: "الأموال الواردة في انتظار التأكيد"},
 	archivedRecordsPathID:            {T: "موقع الملف: {{ path }}"},

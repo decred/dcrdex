@@ -25,7 +25,10 @@ export default class LoginPage extends BasePage {
     prepAndDisplayLoginForm()
 
     this.appPassResetForm = new AppPassResetForm(page.resetAppPWForm, () => { prepAndDisplayLoginForm() })
-    Doc.bind(page.forgotPassBtn, 'click', () => slideSwap(page.loginForm, page.resetAppPWForm))
+    Doc.bind(page.forgotPassBtn, 'click', () => {
+      this.appPassResetForm.refresh()
+      slideSwap(page.loginForm, page.resetAppPWForm)
+    })
     Doc.bind(page.resetPassFormCloser, 'click', () => { prepAndDisplayLoginForm() })
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, page.resetAppPWForm) && Doc.isDisplayed(page.resetAppPWForm)) { prepAndDisplayLoginForm() }
