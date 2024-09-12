@@ -1052,21 +1052,19 @@ export default class Application {
 
         // Updates given order in market's orders list if it finds it.
         // Returns a bool which indicates if order was found.
+        mkt.orders = mkt.orders || []
         const updateOrder = (mkt: Market, ord: Order) => {
-          for (const i in mkt.orders || []) {
-            if (mkt.orders[i].id === ord.id) {
-              mkt.orders[i] = ord
-              return true
-            }
-          }
-          return false
+          const i = mkt.orders.findIndex((o: Order) => o.id === ord.id)
+          if (i === -1) return false
+          if (note.topic === 'OrderRetired') mkt.orders.splice(i, 1)
+          else mkt.orders[i] = ord
+          return true
         }
         // If the notification order already exists we update it.
         // In case market's orders list is empty or the notification order isn't
         // part of it we add it manually as this means the order was
         // just placed.
-        if (!mkt.orders) mkt.orders = [order]
-        else if (!updateOrder(mkt, order)) mkt.orders.push(order)
+        if (!updateOrder(mkt, order)) mkt.orders.push(order)
         break
       }
       case 'balance': {

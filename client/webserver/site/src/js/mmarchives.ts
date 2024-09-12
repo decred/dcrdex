@@ -45,7 +45,7 @@ export default class MarketMakerArchivesPage extends BasePage {
       setMarketElements(row, baseID, quoteID, host)
 
       Doc.bind(tmpl.logs, 'click', () => {
-        app().loadPage('mmlogs', { baseID, quoteID, host, startTime })
+        app().loadPage('mmlogs', { baseID, quoteID, host, startTime, returnPage: 'mmarchives' })
       })
 
       Doc.bind(tmpl.settings, 'click', () => {

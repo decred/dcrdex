@@ -758,13 +758,13 @@ export class RunningMarketMakerDisplay {
   startTime: number
   ticker: any
 
-  constructor (div: PageElement) {
+  constructor (div: PageElement, page: string) {
     this.div = div
     this.page = Doc.parseTemplate(div)
     Doc.bind(this.page.stopBttn, 'click', () => this.stop())
     Doc.bind(this.page.runLogsBttn, 'click', () => {
       const { mkt: { baseID, quoteID, host }, startTime } = this
-      app().loadPage('mmlogs', { baseID, quoteID, host, startTime })
+      app().loadPage('mmlogs', { baseID, quoteID, host, startTime, returnPage: page })
     })
   }
 

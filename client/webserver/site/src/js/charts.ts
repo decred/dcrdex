@@ -945,6 +945,21 @@ export class CandleChart extends Chart {
     }
     this.dataExtents = dataExtents
 
+    let mouseCandle: Candle | null = null
+    if (mousePos) {
+      this.plotRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, 0, 1), (ctx, tools) => {
+        const selectedStartStamp = truncate(tools.unx(mousePos.x), candleWidth)
+        for (const c of candles) {
+          if (start(c) === selectedStartStamp) {
+            mouseCandle = c
+            ctx.fillStyle = this.theme.gridLines
+            ctx.fillRect(tools.x(start(c)), tools.y(0), tools.w(candleWidth), tools.h(1))
+            break
+          }
+        }
+      })
+    }
+
     // Draw the grid
     const rFactor = this.rateConversionFactor
     const baseUnit = app().assets[this.market.baseid]?.unitInfo.conventional.unit || this.market.basesymbol.toUpperCase()
@@ -987,44 +1002,30 @@ export class CandleChart extends Chart {
     this.plotYLabels(yLabels, this.dataExtents.y.min, this.dataExtents.y.max, baseUnit)
 
     // Highlight the candle if the user mouse is over the canvas.
-    let mouseCandle: Candle | null = null
-    if (mousePos) {
-      this.plotRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, 0, 1), (ctx, tools) => {
-        const selectedStartStamp = truncate(tools.unx(mousePos.x), candleWidth)
-        for (const c of candles) {
-          if (start(c) === selectedStartStamp) {
-            mouseCandle = c
-            ctx.fillStyle = this.theme.gridLines
-            ctx.fillRect(tools.x(start(c)), tools.y(0), tools.w(candleWidth), tools.h(1))
-            break
-          }
-        }
+    if (mouseCandle) {
+      const yExt = this.xRegion.extents.y
+      this.xRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, yExt.min, yExt.max), (ctx, tools) => {
+        if (!mouseCandle) return // For TypeScript. Duh.
+        this.applyLabelStyle()
+        const rangeTxt = `${new Date(start(mouseCandle)).toLocaleString()} - ${new Date(end(mouseCandle)).toLocaleString()}`
+        const [xPad, yPad] = [25, 2]
+        const rangeWidth = ctx.measureText(rangeTxt).width + 2 * xPad
+        const rangeHeight = 16
+        let centerX = tools.x((start(mouseCandle) + end(mouseCandle)) / 2)
+        let left = centerX - rangeWidth / 2
+        const xExt = this.xRegion.extents.x
+        if (left < xExt.min) left = xExt.min
+        else if (left + rangeWidth > xExt.max) left = xExt.max - rangeWidth
+        centerX = left + rangeWidth / 2
+        const top = yExt.min + (this.xRegion.height() - rangeHeight) / 2
+        ctx.fillStyle = this.theme.legendFill
+        ctx.strokeStyle = this.theme.gridBorder
+        const rectArgs: [number, number, number, number] = [left - xPad, top - yPad, rangeWidth + 2 * xPad, rangeHeight + 2 * yPad]
+        ctx.fillRect(...rectArgs)
+        ctx.strokeRect(...rectArgs)
+        this.applyLabelStyle()
+        ctx.fillText(rangeTxt, centerX, this.xRegion.extents.midY, rangeWidth)
       })
-      if (mouseCandle) {
-        const yExt = this.xRegion.extents.y
-        this.xRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, yExt.min, yExt.max), (ctx, tools) => {
-          if (!mouseCandle) return // For TypeScript. Duh.
-          this.applyLabelStyle()
-          const rangeTxt = `${new Date(start(mouseCandle)).toLocaleString()} - ${new Date(end(mouseCandle)).toLocaleString()}`
-          const [xPad, yPad] = [25, 2]
-          const rangeWidth = ctx.measureText(rangeTxt).width + 2 * xPad
-          const rangeHeight = 16
-          let centerX = tools.x((start(mouseCandle) + end(mouseCandle)) / 2)
-          let left = centerX - rangeWidth / 2
-          const xExt = this.xRegion.extents.x
-          if (left < xExt.min) left = xExt.min
-          else if (left + rangeWidth > xExt.max) left = xExt.max - rangeWidth
-          centerX = left + rangeWidth / 2
-          const top = yExt.min + (this.xRegion.height() - rangeHeight) / 2
-          ctx.fillStyle = this.theme.legendFill
-          ctx.strokeStyle = this.theme.gridBorder
-          const rectArgs: [number, number, number, number] = [left - xPad, top - yPad, rangeWidth + 2 * xPad, rangeHeight + 2 * yPad]
-          ctx.fillRect(...rectArgs)
-          ctx.strokeRect(...rectArgs)
-          this.applyLabelStyle()
-          ctx.fillText(rangeTxt, centerX, this.xRegion.extents.midY, rangeWidth)
-        })
-      }
     }
 
     // Report the mouse candle.
