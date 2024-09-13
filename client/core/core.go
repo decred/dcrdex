@@ -576,10 +576,9 @@ func (dc *dexConnection) activeOrders() ([]*Order, []*InFlightOrder) {
 }
 
 // findOrder returns the tracker and preimage for an order ID, and a boolean
-// indicating whether this is a cancel order.
+// indicating whether this is a cancel order. The trade mutex must be held for
+// reads.
 func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
-	dc.tradeMtx.RLock()
-	defer dc.tradeMtx.RUnlock()
 	// Try to find the order as a trade.
 	if tracker, found := dc.trades[oid]; found {
 		return tracker, tracker.preImg, false
@@ -645,7 +644,9 @@ func (c *Core) sendCancelOrder(dc *dexConnection, oid order.OrderID, base, quote
 // tryCancel will look for an order with the specified order ID, and attempt to
 // cancel the order. It is not an error if the order is not found.
 func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err error) {
+	dc.tradeMtx.RLock()
 	tracker, _, _ := dc.findOrder(oid)
+	dc.tradeMtx.RUnlock()
 	if tracker == nil {
 		return // false, nil
 	}
@@ -771,7 +772,9 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	for _, msgMatch := range msgMatches {
 		var oid order.OrderID
 		copy(oid[:], msgMatch.OrderID)
+		dc.tradeMtx.RLock()
 		tracker, _, isCancel := dc.findOrder(oid)
+		dc.tradeMtx.RUnlock()
 		if tracker == nil {
 			dc.blindCancelsMtx.Lock()
 			_, found := dc.blindCancels[oid]
@@ -4951,7 +4954,9 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	}
 	// See if it's an active order first.
 	for _, dc := range c.dexConnections() {
+		dc.tradeMtx.RLock()
 		tracker, _, _ := dc.findOrder(oid)
+		dc.tradeMtx.RUnlock()
 		if tracker != nil {
 			return tracker.coreOrder(), nil
 		}
@@ -8492,7 +8497,9 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var oid order.OrderID
 	copy(oid[:], revocation.OrderID)
 
+	dc.tradeMtx.RLock()
 	tracker, _, isCancel := dc.findOrder(oid)
+	dc.tradeMtx.RUnlock()
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}
@@ -8534,7 +8541,9 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var oid order.OrderID
 	copy(oid[:], revocation.OrderID)
 
+	dc.tradeMtx.RLock()
 	tracker, _, _ := dc.findOrder(oid)
+	dc.tradeMtx.RUnlock()
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s (not an error if you've completed your side of the swap)", oid.String())
 	}
@@ -8933,8 +8942,10 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 }
 
 func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.OrderID, commitChecksum dex.Bytes) error {
+	dc.tradeMtx.Lock()
 	tracker, preImg, isCancel := dc.findOrder(oid)
 	if tracker == nil {
+		dc.tradeMtx.Unlock()
 		var found bool
 		dc.blindCancelsMtx.Lock()
 		preImg, found = dc.blindCancels[oid]
@@ -8946,6 +8957,7 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		// Record the csum if this preimage request is novel, and deny it if
 		// this is a duplicate request with an altered csum.
 		if !acceptCsum(tracker, isCancel, commitChecksum) {
+			dc.tradeMtx.Unlock()
 			csumErr := errors.New("invalid csum in duplicate preimage request")
 			resp, err := msgjson.NewResponse(reqID, nil,
 				msgjson.NewError(msgjson.InvalidRequestError, "%v", csumErr))
@@ -8959,6 +8971,7 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 			}
 			return csumErr
 		}
+		dc.tradeMtx.Unlock()
 	}
 
 	resp, err := msgjson.NewResponse(reqID, &msgjson.PreimageResponse{
@@ -8987,14 +9000,12 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 // subsequent match_proof with this order has the same checksum. If it does not,
 // the server may have used the knowledge of this preimage we are sending them
 // now to alter the epoch shuffle. The return value is false if a previous
-// checksum has been recorded that differs from the provided one.
+// checksum has been recorded that differs from the provided one. The trade
+// tracker mutext must be held for writes.
 func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) bool {
 	// Do not allow csum to be changed once it has been committed to
 	// (initialized to something other than `nil`) because it is probably a
 	// malicious behavior by the server.
-	tracker.mtx.Lock()
-	defer tracker.mtx.Unlock()
-
 	if isCancel {
 		if tracker.cancel.csum == nil {
 			tracker.cancel.csum = commitChecksum
@@ -9086,7 +9097,9 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	var oid order.OrderID
 	copy(oid[:], nomatchMsg.OrderID)
 
+	dc.tradeMtx.RLock()
 	tracker, _, _ := dc.findOrder(oid)
+	dc.tradeMtx.RUnlock()
 	if tracker == nil {
 		dc.blindCancelsMtx.Lock()
 		_, found := dc.blindCancels[oid]
@@ -9160,7 +9173,9 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var oid order.OrderID
 	copy(oid[:], audit.OrderID)
 
+	dc.tradeMtx.RLock()
 	tracker, _, _ := dc.findOrder(oid)
+	dc.tradeMtx.RUnlock()
 	if tracker == nil {
 		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
@@ -9185,7 +9200,9 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	var oid order.OrderID
 	copy(oid[:], redemption.OrderID)
 
+	dc.tradeMtx.RLock()
 	tracker, _, isCancel := dc.findOrder(oid)
+	dc.tradeMtx.RUnlock()
 	if tracker != nil {
 		if isCancel {
 			return fmt.Errorf("redemption request received for cancel order %v, match %v (you ok server?)",
@@ -10236,7 +10253,9 @@ func (c *Core) RemoveWalletPeer(assetID uint32, address string) error {
 // id. An error is returned if it cannot be found.
 func (c *Core) findActiveOrder(oid order.OrderID) (*trackedTrade, error) {
 	for _, dc := range c.dexConnections() {
+		dc.tradeMtx.RLock()
 		tracker, _, _ := dc.findOrder(oid)
+		dc.tradeMtx.RUnlock()
 		if tracker != nil {
 			return tracker, nil
 		}
@@ -10623,7 +10642,9 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 	copy(oid[:], req.OrderID)
 	var tracker *trackedTrade
 	for _, dc := range c.dexConnections() {
+		dc.tradeMtx.RLock()
 		tracker, _, _ = dc.findOrder(oid)
+		dc.tradeMtx.RUnlock()
 		if tracker != nil {
 			break
 		}
