@@ -28,6 +28,7 @@ interface LogsPageParams {
   quoteID: number
   baseID: number
   startTime: number
+  returnPage: string
 }
 
 let net = 0
@@ -81,7 +82,7 @@ export default class MarketMakerLogsPage extends BasePage {
     const page = this.page = Doc.idDescendants(main)
     net = app().user.net
     Doc.cleanTemplates(page.eventTableRowTmpl, page.dexOrderTxRowTmpl, page.performanceTableRowTmpl)
-    Doc.bind(this.page.backButton, 'click', () => { app().loadPage(this.liveBot ? 'mm' : 'mmarchives') })
+    Doc.bind(this.page.backButton, 'click', () => { app().loadPage(params.returnPage ?? 'mm') })
     Doc.bind(this.page.filterButton, 'click', () => { this.applyFilters() })
     if (params?.host) {
       const url = new URL(window.location.href)

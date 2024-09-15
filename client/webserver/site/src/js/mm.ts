@@ -411,7 +411,7 @@ class Bot extends BotMarket {
     const div = this.div = pg.page.botTmpl.cloneNode(true) as PageElement
     const page = this.page = Doc.parseTemplate(div)
 
-    this.runDisplay = new RunningMarketMakerDisplay(page.onBox)
+    this.runDisplay = new RunningMarketMakerDisplay(page.onBox, 'mm')
 
     setMarketElements(div, baseID, quoteID, host)
     if (cexName) setCexElements(div, cexName)
@@ -670,8 +670,8 @@ class Bot extends BotMarket {
       this.baseAllocSlider.changed = (r: number) => {
         const dexAlloc = baseSlider.left.dex + r * dexRange
         const cexAlloc = baseSlider.left.cex + r * cexRange
-        alloc.dex[baseID] = dexAlloc * baseFeeFactor
-        alloc.cex[baseID] = cexAlloc * baseFeeFactor
+        alloc.dex[baseID] = dexAlloc * baseFactor
+        alloc.cex[baseID] = cexAlloc * baseFactor
         setBaseProposal(dexAlloc, cexAlloc)
       }
     }
@@ -692,8 +692,8 @@ class Bot extends BotMarket {
       this.quoteAllocSlider.changed = (r: number) => {
         const dexAlloc = quoteSlider.left.dex + r * dexRange
         const cexAlloc = quoteSlider.left.cex + r * cexRange
-        alloc.dex[quoteID] = dexAlloc * quoteFeeFactor
-        alloc.cex[quoteID] = cexAlloc * quoteFeeFactor
+        alloc.dex[quoteID] = dexAlloc * quoteFactor
+        alloc.cex[quoteID] = cexAlloc * quoteFactor
         setQuoteProposal(dexAlloc, cexAlloc)
       }
     }
