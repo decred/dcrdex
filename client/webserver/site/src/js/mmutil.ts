@@ -867,7 +867,7 @@ export class RunningMarketMakerDisplay {
     }
 
     Doc.show(page.stats)
-    setSignedValue(runStats.profitLoss.profitRatio, page.profit, page.profitSign, 2)
+    setSignedValue(runStats.profitLoss.profitRatio * 100, page.profit, page.profitSign, 2)
     setSignedValue(runStats.profitLoss.profit, page.profitLoss, page.plSign, 2)
     this.startTime = runStats.startTime
 
