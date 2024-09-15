@@ -63,7 +63,8 @@ import {
   MatchNote,
   ApprovalStatus,
   OrderFilter,
-  RunStatsNote
+  RunStatsNote,
+  RunEventNote
 } from './registry'
 import { setOptionTemplates } from './opts'
 import { RunningMarketMakerDisplay } from './mmutil'
@@ -128,6 +129,7 @@ interface CurrentMarket {
   baseCfg: Asset
   quoteCfg: Asset
   rateConversionFactor: number
+  bookLoaded: boolean
 }
 
 interface LoadTracker {
@@ -270,7 +272,7 @@ export default class MarketsPage extends BasePage {
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
-    this.mm = new RunningMarketMakerDisplay(page.mmRunning)
+    this.mm = new RunningMarketMakerDisplay(page.mmRunning, 'markets')
 
     this.reputationMeter = new ReputationMeter(page.reputationMeter)
 
@@ -522,7 +524,10 @@ export default class MarketsPage extends BasePage {
           this.resolveOrderFormVisibility()
         }
       },
-      runevent: (/* note: RunEventNote */) => { this.mm.update() }
+      runevent: (note: RunEventNote) => {
+        if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
+        this.mm.update()
+      }
     })
 
     this.loadingAnimations = {}
@@ -1131,7 +1136,8 @@ export default class MarketsPage extends BasePage {
       quoteCfg,
       rateConversionFactor,
       sellBalance: 0,
-      buyBalance: 0
+      buyBalance: 0,
+      bookLoaded: false
     }
 
     this.market = mkt
@@ -1854,9 +1860,10 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (note: BookUpdate) {
     app().log('book', 'handleBookRoute:', note)
     const mktBook = note.payload
-    const { baseCfg: b, quoteCfg: q } = this.market
-    if (mktBook.base !== b.id || mktBook.quote !== q.id) return // user already changed markets
+    const { baseCfg: b, quoteCfg: q, dex: { host } } = this.market
+    if (mktBook.base !== b.id || mktBook.quote !== q.id || note.host !== host) return // user already changed markets
     this.handleBook(mktBook)
+    this.market.bookLoaded = true
     this.updateTitle()
     this.setMarketBuyOrderEstimate()
   }
@@ -2477,7 +2484,7 @@ export default class MarketsPage extends BasePage {
     const conversionRate = this.anyRate()[1]
     if (conversionRate) {
       const quoteLot = mkt.lotsize * conversionRate
-      page.marketLimitQuote.textContent = Doc.formatFourSigFigs(quoteLot / qui.conventional.conversionFactor)
+      page.marketLimitQuote.textContent = Doc.formatFourSigFigs(mkt.parcelsize * quoteLot / qui.conventional.conversionFactor)
     } else page.marketLimitQuote.textContent = '-'
 
     const tier = strongTier(auth)
@@ -2499,9 +2506,11 @@ export default class MarketsPage extends BasePage {
    * rate is generated.
    */
   anyRate (): [number, number, number] {
-    const { cfg: { spot }, baseCfg: { id: baseID }, quoteCfg: { id: quoteID }, rateConversionFactor } = this.market
-    const midGap = this.midGap()
-    if (midGap) return [midGap * OrderUtil.RateEncodingFactor, midGap, this.midGapConventional() || 0]
+    const { cfg: { spot }, baseCfg: { id: baseID }, quoteCfg: { id: quoteID }, rateConversionFactor, bookLoaded } = this.market
+    if (bookLoaded) {
+      const midGap = this.midGap()
+      if (midGap) return [midGap * OrderUtil.RateEncodingFactor, midGap, this.midGapConventional() || 0]
+    }
     if (spot && spot.rate) return [spot.rate, spot.rate / OrderUtil.RateEncodingFactor, spot.rate / rateConversionFactor]
     const [baseUSD, quoteUSD] = [app().fiatRatesMap[baseID], app().fiatRatesMap[quoteID]]
     if (baseUSD && quoteUSD) {
