@@ -1627,13 +1627,11 @@ func TestPruneArchivedOrders(t *testing.T) {
 		return n
 	}
 
-	var ordStampI int64
-	addOrder := func(optStamp int64) order.OrderID {
+	var ordStampI uint64
+	addOrder := func(stamp uint64) order.OrderID {
 		ord, _ := ordertest.RandomLimitOrder()
-		if optStamp != 0 {
-			ord.P.ClientTime = time.Unix(optStamp, 0)
-		} else {
-			ord.P.ClientTime = time.Unix(ordStampI, 0)
+		if stamp == 0 {
+			stamp = ordStampI
 			ordStampI++
 		}
 		boltdb.UpdateOrder(&db.MetaOrder{
@@ -1644,7 +1642,12 @@ func TestPruneArchivedOrders(t *testing.T) {
 			},
 			Order: ord,
 		})
-		return ord.ID()
+		oid := ord.ID()
+		boltdb.ordersUpdate(func(ob, archivedOB *bbolt.Bucket) error {
+			archivedOB.Bucket(oid[:]).Put(updateTimeKey, uint64Bytes(stamp))
+			return nil
+		})
+		return oid
 	}
 	for i := 0; i < archiveSizeLimit*2; i++ {
 		addOrder(0)
@@ -1666,11 +1669,7 @@ func TestPruneArchivedOrders(t *testing.T) {
 	if err := boltdb.View(func(tx *bbolt.Tx) error {
 		bkt := tx.Bucket(archivedOrdersBucket)
 		return bkt.ForEach(func(oidB, _ []byte) error {
-			ord, err := decodeOrderBucket(oidB, bkt.Bucket(oidB))
-			if err != nil {
-				return fmt.Errorf("error decoding order %x: %v", oidB, err)
-			}
-			if stamp := ord.Order.Prefix().ClientTime.Unix(); stamp < int64(archiveSizeLimit) {
+			if stamp := intCoder.Uint64(bkt.Bucket(oidB).Get(updateTimeKey)); stamp < archiveSizeLimit {
 				return fmt.Errorf("order stamp %d should have been pruned", stamp)
 			}
 			return nil
