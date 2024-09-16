@@ -471,7 +471,7 @@ func (db *BoltDB) pruneArchivedOrders() error {
 
 		type orderStamp struct {
 			oid   []byte
-			stamp int64
+			stamp uint64
 		}
 		deletes := make([]*orderStamp, 0, toClear)
 		sortDeletes := func() {
@@ -485,11 +485,16 @@ func (db *BoltDB) pruneArchivedOrders() error {
 			if _, found := oidsWithActiveMatches[oid]; found {
 				return nil
 			}
-			ord, err := decodeOrderBucket(oidB, archivedOB.Bucket(oidB))
-			if err != nil {
-				return fmt.Errorf("error decoding order %x: %v", oid, err)
+			oBkt := archivedOB.Bucket(oidB)
+			if oBkt == nil {
+				return fmt.Errorf("no order bucket iterated order %x", oidB)
 			}
-			stamp := ord.Order.Prefix().ClientTime.Unix()
+			stampB := oBkt.Get(updateTimeKey)
+			if stampB == nil {
+				// Highly improbable.
+				stampB = make([]byte, 8)
+			}
+			stamp := intCoder.Uint64(stampB)
 			if len(deletes) < toClear {
 				deletes = append(deletes, &orderStamp{
 					stamp: stamp,
