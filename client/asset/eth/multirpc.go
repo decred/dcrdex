@@ -408,19 +408,13 @@ type multiRPCClient struct {
 var _ ethFetcher = (*multiRPCClient)(nil)
 
 func newMultiRPCClient(
-	dir string,
+	creds *accountCredentials,
 	endpoints []string,
 	log dex.Logger,
 	cfg *params.ChainConfig,
 	finalizeConfs uint64,
 	net dex.Network,
 ) (*multiRPCClient, error) {
-	walletDir := getWalletDir(dir, net)
-	creds, err := pathCredentials(filepath.Join(walletDir, "keystore"))
-	if err != nil {
-		return nil, fmt.Errorf("error parsing credentials from %q: %w", dir, err)
-	}
-
 	m := &multiRPCClient{
 		net:           net,
 		cfg:           cfg,
@@ -1317,18 +1311,8 @@ func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Tr
 	return nil
 }
 
-func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
-	tx, err := m.creds.ks.SignTx(*m.creds.acct, types.NewTx(&types.DynamicFeeTx{
-		To:        &to,
-		ChainID:   m.chainID,
-		Nonce:     txOpts.Nonce.Uint64(),
-		Gas:       txOpts.GasLimit,
-		GasFeeCap: txOpts.GasFeeCap,
-		GasTipCap: txOpts.GasTipCap,
-		Value:     txOpts.Value,
-		Data:      data,
-	}), m.chainID)
-
+func (m *multiRPCClient) genSignAndSendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
+	tx, err := m.creds.signedTx(txOpts, to, data)
 	if err != nil {
 		return nil, fmt.Errorf("signing error: %v", err)
 	}

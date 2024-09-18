@@ -80,11 +80,11 @@ var (
 	simnetWalletSeed           = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
 	simnetAddr                 common.Address
 	simnetAcct                 *accounts.Account
-	ethClient                  ethFetcher
+	ethClient                  *multiRPCClient
 	participantWalletSeed      = "a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
 	participantAddr            common.Address
 	participantAcct            *accounts.Account
-	participantEthClient       ethFetcher
+	participantEthClient       *multiRPCClient
 	ethSwapContractAddr        common.Address
 	simnetContractor           contractor
 	participantContractor      contractor
@@ -198,7 +198,12 @@ func prepareRPCClient(name, dataDir string, providers []string, net dex.Network)
 		return nil, nil, err
 	}
 
-	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, 3, net)
+	creds, err := walletCredentials(cfg.ChainID, dataDir, net)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error generating wallet credentials: %w", err)
+	}
+
+	c, err := newMultiRPCClient(creds, providers, tLogger.SubLogger(name), cfg, 3, net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) prepareRPCClient error: %v", name, err)
 	}
@@ -650,7 +655,6 @@ func TestBasicRetrieval(t *testing.T) {
 		t.Fatal("not enough funds")
 	}
 	t.Run("testBestHeader", testBestHeader)
-	t.Run("testPendingTransactions", testPendingTransactions)
 	t.Run("testHeaderByHash", testHeaderByHash)
 	t.Run("testTransactionReceipt", testTransactionReceipt)
 }
@@ -804,7 +808,7 @@ func testSendTransaction(t *testing.T) {
 		t.Fatalf("txOpts error: %v", err)
 	}
 
-	tx, err := ethClient.sendTransaction(ctx, txOpts, participantAddr, nil)
+	tx, err := ethClient.genSignAndSendTransaction(ctx, txOpts, participantAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -868,7 +872,6 @@ func testSendSignedTransaction(t *testing.T) {
 	if !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("no CoinNotFoundError")
 	}
-	c := ethClient.(*multiRPCClient)
 	var nonce uint64
 	var chainID *big.Int
 	var ks *keystore.KeyStore
@@ -877,8 +880,8 @@ func testSendSignedTransaction(t *testing.T) {
 		t.Fatalf("error getting nonce: %v", err)
 	}
 	nonce = n.Uint64()
-	ks = c.creds.ks
-	chainID = c.chainID
+	ks = ethClient.creds.ks
+	chainID = ethClient.chainID
 
 	tx := types.NewTx(&types.DynamicFeeTx{
 		To:        &simnetAddr,
@@ -930,7 +933,7 @@ func testTransactionReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
-	tx, err := ethClient.sendTransaction(ctx, txOpts, simnetAddr, nil)
+	tx, err := ethClient.genSignAndSendTransaction(ctx, txOpts, simnetAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -942,19 +945,6 @@ func testTransactionReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	spew.Dump(receipt)
-}
-
-func testPendingTransactions(t *testing.T) {
-	mf, is := ethClient.(txPoolFetcher)
-	if !is {
-		return
-	}
-	txs, err := mf.pendingTransactions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Should be empty.
-	spew.Dump(txs)
 }
 
 func testSwap(t *testing.T, assetID uint32) {
