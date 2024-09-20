@@ -1433,6 +1433,8 @@ type Config struct {
 	// for running core in extension mode, which gives the caller options for
 	// e.g. limiting the ability to configure wallets.
 	ExtensionModeFile string
+
+	TheOneHost string
 }
 
 // locale is data associated with the currently selected language.
@@ -7172,6 +7174,11 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 	if err != nil {
 		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
 		return
+	}
+
+	if c.cfg.TheOneHost != "" && c.cfg.TheOneHost != host {
+		c.log.Infof("Running with --onehost = %q.", c.cfg.TheOneHost)
+		return false
 	}
 
 	var connectFlag connectDEXFlag
