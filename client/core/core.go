@@ -7445,6 +7445,12 @@ func (c *Core) loadDBTrades(dc *dexConnection) error {
 		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
 
 		if mktConf == nil || !versCompat {
+			if tracker.status() < order.OrderStatusExecuted {
+				// Either we couldn't connect at startup and we don't have the
+				// server config, or we have a server config and the market no
+				// longer exists. Either way, revoke the order.
+				tracker.revoke()
+			}
 			tracker.setSelfGoverned(true) // redeem and refund only
 			c.log.Warnf("No server market or incompatible/missing asset configurations for trade %v, market %v, host %v!",
 				tracker.Order.ID(), tracker.mktID, dc.acct.host)
