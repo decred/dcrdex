@@ -122,7 +122,6 @@ func ParseAdaptorSignature(b []byte) (*AdaptorSignature, error) {
 		str := "invalid signature: not for a valid curve point"
 		return nil, errors.New(str)
 	}
-	t.y.Normalize()
 
 	pubKeyTweak := b[96]&1 == 1
 
@@ -266,12 +265,8 @@ func (sig *AdaptorSignature) Verify(hash []byte, pubKey *secp256k1.PublicKey) er
 func (sig *AdaptorSignature) Decrypt(tweak *secp256k1.ModNScalar) (*schnorr.Signature, error) {
 	var expectedT secp256k1.JacobianPoint
 	secp256k1.ScalarBaseMultNonConst(tweak, &expectedT)
-	expectedT.ToAffine()
-	if !expectedT.X.Equals(&sig.t.x) {
-		return nil, fmt.Errorf("tweak X does not match expected")
-	}
-	if !expectedT.Y.Equals(&sig.t.y) {
-		return nil, fmt.Errorf("tweak Y does not match expected")
+	if !expectedT.EquivalentNonConst(sig.t.asJacobian()) {
+		return nil, fmt.Errorf("tweak does not match expected value")
 	}
 
 	s := new(secp256k1.ModNScalar).Set(tweak)
@@ -290,19 +285,14 @@ func (sig *AdaptorSignature) RecoverTweak(validSig *schnorr.Signature) (*secp256
 		return nil, fmt.Errorf("only pub key tweaked sigs can be recovered")
 	}
 
-	_, s := parseSig(validSig)
-
-	t := new(secp256k1.ModNScalar).NegateVal(&sig.s).Add(s)
+	s := validSig.S()
+	t := new(secp256k1.ModNScalar).NegateVal(&sig.s).Add(&s)
 
 	// Verify the recovered tweak
 	var expectedT secp256k1.JacobianPoint
 	secp256k1.ScalarBaseMultNonConst(t, &expectedT)
-	expectedT.ToAffine()
-	if !expectedT.X.Equals(&sig.t.x) {
-		return nil, fmt.Errorf("recovered tweak does not match expected")
-	}
-	if !expectedT.Y.Equals(&sig.t.y) {
-		return nil, fmt.Errorf("recovered tweak does not match expected")
+	if !expectedT.EquivalentNonConst(sig.t.asJacobian()) {
+		return nil, fmt.Errorf("tweak does not match expected value")
 	}
 
 	return t, nil
@@ -483,14 +473,6 @@ func PublicKeyTweakedAdaptorSig(privKey *secp256k1.PrivateKey, hash []byte, T *s
 	}
 }
 
-func parseSig(sig *schnorr.Signature) (r *secp256k1.FieldVal, s *secp256k1.ModNScalar) {
-	sigB := sig.Serialize()
-	r, s = new(secp256k1.FieldVal), new(secp256k1.ModNScalar)
-	r.SetBytes((*[32]byte)(sigB[0:32]))
-	s.SetBytes((*[32]byte)(sigB[32:64]))
-	return r, s
-}
-
 // PrivateKeyTweakedAdaptorSig creates a private key tweaked adaptor signature.
 // This is created by a party which knows the hidden value.
 func PrivateKeyTweakedAdaptorSig(sig *schnorr.Signature, pubKey *secp256k1.PublicKey, t *secp256k1.ModNScalar) *AdaptorSignature {
@@ -498,12 +480,10 @@ func PrivateKeyTweakedAdaptorSig(sig *schnorr.Signature, pubKey *secp256k1.Publi
 	secp256k1.ScalarBaseMultNonConst(t, T)
 	T.ToAffine()
 
-	r, s := parseSig(sig)
-	tweakedS := new(secp256k1.ModNScalar).Add2(s, t)
-
+	s := sig.S()
 	return &AdaptorSignature{
-		r: *r,
-		s: *tweakedS,
+		r: sig.R(),
+		s: *new(secp256k1.ModNScalar).Add2(&s, t),
 		t: affinePoint{x: T.X, y: T.Y},
 	}
 }
