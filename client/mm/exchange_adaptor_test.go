@@ -468,6 +468,164 @@ func TestFreeUpFunds(t *testing.T) {
 	check(quoteID, false, quoteLot+1, lotSize)
 }
 
+func TestInternalTransfer(t *testing.T) {
+	const baseID, quoteID = 42, 0
+
+	type test struct {
+		name          string
+		dist          *distribution
+		dexAvailable  map[uint32]uint64
+		cexAvailable  map[uint32]uint64
+		dexBotBalance map[uint32]uint64
+		cexBotBalance map[uint32]uint64
+		expDEXDiffs   map[uint32]int64
+		expCEXDiffs   map[uint32]int64
+		expComplete   bool
+	}
+
+	tests := []*test{
+		{
+			name: "base deposit, quote withdraw, complete",
+			dist: &distribution{
+				baseInv: &assetInventory{
+					toDeposit: 1e9,
+				},
+				quoteInv: &assetInventory{
+					toWithdraw: 1e8,
+				},
+			},
+			dexAvailable: map[uint32]uint64{
+				quoteID: 1.1e8,
+			},
+			cexAvailable: map[uint32]uint64{
+				baseID: 1e9,
+			},
+			dexBotBalance: map[uint32]uint64{
+				baseID: 1e9,
+			},
+			cexBotBalance: map[uint32]uint64{
+				quoteID: 1e8,
+			},
+			expDEXDiffs: map[uint32]int64{
+				baseID:  -1e9,
+				quoteID: 1e8,
+			},
+			expCEXDiffs: map[uint32]int64{
+				baseID:  1e9,
+				quoteID: -1e8,
+			},
+			expComplete: true,
+		},
+		{
+			name: "base withdraw, quote deposit, incomplete due to available balance",
+			dist: &distribution{
+				baseInv: &assetInventory{
+					toWithdraw: 1e9,
+				},
+				quoteInv: &assetInventory{
+					toDeposit: 1e8,
+				},
+			},
+			dexAvailable: map[uint32]uint64{
+				baseID: 1e8,
+			},
+			cexAvailable: map[uint32]uint64{
+				quoteID: 1e7,
+			},
+			dexBotBalance: map[uint32]uint64{
+				quoteID: 1e8,
+			},
+			cexBotBalance: map[uint32]uint64{
+				baseID: 1e9,
+			},
+			expDEXDiffs: map[uint32]int64{
+				baseID:  1e8,
+				quoteID: -1e7,
+			},
+			expCEXDiffs: map[uint32]int64{
+				baseID:  -1e8,
+				quoteID: 1e7,
+			},
+			expComplete: false,
+		},
+		{
+			name: "base withdraw, quote deposit, incomplete due to bot balance",
+			dist: &distribution{
+				baseInv: &assetInventory{
+					toWithdraw: 1e9,
+				},
+				quoteInv: &assetInventory{
+					toDeposit: 1e8,
+				},
+			},
+			dexAvailable: map[uint32]uint64{
+				baseID: 1e9,
+			},
+			cexAvailable: map[uint32]uint64{
+				quoteID: 1e8,
+			},
+			dexBotBalance: map[uint32]uint64{
+				quoteID: 1e6,
+			},
+			cexBotBalance: map[uint32]uint64{
+				baseID: 1e7,
+			},
+			expDEXDiffs: map[uint32]int64{
+				baseID:  1e7,
+				quoteID: -1e6,
+			},
+			expCEXDiffs: map[uint32]int64{
+				baseID:  -1e7,
+				quoteID: 1e6,
+			},
+			expComplete: false,
+		},
+	}
+
+	runTest := func(test *test) {
+		u := mustParseAdaptorFromMarket(&core.Market{
+			LotSize:  1e8,
+			BaseID:   baseID,
+			QuoteID:  quoteID,
+			RateStep: 1e2,
+		})
+		u.internalTransfer = func(_ *MarketWithHost, doTransfer doTransferFunc) bool {
+			return doTransfer(test.dexAvailable, test.cexAvailable)
+		}
+
+		for assetID, bal := range test.dexBotBalance {
+			u.baseDexBalances[assetID] = int64(bal)
+		}
+		for assetID, bal := range test.cexBotBalance {
+			u.baseCexBalances[assetID] = int64(bal)
+		}
+
+		complete := u.tryInternalTransfers(test.dist)
+
+		if complete != test.expComplete {
+			t.Fatalf("%s: expected complete %v, got %v", test.name, test.expComplete, complete)
+		}
+
+		for assetID, balance := range u.baseDexBalances {
+			if test.expDEXDiffs[assetID]+int64(test.dexBotBalance[assetID]) != balance {
+				t.Fatalf("%s: expected dex diff for asset %d = %d, got %d",
+					test.name, assetID, test.expDEXDiffs[assetID], balance-int64(test.dexBotBalance[assetID]))
+			}
+		}
+
+		for assetID, balance := range u.baseCexBalances {
+			if test.expCEXDiffs[assetID]+int64(test.cexBotBalance[assetID]) != balance {
+				t.Fatalf("%s: expected cex diff for asset %d = %d, got %d",
+					test.name, assetID, test.expDEXDiffs[assetID], balance-int64(test.cexBotBalance[assetID]))
+			}
+		}
+	}
+
+	for _, test := range tests {
+		runTest(test)
+	}
+}
+
 func TestDistribution(t *testing.T) {
 	// utxo/utxo
 	testDistribution(t, 42, 0)
@@ -620,7 +778,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 
 	checkDistribution := func(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64) {
 		t.Helper()
-		dist, err := a.distribution()
+		dist, err := a.distribution(true)
 		if err != nil {
 			t.Fatalf("distribution error: %v", err)
 		}
@@ -628,13 +786,13 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			t.Fatalf("wrong base deposit size. wanted %d, got %d", baseDeposit, dist.baseInv.toDeposit)
 		}
 		if dist.baseInv.toWithdraw != baseWithdraw {
-			t.Fatalf("wrong base withrawal size. wanted %d, got %d", baseWithdraw, dist.baseInv.toWithdraw)
+			t.Fatalf("wrong base withdrawal size. wanted %d, got %d", baseWithdraw, dist.baseInv.toWithdraw)
 		}
 		if dist.quoteInv.toDeposit != quoteDeposit {
 			t.Fatalf("wrong quote deposit size. wanted %d, got %d", quoteDeposit, dist.quoteInv.toDeposit)
 		}
 		if dist.quoteInv.toWithdraw != quoteWithdraw {
-			t.Fatalf("wrong quote withrawal size. wanted %d, got %d", quoteWithdraw, dist.quoteInv.toWithdraw)
+			t.Fatalf("wrong quote withdrawal size. wanted %d, got %d", quoteWithdraw, dist.quoteInv.toWithdraw)
 		}
 	}
 
@@ -728,7 +886,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			u.pendingDEXOrders = make(map[order.OrderID]*pendingDEXOrder)
 		}()
 
-		actionTaken, err := a.tryTransfers(epoch())
+		actionTaken, err := u.tryTransfers(epoch(), a.distribution)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
