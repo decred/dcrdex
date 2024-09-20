@@ -4,18 +4,33 @@ export SHELL=$(which bash)
 SESSION="walletpair"
 
 
-BW_ARGS=${@}
+BW_ARGS=()
 SIMNET=""
 TESTNET=""
+ONLY_ONE=""
+ONLY_TWO=""
 while [ "${1:-}" != "" ]; do
   case "$1" in
     --simnet)
       SIMNET="1"
       echo "Using simnet"
+      BW_ARGS+=("$1")
       ;;
     --testnet)
       TESTNET="1"
       echo "Using testnet"
+      BW_ARGS+=("$1")
+      ;;
+    -1)
+      ONLY_ONE="1"
+      echo "Only starting wallet # 1"
+      ;;
+    -2)
+      ONLY_TWO="1"
+      echo "Only starting wallet # 1"
+      ;;
+    *)
+      BW_ARGS+=("$1")
       ;;
   esac
   shift
@@ -130,17 +145,28 @@ chmod +x "${HARNESS_DIR}/bw2ctl"
 tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'harness-ctl'
 
-tmux new-window -t $SESSION:1 -n 'bisonw1' $SHELL
-tmux send-keys -t $SESSION:1 "cd ${PAIR_ROOT}/dexc1" C-m
-tmux send-keys -t $SESSION:1 "${BISONW} --appdata=${CLIENT_1_DIR} ${BW_ARGS}" C-m
+if [ -z "${ONLY_TWO}" ]; then
+  tmux new-window -t $SESSION:1 -n 'bisonw1' $SHELL
+  tmux send-keys -t $SESSION:1 "cd ${PAIR_ROOT}/dexc1" C-m
+  tmux send-keys -t $SESSION:1 "${BISONW} --appdata=${CLIENT_1_DIR} ${BW_ARGS[@]}" C-m
+fi
 
-tmux new-window -t $SESSION:2 -n 'bisonw1' $SHELL
-tmux send-keys -t $SESSION:2 "cd ${PAIR_ROOT}/dexc1" C-m
-tmux send-keys -t $SESSION:2 "${BISONW} --appdata=${CLIENT_2_DIR} ${BW_ARGS}" C-m
+if [ -z "${ONLY_ONE}" ]; then
+  tmux new-window -t $SESSION:2 -n 'bisonw2' $SHELL
+  tmux send-keys -t $SESSION:2 "cd ${PAIR_ROOT}/dexc1" C-m
+  tmux send-keys -t $SESSION:2 "${BISONW} --appdata=${CLIENT_2_DIR} ${BW_ARGS[@]}" C-m
+fi
 
 tmux select-window -t $SESSION:0
 sleep 1
 tmux send-keys -t $SESSION:0 "cd ${HARNESS_DIR}; tmux wait-for -S walletpair" C-m\; wait-for walletpair
-tmux send-keys -t $SESSION:0 "./bisonw1; tmux wait-for -S walletpair" C-m\; wait-for walletpair
-tmux send-keys -t $SESSION:0 "./bisonw2" C-m
+
+if [ -z "${ONLY_TWO}" ]; then
+  tmux send-keys -t $SESSION:0 "./bisonw1; tmux wait-for -S walletpair" C-m\; wait-for walletpair
+fi
+
+if [ -z "${ONLY_ONE}" ]; then
+  tmux send-keys -t $SESSION:0 "./bisonw2" C-m
+fi
+
 tmux attach-session -t $SESSION
