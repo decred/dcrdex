@@ -293,8 +293,8 @@ github.com/decred/dcrd/dcrec v1.0.1/go.mod h1:CO+EJd8eHFb8WHa84C7ZBkXsNUIywaTHb+
 github.com/decred/dcrd/dcrec/edwards/v2 v2.0.3 h1:l/lhv2aJCUignzls81+wvga0TFlyoZx8QxRMQgXpZik=
 github.com/decred/dcrd/dcrec/edwards/v2 v2.0.3/go.mod h1:AKpV6+wZ2MfPRJnTbQ6NPgWrKzbe9RCIlCF/FKzMtM8=
 github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1/go.mod h1:hyedUtir6IdtD/7lIxGeCxkaw7y45JueMRL4DIyJDKs=
-github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 h1:rpfIENRNNilwHwZeG5+P150SMrnNEcHYvcCuK6dPZSg=
-github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0/go.mod h1:v57UDF4pDQJcEfFUCRop3lJL149eHGSe9Jvczhzjo/0=
+github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.1-0.20240912225101-7333f805850b h1:HIjTBv19sQRjUiifEKPy6BLFKkOtV44uCnDThmYQ37s=
+github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.1-0.20240912225101-7333f805850b/go.mod h1:v57UDF4pDQJcEfFUCRop3lJL149eHGSe9Jvczhzjo/0=
 github.com/decred/dcrd/dcrjson/v4 v4.1.0 h1:WJVogRnYnNxB5hWoGHODvP4fNTG1JycTuHHKt/XucHk=
 github.com/decred/dcrd/dcrjson/v4 v4.1.0/go.mod h1:2qVikafVF9/X3PngQVmqkbUbyAl32uik0k/kydgtqMc=
 github.com/decred/dcrd/dcrutil/v4 v4.0.2 h1:eIl3E6gGln54qE8nk5o5lLtjh2/9C2Rz63OpD662h+8=
