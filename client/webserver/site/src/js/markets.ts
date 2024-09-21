@@ -955,9 +955,16 @@ export default class MarketsPage extends BasePage {
 
     this.updateRegistrationStatusView()
 
+    const showSection = (section: PageElement | undefined) => {
+      const elements = [page.registrationStatus, page.bondRequired, page.bondCreationPending, page.notRegistered]
+      for (const el of elements) {
+        Doc.setVis(el === section, el)
+      }
+    }
+
     if (market.dex.auth.effectiveTier >= 1) {
       const toggle = async () => {
-        Doc.hide(page.registrationStatus, page.bondRequired, page.bondCreationPending)
+        showSection(undefined)
         this.resolveOrderFormVisibility()
       }
       if (Doc.isHidden(page.orderForm)) {
@@ -969,15 +976,15 @@ export default class MarketsPage extends BasePage {
       toggle()
     } else if (market.dex.viewOnly) {
       page.unregisteredDex.textContent = market.dex.host
-      Doc.show(page.notRegistered)
+      showSection(page.notRegistered)
     } else if (this.hasPendingBonds()) {
-      Doc.show(page.registrationStatus)
+      showSection(page.registrationStatus)
     } else if (market.dex.auth.targetTier > 0) {
-      Doc.show(page.bondCreationPending)
+      showSection(page.bondCreationPending)
     } else {
       page.acctTier.textContent = `${market.dex.auth.effectiveTier}`
       page.dexSettingsLink.href = `/dexsettings/${market.dex.host}`
-      Doc.show(page.bondRequired)
+      showSection(page.bondRequired)
     }
   }
 
